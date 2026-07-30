@@ -336,6 +336,12 @@ export const agentChatHandlers = [
               ],
             },
             {
+              question: "What should the app be called?",
+              detail:
+                "The name lands in the spec title, the repo, and the UI shell — there are no sensible presets, so type whatever you have in mind.",
+              options: [],
+            },
+            {
               question: "Who administers the workspace?",
               detail:
                 "The admin model decides whether v1 needs a roles/permissions system or can treat every user the same.",

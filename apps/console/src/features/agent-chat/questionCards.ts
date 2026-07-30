@@ -38,7 +38,9 @@ function parseOneQuestion(value: unknown): AskQuestionInput | null {
   if (typeof value !== "object" || value === null) return null;
   const v = value as Record<string, unknown>;
   if (typeof v.question !== "string" || !v.question) return null;
-  if (!Array.isArray(v.options) || v.options.length === 0) return null;
+  // Empty options is a valid FREE-TEXT question (the form renders only the
+  // text field); a missing/non-array options is malformed.
+  if (!Array.isArray(v.options)) return null;
   const options: AskQuestionOption[] = [];
   for (const raw of v.options) {
     if (typeof raw !== "object" || raw === null) return null;

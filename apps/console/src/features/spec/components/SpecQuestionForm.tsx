@@ -26,6 +26,7 @@
 // user who triggered the turn (`ownerId`) can submit or skip — they hold the
 // SSE stream back to the agent; everyone else co-authors.
 
+import { useRef } from "react";
 import { Box, Button, Checkbox, Chip, CircularProgress, Radio, Stack, TextField, Typography } from "@wso2/oxygen-ui";
 import { Sparkles, Users } from "@wso2/oxygen-ui-icons-react";
 import type { Doc } from "yjs";
@@ -124,6 +125,12 @@ function QuestionBlock({
 }) {
   const multi = q.multiSelect === true;
   const selected = answer?.selected ?? [];
+  // A question with NO options is a free-text question: only the text field
+  // renders — no radio that selects nothing. A question with ONE option is
+  // (in practice) an agent-invented "type my own answer" card: keep it
+  // selectable, but checking it moves the caret straight into the text field.
+  const freeTextOnly = q.options.length === 0;
+  const noteRef = useRef<HTMLTextAreaElement | null>(null);
   return (
     <Box sx={{ mb: 5 }}>
       <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
@@ -139,7 +146,11 @@ function QuestionBlock({
           Pick as many as apply
         </Typography>
       )}
-      <Stack spacing={1.5} role={multi ? "group" : "radiogroup"} aria-label={q.question} sx={{ mt: 1.5 }}>
+      <Stack
+        spacing={1.5}
+        {...(freeTextOnly ? {} : { role: multi ? "group" : "radiogroup", "aria-label": q.question })}
+        sx={{ mt: 1.5 }}
+      >
         {q.options.map((opt) => (
           <OptionCard
             key={opt.label}
@@ -147,15 +158,26 @@ function QuestionBlock({
             multi={multi}
             isOn={selected.includes(opt.label)}
             disabled={disabled}
-            onSelect={() => onSelect(opt.label)}
+            onSelect={() => {
+              const turningOn = !selected.includes(opt.label);
+              onSelect(opt.label);
+              // A lone option means the real input is the text — focus it.
+              if (q.options.length === 1 && turningOn) noteRef.current?.focus();
+            }}
           />
         ))}
         <TextField
           size="small"
-          placeholder="Other — describe your own answer, or add context to a choice…"
+          placeholder={
+            freeTextOnly
+              ? "Type your answer…"
+              : "Other — describe your own answer, or add context to a choice…"
+          }
           value={answer?.freeText ?? ""}
           disabled={disabled}
           multiline
+          {...(freeTextOnly ? { minRows: 2 } : {})}
+          inputRef={noteRef}
           onChange={(e) => onNote(e.target.value)}
           sx={{ "& .MuiOutlinedInput-root": { borderRadius: 2 } }}
         />

@@ -118,12 +118,15 @@ export const askQuestionInputSchema = z.object({
   ),
   options: z
     .array(askQuestionOptionSchema)
-    .min(1)
     .max(5)
     .refine((opts) => opts.filter((o) => o.recommended).length <= 1, {
       message: "At most one option may be marked recommended.",
     })
-    .describe("1–5 answer options the user picks from; labels are the selection identity."),
+    .describe(
+      "0–5 answer options the user picks from; labels are the selection identity. Pass an EMPTY array when " +
+      "the answer must be typed (no sensible presets) — the form always offers a free-text field, so never " +
+      "invent placeholder options like 'Type my own answer' or 'Other'.",
+    ),
   multiSelect: z
     .boolean()
     .optional()
@@ -156,7 +159,7 @@ export const askQuestionTool: Tool = tool({
   description:
     "Ask the user ONE structured multiple-choice question when you cannot proceed safely without their decision. " +
     "Make it decidable without prior context: put the why/what-it-affects in `detail`, and explain every option's " +
-    "meaning and trade-offs in its `description`. Give 1–5 options (mark at most one recommended); set multiSelect " +
+    "meaning and trade-offs in its `description`. Give 0–5 options (0 = a typed answer is required; mark at most one recommended); set multiSelect " +
     "when several may apply together. Ends your turn; the user's answer arrives as the next message.",
   inputSchema: askQuestionInputSchema,
   execute: async (input) => ({ status: "awaiting_user_response" as const, ...input }),

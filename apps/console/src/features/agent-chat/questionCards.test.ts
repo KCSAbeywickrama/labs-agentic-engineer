@@ -59,9 +59,15 @@ describe("parseQuestionsInput — ask_question (single)", () => {
     expect(parseQuestionsInput(ASK_QUESTION_TOOL, { ...SINGLE, detail: 42 })![0]!.detail).toBeUndefined();
   });
 
+  it("accepts empty options as a free-text question", () => {
+    expect(parseQuestionsInput(ASK_QUESTION_TOOL, { question: "q", options: [] })).toEqual([
+      { question: "q", options: [] },
+    ]);
+  });
+
   it.each([
     ["missing question", { options: SINGLE.options }],
-    ["empty options", { question: "q", options: [] }],
+    ["missing options", { question: "q" }],
     ["option without label", { question: "q", options: [{ description: "x" }] }],
     ["duplicate labels", { question: "q", options: [{ label: "a" }, { label: "a", description: "d" }] }],
     ["malformed JSON string", "{nope"],
@@ -83,7 +89,7 @@ describe("parseQuestionsInput — ask_questions (batch)", () => {
   });
 
   it("rejects when ANY question is malformed", () => {
-    expect(parseQuestionsInput(ASK_QUESTIONS_TOOL, { questions: [SINGLE, { question: "q", options: [] }] })).toBeNull();
+    expect(parseQuestionsInput(ASK_QUESTIONS_TOOL, { questions: [SINGLE, { question: "q" }] })).toBeNull();
   });
 
   it("rejects an unknown tool name", () => {
@@ -132,7 +138,7 @@ describe("extractStreamingQuestions", () => {
   });
 
   it("skips a malformed question object but keeps later valid ones", () => {
-    const buf = JSON.stringify({ questions: [{ question: "q", options: [] }, SINGLE] });
+    const buf = JSON.stringify({ questions: [{ options: [{ label: "orphan" }] }, SINGLE] });
     expect(extractStreamingQuestions(ASK_QUESTIONS_TOOL, buf)).toEqual([SINGLE]);
   });
 

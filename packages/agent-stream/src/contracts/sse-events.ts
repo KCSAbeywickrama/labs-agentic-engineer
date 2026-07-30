@@ -157,7 +157,11 @@ export interface AskQuestionInput {
    * the decision affects, and anything the user needs to answer well.
    */
   detail?: string;
-  /** 1–5 options; labels must be unique (they are the selection identity). */
+  /**
+   * 0–5 options; labels must be unique (they are the selection identity).
+   * EMPTY means the answer must be typed — the form renders only the
+   * free-text field, no choice cards.
+   */
   options: AskQuestionOption[];
   /** True → several options may be chosen together (checkboxes, not radios). */
   multiSelect?: boolean;

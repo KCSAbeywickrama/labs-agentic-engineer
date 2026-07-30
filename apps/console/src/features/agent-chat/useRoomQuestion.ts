@@ -28,6 +28,7 @@ import { getMessages, subscribe } from "./chatStore.js";
 import { answerableQuestionIds } from "./questionCards.js";
 import { useCurrentAuthor } from "./currentUser.js";
 import {
+  closeStaleRoomQuestions,
   mirrorQuestion,
   observeRoomQuestions,
   readRoomQuestions,
@@ -60,6 +61,24 @@ export function useRoomQuestion(doc: Doc | null, chatKey: string): RoomQuestion 
   // `aep:mock:user` identities race for it (first-writer-wins — dev-only).
   useEffect(() => {
     if (!doc) return;
+    // Close MY entries the log no longer backs: superseded (answered via the
+    // card or a composer reply) and orphaned (no log message at all — a
+    // persistent collab room outlives a cleared log). Runs from the log
+    // subscription AND the doc observer (entries can sync in from the server
+    // after mount); it only WRITES when something actually closes, so the
+    // observer → close → observer path settles instead of looping.
+    const closeStale = () => {
+      const messages = getMessages(chatKey);
+      const answerable = answerableQuestionIds(messages);
+      const superseded = new Set<string>();
+      const known = new Set<string>();
+      for (const m of messages) {
+        if (m.role !== "question" || !m.toolCallId) continue;
+        known.add(m.toolCallId);
+        if (!answerable.has(m.id)) superseded.add(m.toolCallId);
+      }
+      closeStaleRoomQuestions(doc, me.id, superseded, known);
+    };
     const backfill = () => {
       const messages = getMessages(chatKey);
       const answerable = answerableQuestionIds(messages);
@@ -73,9 +92,15 @@ export function useRoomQuestion(doc: Doc | null, chatKey: string): RoomQuestion 
           ...(m.streaming ? { streaming: true } : {}),
         });
       }
+      closeStale();
     };
     backfill();
-    return subscribe(chatKey, backfill);
+    const unsubscribe = subscribe(chatKey, backfill);
+    const unobserve = observeRoomQuestions(doc, closeStale);
+    return () => {
+      unsubscribe();
+      unobserve();
+    };
   }, [doc, chatKey, me.id]);
 
   useEffect(() => {

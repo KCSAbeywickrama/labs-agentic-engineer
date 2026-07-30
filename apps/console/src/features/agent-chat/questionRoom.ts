@@ -45,6 +45,14 @@ export interface RoomQuestion {
    * selections but submit stays gated until the final mirror clears this.
    */
   streaming?: boolean;
+  /**
+   * Epoch ms of the first mirror. Gates ORPHAN closing (an entry with no
+   * backing log message): another tab or device of the same user legitimately
+   * lacks the asker's log, so an orphan may only close once it is old enough
+   * that nobody is coming back for it. Absent on pre-stamp entries — treated
+   * as ancient (closable), which is exactly the legacy-zombie case.
+   */
+  askedAt?: number;
 }
 
 // --- Shared `questions` map helpers ----------------------------------------
@@ -75,6 +83,7 @@ export function mirrorQuestion(
     ownerId: existing?.ownerId ?? entry.ownerId,
     answers: existing?.answers ?? null,
     ...(existing?.submitted ? { submitted: true } : {}),
+    askedAt: existing?.askedAt ?? Date.now(),
   });
 }
 
@@ -96,6 +105,43 @@ export function closeRoomQuestion(doc: Doc, toolCallId: string): void {
   const existing = map.get(toolCallId);
   if (!existing) return;
   map.set(toolCallId, { ...existing, submitted: true });
+}
+
+/** How long an unbacked ("orphan") entry may live before it is closable. */
+export const ORPHAN_QUESTION_TTL_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Close (for the whole room) THIS owner's entries their chat log no longer
+ * backs. Two classes, deliberately different rules:
+ *
+ * - SUPERSEDED (the log HAS the message, but a later delivered user message —
+ *   e.g. a composer reply, an equally valid answer path per ADR-0012 — made it
+ *   unanswerable): close immediately. The log in hand is proof.
+ * - ORPHAN (no log message at all): close only past ORPHAN_QUESTION_TTL_MS
+ *   (unstamped legacy entries count as ancient). Another tab with a stale
+ *   in-memory log, or another device of the same user, legitimately lacks the
+ *   asker's log — an aggressive orphan rule would close LIVE questions across
+ *   tabs. The TTL keeps a persistent collab room from resurrecting zombie
+ *   forms forever without racing living sessions.
+ *
+ * Only the owner closes their own entries — a teammate's log simply lacks the
+ * message, which must never read as "stale".
+ */
+export function closeStaleRoomQuestions(
+  doc: Doc,
+  ownerId: string,
+  supersededToolCallIds: ReadonlySet<string>,
+  knownToolCallIds: ReadonlySet<string>,
+  now: number = Date.now(),
+): void {
+  for (const entry of readRoomQuestions(doc)) {
+    if (entry.submitted || entry.ownerId !== ownerId) continue;
+    const superseded = supersededToolCallIds.has(entry.toolCallId);
+    const orphanExpired =
+      !knownToolCallIds.has(entry.toolCallId) &&
+      (entry.askedAt === undefined || now - entry.askedAt > ORPHAN_QUESTION_TTL_MS);
+    if (superseded || orphanExpired) closeRoomQuestion(doc, entry.toolCallId);
+  }
 }
 
 /** Snapshot the room's questions in insertion order. */
