@@ -265,10 +265,11 @@ describe("ValidationPage lifecycle", () => {
     expect(screen.getAllByText("Validation passed").length).toBe(2);
   });
 
-  // The three verdicts this page was blind to. `validationVerdictChip` knew only
-  // passed/failed/skipped, so each of these returned null, which made `settled`
-  // false — leaving the page pinned to the run log feed with no chip and no
-  // report, for the outcome any project with a manual criterion lands on.
+  // The three verdicts this page was blind to. It used to map the verdict with a
+  // second, builds-local mapper that knew only passed/failed/skipped, so each of
+  // these produced no chip — which made `settled` false and pinned the page to the
+  // run log feed with no report, for the outcome any project with a manual
+  // criterion lands on. Hence one shared mapper.
   it("renders the report, not the feed, for a PARTIAL verdict", () => {
     mockValidation = "partial";
     mockRun = run({
