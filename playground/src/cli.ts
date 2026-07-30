@@ -24,7 +24,9 @@
  *   pnpm play <dir> requirements|design|chat → run one phase; exit code = result
  *   pnpm play <dir> tasks|code|check|undo    → later steps of the impl plan
  *
- * Flags: --idea "<text>", --target "<x>", --fresh, --silent.
+ * Flags: --idea "<text>", --target "<x>", --fresh, --silent, --restore, --yes.
+ * `code` also takes --host (run the coding agent as a bare host process
+ * instead of the default Docker-image run — see engine/coding-run.ts).
  */
 
 import "./devtools-default.js"; // MUST be first: sets AGENT_DEVTOOLS before the agents config loads
@@ -185,6 +187,7 @@ async function main(): Promise<number> {
       silent: { type: "boolean" },
       restore: { type: "boolean" },
       yes: { type: "boolean" },
+      host: { type: "boolean" },
     },
     allowPositionals: true,
   });
@@ -196,6 +199,7 @@ async function main(): Promise<number> {
     ...(values.silent ? { silent: true } : {}),
     ...(values.restore ? { restore: true } : {}),
     ...(values.yes ? { yes: true } : {}),
+    ...(values.host ? { host: true } : {}),
   };
 
   let [dirArg, command, commandArg] = positionals as [string | undefined, string | undefined, string | undefined];
