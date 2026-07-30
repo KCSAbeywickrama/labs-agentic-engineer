@@ -212,9 +212,33 @@ func (m *SkillMutationService) Update(ctx context.Context, orgID, actor, name st
 	}
 
 	refs := normalizeRefs(in.References)
+
+	// Convergence-persist: if this edit brings a platform-managed org skill's
+	// content back to the platform's CURRENT embedded version, advance its
+	// manifest baseline to that version in the same commit. Otherwise the
+	// baseline stays frozen at the version the org last synced from, and the
+	// next platform release would read the now-identical copy as an org edit
+	// diverged from a stale base — a false conflict (skills-experience spec §3;
+	// the console counterpart of reconcile's converged-copy backfill). A
+	// divergent edit leaves the entry nil: the baseline stays frozen, which is
+	// the correct "override" posture. Only org-kind skills the platform
+	// actually ships can converge this way — a user-authored org skill (absent
+	// from the library) or an imported skill keeps its own manifest posture
+	// untouched.
+	var manifestEntry *ManifestEntry
+	if existing.Kind == SkillKindOrg {
+		embeddedSHA, shipped, serr := m.skills.embeddedContentSHA(name)
+		if serr != nil {
+			return nil, fmt.Errorf("embedded lookup for %q: %w", name, serr)
+		}
+		if shipped && contentSHA(stamped, refs) == embeddedSHA {
+			manifestEntry = &ManifestEntry{Origin: ManifestOriginPlatform, BaseHash: embeddedSHA}
+		}
+	}
+
 	msg := fmt.Sprintf("chore(skills): update %s skill %q\n\nby %s", existing.Kind, name, actor)
 	// pruneStaleRefs=true: an update may have removed reference files.
-	if err := m.skills.writeSkillFiles(ctx, orgID, name, stamped, refs, msg, true, nil); err != nil {
+	if err := m.skills.writeSkillFiles(ctx, orgID, name, stamped, refs, msg, true, manifestEntry); err != nil {
 		return nil, fmt.Errorf("commit update for %q: %w", name, err)
 	}
 	slog.InfoContext(ctx, "skill updated", "orgID", orgID, "name", name, "actor", actor)

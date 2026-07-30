@@ -185,7 +185,7 @@ func (s *SkillService) reconcileEmbedded(ctx context.Context, orgID string, repo
 	if err != nil {
 		return 0, err
 	}
-	entries, manifest, err := s.loadEntriesAndManifest(ctx, orgID, repo)
+	entries, manifest, _, err := s.loadEntriesAndManifest(ctx, orgID, repo)
 	if err != nil {
 		return 0, err
 	}
@@ -368,10 +368,32 @@ func (s *SkillService) UpdatesAvailable(ctx context.Context, orgID string) ([]Sk
 	if err != nil {
 		return nil, err
 	}
-	entries, manifest, err := s.loadEntriesAndManifest(ctx, orgID, repo)
+	entries, manifest, manifestPresent, err := s.loadEntriesAndManifest(ctx, orgID, repo)
 	if err != nil {
 		return nil, err
 	}
+
+	// Lazy manifest backfill — self-heal on the read path, mirroring how
+	// ensureSkillsRepo lazily provisions the repo itself. A repo with NO
+	// manifest file (a team that predates the manifest, or one a user deleted)
+	// has no baselines: every platform-shipped skill would read as a
+	// pre-manifest override, and there is no reconcile-write to CREATE the
+	// manifest unless the org happens to see an "update" row and clicks Sync —
+	// which a clean pre-manifest repo never shows. So stamp it once, here, the
+	// first time updates are read. Reconcile is idempotent, so once the file
+	// exists this never runs again. Gated on a non-empty embedded library:
+	// with nothing to stamp Reconcile writes no manifest, and re-triggering
+	// every read would be a pointless no-op loop. Best-effort — a failed
+	// backfill must NOT fail the read; it degrades to the pre-manifest posture
+	// (the same rows this method returned before the hook).
+	if !manifestPresent && len(embedded) > 0 {
+		if _, rerr := s.Reconcile(ctx, orgID); rerr != nil {
+			slog.WarnContext(ctx, "skills: lazy manifest backfill failed — serving pre-manifest updates", "org", orgID, "error", rerr)
+		} else if entries, manifest, _, err = s.loadEntriesAndManifest(ctx, orgID, repo); err != nil {
+			return nil, err
+		}
+	}
+
 	current := map[string]catalogEntry{}
 	for _, e := range entries {
 		current[e.Name] = e
@@ -406,6 +428,25 @@ func (s *SkillService) UpdatesAvailable(ctx context.Context, orgID string) ([]Sk
 		}
 	}
 	return out, nil
+}
+
+// embeddedContentSHA returns the platform library's current contentSHA for a
+// skill name, and whether the platform ships a skill by that name. The
+// mutation path uses it to detect when a console edit has converged an org
+// copy back onto the platform's current version, so the manifest baseline can
+// advance in the same commit (SkillMutationService.Update) rather than drift
+// stale and provoke a future false conflict.
+func (s *SkillService) embeddedContentSHA(name string) (string, bool, error) {
+	embedded, err := loadLibrary(s.library)
+	if err != nil {
+		return "", false, err
+	}
+	for _, b := range embedded {
+		if b.Name == name {
+			return b.ContentSHA, true, nil
+		}
+	}
+	return "", false, nil
 }
 
 // loadLibrary reads the whole platform skill library (fsys rooted at the

@@ -253,20 +253,25 @@ func (s *SkillService) loadCatalogEntries(ctx context.Context, orgID string, rep
 
 // loadEntriesAndManifest is loadCatalogEntries plus the skills-manifest.json
 // baseline, read from the SAME ref so entries and manifest are a consistent
-// snapshot. The manifest is tolerant-parsed (absent/corrupt → empty).
-func (s *SkillService) loadEntriesAndManifest(ctx context.Context, orgID string, repo *sourcecontrol.GitRepository) ([]catalogEntry, SkillsManifest, error) {
+// snapshot. The manifest is tolerant-parsed (absent/corrupt → empty). The
+// returned manifestPresent reports whether the manifest FILE existed at all —
+// distinct from an empty parse — so a caller can tell a pre-manifest (or
+// manually deleted) repo apart from one whose manifest is simply empty, and
+// lazily backfill it (see UpdatesAvailable).
+func (s *SkillService) loadEntriesAndManifest(ctx context.Context, orgID string, repo *sourcecontrol.GitRepository) ([]catalogEntry, SkillsManifest, bool, error) {
 	ref, err := sourcecontrol.ResolveWorkspaceRef(ctx, s.git.Resolver(), orgID, repo)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, false, err
 	}
 	keep := func(rel string) bool { return rel == skillsManifestPath || isCatalogPath(rel) }
 	files, _, err := s.git.Workspace().ReadBundle(ctx, ref, "", keep)
 	if err != nil {
-		return nil, nil, fmt.Errorf("read skills bundle: %w", err)
+		return nil, nil, false, fmt.Errorf("read skills bundle: %w", err)
 	}
+	_, manifestPresent := files[skillsManifestPath]
 	manifest := parseSkillsManifest([]byte(files[skillsManifestPath]))
 	delete(files, skillsManifestPath) // never let it near the skill parser
-	return parseBundleEntries(ctx, files), manifest, nil
+	return parseBundleEntries(ctx, files), manifest, manifestPresent, nil
 }
 
 // loadCatalog is loadCatalogEntries projected to the Skill catalog shape.

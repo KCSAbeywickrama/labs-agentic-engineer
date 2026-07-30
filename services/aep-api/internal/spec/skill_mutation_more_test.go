@@ -31,6 +31,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"testing/fstest"
 )
 
 func TestUpdate_HappyAndGuards(t *testing.T) {
@@ -253,6 +254,108 @@ func TestDelete_SeededOrgSkill_NowDeletable(t *testing.T) {
 	// files AND manifest entry gone.
 	if _, ok := parseSkillsManifest([]byte(host.readAtHead("org1", skillsManifestPath)))["demo"]; ok {
 		t.Fatal("delete must drop the manifest entry")
+	}
+}
+
+// orgKindMD is an org-kind skill md WITH its kind explicitly stamped, so a
+// console edit (which always stamps the kind) can reproduce it byte-for-byte —
+// the precondition for a converging edit. (An unstamped org skill like the
+// real "go" can never converge through the console, since the console adds a
+// stamp the embedded copy lacks; that path stays an override, which is
+// correct.)
+func orgKindMD(name, body string) string {
+	return "---\nname: " + name + "\ndescription: Convergence fixture.\nmetadata:\n  aep:\n    kind: org\n---\n\n# " +
+		name + "\n\n" + body + "\n"
+}
+
+func orgLibKind(name, body string) fstest.MapFS {
+	return fstest.MapFS{name + "/SKILL.md": &fstest.MapFile{Data: []byte(orgKindMD(name, body))}}
+}
+
+func stateOf(ups []SkillUpdate, name string) string {
+	for _, u := range ups {
+		if u.Name == name {
+			return u.State
+		}
+	}
+	return ""
+}
+
+// A console edit that CONVERGES a platform-managed org skill onto the
+// platform's CURRENT version advances the manifest baseline in the same
+// commit. Without this the baseline stays frozen at the version the org last
+// synced from, and the next platform release reads the now-identical copy as
+// an org edit diverged from a stale base — a false conflict (skills-experience
+// spec §3). This is the console counterpart of reconcile's converged-copy
+// backfill.
+func TestUpdate_ConvergingEditAdvancesBaseline(t *testing.T) {
+	t.Parallel()
+	svc, host := newTestStoreWithLibrary(t, orgLibKind("demo", "v1"))
+	ctx := context.Background()
+	if _, err := svc.List(ctx, "org1"); err != nil { // seed at v1, stamp baseline
+		t.Fatalf("seed: %v", err)
+	}
+	// Platform ships v2; the org has NOT synced (its copy is still v1).
+	svc.SwapLibrary(orgLibKind("demo", "v2"))
+	emb, err := loadLibrary(svc.library)
+	if err != nil {
+		t.Fatalf("load library: %v", err)
+	}
+	v2SHA := contentSHAOf(t, emb, "demo")
+
+	// The user edits demo in-console to exactly the platform's v2 content.
+	mut := NewSkillMutationService(svc)
+	if _, err := mut.Update(ctx, "org1", "tester", "demo", UpdateSkillInput{SkillMD: orgKindMD("demo", "v2")}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	// The baseline advanced to the platform's current version.
+	base := parseSkillsManifest([]byte(host.readAtHead("org1", skillsManifestPath)))["demo"].BaseHash
+	if base != v2SHA {
+		t.Fatalf("converging edit must advance baseHash to the embedded v2 SHA: got %q want %q", base, v2SHA)
+	}
+
+	// So a later platform release (v3) reads as a CLEAN update, not a false
+	// conflict (a stale v1 base would have yielded "conflict").
+	svc.SwapLibrary(orgLibKind("demo", "v3"))
+	ups, err := svc.UpdatesAvailable(ctx, "org1")
+	if err != nil {
+		t.Fatalf("UpdatesAvailable: %v", err)
+	}
+	if st := stateOf(ups, "demo"); st != "update" {
+		t.Fatalf("after convergence + platform move, demo state = %q, want \"update\"", st)
+	}
+}
+
+// Reading updates against a repo with NO manifest (a team that predates it,
+// or a manually deleted one) lazily backfills the manifest — self-heal on the
+// read path, so a pre-manifest repo reaches a stamped baseline without needing
+// an "update" row to light up the Sync button first.
+func TestUpdatesAvailable_BackfillsMissingManifest(t *testing.T) {
+	t.Parallel()
+	svc, host := newTestStoreWithLibrary(t, orgLibKind("demo", "v1"))
+	ctx := context.Background()
+	if _, err := svc.List(ctx, "org1"); err != nil { // seed (writes the manifest)
+		t.Fatalf("seed: %v", err)
+	}
+	// Simulate a pre-manifest / manifest-deleted repo: remove the file outright
+	// (an empty file would read as PRESENT and never trigger the backfill).
+	host.removeAtHead("org1", skillsManifestPath)
+	if got := host.readAtHead("org1", skillsManifestPath); got != "" {
+		t.Fatalf("precondition: manifest should be gone, got %q", got)
+	}
+
+	if _, err := svc.UpdatesAvailable(ctx, "org1"); err != nil {
+		t.Fatalf("UpdatesAvailable: %v", err)
+	}
+
+	// The read recreated the manifest with a real baseline for the seeded skill.
+	raw := host.readAtHead("org1", skillsManifestPath)
+	if raw == "" {
+		t.Fatal("updates-read did not backfill the missing manifest")
+	}
+	if m := parseSkillsManifest([]byte(raw)); m["demo"].Origin != ManifestOriginPlatform || m["demo"].BaseHash == "" {
+		t.Fatalf("backfilled manifest missing demo baseline: %#v", m)
 	}
 }
 
