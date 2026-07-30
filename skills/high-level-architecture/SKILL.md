@@ -223,6 +223,10 @@ kind by WHAT the target is:
   meaningful ONLY on `kind: "external"` — declaring any of them on a
   `component`/`org-service`/`platform-resource` dependency is a schema
   violation (the zod write-gate and the Go fold gate both reject it).
+  **Never author `wiring`.** The platform stamps it on every
+  `platform-resource`/`external` dependency at save — the `ref` and the env-var
+  names are derived from the dependency name and the resource type's declared
+  outputs, so anything you write there is overwritten.
 - **`platform-resource`** — a backing resource the platform provisions (a
   database, cache, object store). Set `resourceType` to a registered type and
   `parameters` for provisioning:

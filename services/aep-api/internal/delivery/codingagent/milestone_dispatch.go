@@ -72,6 +72,17 @@ func (e *CodingExecutor) Dispatch(ctx context.Context, req delivery.MilestoneDis
 	if err != nil {
 		return "", err
 	}
+
+	// Publish the platform-resolved `endpoints:` wiring BEFORE the Job launches,
+	// so the agent finds it on the issues it is about to read. This is the moment
+	// the dispatch predicate has already made safe — no gate open, working set
+	// non-empty — which is why it lives here and not on the gate-resolution path
+	// that used to own it (see WiringPublisher). A validation cycle needs no
+	// wiring: it authors tests, not workload.yaml.
+	if e.wiring != nil && req.Kind != delivery.CycleKindValidation {
+		e.wiring.PublishResolvedWiring(ctx, req.OrgID, req.ProjectID)
+	}
+
 	return e.launchAgent(ctx, agentLaunch{
 		orgID:         req.OrgID,
 		projectID:     req.ProjectID,

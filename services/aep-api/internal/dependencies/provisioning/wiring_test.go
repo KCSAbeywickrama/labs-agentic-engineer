@@ -40,28 +40,99 @@ func codingIssue(number int, title, state string, extra ...string) sourcecontrol
 	}
 }
 
-// wiringDesign is a two-component design: `orders` consumes the platform
-// resource whose gate resolves in these tests, `web` consumes nothing that
-// resolves. It is what makes "the comment is keyed by component" testable.
+// wiringDesign is a two-component design: `web` consumes its sibling `orders`
+// (an ENDPOINT dependency — the half this comment still carries), while `orders`
+// consumes only a platform resource (whose wiring travels in design.json, so it
+// must NOT appear here). That split is what makes both halves testable.
 func wiringDesign() []spec.DesignComponent {
 	return []spec.DesignComponent{
 		{Name: "orders", Dependencies: []spec.Dependency{
 			{Kind: spec.DependencyKindPlatformResource, Name: "orders-db", ResourceType: "postgres-cnpg",
 				Description: "Managed PostgreSQL via CloudNativePG"},
 		}},
-		{Name: "web"},
+		{Name: "web", Dependencies: []spec.Dependency{
+			{Kind: spec.DependencyKindComponent, Name: "orders"},
+		}},
 	}
 }
 
-// readyOrdersDB drives the readiness watcher to the point where the gate for
-// `orders-db` resolves, and returns the fakes so a test can assert what landed.
-// It mirrors the live sequence exactly: Provision admits + starts the run, the
-// binding goes Ready, the sweep completes the row.
-func readyOrdersDB(t *testing.T, seed []sourcecontrol.IssueInfo, design []spec.DesignComponent) (*fakeIssues, *ResourceWatcher) {
+// siblingResolved is a providers fake in which `web`'s sibling endpoint resolves.
+func siblingResolved() fakeProviders {
+	return fakeProviders{projectEP: map[string]openchoreo.WorkloadEndpointInfo{
+		"proj-orders": {Component: "proj-orders", Name: "http"},
+	}}
+}
+
+// publishFor builds a service over the given fakes and publishes the wiring once,
+// as a cycle dispatch does.
+func publishFor(t *testing.T, seed []sourcecontrol.IssueInfo, design []spec.DesignComponent, providers fakeProviders) *fakeIssues {
 	t.Helper()
 	issues := newFakeIssues(append([]sourcecontrol.IssueInfo{provisionGateIssue(11, "orders-db")}, seed...))
+	svc := NewService(Deps{
+		Issues: issues, Execs: &fakeExecStore{}, Reeval: &fakeReeval{},
+		Design: fakeDesign{comps: design}, Repos: fakeRepos{},
+		ExtProv: &fakeExtProv{}, PlatProv: &fakePlatProv{},
+		Bindings: &fakeBindings{}, Providers: providers,
+	})
+	svc.PublishResolvedWiring(context.Background(), "org", "proj")
+	return issues
+}
+
+func wiringComments(f *fakeIssues, number int) []string {
+	var out []string
+	for _, c := range f.comments[number] {
+		if strings.Contains(c, "Platform-resolved dependencies") {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// The trigger, and the reason this design exists: the wiring reaches the agent at
+// CYCLE DISPATCH, where the dispatch predicate has already guaranteed no gate is
+// open and the working set is non-empty. The comment carries the block for the
+// component that consumes the endpoint, named, so the agent knows which
+// workload.yaml it belongs in.
+func TestWiring_PublishedAtDispatch(t *testing.T) {
+	issues := publishFor(t, []sourcecontrol.IssueInfo{codingIssue(21, "Implement web", "open")},
+		wiringDesign(), siblingResolved())
+
+	posted := wiringComments(issues, 21)
+	if len(posted) != 1 {
+		t.Fatalf("want exactly one wiring comment on the working-set issue, got %d: %v", len(posted), posted)
+	}
+	body := posted[0]
+	for _, want := range []string{
+		"**Platform-resolved dependencies**",
+		"## Component `web`",
+		"```yaml\ndependencies:\n",
+		"visibility: project",
+		"address: ORDERS_URL",
+		"### Consumed API contract — orders (local)",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("wiring comment missing %q:\n%s", want, body)
+		}
+	}
+	// `orders` consumes no endpoint — it must not get a block, or the agent would
+	// write a dependencies: into a workload.yaml that has no endpoint deps.
+	if strings.Contains(body, "## Component `orders`") {
+		t.Errorf("a component with no endpoint dependency must have no block:\n%s", body)
+	}
+}
+
+// THE REGRESSION GUARD. Gate resolution must no longer post: its audience was
+// whatever working-set issues happened to exist at that instant, and on a first
+// build (fillMilestone provisions before it plans) that is none — the miss that
+// let an agent ship SQLite instead of the Postgres it had provisioned. The gate
+// still closes; only the comment moved.
+func TestWiring_GateResolutionPostsNothing(t *testing.T) {
+	issues := newFakeIssues([]sourcecontrol.IssueInfo{
+		provisionGateIssue(11, "orders-db"),
+		codingIssue(21, "Implement web", "open"),
+	})
 	bindings := &fakeBindings{byName: map[string]*openchoreo.ResourceReleaseBinding{}}
-	svc := newTestService(issues, &fakeExecStore{}, &fakeReeval{}, fakeDesign{comps: design},
+	svc := newTestService(issues, &fakeExecStore{}, &fakeReeval{}, fakeDesign{comps: wiringDesign()},
 		&fakeExtProv{}, &fakePlatProv{}, bindings)
 
 	if err := svc.Provision(context.Background(), "org", "proj", "orders-db", nil, nil); err != nil {
@@ -69,54 +140,58 @@ func readyOrdersDB(t *testing.T, seed []sourcecontrol.IssueInfo, design []spec.D
 	}
 	w := NewResourceWatcher(svc, nil, time.Second)
 	w.now = func() time.Time { return time.Unix(1000, 0).Add(time.Minute) }
-	// Two keys for one binding: the watcher reads it back by the run name the
-	// provisioner reported (fakePlatProv's "o-<dep>-<env>"), while the wiring
-	// resolver addresses it by the canonical ExternalResourceBindingName
-	// ("<project>-<dep>-<env>") the real provisioner mints. Registering both keeps
-	// the fake from hiding either lookup.
 	ready := readyBinding("host", "port")
 	bindings.byName["o-orders-db-development"] = ready
 	bindings.byName["proj-orders-db-development"] = ready
 	if err := w.Sweep(context.Background()); err != nil {
 		t.Fatalf("Sweep: %v", err)
 	}
-	return issues, w
-}
 
-// ADR-0004's trigger: the resolved dependencies reach the coding agent at GATE
-// RESOLUTION — the first moment the address exists — not at plan time and not
-// after the merge. The comment carries the block for the component that consumes
-// the dependency, named, so the agent knows which workload.yaml it belongs in.
-func TestWiring_PostedOnGateResolution(t *testing.T) {
-	issues, _ := readyOrdersDB(t, []sourcecontrol.IssueInfo{codingIssue(21, "Implement orders", "open")}, wiringDesign())
-
-	posted := issues.comments[21]
-	if len(posted) != 1 {
-		t.Fatalf("want exactly one wiring comment on the working-set issue, got %d: %v", len(posted), posted)
+	if got := wiringComments(issues, 21); len(got) != 0 {
+		t.Errorf("gate resolution must not post the wiring comment any more, got:\n%v", got)
 	}
-	body := posted[0]
-	for _, want := range []string{
-		"**Platform-resolved dependencies**",
-		"## Component `orders`",
-		"```yaml\ndependencies:\n",
-		"ref: proj-orders-db",
-		"ORDERS_DB_HOST",
-		"ORDERS_DB_PORT",
-		"### Platform resource — orders-db",
-		"postgres-cnpg",
-	} {
-		if !strings.Contains(body, want) {
-			t.Errorf("wiring comment missing %q:\n%s", want, body)
-		}
-	}
-	// `web` consumes nothing — it must not get a block, or the agent would write
-	// a dependencies: into a workload.yaml that has no dependencies.
-	if strings.Contains(body, "## Component `web`") {
-		t.Errorf("a component that does not consume the dependency must have no block:\n%s", body)
-	}
-	// The gate closes as it always did — the comment is additive to that path.
 	if _, closed := issues.closed[11]; !closed {
 		t.Errorf("the gate must still close on readiness")
+	}
+}
+
+// The `resources:` half is gone from this comment: a resource's ref and env-var
+// names are stamped into its dependency's `wiring` block in design.json at design
+// save, so restating them here would be two channels for one file section — and
+// the one that could silently miss.
+func TestWiring_CarriesNoResourcesBlock(t *testing.T) {
+	design := []spec.DesignComponent{{
+		Name: "web",
+		Dependencies: []spec.Dependency{
+			{Kind: spec.DependencyKindComponent, Name: "orders"},
+			{Kind: spec.DependencyKindPlatformResource, Name: "orders-db", ResourceType: "postgres-cnpg"},
+			{Kind: spec.DependencyKindExternal, Name: "stripe"},
+		},
+	}}
+	issues := publishFor(t, []sourcecontrol.IssueInfo{codingIssue(21, "Implement web", "open")},
+		design, siblingResolved())
+
+	posted := wiringComments(issues, 21)
+	if len(posted) != 1 {
+		t.Fatalf("want one wiring comment, got %d", len(posted))
+	}
+	body := posted[0]
+	// Scope the check to the YAML the agent copies: the prose deliberately NAMES
+	// `resources:` to say where that half lives, which is not the same as carrying
+	// it. Asserting over the whole body would forbid the pointer along with the
+	// duplication.
+	for _, forbidden := range []string{"resources:", "ref: proj-orders-db", "ORDERS_DB_HOST", "ref: proj-stripe"} {
+		if strings.Contains(yamlBlockOf(t, body), forbidden) {
+			t.Errorf("the workload block must not carry the resources half (%q):\n%s", forbidden, body)
+		}
+	}
+	// It DOES still point the agent at where that half lives.
+	if !strings.Contains(body, "`design.json`") {
+		t.Errorf("the comment must name design.json as the home of the resources half:\n%s", body)
+	}
+	// Secret material never rides the comment.
+	if strings.Contains(strings.ToLower(body), "password") {
+		t.Errorf("no secret material may appear in the wiring comment:\n%s", body)
 	}
 }
 
@@ -125,119 +200,131 @@ func TestWiring_PostedOnGateResolution(t *testing.T) {
 // an issue without `aep` is ledger-only — none of them is agent work.
 func TestWiring_TargetsTheWorkingSetOnly(t *testing.T) {
 	seed := []sourcecontrol.IssueInfo{
-		codingIssue(21, "Implement orders", "open"),
-		codingIssue(22, "Implement web", "open"),
+		codingIssue(21, "Implement web", "open"),
+		codingIssue(22, "Implement orders", "open"),
 		codingIssue(23, "Already merged", "closed"),
 		codingIssue(24, "Validate the increment", "open", delivery.LabelValidationWork),
 		{Number: 25, Title: "A human bug report", State: "open"}, // ledger-only: no `aep`
 	}
-	issues, _ := readyOrdersDB(t, seed, wiringDesign())
+	issues := publishFor(t, seed, wiringDesign(), siblingResolved())
 
 	for _, n := range []int{21, 22} {
-		if len(issues.comments[n]) != 1 {
-			t.Errorf("working-set issue #%d: want 1 wiring comment, got %d", n, len(issues.comments[n]))
+		if len(wiringComments(issues, n)) != 1 {
+			t.Errorf("working-set issue #%d: want 1 wiring comment, got %d", n, len(wiringComments(issues, n)))
 		}
 	}
 	for _, n := range []int{11, 23, 24, 25} {
-		for _, c := range issues.comments[n] {
-			if strings.Contains(c, "Platform-resolved dependencies") {
-				t.Errorf("issue #%d is not agent work and must not get the wiring comment", n)
-			}
+		if got := wiringComments(issues, n); len(got) != 0 {
+			t.Errorf("issue #%d is not agent work and must not get the wiring comment", n)
 		}
 	}
 }
 
-// Idempotency: the resolve path re-runs (a re-build re-mints and re-settles a
-// gate for a dependency that is already Ready), and the same comment must not
-// pile up. The aep:wired/<slug> marker stamped on the issue is the guard.
-func TestWiring_IdempotentAcrossReRun(t *testing.T) {
+// A dispatch with nothing open to work posts nothing: there is no agent to tell.
+func TestWiring_NoOpenWorkPostsNothing(t *testing.T) {
+	issues := publishFor(t, []sourcecontrol.IssueInfo{codingIssue(21, "Implement web", "closed")},
+		wiringDesign(), siblingResolved())
+
+	for n := range issues.comments {
+		if got := wiringComments(issues, n); len(got) != 0 {
+			t.Errorf("no open work: nothing should be posted, but issue #%d got:\n%v", n, got)
+		}
+	}
+}
+
+// Idempotency: the publisher runs on EVERY cycle dispatch, and a complete comment
+// must not pile up across them. The aep:wired marker is the guard.
+func TestWiring_IdempotentAcrossDispatches(t *testing.T) {
 	issues := newFakeIssues([]sourcecontrol.IssueInfo{
 		provisionGateIssue(11, "orders-db"),
-		codingIssue(21, "Implement orders", "open"),
+		codingIssue(21, "Implement web", "open"),
 	})
-	bindings := &fakeBindings{byName: map[string]*openchoreo.ResourceReleaseBinding{
-		"proj-orders-db-development": readyBinding("host", "port"),
+	svc := NewService(Deps{
+		Issues: issues, Execs: &fakeExecStore{}, Reeval: &fakeReeval{},
+		Design: fakeDesign{comps: wiringDesign()}, Repos: fakeRepos{},
+		ExtProv: &fakeExtProv{}, PlatProv: &fakePlatProv{},
+		Bindings: &fakeBindings{}, Providers: siblingResolved(),
+	})
+
+	for i := 0; i < 3; i++ {
+		svc.PublishResolvedWiring(context.Background(), "org", "proj")
+	}
+
+	if got := wiringComments(issues, 21); len(got) != 1 {
+		t.Fatalf("three dispatches must post one comment, got %d:\n%v", len(got), got)
+	}
+	if !delivery.HasLabel(issueByNumber(t, issues, 21).Labels, wiredLabel) {
+		t.Errorf("the posted issue must carry the aep:wired marker")
+	}
+}
+
+// The completeness rule, which is the old bug in miniature: a block that had to
+// OMIT an unresolved sibling goes up unmarked, so the next dispatch supersedes it
+// with the fuller version instead of treating a partial answer as final.
+func TestWiring_PartialPostIsUnmarkedAndSupersededLater(t *testing.T) {
+	design := []spec.DesignComponent{{
+		Name: "web",
+		Dependencies: []spec.Dependency{
+			{Kind: spec.DependencyKindComponent, Name: "orders"},
+			{Kind: spec.DependencyKindOrgService, Name: "employee-api"}, // never resolves below
+		},
 	}}
-	svc := newTestService(issues, &fakeExecStore{}, &fakeReeval{}, fakeDesign{comps: wiringDesign()},
-		&fakeExtProv{}, &fakePlatProv{}, bindings)
+	issues := newFakeIssues([]sourcecontrol.IssueInfo{codingIssue(21, "Implement web", "open")})
+	providers := siblingResolved() // employee-api absent from nsVisible → unresolved
+	deps := Deps{
+		Issues: issues, Execs: &fakeExecStore{}, Reeval: &fakeReeval{},
+		Design: fakeDesign{comps: design}, Repos: fakeRepos{},
+		ExtProv: &fakeExtProv{}, PlatProv: &fakePlatProv{},
+		Bindings: &fakeBindings{}, Providers: providers,
+	}
+	svc := NewService(deps)
 
-	// Two builds in a row over an already-Ready dependency: settleReadyGates
-	// admits + completes a provision run each time it finds an open gate.
-	for i := 0; i < 2; i++ {
-		if fails := svc.settleReadyGates(context.Background(), "org", "proj", nil); len(fails) != 0 {
-			t.Fatalf("settleReadyGates pass %d: %+v", i, fails)
-		}
-		// Re-open the gate so the second pass genuinely re-runs the resolve path
-		// (a re-build re-mints one) — otherwise the test proves only that a closed
-		// gate is skipped.
-		for j := range issues.list {
-			if issues.list[j].Number == 11 {
-				issues.list[j].State = "open"
-			}
-		}
+	svc.PublishResolvedWiring(context.Background(), "org", "proj")
+
+	if got := len(wiringComments(issues, 21)); got != 1 {
+		t.Fatalf("the resolvable half must still be posted, got %d comments", got)
+	}
+	if delivery.HasLabel(issueByNumber(t, issues, 21).Labels, wiredLabel) {
+		t.Fatal("a PARTIAL block must not be marked complete — the next dispatch would never supersede it")
 	}
 
-	if got := len(issues.comments[21]); got != 1 {
-		t.Fatalf("a re-run must not repeat the wiring comment: got %d comments\n%v", got, issues.comments[21])
+	// The provider publishes, and the next dispatch posts the fuller block.
+	providers.nsVisible = map[string]openchoreo.WorkloadEndpointInfo{
+		"employee-api": {Project: "hr", Component: "hr-employee-api", Name: "http"},
 	}
-	if !delivery.HasLabel(issueByNumber(t, issues, 21).Labels, wiredDepLabel("orders-db")) {
-		t.Errorf("the posted issue must carry the aep:wired/<slug> marker")
+	deps.Providers = providers
+	NewService(deps).PublishResolvedWiring(context.Background(), "org", "proj")
+
+	posted := wiringComments(issues, 21)
+	if len(posted) != 2 {
+		t.Fatalf("the next dispatch must supersede a partial block, got %d comments", len(posted))
 	}
-}
-
-// A gate resolving with nothing open to work posts nothing: there is no agent to
-// tell, and the next version's plan will resolve the wiring afresh.
-func TestWiring_NoOpenWorkPostsNothing(t *testing.T) {
-	issues, _ := readyOrdersDB(t, []sourcecontrol.IssueInfo{codingIssue(21, "Implement orders", "closed")}, wiringDesign())
-
-	for n, cs := range issues.comments {
-		for _, c := range cs {
-			if strings.Contains(c, "Platform-resolved dependencies") {
-				t.Errorf("no open work: nothing should be posted, but issue #%d got:\n%s", n, c)
-			}
-		}
+	if !strings.Contains(posted[1], "address: EMPLOYEE_API_URL") {
+		t.Errorf("the superseding block must carry the newly resolved endpoint:\n%s", posted[1])
+	}
+	if !delivery.HasLabel(issueByNumber(t, issues, 21).Labels, wiredLabel) {
+		t.Errorf("a complete block must be marked so later dispatches stop re-posting")
 	}
 }
 
-// The block itself, across all four consumer-side dependency kinds. This is the
-// contract the coding agent copies verbatim, so the env-var names and visibility
-// values are asserted literally.
-func TestWiring_ResolvesEveryDependencyKind(t *testing.T) {
+// Both endpoint kinds, asserted literally — this is the contract the coding agent
+// copies verbatim, so env-var names and visibility values cannot drift silently.
+func TestWiring_ResolvesEveryEndpointKind(t *testing.T) {
 	design := []spec.DesignComponent{{
 		Name: "web",
 		Dependencies: []spec.Dependency{
 			{Kind: spec.DependencyKindOrgService, Name: "employee-api"},
 			{Kind: spec.DependencyKindComponent, Name: "orders"},
-			{Kind: spec.DependencyKindExternal, Name: "stripe"},
-			{Kind: spec.DependencyKindPlatformResource, Name: "orders-db", ResourceType: "postgres-cnpg",
-				Description: "Managed PostgreSQL via CloudNativePG"},
+			{Kind: spec.DependencyKindExternal, Name: "stripe", SpecPath: "dependencies/stripe.openapi.yaml"},
 		},
 	}}
-	issues := newFakeIssues([]sourcecontrol.IssueInfo{
-		provisionGateIssue(11, "orders-db"),
-		codingIssue(21, "Implement web", "open"),
-	})
-	bindings := &fakeBindings{byName: map[string]*openchoreo.ResourceReleaseBinding{
-		"proj-stripe-development":    readyBinding("STRIPE_API_KEY"),
-		"proj-orders-db-development": readyBinding("host", "port"),
-	}}
-	svc := NewService(Deps{
-		Issues: issues, Execs: &fakeExecStore{}, Reeval: &fakeReeval{},
-		Design: fakeDesign{comps: design}, Repos: fakeRepos{},
-		ExtProv: &fakeExtProv{}, PlatProv: &fakePlatProv{}, Bindings: bindings,
-		Providers: fakeProviders{
-			nsVisible: map[string]openchoreo.WorkloadEndpointInfo{
-				"employee-api": {Project: "hr", Component: "hr-employee-api", Name: "http"},
-			},
-			projectEP: map[string]openchoreo.WorkloadEndpointInfo{
-				"proj-orders": {Component: "proj-orders", Name: "http"},
-			},
-		},
-	})
+	providers := siblingResolved()
+	providers.nsVisible = map[string]openchoreo.WorkloadEndpointInfo{
+		"employee-api": {Project: "hr", Component: "hr-employee-api", Name: "http"},
+	}
+	issues := publishFor(t, []sourcecontrol.IssueInfo{codingIssue(21, "Implement web", "open")}, design, providers)
 
-	svc.postResolvedWiring(context.Background(), "org", "proj", "orders-db")
-
-	posted := issues.comments[21]
+	posted := wiringComments(issues, 21)
 	if len(posted) != 1 {
 		t.Fatalf("want one wiring comment, got %d", len(posted))
 	}
@@ -245,54 +332,56 @@ func TestWiring_ResolvesEveryDependencyKind(t *testing.T) {
 	for _, want := range []string{
 		"visibility: namespace", "address: EMPLOYEE_API_URL",
 		"visibility: project", "address: ORDERS_URL",
-		"ref: proj-stripe", "STRIPE_API_KEY: STRIPE_API_KEY",
-		"ref: proj-orders-db", "ORDERS_DB_HOST", "ORDERS_DB_PORT",
 		"### Consumed API contract — employee-api",
 		"project `hr`, component `hr-employee-api`, endpoint `http`",
 		"list_org_component_endpoints",
 		"### Consumed API contract — orders (local)",
-		"### Platform resource — orders-db",
-		"Managed PostgreSQL via CloudNativePG",
+		"dependencies/stripe.openapi.yaml",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("wiring comment missing %q:\n%s", want, body)
 		}
 	}
-	// Secret values never leave the SecretWriter port: outputs ride as NAMES.
-	if strings.Contains(strings.ToLower(body), "password") {
-		t.Errorf("no secret material may appear in the wiring comment:\n%s", body)
-	}
 }
 
-func TestOrgServiceURLEnvAndEnvVarName(t *testing.T) {
-	// Byte parity with endpoints.OrgServiceURLEnv / the upstream envVarName.
+func TestOrgServiceURLEnv(t *testing.T) {
+	// Byte parity with endpoints.OrgServiceURLEnv.
 	cases := map[string]string{"employee-api": "EMPLOYEE_API_URL", "todo": "TODO_URL", "order-svc-2": "ORDER_SVC_2_URL"}
 	for in, want := range cases {
 		if got := orgServiceURLEnv(in); got != want {
 			t.Errorf("orgServiceURLEnv(%q) = %q, want %q", in, got, want)
 		}
 	}
-	if got := envVarName("orders-db", "host"); got != "ORDERS_DB_HOST" {
-		t.Errorf("envVarName(orders-db, host) = %q, want ORDERS_DB_HOST", got)
-	}
 }
 
 // The gate index and the wiring marker are DIFFERENT labels: overloading
 // aep:dep/<slug> onto a coding issue would make gateDepFromLabels answer for
 // issues that are not gates.
-func TestWiredDepLabel_IsNotTheGateIndex(t *testing.T) {
-	if got := wiredDepLabel("Orders DB"); got != "aep:wired/orders-db" {
-		t.Errorf("wiredDepLabel = %q, want aep:wired/orders-db", got)
-	}
-	if wiredDepLabel("orders-db") == gateDepLabel("orders-db") {
+func TestWiredLabel_IsNotTheGateIndex(t *testing.T) {
+	if wiredLabel == gateDepLabel("orders-db") {
 		t.Errorf("the wiring marker must not collide with the gate index")
 	}
-	if got := gateDepFromLabels([]string{wiredDepLabel("orders-db")}); got != "" {
+	if got := gateDepFromLabels([]string{wiredLabel}); got != "" {
 		t.Errorf("the wiring marker must not read back as a gate's dependency, got %q", got)
 	}
-	if wiredDepLabel("  ") != "" {
-		t.Errorf("an unslugifiable name must yield no label")
+}
+
+// yamlBlockOf returns the contents of the comment's first ```yaml fence — the
+// bytes the coding agent actually copies into workload.yaml, as distinct from the
+// prose around them.
+func yamlBlockOf(t *testing.T, body string) string {
+	t.Helper()
+	const fence = "```yaml\n"
+	start := strings.Index(body, fence)
+	if start < 0 {
+		t.Fatalf("comment carries no yaml block:\n%s", body)
 	}
+	rest := body[start+len(fence):]
+	end := strings.Index(rest, "```")
+	if end < 0 {
+		t.Fatalf("unterminated yaml block:\n%s", body)
+	}
+	return rest[:end]
 }
 
 func issueByNumber(t *testing.T, f *fakeIssues, number int) sourcecontrol.IssueInfo {

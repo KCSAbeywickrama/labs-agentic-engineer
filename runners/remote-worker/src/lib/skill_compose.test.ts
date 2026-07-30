@@ -244,6 +244,12 @@ for (const rule of [
   "A pinned contract wins when there is one",
   "You do not build Docker images here",
   "## 3 · Implementing against a dependency's API contract",
+  // The resources half of the workload block comes from design.json in BOTH
+  // modes — it is derived, not resolved, so the playground has it too. Gating it
+  // to one mode is what would bring back the class of bug where an agent finds no
+  // wiring and quietly picks its own database.
+  "**`resources:` — from `design.json`.**",
+  "Substitute your own technology for a declared dependency",
 ]) {
   test(`shared by both modes: ${rule}`, () => {
     assert.ok(composed.github.includes(rule), `github mode lost: ${rule}`);

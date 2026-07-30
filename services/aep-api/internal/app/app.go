@@ -1104,6 +1104,12 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// the agent can integration-test against the live service.
 	codingExecutor.WithRunnerSecrets(runnerSecretResolver{svc: provisioningSvc})
 
+	// Publish the platform-resolved `endpoints:` wiring onto the working set at
+	// every cycle dispatch. Wired consumer-side so delivery holds only the narrow
+	// WiringPublisher port (delivery cannot import dependencies — dependencies
+	// already imports delivery).
+	codingExecutor.WithWiringPublisher(provisioningSvc)
+
 	// Runtime-config (env-config.js) emission — the SPA's `window._env_` (API URLs
 	// + generic <DEP>_<OUTPUT> keys for its platform-resource deps) is materialised
 	// onto each web-app ReleaseBinding. Two triggers:

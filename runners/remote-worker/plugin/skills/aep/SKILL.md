@@ -200,8 +200,8 @@ For **each** issue in the ordered set:
    References.
 <!-- mode:github -->
    Read its comments too (`gh issue view <number> --comments`): a
-   "Platform-resolved dependencies" comment carries a `dependencies:` block you
-   must copy into `workload.yaml` verbatim (see "Dependencies").
+   "Platform-resolved dependencies" comment carries the `endpoints:` half of a
+   `workload.yaml` block you must copy verbatim (see "Dependencies").
 <!-- /mode -->
 2. **Apply the project's stack skills.** Everything stack-specific lives there.
 3. **Write the code under that issue's App Path**, meeting every item in "Every
@@ -447,29 +447,38 @@ dependencies:
       visibility: namespace        # or project (same-project)
       envBindings:
         address: <ENV_VAR>         # the resolved URL is injected here
-  resources:                       # external connection resources
-    - ref: <resource-name>
-      envBindings:
-        <output-name>: <ENV_VAR>   # the connection output is injected here
+  resources:                       # platform + external resources
+    - ref: <resource-name>         # both fields come from the dependency's
+      envBindings:                 # `wiring` object in design.json — copy them
+        <output-name>: <ENV_VAR>   # as-is; the output is injected into <ENV_VAR>
 ```
 
+**You do not author this block — it is platform-owned**, and it reaches you from
+two places.
+
+**`resources:` — from `design.json`.** Every `platform-resource` and `external`
+dependency in your component's `design.json` carries a `wiring` object: copy its
+`ref` and `envBindings` straight into `resources:`, verbatim. A declared
+dependency with **no** `wiring` is a platform fault, not a component without
+dependencies: say so in one line and stop the run — never substitute your own
+database, cache or IDP (see "Never").
 <!-- mode:github -->
-**You do not author this block — it is platform-owned.** The platform resolves
-the wiring and posts it as a **"Platform-resolved dependencies"** comment on the
-open issues of your working set, so it may land on a **sibling** issue rather
-than the one for the component it describes. Read the comments on the issues you
-are working (`gh issue view <number> --comments`) and copy every
-`## Component <name>` block into **that named component's** `workload.yaml`
-exactly as given, **merging into any existing `dependencies:`** — invent, rename
-and omit nothing. No block anywhere in your working set for a component means
-that component has no consumer-side dependencies: add none. Two blocks for the
-same component: the **latest** is the complete answer, superseding the earlier.
+
+**`endpoints:` — from the issue comments.** The platform resolves live addresses
+and posts them as a **"Platform-resolved dependencies"** comment on the open
+issues of your working set, so it may land on a **sibling** issue rather than the
+one for the component it describes. Read the comments on the issues you are
+working (`gh issue view <number> --comments`) and copy every
+`## Component <name>` block into **that named component's** `workload.yaml`,
+**merging into any existing `dependencies:`** — invent, rename and omit nothing.
+Two blocks for the same component: the **latest** is the complete answer.
 <!-- /mode -->
 <!-- mode:local -->
-There is no resolver here, so you author the block from the component's
-`design.json` `dependencies`: one entry per declared dependency, named as the
-design names it. No real address exists to inject, so give the code sensible
-localhost defaults behind the same env-var names.
+
+**`endpoints:` — from `design.json`.** There is no resolver here, so author one
+entry per `component` / `org-service` dependency, named as the design names it.
+No real address exists to inject, so give the code sensible localhost defaults
+behind the same env-var names.
 <!-- /mode -->
 
 ## 2 · Reading an injected address
@@ -563,6 +572,11 @@ you write.
   only the `## Progress` section of an issue you touched is yours to write.
 - Delete or rewrite `.aep-playground/` (the playground's state dir).
 <!-- /mode -->
+- **Substitute your own technology for a declared dependency.** A component whose
+  `design.json` declares a dependency you have no `wiring` for is a platform
+  fault, not a licence to pick your own database, cache or IDP — and a local file
+  or an in-process store is the same substitution. Say so in one line and stop the
+  run, exactly as for a failed `git` auth.
 - Let a subagent run `git` or `gh`.
 - **Touch, read, or even list anything outside the current working directory** —
   never `~`, never other projects or repositories on this machine, never system
