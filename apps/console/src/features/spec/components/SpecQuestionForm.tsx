@@ -26,7 +26,7 @@
 // user who triggered the turn (`ownerId`) can submit or skip — they hold the
 // SSE stream back to the agent; everyone else co-authors.
 
-import { Box, Button, Checkbox, Chip, Radio, Stack, TextField, Typography } from "@wso2/oxygen-ui";
+import { Box, Button, Checkbox, Chip, CircularProgress, Radio, Stack, TextField, Typography } from "@wso2/oxygen-ui";
 import { Sparkles, Users } from "@wso2/oxygen-ui-icons-react";
 import type { Doc } from "yjs";
 import type { AskQuestionInput, QuestionAnswer } from "@aep/agent-stream";
@@ -209,7 +209,11 @@ export function SpecQuestionForm({
   const allAnswered = answers.every(
     (a) => a.selected.length > 0 || (a.freeText ?? "").trim().length > 0,
   );
-  const canSubmit = isOwner && allAnswered;
+  // While the batch is still streaming (#270 latency), the form is readable and
+  // selectable but cannot submit or skip: the turn is still running, and more
+  // questions may yet arrive. The final mirror clears the gate.
+  const streaming = entry.streaming === true;
+  const canSubmit = isOwner && allAnswered && !streaming;
 
   const submit = () => {
     if (!canSubmit) return;
@@ -266,6 +270,14 @@ export function SpecQuestionForm({
               onNote={(text) => note(qi, text)}
             />
           ))}
+          {streaming && (
+            <Stack direction="row" spacing={1} sx={{ alignItems: "center", mb: 4 }}>
+              <CircularProgress size={14} aria-label="More questions arriving" />
+              <Typography variant="body2" color="text.secondary">
+                The agent is still writing questions — you can start answering.
+              </Typography>
+            </Stack>
+          )}
         </Box>
       </Box>
 
@@ -288,7 +300,7 @@ export function SpecQuestionForm({
             Your picks are shared live — only the person who asked can send them.
           </Typography>
         )}
-        <Button variant="text" color="inherit" disabled={!isOwner} onClick={skip}>
+        <Button variant="text" color="inherit" disabled={!isOwner || streaming} onClick={skip}>
           Skip questions
         </Button>
         <Button variant="contained" disabled={!canSubmit} onClick={submit}>

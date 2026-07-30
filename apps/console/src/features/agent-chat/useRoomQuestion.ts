@@ -70,6 +70,7 @@ export function useRoomQuestion(doc: Doc | null, chatKey: string): RoomQuestion 
           toolCallId: m.toolCallId,
           questions: m.questions,
           ownerId: me.id, // it's this client's log, so this client ran the turn
+          ...(m.streaming ? { streaming: true } : {}),
         });
       }
     };

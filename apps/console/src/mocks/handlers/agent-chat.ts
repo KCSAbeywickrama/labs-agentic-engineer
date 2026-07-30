@@ -360,8 +360,20 @@ export const agentChatHandlers = [
             },
           ],
         };
+        // Stream the batch as chunked tool-input deltas (matching the real
+        // provider) so mock mode exercises the progressive question rendering
+        // (#270 latency): questions appear one by one, ~250ms per chunk.
+        const inputJson = JSON.stringify(input);
+        const CHUNK = 180;
+        const deltas = [];
+        for (let i = 0; i < inputJson.length; i += CHUNK) {
+          deltas.push({ type: "tool-input-delta", id: `qs-${turnId}`, delta: inputJson.slice(i, i + CHUNK) });
+        }
         return sse([
           { type: "text-delta", delta: "Let me pin the idea down — a few questions:" },
+          { type: "tool-input-start", id: `qs-${turnId}`, toolName: "ask_questions" },
+          ...deltas,
+          { type: "tool-input-end", id: `qs-${turnId}` },
           { type: "tool-call", toolCallId: `qs-${turnId}`, toolName: "ask_questions", input },
           {
             type: "tool-result",

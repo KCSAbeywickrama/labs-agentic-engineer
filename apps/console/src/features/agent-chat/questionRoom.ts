@@ -39,6 +39,12 @@ export interface RoomQuestion {
   answers: QuestionAnswer[] | null;
   /** Set once the asker submits or skips — the form closes for the whole room. */
   submitted?: boolean;
+  /**
+   * True while the batch is still streaming (#270 latency): `questions` is the
+   * prefix parsed so far and grows on re-mirror; the form renders and takes
+   * selections but submit stays gated until the final mirror clears this.
+   */
+  streaming?: boolean;
 }
 
 // --- Shared `questions` map helpers ----------------------------------------
@@ -56,12 +62,16 @@ function questionsMap(doc: Doc): YMap<RoomQuestion> {
  */
 export function mirrorQuestion(
   doc: Doc,
-  entry: { toolCallId: string; questions: AskQuestionInput[]; ownerId: string },
+  entry: { toolCallId: string; questions: AskQuestionInput[]; ownerId: string; streaming?: boolean },
 ): void {
   const map = questionsMap(doc);
   const existing = map.get(entry.toolCallId);
   map.set(entry.toolCallId, {
-    ...entry,
+    toolCallId: entry.toolCallId,
+    questions: entry.questions,
+    // A re-mirror flips streaming off by OMITTING it — never resurrect the
+    // gate from a stale entry, and never leak `streaming: false` into the doc.
+    ...(entry.streaming ? { streaming: true } : {}),
     ownerId: existing?.ownerId ?? entry.ownerId,
     answers: existing?.answers ?? null,
     ...(existing?.submitted ? { submitted: true } : {}),

@@ -25,6 +25,7 @@ import {
 } from "@aep/agent-stream";
 import {
   answerableQuestionIds,
+  extractStreamingQuestions,
   isQuestionTool,
   parseQuestionsInput,
 } from "./questionCards";
@@ -87,6 +88,63 @@ describe("parseQuestionsInput — ask_questions (batch)", () => {
 
   it("rejects an unknown tool name", () => {
     expect(parseQuestionsInput("addFile", SINGLE)).toBeNull();
+  });
+});
+
+describe("extractStreamingQuestions", () => {
+  const BATCH_JSON = JSON.stringify({
+    questions: [
+      SINGLE,
+      { question: "Which platform?", detail: "Sets the UI stack.", options: [{ label: "Web" }, { label: "Mobile" }] },
+    ],
+  });
+
+  it("returns [] before the first question object closes", () => {
+    const cut = BATCH_JSON.indexOf("}") - 1; // inside the first option object
+    expect(extractStreamingQuestions(ASK_QUESTIONS_TOOL, BATCH_JSON.slice(0, cut))).toEqual([]);
+  });
+
+  it("returns each question as soon as its object closes", () => {
+    // Cut right after the first question's closing brace (before the comma).
+    const firstClose = BATCH_JSON.indexOf('},{"question"') + 1;
+    const got = extractStreamingQuestions(ASK_QUESTIONS_TOOL, BATCH_JSON.slice(0, firstClose));
+    expect(got).toEqual([SINGLE]);
+  });
+
+  it("returns all questions from a complete (or fully-buffered) input", () => {
+    expect(extractStreamingQuestions(ASK_QUESTIONS_TOOL, BATCH_JSON)).toHaveLength(2);
+    // Also when the closing ]} hasn't arrived yet.
+    const noTail = BATCH_JSON.slice(0, BATCH_JSON.lastIndexOf("]"));
+    expect(extractStreamingQuestions(ASK_QUESTIONS_TOOL, noTail)).toHaveLength(2);
+  });
+
+  it("is not confused by braces and escaped quotes inside strings", () => {
+    const tricky = JSON.stringify({
+      questions: [
+        { question: 'Use "brace {} style" config?', options: [{ label: "Yes", description: 'It means {"a":1} literally \\ everywhere' }] },
+        SINGLE,
+      ],
+    });
+    const firstClose = tricky.indexOf('},{"question"') + 1;
+    const got = extractStreamingQuestions(ASK_QUESTIONS_TOOL, tricky.slice(0, firstClose));
+    expect(got).toHaveLength(1);
+    expect(got[0]!.question).toBe('Use "brace {} style" config?');
+  });
+
+  it("skips a malformed question object but keeps later valid ones", () => {
+    const buf = JSON.stringify({ questions: [{ question: "q", options: [] }, SINGLE] });
+    expect(extractStreamingQuestions(ASK_QUESTIONS_TOOL, buf)).toEqual([SINGLE]);
+  });
+
+  it("returns [] for the single-question tool and unknown tools", () => {
+    expect(extractStreamingQuestions(ASK_QUESTION_TOOL, JSON.stringify(SINGLE))).toEqual([]);
+    expect(extractStreamingQuestions("addFile", BATCH_JSON)).toEqual([]);
+    expect(extractStreamingQuestions(undefined, BATCH_JSON)).toEqual([]);
+  });
+
+  it("returns [] for garbage before the questions array", () => {
+    expect(extractStreamingQuestions(ASK_QUESTIONS_TOOL, '{"other": [')).toEqual([]);
+    expect(extractStreamingQuestions(ASK_QUESTIONS_TOOL, "")).toEqual([]);
   });
 });
 

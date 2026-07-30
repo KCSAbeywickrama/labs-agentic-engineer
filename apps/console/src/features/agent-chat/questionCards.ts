@@ -101,6 +101,62 @@ export function isQuestionTool(toolName: string | undefined): boolean {
 }
 
 /**
+ * Incrementally extract the COMPLETE question objects from a PARTIAL
+ * `ask_questions` input buffer, so the form can render questions one by one
+ * while the batch is still streaming (#270 latency follow-up: ~3/4 of the
+ * new-project wait is this JSON streaming — the first question is on the wire
+ * long before the tool-call frame closes).
+ *
+ * A string-aware brace scanner walks the `"questions": [...]` array and
+ * JSON-parses each element the moment its object closes; elements that fail
+ * `parseOneQuestion` are skipped (the final complete `tool-call` parse remains
+ * the authority — its upsert replaces whatever streamed). Batch tool only: a
+ * single `ask_question` input closes its one object only at the very end, so
+ * there is nothing to reveal early.
+ */
+export function extractStreamingQuestions(
+  toolName: string | undefined,
+  buf: string,
+): AskQuestionInput[] {
+  if (toolName !== ASK_QUESTIONS_TOOL) return [];
+  const arr = buf.match(/"questions"\s*:\s*\[/);
+  if (!arr) return [];
+  const out: AskQuestionInput[] = [];
+  const n = buf.length;
+  let i = (arr.index ?? 0) + arr[0].length;
+  while (i < n) {
+    while (i < n && /[\s,]/.test(buf[i]!)) i++;
+    if (i >= n || buf[i] !== "{") break;
+    let depth = 0;
+    let inStr = false;
+    let esc = false;
+    let end = -1;
+    for (let j = i; j < n; j++) {
+      const c = buf[j]!;
+      if (inStr) {
+        if (esc) esc = false;
+        else if (c === "\\") esc = true;
+        else if (c === '"') inStr = false;
+      } else if (c === '"') inStr = true;
+      else if (c === "{") depth++;
+      else if (c === "}" && --depth === 0) {
+        end = j;
+        break;
+      }
+    }
+    if (end < 0) break; // this element is still streaming
+    try {
+      const q = parseOneQuestion(JSON.parse(buf.slice(i, end + 1)));
+      if (q) out.push(q);
+    } catch {
+      // skip an unparseable element; later ones may still be fine
+    }
+    i = end + 1;
+  }
+  return out;
+}
+
+/**
  * Serialize a card's answer(s) into the next turn's plain-text instruction —
  * one definition shared by the chat hook and the collab banner. Single question
  * → `Answer to "…"`, batch → an `Answers:` list (the wire contract's builders).
