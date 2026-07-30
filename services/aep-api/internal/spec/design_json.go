@@ -115,6 +115,20 @@ type dependencyJSON struct {
 	Config       []configKeyJSON `json:"config,omitempty"`
 	ResourceType string          `json:"resourceType,omitempty"`
 	Parameters   map[string]any  `json:"parameters,omitempty"`
+	// Wiring is the platform-stamped consumer-side wiring (ADR-0013). It is the
+	// one derived field that IS persisted here — unlike status/reason, which stay
+	// out of the codec because they are recomputed on every read. It must round-trip
+	// in BOTH directions: dropping it on write silently un-stamps every derivation,
+	// and dropping it on read makes the next derivation see no prior value and the
+	// change detection commit on every save.
+	Wiring *dependencyWiringJSON `json:"wiring,omitempty"`
+}
+
+// dependencyWiringJSON is the on-disk shape of a dependency's `wiring` object.
+// Mirrors DependencyWiring; its own field order is the emitted key order.
+type dependencyWiringJSON struct {
+	Ref         string            `json:"ref"`
+	EnvBindings map[string]string `json:"envBindings"`
 }
 
 // candidateJSON is the on-disk shape of one entry in a dependency's
@@ -257,6 +271,7 @@ func assembleDependencies(dir string, in []dependencyJSON) ([]Dependency, error)
 			Config:       toModelConfigKeys(d.Config),
 			ResourceType: d.ResourceType,
 			Parameters:   d.Parameters,
+			Wiring:       toModelWiring(d.Wiring),
 		})
 	}
 	return out, nil
@@ -305,6 +320,26 @@ func marshalComponentDesignJSON(dir string, comp DesignComponent) ([]byte, error
 	return buf.Bytes(), nil
 }
 
+// toJSONWiring / toModelWiring carry the platform-stamped wiring across the codec
+// boundary. Both directions are load-bearing and each failed once: dropping it on
+// WRITE silently discards every derivation (the design.json lands with no wiring
+// and the coding agent is back to having nothing to copy), and dropping it on READ
+// makes each derivation see no prior value, so the change detection reports a diff
+// and commits on every single save.
+func toJSONWiring(in *DependencyWiring) *dependencyWiringJSON {
+	if in == nil {
+		return nil
+	}
+	return &dependencyWiringJSON{Ref: in.Ref, EnvBindings: in.EnvBindings}
+}
+
+func toModelWiring(in *dependencyWiringJSON) *DependencyWiring {
+	if in == nil {
+		return nil
+	}
+	return &DependencyWiring{Ref: in.Ref, EnvBindings: in.EnvBindings}
+}
+
 // toJSONDeps converts the unified model back to on-disk dependency entries.
 // Status/Reason are intentionally dropped. The result is always non-nil so the
 // `dependencies` key marshals as `[]` (not null) for a clean, stable contract.
@@ -325,6 +360,7 @@ func toJSONDeps(in []Dependency) []dependencyJSON {
 			Config:       toJSONConfigKeys(d.Config),
 			ResourceType: d.ResourceType,
 			Parameters:   d.Parameters,
+			Wiring:       toJSONWiring(d.Wiring),
 		})
 	}
 	return out
