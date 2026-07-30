@@ -52,15 +52,20 @@ func (a validationCriteria) ReadValidationCriteria(ctx context.Context, orgID, p
 	return []byte(fc.Content), true, nil
 }
 
-// validationExecLocator adapts the executions repository to validation's
-// ExecutionLocator port: it resolves a runner's execution id to its project,
-// org-fenced (GetByIDScoped returns nil for a different org — the tenant fence).
-type validationExecLocator struct {
-	repo delivery.ExecutionRepository
+// validationCycleLocator adapts the run-cycle repository to validation's
+// CycleLocator port: it resolves a runner's cycle id to its project, org-fenced
+// (GetByIDScoped returns nil for a different org — the tenant fence).
+//
+// The CYCLE is the runner's identity. This used to read the executions table,
+// which the milestone supervisor never writes — so a dispatched validation runner
+// was told its own dispatch did not exist, and the run reported `skipped` over an
+// oracle it had just filed.
+type validationCycleLocator struct {
+	repo delivery.RunCycleRepository
 }
 
-func (l validationExecLocator) LookupExecutionProject(ctx context.Context, orgHandle, executionID string) (string, bool, error) {
-	row, err := l.repo.GetByIDScoped(ctx, orgHandle, executionID)
+func (l validationCycleLocator) LookupCycleProject(ctx context.Context, orgHandle, cycleID string) (string, bool, error) {
+	row, err := l.repo.GetByIDScoped(ctx, orgHandle, cycleID)
 	if err != nil {
 		return "", false, err
 	}

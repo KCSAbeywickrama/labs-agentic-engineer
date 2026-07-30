@@ -33,10 +33,18 @@
 //
 // This feature does the ISSUE side only. Its runtime inputs — deployed endpoint
 // URLs and test credentials — are never written into the (public) issue: the
-// runner fetches endpoints from the secure validation-context endpoint and
-// requests test credentials on demand (only when a criterion needs a login)
-// from the sibling test-credentials endpoint (credentials.go). Test credentials
-// are a v1 mock (admin/admin) until real user provisioning exists.
+// runner PREFLIGHTS the endpoints from the secure validation-context endpoint
+// before its agent starts, and the agent requests test credentials on demand
+// (only when a criterion needs a login) from the sibling test-credentials
+// endpoint (credentials.go). Test credentials are a v1 mock (admin/admin) until
+// real user provisioning exists.
+//
+// Both callbacks identify their caller by the run CYCLE the platform dispatched
+// (context.go's CycleLocator) — the id the pod carries as AEP_TASK_ID and the
+// subject its bearer is bound to. Resolving it anywhere else is not a detail: it
+// was resolved against the executions table, which the milestone supervisor does
+// not write, so every validation runner was told its own dispatch did not exist
+// and the endpoint resolution below never ran.
 //
 // Feature-edge allowlist: {gitrepo}. Design + criteria reads are consumer ports
 // (ports.go) satisfied by adapters at the composition root, so this package

@@ -42,16 +42,27 @@ requirements. If a required section is missing, post an issue comment
 naming what's missing and exit with failure.
 
 Deployed endpoint URLs and any test credentials are NOT in the issue —
-they are runtime inputs kept out of the public issue. You fetch them from
-the platform in step 4.
+they are runtime inputs kept out of the public issue. The endpoints are
+already on disk for you (step 4); credentials you request on demand.
 
 Post a brief opening comment (`Starting validation: <one-line plan>`).
 
 ### 2. Branch
 
+The `aep/m<milestone#>-` prefix is a CONTRACT, not a style: the platform keys
+your merged pull request back to this run by the branch name. A branch outside
+that shape reads as a stranger's pull request — it is refused auto-merge, and
+your tests and report never reach the run. The milestone is the one your
+validation issue is filed under:
+
 ```bash
-git checkout -b validation/issue-<N>
+MILESTONE=$(gh issue view <N> --repo <owner/repo> --json milestone -q .milestone.number)
+git checkout -b "aep/m${MILESTONE}-validation"
 ```
+
+If `MILESTONE` comes back empty the issue was filed without one — a platform
+fault, not something to work around. Say so in an issue comment and stop; a
+branch without the prefix would strand everything you are about to do.
 
 ### 3. Partition the criteria
 
@@ -70,21 +81,23 @@ For each criterion:
 - `method: scenario` → no automation in this run; the report lists them
   as not validated.
 
-### 4. Fetch the validation context, then confirm the app is reachable
+### 4. Read the validation context, then confirm the app is reachable
 
-Deployed endpoint URLs come from the platform's secure validation-context
-endpoint — never from the issue. Test credentials are a separate on-demand
-request (below), made only when a criterion needs a login. `AEP_TASK_ID`
-carries this run's execution id; the bearer rides a file.
+Deployed endpoint URLs come from the platform, never from the issue. The
+platform fetched them **before you started** and left them at
+`/tmp/validation-context.json`:
 
 ```bash
-curl -sf "$AEP_PLATFORM_URL/internal/v1/executions/$AEP_TASK_ID/validation-context" \
-  -H "Authorization: Bearer $(cat "$AEP_BEARER_FILE")" > /tmp/validation-context.json
+cat /tmp/validation-context.json
 ```
 
-The response is `{ "endpoints": [{"component","url"}], "criteriaPath":
-"..." }`. If the fetch fails or `AEP_PLATFORM_URL` is unset, post an issue
-comment and exit with failure — do not guess endpoints.
+The content is `{ "endpoints": [{"component","url"}], "criteriaPath":
+"..." }`. It is present and non-empty whenever you are running: the runner
+exits before starting you if the platform could not resolve it, so there is
+no failure mode here for you to recover from. If the file were somehow
+missing, that is a platform fault — say so in one line and stop. Do not
+probe, scan, or infer endpoints, and do not call the platform for them
+yourself; the URL is not something you can work out from inside the cluster.
 
 - **Endpoints** become `tests/e2e/targets.json` (step 5) and your target
   list. Probe each URL (`curl -sf -o /dev/null <url>` or a playwright-cli
@@ -93,10 +106,11 @@ comment and exit with failure — do not guess endpoints.
   comment + exit failure.
 - **Test credentials (on demand):** request them only when a criterion
   needs a login — POST the test-credentials endpoint with an optional
-  `role` hint (the role the flow requires):
+  `role` hint (the role the flow requires). `AEP_TASK_ID` is this run's
+  validation cycle id; the bearer rides a file:
 
   ```bash
-  curl -sf -X POST "$AEP_PLATFORM_URL/internal/v1/executions/$AEP_TASK_ID/test-credentials" \
+  curl -sf -X POST "$AEP_PLATFORM_URL/internal/v1/validation/$AEP_TASK_ID/test-credentials" \
     -H "Authorization: Bearer $(cat "$AEP_BEARER_FILE")" \
     -H "Content-Type: application/json" \
     --data '{"role":"admin"}' > /tmp/creds.json
@@ -152,7 +166,8 @@ tests/e2e/
 - `targets.json` shape: `{"targets": {"<component>": "<url>", ...},
   "primary": "<the web-facing component>"}`, filled from the step-4
   validation-context `endpoints`. On a re-validation run, refresh it from
-  the newly fetched context.
+  the context file — a committed `targets.json` may name URLs from an
+  earlier deployment.
 - Install with `npm install` on first scaffold (commit the lockfile),
   `npm ci` on later runs.
 - `scripts/generate-report.mjs` is platform-owned: the REPORT step

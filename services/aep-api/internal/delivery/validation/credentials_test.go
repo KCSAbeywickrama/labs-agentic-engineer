@@ -39,9 +39,9 @@ func (f *fakeCredProvider) RequestCredentials(_ context.Context, _, projectID st
 
 func TestRequestCredentials_ResolvesProjectAndReturnsAccount(t *testing.T) {
 	prov := &fakeCredProvider{cred: TestCredential{Username: "admin", Password: "admin", Mock: true, Note: "mock"}}
-	svc := NewCredentialService(fakeExecLocator{projectID: "proj", found: true}, prov)
+	svc := NewCredentialService(locatorFor("proj"), prov)
 
-	got, err := svc.RequestCredentials(context.Background(), "exec-1", "org", CredentialRequest{Role: "admin"})
+	got, err := svc.RequestCredentials(context.Background(), theCycle, theOrg, CredentialRequest{Role: "admin"})
 	if err != nil {
 		t.Fatalf("RequestCredentials: %v", err)
 	}
@@ -49,7 +49,7 @@ func TestRequestCredentials_ResolvesProjectAndReturnsAccount(t *testing.T) {
 		t.Errorf("credential = %+v; want mock admin/admin", got)
 	}
 	// The provider must be fenced to the resolved project, not handed the raw
-	// execution id or org — this is the tenant fence real provisioning relies on.
+	// cycle id or org — this is the tenant fence real provisioning relies on.
 	if prov.gotProject != "proj" {
 		t.Errorf("provider project = %q; want %q", prov.gotProject, "proj")
 	}
@@ -58,15 +58,30 @@ func TestRequestCredentials_ResolvesProjectAndReturnsAccount(t *testing.T) {
 	}
 }
 
-func TestRequestCredentials_UnknownExecutionIs404(t *testing.T) {
+func TestRequestCredentials_UnknownCycleIs404(t *testing.T) {
 	prov := &fakeCredProvider{}
-	svc := NewCredentialService(fakeExecLocator{found: false}, prov) // execution not in caller's org
+	svc := NewCredentialService(locatorFor("proj"), prov)
 
-	_, err := svc.RequestCredentials(context.Background(), "exec-x", "org", CredentialRequest{})
-	if !errors.Is(err, ErrExecutionNotFound) {
-		t.Fatalf("want ErrExecutionNotFound (→ 404), got %v", err)
+	_, err := svc.RequestCredentials(context.Background(), "cycle-nope", theOrg, CredentialRequest{})
+	if !errors.Is(err, ErrCycleNotFound) {
+		t.Fatalf("want ErrCycleNotFound (→ 404), got %v", err)
 	}
 	if prov.gotProject != "" {
-		t.Errorf("provider must not be called on unknown execution; got project %q", prov.gotProject)
+		t.Errorf("provider must not be called on an unknown cycle; got project %q", prov.gotProject)
+	}
+}
+
+// A credential is the most sensitive thing this surface hands out, so the tenant
+// fence is asserted here too and not only on the context read.
+func TestRequestCredentials_AnotherOrgsCycleIs404(t *testing.T) {
+	prov := &fakeCredProvider{}
+	svc := NewCredentialService(locatorFor("proj"), prov)
+
+	_, err := svc.RequestCredentials(context.Background(), theCycle, strangeOrg, CredentialRequest{})
+	if !errors.Is(err, ErrCycleNotFound) {
+		t.Fatalf("want ErrCycleNotFound for another org's cycle, got %v", err)
+	}
+	if prov.gotProject != "" {
+		t.Errorf("issued a credential for an unowned cycle; got project %q", prov.gotProject)
 	}
 }

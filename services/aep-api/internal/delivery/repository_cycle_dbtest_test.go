@@ -126,7 +126,7 @@ func TestRunCycleRepository_AppendDispatchAndFinish(t *testing.T) {
 	// The merge policy's matched set is the cycle's only record of what it
 	// worked; a verdict is written only when the pull request did NOT merge.
 	declined, err := cycles.NoteMergeDecision(ctx, cycle.ID, []int{7, 8},
-		delivery.CycleMergeDeclined, "no resolved issue is agent work in this milestone")
+		delivery.CycleMergeDeclined, "no resolved issue is this run's work in this milestone")
 	if err != nil || declined == nil {
 		t.Fatalf("NoteMergeDecision(declined) = (%+v, %v)", declined, err)
 	}
@@ -267,6 +267,67 @@ func TestRunCycleRepository_LatestAndTimeline(t *testing.T) {
 	// Another project's cycles survive.
 	if rows, err := cycles.ListByRun(ctx, "orga", other.ID); err != nil || len(rows) != 1 {
 		t.Fatalf("other project's timeline = (%d rows, %v), want 1", len(rows), err)
+	}
+}
+
+// TestRunCycleRepository_GetByIDScoped pins the RUNNER's identity read: a
+// dispatched pod names its cycle id on every callback (AEP_TASK_ID), and this is
+// how the platform resolves that id to a project it may act on.
+//
+// It also pins the decision that the read resolves CYCLES ONLY. An execution id
+// must miss — the rows left in that table are dependency-provisioning gates,
+// which run no agent and are not a callback identity — so a future "helpful"
+// fallback to executions would fail here rather than silently widen who can pass
+// as a runner.
+func TestRunCycleRepository_GetByIDScoped(t *testing.T) {
+	t.Parallel()
+	db := dbtest.New(t)
+	runs := delivery.NewMilestoneRunRepository(db)
+	cycles := delivery.NewRunCycleRepository(db, nil)
+	execs := delivery.NewExecutionRepository(db, nil)
+	ctx := context.Background()
+
+	run := admitRun(t, runs, "orga", "proj", 7, "v7")
+	cycle := &delivery.RunCycle{
+		OrgID: run.OrgID, ProjectID: run.ProjectID, RunID: run.ID,
+		Kind: delivery.CycleKindValidation,
+	}
+	if err := cycles.Append(ctx, cycle); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+
+	got, err := cycles.GetByIDScoped(ctx, "orga", cycle.ID)
+	if err != nil || got == nil {
+		t.Fatalf("GetByIDScoped = (%+v, %v), want the cycle", got, err)
+	}
+	// The project is the whole point of the read: it is what the callback is then
+	// allowed to act on.
+	if got.ProjectID != "proj" || got.Kind != delivery.CycleKindValidation {
+		t.Errorf("GetByIDScoped = %+v; want project proj, kind validation", got)
+	}
+
+	// The tenant fence: another org's read MISSES rather than erroring, so a
+	// cross-tenant probe cannot tell "not yours" from "does not exist".
+	if got, err := cycles.GetByIDScoped(ctx, "orgb", cycle.ID); err != nil || got != nil {
+		t.Fatalf("GetByIDScoped(cross-org) = (%+v, %v), want (nil, nil)", got, err)
+	}
+
+	// An unknown id misses cleanly, never gorm.ErrRecordNotFound.
+	const absent = "3f4b9c1e-0000-4000-8000-000000000000"
+	if got, err := cycles.GetByIDScoped(ctx, "orga", absent); err != nil || got != nil {
+		t.Fatalf("GetByIDScoped(unknown) = (%+v, %v), want (nil, nil)", got, err)
+	}
+
+	// An EXECUTION id is not a runner identity. Same org, real row, still a miss.
+	admitted, exec, err := execs.TryAdmit(ctx, &delivery.Execution{
+		OrgID: "orga", ProjectID: "proj", Repo: "orga/proj", IssueNumber: 3,
+		Kind: "provision", Status: "queued",
+	})
+	if err != nil || !admitted || exec == nil {
+		t.Fatalf("TryAdmit(provision execution) = (%v, %+v, %v)", admitted, exec, err)
+	}
+	if got, err := cycles.GetByIDScoped(ctx, "orga", exec.ID); err != nil || got != nil {
+		t.Fatalf("GetByIDScoped(execution id) = (%+v, %v), want (nil, nil) — cycles only", got, err)
 	}
 }
 
