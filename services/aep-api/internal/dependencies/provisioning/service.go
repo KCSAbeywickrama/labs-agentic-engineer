@@ -158,27 +158,23 @@ func matchDependency(comps []spec.DesignComponent, depName, kind string) (*spec.
 	return nil, dependencies.ErrDepNotFound
 }
 
-// findProvisionIssue returns the open aep:provision gate issue for a dependency
-// name (its block Component), or found=false when none exists yet.
+// findProvisionIssue returns the open gate issue for a dependency name, or
+// found=false when none exists yet.
+//
+// The gate's aep:dep/<slug> label is the index (gate_labels.go). The body is
+// prose and is never read: a gate issue is a human-facing request, and a human
+// may edit it freely without breaking the platform's ability to resolve it.
 func (s *Service) findProvisionIssue(ctx context.Context, orgID, projectID, depName string) (number int, found bool, err error) {
-	issues, err := s.issues.ListIssues(ctx, orgID, projectID, []string{taskmeta.LabelMarker})
+	want := gateDepLabel(depName)
+	if want == "" {
+		return 0, false, nil
+	}
+	issues, err := s.issues.ListIssues(ctx, orgID, projectID, []string{delivery.LabelProvisionGate, want})
 	if err != nil {
 		return 0, false, fmt.Errorf("provisioning: list issues: %w", err)
 	}
-	want := strings.ToLower(depName)
 	for _, issue := range issues {
-		if !strings.EqualFold(issue.State, "open") {
-			continue
-		}
-		labels := taskmeta.ParseLabels(issue.Labels)
-		if labels.Class != taskmeta.ClassProvision {
-			continue
-		}
-		block, berr := taskmeta.ParseBlock(issue.Body)
-		if berr != nil {
-			continue
-		}
-		if strings.ToLower(block.Component) == want {
+		if strings.EqualFold(issue.State, "open") {
 			return issue.Number, true, nil
 		}
 	}
@@ -204,10 +200,19 @@ func (s *Service) admitProvisionRow(ctx context.Context, orgID, projectID, repo,
 }
 
 // completeProvisionRow finishes a provision Execution succeeded, closes the gate
-// issue with a no-secrets reference, and re-evaluates the funnel so consumer
-// tasks gated on this dependency dispatch. Used by the synchronous external path
-// and the readiness watcher.
-func (s *Service) completeProvisionRow(ctx context.Context, orgID, projectID string, issueNumber int, execID, reference string) {
+// issue with a no-secrets reference, posts the dependency's resolved wiring to
+// the run's working set (ADR-0004), and re-evaluates the funnel so consumer tasks
+// gated on this dependency dispatch. Used by the synchronous external path and
+// the readiness watcher.
+//
+// depName is the dependency this gate held. It is what the wiring comment is
+// about, so every caller passes it — the execution row's Component carries it on
+// the watcher path.
+//
+// ORDER: the wiring comment goes up BEFORE the re-evaluation that may release a
+// coding cycle, so an agent dispatched by this very resolution finds the block
+// already on its issues.
+func (s *Service) completeProvisionRow(ctx context.Context, orgID, projectID, depName string, issueNumber int, execID, reference string) {
 	if _, err := s.execs.Finish(ctx, execID, string(taskmeta.ExecSucceeded), reference); err != nil {
 		slog.WarnContext(ctx, "provisioning: finish provision run failed", "execution", execID, "error", err)
 		return
@@ -216,6 +221,7 @@ func (s *Service) completeProvisionRow(ctx context.Context, orgID, projectID str
 	if err := s.issues.CloseIssue(ctx, orgID, projectID, issueNumber, comment); err != nil {
 		slog.WarnContext(ctx, "provisioning: close gate issue failed", "issue", issueNumber, "error", err)
 	}
+	s.postResolvedWiring(ctx, orgID, projectID, depName)
 	if s.reeval != nil {
 		if err := s.reeval.Reevaluate(ctx); err != nil {
 			slog.WarnContext(ctx, "provisioning: reevaluate after provision failed", "error", err)

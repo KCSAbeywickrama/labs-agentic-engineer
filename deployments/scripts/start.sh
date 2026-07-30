@@ -49,11 +49,7 @@ if [ ! -f "$DEPLOY_DIR/docker-compose.yml" ]; then
     echo "❌ docker-compose.yml missing at $DEPLOY_DIR/docker-compose.yml"
     exit 1
 fi
-if [ ! -f "$DEPLOY_DIR/local-secret-manager-api/main.go" ]; then
-    echo "❌ local-secret-manager-api stub missing at $DEPLOY_DIR/local-secret-manager-api/ (in-repo sm-api stub — no wso2cloud checkout needed)"
-    exit 1
-fi
-echo "✅ Pre-flight ok (docker + compose + buildx + docker-compose.yml + sm-api stub)"
+echo "✅ Pre-flight ok (docker + compose + buildx + docker-compose.yml)"
 
 # Load specific env keys needed before `docker compose up` runs envsubst.
 # We extract keys individually rather than blanket-sourcing because .env
@@ -76,10 +72,18 @@ _load_env_key PUBLIC_CONSOLE_URL
 # 0. Refresh k3d node DNS (8.8.8.8 fallback for image pulls). k3d's
 #    native host.k3d.internal mapping + OC's CoreDNS rewrite handle the
 #    rest — see fix_node_dns comment in utils.sh.
+#
+#    Then assert IN-CLUSTER DNS works. These are two different resolvers:
+#    rewriting the node's file does not reach CoreDNS, which snapshotted its
+#    upstream when its pod was created. A Colima restart is precisely when
+#    CoreDNS ends up pointing at an address that no longer answers, so this is
+#    a pre-flight condition — a cluster whose pods can't resolve github.com
+#    fails every coding-agent run at `git clone`.
 echo ""
 echo "🔧 Refreshing k3d node DNS..."
 if kubectl cluster-info --context "${CLUSTER_CONTEXT}" --request-timeout=5s &>/dev/null; then
     fix_node_dns
+    ensure_cluster_dns_healthy || exit 1
 else
     echo "⚠️  k3d cluster not accessible — skipping DNS refresh (run setup.sh if cluster is missing)"
 fi

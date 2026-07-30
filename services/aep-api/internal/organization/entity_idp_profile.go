@@ -38,14 +38,20 @@ type OrganizationIDPProfile struct {
 	PublisherClientID   string `gorm:"column:publisher_client_id" json:"publisherClientId,omitempty"`
 	// PublisherClientSecret is the live secret used by the BFF when it
 	// needs to mint per-org publisher tokens or hand the secret out to
-	// user-app pods. Stored plaintext in PostgreSQL. The JSON `-` tag
-	// keeps it off the wire — callers must use a purpose-built endpoint
-	// to fetch it.
+	// user-app pods. Stored AES-256-GCM (credential-encryption-key) in
+	// PostgreSQL — same framing as org_secrets. The JSON `-` tag keeps it
+	// off the wire — callers must use a purpose-built endpoint to fetch it.
 	PublisherClientSecret string `gorm:"column:publisher_client_secret" json:"-"`
 	PublisherSecretRef    string `gorm:"column:publisher_secret_ref" json:"publisherSecretRef,omitempty"`
-	// SM-API triplet — populated by SMAPIWriter.WritePublisher after
+	// Secret-ref triplet — populated by SecretRefWriter.WritePublisher after
 	// EnsureOrgPublisher provisions the Thunder cc app. The dispatcher
 	// short-circuits the per-run runner-auth ExternalSecret when missing.
+	// secret_ref_* is the provider-neutral name (EXPAND); sm_api_* is kept
+	// for dual-write until phase 09 CONTRACT.
+	SecretRefName      *string    `gorm:"type:text;column:secret_ref_name" json:"-"`
+	SecretRefKVPath    *string    `gorm:"type:text;column:secret_ref_kv_path" json:"-"`
+	SecretRefProperty  *string    `gorm:"type:text;column:secret_ref_property" json:"-"`
+	SecretRefWrittenAt *time.Time `gorm:"column:secret_ref_written_at" json:"-"`
 	SMAPISecretRefName *string    `gorm:"type:text;column:sm_api_secret_ref_name" json:"-"`
 	SMAPIKVPath        *string    `gorm:"type:text;column:sm_api_kv_path" json:"-"`
 	SMAPIProperty      *string    `gorm:"type:text;column:sm_api_property" json:"-"`

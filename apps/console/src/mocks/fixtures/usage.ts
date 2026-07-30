@@ -100,15 +100,7 @@ export const taskUsage: Record<number, Usage> = {
   // 12 (pending) has no execution yet — exercises the absent-usage cell.
 };
 
-const buildingBuildUsage = sum([taskUsage[9]!, taskUsage[10]!, taskUsage[11]!]);
 const doneBuildUsage = sum(Object.values(taskUsage));
-
-// Build totals shared with fixtures/project.ts so the builds list agrees with
-// the usage rows the backend would aggregate.
-export const buildUsageByScenario = {
-  running: buildingBuildUsage,
-  completed: doneBuildUsage,
-} as const;
 
 // ---- Settings → Usage page (#291) -----------------------------------------
 

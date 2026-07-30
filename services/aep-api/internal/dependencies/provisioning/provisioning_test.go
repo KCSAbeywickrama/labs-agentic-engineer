@@ -19,6 +19,8 @@ package provisioning
 import (
 	"context"
 	"fmt"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -96,6 +98,14 @@ func (f *fakeIssues) CloseIssue(_ context.Context, _, _ string, number int, comm
 }
 func (f *fakeIssues) CommentIssue(_ context.Context, _, _ string, number int, body string) error {
 	f.comments[number] = append(f.comments[number], body)
+	return nil
+}
+func (f *fakeIssues) AddLabels(_ context.Context, _, _ string, number int, labels []string) error {
+	for i := range f.list {
+		if f.list[i].Number == number {
+			f.list[i].Labels = append(f.list[i].Labels, labels...)
+		}
+	}
 	return nil
 }
 
@@ -295,10 +305,22 @@ func (f fakeProjects) ListProjects(_ context.Context, orgID string) ([]ProjectRe
 
 type fakeProviders struct {
 	byName map[string]openchoreo.WorkloadEndpointInfo
+	// nsVisible / projectEP back the two visibility-scoped resolves the ADR-0004
+	// wiring comment uses; byName is the any-visibility access-request lookup.
+	nsVisible map[string]openchoreo.WorkloadEndpointInfo
+	projectEP map[string]openchoreo.WorkloadEndpointInfo
 }
 
 func (f fakeProviders) FindByComponent(_ context.Context, _, name string) (openchoreo.WorkloadEndpointInfo, bool, error) {
 	ep, ok := f.byName[name]
+	return ep, ok, nil
+}
+func (f fakeProviders) ResolveNamespaceVisible(_ context.Context, _, name string) (openchoreo.WorkloadEndpointInfo, bool, error) {
+	ep, ok := f.nsVisible[name]
+	return ep, ok, nil
+}
+func (f fakeProviders) ResolveProjectEndpoint(_ context.Context, _, _, ocComponent string) (openchoreo.WorkloadEndpointInfo, bool, error) {
+	ep, ok := f.projectEP[ocComponent]
 	return ep, ok, nil
 }
 
@@ -426,7 +448,7 @@ func TestEnsureProvisionIssues_MintsPerDepDeduped(t *testing.T) {
 	issues := newFakeIssues(nil)
 	svc := newTestService(issues, &fakeExecStore{}, &fakeReeval{}, fakeDesign{comps: designWithDeps()}, &fakeExtProv{}, &fakePlatProv{}, &fakeBindings{})
 
-	gateByDep, err := svc.EnsureProvisionIssues(context.Background(), "org", "proj", "v1-1")
+	gateByDep, err := svc.EnsureProvisionIssues(context.Background(), "org", "proj", "v1-1", 0)
 	if err != nil {
 		t.Fatalf("EnsureProvisionIssues: %v", err)
 	}
@@ -438,32 +460,31 @@ func TestEnsureProvisionIssues_MintsPerDepDeduped(t *testing.T) {
 	if gateByDep["stripe"] == 0 || gateByDep["orders-db"] == 0 {
 		t.Fatalf("EnsureProvisionIssues must return the minted gate number per dep, got %+v", gateByDep)
 	}
-	// Every gate issue carries the provision class label + a GateKind block field.
-	var haveConfig, haveResource bool
+	// A gate is PROSE plus two labels: the aep:provision marker and the
+	// aep:dep/<slug> that keys it to its dependency. It never carries the `aep`
+	// working-set label — it is a hold on dispatch, never agent work — and its
+	// body carries no machine block, because nothing parses it.
+	var deps []string
 	for _, req := range issues.created {
-		if !contains(req.Labels, taskmeta.LabelProvision) {
+		if !contains(req.Labels, delivery.LabelProvisionGate) {
 			t.Errorf("gate issue missing aep:provision label: %v", req.Labels)
 		}
-		block, err := taskmeta.ParseBlock(req.Body)
-		if err != nil {
-			t.Fatalf("gate issue body has no block: %v", err)
+		if contains(req.Labels, delivery.LabelAgentWork) {
+			t.Errorf("a gate must never be agent work: %v", req.Labels)
 		}
-		switch block.GateKind {
-		case taskmeta.GateConfigCollection:
-			haveConfig = true
-		case taskmeta.GateResourceProvisioning:
-			haveResource = true
-		default:
-			t.Errorf("unexpected gateKind %q", block.GateKind)
+		if strings.Contains(req.Body, "aep:task/v1") {
+			t.Errorf("gate issue body still carries a machine block:\n%s", req.Body)
 		}
+		deps = append(deps, gateDepFromLabels(req.Labels))
 	}
-	if !haveConfig || !haveResource {
-		t.Fatalf("want both config-collection + resource-provisioning gate kinds")
+	sort.Strings(deps)
+	if !reflect.DeepEqual(deps, []string{"orders-db", "stripe"}) {
+		t.Fatalf("gate dep labels = %v, want [orders-db stripe]", deps)
 	}
 
 	// Idempotent: a second call mints nothing new (the deps already have open issues).
 	issues.created = nil
-	gateByDep2, err := svc.EnsureProvisionIssues(context.Background(), "org", "proj", "v1-1")
+	gateByDep2, err := svc.EnsureProvisionIssues(context.Background(), "org", "proj", "v1-1", 0)
 	if err != nil {
 		t.Fatalf("EnsureProvisionIssues #2: %v", err)
 	}
@@ -476,8 +497,33 @@ func TestEnsureProvisionIssues_MintsPerDepDeduped(t *testing.T) {
 	}
 }
 
+// A gate must land IN the version's milestone, or the run's dispatch predicate
+// ("no open aep:provision issue in this milestone") can never see the hold. The
+// number rides the CREATE — one call, no follow-up PATCH. A gate deliberately
+// does not carry the `aep` working-set label: it is a dispatch hold, never
+// agent work.
+func TestEnsureProvisionIssues_AssignsTheMilestoneAtCreation(t *testing.T) {
+	issues := newFakeIssues(nil)
+	svc := newTestService(issues, &fakeExecStore{}, &fakeReeval{}, fakeDesign{comps: designWithDeps()}, &fakeExtProv{}, &fakePlatProv{}, &fakeBindings{})
+
+	if _, err := svc.EnsureProvisionIssues(context.Background(), "org", "proj", "v4", 7); err != nil {
+		t.Fatalf("EnsureProvisionIssues: %v", err)
+	}
+	if len(issues.created) == 0 {
+		t.Fatal("no gate issue was minted")
+	}
+	for _, req := range issues.created {
+		if req.Milestone == nil || *req.Milestone != 7 {
+			t.Errorf("gate %q: milestone = %v, want 7 assigned at creation", req.Title, req.Milestone)
+		}
+		if contains(req.Labels, "aep") {
+			t.Errorf("gate %q carries the aep working-set label: %v — a gate is never agent work", req.Title, req.Labels)
+		}
+	}
+}
+
 func TestSaveValues_ProvisionsAndClosesGate(t *testing.T) {
-	gate := provisionGateIssue(10, "stripe", taskmeta.GateConfigCollection)
+	gate := provisionGateIssue(10, "stripe")
 	issues := newFakeIssues([]sourcecontrol.IssueInfo{gate})
 	execs := &fakeExecStore{}
 	reeval := &fakeReeval{}
@@ -523,7 +569,7 @@ func TestSaveValues_ProvisionsAndClosesGate(t *testing.T) {
 }
 
 func TestProvision_PlatformIsAsync_LeftRunning(t *testing.T) {
-	gate := provisionGateIssue(11, "orders-db", taskmeta.GateResourceProvisioning)
+	gate := provisionGateIssue(11, "orders-db")
 	issues := newFakeIssues([]sourcecontrol.IssueInfo{gate})
 	execs := &fakeExecStore{}
 	reeval := &fakeReeval{}
@@ -558,7 +604,7 @@ func TestProvision_PlatformIsAsync_LeftRunning(t *testing.T) {
 }
 
 func TestResourceWatcher_ReadyClosesGateAndReleases(t *testing.T) {
-	gate := provisionGateIssue(11, "orders-db", taskmeta.GateResourceProvisioning)
+	gate := provisionGateIssue(11, "orders-db")
 	issues := newFakeIssues([]sourcecontrol.IssueInfo{gate})
 	execs := &fakeExecStore{}
 	reeval := &fakeReeval{}
@@ -600,7 +646,7 @@ func TestResourceWatcher_ReadyClosesGateAndReleases(t *testing.T) {
 }
 
 func TestResourceWatcher_StaleFails(t *testing.T) {
-	gate := provisionGateIssue(11, "orders-db", taskmeta.GateResourceProvisioning)
+	gate := provisionGateIssue(11, "orders-db")
 	issues := newFakeIssues([]sourcecontrol.IssueInfo{gate})
 	execs := &fakeExecStore{}
 	bindings := &fakeBindings{byName: map[string]*openchoreo.ResourceReleaseBinding{"o-orders-db-development": {}}}
@@ -725,9 +771,11 @@ func TestRequestAccess_CreatesRequestAndProviderIssue(t *testing.T) {
 	if len(issues.created) != 1 {
 		t.Fatalf("want one provider org-publish issue, got %d", len(issues.created))
 	}
-	block, _ := taskmeta.ParseBlock(issues.created[0].Body)
-	if block.GateKind != taskmeta.GateOrgPublish || block.Component != "inventory" {
-		t.Fatalf("org-publish issue block wrong: %+v", block)
+	if got := gateDepFromLabels(issues.created[0].Labels); got != "inventory" {
+		t.Fatalf("org-publish gate dep label = %q, want inventory", got)
+	}
+	if !contains(issues.created[0].Labels, delivery.LabelProvisionGate) {
+		t.Fatalf("org-publish gate missing the aep:provision marker: %v", issues.created[0].Labels)
 	}
 	if ar.ProviderIssueNumber == 0 {
 		t.Fatalf("access request must link the provider issue number")
@@ -840,14 +888,16 @@ func TestSaveValues_WrongKind400(t *testing.T) {
 
 // ---- helpers ---------------------------------------------------------------
 
-func provisionGateIssue(number int, depName, gateKind string) sourcecontrol.IssueInfo {
-	block := taskmeta.Block{Component: depName, GateKind: gateKind, Origin: taskmeta.OriginSpecPlan, DesignTag: "v1-1"}
+// provisionGateIssue builds a seeded gate issue exactly as the platform mints
+// one: prose, the aep:provision marker, and the aep:dep/<slug> label that keys
+// it to its dependency. That label pair IS the index — nothing reads the body.
+func provisionGateIssue(number int, depName string) sourcecontrol.IssueInfo {
 	return sourcecontrol.IssueInfo{
 		Number: number,
 		Title:  "Provision " + depName,
-		Body:   taskmeta.ComposeBody(block, taskmeta.Human{Rationale: "r"}),
+		Body:   "Provide this dependency's values in the architecture drawer.",
 		State:  "open",
-		Labels: taskmeta.NewTaskLabels(taskmeta.ClassProvision, taskmeta.OriginSpecPlan),
+		Labels: gateLabels(depName),
 	}
 }
 
@@ -896,7 +946,7 @@ func TestSaveValues_DesignReadErrorFails(t *testing.T) {
 // PLAIN is listed FIRST here, so a first-component-wins classification would
 // leak the value into the plain map.
 func TestSaveValues_UnionSecretAcrossComponents(t *testing.T) {
-	gate := provisionGateIssue(10, "stripe", taskmeta.GateConfigCollection)
+	gate := provisionGateIssue(10, "stripe")
 	ext := &fakeExtProv{}
 	comps := []spec.DesignComponent{
 		{Name: "webhook-worker", Dependencies: []spec.Dependency{
@@ -931,7 +981,7 @@ func TestSaveValues_UnionSecretAcrossComponents(t *testing.T) {
 // ErrNotRegistered here), SaveValues still succeeds and the external
 // provisioner receives a design-sourced ExternalResource.
 func TestSaveValues_AuthorsDefinitionFromDesign(t *testing.T) {
-	gate := provisionGateIssue(10, "stripe", taskmeta.GateConfigCollection)
+	gate := provisionGateIssue(10, "stripe")
 	ext := &fakeExtProv{}
 	svc := newTestService(newFakeIssues([]sourcecontrol.IssueInfo{gate}), &fakeExecStore{}, &fakeReeval{},
 		fakeDesign{comps: designWithDeps()}, ext, &fakePlatProv{}, &fakeBindings{}) // empty catalog

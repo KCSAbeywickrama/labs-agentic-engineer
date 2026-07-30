@@ -25,6 +25,7 @@ import (
 
 	ocgen "github.com/wso2/aep/aep-api/internal/clients/openchoreo/gen"
 	"github.com/wso2/aep/aep-api/internal/gen"
+	"github.com/wso2/aep/aep-api/internal/platform/k8sname"
 )
 
 //go:generate go run github.com/matryer/moq@v0.7.1 -rm -fmt goimports -pkg mocks -out mocks/component_client_mock.go . ComponentClient
@@ -129,6 +130,11 @@ type ComponentClient interface {
 	// the BFF watcher can correlate runs back to the task.
 	TriggerCodingAgent(ctx context.Context, params CodingAgentParams) (*gen.WorkflowRun, error)
 	ListWorkflowRuns(ctx context.Context, orgName, projectName, componentName string, limit int, cursor string) (*gen.WorkflowRunList, error)
+	// ListProjectWorkflowRuns is the same read widened to every component in
+	// the project — one call instead of one per component. The run read uses it
+	// to derive a cycle's builds from its merge SHA without first having to
+	// learn which components the merge touched.
+	ListProjectWorkflowRuns(ctx context.Context, orgName, projectName string, limit int, cursor string) (*gen.WorkflowRunList, error)
 	GetWorkflowRun(ctx context.Context, orgName, runName string) (*gen.WorkflowRun, error)
 }
 
@@ -1203,6 +1209,19 @@ func codingAgentParameters(p CodingAgentParams) map[string]interface{} {
 // goes into the network-error wrap to keep slog logs distinguishable
 // (trigger build / trigger coding-agent).
 func (c *componentClient) createWorkflowRun(ctx context.Context, orgName string, body ocgen.CreateWorkflowRunJSONRequestBody, opName string) (*gen.WorkflowRun, error) {
+	// Refuse a name OpenChoreo would accept and then never build. This is the
+	// one choke point every WorkflowRun create passes through, and the check is
+	// here rather than in the name generators because it has to hold for names
+	// they do not own — a caller-supplied runName included. The failure it
+	// replaces is the worst kind: a 201 Created, then no build pod, then a run
+	// stuck at WorkflowPending forever with nothing on its status explaining it.
+	if n := body.Metadata.Name; len(n) > k8sname.MaxLabelValueLen {
+		return nil, fmt.Errorf(
+			"%s: WorkflowRun name %q is %d chars, over the %d-char Kubernetes label-value limit "+
+				"(OpenChoreo and Argo both copy it into a label, so this run would be accepted and then never render)",
+			opName, n, len(n), k8sname.MaxLabelValueLen)
+	}
+
 	resp, err := c.oc.CreateWorkflowRunWithResponse(ctx, orgName, body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to %s: %w", opName, err)
@@ -1225,7 +1244,19 @@ func (c *componentClient) createWorkflowRun(ctx context.Context, orgName string,
 
 func (c *componentClient) ListWorkflowRuns(ctx context.Context, orgName, projectName, componentName string, limit int, cursor string) (*gen.WorkflowRunList, error) {
 	scopedComp := ScopedComponentName(projectName, componentName)
-	sel := ocgen.LabelSelectorParam(fmt.Sprintf("%s=%s", string(LabelKeyComponent), scopedComp))
+	return c.listWorkflowRunsBySelector(ctx, orgName,
+		fmt.Sprintf("%s=%s", string(LabelKeyComponent), scopedComp), limit, cursor)
+}
+
+func (c *componentClient) ListProjectWorkflowRuns(ctx context.Context, orgName, projectName string, limit int, cursor string) (*gen.WorkflowRunList, error) {
+	return c.listWorkflowRunsBySelector(ctx, orgName,
+		fmt.Sprintf("%s=%s", string(LabelKeyProject), projectName), limit, cursor)
+}
+
+// listWorkflowRunsBySelector is the shared body of the two listings above; only
+// the label selector differs, so the response handling lives once.
+func (c *componentClient) listWorkflowRunsBySelector(ctx context.Context, orgName, selector string, limit int, cursor string) (*gen.WorkflowRunList, error) {
+	sel := ocgen.LabelSelectorParam(selector)
 	params := &ocgen.ListWorkflowRunsParams{LabelSelector: &sel}
 	if limit > 0 {
 		l := ocgen.LimitParam(limit)
