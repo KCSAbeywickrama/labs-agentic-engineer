@@ -31,8 +31,10 @@ import (
 const defaultInputEnv = "development"
 
 // InputsCoordinator turns the build drawer's inputs into the pre-tag side
-// effects a build requires: it collects external specs and derives end-user
-// auth BEFORE the tag-cut (ApplyPreTag), and splits/stages external-config
+// effects a build requires: it collects external specs and runs the design
+// derivations (end-user auth + dependency wiring — ADR-0013) BEFORE the tag-cut
+// (ApplyPreTag, which runs on EVERY build, drawer inputs or not, because the
+// derivations depend on the design rather than on the inputs), and splits/stages external-config
 // values into non-secret config + SM-API secret references, passing platform
 // resource params + approvals through (BuildProvisionInputs). It is a thin
 // orchestrator over four ports — it holds no state and authors no OC resources
@@ -51,16 +53,21 @@ func NewInputsCoordinator(spec SpecCollector, auth DesignFactDeriver, stager Sec
 
 // ApplyPreTag runs the side effects that MUST land on HEAD before the tag-cut
 // captures the spec: every external-spec input is collected (content →
-// rawSpec, else url → specURL), then the end-user-auth derivation runs exactly
-// once. A per-input CollectSpec failure is reported as an InputFailure (the
-// handler returns {failures} and cuts no tag); an auth-derivation error
-// (conflict / catalog-unavailable) propagates as err for the handler to map to
-// 409 / 503.
+// rawSpec, else url → specURL), then the design derivations run exactly once —
+// end-user auth AND each resource dependency's wiring (ADR-0013). A per-input
+// CollectSpec failure is reported as an InputFailure (the handler returns
+// {failures} and cuts no tag); a derivation error (auth conflict /
+// catalog-unavailable) propagates as err for the handler to map to 409 / 503.
+//
+// The derivation step is NOT conditional on inputs: it reads the design, not the
+// drawer, so a plain re-build with an empty drawer still stamps. That is what
+// makes the wiring present in every version tag rather than only in ones whose
+// build happened to carry inputs.
 //
 // When any spec collection fails the build is already aborting, so we return
-// the failures WITHOUT deriving auth — deriving would commit to HEAD for a
-// build that never cuts a tag, and an auth error would mask the spec failures
-// the user actually needs to see. The next Build re-derives idempotently.
+// the failures WITHOUT deriving — deriving would commit to HEAD for a build that
+// never cuts a tag, and a derivation error would mask the spec failures the user
+// actually needs to see. The next Build re-derives idempotently.
 func (c *InputsCoordinator) ApplyPreTag(ctx context.Context, orgID, projectID string, inputs []BuildInputItem) ([]InputFailure, error) {
 	var failures []InputFailure
 	for _, in := range inputs {
