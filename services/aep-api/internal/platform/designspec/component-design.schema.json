@@ -200,6 +200,12 @@
       "items": {
         "type": "string"
       }
+    },
+    "skillsPinned": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
     }
   },
   "required": [

@@ -87,8 +87,18 @@ export interface ComponentDesign {
    * downstream coding agent. Passthrough — the design agent must not author it.
    */
   componentAgentInstructions?: string;
-  /** Skill names applied to THIS component (per-component; the coding runner
-   *  materializes exactly these for a build of this component). */
+  /**
+   * Skills the coding agent PRELOADS for this component's build. Deliberately
+   * NOT an exhaustive list of what the build may consult — the rest of the
+   * copied skill library stays loadable on demand. Per-component; the
+   * coding runner materializes exactly these for a build of this component.
+   */
+  skillsPinned?: string[];
+  /**
+   * @deprecated Legacy spelling of `skillsPinned`. Designs already committed
+   * in customer org repos carry this key, so it stays permitted and read
+   * forever, but new writes should use `skillsPinned`.
+   */
   skillsApplied?: string[];
 }
 

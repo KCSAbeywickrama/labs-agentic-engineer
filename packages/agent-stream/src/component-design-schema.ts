@@ -168,7 +168,11 @@ export const componentDesignSchema = z.strictObject({
   endpoint: endpointSchema.optional(),
   exposesAPI: exposesAPISchema.optional(),
   componentAgentInstructions: z.string().optional(),
+  // Legacy spelling. Designs already committed in customer org repos carry
+  // this key — it must stay permitted forever as a compatibility read.
+  // `skillsPinned` is the name to write going forward.
   skillsApplied: z.array(z.string()).optional(),
+  skillsPinned: z.array(z.string()).optional(),
 });
 
 // Compile-time drift guard: schema ⇄ contracts wire type (cf. tool.ts).
