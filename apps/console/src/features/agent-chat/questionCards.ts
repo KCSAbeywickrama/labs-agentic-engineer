@@ -190,6 +190,57 @@ export function isQuestionAnswered(q: AskQuestionInput, answer: QuestionAnswer |
 }
 
 /**
+ * Answers aligned 1:1 with `questions`, padding slots the stored array lacks.
+ * LOAD-BEARING while a batch streams (#335): the room's answers array is sized
+ * to the questions that existed when the user first touched an answer, but the
+ * batch keeps growing — every read and write must re-align to the CURRENT
+ * question count, or edits to later questions silently vanish (the array is
+ * mapped over, so an out-of-range index is simply never visited).
+ */
+export function normalizeAnswers(
+  questions: AskQuestionInput[],
+  answers: QuestionAnswer[] | null | undefined,
+): QuestionAnswer[] {
+  return questions.map((_, i) => answers?.[i] ?? { selected: [] });
+}
+
+/**
+ * Toggle one option on question `qi`, returning the full re-aligned answers
+ * array. Single-select replaces (and re-clicking clears); multi-select adds
+ * and removes.
+ */
+export function applySelection(
+  questions: AskQuestionInput[],
+  answers: QuestionAnswer[] | null | undefined,
+  qi: number,
+  label: string,
+): QuestionAnswer[] {
+  const multi = questions[qi]?.multiSelect === true;
+  return normalizeAnswers(questions, answers).map((a, i) => {
+    if (i !== qi) return a;
+    const has = a.selected.includes(label);
+    const selected = multi
+      ? has
+        ? a.selected.filter((l) => l !== label)
+        : [...a.selected, label]
+      : has
+        ? []
+        : [label];
+    return { ...a, selected };
+  });
+}
+
+/** Set the free-text note on question `qi`, re-aligned to the question count. */
+export function applyNote(
+  questions: AskQuestionInput[],
+  answers: QuestionAnswer[] | null | undefined,
+  qi: number,
+  freeText: string,
+): QuestionAnswer[] {
+  return normalizeAnswers(questions, answers).map((a, i) => (i === qi ? { ...a, freeText } : a));
+}
+
+/**
  * Serialize a card's answer(s) into the next turn's plain-text instruction —
  * one definition shared by the chat hook and the collab banner. Single question
  * → `Answer to "…"`, batch → an `Answers:` list (the wire contract's builders).

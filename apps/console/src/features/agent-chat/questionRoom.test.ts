@@ -23,7 +23,9 @@ import {
   closeStaleRoomQuestions,
   mirrorQuestion,
   readRoomQuestions,
+  updateRoomAnswer,
 } from "./questionRoom";
+import { applySelection } from "./questionCards";
 
 const Q = { question: "Which auth flow?", options: [{ label: "OIDC" }] };
 
@@ -81,5 +83,44 @@ describe("closeStaleRoomQuestions", () => {
     // Idempotent: a second pass keeps answers/ownership intact.
     closeStaleRoomQuestions(doc, "me", new Set(["tc-3"]), new Set(["tc-3"]));
     expect(entryOf(doc, "tc-3")).toEqual(after);
+  });
+});
+
+describe("updateRoomAnswer (live-state edits)", () => {
+  const QS = [
+    { question: "q0", options: [{ label: "A" }, { label: "B" }] },
+    { question: "q1", options: [{ label: "A" }, { label: "B" }] },
+  ];
+
+  it("two edits between renders both survive (no stale-snapshot clobber)", () => {
+    const doc = new Doc();
+    mirrorQuestion(doc, { toolCallId: "tc", questions: QS, ownerId: "me" });
+    // Both calls run before any re-render — each must see the other's write.
+    updateRoomAnswer(doc, "tc", (live) => applySelection(live.questions, live.answers, 0, "A"));
+    updateRoomAnswer(doc, "tc", (live) => applySelection(live.questions, live.answers, 1, "B"));
+    const answers = readRoomQuestions(doc)[0]!.answers!;
+    expect(answers[0]!.selected).toEqual(["A"]);
+    expect(answers[1]!.selected).toEqual(["B"]);
+  });
+
+  it("aligns to the LIVE question count when the batch grew since render", () => {
+    const doc = new Doc();
+    mirrorQuestion(doc, { toolCallId: "tc", questions: QS, ownerId: "me" });
+    updateRoomAnswer(doc, "tc", (live) => applySelection(live.questions, live.answers, 0, "A"));
+    // The batch streams two more questions in…
+    const grown = [...QS, { question: "q2", options: [{ label: "A" }] }, { question: "q3", options: [{ label: "A" }] }];
+    mirrorQuestion(doc, { toolCallId: "tc", questions: grown, ownerId: "me" });
+    // …and a late question is still editable.
+    updateRoomAnswer(doc, "tc", (live) => applySelection(live.questions, live.answers, 3, "A"));
+    const answers = readRoomQuestions(doc)[0]!.answers!;
+    expect(answers).toHaveLength(4);
+    expect(answers[3]!.selected).toEqual(["A"]);
+    expect(answers[0]!.selected).toEqual(["A"]);
+  });
+
+  it("is a no-op for an unknown card", () => {
+    const doc = new Doc();
+    updateRoomAnswer(doc, "missing", () => [{ selected: ["X"] }]);
+    expect(readRoomQuestions(doc)).toEqual([]);
   });
 });

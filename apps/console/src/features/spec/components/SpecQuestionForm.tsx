@@ -31,12 +31,19 @@ import { Box, Button, Checkbox, Chip, CircularProgress, Radio, Stack, TextField,
 import { Sparkles, Users } from "@wso2/oxygen-ui-icons-react";
 import type { Doc } from "yjs";
 import type { AskQuestionInput, QuestionAnswer } from "@aep/agent-stream";
-import { isFreeTextOption, isQuestionAnswered, serializeQuestionAnswer } from "../../agent-chat/questionCards";
+import {
+  applyNote,
+  applySelection,
+  isFreeTextOption,
+  isQuestionAnswered,
+  normalizeAnswers,
+  serializeQuestionAnswer,
+} from "../../agent-chat/questionCards";
 import { chatKeyFor, setPendingSeed } from "../../agent-chat/chatStore";
 import { useCurrentAuthor } from "../../agent-chat/currentUser";
 import {
   closeRoomQuestion,
-  setRoomAnswer,
+  updateRoomAnswer,
   type RoomQuestion,
 } from "../../agent-chat/questionRoom";
 
@@ -218,31 +225,21 @@ export function SpecQuestionForm({
 }) {
   const me = useCurrentAuthor();
   const isOwner = entry.ownerId === me.id;
-  const answers: QuestionAnswer[] =
-    entry.answers ?? entry.questions.map(() => ({ selected: [] }));
+  // Re-aligned to the CURRENT question count on every render: while the batch
+  // streams the stored array is shorter than the list, and editing through a
+  // short array drops writes for the later questions (#335).
+  const answers: QuestionAnswer[] = normalizeAnswers(entry.questions, entry.answers);
 
-  const write = (next: QuestionAnswer[]) => setRoomAnswer(doc, entry.toolCallId, next);
-
+  // Edits resolve against the LIVE room entry (never this render's snapshot):
+  // successive clicks between renders must not clobber each other (#335).
   const select = (qi: number, label: string) => {
-    const multi = entry.questions[qi]!.multiSelect === true;
-    write(
-      answers.map((a, i) => {
-        if (i !== qi) return a;
-        const has = a.selected.includes(label);
-        const selected = multi
-          ? has
-            ? a.selected.filter((l) => l !== label)
-            : [...a.selected, label]
-          : has
-            ? []
-            : [label];
-        return { ...a, selected };
-      }),
+    updateRoomAnswer(doc, entry.toolCallId, (live) =>
+      applySelection(live.questions, live.answers, qi, label),
     );
   };
 
   const note = (qi: number, freeText: string) => {
-    write(answers.map((a, i) => (i === qi ? { ...a, freeText } : a)));
+    updateRoomAnswer(doc, entry.toolCallId, (live) => applyNote(live.questions, live.answers, qi, freeText));
   };
 
   const allAnswered = entry.questions.every((q, i) => isQuestionAnswered(q, answers[i]));

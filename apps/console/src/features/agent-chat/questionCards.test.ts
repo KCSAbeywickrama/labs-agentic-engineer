@@ -25,11 +25,15 @@ import {
 } from "@aep/agent-stream";
 import {
   answerableQuestionIds,
+  applyNote,
+  applySelection,
   extractStreamingQuestions,
   isQuestionAnswered,
   isQuestionTool,
+  normalizeAnswers,
   parseQuestionsInput,
 } from "./questionCards";
+import type { QuestionAnswer } from "@aep/agent-stream";
 import type { ChatMessage } from "./chatStore";
 
 const SINGLE = {
@@ -190,6 +194,50 @@ describe("isQuestionAnswered / isFreeTextOption", () => {
     })![0]!;
     expect(parsed.options[1]!.freeText).toBe(true);
     expect(parsed.options[0]!.freeText).toBeUndefined();
+  });
+});
+
+describe("answer editing while the batch streams (#335 regression)", () => {
+  // The room's answers array is sized to the questions visible when the user
+  // FIRST touched an answer; later-streamed questions must still be editable.
+  const Q = (label: string, multi = false) => ({
+    question: label,
+    options: [{ label: "A" }, { label: "B" }],
+    ...(multi ? { multiSelect: true } : {}),
+  });
+  const FIVE = [Q("q0"), Q("q1"), Q("q2", true), Q("q3"), Q("q4")];
+  const SHORT: QuestionAnswer[] = [{ selected: ["A"] }, { selected: [] }];
+
+  it("normalizes a short answers array to the question count", () => {
+    const out = normalizeAnswers(FIVE, SHORT);
+    expect(out).toHaveLength(5);
+    expect(out[0]).toEqual({ selected: ["A"] }); // existing answers survive
+    expect(out[4]).toEqual({ selected: [] });
+    expect(normalizeAnswers(FIVE, null)).toHaveLength(5);
+    expect(normalizeAnswers(FIVE, undefined)).toHaveLength(5);
+  });
+
+  it("selects on a question BEYOND the stored array (the stuck case)", () => {
+    const out = applySelection(FIVE, SHORT, 4, "B");
+    expect(out).toHaveLength(5);
+    expect(out[4]!.selected).toEqual(["B"]);
+    expect(out[0]!.selected).toEqual(["A"]); // earlier answers untouched
+  });
+
+  it("types free text on a question beyond the stored array", () => {
+    const out = applyNote(FIVE, SHORT, 3, "typed later");
+    expect(out).toHaveLength(5);
+    expect(out[3]!.freeText).toBe("typed later");
+  });
+
+  it("keeps single-select exclusive and multi-select additive", () => {
+    const single = applySelection(FIVE, SHORT, 1, "A");
+    expect(applySelection(FIVE, single, 1, "B")[1]!.selected).toEqual(["B"]);
+    expect(applySelection(FIVE, single, 1, "A")[1]!.selected).toEqual([]); // toggle off
+
+    const multi = applySelection(FIVE, SHORT, 2, "A");
+    expect(applySelection(FIVE, multi, 2, "B")[2]!.selected).toEqual(["A", "B"]);
+    expect(applySelection(FIVE, applySelection(FIVE, multi, 2, "B"), 2, "A")[2]!.selected).toEqual(["B"]);
   });
 });
 

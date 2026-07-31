@@ -96,6 +96,26 @@ export function setRoomAnswer(doc: Doc, toolCallId: string, answers: QuestionAns
 }
 
 /**
+ * Apply an answer edit against the LIVE entry rather than a React-render
+ * snapshot. Load-bearing while a batch streams and in a shared room: two
+ * edits landing between renders (fast successive clicks, or a teammate's
+ * concurrent selection) would otherwise each compute from the same stale
+ * answers and the later write would clobber the earlier one. `update` also
+ * receives the live `questions`, so an edit is always aligned to the current
+ * question count.
+ */
+export function updateRoomAnswer(
+  doc: Doc,
+  toolCallId: string,
+  update: (live: RoomQuestion) => QuestionAnswer[],
+): void {
+  const map = questionsMap(doc);
+  const existing = map.get(toolCallId);
+  if (!existing) return;
+  map.set(toolCallId, { ...existing, answers: update(existing) });
+}
+
+/**
  * Close a question for the WHOLE room — used both when the asker submits the
  * answers and when they skip the questions. The form disappears for everyone
  * and the spec body returns to the files.
