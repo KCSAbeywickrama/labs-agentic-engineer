@@ -629,6 +629,13 @@ type dispatchShape struct {
 // buildValidationPrompt is the validation-runner directive: it points at the
 // validation issue and defers the workflow to the aep-validation skill (the
 // runner preloads it because AEP_TASK_KIND=validation).
+//
+// It names NO milestone, and that is load-bearing: a validation cycle is
+// issue-anchored — one issue, one run — where a coding prompt's milestone
+// reference is an instruction to discover a whole working set. The skill still
+// needs the milestone for its branch identity (the platform keys a merged pull
+// request back to its run by an `aep/m<milestone#>-…` branch); it reads it off
+// the issue, which is filed under that milestone at mint time.
 func buildValidationPrompt(issueURL string, issueNumber int) string {
-	return fmt.Sprintf("This is a validation task. Work on this GitHub validation issue: %s\n\nFollow the `aep-validation` skill's workflow: fetch the validation context, author and run the e2e tests against the deployed system, commit the tests and report, and open a PR whose body includes `Closes #%d` so the platform links it back.", issueURL, issueNumber)
+	return fmt.Sprintf("This is a validation task. Work on this GitHub validation issue: %s\n\nFollow the `aep-validation` skill's workflow: read the validation context, author and run the e2e tests against the deployed system, commit the tests and report, and open a PR whose body includes `Closes #%d` so the platform links it back.", issueURL, issueNumber)
 }

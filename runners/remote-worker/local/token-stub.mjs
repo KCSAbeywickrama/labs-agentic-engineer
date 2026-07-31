@@ -23,10 +23,11 @@
 //   POST /internal/v1/tasks/{taskId}/credentials/refresh
 //     -> { "token": $GITHUB_PAT, "taskId": <echoed from path> }
 //
-// For a validation run it also plays the validation-context endpoint so the
-// aep-validation skill can fetch its deployed endpoints (never in the issue):
+// For a validation run it also plays the validation-context endpoint, which the
+// runner PREFLIGHTS before starting the agent (deployed endpoints are never in
+// the issue). Without it the local validation run exits before the agent starts:
 //
-//   GET /internal/v1/executions/{id}/validation-context
+//   GET /internal/v1/validation/{cycleId}/context
 //     -> { endpoints:[{component,url}], credentials:null, criteriaPath }
 //
 // The endpoints point at localhost dev servers the agent starts in-container
@@ -64,7 +65,9 @@ const expectedBearer = process.env.STUB_BEARER ?? "";
 // (git-service fallback) and executions/{id} when it is set (the current
 // execution-keyed model). Match either so the stub serves both run shapes.
 const REFRESH_RE = /^\/internal\/v1\/(?:tasks|executions)\/([^/]+)\/credentials\/refresh$/;
-const VALIDATION_CONTEXT_RE = /^\/internal\/v1\/executions\/([^/]+)\/validation-context$/;
+// Validation callbacks live under the feature that owns them and are keyed by the
+// CYCLE id the runner carries (AEP_TASK_ID).
+const VALIDATION_CONTEXT_RE = /^\/internal\/v1\/validation\/([^/]+)\/context$/;
 const JSON_HEADERS = { "Content-Type": "application/json", "Cache-Control": "no-store" };
 
 // The validation-context payload the stub returns. Localhost dev servers the
@@ -106,7 +109,7 @@ const server = http.createServer((req, res) => {
     return;
   }
   if (contextM) {
-    console.error(`[token-stub] 200 validation-context for execution ${contextM[1]}`);
+    console.error(`[token-stub] 200 validation-context for cycle ${contextM[1]}`);
     res.writeHead(200, JSON_HEADERS).end(JSON.stringify(validationContext));
     return;
   }

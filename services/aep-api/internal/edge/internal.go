@@ -83,29 +83,32 @@ func newInternalV1Handler(deps InternalDeps) http.Handler {
 }
 
 // runnerAuthGate is the internal surface's deny-by-default gate: every
-// operation must present a bearer the authorizer accepts for the execution id
-// named in the request, and the verified org is bound into the context. There
-// are deliberately NO carve-outs here. An operation whose request shape the
-// gate does not know is denied outright — adding an internal op means teaching
-// this gate its execution key first.
+// operation must present a bearer the authorizer accepts for the CYCLE id named
+// in the request, and the verified org is bound into the context. There are
+// deliberately NO carve-outs here. An operation whose request shape the gate does
+// not know is denied outright — adding an internal op means teaching this gate
+// where its cycle id lives first.
+//
+// The refresh operation still spells its parameter `executionId` on the wire; the
+// value is the dispatched cycle id, the same naming debt AEP_TASK_ID carries.
 func runnerAuthGate(authorizer *auth.RunnerAuthorizer) igen.StrictMiddlewareFunc {
 	return func(f igen.StrictHandlerFunc, operationID string) igen.StrictHandlerFunc {
 		return func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error) {
 			if authorizer == nil {
 				return nil, errServiceUnavailable("runner auth not configured")
 			}
-			var executionID string
+			var cycleID string
 			switch req := request.(type) {
 			case igen.RunnerRefreshCredentialsRequestObject:
-				executionID = req.ExecutionID
+				cycleID = req.ExecutionID
 			case igen.RunnerValidationContextRequestObject:
-				executionID = req.ExecutionID
+				cycleID = req.CycleID
 			case igen.RunnerValidationCredentialsRequestObject:
-				executionID = req.ExecutionID
+				cycleID = req.CycleID
 			default:
 				return nil, errUnauthorized("unauthenticated internal operation: " + operationID)
 			}
-			caller, err := authorizer.Authorize(ctx, r.Header.Get("Authorization"), executionID)
+			caller, err := authorizer.Authorize(ctx, r.Header.Get("Authorization"), cycleID)
 			if err != nil {
 				return nil, mapRunnerAuthError(err)
 			}
@@ -166,10 +169,10 @@ func (s *internalServer) RunnerValidationContext(ctx context.Context, request ig
 		return nil, errServiceUnavailable("validation context not configured")
 	}
 	org := tenant.BoundOrgFromContext(ctx)
-	resp, err := s.deps.ValidationContext.ValidationContext(ctx, request.ExecutionID, org)
+	resp, err := s.deps.ValidationContext.ValidationContext(ctx, request.CycleID, org)
 	if err != nil {
-		if errors.Is(err, validation.ErrExecutionNotFound) {
-			return nil, errNotFound("no validation task for this execution")
+		if errors.Is(err, validation.ErrCycleNotFound) {
+			return nil, errNotFound("no validation cycle with this id")
 		}
 		return nil, errInternal("failed to resolve validation context")
 	}
@@ -215,10 +218,10 @@ func (s *internalServer) RunnerValidationCredentials(ctx context.Context, reques
 			Username: request.Body.Username,
 		}
 	}
-	resp, err := s.deps.ValidationCredentials.RequestCredentials(ctx, request.ExecutionID, org, req)
+	resp, err := s.deps.ValidationCredentials.RequestCredentials(ctx, request.CycleID, org, req)
 	if err != nil {
-		if errors.Is(err, validation.ErrExecutionNotFound) {
-			return nil, errNotFound("no validation task for this execution")
+		if errors.Is(err, validation.ErrCycleNotFound) {
+			return nil, errNotFound("no validation cycle with this id")
 		}
 		return nil, errInternal("failed to request test credentials")
 	}
