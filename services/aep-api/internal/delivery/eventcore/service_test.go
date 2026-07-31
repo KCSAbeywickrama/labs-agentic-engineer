@@ -155,8 +155,10 @@ func TestService_AutoMergeIssuesTheSquashMergeOnce(t *testing.T) {
 	}
 	// The milestone read must be scoped to the milestone and to open issues, or
 	// the predicate would be decided against the wrong population.
+	milestoneRead := false
 	for _, r := range h.stub.Requests() {
 		if r.Method == http.MethodGet && r.Path == "/repos/acme/widgets/issues" {
+			milestoneRead = true
 			for _, want := range []string{"milestone=7", "state=open"} {
 				if !strings.Contains(r.Query, want) {
 					t.Fatalf("milestone read query %q must carry %q", r.Query, want)
@@ -172,6 +174,13 @@ func TestService_AutoMergeIssuesTheSquashMergeOnce(t *testing.T) {
 			}
 			break
 		}
+	}
+	// Nothing above fails when the read never happened — the loop simply matches
+	// no request and every assertion inside it is skipped. So a read that moved to
+	// another path would leave the label guard, which is the whole reason these
+	// assertions exist, silently testing nothing.
+	if !milestoneRead {
+		t.Fatal("the merge policy must read the milestone's issues; no such request was made")
 	}
 }
 
