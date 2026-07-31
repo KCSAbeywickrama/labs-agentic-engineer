@@ -42,7 +42,8 @@ import { parse as parseYaml } from "yaml";
 // fence parsing cannot drift from the spec-file fence parsing (same approach as
 // the caller-side skill resolver the playground uses to materialize the mount).
 import { FRONTMATTER_RE, lf } from "@aep/agent-stream";
-import type { SkillCatalogEntry, SkillSource, LoadedSkillBody, LoadedReference } from "../agents/main/skill-source.js";
+import type { SkillAudience, SkillCatalogEntry, SkillSource, LoadedSkillBody, LoadedReference } from "../agents/main/skill-source.js";
+import { ALL_AUDIENCES } from "../agents/main/skill-source.js";
 
 // --- The repo snapshot → `files` map -----------------------------------------
 
@@ -129,7 +130,12 @@ export function readSnapshot(snapshotDir: string): Record<string, string> {
 // --- The `_skills` snapshot → lazy SkillSource --------------------------------
 
 /** Split a `SKILL.md` into frontmatter fields + body (mirrors the caller-side skill resolver). */
-function parseSkillMd(raw: string): { name?: string; description: string; body: string } {
+function parseSkillMd(raw: string): {
+  name?: string;
+  description: string;
+  body: string;
+  audience: readonly SkillAudience[];
+} {
   const text = lf(raw);
   const m = FRONTMATTER_RE.exec(text);
   const frontmatter = m?.[1] ?? "";
@@ -143,10 +149,18 @@ function parseSkillMd(raw: string): { name?: string; description: string; body: 
       // Unparseable frontmatter → treat as absent; the dir name still names the skill.
     }
   }
+  // `metadata.aep.audience` — which agents may load this skill (ADR-0013).
+  // Unrecognised values are dropped rather than becoming a third audience; a
+  // skill left with nothing declared resolves to EVERY audience, so an unmarked
+  // (or misspelt) skill stays loadable instead of silently disappearing.
+  const aep = (fm.metadata as Record<string, unknown> | undefined)?.aep as Record<string, unknown> | undefined;
+  const declared = Array.isArray(aep?.audience) ? aep.audience : [];
+  const audience = declared.filter((a): a is SkillAudience => a === "design" || a === "coding");
   return {
     ...(typeof fm.name === "string" && fm.name.trim() !== "" ? { name: fm.name } : {}),
     description: typeof fm.description === "string" ? fm.description : "",
     body,
+    audience: audience.length > 0 ? audience : ALL_AUDIENCES,
   };
 }
 
@@ -205,7 +219,12 @@ export class SnapshotSkillSource implements SkillSource {
   }
 
   catalog(): readonly SkillCatalogEntry[] {
-    return this.rows.map(({ name, description, hasReferences }) => ({ name, description, hasReferences }));
+    return this.rows.map(({ name, description, hasReferences, audience }) => ({
+      name,
+      description,
+      hasReferences,
+      audience,
+    }));
   }
 
   load(name: string): LoadedSkillBody | undefined {
@@ -279,6 +298,7 @@ function scanCatalog(snapshotDir: string): CatalogRow[] {
       name,
       description: parsed.description,
       hasReferences: listReferences(dir).length > 0,
+      audience: parsed.audience,
       dir,
     });
   };

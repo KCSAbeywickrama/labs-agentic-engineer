@@ -268,9 +268,11 @@ test("the SnapshotSkillSource catalog + system-prompt rendering match the snapsh
   });
   try {
     const fromDisk = loadSkillsFromSnapshot(root);
+    // These fixtures declare no audience, so each resolves to every audience —
+    // the permissive default that keeps an unmarked skill loadable (ADR-0013).
     assert.deepEqual(fromDisk.catalog(), [
-      { name: "alpha", description: "does A", hasReferences: false },
-      { name: "beta", description: "does B", hasReferences: true },
+      { name: "alpha", description: "does A", hasReferences: false, audience: ["design", "coding"] },
+      { name: "beta", description: "does B", hasReferences: true, audience: ["design", "coding"] },
     ]);
 
     const catalog = buildSkillCatalog(fromDisk);

@@ -27,12 +27,34 @@
  * reads race-free). A skill-free turn uses `EMPTY_SKILL_SOURCE`.
  */
 
+/**
+ * Which agent a skill's guidance is written for (ADR-0013): the DESIGN agent
+ * authors a project's spec, design and Task plan; the CODING agent implements a
+ * component. Ownership (`metadata.aep.kind`) and audience are independent — a
+ * skill can be the org's to edit while being the coding agent's to read.
+ */
+export type SkillAudience = "design" | "coding";
+
+/**
+ * Every audience — what a skill declaring none resolves to. Narrowing is
+ * opt-in, so an unmarked skill (and any an org authors without knowing the
+ * field exists) stays readable by whoever asks.
+ */
+export const ALL_AUDIENCES: readonly SkillAudience[] = ["design", "coding"];
+
 /** One catalog row: what the system prompt shows — never a body. */
 export interface SkillCatalogEntry {
   name: string;
   description: string;
   /** True when the skill carries any aux file (docs, scripts, assets, …) — drives the loadSkillReference tool + catalog note. */
   hasReferences: boolean;
+  /**
+   * Audiences permitted to load this skill. Rows OUTSIDE this service's own
+   * audience still appear in the catalog: the design agent has to name a coding
+   * skill to pin it onto a component, so hiding the row would break that
+   * handoff — only the body is withheld.
+   */
+  audience: readonly SkillAudience[];
 }
 
 /** A loaded skill body plus its addressable reference paths. */
