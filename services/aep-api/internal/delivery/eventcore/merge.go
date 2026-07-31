@@ -25,15 +25,26 @@ import (
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 )
 
-// milestoneWorkFilter reads a milestone's OPEN agent-work issues — the
-// population the merge predicate is decided against. Gates and ledger issues
-// are excluded by the label filter, closed ones by the state filter, and pull
-// requests by the host.
-func milestoneWorkFilter(milestoneNumber int) sourcecontrol.MilestoneIssuesFilter {
+// milestoneOpenIssuesFilter reads a milestone's OPEN issues — the whole
+// population the merge predicate is decided against. Closed issues are excluded
+// by the state filter and pull requests by the host; NO label filter is applied,
+// because which labels count as this run's work is decideAutoMerge's decision
+// alone, made against the labels it can see.
+//
+// Narrowing here by label is what broke validation auto-merge: the fetch asked
+// for `aep` only, so the milestone's validation issue — labelled `aep:validation`
+// and nothing else — was gone before the policy could accept it, and every
+// validation pull request was declined with "no resolved issue is this run's
+// work". Two copies of one predicate, and the hidden copy won.
+//
+// Adding the validation label to this filter would not fix it either: REST
+// `?labels=a,b` is AND (see githubhost.ListMilestoneIssues), so asking for both
+// demands an issue carrying both and matches nothing. The fetch stays wide and
+// the policy stays the only place labels are read.
+func milestoneOpenIssuesFilter(milestoneNumber int) sourcecontrol.MilestoneIssuesFilter {
 	return sourcecontrol.MilestoneIssuesFilter{
 		Number: milestoneNumber,
 		State:  "open",
-		Labels: []string{delivery.LabelAgentWork},
 	}
 }
 
