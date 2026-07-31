@@ -36,17 +36,22 @@ import (
 // title match, because a human may rewrite a title.
 const gateDepLabelPrefix = "aep:dep/"
 
-// aep:wired/<slug> is the same trick applied to the OTHER side of a dependency:
-// stamped on a WORKING-SET issue, it records that the platform has already
-// posted dependency <slug>'s resolved-wiring comment there (wiring.go). It is
-// the comment's idempotency key — GitHub has no dedupe on comments the way
-// CreateIssue has DedupeKey, and the resolve path re-runs (a re-build re-mints
-// and re-settles a gate for a dependency that is already Ready).
+// aep:wired is the same trick applied to the OTHER side of a dependency: stamped
+// on a WORKING-SET issue, it records that the platform has already posted a
+// COMPLETE endpoint-wiring comment there (wiring.go). It is the comment's
+// idempotency key — GitHub has no dedupe on comments the way CreateIssue has
+// DedupeKey, and the poster runs on every cycle dispatch.
 //
-// It is deliberately a DIFFERENT prefix from aep:dep/: on a gate the label means
-// "this issue IS the gate for X", and overloading it on a coding issue would
-// make gateDepFromLabels answer for issues that are not gates.
-const wiredDepLabelPrefix = "aep:wired/"
+// "Complete" is load-bearing: the label is stamped only when nothing was omitted
+// from the block. A comment that had to leave out a sibling endpoint that had not
+// resolved yet goes up UNLABELLED, so the next dispatch posts the fuller version
+// rather than treating a partial answer as final. That is the bug this whole
+// design removes, in miniature.
+//
+// It carries no dependency slug: the block a comment carries is now the
+// component's WHOLE endpoint set, resolved as a unit at dispatch, not one
+// dependency's row posted when its gate happened to close.
+const wiredLabel = "aep:wired"
 
 // labelUnsafeRE collapses every run of characters GitHub label names handle
 // poorly into a single hyphen. Dependency names come from the design and are
@@ -70,15 +75,6 @@ func gateDepLabel(depName string) string {
 	return gateDepLabelPrefix + slug
 }
 
-// wiredDepLabel is the "resolved wiring for this dependency has been posted
-// here" marker for a working-set issue. Empty for an unslugifiable name.
-func wiredDepLabel(depName string) string {
-	slug := depSlug(depName)
-	if slug == "" {
-		return ""
-	}
-	return wiredDepLabelPrefix + slug
-}
 
 // gateLabels is the full label set a gate issue is minted with. A gate
 // deliberately does NOT carry the `aep` working-set label: it is never agent

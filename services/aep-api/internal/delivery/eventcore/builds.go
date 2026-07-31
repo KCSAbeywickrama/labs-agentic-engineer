@@ -93,6 +93,12 @@ func (e *Events) fanOutBuilds(ctx context.Context, orgID, projectID string, run 
 				mu.Unlock()
 				return
 			}
+			// Does what shipped actually consume what the design declares? A
+			// component that quietly substituted its own persistence builds fine,
+			// so nothing downstream would ever notice. Never blocks the build:
+			// the build output is how the agent learns whether its code compiles.
+			e.checkWiringConformance(ctx, run, component)
+
 			attempt, berr := e.ensureBuildRun(ctx, orgID, projectID, component, mergeSHA, mergeBuildLimit)
 			if berr != nil {
 				mu.Lock()

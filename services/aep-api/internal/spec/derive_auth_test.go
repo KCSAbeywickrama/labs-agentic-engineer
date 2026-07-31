@@ -35,22 +35,22 @@ func thunderDep(name string) Dependency {
 
 // authRole returns a marker map flagging resourceType as carrying the
 // end-user-auth role — the labeled sample type the derivation stamps on.
-func authRole(resourceType string) map[string]CRTMarkers {
-	return map[string]CRTMarkers{resourceType: {EndUserAuth: true}}
+func authRole(resourceType string) map[string]CRTType {
+	return map[string]CRTType{resourceType: {EndUserAuth: true}}
 }
 
-// fakeMarkerCatalog is the resourceMarkerCatalog port double for SaveAndProceed
-// integration tests: it records whether it was consulted and serves a canned
-// marker map (or an error to exercise the fail-closed save gate).
-type fakeMarkerCatalog struct {
-	markers map[string]CRTMarkers
-	err     error
-	calls   int
+// fakeTypeCatalog is the resourceTypeCatalog port double: it records whether it
+// was consulted and serves a canned resource-type map (or an error to exercise
+// the fail-closed save gate).
+type fakeTypeCatalog struct {
+	types map[string]CRTType
+	err   error
+	calls int
 }
 
-func (f *fakeMarkerCatalog) MarkersByName(context.Context) (map[string]CRTMarkers, error) {
+func (f *fakeTypeCatalog) ResourceTypesByName(context.Context) (map[string]CRTType, error) {
 	f.calls++
-	return f.markers, f.err
+	return f.types, f.err
 }
 
 // (a) service + thunder-app dep + nil ExposesAPI → ExposesAPI created with
@@ -184,7 +184,7 @@ func TestDeriveEndUserAuth_UnlabeledTypeUntouchedEvenIfNamedThunderApp(t *testin
 	}}
 
 	// Empty marker map: "thunder-app" carries no role — nothing to derive.
-	if err := deriveEndUserAuth(comps, map[string]CRTMarkers{}); err != nil {
+	if err := deriveEndUserAuth(comps, map[string]CRTType{}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if comps[0].ExposesAPI != nil {
@@ -247,7 +247,7 @@ func designFilesWithDepsAndAuth(depsJSON, exposesAPIJSON string) map[string]stri
 	return files
 }
 
-// --- DeriveEndUserAuthAtHead (the thin POST /build pre-tag step, #164) -------
+// --- DerivePlatformResourceFactsAtHead (the thin POST /build pre-tag step, #164) -------
 
 // The build path derives + persists exactly like SaveAndProceed does, but
 // standalone (no tag-cut): a commit lands with the stamped auth.
@@ -258,10 +258,10 @@ func TestDeriveEndUserAuthAtHead_PersistsBeforeReturn(t *testing.T) {
 	svc := newService(fake)
 	fc := &fakeCommitter{}
 	svc.fileCommitter = fc
-	svc.resourceCatalog = &fakeMarkerCatalog{markers: authRole("thunder-app")}
+	svc.resourceCatalog = &fakeTypeCatalog{types: authRole("thunder-app")}
 
-	if err := svc.DeriveEndUserAuthAtHead(context.Background(), "acme", "web"); err != nil {
-		t.Fatalf("DeriveEndUserAuthAtHead: %v", err)
+	if err := svc.DerivePlatformResourceFactsAtHead(context.Background(), "acme", "web"); err != nil {
+		t.Fatalf("DerivePlatformResourceFactsAtHead: %v", err)
 	}
 	if fc.commits != 1 || len(fc.writes) != 1 {
 		t.Fatalf("want one derive-persist commit, got commits=%d writes=%d", fc.commits, len(fc.writes))
@@ -280,9 +280,9 @@ func TestDeriveEndUserAuthAtHead_ConflictReturnsSentinel(t *testing.T) {
 	svc := newService(happySave(files))
 	fc := &fakeCommitter{}
 	svc.fileCommitter = fc
-	svc.resourceCatalog = &fakeMarkerCatalog{markers: authRole("thunder-app")}
+	svc.resourceCatalog = &fakeTypeCatalog{types: authRole("thunder-app")}
 
-	err := svc.DeriveEndUserAuthAtHead(context.Background(), "acme", "web")
+	err := svc.DerivePlatformResourceFactsAtHead(context.Background(), "acme", "web")
 	if !errors.Is(err, ErrEndUserAuthConflict) {
 		t.Fatalf("want ErrEndUserAuthConflict, got %v", err)
 	}
@@ -298,9 +298,9 @@ func TestDeriveEndUserAuthAtHead_CatalogDownFailsClosed(t *testing.T) {
 	deps := `[{"kind":"platform-resource","name":"user-auth","resourceType":"thunder-app"}]`
 	svc := newService(happySave(designFilesWithDeps(deps)))
 	svc.fileCommitter = &fakeCommitter{}
-	svc.resourceCatalog = &fakeMarkerCatalog{err: errors.New("OC unreachable")}
+	svc.resourceCatalog = &fakeTypeCatalog{err: errors.New("OC unreachable")}
 
-	if err := svc.DeriveEndUserAuthAtHead(context.Background(), "acme", "web"); !errors.Is(err, ErrResourceCatalogUnavailable) {
+	if err := svc.DerivePlatformResourceFactsAtHead(context.Background(), "acme", "web"); !errors.Is(err, ErrResourceCatalogUnavailable) {
 		t.Fatalf("want ErrResourceCatalogUnavailable, got %v", err)
 	}
 }
@@ -312,10 +312,10 @@ func TestDeriveEndUserAuthAtHead_NoPlatformResourceDepNoOp(t *testing.T) {
 	svc := newService(happySave(validDesignFiles()))
 	fc := &fakeCommitter{}
 	svc.fileCommitter = fc
-	cat := &fakeMarkerCatalog{err: errors.New("must not be called")}
+	cat := &fakeTypeCatalog{err: errors.New("must not be called")}
 	svc.resourceCatalog = cat
 
-	if err := svc.DeriveEndUserAuthAtHead(context.Background(), "acme", "web"); err != nil {
+	if err := svc.DerivePlatformResourceFactsAtHead(context.Background(), "acme", "web"); err != nil {
 		t.Fatalf("auth-free derive: unexpected error: %v", err)
 	}
 	if cat.calls != 0 || fc.commits != 0 {

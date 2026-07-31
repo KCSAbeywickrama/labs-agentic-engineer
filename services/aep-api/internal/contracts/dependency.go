@@ -87,6 +87,24 @@ type Dependency struct {
 	// spec.parameters (numbers must stay JSON numbers for CRD validation).
 	ResourceType string         `json:"resourceType,omitempty"`
 	Parameters   map[string]any `json:"parameters,omitempty"`
+	// platform-resource / external: the platform-stamped consumer-side wiring.
+	// See DependencyWiring — derived at design save, overwritten on every save,
+	// never authored by an agent.
+	Wiring *DependencyWiring `json:"wiring,omitempty"`
+}
+
+// DependencyWiring is the resolved consumer-side wiring for a platform-resource
+// or external dependency: the OC Resource name plus the output→env-var mapping
+// the coding agent copies into its component's workload.yaml. Its shape mirrors
+// ONE `dependencies.resources[]` entry exactly (provisioning's
+// workloadResourceDepYAML), so the agent copies rather than transforms.
+//
+// It is knowable at design save because both halves are pure functions of the
+// design plus the resource type's DECLARED outputs — no binding, no gate, no
+// cluster state. Mirrors the agent-stream TS `DependencyWiring`.
+type DependencyWiring struct {
+	Ref         string            `json:"ref"`
+	EnvBindings map[string]string `json:"envBindings"`
 }
 
 // DependencyCandidate is one option in an ambiguous external dependency's

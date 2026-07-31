@@ -641,16 +641,19 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// resolves a milestone RUN ROW first and returns without a write when there
 	// is none, so a project with no live run costs nothing.
 	eventPlane := eventcore.New(eventcore.Ports{
-		Runs:     eventcoreRuns{runs: milestoneRunRepo},
-		Cycles:   eventcoreCycles{cycles: runCycleRepo},
-		Issues:   issueService,
-		PRs:      issueService,
-		Merger:   issueService,
-		Repos:    repoLocator{db: db},
-		Design:   designComponents{store: artifactStore},
-		Builds:   eventcoreBuilds{oc: componentClient, repos: repoRepo, stager: buildStager},
-		Signaler: runSupervisor,
-		Starter:  runSupervisor,
+		Runs:   eventcoreRuns{runs: milestoneRunRepo},
+		Cycles: eventcoreCycles{cycles: runCycleRepo},
+		Issues: issueService,
+		PRs:    issueService,
+		Merger: issueService,
+		Repos:  repoLocator{db: db},
+		Design: designComponents{store: artifactStore},
+		Builds: eventcoreBuilds{oc: componentClient, repos: repoRepo, stager: buildStager},
+		// The wiring-conformance check on the merged-PR fan-out: does what shipped
+		// consume the resources the design declares?
+		Workloads: workloadReader{files: filesSvc},
+		Signaler:  runSupervisor,
+		Starter:   runSupervisor,
 		// A first-ever component has no OpenChoreo Component CR, and a merged
 		// PR's build would fail "Component not found" — so the fan-out ensures
 		// the CR from the design facts immediately before it triggers.
@@ -940,12 +943,13 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	params.MCPSpecValidator = spec.ValidateOpenAPI
 	params.MCPSpecNormalizer = spec.NormalizeOpenAPIYAML
 	params.MCPSpecFetcher = spec.FetchSpecFromURL
-	// design-save keys end-user-auth derivation on the CRT role marker read from
-	// this catalog (thunder-app generalization); wired consumer-side so design
-	// holds only a narrow MarkersByName port. When the design declares a
-	// platform-resource dependency and this catalog is unreachable, the save
-	// fails closed (ErrResourceCatalogUnavailable → 503).
-	designService.SetResourceCatalog(crtMarkerCatalog{resourceTypeCatalog})
+	// design-save keys BOTH platform-resource derivations on this catalog: the CRT
+	// role marker for end-user auth (thunder-app generalization), and the type's
+	// declared outputs for the dependency wiring it stamps into design.json. Wired
+	// consumer-side so design holds only a narrow ResourceTypesByName port. When
+	// the design declares a platform-resource dependency and this catalog is
+	// unreachable, the save fails closed (ErrResourceCatalogUnavailable → 503).
+	designService.SetResourceCatalog(crtTypeCatalog{resourceTypeCatalog})
 
 	// Read-time org-service dependency resolution (dependency-management Phase 5):
 	// the same endpoint catalog that backs the MCP list_org_endpoints tool marks
@@ -974,8 +978,8 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		Repos:  repoFullNameLookup{repos: repoRepo},
 		Tagger: buildSpecTagger{art: artifactSvcGit},
 		Coord: build.NewInputsCoordinator(
-			designService,                        // SpecCollector (CollectSpec)
-			buildAuthDeriver{svc: designService}, // AuthDeriver (sentinel translation)
+			designService,                          // SpecCollector (CollectSpec)
+			buildDesignDeriver{svc: designService}, // DesignFactDeriver (sentinel translation)
 			buildSecretStager{prov: externalProvisioner},
 			designComponents{store: artifactStore},
 		),
@@ -1109,6 +1113,12 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// Mount the component's external-resource secrets into the coding runner so
 	// the agent can integration-test against the live service.
 	codingExecutor.WithRunnerSecrets(runnerSecretResolver{svc: provisioningSvc})
+
+	// Publish the platform-resolved `endpoints:` wiring onto the working set at
+	// every cycle dispatch. Wired consumer-side so delivery holds only the narrow
+	// WiringPublisher port (delivery cannot import dependencies — dependencies
+	// already imports delivery).
+	codingExecutor.WithWiringPublisher(provisioningSvc)
 
 	// Runtime-config (env-config.js) emission — the SPA's `window._env_` (API URLs
 	// + generic <DEP>_<OUTPUT> keys for its platform-resource deps) is materialised

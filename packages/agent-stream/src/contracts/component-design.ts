@@ -163,6 +163,42 @@ export interface Dependency {
    * the OpenChoreo Resource spec.parameters.
    */
   parameters?: Record<string, string | number | boolean>;
+  /**
+   * platform-resource / external: the consumer-side wiring, PLATFORM-STAMPED at
+   * design save and re-derived on every save — never authored. See `DependencyWiring`.
+   */
+  wiring?: DependencyWiring;
+}
+
+/**
+ * The resolved consumer-side wiring for a `platform-resource` or `external`
+ * dependency — everything the coding agent needs to reach it, and the only part
+ * of the `workload.yaml` `dependencies:` block that is knowable without asking
+ * the cluster. Its shape is byte-identical to one `dependencies.resources[]`
+ * entry so the agent copies the object rather than transforming it.
+ *
+ * PLATFORM-STAMPED, never authored: the platform derives it at design save from
+ * the dependency name plus the resource type's declared outputs, and OVERWRITES
+ * it on every save. An agent-authored value is therefore corrected rather than
+ * rejected — the design agent reads the design, edits and writes it back, so a
+ * rejection rule would reject its own echo.
+ *
+ * Absent means "not derivable yet" — the resource type is unknown to the
+ * cluster, or (for an external dep) no config keys are declared. It never means
+ * "this dependency needs no wiring": a declared dependency with no `wiring` is a
+ * platform fault the coding agent reports rather than works around.
+ */
+export interface DependencyWiring {
+  /** The OpenChoreo Resource name — the `dependencies.resources[].ref` value. */
+  ref: string;
+  /**
+   * Resource output name → the env var OpenChoreo injects it as. A
+   * platform-resource's outputs are generic (host, port, …) so the keys are
+   * prefixed with the dependency name (`orders-db` + `host` → `ORDERS_DB_HOST`);
+   * an external resource's are already namespaced by its own config schema, so
+   * the env var IS the key.
+   */
+  envBindings: Record<string, string>;
 }
 
 /**

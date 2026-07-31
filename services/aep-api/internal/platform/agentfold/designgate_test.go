@@ -169,6 +169,80 @@ func TestValidateComponentDesign_Parameters(t *testing.T) {
 	}
 }
 
+// designWithWiring renders a schema-valid component design.json whose single
+// platform-resource dependency carries the given raw `wiring` JSON literal.
+func designWithWiring(wiringJSON string) string {
+	return fmt.Sprintf(`{
+  "name": "orders-db-owner",
+  "type": "service",
+  "version": "0.1.0",
+  "language": "Go",
+  "buildpack": "docker",
+  "appPath": "svc",
+  "entrypoint": "cmd/main",
+  "exposure": "internet",
+  "description": "owns orders data",
+  "dependencies": [
+    {
+      "kind": "platform-resource",
+      "name": "orders-db",
+      "resourceType": "postgres-cnpg",
+      "wiring": %s
+    }
+  ]
+}`, wiringJSON)
+}
+
+// TestValidateComponentDesign_Wiring locks the `wiring` rule in parity with the
+// zod gate (component-design-schema.ts dependencyWiringSchema): the object FOLDS
+// — unlike status/reason it is persisted in design.json, and the design agent
+// reads-edits-writes the file, so a rejection rule would reject its own echo of
+// a platform-stamped value. What still rejects is a MALFORMED one: half-stamped
+// or wrongly-typed wiring renders an unusable workload.yaml resource entry, which
+// is worse than an absent wiring the coding agent reports as a platform fault.
+func TestValidateComponentDesign_Wiring(t *testing.T) {
+	const dir = "orders-db-owner"
+
+	accept := []struct {
+		name   string
+		wiring string
+	}{
+		{"platform-stamped shape", `{ "ref": "shop-orders-db", "envBindings": { "host": "ORDERS_DB_HOST", "port": "ORDERS_DB_PORT" } }`},
+		{"no outputs bound yet", `{ "ref": "shop-orders-db", "envBindings": {} }`},
+	}
+	for _, tc := range accept {
+		t.Run("accept/"+tc.name, func(t *testing.T) {
+			if p := validateComponentDesign(designWithWiring(tc.wiring), dir); p != nil {
+				t.Fatalf("expected accept, got reject: %s", p.message)
+			}
+		})
+	}
+
+	reject := []struct {
+		name   string
+		wiring string
+	}{
+		{"not an object", `"shop-orders-db"`},
+		{"ref missing", `{ "envBindings": { "host": "ORDERS_DB_HOST" } }`},
+		{"ref empty", `{ "ref": "", "envBindings": {} }`},
+		{"envBindings missing", `{ "ref": "shop-orders-db" }`},
+		{"envBindings not an object", `{ "ref": "shop-orders-db", "envBindings": "ORDERS_DB_HOST" }`},
+		{"env var not a string", `{ "ref": "shop-orders-db", "envBindings": { "port": 5432 } }`},
+		{"unknown property", `{ "ref": "shop-orders-db", "envBindings": {}, "values": { "host": "db" } }`},
+	}
+	for _, tc := range reject {
+		t.Run("reject/"+tc.name, func(t *testing.T) {
+			p := validateComponentDesign(designWithWiring(tc.wiring), dir)
+			if p == nil {
+				t.Fatalf("expected reject for wiring %s, got accept", tc.wiring)
+			}
+			if p.code != ErrSchemaViolation {
+				t.Fatalf("code = %q, want %q", p.code, ErrSchemaViolation)
+			}
+		})
+	}
+}
+
 // designWithSkills builds a minimal valid component design.json for dir "svc",
 // optionally injecting a `skillsApplied` value verbatim from fragment.
 func designWithSkills(fragment string) string {

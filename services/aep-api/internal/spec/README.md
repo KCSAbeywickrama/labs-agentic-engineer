@@ -18,7 +18,7 @@ flowchart LR
     CORE --> TURNS[("agent_turns")]
   end
   CORE -->|Workspace · GitOps engine| SC[[sourcecontrol]]
-  CORE -->|CRTMarkers port| DEP[[dependencies]]
+  CORE -->|CRTType port| DEP[[dependencies]]
   CORE -->|anthropic key · git tokens| SEC[[platform/secrets]]
   CORE -->|the genai fold| FOLD[["platform/agentfold"]]
 ```
@@ -39,7 +39,7 @@ the genai turn engine (runner/broker/sweeper), and the files / design / skills s
 | Port | Dir | Peer · contract |
 |---|---|---|
 | `Workspace` · `GitOpsService` · `RepoService` | needs | `sourcecontrol` — the gitfs engine hosting all spec + skills git content |
-| `resourceMarkerCatalog` (returns `CRTMarkers`) | needs | `dependencies` — the PE-authored CRT marker vocabulary, projected at the root |
+| `resourceTypeCatalog` (returns `CRTType`) | needs | `dependencies` — the PE-authored CRT markers + declared outputs, projected at the root |
 | `AnthropicKeyResolver` · git-token `Resolver` | needs | `platform/secrets` — per-org keys + sealed git tokens |
 | `ArtifactService` · `ArtifactStore` · `SplitFrontmatter` | offers | `delivery` / `projects` / `dependencies` — design reads, spec-save, status snapshots |
 | `DescriptorWriter` | offers | `projects` — stamps `specs/.agentic-engineer.toml` into a repo at project create |
@@ -97,9 +97,22 @@ the genai turn engine (runner/broker/sweeper), and the files / design / skills s
 ## Invariants — don't break
 - **Single write-authority** over the git spec-content store and its `v<N>` tags — every save/tag/discard
   runs through this domain's gitfs Workspace engine; no other domain writes spec content.
-- **`CRTMarkers` is a projection, not a re-export.** design-save reads the dependencies marker catalog
-  through the `resourceMarkerCatalog` port in spec's OWN vocabulary (`CRTMarkers`), mapped by a root
+- **`CRTType` is a projection, not a re-export.** design-save reads the dependencies resource-type catalog
+  through the `resourceTypeCatalog` port in spec's OWN vocabulary (`CRTType`), mapped by a root
   adapter — the spec domain names the dependencies domain nowhere.
+- **Design save DERIVES two platform facts, in one pass over one catalog call** (`derive.go`, ADR-0013):
+  `exposesAPI.auth` off a resource type's role marker (`derive_auth.go`), and each `platform-resource` /
+  `external` dependency's `wiring` — the OC ref plus output→env-var mapping the coding agent copies into
+  `workload.yaml` (`derive_wiring.go`). Both mutate the design in place and commit only the components whose
+  derived state actually changed, so an unchanged design commits nothing.
+  - Derived, therefore **re-derived and overwritten every pass** — which is exactly what lets the write
+    gates ACCEPT `wiring` instead of rejecting it as agent-authored: the design agent reads-edits-writes
+    `design.json`, so a rejection rule would reject its own echo.
+  - Both env-var and ref naming route through `platform/ocname`, the SAME helper the dependencies domain
+    injects pod env vars with. The two must agree byte-for-byte or the agent's `workload.yaml` references a
+    resource that does not exist; a bounded-name test pins it.
+  - Fail-closed: a design declaring a platform-resource whose catalog is unreachable returns
+    `ErrResourceCatalogUnavailable` (503) rather than silently skipping either derivation.
 - The `/collab/validate` oracle recovers the acting org from VERIFIED claims and refuses any room whose
   `spec-<org>-` prefix mismatches — never a hint of whether the room exists. Platform-wide rules (tenant
   gate, secrets fence) → [../../README.md](../../README.md).

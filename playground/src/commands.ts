@@ -181,6 +181,8 @@ export interface CodeOptions extends PhaseOptions {
   /** Override the skills library / plugin (tests). */
   codingSkillsDir?: string;
   pluginDir?: string;
+  /** `--host`: bare `npx tsx` on the host instead of the default Docker-image run. */
+  host?: boolean;
 }
 
 /**
@@ -226,6 +228,7 @@ export async function codeCommand(
     skillsDir: opts.codingSkillsDir ?? SKILLS_DIR,
     ...(opts.pluginDir ? { pluginDir: opts.pluginDir } : {}),
     ...(opts.silent ? { silent: true } : {}),
+    mode: opts.host ? "host" : "docker",
   });
   if (!opts.silent) {
     output.write(`\n  session ${result.exitCode === 0 ? "done" : `gave up (exit ${result.exitCode})`}\n`);

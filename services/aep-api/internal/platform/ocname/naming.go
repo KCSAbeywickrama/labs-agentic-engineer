@@ -14,7 +14,19 @@
 // specific language governing permissions and limitations
 // under the License.
 
-package dependencies
+// Package ocname is the OpenChoreo resource-naming vocabulary: the Resource and
+// binding names AEP derives for a project's external and platform resources, and
+// the env-var names a consumer reads their outputs from.
+//
+// It lives in the kernel rather than in the dependencies domain because TWO
+// domains derive the same names and must agree byte-for-byte: dependencies
+// authors the resources and injects their outputs as pod env vars, and spec
+// stamps the very same ref + env-var names into design.json at design save so the
+// coding agent can author its workload.yaml (see spec/derive_wiring.go). spec
+// cannot import dependencies — dependencies already imports spec — so a shared
+// home is the only way to keep one source of truth instead of two conventions
+// that drift.
+package ocname
 
 import (
 	"fmt"

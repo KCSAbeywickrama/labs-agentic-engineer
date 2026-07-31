@@ -65,7 +65,14 @@ const fullComponentDesignJSON = `{
           "key": "OPENWEATHER_REGION",
           "defaultValue": "us-east-1"
         }
-      ]
+      ],
+      "wiring": {
+        "ref": "shop-openweather",
+        "envBindings": {
+          "OPENWEATHER_API_KEY": "OPENWEATHER_API_KEY",
+          "OPENWEATHER_REGION": "OPENWEATHER_REGION"
+        }
+      }
     },
     {
       "kind": "platform-resource",
@@ -73,6 +80,13 @@ const fullComponentDesignJSON = `{
       "resourceType": "postgres",
       "parameters": {
         "size": "small"
+      },
+      "wiring": {
+        "ref": "shop-orders-db",
+        "envBindings": {
+          "host": "ORDERS_DB_HOST",
+          "port": "ORDERS_DB_PORT"
+        }
       }
     }
   ],
@@ -630,4 +644,48 @@ func keysOf(m map[string]string) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+// The codec must carry the platform-stamped `wiring` in BOTH directions, and the
+// byte-identical round-trip above only proves it because the fixture contains one.
+// This test names the failure mode directly, because it shipped once: `wiring` was
+// added to the model and to both write-gates but NOT to this codec, so every
+// derivation was silently discarded on write — design.json came back from a build
+// with `exposesAPI.auth` stamped and no wiring at all, and the coding agent was
+// left with nothing to copy into workload.yaml.
+func TestComponentDesignJSON_CarriesPlatformStampedWiring(t *testing.T) {
+	comp, err := parseComponentDesignJSON("checkout", fullComponentDesignJSON)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	byName := map[string]Dependency{}
+	for _, d := range comp.Dependencies {
+		byName[d.Name] = d
+	}
+
+	// READ: a platform-resource's prefixed bindings reach the model.
+	db := byName["orders-db"]
+	if db.Wiring == nil {
+		t.Fatal("read dropped wiring on the platform-resource dependency")
+	}
+	if db.Wiring.Ref != "shop-orders-db" || db.Wiring.EnvBindings["host"] != "ORDERS_DB_HOST" {
+		t.Errorf("platform-resource wiring = %+v", db.Wiring)
+	}
+	// READ: an external's verbatim config-key bindings reach the model.
+	ow := byName["openweather"]
+	if ow.Wiring == nil || ow.Wiring.EnvBindings["OPENWEATHER_API_KEY"] != "OPENWEATHER_API_KEY" {
+		t.Errorf("external wiring = %+v", ow.Wiring)
+	}
+
+	// WRITE: a wiring set on the model reaches the file.
+	out, err := marshalComponentDesignJSON("checkout", comp)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, want := range []string{`"wiring"`, `"ref": "shop-orders-db"`, `"host": "ORDERS_DB_HOST"`} {
+		if !strings.Contains(string(out), want) {
+			t.Errorf("write dropped %s:\n%s", want, out)
+		}
+	}
 }
