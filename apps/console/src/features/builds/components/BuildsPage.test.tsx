@@ -28,8 +28,11 @@ type TaskView = components["schemas"]["TaskView"];
 
 // Router stubbed to plain anchors — no RouterProvider needed. createLink is
 // what the gate hold's deep link uses, so it has to survive the stub.
+const navigate = vi.fn();
 vi.mock("@tanstack/react-router", () => ({
   Link: ({ children }: { children?: React.ReactNode }) => <a>{children}</a>,
+  // The delivered result routes on to the deployments and validation boards.
+  useNavigate: () => navigate,
   createLink: (Component: React.ElementType) =>
     ({
       to,
@@ -101,8 +104,22 @@ vi.mock("../../tasks/api/queries", () => ({
   useAllTasks: () => ({ data: mockIssues }),
 }));
 
+// The repo URL behind the milestone panel's "view all issues" link. Same query
+// key the project layout already reads, so react-query serves it from cache
+// rather than issuing a second request.
+vi.mock("../../projects/api/queries", () => ({
+  useProjectStatus: () => ({ data: { repoUrl: "https://github.com/acme/demo" } }),
+}));
+
 let mockBuilds: BuildSummary[] = [];
 let mockRuns: MilestoneRunView[] = [];
+// This merge's builds, as the cluster read answers them. `[]` is "the merge
+// landed but no build has appeared yet", which leaves the Builds stage active.
+let mockCycleBuilds: {
+  component: string;
+  status: string;
+  completed: boolean;
+}[] = [];
 const cancelMutate = vi.fn();
 const cancelState = { isPending: false, isError: false, error: null as unknown };
 
@@ -122,7 +139,7 @@ vi.mock("../api/queries", () => ({
     refetch: vi.fn(),
   }),
   useCancelRun: () => ({ mutate: cancelMutate, ...cancelState }),
-  useCycleBuilds: () => ({ data: [], isPending: false }),
+  useCycleBuilds: () => ({ data: mockCycleBuilds, isPending: false }),
 }));
 
 import { BuildsPage } from "./BuildsPage";
@@ -228,14 +245,17 @@ describe("BuildsPage — one version's story", () => {
     // The tag now appears twice by design: the run card's milestone title, and
     // the milestone panel beside it.
     expect(screen.getAllByText("v2").length).toBeGreaterThan(0);
-    expect(screen.getByTestId("issues")).toHaveTextContent("v2:true");
+    expect(screen.getByRole("combobox", { name: "Version" })).toHaveValue("v2");
   });
 
   it("falls back to newest for an unknown ?tag rather than erroring", () => {
     mockBuilds = [build("v2", "completed"), build("v1", "completed")];
     mockRuns = [run({ state: "succeeded" })];
     renderPage("v99");
-    expect(screen.getByTestId("issues")).toHaveTextContent("v2:false");
+    // The version picker and the milestone both land on the newest tag rather
+    // than erroring on one nobody built.
+    expect(screen.getByRole("combobox", { name: "Version" })).toHaveValue("v2");
+    expect(screen.getAllByText("v2").length).toBeGreaterThan(0);
   });
 
   it("lands on the run's build sessions, handed the facts webhooks taught it", () => {
@@ -404,6 +424,57 @@ describe("BuildsPage — one version's story", () => {
     renderPage();
     expect(screen.getByText("Incident")).toBeInTheDocument();
     expect(screen.getByText("Spec build")).toBeInTheDocument();
+  });
+
+  it("declares a run delivered only once its flow actually finished", () => {
+    // A run can be marked succeeded while a stage is still unreadable — here
+    // the merge landed but no build has appeared in the cluster yet, so the
+    // strip says "Builds · now". Claiming "all agent work is done" over that
+    // would be the page contradicting itself in two places at once.
+    mockBuilds = [build("v2", "completed")];
+    mockRuns = [run({ state: "succeeded" })];
+    mockIssues = withOpenWork();
+    mockCycleBuilds = [];
+    renderPage();
+
+    expect(screen.queryByText(/All agent work for .* is done/)).not.toBeInTheDocument();
+    expect(screen.getByText("NOW")).toBeInTheDocument();
+  });
+
+  it("shows the delivered result once every stage is done", () => {
+    mockBuilds = [build("v2", "completed")];
+    mockRuns = [
+      run({
+        state: "succeeded",
+        endedAt: "2026-07-10T10:03:00Z",
+        cycles: [
+          {
+            id: "cycle-1",
+            kind: "coding",
+            attempts: 1,
+            branch: "aep/m2-c1",
+            prNumber: 3,
+            mergeSha: "dcb1edc5fe04",
+            createdAt: "2026-07-10T09:05:00Z",
+            endedAt: "2026-07-10T09:40:00Z",
+          },
+        ],
+      }),
+    ];
+    mockIssues = withOpenWork();
+    // `completed` is what makes an outcome readable at all — a green status on
+    // an unfinished build is not a success yet.
+    mockCycleBuilds = [
+      { component: "storefront", status: "Succeeded", completed: true },
+    ];
+    renderPage();
+
+    expect(screen.getByText("All agent work for v2 is done")).toBeInTheDocument();
+    // The way out: the board that actually knows what is running.
+    expect(screen.getByText("View deployment status")).toBeInTheDocument();
+    // Nothing is happening, so there is no "now" to narrate.
+    expect(screen.queryByText("NOW")).not.toBeInTheDocument();
+    mockCycleBuilds = [];
   });
 
   it("explains a version tagged before the platform kept run rows", () => {

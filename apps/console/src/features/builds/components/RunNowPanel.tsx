@@ -22,7 +22,7 @@ import { ChevronRight } from "@wso2/oxygen-ui-icons-react";
 import type { components } from "../../../generated/aep-api";
 import type { RunProgressCycle, RunProgressPhase } from "../hooks/useRunProgress";
 import { formatLine } from "../../tasks/lib/timeline";
-import { glanceHeadline, type RunGlance } from "../lib/runGlance";
+import { aheadSentence, glanceHeadline, type RunGlance } from "../lib/runGlance";
 import { AgentLogLines, LogSurface } from "./AgentLogLines";
 import { IssueChips } from "./IssueChips";
 
@@ -116,7 +116,7 @@ export function RunNowPanel({
 
       {glance.ahead.length > 0 && (
         <Typography variant="caption" color="text.disabled">
-          Then: {glance.ahead.map((e) => e.stage.name.toLowerCase()).join(" → ")}.
+          Then: {aheadSentence(glance.ahead)}.
         </Typography>
       )}
     </Stack>

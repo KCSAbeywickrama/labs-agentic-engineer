@@ -79,6 +79,23 @@ export function buildGlance(stages: SpineStage[], stepFrom = 1): RunGlance {
 }
 
 /**
+ * What a stage is doing while it RUNS, said as the platform would say it.
+ *
+ * A generic "Coding agent — running" makes the reader carry the meaning; the
+ * whole point of a now-first surface is that the headline already is the
+ * meaning. Keyed by stage id, and every id falls back to the generic form, so
+ * a stage this map has not learned yet still reads correctly.
+ */
+const ACTIVE_HEADLINE: Record<string, string> = {
+  provisioning: "Standing up this version's connections",
+  agent: "Coding agent is writing code",
+  pr: "Waiting on the agent's pull request",
+  merge: "Merging the agent's work",
+  builds: "Building the components the merge touched",
+  deploy: "Rolling out to the cluster",
+};
+
+/**
  * The NOW headline — what is happening, as a sentence.
  *
  * The stage's own `note` says what the stage DOES; this says what its current
@@ -88,7 +105,7 @@ export function buildGlance(stages: SpineStage[], stepFrom = 1): RunGlance {
 export function glanceHeadline(stage: SpineStage): string {
   switch (stage.state) {
     case "active":
-      return `${stage.name} — running`;
+      return ACTIVE_HEADLINE[stage.id] ?? `${stage.name} — running`;
     case "waiting":
       return `${stage.name} — waiting`;
     case "attention":
@@ -98,4 +115,27 @@ export function glanceHeadline(stage: SpineStage): string {
     default:
       return stage.name;
   }
+}
+
+/**
+ * How a stage still ahead is named in the one-line tail.
+ *
+ * Bare stage names ("pull request → merge → builds") read as a list of nouns;
+ * naming the ACTOR turns the tail into the sentence it is meant to be — who
+ * does what next, and why the run ends where it does.
+ */
+const AHEAD_PHRASE: Record<string, string> = {
+  agent: "the agent writes the code",
+  pr: "the agent opens a pull request",
+  merge: "the platform merges it",
+  builds: "one build per component the diff touches",
+  deploy: "a green build deploys itself",
+};
+
+/** The quiet "then …" tail: everything still ahead, in one sentence. */
+export function aheadSentence(ahead: GlanceStage[]): string {
+  if (ahead.length === 0) return "";
+  return ahead
+    .map((entry) => AHEAD_PHRASE[entry.stage.id] ?? entry.stage.name.toLowerCase())
+    .join(" → ");
 }

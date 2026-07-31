@@ -48,7 +48,13 @@ function when(value: string | null | undefined): string {
  * needs: how it ended, what kind it was, when it ran, and what it left behind.
  * The run that is still moving is the page's lead and is not in here.
  */
-export function RunHistoryList({ runs }: { runs: MilestoneRunView[] }) {
+export function RunHistoryList({
+  runs,
+  tag,
+}: {
+  runs: MilestoneRunView[];
+  tag: string;
+}) {
   if (runs.length === 0) return null;
 
   return (
@@ -63,7 +69,7 @@ export function RunHistoryList({ runs }: { runs: MilestoneRunView[] }) {
           color: "text.secondary",
         }}
       >
-        EARLIER RUNS OF THIS MILESTONE
+        EARLIER RUNS OF {tag.toUpperCase()}
       </Typography>
       <Stack spacing={1}>
         {runs.map((run) => {

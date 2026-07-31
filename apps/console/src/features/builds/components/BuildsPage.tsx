@@ -31,12 +31,12 @@ import {
 import { Link } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { PageHeader } from "../../../components/PageHeader";
-import { IssueSections } from "../../tasks/components/IssueSections";
 import { useAllTasks } from "../../tasks/api/queries";
 import { taskKeys } from "../../tasks/api/keys";
 import { partitionIssues } from "../../tasks/lib/issueRows";
+import { useProjectStatus } from "../../projects/api/queries";
 import { useBuildRuns, useBuilds } from "../api/queries";
-import { versionIsLive } from "../lib/runView";
+import { buildSessionLabel, versionIsLive } from "../lib/runView";
 import { MilestonePanel } from "./MilestonePanel";
 import { RunHistoryList } from "./RunHistoryList";
 import { RunStory } from "./RunStory";
@@ -77,6 +77,19 @@ export function BuildsPage({
   // page leads with and the tail is history.
   const current = runList[0];
   const earlier = runList.slice(1);
+
+  const status = useProjectStatus(projectName);
+  const repoUrl = status.data?.repoUrl?.replace(/\/+$/, "");
+  const issuesUrl = repoUrl ? `${repoUrl}/issues` : undefined;
+
+  // Which build session claimed an in-flight issue. `resolves` is the merge
+  // policy's recorded matched set, so this is a fact rather than a guess — an
+  // issue no session has claimed yet simply gets no note.
+  const claimedBy = (issue: { issueNumber: number }): string | undefined => {
+    const cycles = current?.cycles ?? [];
+    const index = cycles.findIndex((c) => (c.resolves ?? []).includes(issue.issueNumber));
+    return index === -1 ? undefined : `Claimed by ${buildSessionLabel(cycles[index]!, index)}`;
+  };
 
   // The same query IssueSections reads, on the same key — react-query serves
   // both from one request. The run card needs it because only the issue plane
@@ -181,7 +194,18 @@ export function BuildsPage({
 
   return (
     <>
-      <PageHeader title="Builds" backTo={backTo} actions={versionSelector} />
+      <PageHeader
+        title="Builds"
+        // The version being read, and the milestone it is building — the two
+        // facts that say WHICH builds these are.
+        subtitle={
+          current?.milestoneTitle && current.milestoneTitle !== selected.tag
+            ? `${selected.tag} · ${current.milestoneTitle}`
+            : selected.tag
+        }
+        backTo={backTo}
+        actions={versionSelector}
+      />
 
       {runs.isError ? (
         <Alert
@@ -229,21 +253,22 @@ export function BuildsPage({
                 {...(milestone ? { milestone } : {})}
               />
             )}
-            <RunHistoryList runs={earlier} />
+            <RunHistoryList runs={earlier} tag={selected.tag} />
           </Stack>
 
           {milestone && (
             <MilestonePanel
               projectName={projectName}
               tag={selected.tag}
+              {...(current?.milestoneTitle ? { title: current.milestoneTitle } : {})}
               work={milestone.work}
               gates={milestone.gates}
+              claimedBy={claimedBy}
+              {...(issuesUrl ? { issuesUrl } : {})}
             />
           )}
         </Box>
       )}
-
-      <IssueSections projectName={projectName} tag={selected.tag} live={live} />
     </>
   );
 }

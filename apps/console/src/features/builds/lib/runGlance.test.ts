@@ -17,11 +17,16 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { buildGlance, glanceHeadline } from "./runGlance";
+import { aheadSentence, buildGlance, glanceHeadline } from "./runGlance";
 import type { SpineStage, StageState } from "./stage";
 
 function stage(name: string, state: StageState): SpineStage {
   return { id: name.toLowerCase(), name, actor: "platform", state, note: "" };
+}
+
+/** The real shape: sessionSpine keys stages by id, not by display name. */
+function withId(id: string, name: string, state: StageState): SpineStage {
+  return { id, name, actor: "platform", state, note: "" };
 }
 
 const names = (entries: { stage: SpineStage }[]) =>
@@ -91,13 +96,56 @@ describe("buildGlance", () => {
 });
 
 describe("glanceHeadline", () => {
-  it("leads with what the state MEANS, per state", () => {
-    expect(glanceHeadline(stage("Merge", "active"))).toBe("Merge — running");
+  it("says what a known stage is DOING while it runs", () => {
+    // The headline is the meaning, not a state suffix the reader must decode.
+    // Keyed by stage id, which is what sessionSpine actually emits.
+    expect(glanceHeadline(withId("agent", "Coding agent", "active"))).toBe(
+      "Coding agent is writing code",
+    );
+    expect(glanceHeadline(withId("merge", "Merge", "active"))).toBe(
+      "Merging the agent's work",
+    );
+    expect(glanceHeadline(withId("deploy", "Deployment", "active"))).toBe(
+      "Rolling out to the cluster",
+    );
+  });
+
+  it("falls back to the generic form for a stage id it has not learned", () => {
+    const unknown: SpineStage = {
+      id: "something-new",
+      name: "Something new",
+      actor: "platform",
+      state: "active",
+      note: "",
+    };
+    expect(glanceHeadline(unknown)).toBe("Something new — running");
+  });
+
+  it("leads with what the state MEANS for every non-running state", () => {
     expect(glanceHeadline(stage("Merge", "waiting"))).toBe("Merge — waiting");
     expect(glanceHeadline(stage("Merge", "attention"))).toBe(
       "Merge — needs a human",
     );
     expect(glanceHeadline(stage("Merge", "failed"))).toBe("Merge — stopped");
     expect(glanceHeadline(stage("Merge", "done"))).toBe("Merge");
+  });
+});
+
+describe("aheadSentence", () => {
+  it("names the ACTOR of each stage still ahead, not just the stage", () => {
+    const glance = buildGlance([
+      withId("agent", "Coding agent", "active"),
+      withId("pr", "Pull request", "waiting"),
+      withId("merge", "Merge", "waiting"),
+      withId("deploy", "Deployment", "waiting"),
+    ]);
+
+    expect(aheadSentence(glance.ahead)).toBe(
+      "the agent opens a pull request → the platform merges it → a green build deploys itself",
+    );
+  });
+
+  it("says nothing when nothing is ahead", () => {
+    expect(aheadSentence([])).toBe("");
   });
 });

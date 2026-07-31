@@ -22,15 +22,16 @@ import {
   ButtonBase,
   Card,
   CardContent,
-  Chip,
   Collapse,
   Divider,
   LinearProgress,
+  Link,
   Stack,
   Typography,
 } from "@wso2/oxygen-ui";
 import { ChevronRight } from "@wso2/oxygen-ui-icons-react";
 import { Link as RouterLink } from "@tanstack/react-router";
+import { StatusChip } from "../../../components/StatusChip";
 import type { components } from "../../../generated/aep-api";
 import { gateSubject } from "../../tasks/lib/issueRows";
 import { gateDrive } from "../lib/runView";
@@ -50,15 +51,24 @@ type TaskView = components["schemas"]["TaskView"];
 export function MilestonePanel({
   projectName,
   tag,
+  title,
   work,
   gates,
+  claimedBy,
+  issuesUrl,
 }: {
   projectName: string;
   tag: string;
+  /** The milestone's own name, when it carries one richer than the tag. */
+  title?: string;
   /** The milestone's agent work, open and closed. */
   work: TaskView[];
   /** Every connection gate, resolved ones included. */
   gates: TaskView[];
+  /** Which build session claimed an issue, for the ones in flight. */
+  claimedBy?: (issue: TaskView) => string | undefined;
+  /** The repo's issue list — omitted when the project has no repo URL yet. */
+  issuesUrl?: string;
 }) {
   const closed = work.filter((t) => t.derivedStatus === "deployed");
   const failed = work.filter((t) =>
@@ -96,7 +106,7 @@ export function MilestonePanel({
           {delivered ? "MILESTONE · DELIVERED" : "MILESTONE"}
         </Typography>
         <Typography variant="subtitle1" sx={{ fontWeight: 600, mt: 0.5 }}>
-          {tag}
+          {title && title !== tag ? `${tag} — ${title}` : tag}
         </Typography>
         <Typography variant="body2" color="text.secondary">
           {scope}
@@ -130,23 +140,46 @@ export function MilestonePanel({
         </Stack>
 
         <Stack direction="row" spacing={1} sx={{ mt: 1.5, flexWrap: "wrap", rowGap: 1 }}>
+          {/* Soft, not outlined: these are a readout of the milestone, and an
+              outline reads as something you can act on. Same treatment the run
+              card's state chips use, so the two columns agree. */}
           {inProgress.length > 0 && (
-            <Chip size="small" color="info" variant="outlined" label={`${inProgress.length} in progress`} />
+            <StatusChip
+              label={`${inProgress.length} in progress`}
+              tone="info"
+              appearance="soft"
+              dot
+            />
           )}
           {open.length > 0 && (
-            <Chip size="small" variant="outlined" label={`${open.length} open`} />
+            <StatusChip label={`${open.length} open`} tone="neutral" appearance="soft" />
           )}
           {closed.length > 0 && (
-            <Chip size="small" color="success" variant="outlined" label={`${closed.length} closed`} />
+            <StatusChip
+              label={`${closed.length} closed`}
+              tone="success"
+              appearance="soft"
+            />
           )}
           {failed.length > 0 && (
-            <Chip size="small" color="error" variant="outlined" label={`${failed.length} failed`} />
+            <StatusChip
+              label={`${failed.length} failed`}
+              tone="error"
+              appearance="soft"
+              dot
+            />
           )}
         </Stack>
 
         {/* Failures first: the only bucket that needs a human. */}
         <IssueGroup title="Needs attention" projectName={projectName} issues={failed} tone="error.main" />
-        <IssueGroup title="In progress" projectName={projectName} issues={inProgress} tone="info.main" />
+        <IssueGroup
+          title="In progress"
+          projectName={projectName}
+          issues={inProgress}
+          tone="info.main"
+          {...(claimedBy ? { note: claimedBy } : {})}
+        />
         <IssueGroup
           title="Open"
           projectName={projectName}
@@ -174,14 +207,46 @@ export function MilestonePanel({
                   <Typography variant="body2" sx={{ color: "text.secondary" }}>
                     {gateSubject(gate.title)}
                   </Typography>
+                  <Typography
+                    variant="caption"
+                    sx={{
+                      color:
+                        gateDrive(gate) === "failed"
+                          ? "error.main"
+                          : gate.derivedStatus === "pending"
+                            ? "info.main"
+                            : "success.main",
+                    }}
+                  >
+                    {gateState(gate)}
+                  </Typography>
                 </Stack>
               ))}
             </Stack>
           </Box>
         )}
+
+        {issuesUrl && (
+          <Link
+            href={issuesUrl}
+            target="_blank"
+            rel="noreferrer"
+            variant="body2"
+            sx={{ display: "inline-block", mt: 2 }}
+          >
+            View all issues on GitHub →
+          </Link>
+        )}
       </CardContent>
     </Card>
   );
+}
+
+/** A gate's state, said the way the provisioning stage says it. */
+function gateState(gate: TaskView): string {
+  if (gateDrive(gate) === "failed") return "needs you";
+  if (gate.derivedStatus === "pending") return "provisioning";
+  return "provisioned";
 }
 
 function Dot({ color }: { color: string }) {
@@ -312,6 +377,12 @@ function ClosedGroup({
           }}
         />
         <GroupLabel title={title} count={issues.length} />
+        <Box sx={{ flexGrow: 1 }} />
+        {/* A closed agent issue was closed BY its merge — that is the only way
+            one closes — so the count needs no per-row explanation. */}
+        <Typography variant="caption" sx={{ color: "success.main" }}>
+          all merged
+        </Typography>
       </ButtonBase>
       <Collapse in={open} unmountOnExit>
         <Stack spacing={1} sx={{ mt: 1 }}>

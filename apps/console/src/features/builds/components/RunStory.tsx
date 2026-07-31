@@ -26,6 +26,7 @@ import {
   Divider,
   Stack,
   Typography,
+  alpha,
 } from "@wso2/oxygen-ui";
 import { X } from "@wso2/oxygen-ui-icons-react";
 import { StatusChip } from "../../../components/StatusChip";
@@ -45,8 +46,10 @@ import {
   terminalReasonText,
 } from "../lib/runView";
 import { sessionIssues, sessionStages } from "../lib/sessionSpine";
+import { runDuration, runStamp } from "../lib/format";
 import { EarlierSessions } from "./EarlierSessions";
 import { ProvisioningGates } from "./ProvisioningGates";
+import { RunDelivered } from "./RunDelivered";
 import { RunGlanceStrip } from "./RunGlanceStrip";
 import { RunHoldNotice } from "./RunHoldNotice";
 import { RunNowPanel } from "./RunNowPanel";
@@ -54,18 +57,6 @@ import { RunNowPanel } from "./RunNowPanel";
 type MilestoneRunView = components["schemas"]["MilestoneRunView"];
 type TaskView = components["schemas"]["TaskView"];
 
-function when(value: string | null | undefined): string {
-  if (!value) return "";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? ""
-    : date.toLocaleString(undefined, {
-        day: "numeric",
-        month: "short",
-        hour: "2-digit",
-        minute: "2-digit",
-      });
-}
 
 /**
  * One run of the version's milestone loop, NOW-FIRST.
@@ -114,8 +105,11 @@ export function RunStory({
   );
   const reason = terminalReasonText(run.terminalReason ?? "");
   const spent = spentBudgets(run.budgets);
-  const started = when(run.startedAt ?? run.createdAt);
-  const ended = when(run.endedAt);
+  const started = runStamp(run.startedAt ?? run.createdAt);
+  const ended = runStamp(run.endedAt);
+  // How long it has been going, or took — the design's "· 18 min". A live run
+  // re-renders this on the runs poll, so it stays honest without a timer.
+  const span = runDuration(run.startedAt ?? run.createdAt, run.endedAt);
   // A spent budget on a succeeded run is a footnote, not an alarm.
   const tone = run.state === "succeeded" ? "text.secondary" : "error.main";
 
@@ -154,8 +148,21 @@ export function RunStory({
     ? (progress.cycles.find((c) => c.cycle.id === current.id)?.lines ?? [])
     : [];
 
+  // The card carries the run's state in its EDGE, not in a fill: a live run is
+  // ringed in its own tone so the eye lands on it before reading a word, while
+  // the surface stays quiet enough for the strip and the log to sit on it.
+  const edge = chip.tone === "neutral" ? null : chip.tone;
+
   return (
-    <Card variant="outlined" sx={{ bgcolor: "action.hover" }}>
+    <Card
+      variant="outlined"
+      sx={{
+        bgcolor: (t) => alpha(t.palette.text.primary, 0.02),
+        ...(edge && {
+          borderColor: (t) => alpha(t.palette[edge].main, 0.35),
+        }),
+      }}
+    >
       <CardContent sx={{ "&:last-child": { pb: 2.5 } }}>
         <Stack
           direction="row"
@@ -167,17 +174,24 @@ export function RunStory({
           <StatusChip label={runOriginLabel(run.origin)} tone="neutral" appearance="soft" />
           <Typography variant="body2" color="text.secondary">
             {started ? `Started ${started}` : ""}
-            {ended ? ` · ended ${ended}` : ""}
+            {ended ? ` → ${ended}` : ""}
+            {span ? ` · ${span}` : ""}
           </Typography>
           <Box sx={{ flexGrow: 1 }} />
           {!terminal && !planning && (
+            // Quiet by design: cancelling a run is a destructive escape hatch,
+            // not the thing a reader came to do. A filled button here competed
+            // with the stage strip for the eye and read as the page's primary
+            // action. Waiting keeps a warning outline — the state where cancel
+            // is most often what you want — without shouting.
             <Button
               size="small"
               color={waiting ? "warning" : "inherit"}
-              variant={waiting ? "contained" : "outlined"}
+              variant="outlined"
               startIcon={<X size={16} />}
               disabled={cancel.isPending}
               onClick={() => cancel.mutate(run.id)}
+              sx={{ borderRadius: 999 }}
             >
               {cancel.isPending ? "Cancelling…" : "Cancel run"}
             </Button>
@@ -243,15 +257,32 @@ export function RunStory({
                   </Typography>
                 )}
                 <RunGlanceStrip stages={glance.stages} nowIndex={glance.nowIndex} />
-                <RunNowPanel
-                  glance={glance}
-                  issues={issues?.issues ?? []}
-                  {...(issues?.caption ? { issuesCaption: issues.caption } : {})}
-                  lines={lines}
-                  logPhase={progress.phase}
-                  showLog={showLog}
-                  onOpenLog={() => setLogRequested(true)}
-                />
+                {/* A succeeded run whose flow actually finished has no "now" to
+                    narrate: what it produced, and where that now lives, is the
+                    whole story. The nowIndex check is not redundant — a run can
+                    be marked succeeded while a stage is still unreadable (the
+                    console cannot see this merge's builds yet), and claiming
+                    "all done" over a strip that says "Builds · now" would be
+                    the surface contradicting itself. */}
+                {run.state === "succeeded" && glance.nowIndex === null ? (
+                  <RunDelivered
+                    projectName={projectName}
+                    milestoneTitle={run.milestoneTitle}
+                    cycles={cycles}
+                    work={work}
+                    {...(run.endedAt ? { endedAt: run.endedAt } : {})}
+                  />
+                ) : (
+                  <RunNowPanel
+                    glance={glance}
+                    issues={issues?.issues ?? []}
+                    {...(issues?.caption ? { issuesCaption: issues.caption } : {})}
+                    lines={lines}
+                    logPhase={progress.phase}
+                    showLog={showLog}
+                    onOpenLog={() => setLogRequested(true)}
+                  />
+                )}
               </Stack>
             ) : (
               <Typography variant="body2" color="text.secondary">
