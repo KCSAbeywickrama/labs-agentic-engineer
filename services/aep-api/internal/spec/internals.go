@@ -89,3 +89,19 @@ func validateReadPath(p string) error {
 	}
 	return validatePath(p)
 }
+
+// validateCommit gates the commit a read may be pinned to. Empty means the branch
+// tip. Anything else must be a hex object name — reusing commitSHAPattern, the
+// same shape a caller-provided save commit must take (artifact_service.go), so the
+// package has one answer to "what does a caller-supplied commit look like".
+//
+// Deliberately NOT an arbitrary revision expression: a read that accepted branch
+// names, tags or `HEAD~3` would turn an allow-listed path into a browser over the
+// repo's whole history. An object name can only be supplied by something that
+// already knows it — in practice the platform's own cycle records.
+func validateCommit(at string) error {
+	if at == "" || commitSHAPattern.MatchString(at) {
+		return nil
+	}
+	return fmt.Errorf("%w: commit must be a hex object name", ErrPathInvalid)
+}

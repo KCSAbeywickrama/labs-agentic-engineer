@@ -120,6 +120,7 @@ function toSummary(s: SkillDetailBody): SkillSummary {
     description: s.description,
     contentSha: s.contentSha,
     editable: s.editable,
+    deletable: s.deletable,
   };
 }
 
@@ -157,6 +158,7 @@ function importSkill(name: string, source: string): ImportResult {
       name,
       kind: "imported",
       editable: true,
+      deletable: true,
       description: `Imported from ${source}.`,
       skillMd: `---\nname: ${name}\ndescription: Imported from ${source}.\n---\n\nImported skill body.`,
       references: {},
@@ -286,12 +288,14 @@ export const settingsHandlers = [
         existing.updatedAt = new Date().toISOString();
       } else {
         // A synced-in skill the repo didn't have yet. Unmarked frontmatter is
-        // an `org` skill, matching the BE's frontmatterKind default.
+        // an `org` skill, matching the BE's frontmatterKind default —
+        // deletable = editable for org-kind skills.
         skills.push({
           orgId: "org-1",
           name: t.name,
           kind: "org",
-          editable: false,
+          editable: true,
+          deletable: true,
           description: `${t.name} (platform-shipped)`,
           skillMd: `---\nname: ${t.name}\ndescription: ${t.name} (platform-shipped)\n---\n\nPlatform-shipped skill body.`,
           references: {},
@@ -337,8 +341,10 @@ export const settingsHandlers = [
     const created: SkillDetailBody = {
       orgId: "org-1",
       name: body.name,
-      kind: "custom",
+      kind: "org",
+      // A freshly created skill is always org-kind, so deletable = editable.
       editable: true,
+      deletable: true,
       description: extractDescription(body.skillMd),
       skillMd: body.skillMd,
       references: body.references ?? {},
@@ -388,6 +394,24 @@ export const settingsHandlers = [
 
   http.delete("*/api/v1/skills/:name", ({ params }) => {
     ensureInitialized();
+    const skill = skills.find((s) => s.name === params.name);
+    if (!skill) {
+      return errorJson(
+        {
+          code: "not_found",
+          message: `Skill ${String(params.name)} not found`,
+        },
+        404,
+      );
+    }
+    // Mirrors the real BE guard: deletable = editable — a platform-kind
+    // skill (always reconcile-managed) is neither.
+    if (!skill.deletable) {
+      return errorJson(
+        { code: "forbidden", message: "built-in skills are read-only" },
+        403,
+      );
+    }
     skills = skills.filter((s) => s.name !== params.name);
     return HttpResponse.json({ status: "deleted" });
   }),

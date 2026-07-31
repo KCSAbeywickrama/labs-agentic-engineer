@@ -82,6 +82,9 @@ type turnJob struct {
 	// relays frames but folds nothing and commits nothing.
 	collabRoomID string
 	collabToken  string
+	// eagerSkills passes TurnInput.EagerSkills through to the agents-service
+	// turn request (#335) — skill bodies the service inlines up front.
+	eagerSkills []string
 }
 
 // baseMovedError is the D15 overlap conflict: main moved past the turn's base
@@ -210,6 +213,7 @@ func (s *Service) executeTurn(ctx context.Context, job turnJob) TurnTerminal {
 		MCP:                    s.mcpForTurn(ctx, job),
 		WebSearch:              designOrCollabTurn(job),
 		Collab:                 collab,
+		EagerSkills:            job.eagerSkills,
 	})
 	if err != nil {
 		slog.WarnContext(ctx, "genai: turn dispatch failed", "turn", job.turnID, "error", err)

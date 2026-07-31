@@ -17,13 +17,14 @@
  */
 
 /**
- * The post-turn derived-artifact pipeline, as ONE unit: given what a turn
- * changed and the resulting snapshot, refresh every derived view on disk.
- * This is the playground's stand-in for what the BFF owns in production —
- * a single seam, so the turn loop stays chat mechanics only.
+ * The derived-artifact pipeline, as PER-EVENT seams the turn loop drives the
+ * instant a source file lands — so a derived view appears on disk as its source
+ * does, not batched to turn end. This is the playground's stand-in for what the
+ * BFF owns in production, kept as thin functions so the turn loop stays chat
+ * mechanics only.
  *
- *   *.dsl                 → sibling .excalidraw          (compile)
- *   design.json (all components) → specs/design/cell-diagram.gen.json
+ *   *.dsl                        → sibling .excalidraw           (per-file compile)
+ *   design.json (all components) → specs/design/cell-diagram.gen.json (aggregate)
  *
  * Everything written here ends in .excalidraw / .gen.json — the extensions
  * readSnapshot excludes — so derived output can never leak into the agent's
@@ -32,50 +33,52 @@
 
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { FileChange } from "./project-fs.js";
 import { compileDslArtifacts } from "./dsl.js";
 import { buildProjectDesign, toCellDiagramProject } from "@aep/design-projection";
+
+/** Thread-relative path of the project-level cell-diagram rollup. */
+export const CELL_DIAGRAM_PATH = "specs/design/cell-diagram.gen.json";
 
 export interface DerivedNote {
   ok: boolean;
   message: string;
 }
 
-/** Refresh all derived artifacts for one finished turn; returns display notes. */
-export function materializeDerived(
+/**
+ * Compile ONE changed path's derived view, if it has one: a `*.dsl` source
+ * compiles to its sibling `.excalidraw`. Returns a display note, or `null` when
+ * `path` is not a compilable source (so the caller can drive it per change).
+ * The source must already be on disk — `compileDslArtifacts` reads it back.
+ */
+export function compileDslDerived(threadDir: string, path: string): DerivedNote | null {
+  const [r] = compileDslArtifacts(threadDir, [path]);
+  if (!r) return null;
+  return r.ok
+    ? { ok: true, message: `${r.outPath} (compiled)` }
+    : { ok: false, message: `${r.path}: DSL error — ${r.error}` };
+}
+
+/**
+ * Rebuild the project-level cell-diagram rollup from the CURRENT snapshot and
+ * write it to `CELL_DIAGRAM_PATH`. An aggregate over every component's
+ * design.json, so it is regenerated wholesale whenever any `specs/design/` file
+ * changes; an intermediate (mid-turn) snapshot that can't project yet yields an
+ * error note that a later, consistent rebuild overwrites. The in-memory
+ * ProjectDesign aggregate is the BFF's on-demand serving shape — only this
+ * cell-diagram view is materialized (for the diagram team to consume).
+ */
+export function projectCellDiagram(
   threadDir: string,
   threadName: string,
-  changes: readonly FileChange[],
   snapshot: Record<string, string>,
-): DerivedNote[] {
-  const notes: DerivedNote[] = [];
-
-  for (const r of compileDslArtifacts(
-    threadDir,
-    changes.filter((c) => c.kind !== "remove").map((c) => c.path),
-  )) {
-    notes.push(
-      r.ok
-        ? { ok: true, message: `${r.outPath} (compiled)` }
-        : { ok: false, message: `${r.path}: DSL error — ${r.error}` },
-    );
+): DerivedNote {
+  try {
+    const cell = toCellDiagramProject(buildProjectDesign(threadName, snapshot));
+    writeFileSync(join(threadDir, CELL_DIAGRAM_PATH), JSON.stringify(cell, null, 2) + "\n");
+    return { ok: true, message: `${CELL_DIAGRAM_PATH} (projected)` };
+  } catch (e) {
+    // e.g. a hand-edited design.json with an unsupported type — report, don't
+    // kill the chat session over a derived view.
+    return { ok: false, message: `${CELL_DIAGRAM_PATH}: ${e instanceof Error ? e.message : String(e)}` };
   }
-
-  if (changes.some((c) => c.path.startsWith("specs/design/"))) {
-    // The project-level ProjectDesign aggregate stays IN MEMORY — it is the
-    // BFF's on-demand serving shape, not a stored artifact. Only the
-    // cell-diagram view is materialized (for the diagram team to consume).
-    const rel = "specs/design/cell-diagram.gen.json";
-    try {
-      const cell = toCellDiagramProject(buildProjectDesign(threadName, snapshot));
-      writeFileSync(join(threadDir, rel), JSON.stringify(cell, null, 2) + "\n");
-      notes.push({ ok: true, message: `${rel} (projected)` });
-    } catch (e) {
-      // e.g. a hand-edited design.json with an unsupported type — report,
-      // don't kill the chat session over a derived view.
-      notes.push({ ok: false, message: `${rel}: ${e instanceof Error ? e.message : String(e)}` });
-    }
-  }
-
-  return notes;
 }

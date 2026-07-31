@@ -75,6 +75,15 @@ type RunCycleRepository interface {
 	// phase enum on the run row.
 	Latest(ctx context.Context, orgID, runID string) (*RunCycle, error)
 
+	// GetByIDScoped returns the cycle only when it belongs to orgID, and (nil,
+	// nil) otherwise — the tenant fence, so a cross-org id reads as absent rather
+	// than forbidden and a probe learns nothing from the difference.
+	//
+	// This is the RUNNER's identity read: a dispatched pod names its cycle id on
+	// every callback (AEP_TASK_ID), and this resolves it to the project the
+	// callback may act on.
+	GetByIDScoped(ctx context.Context, orgID, id string) (*RunCycle, error)
+
 	// ListByRun returns a run's cycles oldest first — the cycle timeline.
 	ListByRun(ctx context.Context, orgID, runID string) ([]RunCycle, error)
 
@@ -185,6 +194,23 @@ func (r *runCycleRepository) Latest(ctx context.Context, orgID, runID string) (*
 	err := r.db.WithContext(ctx).
 		Where("org_id = ? AND run_id = ?", orgID, runID).
 		Order("created_at DESC").
+		First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &row, nil
+}
+
+func (r *runCycleRepository) GetByIDScoped(ctx context.Context, orgID, id string) (*RunCycle, error) {
+	var row RunCycle
+	// The org is part of the WHERE, not a check after the read: a cycle that
+	// belongs to another org must be indistinguishable from one that does not
+	// exist.
+	err := r.db.WithContext(ctx).
+		Where("org_id = ? AND id = ?", orgID, id).
 		First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil

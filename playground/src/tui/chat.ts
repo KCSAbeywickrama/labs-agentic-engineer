@@ -17,18 +17,70 @@
  */
 
 /**
- * The streaming chat screen (docs/design/playground.md §7): free-chat turns in
- * the project's single `general` conversation — exactly the console's chat
- * panel. Follow-ups are history-aware; hand-edits between turns are picked up
- * via D20 (`filesChangedExternally`).
+ * The streaming chat screen (docs/design/playground.md §7) — the playground's
+ * home surface. Free-chat turns run in the project's single `general`
+ * conversation (exactly the console's chat panel); slash commands drive every
+ * other phase without leaving chat. Follow-ups are history-aware; hand-edits
+ * between turns are picked up via D20 (`filesChangedExternally`).
+ *
+ * Command taxonomy + precedence live in `chat-commands.ts` (pure); this module
+ * is the I/O half: render the entry banner, prompt, and dispatch each intent.
+ * Phase-runners reuse the existing engine commands as-is — a `/task` boots its
+ * own short-lived task-plan session, a `/code` spawns the coding-agent
+ * subprocess with its consent + undo snapshot — so readline is paused around
+ * them (they own stdout, and `/code` prompts for consent).
  */
 
 import readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
-import { withGrillingInterview } from "@aep/contracts/prompts";
-import { chatTurn, type PhaseOptions } from "../commands.js";
+import { chatTurn, codeCommand, tasksCommand, undoCommand, type PhaseOptions } from "../commands.js";
+import { checkProject } from "../engine/check.js";
+import { loadRepoSkills } from "../kit/skills.js";
 import { collectAnswers } from "./questions.js";
+import { buildChatBanner, commandGuide } from "./banner.js";
+import { classifyChatInput, type ChatIntent } from "./chat-commands.js";
+import { confirmCodingDir } from "./consent.js";
+import { startInstruction } from "../engine/compose.js";
+import { readIdea } from "../state/descriptor.js";
 import type { PlaygroundSession } from "../engine/session.js";
+
+/** Run one phase-runner (`/task`, `/code`, `/validate`, `/undo`) to completion. */
+async function runPhase(session: PlaygroundSession, intent: Extract<ChatIntent, { kind: "phase" }>, opts: PhaseOptions): Promise<void> {
+  const dir = session.projectDir;
+  switch (intent.name) {
+    case "validate": {
+      let allOk = true;
+      for (const f of checkProject(dir)) {
+        output.write(f.ok ? `  ✓ ${f.path} — ${f.message}\n` : `  ✗ ${f.path} — ${f.message}\n`);
+        if (!f.ok) allOk = false;
+      }
+      output.write(allOk ? "  ✓ check passed\n" : "  ✗ check found problems\n");
+      return;
+    }
+    case "undo": {
+      const outcome = undoCommand(dir, opts); // prints `↺ restored …` itself on success
+      if (!outcome.ok) output.write(`  ✗ ${outcome.detail ?? "undo failed"}\n`);
+      return;
+    }
+    case "task": {
+      const outcome = await tasksCommand(dir, opts); // streams its own fold summary
+      if (!outcome.ok) output.write(`  ✗ tasks: ${outcome.detail ?? "failed"}\n`);
+      return;
+    }
+    case "code": {
+      // ONE session works the whole project (ADR-0001) — the `aep` skill picks
+      // its own working set, so a per-issue argument has nothing to steer.
+      // Consent + undo snapshot ride inside.
+      if (intent.arg) {
+        output.write("  ✗ /code takes no argument — one session works the whole plan (the agent picks its own working set)\n");
+        return;
+      }
+      const outcome = await codeCommand(dir, opts, confirmCodingDir(dir));
+      if (!outcome.ok) output.write(`  ✗ code: ${outcome.detail ?? "failed"}\n`);
+      return;
+    }
+  }
+}
 
 /** The per-project chat loop. Returns when the user goes back to the menu or quits. */
 export async function chatLoop(session: PlaygroundSession, opts: PhaseOptions): Promise<"menu" | "quit"> {
@@ -37,7 +89,8 @@ export async function chatLoop(session: PlaygroundSession, opts: PhaseOptions): 
     output.write("\n");
     process.exit(130); // Ctrl-C: hard exit (the in-process server dies with us)
   });
-  output.write("  chat — /menu to go back, /quit to exit\n");
+  const skillCount = loadRepoSkills(session.skillsDir).length;
+  output.write(buildChatBanner(session.projectDir, session.state.slug, skillCount) + "\n");
   try {
     for (;;) {
       let raw: string;
@@ -48,24 +101,39 @@ export async function chatLoop(session: PlaygroundSession, opts: PhaseOptions): 
       }
       const line = raw.trim();
       if (line === "") continue;
-      if (line === "/quit") return "quit";
-      if (line === "/menu" || line === "/threads") return "menu";
-      if (line === "/help") {
-        output.write("  commands: /menu, /quit, /grill [idea], /help\n");
+
+      const intent = classifyChatInput(line);
+
+      if (intent.kind === "control") {
+        if (intent.name === "quit") return "quit";
+        if (intent.name === "menu") return "menu";
+        output.write(commandGuide() + "\n");
         continue;
       }
 
-      // `/grill [idea]` opts this turn into the interview-first directive (#270),
-      // mirroring the console's Generate-spec-with-grilling CTA: the agent asks
-      // structured questions before generating. A plain line is an ordinary chat
-      // turn (the agent may still ask a question if it needs a decision).
-      const instruction = line.startsWith("/grill")
-        ? withGrillingInterview(
-            line.slice("/grill".length).trim() ||
-              "Help me pin down this project's requirements before generating anything.",
-          )
-        : line;
+      if (intent.kind === "phase") {
+        // The engine commands own stdout and (for /code) prompt for consent —
+        // pause readline so it doesn't fight them for stdin, resume after.
+        rl.pause();
+        try {
+          await runPhase(session, intent, opts);
+        } finally {
+          rl.resume();
+        }
+        continue;
+      }
 
+      // `/start` — the kickoff. The idea typed inline wins; otherwise it comes
+      // from the descriptor written when the project was created. Neither is
+      // something the agent could read for itself, so this append is the only
+      // channel it travels by. No idea at all is fine: the start skill opens by
+      // asking for one.
+      const instruction =
+        intent.kind === "start"
+          ? startInstruction(intent.inlineIdea ?? readIdea(session.projectDir))
+          : intent.instruction;
+
+      // A skill-load (`/spec`, `/design`, `/<skill>`) or a plain chat turn.
       // HITL loop (console ADR-0012 / #270): while the agent ends a turn on a
       // question card, prompt for the answer and continue with it as the next
       // instruction. `/skip` (or Ctrl-D at the prompt) drops back to free chat.

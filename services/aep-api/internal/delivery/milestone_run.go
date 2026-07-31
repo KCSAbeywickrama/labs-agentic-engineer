@@ -60,6 +60,15 @@ const (
 	RunReasonNoProgress           = "no-progress"
 	RunReasonCycleCeiling         = "cycle-ceiling"
 	RunReasonValidationFailed     = "validation-failed"
+	// RunReasonValidationUnreported is its own failure class, distinct from
+	// validation-failed: the suite going red and the agent delivering no report at
+	// all are different explanations, and a terminal reason exists to explain.
+	//
+	// It is a failure because the report is read at the validation cycle's OWN
+	// merge commit, so an absent report is a hard fact about this run rather than
+	// a propagation artifact — the agent merged a pull request and reported
+	// nothing.
+	RunReasonValidationUnreported = "validation-unreported"
 	// RunReasonPlanFailed is the plan path's own failure class: the run row is
 	// admitted BEFORE the planning turn (so the spec-run mutex is armed for the
 	// whole of it), which means a planning turn that cannot finish must settle
@@ -67,13 +76,78 @@ const (
 	// its own mutex until a human cancelled.
 	RunReasonPlanFailed = "plan-failed"
 
-	// Validation verdicts. Empty until the validation cycle settles; skipped
-	// when the project has no acceptance criteria and on incident runs (which
-	// get no validation cycle at all).
-	ValidationVerdictPassed  = "passed"
-	ValidationVerdictFailed  = "failed"
-	ValidationVerdictSkipped = "skipped"
+	// Validation verdicts — what the run learned about the deployed system. Empty
+	// until the validation cycle settles.
+	//
+	// Six values because each names a distinct situation with a distinct action.
+	// The vocabulary is deliberately about EVIDENCE, not about blame: a verdict
+	// says what we know, and the run's State + TerminalReason say whether the
+	// increment stood.
+	//
+	//   passed        every criterion was automated and every one passed
+	//   partial       some passed, none failed, and some were never covered —
+	//                 so `passed` would be a claim about criteria nobody checked
+	//   failed        a criterion asserted and lost (fails the run)
+	//   inconclusive  no test results at all; nothing to conclude from
+	//   unreported    no usable report at the cycle's merge commit (fails the run)
+	//   skipped       no acceptance criteria authored, and incident runs, which
+	//                 get no validation cycle at all
+	//
+	// `passed` requiring FULL coverage is the point: it previously held whenever
+	// one criterion passed and none failed, so a project could read "passed" over
+	// twenty manual criteria nobody had looked at.
+	ValidationVerdictPassed       = "passed"
+	ValidationVerdictPartial      = "partial"
+	ValidationVerdictFailed       = "failed"
+	ValidationVerdictInconclusive = "inconclusive"
+	ValidationVerdictUnreported   = "unreported"
+	ValidationVerdictSkipped      = "skipped"
 )
+
+// ValidationVerdicts is the closed set of verdicts the store accepts. Kept beside
+// the constants rather than in the repository so growing the vocabulary is one
+// edit: a seventh verdict that the writer rejected but the reader accepted would
+// be a silent write failure at the only moment a run records what it learned.
+var ValidationVerdicts = map[string]bool{
+	ValidationVerdictPassed:       true,
+	ValidationVerdictPartial:      true,
+	ValidationVerdictFailed:       true,
+	ValidationVerdictInconclusive: true,
+	ValidationVerdictUnreported:   true,
+	ValidationVerdictSkipped:      true,
+}
+
+// IsValidationTerminalReason reports whether a run's terminal reason came from the
+// validating phase. The overview needs it: a validation failure is not a BUILD
+// failure — every coding cycle landed — so the build stage must not render red
+// while the validation chip explains the real cause.
+//
+// Kept beside ValidationVerdictFailsRun so the two can never disagree about which
+// reasons the phase can produce: a reason added to one and missed by the other
+// would make the overview contradict itself.
+func IsValidationTerminalReason(reason string) bool {
+	return reason == RunReasonValidationFailed || reason == RunReasonValidationUnreported
+}
+
+// ValidationVerdictFailsRun reports whether a verdict ends the run unsuccessfully,
+// and names the terminal reason it settles under. It is the single place the
+// verdict→outcome mapping lives, so the supervisor and any future consumer cannot
+// disagree about which verdicts are fatal.
+//
+// Only a real assertion failure and a missing report are fatal. `partial` and
+// `inconclusive` are honest reports of incomplete evidence, not defects in the
+// increment — telling "the oracle had nothing automatable" apart from "the agent
+// ran nothing" is deferred to internal-agent-error handling.
+func ValidationVerdictFailsRun(verdict string) (reason string, fatal bool) {
+	switch verdict {
+	case ValidationVerdictFailed:
+		return RunReasonValidationFailed, true
+	case ValidationVerdictUnreported:
+		return RunReasonValidationUnreported, true
+	default:
+		return "", false
+	}
+}
 
 // Budget limits. Each budget names exactly one failure class, which is what
 // keeps the terminal reasons honest.
@@ -155,6 +229,13 @@ type MilestoneRun struct {
 	// ValidationVerdict is a run property (the validation cycle's outcome), not
 	// a per-issue one. Empty until the validation cycle settles.
 	ValidationVerdict string `gorm:"type:text" json:"validationVerdict,omitempty"`
+	// ValidationIssue is the validation issue this run minted, persisted so a
+	// SETTLED run stays navigable to its criteria. It is otherwise only in live
+	// workflow state, which means that once Temporal retention lapses the platform
+	// can no longer say which issue produced a run's verdict — leaving a verdict
+	// with no way to reach the criteria, the PR, or the runner's own summary.
+	// Zero until the validation cycle mints it, and on incident runs.
+	ValidationIssue int `gorm:"not null;default:0" json:"validationIssue,omitempty"`
 
 	CreatedAt time.Time  `json:"createdAt"`
 	UpdatedAt time.Time  `json:"updatedAt"`

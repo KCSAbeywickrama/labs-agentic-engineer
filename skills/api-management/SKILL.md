@@ -1,6 +1,9 @@
 ---
 name: api-management
 description: How the platform's API gateway fronts a service — it validates the caller's token, injects identity headers, and attaches CORS — plus how a consumer calls a protected API. Apply to any service with exposesAPI.auth set, and to any consumer with a dependency (a `component`-kind sibling OR an `external`-kind upstream API) that calls a protected API. What the injected identity MEANS, and how to authorize on it, is owned by `thunder-authentication`.
+metadata:
+  aep:
+    kind: org
 ---
 
 # API Management

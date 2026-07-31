@@ -41,7 +41,8 @@ import { runCodingAgent } from "./engine/coding-run.js";
 import { SKILLS_DIR } from "./engine/session.js";
 import { FsIssueStore, type FoldOutcome } from "./ports/issue-store.js";
 import { projectSlug } from "./ports/spec-workspace.js";
-import { loadProjectState, readPrompt, savePrompt, saveProjectState } from "./state/project.js";
+import { loadProjectState, saveProjectState } from "./state/project.js";
+import { readIdea, writeDescriptor } from "./state/descriptor.js";
 import { restoreUndoSnapshot, takeUndoSnapshot } from "./state/undo.js";
 
 export interface PhaseOutcome {
@@ -92,9 +93,14 @@ async function runPhaseTurn(projectDir: string, instructionText: string, opts: P
 }
 
 /**
- * Phase 1 — requirements. The idea comes from `--idea`, the stored
- * `.aep-playground/prompt.md`, or (TUI) an interactive ask; the instruction is
- * the console's "Generate spec" CTA wrapping it (§5 phase 1).
+ * Phase 1 — requirements, the headless twin of chat's `/start`. The idea comes
+ * from `--idea` or the descriptor written at project creation
+ * (`specs/.agentic-engineer.toml`); a TUI caller may ask for one when neither
+ * has it. The instruction is the console's "Generate spec" CTA wrapping it
+ * (§5 phase 1) — one-shot by design, where `/start` runs the interview.
+ *
+ * An `--idea` given here is CAPTURED, not just used: it becomes the project's
+ * descriptor, so a later `/start` carries the same idea.
  */
 export async function requirementsCommand(
   projectDir: string,
@@ -104,9 +110,12 @@ export async function requirementsCommand(
   const gate = requirementsGate();
   if (!gate.ok) return gateFail(gate);
 
-  let idea = opts.idea?.trim() || readPrompt(projectDir);
+  const flagIdea = opts.idea?.trim() || null;
+  let idea = flagIdea ?? readIdea(projectDir);
   if (!idea && askIdea) idea = (await askIdea())?.trim() || null;
-  if (idea) savePrompt(projectDir, idea);
+  // Only write when this run supplied the idea — reading the descriptor back
+  // and rewriting it would churn createdAt for nothing.
+  if (idea && idea !== readIdea(projectDir)) writeDescriptor(projectDir, projectSlug(projectDir), idea);
 
   return runPhaseTurn(projectDir, buildSpecGenerationInstruction(idea ?? null), opts);
 }

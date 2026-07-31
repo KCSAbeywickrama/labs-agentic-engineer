@@ -93,20 +93,29 @@ export function useDesignDependencies(projectName: string) {
  */
 export async function fetchSpecFileContent(
   projectName: string,
-  file: { path: string; sha: string },
+  file: { path: string; sha: string; ref?: string },
 ): Promise<FileContent> {
   // The contract's {path} param is a trailing wildcard — it spans multiple
   // segments, and openapi-fetch's serializer would percent-encode the very
   // slashes the wildcard exists to keep. Build the concrete URL, cast to
   // the contract path so the response stays typed. `file.path` is already
   // the full repo path (specs/…) the Files API expects.
+  //
+  // `file.ref` pins the read to one commit. Omitted reads the branch tip, which is
+  // what spec reads want; the validation report needs the pin, because it sits at a
+  // fixed path every run overwrites and the tip would answer for the newest run.
   const repoPath = file.path
     .split("/")
     .map(encodeURIComponent)
     .join("/");
   const { data, error } = await client.GET(
     `/projects/${encodeURIComponent(projectName)}/files/${repoPath}` as "/projects/{projectName}/files/{path}",
-    { params: { path: { projectName, path: file.path } } },
+    {
+      params: {
+        path: { projectName, path: file.path },
+        ...(file.ref ? { query: { ref: file.ref } } : {}),
+      },
+    },
   );
   if (error || data === undefined)
     throw toError(error, `Failed to load ${file.path}`);

@@ -267,7 +267,7 @@ func TestMilestoneRunRepository_Transitions(t *testing.T) {
 	if got, err := repo.BumpBudget(ctx, run.ID, delivery.RunBudgetCycles); err != nil || got != nil {
 		t.Fatalf("BumpBudget on a terminal run = (%+v, %v), want (nil, nil)", got, err)
 	}
-	if got, err := repo.SetValidationVerdict(ctx, run.ID, delivery.ValidationVerdictPassed); err != nil || got != nil {
+	if got, err := repo.SetValidationVerdict(ctx, run.ID, delivery.ValidationVerdictPassed, 0); err != nil || got != nil {
 		t.Fatalf("SetValidationVerdict on a terminal run = (%+v, %v), want (nil, nil)", got, err)
 	}
 	// An unknown id is the same no-op, not an error.
@@ -326,15 +326,36 @@ func TestMilestoneRunRepository_Budgets(t *testing.T) {
 	}
 
 	// The verdict is a run property, written when the validation cycle settles.
-	if _, err := repo.SetValidationVerdict(ctx, run.ID, "maybe"); err == nil {
+	if _, err := repo.SetValidationVerdict(ctx, run.ID, "maybe", 0); err == nil {
 		t.Fatalf("SetValidationVerdict(unknown) succeeded, want a rejection")
 	}
-	verdicted, err := repo.SetValidationVerdict(ctx, run.ID, delivery.ValidationVerdictFailed)
+	verdicted, err := repo.SetValidationVerdict(ctx, run.ID, delivery.ValidationVerdictFailed, 77)
 	if err != nil || verdicted == nil {
 		t.Fatalf("SetValidationVerdict = (%+v, %v)", verdicted, err)
 	}
 	if verdicted.ValidationVerdict != delivery.ValidationVerdictFailed {
 		t.Fatalf("verdict = %q, want %q", verdicted.ValidationVerdict, delivery.ValidationVerdictFailed)
+	}
+	// The issue rides with the verdict so a SETTLED run stays navigable to the
+	// criteria behind it — otherwise the number lives only in workflow state and
+	// vanishes with Temporal retention.
+	if verdicted.ValidationIssue != 77 {
+		t.Fatalf("validation issue = %d, want 77", verdicted.ValidationIssue)
+	}
+	// Issue 0 means "nothing to name" (an incident run, or a skip decided before
+	// minting) and must not blank a number already recorded.
+	kept, err := repo.SetValidationVerdict(ctx, run.ID, delivery.ValidationVerdictPartial, 0)
+	if err != nil || kept == nil {
+		t.Fatalf("SetValidationVerdict(issue 0) = (%+v, %v)", kept, err)
+	}
+	if kept.ValidationIssue != 77 {
+		t.Fatalf("issue 0 overwrote a recorded number: %d", kept.ValidationIssue)
+	}
+	// Every member of the vocabulary must be storable.
+	for verdict := range delivery.ValidationVerdicts {
+		if _, err := repo.SetValidationVerdict(ctx, run.ID, verdict, 0); err != nil {
+			t.Errorf("SetValidationVerdict(%q) rejected: %v", verdict, err)
+		}
 	}
 }
 

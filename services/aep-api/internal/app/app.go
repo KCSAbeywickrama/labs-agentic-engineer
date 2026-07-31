@@ -448,6 +448,11 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// Eagerly provision each org's skills repo on project creation.
 	projectService.SetSkillsProvisioner(skillSvc)
 
+	// Stamp specs/.agentic-engineer.toml into each new project's repo: the
+	// Agentic Engineer marker, carrying the idea the user typed at create for
+	// the /start flow to generate requirements from.
+	projectService.SetDescriptorWriter(spec.NewDescriptorWriter(filesSvc))
+
 	// The Task-keyed log endpoint (issue number → newest execution by default,
 	// executionId query pins one for history browsing). (The runner skills-pull
 	// S2S endpoint is retired — the runner now clones `org-skills` and resolves
@@ -716,24 +721,26 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		cfg.GitHubAppClientID,
 	)
 
-	// Internal S2S runner authorizer — re-keyed to executions (§9.2): the id in
-	// the runner bearer is an execution id, and the publisher-cc branch resolves
-	// the acting org by execution id.
+	// Internal S2S runner authorizer — keyed to the CYCLE: the id in the runner
+	// bearer is the run cycle the pod was dispatched for, and the publisher-cc
+	// branch resolves the acting org by that cycle id. Every agent pod in the
+	// system is launched by the milestone supervisor, so a cycle id is the only
+	// runner identity there is; an execution id named in a path fails closed.
 	publisherVerifier := authn.NewPublisherTokenVerifier(thunderJWKS, cfg.PlatformIDP.Issuer, "aep-publisher-")
-	runnerAuth := authn.NewRunnerAuthorizer(taskTokens, publisherVerifier, executionOrgLookup(db))
+	runnerAuth := authn.NewRunnerAuthorizer(taskTokens, publisherVerifier, cycleOrgLookup(db))
 
 	// Validation-context runner callback: resolves the run's deployed endpoint
 	// URLs so they never enter the public issue.
 	validationContextSvc := validation.NewContextService(
-		validationExecLocator{repo: executionRepo},
+		validationCycleLocator{repo: runCycleRepo},
 		validationEndpointResolver{store: artifactStore, comp: componentService},
 	)
 	// Test-credentials runner callback: the runner requests a login on demand
 	// (only when a criterion needs one). v1 returns a shared mock account; the
-	// execution→project fence + request contract are what real per-project user
+	// cycle→project fence + request contract are what real per-project user
 	// provisioning slots into later.
 	validationCredentialsSvc := validation.NewCredentialService(
-		validationExecLocator{repo: executionRepo},
+		validationCycleLocator{repo: runCycleRepo},
 		mockValidationCredentials{},
 	)
 
@@ -1223,12 +1230,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 			PRs:        issueService,
 			Design:     designComponents{store: artifactStore},
 			Builds:     runBuilds{oc: componentClient},
-			Validation: runValidation{
-				svc:       validationSvc,
-				art:       artifactSvcGit,
-				files:     filesSvc,
-				milestone: issueService,
-			},
+			Validation: runValidation{svc: validationSvc, files: filesSvc},
 			// The coding executor launches the cycle's runner Job and answers with
 			// its Job ref. It mints no execution row — the cycle record is the
 			// supervisor's own bookkeeping.

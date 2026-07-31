@@ -356,12 +356,19 @@ func githubBotLogin(appSlug string) string {
 	return appSlug + "[bot]"
 }
 
-// executionOrgLookup resolves an execution id to its owning org handle — the
-// RunnerAuthorizer's publisher-cc branch (re-keyed from task to execution).
-func executionOrgLookup(db *gorm.DB) func(ctx context.Context, executionID string) (string, error) {
-	return func(ctx context.Context, executionID string) (string, error) {
-		var row delivery.Execution
-		if err := db.WithContext(ctx).Select("org_id").First(&row, "id = ?", executionID).Error; err != nil {
+// cycleOrgLookup resolves a run-cycle id to its owning org handle — the
+// RunnerAuthorizer's publisher-cc branch.
+//
+// It reads run_cycles because that is what a runner callback names: every agent
+// pod is launched by the milestone supervisor, which carries the cycle id to the
+// pod as AEP_TASK_ID. It deliberately does NOT fall back to the executions table.
+// The only rows left there are dependency-provisioning gates, which run no agent
+// and are not a callback identity, so an execution id named in a path resolves to
+// nothing and the request fails closed.
+func cycleOrgLookup(db *gorm.DB) func(ctx context.Context, cycleID string) (string, error) {
+	return func(ctx context.Context, cycleID string) (string, error) {
+		var row delivery.RunCycle
+		if err := db.WithContext(ctx).Select("org_id").First(&row, "id = ?", cycleID).Error; err != nil {
 			return "", err
 		}
 		return row.OrgID, nil

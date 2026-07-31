@@ -221,7 +221,7 @@ func (e *Events) OnPullRequest(ctx context.Context, _, _ string, payload []byte)
 	}
 
 	refs := parseResolvesRefs(p.PullRequest.Body)
-	work, err := e.p.Issues.ListMilestoneIssues(ctx, owner.orgID, owner.projectID, milestoneWorkFilter(owner.run.MilestoneNumber))
+	work, err := e.p.Issues.ListMilestoneIssues(ctx, owner.orgID, owner.projectID, milestoneOpenIssuesFilter(owner.run.MilestoneNumber))
 	if err != nil {
 		return err
 	}

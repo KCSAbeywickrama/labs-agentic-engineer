@@ -174,7 +174,9 @@ func TestSkillsComponent_List_MatchesGolden(t *testing.T) {
 	for _, s := range obj.Skills {
 		if s["name"] == "go" {
 			sawGo = true
-			if s["kind"] != "org" || s["editable"] != false {
+			// Editability is decoupled from ownership: "go" is org-kind and
+			// editable even though it is platform-seeded.
+			if s["kind"] != "org" || s["editable"] != true {
 				t.Fatalf("go summary: %v", s)
 			}
 		}
@@ -257,7 +259,7 @@ func TestSkillsComponent_GetOne_MatchesGolden(t *testing.T) {
 	if err := json.Unmarshal(resp.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if got["name"] != "go" || got["kind"] != "org" || got["editable"] != false {
+	if got["name"] != "go" || got["kind"] != "org" || got["editable"] != true {
 		t.Fatalf("get-one semantics drifted: %s", resp.Body.String())
 	}
 }
@@ -368,6 +370,11 @@ func TestSkillsComponent_Updates_MatchesGolden(t *testing.T) {
 	if strings.Join(gotElem, ",") != strings.Join(wantElem, ",") {
 		t.Fatalf("updates[] element field set drifted:\n got %v\nwant %v", gotElem, wantElem)
 	}
+	if arr, ok := decodeObject(t, resp.Body.Bytes())["updates"].([]any); ok && len(arr) == 1 {
+		if el, ok := arr[0].(map[string]any); !ok || el["state"] != "overridden" {
+			t.Fatalf("drifted org copy must report overridden, got %v", arr[0])
+		}
+	}
 }
 
 func TestSkillsComponent_Sync(t *testing.T) {
@@ -400,9 +407,9 @@ func TestSkillsComponent_Create_HappyThenGet(t *testing.T) {
 		t.Fatalf("create: want 201, got %d body=%s", resp.Code, resp.Body.String())
 	}
 	// Same on-wire field set as the get-one golden (a created skill IS a skill),
-	// with editable=true for a custom skill.
+	// with editable=true for a newly authored org skill.
 	assertObjectFieldSetMatchesGolden(t, resp.Body.String(), "get_org_skill.json")
-	if m := decodeObject(t, resp.Body.Bytes()); m["kind"] != "custom" || m["editable"] != true {
+	if m := decodeObject(t, resp.Body.Bytes()); m["kind"] != "org" || m["editable"] != true {
 		t.Fatalf("created projection: %v", m)
 	}
 
@@ -411,7 +418,7 @@ func TestSkillsComponent_Create_HappyThenGet(t *testing.T) {
 	if resp.Code != 200 {
 		t.Fatalf("get created: want 200, got %d body=%s", resp.Code, resp.Body.String())
 	}
-	if m := decodeObject(t, resp.Body.Bytes()); m["name"] != "cool-skill" || m["kind"] != "custom" || m["editable"] != true {
+	if m := decodeObject(t, resp.Body.Bytes()); m["name"] != "cool-skill" || m["kind"] != "org" || m["editable"] != true {
 		t.Fatalf("read-back projection: %v", m)
 	}
 }
@@ -428,7 +435,7 @@ func TestSkillsComponent_Create_WithoutReferences_201(t *testing.T) {
 	if resp.Code != 201 {
 		t.Fatalf("create without references: want 201, got %d body=%s", resp.Code, resp.Body.String())
 	}
-	if m := decodeObject(t, resp.Body.Bytes()); m["kind"] != "custom" || m["editable"] != true {
+	if m := decodeObject(t, resp.Body.Bytes()); m["kind"] != "org" || m["editable"] != true {
 		t.Fatalf("created projection: %v", m)
 	}
 }
@@ -481,14 +488,17 @@ func TestSkillsComponent_Create_CollisionWithBuiltin_409(t *testing.T) {
 	}
 }
 
-func TestSkillsComponent_Update_Builtin_403(t *testing.T) {
+func TestSkillsComponent_Update_Platform_403(t *testing.T) {
 	t.Parallel()
 	h, _ := newHarness(t)
 
-	body := `{"skillMd":` + jsonString(skillMD("go", "")) + `,"references":{}}`
-	resp := h.AsOrg("acme").Put(base+"/go", body)
+	// Editability is decoupled from ownership: an org skill like "go" is now
+	// editable (see TestSkillsComponent_PlatformSkillsReadOnlySurface for the
+	// still-forbidden platform kind); only platform stays read-only.
+	body := `{"skillMd":` + jsonString(skillMD("task-planning", "")) + `,"references":{}}`
+	resp := h.AsOrg("acme").Put(base+"/task-planning", body)
 	if resp.Code != 403 {
-		t.Fatalf("update builtin: want 403, got %d body=%s", resp.Code, resp.Body.String())
+		t.Fatalf("update platform: want 403, got %d body=%s", resp.Code, resp.Body.String())
 	}
 	if e := componenttest.DecodeEnvelope(t, resp.Body.String()); e.Code != "forbidden" || e.Message != "built-in skills are read-only" {
 		t.Fatalf("403 envelope: %s", resp.Body.String())
@@ -513,29 +523,95 @@ func TestSkillsComponent_Delete_Builtin_403(t *testing.T) {
 	t.Parallel()
 	h, _ := newHarness(t)
 
-	resp := h.AsOrg("acme").Delete(base + "/go")
+	// Platform-kind skills are never editable, hence never deletable
+	// (deletable = editable). A platform-SEEDED ORG-kind skill like "go" is
+	// deletable now — see TestSkillsComponent_Delete_SeededOrgSkillNowDeletable.
+	resp := h.AsOrg("acme").Delete(base + "/task-planning")
 	if resp.Code != 403 {
-		t.Fatalf("delete builtin: want 403, got %d body=%s", resp.Code, resp.Body.String())
+		t.Fatalf("delete platform-kind skill: want 403, got %d body=%s", resp.Code, resp.Body.String())
 	}
 }
 
-func TestSkillsComponent_Delete_CustomRoundTrip(t *testing.T) {
+// TestSkillsComponent_Delete_OrgSkillRoundTrips: a newly-authored org skill IS
+// deletable through this path — it carries no platform manifest entry, so the
+// manifest-aware Delete gate (editable AND not platform-seeded) lets the org
+// remove its own skill even though org and platform-seeded org share a kind.
+func TestSkillsComponent_Delete_OrgSkillRoundTrips(t *testing.T) {
 	t.Parallel()
 	h, _ := newHarness(t)
 
-	// Create a custom skill, then delete it, then confirm it is gone.
 	create := `{"name":"delete-me","skillMd":` + jsonString(skillMD("delete-me", "")) + `,"references":{}}`
 	if resp := h.AsOrg("acme").Post(base, create); resp.Code != 201 {
 		t.Fatalf("seed create: %d %s", resp.Code, resp.Body.String())
 	}
 	resp := h.AsOrg("acme").Delete(base + "/delete-me")
 	if resp.Code != 200 {
-		t.Fatalf("delete custom: want 200, got %d body=%s", resp.Code, resp.Body.String())
-	}
-	if m := decodeObject(t, resp.Body.Bytes()); m["status"] != "deleted" || m["name"] != "delete-me" {
-		t.Fatalf("delete body: %v", m)
+		t.Fatalf("delete org skill: want 200, got %d body=%s", resp.Code, resp.Body.String())
 	}
 	if resp := h.AsOrg("acme").Get(base + "/delete-me"); resp.Code != 404 {
+		t.Fatalf("after delete: want 404 (gone), got %d", resp.Code)
+	}
+}
+
+// TestSkillsComponent_Delete_SeededOrgSkillForbidden pins the surviving
+// undeletable case: a platform-KIND skill ("task-planning") stays
+// undeletable — it is never editable, and deletable = editable (Task 2).
+// (Previously this pinned a platform-SEEDED ORG-kind skill, "go", as
+// forbidden; #310's seeded-org gate is gone — such a skill is deletable now,
+// see TestSkillsComponent_Delete_SeededOrgSkillNowDeletable below.)
+func TestSkillsComponent_Delete_SeededOrgSkillForbidden(t *testing.T) {
+	t.Parallel()
+	h, _ := newHarness(t)
+
+	if resp := h.AsOrg("acme").Get(base); resp.Code != 200 { // seed + stamp baseline
+		t.Fatalf("seed: %d %s", resp.Code, resp.Body.String())
+	}
+	resp := h.AsOrg("acme").Delete(base + "/task-planning")
+	if resp.Code != 403 {
+		t.Fatalf("delete platform-kind skill: want 403, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	if resp := h.AsOrg("acme").Get(base + "/task-planning"); resp.Code != 200 {
+		t.Fatalf("after forbidden delete: want 200 (still present), got %d", resp.Code)
+	}
+}
+
+// TestSkillsComponent_Delete_SeededOrgSkillNowDeletable is the flip side:
+// a platform-seeded org skill ("go") is now deletable — reconcile (Task 1)
+// no longer re-adds a deleted org skill, so the delete sticks.
+func TestSkillsComponent_Delete_SeededOrgSkillNowDeletable(t *testing.T) {
+	t.Parallel()
+	h, _ := newHarness(t)
+
+	if resp := h.AsOrg("acme").Get(base); resp.Code != 200 { // seed + stamp baseline
+		t.Fatalf("seed: %d %s", resp.Code, resp.Body.String())
+	}
+	resp := h.AsOrg("acme").Delete(base + "/go")
+	if resp.Code != 200 {
+		t.Fatalf("delete platform-seeded org skill: want 200, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	if resp := h.AsOrg("acme").Get(base + "/go"); resp.Code != 404 {
+		t.Fatalf("after delete: want 404 (gone), got %d", resp.Code)
+	}
+}
+
+// TestSkillsComponent_Delete_ImportedRoundTrip: imported is still deletable —
+// create via import, delete it, confirm it is gone.
+func TestSkillsComponent_Delete_ImportedRoundTrip(t *testing.T) {
+	t.Parallel()
+	h, _ := newHarness(t)
+
+	tgz := makeTarGz(t, "delete-me-import", skillMD("delete-me-import", ""))
+	if resp := postSkillTarball(t, h, "acme", "delete-me-import.tgz", tgz); resp.Code != 201 {
+		t.Fatalf("seed import: %d %s", resp.Code, resp.Body.String())
+	}
+	resp := h.AsOrg("acme").Delete(base + "/delete-me-import")
+	if resp.Code != 200 {
+		t.Fatalf("delete imported: want 200, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	if m := decodeObject(t, resp.Body.Bytes()); m["status"] != "deleted" || m["name"] != "delete-me-import" {
+		t.Fatalf("delete body: %v", m)
+	}
+	if resp := h.AsOrg("acme").Get(base + "/delete-me-import"); resp.Code != 404 {
 		t.Fatalf("after delete: want 404, got %d", resp.Code)
 	}
 }

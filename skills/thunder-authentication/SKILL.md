@@ -1,6 +1,9 @@
 ---
 name: thunder-authentication
 description: How end-user identity works on the platform — Thunder, the IDP wired into the API gateway, signs users in and components authorize them. Covers the auth platform-resource dependency, the platform-owned OAuth client, the window._env_.<DEP>_* runtime keys, OIDC + PKCE in the SPA, and resolving the caller's role and directory record on the backend. Apply to any SPA whose users sign in, and to every protected backend they call.
+metadata:
+  aep:
+    kind: org
 ---
 
 # Thunder Authentication

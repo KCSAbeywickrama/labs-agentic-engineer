@@ -100,6 +100,9 @@ type TurnRequest struct {
 	// depending on the MCP minter being wired. Anthropic-only on the agents
 	// side; false/omitted is byte-identical to a turn without it.
 	WebSearch bool `json:"webSearch,omitempty"`
+	// EagerSkills names skills whose bodies the agents service inlines into
+	// this turn's prompt up front (#335 latency); unknown names are ignored.
+	EagerSkills []string `json:"eagerSkills,omitempty"`
 }
 
 // CollabBlock names the room and carries the prompting user's bearer,

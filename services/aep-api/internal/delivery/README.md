@@ -73,7 +73,7 @@ it), and every former feature→feature edge becomes a legal slice→root type r
 | `run` | the milestone run SUPERVISOR: the wait state + dispatch predicate, the cycle loop, the four budgets + no-progress + ceiling, the validation cycle, settle, and cancel. Plus the `Supervisor` handle the event plane and the build click signal and start runs through | `Runtime`, the milestone model, `RunStatus`/`MilestoneRunWorkflowID`, `MilestoneDispatch`, `DiffComponents`/`BuildRunNamePrefix`; **no GitHub client, no gorm** |
 | `runread` | the run READ surface: a version's runs + their cycles, ONE SSE stream stitching the per-cycle agent logs, and cancel. Owns no state and decides nothing | the run/cycle entities and `IsTerminalRunState`; reaches the pod log through `CycleLogReader` and the supervisor through `RunCanceller`, so it drags in neither a cluster client nor a workflow engine |
 | `codingagent` | the CodingExecutor (ONE dispatch entry point: launch a cycle's agent Job), the build-auth retry, the job watchers and the Job templates | `MilestoneDispatch`/`MilestoneDispatcher`, `TaskStreamHub`, `BuildTerminalObserver` |
-| `validation` | the two S2S validation runner callbacks (context / test-credentials), the validation issue, and the report → verdict rule | — (no cross-edges; least entangled) |
+| `validation` | the two S2S validation runner callbacks (context / test-credentials), the per-version validation issue, and the report → verdict rule | — (no cross-edges; least entangled) |
 | `httpapi` | the aggregator: embeds build/task/execution/runread handlers; **holds `Deps`** (see below) | imports the sub-packages (the exempt aggregator) |
 
 **`Deps` lives in `httpapi`, not the root.** Every other domain keeps its `Deps` in the domain root, but
@@ -101,7 +101,7 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
 | `GateResolver` (author dependencies + mint gates into a milestone) | needs | `build` → `dependencies/provisioning`. Gates are dispatch holds, never agent work |
 | `BuildTrigger` (trigger at commit + list a component's runs) | needs | `clients/openchoreo` — the fan-out, and the run list the re-trigger budget is derived from |
 | `IssueClient` (mint · milestone membership · milestone counts · assign) · `PRReader` · `PRMerger` | needs | `sourcecontrol` — every GitHub write the event plane makes, on the org's own credential |
-| `ValidationContext` · `ValidationCredentials` | offers | the S2S runner callbacks (`/internal/v1`, via the internalServer — not the public edge) |
+| `ValidationContext` · `ValidationCredentials` | offers | the S2S runner callbacks (`/internal/v1/validation/{cycleId}/…`, via the internalServer — not the public edge). Keyed by the CYCLE the pod was dispatched for, which is the only identity a runner has |
 
 ## Owns
 - The **executions** store (now provisioning gates only) and the Temporal `Runtime` + the one workflow on it.
@@ -168,6 +168,12 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   no-op. Gates (`aep:provision` + `aep:dep/<slug>`, minted by `dependencies/provisioning`) and the
   validation issue (`aep:validation`) deliberately do NOT carry `aep` — a gate is a dispatch hold and the
   validation issue is a phase of the run, and neither may hold the settle predicate open.
+  The corollary, and the trap: a read that NARROWS on `aep` cannot see either of them. So a decision that
+  must weigh them (the auto-merge policy, which merges the validation cycle's pull request) reads the
+  milestone's open issues UNFILTERED and decides on the labels itself. `?labels=` on the REST issues
+  endpoint is AND, so there is no filter that returns both populations anyway — and a label predicate split
+  across the fetch and the decision is one rule in two places, which is how the validation cycle's pull
+  request once ended up declined as "not this run's work".
 - **Milestone assignment rides issue creation.** A plan costs `1+N` content-generating requests against
   GitHub's 80-per-minute ceiling: one milestone create plus one issue create per Task. Never
   create-then-PATCH, and never a label pre-create per issue (`sourcecontrol` memoises the ensure).
@@ -201,8 +207,12 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   a Job that exited without a pull request); `build-retrigger-budget` is a build that stayed red through
   its one automatic re-trigger with no fix issue to recover it; `fix-chain-budget` and `conflict-budget`
   bound the two recovery chains; `no-progress` is a green cycle that left the milestone unchanged;
-  `cycle-ceiling` is the backstop over all of them; `validation-failed` is the verdict. A run that settles
-  for a reason outside this list is a bug in the loop, not a new state.
+  `cycle-ceiling` is the backstop over all of them. The validating phase contributes two, and they are
+  two because they are different failures: `validation-failed` is a criterion that asserted and lost —
+  a fact about the software — while `validation-unreported` is the agent merging its pull request
+  without committing a report at all, which proves nothing about the software and is a breach of the
+  runner contract. `ValidationVerdictFailsRun` / `IsValidationTerminalReason` are the executable copy of
+  that pair. A run that settles for a reason outside this list is a bug in the loop, not a new state.
 - **Settle closes the milestone; nothing branches on that.** Milestone state is display only, closed
   milestones still accept new issues, and a failed or cancelled increment leaves its milestone OPEN
   because the way forward from it is more work in the same version. A stray gate never blocks settle:
@@ -267,6 +277,11 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   every cycle boundary open), dispatches one cycle at it with `AEP_TASK_KIND=validation`, and reads the
   committed report back as the run's VERDICT. The acceptance oracle
   `specs/validation/validation-criteria.json` is read-only input authored in the design phase (spec domain).
+  **ONE validation issue per version, filed into the version's milestone by the create itself** — like a
+  Task, it carries no version label, because the milestone is the pin. Per version and not per project:
+  the body embeds the criteria as they stood at mint time, so adopting an older version's issue would
+  hand this version's agent the wrong oracle, and re-filing it would erase it from the ledger of the
+  version it actually validated. The version's own open issue is looked up by milestone, and only there.
 - **The list read returns three populations, and hides one** (`task/reads.go` `ListByTag`, the read-model
   boundary). Every row carries the label-derived `executorClass` the console sections on: `coding` (agent
   work), `provision` (a dispatch gate, which the console renders as a hold banner rather than a row), and

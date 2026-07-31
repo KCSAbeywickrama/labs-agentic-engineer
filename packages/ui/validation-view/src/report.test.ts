@@ -48,7 +48,10 @@ const REPORT = JSON.stringify({
       healed: true,
       flaky: false,
       durationMs: 800,
-      failure: "expected 200, got 500",
+      failure: {
+        message: "expected 200, got 500",
+        location: "tests/e2e/specs/AC-001-b.spec.ts:42",
+      },
     },
     {
       id: "AC-013-a",
@@ -83,7 +86,11 @@ describe("parseValidationReport", () => {
 
   it("carries failure/spec/healed/flaky/duration on the failing e2e row", () => {
     const fail = ok(REPORT).get("AC-001-b")!;
+    // generate-report.mjs writes failure as { message, location }. Reading it as a
+    // bare string produced "" for every real report, so the view's failure block
+    // was dead in production while string-shaped fixtures kept these tests green.
     expect(fail.failure).toBe("expected 200, got 500");
+    expect(fail.failureLocation).toBe("tests/e2e/specs/AC-001-b.spec.ts:42");
     expect(fail.spec).toBe("tests/e2e/specs/AC-001-b.spec.ts");
     expect(fail.healed).toBe(true);
     expect(fail.flaky).toBe(false);
@@ -138,5 +145,27 @@ describe("parseValidationReport", () => {
     expect(
       "kind" in parseValidationReport(JSON.stringify({ criteria: {} })),
     ).toBe(true);
+  });
+
+  it("still accepts a string failure from an older report", () => {
+    const legacy = JSON.stringify({
+      schemaVersion: 1,
+      criteria: [{ id: "AC-1", method: "e2e", status: "fail", failure: "boom" }],
+    });
+    const entry = ok(legacy).get("AC-1")!;
+    expect(entry.failure).toBe("boom");
+    expect(entry.failureLocation).toBeUndefined();
+  });
+
+  it("keeps a location even when the failure carries no message", () => {
+    const noMessage = JSON.stringify({
+      schemaVersion: 1,
+      criteria: [
+        { id: "AC-1", method: "e2e", status: "fail", failure: { location: "a.spec.ts:1" } },
+      ],
+    });
+    const entry = ok(noMessage).get("AC-1")!;
+    expect(entry.failure).toBeUndefined();
+    expect(entry.failureLocation).toBe("a.spec.ts:1");
   });
 });

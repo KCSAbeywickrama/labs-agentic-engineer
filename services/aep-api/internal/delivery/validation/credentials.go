@@ -55,30 +55,30 @@ type CredentialProvider interface {
 }
 
 // CredentialService answers the runner's test-credential request. It resolves
-// the runner's execution id to its project (org-fenced, reusing the
-// validation-context ExecutionLocator) so the provider gets a verified project,
-// then delegates to the provider. Unknown execution → ErrExecutionNotFound
-// (surfaced as 404), exactly like the context fetch.
+// the runner's cycle id to its project (org-fenced, reusing the
+// validation-context CycleLocator) so the provider gets a verified project, then
+// delegates to the provider. Unknown cycle → ErrCycleNotFound (surfaced as 404),
+// exactly like the context fetch.
 type CredentialService struct {
-	execs ExecutionLocator
-	creds CredentialProvider
+	cycles CycleLocator
+	creds  CredentialProvider
 }
 
 // NewCredentialService wires the credential service.
-func NewCredentialService(execs ExecutionLocator, creds CredentialProvider) *CredentialService {
-	return &CredentialService{execs: execs, creds: creds}
+func NewCredentialService(cycles CycleLocator, creds CredentialProvider) *CredentialService {
+	return &CredentialService{cycles: cycles, creds: creds}
 }
 
-// RequestCredentials resolves the runner's execution to its project (org-fenced)
-// and returns the provider's test account. orgHandle is the verified caller org
-// (the auth layer fences it against the execution).
-func (s *CredentialService) RequestCredentials(ctx context.Context, executionID, orgHandle string, req CredentialRequest) (*TestCredential, error) {
-	projectID, found, err := s.execs.LookupExecutionProject(ctx, orgHandle, executionID)
+// RequestCredentials resolves the runner's cycle to its project (org-fenced) and
+// returns the provider's test account. orgHandle is the verified caller org (the
+// auth layer fences it against the cycle).
+func (s *CredentialService) RequestCredentials(ctx context.Context, cycleID, orgHandle string, req CredentialRequest) (*TestCredential, error) {
+	projectID, found, err := s.cycles.LookupCycleProject(ctx, orgHandle, cycleID)
 	if err != nil {
-		return nil, fmt.Errorf("request credentials: resolve execution: %w", err)
+		return nil, fmt.Errorf("request credentials: resolve cycle: %w", err)
 	}
 	if !found {
-		return nil, ErrExecutionNotFound
+		return nil, ErrCycleNotFound
 	}
 	cred, err := s.creds.RequestCredentials(ctx, orgHandle, projectID, req)
 	if err != nil {

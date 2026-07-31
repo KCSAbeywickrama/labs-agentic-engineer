@@ -16,15 +16,18 @@
 
 // UNIT tier: the reconcile.go branches repo_store_test.go doesn't reach. That
 // file proves seed-on-first-read (built-ins + flow), rewrite-of-a-missing
-// skill, and the no-op. This file adds: content-diff overwrite (embedded
-// content SHA ≠ the repo copy's), the purge of a retired built-in the embed no
-// longer ships, the UpdatesAvailable rows (stale + absent), the embedded
-// loaders for both kinds, and the EnsureProvisioned guards.
+// skill, and the no-op. This file adds: the org-edit-preserved branch (a
+// diverged, manifest-tracked repo copy the platform hasn't moved is left
+// alone — reconcile_manifest_test.go covers the rest of the three-way
+// matrix), an unmanaged org skill surviving reconcile untouched, the
+// UpdatesAvailable rows (stale + absent), the embedded loaders for both
+// kinds, and the EnsureProvisioned guards.
 package spec
 
 import (
 	"context"
 	"io/fs"
+	"strings"
 	"testing"
 	"testing/fstest"
 )
@@ -63,40 +66,66 @@ func contentSHAOf(t *testing.T, skills []Skill, name string) string {
 	return ""
 }
 
-func TestReconcile_OverwritesStaleBuiltin(t *testing.T) {
+// TestReconcile_OrgEditPreserved pins the three-way semantics (spec §3): once
+// a skill's baseline is stamped by seeding, a repo copy that diverges from
+// the baseline while the platform side does NOT move is an ORG EDIT
+// (actionOverride) — reconcile must leave it alone, not clobber it back to
+// the embedded content. This supersedes the old two-way
+// "content-diff always wins" behavior.
+func TestReconcile_OrgEditPreserved(t *testing.T) {
 	t.Parallel()
 	svc, host := newTestStore(t)
 	ctx := context.Background()
-	if _, err := svc.List(ctx, "org1"); err != nil { // seed at embed content
+	if _, err := svc.List(ctx, "org1"); err != nil { // seed at embed content (stamps the baseline)
 		t.Fatalf("seed: %v", err)
 	}
-	// Plant a `go` whose content differs from the embed, then reconcile — the
-	// content-diff branch must overwrite it back to the embedded copy.
+	// Plant a `go` whose content differs from the embed — an org edit, since
+	// the embed hasn't moved.
 	host.writeAtHead("org1", skillRepoPath("go"), goBuiltinStale())
 
 	n, err := svc.Reconcile(ctx, "org1")
 	if err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
-	if n != 1 {
-		t.Fatalf("Reconcile wrote %d, want 1 (only stale `go`)", n)
+	if n != 0 {
+		t.Fatalf("Reconcile changed %d, want 0 (org edit must be preserved)", n)
 	}
-	// After the overwrite the repo copy matches the embedded content byte-for-byte.
+	// The planted content survives untouched.
 	got, _ := svc.List(ctx, "org1")
-	if sha := contentSHAOf(t, got, "go"); sha != embeddedSkill(t, "go").ContentSHA {
-		t.Fatalf("after overwrite go content SHA = %s, want the embedded copy's", sha)
+	if !strings.Contains(contentOf(t, got, "go"), "stale body") {
+		t.Fatalf("org edit to `go` was clobbered: %+v", nameSet(got)["go"])
 	}
 }
 
-func TestReconcile_PurgesRetiredBuiltin(t *testing.T) {
+// contentOf returns the resolved skill's SKILL.md, or fails the test.
+func contentOf(t *testing.T, skills []Skill, name string) string {
+	t.Helper()
+	for _, sk := range skills {
+		if sk.Name == name {
+			return sk.SkillMD
+		}
+	}
+	t.Fatalf("skill %q not present in %v", name, skillKeysOf(nameSet(skills)))
+	return ""
+}
+
+// TestReconcile_KeepsUnmanagedOrgSkill pins the three-way purge scope (spec
+// §3): reconcile purges ONLY names the manifest still tracks as
+// platform-shipped that the embed no longer ships. A repo-only skill that was
+// never platform-shipped (no manifest entry — org-authored, or a name that
+// simply never round-tripped through seed/reconcile) is never touched, even
+// though it happens to share a name pattern with a retired built-in. This
+// supersedes the old two-way behavior, which purged any name absent from the
+// embed regardless of provenance.
+func TestReconcile_KeepsUnmanagedOrgSkill(t *testing.T) {
 	t.Parallel()
 	svc, host := newTestStore(t)
 	ctx := context.Background()
 	if _, err := svc.List(ctx, "org1"); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	// A built-in the embed no longer ships lingers in the repo — reconcile must
-	// delete it, or it would keep getting inlined into agent prompts forever.
+	// A skill the embed has never shipped, written directly to the repo — org
+	// authored, no manifest entry.
 	host.writeAtHead("org1", skillRepoPath("retired-legacy"),
 		"---\nname: retired-legacy\ndescription: No longer shipped.\n---\n\ngone\n")
 
@@ -104,16 +133,16 @@ func TestReconcile_PurgesRetiredBuiltin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
-	if n != 1 {
-		t.Fatalf("Reconcile changed %d, want 1 (the retired purge)", n)
+	if n != 0 {
+		t.Fatalf("Reconcile changed %d, want 0 (unmanaged org skill must be kept)", n)
 	}
 	got, _ := svc.List(ctx, "org1")
-	if _, present := nameSet(got)["retired-legacy"]; present {
-		t.Fatalf("retired built-in should be purged, still present: %v", skillKeysOf(nameSet(got)))
+	if _, present := nameSet(got)["retired-legacy"]; !present {
+		t.Fatalf("unmanaged org skill should be kept, was purged: %v", skillKeysOf(nameSet(got)))
 	}
-	// The real built-ins survive the purge.
+	// The real built-ins are unaffected.
 	if _, ok := nameSet(got)["go"]; !ok {
-		t.Fatalf("purge removed a live built-in")
+		t.Fatalf("reconcile removed a live built-in")
 	}
 }
 
@@ -138,27 +167,29 @@ func TestUpdatesAvailable_ReportsStaleAndAbsent(t *testing.T) {
 		}
 	})
 
-	t.Run("absent built-in surfaces on the badge", func(t *testing.T) {
+	t.Run("absent org-kind default does NOT surface (opt-in)", func(t *testing.T) {
 		t.Parallel()
 		svc, host := newTestStore(t)
 		ctx := context.Background()
 		if _, err := svc.List(ctx, "org1"); err != nil {
 			t.Fatalf("seed: %v", err)
 		}
+		// go is org-kind. An absent org-kind default (org-deleted, or a
+		// newly-shipped default not yet added) is OPT-IN on ongoing sync:
+		// Reconcile won't seed it, so UpdatesAvailable must NOT advertise it
+		// as an "update" (mirrors reconcileEmbedded's org-kind-absent skip).
+		// It belongs to the separate "available to add" surface, not the
+		// updates badge — otherwise the badge invites a sync that no-ops.
 		host.removeAtHead("org1", skillRepoPath("go"))
 
 		ups, err := svc.UpdatesAvailable(ctx, "org1")
 		if err != nil {
 			t.Fatalf("UpdatesAvailable: %v", err)
 		}
-		var found bool
 		for i := range ups {
 			if ups[i].Name == "go" {
-				found = true
+				t.Fatalf("absent org-kind default must NOT surface on the updates badge, got %+v", ups)
 			}
-		}
-		if !found {
-			t.Fatalf("absent go must surface on the badge, got %+v", ups)
 		}
 	})
 
@@ -215,9 +246,9 @@ func TestEnsureProvisioned_Guards(t *testing.T) {
 }
 
 // The unified embedded library: every skill vendored from repo-root skills/
-// loads with its kind read from frontmatter — platform for the 8 generation
-// skills (stamped metadata.aep.kind: platform), org for the 4 unmarked stack
-// skills (absent → org). One loader, one source tree.
+// loads with its kind read from frontmatter — platform for the generation
+// skills, org for the stack skills, both stamped metadata.aep.kind explicitly
+// (an absent kind still defaults to org). One loader, one source tree.
 func TestLoadEmbeddedLibrary(t *testing.T) {
 	t.Parallel()
 	fsys := testLibraryFS(t)
@@ -239,8 +270,9 @@ func TestLoadEmbeddedLibrary(t *testing.T) {
 	}
 	wantKinds := map[string]string{
 		"api-management": "org", "go": "org", "react-webapp": "org", "thunder-authentication": "org",
-		"cell-architecture-dsl": "platform", "excalidraw-wireframes": "platform", "grilling": "platform",
-		"high-level-architecture": "platform", "openapi-conventions": "platform",
+		"cell-architecture-dsl": "platform", "design": "platform",
+		"excalidraw-wireframes": "platform", "grilling": "platform",
+		"high-level-architecture": "platform", "openapi-conventions": "platform", "start": "platform",
 		"task-breakdown": "platform", "task-planning": "platform", "validation-criteria": "platform",
 	}
 	for name, kind := range wantKinds {

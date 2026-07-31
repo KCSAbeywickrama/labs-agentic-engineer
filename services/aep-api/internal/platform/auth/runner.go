@@ -33,12 +33,15 @@ import (
 	"github.com/wso2/aep/aep-api/internal/platform/tenant"
 )
 
-// ExecutionOrgLookup returns the owning org handle of an execution. It is
-// injected (from the composition root) so this package — the auth layer —
-// never imports a feature package; it is needed only for the publisher-cc
-// branch, which is org-scoped and must confirm the path execution belongs to
-// the token's org.
-type ExecutionOrgLookup func(ctx context.Context, executionID string) (orgHandle string, err error)
+// CycleOrgLookup returns the owning org handle of a run cycle. It is injected
+// (from the composition root) so this package — the auth layer — never imports a
+// feature package; it is needed only for the publisher-cc branch, which is
+// org-scoped and must confirm the path cycle belongs to the token's org.
+//
+// The CYCLE is the runner's identity: every agent pod is launched by the
+// milestone supervisor, which carries the cycle id to the pod and binds it into
+// the bearer. A lookup that misses fails the request closed.
+type CycleOrgLookup func(ctx context.Context, cycleID string) (orgHandle string, err error)
 
 // RunnerAuthorizer verifies a runner-callback bearer and resolves the acting
 // org. It is the inbound half of the symmetric S2S identity model — the
@@ -48,7 +51,7 @@ type ExecutionOrgLookup func(ctx context.Context, executionID string) (orgHandle
 type RunnerAuthorizer struct {
 	taskTokens *TaskTokenManager
 	publisher  *PublisherTokenVerifier // may be nil (Task-JWT only)
-	execOrg    ExecutionOrgLookup
+	cycleOrg   CycleOrgLookup
 }
 
 // HTTPError is the neutral transport error the authorizer returns (401/403);
@@ -61,32 +64,38 @@ type HTTPError struct {
 
 func (e *HTTPError) Error() string { return e.Message }
 
+// cycleUnavailable is the ONE answer the publisher-cc branch gives for a cycle
+// the caller may not act on, whatever the reason. Kept a constant so a later
+// edit cannot reintroduce a second, more specific message on one of the two
+// arms — which is all it would take to make the pair distinguishable again.
+const cycleUnavailable = "cycle not found"
+
 // NewRunnerAuthorizer builds the authorizer. publisher may be nil (local dev
 // without the platform IDP) — then only BFF Task-JWTs are accepted.
-func NewRunnerAuthorizer(taskTokens *TaskTokenManager, publisher *PublisherTokenVerifier, execOrg ExecutionOrgLookup) *RunnerAuthorizer {
-	return &RunnerAuthorizer{taskTokens: taskTokens, publisher: publisher, execOrg: execOrg}
+func NewRunnerAuthorizer(taskTokens *TaskTokenManager, publisher *PublisherTokenVerifier, cycleOrg CycleOrgLookup) *RunnerAuthorizer {
+	return &RunnerAuthorizer{taskTokens: taskTokens, publisher: publisher, cycleOrg: cycleOrg}
 }
 
-// Authorize verifies authHeader for a runner callback scoped to executionID
-// and returns the verified caller. The BFF Task-JWT is tried first (BFF-signed
-// and execution-bound: the token's `taskId` claim — kept for wire compat, it
-// carries the execution id since the §9.2 re-key — MUST equal the path id, the
-// INT-6 fence); then the publisher-cc token (org-bound: the path execution
-// MUST belong to the token's org). Returns an *HTTPError on any failure; the
-// caller (the internal surface's auth gate) maps it onto its envelope.
-func (a *RunnerAuthorizer) Authorize(ctx context.Context, authHeader, executionID string) (tenant.Caller, error) {
+// Authorize verifies authHeader for a runner callback scoped to cycleID and
+// returns the verified caller. The BFF Task-JWT is tried first (BFF-signed and
+// cycle-bound: the token's `taskId` claim — kept for wire compat, it carries the
+// dispatched cycle id — MUST equal the path id, the INT-6 fence); then the
+// publisher-cc token (org-bound: the path cycle MUST belong to the token's org).
+// Returns an *HTTPError on any failure; the caller (the internal surface's auth
+// gate) maps it onto its envelope.
+func (a *RunnerAuthorizer) Authorize(ctx context.Context, authHeader, cycleID string) (tenant.Caller, error) {
 	const prefix = "Bearer "
 	if len(authHeader) <= len(prefix) || !strings.EqualFold(authHeader[:len(prefix)], prefix) {
 		return tenant.Caller{}, &HTTPError{Status: 401, Message: "bearer token required"}
 	}
 	tok := authHeader[len(prefix):]
 
-	// BFF Task-JWT first: signed by this BFF, execution-bound by the INT-6 fence.
+	// BFF Task-JWT first: signed by this BFF, cycle-bound by the INT-6 fence.
 	if a.taskTokens != nil {
 		if claims, err := a.taskTokens.Verify(tok); err == nil {
-			if claims.TaskID != executionID {
+			if claims.TaskID != cycleID {
 				slog.WarnContext(ctx, "runner callback: task bearer subject mismatch",
-					"execution", executionID, "claimTaskId", claims.TaskID)
+					"cycle", cycleID, "claimTaskId", claims.TaskID)
 				return tenant.Caller{}, &HTTPError{Status: 403, Message: "task bearer does not match path"}
 			}
 			return tenant.Caller{
@@ -98,21 +107,28 @@ func (a *RunnerAuthorizer) Authorize(ctx context.Context, authHeader, executionI
 	}
 
 	// Publisher client-credentials fallback: org-bound (the token's audience
-	// embeds the org). Confirm the path execution actually belongs to that org
-	// so an org-A token cannot read/refresh an org-B execution it merely names
-	// in the path.
+	// embeds the org). Confirm the path cycle actually belongs to that org so an
+	// org-A token cannot read/refresh an org-B cycle it merely names in the path.
+	//
+	// Both ways that check can fail answer with the SAME message. They are
+	// different facts — "no such cycle" and "that cycle is another org's" — and
+	// telling them apart is exactly what turns a valid org-A token into an oracle
+	// for whether a given cycle id exists anywhere on the platform. To this caller
+	// the two are identical anyway: neither is a cycle it may act on. The
+	// distinction survives in the logs, where the operator can see it and the
+	// prober cannot.
 	if a.publisher != nil {
 		if claims, err := a.publisher.Verify(tok); err == nil {
-			execOrg, lerr := a.execOrg(ctx, executionID)
-			if lerr != nil || execOrg == "" {
-				slog.WarnContext(ctx, "runner callback: execution lookup failed",
-					"execution", executionID, "error", lerr)
-				return tenant.Caller{}, &HTTPError{Status: 403, Message: "execution not found"}
+			cycleOrg, lerr := a.cycleOrg(ctx, cycleID)
+			if lerr != nil || cycleOrg == "" {
+				slog.WarnContext(ctx, "runner callback: cycle lookup failed",
+					"cycle", cycleID, "error", lerr)
+				return tenant.Caller{}, &HTTPError{Status: 403, Message: cycleUnavailable}
 			}
-			if execOrg != claims.OrgHandle {
+			if cycleOrg != claims.OrgHandle {
 				slog.WarnContext(ctx, "runner callback: publisher org mismatch",
-					"execution", executionID, "executionOrg", execOrg, "publisherOrg", claims.OrgHandle)
-				return tenant.Caller{}, &HTTPError{Status: 403, Message: "publisher token does not match execution org"}
+					"cycle", cycleID, "cycleOrg", cycleOrg, "publisherOrg", claims.OrgHandle)
+				return tenant.Caller{}, &HTTPError{Status: 403, Message: cycleUnavailable}
 			}
 			return tenant.Caller{
 				Org:    tenant.OrgHandle(claims.OrgHandle),
@@ -121,6 +137,6 @@ func (a *RunnerAuthorizer) Authorize(ctx context.Context, authHeader, executionI
 		}
 	}
 
-	slog.WarnContext(ctx, "runner callback: bearer rejected by all verifiers", "execution", executionID)
+	slog.WarnContext(ctx, "runner callback: bearer rejected by all verifiers", "cycle", cycleID)
 	return tenant.Caller{}, &HTTPError{Status: 401, Message: "invalid bearer"}
 }

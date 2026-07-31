@@ -111,6 +111,25 @@ func (h *testGitHost) removeAtHead(orgID, path string) {
 	h.origin(orgID).Remove(h.t, "test remove "+path, path)
 }
 
+// readAtHead returns one file's exact content at the org's origin main tip
+// ("" if the org, the ref, or the path is absent), so tests can assert
+// committed bytes outside the skill catalog (e.g. skills-manifest.json)
+// without failing the test on a legitimate absence. Mirrors gitDirOut's
+// plumbing but tolerates the not-found case gittest.Remote.FileAt does not.
+func (h *testGitHost) readAtHead(orgID, path string) string {
+	origin := h.origin(orgID)
+	if origin == nil {
+		return ""
+	}
+	cmd := exec.Command("git", "--git-dir", origin.Dir(), "cat-file", "blob", "main:"+path)
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return string(out)
+}
+
 // mirrorGitDir is the engine-side bare mirror location for the org's skills repo.
 func (h *testGitHost) mirrorGitDir(orgID string) (string, error) {
 	h.mu.Lock()
@@ -277,6 +296,10 @@ func TestFreshOrgProvisioning_SeedsEmbeddedLibrary(t *testing.T) {
 	}
 }
 
+// PLATFORM-kind builtins are always managed, so ongoing sync restores a
+// deleted one. (An org-kind builtin like `go` is opt-in on ongoing sync — see
+// TestReconcile_OngoingSync_DoesNotReAddDeletedOrgSkill in
+// reconcile_manifest_test.go — so this test targets a platform-kind name.)
 func TestReconcile_RewritesMissingBuiltin(t *testing.T) {
 	t.Parallel()
 	svc, host := newTestStore(t)
@@ -284,19 +307,20 @@ func TestReconcile_RewritesMissingBuiltin(t *testing.T) {
 	if _, err := svc.List(ctx, "org1"); err != nil { // triggers seed
 		t.Fatalf("seed: %v", err)
 	}
-	// Simulate the `go` built-in being deleted from the repo.
-	host.removeAtHead("org1", skillRepoPath("go"))
+	// Simulate the `high-level-architecture` platform builtin being deleted
+	// from the repo.
+	host.removeAtHead("org1", skillRepoPath("high-level-architecture"))
 
 	n, err := svc.Reconcile(ctx, "org1")
 	if err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
 	if n != 1 {
-		t.Fatalf("Reconcile wrote %d, want 1 (only `go` was missing)", n)
+		t.Fatalf("Reconcile wrote %d, want 1 (only `high-level-architecture` was missing)", n)
 	}
 	got, _ := svc.List(ctx, "org1")
-	if _, ok := nameSet(got)["go"]; !ok {
-		t.Fatalf("`go` should be restored after reconcile")
+	if _, ok := nameSet(got)["high-level-architecture"]; !ok {
+		t.Fatalf("`high-level-architecture` should be restored after reconcile")
 	}
 }
 
@@ -353,7 +377,7 @@ func TestReconcile_NoopWhenUpToDate(t *testing.T) {
 	}
 }
 
-func TestCreateAndDeleteCustomSkill(t *testing.T) {
+func TestCreateOrgSkill_EditableAndDeletable(t *testing.T) {
 	t.Parallel()
 	svc, _ := newTestStore(t)
 	mut := NewSkillMutationService(svc)
@@ -373,8 +397,8 @@ func TestCreateAndDeleteCustomSkill(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if created == nil || created.Kind != "custom" {
-		t.Fatalf("created skill = %+v, want kind=custom", created)
+	if created == nil || created.Kind != SkillKindOrg {
+		t.Fatalf("created skill = %+v, want kind=org", created)
 	}
 
 	resolved, err := svc.Resolve(ctx, "org1", "payments-pci")
@@ -388,8 +412,21 @@ func TestCreateAndDeleteCustomSkill(t *testing.T) {
 			found = &summaries[i]
 		}
 	}
-	if found == nil || !found.Editable {
-		t.Fatalf("custom skill should appear in summaries as editable; got %+v", found)
+	if found == nil || !found.Editable || !found.Deletable {
+		t.Fatalf("user-authored org skill should appear in summaries as editable AND deletable; got %+v", found)
+	}
+
+	// A platform-seeded org skill (go) is editable in place AND deletable —
+	// deletable = editable (Task 2); reconcile no longer re-seeds a deleted
+	// platform default, so the delete sticks.
+	var goSum *SkillSummary
+	for i := range summaries {
+		if summaries[i].Name == "go" {
+			goSum = &summaries[i]
+		}
+	}
+	if goSum == nil || !goSum.Editable || !goSum.Deletable {
+		t.Fatalf("platform-seeded org skill %q should be editable AND deletable; got %+v", "go", goSum)
 	}
 
 	// Duplicate create → collision.
@@ -397,13 +434,14 @@ func TestCreateAndDeleteCustomSkill(t *testing.T) {
 		t.Fatalf("duplicate create err = %v, want ErrSkillNameCollision", err)
 	}
 
-	// Delete → gone.
+	// Delete is manifest-aware: a user-authored org skill (no platform
+	// manifest entry, unlike a platform-seeded one) is deletable through this
+	// path, editable AND owned by the org.
 	if err := mut.Delete(ctx, "org1", "tester", "payments-pci"); err != nil {
-		t.Fatalf("Delete: %v", err)
+		t.Fatalf("delete user-authored org skill err = %v, want success", err)
 	}
-	gone, _ := svc.Resolve(ctx, "org1", "payments-pci")
-	if gone != nil {
-		t.Fatalf("skill should be gone after delete, got %+v", gone)
+	if resolved, _ := svc.Resolve(ctx, "org1", "payments-pci"); resolved != nil {
+		t.Fatalf("payments-pci should be gone after delete, got %+v", resolved)
 	}
 }
 
@@ -415,8 +453,11 @@ func TestDeleteBuiltinIsForbidden(t *testing.T) {
 	if _, err := svc.List(ctx, "org1"); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	if err := mut.Delete(ctx, "org1", "tester", "go"); err != ErrSkillNotEditable {
-		t.Fatalf("delete builtin err = %v, want ErrSkillNotEditable", err)
+	// Platform-kind skills stay undeletable (never editable). A
+	// platform-SEEDED ORG-kind skill like "go" is deletable now — see
+	// TestDelete_SeededOrgSkill_NowDeletable in skill_mutation_more_test.go.
+	if err := mut.Delete(ctx, "org1", "tester", "task-planning"); err != ErrSkillNotEditable {
+		t.Fatalf("delete platform-kind skill err = %v, want ErrSkillNotEditable", err)
 	}
 }
 
@@ -466,8 +507,9 @@ func TestRead_SeesExternalOriginCommitImmediately(t *testing.T) {
 		t.Fatalf("List: %v", err)
 	}
 
-	// An external writer commits a flat, custom-stamped skill (the layout the
-	// service itself writes).
+	// An external writer commits a flat skill stamped with the retired
+	// "custom" kind (back-compat: a stored skill predating the fold still
+	// reads back as org).
 	external := mkSkillMD("external-skill", "custom", "external body")
 	host.writeAtHead("org1", skillRepoPath("external-skill"), external)
 
@@ -476,7 +518,7 @@ func TestRead_SeesExternalOriginCommitImmediately(t *testing.T) {
 		t.Fatalf("List 2: %v", err)
 	}
 	sk, ok := nameSet(got)["external-skill"]
-	if !ok || sk.Kind != SkillKindCustom {
+	if !ok || sk.Kind != SkillKindOrg {
 		t.Fatalf("externally committed skill not visible on next read: %v", skillKeysOf(nameSet(got)))
 	}
 }
@@ -532,7 +574,7 @@ func TestCommitFiles_ConcurrentCommitsSerialize(t *testing.T) {
 		go func(i int, name string) {
 			defer wg.Done()
 			writes := map[string][]byte{skillRepoPath(name): []byte(skillMDNamed(name, ""))}
-			_, errs[i] = svc.commitFiles(ctx, "org1", repo, "add "+name, writes, nil)
+			_, errs[i] = svc.commitFiles(ctx, "org1", repo, "add "+name, writes, nil, nil)
 		}(i, name)
 	}
 	wg.Wait()
@@ -570,6 +612,62 @@ func TestCommitFiles_ConcurrentCommitsSerialize(t *testing.T) {
 		t.Fatalf("mirrorGitDir: %v", err)
 	}
 	gitDirOut(t, mirror, "fsck", "--strict")
+}
+
+// TestCommitFiles_ManifestMergeSurvivesCASRetry is the regression for the
+// lost-update hazard: the manifest merge now runs INSIDE the CAS closure, so a
+// concurrent commit that adds another skill's entry between this op's base
+// read and its push is folded in on the forced retry instead of clobbered.
+//
+// It is a genuine race-shaped test driven through the real engine + real
+// origin + real CAS retry: the injected manifestFn, on its FIRST invocation,
+// lands a competing entry ("A") directly on the origin — advancing main after
+// this attempt resolved its base but before it pushes. The push is rejected
+// non-fast-forward, Mutate re-fetches + re-runs the closure against the new
+// base ({..,A}), and this op's own entry ("B") is merged on top → both survive.
+// A pre-rendered manifest captured outside the closure would drop "A" here.
+func TestCommitFiles_ManifestMergeSurvivesCASRetry(t *testing.T) {
+	t.Parallel()
+	svc, host := newTestStore(t)
+	ctx := context.Background()
+	repo, err := svc.ensureSkillsRepo(ctx, "org1") // provision + seed
+	if err != nil {
+		t.Fatalf("ensureSkillsRepo: %v", err)
+	}
+
+	injected := false
+	manifestFn := func(m SkillsManifest) SkillsManifest {
+		if !injected {
+			injected = true
+			// A concurrent writer lands entry "A" on origin, advancing main
+			// past the base this attempt built on → forces the CAS retry.
+			competitor := parseSkillsManifest([]byte(host.readAtHead("org1", skillsManifestPath)))
+			competitor["A"] = ManifestEntry{Origin: ManifestOriginImported, BaseHash: "aaa"}
+			host.writeAtHead("org1", skillsManifestPath, string(renderSkillsManifest(competitor)))
+		}
+		m["B"] = ManifestEntry{Origin: ManifestOriginImported, BaseHash: "bbb"}
+		return m
+	}
+
+	writes := map[string][]byte{skillRepoPath("B"): []byte(skillMDNamed("B", ""))}
+	if _, err := svc.commitFiles(ctx, "org1", repo, "add B", writes, nil, manifestFn); err != nil {
+		t.Fatalf("commitFiles: %v", err)
+	}
+	if !injected {
+		t.Fatal("manifestFn never ran — the merge closure was skipped")
+	}
+
+	final := parseSkillsManifest([]byte(host.readAtHead("org1", skillsManifestPath)))
+	if _, ok := final["A"]; !ok {
+		t.Fatalf("concurrent entry A lost — manifest not re-read on the CAS retry: %#v", final)
+	}
+	if _, ok := final["B"]; !ok {
+		t.Fatalf("this op's entry B missing from the merged manifest: %#v", final)
+	}
+	// Same-commit invariant: B's SKILL.md landed alongside the manifest.
+	if got := host.readAtHead("org1", skillRepoPath("B")); !strings.Contains(got, "name: B") {
+		t.Fatalf("skill B file did not land in the same commit: %q", got)
+	}
 }
 
 func skillKeysOf(m map[string]Skill) []string {

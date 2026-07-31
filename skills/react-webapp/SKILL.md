@@ -1,6 +1,9 @@
 ---
 name: react-webapp
 description: How to build a React SPA on the platform.
+metadata:
+  aep:
+    kind: org
 ---
 
 # React Webapp

@@ -210,6 +210,33 @@ func TestRunnerAuthorizer_PublisherCC(t *testing.T) {
 			t.Fatalf("status = %d, want 403 (err=%v)", got, err)
 		}
 	})
+
+	// A cycle that belongs to ANOTHER org and a cycle that does not exist must be
+	// indistinguishable to the caller. A different message on the cross-org arm
+	// turns a valid org-A token into an oracle for whether any given cycle id
+	// exists on the platform — the id is all the prober has to supply, and a
+	// distinguishable answer is the whole exploit. Same status AND same message;
+	// only the log may tell them apart.
+	t.Run("another org's cycle is indistinguishable from a missing one", func(t *testing.T) {
+		answer := func(lookup CycleOrgLookup) (int, string) {
+			a := NewRunnerAuthorizer(newRunnerTaskManager(t), verifier, lookup)
+			_, err := a.Authorize(context.Background(), "Bearer "+mint("org-a", "org-a"), "cycle-1")
+			var he *HTTPError
+			if !errors.As(err, &he) {
+				t.Fatalf("want an *HTTPError, got %v", err)
+			}
+			return he.Status, he.Message
+		}
+		missingStatus, missingMsg := answer(
+			func(context.Context, string) (string, error) { return "", errors.New("no such cycle") })
+		otherStatus, otherMsg := answer(
+			func(context.Context, string) (string, error) { return "org-b", nil })
+
+		if missingStatus != otherStatus || missingMsg != otherMsg {
+			t.Fatalf("the two answers leak which cycles exist: missing=%d/%q, other-org=%d/%q",
+				missingStatus, missingMsg, otherStatus, otherMsg)
+		}
+	})
 }
 
 // A Task-JWT minted for a different org still authenticates (signature is

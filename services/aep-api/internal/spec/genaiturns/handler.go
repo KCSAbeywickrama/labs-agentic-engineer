@@ -85,6 +85,7 @@ func (h *Handler) CreateTurn(ctx context.Context, request gen.CreateTurnRequestO
 		Instruction:    request.Body.Instruction,
 		Target:         request.Body.Target,
 		Collab:         request.Body.Collab,
+		EagerSkills:    request.Body.EagerSkills,
 	})
 	if err != nil {
 		if conflict, ok := turnConflictOf(err); ok {

@@ -28,7 +28,6 @@ import {
   runStateChip,
   spentBudgets,
   terminalReasonText,
-  validationVerdictChip,
   versionIsLive,
 } from "./runView";
 
@@ -240,6 +239,14 @@ describe("terminalReasonText", () => {
     expect(terminalReasonText("cycle-ceiling")).toMatch(/ceiling on total build sessions/);
   });
 
+  // Both reasons the validating phase can settle under. They are separate
+  // sentences because they are separate failures, and the fallback below means a
+  // gap here degrades silently to a raw slug rather than to anything noisy.
+  it("spells both of the validating phase's reasons", () => {
+    expect(terminalReasonText("validation-failed")).toMatch(/acceptance criteria/);
+    expect(terminalReasonText("validation-unreported")).toMatch(/without committing a report/);
+  });
+
   it("passes an unmapped reason through so it still reaches the user", () => {
     expect(terminalReasonText("a-reason-from-the-future")).toBe(
       "a-reason-from-the-future",
@@ -319,19 +326,6 @@ describe("spentBudgets", () => {
   it("never reports build re-triggers — the real guard is per component per SHA", () => {
     const spent = spentBudgets(budgets({ buildRetriggers: 3 }));
     expect(spent.map((b) => b.label)).not.toContain("Build re-triggers");
-  });
-});
-
-describe("validationVerdictChip", () => {
-  it("is null until the validation cycle settles", () => {
-    expect(validationVerdictChip(undefined)).toBeNull();
-    expect(validationVerdictChip({})).toBeNull();
-  });
-
-  it("names the verdict", () => {
-    expect(validationVerdictChip({ verdict: "passed" })?.tone).toBe("success");
-    expect(validationVerdictChip({ verdict: "failed" })?.tone).toBe("error");
-    expect(validationVerdictChip({ verdict: "skipped" })?.tone).toBe("neutral");
   });
 });
 

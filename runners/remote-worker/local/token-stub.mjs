@@ -23,10 +23,11 @@
 //   POST /internal/v1/tasks/{taskId}/credentials/refresh
 //     -> { "token": $GITHUB_PAT, "taskId": <echoed from path> }
 //
-// For a validation run it also plays the validation-context endpoint so the
-// aep-validation skill can fetch its deployed endpoints (never in the issue):
+// For a validation run it also plays the validation-context endpoint, which the
+// runner PREFLIGHTS before starting the agent (deployed endpoints are never in
+// the issue). Without it the local validation run exits before the agent starts:
 //
-//   GET /internal/v1/executions/{id}/validation-context
+//   GET /internal/v1/validation/{cycleId}/context
 //     -> { endpoints:[{component,url}], credentials:null, criteriaPath }
 //
 // The endpoints point at localhost dev servers the agent starts in-container
@@ -64,8 +65,9 @@ const expectedBearer = process.env.STUB_BEARER ?? "";
 // (git-service fallback) and executions/{id} when it is set (the current
 // execution-keyed model). Match either so the stub serves both run shapes.
 const REFRESH_RE = /^\/internal\/v1\/(?:tasks|executions)\/([^/]+)\/credentials\/refresh$/;
-const VALIDATION_CONTEXT_RE = /^\/internal\/v1\/executions\/([^/]+)\/validation-context$/;
-const VALIDATION_REPORT_RE = /^\/internal\/v1\/executions\/([^/]+)\/validation-report$/;
+// Validation callbacks live under the feature that owns them and are keyed by the
+// CYCLE id the runner carries (AEP_TASK_ID).
+const VALIDATION_CONTEXT_RE = /^\/internal\/v1\/validation\/([^/]+)\/context$/;
 const JSON_HEADERS = { "Content-Type": "application/json", "Cache-Control": "no-store" };
 
 // The validation-context payload the stub returns. Localhost dev servers the
@@ -88,12 +90,15 @@ const server = http.createServer((req, res) => {
     return;
   }
   // Runner callbacks that require the per-run bearer: credentials/refresh
-  // (POST), validation-context (GET), validation-report (POST). Everything
-  // else 404s.
+  // (POST) and validation-context (GET). Everything else 404s.
+  //
+  // There is no validation-report callback: the report is COMMITTED to the repo
+  // and the platform reads it at the validation cycle's merge commit. The stub
+  // used to ack a POST the real API never implemented, which taught the runner
+  // that reporting was best-effort — it is now required.
   const refreshM = req.method === "POST" ? REFRESH_RE.exec(url.pathname) : null;
   const contextM = req.method === "GET" ? VALIDATION_CONTEXT_RE.exec(url.pathname) : null;
-  const reportM = req.method === "POST" ? VALIDATION_REPORT_RE.exec(url.pathname) : null;
-  if (!refreshM && !contextM && !reportM) {
+  if (!refreshM && !contextM) {
     console.error(`[token-stub] 404 ${req.method} ${url.pathname}`);
     res.writeHead(404, JSON_HEADERS).end('{"error":"not found"}');
     return;
@@ -104,17 +109,8 @@ const server = http.createServer((req, res) => {
     return;
   }
   if (contextM) {
-    console.error(`[token-stub] 200 validation-context for execution ${contextM[1]}`);
+    console.error(`[token-stub] 200 validation-context for cycle ${contextM[1]}`);
     res.writeHead(200, JSON_HEADERS).end(JSON.stringify(validationContext));
-    return;
-  }
-  if (reportM) {
-    // Drain the body so the runner's POST completes, then ack.
-    req.resume();
-    req.on("end", () => {
-      console.error(`[token-stub] 200 validation-report for execution ${reportM[1]}`);
-      res.writeHead(200, JSON_HEADERS).end('{"ok":true}');
-    });
     return;
   }
   const m = refreshM;

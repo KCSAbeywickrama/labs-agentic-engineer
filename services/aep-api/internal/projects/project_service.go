@@ -54,6 +54,7 @@ type Service struct {
 	artifactSvc    spec.ArtifactService
 	execs          delivery.ExecutionRepository
 	skillsProv     skillsProvisioner
+	descriptors    descriptorWriter      // project descriptor stamp; may be nil
 	deprovisioner  resourceDeprovisioner // dependency provisioning teardown; may be nil
 	runReader      milestoneRunRows      // build/deploy stage reads + delete purge (status_stages.go)
 	bindingsReader bindingsReader        // deploy stage: OC release bindings (status_stages.go)
@@ -75,7 +76,19 @@ type skillsProvisioner interface {
 	EnsureProvisioned(ctx context.Context, orgID string) error
 }
 
+// descriptorWriter stamps the project descriptor (specs/.agentic-engineer.toml)
+// into a freshly-provisioned repo: the marker identifying the repo as an
+// Agentic Engineer project, carrying the idea the user typed at create. Narrow
+// port declared here (like skillsProvisioner) so projects keeps no spec edge;
+// *spec.DescriptorWriter satisfies it. Wired at the composition root; nil is a
+// documented no-op.
+type descriptorWriter interface {
+	WriteDescriptor(ctx context.Context, orgID, projectID, name, idea string) error
+}
+
 func (s *Service) SetSkillsProvisioner(p skillsProvisioner) { s.skillsProv = p }
+
+func (s *Service) SetDescriptorWriter(w descriptorWriter) { s.descriptors = w }
 
 func NewProjectService(
 	client openchoreo.ProjectClient,
@@ -194,6 +207,21 @@ func (s *Service) CreateProject(ctx context.Context, orgName string, req *gen.Cr
 				if _, hookErr := s.webhookSvc.Register(ctx, orgName, project.Name); hookErr != nil {
 					slog.ErrorContext(ctx, "failed to register webhook on repo",
 						"project", project.Name, "error", hookErr)
+				}
+			}
+			// Stamp the project descriptor. This is the ONLY durable copy of
+			// the idea the user typed — it is what the /start flow reads back
+			// to generate requirements from, on any device and any client.
+			// Written even with an empty prompt: the file is also the marker
+			// that says "an Agentic Engineer project lives here".
+			//
+			// Best-effort, like every other post-create step above: a write
+			// failure must not destroy a creation the user already committed
+			// to, and /start degrades by asking for the idea instead.
+			if s.descriptors != nil {
+				if derr := s.descriptors.WriteDescriptor(ctx, orgName, project.Name, project.Name, req.Prompt); derr != nil {
+					slog.ErrorContext(ctx, "failed to write project descriptor (project usable; /start will ask for the idea)",
+						"project", project.Name, "error", derr)
 				}
 			}
 		}
