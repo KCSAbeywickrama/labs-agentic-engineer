@@ -215,7 +215,7 @@ func TestEnsureProvisioned_Guards(t *testing.T) {
 }
 
 // The unified embedded library: every skill vendored from repo-root skills/
-// loads with its kind read from frontmatter — platform for the 9 flow skills
+// loads with its kind read from frontmatter — platform for the 10 flow skills
 // (stamped metadata.aep.kind: platform), org for the 4 unmarked stack
 // skills (absent → org). One loader, one source tree.
 func TestLoadEmbeddedLibrary(t *testing.T) {
@@ -239,7 +239,8 @@ func TestLoadEmbeddedLibrary(t *testing.T) {
 	}
 	wantKinds := map[string]string{
 		"api-management": "org", "go": "org", "react-webapp": "org", "thunder-authentication": "org",
-		"cell-architecture-dsl": "platform", "excalidraw-wireframes": "platform", "grilling": "platform",
+		"cell-architecture-dsl": "platform", "design": "platform",
+		"excalidraw-wireframes": "platform", "grilling": "platform",
 		"high-level-architecture": "platform", "openapi-conventions": "platform", "start": "platform",
 		"task-breakdown": "platform", "task-planning": "platform", "validation-criteria": "platform",
 	}

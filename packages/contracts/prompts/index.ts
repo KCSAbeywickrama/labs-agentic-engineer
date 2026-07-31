@@ -72,23 +72,13 @@ export function buildSpecGenerationInstruction(prompt: string | null): string {
 
 /**
  * The instruction the "Generate / Re-generate design" CTA sends into the room
- * turn (#159): derive the component design from the current requirements. No
- * user prompt — the agent designs FROM the requirements already in the repo;
- * the agent's system prompt carries the design-file structure and schema.
- *
- * The CTA also mints the acceptance oracle in the same turn: console turns
- * run as `general` (no `useCase` is sent), so the server-side design-generate
- * steering that would author `validation-criteria.json` never fires. Asking
- * for it here scopes the oracle to exactly the Generate-design action rather
- * than every chat turn.
+ * turn (#159): the `/design` slash-skill expansion, so the button is exactly
+ * the keyboard shortcut — one channel, whether the user clicks or types. The
+ * `design` skill (skills/design/) owns the flow: derive the design from the
+ * current requirements, then mint the validation criteria.
  */
 export function buildDesignGenerationInstruction(): string {
-  return (
-    "Generate the complete component design for this project based on the " +
-    "current requirements. If a design already exists, regenerate it to match " +
-    "the current requirements. Then, as the final step, generate the validation " +
-    "criteria."
-  );
+  return slashSkillInstruction(DESIGN_COMMAND) as string;
 }
 
 /**
@@ -131,6 +121,10 @@ export function buildDesignGenerationInstruction(): string {
  * somewhere the questions were never asked.
  */
 export const START_COMMAND = "/start";
+
+/** The design CTA's command — expanded client-side via `slashSkillInstruction`,
+ *  unlike `/start`, which the server expands to enrich with the captured idea. */
+export const DESIGN_COMMAND = "/design";
 
 /**
  * Parse `/start [idea]`. Returns the inline idea (`""` when the command was
