@@ -592,10 +592,19 @@ func TestDeleteProject_RepoCleanupFailureIsSwallowed(t *testing.T) {
 type fakeRunReader struct {
 	rows []delivery.MilestoneRun
 	err  error
+	// cycle is the run's latest cycle record, consulted only when the newest run
+	// is live with no verdict yet — the one case where "is a validation cycle in
+	// flight?" cannot be answered from the run row.
+	cycle    *delivery.RunCycle
+	cycleErr error
 }
 
 func (f fakeRunReader) ListByProject(context.Context, string, string) ([]delivery.MilestoneRun, error) {
 	return f.rows, f.err
+}
+
+func (f fakeRunReader) LatestCycle(context.Context, string, string) (*delivery.RunCycle, error) {
+	return f.cycle, f.cycleErr
 }
 
 func (f fakeRunReader) DeleteByProject(context.Context, string, string) error { return nil }
@@ -613,12 +622,16 @@ func (f fakeBindingsReader) ListProjectReleaseBindings(context.Context, string, 
 // row + the three poll sources (git snapshot, milestone run rows, dev bindings)
 // as fakes.
 type statusFixture struct {
-	snap        spec.StatusSnapshot
-	snapErr     error
-	counts      map[string]int // ComponentCountAtTag fixture, keyed by tag
-	countErr    error
-	runs        []delivery.MilestoneRun
-	runsErr     error
+	snap     spec.StatusSnapshot
+	snapErr  error
+	counts   map[string]int // ComponentCountAtTag fixture, keyed by tag
+	countErr error
+	runs     []delivery.MilestoneRun
+	runsErr  error
+	// cycle is the newest run's latest cycle record. Only consulted when that run
+	// is live with no verdict yet, which is the sole case where the run row cannot
+	// say whether a validation cycle is in flight.
+	cycle       *delivery.RunCycle
 	bindings    []openchoreo.ReleaseBindingSummary
 	bindingsErr error
 }
@@ -650,7 +663,7 @@ func (fx statusFixture) service() *Service {
 	}
 	svc := NewProjectService(nil, repoSvc, nil, fakeArtifacts, nil)
 	svc.SetStageSources(
-		fakeRunReader{rows: fx.runs, err: fx.runsErr},
+		fakeRunReader{rows: fx.runs, err: fx.runsErr, cycle: fx.cycle},
 		fakeBindingsReader{items: fx.bindings, err: fx.bindingsErr})
 	return svc
 }

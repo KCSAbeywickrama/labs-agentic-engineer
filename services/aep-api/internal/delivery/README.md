@@ -73,7 +73,7 @@ it), and every former feature→feature edge becomes a legal slice→root type r
 | `run` | the milestone run SUPERVISOR: the wait state + dispatch predicate, the cycle loop, the four budgets + no-progress + ceiling, the validation cycle, settle, and cancel. Plus the `Supervisor` handle the event plane and the build click signal and start runs through | `Runtime`, the milestone model, `RunStatus`/`MilestoneRunWorkflowID`, `MilestoneDispatch`, `DiffComponents`/`BuildRunNamePrefix`; **no GitHub client, no gorm** |
 | `runread` | the run READ surface: a version's runs + their cycles, ONE SSE stream stitching the per-cycle agent logs, and cancel. Owns no state and decides nothing | the run/cycle entities and `IsTerminalRunState`; reaches the pod log through `CycleLogReader` and the supervisor through `RunCanceller`, so it drags in neither a cluster client nor a workflow engine |
 | `codingagent` | the CodingExecutor (ONE dispatch entry point: launch a cycle's agent Job), the build-auth retry, the job watchers and the Job templates | `MilestoneDispatch`/`MilestoneDispatcher`, `TaskStreamHub`, `BuildTerminalObserver` |
-| `validation` | the two S2S validation runner callbacks (context / test-credentials), the validation issue, and the report → verdict rule | — (no cross-edges; least entangled) |
+| `validation` | the two S2S validation runner callbacks (context / test-credentials), the per-version validation issue, and the report → verdict rule | — (no cross-edges; least entangled) |
 | `httpapi` | the aggregator: embeds build/task/execution/runread handlers; **holds `Deps`** (see below) | imports the sub-packages (the exempt aggregator) |
 
 **`Deps` lives in `httpapi`, not the root.** Every other domain keeps its `Deps` in the domain root, but
@@ -267,6 +267,11 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   every cycle boundary open), dispatches one cycle at it with `AEP_TASK_KIND=validation`, and reads the
   committed report back as the run's VERDICT. The acceptance oracle
   `specs/validation/validation-criteria.json` is read-only input authored in the design phase (spec domain).
+  **ONE validation issue per version, filed into the version's milestone by the create itself** — like a
+  Task, it carries no version label, because the milestone is the pin. Per version and not per project:
+  the body embeds the criteria as they stood at mint time, so adopting an older version's issue would
+  hand this version's agent the wrong oracle, and re-filing it would erase it from the ledger of the
+  version it actually validated. The version's own open issue is looked up by milestone, and only there.
 - **The list read returns three populations, and hides one** (`task/reads.go` `ListByTag`, the read-model
   boundary). Every row carries the label-derived `executorClass` the console sections on: `coding` (agent
   work), `provision` (a dispatch gate, which the console renders as a hold banner rather than a row), and

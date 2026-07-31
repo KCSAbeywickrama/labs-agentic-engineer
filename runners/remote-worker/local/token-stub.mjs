@@ -65,7 +65,6 @@ const expectedBearer = process.env.STUB_BEARER ?? "";
 // execution-keyed model). Match either so the stub serves both run shapes.
 const REFRESH_RE = /^\/internal\/v1\/(?:tasks|executions)\/([^/]+)\/credentials\/refresh$/;
 const VALIDATION_CONTEXT_RE = /^\/internal\/v1\/executions\/([^/]+)\/validation-context$/;
-const VALIDATION_REPORT_RE = /^\/internal\/v1\/executions\/([^/]+)\/validation-report$/;
 const JSON_HEADERS = { "Content-Type": "application/json", "Cache-Control": "no-store" };
 
 // The validation-context payload the stub returns. Localhost dev servers the
@@ -88,12 +87,15 @@ const server = http.createServer((req, res) => {
     return;
   }
   // Runner callbacks that require the per-run bearer: credentials/refresh
-  // (POST), validation-context (GET), validation-report (POST). Everything
-  // else 404s.
+  // (POST) and validation-context (GET). Everything else 404s.
+  //
+  // There is no validation-report callback: the report is COMMITTED to the repo
+  // and the platform reads it at the validation cycle's merge commit. The stub
+  // used to ack a POST the real API never implemented, which taught the runner
+  // that reporting was best-effort — it is now required.
   const refreshM = req.method === "POST" ? REFRESH_RE.exec(url.pathname) : null;
   const contextM = req.method === "GET" ? VALIDATION_CONTEXT_RE.exec(url.pathname) : null;
-  const reportM = req.method === "POST" ? VALIDATION_REPORT_RE.exec(url.pathname) : null;
-  if (!refreshM && !contextM && !reportM) {
+  if (!refreshM && !contextM) {
     console.error(`[token-stub] 404 ${req.method} ${url.pathname}`);
     res.writeHead(404, JSON_HEADERS).end('{"error":"not found"}');
     return;
@@ -106,15 +108,6 @@ const server = http.createServer((req, res) => {
   if (contextM) {
     console.error(`[token-stub] 200 validation-context for execution ${contextM[1]}`);
     res.writeHead(200, JSON_HEADERS).end(JSON.stringify(validationContext));
-    return;
-  }
-  if (reportM) {
-    // Drain the body so the runner's POST completes, then ack.
-    req.resume();
-    req.on("end", () => {
-      console.error(`[token-stub] 200 validation-report for execution ${reportM[1]}`);
-      res.writeHead(200, JSON_HEADERS).end('{"ok":true}');
-    });
     return;
   }
   const m = refreshM;

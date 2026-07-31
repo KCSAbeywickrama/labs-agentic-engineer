@@ -162,12 +162,6 @@ type ArtifactService interface {
 	// Versions.
 	ListRequirementsVersions(ctx context.Context, orgID, projectID string) ([]RequirementsVersionInfo, error)
 	ListDesignVersions(ctx context.Context, orgID, projectID string) ([]DesignVersionInfo, error)
-	// LatestDesignTag returns just the newest approved design tag name
-	// (`v<N>-<M>`), or "" when none exist. Unlike ListDesignVersions it reads
-	// the local mirror WITHOUT a fetch — a best-effort, network-free read for
-	// the task stale-design attention flag. Never returns an error: an
-	// unavailable repo/mirror degrades to "".
-	LatestDesignTag(ctx context.Context, orgID, projectID string) string
 	// ListSpecVersionTags lists the `v<N>` spec version tags (newest first)
 	// with the latest tag and whether specs/ moved since it (#117).
 	ListSpecVersionTags(ctx context.Context, orgID, projectID string) (*TagList, error)
@@ -299,24 +293,6 @@ func (s *artifactService) ListDesignVersions(ctx context.Context, orgID, project
 		return nil, fmt.Errorf("list tags: %w", err)
 	}
 	return tagsToDesignVersions(tags), nil
-}
-
-// LatestDesignTag returns the newest `v<N>-<M>` design tag name read from the
-// local mirror WITHOUT a fetch — the network-free, best-effort read behind the
-// task stale-design attention flag. Any failure (repo not ready, mirror read
-// error, no design tag yet) degrades to "".
-func (s *artifactService) LatestDesignTag(ctx context.Context, orgID, projectID string) string {
-	_, ref, err := s.readyRef(ctx, orgID, projectID)
-	if err != nil {
-		return ""
-	}
-	tags, err := s.listVersionTagsLocal(ctx, ref)
-	if err != nil {
-		slog.WarnContext(ctx, "latest design tag: local tag read failed",
-			"project", projectID, "error", err)
-		return ""
-	}
-	return latestDesignTag(tags)
 }
 
 // ----- Save (hard gate → tag at HEAD) -----

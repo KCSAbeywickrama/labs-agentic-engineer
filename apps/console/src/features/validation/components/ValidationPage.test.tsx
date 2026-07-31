@@ -151,6 +151,15 @@ const REPORT = JSON.stringify({
   ],
 });
 
+// A report where nothing produced a result — the shape behind `inconclusive`.
+const NOTHING_RAN = JSON.stringify({
+  criteria: [
+    { id: "AC-001-a", status: "not_run" },
+    { id: "AC-001-b", status: "not_run" },
+    { id: "AC-003-b", status: "manual" },
+  ],
+});
+
 function renderPage(view: "logs" | undefined, onViewChange = vi.fn()) {
   render(
     <ValidationPage
@@ -205,7 +214,12 @@ describe("ValidationPage lifecycle", () => {
     expect(screen.getByTestId("run-feed")).toHaveTextContent("validation");
     // A failed verdict still committed a report, so the toggle back exists.
     expect(screen.getByRole("button", { name: /View report/ })).toBeTruthy();
-    expect(screen.getByText("Validation failed")).toBeInTheDocument();
+    // Chip AND tile — a verdict does not stop being true because the reader
+    // switched to the log, so the tile shows over the feed too.
+    expect(screen.getAllByText("Validation failed").length).toBe(2);
+    expect(
+      screen.getByText(/the milestone stays open for the fix/),
+    ).toBeInTheDocument();
   });
 
   it("says so, and shows nothing else, when the run SKIPPED validation", () => {
@@ -216,7 +230,7 @@ describe("ValidationPage lifecycle", () => {
   });
 
   it("renders the joined report on a passed verdict", () => {
-    mockValidation = "completed";
+    mockValidation = "passed";
     mockRun = run({
       validation: { verdict: "passed", reportPath: "tests/validation/report.json" },
       cycles: [validationCycle],
@@ -239,18 +253,98 @@ describe("ValidationPage lifecycle", () => {
   });
 
   it("stamps the run's verdict on the header, not the coarse lifecycle", () => {
-    mockValidation = "completed";
+    mockValidation = "passed";
     mockRun = run({
       validation: { verdict: "passed" },
       cycles: [validationCycle],
     });
     mockCriteria.data = { content: CRITERIA };
     renderPage(undefined);
-    expect(screen.getByText("Validation passed")).toBeInTheDocument();
+    // The header chip and the tile headline, both from the shared mapper — which
+    // is why they read identically rather than being written twice.
+    expect(screen.getAllByText("Validation passed").length).toBe(2);
+  });
+
+  // The three verdicts this page was blind to. It used to map the verdict with a
+  // second, builds-local mapper that knew only passed/failed/skipped, so each of
+  // these produced no chip — which made `settled` false and pinned the page to the
+  // run log feed with no report, for the outcome any project with a manual
+  // criterion lands on. Hence one shared mapper.
+  it("renders the report, not the feed, for a PARTIAL verdict", () => {
+    mockValidation = "partial";
+    mockRun = run({
+      validation: { verdict: "partial", reportPath: "tests/validation/report.json" },
+      cycles: [validationCycle],
+    });
+    mockCriteria.data = { content: CRITERIA };
+    mockReport.data = { content: REPORT };
+    renderPage(undefined);
+
+    expect(screen.queryByTestId("run-feed")).not.toBeInTheDocument();
+    expect(screen.getAllByText("Partially validated").length).toBe(2);
+    expect(screen.getByText("Shoppers can search the catalog.")).toBeInTheDocument();
+  });
+
+  it("renders the report for an INCONCLUSIVE verdict", () => {
+    mockValidation = "inconclusive";
+    mockRun = run({
+      validation: {
+        verdict: "inconclusive",
+        reportPath: "tests/validation/report.json",
+      },
+      cycles: [validationCycle],
+    });
+    mockCriteria.data = { content: CRITERIA };
+    mockReport.data = { content: NOTHING_RAN };
+    renderPage(undefined);
+
+    expect(screen.queryByTestId("run-feed")).not.toBeInTheDocument();
+    expect(screen.getAllByText("No test results").length).toBe(2);
+    expect(screen.getByText(/nothing here is confirmed/)).toBeInTheDocument();
+  });
+
+  // `unreported` means no report was committed at that commit, and the server
+  // omits reportPath for it — so the tile carries the cause and the vague
+  // "wasn't found" note stays out of the way.
+  it("explains an UNREPORTED verdict over criteria-only, with no soft note", () => {
+    mockValidation = "unreported";
+    mockRun = run({
+      validation: { verdict: "unreported" },
+      cycles: [validationCycle],
+    });
+    mockCriteria.data = { content: CRITERIA };
+    renderPage(undefined);
+
+    expect(screen.queryByTestId("run-feed")).not.toBeInTheDocument();
+    expect(screen.getAllByText("Validation didn't report").length).toBe(2);
+    expect(screen.getByText(/validation-unreported/)).toBeInTheDocument();
+    expect(screen.queryByText(/report wasn't found/)).not.toBeInTheDocument();
+    // The criteria still render — they live under specs/, not in the report.
+    expect(screen.getByText("Shoppers can search the catalog.")).toBeInTheDocument();
+    // And with no report there is nothing to count.
+    expect(screen.queryByText(/\d+ passed/)).not.toBeInTheDocument();
+  });
+
+  // The counts moved out of ValidationView and into the tile, so the page carries
+  // exactly one tally rather than the same numbers twice.
+  it("tallies the run's outcome once, in the tile", () => {
+    mockValidation = "failed";
+    mockRun = run({
+      validation: { verdict: "failed", reportPath: "tests/validation/report.json" },
+      cycles: [validationCycle],
+    });
+    mockCriteria.data = { content: CRITERIA };
+    mockReport.data = { content: REPORT };
+    renderPage(undefined);
+
+    // 3 criteria: one pass, one fail, one manual.
+    expect(screen.getByText("1 failed · 1 passed · 1 manual")).toBeInTheDocument();
+    expect(screen.queryByText("Passed 1")).not.toBeInTheDocument();
+    expect(screen.queryByText("Failed 1")).not.toBeInTheDocument();
   });
 
   it("links the validation cycle's PR, learned from the cycle record", () => {
-    mockValidation = "completed";
+    mockValidation = "passed";
     mockRun = run({
       validation: { verdict: "passed" },
       cycles: [validationCycle],
@@ -263,7 +357,7 @@ describe("ValidationPage lifecycle", () => {
   });
 
   it("toggles to the log view via the View logs button", () => {
-    mockValidation = "completed";
+    mockValidation = "passed";
     mockRun = run({
       validation: { verdict: "passed" },
       cycles: [validationCycle],
@@ -277,7 +371,7 @@ describe("ValidationPage lifecycle", () => {
   });
 
   it("shows the feed (and a View report button) when ?view=logs", () => {
-    mockValidation = "completed";
+    mockValidation = "passed";
     mockRun = run({
       validation: { verdict: "passed" },
       cycles: [validationCycle],
@@ -292,7 +386,7 @@ describe("ValidationPage lifecycle", () => {
   });
 
   it("falls back to criteria-only with a note when the report is missing", () => {
-    mockValidation = "completed";
+    mockValidation = "passed";
     mockRun = run({
       validation: { verdict: "passed" },
       cycles: [validationCycle],

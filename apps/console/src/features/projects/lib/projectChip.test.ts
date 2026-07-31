@@ -133,7 +133,7 @@ describe("projectChip — delivery state outranks the spec", () => {
           version: "v1",
           status: "deployed",
           components: { total: 1, ready: 1 },
-          validation: "completed",
+          validation: "passed",
         },
       }),
     );

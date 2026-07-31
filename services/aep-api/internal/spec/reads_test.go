@@ -95,41 +95,6 @@ func TestGetDesignAtTag_PinsApprovedVersion(t *testing.T) {
 	}
 }
 
-func TestLatestDesignTag_LocalNoFetch(t *testing.T) {
-	t.Parallel()
-	r := newRig(t, map[string]string{"specs/requirements/requirements.md": "spec\n"})
-	ctx := context.Background()
-
-	// No design tag yet → "".
-	if got := r.svc.LatestDesignTag(ctx, r.org, r.proj); got != "" {
-		t.Fatalf("LatestDesignTag (no tags) = %q, want empty", got)
-	}
-
-	if _, err := r.svc.SaveRequirements(ctx, r.org, r.proj, SaveRequest{}); err != nil {
-		t.Fatalf("save requirements: %v", err)
-	}
-	r.seed(map[string]string{
-		"specs/design/design.md":                  "# v1-1\n",
-		"specs/design/components/svc/design.json": validComponentDesignJSON("svc"),
-	}, "design")
-	if _, err := r.svc.SaveDesign(ctx, r.org, r.proj, SaveRequest{}); err != nil {
-		t.Fatalf("save design v1-1: %v", err)
-	}
-	if got := r.svc.LatestDesignTag(ctx, r.org, r.proj); got != "v1-1" {
-		t.Fatalf("LatestDesignTag = %q, want v1-1", got)
-	}
-
-	// A second design revision — the tag was cut through the engine, so the
-	// mirror carries it and the network-free read reflects the newest.
-	r.seed(map[string]string{"specs/design/design.md": "# v1-2\n"}, "design edit")
-	if _, err := r.svc.SaveDesign(ctx, r.org, r.proj, SaveRequest{}); err != nil {
-		t.Fatalf("save design v1-2: %v", err)
-	}
-	if got := r.svc.LatestDesignTag(ctx, r.org, r.proj); got != "v1-2" {
-		t.Fatalf("LatestDesignTag = %q, want v1-2 (newest)", got)
-	}
-}
-
 func TestGetRequirementsAtTag_MissingTag(t *testing.T) {
 	t.Parallel()
 	r := newRig(t, map[string]string{"specs/requirements/requirements.md": "x\n"})

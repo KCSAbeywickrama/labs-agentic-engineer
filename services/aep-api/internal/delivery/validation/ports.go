@@ -28,11 +28,15 @@ import (
 // reads are adapted from artifacts/files by the composition root so this package
 // imports neither.
 
-// IssueClient is the GitHub issue surface the minter needs: list Task issues (to
-// dedup the open aep:validation issue) and create the validation issue.
-// sourcecontrol.IssueService satisfies it.
+// IssueClient is the GitHub issue surface the minter needs: read one MILESTONE's
+// issues (to find the version's own aep:validation issue) and create the
+// validation issue into that milestone. sourcecontrol.IssueService satisfies it.
+//
+// The read is milestone-scoped rather than project-wide because the milestone is
+// the version pin: a project-wide question would answer with another version's
+// issue.
 type IssueClient interface {
-	ListIssues(ctx context.Context, orgID, projectID string, labels []string) ([]sourcecontrol.IssueInfo, error)
+	ListMilestoneIssues(ctx context.Context, orgID, projectID string, filter sourcecontrol.MilestoneIssuesFilter) ([]sourcecontrol.IssueInfo, error)
 	CreateIssue(ctx context.Context, orgID, projectID string, req sourcecontrol.CreateIssueRequest) (*sourcecontrol.IssueResult, error)
 }
 
