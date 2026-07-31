@@ -45,7 +45,7 @@ import { runTurn } from "../agents/main/run-turn.js";
 import { buildFileTools } from "../agents/main/tools/files.js";
 import { buildTaskPlanTools } from "../agents/main/tools/task-plan.js";
 import { TaskPlan } from "../agents/main/task-plan-accumulator.js";
-import { buildInstructions, buildTaskPlanInstructions, buildPrompt } from "../agents/main/prompt.js";
+import { buildInstructions, buildTaskPlanInstructions, buildPrompt, buildEagerSkillsBlock } from "../agents/main/prompt.js";
 import type { SkillSource } from "../agents/main/skill-source.js";
 import { buildManifestPart, toTurnUsage } from "./manifest.js";
 import { config } from "../shared/config.js";
@@ -122,6 +122,13 @@ export interface RunConversationTurnInput {
    * no catalog, no `loadSkill`.
    */
   skillSource?: SkillSource;
+  /**
+   * Skill names to inline into THIS turn's prompt up front (#335 latency):
+   * bodies resolve through `skillSource` and ride the user prompt — never the
+   * system prompt, whose cacheable prefix must stay byte-stable across turns.
+   * Unknown names are skipped. The catalog + lazy `loadSkill` are unaffected.
+   */
+  eagerSkills?: string[];
   /**
    * Which tool set to register (tasks-github-native §9.3). Default/absent →
    * `files` (today's file-mutation tools, byte-identical). `task-plan` →
@@ -256,11 +263,16 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
     //    of the system prompt; buildPrompt inlines CURRENT STATE; prepend a one-line
     //    divergence note ONLY when the FE flagged an external edit (append-only).
     const note = input.filesChangedExternally ? DIVERGENCE_NOTE : "";
+    // Eager skills (#335): resolve the requested bodies and inline them ahead
+    // of the instruction — the model applies them in its FIRST step instead of
+    // spending a whole model call on loadSkill. Unknown names skip silently
+    // (the snapshot is the authority on what exists).
+    const eagerBlock = buildEagerSkillsBlock(skills, input.eagerSkills);
     const startLen = conv.messages.length;
     const res = await runTurn({
       model: input.model,
       instructions,
-      prompt: note + buildPrompt(input.files, input.instruction),
+      prompt: note + eagerBlock + buildPrompt(input.files, input.instruction),
       messages: conv.messages, // appended in place by runTurn
       tools,
       // End the turn at a HITL question call (the question tools live on the

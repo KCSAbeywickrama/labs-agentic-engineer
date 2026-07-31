@@ -144,6 +144,12 @@ export interface AskQuestionOption {
   description?: string;
   /** At most ONE option per question carries this — the agent's recommendation. */
   recommended?: boolean;
+  /**
+   * Selecting this option means the user must TYPE their answer (an
+   * "Other" / "Something else" escape hatch): the form focuses the free-text
+   * field and requires text before submit.
+   */
+  freeText?: boolean;
 }
 
 /**
@@ -157,7 +163,11 @@ export interface AskQuestionInput {
    * the decision affects, and anything the user needs to answer well.
    */
   detail?: string;
-  /** 1–5 options; labels must be unique (they are the selection identity). */
+  /**
+   * 0–5 options; labels must be unique (they are the selection identity).
+   * EMPTY means the answer must be typed — the form renders only the
+   * free-text field, no choice cards.
+   */
   options: AskQuestionOption[];
   /** True → several options may be chosen together (checkboxes, not radios). */
   multiSelect?: boolean;
@@ -419,6 +429,16 @@ export interface TurnRequest {
    * the tool map is byte-identical to a turn without it.
    */
   webSearch?: boolean;
+  /**
+   * Skill names whose guidance the service should inline into THIS turn's
+   * prompt up front (#335 latency): when the caller already knows a skill will
+   * be needed (the console's seeded grilling turn), inlining it saves the
+   * model's `loadSkill` round-trip — one full model step before any output.
+   * Bodies ride the per-turn user prompt, never the system prompt, so the
+   * cacheable instruction prefix is untouched. Unknown names are ignored; the
+   * catalog + lazy `loadSkill` remain for everything else (ADR-0002).
+   */
+  eagerSkills?: string[];
 }
 
 /** The registrable tool sets a turn may request (`TurnRequest.toolset`). */

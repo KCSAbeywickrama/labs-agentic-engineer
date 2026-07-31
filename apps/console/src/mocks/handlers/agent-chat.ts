@@ -143,6 +143,11 @@ export const agentChatHandlers = [
                   description:
                     "Two onboarding paths, two permission models, and pricing that has to serve both. Roughly doubles the v1 scope; usually only worth it when both audiences are already committed.",
                 },
+                {
+                  label: "Something else",
+                  description: "Describe a different primary user in the text field below.",
+                  freeText: true,
+                },
               ],
             },
             {
@@ -336,6 +341,12 @@ export const agentChatHandlers = [
               ],
             },
             {
+              question: "What should the app be called?",
+              detail:
+                "The name lands in the spec title, the repo, and the UI shell — there are no sensible presets, so type whatever you have in mind.",
+              options: [],
+            },
+            {
               question: "Who administers the workspace?",
               detail:
                 "The admin model decides whether v1 needs a roles/permissions system or can treat every user the same.",
@@ -360,8 +371,20 @@ export const agentChatHandlers = [
             },
           ],
         };
+        // Stream the batch as chunked tool-input deltas (matching the real
+        // provider) so mock mode exercises the progressive question rendering
+        // (#270 latency): questions appear one by one, ~250ms per chunk.
+        const inputJson = JSON.stringify(input);
+        const CHUNK = 180;
+        const deltas = [];
+        for (let i = 0; i < inputJson.length; i += CHUNK) {
+          deltas.push({ type: "tool-input-delta", id: `qs-${turnId}`, delta: inputJson.slice(i, i + CHUNK) });
+        }
         return sse([
           { type: "text-delta", delta: "Let me pin the idea down — a few questions:" },
+          { type: "tool-input-start", id: `qs-${turnId}`, toolName: "ask_questions" },
+          ...deltas,
+          { type: "tool-input-end", id: `qs-${turnId}` },
           { type: "tool-call", toolCallId: `qs-${turnId}`, toolName: "ask_questions", input },
           {
             type: "tool-result",
