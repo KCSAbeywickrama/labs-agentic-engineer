@@ -40,6 +40,9 @@ export interface PrototypeViewProps {
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
+// Expects to be remounted (e.g. via a `key`) when `model` changes: `initialData`
+// is captured once at mount, and the screen-swap effect only reacts to
+// navigation, not to a new `model` identity.
 export function PrototypeView({ model, initialScreen, onScreenChange, fillHeight, headerAction }: PrototypeViewProps) {
   const byName = useMemo(() => new Map(model.screens.map((s) => [s.name, s])), [model]);
   const first = model.screens[0]!.name;
@@ -48,6 +51,13 @@ export function PrototypeView({ model, initialScreen, onScreenChange, fillHeight
   const apiRef = useRef<any>(null);
   const navigatedRef = useRef(false);
   const [flash, setFlash] = useState<ViewportRect[] | null>(null);
+  const flashTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (flashTimerRef.current !== null) window.clearTimeout(flashTimerRef.current);
+    };
+  }, []);
 
   const screen = byName.get(nav.current) ?? model.screens[0]!;
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -93,7 +103,11 @@ export function PrototypeView({ model, initialScreen, onScreenChange, fillHeight
     if (!api || screen.hotspots.length === 0) return;
     const appState = api.getAppState();
     setFlash(screen.hotspots.map((h) => hotspotToViewport(h, appState)));
-    window.setTimeout(() => setFlash(null), FLASH_MS);
+    if (flashTimerRef.current !== null) window.clearTimeout(flashTimerRef.current);
+    flashTimerRef.current = window.setTimeout(() => {
+      flashTimerRef.current = null;
+      setFlash(null);
+    }, FLASH_MS);
   };
 
   return (
