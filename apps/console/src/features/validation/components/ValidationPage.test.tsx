@@ -115,15 +115,23 @@ vi.mock("../../projects/api/queries", () => ({
 }));
 
 vi.mock("../../builds/api/queries", () => ({
-  // Models the real hook's `enabled: Boolean(tag)`: with no tag the query never
-  // runs and there is no data. A mock that answered regardless of tag would hide
-  // the bug where this page asked for a version the status did not have yet.
+  // Models two things the real hook does, both of which a laxer mock would hide:
+  // `enabled: Boolean(tag)` (no tag → the query never runs, so no data), and
+  // per-version scoping (list-build-runs answers with THAT version's runs). The
+  // run under test belongs to the newest version, so asking for any other tag
+  // finds nothing — which is what makes "asked for the wrong version" visible.
   useBuildRuns: (_project: string, tag: string | undefined) => ({
     isPending: false,
     isError: false,
     error: null,
     refetch: vi.fn(),
-    data: tag ? { tag, milestoneNumber: 1, runs: mockRun ? [mockRun] : [] } : undefined,
+    data: tag
+      ? {
+          tag,
+          milestoneNumber: 1,
+          runs: mockRun && tag === mockBuildVersion ? [mockRun] : [],
+        }
+      : undefined,
   }),
 }));
 
