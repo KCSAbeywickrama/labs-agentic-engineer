@@ -126,6 +126,56 @@ test("a context with no endpoints throws", async () => {
   assert.equal(fs.existsSync(file), false);
 });
 
+// `null` is valid JSON, so it survives JSON.parse and reaches the endpoint check
+// as an object-shaped nothing. Reading `.endpoints` off it threw a bare TypeError
+// — the one failure this preflight cannot name, in the log a human reads when a
+// validation run dies before the agent starts.
+test("a body that parses to a non-object throws a named error, not a TypeError", async () => {
+  for (const body of ["null", "5", '"a string"', "[]"]) {
+    const file = await tmpFile();
+    const { impl } = stubFetch(200, body);
+    await assert.rejects(
+      fetchValidationContext({
+        platformUrl: "https://bff.example",
+        cycleId: CYCLE,
+        bearer: BEARER,
+        file,
+        fetchImpl: impl,
+      }),
+      (err: Error) => {
+        assert.equal(err instanceof TypeError, false, `${body} produced a TypeError`);
+        assert.match(err.message, /validation context is not a JSON object|no deployed endpoints/);
+        return true;
+      },
+      `body ${body}`,
+    );
+    assert.equal(fs.existsSync(file), false);
+  }
+});
+
+// `mode` is honoured only when the write CREATES the file, so a context file left
+// at this fixed path under a world-writable /tmp would otherwise keep whatever
+// permissions it already had.
+test("the context file ends up 0600 even when the path already exists", async () => {
+  const file = await tmpFile();
+  await fs.promises.writeFile(file, "stale", { mode: 0o666 });
+  await fs.promises.chmod(file, 0o666);
+  const { impl } = stubFetch(
+    200,
+    JSON.stringify({ endpoints: [{ component: "c", url: "https://x.example" }] }),
+  );
+
+  await fetchValidationContext({
+    platformUrl: "https://bff.example",
+    cycleId: CYCLE,
+    bearer: BEARER,
+    file,
+    fetchImpl: impl,
+  });
+
+  assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+});
+
 test("an unset platform URL throws before any request", async () => {
   const { impl, calls } = stubFetch(200, "{}");
   await assert.rejects(

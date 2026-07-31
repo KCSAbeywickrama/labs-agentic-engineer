@@ -207,8 +207,12 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   a Job that exited without a pull request); `build-retrigger-budget` is a build that stayed red through
   its one automatic re-trigger with no fix issue to recover it; `fix-chain-budget` and `conflict-budget`
   bound the two recovery chains; `no-progress` is a green cycle that left the milestone unchanged;
-  `cycle-ceiling` is the backstop over all of them; `validation-failed` is the verdict. A run that settles
-  for a reason outside this list is a bug in the loop, not a new state.
+  `cycle-ceiling` is the backstop over all of them. The validating phase contributes two, and they are
+  two because they are different failures: `validation-failed` is a criterion that asserted and lost —
+  a fact about the software — while `validation-unreported` is the agent merging its pull request
+  without committing a report at all, which proves nothing about the software and is a breach of the
+  runner contract. `ValidationVerdictFailsRun` / `IsValidationTerminalReason` are the executable copy of
+  that pair. A run that settles for a reason outside this list is a bug in the loop, not a new state.
 - **Settle closes the milestone; nothing branches on that.** Milestone state is display only, closed
   milestones still accept new issues, and a failed or cancelled increment leaves its milestone OPEN
   because the way forward from it is more work in the same version. A stray gate never blocks settle:

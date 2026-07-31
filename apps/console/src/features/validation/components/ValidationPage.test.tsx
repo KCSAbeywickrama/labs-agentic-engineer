@@ -169,6 +169,22 @@ const REPORT = JSON.stringify({
   ],
 });
 
+// A failure the reporter could locate but not describe: `location` with no
+// `message`, and no `spec` path either. generate-report.mjs writes `failure` as
+// { message, location } and the message can come back empty, so this is the one
+// shape where the location is all the evidence there is.
+const LOCATION_ONLY_FAILURE = JSON.stringify({
+  criteria: [
+    { id: "AC-001-a", status: "pass" },
+    {
+      id: "AC-001-b",
+      status: "fail",
+      failure: { message: "", location: "tests/e2e/specs/AC-001-b.spec.ts:42" },
+    },
+    { id: "AC-003-b", status: "manual" },
+  ],
+});
+
 // A report where nothing produced a result — the shape behind `inconclusive`.
 const NOTHING_RAN = JSON.stringify({
   criteria: [
@@ -436,6 +452,23 @@ describe("ValidationPage lifecycle", () => {
     expect(screen.getByTestId("run-feed")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /View report/ }));
     expect(onViewChange).toHaveBeenCalledWith(undefined);
+  });
+
+  // A reporter can hand back a location with no message and no spec path —
+  // report.ts parses exactly that shape ("keeps a location even when the failure
+  // carries no message"), so the only pointer to the failing assertion the run
+  // produced must survive the render gate rather than be dropped with it.
+  it("renders a failure that carries only a location", () => {
+    mockValidation = "failed";
+    mockRun = run({
+      validation: { verdict: "failed", reportPath: "tests/validation/report.json" },
+      cycles: [validationCycle],
+    });
+    mockCriteria.data = { content: CRITERIA };
+    mockReport.data = { content: LOCATION_ONLY_FAILURE };
+    renderPage(undefined);
+
+    expect(screen.getByText("tests/e2e/specs/AC-001-b.spec.ts:42")).toBeInTheDocument();
   });
 
   it("falls back to criteria-only with a note when the report is missing", () => {

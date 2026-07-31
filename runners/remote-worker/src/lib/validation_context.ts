@@ -104,6 +104,15 @@ export async function fetchValidationContext(
   } catch {
     throw new Error(`validation context is not JSON: ${body.slice(0, 200)}`);
   }
+  // `null` is valid JSON and survives the parse, so without this the cast below
+  // would hand back a null `ctx` and reading `.endpoints` off it would throw a
+  // TypeError. Every other failure here is a sentence naming what the platform
+  // could not answer; a raw "Cannot read properties of null" in the pod log is
+  // the one diagnosis this preflight exists to avoid. Non-objects (a bare number,
+  // a string) are caught here too, for the same reason.
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`validation context is not a JSON object: ${body.slice(0, 200)}`);
+  }
   const ctx = parsed as Partial<ValidationContext>;
   if (!Array.isArray(ctx.endpoints) || ctx.endpoints.length === 0) {
     throw new Error(
@@ -113,6 +122,12 @@ export async function fetchValidationContext(
 
   const file = opts.file ?? VALIDATION_CONTEXT_FILE;
   await fs.promises.mkdir(path.dirname(file), { recursive: true });
+  // Removed first so the write CREATES the file: `mode` is applied at creation
+  // only, so writing over a path that already exists keeps whatever permissions
+  // it already had — and this one is a fixed, predictable name under a
+  // world-writable /tmp. Unlinking also means the write cannot follow a symlink
+  // left at that path. Idempotent (`force`), so a first run is unaffected.
+  await fs.promises.rm(file, { force: true });
   // Written verbatim, not re-serialised from the parsed shape: the skill's
   // contract is the platform's payload, and a field this runner does not model
   // must still reach it.

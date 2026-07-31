@@ -239,6 +239,14 @@ describe("terminalReasonText", () => {
     expect(terminalReasonText("cycle-ceiling")).toMatch(/ceiling on total build sessions/);
   });
 
+  // Both reasons the validating phase can settle under. They are separate
+  // sentences because they are separate failures, and the fallback below means a
+  // gap here degrades silently to a raw slug rather than to anything noisy.
+  it("spells both of the validating phase's reasons", () => {
+    expect(terminalReasonText("validation-failed")).toMatch(/acceptance criteria/);
+    expect(terminalReasonText("validation-unreported")).toMatch(/without committing a report/);
+  });
+
   it("passes an unmapped reason through so it still reaches the user", () => {
     expect(terminalReasonText("a-reason-from-the-future")).toBe(
       "a-reason-from-the-future",

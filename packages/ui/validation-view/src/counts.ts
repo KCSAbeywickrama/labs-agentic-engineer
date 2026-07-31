@@ -45,8 +45,8 @@ export const CRITERION_STATE_LABEL: Record<string, string> = {
 /** Display order for the tally — a failure reads first. */
 const STATE_ORDER = ["fail", "pass", "not_run", "not_validated", "manual"];
 
-/** The statuses that mean "this criterion was never actually checked". */
-const UNCOVERED = ["not_run", "not_validated", "manual"];
+/** The statuses that mean the criterion WAS actually checked and got an answer. */
+const DECIDED = ["pass", "fail"];
 
 export interface CriterionStateCount {
   /** Raw report status; one of CriterionRunState in practice. */
@@ -66,9 +66,29 @@ export function countOf(tally: CriterionTally, status: string): number {
   return tally.states.find((s) => s.status === status)?.count ?? 0;
 }
 
-/** How many criteria were authored but never actually checked. */
+/**
+ * How many criteria were authored but never actually checked.
+ *
+ * Counted as the COMPLEMENT of the two statuses that mean an answer came back —
+ * `pass` and `fail` — rather than by summing `not_run`/`not_validated`/`manual`.
+ * Those three are not the only ways a criterion goes unchecked, and summing them
+ * understated the gap in the two cases that matter most:
+ *
+ *  - a criterion the report OMITS entirely, which report.ts explicitly tolerates.
+ *    It has no status at all, so it belonged to no bucket and vanished from the
+ *    count while still sitting in `total`.
+ *  - an UNRECOGNISED status, which is evidence nobody here can interpret. The
+ *    server's verdict derivation already treats one as a coverage gap
+ *    (VerdictFromReport's default arm), so counting it as covered would let the
+ *    tile's number contradict the verdict it is explaining.
+ *
+ * Complementing also keeps the arithmetic closed: passed + failed + uncovered is
+ * always `total`, so "5 of 40 were never covered" can never exceed the denominator
+ * or leave a remainder the reader has to account for.
+ */
 export function uncoveredCount(tally: CriterionTally): number {
-  return UNCOVERED.reduce((n, s) => n + countOf(tally, s), 0);
+  const decided = DECIDED.reduce((n, s) => n + countOf(tally, s), 0);
+  return tally.total - decided;
 }
 
 /**
