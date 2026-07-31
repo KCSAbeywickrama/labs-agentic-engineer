@@ -155,6 +155,35 @@ func TestPullRequestOpened_MergesWhenItResolvesMilestoneWork(t *testing.T) {
 	}
 }
 
+// The validation cycle's pull request must merge too, and this asserts it through
+// the REAL fetch rather than against a hand-built issue list. decideAutoMerge
+// accepting `aep:validation` is not enough on its own: the fetch used to narrow
+// on `aep`, so the validation issue never reached the policy and every validation
+// pull request was declined with "no resolved issue is this run's work" — a green
+// agent, a report in the branch, and a run that sat at its landing deadline until
+// a human merged by hand. The policy_test cases cannot see that, because they
+// call the pure function with the population already in hand.
+func TestPullRequestOpened_MergesTheValidationCyclesPullRequest(t *testing.T) {
+	h := newHarness(t, aRun("run-1", 7, delivery.RunStateRunning))
+	h.cycles.latest = aCycle("cycle-1", "run-1")
+	// The milestone as it really stands when validation runs: the coding work is
+	// closed, so all that is left open is the validation issue.
+	h.issues.withValidationIssue(7, 3)
+
+	if err := h.deliver(t, "pull_request", prBody("opened", "aep/m7-validation", "Resolves #3", 4, false, false, "")); err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	if len(h.merger.merged) != 1 || h.merger.merged[0] != 4 {
+		t.Fatalf("the validation cycle's PR must be squash-merged, got %v (decline reason: %q)",
+			h.merger.merged, h.cycles.latest.MergeReason)
+	}
+	// Without the matched set the merge closes #3 and nothing records that this
+	// cycle is what worked it.
+	if len(h.cycles.decisions) != 1 || h.cycles.decisions[0] != "cycle-1::[3]" {
+		t.Fatalf("the cycle must record the validation issue as its resolved set, got %v", h.cycles.decisions)
+	}
+}
+
 // A draft is the agent saying it is not finished, but the cycle still records
 // WHICH pull request it is parked behind: without it, a cycle waiting on a draft
 // is indistinguishable from one whose agent never opened a pull request, and the
