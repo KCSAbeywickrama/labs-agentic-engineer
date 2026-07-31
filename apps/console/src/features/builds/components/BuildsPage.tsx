@@ -37,6 +37,8 @@ import { taskKeys } from "../../tasks/api/keys";
 import { partitionIssues } from "../../tasks/lib/issueRows";
 import { useBuildRuns, useBuilds } from "../api/queries";
 import { versionIsLive } from "../lib/runView";
+import { MilestonePanel } from "./MilestonePanel";
+import { RunHistoryList } from "./RunHistoryList";
 import { RunStory } from "./RunStory";
 
 /**
@@ -71,6 +73,10 @@ export function BuildsPage({
   const runs = useBuildRuns(projectName, selectedTag);
   const runList = runs.data?.runs ?? [];
   const live = versionIsLive(runList);
+  // Newest first, and only the newest can be live — so the head is the run the
+  // page leads with and the tail is history.
+  const current = runList[0];
+  const earlier = runList.slice(1);
 
   // The same query IssueSections reads, on the same key — react-query serves
   // both from one request. The run card needs it because only the issue plane
@@ -198,20 +204,43 @@ export function BuildsPage({
           platform started keeping them.
         </Alert>
       ) : (
-        // A milestone sees SEQUENTIAL runs across its life: the spec build that
-        // created the version, then any incident adopted into it. Newest first,
-        // and only the newest can be live.
-        <Stack spacing={2} sx={{ mb: 4 }}>
-          {runList.map((run) => (
-            <RunStory
-              key={run.id}
+        // Now-first: the CURRENT run leads at full detail, and the milestone
+        // sits beside it so "what is happening" and "how much is left" are one
+        // glance apart. Earlier runs of the same milestone — the spec build that
+        // created the version, then any incident adopted into it — collapse to
+        // history rows, because a settled run is a record, not a thing to watch.
+        <Box
+          sx={{
+            display: "grid",
+            gap: 2,
+            alignItems: "start",
+            mb: 4,
+            // The milestone drops below the run on narrow viewports rather than
+            // squeezing the log into an unreadable column.
+            gridTemplateColumns: { xs: "1fr", lg: "minmax(0, 1fr) 320px" },
+          }}
+        >
+          <Stack spacing={2} sx={{ minWidth: 0 }}>
+            {current && (
+              <RunStory
+                projectName={projectName}
+                tag={selected.tag}
+                run={current}
+                {...(milestone ? { milestone } : {})}
+              />
+            )}
+            <RunHistoryList runs={earlier} />
+          </Stack>
+
+          {milestone && (
+            <MilestonePanel
               projectName={projectName}
               tag={selected.tag}
-              run={run}
-              {...(milestone ? { milestone } : {})}
+              work={milestone.work}
+              gates={milestone.gates}
             />
-          ))}
-        </Stack>
+          )}
+        </Box>
       )}
 
       <IssueSections projectName={projectName} tag={selected.tag} live={live} />

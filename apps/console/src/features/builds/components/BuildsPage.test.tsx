@@ -225,7 +225,9 @@ describe("BuildsPage — one version's story", () => {
     renderPage();
 
     // The newest version's run is the page — no intermediate list of versions.
-    expect(screen.getByText("v2")).toBeInTheDocument();
+    // The tag now appears twice by design: the run card's milestone title, and
+    // the milestone panel beside it.
+    expect(screen.getAllByText("v2").length).toBeGreaterThan(0);
     expect(screen.getByTestId("issues")).toHaveTextContent("v2:true");
   });
 
@@ -242,15 +244,14 @@ describe("BuildsPage — one version's story", () => {
     mockIssues = withOpenWork();
     renderPage();
 
-    // Which sessions the page hands down, and the learned facts riding on them —
-    // the rendering of a session is RunSpine's own test.
-    expect(screen.getByTestId("run-spine")).toHaveTextContent(
-      "coding:aep/m2-c1:dcb1edc5fe04|fix::",
-    );
-    // Plus the milestone's agent work, which is what a session attributes its
-    // issues from. WHOLE, not narrowed to the open ones: a settled session's
-    // issues were closed by the very merge that completed it.
-    expect(screen.getByTestId("run-spine").dataset.work).toBe("2");
+    // The strip narrates the CURRENT session's five stages…
+    for (const stage of ["Coding agent", "Pull request", "Merge", "Builds", "Deployment"]) {
+      expect(screen.getAllByText(stage).length).toBeGreaterThan(0);
+    }
+    // …and the session behind it stays visible, because the re-entry loop is
+    // the thing a reader of a multi-session run is trying to understand.
+    expect(screen.getByText("EARLIER BUILD SESSIONS")).toBeInTheDocument();
+    expect(screen.getByText(/merged .* as dcb1edc5/)).toBeInTheDocument();
   });
 
   it("shows no budget counters on a healthy run — unspent allowance is not the user's business", () => {
@@ -330,7 +331,12 @@ describe("BuildsPage — one version's story", () => {
     ];
     renderPage();
 
-    expect(screen.getByTestId("run-spine")).toHaveAttribute("data-gates", "1,3");
+    // Every gate stays on the page, resolved ones included — that is the
+    // version's record. The OPEN one leads in the run card, because it is what
+    // holds dispatch; the resolved one is history, and lives in the milestone
+    // panel's connections beside it.
+    expect(screen.getAllByText(/url-shortener-db/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/cache/).length).toBeGreaterThan(0);
     // A gate hold is NOT the unbounded park — the fix for one is nothing like
     // the fix for the other, so the notice must not claim it.
     expect(screen.queryByText(/wait is unbounded/)).not.toBeInTheDocument();

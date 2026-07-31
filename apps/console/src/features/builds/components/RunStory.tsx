@@ -16,6 +16,7 @@
  * under the License.
  */
 
+import { useState } from "react";
 import {
   Alert,
   Box,
@@ -29,8 +30,13 @@ import {
 import { X } from "@wso2/oxygen-ui-icons-react";
 import { StatusChip } from "../../../components/StatusChip";
 import type { components } from "../../../generated/aep-api";
-import { useCancelRun } from "../api/queries";
+import { useCancelRun, useCycleBuilds } from "../api/queries";
+import { useRunProgress } from "../hooks/useRunProgress";
+import { provisioningStage } from "../lib/provisioning";
+import { buildGlance } from "../lib/runGlance";
 import {
+  BUILD_CYCLE_KINDS,
+  buildSessionLabel,
   isTerminalRun,
   runHold,
   runOriginLabel,
@@ -38,8 +44,12 @@ import {
   spentBudgets,
   terminalReasonText,
 } from "../lib/runView";
+import { sessionIssues, sessionStages } from "../lib/sessionSpine";
+import { EarlierSessions } from "./EarlierSessions";
+import { ProvisioningGates } from "./ProvisioningGates";
+import { RunGlanceStrip } from "./RunGlanceStrip";
 import { RunHoldNotice } from "./RunHoldNotice";
-import { RunSpine } from "./RunSpine";
+import { RunNowPanel } from "./RunNowPanel";
 
 type MilestoneRunView = components["schemas"]["MilestoneRunView"];
 type TaskView = components["schemas"]["TaskView"];
@@ -58,24 +68,22 @@ function when(value: string | null | undefined): string {
 }
 
 /**
- * One run of the version's milestone loop, as ONE NUMBERED FLOW: its connections
- * first (only when it needs any), then every build session's stages — agent,
- * pull request, merge, builds, deployment — counting straight through. See
- * RunSpine.
+ * One run of the version's milestone loop, NOW-FIRST.
  *
- * Budgets are deliberately NOT a standing readout — see `spentBudgets`; they
- * surface only once one is spent, next to the reason it explains.
+ * The flow is a strip — every stage on one line, the current one badged — and
+ * only that stage gets words. This replaced a rail that rendered all six stages
+ * expanded, each with its note, issues and a 420px log: correct for reading a
+ * finished run end to end, and far too much for the question a reader actually
+ * arrives with, which is what is happening right now.
  *
- * The gate hold is NOT a notice here. It is the provisioning stage on the rail,
- * because "why is nothing moving" is best answered at the point where movement
- * stopped, naming each connection and who is acting on it. What remains a notice
- * is the handful of holds that name no connection at all: the plan window, an
- * empty milestone, and the unbounded park between sessions.
+ * What is NOT lost: every stage keeps its note in the strip's tooltip, the
+ * agent's log is one click down in the NOW panel's drawer, and each issue links
+ * to its own page. What IS lost is reading every stage's detail at once — the
+ * deliberate trade the redesign makes.
  *
  * Cancel is PROMINENT on a waiting run, quiet on a running one, and ABSENT
  * while planning: cancel is a signal to the supervisor, and during the plan
- * window there is no supervisor yet to receive it — the button would return
- * 202 and do nothing. A plan that fails settles its own run.
+ * window there is no supervisor yet to receive it.
  */
 export function RunStory({
   projectName,
@@ -86,10 +94,7 @@ export function RunStory({
   projectName: string;
   tag: string;
   run: MilestoneRunView;
-  /** The milestone's issue plane, or undefined while it is still loading. It
-   *  carries the gates the provisioning stage is built from (resolved ones
-   *  included — they are the version's record), and the agent work each build
-   *  session claims. */
+  /** The milestone's issue plane, or undefined while it is still loading. */
   milestone?: { gates: TaskView[]; work: TaskView[] };
 }) {
   const cancel = useCancelRun(projectName, tag);
@@ -98,20 +103,56 @@ export function RunStory({
   const waiting = run.state === "waiting";
   const planning = run.state === "planning";
   const work = milestone?.work ?? [];
+  const gates = milestone?.gates ?? [];
+
   const hold = runHold(
     run,
     milestone && {
       gates: milestone.gates,
-      openWork: milestone.work.filter((task) => task.derivedStatus === "pending").length,
+      openWork: milestone.work.filter((t) => t.derivedStatus === "pending").length,
     },
   );
   const reason = terminalReasonText(run.terminalReason ?? "");
   const spent = spentBudgets(run.budgets);
   const started = when(run.startedAt ?? run.createdAt);
   const ended = when(run.endedAt);
-  // A spent budget on a succeeded run is a footnote, not an alarm — the run
-  // simply used its whole allowance. On any other state it is the bad news.
+  // A spent budget on a succeeded run is a footnote, not an alarm.
   const tone = run.state === "succeeded" ? "text.secondary" : "error.main";
+
+  // Validation is not this surface's session — the deployment is what gets
+  // validated, and its verdict renders there.
+  const cycles = run.cycles.filter((c) =>
+    (BUILD_CYCLE_KINDS as readonly string[]).includes(c.kind),
+  );
+  // The glance narrates the CURRENT build session. Earlier sessions of the same
+  // run are history the strip cannot show without becoming the rail again — the
+  // session label says which one the reader is looking at.
+  const current = cycles.at(-1);
+  const sessionIndex = cycles.length - 1;
+
+  // A settled run opens no stream until asked; a live one streams unprompted,
+  // because it is what the reader came to watch.
+  const [logRequested, setLogRequested] = useState(false);
+  const showLog = !terminal || logRequested;
+  const progress = useRunProgress(projectName, run.id, showLog);
+  const { data: builds } = useCycleBuilds(
+    projectName,
+    tag,
+    current?.id ?? "",
+    Boolean(current?.mergeSha),
+  );
+
+  const provisioning = provisioningStage(gates);
+  const stages = current ? sessionStages({ cycle: current, work, builds }) : [];
+  // Numbered WITHIN the strip, not across the run. The rail this replaced
+  // counted straight through every session (…6, 7, 8) because all of them were
+  // on screen at once; the strip shows one session, so run-wide numbering read
+  // as "step 7 of 5". Which session it is comes from the label above instead.
+  const glance = buildGlance(stages);
+  const issues = current ? sessionIssues(current, work) : undefined;
+  const lines = current
+    ? (progress.cycles.find((c) => c.cycle.id === current.id)?.lines ?? [])
+    : [];
 
   return (
     <Card variant="outlined" sx={{ bgcolor: "action.hover" }}>
@@ -123,18 +164,13 @@ export function RunStory({
         >
           <Typography variant="h6">{run.milestoneTitle}</Typography>
           <StatusChip label={chip.label} tone={chip.tone} appearance="soft" dot />
-          <StatusChip
-            label={runOriginLabel(run.origin)}
-            tone="neutral"
-            appearance="soft"
-          />
+          <StatusChip label={runOriginLabel(run.origin)} tone="neutral" appearance="soft" />
           <Typography variant="body2" color="text.secondary">
             {started ? `Started ${started}` : ""}
             {ended ? ` · ended ${ended}` : ""}
           </Typography>
           <Box sx={{ flexGrow: 1 }} />
           {!terminal && !planning && (
-            // Prominent on a parked run — that is the state cancel exists for.
             <Button
               size="small"
               color={waiting ? "warning" : "inherit"}
@@ -159,9 +195,7 @@ export function RunStory({
 
         {cancel.isError && (
           <Alert severity="error" sx={{ mt: 2 }}>
-            {cancel.error instanceof Error
-              ? cancel.error.message
-              : "Failed to cancel the run"}
+            {cancel.error instanceof Error ? cancel.error.message : "Failed to cancel the run"}
             . Nothing was cancelled — you can retry.
           </Alert>
         )}
@@ -174,32 +208,57 @@ export function RunStory({
               </Typography>
             )}
             {spent.length > 0 && (
-              <Typography
-                variant="caption"
-                color={tone}
-                sx={{ fontVariantNumeric: "tabular-nums" }}
-              >
-                {`Budget spent: ${spent
-                  .map((budget) => `${budget.label} ${budget.text}`)
-                  .join(" · ")}`}
+              <Typography variant="caption" color={tone} sx={{ fontVariantNumeric: "tabular-nums" }}>
+                {`Budget spent: ${spent.map((b) => `${b.label} ${b.text}`).join(" · ")}`}
               </Typography>
             )}
           </Stack>
         )}
 
         {/* A planning run has provably no build sessions — the supervisor that
-            dispatches them has not been started yet — so the rail would say
-            only that none exist, under a notice that already said why. */}
+            dispatches them has not been started yet. */}
         {!planning && (
           <>
             <Divider sx={{ my: 2 }} />
-            <RunSpine
-              projectName={projectName}
-              tag={tag}
-              run={run}
-              gates={milestone?.gates ?? []}
-              work={work}
-            />
+
+            {/* Open gates hold every session, so they stay expanded: "why is
+                nothing moving" is answered where movement stopped. */}
+            {provisioning && provisioning.state !== "done" && (
+              <Box sx={{ mb: 2 }}>
+                <ProvisioningGates
+                  projectName={projectName}
+                  gates={gates}
+                  state={provisioning.state}
+                />
+              </Box>
+            )}
+
+            {current ? (
+              <Stack spacing={2}>
+                {/* Sessions behind the current one — the loop, kept visible. */}
+                <EarlierSessions cycles={cycles.slice(0, -1)} />
+                {sessionIndex > 0 && (
+                  <Typography variant="caption" color="text.secondary">
+                    {buildSessionLabel(current, sessionIndex)}
+                  </Typography>
+                )}
+                <RunGlanceStrip stages={glance.stages} nowIndex={glance.nowIndex} />
+                <RunNowPanel
+                  glance={glance}
+                  issues={issues?.issues ?? []}
+                  {...(issues?.caption ? { issuesCaption: issues.caption } : {})}
+                  lines={lines}
+                  logPhase={progress.phase}
+                  showLog={showLog}
+                  onOpenLog={() => setLogRequested(true)}
+                />
+              </Stack>
+            ) : (
+              <Typography variant="body2" color="text.secondary">
+                No build session has been dispatched yet — the run is waiting on
+                its dispatch predicate.
+              </Typography>
+            )}
           </>
         )}
       </CardContent>
