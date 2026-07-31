@@ -68,9 +68,9 @@ type TaskView = components["schemas"]["TaskView"];
  * to its own page. What IS lost is reading every stage's detail at once — the
  * deliberate trade the redesign makes.
  *
- * Cancel is PROMINENT on a waiting run, quiet on a running one, and ABSENT
- * while planning: cancel is a signal to the supervisor, and during the plan
- * window there is no supervisor yet to receive it.
+ * Cancel is quiet and ABSENT while planning: cancel is a signal to the
+ * supervisor, and during the plan window there is no supervisor yet to receive
+ * it.
  */
 export function RunStory({
   projectName,
@@ -87,7 +87,6 @@ export function RunStory({
   const cancel = useCancelRun(projectName, tag);
   const chip = runStateChip(run);
   const terminal = isTerminalRun(run.state);
-  const waiting = run.state === "waiting";
   const planning = run.state === "planning";
   const work = milestone?.work ?? [];
 
@@ -141,10 +140,12 @@ export function RunStory({
     ? (progress.cycles.find((c) => c.cycle.id === current.id)?.lines ?? [])
     : [];
 
-  // The card carries the run's state in its EDGE, not in a fill: a live run is
-  // ringed in its own tone so the eye lands on it before reading a word, while
-  // the surface stays quiet enough for the strip and the log to sit on it.
-  const edge = chip.tone === "neutral" ? null : chip.tone;
+  // The card carries state in its EDGE, not a fill — but only for the two
+  // states worth a ring: something is moving (info), or something broke
+  // (error). Ringing a merely-waiting run in amber painted the whole card
+  // orange for a state that is not an alarm, and the chip already says it.
+  const edge =
+    chip.tone === "info" || chip.tone === "error" ? chip.tone : null;
 
   return (
     <Card
@@ -172,21 +173,31 @@ export function RunStory({
           </Typography>
           <Box sx={{ flexGrow: 1 }} />
           {!terminal && !planning && (
-            // Quiet by design: cancelling a run is a destructive escape hatch,
-            // not the thing a reader came to do. A filled button here competed
-            // with the stage strip for the eye and read as the page's primary
-            // action. Waiting keeps a warning outline — the state where cancel
-            // is most often what you want — without shouting.
+            // Quiet by design: cancelling a session is a destructive escape
+            // hatch, not the thing a reader came to do. A filled button here
+            // competed with the stage strip for the eye and read as the page's
+            // primary action.
             <Button
               size="small"
-              color={waiting ? "warning" : "inherit"}
+              color="inherit"
               variant="outlined"
               startIcon={<X size={16} />}
               disabled={cancel.isPending}
               onClick={() => cancel.mutate(run.id)}
-              sx={{ borderRadius: 999 }}
+              // Neutral edge, taking its colour from the text: near-white on a
+              // dark theme, near-black on a light one. A warning-coloured
+              // outline made an escape hatch look like an alarm, and put a
+              // second orange on a card that already has an orange accent.
+              sx={{
+                borderRadius: 999,
+                color: "text.primary",
+                borderColor: (t) => alpha(t.palette.text.primary, 0.3),
+                "&:hover": {
+                  borderColor: (t) => alpha(t.palette.text.primary, 0.55),
+                },
+              }}
             >
-              {cancel.isPending ? "Cancelling…" : "Cancel run"}
+              {cancel.isPending ? "Cancelling…" : "Cancel session"}
             </Button>
           )}
         </Stack>
@@ -202,7 +213,7 @@ export function RunStory({
 
         {cancel.isError && (
           <Alert severity="error" sx={{ mt: 2 }}>
-            {cancel.error instanceof Error ? cancel.error.message : "Failed to cancel the run"}
+            {cancel.error instanceof Error ? cancel.error.message : "Failed to cancel the build session"}
             . Nothing was cancelled — you can retry.
           </Alert>
         )}
@@ -260,7 +271,7 @@ export function RunStory({
               </Stack>
             ) : (
               <Typography variant="body2" color="text.secondary">
-                No build session has been dispatched yet — the run is waiting on
+                No cycle has been dispatched yet — the session is waiting on
                 its dispatch predicate.
               </Typography>
             )}

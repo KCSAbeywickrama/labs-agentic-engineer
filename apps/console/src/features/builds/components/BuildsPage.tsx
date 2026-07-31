@@ -36,7 +36,7 @@ import { taskKeys } from "../../tasks/api/keys";
 import { partitionIssues } from "../../tasks/lib/issueRows";
 import { useProjectStatus } from "../../projects/api/queries";
 import { useBuildRuns, useBuilds } from "../api/queries";
-import { BUILD_CYCLE_KINDS, buildSessionLabel, versionIsLive } from "../lib/runView";
+import { BUILD_CYCLE_KINDS, versionIsLive } from "../lib/runView";
 import { EarlierSessions } from "./EarlierSessions";
 import { MilestonePanel } from "./MilestonePanel";
 import { RunHistoryList } from "./RunHistoryList";
@@ -79,9 +79,8 @@ export function BuildsPage({
   const current = runList[0];
   const earlier = runList.slice(1);
 
-  // The current run's build sessions behind the one the card narrates. The
-  // validation cycle is not a build session, so it is filtered the same way the
-  // card filters it.
+  // This session's CYCLES. Validation is not one of them, so it is filtered
+  // the same way the card filters it.
   const currentCycles = (current?.cycles ?? []).filter((c) =>
     (BUILD_CYCLE_KINDS as readonly string[]).includes(c.kind),
   );
@@ -91,13 +90,15 @@ export function BuildsPage({
   const repoUrl = status.data?.repoUrl?.replace(/\/+$/, "");
   const issuesUrl = repoUrl ? `${repoUrl}/issues` : undefined;
 
-  // Which build session claimed an in-flight issue. `resolves` is the merge
-  // policy's recorded matched set, so this is a fact rather than a guess — an
-  // issue no session has claimed yet simply gets no note.
+  // Which CYCLE claimed an in-flight issue. `resolves` is the merge policy's
+  // recorded matched set, so this is a fact rather than a guess — an issue no
+  // cycle has claimed yet simply gets no note.
   const claimedBy = (issue: { issueNumber: number }): string | undefined => {
-    const cycles = current?.cycles ?? [];
-    const index = cycles.findIndex((c) => (c.resolves ?? []).includes(issue.issueNumber));
-    return index === -1 ? undefined : `Claimed by ${buildSessionLabel(cycles[index]!, index)}`;
+    const index = currentCycles.findIndex((c) =>
+      (c.resolves ?? []).includes(issue.issueNumber),
+    );
+    if (index === -1) return undefined;
+    return `Claimed by cycle ${index + 1} · ${currentCycles[index]?.kind ?? ""}`.trim();
   };
 
   // The same query IssueSections reads, on the same key — react-query serves
@@ -222,19 +223,19 @@ export function BuildsPage({
           sx={{ mb: 3 }}
           action={<Button onClick={() => void runs.refetch()}>Retry</Button>}
         >
-          Failed to load {selected.tag}'s runs
+          Failed to load {selected.tag}'s build sessions
           {runs.error instanceof Error && runs.error.message
             ? `: ${runs.error.message}`
             : ""}
         </Alert>
       ) : runs.isPending ? (
         <Box sx={{ display: "flex", justifyContent: "center", p: 4 }}>
-          <CircularProgress aria-label="Loading the version's runs" />
+          <CircularProgress aria-label="Loading the version's build sessions" />
         </Box>
       ) : runList.length === 0 ? (
         <Alert severity="info" sx={{ mb: 3 }}>
-          {selected.tag} has no run rows — the version was tagged before this
-          platform started keeping them.
+          {selected.tag} has no build-session rows — the version was tagged before
+          this platform started keeping them.
         </Alert>
       ) : (
         // Now-first: the CURRENT run leads at full detail, and the milestone
@@ -265,7 +266,7 @@ export function BuildsPage({
             {/* The current run's own earlier sessions, then the milestone's
                 earlier runs — both are history, and both belong below the
                 card rather than inside it. */}
-            <EarlierSessions cycles={earlierSessions} tag={selected.tag} />
+            <EarlierSessions cycles={earlierSessions} />
             <RunHistoryList runs={earlier} tag={selected.tag} />
           </Stack>
 

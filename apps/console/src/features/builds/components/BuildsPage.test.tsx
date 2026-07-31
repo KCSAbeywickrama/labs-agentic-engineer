@@ -271,7 +271,8 @@ describe("BuildsPage — one version's story", () => {
     // …and the session behind it stays visible, because the re-entry loop is
     // the thing a reader of a multi-session run is trying to understand.
     // …below the card, not inside it — the card is the strip and the NOW.
-    expect(screen.getByText("EARLIER BUILD SESSIONS OF V2")).toBeInTheDocument();
+    expect(screen.getByText("EARLIER CYCLES IN THIS SESSION")).toBeInTheDocument();
+    expect(screen.getByText("Cycle 1 · coding")).toBeInTheDocument();
     expect(screen.getByText(/merged .* as dcb1edc5/)).toBeInTheDocument();
   });
 
@@ -306,7 +307,7 @@ describe("BuildsPage — one version's story", () => {
     expect(screen.queryByText(/Fix sessions/)).not.toBeInTheDocument();
   });
 
-  it("makes cancel PROMINENT and explained on a waiting run", () => {
+  it("offers cancel, quietly, on a waiting session", () => {
     mockBuilds = [build("v2", "in_progress")];
     mockRuns = [run({ state: "waiting" })];
     mockIssues = withOpenWork();
@@ -314,7 +315,9 @@ describe("BuildsPage — one version's story", () => {
 
     expect(screen.getByText("Waiting")).toBeInTheDocument();
     expect(screen.getByText(/wait is unbounded/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /Cancel run/ }));
+    // Neutral, not alarm-coloured — cancel is an escape hatch, not the page's
+    // primary action.
+    fireEvent.click(screen.getByRole("button", { name: /Cancel session/ }));
     expect(cancelMutate).toHaveBeenCalledWith("run-1");
   });
 
@@ -427,6 +430,33 @@ describe("BuildsPage — one version's story", () => {
     expect(screen.getByText("Spec build")).toBeInTheDocument();
   });
 
+  it("keeps an earlier session collapsed until asked, then shows its cycles", () => {
+    mockBuilds = [build("v2", "in_progress")];
+    mockRuns = [
+      run({ id: "run-2", origin: "incident-adoption" }),
+      run({ id: "run-1", state: "cancelled", endedAt: "2026-07-10T09:42:00Z" }),
+    ];
+    mockIssues = withOpenWork();
+    renderPage();
+
+    const toggle = screen.getByRole("button", {
+      name: "Show this build session's detail",
+    });
+    // Both runs carry the same cycle fixture, so count rather than match: the
+    // current session's own cycle list is the one occurrence on screen while
+    // the earlier session stays collapsed.
+    const merged = () => screen.getAllByText(/merged pull request #3/).length;
+    expect(merged()).toBe(1);
+
+    fireEvent.click(toggle);
+
+    // Expanded, the earlier session accounts for itself cycle by cycle.
+    expect(merged()).toBe(2);
+    expect(
+      screen.getByRole("button", { name: "Hide this build session's detail" }),
+    ).toBeInTheDocument();
+  });
+
   it("declares a run delivered only once its flow actually finished", () => {
     // A run can be marked succeeded while a stage is still unreadable — here
     // the merge landed but no build has appeared in the cluster yet, so the
@@ -478,11 +508,11 @@ describe("BuildsPage — one version's story", () => {
     mockCycleBuilds = [];
   });
 
-  it("explains a version tagged before the platform kept run rows", () => {
+  it("explains a version tagged before the platform kept session rows", () => {
     mockBuilds = [build("v2", "completed")];
     mockRuns = [];
     renderPage();
-    expect(screen.getByText(/no run rows/)).toBeInTheDocument();
+    expect(screen.getByText(/no build-session rows/)).toBeInTheDocument();
   });
 
   it("re-reads the issue list exactly once when the run settles", () => {

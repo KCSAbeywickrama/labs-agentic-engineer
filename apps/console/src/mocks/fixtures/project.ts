@@ -667,6 +667,28 @@ const settledRun: BuildRunList = {
         },
       ],
     }),
+    // An EARLIER session of the same milestone: a cancelled incident whose one
+    // cycle never opened a pull request. Gives the builds page's history list
+    // something to collapse, and its detail something to show.
+    milestoneRun({
+      id: "run-0",
+      origin: "incident-adoption",
+      state: "cancelled",
+      terminalReason: "cancelled",
+      createdAt: "2026-07-10T06:25:00Z",
+      startedAt: "2026-07-10T06:25:00Z",
+      endedAt: "2026-07-10T09:12:00Z",
+      cycles: [
+        {
+          id: "run0-cycle-1",
+          kind: "coding",
+          attempts: 2,
+          branch: "aep/m1-r0c1",
+          createdAt: "2026-07-10T06:30:00Z",
+          endedAt: "2026-07-10T09:10:00Z",
+        },
+      ],
+    }),
   ],
 };
 

@@ -18,24 +18,29 @@
 
 import { Box, Stack, Typography } from "@wso2/oxygen-ui";
 import type { components } from "../../../generated/aep-api";
-import { buildSessionLabel } from "../lib/runView";
 
 type RunCycleView = components["schemas"]["RunCycleView"];
 
+// VOCABULARY. A build SESSION is one run of the milestone loop — the thing the
+// card narrates and the history below it lists. A session contains CYCLES: each
+// one an agent dispatch, its pull request, the merge, and the builds that
+// follow. A cycle in turn may take two runner ATTEMPTS.
+//
+// The platform's own type is RunCycleView, so "cycle" is its word, not one
+// invented here — and it keeps "session" free to mean the one thing the design
+// calls a build session.
+
 /**
- * The run's EARLIER build sessions, one line each.
+ * The current session's earlier cycles.
  *
- * The strip above narrates the session that is moving. A run that re-entered —
- * a fix or a conflict rebase — has sessions behind it, and dropping them would
- * hide the very loop a reader is trying to understand. What each one needs is
- * not five stages but its outcome: what it opened, and whether it landed.
+ * The strip narrates the cycle that is moving. A session that re-entered — a
+ * fix, or a conflict rebase — has cycles behind it, and dropping them would
+ * hide the very loop a reader is trying to understand.
  */
 export function EarlierSessions({
   cycles,
-  tag,
 }: {
   cycles: RunCycleView[];
-  tag: string;
 }) {
   if (cycles.length === 0) return null;
 
@@ -51,41 +56,51 @@ export function EarlierSessions({
           color: "text.secondary",
         }}
       >
-        EARLIER BUILD SESSIONS OF {tag.toUpperCase()}
+        EARLIER CYCLES IN THIS SESSION
       </Typography>
-      <Stack spacing={0.75}>
-        {cycles.map((cycle, i) => (
-          <Stack
-            key={cycle.id}
-            direction="row"
-            spacing={1.5}
-            sx={{ alignItems: "baseline", flexWrap: "wrap", rowGap: 0.25 }}
-          >
-            <Box
-              aria-hidden
-              sx={{
-                width: 6,
-                height: 6,
-                borderRadius: "50%",
-                flexShrink: 0,
-                bgcolor: cycle.mergeSha ? "success.main" : "text.disabled",
-              }}
-            />
-            <Typography variant="body2" sx={{ fontWeight: 500 }}>
-              {buildSessionLabel(cycle, i)}
-            </Typography>
-            <Typography variant="caption" color="text.secondary">
-              {sessionOutcome(cycle)}
-            </Typography>
-          </Stack>
-        ))}
-      </Stack>
+      <CycleLines cycles={cycles} />
     </Box>
   );
 }
 
-/** What the session left behind, in the platform's own recorded facts. */
-function sessionOutcome(cycle: RunCycleView): string {
+/**
+ * Cycles as one line each — shared by the current session's list and by an
+ * expanded past session, so a cycle reads identically wherever it appears.
+ */
+export function CycleLines({ cycles }: { cycles: RunCycleView[] }) {
+  return (
+    <Stack spacing={0.75}>
+      {cycles.map((cycle, i) => (
+        <Stack
+          key={cycle.id}
+          direction="row"
+          spacing={1.5}
+          sx={{ alignItems: "baseline", flexWrap: "wrap", rowGap: 0.25 }}
+        >
+          <Box
+            aria-hidden
+            sx={{
+              width: 6,
+              height: 6,
+              borderRadius: "50%",
+              flexShrink: 0,
+              bgcolor: cycle.mergeSha ? "success.main" : "text.disabled",
+            }}
+          />
+          <Typography variant="body2" sx={{ fontWeight: 500 }}>
+            {`Cycle ${i + 1} · ${cycle.kind}`}
+          </Typography>
+          <Typography variant="caption" color="text.secondary">
+            {cycleOutcome(cycle)}
+          </Typography>
+        </Stack>
+      ))}
+    </Stack>
+  );
+}
+
+/** What the cycle left behind, in the platform's own recorded facts. */
+function cycleOutcome(cycle: RunCycleView): string {
   if (cycle.mergeSha) {
     const pr = cycle.prNumber ? `pull request #${cycle.prNumber}` : "its pull request";
     return `merged ${pr} as ${cycle.mergeSha.slice(0, 8)}`;

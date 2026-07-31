@@ -62,7 +62,7 @@ export function RunNowPanel({
   if (!now) {
     return (
       <Typography variant="body2" color="text.secondary">
-        Every stage of this run is done.
+        Every stage of this build session is done.
       </Typography>
     );
   }
@@ -165,7 +165,7 @@ function AgentLogDrawer({
 
   const newest = lines.at(-1);
   const preview = !showLog
-    ? "Not attached — open to replay this run's log."
+    ? "Not attached — open to replay this session's log."
     : newest
       ? formatLine(newest).text
       : phase === "ended"

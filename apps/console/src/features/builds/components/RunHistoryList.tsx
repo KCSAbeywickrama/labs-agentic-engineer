@@ -16,37 +16,39 @@
  * under the License.
  */
 
-import { Box, Card, Stack, Typography } from "@wso2/oxygen-ui";
+import { useState } from "react";
+import {
+  Box,
+  ButtonBase,
+  Card,
+  Collapse,
+  Divider,
+  Stack,
+  Typography,
+} from "@wso2/oxygen-ui";
+import { ChevronDown } from "@wso2/oxygen-ui-icons-react";
 import { StatusChip } from "../../../components/StatusChip";
 import type { components } from "../../../generated/aep-api";
+import { runStamp } from "../lib/format";
 import {
   BUILD_CYCLE_KINDS,
   runOriginLabel,
   runStateChip,
+  spentBudgets,
   terminalReasonText,
 } from "../lib/runView";
+import { CycleLines } from "./EarlierSessions";
 
 type MilestoneRunView = components["schemas"]["MilestoneRunView"];
 
-function when(value: string | null | undefined): string {
-  if (!value) return "";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? ""
-    : date.toLocaleString(undefined, {
-        day: "numeric",
-        month: "short",
-        hour: "2-digit",
-        minute: "2-digit",
-      });
-}
-
 /**
- * The milestone's EARLIER runs, one line each.
+ * The milestone's EARLIER BUILD SESSIONS — one collapsed line each.
  *
- * A settled run is a record, not something to watch, so it gets what a record
- * needs: how it ended, what kind it was, when it ran, and what it left behind.
- * The run that is still moving is the page's lead and is not in here.
+ * A settled session is a record, not something to watch, so the line carries
+ * only what a reader scans for: how it ended, what started it, when it ran, and
+ * what it left behind. Everything else — its cycles, the reason it stopped, any
+ * budget it spent — is one click down, because a page that shows all of it for
+ * every past session is the rail this redesign replaced.
  */
 export function RunHistoryList({
   runs,
@@ -69,53 +71,110 @@ export function RunHistoryList({
           color: "text.secondary",
         }}
       >
-        EARLIER RUNS OF {tag.toUpperCase()}
+        EARLIER BUILD SESSIONS OF {tag.toUpperCase()}
       </Typography>
       <Stack spacing={1}>
-        {runs.map((run) => {
-          const chip = runStateChip(run);
-          const sessions = run.cycles.filter((c) =>
-            (BUILD_CYCLE_KINDS as readonly string[]).includes(c.kind),
-          );
-          const merged = sessions.filter((c) => c.mergeSha).length;
-          const reason = terminalReasonText(run.terminalReason ?? "");
-          // What it left behind, in the platform's own terms: a run that merged
-          // nothing landed nothing, and that is the fact worth reading.
-          const outcome =
-            reason ||
-            (merged > 0
-              ? `${merged} of ${sessions.length} build session${sessions.length === 1 ? "" : "s"} merged`
-              : "Landed nothing — no build session merged.");
-
-          return (
-            <Card key={run.id} variant="outlined">
-              <Stack
-                direction="row"
-                spacing={1.5}
-                sx={{ alignItems: "center", flexWrap: "wrap", rowGap: 0.5, px: 2, py: 1.25 }}
-              >
-                <StatusChip label={chip.label} tone={chip.tone} appearance="soft" dot />
-                <StatusChip
-                  label={runOriginLabel(run.origin)}
-                  tone="neutral"
-                  appearance="soft"
-                />
-                <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: "nowrap" }}>
-                  {when(run.startedAt ?? run.createdAt)}
-                  {run.endedAt ? ` → ${when(run.endedAt)}` : ""}
-                </Typography>
-                <Typography
-                  variant="body2"
-                  color={chip.tone === "error" ? "error.main" : "text.secondary"}
-                  sx={{ flexGrow: 1, minWidth: 0 }}
-                >
-                  {outcome}
-                </Typography>
-              </Stack>
-            </Card>
-          );
-        })}
+        {runs.map((run) => (
+          <SessionRow key={run.id} run={run} />
+        ))}
       </Stack>
     </Box>
+  );
+}
+
+function SessionRow({ run }: { run: MilestoneRunView }) {
+  const [open, setOpen] = useState(false);
+  const chip = runStateChip(run);
+  const cycles = run.cycles.filter((c) =>
+    (BUILD_CYCLE_KINDS as readonly string[]).includes(c.kind),
+  );
+  const merged = cycles.filter((c) => c.mergeSha).length;
+  const reason = terminalReasonText(run.terminalReason ?? "");
+  const spent = spentBudgets(run.budgets);
+
+  // What it left behind, in the platform's own terms: a session that merged
+  // nothing landed nothing, and that is the fact worth reading at a glance.
+  const outcome =
+    reason ||
+    (merged > 0
+      ? `${merged} of ${cycles.length} cycle${cycles.length === 1 ? "" : "s"} merged`
+      : "Landed nothing — no cycle merged.");
+
+  return (
+    <Card variant="outlined">
+      <ButtonBase
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-label={`${open ? "Hide" : "Show"} this build session's detail`}
+        sx={{ width: "100%", justifyContent: "flex-start", px: 2, py: 1.25 }}
+      >
+        <Stack
+          direction="row"
+          spacing={1.5}
+          sx={{
+            alignItems: "center",
+            flexWrap: "wrap",
+            rowGap: 0.5,
+            width: "100%",
+            textAlign: "left",
+          }}
+        >
+          <StatusChip label={chip.label} tone={chip.tone} appearance="soft" dot />
+          <StatusChip
+            label={runOriginLabel(run.origin)}
+            tone="neutral"
+            appearance="soft"
+          />
+          <Typography
+            variant="caption"
+            color="text.secondary"
+            sx={{ whiteSpace: "nowrap" }}
+          >
+            {runStamp(run.startedAt ?? run.createdAt)}
+            {run.endedAt ? ` → ${runStamp(run.endedAt)}` : ""}
+          </Typography>
+          <Typography
+            variant="body2"
+            color={chip.tone === "error" ? "error.main" : "text.secondary"}
+            sx={{ flexGrow: 1, minWidth: 0 }}
+          >
+            {outcome}
+          </Typography>
+          <ChevronDown
+            size={16}
+            style={{
+              flexShrink: 0,
+              transition: "transform 0.15s",
+              transform: open ? "rotate(180deg)" : "none",
+            }}
+          />
+        </Stack>
+      </ButtonBase>
+
+      <Collapse in={open} unmountOnExit>
+        <Divider />
+        <Box sx={{ px: 2, py: 1.5 }}>
+          {cycles.length === 0 ? (
+            <Typography variant="body2" color="text.secondary">
+              No cycle was ever dispatched — the session settled before the
+              supervisor started one.
+            </Typography>
+          ) : (
+            <CycleLines cycles={cycles} />
+          )}
+          {spent.length > 0 && (
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              sx={{ display: "block", mt: 1.5, fontVariantNumeric: "tabular-nums" }}
+            >
+              {`Budget spent: ${spent
+                .map((budget) => `${budget.label} ${budget.text}`)
+                .join(" · ")}`}
+            </Typography>
+          )}
+        </Box>
+      </Collapse>
+    </Card>
   );
 }
