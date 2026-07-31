@@ -42,8 +42,8 @@ import { parse as parseYaml } from "yaml";
 // fence parsing cannot drift from the spec-file fence parsing (same approach as
 // the caller-side skill resolver the playground uses to materialize the mount).
 import { FRONTMATTER_RE, lf } from "@aep/agent-stream";
-import type { SkillAudience, SkillCatalogEntry, SkillSource, LoadedSkillBody, LoadedReference } from "../agents/main/skill-source.js";
-import { ALL_AUDIENCES } from "../agents/main/skill-source.js";
+import type { SkillAudience, SkillCatalogEntry, SkillSource, SkillLoadResult, LoadedReference } from "../agents/main/skill-source.js";
+import { ALL_AUDIENCES, SERVICE_AUDIENCE } from "../agents/main/skill-source.js";
 
 // --- The repo snapshot → `files` map -----------------------------------------
 
@@ -227,9 +227,12 @@ export class SnapshotSkillSource implements SkillSource {
     }));
   }
 
-  load(name: string): LoadedSkillBody | undefined {
+  load(name: string): SkillLoadResult {
     const row = this.byName.get(name);
     if (row === undefined) return undefined;
+    // Audience gate before any disk read: this consumer may see the row (it needs
+    // the name to pin the skill onto a component) but not the body.
+    if (!row.audience.includes(SERVICE_AUDIENCE)) return { refused: true };
     let raw: string;
     try {
       raw = readFileSync(join(row.dir, "SKILL.md"), "utf8");

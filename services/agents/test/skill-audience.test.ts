@@ -80,3 +80,19 @@ test("every skill stays in the catalog regardless of audience", () => {
     ["go", "planning"],
   );
 });
+
+test("a coding-only skill is refused, not reported missing", () => {
+  const source = loadSkillsFromSnapshot(
+    snapshotWith({ go: md("go", "[coding]"), planning: md("planning", "[design]") }),
+  );
+  assert.deepEqual(source.load("go"), { refused: true });
+  assert.equal(source.load("nope"), undefined); // unknown stays undefined
+  const ok = source.load("planning");
+  assert.ok(ok !== undefined && "content" in ok && ok.content.includes("BODY of planning"));
+});
+
+test("an unmarked skill is still loadable", () => {
+  const source = loadSkillsFromSnapshot(snapshotWith({ legacy: md("legacy") }));
+  const got = source.load("legacy");
+  assert.ok(got !== undefined && "content" in got);
+});

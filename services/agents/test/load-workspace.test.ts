@@ -23,6 +23,17 @@ import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { readSnapshot, filterTurnSnapshot, keepInTurnSnapshot, loadSkillsFromSnapshot } from "../src/conversation/load-workspace.js";
 import { buildSkillCatalog } from "../src/agents/main/prompt.js";
+import type { LoadedSkillBody } from "../src/agents/main/skill-source.js";
+
+/**
+ * Narrow a `load()` result to its body. These fixtures never declare an
+ * audience, so a defined result is never a refusal — asserting that here
+ * keeps every call site below a plain property access.
+ */
+function body(result: LoadedSkillBody | { refused: true } | undefined): LoadedSkillBody | undefined {
+  assert.ok(result === undefined || "content" in result, "expected a body, not a refusal");
+  return result as LoadedSkillBody | undefined;
+}
 
 function makeTree(files: Record<string, string | Buffer>): string {
   const root = mkdtempSync(join(tmpdir(), "aep-snap-"));
@@ -129,8 +140,8 @@ test("skills snapshot: FLAT layout (skills/<name>/) with kind in frontmatter", (
       source.catalog().map((e) => e.name),
       ["go", "high-level-architecture", "org-style"],
     );
-    assert.equal(source.load("go")?.content, "Write idiomatic Go.");
-    assert.equal(source.load("high-level-architecture")?.content, "Components live under specs/design.");
+    assert.equal(body(source.load("go"))?.content, "Write idiomatic Go.");
+    assert.equal(body(source.load("high-level-architecture"))?.content, "Components live under specs/design.");
     assert.deepEqual(source.loadReference("org-style", "references/tone.md"), { content: "REF BODY — tone guide" });
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -150,8 +161,8 @@ test("skills snapshot: mixed flat + legacy — flat wins a duplicate name", () =
       ["go", "task-planning"],
     );
     assert.equal(source.catalog()[0]?.description, "flat copy");
-    assert.equal(source.load("go")?.content, "FLAT BODY");
-    assert.equal(source.load("task-planning")?.content, "PLAN BODY");
+    assert.equal(body(source.load("go"))?.content, "FLAT BODY");
+    assert.equal(body(source.load("task-planning"))?.content, "PLAN BODY");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -184,8 +195,8 @@ test("skills snapshot: LEGACY nested layout still scans (old snapshots), lazy bo
     );
 
     // Lazy body read (frontmatter stripped, trimmed) + full aux-file listing (any extension).
-    assert.equal(source.load("go")?.content, "Write idiomatic Go.");
-    assert.deepEqual(source.load("org-style")?.references, ["references/notes.txt", "references/tone.md"]);
+    assert.equal(body(source.load("go"))?.content, "Write idiomatic Go.");
+    assert.deepEqual(body(source.load("org-style"))?.references, ["references/notes.txt", "references/tone.md"]);
     assert.deepEqual(source.loadReference("org-style", "references/tone.md"), { content: "REF BODY — tone guide" });
     assert.deepEqual(source.loadReference("org-style", "references/notes.txt"), {
       content: "any extension is addressable, not just .md",
@@ -214,7 +225,7 @@ test("skills snapshot: full Agent Skills structure — recursive walk lists ever
   });
   try {
     const source = loadSkillsFromSnapshot(root);
-    assert.deepEqual(source.load("toolkit")?.references, [
+    assert.deepEqual(body(source.load("toolkit"))?.references, [
       "assets/logo.png",
       "extra/deep/n.txt",
       "references/a.md",
@@ -281,8 +292,8 @@ test("the SnapshotSkillSource catalog + system-prompt rendering match the snapsh
     assert.match(catalog, /loadSkillReference/); // beta carries references
 
     // And the lazily-loaded body is the literal SKILL.md body (frontmatter stripped).
-    assert.equal(fromDisk.load("beta")?.content, "BODY B\n\nSee references/deep.md.");
-    assert.deepEqual(fromDisk.load("beta")?.references, ["references/deep.md"]);
+    assert.equal(body(fromDisk.load("beta"))?.content, "BODY B\n\nSee references/deep.md.");
+    assert.deepEqual(body(fromDisk.load("beta"))?.references, ["references/deep.md"]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

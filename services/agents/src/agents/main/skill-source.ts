@@ -73,12 +73,28 @@ export interface LoadedSkillBody {
  */
 export type LoadedReference = { content: string } | { binary: true } | undefined;
 
+/**
+ * One load attempt: the body, a refusal (this consumer's audience is not among
+ * the skill's), or undefined for an unknown name. A refusal is a THIRD state on
+ * purpose — collapsing it into undefined reads to the agent as "no such skill",
+ * inviting it to distrust the catalog and skip pinning instead. Mirrors
+ * `LoadedReference`'s union shape.
+ */
+export type SkillLoadResult = LoadedSkillBody | { refused: true } | undefined;
+
+/**
+ * The audience this service reads skills as. The agents service IS the design
+ * agent — the coding agent runs in the remote-worker runner and never calls
+ * here — so the audience is a property of the process, not of a request.
+ */
+export const SERVICE_AUDIENCE: SkillAudience = "design";
+
 /** The seam both tool sets and the prompt builder read skills through. */
 export interface SkillSource {
   /** The ordered catalog (order fixes the prompt's listing and the `available` echo). */
   catalog(): readonly SkillCatalogEntry[];
-  /** Body + reference paths for one skill; undefined for an unknown name. */
-  load(name: string): LoadedSkillBody | undefined;
+  /** Body + reference paths for one skill; a refusal when out of audience; undefined for an unknown name. */
+  load(name: string): SkillLoadResult;
   /** One reference file: text content, a binary marker, or undefined (unknown name/path). */
   loadReference(name: string, path: string): LoadedReference;
 }
