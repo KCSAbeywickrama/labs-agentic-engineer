@@ -16,59 +16,16 @@
  * under the License.
  */
 
-import { lazy, Suspense, useEffect, useMemo, useRef } from "react";
+import { Suspense, useEffect, useMemo, useRef } from "react";
 import { Box, CircularProgress } from "@wso2/oxygen-ui";
-
-// Large bundle + separate CSS export; load lazily only when a diagram opens.
-const ExcalidrawComponent = lazy(async () => {
-  const [mod] = await Promise.all([
-    import("@excalidraw/excalidraw"),
-    import("@excalidraw/excalidraw/index.css"),
-  ]);
-  return { default: mod.Excalidraw };
-});
+import { ExcalidrawComponent } from "./lazyExcalidraw.js";
+import { parseScene, fitContentToViewport } from "./scene.js";
 
 export interface ExcalidrawViewProps {
   /** Serialised Excalidraw scene JSON. */
   scene: string;
   /** Fill the parent's height (else fixed 600px). */
   fillHeight?: boolean;
-}
-
-/* eslint-disable @typescript-eslint/no-explicit-any */
-type Scene = { elements?: any; appState?: any; files?: any };
-
-// appState.collaborators is a Map at runtime; a JSON round-trip turns it into a
-// plain object and crashes Excalidraw's iteration. Drop it — the lib rebuilds it.
-function sanitizeAppState(appState: any): any {
-  if (!appState || typeof appState !== "object") return appState;
-  const { collaborators: _drop, ...rest } = appState;
-  return rest;
-}
-
-function parseScene(value: string): Scene | null {
-  if (!value) return null;
-  try {
-    const parsed = JSON.parse(value);
-    if (!parsed || typeof parsed !== "object") return null;
-    return {
-      elements: parsed.elements,
-      appState: sanitizeAppState(parsed.appState),
-      files: parsed.files,
-    };
-  } catch {
-    return null;
-  }
-}
-
-function fitContentToViewport(api: any, elements: any) {
-  requestAnimationFrame(() => {
-    try {
-      api.scrollToContent(elements, { fitToContent: true, viewportZoomFactor: 0.9, animate: false });
-    } catch {
-      /* api torn down */
-    }
-  });
 }
 
 function ExcalidrawViewImpl({ scene, fillHeight }: ExcalidrawViewProps) {

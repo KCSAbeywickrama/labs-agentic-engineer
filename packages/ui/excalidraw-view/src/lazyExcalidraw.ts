@@ -16,7 +16,13 @@
  * under the License.
  */
 
-export { ExcalidrawView } from "./ExcalidrawView.js";
-export type { ExcalidrawViewProps } from "./ExcalidrawView.js";
-export { PrototypeView } from "./PrototypeView.js";
-export type { PrototypeViewProps } from "./PrototypeView.js";
+import { lazy } from "react";
+
+// Large bundle + separate CSS export; load lazily only when a diagram opens.
+export const ExcalidrawComponent = lazy(async () => {
+  const [mod] = await Promise.all([
+    import("@excalidraw/excalidraw"),
+    import("@excalidraw/excalidraw/index.css"),
+  ]);
+  return { default: mod.Excalidraw };
+});
