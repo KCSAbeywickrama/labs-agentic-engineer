@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 
 	"github.com/wso2/aep/aep-api/internal/delivery"
@@ -30,9 +31,9 @@ import (
 // by the validation-criteria skill and read by the runner.
 const criteriaFilePath = "specs/validation/validation-criteria.json"
 
-// validationTitle is the fixed title of the project's validation issue. Stable
-// so a human reading the milestone always sees the same entry, and so the
-// open-issue dedupe below never has to guess.
+// validationTitle is the fixed title of a version's validation issue. It names
+// no version: the MILESTONE is the version pin, and a title is renamable display
+// text that nothing matches on.
 const validationTitle = "Validate the deployed system against its acceptance criteria"
 
 // Service mints the project's validation Task issue. It holds only consumer
@@ -53,88 +54,101 @@ func NewService(d Deps) *Service {
 	return &Service{issues: d.Issues, criteria: d.Criteria}
 }
 
-// EnsureValidationIssue mints the project's single aep:validation issue if the
-// acceptance oracle exists and no open one does yet. It is idempotent: the run
-// supervisor calls it at deployed-green, and a re-entered validation cycle must
-// find the same issue rather than mint a second. A missing or malformed
-// criteria file is a clean no-op — there is nothing to validate.
+// EnsureValidationIssue mints ONE aep:validation issue per version — filed into
+// that version's milestone — and returns its number. 0 means there is nothing to
+// validate, which settles the run `skipped`; a missing or malformed criteria file
+// is that clean no-op. It is idempotent: the run supervisor calls it at
+// deployed-green, and a re-entered validation cycle must find the version's own
+// issue rather than mint a second.
+//
+// Per VERSION and not per project, because the issue body embeds the criteria
+// table rendered at mint time. Adopting the previous version's issue would hand
+// this version's agent the previous version's oracle, and re-filing it would
+// erase it from the ledger of the version it actually validated.
+//
+// The number comes from whichever step DECIDED it — the milestone lookup or the
+// create's own result — and is never re-discovered by listing afterwards.
+// GitHub's issue index lags a write by a beat, so a read-back answered "no
+// validation issue" for an issue this call had just filed, and the run reported
+// `skipped` over an oracle it was holding in its hand.
 //
 // The issue is PROSE with ONE label. It deliberately does NOT carry the `aep`
 // working-set label: the validation cycle is dispatched at it by number, and
 // working-set membership would hold the run's settle predicate open forever.
-func (s *Service) EnsureValidationIssue(ctx context.Context, orgID, projectID, designTag string) error {
+func (s *Service) EnsureValidationIssue(ctx context.Context, orgID, projectID string, milestoneNumber int) (int, error) {
+	if milestoneNumber <= 0 {
+		// A validation issue with no version is the state this refuses to create:
+		// invisible to every milestone-scoped read, and belonging to no ledger.
+		return 0, fmt.Errorf("validation: a milestone is required to file the validation issue under")
+	}
 	raw, found, err := s.criteria.ReadValidationCriteria(ctx, orgID, projectID)
 	if err != nil {
-		return fmt.Errorf("validation: read criteria: %w", err)
+		return 0, fmt.Errorf("validation: read criteria: %w", err)
 	}
 	if !found {
 		// The design agent has not authored the oracle yet — a later planning
 		// pass re-mints once it exists.
-		return nil
+		return 0, nil
 	}
 	doc, err := parseCriteria(raw)
 	if err != nil {
 		// A malformed oracle is the design agent's bug, not a reason to fail the
 		// save; skip and let a corrected pass re-mint.
 		slog.WarnContext(ctx, "validation: skipping mint — criteria file unusable", "project", projectID, "error", err)
-		return nil
+		return 0, nil
 	}
 
-	exists, err := s.hasOpenValidationIssue(ctx, orgID, projectID)
-	if err != nil {
-		return err
-	}
-	if exists {
-		return nil // one validation issue per project until it terminates
+	// Does THIS version already have one? Nothing has been written at this point,
+	// so the read is a straight question about GitHub's settled state rather than
+	// a read-back of our own write. It also adopts an issue a human filed by hand.
+	existing, err := s.findOpenValidationIssue(ctx, orgID, projectID, milestoneNumber)
+	if err != nil || existing > 0 {
+		return existing, err
 	}
 
 	req := sourcecontrol.CreateIssueRequest{
 		Title:  validationTitle,
 		Body:   rationale(doc.summarize()) + "\n\n" + renderScope(doc),
 		Labels: []string{delivery.LabelValidationWork},
-		// The version is the MILESTONE the caller files this under, not a label
-		// and not a line in the body — the run supervisor's adapter assigns it.
-		DedupeKey: "validation:" + projectID + ":" + designTag,
+		// The version pin RIDES the create — one call, so the issue is never
+		// versionless, not even for the beat a follow-up patch would take.
+		Milestone: &milestoneNumber,
+		// Version-scoped so a later version's mint is never deduped against this
+		// one. Mirrors the provision gate's gate:<project>:<tag>:<dep>.
+		DedupeKey: "validation:" + projectID + ":" + strconv.Itoa(milestoneNumber),
 	}
-	if _, cerr := s.issues.CreateIssue(ctx, orgID, projectID, req); cerr != nil {
-		return fmt.Errorf("validation: create issue: %w", cerr)
+	res, cerr := s.issues.CreateIssue(ctx, orgID, projectID, req)
+	if cerr != nil {
+		return 0, fmt.Errorf("validation: create issue: %w", cerr)
 	}
-	slog.InfoContext(ctx, "validation: minted validation issue", "project", projectID, "designTag", designTag)
-	return nil
+	if res == nil || res.Number == 0 {
+		// An issue exists somewhere and we cannot name it. Returning 0 here would
+		// read as "no oracle" and settle the run `skipped`; an error retries the
+		// activity, and the retry finds the open issue above.
+		return 0, fmt.Errorf("validation: created the validation issue but got no number back")
+	}
+	slog.InfoContext(ctx, "validation: minted validation issue",
+		"project", projectID, "milestone", milestoneNumber, "issue", res.Number)
+	return res.Number, nil
 }
 
-// ResolveValidationTask ensures the project's validation issue exists
-// (idempotent — it also covers acceptance criteria authored after the design
-// was first approved) and returns its open issue number, or 0 when there are no
-// criteria and nothing to validate. The run supervisor calls it at
-// deployed-green, before dispatching the validation cycle.
-func (s *Service) ResolveValidationTask(ctx context.Context, orgID, projectID, designTag string) (int, error) {
-	if err := s.EnsureValidationIssue(ctx, orgID, projectID, designTag); err != nil {
-		return 0, err
-	}
-	return s.findOpenValidationIssue(ctx, orgID, projectID)
-}
-
-// hasOpenValidationIssue reports whether an open aep:validation issue already
-// exists for the project.
-func (s *Service) hasOpenValidationIssue(ctx context.Context, orgID, projectID string) (bool, error) {
-	number, err := s.findOpenValidationIssue(ctx, orgID, projectID)
-	return number > 0, err
-}
-
-// findOpenValidationIssue returns the open aep:validation issue's number, or 0
-// when none exists. The LABEL is the whole query — nothing parses a body.
-func (s *Service) findOpenValidationIssue(ctx context.Context, orgID, projectID string) (int, error) {
-	issues, err := s.issues.ListIssues(ctx, orgID, projectID, []string{delivery.LabelValidationWork})
+// findOpenValidationIssue returns the number of the milestone's open
+// aep:validation issue, or 0 when that version has none. The milestone and the
+// LABEL are the whole query — nothing parses a body, and nothing looks outside
+// the version.
+func (s *Service) findOpenValidationIssue(ctx context.Context, orgID, projectID string, milestoneNumber int) (int, error) {
+	issues, err := s.issues.ListMilestoneIssues(ctx, orgID, projectID, sourcecontrol.MilestoneIssuesFilter{
+		Number: milestoneNumber,
+		State:  "open",
+		Labels: []string{delivery.LabelValidationWork},
+	})
 	if err != nil {
-		return 0, fmt.Errorf("validation: list issues: %w", err)
+		return 0, fmt.Errorf("validation: list milestone issues: %w", err)
 	}
-	for _, issue := range issues {
-		if strings.EqualFold(issue.State, "open") {
-			return issue.Number, nil
-		}
+	if len(issues) == 0 {
+		return 0, nil
 	}
-	return 0, nil
+	return issues[0].Number, nil
 }
 
 // rationale is the one-line blockquote summary in the issue body.

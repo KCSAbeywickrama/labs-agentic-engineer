@@ -99,9 +99,10 @@ type MilestoneRunRepository interface {
 	BumpBudget(ctx context.Context, id string, counter RunBudget) (*MilestoneRun, error)
 
 	// SetValidationVerdict records the validation cycle's outcome on the run
-	// (the verdict is a run property, not a per-issue one), guarded on the run
-	// being non-terminal so a settled run's verdict is frozen.
-	SetValidationVerdict(ctx context.Context, id, verdict string) (*MilestoneRun, error)
+	// (the verdict is a run property, not a per-issue one) together with the
+	// validation issue that produced it, guarded on the run being non-terminal so
+	// a settled run's verdict is frozen. An issue of 0 leaves the column as-is.
+	SetValidationVerdict(ctx context.Context, id, verdict string, issue int) (*MilestoneRun, error)
 
 	// GetByIDScoped returns the run only when it belongs to orgID — the store
 	// fence for token-derived org. Returns (nil, nil) for both "no such id" and
@@ -220,13 +221,19 @@ func (r *milestoneRunRepository) BumpBudget(ctx context.Context, id string, coun
 	})
 }
 
-func (r *milestoneRunRepository) SetValidationVerdict(ctx context.Context, id, verdict string) (*MilestoneRun, error) {
-	switch verdict {
-	case ValidationVerdictPassed, ValidationVerdictFailed, ValidationVerdictSkipped:
-	default:
+func (r *milestoneRunRepository) SetValidationVerdict(ctx context.Context, id, verdict string, issue int) (*MilestoneRun, error) {
+	if !ValidationVerdicts[verdict] {
 		return nil, fmt.Errorf("milestone run: unknown validation verdict %q", verdict)
 	}
-	return r.updateNonTerminal(ctx, id, map[string]any{"validation_verdict": verdict})
+	// One write for both: the supervisor knows the verdict and the issue that
+	// produced it at the same instant, and a settled run needs the issue to stay
+	// navigable. Issue 0 (an incident run, or a skip before minting) leaves the
+	// column alone rather than overwriting a real number with zero.
+	fields := map[string]any{"validation_verdict": verdict}
+	if issue > 0 {
+		fields["validation_issue"] = issue
+	}
+	return r.updateNonTerminal(ctx, id, fields)
 }
 
 func (r *milestoneRunRepository) GetByIDScoped(ctx context.Context, orgID, id string) (*MilestoneRun, error) {

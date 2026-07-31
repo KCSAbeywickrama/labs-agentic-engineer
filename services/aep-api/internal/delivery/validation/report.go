@@ -42,38 +42,78 @@ type reportCriterion struct {
 	Status string `json:"status"`
 }
 
-// VerdictFromReport derives a run's validation verdict from the committed
-// report, returning one of the delivery.ValidationVerdict* values.
+// Per-criterion outcomes the runner writes. Shared with the console's
+// validation-view parser, which renders the same five states per criterion.
 //
-// The rule is deliberately narrow: a verdict is FAILED if and only if the
-// runner actually ran a criterion and it failed. Everything else — a criterion
-// it could not run, a manual checklist item, a scenario it declared out of
-// scope — is not a statement about the deployed system, and treating an
-// un-runnable criterion as a failure would make the run's outcome depend on the
-// test harness's coverage rather than on the software.
+// The last three are not failures and not passes: they are the automatic path
+// declining to judge. `not_run` is an e2e criterion whose spec was skipped or was
+// never written; `manual` and `not_validated` are the criterion's own method
+// (manual and scenario) echoed back, and neither is ever executed.
+const (
+	criterionPass         = "pass"
+	criterionFail         = "fail"
+	criterionNotRun       = "not_run"
+	criterionManual       = "manual"
+	criterionNotValidated = "not_validated"
+)
+
+// VerdictFromReport derives a run's validation verdict from the committed report,
+// returning one of the delivery.ValidationVerdict* values. Applied in order:
 //
-// An empty or unparseable report is SKIPPED rather than failed for the same
-// reason: the run landed its work either way, and a missing report is a gap in
-// reporting, not evidence of a broken deployment.
+//  1. no usable report (absent, unparseable, or carrying no criteria) → unreported
+//  2. any criterion failed                                           → failed
+//  3. no criterion passed                                            → inconclusive
+//  4. any criterion was never covered                                → partial
+//  5. otherwise every criterion passed                               → passed
+//
+// Order carries the meaning. A real assertion failure wins outright (2), because
+// it is the one thing the report says about the *software* rather than about the
+// harness. Rule 5 then requires FULL coverage for `passed`: the previous rule
+// returned passed whenever one criterion passed and none failed, so a project
+// could read "passed" over twenty manual criteria nobody had looked at — `partial`
+// exists to say that honestly instead.
+//
+// Rules 1 and 3 look similar and are not. `inconclusive` means we read the
+// evidence and it records that nothing ran; `unreported` means there was nothing
+// to read. Only the second is fatal, because the read is pinned to the validation
+// cycle's own merge commit — so an absent report is a fact about this run, not a
+// propagation artifact.
 func VerdictFromReport(raw []byte) string {
 	if len(raw) == 0 {
-		return delivery.ValidationVerdictSkipped
+		return delivery.ValidationVerdictUnreported
 	}
 	var doc reportDoc
 	if err := json.Unmarshal(raw, &doc); err != nil {
-		return delivery.ValidationVerdictSkipped
+		return delivery.ValidationVerdictUnreported
 	}
-	ran := false
+	// No criteria is not a vacuous pass: "nothing failed" over an empty set would
+	// otherwise report success for a run that judged nothing.
+	if len(doc.Criteria) == 0 {
+		return delivery.ValidationVerdictUnreported
+	}
+
+	passed, uncovered := false, false
 	for _, c := range doc.Criteria {
 		switch c.Status {
-		case "fail":
+		case criterionFail:
 			return delivery.ValidationVerdictFailed
-		case "pass":
-			ran = true
+		case criterionPass:
+			passed = true
+		case criterionNotRun, criterionManual, criterionNotValidated:
+			uncovered = true
+		default:
+			// An unrecognised state is evidence we cannot interpret; treat it as a
+			// gap rather than silently counting it towards full coverage.
+			uncovered = true
 		}
 	}
-	if !ran {
-		return delivery.ValidationVerdictSkipped
+
+	switch {
+	case !passed:
+		return delivery.ValidationVerdictInconclusive
+	case uncovered:
+		return delivery.ValidationVerdictPartial
+	default:
+		return delivery.ValidationVerdictPassed
 	}
-	return delivery.ValidationVerdictPassed
 }

@@ -20,7 +20,7 @@ import { useQuery } from "@tanstack/react-query";
 import { fetchSpecFileContent } from "../../spec/api/queries";
 import { validationKeys } from "./keys";
 
-// The two files the Validation page joins, both read at HEAD via the Files API
+// The two files the Validation page joins, read through the Files API
 // (report.json is reachable through the read-only allow-list on read-file).
 //
 // The report's path is also carried on the RUN (RunValidation.reportPath), which
@@ -29,22 +29,32 @@ import { validationKeys } from "./keys";
 export const CRITERIA_PATH = "specs/validation/validation-criteria.json";
 export const REPORT_PATH = "tests/validation/report.json";
 
-// Fetch one validation artifact's content at HEAD. Reuses the spec Files reader
+// Fetch one validation artifact's content. Reuses the spec Files reader
 // (path-agnostic; `sha` only feeds its cache key, never the request — we key our
-// own query instead). Keyed by (path, version) so a newly merged run refetches;
-// retry is off since a 404 (no report yet) is deterministic, not transient.
+// own query instead). Retry is off: a 404 (no report for this run) is a
+// deterministic answer the page renders, not a transient failure worth hammering.
+//
+// `ref` pins the read to a commit and joins the cache key. The report is the reason
+// it exists: every run overwrites the same path, so reading the branch tip hands a
+// historical run the newest run's results — and a run whose agent committed no
+// report would silently inherit its predecessor's. Pinned to the run's own
+// validation-cycle merge commit the content is immutable, which is also why it can
+// be cached indefinitely.
 function useValidationFile(
   projectName: string,
   path: string,
   version: string,
   enabled: boolean,
+  ref?: string,
 ) {
   return useQuery({
-    queryKey: validationKeys.file(projectName, path, version),
+    queryKey: validationKeys.file(projectName, path, ref || version),
     enabled,
     retry: false,
-    staleTime: 30_000,
-    queryFn: () => fetchSpecFileContent(projectName, { path, sha: "" }),
+    // A pinned read can never change; an unpinned one follows the branch.
+    staleTime: ref ? Infinity : 30_000,
+    queryFn: () =>
+      fetchSpecFileContent(projectName, { path, sha: "", ...(ref ? { ref } : {}) }),
   });
 }
 
@@ -57,17 +67,26 @@ export function useValidationCriteria(
   return useValidationFile(projectName, CRITERIA_PATH, version, enabled);
 }
 
-/** The runner's run report, at the path the run recorded (or the default). */
+/**
+ * The runner's run report, at the path the run recorded (or the default), read at
+ * the validation cycle's merge commit.
+ *
+ * Pass `mergeSha` from the run's own validation cycle. Without it the read follows
+ * the branch tip, which for a report every run overwrites means an older run shows
+ * the newest run's results.
+ */
 export function useValidationReport(
   projectName: string,
   version: string,
   enabled: boolean,
   reportPath?: string,
+  mergeSha?: string,
 ) {
   return useValidationFile(
     projectName,
     reportPath || REPORT_PATH,
     version,
     enabled,
+    mergeSha,
   );
 }

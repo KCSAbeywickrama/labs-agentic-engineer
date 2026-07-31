@@ -25,6 +25,20 @@ type ProjectStatus = components["schemas"]["ProjectStatus"];
 // particular has no stored status: exists/version/dirty decide everything.
 export type StageTone = "ghost" | "neutral" | "info" | "warning" | "success" | "error";
 
+// StageTone → Oxygen/MUI Chip colour. Lives beside the tone union so every
+// consumer maps it identically; "ghost"/"neutral" are ours, "default" is theirs.
+export const CHIP_COLOR: Record<
+  StageTone,
+  "default" | "info" | "warning" | "success" | "error"
+> = {
+  ghost: "default",
+  neutral: "default",
+  info: "info",
+  warning: "warning",
+  success: "success",
+  error: "error",
+};
+
 export interface StageView {
   /** Version chip text ("v1", "v1+"); "" renders an em-dash. */
   version: string;
@@ -96,24 +110,49 @@ export function deployStageView(status: ProjectStatus): StageView {
   }
 }
 
-// validationView maps the coarse deploy.validation state to a label + tone,
-// shared by the overview deploy line (suffix) and the deployments board chip.
-// null = nothing to show (validation never reached, skipped, or no criteria).
+// validationView maps deploy.validation to a label + tone, shared by the overview
+// deploy line (suffix) and the deployments board chip. null = nothing to show yet.
 //
-// The state is folded from the RUN's verdict — the verdict is a run property,
-// and the run rows are where the platform keeps it — so unlike the old
-// task-derived state these labels can name the outcome instead of naming the
-// artifact the user would have to open to find it out.
+// deploy.validation MIRRORS the run's verdict rather than folding it, so this is a
+// one-to-one rename into human words with nothing discarded on the way. That is
+// what lets every label name the outcome instead of naming an artifact the reader
+// would have to open to find the outcome out — the failing of the old vocabulary,
+// where "completed" covered a green run and a red one alike.
 export function validationView(
   validation: string,
 ): { label: string; tone: StageTone } | null {
   switch (validation) {
+    // The one lifecycle value with anything to say: a validation CYCLE is in
+    // flight. It is derived from the run's latest cycle, not from "the run is live
+    // and has no verdict" — that older rule made the chip claim to be validating
+    // through every coding cycle of every run.
     case "running":
       return { label: "validating", tone: "info" };
-    case "completed":
+
+    // The rest are the run's verdict verbatim, which is why each label can name
+    // the outcome instead of naming an artifact to go and open.
+    case "passed":
       return { label: "validation passed", tone: "success" };
+    case "partial":
+      // Something passed, nothing failed, and some criteria were never covered.
+      // Warning rather than success: reporting this as "passed" would claim a
+      // result for criteria nobody checked.
+      return { label: "partially validated", tone: "warning" };
     case "failed":
       return { label: "validation failed", tone: "error" };
+    case "inconclusive":
+      // No test results at all. Names the situation rather than the category —
+      // "inconclusive" alone leaves a reader guessing why.
+      return { label: "no test results", tone: "warning" };
+    case "unreported":
+      // The agent merged its pull request and committed no report, so the run
+      // learned nothing. An agent-contract breach, hence error tone.
+      return { label: "validation didn't report", tone: "error" };
+    case "skipped":
+      // No acceptance criteria authored. Distinct from `none` and actionable —
+      // "author some" — where none means there is nothing to say yet.
+      return { label: "no acceptance criteria", tone: "neutral" };
+
     default: // "none" | "" | unknown
       return null;
   }
