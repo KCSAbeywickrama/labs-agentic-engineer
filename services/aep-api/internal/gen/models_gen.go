@@ -1346,6 +1346,7 @@ type SkillDetailBody struct {
 	Deletable        bool              `json:"deletable"`
 	Description      string            `json:"description"`
 	Editable         bool              `json:"editable"`
+	Enabled          bool              `json:"enabled"`
 	Kind             string            `json:"kind"`
 	License          string            `json:"license,omitempty"`
 	Name             string            `json:"name"`
@@ -1361,6 +1362,7 @@ type SkillSummary struct {
 	Deletable   bool   `json:"deletable"`
 	Description string `json:"description"`
 	Editable    bool   `json:"editable"`
+	Enabled     bool   `json:"enabled"`
 	Kind        string `json:"kind"`
 	Name        string `json:"name"`
 }
@@ -1783,6 +1785,11 @@ type ImportSkillMultipartBody struct {
 	File openapi_types.File `json:"file"`
 }
 
+// SetSkillEnabledJSONBody defines parameters for SetSkillEnabled.
+type SetSkillEnabledJSONBody struct {
+	Enabled bool `json:"enabled"`
+}
+
 // UpdateConfigJSONRequestBody defines body for UpdateConfig for application/json ContentType.
 type UpdateConfigJSONRequestBody = ConfigPatch
 
@@ -1824,6 +1831,9 @@ type CreateSkillJSONRequestBody = CreateSkillInput
 
 // ImportSkillMultipartRequestBody defines body for ImportSkill for multipart/form-data ContentType.
 type ImportSkillMultipartRequestBody ImportSkillMultipartBody
+
+// SetSkillEnabledJSONRequestBody defines body for SetSkillEnabled for application/json ContentType.
+type SetSkillEnabledJSONRequestBody SetSkillEnabledJSONBody
 
 // UpdateSkillJSONRequestBody defines body for UpdateSkill for application/json ContentType.
 type UpdateSkillJSONRequestBody = UpdateSkillInput

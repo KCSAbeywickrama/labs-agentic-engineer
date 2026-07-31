@@ -10,5 +10,6 @@
   "contentSha": "7c12ece37fcd43f52619594ef372357b8680d0fc298e85b253d8683515f58760",
   "updatedAt": "0001-01-01T00:00:00Z",
   "editable": true,
-  "deletable": true
+  "deletable": true,
+  "enabled": true
 }

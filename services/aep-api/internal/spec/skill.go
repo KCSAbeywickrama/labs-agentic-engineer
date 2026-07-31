@@ -43,6 +43,12 @@ type Skill struct {
 	License       string            `json:"license,omitempty"`
 	Compatibility string            `json:"compatibility,omitempty"`
 	UpdatedAt     time.Time         `json:"updatedAt"`
+	// Enabled mirrors the skills-manifest.json entry's Disabled flag, inverted
+	// (see ManifestEntry.Disabled — stored negative so an absent entry means
+	// enabled). Every constructor of a catalog-visible Skill must set this
+	// explicitly; Go's bool zero value is false, the opposite of the
+	// no-manifest-entry default.
+	Enabled bool `json:"enabled"`
 }
 
 // Skill kinds. A SKILL.md declares its kind in frontmatter `metadata.aep.kind`;

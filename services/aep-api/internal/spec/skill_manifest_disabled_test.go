@@ -24,6 +24,7 @@ package spec
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -132,5 +133,82 @@ func TestUpdate_ConvergingEditPreservesDisabled(t *testing.T) {
 	}
 	if !after.Disabled {
 		t.Fatal("a converging edit cleared the org's disabled flag")
+	}
+}
+
+// SetEnabled is the actual write path for ADR-0014's Disabled flag: it must
+// write the manifest ONLY — SKILL.md's bytes (and therefore contentSHA) must
+// never move, or the disable would read as a divergence from the platform
+// baseline and wrongly surface as a pending update — and it must round-trip
+// (disable then re-enable clears the flag), and reject an unknown name with
+// the same not-found sentinel the other skill mutations use.
+func TestSetEnabled(t *testing.T) {
+	t.Parallel()
+	svc, host := newTestStoreWithLibrary(t, orgLibKind("demo", "v1"))
+	ctx := context.Background()
+	if _, err := svc.List(ctx, "org1"); err != nil { // seed
+		t.Fatalf("seed: %v", err)
+	}
+	mut := NewSkillMutationService(svc)
+
+	before, err := svc.Resolve(ctx, "org1", "demo")
+	if err != nil || before == nil {
+		t.Fatalf("resolve before: %v, %v", before, err)
+	}
+	if !before.Enabled {
+		t.Fatal("freshly seeded skill must start enabled")
+	}
+
+	if _, err := mut.SetEnabled(ctx, "org1", "tester", "demo", false); err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+
+	// 1. manifest entry carries Disabled: true.
+	m := parseSkillsManifest([]byte(host.readAtHead("org1", skillsManifestPath)))
+	entry, ok := m["demo"]
+	if !ok || !entry.Disabled {
+		t.Fatalf("manifest entry not disabled: ok=%v entry=%+v", ok, entry)
+	}
+
+	// 2. contentSHA (and the SKILL.md bytes behind it) is UNCHANGED.
+	after, err := svc.Resolve(ctx, "org1", "demo")
+	if err != nil || after == nil {
+		t.Fatalf("resolve after: %v, %v", after, err)
+	}
+	if after.ContentSHA != before.ContentSHA {
+		t.Fatalf("disabling must not touch content: before %q after %q", before.ContentSHA, after.ContentSHA)
+	}
+	if after.SkillMD != before.SkillMD {
+		t.Fatal("disabling must not rewrite SKILL.md")
+	}
+	if after.Enabled {
+		t.Fatal("resolved skill still reports enabled after disabling")
+	}
+
+	// 3. no divergence surfaces: disabling is not a platform update.
+	ups, err := svc.UpdatesAvailable(ctx, "org1")
+	if err != nil {
+		t.Fatalf("UpdatesAvailable: %v", err)
+	}
+	if got := stateOf(ups, "demo"); got != "" {
+		t.Fatalf("disabling surfaced as an update: state=%q", got)
+	}
+
+	// 4. re-enabling clears the flag (round trip).
+	if _, err := mut.SetEnabled(ctx, "org1", "tester", "demo", true); err != nil {
+		t.Fatalf("re-enable: %v", err)
+	}
+	m2 := parseSkillsManifest([]byte(host.readAtHead("org1", skillsManifestPath)))
+	if m2["demo"].Disabled {
+		t.Fatal("re-enable did not clear the disabled flag")
+	}
+	reenabled, err := svc.Resolve(ctx, "org1", "demo")
+	if err != nil || reenabled == nil || !reenabled.Enabled {
+		t.Fatalf("resolve after re-enable: %+v, %v", reenabled, err)
+	}
+
+	// 5. an unknown name errors with the shared not-found sentinel.
+	if _, err := mut.SetEnabled(ctx, "org1", "tester", "no-such-skill", false); !errors.Is(err, ErrSkillNotFound) {
+		t.Fatalf("unknown name: got %v, want ErrSkillNotFound", err)
 	}
 }

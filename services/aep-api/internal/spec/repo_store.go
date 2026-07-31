@@ -177,7 +177,9 @@ func (s *SkillService) List(ctx context.Context, orgID string) ([]Skill, error) 
 // (name, kind, description, ...). Platform skills list READ-ONLY (the page
 // shows the generation-flow guidance for inspection); org + imported are
 // editable and deletable per SkillEditable/SkillDeletable — both are pure
-// kind checks, so a single catalog() read is enough; no manifest load.
+// kind checks; Enabled comes straight through from catalog()'s own
+// manifest cross-reference (loadCatalog), so a single catalog() read still
+// covers everything this projection needs.
 func (s *SkillService) ListSummaries(ctx context.Context, orgID string) ([]SkillSummary, error) {
 	skills := s.catalog(ctx, orgID)
 	out := make([]SkillSummary, 0, len(skills))
@@ -189,6 +191,7 @@ func (s *SkillService) ListSummaries(ctx context.Context, orgID string) ([]Skill
 			ContentSHA:  sk.ContentSHA,
 			Editable:    SkillEditable(sk.Kind),
 			Deletable:   SkillDeletable(sk.Kind),
+			Enabled:     sk.Enabled,
 		})
 	}
 	return out, nil
@@ -234,26 +237,13 @@ func (s *SkillService) catalog(ctx context.Context, orgID string) []Skill {
 	return skills
 }
 
-// loadCatalogEntries reads skills/ at the branch tip: one Workspace.ReadBundle
-// (fetch + local ls-tree/cat-file) filtered to the catalog layout, parsed
-// in-memory — with per-entry layout info for the reconciler. Branch-tip reads
-// always revalidate origin, so freshness matches the retired REST walk without
-// any cache.
-func (s *SkillService) loadCatalogEntries(ctx context.Context, orgID string, repo *sourcecontrol.GitRepository) ([]catalogEntry, error) {
-	ref, err := sourcecontrol.ResolveWorkspaceRef(ctx, s.git.Resolver(), orgID, repo)
-	if err != nil {
-		return nil, err
-	}
-	files, _, err := s.git.Workspace().ReadBundle(ctx, ref, "", isCatalogPath)
-	if err != nil {
-		return nil, fmt.Errorf("read skills bundle: %w", err)
-	}
-	return parseBundleEntries(ctx, files), nil
-}
-
-// loadEntriesAndManifest is loadCatalogEntries plus the skills-manifest.json
-// baseline, read from the SAME ref so entries and manifest are a consistent
-// snapshot. The manifest is tolerant-parsed (absent/corrupt → empty). The
+// loadEntriesAndManifest reads skills/ at the branch tip (one
+// Workspace.ReadBundle: fetch + local ls-tree/cat-file, filtered to the
+// catalog layout, parsed in-memory — with per-entry layout info for the
+// reconciler) plus the skills-manifest.json baseline, read from the SAME ref
+// so entries and manifest are a consistent snapshot. Branch-tip reads always
+// revalidate origin, so freshness matches the retired REST walk without any
+// cache. The manifest is tolerant-parsed (absent/corrupt → empty). The
 // returned manifestPresent reports whether the manifest FILE existed at all —
 // distinct from an empty parse — so a caller can tell a pre-manifest (or
 // manually deleted) repo apart from one whose manifest is simply empty, and
@@ -274,15 +264,20 @@ func (s *SkillService) loadEntriesAndManifest(ctx context.Context, orgID string,
 	return parseBundleEntries(ctx, files), manifest, manifestPresent, nil
 }
 
-// loadCatalog is loadCatalogEntries projected to the Skill catalog shape.
+// loadCatalog is loadEntriesAndManifest projected to the Skill catalog shape,
+// with each skill's Enabled cross-referenced against its skills-manifest.json
+// entry (absent entry, or no manifest at all, means enabled — see
+// ManifestEntry.Disabled).
 func (s *SkillService) loadCatalog(ctx context.Context, orgID string, repo *sourcecontrol.GitRepository) ([]Skill, error) {
-	entries, err := s.loadCatalogEntries(ctx, orgID, repo)
+	entries, manifest, _, err := s.loadEntriesAndManifest(ctx, orgID, repo)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]Skill, 0, len(entries))
 	for _, e := range entries {
-		out = append(out, e.Skill)
+		sk := e.Skill
+		sk.Enabled = !manifest[sk.Name].Disabled
+		out = append(out, sk)
 	}
 	return out, nil
 }
@@ -447,6 +442,10 @@ func parseBundleEntries(ctx context.Context, files map[string]string) []catalogE
 				ContentSHA:    contentSHA(bodies[k], r),
 				License:       fm.License,
 				Compatibility: fm.Compatibility,
+				// Enabled defaults true here (no manifest is in scope for this
+				// pure parse); loadCatalog cross-references skills-manifest.json
+				// and flips it for any entry the org disabled.
+				Enabled: true,
 			},
 			legacyDir: k.legacyDir,
 		}

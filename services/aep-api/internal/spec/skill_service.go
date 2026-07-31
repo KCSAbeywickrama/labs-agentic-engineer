@@ -38,7 +38,7 @@ import (
 // (nil, nil) on a GitHub blip (the cache was just evicted by the write), which
 // would make the success path hand the controller a nil *Skill and panic.
 // Every field here is derivable from what we just committed.
-func newSkillValue(orgID, kind, name, skillMD string, refs References, fm skillFrontmatter) *Skill {
+func newSkillValue(orgID, kind, name, skillMD string, refs References, fm skillFrontmatter, enabled bool) *Skill {
 	return &Skill{
 		OrgID:         orgID,
 		Name:          name,
@@ -50,6 +50,7 @@ func newSkillValue(orgID, kind, name, skillMD string, refs References, fm skillF
 		License:       fm.License,
 		Compatibility: fm.Compatibility,
 		UpdatedAt:     time.Now().UTC(),
+		Enabled:       enabled,
 	}
 }
 
@@ -66,6 +67,7 @@ type SkillSummary struct {
 	ContentSHA  string `json:"contentSha"`
 	Editable    bool   `json:"editable"`
 	Deletable   bool   `json:"deletable"`
+	Enabled     bool   `json:"enabled"`
 }
 
 // ---- frontmatter parsing ----------------------------------------------------
