@@ -448,6 +448,11 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// Eagerly provision each org's skills repo on project creation.
 	projectService.SetSkillsProvisioner(skillSvc)
 
+	// Stamp specs/.agentic-engineer.toml into each new project's repo: the
+	// Agentic Engineer marker, carrying the idea the user typed at create for
+	// the /start flow to generate requirements from.
+	projectService.SetDescriptorWriter(spec.NewDescriptorWriter(filesSvc))
+
 	// The Task-keyed log endpoint (issue number → newest execution by default,
 	// executionId query pins one for history browsing). (The runner skills-pull
 	// S2S endpoint is retired — the runner now clones `org-skills` and resolves

@@ -55,6 +55,39 @@ export const COLLAB_DEPS_STEER =
 export const PLAN_INSTRUCTION =
   "Plan the implementation Tasks for this project. Load the task-planning skill and follow it: create one Task per design component with planTask, wire dependsOn by component name, and write each Task's body with updateTask in the same turn. The design is under specs/design/ and the requirements under specs/requirements/. Existing open Tasks (if any) are listed at the end of this message for reference — add Tasks ONLY for components they do not cover, and do not recreate or update the listed Tasks in this turn. Never invent a component the design does not define.";
 
+// MUST match StartInstruction,
+// services/aep-api/internal/spec/start_command.go — itself the expansion
+// slashSkillInstruction("/start") produces in @aep/contracts/prompts.
+export const START_INSTRUCTION = "Load the start skill and follow it.";
+
+// MUST match the ideaSteer prefix,
+// services/aep-api/internal/spec/descriptor.go
+export const IDEA_STEER_PREFIX = "\n\nThe user's idea for this project:\n\n";
+
+/**
+ * Mirrors ideaSteer, services/aep-api/internal/spec/descriptor.go: the captured
+ * idea appended to an expanded `/start`. A blank idea appends NOTHING, leaving
+ * a bare skill load — the start skill then asks the user for it.
+ */
+export function ideaSteer(idea: string | null | undefined): string {
+  const trimmed = (idea ?? "").trim();
+  return trimmed === "" ? "" : IDEA_STEER_PREFIX + trimmed;
+}
+
+/**
+ * The expanded `/start` turn — mirrors what aep-api composes in
+ * genai_service.go when it sees the command.
+ *
+ * `/start` is the ONE slash command the server owns rather than the client,
+ * because only the server can enrich it with the descriptor's idea. The
+ * playground composes its own instructions instead of calling aep-api, so it
+ * has to perform the same expansion here or the two surfaces would diverge on
+ * the kickoff.
+ */
+export function startInstruction(idea: string | null | undefined): string {
+  return START_INSTRUCTION + ideaSteer(idea);
+}
+
 /** Mirrors targetSuffix, services/aep-api/internal/spec/genai_service.go. */
 export function targetSuffix(target: string | undefined): string {
   if (!target || target.trim() === "") return "";

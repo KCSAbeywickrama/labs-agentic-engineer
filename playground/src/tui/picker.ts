@@ -26,16 +26,23 @@
  * offered for creation.
  */
 
-import { existsSync, mkdirSync, statSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import * as clack from "@clack/prompts";
 import { listRecentProjects } from "../state/project.js";
 import { defaultProjectDir, expandProjectPath, projectDirError } from "../paths.js";
+import { ensureProjectDir } from "./ensure-dir.js";
 
 const OPEN = "\0open";
 const QUIT = "\0quit";
 
+/** A picked project, plus whether this call created it (the caller captures the idea only then). */
+export interface PickedProject {
+  path: string;
+  created: boolean;
+}
+
 /** Pick a project dir, or null to exit. First run confirms the exact directory (§12). */
-export async function pickProject(): Promise<string | null> {
+export async function pickProject(): Promise<PickedProject | null> {
   const recents = listRecentProjects();
   if (recents.length > 0) {
     const choice = await clack.select({
@@ -47,7 +54,7 @@ export async function pickProject(): Promise<string | null> {
       ],
     });
     if (clack.isCancel(choice) || choice === QUIT) return null;
-    if (choice !== OPEN) return choice;
+    if (choice !== OPEN) return { path: choice, created: false }; // a recent always exists already
   }
 
   const dir = await clack.text({
@@ -66,15 +73,14 @@ export async function pickProject(): Promise<string | null> {
   if (clack.isCancel(dir)) return null;
   const path = expandProjectPath(dir.trim());
 
-  if (!existsSync(path)) {
-    const create = await clack.confirm({ message: `${path} does not exist. Create it?` });
-    if (clack.isCancel(create) || !create) return null;
-    mkdirSync(path, { recursive: true });
-  }
+  // Fence + create (the shared step; the validate() above already surfaced a
+  // fence error inline, so here it only does the missing-dir prompt + mkdir).
+  const ensured = await ensureProjectDir(path, { interactive: true });
+  if (!ensured.ok) return null;
 
   const confirmed = await clack.confirm({
     message: `The agents will read and WRITE inside ${path}. Continue?`,
   });
   if (clack.isCancel(confirmed) || !confirmed) return null;
-  return path;
+  return { path, created: ensured.created };
 }
