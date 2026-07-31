@@ -46,6 +46,14 @@ export interface RepoSkill {
   content: string;
   /** Optional `references/<file>.md` → body (agentskills.io structure). */
   references?: Record<string, string>;
+  /**
+   * The authored `metadata:` block, carried through verbatim. The service keys
+   * real behaviour off it — `metadata.aep.kind` (ownership) and
+   * `metadata.aep.audience` (which agent may load the skill) — so dropping it
+   * would materialize a library that behaves unlike any real org's: every skill
+   * unmarked, so every skill loadable by every agent.
+   */
+  metadata?: Record<string, unknown>;
 }
 
 /** Split a `SKILL.md` into its YAML frontmatter block and markdown body. */
@@ -66,7 +74,26 @@ export function parseSkill(dirId: string, raw: string): RepoSkill {
   }
   const name = typeof fm.name === "string" && fm.name.trim() !== "" ? fm.name : dirId;
   const description = typeof fm.description === "string" ? fm.description : "";
-  return { name, description, content: body.trim() };
+  const metadata =
+    fm.metadata !== null && typeof fm.metadata === "object" && !Array.isArray(fm.metadata)
+      ? (fm.metadata as Record<string, unknown>)
+      : undefined;
+  return { name, description, content: body.trim(), ...(metadata ? { metadata } : {}) };
+}
+
+/**
+ * Skill names to materialize as DISABLED, from `AEP_DISABLED_SKILLS` (comma-
+ * separated). In the platform an org admin toggles availability and the flag
+ * lands in the org repo's `skills-manifest.json`; the playground has no admin
+ * and no org repo, so this env var stands in for that toggle — enough to
+ * exercise the read side (a disabled skill must vanish from the turn's catalog
+ * entirely, not merely become unloadable).
+ */
+export function disabledSkillNames(): string[] {
+  return (process.env.AEP_DISABLED_SKILLS ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s !== "");
 }
 
 /**

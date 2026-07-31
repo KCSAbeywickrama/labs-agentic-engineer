@@ -41,6 +41,7 @@ import type { WorkspaceRef } from "@aep/agent-stream";
 import { readProjectFiles, resolveWithin } from "../kit/project-fs.js";
 import { filesSnapshotSha, renderSkillFiles, skillsSnapshotSha } from "../kit/snapshot.js";
 import type { RepoSkill } from "../kit/skills.js";
+import { disabledSkillNames } from "../kit/skills.js";
 
 /** The playground's fixed tenant — fence values only; they never reach the model. */
 export const PLAY_ORG = "play";
@@ -105,8 +106,15 @@ export class FsSpecWorkspace {
    * so an empty library still materializes an (empty) snapshot dir.
    */
   materializeSkills(skills: readonly RepoSkill[]): string {
-    const sha = skillsSnapshotSha(skills);
-    this.mirror(join(this.mountRoot, "repos", PLAY_ORG, "_skills", "org-skills", "snapshots", sha), renderSkillFiles(skills));
+    // AEP_DISABLED_SKILLS stands in for the org admin's availability toggle,
+    // which the playground has no surface for; it lands in the snapshot's
+    // manifest exactly as reconcile would write it.
+    const disabled = disabledSkillNames();
+    const sha = skillsSnapshotSha(skills, disabled);
+    this.mirror(
+      join(this.mountRoot, "repos", PLAY_ORG, "_skills", "org-skills", "snapshots", sha),
+      renderSkillFiles(skills, disabled),
+    );
     return sha;
   }
 
