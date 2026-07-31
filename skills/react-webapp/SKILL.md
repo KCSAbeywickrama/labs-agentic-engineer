@@ -1,163 +1,118 @@
 ---
 name: react-webapp
-description: How to build a React SPA on the platform — Vite project layout, multi-stage Dockerfile → nginx:alpine runtime, synchronous /env-config.js load before the bundle, the authoritative window._env_ key set, throw-on-missing-key rule, and stock static-only nginx config (no envsubst, no proxy). Apply to every web-app component.
+description: How to build a React SPA on the platform.
 metadata:
   aep:
     kind: org
     audience: [coding]
 ---
 
-
 # React Webapp
 
-## What this skill does
+A web-app on this platform: a Vite + TS SPA built to static files, served by
+stock `nginx:alpine`. The image is **byte-identical across every environment** —
+per-env values (API URLs, OIDC config, flags) arrive at request time in
+`window._env_`, never at build time.
 
-The platform deploys React (Vite + TS) SPAs as a `nginx:alpine` image
-serving a built static bundle. This skill tells the architect what to
-expect and the coding agent exactly how to wire the bundle so per-env
-values flow in at request time via `window._env_` — not at build time.
+## Development flow
 
-## Platform facts
+1. **Scaffold** per Layout.
+2. **Implement** — `src/env.ts` first (every other module reads config through
+   it), then `src/api.ts`, then pages. Every rule under Constraints is a runtime
+   failure if broken, not a style preference.
+3. **Verify** — from the app path:
+   ```bash
+   npm install 2>&1 | tail -30   # regenerates package-lock.json
+   npx tsc --noEmit              # type-check without emitting
+   npm run build 2>&1 | tail -20 # actually build
+   ```
+   Commit the `package-lock.json` this produces. Never commit `node_modules/`.
+4. **PR** — only once step 3 exits 0.
 
-- Web-app components have `componentType: web-application`, `entrypoint:
-  deployment/web-application`, `buildpack: docker`, default port 9090.
-- They do NOT get an OpenAPI spec — `set_openapi` for a web-app is
-  rejected.
-- They do NOT carry `exposesAPI` — that toggle is for backend API
-  enforcement only. Web-apps express auth via a `thunder-app`
-  platform-resource dependency instead (see `thunder-authentication`).
-- The image is **identical across every environment**. Per-env values
-  (API URLs, OIDC config, feature flags) arrive at request time via
-  `window._env_`, populated by `/env-config.js`.
-- The platform mounts `/env-config.js` into `/usr/share/nginx/html/`
-  via the SPA's ReleaseBinding (`services/runtime_config_service.go:
-  EmitForComponent`). The agent never generates or commits this file.
-- The set of keys the platform emits into `window._env_` is
-  **hardcoded in BFF code** (`runtime_config_service.go`). Inventing a
-  new key in the SPA produces a runtime error at module load because
-  the value is `undefined`.
+## Constraints
 
-### Authoritative `window._env_` keys
+**Runtime config, not build-time.** The platform mounts `/env-config.js` into
+the served root and it populates `window._env_`. You never generate or commit
+that file. `import.meta.env.VITE_*`, `process.env.REACT_APP_*`,
+`NEXT_PUBLIC_*` and `.env` files are all build-time mechanisms the platform does
+not use — reading one gets you `undefined` in production.
 
-Use these EXACT spellings — do not invent new keys:
+**The key set is fixed.** It is hardcoded in platform code, so a key you invent
+is `undefined` at module load. Use these exact spellings:
 
 | Key | Set when | Meaning |
 |---|---|---|
 | `API_BASE_URL` | this web-app has a `component`-kind `dependencies` entry on a service sibling | external gateway URL of the primary upstream service in this project |
-| `<UPSTREAM>_URL` | this web-app depends on `<upstream>` (a `component`-kind `dependencies` entry) | external gateway URL of that sibling (`<UPSTREAM>` = upstream component name in `UPPER_SNAKE_CASE`, e.g. `todo-api` → `TODO_API_URL`) |
-| `<NAME>_URL` | this web-app's `dependencies` include an `external`-kind entry `<name>` | external gateway URL of that external upstream API (same UPPER_SNAKE convention, e.g. `employee-api` → `EMPLOYEE_API_URL`) |
-| `<DEP>_*` | this web-app declares an auth `platform-resource` dependency named `<dep>` | OIDC config keys (`<DEP>_CLIENT_ID`, `<DEP>_ISSUER`, `<DEP>_JWKS_URL`, `<DEP>_SCOPES`), where `<DEP>` is the UPPER_SNAKE of the dependency name (e.g. `user-auth` → `USER_AUTH_*`) — owned by the `thunder-authentication` skill; see it for the per-key meanings and wiring |
-| `<NAME>` (any) | the agent declared it in `workload.yaml` `configurations.env` | app-config default (per-env override possible) |
+| `<UPSTREAM>_URL` | this web-app depends on `<upstream>` (a `component`-kind entry) | external gateway URL of that sibling (`<UPSTREAM>` = component name in `UPPER_SNAKE_CASE`, e.g. `todo-api` → `TODO_API_URL`) |
+| `<NAME>_URL` | `dependencies` include an `external`-kind entry `<name>` | external gateway URL of that external upstream API (same convention, e.g. `employee-api` → `EMPLOYEE_API_URL`) |
+| `<DEP>_*` | this web-app declares an auth `platform-resource` dependency named `<dep>` | OIDC config (`<DEP>_CLIENT_ID`, `<DEP>_ISSUER`, `<DEP>_JWKS_URL`, `<DEP>_SCOPES`), `<DEP>` = UPPER_SNAKE of the dependency name (`user-auth` → `USER_AUTH_*`) — owned by `thunder-authentication` |
+| `<NAME>` (any) | you declared it in `workload.yaml` `configurations.env` | app-config default, per-env override possible |
 
-## Recommended practice
+**Throw on a missing key, never default it.** No `?? ""`, no `|| ''`. A silent
+fallback turns every fetch into a relative URL against the SPA's own nginx,
+which answers `405` on a `POST` — a bug that looks like a backend fault.
 
-### Architect
+**Served at host root.** Each web-app gets its **own** gateway hostname, so the
+stock Vite default is correct: **do NOT set `base`**. Asset URLs, any react-router
+`basename`, and any OAuth `redirect_uri` are plain root paths (`/assets/…`,
+`/callback`). Services ARE path-routed, under `/<project>-<component>-http` on a
+shared gateway — copying that prefix into `base` 404s every asset (nginx serves
+`index.html` instead, so the browser gets HTML for a module script) and the page
+renders blank.
 
-- One web-app component per user-facing surface; do NOT split a frontend
-  into "ui-shell" + "ui-pages" — every SPA is one component, one
-  task, one bundle.
-- For every backend the web-app has a `component`-kind `dependencies` entry
-  on, the architect MUST include an instruction line in
-  `componentAgentInstructions`:
-  `Upstream <name>: read the URL from window._env_.<NAME_UPPER_SNAKE>_URL via src/env.ts. Throw (no ?? "" fallback) on missing.`
-- Do NOT write anything about `VITE_*`, `REACT_APP_*`,
-  `NEXT_PUBLIC_*`, `.env` files, build-time substitution, or
-  "Dependency endpoint resolved" comments. Those mechanisms are
-  deprecated — runtime config is the ONLY supported path.
+**Static nginx only.** No `proxy_pass`, no `/oidc/` block, no `envsubst`, no
+`/etc/nginx/templates/`, no `NGINX_ENVSUBST_*`, no custom
+`/docker-entrypoint.d/` script. The platform-mounted `/env-config.js` is served
+by the same static config as plain JS.
 
-### Tech-lead — issue body bullets
+**Auth.** If the component declares an auth `platform-resource` dependency, add
+`src/auth.ts` and attach `Authorization: Bearer <token>` to every API call —
+`thunder-authentication` owns that wiring.
 
-For every web-app task whose component `dependencies` include a
-`component`-kind entry, include one Scope bullet per upstream:
+**Never `exposesAPI`.** That toggle is for backends only; a web-app expresses
+auth through its auth dependency instead.
 
-- "Wire upstream `<name>`: Read the URL from
-  `window._env_.<NAME_UPPER_SNAKE>_URL` via `src/env.ts`. The platform
-  writes per-env values into `/env-config.js` on the SPA's
-  ReleaseBinding — no build-time configuration is required."
-
-And one Acceptance criteria bullet:
-
-- "The SPA's API client (`src/api.ts` or equivalent) reads each upstream
-  URL from `window._env_.<UPSTREAM>_URL` via the typed `src/env.ts` shim
-  and throws on missing value — no silent `?? \"\"` fallback. The
-  platform's `env-config.js` is loaded synchronously before the bundle
-  so the value is always populated when modules evaluate."
-
-For every web-app task whose component declares a `thunder-app` dependency,
-also add this Scope bullet (covered fully in `thunder-authentication`):
-
-- "`nginx/default.conf` is a stock static-file config — no proxy block,
-  no envsubst, no custom entrypoint scripts. The image is identical
-  across every environment; per-env values arrive at request time via
-  the mounted `/env-config.js`."
-
-### Coding agent — implementation
-
-Project layout (Vite + TS):
+## Layout
 
 ```
 <app-path>/
 ├── package.json
 ├── tsconfig.json
-├── vite.config.ts
+├── vite.config.ts        # no `base` — served at host root
 ├── index.html
 ├── src/
 │   ├── main.tsx
 │   ├── App.tsx
-│   ├── env.ts        # typed window._env_ shim
-│   ├── api.ts        # fetch helpers
-│   ├── auth.ts       # only if the component declares a thunder-app dependency — see thunder-authentication
+│   ├── env.ts            # typed window._env_ shim
+│   ├── api.ts            # fetch helpers
+│   ├── auth.ts           # only with an auth dependency — see thunder-authentication
 │   └── pages/
 ├── nginx/
 │   └── default.conf
 └── Dockerfile
 ```
 
-#### Served at host root — use the default Vite `base`
-
-The platform serves each web-app on its **own gateway hostname at root**
-(`https://<dedicated-host>/`) — one dedicated host per web-app. So the stock
-Vite default is correct: **do NOT set `base`** in `vite.config.ts` (it defaults
-to `/`), and asset URLs, any react-router `basename`, and any OAuth
-`redirect_uri` are all plain root paths (`/assets/…`, `/callback`).
-
-Services are different — they ARE path-routed under `/<project>-<component>-http`
-on a shared gateway — but a web-app never is. Never copy that service prefix
-into a web-app's `base`: a `base` prefix makes every asset URL 404 (nginx falls
-back to `index.html`, the browser gets HTML for a module script) and the page
-renders blank.
-
-`index.html` — `<script src="./env-config.js">` is **synchronous**,
-BEFORE the bundle. No `async`, no `defer`, no `type="module"` on this
-tag. This guarantees `window._env_` is populated before any ES module
-evaluates.
+`index.html` — the `env-config.js` tag is **synchronous** and comes BEFORE the
+bundle. No `async`, no `defer`, no `type="module"` on it; that is what guarantees
+`window._env_` is populated before any ES module evaluates.
 
 ```html
-<!DOCTYPE html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <title>App</title>
-    <script src="./env-config.js"></script>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
-</html>
+<head>
+  <script src="./env-config.js"></script>          <!-- 1. synchronous -->
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module" src="/src/main.tsx"></script>  <!-- 2. the bundle -->
+</body>
 ```
 
-`src/env.ts` — typed read of `window._env_`. Throws if the file is
-missing (which means a config bug, not a missing key default):
+`src/env.ts` — typed read, throwing if the file never loaded:
 
 ```ts
 type Env = {
   API_BASE_URL: string;
-  // Plus one <UPSTREAM>_URL per component-kind dependency entry, if any.
-  // If this SPA declares an auth platform-resource dependency, its
-  // <DEP>_* OIDC keys (<DEP> = UPPER_SNAKE of the dependency name) are
-  // also present — extend this type with them per the
-  // thunder-authentication skill, which owns the auth wiring.
+  // ...one <UPSTREAM>_URL per component-kind dependency, plus the <DEP>_* OIDC
+  // keys if this SPA declares an auth dependency.
 };
 
 declare global {
@@ -167,22 +122,16 @@ declare global {
 if (!window._env_) {
   throw new Error(
     "window._env_ not set — /env-config.js failed to load. " +
-    "The platform mounts this file via ReleaseBinding; if you see " +
-    "this locally, host /env-config.js from your dev server.",
+    "The platform mounts this file; if you see this locally, host " +
+    "/env-config.js from your dev server.",
   );
 }
 
 export const env: Env = window._env_;
 ```
 
-`src/api.ts` — read the upstream URL at module top-level; throw on
-missing. Do NOT write `?? ""` or any other silent default — that
-fallback produces the v0 `405 Method Not Allowed` bug where every
-fetch becomes a relative URL hitting the SPA's own nginx. The example
-below is the unauthenticated client; if this SPA declares a `thunder-app`
-dependency, attach `Authorization: Bearer <token>`
-to each fetch instead — see the `thunder-authentication` skill for the
-auth'd client.
+`src/api.ts` — resolve the upstream URL at module top level, so a missing key
+throws at load rather than at the first click:
 
 ```ts
 import { env } from "./env";
@@ -191,14 +140,9 @@ const BASE_URL = env.API_BASE_URL; // or env.TODO_API_URL for a specific upstrea
 if (!BASE_URL) {
   throw new Error("API_BASE_URL not set in window._env_");
 }
-
-export async function listTodos(headers: HeadersInit = {}) {
-  const res = await fetch(`${BASE_URL}/todos`, { headers });
-  return res.json();
-}
 ```
 
-`nginx/default.conf` — pure static, no proxy:
+`nginx/default.conf` — pure static:
 
 ```nginx
 server {
@@ -207,23 +151,13 @@ server {
     root /usr/share/nginx/html;
     index index.html;
 
-    location = /health {
-        access_log off;
-        return 200 'OK';
-        add_header Content-Type text/plain;
-    }
-
     location / {
         try_files $uri $uri/ /index.html;
     }
 }
 ```
 
-No `/oidc/` proxy block. No `proxy_pass` to in-cluster services. No
-envsubst, no `${VAR}` placeholders. The platform-mounted
-`/env-config.js` is served by this same static config as plain JS.
-
-`Dockerfile` — multi-stage build + stock `nginx:alpine`:
+`Dockerfile` — multi-stage build onto stock `nginx:alpine`:
 
 ```dockerfile
 FROM node:20-alpine AS builder
@@ -240,65 +174,21 @@ EXPOSE 9090
 CMD ["nginx", "-g", "daemon off;"]
 ```
 
-No `/etc/nginx/templates/`. No `/docker-entrypoint.d/*.sh`. No
-`NGINX_ENVSUBST_*`. The image is byte-identical across all
-environments.
-
-`workload.yaml` for a web-app:
+`workload.yaml` follows the standard format (one `http` endpoint,
+`visibility: [external]`). A web-app may additionally declare its own safe
+defaults, which become entries in `window._env_` — never secrets or per-env
+values, which the platform owns:
 
 ```yaml
-apiVersion: openchoreo.dev/v1alpha1
-metadata:
-  name: <web-component-name>
-
-endpoints:
-  - name: http
-    type: HTTP
-    port: 9090
-    visibility:
-      - external
-
-# Optional: agent-authored defaults that become entries in window._env_.
-# Safe defaults only — secrets and per-env values come from the platform.
 configurations:
   env:
     - name: SUPPORT_EMAIL
       value: support@example.com
 ```
 
-Build verification (run BEFORE opening the PR):
-
-```bash
-cd <app-path>
-npm install 2>&1 | tail -30   # regenerates package-lock.json
-npx tsc --noEmit              # type-check without emitting JS
-npm run build 2>&1 | tail -20 # actually build
-```
-
-Commit the resulting `package-lock.json`. Do not commit `node_modules/`.
-
-### Don't
-
-- ❌ Write a `.env` file in the app path.
-- ❌ Read `import.meta.env.VITE_*` (or `process.env.REACT_APP_*`,
-  `process.env.NEXT_PUBLIC_*`). Build-time mechanisms — the platform
-  doesn't use them.
-- ❌ Add `envsubst`, `/etc/nginx/templates/`, `NGINX_ENVSUBST_*`, or any
-  custom `/docker-entrypoint.d/` script.
-- ❌ Generate or commit your own `env-config.js`. The platform owns it.
-- ❌ Use `?? ""` or any silent default when reading a `window._env_`
-  key. A missing key must throw at module load.
-- ❌ Invent a key name not in the authoritative table above.
-- ❌ Add `exposesAPI` to a web-app — the toggle is for backends only.
-- ❌ Add a separate `auth` / `login` component — Thunder owns sign-in
-  (see `thunder-authentication`).
-
-### Common pitfalls
+## Pitfalls
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| SPA throws on load: `window._env_ not set` | `/env-config.js` failed to load (path wrong, served as 404, or `<script>` was `defer`/`async`) | Confirm `<script src="/env-config.js">` is **synchronous** (no `async`, no `defer`, no `type="module"`) and appears in `<head>` BEFORE the bundle's `<script type="module">`. |
-| SPA throws on load: `<KEY> not set in window._env_` | The agent invented a key not in the authoritative table | Use the exact spellings; the platform only writes the keys it owns. |
-| Browser POST hits the SPA's own host and returns `405 Method Not Allowed` | Code used a silent `?? ""` fallback so a missing key produced relative-URL fetches against nginx | Replace `?? ""` with `throw new Error(...)`. |
-| `nginx: [emerg] host not found in upstream "thunder-service..."` at pod start | Legacy `/oidc/` proxy block in `nginx/default.conf` | Delete the `/oidc/` location block. Browser posts cross-origin. |
-| Agent generated a `.env` file with `VITE_*` lines | Stale docs / training data | Delete it. Read `window._env_` via `src/env.ts`. |
+| SPA throws on load: `window._env_ not set` | `/env-config.js` failed to load — path wrong, 404, or the `<script>` was `defer`/`async` | Make the tag synchronous in `<head>`, BEFORE the bundle's `<script type="module">`. |
+| `nginx: [emerg] host not found in upstream "thunder-service..."` at pod start | Legacy `/oidc/` proxy block in `nginx/default.conf` | Delete the block. The browser posts cross-origin. |

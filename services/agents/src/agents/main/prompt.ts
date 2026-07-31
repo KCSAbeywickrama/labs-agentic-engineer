@@ -120,6 +120,33 @@ export function buildInstructions(skills?: SkillSource): string {
 }
 
 /**
+ * The eager-skill preamble for one turn (#335 latency): the caller already
+ * knows these skills apply, so their bodies are inlined ahead of the
+ * instruction and the model skips the `loadSkill` round-trip — a whole model
+ * step before any useful output. Rides the PER-TURN user prompt, never the
+ * system prompt (whose cacheable prefix must stay byte-stable across turns).
+ * Unknown names skip silently — the snapshot is the authority; "" when nothing
+ * resolves, leaving the prompt byte-identical to an eager-free turn.
+ */
+export function buildEagerSkillsBlock(skills: SkillSource | undefined, names?: string[]): string {
+  if (!names?.length || !skills) return "";
+  const bodies = names
+    .map((name) => ({ name, body: skills.load(name) }))
+    .filter((s): s is { name: string; body: { content: string; references: string[] } } => s.body !== undefined);
+  if (bodies.length === 0) return "";
+  const blocks = bodies
+    .map(({ name, body }) => `## Skill: ${name}\n\n${body.content.trim()}`)
+    .join("\n\n");
+  return `The following skill guidance is ALREADY LOADED for this turn — apply it directly and do NOT call loadSkill for these names:
+
+${blocks}
+
+---
+
+`;
+}
+
+/**
  * System instructions for the `task-plan` tool set. The mission is PLANNING Tasks
  * against the read-only CURRENT STATE — the agent does not edit files here. Detail
  * (title conventions, fresh vs incremental, obsolescence) lives in the

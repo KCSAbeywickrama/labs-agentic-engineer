@@ -15,8 +15,15 @@
 // under the License.
 
 // Package validation owns the VALIDATION phase's platform side: it mints the
-// single project-scoped validation issue (aep:validation) that the milestone
-// run's validation cycle is dispatched at.
+// validation issue (aep:validation) that the milestone run's validation cycle is
+// dispatched at.
+//
+// ONE issue per VERSION, filed into that version's milestone by the create
+// itself. The milestone is the version pin — there is no version label, and no
+// follow-up patch, so the issue is never versionless. Per version rather than per
+// project because the issue body embeds the acceptance criteria as they stood at
+// mint time: reusing the previous version's issue would hand this version's agent
+// the previous version's oracle.
 //
 // The run supervisor mints it at DEPLOYED-GREEN, not at plan time: an issue
 // that nothing can work until every component is deployed would otherwise sit
@@ -26,10 +33,18 @@
 //
 // This feature does the ISSUE side only. Its runtime inputs — deployed endpoint
 // URLs and test credentials — are never written into the (public) issue: the
-// runner fetches endpoints from the secure validation-context endpoint and
-// requests test credentials on demand (only when a criterion needs a login)
-// from the sibling test-credentials endpoint (credentials.go). Test credentials
-// are a v1 mock (admin/admin) until real user provisioning exists.
+// runner PREFLIGHTS the endpoints from the secure validation-context endpoint
+// before its agent starts, and the agent requests test credentials on demand
+// (only when a criterion needs a login) from the sibling test-credentials
+// endpoint (credentials.go). Test credentials are a v1 mock (admin/admin) until
+// real user provisioning exists.
+//
+// Both callbacks identify their caller by the run CYCLE the platform dispatched
+// (context.go's CycleLocator) — the id the pod carries as AEP_TASK_ID and the
+// subject its bearer is bound to. Resolving it anywhere else is not a detail: it
+// was resolved against the executions table, which the milestone supervisor does
+// not write, so every validation runner was told its own dispatch did not exist
+// and the endpoint resolution below never ran.
 //
 // Feature-edge allowlist: {gitrepo}. Design + criteria reads are consumer ports
 // (ports.go) satisfied by adapters at the composition root, so this package

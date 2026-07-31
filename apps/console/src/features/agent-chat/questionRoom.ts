@@ -39,6 +39,20 @@ export interface RoomQuestion {
   answers: QuestionAnswer[] | null;
   /** Set once the asker submits or skips — the form closes for the whole room. */
   submitted?: boolean;
+  /**
+   * True while the batch is still streaming (#270 latency): `questions` is the
+   * prefix parsed so far and grows on re-mirror; the form renders and takes
+   * selections but submit stays gated until the final mirror clears this.
+   */
+  streaming?: boolean;
+  /**
+   * Epoch ms of the first mirror. Gates ORPHAN closing (an entry with no
+   * backing log message): another tab or device of the same user legitimately
+   * lacks the asker's log, so an orphan may only close once it is old enough
+   * that nobody is coming back for it. Absent on pre-stamp entries — treated
+   * as ancient (closable), which is exactly the legacy-zombie case.
+   */
+  askedAt?: number;
 }
 
 // --- Shared `questions` map helpers ----------------------------------------
@@ -56,15 +70,20 @@ function questionsMap(doc: Doc): YMap<RoomQuestion> {
  */
 export function mirrorQuestion(
   doc: Doc,
-  entry: { toolCallId: string; questions: AskQuestionInput[]; ownerId: string },
+  entry: { toolCallId: string; questions: AskQuestionInput[]; ownerId: string; streaming?: boolean },
 ): void {
   const map = questionsMap(doc);
   const existing = map.get(entry.toolCallId);
   map.set(entry.toolCallId, {
-    ...entry,
+    toolCallId: entry.toolCallId,
+    questions: entry.questions,
+    // A re-mirror flips streaming off by OMITTING it — never resurrect the
+    // gate from a stale entry, and never leak `streaming: false` into the doc.
+    ...(entry.streaming ? { streaming: true } : {}),
     ownerId: existing?.ownerId ?? entry.ownerId,
     answers: existing?.answers ?? null,
     ...(existing?.submitted ? { submitted: true } : {}),
+    askedAt: existing?.askedAt ?? Date.now(),
   });
 }
 
@@ -77,6 +96,26 @@ export function setRoomAnswer(doc: Doc, toolCallId: string, answers: QuestionAns
 }
 
 /**
+ * Apply an answer edit against the LIVE entry rather than a React-render
+ * snapshot. Load-bearing while a batch streams and in a shared room: two
+ * edits landing between renders (fast successive clicks, or a teammate's
+ * concurrent selection) would otherwise each compute from the same stale
+ * answers and the later write would clobber the earlier one. `update` also
+ * receives the live `questions`, so an edit is always aligned to the current
+ * question count.
+ */
+export function updateRoomAnswer(
+  doc: Doc,
+  toolCallId: string,
+  update: (live: RoomQuestion) => QuestionAnswer[],
+): void {
+  const map = questionsMap(doc);
+  const existing = map.get(toolCallId);
+  if (!existing) return;
+  map.set(toolCallId, { ...existing, answers: update(existing) });
+}
+
+/**
  * Close a question for the WHOLE room — used both when the asker submits the
  * answers and when they skip the questions. The form disappears for everyone
  * and the spec body returns to the files.
@@ -86,6 +125,43 @@ export function closeRoomQuestion(doc: Doc, toolCallId: string): void {
   const existing = map.get(toolCallId);
   if (!existing) return;
   map.set(toolCallId, { ...existing, submitted: true });
+}
+
+/** How long an unbacked ("orphan") entry may live before it is closable. */
+export const ORPHAN_QUESTION_TTL_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Close (for the whole room) THIS owner's entries their chat log no longer
+ * backs. Two classes, deliberately different rules:
+ *
+ * - SUPERSEDED (the log HAS the message, but a later delivered user message —
+ *   e.g. a composer reply, an equally valid answer path per ADR-0012 — made it
+ *   unanswerable): close immediately. The log in hand is proof.
+ * - ORPHAN (no log message at all): close only past ORPHAN_QUESTION_TTL_MS
+ *   (unstamped legacy entries count as ancient). Another tab with a stale
+ *   in-memory log, or another device of the same user, legitimately lacks the
+ *   asker's log — an aggressive orphan rule would close LIVE questions across
+ *   tabs. The TTL keeps a persistent collab room from resurrecting zombie
+ *   forms forever without racing living sessions.
+ *
+ * Only the owner closes their own entries — a teammate's log simply lacks the
+ * message, which must never read as "stale".
+ */
+export function closeStaleRoomQuestions(
+  doc: Doc,
+  ownerId: string,
+  supersededToolCallIds: ReadonlySet<string>,
+  knownToolCallIds: ReadonlySet<string>,
+  now: number = Date.now(),
+): void {
+  for (const entry of readRoomQuestions(doc)) {
+    if (entry.submitted || entry.ownerId !== ownerId) continue;
+    const superseded = supersededToolCallIds.has(entry.toolCallId);
+    const orphanExpired =
+      !knownToolCallIds.has(entry.toolCallId) &&
+      (entry.askedAt === undefined || now - entry.askedAt > ORPHAN_QUESTION_TTL_MS);
+    if (superseded || orphanExpired) closeRoomQuestion(doc, entry.toolCallId);
+  }
 }
 
 /** Snapshot the room's questions in insertion order. */

@@ -28,10 +28,13 @@ one-shot/headless generation (no interview was requested) — just generate.
 1. **Find the ambiguities that change the output.** Target users, scale,
    platform, must-have vs nice-to-have, hard constraints, the one-sentence
    success criterion. Skip anything that wouldn't change what you build.
-2. **Ask in structured questions.** Give each question **1–5 concrete options**
+2. **Ask in structured questions.** Give each question **0–5 concrete options**
    and mark the **one** you'd recommend (`recommended: true`). Add a short
    `description` when an option's meaning isn't obvious. Set `multiSelect: true`
-   only when several options can genuinely co-apply.
+   only when several options can genuinely co-apply. When the answer must be
+   typed (no sensible presets), pass an **empty options list** — the form always
+   offers a free-text field, so never invent placeholder options like
+   "Type my own answer" or "Other".
    - Use `ask_questions` to batch **independent** questions into one form so the
      user answers them together.
    - Use `ask_question` when the next question depends on the last answer.

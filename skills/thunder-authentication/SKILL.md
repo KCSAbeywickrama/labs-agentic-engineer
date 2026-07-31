@@ -1,199 +1,104 @@
 ---
 name: thunder-authentication
-description: How the platform's Thunder IDP is wired into SPAs that sign users in. Covers the end-user-auth platform-resource dependency that triggers auth, the per-dependency Thunder OAuth client (platform-owned — agent never sees client_id), the generic window._env_.<DEP>_* runtime keys derived from YOUR dependency name, and OIDC client wiring with oidc-client-ts. Pairs with react-webapp when the SPA wiring patterns apply. Apply on any project whose spec implies users sign in.
+description: How end-user identity works on the platform — Thunder, the IDP wired into the API gateway, signs users in and components authorize them. Covers the auth platform-resource dependency, the platform-owned OAuth client, the window._env_.<DEP>_* runtime keys, OIDC + PKCE in the SPA, and resolving the caller's role and directory record on the backend. Apply to any SPA whose users sign in, and to every protected backend they call.
 metadata:
   aep:
     kind: org
     audience: [coding]
 ---
 
-
 # Thunder Authentication
 
-## What this skill does
+End-user identity is delegated to Thunder, the platform's Identity Provider,
+which the API gateway is wired to as its external IDP. That gives every project
+with sign-in **two halves reading one claim set**:
 
-The platform delegates end-user authentication to Thunder (the WSO2
-Identity Provider running on the cluster). This skill tells the
-architect when to mark a web-app for sign-in, what the platform's Thunder
-Application operator provisions behind the scenes via the provisioned
-dependency, and how the SPA code reads OIDC config at runtime to
-sign users in via Authorization Code + PKCE.
+- **The SPA** signs the user in with OIDC Authorization Code + PKCE and reads
+  their claims from the ID token (`user.profile.groups`).
+- **The protected backend** never sees a token: the gateway validates it and
+  injects the SAME claims as headers (`X-User-Groups`). See `api-management` for
+  the gateway's side of that contract.
 
-## Platform facts
+It is one claim set, so the two sides must resolve a caller's role identically.
 
-- One Thunder application is provisioned per auth platform-resource
-  dependency, created by the platform's Thunder Application operator once the
-  dependency is provisioned. Its `client_id` is a platform-derived opaque
-  identifier — it is NOT the dependency's design.json `name`, and the agent
-  never computes, sees, or hardcodes it; the platform delivers it via
-  `window._env_.<DEP>_CLIENT_ID`. The same goes for the `client_secret`
-  and redirect URIs — the platform owns them.
-- The redirect URI is platform-registered: the platform patches the SPA's
-  served callback URL onto the OAuth app once its public URL resolves (driven
-  by the resource type's `consumer-url-env-config` marker). The SPA is served
-  at its host root (see `react-webapp`), so that URL is `<origin>/callback`.
-  The SPA is NOT handed a redirect-URI key; it reconstructs the SAME value in
-  the browser, `window.location.origin + '/callback'`, and serves the callback
-  route at `/callback`.
+The OAuth client itself is **platform-owned**: you never create, compute, or
+hardcode any part of it.
 
-### Runtime keys — derived from YOUR dependency name
+---
 
-For a web-app, the platform emits EVERY platform-resource dependency's
-binding outputs into `window._env_` under generic keys
-`<UPPER_SNAKE(depName)>_<UPPER_SNAKE(outputName)>`. There is NO fixed
-key prefix — the prefix is the UPPER_SNAKE of the dependency `name` the
-ARCHITECT chose. The auth resource type outputs `client_id`,
-`issuer`, `jwks_url`, and `scopes`, so for a dependency named `user-auth`
-the keys are:
+# SPA sign-in
+
+## Order of work
+
+`src/env.ts` (add the `<DEP>_*` keys to the `react-webapp` shim) → `src/auth.ts`
+→ a **`/callback` route** that calls `handleCallback()` once on mount → the
+bearer header in `src/api.ts`. Verify with the `react-webapp` build check.
+
+## Constraints
+
+**Keys are derived from YOUR dependency name.** The platform emits every
+platform-resource dependency's outputs into `window._env_` as
+`<UPPER_SNAKE(depName)>_<UPPER_SNAKE(outputName)>`. There is **no fixed prefix** —
+it is the UPPER_SNAKE of the dependency `name` the architect chose. The auth
+resource type outputs `client_id`, `issuer`, `jwks_url` and `scopes`, so a
+dependency named `user-auth` yields:
 
 | Key (dep `user-auth`) | Generic form | Meaning |
 |---|---|---|
 | `USER_AUTH_CLIENT_ID` | `<DEP>_CLIENT_ID` | this app's platform-owned OAuth client id |
 | `USER_AUTH_ISSUER` | `<DEP>_ISSUER` | OIDC issuer / authority for `oidc-client-ts` |
 | `USER_AUTH_JWKS_URL` | `<DEP>_JWKS_URL` | JWKS endpoint (token validation reference) |
-| `USER_AUTH_SCOPES` | `<DEP>_SCOPES` | space-separated OIDC scopes (e.g. `openid profile email`) |
+| `USER_AUTH_SCOPES` | `<DEP>_SCOPES` | space-separated scopes (e.g. `openid profile email`) |
 
-Substitute YOUR dependency name for `<DEP>`. Read these keys with their
-EXACT derived spellings — inventing one (or hardcoding a fixed prefix
-instead of deriving it from YOUR dependency name) produces a
-`ReferenceError` at module load because the value is `undefined`.
+Hardcoding a fixed prefix — or any prefix other than YOUR dependency's name —
+gives `undefined` at module load and a redirect to `undefined/oauth2/authorize`.
 
-- The redirect URI and post-sign-in URL are NOT platform-emitted keys —
-  compute them in the browser (redirect URI as above; post-sign-in landing =
-  `window.location.origin`).
-- The Thunder OIDC discovery endpoint is `<DEP>_ISSUER/.well-known/openid-configuration`.
-- Token endpoint: `<DEP>_ISSUER/oauth2/token`. The SPA posts to it
-  cross-origin — there is NO same-origin `/oidc/` proxy in nginx.
-- The SPA's OAuth client is provisioned with the `refresh_token` grant (plus
-  `authorization_code` + PKCE), so `oidc-client-ts` renews an expiring access
-  token by posting the refresh token to that endpoint — no hidden iframe, no
-  third-party-cookie dependency. This is what `automaticSilentRenew` and
-  `signinSilent()` use to keep a signed-in user signed in.
-- Thunder does NOT advertise an `end_session_endpoint` (its discovery doc lists
-  only issuer, authorize, and token). So RP-initiated logout via
-  `signoutRedirect()` rejects — sign-out drops the local session
-  (`removeUser()`) and reloads instead.
-- The signed-in user's identity claims ride in the ID TOKEN, surfaced by
-  `oidc-client-ts` as `user.profile`: `groups` (their role/group memberships)
-  and `ouId`/`ouName`/`ouHandle` (their organization), beside standard
-  `profile`/`email`. The platform requests the `group`/`ou` scopes by default,
-  so a role-aware SPA reads roles from `user.profile.groups` — it never decodes
-  the access token for them. The protected backend reads the SAME `groups`
-  from the gateway-injected `X-User-Groups` header (see `api-management`), so
-  the SPA and API resolve the caller's role identically.
-- Default Thunder admin user (dev clusters): `admin` / `admin` in the
-  `Administrators` group. Real orgs add their own users via Thunder's
-  admin console / SCIM.
-- Switching IDPs (Asgardeo, custom) is a settings-page action against
-  the org's `OrganizationIDPProfile` record — NOT a skill edit. The
-  `<DEP>_*` keys are emitted for every SPA that declares an auth
-  platform-resource dependency; a future PR honours the profile flavour.
-  Until then, attaching an `asgardeo-authentication` custom skill produces
-  code that *talks Asgardeo client semantics against a Thunder backend*
-  — the OIDC handshake completes but Asgardeo-specific extensions
-  don't apply.
+**`client_id` is platform-owned.** It is a platform-derived opaque identifier,
+**not** the dependency's `name`; the platform delivers it in
+`window._env_.<DEP>_CLIENT_ID`. Same for the client secret and the registered
+redirect URIs. Never add Thunder client-provisioning code anywhere — the
+platform's Thunder Application operator does it when the dependency provisions —
+and never write a `/login` form that POSTs credentials to your own API.
 
-## Recommended practice
+**Compute the redirect URI; there is no key for it.** The platform registers the
+SPA's served callback URL once its public URL resolves, and the SPA is served at
+its host root (see `react-webapp`), so that URL is `<origin>/callback`.
+Reconstruct exactly that in the browser: `window.location.origin + '/callback'`,
+and serve the route at `/callback`. Post-sign-in landing is
+`window.location.origin`. Neither is an env key.
 
-### Architect
+**Token endpoint is cross-origin.** The browser posts straight to
+`<DEP>_ISSUER/oauth2/token`; discovery is
+`<DEP>_ISSUER/.well-known/openid-configuration`. Nothing is proxied same-origin,
+which is why `react-webapp` keeps nginx purely static.
 
-**The sign-in trigger is an explicit auth platform-resource dependency —
-nothing else provisions auth.** When the spec implies users sign in
-(keywords: `login`, `sign in`, `user account`, `personal`, ...), the SPA
-**and** every backend it calls each declare the SAME `platform-resource`
-dependency of the auth resource type:
+**Persist the session and renew silently.** The OAuth client is provisioned with
+the `refresh_token` grant alongside `authorization_code` + PKCE, so an expiring
+access token is renewed by posting the refresh token — no hidden iframe, no
+third-party-cookie dependency. Store the session in `localStorage` (a
+`WebStorageStateStore`) and set `automaticSilentRenew: true`. `sessionStorage` is
+per-tab and wiped on close, which forces a re-login on every visit; and without
+persistent web storage the PKCE verifier does not survive the redirect at all.
 
-```json
-{ "kind": "platform-resource", "name": "user-auth", "resourceType": "thunder-app", "description": "sign-in for shoppers" }
-```
+**There is no sign-out endpoint.** Thunder's discovery document advertises only
+issuer, authorize and token — no `end_session_endpoint` — so
+`signoutRedirect()` rejects. Sign-out drops the local session (`removeUser()`)
+and reloads.
 
-- Call `list_platform_resource_types` FIRST — never guess the type name.
-  The auth resource type outputs `client_id` / `issuer` / `jwks_url` /
-  `scopes`; those become the `window._env_.<DEP>_*` runtime keys.
-- Choose a clear dependency `name` — it becomes the runtime key prefix
-  (`user-auth` → `USER_AUTH_*`). The SAME name on the SPA and its backends
-  is what ties sign-in to token-carrying API calls.
-- You MAY propose the `scopes` parameter value derived from the spec — this
-  is the one explicit exception to the never-invent-parameters rule (default
-  `openid profile email`).
-- NEVER set `redirectUris` — they are platform-managed (the platform
-  registers the SPA's `<origin>/callback` URL once its public URL resolves).
-- Do NOT emit `exposesAPI.auth: end-user-required` on the backend yourself —
-  the platform DERIVES it from the shared auth dependency (keyed on the
-  resource type's `end-user-auth` role marker). Setting an explicit
-  `service-required` alongside the dependency is a validation error.
-- Declare the dependency on the SPA and on each protected backend with the
-  SAME dependency `name`, so the SPA signs in and its API calls carry a
-  token the backend's gateway accepts. Without the dependency, NO Thunder
-  application is provisioned, NO `<DEP>_*` keys land in `window._env_`,
-  and the SPA deploys unable to sign in.
+**Roles ride in the ID token.** `oidc-client-ts` surfaces them as
+`user.profile.groups`, beside `ouId`/`ouName`/`ouHandle` and standard
+`profile`/`email`. The platform requests the `group`/`ou` scopes by default, so
+never decode the access token for roles and never hand-parse a JWT.
 
-- The web-app's `componentAgentInstructions` MUST say (verbatim or close):
-  `OIDC Authorization Code + PKCE against the platform IDP using oidc-client-ts. Read OIDC config from window._env_.<DEP>_* (<DEP> = UPPER_SNAKE of the auth dependency name) and upstream URLs from window._env_.<UPSTREAM>_URL — typed via src/env.ts. Compute redirect_uri = window.location.origin + '/callback' and serve the callback route at '/callback'. Attach Authorization: Bearer <access_token> to every API call. Persist the session in localStorage with automaticSilentRenew:true so users stay signed in across visits, and renew an expired token silently (signinSilent, refresh_token grant) before any full-page sign-in redirect. DO NOT write a .env file. Runtime config comes from window._env_, never import.meta.env.VITE_*. DO NOT use envsubst, /etc/nginx/templates/, or any custom nginx entrypoint — stock nginx:alpine serves the static bundle + env-config.js.`
-- Do NOT create a separate `auth` / `identity` / `login` /
-  `session` / `user-service` component. Thunder owns token issuance;
-  the API just reads `X-User-Id` (covered by `api-management`).
-- Do NOT add `/auth/login`, `/auth/register`, `/auth/logout` endpoints
-  to ANY backend service. Thunder issues tokens; the SPA initiates the
-  redirect.
+**Dev clusters** ship a default Thunder admin: `admin` / `admin`, in the
+`Administrators` group. Real orgs add users via Thunder's admin console / SCIM.
 
-### Tech-lead — issue body bullets
+## Implementation
 
-For every web-app task whose component declares an auth platform-resource
-dependency:
+Add the four `<DEP>_*` keys to the `Env` type in the `react-webapp` shim.
 
-- Scope: "Implement OIDC Authorization Code + PKCE using
-  `oidc-client-ts`, configured from `window._env_.<DEP>_*` (where `<DEP>`
-  is the UPPER_SNAKE of the auth dependency name — e.g. dep `user-auth` →
-  `USER_AUTH_ISSUER`, `USER_AUTH_CLIENT_ID`, `USER_AUTH_SCOPES`). The
-  platform writes these keys into `env-config.js` via the SPA's
-  ReleaseBinding; the agent's `index.html` loads it synchronously
-  before the bundle. Read values via the typed `src/env.ts` shim and
-  throw at module top-level on missing keys — no `?? ''` fallback. Do
-  NOT write a `.env` file. Do NOT use `import.meta.env.VITE_*`."
-- Scope: "Compute `redirect_uri = window.location.origin + '/callback'` and
-  land the user on `window.location.origin` after sign-in — these are NOT env
-  keys. Serve the callback route at `/callback` — the platform registered
-  exactly that URL."
-- Scope: "Attach `Authorization: Bearer <access_token>` to every
-  `window._env_.API_BASE_URL` fetch. Persist the session in `localStorage`
-  and set `automaticSilentRenew: true`; renew an expired token silently via
-  `signinSilent()` (the platform's `refresh_token` grant) before any full
-  sign-in redirect, and gate app load on that renew — not on `signIn()` for
-  a merely-expired token. On 401, fall back to `signIn()`. Do NOT write a
-  `/login` form that POSTs credentials anywhere."
-- Acceptance criteria: "Loading the webapp unauthenticated redirects to
-  the OIDC authorize endpoint; after sign-in, the user lands back on the app
-  with a token in `localStorage`; subsequent API calls carry
-  `Authorization: Bearer <token>` and return per-user data; returning to the
-  app in a new tab or after closing it keeps the user signed in with no new
-  credential prompt, and an expired access token is renewed silently (no
-  redirect) until the refresh token expires or the user signs out."
-
-### Coding agent — implementation
-
-`src/env.ts` — the base shim (the `window._env_` presence guard,
-`API_BASE_URL`, any `<UPSTREAM>_URL` keys, and the `export const env`)
-is owned by the `react-webapp` skill — don't duplicate it. When the
-component declares an auth platform-resource dependency, the platform
-also populates the `<DEP>_*` keys; extend the `Env` type with them
-(this example uses a dependency named `user-auth` → `USER_AUTH_*` — use
-YOUR dependency name):
-
-```ts
-type Env = {
-  API_BASE_URL: string;
-  // ...plus any <UPSTREAM>_URL keys (see react-webapp).
-  USER_AUTH_CLIENT_ID: string;
-  USER_AUTH_ISSUER: string;
-  USER_AUTH_JWKS_URL: string;
-  USER_AUTH_SCOPES: string;
-};
-```
-
-`src/auth.ts` — `oidc-client-ts` wired to `env.<DEP>_*`; `redirect_uri`
-and the post-sign-in URL are computed from `window.location.origin`, NOT
-read from env (again shown for a dependency named `user-auth`):
+`src/auth.ts` — `oidc-client-ts` wired to `env.<DEP>_*`, with `redirect_uri`
+computed from the origin (shown for a dependency named `user-auth` — use YOURS):
 
 ```ts
 import { UserManager, WebStorageStateStore } from "oidc-client-ts";
@@ -206,13 +111,7 @@ export const userManager = new UserManager({
   post_logout_redirect_uri: window.location.origin,
   response_type: "code",
   scope: env.USER_AUTH_SCOPES,
-  // Persist the session in localStorage so the user stays signed in across
-  // visits — a new tab, or coming back after closing the app. sessionStorage
-  // is per-tab and wiped on close, which forces a re-login on every visit;
-  // localStorage carries the PKCE state across the redirect just as well.
-  // automaticSilentRenew refreshes the token in the background via the
-  // platform's refresh_token grant (no redirect). Tradeoff: the token lives
-  // in JS-readable storage — acceptable for a public SPA; keep
+  // The token lives in JS-readable storage — acceptable for a public SPA; keep
   // loadUserInfo:false and lean on the platform CSP.
   userStore: new WebStorageStateStore({ store: window.localStorage }),
   automaticSilentRenew: true,
@@ -222,9 +121,8 @@ export const userManager = new UserManager({
 export async function signIn()         { await userManager.signinRedirect(); }
 export async function handleCallback() { return userManager.signinRedirectCallback(); }
 
-// Sign the user out. Thunder advertises no end_session_endpoint, so
-// signoutRedirect() rejects; fall back to dropping the LOCAL session and
-// reloading — the load-time guard then starts a fresh sign-in.
+// No end_session_endpoint → signoutRedirect() rejects; drop the LOCAL session
+// instead and let the load-time guard start a fresh sign-in.
 export async function signOut() {
   try {
     await userManager.signoutRedirect();
@@ -234,9 +132,7 @@ export async function signOut() {
   }
 }
 
-// Return the current user, renewing a persisted-but-expired session SILENTLY
-// via the refresh token (no redirect). Returns null only when there is no
-// usable session — the caller then starts a full sign-in redirect.
+// null ONLY when there is no session to renew — an expired one renews silently.
 export async function currentUser() {
   const user = await userManager.getUser();
   if (user && !user.expired) return user;
@@ -247,13 +143,7 @@ export async function getAccessToken(): Promise<string | null> {
   const user = await currentUser();
   return user?.access_token ?? null;
 }
-```
 
-When the spec calls for role-based UI, read the user's roles from
-`user.profile.groups` — the id_token claim `oidc-client-ts` surfaces (see
-Platform facts); the platform already requests the `group`/`ou` scopes:
-
-```ts
 export async function getRoles(): Promise<string[]> {
   const user = await currentUser();
   const groups = user?.profile?.groups;
@@ -261,59 +151,117 @@ export async function getRoles(): Promise<string[]> {
 }
 ```
 
-On app load, gate rendering on `currentUser()`: if it returns a user, proceed;
-if it returns `null`, call `signIn()`. Do NOT call `signIn()` merely because
-the access token is expired — that turns a silent refresh into a full-screen
-redirect and re-logs the user in on every visit. `currentUser()` already
-renews an expired-but-persisted session silently.
+On app load, gate rendering on `currentUser()`: a user → proceed; `null` →
+`signIn()`. Do **not** call `signIn()` merely because the access token expired —
+that turns a silent refresh into a full-screen redirect and re-logs the user in
+on every visit. `currentUser()` already renews silently.
 
-Add a callback route at `/callback` in your router that calls
-`handleCallback()` once on mount, then navigates to `/`. If you instead gate
-rendering on `window.location.pathname`, compare it against `/callback`.
-
-`src/api.ts` — attach `Authorization: Bearer <token>`; redirect on 401:
+`src/api.ts` — attach the bearer token; on 401 fall back to a full sign-in:
 
 ```ts
-import { env } from "./env";
-import { getAccessToken, signIn } from "./auth";
-
-async function authHeaders(): Promise<HeadersInit> {
-  const token = await getAccessToken();
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
-
 export async function listTodos() {
+  const token = await getAccessToken();
   const res = await fetch(`${env.API_BASE_URL}/todos`, {
-    headers: await authHeaders(),
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
   if (res.status === 401) { await signIn(); return []; }
   return res.json();
 }
 ```
 
-### Don't
+---
 
-- ❌ Write a `/login` form that POSTs credentials to your API. Thunder
-  owns token issuance.
-- ❌ Hardcode a fixed key prefix, or any prefix other than the
-  UPPER_SNAKE of YOUR auth dependency name. The keys are
-  `<DEP>_CLIENT_ID` / `<DEP>_ISSUER` / `<DEP>_JWKS_URL` / `<DEP>_SCOPES`.
-- ❌ Read a `redirect_uri` from `window._env_` — there is no such key.
-  Compute `window.location.origin + '/callback'`.
-- ❌ Add a same-origin `/oidc/` proxy in nginx. The browser posts to
-  `${env.<DEP>_ISSUER}/oauth2/token` cross-origin.
-- ❌ Hardcode the `client_id`. It is per-dependency and platform-derived;
-  the platform puts it in `window._env_.<DEP>_CLIENT_ID`.
-- ❌ Add Thunder client provisioning code anywhere — the platform's Thunder
-  Application operator does it when the auth dependency is provisioned.
+# Backend authorization
 
-### Common pitfalls
+The gateway hands your service the caller's verified identity as headers
+(`api-management` covers the mechanism and the 401-on-missing-`X-User-Id` rule).
+What follows is what that identity *means*.
+
+## Identity is not authorization
+
+`X-User-Id` is an **opaque IdP subject** — not a record key in any other service,
+so a directory lookup keyed on it 404s. Split the two questions a caller raises:
+
+- **Role** (what may they do) comes from `X-User-Groups` — the SAME groups claim
+  the SPA reads from `user.profile.groups`. An authenticated caller with no
+  recognized role is a **403, never a 401**: a 401 tells the SPA its token
+  expired, so it restarts sign-in and loops forever.
+- **Directory attributes** (which unit is theirs, their own id in the directory)
+  come from the caller's **directory record**, resolved by `X-User-Name` — the
+  username, which the directory keys on. A group name is a role, not an identity,
+  so never parse an attribute out of one, and never match `X-User-Id` against a
+  stored record id. `X-User-Name` is gateway-set from the validated token so it
+  is safe to authorize on, but a username can be renamed — so look the record UP
+  by it, and never store it as a row key (`api-management` covers what to key on).
+
+## Implementation
+
+Resolve the role from `X-User-Groups`, never by looking `X-User-Id` up anywhere.
+**403**, never 401, when no group maps:
+
+```go
+func callerRole(r *http.Request) string { // "" = no recognized role
+    for _, g := range parseGroups(r.Header.Get("X-User-Groups")) {
+        lg := strings.ToLower(g)
+        switch { // adapt the keywords to the spec's role names
+        case strings.Contains(lg, "admin"):   return "admin"
+        case strings.Contains(lg, "auditor"): return "auditor"
+        }
+    }
+    return ""
+}
+
+// X-User-Groups is a JSON array (e.g. ["Compliance Admin"]); accept a
+// comma-separated fallback too.
+func parseGroups(h string) []string {
+    h = strings.TrimSpace(h)
+    if h == "" { return nil }
+    var arr []string
+    if strings.HasPrefix(h, "[") && json.Unmarshal([]byte(h), &arr) == nil {
+        return arr
+    }
+    return strings.Split(h, ",")
+}
+```
+
+When roles scope by the caller's own directory attributes — their unit, their own
+id — resolve the caller's **directory record** by `X-User-Name` and filter on that
+record's fields. Absent or unresolved → 403:
+
+```go
+// ok == false → answer 403, never 401.
+func resolveCaller(r *http.Request) (DirectoryRecord, bool) {
+    username := r.Header.Get("X-User-Name")
+    if username == "" {
+        return DirectoryRecord{}, false
+    }
+    return directory.FindByUsername(r.Context(), username)
+}
+
+func listScoped(w http.ResponseWriter, r *http.Request) {
+    switch callerRole(r) {
+    case "":      /* 403: no role */ return
+    case "admin": // no filter — sees everything
+    default:
+        rec, ok := resolveCaller(r); if !ok { /* 403 */ return }
+        // Filter on rec.Unit or rec.ID — the attribute the spec scopes by.
+        // NOT X-User-Id (opaque) and NOT a group name.
+    }
+}
+```
+
+The directory's real endpoint, its username field, and the dependency wiring are
+org-specific — `internal-services` owns them; do not hardcode a roster.
+
+---
+
+## Pitfalls
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| SPA throws `<KEY> not set` / redirects to `undefined/oauth2/authorize` | Agent hardcoded a fixed key prefix instead of deriving keys from YOUR dependency name | Use `env.<DEP>_ISSUER` etc., where `<DEP>` = UPPER_SNAKE of the auth dependency name (dep `user-auth` → `USER_AUTH_ISSUER`). |
-| Every user shows no role / `groups` is empty | Roles read from the wrong place — the access token, or a hand-decoded JWT | Read `user.profile.groups` (the id_token claim `oidc-client-ts` surfaces). The platform already requests the `group`/`ou` scopes, so the claim is present. |
-| After login, "invalid redirect URI" | `redirect_uri` doesn't match the `<origin>/callback` URL the platform registered (e.g. an invented redirect-URI key) | Compute `window.location.origin + '/callback'`. |
-| Sign-in loops endlessly even at the right path | `oidc-client-ts` written without a persistent `WebStorageStateStore` (in-memory default) | Use `WebStorageStateStore({ store: localStorage })` as shown; without persistent web storage the state and PKCE verifier don't survive the redirect. |
-| User is sent to the login screen on every visit / new tab | Session kept in `sessionStorage` (per-tab, wiped on close), or the load path calls `signIn()` on an expired token instead of renewing it | Store the session in `localStorage` and enable `automaticSilentRenew`; on load renew via `signinSilent()` (refresh token) and only `signIn()` when there is no session to renew. |
-| Logout button does nothing | `signOut()` calls only `signoutRedirect()`, which rejects because Thunder has no `end_session_endpoint` — and the click handler swallows the rejection | Wrap `signoutRedirect()` in a try/catch that falls back to `removeUser()` + `window.location.assign('/')` (shown in the `signOut` above); local sign-out always works. |
+| Signed-in user loops back to the login page forever | A protected handler answers no-role (or a failed directory lookup keyed on `X-User-Id`) with **401**; the SPA reads 401 as "token expired" and restarts sign-in | Resolve role from `X-User-Groups`; return **403**; never key a directory lookup on `X-User-Id`. |
+| A role-scoped caller signs in but sees no rows | Scope derived the attribute from a group NAME (empty for a generic role group), or matched `X-User-Id` (an opaque subject) against a stored directory id (never equal) | Resolve the caller's directory record via `X-User-Name`, read the attribute from it, filter on that. |
+| Every user shows no role / `groups` is empty | Roles read from the access token or a hand-decoded JWT | SPA: `user.profile.groups`. API: `X-User-Groups`. |
+| Sign-in loops at the right path, or the user is sent to login on every visit / new tab | No persistent `WebStorageStateStore` (the in-memory default loses the PKCE verifier across the redirect), session in `sessionStorage`, or the load path calls `signIn()` on a merely-expired token | `WebStorageStateStore({ store: localStorage })` + `automaticSilentRenew`; renew via `signinSilent()` and only `signIn()` when there is no session. |
+| After login, "invalid redirect URI" | `redirect_uri` doesn't match the `<origin>/callback` the platform registered | Compute `window.location.origin + '/callback'`. |
+| Logout button does nothing | `signOut()` calls only `signoutRedirect()`, which rejects (no `end_session_endpoint`), and the handler swallows it | Wrap it in the try/catch fallback to `removeUser()` + reload. |

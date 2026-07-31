@@ -49,12 +49,34 @@ edits (see `deployments/scripts/setup-k3d.sh`).
   strip step: an unstripped marker region would inject the wrong procedure, so
   there is no "raw" path that skips it. Mode is stated by the entrypoint
   (`BaseAgentConfig.mode`, default `github`), never inferred.
+  **`# The component contract` is the single home of the per-component platform
+  contract** (App Path, `workload.yaml`, dependency wiring, the runtime rules),
+  stated as information rather than a build procedure so it reads the same for a
+  component's first line and for a change to one that has shipped. `# The run`
+  stays a dispatcher over the issue set and the git record and never restates a
+  contract rule; the tie-break is that a rule naming `git`/`gh`/an issue/a PR
+  belongs to the run and one naming a path, a file or an env var belongs to the
+  contract. That tie-break lives here, not in the skill — it is authoring
+  guidance, useless to the agent at runtime.
   **The platform text is the trunk** — gate a region only when the ungated
   version would make a mode attempt something impossible, and prefer gating one
   side to writing two variants. A *paired* region is prose duplicated per mode
   and is what the test suite caps; reading an inert paragraph is cheaper than
   maintaining a second copy of it. ADR:
   `remote-worker/design/decisions/ADR-0001-one-mode-composed-skill.md`.
+- **`aep` is the umbrella skill; the stack skills sit under it.** It owns the run
+  (start the cycle → work the issues → finish) and the platform contract every
+  component obeys whatever it is written in — App Path, `workload.yaml`, port,
+  config + error shape, CORS ownership, dependency wiring, deny-list. A
+  cross-stack *practice* (config read in one place at startup) is the contract's;
+  **which file it lands in** is the stack skill's.
+  The repo-root `skills/` entries (`go`, `react-webapp`, `api-management`,
+  `thunder-authentication`) own only their stack: layout, `Dockerfile`, libraries,
+  the verify command, their own pitfalls. Restating a platform-contract rule in a
+  stack skill is a defect — it is preloaded context paid twice, and the two copies
+  drift (a live example: the deny-list once banned CORS middleware outright while
+  the `go` skill required it for an unmanaged service). Niche material that only
+  some runs need goes to `plugin/skills/aep/references/`, not into the body.
 - **Running the `aep` skill by hand.** Install the plugin into your own Claude
   Code (`claude plugin install <repo>/runners/remote-worker/plugin`) and use your
   own `gh auth login`; the workflow is the platform's. Note the installed plugin

@@ -448,6 +448,11 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// Eagerly provision each org's skills repo on project creation.
 	projectService.SetSkillsProvisioner(skillSvc)
 
+	// Stamp specs/.agentic-engineer.toml into each new project's repo: the
+	// Agentic Engineer marker, carrying the idea the user typed at create for
+	// the /start flow to generate requirements from.
+	projectService.SetDescriptorWriter(spec.NewDescriptorWriter(filesSvc))
+
 	// The Task-keyed log endpoint (issue number → newest execution by default,
 	// executionId query pins one for history browsing). (The runner skills-pull
 	// S2S endpoint is retired — the runner now clones `org-skills` and resolves
@@ -636,16 +641,19 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// resolves a milestone RUN ROW first and returns without a write when there
 	// is none, so a project with no live run costs nothing.
 	eventPlane := eventcore.New(eventcore.Ports{
-		Runs:     eventcoreRuns{runs: milestoneRunRepo},
-		Cycles:   eventcoreCycles{cycles: runCycleRepo},
-		Issues:   issueService,
-		PRs:      issueService,
-		Merger:   issueService,
-		Repos:    repoLocator{db: db},
-		Design:   designComponents{store: artifactStore},
-		Builds:   eventcoreBuilds{oc: componentClient, repos: repoRepo, stager: buildStager},
-		Signaler: runSupervisor,
-		Starter:  runSupervisor,
+		Runs:   eventcoreRuns{runs: milestoneRunRepo},
+		Cycles: eventcoreCycles{cycles: runCycleRepo},
+		Issues: issueService,
+		PRs:    issueService,
+		Merger: issueService,
+		Repos:  repoLocator{db: db},
+		Design: designComponents{store: artifactStore},
+		Builds: eventcoreBuilds{oc: componentClient, repos: repoRepo, stager: buildStager},
+		// The wiring-conformance check on the merged-PR fan-out: does what shipped
+		// consume the resources the design declares?
+		Workloads: workloadReader{files: filesSvc},
+		Signaler:  runSupervisor,
+		Starter:   runSupervisor,
 		// A first-ever component has no OpenChoreo Component CR, and a merged
 		// PR's build would fail "Component not found" — so the fan-out ensures
 		// the CR from the design facts immediately before it triggers.
@@ -713,24 +721,26 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		cfg.GitHubAppClientID,
 	)
 
-	// Internal S2S runner authorizer — re-keyed to executions (§9.2): the id in
-	// the runner bearer is an execution id, and the publisher-cc branch resolves
-	// the acting org by execution id.
+	// Internal S2S runner authorizer — keyed to the CYCLE: the id in the runner
+	// bearer is the run cycle the pod was dispatched for, and the publisher-cc
+	// branch resolves the acting org by that cycle id. Every agent pod in the
+	// system is launched by the milestone supervisor, so a cycle id is the only
+	// runner identity there is; an execution id named in a path fails closed.
 	publisherVerifier := authn.NewPublisherTokenVerifier(thunderJWKS, cfg.PlatformIDP.Issuer, "aep-publisher-")
-	runnerAuth := authn.NewRunnerAuthorizer(taskTokens, publisherVerifier, executionOrgLookup(db))
+	runnerAuth := authn.NewRunnerAuthorizer(taskTokens, publisherVerifier, cycleOrgLookup(db))
 
 	// Validation-context runner callback: resolves the run's deployed endpoint
 	// URLs so they never enter the public issue.
 	validationContextSvc := validation.NewContextService(
-		validationExecLocator{repo: executionRepo},
+		validationCycleLocator{repo: runCycleRepo},
 		validationEndpointResolver{store: artifactStore, comp: componentService},
 	)
 	// Test-credentials runner callback: the runner requests a login on demand
 	// (only when a criterion needs one). v1 returns a shared mock account; the
-	// execution→project fence + request contract are what real per-project user
+	// cycle→project fence + request contract are what real per-project user
 	// provisioning slots into later.
 	validationCredentialsSvc := validation.NewCredentialService(
-		validationExecLocator{repo: executionRepo},
+		validationCycleLocator{repo: runCycleRepo},
 		mockValidationCredentials{},
 	)
 
@@ -933,12 +943,13 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	params.MCPSpecValidator = spec.ValidateOpenAPI
 	params.MCPSpecNormalizer = spec.NormalizeOpenAPIYAML
 	params.MCPSpecFetcher = spec.FetchSpecFromURL
-	// design-save keys end-user-auth derivation on the CRT role marker read from
-	// this catalog (thunder-app generalization); wired consumer-side so design
-	// holds only a narrow MarkersByName port. When the design declares a
-	// platform-resource dependency and this catalog is unreachable, the save
-	// fails closed (ErrResourceCatalogUnavailable → 503).
-	designService.SetResourceCatalog(crtMarkerCatalog{resourceTypeCatalog})
+	// design-save keys BOTH platform-resource derivations on this catalog: the CRT
+	// role marker for end-user auth (thunder-app generalization), and the type's
+	// declared outputs for the dependency wiring it stamps into design.json. Wired
+	// consumer-side so design holds only a narrow ResourceTypesByName port. When
+	// the design declares a platform-resource dependency and this catalog is
+	// unreachable, the save fails closed (ErrResourceCatalogUnavailable → 503).
+	designService.SetResourceCatalog(crtTypeCatalog{resourceTypeCatalog})
 
 	// Read-time org-service dependency resolution (dependency-management Phase 5):
 	// the same endpoint catalog that backs the MCP list_org_endpoints tool marks
@@ -967,8 +978,8 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		Repos:  repoFullNameLookup{repos: repoRepo},
 		Tagger: buildSpecTagger{art: artifactSvcGit},
 		Coord: build.NewInputsCoordinator(
-			designService,                        // SpecCollector (CollectSpec)
-			buildAuthDeriver{svc: designService}, // AuthDeriver (sentinel translation)
+			designService,                          // SpecCollector (CollectSpec)
+			buildDesignDeriver{svc: designService}, // DesignFactDeriver (sentinel translation)
 			buildSecretStager{prov: externalProvisioner},
 			designComponents{store: artifactStore},
 		),
@@ -1103,6 +1114,12 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// the agent can integration-test against the live service.
 	codingExecutor.WithRunnerSecrets(runnerSecretResolver{svc: provisioningSvc})
 
+	// Publish the platform-resolved `endpoints:` wiring onto the working set at
+	// every cycle dispatch. Wired consumer-side so delivery holds only the narrow
+	// WiringPublisher port (delivery cannot import dependencies — dependencies
+	// already imports delivery).
+	codingExecutor.WithWiringPublisher(provisioningSvc)
+
 	// Runtime-config (env-config.js) emission — the SPA's `window._env_` (API URLs
 	// + generic <DEP>_<OUTPUT> keys for its platform-resource deps) is materialised
 	// onto each web-app ReleaseBinding. Two triggers:
@@ -1213,12 +1230,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 			PRs:        issueService,
 			Design:     designComponents{store: artifactStore},
 			Builds:     runBuilds{oc: componentClient},
-			Validation: runValidation{
-				svc:       validationSvc,
-				art:       artifactSvcGit,
-				files:     filesSvc,
-				milestone: issueService,
-			},
+			Validation: runValidation{svc: validationSvc, files: filesSvc},
 			// The coding executor launches the cycle's runner Job and answers with
 			// its Job ref. It mints no execution row — the cycle record is the
 			// supervisor's own bookkeeping.

@@ -35,7 +35,7 @@ import {
   setTurnStatus,
   notifyTurnEnd,
 } from "./chatStore.js";
-import { isQuestionTool, parseQuestionsInput } from "./questionCards.js";
+import { extractStreamingQuestions, isQuestionTool, parseQuestionsInput } from "./questionCards.js";
 import { getTurn, openTurnStream } from "./api/turns.js";
 
 const FILE_TOOLS = new Set(["addFile", "editFile", "removeFile"]);
@@ -60,7 +60,33 @@ export async function attachAndFoldTurn(
   // soon as it closes (path is the first schema property), then show a "Creating
   // <file>" card BEFORE the tool finishes. Keyed by the input-stream id (== the
   // eventual toolCallId). `carded` guards against re-emitting once shown.
-  const inputs = new Map<string, { toolName: string; buf: string; carded: boolean }>();
+  // Question batches ride the same map: `shownQuestions` counts the complete
+  // question objects already surfaced off the partial buffer (#270 latency —
+  // the batch JSON streams for 10+ seconds; each question renders as soon as
+  // its object closes instead of waiting for the full tool-call).
+  const inputs = new Map<
+    string,
+    { toolName: string; buf: string; carded: boolean; shownQuestions: number }
+  >();
+
+  // A turn that never delivers the batch's complete `tool-call` (severed
+  // stream, mid-call abort, malformed tail) must not strand a card in the
+  // gated `streaming` state: whatever complete questions already streamed ARE
+  // the card — flip it final so it becomes answerable.
+  const finalizeStreamingQuestions = (): void => {
+    for (const [id, st] of inputs) {
+      if (st.shownQuestions > 0) {
+        upsertQuestionMessage(chatKey, {
+          role: "question",
+          turnId,
+          toolCallId: id,
+          questions: extractStreamingQuestions(st.toolName, st.buf),
+          streaming: false,
+        });
+        st.shownQuestions = 0;
+      }
+    }
+  };
 
   const fold = (part: StreamPart): void => {
     switch (part.type) {
@@ -68,14 +94,29 @@ export async function attachAndFoldTurn(
         appendAssistantText(chatKey, turnId, part.delta ?? part.text ?? "");
         break;
       case "tool-input-start":
-        if (part.toolName && FILE_TOOLS.has(part.toolName) && part.id) {
-          inputs.set(part.id, { toolName: part.toolName, buf: "", carded: false });
+        if (part.toolName && part.id && (FILE_TOOLS.has(part.toolName) || isQuestionTool(part.toolName))) {
+          inputs.set(part.id, { toolName: part.toolName, buf: "", carded: false, shownQuestions: 0 });
         }
         break;
       case "tool-input-delta": {
         const st = part.id ? inputs.get(part.id) : undefined;
-        if (!st || st.carded) break;
+        if (!st) break;
         st.buf += part.delta ?? "";
+        if (isQuestionTool(st.toolName)) {
+          const streamed = extractStreamingQuestions(st.toolName, st.buf);
+          if (streamed.length > st.shownQuestions) {
+            st.shownQuestions = streamed.length;
+            upsertQuestionMessage(chatKey, {
+              role: "question",
+              turnId,
+              toolCallId: part.id!,
+              questions: streamed,
+              streaming: true,
+            });
+          }
+          break;
+        }
+        if (st.carded) break;
         const path = readToolInputPath(st.buf);
         if (path) {
           st.carded = true;
@@ -92,12 +133,18 @@ export async function attachAndFoldTurn(
         break;
       }
       case "tool-call": {
-        // ask_question / ask_questions (ADR-0012): the COMPLETE call renders as
-        // a question card — no progressive render off partial input deltas.
-        // Malformed input → no card (the agent's prose still carries it).
+        // ask_question / ask_questions (ADR-0012): the COMPLETE call is the
+        // authoritative card — it replaces whatever prefix streamed above and
+        // clears the `streaming` gate. Malformed input → the streamed prefix
+        // (individually-validated questions) is finalized as the card; with no
+        // prefix, no card (the agent's prose still carries it).
         if (!isQuestionTool(part.toolName)) break;
         const questions = parseQuestionsInput(part.toolName!, part.input);
-        if (!questions) break;
+        if (!questions) {
+          finalizeStreamingQuestions();
+          break;
+        }
+        if (part.toolCallId) inputs.delete(part.toolCallId);
         // Landing in the chat log is ALSO what surfaces the question on the
         // spec panel: useRoomQuestion subscribes to this log and mirrors
         // answerable questions into the room's shared Yjs map (single path —
@@ -107,6 +154,7 @@ export async function attachAndFoldTurn(
           turnId,
           toolCallId: part.toolCallId ?? "",
           questions,
+          streaming: false,
         });
         break;
       }
@@ -166,6 +214,10 @@ export async function attachAndFoldTurn(
   } catch (err) {
     if (signal.aborted) return; // unmount/navigation — not a failure
     throw err;
+  } finally {
+    // Stream over (terminal, severed, or aborted): nothing further can flip a
+    // streaming card, so settle any question prefix into its final state.
+    finalizeStreamingQuestions();
   }
 
   if (sawTerminal || signal.aborted) return;

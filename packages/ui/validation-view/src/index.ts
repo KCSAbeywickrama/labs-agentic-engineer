@@ -34,3 +34,10 @@ export type {
   ValidationReport,
   ReportParseResult,
 } from "./report.js";
+export {
+  countOf,
+  CRITERION_STATE_LABEL,
+  tallyCriterionStates,
+  uncoveredCount,
+} from "./counts.js";
+export type { CriterionStateCount, CriterionTally } from "./counts.js";

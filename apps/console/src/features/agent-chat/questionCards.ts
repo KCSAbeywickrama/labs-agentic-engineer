@@ -38,7 +38,9 @@ function parseOneQuestion(value: unknown): AskQuestionInput | null {
   if (typeof value !== "object" || value === null) return null;
   const v = value as Record<string, unknown>;
   if (typeof v.question !== "string" || !v.question) return null;
-  if (!Array.isArray(v.options) || v.options.length === 0) return null;
+  // Empty options is a valid FREE-TEXT question (the form renders only the
+  // text field); a missing/non-array options is malformed.
+  if (!Array.isArray(v.options)) return null;
   const options: AskQuestionOption[] = [];
   for (const raw of v.options) {
     if (typeof raw !== "object" || raw === null) return null;
@@ -48,6 +50,7 @@ function parseOneQuestion(value: unknown): AskQuestionInput | null {
       label: o.label,
       ...(typeof o.description === "string" ? { description: o.description } : {}),
       ...(o.recommended === true ? { recommended: true } : {}),
+      ...(o.freeText === true ? { freeText: true } : {}),
     });
   }
   // Labels are the selection identity on the card AND in the serialized answer;
@@ -98,6 +101,143 @@ export function parseQuestionsInput(toolName: string, input: unknown): AskQuesti
 /** True when `toolName` is one of the question tools (single or batch). */
 export function isQuestionTool(toolName: string | undefined): boolean {
   return toolName === ASK_QUESTION_TOOL || toolName === ASK_QUESTIONS_TOOL;
+}
+
+/**
+ * Incrementally extract the COMPLETE question objects from a PARTIAL
+ * `ask_questions` input buffer, so the form can render questions one by one
+ * while the batch is still streaming (#270 latency follow-up: ~3/4 of the
+ * new-project wait is this JSON streaming — the first question is on the wire
+ * long before the tool-call frame closes).
+ *
+ * A string-aware brace scanner walks the `"questions": [...]` array and
+ * JSON-parses each element the moment its object closes; elements that fail
+ * `parseOneQuestion` are skipped (the final complete `tool-call` parse remains
+ * the authority — its upsert replaces whatever streamed). Batch tool only: a
+ * single `ask_question` input closes its one object only at the very end, so
+ * there is nothing to reveal early.
+ */
+export function extractStreamingQuestions(
+  toolName: string | undefined,
+  buf: string,
+): AskQuestionInput[] {
+  if (toolName !== ASK_QUESTIONS_TOOL) return [];
+  const arr = buf.match(/"questions"\s*:\s*\[/);
+  if (!arr) return [];
+  const out: AskQuestionInput[] = [];
+  const n = buf.length;
+  let i = (arr.index ?? 0) + arr[0].length;
+  while (i < n) {
+    while (i < n && /[\s,]/.test(buf[i]!)) i++;
+    if (i >= n || buf[i] !== "{") break;
+    let depth = 0;
+    let inStr = false;
+    let esc = false;
+    let end = -1;
+    for (let j = i; j < n; j++) {
+      const c = buf[j]!;
+      if (inStr) {
+        if (esc) esc = false;
+        else if (c === "\\") esc = true;
+        else if (c === '"') inStr = false;
+      } else if (c === '"') inStr = true;
+      else if (c === "{") depth++;
+      else if (c === "}" && --depth === 0) {
+        end = j;
+        break;
+      }
+    }
+    if (end < 0) break; // this element is still streaming
+    try {
+      const q = parseOneQuestion(JSON.parse(buf.slice(i, end + 1)));
+      if (q) out.push(q);
+    } catch {
+      // skip an unparseable element; later ones may still be fine
+    }
+    i = end + 1;
+  }
+  return out;
+}
+
+/**
+ * Options whose selection implies TYPING the real answer, when the agent
+ * didn't set the explicit `freeText` flag — "Other", "Something else",
+ * "Type my own answer"… Heuristic drives FOCUS and the answered-check both:
+ * a bare label like "Something else" with no typed text answers nothing.
+ */
+export function isFreeTextOption(opt: AskQuestionOption): boolean {
+  return (
+    opt.freeText === true ||
+    /\b(other|something else|type (in|my)|describe|own answer|specify|custom)\b/i.test(opt.label)
+  );
+}
+
+/**
+ * One question's answered-ness — the submit gate. Free text always answers.
+ * A selection answers UNLESS every selected option is a free-text escape
+ * hatch (explicit flag or heuristic): "Something else" without the something
+ * else is not an answer.
+ */
+export function isQuestionAnswered(q: AskQuestionInput, answer: QuestionAnswer | undefined): boolean {
+  if ((answer?.freeText ?? "").trim().length > 0) return true;
+  const selected = answer?.selected ?? [];
+  if (selected.length === 0) return false;
+  const byLabel = new Map(q.options.map((o) => [o.label, o] as const));
+  return selected.some((label) => {
+    const opt = byLabel.get(label);
+    return opt !== undefined && !isFreeTextOption(opt);
+  });
+}
+
+/**
+ * Answers aligned 1:1 with `questions`, padding slots the stored array lacks.
+ * LOAD-BEARING while a batch streams (#335): the room's answers array is sized
+ * to the questions that existed when the user first touched an answer, but the
+ * batch keeps growing — every read and write must re-align to the CURRENT
+ * question count, or edits to later questions silently vanish (the array is
+ * mapped over, so an out-of-range index is simply never visited).
+ */
+export function normalizeAnswers(
+  questions: AskQuestionInput[],
+  answers: QuestionAnswer[] | null | undefined,
+): QuestionAnswer[] {
+  return questions.map((_, i) => answers?.[i] ?? { selected: [] });
+}
+
+/**
+ * Toggle one option on question `qi`, returning the full re-aligned answers
+ * array. Single-select replaces (and re-clicking clears); multi-select adds
+ * and removes.
+ */
+export function applySelection(
+  questions: AskQuestionInput[],
+  answers: QuestionAnswer[] | null | undefined,
+  qi: number,
+  label: string,
+): QuestionAnswer[] {
+  const multi = questions[qi]?.multiSelect === true;
+  return normalizeAnswers(questions, answers).map((a, i) => {
+    if (i !== qi) return a;
+    const has = a.selected.includes(label);
+    const selected = multi
+      ? has
+        ? a.selected.filter((l) => l !== label)
+        : [...a.selected, label]
+      : has
+        ? []
+        : [label];
+    return { ...a, selected };
+  });
+}
+
+/** Set the free-text note on question `qi`, re-aligned to the question count. */
+export function applyNote(
+  questions: AskQuestionInput[],
+  answers: QuestionAnswer[] | null | undefined,
+  qi: number,
+  freeText: string,
+): QuestionAnswer[] {
+  return normalizeAnswers(questions, answers).map((a, i) => (i === qi ? { ...a, freeText } : a));
 }
 
 /**

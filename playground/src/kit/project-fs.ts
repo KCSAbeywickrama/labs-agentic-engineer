@@ -72,36 +72,27 @@ export function resolveWithin(root: string, key: string): string {
 }
 
 /**
- * Diff `before` (read at turn start) against `after` (the agent's reconstructed
- * snapshot) and, unless `dryRun`, write the changes to disk under `root`:
- * new/edited files written, vanished files deleted. Returns the change list
- * either way.
+ * Reconcile a SINGLE path from `before`→`after` content and write it under
+ * `root` — the engine loop folds each streamed tool-call to disk the moment it
+ * arrives (§5) rather than batching a whole turn's diff. `after === undefined`
+ * means the file was removed. Returns the change, or `null` when nothing
+ * changed (e.g. a rejected op left the bundle byte-for-byte unchanged).
  */
-export function reconcileDir(
+export function reconcileFile(
   root: string,
-  before: Record<string, string>,
-  after: Record<string, string>,
-  dryRun: boolean,
-): FileChange[] {
+  path: string,
+  before: string | undefined,
+  after: string | undefined,
+): FileChange | null {
   const absRoot = resolve(root);
-  const changes: FileChange[] = [];
-
-  for (const [path, content] of Object.entries(after)) {
-    if (!(path in before)) changes.push({ kind: "add", path });
-    else if (before[path] !== content) changes.push({ kind: "edit", path });
-    else continue; // unchanged
-    if (!dryRun) {
-      const abs = resolveWithin(absRoot, path);
-      mkdirSync(dirname(abs), { recursive: true });
-      writeFileSync(abs, content, "utf8");
-    }
+  if (after !== undefined) {
+    if (before === after) return null; // unchanged / rejected op
+    const abs = resolveWithin(absRoot, path);
+    mkdirSync(dirname(abs), { recursive: true });
+    writeFileSync(abs, after, "utf8");
+    return { kind: before === undefined ? "add" : "edit", path };
   }
-
-  for (const path of Object.keys(before)) {
-    if (path in after) continue;
-    changes.push({ kind: "remove", path });
-    if (!dryRun) rmSync(resolveWithin(absRoot, path), { force: true });
-  }
-
-  return changes;
+  if (before === undefined) return null; // nothing to remove
+  rmSync(resolveWithin(absRoot, path), { force: true });
+  return { kind: "remove", path };
 }

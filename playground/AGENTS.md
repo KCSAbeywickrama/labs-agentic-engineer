@@ -14,13 +14,33 @@ inline, so tuning it here IS tuning the platform's. See
 ## Run
 
 ```
-pnpm play                              # picker → phase menu
-pnpm play <dir>                        # phase menu
+pnpm play                              # usage help (bare invocation)
+pnpm play menu                         # picker → phase menu
+pnpm play <dir>                        # chat home (dir created if missing; /menu for the dashboard)
 pnpm play <dir> requirements --idea "…"
 pnpm play <dir> design | tasks | check | undo
 pnpm play <dir> code [--restore] [--yes]   # ONE coding-agent session works the
                                             # whole project — no per-issue run
+pnpm play help | -h | --help           # same usage help
 ```
+
+`play <dir>` drops straight into **chat** — the home surface. A directly-named
+dir is created after a prompt (headless refuses a missing dir rather than
+creating silently), and a NEWLY created project captures its idea right there —
+from `--idea`, or by asking once. In chat, slash commands drive every phase
+without leaving: `/start [idea]` kicks the project off (interview →
+requirements); `/spec` `/design` `/<skill>` load a working-tree skill and follow
+it (the same channel `PLAN_INSTRUCTION` uses); `/task` `/code` `/validate`
+`/undo` run the existing phase engines; `/menu` opens the status dashboard,
+`/help` the guide.
+
+The idea lives in `<project>/specs/.agentic-engineer.toml` — the **project
+descriptor**, identical to what aep-api commits on project create. It marks the
+directory as an Agentic Engineer project and carries the idea `/start` builds
+requirements from. Being dot-prefixed it is stripped from every turn snapshot,
+so the agent can never read it: the idea reaches a turn ONLY through the
+`/start` expansion in `engine/compose.ts`, mirroring the server
+(`spec.StartInstruction` + `ideaSteer`, both pinned by `steer-parity.test.ts`).
 
 `code` mirrors prod's milestone cycle (ADR-0011): the CLI never picks an issue
 or an order — the `aep` skill discovers its own working set from
@@ -102,5 +122,7 @@ also a headless verb in `src/commands.ts`. `test/` — mock-model phase tests
 (no tokens) + the parity pins.
 
 A playground project keeps its state in `<project>/.aep-playground/`
-(conversations, runs, undo snapshots, prompt.md, project.json) — a dot-dir,
-so engineering-agent turns never see it.
+(conversations, runs, undo snapshots, project.json) — a dot-dir, so
+engineering-agent turns never see it. The project's idea is NOT there: it lives
+in `specs/.agentic-engineer.toml`, which is project content committed in
+production, not playground-local state.

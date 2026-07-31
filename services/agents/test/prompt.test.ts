@@ -19,7 +19,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { testSkillSource, type TestSkill } from "./skill-source.js";
-import { instructions, buildInstructions, buildSkillCatalog } from "../src/agents/main/prompt.js";
+import { instructions, buildInstructions, buildSkillCatalog, buildEagerSkillsBlock } from "../src/agents/main/prompt.js";
 
 const SKILL_LIST: TestSkill[] = [
   { name: "a-skill", description: "does A", content: "BODY A — secret guidance" },
@@ -63,4 +63,26 @@ test("catalog mentions loadSkillReference only when a skill carries references",
   assert.match(out, /loadSkillReference/);
   assert.doesNotMatch(out, /REF BODY/); // reference bodies are third-level, never in the prompt
   assert.doesNotMatch(buildInstructions(SKILLS), /loadSkillReference/); // refs-free library = today's catalog
+});
+
+test("eager skills inline resolved bodies into a per-turn block (#335)", () => {
+  const block = buildEagerSkillsBlock(SKILLS, ["a-skill"]);
+  assert.match(block, /ALREADY LOADED/);
+  assert.match(block, /## Skill: a-skill/);
+  assert.match(block, /BODY A — secret guidance/);
+  assert.doesNotMatch(block, /BODY B/);
+});
+
+test("eager skills: unknown names skip; nothing resolved → empty string", () => {
+  assert.equal(buildEagerSkillsBlock(SKILLS, ["nope"]), "");
+  assert.equal(buildEagerSkillsBlock(SKILLS, []), "");
+  assert.equal(buildEagerSkillsBlock(SKILLS, undefined), "");
+  assert.equal(buildEagerSkillsBlock(undefined, ["a-skill"]), "");
+  const mixed = buildEagerSkillsBlock(SKILLS, ["nope", "b-skill"]);
+  assert.match(mixed, /## Skill: b-skill/);
+  assert.doesNotMatch(mixed, /nope/);
+});
+
+test("eager skills never touch the SYSTEM instructions (cacheable prefix)", () => {
+  assert.equal(buildInstructions(SKILLS), instructions + buildSkillCatalog(SKILLS));
 });

@@ -90,6 +90,15 @@ security:
   - bearerAuth: []
 ```
 
+On a service the gateway protects, also document the injected `X-User-Id` under
+`parameters` so consumers read it as required-but-injected — the gateway sets it
+from the validated token; a client never sends it.
+
+**Never spec an auth endpoint.** No `/auth/login`, `/auth/register`,
+`/auth/logout`, or any other token-issuance path on any service: the IDP issues
+tokens and the gateway validates them (see `thunder-authentication`). Specifying
+one puts the coding agent's issue in direct conflict with its skills.
+
 ## YAML hygiene
 
 2-space indentation throughout; quote status-code keys (`'200'`, `'404'`).

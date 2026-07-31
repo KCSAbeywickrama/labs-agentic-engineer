@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/wso2/aep/aep-api/internal/delivery"
+	"github.com/wso2/aep/aep-api/internal/delivery/eventcore"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 
 	"gorm.io/gorm"
@@ -128,6 +129,32 @@ func (d designComponents) ComponentPaths(ctx context.Context, orgID, projectID s
 		paths[c.Name] = strings.Trim(c.AppPath, "/")
 	}
 	return paths, nil
+}
+
+// DeclaredResources maps each design component to its App Path plus the OC
+// resource refs its design says it consumes — read off each dependency's
+// platform-stamped `wiring` (spec/derive_wiring.go). A dependency with no wiring
+// is skipped: it is not derivable yet, so no agent could have wired it.
+// Satisfies eventcore.DesignReader's conformance half.
+func (d designComponents) DeclaredResources(ctx context.Context, orgID, projectID string) (map[string]eventcore.ComponentResources, error) {
+	design, err := d.store.ReadDesign(ctx, orgID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	if design == nil {
+		return nil, nil
+	}
+	out := make(map[string]eventcore.ComponentResources, len(design.Components))
+	for _, c := range design.Components {
+		entry := eventcore.ComponentResources{AppPath: strings.Trim(c.AppPath, "/")}
+		for _, dep := range c.Dependencies {
+			if dep.Wiring != nil && dep.Wiring.Ref != "" {
+				entry.Refs = append(entry.Refs, dep.Wiring.Ref)
+			}
+		}
+		out[c.Name] = entry
+	}
+	return out, nil
 }
 
 // ReadDesignComponents exposes the project's authored design components at HEAD.
@@ -329,12 +356,19 @@ func githubBotLogin(appSlug string) string {
 	return appSlug + "[bot]"
 }
 
-// executionOrgLookup resolves an execution id to its owning org handle — the
-// RunnerAuthorizer's publisher-cc branch (re-keyed from task to execution).
-func executionOrgLookup(db *gorm.DB) func(ctx context.Context, executionID string) (string, error) {
-	return func(ctx context.Context, executionID string) (string, error) {
-		var row delivery.Execution
-		if err := db.WithContext(ctx).Select("org_id").First(&row, "id = ?", executionID).Error; err != nil {
+// cycleOrgLookup resolves a run-cycle id to its owning org handle — the
+// RunnerAuthorizer's publisher-cc branch.
+//
+// It reads run_cycles because that is what a runner callback names: every agent
+// pod is launched by the milestone supervisor, which carries the cycle id to the
+// pod as AEP_TASK_ID. It deliberately does NOT fall back to the executions table.
+// The only rows left there are dependency-provisioning gates, which run no agent
+// and are not a callback identity, so an execution id named in a path resolves to
+// nothing and the request fails closed.
+func cycleOrgLookup(db *gorm.DB) func(ctx context.Context, cycleID string) (string, error) {
+	return func(ctx context.Context, cycleID string) (string, error) {
+		var row delivery.RunCycle
+		if err := db.WithContext(ctx).Select("org_id").First(&row, "id = ?", cycleID).Error; err != nil {
 			return "", err
 		}
 		return row.OrgID, nil

@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/wso2/aep/aep-api/internal/dependencies"
+	"github.com/wso2/aep/aep-api/internal/platform/ocname"
 	"github.com/wso2/aep/aep-api/internal/spec"
 )
 
@@ -208,7 +209,7 @@ func (s *Service) completeReadyGate(ctx context.Context, orgID, projectID, depNa
 		// A provision run is already active for this gate (e.g. a concurrent settle).
 		return nil
 	}
-	ref := dependencies.ExternalResourceBindingName(projectID, depName, defaultEnv)
+	ref := ocname.ExternalResourceBindingName(projectID, depName, defaultEnv)
 	if _, serr := s.execs.StartWithRun(ctx, row.ID, ref); serr != nil {
 		slog.WarnContext(ctx, "provisioning: start settle provision run failed", "execution", row.ID, "error", serr)
 	}

@@ -18,7 +18,7 @@ flowchart LR
     CORE --> TURNS[("agent_turns")]
   end
   CORE -->|Workspace · GitOps engine| SC[[sourcecontrol]]
-  CORE -->|CRTMarkers port| DEP[[dependencies]]
+  CORE -->|CRTType port| DEP[[dependencies]]
   CORE -->|anthropic key · git tokens| SEC[[platform/secrets]]
   CORE -->|the genai fold| FOLD[["platform/agentfold"]]
 ```
@@ -39,9 +39,10 @@ the genai turn engine (runner/broker/sweeper), and the files / design / skills s
 | Port | Dir | Peer · contract |
 |---|---|---|
 | `Workspace` · `GitOpsService` · `RepoService` | needs | `sourcecontrol` — the gitfs engine hosting all spec + skills git content |
-| `resourceMarkerCatalog` (returns `CRTMarkers`) | needs | `dependencies` — the PE-authored CRT marker vocabulary, projected at the root |
+| `resourceTypeCatalog` (returns `CRTType`) | needs | `dependencies` — the PE-authored CRT markers + declared outputs, projected at the root |
 | `AnthropicKeyResolver` · git-token `Resolver` | needs | `platform/secrets` — per-org keys + sealed git tokens |
 | `ArtifactService` · `ArtifactStore` · `SplitFrontmatter` | offers | `delivery` / `projects` / `dependencies` — design reads, spec-save, status snapshots |
+| `DescriptorWriter` | offers | `projects` — stamps `specs/.agentic-engineer.toml` into a repo at project create |
 | `CredentialsRefreshService`-adjacent turn/tag reads | offers | delivery/build (SpecTagger, validation criteria) |
 
 ## Owns
@@ -80,6 +81,15 @@ the genai turn engine (runner/broker/sweeper), and the files / design / skills s
   but still runs the full three-way, including auto-refresh, against any PRESENT org skill. Purge only
   retires manifest-tracked platform entries with a clean copy; an overridden retiree keeps its files and
   just loses the entry, becoming a plain org skill.
+- **The project descriptor** (`specs/.agentic-engineer.toml`, `descriptor.go`) — the marker identifying a
+  repo as an Agentic Engineer project, carrying the idea the user gave at creation. Written by `projects`
+  at create through the `DescriptorWriter` port (best-effort: a failed write never fails the create) and
+  read back here to enrich `/start`. TOML rather than the YAML/JSON used elsewhere because its one
+  load-bearing field is a paragraph of free text a user typed — a real encoder keeps quotes, backslashes
+  and newlines intact.
+- **The `/start` command** (`start_command.go`) — the ONE slash command the server expands. Every other
+  `/<skill>` is rewritten client-side by `slashSkillInstruction` before the turn is sent; `/start` arrives
+  verbatim because only the server can enrich it with the descriptor's idea.
 - **Persistence**: the `agent_turns` gorm lives in this domain (`repository_turn.go` over the
   `agent_turn.go` entity), single write-authority. Spec content itself is not gorm — it lives in git,
   reached through sourcecontrol's `Workspace`/gitfs engine.
@@ -87,9 +97,22 @@ the genai turn engine (runner/broker/sweeper), and the files / design / skills s
 ## Invariants — don't break
 - **Single write-authority** over the git spec-content store and its `v<N>` tags — every save/tag/discard
   runs through this domain's gitfs Workspace engine; no other domain writes spec content.
-- **`CRTMarkers` is a projection, not a re-export.** design-save reads the dependencies marker catalog
-  through the `resourceMarkerCatalog` port in spec's OWN vocabulary (`CRTMarkers`), mapped by a root
+- **`CRTType` is a projection, not a re-export.** design-save reads the dependencies resource-type catalog
+  through the `resourceTypeCatalog` port in spec's OWN vocabulary (`CRTType`), mapped by a root
   adapter — the spec domain names the dependencies domain nowhere.
+- **Design save DERIVES two platform facts, in one pass over one catalog call** (`derive.go`, ADR-0013):
+  `exposesAPI.auth` off a resource type's role marker (`derive_auth.go`), and each `platform-resource` /
+  `external` dependency's `wiring` — the OC ref plus output→env-var mapping the coding agent copies into
+  `workload.yaml` (`derive_wiring.go`). Both mutate the design in place and commit only the components whose
+  derived state actually changed, so an unchanged design commits nothing.
+  - Derived, therefore **re-derived and overwritten every pass** — which is exactly what lets the write
+    gates ACCEPT `wiring` instead of rejecting it as agent-authored: the design agent reads-edits-writes
+    `design.json`, so a rejection rule would reject its own echo.
+  - Both env-var and ref naming route through `platform/ocname`, the SAME helper the dependencies domain
+    injects pod env vars with. The two must agree byte-for-byte or the agent's `workload.yaml` references a
+    resource that does not exist; a bounded-name test pins it.
+  - Fail-closed: a design declaring a platform-resource whose catalog is unreachable returns
+    `ErrResourceCatalogUnavailable` (503) rather than silently skipping either derivation.
 - The `/collab/validate` oracle recovers the acting org from VERIFIED claims and refuses any room whose
   `spec-<org>-` prefix mismatches — never a hint of whether the room exists. Platform-wide rules (tenant
   gate, secrets fence) → [../../README.md](../../README.md).
@@ -97,3 +120,10 @@ the genai turn engine (runner/broker/sweeper), and the files / design / skills s
   commit; a mismatch rejects the turn and leaves `main` untouched.
 - **Skill read-only is enforced by the mutation guards, not by visibility.** `Resolve`/`List` return every
   kind — platform skills list read-only on the skills page; reserved names/prefixes block name collisions.
+- **The descriptor is unreadable by the agent, structurally.** Its dot-led segment is stripped from every
+  turn snapshot (`agentfold.InTurnSnapshot` and its TS mirror), and `.toml` is not an admitted extension
+  either — so the captured idea reaches a turn ONLY via the `/start` expansion, never by the model opening
+  the file. Do not "fix" this by widening the snapshot filter.
+- **The kickoff is never signalled through `useCase`.** That field is part of the conversation identity
+  (`namespacedID`), so keying `/start` on it would put the turn in a different conversation from the chat
+  around it — and `/start` runs an interview whose answers arrive as ordinary chat turns.

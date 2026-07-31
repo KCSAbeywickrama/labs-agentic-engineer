@@ -45,7 +45,7 @@ import {
   type DeploymentCard,
 } from "../lib/deploymentRows";
 import { projectChip } from "../lib/projectChip";
-import { validationView } from "../lib/pipeline";
+import { CHIP_COLOR, validationView } from "../lib/pipeline";
 
 const LinkChip = createLink(Chip);
 
@@ -231,7 +231,7 @@ function BoardColumn({
               <LinkChip
                 label={validationLabel}
                 size="small"
-                color={validation.tone as "info" | "success" | "error"}
+                color={CHIP_COLOR[validation.tone]}
                 variant="outlined"
                 clickable
                 to="/projects/$projectName/validation"

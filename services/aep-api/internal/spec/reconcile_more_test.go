@@ -270,8 +270,9 @@ func TestLoadEmbeddedLibrary(t *testing.T) {
 	}
 	wantKinds := map[string]string{
 		"api-management": "org", "go": "org", "react-webapp": "org", "thunder-authentication": "org",
-		"cell-architecture-dsl": "platform", "excalidraw-wireframes": "platform", "grilling": "platform",
-		"high-level-architecture": "platform", "openapi-conventions": "platform",
+		"cell-architecture-dsl": "platform", "design": "platform",
+		"excalidraw-wireframes": "platform", "grilling": "platform",
+		"high-level-architecture": "platform", "openapi-conventions": "platform", "start": "platform",
 		"task-breakdown": "platform", "task-planning": "platform", "validation-criteria": "platform",
 	}
 	for name, kind := range wantKinds {

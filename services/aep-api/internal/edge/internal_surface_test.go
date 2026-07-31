@@ -38,6 +38,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/wso2/aep/aep-api/internal/delivery/validation"
 	"github.com/wso2/aep/aep-api/internal/organization"
 	"github.com/wso2/aep/aep-api/internal/platform/auth"
 	"github.com/wso2/aep/aep-api/internal/platform/secrets"
@@ -57,7 +58,44 @@ func (f *fakeCredsRefresh) Refresh(_ context.Context, executionID, orgHandle str
 	}, nil
 }
 
+// fakeValidationContext records the cycle id and org the surface hands it, which
+// is what proves the path parameter reaches the service intact.
+type fakeValidationContext struct {
+	gotCycle, gotOrg string
+}
+
+func (f *fakeValidationContext) ValidationContext(_ context.Context, cycleID, orgHandle string) (*validation.ValidationContextResponse, error) {
+	f.gotCycle, f.gotOrg = cycleID, orgHandle
+	return &validation.ValidationContextResponse{
+		Endpoints:    []validation.ComponentEndpoint{{Component: "hello-webapp", URL: "https://hello.example"}},
+		CriteriaPath: "specs/validation/validation-criteria.json",
+	}, nil
+}
+
+type fakeValidationCreds struct {
+	gotCycle, gotOrg string
+}
+
+func (f *fakeValidationCreds) RequestCredentials(_ context.Context, cycleID, orgHandle string, _ validation.CredentialRequest) (*validation.TestCredential, error) {
+	f.gotCycle, f.gotOrg = cycleID, orgHandle
+	return &validation.TestCredential{Username: "admin", Password: "admin", Mock: true}, nil
+}
+
+type internalStack struct {
+	handler http.Handler
+	tokens  *auth.TaskTokenManager
+	refresh *fakeCredsRefresh
+	context *fakeValidationContext
+	creds   *fakeValidationCreds
+}
+
 func newInternalTestStack(t *testing.T) (http.Handler, *auth.TaskTokenManager, *fakeCredsRefresh) {
+	t.Helper()
+	s := newInternalStack(t)
+	return s.handler, s.tokens, s.refresh
+}
+
+func newInternalStack(t *testing.T) internalStack {
 	t.Helper()
 	priv, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -70,14 +108,21 @@ func newInternalTestStack(t *testing.T) (http.Handler, *auth.TaskTokenManager, *
 	if err != nil {
 		t.Fatalf("NewTaskTokenManager: %v", err)
 	}
-	svc := &fakeCredsRefresh{}
-	h := NewHandler(AppParams{
+	stack := internalStack{
+		tokens:  mgr,
+		refresh: &fakeCredsRefresh{},
+		context: &fakeValidationContext{},
+		creds:   &fakeValidationCreds{},
+	}
+	stack.handler = NewHandler(AppParams{
 		InternalDeps: InternalDeps{
-			CredsRefresh: svc,
-			RunnerAuth:   auth.NewRunnerAuthorizer(mgr, nil, nil),
+			CredsRefresh:          stack.refresh,
+			RunnerAuth:            auth.NewRunnerAuthorizer(mgr, nil, nil),
+			ValidationContext:     stack.context,
+			ValidationCredentials: stack.creds,
 		},
 	})
-	return h, mgr, svc
+	return stack
 }
 
 func TestInternalSurface_RunnerRefresh_Lockstep(t *testing.T) {
@@ -115,6 +160,75 @@ func TestInternalSurface_RunnerRefresh_Lockstep(t *testing.T) {
 	if got, want := slices.Sorted(maps.Keys(identity)), []string{"Email", "Login", "Name"}; !slices.Equal(got, want) {
 		t.Fatalf("identity keys drifted (capitalized, runner lockstep): got %v want %v", got, want)
 	}
+}
+
+// The validation callbacks live under their own prefix, so the edge must MOUNT
+// that prefix — the inner mux registers the contract's full paths, and a prefix
+// missing from the outer mux 404s before any handler or auth gate runs. That is a
+// silent break the contract test cannot see, so it is asserted through real HTTP.
+func TestInternalSurface_ValidationCallbacksAreRoutedAndCycleKeyed(t *testing.T) {
+	t.Parallel()
+	s := newInternalStack(t)
+	const cycle = "9d90f001-67bb-4c51-a5f3-7fd808c06c36"
+
+	tok, err := s.tokens.Issue(cycle, "org-acme", "proj-1")
+	if err != nil {
+		t.Fatalf("issue task token: %v", err)
+	}
+
+	t.Run("context", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/internal/v1/validation/"+cycle+"/context", nil)
+		req.Header.Set("Authorization", "Bearer "+tok)
+		rec := httptest.NewRecorder()
+		s.handler.ServeHTTP(rec, req)
+
+		if rec.Code == 404 {
+			t.Fatalf("404 — the /internal/v1/validation/ prefix is not mounted on the edge mux")
+		}
+		if rec.Code != 200 {
+			t.Fatalf("want 200, got %d body=%s", rec.Code, rec.Body.String())
+		}
+		// The CYCLE id must arrive intact, and the org must come from the verified
+		// token rather than anything in the request.
+		if s.context.gotCycle != cycle || s.context.gotOrg != "org-acme" {
+			t.Fatalf("service saw cycle=%q org=%q; want %q / org-acme", s.context.gotCycle, s.context.gotOrg, cycle)
+		}
+		if !strings.Contains(rec.Body.String(), "hello.example") {
+			t.Errorf("endpoints missing from the body: %s", rec.Body.String())
+		}
+	})
+
+	t.Run("test-credentials", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/internal/v1/validation/"+cycle+"/test-credentials",
+			strings.NewReader(`{"role":"admin"}`))
+		req.Header.Set("Authorization", "Bearer "+tok)
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		s.handler.ServeHTTP(rec, req)
+
+		if rec.Code == 404 {
+			t.Fatalf("404 — the /internal/v1/validation/ prefix is not mounted on the edge mux")
+		}
+		if rec.Code != 200 {
+			t.Fatalf("want 200, got %d body=%s", rec.Code, rec.Body.String())
+		}
+		if s.creds.gotCycle != cycle || s.creds.gotOrg != "org-acme" {
+			t.Fatalf("service saw cycle=%q org=%q; want %q / org-acme", s.creds.gotCycle, s.creds.gotOrg, cycle)
+		}
+	})
+
+	// The INT-6 fence covers the new prefix too: a bearer minted for a different
+	// cycle cannot read this one's endpoints or ask for its credentials.
+	t.Run("bearer bound to another cycle → 403", func(t *testing.T) {
+		other, _ := s.tokens.Issue("some-other-cycle", "org-acme", "proj-1")
+		req := httptest.NewRequest(http.MethodGet, "/internal/v1/validation/"+cycle+"/context", nil)
+		req.Header.Set("Authorization", "Bearer "+other)
+		rec := httptest.NewRecorder()
+		s.handler.ServeHTTP(rec, req)
+		if rec.Code != 403 {
+			t.Fatalf("want 403, got %d body=%s", rec.Code, rec.Body.String())
+		}
+	})
 }
 
 func TestInternalSurface_AuthPosture(t *testing.T) {

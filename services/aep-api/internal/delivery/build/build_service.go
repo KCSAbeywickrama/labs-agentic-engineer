@@ -219,10 +219,10 @@ func (s *Service) Run(ctx context.Context, orgID, projectID string, inputs []Bui
 		return "", nil, &EdgeError{Status: 404, Message: "project repository not found"}
 	}
 
-	// Apply the drawer inputs BEFORE the tag-cut: collect external specs +
-	// derive end-user auth (their commits must land on HEAD so the tag captures
-	// them), then stage external-config secrets to SM-API and assemble the
-	// provision payload. A fail-fast pre-tag failure returns {failures} and cuts
+	// Apply the drawer inputs BEFORE the tag-cut: collect external specs + run the
+	// design derivations (end-user auth and each resource dependency's wiring —
+	// their commits must land on HEAD so the tag captures them), then stage
+	// external-config secrets to SM-API and assemble the provision payload. A fail-fast pre-tag failure returns {failures} and cuts
 	// NO tag.
 	var provInputs []delivery.ProvisionInput
 	if s.coord != nil {

@@ -19,7 +19,6 @@ package app
 import (
 	"context"
 	"errors"
-	"log/slog"
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/delivery"
@@ -75,8 +74,8 @@ func (a runRuns) BumpBudget(ctx context.Context, id string, counter delivery.Run
 	return err
 }
 
-func (a runRuns) SetValidationVerdict(ctx context.Context, id, verdict string) error {
-	_, err := a.runs.SetValidationVerdict(ctx, id, verdict)
+func (a runRuns) SetValidationVerdict(ctx context.Context, id, verdict string, issue int) error {
+	_, err := a.runs.SetValidationVerdict(ctx, id, verdict, issue)
 	return err
 }
 
@@ -131,52 +130,31 @@ func (a runBuilds) ListBuildRuns(ctx context.Context, orgID, projectID, componen
 }
 
 // runValidation adapts the validation feature onto the supervisor's
-// ValidationCoordinator port: mint the run's validation issue into the
-// milestone at deployed-green, and read the runner's verdict back afterwards.
+// ValidationCoordinator port: mint the version's validation issue at
+// deployed-green, and read the runner's verdict back afterwards.
 //
-// The milestone assignment happens HERE rather than inside the minter because
-// the minter is shared with the pre-milestone path; a freshly minted validation
-// issue is moved into the run's milestone so it joins the version's ledger.
-// It deliberately does not gain the `aep` working-set label — the validation
-// cycle is dispatched at it by number, and a working-set membership would only
-// hold settle open.
+// The milestone is the minter's own concern — it rides the create, so there is
+// no assignment step here and no window in which the issue has no version. What
+// is left is a delegation plus the ref-pinned report read, which is the whole
+// reason this type exists at the boundary.
 type runValidation struct {
-	svc       *validation.Service
-	art       spec.ArtifactService
-	files     spec.FilesService
-	milestone milestoneAssigner
-}
-
-// milestoneAssigner is the one issue-service verb this adapter needs.
-type milestoneAssigner interface {
-	SetIssueMilestone(ctx context.Context, orgID, projectID string, number, milestoneNumber int) error
+	svc   *validation.Service
+	files spec.FilesService
 }
 
 func (a runValidation) EnsureValidationIssue(ctx context.Context, orgID, projectID string, milestoneNumber int) (int, error) {
-	designTag := a.art.LatestDesignTag(ctx, orgID, projectID)
-	number, err := a.svc.ResolveValidationTask(ctx, orgID, projectID, designTag)
-	if err != nil || number == 0 {
-		return 0, err
-	}
-	if a.milestone != nil && milestoneNumber > 0 {
-		if merr := a.milestone.SetIssueMilestone(ctx, orgID, projectID, number, milestoneNumber); merr != nil {
-			// The cycle can still be dispatched at the issue by number; only the
-			// version's ledger loses an entry.
-			slog.WarnContext(ctx, "run: could not file the validation issue under the milestone",
-				"project", projectID, "issue", number, "milestone", milestoneNumber, "error", merr)
-		}
-	}
-	return number, nil
+	return a.svc.EnsureValidationIssue(ctx, orgID, projectID, milestoneNumber)
 }
 
-func (a runValidation) Verdict(ctx context.Context, orgID, projectID string) (string, error) {
-	fc, err := a.files.Read(ctx, orgID, projectID, validation.ReportFilePath)
+func (a runValidation) Verdict(ctx context.Context, orgID, projectID, at string) (string, error) {
+	fc, err := a.files.ReadAt(ctx, orgID, projectID, validation.ReportFilePath, at)
 	if err != nil {
 		if errors.Is(err, spec.ErrFileNotFound) {
-			// The validation cycle merged but committed no report. Skipped, not
-			// failed: an absent report is a gap in reporting, not evidence that the
-			// deployment is broken.
-			return delivery.ValidationVerdictSkipped, nil
+			// The validation cycle merged but committed no report AT ITS OWN MERGE
+			// COMMIT, so this is a fact about this run and not a stale read: the
+			// agent shipped a pull request and reported nothing. VerdictFromReport
+			// maps the empty case to `unreported`, which fails the run.
+			return validation.VerdictFromReport(nil), nil
 		}
 		return "", err
 	}

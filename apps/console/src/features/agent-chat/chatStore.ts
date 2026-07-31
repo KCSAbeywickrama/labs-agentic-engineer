@@ -68,6 +68,14 @@ export type ChatMessage =
       questions: AskQuestionInput[];
       /** Set once answered via the card — one entry per question; flips it read-only. */
       answers?: QuestionAnswer[];
+      /**
+       * True while the batch is still streaming off the wire (#270 latency):
+       * `questions` holds the prefix parsed so far and grows in place; submit
+       * stays gated until the complete tool-call flips this false. NOTE: the
+       * upsert spreads over the existing card, so finalizers must pass an
+       * explicit `streaming: false` — omitting the field keeps the old value.
+       */
+      streaming?: boolean;
     }
   | { id: string; role: "error"; content: string };
 

@@ -35,15 +35,20 @@ func TestInternalContract(t *testing.T) {
 
 	for _, want := range []string{
 		"runner-refresh-credentials",
-		// Runner S2S re-keyed from task to execution (tasks-github-native §9.2);
-		// the version root lives in `servers`, the path is server-relative.
+		// Token refresh is every runner's, not validation's, so it keeps its path.
+		// The id it names is the dispatched CYCLE — the parameter's spelling is the
+		// same wire-compat debt AEP_TASK_ID carries. The version root lives in
+		// `servers`, so the path is server-relative.
 		"/executions/{executionId}/credentials/refresh",
-		// Validation runner callbacks: deployed-endpoint fetch + on-demand
-		// test-credential request.
+		// Validation runner callbacks, grouped under the feature that owns them and
+		// keyed by the cycle id the runner actually carries. They used to sit under
+		// /executions/{executionId}, resolved against a table the milestone
+		// supervisor never writes — so every validation runner was told its own
+		// dispatch did not exist.
 		"runner-validation-context",
-		"/executions/{executionId}/validation-context",
+		"/validation/{cycleId}/context",
 		"runner-validation-credentials",
-		"/executions/{executionId}/test-credentials",
+		"/validation/{cycleId}/test-credentials",
 		"taskJWT",
 		"publisherCC",
 	} {

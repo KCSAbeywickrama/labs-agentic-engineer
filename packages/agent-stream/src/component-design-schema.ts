@@ -72,6 +72,16 @@ const EXTERNAL_ONLY_DEPENDENCY_FIELDS = [
   "specPath",
 ] as const;
 
+// The resolved consumer-side wiring for a platform-resource / external
+// dependency: byte-identical to one workload.yaml `dependencies.resources[]`
+// entry, so the coding agent copies it instead of transforming it. Both fields
+// are required WHEN the object is present — a half-stamped wiring (a ref with no
+// bindings, or bindings with no ref) would render an unusable workload entry.
+const dependencyWiringSchema = z.strictObject({
+  ref: z.string().min(1),
+  envBindings: z.record(z.string(), z.string()),
+});
+
 // One unified, kind-discriminated dependency edge — the successor to the legacy
 // per-kind `connections[]`. A single flat shape carries every kind's fields;
 // `kind` selects which are meaningful (LENIENT within the known set, mirroring
@@ -103,6 +113,13 @@ const dependencyObjectSchema = z.strictObject({
   // is marshalled verbatim into the OpenChoreo Resource spec.parameters, so a
   // number must survive as a JSON number for CRD validation to pass.
   parameters: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
+  // platform-resource / external: the platform-stamped consumer-side wiring
+  // (see contracts/component-design.ts `DependencyWiring`). ACCEPTED here rather
+  // than rejected as agent-authored — unlike status/reason, this one is
+  // PERSISTED in design.json, and the design agent reads-edits-writes the file,
+  // so a rejection rule would reject its own echo. Design save re-derives and
+  // overwrites it, which is what makes authoring moot.
+  wiring: dependencyWiringSchema.optional(),
 });
 
 const dependencySchema = dependencyObjectSchema.superRefine((dep, ctx) => {

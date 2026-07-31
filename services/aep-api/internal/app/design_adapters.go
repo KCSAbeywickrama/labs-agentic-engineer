@@ -24,28 +24,29 @@ import (
 	"github.com/wso2/aep/aep-api/internal/spec"
 )
 
-// crtMarkerCatalog adapts the dependencies resource-type catalog onto spec's
-// own CRTMarkers vocabulary: design-save's resourceMarkerCatalog port returns
-// spec.CRTMarkers, so the spec domain names the dependencies feature nowhere
+// crtTypeCatalog adapts the dependencies resource-type catalog onto spec's
+// own CRTType vocabulary: design-save's resourceTypeCatalog port returns
+// spec.CRTType, so the spec domain names the dependencies feature nowhere
 // (the "a domain names no other domain's entity, even in a port" rule). It is
 // the projection point — dependencies becomes a domain in P8; this stays a port.
-type crtMarkerCatalog struct {
+type crtTypeCatalog struct {
 	cat *dependencies.ResourceTypeCatalog
 }
 
-func (c crtMarkerCatalog) MarkersByName(ctx context.Context) (map[string]spec.CRTMarkers, error) {
-	m, err := c.cat.MarkersByName(ctx)
+func (c crtTypeCatalog) ResourceTypesByName(ctx context.Context) (map[string]spec.CRTType, error) {
+	types, err := c.cat.TypesByName(ctx)
 	if err != nil {
 		return nil, err
 	}
-	out := make(map[string]spec.CRTMarkers, len(m))
-	for k, v := range m {
-		out[k] = spec.CRTMarkers{
-			EndUserAuth:          v.EndUserAuth,
-			ConsumerURLEnvConfig: v.ConsumerURLEnvConfig,
-			ConsumerURLPath:      v.ConsumerURLPath,
-			Skill:                v.Skill,
+	out := make(map[string]spec.CRTType, len(types))
+	for k, v := range types {
+		out[k] = spec.CRTType{
+			EndUserAuth:          v.Markers.EndUserAuth,
+			ConsumerURLEnvConfig: v.Markers.ConsumerURLEnvConfig,
+			ConsumerURLPath:      v.Markers.ConsumerURLPath,
+			Skill:                v.Markers.Skill,
 			Description:          v.Description,
+			Outputs:              v.Outputs,
 		}
 	}
 	return out, nil
@@ -58,6 +59,25 @@ func (c crtMarkerCatalog) MarkersByName(ctx context.Context) (map[string]spec.CR
 // design feature imports only artifacts (arch boundary), never the files service directly.
 type designFilesCommitter struct {
 	files spec.FilesService
+}
+
+// workloadReader is the eventcore wiring-conformance check's file read: the
+// shipped workload.yaml at HEAD. It is the same Files surface designFilesCommitter
+// uses, projected onto the narrower shape eventcore holds (no CAS token — the
+// check never writes).
+type workloadReader struct {
+	files spec.FilesService
+}
+
+func (a workloadReader) ReadFile(ctx context.Context, orgID, projectID, path string) (string, bool, error) {
+	fc, err := a.files.Read(ctx, orgID, projectID, path)
+	if err != nil {
+		if errors.Is(err, spec.ErrFileNotFound) {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	return fc.Content, true, nil
 }
 
 // ReadFile returns a file's current content + blob sha (the CAS token). A file

@@ -217,6 +217,17 @@ func (f *fakeIssues) withWork(milestone int, numbers ...int) *fakeIssues {
 	return f
 }
 
+// withValidationIssue puts the milestone's open VALIDATION issue in it, labelled
+// the way the minter files it: `aep:validation` and nothing else. The absent
+// `aep` label is the point — it keeps the issue out of the dispatch working set,
+// and any read that narrows on `aep` cannot see this issue at all.
+func (f *fakeIssues) withValidationIssue(milestone, number int) *fakeIssues {
+	f.byMilestone[milestone] = append(f.byMilestone[milestone], sourcecontrol.IssueInfo{
+		Number: number, State: "open", Labels: []string{delivery.LabelValidationWork},
+	})
+	return f
+}
+
 // withCounts gives a milestone its open-issue populations: gates, working set
 // ("aep", non-gate, non-validation) and grand total. work and total are stated
 // separately on purpose — the gap between them is the ledger, the population
@@ -424,10 +435,34 @@ func (f fakeRepoLookup) ByFullName(_ context.Context, fullName string) (string, 
 	return testOrg, testProject, nil
 }
 
-type fakeDesign struct{ paths map[string]string }
+type fakeDesign struct {
+	paths map[string]string
+	// declared backs the wiring-conformance check; nil means the design declares
+	// no resources, which is the pre-conformance status quo.
+	declared map[string]ComponentResources
+	err      error
+}
 
 func (f fakeDesign) ComponentPaths(context.Context, string, string) (map[string]string, error) {
 	return f.paths, nil
+}
+
+func (f fakeDesign) DeclaredResources(context.Context, string, string) (map[string]ComponentResources, error) {
+	return f.declared, f.err
+}
+
+// fakeWorkloads serves shipped workload.yaml content by repo path.
+type fakeWorkloads struct {
+	byPath map[string]string
+	err    error
+}
+
+func (f fakeWorkloads) ReadFile(_ context.Context, _, _, path string) (string, bool, error) {
+	if f.err != nil {
+		return "", false, f.err
+	}
+	content, ok := f.byPath[path]
+	return content, ok, nil
 }
 
 type fakeRepoLister struct{ repos []RepoRef }

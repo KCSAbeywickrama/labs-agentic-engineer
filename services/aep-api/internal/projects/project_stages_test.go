@@ -22,6 +22,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/wso2/aep/aep-api/internal/delivery"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
@@ -143,11 +144,14 @@ func TestBuildStage_RunStateMapping(t *testing.T) {
 // heuristic is needed any more.
 func TestBuildStage_ValidationFailureAttribution(t *testing.T) {
 	t.Parallel()
-	failedFor := func(reason string) []delivery.MilestoneRun {
+	failedForVerdict := func(reason, verdict string) []delivery.MilestoneRun {
 		run := specRun("v1", delivery.RunStateFailed)
 		run.TerminalReason = reason
-		run.ValidationVerdict = delivery.ValidationVerdictFailed
+		run.ValidationVerdict = verdict
 		return []delivery.MilestoneRun{run}
+	}
+	failedFor := func(reason string) []delivery.MilestoneRun {
+		return failedForVerdict(reason, delivery.ValidationVerdictFailed)
 	}
 	cases := []struct {
 		name           string
@@ -159,6 +163,13 @@ func TestBuildStage_ValidationFailureAttribution(t *testing.T) {
 			name:      "validation-attributed failure → build succeeded",
 			runs:      failedFor(delivery.RunReasonValidationFailed),
 			wantBuild: "succeeded", wantValidation: "failed",
+		},
+		{
+			// The phase can settle a run for two reasons, and BOTH are carved out:
+			// an unreported run is no more a build failure than a red suite is.
+			name:      "an unreported run is also not a build failure",
+			runs:      failedForVerdict(delivery.RunReasonValidationUnreported, delivery.ValidationVerdictUnreported),
+			wantBuild: "succeeded", wantValidation: "unreported",
 		},
 		{
 			name:      "a budget failure is the build's own",
@@ -316,33 +327,76 @@ func TestDeployStage_ValidationDerivation(t *testing.T) {
 		return []delivery.MilestoneRun{run}
 	}
 
+	cycle := func(kind string, ended bool) *delivery.RunCycle {
+		c := &delivery.RunCycle{Kind: kind}
+		if ended {
+			at := time.Now()
+			c.EndedAt = &at
+		}
+		return c
+	}
+
 	cases := []struct {
 		name       string
 		runs       []delivery.MilestoneRun
+		cycle      *delivery.RunCycle
 		wantStatus string
 	}{
 		{name: "no run at all → none", wantStatus: "none"},
-		{
-			name:       "live run, no verdict yet → running",
-			runs:       withVerdict(delivery.RunStateRunning, ""),
-			wantStatus: "running",
-		},
+
+		// Every verdict is MIRRORED, so the chip says what the run concluded rather
+		// than a coarser word that has to be looked up.
+		{"passed", withVerdict(delivery.RunStateRunning, delivery.ValidationVerdictPassed), nil, "passed"},
+		{"failed", withVerdict(delivery.RunStateRunning, delivery.ValidationVerdictFailed), nil, "failed"},
+		{"partial", withVerdict(delivery.RunStateRunning, delivery.ValidationVerdictPartial), nil, "partial"},
+		{"inconclusive", withVerdict(delivery.RunStateRunning, delivery.ValidationVerdictInconclusive), nil, "inconclusive"},
+		{"unreported", withVerdict(delivery.RunStateRunning, delivery.ValidationVerdictUnreported), nil, "unreported"},
+		// skipped is surfaced, not folded into none: "no acceptance criteria" is
+		// actionable ("author some"), where none means "nothing to say yet".
+		{"skipped", withVerdict(delivery.RunStateRunning, delivery.ValidationVerdictSkipped), nil, "skipped"},
+
 		{
 			name:       "settled run that never validated → none",
 			runs:       withVerdict(delivery.RunStateFailed, ""),
 			wantStatus: "none",
 		},
-		{name: "passed → completed", runs: withVerdict(delivery.RunStateRunning, delivery.ValidationVerdictPassed), wantStatus: "completed"},
-		{name: "failed → failed", runs: withVerdict(delivery.RunStateRunning, delivery.ValidationVerdictFailed), wantStatus: "failed"},
+
+		// A live run with no verdict is the one case the run row cannot answer, so
+		// the latest CYCLE decides. This is what stops the chip claiming
+		// "validating" through every coding cycle of every run.
 		{
-			name:       "skipped (no acceptance criteria) → none, never failed",
-			runs:       withVerdict(delivery.RunStateRunning, delivery.ValidationVerdictSkipped),
+			name:       "live run in a validation cycle → running",
+			runs:       withVerdict(delivery.RunStateRunning, ""),
+			cycle:      cycle(delivery.CycleKindValidation, false),
+			wantStatus: "running",
+		},
+		{
+			name:       "live run in a CODING cycle → none, not running",
+			runs:       withVerdict(delivery.RunStateRunning, ""),
+			cycle:      cycle(delivery.CycleKindCoding, false),
+			wantStatus: "none",
+		},
+		{
+			name:       "live run in a FIX cycle → none, not running",
+			runs:       withVerdict(delivery.RunStateRunning, ""),
+			cycle:      cycle(delivery.CycleKindFix, false),
+			wantStatus: "none",
+		},
+		{
+			name:       "validation cycle already ended but no verdict written yet → none",
+			runs:       withVerdict(delivery.RunStateRunning, ""),
+			cycle:      cycle(delivery.CycleKindValidation, true),
+			wantStatus: "none",
+		},
+		{
+			name:       "live run that has dispatched no cycle at all → none",
+			runs:       withVerdict(delivery.RunStateRunning, ""),
 			wantStatus: "none",
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			st := mustStatus(t, statusFixture{runs: tc.runs})
+			st := mustStatus(t, statusFixture{runs: tc.runs, cycle: tc.cycle})
 			if string(st.Deploy.Validation) != tc.wantStatus {
 				t.Errorf("validation = %q, want %q", st.Deploy.Validation, tc.wantStatus)
 			}

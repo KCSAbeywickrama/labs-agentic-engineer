@@ -33,6 +33,10 @@ export default defineConfig({
     environment: "node",
     globals: true,
     setupFiles: ["src/test-setup.ts"],
+    // Above the 5s async-util budget in `src/test-setup.ts`, so a slow CI
+    // machine surfaces the real assertion failure instead of a bare test
+    // timeout that says nothing about what the component was waiting for.
+    testTimeout: 15_000,
     server: {
       deps: {
         inline: [

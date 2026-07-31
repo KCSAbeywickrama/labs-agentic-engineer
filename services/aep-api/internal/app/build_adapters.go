@@ -40,25 +40,25 @@ func (t buildSpecTagger) TagSpec(ctx context.Context, orgID, projectID string) (
 	return t.art.SaveSpec(ctx, orgID, projectID, spec.SaveRequest{Message: "Build"})
 }
 
-// designAuthDeriver is the composition root's narrow consumer view of the
+// designFactDeriver is the composition root's narrow consumer view of the
 // concrete *design service — the pre-tag step the thin POST /build path reuses
 // (issue #164). The design package no longer exports an interface (its read
 // HTTP surface was retired); *designService satisfies this structurally, so app
 // wires the concrete value straight in.
-type designAuthDeriver interface {
-	DeriveEndUserAuthAtHead(ctx context.Context, orgID, projectID string) error
+type designFactDeriver interface {
+	DerivePlatformResourceFactsAtHead(ctx context.Context, orgID, projectID string) error
 }
 
-// buildAuthDeriver adapts design's DeriveEndUserAuthAtHead onto the build
-// feature's AuthDeriver port, translating design's domain sentinels into the
+// buildDesignDeriver adapts design's DerivePlatformResourceFactsAtHead onto the build
+// feature's DesignFactDeriver port, translating design's domain sentinels into the
 // build-local ones the handler maps to 409 / 503 (build cannot import design —
 // arch allowlist). Everything else passes through so the handler 500s it.
-type buildAuthDeriver struct {
-	svc designAuthDeriver
+type buildDesignDeriver struct {
+	svc designFactDeriver
 }
 
-func (d buildAuthDeriver) DeriveEndUserAuthAtHead(ctx context.Context, orgID, projectID string) error {
-	err := d.svc.DeriveEndUserAuthAtHead(ctx, orgID, projectID)
+func (d buildDesignDeriver) DerivePlatformResourceFactsAtHead(ctx context.Context, orgID, projectID string) error {
+	err := d.svc.DerivePlatformResourceFactsAtHead(ctx, orgID, projectID)
 	switch {
 	case err == nil:
 		return nil

@@ -62,6 +62,25 @@ type RunnerSecretResolver interface {
 	ResolveRunnerSecrets(ctx context.Context, orgID, projectID, component, env string) ([]ExternalResourceSecretInputs, error)
 }
 
+// WiringPublisher publishes the platform-resolved `endpoints:` block for the
+// project onto the run's working-set issues (ADR-0004). It is called ONCE per
+// cycle dispatch, immediately before the Job is launched.
+//
+// Dispatch is the correct moment because the dispatch predicate already
+// guarantees what the comment needs: no gate is open in the milestone (so every
+// dependency that can resolve has) and the working set is non-empty (so there is
+// somebody to tell). The previous trigger — gate resolution — had neither
+// guarantee, and a project whose gates closed before its issues were planned got
+// no comment at all and no retry.
+//
+// Best-effort and non-fatal: a GitHub hiccup must not fail a dispatch, and the
+// publisher withholds its idempotency marker on a partial post so the next
+// dispatch supersedes it. Wired from the provisioning feature at the composition
+// root; nil → skipped.
+type WiringPublisher interface {
+	PublishResolvedWiring(ctx context.Context, orgID, projectID string)
+}
+
 // AnthropicProvisioner materializes the per-org Anthropic key Secret on the
 // workflow plane and returns its ref. Best-effort at dispatch. Wired from
 // orgcreds.AnthropicCredentialService.

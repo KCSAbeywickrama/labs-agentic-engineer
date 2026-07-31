@@ -97,6 +97,10 @@ test("design phase: folds the bundle, gates skillsPinned shape, derives .excalid
       existsSync(join(projectDir, "specs/design/components/user-service/wireframes.excalidraw")),
       "derived .excalidraw materialized",
     );
+    assert.ok(
+      existsSync(join(projectDir, "specs/design/cell-diagram.gen.json")),
+      "aggregate cell-diagram projected as design files streamed in",
+    );
     assert.ok(checkProject(projectDir).every((f) => f.ok), "check is green");
   } finally {
     rmSync(projectDir, { recursive: true, force: true });

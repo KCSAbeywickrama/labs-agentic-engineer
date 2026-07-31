@@ -20,7 +20,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/wso2/aep/aep-api/internal/dependencies"
+	"github.com/wso2/aep/aep-api/internal/platform/ocname"
 )
 
 // DependencyStatus is the masked provisioning status of a dependency: the
@@ -42,7 +42,7 @@ func (s *Service) Status(ctx context.Context, orgID, projectID, depName, env str
 	if env == "" {
 		env = defaultEnv
 	}
-	bindingName := dependencies.ExternalResourceBindingName(projectID, depName, env)
+	bindingName := ocname.ExternalResourceBindingName(projectID, depName, env)
 	b, err := s.bindings.GetBinding(ctx, orgID, bindingName)
 	if err != nil {
 		return nil, fmt.Errorf("provisioning: read binding %q: %w", bindingName, err)

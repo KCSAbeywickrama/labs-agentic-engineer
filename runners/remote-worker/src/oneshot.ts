@@ -44,6 +44,10 @@ import { installConsoleScrubber } from "./lib/progress/console_scrub.js";
 import { resolveTaskSkills } from "./lib/skills_resolver.js";
 import { materializeSkills } from "./lib/skills_materializer.js";
 import { ClientCredentialsTokenProvider } from "./lib/oauth.js";
+import {
+  fetchValidationContext,
+  VALIDATION_CONTEXT_FILE,
+} from "./lib/validation_context.js";
 
 function requireEnv(name: string): string {
   const v = process.env[name];
@@ -205,6 +209,25 @@ async function main(): Promise<number> {
   const skillsRepoURL = process.env.AEP_SKILLS_REPO_URL ?? "";
   if (req.taskKind === "validation") {
     console.log("[oneshot] validation run — no design skills apply; using the aep-validation skill only");
+    // PREFLIGHT: where the deployed system is, fetched by the platform before the
+    // agent starts. Fatal on purpose — an agent that cannot learn its targets has
+    // no honest way forward, and when this was the skill's own `curl` a 404 sent
+    // it scanning the pod network for half an hour instead of stopping.
+    try {
+      const ctx = await fetchValidationContext({
+        platformUrl: platformURL,
+        cycleId: req.taskId,
+        bearer: req.bearer,
+      });
+      console.log(
+        `[oneshot] validation context: ${ctx.endpoints.length} deployed endpoint(s) → ${VALIDATION_CONTEXT_FILE}`,
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      emit({ kind: "result", status: "failure", error: `validation_context: ${msg}` });
+      console.error(`[oneshot] validation context unavailable — not starting the agent: ${msg}`);
+      return 2;
+    }
   } else if (skillsRepoURL) {
     try {
       const resolutions = await resolveTaskSkills({

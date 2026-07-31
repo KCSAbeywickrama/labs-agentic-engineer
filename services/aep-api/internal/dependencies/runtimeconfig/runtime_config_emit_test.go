@@ -51,6 +51,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	ocmocks "github.com/wso2/aep/aep-api/internal/clients/openchoreo/mocks"
 	"github.com/wso2/aep/aep-api/internal/dependencies"
+	"github.com/wso2/aep/aep-api/internal/platform/ocname"
 	"github.com/wso2/aep/aep-api/internal/spec"
 	"github.com/wso2/aep/aep-api/internal/spec/artifactstest"
 )
@@ -318,8 +319,8 @@ func Test_outputKeyNaming_matchesWiringConvention(t *testing.T) {
 		{"orders-db", "port", "ORDERS_DB_PORT"},
 	}
 	for _, c := range cases {
-		if got := dependencies.EnvVarName(c.dep, c.out); got != c.want {
-			t.Errorf("EnvVarName(%q,%q) = %q; want %q", c.dep, c.out, got, c.want)
+		if got := ocname.EnvVarName(c.dep, c.out); got != c.want {
+			t.Errorf("ocname.EnvVarName(%q,%q) = %q; want %q", c.dep, c.out, got, c.want)
 		}
 	}
 }

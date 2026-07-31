@@ -51,8 +51,10 @@ type RunStore interface {
 	// BumpBudget increments one counter — bookkeeping for the read model, never
 	// the loop's own arithmetic.
 	BumpBudget(ctx context.Context, id string, counter delivery.RunBudget) error
-	// SetValidationVerdict records the validation cycle's outcome on the run.
-	SetValidationVerdict(ctx context.Context, id, verdict string) error
+	// SetValidationVerdict records the validation cycle's outcome on the run,
+	// together with the validation issue that produced it so a settled run stays
+	// navigable to its criteria. An issue of 0 leaves the stored one untouched.
+	SetValidationVerdict(ctx context.Context, id, verdict string, issue int) error
 }
 
 // CycleStore is the cycle-record surface: one row per dispatch. Satisfied by an
@@ -130,9 +132,16 @@ type ValidationCoordinator interface {
 	// acceptance criteria. Minting here rather than at plan time is what keeps
 	// an unworkable issue out of the working set for the whole run.
 	EnsureValidationIssue(ctx context.Context, orgID, projectID string, milestoneNumber int) (int, error)
-	// Verdict reads the validation runner's committed report and returns one of
-	// the delivery.ValidationVerdict* values.
-	Verdict(ctx context.Context, orgID, projectID string) (string, error)
+	// Verdict reads the validation runner's committed report AT `at` — the
+	// validation cycle's own merge commit — and returns one of the
+	// delivery.ValidationVerdict* values.
+	//
+	// The commit is not optional in spirit: the report lives at one fixed path
+	// that every run overwrites, so reading the branch tip returns the newest
+	// run's results regardless of which run is asking. A run whose agent shipped
+	// no report would inherit its predecessor's and be handed a confidently wrong
+	// verdict. An empty `at` still reads the tip, for a caller that has no commit.
+	Verdict(ctx context.Context, orgID, projectID, at string) (string, error)
 }
 
 // Dispatcher launches one agent run over the milestone. It is the locally
