@@ -203,6 +203,11 @@ const TERMINAL_REASONS: Record<string, string> = {
     "A build session closed no issues and minted none — the run stopped rather than loop.",
   "cycle-ceiling": "The run hit its ceiling on total build sessions.",
   "validation-failed": "Validation failed against the acceptance criteria.",
+  // The validating phase's OTHER reason, and a different failure: nothing was
+  // asserted against the software at all, so this names the missing artifact
+  // rather than an outcome the criteria produced.
+  "validation-unreported":
+    "The validation agent merged its pull request without committing a report, so the run proved nothing.",
 };
 
 /** A sentence for the run's terminal reason; the raw value when unmapped, so

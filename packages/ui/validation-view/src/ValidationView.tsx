@@ -149,10 +149,13 @@ function CriterionRow({
       </Box>
       {/* Failure detail sits full-width beneath the row (indented past the
           method badge) so a long trace never crowds the assertion. */}
-      {failed && (report?.spec || report?.failure) && (
+      {failed && (report?.failureLocation || report?.spec || report?.failure) && (
         <Box sx={{ mt: 0.75, ml: "108px" }}>
           {/* Prefer the reporter's `<file>:<line>`, which points at the failing
-              assertion rather than merely the spec that contains it. */}
+              assertion rather than merely the spec that contains it. The gate
+              above admits it on its own: a reporter can hand back a location with
+              an empty message, and dropping the block then would throw away the
+              only pointer to the failing assertion the run produced. */}
           {(report?.failureLocation || report?.spec) && (
             <Typography variant="caption" color="text.secondary" sx={mono}>
               {report.failureLocation || report.spec}

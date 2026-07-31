@@ -117,9 +117,9 @@ describe("countOf", () => {
 });
 
 describe("uncoveredCount", () => {
-  // The three statuses that mean nobody actually checked the criterion. This sum
-  // is what lets a partial verdict say "5 of 40 were never covered".
-  it("sums not_run, not_validated and manual", () => {
+  // The three statuses that explicitly mean nobody checked the criterion. This
+  // count is what lets a partial verdict say "5 of 40 were never covered".
+  it("counts not_run, not_validated and manual", () => {
     const t = tallyCriterionStates(
       oracle(5),
       report({
@@ -136,6 +136,37 @@ describe("uncoveredCount", () => {
   it("is zero when every criterion produced a real result", () => {
     const t = tallyCriterionStates(oracle(2), report({ "AC-1": "pass", "AC-2": "fail" }));
     expect(uncoveredCount(t)).toBe(0);
+  });
+
+  // A criterion the report never mentions was not checked either — report.ts
+  // tolerates the omission, so the count has to absorb it rather than let it fall
+  // out of the tally and understate the gap the `partial` tile is explaining.
+  it("counts a criterion the report omits entirely", () => {
+    const t = tallyCriterionStates(oracle(4), report({ "AC-1": "pass", "AC-2": "manual" }));
+    expect(uncoveredCount(t)).toBe(3);
+  });
+
+  // An unrecognised status is evidence nothing here can read. VerdictFromReport's
+  // default arm calls it a coverage gap, so the tile must count it the same way or
+  // the number would argue with the verdict printed above it.
+  it("counts an unrecognised status as never checked", () => {
+    const t = tallyCriterionStates(oracle(3), report({ "AC-1": "pass", "AC-2": "quarantined", "AC-3": "aborted" }));
+    expect(uncoveredCount(t)).toBe(2);
+  });
+
+  // The invariant behind the sentence "N of TOTAL criteria were never covered":
+  // it can neither exceed the denominator nor leave an unexplained remainder.
+  it("closes the arithmetic — passed + failed + uncovered is always the total", () => {
+    const t = tallyCriterionStates(
+      oracle(6),
+      report({ "AC-1": "pass", "AC-2": "fail", "AC-3": "manual", "AC-4": "weird" }),
+    );
+    expect(countOf(t, "pass") + countOf(t, "fail") + uncoveredCount(t)).toBe(t.total);
+    expect(uncoveredCount(t)).toBe(4);
+  });
+
+  it("is zero for an empty oracle", () => {
+    expect(uncoveredCount(tallyCriterionStates({ requirements: [] }, undefined))).toBe(0);
   });
 });
 

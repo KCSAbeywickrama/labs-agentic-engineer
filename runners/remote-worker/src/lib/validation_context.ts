@@ -104,21 +104,59 @@ export async function fetchValidationContext(
   } catch {
     throw new Error(`validation context is not JSON: ${body.slice(0, 200)}`);
   }
+  // `null` is valid JSON and survives the parse, so without this the cast below
+  // would hand back a null `ctx` and reading `.endpoints` off it would throw a
+  // TypeError. Every other failure here is a sentence naming what the platform
+  // could not answer; a raw "Cannot read properties of null" in the pod log is
+  // the one diagnosis this preflight exists to avoid. Non-objects (a bare number,
+  // a string) are caught here too, for the same reason.
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`validation context is not a JSON object: ${body.slice(0, 200)}`);
+  }
   const ctx = parsed as Partial<ValidationContext>;
   if (!Array.isArray(ctx.endpoints) || ctx.endpoints.length === 0) {
     throw new Error(
       "validation context names no deployed endpoints — there is nothing to validate against",
     );
   }
+  // The oracle's path is required by the internal contract, and the skill is told
+  // in so many words that the context "is present and non-empty whenever you are
+  // running … there is no failure mode here for you to recover from". Defaulting a
+  // missing one to "" would hand the agent a well-formed file that quietly fails
+  // that promise, and an agent that cannot find the oracle goes looking — the exact
+  // behaviour this preflight exists to prevent. Same reasoning as the endpoints
+  // check above, so it fails the same way.
+  if (typeof ctx.criteriaPath !== "string" || ctx.criteriaPath === "") {
+    throw new Error(
+      "validation context names no acceptance-criteria path — there is nothing to validate against",
+    );
+  }
 
   const file = opts.file ?? VALIDATION_CONTEXT_FILE;
-  await fs.promises.mkdir(path.dirname(file), { recursive: true });
-  // Written verbatim, not re-serialised from the parsed shape: the skill's
-  // contract is the platform's payload, and a field this runner does not model
-  // must still reach it.
-  await fs.promises.writeFile(file, body, { mode: 0o600 });
-  return {
-    endpoints: ctx.endpoints,
-    criteriaPath: typeof ctx.criteriaPath === "string" ? ctx.criteriaPath : "",
-  };
+  const dir = path.dirname(file);
+  await fs.promises.mkdir(dir, { recursive: true });
+  // Staged in a private directory and renamed into place, rather than written
+  // straight to `file`. Three separate things that buys, all of which the direct
+  // write got wrong:
+  //
+  //  - `mode` is honoured only when the write CREATES the file, so writing over an
+  //    existing path silently kept whatever permissions it already had.
+  //  - the target is a fixed, predictable name under a world-writable /tmp, so it
+  //    can be pre-created as a symlink pointing anywhere. mkdtemp's name is not
+  //    predictable and the directory is 0700, so nothing can sit in the way.
+  //  - rename is atomic and does not follow a symlink at the destination, so there
+  //    is no window between clearing the path and filling it, and a write that
+  //    fails leaves the previous context intact instead of destroying it.
+  const staging = await fs.promises.mkdtemp(path.join(dir, ".aep-valctx-"));
+  try {
+    const staged = path.join(staging, "context.json");
+    // Written verbatim, not re-serialised from the parsed shape: the skill's
+    // contract is the platform's payload, and a field this runner does not model
+    // must still reach it.
+    await fs.promises.writeFile(staged, body, { mode: 0o600 });
+    await fs.promises.rename(staged, file);
+  } finally {
+    await fs.promises.rm(staging, { recursive: true, force: true });
+  }
+  return { endpoints: ctx.endpoints, criteriaPath: ctx.criteriaPath };
 }

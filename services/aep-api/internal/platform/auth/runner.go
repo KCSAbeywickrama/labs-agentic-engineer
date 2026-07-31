@@ -64,6 +64,12 @@ type HTTPError struct {
 
 func (e *HTTPError) Error() string { return e.Message }
 
+// cycleUnavailable is the ONE answer the publisher-cc branch gives for a cycle
+// the caller may not act on, whatever the reason. Kept a constant so a later
+// edit cannot reintroduce a second, more specific message on one of the two
+// arms — which is all it would take to make the pair distinguishable again.
+const cycleUnavailable = "cycle not found"
+
 // NewRunnerAuthorizer builds the authorizer. publisher may be nil (local dev
 // without the platform IDP) — then only BFF Task-JWTs are accepted.
 func NewRunnerAuthorizer(taskTokens *TaskTokenManager, publisher *PublisherTokenVerifier, cycleOrg CycleOrgLookup) *RunnerAuthorizer {
@@ -103,18 +109,26 @@ func (a *RunnerAuthorizer) Authorize(ctx context.Context, authHeader, cycleID st
 	// Publisher client-credentials fallback: org-bound (the token's audience
 	// embeds the org). Confirm the path cycle actually belongs to that org so an
 	// org-A token cannot read/refresh an org-B cycle it merely names in the path.
+	//
+	// Both ways that check can fail answer with the SAME message. They are
+	// different facts — "no such cycle" and "that cycle is another org's" — and
+	// telling them apart is exactly what turns a valid org-A token into an oracle
+	// for whether a given cycle id exists anywhere on the platform. To this caller
+	// the two are identical anyway: neither is a cycle it may act on. The
+	// distinction survives in the logs, where the operator can see it and the
+	// prober cannot.
 	if a.publisher != nil {
 		if claims, err := a.publisher.Verify(tok); err == nil {
 			cycleOrg, lerr := a.cycleOrg(ctx, cycleID)
 			if lerr != nil || cycleOrg == "" {
 				slog.WarnContext(ctx, "runner callback: cycle lookup failed",
 					"cycle", cycleID, "error", lerr)
-				return tenant.Caller{}, &HTTPError{Status: 403, Message: "cycle not found"}
+				return tenant.Caller{}, &HTTPError{Status: 403, Message: cycleUnavailable}
 			}
 			if cycleOrg != claims.OrgHandle {
 				slog.WarnContext(ctx, "runner callback: publisher org mismatch",
 					"cycle", cycleID, "cycleOrg", cycleOrg, "publisherOrg", claims.OrgHandle)
-				return tenant.Caller{}, &HTTPError{Status: 403, Message: "publisher token does not match cycle org"}
+				return tenant.Caller{}, &HTTPError{Status: 403, Message: cycleUnavailable}
 			}
 			return tenant.Caller{
 				Org:    tenant.OrgHandle(claims.OrgHandle),
