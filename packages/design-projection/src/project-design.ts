@@ -84,9 +84,16 @@ export function projectComponent(id: string, files: Record<string, string>): Pro
   // authored type passes through untouched (support-gating is a later phase).
   const type = str(dj.type) ?? "service";
   const exposure = str(dj.exposure) ?? "intranet";
-  const skillsApplied = Array.isArray(dj.skillsApplied)
-    ? dj.skillsApplied.filter((s): s is string => typeof s === "string")
-    : [];
+  // `skillsPinned` is the current key; `skillsApplied` is the pre-rename
+  // spelling. design.json files carrying the legacy key are already
+  // committed in customer org repos (and may be hand-edited), so both must
+  // keep being read here, forever, with skillsPinned winning when present.
+  const skillsSource = Array.isArray(dj.skillsPinned)
+    ? dj.skillsPinned
+    : Array.isArray(dj.skillsApplied)
+      ? dj.skillsApplied
+      : [];
+  const skillsPinned = skillsSource.filter((s): s is string => typeof s === "string");
 
   const artifacts: Record<string, string> = { design: `${dir}/design.json` };
   if (files[`${dir}/openapi.yaml`] !== undefined) artifacts.openapi = `${dir}/openapi.yaml`;
@@ -103,7 +110,7 @@ export function projectComponent(id: string, files: Record<string, string>): Pro
     id,
     type,
     version: str(dj.version) ?? "0.1.0",
-    skillsApplied,
+    skillsPinned,
     build,
     ...(type === "service"
       ? {

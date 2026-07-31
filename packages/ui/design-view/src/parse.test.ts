@@ -29,7 +29,7 @@ const FULL = JSON.stringify({
   entrypoint: "deployment/service",
   exposure: "internet",
   description: "Stores and serves audit evidence records.",
-  skillsApplied: ["go", "openapi-conventions"],
+  skillsPinned: ["go", "openapi-conventions"],
   endpoint: { name: "http" },
   exposesAPI: { some: "platform-owned" },
   componentAgentInstructions: "platform-owned",
@@ -62,7 +62,7 @@ describe("parseComponentDesign", () => {
     expect(d.type).toBe("service");
     expect(d.exposure).toBe("internet");
     expect(d.description).toBe("Stores and serves audit evidence records.");
-    expect(d.skillsApplied).toEqual(["go", "openapi-conventions"]);
+    expect(d.skillsPinned).toEqual(["go", "openapi-conventions"]);
     expect(d.endpoint).toEqual({ name: "http" });
     expect(d.dependencies).toHaveLength(4);
     const stripe = d.dependencies.find((x) => x.name === "stripe")!;
@@ -81,7 +81,7 @@ describe("parseComponentDesign", () => {
     );
     if ("kind" in d) throw new Error("unexpected parse error");
     expect(d.description).toBeUndefined();
-    expect(d.skillsApplied).toBeUndefined();
+    expect(d.skillsPinned).toBeUndefined();
     expect(d.endpoint).toBeUndefined();
     expect(d.dependencies).toEqual([]);
   });
@@ -117,12 +117,40 @@ describe("parseComponentDesign", () => {
     expect("kind" in parseComponentDesign("[]")).toBe(true);
   });
 
-  it("filters non-string skillsApplied entries", () => {
+  it("filters non-string skillsPinned entries", () => {
+    const d = parseComponentDesign(
+      JSON.stringify({ name: "svc", skillsPinned: ["go", 3, null, "react"] }),
+    );
+    if ("kind" in d) throw new Error("unexpected parse error");
+    expect(d.skillsPinned).toEqual(["go", "react"]);
+  });
+
+  it("filters non-string entries in the legacy skillsApplied key too", () => {
     const d = parseComponentDesign(
       JSON.stringify({ name: "svc", skillsApplied: ["go", 3, null, "react"] }),
     );
     if ("kind" in d) throw new Error("unexpected parse error");
-    expect(d.skillsApplied).toEqual(["go", "react"]);
+    expect(d.skillsPinned).toEqual(["go", "react"]);
+  });
+
+  it("reads the legacy skillsApplied key when skillsPinned is absent", () => {
+    const d = parseComponentDesign(
+      JSON.stringify({ name: "svc", skillsApplied: ["go", "openapi-conventions"] }),
+    );
+    if ("kind" in d) throw new Error("unexpected parse error");
+    expect(d.skillsPinned).toEqual(["go", "openapi-conventions"]);
+  });
+
+  it("prefers skillsPinned over legacy skillsApplied when a hand-edited design.json has both", () => {
+    const d = parseComponentDesign(
+      JSON.stringify({
+        name: "svc",
+        skillsPinned: ["go"],
+        skillsApplied: ["stale-legacy-value"],
+      }),
+    );
+    if ("kind" in d) throw new Error("unexpected parse error");
+    expect(d.skillsPinned).toEqual(["go"]);
   });
 
   // #252 Task 9: style/package/candidates are persisted intent

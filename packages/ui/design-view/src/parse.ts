@@ -87,7 +87,13 @@ export interface ComponentDesign {
   entrypoint: string;
   exposure: string;
   description?: string;
-  skillsApplied?: string[];
+  /**
+   * Skills preloaded for this component's coding agent. Normalized output —
+   * always the winning value between the current `skillsPinned` key and the
+   * legacy `skillsApplied` spelling; see the dual-key read in
+   * parseComponentDesign below.
+   */
+  skillsPinned?: string[];
   endpoint?: DesignEndpoint;
   dependencies: Dependency[];
 }
@@ -200,11 +206,18 @@ export function parseComponentDesign(raw: string): ParseResult {
   const description = optStr(data.description);
   if (description) design.description = description;
 
-  if (Array.isArray(data.skillsApplied)) {
-    const skills = data.skillsApplied.filter(
-      (s): s is string => typeof s === "string",
-    );
-    if (skills.length) design.skillsApplied = skills;
+  // `skillsPinned` is the current key; `skillsApplied` is the pre-rename
+  // spelling. design.json files carrying the legacy key are already
+  // committed in customer org repos (and may be hand-edited), so both must
+  // keep being read here, forever, with skillsPinned winning when present.
+  const rawSkills = Array.isArray(data.skillsPinned)
+    ? data.skillsPinned
+    : Array.isArray(data.skillsApplied)
+      ? data.skillsApplied
+      : undefined;
+  if (rawSkills) {
+    const skills = rawSkills.filter((s): s is string => typeof s === "string");
+    if (skills.length) design.skillsPinned = skills;
   }
 
   if (isObject(data.endpoint)) {

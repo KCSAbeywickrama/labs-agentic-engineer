@@ -30,7 +30,7 @@ const BUNDLE: Record<string, string> = {
     appPath: "expense-api",
     entrypoint: "deployment/service",
     exposure: "internet",
-    skillsApplied: ["high-level-architecture", "openapi-conventions"],
+    skillsPinned: ["high-level-architecture", "openapi-conventions"],
     dependencies: [
       { kind: "platform-resource", name: "postgres", resourceType: "postgres" },
       { kind: "external", name: "email-gateway" },
@@ -62,7 +62,7 @@ test("projects the bundle into the cell-diagram-compatible design json", () => {
   const api = dj.components.find((c) => c.id === "expense-api")!;
   assert.equal(api.type, "service");
   assert.equal(api.version, "0.2.0");
-  assert.deepEqual(api.skillsApplied, ["high-level-architecture", "openapi-conventions"]);
+  assert.deepEqual(api.skillsPinned, ["high-level-architecture", "openapi-conventions"]);
   assert.equal(api.build.language, "Go");
   assert.equal(api.services!["expense-api"]!.deploymentMetadata.gateways.internet.isExposed, true);
   assert.deepEqual(api.connections, [
@@ -74,10 +74,49 @@ test("projects the bundle into the cell-diagram-compatible design json", () => {
   const web = dj.components.find((c) => c.id === "expense-webapp")!;
   assert.equal(web.type, "webapp");
   assert.equal(web.version, "0.1.0");
-  assert.deepEqual(web.skillsApplied, []); // no skillsApplied authored for this component
+  assert.deepEqual(web.skillsPinned, []); // no skillsPinned authored for this component
   assert.equal(web.services, undefined); // webapps expose no services
   assert.deepEqual(web.connections, [{ id: "http://expense-api", type: "http", onPlatform: true }]);
   assert.equal(web.artifacts.wireframes, "specs/design/components/expense-webapp/wireframes.dsl");
+});
+
+test("reads the legacy skillsApplied key when skillsPinned is absent", () => {
+  const files = {
+    "specs/design/components/legacy-svc/design.json": JSON.stringify({
+      name: "legacy-svc",
+      type: "service",
+      version: "0.1.0",
+      language: "Go",
+      buildpack: "docker",
+      appPath: "legacy-svc",
+      entrypoint: "deployment/service",
+      exposure: "intranet",
+      skillsApplied: ["go"],
+      dependencies: [],
+    }),
+  };
+  const dj = buildProjectDesign("p", files);
+  assert.deepEqual(dj.components[0]!.skillsPinned, ["go"]);
+});
+
+test("prefers skillsPinned over legacy skillsApplied when a hand-edited design.json has both", () => {
+  const files = {
+    "specs/design/components/both-svc/design.json": JSON.stringify({
+      name: "both-svc",
+      type: "service",
+      version: "0.1.0",
+      language: "Go",
+      buildpack: "docker",
+      appPath: "both-svc",
+      entrypoint: "deployment/service",
+      exposure: "intranet",
+      skillsPinned: ["go"],
+      skillsApplied: ["stale-legacy-value"],
+      dependencies: [],
+    }),
+  };
+  const dj = buildProjectDesign("p", files);
+  assert.deepEqual(dj.components[0]!.skillsPinned, ["go"]);
 });
 
 test("a bundle without a design tree projects to an empty component list", () => {
