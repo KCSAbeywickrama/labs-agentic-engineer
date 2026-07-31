@@ -44,7 +44,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
           description: Error
-  /executions/{executionId}/validation-context:
+  /validation/{cycleId}/context:
     get:
       operationId: runner-validation-context
       summary: Fetch a validation run's deployed endpoints (runner callback)
@@ -54,9 +54,11 @@ paths:
       - taskJWT: []
       - publisherCC: []
       parameters:
-      - description: Execution id the runner callback is scoped to
+      - description: Validation cycle id the runner callback is scoped to — the
+          run cycle the platform dispatched this runner for, carried to the pod as
+          AEP_TASK_ID and bound into its bearer token
         in: path
-        name: executionId
+        name: cycleId
         required: true
         schema:
           type: string
@@ -73,7 +75,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
           description: Error
-  /executions/{executionId}/test-credentials:
+  /validation/{cycleId}/test-credentials:
     post:
       operationId: runner-validation-credentials
       summary: Request test credentials for a validation run (runner callback)
@@ -83,9 +85,11 @@ paths:
       - taskJWT: []
       - publisherCC: []
       parameters:
-      - description: Execution id the runner callback is scoped to
+      - description: Validation cycle id the runner callback is scoped to — the
+          run cycle the platform dispatched this runner for, carried to the pod as
+          AEP_TASK_ID and bound into its bearer token
         in: path
-        name: executionId
+        name: cycleId
         required: true
         schema:
           type: string

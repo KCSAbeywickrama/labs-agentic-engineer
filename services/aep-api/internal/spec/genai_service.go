@@ -369,6 +369,22 @@ func (s *Service) StartTurn(ctx context.Context, orgID, projectID string, in Tur
 		}
 	}
 
+	// `/start` (start_command.go) is the one slash command the server expands,
+	// because only the server can enrich it: the idea lives in
+	// specs/.agentic-engineer.toml, which no client parses and the agent cannot
+	// read (dot-led segments are stripped from every turn snapshot). An idea
+	// typed inline wins; otherwise the captured one is read from the descriptor.
+	// Best-effort throughout — no descriptor, no append, and the start skill
+	// asks the user instead.
+	instructionText := in.Instruction
+	if inlineIdea, isStart := parseStartCommand(in.Instruction); isStart {
+		idea := inlineIdea
+		if idea == "" {
+			idea = s.readProjectIdea(ctx, ref, baseRef)
+		}
+		instructionText = StartInstruction + ideaSteer(idea)
+	}
+
 	// Skills resolve failures are typed: both arms mean the org's _skills repo
 	// is unusable right now (row missing/unprovisionable, or the backing repo
 	// gone/unreachable — e.g. deleted externally under a lingering row). The
@@ -415,17 +431,19 @@ func (s *Service) StartTurn(ctx context.Context, orgID, projectID string, in Tur
 		useCase:          useCase,
 		conversationID:   in.ConversationID,
 		nsConversationID: namespacedID(repo, useCase, in.ConversationID),
-		instruction:      in.Instruction + steeringByUseCase[useCase] + collabSteer + targetSuffix(in.Target),
-		summary:          in.Instruction,
-		repoRef:          ref,
-		baseRef:          baseRef,
-		skillsRef:        skillsRef,
-		anthropicKey:     key,
-		author:           author,
-		committer:        committer,
-		collabRoomID:     collabRoomID,
-		collabToken:      collabToken,
-		eagerSkills:      in.EagerSkills,
+		// The idea rides BEFORE the useCase steering so that steering's "from
+		// the direction above" covers the idea as well as the instruction.
+		instruction:  instructionText + steeringByUseCase[useCase] + collabSteer + targetSuffix(in.Target),
+		summary:      in.Instruction,
+		repoRef:      ref,
+		baseRef:      baseRef,
+		skillsRef:    skillsRef,
+		anthropicKey: key,
+		author:       author,
+		committer:    committer,
+		collabRoomID: collabRoomID,
+		collabToken:  collabToken,
+		eagerSkills:  in.EagerSkills,
 	}
 	// Detached: the turn runs to completion (or a terminal failure) server-
 	// side regardless of the client connection (D16). runTurnSafe is the panic

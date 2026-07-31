@@ -35,8 +35,9 @@ import (
 //	───────────────────────────────────────────────────────────────────────────────────────────────────
 //	public         /api/v1              Thunder user JWT + org gate                handlers_*.go · tenant_gate.go
 //	               (jwt → orgensure)    (org from the verified token, never input)  ← packages/contracts/api/v1 (source of truth)
-//	internal S2S   /internal/v1/executions/  BFF Task-JWT or publisher-cc          internal.go · runnerAuthGate
-//	               (deny-by-default gate)    (dual-token verify + INT-6 fence)      ← packages/contracts/api/internal/v1 (non-public)
+//	internal S2S   /internal/v1/validation/, BFF Task-JWT or publisher-cc          internal.go · runnerAuthGate
+//	               /internal/v1/executions/  (dual-token verify + INT-6 fence,      ← packages/contracts/api/internal/v1 (non-public)
+//	               (deny-by-default gate)     both keyed to the run CYCLE id)
 //	internal MCP   /internal/v1/mcp     BFF-signed JWT, aud aep-api-mcp            dependencies/mcp_server.go ·
 //	               (POST, JSON-RPC)     (org from ocOrgId claim, never input)       auth.AgentsScopedVerifier (no spec — JSON-RPC)
 //	               /mcp/playground-token  NONE — flag-gated only                   dependencies/playground_token.go
@@ -118,10 +119,19 @@ func mountSurfaces(params AppParams) *http.ServeMux {
 	// Served contract-first from packages/contracts/api/internal/v1 (strict
 	// server in internal/igen), NOT wrapped by the /api/ user-JWT
 	// middleware. Every operation passes the deny-by-default runnerAuthGate
-	// (BFF Task-JWT or publisher-cc verified against the path execution id)
-	// and is never gateway-advertised. All runner callbacks are keyed to the
-	// execution id — tasks-github-native §9.2.
-	mux.Handle(internalV1+"/executions/", newInternalV1Handler(params.InternalDeps))
+	// (BFF Task-JWT or publisher-cc verified against the path id) and is never
+	// gateway-advertised. Every runner callback is keyed to the run CYCLE the
+	// platform dispatched the pod for — the id it carries as AEP_TASK_ID.
+	//
+	// TWO prefixes, ONE handler: the validation callbacks live under the feature
+	// that owns them, and token refresh keeps the `/executions/` prefix it was
+	// published under (the id it names is a cycle, the same wire-compat debt
+	// AEP_TASK_ID carries). Both must be mounted — the inner mux registers the
+	// contract's full paths, so a prefix that is not mounted here 404s before any
+	// handler or auth gate is reached.
+	internalHandler := newInternalV1Handler(params.InternalDeps)
+	mux.Handle(internalV1+"/executions/", internalHandler)
+	mux.Handle(internalV1+"/validation/", internalHandler)
 
 	// ── internal MCP discovery (POST /internal/v1/mcp) ───────────────────────
 	// A raw (non-Huma) JSON-RPC mount: the MCP server the agents service's

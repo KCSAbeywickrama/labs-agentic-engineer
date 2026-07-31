@@ -120,11 +120,21 @@ export function ValidationPage({
 }) {
   const status = useProjectStatus(projectName);
   const deploy = status.data?.deploy;
-  const version = deploy?.version ?? "";
   const running = deploy?.validation === "running";
 
-  // The deployed version's runs: the newest is the one that landed it, and its
-  // validation record is this page's subject.
+  // The version this page is about is the NEWEST run's — the same run
+  // `deploy.validation` (the chip) describes.
+  //
+  // NOT deploy.version, which names the newest SUCCEEDED run. Validation is the
+  // last cycle before a run settles, so while it is in flight the run is still
+  // `running` and deploy.version names either nothing (the first version) or the
+  // PREVIOUS one. Keyed on that, this page said "No validation has run yet" about
+  // a validation that was running, and on any later build would have shown the
+  // previous version's report under a chip reading "Validating".
+  const version = status.data?.build.version ?? "";
+
+  // The version's runs: the newest is the one that landed it, and its validation
+  // record is this page's subject.
   const runs = useBuildRuns(projectName, version || undefined);
   const run = runs.data?.runs?.[0];
   // The verdict VALUE drives every decision below. Deriving them from the chip's

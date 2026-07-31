@@ -40,7 +40,21 @@ type mergeDecision struct {
 }
 
 // decideAutoMerge IS the merge policy: a pull request whose Resolves list
-// references at least one agent-work issue in the run's milestone squash-merges.
+// references at least one issue THIS RUN IS WORKING in its milestone
+// squash-merges. That is the milestone's agent work (`aep`) plus its validation
+// issue (`aep:validation`), which is the validation cycle's whole output.
+//
+// The validation issue has to be named explicitly precisely BECAUSE it carries
+// no `aep` label: that omission keeps it out of the working set so it cannot hold
+// the settle predicate open, and reading it as "not this run's work" here would
+// leave the validation cycle's pull request — tests, report and all — sitting
+// unmerged until its landing deadline, so the run could never read a verdict.
+// One label decision, two opposite consequences; this is the second one.
+//
+// Merging it is safe for the same reason it was excluded: OpenNonGateWork
+// subtracts the validation issue either way, so closing it moves no predicate.
+// It also has to close — an open validation issue left in a settled milestone is
+// what the reconcile sweep sees as unworked.
 //
 // There is deliberately no verification BEFORE the merge. The verification is
 // the POST-MERGE build: the merge is what triggers it, so gating the merge on a
@@ -61,7 +75,8 @@ func decideAutoMerge(resolves []int, milestoneIssues []sourcecontrol.IssueInfo) 
 	}
 	work := make(map[int]bool, len(milestoneIssues))
 	for _, iss := range milestoneIssues {
-		if delivery.HasLabel(iss.Labels, delivery.LabelAgentWork) {
+		if delivery.HasLabel(iss.Labels, delivery.LabelAgentWork) ||
+			delivery.HasLabel(iss.Labels, delivery.LabelValidationWork) {
 			work[iss.Number] = true
 		}
 	}
@@ -72,9 +87,9 @@ func decideAutoMerge(resolves []int, milestoneIssues []sourcecontrol.IssueInfo) 
 		}
 	}
 	if len(matched) == 0 {
-		return mergeDecision{Reason: "no resolved issue is agent work in this milestone"}
+		return mergeDecision{Reason: "no resolved issue is this run's work in this milestone"}
 	}
-	return mergeDecision{Merge: true, Reason: "resolves agent work in the run's milestone", Matched: matched}
+	return mergeDecision{Merge: true, Reason: "resolves this run's work in its milestone", Matched: matched}
 }
 
 // The path diff itself is delivery.DiffComponents in the domain root: the run

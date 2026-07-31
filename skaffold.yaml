@@ -34,6 +34,10 @@ build:
     # k3d is detected automatically — Skaffold loads images via `k3d image import`
     # instead of pushing to a registry. TS service images use this path.
     push: false
+    # Dockerfiles use BuildKit features (--mount); Skaffold's API builder
+    # defaults to the legacy builder even on daemons whose CLI defaults to
+    # BuildKit.
+    useBuildkit: true
   artifacts:
     # aep-api requires a BuildKit named context for the skills/ directory.
     # A custom builder passes --build-context so the existing Dockerfile is

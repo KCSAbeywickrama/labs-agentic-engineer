@@ -22,8 +22,10 @@
  * playground's `runTurn`:
  *
  *   read project → files map → materialize snapshot (+ working-tree skills)
- *   → POST one workspace-shape turn → stream parts → fold tool-calls
- *   → verify manifest sha256s (WARN, never block) → diff-write the project
+ *   → POST one workspace-shape turn → stream parts, folding + diff-writing each
+ *     tool-call to disk the INSTANT it arrives (files show up as the agent
+ *     creates them, not batched to turn end)
+ *   → verify manifest sha256s (WARN, never block)
  *   → materialize derived artifacts → record the folded hash (D20).
  *
  * The conversation itself is persisted by the SERVICE via the injected
@@ -34,8 +36,8 @@ import { FileBundle, applyToolCall, streamTurn, type StreamPart, type TurnReques
 import { filterTurnSnapshot } from "@aep/agents/conversation/load-workspace";
 import { sha256Hex } from "@aep/agents/shared/hash";
 import { loadRepoSkills, type RepoSkill } from "../kit/skills.js";
-import { reconcileDir, type FileChange } from "../kit/project-fs.js";
-import { materializeDerived, type DerivedNote } from "../kit/derived.js";
+import { reconcileFile, type FileChange } from "../kit/project-fs.js";
+import { compileDslDerived, projectCellDiagram, CELL_DIAGRAM_PATH, type DerivedNote } from "../kit/derived.js";
 import { FsSpecWorkspace, hashFiles, playConversationId } from "../ports/spec-workspace.js";
 import type { ProjectState } from "../state/project.js";
 import { saveProjectState } from "../state/project.js";
@@ -100,37 +102,75 @@ export async function runSpecTurn(session: TurnSession, instruction: string, opt
   const toolCalls: StreamPart[] = [];
   let manifest: StreamPart | undefined;
   let streamError: string | undefined;
+
+  // Fold each tool-call over the SERVER'S filtered view of the snapshot — the
+  // state the agent actually saw — and diff-write it to disk AS IT STREAMS, so
+  // a file lands the instant the agent finishes emitting its tool-call rather
+  // than batched to turn end. Tool-calls that stream before a mid-stream error
+  // are real server-side mutations, so they still apply. Plan turns
+  // (`foldToDisk === false`) mutate nothing under specs/ — they only observe.
+  const fold = opts.foldToDisk !== false;
+  const view = filterTurnSnapshot(before);
+  const bundle = new FileBundle(view);
+  const after: Record<string, string> = { ...before };
+  const changes: FileChange[] = [];
+  // Derived-artifact notes keyed by output so a source touched twice in a turn
+  // (or the aggregate cell-diagram rebuilt on every design change) collapses to
+  // one last-write-wins note; the files themselves are refreshed on disk live.
+  const derived = new Map<string, DerivedNote>();
+
+  const foldToolCall = (part: StreamPart): void => {
+    toolCalls.push(part);
+    if (!fold) return;
+    const input = part.input as { path?: unknown } | undefined;
+    const path = typeof input?.path === "string" ? input.path : undefined;
+    applyToolCall(bundle, part);
+    if (!path) return;
+    // A rejected op (INVALID_YAML, ALREADY_EXISTS, …) leaves the bundle
+    // unchanged, so reconcileFile diffs equal and writes nothing.
+    const change = reconcileFile(projectDir, path, after[path], bundle.read(path));
+    if (!change) return;
+    changes.push(change);
+    if (bundle.has(path)) after[path] = bundle.read(path)!;
+    else delete after[path];
+    // Refresh this change's derived views immediately: the *.dsl → .excalidraw
+    // compile is per-file; any specs/design/ change re-rolls the aggregate
+    // cell-diagram from the current snapshot (last rebuild wins the final view).
+    if (change.kind !== "remove") {
+      const note = compileDslDerived(projectDir, change.path);
+      if (note) derived.set(change.path, note);
+    }
+    if (change.path.startsWith("specs/design/")) {
+      derived.set(CELL_DIAGRAM_PATH, projectCellDiagram(projectDir, state.slug, after));
+    }
+  };
+
   try {
     for await (const part of streamTurn(session.baseUrl, conversationId, body, { headers: session.headers })) {
       parts.push(part);
       opts.onPart?.(part);
-      if (part.type === "tool-call") toolCalls.push(part);
+      if (part.type === "tool-call") foldToolCall(part);
       if (part.type === "manifest") manifest = part;
       if (part.type === "error") streamError = String(part.error ?? "stream error");
     }
   } catch (e) {
-    // Transport/pre-stream failure: leave the project untouched.
+    // Transport failure mid-stream: tool-calls already folded above are
+    // committed server-side and on disk (with their derived views), so report
+    // them rather than claiming the project is untouched.
     return {
       parts,
       toolCalls,
-      changes: [],
-      derivedNotes: [],
+      changes,
+      derivedNotes: [...derived.values()],
       manifestMismatches: [],
       error: e instanceof Error ? e.message : String(e),
     };
   }
 
-  if (opts.foldToDisk === false) {
+  if (!fold) {
     return { parts, toolCalls, changes: [], derivedNotes: [], manifestMismatches: [], ...(streamError ? { error: streamError } : {}) };
   }
 
-  // Fold the streamed tool-calls (canonical ops) over the SERVER'S filtered
-  // view of the snapshot — the state the agent actually saw — then write the
-  // diff. Tool-calls that streamed before a mid-stream error are real
-  // server-side mutations, so they still apply.
-  const view = filterTurnSnapshot(before);
-  const bundle = new FileBundle(view);
-  for (const tc of toolCalls) applyToolCall(bundle, tc);
   const folded = bundle.snapshot();
 
   // Cheap D14 parity: the terminal manifest's sha256s must match our fold.
@@ -142,16 +182,12 @@ export async function runSpecTurn(session: TurnSession, instruction: string, opt
     }
   }
 
-  // Rebuild the full project state: files the turn filter hid stay untouched;
-  // deletions apply only to files the agent could see.
-  const after: Record<string, string> = { ...before };
-  for (const path of Object.keys(view)) {
-    if (!(path in folded)) delete after[path];
-  }
-  Object.assign(after, folded);
-  const changes = reconcileDir(projectDir, before, after, false);
-
-  const derivedNotes = materializeDerived(projectDir, state.slug, changes, after);
+  // `after`, `changes`, and `derived` were all built incrementally in the
+  // stream loop above: files the turn filter hid were never touched, deletions
+  // applied only to files the agent could see (via removeFile tool-calls), and
+  // every derived view (.excalidraw / cell-diagram.gen.json) was refreshed as
+  // its source landed.
+  const derivedNotes = [...derived.values()];
 
   state.lastFoldedHash = hashFiles(ws.readSpecFiles());
   saveProjectState(projectDir, state);

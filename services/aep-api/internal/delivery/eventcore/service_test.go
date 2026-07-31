@@ -153,17 +153,34 @@ func TestService_AutoMergeIssuesTheSquashMergeOnce(t *testing.T) {
 	if got := h.countRequests(http.MethodPut, "/repos/acme/widgets/pulls/42/merge"); got != 1 {
 		t.Fatalf("the merge must be issued exactly once across a delivery and its redelivery, got %d", got)
 	}
-	// The milestone read must be scoped — milestone number, open state, agent
-	// work — or the predicate would be decided against the wrong population.
+	// The milestone read must be scoped to the milestone and to open issues, or
+	// the predicate would be decided against the wrong population.
+	milestoneRead := false
 	for _, r := range h.stub.Requests() {
 		if r.Method == http.MethodGet && r.Path == "/repos/acme/widgets/issues" {
-			for _, want := range []string{"milestone=7", "state=open", "labels=aep"} {
+			milestoneRead = true
+			for _, want := range []string{"milestone=7", "state=open"} {
 				if !strings.Contains(r.Query, want) {
 					t.Fatalf("milestone read query %q must carry %q", r.Query, want)
 				}
 			}
+			// And it must NOT narrow by label. This endpoint's `labels` is AND, so
+			// any value here excludes some population the policy accepts — it used
+			// to send `labels=aep`, which hid the milestone's `aep:validation` issue
+			// and left every validation pull request unmerged. The label decision
+			// belongs to decideAutoMerge, over the labels this read returns.
+			if strings.Contains(r.Query, "labels=") {
+				t.Fatalf("milestone read query %q must not narrow by label — that decision is the policy's", r.Query)
+			}
 			break
 		}
+	}
+	// Nothing above fails when the read never happened — the loop simply matches
+	// no request and every assertion inside it is skipped. So a read that moved to
+	// another path would leave the label guard, which is the whole reason these
+	// assertions exist, silently testing nothing.
+	if !milestoneRead {
+		t.Fatal("the merge policy must read the milestone's issues; no such request was made")
 	}
 }
 

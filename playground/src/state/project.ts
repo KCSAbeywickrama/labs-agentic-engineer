@@ -56,10 +56,6 @@ export function conversationsDir(projectDir: string): string {
   return join(stateDir(projectDir), "conversations");
 }
 
-export function promptFile(projectDir: string): string {
-  return join(stateDir(projectDir), "prompt.md");
-}
-
 function stateFile(projectDir: string): string {
   return join(stateDir(projectDir), "project.json");
 }
@@ -86,19 +82,6 @@ export function saveProjectState(projectDir: string, state: ProjectState): void 
   const tmp = `${file}.tmp`;
   writeFileSync(tmp, JSON.stringify(state, null, 2), "utf8");
   renameSync(tmp, file);
-}
-
-/** The stored create-prompt (the console's create prompt mirror), or null. */
-export function readPrompt(projectDir: string): string | null {
-  const file = promptFile(projectDir);
-  if (!existsSync(file)) return null;
-  const text = readFileSync(file, "utf8").trim();
-  return text === "" ? null : text;
-}
-
-export function savePrompt(projectDir: string, prompt: string): void {
-  mkdirSync(stateDir(projectDir), { recursive: true });
-  writeFileSync(promptFile(projectDir), prompt.trim() + "\n", "utf8");
 }
 
 // --- Recent projects (global, ~/.aep-playground/recents.json) ---------------

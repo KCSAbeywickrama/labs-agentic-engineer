@@ -94,6 +94,12 @@ const mockReport = {
   data: undefined as { content: string } | undefined,
 };
 
+// build.version is the NEWEST run's version and deploy.version the newest
+// SUCCEEDED one; they differ for exactly as long as a run is live, which is the
+// whole time validation is running. Both are settable so a test can pin that gap.
+let mockBuildVersion = "v1";
+let mockDeployVersion = "v1";
+
 vi.mock("../../projects/api/queries", () => ({
   useProjectStatus: () => ({
     isPending: false,
@@ -102,18 +108,30 @@ vi.mock("../../projects/api/queries", () => ({
     refetch: vi.fn(),
     data: {
       repoUrl: "https://github.com/acme/demo",
-      deploy: { version: "v1", validation: mockValidation },
+      build: { version: mockBuildVersion, status: "running" },
+      deploy: { version: mockDeployVersion, validation: mockValidation },
     },
   }),
 }));
 
 vi.mock("../../builds/api/queries", () => ({
-  useBuildRuns: () => ({
+  // Models two things the real hook does, both of which a laxer mock would hide:
+  // `enabled: Boolean(tag)` (no tag → the query never runs, so no data), and
+  // per-version scoping (list-build-runs answers with THAT version's runs). The
+  // run under test belongs to the newest version, so asking for any other tag
+  // finds nothing — which is what makes "asked for the wrong version" visible.
+  useBuildRuns: (_project: string, tag: string | undefined) => ({
     isPending: false,
     isError: false,
     error: null,
     refetch: vi.fn(),
-    data: { tag: "v1", milestoneNumber: 1, runs: mockRun ? [mockRun] : [] },
+    data: tag
+      ? {
+          tag,
+          milestoneNumber: 1,
+          runs: mockRun && tag === mockBuildVersion ? [mockRun] : [],
+        }
+      : undefined,
   }),
 }));
 
@@ -174,6 +192,8 @@ function renderPage(view: "logs" | undefined, onViewChange = vi.fn()) {
 afterEach(() => {
   mockValidation = "none";
   mockRun = undefined;
+  mockBuildVersion = "v1";
+  mockDeployVersion = "v1";
   mockCriteria.isPending = false;
   mockCriteria.isError = false;
   mockCriteria.data = undefined;
@@ -201,6 +221,39 @@ describe("ValidationPage lifecycle", () => {
     // The feed streams the WHOLE run; the page filters it to the one phase it
     // owns, so a coding cycle's output never leaks onto the validation page.
     expect(screen.getByTestId("run-feed")).toHaveTextContent("validation");
+  });
+
+  // The regression: validation is the last cycle before a run settles, so while
+  // it runs the run is still `running` and deploy.version — the newest SUCCEEDED
+  // run's version — names nothing on a project's first version. Keyed on that,
+  // the page found no run at all and claimed validation had not started, while
+  // the header chip beside it read "Validating".
+  it("finds the run mid-validation on a first version, when nothing has been delivered yet", () => {
+    mockValidation = "running";
+    mockDeployVersion = ""; // no spec-build run has SUCCEEDED yet
+    mockBuildVersion = "v1"; // ...but v1's run is live and validating
+    mockRun = run({ cycles: [validationCycle] });
+
+    renderPage(undefined);
+
+    expect(screen.queryByText(/No validation has run yet/)).not.toBeInTheDocument();
+    expect(screen.getByTestId("run-feed")).toHaveTextContent("validation");
+  });
+
+  // The same gap on a later build points the other way: deploy.version still
+  // names the PREVIOUS version, so keying on it would show v1's settled report
+  // under a chip announcing that v2 is validating.
+  it("follows the newest run, not the last delivered version", () => {
+    mockValidation = "running";
+    mockDeployVersion = "v1"; // v1 is live in dev
+    mockBuildVersion = "v2"; // v2's run is validating right now
+    mockRun = run({ cycles: [validationCycle] });
+
+    renderPage(undefined);
+
+    // The run story is fetched for v2 — the version the chip is talking about.
+    expect(screen.getByTestId("run-feed")).toHaveTextContent("validation");
+    expect(screen.queryByText(/No validation has run yet/)).not.toBeInTheDocument();
   });
 
   it("shows the feed for a run whose validation failed", () => {

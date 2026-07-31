@@ -121,7 +121,11 @@ func gitOut(t *testing.T, gitDir string, args ...string) string {
 	cmd.Env = append(os.Environ(),
 		"GIT_CONFIG_GLOBAL="+os.DevNull,
 		"GIT_CONFIG_SYSTEM="+os.DevNull,
-		"GIT_TERMINAL_PROMPT=0")
+		"GIT_TERMINAL_PROMPT=0",
+		// Scrubbing the config above also scrubs the developer's identity, and
+		// object-writing commands (`tag -a`) refuse to run without one.
+		"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@aep.local",
+		"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@aep.local")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)

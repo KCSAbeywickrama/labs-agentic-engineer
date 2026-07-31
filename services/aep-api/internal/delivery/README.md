@@ -101,7 +101,7 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
 | `GateResolver` (author dependencies + mint gates into a milestone) | needs | `build` → `dependencies/provisioning`. Gates are dispatch holds, never agent work |
 | `BuildTrigger` (trigger at commit + list a component's runs) | needs | `clients/openchoreo` — the fan-out, and the run list the re-trigger budget is derived from |
 | `IssueClient` (mint · milestone membership · milestone counts · assign) · `PRReader` · `PRMerger` | needs | `sourcecontrol` — every GitHub write the event plane makes, on the org's own credential |
-| `ValidationContext` · `ValidationCredentials` | offers | the S2S runner callbacks (`/internal/v1`, via the internalServer — not the public edge) |
+| `ValidationContext` · `ValidationCredentials` | offers | the S2S runner callbacks (`/internal/v1/validation/{cycleId}/…`, via the internalServer — not the public edge). Keyed by the CYCLE the pod was dispatched for, which is the only identity a runner has |
 
 ## Owns
 - The **executions** store (now provisioning gates only) and the Temporal `Runtime` + the one workflow on it.
@@ -168,6 +168,12 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   no-op. Gates (`aep:provision` + `aep:dep/<slug>`, minted by `dependencies/provisioning`) and the
   validation issue (`aep:validation`) deliberately do NOT carry `aep` — a gate is a dispatch hold and the
   validation issue is a phase of the run, and neither may hold the settle predicate open.
+  The corollary, and the trap: a read that NARROWS on `aep` cannot see either of them. So a decision that
+  must weigh them (the auto-merge policy, which merges the validation cycle's pull request) reads the
+  milestone's open issues UNFILTERED and decides on the labels itself. `?labels=` on the REST issues
+  endpoint is AND, so there is no filter that returns both populations anyway — and a label predicate split
+  across the fetch and the decision is one rule in two places, which is how the validation cycle's pull
+  request once ended up declined as "not this run's work".
 - **Milestone assignment rides issue creation.** A plan costs `1+N` content-generating requests against
   GitHub's 80-per-minute ceiling: one milestone create plus one issue create per Task. Never
   create-then-PATCH, and never a label pre-create per issue (`sourcecontrol` memoises the ensure).

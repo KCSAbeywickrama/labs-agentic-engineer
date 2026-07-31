@@ -217,6 +217,17 @@ func (f *fakeIssues) withWork(milestone int, numbers ...int) *fakeIssues {
 	return f
 }
 
+// withValidationIssue puts the milestone's open VALIDATION issue in it, labelled
+// the way the minter files it: `aep:validation` and nothing else. The absent
+// `aep` label is the point — it keeps the issue out of the dispatch working set,
+// and any read that narrows on `aep` cannot see this issue at all.
+func (f *fakeIssues) withValidationIssue(milestone, number int) *fakeIssues {
+	f.byMilestone[milestone] = append(f.byMilestone[milestone], sourcecontrol.IssueInfo{
+		Number: number, State: "open", Labels: []string{delivery.LabelValidationWork},
+	})
+	return f
+}
+
 // withCounts gives a milestone its open-issue populations: gates, working set
 // ("aep", non-gate, non-validation) and grand total. work and total are stated
 // separately on purpose — the gap between them is the ledger, the population
