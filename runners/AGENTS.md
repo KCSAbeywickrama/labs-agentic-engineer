@@ -49,6 +49,11 @@ edits (see `deployments/scripts/setup-k3d.sh`).
   strip step: an unstripped marker region would inject the wrong procedure, so
   there is no "raw" path that skips it. Mode is stated by the entrypoint
   (`BaseAgentConfig.mode`, default `github`), never inferred.
+  **Part 2 is the single home of the per-component platform contract** (App Path,
+  `workload.yaml`, dependency wiring, the runtime rules). Part 1 stays a
+  dispatcher over the issue set and the git record and never restates a Part 2
+  rule; the tie-break is that a rule naming `git`/`gh`/an issue/a PR is Part 1's
+  and one naming a path, a file or an env var is Part 2's.
   **The platform text is the trunk** — gate a region only when the ungated
   version would make a mode attempt something impossible, and prefer gating one
   side to writing two variants. A *paired* region is prose duplicated per mode
