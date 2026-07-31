@@ -270,7 +270,8 @@ describe("BuildsPage — one version's story", () => {
     }
     // …and the session behind it stays visible, because the re-entry loop is
     // the thing a reader of a multi-session run is trying to understand.
-    expect(screen.getByText("EARLIER BUILD SESSIONS")).toBeInTheDocument();
+    // …below the card, not inside it — the card is the strip and the NOW.
+    expect(screen.getByText("EARLIER BUILD SESSIONS OF V2")).toBeInTheDocument();
     expect(screen.getByText(/merged .* as dcb1edc5/)).toBeInTheDocument();
   });
 

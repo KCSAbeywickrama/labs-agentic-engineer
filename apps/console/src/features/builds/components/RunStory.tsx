@@ -33,11 +33,9 @@ import { StatusChip } from "../../../components/StatusChip";
 import type { components } from "../../../generated/aep-api";
 import { useCancelRun, useCycleBuilds } from "../api/queries";
 import { useRunProgress } from "../hooks/useRunProgress";
-import { provisioningStage } from "../lib/provisioning";
 import { buildGlance } from "../lib/runGlance";
 import {
   BUILD_CYCLE_KINDS,
-  buildSessionLabel,
   isTerminalRun,
   runHold,
   runOriginLabel,
@@ -47,8 +45,6 @@ import {
 } from "../lib/runView";
 import { sessionIssues, sessionStages } from "../lib/sessionSpine";
 import { runDuration, runStamp } from "../lib/format";
-import { EarlierSessions } from "./EarlierSessions";
-import { ProvisioningGates } from "./ProvisioningGates";
 import { RunDelivered } from "./RunDelivered";
 import { RunGlanceStrip } from "./RunGlanceStrip";
 import { RunHoldNotice } from "./RunHoldNotice";
@@ -94,7 +90,6 @@ export function RunStory({
   const waiting = run.state === "waiting";
   const planning = run.state === "planning";
   const work = milestone?.work ?? [];
-  const gates = milestone?.gates ?? [];
 
   const hold = runHold(
     run,
@@ -119,10 +114,9 @@ export function RunStory({
     (BUILD_CYCLE_KINDS as readonly string[]).includes(c.kind),
   );
   // The glance narrates the CURRENT build session. Earlier sessions of the same
-  // run are history the strip cannot show without becoming the rail again — the
-  // session label says which one the reader is looking at.
+  // run are history, listed below the card — putting them inside it turned the
+  // card into the rail it replaced.
   const current = cycles.at(-1);
-  const sessionIndex = cycles.length - 1;
 
   // A settled run opens no stream until asked; a live one streams unprompted,
   // because it is what the reader came to watch.
@@ -136,7 +130,6 @@ export function RunStory({
     Boolean(current?.mergeSha),
   );
 
-  const provisioning = provisioningStage(gates);
   const stages = current ? sessionStages({ cycle: current, work, builds }) : [];
   // Numbered WITHIN the strip, not across the run. The rail this replaced
   // counted straight through every session (…6, 7, 8) because all of them were
@@ -235,27 +228,8 @@ export function RunStory({
           <>
             <Divider sx={{ my: 2 }} />
 
-            {/* Open gates hold every session, so they stay expanded: "why is
-                nothing moving" is answered where movement stopped. */}
-            {provisioning && provisioning.state !== "done" && (
-              <Box sx={{ mb: 2 }}>
-                <ProvisioningGates
-                  projectName={projectName}
-                  gates={gates}
-                  state={provisioning.state}
-                />
-              </Box>
-            )}
-
             {current ? (
               <Stack spacing={2}>
-                {/* Sessions behind the current one — the loop, kept visible. */}
-                <EarlierSessions cycles={cycles.slice(0, -1)} />
-                {sessionIndex > 0 && (
-                  <Typography variant="caption" color="text.secondary">
-                    {buildSessionLabel(current, sessionIndex)}
-                  </Typography>
-                )}
                 <RunGlanceStrip stages={glance.stages} nowIndex={glance.nowIndex} />
                 {/* A succeeded run whose flow actually finished has no "now" to
                     narrate: what it produced, and where that now lives, is the

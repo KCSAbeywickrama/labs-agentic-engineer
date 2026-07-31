@@ -28,6 +28,7 @@ import {
   Link,
   Stack,
   Typography,
+  alpha,
 } from "@wso2/oxygen-ui";
 import { ChevronRight } from "@wso2/oxygen-ui-icons-react";
 import { Link as RouterLink } from "@tanstack/react-router";
@@ -172,12 +173,16 @@ export function MilestonePanel({
         </Stack>
 
         {/* Failures first: the only bucket that needs a human. */}
-        <IssueGroup title="Needs attention" projectName={projectName} issues={failed} tone="error.main" />
+        <IssueGroup title="Needs attention" projectName={projectName} issues={failed} tone="error.main" counted />
+        {/* The one bucket with an agent on it right now gets a surface of its
+            own — it is the panel's answer to "what is being worked", and a
+            plain row buried it among the six open ones. */}
         <IssueGroup
           title="In progress"
           projectName={projectName}
           issues={inProgress}
           tone="info.main"
+          highlight
           {...(claimedBy ? { note: claimedBy } : {})}
         />
         <IssueGroup
@@ -185,6 +190,7 @@ export function MilestonePanel({
           projectName={projectName}
           issues={open}
           tone="text.disabled"
+          counted
           note={(t) =>
             t.derivedStatus === "on_hold" && t.blockedBy?.length
               ? `Waiting for ${t.blockedBy.join(", ")}`
@@ -196,7 +202,7 @@ export function MilestonePanel({
         {gates.length > 0 && (
           <Box sx={{ mt: 2 }}>
             <Divider sx={{ mb: 1.5 }} />
-            <GroupLabel title="Connections" count={gates.length} />
+            <GroupLabel title="Connections" />
             <Stack spacing={1} sx={{ mt: 1 }}>
               {gates.map((gate) => (
                 <Stack key={gate.issueNumber} direction="row" spacing={1} sx={{ alignItems: "baseline" }}>
@@ -258,13 +264,20 @@ function Dot({ color }: { color: string }) {
   );
 }
 
-function GroupLabel({ title, count }: { title: string; count: number }) {
+/**
+ * A section heading. The count is suffixed only where it TELLS the reader
+ * something they cannot see: how many are hidden below a fold (closed), or how
+ * long a list runs (open). "In progress" and "Connections" are short and fully
+ * on screen, so a count there is noise.
+ */
+function GroupLabel({ title, count }: { title: string; count?: number }) {
   return (
     <Typography
       variant="caption"
       sx={{ fontWeight: 700, letterSpacing: "0.08em", color: "text.secondary" }}
     >
-      {title.toUpperCase()} · {count}
+      {title.toUpperCase()}
+      {count === undefined ? "" : ` · ${count}`}
     </Typography>
   );
 }
@@ -317,28 +330,51 @@ function IssueGroup({
   issues,
   tone,
   note,
+  highlight = false,
+  counted = false,
 }: {
   title: string;
   projectName: string;
   issues: TaskView[];
   tone: string;
   note?: (issue: TaskView) => string | undefined;
+  /** Give each row its own tinted surface — for the bucket that is moving. */
+  highlight?: boolean;
+  /** Suffix the heading with the count. */
+  counted?: boolean;
 }) {
   if (issues.length === 0) return null;
   return (
     <Box sx={{ mt: 2 }}>
-      <GroupLabel title={title} count={issues.length} />
+      <GroupLabel title={title} {...(counted ? { count: issues.length } : {})} />
       <Stack spacing={1} sx={{ mt: 1 }}>
         {issues.map((issue) => {
           const detail = note?.(issue);
-          return (
+          const row = (
             <IssueRow
-              key={issue.issueNumber}
               projectName={projectName}
               issue={issue}
               tone={tone}
               {...(detail ? { note: detail } : {})}
             />
+          );
+          if (!highlight) {
+            return <Box key={issue.issueNumber}>{row}</Box>;
+          }
+          return (
+            <Box
+              key={issue.issueNumber}
+              sx={{
+                px: 1.25,
+                py: 1,
+                borderRadius: 1,
+                border: "1px solid",
+                borderColor: (t) => alpha(t.palette.info.main, 0.25),
+                bgcolor: (t) => alpha(t.palette.info.main, 0.07),
+              }}
+            >
+              {row}
+            </Box>
           );
         })}
       </Stack>

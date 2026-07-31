@@ -71,13 +71,24 @@ export function RunNowPanel({
 
   return (
     <Stack spacing={1.5}>
-      <Stack spacing={0.5}>
+      {/* NOW sits in a left gutter rather than stacked above: the label is a
+          margin note, and giving it its own line pushed the sentence a reader
+          actually came for further down the card. */}
+      <Stack direction="row" spacing={2} sx={{ alignItems: "flex-start" }}>
         <Typography
           variant="caption"
-          sx={{ fontWeight: 700, letterSpacing: "0.08em", color: "info.main" }}
+          sx={{
+            fontWeight: 700,
+            letterSpacing: "0.08em",
+            color: "info.main",
+            flexShrink: 0,
+            width: 34,
+            mt: 0.25,
+          }}
         >
           NOW
         </Typography>
+        <Stack spacing={1.25} sx={{ minWidth: 0, flexGrow: 1 }}>
         <Typography variant="body1" sx={{ fontWeight: 600 }}>
           {glanceHeadline(stage)}{" "}
           <Typography component="span" variant="caption" color="text.disabled">
@@ -100,19 +111,20 @@ export function RunNowPanel({
             {stage.fact} →
           </Link>
         )}
+
+        <IssueChips
+          issues={issues}
+          {...(issuesCaption ? { caption: issuesCaption } : {})}
+        />
+
+        <AgentLogDrawer
+          lines={lines}
+          phase={logPhase}
+          showLog={showLog}
+          onOpenLog={onOpenLog}
+        />
+        </Stack>
       </Stack>
-
-      <IssueChips
-        issues={issues}
-        {...(issuesCaption ? { caption: issuesCaption } : {})}
-      />
-
-      <AgentLogDrawer
-        lines={lines}
-        phase={logPhase}
-        showLog={showLog}
-        onOpenLog={onOpenLog}
-      />
 
       {glance.ahead.length > 0 && (
         <Typography variant="caption" color="text.disabled">

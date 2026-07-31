@@ -71,7 +71,7 @@ export function RunGlanceStrip({
               <Box
                 aria-hidden
                 sx={{
-                  width: 24,
+                  width: 16,
                   height: 2,
                   borderRadius: 1,
                   flexShrink: 0,
@@ -89,7 +89,7 @@ export function RunGlanceStrip({
                 sx={{
                   alignItems: "center",
                   px: isNow ? 1.25 : 0.5,
-                  py: 0.5,
+                  py: 0.4,
                   borderRadius: 999,
                   ...(isNow && {
                     bgcolor: (t) =>
@@ -119,13 +119,15 @@ export function RunGlanceStrip({
                 >
                   {stage.name}
                 </Typography>
-                {stage.fact && (
+                {/* Only a LANDED fact rides the strip — a pull request number,
+                    a merge SHA, "5 green". A fact about the stage that is
+                    currently running (an attempt counter) is already in the NOW
+                    line right below, and saying it twice cost the strip the
+                    width it needs to stay on one row. */}
+                {stage.fact && done && (
                   <Typography
                     variant="caption"
-                    sx={{
-                      fontFamily: "monospace",
-                      color: done ? "success.main" : "text.secondary",
-                    }}
+                    sx={{ fontFamily: "monospace", color: "success.main" }}
                   >
                     {stage.fact}
                   </Typography>

@@ -30,7 +30,13 @@ type RunCycleView = components["schemas"]["RunCycleView"];
  * hide the very loop a reader is trying to understand. What each one needs is
  * not five stages but its outcome: what it opened, and whether it landed.
  */
-export function EarlierSessions({ cycles }: { cycles: RunCycleView[] }) {
+export function EarlierSessions({
+  cycles,
+  tag,
+}: {
+  cycles: RunCycleView[];
+  tag: string;
+}) {
   if (cycles.length === 0) return null;
 
   return (
@@ -45,7 +51,7 @@ export function EarlierSessions({ cycles }: { cycles: RunCycleView[] }) {
           color: "text.secondary",
         }}
       >
-        EARLIER BUILD SESSIONS
+        EARLIER BUILD SESSIONS OF {tag.toUpperCase()}
       </Typography>
       <Stack spacing={0.75}>
         {cycles.map((cycle, i) => (

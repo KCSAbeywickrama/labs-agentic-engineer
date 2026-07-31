@@ -36,7 +36,8 @@ import { taskKeys } from "../../tasks/api/keys";
 import { partitionIssues } from "../../tasks/lib/issueRows";
 import { useProjectStatus } from "../../projects/api/queries";
 import { useBuildRuns, useBuilds } from "../api/queries";
-import { buildSessionLabel, versionIsLive } from "../lib/runView";
+import { BUILD_CYCLE_KINDS, buildSessionLabel, versionIsLive } from "../lib/runView";
+import { EarlierSessions } from "./EarlierSessions";
 import { MilestonePanel } from "./MilestonePanel";
 import { RunHistoryList } from "./RunHistoryList";
 import { RunStory } from "./RunStory";
@@ -77,6 +78,14 @@ export function BuildsPage({
   // page leads with and the tail is history.
   const current = runList[0];
   const earlier = runList.slice(1);
+
+  // The current run's build sessions behind the one the card narrates. The
+  // validation cycle is not a build session, so it is filtered the same way the
+  // card filters it.
+  const currentCycles = (current?.cycles ?? []).filter((c) =>
+    (BUILD_CYCLE_KINDS as readonly string[]).includes(c.kind),
+  );
+  const earlierSessions = currentCycles.slice(0, -1);
 
   const status = useProjectStatus(projectName);
   const repoUrl = status.data?.repoUrl?.replace(/\/+$/, "");
@@ -253,6 +262,10 @@ export function BuildsPage({
                 {...(milestone ? { milestone } : {})}
               />
             )}
+            {/* The current run's own earlier sessions, then the milestone's
+                earlier runs — both are history, and both belong below the
+                card rather than inside it. */}
+            <EarlierSessions cycles={earlierSessions} tag={selected.tag} />
             <RunHistoryList runs={earlier} tag={selected.tag} />
           </Stack>
 
