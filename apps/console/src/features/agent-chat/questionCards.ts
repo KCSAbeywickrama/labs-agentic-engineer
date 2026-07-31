@@ -50,6 +50,7 @@ function parseOneQuestion(value: unknown): AskQuestionInput | null {
       label: o.label,
       ...(typeof o.description === "string" ? { description: o.description } : {}),
       ...(o.recommended === true ? { recommended: true } : {}),
+      ...(o.freeText === true ? { freeText: true } : {}),
     });
   }
   // Labels are the selection identity on the card AND in the serialized answer;
@@ -156,6 +157,36 @@ export function extractStreamingQuestions(
     i = end + 1;
   }
   return out;
+}
+
+/**
+ * Options whose selection implies TYPING the real answer, when the agent
+ * didn't set the explicit `freeText` flag — "Other", "Something else",
+ * "Type my own answer"… Heuristic drives FOCUS and the answered-check both:
+ * a bare label like "Something else" with no typed text answers nothing.
+ */
+export function isFreeTextOption(opt: AskQuestionOption): boolean {
+  return (
+    opt.freeText === true ||
+    /\b(other|something else|type (in|my)|describe|own answer|specify|custom)\b/i.test(opt.label)
+  );
+}
+
+/**
+ * One question's answered-ness — the submit gate. Free text always answers.
+ * A selection answers UNLESS every selected option is a free-text escape
+ * hatch (explicit flag or heuristic): "Something else" without the something
+ * else is not an answer.
+ */
+export function isQuestionAnswered(q: AskQuestionInput, answer: QuestionAnswer | undefined): boolean {
+  if ((answer?.freeText ?? "").trim().length > 0) return true;
+  const selected = answer?.selected ?? [];
+  if (selected.length === 0) return false;
+  const byLabel = new Map(q.options.map((o) => [o.label, o] as const));
+  return selected.some((label) => {
+    const opt = byLabel.get(label);
+    return opt !== undefined && !isFreeTextOption(opt);
+  });
 }
 
 /**

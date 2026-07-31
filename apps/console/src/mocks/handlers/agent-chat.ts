@@ -143,6 +143,11 @@ export const agentChatHandlers = [
                   description:
                     "Two onboarding paths, two permission models, and pricing that has to serve both. Roughly doubles the v1 scope; usually only worth it when both audiences are already committed.",
                 },
+                {
+                  label: "Something else",
+                  description: "Describe a different primary user in the text field below.",
+                  freeText: true,
+                },
               ],
             },
             {

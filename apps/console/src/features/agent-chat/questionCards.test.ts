@@ -26,6 +26,7 @@ import {
 import {
   answerableQuestionIds,
   extractStreamingQuestions,
+  isQuestionAnswered,
   isQuestionTool,
   parseQuestionsInput,
 } from "./questionCards";
@@ -151,6 +152,44 @@ describe("extractStreamingQuestions", () => {
   it("returns [] for garbage before the questions array", () => {
     expect(extractStreamingQuestions(ASK_QUESTIONS_TOOL, '{"other": [')).toEqual([]);
     expect(extractStreamingQuestions(ASK_QUESTIONS_TOOL, "")).toEqual([]);
+  });
+});
+
+describe("isQuestionAnswered / isFreeTextOption", () => {
+  const OPTS = {
+    question: "q",
+    options: [
+      { label: "Web" },
+      { label: "Something else", description: "Type it in." },
+      { label: "Escape", freeText: true },
+    ],
+  };
+
+  it("free text always answers — including option-less questions", () => {
+    expect(isQuestionAnswered({ question: "q", options: [] }, { selected: [], freeText: "my answer" })).toBe(true);
+    expect(isQuestionAnswered({ question: "q", options: [] }, { selected: [] })).toBe(false);
+  });
+
+  it("a concrete selection answers; nothing selected does not", () => {
+    expect(isQuestionAnswered(OPTS, { selected: ["Web"] })).toBe(true);
+    expect(isQuestionAnswered(OPTS, undefined)).toBe(false);
+  });
+
+  it("a free-text escape hatch alone (flag or heuristic label) does NOT answer until text is typed", () => {
+    expect(isQuestionAnswered(OPTS, { selected: ["Escape"] })).toBe(false);
+    expect(isQuestionAnswered(OPTS, { selected: ["Something else"] })).toBe(false);
+    expect(isQuestionAnswered(OPTS, { selected: ["Something else"], freeText: "custom roles: admin only" })).toBe(true);
+    // A concrete option alongside the hatch still answers.
+    expect(isQuestionAnswered(OPTS, { selected: ["Web", "Escape"] })).toBe(true);
+  });
+
+  it("keeps the parsed freeText flag off the wire", () => {
+    const parsed = parseQuestionsInput(ASK_QUESTION_TOOL, {
+      question: "q",
+      options: [{ label: "A" }, { label: "B", freeText: true }],
+    })![0]!;
+    expect(parsed.options[1]!.freeText).toBe(true);
+    expect(parsed.options[0]!.freeText).toBeUndefined();
   });
 });
 

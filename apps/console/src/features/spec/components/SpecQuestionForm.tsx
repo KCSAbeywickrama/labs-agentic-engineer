@@ -31,7 +31,7 @@ import { Box, Button, Checkbox, Chip, CircularProgress, Radio, Stack, TextField,
 import { Sparkles, Users } from "@wso2/oxygen-ui-icons-react";
 import type { Doc } from "yjs";
 import type { AskQuestionInput, QuestionAnswer } from "@aep/agent-stream";
-import { serializeQuestionAnswer } from "../../agent-chat/questionCards";
+import { isFreeTextOption, isQuestionAnswered, serializeQuestionAnswer } from "../../agent-chat/questionCards";
 import { chatKeyFor, setPendingSeed } from "../../agent-chat/chatStore";
 import { useCurrentAuthor } from "../../agent-chat/currentUser";
 import {
@@ -130,6 +130,16 @@ function QuestionBlock({
   // (in practice) an agent-invented "type my own answer" card: keep it
   // selectable, but checking it moves the caret straight into the text field.
   const freeTextOnly = q.options.length === 0;
+  // A selected escape-hatch option ("Something else", "Other", explicit
+  // freeText flag) means the REAL answer is the text — surface that: the
+  // field grows, gains a helper line, and submit stays gated until typed.
+  const needsText =
+    !freeTextOnly &&
+    selected.some((label) => {
+      const opt = q.options.find((o) => o.label === label);
+      return opt !== undefined && isFreeTextOption(opt);
+    }) &&
+    (answer?.freeText ?? "").trim() === "";
   const noteRef = useRef<HTMLTextAreaElement | null>(null);
   return (
     <Box sx={{ mb: 5 }}>
@@ -161,25 +171,32 @@ function QuestionBlock({
             onSelect={() => {
               const turningOn = !selected.includes(opt.label);
               onSelect(opt.label);
-              // A lone option means the real input is the text — focus it.
-              if (q.options.length === 1 && turningOn) noteRef.current?.focus();
+              // Checking an option whose real input is the text (an "Other" /
+              // "Something else" escape hatch, or a lone option) moves the
+              // caret straight into the field.
+              if (turningOn && (isFreeTextOption(opt) || q.options.length === 1)) {
+                noteRef.current?.focus();
+              }
             }}
           />
         ))}
         <TextField
           size="small"
-          placeholder={
-            freeTextOnly
-              ? "Type your answer…"
-              : "Other — describe your own answer, or add context to a choice…"
-          }
+          label={freeTextOnly ? "Your answer" : "Other — your own answer or extra context"}
+          placeholder={freeTextOnly || needsText ? "Type your answer…" : "Add a note…"}
           value={answer?.freeText ?? ""}
           disabled={disabled}
           multiline
-          {...(freeTextOnly ? { minRows: 2 } : {})}
+          {...(freeTextOnly || needsText ? { minRows: 2 } : {})}
+          {...(needsText
+            ? { helperText: "This choice needs a typed answer — describe it here to continue." }
+            : {})}
           inputRef={noteRef}
           onChange={(e) => onNote(e.target.value)}
-          sx={{ "& .MuiOutlinedInput-root": { borderRadius: 2 } }}
+          sx={{
+            "& .MuiOutlinedInput-root": { borderRadius: 2 },
+            ...(needsText ? { "& .MuiOutlinedInput-notchedOutline": { borderColor: "primary.main" } } : {}),
+          }}
         />
       </Stack>
     </Box>
@@ -228,9 +245,7 @@ export function SpecQuestionForm({
     write(answers.map((a, i) => (i === qi ? { ...a, freeText } : a)));
   };
 
-  const allAnswered = answers.every(
-    (a) => a.selected.length > 0 || (a.freeText ?? "").trim().length > 0,
-  );
+  const allAnswered = entry.questions.every((q, i) => isQuestionAnswered(q, answers[i]));
   // While the batch is still streaming (#270 latency), the form is readable and
   // selectable but cannot submit or skip: the turn is still running, and more
   // questions may yet arrive. The final mirror clears the gate.

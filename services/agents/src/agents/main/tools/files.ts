@@ -108,6 +108,11 @@ const askQuestionOptionSchema = z.object({
     "for a non-expert to decide confidently. Always provide it unless the label is truly self-explanatory.",
   ),
   recommended: z.boolean().optional().describe("Mark the ONE option you recommend (at most one per question)."),
+  freeText: z.boolean().optional().describe(
+    "Set true on an option whose selection requires the user to TYPE their answer (an 'Other' / 'Something else' " +
+    "escape hatch): the form focuses the text field and blocks submit until text is entered. When the ENTIRE " +
+    "question needs a typed answer, prefer an empty options array instead.",
+  ),
 });
 
 export const askQuestionInputSchema = z.object({

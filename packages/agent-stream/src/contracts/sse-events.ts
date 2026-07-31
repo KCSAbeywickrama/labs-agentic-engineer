@@ -144,6 +144,12 @@ export interface AskQuestionOption {
   description?: string;
   /** At most ONE option per question carries this — the agent's recommendation. */
   recommended?: boolean;
+  /**
+   * Selecting this option means the user must TYPE their answer (an
+   * "Other" / "Something else" escape hatch): the form focuses the free-text
+   * field and requires text before submit.
+   */
+  freeText?: boolean;
 }
 
 /**
