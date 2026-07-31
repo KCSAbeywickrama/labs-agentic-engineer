@@ -59,6 +59,8 @@ export interface SpecTurnOptions {
   conversationUuid?: string;
   toolset?: "task-plan";
   mcp?: { url: string; token: string };
+  /** Skill names the service inlines into the turn's prompt up front (#335). */
+  eagerSkills?: string[];
   /** Live rendering hook; every streamed part passes through it. */
   onPart?: (part: StreamPart) => void;
   /** Skip the disk reconcile (plan turns mutate nothing under specs/). */
@@ -93,6 +95,7 @@ export async function runSpecTurn(session: TurnSession, instruction: string, opt
     ...(filesChangedExternally ? { filesChangedExternally: true } : {}),
     ...(opts.toolset ? { toolset: opts.toolset } : {}),
     ...(opts.mcp ? { mcp: opts.mcp } : {}),
+    ...(opts.eagerSkills ? { eagerSkills: opts.eagerSkills } : {}),
   };
 
   const parts: StreamPart[] = [];

@@ -25,9 +25,15 @@ import {
 } from "@aep/agent-stream";
 import {
   answerableQuestionIds,
+  applyNote,
+  applySelection,
+  extractStreamingQuestions,
+  isQuestionAnswered,
   isQuestionTool,
+  normalizeAnswers,
   parseQuestionsInput,
 } from "./questionCards";
+import type { QuestionAnswer } from "@aep/agent-stream";
 import type { ChatMessage } from "./chatStore";
 
 const SINGLE = {
@@ -58,9 +64,15 @@ describe("parseQuestionsInput — ask_question (single)", () => {
     expect(parseQuestionsInput(ASK_QUESTION_TOOL, { ...SINGLE, detail: 42 })![0]!.detail).toBeUndefined();
   });
 
+  it("accepts empty options as a free-text question", () => {
+    expect(parseQuestionsInput(ASK_QUESTION_TOOL, { question: "q", options: [] })).toEqual([
+      { question: "q", options: [] },
+    ]);
+  });
+
   it.each([
     ["missing question", { options: SINGLE.options }],
-    ["empty options", { question: "q", options: [] }],
+    ["missing options", { question: "q" }],
     ["option without label", { question: "q", options: [{ description: "x" }] }],
     ["duplicate labels", { question: "q", options: [{ label: "a" }, { label: "a", description: "d" }] }],
     ["malformed JSON string", "{nope"],
@@ -82,11 +94,150 @@ describe("parseQuestionsInput — ask_questions (batch)", () => {
   });
 
   it("rejects when ANY question is malformed", () => {
-    expect(parseQuestionsInput(ASK_QUESTIONS_TOOL, { questions: [SINGLE, { question: "q", options: [] }] })).toBeNull();
+    expect(parseQuestionsInput(ASK_QUESTIONS_TOOL, { questions: [SINGLE, { question: "q" }] })).toBeNull();
   });
 
   it("rejects an unknown tool name", () => {
     expect(parseQuestionsInput("addFile", SINGLE)).toBeNull();
+  });
+});
+
+describe("extractStreamingQuestions", () => {
+  const BATCH_JSON = JSON.stringify({
+    questions: [
+      SINGLE,
+      { question: "Which platform?", detail: "Sets the UI stack.", options: [{ label: "Web" }, { label: "Mobile" }] },
+    ],
+  });
+
+  it("returns [] before the first question object closes", () => {
+    const cut = BATCH_JSON.indexOf("}") - 1; // inside the first option object
+    expect(extractStreamingQuestions(ASK_QUESTIONS_TOOL, BATCH_JSON.slice(0, cut))).toEqual([]);
+  });
+
+  it("returns each question as soon as its object closes", () => {
+    // Cut right after the first question's closing brace (before the comma).
+    const firstClose = BATCH_JSON.indexOf('},{"question"') + 1;
+    const got = extractStreamingQuestions(ASK_QUESTIONS_TOOL, BATCH_JSON.slice(0, firstClose));
+    expect(got).toEqual([SINGLE]);
+  });
+
+  it("returns all questions from a complete (or fully-buffered) input", () => {
+    expect(extractStreamingQuestions(ASK_QUESTIONS_TOOL, BATCH_JSON)).toHaveLength(2);
+    // Also when the closing ]} hasn't arrived yet.
+    const noTail = BATCH_JSON.slice(0, BATCH_JSON.lastIndexOf("]"));
+    expect(extractStreamingQuestions(ASK_QUESTIONS_TOOL, noTail)).toHaveLength(2);
+  });
+
+  it("is not confused by braces and escaped quotes inside strings", () => {
+    const tricky = JSON.stringify({
+      questions: [
+        { question: 'Use "brace {} style" config?', options: [{ label: "Yes", description: 'It means {"a":1} literally \\ everywhere' }] },
+        SINGLE,
+      ],
+    });
+    const firstClose = tricky.indexOf('},{"question"') + 1;
+    const got = extractStreamingQuestions(ASK_QUESTIONS_TOOL, tricky.slice(0, firstClose));
+    expect(got).toHaveLength(1);
+    expect(got[0]!.question).toBe('Use "brace {} style" config?');
+  });
+
+  it("skips a malformed question object but keeps later valid ones", () => {
+    const buf = JSON.stringify({ questions: [{ options: [{ label: "orphan" }] }, SINGLE] });
+    expect(extractStreamingQuestions(ASK_QUESTIONS_TOOL, buf)).toEqual([SINGLE]);
+  });
+
+  it("returns [] for the single-question tool and unknown tools", () => {
+    expect(extractStreamingQuestions(ASK_QUESTION_TOOL, JSON.stringify(SINGLE))).toEqual([]);
+    expect(extractStreamingQuestions("addFile", BATCH_JSON)).toEqual([]);
+    expect(extractStreamingQuestions(undefined, BATCH_JSON)).toEqual([]);
+  });
+
+  it("returns [] for garbage before the questions array", () => {
+    expect(extractStreamingQuestions(ASK_QUESTIONS_TOOL, '{"other": [')).toEqual([]);
+    expect(extractStreamingQuestions(ASK_QUESTIONS_TOOL, "")).toEqual([]);
+  });
+});
+
+describe("isQuestionAnswered / isFreeTextOption", () => {
+  const OPTS = {
+    question: "q",
+    options: [
+      { label: "Web" },
+      { label: "Something else", description: "Type it in." },
+      { label: "Escape", freeText: true },
+    ],
+  };
+
+  it("free text always answers — including option-less questions", () => {
+    expect(isQuestionAnswered({ question: "q", options: [] }, { selected: [], freeText: "my answer" })).toBe(true);
+    expect(isQuestionAnswered({ question: "q", options: [] }, { selected: [] })).toBe(false);
+  });
+
+  it("a concrete selection answers; nothing selected does not", () => {
+    expect(isQuestionAnswered(OPTS, { selected: ["Web"] })).toBe(true);
+    expect(isQuestionAnswered(OPTS, undefined)).toBe(false);
+  });
+
+  it("a free-text escape hatch alone (flag or heuristic label) does NOT answer until text is typed", () => {
+    expect(isQuestionAnswered(OPTS, { selected: ["Escape"] })).toBe(false);
+    expect(isQuestionAnswered(OPTS, { selected: ["Something else"] })).toBe(false);
+    expect(isQuestionAnswered(OPTS, { selected: ["Something else"], freeText: "custom roles: admin only" })).toBe(true);
+    // A concrete option alongside the hatch still answers.
+    expect(isQuestionAnswered(OPTS, { selected: ["Web", "Escape"] })).toBe(true);
+  });
+
+  it("keeps the parsed freeText flag off the wire", () => {
+    const parsed = parseQuestionsInput(ASK_QUESTION_TOOL, {
+      question: "q",
+      options: [{ label: "A" }, { label: "B", freeText: true }],
+    })![0]!;
+    expect(parsed.options[1]!.freeText).toBe(true);
+    expect(parsed.options[0]!.freeText).toBeUndefined();
+  });
+});
+
+describe("answer editing while the batch streams (#335 regression)", () => {
+  // The room's answers array is sized to the questions visible when the user
+  // FIRST touched an answer; later-streamed questions must still be editable.
+  const Q = (label: string, multi = false) => ({
+    question: label,
+    options: [{ label: "A" }, { label: "B" }],
+    ...(multi ? { multiSelect: true } : {}),
+  });
+  const FIVE = [Q("q0"), Q("q1"), Q("q2", true), Q("q3"), Q("q4")];
+  const SHORT: QuestionAnswer[] = [{ selected: ["A"] }, { selected: [] }];
+
+  it("normalizes a short answers array to the question count", () => {
+    const out = normalizeAnswers(FIVE, SHORT);
+    expect(out).toHaveLength(5);
+    expect(out[0]).toEqual({ selected: ["A"] }); // existing answers survive
+    expect(out[4]).toEqual({ selected: [] });
+    expect(normalizeAnswers(FIVE, null)).toHaveLength(5);
+    expect(normalizeAnswers(FIVE, undefined)).toHaveLength(5);
+  });
+
+  it("selects on a question BEYOND the stored array (the stuck case)", () => {
+    const out = applySelection(FIVE, SHORT, 4, "B");
+    expect(out).toHaveLength(5);
+    expect(out[4]!.selected).toEqual(["B"]);
+    expect(out[0]!.selected).toEqual(["A"]); // earlier answers untouched
+  });
+
+  it("types free text on a question beyond the stored array", () => {
+    const out = applyNote(FIVE, SHORT, 3, "typed later");
+    expect(out).toHaveLength(5);
+    expect(out[3]!.freeText).toBe("typed later");
+  });
+
+  it("keeps single-select exclusive and multi-select additive", () => {
+    const single = applySelection(FIVE, SHORT, 1, "A");
+    expect(applySelection(FIVE, single, 1, "B")[1]!.selected).toEqual(["B"]);
+    expect(applySelection(FIVE, single, 1, "A")[1]!.selected).toEqual([]); // toggle off
+
+    const multi = applySelection(FIVE, SHORT, 2, "A");
+    expect(applySelection(FIVE, multi, 2, "B")[2]!.selected).toEqual(["A", "B"]);
+    expect(applySelection(FIVE, applySelection(FIVE, multi, 2, "B"), 2, "A")[2]!.selected).toEqual(["B"]);
   });
 });
 

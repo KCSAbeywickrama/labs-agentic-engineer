@@ -184,9 +184,11 @@ describe("AgentChatPanel — generation CTAs", () => {
     consumePendingSeed(KEY);
   });
 
-  it("auto-sends /start for the requirements signal", () => {
+  it("auto-sends /start for the requirements signal, with the grilling skill inlined", () => {
     renderPanel({ autoGenerate: "requirements" });
-    expect(mockSend).toHaveBeenCalledWith("/start");
+    // `/start` IS the interview turn, so the skill rides along and the agent
+    // skips its loadSkill round-trip (#335).
+    expect(mockSend).toHaveBeenCalledWith("/start", { eagerSkills: ["grilling"] });
   });
 
   it("auto-sends the design instruction for the design signal", () => {

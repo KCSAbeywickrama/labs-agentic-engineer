@@ -26,16 +26,24 @@
 // user who triggered the turn (`ownerId`) can submit or skip — they hold the
 // SSE stream back to the agent; everyone else co-authors.
 
-import { Box, Button, Checkbox, Chip, Radio, Stack, TextField, Typography } from "@wso2/oxygen-ui";
+import { useRef } from "react";
+import { Box, Button, Checkbox, Chip, CircularProgress, Radio, Stack, TextField, Typography } from "@wso2/oxygen-ui";
 import { Sparkles, Users } from "@wso2/oxygen-ui-icons-react";
 import type { Doc } from "yjs";
 import type { AskQuestionInput, QuestionAnswer } from "@aep/agent-stream";
-import { serializeQuestionAnswer } from "../../agent-chat/questionCards";
+import {
+  applyNote,
+  applySelection,
+  isFreeTextOption,
+  isQuestionAnswered,
+  normalizeAnswers,
+  serializeQuestionAnswer,
+} from "../../agent-chat/questionCards";
 import { chatKeyFor, setPendingSeed } from "../../agent-chat/chatStore";
 import { useCurrentAuthor } from "../../agent-chat/currentUser";
 import {
   closeRoomQuestion,
-  setRoomAnswer,
+  updateRoomAnswer,
   type RoomQuestion,
 } from "../../agent-chat/questionRoom";
 
@@ -124,6 +132,22 @@ function QuestionBlock({
 }) {
   const multi = q.multiSelect === true;
   const selected = answer?.selected ?? [];
+  // A question with NO options is a free-text question: only the text field
+  // renders — no radio that selects nothing. A question with ONE option is
+  // (in practice) an agent-invented "type my own answer" card: keep it
+  // selectable, but checking it moves the caret straight into the text field.
+  const freeTextOnly = q.options.length === 0;
+  // A selected escape-hatch option ("Something else", "Other", explicit
+  // freeText flag) means the REAL answer is the text — surface that: the
+  // field grows, gains a helper line, and submit stays gated until typed.
+  const needsText =
+    !freeTextOnly &&
+    selected.some((label) => {
+      const opt = q.options.find((o) => o.label === label);
+      return opt !== undefined && isFreeTextOption(opt);
+    }) &&
+    (answer?.freeText ?? "").trim() === "";
+  const noteRef = useRef<HTMLTextAreaElement | null>(null);
   return (
     <Box sx={{ mb: 5 }}>
       <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
@@ -139,7 +163,11 @@ function QuestionBlock({
           Pick as many as apply
         </Typography>
       )}
-      <Stack spacing={1.5} role={multi ? "group" : "radiogroup"} aria-label={q.question} sx={{ mt: 1.5 }}>
+      <Stack
+        spacing={1.5}
+        {...(freeTextOnly ? {} : { role: multi ? "group" : "radiogroup", "aria-label": q.question })}
+        sx={{ mt: 1.5 }}
+      >
         {q.options.map((opt) => (
           <OptionCard
             key={opt.label}
@@ -147,17 +175,35 @@ function QuestionBlock({
             multi={multi}
             isOn={selected.includes(opt.label)}
             disabled={disabled}
-            onSelect={() => onSelect(opt.label)}
+            onSelect={() => {
+              const turningOn = !selected.includes(opt.label);
+              onSelect(opt.label);
+              // Checking an option whose real input is the text (an "Other" /
+              // "Something else" escape hatch, or a lone option) moves the
+              // caret straight into the field.
+              if (turningOn && (isFreeTextOption(opt) || q.options.length === 1)) {
+                noteRef.current?.focus();
+              }
+            }}
           />
         ))}
         <TextField
           size="small"
-          placeholder="Other — describe your own answer, or add context to a choice…"
+          label={freeTextOnly ? "Your answer" : "Other — your own answer or extra context"}
+          placeholder={freeTextOnly || needsText ? "Type your answer…" : "Add a note…"}
           value={answer?.freeText ?? ""}
           disabled={disabled}
           multiline
+          {...(freeTextOnly || needsText ? { minRows: 2 } : {})}
+          {...(needsText
+            ? { helperText: "This choice needs a typed answer — describe it here to continue." }
+            : {})}
+          inputRef={noteRef}
           onChange={(e) => onNote(e.target.value)}
-          sx={{ "& .MuiOutlinedInput-root": { borderRadius: 2 } }}
+          sx={{
+            "& .MuiOutlinedInput-root": { borderRadius: 2 },
+            ...(needsText ? { "& .MuiOutlinedInput-notchedOutline": { borderColor: "primary.main" } } : {}),
+          }}
         />
       </Stack>
     </Box>
@@ -179,37 +225,29 @@ export function SpecQuestionForm({
 }) {
   const me = useCurrentAuthor();
   const isOwner = entry.ownerId === me.id;
-  const answers: QuestionAnswer[] =
-    entry.answers ?? entry.questions.map(() => ({ selected: [] }));
+  // Re-aligned to the CURRENT question count on every render: while the batch
+  // streams the stored array is shorter than the list, and editing through a
+  // short array drops writes for the later questions (#335).
+  const answers: QuestionAnswer[] = normalizeAnswers(entry.questions, entry.answers);
 
-  const write = (next: QuestionAnswer[]) => setRoomAnswer(doc, entry.toolCallId, next);
-
+  // Edits resolve against the LIVE room entry (never this render's snapshot):
+  // successive clicks between renders must not clobber each other (#335).
   const select = (qi: number, label: string) => {
-    const multi = entry.questions[qi]!.multiSelect === true;
-    write(
-      answers.map((a, i) => {
-        if (i !== qi) return a;
-        const has = a.selected.includes(label);
-        const selected = multi
-          ? has
-            ? a.selected.filter((l) => l !== label)
-            : [...a.selected, label]
-          : has
-            ? []
-            : [label];
-        return { ...a, selected };
-      }),
+    updateRoomAnswer(doc, entry.toolCallId, (live) =>
+      applySelection(live.questions, live.answers, qi, label),
     );
   };
 
   const note = (qi: number, freeText: string) => {
-    write(answers.map((a, i) => (i === qi ? { ...a, freeText } : a)));
+    updateRoomAnswer(doc, entry.toolCallId, (live) => applyNote(live.questions, live.answers, qi, freeText));
   };
 
-  const allAnswered = answers.every(
-    (a) => a.selected.length > 0 || (a.freeText ?? "").trim().length > 0,
-  );
-  const canSubmit = isOwner && allAnswered;
+  const allAnswered = entry.questions.every((q, i) => isQuestionAnswered(q, answers[i]));
+  // While the batch is still streaming (#270 latency), the form is readable and
+  // selectable but cannot submit or skip: the turn is still running, and more
+  // questions may yet arrive. The final mirror clears the gate.
+  const streaming = entry.streaming === true;
+  const canSubmit = isOwner && allAnswered && !streaming;
 
   const submit = () => {
     if (!canSubmit) return;
@@ -266,6 +304,14 @@ export function SpecQuestionForm({
               onNote={(text) => note(qi, text)}
             />
           ))}
+          {streaming && (
+            <Stack direction="row" spacing={1} sx={{ alignItems: "center", mb: 4 }}>
+              <CircularProgress size={14} aria-label="More questions arriving" />
+              <Typography variant="body2" color="text.secondary">
+                The agent is still writing questions — you can start answering.
+              </Typography>
+            </Stack>
+          )}
         </Box>
       </Box>
 
@@ -288,7 +334,7 @@ export function SpecQuestionForm({
             Your picks are shared live — only the person who asked can send them.
           </Typography>
         )}
-        <Button variant="text" color="inherit" disabled={!isOwner} onClick={skip}>
+        <Button variant="text" color="inherit" disabled={!isOwner || streaming} onClick={skip}>
           Skip questions
         </Button>
         <Button variant="contained" disabled={!canSubmit} onClick={submit}>

@@ -17,3 +17,12 @@
  */
 
 import "@testing-library/jest-dom";
+import { configure } from "@testing-library/react";
+
+// Testing Library's default 1s async-util budget is a CI flake source, not a
+// correctness bound: a component test's `waitFor` competes with every other
+// worker on the runner, and a heavy MUI render (the spec view's drawers) can
+// need well past a second on a loaded machine while passing instantly here.
+// Raise the ceiling — a genuinely stuck expectation still fails, just later,
+// and the per-test timeout below stays the real backstop.
+configure({ asyncUtilTimeout: 5_000 });

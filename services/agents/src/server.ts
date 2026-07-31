@@ -141,6 +141,7 @@ export function createApp(deps: CreateAppDeps): Express {
       mcp?: unknown;
       collab?: unknown;
       webSearch?: unknown;
+      eagerSkills?: unknown;
     };
 
     // Pre-stream validation → HTTP status (no SSE headers sent yet).
@@ -233,6 +234,24 @@ export function createApp(deps: CreateAppDeps): Express {
       collab = body.collab;
     }
 
+    // eagerSkills (optional, #335 latency): skill names the caller wants
+    // inlined into this turn's prompt up front, skipping the loadSkill
+    // round-trip. Names are validated for shape only — unknown names are
+    // ignored downstream (the snapshot decides what exists).
+    let eagerSkills: string[] | undefined;
+    if (body.eagerSkills !== undefined) {
+      const list = body.eagerSkills;
+      if (
+        !Array.isArray(list) ||
+        list.length > 8 ||
+        !list.every((s) => typeof s === "string" && s.trim() !== "")
+      ) {
+        res.status(400).json({ error: "eagerSkills must be an array of at most 8 skill names" });
+        return;
+      }
+      eagerSkills = list as string[];
+    }
+
     // Build the per-turn model from the request key (fail as a pre-stream 500).
     let model: LanguageModel;
     try {
@@ -303,6 +322,7 @@ export function createApp(deps: CreateAppDeps): Express {
         skillSource,
         ...(toolset ? { toolset } : {}),
         ...(mcp ? { mcp } : {}),
+        ...(eagerSkills ? { eagerSkills } : {}),
         webSearch: body.webSearch === true,
         ...(roomPeer ? { collabPeer: roomPeer } : {}),
         model,
