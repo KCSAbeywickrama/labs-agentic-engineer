@@ -51,6 +51,14 @@ type ManifestEntry struct {
 	Origin   string `json:"origin"`
 	Source   string `json:"source,omitempty"`
 	BaseHash string `json:"baseHash"`
+
+	// Disabled withholds the skill from the agents (catalog + project-repo
+	// copies) without touching SKILL.md — availability must never alter
+	// contentSHA, or a disabled skill would read as a divergence from the
+	// platform baseline and surface as a pending platform update. Stored as the
+	// NEGATIVE so an entry written before this field existed, and every newly
+	// seeded entry, is enabled by its zero value. ADR-0014.
+	Disabled bool `json:"disabled,omitempty"`
 }
 
 // UnmarshalJSON tolerates the pre-rename "kind" field (manifests written
@@ -62,6 +70,7 @@ func (e *ManifestEntry) UnmarshalJSON(b []byte) error {
 		Kind     string `json:"kind"`
 		Source   string `json:"source"`
 		BaseHash string `json:"baseHash"`
+		Disabled bool   `json:"disabled"`
 	}
 	if err := json.Unmarshal(b, &raw); err != nil {
 		return err
@@ -72,6 +81,7 @@ func (e *ManifestEntry) UnmarshalJSON(b []byte) error {
 	}
 	e.Source = raw.Source
 	e.BaseHash = raw.BaseHash
+	e.Disabled = raw.Disabled
 	return nil
 }
 

@@ -220,7 +220,11 @@ func (s *SkillService) reconcileEmbedded(ctx context.Context, orgID string, repo
 		}
 	}
 	setBase := func(name, sha string) {
-		want := ManifestEntry{Origin: ManifestOriginPlatform, BaseHash: sha}
+		// Disabled is org intent (ADR-0014), not baseline state: carry the
+		// prior entry's flag through so a platform refresh — which advances
+		// BaseHash and may rewrite content — never silently re-enables a
+		// skill the org switched off.
+		want := ManifestEntry{Origin: ManifestOriginPlatform, BaseHash: sha, Disabled: manifest[name].Disabled}
 		if manifest[name] != want {
 			manifest[name] = want
 			manifestDirty = true

@@ -566,7 +566,17 @@ func (s *SkillService) writeSkillFiles(ctx context.Context, orgID, name, skillMD
 	if entry != nil {
 		e := *entry
 		manifestFn = func(m SkillsManifest) SkillsManifest {
-			m[name] = e
+			// The upsert replaces the WHOLE entry, but availability is org
+			// intent and independent of the baseline this write records: a
+			// converging console edit or a re-import must not silently
+			// re-enable a skill the org switched off. Carry the prior flag here
+			// so no caller has to remember to. Re-enabling is a manifest-only
+			// write (SetEnabled), which never routes through this path.
+			next := e
+			if prior, ok := m[name]; ok && prior.Disabled {
+				next.Disabled = true
+			}
+			m[name] = next
 			return m
 		}
 	}
