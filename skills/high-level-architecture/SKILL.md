@@ -4,6 +4,7 @@ description: Use when turning requirements into a design — creating or restruc
 metadata:
   aep:
     kind: platform
+    audience: [design]
 ---
 
 

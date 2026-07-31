@@ -4,6 +4,7 @@ description: How to build a Go service on the platform — pinned golang:1.25-al
 metadata:
   aep:
     kind: org
+    audience: [coding]
 ---
 
 # Go

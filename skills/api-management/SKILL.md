@@ -4,6 +4,7 @@ description: How the platform's API gateway validates JWTs, injects identity hea
 metadata:
   aep:
     kind: org
+    audience: [design, coding]
 ---
 
 

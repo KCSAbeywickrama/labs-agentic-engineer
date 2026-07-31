@@ -4,6 +4,7 @@ description: How the platform's Thunder IDP is wired into SPAs that sign users i
 metadata:
   aep:
     kind: org
+    audience: [coding]
 ---
 
 

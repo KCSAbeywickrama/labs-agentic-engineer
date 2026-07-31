@@ -4,6 +4,7 @@ description: Use when creating or editing an openapi.yaml for a service componen
 metadata:
   aep:
     kind: platform
+    audience: [design, coding]
 ---
 
 # OpenAPI conventions

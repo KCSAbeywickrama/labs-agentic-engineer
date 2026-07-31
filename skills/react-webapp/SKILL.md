@@ -4,6 +4,7 @@ description: How to build a React SPA on the platform — Vite project layout, m
 metadata:
   aep:
     kind: org
+    audience: [coding]
 ---
 
 

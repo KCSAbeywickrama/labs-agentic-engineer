@@ -4,6 +4,7 @@ description: Use when the user wants to be interviewed or "grilled" about an ide
 metadata:
   aep:
     kind: platform
+    audience: [design]
 ---
 
 # Grilling
