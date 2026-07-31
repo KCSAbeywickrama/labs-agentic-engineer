@@ -250,7 +250,15 @@ export interface LoadedSkill {
  */
 export type LoadSkillResult =
   | { ok: true; skills: LoadedSkill[] }
-  | { ok: false; error: string; skills: LoadedSkill[]; missing: string[]; available: string[] };
+  | {
+      ok: false;
+      error: string;
+      skills: LoadedSkill[];
+      missing: string[];
+      available: string[];
+      /** Names refused because they are written for a different agent — visible in the catalog so they can be pinned, but not loadable here. */
+      refused?: string[];
+    };
 
 /** The `loadSkillReference` tool input. WIRE source of truth; drift-guarded in `tool.ts`. */
 export interface LoadSkillReferenceInput {

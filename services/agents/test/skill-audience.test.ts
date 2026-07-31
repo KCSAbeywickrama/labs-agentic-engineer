@@ -30,6 +30,9 @@ import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadSkillsFromSnapshot } from "../src/conversation/load-workspace.js";
+import { buildSkillTools } from "../src/agents/main/tools/skill-tools.js";
+import { buildSkillCatalog } from "../src/agents/main/prompt.js";
+import { ALL_AUDIENCES } from "../src/agents/main/skill-source.js";
 
 /** A `_skills` snapshot holding the given `<name>/SKILL.md` files. */
 function snapshotWith(skills: Record<string, string>): string {
@@ -95,4 +98,52 @@ test("an unmarked skill is still loadable", () => {
   const source = loadSkillsFromSnapshot(snapshotWith({ legacy: md("legacy") }));
   const got = source.load("legacy");
   assert.ok(got !== undefined && "content" in got);
+});
+
+test("loadSkill separates refused names from missing ones", async () => {
+  const source = loadSkillsFromSnapshot(
+    snapshotWith({ go: md("go", "[coding]"), planning: md("planning", "[design]") }),
+  );
+  const execute = buildSkillTools(source).loadSkill!.execute as unknown as (
+    input: { names: string[] },
+    options: unknown,
+  ) => Promise<{
+    ok: boolean;
+    error?: string;
+    refused?: string[];
+    missing?: string[];
+    skills: { name: string }[];
+  }>;
+  const res = await execute({ names: ["go", "planning", "ghost"] }, {});
+  assert.equal(res.ok, false);
+  assert.deepEqual(res.refused, ["go"]);
+  assert.deepEqual(res.missing, ["ghost"]);
+  assert.deepEqual(res.skills.map((s) => s.name), ["planning"]);
+  assert.match(res.error!, /skillsApplied/); // the redirect names the alternative
+});
+
+const entry = (name: string, audience: readonly ("design" | "coding")[]) => ({
+  name,
+  description: `${name} does things.`,
+  hasReferences: false,
+  audience,
+});
+const sourceOf = (...entries: ReturnType<typeof entry>[]) => ({
+  catalog: () => entries,
+  load: () => undefined,
+  loadReference: () => undefined,
+});
+
+test("coding-only skills are listed apart, with the pin instruction", () => {
+  const text = buildSkillCatalog(sourceOf(entry("planning", ["design"]), entry("go", ["coding"])));
+  assert.match(text, /- planning:/);
+  assert.match(text, /- go:/); // still visible — needed to pin it
+  assert.match(text, /skillsApplied/); // says what to do with it instead
+  assert.ok(text.indexOf("- planning:") < text.indexOf("- go:"));
+});
+
+test("a library with no coding-only skills renders exactly as before", () => {
+  const text = buildSkillCatalog(sourceOf(entry("planning", ALL_AUDIENCES)));
+  assert.ok(!text.includes("skillsApplied"));
+  assert.ok(!/pin/i.test(text));
 });

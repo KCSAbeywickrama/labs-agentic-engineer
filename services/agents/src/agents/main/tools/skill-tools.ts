@@ -98,10 +98,15 @@ export function buildSkillTools(skills?: SkillSource): Record<string, Tool> {
       execute: async ({ names }): Promise<LoadSkillResult> => {
         const skills: LoadedSkill[] = [];
         const missing: string[] = [];
+        const refused: string[] = [];
         for (const name of names) {
           const loaded = source.load(name);
           if (loaded === undefined) {
             missing.push(name);
+            continue;
+          }
+          if ("refused" in loaded) {
+            refused.push(name);
             continue;
           }
           skills.push({
@@ -110,8 +115,25 @@ export function buildSkillTools(skills?: SkillSource): Record<string, Tool> {
             ...(loaded.references.length > 0 ? { references: loaded.references } : {}),
           });
         }
-        if (missing.length > 0) {
-          return { ok: false, error: `unknown skills: ${missing.join(", ")}`, skills, missing, available };
+        if (missing.length > 0 || refused.length > 0) {
+          // Two different faults, phrased differently on purpose: an unknown name is
+          // a mistake to correct, a refusal is a redirect to the right mechanism.
+          const parts: string[] = [];
+          if (refused.length > 0) {
+            parts.push(
+              `not yours to load: ${refused.join(", ")} — these are the coding agent's guidance. ` +
+                "If a component's build needs one, add it to that component's skillsApplied in its design.json.",
+            );
+          }
+          if (missing.length > 0) parts.push(`unknown skills: ${missing.join(", ")}`);
+          return {
+            ok: false,
+            error: parts.join(" "),
+            skills,
+            missing,
+            available,
+            ...(refused.length > 0 ? { refused } : {}),
+          };
         }
         return { ok: true, skills };
       },
@@ -128,7 +150,7 @@ export function buildSkillTools(skills?: SkillSource): Record<string, Tool> {
       inputSchema: loadSkillReferenceInputSchema,
       execute: async ({ name, path }): Promise<LoadSkillReferenceResult> => {
         const loaded = source.load(name);
-        if (loaded === undefined || loaded.references.length === 0) {
+        if (loaded === undefined || "refused" in loaded || loaded.references.length === 0) {
           return { ok: false, name, path, error: `unknown skill: ${name}`, available: refSkillNames };
         }
         const loadedRef = source.loadReference(name, path);
