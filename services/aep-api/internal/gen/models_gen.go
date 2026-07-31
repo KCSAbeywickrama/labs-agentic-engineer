@@ -66,22 +66,34 @@ func (e BuildSummaryStatus) Valid() bool {
 
 // Defines values for DeployStageValidation.
 const (
-	DeployStageValidationCompleted DeployStageValidation = "completed"
-	DeployStageValidationFailed    DeployStageValidation = "failed"
-	DeployStageValidationNone      DeployStageValidation = "none"
-	DeployStageValidationRunning   DeployStageValidation = "running"
+	DeployStageValidationFailed       DeployStageValidation = "failed"
+	DeployStageValidationInconclusive DeployStageValidation = "inconclusive"
+	DeployStageValidationNone         DeployStageValidation = "none"
+	DeployStageValidationPartial      DeployStageValidation = "partial"
+	DeployStageValidationPassed       DeployStageValidation = "passed"
+	DeployStageValidationRunning      DeployStageValidation = "running"
+	DeployStageValidationSkipped      DeployStageValidation = "skipped"
+	DeployStageValidationUnreported   DeployStageValidation = "unreported"
 )
 
 // Valid indicates whether the value is a known member of the DeployStageValidation enum.
 func (e DeployStageValidation) Valid() bool {
 	switch e {
-	case DeployStageValidationCompleted:
-		return true
 	case DeployStageValidationFailed:
+		return true
+	case DeployStageValidationInconclusive:
 		return true
 	case DeployStageValidationNone:
 		return true
+	case DeployStageValidationPartial:
+		return true
+	case DeployStageValidationPassed:
+		return true
 	case DeployStageValidationRunning:
+		return true
+	case DeployStageValidationSkipped:
+		return true
+	case DeployStageValidationUnreported:
 		return true
 	default:
 		return false
@@ -267,9 +279,12 @@ func (e RunProgressLineEmitter) Valid() bool {
 
 // Defines values for RunValidationVerdict.
 const (
-	RunValidationVerdictFailed  RunValidationVerdict = "failed"
-	RunValidationVerdictPassed  RunValidationVerdict = "passed"
-	RunValidationVerdictSkipped RunValidationVerdict = "skipped"
+	RunValidationVerdictFailed       RunValidationVerdict = "failed"
+	RunValidationVerdictInconclusive RunValidationVerdict = "inconclusive"
+	RunValidationVerdictPartial      RunValidationVerdict = "partial"
+	RunValidationVerdictPassed       RunValidationVerdict = "passed"
+	RunValidationVerdictSkipped      RunValidationVerdict = "skipped"
+	RunValidationVerdictUnreported   RunValidationVerdict = "unreported"
 )
 
 // Valid indicates whether the value is a known member of the RunValidationVerdict enum.
@@ -277,9 +292,36 @@ func (e RunValidationVerdict) Valid() bool {
 	switch e {
 	case RunValidationVerdictFailed:
 		return true
+	case RunValidationVerdictInconclusive:
+		return true
+	case RunValidationVerdictPartial:
+		return true
 	case RunValidationVerdictPassed:
 		return true
 	case RunValidationVerdictSkipped:
+		return true
+	case RunValidationVerdictUnreported:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SkillUpdateState.
+const (
+	SkillUpdateStateConflict   SkillUpdateState = "conflict"
+	SkillUpdateStateOverridden SkillUpdateState = "overridden"
+	SkillUpdateStateUpdate     SkillUpdateState = "update"
+)
+
+// Valid indicates whether the value is a known member of the SkillUpdateState enum.
+func (e SkillUpdateState) Valid() bool {
+	switch e {
+	case SkillUpdateStateConflict:
+		return true
+	case SkillUpdateStateOverridden:
+		return true
+	case SkillUpdateStateUpdate:
 		return true
 	default:
 		return false
@@ -336,22 +378,22 @@ func (e TaskStreamEventType) Valid() bool {
 
 // Defines values for TaskViewExecutorClass.
 const (
-	Coding     TaskViewExecutorClass = "coding"
-	Ledger     TaskViewExecutorClass = "ledger"
-	Provision  TaskViewExecutorClass = "provision"
-	Validation TaskViewExecutorClass = "validation"
+	TaskViewExecutorClassCoding     TaskViewExecutorClass = "coding"
+	TaskViewExecutorClassLedger     TaskViewExecutorClass = "ledger"
+	TaskViewExecutorClassProvision  TaskViewExecutorClass = "provision"
+	TaskViewExecutorClassValidation TaskViewExecutorClass = "validation"
 )
 
 // Valid indicates whether the value is a known member of the TaskViewExecutorClass enum.
 func (e TaskViewExecutorClass) Valid() bool {
 	switch e {
-	case Coding:
+	case TaskViewExecutorClassCoding:
 		return true
-	case Ledger:
+	case TaskViewExecutorClassLedger:
 		return true
-	case Provision:
+	case TaskViewExecutorClassProvision:
 		return true
-	case Validation:
+	case TaskViewExecutorClassValidation:
 		return true
 	default:
 		return false
@@ -801,14 +843,20 @@ type DeployStage struct {
 	} `json:"components"`
 	Status string `json:"status"`
 
-	// Validation Coarse validation state of the newest milestone run, folded from that run's verdict: none (the run never reached validation, had no acceptance criteria, or skipped it), running, completed (the verdict is `passed`), failed. The verdict itself, the report path and the per-cycle detail behind it live on the version's run story (list-build-runs) — this field is only the overview's coarse chip.
+	// Validation Validation state of the newest milestone run. This MIRRORS the run's verdict rather than folding it, so the chip says what the run concluded: a fold would have to discard `partial`, `inconclusive` and `unreported` at exactly the surface that needs them, and `completed` never said whether anything passed.
+	// none (the run has not reached validation) and running (a validation CYCLE is in flight — not merely a live run with no verdict yet) are lifecycle values; the rest are the verdict verbatim. They are mutually exclusive in time, so nothing is hidden behind another.
+	// passed (every criterion was automated and passed), partial (some passed, none failed, some were never covered), failed (a criterion asserted and lost — this fails the run), inconclusive (no test results at all), unreported (no usable report at the validation cycle's merge commit — this fails the run), skipped (no acceptance criteria, and incident runs, which get no validation cycle).
+	// The report path and per-cycle detail live on the version's run story (list-build-runs).
 	Validation DeployStageValidation `json:"validation"`
 
 	// Version Spec tag live in dev; "" if nothing deployed.
 	Version string `json:"version"`
 }
 
-// DeployStageValidation Coarse validation state of the newest milestone run, folded from that run's verdict: none (the run never reached validation, had no acceptance criteria, or skipped it), running, completed (the verdict is `passed`), failed. The verdict itself, the report path and the per-cycle detail behind it live on the version's run story (list-build-runs) — this field is only the overview's coarse chip.
+// DeployStageValidation Validation state of the newest milestone run. This MIRRORS the run's verdict rather than folding it, so the chip says what the run concluded: a fold would have to discard `partial`, `inconclusive` and `unreported` at exactly the surface that needs them, and `completed` never said whether anything passed.
+// none (the run has not reached validation) and running (a validation CYCLE is in flight — not merely a live run with no verdict yet) are lifecycle values; the rest are the verdict verbatim. They are mutually exclusive in time, so nothing is hidden behind another.
+// passed (every criterion was automated and passed), partial (some passed, none failed, some were never covered), failed (a criterion asserted and lost — this fails the run), inconclusive (no test results at all), unreported (no usable report at the validation cycle's merge commit — this fails the run), skipped (no acceptance criteria, and incident runs, which get no validation cycle).
+// The report path and per-cycle detail live on the version's run story (list-build-runs).
 type DeployStageValidation string
 
 // Deployment defines model for Deployment.
@@ -1295,14 +1343,21 @@ type RunProgressLineEmitter string
 
 // RunValidation The run's validation outcome. The verdict is a RUN property, not a per-issue one, and this is where the deployment surface reads it.
 type RunValidation struct {
-	// ReportPath Repository path of the validation runner's committed report, present once a verdict exists. The console fetches it at HEAD through the files API — there is no dedicated validation endpoint.
+	// Issue The validation issue this run worked, so a SETTLED run stays navigable to the criteria behind its verdict. 0 before the validation cycle mints it, and on incident runs.
+	Issue int64 `json:"issue,omitempty"`
+
+	// ReportPath Repository path of the validation runner's committed report, present once a verdict exists. Fetch it through read-file with `ref` set to the validation cycle's mergeSha (RunCycleView.mergeSha) — the report lives at a fixed path that every run overwrites, so reading it at the branch tip returns the NEWEST run's results whichever run you asked about.
 	ReportPath string `json:"reportPath,omitempty"`
 
-	// Verdict Empty until the validation cycle settles. `skipped` covers both "no acceptance criteria" and an incident run, which gets no validation cycle at all.
+	// Verdict What the run learned about the deployed system. Empty until the validation cycle settles.
+	// passed (every criterion was automated and passed), partial (some passed, none failed, and some were never covered — so `passed` would claim a result for criteria nobody checked), failed (a criterion asserted and lost), inconclusive (no test results at all), unreported (no usable report at the cycle's merge commit), skipped (no acceptance criteria, and incident runs, which get no validation cycle at all).
+	// `failed` and `unreported` fail the run, under terminal reasons validation-failed and validation-unreported respectively. The rest settle succeeded.
 	Verdict RunValidationVerdict `json:"verdict,omitempty"`
 }
 
-// RunValidationVerdict Empty until the validation cycle settles. `skipped` covers both "no acceptance criteria" and an incident run, which gets no validation cycle at all.
+// RunValidationVerdict What the run learned about the deployed system. Empty until the validation cycle settles.
+// passed (every criterion was automated and passed), partial (some passed, none failed, and some were never covered — so `passed` would claim a result for criteria nobody checked), failed (a criterion asserted and lost), inconclusive (no test results at all), unreported (no usable report at the cycle's merge commit), skipped (no acceptance criteria, and incident runs, which get no validation cycle at all).
+// `failed` and `unreported` fail the run, under terminal reasons validation-failed and validation-unreported respectively. The rest settle succeeded.
 type RunValidationVerdict string
 
 // SaveValuesBody defines model for SaveValuesBody.
@@ -1322,6 +1377,7 @@ type SkillDetailBody struct {
 	BinaryReferences []string          `json:"binaryReferences"`
 	Compatibility    string            `json:"compatibility,omitempty"`
 	ContentSha       string            `json:"contentSha"`
+	Deletable        bool              `json:"deletable"`
 	Description      string            `json:"description"`
 	Editable         bool              `json:"editable"`
 	Kind             string            `json:"kind"`
@@ -1336,6 +1392,7 @@ type SkillDetailBody struct {
 // SkillSummary defines model for SkillSummary.
 type SkillSummary struct {
 	ContentSha  string `json:"contentSha"`
+	Deletable   bool   `json:"deletable"`
 	Description string `json:"description"`
 	Editable    bool   `json:"editable"`
 	Kind        string `json:"kind"`
@@ -1355,10 +1412,17 @@ type SkillSyncOutput struct {
 	Updated int64  `json:"updated"`
 }
 
-// SkillUpdate One built-in whose embedded (platform) content differs from the org's repo copy. Reconcile compares ContentSHA, not a hand-maintained version.
+// SkillUpdate One platform-shipped skill whose state differs from the org's baseline: state
+// "update" = org copy clean, platform shipped new content (sync will refresh);
+// "overridden" = org modified its copy (sync will never touch it);
+// "conflict" = both moved since the baseline (review required).
 type SkillUpdate struct {
-	Name string `json:"name"`
+	Name  string           `json:"name"`
+	State SkillUpdateState `json:"state"`
 }
+
+// SkillUpdateState defines model for SkillUpdate.State.
+type SkillUpdateState string
 
 // SkillUpdateList defines model for SkillUpdateList.
 type SkillUpdateList struct {
@@ -1700,6 +1764,14 @@ type GetDependencyStatusParams struct {
 type ListFilesParams struct {
 	// Prefix Only list paths under this prefix (e.g. specs/design/)
 	Prefix string `form:"prefix,omitempty" json:"prefix,omitempty"`
+}
+
+// ReadFileParams defines parameters for ReadFile.
+type ReadFileParams struct {
+	// Ref Commit to read the file AT. Omitted reads the default-branch tip.
+	// It exists because an artifact at a fixed path is otherwise unaddressable: the validation report is overwritten by every run, so reading the tip returns the newest run's results whichever run you asked about. Pin it to that run's validation-cycle mergeSha (RunCycleView.mergeSha) to get the report that run actually produced.
+	// A hex object name only — deliberately not a revision expression, so this cannot become a browser over the repo's history. The path allow-list still decides what is readable at all.
+	Ref string `form:"ref,omitempty" json:"ref,omitempty"`
 }
 
 // ListIssuesParams defines parameters for ListIssues.

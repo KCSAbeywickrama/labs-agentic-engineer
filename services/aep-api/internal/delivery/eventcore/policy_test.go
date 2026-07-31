@@ -76,6 +76,9 @@ func TestDecideAutoMerge(t *testing.T) {
 		{Number: 13, State: "open", Labels: []string{delivery.LabelAgentWork, delivery.LabelProvisionGate}},
 		// A ledger issue: in the milestone, but not agent work.
 		{Number: 14, State: "open", Labels: []string{"question"}},
+		// The validation issue: the run's own work, and deliberately WITHOUT the
+		// `aep` label (it must not sit in the working set).
+		{Number: 15, State: "open", Labels: []string{delivery.LabelValidationWork}},
 	}
 	cases := []struct {
 		name     string
@@ -89,6 +92,10 @@ func TestDecideAutoMerge(t *testing.T) {
 		{"a ledger issue is not agent work", []int{14}, false, nil},
 		{"partial match still merges", []int{99, 12}, true, []int{12}},
 		{"claiming nothing never merges", nil, false, nil},
+		// The validation cycle's pull request IS this run's work. Declining it —
+		// which is what reading `aep` alone did — strands the tests and the report
+		// unmerged, so the run can never read a verdict from them.
+		{"the validation issue is this run's work", []int{15}, true, []int{15}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

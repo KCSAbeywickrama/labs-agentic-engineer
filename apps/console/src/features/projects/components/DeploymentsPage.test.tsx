@@ -139,7 +139,7 @@ describe("DeploymentsPage — validation chip", () => {
       version: "v1",
       status: "deployed",
       components: { total: 1, ready: 1 },
-      validation: "completed",
+      validation: "passed",
     };
 
     render(<DeploymentsPage projectName="acme" />);

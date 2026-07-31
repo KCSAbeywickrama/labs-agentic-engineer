@@ -153,3 +153,38 @@ func TestImport_NotConfigured(t *testing.T) {
 func contains(s, sub string) bool {
 	return bytes.Contains([]byte(s), []byte(sub))
 }
+
+func TestImport_WritesManifestEntry(t *testing.T) {
+	t.Parallel()
+	svc, host := newTestStore(t)
+	ctx := context.Background()
+	if _, err := svc.List(ctx, "org1"); err != nil { // seed built-ins first
+		t.Fatalf("seed: %v", err)
+	}
+
+	importer := NewSkillImportService(svc)
+	tgz := makeTarGz(t, map[string]string{
+		"my-import/":         "",
+		"my-import/SKILL.md": skillMDNamed("my-import", ""),
+	})
+	res, err := importer.Import(ctx, "org1", "tester", bytes.NewReader(tgz))
+	if err != nil {
+		t.Fatalf("import: %v", err)
+	}
+
+	m := parseSkillsManifest([]byte(host.readAtHead("org1", skillsManifestPath)))
+	e, ok := m[res.Name]
+	if !ok || e.Origin != ManifestOriginImported || e.BaseHash == "" {
+		t.Fatalf("imported manifest entry missing/wrong: %#v", m)
+	}
+
+	// Deleting the imported skill drops its entry in the same commit.
+	mut := NewSkillMutationService(svc)
+	if err := mut.Delete(ctx, "org1", "tester", res.Name); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	m = parseSkillsManifest([]byte(host.readAtHead("org1", skillsManifestPath)))
+	if _, ok := m[res.Name]; ok {
+		t.Fatal("deleted import's manifest entry not dropped")
+	}
+}

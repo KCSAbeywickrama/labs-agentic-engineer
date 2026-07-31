@@ -1,6 +1,9 @@
 ---
 name: api-management
 description: How the platform's API gateway validates JWTs, injects identity headers (X-User-Id from sub, X-User-Groups for role), attaches CORS, and how to design + write services and consumers that match — including resolving the caller's role from X-User-Groups (403, not 401, for no role) and, when scoping needs them, the caller's directory attributes (e.g. their team/unit, their own id) via X-User-Name. Apply to any service with exposesAPI.auth set, and to any consumer with a dependency (a `component`-kind sibling OR an `external`-kind upstream API) that calls a protected API.
+metadata:
+  aep:
+    kind: org
 ---
 
 

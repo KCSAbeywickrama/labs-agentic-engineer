@@ -33,7 +33,9 @@ package spec
 // architect and tech-lead resolvers consume it unchanged.
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log/slog"
@@ -64,8 +66,20 @@ const (
 var legacyKindDirs = map[string]string{
 	"builtin":  SkillKindOrg,
 	"flow":     SkillKindPlatform,
-	"custom":   SkillKindCustom,
+	"custom":   SkillKindOrg,
 	"imported": SkillKindImported,
+}
+
+// legacyUserDirs are the legacy dirs that were never platform output —
+// "custom" (now folded into the org kind) and "imported". Reconcile's legacy
+// migration keys off this set, not the mapped kind, to tell a user-authored
+// legacy skill (must survive migration) apart from a retired platform one
+// living in "builtin"/"flow" (must fall to the wholesale legacy-dir purge):
+// since the fold, both the user and platform legacy dirs can map to the same
+// kind (org), so kind alone no longer carries that distinction.
+var legacyUserDirs = map[string]bool{
+	"custom":   true,
+	"imported": true,
 }
 
 // SkillService is the repo-backed read/reconcile surface for skills. It also
@@ -161,8 +175,9 @@ func (s *SkillService) List(ctx context.Context, orgID string) ([]Skill, error) 
 
 // ListSummaries is the skills-page projection: every kind, projected to
 // (name, kind, description, ...). Platform skills list READ-ONLY (the page
-// shows the generation-flow guidance for inspection); only user-owned kinds
-// are editable — org + platform are reconcile-managed.
+// shows the generation-flow guidance for inspection); org + imported are
+// editable and deletable per SkillEditable/SkillDeletable — both are pure
+// kind checks, so a single catalog() read is enough; no manifest load.
 func (s *SkillService) ListSummaries(ctx context.Context, orgID string) ([]SkillSummary, error) {
 	skills := s.catalog(ctx, orgID)
 	out := make([]SkillSummary, 0, len(skills))
@@ -172,7 +187,8 @@ func (s *SkillService) ListSummaries(ctx context.Context, orgID string) ([]Skill
 			Kind:        sk.Kind,
 			Description: sk.Description,
 			ContentSHA:  sk.ContentSHA,
-			Editable:    sk.Kind == SkillKindCustom || sk.Kind == SkillKindImported,
+			Editable:    SkillEditable(sk.Kind),
+			Deletable:   SkillDeletable(sk.Kind),
 		})
 	}
 	return out, nil
@@ -233,6 +249,29 @@ func (s *SkillService) loadCatalogEntries(ctx context.Context, orgID string, rep
 		return nil, fmt.Errorf("read skills bundle: %w", err)
 	}
 	return parseBundleEntries(ctx, files), nil
+}
+
+// loadEntriesAndManifest is loadCatalogEntries plus the skills-manifest.json
+// baseline, read from the SAME ref so entries and manifest are a consistent
+// snapshot. The manifest is tolerant-parsed (absent/corrupt → empty). The
+// returned manifestPresent reports whether the manifest FILE existed at all —
+// distinct from an empty parse — so a caller can tell a pre-manifest (or
+// manually deleted) repo apart from one whose manifest is simply empty, and
+// lazily backfill it (see UpdatesAvailable).
+func (s *SkillService) loadEntriesAndManifest(ctx context.Context, orgID string, repo *sourcecontrol.GitRepository) ([]catalogEntry, SkillsManifest, bool, error) {
+	ref, err := sourcecontrol.ResolveWorkspaceRef(ctx, s.git.Resolver(), orgID, repo)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	keep := func(rel string) bool { return rel == skillsManifestPath || isCatalogPath(rel) }
+	files, _, err := s.git.Workspace().ReadBundle(ctx, ref, "", keep)
+	if err != nil {
+		return nil, nil, false, fmt.Errorf("read skills bundle: %w", err)
+	}
+	_, manifestPresent := files[skillsManifestPath]
+	manifest := parseSkillsManifest([]byte(files[skillsManifestPath]))
+	delete(files, skillsManifestPath) // never let it near the skill parser
+	return parseBundleEntries(ctx, files), manifest, manifestPresent, nil
 }
 
 // loadCatalog is loadCatalogEntries projected to the Skill catalog shape.
@@ -431,7 +470,20 @@ func parseBundleEntries(ctx context.Context, files map[string]string) []catalogE
 // commitFiles applies a set of blob writes + path/prefix deletes to the skills
 // repo's default branch in a single commit through Workspace.Mutate, which
 // owns the bounded fast-forward CAS retry (design D5). §9.
-func (s *SkillService) commitFiles(ctx context.Context, orgID string, repo *sourcecontrol.GitRepository, message string, writes map[string][]byte, deletePrefixes []string) (string, error) {
+//
+// manifestFn, when non-nil, is the retry-safe manifest merge: it runs INSIDE
+// the CAS closure on EVERY attempt, re-reading skills-manifest.json from the
+// attempt's current base (tx.Base()) and applying this operation's delta
+// (upsert one entry / drop one entry / reconcile's computed set+delete). This
+// is the fix for the lost-update hazard — a pre-rendered manifest captured
+// outside the closure would, on a non-fast-forward retry, silently clobber any
+// entry a concurrent commit added; re-reading + re-merging per attempt folds
+// the concurrent entry in instead. The rendered manifest is staged in the SAME
+// commit as the file writes/deletes below (the same-commit invariant), and
+// only when the merge actually changes the bytes (so a no-op delta never
+// churns the manifest, and a delete of an absent entry never conjures an empty
+// manifest file).
+func (s *SkillService) commitFiles(ctx context.Context, orgID string, repo *sourcecontrol.GitRepository, message string, writes map[string][]byte, deletePrefixes []string, manifestFn func(SkillsManifest) SkillsManifest) (string, error) {
 	ref, err := sourcecontrol.ResolveWorkspaceRef(ctx, s.git.Resolver(), orgID, repo)
 	if err != nil {
 		return "", err
@@ -457,6 +509,26 @@ func (s *SkillService) commitFiles(ctx context.Context, orgID string, repo *sour
 		for p, data := range writes {
 			tx.Write(p, data)
 		}
+		// Manifest merge, re-read + re-applied against THIS attempt's base so
+		// the CAS retry loop never loses a concurrently-added entry. NOTE the
+		// scope boundary: only the manifest is made retry-safe here. The file
+		// writes/deletes above were planned by the caller against the base it
+		// pre-read; a competing commit could in theory invalidate that plan
+		// too, but that hazard pre-dates the shared manifest and full
+		// re-planning inside the closure is out of scope — ONLY the manifest
+		// merge is folded per attempt.
+		if manifestFn != nil {
+			raw, _, rerr := tx.Base().Read(skillsManifestPath)
+			if rerr != nil && !errors.Is(rerr, sourcecontrol.ErrPathNotFound) {
+				return fmt.Errorf("read manifest baseline: %w", rerr)
+			}
+			base := parseSkillsManifest(raw)
+			renderedBase := renderSkillsManifest(base)
+			merged := renderSkillsManifest(manifestFn(base)) // manifestFn may mutate base in place
+			if !bytes.Equal(renderedBase, merged) {
+				tx.Write(skillsManifestPath, merged)
+			}
+		}
 		return nil
 	}, sourcecontrol.CommitOpts{Message: message, Author: author, Committer: committer})
 	if err != nil {
@@ -473,9 +545,12 @@ func (s *SkillService) commitFiles(ctx context.Context, orgID string, repo *sour
 // commit (the SKILL.md path and any reference being rewritten are protected
 // from the delete). Creates/imports pass pruneStaleRefs=false: there is nothing
 // to prune for a brand-new skill. Any retired-layout directories of the same
-// name are cleaned up in the same commit (no-ops on migrated repos). Used by
-// the mutation + import services and the reconciler. §9.
-func (s *SkillService) writeSkillFiles(ctx context.Context, orgID, name, skillMD string, references map[string]string, message string, pruneStaleRefs bool) error {
+// name are cleaned up in the same commit (no-ops on migrated repos). When
+// entry is non-nil the skill's skills-manifest.json entry is written in the
+// SAME commit (imports stamp provenance; custom create/update pass nil —
+// org-authored skills never get an entry). Used by the mutation + import
+// services and the reconciler. §9.
+func (s *SkillService) writeSkillFiles(ctx context.Context, orgID, name, skillMD string, references map[string]string, message string, pruneStaleRefs bool, entry *ManifestEntry) error {
 	repo, err := s.ensureSkillsRepo(ctx, orgID)
 	if err != nil {
 		return err
@@ -484,44 +559,65 @@ func (s *SkillService) writeSkillFiles(ctx context.Context, orgID, name, skillMD
 	for refKey, content := range references {
 		writes[skillRefPath(name, refKey)] = []byte(content)
 	}
+	// The manifest entry (imports only) is upserted INSIDE the commit closure
+	// so a concurrent import's entry is never clobbered on a CAS retry — see
+	// commitFiles. Capture entry by value; the closure runs per attempt.
+	var manifestFn func(SkillsManifest) SkillsManifest
+	if entry != nil {
+		e := *entry
+		manifestFn = func(m SkillsManifest) SkillsManifest {
+			m[name] = e
+			return m
+		}
+	}
 	deletes := legacySkillDirs(name)
 	if pruneStaleRefs {
 		// Sweep the references/ subtree so removed refs don't linger; commitFiles
 		// stages writes after deletes, so rewritten refs win.
 		deletes = append(deletes, skillRepoDir(name)+"/"+strings.TrimSuffix(refsPrefix, "/"))
 	}
-	_, err = s.commitFiles(ctx, orgID, repo, message, writes, deletes)
+	_, err = s.commitFiles(ctx, orgID, repo, message, writes, deletes, manifestFn)
 	return err
 }
 
 // deleteSkillDir removes a skill's whole directory (plus any retired-layout
-// copies of the name) in one commit. §9.
+// copies of the name) in one commit. If the name has a skills-manifest.json
+// entry (an imported skill), it is dropped in the SAME commit so the
+// manifest never outlives the files it describes. §9.
 func (s *SkillService) deleteSkillDir(ctx context.Context, orgID, name, message string) error {
 	repo, err := s.ensureSkillsRepo(ctx, orgID)
 	if err != nil {
 		return err
 	}
-	_, err = s.commitFiles(ctx, orgID, repo, message, nil, append([]string{skillRepoDir(name)}, legacySkillDirs(name)...))
+	// Drop the name's manifest entry (if any) INSIDE the commit closure so the
+	// entry never outlives its files AND a concurrent commit's entries survive
+	// the CAS retry — see commitFiles. commitFiles stages the manifest only
+	// when this delete actually removes an entry (an absent name is a no-op
+	// that never conjures an empty manifest file).
+	manifestFn := func(m SkillsManifest) SkillsManifest {
+		delete(m, name)
+		return m
+	}
+	_, err = s.commitFiles(ctx, orgID, repo, message, nil, append([]string{skillRepoDir(name)}, legacySkillDirs(name)...), manifestFn)
 	return err
 }
 
 // ---- helpers ---------------------------------------------------------------
 
-// kindRank orders org < platform < custom < imported. The dedup rule keeps the
-// HIGHER rank, so a custom/imported skill owns its name over a same-named
-// platform-shipped skill (the legacy shadow semantics, "org wins").
+// kindRank orders org < platform < imported. The dedup rule keeps the HIGHER
+// rank, so an imported skill owns its name over a same-named platform-shipped
+// skill (the legacy shadow semantics, "org wins"). The retired custom kind
+// shared org's rank and folds into it.
 func kindRank(kind string) int {
 	switch kind {
 	case SkillKindOrg:
 		return 0
 	case SkillKindPlatform:
 		return 1
-	case SkillKindCustom:
-		return 2
 	case SkillKindImported:
-		return 3
+		return 2
 	default:
-		return 4
+		return 3
 	}
 }
 

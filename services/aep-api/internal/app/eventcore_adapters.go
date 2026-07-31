@@ -287,6 +287,14 @@ func (a projectRunRows) ListByProject(ctx context.Context, orgID, projectID stri
 	return a.runs.ListByProject(ctx, orgID, projectID)
 }
 
+// LatestCycle lets the validation chip say "validating" only when a validation
+// CYCLE is in flight. Read from the cycle records rather than the run row because
+// loop position is never stored: a fix or conflict cycle re-enters an earlier
+// phase, so only the latest cycle knows where the loop actually is.
+func (a projectRunRows) LatestCycle(ctx context.Context, orgID, runID string) (*delivery.RunCycle, error) {
+	return a.cycles.Latest(ctx, orgID, runID)
+}
+
 func (a projectRunRows) DeleteByProject(ctx context.Context, orgID, projectID string) error {
 	if err := a.cycles.DeleteByProject(ctx, orgID, projectID); err != nil {
 		return err

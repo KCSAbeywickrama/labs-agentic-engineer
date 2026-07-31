@@ -67,6 +67,9 @@ type harness struct {
 	states     []string
 	settle     SettleRunInput
 	verdicts   []string
+	// verdictWrites keeps the full payload so a test can assert on what was
+	// PERSISTED (verdict + issue), not merely on the verdict the run returned.
+	verdictWrites []SetValidationVerdictInput
 	closed     int
 }
 
@@ -115,6 +118,7 @@ func newHarness(t *testing.T) *harness {
 			h.mu.Lock()
 			defer h.mu.Unlock()
 			h.verdicts = append(h.verdicts, in.Verdict)
+			h.verdictWrites = append(h.verdictWrites, in)
 		}).Return(nil)
 	h.env.OnActivity(acts.AppendCycle, mock.Anything, mock.Anything).Return(testCycleID, nil)
 	h.env.OnActivity(acts.NoteCycleDispatch, mock.Anything, mock.Anything).Return(nil)
@@ -396,6 +400,86 @@ func TestValidationCycle_Fails(t *testing.T) {
 	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonValidationFailed)
 	require.Equal(t, delivery.ValidationVerdictFailed, res.ValidationVerdict)
 	require.Equal(t, 0, h.closed, "a failed increment keeps its milestone open")
+}
+
+// TestValidationCycle_Unreported proves the one non-assertion verdict that still
+// fails a run: the agent merged its pull request and delivered no report at that
+// cycle's own merge commit, so the run learned nothing. It settles under its OWN
+// reason — "the suite went red" and "nothing was reported" are different
+// explanations, and a terminal reason exists to explain.
+func TestValidationCycle_Unreported(t *testing.T) {
+	h := newHarness(t)
+	h.milestoneIs(MilestoneSnapshot{Work: 1, Total: 1}, MilestoneSnapshot{})
+	h.validationIs(77, delivery.ValidationVerdictUnreported)
+	h.merges(2)
+
+	h.run(delivery.RunOriginSpecBuild, 0)
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonValidationUnreported)
+	require.Equal(t, delivery.ValidationVerdictUnreported, res.ValidationVerdict)
+	require.Equal(t, 0, h.closed, "a run that reported nothing keeps its milestone open")
+}
+
+// TestValidationCycle_IncompleteEvidenceStillSucceeds pins the pair that must NOT
+// fail a run. Both are honest reports about the test harness rather than evidence
+// the increment is broken:
+//
+//   - partial: something passed, nothing failed, and some criteria were never
+//     covered — which is why it is not reported as `passed`;
+//   - inconclusive: no test results at all.
+//
+// Telling "the oracle had nothing automatable" apart from "the agent ran nothing"
+// is deferred with the rest of internal-agent-error handling, so inconclusive
+// succeeds for now.
+func TestValidationCycle_IncompleteEvidenceStillSucceeds(t *testing.T) {
+	for _, verdict := range []string{
+		delivery.ValidationVerdictPartial,
+		delivery.ValidationVerdictInconclusive,
+	} {
+		t.Run(verdict, func(t *testing.T) {
+			h := newHarness(t)
+			h.milestoneIs(
+				MilestoneSnapshot{Work: 1, Total: 1},
+				MilestoneSnapshot{}, // deployed-green → validation
+				MilestoneSnapshot{}, // after validation → settle
+			)
+			h.validationIs(77, verdict)
+			h.merges(2)
+
+			h.run(delivery.RunOriginSpecBuild, 0)
+			res := h.result(t)
+
+			h.assertSettled(t, res, delivery.RunStateSucceeded, "")
+			require.Equal(t, verdict, res.ValidationVerdict)
+			require.Equal(t, 1, h.closed,
+				"a delivered increment closes its milestone even with incomplete evidence")
+		})
+	}
+}
+
+// The validation issue is persisted WITH the verdict: it otherwise lives only in
+// workflow state, so a settled run would carry a verdict with no way back to the
+// criteria that produced it once Temporal retention lapses.
+func TestValidationCycle_PersistsTheIssueWithTheVerdict(t *testing.T) {
+	h := newHarness(t)
+	h.milestoneIs(
+		MilestoneSnapshot{Work: 1, Total: 1},
+		MilestoneSnapshot{},
+		MilestoneSnapshot{},
+	)
+	h.validationIs(77, delivery.ValidationVerdictPassed)
+	h.merges(2)
+
+	h.run(delivery.RunOriginSpecBuild, 0)
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	require.Len(t, h.verdictWrites, 1, "the verdict is written once")
+	require.Equal(t, 77, h.verdictWrites[0].Issue,
+		"the issue is persisted alongside the verdict, not left in workflow state")
 }
 
 // TestIncidentRun_GetsNoValidationCycle pins the origin split: an incident fixes

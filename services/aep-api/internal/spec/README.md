@@ -54,17 +54,33 @@ the genai turn engine (runner/broker/sweeper), and the files / design / skills s
   `references/`, `assets/`, and any other files or directories — carried byte-faithfully end to end
   (loader → reconcile → org-skills repo → design agent → coding runner); scanners walk the whole dir with
   no extension filter, skipping only `SKILL.md` itself and dotfile segments; `scripts/` files materialize
-  with the exec bit on the coding runner. Kind (`platform | org | custom | imported`) lives in frontmatter
-  `metadata.aep.kind`, absent ⇒ `org`: platform/org are library-shipped + reconcile-managed (read-only),
-  custom/imported are user-owned + editable — the same aux-file contract governs user-facing create/update
-  and tarball import, rejecting any `..`/absolute path outright rather than silently dropping it. Each
-  org's flat `org-skills` repo (kind in frontmatter) is reconciled content-SHA-wise — seed / overwrite /
-  purge platform+org, skip user-owned. Model-context reads (the design agent's `loadSkillReference`) and
-  JSON API responses inline UTF-8 text only; binary aux files are listed, never inlined
-  (`binaryReferences` in the API; a corrective error naming the binary path in the tool). Binary aux
-  files are therefore delivery-only over the JSON API — their content never round-trips through a
-  GET→edit→PUT cycle — and stay durable only via the embedded library or tarball import, which carry
-  the bytes directly rather than through `binaryReferences`.
+  with the exec bit on the coding runner. Model-context reads (the design agent's `loadSkillReference`)
+  and JSON API responses inline UTF-8 text only; binary aux files are listed, never inlined
+  (`binaryReferences` in the API; a corrective error naming the binary path in the tool) — they are
+  delivery-only over the JSON API (their content never round-trips through a GET→edit→PUT cycle) and stay
+  durable only via the embedded library or tarball import, which carry the bytes directly. The same
+  aux-file contract governs user-facing create/update and tarball import, rejecting any `..`/absolute path
+  outright rather than silently dropping it.
+- **Kind, editability, and reconcile.** Kind (`platform | org | imported`) lives in frontmatter
+  `metadata.aep.kind`, absent ⇒ `org` (a stored legacy `custom` also reads back as `org` — the `custom`
+  kind is retired, folded into `org`). Kind is an ownership label, not the editability switch:
+  `SkillEditable(kind)` is the single seam — org + imported are editable, platform is read-only — so a
+  platform-seeded skill can be unlocked for editing without reclassifying it. `SkillDeletable(kind)`
+  equals `SkillEditable(kind)`: an org skill (platform-seeded or user-authored) is always deletable; a
+  platform-kind skill never is. Each org's flat `org-skills` repo is reconciled THREE-WAY against a
+  `skills-manifest.json` baseline (`{name: {origin, source?, baseHash}}`, `origin` = `platform`) written in
+  the same commit as any skill files: reconcile keys off manifest presence/origin, never off the skill's
+  `kind` — clean copy + platform moved → refresh and advance the baseline; org moved → override, left
+  alone; both moved → conflict, left alone and surfaced by `/updates` (states `update` / `overridden` /
+  `conflict`); both moved but converged on identical content → auto-resolves clean. A pre-manifest repo
+  copy is backfilled (baseline stamped; a divergent copy is treated as an override, never clobbered). Names
+  with no manifest entry are org-authored and never touched — this is what lets a user-authored `org`-kind
+  skill coexist with platform-seeded `org`-kind skills without reconcile confusing the two. Seeding an
+  absent default is split by ownership: a `platform`-kind default is always (re-)seeded; an `org`-kind
+  default is seeded only at first org creation — an ongoing sync leaves an absent org default out (opt-in)
+  but still runs the full three-way, including auto-refresh, against any PRESENT org skill. Purge only
+  retires manifest-tracked platform entries with a clean copy; an overridden retiree keeps its files and
+  just loses the entry, becoming a plain org skill.
 - **The project descriptor** (`specs/.agentic-engineer.toml`, `descriptor.go`) — the marker identifying a
   repo as an Agentic Engineer project, carrying the idea the user gave at creation. Written by `projects`
   at create through the `DescriptorWriter` port (best-effort: a failed write never fails the create) and

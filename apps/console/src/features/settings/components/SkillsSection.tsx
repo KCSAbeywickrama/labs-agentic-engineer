@@ -36,7 +36,13 @@ import {
   Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
-import { Eye, FolderGit2, Pencil, Trash2, Upload } from "@wso2/oxygen-ui-icons-react";
+import {
+  Eye,
+  FolderGit2,
+  RefreshCw,
+  TriangleAlert,
+  Upload,
+} from "@wso2/oxygen-ui-icons-react";
 import { StatusChip } from "../../../components/StatusChip";
 import {
   useConfig,
@@ -53,6 +59,32 @@ import { SkillViewerDialog } from "./SkillViewerDialog";
 import { SyncUpdatesControl } from "./SyncUpdatesControl";
 
 const PAGE_SIZE = 10;
+
+// Per-row platform-update status. Both states are framed as "a platform update
+// is available" — the only difference is whether the org customized this skill,
+// which is why one needs a review before adopting. Deliberately NOT called a
+// "conflict": a plain platform update is a new version on offer, not a fault.
+// The status is shown as a coloured left stripe on the row plus this inline
+// line — kept off the name line so it never competes with the kind chip.
+const STATUS_META = {
+  // Clean copy, platform moved → Sync brings it up to date. Informational.
+  update: {
+    icon: RefreshCw,
+    color: "info.main",
+    label: "Platform update available",
+    tooltip:
+      "The platform shipped a newer version of this skill. Your copy is unchanged, so syncing brings it up to date.",
+  },
+  // Org customized it AND the platform moved → adopting would overwrite the
+  // org's edits, so it needs a look first (the #298 review flow). Not synced.
+  review: {
+    icon: TriangleAlert,
+    color: "warning.main",
+    label: "Platform update — review your changes",
+    tooltip:
+      "The platform shipped a newer version of this skill after you customized it. Your version is kept; review to decide whether to adopt the platform's.",
+  },
+} as const;
 
 export function SkillsSection() {
   const {
@@ -134,7 +166,16 @@ export function SkillsSection() {
   }
 
   const { skills, repoUrl } = data;
-  const updatable = new Set((updates ?? []).map((u) => u.name));
+  // Three-way update states drive the per-row status stripe. Only "update"
+  // rows are sync-appliable, so only they feed the badge and the sync count.
+  // "overridden" (org customized, platform unchanged) has nothing to apply and
+  // stays quiet. "conflict" (platform moved a skill the org customized) is NOT
+  // synced — it surfaces as the amber "review your changes" status until the
+  // review flow lands (#298). See STATUS_META for the wording rationale.
+  const applicable = (updates ?? []).filter((u) => u.state === "update");
+  const conflicted = (updates ?? []).filter((u) => u.state === "conflict");
+  const updatable = new Set(applicable.map((u) => u.name));
+  const reviewNames = new Set(conflicted.map((u) => u.name));
   const syncedCount = syncSkills.data?.updated ?? 0;
 
   // Filter → sort → clamp → slice as one pure derivation: a list that shrinks
@@ -190,7 +231,7 @@ export function SkillsSection() {
           sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}
         >
           <SyncUpdatesControl
-            count={updates?.length ?? 0}
+            count={applicable.length}
             pending={syncSkills.isPending}
             onSync={() => syncSkills.mutate()}
           />
@@ -211,8 +252,8 @@ export function SkillsSection() {
           onClose={() => syncSkills.reset()}
         >
           {syncedCount > 0
-            ? `Synced ${syncedCount} built-in skill${syncedCount === 1 ? "" : "s"} to the latest content.`
-            : "Built-in skills are already up to date."}
+            ? `Synced ${syncedCount} org skill${syncedCount === 1 ? "" : "s"} to the latest content.`
+            : "Org skills are already up to date."}
         </Alert>
       )}
       {syncSkills.isError && (
@@ -235,6 +276,14 @@ export function SkillsSection() {
             <CardContent sx={{ p: 0, "&:last-child": { pb: 0 } }}>
               {rows.map((skill, idx) => {
                 const kind = normalizeKind(skill.kind);
+                // "update" wins over "review" only in that they're mutually
+                // exclusive per the three-way states; a row has at most one.
+                const status = updatable.has(skill.name)
+                  ? STATUS_META.update
+                  : reviewNames.has(skill.name)
+                    ? STATUS_META.review
+                    : null;
+                const StatusIcon = status?.icon;
                 return (
                   <Box key={skill.name}>
                     {idx > 0 && <Divider />}
@@ -245,6 +294,11 @@ export function SkillsSection() {
                         gap: 1.5,
                         px: 2,
                         py: 1.5,
+                        // A coloured left stripe carries the status; a
+                        // transparent border on statusless rows keeps every
+                        // row's content aligned to the same left edge.
+                        borderLeft: "3px solid",
+                        borderLeftColor: status ? status.color : "transparent",
                         "&:hover": { bgcolor: "action.hover" },
                       }}
                     >
@@ -263,7 +317,8 @@ export function SkillsSection() {
                           {/* The kind chip is the flat list's only kind
                               signal; its tooltip carries the kind's blurb,
                               including read-only-ness — there is no separate
-                              read-only chip. */}
+                              read-only chip. Status lives on its own line
+                              below, never competing with the kind here. */}
                           <Tooltip title={kindBlurb(kind)}>
                             {/* Box holds the ref Tooltip needs — StatusChip
                                 doesn't forward one. */}
@@ -274,10 +329,28 @@ export function SkillsSection() {
                               />
                             </Box>
                           </Tooltip>
-                          {updatable.has(skill.name) && (
-                            <StatusChip label="update available" tone="warning" />
-                          )}
                         </Box>
+                        {status && StatusIcon && (
+                          <Tooltip title={status.tooltip}>
+                            <Box
+                              sx={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: 0.5,
+                                mt: 0.5,
+                                color: status.color,
+                              }}
+                            >
+                              <StatusIcon size={14} />
+                              <Typography
+                                variant="caption"
+                                sx={{ fontWeight: 600, color: "inherit" }}
+                              >
+                                {status.label}
+                              </Typography>
+                            </Box>
+                          </Tooltip>
+                        )}
                         <Typography
                           variant="body2"
                           color="text.secondary"
@@ -286,10 +359,12 @@ export function SkillsSection() {
                           {skill.description}
                         </Typography>
                       </Box>
-                      <Box sx={{ display: "flex", gap: 0.5, flexShrink: 0 }}>
-                        {/* View is available for every kind — inspecting a
-                            read-only org/platform skill's body is the whole
-                            point of the viewer. */}
+                      {/* One uniform action per row — View. Edit and Delete
+                          live inside the viewer (gated on the skill's own
+                          editable/deletable), so every row aligns the same way
+                          regardless of kind, and mutations happen while looking
+                          at the skill. */}
+                      <Box sx={{ flexShrink: 0 }}>
                         <Button
                           size="small"
                           startIcon={<Eye size={16} />}
@@ -297,25 +372,6 @@ export function SkillsSection() {
                         >
                           View
                         </Button>
-                        {skill.editable && (
-                          <>
-                            <Button
-                              size="small"
-                              startIcon={<Pencil size={16} />}
-                              onClick={() => setEditTarget(skill.name)}
-                            >
-                              Edit
-                            </Button>
-                            <Button
-                              size="small"
-                              color="error"
-                              startIcon={<Trash2 size={16} />}
-                              onClick={() => setDeleteTarget(skill.name)}
-                            >
-                              Delete
-                            </Button>
-                          </>
-                        )}
                       </Box>
                     </Box>
                   </Box>
@@ -344,6 +400,16 @@ export function SkillsSection() {
       <SkillViewerDialog
         name={viewTarget}
         onClose={() => setViewTarget(null)}
+        onEdit={() => {
+          // Hand off from viewing to editing: open the editor on the same
+          // skill, then close the viewer behind it.
+          setEditTarget(viewTarget);
+          setViewTarget(null);
+        }}
+        onDelete={() => {
+          setDeleteTarget(viewTarget);
+          setViewTarget(null);
+        }}
       />
       <EditSkillDialog name={editTarget} onClose={() => setEditTarget(null)} />
 

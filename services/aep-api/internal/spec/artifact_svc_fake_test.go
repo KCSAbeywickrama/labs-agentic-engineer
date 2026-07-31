@@ -38,7 +38,6 @@ type fakeArtifactSvc struct {
 	ListRequirementsVersionsFunc func(ctx context.Context, orgID, projectID string) ([]RequirementsVersionInfo, error)
 	ListDesignVersionsFunc       func(ctx context.Context, orgID, projectID string) ([]DesignVersionInfo, error)
 	ListSpecVersionTagsFunc      func(ctx context.Context, orgID, projectID string) (*TagList, error)
-	LatestDesignTagFunc          func(ctx context.Context, orgID, projectID string) string
 	GetRequirementsAtTagFunc     func(ctx context.Context, orgID, projectID, tag string) (map[string]string, error)
 	GetDesignAtTagFunc           func(ctx context.Context, orgID, projectID, tag string) (map[string]string, error)
 	GetDesignAtCommitFunc        func(ctx context.Context, orgID, projectID, commitSHA string) (map[string]string, error)
@@ -109,13 +108,6 @@ func (f *fakeArtifactSvc) ListSpecVersionTags(ctx context.Context, orgID, projec
 		panic("spec test: ListSpecVersionTags called but ListSpecVersionTagsFunc is not set")
 	}
 	return f.ListSpecVersionTagsFunc(ctx, orgID, projectID)
-}
-
-func (f *fakeArtifactSvc) LatestDesignTag(ctx context.Context, orgID, projectID string) string {
-	if f.LatestDesignTagFunc == nil {
-		panic("spec test: LatestDesignTag called but LatestDesignTagFunc is not set")
-	}
-	return f.LatestDesignTagFunc(ctx, orgID, projectID)
 }
 
 func (f *fakeArtifactSvc) GetRequirementsAtTag(ctx context.Context, orgID, projectID, tag string) (map[string]string, error) {

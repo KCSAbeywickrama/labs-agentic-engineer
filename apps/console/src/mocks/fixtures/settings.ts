@@ -144,17 +144,28 @@ export const skillsSyncError: ApiError = {
   message: "Failed to create the skills repository on GitHub",
 };
 
-// Covers all four kinds (org | platform | custom | imported — the BE's real
-// vocabulary; builtin/flow are retired) so the catalogue's kind chips,
-// read-only vs editable actions, and the updates-available list all exercise.
-// More than one page of skills (10/page, issue #172) so the flat list's
-// pagination is exercisable in mock mode.
+// Covers all three kinds (org | platform | imported — the BE's real
+// vocabulary; custom/builtin/flow are retired) so the catalogue's kind chips,
+// read-only vs editable vs deletable actions, and the updates-available list
+// all exercise. deletable = editable per the real BE contract: org-kind
+// skills — whether platform-seeded (go, react-webapp, node-service,
+// python-service, postgres-schema), user-authored (acme-deploy-checklist,
+// acme-api-style), or imported (find-skills, commit-conventions) — are
+// editable:true, deletable:true; platform-kind skills (high-level-
+// architecture, task-breakdown, wireframes, validation-files) are always
+// managed by reconcile and are editable:false, deletable:false. Both Delete
+// states render in mock mode. More than one page of skills (10/page, issue
+// #172) so the flat list's pagination is exercisable in mock mode.
 export const seedSkills: SkillDetailBody[] = [
   {
     orgId: "org-1",
     name: "go",
     kind: "org",
-    editable: false,
+    // Platform-seeded org skill: editable and deletable like any org skill
+    // (deletable = editable) — reconcile only re-seeds it on ongoing sync if
+    // it's absent, never overwrites a present copy.
+    editable: true,
+    deletable: true,
     description:
       "How to build a Go service on the platform — layout, port 9090, multi-stage Dockerfile.",
     skillMd: `---
@@ -182,7 +193,9 @@ Expose \`GET /health\` for liveness on port **9090**.`,
     orgId: "org-1",
     name: "react-webapp",
     kind: "org",
-    editable: false,
+    // Platform-seeded org skill: editable and deletable (deletable = editable).
+    editable: true,
+    deletable: true,
     description:
       "How to build a React SPA on the platform — Vite layout, nginx runtime, window._env_ config.",
     skillMd: `---
@@ -204,6 +217,7 @@ config from \`window._env_\`. Throw on a missing key rather than defaulting.`,
     name: "high-level-architecture",
     kind: "platform",
     editable: false,
+    deletable: false,
     description: "Derives component architecture from requirements.",
     skillMd: `---
 name: high-level-architecture
@@ -221,6 +235,7 @@ Derive the component architecture from the approved requirements.`,
     name: "task-breakdown",
     kind: "platform",
     editable: false,
+    deletable: false,
     description: "Breaks a design into buildable tasks.",
     skillMd: `---
 name: task-breakdown
@@ -236,8 +251,11 @@ Break the approved design into a sequence of buildable tasks.`,
   {
     orgId: "org-1",
     name: "acme-deploy-checklist",
-    kind: "custom",
+    kind: "org",
+    // User-authored org skill (no platform manifest entry): editable AND
+    // deletable — this is what exercises the Delete button in mock mode.
     editable: true,
+    deletable: true,
     description: "Acme's internal pre-deploy checklist.",
     skillMd: `---
 name: acme-deploy-checklist
@@ -261,6 +279,7 @@ description: Acme's internal pre-deploy checklist.
     name: "find-skills",
     kind: "imported",
     editable: true,
+    deletable: true,
     description: "Discover and evaluate community AgentSkills before adopting.",
     skillMd: `---
 name: find-skills
@@ -277,7 +296,9 @@ Search the registry, read the SKILL.md, and check the declared license.`,
     orgId: "org-1",
     name: "node-service",
     kind: "org",
-    editable: false,
+    // Platform-seeded org skill: editable and deletable (deletable = editable).
+    editable: true,
+    deletable: true,
     description: "How to build a Node.js service on the platform.",
     skillMd: `---
 name: node-service
@@ -294,7 +315,9 @@ Pin the LTS base image; expose \`GET /health\` on port **9090**.`,
     orgId: "org-1",
     name: "python-service",
     kind: "org",
-    editable: false,
+    // Platform-seeded org skill: editable and deletable (deletable = editable).
+    editable: true,
+    deletable: true,
     description: "How to build a Python service on the platform.",
     skillMd: `---
 name: python-service
@@ -311,7 +334,9 @@ Use \`uv\` for dependency management; expose \`GET /health\` on port **9090**.`,
     orgId: "org-1",
     name: "postgres-schema",
     kind: "org",
-    editable: false,
+    // Platform-seeded org skill: editable and deletable (deletable = editable).
+    editable: true,
+    deletable: true,
     description: "Schema and migration conventions for platform databases.",
     skillMd: `---
 name: postgres-schema
@@ -329,6 +354,7 @@ One migration per change; never edit an applied migration.`,
     name: "wireframes",
     kind: "platform",
     editable: false,
+    deletable: false,
     description: "Derives per-component wireframes from the design file.",
     skillMd: `---
 name: wireframes
@@ -346,6 +372,7 @@ Derive one wireframe per user-facing component in the approved design.`,
     name: "validation-files",
     kind: "platform",
     editable: false,
+    deletable: false,
     description: "Derives validation files from approved requirements.",
     skillMd: `---
 name: validation-files
@@ -361,8 +388,10 @@ Every requirement gets at least one validation criterion.`,
   {
     orgId: "org-1",
     name: "acme-api-style",
-    kind: "custom",
+    kind: "org",
+    // User-authored org skill: editable AND deletable.
     editable: true,
+    deletable: true,
     description: "Acme's REST API naming and versioning conventions.",
     skillMd: `---
 name: acme-api-style
@@ -380,6 +409,7 @@ Plural nouns, kebab-case paths, \`/v1\` prefix, RFC 9457 errors.`,
     name: "commit-conventions",
     kind: "imported",
     editable: true,
+    deletable: true,
     description: "Conventional-commit message rules for agent-authored PRs.",
     skillMd: `---
 name: commit-conventions
@@ -395,9 +425,11 @@ description: Conventional-commit message rules for agent-authored PRs.
 ];
 
 // Embedded content differs from the org repo copy — surfaces in GET
-// /skills/updates until synced. "code-review" is absent from the repo.
+// /skills/updates until synced. "code-review" is absent from the repo. All
+// seeds are state "update" (clean copies the sync will refresh); the
+// overridden/conflict states get their own fixtures with the review UI.
 export const seedSkillUpdates: SkillUpdate[] = [
-  { name: "task-breakdown" },
-  { name: "go" },
-  { name: "code-review" },
+  { name: "task-breakdown", state: "update" },
+  { name: "go", state: "update" },
+  { name: "code-review", state: "update" },
 ];

@@ -99,7 +99,7 @@ func runView(row *delivery.MilestoneRun, cycles []delivery.RunCycle) gen.Milesto
 			ConflictCycles:  int64(row.ConflictCycles),
 			BuildRetriggers: int64(row.BuildRetriggers),
 		},
-		Validation: validationView(row.ValidationVerdict),
+		Validation: validationView(row.ValidationVerdict, row.ValidationIssue),
 		Cycles:     make([]gen.RunCycleView, 0, len(cycles)),
 		CreatedAt:  row.CreatedAt,
 		StartedAt:  row.StartedAt,
@@ -111,17 +111,30 @@ func runView(row *delivery.MilestoneRun, cycles []delivery.RunCycle) gen.Milesto
 	return view
 }
 
-// validationView carries the run's verdict and, once there is one, where the
-// report lives. The deployment surface reads the verdict HERE — there is no
-// separate validation endpoint — and fetches the report itself at HEAD through
-// the files API, which is why this is a path and not a body.
-func validationView(verdict string) gen.RunValidation {
+// validationView carries the run's verdict, the issue behind it, and — when there
+// is one to fetch — where the report lives. The deployment surface reads the
+// verdict HERE; there is no separate validation endpoint.
+//
+// The path is a path and not a body because the run story is polled at 5s and a
+// report body per run would ride every poll. The consumer pairs it with the
+// validation cycle's mergeSha (CycleView) and reads it through read-file's `ref`:
+// the report sits at ONE fixed path that every run overwrites, so reading the
+// branch tip would hand a historical run the newest run's results.
+//
+// A path is advertised only when a report can actually be there. `skipped` never
+// ran a cycle, and `unreported` is precisely the verdict meaning nothing was
+// committed — offering a path for either would send the console to a 404 and make
+// a known-absent report look like a read failure.
+func validationView(verdict string, issue int) gen.RunValidation {
 	out := gen.RunValidation{}
 	if verdict == "" {
 		return out
 	}
 	out.Verdict = gen.RunValidationVerdict(verdict)
-	if verdict != delivery.ValidationVerdictSkipped {
+	out.Issue = int64(issue)
+	switch verdict {
+	case delivery.ValidationVerdictSkipped, delivery.ValidationVerdictUnreported:
+	default:
 		out.ReportPath = validationReportPath
 	}
 	return out

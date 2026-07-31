@@ -22,30 +22,56 @@ import (
 	"testing"
 )
 
-type fakeExecLocator struct {
-	projectID string
-	found     bool
+// The cycle the tests resolve, and an org that does not own it.
+const (
+	theCycle   = "cycle-1"
+	theOrg     = "org"
+	strangeOrg = "org-other"
+)
+
+// fakeCycleLocator answers only for the (org, cycle) pairs it holds, which is how
+// the repository behaves: the org is part of the WHERE, so another org's cycle is
+// indistinguishable from one that does not exist. A locator keyed on the cycle
+// alone would let a broken tenant fence pass.
+type fakeCycleLocator struct {
+	// projects maps org handle → cycle id → project.
+	projects map[string]map[string]string
+	asked    []string
 }
 
-func (f fakeExecLocator) LookupExecutionProject(_ context.Context, _, _ string) (string, bool, error) {
-	return f.projectID, f.found, nil
+func (f *fakeCycleLocator) LookupCycleProject(_ context.Context, orgHandle, cycleID string) (string, bool, error) {
+	f.asked = append(f.asked, orgHandle+"/"+cycleID)
+	projectID, ok := f.projects[orgHandle][cycleID]
+	return projectID, ok, nil
 }
 
-type fakeEndpoints struct{ eps []ComponentEndpoint }
+// locatorFor is a locator that resolves theCycle under theOrg and nothing else.
+func locatorFor(projectID string) *fakeCycleLocator {
+	return &fakeCycleLocator{projects: map[string]map[string]string{
+		theOrg: {theCycle: projectID},
+	}}
+}
 
-func (f fakeEndpoints) ResolveEndpoints(_ context.Context, _, _ string) ([]ComponentEndpoint, error) {
+type fakeEndpoints struct {
+	eps    []ComponentEndpoint
+	called bool
+}
+
+func (f *fakeEndpoints) ResolveEndpoints(_ context.Context, _, _ string) ([]ComponentEndpoint, error) {
+	f.called = true
 	return f.eps, nil
 }
 
 func TestValidationContext_ResolvesEndpoints(t *testing.T) {
+	locator := locatorFor("proj")
 	svc := NewContextService(
-		fakeExecLocator{projectID: "proj", found: true},
-		fakeEndpoints{eps: []ComponentEndpoint{
+		locator,
+		&fakeEndpoints{eps: []ComponentEndpoint{
 			{Component: "hello-web", URL: "https://web.example"},
 			{Component: "hello-api", URL: "https://api.example"},
 		}},
 	)
-	resp, err := svc.ValidationContext(context.Background(), "exec-1", "org")
+	resp, err := svc.ValidationContext(context.Background(), theCycle, theOrg)
 	if err != nil {
 		t.Fatalf("ValidationContext: %v", err)
 	}
@@ -57,15 +83,33 @@ func TestValidationContext_ResolvesEndpoints(t *testing.T) {
 	if resp.CriteriaPath != criteriaFilePath {
 		t.Errorf("criteriaPath = %q; want %q", resp.CriteriaPath, criteriaFilePath)
 	}
+	// The id the runner presents is a CYCLE id, resolved under the verified org.
+	// Looking it up anywhere else is the bug this replaces.
+	if len(locator.asked) != 1 || locator.asked[0] != theOrg+"/"+theCycle {
+		t.Errorf("locator asked %v; want one lookup of %q under %q", locator.asked, theCycle, theOrg)
+	}
 }
 
-func TestValidationContext_UnknownExecutionIs404(t *testing.T) {
-	svc := NewContextService(
-		fakeExecLocator{found: false}, // execution not in caller's org
-		fakeEndpoints{},
-	)
-	_, err := svc.ValidationContext(context.Background(), "exec-x", "org")
-	if !errors.Is(err, ErrExecutionNotFound) {
-		t.Fatalf("want ErrExecutionNotFound (→ 404), got %v", err)
+func TestValidationContext_UnknownCycleIs404(t *testing.T) {
+	svc := NewContextService(locatorFor("proj"), &fakeEndpoints{})
+	_, err := svc.ValidationContext(context.Background(), "cycle-nope", theOrg)
+	if !errors.Is(err, ErrCycleNotFound) {
+		t.Fatalf("want ErrCycleNotFound (→ 404), got %v", err)
+	}
+}
+
+// The tenant fence: another org naming a real cycle id gets the SAME answer as
+// one naming nothing, so a cross-tenant probe cannot tell them apart. And the
+// endpoint resolver must never run — identity is decided first.
+func TestValidationContext_AnotherOrgsCycleIs404AndResolvesNothing(t *testing.T) {
+	endpoints := &fakeEndpoints{}
+	svc := NewContextService(locatorFor("proj"), endpoints)
+
+	_, err := svc.ValidationContext(context.Background(), theCycle, strangeOrg)
+	if !errors.Is(err, ErrCycleNotFound) {
+		t.Fatalf("want ErrCycleNotFound for another org's cycle, got %v", err)
+	}
+	if endpoints.called {
+		t.Error("resolved endpoints for an unowned cycle — identity must gate the endpoint read")
 	}
 }
