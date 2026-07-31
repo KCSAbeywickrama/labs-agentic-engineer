@@ -34,13 +34,24 @@ import { buildSkillTools } from "../src/agents/main/tools/skill-tools.js";
 import { buildSkillCatalog } from "../src/agents/main/prompt.js";
 import { ALL_AUDIENCES } from "../src/agents/main/skill-source.js";
 
-/** A `_skills` snapshot holding the given `<name>/SKILL.md` files. */
-function snapshotWith(skills: Record<string, string>): string {
+/**
+ * A `_skills` snapshot holding the given `<name>/SKILL.md` files, optionally
+ * with a `skills-manifest.json` sidecar written beside `skills/` (ADR-0014).
+ * `manifest` is JSON-encoded unless it is already a string, in which case it
+ * is written verbatim — letting a test write deliberately unparseable JSON.
+ */
+function snapshotWith(skills: Record<string, string>, manifest?: unknown): string {
   const dir = mkdtempSync(join(tmpdir(), "aep-skill-audience-"));
   for (const [name, md] of Object.entries(skills)) {
     const skillDir = join(dir, "skills", name);
     mkdirSync(skillDir, { recursive: true });
     writeFileSync(join(skillDir, "SKILL.md"), md);
+  }
+  if (manifest !== undefined) {
+    writeFileSync(
+      join(dir, "skills-manifest.json"),
+      typeof manifest === "string" ? manifest : JSON.stringify(manifest),
+    );
   }
   return dir;
 }
@@ -146,4 +157,37 @@ test("a library with no coding-only skills renders exactly as before", () => {
   const text = buildSkillCatalog(sourceOf(entry("planning", ALL_AUDIENCES)));
   assert.ok(!text.includes("skillsApplied"));
   assert.ok(!/pin/i.test(text));
+});
+
+// --- Disabled skills (ADR-0014) -----------------------------------------------
+
+test("a disabled skill is absent from the catalog and unloadable", () => {
+  const source = loadSkillsFromSnapshot(
+    snapshotWith(
+      { go: md("go", "[coding]"), planning: md("planning", "[design]") },
+      { planning: { origin: "platform", baseHash: "x", disabled: true } },
+    ),
+  );
+  assert.deepEqual(source.catalog().map((e) => e.name), ["go"]);
+  // Gone, not refused — it does not exist for this org.
+  assert.equal(source.load("planning"), undefined);
+});
+
+test("an entry without disabled, and a skill with no entry, stay enabled", () => {
+  const source = loadSkillsFromSnapshot(
+    snapshotWith(
+      { planning: md("planning", "[design]"), mine: md("mine", "[design]") },
+      { planning: { origin: "platform", baseHash: "x" } },
+    ),
+  );
+  assert.deepEqual(source.catalog().map((e) => e.name), ["mine", "planning"]);
+});
+
+test("a missing or unparseable manifest leaves every skill enabled", () => {
+  const noManifest = loadSkillsFromSnapshot(snapshotWith({ planning: md("planning", "[design]") }));
+  assert.deepEqual(noManifest.catalog().map((e) => e.name), ["planning"]);
+  const broken = loadSkillsFromSnapshot(
+    snapshotWith({ planning: md("planning", "[design]") }, "{ not json"),
+  );
+  assert.deepEqual(broken.catalog().map((e) => e.name), ["planning"]);
 });

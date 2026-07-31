@@ -32,7 +32,11 @@
  *    `skills/<kind>/<name>/SKILL.md` catalog (frontmatter only — bodies are NOT
  *    retained) and returns a `SkillSource` whose `loadSkill`/
  *    `loadSkillReference` read from disk ON DEMAND: progressive disclosure is
- *    truly lazy, and D4 immutability makes the mid-turn reads race-free.
+ *    truly lazy, and D4 immutability makes the mid-turn reads race-free. It
+ *    also reads the sidecar `<dir>/skills-manifest.json` once (ADR-0014) to
+ *    drop any skill an org admin has DISABLED — such a skill never becomes a
+ *    row, so it is absent from the catalog and `load`/`loadReference` return
+ *    `undefined` for it, same as an unknown name.
  */
 
 import { existsSync, readFileSync, readdirSync, type Dirent } from "node:fs";
@@ -271,6 +275,39 @@ export class SnapshotSkillSource implements SkillSource {
 const LEGACY_KIND_DIRS = new Set(["builtin", "flow", "custom", "imported"]);
 
 /**
+ * Read the sidecar `skills-manifest.json` (ADR-0014) and return the set of
+ * skill names an org admin has DISABLED. Availability FAILS OPEN: a missing
+ * file, unreadable file, invalid JSON, a non-object root, or an entry that
+ * isn't itself an object all yield an EMPTY set (nothing disabled) rather
+ * than throwing — a malformed sidecar must never blank an org's whole
+ * catalog, which would be far worse than serving a skill that should have
+ * been hidden. Each entry is checked individually so one bad entry cannot
+ * poison the read of the rest.
+ */
+function readDisabledSkillNames(snapshotDir: string): Set<string> {
+  const disabled = new Set<string>();
+  let raw: string;
+  try {
+    raw = readFileSync(join(snapshotDir, "skills-manifest.json"), "utf8");
+  } catch {
+    return disabled; // no manifest → nothing disabled
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return disabled; // unparseable → nothing disabled
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return disabled;
+  for (const [name, entry] of Object.entries(parsed as Record<string, unknown>)) {
+    if (entry !== null && typeof entry === "object" && (entry as Record<string, unknown>).disabled === true) {
+      disabled.add(name);
+    }
+  }
+  return disabled;
+}
+
+/**
  * Scan the snapshot's skill catalog into rows. The current shape is FLAT —
  * `<snapshotDir>/skills/<name>/SKILL.md` with the kind in frontmatter
  * (`metadata.aep.kind`; irrelevant to this scan) — and the legacy nested shape
@@ -279,11 +316,16 @@ const LEGACY_KIND_DIRS = new Set(["builtin", "flow", "custom", "imported"]);
  * with skill dirs sorted within each; a duplicate skill NAME keeps its first
  * occurrence (so a flat copy wins over a legacy one). A dir without a readable
  * SKILL.md is simply not a skill; a snapshot without `skills/` yields an empty
- * catalog.
+ * catalog. A skill named in the `skills-manifest.json` sidecar with
+ * `disabled: true` (ADR-0014) never becomes a row at all — it is withheld
+ * from this org entirely, not merely access-gated — so it never reaches
+ * `this.rows`/`this.byName` and `load`/`loadReference` fall through to their
+ * existing "unknown name" `undefined` branch for free.
  */
 function scanCatalog(snapshotDir: string): CatalogRow[] {
   const skillsRoot = join(snapshotDir, "skills");
   if (!existsSync(skillsRoot)) return [];
+  const disabledNames = readDisabledSkillNames(snapshotDir);
   const rows: CatalogRow[] = [];
   const seen = new Set<string>();
   const addSkillDir = (dir: string, id: string): void => {
@@ -297,6 +339,7 @@ function scanCatalog(snapshotDir: string): CatalogRow[] {
     const name = parsed.name ?? id; // fallback: the dir name IS the skill id
     if (seen.has(name)) return;
     seen.add(name);
+    if (disabledNames.has(name)) return; // disabled → does not exist for this org
     rows.push({
       name,
       description: parsed.description,
