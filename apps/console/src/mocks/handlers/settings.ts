@@ -121,6 +121,7 @@ function toSummary(s: SkillDetailBody): SkillSummary {
     contentSha: s.contentSha,
     editable: s.editable,
     deletable: s.deletable,
+    enabled: s.enabled,
   };
 }
 
@@ -159,6 +160,7 @@ function importSkill(name: string, source: string): ImportResult {
       kind: "imported",
       editable: true,
       deletable: true,
+      enabled: true,
       description: `Imported from ${source}.`,
       skillMd: `---\nname: ${name}\ndescription: Imported from ${source}.\n---\n\nImported skill body.`,
       references: {},
@@ -296,6 +298,7 @@ export const settingsHandlers = [
           kind: "org",
           editable: true,
           deletable: true,
+          enabled: true,
           description: `${t.name} (platform-shipped)`,
           skillMd: `---\nname: ${t.name}\ndescription: ${t.name} (platform-shipped)\n---\n\nPlatform-shipped skill body.`,
           references: {},
@@ -345,6 +348,7 @@ export const settingsHandlers = [
       // A freshly created skill is always org-kind, so deletable = editable.
       editable: true,
       deletable: true,
+      enabled: true,
       description: extractDescription(body.skillMd),
       skillMd: body.skillMd,
       references: body.references ?? {},
@@ -368,6 +372,26 @@ export const settingsHandlers = [
         404,
       );
     }
+    return HttpResponse.json(skill);
+  }),
+
+  // Non-destructive availability toggle (ADR-0014): flips the fixture's
+  // `enabled` flag in place — content, kind, and editable/deletable are
+  // untouched.
+  http.patch("*/api/v1/skills/:name", async ({ params, request }) => {
+    ensureInitialized();
+    const skill = skills.find((s) => s.name === params.name);
+    if (!skill) {
+      return errorJson(
+        {
+          code: "not_found",
+          message: `Skill ${String(params.name)} not found`,
+        },
+        404,
+      );
+    }
+    const body = (await request.json()) as { enabled: boolean };
+    skill.enabled = body.enabled;
     return HttpResponse.json(skill);
   }),
 
