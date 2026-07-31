@@ -65,7 +65,7 @@ const (
 	// page and the updates badge (was kind "flow").
 	SkillKindPlatform = "platform"
 	// SkillKindOrg — the org-visible stack skills, platform-seeded or
-	// user-authored; feeds coding-runner skillsApplied (was kind "builtin").
+	// user-authored; feeds coding-runner skillsPinned (was kind "builtin").
 	SkillKindOrg = "org"
 	// SkillKindImported — imported from an AgentSkills tarball; editable.
 	SkillKindImported = "imported"

@@ -156,7 +156,7 @@ async function main(): Promise<number> {
   }
   emit({ kind: "phase", phase: "workspace_ready" });
 
-  // Per-task skills: same readSkillsApplied → resolveTaskSkills →
+  // Per-task skills: same readSkillsPinned → resolveTaskSkills →
   // materializeSkills pipeline as production, with the git clone swapped for a
   // working-tree copy. Failure degrades to the base plugin, loudly.
   let preloadSkillNames: string[] = [];
@@ -167,7 +167,7 @@ async function main(): Promise<number> {
       const resolutions = await resolveTaskSkills({
         workspace: run.projectDir,
         // A run works the whole project, same as prod's milestone loop — the
-        // union of every component's skillsApplied, never one componentName.
+        // union of every component's skillsPinned, never one componentName.
         scope: { kind: "project" },
         skillsRepoURL: "local:working-tree",
         // No git, no platform: the clone below is a working-tree copy.

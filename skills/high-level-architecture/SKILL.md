@@ -83,12 +83,12 @@ sections, no generic performance targets, no "future enhancements" — unless
 the requirements state them.
 
 After emitting or changing a component's design, record the skills that
-component's build actually needs as a `skillsApplied` array **inside that
+component's build actually needs as a `skillsPinned` array **inside that
 component's `specs/design/components/<name>/design.json`** — e.g. a Go API
 service → `["openapi-conventions", "go"]`; a web-application →
 `["excalidraw", "react"]`. It is a JSON key on the component's design object,
 so include it when you write that `design.json` (addFile/editFile) — do NOT
-put `skillsApplied` in `design.md` frontmatter. Each component carries only the
+put `skillsPinned` in `design.md` frontmatter. Each component carries only the
 skills its own build needs.
 
 ## Deriving components — deployment units the requirements justify

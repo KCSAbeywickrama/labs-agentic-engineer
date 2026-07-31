@@ -88,10 +88,9 @@ export interface ComponentDesign {
   exposure: string;
   description?: string;
   /**
-   * Skills preloaded for this component's coding agent. Normalized output —
-   * always the winning value between the current `skillsPinned` key and the
-   * legacy `skillsApplied` spelling; see the dual-key read in
-   * parseComponentDesign below.
+   * Skills the coding agent preloads for this component's build. Deliberately
+   * not an exhaustive list of what the build may consult — the rest of the
+   * copied skill library stays loadable on demand.
    */
   skillsPinned?: string[];
   endpoint?: DesignEndpoint;
@@ -206,15 +205,10 @@ export function parseComponentDesign(raw: string): ParseResult {
   const description = optStr(data.description);
   if (description) design.description = description;
 
-  // `skillsPinned` is the current key; `skillsApplied` is the pre-rename
-  // spelling. design.json files carrying the legacy key are already
-  // committed in customer org repos (and may be hand-edited), so both must
-  // keep being read here, forever, with skillsPinned winning when present.
-  const rawSkills = Array.isArray(data.skillsPinned)
-    ? data.skillsPinned
-    : Array.isArray(data.skillsApplied)
-      ? data.skillsApplied
-      : undefined;
+  // Non-string entries are filtered rather than rejected — this parser feeds a
+  // view, so a malformed authored value shows fewer pins instead of blanking
+  // the panel; the write-gate is what refuses it.
+  const rawSkills = Array.isArray(data.skillsPinned) ? data.skillsPinned : undefined;
   if (rawSkills) {
     const skills = rawSkills.filter((s): s is string => typeof s === "string");
     if (skills.length) design.skillsPinned = skills;

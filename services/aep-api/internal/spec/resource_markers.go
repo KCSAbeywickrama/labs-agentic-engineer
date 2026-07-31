@@ -34,7 +34,7 @@ type CRTMarkers struct {
 	// ConsumerURLPath is the path appended to the consumer's origin for that
 	// patch.
 	ConsumerURLPath string
-	// Skill is the skill name that must appear in skillsApplied, or "".
+	// Skill is the skill name that must appear in skillsPinned, or "".
 	Skill string
 	// Description is the human prose describing what the type provides, or "".
 	Description string

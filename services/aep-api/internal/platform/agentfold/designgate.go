@@ -71,10 +71,7 @@ var (
 		"buildpack": true, "appPath": true, "entrypoint": true,
 		"exposure": true, "dependencies": true, "description": true,
 		"endpoint": true, "exposesAPI": true, "componentAgentInstructions": true,
-		// skillsApplied is the legacy spelling — designs already committed in
-		// customer org repos carry it, so it stays permitted forever.
-		// skillsPinned is the name the design agent now writes.
-		"skillsApplied": true, "skillsPinned": true,
+		"skillsPinned": true,
 	}
 )
 
@@ -133,13 +130,8 @@ func validateComponentDesign(content, dirName string) *designProblem {
 			return p
 		}
 	}
-	if sa, present := obj["skillsApplied"]; present {
-		if p := validateSkillsApplied("skillsApplied", sa); p != nil {
-			return p
-		}
-	}
 	if sp, present := obj["skillsPinned"]; present {
-		if p := validateSkillsApplied("skillsPinned", sp); p != nil {
+		if p := validateSkillsPinned(sp); p != nil {
 			return p
 		}
 	}
@@ -175,20 +167,19 @@ func validateEndpoint(v any) *designProblem {
 	return nil
 }
 
-// validateSkillsApplied mirrors the zod `skillsPinned` / legacy `skillsApplied`
-// field, both `z.array(z.string())`: when present it must be an array whose
-// every element is a string. Parity with the agent's zod gate — without it the
-// Go fold would accept a shape the agent rejected (or vice versa), diverging
-// the fold. (JSON arrays unmarshal to []any.) field is the JSON key name
-// ("skillsApplied" or "skillsPinned"), used only to phrase the message.
-func validateSkillsApplied(field string, raw any) *designProblem {
+// validateSkillsPinned mirrors the zod `skillsPinned` field
+// (`z.array(z.string())`): when present it must be an array whose every element
+// is a string. Parity with the agent's zod gate — without it the Go fold would
+// accept a shape the agent rejected (or vice versa), diverging the fold. (JSON
+// arrays unmarshal to []any.)
+func validateSkillsPinned(raw any) *designProblem {
 	arr, ok := raw.([]any)
 	if !ok {
-		return &designProblem{code: ErrSchemaViolation, message: field + ": must be an array"}
+		return &designProblem{code: ErrSchemaViolation, message: "skillsPinned: must be an array"}
 	}
 	for i, v := range arr {
 		if _, ok := v.(string); !ok {
-			return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("%s[%d]: must be a string", field, i)}
+			return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("skillsPinned[%d]: must be a string", i)}
 		}
 	}
 	return nil

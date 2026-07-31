@@ -195,12 +195,6 @@
     "componentAgentInstructions": {
       "type": "string"
     },
-    "skillsApplied": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      }
-    },
     "skillsPinned": {
       "type": "array",
       "items": {

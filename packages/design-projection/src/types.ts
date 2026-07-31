@@ -41,7 +41,7 @@ export interface ProjectDesignComponent {
   version: string;
   /**
    * Skill names preloaded for this component's coding agent (from the
-   * component's design.json `skillsPinned`, née `skillsApplied`). Normalized
+   * component's design.json `skillsPinned`, née `skillsPinned`). Normalized
    * output — always the winning value; the raw-document dual-key
    * compatibility lives in project-design.ts, not here.
    */

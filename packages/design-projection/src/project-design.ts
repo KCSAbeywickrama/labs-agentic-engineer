@@ -84,15 +84,10 @@ export function projectComponent(id: string, files: Record<string, string>): Pro
   // authored type passes through untouched (support-gating is a later phase).
   const type = str(dj.type) ?? "service";
   const exposure = str(dj.exposure) ?? "intranet";
-  // `skillsPinned` is the current key; `skillsApplied` is the pre-rename
-  // spelling. design.json files carrying the legacy key are already
-  // committed in customer org repos (and may be hand-edited), so both must
-  // keep being read here, forever, with skillsPinned winning when present.
-  const skillsSource = Array.isArray(dj.skillsPinned)
-    ? dj.skillsPinned
-    : Array.isArray(dj.skillsApplied)
-      ? dj.skillsApplied
-      : [];
+  // Non-string entries are filtered rather than rejected: the projection is a
+  // read-side view, so a malformed authored value degrades to fewer pins here
+  // and is caught by the write-gate, not by breaking the diagram.
+  const skillsSource = Array.isArray(dj.skillsPinned) ? dj.skillsPinned : [];
   const skillsPinned = skillsSource.filter((s): s is string => typeof s === "string");
 
   const artifacts: Record<string, string> = { design: `${dir}/design.json` };

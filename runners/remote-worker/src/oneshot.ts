@@ -196,7 +196,7 @@ async function main(): Promise<number> {
   //
   // Scope: an implementation run is a MILESTONE cycle — one branch, one PR,
   // any component in the milestone — so it takes the union of every component's
-  // skillsApplied. Its AEP_COMPONENT_NAME is the `aep-milestone` sentinel and
+  // skillsPinned. Its AEP_COMPONENT_NAME is the `aep-milestone` sentinel and
   // must not be used to pick a design file. A validation run applies no design
   // skills at all: it is black-box verification driven by the `aep-validation`
   // skill (AEP_TASK_KIND), and builds nothing.

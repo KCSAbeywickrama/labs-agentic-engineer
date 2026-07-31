@@ -42,7 +42,7 @@ Reacting to tool results (each result tells you the next move):
 - INVALID_YAML — your edit would break the YAML and was rejected; fix the indentation of newString and retry.
 - INVALID_JSON / SCHEMA_VIOLATION — a components/<name>/design.json write was rejected (broken JSON or a
   schema problem, listed in the message); re-emit the WHOLE corrected file with removeFile + addFile.
-  skillsApplied (the skills that component's build needs) is a per-component key inside its design.json,
+  skillsPinned (the skills that component's build needs) is a per-component key inside its design.json,
   not project-level frontmatter.
 - INVALID_DSL — a wireframes .dsl write was rejected (bad lines listed with line numbers: an unknown
   keyword, a misplaced left/right/table-row, or retired x,y coordinates). Fix EVERY listed line and
@@ -91,7 +91,7 @@ export function buildSkillCatalog(skills: SkillSource | undefined): string {
   const pinBlock =
     pinOnly.length === 0
       ? ""
-      : `\n\n${pinLeadIn} When a component's build needs one, add it to that component's skillsApplied ` +
+      : `\n\n${pinLeadIn} When a component's build needs one, add it to that component's skillsPinned ` +
         `in its design.json:\n\n` +
         pinOnly.map((e) => `- ${e.name}: ${e.description}`).join("\n");
 

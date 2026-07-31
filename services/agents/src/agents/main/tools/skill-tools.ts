@@ -122,7 +122,7 @@ export function buildSkillTools(skills?: SkillSource): Record<string, Tool> {
           if (refused.length > 0) {
             parts.push(
               `not yours to load: ${refused.join(", ")} — these are the coding agent's guidance. ` +
-                "If a component's build needs one, add it to that component's skillsApplied in its design.json.",
+                "If a component's build needs one, add it to that component's skillsPinned in its design.json.",
             );
           }
           if (missing.length > 0) parts.push(`unknown skills: ${missing.join(", ")}`);

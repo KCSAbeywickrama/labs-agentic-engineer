@@ -130,7 +130,7 @@ test("loadSkill separates refused names from missing ones", async () => {
   assert.deepEqual(res.refused, ["go"]);
   assert.deepEqual(res.missing, ["ghost"]);
   assert.deepEqual(res.skills.map((s) => s.name), ["planning"]);
-  assert.match(res.error!, /skillsApplied/); // the redirect names the alternative
+  assert.match(res.error!, /skillsPinned/); // the redirect names the alternative
 });
 
 const entry = (name: string, audience: readonly ("design" | "coding")[]) => ({
@@ -149,13 +149,13 @@ test("coding-only skills are listed apart, with the pin instruction", () => {
   const text = buildSkillCatalog(sourceOf(entry("planning", ["design"]), entry("go", ["coding"])));
   assert.match(text, /- planning:/);
   assert.match(text, /- go:/); // still visible — needed to pin it
-  assert.match(text, /skillsApplied/); // says what to do with it instead
+  assert.match(text, /skillsPinned/); // says what to do with it instead
   assert.ok(text.indexOf("- planning:") < text.indexOf("- go:"));
 });
 
 test("a library with no coding-only skills renders exactly as before", () => {
   const text = buildSkillCatalog(sourceOf(entry("planning", ALL_AUDIENCES)));
-  assert.ok(!text.includes("skillsApplied"));
+  assert.ok(!text.includes("skillsPinned"));
   assert.ok(!/pin/i.test(text));
 });
 

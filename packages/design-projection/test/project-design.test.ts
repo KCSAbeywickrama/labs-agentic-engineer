@@ -80,44 +80,7 @@ test("projects the bundle into the cell-diagram-compatible design json", () => {
   assert.equal(web.artifacts.wireframes, "specs/design/components/expense-webapp/wireframes.dsl");
 });
 
-test("reads the legacy skillsApplied key when skillsPinned is absent", () => {
-  const files = {
-    "specs/design/components/legacy-svc/design.json": JSON.stringify({
-      name: "legacy-svc",
-      type: "service",
-      version: "0.1.0",
-      language: "Go",
-      buildpack: "docker",
-      appPath: "legacy-svc",
-      entrypoint: "deployment/service",
-      exposure: "intranet",
-      skillsApplied: ["go"],
-      dependencies: [],
-    }),
-  };
-  const dj = buildProjectDesign("p", files);
-  assert.deepEqual(dj.components[0]!.skillsPinned, ["go"]);
-});
 
-test("prefers skillsPinned over legacy skillsApplied when a hand-edited design.json has both", () => {
-  const files = {
-    "specs/design/components/both-svc/design.json": JSON.stringify({
-      name: "both-svc",
-      type: "service",
-      version: "0.1.0",
-      language: "Go",
-      buildpack: "docker",
-      appPath: "both-svc",
-      entrypoint: "deployment/service",
-      exposure: "intranet",
-      skillsPinned: ["go"],
-      skillsApplied: ["stale-legacy-value"],
-      dependencies: [],
-    }),
-  };
-  const dj = buildProjectDesign("p", files);
-  assert.deepEqual(dj.components[0]!.skillsPinned, ["go"]);
-});
 
 test("a bundle without a design tree projects to an empty component list", () => {
   const dj = buildProjectDesign("empty", { "requirements.md": "# hi\n" });

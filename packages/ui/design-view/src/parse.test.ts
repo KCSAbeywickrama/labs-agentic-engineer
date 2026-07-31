@@ -125,33 +125,8 @@ describe("parseComponentDesign", () => {
     expect(d.skillsPinned).toEqual(["go", "react"]);
   });
 
-  it("filters non-string entries in the legacy skillsApplied key too", () => {
-    const d = parseComponentDesign(
-      JSON.stringify({ name: "svc", skillsApplied: ["go", 3, null, "react"] }),
-    );
-    if ("kind" in d) throw new Error("unexpected parse error");
-    expect(d.skillsPinned).toEqual(["go", "react"]);
-  });
 
-  it("reads the legacy skillsApplied key when skillsPinned is absent", () => {
-    const d = parseComponentDesign(
-      JSON.stringify({ name: "svc", skillsApplied: ["go", "openapi-conventions"] }),
-    );
-    if ("kind" in d) throw new Error("unexpected parse error");
-    expect(d.skillsPinned).toEqual(["go", "openapi-conventions"]);
-  });
 
-  it("prefers skillsPinned over legacy skillsApplied when a hand-edited design.json has both", () => {
-    const d = parseComponentDesign(
-      JSON.stringify({
-        name: "svc",
-        skillsPinned: ["go"],
-        skillsApplied: ["stale-legacy-value"],
-      }),
-    );
-    if ("kind" in d) throw new Error("unexpected parse error");
-    expect(d.skillsPinned).toEqual(["go"]);
-  });
 
   // #252 Task 9: style/package/candidates are persisted intent
   // (component-design.schema.json), unlike status/reason which are read-time

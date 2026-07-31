@@ -34,7 +34,7 @@ edits (see `deployments/scripts/setup-k3d.sh`).
 - Self-contained: all agent and SDK-specific wiring lives here.
 - **Skills scope is stated by the caller, never read off `AEP_COMPONENT_NAME`.**
   A milestone Job carries a sentinel there (`aep-milestone`), so an
-  implementation run resolves the union of `skillsApplied` across every
+  implementation run resolves the union of `skillsPinned` across every
   `specs/design/components/*/design.json`; a validation run applies no design
   skills at all. The local harness (`local.ts`) carries its own sentinel
   (`aep-local-milestone`) for the same reason: a playground coding run works

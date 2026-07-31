@@ -18,7 +18,7 @@
 
 /**
  * Design-phase mock tests: gate, folded design bundle (incl. the model-authored
- * skillsApplied through the REAL write-gate), derived artifacts, `check`.
+ * skillsPinned through the REAL write-gate), derived artifacts, `check`.
  */
 
 import { test } from "node:test";
@@ -41,7 +41,7 @@ const VALID_DESIGN = {
   exposure: "internet",
   dependencies: [],
   description: "Manages users",
-  skillsApplied: ["go"],
+  skillsPinned: ["go"],
 };
 
 const FLOW_DSL = `screen Login
@@ -61,12 +61,12 @@ function tempSkills(): string {
   mkdirSync(join(dir, "high-level-architecture"), { recursive: true });
   writeFileSync(
     join(dir, "high-level-architecture", "SKILL.md"),
-    "---\nname: high-level-architecture\ndescription: architecture flow\n---\n\nAuthor skillsApplied in design.json.\n",
+    "---\nname: high-level-architecture\ndescription: architecture flow\n---\n\nAuthor skillsPinned in design.json.\n",
   );
   return dir;
 }
 
-test("design phase: folds the bundle, gates skillsApplied shape, derives .excalidraw, check passes", async () => {
+test("design phase: folds the bundle, gates skillsPinned shape, derives .excalidraw, check passes", async () => {
   const projectDir = seedProject();
   const skillsDir = tempSkills();
   try {
@@ -90,9 +90,9 @@ test("design phase: folds the bundle, gates skillsApplied shape, derives .excali
     assert.equal(outcome.ok, true, outcome.detail);
 
     const design = JSON.parse(readFileSync(join(projectDir, "specs/design/components/user-service/design.json"), "utf8")) as {
-      skillsApplied?: string[];
+      skillsPinned?: string[];
     };
-    assert.deepEqual(design.skillsApplied, ["go"], "model-authored skillsApplied landed");
+    assert.deepEqual(design.skillsPinned, ["go"], "model-authored skillsPinned landed");
     assert.ok(
       existsSync(join(projectDir, "specs/design/components/user-service/wireframes.excalidraw")),
       "derived .excalidraw materialized",

@@ -592,7 +592,7 @@ func TestSplitAssembleDesign_ComponentRoundTrip(t *testing.T) {
 	}
 }
 
-func TestComponentDesignJSON_SkillsAppliedRoundTrip(t *testing.T) {
+func TestComponentDesignJSON_SkillsPinnedRoundTrip(t *testing.T) {
 	src := `{
   "name": "orders-api",
   "type": "service",
@@ -604,21 +604,21 @@ func TestComponentDesignJSON_SkillsAppliedRoundTrip(t *testing.T) {
   "exposure": "internet",
   "description": "orders",
   "dependencies": [],
-  "skillsApplied": ["go", "openapi-conventions"]
+  "skillsPinned": ["go", "openapi-conventions"]
 }`
 	comp, err := parseComponentDesignJSON("orders-api", src)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	if want := []string{"go", "openapi-conventions"}; !reflect.DeepEqual(comp.SkillsApplied, want) {
-		t.Fatalf("parsed skillsApplied = %v, want %v", comp.SkillsApplied, want)
+	if want := []string{"go", "openapi-conventions"}; !reflect.DeepEqual(comp.SkillsPinned, want) {
+		t.Fatalf("parsed skillsPinned = %v, want %v", comp.SkillsPinned, want)
 	}
 	out, err := marshalComponentDesignJSON("orders-api", comp)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	if !strings.Contains(string(out), `"skillsApplied"`) {
-		t.Fatalf("marshalled design.json missing skillsApplied: %s", out)
+	if !strings.Contains(string(out), `"skillsPinned"`) {
+		t.Fatalf("marshalled design.json missing skillsPinned: %s", out)
 	}
 }
 

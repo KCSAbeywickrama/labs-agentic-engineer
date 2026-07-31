@@ -24,7 +24,7 @@
 // skills locally — no second BFF round-trip, one git-based delivery mechanism.
 //
 // Flow (per task):
-//   1. Read skillsApplied[] from the PROJECT clone, at the scope the run works
+//   1. Read skillsPinned[] from the PROJECT clone, at the scope the run works
 //      at: one component's design.json, or — for a milestone cycle, which spans
 //      the whole milestone and may touch any component — the union across every
 //      specs/design/components/*/design.json.
@@ -54,7 +54,7 @@ const KNOWN_KINDS: readonly SkillKind[] = ["platform", "org", "custom", "importe
 const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---/;
 
 /**
- * Which design files contribute `skillsApplied` to this run.
+ * Which design files contribute `skillsPinned` to this run.
  *
  * `component` is the single-component read: one named component is being built,
  * so only its design.json applies. `project` is the union across every
@@ -72,7 +72,7 @@ export type SkillsScope =
 export interface ResolveTaskSkillsArgs {
   /** The project work tree (holds specs/design/components/<name>/design.json). */
   workspace: string;
-  /** Which component design files contribute skillsApplied. */
+  /** Which component design files contribute skillsPinned. */
   scope: SkillsScope;
   /** AEP_SKILLS_REPO_URL — the org's `org-skills` clone URL. */
   skillsRepoURL: string;
@@ -102,8 +102,8 @@ export async function resolveTaskSkills(args: ResolveTaskSkillsArgs): Promise<Sk
 
   const names =
     args.scope.kind === "project"
-      ? await readProjectSkillsApplied(args.workspace, log)
-      : await readSkillsApplied(args.workspace, args.scope.componentName, log);
+      ? await readProjectSkillsPinned(args.workspace, log)
+      : await readSkillsPinned(args.workspace, args.scope.componentName, log);
   if (names.length === 0) {
     log("[skills-resolve] design applies no skills — nothing to materialise");
     return [];
@@ -115,15 +115,15 @@ export async function resolveTaskSkills(args: ResolveTaskSkillsArgs): Promise<Sk
   return resolveSkillsFromClone(args.scratchDir, names, log);
 }
 
-// The component's authored design file; its `skillsApplied` key lists the
+// The component's authored design file; its `skillsPinned` key lists the
 // skills THIS component's build needs (per-component — the project design.md
 // no longer carries skills).
 const componentDesignRel = (component: string) =>
   `specs/design/components/${component}/design.json`;
 
-// Reads the building component's design.json and returns its `skillsApplied`
+// Reads the building component's design.json and returns its `skillsPinned`
 // (bare skill names). Absent file / absent field → []. Malformed JSON → [].
-export async function readSkillsApplied(
+export async function readSkillsPinned(
   workspace: string,
   componentName: string,
   log: (line: string) => void = () => {},
@@ -137,8 +137,8 @@ export async function readSkillsApplied(
     return [];
   }
   try {
-    const parsed = JSON.parse(raw) as { skillsApplied?: unknown } | null;
-    const applied = parsed?.skillsApplied;
+    const parsed = JSON.parse(raw) as { skillsPinned?: unknown } | null;
+    const applied = parsed?.skillsPinned;
     if (Array.isArray(applied)) {
       return applied.filter((s): s is string => typeof s === "string");
     }
@@ -151,13 +151,13 @@ export async function readSkillsApplied(
 // The directory every component's authored design file lives under.
 const COMPONENTS_DIR = "specs/design/components";
 
-// Reads the union of `skillsApplied` across every component's design.json —
+// Reads the union of `skillsPinned` across every component's design.json —
 // the milestone-scope read. Components are visited in sorted order and names
 // de-duplicated first-seen, so the result is deterministic for a given tree.
 // An absent components directory → [] (a project with no designed components
 // yet); an individual component's absent/malformed design.json contributes
 // nothing, exactly as at component scope.
-export async function readProjectSkillsApplied(
+export async function readProjectSkillsPinned(
   workspace: string,
   log: (line: string) => void = () => {},
 ): Promise<string[]> {
@@ -183,7 +183,7 @@ export async function readProjectSkillsApplied(
     // Quiet per-component read: at project scope a component without a
     // design.json is ordinary, not the warning-worthy case it is at component
     // scope, where the named component's file is the one thing being asked for.
-    const names = await readSkillsApplied(workspace, component);
+    const names = await readSkillsPinned(workspace, component);
     if (names.length > 0) contributors.push(component);
     for (const name of names) {
       if (seen.has(name)) continue;
