@@ -39,6 +39,7 @@ package reaper
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -98,16 +99,22 @@ func New(engine *gitfs.Engine, repos RepoLister, cfg config.WorkspaceConfig) *Re
 		cfg.ReapInterval = 5 * time.Minute
 	}
 	if cfg.SnapshotMaxAge <= 0 {
-		cfg.SnapshotMaxAge = 24 * time.Hour
+		cfg.SnapshotMaxAge = time.Hour
 	}
 	if cfg.TrashMaxAge <= 0 {
-		cfg.TrashMaxAge = 24 * time.Hour
+		cfg.TrashMaxAge = time.Hour
 	}
 	if cfg.DiskHighPct <= 0 {
 		cfg.DiskHighPct = 85
 	}
 	if cfg.DiskLowPct <= 0 {
 		cfg.DiskLowPct = 70
+	}
+	if cfg.DiskLowPct >= cfg.DiskHighPct || cfg.DiskHighPct > 100 {
+		panic(fmt.Sprintf(
+			"reaper: invalid disk watermarks: DiskLowPct=%d DiskHighPct=%d (need 0 < low < high <= 100)",
+			cfg.DiskLowPct, cfg.DiskHighPct,
+		))
 	}
 	return &Reaper{engine: engine, repos: repos, cfg: cfg, diskUsage: statfsUsage}
 }

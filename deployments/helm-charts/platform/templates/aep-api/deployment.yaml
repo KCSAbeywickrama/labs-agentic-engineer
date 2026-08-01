@@ -50,6 +50,18 @@ spec:
               value: "false"
             - name: AEP_WORKSPACE_ROOT
               value: "/workspaces"
+            - name: AEP_WORKSPACE_REAP_INTERVAL
+              value: {{ .Values.workspaces.reapInterval | default "5m" | quote }}
+            - name: AEP_WORKSPACE_SNAPSHOT_MAX_AGE
+              value: {{ .Values.workspaces.snapshotMaxAge | default "1h" | quote }}
+            - name: AEP_WORKSPACE_TRASH_MAX_AGE
+              value: {{ .Values.workspaces.trashMaxAge | default "1h" | quote }}
+            - name: AEP_WORKSPACE_ORG_QUOTA_BYTES
+              value: {{ .Values.workspaces.orgQuotaBytes | default "2147483648" | quote }}
+            - name: AEP_WORKSPACE_DISK_HIGH_PCT
+              value: {{ .Values.workspaces.diskHighPct | default "85" | quote }}
+            - name: AEP_WORKSPACE_DISK_LOW_PCT
+              value: {{ .Values.workspaces.diskLowPct | default "70" | quote }}
             # aep-* covers the AEP clients (aud = client id, all aep-*).
             # openchoreo-rca-agent is added so the SRE/RCA agent's token (aud =
             # its client id) is accepted for issue-create + report publish —

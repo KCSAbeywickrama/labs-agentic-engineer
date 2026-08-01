@@ -29,6 +29,37 @@ import (
 	"github.com/wso2/aep/aep-api/internal/platform/gitfs"
 )
 
+func TestNewPanicsOnInvalidWatermarks(t *testing.T) {
+	eng, err := gitfs.New(filepath.Join(t.TempDir(), "workspaces"))
+	if err != nil {
+		t.Fatalf("gitfs.New: %v", err)
+	}
+	cfg := testCfg()
+	cfg.DiskLowPct = 90
+	cfg.DiskHighPct = 85 // low >= high after floors
+	defer func() {
+		if recover() == nil {
+			t.Fatal("expected panic for DiskLowPct >= DiskHighPct")
+		}
+	}()
+	_ = New(eng, staticLister(nil), cfg)
+}
+
+func TestNewPanicsOnDiskHighOver100(t *testing.T) {
+	eng, err := gitfs.New(filepath.Join(t.TempDir(), "workspaces"))
+	if err != nil {
+		t.Fatalf("gitfs.New: %v", err)
+	}
+	cfg := testCfg()
+	cfg.DiskHighPct = 101
+	defer func() {
+		if recover() == nil {
+			t.Fatal("expected panic for DiskHighPct > 100")
+		}
+	}()
+	_ = New(eng, staticLister(nil), cfg)
+}
+
 // TestLeaderFlockGatesGlobalPasses: while another holder owns
 // <root>/.reaper.lock, a Sweep still runs the local passes (trash purge)
 // but skips the global ones (orphan reconciliation); once released, the
