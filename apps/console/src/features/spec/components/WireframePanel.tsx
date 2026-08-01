@@ -126,16 +126,13 @@ export function WireframePanel({
   // streaming/agent-busy/pending/error branches above all return before here.
   const showToggle = settled && scene != null;
   const component = componentOf(dslPath);
-  // The full-screen prototype route ships in the next task; the generated
-  // route tree doesn't know about it yet, so a typed `Link to="/projects/…"`
-  // literal fails tsc against the current route union. Build the href as a
-  // plain (non-literal) string instead — TanStack's `Link` still accepts an
-  // arbitrary `string`-typed `to`, and this line can be tightened to a typed
-  // route once that route file exists.
-  const fullScreenHref: string =
-    component != null ? `/projects/${projectName}/prototype/${component}` : "";
   const fullScreenLink = component != null && (
-    <Link to={fullScreenHref}>Open full screen</Link>
+    <Link
+      to="/projects/$projectName/prototype/$component"
+      params={{ projectName, component }}
+    >
+      Open full screen
+    </Link>
   );
 
   // While streaming, ONE mounted canvas takes successive scenes through

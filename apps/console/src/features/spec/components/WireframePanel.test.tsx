@@ -48,11 +48,27 @@ vi.mock("../api/useDerivedDesign", () => ({
 }));
 
 vi.mock("@tanstack/react-router", () => ({
-  Link: (p: { to?: unknown; children?: unknown }) => (
-    <a href="#" data-to={String(p.to)}>
-      {p.children as never}
-    </a>
-  ),
+  // Resolves a typed `to`/`params` pair into the concrete path, same as the
+  // real router would — so `data-to` assertions read the resolved URL, not
+  // the `$param` route pattern literal.
+  Link: (p: {
+    to?: unknown;
+    params?: Record<string, string>;
+    children?: unknown;
+  }) => {
+    const resolved =
+      typeof p.to === "string" && p.params
+        ? Object.entries(p.params).reduce(
+            (path, [key, value]) => path.replace(`$${key}`, value),
+            p.to,
+          )
+        : String(p.to);
+    return (
+      <a href="#" data-to={resolved}>
+        {p.children as never}
+      </a>
+    );
+  },
 }));
 
 const DSL_PATH = "specs/design/components/shop-webapp/wireframes.dsl";
