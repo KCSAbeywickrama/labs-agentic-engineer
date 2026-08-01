@@ -17,6 +17,7 @@
 package run
 
 import (
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -67,6 +68,9 @@ type harness struct {
 	states     []string
 	settle     SettleRunInput
 	verdicts   []string
+	// traitSyncs records every managed-API trait convergence the loop asked for,
+	// so a test can assert WHEN it fires rather than merely that it was wired.
+	traitSyncs []ProjectRef
 	// verdictWrites keeps the full payload so a test can assert on what was
 	// PERSISTED (verdict + issue), not merely on the verdict the run returned.
 	verdictWrites []SetValidationVerdictInput
@@ -97,6 +101,7 @@ func newHarness(t *testing.T) *harness {
 	h.env.RegisterActivity(acts.EnsureValidationIssue)
 	h.env.RegisterActivity(acts.ReadValidationVerdict)
 	h.env.RegisterActivity(acts.DispatchAgent)
+	h.env.RegisterActivity(acts.SyncAPITraits)
 
 	h.env.OnActivity(acts.SetRunState, mock.Anything, mock.Anything).
 		Run(func(args mock.Arguments) {
@@ -142,6 +147,27 @@ func newHarness(t *testing.T) *harness {
 		}).Return("job-1", nil)
 
 	return h
+}
+
+// traitSyncIs pins what the managed-API convergence answers. Registered per
+// test rather than as a constructor default so a test can make it fail — the
+// harness consumes expectations in registration order, so an unlimited default
+// set in newHarness would swallow the override.
+func (h *harness) traitSyncIs(err error) {
+	h.set["traits"] = true
+	h.env.OnActivity(h.acts.SyncAPITraits, mock.Anything, mock.Anything).
+		Run(func(args mock.Arguments) {
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			h.traitSyncs = append(h.traitSyncs, args.Get(1).(ProjectRef))
+		}).Return(err)
+}
+
+// traitSyncCount is the convergence tally, read safely.
+func (h *harness) traitSyncCount() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return len(h.traitSyncs)
 }
 
 // milestoneIs queues the cycle-boundary polls, in order. The last one repeats
@@ -201,6 +227,9 @@ func (h *harness) applyDefaults() {
 	}
 	if !h.set["milestone"] {
 		h.milestoneIs(MilestoneSnapshot{})
+	}
+	if !h.set["traits"] {
+		h.traitSyncIs(nil)
 	}
 }
 
@@ -334,6 +363,69 @@ func TestFixCycle_RedBuildBecomesTheNextCyclesWork(t *testing.T) {
 
 	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
 	require.Equal(t, []string{delivery.CycleKindCoding, delivery.CycleKindFix}, h.dispatchKinds())
+}
+
+// TestBuildsGreen_ConvergesTheManagedAPIGatewayPolicy pins the trigger this
+// loop now owns. The `api-configuration` trait's per-environment half — the
+// `jwtAuth` policy the gateway enforces — is written to the ReleaseBinding,
+// which OpenChoreo creates from the workload the build's last step generates.
+// Builds going green is therefore the first moment in a run where the write has
+// a target, and the loop must take it: nothing else on this rail does, which is
+// how protected APIs came to serve unauthenticated.
+func TestBuildsGreen_ConvergesTheManagedAPIGatewayPolicy(t *testing.T) {
+	h := newHarness(t)
+	h.milestoneIs(MilestoneSnapshot{Work: 1, Total: 1}, MilestoneSnapshot{})
+	h.merges(1)
+
+	h.run(delivery.RunOriginSpecBuild, 0)
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
+	require.Equal(t, []ProjectRef{{OrgID: testOrg, ProjectID: testProject}}, h.traitSyncs,
+		"a green cycle converges the project's managed-API policy exactly once")
+}
+
+// TestRedBuild_ConvergesOnlyOnceItGoesGreen: a red cycle produced no new
+// ReleaseBinding, so there is nothing to converge and the loop must not spend a
+// round trip pretending otherwise. The fix cycle that follows passes through the
+// same green path and does the write then.
+func TestRedBuild_ConvergesOnlyOnceItGoesGreen(t *testing.T) {
+	h := newHarness(t)
+	h.milestoneIs(
+		MilestoneSnapshot{Work: 1, Total: 1},
+		MilestoneSnapshot{Work: 1, Total: 1},
+		MilestoneSnapshot{},
+	)
+	h.buildsAre(
+		CycleBuildState{Expected: 1, Settled: 1, Red: []string{"order-service"}},
+		CycleBuildState{Expected: 1, Settled: 1},
+	)
+	h.merges(2)
+
+	h.run(delivery.RunOriginSpecBuild, 0)
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
+	require.Equal(t, 1, h.traitSyncCount(),
+		"only the green cycle converges; the red one had no binding to write to")
+}
+
+// TestTraitSyncFailure_DoesNotFailTheRun pins the deliberate asymmetry: the
+// convergence is retried under its own deadline, but its exhaustion is logged,
+// not fatal. Failing the cycle would not undo the exposure — the component is
+// already deployed and serving by the time this runs — so a red run would add
+// noise without removing it. Only a later convergence removes it.
+func TestTraitSyncFailure_DoesNotFailTheRun(t *testing.T) {
+	h := newHarness(t)
+	h.milestoneIs(MilestoneSnapshot{Work: 1, Total: 1}, MilestoneSnapshot{})
+	h.traitSyncIs(errors.New("openchoreo unreachable"))
+	h.merges(1)
+
+	h.run(delivery.RunOriginSpecBuild, 0)
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
+	require.Positive(t, h.traitSyncCount(), "the convergence was attempted")
 }
 
 // TestConflictCycle_AnUnmergeablePRBecomesTheNextCyclesWork is the same shape

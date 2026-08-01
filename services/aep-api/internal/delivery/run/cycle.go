@@ -118,7 +118,19 @@ func (l *loop) runCycle(ctx workflow.Context, kind string, anchorIssue int) (cyc
 		return cycleNone, err
 	}
 	l.st.Phase = delivery.RunPhaseBuilding
-	return l.awaitBuilds(ctx)
+	res, err = l.awaitBuilds(ctx)
+	if err != nil {
+		return cycleNone, err
+	}
+	if res == cycleGreen {
+		// Green is the first moment the managed-API trait config has somewhere to
+		// land: OpenChoreo builds the ReleaseBinding that carries it out of the
+		// workload the build's last step generates. Deliberately not on the red
+		// path — a component that did not build has no new binding to converge,
+		// and the fix cycle that follows will pass through here again.
+		l.syncAPITraits(ctx)
+	}
+	return res, nil
 }
 
 // dispatchUntilLanded spends the cycle's re-dispatch budget trying to land a
