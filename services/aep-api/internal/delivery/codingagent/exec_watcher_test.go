@@ -237,6 +237,114 @@ func TestExecWatcher_BuildSuccess_FinishLoserSkipsObserver(t *testing.T) {
 	}
 }
 
+// TestExecWatcher_CodingFailure_FinishLoserSkipsNotify: reconcile twice on the
+// same failed coding run — the second Finish is a loser and must not Notify.
+func TestExecWatcher_CodingFailure_FinishLoserSkipsNotify(t *testing.T) {
+	coding := &delivery.Execution{ID: "c1", OrgID: "acme", Repo: "acme/widgets", IssueNumber: 7,
+		Kind: string(taskmeta.KindCoding), Status: string(taskmeta.ExecRunning), RunName: "wf-1"}
+	repo := newFakeExecRepo(coding)
+	failed := &gen.WorkflowRun{Name: "wf-1", Completed: true, Status: openchoreo.ReasonWorkflowFailed}
+	hub := delivery.NewTaskStreamHub()
+	ch, cancel := hub.Subscribe(coding.Repo, coding.IssueNumber)
+	defer cancel()
+	w := NewExecWatcher(ocRuns(map[string]*gen.WorkflowRun{"wf-1": failed}), repo, nil, 0).
+		WithTaskNotifier(hub)
+
+	ctx := context.Background()
+	if err := w.Sweep(ctx); err != nil {
+		t.Fatalf("first Sweep: %v", err)
+	}
+	select {
+	case <-ch:
+	default:
+		t.Fatal("winner must Notify")
+	}
+	w.reconcile(ctx, coding, failed)
+	select {
+	case <-ch:
+		t.Fatal("Finish loser must not Notify")
+	default:
+	}
+}
+
+// TestExecWatcher_BuildPlainFailure_FinishLoserSkipsNotifyAndObserver: reconcile
+// twice on the same plain-failed build — the second Finish is a loser and must
+// not Notify or re-fire OnBuildTerminal.
+func TestExecWatcher_BuildPlainFailure_FinishLoserSkipsNotifyAndObserver(t *testing.T) {
+	row := runningBuild("b1", "run-1", "")
+	repo := newFakeExecRepo(row)
+	failed := plainFailedRun("run-1")
+	hub := delivery.NewTaskStreamHub()
+	ch, cancel := hub.Subscribe(row.Repo, row.IssueNumber)
+	defer cancel()
+	obs := &countingBuildObserver{}
+	w := NewExecWatcher(ocRuns(map[string]*gen.WorkflowRun{"run-1": failed}), repo, nil, 0).
+		WithBuildRetrier(&fakeRetrier{}, 3).
+		WithTaskNotifier(hub).
+		WithBuildObserver(obs)
+
+	ctx := context.Background()
+	if err := w.Sweep(ctx); err != nil {
+		t.Fatalf("first Sweep: %v", err)
+	}
+	select {
+	case <-ch:
+	default:
+		t.Fatal("winner must Notify")
+	}
+	if obs.n != 1 {
+		t.Fatalf("winner must notify observer once, got %d", obs.n)
+	}
+	w.reconcile(ctx, row, failed)
+	select {
+	case <-ch:
+		t.Fatal("Finish loser must not Notify")
+	default:
+	}
+	if obs.n != 1 {
+		t.Fatalf("Finish loser must not re-fire OnBuildTerminal, got %d", obs.n)
+	}
+}
+
+// TestExecWatcher_BuildAuthBudgetExhausted_FinishLoserSkipsNotifyAndObserver:
+// reconcile twice after auth-retry budget is spent — the second Finish is a
+// loser and must not Notify or re-fire OnBuildTerminal.
+func TestExecWatcher_BuildAuthBudgetExhausted_FinishLoserSkipsNotifyAndObserver(t *testing.T) {
+	row := runningBuild("b1", "run-3", "build_auth_retry:3")
+	repo := newFakeExecRepo(row)
+	failed := authFailedRun("run-3")
+	hub := delivery.NewTaskStreamHub()
+	ch, cancel := hub.Subscribe(row.Repo, row.IssueNumber)
+	defer cancel()
+	obs := &countingBuildObserver{}
+	w := NewExecWatcher(ocRuns(map[string]*gen.WorkflowRun{"run-3": failed}), repo, nil, 0).
+		WithBuildRetrier(&fakeRetrier{newRun: "run-4"}, 3).
+		WithTaskNotifier(hub).
+		WithBuildObserver(obs)
+
+	ctx := context.Background()
+	if err := w.Sweep(ctx); err != nil {
+		t.Fatalf("first Sweep: %v", err)
+	}
+	select {
+	case <-ch:
+	default:
+		t.Fatal("winner must Notify")
+	}
+	if obs.n != 1 {
+		t.Fatalf("winner must notify observer once, got %d", obs.n)
+	}
+	w.reconcile(ctx, row, failed)
+	select {
+	case <-ch:
+		t.Fatal("Finish loser must not Notify")
+	default:
+	}
+	if obs.n != 1 {
+		t.Fatalf("Finish loser must not re-fire OnBuildTerminal, got %d", obs.n)
+	}
+}
+
 // TestJobWatcher_FinishFailed_LoserSkipsNotify: finishFailed twice on the same
 // row — the second Finish loses and must not Notify the task-stream hub.
 func TestJobWatcher_FinishFailed_LoserSkipsNotify(t *testing.T) {
