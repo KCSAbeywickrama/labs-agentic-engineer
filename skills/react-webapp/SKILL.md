@@ -17,7 +17,8 @@ per-env values (API URLs, OIDC config, flags) arrive at request time in
 
 1. **Scaffold** per Layout.
 2. **Implement** — `src/env.ts` first (every other module reads config through
-   it), then `src/api.ts`, then pages. Every rule under Constraints is a runtime
+   it), then generate `src/generated/` from each dependency's OpenAPI contract,
+   then `src/api.ts`, then pages. Every rule under Constraints is a runtime
    failure if broken, not a style preference.
 3. **Verify** — from the app path:
    ```bash
@@ -71,6 +72,17 @@ by the same static config as plain JS.
 **Never `exposesAPI`.** That toggle is for backends only; a web-app expresses
 auth through its auth dependency instead.
 
+**Contract-first client, never hand-rolled shapes.** Every dependency has a
+committed OpenAPI contract: `specs/design/components/<component-name>/openapi.yaml`
+for a `component`-kind dependency, or
+`specs/design/components/<this-app>/dependencies/<dep-name>.openapi.yaml` for an
+`external`-kind one — project-root paths, sibling to this app's own folder.
+Generate types from it and call through `openapi-fetch`'s typed client (Layout);
+don't hand-write request/response shapes, they drift from the real contract the
+moment it changes. Commit `src/generated/` — the per-component Docker build's
+context is this app's own folder alone, so unlike a monorepo-wide `gen` step
+there is no later stage that can reach the sibling spec to regenerate it.
+
 ## Layout
 
 ```
@@ -83,7 +95,8 @@ auth through its auth dependency instead.
 │   ├── main.tsx
 │   ├── App.tsx
 │   ├── env.ts            # typed window._env_ shim
-│   ├── api.ts            # fetch helpers
+│   ├── generated/        # openapi-typescript output, one file per dependency — commit, never hand-edit
+│   ├── api.ts            # openapi-fetch client(s), typed against generated/
 │   ├── auth.ts           # only with an auth dependency — see thunder-authentication
 │   └── pages/
 ├── nginx/
@@ -129,16 +142,38 @@ if (!window._env_) {
 export const env: Env = window._env_;
 ```
 
+`src/generated/<component-name>.ts` — one run per dependency, before writing
+`api.ts`. `openapi-typescript` is a devDependency (codegen only, no runtime
+footprint); `openapi-fetch` is a regular dependency (it ships in the bundle):
+
+```bash
+npx openapi-typescript ../specs/design/components/<component-name>/openapi.yaml \
+  -o src/generated/<component-name>.ts
+```
+
+(`external`-kind dependency: point at
+`../specs/design/components/<this-app>/dependencies/<dep-name>.openapi.yaml`
+instead.) Re-run and commit the diff whenever the upstream spec changes.
+
 `src/api.ts` — resolve the upstream URL at module top level, so a missing key
-throws at load rather than at the first click:
+throws at load rather than at the first click; the client is typed end-to-end
+against the generated file, so a path or method typo is a compile error, not a
+runtime 404:
 
 ```ts
+import createClient from "openapi-fetch";
+import type { paths } from "./generated/todo-api";
 import { env } from "./env";
 
-const BASE_URL = env.API_BASE_URL; // or env.TODO_API_URL for a specific upstream
+const BASE_URL = env.TODO_API_URL; // or env.API_BASE_URL for the primary upstream
 if (!BASE_URL) {
-  throw new Error("API_BASE_URL not set in window._env_");
+  throw new Error("TODO_API_URL not set in window._env_");
 }
+
+export const todoApi = createClient<paths>({ baseUrl: BASE_URL });
+
+// call sites use the typed client directly, e.g.:
+// const { data, error } = await todoApi.GET("/todos");
 ```
 
 `nginx/default.conf` — pure static:
@@ -191,3 +226,5 @@ configurations:
 |---|---|---|
 | SPA throws on load: `window._env_ not set` | `/env-config.js` failed to load — path wrong, 404, or the `<script>` was `defer`/`async` | Make the tag synchronous in `<head>`, BEFORE the bundle's `<script type="module">`. |
 | `nginx: [emerg] host not found in upstream "thunder-service..."` at pod start | Legacy `/oidc/` proxy block in `nginx/default.conf` | Delete the block. The browser posts cross-origin. |
+| Types in `src/generated/*` don't match the live service | Upstream `openapi.yaml` changed since last generation | Re-run the `openapi-typescript` command and commit the diff. |
+| Docker build succeeds but ships stale/hand-written shapes, or fails `ENOENT ../specs/...` | `src/generated/` wasn't committed — the per-component build context is this app's folder alone, `specs/` isn't reachable from it | Generate and commit `src/generated/` before PR; never rely on a build-time regen step. |
