@@ -618,7 +618,7 @@ func TestResourceWatcher_ReadyClosesGateAndReleases(t *testing.T) {
 		t.Fatalf("run must stay running while binding not ready, got %s", r.Status)
 	}
 
-	// Binding goes Ready → watcher finishes the run, closes the gate, reevaluates.
+	// Binding goes Ready → watcher finishes the run, closes the gate (webhook + sweep release consumers).
 	bindings.byName["o-orders-db-development"] = readyBinding("host", "port")
 	if err := w.Sweep(context.Background()); err != nil {
 		t.Fatalf("Sweep (ready): %v", err)
