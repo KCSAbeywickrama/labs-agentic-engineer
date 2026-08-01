@@ -50,6 +50,7 @@ aepAgents:
 # it; it calls aep-api for room auth + spec seeding. Without it, agents spec
 # generation returns 503 ("collab is not configured on this deployment").
 collab:
+  # mandatory: in-memory rooms Map; 2nd replica silently overwrites commits (doc-wins)
   replicas: 1
   image:
     repository: ghcr.io/wso2/aep/collab
@@ -62,7 +63,7 @@ collab:
       memory: "128Mi"
     limits:
       cpu: "500m"
-      memory: "256Mi"
+      memory: "512Mi"
 
 # Streamable-HTTP MCP server wrapping aep-api's issue-create + coding-agent
 # dispatch endpoints. The OpenChoreo SRE/RCA agent calls it (AE_API_URL) during

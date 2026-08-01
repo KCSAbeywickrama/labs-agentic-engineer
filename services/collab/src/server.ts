@@ -22,6 +22,7 @@ import type {
   beforeUnloadDocumentPayload,
   onAuthenticatePayload,
   onLoadDocumentPayload,
+  onRequestPayload,
   onStatelessPayload,
   onStoreDocumentPayload,
 } from "@hocuspocus/server";
@@ -30,7 +31,7 @@ import type { BffClient } from "./bff.js";
 import { isSpecRoom } from "./room.js";
 import { seedDocument } from "./seed.js";
 import { devSeedFiles } from "./fixtures.js";
-import { flushRoom } from "./committer.js";
+import { flushAllRooms, flushRoom } from "./committer.js";
 import {
   addParticipant,
   dropRoomState,
@@ -261,12 +262,54 @@ export function buildStatelessHook(config: CollabConfig, deps: CollabDeps) {
   };
 }
 
+function isHealthzRequest(url: string | undefined): boolean {
+  return url === "/healthz" || (url?.startsWith("/healthz?") ?? false);
+}
+
+export function buildHealthzHandler() {
+  return async (data: Pick<onRequestPayload, "request" | "response">) => {
+    if (!isHealthzRequest(data.request.url)) return;
+    data.response.writeHead(200, { "Content-Type": "text/plain" });
+    data.response.end("ok");
+    // Suppress Hocuspocus's default "Welcome to Hocuspocus!" body.
+    throw undefined;
+  };
+}
+
+export function registerGracefulShutdown(
+  server: Server<CollabContext>,
+  config: CollabConfig,
+  deps: CollabDeps,
+): void {
+  let shuttingDown = false;
+  const shutdown = async (signal: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    deps.log?.(`${signal} — flushing rooms before shutdown`);
+    if (!config.devMode && deps.bff) {
+      await flushAllRooms(
+        { bff: deps.bff, log: deps.log },
+        server.hocuspocus.documents,
+        { concurrency: 8, force: true },
+      );
+    }
+    await server.destroy();
+    process.exit(0);
+  };
+  for (const signal of ["SIGINT", "SIGTERM", "SIGQUIT"] as const) {
+    process.on(signal, () => {
+      void shutdown(signal);
+    });
+  }
+}
+
 export function createCollabServer(
   config: CollabConfig,
   deps: CollabDeps,
 ): Server<CollabContext> {
   return new Server<CollabContext>({
     name: "aep-collab",
+    stopOnSignals: false,
     // The committer (#86 phase 3 / #133): onStoreDocument is Hocuspocus's
     // debounced persistence seam — a quiet period commits, maxDebounce caps
     // the wait during continuous editing, and unload runs one final store.
@@ -289,5 +332,6 @@ export function createCollabServer(
     onStateless: buildStatelessHook(config, deps) as (
       data: onStatelessPayload,
     ) => Promise<unknown>,
+    onRequest: buildHealthzHandler(),
   });
 }

@@ -22,7 +22,11 @@ import * as Y from "yjs";
 import type { CollabConfig } from "./env.js";
 import type { BffClient } from "./bff.js";
 import { BffAccessDeniedError } from "./bff.js";
-import { buildAuthenticateHook, buildLoadDocumentHook } from "./server.js";
+import {
+  buildAuthenticateHook,
+  buildLoadDocumentHook,
+  createCollabServer,
+} from "./server.js";
 import { filesMap } from "./seed.js";
 import { devSeedFiles } from "./fixtures.js";
 import type { Document } from "@hocuspocus/server";
@@ -195,6 +199,16 @@ test("load opens an unseeded doc when the files fetch fails (room must survive)"
     },
   });
   assert.equal(filesMap(doc).size, 0);
+});
+
+test("GET /healthz returns 200 ok", async () => {
+  const server = createCollabServer(devConfig, { bff: null });
+  await server.listen(0);
+  const { port } = server.address;
+  const res = await fetch(`http://127.0.0.1:${port}/healthz`);
+  assert.equal(res.status, 200);
+  assert.equal(await res.text(), "ok");
+  await server.destroy();
 });
 
 test("load opens an empty doc when the oracle gave no project (pre-phase-2 BFF)", async () => {
