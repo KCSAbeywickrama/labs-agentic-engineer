@@ -32,8 +32,10 @@ vi.mock("@aep/ui-excalidraw-view", () => ({
       data-elements={String(JSON.parse(scene).elements?.length ?? 0)}
     />
   ),
-  PrototypeView: (p: { model: { screens: unknown[] } }) => (
-    <div data-testid="prototype" data-screens={p.model.screens.length} />
+  PrototypeView: (p: { model: { screens: unknown[] }; headerAction?: unknown }) => (
+    <div data-testid="prototype" data-screens={p.model.screens.length}>
+      {p.headerAction as never}
+    </div>
   ),
 }));
 
@@ -46,7 +48,11 @@ vi.mock("../api/useDerivedDesign", () => ({
 }));
 
 vi.mock("@tanstack/react-router", () => ({
-  Link: (p: { children?: unknown }) => <a href="#">{p.children as never}</a>,
+  Link: (p: { to?: unknown; children?: unknown }) => (
+    <a href="#" data-to={String(p.to)}>
+      {p.children as never}
+    </a>
+  ),
 }));
 
 const DSL_PATH = "specs/design/components/shop-webapp/wireframes.dsl";
@@ -171,6 +177,10 @@ describe("WireframePanel prototype toggle", () => {
     expect(screen.getByRole("button", { name: /prototype/i })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /prototype/i }));
     expect(screen.getByTestId("prototype")).toBeInTheDocument();
+    expect(screen.getByText(/open full screen/i)).toHaveAttribute(
+      "data-to",
+      "/projects/p/prototype/shop-webapp",
+    );
     fireEvent.click(screen.getByRole("button", { name: /canvas/i }));
     expect(screen.getByTestId("excalidraw")).toBeInTheDocument();
   });
