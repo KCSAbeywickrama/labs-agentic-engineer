@@ -16,14 +16,26 @@
  * under the License.
  */
 
-import { useMemo, useRef } from "react";
-import { Alert, Box, Chip, CircularProgress, Typography } from "@wso2/oxygen-ui";
-import { ExcalidrawView } from "@aep/ui-excalidraw-view";
-import { useDerivedWireframe } from "../api/useDerivedDesign";
+import { useMemo, useRef, useState } from "react";
+import {
+  Alert,
+  Box,
+  Chip,
+  CircularProgress,
+  ToggleButton,
+  ToggleButtonGroup,
+  Typography,
+} from "@wso2/oxygen-ui";
+import { Link } from "@tanstack/react-router";
+import { ExcalidrawView, PrototypeView } from "@aep/ui-excalidraw-view";
+import { useDerivedPrototype, useDerivedWireframe } from "../api/useDerivedDesign";
 import { deriveWireframeScene } from "../derive/deriveWireframe";
+import { componentOf } from "../api/designTree";
 import type { SpecFileEntry } from "../api/mapping";
 import type { CollabSpec } from "../collab/useCollabSpec";
 import { useYTextString } from "../collab/useYTextString";
+
+type ViewMode = "canvas" | "prototype";
 
 export function WireframePanel({
   projectName,
@@ -37,6 +49,7 @@ export function WireframePanel({
   collab: CollabSpec;
 }) {
   const sha = files.find((f) => f.path === dslPath)?.sha;
+  const [mode, setMode] = useState<ViewMode>("canvas");
 
   // The collab doc is the SOURCE while collab is up — the design.md rule.
   // Rooms are seeded with every committed specs/ file (non-md as Y.Text), and
@@ -70,6 +83,16 @@ export function WireframePanel({
     sha,
   );
 
+  // The toggle (and prototype derivation) only makes sense on a settled,
+  // committed render — the streaming/agent-busy paths above return early
+  // before this ever renders. Called unconditionally to keep hooks order
+  // stable; the "" path convention disables the query while unsettled.
+  const settled = !streaming && !agentBusy;
+  const {
+    model: prototypeModel,
+    isPending: prototypePending,
+  } = useDerivedPrototype(projectName, settled ? dslPath : "", sha);
+
   if (!streaming && agentBusy) {
     // The committed fetch is suppressed while an agent is in the room (the
     // doc will deliver the file) — "drawing about to start", not a failure.
@@ -99,6 +122,22 @@ export function WireframePanel({
     );
   }
 
+  // The toggle only makes sense once we've settled on a committed scene — the
+  // streaming/agent-busy/pending/error branches above all return before here.
+  const showToggle = settled && scene != null;
+  const component = componentOf(dslPath);
+  // The full-screen prototype route ships in the next task; the generated
+  // route tree doesn't know about it yet, so a typed `Link to="/projects/…"`
+  // literal fails tsc against the current route union. Build the href as a
+  // plain (non-literal) string instead — TanStack's `Link` still accepts an
+  // arbitrary `string`-typed `to`, and this line can be tightened to a typed
+  // route once that route file exists.
+  const fullScreenHref: string =
+    component != null ? `/projects/${projectName}/prototype/${component}` : "";
+  const fullScreenLink = component != null && (
+    <Link to={fullScreenHref}>Open full screen</Link>
+  );
+
   // While streaming, ONE mounted canvas takes successive scenes through
   // ExcalidrawView's updateScene path (no `key`, no remount per line). The
   // committed render keeps the remount-by-sha behavior. ExcalidrawView
@@ -122,7 +161,43 @@ export function WireframePanel({
           <Chip size="small" color="primary" variant="outlined" label="Drawing…" />
         </Box>
       )}
-      {streaming ? (
+      {showToggle && (
+        <Box
+          sx={{
+            px: 1.5,
+            py: 1,
+            display: "flex",
+            alignItems: "center",
+            borderBottom: 1,
+            borderColor: "divider",
+          }}
+        >
+          <ToggleButtonGroup
+            size="small"
+            exclusive
+            value={mode}
+            onChange={(_, next: ViewMode | null) => {
+              if (next) setMode(next);
+            }}
+          >
+            <ToggleButton value="canvas">Canvas</ToggleButton>
+            <ToggleButton value="prototype">Prototype</ToggleButton>
+          </ToggleButtonGroup>
+        </Box>
+      )}
+      {mode === "prototype" && showToggle ? (
+        prototypePending ? (
+          <Box sx={{ flex: 1, minHeight: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <CircularProgress aria-label="Loading prototype" />
+          </Box>
+        ) : prototypeModel ? (
+          <PrototypeView key={sha} model={prototypeModel} fillHeight headerAction={fullScreenLink} />
+        ) : (
+          <Typography variant="body2" color="text.secondary" sx={{ p: 2 }}>
+            This wireframe could not be rendered as a prototype.
+          </Typography>
+        )
+      ) : streaming ? (
         <ExcalidrawView scene={liveScene!} fillHeight />
       ) : (
         <ExcalidrawView key={sha} scene={scene!} fillHeight />
