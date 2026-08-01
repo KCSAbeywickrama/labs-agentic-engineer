@@ -196,7 +196,7 @@ openbao:
   addr: "http://aep-aep-openbao.wso2-aep.svc.cluster.local:8200"
 
 # Shared git workspaces (RWO PVC + co-located pods). aep-api writes; agents mounts RO.
-# See services/aep-api/design/shared-workspace-volume.md (written in Task F1).
+# See services/aep-api/design/shared-workspace-volume.md.
 workspaces:
   storage: "10Gi"
   storageClassName: ""
