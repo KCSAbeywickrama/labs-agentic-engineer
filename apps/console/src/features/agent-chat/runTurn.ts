@@ -36,9 +36,32 @@ import {
   notifyTurnEnd,
 } from "./chatStore.js";
 import { extractStreamingQuestions, isQuestionTool, parseQuestionsInput } from "./questionCards.js";
-import { getTurn, openTurnStream } from "./api/turns.js";
+import { getTurn, isTurnStreamNotFound, openTurnStream } from "./api/turns.js";
 
 const FILE_TOOLS = new Set(["addFile", "editFile", "removeFile"]);
+
+const ATTACH_404_MAX_ATTEMPTS = 8;
+const ATTACH_404_BASE_MS = 250; // 250, 500, 1000, ... capped
+
+function attachBackoffMs(attempt: number): number {
+  return Math.min(ATTACH_404_BASE_MS * 2 ** attempt, 4000);
+}
+
+async function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  if (ms <= 0) return;
+  await new Promise<void>((resolve, reject) => {
+    const t = setTimeout(resolve, ms);
+    const onAbort = () => {
+      clearTimeout(t);
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+    if (signal.aborted) {
+      onAbort();
+      return;
+    }
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
 
 /**
  * Attach to a running turn's stream and fold it to its terminal. Resolves
@@ -206,17 +229,50 @@ export async function attachAndFoldTurn(
   };
 
   try {
-    const body = await openTurnStream(projectName, turnId, 0, signal);
-    for await (const part of parseSseStream(body)) {
-      if (signal.aborted) return;
-      fold(part);
+    let attempt = 0;
+    for (;;) {
+      try {
+        const body = await openTurnStream(projectName, turnId, 0, signal);
+        for await (const part of parseSseStream(body)) {
+          if (signal.aborted) return;
+          fold(part);
+        }
+        break; // stream ended cleanly (terminal or severed)
+      } catch (err) {
+        if (signal.aborted) return; // unmount/navigation — not a failure
+        if (!isTurnStreamNotFound(err) || attempt >= ATTACH_404_MAX_ATTEMPTS - 1) {
+          throw err;
+        }
+        // Turn may already be terminal on another replica — settle via getTurn.
+        const status = await getTurn(projectName, turnId);
+        if (status?.status === "completed") {
+          setTurnStatus(chatKey, turnId, "completed");
+          notifyTurnEnd(chatKey, "completed");
+          onCommitted?.();
+          return;
+        }
+        if (status?.status === "failed") {
+          setTurnStatus(chatKey, turnId, "failed");
+          notifyTurnEnd(chatKey, "failed");
+          addMessage(chatKey, {
+            role: "error",
+            content: status.message ?? "The agent turn failed.",
+          });
+          return;
+        }
+        await sleep(attachBackoffMs(attempt), signal);
+        attempt += 1;
+      }
     }
   } catch (err) {
-    if (signal.aborted) return; // unmount/navigation — not a failure
+    // sleep / openTurnStream may reject AbortError after the inner catch's
+    // aborted check — treat detach as success, matching prior semantics.
+    if (signal.aborted) return;
     throw err;
   } finally {
-    // Stream over (terminal, severed, or aborted): nothing further can flip a
-    // streaming card, so settle any question prefix into its final state.
+    // Stream over (terminal, severed, aborted, or settled via pre-stream
+    // getTurn): nothing further can flip a streaming card. Do NOT finalize
+    // inside the per-attempt catch — that would settle question cards mid-turn.
     finalizeStreamingQuestions();
   }
 
