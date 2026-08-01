@@ -17,6 +17,7 @@
 package reaper
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -58,6 +59,47 @@ func TestNewPanicsOnDiskHighOver100(t *testing.T) {
 		}
 	}()
 	_ = New(eng, staticLister(nil), cfg)
+}
+
+// TestLeaderLockTakeoverOnExpiry: lease metadata names the holding pod;
+// after the prior holder releases flock (simulating a dead leader), the
+// next tryLeaderLock acquires and refreshes expiry\npodName in the lock file.
+func TestLeaderLockTakeoverOnExpiry(t *testing.T) {
+	r, root := newSyntheticReaper(t, testCfg(), staticLister(nil))
+	r.diskUsage = fakeDisk(1000, 900)
+	r.leaderLease = 50 * time.Millisecond // test seam; production ~2*ReapInterval
+
+	path := filepath.Join(root, leaderLockName)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("POD_NAME", "aep-api-0")
+	release, held := r.tryLeaderLock(context.Background())
+	if held {
+		release()
+		t.Fatal("expected not held while competing flock is held")
+	}
+
+	_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+	_ = f.Close()
+
+	release2, held2 := r.tryLeaderLock(context.Background())
+	if !held2 {
+		t.Fatal("expected leadership after prior release")
+	}
+	release2()
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(body, []byte("aep-api-0")) {
+		t.Fatalf("lease file missing pod name: %q", body)
+	}
 }
 
 // TestLeaderFlockGatesGlobalPasses: while another holder owns

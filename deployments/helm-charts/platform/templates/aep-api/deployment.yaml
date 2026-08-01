@@ -36,6 +36,14 @@ spec:
               name: http
           resources: {{ toYaml .Values.aepApi.resources | nindent 12 }}
           env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
             - name: SERVER_HOST
               value: "0.0.0.0"
             - name: SERVER_PORT

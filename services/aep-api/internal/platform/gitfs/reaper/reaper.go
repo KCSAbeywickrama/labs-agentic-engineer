@@ -47,6 +47,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -88,6 +89,11 @@ type Reaper struct {
 	engine *gitfs.Engine
 	repos  RepoLister
 	cfg    config.WorkspaceConfig
+	// leaderLease is how long a lock-file lease is marked valid after acquire
+	// (written as expiry metadata). Defaults to 2×ReapInterval; tests shorten
+	// it. Flock is still the real gate — expiry is diagnostic + documents
+	// intent when a dead holder's kernel-released flock leaves a stale file.
+	leaderLease time.Duration
 	// diskUsage is the statfs seam (total/available bytes and inode counts of
 	// the filesystem backing the workspace root). Defaults to syscall.Statfs;
 	// tests inject a fake to simulate watermark pressure.
@@ -120,7 +126,13 @@ func New(engine *gitfs.Engine, repos RepoLister, cfg config.WorkspaceConfig) *Re
 			cfg.DiskLowPct, cfg.DiskHighPct,
 		))
 	}
-	return &Reaper{engine: engine, repos: repos, cfg: cfg, diskUsage: statfsUsage}
+	return &Reaper{
+		engine:      engine,
+		repos:       repos,
+		cfg:         cfg,
+		leaderLease: 2 * cfg.ReapInterval,
+		diskUsage:   statfsUsage,
+	}
 }
 
 // Run drives the sweep on cfg.ReapInterval until ctx is canceled. Matches
@@ -178,7 +190,10 @@ func (r *Reaper) pass(ctx context.Context, name string, fn func(context.Context)
 
 // tryLeaderLock takes the global <root>/.reaper.lock exclusively without
 // blocking. held=false means another replica leads this tick (or the lock
-// file could not be opened — logged, treated as not-leader).
+// file could not be opened — logged, treated as not-leader). On acquire the
+// lock file is rewritten with expiryUnixNano\npodName so losers can name the
+// holder at Debug. Flock released by a dead process is stealable next tick;
+// lease expiry alone cannot override a live holder's flock.
 func (r *Reaper) tryLeaderLock(ctx context.Context) (release func(), held bool) {
 	path := filepath.Join(r.engine.Root(), leaderLockName)
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
@@ -188,15 +203,43 @@ func (r *Reaper) tryLeaderLock(ctx context.Context) (release func(), held bool) 
 	}
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		_ = f.Close()
+		holder := readLeaderMeta(path)
 		if !errors.Is(err, syscall.EWOULDBLOCK) && !errors.Is(err, syscall.EAGAIN) {
-			slog.WarnContext(ctx, "reaper: leader flock failed", "path", path, "error", err)
+			slog.WarnContext(ctx, "reaper: leader flock failed", "path", path, "holder", holder, "error", err)
+		} else {
+			slog.DebugContext(ctx, "reaper: not leader this tick", "holder", holder, "error", err)
 		}
 		return nil, false
 	}
+	pod := os.Getenv("POD_NAME")
+	if pod == "" {
+		pod, _ = os.Hostname()
+	}
+	expiry := time.Now().Add(r.leaderLease).UnixNano()
+	meta := []byte(fmt.Sprintf("%d\n%s\n", expiry, pod))
+	_ = f.Truncate(0)
+	if _, err := f.WriteAt(meta, 0); err != nil {
+		slog.WarnContext(ctx, "reaper: write leader lease failed", "path", path, "error", err)
+	}
+	slog.DebugContext(ctx, "reaper: acquired leader lock", "pod", pod)
 	return func() {
 		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
 		_ = f.Close()
 	}, true
+}
+
+// readLeaderMeta returns the pod name from a lock file formatted as
+// expiryUnixNano\npodName\n. Empty string when unreadable or malformed.
+func readLeaderMeta(path string) string {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	lines := strings.SplitN(string(b), "\n", 3)
+	if len(lines) < 2 {
+		return ""
+	}
+	return lines[1]
 }
 
 // walkRepoDirs visits every repos/<orgId>/<projectId>/<repoSlug> directory.
