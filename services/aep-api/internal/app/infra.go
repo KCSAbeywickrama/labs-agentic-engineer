@@ -106,7 +106,7 @@ func Resolve(ctx context.Context, cfg config.Config) (Infra, error) {
 	// In-cluster k8s client (optional — mint-build skips Secret writes when nil).
 	wpClient, err := k8sclient.NewInClusterClient()
 	if err != nil {
-		slog.Warn("k8s client init failed — mint-build will skip Secret writes; builds will fail at clone", "error", err)
+		slog.Warn("k8s client init failed — mint-build will skip Secret writes; builds will fail at checkout", "error", err)
 		wpClient = nil
 	}
 

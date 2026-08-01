@@ -85,6 +85,10 @@ function streamForStep(step: MockStep, i: number, delayMs?: number): StreamResul
  * `LanguageModel` union) so callers can inspect `.doStreamCalls` — the exact
  * `tools`/`prompt` the caller handed the model for that step — to assert on
  * the ASSEMBLED tool set/instructions rather than only on side effects.
+ *
+ * @knipkeep deliberate published test seam (`package.json` exports); playground
+ * + unit tests drive ToolLoopAgent without tokens. Knip --production ignores
+ * *.test.ts consumers, so the file looks unused without this keep.
  */
 export function mockModel(
   steps: MockStep[],

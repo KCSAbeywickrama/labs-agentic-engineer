@@ -29,9 +29,9 @@ FROM alpine:3.21
 
 # git at runtime: the binary reads/writes/tags project repos via local git
 # plumbing over bare mirrors on the shared /workspaces volume
-# (docs/design/shared-volume-clone-architecture.md) — clone/fetch/push/tag
+# (services/aep-api/design/shared-workspace-volume.md) — clone/fetch/push/tag
 # shell out to the git CLI. GitHub REST remains only for repo admin, issues,
-# webhooks, and App installs (§9). aep-api is the sole writer of the mount;
+# webhooks, and App installs. aep-api is the sole writer of the mount;
 # the agents service consumes read-only per-SHA snapshots from it.
 RUN apk add --no-cache git
 RUN addgroup -g 1000 appgroup && adduser -S -u 1000 -G appgroup appuser

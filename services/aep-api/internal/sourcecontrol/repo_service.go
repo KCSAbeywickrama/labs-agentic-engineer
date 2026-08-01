@@ -148,9 +148,9 @@ func (s *repoService) CreateRepo(ctx context.Context, orgID, projectID, projectN
 	// name is computed here; OcSecretRefName is left nil on new rows.
 	repoSlug := naming.SlugForURL(cloneURL)
 
-	// The repo is ready the moment GitHub has it: reads/writes/tags go through
-	// the Git Data API (docs/design/agents-generation-migration.md §5), so there
-	// is no local clone to warm and no "cloning" state to wait through.
+	// The repo is ready the moment GitHub has it: the shared-volume bare
+	// mirror is created lazily on first gitfs access (ensureMirror), so
+	// there is no "cloning" status to wait through at create time.
 	gitRepo := &GitRepository{
 		OrgID:         orgID,
 		ProjectID:     projectID,
@@ -208,7 +208,7 @@ func (s *repoService) EnsureBareRepo(ctx context.Context, orgID, projectID, repo
 		ProjectID:     projectID,
 		RepoURL:       cloneURL,
 		DefaultBranch: "main",
-		Status:        "ready", // no clone — the BFF reads/writes via the GitHub API
+		Status:        "ready", // mirror is lazy — ensureMirror on first gitfs access
 		RepoSlug:      naming.SlugForURL(cloneURL),
 	}
 	if err := s.repo.Create(ctx, gitRepo); err != nil {

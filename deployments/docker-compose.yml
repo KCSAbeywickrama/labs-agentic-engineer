@@ -95,7 +95,7 @@ services:
       # See deployments/scripts/repair-secrets.sh.
       LOCAL_OPENBAO_REPAIR: "true"
       # ── Shared git workspaces volume — bare mirrors + per-SHA snapshots
-      # (docs/design/shared-volume-clone-architecture.md). aep-api is the
+      # (services/aep-api/design/shared-workspace-volume.md). aep-api is the
       # SOLE writer; the agents service mounts the same volume read-only.
       AEP_WORKSPACE_ROOT: "/workspaces"
       AEP_WORKSPACE_REAP_INTERVAL: "5m"
