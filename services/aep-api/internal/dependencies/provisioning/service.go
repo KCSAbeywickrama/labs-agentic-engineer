@@ -215,9 +215,13 @@ func (s *Service) admitProvisionRow(ctx context.Context, orgID, projectID, repo,
 // (wiring.go), where the dispatch predicate guarantees both a resolved design and
 // a non-empty audience.
 func (s *Service) completeProvisionRow(ctx context.Context, orgID, projectID, depName string, issueNumber int, execID, reference string) {
-	if _, err := s.execs.Finish(ctx, execID, string(taskmeta.ExecSucceeded), reference); err != nil {
+	exec, err := s.execs.Finish(ctx, execID, string(taskmeta.ExecSucceeded), reference)
+	if err != nil {
 		slog.WarnContext(ctx, "provisioning: finish provision run failed", "execution", execID, "error", err)
 		return
+	}
+	if exec == nil {
+		return // lost the race — another replica already finished
 	}
 	comment := "✅ Provisioned. " + reference + "\n\nClosing — dependent tasks will dispatch automatically."
 	if err := s.issues.CloseIssue(ctx, orgID, projectID, issueNumber, comment); err != nil {
@@ -242,8 +246,12 @@ func (s *Service) failProvisionRow(ctx context.Context, orgID, projectID string,
 	// terminal must always succeed, so it runs on a cancellation-free context
 	// (values — the user JWT for the issue comment — are preserved).
 	ctx = context.WithoutCancel(ctx)
-	if _, err := s.execs.Finish(ctx, execID, string(taskmeta.ExecFailed), reason); err != nil {
+	exec, err := s.execs.Finish(ctx, execID, string(taskmeta.ExecFailed), reason)
+	if err != nil {
 		slog.WarnContext(ctx, "provisioning: finish provision run (failed) failed", "execution", execID, "error", err)
+	}
+	if exec == nil && err == nil {
+		return // lost the race — another replica already finished
 	}
 	if issueNumber > 0 {
 		if err := s.issues.CommentIssue(ctx, orgID, projectID, issueNumber, "⚠️ Provisioning failed: "+reason); err != nil {

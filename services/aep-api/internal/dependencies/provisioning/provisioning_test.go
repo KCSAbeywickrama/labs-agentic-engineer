@@ -141,6 +141,9 @@ func (f *fakeExecStore) StartWithRun(_ context.Context, id, runName string) (*de
 func (f *fakeExecStore) Finish(_ context.Context, id, status, reason string) (*delivery.Execution, error) {
 	for _, r := range f.rows {
 		if r.ID == id {
+			if !taskmeta.ExecutionStatus(r.Status).IsActive() {
+				return nil, nil // loser — already terminal
+			}
 			r.Status = status
 			r.Reason = reason
 			return r, nil
@@ -1000,5 +1003,42 @@ func TestSaveValues_AuthorsDefinitionFromDesign(t *testing.T) {
 	}
 	if !secret["api_key"] || secret["region"] {
 		t.Fatalf("authored config must reflect the design schema; got %v", secret)
+	}
+}
+
+// TestCompleteProvisionRow_FinishLoserSkipsCloseIssue: when Finish returns
+// (nil, nil) because the row is already terminal, the loser must not CloseIssue
+// (or re-evaluate) — another replica already won.
+func TestCompleteProvisionRow_FinishLoserSkipsCloseIssue(t *testing.T) {
+	gate := provisionGateIssue(10, "stripe")
+	issues := newFakeIssues([]sourcecontrol.IssueInfo{gate})
+	row := &delivery.Execution{ID: "e1", Status: string(taskmeta.ExecSucceeded)} // already terminal
+	execs := &fakeExecStore{rows: []*delivery.Execution{row}}
+	reeval := &fakeReeval{}
+	svc := newTestService(issues, execs, reeval, fakeDesign{comps: designWithDeps()}, &fakeExtProv{}, &fakePlatProv{}, &fakeBindings{})
+
+	svc.completeProvisionRow(context.Background(), "org", "proj", "stripe", 10, "e1", "ref")
+
+	if _, closed := issues.closed[10]; closed {
+		t.Fatalf("loser must not CloseIssue")
+	}
+	if reeval.calls != 0 {
+		t.Fatalf("loser must not Reevaluate, got %d calls", reeval.calls)
+	}
+}
+
+// TestFailProvisionRow_FinishLoserSkipsComment: same race on the failure path —
+// a pre-terminal row means Finish lost, so the gate must not get a failed comment.
+func TestFailProvisionRow_FinishLoserSkipsComment(t *testing.T) {
+	gate := provisionGateIssue(10, "stripe")
+	issues := newFakeIssues([]sourcecontrol.IssueInfo{gate})
+	row := &delivery.Execution{ID: "e1", Status: string(taskmeta.ExecFailed)} // already terminal
+	execs := &fakeExecStore{rows: []*delivery.Execution{row}}
+	svc := newTestService(issues, execs, &fakeReeval{}, fakeDesign{comps: designWithDeps()}, &fakeExtProv{}, &fakePlatProv{}, &fakeBindings{})
+
+	svc.failProvisionRow(context.Background(), "org", "proj", 10, "e1", "boom")
+
+	if comments := issues.comments[10]; len(comments) != 0 {
+		t.Fatalf("loser must not CommentIssue, got %v", comments)
 	}
 }

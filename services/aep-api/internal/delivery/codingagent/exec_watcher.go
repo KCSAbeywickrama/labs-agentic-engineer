@@ -172,17 +172,26 @@ func (w *ExecWatcher) reconcile(ctx context.Context, row *delivery.Execution, ru
 	case string(taskmeta.KindCoding):
 		if !succeeded {
 			// A failed coding run — the PR will never open; Finish failed.
-			if _, err := w.execRows.Finish(ctx, row.ID, string(taskmeta.ExecFailed), workflowReason(run)); err != nil {
+			exec, err := w.execRows.Finish(ctx, row.ID, string(taskmeta.ExecFailed), workflowReason(run))
+			if err != nil {
 				slog.WarnContext(ctx, "exec watcher: finish coding failed", "execution", row.ID, "error", err)
+				return
+			}
+			if exec == nil {
+				return // lost the race — another replica already finished
 			}
 			w.notifier.Notify(row.Repo, row.IssueNumber)
 		}
 		// A succeeded coding run rides the pull_request-opened webhook — no action.
 	case string(taskmeta.KindBuild):
 		if succeeded {
-			if _, err := w.execRows.Finish(ctx, row.ID, string(taskmeta.ExecSucceeded), ""); err != nil {
+			exec, err := w.execRows.Finish(ctx, row.ID, string(taskmeta.ExecSucceeded), "")
+			if err != nil {
 				slog.WarnContext(ctx, "exec watcher: finish build succeeded", "execution", row.ID, "error", err)
 				return
+			}
+			if exec == nil {
+				return // lost the race — another replica already finished
 			}
 			if w.deployObserver != nil {
 				// The component deployed — grant any pending cross-project access
@@ -207,8 +216,13 @@ func (w *ExecWatcher) reconcile(ctx context.Context, row *delivery.Execution, ru
 func (w *ExecWatcher) reconcileBuildFailure(ctx context.Context, row *delivery.Execution, run *gen.WorkflowRun) {
 	_, authFailure := classifyBuildRun(run)
 	if !authFailure || w.buildRetrier == nil {
-		if _, err := w.execRows.Finish(ctx, row.ID, string(taskmeta.ExecFailed), workflowReason(run)); err != nil {
+		exec, err := w.execRows.Finish(ctx, row.ID, string(taskmeta.ExecFailed), workflowReason(run))
+		if err != nil {
 			slog.WarnContext(ctx, "exec watcher: finish build failed", "execution", row.ID, "error", err)
+			return
+		}
+		if exec == nil {
+			return // lost the race — another replica already finished
 		}
 		w.notifier.Notify(row.Repo, row.IssueNumber)
 		w.notifyBuildTerminal(ctx, row, false, workflowReason(run))
@@ -216,11 +230,15 @@ func (w *ExecWatcher) reconcileBuildFailure(ctx context.Context, row *delivery.E
 	}
 	attempt := parseBuildAuthRetryAttempt(row.Reason)
 	if attempt >= w.authBudget {
-		if _, err := w.execRows.Finish(ctx, row.ID, string(taskmeta.ExecFailed), buildAuthRetryExceededReason); err != nil {
+		exec, err := w.execRows.Finish(ctx, row.ID, string(taskmeta.ExecFailed), buildAuthRetryExceededReason)
+		if err != nil {
 			slog.WarnContext(ctx, "exec watcher: finish build auth-exhausted", "execution", row.ID, "error", err)
-		} else {
-			slog.WarnContext(ctx, "exec watcher: build git-auth retry budget exhausted", "execution", row.ID, "attempts", attempt, "budget", w.authBudget)
+			return
 		}
+		if exec == nil {
+			return // lost the race — another replica already finished
+		}
+		slog.WarnContext(ctx, "exec watcher: build git-auth retry budget exhausted", "execution", row.ID, "attempts", attempt, "budget", w.authBudget)
 		w.notifier.Notify(row.Repo, row.IssueNumber)
 		w.notifyBuildTerminal(ctx, row, false, buildAuthRetryExceededReason)
 		return

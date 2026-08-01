@@ -202,3 +202,65 @@ func TestExecWatcher_CodingFailure_FinishesFailed_SuccessRidesPRWebhook(t *testi
 		t.Errorf("failed coding run must Finish failed (no PR will open), got %q", got.Status)
 	}
 }
+
+// countingBuildObserver counts OnBuildTerminal deliveries so a Finish loser can
+// be shown not to re-fire terminal side effects.
+type countingBuildObserver struct{ n int }
+
+func (c *countingBuildObserver) OnBuildTerminal(context.Context, delivery.BuildTerminal) error {
+	c.n++
+	return nil
+}
+
+// TestExecWatcher_BuildSuccess_FinishLoserSkipsObserver: reconcile twice on the
+// same completed build — the second Finish is a loser ((nil, nil)) and must not
+// call OnBuildTerminal again.
+func TestExecWatcher_BuildSuccess_FinishLoserSkipsObserver(t *testing.T) {
+	row := runningBuild("b1", "run-1", "")
+	repo := newFakeExecRepo(row)
+	ok := &gen.WorkflowRun{Name: "run-1", Completed: true, Status: openchoreo.ReasonWorkflowSucceeded}
+	obs := &countingBuildObserver{}
+	w := NewExecWatcher(ocRuns(map[string]*gen.WorkflowRun{"run-1": ok}), repo, nil, 0).
+		WithBuildObserver(obs)
+
+	ctx := context.Background()
+	if err := w.Sweep(ctx); err != nil {
+		t.Fatalf("first Sweep: %v", err)
+	}
+	if obs.n != 1 {
+		t.Fatalf("winner must notify observer once, got %d", obs.n)
+	}
+	// Row is terminal; Sweep no longer lists it. Drive reconcile directly for the loser path.
+	w.reconcile(ctx, row, ok)
+	if obs.n != 1 {
+		t.Fatalf("Finish loser must not re-fire OnBuildTerminal, got %d", obs.n)
+	}
+}
+
+// TestJobWatcher_FinishFailed_LoserSkipsNotify: finishFailed twice on the same
+// row — the second Finish loses and must not Notify the task-stream hub.
+func TestJobWatcher_FinishFailed_LoserSkipsNotify(t *testing.T) {
+	row := &delivery.Execution{
+		ID: "c1", Repo: "acme/widgets", IssueNumber: 7,
+		Kind: string(taskmeta.KindCoding), Status: string(taskmeta.ExecRunning),
+	}
+	repo := newFakeExecRepo(row)
+	hub := delivery.NewTaskStreamHub()
+	ch, cancel := hub.Subscribe(row.Repo, row.IssueNumber)
+	defer cancel()
+	w := &JobWatcher{execRows: repo, notifier: hub}
+
+	ctx := context.Background()
+	w.finishFailed(ctx, row, "job_failed")
+	select {
+	case <-ch:
+	default:
+		t.Fatal("winner must Notify")
+	}
+	w.finishFailed(ctx, row, "job_failed")
+	select {
+	case <-ch:
+		t.Fatal("Finish loser must not Notify")
+	default:
+	}
+}
