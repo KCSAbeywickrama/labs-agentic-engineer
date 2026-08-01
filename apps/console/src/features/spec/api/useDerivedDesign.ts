@@ -17,7 +17,9 @@
  */
 
 import { useQuery } from "@tanstack/react-query";
+import { type PrototypeModel } from "@aep/excalidraw-dsl";
 import { deriveWireframeScene } from "../derive/deriveWireframe";
+import { derivePrototypeModel } from "../derive/derivePrototype";
 import { fetchSpecFileContent } from "./queries";
 import { specKeys } from "./keys";
 
@@ -43,4 +45,22 @@ export function useDerivedWireframe(
   const scene =
     q.data?.content != null ? deriveWireframeScene(dslPath, q.data.content) : null;
   return { scene, isPending: q.isPending, isError: q.isError };
+}
+
+export function useDerivedPrototype(
+  projectName: string,
+  dslPath: string,
+  sha: string | undefined,
+): { model: PrototypeModel | null; isPending: boolean; isError: boolean } {
+  // Same key/queryFn as useDerivedWireframe — see its comments; only the
+  // derivation differs, so toggling modes never refetches.
+  const q = useQuery({
+    queryKey: specKeys.file(projectName, dslPath, sha ?? "head"),
+    enabled: Boolean(dslPath),
+    staleTime: sha ? Infinity : 0,
+    queryFn: () => fetchSpecFileContent(projectName, { path: dslPath, sha: sha ?? "" }),
+  });
+  const model =
+    q.data?.content != null ? derivePrototypeModel(dslPath, q.data.content) : null;
+  return { model, isPending: q.isPending, isError: q.isError };
 }
