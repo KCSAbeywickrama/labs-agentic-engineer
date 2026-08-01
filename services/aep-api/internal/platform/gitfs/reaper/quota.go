@@ -76,33 +76,62 @@ func (r *Reaper) enforceQuota(ctx context.Context) error {
 			slog.WarnContext(ctx, "reaper: org quota pass failed — continuing to global watermark", "error", err)
 		}
 	}
-	total, avail, err := r.diskUsage(root)
+	total, avail, inodesTotal, inodesFree, err := r.diskUsage(root)
 	if err != nil || total == 0 {
 		return err
 	}
 	used := total - avail
-	if used*100 <= uint64(r.cfg.DiskHighPct)*total {
+	inodeUsed := inodesTotal - inodesFree
+	overBytes := used*100 > uint64(r.cfg.DiskHighPct)*total
+	overInodes := inodesTotal > 0 && inodeUsed*100 > uint64(r.cfg.DiskHighPct)*inodesTotal
+	if !overBytes && !overInodes {
 		return nil
 	}
+	inodeUsedPct := uint64(0)
+	if inodesTotal > 0 {
+		inodeUsedPct = inodeUsed * 100 / inodesTotal
+	}
 	slog.InfoContext(ctx, "reaper: disk over high watermark — purging trash before eviction",
-		"usedPct", used*100/total, "highPct", r.cfg.DiskHighPct)
+		"usedPct", used*100/total, "highPct", r.cfg.DiskHighPct,
+		"inodeUsedPct", inodeUsedPct, "overBytes", overBytes, "overInodes", overInodes)
 	if err := r.purgeTrashAll(ctx); err != nil {
 		slog.WarnContext(ctx, "reaper: pressure trash purge failed", "error", err)
 	}
-	total, avail, err = r.diskUsage(root)
+	total, avail, inodesTotal, inodesFree, err = r.diskUsage(root)
 	if err != nil || total == 0 {
 		return err
 	}
 	used = total - avail
-	if used*100 <= uint64(r.cfg.DiskHighPct)*total {
+	inodeUsed = inodesTotal - inodesFree
+	overBytes = used*100 > uint64(r.cfg.DiskHighPct)*total
+	overInodes = inodesTotal > 0 && inodeUsed*100 > uint64(r.cfg.DiskHighPct)*inodesTotal
+	if !overBytes && !overInodes {
+		if inodesTotal > 0 {
+			inodeUsedPct = inodeUsed * 100 / inodesTotal
+		} else {
+			inodeUsedPct = 0
+		}
 		slog.InfoContext(ctx, "reaper: under high watermark after trash purge — skipping eviction",
-			"usedPct", used*100/total)
+			"usedPct", used*100/total, "inodeUsedPct", inodeUsedPct)
 		return nil
 	}
-	lowBytes := total * uint64(r.cfg.DiskLowPct) / 100
-	target := int64(used - lowBytes)
+	var target int64
+	if overBytes {
+		lowBytes := total * uint64(r.cfg.DiskLowPct) / 100
+		target = int64(used - lowBytes)
+	} else {
+		reposDir := gitfs.ReposDir(root)
+		target = duDir(reposDir) / 4
+		if target <= 0 {
+			target = 1
+		}
+	}
+	if inodesTotal > 0 {
+		inodeUsedPct = inodeUsed * 100 / inodesTotal
+	}
 	slog.InfoContext(ctx, "reaper: still over high watermark — evicting",
-		"usedPct", used*100/total, "highPct", r.cfg.DiskHighPct, "lowPct", r.cfg.DiskLowPct, "targetBytes", target)
+		"usedPct", used*100/total, "highPct", r.cfg.DiskHighPct, "lowPct", r.cfg.DiskLowPct,
+		"inodeUsedPct", inodeUsedPct, "targetBytes", target)
 	return r.evictWithin(ctx, gitfs.ReposDir(root), target)
 }
 
@@ -273,8 +302,9 @@ func (r *Reaper) collectCandidates(ctx context.Context, scopeDir string) ([]snap
 	return snaps, mirrors, err
 }
 
-// duDir sums the file sizes under path (directory entries themselves are
-// not counted; errors are skipped — a trash rename mid-walk is normal).
+// duDir sums allocated blocks (st_blocks*512) for regular files under path.
+// Directory entries themselves are not counted; errors are skipped — a trash
+// rename mid-walk is normal.
 func duDir(path string) int64 {
 	var total int64
 	_ = filepath.WalkDir(path, func(_ string, d fs.DirEntry, err error) error {
@@ -283,7 +313,11 @@ func duDir(path string) int64 {
 		}
 		if d.Type().IsRegular() {
 			if info, err := d.Info(); err == nil {
-				total += info.Size()
+				if st, ok := info.Sys().(*syscall.Stat_t); ok {
+					total += st.Blocks * 512
+				} else {
+					total += info.Size() // non-unix fallback for tests on exotic GOOS
+				}
 			}
 		}
 		return nil
@@ -291,13 +325,13 @@ func duDir(path string) int64 {
 	return total
 }
 
-// statfsUsage is the default diskUsage seam: total/available bytes of the
-// filesystem backing path, df-style (available = unprivileged Bavail).
-func statfsUsage(path string) (total, avail uint64, err error) {
+// statfsUsage is the default diskUsage seam: total/available bytes and inode
+// counts of the filesystem backing path, df-style (available = Bavail).
+func statfsUsage(path string) (total, avail, inodesTotal, inodesFree uint64, err error) {
 	var st syscall.Statfs_t
 	if err := syscall.Statfs(path, &st); err != nil {
-		return 0, 0, err
+		return 0, 0, 0, 0, err
 	}
 	bsize := uint64(st.Bsize)
-	return st.Blocks * bsize, st.Bavail * bsize, nil
+	return st.Blocks * bsize, st.Bavail * bsize, st.Files, st.Ffree, nil
 }

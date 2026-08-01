@@ -88,10 +88,10 @@ type Reaper struct {
 	engine *gitfs.Engine
 	repos  RepoLister
 	cfg    config.WorkspaceConfig
-	// diskUsage is the statfs seam (total/available bytes of the filesystem
-	// backing the workspace root). Defaults to syscall.Statfs; tests inject a
-	// fake to simulate watermark pressure.
-	diskUsage func(path string) (total, avail uint64, err error)
+	// diskUsage is the statfs seam (total/available bytes and inode counts of
+	// the filesystem backing the workspace root). Defaults to syscall.Statfs;
+	// tests inject a fake to simulate watermark pressure.
+	diskUsage func(path string) (total, avail, inodesTotal, inodesFree uint64, err error)
 }
 
 // New wires the reaper over the engine's workspace root. Zero/negative cfg

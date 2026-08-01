@@ -62,7 +62,15 @@ func newSyntheticReaper(t *testing.T, cfg config.WorkspaceConfig, repos RepoList
 	return New(eng, repos, cfg), eng.Root()
 }
 
-// mkSlugDir creates repos/<org>/<proj>/<slug> and returns its path.
+// blockPayloadSize returns the bytes duDir charges for one mkFile payload
+// (allocated blocks, not apparent size).
+func blockPayloadSize(t *testing.T) int64 {
+	t.Helper()
+	dir := t.TempDir()
+	mkFile(t, filepath.Join(dir, "probe"), 1)
+	return duDir(dir)
+}
+
 func mkSlugDir(t *testing.T, root, org, proj, slug string) string {
 	t.Helper()
 	dir := filepath.Join(gitfs.ReposDir(root), org, proj, slug)

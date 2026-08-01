@@ -100,9 +100,9 @@ func TestLeaderFlockGatesGlobalPasses(t *testing.T) {
 func TestSweepPassIsolation(t *testing.T) {
 	r, _ := newSyntheticReaper(t, testCfg(), errLister{err: errors.New("db down")})
 	statfsCalled := false
-	r.diskUsage = func(string) (uint64, uint64, error) {
+	r.diskUsage = func(string) (uint64, uint64, uint64, uint64, error) {
 		statfsCalled = true
-		return 1000, 900, nil
+		return 1000, 900, 1000, 1000, nil
 	}
 	r.Sweep(context.Background())
 	if !statfsCalled {

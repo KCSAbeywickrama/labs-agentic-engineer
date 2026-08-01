@@ -29,8 +29,39 @@ import (
 )
 
 // fakeDisk pins the statfs seam to a fixed picture.
-func fakeDisk(total, avail uint64) func(string) (uint64, uint64, error) {
-	return func(string) (uint64, uint64, error) { return total, avail, nil }
+func fakeDisk(total, avail uint64) func(string) (uint64, uint64, uint64, uint64, error) {
+	return func(string) (uint64, uint64, uint64, uint64, error) {
+		return total, avail, 1000, 1000, nil // inodes quiet by default
+	}
+}
+
+func TestDuDirUsesAllocatedBlocks(t *testing.T) {
+	dir := t.TempDir()
+	// One small file: apparent size 1 byte; allocated is typically 4096 / 512 blocks.
+	if err := os.WriteFile(filepath.Join(dir, "x"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := duDir(dir)
+	if got <= 1 {
+		t.Fatalf("duDir returned apparent size %d; want Blocks*512 (>= 512)", got)
+	}
+}
+
+func TestQuotaEvictsOnInodeWatermark(t *testing.T) {
+	r, root := newSyntheticReaper(t, testCfg(), staticLister(nil))
+	now := time.Now()
+	slug := mkSlugDir(t, root, "o1", "p1", "r1")
+	aged := mkSnapshot(t, slug, fakeSha(2), 250, now.Add(-2*time.Hour))
+	mkGitDir(t, slug, 50, now.Add(-2*time.Hour))
+
+	// Bytes green (10% used), inodes over high (900/1000 = 90%).
+	r.diskUsage = func(string) (uint64, uint64, uint64, uint64, error) {
+		return 1000, 900, 1000, 100, nil
+	}
+	if err := r.enforceQuota(context.Background()); err != nil {
+		t.Fatalf("enforceQuota: %v", err)
+	}
+	mustNotExist(t, aged)
 }
 
 // TestQuotaEvictsSnapshotsFirstThenMirrorsLRU drives the global watermark
@@ -40,7 +71,10 @@ func fakeDisk(total, avail uint64) func(string) (uint64, uint64, error) {
 // mirror.
 func TestQuotaEvictsSnapshotsFirstThenMirrorsLRU(t *testing.T) {
 	r, root := newSyntheticReaper(t, testCfg(), staticLister(nil))
-	r.diskUsage = fakeDisk(1000, 100) // used 900 = 90% > 85; low 70 → free ≥ 200
+	bs := blockPayloadSize(t)
+	// 90% used (high 85, low 70) → target 4*bs: three snapshots plus the LRU
+	// mirror, but not the fresher mirror (allocated blocks, not apparent size).
+	r.diskUsage = fakeDisk(uint64(20*bs), uint64(2*bs))
 
 	now := time.Now()
 	r1 := mkSlugDir(t, root, "o1", "p1", "r1")
@@ -102,25 +136,24 @@ func TestQuotaNeverEvictsLockedMirror(t *testing.T) {
 // once back under quota (mirror intact); other orgs are untouched.
 func TestPerOrgQuota(t *testing.T) {
 	cfg := testCfg()
-	cfg.OrgQuotaBytes = 100
+	bs := blockPayloadSize(t)
+	cfg.OrgQuotaBytes = 3 * bs / 2 // one snapshot clears the excess over 2*bs
 	r, root := newSyntheticReaper(t, cfg, staticLister(nil))
 	r.diskUsage = fakeDisk(1000, 900) // 10% used — global watermark quiet
 
 	now := time.Now()
-	over := mkSlugDir(t, root, "o1", "p1", "r1") // org usage 150 > 100
+	over := mkSlugDir(t, root, "o1", "p1", "r1") // org usage 2*bs > quota
 	overSnap := mkSnapshot(t, over, fakeSha(1), 60, now.Add(-2*time.Hour))
 	overGit := mkGitDir(t, over, 90, now.Add(-1*time.Hour))
 
-	under := mkSlugDir(t, root, "o2", "p1", "r1") // org usage 50 ≤ 100
-	underSnap := mkSnapshot(t, under, fakeSha(2), 20, now.Add(-2*time.Hour))
+	under := mkSlugDir(t, root, "o2", "p1", "r1") // org usage bs ≤ quota
 	underGit := mkGitDir(t, under, 30, now.Add(-1*time.Hour))
 
 	if err := r.enforceQuota(context.Background()); err != nil {
 		t.Fatalf("enforce quota: %v", err)
 	}
-	mustNotExist(t, overSnap) // snapshot eviction (60) clears the 50-byte excess
+	mustNotExist(t, overSnap) // snapshot eviction clears the excess
 	mustExist(t, overGit)     // mirror survives — snapshots-first sufficed
-	mustExist(t, underSnap)
 	mustExist(t, underGit)
 }
 
@@ -209,12 +242,12 @@ func TestQuotaPurgesTrashFirstThenConvergesWithoutDrainingRepos(t *testing.T) {
 	// fakeDisk: first call over high (used 900/1000); after trash purge,
 	// second call under high (used 200/1000). Converges without eviction.
 	calls := 0
-	r.diskUsage = func(string) (uint64, uint64, error) {
+	r.diskUsage = func(string) (uint64, uint64, uint64, uint64, error) {
 		calls++
 		if calls == 1 {
-			return 1000, 100, nil // 90% used
+			return 1000, 100, 1000, 1000, nil // 90% used
 		}
-		return 1000, 800, nil // 20% used after trash purge
+		return 1000, 800, 1000, 1000, nil // 20% used after trash purge
 	}
 
 	if err := r.enforceQuota(context.Background()); err != nil {
@@ -247,9 +280,9 @@ func TestOrgQuotaErrorDoesNotSkipGlobalWatermark(t *testing.T) {
 	mkGitDir(t, over, 40, now.Add(-1*time.Hour))
 
 	statfsCalls := 0
-	r.diskUsage = func(string) (uint64, uint64, error) {
+	r.diskUsage = func(string) (uint64, uint64, uint64, uint64, error) {
 		statfsCalls++
-		return 1000, 100, nil // always over high
+		return 1000, 100, 1000, 1000, nil // always over high (bytes)
 	}
 	if err := r.enforceQuota(context.Background()); err != nil {
 		t.Fatalf("enforceQuota: %v", err)
