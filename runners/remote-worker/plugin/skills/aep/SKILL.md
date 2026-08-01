@@ -51,25 +51,37 @@ When an issue's Scope names a stack convention ("use `modernc.org/sqlite`", "rea
 `window._env_.X_URL`"), the owning skill is authoritative — never re-derive a
 convention from training data when a loaded skill states it.
 
+## Contract-first
+
+`specs/` was authored at design time, before any issue existed: every component's
+`design.json`, and every service's `openapi.yaml`. It is the contract — what a
+service implements, and what its consumers are written against. **Implement to it;
+never edit it.** A service with no `openapi.yaml` has its issue's Scope and
+Acceptance criteria as its contract instead.
+
+That is what makes the work parallel. A consumer codes against its provider's
+committed `openapi.yaml`, never its code, so **no issue waits for another issue's
+code** — and a dependency an issue declares is a *runtime* edge, who calls whom
+once deployed, never a build order. Only two issues writing the same files
+serialise anything.
+
 ---
 
 # The run
 
 ## 1 · Start the cycle
 
-Settle **what you are working, and in what order**, before you write any file.
+Settle **what you are working, and what can run at once**, before you write any
+file.
 
 Done-ness is a **live fact, never a stored flag**: an issue is finished because
 the work landed. So derive the working set fresh before each pick — a run is
 long enough for the set to change under you, and re-checking is what lets new
-work join *this* run instead of the next one. Then order it **topologically** on
-the dependencies each issue declares and work it in that order: a dependent's
-code has to compile against its provider's, and you commit as you go.
+work join *this* run instead of the next one.
 
-- A dependency on something **not in your working set** (already finished, or no
-  issue exists for it) is **already satisfied** — ignore it.
-- **Ties, and any issue with no dependencies, sort by issue number ascending.**
-  Same for breaking a cycle if the declarations contain one.
+**Order is by issue number ascending, and nothing else** — every issue's contract
+is already fixed (**Contract-first**), so there is no build order to derive. What
+decides how much runs at once is file overlap: see **Fan-out to subagents**.
 
 <!-- mode:github -->
 **The set.** Ask the **issues API**, live, once per pick:
@@ -99,10 +111,11 @@ joins the working set on your next re-list.
 > you should work around it: treat the working set as empty and go to Finish —
 > never fall back to the search API, never guess issue numbers.
 
-**The order.** Issue bodies name their dependencies in **prose**, e.g.
-`Depends on #41`. **Nothing parses this platform-side — reading it is your
-job.** Fetch the bodies of your whole working set up front with
-`gh issue view <number> --json number,title,body,labels`.
+**The bodies.** Fetch the bodies of your whole working set up front with
+`gh issue view <number> --json number,title,body,labels` — you need them to plan
+the fan-out. A `Depends on #41` line records the **runtime** relationship the
+design declared. It is context, not a gate: it never means "work #41 first" and
+never means "wait for #41".
 <!-- /mode -->
 <!-- mode:local -->
 **The set.** List every `issues/<n>.md` under `issues/`. Each is markdown with
@@ -116,9 +129,9 @@ not merely because those components exist. Read each path from its `design.json`
 and look. Satisfied → leave the issue out of the working set. Missing, empty, or
 short of the Scope → it's in.
 
-**The order.** Each issue's `dependsOn` frontmatter array names the
-**components** its component depends on (component names, not issue numbers) —
-read it straight off the frontmatter, no prose parsing needed.
+**The declarations.** An issue's `dependsOn` frontmatter names the **components**
+its component consumes at runtime (component names, not issue numbers). That is a
+runtime relationship, not a build order — it never holds an issue back.
 <!-- /mode -->
 
 <!-- mode:github -->
@@ -179,8 +192,10 @@ it is how the platform maps your PR back to this run.
 
 For **each** issue in the ordered set:
 
-1. **Read it in full.** The issue is the spec — Scope, Acceptance criteria,
-   References.
+1. **Read it in full** — Scope, Acceptance criteria, References — **and the
+   contract under `specs/`**: its component's `design.json` and `openapi.yaml`,
+   plus the `openapi.yaml` of every component it consumes. The issue says what to
+   build; the contract fixes the shape.
 <!-- mode:github -->
    Read its comments too (`gh issue view <number> --comments`): a
    "Platform-resolved dependencies" comment carries dependency wiring you need.
@@ -206,23 +221,22 @@ For **each** issue in the ordered set:
 
 ### Fan-out to subagents
 
-You have the **Task** tool. Use it to work more than one issue at a time — but
-**you** decide what is safe to parallelise, and the bar is higher than "they
-don't conflict":
+You have the **Task** tool, and **fanning out is the default, not the exception** —
+a provider and its consumer may be built at the same time, by different subagents
+(**Contract-first**). Two tests, and they are the only two:
 
-- **Independent** in the ordering you derived — neither depends on the other,
-  directly or transitively — **and** their App Paths are disjoint (no shared
-  file, no shared module).
+- **Disjoint App Paths** — no file and no module written by both. Overlap is the
+  only reason to serialise; work those inline, in ascending order.
 - **Big enough to be worth a subagent.** A one-file change, a config tweak, a
   small fix issue: work those inline. Spawning a subagent for small work costs
   more than it saves and makes the run harder to follow.
-- If either test fails, work the issue inline, in order.
 
 **Subagents Edit/Write only. A subagent never runs `git` and never runs `gh`** —
 no commit, no push, no branch, no comment, no PR. Say so explicitly in every
 Task prompt, and give the subagent its issue's body, the App Paths it may touch,
-and the relevant stack skills' conventions. It reports what it changed; you
-inspect it.
+its component's contract and the `openapi.yaml` of every component it consumes
+(**Contract-first**), and the relevant stack skills' conventions. It reports what
+it changed; you inspect it.
 
 **You are the sole git writer.** When a subagent reports done, *you* stage those
 paths and commit them exactly as in step 3. **No worktrees** — one workspace.
@@ -373,9 +387,11 @@ actually runs on is its own default for `<DEP_NAME>_URL`.
 <!-- /mode -->
 
 **Contracts.** Find the contract before writing any client code: never guess at
-endpoint paths or request/response shapes, and never invent an operation. With no
-published contract, implement a minimal client against the injected address plus
-its `basePath` and nothing more.
+endpoint paths or request/response shapes, and never invent an operation. A
+`component` dependency's `openapi.yaml` is authoritative **whether or not that
+component has been written yet** — read the spec, never the provider's source.
+With no published contract, implement a minimal client against the injected
+address plus its `basePath` and nothing more.
 <!-- mode:github -->
 
 The comment's **Consumed API contracts** sections name the providers. For an
@@ -473,6 +489,14 @@ The platform contract the code itself must satisfy. Layout, libraries, the
 `Dockerfile` and the verify command belong to the stack skill, not here — and
 **where** a rule below lands in the tree is the stack skill's call too.
 
+- **Keep a `.gitignore` at the repo root, and keep it current** — one file for the
+  whole project, extended in the same change that introduces something it should
+  cover (build output, dependency directories, local env files; your stack skill
+  names its own). Never commit what belongs in it.
+- **A service implements its own `openapi.yaml` exactly** — same paths, schemas
+  and status codes. Its consumers are being written against that document, maybe
+  in this same run, so a path you "improve" is a break your own component cannot
+  show you.
 - **Code that is already there sets the conventions.** Read the files an issue
   touches before editing them and follow their structure, error handling and
   config names over what you would write on a blank page, unless one contradicts
@@ -547,6 +571,11 @@ output and what you tried, leave that issue unfinished, and hand both to
   only the `## Progress` section of an issue you touched is yours to write.
 - Delete or rewrite `.aep-playground/` (the playground's state dir).
 <!-- /mode -->
+- **Edit, add to, or delete anything under the repo-root `specs/`.** It is the
+  design-time contract and your consumers are reading it. If it is wrong, or
+  contradicts an issue, implement what the issue asks and say so in one line.
+- **Hold back or skip an issue because a component it depends on is not built
+  yet.** Code against the contract.
 - **Substitute your own technology for a declared dependency.** A
   `platform-resource` you have no `wiring` for is broken input, not
   a licence to pick your own database, cache or IDP — and a local file or an
