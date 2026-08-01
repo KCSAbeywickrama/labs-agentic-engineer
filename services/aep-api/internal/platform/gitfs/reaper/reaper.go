@@ -17,21 +17,23 @@
 // Package reaper is the single disk-lifecycle authority for the shared
 // workspace mount. git_repositories is authoritative and the mount is a rebuildable cache in
 // every part, so the synchronous delete hooks (TrashRepo / TrashOrg) are
-// best-effort and CORRECTNESS lives here, in the background sweep. Four
+// best-effort and CORRECTNESS lives here, in the background sweep. Five
 // passes per tick, each isolated (one failing never stops the next):
 //
-//  1. trash reclamation — purge trash/<id> entries older than TrashMaxAge
+//  1. tmp reclamation — purge tmp/ entries older than TrashMaxAge (same 1h
+//     binding), skipping askpass.sh (local + idempotent: every replica runs it);
+//  2. trash reclamation — purge trash/<id> entries older than TrashMaxAge
 //     (local + idempotent: every replica runs it);
-//  2. snapshot age-reap — trash snapshots/<sha> dirs older than
+//  3. snapshot age-reap — trash snapshots/<sha> dirs older than
 //     SnapshotMaxAge that are not the mirror's current HEAD (immutability
 //     makes this safe: no leases, no heartbeats);
-//  3. orphan reconciliation — set-difference the on-disk repos/… tree
+//  4. orphan reconciliation — set-difference the on-disk repos/… tree
 //     against the DB rows, with a 2×interval mtime grace (leader-only);
-//  4. quota/LRU eviction — statfs high-watermark + per-org quota; snapshots
+//  5. quota/LRU eviction — statfs high-watermark + per-org quota; snapshots
 //     evicted first (oldest mtime), then whole mirrors LRU by git/ mtime,
 //     until under the low watermark (leader-only).
 //
-// The leader gate for passes 3–4 is a non-blocking flock on
+// The leader gate for passes 4–5 is a non-blocking flock on
 // <root>/.reaper.lock — replicas that lose it skip the global passes for the
 // tick and retry next tick.
 package reaper
@@ -78,7 +80,7 @@ const leaderLockName = ".reaper.lock"
 // waited on.
 const evictLockTimeout = 100 * time.Millisecond
 
-// Reaper is the app.Watcher running the four disk-lifecycle passes on
+// Reaper is the app.Watcher running the five disk-lifecycle passes on
 // cfg.ReapInterval.
 type Reaper struct {
 	engine *gitfs.Engine
@@ -123,6 +125,10 @@ func New(engine *gitfs.Engine, repos RepoLister, cfg config.WorkspaceConfig) *Re
 // the watcher lifecycle convention (execution.Sweep): a plain goroutine per
 // watcher, all durable state on disk / in Postgres.
 func (r *Reaper) Run(ctx context.Context) {
+	// Startup sweep: a pod restarting into a full volume must not wait a full
+	// ReapInterval before reclaiming. If the full volume is crash-looping
+	// aep-api, waiting on the ticker may never run.
+	r.Sweep(ctx)
 	ticker := time.NewTicker(r.cfg.ReapInterval)
 	defer ticker.Stop()
 	for {
@@ -139,6 +145,7 @@ func (r *Reaper) Run(ctx context.Context) {
 // can drive a single pass without the ticker. Passes are isolated: a failing
 // pass is logged and the next one still runs.
 func (r *Reaper) Sweep(ctx context.Context) {
+	r.pass(ctx, "tmp-reclamation", r.reclaimTmp)
 	r.pass(ctx, "trash-reclamation", r.reclaimTrash)
 	r.pass(ctx, "snapshot-age-reap", r.reapSnapshots)
 
