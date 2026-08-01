@@ -18,6 +18,7 @@
 
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
+import { createServer } from "node:net";
 import * as Y from "yjs";
 import type { CollabConfig } from "./env.js";
 import type { BffClient } from "./bff.js";
@@ -38,6 +39,24 @@ import {
   ensureRoomState,
   roomState,
 } from "./rooms.js";
+
+/** Ephemeral port — Hocuspocus `listen(0)` is a no-op (falsy → default 80). */
+async function freePort(): Promise<number> {
+  return await new Promise((resolve, reject) => {
+    const s = createServer();
+    s.listen(0, "127.0.0.1", () => {
+      const addr = s.address();
+      if (!addr || typeof addr === "string") {
+        s.close();
+        reject(new Error("expected TCP address"));
+        return;
+      }
+      const { port } = addr;
+      s.close((err) => (err ? reject(err) : resolve(port)));
+    });
+    s.on("error", reject);
+  });
+}
 
 const ROOM = "spec-acme-shop";
 
@@ -215,9 +234,9 @@ test("load opens an unseeded doc when the files fetch fails (room must survive)"
 });
 
 test("GET /healthz returns 200 ok", async () => {
-  const server = createCollabServer(devConfig, { bff: null });
-  await server.listen(0);
-  const { port } = server.address;
+  const port = await freePort();
+  const server = createCollabServer({ ...devConfig, port }, { bff: null });
+  await server.listen(port);
   const res = await fetch(`http://127.0.0.1:${port}/healthz`);
   assert.equal(res.status, 200);
   assert.equal(await res.text(), "ok");

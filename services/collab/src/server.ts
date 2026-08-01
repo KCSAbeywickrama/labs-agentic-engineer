@@ -441,6 +441,9 @@ export function createCollabServer(
 ): Server<CollabContext> {
   return new Server<CollabContext>({
     name: "aep-collab",
+    // Hocuspocus defaults to port 80; listen(0) is ignored (falsy) and would
+    // also fall back to 80 — always set an explicit port from config.
+    port: config.port,
     stopOnSignals: false,
     // The committer (#86 phase 3 / #133): onStoreDocument is Hocuspocus's
     // debounced persistence seam — a quiet period commits, maxDebounce caps
