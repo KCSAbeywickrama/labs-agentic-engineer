@@ -60,10 +60,28 @@ securityContext patch so `runAsNonRoot` is preserved).
 | Disk watermarks | high 85% / low 70% |
 | Admission | refuse new snapshots at ≥ 90% used (bytes or inodes) |
 
-Reaper sweep order (leader-only for disk-mutating passes): trash age-purge
-**before** snapshot eviction; `tmp/` cleanup; orphan reconciliation; git
-maintenance; org quota / watermark eviction. Two-phase delete lands under
-`trash/<ulid>` then purges by age.
+Reaper sweep order (six passes per tick; authority is the `reaper` package
+doc). Every replica runs 1–3; leader-only (`<root>/.reaper.lock`) for 4–6:
+
+1. **tmp reclamation** — purge `tmp/` entries older than `TrashMaxAge` (skip
+   `askpass.sh`)
+2. **trash age-purge** — purge `trash/<id>` older than `TrashMaxAge`
+3. **snapshot age-reap** — trash aged non-HEAD `snapshots/<sha>` dirs
+4. **orphan reconciliation** — on-disk `repos/…` vs DB rows (mtime grace)
+5. **git maintenance** — before quota so eviction sees reclaimed space
+6. **quota / watermark eviction** — org quota then global high/low watermarks
+
+Two-phase delete: rename into `trash/<ulid>` (canonical path frees instantly;
+bytes stay allocated), then purge by age — or under pressure (below).
+
+### Trash-eviction cascade
+
+Rename-into-trash frees **zero** bytes on `statfs`. Age-gated trash purge alone
+would leave the volume over the high watermark across ticks and cascade-drain
+`repos/`. Shipped fix: when over the high watermark, **purge `trash/`
+unconditionally first**, re-read `statfs`, and only then evict snapshots /
+mirrors if still over. Open readers survive (POSIX keeps deleted-but-open
+inodes alive). ENOSPC takes the same emergency trash purge via `ForceSweep`.
 
 Git maintenance (never `git gc`, never `git maintenance --task=loose-objects`):
 
@@ -85,7 +103,19 @@ Node loss takes the whole workspace plane offline until the volume reattaches
 (~6–12 minutes typical). The design does **not** scale writers or readers past
 one node: RWO + hostname co-location is the capacity ceiling.
 
-## 5. Collab
+## 5. PVC lifetime / availability trap
+
+OpenChoreo prunes Flux-style: remove the provisioning trait, or delete the
+Component / ReleaseBinding that owns the claim, and the PVC is Deleted. Every
+PVC carries `kubernetes.io/pvc-protection`, so a mounted claim goes to
+`Terminating` and **waits** — it does not vanish under a running pod. The
+failure mode is an **availability trap, not data loss**: the PVC stays
+`Terminating` until every consumer stops, and re-adding the trait cannot create
+a same-named claim while the old one is still terminating. Recovery: scale both
+aep-api and agents Deployments to zero, let the claim clear, then re-add.
+Workspace content is a rebuildable cache; blast radius is a cold start.
+
+## 6. Collab
 
 Collab-server runs **replicas: 1**, `/healthz` probes, 512Mi memory limit,
 `terminationGracePeriodSeconds: 30`, concurrent shutdown flush. D6 keeps access
@@ -93,7 +123,7 @@ tokens fresh over the stateless channel for long sessions; residual: a
 last-leave forced flush often has no client for `token-please`, so exposure
 stays the ≤60s commit debounce window.
 
-## 6. Rejected alternatives
+## 7. Rejected alternatives
 
 | Approach | Outcome |
 |---|---|
@@ -102,12 +132,15 @@ stays the ≤60s commit debounce window.
 | Register #1 (persist HEAD/tags in Postgres / `PersistingWorkspace`) | Cancelled |
 | Snapshot-layer removal | Cancelled |
 
-## 7. Related concerns
+## 8. Related concerns
 
 - **Collab upstream:** console nginx can override the collab upstream via
   `COLLAB_SERVER_URL`; that is a deployment concern, not a workspace-volume
   change.
-- **Anthropic credentials:** aep-api still applies per-org
-  `anthropic-credentials` Secrets into workflow namespaces via the in-cluster
-  client. Cloud/helm does not mount those files; the k8s push path and any
-  ExternalSecret wiring remain operational cleanup outside this design.
+- **Anthropic credentials:** aep-api still applies/deletes per-org
+  `anthropic-credentials` Secrets via the in-cluster Kubernetes client on org
+  disconnect. **Decision:** retire that path with phase 08's k8s-client
+  deletion wave (`learn/get-cloud-working-v2/plan/phase-08-coding-agent-oc-job.md`
+  — ticket 11 D7 loose end): expected outcome is delete the workflow-plane
+  Secret push once runners read Anthropic keys through ExternalSecret; aep-api
+  must not keep a Kubernetes client solely for this call.
