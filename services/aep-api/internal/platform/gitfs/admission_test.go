@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os/exec"
 	"syscall"
 	"testing"
 
@@ -59,6 +60,15 @@ func TestIsENOSPC(t *testing.T) {
 	if gitfs.IsENOSPC(fmt.Errorf("write: %w", syscall.EIO)) {
 		t.Fatal("EIO must not match ENOSPC")
 	}
+	// git()/gitStream shape: ExitError in the chain, ENOSPC only in stderr text.
+	exitErr := gitStyleExitError(t)
+	gitErr := fmt.Errorf("git fetch --depth 1 origin sha: %w: fatal: write error: No space left on device", exitErr)
+	if !gitfs.IsENOSPC(gitErr) {
+		t.Fatal("git-wrapped stderr ENOSPC must be detected")
+	}
+	if gitfs.IsENOSPC(fmt.Errorf("git fetch: %w: fatal: unable to access", exitErr)) {
+		t.Fatal("unrelated git ExitError must not match ENOSPC")
+	}
 }
 
 func TestMapDiskErrTriggersOnENOSPC(t *testing.T) {
@@ -84,4 +94,43 @@ func TestMapDiskErrTriggersOnENOSPC(t *testing.T) {
 	if !called {
 		t.Fatal("onENOSPC was not invoked")
 	}
+}
+
+func TestMapDiskErrTriggersOnGitStderrENOSPC(t *testing.T) {
+	fx := workspacetest.New(t, nil)
+	called := false
+	fx.Engine.SetOnENOSPC(func() { called = true })
+	fx.Engine.SetDiskUsagePct(91)
+
+	// Mirrors Engine.git / gitStream: %w is *exec.ExitError (no ENOSPC errno);
+	// the disk-full signal lives only in the trailing stderr fragment.
+	exitErr := gitStyleExitError(t)
+	gitErr := fmt.Errorf("git archive --format=tar sha: %w: fatal: unable to write loose object file: No space left on device", exitErr)
+
+	err := gitfs.MapDiskErr(fx.Engine, gitErr)
+	var diskFull *gitfs.DiskFullError
+	if !errors.As(err, &diskFull) {
+		t.Fatalf("got %T %v, want *DiskFullError", err, err)
+	}
+	if diskFull.UsedPct != 91 {
+		t.Fatalf("UsedPct = %d, want 91", diskFull.UsedPct)
+	}
+	if !errors.Is(err, gitfs.ErrDiskFull) {
+		t.Fatalf("errors.Is(ErrDiskFull) = false for %v", err)
+	}
+	if !called {
+		t.Fatal("onENOSPC was not invoked for git stderr ENOSPC")
+	}
+}
+
+// gitStyleExitError returns a real *exec.ExitError (errno not ENOSPC) the way
+// Engine.git wraps child failures — ENOSPC appears only in stderr text.
+func gitStyleExitError(t *testing.T) *exec.ExitError {
+	t.Helper()
+	err := exec.Command("false").Run()
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("false: got %T %v, want *exec.ExitError", err, err)
+	}
+	return exitErr
 }
