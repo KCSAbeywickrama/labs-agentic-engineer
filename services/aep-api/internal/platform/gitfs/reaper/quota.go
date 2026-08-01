@@ -40,21 +40,40 @@ import (
 // evictable.
 const snapshotEvictMinAge = 30 * time.Minute
 
-// enforceQuota is pass 4 (leader-only): per-org quota first, then the global
-// statfs watermark. Both funnel into evictWithin — snapshots go first
-// (oldest mtime), then whole mirrors LRU by git/ activity, and every
-// eviction is a trash rename (two-phase like all deletes). Eviction cost is
-// a re-clone / re-Ensure on next use — always safe, because the mount is a
-// rebuildable cache (D12/D13).
-//
-// Freed bytes are ESTIMATED from the candidates' sizes: a trash rename keeps
-// the bytes on the filesystem until pass 1 purges them, so re-polling statfs
-// mid-eviction would never converge.
+// purgeTrashAll removes every trash/<id> entry regardless of age. Used when
+// the volume is over the high watermark so a trash rename from a prior tick
+// actually frees bytes before we evict more repos/. Open readers survive
+// (POSIX keeps deleted-but-open inodes alive).
+func (r *Reaper) purgeTrashAll(ctx context.Context) error {
+	trashDir := gitfs.TrashDir(r.engine.Root())
+	entries, err := os.ReadDir(trashDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	for _, e := range entries {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		path := filepath.Join(trashDir, e.Name())
+		if err := os.RemoveAll(path); err != nil {
+			slog.WarnContext(ctx, "reaper: pressure purge trash failed", "path", path, "error", err)
+		}
+	}
+	return nil
+}
+
+// enforceQuota is pass 4 (leader-only): per-org quota first (errors logged,
+// never abort the global path), then the global statfs watermark. When over
+// high: purge trash/ unconditionally FIRST, re-read statfs, and only then
+// evict if still over.
 func (r *Reaper) enforceQuota(ctx context.Context) error {
 	root := r.engine.Root()
 	if r.cfg.OrgQuotaBytes > 0 {
 		if err := r.enforceOrgQuotas(ctx); err != nil {
-			return err
+			slog.WarnContext(ctx, "reaper: org quota pass failed — continuing to global watermark", "error", err)
 		}
 	}
 	total, avail, err := r.diskUsage(root)
@@ -63,11 +82,26 @@ func (r *Reaper) enforceQuota(ctx context.Context) error {
 	}
 	used := total - avail
 	if used*100 <= uint64(r.cfg.DiskHighPct)*total {
-		return nil // under the high watermark — nothing to do
+		return nil
+	}
+	slog.InfoContext(ctx, "reaper: disk over high watermark — purging trash before eviction",
+		"usedPct", used*100/total, "highPct", r.cfg.DiskHighPct)
+	if err := r.purgeTrashAll(ctx); err != nil {
+		slog.WarnContext(ctx, "reaper: pressure trash purge failed", "error", err)
+	}
+	total, avail, err = r.diskUsage(root)
+	if err != nil || total == 0 {
+		return err
+	}
+	used = total - avail
+	if used*100 <= uint64(r.cfg.DiskHighPct)*total {
+		slog.InfoContext(ctx, "reaper: under high watermark after trash purge — skipping eviction",
+			"usedPct", used*100/total)
+		return nil
 	}
 	lowBytes := total * uint64(r.cfg.DiskLowPct) / 100
-	target := int64(used - lowBytes) // free down to the LOW watermark, not just under high
-	slog.InfoContext(ctx, "reaper: disk over high watermark — evicting",
+	target := int64(used - lowBytes)
+	slog.InfoContext(ctx, "reaper: still over high watermark — evicting",
 		"usedPct", used*100/total, "highPct", r.cfg.DiskHighPct, "lowPct", r.cfg.DiskLowPct, "targetBytes", target)
 	return r.evictWithin(ctx, gitfs.ReposDir(root), target)
 }
