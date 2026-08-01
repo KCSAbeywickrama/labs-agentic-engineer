@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import { test } from "node:test";
+import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import * as Y from "yjs";
 import type { CollabConfig } from "./env.js";
@@ -25,11 +25,21 @@ import { BffAccessDeniedError } from "./bff.js";
 import {
   buildAuthenticateHook,
   buildLoadDocumentHook,
+  buildStatelessHook,
   createCollabServer,
+  requestFreshToken,
+  type CollabContext,
 } from "./server.js";
 import { filesMap } from "./seed.js";
 import { devSeedFiles } from "./fixtures.js";
 import type { Document } from "@hocuspocus/server";
+import {
+  dropRoomState,
+  ensureRoomState,
+  roomState,
+} from "./rooms.js";
+
+const ROOM = "spec-acme-shop";
 
 const prodConfig: CollabConfig = {
   port: 0,
@@ -64,6 +74,9 @@ function fakeBff(overrides: Partial<BffClient> = {}): BffClient {
     ...overrides,
   };
 }
+
+beforeEach(() => dropRoomState(ROOM));
+
 
 test("auth rejects unknown rooms before hitting the oracle", async () => {
   let oracleCalled = false;
@@ -220,4 +233,75 @@ test("load opens an empty doc when the oracle gave no project (pre-phase-2 BFF)"
     context: { user: { name: "Jo", email: "j", kind: "user" }, token: "t", projectName: null },
   });
   assert.equal(filesMap(doc).size, 0);
+});
+
+test("stateless token updates connection context and lastToken", async () => {
+  ensureRoomState(ROOM, "shop").lastToken = "old";
+  const ctx: CollabContext = {
+    user: { name: "Jo", email: "j", kind: "user" },
+    token: "old",
+    projectName: "shop",
+  };
+  const logs: string[] = [];
+  const hook = buildStatelessHook(prodConfig, {
+    bff: fakeBff(),
+    log: (m) => logs.push(m),
+  });
+  await hook({
+    connection: {
+      context: ctx,
+      sendStateless: () => {},
+    } as never,
+    documentName: ROOM,
+    document: new Y.Doc() as Document,
+    payload: JSON.stringify({ type: "token", value: "new-jwt" }),
+  });
+  assert.equal(ctx.token, "new-jwt");
+  assert.equal(roomState(ROOM)!.lastToken, "new-jwt");
+  assert.match(logs.join("\n"), /token refreshed for spec-acme-shop/);
+});
+
+test("requestFreshToken resolves when a matching token reply arrives", async () => {
+  const sent: string[] = [];
+  const fakeConn = {
+    sendStateless: (payload: string) => sent.push(payload),
+  };
+  const doc = {
+    getConnections: () => [fakeConn],
+    broadcastStateless: () => {},
+  };
+  const pending = requestFreshToken(doc as never, {}, ROOM);
+  assert.equal(sent.length, 1);
+  const please = JSON.parse(sent[0]!) as { type: string; id: string };
+  assert.equal(please.type, "token-please");
+  assert.ok(please.id);
+
+  const hook = buildStatelessHook(prodConfig, { bff: fakeBff() });
+  ensureRoomState(ROOM, "shop");
+  await hook({
+    connection: {
+      context: {
+        user: { name: "Jo", email: "j", kind: "user" },
+        token: "stale",
+        projectName: "shop",
+      } satisfies CollabContext,
+      sendStateless: () => {},
+    } as never,
+    documentName: ROOM,
+    document: new Y.Doc() as Document,
+    payload: JSON.stringify({
+      type: "token",
+      value: "pulled-jwt",
+      id: please.id,
+    }),
+  });
+  assert.equal(await pending, "pulled-jwt");
+});
+
+test("requestFreshToken returns null when no connections", async () => {
+  const doc = {
+    getConnections: () => [],
+    broadcastStateless: () => {},
+  };
+  assert.equal(await requestFreshToken(doc as never, {}, ROOM), null);
 });

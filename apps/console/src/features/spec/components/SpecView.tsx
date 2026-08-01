@@ -707,6 +707,17 @@ export function SpecView({ projectName }: { projectName: string }) {
           </Alert>
         )}
 
+        {/* Committer flush failure (D6): background or on-demand apply failed. */}
+        {collab.flushError && (
+          <Alert
+            severity="error"
+            sx={{ borderRadius: 0 }}
+            onClose={() => collab.clearFlushError()}
+          >
+            {collab.flushError}
+          </Alert>
+        )}
+
         {/* Body: grouped file list + file content */}
         {spec.isPending ? (
           <Box

@@ -30,6 +30,7 @@ import {
   snapshotDoc,
 } from "@aep/collab-doc";
 import {
+  ApplyAuthError,
   ApplyConflictError,
   type ApplyDelete,
   type ApplyWrite,
@@ -44,6 +45,33 @@ const SLOW_SHUTDOWN_FLUSH_MS = 25_000;
 interface FlushDeps {
   bff: BffClient;
   log?: ((message: string) => void) | undefined;
+  /**
+   * Pull a fresh bearer after ApplyAuthError (D6). Typically asks a connected
+   * client via `{type:"token-please"}`. Absent/empty → classify + log, no retry.
+   */
+  tokenRefresh?: (() => Promise<string | null>) | undefined;
+}
+
+function flushFailureLog(
+  documentName: string,
+  projectName: string,
+  err: unknown,
+  writes: number,
+  deletes: number,
+  refreshAttempted: boolean,
+  refreshOutcome: "ok" | "failed" | "skipped" | "n/a",
+): string {
+  const status =
+    err instanceof ApplyAuthError
+      ? String(err.status)
+      : err instanceof Error
+        ? "error"
+        : "n/a";
+  return (
+    `committer: ${documentName} project=${projectName} flush failed ` +
+    `status=${status} writes=${writes} deletes=${deletes} ` +
+    `refreshAttempted=${refreshAttempted} refreshOutcome=${refreshOutcome}`
+  );
 }
 
 export interface FlushAllOptions {
@@ -142,12 +170,13 @@ export async function flushRoom(
 ): Promise<void> {
   const state = roomState(documentName);
   if (!state) return;
-  const token = context?.token ?? state.lastToken;
+  let token = context?.token ?? state.lastToken;
   if (!token) {
     deps.log?.(`committer: no token for ${documentName} — skipping flush`);
     return;
   }
 
+  let authRetried = false;
   for (let attempt = 0; ; attempt++) {
     const { writes, deletes, held } = pendingChanges(doc, state, force);
     if (held.length > 0) {
@@ -183,6 +212,37 @@ export async function flushRoom(
       );
       return;
     } catch (err) {
+      if (
+        err instanceof ApplyAuthError &&
+        !authRetried &&
+        deps.tokenRefresh
+      ) {
+        authRetried = true;
+        const fresh = await deps.tokenRefresh();
+        if (fresh) {
+          token = fresh;
+          state.lastToken = fresh;
+          if (context) context.token = fresh;
+          deps.log?.(
+            `committer: ${documentName} project=${state.projectName} ` +
+              `auth ${err.status} — retrying once with refreshed token ` +
+              `(writes=${writes.length} deletes=${deletes.length} refreshOutcome=ok)`,
+          );
+          continue;
+        }
+        deps.log?.(
+          flushFailureLog(
+            documentName,
+            state.projectName,
+            err,
+            writes.length,
+            deletes.length,
+            true,
+            "failed",
+          ),
+        );
+        throw err;
+      }
       if (err instanceof ApplyConflictError && attempt < MAX_CONFLICT_RETRIES) {
         // Someone moved git under the session: the DOC wins (#86 d6) — adopt
         // HEAD's shas as the new base and re-apply our content over it.
@@ -201,6 +261,21 @@ export async function flushRoom(
         }
         continue;
       }
+      deps.log?.(
+        flushFailureLog(
+          documentName,
+          state.projectName,
+          err,
+          writes.length,
+          deletes.length,
+          authRetried,
+          err instanceof ApplyAuthError
+            ? authRetried
+              ? "failed"
+              : "skipped"
+            : "n/a",
+        ),
+      );
       throw err;
     }
   }

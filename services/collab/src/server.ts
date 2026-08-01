@@ -55,6 +55,88 @@ export interface CollabDeps {
   log?: (message: string) => void;
 }
 
+/** Brief wait for a client reply to `{type:"token-please"}` (D6 pull). */
+const TOKEN_PLEASE_TIMEOUT_MS = 5_000;
+
+/** In-flight pull-on-401 waits keyed by correlation id. */
+const pendingTokenPlease = new Map<
+  string,
+  { resolve: (token: string | null) => void }
+>();
+
+/**
+ * Ask connected clients for a fresh bearer, resolve with the first matching
+ * `{type:"token", value, id}` or null on timeout / no connections (D6).
+ */
+export function requestFreshToken(
+  document: Pick<
+    onStoreDocumentPayload["document"],
+    "getConnections" | "broadcastStateless"
+  >,
+  deps: Pick<CollabDeps, "log">,
+  documentName: string,
+): Promise<string | null> {
+  const connections = document.getConnections?.() ?? [];
+  if (connections.length === 0) {
+    deps.log?.(
+      `token-please: no connections for ${documentName} — cannot refresh`,
+    );
+    return Promise.resolve(null);
+  }
+  const id = crypto.randomUUID();
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      pendingTokenPlease.delete(id);
+      deps.log?.(
+        `token-please: timed out waiting for ${documentName} (id=${id})`,
+      );
+      resolve(null);
+    }, TOKEN_PLEASE_TIMEOUT_MS);
+    pendingTokenPlease.set(id, {
+      resolve: (token) => {
+        clearTimeout(timer);
+        pendingTokenPlease.delete(id);
+        resolve(token);
+      },
+    });
+    const payload = JSON.stringify({ type: "token-please", id });
+    for (const conn of connections) {
+      conn.sendStateless(payload);
+    }
+  });
+}
+
+function tokenRefreshFor(
+  document: onStoreDocumentPayload["document"],
+  documentName: string,
+  deps: CollabDeps,
+): () => Promise<string | null> {
+  return () => requestFreshToken(document, deps, documentName);
+}
+
+function surfaceFlushError(
+  document: Pick<
+    onStoreDocumentPayload["document"],
+    "broadcastStateless" | "getConnections"
+  >,
+  message: string,
+): void {
+  const connections = document.getConnections?.() ?? [];
+  if (connections.length === 0) return;
+  const payload = JSON.stringify({ type: "flush-error", message });
+  try {
+    if (typeof document.broadcastStateless === "function") {
+      document.broadcastStateless(payload);
+      return;
+    }
+  } catch {
+    // fall through to per-connection send
+  }
+  for (const conn of connections) {
+    conn.sendStateless(payload);
+  }
+}
+
 export function buildAuthenticateHook(config: CollabConfig, deps: CollabDeps) {
   return async (
     data: Pick<onAuthenticatePayload, "token" | "documentName">,
@@ -157,7 +239,15 @@ export function buildStoreDocumentHook(config: CollabConfig, deps: CollabDeps) {
     if (!roomState(data.documentName)) return;
     try {
       await flushRoom(
-        { bff: deps.bff, log: deps.log },
+        {
+          bff: deps.bff,
+          log: deps.log,
+          tokenRefresh: tokenRefreshFor(
+            data.document,
+            data.documentName,
+            deps,
+          ),
+        },
         data.documentName,
         data.document,
         data.lastContext ?? undefined,
@@ -165,9 +255,12 @@ export function buildStoreDocumentHook(config: CollabConfig, deps: CollabDeps) {
     } catch (err) {
       // A failed flush must not kill connections; the doc stays live and the
       // next store attempt (or session end) retries from the same baseline.
+      // Surface to clients so the failure is not silent (D6).
+      const message = err instanceof Error ? err.message : "flush failed";
       deps.log?.(
-        `committer: flush failed for ${data.documentName} (${String(err)})`,
+        `committer: flush failed for ${data.documentName} (${message})`,
       );
+      surfaceFlushError(data.document, message);
     }
   };
 }
@@ -184,16 +277,27 @@ export function buildBeforeUnloadHook(config: CollabConfig, deps: CollabDeps) {
     if (!roomState(data.documentName)) return;
     try {
       await flushRoom(
-        { bff: deps.bff, log: deps.log },
+        {
+          bff: deps.bff,
+          log: deps.log,
+          // Last-leave residual (D6): often no client left to refresh from.
+          tokenRefresh: tokenRefreshFor(
+            data.document,
+            data.documentName,
+            deps,
+          ),
+        },
         data.documentName,
         data.document,
         undefined,
         true,
       );
     } catch (err) {
+      const message = err instanceof Error ? err.message : "flush failed";
       deps.log?.(
-        `committer: final flush failed for ${data.documentName} (${String(err)})`,
+        `committer: final flush failed for ${data.documentName} (${message})`,
       );
+      surfaceFlushError(data.document, message);
     }
   };
 }
@@ -221,12 +325,31 @@ export function buildStatelessHook(config: CollabConfig, deps: CollabDeps) {
       "connection" | "documentName" | "document" | "payload"
     >,
   ) => {
-    let msg: { type?: string; id?: string };
+    let msg: { type?: string; id?: string; value?: unknown };
     try {
-      msg = JSON.parse(data.payload) as { type?: string; id?: string };
+      msg = JSON.parse(data.payload) as {
+        type?: string;
+        id?: string;
+        value?: unknown;
+      };
     } catch {
       return; // not our protocol
     }
+
+    // D6 push (+ pull reply): client refreshed its access token.
+    if (msg.type === "token" && typeof msg.value === "string") {
+      const value = msg.value;
+      const ctx = data.connection.context as CollabContext | undefined;
+      if (ctx) ctx.token = value;
+      const state = roomState(data.documentName);
+      if (state) state.lastToken = value;
+      if (typeof msg.id === "string") {
+        pendingTokenPlease.get(msg.id)?.resolve(value);
+      }
+      deps.log?.(`token refreshed for ${data.documentName}`);
+      return;
+    }
+
     if (msg.type !== "flush") return;
 
     const ack = (extra: Record<string, unknown> = {}) =>
@@ -240,7 +363,15 @@ export function buildStatelessHook(config: CollabConfig, deps: CollabDeps) {
     }
     try {
       await flushRoom(
-        { bff: deps.bff, log: deps.log },
+        {
+          bff: deps.bff,
+          log: deps.log,
+          tokenRefresh: tokenRefreshFor(
+            data.document,
+            data.documentName,
+            deps,
+          ),
+        },
         data.documentName,
         data.document,
         undefined,
@@ -248,14 +379,15 @@ export function buildStatelessHook(config: CollabConfig, deps: CollabDeps) {
       );
       ack();
     } catch (err) {
+      const message = err instanceof Error ? err.message : "flush failed";
       deps.log?.(
-        `committer: on-demand flush failed for ${data.documentName} (${String(err)})`,
+        `committer: on-demand flush failed for ${data.documentName} (${message})`,
       );
       data.connection.sendStateless(
         JSON.stringify({
           type: "flush-error",
           id: msg.id,
-          message: err instanceof Error ? err.message : "flush failed",
+          message,
         }),
       );
     }

@@ -66,6 +66,8 @@ const soloCollab = () => ({
   isLocalTransaction: () => false,
   version: 0,
   flush: mockFlush,
+  flushError: null as string | null,
+  clearFlushError: vi.fn(),
 });
 let mockCollab = soloCollab();
 vi.mock("../collab/useCollabSpec", () => ({
