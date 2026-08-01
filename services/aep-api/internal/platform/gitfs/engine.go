@@ -28,6 +28,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -213,10 +214,11 @@ func (e *Engine) remoteGit(ctx context.Context, ref RepoRef, opts execOpts, args
 // ----- mirror lifecycle -----
 
 // ensureMirror guarantees the bare mirror exists, cloning it atomically on
-// demand: `git clone --mirror` into tmp/ staging, gc.auto=0 stamped, then
-// os.Rename into the canonical path — a crash mid-clone leaves only tmp/
-// debris, never a half-populated mirror. Returns whether this call cloned
-// (a fresh clone is fresh — callers skip the next fetch).
+// demand: `git clone --mirror` into tmp/ staging, gc.auto=0 +
+// repack.writeBitmaps=false stamped, then os.Rename into the canonical path —
+// a crash mid-clone leaves only tmp/ debris, never a half-populated mirror.
+// Returns whether this call cloned (a fresh clone is fresh — callers skip the
+// next fetch).
 func (e *Engine) ensureMirror(ctx context.Context, ref RepoRef, p repoPaths) (cloned bool, err error) {
 	if mirrorExists(p.gitDir) {
 		return false, nil
@@ -241,8 +243,13 @@ func (e *Engine) ensureMirror(ctx context.Context, ref RepoRef, p repoPaths) (cl
 	if _, err := e.remoteGit(ctx, ref, execOpts{}, "clone", "--mirror", ref.CloneURL, stagingGit); err != nil {
 		return false, fmt.Errorf("gitfs: mirror clone %s: %w", ref.RepoSlug, err)
 	}
-	// Never auto-gc a shared mirror — GC runs only in the reaper (design D8).
+	// Never auto-gc a shared mirror — the reaper maintainRepos pass runs
+	// repack/prune/pack-refs under the EX flock (never git gc: gc.pid hostname trap).
 	if _, err := e.git(ctx, execOpts{}, "--git-dir", stagingGit, "config", "gc.auto", "0"); err != nil {
+		return false, err
+	}
+	// Bitmaps are pure overhead: nothing clones FROM these mirrors.
+	if _, err := e.git(ctx, execOpts{}, "--git-dir", stagingGit, "config", "repack.writeBitmaps", "false"); err != nil {
 		return false, err
 	}
 	// clone --mirror marks the remote mirror=true, which forbids the
@@ -374,6 +381,57 @@ func (e *Engine) resolveCommit(ctx context.Context, ref RepoRef, p repoPaths, at
 		return "", fmt.Errorf("gitfs: resolve %q in %s: %w", at, ref.RepoSlug, err)
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// ----- mirror maintenance (consumed by the reaper) -----
+
+// MaintainMirror runs the reaper's git maintenance sequence under the EX
+// flock: repack -ad --quiet, prune --expire=2.hours.ago, pack-refs --all --prune.
+// Never git gc. Never git maintenance --task=loose-objects.
+func (e *Engine) MaintainMirror(ctx context.Context, ref RepoRef) error {
+	p, err := e.pathsFor(ref)
+	if err != nil {
+		return err
+	}
+	if !mirrorExists(p.gitDir) {
+		return nil
+	}
+	release, err := e.locks.Lock(ctx, p.lockPath)
+	if err != nil {
+		return err
+	}
+	defer release()
+	if _, err := e.git(ctx, execOpts{}, "--git-dir", p.gitDir, "repack", "-ad", "--quiet"); err != nil {
+		return fmt.Errorf("gitfs: repack %s: %w", ref.RepoSlug, err)
+	}
+	if _, err := e.git(ctx, execOpts{}, "--git-dir", p.gitDir, "prune", "--expire=2.hours.ago"); err != nil {
+		return fmt.Errorf("gitfs: prune %s: %w", ref.RepoSlug, err)
+	}
+	if _, err := e.git(ctx, execOpts{}, "--git-dir", p.gitDir, "pack-refs", "--all", "--prune"); err != nil {
+		return fmt.Errorf("gitfs: pack-refs %s: %w", ref.RepoSlug, err)
+	}
+	return nil
+}
+
+// CountObjects returns loose-object and pack counts for a mirror (count-objects -v).
+func (e *Engine) CountObjects(ctx context.Context, ref RepoRef) (loose, packs int, err error) {
+	p, err := e.pathsFor(ref)
+	if err != nil {
+		return 0, 0, err
+	}
+	out, err := e.git(ctx, execOpts{}, "--git-dir", p.gitDir, "count-objects", "-v")
+	if err != nil {
+		return 0, 0, err
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		switch {
+		case strings.HasPrefix(line, "count: "):
+			loose, _ = strconv.Atoi(strings.TrimPrefix(line, "count: "))
+		case strings.HasPrefix(line, "packs: "):
+			packs, _ = strconv.Atoi(strings.TrimPrefix(line, "packs: "))
+		}
+	}
+	return loose, packs, nil
 }
 
 // ----- trash primitives (consumed by the reaper, design D12) -----

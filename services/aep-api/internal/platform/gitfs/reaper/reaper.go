@@ -17,7 +17,7 @@
 // Package reaper is the single disk-lifecycle authority for the shared
 // workspace mount. git_repositories is authoritative and the mount is a rebuildable cache in
 // every part, so the synchronous delete hooks (TrashRepo / TrashOrg) are
-// best-effort and CORRECTNESS lives here, in the background sweep. Five
+// best-effort and CORRECTNESS lives here, in the background sweep. Six
 // passes per tick, each isolated (one failing never stops the next):
 //
 //  1. tmp reclamation — purge tmp/ entries older than TrashMaxAge (same 1h
@@ -29,11 +29,13 @@
 //     makes this safe: no leases, no heartbeats);
 //  4. orphan reconciliation — set-difference the on-disk repos/… tree
 //     against the DB rows, with a 2×interval mtime grace (leader-only);
-//  5. quota/LRU eviction — statfs high-watermark + per-org quota; snapshots
+//  5. git maintenance — repack/prune/pack-refs on loose-/pack-heavy mirrors
+//     under EX flock (leader-only; before quota so eviction sees reclaimed space);
+//  6. quota/LRU eviction — statfs high-watermark + per-org quota; snapshots
 //     evicted first (oldest mtime), then whole mirrors LRU by git/ mtime,
 //     until under the low watermark (leader-only).
 //
-// The leader gate for passes 4–5 is a non-blocking flock on
+// The leader gate for passes 4–6 is a non-blocking flock on
 // <root>/.reaper.lock — replicas that lose it skip the global passes for the
 // tick and retry next tick.
 package reaper
@@ -71,7 +73,7 @@ type RepoLister interface {
 }
 
 // leaderLockName is the root-level flock file serializing the global passes
-// (orphan reconciliation + quota/LRU) to one replica per tick.
+// (orphan reconciliation + git maintenance + quota/LRU) to one replica per tick.
 const leaderLockName = ".reaper.lock"
 
 // evictLockTimeout bounds the "non-blocking try" on a mirror's repo.lock
@@ -80,7 +82,7 @@ const leaderLockName = ".reaper.lock"
 // waited on.
 const evictLockTimeout = 100 * time.Millisecond
 
-// Reaper is the app.Watcher running the five disk-lifecycle passes on
+// Reaper is the app.Watcher running the six disk-lifecycle passes on
 // cfg.ReapInterval.
 type Reaper struct {
 	engine *gitfs.Engine
@@ -157,6 +159,7 @@ func (r *Reaper) Sweep(ctx context.Context) {
 	}
 	defer release()
 	r.pass(ctx, "orphan-reconciliation", r.reconcileOrphans)
+	r.pass(ctx, "git-maintenance", r.maintainRepos)
 	r.pass(ctx, "quota-lru-eviction", r.enforceQuota)
 }
 
