@@ -145,7 +145,8 @@ func (r *Reaper) Run(ctx context.Context) {
 
 // Sweep runs one full reap cycle. Exported so a test (or an admin trigger)
 // can drive a single pass without the ticker. Passes are isolated: a failing
-// pass is logged and the next one still runs.
+// pass is logged and the next one still runs. After all passes, usage is
+// re-recorded for Ensure admission (even when this replica was not leader).
 func (r *Reaper) Sweep(ctx context.Context) {
 	r.pass(ctx, "tmp-reclamation", r.reclaimTmp)
 	r.pass(ctx, "trash-reclamation", r.reclaimTrash)
@@ -154,13 +155,13 @@ func (r *Reaper) Sweep(ctx context.Context) {
 	// Global passes run on at most one replica per tick: non-blocking leader
 	// flock — losing it simply defers to whichever replica holds it.
 	release, held := r.tryLeaderLock(ctx)
-	if !held {
-		return
+	if held {
+		r.pass(ctx, "orphan-reconciliation", r.reconcileOrphans)
+		r.pass(ctx, "git-maintenance", r.maintainRepos)
+		r.pass(ctx, "quota-lru-eviction", r.enforceQuota)
+		release()
 	}
-	defer release()
-	r.pass(ctx, "orphan-reconciliation", r.reconcileOrphans)
-	r.pass(ctx, "git-maintenance", r.maintainRepos)
-	r.pass(ctx, "quota-lru-eviction", r.enforceQuota)
+	r.recordUsageFromStatfs()
 }
 
 // pass runs one pass, isolating its failure to a log line so the remaining

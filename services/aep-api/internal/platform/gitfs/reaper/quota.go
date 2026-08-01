@@ -80,6 +80,7 @@ func (r *Reaper) enforceQuota(ctx context.Context) error {
 	if err != nil || total == 0 {
 		return err
 	}
+	r.recordDiskUsage(total, avail)
 	used := total - avail
 	inodeUsed := inodesTotal - inodesFree
 	overBytes := used*100 > uint64(r.cfg.DiskHighPct)*total
@@ -101,6 +102,7 @@ func (r *Reaper) enforceQuota(ctx context.Context) error {
 	if err != nil || total == 0 {
 		return err
 	}
+	r.recordDiskUsage(total, avail)
 	used = total - avail
 	inodeUsed = inodesTotal - inodesFree
 	overBytes = used*100 > uint64(r.cfg.DiskHighPct)*total

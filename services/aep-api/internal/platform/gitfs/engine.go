@@ -30,6 +30,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -47,6 +48,12 @@ type Engine struct {
 	// git invocation's argv + env before it runs. It is the seam for the
 	// credential-hygiene assertions and crash injection.
 	execHook func(args []string, env []string)
+	// diskUsagePct is the last volume used% recorded by the reaper (-1 =
+	// unknown). Ensure refuses new snapshot materialization at >= 90%.
+	diskUsagePct atomic.Int32
+	// onENOSPC, when set (composition root → reaper.ForceSweep), runs on
+	// detected ENOSPC before DiskFullError is returned.
+	onENOSPC func()
 }
 
 // Compile-time port compliance.
@@ -72,11 +79,42 @@ func New(root string) (*Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Engine{root: abs, locks: flockLocker{}, askpass: shim}, nil
+	e := &Engine{root: abs, locks: flockLocker{}, askpass: shim}
+	e.diskUsagePct.Store(-1)
+	return e, nil
 }
 
 // Root returns the absolute workspace root the engine operates under.
 func (e *Engine) Root() string { return e.root }
+
+// SetDiskUsagePct records the workspace volume used percentage (0–100) from
+// the reaper's last statfs read. Used by Ensure admission control.
+func (e *Engine) SetDiskUsagePct(pct int) { e.diskUsagePct.Store(int32(pct)) }
+
+// DiskUsagePct returns the last recorded used percentage, or 0 when unknown.
+func (e *Engine) DiskUsagePct() int {
+	v := e.diskUsagePct.Load()
+	if v < 0 {
+		return 0
+	}
+	return int(v)
+}
+
+// SetOnENOSPC registers the emergency handler invoked when mapDiskErr detects
+// ENOSPC (composition root wires reaper.ForceSweep). Pass nil to clear.
+func (e *Engine) SetOnENOSPC(fn func()) { e.onENOSPC = fn }
+
+// mapDiskErr translates ENOSPC into DiskFullError after invoking onENOSPC.
+// Non-ENOSPC errors (and nil) pass through unchanged.
+func (e *Engine) mapDiskErr(err error) error {
+	if err == nil || !isENOSPC(err) {
+		return err
+	}
+	if e.onENOSPC != nil {
+		e.onENOSPC()
+	}
+	return &DiskFullError{Root: e.root, UsedPct: e.DiskUsagePct()}
+}
 
 func absPath(p string) (string, error) {
 	if p == "" {

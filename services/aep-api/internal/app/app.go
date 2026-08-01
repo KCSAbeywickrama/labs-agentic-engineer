@@ -1168,6 +1168,14 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 
 	handler := edge.NewHandler(params)
 
+	// Disk-lifecycle reaper (design §14/D12): trash purge, snapshot age-reap,
+	// DB↔disk orphan reconciliation, quota/LRU eviction. ENOSPC on Ensure/Mutate
+	// triggers ForceSweep (unconditional trash purge + full Sweep).
+	workspaceReaper := reaper.New(workspaceEngine, reaperRepoLister{repoRepo}, cfg.Workspace)
+	workspaceEngine.SetOnENOSPC(func() {
+		workspaceReaper.ForceSweep(context.Background())
+	})
+
 	// Background watchers, launched by main under a shared cancellable context.
 	// State lives in Postgres + GitHub, so a plain goroutine per watcher is
 	// enough. The reconciliation sweep re-gates queued executions and picks up
@@ -1196,11 +1204,8 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		// once per cfg.CredentialValidatorInterval (default 24h), probes GitHub,
 		// flags identity drift on confirmed unauthorised secrets.
 		credValidator,
-		// Disk-lifecycle reaper (design §14/D12): trash purge, snapshot
-		// age-reap, DB↔disk orphan reconciliation, quota/LRU eviction. The
-		// global passes self-elect via a non-blocking flock on the mount, so
-		// running one per replica is correct.
-		reaper.New(workspaceEngine, reaperRepoLister{repoRepo}, cfg.Workspace),
+		// Disk-lifecycle reaper: global passes self-elect via non-blocking flock.
+		workspaceReaper,
 		// agent_turns crash-safety sweep (design D17): a stale-heartbeat
 		// running turn is failed and the D18 one-active guard released;
 		// locally-buffered streams get the terminal event.
