@@ -28,6 +28,7 @@ import {
   ensureRoomState,
 } from "./rooms.js";
 import {
+  ApplyAuthError,
   ApplyConflictError,
   type ApplyOutcome,
   type BffClient,
@@ -214,4 +215,92 @@ test("interim flush holds md files with pending agent marks; forced flush commit
   assert.equal(applies.length, 1);
   assert.match(applies[0]!.writes[0]!.content, /Agent addition\./);
   assert.ok(!applies[0]!.writes[0]!.content.includes("agentInsertion"));
+});
+
+test("ApplyAuthError: retries once with tokenRefresh, then succeeds", async () => {
+  const doc = seededDoc();
+  setDocFile(doc, "design/arch.excalidraw", '{"v":2}');
+  const tokens: string[] = [];
+  let first = true;
+  const { bff, applies } = fakeBff({
+    applyFiles: async (t, _p, batch) => {
+      tokens.push(t);
+      if (first) {
+        first = false;
+        throw new ApplyAuthError(401, "expired");
+      }
+      applies.push(batch);
+      return {
+        commitSha: "after-auth",
+        files: batch.writes.map((w) => ({ path: w.path, sha: `new-${w.path}` })),
+      };
+    },
+  });
+  const logs: string[] = [];
+  await flushRoom(
+    {
+      bff,
+      log: (m) => logs.push(m),
+      tokenRefresh: async () => "fresh-tok",
+    },
+    ROOM,
+    doc,
+    ctx,
+  );
+  assert.deepEqual(tokens, ["tok", "fresh-tok"]);
+  assert.equal(applies.length, 1);
+  assert.match(
+    logs.join("\n"),
+    /auth 401 — retrying once with refreshed token.*refreshOutcome=ok/,
+  );
+  const state = ensureRoomState(ROOM, "shop");
+  assert.equal(state.lastToken, "fresh-tok");
+});
+
+test("ApplyAuthError: logs structured failure when refresh returns null", async () => {
+  const doc = seededDoc();
+  setDocFile(doc, "design/arch.excalidraw", '{"v":2}');
+  const { bff } = fakeBff({
+    applyFiles: async () => {
+      throw new ApplyAuthError(403, "nope");
+    },
+  });
+  const logs: string[] = [];
+  await assert.rejects(
+    () =>
+      flushRoom(
+        {
+          bff,
+          log: (m) => logs.push(m),
+          tokenRefresh: async () => null,
+        },
+        ROOM,
+        doc,
+        ctx,
+      ),
+    ApplyAuthError,
+  );
+  assert.match(
+    logs.join("\n"),
+    /project=shop flush failed status=403 writes=1 deletes=0 refreshAttempted=true refreshOutcome=failed/,
+  );
+});
+
+test("ApplyAuthError without tokenRefresh: logs skipped refresh and rethrows", async () => {
+  const doc = seededDoc();
+  setDocFile(doc, "design/arch.excalidraw", '{"v":2}');
+  const { bff } = fakeBff({
+    applyFiles: async () => {
+      throw new ApplyAuthError(401);
+    },
+  });
+  const logs: string[] = [];
+  await assert.rejects(
+    () => flushRoom({ bff, log: (m) => logs.push(m) }, ROOM, doc, ctx),
+    ApplyAuthError,
+  );
+  assert.match(
+    logs.join("\n"),
+    /project=shop flush failed status=401 writes=1 deletes=0 refreshAttempted=false refreshOutcome=skipped/,
+  );
 });

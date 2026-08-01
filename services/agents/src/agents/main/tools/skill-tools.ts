@@ -41,7 +41,7 @@ import type {
   LoadSkillReferenceInput,
   LoadSkillReferenceResult,
 } from "@aep/agent-stream";
-import { EMPTY_SKILL_SOURCE, type SkillSource } from "../skill-source.js";
+import { EMPTY_SKILL_SOURCE, SkillReadError, type SkillSource } from "../skill-source.js";
 
 /** Progressive-disclosure skill loader — registered only when skills are supplied. */
 export const LOAD_SKILL = "loadSkill" as const;
@@ -99,7 +99,22 @@ export function buildSkillTools(skills?: SkillSource): Record<string, Tool> {
         const skills: LoadedSkill[] = [];
         const missing: string[] = [];
         for (const name of names) {
-          const loaded = source.load(name);
+          let loaded;
+          try {
+            loaded = source.load(name);
+          } catch (err) {
+            if (err instanceof SkillReadError) {
+              // I/O fault — do NOT list as unknown skills; fail loudly.
+              return {
+                ok: false,
+                error: `could not read skill ${name}`,
+                skills,
+                missing: [],
+                available,
+              };
+            }
+            throw err;
+          }
           if (loaded === undefined) {
             missing.push(name);
             continue;
@@ -127,11 +142,33 @@ export function buildSkillTools(skills?: SkillSource): Record<string, Tool> {
         "re-call with one of those.",
       inputSchema: loadSkillReferenceInputSchema,
       execute: async ({ name, path }): Promise<LoadSkillReferenceResult> => {
-        const loaded = source.load(name);
+        let loaded;
+        try {
+          loaded = source.load(name);
+        } catch (err) {
+          if (err instanceof SkillReadError) {
+            return { ok: false, name, path, error: `could not read skill ${name}`, available: refSkillNames };
+          }
+          throw err;
+        }
         if (loaded === undefined || loaded.references.length === 0) {
           return { ok: false, name, path, error: `unknown skill: ${name}`, available: refSkillNames };
         }
-        const loadedRef = source.loadReference(name, path);
+        let loadedRef;
+        try {
+          loadedRef = source.loadReference(name, path);
+        } catch (err) {
+          if (err instanceof SkillReadError) {
+            return {
+              ok: false,
+              name,
+              path,
+              error: `could not read skill ${name} reference ${path}`,
+              available: loaded.references,
+            };
+          }
+          throw err;
+        }
         if (loadedRef === undefined) {
           return { ok: false, name, path, error: `unknown reference: ${path}`, available: loaded.references };
         }

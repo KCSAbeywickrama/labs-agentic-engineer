@@ -144,7 +144,7 @@ func TestRepoRepository_GetByOrgAndSlug_OrgScoped(t *testing.T) {
 }
 
 // TestRepoRepository_ListAllReady returns only `ready` rows and — by design for
-// the startup pre-warm — is NOT org-scoped (it spans every org's ready repos).
+// cross-org sweeps — is NOT org-scoped (it spans every org's ready repos).
 func TestRepoRepository_ListAllReady(t *testing.T) {
 	t.Parallel()
 	db := dbtest.New(t)

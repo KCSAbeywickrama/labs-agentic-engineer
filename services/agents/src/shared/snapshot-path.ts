@@ -17,7 +17,7 @@
  */
 
 /**
- * The structural tenancy fence (shared-volume-clone-architecture §12, D9).
+ * The structural tenancy fence (shared-workspace-volume, D9).
  *
  * A workspace-shape turn carries IDs + shas ONLY — never a filesystem path —
  * and this module is the single place they become paths:

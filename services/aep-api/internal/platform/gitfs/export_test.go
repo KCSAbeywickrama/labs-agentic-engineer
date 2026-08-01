@@ -43,3 +43,9 @@ func AskpassPath(e *Engine) string { return e.askpass }
 
 // NewLocker exposes the production flock implementation for contention tests.
 func NewLocker() Locker { return flockLocker{} }
+
+// IsENOSPC exposes isENOSPC for ENOSPC-detection unit tests.
+func IsENOSPC(err error) bool { return isENOSPC(err) }
+
+// MapDiskErr exposes Engine.mapDiskErr for emergency-sweep wiring tests.
+func MapDiskErr(e *Engine, err error) error { return e.mapDiskErr(err) }

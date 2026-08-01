@@ -17,8 +17,8 @@
  */
 
 /**
- * The skill-supply seam (ADR-0002 + shared-volume-clone-architecture §12): ONE
- * interface the catalog builder (`prompt.ts`) and the skill loaders
+ * The skill-supply seam (ADR-0002 + shared-workspace-volume): ONE interface
+ * the catalog builder (`prompt.ts`) and the skill loaders
  * (`tools/skill-tools.ts`) consume. The one production implementation is
  * `SnapshotSkillSource` (`conversation/load-workspace.ts`): the catalog is
  * scanned from the turn's immutable `_skills` snapshot dir and
@@ -51,13 +51,39 @@ export interface LoadedSkillBody {
  */
 export type LoadedReference = { content: string } | { binary: true } | undefined;
 
+/**
+ * Non-ENOENT I/O while reading a skill file from the `_skills` snapshot.
+ * Distinct from a missing skill (`load` → `undefined`): callers must NOT treat
+ * this as `unknown skills`. Thrown by `SnapshotSkillSource`; caught by
+ * `buildSkillTools` into a loud tool error.
+ */
+export class SkillReadError extends Error {
+  readonly path: string;
+  constructor(path: string, cause?: unknown) {
+    const detail = cause instanceof Error ? cause.message : String(cause ?? "I/O error");
+    super(`could not read skill file ${path}: ${detail}`);
+    this.name = "SkillReadError";
+    this.path = path;
+    if (cause !== undefined) {
+      (this as Error & { cause?: unknown }).cause = cause;
+    }
+  }
+}
+
 /** The seam both tool sets and the prompt builder read skills through. */
 export interface SkillSource {
   /** The ordered catalog (order fixes the prompt's listing and the `available` echo). */
   catalog(): readonly SkillCatalogEntry[];
-  /** Body + reference paths for one skill; undefined for an unknown name. */
+  /**
+   * Body + reference paths for one skill; `undefined` for an unknown / vanished
+   * name (ENOENT). Throws `SkillReadError` on other I/O faults — never collapses
+   * those into a miss.
+   */
   load(name: string): LoadedSkillBody | undefined;
-  /** One reference file: text content, a binary marker, or undefined (unknown name/path). */
+  /**
+   * One reference file: text content, a binary marker, or `undefined` (unknown
+   * name/path / ENOENT). Throws `SkillReadError` on other I/O faults.
+   */
   loadReference(name: string, path: string): LoadedReference;
 }
 

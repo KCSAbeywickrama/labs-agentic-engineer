@@ -30,6 +30,7 @@ import {
   snapshotDoc,
 } from "@aep/collab-doc";
 import {
+  ApplyAuthError,
   ApplyConflictError,
   type ApplyDelete,
   type ApplyWrite,
@@ -39,10 +40,76 @@ import { roomState, type RoomState } from "./rooms.js";
 import type { CollabContext } from "./server.js";
 
 const MAX_CONFLICT_RETRIES = 2;
+const SLOW_SHUTDOWN_FLUSH_MS = 25_000;
 
 interface FlushDeps {
   bff: BffClient;
   log?: ((message: string) => void) | undefined;
+  /**
+   * Pull a fresh bearer after ApplyAuthError (D6). Typically asks a connected
+   * client via `{type:"token-please"}`. Absent/empty → classify + log, no retry.
+   */
+  tokenRefresh?: (() => Promise<string | null>) | undefined;
+}
+
+function flushFailureLog(
+  documentName: string,
+  projectName: string,
+  err: unknown,
+  writes: number,
+  deletes: number,
+  refreshAttempted: boolean,
+  refreshOutcome: "ok" | "failed" | "skipped" | "n/a",
+): string {
+  const status =
+    err instanceof ApplyAuthError
+      ? String(err.status)
+      : err instanceof Error
+        ? "error"
+        : "n/a";
+  return (
+    `committer: ${documentName} project=${projectName} flush failed ` +
+    `status=${status} writes=${writes} deletes=${deletes} ` +
+    `refreshAttempted=${refreshAttempted} refreshOutcome=${refreshOutcome}`
+  );
+}
+
+export interface FlushAllOptions {
+  concurrency: number;
+  force: boolean;
+}
+
+function roomHasPendingChanges(
+  doc: Document,
+  state: RoomState,
+  force: boolean,
+): boolean {
+  const { writes, deletes } = pendingChanges(doc, state, force);
+  return writes.length > 0 || deletes.length > 0;
+}
+
+function truncateRoomList(names: readonly string[], maxLen = 200): string {
+  const joined = names.join(", ");
+  return joined.length <= maxLen ? joined : `${joined.slice(0, maxLen)}…`;
+}
+
+async function runPool<T>(
+  items: readonly T[],
+  concurrency: number,
+  fn: (item: T) => Promise<void>,
+): Promise<void> {
+  if (items.length === 0) return;
+  let next = 0;
+  const workers = Array.from(
+    { length: Math.min(concurrency, items.length) },
+    async () => {
+      while (next < items.length) {
+        const i = next++;
+        await fn(items[i]!);
+      }
+    },
+  );
+  await Promise.all(workers);
 }
 
 /**
@@ -103,12 +170,13 @@ export async function flushRoom(
 ): Promise<void> {
   const state = roomState(documentName);
   if (!state) return;
-  const token = context?.token ?? state.lastToken;
+  let token = context?.token ?? state.lastToken;
   if (!token) {
     deps.log?.(`committer: no token for ${documentName} — skipping flush`);
     return;
   }
 
+  let authRetried = false;
   for (let attempt = 0; ; attempt++) {
     const { writes, deletes, held } = pendingChanges(doc, state, force);
     if (held.length > 0) {
@@ -144,6 +212,37 @@ export async function flushRoom(
       );
       return;
     } catch (err) {
+      if (
+        err instanceof ApplyAuthError &&
+        !authRetried &&
+        deps.tokenRefresh
+      ) {
+        authRetried = true;
+        const fresh = await deps.tokenRefresh();
+        if (fresh) {
+          token = fresh;
+          state.lastToken = fresh;
+          if (context) context.token = fresh;
+          deps.log?.(
+            `committer: ${documentName} project=${state.projectName} ` +
+              `auth ${err.status} — retrying once with refreshed token ` +
+              `(writes=${writes.length} deletes=${deletes.length} refreshOutcome=ok)`,
+          );
+          continue;
+        }
+        deps.log?.(
+          flushFailureLog(
+            documentName,
+            state.projectName,
+            err,
+            writes.length,
+            deletes.length,
+            true,
+            "failed",
+          ),
+        );
+        throw err;
+      }
       if (err instanceof ApplyConflictError && attempt < MAX_CONFLICT_RETRIES) {
         // Someone moved git under the session: the DOC wins (#86 d6) — adopt
         // HEAD's shas as the new base and re-apply our content over it.
@@ -162,7 +261,88 @@ export async function flushRoom(
         }
         continue;
       }
+      deps.log?.(
+        flushFailureLog(
+          documentName,
+          state.projectName,
+          err,
+          writes.length,
+          deletes.length,
+          authRetried,
+          err instanceof ApplyAuthError
+            ? authRetried
+              ? "failed"
+              : "skipped"
+            : "n/a",
+        ),
+      );
       throw err;
+    }
+  }
+}
+
+/**
+ * Force-flush every loaded room during shutdown. Dirty rooms (pending git
+ * changes) run first; up to `concurrency` flushes run in parallel so the
+ * batch fits inside the default 30s termination grace.
+ */
+export async function flushAllRooms(
+  deps: FlushDeps,
+  documents: Map<string, Document>,
+  options: FlushAllOptions,
+): Promise<void> {
+  const { concurrency, force } = options;
+  const started = Date.now();
+  const pending = new Set<string>();
+
+  const names = [...documents.keys()].filter((name) => roomState(name));
+  names.sort((a, b) => {
+    const docA = documents.get(a)!;
+    const docB = documents.get(b)!;
+    const stateA = roomState(a)!;
+    const stateB = roomState(b)!;
+    const dirtyA = roomHasPendingChanges(docA, stateA, force);
+    const dirtyB = roomHasPendingChanges(docB, stateB, force);
+    if (dirtyA !== dirtyB) return dirtyA ? -1 : 1;
+    return a.localeCompare(b);
+  });
+
+  for (const name of names) pending.add(name);
+
+  const slowTimer = setTimeout(() => {
+    if (pending.size > 0) {
+      deps.log?.(
+        `committer: shutdown flush exceeded ${SLOW_SHUTDOWN_FLUSH_MS}ms; ` +
+          `pending rooms: ${truncateRoomList([...pending])}`,
+      );
+    }
+  }, SLOW_SHUTDOWN_FLUSH_MS);
+
+  try {
+    await runPool(names, concurrency, async (documentName) => {
+      const doc = documents.get(documentName);
+      const state = roomState(documentName);
+      if (!doc || !state) {
+        pending.delete(documentName);
+        return;
+      }
+      try {
+        await flushRoom(deps, documentName, doc, undefined, force);
+      } catch (err) {
+        deps.log?.(
+          `committer: shutdown flush failed for ${documentName} (${String(err)})`,
+        );
+      } finally {
+        pending.delete(documentName);
+      }
+    });
+  } finally {
+    clearTimeout(slowTimer);
+    const elapsed = Date.now() - started;
+    if (elapsed >= SLOW_SHUTDOWN_FLUSH_MS) {
+      deps.log?.(
+        `committer: shutdown flush finished in ${elapsed}ms (${names.length} room(s))`,
+      );
     }
   }
 }

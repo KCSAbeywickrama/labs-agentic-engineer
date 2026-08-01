@@ -91,9 +91,9 @@ func Load() (Config, error) {
 		Workspace: WorkspaceConfig{
 			Root:           r.readOptionalString("AEP_WORKSPACE_ROOT", "/workspaces"),
 			ReapInterval:   r.readOptionalDuration("AEP_WORKSPACE_REAP_INTERVAL", 5*time.Minute),
-			SnapshotMaxAge: r.readOptionalDuration("AEP_WORKSPACE_SNAPSHOT_MAX_AGE", 24*time.Hour),
-			TrashMaxAge:    r.readOptionalDuration("AEP_WORKSPACE_TRASH_MAX_AGE", 24*time.Hour),
-			OrgQuotaBytes:  r.readOptionalInt64("AEP_WORKSPACE_ORG_QUOTA_BYTES", 5<<30),
+			SnapshotMaxAge: r.readOptionalDuration("AEP_WORKSPACE_SNAPSHOT_MAX_AGE", time.Hour),
+			TrashMaxAge:    r.readOptionalDuration("AEP_WORKSPACE_TRASH_MAX_AGE", time.Hour),
+			OrgQuotaBytes:  r.readOptionalInt64("AEP_WORKSPACE_ORG_QUOTA_BYTES", 2147483648), // 2 GiB
 			DiskHighPct:    r.readOptionalInt("AEP_WORKSPACE_DISK_HIGH_PCT", 85),
 			DiskLowPct:     r.readOptionalInt("AEP_WORKSPACE_DISK_LOW_PCT", 70),
 		},
