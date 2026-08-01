@@ -18,6 +18,7 @@ package reaper
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -75,6 +76,70 @@ func TestMaintainReposRepacksLooseHeavyMirror(t *testing.T) {
 	if after >= before {
 		t.Fatalf("loose objects did not drop: before=%d after=%d", before, after)
 	}
+}
+
+// TestMaintainReposSlowGitCompletes proves R4: the ~2s budget bounds lock
+// acquisition only. A repack that takes longer than 2s must still finish —
+// wrapping MaintainMirror in the lock timeout would SIGKILL mid-repack.
+func TestMaintainReposSlowGitCompletes(t *testing.T) {
+	r, root := newSyntheticReaper(t, testCfg(), staticLister([]RepoCoordinate{{
+		OrgID: "o1", ProjectID: "p1", WorkspaceSlug: "r1",
+	}}))
+	r.diskUsage = fakeDisk(1000, 900)
+	slug := mkSlugDir(t, root, "o1", "p1", "r1")
+	gitDir := filepath.Join(slug, "git")
+	runGit(t, "", "init", "--bare", gitDir)
+	work := t.TempDir()
+	for i := 0; i < 1101; i++ {
+		name := filepath.Join(work, "f"+strconv.Itoa(i))
+		if err := os.WriteFile(name, []byte("slow-"+strconv.Itoa(i)), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runGitWorktree(t, gitDir, work, "add", ".")
+	runGitWorktree(t, gitDir, work, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "seed")
+	if _, err := os.OpenFile(filepath.Join(slug, "repo.lock"), os.O_CREATE|os.O_RDWR, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	installSlowRepackGit(t)
+
+	before := countLoose(t, gitDir)
+	if before <= 1000 {
+		t.Fatalf("setup: want >1000 loose, got %d", before)
+	}
+	if err := r.maintainRepos(context.Background()); err != nil {
+		t.Fatalf("maintain: %v", err)
+	}
+	after := countLoose(t, gitDir)
+	if after >= before {
+		t.Fatalf("slow maintain must complete (not SIGKILL at 2s): loose before=%d after=%d", before, after)
+	}
+}
+
+// installSlowRepackGit puts a PATH wrapper ahead of real git that sleeps
+// >2s on `repack` so a lock-budget wrapping the whole MaintainMirror call
+// would cancel the child mid-work.
+func installSlowRepackGit(t *testing.T) {
+	t.Helper()
+	real, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	wrapper := filepath.Join(dir, "git")
+	script := fmt.Sprintf(`#!/bin/sh
+for a in "$@"; do
+  if [ "$a" = "repack" ]; then
+    sleep 2.5
+    break
+  fi
+done
+exec %q "$@"
+`, real)
+	if err := os.WriteFile(wrapper, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
 func TestMaintainReposSkipsBusyLock(t *testing.T) {

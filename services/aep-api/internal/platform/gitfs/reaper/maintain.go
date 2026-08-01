@@ -27,10 +27,13 @@ import (
 )
 
 const (
-	maintainLockTimeout = 2 * time.Second
 	maintainLooseGate   = 1000
 	maintainPackGate    = 20
 	maintainRepoBudget  = 10
+	// maintainWorkTimeout caps one mirror's repack/prune/pack-refs so a
+	// stuck git child cannot pin the leader sweep indefinitely. Lock
+	// acquisition is bounded inside Engine.MaintainMirror (~2s), not here.
+	maintainWorkTimeout = 5 * time.Minute
 )
 
 func shouldMaintain(loose, packs int) bool {
@@ -59,8 +62,8 @@ func (r *Reaper) maintainRepos(ctx context.Context) error {
 		if !shouldMaintain(loose, packs) {
 			return
 		}
-		lockCtx, cancel := context.WithTimeout(ctx, maintainLockTimeout)
-		err = r.engine.MaintainMirror(lockCtx, ref)
+		workCtx, cancel := context.WithTimeout(ctx, maintainWorkTimeout)
+		err = r.engine.MaintainMirror(workCtx, ref)
 		cancel()
 		if err != nil {
 			slog.InfoContext(ctx, "reaper: skipping mirror maintenance",

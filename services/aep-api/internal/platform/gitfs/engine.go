@@ -424,9 +424,15 @@ func (e *Engine) resolveCommit(ctx context.Context, ref RepoRef, p repoPaths, at
 
 // ----- mirror maintenance (consumed by the reaper) -----
 
+// maintainLockTimeout bounds EX flock acquisition for MaintainMirror only
+// (R4). Git repack/prune/pack-refs use the caller ctx — never this budget —
+// so a contended lock skips within ~2s without SIGKILLing a slow maintain.
+const maintainLockTimeout = 2 * time.Second
+
 // MaintainMirror runs the reaper's git maintenance sequence under the EX
 // flock: repack -ad --quiet, prune --expire=2.hours.ago, pack-refs --all --prune.
 // Never git gc. Never git maintenance --task=loose-objects.
+// Lock acquisition is bounded by maintainLockTimeout; git work uses ctx.
 func (e *Engine) MaintainMirror(ctx context.Context, ref RepoRef) error {
 	p, err := e.pathsFor(ref)
 	if err != nil {
@@ -435,7 +441,9 @@ func (e *Engine) MaintainMirror(ctx context.Context, ref RepoRef) error {
 	if !mirrorExists(p.gitDir) {
 		return nil
 	}
-	release, err := e.locks.Lock(ctx, p.lockPath)
+	lockCtx, cancel := context.WithTimeout(ctx, maintainLockTimeout)
+	release, err := e.locks.Lock(lockCtx, p.lockPath)
+	cancel()
 	if err != nil {
 		return err
 	}
