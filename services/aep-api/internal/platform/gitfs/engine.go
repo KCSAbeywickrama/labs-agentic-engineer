@@ -87,11 +87,12 @@ func New(root string) (*Engine, error) {
 // Root returns the absolute workspace root the engine operates under.
 func (e *Engine) Root() string { return e.root }
 
-// SetDiskUsagePct records the workspace volume used percentage (0–100) from
-// the reaper's last statfs read. Used by Ensure admission control.
+// SetDiskUsagePct records the workspace volume pressure percentage (0–100)
+// from the reaper's last statfs read — max of byte used% and inode used%.
+// Used by Ensure admission control.
 func (e *Engine) SetDiskUsagePct(pct int) { e.diskUsagePct.Store(int32(pct)) }
 
-// DiskUsagePct returns the last recorded used percentage, or 0 when unknown.
+// DiskUsagePct returns the last recorded pressure percentage, or 0 when unknown.
 func (e *Engine) DiskUsagePct() int {
 	v := e.diskUsagePct.Load()
 	if v < 0 {

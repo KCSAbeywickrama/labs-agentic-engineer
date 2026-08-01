@@ -37,10 +37,12 @@ import (
 // requirement and no Postgres advisory-lock fallback.
 //
 // flock has no fairness: continuous back-to-back SHARED holders can starve
-// an EXCLUSIVE acquirer. Acceptable because reads are sporadic and
-// sub-second (the corruption-soak test paces its readers for exactly this
-// reason); if a hot read path ever emerges, add writer-preference here
-// rather than at call sites.
+// an EXCLUSIVE acquirer. That risk is real under the shared volume —
+// ReadBundle holds SHARED across its N-blob cat-file loop, which is not
+// bounded to sub-second. Mitigation today: git maintenance acquires EX with a
+// ~2s timeout and skips the mirror on contention (see reaper maintainRepos)
+// rather than blocking forever. If starvation becomes observable in production,
+// add writer-preference here rather than at call sites.
 type Locker interface {
 	// RLock acquires the lock shared. release is never nil on success.
 	RLock(ctx context.Context, path string) (release func(), err error)

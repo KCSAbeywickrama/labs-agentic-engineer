@@ -31,19 +31,28 @@ func (r *Reaper) ForceSweep(ctx context.Context) {
 	r.Sweep(ctx)
 }
 
-// recordDiskUsage publishes used% onto the engine for Ensure admission.
-func (r *Reaper) recordDiskUsage(total, avail uint64) {
+// recordDiskUsage publishes max(byte used%, inode used%) onto the engine for
+// Ensure admission — either pressure axis at ≥ DiskAdmissionRefusePct refuses
+// new snapshots.
+func (r *Reaper) recordDiskUsage(total, avail, inodesTotal, inodesFree uint64) {
 	if total == 0 {
 		return
 	}
-	r.engine.SetDiskUsagePct(int((total - avail) * 100 / total))
+	pct := int((total - avail) * 100 / total)
+	if inodesTotal > 0 {
+		inodePct := int((inodesTotal - inodesFree) * 100 / inodesTotal)
+		if inodePct > pct {
+			pct = inodePct
+		}
+	}
+	r.engine.SetDiskUsagePct(pct)
 }
 
 // recordUsageFromStatfs re-reads the volume and updates admission usage.
 func (r *Reaper) recordUsageFromStatfs() {
-	total, avail, _, _, err := r.diskUsage(r.engine.Root())
+	total, avail, inodesTotal, inodesFree, err := r.diskUsage(r.engine.Root())
 	if err != nil || total == 0 {
 		return
 	}
-	r.recordDiskUsage(total, avail)
+	r.recordDiskUsage(total, avail, inodesTotal, inodesFree)
 }

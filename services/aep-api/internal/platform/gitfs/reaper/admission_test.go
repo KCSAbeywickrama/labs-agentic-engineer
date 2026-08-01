@@ -18,12 +18,14 @@ package reaper
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/wso2/aep/aep-api/internal/platform/gitfs"
+	"github.com/wso2/aep/aep-api/internal/platform/gitfs/workspacetest"
 )
 
 func TestForceSweepPurgesTrashThenSweeps(t *testing.T) {
@@ -59,5 +61,35 @@ func TestEnforceQuotaRecordsDiskUsage(t *testing.T) {
 	}
 	if got := r.engine.DiskUsagePct(); got != 80 {
 		t.Fatalf("DiskUsagePct = %d, want 80", got)
+	}
+}
+
+func TestAdmissionRecordsMaxOfByteAndInodePct(t *testing.T) {
+	r, _ := newSyntheticReaper(t, testCfg(), staticLister(nil))
+	// Bytes green (10% used), inodes at 95% → admission publishes 95.
+	r.diskUsage = func(string) (uint64, uint64, uint64, uint64, error) {
+		return 1000, 900, 1000, 50, nil
+	}
+	r.recordUsageFromStatfs()
+	if got := r.engine.DiskUsagePct(); got != 95 {
+		t.Fatalf("DiskUsagePct = %d, want 95 (inode pressure)", got)
+	}
+}
+
+func TestEnsureRefusedWhenInodePressureAtAdmission(t *testing.T) {
+	fx := workspacetest.New(t, map[string]string{"a.txt": "x"})
+	r := New(fx.Engine, staticLister(nil), testCfg())
+	// Bytes green (10%), inodes 92% ≥ DiskAdmissionRefusePct.
+	r.diskUsage = func(string) (uint64, uint64, uint64, uint64, error) {
+		return 1000, 900, 1000, 80, nil
+	}
+	r.recordUsageFromStatfs()
+	if got := r.engine.DiskUsagePct(); got != 92 {
+		t.Fatalf("DiskUsagePct = %d, want 92", got)
+	}
+	sha := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	err := fx.Engine.Ensure(context.Background(), fx.Ref, sha)
+	if !errors.Is(err, gitfs.ErrDiskAdmission) {
+		t.Fatalf("Ensure = %v, want ErrDiskAdmission under inode pressure", err)
 	}
 }

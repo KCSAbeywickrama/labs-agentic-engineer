@@ -58,7 +58,7 @@ securityContext patch so `runAsNonRoot` is preserved).
 | `AEP_WORKSPACE_TRASH_MAX_AGE` | 1h |
 | `AEP_WORKSPACE_ORG_QUOTA_BYTES` | 2 GiB (2147483648) |
 | Disk watermarks | high 85% / low 70% |
-| Admission | refuse new snapshots at ≥ 90% used |
+| Admission | refuse new snapshots at ≥ 90% used (bytes or inodes) |
 
 Reaper sweep order (leader-only for disk-mutating passes): trash age-purge
 **before** snapshot eviction; `tmp/` cleanup; orphan reconciliation; git
@@ -75,9 +75,9 @@ Gate: >1000 loose objects or >20 packs; ~10 repos per tick; exclusive flock
 with ~2s timeout then skip. `repack.writeBitmaps=false` on mirrors.
 
 Admission at 90%: `Ensure` refuses a new snapshot when recorded usage ≥ 90%
-and the dest does not already exist; in-flight reads and existing snapshots
-keep working. ENOSPC triggers an emergency trash sweep and surfaces
-`ErrDiskFull`.
+(max of byte used% and inode used%) and the dest does not already exist;
+in-flight reads and existing snapshots keep working. ENOSPC triggers an
+emergency trash sweep and surfaces `ErrDiskFull`.
 
 ## 4. Accepted limitation: single-node RWO
 
@@ -85,7 +85,7 @@ Node loss takes the whole workspace plane offline until the volume reattaches
 (~6–12 minutes typical). The design does **not** scale writers or readers past
 one node: RWO + hostname co-location is the capacity ceiling.
 
-## 5. Collab (same phase)
+## 5. Collab
 
 Collab-server runs **replicas: 1**, `/healthz` probes, 512Mi memory limit,
 `terminationGracePeriodSeconds: 30`, concurrent shutdown flush. D6 keeps access
@@ -97,17 +97,17 @@ stays the ≤60s commit debounce window.
 
 | Approach | Outcome |
 |---|---|
-| HTTP content bundles / `/internal/v1` bundle endpoint + agents HTTP client | Deferred — not built |
+| HTTP content bundles / `/internal/v1` bundle endpoint + agents HTTP client | Cancelled — D2 kept the shared mount; content does not move over HTTP |
 | RWX in dev (multi-node flock) | Declined — stay RWO + co-location |
 | Register #1 (persist HEAD/tags in Postgres / `PersistingWorkspace`) | Cancelled |
 | Snapshot-layer removal | Cancelled |
 
-## 7. Carry-forwards
+## 7. Related concerns
 
-- **Phase 07 — `COLLAB_SERVER_URL`:** console nginx upstream wiring for
-  collab remains a deployment concern; keep documenting/overrides there, not
-  as a workspace-volume change.
-- **Phase 08 — anthropic k8s client:** aep-api still applies per-org
+- **Collab upstream:** console nginx can override the collab upstream via
+  `COLLAB_SERVER_URL`; that is a deployment concern, not a workspace-volume
+  change.
+- **Anthropic credentials:** aep-api still applies per-org
   `anthropic-credentials` Secrets into workflow namespaces via the in-cluster
-  client. Cloud/helm does not mount those files; cleanup of the k8s push path
-  and ExternalSecret wiring is deferred to phase 08.
+  client. Cloud/helm does not mount those files; the k8s push path and any
+  ExternalSecret wiring remain operational cleanup outside this design.

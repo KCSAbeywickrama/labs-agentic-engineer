@@ -28,7 +28,8 @@ import (
 // the unwrap target of DiskFullError after an emergency sweep is triggered.
 var (
 	// ErrDiskAdmission is returned by Ensure when DiskUsagePct() >= 90 and
-	// the destination snapshot does not already exist.
+	// the destination snapshot does not already exist. DiskUsagePct is
+	// max(byte%, inode%) as published by the reaper.
 	ErrDiskAdmission = errors.New("gitfs: disk admission refused: workspace usage >= 90%")
 	// ErrDiskFull is the sentinel underneath DiskFullError (errors.Is).
 	ErrDiskFull = errors.New("gitfs: disk full")

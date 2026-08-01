@@ -65,10 +65,10 @@ func (r *Reaper) purgeTrashAll(ctx context.Context) error {
 	return nil
 }
 
-// enforceQuota is pass 4 (leader-only): per-org quota first (errors logged,
-// never abort the global path), then the global statfs watermark. When over
-// high: purge trash/ unconditionally FIRST, re-read statfs, and only then
-// evict if still over.
+// enforceQuota is pass 6 / last leader-only pass (after orphans + maintenance):
+// per-org quota first (errors logged, never abort the global path), then the
+// global statfs watermark. When over high: purge trash/ unconditionally FIRST,
+// re-read statfs, and only then evict if still over.
 func (r *Reaper) enforceQuota(ctx context.Context) error {
 	root := r.engine.Root()
 	if r.cfg.OrgQuotaBytes > 0 {
@@ -80,7 +80,7 @@ func (r *Reaper) enforceQuota(ctx context.Context) error {
 	if err != nil || total == 0 {
 		return err
 	}
-	r.recordDiskUsage(total, avail)
+	r.recordDiskUsage(total, avail, inodesTotal, inodesFree)
 	used := total - avail
 	inodeUsed := inodesTotal - inodesFree
 	overBytes := used*100 > uint64(r.cfg.DiskHighPct)*total
@@ -102,7 +102,7 @@ func (r *Reaper) enforceQuota(ctx context.Context) error {
 	if err != nil || total == 0 {
 		return err
 	}
-	r.recordDiskUsage(total, avail)
+	r.recordDiskUsage(total, avail, inodesTotal, inodesFree)
 	used = total - avail
 	inodeUsed = inodesTotal - inodesFree
 	overBytes = used*100 > uint64(r.cfg.DiskHighPct)*total
