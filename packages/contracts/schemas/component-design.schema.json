@@ -150,27 +150,73 @@
             }
           },
           "wiring": {
-            "type": "object",
-            "properties": {
-              "ref": {
-                "type": "string",
-                "minLength": 1
-              },
-              "envBindings": {
+            "anyOf": [
+              {
                 "type": "object",
-                "propertyNames": {
-                  "type": "string"
+                "properties": {
+                  "ref": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "envBindings": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  }
                 },
-                "additionalProperties": {
-                  "type": "string"
-                }
+                "required": [
+                  "ref",
+                  "envBindings"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "endpoint": {
+                    "type": "object",
+                    "properties": {
+                      "component": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "name": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "visibility": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "envBindings": {
+                        "type": "object",
+                        "propertyNames": {
+                          "type": "string"
+                        },
+                        "additionalProperties": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "required": [
+                      "component",
+                      "name",
+                      "visibility",
+                      "envBindings"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "endpoint"
+                ],
+                "additionalProperties": false
               }
-            },
-            "required": [
-              "ref",
-              "envBindings"
-            ],
-            "additionalProperties": false
+            ]
           }
         },
         "required": [

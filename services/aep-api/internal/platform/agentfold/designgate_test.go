@@ -209,6 +209,8 @@ func TestValidateComponentDesign_Wiring(t *testing.T) {
 	}{
 		{"platform-stamped shape", `{ "ref": "shop-orders-db", "envBindings": { "host": "ORDERS_DB_HOST", "port": "ORDERS_DB_PORT" } }`},
 		{"no outputs bound yet", `{ "ref": "shop-orders-db", "envBindings": {} }`},
+		// The endpoints[] variant: a sibling component's endpoint, scoped for OC.
+		{"sibling endpoint variant", `{ "endpoint": { "component": "todo-api99-todo-api", "name": "http", "visibility": "project", "envBindings": { "address": "TODO_API_URL" } } }`},
 	}
 	for _, tc := range accept {
 		t.Run("accept/"+tc.name, func(t *testing.T) {
@@ -229,6 +231,18 @@ func TestValidateComponentDesign_Wiring(t *testing.T) {
 		{"envBindings not an object", `{ "ref": "shop-orders-db", "envBindings": "ORDERS_DB_HOST" }`},
 		{"env var not a string", `{ "ref": "shop-orders-db", "envBindings": { "port": 5432 } }`},
 		{"unknown property", `{ "ref": "shop-orders-db", "envBindings": {}, "values": { "host": "db" } }`},
+		// The endpoints[] variant is all-or-nothing too, and exclusive with the
+		// resources[] one: a partial or mixed entry is silently ignored by
+		// OpenChoreo, which is the failure mode this whole field exists to end.
+		{"endpoint not an object", `{ "endpoint": "todo-api99-todo-api" }`},
+		{"endpoint component missing", `{ "endpoint": { "name": "http", "visibility": "project", "envBindings": { "address": "TODO_API_URL" } } }`},
+		{"endpoint component empty", `{ "endpoint": { "component": "", "name": "http", "visibility": "project", "envBindings": {} } }`},
+		{"endpoint name missing", `{ "endpoint": { "component": "todo-api99-todo-api", "visibility": "project", "envBindings": {} } }`},
+		{"endpoint visibility missing", `{ "endpoint": { "component": "todo-api99-todo-api", "name": "http", "envBindings": {} } }`},
+		{"endpoint envBindings missing", `{ "endpoint": { "component": "todo-api99-todo-api", "name": "http", "visibility": "project" } }`},
+		{"endpoint env var not a string", `{ "endpoint": { "component": "todo-api99-todo-api", "name": "http", "visibility": "project", "envBindings": { "address": 8080 } } }`},
+		{"endpoint unknown property", `{ "endpoint": { "component": "todo-api99-todo-api", "name": "http", "visibility": "project", "envBindings": {}, "project": "todo-api99" } }`},
+		{"both variants at once", `{ "ref": "shop-orders-db", "envBindings": {}, "endpoint": { "component": "todo-api99-todo-api", "name": "http", "visibility": "project", "envBindings": {} } }`},
 	}
 	for _, tc := range reject {
 		t.Run("reject/"+tc.name, func(t *testing.T) {

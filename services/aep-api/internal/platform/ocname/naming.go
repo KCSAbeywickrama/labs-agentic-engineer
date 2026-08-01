@@ -14,9 +14,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Package ocname is the OpenChoreo resource-naming vocabulary: the Resource and
-// binding names AEP derives for a project's external and platform resources, and
-// the env-var names a consumer reads their outputs from.
+// Package ocname is the OpenChoreo naming vocabulary: the Resource and binding
+// names AEP derives for a project's external and platform resources, the scoped
+// component name OC identifies a component by, and the env-var names a consumer
+// reads their outputs from.
 //
 // It lives in the kernel rather than in the dependencies domain because TWO
 // domains derive the same names and must agree byte-for-byte: dependencies
@@ -103,6 +104,43 @@ func EnvVarName(depName, outName string) string {
 		}
 	}, joined)
 	return strings.ToUpper(mapped)
+}
+
+// ScopedComponentName is the k8s metadata name OC uses for a component. OC
+// components across every project in an org share a single k8s namespace, so two
+// projects cannot hold the same component name unless we disambiguate; the
+// project prefixes the name, and the user's original name survives as the
+// display-name annotation.
+//
+// It lives here, beside EnvVarName, for the same reason: THREE call sites derive
+// this name and must agree byte-for-byte — the OC client at the API boundary,
+// provisioning when it resolves a sibling's endpoint dependency, and spec when it
+// stamps that sibling's `component` into design.json at design save. The third is
+// what makes the shared home necessary: a sibling endpoint dependency that names
+// the FRIENDLY component resolves to nothing in OpenChoreo (the binding lookup is
+// by scoped name), so the consumer's ReleaseBinding never reaches Ready and the
+// platform reports "deploying" forever.
+//
+// Callers must always pass the friendly component name (never an already-scoped
+// name) — scope exactly once.
+func ScopedComponentName(projectName, componentName string) string {
+	if projectName == "" {
+		return componentName
+	}
+	return projectName + "-" + componentName
+}
+
+// ServiceURLEnvName is the env var a consumer reads a provider component's
+// resolved base URL from — the `envBindings.address` value on a workload
+// `dependencies.endpoints[]` entry. Keyed on the LOGICAL dependency name (never
+// the scoped component name), so the env var the coding agent codes against does
+// not change when the OC scoping rule does: "todo-api" → "TODO_API_URL".
+//
+// Shared for the same byte-for-byte reason as EnvVarName: provisioning binds this
+// name into the pod env, spec stamps it into design.json, and runtimeconfig emits
+// it as a window._env_ key for a browser app.
+func ServiceURLEnvName(depName string) string {
+	return EnvVarName(depName, "URL")
 }
 
 // ExternalResourceName is the per-project OC Resource name (== the Workload
