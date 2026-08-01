@@ -37,24 +37,35 @@ import (
 // on one component whose fix spans others). For coding/ops rows component is
 // constant per Task, so including it is a no-op for their one-active-per-Task
 // semantics. The pre-fan-out index keyed only (repo, issue_number, kind) is
-// dropped first so an already-migrated DB is upgraded in place.
+// superseded by CREATE-then-DROP so an already-migrated DB is upgraded in place
+// without leaving the mutex unenforced.
 //
-// Idempotent: the DROP/CREATE IF (NOT) EXISTS pair is a no-op on re-run, and the
+// Idempotent: the CREATE/DROP IF (NOT) EXISTS pair is a no-op on re-run, and the
 // step no-ops entirely if the table is not present yet.
 func RunExecutions(ctx context.Context, db *gorm.DB) error {
 	if !hasTable(db, "executions") {
 		return nil
 	}
-	// Drop the legacy component-less admission index (if present) so the widened
-	// key below replaces it in place on an already-migrated database.
-	if err := db.WithContext(ctx).Exec(`DROP INDEX IF EXISTS ux_executions_admission`).Error; err != nil {
-		return fmt.Errorf("drop legacy executions admission index: %w", err)
-	}
-	if err := db.WithContext(ctx).Exec(`
-		CREATE UNIQUE INDEX IF NOT EXISTS ux_executions_admission_component
-		ON executions (repo, issue_number, kind, component)
-		WHERE status IN ('queued', 'running')`).Error; err != nil {
+	stmts := ExecutionsAdmissionStatements()
+	// CREATE-then-DROP (not the reverse): dropping first leaves the admission
+	// mutex unenforced for the width of the migration — the window a second
+	// replica can double-admit into. Same rationale as RunMilestoneRuns.
+	if err := db.WithContext(ctx).Exec(stmts[0]).Error; err != nil {
 		return fmt.Errorf("executions admission-mutex index: %w", err)
 	}
+	if err := db.WithContext(ctx).Exec(stmts[1]).Error; err != nil {
+		return fmt.Errorf("drop legacy executions admission index: %w", err)
+	}
 	return nil
+}
+
+// ExecutionsAdmissionStatements is the ordered DDL RunExecutions applies.
+// CREATE precedes DROP so the admission mutex is never unenforced during upgrade.
+func ExecutionsAdmissionStatements() []string {
+	return []string{
+		`CREATE UNIQUE INDEX IF NOT EXISTS ux_executions_admission_component
+		ON executions (repo, issue_number, kind, component)
+		WHERE status IN ('queued', 'running')`,
+		`DROP INDEX IF EXISTS ux_executions_admission`,
+	}
 }
