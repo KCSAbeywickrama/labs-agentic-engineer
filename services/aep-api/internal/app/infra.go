@@ -21,6 +21,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"log/slog"
+	"os"
 	"time"
 
 	"gorm.io/gorm"
@@ -171,11 +172,18 @@ func Resolve(ctx context.Context, cfg config.Config) (Infra, error) {
 	// Workspace engine — the disk-backed git plumbing over the shared /workspaces
 	// mount. Fail fast on an unusable root: the volume is mounted in compose/k8s,
 	// and dev runs override AEP_WORKSPACE_ROOT.
-	workspaceEngine, err := gitfs.New(cfg.Workspace.Root)
+	workspaceEngine, rootLayout, err := gitfs.New(cfg.Workspace.Root)
 	if err != nil {
 		return Infra{}, fmt.Errorf("workspace engine init (root %q): %w", cfg.Workspace.Root, err)
 	}
-	slog.Info("workspace engine", "root", workspaceEngine.Root())
+	// R8b boot identity: node/pod (fieldRef-injected) + root + found|created.
+	// Two replicas logging different NODE_NAME is the affinity-scatter signature.
+	slog.Info("workspace engine",
+		"node", os.Getenv("NODE_NAME"),
+		"pod", os.Getenv("POD_NAME"),
+		"root", workspaceEngine.Root(),
+		"rootState", string(rootLayout),
+	)
 
 	return Infra{
 		DB:              db,

@@ -34,6 +34,18 @@ spec:
           ports:
             - containerPort: {{ .Values.aepApi.port }}
               name: http
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 5
           resources: {{ toYaml .Values.aepApi.resources | nindent 12 }}
           env:
             - name: POD_NAME

@@ -89,6 +89,9 @@ type Reaper struct {
 	engine *gitfs.Engine
 	repos  RepoLister
 	cfg    config.WorkspaceConfig
+	// ready is the shared R8b readiness gate (GET /readyz). Updated every
+	// sweep from root-health; nil is treated as always-ready.
+	ready *ReadyGate
 	// leaderLease is how long a lock-file lease is marked valid after acquire
 	// (written as expiry metadata). Defaults to 2×ReapInterval; tests shorten
 	// it. Flock is still the real gate — expiry is diagnostic + documents
@@ -103,8 +106,9 @@ type Reaper struct {
 // New wires the reaper over the engine's workspace root. Zero/negative cfg
 // knobs fall back to the design §14 defaults (defensive — the config loader
 // already bakes them in). OrgQuotaBytes <= 0 disables the per-org quota
-// check; the global watermark check always runs.
-func New(engine *gitfs.Engine, repos RepoLister, cfg config.WorkspaceConfig) *Reaper {
+// check; the global watermark check always runs. ready may be nil (tests);
+// when non-nil it is updated every sweep from root-health.
+func New(engine *gitfs.Engine, repos RepoLister, cfg config.WorkspaceConfig, ready *ReadyGate) *Reaper {
 	if cfg.ReapInterval <= 0 {
 		cfg.ReapInterval = 5 * time.Minute
 	}
@@ -130,6 +134,7 @@ func New(engine *gitfs.Engine, repos RepoLister, cfg config.WorkspaceConfig) *Re
 		engine:      engine,
 		repos:       repos,
 		cfg:         cfg,
+		ready:       ready,
 		leaderLease: 2 * cfg.ReapInterval,
 		diskUsage:   statfsUsage,
 	}
@@ -157,23 +162,35 @@ func (r *Reaper) Run(ctx context.Context) {
 
 // Sweep runs one full reap cycle. Exported so a test (or an admin trigger)
 // can drive a single pass without the ticker. Passes are isolated: a failing
-// pass is logged and the next one still runs. After all passes, usage is
-// re-recorded for Ensure admission (even when this replica was not leader).
+// pass is logged and the next one still runs. Root-health runs first and
+// drives readiness (R8b). After all passes, a usage INFO line is emitted and
+// admission usage is re-recorded (even when this replica was not leader).
 func (r *Reaper) Sweep(ctx context.Context) {
+	r.applyRootHealth(ctx)
+
 	r.pass(ctx, "tmp-reclamation", r.reclaimTmp)
 	r.pass(ctx, "trash-reclamation", r.reclaimTrash)
 	r.pass(ctx, "snapshot-age-reap", r.reapSnapshots)
 
+	var maintained, evictions int
 	// Global passes run on at most one replica per tick: non-blocking leader
 	// flock — losing it simply defers to whichever replica holds it.
 	release, held := r.tryLeaderLock(ctx)
 	if held {
 		r.pass(ctx, "orphan-reconciliation", r.reconcileOrphans)
-		r.pass(ctx, "git-maintenance", r.maintainRepos)
-		r.pass(ctx, "quota-lru-eviction", r.enforceQuota)
+		r.pass(ctx, "git-maintenance", func(ctx context.Context) error {
+			n, err := r.maintainRepos(ctx)
+			maintained = n
+			return err
+		})
+		r.pass(ctx, "quota-lru-eviction", func(ctx context.Context) error {
+			n, err := r.enforceQuota(ctx)
+			evictions = n
+			return err
+		})
 		release()
 	}
-	r.recordUsageFromStatfs()
+	r.logSweepUsage(ctx, held, maintained, evictions)
 }
 
 // pass runs one pass, isolating its failure to a log line so the remaining

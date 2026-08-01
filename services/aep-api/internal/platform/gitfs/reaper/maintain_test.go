@@ -69,7 +69,7 @@ func TestMaintainReposRepacksLooseHeavyMirror(t *testing.T) {
 	if _, err := os.OpenFile(filepath.Join(slug, "repo.lock"), os.O_CREATE|os.O_RDWR, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.maintainRepos(context.Background()); err != nil {
+	if _, err := r.maintainRepos(context.Background()); err != nil {
 		t.Fatalf("maintain: %v", err)
 	}
 	after := countLoose(t, gitDir)
@@ -107,7 +107,7 @@ func TestMaintainReposSlowGitCompletes(t *testing.T) {
 	if before <= 1000 {
 		t.Fatalf("setup: want >1000 loose, got %d", before)
 	}
-	if err := r.maintainRepos(context.Background()); err != nil {
+	if _, err := r.maintainRepos(context.Background()); err != nil {
 		t.Fatalf("maintain: %v", err)
 	}
 	after := countLoose(t, gitDir)
@@ -168,7 +168,7 @@ func TestMaintainReposSkipsBusyLock(t *testing.T) {
 		t.Fatal(err)
 	}
 	start := time.Now()
-	if err := r.maintainRepos(context.Background()); err != nil {
+	if _, err := r.maintainRepos(context.Background()); err != nil {
 		t.Fatalf("maintain: %v", err)
 	}
 	if time.Since(start) > 5*time.Second {

@@ -42,8 +42,9 @@ func shouldMaintain(loose, packs int) bool {
 
 // maintainRepos is leader-only, ordered BEFORE quota so eviction sees
 // reclaimed space. Never git gc (gc.pid hostname trap). Never
-// `git maintenance --task=loose-objects` (transient growth).
-func (r *Reaper) maintainRepos(ctx context.Context) error {
+// `git maintenance --task=loose-objects` (transient growth). Returns the
+// number of mirrors successfully maintained this pass (R8b usage line).
+func (r *Reaper) maintainRepos(ctx context.Context) (int, error) {
 	done := 0
 	err := r.walkRepoDirs(ctx, func(orgID, projectID, repoSlug, slugDir string) {
 		if done >= maintainRepoBudget || ctx.Err() != nil {
@@ -74,5 +75,5 @@ func (r *Reaper) maintainRepos(ctx context.Context) error {
 		slog.InfoContext(ctx, "reaper: maintained mirror",
 			"org", orgID, "project", projectID, "slug", repoSlug, "looseBefore", loose, "packsBefore", packs)
 	})
-	return err
+	return done, err
 }

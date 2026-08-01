@@ -31,7 +31,7 @@ import (
 )
 
 func TestNewPanicsOnInvalidWatermarks(t *testing.T) {
-	eng, err := gitfs.New(filepath.Join(t.TempDir(), "workspaces"))
+	eng, _, err := gitfs.New(filepath.Join(t.TempDir(), "workspaces"))
 	if err != nil {
 		t.Fatalf("gitfs.New: %v", err)
 	}
@@ -43,11 +43,11 @@ func TestNewPanicsOnInvalidWatermarks(t *testing.T) {
 			t.Fatal("expected panic for DiskLowPct >= DiskHighPct")
 		}
 	}()
-	_ = New(eng, staticLister(nil), cfg)
+	_ = New(eng, staticLister(nil), cfg, nil)
 }
 
 func TestNewPanicsOnDiskHighOver100(t *testing.T) {
-	eng, err := gitfs.New(filepath.Join(t.TempDir(), "workspaces"))
+	eng, _, err := gitfs.New(filepath.Join(t.TempDir(), "workspaces"))
 	if err != nil {
 		t.Fatalf("gitfs.New: %v", err)
 	}
@@ -58,7 +58,7 @@ func TestNewPanicsOnDiskHighOver100(t *testing.T) {
 			t.Fatal("expected panic for DiskHighPct > 100")
 		}
 	}()
-	_ = New(eng, staticLister(nil), cfg)
+	_ = New(eng, staticLister(nil), cfg, nil)
 }
 
 // TestLeaderLockTakeoverOnExpiry: lease metadata names the holding pod;

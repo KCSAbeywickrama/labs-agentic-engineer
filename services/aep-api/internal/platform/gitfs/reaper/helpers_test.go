@@ -55,11 +55,11 @@ func (l errLister) ListAll(context.Context) ([]RepoCoordinate, error) { return n
 // origin — dirs are laid out by hand with the mk* helpers below).
 func newSyntheticReaper(t *testing.T, cfg config.WorkspaceConfig, repos RepoLister) (*Reaper, string) {
 	t.Helper()
-	eng, err := gitfs.New(filepath.Join(t.TempDir(), "workspaces"))
+	eng, _, err := gitfs.New(filepath.Join(t.TempDir(), "workspaces"))
 	if err != nil {
 		t.Fatalf("gitfs.New: %v", err)
 	}
-	return New(eng, repos, cfg), eng.Root()
+	return New(eng, repos, cfg, nil), eng.Root()
 }
 
 // blockPayloadSize returns the bytes duDir charges for one mkFile payload

@@ -47,12 +47,3 @@ func (r *Reaper) recordDiskUsage(total, avail, inodesTotal, inodesFree uint64) {
 	}
 	r.engine.SetDiskUsagePct(pct)
 }
-
-// recordUsageFromStatfs re-reads the volume and updates admission usage.
-func (r *Reaper) recordUsageFromStatfs() {
-	total, avail, inodesTotal, inodesFree, err := r.diskUsage(r.engine.Root())
-	if err != nil || total == 0 {
-		return
-	}
-	r.recordDiskUsage(total, avail, inodesTotal, inodesFree)
-}

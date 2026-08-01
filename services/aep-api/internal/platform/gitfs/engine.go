@@ -62,26 +62,45 @@ var (
 	_ SnapshotProvider = (*Engine)(nil)
 )
 
+// RootLayout reports whether New found an existing workspace root directory
+// or created it (R8b boot identity — affinity-scatter diagnosis).
+type RootLayout string
+
+const (
+	RootFound   RootLayout = "found"
+	RootCreated RootLayout = "created"
+)
+
 // New builds an Engine rooted at root: creates repos/, tmp/, trash/ and
 // writes the askpass shim. root is made absolute so git child processes are
-// immune to cwd changes.
-func New(root string) (*Engine, error) {
+// immune to cwd changes. layout is RootFound when abs already existed as a
+// directory before layout creation, RootCreated when New created it.
+func New(root string) (*Engine, RootLayout, error) {
 	abs, err := absPath(root)
 	if err != nil {
-		return nil, fmt.Errorf("gitfs: resolve root %q: %w", root, err)
+		return nil, "", fmt.Errorf("gitfs: resolve root %q: %w", root, err)
+	}
+	layout := RootCreated
+	if st, err := os.Stat(abs); err == nil {
+		if !st.IsDir() {
+			return nil, "", fmt.Errorf("gitfs: root %q exists and is not a directory", abs)
+		}
+		layout = RootFound
+	} else if !os.IsNotExist(err) {
+		return nil, "", fmt.Errorf("gitfs: stat root %q: %w", abs, err)
 	}
 	for _, d := range []string{ReposDir(abs), TmpDir(abs), TrashDir(abs)} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
-			return nil, fmt.Errorf("gitfs: create %s: %w", d, err)
+			return nil, "", fmt.Errorf("gitfs: create %s: %w", d, err)
 		}
 	}
 	shim, err := writeAskpassShim(abs)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	e := &Engine{root: abs, locks: flockLocker{}, askpass: shim}
 	e.diskUsagePct.Store(-1)
-	return e, nil
+	return e, layout, nil
 }
 
 // Root returns the absolute workspace root the engine operates under.

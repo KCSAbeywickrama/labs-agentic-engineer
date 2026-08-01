@@ -58,7 +58,7 @@ func TestQuotaEvictsOnInodeWatermark(t *testing.T) {
 	r.diskUsage = func(string) (uint64, uint64, uint64, uint64, error) {
 		return 1000, 900, 1000, 100, nil
 	}
-	if err := r.enforceQuota(context.Background()); err != nil {
+	if _, err := r.enforceQuota(context.Background()); err != nil {
 		t.Fatalf("enforceQuota: %v", err)
 	}
 	mustNotExist(t, aged)
@@ -86,7 +86,7 @@ func TestQuotaEvictsSnapshotsFirstThenMirrorsLRU(t *testing.T) {
 	snapC := mkSnapshot(t, r2, fakeSha(3), 40, now.Add(-30*time.Minute))
 	r2Git := mkGitDir(t, r2, 100, now.Add(-1*time.Hour)) // fresher mirror
 
-	if err := r.enforceQuota(context.Background()); err != nil {
+	if _, err := r.enforceQuota(context.Background()); err != nil {
 		t.Fatalf("enforce quota: %v", err)
 	}
 
@@ -125,7 +125,7 @@ func TestQuotaNeverEvictsLockedMirror(t *testing.T) {
 		t.Fatalf("flock: %v", err)
 	}
 
-	if err := r.enforceQuota(context.Background()); err != nil {
+	if _, err := r.enforceQuota(context.Background()); err != nil {
 		t.Fatalf("enforce quota: %v", err)
 	}
 	mustExist(t, r1)    // held lock → never evicted, despite being LRU
@@ -149,7 +149,7 @@ func TestPerOrgQuota(t *testing.T) {
 	under := mkSlugDir(t, root, "o2", "p1", "r1") // org usage bs ≤ quota
 	underGit := mkGitDir(t, under, 30, now.Add(-1*time.Hour))
 
-	if err := r.enforceQuota(context.Background()); err != nil {
+	if _, err := r.enforceQuota(context.Background()); err != nil {
 		t.Fatalf("enforce quota: %v", err)
 	}
 	mustNotExist(t, overSnap) // snapshot eviction clears the excess
@@ -172,7 +172,7 @@ func TestQuotaNeverEvictsCurrentHeadSnapshot(t *testing.T) {
 	evictSnap := mkSnapshot(t, slug, fakeSha(2), 250, now.Add(-3*time.Hour))
 	writeGitHead(t, mkGitDir(t, slug, 50, now.Add(-2*time.Hour)), headSha)
 
-	if err := r.enforceQuota(context.Background()); err != nil {
+	if _, err := r.enforceQuota(context.Background()); err != nil {
 		t.Fatalf("enforce quota: %v", err)
 	}
 	mustExist(t, headSnap)     // current HEAD → never evicted despite pressure
@@ -193,7 +193,7 @@ func TestQuotaNeverEvictsSnapshotYoungerThanFloor(t *testing.T) {
 	aged := mkSnapshot(t, slug, fakeSha(2), 250, now.Add(-2*time.Hour))  // evictable
 	mkGitDir(t, slug, 50, now.Add(-2*time.Hour))                         // no HEAD file → isHead false
 
-	if err := r.enforceQuota(context.Background()); err != nil {
+	if _, err := r.enforceQuota(context.Background()); err != nil {
 		t.Fatalf("enforce quota: %v", err)
 	}
 	mustExist(t, young)   // younger than the floor → protected
@@ -215,7 +215,7 @@ func TestQuotaEvictsAgedNonHeadSnapshot(t *testing.T) {
 	aged := mkSnapshot(t, slug, fakeSha(2), 250, now.Add(-2*time.Hour))
 	writeGitHead(t, mkGitDir(t, slug, 50, now.Add(-2*time.Hour)), headSha)
 
-	if err := r.enforceQuota(context.Background()); err != nil {
+	if _, err := r.enforceQuota(context.Background()); err != nil {
 		t.Fatalf("enforce quota: %v", err)
 	}
 	mustNotExist(t, aged) // aged + not HEAD → evicted
@@ -250,7 +250,7 @@ func TestQuotaPurgesTrashFirstThenConvergesWithoutDrainingRepos(t *testing.T) {
 		return 1000, 800, 1000, 1000, nil // 20% used after trash purge
 	}
 
-	if err := r.enforceQuota(context.Background()); err != nil {
+	if _, err := r.enforceQuota(context.Background()); err != nil {
 		t.Fatalf("enforceQuota: %v", err)
 	}
 	mustNotExist(t, youngTrash)
@@ -284,7 +284,7 @@ func TestOrgQuotaErrorDoesNotSkipGlobalWatermark(t *testing.T) {
 		statfsCalls++
 		return 1000, 100, 1000, 1000, nil // always over high (bytes)
 	}
-	if err := r.enforceQuota(context.Background()); err != nil {
+	if _, err := r.enforceQuota(context.Background()); err != nil {
 		t.Fatalf("enforceQuota: %v", err)
 	}
 	if statfsCalls == 0 {

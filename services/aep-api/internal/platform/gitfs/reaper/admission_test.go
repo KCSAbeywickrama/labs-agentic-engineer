@@ -56,7 +56,7 @@ func TestEnforceQuotaRecordsDiskUsage(t *testing.T) {
 	r, _ := newSyntheticReaper(t, testCfg(), staticLister(nil))
 	r.diskUsage = fakeDisk(1000, 200) // 80%
 
-	if err := r.enforceQuota(context.Background()); err != nil {
+	if _, err := r.enforceQuota(context.Background()); err != nil {
 		t.Fatalf("enforceQuota: %v", err)
 	}
 	if got := r.engine.DiskUsagePct(); got != 80 {
@@ -70,7 +70,11 @@ func TestAdmissionRecordsMaxOfByteAndInodePct(t *testing.T) {
 	r.diskUsage = func(string) (uint64, uint64, uint64, uint64, error) {
 		return 1000, 900, 1000, 50, nil
 	}
-	r.recordUsageFromStatfs()
+	total, avail, inodesTotal, inodesFree, err := r.diskUsage(r.engine.Root())
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.recordDiskUsage(total, avail, inodesTotal, inodesFree)
 	if got := r.engine.DiskUsagePct(); got != 95 {
 		t.Fatalf("DiskUsagePct = %d, want 95 (inode pressure)", got)
 	}
@@ -78,17 +82,21 @@ func TestAdmissionRecordsMaxOfByteAndInodePct(t *testing.T) {
 
 func TestEnsureRefusedWhenInodePressureAtAdmission(t *testing.T) {
 	fx := workspacetest.New(t, map[string]string{"a.txt": "x"})
-	r := New(fx.Engine, staticLister(nil), testCfg())
+	r := New(fx.Engine, staticLister(nil), testCfg(), nil)
 	// Bytes green (10%), inodes 92% ≥ DiskAdmissionRefusePct.
 	r.diskUsage = func(string) (uint64, uint64, uint64, uint64, error) {
 		return 1000, 900, 1000, 80, nil
 	}
-	r.recordUsageFromStatfs()
+	total, avail, inodesTotal, inodesFree, err := r.diskUsage(r.engine.Root())
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.recordDiskUsage(total, avail, inodesTotal, inodesFree)
 	if got := r.engine.DiskUsagePct(); got != 92 {
 		t.Fatalf("DiskUsagePct = %d, want 92", got)
 	}
 	sha := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-	err := fx.Engine.Ensure(context.Background(), fx.Ref, sha)
+	err = fx.Engine.Ensure(context.Background(), fx.Ref, sha)
 	if !errors.Is(err, gitfs.ErrDiskAdmission) {
 		t.Fatalf("Ensure = %v, want ErrDiskAdmission under inode pressure", err)
 	}

@@ -62,7 +62,7 @@ func TestSnapshotAgeReap(t *testing.T) {
 	chtimes(t, dirFor(sha3), old) // aged but HEAD → keep
 	// sha2 stays fresh → keep.
 
-	r := New(fx.Engine, staticLister(nil), testCfg())
+	r := New(fx.Engine, staticLister(nil), testCfg(), nil)
 	if err := r.reapSnapshots(ctx); err != nil {
 		t.Fatalf("reap snapshots: %v", err)
 	}

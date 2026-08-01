@@ -1167,6 +1167,14 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 
 	slog.Info("OpenChoreo API", "baseURL", cfg.PlatformAPI.BaseURL)
 
+	// R8b readiness gate: true after successful boot layout (Resolve → gitfs.New);
+	// the reaper clears it on root-health failure and sets it again on recovery.
+	var workspaceReady *reaper.ReadyGate
+	if workspaceEngine != nil {
+		workspaceReady = &reaper.ReadyGate{}
+		workspaceReady.Set(true)
+	}
+	params.WorkspaceReady = workspaceReady
 	handler := edge.NewHandler(params)
 
 	// Disk-lifecycle reaper (design §14/D12): trash purge, snapshot age-reap,
@@ -1175,7 +1183,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// leaves Workspace nil (no disk); skip reaper wiring in that case.
 	var workspaceReaper Watcher
 	if workspaceEngine != nil {
-		r := reaper.New(workspaceEngine, reaperRepoLister{repoRepo}, cfg.Workspace)
+		r := reaper.New(workspaceEngine, reaperRepoLister{repoRepo}, cfg.Workspace, workspaceReady)
 		workspaceEngine.SetOnENOSPC(func() {
 			r.ForceSweep(context.Background())
 		})

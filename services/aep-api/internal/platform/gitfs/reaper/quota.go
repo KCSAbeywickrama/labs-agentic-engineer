@@ -68,17 +68,21 @@ func (r *Reaper) purgeTrashAll(ctx context.Context) error {
 // enforceQuota is pass 6 / last leader-only pass (after orphans + maintenance):
 // per-org quota first (errors logged, never abort the global path), then the
 // global statfs watermark. When over high: purge trash/ unconditionally FIRST,
-// re-read statfs, and only then evict if still over.
-func (r *Reaper) enforceQuota(ctx context.Context) error {
+// re-read statfs, and only then evict if still over. Returns successful
+// snapshot/mirror eviction count this pass (R8b usage line).
+func (r *Reaper) enforceQuota(ctx context.Context) (int, error) {
 	root := r.engine.Root()
+	evictions := 0
 	if r.cfg.OrgQuotaBytes > 0 {
-		if err := r.enforceOrgQuotas(ctx); err != nil {
+		n, err := r.enforceOrgQuotas(ctx)
+		evictions += n
+		if err != nil {
 			slog.WarnContext(ctx, "reaper: org quota pass failed — continuing to global watermark", "error", err)
 		}
 	}
 	total, avail, inodesTotal, inodesFree, err := r.diskUsage(root)
 	if err != nil || total == 0 {
-		return err
+		return evictions, err
 	}
 	r.recordDiskUsage(total, avail, inodesTotal, inodesFree)
 	used := total - avail
@@ -86,7 +90,7 @@ func (r *Reaper) enforceQuota(ctx context.Context) error {
 	overBytes := used*100 > uint64(r.cfg.DiskHighPct)*total
 	overInodes := inodesTotal > 0 && inodeUsed*100 > uint64(r.cfg.DiskHighPct)*inodesTotal
 	if !overBytes && !overInodes {
-		return nil
+		return evictions, nil
 	}
 	inodeUsedPct := uint64(0)
 	if inodesTotal > 0 {
@@ -100,7 +104,7 @@ func (r *Reaper) enforceQuota(ctx context.Context) error {
 	}
 	total, avail, inodesTotal, inodesFree, err = r.diskUsage(root)
 	if err != nil || total == 0 {
-		return err
+		return evictions, err
 	}
 	r.recordDiskUsage(total, avail, inodesTotal, inodesFree)
 	used = total - avail
@@ -115,7 +119,7 @@ func (r *Reaper) enforceQuota(ctx context.Context) error {
 		}
 		slog.InfoContext(ctx, "reaper: under high watermark after trash purge — skipping eviction",
 			"usedPct", used*100/total, "inodeUsedPct", inodeUsedPct)
-		return nil
+		return evictions, nil
 	}
 	var target int64
 	if overBytes {
@@ -134,23 +138,25 @@ func (r *Reaper) enforceQuota(ctx context.Context) error {
 	slog.InfoContext(ctx, "reaper: still over high watermark — evicting",
 		"usedPct", used*100/total, "highPct", r.cfg.DiskHighPct, "lowPct", r.cfg.DiskLowPct,
 		"inodeUsedPct", inodeUsedPct, "targetBytes", target)
-	return r.evictWithin(ctx, gitfs.ReposDir(root), target)
+	n, err := r.evictWithin(ctx, gitfs.ReposDir(root), target)
+	return evictions + n, err
 }
 
 // enforceOrgQuotas walks repos/<orgId> subtrees and evicts within any org
 // whose on-disk usage exceeds OrgQuotaBytes, down to the quota.
-func (r *Reaper) enforceOrgQuotas(ctx context.Context) error {
+func (r *Reaper) enforceOrgQuotas(ctx context.Context) (int, error) {
 	reposDir := gitfs.ReposDir(r.engine.Root())
 	orgDirs, err := os.ReadDir(reposDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil
+			return 0, nil
 		}
-		return err
+		return 0, err
 	}
+	evictions := 0
 	for _, org := range orgDirs {
 		if ctx.Err() != nil {
-			return ctx.Err()
+			return evictions, ctx.Err()
 		}
 		if !org.IsDir() {
 			continue
@@ -162,11 +168,13 @@ func (r *Reaper) enforceOrgQuotas(ctx context.Context) error {
 		}
 		slog.InfoContext(ctx, "reaper: org over quota — evicting",
 			"org", org.Name(), "usageBytes", usage, "quotaBytes", r.cfg.OrgQuotaBytes)
-		if err := r.evictWithin(ctx, orgDir, usage-r.cfg.OrgQuotaBytes); err != nil {
+		n, err := r.evictWithin(ctx, orgDir, usage-r.cfg.OrgQuotaBytes)
+		evictions += n
+		if err != nil {
 			slog.WarnContext(ctx, "reaper: org quota eviction failed", "org", org.Name(), "error", err)
 		}
 	}
-	return nil
+	return evictions, nil
 }
 
 // snapshotCandidate / mirrorCandidate are eviction units within a scope.
@@ -191,15 +199,16 @@ type mirrorCandidate struct {
 // held is in live use and is SKIPPED, never waited on: TrashRepo acquires
 // the EX flock through the gitfs Locker, and the bounded lockCtx turns that
 // into a non-blocking try.
-func (r *Reaper) evictWithin(ctx context.Context, scopeDir string, target int64) error {
+func (r *Reaper) evictWithin(ctx context.Context, scopeDir string, target int64) (int, error) {
 	snaps, mirrors, err := r.collectCandidates(ctx, scopeDir)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	sort.Slice(snaps, func(i, j int) bool { return snaps[i].mtime.Before(snaps[j].mtime) })
 	sort.Slice(mirrors, func(i, j int) bool { return mirrors[i].lastUse.Before(mirrors[j].lastUse) })
 
 	freed := int64(0)
+	count := 0
 	now := time.Now()
 	evictedSnapBytes := map[string]int64{} // slugDir → snapshot bytes already trashed
 	for _, s := range snaps {
@@ -222,6 +231,7 @@ func (r *Reaper) evictWithin(ctx context.Context, scopeDir string, target int64)
 			continue
 		}
 		freed += s.size
+		count++
 		evictedSnapBytes[s.slugDir] += s.size
 	}
 	for _, m := range mirrors {
@@ -239,6 +249,7 @@ func (r *Reaper) evictWithin(ctx context.Context, scopeDir string, target int64)
 			continue
 		}
 		freed += m.size - evictedSnapBytes[m.slugDir] // don't double-count its evicted snapshots
+		count++
 		slog.InfoContext(ctx, "reaper: evicted LRU mirror",
 			"org", m.ref.OrgID, "project", m.ref.ProjectID, "slug", m.ref.RepoSlug, "bytes", m.size)
 	}
@@ -246,7 +257,7 @@ func (r *Reaper) evictWithin(ctx context.Context, scopeDir string, target int64)
 		slog.WarnContext(ctx, "reaper: eviction exhausted candidates short of target",
 			"scope", scopeDir, "freedBytes", freed, "targetBytes", target)
 	}
-	return nil
+	return count, nil
 }
 
 // collectCandidates gathers the snapshot + mirror eviction candidates under
