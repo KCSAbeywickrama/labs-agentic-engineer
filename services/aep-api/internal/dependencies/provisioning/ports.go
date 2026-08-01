@@ -56,13 +56,6 @@ type ExecutionStore interface {
 	ListActive(ctx context.Context) ([]delivery.Execution, error)
 }
 
-// Reevaluator releases consumer coding tasks whose provision dependency just
-// reached deployed (the same unhold hook build success uses). *execution.Funnel
-// satisfies it.
-type Reevaluator interface {
-	Reevaluate(ctx context.Context) error
-}
-
 // DesignReader reads a project's authored design components at HEAD. It returns
 // ONLY models-typed data so this package needs no artifacts feature edge — the
 // composition root adapts artifacts.ArtifactStore. (Minting runs right after

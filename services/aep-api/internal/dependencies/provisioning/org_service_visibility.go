@@ -138,7 +138,7 @@ func (s *Service) triggerProviderBuild(ctx context.Context, orgID, providerProje
 // org-service visibility gate so it derives StatusDeployed and the consumer's
 // held coding task dispatches — the grant-cascade tail (issue #164, Task 4). It
 // mirrors SaveValues' tail (admit → StartWithRun → completeProvisionRow, which
-// closes the gate + reevaluates the funnel). Best-effort throughout: a missing
+// closes the gate). Best-effort throughout: a missing
 // gate (an interactive-flow rider) or any step failure is logged and swallowed
 // so the deploy cascade never fails over it.
 func (s *Service) resolveConsumerVisibilityGate(ctx context.Context, orgID, consumerProjectID, dep string) {

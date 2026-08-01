@@ -161,10 +161,6 @@ func (f *fakeExecStore) ListActive(_ context.Context) ([]delivery.Execution, err
 	return out, nil
 }
 
-type fakeReeval struct{ calls int }
-
-func (f *fakeReeval) Reevaluate(context.Context) error { f.calls++; return nil }
-
 type fakeDesign struct {
 	comps []spec.DesignComponent
 	err   error
@@ -432,11 +428,10 @@ func designWithDeps() []spec.DesignComponent {
 	}}
 }
 
-func newTestService(issues *fakeIssues, execs *fakeExecStore, reeval Reevaluator, design DesignReader, ext *fakeExtProv, plat *fakePlatProv, bindings *fakeBindings) *Service {
+func newTestService(issues *fakeIssues, execs *fakeExecStore, design DesignReader, ext *fakeExtProv, plat *fakePlatProv, bindings *fakeBindings) *Service {
 	return NewService(Deps{
 		Issues:   issues,
 		Execs:    execs,
-		Reeval:   reeval,
 		Design:   design,
 		Repos:    fakeRepos{},
 		ExtProv:  ext,
@@ -449,7 +444,7 @@ func newTestService(issues *fakeIssues, execs *fakeExecStore, reeval Reevaluator
 
 func TestEnsureProvisionIssues_MintsPerDepDeduped(t *testing.T) {
 	issues := newFakeIssues(nil)
-	svc := newTestService(issues, &fakeExecStore{}, &fakeReeval{}, fakeDesign{comps: designWithDeps()}, &fakeExtProv{}, &fakePlatProv{}, &fakeBindings{})
+	svc := newTestService(issues, &fakeExecStore{}, fakeDesign{comps: designWithDeps()}, &fakeExtProv{}, &fakePlatProv{}, &fakeBindings{})
 
 	gateByDep, err := svc.EnsureProvisionIssues(context.Background(), "org", "proj", "v1-1", 0)
 	if err != nil {
@@ -507,7 +502,7 @@ func TestEnsureProvisionIssues_MintsPerDepDeduped(t *testing.T) {
 // agent work.
 func TestEnsureProvisionIssues_AssignsTheMilestoneAtCreation(t *testing.T) {
 	issues := newFakeIssues(nil)
-	svc := newTestService(issues, &fakeExecStore{}, &fakeReeval{}, fakeDesign{comps: designWithDeps()}, &fakeExtProv{}, &fakePlatProv{}, &fakeBindings{})
+	svc := newTestService(issues, &fakeExecStore{}, fakeDesign{comps: designWithDeps()}, &fakeExtProv{}, &fakePlatProv{}, &fakeBindings{})
 
 	if _, err := svc.EnsureProvisionIssues(context.Background(), "org", "proj", "v4", 7); err != nil {
 		t.Fatalf("EnsureProvisionIssues: %v", err)
@@ -529,12 +524,11 @@ func TestSaveValues_ProvisionsAndClosesGate(t *testing.T) {
 	gate := provisionGateIssue(10, "stripe")
 	issues := newFakeIssues([]sourcecontrol.IssueInfo{gate})
 	execs := &fakeExecStore{}
-	reeval := &fakeReeval{}
 	ext := &fakeExtProv{}
 	// Secret-vs-plain classification comes from the project's committed design
 	// (dep.Config), never a catalog: SaveValues reads the design to split
 	// api_key → secret, region → plain (see designWithDeps).
-	svc := newTestService(issues, execs, reeval, fakeDesign{comps: designWithDeps()}, ext, &fakePlatProv{}, &fakeBindings{})
+	svc := newTestService(issues, execs, fakeDesign{comps: designWithDeps()}, ext, &fakePlatProv{}, &fakeBindings{})
 
 	err := svc.SaveValues(context.Background(), "org", "org", "proj", "stripe", map[string]map[string]string{
 		"development": {"api_key": "sk_live_x", "region": "us"},
@@ -554,12 +548,9 @@ func TestSaveValues_ProvisionsAndClosesGate(t *testing.T) {
 	if _, leaked := ev.Plain["api_key"]; leaked {
 		t.Fatalf("secret api_key leaked into the plain map")
 	}
-	// The gate issue is closed and the funnel re-evaluated (consumers release).
+	// The gate issue is closed (consumers release via gate-close webhook + sweep).
 	if _, closed := issues.closed[10]; !closed {
 		t.Fatalf("gate issue must be closed after external provisioning")
-	}
-	if reeval.calls != 1 {
-		t.Fatalf("Reevaluate must be called once, got %d", reeval.calls)
 	}
 	// The provision Execution derives deployed (succeeded provision run).
 	if r := latestProvisionRow(execs); r == nil || r.Status != string(taskmeta.ExecSucceeded) {
@@ -575,9 +566,8 @@ func TestProvision_PlatformIsAsync_LeftRunning(t *testing.T) {
 	gate := provisionGateIssue(11, "orders-db")
 	issues := newFakeIssues([]sourcecontrol.IssueInfo{gate})
 	execs := &fakeExecStore{}
-	reeval := &fakeReeval{}
 	plat := &fakePlatProv{}
-	svc := newTestService(issues, execs, reeval, fakeDesign{comps: designWithDeps()}, &fakeExtProv{}, plat, &fakeBindings{})
+	svc := newTestService(issues, execs, fakeDesign{comps: designWithDeps()}, &fakeExtProv{}, plat, &fakeBindings{})
 
 	if err := svc.Provision(context.Background(), "org", "proj", "orders-db", nil, nil); err != nil {
 		t.Fatalf("Provision: %v", err)
@@ -601,19 +591,15 @@ func TestProvision_PlatformIsAsync_LeftRunning(t *testing.T) {
 	if _, closed := issues.closed[11]; closed {
 		t.Fatalf("gate issue must stay open until the binding is ready")
 	}
-	if reeval.calls != 0 {
-		t.Fatalf("no reevaluate before readiness, got %d", reeval.calls)
-	}
 }
 
 func TestResourceWatcher_ReadyClosesGateAndReleases(t *testing.T) {
 	gate := provisionGateIssue(11, "orders-db")
 	issues := newFakeIssues([]sourcecontrol.IssueInfo{gate})
 	execs := &fakeExecStore{}
-	reeval := &fakeReeval{}
 	bindings := &fakeBindings{byName: map[string]*openchoreo.ResourceReleaseBinding{}}
 	plat := &fakePlatProv{}
-	svc := newTestService(issues, execs, reeval, fakeDesign{comps: designWithDeps()}, &fakeExtProv{}, plat, bindings)
+	svc := newTestService(issues, execs, fakeDesign{comps: designWithDeps()}, &fakeExtProv{}, plat, bindings)
 
 	// Provision (async) → running row pinned to the binding.
 	if err := svc.Provision(context.Background(), "org", "proj", "orders-db", nil, nil); err != nil {
@@ -643,9 +629,6 @@ func TestResourceWatcher_ReadyClosesGateAndReleases(t *testing.T) {
 	if _, closed := issues.closed[11]; !closed {
 		t.Fatalf("gate issue must be closed once the binding is ready")
 	}
-	if reeval.calls != 1 {
-		t.Fatalf("Reevaluate must fire once on readiness, got %d", reeval.calls)
-	}
 }
 
 func TestResourceWatcher_StaleFails(t *testing.T) {
@@ -653,7 +636,7 @@ func TestResourceWatcher_StaleFails(t *testing.T) {
 	issues := newFakeIssues([]sourcecontrol.IssueInfo{gate})
 	execs := &fakeExecStore{}
 	bindings := &fakeBindings{byName: map[string]*openchoreo.ResourceReleaseBinding{"o-orders-db-development": {}}}
-	svc := newTestService(issues, execs, &fakeReeval{}, fakeDesign{comps: designWithDeps()}, &fakeExtProv{}, &fakePlatProv{}, bindings)
+	svc := newTestService(issues, execs, fakeDesign{comps: designWithDeps()}, &fakeExtProv{}, &fakePlatProv{}, bindings)
 	if err := svc.Provision(context.Background(), "org", "proj", "orders-db", nil, nil); err != nil {
 		t.Fatalf("Provision: %v", err)
 	}
@@ -672,7 +655,7 @@ func TestStatus_MasksOutputsToNames(t *testing.T) {
 	bindings := &fakeBindings{byName: map[string]*openchoreo.ResourceReleaseBinding{
 		"proj-orders-db-development": readyBinding("host", "port"),
 	}}
-	svc := newTestService(newFakeIssues(nil), &fakeExecStore{}, &fakeReeval{}, fakeDesign{}, &fakeExtProv{}, &fakePlatProv{}, bindings)
+	svc := newTestService(newFakeIssues(nil), &fakeExecStore{}, fakeDesign{}, &fakeExtProv{}, &fakePlatProv{}, bindings)
 	st, err := svc.Status(context.Background(), "org", "proj", "orders-db", "")
 	if err != nil {
 		t.Fatalf("Status: %v", err)
@@ -882,7 +865,7 @@ func TestDeprovisionProject_TearsDownResources(t *testing.T) {
 
 func TestSaveValues_WrongKind400(t *testing.T) {
 	// stripe is external; asking to provision it as a platform resource is wrong-kind.
-	svc := newTestService(newFakeIssues(nil), &fakeExecStore{}, &fakeReeval{}, fakeDesign{comps: designWithDeps()}, &fakeExtProv{}, &fakePlatProv{}, &fakeBindings{})
+	svc := newTestService(newFakeIssues(nil), &fakeExecStore{}, fakeDesign{comps: designWithDeps()}, &fakeExtProv{}, &fakePlatProv{}, &fakeBindings{})
 	err := svc.Provision(context.Background(), "org", "proj", "stripe", nil, nil)
 	if err == nil || !strings.Contains(err.Error(), dependencies.ErrDepWrongKind.Error()) {
 		t.Fatalf("provisioning an external dep as a resource must be wrong-kind, got %v", err)
@@ -929,7 +912,7 @@ func contains(ss []string, want string) bool {
 // provisioner must never be called.
 func TestSaveValues_DesignReadErrorFails(t *testing.T) {
 	ext := &fakeExtProv{}
-	svc := newTestService(newFakeIssues(nil), &fakeExecStore{}, &fakeReeval{},
+	svc := newTestService(newFakeIssues(nil), &fakeExecStore{},
 		fakeDesign{err: fmt.Errorf("boom")}, ext, &fakePlatProv{}, &fakeBindings{})
 
 	err := svc.SaveValues(context.Background(), "org", "org", "proj", "stripe",
@@ -959,7 +942,7 @@ func TestSaveValues_UnionSecretAcrossComponents(t *testing.T) {
 			{Kind: spec.DependencyKindExternal, Name: "stripe", Config: []spec.ConfigKey{{Key: "api_key", Secret: true}}}, // secret
 		}},
 	}
-	svc := newTestService(newFakeIssues([]sourcecontrol.IssueInfo{gate}), &fakeExecStore{}, &fakeReeval{},
+	svc := newTestService(newFakeIssues([]sourcecontrol.IssueInfo{gate}), &fakeExecStore{},
 		fakeDesign{comps: comps}, ext, &fakePlatProv{}, &fakeBindings{})
 
 	if err := svc.SaveValues(context.Background(), "org", "org", "proj", "stripe",
@@ -986,7 +969,7 @@ func TestSaveValues_UnionSecretAcrossComponents(t *testing.T) {
 func TestSaveValues_AuthorsDefinitionFromDesign(t *testing.T) {
 	gate := provisionGateIssue(10, "stripe")
 	ext := &fakeExtProv{}
-	svc := newTestService(newFakeIssues([]sourcecontrol.IssueInfo{gate}), &fakeExecStore{}, &fakeReeval{},
+	svc := newTestService(newFakeIssues([]sourcecontrol.IssueInfo{gate}), &fakeExecStore{},
 		fakeDesign{comps: designWithDeps()}, ext, &fakePlatProv{}, &fakeBindings{}) // empty catalog
 
 	if err := svc.SaveValues(context.Background(), "org", "org", "proj", "stripe",
@@ -1008,22 +991,18 @@ func TestSaveValues_AuthorsDefinitionFromDesign(t *testing.T) {
 
 // TestCompleteProvisionRow_FinishLoserSkipsCloseIssue: when Finish returns
 // (nil, nil) because the row is already terminal, the loser must not CloseIssue
-// (or re-evaluate) — another replica already won.
+// — another replica already won.
 func TestCompleteProvisionRow_FinishLoserSkipsCloseIssue(t *testing.T) {
 	gate := provisionGateIssue(10, "stripe")
 	issues := newFakeIssues([]sourcecontrol.IssueInfo{gate})
 	row := &delivery.Execution{ID: "e1", Status: string(taskmeta.ExecSucceeded)} // already terminal
 	execs := &fakeExecStore{rows: []*delivery.Execution{row}}
-	reeval := &fakeReeval{}
-	svc := newTestService(issues, execs, reeval, fakeDesign{comps: designWithDeps()}, &fakeExtProv{}, &fakePlatProv{}, &fakeBindings{})
+	svc := newTestService(issues, execs, fakeDesign{comps: designWithDeps()}, &fakeExtProv{}, &fakePlatProv{}, &fakeBindings{})
 
 	svc.completeProvisionRow(context.Background(), "org", "proj", "stripe", 10, "e1", "ref")
 
 	if _, closed := issues.closed[10]; closed {
 		t.Fatalf("loser must not CloseIssue")
-	}
-	if reeval.calls != 0 {
-		t.Fatalf("loser must not Reevaluate, got %d calls", reeval.calls)
 	}
 }
 
@@ -1034,7 +1013,7 @@ func TestFailProvisionRow_FinishLoserSkipsComment(t *testing.T) {
 	issues := newFakeIssues([]sourcecontrol.IssueInfo{gate})
 	row := &delivery.Execution{ID: "e1", Status: string(taskmeta.ExecFailed)} // already terminal
 	execs := &fakeExecStore{rows: []*delivery.Execution{row}}
-	svc := newTestService(issues, execs, &fakeReeval{}, fakeDesign{comps: designWithDeps()}, &fakeExtProv{}, &fakePlatProv{}, &fakeBindings{})
+	svc := newTestService(issues, execs, fakeDesign{comps: designWithDeps()}, &fakeExtProv{}, &fakePlatProv{}, &fakeBindings{})
 
 	svc.failProvisionRow(context.Background(), "org", "proj", 10, "e1", "boom")
 

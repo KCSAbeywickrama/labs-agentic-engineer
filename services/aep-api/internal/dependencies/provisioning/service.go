@@ -41,7 +41,6 @@ const defaultEnv = openchoreo.DevEnvironmentName
 type Service struct {
 	issues    IssueClient
 	execs     ExecutionStore
-	reeval    Reevaluator
 	design    DesignReader
 	repos     RepoLocator
 	rtCatalog ExternalRTCatalog
@@ -79,14 +78,12 @@ func (s *Service) SetOrgPublishMarker(m OrgPublishMarker) { s.orgPublish = m }
 // org-service visibility flow. Nil is a documented best-effort no-op (logged).
 func (s *Service) SetProviderBuildTrigger(t ProviderBuildTrigger) { s.providerBuild = t }
 
-// Deps is the provisioning service's collaborator set. reeval / projects /
-// access / providers may be nil (a nil reeval skips the release nudge — the
-// sweep heals it; a nil projects skips the cross-project consumer scan; nil
-// access / providers disable the access-request surface).
+// Deps is the provisioning service's collaborator set. projects / access /
+// providers may be nil (a nil projects skips the cross-project consumer scan;
+// nil access / providers disable the access-request surface).
 type Deps struct {
 	Issues    IssueClient
 	Execs     ExecutionStore
-	Reeval    Reevaluator
 	Design    DesignReader
 	Repos     RepoLocator
 	RTCatalog ExternalRTCatalog
@@ -103,7 +100,6 @@ func NewService(d Deps) *Service {
 	return &Service{
 		issues:    d.Issues,
 		execs:     d.Execs,
-		reeval:    d.Reeval,
 		design:    d.Design,
 		repos:     d.Repos,
 		rtCatalog: d.RTCatalog,
@@ -199,10 +195,10 @@ func (s *Service) admitProvisionRow(ctx context.Context, orgID, projectID, repo,
 	return row, admitted, err
 }
 
-// completeProvisionRow finishes a provision Execution succeeded, closes the gate
-// issue with a no-secrets reference, and re-evaluates the funnel so consumer tasks
-// gated on this dependency dispatch. Used by the synchronous external path and
-// the readiness watcher.
+// completeProvisionRow finishes a provision Execution succeeded and closes the
+// gate issue with a no-secrets reference. Consumer tasks gated on this
+// dependency release via the gate-issue-close webhook and the eventcore sweep.
+// Used by the synchronous external path and the readiness watcher.
 //
 // depName is the dependency this gate held, carried for the log line and (on the
 // watcher path) read off the execution row's Component.
@@ -226,11 +222,6 @@ func (s *Service) completeProvisionRow(ctx context.Context, orgID, projectID, de
 	comment := "✅ Provisioned. " + reference + "\n\nClosing — dependent tasks will dispatch automatically."
 	if err := s.issues.CloseIssue(ctx, orgID, projectID, issueNumber, comment); err != nil {
 		slog.WarnContext(ctx, "provisioning: close gate issue failed", "issue", issueNumber, "error", err)
-	}
-	if s.reeval != nil {
-		if err := s.reeval.Reevaluate(ctx); err != nil {
-			slog.WarnContext(ctx, "provisioning: reevaluate after provision failed", "error", err)
-		}
 	}
 }
 
