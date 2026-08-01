@@ -58,6 +58,12 @@ edits (see `deployments/scripts/setup-k3d.sh`).
   belongs to the run and one naming a path, a file or an env var belongs to the
   contract. That tie-break lives here, not in the skill — it is authoring
   guidance, useless to the agent at runtime.
+  **`## Contract-first` carries the premise both of those rest on** — `specs/` is
+  fixed at design time and is what implementation targets, so no issue waits for
+  another's code. Keep it to the premise; the ordering rule is the run's and the
+  per-dependency lookup the contract's. A dependency declaration (`dependsOn`,
+  `Depends on #N`) is a **runtime** edge, and text reading it as a build order is
+  a defect.
   **The platform text is the trunk** — gate a region only when the ungated
   version would make a mode attempt something impossible, and prefer gating one
   side to writing two variants. A *paired* region is prose duplicated per mode

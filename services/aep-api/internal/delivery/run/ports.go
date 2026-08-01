@@ -151,3 +151,21 @@ type ValidationCoordinator interface {
 type Dispatcher interface {
 	Dispatch(ctx context.Context, req delivery.MilestoneDispatch) (jobRef string, err error)
 }
+
+// APITraitSyncer lands the per-environment `api-configuration` trait config —
+// the `jwtAuth` policy the gateway enforces and the sibling-SPA CORS allowlist
+// — on each protected component's ReleaseBinding. projects.TraitSyncService
+// satisfies it.
+//
+// Why the supervisor drives this at all: the config's write target is the
+// ReleaseBinding, which OpenChoreo creates only once a build has produced a
+// workload. The Component CR's trait SHAPE is set far earlier (at component
+// ensure, pre-build) and is what makes OpenChoreo render the RestApi; this is
+// the other half, and it cannot be written before the deploy chain has run.
+// Builds settling green is the first moment in the run where that is true.
+//
+// Idempotent and convergent: re-running it re-asserts the same desired state,
+// so a cycle that syncs twice costs a round trip and changes nothing.
+type APITraitSyncer interface {
+	SyncProjectAPITraits(ctx context.Context, orgID, projectID string) error
+}

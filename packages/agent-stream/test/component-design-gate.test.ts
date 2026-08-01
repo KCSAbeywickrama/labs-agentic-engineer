@@ -129,9 +129,21 @@ const wiredDep = (wiring: unknown) => ({
   wiring,
 });
 
+// The sibling endpoint the derivation stamps for a `component` dependency. Its
+// `component` is the SCOPED OpenChoreo name — the value an agent left to guess
+// gets wrong (it writes the friendly one, the connection never resolves, and the
+// consumer's ReleaseBinding never reaches Ready).
+const SIBLING_ENDPOINT = {
+  component: "todo-api99-todo-api",
+  name: "http",
+  visibility: "project",
+  envBindings: { address: "TODO_API_URL" },
+};
+
 for (const [name, wiring] of [
   ["the platform-stamped shape", { ref: "shop-orders-db", envBindings: { host: "ORDERS_DB_HOST", port: "ORDERS_DB_PORT" } }],
   ["no outputs bound yet", { ref: "shop-orders-db", envBindings: {} }],
+  ["the sibling endpoint variant", { endpoint: SIBLING_ENDPOINT }],
 ] as const) {
   test(`accepts dependency wiring: ${name}`, () => {
     assert.equal(checkComponentDesign(PATH, design({ dependencies: [wiredDep(wiring)] })), null);
@@ -146,6 +158,17 @@ for (const [name, wiring] of [
   ["envBindings not an object", { ref: "shop-orders-db", envBindings: "ORDERS_DB_HOST" }],
   ["env var not a string", { ref: "shop-orders-db", envBindings: { port: 5432 } }],
   ["unknown property", { ref: "shop-orders-db", envBindings: {}, values: { host: "db" } }],
+  // The endpoints[] variant is all-or-nothing too, and exclusive with the
+  // resources[] one — OpenChoreo silently ignores a partial entry.
+  ["endpoint not an object", { endpoint: "todo-api99-todo-api" }],
+  ["endpoint component missing", { endpoint: { ...SIBLING_ENDPOINT, component: undefined } }],
+  ["endpoint component empty", { endpoint: { ...SIBLING_ENDPOINT, component: "" } }],
+  ["endpoint name missing", { endpoint: { ...SIBLING_ENDPOINT, name: undefined } }],
+  ["endpoint visibility missing", { endpoint: { ...SIBLING_ENDPOINT, visibility: undefined } }],
+  ["endpoint envBindings missing", { endpoint: { ...SIBLING_ENDPOINT, envBindings: undefined } }],
+  ["endpoint env var not a string", { endpoint: { ...SIBLING_ENDPOINT, envBindings: { address: 8080 } } }],
+  ["endpoint unknown property", { endpoint: { ...SIBLING_ENDPOINT, project: "todo-api99" } }],
+  ["both variants at once", { ref: "shop-orders-db", envBindings: {}, endpoint: SIBLING_ENDPOINT }],
 ] as const) {
   test(`rejects malformed dependency wiring: ${name}`, () => {
     const problem = checkComponentDesign(PATH, design({ dependencies: [wiredDep(wiring)] }));

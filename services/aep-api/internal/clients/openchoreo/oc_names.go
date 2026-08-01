@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/wso2/aep/aep-api/internal/platform/k8sname"
+	"github.com/wso2/aep/aep-api/internal/platform/ocname"
 )
 
 // unixMilliDigits is the width of the timestamp NewBuildRunName appends. Thirteen
@@ -58,19 +59,16 @@ func NewBuildRunName(projectName, componentName string) string {
 	return fmt.Sprintf("%s-%d", head, time.Now().UnixMilli())
 }
 
-// ScopedComponentName is the k8s metadata name OC uses for a component. OC
-// components across every project in an org share a single k8s namespace, so
-// two projects can't hold the same component name unless we disambiguate.
-// We prefix with the project name; the user's original name survives as the
-// display-name annotation.
+// ScopedComponentName is the k8s metadata name OC uses for a component.
+// Delegates to ocname.ScopedComponentName — the shared source of truth, because
+// spec stamps this same name into design.json at design save (see
+// spec/derive_wiring.go) and a byte of drift there costs a consumer's
+// ReleaseBinding its Ready condition.
 //
 // Callers must always pass the friendly component name (never a previously
-// scoped name) — call this exactly once, at the OC boundary.
+// scoped name) — scope exactly once.
 func ScopedComponentName(projectName, componentName string) string {
-	if projectName == "" {
-		return componentName
-	}
-	return projectName + "-" + componentName
+	return ocname.ScopedComponentName(projectName, componentName)
 }
 
 // FriendlyComponentName reverses ScopedComponentName using the owner project

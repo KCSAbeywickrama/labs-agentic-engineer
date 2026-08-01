@@ -131,11 +131,11 @@ func (d designComponents) ComponentPaths(ctx context.Context, orgID, projectID s
 	return paths, nil
 }
 
-// DeclaredResources maps each design component to its App Path plus the OC
-// resource refs its design says it consumes — read off each dependency's
-// platform-stamped `wiring` (spec/derive_wiring.go). A dependency with no wiring
-// is skipped: it is not derivable yet, so no agent could have wired it.
-// Satisfies eventcore.DesignReader's conformance half.
+// DeclaredResources maps each design component to its App Path plus the wiring
+// its design says it consumes — resource refs and sibling endpoint targets, both
+// read off each dependency's platform-stamped `wiring` (spec/derive_wiring.go). A
+// dependency with no wiring is skipped: it is not derivable yet, so no agent could
+// have wired it. Satisfies eventcore.DesignReader's conformance half.
 func (d designComponents) DeclaredResources(ctx context.Context, orgID, projectID string) (map[string]eventcore.ComponentResources, error) {
 	design, err := d.store.ReadDesign(ctx, orgID, projectID)
 	if err != nil {
@@ -148,7 +148,11 @@ func (d designComponents) DeclaredResources(ctx context.Context, orgID, projectI
 	for _, c := range design.Components {
 		entry := eventcore.ComponentResources{AppPath: strings.Trim(c.AppPath, "/")}
 		for _, dep := range c.Dependencies {
-			if dep.Wiring != nil && dep.Wiring.Ref != "" {
+			switch {
+			case dep.Wiring == nil:
+			case dep.Wiring.Endpoint != nil && dep.Wiring.Endpoint.Component != "":
+				entry.EndpointTargets = append(entry.EndpointTargets, dep.Wiring.Endpoint.Component)
+			case dep.Wiring.Ref != "":
 				entry.Refs = append(entry.Refs, dep.Wiring.Ref)
 			}
 		}
