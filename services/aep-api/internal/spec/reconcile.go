@@ -535,6 +535,7 @@ func loadLibrary(fsys fs.FS) ([]Skill, error) {
 			SkillMD:     string(raw),
 			References:  refs,
 			ContentSHA:  contentSHA(string(raw), refs),
+			Audience:    frontmatterAudience(fm),
 		})
 	}
 	return out, nil

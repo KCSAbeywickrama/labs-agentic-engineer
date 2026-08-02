@@ -165,6 +165,30 @@ func (s *SkillService) resolveFresh(ctx context.Context, orgID, name string) (*S
 	return findByName(skills, name), nil
 }
 
+// ListForMirror is List with read errors SURFACED rather than degraded to
+// empty — the same "same read, errors surfaced" shape as resolveFresh, for the
+// one caller that must NOT treat a git outage as "the org library is empty":
+// the project-skill mirror (skill_mirror.go). List/catalog degrade to nil on
+// any failure (§12) because a design/task run reading a stale-but-nonempty
+// catalog is far better than failing the run outright; the mirror's pruning
+// step has the opposite failure mode — an empty read would delete every
+// project's copy of every skill — so it must be able to tell "the library is
+// genuinely empty" apart from "the read failed".
+func (s *SkillService) ListForMirror(ctx context.Context, orgID string) ([]Skill, error) {
+	if s == nil || s.git == nil || s.repos == nil || orgID == "" {
+		return nil, fmt.Errorf("skills: service not configured for org %q", orgID)
+	}
+	repo, err := s.ensureSkillsRepo(ctx, orgID)
+	if err != nil {
+		return nil, fmt.Errorf("ensure skills repo: %w", err)
+	}
+	skills, err := s.loadCatalog(ctx, orgID, repo)
+	if err != nil {
+		return nil, fmt.Errorf("load skills catalog: %w", err)
+	}
+	return skills, nil
+}
+
 // List returns every skill visible to the org (including platform skills —
 // the internal catalog), sorted by kind then name. Callers that feed
 // user-facing or per-turn surfaces filter kinds themselves (ListSummaries
@@ -445,7 +469,8 @@ func parseBundleEntries(ctx context.Context, files map[string]string) []catalogE
 				// Enabled defaults true here (no manifest is in scope for this
 				// pure parse); loadCatalog cross-references skills-manifest.json
 				// and flips it for any entry the org disabled.
-				Enabled: true,
+				Enabled:  true,
+				Audience: frontmatterAudience(fm),
 			},
 			legacyDir: k.legacyDir,
 		}
