@@ -251,9 +251,22 @@ func TestDelete_SeededOrgSkill_NowDeletable(t *testing.T) {
 	if got := host.readAtHead("org1", skillRepoPath("demo")); got != "" {
 		t.Fatalf("delete did not remove files: %q", got)
 	}
-	// files AND manifest entry gone.
-	if _, ok := parseSkillsManifest([]byte(host.readAtHead("org1", skillsManifestPath)))["demo"]; ok {
-		t.Fatal("delete must drop the manifest entry")
+	// Files gone, but the manifest entry OUTLIVES them as a tombstone — it is
+	// the only record that this org threw the skill away, and it is what stops
+	// the next reconcile handing it straight back.
+	e, ok := parseSkillsManifest([]byte(host.readAtHead("org1", skillsManifestPath)))["demo"]
+	if !ok {
+		t.Fatal("delete must leave a tombstone entry, not drop the manifest entry")
+	}
+	if !e.Removed {
+		t.Fatalf("manifest entry survived delete but is not tombstoned: %#v", e)
+	}
+	// The point of the tombstone: an ongoing sync must not resurrect it.
+	if _, err := svc.Reconcile(ctx, "org1"); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if got := host.readAtHead("org1", skillRepoPath("demo")); got != "" {
+		t.Fatalf("sync resurrected a deleted skill: %q", got)
 	}
 }
 

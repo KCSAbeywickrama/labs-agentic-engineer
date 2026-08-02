@@ -589,13 +589,21 @@ func (s *SkillService) deleteSkillDir(ctx context.Context, orgID, name, message 
 	if err != nil {
 		return err
 	}
-	// Drop the name's manifest entry (if any) INSIDE the commit closure so the
-	// entry never outlives its files AND a concurrent commit's entries survive
-	// the CAS retry — see commitFiles. commitFiles stages the manifest only
-	// when this delete actually removes an entry (an absent name is a no-op
-	// that never conjures an empty manifest file).
+	// TOMBSTONE the name's manifest entry (if any) INSIDE the commit closure so
+	// a concurrent commit's entries survive the CAS retry — see commitFiles.
+	// The entry deliberately outlives its files: it is the only record that
+	// this org threw the skill away, which is what stops reconcile handing it
+	// back on the next sync. A name with NO entry is left untouched — it is
+	// org-authored, and inventing a tombstone for it would both conjure an
+	// empty manifest file and permanently block a future platform default of
+	// the same name. commitFiles stages the manifest only when these bytes
+	// actually change, so that case stays a clean no-op.
 	manifestFn := func(m SkillsManifest) SkillsManifest {
-		delete(m, name)
+		if e, ok := m[name]; ok {
+			e.Removed = true
+			e.BaseHash = "" // no live copy to compare against any more
+			m[name] = e
+		}
 		return m
 	}
 	_, err = s.commitFiles(ctx, orgID, repo, message, nil, append([]string{skillRepoDir(name)}, legacySkillDirs(name)...), manifestFn)

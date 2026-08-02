@@ -178,13 +178,19 @@ func TestImport_WritesManifestEntry(t *testing.T) {
 		t.Fatalf("imported manifest entry missing/wrong: %#v", m)
 	}
 
-	// Deleting the imported skill drops its entry in the same commit.
+	// Deleting the imported skill tombstones its entry in the same commit: the
+	// files go, the entry stays behind marked Removed so the name is never
+	// handed back by a later reconcile.
 	mut := NewSkillMutationService(svc)
 	if err := mut.Delete(ctx, "org1", "tester", res.Name); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
 	m = parseSkillsManifest([]byte(host.readAtHead("org1", skillsManifestPath)))
-	if _, ok := m[res.Name]; ok {
-		t.Fatal("deleted import's manifest entry not dropped")
+	e, ok = m[res.Name]
+	if !ok {
+		t.Fatal("deleted import must leave a tombstone entry")
+	}
+	if !e.Removed {
+		t.Fatalf("deleted import's entry is not tombstoned: %#v", e)
 	}
 }
