@@ -26,11 +26,9 @@ import {
   ToggleButtonGroup,
   Typography,
 } from "@wso2/oxygen-ui";
-import { Link } from "@tanstack/react-router";
 import { ExcalidrawView, PrototypeView } from "@aep/ui-excalidraw-view";
 import { useDerivedPrototype, useDerivedWireframe } from "../api/useDerivedDesign";
 import { deriveWireframeScene } from "../derive/deriveWireframe";
-import { componentOf } from "../api/designTree";
 import type { SpecFileEntry } from "../api/mapping";
 import type { CollabSpec } from "../collab/useCollabSpec";
 import { useYTextString } from "../collab/useYTextString";
@@ -125,15 +123,51 @@ export function WireframePanel({
   // The toggle only makes sense once we've settled on a committed scene — the
   // streaming/agent-busy/pending/error branches above all return before here.
   const showToggle = settled && scene != null;
-  const component = componentOf(dslPath);
-  const fullScreenLink = component != null && (
-    <Link
-      to="/projects/$projectName/prototype/$component"
-      params={{ projectName, component }}
+
+  // A compact segmented control (Oxygen's ToggleButtonGroup, restyled as a
+  // pill) rather than the default chunky outlined pair — reads as a native
+  // small view switch instead of a stray widget. Colors come from theme
+  // tokens so it follows the active Oxygen theme.
+  const viewSwitch = showToggle && (
+    <ToggleButtonGroup
+      size="small"
+      exclusive
+      value={mode}
+      onChange={(_, next: ViewMode | null) => {
+        if (next) setMode(next);
+      }}
+      sx={{
+        bgcolor: "action.hover",
+        borderRadius: 999,
+        p: 0.25,
+        "& .MuiToggleButtonGroup-grouped": {
+          border: 0,
+          borderRadius: 999,
+          px: 1.5,
+          minHeight: 28,
+          textTransform: "none",
+          fontSize: "0.8125rem",
+          color: "text.secondary",
+          "&.Mui-selected": {
+            bgcolor: "background.paper",
+            color: "text.primary",
+            boxShadow: 1,
+            "&:hover": { bgcolor: "background.paper" },
+          },
+        },
+      }}
     >
-      Open full screen
-    </Link>
+      <ToggleButton value="canvas">Canvas</ToggleButton>
+      <ToggleButton value="prototype">Prototype</ToggleButton>
+    </ToggleButtonGroup>
   );
+
+  // Prototype mode with a rendered model hands the switch to PrototypeView's
+  // `leadingSlot`, so the switch joins PrototypeView's own toolbar row (back ·
+  // picker · description) instead of stacking a second gray bar above it.
+  // Every other state (canvas, loading, error) keeps its own minimal header —
+  // just the switch — since there's no PrototypeView toolbar to join.
+  const showOwnHeader = showToggle && !(mode === "prototype" && prototypeModel && !prototypePending);
 
   // While streaming, ONE mounted canvas takes successive scenes through
   // ExcalidrawView's updateScene path (no `key`, no remount per line). The
@@ -158,7 +192,7 @@ export function WireframePanel({
           <Chip size="small" color="primary" variant="outlined" label="Drawing…" />
         </Box>
       )}
-      {showToggle && (
+      {showOwnHeader && (
         <Box
           sx={{
             px: 1.5,
@@ -169,17 +203,7 @@ export function WireframePanel({
             borderColor: "divider",
           }}
         >
-          <ToggleButtonGroup
-            size="small"
-            exclusive
-            value={mode}
-            onChange={(_, next: ViewMode | null) => {
-              if (next) setMode(next);
-            }}
-          >
-            <ToggleButton value="canvas">Canvas</ToggleButton>
-            <ToggleButton value="prototype">Prototype</ToggleButton>
-          </ToggleButtonGroup>
+          {viewSwitch}
         </Box>
       )}
       {mode === "prototype" && showToggle ? (
@@ -188,7 +212,7 @@ export function WireframePanel({
             <CircularProgress aria-label="Loading prototype" />
           </Box>
         ) : prototypeModel ? (
-          <PrototypeView key={sha} model={prototypeModel} fillHeight headerAction={fullScreenLink} />
+          <PrototypeView key={sha} model={prototypeModel} fillHeight leadingSlot={viewSwitch} />
         ) : (
           <Typography variant="body2" color="text.secondary" sx={{ p: 2 }}>
             This wireframe could not be rendered as a prototype.

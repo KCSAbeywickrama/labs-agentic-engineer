@@ -19,13 +19,16 @@
 import { useMemo, useReducer, useRef, useState, useEffect, Suspense, type ReactNode } from "react";
 import { Box, CircularProgress, IconButton, MenuItem, Select, Typography } from "@wso2/oxygen-ui";
 import { ArrowLeft } from "@wso2/oxygen-ui-icons-react";
-import { PROTOTYPE_LINK_PREFIX, type PrototypeModel } from "@aep/excalidraw-dsl";
+import type { PrototypeModel } from "@aep/excalidraw-dsl";
 import { ExcalidrawComponent } from "./lazyExcalidraw.js";
 import { parseScene, fitContentToViewport } from "./scene.js";
 import { prototypeNavReducer } from "./prototypeState.js";
 import { hotspotToViewport, type ViewportRect } from "./hotspotOverlay.js";
 
 const FLASH_MS = 900;
+
+/** Excalidraw's own scroll/zoom snapshot — the shape hotspotToViewport needs. */
+type CameraState = { scrollX: number; scrollY: number; zoom: { value: number } };
 
 export interface PrototypeViewProps {
   model: PrototypeModel;
@@ -35,23 +38,27 @@ export interface PrototypeViewProps {
   onScreenChange?: (screen: string) => void;
   /** Fill the parent's height (else fixed 600px), like ExcalidrawView. */
   fillHeight?: boolean;
-  /** Right-aligned toolbar slot (e.g. "open full screen" in the inline embed). */
-  headerAction?: ReactNode;
+  /** Left-aligned toolbar slot (e.g. the console's Canvas | Prototype switch,
+   *  so the switch and this view's own chrome read as one toolbar row). */
+  leadingSlot?: ReactNode;
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // Expects to be remounted (e.g. via a `key`) when `model` changes: `initialData`
 // is captured once at mount, and the screen-swap effect only reacts to
 // navigation, not to a new `model` identity.
-export function PrototypeView({ model, initialScreen, onScreenChange, fillHeight, headerAction }: PrototypeViewProps) {
+export function PrototypeView({ model, initialScreen, onScreenChange, fillHeight, leadingSlot }: PrototypeViewProps) {
   const byName = useMemo(() => new Map(model.screens.map((s) => [s.name, s])), [model]);
   const first = model.screens[0]!.name;
   const start = initialScreen && byName.has(initialScreen) ? initialScreen : first;
   const [nav, dispatch] = useReducer(prototypeNavReducer, { current: start, stack: [] });
   const apiRef = useRef<any>(null);
-  const navigatedRef = useRef(false);
-  const [flash, setFlash] = useState<ViewportRect[] | null>(null);
+  const [flash, setFlash] = useState(false);
   const flashTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  // Current screen's hotspots, transformed to container-viewport coordinates.
+  // Recomputed on scroll/zoom, after a screen swap's fit-to-content settles,
+  // and on initial mount — see the effects below.
+  const [overlayRects, setOverlayRects] = useState<ViewportRect[]>([]);
 
   useEffect(() => {
     return () => {
@@ -63,6 +70,22 @@ export function PrototypeView({ model, initialScreen, onScreenChange, fillHeight
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const initialData = useMemo(() => parseScene(model.screens.find((s) => s.name === start)!.sceneJson), []);
 
+  const recomputeOverlay = (camera: CameraState) => {
+    setOverlayRects(screen.hotspots.map((h) => hotspotToViewport(h, camera)));
+  };
+
+  // fitContentToViewport settles inside a requestAnimationFrame; chain one
+  // more frame after it so the overlay is measured against the SETTLED
+  // camera, not the pre-fit one.
+  const recomputeOverlaySoon = () => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const api = apiRef.current;
+        if (api) recomputeOverlay(api.getAppState());
+      });
+    });
+  };
+
   // Screen swap: one mounted canvas, updateScene + refit — ExcalidrawView's
   // streaming pattern. Also notify the consumer (URL sync).
   const mounted = useRef(start);
@@ -72,41 +95,28 @@ export function PrototypeView({ model, initialScreen, onScreenChange, fillHeight
     mounted.current = nav.current;
     const api = apiRef.current;
     const next = parseScene(screen.sceneJson);
+    setOverlayRects([]); // stale positions belong to the outgoing screen
     if (!api || !next?.elements) return;
     try {
       api.updateScene({ elements: next.elements });
       fitContentToViewport(api, next.elements);
+      recomputeOverlaySoon();
     } catch {
       /* api torn down */
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nav.current]);
 
-  const onLinkOpen = (element: any, event: CustomEvent<{ nativeEvent: MouseEvent }>) => {
-    const link: string | null = element?.link ?? null;
-    if (!link?.startsWith(PROTOTYPE_LINK_PREFIX)) return; // real URLs keep default behavior
-    event.preventDefault();
-    navigatedRef.current = true;
-    const target = link.slice(PROTOTYPE_LINK_PREFIX.length);
-    if (byName.has(target)) dispatch({ type: "navigate", to: target });
-  };
-
-  // Dead-area click → flash all hotspots (Figma-style discoverability).
-  // onLinkOpen fires during pointerup, before the click event bubbles here,
-  // so the ref cleanly separates "navigated" from "dead click".
-  const onCanvasClick = () => {
-    if (navigatedRef.current) {
-      navigatedRef.current = false;
-      return;
-    }
-    const api = apiRef.current;
-    if (!api || screen.hotspots.length === 0) return;
-    const appState = api.getAppState();
-    setFlash(screen.hotspots.map((h) => hotspotToViewport(h, appState)));
+  // Dead-area click (canvas background, not a hotspot overlay — those stop
+  // propagation) → flash every hotspot on the current screen (Figma-style
+  // discoverability).
+  const onDeadAreaClick = () => {
+    if (screen.hotspots.length === 0) return;
+    setFlash(true);
     if (flashTimerRef.current !== null) window.clearTimeout(flashTimerRef.current);
     flashTimerRef.current = window.setTimeout(() => {
       flashTimerRef.current = null;
-      setFlash(null);
+      setFlash(false);
     }, FLASH_MS);
   };
 
@@ -126,8 +136,10 @@ export function PrototypeView({ model, initialScreen, onScreenChange, fillHeight
         "& .App-menu_top__left": { display: "none !important" },
       }}
     >
-      {/* Toolbar: back · screen picker · description · action slot */}
+      {/* Toolbar: leading slot (e.g. the console's view switch) · back ·
+          screen picker · description — one coherent row. */}
       <Box sx={{ px: 1.5, py: 1, display: "flex", alignItems: "center", gap: 1, borderBottom: 1, borderColor: "divider" }}>
+        {leadingSlot}
         <IconButton size="small" aria-label="Back" disabled={nav.stack.length === 0} onClick={() => dispatch({ type: "back" })}>
           <ArrowLeft size={16} />
         </IconButton>
@@ -148,9 +160,8 @@ export function PrototypeView({ model, initialScreen, onScreenChange, fillHeight
             {screen.description}
           </Typography>
         )}
-        <Box sx={{ ml: "auto" }}>{headerAction}</Box>
       </Box>
-      <Box sx={{ position: "relative", flex: 1, minHeight: 0 }} onClick={onCanvasClick}>
+      <Box sx={{ position: "relative", flex: 1, minHeight: 0 }} onClick={onDeadAreaClick}>
         <Box sx={{ position: "absolute", inset: 0 }}>
           <Suspense
             fallback={
@@ -162,32 +173,64 @@ export function PrototypeView({ model, initialScreen, onScreenChange, fillHeight
             <ExcalidrawComponent
               initialData={initialData as any}
               viewModeEnabled
-              onLinkOpen={onLinkOpen as any}
+              onScrollChange={(scrollX: number, scrollY: number, zoom: { value: number }) =>
+                recomputeOverlay({ scrollX, scrollY, zoom })
+              }
               excalidrawAPI={(api: any) => {
                 apiRef.current = api;
                 const els = initialData?.elements;
                 if (els?.length) fitContentToViewport(api, els);
+                recomputeOverlaySoon();
               }}
             />
           </Suspense>
         </Box>
-        {flash?.map((r, i) => (
-          <Box
-            key={i}
-            sx={{
-              position: "absolute",
-              left: r.left,
-              top: r.top,
-              width: r.width,
-              height: r.height,
-              border: "2px solid",
-              borderColor: "primary.main",
-              borderRadius: 1,
-              bgcolor: "rgba(250,123,63,0.12)",
-              pointerEvents: "none",
-            }}
-          />
-        ))}
+        {screen.hotspots.map((h, i) => {
+          const r = overlayRects[i];
+          if (!r) return null;
+          return (
+            <Box
+              key={`${h.target}:${i}`}
+              role="button"
+              aria-label={`Go to ${h.target}`}
+              tabIndex={0}
+              onClick={(e) => {
+                e.stopPropagation();
+                dispatch({ type: "navigate", to: h.target });
+              }}
+              onKeyDown={(e) => {
+                if (e.key !== "Enter" && e.key !== " ") return;
+                e.preventDefault();
+                e.stopPropagation();
+                dispatch({ type: "navigate", to: h.target });
+              }}
+              sx={{
+                position: "absolute",
+                // Excalidraw's own interactive canvas layer sets z-index: 2
+                // (its CSS, not ours); since neither ancestor Box here
+                // establishes its own stacking context, that z-index escapes
+                // to this box's context and would otherwise paint OVER a
+                // later-in-DOM but z-index:auto sibling. Beat it explicitly.
+                zIndex: 3,
+                left: r.left,
+                top: r.top,
+                width: r.width,
+                height: r.height,
+                cursor: "pointer",
+                borderRadius: 1,
+                border: "2px solid transparent",
+                ...(flash
+                  ? { borderColor: "primary.main", bgcolor: "rgba(250,123,63,0.12)" }
+                  : {
+                      "&:hover": {
+                        borderColor: "primary.main",
+                        bgcolor: "rgba(250,123,63,0.12)",
+                      },
+                    }),
+              }}
+            />
+          );
+        })}
       </Box>
     </Box>
   );

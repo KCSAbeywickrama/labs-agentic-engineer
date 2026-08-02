@@ -32,9 +32,9 @@ vi.mock("@aep/ui-excalidraw-view", () => ({
       data-elements={String(JSON.parse(scene).elements?.length ?? 0)}
     />
   ),
-  PrototypeView: (p: { model: { screens: unknown[] }; headerAction?: unknown }) => (
+  PrototypeView: (p: { model: { screens: unknown[] }; leadingSlot?: unknown }) => (
     <div data-testid="prototype" data-screens={p.model.screens.length}>
-      {p.headerAction as never}
+      {p.leadingSlot as never}
     </div>
   ),
 }));
@@ -45,30 +45,6 @@ const mockDerivedPrototype = vi.fn();
 vi.mock("../api/useDerivedDesign", () => ({
   useDerivedWireframe: (...args: unknown[]) => mockDerived(...args),
   useDerivedPrototype: (...args: unknown[]) => mockDerivedPrototype(...args),
-}));
-
-vi.mock("@tanstack/react-router", () => ({
-  // Resolves a typed `to`/`params` pair into the concrete path, same as the
-  // real router would — so `data-to` assertions read the resolved URL, not
-  // the `$param` route pattern literal.
-  Link: (p: {
-    to?: unknown;
-    params?: Record<string, string>;
-    children?: unknown;
-  }) => {
-    const resolved =
-      typeof p.to === "string" && p.params
-        ? Object.entries(p.params).reduce(
-            (path, [key, value]) => path.replace(`$${key}`, value),
-            p.to,
-          )
-        : String(p.to);
-    return (
-      <a href="#" data-to={resolved}>
-        {p.children as never}
-      </a>
-    );
-  },
 }));
 
 const DSL_PATH = "specs/design/components/shop-webapp/wireframes.dsl";
@@ -193,10 +169,6 @@ describe("WireframePanel prototype toggle", () => {
     expect(screen.getByRole("button", { name: /prototype/i })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /prototype/i }));
     expect(screen.getByTestId("prototype")).toBeInTheDocument();
-    expect(screen.getByText(/open full screen/i)).toHaveAttribute(
-      "data-to",
-      "/projects/p/prototype/shop-webapp",
-    );
     fireEvent.click(screen.getByRole("button", { name: /canvas/i }));
     expect(screen.getByTestId("excalidraw")).toBeInTheDocument();
   });

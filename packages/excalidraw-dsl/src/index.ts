@@ -170,7 +170,7 @@ interface ExcalidrawElementBase {
   isDeleted: boolean;
   boundElements: { id: string; type: string }[] | null;
   updated: number;
-  link: string | null;
+  link: null;
   locked: boolean;
 }
 
@@ -260,11 +260,6 @@ export function tryDslToExcalidraw(
 }
 
 // ---------- Prototype (click-through) compile mode ----------
-
-/** URI scheme stamped onto every navigable control's Excalidraw `link`
- *  field in prototype mode. The single definition for the whole repo — the
- *  viewer (later tasks) parses `aep://screen/<Name>` to jump screens. */
-export const PROTOTYPE_LINK_PREFIX = 'aep://screen/';
 
 export interface PrototypeHotspot {
   x: number;
@@ -1160,7 +1155,6 @@ function renderWireframes(ast: WireframeAst, opts?: WireframeRenderOpts): Excali
           );
         }
       }
-      const emittedFrom = out.length;
       switch (el.kind) {
         case 'navbar': {
           // White top bar laid out like a real webapp header: the first item
@@ -1567,14 +1561,6 @@ function renderWireframes(ast: WireframeAst, opts?: WireframeRenderOpts): Excali
           }
           out.push(withColor(makeText(stableId(`${eid}:lb`), ex, ey + el.height - 16, el.width, 14, el.label || 'chart', 12, 'center'), '#868e96'));
           break;
-        }
-      }
-      if (opts?.prototype && el.navTo) {
-        const canonical = opts.prototype.validTargets.get(el.navTo.toLowerCase());
-        if (canonical) {
-          for (let i = emittedFrom; i < out.length; i++) {
-            out[i] = { ...out[i]!, link: `${PROTOTYPE_LINK_PREFIX}${canonical}` };
-          }
         }
       }
     }

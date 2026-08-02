@@ -18,11 +18,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import {
-  tryDslToPrototype,
-  dslToExcalidraw,
-  PROTOTYPE_LINK_PREFIX,
-} from "../src/index.js";
+import { tryDslToPrototype, dslToExcalidraw } from "../src/index.js";
 
 type El = {
   type: string; x: number; y: number; width: number; height: number;
@@ -70,24 +66,24 @@ test("each scene is one screen with its frame at origin and no canvas decoration
   assert.ok(!texts.includes("Sign-in for all roles"), "description subtitle must be suppressed");
 });
 
-test("a navigable control's elements all carry the aep:// link", () => {
+test("prototype scenes carry no Excalidraw links — navigation is overlay-driven, not link-driven", () => {
   const m = model(DSL);
-  const els = elements(m.screens[0]!.sceneJson);
-  const linked = els.filter((e) => e.link === `${PROTOTYPE_LINK_PREFIX}Dashboard`);
-  // button rect + its centered label text at minimum
-  assert.ok(linked.length >= 2, `expected >=2 linked elements, got ${linked.length}`);
-  assert.ok(linked.some((e) => e.type === "text" && e.text === "Sign in"));
+  for (const s of m.screens) {
+    const els = elements(s.sceneJson);
+    assert.ok(
+      els.every((e) => (e.link ?? null) === null),
+      `screen ${s.name}: expected every element's link to be null`,
+    );
+  }
 });
 
-test("hotspot matches the control's laid-out box and canonical target", () => {
+test("hotspot matches the navigable control's laid-out box and canonical target", () => {
   const m = model(DSL);
   const hs = m.screens[0]!.hotspots;
   assert.equal(hs.length, 1);
   assert.equal(hs[0]!.target, "Dashboard");
   const els = elements(m.screens[0]!.sceneJson);
-  const btnRect = els.find((e) => e.type === "rectangle" && e.link === `${PROTOTYPE_LINK_PREFIX}Dashboard`)!;
-  assert.equal(hs[0]!.x, btnRect.x);
-  assert.equal(hs[0]!.y, btnRect.y);
+  const btnRect = els.find((e) => e.type === "rectangle" && e.x === hs[0]!.x && e.y === hs[0]!.y)!;
   assert.equal(hs[0]!.width, btnRect.width);
   assert.equal(hs[0]!.height, btnRect.height);
 });
