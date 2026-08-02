@@ -83,6 +83,14 @@ Features currently being built. One line each; **must be emptied on ship**
 (the line moves to the inventory below). If a line sits here for weeks,
 that's a stalled feature — investigate, don't ignore.
 
+- Spec view — wireframe prototype mode: a **Canvas | Prototype** toggle on
+  settled wireframes swaps to a single-screen, click-through view — controls
+  annotated `-> Target` in the `.dsl` jump screens Figma-prototype style, with
+  back/picker toolbar and dead-area hotspot flash; **Open full screen** lands
+  on a deep-linkable `/projects/:project/prototype/:component?screen=<Name>`
+  route. `@aep/excalidraw-dsl`'s `tryDslToPrototype` compiles per-screen
+  scenes client-side (no BE handshake, no contract change; ADR-0008) —
+  [#348](https://github.com/wso2/labs-agentic-engineer/issues/348)
 - Agent chat — structured question cards: `ask_question` (single) +
   `ask_questions` (batch form) tool-calls rendered as native Oxygen UI cards
   in the activity stream (answer returns as the next turn's plain text);
