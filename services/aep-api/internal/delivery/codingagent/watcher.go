@@ -277,9 +277,13 @@ func (w *JobWatcher) checkOne(ctx context.Context, row *delivery.Execution) {
 }
 
 func (w *JobWatcher) finishFailed(ctx context.Context, row *delivery.Execution, reason string) {
-	if _, err := w.execRows.Finish(ctx, row.ID, string(taskmeta.ExecFailed), reason); err != nil {
+	exec, err := w.execRows.Finish(ctx, row.ID, string(taskmeta.ExecFailed), reason)
+	if err != nil {
 		slog.ErrorContext(ctx, "codingagent.JobWatcher: finish failed", "execution", row.ID, "reason", reason, "error", err)
 		return
+	}
+	if exec == nil {
+		return // lost the race — another replica already finished
 	}
 	slog.InfoContext(ctx, "codingagent.JobWatcher: coding execution failed", "execution", row.ID, "reason", reason)
 	w.notifier.Notify(row.Repo, row.IssueNumber)

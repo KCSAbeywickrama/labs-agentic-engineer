@@ -69,7 +69,7 @@ func publishFor(t *testing.T, seed []sourcecontrol.IssueInfo, design []spec.Desi
 	t.Helper()
 	issues := newFakeIssues(append([]sourcecontrol.IssueInfo{provisionGateIssue(11, "orders-db")}, seed...))
 	svc := NewService(Deps{
-		Issues: issues, Execs: &fakeExecStore{}, Reeval: &fakeReeval{},
+		Issues: issues, Execs: &fakeExecStore{},
 		Design: fakeDesign{comps: design}, Repos: fakeRepos{},
 		ExtProv: &fakeExtProv{}, PlatProv: &fakePlatProv{},
 		Bindings: &fakeBindings{}, Providers: providers,
@@ -132,7 +132,7 @@ func TestWiring_GateResolutionPostsNothing(t *testing.T) {
 		codingIssue(21, "Implement web", "open"),
 	})
 	bindings := &fakeBindings{byName: map[string]*openchoreo.ResourceReleaseBinding{}}
-	svc := newTestService(issues, &fakeExecStore{}, &fakeReeval{}, fakeDesign{comps: wiringDesign()},
+	svc := newTestService(issues, &fakeExecStore{}, fakeDesign{comps: wiringDesign()},
 		&fakeExtProv{}, &fakePlatProv{}, bindings)
 
 	if err := svc.Provision(context.Background(), "org", "proj", "orders-db", nil, nil); err != nil {
@@ -240,7 +240,7 @@ func TestWiring_IdempotentAcrossDispatches(t *testing.T) {
 		codingIssue(21, "Implement web", "open"),
 	})
 	svc := NewService(Deps{
-		Issues: issues, Execs: &fakeExecStore{}, Reeval: &fakeReeval{},
+		Issues: issues, Execs: &fakeExecStore{},
 		Design: fakeDesign{comps: wiringDesign()}, Repos: fakeRepos{},
 		ExtProv: &fakeExtProv{}, PlatProv: &fakePlatProv{},
 		Bindings: &fakeBindings{}, Providers: siblingResolved(),
@@ -272,7 +272,7 @@ func TestWiring_PartialPostIsUnmarkedAndSupersededLater(t *testing.T) {
 	issues := newFakeIssues([]sourcecontrol.IssueInfo{codingIssue(21, "Implement web", "open")})
 	providers := siblingResolved() // employee-api absent from nsVisible → unresolved
 	deps := Deps{
-		Issues: issues, Execs: &fakeExecStore{}, Reeval: &fakeReeval{},
+		Issues: issues, Execs: &fakeExecStore{},
 		Design: fakeDesign{comps: design}, Repos: fakeRepos{},
 		ExtProv: &fakeExtProv{}, PlatProv: &fakePlatProv{},
 		Bindings: &fakeBindings{}, Providers: providers,

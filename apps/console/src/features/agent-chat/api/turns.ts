@@ -144,6 +144,22 @@ export async function getTurn(
   return data;
 }
 
+/** Thrown when the turn-stream attach HTTP call fails. `status` lets callers
+ *  discriminate a pre-stream 404 (buffer not on this replica / not yet minted)
+ *  from other failures. */
+export class TurnStreamAttachError extends Error {
+  readonly status: number;
+  constructor(status: number, message = "Failed to attach to the turn stream") {
+    super(message);
+    this.name = "TurnStreamAttachError";
+    this.status = status;
+  }
+}
+
+export function isTurnStreamNotFound(err: unknown): boolean {
+  return err instanceof TurnStreamAttachError && err.status === 404;
+}
+
 /**
  * Open the turn's SSE stream as a raw byte stream (replay from `from`, then
  * live tail). The caller iterates it with @aep/agent-stream's parseSseStream.
@@ -154,7 +170,7 @@ export async function openTurnStream(
   from: number,
   signal: AbortSignal,
 ): Promise<ReadableStream<Uint8Array>> {
-  const { data, error } = await client.GET(
+  const { data, error, response } = await client.GET(
     "/projects/{projectName}/turns/{turnId}/stream",
     {
       params: { path: { projectName, turnId }, query: { from } },
@@ -162,6 +178,8 @@ export async function openTurnStream(
       signal,
     },
   );
-  if (error || !data) throw new Error("Failed to attach to the turn stream");
+  if (error || !data) {
+    throw new TurnStreamAttachError(response?.status ?? 0);
+  }
   return data as ReadableStream<Uint8Array>;
 }
