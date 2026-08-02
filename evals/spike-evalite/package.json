@@ -10,6 +10,7 @@
     "@ai-sdk/anthropic": "^4.0.0",
     "ai": "^7.0.2",
     "evalite": "latest",
-    "vitest": "^3.0.0"
+    "vitest": "^3.0.0",
+    "yaml": "^2.9.0"
   }
 }
