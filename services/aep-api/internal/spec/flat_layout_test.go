@@ -231,23 +231,22 @@ func TestReconcile_MigratesLegacyRepo(t *testing.T) {
 	for _, sk := range skills {
 		byName[sk.Name] = sk
 	}
-	// Platform-kind embedded skills are always managed, so all of them come
-	// back regardless of prior presence; org-kind embedded defaults absent
-	// from this (legacy) repo are opt-in on ongoing sync (this Reconcile call
-	// is NOT first-creation) and are NOT resurrected here — only the org-kind
-	// names already present (go, react-webapp) are migrated/preserved. Plus
-	// the preserved custom skill (mine) — minus nothing else. retired is
-	// purged. The platform side is derived from the library rather than
-	// hardcoded, so this never needs bumping when a skill is added to or
-	// removed from skills/.
-	for _, absentOrgDefault := range []string{"api-management", "thunder-authentication"} {
-		if _, ok := byName[absentOrgDefault]; ok {
-			t.Fatalf("absent org-kind default %q must stay opt-in on ongoing sync, got resurrected: %+v", absentOrgDefault, skillKeysOf(byName))
+	// Every embedded default comes back, platform- and org-kind alike: this
+	// legacy repo predates tombstones, so an absent org-kind name was never
+	// deleted-with-a-tombstone — it is simply one this repo has never been
+	// handed, and seeding it is the point. Present org-kind names (go,
+	// react-webapp) are migrated/preserved rather than re-seeded. Plus the
+	// preserved custom skill (mine). retired is purged. Both sides are derived
+	// from the library rather than hardcoded, so this never needs bumping when
+	// a skill is added to or removed from skills/.
+	for _, orgDefault := range []string{"api-management", "thunder-authentication"} {
+		if _, ok := byName[orgDefault]; !ok {
+			t.Fatalf("org-kind default %q was not seeded on migration: %+v", orgDefault, skillKeysOf(byName))
 		}
 	}
-	// go + react-webapp (present org-kind names) + mine (preserved custom).
-	const nonPlatformAfterMigration = 3
-	if want := EmbeddedLibraryCount(t, SkillKindPlatform) + nonPlatformAfterMigration; len(skills) != want {
+	// The whole embedded library + mine (the preserved custom skill).
+	const preservedCustom = 1
+	if want := EmbeddedLibraryCount(t, "") + preservedCustom; len(skills) != want {
 		t.Fatalf("catalog size after migration = %d, want %d: %+v", len(skills), want, skillKeysOf(byName))
 	}
 	if _, ok := byName["retired"]; ok {

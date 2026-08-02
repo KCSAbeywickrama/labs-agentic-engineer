@@ -46,6 +46,8 @@ function toRows(lines: TimelineEvent[]): Row[] {
       });
     }
     const { text, tone } = formatLine(line);
+    // Deliberately silent lines carry no row — see formatLine.
+    if (!text) continue;
     rows.push({
       type: "line",
       key: timelineEventKey(line),

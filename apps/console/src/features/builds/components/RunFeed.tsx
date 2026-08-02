@@ -26,40 +26,16 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import { ChevronDown } from "@wso2/oxygen-ui-icons-react";
-import { formatLine } from "../../tasks/lib/timeline";
-import {
-  runLineKey,
-  useRunProgress,
-  type RunProgressCycle,
-} from "../hooks/useRunProgress";
+import { AgentLogLines, LogSurface } from "./AgentLogLines";
+import { useRunProgress, type RunProgressCycle } from "../hooks/useRunProgress";
 
 // The run feed: ONE SSE stream for the whole run, rendered as one accordion
 // section per cycle. Grouping by cycle is the point — a fix or conflict cycle
 // re-enters an earlier phase of the loop, so a flat log would read as the agent
-// going backwards. Each line carries an emitter chip: `main` for the run's main
-// agent, `subagent` for work it fanned out with the Task tool.
-
-function EmitterChip({ emitter }: { emitter: string }) {
-  // The main agent is the overwhelming majority of lines, so only a subagent
-  // line is stamped — an unstamped line reads as "the main agent", which is
-  // exactly the contract's own rule and keeps the feed quiet.
-  if (emitter !== "subagent") return null;
-  return (
-    <Chip
-      label="subagent"
-      size="small"
-      variant="outlined"
-      sx={{
-        height: 16,
-        fontSize: "0.6875rem",
-        color: "grey.400",
-        borderColor: "grey.700",
-        mr: 1,
-        flexShrink: 0,
-      }}
-    />
-  );
-}
+// going backwards. Within a cycle, each subagent the main agent fanned out to
+// gets its own collapsible section (see AgentLogLines, shared with the task
+// log) — several run at once and their lines arrive interleaved, so read flat
+// they would look like one agent contradicting itself.
 
 function CycleSection({
   section,
@@ -93,48 +69,9 @@ function CycleSection({
         </Stack>
       </AccordionSummary>
       <AccordionDetails sx={{ pt: 0 }}>
-        <Box
-          sx={{
-            bgcolor: "grey.900",
-            borderRadius: 1,
-            p: 2,
-            maxHeight: 420,
-            overflowY: "auto",
-            fontFamily: "monospace",
-            fontSize: "0.8125rem",
-            lineHeight: 1.7,
-          }}
-        >
-          {lines.length === 0 ? (
-            <Typography component="div" sx={{ font: "inherit", color: "grey.500" }}>
-              No output from this cycle yet.
-            </Typography>
-          ) : (
-            lines.map((line) => {
-              const { text, tone } = formatLine(line);
-              return (
-                <Box
-                  key={runLineKey(line)}
-                  sx={{ display: "flex", alignItems: "baseline" }}
-                >
-                  <EmitterChip emitter={line.emitter} />
-                  <Typography
-                    component="div"
-                    sx={{
-                      font: "inherit",
-                      color: tone,
-                      whiteSpace: "pre-wrap",
-                      wordBreak: "break-word",
-                      minWidth: 0,
-                    }}
-                  >
-                    {text}
-                  </Typography>
-                </Box>
-              );
-            })
-          )}
-        </Box>
+        <LogSurface>
+          <AgentLogLines lines={lines} />
+        </LogSurface>
       </AccordionDetails>
     </Accordion>
   );

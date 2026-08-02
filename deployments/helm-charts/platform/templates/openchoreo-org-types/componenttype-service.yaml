@@ -28,6 +28,9 @@ spec:
           type: integer
           default: 1
           minimum: 1
+        # Default limit sized for a JVM-based service (Ballerina's `bal run`
+        # recompiles from source on every pod start) rather than the leaner
+        # Go binaries this same default also covers.
         resources:
           type: object
           default: {}
@@ -48,10 +51,10 @@ spec:
               properties:
                 cpu:
                   type: string
-                  default: "200m"
+                  default: "500m"
                 memory:
                   type: string
-                  default: "256Mi"
+                  default: "768Mi"
   # The Pod template + the four `forEach` ConfigMap/ExternalSecret resources
   # below opt this CCT into OpenChoreo's `configurations.*` contract:
   #   - container.env / container.files declared in the Workload, AND

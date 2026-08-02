@@ -16,6 +16,12 @@
  * under the License.
  */
 
+import {
+  formatLine as formatShared,
+  formatOutcome as formatOutcomeShared,
+  type LineTone,
+  type ProgressLineView,
+} from "@aep/progress-view";
 import type { components } from "../../../generated/aep-api";
 
 type TimelineEvent = components["schemas"]["TimelineEvent"];
@@ -33,97 +39,52 @@ export function timelineEventKey(e: TimelineEvent): string {
   return `${e.executionId}:0:${e.ts}:${e.summary ?? e.message ?? ""}`;
 }
 
-// Friendly labels for phase ids. Covers both the runner's own workspace phases
-// and the BFF's synthetic "dark zone" markers (agent_progress.go) that narrate
-// pod scheduling / image pull / boot — the stretch before the runner writes its
-// first line. An unmapped phase falls back to its summary, then the raw id, so
-// nothing hides.
-const PHASE_LABELS: Record<string, string> = {
-  runner_scheduling: "Waiting for a runner to be scheduled…",
-  runner_pulling_image: "Pulling the agent image…",
-  runner_image_pull_backoff: "Still pulling the agent image (retrying)…",
-  runner_config_error: "Waiting on runner configuration and secrets…",
-  runner_starting: "Starting the agent…",
-  workspace_provisioning: "Setting up the workspace…",
-  workspace_ready: "Workspace ready",
-};
-
 /**
  * The runner's progress envelope, minus whatever the transport attributes it
  * to. TimelineEvent (per-execution, task log) and RunProgressLine (per-cycle,
  * run feed) are the same envelope carried by two streams and differ only in
- * their attribution fields, so the formatter below is written against the
- * envelope and both streams feed it.
+ * their attribution fields, so the formatter is written against the envelope
+ * and both streams feed it.
  */
-export interface AgentLogLine {
-  kind: string;
-  phase?: string;
-  tool?: string;
-  summary?: string;
-  command?: string;
-  step?: string;
-  sha?: string;
-  files?: number;
-  branch?: string;
-  status?: string;
-  error?: string;
-  level?: string;
-  message?: string;
-}
+export type AgentLogLine = ProgressLineView;
+
+// The wording of a line is shared with the playground (@aep/progress-view) so
+// the fast local loop and a cluster run read identically — two formatters
+// drifted once already. Only the mapping from semantic weight to the Oxygen
+// palette is the console's, and it stays here.
+const TONE_COLORS: Record<LineTone, string> = {
+  default: "grey.300",
+  muted: "grey.400",
+  info: "info.light",
+  success: "success.light",
+  warn: "warning.light",
+  error: "error.light",
+};
 
 /**
  * One console line per log line, formatted by kind (#173 decisions: flat log;
  * attempts are divider lines, not UI sections).
+ *
+ * An empty `text` means the line is deliberately silent — it exists on the wire
+ * for a machine reader but has nothing worth a row (a fast, successful
+ * tool_result). Renderers drop those rather than emitting a blank line.
  */
 export function formatLine(e: AgentLogLine): { text: string; tone: string } {
-  switch (e.kind) {
-    case "phase": {
-      const label =
-        (e.phase && PHASE_LABELS[e.phase]) ?? e.summary ?? e.phase ?? e.message ?? "phase";
-      return { text: `▸ ${label}`, tone: "info.light" };
-    }
-    case "tool_use":
-      // The payload rides in summary (Bash: the command; file tools: the
-      // path) — tool_use has no command field, that's gh_action's. For Bash
-      // the `$` prompt already says "shell", so the tool name is noise; for
-      // every other tool it is the verb (Write/Read/Edit <path>).
-      if (e.tool === "Bash" && e.summary) {
-        return { text: `$ ${e.summary}`, tone: "grey.400" };
-      }
-      return {
-        text: `$ ${e.tool ?? "tool"}${e.summary ? ` ${e.summary}` : ""}`,
-        tone: "grey.400",
-      };
-    case "git_commit":
-      return {
-        text: `✓ commit ${e.sha?.slice(0, 7) ?? ""}${e.files ? ` · ${e.files} files` : ""}`,
-        tone: "success.light",
-      };
-    case "git_push":
-      return {
-        text: `↑ push${e.branch ? ` ${e.branch}` : ""}`,
-        tone: "success.light",
-      };
-    case "gh_action":
-    case "build_step":
-      // gh_action's payload is its command; build_step's is step/summary.
-      return {
-        text: `⚙ ${e.step ?? e.summary ?? e.command ?? e.kind}${e.status ? ` — ${e.status}` : ""}`,
-        tone: e.status === "failed" ? "error.light" : "info.light",
-      };
-    case "result":
-      return {
-        text: `■ ${e.summary ?? e.status ?? "finished"}${e.error ? ` — ${e.error}` : ""}`,
-        tone: e.error || e.status === "failed" ? "error.light" : "success.light",
-      };
-    default: {
-      const tone =
-        e.level === "error"
-          ? "error.light"
-          : e.level === "warn"
-            ? "warning.light"
-            : "grey.300";
-      return { text: e.message ?? e.summary ?? "", tone };
-    }
-  }
+  const { text, tone } = formatShared(e);
+  return { text, tone: TONE_COLORS[tone] };
+}
+
+/**
+ * What a call's outcome adds, as the trailing cell on its action's row.
+ *
+ * The console can do this and a terminal cannot: it holds every line in state,
+ * so when the outcome arrives — 25 seconds after the action for a cold build —
+ * it re-renders that row rather than printing a second one. One row per step.
+ *
+ * An empty `text` means the outcome carries nothing worth showing (a fast
+ * success), which is the feed's governing rule, not a missing value.
+ */
+export function formatOutcome(e: AgentLogLine | undefined): { text: string; tone: string } {
+  const { detail, duration, tone } = formatOutcomeShared(e);
+  return { text: [detail, duration].filter(Boolean).join(" · "), tone: TONE_COLORS[tone] };
 }
