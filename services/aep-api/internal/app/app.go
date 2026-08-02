@@ -589,10 +589,6 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		anthropicProvisioner{svc: anthropicCredService}, taskTokens, executionRepo,
 		cfg.AgentPlatformURL, cfg.AgentPlatformURL,
 		orgRepo, orgAnthropicRepo, orgCredRepo, idpRepo)
-	// Stamp AEP_SKILLS_REPO_URL so the runner clones `org-skills` and resolves
-	// applied skills locally (the same EnsureProvisioned+GetRepo closure the
-	// genai + task-plan turns use for their SkillsRef).
-	codingExecutor.WithSkillsRepo(skillsRepoForTurns)
 	// The cluster-gateway-proxy DISPATCH path (per-org NS + per-run
 	// ExternalSecrets + a K8s Job via the proxy) requires secrets delivery:
 	// the per-run ExternalSecrets source their values from SecretReferences
