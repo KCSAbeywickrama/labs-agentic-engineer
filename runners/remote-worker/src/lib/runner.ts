@@ -105,21 +105,19 @@ export interface StartedRun {
   completion: Promise<RunResult>;
 }
 
-// PerTaskSkills carries the materialised AgentSkills plugin into the SDK
-// query options (built by skills_resolver.ts + skills_materializer.ts).
+// PerTaskSkills carries the run's pinned, present skills into the SDK query
+// options (built by skills_resolver.ts + skills_presence.ts).
 //
-// `skillsPluginDir` is the absolute path to .aep/skills-plugin/. If
-// set, runner.ts adds a second `{type:"local"}` plugin entry pointing
-// at it. `preloadSkillNames` lists the materialised names of every
-// platform-shipped (`kind: org`) skill in that plugin, which we push
-// into the SDK's `skills:` array so their full bodies inject at
-// startup. Custom and imported skills sit in the same plugin and
-// surface via the SDK's standard skill listing (description in
-// context, body on invoke) — they are NOT in the preload array,
-// because a run must not pay for every attached skill's full body
-// when only the stack ones are certain to apply.
+// The BFF mirrors the org's coding-relevant skills into the project clone at
+// `.claude/skills/`, and the SDK discovers that directory NATIVELY because
+// `cwd: layout.workspace` puts it at the working-directory root — there is no
+// per-task plugin to load. `preloadSkillNames` is the BARE names of every
+// pinned skill that exists in the mirror (kind-agnostic: the copies are
+// already the filtered set, so the runner does no filtering of its own),
+// pushed into the SDK's `skills:` array so their full bodies inject at
+// startup. Unpinned skills in the mirror are still reachable on demand,
+// natively, via the SDK's standard discovery.
 export interface PerTaskSkills {
-  skillsPluginDir?: string;
   preloadSkillNames: string[];
 }
 
@@ -207,13 +205,13 @@ export function runClaudeQuery(
     AEP_CORRELATION_ID: req.correlationId ?? "",
   };
 
-  // Two-tier plugin list: the base `aep` plugin (workflow + base
-  // conventions) is always loaded; the per-task `aep-task-skills`
-  // plugin (project-attached skills) is loaded conditionally when
-  // workspace.ts materialised it. Per-task org skills land in the
-  // `skills:` preload so the SDK injects their full bodies at startup;
-  // custom + imported sit in the same plugin and surface via the SDK's
-  // standard discovery (description in context, body on invoke).
+  // One plugin: the base `aep` plugin (workflow + base conventions) —
+  // runner-owned, composed per run. Project-attached org skills are NOT a
+  // plugin: they are the BFF-written `.claude/skills/` mirror sitting in the
+  // workspace root the SDK is run with `cwd:` at, so Claude Code discovers
+  // them natively. Pinned ones land in the `skills:` preload (bare names) so
+  // the SDK injects their full bodies at startup; unpinned ones surface via
+  // the SDK's standard discovery (description in context, body on invoke).
   // Related-issue discovery/cross-linking moved to the SRE agent's handoff
   // stage (a "## Related issues" section in the issue body; GitHub #N
   // mentions back-link automatically) — issues arrive pre-linked, so the
@@ -238,11 +236,8 @@ export function runClaudeQuery(
     { type: "local", path: basePluginDir },
   ];
   const skillPreload: string[] = resolvedBase.preload;
-  if (perTaskSkills?.skillsPluginDir) {
-    plugins.push({ type: "local", path: perTaskSkills.skillsPluginDir });
-    for (const name of perTaskSkills.preloadSkillNames) {
-      skillPreload.push(`aep-task-skills:${name}`);
-    }
+  if (perTaskSkills?.preloadSkillNames) {
+    skillPreload.push(...perTaskSkills.preloadSkillNames);
   }
 
   // Endpoint Spec Discovery (B2) — register the BFF's MCP server in-process

@@ -21,13 +21,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import {
-  readSkillsPinned,
-  readProjectSkillsPinned,
-  resolveSkillsFromClone,
-  resolveKind,
-  resolveTaskSkills,
-} from "./skills_resolver.js";
+import { readSkillsPinned, readProjectSkillsPinned, resolveTaskSkills } from "./skills_resolver.js";
 
 // tmpTree materialises a { relPath: content } map under a fresh temp dir and
 // returns the root. Directories are created as needed.
@@ -40,11 +34,6 @@ async function tmpTree(files: Record<string, string>): Promise<string> {
   }
   return root;
 }
-
-const skillMD = (name: string, kind?: string): string => {
-  const meta = kind ? `metadata:\n  aep:\n    kind: ${kind}\n` : "";
-  return `---\nname: ${name}\ndescription: does ${name}.\n${meta}---\n\n# ${name}\n`;
-};
 
 // ---- readSkillsPinned ------------------------------------------------------
 
@@ -150,165 +139,31 @@ test("readProjectSkillsPinned: skips dot-dirs and stray files", async () => {
   assert.deepEqual(await readProjectSkillsPinned(ws), ["go"]);
 });
 
-// ---- resolveKind ------------------------------------------------------------
+// ---- resolveTaskSkills (thin scope dispatch, no clone/network) -------------
 
-test("resolveKind: known kinds pass through; absent/unknown → org", () => {
-  assert.equal(resolveKind(skillMD("s", "platform")), "platform");
-  assert.equal(resolveKind(skillMD("s", "org")), "org");
-  assert.equal(resolveKind(skillMD("s", "custom")), "custom");
-  assert.equal(resolveKind(skillMD("s", "imported")), "imported");
-  assert.equal(resolveKind(skillMD("s")), "org"); // unmarked
-  assert.equal(resolveKind(skillMD("s", "wat")), "org"); // unknown
-  assert.equal(resolveKind(skillMD("s", "  platform  ")), "platform"); // trimmed
-  assert.equal(resolveKind("no frontmatter here"), "org");
-});
-
-// ---- resolveSkillsFromClone -------------------------------------------------
-
-test("resolveSkillsFromClone: builds materializedName from kind + reads references", async () => {
-  const clone = await tmpTree({
-    "skills/go/SKILL.md": skillMD("go", "org"),
-    "skills/go/references/style.md": "# go style",
-    "skills/payments/SKILL.md": skillMD("payments", "custom"),
-  });
-
-  const out = await resolveSkillsFromClone(clone, ["go", "payments"]);
-  assert.equal(out.length, 2);
-
-  const go = out.find((s) => s.materializedName === "org-go");
-  assert.ok(go, "expected org-go");
-  assert.equal(go!.kind, "org");
-  assert.equal(go!.references["references/style.md"]?.toString("utf-8"), "# go style");
-
-  const pay = out.find((s) => s.materializedName === "custom-payments");
-  assert.ok(pay, "expected custom-payments");
-  assert.equal(pay!.kind, "custom");
-  assert.deepEqual(pay!.references, {}); // no aux files
-});
-
-test("resolveSkillsFromClone: recursively reads the full skill structure as Buffers, skipping SKILL.md and dot-entries", async () => {
-  const clone = await tmpTree({
-    "skills/full/SKILL.md": skillMD("full", "org"),
-    "skills/full/references/a.md": "# ref a",
-    "skills/full/scripts/run.mjs": "console.log('hi');\n",
-    "skills/full/.gitkeep": "should be skipped",
-  });
-  // Write a nested dotdir file and a genuine binary asset the string-based
-  // tmpTree helper can't express.
-  await fs.promises.mkdir(path.join(clone, "skills/full/.hidden"), { recursive: true });
-  await fs.promises.writeFile(path.join(clone, "skills/full/.hidden/secret.md"), "nope");
-  await fs.promises.mkdir(path.join(clone, "skills/full/assets"), { recursive: true });
-  const binary = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0xff]);
-  await fs.promises.writeFile(path.join(clone, "skills/full/assets/logo.png"), binary);
-
-  const out = await resolveSkillsFromClone(clone, ["full"]);
-  assert.equal(out.length, 1);
-  const refs = out[0].references;
-
-  assert.ok(refs["references/a.md"] instanceof Buffer);
-  assert.equal(refs["references/a.md"]!.toString("utf-8"), "# ref a");
-  assert.ok(refs["scripts/run.mjs"] instanceof Buffer);
-  assert.equal(refs["scripts/run.mjs"]!.toString("utf-8"), "console.log('hi');\n");
-  assert.ok(refs["assets/logo.png"] instanceof Buffer);
-  assert.ok(Buffer.compare(refs["assets/logo.png"]!, binary) === 0);
-
-  // SKILL.md itself and dot-entries must never appear among the aux files.
-  assert.equal(refs["SKILL.md"], undefined);
-  assert.equal(refs[".gitkeep"], undefined);
-  assert.equal(refs[".hidden/secret.md"], undefined);
-  assert.deepEqual(Object.keys(refs).sort(), ["assets/logo.png", "references/a.md", "scripts/run.mjs"]);
-});
-
-test("resolveSkillsFromClone: unmarked SKILL.md resolves as org kind", async () => {
-  const clone = await tmpTree({ "skills/mystery/SKILL.md": skillMD("mystery") });
-  const out = await resolveSkillsFromClone(clone, ["mystery"]);
-  assert.equal(out.length, 1);
-  assert.equal(out[0].kind, "org");
-  assert.equal(out[0].materializedName, "org-mystery");
-});
-
-test("resolveSkillsFromClone: missing names are dropped (warn-and-skip parity)", async () => {
-  const clone = await tmpTree({ "skills/go/SKILL.md": skillMD("go", "org") });
-  const out = await resolveSkillsFromClone(clone, ["go", "does-not-exist"]);
-  assert.deepEqual(out.map((s) => s.materializedName), ["org-go"]);
-});
-
-test("resolveSkillsFromClone: path-traversal names are rejected", async () => {
-  const clone = await tmpTree({ "skills/go/SKILL.md": skillMD("go", "org") });
-  const out = await resolveSkillsFromClone(clone, ["../secrets", "a/b", "go"]);
-  assert.deepEqual(out.map((s) => s.materializedName), ["org-go"]);
-});
-
-// ---- resolveTaskSkills (orchestrator, injected clone) -----------------------
-
-test("resolveTaskSkills: end-to-end with an injected clone", async () => {
-  const ws = await tmpTree({
-    "specs/design/components/api/design.json": JSON.stringify({ skillsPinned: ["go"] }),
-  });
-  const cloneSrc = await tmpTree({ "skills/go/SKILL.md": skillMD("go", "org") });
-  const scratchDir = path.join(os.tmpdir(), "aep-skills-orch", "task-1");
-
-  let clonedRepoURL: string | undefined;
-  let cloneCount = 0;
-  const out = await resolveTaskSkills({
-    workspace: ws,
-    scope: { kind: "component", componentName: "api" },
-    skillsRepoURL: "https://github.com/acme/org-skills",
-    cloneAuth: { helperPath: "/stage/credhelper.sh", bearerFile: "/stage/bearer" },
-    scratchDir,
-    clone: async (repoURL, _auth, dest) => {
-      clonedRepoURL = repoURL;
-      cloneCount += 1;
-      // Fake the clone: copy the fixture tree into the scratch dir.
-      await fs.promises.cp(cloneSrc, dest, { recursive: true });
-    },
-  });
-
-  assert.equal(cloneCount, 1, "clone must be invoked once when skills are applied");
-  assert.equal(clonedRepoURL, "https://github.com/acme/org-skills");
-  assert.equal(out.length, 1);
-  assert.equal(out[0].materializedName, "org-go");
-});
-
-test("resolveTaskSkills: no applied skills → no clone, empty result", async () => {
-  const ws = await tmpTree({
-    "specs/design/components/api/design.json": JSON.stringify({ title: "x" }),
-  });
-  let cloned = false;
-  const out = await resolveTaskSkills({
-    workspace: ws,
-    scope: { kind: "component", componentName: "api" },
-    skillsRepoURL: "https://github.com/acme/org-skills",
-    cloneAuth: { helperPath: "/stage/credhelper.sh", bearerFile: "/stage/bearer" },
-    scratchDir: path.join(os.tmpdir(), "aep-skills-noop", "task-2"),
-    clone: async () => {
-      cloned = true;
-    },
-  });
-  assert.equal(cloned, false, "clone must be skipped when no skills are applied");
-  assert.deepEqual(out, []);
-});
-
-test("resolveTaskSkills: project scope materialises skills from every component", async () => {
+test("resolveTaskSkills: component scope reads one design", async () => {
   const ws = await tmpTree({
     "specs/design/components/api/design.json": JSON.stringify({ skillsPinned: ["go"] }),
     "specs/design/components/webapp/design.json": JSON.stringify({ skillsPinned: ["react-webapp"] }),
   });
-  const cloneSrc = await tmpTree({
-    "skills/go/SKILL.md": skillMD("go", "org"),
-    "skills/react-webapp/SKILL.md": skillMD("react-webapp", "org"),
-  });
+  const out = await resolveTaskSkills({ workspace: ws, scope: { kind: "component", componentName: "api" } });
+  assert.deepEqual(out, ["go"]);
+});
 
-  const out = await resolveTaskSkills({
-    workspace: ws,
-    scope: { kind: "project" },
-    skillsRepoURL: "https://github.com/acme/org-skills",
-    cloneAuth: { helperPath: "/stage/credhelper.sh", bearerFile: "/stage/bearer" },
-    scratchDir: path.join(os.tmpdir(), "aep-skills-project", "cycle-1"),
-    clone: async (_repoURL, _auth, dest) => {
-      await fs.promises.cp(cloneSrc, dest, { recursive: true });
-    },
+test("resolveTaskSkills: project scope unions every component", async () => {
+  const ws = await tmpTree({
+    "specs/design/components/api/design.json": JSON.stringify({ skillsPinned: ["go"] }),
+    "specs/design/components/webapp/design.json": JSON.stringify({ skillsPinned: ["react-webapp"] }),
   });
+  const out = await resolveTaskSkills({ workspace: ws, scope: { kind: "project" } });
+  assert.deepEqual(out, ["go", "react-webapp"]);
+});
 
-  assert.deepEqual(out.map((s) => s.materializedName), ["org-go", "org-react-webapp"]);
+test("resolveTaskSkills: a missing specs/design/ yields no pins and no error", async () => {
+  const ws = await tmpTree({ "README.md": "empty project" });
+  assert.deepEqual(
+    await resolveTaskSkills({ workspace: ws, scope: { kind: "component", componentName: "api" } }),
+    [],
+  );
+  assert.deepEqual(await resolveTaskSkills({ workspace: ws, scope: { kind: "project" } }), []);
 });

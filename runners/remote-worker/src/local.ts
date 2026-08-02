@@ -56,7 +56,7 @@ import type { WorkspaceLayout } from "./lib/workspace.js";
 import { emit, primeScrubber } from "./lib/progress/emitter.js";
 import { installConsoleScrubber } from "./lib/progress/console_scrub.js";
 import { resolveTaskSkills } from "./lib/skills_resolver.js";
-import { materializeSkills } from "./lib/skills_materializer.js";
+import { resolvePinnedSkills } from "./lib/skills_presence.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // The SAME authored plugin production loads. `mode: "local"` below is what
@@ -124,12 +124,19 @@ function localDirWorkspace(run: LocalRun): WorkspaceLayout {
   };
 }
 
-// The injected "clone": copy the working-tree skill library into the scratch
-// dir under the flat org-skills layout (skills/<name>/…) the resolver reads.
-async function copyLocalSkillLibrary(skillsDir: string, destDir: string): Promise<void> {
-  await fs.promises.rm(destDir, { recursive: true, force: true });
-  await fs.promises.mkdir(path.join(destDir, "skills"), { recursive: true });
-  await fs.promises.cp(skillsDir, path.join(destDir, "skills"), { recursive: true });
+// Local mode's stand-in for the BFF's project-repo skill mirror: production
+// writes the org's coding-relevant skills into the PROJECT repo at
+// `.claude/skills/` before the runner ever starts, which is what makes native
+// SDK discovery work (see skills_resolver.ts's module doc). The playground has
+// no BFF, so this copies the working-tree skill library (AEP_LOCAL_SKILLS_DIR,
+// flat `<name>/SKILL.md` layout) into that same location under the project
+// dir. `fs.cp` merges into any `.claude/skills/` the project already has
+// (overwriting name collisions) rather than wiping it, so a project's own
+// committed skills survive a playground run.
+async function mirrorLocalSkillLibrary(skillsDir: string, workspace: string): Promise<void> {
+  const mirrorDir = path.join(workspace, ".claude", "skills");
+  await fs.promises.mkdir(mirrorDir, { recursive: true });
+  await fs.promises.cp(skillsDir, mirrorDir, { recursive: true });
 }
 
 async function main(): Promise<number> {
@@ -156,38 +163,32 @@ async function main(): Promise<number> {
   }
   emit({ kind: "phase", phase: "workspace_ready" });
 
-  // Per-task skills: same readSkillsPinned → resolveTaskSkills →
-  // materializeSkills pipeline as production, with the git clone swapped for a
-  // working-tree copy. Failure degrades to the base plugin, loudly.
+  // Per-task skills: same readSkillsPinned/readProjectSkillsPinned pin read as
+  // production, resolved against `.claude/skills/` in the project dir — the
+  // SAME location the SDK discovers natively via `cwd: layout.workspace`
+  // (== run.projectDir here). No clone, no plugin: AEP_LOCAL_SKILLS_DIR (when
+  // set) mirrors into that location first, standing in for the BFF write prod
+  // gets for free. Failure degrades to the base plugin, loudly.
   let preloadSkillNames: string[] = [];
-  let skillsPluginDir: string | undefined;
   if (run.skillsDir) {
     try {
-      const skillsDir = run.skillsDir;
-      const resolutions = await resolveTaskSkills({
+      await mirrorLocalSkillLibrary(run.skillsDir, run.projectDir);
+      const pinned = await resolveTaskSkills({
         workspace: run.projectDir,
         // A run works the whole project, same as prod's milestone loop — the
         // union of every component's skillsPinned, never one componentName.
         scope: { kind: "project" },
-        skillsRepoURL: "local:working-tree",
-        // No git, no platform: the clone below is a working-tree copy.
-        cloneAuth: { helperPath: "", bearerFile: "" },
-        scratchDir: path.join(run.runDir, "skills-clone"),
         log: (l) => console.log(l),
-        clone: (_url, _auth, dest) => copyLocalSkillLibrary(skillsDir, dest),
       });
-      // Materialize under the run dir — never inside the user's project tree.
-      const result = await materializeSkills(run.runDir, resolutions);
-      if (result) {
-        skillsPluginDir = result.pluginDir;
-        preloadSkillNames = result.preloadNames;
-        console.log(`[local] materialised ${resolutions.length} skill(s); preload=${preloadSkillNames.length}`);
-      } else {
-        console.log("[local] no per-task skills to materialise");
+      const { preload, dangling } = await resolvePinnedSkills(run.projectDir, pinned, (l) => console.log(l));
+      preloadSkillNames = preload;
+      if (dangling.length > 0) {
+        console.warn(`[local] ⚠️  pinned skill(s) missing from .claude/skills/ — proceeding without them: ${dangling.join(", ")}`);
       }
+      console.log(`[local] preload=${preloadSkillNames.length} pinned skill(s) from the project's skill mirror`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.warn(`[local] ⚠️  SKILLS UNAVAILABLE — proceeding without the per-task skill plugin: ${msg}`);
+      console.warn(`[local] ⚠️  SKILLS UNAVAILABLE — proceeding without per-task skills: ${msg}`);
     }
   } else {
     console.log("[local] AEP_LOCAL_SKILLS_DIR not set — skipping per-task skills");
@@ -219,7 +220,7 @@ async function main(): Promise<number> {
     req,
     layout,
     log,
-    { ...(skillsPluginDir ? { skillsPluginDir } : {}), preloadSkillNames },
+    { preloadSkillNames },
     {
       basePluginPath: run.pluginDir,
       mode: "local",
