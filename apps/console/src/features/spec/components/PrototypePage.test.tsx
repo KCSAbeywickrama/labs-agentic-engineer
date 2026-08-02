@@ -18,6 +18,7 @@
 
 // @vitest-environment jsdom
 
+import { useEffect } from "react";
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PrototypePage } from "./PrototypePage";
@@ -28,11 +29,20 @@ vi.mock("@tanstack/react-router", () => ({
   Link: ({ children }: { children?: React.ReactNode }) => <a>{children}</a>,
 }));
 
+// Counts how many times the mocked PrototypeView actually MOUNTS (as opposed
+// to just re-rendering with new props) — React strips `key` from props, so
+// this is the only reliable way to assert PrototypePage honors PrototypeView's
+// remount-on-`key` contract from JS assertions alone.
+let prototypeMountCount = 0;
+
 // The heavy lazy canvas is irrelevant here — record what model/initialScreen it receives.
 vi.mock("@aep/ui-excalidraw-view", () => ({
-  PrototypeView: (p: { model: { screens: unknown[] }; initialScreen?: string }) => (
-    <div data-testid="prototype" data-initial={p.initialScreen ?? ""} />
-  ),
+  PrototypeView: (p: { model: { screens: unknown[] }; initialScreen?: string }) => {
+    useEffect(() => {
+      prototypeMountCount += 1;
+    }, []);
+    return <div data-testid="prototype" data-initial={p.initialScreen ?? ""} />;
+  },
 }));
 
 const mockFiles = vi.fn();
@@ -55,6 +65,7 @@ const MODEL = {
 beforeEach(() => {
   mockFiles.mockReset();
   mockDerivedPrototype.mockReset();
+  prototypeMountCount = 0;
 });
 
 describe("PrototypePage", () => {
@@ -100,5 +111,29 @@ describe("PrototypePage", () => {
     mockDerivedPrototype.mockReturnValue({ model: null, isPending: false, isError: false });
     render(<PrototypePage projectName="p" component="shop" onScreenChange={vi.fn()} />);
     expect(screen.getByText(/could not be rendered/i)).toBeInTheDocument();
+  });
+
+  it("remounts PrototypeView (not just re-renders) when a new wireframe commit changes the sha", () => {
+    mockFiles.mockReturnValue({ data: FILES, isPending: false, isError: false });
+    mockDerivedPrototype.mockReturnValue({ model: MODEL, isPending: false, isError: false });
+    const { rerender } = render(
+      <PrototypePage projectName="p" component="shop" onScreenChange={vi.fn()} />,
+    );
+    expect(prototypeMountCount).toBe(1);
+
+    // A new commit lands: same path, new sha, new (derived) model instance.
+    mockFiles.mockReturnValue({
+      data: [{ ...FILES[0], sha: "def" }],
+      isPending: false,
+      isError: false,
+    });
+    mockDerivedPrototype.mockReturnValue({
+      model: { screens: [...MODEL.screens] },
+      isPending: false,
+      isError: false,
+    });
+    rerender(<PrototypePage projectName="p" component="shop" onScreenChange={vi.fn()} />);
+
+    expect(prototypeMountCount).toBe(2);
   });
 });

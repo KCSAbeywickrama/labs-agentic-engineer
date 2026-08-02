@@ -16,6 +16,7 @@
  * under the License.
  */
 
+import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { type PrototypeModel } from "@aep/excalidraw-dsl";
 import { deriveWireframeScene } from "../derive/deriveWireframe";
@@ -70,7 +71,10 @@ export function useDerivedPrototype(
   sha: string | undefined,
 ): { model: PrototypeModel | null; isPending: boolean; isError: boolean } {
   const q = useSpecFileQuery(projectName, dslPath, sha);
-  const model =
-    q.data?.content != null ? derivePrototypeModel(dslPath, q.data.content) : null;
+  const model = useMemo(
+    () =>
+      q.data?.content != null ? derivePrototypeModel(dslPath, q.data.content) : null,
+    [dslPath, q.data?.content],
+  );
   return { model, isPending: q.isPending, isError: q.isError };
 }

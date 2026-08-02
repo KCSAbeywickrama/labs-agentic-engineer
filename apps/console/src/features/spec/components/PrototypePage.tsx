@@ -43,7 +43,7 @@ function Centered({ children }: { children: React.ReactNode }) {
 
 /**
  * Full-screen, deep-linkable prototype for one design component's wireframes
- * (#252 Task 6). Mirrors WireframePanel's inline "Prototype" mode, but as the
+ * (#348). Mirrors WireframePanel's inline "Prototype" mode, but as the
  * whole page: resolve the component's `.dsl` via `buildDesignSection` (the
  * same tree WireframePanel/SpecView use for the sidebar), derive the model,
  * and hand off to `PrototypeView` with the deep-linked `screen` — the route
@@ -105,6 +105,7 @@ export function PrototypePage({
   } else {
     body = (
       <PrototypeView
+        key={sha ?? dslPath}
         model={model}
         fillHeight
         onScreenChange={onScreenChange}

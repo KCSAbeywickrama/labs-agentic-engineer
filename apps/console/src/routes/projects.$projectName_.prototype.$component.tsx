@@ -22,7 +22,7 @@ import { PrototypePage } from "../features/spec/components/PrototypePage";
 // `$projectName_` (trailing underscore) un-nests this route from the
 // /projects/$projectName layout, same trick as `projects.$projectName_.spec`
 // — the prototype is a full-screen workspace without the shared project
-// header (#252 Task 6).
+// header (#348).
 //
 // `?screen=<Name>` deep-links to a specific screen of the component's
 // prototype (e.g. a link shared mid-review). `PrototypeView` drives screen
