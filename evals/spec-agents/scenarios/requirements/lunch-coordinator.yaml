@@ -1,7 +1,5 @@
-# Eval scenario artifact: the sim-user brief (what the "product owner" knows)
-# and the rubric (what the produced requirements.md must cover).
-# The brief is the PROMPT side; the rubric is the EVALUATION side. The sim
-# user never sees the rubric.
+# One eval case: brief = the sim user's world (never sees the rubric);
+# rubric = weighted mustCover + declared mustNot (#354/#355).
 
 brief:
   name: lunch-coordinator
@@ -25,9 +23,15 @@ brief:
     recommended option when genuinely indifferent.
 
 rubric:
-  - Google-workspace sign-in captured; no separate registration flow invented
-  - "Daily order round lifecycle: open (restaurant + cutoff) -> teammates add own items -> lock at cutoff"
-  - Consolidated order view grouped by item with per-person cost totals
-  - Payment explicitly out of scope beyond tracking who owes what
-  - Slack notifications at round open and cutoff; no email flows invented
-  - Mobile-browser support noted; no native app scope invented
+  mustCover:
+    - item: Google-workspace sign-in captured; no separate registration flow invented
+      weight: 2
+    - item: "Daily order round lifecycle: open (restaurant + cutoff) -> teammates add own items -> lock at cutoff"
+      weight: 2
+    - Consolidated order view grouped by item with per-person cost totals
+    - Payment explicitly out of scope beyond tracking who owes what
+    - Slack notifications at round open and cutoff; no email flows invented
+    - Mobile-browser support noted
+  mustNot:
+    - Native mobile app scope
+    - In-app payment processing or money movement
