@@ -1,0 +1,38 @@
+# Design section, standalone: starts from the captured-then-curated
+# requirements fixture (#356). The brief still matters — design turns can ask
+# questions, and the sim answers them.
+
+brief:
+  name: lunch-coordinator
+  idea: >-
+    A web app for coordinating team lunch orders: someone opens a daily order,
+    teammates add items from a chosen restaurant before a cutoff, and the
+    opener gets one consolidated order to place.
+  persona: >-
+    Engineering manager at a 40-person startup; pragmatic, wants a small v1
+    shipped fast; non-technical answers, plain language.
+  facts:
+    - Users sign in with their existing Google workspace accounts; no separate registration.
+    - One order round per day is enough; the opener picks the restaurant and the cutoff time.
+    - Teammates only add/edit/remove their own items before the cutoff; after cutoff the round locks.
+    - The opener needs a consolidated view grouped by menu item, plus per-person cost totals.
+    - Payment stays offline (people pay the opener back directly); the app only tracks who owes what.
+    - "Notifications: a message to the team's existing Slack channel when a round opens and at cutoff is enough; no email."
+    - Mobile browser support matters; a native app does not.
+  fallback: >-
+    Prefer the smallest reasonable v1; defer anything speculative; pick the
+    recommended option when genuinely indifferent.
+
+fixture: lunch-coordinator-requirements
+
+rubric:
+  mustCover:
+    - item: A web frontend component and a backend/API component are both designed
+      weight: 2
+    - Google-workspace (OAuth/SSO) sign-in appears in the design, not a custom credential store
+    - The API models the order-round lifecycle including the cutoff lock
+    - Slack notification integration appears in the design
+    - Consolidated/grouped order view with per-person totals is designed
+  mustNot:
+    - A native mobile app component
+    - Payment processing or money-movement integration

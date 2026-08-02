@@ -1,0 +1,16 @@
+# Task generation, standalone: the one-shot task-plan turn from a captured
+# design fixture (#356). No brief — the section has no human in the loop.
+
+name: lunch-coordinator
+fixture: lunch-coordinator-design
+
+rubric:
+  mustCover:
+    - item: Every designed component has at least one implementable task
+      weight: 2
+    - Frontend tasks list their backend/API providers in build order (dependsOn)
+    - A task covers the Slack notification integration
+    - Tasks are right-sized (a coherent unit of work each, not one giant task or micro-fragments)
+  mustNot:
+    - Tasks for payment processing
+    - Tasks for a native mobile app

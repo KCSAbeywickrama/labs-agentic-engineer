@@ -1,0 +1,372 @@
+openapi: 3.0.3
+info:
+  title: Lunch API
+  version: 0.1.0
+  description: Rounds, items, consolidation, and history for team lunch ordering.
+servers:
+  - url: /
+security:
+  - bearerAuth: []
+paths:
+  /rounds:
+    get:
+      operationId: listRounds
+      summary: List rounds (history), newest first
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [open, closed] }
+          description: Filter by round status
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20, maximum: 100 }
+        - name: offset
+          in: query
+          schema: { type: integer, default: 0 }
+      responses:
+        '200':
+          description: Matching rounds
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [count, data]
+                properties:
+                  count: { type: integer, description: total matching rounds }
+                  next: { type: string, nullable: true, description: relative URI of the next page }
+                  previous: { type: string, nullable: true, description: relative URI of the previous page }
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Round' }
+        '401':
+          description: Missing or invalid identity
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/Error' } }
+    post:
+      operationId: openRound
+      summary: Open a new lunch round
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OpenRoundRequest' }
+      responses:
+        '201':
+          description: Round opened
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/Round' } }
+        '400':
+          description: Invalid input
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/Error' } }
+        '401':
+          description: Missing or invalid identity
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/Error' } }
+        '409':
+          description: Another round is already open
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/Error' } }
+  /rounds/{roundId}:
+    parameters:
+      - name: roundId
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      operationId: getRound
+      summary: Get a round's details and items
+      responses:
+        '200':
+          description: The round
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/Round' } }
+        '401':
+          description: Missing or invalid identity
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/Error' } }
+        '404':
+          description: Round not found
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/Error' } }
+  /rounds/{roundId}/close:
+    parameters:
+      - name: roundId
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      operationId: closeRound
+      summary: Manually close an open round (opener only)
+      responses:
+        '200':
+          description: Round closed
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/Round' } }
+        '401':
+          description: Missing or invalid identity
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/Error' } }
+        '403':
+          description: Caller is not the round's opener
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/Error' } }
+        '404':
+          description: Round not found
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/Error' } }
+        '409':
+          description: Round is already closed
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/Error' } }
+  /rounds/{roundId}/items:
+    parameters:
+      - name: roundId
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      operationId: listItems
+      summary: List items added to a round
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20, maximum: 100 }
+        - name: offset
+          in: query
+          schema: { type: integer, default: 0 }
+      responses:
+        '200':
+          description: Matching items
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [count, data]
+                properties:
+                  count: { type: integer, description: total matching items }
+                  next: { type: string, nullable: true, description: relative URI of the next page }
+                  previous: { type: string, nullable: true, description: relative URI of the previous page }
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Item' }
+        '401':
+          description: Missing or invalid identity
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/Error' } }
+        '404':
+          description: Round not found
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/Error' } }
+    post:
+      operationId: addItem
+      summary: Add an item to an open round
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AddItemRequest' }
+      responses:
+        '201':
+          description: Item added
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/Item' } }
+        '400':
+          description: Invalid input
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/Error' } }
+        '401':
+          description: Missing or invalid identity
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/Error' } }
+        '404':
+          description: Round not found
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/Error' } }
+        '409':
+          description: Round is past cutoff / closed
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/Error' } }
+  /rounds/{roundId}/items/{itemId}:
+    parameters:
+      - name: roundId
+        in: path
+        required: true
+        schema: { type: string }
+      - name: itemId
+        in: path
+        required: true
+        schema: { type: string }
+    patch:
+      operationId: updateItem
+      summary: Edit an item you added, before cutoff
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateItemRequest' }
+      responses:
+        '200':
+          description: Item updated
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/Item' } }
+        '400':
+          description: Invalid input
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/Error' } }
+        '401':
+          description: Missing or invalid identity
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/Error' } }
+        '403':
+          description: Item was added by another teammate
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/Error' } }
+        '404':
+          description: Round or item not found
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/Error' } }
+        '409':
+          description: Round is past cutoff / closed
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/Error' } }
+    delete:
+      operationId: removeItem
+      summary: Remove an item you added, before cutoff
+      responses:
+        '204':
+          description: Item removed
+        '401':
+          description: Missing or invalid identity
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/Error' } }
+        '403':
+          description: Item was added by another teammate
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/Error' } }
+        '404':
+          description: Round or item not found
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/Error' } }
+        '409':
+          description: Round is past cutoff / closed
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/Error' } }
+  /rounds/{roundId}/consolidated-order:
+    parameters:
+      - name: roundId
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      operationId: getConsolidatedOrder
+      summary: Get the consolidated order for a closed round
+      responses:
+        '200':
+          description: The consolidated order
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/ConsolidatedOrder' } }
+        '401':
+          description: Missing or invalid identity
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/Error' } }
+        '404':
+          description: Round not found
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/Error' } }
+        '409':
+          description: Round is still open
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/Error' } }
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+  parameters:
+    XUserId:
+      name: X-User-Id
+      in: header
+      required: true
+      schema: { type: string }
+      description: Injected by the platform gateway from the caller's validated JWT (sub claim). Not set by clients.
+  schemas:
+    Round:
+      type: object
+      required: [id, restaurant, cutoffAt, openedBy, openedAt, status]
+      properties:
+        id: { type: string }
+        restaurant: { type: string }
+        cutoffAt: { type: string, format: date-time }
+        notes: { type: string, nullable: true }
+        openedBy: { type: string, description: opener's user id }
+        openedAt: { type: string, format: date-time }
+        status: { type: string, enum: [open, closed] }
+        closedAt: { type: string, format: date-time, nullable: true }
+        closedReason: { type: string, enum: [cutoff, manual], nullable: true }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Item' }
+    Item:
+      type: object
+      required: [id, roundId, addedBy, description, quantity, price]
+      properties:
+        id: { type: string }
+        roundId: { type: string }
+        addedBy: { type: string, description: user id of the teammate who added this item }
+        description: { type: string }
+        quantity: { type: integer, minimum: 1 }
+        price: { type: number, format: double, description: per-unit price }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    OpenRoundRequest:
+      type: object
+      required: [restaurant, cutoffAt]
+      properties:
+        restaurant: { type: string }
+        cutoffAt: { type: string, format: date-time }
+        notes: { type: string }
+    AddItemRequest:
+      type: object
+      required: [description, quantity, price]
+      properties:
+        description: { type: string }
+        quantity: { type: integer, minimum: 1 }
+        price: { type: number, format: double }
+    UpdateItemRequest:
+      type: object
+      properties:
+        description: { type: string }
+        quantity: { type: integer, minimum: 1 }
+        price: { type: number, format: double }
+    ConsolidatedOrder:
+      type: object
+      required: [roundId, groupedItems, perPerson, grandTotal]
+      properties:
+        roundId: { type: string }
+        groupedItems:
+          type: array
+          items:
+            type: object
+            required: [description, totalQuantity]
+            properties:
+              description: { type: string }
+              totalQuantity: { type: integer }
+        perPerson:
+          type: array
+          items:
+            type: object
+            required: [userId, items, total]
+            properties:
+              userId: { type: string }
+              items:
+                type: array
+                items: { $ref: '#/components/schemas/Item' }
+              total: { type: number, format: double }
+        grandTotal: { type: number, format: double }
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: integer, description: HTTP or application error code }
+        message: { type: string, description: short human-readable label }
+        description: { type: string, description: detailed explanation }
+        moreInfo: { type: string, description: URI to documentation }
