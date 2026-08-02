@@ -16,16 +16,22 @@
  * under the License.
  */
 
-// Versioned NDJSON envelope emitted by the coding-agent runner to stdout.
-// Source of truth: docs/design/task-execution-progress.md §5.1.
-// The Go mirror lives at aep-service/clients/observer/schema.go;
-// schemas/progress-event.schema.json gates them in CI.
+// Versioned NDJSON envelope emitted by the coding-agent runner to stdout, and
+// the SOURCE OF TRUTH for the progress contract — there is no design doc above
+// it. `console.*` output is on the same fd and goes through the same envelope
+// (see console_scrub.ts), so every byte on that stream is one of these.
+// The Go mirror is services/aep-api/internal/contracts/progress.go, and the
+// console-facing shapes (ProgressEvent / RunProgressLine / TimelineEvent) live
+// in packages/contracts/api/v1/openapi.yaml — change this file and all four
+// move together, contract-first (`make gen-api`).
 
 export const PROGRESS_SCHEMA_VERSION = 1 as const;
 
 export type ProgressKind =
   | "phase"
   | "tool_use"
+  | "activity"
+  | "tool_result"
   | "git_commit"
   | "git_push"
   | "gh_action"
@@ -45,6 +51,22 @@ interface ProgressEnvelope {
   seq: number;
   kind: ProgressKind;
   emitter?: ProgressEmitter;
+
+  // WHICH subagent, for the runs that fan out to several at once. `emitter`
+  // alone collapses them: a milestone cycle routinely runs two or three
+  // concurrently and their lines interleave, so a reader cannot tell one
+  // component's work from another's. emitterId is the fan-out tool call's id
+  // (stable for that subagent's whole life) and emitterLabel is the
+  // description the main agent gave it ("Implement todo-api service (issue
+  // #3)"). Both are absent on main-agent lines, same rule as `emitter`.
+  emitterId?: string;
+  emitterLabel?: string;
+
+  // The tool call this line is about, for the kinds derived from one
+  // (tool_use, tool_result, and the git_*/gh_action rewrites of a Bash call).
+  // A tool_result carries the id of the tool_use it answers, which is the only
+  // way to pair a call with its outcome once subagents interleave the feed.
+  toolUseId?: string;
 }
 
 export interface PhaseEvent extends ProgressEnvelope {
@@ -56,6 +78,56 @@ export interface ToolUseEvent extends ProgressEnvelope {
   kind: "tool_use";
   tool: string;
   summary: string;
+}
+
+// What a subagent says it is doing right now — the SDK's own sentence off a
+// task_progress message ("Writing todo-api/service.bal"), plus how many tool
+// calls it has made so far.
+//
+// It is NOT a row. The phrase earns its place in exactly one spot: the live
+// status of a collapsed subagent section, work the reader has chosen not to
+// look at. Inline beside the raw commands it is status text rather than
+// progress — "Running List project root contents" next to `ls` says nothing the
+// command didn't. Renderers must therefore format it to no text; only the
+// section header reads it.
+export interface ActivityEvent extends ProgressEnvelope {
+  kind: "activity";
+  summary: string;
+  toolCount?: number;
+}
+
+// The outcome of a tool call, paired to its tool_use by toolUseId. `ok: false`
+// is the SDK's own is_error — without this event a failed call is invisible in
+// the feed and reads as a success. durationMs is measured runner-side between
+// the two messages, so it includes the model's turnaround, not just the tool.
+// summary is populated only on failure: the error text is the diagnostic
+// payload, whereas successful output is bulky, uninteresting, and the more
+// likely place for a secret to surface.
+//
+// exitCode is the process status of a failed shell call, parsed from the SDK's
+// own `Exit code N` first line. It is the honest per-step failure signal: a
+// non-zero code says THIS command is what broke, where the surrounding prose
+// only says the agent is unhappy. Absent when the tool was not a shell (those
+// report `<tool_use_error>` with no code) — absence means "no code was
+// reported", never "exited 0".
+//
+// The three totals below appear ONLY on a fan-out call's result, where the SDK
+// hands us authoritative figures for the whole subagent (its own duration, tool
+// count, and the lines its edits added and removed). They are what a settled
+// subagent section reports, and they cannot be derived from this feed: a
+// subagent's per-edit line counts are never in its own events.
+export interface ToolResultEvent extends ProgressEnvelope {
+  kind: "tool_result";
+  tool?: string;
+  ok: boolean;
+  durationMs?: number;
+  summary?: string;
+  exitCode?: number;
+  /** The SDK's own verdict word, when it gave one ("completed", "failed", …). */
+  status?: string;
+  toolCount?: number;
+  linesAdded?: number;
+  linesRemoved?: number;
 }
 
 export interface GitCommitEvent extends ProgressEnvelope {
@@ -109,21 +181,47 @@ export interface ResultEvent extends ProgressEnvelope {
 export type ProgressEvent =
   | PhaseEvent
   | ToolUseEvent
+  | ActivityEvent
+  | ToolResultEvent
   | GitCommitEvent
   | GitPushEvent
   | GhActionEvent
   | LogEvent
   | ResultEvent;
 
-// Discriminated union of payloads (no envelope fields except the optional
-// emitter attribution, which the translator knows and emit() cannot). The
-// emitter stamps schemaVersion / ts / seq itself so callers cannot forget.
+// Attribution the translator knows and emit() cannot: which agent produced the
+// line and which tool call it belongs to. Carried alongside every payload
+// below rather than per-kind, because a Bash call rewritten into a git_commit
+// is still the same subagent's same tool call.
+export interface ProgressAttribution {
+  emitter?: ProgressEmitter;
+  emitterId?: string;
+  emitterLabel?: string;
+  toolUseId?: string;
+}
+
+// Discriminated union of payloads (no envelope fields except the attribution
+// above). The emitter stamps schemaVersion / ts / seq itself so callers cannot
+// forget.
 export type ProgressEventInput = (
   | { kind: "phase"; phase: string }
   | { kind: "tool_use"; tool: string; summary: string }
+  | { kind: "activity"; summary: string; toolCount?: number }
+  | {
+      kind: "tool_result";
+      tool?: string;
+      ok: boolean;
+      durationMs?: number;
+      summary?: string;
+      exitCode?: number;
+      status?: string;
+      toolCount?: number;
+      linesAdded?: number;
+      linesRemoved?: number;
+    }
   | { kind: "git_commit"; sha?: string; files?: number; summary?: string }
   | { kind: "git_push"; sha?: string; branch?: string; summary?: string }
   | { kind: "gh_action"; command: string; summary?: string }
   | { kind: "log"; level?: "info" | "warn" | "error"; summary: string }
   | { kind: "result"; status: "success" | "failure"; summary?: string; error?: string; usage?: TurnUsage }
-) & { emitter?: ProgressEmitter };
+) & ProgressAttribution;

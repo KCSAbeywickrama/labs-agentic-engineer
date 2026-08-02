@@ -1089,23 +1089,50 @@ type ProgressEvent struct {
 	Command     string `json:"command,omitempty"`
 	CompletedAt string `json:"completedAt,omitempty"`
 
+	// DurationMs `tool_result` only: how long the call took, measured by the runner between the call and its outcome, so it includes model turnaround.
+	DurationMs int64 `json:"durationMs,omitempty"`
+
 	// Emitter Who produced the line — `subagent` for work the main agent fanned out with the Task tool, absent for the main agent itself. Absence is a positive fact, not an unknown.
-	Emitter       ProgressEventEmitter `json:"emitter,omitempty"`
-	Error         string               `json:"error,omitempty"`
-	Files         int64                `json:"files,omitempty"`
-	Kind          string               `json:"kind"`
-	Level         string               `json:"level,omitempty"`
-	Message       string               `json:"message,omitempty"`
-	Phase         string               `json:"phase,omitempty"`
-	SchemaVersion int64                `json:"schemaVersion"`
-	Seq           int64                `json:"seq"`
-	Sha           string               `json:"sha,omitempty"`
-	StartedAt     string               `json:"startedAt,omitempty"`
-	Status        string               `json:"status,omitempty"`
-	Step          string               `json:"step,omitempty"`
-	Summary       string               `json:"summary,omitempty"`
-	Tool          string               `json:"tool,omitempty"`
-	TS            string               `json:"ts"`
+	Emitter ProgressEventEmitter `json:"emitter,omitempty"`
+
+	// EmitterID Which subagent, for the cycles that fan out to several at once — the id of the fan-out tool call, stable for that subagent's whole life. Absent on main-agent lines.
+	EmitterID string `json:"emitterId,omitempty"`
+
+	// EmitterLabel The description the main agent gave that subagent ("Implement todo-api service (issue
+	EmitterLabel string `json:"emitterLabel,omitempty"`
+	Error        string `json:"error,omitempty"`
+
+	// ExitCode `tool_result` only: the process status of a failed shell call, parsed from the SDK's own `Exit code N` first line. Absent when the tool was not a shell — those report a `<tool_use_error>` with no code — so read absence as "no code was reported", never as "exited 0".
+	ExitCode int64  `json:"exitCode,omitempty"`
+	Files    int64  `json:"files,omitempty"`
+	Kind     string `json:"kind"`
+	Level    string `json:"level,omitempty"`
+
+	// LinesAdded A fanned-out subagent's total lines added, off the SDK's own report on its fan-out call's result. Present only there; nothing in the feed can reconstruct it.
+	LinesAdded int64 `json:"linesAdded,omitempty"`
+
+	// LinesRemoved A fanned-out subagent's total lines removed, from the same report.
+	LinesRemoved int64  `json:"linesRemoved,omitempty"`
+	Message      string `json:"message,omitempty"`
+
+	// Ok `tool_result` only: whether the call succeeded. Absent on every other kind — so read absence as "not a tool result", never as success.
+	Ok            bool   `json:"ok,omitempty"`
+	Phase         string `json:"phase,omitempty"`
+	SchemaVersion int64  `json:"schemaVersion"`
+	Seq           int64  `json:"seq"`
+	Sha           string `json:"sha,omitempty"`
+	StartedAt     string `json:"startedAt,omitempty"`
+	Status        string `json:"status,omitempty"`
+	Step          string `json:"step,omitempty"`
+	Summary       string `json:"summary,omitempty"`
+	Tool          string `json:"tool,omitempty"`
+
+	// ToolCount A fanned-out subagent's total tool calls, off the SDK's own report on its fan-out call's result. Present only there.
+	ToolCount int64 `json:"toolCount,omitempty"`
+
+	// ToolUseID The tool call this line is about. A `tool_result` carries the id of the `tool_use` it answers, which is what pairs a call with its outcome once several subagents interleave the feed.
+	ToolUseID string `json:"toolUseId,omitempty"`
+	TS        string `json:"ts"`
 }
 
 // ProgressEventEmitter Who produced the line — `subagent` for work the main agent fanned out with the Task tool, absent for the main agent itself. Absence is a positive fact, not an unknown.
@@ -1322,20 +1349,47 @@ type RunProgressLine struct {
 	// CycleKind Kind of that cycle (coding | conflict | fix | validation) — the section label.
 	CycleKind string `json:"cycleKind"`
 
+	// DurationMs `tool_result` only: how long the call took, measured by the runner between the call and its outcome, so it includes model turnaround.
+	DurationMs int64 `json:"durationMs,omitempty"`
+
 	// Emitter Who produced the line. The runner stamps `subagent` only on lines forwarded from inside a Task tool call; everything else is the main agent.
-	Emitter       RunProgressLineEmitter `json:"emitter"`
-	Error         string                 `json:"error,omitempty"`
-	Files         int64                  `json:"files,omitempty"`
-	Kind          string                 `json:"kind"`
-	Level         string                 `json:"level,omitempty"`
-	Phase         string                 `json:"phase,omitempty"`
-	SchemaVersion int64                  `json:"schemaVersion,omitempty"`
-	Seq           int64                  `json:"seq,omitempty"`
-	Sha           string                 `json:"sha,omitempty"`
-	Status        string                 `json:"status,omitempty"`
-	Summary       string                 `json:"summary,omitempty"`
-	Tool          string                 `json:"tool,omitempty"`
-	TS            string                 `json:"ts,omitempty"`
+	Emitter RunProgressLineEmitter `json:"emitter"`
+
+	// EmitterID Which subagent, for the cycles that fan out to several at once — the id of the fan-out tool call, stable for that subagent's whole life. Absent on main-agent lines.
+	EmitterID string `json:"emitterId,omitempty"`
+
+	// EmitterLabel The description the main agent gave that subagent ("Implement todo-api service (issue
+	EmitterLabel string `json:"emitterLabel,omitempty"`
+	Error        string `json:"error,omitempty"`
+
+	// ExitCode `tool_result` only: the process status of a failed shell call, parsed from the SDK's own `Exit code N` first line. Absent when the tool was not a shell — those report a `<tool_use_error>` with no code — so read absence as "no code was reported", never as "exited 0".
+	ExitCode int64  `json:"exitCode,omitempty"`
+	Files    int64  `json:"files,omitempty"`
+	Kind     string `json:"kind"`
+	Level    string `json:"level,omitempty"`
+
+	// LinesAdded A fanned-out subagent's total lines added, off the SDK's own report on its fan-out call's result. Present only there; nothing in the feed can reconstruct it.
+	LinesAdded int64 `json:"linesAdded,omitempty"`
+
+	// LinesRemoved A fanned-out subagent's total lines removed, from the same report.
+	LinesRemoved int64 `json:"linesRemoved,omitempty"`
+
+	// Ok `tool_result` only: whether the call succeeded. Absent on every other kind — so read absence as "not a tool result", never as success.
+	Ok            bool   `json:"ok,omitempty"`
+	Phase         string `json:"phase,omitempty"`
+	SchemaVersion int64  `json:"schemaVersion,omitempty"`
+	Seq           int64  `json:"seq,omitempty"`
+	Sha           string `json:"sha,omitempty"`
+	Status        string `json:"status,omitempty"`
+	Summary       string `json:"summary,omitempty"`
+	Tool          string `json:"tool,omitempty"`
+
+	// ToolCount A fanned-out subagent's total tool calls, off the SDK's own report on its fan-out call's result. Present only there.
+	ToolCount int64 `json:"toolCount,omitempty"`
+
+	// ToolUseID The tool call this line is about. A `tool_result` carries the id of the `tool_use` it answers, which is what pairs a call with its outcome once several subagents interleave the feed.
+	ToolUseID string `json:"toolUseId,omitempty"`
+	TS        string `json:"ts,omitempty"`
 }
 
 // RunProgressLineEmitter Who produced the line. The runner stamps `subagent` only on lines forwarded from inside a Task tool call; everything else is the main agent.
@@ -1552,19 +1606,40 @@ type TimelineEvent struct {
 	Command     string `json:"command,omitempty"`
 	CompletedAt string `json:"completedAt,omitempty"`
 
+	// DurationMs `tool_result` only: how long the call took, measured by the runner between the call and its outcome, so it includes model turnaround.
+	DurationMs int64 `json:"durationMs,omitempty"`
+
 	// Emitter Who produced the line — `subagent` for work the main agent fanned out with the Task tool, absent for the main agent itself. Absence is a positive fact, not an unknown.
 	Emitter TimelineEventEmitter `json:"emitter,omitempty"`
-	Error   string               `json:"error,omitempty"`
+
+	// EmitterID Which subagent, for the cycles that fan out to several at once — the id of the fan-out tool call, stable for that subagent's whole life. Absent on main-agent lines.
+	EmitterID string `json:"emitterId,omitempty"`
+
+	// EmitterLabel The description the main agent gave that subagent ("Implement todo-api service (issue
+	EmitterLabel string `json:"emitterLabel,omitempty"`
+	Error        string `json:"error,omitempty"`
 
 	// ExecutionID Id of the execution attempt this line belongs to.
 	ExecutionID string `json:"executionId"`
 
 	// ExecutionKind Kind of that attempt (coding | build | ops) — client-side grouping/section labels.
 	ExecutionKind string `json:"executionKind"`
-	Files         int64  `json:"files,omitempty"`
-	Kind          string `json:"kind"`
-	Level         string `json:"level,omitempty"`
-	Message       string `json:"message,omitempty"`
+
+	// ExitCode `tool_result` only: the process status of a failed shell call, parsed from the SDK's own `Exit code N` first line. Absent when the tool was not a shell — those report a `<tool_use_error>` with no code — so read absence as "no code was reported", never as "exited 0".
+	ExitCode int64  `json:"exitCode,omitempty"`
+	Files    int64  `json:"files,omitempty"`
+	Kind     string `json:"kind"`
+	Level    string `json:"level,omitempty"`
+
+	// LinesAdded A fanned-out subagent's total lines added, off the SDK's own report on its fan-out call's result. Present only there; nothing in the feed can reconstruct it.
+	LinesAdded int64 `json:"linesAdded,omitempty"`
+
+	// LinesRemoved A fanned-out subagent's total lines removed, from the same report.
+	LinesRemoved int64  `json:"linesRemoved,omitempty"`
+	Message      string `json:"message,omitempty"`
+
+	// Ok `tool_result` only: whether the call succeeded. Absent on every other kind — so read absence as "not a tool result", never as success.
+	Ok            bool   `json:"ok,omitempty"`
 	Phase         string `json:"phase,omitempty"`
 	SchemaVersion int64  `json:"schemaVersion"`
 	Seq           int64  `json:"seq"`
@@ -1574,7 +1649,13 @@ type TimelineEvent struct {
 	Step          string `json:"step,omitempty"`
 	Summary       string `json:"summary,omitempty"`
 	Tool          string `json:"tool,omitempty"`
-	TS            string `json:"ts"`
+
+	// ToolCount A fanned-out subagent's total tool calls, off the SDK's own report on its fan-out call's result. Present only there.
+	ToolCount int64 `json:"toolCount,omitempty"`
+
+	// ToolUseID The tool call this line is about. A `tool_result` carries the id of the `tool_use` it answers, which is what pairs a call with its outcome once several subagents interleave the feed.
+	ToolUseID string `json:"toolUseId,omitempty"`
+	TS        string `json:"ts"`
 }
 
 // TimelineEventEmitter Who produced the line — `subagent` for work the main agent fanned out with the Task tool, absent for the main agent itself. Absence is a positive fact, not an unknown.

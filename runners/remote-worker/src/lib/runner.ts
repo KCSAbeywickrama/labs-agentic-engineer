@@ -25,8 +25,11 @@ import type { TaskLog } from "./logger.js";
 import type { DispatchRequest } from "./types.js";
 import type { WorkspaceLayout } from "./workspace.js";
 import { emit } from "./progress/emitter.js";
-import { progressFromSdkMessage } from "./progress/from-sdk.js";
+import { createSdkTranslator } from "./progress/from-sdk.js";
+import { createRunWatchdog } from "./progress/watchdog.js";
 import { createWebSearchDlpHook, stagedSecretValues } from "./websearch_dlp.js";
+import { createForegroundFanOutHook } from "./fanout_foreground.js";
+import { createWorkspaceWriteGuard } from "./workspace_guard.js";
 import { createWebFetchGuardHook } from "./webfetch_guard.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -44,14 +47,68 @@ const PLUGIN_PATH = path.resolve(__dirname, "../../plugin");
 // (see webfetch_guard.ts) — fail-closed, so pod egress to arbitrary
 // fetched pages never reaches internal/private/link-local/metadata
 // addresses or leaks a staged secret in the URL.
-// Task joins the set for the milestone run loop (docs/design §9.3): a cycle
+// Agent joins the set for the milestone run loop (docs/design §9.3): a cycle
 // works several issues, and the main agent fans the big, prose-independent,
 // disjoint-App-Path ones out to subagents. The main agent stays the SOLE git
 // writer — subagents Edit/Write only. That split is a SKILL rule, not a tool
 // restriction: the SDK hands a subagent the same allowedTools as its parent,
 // so `aep`'s deny-list is what keeps a subagent off git, and its fan-out
 // section is what keeps small issues inline.
-const BASE_ALLOWED_TOOLS = ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "WebSearch", "WebFetch", "Task"];
+//
+// The fan-out tool is `Agent`. It was `Task` until the SDK 0.2 → 0.3 bump, and
+// this list still said `Task` afterwards — a name with no tool behind it in
+// 0.3.220 (`sdk-tools.d.ts` declares `AgentInput` and no `TaskInput`). Nothing
+// broke loudly, which is the point of the note below.
+const BASE_ALLOWED_TOOLS = ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "WebSearch", "WebFetch", "Agent"];
+
+// allowedTools does NOT restrict anything in this run: `bypassPermissions` plus
+// `allowDangerouslySkipPermissions` (see the query() options below) allows every
+// tool the harness has, whether or not it is named above. Measured on a live run
+// — the agent called `Agent` and `ScheduleWakeup`, neither of which was in the
+// list, and both dispatched. So BASE_ALLOWED_TOOLS documents the intended
+// surface, and this is the list that actually holds a boundary.
+//
+// What it excludes is the harness's *session-management* surface: tools that
+// assume an interactive user, a scheduler, or a durable session, none of which a
+// one-shot pod has. They are not merely useless here — a run reached for
+// `ScheduleWakeup` to wait on its own detached subagents (it failed the schema
+// and the session exited anyway), so an unreachable tool is a real invitation to
+// spend a turn on a dead end. File/shell/search tools are deliberately absent
+// from this list: `aep`'s deny-list governs those by path and command, and
+// blocking them wholesale would end the run.
+export const DISALLOWED_TOOLS = [
+  "ScheduleWakeup",
+  "Monitor",
+  "CronCreate",
+  "CronDelete",
+  "CronList",
+  "TaskCreate",
+  "TaskUpdate",
+  "TaskGet",
+  "TaskList",
+  "TaskStop",
+  "TaskOutput",
+  "Workflow",
+  "Artifact",
+  "AskUserQuestion",
+  "EnterPlanMode",
+  "ExitPlanMode",
+  "SendMessage",
+  "PushNotification",
+  "RemoteTrigger",
+  "SendFeedback",
+  "EnterWorktree",
+  "ExitWorktree",
+];
+
+// 128 + SIGTERM(15), the shell's own convention for "killed by a signal". The
+// run reports this only when it is torn down from outside, never on its own.
+const TERMINATED_EXIT_CODE = 143;
+
+// How long the terminal dump gets to reach the pipe before the hard exit. Well
+// under any sane SIGTERM grace period (Kubernetes defaults to 30s), so this
+// never turns into the SIGKILL it is trying to beat.
+const TERMINATE_FLUSH_MS = 50;
 
 // The server key the BFF MCP endpoint is registered under. The SDK
 // namespaces MCP tools as `mcp__<serverKey>__<toolName>` (confirmed from
@@ -67,6 +124,30 @@ const MCP_TOOL_NAMES = [
   `mcp__${MCP_SERVER_KEY}__get_remote_git_file_contents`,
   `mcp__${MCP_SERVER_KEY}__search_remote_git_code`,
 ];
+
+/**
+ * Prepends the project root to the caller's prompt.
+ *
+ * The `aep` skill says "the current working directory **is** the project" and
+ * never names it, because static skill text cannot. Neither prompt builder can
+ * either: the playground's is a TS literal and the platform's is a Go one
+ * (`delivery/codingagent/coding_executor.go`), and the path is decided here,
+ * after `provisionWorkspace`. So this is the only place that both knows the value
+ * and reaches every run — stating it in two prompt builders would duplicate a
+ * fact across a language boundary that neither of them owns.
+ *
+ * Worth stating at all because the alternative was measured: with only relative
+ * framing, a run inferred the run directory was the project root and built a
+ * whole component there. The skill's deny-list and `workspace_guard.ts` cover
+ * the same ground from the rule and enforcement sides; this removes the ambiguity
+ * up front so neither has to fire.
+ */
+export function promptWithProjectRoot(prompt: string, workspaceRoot: string): string {
+  return (
+    `Your project root — the current working directory — is ${workspaceRoot}. ` +
+    `Every file you author lives under it; nothing else on this filesystem is a project root.\n\n${prompt}`
+  );
+}
 
 export interface McpQueryOptions {
   mcpServers?: Record<string, McpServerConfig>;
@@ -266,19 +347,43 @@ export function runClaudeQuery(
   // truth for "what's secret in this run".
   const webFetchGuardHook = createWebFetchGuardHook(stagedSecrets);
 
-  // SDK v0.2.126 auto-discovers the bundled native binary — no
+  // Fan-out stays in the foreground — see fanout_foreground.ts. Backgrounding a
+  // subagent detaches it, and the SDK then forwards none of its messages, so the
+  // run's whole implementation phase reaches the feed as an empty section.
+  const foregroundFanOutHook = createForegroundFanOutHook((label) => {
+    emit({
+      kind: "log",
+      level: "info",
+      summary: `[fan-out] ${label} — running in the foreground so its steps stay on the feed`,
+    });
+  });
+
+  // Authored files land in the project — see workspace_guard.ts. A run once built
+  // a whole component into the run directory and finished green, so the skill's
+  // "everything you produce goes inside it" needs an enforcer too.
+  const workspaceWriteGuard = createWorkspaceWriteGuard(layout.workspace, (reason) => {
+    emit({ kind: "log", level: "warn", summary: `[workspace] ${reason}` });
+  });
+
+  // The SDK auto-discovers the bundled native binary — no
   // pathToClaudeCodeExecutable needed. settingSources: [] ensures no
   // host filesystem settings leak into the container agent.
   const q = query({
-    prompt: req.prompt,
+    prompt: promptWithProjectRoot(req.prompt, layout.workspace),
     options: {
       cwd: layout.workspace,
+      // Pinned rather than left to the SDK's own default, which drifts across
+      // SDK releases (seen live: an unpinned run resolved to claude-sonnet-4-6).
+      model: "claude-sonnet-5",
       plugins,
       // Force built-in skill bodies into context at startup. Do NOT
       // replace with 'all': that would inject every custom + imported
       // skill's body too, which is what the on-demand listing is for.
       skills: skillPreload as unknown as string[],
       allowedTools,
+      // The boundary that actually holds under bypassPermissions — see
+      // DISALLOWED_TOOLS.
+      disallowedTools: DISALLOWED_TOOLS,
       ...(mcpServers ? { mcpServers } : {}),
       permissionMode: "bypassPermissions",
       allowDangerouslySkipPermissions: true,
@@ -297,16 +402,58 @@ export function runClaudeQuery(
         PreToolUse: [
           { matcher: "WebSearch", hooks: [webSearchDlpHook] },
           { matcher: "WebFetch", hooks: [webFetchGuardHook] },
+          // Not a guard: this one rewrites the call rather than gating it. Two
+          // entries rather than one alternation, because the matcher's grammar
+          // is unspecified in the SDK's types and a pattern that silently failed
+          // to match would take the feed down with it. The hook re-checks the
+          // tool name itself, so a matcher that over-matches is harmless.
+          { matcher: "Agent", hooks: [foregroundFanOutHook] },
+          { matcher: "Task", hooks: [foregroundFanOutHook] },
+          // One matcher per authoring tool, same reasoning as the pair above: the
+          // matcher grammar is unspecified, and the hook re-checks the tool name
+          // itself, so over-matching is harmless and a silent non-match is not.
+          { matcher: "Write", hooks: [workspaceWriteGuard] },
+          { matcher: "Edit", hooks: [workspaceWriteGuard] },
+          { matcher: "NotebookEdit", hooks: [workspaceWriteGuard] },
         ],
       },
     },
   });
 
+  // One translator per run — it carries this run's subagent labels and
+  // in-flight tool calls (see createSdkTranslator).
+  const translate = createSdkTranslator();
+  // …and one watchdog, so a silent stretch says what it is waiting on rather
+  // than looking identical to a dead run.
+  const watchdog = createRunWatchdog();
+  const stopWatchdog = watchdog.start();
+
+  // A killed run must still explain itself. Without this, SIGTERM (what the
+  // playground's Ctrl-C and a Job eviction both send) tears the process down
+  // mid-tool and leaves nothing behind — the state that would have named the
+  // culprit dies with it. Handling the signal means we now own the exit, so
+  // this MUST terminate: a handler that only logged would convert a kill into
+  // the very hang it exists to diagnose.
+  const onTerminate = (signal: NodeJS.Signals): void => {
+    emit({ kind: "log", level: "error", summary: `[watchdog] terminated by ${signal} — ${watchdog.describe()}` });
+    stopWatchdog();
+    // stdout is a PIPE here (a pod's log stream; the playground's child stdio),
+    // and pipe writes are asynchronous on POSIX — exiting on this tick can
+    // truncate the dump just written, losing the one line the handler exists
+    // to produce. Give the fd a bounded moment to drain and then exit hard: a
+    // blocked reader must not turn a kill into a hang.
+    setTimeout(() => process.exit(TERMINATED_EXIT_CODE), TERMINATE_FLUSH_MS);
+  };
+  process.once("SIGTERM", onTerminate);
+  process.once("SIGINT", onTerminate);
+
   const completion = (async (): Promise<RunResult> => {
     try {
       for await (const message of q) {
         log.write(message);
-        for (const event of progressFromSdkMessage(message)) {
+        const events = translate(message);
+        watchdog.observe(events);
+        for (const event of events) {
           emit(event);
         }
         if (message.type === "result") {
@@ -331,6 +478,9 @@ export function runClaudeQuery(
       emit({ kind: "result", status: "failure", error: msg });
       return { exitCode: 1, error: msg };
     } finally {
+      stopWatchdog();
+      process.removeListener("SIGTERM", onTerminate);
+      process.removeListener("SIGINT", onTerminate);
       log.close();
     }
   })();

@@ -16,7 +16,7 @@
  * under the License.
  */
 
-// Routes the runner's console output through the scrubber.
+// Routes the runner's console output into the progress feed, scrubbed.
 //
 // `console.*` is not a private debug channel here: the BFF tails the agent
 // pod's stdout/stderr and forwards every line that isn't a progress NDJSON
@@ -24,14 +24,22 @@
 // delivery/codingagent/agent_progress.go). So console is as user-facing as
 // emit() and needs the same redaction.
 //
+// It is also on the SAME file descriptor as the NDJSON feed, which is why this
+// converts rather than merely scrubs: a bare line on that fd makes the stream
+// not-NDJSON, so a strict consumer breaks on it and a watchdog cannot parse the
+// feed it is supposed to be watching. Emitting a typed `log` event instead
+// gives every line the same envelope, schemaVersion, ts and seq as the rest.
+// The BFF's raw-line fallback stays as a safety net for output that never went
+// through console at all (a dependency writing to process.stdout directly).
+//
 // This wraps the console methods once at process entry rather than asking each
 // call site to remember, which also covers output we don't author — the Agent
 // SDK, git's own stderr as relayed by child_process errors, and any dependency
-// that logs. Scrubbing is applied per call, so literals enrolled later (the
-// git token, minted mid-run) still redact earlier-wrapped methods.
+// that logs. Scrubbing is applied per call by emit(), so literals enrolled later
+// (the git token, minted mid-run) still redact earlier-wrapped methods.
 
 import { format } from "node:util";
-import { scrubber } from "./scrubber.js";
+import { emit } from "./emitter.js";
 
 type ConsoleMethod = "log" | "info" | "warn" | "error" | "debug";
 
@@ -39,20 +47,30 @@ const METHODS: readonly ConsoleMethod[] = ["log", "info", "warn", "error", "debu
 
 export type ConsoleLike = Pick<Console, ConsoleMethod>;
 
-// Wrapping the same console twice would scrub twice — harmless but pointless,
-// and it would stack a wrapper per call in tests.
+// Wrapping the same console twice would emit twice — and it would stack a
+// wrapper per call in tests.
 const wrapped = new WeakSet<object>();
+
+// console's five levels collapse to the feed's three. `debug` joins `info`
+// rather than being dropped: the runner logs its provisioning trail there, and
+// a level that silently discards output is worse than a noisy feed.
+const LEVELS: Record<ConsoleMethod, "info" | "warn" | "error"> = {
+  log: "info",
+  info: "info",
+  debug: "info",
+  warn: "warn",
+  error: "error",
+};
 
 export function installConsoleScrubber(target: ConsoleLike = console): void {
   if (wrapped.has(target)) return;
   wrapped.add(target);
   for (const method of METHODS) {
-    const original = target[method].bind(target);
     // util.format reproduces console's own rendering, including printf-style
     // specifiers and Error stacks, so nothing is lost by collapsing the args
-    // to one string before scrubbing.
+    // to one string.
     target[method] = (...args: unknown[]): void => {
-      original(scrubber.scrub(format(...args)));
+      emit({ kind: "log", level: LEVELS[method], summary: format(...args) });
     };
   }
 }

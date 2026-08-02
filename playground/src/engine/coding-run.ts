@@ -51,6 +51,15 @@ import { spawn } from "node:child_process";
 import { createWriteStream, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { stdout as output } from "node:process";
+import {
+  formatLine,
+  formatOutcome,
+  formatSubagentStatus,
+  groupBySubagent,
+  mergeOutcomes,
+  type AttributedLine,
+  type ProgressLineView,
+} from "@aep/progress-view";
 import { REPO_ROOT } from "../paths.js";
 
 const LOCAL_ENTRY = join(REPO_ROOT, "runners", "remote-worker", "src", "local.ts");
@@ -58,38 +67,118 @@ const DEFAULT_PLUGIN_DIR = join(REPO_ROOT, "runners", "remote-worker", "plugin")
 const BUILD_RUNNER_SCRIPT = join(REPO_ROOT, "deployments", "scripts", "build-runner.sh");
 const RUNNER_IMAGE = process.env.AGENT_RUNNER_IMAGE || "aep-runner:dev";
 
-export interface ProgressEvent {
-  kind: string;
-  phase?: string;
-  tool?: string;
-  summary?: string;
-  status?: string;
-  error?: string;
-  level?: string;
-  command?: string;
-  sha?: string;
+/** One NDJSON line off the runner's feed, as this harness reads it. */
+export type ProgressEvent = ProgressLineView & AttributedLine;
+
+// Attribution is a fixed-width tag so the glyphs stay in one column and a
+// fanned-out run still scans as a single timeline. The tag is a NUMBER, not the
+// subagent's label: labels run to a full sentence ("Implement todo-api
+// Ballerina service (issue #3)") and would push every line off the right edge.
+// The label is announced once, the first time that subagent appears.
+const TAG_WIDTH = "[#1] ".length;
+
+export type TimelineRenderer = (e: ProgressEvent) => string[];
+
+// The one place the local harness legitimately says something the console does
+// not. A local run has no remote and no GitHub, so a push or a `gh` call is a
+// no-op the agent may not realise it made — worth flagging where it is true,
+// and meaningless in a cluster run where both exist.
+function annotateForLocalMode(e: ProgressEvent, text: string): string {
+  if (!text) return text;
+  if (e.kind === "git_push") return `${text} — no remote in local mode`;
+  if (e.kind === "gh_action") return `${text} — no GitHub in local mode`;
+  return text;
 }
 
-/** One NDJSON line → a formatted timeline line (docs §7 coding-run screen). */
-export function renderProgressLine(e: ProgressEvent): string {
-  switch (e.kind) {
-    case "phase":
-      return `  ▸ ${String(e.phase ?? "").replace(/_/g, " ")}`;
-    case "tool_use":
-      return `  ${e.tool === "Bash" ? "$" : "⚙"} ${e.summary || e.tool || "tool"}`;
-    case "git_commit":
-      return `  ✓ commit ${e.sha?.slice(0, 8) ?? ""} ${e.summary ?? ""}`.trimEnd();
-    case "git_push":
-      return `  ⚠ push attempted (local mode has no remote) ${e.summary ?? ""}`.trimEnd();
-    case "gh_action":
-      return `  ⚠ gh ${e.command ?? ""} (local mode has no GitHub)`.trimEnd();
-    case "log":
-      return `  ${e.level === "error" ? "✗" : e.level === "warn" ? "⚠" : "·"} ${e.summary ?? ""}`.trimEnd();
-    case "result":
-      return e.status === "success" ? "  ■ result success" : `  ■ result failure${e.error ? ` — ${e.error}` : ""}`;
-    default:
-      return `  · ${e.kind}`;
+/**
+ * Build the renderer for ONE run: it numbers subagents as they appear, so
+ * concurrent fan-outs stay tellable apart across lines. Returns zero lines for
+ * a silent event, one for a normal line, and two the first time a subagent
+ * speaks (its announcement, then its line).
+ *
+ * The WORDING of every line comes from @aep/progress-view, the same module the
+ * console renders through — so what you iterate on here is what a cluster run
+ * shows, and a wording defect cannot hide in one surface. Only the terminal
+ * presentation (the tags, the column) is this harness's own.
+ */
+export function createTimelineRenderer(): TimelineRenderer {
+  const tags = new Map<string, string>();
+
+  return function render(e: ProgressEvent): string[] {
+    const text = annotateForLocalMode(e, formatLine(e).text);
+    if (!text) return [];
+
+    // One line at a time, so the grouping the console applies over a whole
+    // cycle degrades here to "is this line a subagent's, and which one".
+    const [row] = groupBySubagent([e]);
+    if (!row || row.kind !== "group") {
+      // A subagent line from a runner too old to stamp an id cannot be grouped,
+      // but it is still a subagent's — the console keeps its chip for exactly
+      // this case, and dropping the marker here would read as the main agent.
+      const tag = e.emitter === "subagent" ? "[sub]" : "";
+      return [`  ${tag.padEnd(TAG_WIDTH)}${text}`];
+    }
+
+    const { id, label } = row.group;
+    const announce: string[] = [];
+    let tag = tags.get(id);
+    if (!tag) {
+      tag = `[#${tags.size + 1}]`;
+      tags.set(id, tag);
+      if (label !== "subagent") announce.push(`  ${" ".repeat(TAG_WIDTH)}⑂ ${tag} ${label}`);
+    }
+    return [...announce, `  ${`${tag} `.padEnd(TAG_WIDTH)}${text}`];
+  };
+}
+
+// Where an outcome's column starts in the merged pass. Wide enough for the
+// commands a real run issues; anything longer pushes its outcome right rather
+// than being cut, because a truncated command is worse than a ragged column.
+const OUTCOME_COLUMN = 62;
+
+/**
+ * The whole run again, once every event is in hand: one row per step with its
+ * outcome attached, and each subagent's work gathered under its own report.
+ *
+ * This exists because a terminal cannot go back and rewrite a line it printed.
+ * The live stream above is honest about that — an outcome follows as a
+ * continuation row — but it means the fast local loop is NOT shaped like the
+ * console, which is the surface being iterated on. Printing a merged pass at the
+ * end gives both: live while it runs, console-shaped afterwards.
+ */
+export function renderMergedTimeline(events: readonly ProgressEvent[]): string[] {
+  const out: string[] = [];
+  const row = (indent: string, text: string, outcome: string): void => {
+    if (!text) return;
+    out.push(outcome ? `${(indent + text).padEnd(OUTCOME_COLUMN)} ${outcome}` : `${indent}${text}`);
+  };
+
+  const rows = groupBySubagent(events);
+  // The main agent's lines are merged as ONE stream: its action and its outcome
+  // are routinely separated by a subagent section that spoke in between, so
+  // pairing has to survive the gap. Looked up per line afterwards, which keeps
+  // each section printed where its subagent first spoke.
+  const mainByLine = new Map(
+    mergeOutcomes(rows.flatMap((r) => (r.kind === "line" ? [r.line] : []))).map((m) => [m.line, m]),
+  );
+
+  for (const r of rows) {
+    if (r.kind === "group") {
+      out.push(`  ⑂ ${r.group.label} — ${formatSubagentStatus(r.group.report)}`);
+      for (const m of mergeOutcomes(r.group.lines)) {
+        const { text } = formatLine(m.line);
+        const { detail, duration } = formatOutcome(m.outcome);
+        row("    │ ", annotateForLocalMode(m.line, text), [detail, duration].filter(Boolean).join(" · "));
+      }
+      continue;
+    }
+    const m = mainByLine.get(r.line);
+    if (!m) continue; // folded into an earlier action's row
+    const { text } = formatLine(r.line);
+    const { detail, duration } = formatOutcome(m.outcome);
+    row("  ", annotateForLocalMode(r.line, text), [detail, duration].filter(Boolean).join(" · "));
   }
+  return out;
 }
 
 export interface CodingRunOptions {
@@ -220,6 +309,11 @@ export async function runCodingAgent(opts: CodingRunOptions): Promise<CodingRunR
   return new Promise((resolvePromise) => {
     const child = spawn(command, args, { cwd: REPO_ROOT, env, stdio: ["ignore", "pipe", "pipe"] });
 
+    // One renderer per run — it numbers this run's subagents (see above).
+    const render = createTimelineRenderer();
+    // Kept so the run can be re-rendered console-shaped once it ends. Bounded by
+    // the run itself, same as the progress.ndjson beside it.
+    const events: ProgressEvent[] = [];
     let buffer = "";
     child.stdout.on("data", (chunk: Buffer) => {
       buffer += chunk.toString("utf8");
@@ -230,12 +324,17 @@ export async function runCodingAgent(opts: CodingRunOptions): Promise<CodingRunR
         buffer = buffer.slice(nl + 1);
         if (line.trim() === "") continue;
         progressLog.write(line + "\n");
-        if (opts.silent) continue;
+        let event: ProgressEvent;
         try {
-          output.write(renderProgressLine(JSON.parse(line) as ProgressEvent) + "\n");
+          event = JSON.parse(line) as ProgressEvent;
         } catch {
-          output.write(`  ${line}\n`); // non-NDJSON runner logging — pass through
+          // non-NDJSON runner logging — pass through
+          if (!opts.silent) output.write(`  ${line}\n`);
+          continue;
         }
+        events.push(event);
+        if (opts.silent) continue;
+        for (const rendered of render(event)) output.write(rendered + "\n");
       }
     });
     child.stderr.on("data", (chunk: Buffer) => {
@@ -244,6 +343,10 @@ export async function runCodingAgent(opts: CodingRunOptions): Promise<CodingRunR
 
     const settle = (exitCode: number): void => {
       progressLog.end();
+      if (!opts.silent && events.length > 0) {
+        output.write("\n  ── the run, merged ──\n");
+        for (const line of renderMergedTimeline(events)) output.write(line + "\n");
+      }
       resolvePromise({ exitCode, runDir });
     };
     child.on("error", (err) => {

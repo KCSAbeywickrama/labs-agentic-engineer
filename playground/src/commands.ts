@@ -38,6 +38,7 @@ import { openSession, type OpenOptions, type PlaygroundSession } from "./engine/
 import { pendingQuestions, type PendingQuestions } from "./engine/questions.js";
 import { runSpecTurn, type SpecTurnResult } from "./engine/turn.js";
 import { runCodingAgent } from "./engine/coding-run.js";
+import { renderLogView, resolveRunDir, type LogView } from "./engine/log-read.js";
 import { SKILLS_DIR } from "./engine/session.js";
 import { FsIssueStore, type FoldOutcome } from "./ports/issue-store.js";
 import { projectSlug } from "./ports/spec-workspace.js";
@@ -183,6 +184,9 @@ export interface CodeOptions extends PhaseOptions {
   pluginDir?: string;
   /** `--host`: bare `npx tsx` on the host instead of the default Docker-image run. */
   host?: boolean;
+  /** `log` only: which view, and which archived run (default: the newest). */
+  view?: LogView;
+  run?: string;
 }
 
 /**
@@ -235,6 +239,26 @@ export async function codeCommand(
     output.write(`  transcript: ${result.runDir}\n`);
   }
   return result.exitCode === 0 ? { ok: true } : { ok: false, detail: `coding run exited ${result.exitCode}` };
+}
+
+/**
+ * `play <dir> log [--steps|--slow|--thinking]` — the DEVELOPER view of a coding
+ * run, derived on demand from the archived transcript.
+ *
+ * Deliberately a reader rather than a file the run writes: `claude.log` already
+ * holds every message, so a second artifact would be a cache of an analysis, and
+ * one that can drift from the truth is worse than none. What was missing was
+ * only the ergonomics of asking.
+ */
+export function logCommand(projectDir: string, opts: CodeOptions): PhaseOutcome {
+  const runDir = resolveRunDir(projectDir, opts.run);
+  if (!runDir) return { ok: false, detail: "no archived coding run found (run `code` first?)" };
+  const view = opts.view ?? "steps";
+  if (!opts.silent) {
+    output.write(`  ${view} — ${runDir}\n`);
+    for (const line of renderLogView(runDir, view)) output.write(`${line}\n`);
+  }
+  return { ok: true };
 }
 
 /** `play undo` — restore the latest pre-coding-run snapshot. */

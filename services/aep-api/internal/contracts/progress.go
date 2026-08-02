@@ -37,11 +37,47 @@ type ProgressEvent struct {
 	// value means main — readers should default rather than treat it as unknown.
 	Emitter string `json:"emitter,omitempty"`
 
+	// EmitterID / EmitterLabel say WHICH subagent, for the cycles that fan out
+	// to several at once and whose lines therefore interleave. The id is the
+	// fan-out tool call (stable for that subagent's life) and the label is the
+	// description the main agent gave it. Both empty on main-agent lines.
+	EmitterID    string `json:"emitterId,omitempty"`
+	EmitterLabel string `json:"emitterLabel,omitempty"`
+
 	// Phase events.
 	Phase string `json:"phase,omitempty"`
 
 	// Tool-use events.
 	Tool string `json:"tool,omitempty"`
+
+	// tool_use / tool_result: the tool call this line is about. A tool_result
+	// carries the id of the tool_use it answers, which is what pairs a call
+	// with its outcome once several subagents interleave the feed.
+	ToolUseID string `json:"toolUseId,omitempty"`
+
+	// tool_result. OK is a POINTER because `false` is the interesting value —
+	// a failed call with `omitempty` on a plain bool would vanish from the wire
+	// and read as a success, which is the exact defect this event exists to
+	// fix. Nil means "not a tool_result". DurationMs is measured runner-side
+	// between the call and its outcome, so it includes model turnaround.
+	OK         *bool `json:"ok,omitempty"`
+	DurationMs int64 `json:"durationMs,omitempty"`
+
+	// ExitCode is the process status of a failed shell call, as the runner
+	// parsed it from the SDK's own `Exit code N` line. A POINTER for the same
+	// reason as OK: it is the honest per-step failure signal, and a reader must
+	// be able to tell "the SDK reported no code" (nil, for the non-shell tools
+	// that report `<tool_use_error>`) from any particular value.
+	ExitCode *int `json:"exitCode,omitempty"`
+
+	// The authoritative totals for one fanned-out subagent, present only on its
+	// fan-out call's result: the SDK's own duration (in DurationMs above), tool
+	// count, and the lines its edits added and removed. They are what a settled
+	// subagent section reports and cannot be derived from this feed — a
+	// subagent's per-edit line counts never appear in its own events.
+	ToolCount    int `json:"toolCount,omitempty"`
+	LinesAdded   int `json:"linesAdded,omitempty"`
+	LinesRemoved int `json:"linesRemoved,omitempty"`
 
 	// git_commit / git_push.
 	SHA    string `json:"sha,omitempty"`

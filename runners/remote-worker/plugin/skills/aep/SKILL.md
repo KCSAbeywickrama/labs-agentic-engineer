@@ -214,14 +214,18 @@ For **each** issue in the ordered set:
 <!-- /mode -->
 <!-- mode:local -->
    **Never push, never add a remote.** The commit is a diffing courtesy for the
-   developer, not load-bearing — if the project is not a git repository at all,
-   skip it and just edit files.
+   developer, not load-bearing, so guard it rather than probing for a repository:
+   ```bash
+   git rev-parse --is-inside-work-tree >/dev/null 2>&1 && git add … && git commit …
+   ```
+   A project that is not a repository is normal here — skip the commit and just
+   edit files.
 <!-- /mode -->
 4. Re-derive the working set (§1) and pick the next issue.
 
 ### Fan-out to subagents
 
-You have the **Task** tool, and **fanning out is the default, not the exception** —
+You have a fan-out tool, and **fanning out is the default, not the exception** —
 a provider and its consumer may be built at the same time, by different subagents
 (**Contract-first**). Two tests, and they are the only two:
 
@@ -231,12 +235,38 @@ a provider and its consumer may be built at the same time, by different subagent
   small fix issue: work those inline. Spawning a subagent for small work costs
   more than it saves and makes the run harder to follow.
 
+**Issue every subagent for a wave in ONE turn, and wait for them.** Several fan-out
+calls in a single message is what makes them run at the same time — and short
+prompts are what make one message possible. A wave that takes two turns delays its
+second subagent by however long the first prompt took to write. Do not use
+`run_in_background`: it does not add concurrency — it detaches the subagent, so
+its steps stop reaching the progress feed and the person watching the run sees an
+empty section where a component was built.
+
 **Subagents Edit/Write only. A subagent never runs `git` and never runs `gh`** —
 no commit, no push, no branch, no comment, no PR. Say so explicitly in every
-Task prompt, and give the subagent its issue's body, the App Paths it may touch,
-its component's contract and the `openapi.yaml` of every component it consumes
-(**Contract-first**), and the relevant stack skills' conventions. It reports what
-it changed; you inspect it.
+fan-out prompt.
+
+**Give a subagent paths, not contents — except the one thing only you resolved.**
+It reads the same filesystem you do and loads its own skills, so name its issue
+file, the App Paths it may touch, the `design.json` and `openapi.yaml` of its
+component and of every component it consumes (**Contract-first**), and the stack
+skills it must load. Paste exactly one artefact: its finished `workload.yaml`,
+wiring included. That one is yours alone, and a subagent handed a pointer instead
+searches the filesystem for it. Everything else you paste is a long turn spent
+before the subagent starts, on a file it opens anyway — and do not open those
+yourself either: a contract you are not implementing is its reading, and every
+line you pull in you carry for the rest of the run.
+
+**State each boundary once, and resolve your own uncertainty before you delegate.**
+A prompt that says "your call, but" or offers two conventions to choose between
+hands down a question you were better placed to answer, and buys a turn of
+deliberation with it.
+
+A subagent reports what it changed. **Trust a report that says the build is
+clean** — re-read only what a report calls incomplete, and what you must open to
+commit. Re-reading every file a subagent just wrote buys nothing and carries the
+whole set in context for the rest of the run.
 
 **You are the sole git writer.** When a subagent reports done, *you* stage those
 paths and commit them exactly as in step 3. **No worktrees** — one workspace.
@@ -532,6 +562,13 @@ from it, and in any case before the cycle finishes.
 lockfile or one of its checksums**: regenerate the lockfile with your stack's
 dependency tool and commit exactly what that produces.
 
+**One clean pass settles it.** A verify command that prints nothing and exits 0
+passed — append `; echo "EXIT:$?"` the first time if you want that in writing, and
+then believe it. Do not re-run a check that has already passed, do not wipe and
+reinstall dependencies to prove a build reproduces, and do not re-read files you
+have just built. Each of those spends a turn and a page of context on something you
+already knew.
+
 Compile checks are the *only* execution allowed. **Do not run, start, or execute
 the application** — no long-running process of any kind. The platform builds and
 deploys; a local server just takes a port.
@@ -546,6 +583,22 @@ Do not force something broken through. Capture the last ~40 lines of the failing
 output and what you tried, leave that issue unfinished, and hand both to
 **Finish the cycle** — which owns what the diagnostic becomes.
 
+<!-- mode:local -->
+**Say why before you throw work away.** Immediately before deleting or wholesale
+-rewriting a file that already exists — a generated stub, a scaffold, anything an
+earlier step produced — run one `echo` naming the file and the reason:
+
+```bash
+echo "discarding openapi_service.bal: regenerating it against the corrected spec"
+```
+
+This is not ceremony. Only your *tool calls* reach the run's progress feed;
+prose you write between them does not, and neither does your reasoning. A
+deletion with no stated reason is indistinguishable afterwards from a mistake,
+and someone reading the feed has to reconstruct your intent from the wreckage.
+The echo is the one channel that survives. If you cannot state a reason in a
+line, that is the signal to fix the file rather than delete it.
+<!-- /mode -->
 ---
 
 # Never
@@ -582,15 +635,22 @@ output and what you tried, leave that issue unfinished, and hand both to
   in-process store is the same substitution. Say so in one line and stop the run,
   exactly as for a failed `git` auth.
 - Let a subagent run `git` or `gh`.
-- **Touch, read, or even list anything outside the current working directory** —
-  never `~`, never other projects or repositories on this machine, never system
-  paths. Do not probe whether such paths exist. Everything you need is inside
-  the cwd and your loaded skills — including their `references/` files, which
-  are part of a skill and always yours to read.
+- Fan out with `run_in_background` (**Fan-out to subagents**).
+- **Author a file anywhere but inside the project.** Nothing else on this
+  filesystem is a project root, however project-shaped it looks — the directory
+  your skills were materialised into is not one, and neither is its parent. A
+  refused write means the path was the mistake, not that another route to it is
+  needed.
+- **Read anything unrelated to this run** — no other projects or repositories on
+  this machine, no browsing `~` or the filesystem at large.
+  Do not probe whether such paths exist. Three things outside the project ARE
+  yours to read, freely and without asking: your loaded skills and their
+  `references/`; your toolchain's own installation, when you need a library's
+  real signature; and the package cache it writes to. Write to none of them.
 - **Install anything outside the project's own package manager** — no `brew`, no
   `apt`, no global `npm -g`, no `pip install` outside a project venv. The sandbox
-  ships `go` and `node`/`npm` and nothing else: no Python, no Rust, no custom
-  toolchain.
+  ships `go`, `bal` (Ballerina, with its own bundled JRE) and `node`/`npm` and
+  nothing else: no Python, no Rust, no custom toolchain.
 - Add your own CORS middleware to a managed API (**The code**).
 - Split persistence, auth, or scheduled work into its own component. A service
   owns its storage; the platform's IDP owns sign-in; periodic work is a
