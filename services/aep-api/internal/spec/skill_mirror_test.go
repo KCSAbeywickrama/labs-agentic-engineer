@@ -448,3 +448,115 @@ func TestSyncProjectSkills_NoDesignYetIsNotAnError(t *testing.T) {
 		t.Fatalf("SyncProjectSkills on a design-less project: %v", err)
 	}
 }
+
+// ---- Task 5: the lifecycle -------------------------------------------------
+
+// The mirror walked through a project's life in the order the three call sites
+// fire it: seeded at creation with no design at all, refreshed once a design
+// pins skills, and refreshed again after an admin changes availability. Each
+// step asserts the whole tree, not just the skill it moved — a rule that admits
+// the right skill while quietly admitting a wrong one is still broken.
+//
+// The three call sites themselves are thin best-effort wrappers over this one
+// method (the deadcode gate proves they reach it from main), so exercising the
+// SEQUENCE is what validates the feature.
+func TestSyncProjectSkills_Lifecycle(t *testing.T) {
+	t.Parallel()
+	svc, host := newTestStore(t)
+	ctx := context.Background()
+	orgID := "org1"
+
+	if _, err := svc.List(ctx, orgID); err != nil { // provision + seed the org library
+		t.Fatalf("seed skills repo: %v", err)
+	}
+	// A library spanning every branch of the copy rule.
+	host.writeAtHead(orgID, skillRepoPath("go"), mkSkillMDAudience("go", []string{SkillAudienceCoding}, "go guidance"))
+	host.writeAtHead(orgID, skillRepoPath("react"), mkSkillMDAudience("react", []string{SkillAudienceCoding}, "react guidance"))
+	host.writeAtHead(orgID, skillRepoPath("planning"), mkSkillMDAudience("planning", []string{SkillAudienceDesign}, "planning guidance"))
+	host.writeAtHead(orgID, skillRepoPath("wireframes"),
+		mkSkillMDAudience("wireframes", []string{SkillAudienceDesign, SkillAudienceCoding}, "wireframe guidance"))
+	provisionProjectRepo(t, host, orgID)
+
+	mirrored := func(t *testing.T, name string) bool {
+		t.Helper()
+		return host.readAtHeadIn(orgID, testProjectID, ".claude/skills/"+name+"/SKILL.md") != ""
+	}
+	assertTree := func(t *testing.T, step string, want map[string]bool) {
+		t.Helper()
+		for _, name := range []string{"go", "react", "planning", "wireframes"} {
+			if got := mirrored(t, name); got != want[name] {
+				t.Fatalf("%s: %q mirrored = %v, want %v", step, name, got, want[name])
+			}
+		}
+	}
+
+	// 1. Creation: no design exists, so no pins. Only the coding-audience
+	//    skills land; a design-only skill never reaches a build's clone.
+	if err := svc.SyncProjectSkills(ctx, orgID, testProjectID); err != nil {
+		t.Fatalf("seed sync: %v", err)
+	}
+	assertTree(t, "after creation", map[string]bool{
+		"go": true, "react": true, "wireframes": true, "planning": false,
+	})
+
+	// 2. The design agent pins skills onto a component — including `planning`,
+	//    which the audience rule alone would exclude. A pin is a component
+	//    declaring it needs the skill, which outranks the default.
+	host.writeAtHeadIn(orgID, testProjectID, "specs/design/components/orders/design.json", `{
+  "name": "orders",
+  "type": "service",
+  "dependencies": [],
+  "skillsPinned": ["go", "planning"]
+}
+`)
+	if err := svc.SyncProjectSkills(ctx, orgID, testProjectID); err != nil {
+		t.Fatalf("post-design sync: %v", err)
+	}
+	assertTree(t, "after design pins planning", map[string]bool{
+		"go": true, "react": true, "wireframes": true, "planning": true,
+	})
+
+	// 3. An admin disables both a pinned skill and an unpinned one. The pinned
+	//    one SURVIVES — the drift guard, so a settings toggle never breaks a
+	//    build already designed against it — while the unpinned one is pruned.
+	mut := NewSkillMutationService(svc)
+	if _, err := mut.SetEnabled(ctx, orgID, "admin", "go", false); err != nil {
+		t.Fatalf("disable go: %v", err)
+	}
+	if _, err := mut.SetEnabled(ctx, orgID, "admin", "react", false); err != nil {
+		t.Fatalf("disable react: %v", err)
+	}
+	if err := svc.SyncProjectSkills(ctx, orgID, testProjectID); err != nil {
+		t.Fatalf("post-disable sync: %v", err)
+	}
+	assertTree(t, "after disabling a pinned and an unpinned skill", map[string]bool{
+		"go": true, "react": false, "wireframes": true, "planning": true,
+	})
+
+	// 4. The design drops the pins. `go` is disabled AND no longer pinned, so
+	//    nothing holds it in any more; `planning` returns to design-only.
+	host.writeAtHeadIn(orgID, testProjectID, "specs/design/components/orders/design.json", `{
+  "name": "orders",
+  "type": "service",
+  "dependencies": [],
+  "skillsPinned": []
+}
+`)
+	if err := svc.SyncProjectSkills(ctx, orgID, testProjectID); err != nil {
+		t.Fatalf("post-unpin sync: %v", err)
+	}
+	assertTree(t, "after the design drops its pins", map[string]bool{
+		"go": false, "react": false, "wireframes": true, "planning": false,
+	})
+
+	// 5. Re-enabling restores availability without any design change.
+	if _, err := mut.SetEnabled(ctx, orgID, "admin", "react", true); err != nil {
+		t.Fatalf("re-enable react: %v", err)
+	}
+	if err := svc.SyncProjectSkills(ctx, orgID, testProjectID); err != nil {
+		t.Fatalf("post-reenable sync: %v", err)
+	}
+	assertTree(t, "after re-enabling react", map[string]bool{
+		"go": false, "react": true, "wireframes": true, "planning": false,
+	})
+}
