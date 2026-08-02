@@ -89,7 +89,8 @@ type CodingExecutor struct {
 
 	// wiring publishes the platform-resolved `endpoints:` block onto the working
 	// set at dispatch (nil → skipped). Best-effort; see WiringPublisher.
-	wiring WiringPublisher
+	wiring      WiringPublisher
+	skillMirror SkillMirror
 
 	// skillsRepo resolves (provisioning if needed) the org's `org-skills` repo
 	// row so its clone URL can be stamped as AEP_SKILLS_REPO_URL — the runner
@@ -173,6 +174,14 @@ func (e *CodingExecutor) WithRunnerSecrets(r RunnerSecretResolver) *CodingExecut
 // receiver for chained construction.
 func (e *CodingExecutor) WithWiringPublisher(w WiringPublisher) *CodingExecutor {
 	e.wiring = w
+	return e
+}
+
+// WithSkillMirror enables refreshing the project repo's `.claude/skills/`
+// copies before each dispatch (nil → not refreshed; the clone keeps whatever
+// copies it already has). Returns the receiver for chained construction.
+func (e *CodingExecutor) WithSkillMirror(m SkillMirror) *CodingExecutor {
+	e.skillMirror = m
 	return e
 }
 

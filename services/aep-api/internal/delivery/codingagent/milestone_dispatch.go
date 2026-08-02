@@ -25,6 +25,7 @@ package codingagent
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/wso2/aep/aep-api/internal/delivery"
@@ -81,6 +82,20 @@ func (e *CodingExecutor) Dispatch(ctx context.Context, req delivery.MilestoneDis
 	// wiring: it authors tests, not workload.yaml.
 	if e.wiring != nil && req.Kind != delivery.CycleKindValidation {
 		e.wiring.PublishResolvedWiring(ctx, req.OrgID, req.ProjectID)
+	}
+
+	// Refresh the repo's `.claude/skills/` copies from the org library, for the
+	// same reason and at the same moment as the wiring above: the clone the
+	// agent is about to work in must carry the guidance its build was designed
+	// against. Unlike wiring this runs for EVERY cycle kind — a validation run
+	// works in the same clone, and the refresh is diff-first, so an
+	// already-current repo costs a read and no commit. Best-effort: stale
+	// skills degrade a build, a failed dispatch loses it entirely.
+	if e.skillMirror != nil {
+		if err := e.skillMirror.SyncProjectSkills(ctx, req.OrgID, req.ProjectID); err != nil {
+			slog.WarnContext(ctx, "skills: project mirror refresh failed; dispatching with the copies already in the repo",
+				"org", req.OrgID, "project", req.ProjectID, "error", err)
+		}
 	}
 
 	return e.launchAgent(ctx, agentLaunch{

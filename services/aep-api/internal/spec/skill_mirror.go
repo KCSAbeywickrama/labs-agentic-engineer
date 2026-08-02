@@ -157,13 +157,13 @@ func (s *SkillService) resolvePinnedSkills(ctx context.Context, ref sourcecontro
 //
 // Callers are best-effort: a mirror failure must never fail project creation,
 // a publish, or a dispatch — this method only computes and commits;
-// logging-and-continuing is the caller's job. Not yet wired to any of its
-// three planned call sites (project creation, the pre-tag build step,
-// milestone dispatch) — see
-// docs/design/draft/2026-08-02-project-skill-mirror-plan.md Task 4. Exercised
-// directly by skill_mirror_test.go until then.
-//
-//deadcode:keep wired at its call sites in a later task — see above.
+// logging-and-continuing is the caller's job. Three call sites, each reaching
+// it through its own narrow port so no feature grows a spec edge: the project
+// seed (projects.skillMirror, async so GitHub repo creation stays out of the
+// create latency), the pre-tag build step (build.SkillMirror, so the version
+// tag captures the guidance the build was designed against), and milestone
+// dispatch (codingagent.SkillMirror, so the clone the agent works in is
+// current).
 func (s *SkillService) SyncProjectSkills(ctx context.Context, orgID, projectID string) error {
 	if s == nil || s.git == nil || s.repos == nil || orgID == "" || projectID == "" {
 		return fmt.Errorf("skills: service not configured for project skill sync")

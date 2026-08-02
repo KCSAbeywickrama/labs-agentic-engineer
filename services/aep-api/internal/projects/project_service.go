@@ -55,6 +55,7 @@ type Service struct {
 	execs          delivery.ExecutionRepository
 	skillsProv     skillsProvisioner
 	descriptors    descriptorWriter      // project descriptor stamp; may be nil
+	skillMirrorSvc skillMirror           // seeds .claude/skills into the new repo; may be nil
 	deprovisioner  resourceDeprovisioner // dependency provisioning teardown; may be nil
 	runReader      milestoneRunRows      // build/deploy stage reads + delete purge (status_stages.go)
 	bindingsReader bindingsReader        // deploy stage: OC release bindings (status_stages.go)
@@ -86,9 +87,20 @@ type descriptorWriter interface {
 	WriteDescriptor(ctx context.Context, orgID, projectID, name, idea string) error
 }
 
+// skillMirror seeds the new repo's `.claude/skills/` copies from the org
+// library, so a clone carries the coding guidance before any design or task
+// exists. Narrow port declared here (like the two above) so projects keeps no
+// spec edge; *spec.SkillService satisfies it. Wired at the composition root;
+// nil is a documented no-op.
+type skillMirror interface {
+	SyncProjectSkills(ctx context.Context, orgID, projectID string) error
+}
+
 func (s *Service) SetSkillsProvisioner(p skillsProvisioner) { s.skillsProv = p }
 
 func (s *Service) SetDescriptorWriter(w descriptorWriter) { s.descriptors = w }
+
+func (s *Service) SetSkillMirror(m skillMirror) { s.skillMirrorSvc = m }
 
 func NewProjectService(
 	client openchoreo.ProjectClient,
@@ -223,6 +235,26 @@ func (s *Service) CreateProject(ctx context.Context, orgName string, req *gen.Cr
 					slog.ErrorContext(ctx, "failed to write project descriptor (project usable; /start will ask for the idea)",
 						"project", project.Name, "error", derr)
 				}
+			}
+
+			// Seed `.claude/skills/` so a clone carries the org's coding
+			// guidance before any design or task exists. ASYNC for the same
+			// reason the skills-repo provisioning above is: this may have to
+			// create the org repo on first touch (its read path provisions
+			// lazily), and GitHub repo creation must not sit in the create
+			// latency the user waits on. Best-effort — every later refresh at
+			// design save and at dispatch is diff-first, so a project that
+			// misses this seed heals on its first build.
+			if s.skillMirrorSvc != nil {
+				mirror, projectName := s.skillMirrorSvc, project.Name
+				async.Go(context.Background(), "project skills seed", func(context.Context) {
+					bg, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+					defer cancel()
+					if merr := mirror.SyncProjectSkills(bg, orgName, projectName); merr != nil {
+						slog.WarnContext(bg, "skills: project mirror seed failed (heals on the next refresh)",
+							"org", orgName, "project", projectName, "error", merr)
+					}
+				})
 			}
 		}
 	}

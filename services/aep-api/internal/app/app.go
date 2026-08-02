@@ -447,6 +447,8 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 
 	// Eagerly provision each org's skills repo on project creation.
 	projectService.SetSkillsProvisioner(skillSvc)
+	// Seed the new repo's .claude/skills copies (async + best-effort inside).
+	projectService.SetSkillMirror(skillSvc)
 
 	// Stamp specs/.agentic-engineer.toml into each new project's repo: the
 	// Agentic Engineer marker, carrying the idea the user typed at create for
@@ -982,7 +984,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 			buildDesignDeriver{svc: designService}, // DesignFactDeriver (sentinel translation)
 			buildSecretStager{prov: externalProvisioner},
 			designComponents{store: artifactStore},
-		),
+		).WithSkillMirror(skillSvc), // refresh .claude/skills onto HEAD before the tag-cut
 		// The build-time dependency hard gate's fresh read (dependencyGateFailures) —
 		// the SAME designComponents{store: artifactStore} adapter PreflightSvc.Design
 		// uses below, so both surfaces read the exact same
@@ -1119,6 +1121,9 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// WiringPublisher port (delivery cannot import dependencies — dependencies
 	// already imports delivery).
 	codingExecutor.WithWiringPublisher(provisioningSvc)
+	// Refresh .claude/skills before each dispatch, so the clone the agent works
+	// in carries the guidance its build was designed against.
+	codingExecutor.WithSkillMirror(skillSvc)
 
 	// Runtime-config (env-config.js) emission — the SPA's `window._env_` (API URLs
 	// + generic <DEP>_<OUTPUT> keys for its platform-resource deps) is materialised
