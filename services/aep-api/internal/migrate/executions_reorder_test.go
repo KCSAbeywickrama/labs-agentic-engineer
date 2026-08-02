@@ -18,33 +18,16 @@ package migrate_test
 
 import (
 	"context"
-	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/wso2/aep/aep-api/internal/contracts/taskmeta"
 	"github.com/wso2/aep/aep-api/internal/delivery"
 	"github.com/wso2/aep/aep-api/internal/migrate"
 	"github.com/wso2/aep/aep-api/internal/platform/dbtest"
 )
-
-// CREATE must precede DROP so the admission mutex is never unenforced during
-// the upgrade — same rationale as RunMilestoneRuns.
-func TestExecutionsAdmissionStatements_CreateThenDrop(t *testing.T) {
-	t.Parallel()
-	stmts := migrate.ExecutionsAdmissionStatements()
-	if len(stmts) != 2 {
-		t.Fatalf("got %d statements, want 2", len(stmts))
-	}
-	if !strings.Contains(strings.ToUpper(stmts[0]), "CREATE") {
-		t.Fatalf("first statement must CREATE the new index, got: %s", stmts[0])
-	}
-	if !strings.Contains(strings.ToUpper(stmts[1]), "DROP") {
-		t.Fatalf("second statement must DROP the legacy index, got: %s", stmts[1])
-	}
-	if strings.Contains(strings.ToUpper(stmts[0]), "DROP") {
-		t.Fatalf("first statement must not DROP: %s", stmts[0])
-	}
-}
 
 // After upgrading a DB that only has the legacy admission index, only the
 // component-keyed index remains and a second active admit for the same key
@@ -113,5 +96,77 @@ func TestRunExecutions_LegacyIndexUpgrade_AdmissionHeld(t *testing.T) {
 	}
 	if ok {
 		t.Fatal("TryAdmit(second) admitted — component admission mutex not enforced")
+	}
+}
+
+// Concurrent TryAdmit during the CREATE→DROP upgrade window must never
+// double-admit. A sleep between the two statements widens the window so the
+// race is observable; CREATE-then-DROP keeps a covering unique index for the
+// whole gap (DROP-then-CREATE would leave none).
+func TestRunExecutions_CreateThenDrop_NoDoubleAdmitUnderConcurrentTryAdmit(t *testing.T) {
+	t.Parallel()
+	db := dbtest.New(t)
+	ctx := context.Background()
+
+	if err := db.Exec(`DROP INDEX IF EXISTS ux_executions_admission_component`).Error; err != nil {
+		t.Fatalf("drop new index: %v", err)
+	}
+	if err := db.Exec(`
+		CREATE UNIQUE INDEX ux_executions_admission
+		ON executions (repo, issue_number, kind)
+		WHERE status IN ('queued', 'running')`).Error; err != nil {
+		t.Fatalf("create legacy index: %v", err)
+	}
+
+	stmts := migrate.ExecutionsAdmissionStatements()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if err := db.WithContext(ctx).Exec(stmts[0]).Error; err != nil {
+			t.Errorf("CREATE: %v", err)
+			return
+		}
+		time.Sleep(200 * time.Millisecond) // widen CREATE→DROP window
+		if err := db.WithContext(ctx).Exec(stmts[1]).Error; err != nil {
+			t.Errorf("DROP: %v", err)
+		}
+	}()
+
+	repo := delivery.NewExecutionRepository(db, nil)
+	var admits atomic.Int32
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-done:
+					return
+				default:
+				}
+				e := &delivery.Execution{
+					OrgID:       "orga",
+					ProjectID:   "proj",
+					Repo:        "acme/race",
+					IssueNumber: 99,
+					Kind:        string(taskmeta.KindCoding),
+					Component:   "web",
+				}
+				ok, _, err := repo.TryAdmit(ctx, e)
+				if err != nil {
+					continue // unique violations / transient — keep spinning
+				}
+				if ok {
+					admits.Add(1)
+				}
+			}
+		}()
+	}
+	<-done
+	wg.Wait()
+
+	if n := admits.Load(); n != 1 {
+		t.Fatalf("admits during CREATE-then-DROP window = %d, want exactly 1", n)
 	}
 }

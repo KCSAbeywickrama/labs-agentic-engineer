@@ -50,17 +50,45 @@ function attachBackoffMs(attempt: number): number {
 async function sleep(ms: number, signal: AbortSignal): Promise<void> {
   if (ms <= 0) return;
   await new Promise<void>((resolve, reject) => {
-    const t = setTimeout(resolve, ms);
     const onAbort = () => {
       clearTimeout(t);
+      signal.removeEventListener("abort", onAbort);
       reject(new DOMException("Aborted", "AbortError"));
     };
+    const t = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
     if (signal.aborted) {
       onAbort();
       return;
     }
-    signal.addEventListener("abort", onAbort, { once: true });
+    signal.addEventListener("abort", onAbort);
   });
+}
+
+function settleFromTurnStatus(
+  chatKey: string,
+  turnId: string,
+  status: { status?: string; message?: string } | null | undefined,
+  onCommitted?: () => void,
+): boolean {
+  if (status?.status === "completed") {
+    setTurnStatus(chatKey, turnId, "completed");
+    notifyTurnEnd(chatKey, "completed");
+    onCommitted?.();
+    return true;
+  }
+  if (status?.status === "failed") {
+    setTurnStatus(chatKey, turnId, "failed");
+    notifyTurnEnd(chatKey, "failed");
+    addMessage(chatKey, {
+      role: "error",
+      content: status.message ?? "The agent turn failed.",
+    });
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -245,19 +273,7 @@ export async function attachAndFoldTurn(
         }
         // Turn may already be terminal on another replica — settle via getTurn.
         const status = await getTurn(projectName, turnId);
-        if (status?.status === "completed") {
-          setTurnStatus(chatKey, turnId, "completed");
-          notifyTurnEnd(chatKey, "completed");
-          onCommitted?.();
-          return;
-        }
-        if (status?.status === "failed") {
-          setTurnStatus(chatKey, turnId, "failed");
-          notifyTurnEnd(chatKey, "failed");
-          addMessage(chatKey, {
-            role: "error",
-            content: status.message ?? "The agent turn failed.",
-          });
+        if (settleFromTurnStatus(chatKey, turnId, status, onCommitted)) {
           return;
         }
         await sleep(attachBackoffMs(attempt), signal);
@@ -281,16 +297,5 @@ export async function attachAndFoldTurn(
   // (and is itself a "terminal frame arrived" for turn-end purposes: the
   // fallback poll IS how this turn's end is observed here).
   const status = await getTurn(projectName, turnId);
-  if (status?.status === "completed") {
-    setTurnStatus(chatKey, turnId, "completed");
-    notifyTurnEnd(chatKey, "completed");
-    onCommitted?.();
-  } else if (status?.status === "failed") {
-    setTurnStatus(chatKey, turnId, "failed");
-    notifyTurnEnd(chatKey, "failed");
-    addMessage(chatKey, {
-      role: "error",
-      content: status.message ?? "The agent turn failed.",
-    });
-  }
+  settleFromTurnStatus(chatKey, turnId, status, onCommitted);
 }

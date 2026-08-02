@@ -81,6 +81,12 @@ func Run(ctx context.Context, db *gorm.DB, steps []Step) error {
 	}
 	defer conn.Close()
 
+	slog.Info("waiting for migration lock", "key", migrationLockKey)
+	// Bound the wait so a wedged peer surfaces as a named error instead of an
+	// unexplained boot hang (Kubernetes would otherwise restart into the same queue).
+	if _, err := conn.ExecContext(ctx, `SET lock_timeout = '60s'`); err != nil {
+		return fmt.Errorf("migration lock: set lock_timeout: %w", err)
+	}
 	if _, err := conn.ExecContext(ctx, `SELECT pg_advisory_lock($1)`, migrationLockKey); err != nil {
 		return fmt.Errorf("migration lock: acquire: %w", err)
 	}

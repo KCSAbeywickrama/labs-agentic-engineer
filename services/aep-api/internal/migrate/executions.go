@@ -49,7 +49,8 @@ func RunExecutions(ctx context.Context, db *gorm.DB) error {
 	stmts := ExecutionsAdmissionStatements()
 	// CREATE-then-DROP (not the reverse): dropping first leaves the admission
 	// mutex unenforced for the width of the migration — the window a second
-	// replica can double-admit into. Same rationale as RunMilestoneRuns.
+	// replica can double-admit into. Follows the CREATE-then-DROP ordering
+	// documented on RunMilestoneRuns.
 	if err := db.WithContext(ctx).Exec(stmts[0]).Error; err != nil {
 		return fmt.Errorf("executions admission-mutex index: %w", err)
 	}

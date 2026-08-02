@@ -216,8 +216,14 @@ func (w *ExecWatcher) reconcileBuildFailure(ctx context.Context, row *delivery.E
 	if !authFailure || w.buildRetrier == nil {
 		exec, err := w.execRows.Finish(ctx, row.ID, string(taskmeta.ExecFailed), workflowReason(run))
 		if err != nil {
+			// Notify is cheap/idempotent; do NOT notifyBuildTerminal — the row
+			// stays running and the next tick retries Finish. Reporting terminal
+			// on a DB blip spends budget / mints a fix issue prematurely.
 			slog.WarnContext(ctx, "exec watcher: finish build failed", "execution", row.ID, "error", err)
-		} else if exec == nil {
+			w.notifier.Notify(row.Repo, row.IssueNumber)
+			return
+		}
+		if exec == nil {
 			return // lost the race — another replica already finished
 		}
 		w.notifier.Notify(row.Repo, row.IssueNumber)
@@ -229,7 +235,10 @@ func (w *ExecWatcher) reconcileBuildFailure(ctx context.Context, row *delivery.E
 		exec, err := w.execRows.Finish(ctx, row.ID, string(taskmeta.ExecFailed), buildAuthRetryExceededReason)
 		if err != nil {
 			slog.WarnContext(ctx, "exec watcher: finish build auth-exhausted", "execution", row.ID, "error", err)
-		} else if exec == nil {
+			w.notifier.Notify(row.Repo, row.IssueNumber)
+			return
+		}
+		if exec == nil {
 			return // lost the race — another replica already finished
 		}
 		slog.WarnContext(ctx, "exec watcher: build git-auth retry budget exhausted", "execution", row.ID, "attempts", attempt, "budget", w.authBudget)
