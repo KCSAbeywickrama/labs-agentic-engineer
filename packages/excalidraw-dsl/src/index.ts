@@ -1034,8 +1034,9 @@ const ACCENT_FILL: Record<WireframeVariant, string> = {
 };
 
 interface WireframeRenderOpts {
-  /** Prototype mode: one-screen scene, no decorations, links on navigable
-   *  controls. Maps lowercased screen name → canonical name. */
+  /** Prototype mode: one-screen scene with the canvas decorations suppressed —
+   *  navigation lives in the model's hotspots, not on the elements. Maps
+   *  lowercased screen name → canonical name. */
   prototype?: { validTargets: Map<string, string> };
 }
 
