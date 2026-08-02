@@ -30,7 +30,9 @@ import {
   buildAnswersInstruction,
 } from "/home/jo/workspace/labs-agentic-engineer/packages/agent-stream/src/index.js";
 
-const PROJECTS = join(import.meta.dirname, "projects");
+// The one sanctioned in-repo home for playground projects (gitignored;
+// see playground/src/paths.ts projectDirError).
+const PROJECTS = join(REPO, "playground/.projects/evalite-spike");
 const MAX_TURNS = 8;
 
 interface RunOutput {
