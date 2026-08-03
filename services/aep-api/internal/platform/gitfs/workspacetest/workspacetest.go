@@ -72,7 +72,7 @@ func NewOrigin(t *testing.T, seed map[string]string) *gittest.Remote {
 // NewEngine builds an engine over a fresh workspace root in t.TempDir().
 func NewEngine(t *testing.T) *gitfs.Engine {
 	t.Helper()
-	e, err := gitfs.New(filepath.Join(t.TempDir(), "workspaces"))
+	e, _, err := gitfs.New(filepath.Join(t.TempDir(), "workspaces"))
 	if err != nil {
 		t.Fatalf("workspacetest: new engine: %v", err)
 	}

@@ -342,9 +342,10 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 
 	// Repo-backed skills store (single source of truth = per-org org-skills
 	// repo). Reads walk the shared-volume mirror at branch tip and writes
-	// commit to main through the Workspace port (shared-volume-clone
-	// architecture, Phase 1). Built-ins + flow skills seed/reconcile from the
-	// embedded files on demand. docs/design/skills-repo-storage.md.
+	// commit to main through the Workspace port
+	// (services/aep-api/design/shared-workspace-volume.md). Built-ins + flow
+	// skills seed/reconcile from the embedded files on demand.
+	// docs/design/skills-repo-storage.md.
 	skillSvc := spec.NewSkillService(gitOpsService, repoService, os.DirFS(cfg.SkillsDir))
 	skillMutationSvc := spec.NewSkillMutationService(skillSvc)
 	skillImportSvc := spec.NewSkillImportService(skillSvc)
@@ -364,7 +365,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// (commits straight to main under CAS retry). No local working tree.
 	filesSvc := spec.NewFilesService(repoService, gitOpsService)
 
-	// Unified genai committed-truth turn surface (shared-volume-clone §6). It
+	// Unified genai committed-truth turn surface (shared-workspace-volume). It
 	// resolves the org Anthropic key (no platform fallback), snapshots the
 	// project repo + the org's _skills repo onto the workspace mount, and
 	// runs turns detached behind the durable agent_turns guard. Skills are
@@ -490,10 +491,11 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 
 	// trait_sync is the single shared emitter that reconciles the
 	// `api-configuration` ClusterTrait on a Component CR + per-environment
-	// ReleaseBindings. Hooked from both the dispatch path (after
-	// CreateComponent) and the design-edit path (after
-	// `components/<name>/design.md` PUT). See
-	// docs/design/api-platform-integration.md §6 Phase 2.
+	// ReleaseBindings. The Component CR's trait shape is set independently of
+	// this, at component create (projects/component_service.go); what this
+	// emitter adds is the per-environment half, which needs a ReleaseBinding to
+	// exist and so cannot run before a build has deployed. Its trigger is the run
+	// supervisor at builds-green — see the NOTE above the watcher list.
 	traitSyncService := projects.NewTraitSyncService(componentClient, artifactStore)
 
 	// Thunder admin client + IDP service. Reads
@@ -686,11 +688,20 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// the component_tasks table to periodically reconcile the api-configuration
 	// ClusterTrait. That table is gone (tasks are GitHub issues), so the periodic
 	// watcher is dropped. The per-env traitEnvironmentConfigs (jwtAuth/CORS) are
-	// instead re-emitted on the ExecWatcher deploy path via traitDeployObserver
-	// (wired into the MultiDeployObserver fan-out below), which fires once a
-	// protected component — or a sibling SPA — deploys and its ReleaseBinding
-	// exists to carry the config. A component-enumerating reconcile backstop can
-	// be re-added over the OC component list if drift reappears.
+	// re-emitted from the run supervisor instead, when a cycle's builds go green
+	// (run.Deps.APITraits below). traitDeployObserver, wired into the
+	// MultiDeployObserver fan-out below, reaches the same emitter from the
+	// ExecWatcher deploy path and is kept for the paths that still mint
+	// `kind=build` execution rows — it is inert for anything the run loop builds,
+	// which is what left every protected API's gateway unauthenticated until the
+	// run-loop trigger was added.
+	//
+	// Both triggers are events, so neither covers drift: a ReleaseBinding
+	// recreated, a config stripped, or a transient OC failure during the write
+	// (the fan-out is best-effort and does not retry) stays broken until the next
+	// green cycle. The component-enumerating reconcile backstop over the OC
+	// component list — the sibling of runtimeconfig.NewWatcher below — is what
+	// would close that, and is still owed.
 
 	// Inbound JWT verifier — Thunder publishes the User JWT and Service JWT
 	// signing keys at JWKSURL. Lazy fetch on first request avoids compose
@@ -1157,7 +1168,28 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 
 	slog.Info("OpenChoreo API", "baseURL", cfg.PlatformAPI.BaseURL)
 
+	// R8b readiness gate: true after successful boot layout (Resolve → gitfs.New);
+	// the reaper clears it on root-health failure and sets it again on recovery.
+	var workspaceReady *reaper.ReadyGate
+	if workspaceEngine != nil {
+		workspaceReady = &reaper.ReadyGate{}
+		workspaceReady.Set(true)
+	}
+	params.WorkspaceReady = workspaceReady
 	handler := edge.NewHandler(params)
+
+	// Disk-lifecycle reaper (design §14/D12): trash purge, snapshot age-reap,
+	// DB↔disk orphan reconciliation, quota/LRU eviction. ENOSPC on Ensure/Mutate
+	// triggers ForceSweep (unconditional trash purge + full Sweep). Fake()
+	// leaves Workspace nil (no disk); skip reaper wiring in that case.
+	var workspaceReaper Watcher
+	if workspaceEngine != nil {
+		r := reaper.New(workspaceEngine, reaperRepoLister{repoRepo}, cfg.Workspace, workspaceReady)
+		workspaceEngine.SetOnENOSPC(func() {
+			r.ForceSweep(context.Background())
+		})
+		workspaceReaper = r
+	}
 
 	// Background watchers, launched by main under a shared cancellable context.
 	// State lives in Postgres + GitHub, so a plain goroutine per watcher is
@@ -1187,15 +1219,15 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		// once per cfg.CredentialValidatorInterval (default 24h), probes GitHub,
 		// flags identity drift on confirmed unauthorised secrets.
 		credValidator,
-		// Disk-lifecycle reaper (design §14/D12): trash purge, snapshot
-		// age-reap, DB↔disk orphan reconciliation, quota/LRU eviction. The
-		// global passes self-elect via a non-blocking flock on the mount, so
-		// running one per replica is correct.
-		reaper.New(workspaceEngine, reaperRepoLister{repoRepo}, cfg.Workspace),
 		// agent_turns crash-safety sweep (design D17): a stale-heartbeat
 		// running turn is failed and the D18 one-active guard released;
 		// locally-buffered streams get the terminal event.
 		spec.NewTurnSweeper(turnRepo, turnBroker, 0, 0),
+	}
+	// Disk-lifecycle reaper: global passes self-elect via non-blocking flock.
+	// Omitted when Fake() leaves Workspace nil (no disk at assemble time).
+	if workspaceReaper != nil {
+		watchers = append(watchers, workspaceReaper)
 	}
 	// JobWatcher polls the `ca-…` coding-agent Jobs and Finishes the coding
 	// execution FAILED on Job failure (success rides the PR webhook), capturing
@@ -1236,6 +1268,12 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 			// its Job ref. It mints no execution row — the cycle record is the
 			// supervisor's own bookkeeping.
 			Dispatcher: codingExecutor,
+			// Managed-API gateway policy, converged at builds-green. This rail is
+			// where the trait sync has to hang now: it took over building from the
+			// ExecWatcher deploy path (which reached the same emitter through
+			// traitDeployObserver below) but writes no `kind=build` execution rows,
+			// so that observer no longer fires for anything this loop builds.
+			APITraits: traitSyncService,
 		})
 		watchers = append(watchers, run.NewWorkerWatcher(temporalRuntime, runActs))
 		slog.Info("run: temporal worker watcher registered", "hostPort", cfg.Temporal.HostPort)

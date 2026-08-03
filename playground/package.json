@@ -18,6 +18,7 @@
     "@aep/contracts": "workspace:*",
     "@aep/design-projection": "workspace:*",
     "@aep/excalidraw-dsl": "workspace:*",
+    "@aep/progress-view": "workspace:*",
     "@clack/prompts": "^1.6.0",
     "ai": "^7.0.2",
     "jose": "^5.9.0",

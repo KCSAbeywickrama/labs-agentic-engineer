@@ -487,7 +487,8 @@ func (s *Service) AttachTurn(ctx context.Context, orgID, projectID, turnID strin
 	sub, err := s.broker.Subscribe(turnID, from)
 	if errors.Is(err, ErrTurnNotBuffered) {
 		// Known turn, expired (or other-replica) buffer → 404 pre-stream; the
-		// FE falls back to the status GET.
+		// console retries attach with backoff and settles via the status GET when
+		// the turn is already terminal.
 		return nil, ErrTurnNotFound
 	}
 	if err != nil {

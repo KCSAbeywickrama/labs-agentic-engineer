@@ -16,16 +16,49 @@
  * under the License.
  */
 
-import { test } from "node:test";
+import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
+import { createServer } from "node:net";
 import * as Y from "yjs";
 import type { CollabConfig } from "./env.js";
 import type { BffClient } from "./bff.js";
 import { BffAccessDeniedError } from "./bff.js";
-import { buildAuthenticateHook, buildLoadDocumentHook } from "./server.js";
+import {
+  buildAuthenticateHook,
+  buildLoadDocumentHook,
+  buildStatelessHook,
+  createCollabServer,
+  requestFreshToken,
+  type CollabContext,
+} from "./server.js";
 import { filesMap } from "./seed.js";
 import { devSeedFiles } from "./fixtures.js";
 import type { Document } from "@hocuspocus/server";
+import {
+  dropRoomState,
+  ensureRoomState,
+  roomState,
+} from "./rooms.js";
+
+/** Ephemeral port — Hocuspocus `listen(0)` is a no-op (falsy → default 80). */
+async function freePort(): Promise<number> {
+  return await new Promise((resolve, reject) => {
+    const s = createServer();
+    s.listen(0, "127.0.0.1", () => {
+      const addr = s.address();
+      if (!addr || typeof addr === "string") {
+        s.close();
+        reject(new Error("expected TCP address"));
+        return;
+      }
+      const { port } = addr;
+      s.close((err) => (err ? reject(err) : resolve(port)));
+    });
+    s.on("error", reject);
+  });
+}
+
+const ROOM = "spec-acme-shop";
 
 const prodConfig: CollabConfig = {
   port: 0,
@@ -60,6 +93,9 @@ function fakeBff(overrides: Partial<BffClient> = {}): BffClient {
     ...overrides,
   };
 }
+
+beforeEach(() => dropRoomState(ROOM));
+
 
 test("auth rejects unknown rooms before hitting the oracle", async () => {
   let oracleCalled = false;
@@ -197,6 +233,16 @@ test("load opens an unseeded doc when the files fetch fails (room must survive)"
   assert.equal(filesMap(doc).size, 0);
 });
 
+test("GET /healthz returns 200 ok", async () => {
+  const port = await freePort();
+  const server = createCollabServer({ ...devConfig, port }, { bff: null });
+  await server.listen(port);
+  const res = await fetch(`http://127.0.0.1:${port}/healthz`);
+  assert.equal(res.status, 200);
+  assert.equal(await res.text(), "ok");
+  await server.destroy();
+});
+
 test("load opens an empty doc when the oracle gave no project (pre-phase-2 BFF)", async () => {
   const load = buildLoadDocumentHook(prodConfig, { bff: fakeBff() });
   const doc = new Y.Doc() as Document;
@@ -206,4 +252,75 @@ test("load opens an empty doc when the oracle gave no project (pre-phase-2 BFF)"
     context: { user: { name: "Jo", email: "j", kind: "user" }, token: "t", projectName: null },
   });
   assert.equal(filesMap(doc).size, 0);
+});
+
+test("stateless token updates connection context and lastToken", async () => {
+  ensureRoomState(ROOM, "shop").lastToken = "old";
+  const ctx: CollabContext = {
+    user: { name: "Jo", email: "j", kind: "user" },
+    token: "old",
+    projectName: "shop",
+  };
+  const logs: string[] = [];
+  const hook = buildStatelessHook(prodConfig, {
+    bff: fakeBff(),
+    log: (m) => logs.push(m),
+  });
+  await hook({
+    connection: {
+      context: ctx,
+      sendStateless: () => {},
+    } as never,
+    documentName: ROOM,
+    document: new Y.Doc() as Document,
+    payload: JSON.stringify({ type: "token", value: "new-jwt" }),
+  });
+  assert.equal(ctx.token, "new-jwt");
+  assert.equal(roomState(ROOM)!.lastToken, "new-jwt");
+  assert.match(logs.join("\n"), /token refreshed for spec-acme-shop/);
+});
+
+test("requestFreshToken resolves when a matching token reply arrives", async () => {
+  const sent: string[] = [];
+  const fakeConn = {
+    sendStateless: (payload: string) => sent.push(payload),
+  };
+  const doc = {
+    getConnections: () => [fakeConn],
+    broadcastStateless: () => {},
+  };
+  const pending = requestFreshToken(doc as never, {}, ROOM);
+  assert.equal(sent.length, 1);
+  const please = JSON.parse(sent[0]!) as { type: string; id: string };
+  assert.equal(please.type, "token-please");
+  assert.ok(please.id);
+
+  const hook = buildStatelessHook(prodConfig, { bff: fakeBff() });
+  ensureRoomState(ROOM, "shop");
+  await hook({
+    connection: {
+      context: {
+        user: { name: "Jo", email: "j", kind: "user" },
+        token: "stale",
+        projectName: "shop",
+      } satisfies CollabContext,
+      sendStateless: () => {},
+    } as never,
+    documentName: ROOM,
+    document: new Y.Doc() as Document,
+    payload: JSON.stringify({
+      type: "token",
+      value: "pulled-jwt",
+      id: please.id,
+    }),
+  });
+  assert.equal(await pending, "pulled-jwt");
+});
+
+test("requestFreshToken returns null when no connections", async () => {
+  const doc = {
+    getConnections: () => [],
+    broadcastStateless: () => {},
+  };
+  assert.equal(await requestFreshToken(doc as never, {}, ROOM), null);
 });

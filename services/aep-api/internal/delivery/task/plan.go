@@ -43,7 +43,7 @@ import (
 // planInstruction is the steering directive the BFF composes server-side (§9.1:
 // the request body is empty; the BFF assembles the whole generation directive).
 // The design/requirements content is NOT inlined anymore — the agents service
-// reads it from the workspace snapshot (shared-volume-clone D9); the existing-
+// reads it from the workspace snapshot (shared-workspace-volume D9); the existing-
 // task renders + lineage diffs are appended to this instruction (they are
 // platform state, not repository files, so they cannot ride in the snapshot —
 // see renderPlanContext).

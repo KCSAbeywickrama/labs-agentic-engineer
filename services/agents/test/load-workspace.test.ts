@@ -18,10 +18,16 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { chmodSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
-import { readSnapshot, filterTurnSnapshot, keepInTurnSnapshot, loadSkillsFromSnapshot } from "../src/conversation/load-workspace.js";
+import {
+  readSnapshot,
+  filterTurnSnapshot,
+  keepInTurnSnapshot,
+  loadSkillsFromSnapshot,
+  SkillReadError,
+} from "../src/conversation/load-workspace.js";
 import { buildSkillCatalog } from "../src/agents/main/prompt.js";
 import type { LoadedSkillBody } from "../src/agents/main/skill-source.js";
 
@@ -295,6 +301,69 @@ test("the SnapshotSkillSource catalog + system-prompt rendering match the snapsh
     assert.equal(body(fromDisk.load("beta"))?.content, "BODY B\n\nSee references/deep.md.");
     assert.deepEqual(body(fromDisk.load("beta"))?.references, ["references/deep.md"]);
   } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("load throws SkillReadError on non-ENOENT I/O (not collapsed to a miss)", () => {
+  const root = makeTree({
+    "skills/go/SKILL.md": SKILL_MD("go", "Go guidance", "Write idiomatic Go."),
+  });
+  try {
+    const source = loadSkillsFromSnapshot(root);
+    assert.ok(source.load("go"));
+    const skillMd = join(root, "skills/go/SKILL.md");
+    chmodSync(skillMd, 0);
+    assert.throws(() => source.load("go"), (err: unknown) => {
+      assert.ok(err instanceof SkillReadError);
+      assert.match(err.message, /could not read skill file/);
+      return true;
+    });
+    // Unknown name stays a soft miss — never a SkillReadError.
+    assert.equal(source.load("nope"), undefined);
+  } finally {
+    try {
+      chmodSync(join(root, "skills/go/SKILL.md"), 0o644);
+    } catch {
+      /* restore best-effort so rmSync can clean up */
+    }
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("catalog scan fails when a SKILL.md exists but is unreadable", () => {
+  const root = makeTree({
+    "skills/go/SKILL.md": SKILL_MD("go", "Go guidance", "Write idiomatic Go."),
+  });
+  try {
+    chmodSync(join(root, "skills/go/SKILL.md"), 0);
+    assert.throws(() => loadSkillsFromSnapshot(root), (err: unknown) => err instanceof SkillReadError);
+  } finally {
+    try {
+      chmodSync(join(root, "skills/go/SKILL.md"), 0o644);
+    } catch {
+      /* restore best-effort */
+    }
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("listReferences throws SkillReadError when an aux dir is unreadable", () => {
+  const root = makeTree({
+    "skills/toolkit/SKILL.md": SKILL_MD("toolkit", "full aux", "See references/."),
+    "skills/toolkit/references/a.md": "REF A",
+  });
+  try {
+    const source = loadSkillsFromSnapshot(root);
+    assert.deepEqual(body(source.load("toolkit"))?.references, ["references/a.md"]);
+    chmodSync(join(root, "skills/toolkit/references"), 0);
+    assert.throws(() => source.load("toolkit"), (err: unknown) => err instanceof SkillReadError);
+  } finally {
+    try {
+      chmodSync(join(root, "skills/toolkit/references"), 0o755);
+    } catch {
+      /* restore best-effort */
+    }
     rmSync(root, { recursive: true, force: true });
   }
 });

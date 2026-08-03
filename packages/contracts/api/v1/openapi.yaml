@@ -3929,6 +3929,11 @@ components:
           type: string
         completedAt:
           type: string
+        durationMs:
+          description: '`tool_result` only: how long the call took, measured by the runner between
+            the call and its outcome, so it includes model turnaround.'
+          format: int64
+          type: integer
         emitter:
           description: Who produced the line — `subagent` for work the main agent fanned out with the
             Task tool, absent for the main agent itself. Absence is a positive fact, not an unknown.
@@ -3936,8 +3941,23 @@ components:
           - main
           - subagent
           type: string
+        emitterId:
+          description: Which subagent, for the cycles that fan out to several at once — the id of the
+            fan-out tool call, stable for that subagent's whole life. Absent on main-agent lines.
+          type: string
+        emitterLabel:
+          description: The description the main agent gave that subagent ("Implement todo-api service
+            (issue #3)"). Absent on main-agent lines, and on a fan-out that carried no description.
+          type: string
         error:
           type: string
+        exitCode:
+          description: '`tool_result` only: the process status of a failed shell call, parsed from the
+            SDK''s own `Exit code N` first line. Absent when the tool was not a shell — those report a
+            `<tool_use_error>` with no code — so read absence as "no code was reported", never as
+            "exited 0".'
+          format: int64
+          type: integer
         files:
           format: int64
           type: integer
@@ -3945,8 +3965,21 @@ components:
           type: string
         level:
           type: string
+        linesAdded:
+          description: A fanned-out subagent's total lines added, off the SDK's own report on its fan-out
+            call's result. Present only there; nothing in the feed can reconstruct it.
+          format: int64
+          type: integer
+        linesRemoved:
+          description: A fanned-out subagent's total lines removed, from the same report.
+          format: int64
+          type: integer
         message:
           type: string
+        ok:
+          description: '`tool_result` only: whether the call succeeded. Absent on every other kind — so
+            read absence as "not a tool result", never as success.'
+          type: boolean
         phase:
           type: string
         schemaVersion:
@@ -3966,6 +3999,16 @@ components:
         summary:
           type: string
         tool:
+          type: string
+        toolCount:
+          description: A fanned-out subagent's total tool calls, off the SDK's own report on its fan-out
+            call's result. Present only there.
+          format: int64
+          type: integer
+        toolUseId:
+          description: The tool call this line is about. A `tool_result` carries the id of the `tool_use`
+            it answers, which is what pairs a call with its outcome once several subagents interleave
+            the feed.
           type: string
         ts:
           type: string
@@ -4386,6 +4429,11 @@ components:
         cycleKind:
           description: Kind of that cycle (coding | conflict | fix | validation) — the section label.
           type: string
+        durationMs:
+          description: '`tool_result` only: how long the call took, measured by the runner between
+            the call and its outcome, so it includes model turnaround.'
+          format: int64
+          type: integer
         emitter:
           description: Who produced the line. The runner stamps `subagent` only on lines forwarded from
             inside a Task tool call; everything else is the main agent.
@@ -4396,8 +4444,23 @@ components:
           x-enum-varnames:
           - RunProgressLineEmitterMain
           - RunProgressLineEmitterSubagent
+        emitterId:
+          description: Which subagent, for the cycles that fan out to several at once — the id of the
+            fan-out tool call, stable for that subagent's whole life. Absent on main-agent lines.
+          type: string
+        emitterLabel:
+          description: The description the main agent gave that subagent ("Implement todo-api service
+            (issue #3)"). Absent on main-agent lines, and on a fan-out that carried no description.
+          type: string
         error:
           type: string
+        exitCode:
+          description: '`tool_result` only: the process status of a failed shell call, parsed from the
+            SDK''s own `Exit code N` first line. Absent when the tool was not a shell — those report a
+            `<tool_use_error>` with no code — so read absence as "no code was reported", never as
+            "exited 0".'
+          format: int64
+          type: integer
         files:
           format: int64
           type: integer
@@ -4405,6 +4468,19 @@ components:
           type: string
         level:
           type: string
+        linesAdded:
+          description: A fanned-out subagent's total lines added, off the SDK's own report on its fan-out
+            call's result. Present only there; nothing in the feed can reconstruct it.
+          format: int64
+          type: integer
+        linesRemoved:
+          description: A fanned-out subagent's total lines removed, from the same report.
+          format: int64
+          type: integer
+        ok:
+          description: '`tool_result` only: whether the call succeeded. Absent on every other kind — so
+            read absence as "not a tool result", never as success.'
+          type: boolean
         phase:
           type: string
         schemaVersion:
@@ -4420,6 +4496,16 @@ components:
         summary:
           type: string
         tool:
+          type: string
+        toolCount:
+          description: A fanned-out subagent's total tool calls, off the SDK's own report on its fan-out
+            call's result. Present only there.
+          format: int64
+          type: integer
+        toolUseId:
+          description: The tool call this line is about. A `tool_result` carries the id of the `tool_use`
+            it answers, which is what pairs a call with its outcome once several subagents interleave
+            the feed.
           type: string
         ts:
           type: string
@@ -4895,6 +4981,11 @@ components:
           type: string
         completedAt:
           type: string
+        durationMs:
+          description: '`tool_result` only: how long the call took, measured by the runner between
+            the call and its outcome, so it includes model turnaround.'
+          format: int64
+          type: integer
         emitter:
           description: Who produced the line — `subagent` for work the main agent fanned out with the
             Task tool, absent for the main agent itself. Absence is a positive fact, not an unknown.
@@ -4902,8 +4993,23 @@ components:
           - main
           - subagent
           type: string
+        emitterId:
+          description: Which subagent, for the cycles that fan out to several at once — the id of the
+            fan-out tool call, stable for that subagent's whole life. Absent on main-agent lines.
+          type: string
+        emitterLabel:
+          description: The description the main agent gave that subagent ("Implement todo-api service
+            (issue #3)"). Absent on main-agent lines, and on a fan-out that carried no description.
+          type: string
         error:
           type: string
+        exitCode:
+          description: '`tool_result` only: the process status of a failed shell call, parsed from the
+            SDK''s own `Exit code N` first line. Absent when the tool was not a shell — those report a
+            `<tool_use_error>` with no code — so read absence as "no code was reported", never as
+            "exited 0".'
+          format: int64
+          type: integer
         executionId:
           description: Id of the execution attempt this line belongs to.
           type: string
@@ -4917,8 +5023,21 @@ components:
           type: string
         level:
           type: string
+        linesAdded:
+          description: A fanned-out subagent's total lines added, off the SDK's own report on its fan-out
+            call's result. Present only there; nothing in the feed can reconstruct it.
+          format: int64
+          type: integer
+        linesRemoved:
+          description: A fanned-out subagent's total lines removed, from the same report.
+          format: int64
+          type: integer
         message:
           type: string
+        ok:
+          description: '`tool_result` only: whether the call succeeded. Absent on every other kind — so
+            read absence as "not a tool result", never as success.'
+          type: boolean
         phase:
           type: string
         schemaVersion:
@@ -4938,6 +5057,16 @@ components:
         summary:
           type: string
         tool:
+          type: string
+        toolCount:
+          description: A fanned-out subagent's total tool calls, off the SDK's own report on its fan-out
+            call's result. Present only there.
+          format: int64
+          type: integer
+        toolUseId:
+          description: The tool call this line is about. A `tool_result` carries the id of the `tool_use`
+            it answers, which is what pairs a call with its outcome once several subagents interleave
+            the feed.
           type: string
         ts:
           type: string

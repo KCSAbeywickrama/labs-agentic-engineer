@@ -83,6 +83,90 @@ func TestDeriveDependencyWiring_PlatformResourcePrefixesEveryOutput(t *testing.T
 	}
 }
 
+// todoProject is the two-component shape the sibling-endpoint bug was found in: a
+// browser app depending on the API beside it.
+func todoProject() []DesignComponent {
+	return []DesignComponent{
+		{Name: "todo-api"},
+		{Name: "todo-webapp", Dependencies: []Dependency{{
+			Kind: DependencyKindComponent, Name: "todo-api",
+		}}},
+	}
+}
+
+// THE regression pin, with the values taken from the live failure: project
+// `todo-api99`, a webapp depending on sibling `todo-api`. OpenChoreo resolves an
+// endpoint dependency by SCOPED component name, so the friendly `todo-api` the
+// agent invented matched no ReleaseBinding — `Ready` never flipped and the project
+// reported "deploying" indefinitely while serving fine.
+//
+// The expected values are literal, not re-derived: a test that called the same
+// helpers would keep passing if the naming convention changed under both sides.
+func TestDeriveDependencyWiring_SiblingEndpointIsScopedForOpenChoreo(t *testing.T) {
+	t.Parallel()
+	comps := todoProject()
+
+	deriveDependencyWiring(comps, nil, "todo-api99") // no catalog: none is needed
+
+	w := wiringOf(t, comps, "todo-api")
+	if w == nil || w.Endpoint == nil {
+		t.Fatal("no endpoint wiring stamped for a sibling-component dependency")
+	}
+	if want := "todo-api99-todo-api"; w.Endpoint.Component != want {
+		t.Errorf("component = %q, want %q — the SCOPED name OpenChoreo resolves by", w.Endpoint.Component, want)
+	}
+	if w.Endpoint.Component == "todo-api" {
+		t.Error("stamped the friendly name: this is the exact value that never resolves")
+	}
+	if want := "http"; w.Endpoint.Name != want {
+		t.Errorf("name = %q, want %q", w.Endpoint.Name, want)
+	}
+	if want := "project"; w.Endpoint.Visibility != want {
+		t.Errorf("visibility = %q, want %q", w.Endpoint.Visibility, want)
+	}
+	if want := "TODO_API_URL"; w.Endpoint.EnvBindings["address"] != want {
+		t.Errorf("envBindings[address] = %q, want %q", w.Endpoint.EnvBindings["address"], want)
+	}
+	if len(w.Endpoint.EnvBindings) != 1 {
+		t.Errorf("envBindings has %d entries, want exactly 1 (address)", len(w.Endpoint.EnvBindings))
+	}
+	// The variants are exclusive — a resources[] half here would render a
+	// workload.yaml entry OpenChoreo ignores, and the write gates reject the mix.
+	if w.Ref != "" || w.EnvBindings != nil {
+		t.Errorf("endpoint wiring also carried the resource variant: ref=%q envBindings=%v", w.Ref, w.EnvBindings)
+	}
+}
+
+// The endpoint name belongs to the PROVIDER, and it is in the provider's own
+// design — which is what makes the whole value derivable without the cluster. A
+// derivation that hardcoded "http" would silently mis-wire every component that
+// named its endpoint anything else.
+func TestDeriveDependencyWiring_SiblingEndpointUsesTheProvidersDeclaredName(t *testing.T) {
+	t.Parallel()
+	comps := todoProject()
+	comps[0].Endpoint = &ComponentEndpoint{Name: "rest"}
+
+	deriveDependencyWiring(comps, nil, "todo-api99")
+
+	if got := wiringOf(t, comps, "todo-api").Endpoint.Name; got != "rest" {
+		t.Errorf("name = %q, want %q (the provider's declared endpoint name)", got, "rest")
+	}
+}
+
+// The address env var keys on the LOGICAL dependency name, never the scoped
+// component name: it is the variable the coding agent writes into its source, and a
+// browser app already reads the identical key from window._env_.
+func TestDeriveDependencyWiring_SiblingAddressEnvIgnoresScoping(t *testing.T) {
+	t.Parallel()
+	comps := todoProject()
+
+	deriveDependencyWiring(comps, nil, "some-very-different-project")
+
+	if got := wiringOf(t, comps, "todo-api").Endpoint.EnvBindings["address"]; got != "TODO_API_URL" {
+		t.Errorf("envBindings[address] = %q, want TODO_API_URL regardless of the project", got)
+	}
+}
+
 // An external resource's outputs are its OWN config keys, already namespaced by
 // the schema the design declares — prefixing them would rename the very keys the
 // architect authored and the build drawer collects.
@@ -127,8 +211,13 @@ func TestDeriveDependencyWiring_UnderivableStampsNothing(t *testing.T) {
 		"no catalog read at all":               {platformDep("todo-db", "postgres-cnpg"), nil},
 		"type declares no outputs":             {platformDep("thing", "opaque"), map[string]CRTType{"opaque": {}}},
 		"external with no config keys":         {Dependency{Kind: DependencyKindExternal, Name: "weather"}, nil},
-		"sibling component":                    {Dependency{Kind: DependencyKindComponent, Name: "todo-api"}, postgresType()},
-		"cross-project org service":            {Dependency{Kind: DependencyKindOrgService, Name: "billing"}, postgresType()},
+		// A sibling the design does not declare: the endpoint name is the
+		// PROVIDER's to declare, so there is nothing to derive. Guessing "http"
+		// would stamp a confident value for a dependency the design cannot satisfy.
+		"sibling absent from the design": {Dependency{Kind: DependencyKindComponent, Name: "todo-api"}, postgresType()},
+		// org-service stays on the dispatch-time channel: its project, component
+		// and visibility live in ANOTHER project's design, which this one cannot read.
+		"cross-project org service": {Dependency{Kind: DependencyKindOrgService, Name: "billing"}, postgresType()},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -278,5 +367,67 @@ func TestSnapshotDerived_IsNotAliasedByALaterDerivation(t *testing.T) {
 
 	if before.wiring["todo-db"].EnvBindings["host"] != "TODO_DB_HOST" {
 		t.Error("snapshot aliased the live envBindings map")
+	}
+}
+
+// The endpoints[] variant hangs off a POINTER, so the shallow struct copy shares
+// it. Left aliased, the "before" snapshot would mutate along with the live value
+// and an endpoint change could never be committed.
+func TestSnapshotDerived_DoesNotAliasTheEndpointVariant(t *testing.T) {
+	t.Parallel()
+	comps := todoProject()
+	deriveDependencyWiring(comps, nil, "todo-api99")
+	before := snapshotDerived(comps[1])
+
+	live := comps[1].Dependencies[0].Wiring.Endpoint
+	live.Component = "MUTATED"
+	live.EnvBindings["address"] = "MUTATED"
+
+	snap := before.wiring["todo-api"].Endpoint
+	if snap.Component != "todo-api99-todo-api" {
+		t.Errorf("snapshot aliased the live endpoint struct: component = %q", snap.Component)
+	}
+	if snap.EnvBindings["address"] != "TODO_API_URL" {
+		t.Errorf("snapshot aliased the live endpoint envBindings: %q", snap.EnvBindings["address"])
+	}
+}
+
+// Change detection has to look INSIDE the endpoint variant. If it did not, a
+// project rename would move every scoped component name while the diff reported no
+// change — so the corrected wiring would never be committed and every consumer in
+// the project would keep the stale, unresolvable target.
+func TestDerivedStateEqual_CatchesEndpointVariantChanges(t *testing.T) {
+	t.Parallel()
+	comps := todoProject()
+	deriveDependencyWiring(comps, nil, "todo-api99")
+	first := snapshotDerived(comps[1])
+
+	deriveDependencyWiring(comps, nil, "todo-api99")
+	if !derivedStateEqual(first, snapshotDerived(comps[1])) {
+		t.Error("re-deriving the same endpoint reported a change — every save would commit")
+	}
+
+	deriveDependencyWiring(comps, nil, "renamed-project")
+	if derivedStateEqual(first, snapshotDerived(comps[1])) {
+		t.Error("a changed scoped component name went undetected — the fix would never be committed")
+	}
+}
+
+// A sibling dependency that stops being derivable must LOSE its wiring: a stale
+// scoped name pointing at a component the design no longer declares is exactly the
+// confidently-wrong value this derivation exists to stop producing.
+func TestDeriveDependencyWiring_RemovesEndpointWhenTheSiblingGoes(t *testing.T) {
+	t.Parallel()
+	comps := todoProject()
+	deriveDependencyWiring(comps, nil, "todo-api99")
+	if wiringOf(t, comps, "todo-api") == nil {
+		t.Fatal("precondition: the sibling wiring should have been stamped")
+	}
+
+	// The provider is removed from the design; the consumer still names it.
+	deriveDependencyWiring(comps[1:], nil, "todo-api99")
+
+	if w := wiringOf(t, comps[1:], "todo-api"); w != nil {
+		t.Errorf("wiring = %+v, want nil once the sibling is gone from the design", w)
 	}
 }

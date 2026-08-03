@@ -87,23 +87,60 @@ type Dependency struct {
 	// spec.parameters (numbers must stay JSON numbers for CRD validation).
 	ResourceType string         `json:"resourceType,omitempty"`
 	Parameters   map[string]any `json:"parameters,omitempty"`
-	// platform-resource / external: the platform-stamped consumer-side wiring.
-	// See DependencyWiring — derived at design save, overwritten on every save,
-	// never authored by an agent.
+	// component / platform-resource / external: the platform-stamped consumer-side
+	// wiring. See DependencyWiring — derived at design save, overwritten on every
+	// save, never authored by an agent.
 	Wiring *DependencyWiring `json:"wiring,omitempty"`
 }
 
-// DependencyWiring is the resolved consumer-side wiring for a platform-resource
-// or external dependency: the OC Resource name plus the output→env-var mapping
-// the coding agent copies into its component's workload.yaml. Its shape mirrors
-// ONE `dependencies.resources[]` entry exactly (provisioning's
-// workloadResourceDepYAML), so the agent copies rather than transforms.
+// DependencyWiring is the resolved consumer-side wiring for a dependency: what
+// the coding agent copies into its component's workload.yaml `dependencies:`
+// block. It carries ONE VARIANT PER sub-block of that block, and each variant
+// mirrors one entry of its sub-block exactly, so the agent copies rather than
+// transforms:
 //
-// It is knowable at design save because both halves are pure functions of the
-// design plus the resource type's DECLARED outputs — no binding, no gate, no
-// cluster state. Mirrors the agent-stream TS `DependencyWiring`.
+//   - Ref + EnvBindings → one `dependencies.resources[]` entry (provisioning's
+//     workloadResourceDepYAML), for kind platform-resource / external.
+//   - Endpoint          → one `dependencies.endpoints[]` entry (provisioning's
+//     workloadEndpointDepYAML), for kind component.
+//
+// The variants are EXCLUSIVE — a dependency resolves to a resource or to an
+// endpoint, never both, and Kind already says which. Go cannot express a union,
+// so both live on one struct and exactly-one is enforced by the write gates (the
+// zod union in agent-stream, agentfold.validateDependencyWiring here); the TS
+// contract states it as a real union type.
+//
+// Every variant is knowable at design save because every field is a pure function
+// of the design (plus, for a resource, the resource type's DECLARED outputs) — no
+// binding, no gate, no cluster state. Mirrors the agent-stream TS
+// `DependencyWiring`.
 type DependencyWiring struct {
-	Ref         string            `json:"ref"`
+	Ref         string            `json:"ref,omitempty"`
+	EnvBindings map[string]string `json:"envBindings,omitempty"`
+	Endpoint    *EndpointWiring   `json:"endpoint,omitempty"`
+}
+
+// EndpointWiring is one `dependencies.endpoints[]` entry: a sibling component's
+// endpoint in the same project.
+//
+// Component is the SCOPED OC component name (ocname.ScopedComponentName), because
+// that is the key OpenChoreo resolves an endpoint dependency by. Stamping it here
+// is what removed the ordering dependency that made this unknowable: the live
+// endpoint catalog only lists components that have DEPLOYED, so on a first
+// delivery — siblings coded in one cycle, nothing running yet — dispatch-time
+// resolution could answer nothing, and an agent left to guess wrote the FRIENDLY
+// name. OpenChoreo then matched no binding, and the consumer sat at
+// `Ready=False / ConnectionsPending` while the platform reported "deploying".
+//
+// Mirrors the agent-stream TS `EndpointWiring`.
+type EndpointWiring struct {
+	Component string `json:"component"`
+	Name      string `json:"name"`
+	// Visibility is the target endpoint's reachability — "project" for a
+	// same-project sibling.
+	Visibility string `json:"visibility"`
+	// EnvBindings maps the endpoint output to the env var OpenChoreo injects it
+	// as: one key, `address`, bound to ocname.ServiceURLEnvName(depName).
 	EnvBindings map[string]string `json:"envBindings"`
 }
 

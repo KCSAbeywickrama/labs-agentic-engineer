@@ -274,15 +274,20 @@ func (s *Service) resolveDependenciesYAML(ctx context.Context, orgID, projectID 
 				Component:   target.Component,
 				Name:        target.Name,
 				Visibility:  "namespace",
-				EnvBindings: map[string]string{"address": orgServiceURLEnv(name)},
+				EnvBindings: map[string]string{spec.EndpointAddressOutput: orgServiceURLEnv(name)},
 			})
 			contractSections = append(contractSections, orgServiceContractSection(name, target))
 		}
 		// same-project component siblings (visibility project). The sibling's OC
-		// component name is `<project>-<logicalName>`; the env var keys on the
-		// LOGICAL dep name. Project is omitted (same project).
+		// component name is the SCOPED one; the env var keys on the LOGICAL dep
+		// name. Project is omitted (same project).
+		//
+		// Both values are now stamped into design.json at design save
+		// (spec/derive_wiring.go), so this path is no longer the only source for
+		// them — it re-states them for a reader of the issue thread, and still
+		// carries the consumed-contract guidance below, which is not derivable.
 		for _, depName := range comp.ComponentDependsOn() {
-			ocComponent := projectID + "-" + depName
+			ocComponent := ocname.ScopedComponentName(projectID, depName)
 			target, ok, rerr := s.providers.ResolveProjectEndpoint(ctx, orgID, projectID, ocComponent)
 			if rerr != nil {
 				return "", "", false, fmt.Errorf("resolve same-project component %q: %w", depName, rerr)
@@ -294,8 +299,8 @@ func (s *Service) resolveDependenciesYAML(ctx context.Context, orgID, projectID 
 			deps.Endpoints = append(deps.Endpoints, workloadEndpointDepYAML{
 				Component:   target.Component,
 				Name:        target.Name,
-				Visibility:  "project",
-				EnvBindings: map[string]string{"address": orgServiceURLEnv(depName)},
+				Visibility:  spec.EndpointVisibilityProject,
+				EnvBindings: map[string]string{spec.EndpointAddressOutput: orgServiceURLEnv(depName)},
 			})
 			contractSections = append(contractSections, localComponentContractSection(depName))
 		}
@@ -373,18 +378,10 @@ func externalSpecContractSection(depName, specPath string) string {
 	)
 }
 
-// orgServiceURLEnv mirrors endpoints.OrgServiceURLEnv: <UPPER_SNAKE>_URL (a local
-// copy keeps this feature's edge to dependencies/endpoints out). e.g.
-// "employee-api" → "EMPLOYEE_API_URL".
+// orgServiceURLEnv is <UPPER_SNAKE>_URL — the env var a consumer reads a
+// provider's base URL from. Delegates to ocname.ServiceURLEnvName so this comment
+// and the `address` binding spec stamps into design.json cannot drift apart.
+// e.g. "employee-api" → "EMPLOYEE_API_URL".
 func orgServiceURLEnv(name string) string {
-	return envVarName(name, "") + "URL"
-}
-
-// envVarName builds a valid C_IDENTIFIER env-var name from a dep name + output
-// name. Delegates to ocname.EnvVarName — the single source of truth shared
-// with runtimeconfig's window._env_ keys, so the pod env var and the SPA config
-// key for the same dep+output are byte-identical. "orders-db" + "host" →
-// "ORDERS_DB_HOST".
-func envVarName(depName, outName string) string {
-	return ocname.EnvVarName(depName, outName)
+	return ocname.ServiceURLEnvName(name)
 }

@@ -16,16 +16,22 @@
  * under the License.
  */
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { StreamPart } from "@aep/agent-stream";
 
 // --- api/turns.js: openTurnStream/getTurn are the only calls runTurn makes.
+// Pass through TurnStreamAttachError / isTurnStreamNotFound so attach tests
+// exercise the real discriminator.
 const mockOpenTurnStream = vi.fn();
 const mockGetTurn = vi.fn();
-vi.mock("./api/turns.js", () => ({
-  openTurnStream: (...args: unknown[]) => mockOpenTurnStream(...args),
-  getTurn: (...args: unknown[]) => mockGetTurn(...args),
-}));
+vi.mock("./api/turns.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./api/turns.js")>();
+  return {
+    ...actual,
+    openTurnStream: (...args: unknown[]) => mockOpenTurnStream(...args),
+    getTurn: (...args: unknown[]) => mockGetTurn(...args),
+  };
+});
 
 // --- @aep/agent-stream: parseSseStream is mocked to yield the parts a test
 // queues, bypassing real SSE byte parsing (irrelevant to this unit).
@@ -48,11 +54,14 @@ vi.mock("./chatStore.js", () => ({
   appendAssistantText: vi.fn(),
   addMessage: vi.fn(),
   upsertToolMessage: vi.fn(),
+  upsertQuestionMessage: vi.fn(),
   setTurnStatus: vi.fn(),
   notifyTurnEnd: (key: string, status: string) => notified.push({ key, status }),
 }));
 
 import { attachAndFoldTurn } from "./runTurn";
+import { TurnStreamAttachError } from "./api/turns.js";
+import { addMessage } from "./chatStore.js";
 
 const KEY = "aep.chat.v1.acme.proj1";
 
@@ -62,6 +71,10 @@ describe("attachAndFoldTurn — turn-end notification (#252 Task 5)", () => {
     queuedParts = [];
     notified.length = 0;
     mockOpenTurnStream.mockResolvedValue(new ReadableStream());
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("notifies turn-end with 'completed' on a turn-committed terminal frame", async () => {
@@ -97,5 +110,59 @@ describe("attachAndFoldTurn — turn-end notification (#252 Task 5)", () => {
     await attachAndFoldTurn(KEY, "proj1", "t1", ac.signal);
     expect(notified).toEqual([]);
     expect(mockGetTurn).not.toHaveBeenCalled();
+  });
+});
+
+describe("attachAndFoldTurn — pre-stream 404 re-attach (#3)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    queuedParts = [];
+    notified.length = 0;
+    mockOpenTurnStream.mockResolvedValue(new ReadableStream());
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("retries openTurnStream on a pre-stream 404, then folds the stream (no Turn failed)", async () => {
+    vi.useFakeTimers();
+    const attachErr = new TurnStreamAttachError(404);
+    mockOpenTurnStream
+      .mockRejectedValueOnce(attachErr)
+      .mockResolvedValueOnce(new ReadableStream());
+    queuedParts = [{ type: "turn-committed" } as StreamPart];
+    mockGetTurn.mockResolvedValue({ status: "running" });
+
+    const done = attachAndFoldTurn(KEY, "proj1", "t1", new AbortController().signal);
+    await vi.runAllTimersAsync();
+    await done;
+
+    expect(mockOpenTurnStream).toHaveBeenCalledTimes(2);
+    expect(notified).toEqual([{ key: KEY, status: "completed" }]);
+    expect(addMessage).not.toHaveBeenCalledWith(
+      KEY,
+      expect.objectContaining({ role: "error" }),
+    );
+  });
+
+  it("falls through to getTurn when a pre-stream 404's turn is already completed", async () => {
+    vi.useFakeTimers();
+    const attachErr = new TurnStreamAttachError(404);
+    mockOpenTurnStream.mockRejectedValue(attachErr);
+    mockGetTurn.mockResolvedValue({ status: "completed" });
+
+    const done = attachAndFoldTurn(KEY, "proj1", "t1", new AbortController().signal);
+    await vi.runAllTimersAsync();
+    await done;
+
+    expect(notified).toEqual([{ key: KEY, status: "completed" }]);
+  });
+
+  it("re-throws non-404 attach failures (still surfaces Turn failed upstream)", async () => {
+    mockOpenTurnStream.mockRejectedValue(new Error("Failed to attach to the turn stream")); // no status
+    await expect(
+      attachAndFoldTurn(KEY, "proj1", "t1", new AbortController().signal),
+    ).rejects.toThrow(/Failed to attach/);
   });
 });

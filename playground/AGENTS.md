@@ -24,6 +24,32 @@ pnpm play <dir> code [--restore] [--yes]   # ONE coding-agent session works the
 pnpm play help | -h | --help           # same usage help
 ```
 
+## Tuning the coding run
+
+`pnpm play <dir> code --restore --yes` is the edit → rerun loop: `--restore`
+rolls the project back to the snapshot taken before the last coding run, which
+removes the generated component directories and reverts the `## Progress`
+sections on the issues, so the next run starts from the same state the last one
+did. One command, no manual cleanup, and the comparison is honest.
+
+**Tune against a deliberately minimal project, not a realistic one.** Two
+components is the floor that still exercises what matters — the working-set
+derivation and the subagent fan-out — and the components themselves should be
+trivial: one endpoint, one screen, no database, no auth, no platform resources.
+A realistic project spends most of its wall clock on work that is the same every
+time you rerun it, which is exactly the part you are not tuning. Measured on this
+repo: a two-component todo app with Postgres and OIDC runs ~12-16 min, while the
+same shape reduced to `GET /hello` plus one screen runs in a few minutes and
+halves the preloaded skill set (3 skills / preload 2, against 6 / 4).
+
+Keep the small one around and rerun it; reach for a realistic project only to
+confirm a change holds at size. Since `playground/.projects/` is gitignored,
+a fixture like that is yours alone — author it by copying the `specs/` +
+`issues/` shape of an existing project and stripping every dependency.
+
+Relative `<dir>` paths resolve against pnpm's `INIT_CWD`, so pass an absolute
+path from a script or a shell whose cwd you have not changed.
+
 `play <dir>` drops straight into **chat** — the home surface. A directly-named
 dir is created after a prompt (headless refuses a missing dir rather than
 creating silently), and a NEWLY created project captures its idea right there —
@@ -110,7 +136,7 @@ push it to a repo and let the platform's normal flow build/deploy it.
 | Issue `key` lineage constant `"local"`; no spec/design tags | no builds/tags locally | dedupe across replans still works |
 | Design/tasks gates are playground-side UX | production has no server gate on the console's spec paths | advisory only |
 | No status field on an issue file | prod's own `derivedStatus` is read from GitHub issue state, never cached; the playground has no such oracle, so it re-derives "is this done" from whether the App Path looks implemented, every run | none needed — deleting a component's code puts its issue back in the working set |
-| Coding agent runs bypassPermissions ON THE HOST | production uses a disposable pod | mandatory undo snapshot + first-run consent; point it at scratch/git-tracked projects |
+| Coding agent runs in a throwaway `docker run` of the runner image, not a pod | no cluster; the image and the session options are production's | mandatory undo snapshot + first-run consent. `--host` opts out of the container entirely and runs bypassPermissions ON THE HOST against the developer's own toolchain — weaker parity, so point it at scratch/git-tracked projects |
 | No GitHub-shaped steps in the workflow skill (issue files, no branch, no PR) | there is no remote to discover issues from or open a PR against | the deliberate one: the same authored `aep` skill, composed for `mode: "local"`; everything outside a `<!-- mode:… -->` block is shared with production verbatim |
 
 ## Layout

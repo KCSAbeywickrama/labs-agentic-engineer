@@ -118,8 +118,9 @@ func (f *fakeRetrier) count() int { f.mu.Lock(); defer f.mu.Unlock(); return len
 // tests, and a panic would mask an unexpected call regression, so they no-op
 // instead of panicking to keep the fake honest about "not exercised here".
 type fakeExecRepo struct {
-	mu   sync.Mutex
-	rows map[string]*delivery.Execution
+	mu        sync.Mutex
+	rows      map[string]*delivery.Execution
+	finishErr error // when set, Finish returns this error without mutating the row
 }
 
 func newFakeExecRepo(rows ...*delivery.Execution) *fakeExecRepo {
@@ -183,6 +184,9 @@ func (f *fakeExecRepo) StartWithRun(_ context.Context, id, runName string) (*del
 func (f *fakeExecRepo) Finish(_ context.Context, id, status, reason string) (*delivery.Execution, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.finishErr != nil {
+		return nil, f.finishErr
+	}
 	r := f.rows[id]
 	if r == nil || !taskmeta.ExecutionStatus(r.Status).IsActive() {
 		return nil, nil

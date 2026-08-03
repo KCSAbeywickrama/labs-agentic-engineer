@@ -17,8 +17,8 @@
  */
 
 /**
- * Workspace-shape input loading (shared-volume-clone-architecture §12, D4): the
- * ONLY module that reads the shared mount. Both readers take a directory that
+ * Workspace-shape input loading (shared-workspace-volume, D4): the ONLY module
+ * that reads the shared mount. Both readers take a directory that
  * `snapshot-path.ts` derived and stat-checked — nothing here touches untrusted
  * paths, and nothing here writes.
  *
@@ -46,8 +46,50 @@ import { parse as parseYaml } from "yaml";
 // fence parsing cannot drift from the spec-file fence parsing (same approach as
 // the caller-side skill resolver the playground uses to materialize the mount).
 import { FRONTMATTER_RE, lf } from "@aep/agent-stream";
-import type { SkillAudience, SkillCatalogEntry, SkillSource, SkillLoadResult, LoadedReference } from "../agents/main/skill-source.js";
+import type { SkillAudience, SkillLoadResult } from "../agents/main/skill-source.js";
 import { ALL_AUDIENCES, SERVICE_AUDIENCE } from "../agents/main/skill-source.js";
+import {
+  SkillReadError,
+  type SkillCatalogEntry,
+  type SkillSource,
+  type LoadedReference,
+} from "../agents/main/skill-source.js";
+
+export { SkillReadError };
+
+/** Skill-read logger: ENOENT is expected (missing/vanished); other I/O is not. */
+type SkillReadLog = (msg: string, err: unknown) => void;
+
+const defaultSkillReadLog: SkillReadLog = (msg, err) => {
+  const detail = err instanceof Error ? err.message : String(err);
+  console.warn(`[skills] ${msg}: ${detail}`);
+};
+
+function isEnoent(err: unknown): boolean {
+  return typeof err === "object" && err !== null && "code" in err && (err as { code: unknown }).code === "ENOENT";
+}
+
+/** Read text; return undefined on ENOENT. Log and throw SkillReadError on other I/O. */
+function readSkillText(abs: string, log: SkillReadLog): string | undefined {
+  try {
+    return readFileSync(abs, "utf8");
+  } catch (err) {
+    if (isEnoent(err)) return undefined;
+    log(`read failed ${abs}`, err);
+    throw new SkillReadError(abs, err);
+  }
+}
+
+/** Read bytes; return undefined on ENOENT. Log and throw SkillReadError on other I/O. */
+function readSkillBytes(abs: string, log: SkillReadLog): Buffer | undefined {
+  try {
+    return readFileSync(abs);
+  } catch (err) {
+    if (isEnoent(err)) return undefined;
+    log(`read failed ${abs}`, err);
+    throw new SkillReadError(abs, err);
+  }
+}
 
 // --- The repo snapshot → `files` map -----------------------------------------
 
@@ -176,14 +218,16 @@ function parseSkillMd(raw: string): {
  * skipping the top-level SKILL.md and dot-entries (files and dirs, at any
  * depth) — the same skip rule the Go-side scan applies.
  */
-function listReferences(skillDir: string): string[] {
+function listReferences(skillDir: string, log: SkillReadLog = defaultSkillReadLog): string[] {
   const out: string[] = [];
   const walkAux = (dir: string, rel: string): void => {
     let entries: Dirent[];
     try {
       entries = readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return; // vanished mid-scan — impossible for an immutable snapshot, but stay honest
+    } catch (err) {
+      if (isEnoent(err)) return;
+      log(`readdir failed ${dir}`, err);
+      throw new SkillReadError(dir, err);
     }
     for (const e of entries) {
       if (e.name.startsWith(".")) continue; // dot-entries (files and dirs) skipped
@@ -216,9 +260,11 @@ interface CatalogRow extends SkillCatalogEntry {
 export class SnapshotSkillSource implements SkillSource {
   private readonly rows: CatalogRow[];
   private readonly byName: Map<string, CatalogRow>;
+  private readonly log: SkillReadLog;
 
-  constructor(skillsSnapshotDir: string) {
-    this.rows = scanCatalog(skillsSnapshotDir);
+  constructor(skillsSnapshotDir: string, log: SkillReadLog = defaultSkillReadLog) {
+    this.log = log;
+    this.rows = scanCatalog(skillsSnapshotDir, log);
     this.byName = new Map(this.rows.map((r) => [r.name, r] as const));
   }
 
@@ -234,16 +280,13 @@ export class SnapshotSkillSource implements SkillSource {
   load(name: string): SkillLoadResult {
     const row = this.byName.get(name);
     if (row === undefined) return undefined;
-    // Audience gate before any disk read: this consumer may see the row (it needs
-    // the name to pin the skill onto a component) but not the body.
+    // Audience gate before any disk read: this consumer may see the row (it
+    // needs the name to pin the skill onto a component) but not the body.
     if (!row.audience.includes(SERVICE_AUDIENCE)) return { refused: true };
-    let raw: string;
-    try {
-      raw = readFileSync(join(row.dir, "SKILL.md"), "utf8");
-    } catch {
-      return undefined; // vanished mid-turn — impossible for an immutable snapshot, but stay honest
-    }
-    return { content: parseSkillMd(raw).body.trim(), references: listReferences(row.dir) };
+    const abs = join(row.dir, "SKILL.md");
+    const raw = readSkillText(abs, this.log);
+    if (raw === undefined) return undefined;
+    return { content: parseSkillMd(raw).body.trim(), references: listReferences(row.dir, this.log) };
   }
 
   loadReference(name: string, path: string): LoadedReference {
@@ -251,13 +294,10 @@ export class SnapshotSkillSource implements SkillSource {
     if (row === undefined) return undefined;
     // Fence-by-allowlist: the model-supplied path must be one of the LISTED
     // reference paths (never resolved raw against the fs).
-    if (!listReferences(row.dir).includes(path)) return undefined;
-    let buf: Buffer;
-    try {
-      buf = readFileSync(join(row.dir, path));
-    } catch {
-      return undefined;
-    }
+    if (!listReferences(row.dir, this.log).includes(path)) return undefined;
+    const abs = join(row.dir, path);
+    const buf = readSkillBytes(abs, this.log);
+    if (buf === undefined) return undefined;
     // Cheap UTF-8 validity check: re-encode the decoded text and compare bytes
     // — a mismatch means the file isn't valid UTF-8 text (binary), and
     // model-context surfaces must never inline binary.
@@ -314,27 +354,25 @@ function readDisabledSkillNames(snapshotDir: string): Set<string> {
  * `skills/<kindDir>/<name>/SKILL.md` is tolerated for old snapshots.
  * Deterministic order: flat dirs sorted first, then legacy kind dirs sorted
  * with skill dirs sorted within each; a duplicate skill NAME keeps its first
- * occurrence (so a flat copy wins over a legacy one). A dir without a readable
- * SKILL.md is simply not a skill; a snapshot without `skills/` yields an empty
- * catalog. A skill named in the `skills-manifest.json` sidecar with
- * `disabled: true` (ADR-0014) never becomes a row at all — it is withheld
- * from this org entirely, not merely access-gated — so it never reaches
- * `this.rows`/`this.byName` and `load`/`loadReference` fall through to their
- * existing "unknown name" `undefined` branch for free.
+ * occurrence (so a flat copy wins over a legacy one). A dir whose SKILL.md is
+ * missing (ENOENT) is simply not a skill; a SKILL.md that exists but cannot be
+ * read (non-ENOENT I/O) fails the catalog load via `SkillReadError`. A snapshot
+ * without `skills/` yields an empty catalog. A skill named in the
+ * `skills-manifest.json` sidecar with `disabled: true` (ADR-0014) never becomes
+ * a row at all — it is withheld from this org entirely, not merely
+ * access-gated — so it never reaches `this.rows`/`this.byName` and
+ * `load`/`loadReference` fall through to their "unknown name" branch for free.
  */
-function scanCatalog(snapshotDir: string): CatalogRow[] {
+function scanCatalog(snapshotDir: string, log: SkillReadLog = defaultSkillReadLog): CatalogRow[] {
   const skillsRoot = join(snapshotDir, "skills");
   if (!existsSync(skillsRoot)) return [];
   const disabledNames = readDisabledSkillNames(snapshotDir);
   const rows: CatalogRow[] = [];
   const seen = new Set<string>();
   const addSkillDir = (dir: string, id: string): void => {
-    let raw: string;
-    try {
-      raw = readFileSync(join(dir, "SKILL.md"), "utf8");
-    } catch {
-      return;
-    }
+    const skillMd = join(dir, "SKILL.md");
+    const raw = readSkillText(skillMd, log);
+    if (raw === undefined) return; // ENOENT — not a skill
     const parsed = parseSkillMd(raw);
     const name = parsed.name ?? id; // fallback: the dir name IS the skill id
     if (seen.has(name)) return;
@@ -343,7 +381,7 @@ function scanCatalog(snapshotDir: string): CatalogRow[] {
     rows.push({
       name,
       description: parsed.description,
-      hasReferences: listReferences(dir).length > 0,
+      hasReferences: listReferences(dir, log).length > 0,
       audience: parsed.audience,
       dir,
     });

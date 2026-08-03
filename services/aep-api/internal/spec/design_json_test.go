@@ -689,3 +689,52 @@ func TestComponentDesignJSON_CarriesPlatformStampedWiring(t *testing.T) {
 		}
 	}
 }
+
+// The endpoints[] variant has to survive the same round trip, and its loss is the
+// one that hides: a missing `ref` leaves the coding agent with nothing to write,
+// but a missing `endpoint` leaves it free to invent a plausible sibling name — and
+// the wrong one builds, deploys and serves while its ReleaseBinding never reaches
+// Ready.
+func TestComponentDesignJSON_CarriesTheSiblingEndpointWiring(t *testing.T) {
+	comp := DesignComponent{
+		Name: "todo-webapp", ComponentType: "web-application", Version: "0.1.0",
+		Language: "TypeScript", Buildpack: "docker", AppPath: "todo-webapp",
+		Dependencies: []Dependency{{
+			Kind: DependencyKindComponent, Name: "todo-api",
+			Wiring: &DependencyWiring{Endpoint: &EndpointWiring{
+				Component:   "todo-api99-todo-api",
+				Name:        "http",
+				Visibility:  "project",
+				EnvBindings: map[string]string{"address": "TODO_API_URL"},
+			}},
+		}},
+	}
+
+	out, err := marshalComponentDesignJSON("todo-webapp", comp)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, want := range []string{`"endpoint"`, `"component": "todo-api99-todo-api"`, `"visibility": "project"`, `"address": "TODO_API_URL"`} {
+		if !strings.Contains(string(out), want) {
+			t.Errorf("write dropped %s:\n%s", want, out)
+		}
+	}
+	// The variants are exclusive on the wire too: an empty `ref` alongside the
+	// endpoint is a mixed object, which both write gates reject.
+	if strings.Contains(string(out), `"ref"`) {
+		t.Errorf("endpoint-variant wiring emitted an empty ref — the write gates reject the mix:\n%s", out)
+	}
+
+	back, err := parseComponentDesignJSON("todo-webapp", string(out))
+	if err != nil {
+		t.Fatalf("re-parse: %v", err)
+	}
+	got := back.Dependencies[0].Wiring
+	if got == nil || got.Endpoint == nil {
+		t.Fatalf("read dropped the endpoint wiring: %+v", got)
+	}
+	if got.Endpoint.Component != "todo-api99-todo-api" || got.Endpoint.Name != "http" ||
+		got.Endpoint.Visibility != "project" || got.Endpoint.EnvBindings["address"] != "TODO_API_URL" {
+		t.Errorf("round-trip changed the endpoint wiring: %+v", got.Endpoint)
+	}
+}

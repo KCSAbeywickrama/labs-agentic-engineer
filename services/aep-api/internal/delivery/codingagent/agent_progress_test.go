@@ -17,6 +17,7 @@
 package codingagent
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -53,6 +54,97 @@ func TestParseProgressLine(t *testing.T) {
 	future := parseProgressLine(`{"schemaVersion":2,"kind":"phase","phase":"x"}`)
 	if future.Kind != "log" {
 		t.Errorf("future schema = %+v, want kind=log", future)
+	}
+}
+
+// TestParseProgressLineAttribution pins the fields that let a reader tell one
+// subagent's work from another's, and a failed tool call from a successful one.
+// A cycle fans out to several subagents at once and their lines interleave, so
+// dropping any of these silently collapses the feed back to unattributable.
+func TestParseProgressLineAttribution(t *testing.T) {
+	t.Parallel()
+
+	sub := parseProgressLine(`{"schemaVersion":1,"seq":9,"kind":"tool_use","tool":"Bash","summary":"bal build",` +
+		`"emitter":"subagent","emitterId":"toolu_api","emitterLabel":"Implement todo-api service (issue #3)",` +
+		`"toolUseId":"toolu_b1"}`)
+	if sub.Emitter != "subagent" || sub.EmitterID != "toolu_api" {
+		t.Errorf("subagent attribution = %+v", sub)
+	}
+	if sub.EmitterLabel != "Implement todo-api service (issue #3)" || sub.ToolUseID != "toolu_b1" {
+		t.Errorf("subagent identity = %+v", sub)
+	}
+
+	// A FAILED call. `ok` is a pointer precisely so this survives: a plain bool
+	// with omitempty would drop `false` on the way out and the console would
+	// render the failure as an ordinary success.
+	failed := parseProgressLine(`{"schemaVersion":1,"seq":10,"kind":"tool_result","tool":"Bash","ok":false,` +
+		`"durationMs":172000,"summary":"exit 1: compilation failed","toolUseId":"toolu_b1"}`)
+	if failed.Kind != "tool_result" || failed.OK == nil || *failed.OK {
+		t.Fatalf("failed tool_result = %+v, want ok=false", failed)
+	}
+	if failed.DurationMs != 172000 {
+		t.Errorf("durationMs = %d, want 172000", failed.DurationMs)
+	}
+
+	// …and it must still be false after a round trip to the wire.
+	encoded, err := json.Marshal(failed)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(encoded), `"ok":false`) {
+		t.Errorf("re-encoded line = %s, want it to still carry ok:false", encoded)
+	}
+
+	// Every other kind carries no `ok` at all, so absence must never read as
+	// success.
+	if phase := parseProgressLine(`{"schemaVersion":1,"kind":"phase","phase":"x"}`); phase.OK != nil {
+		t.Errorf("phase event carries ok = %v, want nil", *phase.OK)
+	}
+}
+
+// TestParseProgressLineFailureDetail pins the per-step failure signal and the
+// per-subagent totals. Both are figures the runner is the only source of — the
+// exit code because it parses the SDK's own line, the totals because the SDK
+// reports them and nothing downstream can reconstruct them.
+func TestParseProgressLineFailureDetail(t *testing.T) {
+	t.Parallel()
+
+	shell := parseProgressLine(`{"schemaVersion":1,"seq":11,"kind":"tool_result","tool":"Bash","ok":false,` +
+		`"exitCode":2,"summary":"ls: cannot access 'todo-api/'","toolUseId":"toolu_b1"}`)
+	if shell.ExitCode == nil || *shell.ExitCode != 2 {
+		t.Fatalf("exitCode = %v, want 2", shell.ExitCode)
+	}
+
+	// A non-shell tool reports no code. Nil has to stay nil on the way out: a
+	// zero would read as "exited 0", i.e. as a success on a failed call.
+	other := parseProgressLine(`{"schemaVersion":1,"seq":12,"kind":"tool_result","tool":"Read","ok":false,` +
+		`"summary":"File does not exist"}`)
+	if other.ExitCode != nil {
+		t.Errorf("exitCode = %d on a tool that reports none, want nil", *other.ExitCode)
+	}
+	encoded, err := json.Marshal(other)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(encoded), "exitCode") {
+		t.Errorf("re-encoded line = %s, want no exitCode field at all", encoded)
+	}
+
+	// A fan-out call's result: the SDK's own totals for a whole subagent.
+	settle := parseProgressLine(`{"schemaVersion":1,"seq":13,"kind":"tool_result","tool":"Agent","ok":true,` +
+		`"status":"completed","summary":"todo-api","durationMs":209158,"toolCount":19,"linesAdded":553,` +
+		`"linesRemoved":4,"toolUseId":"toolu_spawn","emitter":"subagent","emitterId":"toolu_spawn"}`)
+	if settle.ToolCount != 19 || settle.LinesAdded != 553 || settle.LinesRemoved != 4 {
+		t.Errorf("subagent totals = %+v, want 19 tools +553/-4", settle)
+	}
+	if settle.Status != "completed" || settle.DurationMs != 209158 {
+		t.Errorf("subagent verdict = %q after %dms, want completed after 209158", settle.Status, settle.DurationMs)
+	}
+
+	// A subagent's narration is its own kind, so a reader can drop it from the
+	// rows without having to infer intent from an empty tool name.
+	if act := parseProgressLine(`{"schemaVersion":1,"seq":14,"kind":"activity","summary":"Writing service.bal","toolCount":12}`); act.Kind != "activity" || act.ToolCount != 12 {
+		t.Errorf("activity = %+v, want kind=activity toolCount=12", act)
 	}
 }
 

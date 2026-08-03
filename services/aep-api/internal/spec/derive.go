@@ -166,6 +166,15 @@ func snapshotDerived(c DesignComponent) derivedState {
 		if d.Wiring != nil {
 			v := *d.Wiring
 			v.EnvBindings = maps.Clone(d.Wiring.EnvBindings)
+			// The endpoints[] variant is a POINTER on the copied struct, so the
+			// shallow copy above still shares it. Clone it too, or a later
+			// in-place derivation mutates the "before" snapshot through it and the
+			// diff can never see an endpoint change.
+			if d.Wiring.Endpoint != nil {
+				ep := *d.Wiring.Endpoint
+				ep.EnvBindings = maps.Clone(d.Wiring.Endpoint.EnvBindings)
+				v.Endpoint = &ep
+			}
 			st.wiring[d.Name] = &v
 		}
 	}

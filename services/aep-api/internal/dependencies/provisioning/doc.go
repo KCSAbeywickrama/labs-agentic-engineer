@@ -27,22 +27,21 @@
 //     per project). The consumer coding task holds until each derives deployed.
 //   - ValueService — external value collection: split values by the registered
 //     schema, write secrets to SM-API + author the OC external Resource model,
-//     then Finish the provision Execution + close the issue + Reevaluate
+//     then Finish the provision Execution + close the issue
 //     (external readyWhen:${true} → completion is synchronous).
 //   - ResourceService — platform-resource provisioning: author the OC Resource +
 //     binding (async) and admit a running provision Execution; the readiness
 //     watcher observes the binding's native Ready condition out-of-band.
 //   - ResourceWatcher — the resource-readiness watcher (cloned from the exec
 //     watcher): on the binding going Ready it Finishes the provision Execution
-//     (→ deployed), closes the issue with the binding reference, and Reevaluates
-//     so gated consumer tasks dispatch. A 30-minute stale bound fails a stuck run.
+//     (→ deployed) and closes the issue with the binding reference. A 30-minute
+//     stale bound fails a stuck run.
 //   - StatusService — the masked status read (outputs by name only — secrets
 //     live only in SM-API / the OC-rendered Secret, never in a response).
 //
 // The no-secrets invariant holds throughout: secret VALUES go only to SM-API /
 // OpenBao; issue bodies, comments, and API responses carry only names / paths /
 // references. This package coordinates provisioners (dependencies/resources) +
-// GitHub issues (gitrepo); every other collaborator (executions store, funnel
-// Reevaluate, design read, repo lookup) is a narrow local port wired in the
-// composition root.
+// GitHub issues (gitrepo); every other collaborator (executions store, design
+// read, repo lookup) is a narrow local port wired in the composition root.
 package provisioning

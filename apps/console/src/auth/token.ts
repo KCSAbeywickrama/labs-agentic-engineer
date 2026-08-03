@@ -19,6 +19,7 @@
 import { env } from "../config/env";
 import { mockAccessToken } from "./mockSession";
 import { getUserManager } from "./userManager";
+import type { User } from "oidc-client-ts";
 
 // Token access for non-React code: the API client attaches it, the collab
 // provider hands it to the WebSocket. Mode-aware so callers never are.
@@ -42,6 +43,24 @@ export function renewAccessToken(): Promise<string | null> {
       renewInFlight = null;
     });
   return renewInFlight;
+}
+
+/**
+ * Subscribe to access-token refresh (OIDC silent renew / userLoaded).
+ * No-op in mock mode. Returns an unsubscribe function.
+ */
+export function subscribeAccessTokenRefresh(
+  cb: (token: string) => void,
+): () => void {
+  if (env.authMode === "mock") return () => {};
+  const um = getUserManager();
+  const handler = (user: User) => {
+    if (user.access_token) cb(user.access_token);
+  };
+  um.events.addUserLoaded(handler);
+  return () => {
+    um.events.removeUserLoaded(handler);
+  };
 }
 
 // Full re-auth, preserving where the user was (restored by the provider's

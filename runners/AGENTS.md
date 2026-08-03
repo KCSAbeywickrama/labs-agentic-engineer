@@ -28,9 +28,59 @@ edits (see `deployments/scripts/setup-k3d.sh`).
   provisioning failure instead. Any change to the generated scripts must keep
   `credhelper.test.ts` green — it drives them with real `git`, which is the only
   thing that would have caught that.
-- Runner `console.*` is a **user-facing** channel — the BFF turns every
-  non-NDJSON pod line into a build-log event. `installConsoleScrubber()` at each
-  entry point routes it through the scrubber; don't bypass it.
+- Runner `console.*` is a **user-facing** channel, and it shares the file
+  descriptor the NDJSON progress feed writes to. `installConsoleScrubber()` at
+  each entry point converts every call into a scrubbed `log` progress event, so
+  the feed stays parseable NDJSON end to end; don't bypass it by writing to
+  `process.stdout` directly. The BFF still wraps any non-NDJSON pod line into a
+  build-log event, but that is now a safety net, not the normal path.
+- **The progress contract is `lib/progress/schema.ts`, and it moves with three
+  mirrors**: `contracts/progress.go`, the three progress schemas in
+  `packages/contracts/api/v1/openapi.yaml` (contract-first — then `make gen-api`),
+  and the WORDING, which is nobody's here: `@aep/progress-view` renders every
+  line for both the console and the playground, so an event without a case there
+  reaches a user as a blank row or a raw field dump. Decisions and the SDK's
+  measured capabilities are in
+  `remote-worker/design/decisions/ADR-0002-run-observability.md`; read it before
+  changing what a line says, because several of its entries are corrections of
+  the obvious-looking choice.
+- **Fan-out runs in the foreground.** A `PreToolUse` hook
+  (`lib/fanout_foreground.ts`) forces `run_in_background: false` on every
+  `Agent`/`Task` call that did not already say so. Backgrounding does not add
+  concurrency — several fan-out calls in one turn is what does — and it detaches
+  the subagent, so the SDK forwards none of its messages, a whole component's work
+  reaches the feed as an empty section, and the session can finish while its
+  children are still running (it did: `result: success` with one component
+  stubbed and one missing). **Background is the SDK default**, so the hook keys on
+  the flag's absence, not on `true`; the omitted-flag test is the regression pin.
+  Rationale inline in the module; ADR-0002 decision 13 has the measurements.
+- **Authored files land in the project.** `lib/workspace_guard.ts` is a
+  `PreToolUse` hook that denies `Write`/`Edit`/`NotebookEdit` outside the
+  workspace, and `promptWithProjectRoot` (`lib/runner.ts`) states the absolute
+  root in the prompt — the runner is the only layer that knows it, since the two
+  prompt builders sit either side of a language boundary and the path is decided
+  after `provisionWorkspace`. Both exist because a run inferred that the
+  skills-plugin directory's parent was the project root and built a whole
+  component there, green. Writes are allowed outside the project in exactly two
+  trees: the temp directory, and **any dot-directory under `$HOME`** — one rule,
+  because every toolchain hides its cache in one (`.ballerina`, `.npm`, `.m2`,
+  `.cargo`) and this module has no business tracking which stacks the image
+  ships. The earlier version listed three, which silently contradicts the next
+  stack skill added. A visible directory under `$HOME` stays denied, so a sibling
+  checkout is still caught. Reads are deliberately NOT gated: a skill's
+  `references/` live outside the project by construction, and the agent must be
+  able to read the toolchain's own installation for a library's real signature.
+  Bash is not gated either; a build writes where it writes, and the pod is the
+  containment boundary. The guard catches the one expensive mistake, it is not a
+  sandbox.
+- **`allowedTools` restricts nothing here.** `bypassPermissions` +
+  `allowDangerouslySkipPermissions` allow every harness tool regardless, so
+  `BASE_ALLOWED_TOOLS` documents intent while `DISALLOWED_TOOLS` is the boundary
+  that holds. Keep the harness's session-management surface (schedulers, task
+  channels, interactive prompts) in the deny list: a one-shot pod has no user and
+  no next session, and a reachable-but-useless tool is somewhere a run will spend
+  a turn. Corollary: a typo in `BASE_ALLOWED_TOOLS` cannot fail loudly — it named
+  `Task` for a whole SDK generation after the tool became `Agent`.
 - Self-contained: all agent and SDK-specific wiring lives here.
 - **Skills scope is stated by the caller, never read off `AEP_COMPONENT_NAME`.**
   A milestone Job carries a sentinel there (`aep-milestone`), so an
@@ -58,6 +108,12 @@ edits (see `deployments/scripts/setup-k3d.sh`).
   belongs to the run and one naming a path, a file or an env var belongs to the
   contract. That tie-break lives here, not in the skill — it is authoring
   guidance, useless to the agent at runtime.
+  **`## Contract-first` carries the premise both of those rest on** — `specs/` is
+  fixed at design time and is what implementation targets, so no issue waits for
+  another's code. Keep it to the premise; the ordering rule is the run's and the
+  per-dependency lookup the contract's. A dependency declaration (`dependsOn`,
+  `Depends on #N`) is a **runtime** edge, and text reading it as a build order is
+  a defect.
   **The platform text is the trunk** — gate a region only when the ungated
   version would make a mode attempt something impossible, and prefer gating one
   side to writing two variants. A *paired* region is prose duplicated per mode
@@ -70,12 +126,13 @@ edits (see `deployments/scripts/setup-k3d.sh`).
   config + error shape, CORS ownership, dependency wiring, deny-list. A
   cross-stack *practice* (config read in one place at startup) is the contract's;
   **which file it lands in** is the stack skill's.
-  The repo-root `skills/` entries (`go`, `react-webapp`, `api-management`,
-  `thunder-authentication`) own only their stack: layout, `Dockerfile`, libraries,
-  the verify command, their own pitfalls. Restating a platform-contract rule in a
-  stack skill is a defect — it is preloaded context paid twice, and the two copies
-  drift (a live example: the deny-list once banned CORS middleware outright while
-  the `go` skill required it for an unmanaged service). Niche material that only
+  The repo-root `skills/` entries (`go`, `ballerina`, `react-webapp`,
+  `api-management`, `thunder-authentication`) own only their stack: layout,
+  `Dockerfile`, libraries, the verify command, their own pitfalls. Restating a
+  platform-contract rule in a stack skill is a defect — it is preloaded context
+  paid twice, and the two copies drift (a live example: the deny-list once
+  banned CORS middleware outright while the `go` skill required it for an
+  unmanaged service). Niche material that only
   some runs need goes to `plugin/skills/aep/references/`, not into the body.
 - **Running the `aep` skill by hand.** Install the plugin into your own Claude
   Code (`claude plugin install <repo>/runners/remote-worker/plugin`) and use your

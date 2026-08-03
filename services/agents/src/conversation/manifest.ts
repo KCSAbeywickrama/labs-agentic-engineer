@@ -17,7 +17,7 @@
  */
 
 /**
- * The terminal manifest part (shared-volume-clone-architecture D14): the
+ * The terminal manifest part (shared-workspace-volume D14): the
  * producer half of the fold-parity gate. Emitted ONCE per successful turn (any
  * request shape), before `[DONE]`; a turn that throws emits none, so a severed
  * stream is unambiguously "do not commit" to the aep-api fold.

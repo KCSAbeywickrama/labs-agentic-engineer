@@ -51,25 +51,37 @@ When an issue's Scope names a stack convention ("use `modernc.org/sqlite`", "rea
 `window._env_.X_URL`"), the owning skill is authoritative — never re-derive a
 convention from training data when a loaded skill states it.
 
+## Contract-first
+
+`specs/` was authored at design time, before any issue existed: every component's
+`design.json`, and every service's `openapi.yaml`. It is the contract — what a
+service implements, and what its consumers are written against. **Implement to it;
+never edit it.** A service with no `openapi.yaml` has its issue's Scope and
+Acceptance criteria as its contract instead.
+
+That is what makes the work parallel. A consumer codes against its provider's
+committed `openapi.yaml`, never its code, so **no issue waits for another issue's
+code** — and a dependency an issue declares is a *runtime* edge, who calls whom
+once deployed, never a build order. Only two issues writing the same files
+serialise anything.
+
 ---
 
 # The run
 
 ## 1 · Start the cycle
 
-Settle **what you are working, and in what order**, before you write any file.
+Settle **what you are working, and what can run at once**, before you write any
+file.
 
 Done-ness is a **live fact, never a stored flag**: an issue is finished because
 the work landed. So derive the working set fresh before each pick — a run is
 long enough for the set to change under you, and re-checking is what lets new
-work join *this* run instead of the next one. Then order it **topologically** on
-the dependencies each issue declares and work it in that order: a dependent's
-code has to compile against its provider's, and you commit as you go.
+work join *this* run instead of the next one.
 
-- A dependency on something **not in your working set** (already finished, or no
-  issue exists for it) is **already satisfied** — ignore it.
-- **Ties, and any issue with no dependencies, sort by issue number ascending.**
-  Same for breaking a cycle if the declarations contain one.
+**Order is by issue number ascending, and nothing else** — every issue's contract
+is already fixed (**Contract-first**), so there is no build order to derive. What
+decides how much runs at once is file overlap: see **Fan-out to subagents**.
 
 <!-- mode:github -->
 **The set.** Ask the **issues API**, live, once per pick:
@@ -99,10 +111,11 @@ joins the working set on your next re-list.
 > you should work around it: treat the working set as empty and go to Finish —
 > never fall back to the search API, never guess issue numbers.
 
-**The order.** Issue bodies name their dependencies in **prose**, e.g.
-`Depends on #41`. **Nothing parses this platform-side — reading it is your
-job.** Fetch the bodies of your whole working set up front with
-`gh issue view <number> --json number,title,body,labels`.
+**The bodies.** Fetch the bodies of your whole working set up front with
+`gh issue view <number> --json number,title,body,labels` — you need them to plan
+the fan-out. A `Depends on #41` line records the **runtime** relationship the
+design declared. It is context, not a gate: it never means "work #41 first" and
+never means "wait for #41".
 <!-- /mode -->
 <!-- mode:local -->
 **The set.** List every `issues/<n>.md` under `issues/`. Each is markdown with
@@ -116,9 +129,9 @@ not merely because those components exist. Read each path from its `design.json`
 and look. Satisfied → leave the issue out of the working set. Missing, empty, or
 short of the Scope → it's in.
 
-**The order.** Each issue's `dependsOn` frontmatter array names the
-**components** its component depends on (component names, not issue numbers) —
-read it straight off the frontmatter, no prose parsing needed.
+**The declarations.** An issue's `dependsOn` frontmatter names the **components**
+its component consumes at runtime (component names, not issue numbers). That is a
+runtime relationship, not a build order — it never holds an issue back.
 <!-- /mode -->
 
 <!-- mode:github -->
@@ -179,8 +192,10 @@ it is how the platform maps your PR back to this run.
 
 For **each** issue in the ordered set:
 
-1. **Read it in full.** The issue is the spec — Scope, Acceptance criteria,
-   References.
+1. **Read it in full** — Scope, Acceptance criteria, References — **and the
+   contract under `specs/`**: its component's `design.json` and `openapi.yaml`,
+   plus the `openapi.yaml` of every component it consumes. The issue says what to
+   build; the contract fixes the shape.
 <!-- mode:github -->
    Read its comments too (`gh issue view <number> --comments`): a
    "Platform-resolved dependencies" comment carries dependency wiring you need.
@@ -199,30 +214,59 @@ For **each** issue in the ordered set:
 <!-- /mode -->
 <!-- mode:local -->
    **Never push, never add a remote.** The commit is a diffing courtesy for the
-   developer, not load-bearing — if the project is not a git repository at all,
-   skip it and just edit files.
+   developer, not load-bearing, so guard it rather than probing for a repository:
+   ```bash
+   git rev-parse --is-inside-work-tree >/dev/null 2>&1 && git add … && git commit …
+   ```
+   A project that is not a repository is normal here — skip the commit and just
+   edit files.
 <!-- /mode -->
 4. Re-derive the working set (§1) and pick the next issue.
 
 ### Fan-out to subagents
 
-You have the **Task** tool. Use it to work more than one issue at a time — but
-**you** decide what is safe to parallelise, and the bar is higher than "they
-don't conflict":
+You have a fan-out tool, and **fanning out is the default, not the exception** —
+a provider and its consumer may be built at the same time, by different subagents
+(**Contract-first**). Two tests, and they are the only two:
 
-- **Independent** in the ordering you derived — neither depends on the other,
-  directly or transitively — **and** their App Paths are disjoint (no shared
-  file, no shared module).
+- **Disjoint App Paths** — no file and no module written by both. Overlap is the
+  only reason to serialise; work those inline, in ascending order.
 - **Big enough to be worth a subagent.** A one-file change, a config tweak, a
   small fix issue: work those inline. Spawning a subagent for small work costs
   more than it saves and makes the run harder to follow.
-- If either test fails, work the issue inline, in order.
+
+**Issue every subagent for a wave in ONE turn, and wait for them.** Several fan-out
+calls in a single message is what makes them run at the same time — and short
+prompts are what make one message possible. A wave that takes two turns delays its
+second subagent by however long the first prompt took to write. Do not use
+`run_in_background`: it does not add concurrency — it detaches the subagent, so
+its steps stop reaching the progress feed and the person watching the run sees an
+empty section where a component was built.
 
 **Subagents Edit/Write only. A subagent never runs `git` and never runs `gh`** —
 no commit, no push, no branch, no comment, no PR. Say so explicitly in every
-Task prompt, and give the subagent its issue's body, the App Paths it may touch,
-and the relevant stack skills' conventions. It reports what it changed; you
-inspect it.
+fan-out prompt.
+
+**Give a subagent paths, not contents — except the one thing only you resolved.**
+It reads the same filesystem you do and loads its own skills, so name its issue
+file, the App Paths it may touch, the `design.json` and `openapi.yaml` of its
+component and of every component it consumes (**Contract-first**), and the stack
+skills it must load. Paste exactly one artefact: its finished `workload.yaml`,
+wiring included. That one is yours alone, and a subagent handed a pointer instead
+searches the filesystem for it. Everything else you paste is a long turn spent
+before the subagent starts, on a file it opens anyway — and do not open those
+yourself either: a contract you are not implementing is its reading, and every
+line you pull in you carry for the rest of the run.
+
+**State each boundary once, and resolve your own uncertainty before you delegate.**
+A prompt that says "your call, but" or offers two conventions to choose between
+hands down a question you were better placed to answer, and buys a turn of
+deliberation with it.
+
+A subagent reports what it changed. **Trust a report that says the build is
+clean** — re-read only what a report calls incomplete, and what you must open to
+commit. Re-reading every file a subagent just wrote buys nothing and carries the
+whole set in context for the rest of the run.
 
 **You are the sole git writer.** When a subagent reports done, *you* stage those
 paths and commit them exactly as in step 3. **No worktrees** — one workspace.
@@ -373,9 +417,11 @@ actually runs on is its own default for `<DEP_NAME>_URL`.
 <!-- /mode -->
 
 **Contracts.** Find the contract before writing any client code: never guess at
-endpoint paths or request/response shapes, and never invent an operation. With no
-published contract, implement a minimal client against the injected address plus
-its `basePath` and nothing more.
+endpoint paths or request/response shapes, and never invent an operation. A
+`component` dependency's `openapi.yaml` is authoritative **whether or not that
+component has been written yet** — read the spec, never the provider's source.
+With no published contract, implement a minimal client against the injected
+address plus its `basePath` and nothing more.
 <!-- mode:github -->
 
 The comment's **Consumed API contracts** sections name the providers. For an
@@ -473,6 +519,14 @@ The platform contract the code itself must satisfy. Layout, libraries, the
 `Dockerfile` and the verify command belong to the stack skill, not here — and
 **where** a rule below lands in the tree is the stack skill's call too.
 
+- **Keep a `.gitignore` at the repo root, and keep it current** — one file for the
+  whole project, extended in the same change that introduces something it should
+  cover (build output, dependency directories, local env files; your stack skill
+  names its own). Never commit what belongs in it.
+- **A service implements its own `openapi.yaml` exactly** — same paths, schemas
+  and status codes. Its consumers are being written against that document, maybe
+  in this same run, so a path you "improve" is a break your own component cannot
+  show you.
 - **Code that is already there sets the conventions.** Read the files an issue
   touches before editing them and follow their structure, error handling and
   config names over what you would write on a blank page, unless one contradicts
@@ -508,6 +562,13 @@ from it, and in any case before the cycle finishes.
 lockfile or one of its checksums**: regenerate the lockfile with your stack's
 dependency tool and commit exactly what that produces.
 
+**One clean pass settles it.** A verify command that prints nothing and exits 0
+passed — append `; echo "EXIT:$?"` the first time if you want that in writing, and
+then believe it. Do not re-run a check that has already passed, do not wipe and
+reinstall dependencies to prove a build reproduces, and do not re-read files you
+have just built. Each of those spends a turn and a page of context on something you
+already knew.
+
 Compile checks are the *only* execution allowed. **Do not run, start, or execute
 the application** — no long-running process of any kind. The platform builds and
 deploys; a local server just takes a port.
@@ -522,6 +583,22 @@ Do not force something broken through. Capture the last ~40 lines of the failing
 output and what you tried, leave that issue unfinished, and hand both to
 **Finish the cycle** — which owns what the diagnostic becomes.
 
+<!-- mode:local -->
+**Say why before you throw work away.** Immediately before deleting or wholesale
+-rewriting a file that already exists — a generated stub, a scaffold, anything an
+earlier step produced — run one `echo` naming the file and the reason:
+
+```bash
+echo "discarding openapi_service.bal: regenerating it against the corrected spec"
+```
+
+This is not ceremony. Only your *tool calls* reach the run's progress feed;
+prose you write between them does not, and neither does your reasoning. A
+deletion with no stated reason is indistinguishable afterwards from a mistake,
+and someone reading the feed has to reconstruct your intent from the wreckage.
+The echo is the one channel that survives. If you cannot state a reason in a
+line, that is the signal to fix the file rather than delete it.
+<!-- /mode -->
 ---
 
 # Never
@@ -547,21 +624,33 @@ output and what you tried, leave that issue unfinished, and hand both to
   only the `## Progress` section of an issue you touched is yours to write.
 - Delete or rewrite `.aep-playground/` (the playground's state dir).
 <!-- /mode -->
+- **Edit, add to, or delete anything under the repo-root `specs/`.** It is the
+  design-time contract and your consumers are reading it. If it is wrong, or
+  contradicts an issue, implement what the issue asks and say so in one line.
+- **Hold back or skip an issue because a component it depends on is not built
+  yet.** Code against the contract.
 - **Substitute your own technology for a declared dependency.** A
   `platform-resource` you have no `wiring` for is broken input, not
   a licence to pick your own database, cache or IDP — and a local file or an
   in-process store is the same substitution. Say so in one line and stop the run,
   exactly as for a failed `git` auth.
 - Let a subagent run `git` or `gh`.
-- **Touch, read, or even list anything outside the current working directory** —
-  never `~`, never other projects or repositories on this machine, never system
-  paths. Do not probe whether such paths exist. Everything you need is inside
-  the cwd and your loaded skills — including their `references/` files, which
-  are part of a skill and always yours to read.
+- Fan out with `run_in_background` (**Fan-out to subagents**).
+- **Author a file anywhere but inside the project.** Nothing else on this
+  filesystem is a project root, however project-shaped it looks — the directory
+  your skills were materialised into is not one, and neither is its parent. A
+  refused write means the path was the mistake, not that another route to it is
+  needed.
+- **Read anything unrelated to this run** — no other projects or repositories on
+  this machine, no browsing `~` or the filesystem at large.
+  Do not probe whether such paths exist. Three things outside the project ARE
+  yours to read, freely and without asking: your loaded skills and their
+  `references/`; your toolchain's own installation, when you need a library's
+  real signature; and the package cache it writes to. Write to none of them.
 - **Install anything outside the project's own package manager** — no `brew`, no
   `apt`, no global `npm -g`, no `pip install` outside a project venv. The sandbox
-  ships `go` and `node`/`npm` and nothing else: no Python, no Rust, no custom
-  toolchain.
+  ships `go`, `bal` (Ballerina, with its own bundled JRE) and `node`/`npm` and
+  nothing else: no Python, no Rust, no custom toolchain.
 - Add your own CORS middleware to a managed API (**The code**).
 - Split persistence, auth, or scheduled work into its own component. A service
   owns its storage; the platform's IDP owns sign-in; periodic work is a

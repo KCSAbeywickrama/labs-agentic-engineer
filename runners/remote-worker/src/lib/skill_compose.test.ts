@@ -238,6 +238,14 @@ for (const heading of SHARED_SECTIONS) {
 // playground run researches external dependencies the same way.
 for (const rule of [
   "Add your own CORS middleware to a managed API",
+  // The filesystem boundary, both halves: where a file may be authored, and what
+  // outside the project may be read. Split into two rules after a run inferred
+  // that the skills-plugin directory's parent was the project root and built a
+  // component there — the old single bullet forbade reading outside the cwd while
+  // also licensing skill `references/` reads, and that contradiction is what the
+  // agent resolved the wrong way.
+  "Author a file anywhere but inside the project",
+  "Read anything unrelated to this run",
   "Do not probe whether such paths exist",
   "Install anything outside the project's own package manager",
   "Let a subagent run `git` or `gh`",

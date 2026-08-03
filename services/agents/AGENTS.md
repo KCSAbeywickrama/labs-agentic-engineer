@@ -23,7 +23,7 @@ at the end of the system prompt, and the agent pulls a body on demand via the
 (`src/agents/main/skill-source.ts`). One supply: skills load lazily from the
 turn's `_skills` snapshot on the mount (`src/conversation/load-workspace.ts`);
 they never travel in the turn payload. No skills → no catalog, behaves as today.
-See ADR-0002 and `docs/design/shared-volume-clone-architecture.md` §12.
+See ADR-0002 and `services/aep-api/design/shared-workspace-volume.md`.
 
 **Audience** (ADR-0013) splits that catalog. A skill's `metadata.aep.audience`
 lists the agents its guidance is written for — `design` or `coding` — and this

@@ -31,18 +31,18 @@ import (
 // object DB against concurrent fetch/gc corruption; write CORRECTNESS is
 // arbitrated by origin push-CAS, not by this lock.
 //
-// The default implementation is POSIX flock(2), which requires the RWX
-// backend to honour flock across nodes (CephFS / NFSv4 / EFS do). Documented
-// fallback if the chosen StorageClass no-ops flock (§17.1): a Postgres
-// advisory-lock implementation keyed org:project:repoSlug behind this same
-// interface, with aep-api pinned to one writer replica. Deliberately not
-// built until the Phase-0 flock probe on the target StorageClass fails.
+// The default implementation is POSIX flock(2). Under the shipped RWO +
+// co-located placement (services/aep-api/design/shared-workspace-volume.md)
+// every holder shares one node, so flock is local — no cross-node flock
+// requirement and no Postgres advisory-lock fallback.
 //
 // flock has no fairness: continuous back-to-back SHARED holders can starve
-// an EXCLUSIVE acquirer. Acceptable because reads are sporadic and
-// sub-second (the corruption-soak test paces its readers for exactly this
-// reason); if a hot read path ever emerges, add writer-preference here
-// rather than at call sites.
+// an EXCLUSIVE acquirer. That risk is real under the shared volume —
+// ReadBundle holds SHARED across its N-blob cat-file loop, which is not
+// bounded to sub-second. Mitigation today: git maintenance acquires EX with a
+// ~2s timeout and skips the mirror on contention (see reaper maintainRepos)
+// rather than blocking forever. If starvation becomes observable in production,
+// add writer-preference here rather than at call sites.
 type Locker interface {
 	// RLock acquires the lock shared. release is never nil on success.
 	RLock(ctx context.Context, path string) (release func(), err error)

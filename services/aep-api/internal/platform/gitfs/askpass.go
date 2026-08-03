@@ -28,7 +28,7 @@ import (
 // immediately before every remote op via ref.Cred.Token(ctx) and handed to
 // git through a static GIT_ASKPASS shim reading the child's environment. The
 // token is NEVER in argv (invisible to ps), NEVER written to any .git/config
-// (no secret at rest on the shared RWX volume), and no credential helper is
+// (no secret at rest on the shared RWO volume), and no credential helper is
 // configured. A mid-op auth failure re-mints once and retries that op.
 
 // askpassFile is the shim's name under <root>/tmp.

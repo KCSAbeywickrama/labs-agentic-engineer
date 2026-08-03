@@ -25,12 +25,24 @@ parameter names the project for that read.
 - **Mock BFF** (`COLLAB_MOCK_BFF=1`): an embedded stand-in for the BFF
   (`mockbff.ts`) serves `validate-collab-access` + `get-project-spec` from
   the same fixtures, and the service runs its **real** auth and seed paths
-  against it — use this while the Go implementations land (#81 / #86 phase 2).
-  Token `deny` exercises the rejection path; a JWT-shaped token's
+  against it. Token `deny` exercises the rejection path; a JWT-shaped token's
   `name`/`email` claims become the identity.
 - **Real BFF**: set `AEP_API_BASE`.
 
 Never enable dev mode or the mock BFF in a cluster.
+
+## Persistence + ops (shipped)
+
+- **Committer**: quiet-period flush (`COLLAB_COMMIT_DEBOUNCE_MS`, default 60s)
+  commits via the BFF `files/apply`; `COLLAB_COMMIT_MAX_DEBOUNCE_MS` caps
+  continuous editing. Last-leave and shutdown also force a flush.
+- **D6 token freshness**: clients push refreshed JWTs over the stateless
+  channel; on apply 401/403 the server may pull once via `token-please`.
+  Residual: a last-leave forced flush often has no client for pull — exposure
+  stays the ≤60s debounce window.
+- **Health**: `GET /healthz` → 200 `ok`. Helm: replicas **1**, probes on
+  `/healthz`, 512Mi memory, `terminationGracePeriodSeconds: 30`, concurrent
+  shutdown flush (pool 8).
 
 ## Env
 
@@ -41,14 +53,8 @@ Never enable dev mode or the mock BFF in a cluster.
 | `COLLAB_DEV` | off | force dev mode (implied when no BFF, real or mock) |
 | `COLLAB_MOCK_BFF` | off | run the embedded mock BFF; overrides `AEP_API_BASE` |
 | `COLLAB_MOCK_BFF_PORT` | `8092` | mock BFF listen port |
-
-## Phase status (#86)
-
-- Phase 1 (this): rooms, oracle auth hook, lazy seed, dev mode. **No
-  persistence** — docs live only while a room has connections
-  (`unloadImmediately: true`); the seed is the recovery story.
-- Phase 3 adds the committer worker (disk flush ~30s, GitHub commit at
-  session end / max age) — replaces the no-persistence stance.
+| `COLLAB_COMMIT_DEBOUNCE_MS` | `60000` | quiet period before a flush commits |
+| `COLLAB_COMMIT_MAX_DEBOUNCE_MS` | `300000` | max wait during continuous editing |
 
 Commands: uniform verbs via the root `Makefile`; locally
 `pnpm --filter @aep/collab dev|test|lint|typecheck`.

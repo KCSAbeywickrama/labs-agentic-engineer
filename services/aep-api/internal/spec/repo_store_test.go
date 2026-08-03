@@ -237,7 +237,7 @@ func TestList_SeedsBuiltinsOnFirstRead(t *testing.T) {
 		t.Fatalf("List: %v", err)
 	}
 	by := nameSet(got)
-	for _, want := range []string{"go", "api-management", "react-webapp", "thunder-authentication"} {
+	for _, want := range []string{"ballerina", "go", "api-management", "react-webapp", "thunder-authentication"} {
 		sk, ok := by[want]
 		if !ok {
 			t.Fatalf("expected org skill %q to be seeded; got %v", want, skillKeysOf(by))
