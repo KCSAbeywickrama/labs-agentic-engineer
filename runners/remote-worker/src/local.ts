@@ -18,10 +18,11 @@
 
 // Local-mode entrypoint — oneshot.ts's sibling for the AEP playground: the
 // workspace IS a plain local project dir (no clone, no credhelper, no PAT),
-// and the workflow skill is the SAME `aep` skill production loads, composed
-// for `mode: "local"` (edit-in-place, no PR). See skill_compose.ts: the two
-// modes share one authored SKILL.md, so the project conventions the playground
-// exists to tune cannot drift from the ones a real run uses.
+// and the workflow skill is the SAME `aep` skill production loads, with
+// `overlays/local.md` applied for `mode: "local"` (edit-in-place, no PR). See
+// base_plugin.ts: both modes read one authored SKILL.md, so the project
+// conventions the playground exists to tune cannot drift from the ones a real
+// run uses.
 // Mirrors prod's milestone dispatch (`docs/decisions/ADR-0011`; playground
 // decision: `playground/design/decisions/ADR-0001-milestone-batch-coding-run.md`):
 // the run is scoped to the WHOLE project, not one issue — the prompt names
@@ -37,10 +38,18 @@
 //
 // Env contract (stamped by the playground CLI):
 //   AEP_LOCAL_PROJECT_DIR  the project directory (becomes the cwd)
-//   AEP_LOCAL_SKILLS_DIR   the working-tree skill library (optional)
-//   AEP_LOCAL_PLUGIN_DIR   the authored base plugin (default: ../plugin)
+//   AEP_LOCAL_SKILLS_DIR   the skill library — ONE dir serving both the base
+//                          plugin and the project's applied skills
+//                          (default: ../skills, the library baked into the image)
 //   AEP_LOCAL_RUN_DIR      scratch/log dir (default: <project>/.aep-playground/runner)
-//   ANTHROPIC_API_KEY      the SDK session's key
+//   ANTHROPIC_API_KEY      OPTIONAL. Present (the containerised playground run,
+//                          which can reach no credential store) → the SDK
+//                          session authenticates with it. Absent (a `--host`
+//                          run) → the SDK falls back to the developer's own
+//                          Claude credentials, the ones `claude login` wrote.
+//                          Not validated here: this entrypoint cannot tell
+//                          which of the two it is in, and the caller can — the
+//                          playground refuses a keyless docker run up front.
 //
 // This module imports nothing outside the package — remote-worker stays
 // workspace-dep-free for its standalone image.
@@ -59,9 +68,10 @@ import { resolveTaskSkills } from "./lib/skills_resolver.js";
 import { materializeSkills } from "./lib/skills_materializer.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-// The SAME authored plugin production loads. `mode: "local"` below is what
-// swaps the GitHub-shaped steps out of it at compose time.
-const DEFAULT_PLUGIN = path.resolve(__dirname, "../plugin");
+// The SAME authored library production reads (repo-root `skills/`, baked in at
+// /app/skills). `mode: "local"` below is what applies the local overlay to its
+// workflow skill; the playground bind-mounts its working tree over this path.
+const DEFAULT_LIBRARY = path.resolve(__dirname, "../skills");
 
 // A run is scoped to the whole project, not one component — the agent works
 // every open issue it discovers and may touch several components. This is a
@@ -81,27 +91,25 @@ function requireEnv(name: string): string {
 
 interface LocalRun {
   projectDir: string;
-  skillsDir?: string;
-  pluginDir: string;
+  /** The skill library: the base plugin is assembled from it, applied skills resolved out of it. */
+  libraryDir: string;
   runDir: string;
 }
 
 function readLocalRunFromEnv(): LocalRun {
   const projectDir = path.resolve(requireEnv("AEP_LOCAL_PROJECT_DIR"));
-  requireEnv("ANTHROPIC_API_KEY");
 
   if (!fs.existsSync(projectDir) || !fs.statSync(projectDir).isDirectory()) {
     throw new Error(`AEP_LOCAL_PROJECT_DIR is not a directory: ${projectDir}`);
   }
 
-  const skillsDir = process.env.AEP_LOCAL_SKILLS_DIR || undefined;
-  if (skillsDir && !fs.existsSync(skillsDir)) {
-    throw new Error(`AEP_LOCAL_SKILLS_DIR does not exist: ${skillsDir}`);
+  const libraryDir = process.env.AEP_LOCAL_SKILLS_DIR || DEFAULT_LIBRARY;
+  if (!fs.existsSync(libraryDir)) {
+    throw new Error(`skill library does not exist: ${libraryDir}`);
   }
-  const pluginDir = process.env.AEP_LOCAL_PLUGIN_DIR || DEFAULT_PLUGIN;
   const runDir = process.env.AEP_LOCAL_RUN_DIR || path.join(projectDir, ".aep-playground", "runner");
 
-  return { projectDir, ...(skillsDir ? { skillsDir } : {}), pluginDir, runDir };
+  return { projectDir, libraryDir, runDir };
 }
 
 // The workspace IS the project dir; the auth-flavored layout fields point at
@@ -159,38 +167,31 @@ async function main(): Promise<number> {
   // Per-task skills: same readSkillsApplied → resolveTaskSkills →
   // materializeSkills pipeline as production, with the git clone swapped for a
   // working-tree copy. Failure degrades to the base plugin, loudly.
-  let preloadSkillNames: string[] = [];
   let skillsPluginDir: string | undefined;
-  if (run.skillsDir) {
-    try {
-      const skillsDir = run.skillsDir;
-      const resolutions = await resolveTaskSkills({
-        workspace: run.projectDir,
-        // A run works the whole project, same as prod's milestone loop — the
-        // union of every component's skillsApplied, never one componentName.
-        scope: { kind: "project" },
-        skillsRepoURL: "local:working-tree",
-        // No git, no platform: the clone below is a working-tree copy.
-        cloneAuth: { helperPath: "", bearerFile: "" },
-        scratchDir: path.join(run.runDir, "skills-clone"),
-        log: (l) => console.log(l),
-        clone: (_url, _auth, dest) => copyLocalSkillLibrary(skillsDir, dest),
-      });
-      // Materialize under the run dir — never inside the user's project tree.
-      const result = await materializeSkills(run.runDir, resolutions);
-      if (result) {
-        skillsPluginDir = result.pluginDir;
-        preloadSkillNames = result.preloadNames;
-        console.log(`[local] materialised ${resolutions.length} skill(s); preload=${preloadSkillNames.length}`);
-      } else {
-        console.log("[local] no per-task skills to materialise");
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.warn(`[local] ⚠️  SKILLS UNAVAILABLE — proceeding without the per-task skill plugin: ${msg}`);
+  try {
+    const libraryDir = run.libraryDir;
+    const resolutions = await resolveTaskSkills({
+      workspace: run.projectDir,
+      // A run works the whole project, same as prod's milestone loop — the
+      // union of every component's skillsApplied, never one componentName.
+      scope: { kind: "project" },
+      skillsRepoURL: "local:working-tree",
+      // No git, no platform: the clone below is a working-tree copy.
+      cloneAuth: { helperPath: "", bearerFile: "" },
+      scratchDir: path.join(run.runDir, "skills-clone"),
+      log: (l) => console.log(l),
+      clone: (_url, _auth, dest) => copyLocalSkillLibrary(libraryDir, dest),
+    });
+    // Materialize under the run dir — never inside the user's project tree.
+    skillsPluginDir = (await materializeSkills(run.runDir, resolutions)) ?? undefined;
+    if (skillsPluginDir) {
+      console.log(`[local] materialised ${resolutions.length} skill(s) — all loaded on demand, none preloaded`);
+    } else {
+      console.log("[local] no per-task skills to materialise");
     }
-  } else {
-    console.log("[local] AEP_LOCAL_SKILLS_DIR not set — skipping per-task skills");
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`[local] ⚠️  SKILLS UNAVAILABLE — proceeding without the per-task skill plugin: ${msg}`);
   }
 
   const req: DispatchRequest = {
@@ -219,11 +220,11 @@ async function main(): Promise<number> {
     req,
     layout,
     log,
-    { ...(skillsPluginDir ? { skillsPluginDir } : {}), preloadSkillNames },
+    skillsPluginDir,
     {
-      basePluginPath: run.pluginDir,
+      libraryPath: run.libraryDir,
       mode: "local",
-      // Under the run dir, not the OS temp dir: the composed skill is the exact
+      // Under the run dir, not the OS temp dir: the assembled skill is the exact
       // text the agent was steered by, and "what did it actually read?" is a
       // question a developer tuning the skill asks constantly.
       composeDir: path.join(run.runDir, "base-plugin"),

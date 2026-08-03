@@ -20,7 +20,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { query, type McpServerConfig, type Query } from "@anthropic-ai/claude-agent-sdk";
-import { composeBasePlugin, type AgentMode } from "./skill_compose.js";
+import { assembleBasePlugin, type AgentMode } from "./base_plugin.js";
 import type { TaskLog } from "./logger.js";
 import type { DispatchRequest } from "./types.js";
 import type { WorkspaceLayout } from "./workspace.js";
@@ -33,7 +33,11 @@ import { createWorkspaceWriteGuard } from "./workspace_guard.js";
 import { createWebFetchGuardHook } from "./webfetch_guard.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const PLUGIN_PATH = path.resolve(__dirname, "../../plugin");
+// The authored skill library, as the image lays it out: repo-root `skills/`
+// arrives at /app/skills (Dockerfile `COPY --from=skills`), and this module sits
+// at /app/src/lib. The dev flow and the playground bind-mount the working-tree
+// library over that path, so a skill edit needs no rebuild.
+const LIBRARY_PATH = path.resolve(__dirname, "../../skills");
 
 // Phase 0 allowed-tools: git, gh, build/test/lint via Bash; standard file
 // tools. Endpoint Spec Discovery (B2) re-introduces MCP — but only as an
@@ -126,27 +130,73 @@ const MCP_TOOL_NAMES = [
 ];
 
 /**
- * Prepends the project root to the caller's prompt.
+ * Prepends the two absolute paths a run cannot derive to the caller's prompt.
  *
  * The `aep` skill says "the current working directory **is** the project" and
  * never names it, because static skill text cannot. Neither prompt builder can
  * either: the playground's is a TS literal and the platform's is a Go one
- * (`delivery/codingagent/coding_executor.go`), and the path is decided here,
- * after `provisionWorkspace`. So this is the only place that both knows the value
- * and reaches every run — stating it in two prompt builders would duplicate a
- * fact across a language boundary that neither of them owns.
+ * (`delivery/codingagent/coding_executor.go`), and the paths are decided here,
+ * after `provisionWorkspace` and `assembleBasePlugin`. So this is the only place
+ * that both knows the values and reaches every run — stating them in two prompt
+ * builders would duplicate facts across a language boundary neither owns.
  *
- * Worth stating at all because the alternative was measured: with only relative
- * framing, a run inferred the run directory was the project root and built a
- * whole component there. The skill's deny-list and `workspace_guard.ts` cover
- * the same ground from the rule and enforcement sides; this removes the ambiguity
- * up front so neither has to fire.
+ * **The project root** is worth stating because the alternative was measured:
+ * with only relative framing, a run inferred the run directory was the project
+ * root and built a whole component there.
+ *
+ * **The contract path** is stated for the same reason, one level down. A fan-out
+ * subagent gets no skill of its own, so the lead has to hand it
+ * `references/component-contract.md` as an absolute path — and a lead that has to
+ * transcribe one gets it wrong: in the first playground run of the split, the
+ * lead pasted `/run/base-plugin/…` to one of two subagents, dropping the
+ * workspace prefix. That subagent's read failed and it fell to scanning `/` for
+ * the file, which the deny-list forbids. Handing the lead the exact string to
+ * copy removes the class.
  */
-export function promptWithProjectRoot(prompt: string, workspaceRoot: string): string {
+export function promptWithProjectRoot(prompt: string, workspaceRoot: string, contractPath?: string): string {
+  const contract =
+    contractPath === undefined
+      ? ""
+      : `The component contract every implementer follows is ${contractPath} — ` +
+        `hand that exact path to every subagent you fan out to.\n`;
   return (
     `Your project root — the current working directory — is ${workspaceRoot}. ` +
-    `Every file you author lives under it; nothing else on this filesystem is a project root.\n\n${prompt}`
+    `Every file you author lives under it; nothing else on this filesystem is a project root.\n` +
+    `${contract}\n${prompt}`
   );
+}
+
+/** Where the assembled plugin keeps the `aep` skill's references. */
+export function contractReferencePath(basePluginDir: string): string {
+  return path.join(basePluginDir, "skills", "aep", "references", "component-contract.md");
+}
+
+export interface SessionSkills {
+  plugins: Array<{ type: "local"; path: string }>;
+  /** The SDK `skills:` preload — base-plugin entries only, by construction. */
+  skills: string[];
+}
+
+/**
+ * The session's plugin list and its startup preload.
+ *
+ * A pure seam (the buildMcpOptions pattern) so the property that matters is
+ * pinnable without constructing a query(): the per-task plugin is LOADED, and it
+ * contributes NOTHING to the preload. Every project-attached skill is discovered
+ * by its description and its body arrives only when the agent invokes it, so a
+ * project that designed twelve components costs a run exactly as much startup
+ * context as one that designed two.
+ */
+export function buildSessionSkills(
+  basePluginDir: string,
+  skillsPluginDir: string | undefined,
+  basePreload: string[],
+): SessionSkills {
+  const plugins: Array<{ type: "local"; path: string }> = [{ type: "local", path: basePluginDir }];
+  if (skillsPluginDir) {
+    plugins.push({ type: "local", path: skillsPluginDir });
+  }
+  return { plugins, skills: [...basePreload] };
 }
 
 export interface McpQueryOptions {
@@ -186,53 +236,35 @@ export interface StartedRun {
   completion: Promise<RunResult>;
 }
 
-// PerTaskSkills carries the materialised AgentSkills plugin into the SDK
-// query options (built by skills_resolver.ts + skills_materializer.ts).
-//
-// `skillsPluginDir` is the absolute path to .aep/skills-plugin/. If
-// set, runner.ts adds a second `{type:"local"}` plugin entry pointing
-// at it. `preloadSkillNames` lists the materialised names of every
-// platform-shipped (`kind: org`) skill in that plugin, which we push
-// into the SDK's `skills:` array so their full bodies inject at
-// startup. Custom and imported skills sit in the same plugin and
-// surface via the SDK's standard skill listing (description in
-// context, body on invoke) — they are NOT in the preload array,
-// because a run must not pay for every attached skill's full body
-// when only the stack ones are certain to apply.
-export interface PerTaskSkills {
-  skillsPluginDir?: string;
-  preloadSkillNames: string[];
-}
-
-// BaseAgentConfig parameterizes what the always-loaded workflow plugin is and
-// how it is composed. Every field defaults to production behavior, so
-// `oneshot.ts` passes nothing at all (pinned in runner.test.ts).
+// BaseAgentConfig parameterizes which skill library the always-loaded workflow
+// plugin is assembled from, and how. Every field defaults to production
+// behavior, so `oneshot.ts` passes nothing at all (pinned in runner.test.ts).
 //
 // `mode` is stated by the caller, never inferred. The entrypoint unambiguously
 // knows which flavour of run this is; deriving it from something incidental (an
 // empty `repoUrl`, an absent MCP token) would tie the agent's whole procedure to
 // a signal whose meaning could shift for an unrelated reason. It defaults to
-// `github` because that is the safe direction: a local run mistakenly composed
+// `github` because that is the safe direction: a local run mistakenly assembled
 // for GitHub fails loudly the first time `gh` is invoked, whereas a production
-// run mistakenly composed for local would be told there is no remote and no PR
+// run mistakenly assembled for local would be told there is no remote and no PR
 // to open — the exact opposite of its contract.
 //
 // A caller that overrides `basePreload` owns the FULL preload list — the
 // validation-task append only applies to the default.
 export interface BaseAgentConfig {
-  /** The authored workflow plugin dir; defaults to the shipped `plugin/`. */
-  basePluginPath?: string;
+  /** The authored skill library; defaults to the image's `/app/skills`. */
+  libraryPath?: string;
   /** The startup `skills:` preload; defaults to ["aep:aep"] (+ the validation body for validation tasks). */
   basePreload?: string[];
-  /** Which mode to compose the workflow skill for; defaults to "github". */
+  /** Which mode to assemble the workflow skill for; defaults to "github". */
   mode?: AgentMode;
-  /** Where the composed plugin is written; defaults to a per-task dir under the OS temp dir. */
+  /** Where the assembled plugin is written; defaults to a per-task dir under the OS temp dir. */
   composeDir?: string;
 }
 
 export interface ResolvedBaseAgentConfig {
-  /** The authored plugin dir to compose FROM (not what the SDK loads). */
-  sourcePluginPath: string;
+  /** The authored library to assemble FROM (not what the SDK loads). */
+  libraryPath: string;
   preload: string[];
   mode: AgentMode;
   composeDir: string;
@@ -245,14 +277,14 @@ export function resolveBaseAgentConfig(
   taskKind: DispatchRequest["taskKind"],
   taskId: string,
 ): ResolvedBaseAgentConfig {
-  const sourcePluginPath = base?.basePluginPath ?? PLUGIN_PATH;
+  const libraryPath = base?.libraryPath ?? LIBRARY_PATH;
   const mode = base?.mode ?? "github";
   // Outside the workspace in both modes: in production the workspace is a git
   // clone the agent commits from, and in the playground it is the developer's
   // own project dir. Neither should grow a copy of the plugin tree.
   const composeDir = base?.composeDir ?? path.join(os.tmpdir(), "aep-base-plugin", taskId);
   const preload = base?.basePreload ? [...base.basePreload] : defaultPreload(taskKind);
-  return { sourcePluginPath, preload, mode, composeDir };
+  return { libraryPath, preload, mode, composeDir };
 }
 
 function defaultPreload(taskKind: DispatchRequest["taskKind"]): string[] {
@@ -265,7 +297,12 @@ export function runClaudeQuery(
   req: DispatchRequest,
   layout: WorkspaceLayout,
   log: TaskLog,
-  perTaskSkills?: PerTaskSkills,
+  /**
+   * Absolute path to the materialised per-task plugin (.aep/skills-plugin/),
+   * or undefined when the run applies no skills. Built by skills_resolver.ts +
+   * skills_materializer.ts; loaded as a second `{type:"local"}` plugin.
+   */
+  skillsPluginDir?: string,
   base?: BaseAgentConfig,
 ): StartedRun {
   // Spawn env: bearer + git-service URL passed by file path / URL only.
@@ -290,11 +327,14 @@ export function runClaudeQuery(
 
   // Two-tier plugin list: the base `aep` plugin (workflow + base
   // conventions) is always loaded; the per-task `aep-task-skills`
-  // plugin (project-attached skills) is loaded conditionally when
-  // workspace.ts materialised it. Per-task org skills land in the
-  // `skills:` preload so the SDK injects their full bodies at startup;
-  // custom + imported sit in the same plugin and surface via the SDK's
-  // standard discovery (description in context, body on invoke).
+  // plugin (project-attached skills) is loaded conditionally when the
+  // entrypoint materialised it.
+  //
+  // ONLY the base plugin preloads. Every project-attached skill — whatever its
+  // kind — reaches the session through the SDK's standard discovery: its
+  // description in context, its body when the agent invokes it. So the startup
+  // context cost of a run is fixed at the workflow skill, not proportional to
+  // how many components the project designed (see skills_materializer.ts).
   // Related-issue discovery/cross-linking moved to the SRE agent's handoff
   // stage (a "## Related issues" section in the issue body; GitHub #N
   // mentions back-link automatically) — issues arrive pre-linked, so the
@@ -304,27 +344,26 @@ export function runClaudeQuery(
   // it replaces the implementation workflow and the run cannot afford
   // the agent skipping a description-triggered load of it.
   //
-  // The base plugin is COMPOSED, never loaded from the authored tree: the `aep`
-  // skill carries `<!-- mode:… -->` blocks for the GitHub/local split, and this
-  // is the single choke point that resolves them (see skill_compose.ts). Doing
-  // it here rather than in each entrypoint means no caller can forget and ship a
-  // session the raw source, markers and both procedures included.
+  // The base plugin is ASSEMBLED from the skill library, never pointed at it: the
+  // library also holds the design-flow and stack skills, and this is the single
+  // choke point that selects the runner's three and applies the mode's overlay
+  // (see base_plugin.ts). Doing it here rather than in each entrypoint means no
+  // caller can forget and hand the SDK a session that can see `design`'s
+  // description, or the platform's PR procedure in a local run.
   const resolvedBase = resolveBaseAgentConfig(base, req.taskKind, req.taskId);
-  const basePluginDir = composeBasePlugin({
-    sourceDir: resolvedBase.sourcePluginPath,
+  const basePluginDir = assembleBasePlugin({
+    libraryDir: resolvedBase.libraryPath,
     destDir: resolvedBase.composeDir,
     mode: resolvedBase.mode,
   });
-  const plugins: Array<{ type: "local"; path: string }> = [
-    { type: "local", path: basePluginDir },
-  ];
-  const skillPreload: string[] = resolvedBase.preload;
-  if (perTaskSkills?.skillsPluginDir) {
-    plugins.push({ type: "local", path: perTaskSkills.skillsPluginDir });
-    for (const name of perTaskSkills.preloadSkillNames) {
-      skillPreload.push(`aep-task-skills:${name}`);
-    }
-  }
+  // Where the skill library actually is, for the one skill that has to name a
+  // file inside it: `aep-validation` runs the platform's report generator rather
+  // than a copy the repo committed. The runner is the only layer that knows the
+  // path — it is a mount point in the cluster, a bind-mount in the playground and
+  // a checkout on a developer's host — so a skill that hardcodes one is wrong in
+  // two of the three (it was, and it named the retired /app/plugin).
+  childEnv.AEP_SKILLS_DIR = resolvedBase.libraryPath;
+  const { plugins, skills } = buildSessionSkills(basePluginDir, skillsPluginDir, resolvedBase.preload);
 
   // Endpoint Spec Discovery (B2) — register the BFF's MCP server in-process
   // when the dispatch carries both AEP_MCP_URL and AEP_MCP_TOKEN. Older
@@ -369,17 +408,17 @@ export function runClaudeQuery(
   // pathToClaudeCodeExecutable needed. settingSources: [] ensures no
   // host filesystem settings leak into the container agent.
   const q = query({
-    prompt: promptWithProjectRoot(req.prompt, layout.workspace),
+    prompt: promptWithProjectRoot(req.prompt, layout.workspace, contractReferencePath(basePluginDir)),
     options: {
       cwd: layout.workspace,
       // Pinned rather than left to the SDK's own default, which drifts across
       // SDK releases (seen live: an unpinned run resolved to claude-sonnet-4-6).
       model: "claude-sonnet-5",
       plugins,
-      // Force built-in skill bodies into context at startup. Do NOT
-      // replace with 'all': that would inject every custom + imported
-      // skill's body too, which is what the on-demand listing is for.
-      skills: skillPreload as unknown as string[],
+      // The base plugin's workflow bodies, forced into context at startup.
+      // Do NOT replace with 'all': that would inject every attached skill's
+      // body too, which is exactly what the on-demand listing is for.
+      skills: skills as unknown as string[],
       allowedTools,
       // The boundary that actually holds under bypassPermissions — see
       // DISALLOWED_TOOLS.

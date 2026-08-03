@@ -1,6 +1,6 @@
 ---
 name: react-webapp
-description: How to build a React SPA on the platform.
+description: How to build a React SPA on the platform — project layout, the build-verify command, and this stack's constraints and pitfalls. Apply when a component's `type` is `web-application`.
 metadata:
   aep:
     kind: org
@@ -22,9 +22,9 @@ per-env values (API URLs, OIDC config, flags) arrive at request time in
    failure if broken, not a style preference.
 3. **Verify** — from the app path:
    ```bash
-   npm install 2>&1 | tail -30   # regenerates package-lock.json
+   npm install                   # regenerates package-lock.json
    npx tsc --noEmit              # type-check without emitting
-   npm run build 2>&1 | tail -20 # actually build
+   npm run build                 # actually build
    ```
    Commit the `package-lock.json` this produces. Never commit `node_modules/`.
 4. **PR** — only once step 3 exits 0.
@@ -208,17 +208,9 @@ EXPOSE 9090
 CMD ["nginx", "-g", "daemon off;"]
 ```
 
-`workload.yaml` follows the standard format (one `http` endpoint,
-`visibility: [external]`). A web-app may additionally declare its own safe
-defaults, which become entries in `window._env_` — never secrets or per-env
-values, which the platform owns:
-
-```yaml
-configurations:
-  env:
-    - name: SUPPORT_EMAIL
-      value: support@example.com
-```
+`workload.yaml` follows your prompt — as given when it carries one, else per the
+component contract. Any default it declares under `configurations.env` arrives as
+a `window._env_` entry (see Config above).
 
 ## Pitfalls
 

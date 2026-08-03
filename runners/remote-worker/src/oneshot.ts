@@ -204,7 +204,6 @@ async function main(): Promise<number> {
   // must not be used to pick a design file. A validation run applies no design
   // skills at all: it is black-box verification driven by the `aep-validation`
   // skill (AEP_TASK_KIND), and builds nothing.
-  let preloadSkillNames: string[] = [];
   let skillsPluginDir: string | undefined;
   const skillsRepoURL = process.env.AEP_SKILLS_REPO_URL ?? "";
   if (req.taskKind === "validation") {
@@ -242,12 +241,10 @@ async function main(): Promise<number> {
         scratchDir: path.join(os.tmpdir(), "aep-skills", req.taskId),
         log: (l) => console.log(l),
       });
-      const result = await materializeSkills(layout.workspace, resolutions);
-      if (result) {
-        skillsPluginDir = result.pluginDir;
-        preloadSkillNames = result.preloadNames;
+      skillsPluginDir = (await materializeSkills(layout.workspace, resolutions)) ?? undefined;
+      if (skillsPluginDir) {
         console.log(
-          `[oneshot] materialised ${resolutions.length} skill(s); preload=${preloadSkillNames.length} org skill(s)`,
+          `[oneshot] materialised ${resolutions.length} skill(s) — all loaded on demand, none preloaded`,
         );
       } else {
         console.log("[oneshot] no per-task skills to materialise");
@@ -263,10 +260,7 @@ async function main(): Promise<number> {
   }
 
   const log = openTaskLog(layout.workspace);
-  const { completion } = runClaudeQuery(req, layout, log, {
-    skillsPluginDir,
-    preloadSkillNames,
-  });
+  const { completion } = runClaudeQuery(req, layout, log, skillsPluginDir);
   const result = await completion;
   return result.exitCode;
 }

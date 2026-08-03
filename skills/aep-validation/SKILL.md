@@ -1,6 +1,9 @@
 ---
 name: aep-validation
 description: Load when working a VALIDATION task dispatched by WSO2 Labs Agentic Engineer (the prompt says "validation task"; the issue is labelled `aep` + `validation`). The cwd is a clone of the project's repo on its default branch. You validate the deployed system against specs/validation/validation-criteria.json by authoring and running Playwright e2e tests, then open a PR containing the tests plus a validation report. This workflow REPLACES the implementation workflow in the `aep` skill; the auth model, git/gh conventions, and deny-list there still apply. The phase-specific discipline lives in this skill's `references/authoring.md` (explore + write specs) and `references/healing.md` (repair brittle specs); the `playwright-cli` companion skill carries the CLI mechanics.
+metadata:
+  aep:
+    kind: platform
 ---
 
 # WSO2 Labs Agentic Engineer validation task
@@ -21,10 +24,11 @@ implementation-specific sections (build verification, workload.yaml,
 App Path structure) do NOT apply here.
 
 The workflow docs `references/authoring.md` and `references/healing.md`
-are referenced below by relative path; the platform runner root for this
-skill is `/app/plugin/skills/aep-validation/` (docs under that plus
-`authoring.md`/`healing.md`, templates under `assets/`, the report
-generator under `scripts/`).
+are referenced below by relative path, and resolve inside this skill's own
+directory (templates under `assets/`, the report generator under
+`scripts/`). Where that directory IS on disk varies by run, so anything you
+must invoke by absolute path is under `$AEP_SKILLS_DIR/aep-validation/` —
+the runner sets it.
 
 ## Workflow
 
@@ -220,11 +224,11 @@ one final full run so `results.json` reflects the authoritative state.
 ### 9. REPORT
 
 Generate the report deterministically — never hand-write it. Run the
-**plugin's** copy of the script (always the current version, regardless
+**platform's** copy of the script (always the current version, regardless
 of what an earlier cycle committed into the repo):
 
 ```bash
-node /app/plugin/skills/aep-validation/scripts/generate-report.mjs \
+node "$AEP_SKILLS_DIR/aep-validation/scripts/generate-report.mjs" \
   --issue <N> --commit "$(git rev-parse HEAD)"
 ```
 
@@ -232,7 +236,7 @@ Then refresh the repo's committed copy so a human can reproduce the
 report after checkout:
 
 ```bash
-cp /app/plugin/skills/aep-validation/scripts/generate-report.mjs \
+cp "$AEP_SKILLS_DIR/aep-validation/scripts/generate-report.mjs" \
    tests/e2e/scripts/generate-report.mjs
 ```
 

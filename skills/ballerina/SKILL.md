@@ -27,7 +27,7 @@ cd <project-name>
 
 `ballerinax/postgresql` pulls `ballerinax/cdc` and its Debezium jars transitively at every version; the jar-conflict warning that follows is expected and not yours to fix.
 
-**Never fetch Ballerina documentation from the web.** `central.ballerina.io` and `lib.ballerina.io` spend a network round-trip on prose about a module whose exact source is already on this machine.
+**Never fetch Ballerina documentation from the web.** `central.ballerina.io` and `lib.ballerina.io` spend a network round-trip on prose about a module whose README and exact source are already on this machine.
 
 **Code rules.** [code-rules.md](code-rules.md) is the source of truth for how code is written and structured, including dependency management (`Dependencies.toml`/`Ballerina.toml` are auto-managed, never hand-edited) — check code against it as it's written.
 
@@ -45,7 +45,7 @@ When the build does name a symbol, in this order:
 
 1. [code-rules.md](code-rules.md) — `http` resources, `sql` queries, `time`.
 2. [langlib-reference.md](langlib-reference.md) — the `lang.*` libraries (string, array, map, json, regexp, query expressions).
-3. Only beyond those, the module's own source. `ballerina/*` ships with the distribution at `$(bal home)/repo/bala/<org>/<name>/<version>/<any|java21>/modules/<name>/`. `ballerinax/*` lands under `~/.ballerina/repositories/central.ballerina.io/bala/` in the same layout — **but only once a `bal build` has resolved it.** Before that the tree does not exist at all, so `ls` fails rather than returning empty.
+3. Only beyond those, the package itself — **`docs/README.md` before `modules/`**: the README is the package's own guide and leads with usage samples, the modules hold the exact signatures. A stub README — some are a paragraph — is a dead end; go straight to the module. Both sit under `$(bal home)/repo/bala/<org>/<name>/<version>/<any|java21>/` for `ballerina/*`; `ballerinax/*` lands under `~/.ballerina/repositories/central.ballerina.io/bala/` in the same layout — **but only once a `bal build` has resolved it.** Before that the tree does not exist at all, so `ls` fails rather than returning empty.
 
 Derive the distribution root with `bal home`, never a hardcoded version; both roots are read-only. Grep for the declaration rather than paging the file — a `grep` that lands in a 31KB `types.bal` carries that much context for the rest of the run. An error still unresolved after several attempts is worth reporting with its file and line instead of guessing again.
 

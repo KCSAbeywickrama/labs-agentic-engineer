@@ -46,7 +46,7 @@ LICENSE_HEADER := .github/license-header.txt
 LICENSE_MATCH = grep -E '\.(go|ts|tsx|sh)$$|(^|/)Dockerfile$$' | \
 	grep -vE '\.gen\.(go|ts)$$|_mock\.go$$|/mocks/|/node_modules/|/dist/|/generated/|(^|/)\.(agents|claude)/'
 
-.PHONY: install gen build dev test lint typecheck license license-check tools clean eval cover build-runner deadcode-ts deadcode-ts-check setup-local dev-cluster deploy-local
+.PHONY: install gen build dev test lint typecheck license license-check tools clean eval cover build-runner runner-plugin deadcode-ts deadcode-ts-check setup-local dev-cluster deploy-local
 
 install:
 	$(PNPM) install
@@ -114,6 +114,14 @@ deadcode-ts-check:
 # the runner's TS — `make build-runner FORCE=1`.
 build-runner:
 	FORCE=$(FORCE) bash deployments/scripts/build-runner.sh
+
+# Local-dev helper: assemble the runner's base plugin out of repo-root skills/
+# into runners/remote-worker/.plugin-dev (git-ignored) so it can be installed
+# into your own Claude Code — `claude plugin install <printed path>`. Runs the
+# same assembler a session runs, so there is no second copy to drift.
+#   MODE=local make runner-plugin   # the playground's composed body
+runner-plugin:
+	@cd runners/remote-worker && npx tsx src/assemble.ts
 
 # ── Local in-cluster dev (Skaffold + k3d) ────────────────────────────────────
 # Run once per cluster after setup-k3d.sh. Creates K8s Secrets and registers

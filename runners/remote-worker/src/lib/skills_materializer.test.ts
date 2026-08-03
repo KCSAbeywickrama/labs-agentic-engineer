@@ -50,7 +50,7 @@ test("materializeSkills writes the full structure with exec-bit scripts", async 
   const ws = await tmpWorkspace();
   const out = await materializeSkills(ws, [fixtureResolution()]);
   assert.ok(out);
-  const skillDir = path.join(out!.pluginDir, "skills", "org-demo");
+  const skillDir = path.join(out!, "skills", "org-demo");
 
   assert.ok(fs.existsSync(path.join(skillDir, "assets", "tpl.ts")));
 
@@ -61,7 +61,7 @@ test("materializeSkills writes the full structure with exec-bit scripts", async 
 test("materializeSkills keeps non-script files at 0o644", async () => {
   const ws = await tmpWorkspace();
   const out = await materializeSkills(ws, [fixtureResolution()]);
-  const skillDir = path.join(out!.pluginDir, "skills", "org-demo");
+  const skillDir = path.join(out!, "skills", "org-demo");
 
   const refMode = fs.statSync(path.join(skillDir, "references", "a.md")).mode & 0o777;
   assert.equal(refMode, 0o644);
@@ -72,7 +72,7 @@ test("materializeSkills keeps non-script files at 0o644", async () => {
 test("materializeSkills skips path-traversal and absolute keys", async () => {
   const ws = await tmpWorkspace();
   const out = await materializeSkills(ws, [fixtureResolution()]);
-  const skillDir = path.join(out!.pluginDir, "skills", "org-demo");
+  const skillDir = path.join(out!, "skills", "org-demo");
 
   assert.ok(!fs.existsSync(path.join(ws, ".aep", "escape")));
   // Nothing escaped the skill dir into the plugin root either.
@@ -89,7 +89,7 @@ test("materializeSkills writes buffers byte-faithfully (binary content untouched
     references: { "assets/logo.png": binary },
   };
   const out = await materializeSkills(ws, [resolution]);
-  const written = fs.readFileSync(path.join(out!.pluginDir, "skills", "org-demo", "assets", "logo.png"));
+  const written = fs.readFileSync(path.join(out!, "skills", "org-demo", "assets", "logo.png"));
   assert.ok(Buffer.compare(written, binary) === 0);
 });
 

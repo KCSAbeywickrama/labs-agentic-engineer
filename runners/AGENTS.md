@@ -2,11 +2,13 @@
 
 One-shot / job images (not long-lived services). Run to completion in a pod.
 
-**Status:** `remote-worker/` holds the `aep` skill plugin loaded by the
-coding-agent runner — a TS Claude Agent SDK one-shot pod that provisions a
-workspace, loads the `aep` skill, and runs the Agent SDK. The dev flow
-bind-mounts `runners/remote-worker/plugin` into the runner pod for live skill
-edits (see `deployments/scripts/setup-k3d.sh`).
+**Status:** `remote-worker/` is the coding-agent runner — a TS Claude Agent SDK
+one-shot pod that provisions a workspace, assembles its base plugin out of the
+repo-root skill library, and runs the Agent SDK. Skills are **authored in
+`<repo>/skills/`, not here** (`skills/AGENTS.md` has the authoring rules); this
+package owns their delivery. The dev flow bind-mounts that library into the
+runner pod at `/app/skills` for live skill edits (see
+`deployments/scripts/setup-k3d.sh`).
 
 ## Conventions
 
@@ -90,56 +92,44 @@ edits (see `deployments/scripts/setup-k3d.sh`).
   (`aep-local-milestone`) for the same reason: a playground coding run works
   the whole project, same as the milestone loop, and may touch several
   components — there is no single one to name.
-- **ONE authored workflow skill, composed per mode.** `plugin/skills/aep/SKILL.md`
-  serves both the platform's GitHub-backed runs and the playground's file-based
-  ones. Where they differ, the text is marked `<!-- mode:github -->` /
-  `<!-- mode:local -->` — alone on a line to gate whole lines, or with content
-  beside it to gate a clause — and `lib/skill_compose.ts` resolves it at session
-  start. Anything unmarked is shared and cannot drift. Both modes go through the
-  strip step: an unstripped marker region would inject the wrong procedure, so
-  there is no "raw" path that skips it. Mode is stated by the entrypoint
-  (`BaseAgentConfig.mode`, default `github`), never inferred.
-  **`# The component contract` is the single home of the per-component platform
-  contract** (App Path, `workload.yaml`, dependency wiring, the runtime rules),
-  stated as information rather than a build procedure so it reads the same for a
-  component's first line and for a change to one that has shipped. `# The run`
-  stays a dispatcher over the issue set and the git record and never restates a
-  contract rule; the tie-break is that a rule naming `git`/`gh`/an issue/a PR
-  belongs to the run and one naming a path, a file or an env var belongs to the
-  contract. That tie-break lives here, not in the skill — it is authoring
-  guidance, useless to the agent at runtime.
-  **`## Contract-first` carries the premise both of those rest on** — `specs/` is
-  fixed at design time and is what implementation targets, so no issue waits for
-  another's code. Keep it to the premise; the ordering rule is the run's and the
-  per-dependency lookup the contract's. A dependency declaration (`dependsOn`,
-  `Depends on #N`) is a **runtime** edge, and text reading it as a build order is
-  a defect.
-  **The platform text is the trunk** — gate a region only when the ungated
-  version would make a mode attempt something impossible, and prefer gating one
-  side to writing two variants. A *paired* region is prose duplicated per mode
-  and is what the test suite caps; reading an inert paragraph is cheaper than
-  maintaining a second copy of it. ADR:
-  `remote-worker/design/decisions/ADR-0001-one-mode-composed-skill.md`.
-- **`aep` is the umbrella skill; the stack skills sit under it.** It owns the run
-  (start the cycle → work the issues → finish) and the platform contract every
-  component obeys whatever it is written in — App Path, `workload.yaml`, port,
-  config + error shape, CORS ownership, dependency wiring, deny-list. A
-  cross-stack *practice* (config read in one place at startup) is the contract's;
-  **which file it lands in** is the stack skill's.
-  The repo-root `skills/` entries (`go`, `ballerina`, `react-webapp`,
-  `api-management`, `thunder-authentication`) own only their stack: layout,
-  `Dockerfile`, libraries, the verify command, their own pitfalls. Restating a
-  platform-contract rule in a stack skill is a defect — it is preloaded context
-  paid twice, and the two copies drift (a live example: the deny-list once
-  banned CORS middleware outright while the `go` skill required it for an
-  unmanaged service). Niche material that only
-  some runs need goes to `plugin/skills/aep/references/`, not into the body.
-- **Running the `aep` skill by hand.** Install the plugin into your own Claude
-  Code (`claude plugin install <repo>/runners/remote-worker/plugin`) and use your
-  own `gh auth login`; the workflow is the platform's. Note the installed plugin
-  is the *authored* source, markers and all — the composed form is what a real
-  run loads, so use the playground (`pnpm play <dir> code`) if you want the
-  local-mode body.
+- **Only the base plugin preloads.** The SDK `skills:` array carries `aep:aep`
+  (plus `aep:aep-validation` on a validation run) and nothing else; every
+  project-attached skill is listed by description and its body arrives when the
+  agent loads it. `buildSessionSkills` (`lib/runner.ts`) is the seam that holds
+  this and `runner.test.ts` pins it. Kind decides the materialised prefix only —
+  `org` bought a preloaded body until it didn't, which made a run's startup
+  context grow with the number of components the project designed. The cost of
+  the flip is that a skill's **description** is now the whole trigger, so a thin
+  one silently loses its skill; `skills/AGENTS.md` owns that rule.
+- **The base plugin is ASSEMBLED from `<repo>/skills/`, per session, per mode.**
+  `lib/base_plugin.ts` is the single choke point: it selects the runner's three
+  skills out of the library (`aep`, `aep-validation`, `playwright-cli`), applies
+  `skills/aep/overlays/local.md` when the mode is `local`, and writes the result
+  to a scratch dir the SDK loads. Three properties it exists to hold, all pinned
+  by `base_plugin.test.ts`:
+  **the selection is explicit** — the library also holds the design-flow skills,
+  and a coding session that could see `design`'s description is one `loadSkill`
+  from being told to author `specs/`;
+  **`overlays/` never reaches a session** — the `aep` skill lets the agent read
+  its own skill dir, so a local-mode overlay sitting beside `SKILL.md` in a
+  production run is a second procedure it can find;
+  **assembling happens here, not in the entrypoints** — a caller passes a mode,
+  never a composed directory, so no new caller can hand the SDK something
+  hand-built. Mode is stated (`BaseAgentConfig.mode`, default `github`), never
+  inferred. ADR:
+  `remote-worker/design/decisions/ADR-0004-library-owned-workflow-skills.md`.
+- **Anything a skill must invoke by absolute path reads `$AEP_SKILLS_DIR`.** The
+  runner stamps it (`lib/runner.ts`) because it is the only layer that knows
+  where the library is: a mount point in the cluster, a bind-mount in the
+  playground, a checkout on a developer's host. `aep-validation` runs the
+  platform's report generator through it. A hardcoded path is wrong in two modes
+  out of three — it was, and it named `/app/plugin`, which stopped existing when
+  the plugin became an assembled artifact.
+- **The library arrives as a BuildKit named context**
+  (`--build-context skills=<repo>/skills` → `COPY --from=skills . /app/skills`),
+  the same mechanism `aep-api` uses. Add it to any new build path or the image
+  ships without a workflow: `build-runner.sh`, `release.yml`'s matrix row, and
+  `local/run-local.sh` all pass it.
 - **One image**, `remote-worker/Dockerfile`, serves BOTH task kinds
   (`AEP_TASK_KIND=implementation` and `=validation`). It is Debian-based
   because Playwright's browsers are glibc-linked; do not reintroduce a second,

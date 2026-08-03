@@ -21,7 +21,14 @@ import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { DISALLOWED_TOOLS, buildMcpOptions, promptWithProjectRoot, resolveBaseAgentConfig } from "./runner.js";
+import {
+  DISALLOWED_TOOLS,
+  buildMcpOptions,
+  buildSessionSkills,
+  contractReferencePath,
+  promptWithProjectRoot,
+  resolveBaseAgentConfig,
+} from "./runner.js";
 
 // D9 secure search (Task 12) — WebSearch joins the base tool set (gated by
 // the PreToolUse DLP hook wired in runClaudeQuery; see websearch_dlp.ts).
@@ -112,16 +119,16 @@ test("buildMcpOptions: Bash stays in the base set alongside Agent", () => {
 // --- resolveBaseAgentConfig: production behavior is what you get when a caller
 // passes nothing at all ------------------------------------------------------
 
-const SHIPPED_PLUGIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../plugin");
+const SHIPPED_LIBRARY = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../skills");
 const TASK_ID = "11111111-2222-3333-4444-555555555555";
 
-test("resolveBaseAgentConfig: defaults pin today's plugin + preload exactly", () => {
+test("resolveBaseAgentConfig: defaults pin today's library + preload exactly", () => {
   const impl = resolveBaseAgentConfig(undefined, "implementation", TASK_ID);
-  assert.equal(impl.sourcePluginPath, SHIPPED_PLUGIN);
+  assert.equal(impl.libraryPath, SHIPPED_LIBRARY);
   assert.deepEqual(impl.preload, ["aep:aep"]);
 
   const val = resolveBaseAgentConfig(undefined, "validation", TASK_ID);
-  assert.equal(val.sourcePluginPath, SHIPPED_PLUGIN);
+  assert.equal(val.libraryPath, SHIPPED_LIBRARY);
   assert.deepEqual(val.preload, ["aep:aep", "aep:aep-validation"]);
 });
 
@@ -144,11 +151,11 @@ test("resolveBaseAgentConfig: the default compose dir is a per-task dir under th
 
 test("resolveBaseAgentConfig: the playground's overrides ride through", () => {
   const local = resolveBaseAgentConfig(
-    { basePluginPath: "/x/plugin", mode: "local", composeDir: "/x/run/base-plugin" },
+    { libraryPath: "/x/skills", mode: "local", composeDir: "/x/run/base-plugin" },
     "implementation",
     TASK_ID,
   );
-  assert.equal(local.sourcePluginPath, "/x/plugin");
+  assert.equal(local.libraryPath, "/x/skills");
   assert.equal(local.mode, "local");
   assert.equal(local.composeDir, "/x/run/base-plugin");
   // Local mode preloads the SAME skill identity as production — one plugin, one
@@ -159,6 +166,41 @@ test("resolveBaseAgentConfig: the playground's overrides ride through", () => {
 test("resolveBaseAgentConfig: an explicit basePreload owns the FULL list (no validation append)", () => {
   const pinned = resolveBaseAgentConfig({ basePreload: ["aep:aep"] }, "validation", TASK_ID);
   assert.deepEqual(pinned.preload, ["aep:aep"]);
+});
+
+// --- buildSessionSkills: attached skills are loaded, never preloaded --------
+
+// The regression this file exists to prevent: an attached skill's body must not
+// reach the session at startup. Preloading them made a run's startup context
+// grow with the number of designed components (a two-component project already
+// injected four full stack-skill bodies before the first turn), and it decided
+// for the agent which of them mattered. Loading is the agent's call now — which
+// makes every attached skill's `description` the trigger, so a thin one is a
+// real defect. Pinned per kind: nothing about `org` earns an exception.
+test("buildSessionSkills: the per-task plugin loads and adds nothing to the preload", () => {
+  const withSkills = buildSessionSkills("/run/base-plugin", "/ws/.aep/skills-plugin", ["aep:aep"]);
+  assert.deepEqual(withSkills.plugins, [
+    { type: "local", path: "/run/base-plugin" },
+    { type: "local", path: "/ws/.aep/skills-plugin" },
+  ]);
+  assert.deepEqual(withSkills.skills, ["aep:aep"]);
+
+  // …and the preload is identical when there is no per-task plugin at all, so
+  // the two paths differ only in what is DISCOVERABLE.
+  const without = buildSessionSkills("/run/base-plugin", undefined, ["aep:aep"]);
+  assert.deepEqual(without.plugins, [{ type: "local", path: "/run/base-plugin" }]);
+  assert.deepEqual(without.skills, ["aep:aep"]);
+});
+
+// The base preload is the caller's and stays whole — a validation run's second
+// workflow body is the one thing that still MUST be in context at startup.
+test("buildSessionSkills: the base preload rides through unchanged, and is copied", () => {
+  const basePreload = ["aep:aep", "aep:aep-validation"];
+  const built = buildSessionSkills("/run/base-plugin", "/ws/.aep/skills-plugin", basePreload);
+  assert.deepEqual(built.skills, ["aep:aep", "aep:aep-validation"]);
+
+  built.skills.push("aep:playwright-cli");
+  assert.deepEqual(basePreload, ["aep:aep", "aep:aep-validation"], "must not alias the caller's array");
 });
 
 // --- DISALLOWED_TOOLS: the boundary that survives bypassPermissions ---------
@@ -195,4 +237,26 @@ test("promptWithProjectRoot: the platform's own workspace shape survives it", ()
   // provisionWorkspace, which is why neither prompt builder can state it.
   const root = "/aep-workspace/acme/todo/11111111-2222-3333-4444-555555555555";
   assert.match(promptWithProjectRoot("Work the issues for milestone 4", root), new RegExp(root));
+});
+
+// A fan-out subagent has no skill of its own, so the lead hands it the contract
+// as an absolute path. A lead that has to TRANSCRIBE one gets it wrong: the first
+// playground run of the reference split pasted `/run/base-plugin/…` to one of two
+// subagents, dropping the workspace prefix — the read failed and the subagent fell
+// to scanning `/` for the file. The prompt now carries the exact string to copy.
+test("promptWithProjectRoot: states the contract path for the lead to hand on", () => {
+  const contract = contractReferencePath("/workspace/run/base-plugin");
+  const out = promptWithProjectRoot("Work the issues", "/workspace/project", contract);
+  assert.match(out, /\/workspace\/run\/base-plugin\/skills\/aep\/references\/component-contract\.md/);
+  assert.match(out, /hand that exact path to every subagent/);
+  assert.ok(out.endsWith("Work the issues"));
+});
+
+test("promptWithProjectRoot: omitting the contract path leaves the prompt as it was", () => {
+  // The platform's Go prompt builder and the playground's both go through
+  // runClaudeQuery, which always passes it — but the seam stays optional so a
+  // caller that has no plugin dir cannot be broken by this.
+  const out = promptWithProjectRoot("Work the issues", "/workspace/project");
+  assert.ok(!out.includes("component-contract.md"));
+  assert.ok(out.endsWith("Work the issues"));
 });

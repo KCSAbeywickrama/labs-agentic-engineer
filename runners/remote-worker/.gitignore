@@ -2,3 +2,5 @@ node_modules
 dist
 local/.env.local
 local/workspace/
+# `make runner-plugin` output — assembled from skills/, never authored here.
+.plugin-dev/

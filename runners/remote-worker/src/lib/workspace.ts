@@ -25,7 +25,7 @@
 // configure `.git/config` + `gh` so the agent can git/gh against GitHub
 // without ever seeing a token in environment variables. The agent itself
 // creates the feature branch and opens the PR with `Closes #<issueNumber>`
-// — see remote-worker/plugin/skills/aep/SKILL.md.
+// — see skills/aep/SKILL.md.
 //
 // The clone and every operation after it authenticate through the SAME
 // credential helper (lib/credhelper.ts): the clone gets it via `git -c`, since

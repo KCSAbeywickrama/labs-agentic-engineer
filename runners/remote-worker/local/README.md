@@ -57,8 +57,8 @@ the rest.
 - **Real flow:** create a GitHub issue in the test repo whose body is the
   task spec, and set `AEP_PROMPT` to point at its URL — the `aep` skill
   drives issue-comment/branch/PR conventions from there.
-- **Skill iteration:** edit `../plugin/skills/aep/SKILL.md` or add a new
-  `../plugin/skills/<name>/SKILL.md`; the mount picks it up on the next run.
+- **Skill iteration:** edit `<repo>/skills/aep/SKILL.md` (or any skill the
+  runner loads); the `/app/skills` mount picks it up on the next run.
   (In-cluster, per-task skills come from the BFF snapshot instead — that
   path needs the full `deployments/` setup.)
 

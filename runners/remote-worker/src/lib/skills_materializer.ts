@@ -39,6 +39,16 @@
 // (`org-`, `custom-`, `imported-`) is applied to both the directory
 // name AND the `name:` frontmatter field; the original name is preserved
 // under metadata.aep.canonical-name.
+//
+// NOTHING here is preloaded. Every materialised skill reaches the session the
+// same way — its description in the skill listing, its body only when the agent
+// invokes it. Kind decides the prefix and nothing else. The `org` kind used to
+// buy a startup body injection, on the theory that a Ballerina component's build
+// certainly needs the `ballerina` skill; the cost is that every applied skill's
+// full body is paid on every run whether the session reaches that component or
+// not, and a two-component project already put four bodies in context before the
+// first turn. Loading is now the agent's call, which makes a skill's
+// `description` the whole trigger — write it to name when the skill applies.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -58,15 +68,14 @@ export interface SkillResolution {
   references: Record<string, Buffer>; // relative path (excl. SKILL.md) → content, byte-faithful
 }
 
-export interface MaterializeResult {
-  pluginDir: string;
-  preloadNames: string[]; // platform-shipped (org-kind) skills for the SDK `skills:` preload array
-}
-
+/**
+ * Write the per-task plugin and return its directory, or null when the run
+ * applies no skills (the caller then registers no second plugin at all).
+ */
 export async function materializeSkills(
   workspace: string,
   skills: SkillResolution[],
-): Promise<MaterializeResult | null> {
+): Promise<string | null> {
   if (skills.length === 0) {
     return null;
   }
@@ -82,8 +91,6 @@ export async function materializeSkills(
     JSON.stringify({ name: "aep-task-skills", version: "1.0" }, null, 2) + "\n",
     { mode: 0o644 },
   );
-
-  const preloadNames: string[] = [];
 
   for (const sk of skills) {
     const skillDir = path.join(skillsDir, sk.materializedName);
@@ -103,15 +110,9 @@ export async function materializeSkills(
         await fs.promises.writeFile(fullPath, refBody, { mode });
       }
     }
-
-    // Platform-shipped stack skills (kind "org") are preloaded into the
-    // session; the other kinds are available on-demand only.
-    if (sk.kind === "org") {
-      preloadNames.push(sk.materializedName);
-    }
   }
 
-  return { pluginDir, preloadNames };
+  return pluginDir;
 }
 
 // Rewrite the `name:` field in the SKILL.md frontmatter to the

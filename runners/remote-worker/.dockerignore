@@ -20,10 +20,13 @@ dist
 coverage
 .env
 .env.*
-plugin/node_modules
 local
-# Playground local-mode assets — never shipped in the production image
-# (docs/design/playground.md §13 step 6). oneshot.ts never loads them; this
-# keeps the bytes out too.
-plugin-local
+# Playground local-mode entrypoint — never shipped in the production image
+# (docs/design/playground.md §13 step 6). oneshot.ts never loads it; this keeps
+# the bytes out too. NOTE the local-mode SKILL overlay is NOT excluded: it lives
+# in the skill library (skills/aep/overlays/), which arrives via the `skills`
+# named build context, and the assembler is what keeps it out of a session.
 src/local.ts
+# Dev CLI for hand-installing the plugin; no run path touches it.
+src/assemble.ts
+.plugin-dev
