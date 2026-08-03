@@ -42,8 +42,8 @@ func descriptorTOML(t *testing.T, idea string) string {
 func startInstruction(t *testing.T, seed map[string]string, msg string) string {
 	t.Helper()
 	r := newGenaiRig(t, seed)
-	r.fake.parts = []string{addFilePart("specs/requirements/requirements.md", "# Reqs\n")}
-	m := manifestPart(map[string]string{"specs/requirements/requirements.md": "# Reqs\n"}, nil)
+	r.fake.parts = []string{addFilePart("specs/requirements/prd.md", "# Reqs\n")}
+	m := manifestPart(map[string]string{"specs/requirements/prd.md": "# Reqs\n"}, nil)
 	r.fake.manifest = &m
 
 	turnID := r.startTurn(t, convUUID, "", msg)

@@ -640,17 +640,17 @@ func parseSSE(t *testing.T, body string) []sseEvent {
 // genai turns never commit; room turns persist via the collab save path) →
 // stream replay carries every part + the terminal (and never the manifest).
 func Test202Flow_PreviewOnlyAndStreamReplays(t *testing.T) {
-	r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"})
+	r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"})
 	baseRef := r.fx.Origin.HeadSHA(t)
 
 	final := map[string]string{
 		"specs/requirements/notes.md":        "# Notes\nBody\n",
-		"specs/requirements/requirements.md": "# Requirements\n",
+		"specs/requirements/prd.md": "# Requirements\n",
 	}
 	r.fake.parts = []string{
 		textPart("working"),
 		addFilePart("specs/requirements/notes.md", "# Notes\nBody\n"),
-		editFilePart("specs/requirements/requirements.md", "# Reqs\n", "# Requirements\n"),
+		editFilePart("specs/requirements/prd.md", "# Reqs\n", "# Requirements\n"),
 	}
 	m := manifestPart(final, nil)
 	r.fake.manifest = &m
@@ -759,7 +759,7 @@ func Test202Flow_PreviewOnlyAndStreamReplays(t *testing.T) {
 // case — and, crucially, it COMMITS NOTHING: the fold streams for display but
 // main never advances.
 func TestGenericTurn_NoUseCase(t *testing.T) {
-	r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"})
+	r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"})
 	baseRef := r.fx.Origin.HeadSHA(t)
 
 	// The agent proposes a design.md edit; the manifest vouches for it. A
@@ -824,7 +824,7 @@ func TestNoDesignGate(t *testing.T) {
 // manifest → completed noChanges (no commit).
 func TestManifestGate_MismatchSeveredEmpty(t *testing.T) {
 	t.Run("hash mismatch", func(t *testing.T) {
-		r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"})
+		r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"})
 		base := r.fx.Origin.HeadSHA(t)
 		r.fake.parts = []string{addFilePart("specs/requirements/notes.md", "# Notes\n")}
 		m := manifestPart(map[string]string{"specs/requirements/notes.md": "CORRUPTED content"}, nil)
@@ -840,7 +840,7 @@ func TestManifestGate_MismatchSeveredEmpty(t *testing.T) {
 	})
 
 	t.Run("severed stream", func(t *testing.T) {
-		r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"})
+		r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"})
 		base := r.fx.Origin.HeadSHA(t)
 		r.fake.parts = []string{addFilePart("specs/requirements/notes.md", "# Notes\n")}
 		r.fake.sever = true
@@ -855,7 +855,7 @@ func TestManifestGate_MismatchSeveredEmpty(t *testing.T) {
 	})
 
 	t.Run("empty manifest", func(t *testing.T) {
-		r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"})
+		r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"})
 		base := r.fx.Origin.HeadSHA(t)
 		r.fake.parts = []string{textPart("chat only")}
 		m := manifestPart(nil, nil)
@@ -887,7 +887,7 @@ func TestCollabTurn_RoomScopedDispatchNoCommit(t *testing.T) {
 	// MCP discovery is wired: a collab room-scoped turn must carry the BFF-minted
 	// MCP block so the Spec-view architect can discover real org endpoints (the
 	// regression pin for the invented-org-service-name bug).
-	r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"}, withMCP())
+	r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"}, withMCP())
 	base := r.fx.Origin.HeadSHA(t)
 	// Room-scheme (unprefixed) paths: in committed mode this would fail the
 	// fold; room mode never folds — pinning that the fold is bypassed.
@@ -965,7 +965,7 @@ func TestCollabTurn_RoomScopedDispatchNoCommit(t *testing.T) {
 // + collab); a design-generate turn still attaches MCP.
 func TestMCPGate_AttachAndLeak(t *testing.T) {
 	t.Run("collab turn, MCP unwired → no block", func(t *testing.T) {
-		r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"})
+		r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"})
 		r.fake.parts = []string{textPart("editing the shared doc")}
 		m := manifestPart(nil, nil)
 		r.fake.manifest = &m
@@ -989,7 +989,7 @@ func TestMCPGate_AttachAndLeak(t *testing.T) {
 	})
 
 	t.Run("non-collab requirements-chat, MCP wired → no leak", func(t *testing.T) {
-		r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"}, withMCP())
+		r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"}, withMCP())
 		r.fake.parts = []string{textPart("chatting")}
 		m := manifestPart(nil, nil)
 		r.fake.manifest = &m
@@ -1006,7 +1006,7 @@ func TestMCPGate_AttachAndLeak(t *testing.T) {
 	})
 
 	t.Run("design flow, MCP wired → attaches", func(t *testing.T) {
-		r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"}, withMCP())
+		r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"}, withMCP())
 		r.fake.parts = []string{textPart("designing")}
 		m := manifestPart(nil, nil)
 		r.fake.manifest = &m
@@ -1034,7 +1034,7 @@ func TestMCPGate_AttachAndLeak(t *testing.T) {
 // subtests call withMCP(), proving that independence.
 func TestWebSearchGate_AttachAndLeak(t *testing.T) {
 	t.Run("collab turn, MCP unwired → WebSearch still attaches", func(t *testing.T) {
-		r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"})
+		r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"})
 		r.fake.parts = []string{textPart("editing the shared doc")}
 		m := manifestPart(nil, nil)
 		r.fake.manifest = &m
@@ -1058,7 +1058,7 @@ func TestWebSearchGate_AttachAndLeak(t *testing.T) {
 	})
 
 	t.Run("non-collab requirements-chat → no WebSearch", func(t *testing.T) {
-		r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"})
+		r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"})
 		r.fake.parts = []string{textPart("chatting")}
 		m := manifestPart(nil, nil)
 		r.fake.manifest = &m
@@ -1072,7 +1072,7 @@ func TestWebSearchGate_AttachAndLeak(t *testing.T) {
 	})
 
 	t.Run("design-generate → WebSearch attaches", func(t *testing.T) {
-		r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"})
+		r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"})
 		r.fake.parts = []string{textPart("designing")}
 		m := manifestPart(nil, nil)
 		r.fake.manifest = &m
@@ -1092,7 +1092,7 @@ func TestWebSearchGate_AttachAndLeak(t *testing.T) {
 // dispatches filesChangedExternally=true; after a FAILED turn the divergence
 // note is prepended.
 func TestD20_FilesChangedExternallyAndDivergenceNote(t *testing.T) {
-	r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"})
+	r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"})
 	m := manifestPart(nil, nil)
 	r.fake.parts = []string{textPart("ok")}
 	r.fake.manifest = &m
@@ -1101,7 +1101,7 @@ func TestD20_FilesChangedExternallyAndDivergenceNote(t *testing.T) {
 	r.waitTerminal(t, r.startTurn(t, convUUID, "requirements-chat", "one"))
 
 	// An external Apply advances main behind the conversation's back.
-	r.fx.Origin.Seed(t, map[string]string{"specs/requirements/requirements.md": "# Externally edited\n"}, "external")
+	r.fx.Origin.Seed(t, map[string]string{"specs/requirements/prd.md": "# Externally edited\n"}, "external")
 
 	// Turn 2, same conversation → filesChangedExternally=true, no note.
 	r.waitTerminal(t, r.startTurn(t, convUUID, "requirements-chat", "two"))
@@ -1134,7 +1134,7 @@ func TestD20_FilesChangedExternallyAndDivergenceNote(t *testing.T) {
 // D16/D18 viewer): it receives the already-buffered parts, live-tails the
 // rest, and sees the terminal + [DONE].
 func TestLiveAttach_SecondViewerTails(t *testing.T) {
-	r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"})
+	r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"})
 	r.fake.parts = []string{textPart("before-gate")}
 	m := manifestPart(nil, nil)
 	r.fake.manifest = &m
@@ -1193,7 +1193,7 @@ func TestLiveAttach_SecondViewerTails(t *testing.T) {
 // conversation id / missing Anthropic key — agents is never dispatched, no
 // turn row is created.
 func TestPre202Failures(t *testing.T) {
-	r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"})
+	r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"})
 
 	if rec := r.post(t, "a--b", "", "x"); rec.Code != http.StatusBadRequest {
 		t.Errorf("invalid conversation id: code %d, want 400", rec.Code)
@@ -1213,7 +1213,7 @@ func TestPre202Failures(t *testing.T) {
 // TestTurnStatus_CrossOrg404 pins the row fence: another org cannot read a
 // foreign turn's status or stream.
 func TestTurnStatus_CrossOrg404(t *testing.T) {
-	r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"})
+	r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"})
 	m := manifestPart(nil, nil)
 	r.fake.parts = []string{textPart("ok")}
 	r.fake.manifest = &m
@@ -1236,7 +1236,7 @@ func TestTurnStatus_CrossOrg404(t *testing.T) {
 // ---- rehydrate (unchanged surface) ----------------------------------------------
 
 func TestRehydrate_ChatMessages(t *testing.T) {
-	r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"})
+	r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"})
 	rec := r.h.AsOrg(testOrg).Get(convPath(convUUID))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("rehydrate code %d: %s", rec.Code, rec.Body.String())
@@ -1256,7 +1256,7 @@ func TestRehydrate_ChatMessages(t *testing.T) {
 }
 
 func TestRehydrate_CrossTenantOrUnknown_404(t *testing.T) {
-	r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"})
+	r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"})
 	r.fake.mu.Lock()
 	r.fake.convStatus = http.StatusNotFound
 	r.fake.mu.Unlock()
@@ -1266,7 +1266,7 @@ func TestRehydrate_CrossTenantOrUnknown_404(t *testing.T) {
 }
 
 func TestGenAI_NoAuth_401(t *testing.T) {
-	r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"})
+	r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"})
 	if rec := r.h.NoAuth().Get(convPath(convUUID)); rec.Code != http.StatusUnauthorized {
 		t.Errorf("no-auth rehydrate: code %d, want 401", rec.Code)
 	}
@@ -1295,7 +1295,7 @@ func (panicClient) GetConversation(context.Context, string, string) (json.RawMes
 // the D18 one-active guard releases, and a subsequent turn on the same project
 // is admitted (and its own panic is likewise contained).
 func TestPanicBarrier_TurnFailsAndGuardReleases(t *testing.T) {
-	r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"},
+	r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"},
 		withAgentsClient(panicClient{}))
 	base := r.fx.Origin.HeadSHA(t)
 
@@ -1323,7 +1323,7 @@ func TestPanicBarrier_TurnFailsAndGuardReleases(t *testing.T) {
 // whitespace-only instruction is 400 pre-202 — agents is never dispatched, no
 // turn row is created, and the D18 guard is untaken (active → 204).
 func TestEmptyInstruction_400NoRow(t *testing.T) {
-	r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"})
+	r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"})
 
 	if rec := r.post(t, convUUID, "requirements-chat", "  \t\n  "); rec.Code != http.StatusBadRequest {
 		t.Fatalf("whitespace instruction: code %d, want 400 (%s)", rec.Code, rec.Body.String())

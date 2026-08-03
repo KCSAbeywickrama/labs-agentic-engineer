@@ -11,7 +11,7 @@ metadata:
 Every `service` component gets one spec at
 `specs/design/components/<name>/openapi.yaml`, authored as **OpenAPI 3.0.3**.
 
-Coverage is checklist-driven, not vibes: walk `requirements.md` against the
+Coverage is checklist-driven, not vibes: walk the PRD (`specs/requirements/prd.md`) against the
 component's `design.json` responsibility, and give every capability the
 requirements assign to THIS component its resource(s) and every core entity
 its schema. A capability with no endpoint is a defect. Commonly dropped when

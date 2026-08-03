@@ -319,7 +319,7 @@ func TestBuild_AdmissionRaceLost_409(t *testing.T) {
 func TestBuild_SpecValidationFails_400_NoVersionClaimed(t *testing.T) {
 	spy := newPlanSpy()
 	tagger := &fakeTagger{err: &spec.SpecValidationError{Files: []spec.FileValidationError{
-		{Path: "specs/requirements/requirements.md", Code: "MISSING_REQUIREMENTS", Message: "missing"},
+		{Path: "specs/requirements/prd.md", Code: "MISSING_REQUIREMENTS", Message: "missing"},
 		{Path: "specs/design/design.md", Code: "MISSING_DESIGN", Message: "missing"},
 	}}}
 	svc := withPlanPath(newSvc(fakeRepos{}, tagger), spy)
@@ -333,7 +333,7 @@ func TestBuild_SpecValidationFails_400_NoVersionClaimed(t *testing.T) {
 		t.Fatalf("envelope = %+v, want validation_failed / spec validation failed", e)
 	}
 	if len(e.Details) != 2 ||
-		e.Details[0].Field != "specs/requirements/requirements.md" ||
+		e.Details[0].Field != "specs/requirements/prd.md" ||
 		!strings.Contains(e.Details[0].Message, "MISSING_REQUIREMENTS") {
 		t.Fatalf("details = %+v, want the per-file locations + code:message", e.Details)
 	}

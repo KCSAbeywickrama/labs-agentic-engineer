@@ -75,7 +75,7 @@ test("rejects an unknown element kind (a typo would silently vanish)", () => {
 });
 
 test("ignores non-wireframe paths and non-dsl files", () => {
-  assert.equal(checkWireframeLayout("specs/requirements/requirements.md", LEGACY), null);
+  assert.equal(checkWireframeLayout("specs/requirements/prd.md", LEGACY), null);
   assert.equal(checkWireframeLayout("specs/design/components/api/erd.dsl", LEGACY), null);
 });
 

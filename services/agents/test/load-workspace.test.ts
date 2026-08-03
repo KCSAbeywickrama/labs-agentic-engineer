@@ -42,7 +42,7 @@ function makeTree(files: Record<string, string | Buffer>): string {
 
 test("readSnapshot walks recursively with POSIX keys and applies the turn filter", () => {
   const root = makeTree({
-    "specs/requirements/requirements.md": "# Req\n",
+    "specs/requirements/prd.md": "# Req\n",
     "specs/design/design.md": "# Design\n",
     "specs/design/design.cell": "title Shop\n",
     "specs/design/system.dsl": "workspace {}\n",
@@ -69,9 +69,9 @@ test("readSnapshot walks recursively with POSIX keys and applies the turn filter
       "specs/design/design.cell",
       "specs/design/design.md",
       "specs/design/system.dsl",
-      "specs/requirements/requirements.md",
+      "specs/requirements/prd.md",
     ]);
-    assert.equal(snap["specs/requirements/requirements.md"], "# Req\n");
+    assert.equal(snap["specs/requirements/prd.md"], "# Req\n");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

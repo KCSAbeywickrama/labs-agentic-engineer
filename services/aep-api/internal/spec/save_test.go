@@ -41,7 +41,7 @@ func validComponentDesignJSON(name string) string {
 
 func TestSaveRequirements_TagsAtHead(t *testing.T) {
 	t.Parallel()
-	r := newRig(t, map[string]string{"specs/requirements/requirements.md": "v1 body\n"})
+	r := newRig(t, map[string]string{"specs/requirements/prd.md": "v1 body\n"})
 	head := r.headSHA()
 
 	res, err := r.svc.SaveRequirements(context.Background(), r.org, r.proj, SaveRequest{Message: "cut v1"})
@@ -64,7 +64,7 @@ func TestSaveRequirements_TagsAtHead(t *testing.T) {
 
 func TestSaveRequirements_Unchanged(t *testing.T) {
 	t.Parallel()
-	r := newRig(t, map[string]string{"specs/requirements/requirements.md": "v1 body\n"})
+	r := newRig(t, map[string]string{"specs/requirements/prd.md": "v1 body\n"})
 	ctx := context.Background()
 	if _, err := r.svc.SaveRequirements(ctx, r.org, r.proj, SaveRequest{}); err != nil {
 		t.Fatalf("first save: %v", err)
@@ -106,11 +106,11 @@ func TestSaveRequirements_GateMissingMain(t *testing.T) {
 
 func TestSaveRequirements_AtProvidedCommit_TagsThatCommit(t *testing.T) {
 	t.Parallel()
-	r := newRig(t, map[string]string{"specs/requirements/requirements.md": "published body\n"})
+	r := newRig(t, map[string]string{"specs/requirements/prd.md": "published body\n"})
 	applied := r.headSHA()
 	// main moves on after the apply (another writer, or a stale ref would
 	// resolve elsewhere) — the save must still pin the caller's commit.
-	r.seed(map[string]string{"specs/requirements/requirements.md": "newer draft\n"}, "later edit")
+	r.seed(map[string]string{"specs/requirements/prd.md": "newer draft\n"}, "later edit")
 
 	res, err := r.svc.SaveRequirements(context.Background(), r.org, r.proj, SaveRequest{CommitSHA: applied})
 	if err != nil {
@@ -132,7 +132,7 @@ func TestSaveRequirements_AtProvidedCommit_GateReadsThatCommit(t *testing.T) {
 	// read that could race.
 	r := newRig(t, map[string]string{"specs/requirements/functional.md": "no main doc\n"})
 	early := r.headSHA()
-	r.seed(map[string]string{"specs/requirements/requirements.md": "arrived later\n"}, "add main doc")
+	r.seed(map[string]string{"specs/requirements/prd.md": "arrived later\n"}, "add main doc")
 
 	_, err := r.svc.SaveRequirements(context.Background(), r.org, r.proj, SaveRequest{CommitSHA: early})
 	if !errors.Is(err, ErrArtifactPathInvalid) {
@@ -145,7 +145,7 @@ func TestSaveRequirements_AtProvidedCommit_GateReadsThatCommit(t *testing.T) {
 
 func TestSaveRequirements_InvalidCommitSHA(t *testing.T) {
 	t.Parallel()
-	r := newRig(t, map[string]string{"specs/requirements/requirements.md": "body\n"})
+	r := newRig(t, map[string]string{"specs/requirements/prd.md": "body\n"})
 	_, err := r.svc.SaveRequirements(context.Background(), r.org, r.proj, SaveRequest{CommitSHA: "not-a-sha!"})
 	if !errors.Is(err, ErrArtifactPathInvalid) {
 		t.Fatalf("err = %v, want ErrArtifactPathInvalid (malformed commit sha)", err)
@@ -157,7 +157,7 @@ func TestSaveRequirements_InvalidCommitSHA(t *testing.T) {
 
 func TestSaveDesign_AtProvidedCommit_TagsThatCommit(t *testing.T) {
 	t.Parallel()
-	r := newRig(t, map[string]string{"specs/requirements/requirements.md": "spec\n"})
+	r := newRig(t, map[string]string{"specs/requirements/prd.md": "spec\n"})
 	ctx := context.Background()
 	if _, err := r.svc.SaveRequirements(ctx, r.org, r.proj, SaveRequest{}); err != nil {
 		t.Fatalf("save requirements: %v", err)
@@ -184,11 +184,11 @@ func TestSaveDesign_AtProvidedCommit_TagsThatCommit(t *testing.T) {
 
 func TestSaveRequirements_TagCollision_RecomputesToNextName(t *testing.T) {
 	t.Parallel()
-	r := newRig(t, map[string]string{"specs/requirements/requirements.md": "body\n"})
+	r := newRig(t, map[string]string{"specs/requirements/prd.md": "body\n"})
 	// v1 already claimed externally at an earlier state, and the draft has since
 	// moved on → save wants a new tag but must skip the taken v1 and land v2.
 	r.tag("v1", "external v1")
-	r.seed(map[string]string{"specs/requirements/requirements.md": "moved on\n"}, "draft edit")
+	r.seed(map[string]string{"specs/requirements/prd.md": "moved on\n"}, "draft edit")
 
 	res, err := r.svc.SaveRequirements(context.Background(), r.org, r.proj, SaveRequest{})
 	if err != nil {
@@ -210,7 +210,7 @@ func TestSaveRequirements_TagCollision_RecomputesToNextName(t *testing.T) {
 // and the collision-recompute loop must refresh the tag list and land v2.
 func TestSaveRequirements_TagCollision_InWindowClaim(t *testing.T) {
 	t.Parallel()
-	r := newRig(t, map[string]string{"specs/requirements/requirements.md": "body\n"})
+	r := newRig(t, map[string]string{"specs/requirements/prd.md": "body\n"})
 
 	var tagAttempts int32
 	var once sync.Once
@@ -241,7 +241,7 @@ func TestSaveRequirements_TagCollision_InWindowClaim(t *testing.T) {
 // tags point at the pinned commit.
 func TestCreateAnnotatedTag_ConcurrentSameName_LoserRecomputesToNext(t *testing.T) {
 	t.Parallel()
-	r := newRig(t, map[string]string{"specs/requirements/requirements.md": "body\n"})
+	r := newRig(t, map[string]string{"specs/requirements/prd.md": "body\n"})
 	s := r.svc.(*artifactService)
 	ref := r.workspaceRef()
 	head := r.headSHA()
@@ -286,7 +286,7 @@ func TestCreateAnnotatedTag_ConcurrentSameName_LoserRecomputesToNext(t *testing.
 // commit on the ORIGIN == the mirror's view of the same tag.
 func TestSaveRequirements_TagShaConsistency_OriginAndMirror(t *testing.T) {
 	t.Parallel()
-	r := newRig(t, map[string]string{"specs/requirements/requirements.md": "body\n"})
+	r := newRig(t, map[string]string{"specs/requirements/prd.md": "body\n"})
 
 	res, err := r.svc.SaveRequirements(context.Background(), r.org, r.proj, SaveRequest{})
 	if err != nil {
@@ -308,7 +308,7 @@ func TestSaveRequirements_TagShaConsistency_OriginAndMirror(t *testing.T) {
 // runs first; no tag is ever attempted).
 func TestSaveRequirements_UnknownPinnedSha_RefNotFound(t *testing.T) {
 	t.Parallel()
-	r := newRig(t, map[string]string{"specs/requirements/requirements.md": "body\n"})
+	r := newRig(t, map[string]string{"specs/requirements/prd.md": "body\n"})
 	_, err := r.svc.SaveRequirements(context.Background(), r.org, r.proj,
 		SaveRequest{CommitSHA: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"})
 	if !errors.Is(err, sourcecontrol.ErrRefNotFound) {
@@ -321,7 +321,7 @@ func TestSaveRequirements_UnknownPinnedSha_RefNotFound(t *testing.T) {
 
 func TestSaveDesign_TagsAtHead(t *testing.T) {
 	t.Parallel()
-	r := newRig(t, map[string]string{"specs/requirements/requirements.md": "spec\n"})
+	r := newRig(t, map[string]string{"specs/requirements/prd.md": "spec\n"})
 	ctx := context.Background()
 	// A requirements baseline must exist for a design tag.
 	if _, err := r.svc.SaveRequirements(ctx, r.org, r.proj, SaveRequest{}); err != nil {
@@ -358,7 +358,7 @@ func TestSaveDesign_NoRequirementsBaseline(t *testing.T) {
 
 func TestSaveDesign_GateMissingLayout(t *testing.T) {
 	t.Parallel()
-	r := newRig(t, map[string]string{"specs/requirements/requirements.md": "spec\n"})
+	r := newRig(t, map[string]string{"specs/requirements/prd.md": "spec\n"})
 	ctx := context.Background()
 	if _, err := r.svc.SaveRequirements(ctx, r.org, r.proj, SaveRequest{}); err != nil {
 		t.Fatalf("save requirements: %v", err)
@@ -375,7 +375,7 @@ func TestSaveDesign_GateMissingLayout(t *testing.T) {
 
 func TestSaveDesign_GateSchemaViolation(t *testing.T) {
 	t.Parallel()
-	r := newRig(t, map[string]string{"specs/requirements/requirements.md": "spec\n"})
+	r := newRig(t, map[string]string{"specs/requirements/prd.md": "spec\n"})
 	ctx := context.Background()
 	if _, err := r.svc.SaveRequirements(ctx, r.org, r.proj, SaveRequest{}); err != nil {
 		t.Fatalf("save requirements: %v", err)
@@ -404,7 +404,7 @@ func TestSaveDesign_GateSchemaViolation(t *testing.T) {
 
 func TestSaveDesign_GateNameMismatch(t *testing.T) {
 	t.Parallel()
-	r := newRig(t, map[string]string{"specs/requirements/requirements.md": "spec\n"})
+	r := newRig(t, map[string]string{"specs/requirements/prd.md": "spec\n"})
 	ctx := context.Background()
 	if _, err := r.svc.SaveRequirements(ctx, r.org, r.proj, SaveRequest{}); err != nil {
 		t.Fatalf("save requirements: %v", err)
@@ -424,7 +424,7 @@ func TestSaveDesign_GateNameMismatch(t *testing.T) {
 
 func TestSaveDesign_GateBrokenOpenAPI(t *testing.T) {
 	t.Parallel()
-	r := newRig(t, map[string]string{"specs/requirements/requirements.md": "spec\n"})
+	r := newRig(t, map[string]string{"specs/requirements/prd.md": "spec\n"})
 	ctx := context.Background()
 	if _, err := r.svc.SaveRequirements(ctx, r.org, r.proj, SaveRequest{}); err != nil {
 		t.Fatalf("save requirements: %v", err)

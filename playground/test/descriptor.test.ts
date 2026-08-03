@@ -82,10 +82,10 @@ test("the descriptor never enters a turn snapshot", () => {
   try {
     writeDescriptor(dir, "expense-tracker", "an expense claim tracker");
     mkdirSync(join(dir, "specs/requirements"), { recursive: true });
-    writeFileSync(join(dir, "specs/requirements/requirements.md"), "# Reqs\n", "utf8");
+    writeFileSync(join(dir, "specs/requirements/prd.md"), "# Reqs\n", "utf8");
 
     const files = readProjectFiles(dir);
-    assert.ok(files["specs/requirements/requirements.md"], "ordinary spec files still ride");
+    assert.ok(files["specs/requirements/prd.md"], "ordinary spec files still ride");
     assert.equal(files[DESCRIPTOR_PATH], undefined, "the descriptor must never reach the agent");
   } finally {
     rmSync(dir, { recursive: true, force: true });

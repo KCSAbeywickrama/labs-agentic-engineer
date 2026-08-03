@@ -30,7 +30,7 @@ import (
 // bundle (root + one component with schema-valid design.json).
 func validSpecSeed() map[string]string {
 	return map[string]string{
-		"specs/requirements/requirements.md":      "the spec\n",
+		"specs/requirements/prd.md":      "the spec\n",
 		"specs/design/design.md":                  "# System\n",
 		"specs/design/components/svc/design.md":   "---\ntype: service\n---\n# svc\n",
 		"specs/design/components/svc/design.json": validComponentDesignJSON("svc"),
@@ -85,13 +85,13 @@ func TestSaveSpec_TagsAtHead(t *testing.T) {
 func TestSaveSpec_GateRequirementsMissing(t *testing.T) {
 	t.Parallel()
 	seed := validSpecSeed()
-	delete(seed, "specs/requirements/requirements.md")
+	delete(seed, "specs/requirements/prd.md")
 	r := newRig(t, seed)
 
 	_, err := r.svc.SaveSpec(context.Background(), r.org, r.proj, SaveRequest{})
 	paths := specErrPaths(t, err)
-	if !containsPath(paths, "specs/requirements/requirements.md") {
-		t.Fatalf("validation paths = %v, want specs/requirements/requirements.md", paths)
+	if !containsPath(paths, "specs/requirements/prd.md") {
+		t.Fatalf("validation paths = %v, want specs/requirements/prd.md", paths)
 	}
 	if got := r.tags(); len(got) != 0 {
 		t.Errorf("tags = %v, want none (nothing may be tagged when the gate fails)", got)
@@ -100,7 +100,7 @@ func TestSaveSpec_GateRequirementsMissing(t *testing.T) {
 
 func TestSaveSpec_GateDesignMissing(t *testing.T) {
 	t.Parallel()
-	r := newRig(t, map[string]string{"specs/requirements/requirements.md": "the spec\n"})
+	r := newRig(t, map[string]string{"specs/requirements/prd.md": "the spec\n"})
 
 	_, err := r.svc.SaveSpec(context.Background(), r.org, r.proj, SaveRequest{})
 	paths := specErrPaths(t, err)
@@ -139,7 +139,7 @@ func TestSaveSpec_GateAggregatesRequirementsAndDesign(t *testing.T) {
 
 	_, err := r.svc.SaveSpec(context.Background(), r.org, r.proj, SaveRequest{})
 	paths := specErrPaths(t, err)
-	if !containsPath(paths, "specs/requirements/requirements.md") || !containsPath(paths, "specs/design/design.md") {
+	if !containsPath(paths, "specs/requirements/prd.md") || !containsPath(paths, "specs/design/design.md") {
 		t.Fatalf("validation paths = %v, want both the requirements and design entries", paths)
 	}
 }
@@ -199,7 +199,7 @@ func TestSaveSpec_LegacyDesignTagsExcluded(t *testing.T) {
 	r.tag("v1", "spec v1")
 	r.tag("v1-1", "legacy design rev")
 	r.tag("v1-2", "legacy design rev")
-	r.seed(map[string]string{"specs/requirements/requirements.md": "moved on\n"}, "spec edit")
+	r.seed(map[string]string{"specs/requirements/prd.md": "moved on\n"}, "spec edit")
 
 	res, err := r.svc.SaveSpec(context.Background(), r.org, r.proj, SaveRequest{})
 	if err != nil {
@@ -215,7 +215,7 @@ func TestSaveSpec_AtProvidedCommit_TagsThatCommit(t *testing.T) {
 	r := newRig(t, validSpecSeed())
 	applied := r.headSHA()
 	// main moves on after the apply — the save must still pin the caller's commit.
-	r.seed(map[string]string{"specs/requirements/requirements.md": "newer draft\n"}, "later edit")
+	r.seed(map[string]string{"specs/requirements/prd.md": "newer draft\n"}, "later edit")
 
 	res, err := r.svc.SaveSpec(context.Background(), r.org, r.proj, SaveRequest{CommitSHA: applied})
 	if err != nil {
@@ -250,7 +250,7 @@ func TestValidateSpecAtTag(t *testing.T) {
 func TestValidateSpecAtTag_InvalidSpecAtTag(t *testing.T) {
 	t.Parallel()
 	// A tag cut externally over a design-less tree fails re-validation.
-	r := newRig(t, map[string]string{"specs/requirements/requirements.md": "the spec\n"})
+	r := newRig(t, map[string]string{"specs/requirements/prd.md": "the spec\n"})
 	r.tag("v1", "external tag over an unbuildable tree")
 
 	err := r.svc.ValidateSpecAtTag(context.Background(), r.org, r.proj, "v1")

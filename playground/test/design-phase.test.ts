@@ -52,7 +52,7 @@ const FLOW_DSL = `screen Login
 function seedProject(): string {
   const dir = mkdtempSync(join(tmpdir(), "aep-play-design-"));
   mkdirSync(join(dir, "specs/requirements"), { recursive: true });
-  writeFileSync(join(dir, "specs/requirements/requirements.md"), "# Requirements\n\n- login\n");
+  writeFileSync(join(dir, "specs/requirements/prd.md"), "# Requirements\n\n- login\n");
   return dir;
 }
 

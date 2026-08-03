@@ -19,7 +19,7 @@ design-generation turn** — in both cases the requirement-only input rule below
 
 ## Input — the requirement ONLY
 
-Read the requirement prose from `specs/requirements/requirements.md` (or whichever requirements file the
+Read the requirement prose from `specs/requirements/prd.md` (or whichever requirements file the
 user points you at). **Do not read `design.md`, `openapi.yaml`, or any source code** to derive criteria —
 the oracle must be independent of the work it will grade. Base every criterion only on what the
 requirement says or necessarily implies.

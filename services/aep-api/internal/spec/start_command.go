@@ -51,7 +51,8 @@ const startCommand = "/start"
 // inlines into the turn's prompt up front — the server-decided eager map
 // (#373). A token absent here still expands; the model loads its skill lazily.
 var flowEagerSkills = map[string][]string{
-	"start":  {"grilling"},
+	"start":  {"grilling", "organization"},
+	"amend":  {"grilling", "organization"},
 	"design": {"design"},
 }
 

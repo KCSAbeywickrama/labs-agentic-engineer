@@ -1,6 +1,6 @@
 ---
 name: design
-description: Use when generating a project's design from its requirements — the /design flow that turns specs/requirements/requirements.md into the component design under specs/design/, then mints the validation criteria.
+description: Use when generating a project's design from its PRD — the /design flow that turns specs/requirements/prd.md into the component design under specs/design/, then mints the validation criteria.
 metadata:
   aep:
     kind: platform
@@ -14,12 +14,16 @@ that step and nothing after it.
 
 ## The requirements are the brief
 
-Design FROM `specs/requirements/requirements.md` — it is the source of truth
-the kickoff produced, and it is already in the workspace. Do not interview the
-user again and do not widen or narrow the scope: what the requirements say is
-what gets designed. If the requirements file is missing or empty, stop and say
-so — the user needs to run `/start` first; inventing a design from nothing is
-always wrong.
+Design FROM `specs/requirements/prd.md` — it is the source of truth the
+kickoff produced, and it is already in the workspace. Do not interview the
+user again and do not widen or narrow the scope: what the PRD says is what
+gets designed. If the PRD is missing or empty, stop and say so — the user
+needs to run `/start` first; inventing a design from nothing is always wrong.
+
+**Open questions gate:** check the PRD's Open Questions section first. Any
+question neither answered nor marked "deferred" blocks design — stop and tell
+the user to resolve them (the amend flow's resolve-open-questions branch)
+before designing. Deferred questions never block.
 
 ## Generate the design
 

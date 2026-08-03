@@ -41,7 +41,7 @@ import { mockModel } from "../src/shared/mock-model.js";
 
 const OPENAPI = "specs/design/components/hello-api/openapi.yaml";
 const WORKLOAD_YAML = "specs/design/components/hello-api/workload.yaml";
-const REQUIREMENTS = "specs/requirements/requirements.md";
+const REQUIREMENTS = "specs/requirements/prd.md";
 const AUD = "agents-service";
 const SECRET = "test-secret";
 const KEY = "sk-ant-test"; // the mock buildModel ignores it; presence is what the route checks

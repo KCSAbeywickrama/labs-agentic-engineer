@@ -34,7 +34,7 @@ import (
 func seedFiles() map[string]string {
 	return map[string]string{
 		"README.md":                          "hello\n",
-		"specs/requirements/requirements.md": "req v1\n",
+		"specs/requirements/prd.md": "req v1\n",
 	}
 }
 

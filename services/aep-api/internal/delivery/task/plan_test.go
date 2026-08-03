@@ -123,7 +123,7 @@ func TestPlanIntoMilestone_DispatchesWorkspaceShape(t *testing.T) {
 	r := newPlanRig(t, map[string]string{
 		"specs/design/design.md":                              "# design",
 		"specs/design/components/hello-world-api/design.json": `{"name":"hello-world-api"}`,
-		"specs/requirements/requirements.md":                  "# reqs",
+		"specs/requirements/prd.md":                  "# reqs",
 	}, "v1")
 	req := r.start(t)
 
@@ -180,7 +180,7 @@ func TestPlanIntoMilestone_SkillsRepoGone_TypedError(t *testing.T) {
 	fx := workspacetest.New(t, map[string]string{
 		"specs/design/design.md":                              "# design",
 		"specs/design/components/hello-world-api/design.json": `{"name":"hello-world-api"}`,
-		"specs/requirements/requirements.md":                  "# reqs",
+		"specs/requirements/prd.md":                  "# reqs",
 	})
 	repoRow := &sourcecontrol.GitRepository{OrgID: "org1", ProjectID: "proj1", RepoURL: fx.Origin.URL(),
 		DefaultBranch: "main", RepoSlug: workspacetest.DefaultSlug, Status: "ready"}

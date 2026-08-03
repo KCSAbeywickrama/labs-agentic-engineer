@@ -77,11 +77,11 @@ func (c *captureTurnActivity) all() []recordedTurnActivity {
 // collab save path.
 func TestTurnActivity_PreviewTurnRecordsNothing(t *testing.T) {
 	rec := &captureTurnActivity{}
-	r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"}, withRecorder(rec))
+	r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"}, withRecorder(rec))
 
-	final := map[string]string{"specs/requirements/requirements.md": "# Requirements\n"}
+	final := map[string]string{"specs/requirements/prd.md": "# Requirements\n"}
 	r.fake.parts = []string{
-		editFilePart("specs/requirements/requirements.md", "# Reqs\n", "# Requirements\n"),
+		editFilePart("specs/requirements/prd.md", "# Reqs\n", "# Requirements\n"),
 	}
 	m := manifestPart(final, nil)
 	r.fake.manifest = &m
@@ -104,7 +104,7 @@ func TestTurnActivity_PreviewTurnRecordsNothing(t *testing.T) {
 // regression that made the Spec view show only "Admin updated the spec".
 func TestTurnActivity_RoomScopedTurnRecordsAgentEdit(t *testing.T) {
 	rec := &captureTurnActivity{}
-	r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"}, withRecorder(rec))
+	r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"}, withRecorder(rec))
 
 	r.fake.parts = []string{
 		editFilePart("requirements/requirements.md", "# Reqs\n", "# Requirements\n"),
@@ -136,7 +136,7 @@ func TestTurnActivity_RoomScopedTurnRecordsAgentEdit(t *testing.T) {
 // reply) records no line.
 func TestTurnActivity_RoomScopedNoEditsRecordsNothing(t *testing.T) {
 	rec := &captureTurnActivity{}
-	r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"}, withRecorder(rec))
+	r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"}, withRecorder(rec))
 
 	r.fake.parts = []string{textPart("just answering your question")}
 	m := manifestPart(map[string]string{}, nil)
@@ -155,7 +155,7 @@ func TestTurnActivity_RoomScopedNoEditsRecordsNothing(t *testing.T) {
 // A completed turn that changes nothing records no line.
 func TestTurnActivity_NoChangesRecordsNothing(t *testing.T) {
 	rec := &captureTurnActivity{}
-	r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"}, withRecorder(rec))
+	r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"}, withRecorder(rec))
 
 	r.fake.parts = []string{textPart("nothing to do")}
 	m := manifestPart(map[string]string{}, nil)

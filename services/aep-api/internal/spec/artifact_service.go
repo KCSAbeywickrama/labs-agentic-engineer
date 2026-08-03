@@ -74,9 +74,9 @@ const (
 	// `components/<name>/design.md` (+ optional `openapi.yaml`) per component.
 	// Versioned as a single artifact under `v<N>-<M>` tags.
 	DesignDir = "specs/design"
-	// requirementsMainFile is the canonical "main" requirements document. Its
-	// presence is the requirements save gate.
-	requirementsMainFile = "requirements.md"
+	// requirementsMainFile is the canonical "main" requirements document (the
+	// PRD). Its presence is the requirements save gate.
+	requirementsMainFile = "prd.md"
 	// designRootFile is the canonical root design document (system overview).
 	// Its presence is part of the design save gate (layout).
 	designRootFile = "design.md"
@@ -297,7 +297,7 @@ func (s *artifactService) ListDesignVersions(ctx context.Context, orgID, project
 
 // ----- Save (hard gate → tag at HEAD) -----
 
-// SaveRequirements runs the requirements hard gate (requirements.md must exist
+// SaveRequirements runs the requirements hard gate (prd.md must exist
 // at HEAD) and cuts the next `v<N>` annotated tag pointing at HEAD. No commit is
 // created — the accepted draft is already on `main`. When HEAD already matches
 // the latest tag the save is a no-op ("unchanged").

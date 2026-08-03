@@ -22,7 +22,7 @@ import { TaskPlan } from "../src/agents/main/task-plan-accumulator.js";
 
 /** A design snapshot with three components (no existing Tasks). */
 const DESIGN: Record<string, string> = {
-  "specs/requirements/requirements.md": "# reqs\n",
+  "specs/requirements/prd.md": "# reqs\n",
   "specs/design/design.md": "# design\n",
   "specs/design/components/order-service/design.json": '{"name":"order-service"}\n',
   "specs/design/components/user-service/design.json": '{"name":"user-service"}\n',

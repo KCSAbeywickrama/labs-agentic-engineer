@@ -72,7 +72,7 @@ const CLIP = 80_000;
 const clip = (s: string): string => (s.length > CLIP ? `${s.slice(0, CLIP)}\n…(clipped)` : s);
 
 function requirementsArtifact(projectDir: string): string {
-  return readProjectFile(projectDir, "specs/requirements/requirements.md");
+  return readProjectFile(projectDir, "specs/requirements/prd.md");
 }
 
 function designArtifact(projectDir: string): string {
@@ -199,7 +199,7 @@ export async function runRequirementsScenario(sc: RequirementsScenario, runName:
   }
   const outcome = await scoreConversational(projectDir, run, sc.rubric, []);
   return finishRun("requirements-section", sc.brief.name, runName, run.records, [outcome], {
-    "specs/requirements/requirements.md": requirementsArtifact(projectDir),
+    "specs/requirements/prd.md": requirementsArtifact(projectDir),
   });
 }
 
@@ -268,7 +268,7 @@ export async function runChainScenario(sc: ChainScenario, runName: string): Prom
   }
 
   return finishRun("chain", sc.brief.name, runName, records, outcomes, {
-    "specs/requirements/requirements.md": requirementsArtifact(projectDir),
+    "specs/requirements/prd.md": requirementsArtifact(projectDir),
     "specs/design/design.md": readProjectFile(projectDir, "specs/design/design.md"),
     "issues/": tasksArtifact(projectDir),
   });

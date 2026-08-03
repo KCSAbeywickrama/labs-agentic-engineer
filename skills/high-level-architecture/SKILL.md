@@ -9,7 +9,7 @@ metadata:
 
 # High-level architecture
 
-Derive the design tree from `requirements.md`. The design lives under
+Derive the design tree from `specs/requirements/prd.md`. The design lives under
 `specs/design/` — never at the bundle root.
 
 ```
