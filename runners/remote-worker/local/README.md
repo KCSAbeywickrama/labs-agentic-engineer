@@ -11,7 +11,7 @@ and hands back your GitHub PAT.
 1. Starts the token stub on `127.0.0.1:8377` (host side).
 2. Builds the runner image from `../Dockerfile` (cached after the first time).
 3. Runs the one-shot container: clones `AEP_REPO_URL`'s default branch,
-   loads the `aep` skill plugin, and lets the agent work `AEP_PROMPT` —
+   reads the `aep` skill from the clone's mirror, and lets the agent work `AEP_PROMPT` —
    branch, commit, push, PR, exactly as a cluster run would.
 
 The run reads every skill from the `.claude/skills/` mirror the BFF wrote

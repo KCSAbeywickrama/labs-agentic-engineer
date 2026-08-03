@@ -97,6 +97,31 @@ Consequences, in the order they were decided:
    hardcodes one. The component contract a lead hands to fan-out subagents moves
    with it.
 
+## Measured on the playground, docker mode, two components
+
+A `GET /hello` service plus one React screen, run end to end after the change:
+
+- **10 skills mirrored, 8 withheld**, every withheld one design-only
+  (`design`, `start`, `grilling`, `high-level-architecture`, `task-planning`,
+  `task-breakdown`, `cell-architecture-dsl`, `validation-criteria`). The copy rule
+  is doing the work ADR-0004 decision 7 used to do with an explicit selection.
+- **No `overlays/` in the mirror**, and the mirrored `aep/SKILL.md` is the
+  local-composed body: two local landmarks present, zero occurrences of
+  `gh pr create` or `git push -u origin HEAD`.
+- **The lead invoked the Skill tool zero times.** Its workflow body and the 4
+  pinned bodies were already in context.
+- **Every subagent load succeeded — and this is the finding.** Subagents invoked
+  `aep`, `go`, `openapi-conventions` and `react-webapp` on demand, four
+  invocations, no rejection. The system-prompt append does **not** reach a
+  subagent, so a fan-out implementer starts without the workflow and loads it
+  itself. Under the pins-only allowlist this run would have had `aep` *rejected*
+  for both subagents — which is exactly #361's silent failure, one level down: the
+  build would still have passed, because a subagent that cannot load the workflow
+  greps for it instead.
+
+So a pin buys preloading **for the lead only**. That bounds what pinning is worth
+and it is the argument for listing the whole mirror rather than only the pins.
+
 ## Consequences
 
 - A developer who clones a project repo reads the same workflow the build does.
