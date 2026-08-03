@@ -213,6 +213,41 @@ func TestSetEnabled(t *testing.T) {
 	}
 }
 
+// The coding runner reads its workflow out of the project mirror, and the mirror
+// only copies enabled skills — so disabling `aep` would take the procedure away
+// from every build in the org, which the runner then refuses to start without.
+// Refused rather than force-copied: copying a disabled skill anyway would leave
+// the console showing it as off while every build loaded it.
+func TestSetEnabled_RefusesToDisableTheWorkflow(t *testing.T) {
+	t.Parallel()
+	svc, host := newTestStoreWithLibrary(t, orgLibKind("demo", "v1"))
+	ctx := context.Background()
+	if _, err := svc.List(ctx, "org1"); err != nil { // seed
+		t.Fatalf("seed: %v", err)
+	}
+	mut := NewSkillMutationService(svc)
+	headBefore := host.readAtHead("org1", skillsManifestPath)
+
+	for name := range RequiredSkills {
+		if _, err := mut.SetEnabled(ctx, "org1", "tester", name, false); !errors.Is(err, ErrSkillRequired) {
+			t.Fatalf("disable %q: got %v, want ErrSkillRequired", name, err)
+		}
+		// Refused BEFORE any resolve or commit — the org repo is untouched, so a
+		// rejected call cannot leave a half-applied manifest behind. This also
+		// means the refusal does not depend on the skill being present in this
+		// org's library, which is the point: it is a property of the name.
+		if got := host.readAtHead("org1", skillsManifestPath); got != headBefore {
+			t.Fatalf("refused disable still wrote the manifest: %q", got)
+		}
+	}
+
+	// ENABLING a required skill is always allowed — that is the repair path for an
+	// org whose manifest already carries a disabled entry from before this guard.
+	if _, err := mut.SetEnabled(ctx, "org1", "tester", "aep", true); errors.Is(err, ErrSkillRequired) {
+		t.Fatal("enabling a required skill must not be refused")
+	}
+}
+
 // A pre-manifest org repo (skills on disk, no skills-manifest.json) is the
 // migration case. Backfill used to stamp the EMBEDDED sha as the baseline of a
 // copy the org did not have — a third value matching neither side — so every

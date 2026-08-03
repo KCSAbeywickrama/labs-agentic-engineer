@@ -22,7 +22,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { assembleBasePlugin, composeWorkflowSkill, type AgentMode } from "./base_plugin.js";
+import { composeWorkflowSkill, type AgentMode } from "./workflow_skill.js";
+import { mirrorLocalSkillLibrary } from "./local_skill_mirror.js";
 
 // The real authored library: src/lib → remote-worker → runners → repo root.
 const LIBRARY = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../skills");
@@ -38,7 +39,7 @@ const composed: Record<AgentMode, string> = {
 
 // The library holds one authored workflow skill and it is written for the
 // platform. Nothing is stripped for a production run, so what a reviewer reads
-// in `skills/aep/SKILL.md` — or installs with `make runner-plugin` — is what a
+// in `skills/aep/SKILL.md` — or installs with `make workflow-skill` — is what a
 // dispatched run is steered by, byte for byte.
 test("github mode is the authored skill, unmodified", () => {
   assert.equal(composed.github, fs.readFileSync(AEP_SKILL, "utf8"));
@@ -292,50 +293,74 @@ test("the authored skill keeps git and gh invocations in the sections the overla
   assert.deepEqual(stray, [], `platform git/gh mechanics outside the overlay's reach:\n${stray.join("\n")}`);
 });
 
-// --- assembleBasePlugin: the fs side ----------------------------------------
+// --- the fs side: what a local run's mirror actually contains -----------------
+//
+// `mirrorLocalSkillLibrary` is the playground's stand-in for the BFF write, and
+// the only writer left that composes: production mirrors the authored trunk,
+// which is what a dispatched run should read. So these drive it against the REAL
+// library, because the properties being pinned are properties of the library's
+// content as much as of the copier.
 
-function inTempDir<T>(fn: (dir: string) => T): T {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aep-plugin-test-"));
-  try {
-    return fn(dir);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
+function inTempDir<T>(fn: (dir: string) => T | Promise<T>): Promise<T> {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aep-mirror-test-"));
+  return (async () => {
+    try {
+      return await fn(dir);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  })();
 }
 
-test("assembleBasePlugin: writes a loadable plugin holding exactly the runner's skills", () => {
-  inTempDir((dir) => {
-    const out = assembleBasePlugin({ libraryDir: LIBRARY, destDir: path.join(dir, "plugin"), mode: "local" });
+/** Mirror the real library into a fresh workspace and return `.claude/skills/`. */
+async function mirrorInto(dir: string, mode: AgentMode): Promise<string> {
+  const workspace = path.join(dir, mode);
+  fs.mkdirSync(workspace, { recursive: true });
+  await mirrorLocalSkillLibrary(LIBRARY, workspace, new Set(), mode);
+  return path.join(workspace, ".claude", "skills");
+}
 
-    const manifest = JSON.parse(fs.readFileSync(path.join(out, ".claude-plugin", "plugin.json"), "utf8")) as {
-      name: string;
-    };
-    // The plugin name is what `basePreload` entries are qualified by.
-    assert.equal(manifest.name, "aep");
+test("the mirror carries the coding-audience skills, composed for the mode", async () => {
+  await inTempDir(async (dir) => {
+    const skills = await mirrorInto(dir, "local");
 
-    assert.deepEqual(fs.readdirSync(path.join(out, "skills")).sort(), ["aep", "aep-validation", "playwright-cli"]);
-    // The library's design-flow skills stay out: their descriptions would sit in
-    // a coding session's skill list, one load away from authoring specs/.
-    assert.ok(!fs.existsSync(path.join(out, "skills", "design")));
-    assert.ok(!fs.existsSync(path.join(out, "skills", "go")));
-
-    assert.equal(fs.readFileSync(path.join(out, "skills", "aep", "SKILL.md"), "utf8"), composed.local);
+    // The runner's own skills arrive the SAME way every other coding skill does.
+    // There is no plugin any more, so if they are not here they reach no session.
+    for (const name of ["aep", "aep-validation", "playwright-cli"]) {
+      assert.ok(fs.existsSync(path.join(skills, name, "SKILL.md")), `mirror is missing ${name}`);
+    }
+    // Design-only skills stay out: their descriptions would sit in a coding
+    // session's skill catalog, one load away from authoring specs/.
+    for (const name of ["design", "task-planning", "high-level-architecture"]) {
+      assert.ok(!fs.existsSync(path.join(skills, name)), `${name} must not reach a build`);
+    }
+    // And the mirrored workflow is the COMPOSED body, not the authored trunk —
+    // this is the whole reason the writer is not a directory copy.
+    assert.equal(fs.readFileSync(path.join(skills, "aep", "SKILL.md"), "utf8"), composed.local);
   });
 });
 
-// A production session that can read a local-mode overlay beside SKILL.md has a
-// second procedure available to it — and the `aep` skill explicitly permits
-// reading its own skill dir.
+test("github mode mirrors the authored trunk verbatim, as production does", async () => {
+  await inTempDir(async (dir) => {
+    const skills = await mirrorInto(dir, "github");
+    assert.equal(fs.readFileSync(path.join(skills, "aep", "SKILL.md"), "utf8"), composed.github);
+  });
+});
+
+// A session that can read a local-mode overlay beside SKILL.md has a second
+// procedure available to it — and the `aep` skill explicitly permits reading its
+// own skill dir. Production cannot hit this (`loadLibrary` never seeds
+// `overlays/`, so no org repo has one to mirror); the local writer has to filter.
 for (const mode of ["github", "local"] as const) {
-  test(`assembleBasePlugin: the ${mode} plugin carries no overlays/ directory`, () => {
-    inTempDir((dir) => {
-      const out = assembleBasePlugin({ libraryDir: LIBRARY, destDir: path.join(dir, "plugin"), mode });
+  test(`the ${mode} mirror carries no overlays/ directory`, async () => {
+    await inTempDir(async (dir) => {
+      const skills = await mirrorInto(dir, mode);
       const walk = (at: string): string[] =>
         fs.readdirSync(at, { withFileTypes: true }).flatMap((e) => {
           const full = path.join(at, e.name);
-          return e.isDirectory() ? walk(full) : [path.relative(out, full)];
+          return e.isDirectory() ? walk(full) : [path.relative(skills, full)];
         });
-      const paths = walk(out);
+      const paths = walk(skills);
       assert.deepEqual(
         paths.filter((p) => p.split(path.sep).includes("overlays")),
         [],
@@ -360,10 +385,9 @@ for (const mode of ["github", "local"] as const) {
 // rather than in a local run.
 const PLATFORM_MECHANICS = [/\bgh [a-z]/, /git push/, /git checkout/, /git fetch/, /git rebase/, /git ls-remote/, /--milestone/, /Resolves #/, /pull request/i];
 
-test("assembleBasePlugin: the aep skill's references carry no platform mechanics", () => {
-  inTempDir((dir) => {
-    const out = assembleBasePlugin({ libraryDir: LIBRARY, destDir: path.join(dir, "plugin"), mode: "local" });
-    const refs = path.join(out, "skills", "aep", "references");
+test("the aep skill's references carry no platform mechanics", async () => {
+  await inTempDir(async (dir) => {
+    const refs = path.join(await mirrorInto(dir, "local"), "aep", "references");
     const stray: string[] = [];
     for (const name of fs.existsSync(refs) ? fs.readdirSync(refs) : []) {
       for (const [index, line] of fs.readFileSync(path.join(refs, name), "utf8").split("\n").entries()) {
@@ -374,24 +398,25 @@ test("assembleBasePlugin: the aep skill's references carry no platform mechanics
   });
 });
 
-test("assembleBasePlugin: both modes ship the same references", () => {
-  inTempDir((dir) => {
-    const read = (mode: AgentMode): Record<string, string> => {
-      const out = assembleBasePlugin({ libraryDir: LIBRARY, destDir: path.join(dir, mode), mode });
-      const refs = path.join(out, "skills", "aep", "references");
+test("both modes ship the same references", async () => {
+  await inTempDir(async (dir) => {
+    const read = async (mode: AgentMode): Promise<Record<string, string>> => {
+      const refs = path.join(await mirrorInto(dir, mode), "aep", "references");
       return Object.fromEntries(fs.readdirSync(refs).map((n) => [n, fs.readFileSync(path.join(refs, n), "utf8")]));
     };
     // Byte-identical is what makes the check above sufficient for both modes —
     // and what makes "mode-neutral or it stays in the trunk" the only rule.
-    assert.deepEqual(read("local"), read("github"));
+    assert.deepEqual(await read("local"), await read("github"));
   });
 });
 
 // A skill is its SKILL.md plus whatever it ships beside it: the validation
-// workflow is useless without its templates and its report generator.
-test("assembleBasePlugin: a skill's references, assets and scripts come along", () => {
-  inTempDir((dir) => {
-    const out = assembleBasePlugin({ libraryDir: LIBRARY, destDir: path.join(dir, "plugin"), mode: "github" });
+// workflow is useless without its templates and its report generator. The BFF's
+// mirror copies every aux file for the same reason (`Skill.References` is not
+// limited to `references/`), so this is the local writer holding the same line.
+test("a skill's references, assets and scripts come along", async () => {
+  await inTempDir(async (dir) => {
+    const skills = await mirrorInto(dir, "github");
     for (const rel of [
       path.join("aep", "references", "external-dependency-research.md"),
       path.join("aep", "references", "component-contract.md"),
@@ -401,16 +426,16 @@ test("assembleBasePlugin: a skill's references, assets and scripts come along", 
       path.join("aep-validation", "scripts", "generate-report.mjs"),
       path.join("playwright-cli", "LICENSE"),
     ]) {
-      assert.ok(fs.existsSync(path.join(out, "skills", rel)), `plugin is missing ${rel}`);
+      assert.ok(fs.existsSync(path.join(skills, rel)), `mirror is missing ${rel}`);
     }
   });
 });
 
-// A skill that names an absolute path into the plugin tree is naming a location
-// only the runner knows — it varies per run (a cluster mount, a playground
-// bind-mount, a developer's checkout). `/app/plugin` was such a path, and it
-// stopped existing when the plugin became an assembled artifact; the report
-// generator was still being invoked through it.
+// A skill that names an absolute path into the runner's own tree is naming a
+// location only the runner knows — it varies per run (a cluster mount, a
+// playground bind-mount, a developer's checkout, and now the project's own
+// mirror). `/app/plugin` was such a path, and it stopped existing when the plugin
+// did; the report generator was still being invoked through it.
 test("no library skill hardcodes a runner path", () => {
   for (const skill of ["aep", "aep-validation", "playwright-cli"]) {
     const body = fs.readFileSync(path.join(LIBRARY, skill, "SKILL.md"), "utf8");
@@ -422,53 +447,50 @@ test("no library skill hardcodes a runner path", () => {
   }
 });
 
-test("assembleBasePlugin: re-assembling the same dest replaces the previous mode", () => {
-  inTempDir((dir) => {
-    const target = path.join(dir, "plugin");
-    assembleBasePlugin({ libraryDir: LIBRARY, destDir: target, mode: "local" });
-    assembleBasePlugin({ libraryDir: LIBRARY, destDir: target, mode: "github" });
-    assert.equal(fs.readFileSync(path.join(target, "skills", "aep", "SKILL.md"), "utf8"), composed.github);
-  });
-});
-
-test("assembleBasePlugin: rejects a library missing one of the runner's skills", () => {
-  inTempDir((dir) => {
-    fs.mkdirSync(path.join(dir, "library", "aep"), { recursive: true });
-    fs.writeFileSync(path.join(dir, "library", "aep", "SKILL.md"), "---\nname: aep\n---\n\nbody\n");
-    assert.throws(
-      () => assembleBasePlugin({ libraryDir: path.join(dir, "library"), destDir: path.join(dir, "out"), mode: "github" }),
-      /skill library has no aep-validation\/SKILL\.md/,
+test("re-mirroring the same workspace replaces the previous mode's body", async () => {
+  await inTempDir(async (dir) => {
+    const workspace = path.join(dir, "ws");
+    fs.mkdirSync(workspace, { recursive: true });
+    await mirrorLocalSkillLibrary(LIBRARY, workspace, new Set(), "local");
+    await mirrorLocalSkillLibrary(LIBRARY, workspace, new Set(), "github");
+    assert.equal(
+      fs.readFileSync(path.join(workspace, ".claude", "skills", "aep", "SKILL.md"), "utf8"),
+      composed.github,
     );
   });
 });
 
 // A local run whose overlay went missing must not silently fall back to the
 // platform's procedure: it would be told to push and open a pull request.
-test("assembleBasePlugin: local mode rejects a library with no overlay", () => {
-  inTempDir((dir) => {
-    for (const skill of ["aep", "aep-validation", "playwright-cli"]) {
-      fs.mkdirSync(path.join(dir, "library", skill), { recursive: true });
-      fs.writeFileSync(path.join(dir, "library", skill, "SKILL.md"), `---\nname: ${skill}\n---\n\nbody\n`);
-    }
-    assert.throws(
-      () => assembleBasePlugin({ libraryDir: path.join(dir, "library"), destDir: path.join(dir, "out"), mode: "local" }),
+test("local mode rejects a library with no overlay", () => {
+  return inTempDir(async (dir) => {
+    const library = path.join(dir, "library");
+    fs.mkdirSync(path.join(library, "aep"), { recursive: true });
+    fs.writeFileSync(
+      path.join(library, "aep", "SKILL.md"),
+      "---\nname: aep\nmetadata:\n  aep:\n    audience: [coding]\n---\n\nbody\n",
+    );
+    await assert.rejects(
+      () => mirrorLocalSkillLibrary(library, path.join(dir, "ws"), new Set(), "local"),
       /needs the overlay aep\/overlays\/local\.md/,
     );
   });
 });
 
-// A half-written plugin dir left behind by a failed compose would be loaded by a
-// retry as if it were whole.
-test("assembleBasePlugin: a malformed overlay leaves no plugin dir behind", () => {
-  inTempDir((dir) => {
-    for (const skill of ["aep", "aep-validation", "playwright-cli"]) {
-      fs.mkdirSync(path.join(dir, "library", skill), { recursive: true });
-      fs.writeFileSync(path.join(dir, "library", skill, "SKILL.md"), `---\nname: ${skill}\n---\n\nbody\n`);
-    }
-    fs.mkdirSync(path.join(dir, "library", "aep", "overlays"));
-    fs.writeFileSync(path.join(dir, "library", "aep", "overlays", "local.md"), "<!-- drop-section: ## Nope -->\n");
-    const dest = path.join(dir, "out");
-    assert.throws(() => assembleBasePlugin({ libraryDir: path.join(dir, "library"), destDir: dest, mode: "local" }));
-    assert.ok(!fs.existsSync(dest));
+// A half-written mirror left behind by a failed compose would be read by a retry
+// as if it were whole — and by `requireWorkflowBodies` as a workflow that is
+// present. Composing happens before the first copy for exactly this reason.
+test("a malformed overlay writes no mirror at all", () => {
+  return inTempDir(async (dir) => {
+    const library = path.join(dir, "library");
+    fs.mkdirSync(path.join(library, "aep", "overlays"), { recursive: true });
+    fs.writeFileSync(
+      path.join(library, "aep", "SKILL.md"),
+      "---\nname: aep\nmetadata:\n  aep:\n    audience: [coding]\n---\n\nbody\n",
+    );
+    fs.writeFileSync(path.join(library, "aep", "overlays", "local.md"), "<!-- drop-section: ## Nope -->\n");
+    const workspace = path.join(dir, "ws");
+    await assert.rejects(() => mirrorLocalSkillLibrary(library, workspace, new Set(), "local"));
+    assert.ok(!fs.existsSync(path.join(workspace, ".claude", "skills", "aep")));
   });
 });

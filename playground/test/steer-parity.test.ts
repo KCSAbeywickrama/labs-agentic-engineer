@@ -104,7 +104,7 @@ test("targetSuffix + renderPlanContext shapes appear in their Go sources", () =>
 // BODIES no longer need a parity test: there is one authored SKILL.md in the
 // repo-root library, and the local-mode edits that produce the playground's copy
 // of it (skills/aep/overlays/local.md) are checked by
-// runners/remote-worker/src/lib/base_plugin.test.ts.
+// runners/remote-worker/src/lib/workflow_skill.test.ts.
 
 const SKILL_POINTER = "Follow the `aep` skill loaded in your session — it defines discovery, ordering, fan-out";
 

@@ -4,6 +4,7 @@ description: Load when working a CODING run dispatched by WSO2 Labs Agentic Engi
 metadata:
   aep:
     kind: platform
+    audience: [coding]
 ---
 
 # AEP coding run
@@ -43,7 +44,7 @@ choices, the exact build-verify command, and that stack's own pitfalls. None of
 them is in your context — you have their descriptions and nothing else, and their
 content arrives only when you load one. **Load a component's skills before you
 write a line of its code**, and re-read them rather than working from memory of a
-similar project: its `design.json` lists them under `skillsApplied`, and each is
+similar project: its `design.json` lists them under `skillsPinned`, and each is
 offered to you under a kind prefix, so `ballerina` there is the skill named
 `org-ballerina` here. Name them in every subagent prompt, by the prefixed name.
 

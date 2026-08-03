@@ -95,7 +95,7 @@ test("only the admitted skills reach .claude/skills/", async () => {
   });
   const workspace = mkdtempSync(join(tmpdir(), "aep-local-ws-"));
 
-  await mirrorLocalSkillLibrary(skillsDir, workspace, new Set());
+  await mirrorLocalSkillLibrary(skillsDir, workspace, new Set(), "github");
 
   const at = (n: string) => join(workspace, ".claude", "skills", n, "SKILL.md");
   assert.ok(existsSync(at("go")), "coding skill must be mirrored");
@@ -109,7 +109,7 @@ test("a pinned design-only skill IS mirrored", async () => {
   const skillsDir = libraryDir({ planning: md("planning", "[design]") });
   const workspace = mkdtempSync(join(tmpdir(), "aep-local-ws-"));
 
-  await mirrorLocalSkillLibrary(skillsDir, workspace, new Set(["planning"]));
+  await mirrorLocalSkillLibrary(skillsDir, workspace, new Set(["planning"]), "github");
 
   assert.ok(existsSync(join(workspace, ".claude", "skills", "planning", "SKILL.md")));
 });

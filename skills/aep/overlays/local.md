@@ -3,7 +3,7 @@
 This file is **not a skill**. It is the set of edits that turn the `aep` skill
 into the playground's local-mode workflow: a plain project directory, `issues/*.md`
 instead of the issues API, no remote, no pull request. `lib/skill_overlay.ts`
-applies it when the runner composes the base plugin for `mode: "local"`
+applies it when the mirror is written for `mode: "local"`
 (`ADR-0004`); the platform's own runs read `SKILL.md` untouched, and nothing
 copies this file into a session's plugin.
 

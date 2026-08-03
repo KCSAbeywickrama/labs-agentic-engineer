@@ -5,6 +5,7 @@ allowed-tools: Bash(playwright-cli:*) Bash(npx:*) Bash(npm:*)
 metadata:
   aep:
     kind: platform
+    audience: [coding]
 ---
 
 # Browser Automation with playwright-cli

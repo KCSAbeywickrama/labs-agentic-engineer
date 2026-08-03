@@ -66,8 +66,8 @@ const LOCAL_ENTRY = join(REPO_ROOT, "runners", "remote-worker", "src", "local.ts
 const BUILD_RUNNER_SCRIPT = join(REPO_ROOT, "deployments", "scripts", "build-runner.sh");
 // Where the image keeps the skill library. Mounting the working tree over it is
 // what makes a skill edit — including the local-mode overlay — apply to the next
-// run with no rebuild, and it is the ONE library the run reads: the base plugin
-// is assembled from it and the project's applied skills are resolved out of it.
+// run with no rebuild. It is the ONE library the run reads, and local mode mirrors
+// it into the project dir's .claude/skills/, standing in for the BFF's write.
 const IMAGE_LIBRARY_DIR = "/app/skills";
 const RUNNER_IMAGE = process.env.AGENT_RUNNER_IMAGE || "aep-runner:dev";
 // The Agent SDK's project state inside the image, which is where a fanned-out

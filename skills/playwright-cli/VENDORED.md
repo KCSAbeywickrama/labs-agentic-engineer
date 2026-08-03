@@ -27,10 +27,9 @@ defer all CLI mechanics to this one.
 ## Why vendored (interim)
 
 The platform has no third-party skill install channel for the runner
-today. A session reads exactly two places: the base plugin the runner
-assembles from this library, and the project clone's `.claude/skills/`,
-which is the BFF's mirror of the org library and not somewhere a
-third-party installer may write — `playwright-cli install --skills`
+today. A session reads exactly one place: the project clone's
+`.claude/skills/`, which is the BFF's mirror of the org library and not
+somewhere a third-party installer may write — `playwright-cli install --skills`
 targets `$HOME`, outside every source the runner admits. The dev flow
 also bind-mounts the repo-root `skills/` library over the image, so a
 build-time copy elsewhere would be masked. Building that channel for a

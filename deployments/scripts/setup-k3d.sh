@@ -70,8 +70,7 @@ else
     # Dev skills overlay (default ON) — bind-mount the repo-root skills/ library
     # into the k3d server node so the dev variant of aep-coding-agent can
     # hostPath-mount it into the runner pod (live skill edits, no image
-    # rebuild; the runner assembles its base plugin from this library at
-    # session start). The mount must be baked into the cluster at create-time;
+    # rebuild). The mount must be baked into the cluster at create-time;
     # k3d has no in-place equivalent. Opt out with AEP_PROD_RUNNER=1 to
     # mirror the published-image flow (no host overlay).
     if [ "${AEP_PROD_RUNNER:-0}" = "1" ]; then

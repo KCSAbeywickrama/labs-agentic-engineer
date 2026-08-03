@@ -77,8 +77,8 @@ jobs:
           file: ${{ matrix.dockerfile }}
           # aep-api and remote-worker pull repo-root skills/ in as a named context
           # (empty for every other image) — the BFF seeds the library into org
-          # skills repos, the runner assembles its base plugin out of it. See the
-          # COPY --from=skills line in each Dockerfile.
+          # skills repos, and the runner's local (playground) mode mirrors it into
+          # a project dir. See the COPY --from=skills line in each Dockerfile.
           build-contexts: ${{ matrix.buildContexts }}
           push: true
           platforms: linux/amd64,linux/arm64

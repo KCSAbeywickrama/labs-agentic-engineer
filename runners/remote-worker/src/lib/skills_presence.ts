@@ -49,7 +49,7 @@ export interface PinnedSkillsResolution {
   dangling: string[];
 }
 
-const SKILLS_MIRROR_DIR = path.join(".claude", "skills");
+export const SKILLS_MIRROR_DIR = path.join(".claude", "skills");
 
 /**
  * Partition `names` into present (preload) vs dangling, checked against
@@ -140,6 +140,66 @@ export async function readSkillBodies(workspace: string, names: readonly string[
     `instructions are included below and are ALREADY in your context — you do not need to ` +
     `invoke the Skill tool to read them again. Other skills are listed in your skill catalog ` +
     `and you can invoke those on demand as usual.\n\n` +
+    sections.join("\n\n")
+  );
+}
+
+/**
+ * Thrown when the mirror is missing a skill the run cannot proceed without.
+ * A distinct type so an entrypoint can report "the platform did not deliver the
+ * workflow" rather than a generic startup crash.
+ */
+export class MissingWorkflowSkillError extends Error {
+  readonly missing: string[];
+  constructor(workspace: string, missing: string[]) {
+    super(
+      `the project's ${SKILLS_MIRROR_DIR}/ carries no ${missing.join(", ")} — ` +
+        `the platform's skill sync did not reach ${workspace}. Refusing to start: a coding run ` +
+        `without its workflow skill has no procedure to follow.`,
+    );
+    this.name = "MissingWorkflowSkillError";
+    this.missing = missing;
+  }
+}
+
+/**
+ * The always-on bodies: the run's own workflow, read from the mirror like every
+ * other skill, and FATAL when absent.
+ *
+ * This is the one place the runner refuses to degrade. Every other skill is
+ * optional — a missing pin is a warning and the build proceeds — but the `aep`
+ * skill IS the run's procedure, so a session without it does not do a smaller
+ * version of the job, it improvises one. That failure is invisible from the
+ * outside: the agent explores the repo, writes something plausible, and the run
+ * reports success. #361 documents the same shape from the other direction, where
+ * an unlisted skill was silently rejected and the agent compensated by grepping
+ * SKILL.md out of the tree for a whole release.
+ *
+ * The mirror is written at project creation, at pre-tag and again at dispatch,
+ * and each of those writes is best-effort by design — none may fail a creation,
+ * publish or dispatch. This turns the one case that matters into a loud build
+ * failure at the point where the cause is still obvious.
+ *
+ * Synchronous because `runClaudeQuery` is, and because this must throw before a
+ * session exists rather than mid-stream.
+ */
+export function requireWorkflowBodies(workspace: string, names: readonly string[]): string {
+  const sections: string[] = [];
+  const missing: string[] = [];
+  for (const name of names) {
+    try {
+      const body = fs.readFileSync(path.join(workspace, SKILLS_MIRROR_DIR, name, "SKILL.md"), "utf8");
+      sections.push(`<skill name="${name}">\n${body.trim()}\n</skill>`);
+    } catch {
+      missing.push(name);
+    }
+  }
+  if (missing.length > 0) throw new MissingWorkflowSkillError(workspace, missing);
+  return (
+    `# Your workflow\n\n` +
+    `The skill(s) below define how this run works — discovery, ordering, fan-out, ` +
+    `verification and how to finish. They are ALREADY in your context; you do not need to ` +
+    `invoke the Skill tool to read them again.\n\n` +
     sections.join("\n\n")
   );
 }

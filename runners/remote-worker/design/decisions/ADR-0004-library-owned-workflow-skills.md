@@ -1,7 +1,19 @@
 # ADR-0004 — The workflow skills live in the library; local mode is an overlay
 
-**Status:** Accepted · shipped 2026-08-02 · supersedes
+**Status:** Partly superseded (2026-08-03) · shipped 2026-08-02 · supersedes
 [ADR-0001](ADR-0001-one-mode-composed-skill.md)
+
+> [!IMPORTANT]
+> **Its delivery half is superseded by
+> [ADR-0005](ADR-0005-the-workflow-rides-the-project-mirror.md).** The one
+> library and the overlay mechanism below stand as written — that is decisions
+> 1–6, and the tests that replace the marker tests. What changed is *how the
+> skills reach a session*: there is no plugin any more, so **decisions 7 and 8
+> are void** and decision 9's path has a new value. The three skills declare
+> `audience: [coding]` and arrive in the BFF's project-repo mirror like every
+> other coding skill; the overlay is applied while that mirror is written.
+> Read ADR-0005 for the delivery story and this ADR for the overlay's grammar
+> and its safety argument.
 
 ## Context
 

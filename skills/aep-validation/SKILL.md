@@ -4,6 +4,7 @@ description: Load when working a VALIDATION task dispatched by WSO2 Labs Agentic
 metadata:
   aep:
     kind: platform
+    audience: [coding]
 ---
 
 # WSO2 Labs Agentic Engineer validation task

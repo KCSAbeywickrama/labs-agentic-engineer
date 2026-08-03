@@ -19,17 +19,17 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import os from "node:os";
+import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import {
   AGENT_SETTING_SOURCES,
   DISALLOWED_TOOLS,
+  alwaysOnSkills,
   buildMcpOptions,
-  buildSessionSkills,
   contractReferencePath,
   promptWithProjectRoot,
-  resolveBaseAgentConfig,
 } from "./runner.js";
+import { MissingWorkflowSkillError, requireWorkflowBodies } from "./skills_presence.js";
 
 // D9 secure search (Task 12) — WebSearch joins the base tool set (gated by
 // the PreToolUse DLP hook wired in runClaudeQuery; see websearch_dlp.ts).
@@ -117,91 +117,84 @@ test("buildMcpOptions: Bash stays in the base set alongside Agent", () => {
   assert.ok(tools.includes("Agent"));
 });
 
-// --- resolveBaseAgentConfig: production behavior is what you get when a caller
-// passes nothing at all ------------------------------------------------------
+// --- alwaysOnSkills: the run's own workflow is not the design's to choose ----
 
-const SHIPPED_LIBRARY = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../skills");
-const TASK_ID = "11111111-2222-3333-4444-555555555555";
-
-test("resolveBaseAgentConfig: defaults pin today's library + preload exactly", () => {
-  const impl = resolveBaseAgentConfig(undefined, "implementation", TASK_ID);
-  assert.equal(impl.libraryPath, SHIPPED_LIBRARY);
-  assert.deepEqual(impl.preload, ["aep:aep"]);
-
-  const val = resolveBaseAgentConfig(undefined, "validation", TASK_ID);
-  assert.equal(val.libraryPath, SHIPPED_LIBRARY);
-  assert.deepEqual(val.preload, ["aep:aep", "aep:aep-validation"]);
+// Every other skill a build reads is a `skillsPinned` entry someone put in a
+// design.json. This list is not: no design decides whether a coding run follows
+// the coding workflow, and a validation run's workflow REPLACES it rather than
+// adding to it.
+test("alwaysOnSkills: an implementation run is steered by aep, a validation run by both", () => {
+  assert.deepEqual(alwaysOnSkills("implementation"), ["aep"]);
+  assert.deepEqual(alwaysOnSkills("validation"), ["aep", "aep-validation"]);
 });
 
-// Mode is stated, never inferred — and the default is the production one, so a
-// new entrypoint that forgets to state it gets the safe failure: a local run
-// told to use `gh` dies on the first call, where a production run told there is
-// no remote would quietly finish without opening its PR.
-test("resolveBaseAgentConfig: mode defaults to github", () => {
-  assert.equal(resolveBaseAgentConfig(undefined, "implementation", TASK_ID).mode, "github");
-  assert.equal(resolveBaseAgentConfig(undefined, "validation", TASK_ID).mode, "github");
+// playwright-cli carries the browser mechanics a validation run reaches for, and
+// `aep-validation` names it by description. Paying for its body on every turn of
+// every validation run is what NOT listing it here buys.
+test("alwaysOnSkills: playwright-cli is left to on-demand loading", () => {
+  assert.ok(!alwaysOnSkills("validation").includes("playwright-cli"));
 });
 
-// The composed plugin must never land inside the workspace: in production that
-// is a git clone the agent commits from, and in the playground it is the
-// developer's own project directory.
-test("resolveBaseAgentConfig: the default compose dir is a per-task dir under the OS temp dir", () => {
-  const resolved = resolveBaseAgentConfig(undefined, "implementation", TASK_ID);
-  assert.equal(resolved.composeDir, path.join(os.tmpdir(), "aep-base-plugin", TASK_ID));
+// --- requireWorkflowBodies: a run with no procedure must not start -----------
+
+function withMirror<T>(skills: Record<string, string>, fn: (workspace: string) => T): T {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "aep-mirror-"));
+  try {
+    for (const [name, body] of Object.entries(skills)) {
+      fs.mkdirSync(path.join(workspace, ".claude", "skills", name), { recursive: true });
+      fs.writeFileSync(path.join(workspace, ".claude", "skills", name, "SKILL.md"), body);
+    }
+    return fn(workspace);
+  } finally {
+    fs.rmSync(workspace, { recursive: true, force: true });
+  }
+}
+
+// The mirror's writes are best-effort by design — none of them may fail a project
+// creation, a publish or a dispatch. So the one case that cannot degrade is
+// caught here instead: a session with no workflow skill does not do a smaller
+// version of the job, it improvises one and reports success.
+test("requireWorkflowBodies: a mirror with no aep skill is fatal", () => {
+  withMirror({ go: "---\nname: go\n---\n\nGo rules\n" }, (workspace) => {
+    assert.throws(() => requireWorkflowBodies(workspace, ["aep"]), (err: unknown) => {
+      assert.ok(err instanceof MissingWorkflowSkillError);
+      assert.deepEqual(err.missing, ["aep"]);
+      // The message has to name the cause, because the person reading it in a
+      // build log is not the person who broke the sync.
+      assert.match(err.message, /skill sync did not reach/);
+      return true;
+    });
+  });
 });
 
-test("resolveBaseAgentConfig: the playground's overrides ride through", () => {
-  const local = resolveBaseAgentConfig(
-    { libraryPath: "/x/skills", mode: "local", composeDir: "/x/run/base-plugin" },
-    "implementation",
-    TASK_ID,
+test("requireWorkflowBodies: a validation run missing only aep-validation is still fatal", () => {
+  withMirror({ aep: "---\nname: aep\n---\n\nThe run\n" }, (workspace) => {
+    assert.throws(
+      () => requireWorkflowBodies(workspace, ["aep", "aep-validation"]),
+      (err: unknown) => err instanceof MissingWorkflowSkillError && err.missing.length === 1,
+    );
+  });
+});
+
+// The bodies are what actually reach the model — `skills:` carries names and
+// descriptions only, so this string IS the delivery mechanism for the procedure.
+test("requireWorkflowBodies: present skills come back fenced and labelled as loaded", () => {
+  withMirror(
+    {
+      aep: "---\nname: aep\n---\n\nCODEWORD-RUN\n",
+      "aep-validation": "---\nname: aep-validation\n---\n\nCODEWORD-VALIDATION\n",
+    },
+    (workspace) => {
+      const out = requireWorkflowBodies(workspace, ["aep", "aep-validation"]);
+      assert.match(out, /CODEWORD-RUN/);
+      assert.match(out, /CODEWORD-VALIDATION/);
+      assert.match(out, /<skill name="aep">/);
+      assert.match(out, /<skill name="aep-validation">/);
+      // Without this the agent re-invokes the Skill tool for guidance it already
+      // has and pays for the body twice.
+      assert.match(out, /ALREADY in your context/);
+    },
   );
-  assert.equal(local.libraryPath, "/x/skills");
-  assert.equal(local.mode, "local");
-  assert.equal(local.composeDir, "/x/run/base-plugin");
-  // Local mode preloads the SAME skill identity as production — one plugin, one
-  // skill name, only the composed body differs.
-  assert.deepEqual(local.preload, ["aep:aep"]);
-});
-
-test("resolveBaseAgentConfig: an explicit basePreload owns the FULL list (no validation append)", () => {
-  const pinned = resolveBaseAgentConfig({ basePreload: ["aep:aep"] }, "validation", TASK_ID);
-  assert.deepEqual(pinned.preload, ["aep:aep"]);
-});
-
-// --- buildSessionSkills: one plugin, and the whole mirror in the allowlist ---
-
-// There is exactly ONE plugin: the base plugin the runner assembled. The
-// per-task `aep-task-skills` plugin is gone — project skills arrive as the BFF's
-// `.claude/skills/` mirror inside the workspace, which the SDK discovers itself.
-// A second plugin entry appearing here again would mean someone reintroduced a
-// fetch the mirror exists to replace.
-test("buildSessionSkills: one plugin, and every mirrored name joins the allowlist", () => {
-  const built = buildSessionSkills("/run/base-plugin", ["go", "openapi-conventions"], ["aep:aep"]);
-  assert.deepEqual(built.plugins, [{ type: "local", path: "/run/base-plugin" }]);
-  // The WHOLE mirror, not just the pins: `skills:` is an allowlist, so a
-  // mirrored skill left out of it is rejected by the Skill tool outright.
-  assert.deepEqual(built.skills, ["aep:aep", "go", "openapi-conventions"]);
-});
-
-// An empty mirror is the normal shape for a validation run (no design skills
-// apply) — it must leave the base preload exactly as it was, not degrade it.
-test("buildSessionSkills: an empty mirror leaves the base preload alone", () => {
-  const built = buildSessionSkills("/run/base-plugin", [], ["aep:aep", "aep:aep-validation"]);
-  assert.deepEqual(built.plugins, [{ type: "local", path: "/run/base-plugin" }]);
-  assert.deepEqual(built.skills, ["aep:aep", "aep:aep-validation"]);
-});
-
-// The base preload is the caller's array, and a validation run's second workflow
-// body is the one thing that still MUST be in context at startup — so mutating
-// the result must not reach back and corrupt it.
-test("buildSessionSkills: the base preload rides through unchanged, and is copied", () => {
-  const basePreload = ["aep:aep", "aep:aep-validation"];
-  const built = buildSessionSkills("/run/base-plugin", ["go"], basePreload);
-  assert.deepEqual(built.skills, ["aep:aep", "aep:aep-validation", "go"]);
-
-  built.skills.push("aep:playwright-cli");
-  assert.deepEqual(basePreload, ["aep:aep", "aep:aep-validation"], "must not alias the caller's array");
 });
 
 // --- DISALLOWED_TOOLS: the boundary that survives bypassPermissions ---------
@@ -246,9 +239,12 @@ test("promptWithProjectRoot: the platform's own workspace shape survives it", ()
 // subagents, dropping the workspace prefix — the read failed and the subagent fell
 // to scanning `/` for the file. The prompt now carries the exact string to copy.
 test("promptWithProjectRoot: states the contract path for the lead to hand on", () => {
-  const contract = contractReferencePath("/workspace/run/base-plugin");
+  const contract = contractReferencePath("/workspace/project");
+  // Inside the mirror, like every other skill file — so a subagent reads the same
+  // bytes the lead does, and a developer who clones the repo can read them too.
+  assert.equal(contract, path.join("/workspace/project", ".claude", "skills", "aep", "references", "component-contract.md"));
   const out = promptWithProjectRoot("Work the issues", "/workspace/project", contract);
-  assert.match(out, /\/workspace\/run\/base-plugin\/skills\/aep\/references\/component-contract\.md/);
+  assert.match(out, /\.claude\/skills\/aep\/references\/component-contract\.md/);
   assert.match(out, /hand that exact path to every subagent/);
   assert.ok(out.endsWith("Work the issues"));
 });
@@ -256,7 +252,7 @@ test("promptWithProjectRoot: states the contract path for the lead to hand on", 
 test("promptWithProjectRoot: omitting the contract path leaves the prompt as it was", () => {
   // The platform's Go prompt builder and the playground's both go through
   // runClaudeQuery, which always passes it — but the seam stays optional so a
-  // caller that has no plugin dir cannot be broken by this.
+  // caller with no mirror cannot be broken by this.
   const out = promptWithProjectRoot("Work the issues", "/workspace/project");
   assert.ok(!out.includes("component-contract.md"));
   assert.ok(out.endsWith("Work the issues"));

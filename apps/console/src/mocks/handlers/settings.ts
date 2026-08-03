@@ -122,6 +122,7 @@ function toSummary(s: SkillDetailBody): SkillSummary {
     editable: s.editable,
     deletable: s.deletable,
     enabled: s.enabled,
+    required: s.required,
   };
 }
 
@@ -161,6 +162,7 @@ function importSkill(name: string, source: string): ImportResult {
       editable: true,
       deletable: true,
       enabled: true,
+      required: false,
       description: `Imported from ${source}.`,
       skillMd: `---\nname: ${name}\ndescription: Imported from ${source}.\n---\n\nImported skill body.`,
       references: {},
@@ -299,6 +301,7 @@ export const settingsHandlers = [
           editable: true,
           deletable: true,
           enabled: true,
+          required: false,
           description: `${t.name} (platform-shipped)`,
           skillMd: `---\nname: ${t.name}\ndescription: ${t.name} (platform-shipped)\n---\n\nPlatform-shipped skill body.`,
           references: {},
@@ -349,6 +352,7 @@ export const settingsHandlers = [
       editable: true,
       deletable: true,
       enabled: true,
+      required: false,
       description: extractDescription(body.skillMd),
       skillMd: body.skillMd,
       references: body.references ?? {},

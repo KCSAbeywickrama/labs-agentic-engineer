@@ -16,31 +16,34 @@
  * under the License.
  */
 
-// Dev CLI (`make runner-plugin`) — writes the base plugin a session would load,
-// so a human can install it into their own Claude Code:
+// Dev CLI (`make workflow-skill`) — prints the `aep` workflow skill exactly as a
+// session reads it, on stdout:
 //
-//   make runner-plugin            # github mode (what the platform dispatches)
-//   MODE=local make runner-plugin # what a playground run reads
-//   claude plugin install <printed path>
+//   make workflow-skill             # github mode: the authored trunk, verbatim
+//   MODE=local make workflow-skill  # what a playground run reads
 //
-// It exists because the plugin is no longer a checked-in directory: it is
-// assembled from the library per run. Rather than keep a second, hand-authored
-// copy for people to install (which would drift — that is the whole point of
-// ADR-0004), this runs the SAME assembler a session runs.
+// It exists because local mode's text is DERIVED — the authored `SKILL.md` plus
+// `overlays/local.md` — so "what is the agent actually steered by?" has no file
+// on disk to open. This runs the same composer a run runs, which is the whole
+// point: a second hand-maintained copy would drift (ADR-0005).
+//
+// Answering that question used to be free, because a local run wrote its composed
+// plugin under the run dir. It cannot any more: composing into that dir is a
+// bind mount in docker mode, where `fs.cpSync` fails EACCES. So the question
+// moved here, off a run's critical path.
 //
 // Never shipped in the production image (`.dockerignore`), and never on a run's
-// path: `oneshot.ts` and `local.ts` call the assembler directly.
+// path: `local_skill_mirror.ts` composes for a session.
 //
 // Env:
 //   AEP_LIBRARY_DIR  the skill library  (default: the checkout's repo-root
 //                    skills/ — this CLI runs from a checkout, never in the image
 //                    where the library is baked at /app/skills)
-//   AEP_PLUGIN_OUT   where to write it  (default: ../.plugin-dev)
 //   MODE             github | local     (default: github)
 
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { assembleBasePlugin, type AgentMode } from "./lib/base_plugin.js";
+import { composeWorkflowSkill, type AgentMode } from "./lib/workflow_skill.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -53,9 +56,5 @@ function readMode(): AgentMode {
 }
 
 const libraryDir = process.env.AEP_LIBRARY_DIR ?? path.resolve(__dirname, "../../../skills");
-const destDir = process.env.AEP_PLUGIN_OUT ?? path.resolve(__dirname, "../.plugin-dev");
-const mode = readMode();
-
-const out = assembleBasePlugin({ libraryDir, destDir, mode });
-console.log(`assembled the ${mode} base plugin from ${libraryDir}`);
-console.log(out);
+// stdout carries the skill and nothing else, so it pipes into a diff or a pager.
+process.stdout.write(composeWorkflowSkill(libraryDir, readMode()));

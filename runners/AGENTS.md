@@ -3,12 +3,14 @@
 One-shot / job images (not long-lived services). Run to completion in a pod.
 
 **Status:** `remote-worker/` is the coding-agent runner — a TS Claude Agent SDK
-one-shot pod that provisions a workspace, assembles its base plugin out of the
-repo-root skill library, and runs the Agent SDK. Skills are **authored in
-`<repo>/skills/`, not here** (`skills/AGENTS.md` has the authoring rules); this
-package owns their delivery. The dev flow bind-mounts that library into the
-runner pod at `/app/skills` for live skill edits (see
-`deployments/scripts/setup-k3d.sh`).
+one-shot pod that provisions a workspace and runs the Agent SDK against it.
+Skills are **authored in `<repo>/skills/`, not here** (`skills/AGENTS.md` has
+the authoring rules) and **delivered by the BFF, not here either**: a run reads
+the `.claude/skills/` mirror in its own clone. What this package owns is
+consuming that mirror correctly — the always-on workflow, the allowlist, and the
+playground's stand-in for the BFF write. The dev flow bind-mounts the library
+into the runner pod at `/app/skills` for live skill edits (see
+`deployments/scripts/setup-k3d.sh`), which is what the playground mirrors from.
 
 ## Conventions
 
@@ -117,44 +119,54 @@ runner pod at `/app/skills` for live skill edits (see
   (`aep-local-milestone`) for the same reason: a playground coding run works
   the whole project, same as the milestone loop, and may touch several
   components — there is no single one to name.
-- **Only the base plugin preloads.** The SDK `skills:` array carries `aep:aep`
-  (plus `aep:aep-validation` on a validation run) and nothing else; every
-  project-attached skill is listed by description and its body arrives when the
-  agent loads it. `buildSessionSkills` (`lib/runner.ts`) is the seam that holds
-  this and `runner.test.ts` pins it. Kind decides the materialised prefix only —
-  `org` bought a preloaded body until it didn't, which made a run's startup
-  context grow with the number of components the project designed. The cost of
-  the flip is that a skill's **description** is now the whole trigger, so a thin
-  one silently loses its skill; `skills/AGENTS.md` owns that rule.
-- **The base plugin is ASSEMBLED from `<repo>/skills/`, per session, per mode.**
-  `lib/base_plugin.ts` is the single choke point: it selects the runner's three
-  skills out of the library (`aep`, `aep-validation`, `playwright-cli`), applies
-  `skills/aep/overlays/local.md` when the mode is `local`, and writes the result
-  to a scratch dir the SDK loads. Three properties it exists to hold, all pinned
-  by `base_plugin.test.ts`:
-  **the selection is explicit** — the library also holds the design-flow skills,
-  and a coding session that could see `design`'s description is one `loadSkill`
-  from being told to author `specs/`;
-  **`overlays/` never reaches a session** — the `aep` skill lets the agent read
-  its own skill dir, so a local-mode overlay sitting beside `SKILL.md` in a
-  production run is a second procedure it can find;
-  **assembling happens here, not in the entrypoints** — a caller passes a mode,
-  never a composed directory, so no new caller can hand the SDK something
-  hand-built. Mode is stated (`BaseAgentConfig.mode`, default `github`), never
-  inferred. ADR:
-  `remote-worker/design/decisions/ADR-0004-library-owned-workflow-skills.md`.
-- **Anything a skill must invoke by absolute path reads `$AEP_SKILLS_DIR`.** The
-  runner stamps it (`lib/runner.ts`) because it is the only layer that knows
-  where the library is: a mount point in the cluster, a bind-mount in the
-  playground, a checkout on a developer's host. `aep-validation` runs the
-  platform's report generator through it. A hardcoded path is wrong in two modes
-  out of three — it was, and it named `/app/plugin`, which stopped existing when
-  the plugin became an assembled artifact.
+- **There are NO plugins, and the mirror is the only skill source.** The runner
+  once loaded two — one it assembled from the library, one it materialised per
+  task — and both are gone. `aep`, `aep-validation` and `playwright-cli` are
+  library skills carrying `audience: [coding]`, so the BFF mirrors them into the
+  project repo exactly like `go`, and a coding session reads one directory. What
+  reaches a build is therefore decided in one place, by the BFF: `design`'s
+  description cannot appear in a coding session's catalog because
+  `audience: [design]` keeps it out of the mirror, not because the runner filters
+  a library. ADR:
+  `remote-worker/design/decisions/ADR-0005-the-workflow-rides-the-project-mirror.md`.
+- **The always-on set is the runner's, not the design's.** `alwaysOnSkills`
+  (`lib/runner.ts`) names `aep` for every run and `aep-validation` for a
+  validation task; `requireWorkflowBodies` reads those bodies out of the mirror
+  and appends them to the `claude_code` preset. Everything else a component needs
+  is a `skillsPinned` entry someone put in a `design.json` — but no design decides
+  whether a coding run follows the coding workflow. `playwright-cli` is
+  deliberately NOT always-on: `aep-validation` names it, and mechanics a run may
+  not reach for should cost a load, not every turn.
+- **A mirror with no workflow skill is FATAL.** `requireWorkflowBodies` throws and
+  both entrypoints report a failed run. Every other skill degrades — a dangling
+  pin warns and the build continues — because missing guidance costs quality and
+  aborting costs the whole build. The workflow is the exception: a session without
+  it improvises a procedure and reports success, which is invisible from outside.
+  The mirror's writes are best-effort by design (they may not fail a creation,
+  publish or dispatch), so this is where that becomes visible. **Do not add an
+  image fallback**: two sources drift, and the fallback would silently discard an
+  org's own edit to the skill. The check sits in `runClaudeQuery`, so no new
+  entrypoint can start a procedure-less session.
+- **Anything a skill must invoke by absolute path reads `$AEP_SKILLS_DIR`**, now
+  `<workspace>/.claude/skills`. The runner stamps it (`lib/runner.ts`) because it
+  is still the only layer that knows the value. `aep-validation` runs the
+  platform's report generator through it, and the component contract a lead hands
+  to fan-out subagents (`contractReferencePath`) resolves the same way. A
+  hardcoded path is wrong somewhere — it was, and it named `/app/plugin`.
+- **`lib/workflow_skill.ts` composes ONE file**: `skills/aep/SKILL.md` for a mode.
+  Production mirrors the authored trunk verbatim; local mode applies
+  `skills/aep/overlays/local.md`, and `local_skill_mirror.ts` does it **while
+  writing the mirror**, which is what keeps it unskippable. Every writer filters
+  `overlays/` out — `loadLibrary` never seeds it, so no org repo has one for the
+  BFF to copy — because the `aep` skill lets the agent read its own directory and
+  an overlay beside `SKILL.md` is a second procedure it can find.
+  `make workflow-skill` prints either mode without spawning a session.
 - **The library arrives as a BuildKit named context**
   (`--build-context skills=<repo>/skills` → `COPY --from=skills . /app/skills`),
-  the same mechanism `aep-api` uses. Add it to any new build path or the image
-  ships without a workflow: `build-runner.sh`, `release.yml`'s matrix row, and
-  `local/run-local.sh` all pass it.
+  the same mechanism `aep-api` uses. Add it to any new build path or the
+  playground has no library to mirror: `build-runner.sh`, `release.yml`'s matrix
+  row, and `local/run-local.sh` all pass it. A dispatched run does not read it —
+  its skills come from the clone — but `local.ts` does.
 - **One image**, `remote-worker/Dockerfile`, serves BOTH task kinds
   (`AEP_TASK_KIND=implementation` and `=validation`). It is Debian-based
   because Playwright's browsers are glibc-linked; do not reintroduce a second,

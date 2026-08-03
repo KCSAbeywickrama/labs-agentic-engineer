@@ -126,7 +126,7 @@ provenance-pinned verbatim copies of the live Go steer strings —
 the same runner session options (`resolveBaseAgentConfig` defaults are
 unit-pinned in remote-worker), and and the same authored workflow skill
 out of the same library (only the GitHub-shaped passages are swapped, by
-`skills/aep/overlays/local.md` — `base_plugin.test.ts` pins which text is shared
+`skills/aep/overlays/local.md` — `workflow_skill.test.ts` pins which text is shared
 and asserts neither mode leaks the other's procedure; ADR-0004 in
 remote-worker).
 

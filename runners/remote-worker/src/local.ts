@@ -20,7 +20,7 @@
 // workspace IS a plain local project dir (no clone, no credhelper, no PAT),
 // and the workflow skill is the SAME `aep` skill production loads, with
 // `overlays/local.md` applied for `mode: "local"` (edit-in-place, no PR). See
-// base_plugin.ts: both modes read one authored SKILL.md, so the project
+// workflow_skill.ts: both modes read one authored SKILL.md, so the project
 // conventions the playground exists to tune cannot drift from the ones a real
 // run uses.
 // Mirrors prod's milestone dispatch (`docs/decisions/ADR-0011`; playground
@@ -38,8 +38,8 @@
 //
 // Env contract (stamped by the playground CLI):
 //   AEP_LOCAL_PROJECT_DIR  the project directory (becomes the cwd)
-//   AEP_LOCAL_SKILLS_DIR   the skill library — ONE dir serving both the base
-//                          plugin and the project's applied skills
+//   AEP_LOCAL_SKILLS_DIR   the skill library to mirror from — the same one the
+//                          BFF reconciles into an org's repo in production
 //                          (default: ../skills, the library baked into the image)
 //   AEP_LOCAL_RUN_DIR      scratch/log dir (default: <project>/.aep-playground/runner)
 //   ANTHROPIC_API_KEY      OPTIONAL. Present (the containerised playground run,
@@ -68,7 +68,6 @@ import { installConsoleScrubber } from "./lib/progress/console_scrub.js";
 import { resolveTaskSkills } from "./lib/skills_resolver.js";
 import { listMirroredSkills, readSkillBodies, resolvePinnedSkills } from "./lib/skills_presence.js";
 import { mirrorLocalSkillLibrary } from "./lib/local_skill_mirror.js";
-import { BASE_PLUGIN_SKILLS } from "./lib/base_plugin.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // The SAME authored library production reads (repo-root `skills/`, baked in at
@@ -94,7 +93,7 @@ function requireEnv(name: string): string {
 
 interface LocalRun {
   projectDir: string;
-  /** The skill library: the base plugin is assembled from it, applied skills resolved out of it. */
+  /** The skill library this run mirrors into the project dir, standing in for the BFF's write. */
   libraryDir: string;
   runDir: string;
 }
@@ -160,21 +159,27 @@ async function main(): Promise<number> {
   }
   emit({ kind: "phase", phase: "workspace_ready" });
 
-  // Per-task skills: the same pin read as production, resolved against
-  // `.claude/skills/` in the project dir — the SAME location the SDK discovers
-  // natively via `cwd: layout.workspace` (== run.projectDir here). No clone, no
-  // second plugin. The playground has no BFF, so it writes that mirror itself,
-  // applying the production copy rule so a local run sees the same filtered set
-  // a real project would. Pins are read BEFORE the mirror because they are an
-  // INPUT to that rule.
+  // The playground writes its own mirror, standing in for the BFF write that
+  // production gets for free — into `.claude/skills/` in the project dir, the
+  // SAME location the SDK discovers natively via `cwd: layout.workspace`
+  // (== run.projectDir here). No clone, no plugin. It applies the production copy
+  // rule, so a local run sees the same filtered set a real project would, and
+  // pins are read BEFORE it because they are an INPUT to that rule.
   //
-  // `withheld` is the runner's own base-plugin selection. Those three skills
-  // reach the session from the assembled plugin, so mirroring them too would put
-  // a second copy of the workflow in the same session — and in local mode the
-  // mirrored copy is the un-overlaid GitHub procedure, which is the exact
-  // failure ADR-0004 decision 1 exists to prevent.
+  // `mode: "local"` is what makes the mirrored `aep` skill the playground's
+  // procedure rather than the platform's. It is stated, never inferred: deriving
+  // it from something incidental (an empty `repoUrl`, an absent MCP token) would
+  // tie the agent's whole procedure to a signal whose meaning could shift for an
+  // unrelated reason. `github` is the default in the mirror writer for the same
+  // reason it always was — a local run wrongly given the platform's procedure
+  // dies on its first `gh` call, where the reverse would quietly finish without
+  // opening a PR.
   //
-  // Failure degrades to the base plugin, loudly.
+  // A failure here is NOT recoverable: the mirror is where the workflow skill
+  // comes from, so a run whose mirror never got written has no procedure to
+  // follow. runClaudeQuery refuses to start such a session (see
+  // requireWorkflowBodies), which is why this only warns — the fatal check is one
+  // place, not two.
   let availableSkillNames: string[] = [];
   let pinnedBodies = "";
   try {
@@ -185,9 +190,7 @@ async function main(): Promise<number> {
       scope: { kind: "project" },
       log: (l) => console.log(l),
     });
-    await mirrorLocalSkillLibrary(run.libraryDir, run.projectDir, new Set(pinned), (l) => console.log(l), {
-      withheld: new Set(BASE_PLUGIN_SKILLS),
-    });
+    await mirrorLocalSkillLibrary(run.libraryDir, run.projectDir, new Set(pinned), "local", (l) => console.log(l));
     const { preload, dangling } = await resolvePinnedSkills(run.projectDir, pinned, (l) => console.log(l));
     if (dangling.length > 0) {
       console.warn(`[local] ⚠️  pinned skill(s) missing from .claude/skills/ — proceeding without them: ${dangling.join(", ")}`);
@@ -226,20 +229,19 @@ async function main(): Promise<number> {
   };
 
   const log = openTaskLog(run.runDir);
-  // Assemble the base plugin CONTAINER-LOCAL, never under run.runDir. In docker
-  // mode that dir is a bind mount from the host, and the assembler copies the
-  // plugin tree with fs.cpSync — which fails EACCES on the mount even at mode
-  // 0777 and even though mkdir, write and shell `cp -r` all succeed there. It is
-  // the file-sharing backend, not the permissions: the same cpSync into /tmp
-  // works. Composing into the mount killed every docker-mode run before the
-  // agent started. So "what text did the agent actually read?" is answered by
-  // `make runner-plugin` off the critical path, not by the run dir.
-  const composeDir = path.join(os.tmpdir(), "aep-base-plugin", req.taskId);
-  const { completion } = runClaudeQuery(req, layout, log, { availableSkillNames, pinnedBodies }, {
-    libraryPath: run.libraryDir,
-    mode: "local",
-    composeDir,
-  });
+  let completion: Promise<{ exitCode: number }>;
+  try {
+    ({ completion } = runClaudeQuery(req, layout, log, { availableSkillNames, pinnedBodies }));
+  } catch (err) {
+    // The mirror carries no workflow skill, so there is no procedure to run —
+    // see requireWorkflowBodies. In the playground that means the library or the
+    // overlay is broken, which is exactly what a developer here wants told
+    // plainly rather than discovered from a session that improvised.
+    const msg = err instanceof Error ? err.message : String(err);
+    emit({ kind: "result", status: "failure", error: `skills: ${msg}` });
+    console.error(`[local] ${msg}`);
+    return 2;
+  }
   const result = await completion;
   return result.exitCode;
 }

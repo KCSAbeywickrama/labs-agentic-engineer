@@ -25,8 +25,9 @@
 #   ./run-local.sh [path/to/env-file]
 #
 # The repo-root skills/ library is bind-mounted read-only over /app/skills, so
-# skill edits are live without an image rebuild (mirrors the k3d dev flow); the
-# runner assembles its base plugin out of it at session start.
+# skill edits are live without an image rebuild (mirrors the k3d dev flow). A
+# dispatched run reads its skills from the clone's .claude/skills/ mirror, not
+# from here — this mount is what the playground's local mode mirrors FROM.
 # Exit code mirrors the runner: 0 success, 1 agent failure, 2 provisioning.
 
 set -euo pipefail

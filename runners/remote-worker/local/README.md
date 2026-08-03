@@ -14,9 +14,11 @@ and hands back your GitHub PAT.
    loads the `aep` skill plugin, and lets the agent work `AEP_PROMPT` —
    branch, commit, push, PR, exactly as a cluster run would.
 
-`AEP_PLATFORM_URL` is left unset, so the per-task skills pull is skipped;
-the base plugin at `../plugin` is bind-mounted read-only into the
-container, so skill edits are live on the next run without a rebuild.
+The run reads every skill from the `.claude/skills/` mirror the BFF wrote
+into the clone — there is no skills fetch and no plugin. The repo-root
+`skills/` library is bind-mounted read-only over `/app/skills` all the
+same, so a skill edit is live on the next run without a rebuild; the
+playground's local mode mirrors from it, and the mount is harmless here.
 
 ## Usage
 

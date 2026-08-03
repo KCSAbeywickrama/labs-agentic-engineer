@@ -85,7 +85,7 @@ the requirements state them.
 **Backend services are written in Ballerina** unless the requirements name a
 different language, in which case honour what they say. That choice is a fact
 you record, not a preference you re-derive per component: write it as the
-component's `language` and pin the matching stack skill in `skillsApplied`.
+component's `language` and pin the matching stack skill in `skillsPinned`.
 
 After emitting or changing a component's design, record the skills that
 component's build actually needs as a `skillsPinned` array **inside that

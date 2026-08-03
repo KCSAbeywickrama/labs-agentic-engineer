@@ -40,19 +40,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import { parse as parseYaml } from "yaml";
+import { OVERLAYS_DIR, SKILL_FILE, WORKFLOW_SKILL, composeWorkflowSkill, type AgentMode } from "./workflow_skill.js";
 
 /** Leading YAML frontmatter fence (LF-normalized). */
 const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---/;
 
 const AUDIENCE_DESIGN = "design";
 const AUDIENCE_CODING = "coding";
-
-/**
- * The one subdirectory of an authored skill that is not skill content — the
- * runner's mode overlays. Mirrors `skillOverlaysDir` in `aep-api`'s
- * `repo_store.go`, which keeps it out of every org repo for the same reason.
- */
-const SKILL_OVERLAYS_DIR = "overlays";
 
 /**
  * The audiences a SKILL.md declares (`metadata.aep.audience`). Unrecognised
@@ -84,36 +78,23 @@ export interface MirrorSelection {
   /** Skill names the rule admits into the project's `.claude/skills/`. */
   copied: string[];
   /** Names withheld, with why — logged so a local run explains its own mirror. */
-  skipped: Array<{ name: string; reason: "design-only" | "disabled" | "runner-owned" }>;
+  skipped: Array<{ name: string; reason: "design-only" | "disabled" }>;
 }
 
 /**
- * Apply the copy rule to a working-tree library. `pinned` overrides the audience
- * and availability axes: a component that pinned a skill needs it whatever those
- * say, which is the drift guard production carries too — an admin toggle must not
- * break a build already designed against a skill.
- *
- * `withheld` is NOT overridable by a pin, and it is the one rule the playground
- * has that production does not need. It names the skills the runner delivers
- * itself, out of the base plugin it assembles. Mirroring one of those would put a
- * second copy of the same skill in a session, and in local mode that copy is the
- * library's un-overlaid text — the platform's `gh`/PR procedure in a run that has
- * no remote (ADR-0004 decision 1). Production is unaffected: `aep-api`'s
- * `loadLibrary` never seeds these into an org repo, so its mirror cannot see them.
+ * Apply the copy rule to a working-tree library. `pinned` overrides BOTH axes:
+ * a component that pinned a skill needs it whatever its audience or
+ * availability says, which is the drift guard production carries too — an
+ * admin toggle must not break a build already designed against a skill.
  */
 export function selectMirroredSkills(
   library: Array<{ name: string; skillMd: string }>,
   pinned: ReadonlySet<string>,
   disabled: ReadonlySet<string>,
-  withheld: ReadonlySet<string> = new Set(),
 ): MirrorSelection {
   const copied: string[] = [];
   const skipped: MirrorSelection["skipped"] = [];
   for (const { name, skillMd } of library) {
-    if (withheld.has(name)) {
-      skipped.push({ name, reason: "runner-owned" });
-      continue;
-    }
     if (pinned.has(name)) {
       copied.push(name);
       continue;
@@ -166,24 +147,37 @@ export async function readLocalLibrary(skillsDir: string): Promise<Array<{ name:
  * so an org repo has no `overlays/` for the BFF's mirror to copy. A local run
  * writing one would be the one place a session could find a second, contradictory
  * procedure beside the skill it is following — and the `aep` skill explicitly
- * permits reading its own directory (ADR-0004 decision 6).
+ * permits reading its own directory (ADR-0005).
+ *
+ * `mode` is the reason this writer exists rather than a directory copy. The
+ * workflow skill lands COMPOSED: production mirrors the authored trunk, which is
+ * what a dispatched run should read, and a local run needs the overlay applied.
+ * Composing here — at the only point where a local run's skills are written — is
+ * what makes the overlay unskippable, and it happens BEFORE the first copy so a
+ * malformed overlay leaves no half-written mirror for a retry to read.
  */
 export async function mirrorLocalSkillLibrary(
   skillsDir: string,
   workspace: string,
   pinned: ReadonlySet<string>,
+  mode: AgentMode,
   log: (line: string) => void = () => {},
-  opts: { withheld?: ReadonlySet<string> } = {},
 ): Promise<MirrorSelection> {
   const library = await readLocalLibrary(skillsDir);
-  const selection = selectMirroredSkills(library, pinned, disabledSkillNames(), opts.withheld);
+  const selection = selectMirroredSkills(library, pinned, disabledSkillNames());
+  const workflow = selection.copied.includes(WORKFLOW_SKILL)
+    ? composeWorkflowSkill(skillsDir, mode)
+    : undefined;
   const mirrorDir = path.join(workspace, ".claude", "skills");
   await fs.promises.mkdir(mirrorDir, { recursive: true });
   for (const name of selection.copied) {
     await fs.promises.cp(path.join(skillsDir, name), path.join(mirrorDir, name), {
       recursive: true,
-      filter: (src) => path.basename(src) !== SKILL_OVERLAYS_DIR,
+      filter: (src) => path.basename(src) !== OVERLAYS_DIR,
     });
+  }
+  if (workflow !== undefined) {
+    await fs.promises.writeFile(path.join(mirrorDir, WORKFLOW_SKILL, SKILL_FILE), workflow, { mode: 0o644 });
   }
   if (selection.skipped.length > 0) {
     const detail = selection.skipped.map((s) => `${s.name} (${s.reason})`).join(", ");
