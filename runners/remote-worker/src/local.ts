@@ -57,7 +57,7 @@ import type { WorkspaceLayout } from "./lib/workspace.js";
 import { emit, primeScrubber } from "./lib/progress/emitter.js";
 import { installConsoleScrubber } from "./lib/progress/console_scrub.js";
 import { resolveTaskSkills } from "./lib/skills_resolver.js";
-import { resolvePinnedSkills } from "./lib/skills_presence.js";
+import { listMirroredSkills, readSkillBodies, resolvePinnedSkills } from "./lib/skills_presence.js";
 import { mirrorLocalSkillLibrary } from "./lib/local_skill_mirror.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -159,7 +159,8 @@ async function main(): Promise<number> {
   // rule, so a local run sees the same filtered set a real project would.
   // Pins are read BEFORE the mirror because they are an INPUT to that rule.
   // Failure degrades to the base plugin, loudly.
-  let preloadSkillNames: string[] = [];
+  let availableSkillNames: string[] = [];
+  let pinnedBodies = "";
   if (run.skillsDir) {
     try {
       const pinned = await resolveTaskSkills({
@@ -171,11 +172,16 @@ async function main(): Promise<number> {
       });
       await mirrorLocalSkillLibrary(run.skillsDir, run.projectDir, new Set(pinned), (l) => console.log(l));
       const { preload, dangling } = await resolvePinnedSkills(run.projectDir, pinned, (l) => console.log(l));
-      preloadSkillNames = preload;
       if (dangling.length > 0) {
         console.warn(`[local] ⚠️  pinned skill(s) missing from .claude/skills/ — proceeding without them: ${dangling.join(", ")}`);
       }
-      console.log(`[local] preload=${preloadSkillNames.length} pinned skill(s) from the project's skill mirror`);
+      // The whole mirror is allowed (the SDK rejects anything unlisted); the
+      // pinned subset additionally rides in on the system prompt.
+      availableSkillNames = await listMirroredSkills(run.projectDir);
+      pinnedBodies = await readSkillBodies(run.projectDir, preload);
+      console.log(
+        `[local] ${availableSkillNames.length} skill(s) available, ${preload.length} pinned into context`,
+      );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.warn(`[local] ⚠️  SKILLS UNAVAILABLE — proceeding without per-task skills: ${msg}`);
@@ -214,25 +220,12 @@ async function main(): Promise<number> {
   // the permissions: the same cpSync into /tmp works. Composing into the mount
   // therefore killed every docker-mode run before the agent started.
   const composeDir = path.join(os.tmpdir(), "aep-base-plugin", req.taskId);
-  const { completion } = runClaudeQuery(req, layout, log, { preloadSkillNames }, {
+  const { completion } = runClaudeQuery(req, layout, log, { availableSkillNames, pinnedBodies }, {
     basePluginPath: run.pluginDir,
     mode: "local",
     composeDir,
   });
   const result = await completion;
-
-  // "What did the agent actually read?" is a question a developer tuning the
-  // skill asks constantly, and the composed text is container-local now — so
-  // copy the one file that answers it into the run dir. A single writeFile
-  // works on the mount; only cpSync's directory walk does not.
-  try {
-    fs.copyFileSync(
-      path.join(composeDir, "skills", "aep", "SKILL.md"),
-      path.join(run.runDir, "composed-aep-SKILL.md"),
-    );
-  } catch (err) {
-    console.warn(`[local] could not save the composed skill for inspection: ${String(err)}`);
-  }
   return result.exitCode;
 }
 

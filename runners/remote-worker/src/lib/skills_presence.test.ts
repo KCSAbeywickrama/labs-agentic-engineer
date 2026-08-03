@@ -21,7 +21,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { resolvePinnedSkills } from "./skills_presence.js";
+import { listMirroredSkills, readSkillBodies, resolvePinnedSkills } from "./skills_presence.js";
 
 async function tmpTree(files: Record<string, string>): Promise<string> {
   const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "aep-skills-presence-test-"));
@@ -68,4 +68,61 @@ test("resolvePinnedSkills: empty pin list → empty result, no fs access", async
   const ws = await tmpTree({ "README.md": "no skills mirror here" });
   const out = await resolvePinnedSkills(ws, []);
   assert.deepEqual(out, { preload: [], dangling: [] });
+});
+
+// `skills:` is an ALLOWLIST — a mirrored skill omitted from it is rejected by
+// the Skill tool ("not in this session's skills allowlist"), so the run must
+// list the WHOLE mirror or the unpinned copies are inert files on disk.
+test("listMirroredSkills: every mirrored skill is listed, sorted", async () => {
+  const ws = await tmpTree({
+    ".claude/skills/react-webapp/SKILL.md": "---\nname: react-webapp\n---\n\nB\n",
+    ".claude/skills/go/SKILL.md": "---\nname: go\n---\n\nB\n",
+    ".claude/skills/api-management/SKILL.md": "---\nname: api-management\n---\n\nB\n",
+  });
+  assert.deepEqual(await listMirroredSkills(ws), ["api-management", "go", "react-webapp"]);
+});
+
+test("listMirroredSkills: a directory without a readable SKILL.md is not a skill", async () => {
+  const ws = await tmpTree({
+    ".claude/skills/go/SKILL.md": "---\nname: go\n---\n\nB\n",
+    ".claude/skills/not-a-skill/README.md": "just docs\n",
+  });
+  assert.deepEqual(await listMirroredSkills(ws), ["go"]);
+});
+
+test("listMirroredSkills: no mirror at all is empty, not an error", async () => {
+  const ws = await tmpTree({ "README.md": "x" });
+  assert.deepEqual(await listMirroredSkills(ws), []);
+});
+
+// Nothing in `skills:` arrives in context — the model sees a name and a
+// description, and a body only when it invokes the skill. Verified against the
+// SDK: an agent holding a listed skill could not state a codeword written in
+// that skill's body until it called the Skill tool. A pin means the guidance IS
+// needed, so the body goes into the system prompt.
+test("readSkillBodies: each pinned body is included, fenced by name", async () => {
+  const ws = await tmpTree({
+    ".claude/skills/go/SKILL.md": "---\nname: go\n---\n\nBuild Go like THIS.\n",
+    ".claude/skills/react-webapp/SKILL.md": "---\nname: react-webapp\n---\n\nReact rules.\n",
+  });
+  const out = await readSkillBodies(ws, ["go", "react-webapp"]);
+  assert.match(out, /<skill name="go">/);
+  assert.match(out, /Build Go like THIS\./);
+  assert.match(out, /<skill name="react-webapp">/);
+  assert.match(out, /React rules\./);
+  // The model must be told these are already loaded, or it re-invokes the Skill
+  // tool and pays for the same body twice.
+  assert.match(out, /ALREADY in your context/);
+});
+
+test("readSkillBodies: nothing pinned is the empty string, so appending is a no-op", async () => {
+  const ws = await tmpTree({ ".claude/skills/go/SKILL.md": "---\nname: go\n---\n\nB\n" });
+  assert.equal(await readSkillBodies(ws, []), "");
+});
+
+test("readSkillBodies: a dangling pin is skipped, the rest still load", async () => {
+  const ws = await tmpTree({ ".claude/skills/go/SKILL.md": "---\nname: go\n---\n\nGo body.\n" });
+  const out = await readSkillBodies(ws, ["go", "vanished"]);
+  assert.match(out, /Go body\./);
+  assert.ok(!out.includes("vanished"));
 });

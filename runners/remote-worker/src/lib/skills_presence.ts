@@ -21,8 +21,23 @@
 // zero network, a filesystem check only.
 //
 // A pinned name with no `.claude/skills/<name>/SKILL.md` is DANGLING, not an
-// error: the caller warns and preloads the rest. Missing guidance degrades a
-// build; aborting the run over it loses the build entirely.
+// error: the caller warns and carries on with the rest. Missing guidance
+// degrades a build; aborting the run over it loses the build entirely.
+//
+// Two jobs, because the SDK draws the line in a place the design did not
+// anticipate. `skills:` is an ALLOWLIST — a mirrored skill absent from it is
+// rejected outright by the Skill tool ("not in this session's skills
+// allowlist"), so listing only the pins would leave the rest of the mirror as
+// inert files on disk. Hence `listMirroredSkills`: everything the BFF decided
+// this build may use is what the session allows.
+//
+// And nothing in that array is "preloaded" in the sense of arriving in context
+// — the model gets each skill's name and description, and the body only on
+// invocation. Verified: an agent holding a listed skill could not state a
+// codeword written in its body until it called the Skill tool. A pin is a
+// statement that the guidance is needed for THIS work, so `readSkillBodies`
+// puts those bodies in front of the model at startup rather than hoping it
+// chooses to look.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -64,4 +79,67 @@ export async function resolvePinnedSkills(
   }
 
   return { preload, dangling };
+}
+
+/**
+ * Every skill in the mirror — the set this session may use at all.
+ *
+ * A directory without a readable `SKILL.md` is not a skill (the same rule the
+ * BFF and the local mirror apply), and an absent mirror yields an empty list
+ * rather than an error: a project with no attached skills is ordinary.
+ */
+export async function listMirroredSkills(workspace: string): Promise<string[]> {
+  const dir = path.join(workspace, SKILLS_MIRROR_DIR);
+  let entries: fs.Dirent[];
+  try {
+    entries = await fs.promises.readdir(dir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const names: string[] = [];
+  for (const e of entries) {
+    if (!e.isDirectory() || e.name.startsWith(".")) continue;
+    try {
+      await fs.promises.access(path.join(dir, e.name, "SKILL.md"), fs.constants.R_OK);
+      names.push(e.name);
+    } catch {
+      continue;
+    }
+  }
+  return names.sort((a, b) => a.localeCompare(b));
+}
+
+/**
+ * The system-prompt appendix that actually puts pinned guidance in context.
+ *
+ * Each body is fenced with its name so the model can tell where one skill's
+ * instructions end and the next begin, and told that these are already loaded
+ * — without that, an agent reading guidance it also sees in the skill listing
+ * will helpfully re-invoke the Skill tool and pay for the body twice.
+ *
+ * Returns an empty string when nothing is pinned, so a caller can pass it
+ * straight through: appending "" must not perturb a run with no pins.
+ */
+export async function readSkillBodies(workspace: string, names: readonly string[]): Promise<string> {
+  const sections: string[] = [];
+  for (const name of names) {
+    try {
+      const body = await fs.promises.readFile(
+        path.join(workspace, SKILLS_MIRROR_DIR, name, "SKILL.md"),
+        "utf8",
+      );
+      sections.push(`<skill name="${name}">\n${body.trim()}\n</skill>`);
+    } catch {
+      continue; // dangling — already warned by resolvePinnedSkills
+    }
+  }
+  if (sections.length === 0) return "";
+  return (
+    `# Skills pinned to this work\n\n` +
+    `The design pinned these skills to the component(s) you are building, so their full ` +
+    `instructions are included below and are ALREADY in your context — you do not need to ` +
+    `invoke the Skill tool to read them again. Other skills are listed in your skill catalog ` +
+    `and you can invoke those on demand as usual.\n\n` +
+    sections.join("\n\n")
+  );
 }

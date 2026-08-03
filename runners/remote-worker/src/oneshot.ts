@@ -40,7 +40,7 @@ import type { DispatchRequest } from "./lib/types.js";
 import { emit, primeScrubber } from "./lib/progress/emitter.js";
 import { installConsoleScrubber } from "./lib/progress/console_scrub.js";
 import { resolveTaskSkills } from "./lib/skills_resolver.js";
-import { resolvePinnedSkills } from "./lib/skills_presence.js";
+import { listMirroredSkills, readSkillBodies, resolvePinnedSkills } from "./lib/skills_presence.js";
 import { ClientCredentialsTokenProvider } from "./lib/oauth.js";
 import {
   fetchValidationContext,
@@ -204,7 +204,10 @@ async function main(): Promise<number> {
   // must not be used to pick a design file. A validation run applies no design
   // skills at all: it is black-box verification driven by the `aep-validation`
   // skill (AEP_TASK_KIND), and builds nothing.
-  let preloadSkillNames: string[] = [];
+  // A validation run stays at the base plugin: no mirror is allowed and nothing
+  // is pinned, so the allowlist below leaves the design skills out entirely.
+  let availableSkillNames: string[] = [];
+  let pinnedBodies = "";
   if (req.taskKind === "validation") {
     console.log("[oneshot] validation run — no design skills apply; using the aep-validation skill only");
     // PREFLIGHT: where the deployed system is, fetched by the platform before the
@@ -233,18 +236,26 @@ async function main(): Promise<number> {
       log: (l) => console.log(l),
     });
     const { preload, dangling } = await resolvePinnedSkills(layout.workspace, pinned, (l) => console.log(l));
-    preloadSkillNames = preload;
     if (dangling.length > 0) {
       console.warn(
         `[oneshot] ⚠️  ${dangling.length} pinned skill(s) missing from .claude/skills/ — proceeding without them: ${dangling.join(", ")}`,
       );
     }
-    console.log(`[oneshot] preload=${preloadSkillNames.length} pinned skill(s) from the project's skill mirror`);
+    // Every mirrored skill is allowed — the SDK's `skills:` is an allowlist, so
+    // anything omitted here cannot be invoked at all. The pinned subset also
+    // goes into the system prompt, which is the only thing that actually
+    // preloads guidance.
+    availableSkillNames = await listMirroredSkills(layout.workspace);
+    pinnedBodies = await readSkillBodies(layout.workspace, preload);
+    console.log(
+      `[oneshot] ${availableSkillNames.length} skill(s) available, ${preload.length} pinned into context`,
+    );
   }
 
   const log = openTaskLog(layout.workspace);
   const { completion } = runClaudeQuery(req, layout, log, {
-    preloadSkillNames,
+    availableSkillNames,
+    pinnedBodies,
   });
   const result = await completion;
   return result.exitCode;

@@ -31,6 +31,7 @@ import { createWebSearchDlpHook, stagedSecretValues } from "./websearch_dlp.js";
 import { createForegroundFanOutHook } from "./fanout_foreground.js";
 import { createWorkspaceWriteGuard } from "./workspace_guard.js";
 import { createWebFetchGuardHook } from "./webfetch_guard.js";
+import { checkPreload, preloadWarning } from "./skills_preload_check.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PLUGIN_PATH = path.resolve(__dirname, "../../plugin");
@@ -38,7 +39,10 @@ const PLUGIN_PATH = path.resolve(__dirname, "../../plugin");
 // Phase 0 allowed-tools: git, gh, build/test/lint via Bash; standard file
 // tools. Endpoint Spec Discovery (B2) re-introduces MCP — but only as an
 // in-process remote HTTP server (see buildMcpOptions below), never the
-// file-based .mcp.json that settingSources: [] deliberately blocks.
+// file-based .mcp.json — which strictMcpConfig blocks. That used to fall out
+// of settingSources: [] for free; admitting the project source to discover the
+// skills mirror re-admits the project's .mcp.json with it, so the exclusion is
+// now stated rather than inherited.
 // D9 secure search (Task 12) adds WebSearch, gated by the PreToolUse DLP
 // hook wired in runClaudeQuery below (see websearch_dlp.ts for why
 // PreToolUse, not canUseTool, and .superpowers/sdd/task-12-report.md for
@@ -176,6 +180,28 @@ export function buildMcpOptions(mcpUrl: string | undefined, mcpToken: string | u
   };
 }
 
+/**
+ * The filesystem settings sources a dispatched run admits.
+ *
+ * 'project' resolves relative to `cwd` — the per-task clone the platform
+ * provisioned and the BFF wrote `.claude/skills/` into. Admitting it is what
+ * makes the mirrored skills discoverable AT ALL: the SDK's `skills` option is a
+ * context filter over discovered skills, not a loader, so with no filesystem
+ * source the pinned names match nothing and vanish without a word. That is not
+ * theoretical — it shipped, and the agent compensated by grepping SKILL.md out
+ * of the tree, which reads like the feature working.
+ *
+ * The isolation this replaces was about 'user' — a developer's ~/.claude
+ * leaking into a container agent — which stays excluded, as does 'local' (a
+ * personal .claude/settings.local.json has no place in a dispatched run).
+ * 'project' admits only content the platform itself put in the clone. It also
+ * loads that repo's CLAUDE.md, which is the project's own guidance and belongs
+ * in a build of that project.
+ *
+ * Exported so a revert to `[]` fails a test rather than a customer's build.
+ */
+export const AGENT_SETTING_SOURCES = ["project"] as const;
+
 export interface RunResult {
   exitCode: number;
   error?: string;
@@ -190,16 +216,27 @@ export interface StartedRun {
 // options (built by skills_resolver.ts + skills_presence.ts).
 //
 // The BFF mirrors the org's coding-relevant skills into the project clone at
-// `.claude/skills/`, and the SDK discovers that directory NATIVELY because
-// `cwd: layout.workspace` puts it at the working-directory root — there is no
-// per-task plugin to load. `preloadSkillNames` is the BARE names of every
-// pinned skill that exists in the mirror (kind-agnostic: the copies are
-// already the filtered set, so the runner does no filtering of its own),
-// pushed into the SDK's `skills:` array so their full bodies inject at
-// startup. Unpinned skills in the mirror are still reachable on demand,
-// natively, via the SDK's standard discovery.
+// `.claude/skills/`, which the SDK discovers because `cwd: layout.workspace`
+// puts it at the working-directory root AND the project setting source is
+// admitted (see AGENT_SETTING_SOURCES — `cwd` alone is not enough, which cost
+// us a release). There is no per-task plugin to load. All names are BARE and kind-agnostic: the copies are
+// already the filtered set, so the runner does no filtering of its own.
+//
+// The split between these two fields is the SDK's, not ours:
+//
+//   availableSkillNames → the `skills:` ALLOWLIST. A mirrored skill absent from
+//     it is rejected by the Skill tool outright, so this is every skill in the
+//     mirror, not just the pinned ones. Listing only pins would leave the rest
+//     of what the BFF decided this build may use as inert files on disk.
+//
+//   pinnedBodies → the actual preload. Nothing in `skills:` arrives in context;
+//     the model gets names and descriptions, and a body only when it invokes
+//     the skill. A pin says the guidance IS needed for this work, so its body
+//     is appended to the system prompt instead of left to the model's
+//     discretion. Empty string when nothing is pinned.
 export interface PerTaskSkills {
-  preloadSkillNames: string[];
+  availableSkillNames: string[];
+  pinnedBodies: string;
 }
 
 // BaseAgentConfig parameterizes what the always-loaded workflow plugin is and
@@ -316,9 +353,11 @@ export function runClaudeQuery(
   const plugins: Array<{ type: "local"; path: string }> = [
     { type: "local", path: basePluginDir },
   ];
-  const skillPreload: string[] = resolvedBase.preload;
-  if (perTaskSkills?.preloadSkillNames) {
-    skillPreload.push(...perTaskSkills.preloadSkillNames);
+  // The base plugin's own skills plus everything in the project's mirror. This
+  // is an allowlist: a name missing here cannot be invoked at all.
+  const skillAllowlist: string[] = resolvedBase.preload;
+  if (perTaskSkills?.availableSkillNames) {
+    skillAllowlist.push(...perTaskSkills.availableSkillNames);
   }
 
   // Endpoint Spec Discovery (B2) — register the BFF's MCP server in-process
@@ -361,12 +400,20 @@ export function runClaudeQuery(
   });
 
   // The SDK auto-discovers the bundled native binary — no
-  // pathToClaudeCodeExecutable needed. settingSources: [] ensures no
-  // host filesystem settings leak into the container agent.
+  // pathToClaudeCodeExecutable needed. See settingSources below for why the
+  // project source — and only the project source — is admitted.
+  // Pinned skill bodies ride in on the system prompt because `skills:` does not
+  // carry them (see PerTaskSkills). Appended to the claude_code preset rather
+  // than replacing it — the preset is what makes the harness's own tools and
+  // conventions work, and this is additional context, not a different agent.
+  const pinnedBodies = perTaskSkills?.pinnedBodies ?? "";
   const q = query({
     prompt: promptWithProjectRoot(req.prompt, layout.workspace),
     options: {
       cwd: layout.workspace,
+      ...(pinnedBodies
+        ? { systemPrompt: { type: "preset" as const, preset: "claude_code" as const, append: pinnedBodies } }
+        : {}),
       // Pinned rather than left to the SDK's own default, which drifts across
       // SDK releases (seen live: an unpinned run resolved to claude-sonnet-4-6).
       model: "claude-sonnet-5",
@@ -374,7 +421,7 @@ export function runClaudeQuery(
       // Force built-in skill bodies into context at startup. Do NOT
       // replace with 'all': that would inject every custom + imported
       // skill's body too, which is what the on-demand listing is for.
-      skills: skillPreload as unknown as string[],
+      skills: skillAllowlist as unknown as string[],
       allowedTools,
       // The boundary that actually holds under bypassPermissions — see
       // DISALLOWED_TOOLS.
@@ -383,7 +430,13 @@ export function runClaudeQuery(
       permissionMode: "bypassPermissions",
       allowDangerouslySkipPermissions: true,
       persistSession: false,
-      settingSources: [],
+      settingSources: [...AGENT_SETTING_SOURCES],
+      // The project source above admits the clone's .claude/, and a project
+      // repo can carry a .mcp.json declaring arbitrary servers. The runner's
+      // MCP surface is the platform's to decide, not a checkout's, so only
+      // servers from buildMcpOptions are honoured — the isolation that
+      // settingSources: [] used to give implicitly, kept explicitly.
+      strictMcpConfig: true,
       env: childEnv,
       // NOT canUseTool — the Task 12 spike found canUseTool is never
       // invoked for the server-executed WebSearch tool (confirmed under
@@ -450,6 +503,17 @@ export function runClaudeQuery(
         watchdog.observe(events);
         for (const event of events) {
           emit(event);
+        }
+        // The SDK reports what it actually resolved; a preload that matched
+        // nothing is dropped in silence (see skills_preload_check.ts for the
+        // run this cost us). Warn rather than fail: the guidance is missing,
+        // not the build, and a run that can still produce something useful
+        // should — but it must not look clean while doing it.
+        if (message.type === "system" && message.subtype === "init") {
+          const { missing } = checkPreload(skillAllowlist, message.skills ?? []);
+          if (missing.length > 0) {
+            emit({ kind: "log", level: "warn", summary: preloadWarning(missing) });
+          }
         }
         if (message.type === "result") {
           if (message.subtype === "success") {
