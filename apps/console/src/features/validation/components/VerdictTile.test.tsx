@@ -39,22 +39,22 @@ describe("verdictSentence", () => {
   // had checked.
   it("passed names coverage, not just the result", () => {
     expect(verdictSentence("passed", tally(40, { pass: 40 }))).toBe(
-      "All 40 acceptance criteria were covered by a test and passed.",
+      "All 40 validation criteria were covered by a test and passed.",
     );
   });
 
   // The pair the vocabulary exists for. The numbers are the whole point: without
-  // them "partially validated" leaves the reader asking which part.
+  // them "Validated*" leaves the reader asking which part.
   it("partial counts the uncovered criteria against the authored total", () => {
     const t = tally(40, { pass: 35, manual: 3, not_run: 2 });
     expect(verdictSentence("partial", t)).toBe(
-      "Everything that ran passed, but 5 of 40 criteria were never covered by a test — so this is not a clean pass.",
+      "Everything that ran passed, but 5 of 40 validation criteria couldn't be automated — please validate them manually.",
     );
   });
 
   it("partial inflects for a single uncovered criterion", () => {
     expect(verdictSentence("partial", tally(40, { pass: 39, manual: 1 }))).toContain(
-      "1 of 40 criteria was never covered",
+      "1 of 40 validation criteria couldn't be automated — please validate it manually",
     );
   });
 
@@ -73,18 +73,19 @@ describe("verdictSentence", () => {
     );
   });
 
-  it("inconclusive says nothing is confirmed", () => {
+  it("inconclusive asks for manual validation", () => {
     expect(verdictSentence("inconclusive", tally(12, { manual: 12 }))).toBe(
-      "None of the 12 acceptance criteria produced a result, so nothing here is confirmed.",
+      "None of the 12 validation criteria could be automated — please validate them manually.",
     );
   });
 
-  // Not a test outcome but an agent-contract breach, so the sentence names the
-  // omission and the terminal reason rather than reading as a failing suite.
-  it("unreported names the breach and the terminal reason", () => {
+  // Not a test outcome but a reporting failure, so the sentence says so instead of
+  // reading as a failing suite — and it must never quote the terminal reason, which
+  // is a wire value, not something to hand a reader.
+  it("unreported names the reporting failure, never the terminal reason", () => {
     const s = verdictSentence("unreported", undefined);
-    expect(s).toContain("without committing a report");
-    expect(s).toContain("validation-unreported");
+    expect(s).toContain("generating the validation report");
+    expect(s).not.toContain("validation-unreported");
   });
 
   // The tile renders before the report loads, and `unreported` has no report at
@@ -101,7 +102,7 @@ describe("verdictSentence", () => {
   // numbered forms are gated on total > 1 rather than inflected six ways.
   it("skips the numbers for a single-criterion oracle", () => {
     expect(verdictSentence("passed", tally(1, { pass: 1 }))).toBe(
-      "Every acceptance criterion was covered by a test and passed.",
+      "Every validation criterion was covered by a test and passed.",
     );
   });
 
@@ -131,8 +132,8 @@ describe("verdictCounts", () => {
 describe("VerdictTile", () => {
   it("leads with the shared mapper's label as its headline", () => {
     render(<VerdictTile verdict="partial" tally={tally(40, { pass: 35, manual: 5 })} />);
-    // "partially validated" in the mapper; a headline leads.
-    expect(screen.getByText("Partially validated")).toBeInTheDocument();
+    // "validated*" in the mapper; a headline leads.
+    expect(screen.getByText("Validated*")).toBeInTheDocument();
   });
 
   it("renders the counts under the sentence", () => {
@@ -140,18 +141,19 @@ describe("VerdictTile", () => {
     expect(screen.getByText("40 passed")).toBeInTheDocument();
   });
 
-  // Warning, never success: a tile that looked like a pass would reintroduce
-  // exactly the lie the verdict split removed.
-  it("tones partial as a warning and passed as a success", () => {
+  // Never success: a tile that looked like a clean pass would reintroduce exactly
+  // the lie the verdict split removed. `info` rather than warning because nothing
+  // about a partial run FAILED — the asterisk carries the hedge.
+  it("tones partial as info and passed as a success", () => {
     const { unmount } = render(<VerdictTile verdict="partial" />);
-    expect(screen.getByRole("alert").className).toMatch(/Warning/);
+    expect(screen.getByRole("alert").className).toMatch(/Info/);
     unmount();
     render(<VerdictTile verdict="passed" />);
     expect(screen.getByRole("alert").className).toMatch(/Success/);
   });
 
-  // An agent-contract breach that FAILS the run — so error, like a failing suite,
-  // and distinctly worded from one.
+  // A reporting failure that FAILS the run — so error, like a failing suite, and
+  // distinctly worded from one.
   it("tones unreported as an error", () => {
     render(<VerdictTile verdict="unreported" />);
     expect(screen.getByRole("alert").className).toMatch(/Error/);

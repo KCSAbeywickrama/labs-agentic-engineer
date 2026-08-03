@@ -278,7 +278,7 @@ export function ValidationPage({
         {header}
         <EmptyState
           compact
-          description="This version was not validated — it has no acceptance criteria, or it was an incident run, which gets no validation cycle."
+          description="This version was not validated — it has no validation criteria, or it was an incident run, which gets no validation cycle."
         />
       </>
     );
