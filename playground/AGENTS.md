@@ -65,8 +65,9 @@ descriptor**, identical to what aep-api commits on project create. It marks the
 directory as an Agentic Engineer project and carries the idea `/start` builds
 requirements from. Being dot-prefixed it is stripped from every turn snapshot,
 so the agent can never read it: the idea reaches a turn ONLY through the
-`/start` expansion in `engine/compose.ts`, mirroring the server
-(`spec.StartInstruction` + `ideaSteer`, both pinned by `steer-parity.test.ts`).
+`/start` expansion in `engine/compose.ts`, mirroring the server — both sides
+built from the same generated canonical strings (`@aep/contracts/prompts` ←
+`packages/contracts/prompts/strings.json`).
 
 `code` mirrors prod's milestone cycle (ADR-0011): the CLI never picks an issue
 or an order — the `aep` skill discovers its own working set from
@@ -103,9 +104,9 @@ not an AI SDK model — its full transcript is the run's
 
 The bytes reaching the model are production-identical: the same server code
 path (auth middleware, TurnGuard, workspace shape, snapshot filter, write
-gates), the same instruction composition (`src/engine/compose.ts` carries
-provenance-pinned verbatim copies of the live Go steer strings —
-`test/steer-parity.test.ts` fails on drift), the same skills materialization,
+gates), the same instruction composition (`src/engine/compose.ts` and the Go composer
+are both generated from `packages/contracts/prompts/strings.json`, so drift is
+impossible by construction), the same skills materialization,
 the same runner session options (`resolveBaseAgentConfig` defaults are
 unit-pinned in remote-worker), and the same authored workflow skill (only the
 mode-marked GitHub steps are swapped — `skill_compose.test.ts` pins which text
@@ -131,7 +132,6 @@ push it to a repo and let the platform's normal flow build/deploy it.
 |---|---|---|
 | `issues/` excluded from spec-turn snapshots | production spec turns never see tasks (they live in GitHub) | n/a — this IS parity in effect |
 | MCP off by default | no cluster; avoids a localhost mint attempt per turn | run aep-api locally + AEP_MCP_URL (its MCP resolver) |
-| `collabDepsSteer` present without a live MCP tool | kept for byte parity — all console turns carry it | MCP passthrough makes the named tool real |
 | No CRT-annotation append, no lineage diffs in replans | platform resources/tags don't exist locally | manual edit; replan is still files-based |
 | Issue `key` lineage constant `"local"`; no spec/design tags | no builds/tags locally | dedupe across replans still works |
 | Design/tasks gates are playground-side UX | production has no server gate on the console's spec paths | advisory only |
