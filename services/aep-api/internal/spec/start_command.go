@@ -14,54 +14,79 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// `/start` — the project kickoff command, and the ONE slash command the server
-// owns rather than the client.
+// `/<skill>` flow commands — expanded by the SERVER, for every token (#373).
 //
-// Every other `/<skill>` shortcut is expanded client-side by
-// slashSkillInstruction (@aep/contracts/prompts) before the turn is sent, so
-// the server only ever sees prose. `/start` is passed through VERBATIM instead,
-// because the server has to recognize it: it is the only command whose
-// instruction must be enriched with state the client cannot see — the idea
-// captured in specs/.agentic-engineer.toml, a file no client parses and the
-// agent cannot read.
+// Clients send commands VERBATIM. Expanding here (instead of the old
+// client-side slashSkillInstruction split) buys two things:
 //
-// Deliberately NOT signalled through `useCase`: that field is baked into the
-// conversation identity (namespacedID → org_X--proj_Y--<useCase>--<uuid>), so
-// keying the kickoff on it would put the turn in a different conversation from
-// the chat around it. `/start` runs an INTERVIEW, so its follow-up answers —
-// ordinary chat turns — must land in the same conversation or the agent loses
-// the thread of its own questions.
+//   - `/start` can be enriched with state no client sees — the idea captured
+//     in specs/.agentic-engineer.toml, a file no client parses and the agent
+//     cannot read (dot-led segments are stripped from every turn snapshot).
+//   - The flow's EAGER SKILLS (#335 latency) are decided server-side, so a
+//     console CTA and a typed command produce byte-identical turns — the old
+//     CTA-vs-typed asymmetry cannot exist.
 //
-// The idea only ever rides the FIRST turn: after that it is in the
+// Flows are deliberately NOT a conversation-identity dimension: a flow runs an
+// interview whose answers are ordinary chat turns, so every turn of a project
+// conversation must share one namespace (see useCaseGeneral).
+//
+// The idea only ever rides the FIRST `/start` turn: after that it is in the
 // conversation history, so nothing needs re-attaching.
 
 package spec
 
-import "strings"
+import (
+	"context"
+	"regexp"
+	"strings"
 
-// startCommand is the verbatim token clients pass through unexpanded.
+	"github.com/wso2/aep/aep-api/internal/prompts"
+	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
+)
+
+// startCommand is the one token with server-side enrichment beyond expansion.
 const startCommand = "/start"
 
-// StartInstruction is the server-side expansion of `/start`.
-//
-// MUST match slashSkillInstruction("/start") in packages/contracts/prompts —
-// the client-side expander every other `/<skill>` command goes through.
-// playground/test/steer-parity.test.ts pins the two together.
-const StartInstruction = "Load the start skill and follow it."
+// flowEagerSkills maps a flow token to the skill bodies the agents service
+// inlines into the turn's prompt up front — the server-decided eager map
+// (#373). A token absent here still expands; the model loads its skill lazily.
+var flowEagerSkills = map[string][]string{
+	"start":  {"grilling"},
+	"design": {"design"},
+}
 
-// parseStartCommand reports whether a raw instruction is the `/start` command,
-// returning any idea typed inline after it (`/start an expense tracker`).
-//
-// The grammar is deliberately narrow — the exact token, alone or followed by
-// whitespace — so ordinary prose that merely mentions the word is never eaten.
-func parseStartCommand(instruction string) (inlineIdea string, ok bool) {
-	trimmed := strings.TrimSpace(instruction)
-	if trimmed == startCommand {
-		return "", true
+// slashCommandPattern mirrors the grammar of the retired client-side expander
+// (@aep/contracts/prompts slashSkillInstruction), deliberately narrow so real
+// chat is never eaten: a single leading `/`, a skill-name token ending at
+// whitespace or message end, optional free text after it. A bare `/`, a
+// mid-message slash, `//x`, or trailing punctuation on the token all fail the
+// match and pass through as ordinary chat.
+var slashCommandPattern = regexp.MustCompile(`^/([a-z0-9-]+)(?:\s+([\s\S]+))?$`)
+
+// expandFlowInstruction turns a raw instruction into the composed turn text.
+// Non-command text passes through verbatim with an empty flow. A `/<skill>`
+// command expands to the canonical skill pointer; `/start` is additionally
+// enriched with the project idea (typed inline wins, else read from the
+// descriptor at `at` — best-effort: no descriptor, no append, and the start
+// skill asks the user instead).
+func (s *Service) expandFlowInstruction(ctx context.Context, ref sourcecontrol.RepoRef, at, raw string) (text, flow string, eagerSkills []string) {
+	m := slashCommandPattern.FindStringSubmatch(strings.TrimSpace(raw))
+	if m == nil {
+		return raw, "", nil
 	}
-	rest, found := strings.CutPrefix(trimmed, startCommand+" ")
-	if !found {
-		return "", false
+	token, rest := m[1], strings.TrimSpace(m[2])
+
+	if "/"+token == startCommand {
+		idea := rest
+		if idea == "" {
+			idea = s.readProjectIdea(ctx, ref, at)
+		}
+		return prompts.StartInstruction + ideaSteer(idea), token, flowEagerSkills[token]
 	}
-	return strings.TrimSpace(rest), true
+
+	text = "Load the " + token + " skill and follow it."
+	if rest != "" {
+		text += "\n\n" + rest
+	}
+	return text, token, flowEagerSkills[token]
 }

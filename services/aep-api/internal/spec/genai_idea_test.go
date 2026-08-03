@@ -20,6 +20,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/wso2/aep/aep-api/internal/prompts"
 	"github.com/wso2/aep/aep-api/internal/spec"
 )
 
@@ -61,7 +62,7 @@ func TestStartCommand_ExpandsAndCarriesCapturedIdea(t *testing.T) {
 		spec.DescriptorPath: descriptorTOML(t, testIdea),
 	}, "/start")
 
-	if !strings.Contains(got, spec.StartInstruction) {
+	if !strings.Contains(got, prompts.StartInstruction) {
 		t.Fatalf("/start was not expanded to the skill load: %q", got)
 	}
 	if !strings.Contains(got, testIdea) {
@@ -93,7 +94,7 @@ func TestStartCommand_InlineIdeaOverridesDescriptor(t *testing.T) {
 func TestStartCommand_NoDescriptorStillExpands(t *testing.T) {
 	got := startInstruction(t, map[string]string{"README.md": "hi\n"}, "/start")
 
-	if !strings.Contains(got, spec.StartInstruction) {
+	if !strings.Contains(got, prompts.StartInstruction) {
 		t.Fatalf("/start must still expand without a descriptor: %q", got)
 	}
 	if strings.Contains(got, "The user's idea") {
@@ -108,7 +109,7 @@ func TestStartCommand_CorruptDescriptorDoesNotFailTheTurn(t *testing.T) {
 		spec.DescriptorPath: "this is not = = toml [[[",
 	}, "/start")
 
-	if !strings.Contains(got, spec.StartInstruction) {
+	if !strings.Contains(got, prompts.StartInstruction) {
 		t.Fatalf("/start must still expand: %q", got)
 	}
 	if strings.Contains(got, "The user's idea") {

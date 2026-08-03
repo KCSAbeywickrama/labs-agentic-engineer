@@ -8,6 +8,7 @@
     "./prompts": "./prompts/index.ts"
   },
   "scripts": {
+    "gen": "node prompts/gen.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint ."
   },

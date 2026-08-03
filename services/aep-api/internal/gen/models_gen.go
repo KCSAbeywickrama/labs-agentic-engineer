@@ -436,27 +436,6 @@ func (e TurnConflictCode) Valid() bool {
 	}
 }
 
-// Defines values for TurnInputBodyUseCase.
-const (
-	DesignGenerate       TurnInputBodyUseCase = "design-generate"
-	RequirementsChat     TurnInputBodyUseCase = "requirements-chat"
-	RequirementsGenerate TurnInputBodyUseCase = "requirements-generate"
-)
-
-// Valid indicates whether the value is a known member of the TurnInputBodyUseCase enum.
-func (e TurnInputBodyUseCase) Valid() bool {
-	switch e {
-	case DesignGenerate:
-		return true
-	case RequirementsChat:
-		return true
-	case RequirementsGenerate:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for ListTasksParamsState.
 const (
 	All    ListTasksParamsState = "all"
@@ -1675,21 +1654,12 @@ type TurnInputBody struct {
 	// Collab Room-scoped turn (#86 phase 4): the agent joins the project's spec collab room as a live peer, reads and edits the shared doc, and commits nothing to git.
 	Collab bool `json:"collab,omitempty"`
 
-	// EagerSkills Skill names whose guidance the agents service inlines into this turn's prompt up front (#335 latency) — skips the model's loadSkill round-trip when the caller already knows a skill applies (the seeded grilling turn). Unknown names are ignored.
-	EagerSkills []string `json:"eagerSkills,omitempty"`
-
-	// Instruction User message / generation directive
+	// Instruction User message / generation directive. `/<skill>` flow commands (`/start`, `/design`, …) are sent VERBATIM — the server expands them, attaches the flow's eager skills, and enriches `/start` with the captured project idea.
 	Instruction string `json:"instruction"`
 
 	// Target Optional target (e.g. a doc type)
 	Target string `json:"target,omitempty"`
-
-	// UseCase Which generation/chat flow. Omit to run a generic spec turn.
-	UseCase TurnInputBodyUseCase `json:"useCase,omitempty"`
 }
-
-// TurnInputBodyUseCase Which generation/chat flow. Omit to run a generic spec turn.
-type TurnInputBodyUseCase string
 
 // TurnOutputBody defines model for TurnOutputBody.
 type TurnOutputBody struct {

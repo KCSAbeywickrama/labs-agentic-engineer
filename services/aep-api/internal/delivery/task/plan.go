@@ -33,21 +33,23 @@ import (
 	"github.com/wso2/aep/aep-api/internal/clients/agentsvc"
 	"github.com/wso2/aep/aep-api/internal/delivery"
 	"github.com/wso2/aep/aep-api/internal/platform/taskplan"
+	"github.com/wso2/aep/aep-api/internal/prompts"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 )
 
-// NOTE: playground/src/engine/compose.ts carries a verbatim copy of this
-// string (and mirrors renderPlanContext); its steer-parity test fails when
-// they drift. Update both together.
-//
-// planInstruction is the steering directive the BFF composes server-side (§9.1:
-// the request body is empty; the BFF assembles the whole generation directive).
-// The design/requirements content is NOT inlined anymore — the agents service
-// reads it from the workspace snapshot (shared-workspace-volume D9); the existing-
-// task renders + lineage diffs are appended to this instruction (they are
-// platform state, not repository files, so they cannot ride in the snapshot —
-// see renderPlanContext).
-const planInstruction = "Plan the implementation Tasks for this project. Load the task-planning skill and follow it: create one Task per design component with planTask, wire dependsOn by component name, and write each Task's body with updateTask in the same turn. The design is under specs/design/ and the requirements under specs/requirements/. Existing open Tasks (if any) are listed at the end of this message for reference — add Tasks ONLY for components they do not cover, and do not recreate or update the listed Tasks in this turn. Never invent a component the design does not define."
+// planInstruction is the plan-turn directive the BFF composes server-side
+// (§9.1: the request body is empty; the BFF assembles the whole generation
+// directive). Per the layer charter (#373) it carries ONLY the skill pointer,
+// the bundle paths, and the existing-Tasks fence — the planning invariants
+// live once in the task-plan system prompt, the mechanics once in the
+// task-planning skill. The text is a generated prompt string
+// (internal/prompts), authored once in packages/contracts/prompts/strings.json
+// for every Go and TS consumer. The design/requirements content is NOT inlined
+// — the agents service reads it from the workspace snapshot
+// (shared-workspace-volume D9); the existing-task renders + lineage diffs are
+// appended to this instruction (they are platform state, not repository files,
+// so they cannot ride in the snapshot — see renderPlanContext).
+const planInstruction = prompts.PlanInstruction
 
 // PlanService assembles the plan-turn context, starts the upstream turn, and
 // hands back a PlanSession the HTTP edge streams. One active plan turn per
@@ -333,7 +335,7 @@ func renderPlanContext(files map[string]string) string {
 	}
 	sort.Strings(paths)
 	var sb strings.Builder
-	sb.WriteString("\n\n## Existing open Tasks in this version (reference)\n")
+	sb.WriteString(prompts.PlanContextHeader)
 	for _, p := range paths {
 		fmt.Fprintf(&sb, "\n--- %s ---\n%s\n", p, files[p])
 	}

@@ -77,15 +77,10 @@ func (h *Handler) CreateTurn(ctx context.Context, request gen.CreateTurnRequestO
 		return nil, apierr.BadRequest("request body is required")
 	}
 	turnID, err := h.genai.StartTurn(ctx, org, request.ProjectName, spec.TurnInput{
-		// An omitted useCase decodes to "" (the generated type is a plain
-		// string); the service normalizes "" → the generic turn. An explicit
-		// "" is enum-invalid and already rejected by the contract validator.
-		UseCase:        string(request.Body.UseCase),
 		ConversationID: request.ConversationID,
 		Instruction:    request.Body.Instruction,
 		Target:         request.Body.Target,
 		Collab:         request.Body.Collab,
-		EagerSkills:    request.Body.EagerSkills,
 	})
 	if err != nil {
 		if conflict, ok := turnConflictOf(err); ok {
@@ -166,9 +161,6 @@ func turnConflictOf(err error) (gen.CreateTurnResponseObject, bool) {
 		return gen.CreateTurn409JSONResponse(gen.TurnConflict{
 			Code: gen.TurnInProgress, ActiveTurnID: inProgress.ActiveTurnID,
 		}), true
-	}
-	if errors.Is(err, spec.ErrRequirementsMissing) {
-		return gen.CreateTurn409JSONResponse(gen.TurnConflict{Code: gen.RequirementsMissing}), true
 	}
 	return nil, false
 }
@@ -311,8 +303,6 @@ func mapGenAITurnError(ctx context.Context, err error) error {
 		return apierr.NotFound("project repository not found")
 	case errors.Is(err, spec.ErrTurnNotFound):
 		return apierr.NotFound("turn not found")
-	case errors.Is(err, spec.ErrInvalidUseCase):
-		return apierr.BadRequest("invalid use case")
 	case errors.Is(err, spec.ErrInvalidConversationID):
 		return apierr.BadRequest("invalid conversation id")
 	case errors.Is(err, spec.ErrEmptyInstruction):

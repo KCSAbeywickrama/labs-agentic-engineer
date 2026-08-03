@@ -66,6 +66,7 @@ var nonDomainPkgs = map[string]bool{
 	"clients":   true, // outbound adapters (folds into platform/clients)
 	"config":    true,
 	"contracts": true,
+	"prompts":   true, // generated prompt strings (packages/contracts/prompts is the source)
 	"seed":      true,
 }
 

@@ -49,6 +49,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
+	"github.com/wso2/aep/aep-api/internal/prompts"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 )
 
@@ -173,12 +174,12 @@ func (s *Service) readProjectIdea(ctx context.Context, ref sourcecontrol.RepoRef
 // ways: typed inline (`/start an expense tracker`) or captured at project
 // creation and read back from the descriptor.
 //
-// MIRRORED in playground/src/engine/compose.ts (see the provenance note at the
-// top of steering.go); test/steer-parity.test.ts fails when the two drift.
+// The prefix is a generated prompt string (internal/prompts) — authored once
+// in packages/contracts/prompts/strings.json for every Go and TS consumer.
 func ideaSteer(idea string) string {
 	idea = strings.TrimSpace(idea)
 	if idea == "" {
 		return ""
 	}
-	return "\n\nThe user's idea for this project:\n\n" + idea
+	return prompts.IdeaSteerPrefix + idea
 }
