@@ -32,6 +32,8 @@ export interface ParsedComponent {
   id: string;
   label?: string;
   type?: string;
+  /** PRD story numbers this component serves (spec-agent redesign #371). */
+  stories?: number[];
   line?: number;
 }
 
@@ -56,6 +58,8 @@ export interface ParsedEdge {
 export interface ParsedCellDocument {
   title?: string;
   version?: string;
+  /** The one PRD phase this design version details (spec-agent redesign #370/#371). */
+  phase?: number;
   components: ParsedComponent[];
   externals: ParsedExternal[];
   edges: ParsedEdge[];

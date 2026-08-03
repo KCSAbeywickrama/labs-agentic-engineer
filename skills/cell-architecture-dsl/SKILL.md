@@ -60,6 +60,10 @@ south west`.
 
 **Title** — `title <text>` (rest of line).
 
+**Phase** — `phase <N>` (a positive integer): the ONE PRD phase this design
+version details. Every design.cell carries exactly one phase statement, near
+the top.
+
 **Component** (inside the cell) — `component <id> [as <label>] [type]`
 - The optional `type` is the LAST bare token. **There is no `:` before it.**
 - Without `as`, everything after the id is the type. With `as`, one trailing
@@ -67,6 +71,10 @@ south west`.
   rest is the label.
 - `component ceramics-api` → id only.
 - `component ceramics-api service` → id + type `service`.
+- A component cites the PRD stories it serves with a trailing
+  `[stories: <n>, <n>, …]` suffix (positive integers, the PRD's story
+  numbers): `component ceramics-api service [stories: 1, 2, 4]`. Cite every
+  story the component serves — the platform's coverage check reads these.
 - `component ceramics-api as "Ceramics API" service` → id, label, type.
 
 **External** (on a boundary) — `<direction> <id> [as <label>] [type]` where

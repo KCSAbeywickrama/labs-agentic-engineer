@@ -732,3 +732,52 @@ func TestRead_SeesOriginAdvanceImmediately(t *testing.T) {
 		t.Error("blob sha did not change across an origin advance")
 	}
 }
+
+// TestApply_ScaffoldsComponentsFromCell pins the scaffold engine (#371): a
+// batch that writes specs/design/design.cell also lands a design.json skeleton
+// for every deployable component the cell declares that has none yet — in the
+// SAME commit. Non-deployable nodes (database) get no directory; a component
+// whose design.json already exists (in the tree or in the batch) is untouched.
+func TestApply_ScaffoldsComponentsFromCell(t *testing.T) {
+	existing := `{"name":"lunch-api","type":"service","version":"0.1.0","language":"Go","buildpack":"docker","appPath":"lunch-api","entrypoint":"deployment/service","exposure":"intranet","dependencies":[],"description":"hand-written"}`
+	r := newFilesRig(t, map[string]string{
+		"specs/design/components/lunch-api/design.json": existing,
+	})
+
+	cell := "phase 1\n" +
+		"component lunch-api service [stories: 1, 2]\n" +
+		"component lunch-web web-application [stories: 1]\n" +
+		"component slack-notifier service [stories: 7]\n" +
+		"component orders-db database\n"
+	body := mustJSON(t, spec.ApplyRequest{
+		Writes:  []spec.WriteOp{{Path: "specs/design/design.cell", Content: cell}},
+		Message: "design cell",
+	})
+	rec := r.apply(body)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("apply code %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// Scaffolded skeletons exist, valid per the design gate, name == dir.
+	for id, wantType := range map[string]string{"lunch-web": "web-application", "slack-notifier": "service"} {
+		content := r.remote.FileAt(t, "main", "specs/design/components/"+id+"/design.json")
+		var parsed map[string]any
+		if err := json.Unmarshal([]byte(content), &parsed); err != nil {
+			t.Fatalf("scaffolded %s design.json not JSON: %v", id, err)
+		}
+		if parsed["name"] != id || parsed["type"] != wantType {
+			t.Errorf("scaffold %s = name %v type %v", id, parsed["name"], parsed["type"])
+		}
+		if parsed["language"] == "" || parsed["description"] == "" {
+			t.Errorf("scaffold %s missing enrichable defaults: %v", id, parsed)
+		}
+	}
+	// Existing component untouched.
+	if got := r.remote.FileAt(t, "main", "specs/design/components/lunch-api/design.json"); got != existing {
+		t.Errorf("existing design.json rewritten: %s", got)
+	}
+	// The database node scaffolds nothing.
+	if rec := r.get(apiBase + "/specs/design/components/orders-db/design.json"); rec.Code != http.StatusNotFound {
+		t.Errorf("orders-db dir should not exist: code %d", rec.Code)
+	}
+}

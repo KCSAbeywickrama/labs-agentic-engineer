@@ -341,8 +341,10 @@ func (s *service) Apply(ctx context.Context, orgID, projectID string, req ApplyR
 			return errConflictSentinel // fn error aborts Mutate — no retry, the 409 path
 		}
 
+		batch := map[string]bool{}
 		for _, w := range req.Writes {
 			tx.Write(w.Path, []byte(w.Content))
+			batch[w.Path] = true
 			// The staged blob's object name is a pure function of its content
 			// (what `git hash-object` will produce), so the response carries
 			// the exact sha a subsequent read returns — the FE folds it into
@@ -352,6 +354,26 @@ func (s *service) Apply(ctx context.Context, orgID, projectID string, req ApplyR
 		}
 		for _, d := range req.Deletes {
 			tx.Delete(d.Path)
+		}
+		// Scaffold engine (#371): a batch that lands design.cell also lands a
+		// design.json skeleton for every deployable component the cell declares
+		// that has none yet — same commit, platform-authored; the agent only
+		// enriches. Rides the SAME warnings channel so the caller sees what was
+		// generated.
+		for _, w := range req.Writes {
+			if w.Path != DesignCellPath {
+				continue
+			}
+			scaffolds := scaffoldFromCell(w.Content, func(path string) bool {
+				_, inTree := current[path]
+				return inTree || batch[path]
+			})
+			for _, path := range sortedPaths(scaffolds) {
+				content := scaffolds[path]
+				tx.Write(path, []byte(content))
+				files = append(files, FileMeta{Path: path, SHA: blobSHA([]byte(content))})
+				warnings = append(warnings, Warning{Path: path, Message: "scaffolded from design.cell — enrich, don't author, the mechanical fields"})
+			}
 		}
 		return nil
 	}, sourcecontrol.CommitOpts{

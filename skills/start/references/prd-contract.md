@@ -31,9 +31,12 @@ Decisions taken from org defaults or the skip valve are ordinary entries;
 skip-valve entries carry the *assumed* tag.>
 
 ## Phasing
-<thin: every story lands in exactly ONE phase — phase name, one-line goal,
-story numbers. Phase 1 works best as a thin vertical slice that touches every
-core capability. No story left unphased.>
+<thin: every story lands in exactly ONE phase. Each entry names the phase and
+carries its stories in EXACTLY this machine-read form — the build gate parses
+it:
+- **Phase 1 — <one-line goal>**: <goal detail>. Stories: 1, 2, 4.
+Phase 1 works best as a thin vertical slice that touches every core
+capability. No story left unphased.>
 
 ## Out of Scope
 <what this project deliberately does not do>

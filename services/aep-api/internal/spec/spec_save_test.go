@@ -26,14 +26,18 @@ import (
 	"testing"
 )
 
-// validSpecSeed is a buildable spec: requirements main doc + a valid design
-// bundle (root + one component with schema-valid design.json).
+// validSpecSeed is a buildable spec: a PRD with a parseable Phasing section,
+// a design.cell declaring the phase + story citations, and a valid design
+// bundle (root + one enriched component with its type artifact) — everything
+// the layout gates AND the phase gate (#370/#371) demand.
 func validSpecSeed() map[string]string {
 	return map[string]string{
-		"specs/requirements/prd.md":      "the spec\n",
+		"specs/requirements/prd.md": "# PRD\n\n## User Stories\n\n1. As a user, I want the thing, so that value.\n\n## Phasing\n\n- **Phase 1 — slice**: everything. Stories: 1.\n",
+		"specs/design/design.cell":                "phase 1\ncomponent svc service [stories: 1]\n",
 		"specs/design/design.md":                  "# System\n",
 		"specs/design/components/svc/design.md":   "---\ntype: service\n---\n# svc\n",
 		"specs/design/components/svc/design.json": validComponentDesignJSON("svc"),
+		"specs/design/components/svc/openapi.yaml": "openapi: 3.0.3\n",
 	}
 }
 
@@ -199,7 +203,7 @@ func TestSaveSpec_LegacyDesignTagsExcluded(t *testing.T) {
 	r.tag("v1", "spec v1")
 	r.tag("v1-1", "legacy design rev")
 	r.tag("v1-2", "legacy design rev")
-	r.seed(map[string]string{"specs/requirements/prd.md": "moved on\n"}, "spec edit")
+	r.seed(map[string]string{"specs/requirements/prd.md": "# PRD v2\n\n## User Stories\n\n1. As a user, I want the thing, so that value.\n\n## Phasing\n\n- **Phase 1 — slice**: moved on. Stories: 1.\n"}, "spec edit")
 
 	res, err := r.svc.SaveSpec(context.Background(), r.org, r.proj, SaveRequest{})
 	if err != nil {
