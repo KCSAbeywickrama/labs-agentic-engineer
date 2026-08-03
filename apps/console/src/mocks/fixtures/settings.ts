@@ -216,14 +216,14 @@ config from \`window._env_\`. Throw on a missing key rather than defaulting.`,
   },
   {
     orgId: "org-1",
-    name: "high-level-architecture",
+    name: "architecture",
     kind: "platform",
     editable: false,
     deletable: false,
     enabled: true,
     description: "Derives component architecture from requirements.",
     skillMd: `---
-name: high-level-architecture
+name: architecture
 description: Derives component architecture from requirements.
 ---
 

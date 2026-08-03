@@ -58,10 +58,10 @@ function seedProject(): string {
 
 function tempSkills(): string {
   const dir = mkdtempSync(join(tmpdir(), "aep-play-skills-"));
-  mkdirSync(join(dir, "high-level-architecture"), { recursive: true });
+  mkdirSync(join(dir, "architecture"), { recursive: true });
   writeFileSync(
-    join(dir, "high-level-architecture", "SKILL.md"),
-    "---\nname: high-level-architecture\ndescription: architecture flow\n---\n\nAuthor skillsPinned in design.json.\n",
+    join(dir, "architecture", "SKILL.md"),
+    "---\nname: architecture\ndescription: architecture flow\n---\n\nAuthor skillsPinned in design.json.\n",
   );
   return dir;
 }

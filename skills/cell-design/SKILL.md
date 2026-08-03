@@ -1,5 +1,5 @@
 ---
-name: cell-architecture-dsl
+name: cell-design
 description: Use when generating a design OR when ANY change alters the architecture — a component added, removed, or renamed; an edge or dependency changed; exposure changed; an external/SaaS dependency added or dropped. specs/design/design.cell moves FIRST, before design.md and the component design.json files. Covers the grammar, the AEP boundary semantics (where each dependency goes), and the write protocol that drives the live architecture diagram.
 metadata:
   aep:
@@ -8,13 +8,16 @@ metadata:
 ---
 
 
-# Cell architecture DSL (design.cell)
+# Cell design (design.cell)
 
-`specs/design/design.cell` is a small, project-level text file describing the
-architecture as a **cell**. The console renders it live as you write it, so it
-is the FIRST design artifact you emit — before design.md and the component
-design.json files. The component ids here MUST match the
-`components/<name>/design.json` names you write afterwards.
+`specs/design/design.cell` is the PRIMARY design source: a small project-level
+text file describing the architecture as a **cell**, carrying the design
+version's `phase` and every component's story citations. The console renders
+it live as you write it, so it is the FIRST design artifact you emit — and the
+platform derives from it: when the cell is saved, a design.json skeleton is
+scaffolded for every deployable component that has none, born with the cell's
+story citations. The component ids here MUST match the
+`components/<name>/design.json` names.
 
 ## Cell-based architecture in AEP
 

@@ -53,14 +53,14 @@ test("loadRepoSkills returns [] for a missing directory (skill-free checkout)", 
 test("loadRepoSkills reads the committed repo-root skill library", () => {
   const skills = loadRepoSkills(repoSkillsDir);
   const names = skills.map((s) => s.name);
-  assert.ok(names.includes("high-level-architecture"), JSON.stringify(names));
-  const arch = skills.find((s) => s.name === "high-level-architecture")!;
+  assert.ok(names.includes("architecture"), JSON.stringify(names));
+  const arch = skills.find((s) => s.name === "architecture")!;
   assert.notEqual(arch.description, "");
   assert.match(arch.content, /specs\/design\/components/);
   // The library's reference files ride along (agentskills.io structure).
   const oas = skills.find((s) => s.name === "openapi-conventions")!;
   assert.ok(oas.references?.["references/wso2-rest-api-design-guidelines.md"]);
-  const wf = skills.find((s) => s.name === "excalidraw-wireframes")!;
+  const wf = skills.find((s) => s.name === "wireframes")!;
   // The worked example is inlined in the body (read-before-write is load-bearing).
   assert.match(wf.content, /Worked example — risk register/);
 });

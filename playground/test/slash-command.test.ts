@@ -43,8 +43,8 @@ test("/<skill> with follow-up text rides after a blank line", () => {
 
 test("kebab-case skill tokens are allowed", () => {
   assert.equal(
-    slashSkillInstruction("/high-level-architecture redo the edges"),
-    "Load the high-level-architecture skill and follow it.\n\nredo the edges",
+    slashSkillInstruction("/architecture redo the edges"),
+    "Load the architecture skill and follow it.\n\nredo the edges",
   );
 });
 

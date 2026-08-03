@@ -20,10 +20,13 @@ design-generation turn** — in both cases the requirement-only input rule below
 
 ## Input — the requirement ONLY
 
-Read the requirement prose from `specs/requirements/prd.md` (or whichever requirements file the
-user points you at). **Do not read `design.md`, `openapi.yaml`, or any source code** to derive criteria —
-the oracle must be independent of the work it will grade. Base every criterion only on what the
-requirement says or necessarily implies.
+Read `specs/requirements/prd.md` — the numbered User Stories are the spine,
+with `specs/requirements/features/<slug>.md` for depth. **Do not read
+`design.md`, `openapi.yaml`, or any source code** to derive criteria — the
+oracle must be independent of the work it will grade. Base every criterion
+only on what the PRD says or necessarily implies, and cite each requirement's
+story numbers so coverage is checkable: every story of the phase being
+designed appears in some entry's `stories`.
 
 ## Output — write exactly one file
 
@@ -42,6 +45,7 @@ a fresh id only to a genuinely new or reworded criterion.
     {
       "id": "REQ-001",
       "statement": "Users can reset their password via email",
+      "stories": [3, 8],
       "criteria": [
         { "id": "AC-001-a", "must": "A registered email receives a reset link", "method": "e2e" },
         { "id": "AC-001-b", "must": "The reset link expires after 1 hour", "method": "e2e" },
@@ -59,6 +63,7 @@ a fresh id only to a genuinely new or reworded criterion.
 | `requirements[]` | One entry per distinct requirement parsed from the prose. |
 | `requirements[].id` | `REQ-NNN`, assigned sequentially (`REQ-001`, `REQ-002`, …). |
 | `requirements[].statement` | The requirement restated as one clear sentence. |
+| `requirements[].stories` | The PRD story numbers this requirement traces to — every entry cites at least one; a story number that appears in no entry means the oracle misses that story. |
 | `criteria[]` | The testable acceptance criteria for that requirement. **≥ 1 per requirement.** |
 | `criteria[].id` | `AC-<req-number>-<letter>`, e.g. `AC-001-a`, `AC-001-b`. |
 | `criteria[].must` | A single, **atomic**, verifiable assertion. No conjunctions — split "X and Y" into two criteria. |
