@@ -70,6 +70,19 @@ type RunCycleRepository interface {
 	// so the first close wins.
 	Finish(ctx context.Context, id, mergeSHA string) (*RunCycle, error)
 
+	// SetValidationVerdict records what one validation ATTEMPT concluded, and the
+	// issue it was dispatched at.
+	//
+	// It is the ONE mutator not fenced on the cycle being open, and deliberately:
+	// the verdict is derived from the report at the cycle's own merge commit, which
+	// the supervisor can only read AFTER Finish has stamped ended_at. The fence is
+	// write-once instead — an empty verdict — because an attempt concludes exactly
+	// once and a second write could only be a retry or a bug. Guarded that way, a
+	// redelivered activity is a no-op rather than a rewrite.
+	//
+	// Returns (nil, nil) when the cycle is absent or already carries a verdict.
+	SetValidationVerdict(ctx context.Context, id, verdict string, issue int) (*RunCycle, error)
+
 	// Latest returns a run's newest cycle, or (nil, nil) when the run has not
 	// dispatched yet. This is how loop POSITION is read — never from a stored
 	// phase enum on the run row.
@@ -187,6 +200,28 @@ func (r *runCycleRepository) Finish(ctx context.Context, id, mergeSHA string) (*
 		"merge_sha": mergeSHA,
 		"ended_at":  time.Now().UTC(),
 	})
+}
+
+func (r *runCycleRepository) SetValidationVerdict(ctx context.Context, id, verdict string, issue int) (*RunCycle, error) {
+	if !ValidationVerdicts[verdict] {
+		return nil, fmt.Errorf("run cycle: unknown validation verdict %q", verdict)
+	}
+	// Not updateOpen: this write lands after Finish. The write-once fence replaces
+	// the closed-cycle one — see SetValidationVerdict on the interface.
+	res := r.db.WithContext(ctx).
+		Model(&RunCycle{}).
+		Where("id = ? AND (validation_verdict IS NULL OR validation_verdict = '')", id).
+		Updates(map[string]any{
+			"validation_verdict": verdict,
+			"validation_issue":   issue,
+		})
+	if res.Error != nil {
+		return nil, res.Error
+	}
+	if res.RowsAffected == 0 {
+		return nil, nil
+	}
+	return r.getByID(ctx, id)
 }
 
 func (r *runCycleRepository) Latest(ctx context.Context, orgID, runID string) (*RunCycle, error) {

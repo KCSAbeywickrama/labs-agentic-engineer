@@ -44,6 +44,10 @@ type fakeIssues struct {
 	// just the answer.
 	filters []sourcecontrol.MilestoneIssuesFilter
 	created []sourcecontrol.CreateIssueRequest
+	// reopened records the issue numbers ReopenIssue was called for, so a test can
+	// assert a repeat attempt adopted the version's issue instead of filing a
+	// second one.
+	reopened []int
 	// numberless models a provider that files the issue and reports back no
 	// number — the one create outcome the minter must not read as "nothing to
 	// validate".
@@ -54,7 +58,11 @@ func (f *fakeIssues) ListMilestoneIssues(_ context.Context, _, _ string, filter 
 	f.filters = append(f.filters, filter)
 	var out []sourcecontrol.IssueInfo
 	for _, issue := range f.byMilestone[filter.Number] {
-		if filter.State != "" && !strings.EqualFold(issue.State, filter.State) {
+		// `all` is GitHub's "do not filter by state", and the fake has to honour that
+		// spelling: treating it as a literal state to match would hide every issue and
+		// make a state-blind lookup look like a version with no validation issue.
+		if filter.State != "" && !strings.EqualFold(filter.State, "all") &&
+			!strings.EqualFold(issue.State, filter.State) {
 			continue
 		}
 		// REST narrows as labels are added (sourcecontrol/README.md) — every
@@ -73,6 +81,18 @@ func (f *fakeIssues) CreateIssue(_ context.Context, _, _ string, req sourcecontr
 		return &sourcecontrol.IssueResult{URL: "https://example/issues/unknown"}, nil
 	}
 	return &sourcecontrol.IssueResult{Number: 42, URL: "https://example/issues/42"}, nil
+}
+
+func (f *fakeIssues) ReopenIssue(_ context.Context, _, _ string, number int) error {
+	f.reopened = append(f.reopened, number)
+	for milestone := range f.byMilestone {
+		for i := range f.byMilestone[milestone] {
+			if f.byMilestone[milestone][i].Number == number {
+				f.byMilestone[milestone][i].State = "open"
+			}
+		}
+	}
+	return nil
 }
 
 func hasEveryLabel(have, want []string) bool {
@@ -232,16 +252,50 @@ func TestEnsureValidationIssue_ReusesTheVersionsOwnOpenIssue(t *testing.T) {
 		t.Errorf("issue number = %d; want the open issue 7", number)
 	}
 
-	// The QUESTION matters as much as the answer: scoped to this milestone, open
-	// only, and narrowed to the validation label.
+	// The QUESTION matters as much as the answer: scoped to this milestone, narrowed
+	// to the validation label, and deliberately state-BLIND. `all` rather than `open`
+	// because a closed validation issue is the normal state between attempts — every
+	// attempt's pull request closes it with `Closes #<N>` — so asking only for open
+	// ones made a repeat attempt file a second issue for the same version.
 	if len(iss.filters) != 1 {
 		t.Fatalf("want 1 milestone read, got %d", len(iss.filters))
 	}
 	want := sourcecontrol.MilestoneIssuesFilter{
-		Number: thisMilestone, State: "open", Labels: []string{delivery.LabelValidationWork},
+		Number: thisMilestone, State: "all", Labels: []string{delivery.LabelValidationWork},
 	}
 	if !reflect.DeepEqual(iss.filters[0], want) {
 		t.Errorf("filter = %+v; want %+v", iss.filters[0], want)
+	}
+	if len(iss.reopened) != 0 {
+		t.Errorf("reopened %v; an already-open issue needs no reopen", iss.reopened)
+	}
+}
+
+// The repeat attempt: the previous attempt's pull request closed the version's
+// validation issue, and this call must find and reopen THAT issue rather than file
+// a second one. Two validation issues for one version would each embed their own
+// snapshot of the oracle, and the run's ValidationIssue would name whichever was
+// newest.
+func TestEnsureValidationIssue_ReopensTheClosedIssueForARepeatAttempt(t *testing.T) {
+	closed := validationIssue(7)
+	closed.State = "closed"
+	iss := &fakeIssues{byMilestone: map[int][]sourcecontrol.IssueInfo{
+		thisMilestone: {closed},
+	}}
+	svc := newSvc(iss, fakeCriteria{raw: []byte(sampleCriteria), found: true})
+
+	number, err := svc.EnsureValidationIssue(context.Background(), "org", "proj", thisMilestone)
+	if err != nil {
+		t.Fatalf("EnsureValidationIssue: %v", err)
+	}
+	if number != 7 {
+		t.Errorf("issue number = %d; want the version's own issue 7", number)
+	}
+	if len(iss.created) != 0 {
+		t.Errorf("filed %d issues; a closed validation issue must be reopened, not re-filed", len(iss.created))
+	}
+	if !reflect.DeepEqual(iss.reopened, []int{7}) {
+		t.Errorf("reopened = %v; want [7]", iss.reopened)
 	}
 }
 

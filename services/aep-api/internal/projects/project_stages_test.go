@@ -345,15 +345,53 @@ func TestDeployStage_ValidationDerivation(t *testing.T) {
 		{name: "no run at all → none", wantStatus: "none"},
 
 		// Every verdict is MIRRORED, so the chip says what the run concluded rather
-		// than a coarser word that has to be looked up.
+		// than a coarser word that has to be looked up. These four are final the
+		// moment they are written — the loop never repairs them — so a live run
+		// renders them straight away.
 		{"passed", withVerdict(delivery.RunStateRunning, delivery.ValidationVerdictPassed), nil, "passed"},
-		{"failed", withVerdict(delivery.RunStateRunning, delivery.ValidationVerdictFailed), nil, "failed"},
 		{"partial", withVerdict(delivery.RunStateRunning, delivery.ValidationVerdictPartial), nil, "partial"},
 		{"inconclusive", withVerdict(delivery.RunStateRunning, delivery.ValidationVerdictInconclusive), nil, "inconclusive"},
-		{"unreported", withVerdict(delivery.RunStateRunning, delivery.ValidationVerdictUnreported), nil, "unreported"},
 		// skipped is surfaced, not folded into none: "no acceptance criteria" is
 		// actionable ("author some"), where none means "nothing to say yet".
 		{"skipped", withVerdict(delivery.RunStateRunning, delivery.ValidationVerdictSkipped), nil, "skipped"},
+
+		// The two REPAIRABLE verdicts are not final on a live run: the platform files
+		// the failure as work and validates again. Rendering `failed` here would read
+		// as terminal while the loop is actively fixing it, so a live run mid-repair
+		// says so instead — and names the IMPLEMENTATION, since the cycle in flight is
+		// ordinary coding work.
+		{
+			name:       "live run repairing a failed verdict → awaiting-fix",
+			runs:       withVerdict(delivery.RunStateRunning, delivery.ValidationVerdictFailed),
+			cycle:      cycle(delivery.CycleKindCoding, false),
+			wantStatus: "awaiting-fix",
+		},
+		{
+			name:       "live run re-dispatching after unreported → awaiting-fix",
+			runs:       withVerdict(delivery.RunStateRunning, delivery.ValidationVerdictUnreported),
+			cycle:      cycle(delivery.CycleKindCoding, false),
+			wantStatus: "awaiting-fix",
+		},
+		// A repeat attempt already in flight is `running`, not `awaiting-fix`: the
+		// latest cycle is the validation cycle, which wins over the stale verdict.
+		{
+			name:       "live run whose repeat validation cycle is in flight → running",
+			runs:       withVerdict(delivery.RunStateRunning, delivery.ValidationVerdictFailed),
+			cycle:      cycle(delivery.CycleKindValidation, false),
+			wantStatus: "running",
+		},
+		// Once the run SETTLES, the repairable verdicts are the final answer — the
+		// loop is over and it kept failing.
+		{
+			name:       "settled run that failed validation → failed",
+			runs:       withVerdict(delivery.RunStateFailed, delivery.ValidationVerdictFailed),
+			wantStatus: "failed",
+		},
+		{
+			name:       "settled run that reported nothing → unreported",
+			runs:       withVerdict(delivery.RunStateFailed, delivery.ValidationVerdictUnreported),
+			wantStatus: "unreported",
+		},
 
 		{
 			name:       "settled run that never validated → none",

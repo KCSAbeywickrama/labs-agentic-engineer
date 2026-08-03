@@ -153,3 +153,123 @@ func TestValidationVerdictFailsRun(t *testing.T) {
 		}
 	}
 }
+
+// TestFailedCriteria covers the read a repair issue is built from. The shape of
+// `failure` is the whole risk: generate-report.mjs writes an OBJECT, and reports
+// already merged into project repos carry a bare string — a report is read long
+// after it was written, so both have to work.
+func TestFailedCriteria(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+		want []validation.FailedCriterion
+	}{
+		{"no report at all", "", nil},
+		{"unparseable", `{`, nil},
+		{"nothing failed", `{"criteria":[{"id":"AC-1","status":"pass"}]}`, nil},
+		{
+			"object-shaped failure — what the generator writes",
+			`{"criteria":[
+			  {"id":"AC-1","method":"e2e","status":"pass"},
+			  {"id":"AC-2","method":"e2e","status":"fail","spec":"tests/e2e/greet.spec.ts",
+			   "failure":{"message":"expected Hello, Ada","location":"greet.spec.ts:14"}}
+			]}`,
+			[]validation.FailedCriterion{{
+				ID: "AC-2", Method: "e2e", Message: "expected Hello, Ada",
+				Location: "greet.spec.ts:14", Spec: "tests/e2e/greet.spec.ts",
+			}},
+		},
+		{
+			"string-shaped failure — the older on-disk shape",
+			`{"criteria":[{"id":"AC-9","method":"e2e","status":"fail","failure":"timed out"}]}`,
+			[]validation.FailedCriterion{{ID: "AC-9", Method: "e2e", Message: "timed out"}},
+		},
+		{
+			"a failure shaped like neither degrades to no detail, not to a dropped criterion",
+			`{"criteria":[{"id":"AC-9","method":"e2e","status":"fail","failure":42}]}`,
+			[]validation.FailedCriterion{{ID: "AC-9", Method: "e2e"}},
+		},
+		{
+			"every failure is returned, in report order",
+			`{"criteria":[
+			  {"id":"AC-3","status":"fail","failure":{"message":"one"}},
+			  {"id":"AC-1","status":"not_run"},
+			  {"id":"AC-2","status":"fail","failure":{"message":"two"}}
+			]}`,
+			[]validation.FailedCriterion{
+				{ID: "AC-3", Message: "one"},
+				{ID: "AC-2", Message: "two"},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := validation.FailedCriteria([]byte(tc.raw))
+			if len(got) != len(tc.want) {
+				t.Fatalf("FailedCriteria() = %+v; want %+v", got, tc.want)
+			}
+			for i := range tc.want {
+				if got[i] != tc.want[i] {
+					t.Errorf("FailedCriteria()[%d] = %+v; want %+v", i, got[i], tc.want[i])
+				}
+			}
+		})
+	}
+}
+
+// TestReportDigest is the live-or-dead test for the identical-report rule.
+//
+// The rule stops a repeat attempt that learned nothing. It can only ever fire if the
+// digest ignores everything about a report except what it concluded — and the runner
+// stamps every report with the commit it was generated at, so a whole-file hash
+// would differ on every attempt and the rule would be dead code that always passes.
+func TestReportDigest(t *testing.T) {
+	const outcomes = `"criteria":[{"id":"AC-1","status":"fail","failure":{"message":"boom"}},{"id":"AC-2","status":"pass"}]`
+
+	t.Run("same outcomes digest the same, despite a different commit stamp", func(t *testing.T) {
+		first := validation.ReportDigest([]byte(`{"commit":"aaaaaaa","generatedAt":"2026-01-01T00:00:00Z",` + outcomes + `}`))
+		second := validation.ReportDigest([]byte(`{"commit":"bbbbbbb","generatedAt":"2026-02-02T00:00:00Z",` + outcomes + `}`))
+		if first == "" {
+			t.Fatal("digest is empty for a usable report")
+		}
+		if first != second {
+			t.Error("the commit stamp changed the digest — the identical-report rule can never fire")
+		}
+	})
+
+	t.Run("criterion order is not part of the answer", func(t *testing.T) {
+		a := validation.ReportDigest([]byte(`{"criteria":[{"id":"AC-1","status":"pass"},{"id":"AC-2","status":"fail"}]}`))
+		b := validation.ReportDigest([]byte(`{"criteria":[{"id":"AC-2","status":"fail"},{"id":"AC-1","status":"pass"}]}`))
+		if a != b {
+			t.Error("report order changed the digest; it is the runner's discovery order, not a promise")
+		}
+	})
+
+	t.Run("a repaired criterion is a changed answer", func(t *testing.T) {
+		red := validation.ReportDigest([]byte(`{"criteria":[{"id":"AC-1","status":"fail"}]}`))
+		green := validation.ReportDigest([]byte(`{"criteria":[{"id":"AC-1","status":"pass"}]}`))
+		if red == green {
+			t.Error("a repaired criterion must not digest the same as a failing one")
+		}
+	})
+
+	t.Run("the same criterion failing for a different reason is a changed answer", func(t *testing.T) {
+		a := validation.ReportDigest([]byte(`{"criteria":[{"id":"AC-1","status":"fail","failure":{"message":"timeout"}}]}`))
+		b := validation.ReportDigest([]byte(`{"criteria":[{"id":"AC-1","status":"fail","failure":{"message":"404"}}]}`))
+		if a == b {
+			t.Error("the repair moved the failure; that is progress and must not read as unchanged")
+		}
+	})
+
+	t.Run("no comparable evidence digests empty, so two of them never match", func(t *testing.T) {
+		for name, raw := range map[string]string{
+			"absent":      "",
+			"unparseable": `{`,
+			"no criteria": `{"criteria":[]}`,
+		} {
+			if got := validation.ReportDigest([]byte(raw)); got != "" {
+				t.Errorf("%s: digest = %q; want empty so it cannot compare equal", name, got)
+			}
+		}
+	})
+}

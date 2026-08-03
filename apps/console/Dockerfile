@@ -96,7 +96,14 @@ RUN chmod +x /docker-entrypoint.sh
 # must own that tree or boot fails with:
 #   mkdir() "/var/lib/nginx/tmp/client_body" failed (13: Permission denied)
 # Official nginx image temps under /var/cache/nginx — chown both.
-RUN chown -R 10001:10001 /var/cache/nginx && \
+#
+# /var/lib/nginx is CREATED here, not merely chowned: this base image
+# (nginx:1.28-alpine, the official one) does not ship it, so an unconditional
+# chown fails the build with "No such file or directory". Only the cloud
+# overlay's `apk upgrade nginx` introduces the directory — and it finds a tree
+# UID 10001 already owns, which is the point.
+RUN mkdir -p /var/lib/nginx/tmp && \
+    chown -R 10001:10001 /var/cache/nginx && \
     chown -R 10001:10001 /var/log/nginx && \
     chown -R 10001:10001 /var/lib/nginx && \
     chown -R 10001:10001 /etc/nginx && \
