@@ -73,8 +73,8 @@ apply_with_retry() {
 apply_with_retry "${SCRIPT_DIR}/../manifests/docker-build-workflow.yaml" "docker-build-workflow"
 echo "✅ ClusterWorkflow 'dockerfile-builder' installed"
 
-# Default: splice a hostPath overlay onto /app/plugin in the runner pod so
-# the host's runners/remote-worker/plugin is read live (skill edits without an image
+# Default: splice a hostPath overlay onto /app/skills in the runner pod so the
+# host's repo-root skills/ library is read live (skill edits without an image
 # rebuild). The prod manifest stays the single source of truth; yq layers
 # the dev-patch fragment over it at apply time so other fields can't drift.
 # Requires setup-k3d.sh to have baked the bind-mount onto the node.
@@ -84,10 +84,10 @@ CODING_AGENT_PATCH="${SCRIPT_DIR}/../manifests/aep-coding-agent.dev-patch.yaml"
 
 if [ "${AEP_PROD_RUNNER:-0}" = "1" ]; then
     apply_with_retry "$CODING_AGENT_MANIFEST" "aep-coding-agent"
-    echo "✅ ClusterWorkflow 'aep-coding-agent' installed (PROD — baked-in image plugin)"
+    echo "✅ ClusterWorkflow 'aep-coding-agent' installed (PROD — baked-in skill library)"
 else
     if ! command -v yq &>/dev/null; then
-        echo "❌ Dev plugin overlay needs yq for the patch merge — 'brew install yq'"
+        echo "❌ Dev skills overlay needs yq for the patch merge — 'brew install yq'"
         echo "   Or set AEP_PROD_RUNNER=1 to skip the overlay."
         exit 1
     fi
@@ -100,7 +100,7 @@ else
           load(\"${CODING_AGENT_PATCH}\").volumes
     " "$CODING_AGENT_MANIFEST" > "$DEV_MANIFEST"
     apply_with_retry "$DEV_MANIFEST" "aep-coding-agent (dev — hostPath overlay)"
-    echo "✅ ClusterWorkflow 'aep-coding-agent' installed (DEV — /app/plugin overlay live from host)"
+    echo "✅ ClusterWorkflow 'aep-coding-agent' installed (DEV — /app/skills overlay live from host)"
 fi
 
 # Build + import the runner image (ONE image, both task kinds: Debian + Go +

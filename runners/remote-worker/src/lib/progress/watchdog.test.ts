@@ -20,6 +20,15 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createRunWatchdog } from "./watchdog.js";
 import type { ProgressEventInput } from "./schema.js";
+import type { ApiRetryInfo } from "./diagnostics.js";
+
+const OVERLOADED: ApiRetryInfo = {
+  attempt: 3,
+  maxRetries: 10,
+  retryDelayMs: 4_200,
+  errorStatus: 529,
+  error: "overloaded",
+};
 
 const IDLE = 120_000;
 
@@ -125,4 +134,96 @@ test("watchdog: a Bash call rewritten to git_commit is still tracked as in fligh
 test("watchdog: describe() is usable before anything has happened", () => {
   // The SIGTERM path calls it at arbitrary times, including during startup.
   assert.match(createRunWatchdog().describe(), /no tool in flight/);
+});
+
+test("watchdog: a retry does NOT reset the idle clock — otherwise a retry storm reports nothing", () => {
+  // The regression that matters most. Retries arrive as SDK messages, so
+  // routing them through observe() would keep the clock alive and the watchdog
+  // silent through exactly the stall it exists to report. The measured backoff
+  // climbs 0.2s → 33.6s, all of it inside the idle window.
+  const h = harness();
+  h.watchdog.observe([{ kind: "tool_result", ok: true, toolUseId: "t1" }]);
+
+  for (let i = 0; i < 8; i++) {
+    h.advance(30_000);
+    h.watchdog.observeRetry({ ...OVERLOADED, attempt: i + 1 });
+    h.watchdog.check();
+  }
+  assert.equal(h.emitted.length, 2, "4 minutes of retries produce two reports, not zero");
+  assert.match(h.summaries()[0] ?? "", /waiting on the model for 2m0s/);
+});
+
+test("watchdog: the report names the retry — the diagnosis, not just the symptom", () => {
+  const h = harness();
+  h.watchdog.observe([{ kind: "tool_result", ok: true, toolUseId: "t1" }]);
+  h.watchdog.observeRetry(OVERLOADED);
+
+  h.advance(IDLE + 1);
+  h.watchdog.check();
+  const line = h.summaries()[0] ?? "";
+  assert.match(line, /no tool in flight — waiting on the model for 2m0s/);
+  assert.match(line, /\(API retry 3\/10, overloaded, last 2m0s ago\)/);
+});
+
+test("watchdog: real activity clears the retry, so a later stall is not blamed on a stale cause", () => {
+  const h = harness();
+  h.watchdog.observeRetry(OVERLOADED);
+  // The retry was followed by a call that worked — that retry is history.
+  h.watchdog.observe([{ kind: "tool_use", tool: "Bash", summary: "bal build", toolUseId: "t1" }]);
+  h.watchdog.observe([{ kind: "tool_result", ok: true, toolUseId: "t1" }]);
+
+  h.advance(IDLE + 1);
+  h.watchdog.check();
+  assert.doesNotMatch(h.summaries()[0] ?? "", /API retry/);
+});
+
+test("watchdog: a subagent's retry surfaces under the Agent call that is still in flight", () => {
+  // A fan-out lead's Agent call stays open for its subagent's whole run, so this
+  // branch is where a retry inside that subagent shows up — and where the cause
+  // is hardest to guess from outside.
+  const h = harness();
+  h.watchdog.observe([{ kind: "tool_use", tool: "Agent", summary: "implement checkout", toolUseId: "a1" }]);
+  h.watchdog.observeRetry({ ...OVERLOADED, error: "rate_limit", errorStatus: 429 });
+
+  h.advance(IDLE + 1);
+  h.watchdog.check();
+  const line = h.summaries()[0] ?? "";
+  assert.match(line, /waiting on Agent \(implement checkout\)/);
+  assert.match(line, /API retry 3\/10, rate_limit/);
+});
+
+test("watchdog: streaming frames do not reset the clock — the report fires on the same schedule either way", () => {
+  // includePartialMessages is developer-only, and a diagnostic that changes when
+  // the report fires would be useless for reproducing what the cluster saw.
+  const h = harness();
+  h.watchdog.observe([{ kind: "tool_result", ok: true, toolUseId: "t1" }]);
+  for (let i = 0; i < 60; i++) {
+    h.advance(2_000);
+    h.watchdog.observeStream();
+  }
+  h.watchdog.check();
+  assert.equal(h.emitted.length, 1, "two minutes of tokens is still two minutes without a tool");
+  assert.match(h.summaries()[0] ?? "", /model streaming, last token 0s ago/);
+});
+
+test("watchdog: with no streaming measured, nothing is claimed about tokens", () => {
+  // Absence of frames means "not measured", not "no tokens" — the normal case
+  // in the cluster, where the option is off.
+  const h = harness();
+  h.watchdog.observe([{ kind: "tool_result", ok: true, toolUseId: "t1" }]);
+  h.advance(IDLE + 1);
+  h.watchdog.check();
+  assert.doesNotMatch(h.summaries()[0] ?? "", /streaming/);
+});
+
+test("watchdog: a retry outranks the streaming clock as the reported cause", () => {
+  const h = harness();
+  h.watchdog.observe([{ kind: "tool_result", ok: true, toolUseId: "t1" }]);
+  h.watchdog.observeStream();
+  h.watchdog.observeRetry(OVERLOADED);
+
+  h.advance(IDLE + 1);
+  h.watchdog.check();
+  assert.match(h.summaries()[0] ?? "", /API retry/);
+  assert.doesNotMatch(h.summaries()[0] ?? "", /streaming/);
 });

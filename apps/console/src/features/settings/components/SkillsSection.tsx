@@ -386,16 +386,23 @@ export function SkillsSection() {
                       <Box sx={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 1 }}>
                         <Tooltip
                           title={
-                            skill.enabled
-                              ? "Disable this skill to withhold it from the platform's agents. It stays in your org's skills repo and can be switched back on anytime."
-                              : "Enable this skill to make it available to the platform's agents again."
+                            // `required` is the server's call, not a name match
+                            // here: the coding runner reads this skill on every
+                            // run and refuses to start without it, so the PATCH
+                            // would 409. A toggle that can only fail is worse
+                            // than one that says why it is unavailable.
+                            skill.required
+                              ? "This skill carries the coding run's workflow, so it can't be turned off — every build in your organization needs it."
+                              : skill.enabled
+                                ? "Disable this skill to withhold it from the platform's agents. It stays in your org's skills repo and can be switched back on anytime."
+                                : "Enable this skill to make it available to the platform's agents again."
                           }
                         >
                           <span>
                             <Switch
                               size="small"
                               checked={skill.enabled}
-                              disabled={isTogglingThisRow}
+                              disabled={isTogglingThisRow || skill.required}
                               onChange={(e) =>
                                 setSkillEnabled.mutate({
                                   name: skill.name,

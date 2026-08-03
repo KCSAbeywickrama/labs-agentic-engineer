@@ -27,7 +27,7 @@
 #
 # Idempotent: the (multi-minute, downloads chromium) build is skipped when the
 # image already exists. FORCE=1 rebuilds — use it after changing the Dockerfile
-# or the runner's TS/toolchain (skill edits are picked up live via the plugin
+# or the runner's TS/toolchain (skill edits are picked up live via the skills
 # hostPath overlay and never need a rebuild).
 #
 # SKIP_IMPORT=1 builds without importing — used by setup.sh, which starts this
@@ -53,7 +53,12 @@ if [ "${FORCE:-0}" = "1" ] || ! docker image inspect "$IMAGE" &>/dev/null; then
     # kubelet falls back to a registry pull of this local-only tag and the pod
     # hangs in ImagePullBackOff. Emitting a plain single-manifest image keeps the
     # local build importable.
-    docker build --provenance=false --sbom=false -f "$DOCKERFILE" -t "$IMAGE" "$WORKER_DIR"
+    # --build-context skills=<repo>/skills: the authored skill library lives at
+    # the repo root, outside this image's build context, and the runner bakes it
+    # at /app/skills (see the Dockerfile). Same mechanism aep-api uses.
+    docker build --provenance=false --sbom=false \
+        --build-context "skills=$SCRIPT_DIR/../../skills" \
+        -f "$DOCKERFILE" -t "$IMAGE" "$WORKER_DIR"
     echo "✅ built $IMAGE"
 else
     echo "✅ runner image already present ($IMAGE) — skipping build (FORCE=1 to rebuild)"

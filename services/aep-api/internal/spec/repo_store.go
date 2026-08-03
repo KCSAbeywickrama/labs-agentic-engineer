@@ -56,6 +56,11 @@ const (
 	skillsRootDir = "skills"
 	skillFileName = "SKILL.md"
 	refsPrefix    = "references/"
+	// skillOverlaysDir names the one subdirectory of an authored skill that is
+	// NOT skill content: the coding runner's mode overlays (compose-time input
+	// for a session it assembles — ADR-0004 in runners/remote-worker). loadLibrary
+	// skips it, so it never reaches an org's skills repo or a ContentSHA.
+	skillOverlaysDir = "overlays"
 )
 
 // legacyKindDirs maps the RETIRED kind path-segments (skills/<kindDir>/<name>/,

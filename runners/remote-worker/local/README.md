@@ -11,12 +11,14 @@ and hands back your GitHub PAT.
 1. Starts the token stub on `127.0.0.1:8377` (host side).
 2. Builds the runner image from `../Dockerfile` (cached after the first time).
 3. Runs the one-shot container: clones `AEP_REPO_URL`'s default branch,
-   loads the `aep` skill plugin, and lets the agent work `AEP_PROMPT` —
+   reads the `aep` skill from the clone's mirror, and lets the agent work `AEP_PROMPT` —
    branch, commit, push, PR, exactly as a cluster run would.
 
-`AEP_PLATFORM_URL` is left unset, so the per-task skills pull is skipped;
-the base plugin at `../plugin` is bind-mounted read-only into the
-container, so skill edits are live on the next run without a rebuild.
+The run reads every skill from the `.claude/skills/` mirror the BFF wrote
+into the clone — there is no skills fetch and no plugin. The repo-root
+`skills/` library is bind-mounted read-only over `/app/skills` all the
+same, so a skill edit is live on the next run without a rebuild; the
+playground's local mode mirrors from it, and the mount is harmless here.
 
 ## Usage
 
@@ -57,8 +59,8 @@ the rest.
 - **Real flow:** create a GitHub issue in the test repo whose body is the
   task spec, and set `AEP_PROMPT` to point at its URL — the `aep` skill
   drives issue-comment/branch/PR conventions from there.
-- **Skill iteration:** edit `../plugin/skills/aep/SKILL.md` or add a new
-  `../plugin/skills/<name>/SKILL.md`; the mount picks it up on the next run.
+- **Skill iteration:** edit `<repo>/skills/aep/SKILL.md` (or any skill the
+  runner loads); the `/app/skills` mount picks it up on the next run.
   (In-cluster, per-task skills come from the BFF snapshot instead — that
   path needs the full `deployments/` setup.)
 

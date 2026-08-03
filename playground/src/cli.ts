@@ -88,6 +88,7 @@ function printUsage(): void {
       "  --restore         restore the latest undo snapshot before the run",
       "  --yes             headless consent for the coding agent (bypass-permissions)",
       "  --host            (code) run the coding agent as a bare host process, not the runner image",
+      "  --api-key         (code --host) authenticate with ANTHROPIC_API_KEY instead of your Claude login",
       "  --slow            (log) only the calls that took 3s or more, slowest first",
       "  --thinking        (log) the model's reasoning blocks (main agent only — subagents emit none)",
       "  --run <name>      (log) an older archived run instead of the newest",
@@ -268,6 +269,7 @@ async function main(): Promise<number> {
       restore: { type: "boolean" },
       yes: { type: "boolean" },
       host: { type: "boolean" },
+      "api-key": { type: "boolean" },
       slow: { type: "boolean" },
       thinking: { type: "boolean" },
       run: { type: "string" },
@@ -291,6 +293,7 @@ async function main(): Promise<number> {
     ...(values.restore ? { restore: true } : {}),
     ...(values.yes ? { yes: true } : {}),
     ...(values.host ? { host: true } : {}),
+    ...(values["api-key"] ? { apiKey: true } : {}),
     // `log` defaults to the per-step view; --slow and --thinking narrow it.
     ...(values.slow ? { view: "slow" as const } : values.thinking ? { view: "thinking" as const } : {}),
     ...(values.run ? { run: values.run } : {}),

@@ -516,6 +516,15 @@ func loadLibrary(fsys fs.FS) ([]Skill, error) {
 				}
 				return nil
 			}
+			// `overlays/` is COMPOSE-TIME input, not skill content: the coding
+			// runner assembles its base plugin out of this same library and
+			// applies skills/aep/overlays/local.md to get the playground's
+			// local-mode workflow (ADR-0004, runners/remote-worker). Seeding it
+			// would put playground-only prose in every org's skills repo, count
+			// it in ContentSHA, and hand it to any agent that loads the skill.
+			if d.IsDir() && base == skillOverlaysDir {
+				return fs.SkipDir
+			}
 			if d.IsDir() {
 				return nil
 			}

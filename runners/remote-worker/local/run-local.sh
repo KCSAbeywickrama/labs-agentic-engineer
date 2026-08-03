@@ -24,8 +24,10 @@
 #   cp env.local.example .env.local    # then fill in
 #   ./run-local.sh [path/to/env-file]
 #
-# The plugin/ dir is bind-mounted read-only over /app/plugin, so skill
-# edits are live without an image rebuild (mirrors the k3d dev flow).
+# The repo-root skills/ library is bind-mounted read-only over /app/skills, so
+# skill edits are live without an image rebuild (mirrors the k3d dev flow). A
+# dispatched run reads its skills from the clone's .claude/skills/ mirror, not
+# from here — this mount is what the playground's local mode mirrors FROM.
 # Exit code mirrors the runner: 0 success, 1 agent failure, 2 provisioning.
 
 set -euo pipefail
@@ -114,7 +116,7 @@ docker run --rm \
   --add-host=host.docker.internal:host-gateway \
   --shm-size=1g \
   -v "$SCRIPT_DIR/workspace:/home/aep/aep-workspace" \
-  -v "$WORKER_DIR/plugin:/app/plugin:ro" \
+  -v "$WORKER_DIR/../../skills:/app/skills:ro" \
   -e ANTHROPIC_API_KEY \
   -e AEP_TASK_ID -e AEP_ORG_ID -e AEP_PROJECT_ID -e AEP_COMPONENT_NAME \
   -e AEP_REPO_URL -e AEP_PROMPT -e AEP_BEARER -e AEP_GIT_SERVICE_URL \

@@ -6,10 +6,11 @@ Root-level local-filesystem playground: runs the **real** engineering agent
 prompt, or a steer copy → rerun one phase → observe. No git, no GitHub, no
 Postgres, no cluster.
 
-The coding agent loads the **same `aep` skill production loads**, composed for
-`mode: "local"` — one authored `SKILL.md` with the GitHub-shaped steps marked
-inline, so tuning it here IS tuning the platform's. See
-`runners/remote-worker/design/decisions/ADR-0001-one-mode-composed-skill.md`.
+The coding agent loads the **same `aep` skill production loads**, assembled for
+`mode: "local"` — one authored `skills/aep/SKILL.md`, with the GitHub-shaped
+passages swapped by the anchored edits in `skills/aep/overlays/local.md`, so
+tuning it here IS tuning the platform's. See
+`runners/remote-worker/design/decisions/ADR-0004-library-owned-workflow-skills.md`.
 
 ## Run
 
@@ -40,7 +41,9 @@ A realistic project spends most of its wall clock on work that is the same every
 time you rerun it, which is exactly the part you are not tuning. Measured on this
 repo: a two-component todo app with Postgres and OIDC runs ~12-16 min, while the
 same shape reduced to `GET /hello` plus one screen runs in a few minutes and
-halves the preloaded skill set (3 skills / preload 2, against 6 / 4).
+halves the attached skill set (3 skills against 6). No attached skill is
+preloaded — the run loads what it reaches for — so a smaller fixture buys
+fewer loads and less work, not a smaller system prompt.
 
 Keep the small one around and rerun it; reach for a realistic project only to
 confirm a change holds at size. Since `playground/.projects/` is gitignored,
@@ -79,8 +82,9 @@ editor (VS Code) is where browsing, diffs, and hand-edits happen — including
 authoring `issues/<n>.md` by hand (picked up automatically).
 
 Flags: `--idea`, `--target`, `--fresh` (rotate the general conversation),
-`--silent`, `--restore`, `--yes` (headless coding consent). Every verb exits
-nonzero on failure — the edit-skill → rerun loop is scriptable.
+`--silent`, `--restore`, `--yes` (headless coding consent), `--host` +
+`--api-key` (coding-run mode and its auth). Every verb exits nonzero on failure
+— the edit-skill → rerun loop is scriptable.
 
 Relative project paths resolve against where you launched `pnpm play` (pnpm's
 `INIT_CWD`). The picker's default is `<repo>/playground/.projects/my-app` —
@@ -88,8 +92,17 @@ Relative project paths resolve against where you launched `pnpm play` (pnpm's
 may live (a gitignored dot-dir, invisible to lint + license gates). Anywhere
 else inside the repo is refused.
 
-Requires `ANTHROPIC_API_KEY` (env or `deployments/.env`). Skills load from the
-working-tree `skills/` on EVERY turn — edits apply next run, no rebuild.
+Requires `ANTHROPIC_API_KEY` (env or `deployments/.env`) for the **engineering**
+agent, which is an AI SDK model call with no other way to authenticate. The
+**coding** agent is a Claude Code session and authenticates by mode: a docker run
+gets the key (a container reaches no credential store), while `--host` withholds
+it and lets the SDK use the developer's own credentials — the ones `claude login`
+wrote — so a local tuning loop bills your subscription, not the platform's key.
+`code --host --api-key` opts back into key auth. Skills load from the
+working-tree `skills/` on EVERY turn — edits apply next run, no rebuild. That now
+covers the coding run's own workflow skill and its local-mode overlay too: the
+library is mounted over the image's `/app/skills`, so `aep/SKILL.md` and
+`aep/overlays/local.md` are live-editable exactly like a stack skill.
 
 **AI SDK DevTools is always on** (`src/devtools-default.ts`): every
 engineering-agent LLM call — the composed prompt, tool calls, usage, timing —
@@ -97,7 +110,11 @@ is captured to `playground/.devtools/generations.json` (gitignored). Inspect
 with `npx @ai-sdk/devtools` (port 4983). Opt out per run with
 `AGENT_DEVTOOLS=false pnpm play …`. The coding agent is an Agent SDK session,
 not an AI SDK model — its full transcript is the run's
-`.aep-playground/runs/<ts>/…/claude.log` instead.
+`.aep-playground/runs/<ts>/…/claude.log` instead. Beside it,
+`agent-sessions/` is the SDK's own per-session scratch, redirected there with
+`CLAUDE_CODE_TMPDIR` so a stalled subagent's diagnostic file survives
+`docker run --rm` (rationale inline in `engine/coding-run.ts`) — docker mode only,
+and never pre-created on the host: the CLI refuses a temp dir it does not own.
 
 ## Fidelity contract
 
@@ -107,9 +124,11 @@ gates), the same instruction composition (`src/engine/compose.ts` carries
 provenance-pinned verbatim copies of the live Go steer strings —
 `test/steer-parity.test.ts` fails on drift), the same skills materialization,
 the same runner session options (`resolveBaseAgentConfig` defaults are
-unit-pinned in remote-worker), and the same authored workflow skill (only the
-mode-marked GitHub steps are swapped — `skill_compose.test.ts` pins which text
-is shared and asserts neither mode leaks the other's procedure).
+unit-pinned in remote-worker), and and the same authored workflow skill
+out of the same library (only the GitHub-shaped passages are swapped, by
+`skills/aep/overlays/local.md` — `workflow_skill.test.ts` pins which text is shared
+and asserts neither mode leaks the other's procedure; ADR-0004 in
+remote-worker).
 
 ## Scope ends when the code lands
 
@@ -136,8 +155,8 @@ push it to a repo and let the platform's normal flow build/deploy it.
 | Issue `key` lineage constant `"local"`; no spec/design tags | no builds/tags locally | dedupe across replans still works |
 | Design/tasks gates are playground-side UX | production has no server gate on the console's spec paths | advisory only |
 | No status field on an issue file | prod's own `derivedStatus` is read from GitHub issue state, never cached; the playground has no such oracle, so it re-derives "is this done" from whether the App Path looks implemented, every run | none needed — deleting a component's code puts its issue back in the working set |
-| Coding agent runs in a throwaway `docker run` of the runner image, not a pod | no cluster; the image and the session options are production's | mandatory undo snapshot + first-run consent. `--host` opts out of the container entirely and runs bypassPermissions ON THE HOST against the developer's own toolchain — weaker parity, so point it at scratch/git-tracked projects |
-| No GitHub-shaped steps in the workflow skill (issue files, no branch, no PR) | there is no remote to discover issues from or open a PR against | the deliberate one: the same authored `aep` skill, composed for `mode: "local"`; everything outside a `<!-- mode:… -->` block is shared with production verbatim |
+| Coding agent runs in a throwaway `docker run` of the runner image, not a pod | no cluster; the image and the session options are production's | mandatory undo snapshot + first-run consent. `--host` opts out of the container entirely and runs bypassPermissions ON THE HOST against the developer's own toolchain **and the developer's own Claude credentials** — weaker parity, so point it at scratch/git-tracked projects |
+| No GitHub-shaped steps in the workflow skill (issue files, no branch, no PR) | there is no remote to discover issues from or open a PR against | the deliberate one: the same authored `aep` skill, assembled for `mode: "local"`; only the passages `skills/aep/overlays/local.md` anchors are swapped, everything else is production's text verbatim |
 
 ## Layout
 

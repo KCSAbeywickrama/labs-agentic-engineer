@@ -4614,6 +4614,15 @@ components:
         updatedAt:
           format: date-time
           type: string
+        required:
+          description: >-
+            True when the coding runner reads this skill on every run and cannot
+            start without it (`aep`, and `aep-validation` for a validation task).
+            The mirror only copies enabled skills, so disabling one of these would
+            take the procedure away from every build in the org — `PATCH
+            /skills/{name}` refuses it with 409. The console renders the
+            availability toggle as unavailable rather than letting the call fail.
+          type: boolean
       required:
       - editable
       - deletable
@@ -4627,6 +4636,7 @@ components:
       - binaryReferences
       - contentSha
       - updatedAt
+      - required
       type: object
     SkillSummary:
       additionalProperties: false
@@ -4645,6 +4655,15 @@ components:
           type: string
         name:
           type: string
+        required:
+          description: >-
+            True when the coding runner reads this skill on every run and cannot
+            start without it (`aep`, and `aep-validation` for a validation task).
+            The mirror only copies enabled skills, so disabling one of these would
+            take the procedure away from every build in the org — `PATCH
+            /skills/{name}` refuses it with 409. The console renders the
+            availability toggle as unavailable rather than letting the call fail.
+          type: boolean
       required:
       - name
       - kind
@@ -4653,6 +4672,7 @@ components:
       - editable
       - deletable
       - enabled
+      - required
       type: object
     SkillSummaryList:
       additionalProperties: false

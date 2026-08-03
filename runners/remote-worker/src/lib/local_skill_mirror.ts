@@ -40,6 +40,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { parse as parseYaml } from "yaml";
+import { OVERLAYS_DIR, SKILL_FILE, WORKFLOW_SKILL, composeWorkflowSkill, type AgentMode } from "./workflow_skill.js";
 
 /** Leading YAML frontmatter fence (LF-normalized). */
 const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---/;
@@ -140,19 +141,43 @@ export async function readLocalLibrary(skillsDir: string): Promise<Array<{ name:
  * Copy the admitted skills into `<workspace>/.claude/skills/`. Per-skill copies
  * (not a whole-tree copy) so withheld skills never land, and so a project's own
  * committed `.claude/skills/` entries survive except where a name collides.
+ *
+ * `overlays/` is filtered out of every copy, matching what production mirrors:
+ * `aep-api`'s `loadLibrary` treats it as compose-time input and never seeds it,
+ * so an org repo has no `overlays/` for the BFF's mirror to copy. A local run
+ * writing one would be the one place a session could find a second, contradictory
+ * procedure beside the skill it is following — and the `aep` skill explicitly
+ * permits reading its own directory (ADR-0005).
+ *
+ * `mode` is the reason this writer exists rather than a directory copy. The
+ * workflow skill lands COMPOSED: production mirrors the authored trunk, which is
+ * what a dispatched run should read, and a local run needs the overlay applied.
+ * Composing here — at the only point where a local run's skills are written — is
+ * what makes the overlay unskippable, and it happens BEFORE the first copy so a
+ * malformed overlay leaves no half-written mirror for a retry to read.
  */
 export async function mirrorLocalSkillLibrary(
   skillsDir: string,
   workspace: string,
   pinned: ReadonlySet<string>,
+  mode: AgentMode,
   log: (line: string) => void = () => {},
 ): Promise<MirrorSelection> {
   const library = await readLocalLibrary(skillsDir);
   const selection = selectMirroredSkills(library, pinned, disabledSkillNames());
+  const workflow = selection.copied.includes(WORKFLOW_SKILL)
+    ? composeWorkflowSkill(skillsDir, mode)
+    : undefined;
   const mirrorDir = path.join(workspace, ".claude", "skills");
   await fs.promises.mkdir(mirrorDir, { recursive: true });
   for (const name of selection.copied) {
-    await fs.promises.cp(path.join(skillsDir, name), path.join(mirrorDir, name), { recursive: true });
+    await fs.promises.cp(path.join(skillsDir, name), path.join(mirrorDir, name), {
+      recursive: true,
+      filter: (src) => path.basename(src) !== OVERLAYS_DIR,
+    });
+  }
+  if (workflow !== undefined) {
+    await fs.promises.writeFile(path.join(mirrorDir, WORKFLOW_SKILL, SKILL_FILE), workflow, { mode: 0o644 });
   }
   if (selection.skipped.length > 0) {
     const detail = selection.skipped.map((s) => `${s.name} (${s.reason})`).join(", ");

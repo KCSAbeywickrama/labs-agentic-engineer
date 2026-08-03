@@ -1,6 +1,6 @@
 ---
 name: go
-description: Conventions to follow when writing go applications.
+description: How to build a Go service on the platform — project layout, the build-verify command, and this stack's constraints and pitfalls. Apply when a component's `language` is Go. For a Ballerina service, use `ballerina` instead.
 metadata:
   aep:
     kind: org
@@ -16,14 +16,15 @@ download a toolchain and will not compile C.
 ## Development flow
 
 1. **Scaffold** — `go.mod` (module path = app folder name, `go 1.25`),
-   `main.go`, `Dockerfile`, `workload.yaml`, per Layout.
+   `main.go`, `Dockerfile`, per Layout. `workload.yaml` follows your prompt — as
+   given when it carries one, else per the component contract.
 2. **Implement** — handlers, store, models. Every rule under Constraints is a
    build- or runtime-failure if broken, not a style preference. The
-   platform-wide rules (port, no required env vars, `workload.yaml`,
-   error shape, dependency wiring) live in the `aep` run skill, not here.
+   platform-wide rules (port, no required env vars, error shape, dependency
+   wiring) live in the `aep` skill's component contract, not here.
 3. **Verify** — from the app path:
    ```bash
-   go mod tidy 2>&1 | tail -20   # regenerate go.sum from real checksums
+   go mod tidy                   # regenerate go.sum from real checksums
    go build -o /dev/null ./...   # compile everything
    ```
    Commit the `go.sum` this produces. A stdlib-only service produces none —

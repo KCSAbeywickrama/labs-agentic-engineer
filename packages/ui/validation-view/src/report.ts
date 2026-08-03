@@ -27,7 +27,7 @@
  * criterion should appear, but a criterion absent from the report simply renders
  * with no state; a malformed file degrades to a ParseError the view surfaces as a
  * non-blocking warning (the oracle still renders). The authored shape is produced
- * by runners/remote-worker/plugin/skills/aep-validation/references/generate-report.mjs.
+ * by skills/aep-validation/scripts/generate-report.mjs.
  */
 
 import type { ParseError } from "./parse.js";
