@@ -48,12 +48,13 @@ import { toSpecEntry } from "../api/mapping";
 import { computeDependencyUsedBy } from "../lib/dependencyUsedBy";
 import { useCollabSpec } from "../collab/useCollabSpec";
 import { SpecQuestionForm } from "./SpecQuestionForm";
+import { countBlockingOpenQuestions } from "../lib/openQuestions";
 import { useRoomQuestion } from "../../agent-chat/useRoomQuestion";
 import { CollabTextArea } from "../collab/CollabTextArea";
 import { SpecMdEditor } from "../collab/SpecMdEditor";
 import { useYTextString } from "../collab/useYTextString";
 import { useTurnEndFlush } from "../collab/useTurnEndFlush";
-import { chatKeyFor, subscribeTurnEnd } from "../../agent-chat/chatStore";
+import { chatKeyFor, setPendingSeed, subscribeTurnEnd } from "../../agent-chat/chatStore";
 import { useResolveDependencyViaChat } from "../../agent-chat/useResolveDependencyViaChat";
 import type { DependencyResolutionIntent } from "../../projects/lib/dependencyResolutionMessage.js";
 import { useDesignCellChangeCount } from "../collab/useDesignCellChange";
@@ -427,6 +428,19 @@ export function SpecView({ projectName }: { projectName: string }) {
   const failed = specStatus === "failed";
   // The design gate: Build arms once design files are generated (#80).
   const hasDesignFiles = files.some((f) => f.group === "designs");
+  // The PRD's Open Questions gate (#365/#372): undeferred questions block
+  // Generate design, and the header says why instead of a mystery-grey button.
+  const prdEntry = files.find((f) => f.path === "specs/requirements/prd.md") ?? null;
+  const prdContent = useSpecFileContent(
+    projectName,
+    prdEntry ? { path: prdEntry.path, sha: prdEntry.sha } : null,
+  );
+  const openQuestions = useMemo(
+    () => (prdContent.data ? countBlockingOpenQuestions(prdContent.data.content) : 0),
+    [prdContent.data],
+  );
+  const seedChat = (message: string) =>
+    setPendingSeed(chatKeyFor(orgHandle ?? "default", projectName), message);
   // #159: design is derived FROM requirements, so its CTA needs them first.
   const hasRequirementsFiles = files.some((f) => f.group === "requirements");
 
@@ -664,13 +678,33 @@ export function SpecView({ projectName }: { projectName: string }) {
             </>
           ) : (
             <>
+            {/* Hand-picked flow launchers (#372): only the two that matter at
+                this gate ride the header; the full set lives in the chat's
+                Actions menu. Both seed the scoped /amend flow. */}
+            {hasRequirementsFiles && (
+              <Button size="small" variant="outlined" onClick={() => seedChat("/amend Add a feature")}>
+                + Feature
+              </Button>
+            )}
+            {openQuestions > 0 && (
+              <Button
+                size="small"
+                variant="outlined"
+                color="warning"
+                onClick={() => seedChat("/amend Resolve the open questions")}
+              >
+                Resolve open questions ({openQuestions})
+              </Button>
+            )}
             <Tooltip
               title={
                 agentBusy
                   ? "An agent is still working — Generate design is available once it finishes"
-                  : hasRequirementsFiles
-                    ? "Derive the component design from your requirements"
-                    : "Generate requirements first"
+                  : openQuestions > 0
+                    ? `${openQuestions} open question${openQuestions === 1 ? "" : "s"} block design — answer or defer them first`
+                    : hasRequirementsFiles
+                      ? "Derive the component design from your requirements"
+                      : "Generate requirements first"
               }
             >
               {/* span so the tooltip works while the button is disabled */}
@@ -678,7 +712,7 @@ export function SpecView({ projectName }: { projectName: string }) {
                 <Button
                   variant="contained"
                   startIcon={<Sparkles size={18} />}
-                  disabled={!hasRequirementsFiles || agentBusy}
+                  disabled={!hasRequirementsFiles || agentBusy || openQuestions > 0}
                   onClick={generateDesign}
                 >
                   Generate design

@@ -56,6 +56,10 @@ import { buildFeed, participantsOf, type FeedBlock } from "../feed";
 import { answerableQuestionIds } from "../questionCards";
 import { MessageList } from "./MessageList";
 import { ChatInput } from "./ChatInput";
+import { FlowStepper } from "./FlowStepper";
+import { activeFlow, designSteps, interviewSteps } from "../lib/flowProgress";
+import { useSpecFiles } from "../../spec/api/queries";
+import { Button, Menu, MenuItem } from "@wso2/oxygen-ui";
 import {
   DESIGN_COMMAND,
   START_COMMAND,
@@ -144,6 +148,30 @@ export function AgentChatPanel({
   // A question is live only while unanswered and not superseded by a later
   // delivered user message. One O(n) pass per log change.
   const answerableIds = useMemo(() => answerableQuestionIds(messages), [messages]);
+
+  // Chat-top flow progress (#372): the agent's current flow shows its steps
+  // here — the interview's section walk before a PRD exists, the design
+  // emission order once design files appear. Derived, never agent-reported.
+  const specFiles = useSpecFiles(projectName);
+  const specPaths = useMemo(() => (specFiles.data ?? []).map((f) => f.path), [specFiles.data]);
+  const questionHeadings = useMemo(
+    () =>
+      messages
+        .filter((m): m is Extract<typeof m, { role: "question" }> => m.role === "question")
+        .flatMap((m) => m.questions.map((q) => q.question)),
+    [messages],
+  );
+  const flow = activeFlow(specPaths, isSending);
+  const flowSteps =
+    flow === "interview" ? interviewSteps(questionHeadings) : flow === "design" ? designSteps(specPaths) : null;
+
+  // The Actions menu (#372): the complete scoped-flow set behind one button.
+  const [actionsAnchor, setActionsAnchor] = useState<HTMLElement | null>(null);
+  const runAction = (instruction: string | null, prefill?: string) => {
+    setActionsAnchor(null);
+    if (instruction) send(instruction);
+    else if (prefill) setDraft(prefill);
+  };
   const awaiting = !isSending && answerableIds.size > 0;
 
   // A teammate's running turn locks the composer (a concurrent send 409s
@@ -401,6 +429,9 @@ export function AgentChatPanel({
         </IconButton>
       </Stack>
       <Divider />
+      {flow && flowSteps && (
+        <FlowStepper title={flow === "interview" ? "Interview steps" : "Design steps"} steps={flowSteps} />
+      )}
 
       {/* Feed */}
       <Box ref={scrollRef} sx={{ flexGrow: 1, overflow: "auto", p: 2 }}>
@@ -446,6 +477,31 @@ export function AgentChatPanel({
             />
           )}
         </Box>
+      </Box>
+
+      {/* Actions menu (#372): every scoped launcher in one place. Direct-send
+          items start their interview immediately; prefill items need the
+          user's subject first. */}
+      <Box sx={{ px: 1.5, pt: 1 }}>
+        <Button
+          size="small"
+          variant="outlined"
+          onClick={(e: React.MouseEvent<HTMLElement>) => setActionsAnchor(e.currentTarget)}
+          disabled={inputDisabled}
+        >
+          Actions ▾
+        </Button>
+        <Menu anchorEl={actionsAnchor} open={actionsAnchor !== null} onClose={() => setActionsAnchor(null)}>
+          <MenuItem onClick={() => runAction("/amend Add a feature")}>+ Feature</MenuItem>
+          <MenuItem onClick={() => runAction("/amend Add an actor")}>+ Actor</MenuItem>
+          <MenuItem onClick={() => runAction(null, "/amend Go deeper on ")}>Go deeper on…</MenuItem>
+          <MenuItem onClick={() => runAction("/amend Resolve the open questions")}>
+            Resolve open questions
+          </MenuItem>
+          <MenuItem onClick={() => runAction("/design Start the next phase — delta pass, protect shipped components")}>
+            Start next phase
+          </MenuItem>
+        </Menu>
       </Box>
 
       {/* Composer */}

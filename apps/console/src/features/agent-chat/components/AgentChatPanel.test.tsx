@@ -18,6 +18,7 @@
 
 // @vitest-environment jsdom
 
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ComponentProps } from "react";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -80,8 +81,17 @@ function panelProps(overrides: Partial<PanelProps> = {}): PanelProps {
   return { org: ORG, projectName: PROJECT, onClose: () => {}, ...overrides };
 }
 
+// The panel reads the spec file list (flow stepper, #372) through
+// react-query, so tests provide the same QueryClientProvider the app root
+// does — with retries off and no network (queries just stay pending).
+const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, enabled: false } } });
+
+function withProviders(node: React.ReactElement) {
+  return <QueryClientProvider client={queryClient}>{node}</QueryClientProvider>;
+}
+
 function renderPanel(overrides: Partial<PanelProps> = {}) {
-  return render(<AgentChatPanel {...panelProps(overrides)} />);
+  return render(withProviders(<AgentChatPanel {...panelProps(overrides)} />));
 }
 
 describe("AgentChatPanel — pendingSeed + turn-end wiring (#252 Task 5)", () => {
@@ -197,7 +207,7 @@ describe("AgentChatPanel — generation CTAs", () => {
 
   it("fires the signal exactly once", () => {
     const { rerender } = renderPanel({ autoGenerate: "requirements" });
-    rerender(<AgentChatPanel {...panelProps({ autoGenerate: "requirements" })} />);
+    rerender(withProviders(<AgentChatPanel {...panelProps({ autoGenerate: "requirements" })} />));
     expect(mockSend).toHaveBeenCalledTimes(1);
   });
 });
