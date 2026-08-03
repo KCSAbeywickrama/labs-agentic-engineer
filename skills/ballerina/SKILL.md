@@ -4,6 +4,7 @@ description: How to build a Ballerina service on the platform — network-native
 metadata:
   aep:
     kind: org
+    audience: [coding]
 ---
 
 # Ballerina
