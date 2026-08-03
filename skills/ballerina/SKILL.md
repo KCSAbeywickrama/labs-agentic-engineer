@@ -56,7 +56,7 @@ Derive the distribution root with `bal home`, never a hardcoded version; both ro
 - Generate a service stub from a spec: `bal openapi -i oas.yaml --mode service`
 - Generate a client from a spec: `bal openapi -i oas.yaml --mode client`
 
-**The generated stub is the starting point — implement it, never delete it.** Three things it always needs:
+**The generated stub is the starting point — fill it using Edit, never delete it.** Three things it always needs:
 
 - Resource bodies come out empty, You need to fill the implementation. Failing to fill will result a compiler error.
 - The listener is generated as `new (9090, config = {host: "localhost"})` — **drop the config, leave `new (9090)`**. A container bound to localhost answers from inside and refuses every request from outside, so the deployed service is unreachable while looking healthy.
