@@ -61,7 +61,7 @@ func completeDesignFiles() map[string]string {
 }
 
 func scaffoldPlaceholderJSON(id, typ string) string {
-	return renderScaffold(id, typ)
+	return renderScaffold(id, typ, nil)
 }
 
 func gateErrors(t *testing.T, reqFiles, designFiles map[string]string) []FileValidationError {

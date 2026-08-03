@@ -93,6 +93,10 @@ export interface ComponentDesign {
    * copied skill library stays loadable on demand. Per-component; the
    * coding runner materializes exactly these for a build of this component.
    */
+  /** PRD story numbers this component serves — PLATFORM-RECOMPUTED from the
+   *  design.cell citations on every save (like a dependency's wiring); an
+   *  authored value is overwritten. */
+  stories?: number[];
   skillsPinned?: string[];
 }
 

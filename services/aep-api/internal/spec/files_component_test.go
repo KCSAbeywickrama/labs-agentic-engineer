@@ -29,6 +29,7 @@ package spec_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -772,12 +773,62 @@ func TestApply_ScaffoldsComponentsFromCell(t *testing.T) {
 			t.Errorf("scaffold %s missing enrichable defaults: %v", id, parsed)
 		}
 	}
-	// Existing component untouched.
-	if got := r.remote.FileAt(t, "main", "specs/design/components/lunch-api/design.json"); got != existing {
-		t.Errorf("existing design.json rewritten: %s", got)
+	// Existing component: enrichment survives; only the platform-recomputed
+	// stories field is restamped from the cell (lunch-api cites 1, 2).
+	var existingParsed map[string]any
+	if err := json.Unmarshal([]byte(r.remote.FileAt(t, "main", "specs/design/components/lunch-api/design.json")), &existingParsed); err != nil {
+		t.Fatalf("existing design.json parse: %v", err)
+	}
+	if existingParsed["language"] != "Go" || existingParsed["description"] != "hand-written" {
+		t.Errorf("existing enrichment clobbered: %v", existingParsed)
+	}
+	if got := fmt.Sprint(existingParsed["stories"]); got != "[1 2]" {
+		t.Errorf("existing stories = %v, want restamped [1 2]", existingParsed["stories"])
 	}
 	// The database node scaffolds nothing.
 	if rec := r.get(apiBase + "/specs/design/components/orders-db/design.json"); rec.Code != http.StatusNotFound {
 		t.Errorf("orders-db dir should not exist: code %d", rec.Code)
+	}
+}
+
+// TestApply_StoriesDerivedFromCell pins the platform-recomputed `stories`
+// field: scaffolds are born with their cell citations, an existing enriched
+// design.json is restamped when the cell's citations change, and an authored
+// stories value is overwritten (like a dependency's wiring).
+func TestApply_StoriesDerivedFromCell(t *testing.T) {
+	enriched := `{"name":"lunch-api","type":"service","version":"0.1.0","language":"Go","buildpack":"docker","appPath":"lunch-api","entrypoint":"deployment/service","exposure":"intranet","dependencies":[],"description":"hand-written","stories":[9]}`
+	r := newFilesRig(t, map[string]string{
+		"specs/design/components/lunch-api/design.json": enriched,
+	})
+
+	cell := "phase 1\n" +
+		"component lunch-api service [stories: 1, 2]\n" +
+		"component lunch-web web-application [stories: 1]\n"
+	rec := r.apply(mustJSON(t, spec.ApplyRequest{
+		Writes:  []spec.WriteOp{{Path: "specs/design/design.cell", Content: cell}},
+		Message: "design cell",
+	}))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("apply code %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var parsed map[string]any
+	// Scaffolded component is born citing its cell stories.
+	if err := json.Unmarshal([]byte(r.remote.FileAt(t, "main", "specs/design/components/lunch-web/design.json")), &parsed); err != nil {
+		t.Fatalf("scaffold parse: %v", err)
+	}
+	if got := fmt.Sprint(parsed["stories"]); got != "[1]" {
+		t.Errorf("scaffold stories = %v, want [1]", parsed["stories"])
+	}
+	// The existing component's authored [9] is OVERWRITTEN by the cell's [1 2];
+	// its hand-written fields survive.
+	if err := json.Unmarshal([]byte(r.remote.FileAt(t, "main", "specs/design/components/lunch-api/design.json")), &parsed); err != nil {
+		t.Fatalf("restamp parse: %v", err)
+	}
+	if got := fmt.Sprint(parsed["stories"]); got != "[1 2]" {
+		t.Errorf("restamped stories = %v, want [1 2]", parsed["stories"])
+	}
+	if parsed["description"] != "hand-written" || parsed["language"] != "Go" {
+		t.Errorf("restamp clobbered enrichment: %v", parsed)
 	}
 }

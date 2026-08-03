@@ -360,11 +360,20 @@ func (s *service) Apply(ctx context.Context, orgID, projectID string, req ApplyR
 		// that has none yet — same commit, platform-authored; the agent only
 		// enriches. Rides the SAME warnings channel so the caller sees what was
 		// generated.
+		batchContent := map[string]string{}
 		for _, w := range req.Writes {
-			if w.Path != DesignCellPath {
-				continue
+			batchContent[w.Path] = w.Content
+		}
+		cellSource, cellInBatch := batchContent[DesignCellPath]
+		if !cellInBatch {
+			if _, inTree := current[DesignCellPath]; inTree {
+				if raw, _, rerr := tx.Base().Read(DesignCellPath); rerr == nil {
+					cellSource = string(raw)
+				}
 			}
-			scaffolds := scaffoldFromCell(w.Content, func(path string) bool {
+		}
+		if cellInBatch {
+			scaffolds := scaffoldFromCell(cellSource, func(path string) bool {
 				_, inTree := current[path]
 				return inTree || batch[path]
 			})
@@ -373,6 +382,48 @@ func (s *service) Apply(ctx context.Context, orgID, projectID string, req ApplyR
 				tx.Write(path, []byte(content))
 				files = append(files, FileMeta{Path: path, SHA: blobSHA([]byte(content))})
 				warnings = append(warnings, Warning{Path: path, Message: "scaffolded from design.cell — enrich, don't author, the mechanical fields"})
+			}
+		}
+		// `stories` is platform-recomputed from the cell's citations (#369/#371,
+		// like a dependency's wiring): a cell save restamps every existing
+		// design.json whose citations moved, and a design.json save is restamped
+		// from the current cell — an authored value never survives.
+		if cellSource != "" {
+			if facts, ferr := parseCellFacts(cellSource); ferr == nil {
+				storiesByID := map[string][]int{}
+				for _, c := range facts.Components {
+					storiesByID[c.ID] = c.Stories
+				}
+				restamp := func(path, content string) {
+					id, ok := componentIDOfDesignPath(path)
+					if !ok {
+						return
+					}
+					updated, changed := restampDesignStories(content, storiesByID[id])
+					if !changed {
+						return
+					}
+					tx.Write(path, []byte(updated))
+					files = append(files, FileMeta{Path: path, SHA: blobSHA([]byte(updated))})
+				}
+				for path, content := range batchContent {
+					if path != DesignCellPath {
+						restamp(path, content)
+					}
+				}
+				if cellInBatch {
+					for path := range current {
+						if batch[path] {
+							continue
+						}
+						if _, ok := componentIDOfDesignPath(path); !ok {
+							continue
+						}
+						if raw, _, rerr := tx.Base().Read(path); rerr == nil {
+							restamp(path, string(raw))
+						}
+					}
+				}
 			}
 		}
 		return nil

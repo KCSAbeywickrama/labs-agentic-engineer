@@ -206,6 +206,10 @@ export const componentDesignSchema = z.strictObject({
   endpoint: endpointSchema.optional(),
   exposesAPI: exposesAPISchema.optional(),
   componentAgentInstructions: z.string().optional(),
+  // Platform-recomputed from the cell's story citations (accepted so a
+  // snapshot round-trip never rejects; authored values are overwritten on
+  // save, like a dependency's wiring).
+  stories: z.array(z.number().int().positive()).optional(),
   skillsPinned: z.array(z.string()).optional(),
 });
 

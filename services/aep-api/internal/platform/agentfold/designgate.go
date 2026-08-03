@@ -76,7 +76,7 @@ var (
 		"buildpack": true, "appPath": true, "entrypoint": true,
 		"exposure": true, "dependencies": true, "description": true,
 		"endpoint": true, "exposesAPI": true, "componentAgentInstructions": true,
-		"skillsPinned": true,
+		"skillsPinned": true, "stories": true,
 	}
 )
 
@@ -140,6 +140,11 @@ func validateComponentDesign(content, dirName string) *designProblem {
 			return p
 		}
 	}
+	if st, present := obj["stories"]; present {
+		if p := validateStories(st); p != nil {
+			return p
+		}
+	}
 	if name := obj["name"].(string); name != dirName {
 		return &designProblem{
 			code:    ErrSchemaViolation,
@@ -168,6 +173,22 @@ func validateEndpoint(v any) *designProblem {
 	name, ok := ep["name"].(string)
 	if !ok || name == "" {
 		return &designProblem{code: ErrSchemaViolation, message: "endpoint.name: must be at least 1 characters"}
+	}
+	return nil
+}
+
+// validateStories mirrors the zod `stories` field (platform-recomputed from
+// the cell's citations): when present, an array of positive integers.
+func validateStories(raw any) *designProblem {
+	arr, ok := raw.([]any)
+	if !ok {
+		return &designProblem{code: ErrSchemaViolation, message: "stories: must be an array"}
+	}
+	for i, v := range arr {
+		n, ok := v.(float64)
+		if !ok || n != float64(int(n)) || n <= 0 {
+			return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("stories[%d]: must be a positive integer", i)}
+		}
 	}
 	return nil
 }
