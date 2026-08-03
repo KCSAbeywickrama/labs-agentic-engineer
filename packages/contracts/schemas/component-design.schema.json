@@ -264,7 +264,7 @@
     "componentAgentInstructions": {
       "type": "string"
     },
-    "skillsApplied": {
+    "skillsPinned": {
       "type": "array",
       "items": {
         "type": "string"

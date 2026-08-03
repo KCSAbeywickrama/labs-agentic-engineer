@@ -32,7 +32,11 @@
  *    `skills/<kind>/<name>/SKILL.md` catalog (frontmatter only — bodies are NOT
  *    retained) and returns a `SkillSource` whose `loadSkill`/
  *    `loadSkillReference` read from disk ON DEMAND: progressive disclosure is
- *    truly lazy, and D4 immutability makes the mid-turn reads race-free.
+ *    truly lazy, and D4 immutability makes the mid-turn reads race-free. It
+ *    also reads the sidecar `<dir>/skills-manifest.json` once (ADR-0014) to
+ *    drop any skill an org admin has DISABLED — such a skill never becomes a
+ *    row, so it is absent from the catalog and `load`/`loadReference` return
+ *    `undefined` for it, same as an unknown name.
  */
 
 import { existsSync, readFileSync, readdirSync, type Dirent } from "node:fs";
@@ -42,11 +46,12 @@ import { parse as parseYaml } from "yaml";
 // fence parsing cannot drift from the spec-file fence parsing (same approach as
 // the caller-side skill resolver the playground uses to materialize the mount).
 import { FRONTMATTER_RE, lf } from "@aep/agent-stream";
+import type { SkillAudience, SkillLoadResult } from "../agents/main/skill-source.js";
+import { ALL_AUDIENCES, SERVICE_AUDIENCE } from "../agents/main/skill-source.js";
 import {
   SkillReadError,
   type SkillCatalogEntry,
   type SkillSource,
-  type LoadedSkillBody,
   type LoadedReference,
 } from "../agents/main/skill-source.js";
 
@@ -171,7 +176,12 @@ export function readSnapshot(snapshotDir: string): Record<string, string> {
 // --- The `_skills` snapshot → lazy SkillSource --------------------------------
 
 /** Split a `SKILL.md` into frontmatter fields + body (mirrors the caller-side skill resolver). */
-function parseSkillMd(raw: string): { name?: string; description: string; body: string } {
+function parseSkillMd(raw: string): {
+  name?: string;
+  description: string;
+  body: string;
+  audience: readonly SkillAudience[];
+} {
   const text = lf(raw);
   const m = FRONTMATTER_RE.exec(text);
   const frontmatter = m?.[1] ?? "";
@@ -185,10 +195,18 @@ function parseSkillMd(raw: string): { name?: string; description: string; body: 
       // Unparseable frontmatter → treat as absent; the dir name still names the skill.
     }
   }
+  // `metadata.aep.audience` — which agents may load this skill (ADR-0013).
+  // Unrecognised values are dropped rather than becoming a third audience; a
+  // skill left with nothing declared resolves to EVERY audience, so an unmarked
+  // (or misspelt) skill stays loadable instead of silently disappearing.
+  const aep = (fm.metadata as Record<string, unknown> | undefined)?.aep as Record<string, unknown> | undefined;
+  const declared = Array.isArray(aep?.audience) ? aep.audience : [];
+  const audience = declared.filter((a): a is SkillAudience => a === "design" || a === "coding");
   return {
     ...(typeof fm.name === "string" && fm.name.trim() !== "" ? { name: fm.name } : {}),
     description: typeof fm.description === "string" ? fm.description : "",
     body,
+    audience: audience.length > 0 ? audience : ALL_AUDIENCES,
   };
 }
 
@@ -251,12 +269,20 @@ export class SnapshotSkillSource implements SkillSource {
   }
 
   catalog(): readonly SkillCatalogEntry[] {
-    return this.rows.map(({ name, description, hasReferences }) => ({ name, description, hasReferences }));
+    return this.rows.map(({ name, description, hasReferences, audience }) => ({
+      name,
+      description,
+      hasReferences,
+      audience,
+    }));
   }
 
-  load(name: string): LoadedSkillBody | undefined {
+  load(name: string): SkillLoadResult {
     const row = this.byName.get(name);
     if (row === undefined) return undefined;
+    // Audience gate before any disk read: this consumer may see the row (it
+    // needs the name to pin the skill onto a component) but not the body.
+    if (!row.audience.includes(SERVICE_AUDIENCE)) return { refused: true };
     const abs = join(row.dir, "SKILL.md");
     const raw = readSkillText(abs, this.log);
     if (raw === undefined) return undefined;
@@ -289,6 +315,39 @@ export class SnapshotSkillSource implements SkillSource {
 const LEGACY_KIND_DIRS = new Set(["builtin", "flow", "custom", "imported"]);
 
 /**
+ * Read the sidecar `skills-manifest.json` (ADR-0014) and return the set of
+ * skill names an org admin has DISABLED. Availability FAILS OPEN: a missing
+ * file, unreadable file, invalid JSON, a non-object root, or an entry that
+ * isn't itself an object all yield an EMPTY set (nothing disabled) rather
+ * than throwing — a malformed sidecar must never blank an org's whole
+ * catalog, which would be far worse than serving a skill that should have
+ * been hidden. Each entry is checked individually so one bad entry cannot
+ * poison the read of the rest.
+ */
+function readDisabledSkillNames(snapshotDir: string): Set<string> {
+  const disabled = new Set<string>();
+  let raw: string;
+  try {
+    raw = readFileSync(join(snapshotDir, "skills-manifest.json"), "utf8");
+  } catch {
+    return disabled; // no manifest → nothing disabled
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return disabled; // unparseable → nothing disabled
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return disabled;
+  for (const [name, entry] of Object.entries(parsed as Record<string, unknown>)) {
+    if (entry !== null && typeof entry === "object" && (entry as Record<string, unknown>).disabled === true) {
+      disabled.add(name);
+    }
+  }
+  return disabled;
+}
+
+/**
  * Scan the snapshot's skill catalog into rows. The current shape is FLAT —
  * `<snapshotDir>/skills/<name>/SKILL.md` with the kind in frontmatter
  * (`metadata.aep.kind`; irrelevant to this scan) — and the legacy nested shape
@@ -298,11 +357,16 @@ const LEGACY_KIND_DIRS = new Set(["builtin", "flow", "custom", "imported"]);
  * occurrence (so a flat copy wins over a legacy one). A dir whose SKILL.md is
  * missing (ENOENT) is simply not a skill; a SKILL.md that exists but cannot be
  * read (non-ENOENT I/O) fails the catalog load via `SkillReadError`. A snapshot
- * without `skills/` yields an empty catalog.
+ * without `skills/` yields an empty catalog. A skill named in the
+ * `skills-manifest.json` sidecar with `disabled: true` (ADR-0014) never becomes
+ * a row at all — it is withheld from this org entirely, not merely
+ * access-gated — so it never reaches `this.rows`/`this.byName` and
+ * `load`/`loadReference` fall through to their "unknown name" branch for free.
  */
 function scanCatalog(snapshotDir: string, log: SkillReadLog = defaultSkillReadLog): CatalogRow[] {
   const skillsRoot = join(snapshotDir, "skills");
   if (!existsSync(skillsRoot)) return [];
+  const disabledNames = readDisabledSkillNames(snapshotDir);
   const rows: CatalogRow[] = [];
   const seen = new Set<string>();
   const addSkillDir = (dir: string, id: string): void => {
@@ -313,10 +377,12 @@ function scanCatalog(snapshotDir: string, log: SkillReadLog = defaultSkillReadLo
     const name = parsed.name ?? id; // fallback: the dir name IS the skill id
     if (seen.has(name)) return;
     seen.add(name);
+    if (disabledNames.has(name)) return; // disabled → does not exist for this org
     rows.push({
       name,
       description: parsed.description,
       hasReferences: listReferences(dir, log).length > 0,
+      audience: parsed.audience,
       dir,
     });
   };

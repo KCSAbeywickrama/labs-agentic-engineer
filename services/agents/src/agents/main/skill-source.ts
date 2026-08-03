@@ -27,12 +27,34 @@
  * reads race-free). A skill-free turn uses `EMPTY_SKILL_SOURCE`.
  */
 
+/**
+ * Which agent a skill's guidance is written for (ADR-0013): the DESIGN agent
+ * authors a project's spec, design and Task plan; the CODING agent implements a
+ * component. Ownership (`metadata.aep.kind`) and audience are independent — a
+ * skill can be the org's to edit while being the coding agent's to read.
+ */
+export type SkillAudience = "design" | "coding";
+
+/**
+ * Every audience — what a skill declaring none resolves to. Narrowing is
+ * opt-in, so an unmarked skill (and any an org authors without knowing the
+ * field exists) stays readable by whoever asks.
+ */
+export const ALL_AUDIENCES: readonly SkillAudience[] = ["design", "coding"];
+
 /** One catalog row: what the system prompt shows — never a body. */
 export interface SkillCatalogEntry {
   name: string;
   description: string;
   /** True when the skill carries any aux file (docs, scripts, assets, …) — drives the loadSkillReference tool + catalog note. */
   hasReferences: boolean;
+  /**
+   * Audiences permitted to load this skill. Rows OUTSIDE this service's own
+   * audience still appear in the catalog: the design agent has to name a coding
+   * skill to pin it onto a component, so hiding the row would break that
+   * handoff — only the body is withheld.
+   */
+  audience: readonly SkillAudience[];
 }
 
 /** A loaded skill body plus its addressable reference paths. */
@@ -50,6 +72,22 @@ export interface LoadedSkillBody {
  * UTF-8 text (model-context surfaces never inline binary), otherwise the text.
  */
 export type LoadedReference = { content: string } | { binary: true } | undefined;
+
+/**
+ * One load attempt: the body, a refusal (this consumer's audience is not among
+ * the skill's), or undefined for an unknown name. A refusal is a THIRD state on
+ * purpose — collapsing it into undefined reads to the agent as "no such skill",
+ * inviting it to distrust the catalog and skip pinning instead. Mirrors
+ * `LoadedReference`'s union shape.
+ */
+export type SkillLoadResult = LoadedSkillBody | { refused: true } | undefined;
+
+/**
+ * The audience this service reads skills as. The agents service IS the design
+ * agent — the coding agent runs in the remote-worker runner and never calls
+ * here — so the audience is a property of the process, not of a request.
+ */
+export const SERVICE_AUDIENCE: SkillAudience = "design";
 
 /**
  * Non-ENOENT I/O while reading a skill file from the `_skills` snapshot.
@@ -75,11 +113,13 @@ export interface SkillSource {
   /** The ordered catalog (order fixes the prompt's listing and the `available` echo). */
   catalog(): readonly SkillCatalogEntry[];
   /**
-   * Body + reference paths for one skill; `undefined` for an unknown / vanished
-   * name (ENOENT). Throws `SkillReadError` on other I/O faults — never collapses
-   * those into a miss.
+   * Body + reference paths for one skill; a refusal when the skill is out of
+   * this consumer's audience; `undefined` for an unknown / vanished name
+   * (ENOENT). Throws `SkillReadError` on other I/O faults. Three distinct
+   * outcomes, none collapsed into another: a refusal is not a miss, and an I/O
+   * fault is not a miss either.
    */
-  load(name: string): LoadedSkillBody | undefined;
+  load(name: string): SkillLoadResult;
   /**
    * One reference file: text content, a binary marker, or `undefined` (unknown
    * name/path / ENOENT). Throws `SkillReadError` on other I/O faults.

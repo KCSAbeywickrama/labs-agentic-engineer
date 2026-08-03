@@ -233,6 +233,29 @@ export function useDeleteSkill() {
   });
 }
 
+// Non-destructive availability toggle (ADR-0014): withholds the skill from
+// the platform's agents without touching its content, so the list and the
+// detail view (opened via View) must both reflect the new state.
+export function useSetSkillEnabled() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ name, enabled }: { name: string; enabled: boolean }) => {
+      const { data, error } = await client.PATCH("/skills/{name}", {
+        params: { path: { name } },
+        body: { enabled },
+      });
+      if (error) {
+        throw new Error(errorMessage(error, "Failed to update the skill"));
+      }
+      return data;
+    },
+    onSuccess: (_data, { name }) => {
+      void queryClient.invalidateQueries({ queryKey: skillsKeys.lists() });
+      void queryClient.invalidateQueries({ queryKey: skillsKeys.detail(name) });
+    },
+  });
+}
+
 export function useImportSkill() {
   const queryClient = useQueryClient();
   return useMutation({

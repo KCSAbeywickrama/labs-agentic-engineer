@@ -84,9 +84,11 @@ export function projectComponent(id: string, files: Record<string, string>): Pro
   // authored type passes through untouched (support-gating is a later phase).
   const type = str(dj.type) ?? "service";
   const exposure = str(dj.exposure) ?? "intranet";
-  const skillsApplied = Array.isArray(dj.skillsApplied)
-    ? dj.skillsApplied.filter((s): s is string => typeof s === "string")
-    : [];
+  // Non-string entries are filtered rather than rejected: the projection is a
+  // read-side view, so a malformed authored value degrades to fewer pins here
+  // and is caught by the write-gate, not by breaking the diagram.
+  const skillsSource = Array.isArray(dj.skillsPinned) ? dj.skillsPinned : [];
+  const skillsPinned = skillsSource.filter((s): s is string => typeof s === "string");
 
   const artifacts: Record<string, string> = { design: `${dir}/design.json` };
   if (files[`${dir}/openapi.yaml`] !== undefined) artifacts.openapi = `${dir}/openapi.yaml`;
@@ -103,7 +105,7 @@ export function projectComponent(id: string, files: Record<string, string>): Pro
     id,
     type,
     version: str(dj.version) ?? "0.1.0",
-    skillsApplied,
+    skillsPinned,
     build,
     ...(type === "service"
       ? {

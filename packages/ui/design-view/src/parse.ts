@@ -87,7 +87,12 @@ export interface ComponentDesign {
   entrypoint: string;
   exposure: string;
   description?: string;
-  skillsApplied?: string[];
+  /**
+   * Skills the coding agent preloads for this component's build. Deliberately
+   * not an exhaustive list of what the build may consult — the rest of the
+   * copied skill library stays loadable on demand.
+   */
+  skillsPinned?: string[];
   endpoint?: DesignEndpoint;
   dependencies: Dependency[];
 }
@@ -200,11 +205,13 @@ export function parseComponentDesign(raw: string): ParseResult {
   const description = optStr(data.description);
   if (description) design.description = description;
 
-  if (Array.isArray(data.skillsApplied)) {
-    const skills = data.skillsApplied.filter(
-      (s): s is string => typeof s === "string",
-    );
-    if (skills.length) design.skillsApplied = skills;
+  // Non-string entries are filtered rather than rejected — this parser feeds a
+  // view, so a malformed authored value shows fewer pins instead of blanking
+  // the panel; the write-gate is what refuses it.
+  const rawSkills = Array.isArray(data.skillsPinned) ? data.skillsPinned : undefined;
+  if (rawSkills) {
+    const skills = rawSkills.filter((s): s is string => typeof s === "string");
+    if (skills.length) design.skillsPinned = skills;
   }
 
   if (isObject(data.endpoint)) {

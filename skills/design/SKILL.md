@@ -4,6 +4,7 @@ description: Use when generating a project's design from its requirements — th
 metadata:
   aep:
     kind: platform
+    audience: [design]
 ---
 
 # Design

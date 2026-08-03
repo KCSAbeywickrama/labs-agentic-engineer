@@ -17,8 +17,11 @@
  */
 
 // Authenticated `git clone` — the single owner of "clone a platform repo with
-// the run's credential". Both clone sites in the runner go through it: the
-// project work tree (workspace.ts) and the org-skills repo (skills_resolver.ts).
+// the run's credential". The runner's one clone site, the project work tree
+// (workspace.ts), goes through it. Skills are no longer a second clone: the
+// BFF mirrors them into that same project clone at `.claude/skills/`, and
+// skills_resolver.ts only reads pin names off the checked-out tree — see its
+// module doc.
 //
 // The credential is supplied by the same credential helper that authenticates
 // every later git operation (lib/credhelper.ts), wired in for this one command

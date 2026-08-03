@@ -77,6 +77,11 @@ func (h *Handler) ListSkills(ctx context.Context, _ gen.ListSkillsRequestObject)
 			ContentSha:  sum.ContentSHA,
 			Editable:    sum.Editable,
 			Deletable:   sum.Deletable,
+			// The skills page renders its availability toggle from THIS list,
+			// not from the per-skill detail — omitting it made every row read
+			// as disabled, so a toggle click sent "enable" for a skill that
+			// was already enabled and nothing appeared to happen.
+			Enabled: sum.Enabled,
 		})
 	}
 	return gen.ListSkills200JSONResponse(out), nil
@@ -209,6 +214,33 @@ func (h *Handler) DeleteSkill(ctx context.Context, request gen.DeleteSkillReques
 	}), nil
 }
 
+// SetSkillEnabled flips a skill's availability for the org — withholding it
+// from the agents, or restoring it — without touching a single SKILL.md byte
+// (ADR-0014). It is a PATCH rather than part of UpdateSkill precisely because
+// UpdateSkill rewrites content: an availability change that altered contentSHA
+// would read as a divergence from the platform baseline and surface as a
+// pending platform update.
+//
+// Deliberately NOT gated on editability. Availability is an org-admin call over
+// its own library, orthogonal to who may edit a skill's text — so a read-only
+// platform skill can still be switched off.
+func (h *Handler) SetSkillEnabled(ctx context.Context, request gen.SetSkillEnabledRequestObject) (gen.SetSkillEnabledResponseObject, error) {
+	org := tenant.BoundOrgFromContext(ctx)
+	if h.mut == nil {
+		return nil, apierr.ServiceUnavailable("skill mutation not configured")
+	}
+	if err := requireSlug("name", request.Name); err != nil {
+		return nil, err
+	}
+	sk, err := h.mut.SetEnabled(ctx, org, org, request.Name, request.Body.Enabled)
+	if err != nil {
+		return nil, mapSkillError(err)
+	}
+	// Availability leaves kind untouched, so both derived flags are pure kind
+	// checks, exactly as on the GET.
+	return gen.SetSkillEnabled200JSONResponse(skillDetailBody(sk, skillEditable(sk.Kind), spec.SkillDeletable(sk.Kind))), nil
+}
+
 // skillDetailBody projects a resolved Skill + the derived editable/deletable
 // flags onto the contract's SkillDetailBody (the full single-skill response).
 // Binary aux files are pulled out of `references` and listed in
@@ -230,6 +262,9 @@ func skillDetailBody(sk *spec.Skill, editable, deletable bool) gen.SkillDetailBo
 		UpdatedAt:        sk.UpdatedAt,
 		Editable:         editable,
 		Deletable:        deletable,
+		// Read back from the manifest by loadCatalog, so the console can render
+		// the toggle's current state rather than guessing it.
+		Enabled: sk.Enabled,
 	}
 }
 

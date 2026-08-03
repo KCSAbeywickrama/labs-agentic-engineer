@@ -206,7 +206,7 @@ export const componentDesignSchema = z.strictObject({
   endpoint: endpointSchema.optional(),
   exposesAPI: exposesAPISchema.optional(),
   componentAgentInstructions: z.string().optional(),
-  skillsApplied: z.array(z.string()).optional(),
+  skillsPinned: z.array(z.string()).optional(),
 });
 
 // Compile-time drift guard: schema ⇄ contracts wire type (cf. tool.ts).

@@ -21,7 +21,13 @@ import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { DISALLOWED_TOOLS, buildMcpOptions, promptWithProjectRoot, resolveBaseAgentConfig } from "./runner.js";
+import {
+  AGENT_SETTING_SOURCES,
+  DISALLOWED_TOOLS,
+  buildMcpOptions,
+  promptWithProjectRoot,
+  resolveBaseAgentConfig,
+} from "./runner.js";
 
 // D9 secure search (Task 12) — WebSearch joins the base tool set (gated by
 // the PreToolUse DLP hook wired in runClaudeQuery; see websearch_dlp.ts).
@@ -195,4 +201,16 @@ test("promptWithProjectRoot: the platform's own workspace shape survives it", ()
   // provisionWorkspace, which is why neither prompt builder can state it.
   const root = "/aep-workspace/acme/todo/11111111-2222-3333-4444-555555555555";
   assert.match(promptWithProjectRoot("Work the issues for milestone 4", root), new RegExp(root));
+});
+
+test("AGENT_SETTING_SOURCES admits the project source, and only that one", () => {
+  // Verified against the real SDK: with [] a skill in the clone's
+  // .claude/skills/ is absent from the init message's resolved list; with
+  // ["project"] it is present. Dropping 'project' silently un-ships the whole
+  // mirror, so this is the guard, not a restatement.
+  assert.deepEqual([...AGENT_SETTING_SOURCES], ["project"]);
+  // 'user' is a developer's ~/.claude and 'local' their personal overrides —
+  // neither belongs in a dispatched container run.
+  assert.ok(!AGENT_SETTING_SOURCES.includes("user" as never));
+  assert.ok(!AGENT_SETTING_SOURCES.includes("local" as never));
 });

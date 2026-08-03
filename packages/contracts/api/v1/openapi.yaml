@@ -2345,6 +2345,46 @@ paths:
       summary: Get a skill
       tags:
       - Skills
+    patch:
+      operationId: set-skill-enabled
+      parameters:
+      - description: Skill name (slug)
+        in: path
+        name: name
+        required: true
+        schema:
+          description: Skill name (slug)
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              additionalProperties: false
+              properties:
+                enabled:
+                  type: boolean
+              required:
+              - enabled
+              type: object
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillDetailBody'
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Error
+      security:
+      - userJWT: []
+      summary: Enable or disable a skill
+      tags:
+      - Skills
     put:
       operationId: update-skill
       parameters:
@@ -4590,6 +4630,8 @@ components:
           type: string
         editable:
           type: boolean
+        enabled:
+          type: boolean
         kind:
           type: string
         license:
@@ -4610,6 +4652,7 @@ components:
       required:
       - editable
       - deletable
+      - enabled
       - orgId
       - name
       - kind
@@ -4631,6 +4674,8 @@ components:
           type: string
         editable:
           type: boolean
+        enabled:
+          type: boolean
         kind:
           type: string
         name:
@@ -4642,6 +4687,7 @@ components:
       - contentSha
       - editable
       - deletable
+      - enabled
       type: object
     SkillSummaryList:
       additionalProperties: false

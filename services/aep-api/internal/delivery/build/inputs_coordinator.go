@@ -18,6 +18,7 @@ package build
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 
 	"github.com/wso2/aep/aep-api/internal/delivery"
@@ -44,11 +45,26 @@ type InputsCoordinator struct {
 	auth   DesignFactDeriver
 	stager SecretStager
 	design PreflightDesignReader
+	skills SkillMirror
+}
+
+// SkillMirror refreshes the project repo's `.claude/skills/` copies from the
+// org library. Run pre-tag so the version the build cuts carries the guidance
+// the build was designed against. Diff-first; nil → skipped.
+type SkillMirror interface {
+	SyncProjectSkills(ctx context.Context, orgID, projectID string) error
 }
 
 // NewInputsCoordinator wires the coordinator.
 func NewInputsCoordinator(spec SpecCollector, auth DesignFactDeriver, stager SecretStager, design PreflightDesignReader) *InputsCoordinator {
 	return &InputsCoordinator{spec: spec, auth: auth, stager: stager, design: design}
+}
+
+// WithSkillMirror enables the pre-tag skills refresh (nil → skipped). Returns
+// the receiver for chained construction.
+func (c *InputsCoordinator) WithSkillMirror(m SkillMirror) *InputsCoordinator {
+	c.skills = m
+	return c
 }
 
 // ApplyPreTag runs the side effects that MUST land on HEAD before the tag-cut
@@ -92,6 +108,17 @@ func (c *InputsCoordinator) ApplyPreTag(ctx context.Context, orgID, projectID st
 	}
 	if err := c.auth.DerivePlatformResourceFactsAtHead(ctx, orgID, projectID); err != nil {
 		return failures, err
+	}
+	// Refresh `.claude/skills/` last, so the tag this build is about to cut
+	// captures the guidance the build was designed against. Best-effort and
+	// deliberately NOT propagated: stale skill copies degrade a build, whereas
+	// returning here would abort one over a mirror that the next dispatch's
+	// diff-first refresh repairs anyway.
+	if c.skills != nil {
+		if err := c.skills.SyncProjectSkills(ctx, orgID, projectID); err != nil {
+			slog.WarnContext(ctx, "skills: pre-tag mirror refresh failed; tagging with the copies already in the repo",
+				"org", orgID, "project", projectID, "error", err)
+		}
 	}
 	return failures, nil
 }

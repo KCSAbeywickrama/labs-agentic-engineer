@@ -89,19 +89,9 @@ type CodingExecutor struct {
 
 	// wiring publishes the platform-resolved `endpoints:` block onto the working
 	// set at dispatch (nil → skipped). Best-effort; see WiringPublisher.
-	wiring WiringPublisher
-
-	// skillsRepo resolves (provisioning if needed) the org's `org-skills` repo
-	// row so its clone URL can be stamped as AEP_SKILLS_REPO_URL — the runner
-	// clones it to resolve the design's applied skills locally (nil → the URL
-	// is not stamped and the runner degrades to the base plugin). Best-effort.
-	skillsRepo SkillsRepoResolver
+	wiring      WiringPublisher
+	skillMirror SkillMirror
 }
-
-// SkillsRepoResolver ensures the org's skills repo exists and returns its row.
-// Satisfied at the composition root by the same EnsureProvisioned+GetRepo
-// closure the genai + task-plan turns use, so this feature grows no skills edge.
-type SkillsRepoResolver func(ctx context.Context, orgID string) (*sourcecontrol.GitRepository, error)
 
 // NewCodingExecutor wires the base coding executor. anthropic may be nil. Call
 // WithProxy and/or WithK8sJobDispatch to enable a dispatch path.
@@ -176,30 +166,12 @@ func (e *CodingExecutor) WithWiringPublisher(w WiringPublisher) *CodingExecutor 
 	return e
 }
 
-// WithSkillsRepo enables stamping AEP_SKILLS_REPO_URL onto the coding dispatch
-// so the runner clones the org's `org-skills` repo to resolve applied skills
-// locally (nil → not stamped; the runner degrades to the base plugin). Returns
-// the receiver for chained construction.
-func (e *CodingExecutor) WithSkillsRepo(r SkillsRepoResolver) *CodingExecutor {
-	e.skillsRepo = r
+// WithSkillMirror enables refreshing the project repo's `.claude/skills/`
+// copies before each dispatch (nil → not refreshed; the clone keeps whatever
+// copies it already has). Returns the receiver for chained construction.
+func (e *CodingExecutor) WithSkillMirror(m SkillMirror) *CodingExecutor {
+	e.skillMirror = m
 	return e
-}
-
-// resolveSkillsRepoURL returns the org's `org-skills` clone URL, provisioning
-// the repo on first touch. Best-effort: any failure (no resolver wired,
-// provisioning error, missing row) yields "" — the dispatch proceeds without
-// the skills URL and the runner degrades to the base plugin rather than failing
-// the coding run over a skills-guidance gap.
-func (e *CodingExecutor) resolveSkillsRepoURL(ctx context.Context, orgID string) string {
-	if e.skillsRepo == nil {
-		return ""
-	}
-	repo, err := e.skillsRepo(ctx, orgID)
-	if err != nil || repo == nil {
-		slog.WarnContext(ctx, "coding executor: resolve skills repo failed — dispatching without AEP_SKILLS_REPO_URL", "org", orgID, "error", err)
-		return ""
-	}
-	return repo.RepoURL
 }
 
 // AuthRetryBudget reports the configured git-clone-auth build retry budget
@@ -270,15 +242,10 @@ func (e *CodingExecutor) launchAgent(ctx context.Context, in agentLaunch) (strin
 	if err != nil {
 		return "", fmt.Errorf("mint MCP token: %w", err)
 	}
-	// Resolve the org's skills repo URL (provisioning on first touch) so the
-	// runner can clone it and resolve applied skills locally. Best-effort — ""
-	// on any failure, the runner then degrades to the base plugin.
-	skillsRepoURL := e.resolveSkillsRepoURL(ctx, in.orgID)
-
 	// Proxy path (cloud / local-proxy plane): per-org NS + per-run ExternalSecrets
 	// + K8s Job via the cluster-gateway-proxy. Falls back to the direct K8s Job
 	// path below when the proxy / SM-API is not configured.
-	used, runName, perr := e.dispatchViaProxy(ctx, in, repo, name, email, login, bearer, mcpToken, skillsRepoURL)
+	used, runName, perr := e.dispatchViaProxy(ctx, in, repo, name, email, login, bearer, mcpToken)
 	if perr != nil {
 		return "", perr
 	}
@@ -317,7 +284,6 @@ func (e *CodingExecutor) launchAgent(ctx context.Context, in agentLaunch) (strin
 			IdentityEmail: email,
 			IdentityLogin: login,
 			Bearer:        bearer,
-			SkillsRepoURL: skillsRepoURL,
 		})
 		if k8serr != nil {
 			return "", k8serr
@@ -333,7 +299,7 @@ func (e *CodingExecutor) launchAgent(ctx context.Context, in agentLaunch) (strin
 // used=false ⇒ not configured for the proxy path (fall back). The runner env
 // AEP_TASK_ID carries the launch's correlation id (JobInputs.TaskID) and so does
 // the bearer's task claim — the re-keyed runner contract (§9.2).
-func (e *CodingExecutor) dispatchViaProxy(ctx context.Context, in agentLaunch, repo *sourcecontrol.GitRepository, name, email, login, bearer string, mcpToken, skillsRepoURL string) (bool, string, error) {
+func (e *CodingExecutor) dispatchViaProxy(ctx context.Context, in agentLaunch, repo *sourcecontrol.GitRepository, name, email, login, bearer string, mcpToken string) (bool, string, error) {
 	disp := in.shape
 	if e.proxy == nil || e.runnerImage == "" || e.clusterSecretStore == "" {
 		return false, "", nil
@@ -400,7 +366,6 @@ func (e *CodingExecutor) dispatchViaProxy(ctx context.Context, in agentLaunch, r
 		CallbackURL:           e.platformURL,
 		Bearer:                bearer,
 		MCPToken:              mcpToken,
-		SkillsRepoURL:         skillsRepoURL,
 		PublisherTokenURL:     publisherTokenURL,
 	}
 	// Resolve the component's external-resource secret bundles so the dispatcher
