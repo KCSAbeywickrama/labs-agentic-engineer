@@ -57,6 +57,7 @@ import { emit, primeScrubber } from "./lib/progress/emitter.js";
 import { installConsoleScrubber } from "./lib/progress/console_scrub.js";
 import { resolveTaskSkills } from "./lib/skills_resolver.js";
 import { resolvePinnedSkills } from "./lib/skills_presence.js";
+import { mirrorLocalSkillLibrary } from "./lib/local_skill_mirror.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // The SAME authored plugin production loads. `mode: "local"` below is what
@@ -124,20 +125,6 @@ function localDirWorkspace(run: LocalRun): WorkspaceLayout {
   };
 }
 
-// Local mode's stand-in for the BFF's project-repo skill mirror: production
-// writes the org's coding-relevant skills into the PROJECT repo at
-// `.claude/skills/` before the runner ever starts, which is what makes native
-// SDK discovery work (see skills_resolver.ts's module doc). The playground has
-// no BFF, so this copies the working-tree skill library (AEP_LOCAL_SKILLS_DIR,
-// flat `<name>/SKILL.md` layout) into that same location under the project
-// dir. `fs.cp` merges into any `.claude/skills/` the project already has
-// (overwriting name collisions) rather than wiping it, so a project's own
-// committed skills survive a playground run.
-async function mirrorLocalSkillLibrary(skillsDir: string, workspace: string): Promise<void> {
-  const mirrorDir = path.join(workspace, ".claude", "skills");
-  await fs.promises.mkdir(mirrorDir, { recursive: true });
-  await fs.promises.cp(skillsDir, mirrorDir, { recursive: true });
-}
 
 async function main(): Promise<number> {
   installConsoleScrubber();
@@ -163,16 +150,17 @@ async function main(): Promise<number> {
   }
   emit({ kind: "phase", phase: "workspace_ready" });
 
-  // Per-task skills: same readSkillsPinned/readProjectSkillsPinned pin read as
-  // production, resolved against `.claude/skills/` in the project dir — the
-  // SAME location the SDK discovers natively via `cwd: layout.workspace`
-  // (== run.projectDir here). No clone, no plugin: AEP_LOCAL_SKILLS_DIR (when
-  // set) mirrors into that location first, standing in for the BFF write prod
-  // gets for free. Failure degrades to the base plugin, loudly.
+  // Per-task skills: the same pin read as production, resolved against
+  // `.claude/skills/` in the project dir — the SAME location the SDK discovers
+  // natively via `cwd: layout.workspace` (== run.projectDir here). No clone, no
+  // plugin. AEP_LOCAL_SKILLS_DIR (when set) writes that mirror first, standing
+  // in for the BFF write prod gets for free — applying the production copy
+  // rule, so a local run sees the same filtered set a real project would.
+  // Pins are read BEFORE the mirror because they are an INPUT to that rule.
+  // Failure degrades to the base plugin, loudly.
   let preloadSkillNames: string[] = [];
   if (run.skillsDir) {
     try {
-      await mirrorLocalSkillLibrary(run.skillsDir, run.projectDir);
       const pinned = await resolveTaskSkills({
         workspace: run.projectDir,
         // A run works the whole project, same as prod's milestone loop — the
@@ -180,6 +168,7 @@ async function main(): Promise<number> {
         scope: { kind: "project" },
         log: (l) => console.log(l),
       });
+      await mirrorLocalSkillLibrary(run.skillsDir, run.projectDir, new Set(pinned), (l) => console.log(l));
       const { preload, dangling } = await resolvePinnedSkills(run.projectDir, pinned, (l) => console.log(l));
       preloadSkillNames = preload;
       if (dangling.length > 0) {
