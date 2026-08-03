@@ -161,7 +161,7 @@ describe("deployStageView", () => {
         },
       }),
     );
-    expect(v.line).toBe("live in dev · validation passed");
+    expect(v.line).toBe("live in dev · validated");
   });
   it("failed → error", () => {
     const v = deployStageView(
@@ -188,7 +188,7 @@ describe("deployStageView", () => {
         },
       }),
     );
-    expect(v.line).toBe("live in dev · validation passed");
+    expect(v.line).toBe("live in dev · validated");
     expect(v.tone).toBe("success");
   });
   it("status none and no validation → nothing deployed", () => {
@@ -212,9 +212,9 @@ describe("validationView", () => {
   });
   // deploy.validation MIRRORS the verdict, so every label names the outcome
   // rather than naming an artifact the reader would have to open to find it.
-  it("passed → validation passed (success)", () => {
+  it("passed → validated (success)", () => {
     expect(validationView("passed")).toEqual({
-      label: "validation passed",
+      label: "validated",
       tone: "success",
     });
   });
@@ -227,31 +227,31 @@ describe("validationView", () => {
   // The pair the vocabulary exists for: something passed and nothing failed, but
   // criteria were left uncovered. Reporting this as "passed" is the lie the whole
   // change removes, so it must never share a label or a tone with it.
-  it("partial → partially validated (warning, never success)", () => {
+  it("partial → validated* (info, never success)", () => {
     expect(validationView("partial")).toEqual({
-      label: "partially validated",
-      tone: "warning",
+      label: "validated*",
+      tone: "info",
     });
   });
-  it("inconclusive → no test results (warning)", () => {
+  it("inconclusive → validation inconclusive (warning)", () => {
     expect(validationView("inconclusive")).toEqual({
-      label: "no test results",
+      label: "validation inconclusive",
       tone: "warning",
     });
   });
-  // An agent-contract breach, and one that fails the run — so error, not warning,
-  // and distinctly worded from a failing suite.
-  it("unreported → validation didn't report (error)", () => {
+  // A reporting failure that fails the run — so error, not warning, and worded
+  // distinctly from a failing suite: no criterion produced a result here.
+  it("unreported → validation reporting error (error)", () => {
     expect(validationView("unreported")).toEqual({
-      label: "validation didn't report",
+      label: "validation reporting error",
       tone: "error",
     });
   });
   // Surfaced rather than folded into null: "author some criteria" is actionable,
   // where null means there is nothing to say yet.
-  it("skipped → no acceptance criteria (neutral)", () => {
+  it("skipped → no validation criteria (neutral)", () => {
     expect(validationView("skipped")).toEqual({
-      label: "no acceptance criteria",
+      label: "no validation criteria",
       tone: "neutral",
     });
   });

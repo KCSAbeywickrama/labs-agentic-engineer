@@ -132,26 +132,29 @@ export function validationView(
     // The rest are the run's verdict verbatim, which is why each label can name
     // the outcome instead of naming an artifact to go and open.
     case "passed":
-      return { label: "validation passed", tone: "success" };
+      return { label: "validated", tone: "success" };
     case "partial":
       // Something passed, nothing failed, and some criteria were never covered.
-      // Warning rather than success: reporting this as "passed" would claim a
-      // result for criteria nobody checked.
-      return { label: "partially validated", tone: "warning" };
+      // The asterisk is the whole hedge: nothing about this run failed, so amber
+      // would overstate the alarm, but the bare word "validated" would claim a
+      // result for criteria nobody checked. `info` says "done, with a note".
+      return { label: "validated*", tone: "info" };
     case "failed":
       return { label: "validation failed", tone: "error" };
     case "inconclusive":
-      // No test results at all. Names the situation rather than the category —
-      // "inconclusive" alone leaves a reader guessing why.
-      return { label: "no test results", tone: "warning" };
+      // Nothing was automated, so nothing here is confirmed. "validation"
+      // prefixes the word because the chip is read on surfaces (the overview
+      // line, the board) where the subject is otherwise the deployment.
+      return { label: "validation inconclusive", tone: "warning" };
     case "unreported":
-      // The agent merged its pull request and committed no report, so the run
-      // learned nothing. An agent-contract breach, hence error tone.
-      return { label: "validation didn't report", tone: "error" };
+      // No usable report at the validation cycle's merge commit, so the run
+      // learned nothing. Named as a reporting failure rather than as an outcome,
+      // because no criterion produced one.
+      return { label: "validation reporting error", tone: "error" };
     case "skipped":
-      // No acceptance criteria authored. Distinct from `none` and actionable —
-      // "author some" — where none means there is nothing to say yet.
-      return { label: "no acceptance criteria", tone: "neutral" };
+      // No criteria authored. Distinct from `none` and actionable — "author
+      // some" — where none means there is nothing to say yet.
+      return { label: "no validation criteria", tone: "neutral" };
 
     default: // "none" | "" | unknown
       return null;
