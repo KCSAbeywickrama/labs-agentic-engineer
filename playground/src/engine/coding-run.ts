@@ -48,7 +48,7 @@
  */
 
 import { spawn } from "node:child_process";
-import { chmodSync, createWriteStream, mkdirSync } from "node:fs";
+import { createWriteStream, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { stdout as output } from "node:process";
 import {
@@ -288,14 +288,6 @@ export async function runCodingAgent(opts: CodingRunOptions): Promise<CodingRunR
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const runDir = join(opts.projectDir, ".aep-playground", "runs", `${stamp}-code`);
   mkdirSync(runDir, { recursive: true });
-  // Docker mode bind-mounts this dir at /workspace/run and the runner image runs
-  // as its own unprivileged user (uid 999 `aep`), which cannot write into a dir
-  // this process just created under the invoking user. The runner composes the
-  // base `aep` plugin in there on purpose — a developer tuning the skill needs
-  // to read the exact text the agent was steered by — so widen the mount rather
-  // than move the compose target somewhere unreadable. Local harness dir under
-  // a gitignored .aep-playground; nothing sensitive lands here.
-  chmodSync(runDir, 0o777);
   const progressLog = createWriteStream(join(runDir, "progress.ndjson"), { flags: "w" });
 
   const mode = opts.mode ?? "docker";

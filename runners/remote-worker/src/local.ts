@@ -47,6 +47,7 @@
 
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { runClaudeQuery } from "./lib/runner.js";
@@ -205,21 +206,33 @@ async function main(): Promise<number> {
   };
 
   const log = openTaskLog(run.runDir);
-  const { completion } = runClaudeQuery(
-    req,
-    layout,
-    log,
-    { preloadSkillNames },
-    {
-      basePluginPath: run.pluginDir,
-      mode: "local",
-      // Under the run dir, not the OS temp dir: the composed skill is the exact
-      // text the agent was steered by, and "what did it actually read?" is a
-      // question a developer tuning the skill asks constantly.
-      composeDir: path.join(run.runDir, "base-plugin"),
-    },
-  );
+  // Compose the base plugin CONTAINER-LOCAL (runner.ts's os.tmpdir default),
+  // never under run.runDir. In docker mode that dir is a bind mount from the
+  // host, and composeBasePlugin copies the plugin tree with fs.cpSync — which
+  // fails EACCES on the mount even at mode 0777 and even though mkdir, write
+  // and shell `cp -r` all succeed there. It is the file-sharing backend, not
+  // the permissions: the same cpSync into /tmp works. Composing into the mount
+  // therefore killed every docker-mode run before the agent started.
+  const composeDir = path.join(os.tmpdir(), "aep-base-plugin", req.taskId);
+  const { completion } = runClaudeQuery(req, layout, log, { preloadSkillNames }, {
+    basePluginPath: run.pluginDir,
+    mode: "local",
+    composeDir,
+  });
   const result = await completion;
+
+  // "What did the agent actually read?" is a question a developer tuning the
+  // skill asks constantly, and the composed text is container-local now — so
+  // copy the one file that answers it into the run dir. A single writeFile
+  // works on the mount; only cpSync's directory walk does not.
+  try {
+    fs.copyFileSync(
+      path.join(composeDir, "skills", "aep", "SKILL.md"),
+      path.join(run.runDir, "composed-aep-SKILL.md"),
+    );
+  } catch (err) {
+    console.warn(`[local] could not save the composed skill for inspection: ${String(err)}`);
+  }
   return result.exitCode;
 }
 
