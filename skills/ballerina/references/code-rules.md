@@ -35,6 +35,7 @@
 
 - Declare types explicitly in all variable declarations and `foreach` statements.
 - To narrow a union or optional type: assign to a separate typed variable first, then use it in the `if` condition.
+- An **optional field** (`field?: T` — what every non-required OpenAPI property generates) needs optional field access: `payload?.dueDate`, often `payload?.priority ?: "medium"`. Plain `payload.dueDate` fails to compile with *"field access cannot be used to access an optional field of a type that includes nil"*.
 - Do not invoke methods on json access expressions — always use a separate statement.
 
 ## Imports

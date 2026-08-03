@@ -28,6 +28,16 @@ per-env values (API URLs, OIDC config, flags) arrive at request time in
    npm run build                 # actually build
    ```
    Commit the `package-lock.json` this produces. Never commit `node_modules/`.
+
+   The `build` script is `tsc --noEmit && vite build` — **not** `tsc -b`, which
+   needs a composite project: a `tsconfig.json` that `references` a
+   `tsconfig.node.json` setting `noEmit` fails with `TS6310: Referenced project
+   may not disable emit`, and unwinding that costs more than it buys.
+
+   Verification ends at exit 0. **Never run `npm audit` or `npm audit fix`** —
+   the advisories land on Vite's dev-only transitive dependencies, which never
+   reach a static bundle served by nginx, and `audit fix` bumps pinned
+   dependencies behind your back.
 4. **PR** — only once step 3 exits 0.
 
 ## Constraints
@@ -89,7 +99,7 @@ there is no later stage that can reach the sibling spec to regenerate it.
 ```
 <app-path>/
 ├── package.json
-├── tsconfig.json
+├── tsconfig.json         # ONE file — no project references, no tsconfig.node.json
 ├── vite.config.ts        # no `base` — served at host root
 ├── index.html
 ├── src/
