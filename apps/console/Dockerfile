@@ -44,16 +44,24 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
 # @aep/agent-stream imports it; @aep/agent-stream — the agent-chat panel's SSE
 # contracts, #130; @aep/collab-doc — the AgentInsertion mark shared with the
 # editor, #86 ph6; @aep/design-projection — the rich design view's projection,
-# #149; @aep/ui-cell-diagram-react — the vendored xyflow renderer, which ships
-# types: dist/index.d.ts so consumers read its pre-built declarations instead
-# of re-typechecking its source). The @aep/ui-cell-diagram-view package
-# resolves to its src/ (types: src/index.ts) so tsc reads it directly — no
-# pre-build. These depend only on packages/, so an app-source edit doesn't
-# rerun them.
+# #149; @aep/progress-view — the ONE rendering of the run progress feed, shared
+# with the playground TUI; @aep/ui-cell-diagram-react — the vendored xyflow
+# renderer, which ships types: dist/index.d.ts so consumers read its pre-built
+# declarations instead of re-typechecking its source). The
+# @aep/ui-cell-diagram-view package resolves to its src/ (types: src/index.ts)
+# so tsc reads it directly — no pre-build. These depend only on packages/, so an
+# app-source edit doesn't rerun them.
+#
+# This list is hand-maintained and drifts silently: a new dist-resolved
+# workspace dep typechecks locally (its dist/ exists from an earlier build) and
+# fails ONLY here, as TS2307 plus a cascade of implicit-any and
+# undefined-narrowing errors in files that never mention it. Adding a dep to
+# apps/console/package.json means adding a line below.
 RUN pnpm --filter @aep/excalidraw-dsl build
 RUN pnpm --filter @aep/agent-stream build
 RUN pnpm --filter @aep/collab-doc build
 RUN pnpm --filter @aep/design-projection build
+RUN pnpm --filter @aep/progress-view build
 RUN pnpm --filter @aep/ui-cell-diagram-react build
 
 # App source LAST: a console-only change invalidates only this COPY and the
@@ -83,8 +91,14 @@ COPY --from=builder --chown=10001:10001 /repo/apps/console/dist /usr/share/nginx
 COPY --chown=10001:10001 apps/console/docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 
+# Alpine's packaged nginx (and any `apk upgrade nginx` in cloud overlays) defaults
+# temp paths to /var/lib/nginx/tmp/*, owned by the distro `nginx` user. UID 10001
+# must own that tree or boot fails with:
+#   mkdir() "/var/lib/nginx/tmp/client_body" failed (13: Permission denied)
+# Official nginx image temps under /var/cache/nginx — chown both.
 RUN chown -R 10001:10001 /var/cache/nginx && \
     chown -R 10001:10001 /var/log/nginx && \
+    chown -R 10001:10001 /var/lib/nginx && \
     chown -R 10001:10001 /etc/nginx && \
     chown -R 10001:10001 /usr/share/nginx/html
 

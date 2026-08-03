@@ -76,6 +76,17 @@ export class ApplyConflictError extends Error {
   }
 }
 
+/** Apply rejected for auth — the committer may pull a fresh token and retry once (D6). */
+export class ApplyAuthError extends Error {
+  constructor(
+    readonly status: number,
+    detail = "",
+  ) {
+    super(`apply auth failed (${status})${detail ? `: ${detail}` : ""}`);
+    this.name = "ApplyAuthError";
+  }
+}
+
 export interface BffClient {
   /** Resolves to the caller's display identity, or throws on deny. */
   validateAccess(token: string, roomId: string): Promise<CollabIdentity>;
@@ -190,6 +201,10 @@ export function createBffClient(
         throw new ApplyConflictError(
           (body.conflicts ?? []).map((c) => c.path),
         );
+      }
+      if (res.status === 401 || res.status === 403) {
+        const detail = await res.text().catch(() => "");
+        throw new ApplyAuthError(res.status, detail.slice(0, 500));
       }
       if (!res.ok) {
         // Surface the BFF's error body — a bare status hides the reason a

@@ -51,6 +51,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	ocmocks "github.com/wso2/aep/aep-api/internal/clients/openchoreo/mocks"
 	"github.com/wso2/aep/aep-api/internal/dependencies"
+	"github.com/wso2/aep/aep-api/internal/platform/ocname"
 	"github.com/wso2/aep/aep-api/internal/spec"
 	"github.com/wso2/aep/aep-api/internal/spec/artifactstest"
 )
@@ -304,9 +305,9 @@ func Test_platformResourceDeps(t *testing.T) {
 // --- naming consistency ------------------------------------------------------
 
 // Test_outputKeyNaming_matchesWiringConvention pins the window._env_ key naming
-// to the SAME helper wiring.go injects pod env vars with (resources.EnvVarName —
-// the single source of truth). A guarding white-box test lives beside wiring.go
-// (provisioning) asserting its envVarName delegates to this same helper.
+// to the SAME helper wiring.go injects pod env vars with (ocname.EnvVarName — the
+// single source of truth every consumer now calls directly, so the browser's
+// window._env_ key and the pod env var for one dep+output cannot drift).
 func Test_outputKeyNaming_matchesWiringConvention(t *testing.T) {
 	t.Parallel()
 	cases := []struct{ dep, out, want string }{
@@ -318,8 +319,8 @@ func Test_outputKeyNaming_matchesWiringConvention(t *testing.T) {
 		{"orders-db", "port", "ORDERS_DB_PORT"},
 	}
 	for _, c := range cases {
-		if got := dependencies.EnvVarName(c.dep, c.out); got != c.want {
-			t.Errorf("EnvVarName(%q,%q) = %q; want %q", c.dep, c.out, got, c.want)
+		if got := ocname.EnvVarName(c.dep, c.out); got != c.want {
+			t.Errorf("ocname.EnvVarName(%q,%q) = %q; want %q", c.dep, c.out, got, c.want)
 		}
 	}
 }

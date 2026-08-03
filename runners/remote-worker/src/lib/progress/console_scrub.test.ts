@@ -16,32 +16,88 @@
  * under the License.
  */
 
-import { test, beforeEach } from "node:test";
+import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { installConsoleScrubber, type ConsoleLike } from "./console_scrub.js";
+import { _resetEmitterForTesting } from "./emitter.js";
 import { scrubber } from "./scrubber.js";
 
 // A token whose SHAPE the scrubber does not recognise, so these tests prove the
 // literal-enrollment path rather than the regex path.
 const OPAQUE_TOKEN = "aQ7fL2mZ9xR4tY6uP1sD3gH5jK8nB0vC";
 
-function fakeConsole(): { console: ConsoleLike; lines: string[] } {
-  const lines: string[] = [];
-  const sink = (...args: unknown[]): void => {
-    lines.push(args.map(String).join(" "));
+// The bridge writes to the real stdout (that IS the progress feed), so the
+// tests capture the fd rather than a fake sink — which also proves the output
+// is parseable NDJSON, the property the whole change is about.
+let captured: string[] = [];
+let restore: (() => void) | undefined;
+
+function captureStdout(): void {
+  const original = process.stdout.write.bind(process.stdout);
+  restore = () => {
+    process.stdout.write = original;
   };
-  return {
-    console: { log: sink, info: sink, warn: sink, error: sink, debug: sink },
-    lines,
-  };
+  process.stdout.write = ((chunk: string | Uint8Array): boolean => {
+    captured.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
+    return true;
+  }) as typeof process.stdout.write;
+}
+
+/** Every emitted event, parsed — a parse failure fails the test by design. */
+function events(): Array<Record<string, unknown>> {
+  return captured
+    .join("")
+    .split("\n")
+    .filter((l) => l.trim() !== "")
+    .map((l) => JSON.parse(l) as Record<string, unknown>);
+}
+
+function summaries(): string[] {
+  return events().map((e) => String(e.summary));
+}
+
+/** A console with all five methods, so the bridge has something to wrap. */
+function fakeConsole(): ConsoleLike {
+  const noop = (): void => {};
+  return { log: noop, info: noop, warn: noop, error: noop, debug: noop };
 }
 
 beforeEach(() => {
-  scrubber.reset();
+  captured = [];
+  _resetEmitterForTesting();
+  captureStdout();
+});
+
+afterEach(() => {
+  restore?.();
+});
+
+test("installConsoleScrubber: console output lands on the feed as typed, parseable log events", () => {
+  const c = fakeConsole();
+  installConsoleScrubber(c);
+
+  c.log("[local] materialised 6 skill(s); preload=4");
+  c.warn("careful");
+  c.error("broken");
+
+  const out = events();
+  assert.equal(out.length, 3);
+  // The envelope every other event carries — this is what a bare stdout line
+  // used to be missing, and what made the feed not-NDJSON.
+  for (const e of out) {
+    assert.equal(e.kind, "log");
+    assert.equal(e.schemaVersion, 1);
+    assert.ok(typeof e.ts === "string" && e.ts !== "");
+    assert.ok(typeof e.seq === "number");
+  }
+  assert.deepEqual(out.map((e) => e.level), ["info", "warn", "error"]);
+  assert.equal(out[0]?.summary, "[local] materialised 6 skill(s); preload=4");
+  // seq is monotonic across the bridge and the rest of the feed alike.
+  assert.deepEqual(out.map((e) => e.seq), [1, 2, 3]);
 });
 
 test("installConsoleScrubber: redacts an enrolled literal on every method", () => {
-  const { console: c, lines } = fakeConsole();
+  const c = fakeConsole();
   installConsoleScrubber(c);
   scrubber.addLiteral(OPAQUE_TOKEN);
 
@@ -51,6 +107,7 @@ test("installConsoleScrubber: redacts an enrolled literal on every method", () =
   c.info(`info ${OPAQUE_TOKEN}`);
   c.debug(`debug ${OPAQUE_TOKEN}`);
 
+  const lines = summaries();
   assert.equal(lines.length, 5);
   for (const line of lines) {
     assert.ok(!line.includes(OPAQUE_TOKEN), `leaked: ${line}`);
@@ -60,54 +117,60 @@ test("installConsoleScrubber: redacts an enrolled literal on every method", () =
 
 test("installConsoleScrubber: literals enrolled after install still redact", () => {
   // The git token is minted mid-run, well after the wrapper is installed.
-  const { console: c, lines } = fakeConsole();
+  const c = fakeConsole();
   installConsoleScrubber(c);
 
   c.log(`before ${OPAQUE_TOKEN}`);
   scrubber.addLiteral(OPAQUE_TOKEN);
   c.log(`after ${OPAQUE_TOKEN}`);
 
-  assert.ok(lines[0].includes(OPAQUE_TOKEN), "pre-enrollment line is not covered by a literal");
-  assert.ok(!lines[1].includes(OPAQUE_TOKEN), `leaked after enrollment: ${lines[1]}`);
+  const lines = summaries();
+  assert.ok(lines[0]?.includes(OPAQUE_TOKEN), "pre-enrollment line is not covered by a literal");
+  assert.ok(!lines[1]?.includes(OPAQUE_TOKEN), `leaked after enrollment: ${lines[1]}`);
 });
 
 test("installConsoleScrubber: scrubs a token inside an Error's stack", () => {
-  const { console: c, lines } = fakeConsole();
+  const c = fakeConsole();
   installConsoleScrubber(c);
   scrubber.addLiteral(OPAQUE_TOKEN);
 
   // The shape console.error("...:", err) takes at the runner's entry points.
   c.error("[oneshot] unhandled error:", new Error(`Command failed: git clone ${OPAQUE_TOKEN}`));
 
+  const lines = summaries();
   assert.equal(lines.length, 1);
-  assert.ok(!lines[0].includes(OPAQUE_TOKEN), `leaked: ${lines[0]}`);
-  assert.match(lines[0], /\[oneshot\] unhandled error:/);
+  assert.ok(!lines[0]?.includes(OPAQUE_TOKEN), `leaked: ${lines[0]}`);
+  assert.match(String(lines[0]), /\[oneshot\] unhandled error:/);
   // The stack survives — redaction must not cost us the diagnostic.
-  assert.match(lines[0], /Error: Command failed/);
+  assert.match(String(lines[0]), /Error: Command failed/);
+  // A multi-line stack stays ONE event: a newline inside the summary is
+  // JSON-escaped, so it cannot split the feed into unparseable fragments.
+  assert.equal(events().length, 1);
 });
 
 test("installConsoleScrubber: preserves printf-style formatting", () => {
-  const { console: c, lines } = fakeConsole();
+  const c = fakeConsole();
   installConsoleScrubber(c);
   c.log("materialised %d skill(s) for %s", 3, "api");
-  assert.equal(lines[0], "materialised 3 skill(s) for api");
+  assert.equal(summaries()[0], "materialised 3 skill(s) for api");
 });
 
 test("installConsoleScrubber: leaves ordinary lines untouched", () => {
-  const { console: c, lines } = fakeConsole();
+  const c = fakeConsole();
   installConsoleScrubber(c);
   scrubber.addLiteral(OPAQUE_TOKEN);
   c.log("[oneshot] no per-task skills to materialise");
-  assert.equal(lines[0], "[oneshot] no per-task skills to materialise");
+  assert.equal(summaries()[0], "[oneshot] no per-task skills to materialise");
 });
 
 test("installConsoleScrubber: is idempotent — no double wrapping", () => {
-  const { console: c, lines } = fakeConsole();
+  const c = fakeConsole();
   installConsoleScrubber(c);
   installConsoleScrubber(c);
   scrubber.addLiteral(OPAQUE_TOKEN);
 
   c.log(`x ${OPAQUE_TOKEN} y`);
+  const lines = summaries();
   assert.equal(lines.length, 1);
   assert.equal(lines[0], "x [REDACTED] y");
 });

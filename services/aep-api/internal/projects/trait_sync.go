@@ -41,14 +41,32 @@ type OrgPublisher interface {
 
 // TraitSyncService is the single shared emitter for `api-configuration`
 // trait state on a Component CR + its per-environment ReleaseBindings.
-// See docs/design/api-platform-integration.md section 6.
 //
-// Two write triggers call SyncComponentTraits:
-//  1. Dispatch path (`dispatch_service.go`): after CreateComponent so a
-//     newly-protected component lands with traits set immediately.
-//  2. Design edit path (`design_service.UpdateDesignFile`): after the
-//     user toggles `exposesAPI.auth` on `design.json` so the trait shape
-//     propagates without waiting for the next dispatch.
+// The two halves of that state are written at different times, because they
+// have different write targets:
+//
+//  1. The Component CR's trait SHAPE — which is what makes OpenChoreo render
+//     the RestApi at all — is set at component create by
+//     `component_service.go`, from the same `exposesAPI.auth` this service
+//     reads. That happens before the first build, and this service re-asserts
+//     it on every reconcile.
+//  2. The per-environment config — the `jwtAuth` policy the gateway enforces
+//     and the sibling-SPA CORS allowlist — lands on the ReleaseBinding, which
+//     OpenChoreo creates only once a build has produced a workload. It cannot
+//     be written before then; UpdateComponentTraitEnvironmentConfigs soft
+//     no-ops when the binding is absent.
+//
+// The trigger for (2) is `SyncProjectAPITraits`, called by the run
+// supervisor when a cycle's builds go green (`delivery/run`, activity
+// SyncAPITraits). That trigger is rail-coupled ON PURPOSE-FOR-NOW and it is
+// the known weak point: the previous trigger hung off the ExecWatcher's build
+// terminal and stopped firing — silently, for every project — when builds
+// moved to the Temporal run loop, which writes no `kind=build` execution rows
+// for that watcher to read. A missed write leaves a protected API's gateway
+// passing every request through unauthenticated, so a rail-agnostic reconcile
+// sweep over the component list is what should ultimately make the guarantee.
+// `traitDeployObserver` still routes the old ExecWatcher path here; it is
+// inert for anything the run loop builds.
 //
 // Concurrency: every call acquires a per-component mutex keyed by
 // `(orgID, projectID, componentName)`. We use a `sync.Map` of `*sync.Mutex`

@@ -37,6 +37,11 @@ import (
 // manage their own lifetimes and ignore it.
 const StepTimeout = 30 * time.Second
 
+// migrationLockKey serializes boot schema migrations across aep-api replicas.
+// Session-scoped (not xact): Run is not a single transaction. Distinct from
+// validatorLockKey (0x76616c696461746f) in platform/secrets.
+const migrationLockKey int64 = 0x6165702d6d696772 // "aep-migr" bytes
+
 // Step is one ordered schema migration, reduced to a name and a run func so the
 // runner needs no knowledge of what it does.
 type Step struct {
@@ -62,7 +67,36 @@ func CtxStep(name string, db *gorm.DB, fn func(context.Context, *gorm.DB) error)
 // Run applies every step in the ORDER GIVEN — the order is the caller's
 // invariant, never re-derived here (it is load-bearing and non-obvious; see
 // internal/migrate). Fails fast, naming the offending step.
-func Run(ctx context.Context, steps []Step) error {
+//
+// Concurrent callers (multi-replica boot) are serialized with a session-scoped
+// Postgres advisory lock held on a dedicated connection for the whole loop.
+func Run(ctx context.Context, db *gorm.DB, steps []Step) error {
+	sqlDB, err := db.DB()
+	if err != nil {
+		return fmt.Errorf("migration lock: underlying sql.DB: %w", err)
+	}
+	conn, err := sqlDB.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("migration lock: conn: %w", err)
+	}
+	defer conn.Close()
+
+	slog.Info("waiting for migration lock", "key", migrationLockKey)
+	// Bound the wait so a wedged peer surfaces as a named error instead of an
+	// unexplained boot hang (Kubernetes would otherwise restart into the same queue).
+	if _, err := conn.ExecContext(ctx, `SET lock_timeout = '60s'`); err != nil {
+		return fmt.Errorf("migration lock: set lock_timeout: %w", err)
+	}
+	if _, err := conn.ExecContext(ctx, `SELECT pg_advisory_lock($1)`, migrationLockKey); err != nil {
+		return fmt.Errorf("migration lock: acquire: %w", err)
+	}
+	defer func() {
+		// Unlock on the same session even if ctx is cancelled.
+		if _, uerr := conn.ExecContext(context.WithoutCancel(ctx), `SELECT pg_advisory_unlock($1)`, migrationLockKey); uerr != nil {
+			slog.Error("migration lock: unlock failed", "error", uerr)
+		}
+	}()
+
 	for _, s := range steps {
 		if err := s.Run(ctx); err != nil {
 			return fmt.Errorf("%s migration: %w", s.Name, err)

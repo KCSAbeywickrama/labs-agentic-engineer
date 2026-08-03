@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
+	"github.com/wso2/aep/aep-api/internal/platform/ocname"
 	"github.com/wso2/aep/aep-api/internal/spec"
 )
 
@@ -255,12 +256,12 @@ func (p *ExternalResourceProvisioner) StageSecrets(
 // blocks until bindings are gone). The ResourceType is long-lived — never
 // deleted.
 func (p *ExternalResourceProvisioner) Deprovision(ctx context.Context, orgHandle, projectName, name string, envs []string) error {
-	resourceName := ExternalResourceName(projectName, name)
+	resourceName := ocname.ExternalResourceName(projectName, name)
 	// Collect binding-delete errors and continue (mirror the platform twin):
 	// one failed env must not short-circuit and leave the Resource behind.
 	var errs []error
 	for _, env := range envs {
-		if err := p.rc.DeleteBinding(ctx, orgHandle, ExternalResourceBindingName(projectName, name, env)); err != nil {
+		if err := p.rc.DeleteBinding(ctx, orgHandle, ocname.ExternalResourceBindingName(projectName, name, env)); err != nil {
 			errs = append(errs, fmt.Errorf("delete binding (%s/%s): %w", name, env, err))
 		}
 	}
@@ -303,7 +304,7 @@ func (p *ExternalResourceProvisioner) ResolveRunnerSecrets(ctx context.Context, 
 		if len(keys) == 0 {
 			continue
 		}
-		b, err := p.rc.GetBinding(ctx, orgHandle, ExternalResourceBindingName(projectName, name, env))
+		b, err := p.rc.GetBinding(ctx, orgHandle, ocname.ExternalResourceBindingName(projectName, name, env))
 		if err != nil || b == nil {
 			continue
 		}
@@ -366,7 +367,7 @@ func externalResourceSecretEntity(name, env string) string { return "extres-" + 
 // authored RT rather than a stale same-named one.
 func buildExternalResource(projectName string, er *ExternalResource, rtName string) *openchoreo.Resource {
 	return &openchoreo.Resource{
-		Metadata: openchoreo.OCObjectMeta{Name: ExternalResourceName(projectName, er.Name)},
+		Metadata: openchoreo.OCObjectMeta{Name: ocname.ExternalResourceName(projectName, er.Name)},
 		Spec: openchoreo.ResourceSpec{
 			Owner: openchoreo.ResourceOwner{ProjectName: projectName},
 			Type:  openchoreo.ResourceTypeRef{Kind: "ResourceType", Name: rtName},
@@ -386,9 +387,9 @@ func buildExternalResourceBinding(projectName, name, env, latestRelease, secretS
 	if err != nil {
 		return nil, fmt.Errorf("external resources: marshal env configs: %w", err)
 	}
-	resourceName := ExternalResourceName(projectName, name)
+	resourceName := ocname.ExternalResourceName(projectName, name)
 	return &openchoreo.ResourceReleaseBinding{
-		Metadata: openchoreo.OCObjectMeta{Name: ExternalResourceBindingName(projectName, name, env)},
+		Metadata: openchoreo.OCObjectMeta{Name: ocname.ExternalResourceBindingName(projectName, name, env)},
 		Spec: openchoreo.ResourceReleaseBindingSpec{
 			Owner:                          openchoreo.ResourceReleaseBindingOwner{ProjectName: projectName, ResourceName: resourceName},
 			Environment:                    env,

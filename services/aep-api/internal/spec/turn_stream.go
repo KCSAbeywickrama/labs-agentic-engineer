@@ -21,8 +21,9 @@ package spec
 // payload as it taps the agents stream, attachers replay from an index and
 // live-tail, and ONE terminal event closes the turn. The buffer is
 // deliberately not durable (replica affinity, D17) and is dropped
-// turnBufferRetention after the terminal event — an attach after that 404s
-// and the FE falls back to the status GET.
+// turnBufferRetention after the terminal event — an attach after that 404s;
+// the console retries attach with backoff and settles via the status GET when
+// the turn is already terminal.
 
 import (
 	"errors"

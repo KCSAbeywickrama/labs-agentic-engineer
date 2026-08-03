@@ -28,7 +28,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -46,6 +48,12 @@ type Engine struct {
 	// git invocation's argv + env before it runs. It is the seam for the
 	// credential-hygiene assertions and crash injection.
 	execHook func(args []string, env []string)
+	// diskUsagePct is the last volume used% recorded by the reaper (-1 =
+	// unknown). Ensure refuses new snapshot materialization at >= 90%.
+	diskUsagePct atomic.Int32
+	// onENOSPC, when set (composition root → reaper.ForceSweep), runs on
+	// detected ENOSPC before DiskFullError is returned.
+	onENOSPC func()
 }
 
 // Compile-time port compliance.
@@ -54,28 +62,79 @@ var (
 	_ SnapshotProvider = (*Engine)(nil)
 )
 
+// RootLayout reports whether New found an existing workspace root directory
+// or created it (R8b boot identity — affinity-scatter diagnosis).
+type RootLayout string
+
+const (
+	RootFound   RootLayout = "found"
+	RootCreated RootLayout = "created"
+)
+
 // New builds an Engine rooted at root: creates repos/, tmp/, trash/ and
 // writes the askpass shim. root is made absolute so git child processes are
-// immune to cwd changes.
-func New(root string) (*Engine, error) {
+// immune to cwd changes. layout is RootFound when abs already existed as a
+// directory before layout creation, RootCreated when New created it.
+func New(root string) (*Engine, RootLayout, error) {
 	abs, err := absPath(root)
 	if err != nil {
-		return nil, fmt.Errorf("gitfs: resolve root %q: %w", root, err)
+		return nil, "", fmt.Errorf("gitfs: resolve root %q: %w", root, err)
+	}
+	layout := RootCreated
+	if st, err := os.Stat(abs); err == nil {
+		if !st.IsDir() {
+			return nil, "", fmt.Errorf("gitfs: root %q exists and is not a directory", abs)
+		}
+		layout = RootFound
+	} else if !os.IsNotExist(err) {
+		return nil, "", fmt.Errorf("gitfs: stat root %q: %w", abs, err)
 	}
 	for _, d := range []string{ReposDir(abs), TmpDir(abs), TrashDir(abs)} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
-			return nil, fmt.Errorf("gitfs: create %s: %w", d, err)
+			return nil, "", fmt.Errorf("gitfs: create %s: %w", d, err)
 		}
 	}
 	shim, err := writeAskpassShim(abs)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	return &Engine{root: abs, locks: flockLocker{}, askpass: shim}, nil
+	e := &Engine{root: abs, locks: flockLocker{}, askpass: shim}
+	e.diskUsagePct.Store(-1)
+	return e, layout, nil
 }
 
 // Root returns the absolute workspace root the engine operates under.
 func (e *Engine) Root() string { return e.root }
+
+// SetDiskUsagePct records the workspace volume pressure percentage (0–100)
+// from the reaper's last statfs read — max of byte used% and inode used%.
+// Used by Ensure admission control.
+func (e *Engine) SetDiskUsagePct(pct int) { e.diskUsagePct.Store(int32(pct)) }
+
+// DiskUsagePct returns the last recorded pressure percentage, or 0 when unknown.
+func (e *Engine) DiskUsagePct() int {
+	v := e.diskUsagePct.Load()
+	if v < 0 {
+		return 0
+	}
+	return int(v)
+}
+
+// SetOnENOSPC registers the emergency handler invoked when mapDiskErr detects
+// ENOSPC (composition root wires reaper.ForceSweep). Pass nil to clear.
+func (e *Engine) SetOnENOSPC(fn func()) { e.onENOSPC = fn }
+
+// mapDiskErr translates ENOSPC into DiskFullError after invoking onENOSPC.
+// Non-ENOSPC errors (and nil) pass through unchanged.
+func (e *Engine) mapDiskErr(err error) error {
+	if err == nil || !isENOSPC(err) {
+		return err
+	}
+	if e.onENOSPC != nil {
+		e.onENOSPC()
+	}
+	return &DiskFullError{Root: e.root, UsedPct: e.DiskUsagePct()}
+}
 
 func absPath(p string) (string, error) {
 	if p == "" {
@@ -213,10 +272,11 @@ func (e *Engine) remoteGit(ctx context.Context, ref RepoRef, opts execOpts, args
 // ----- mirror lifecycle -----
 
 // ensureMirror guarantees the bare mirror exists, cloning it atomically on
-// demand: `git clone --mirror` into tmp/ staging, gc.auto=0 stamped, then
-// os.Rename into the canonical path — a crash mid-clone leaves only tmp/
-// debris, never a half-populated mirror. Returns whether this call cloned
-// (a fresh clone is fresh — callers skip the next fetch).
+// demand: `git clone --mirror` into tmp/ staging, gc.auto=0 +
+// repack.writeBitmaps=false stamped, then os.Rename into the canonical path —
+// a crash mid-clone leaves only tmp/ debris, never a half-populated mirror.
+// Returns whether this call cloned (a fresh clone is fresh — callers skip the
+// next fetch).
 func (e *Engine) ensureMirror(ctx context.Context, ref RepoRef, p repoPaths) (cloned bool, err error) {
 	if mirrorExists(p.gitDir) {
 		return false, nil
@@ -241,8 +301,13 @@ func (e *Engine) ensureMirror(ctx context.Context, ref RepoRef, p repoPaths) (cl
 	if _, err := e.remoteGit(ctx, ref, execOpts{}, "clone", "--mirror", ref.CloneURL, stagingGit); err != nil {
 		return false, fmt.Errorf("gitfs: mirror clone %s: %w", ref.RepoSlug, err)
 	}
-	// Never auto-gc a shared mirror — GC runs only in the reaper (design D8).
+	// Never auto-gc a shared mirror — the reaper maintainRepos pass runs
+	// repack/prune/pack-refs under the EX flock (never git gc: gc.pid hostname trap).
 	if _, err := e.git(ctx, execOpts{}, "--git-dir", stagingGit, "config", "gc.auto", "0"); err != nil {
+		return false, err
+	}
+	// Bitmaps are pure overhead: nothing clones FROM these mirrors.
+	if _, err := e.git(ctx, execOpts{}, "--git-dir", stagingGit, "config", "repack.writeBitmaps", "false"); err != nil {
 		return false, err
 	}
 	// clone --mirror marks the remote mirror=true, which forbids the
@@ -374,6 +439,65 @@ func (e *Engine) resolveCommit(ctx context.Context, ref RepoRef, p repoPaths, at
 		return "", fmt.Errorf("gitfs: resolve %q in %s: %w", at, ref.RepoSlug, err)
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// ----- mirror maintenance (consumed by the reaper) -----
+
+// maintainLockTimeout bounds EX flock acquisition for MaintainMirror only
+// (R4). Git repack/prune/pack-refs use the caller ctx — never this budget —
+// so a contended lock skips within ~2s without SIGKILLing a slow maintain.
+const maintainLockTimeout = 2 * time.Second
+
+// MaintainMirror runs the reaper's git maintenance sequence under the EX
+// flock: repack -ad --quiet, prune --expire=2.hours.ago, pack-refs --all --prune.
+// Never git gc. Never git maintenance --task=loose-objects.
+// Lock acquisition is bounded by maintainLockTimeout; git work uses ctx.
+func (e *Engine) MaintainMirror(ctx context.Context, ref RepoRef) error {
+	p, err := e.pathsFor(ref)
+	if err != nil {
+		return err
+	}
+	if !mirrorExists(p.gitDir) {
+		return nil
+	}
+	lockCtx, cancel := context.WithTimeout(ctx, maintainLockTimeout)
+	release, err := e.locks.Lock(lockCtx, p.lockPath)
+	cancel()
+	if err != nil {
+		return err
+	}
+	defer release()
+	if _, err := e.git(ctx, execOpts{}, "--git-dir", p.gitDir, "repack", "-ad", "--quiet"); err != nil {
+		return fmt.Errorf("gitfs: repack %s: %w", ref.RepoSlug, err)
+	}
+	if _, err := e.git(ctx, execOpts{}, "--git-dir", p.gitDir, "prune", "--expire=2.hours.ago"); err != nil {
+		return fmt.Errorf("gitfs: prune %s: %w", ref.RepoSlug, err)
+	}
+	if _, err := e.git(ctx, execOpts{}, "--git-dir", p.gitDir, "pack-refs", "--all", "--prune"); err != nil {
+		return fmt.Errorf("gitfs: pack-refs %s: %w", ref.RepoSlug, err)
+	}
+	return nil
+}
+
+// CountObjects returns loose-object and pack counts for a mirror (count-objects -v).
+func (e *Engine) CountObjects(ctx context.Context, ref RepoRef) (loose, packs int, err error) {
+	p, err := e.pathsFor(ref)
+	if err != nil {
+		return 0, 0, err
+	}
+	out, err := e.git(ctx, execOpts{}, "--git-dir", p.gitDir, "count-objects", "-v")
+	if err != nil {
+		return 0, 0, err
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		switch {
+		case strings.HasPrefix(line, "count: "):
+			loose, _ = strconv.Atoi(strings.TrimPrefix(line, "count: "))
+		case strings.HasPrefix(line, "packs: "):
+			packs, _ = strconv.Atoi(strings.TrimPrefix(line, "packs: "))
+		}
+	}
+	return loose, packs, nil
 }
 
 // ----- trash primitives (consumed by the reaper, design D12) -----

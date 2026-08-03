@@ -351,6 +351,108 @@ func TestRunProgress_TerminalRun_StreamsCyclesAndLinesThenDone(t *testing.T) {
 	}
 }
 
+// TestRunProgress_CarriesSubagentIdentityAndOutcomes pins that the fields the
+// console needs to tell one subagent from another — and a failed tool call from
+// a successful one — survive the run-feed transform. That transform moves
+// `emitter` onto the wrapper and blanks it on the embedded envelope, so it is
+// exactly the place where the rest of the attribution could be dropped without
+// anything failing to compile.
+func TestRunProgress_CarriesSubagentIdentityAndOutcomes(t *testing.T) {
+	failed := false
+	work := contracts.ProgressEvent{
+		SchemaVersion: 1, Seq: 1, Kind: "tool_use", Tool: "Bash", Summary: "bal build",
+		Emitter: "subagent", EmitterID: "toolu_api", EmitterLabel: "Implement todo-api (issue #3)",
+		ToolUseID: "toolu_b1",
+	}
+	exitCode := 1
+	outcome := contracts.ProgressEvent{
+		SchemaVersion: 1, Seq: 2, Kind: "tool_result", Tool: "Bash", Summary: "error: compilation contains errors",
+		Emitter: "subagent", EmitterID: "toolu_api", EmitterLabel: "Implement todo-api (issue #3)",
+		ToolUseID: "toolu_b1", OK: &failed, DurationMs: 172000, ExitCode: &exitCode,
+	}
+	// The subagent's own closing report, with the figures only the SDK has.
+	settled := contracts.ProgressEvent{
+		SchemaVersion: 1, Seq: 3, Kind: "tool_result", Tool: "Agent", Summary: "Implement todo-api (issue #3)",
+		Status: "completed", Emitter: "subagent", EmitterID: "toolu_api",
+		EmitterLabel: "Implement todo-api (issue #3)", ToolUseID: "toolu_api",
+		DurationMs: 209158, ToolCount: 19, LinesAdded: 553, LinesRemoved: 4,
+	}
+
+	h := newHarness(t,
+		[]delivery.MilestoneRun{specRun("r1", delivery.RunStateSucceeded)},
+		map[string][]delivery.RunCycle{"r1": {cycle("c1", delivery.CycleKindCoding, true)}},
+		map[string][]contracts.ProgressEvent{"c1": {work, outcome, settled}}, nil)
+
+	rec := h.AsOrg("acme").Get(progressPath)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("stream: code %d (%s)", rec.Code, rec.Body.String())
+	}
+	var lines []map[string]any
+	for _, f := range parseFrames(t, rec.Body.String()) {
+		if f["type"] == "line" {
+			lines = append(lines, f["line"].(map[string]any))
+		}
+	}
+	if len(lines) != 3 {
+		t.Fatalf("line frames = %d, want 3", len(lines))
+	}
+
+	for i, l := range lines {
+		if l["emitter"] != "subagent" || l["emitterId"] != "toolu_api" {
+			t.Errorf("line %d lost its subagent identity: %+v", i, l)
+		}
+		if l["emitterLabel"] != "Implement todo-api (issue #3)" {
+			t.Errorf("line %d lost the subagent label: %+v", i, l)
+		}
+	}
+	// The action and its outcome share a call id — that pairing is what lets the
+	// console put the outcome back on the action's own row. The closing report
+	// answers the FAN-OUT call instead, which is what makes it the section's
+	// header rather than a step inside it.
+	if lines[0]["toolUseId"] != "toolu_b1" || lines[1]["toolUseId"] != "toolu_b1" {
+		t.Errorf("action/outcome pairing lost: %+v / %+v", lines[0], lines[1])
+	}
+	if lines[2]["toolUseId"] != "toolu_api" {
+		t.Errorf("closing report = %+v, want it keyed to the fan-out call", lines[2])
+	}
+
+	// The failure must arrive AS a failure. `ok` is a pointer precisely so
+	// `false` survives the wire; a plain bool would omitempty it away here and
+	// the console would render a failed build as a success.
+	res := lines[1]
+	if got, ok := res["ok"].(bool); !ok || got {
+		t.Errorf("tool_result ok = %v, want an explicit false", res["ok"])
+	}
+	if res["durationMs"] != float64(172000) {
+		t.Errorf("tool_result durationMs = %v, want 172000", res["durationMs"])
+	}
+	// …and a line that is NOT a tool result carries no `ok` at all, so absence
+	// can never be mistaken for success.
+	if _, present := lines[0]["ok"]; present {
+		t.Errorf("tool_use carries an ok field: %+v", lines[0])
+	}
+
+	// The exit code is the honest per-step signal: it says THIS command broke.
+	if res["exitCode"] != float64(1) {
+		t.Errorf("tool_result exitCode = %v, want 1", res["exitCode"])
+	}
+	// A tool that reports no code must not gain a zero on the way through,
+	// which would read as "exited 0" on a failed call.
+	if _, present := lines[0]["exitCode"]; present {
+		t.Errorf("tool_use carries an exitCode: %+v", lines[0])
+	}
+
+	// The subagent totals are what a collapsed section reports, so losing them
+	// here means a settled fan-out says nothing about what it produced.
+	report := lines[2]
+	if report["toolCount"] != float64(19) || report["linesAdded"] != float64(553) || report["linesRemoved"] != float64(4) {
+		t.Errorf("subagent report lost its totals: %+v", report)
+	}
+	if report["status"] != "completed" || report["durationMs"] != float64(209158) {
+		t.Errorf("subagent report lost its verdict or duration: %+v", report)
+	}
+}
+
 func TestRunProgress_CrossTenant_404(t *testing.T) {
 	h := newHarness(t, []delivery.MilestoneRun{specRun("r1", delivery.RunStateSucceeded)}, nil, nil, nil)
 	rec := h.AsOrg("evil").Get(progressPath)

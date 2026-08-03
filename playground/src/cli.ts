@@ -26,7 +26,8 @@
  *   pnpm play <dir> tasks|code|check|undo    → later steps of the impl plan
  *
  * Flags: --idea "<text>", --target "<x>", --fresh, --silent, --restore, --yes,
- * -h/--help.
+ * -h/--help. `code` also takes --host (run the coding agent as a bare host
+ * process instead of the default Docker-image run — see engine/coding-run.ts).
  */
 
 import "./devtools-default.js"; // MUST be first: sets AGENT_DEVTOOLS before the agents config loads
@@ -41,6 +42,7 @@ import { loadDotenv } from "@aep/agents/shared/env";
 import {
   chatTurn,
   codeCommand,
+  logCommand,
   designCommand,
   requirementsCommand,
   tasksCommand,
@@ -61,7 +63,7 @@ import { ensureProjectDir } from "./tui/ensure-dir.js";
 import { readIdea, writeDescriptor } from "./state/descriptor.js";
 import { confirmCodingDir } from "./tui/consent.js";
 
-const COMMANDS = new Set(["requirements", "design", "tasks", "code", "chat", "check", "undo", "menu"]);
+const COMMANDS = new Set(["requirements", "design", "tasks", "code", "chat", "check", "undo", "log", "menu"]);
 
 /** Bare `play`, `play help`, or `-h/--help` → the one-screen command reference. */
 function printUsage(): void {
@@ -75,6 +77,7 @@ function printUsage(): void {
       "  pnpm play <dir>                           open <dir> in chat (created if missing; /menu for the dashboard)",
       "  pnpm play <dir> requirements|design       generate or refine the spec",
       "  pnpm play <dir> tasks|code|check|undo      run a later step of the impl plan",
+      "  pnpm play <dir> log [--slow|--thinking]   read the last coding run in detail (developer view)",
       '  pnpm play <dir> chat "<message>"          one-shot headless chat turn',
       "",
       "Flags:",
@@ -84,6 +87,10 @@ function printUsage(): void {
       "  --silent          suppress live turn rendering",
       "  --restore         restore the latest undo snapshot before the run",
       "  --yes             headless consent for the coding agent (bypass-permissions)",
+      "  --host            (code) run the coding agent as a bare host process, not the runner image",
+      "  --slow            (log) only the calls that took 3s or more, slowest first",
+      "  --thinking        (log) the model's reasoning blocks (main agent only — subagents emit none)",
+      "  --run <name>      (log) an older archived run instead of the newest",
       "  -h, --help        show this help",
       "",
       "Tracing: AI SDK DevTools is on by default — run `npx @ai-sdk/devtools` (port 4983).",
@@ -154,6 +161,11 @@ async function runHeadless(
       break;
     case "undo":
       outcome = undoCommand(projectDir, opts);
+      break;
+    case "log":
+      // Developer detail, read from the archived run rather than folded into the
+      // progress feed — the feed answers a different question (see log-read.ts).
+      outcome = logCommand(projectDir, opts);
       break;
     case "chat": {
       // Headless one-shot chat turn: `play <dir> chat "message"` — same
@@ -255,6 +267,10 @@ async function main(): Promise<number> {
       silent: { type: "boolean" },
       restore: { type: "boolean" },
       yes: { type: "boolean" },
+      host: { type: "boolean" },
+      slow: { type: "boolean" },
+      thinking: { type: "boolean" },
+      run: { type: "string" },
       help: { type: "boolean", short: "h" },
     },
     allowPositionals: true,
@@ -274,6 +290,10 @@ async function main(): Promise<number> {
     ...(values.silent ? { silent: true } : {}),
     ...(values.restore ? { restore: true } : {}),
     ...(values.yes ? { yes: true } : {}),
+    ...(values.host ? { host: true } : {}),
+    // `log` defaults to the per-step view; --slow and --thinking narrow it.
+    ...(values.slow ? { view: "slow" as const } : values.thinking ? { view: "thinking" as const } : {}),
+    ...(values.run ? { run: values.run } : {}),
   };
 
   let [dirArg, command, commandArg] = positionals as [string | undefined, string | undefined, string | undefined];

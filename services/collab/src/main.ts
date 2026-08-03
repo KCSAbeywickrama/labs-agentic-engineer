@@ -25,7 +25,7 @@
 
 import { loadConfig } from "./env.js";
 import { createBffClient } from "./bff.js";
-import { createCollabServer } from "./server.js";
+import { createCollabServer, registerGracefulShutdown } from "./server.js";
 import { startMockBff } from "./mockbff.js";
 
 const config = loadConfig();
@@ -46,10 +46,11 @@ if (config.devMode) {
   );
 }
 
-const server = createCollabServer(config, {
-  bff,
-  log: (m) => console.log(`[collab] ${m}`),
-});
+const log = (m: string) => console.log(`[collab] ${m}`);
+
+const server = createCollabServer(config, { bff, log });
+
+registerGracefulShutdown(server, config, { bff, log });
 
 await server.listen(config.port);
 console.log(`[collab] listening on ws://localhost:${config.port}`);

@@ -63,7 +63,7 @@ export const config = {
   keepAliveMs: intEnv(process.env.AGENT_KEEPALIVE_MS, 15_000),
 
   // Shared workspaces mount root — read-only per-SHA snapshots written by
-  // aep-api (docs/design/shared-volume-clone-architecture.md). Compose/k8s
+  // aep-api (services/aep-api/design/shared-workspace-volume.md). Compose/k8s
   // mount the volume :ro; nothing in this service ever writes it.
   workspaceMountRoot: process.env.WORKSPACE_MOUNT_ROOT || "/workspaces",
 

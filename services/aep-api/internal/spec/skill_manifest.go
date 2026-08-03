@@ -22,8 +22,11 @@ package spec
 // skills get origin "platform" (whatever their frontmatter kind — the manifest
 // origin is provenance, the frontmatter kind is a human ownership label),
 // imports get origin "imported" + their source. baseHash is contentSHA output
-// (bare hex). A
-// skill with NO entry is org-authored: reconcile never touches it. Parsing
+// (bare hex). An entry also OUTLIVES its files as a tombstone (removed:true)
+// when the org deletes the skill, so "the org threw this away" stays
+// distinguishable from "never offered". A
+// skill with NO entry is org-authored or never-offered: reconcile never
+// touches an org-authored name, and seeds a never-offered default. Parsing
 // is tolerant — a corrupt manifest must never brick reads; the next
 // reconcile rewrites it. Rendering is deterministic (encoding/json sorts map
 // keys) so commits diff cleanly.
@@ -46,11 +49,20 @@ const (
 )
 
 // ManifestEntry is one skill's baseline: what it is, where it came from, and
-// the contentSHA it was last handed at.
+// the contentSHA it was last handed at. Removed marks a TOMBSTONE — the org
+// deleted this name, so it is never handed back (see the Removed doc below).
 type ManifestEntry struct {
 	Origin   string `json:"origin"`
 	Source   string `json:"source,omitempty"`
 	BaseHash string `json:"baseHash"`
+	// Removed records that the org deleted this skill. The entry outlives the
+	// files precisely so reconcile can tell "the org threw this away" apart
+	// from "this org has never been offered it" — a name with NO entry is the
+	// latter, and gets seeded like any other default. Without the tombstone
+	// the two states are identical (delete used to drop the entry), which is
+	// why seeding an absent org-kind default had to be refused wholesale and
+	// no new org-kind default could ever reach an existing org.
+	Removed bool `json:"removed,omitempty"`
 }
 
 // UnmarshalJSON tolerates the pre-rename "kind" field (manifests written
@@ -62,6 +74,7 @@ func (e *ManifestEntry) UnmarshalJSON(b []byte) error {
 		Kind     string `json:"kind"`
 		Source   string `json:"source"`
 		BaseHash string `json:"baseHash"`
+		Removed  bool   `json:"removed"`
 	}
 	if err := json.Unmarshal(b, &raw); err != nil {
 		return err
@@ -72,6 +85,7 @@ func (e *ManifestEntry) UnmarshalJSON(b []byte) error {
 	}
 	e.Source = raw.Source
 	e.BaseHash = raw.BaseHash
+	e.Removed = raw.Removed
 	return nil
 }
 

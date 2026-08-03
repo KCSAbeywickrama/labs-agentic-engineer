@@ -48,7 +48,7 @@ import (
 //	dev/test       /_dev/v1             none — registration-gated to dev tier      dev.go · RegisterAllDev
 //	               (gated mount)        + on no HTTPRoute (loopback only)           (no spec)
 //
-//	discovery: /healthz, /auth/external/jwks.json — public, no auth.
+//	discovery: /healthz (liveness), /readyz (workspace readiness), /auth/external/jwks.json — public, no auth.
 //
 // The reusable identity primitive underneath both S2S directions: the BFF is the
 // single issuer of org-bearing RS256 tokens (internal/platform/auth.TaskTokenManager
@@ -63,8 +63,19 @@ func mountSurfaces(params AppParams) *http.ServeMux {
 	mux := http.NewServeMux()
 
 	// ── discovery ────────────────────────────────────────────────────────────
-	// Health check — unauthenticated. `/healthz` (k8s idiom) platform-wide.
+	// Liveness — unauthenticated. `/healthz` (k8s idiom) platform-wide; always 200.
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"ok"}`)) //nolint:errcheck
+	})
+	// Readiness — workspace root health (R8b). 503 when the shared mount fails
+	// root-health so kubelet marks the pod NotReady (PVC-prune detector).
+	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
+		if params.WorkspaceReady != nil && !params.WorkspaceReady.Ready() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			w.Write([]byte(`{"status":"not_ready"}`)) //nolint:errcheck
+			return
+		}
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status":"ok"}`)) //nolint:errcheck
 	})

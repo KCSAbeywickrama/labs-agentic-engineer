@@ -109,8 +109,8 @@ func (e *Engine) ListTags(ctx context.Context, ref RepoRef, prefix string) ([]Ta
 // ListTagsLocal implements Workspace: like ListTags but WITHOUT the origin
 // fetch — it lists whatever tags the shared mirror already holds. The mirror is
 // authoritative for every tag this platform creates (Tag pushes AND updates the
-// mirror before returning, and the mirror lives on the shared RWX volume, so a
-// tag cut by any instance is visible to all), so this is correctness-equivalent
+// mirror before returning, and the mirror lives on the co-located RWO volume, so a
+// tag cut by any co-located instance is visible to all), so this is correctness-equivalent
 // to ListTags for the platform-owned `v*` tags — only truly out-of-band pushes
 // are missed until the next fetch-bearing op. Intended for best-effort,
 // hot-path reads (the task stale-design attention flag) that must not pay a

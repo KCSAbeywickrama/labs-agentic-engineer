@@ -95,9 +95,15 @@ services:
       # See deployments/scripts/repair-secrets.sh.
       LOCAL_OPENBAO_REPAIR: "true"
       # ── Shared git workspaces volume — bare mirrors + per-SHA snapshots
-      # (docs/design/shared-volume-clone-architecture.md). aep-api is the
+      # (services/aep-api/design/shared-workspace-volume.md). aep-api is the
       # SOLE writer; the agents service mounts the same volume read-only.
       AEP_WORKSPACE_ROOT: "/workspaces"
+      AEP_WORKSPACE_REAP_INTERVAL: "5m"
+      AEP_WORKSPACE_SNAPSHOT_MAX_AGE: "1h"
+      AEP_WORKSPACE_TRASH_MAX_AGE: "1h"
+      AEP_WORKSPACE_ORG_QUOTA_BYTES: "2147483648"
+      AEP_WORKSPACE_DISK_HIGH_PCT: "85"
+      AEP_WORKSPACE_DISK_LOW_PCT: "70"
       # Gates POST /internal/v1/mcp/playground-token — mints a short-lived MCP
       # token with NO caller auth so services/agents' playground CLI can drive
       # dependency discovery against this aep-api locally (AEP_MCP_URL et al.

@@ -176,5 +176,5 @@ func Steps(db *gorm.DB, deploymentTier string, credKey []byte) []database.Step {
 // those blocks are preserved on the steps in Steps. Fails fast on the first
 // error, naming the offending step. credKey must be 32 bytes for phase12.
 func RunAll(ctx context.Context, db *gorm.DB, deploymentTier string, credKey []byte) error {
-	return database.Run(ctx, Steps(db, deploymentTier, credKey))
+	return database.Run(ctx, db, Steps(db, deploymentTier, credKey))
 }

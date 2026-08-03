@@ -21,14 +21,17 @@ import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildMcpOptions, resolveBaseAgentConfig } from "./runner.js";
+import { DISALLOWED_TOOLS, buildMcpOptions, promptWithProjectRoot, resolveBaseAgentConfig } from "./runner.js";
 
 // D9 secure search (Task 12) — WebSearch joins the base tool set (gated by
 // the PreToolUse DLP hook wired in runClaudeQuery; see websearch_dlp.ts).
 // WebFetch joins it too (see webfetch_guard.ts's PreToolUse SSRF + secret
 // guard, wired the same way) — fail-closed, so this is safe to enable.
-// Task joins it for the milestone run loop's subagent fan-out (design §9.3).
-const BASE_TOOLS = ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "WebSearch", "WebFetch", "Task"];
+// Agent joins it for the milestone run loop's subagent fan-out (design §9.3).
+// It is `Agent`, not `Task`: SDK 0.3.220 declares AgentInput and no TaskInput,
+// so the old name named nothing — and because bypassPermissions ignores this
+// list entirely, that mismatch could not fail loudly. Hence the pin.
+const BASE_TOOLS = ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "WebSearch", "WebFetch", "Agent"];
 const MCP_TOOLS = [
   "mcp__aep__list_org_component_endpoints",
   "mcp__aep__get_remote_git_file_contents",
@@ -84,22 +87,26 @@ test("buildMcpOptions: allowedTools includes both WebSearch and WebFetch (D9)", 
 });
 
 // The milestone run loop fans big, independent issues out to subagents; without
-// Task in allowedTools the `aep` skill's fan-out section is unexecutable.
-test("buildMcpOptions: allowedTools includes Task, with and without MCP", () => {
-  assert.ok(buildMcpOptions(undefined, undefined).allowedTools.includes("Task"));
+// Agent in allowedTools the `aep` skill's fan-out section names a tool the
+// intended surface does not include.
+test("buildMcpOptions: allowedTools includes Agent, with and without MCP", () => {
+  assert.ok(buildMcpOptions(undefined, undefined).allowedTools.includes("Agent"));
   assert.ok(
-    buildMcpOptions("https://bff.example.com/internal/v1/mcp", "mcp-token-xyz").allowedTools.includes("Task"),
+    buildMcpOptions("https://bff.example.com/internal/v1/mcp", "mcp-token-xyz").allowedTools.includes("Agent"),
   );
+  // The retired name must not creep back: it is the one that silently named
+  // nothing for a whole SDK generation.
+  assert.ok(!buildMcpOptions(undefined, undefined).allowedTools.includes("Task"));
 });
 
 // Subagents inherit the parent's allowedTools, so the git tools stay in the set
 // and the main-agent-is-sole-git-writer rule is enforced by the skill's
 // deny-list, not by the tool list. Pinned so a future "just drop Bash for
 // subagents" idea has to confront that the seam does not exist here.
-test("buildMcpOptions: Bash stays in the base set alongside Task", () => {
+test("buildMcpOptions: Bash stays in the base set alongside Agent", () => {
   const tools = buildMcpOptions(undefined, undefined).allowedTools;
   assert.ok(tools.includes("Bash"));
-  assert.ok(tools.includes("Task"));
+  assert.ok(tools.includes("Agent"));
 });
 
 // --- resolveBaseAgentConfig: production behavior is what you get when a caller
@@ -152,4 +159,40 @@ test("resolveBaseAgentConfig: the playground's overrides ride through", () => {
 test("resolveBaseAgentConfig: an explicit basePreload owns the FULL list (no validation append)", () => {
   const pinned = resolveBaseAgentConfig({ basePreload: ["aep:aep"] }, "validation", TASK_ID);
   assert.deepEqual(pinned.preload, ["aep:aep"]);
+});
+
+// --- DISALLOWED_TOOLS: the boundary that survives bypassPermissions ---------
+
+// allowedTools restricts nothing in this run (bypassPermissions +
+// allowDangerouslySkipPermissions allow every harness tool), so this list is the
+// only real boundary. Pinned because the failure it prevents is quiet: a run
+// reached for ScheduleWakeup to wait on its own detached subagents, spent a turn
+// on a schema error, and exited anyway.
+test("DISALLOWED_TOOLS: blocks the session-management tools a one-shot pod cannot use", () => {
+  for (const name of ["ScheduleWakeup", "Monitor", "AskUserQuestion", "Workflow", "CronCreate", "SendMessage"]) {
+    assert.ok(DISALLOWED_TOOLS.includes(name), `${name} must stay disallowed`);
+  }
+});
+
+// The run is the agent doing the work; blocking its working tools would end it.
+test("DISALLOWED_TOOLS: never blocks a tool the run needs", () => {
+  for (const name of buildMcpOptions(undefined, undefined).allowedTools) {
+    assert.ok(!DISALLOWED_TOOLS.includes(name), `${name} is both allowed and disallowed`);
+  }
+});
+
+// --- promptWithProjectRoot -------------------------------------------------
+
+test("promptWithProjectRoot: names the absolute root and keeps the caller's prompt intact", () => {
+  const out = promptWithProjectRoot("Work the issues in this project. Follow the `aep` skill", "/workspace/project");
+  assert.match(out, /\/workspace\/project/);
+  // The caller's prompt is the subject of the run; prefixing must not reword it.
+  assert.ok(out.endsWith("Work the issues in this project. Follow the `aep` skill"));
+});
+
+test("promptWithProjectRoot: the platform's own workspace shape survives it", () => {
+  // WORKSPACE_BASE_PATH/<org>/<project>/<taskId> — the value only exists after
+  // provisionWorkspace, which is why neither prompt builder can state it.
+  const root = "/aep-workspace/acme/todo/11111111-2222-3333-4444-555555555555";
+  assert.match(promptWithProjectRoot("Work the issues for milestone 4", root), new RegExp(root));
 });

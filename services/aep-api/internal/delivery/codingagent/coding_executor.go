@@ -87,6 +87,10 @@ type CodingExecutor struct {
 	// the proxy dispatch mounts them into the runner (nil → none). Best-effort.
 	runnerSecrets RunnerSecretResolver
 
+	// wiring publishes the platform-resolved `endpoints:` block onto the working
+	// set at dispatch (nil → skipped). Best-effort; see WiringPublisher.
+	wiring WiringPublisher
+
 	// skillsRepo resolves (provisioning if needed) the org's `org-skills` repo
 	// row so its clone URL can be stamped as AEP_SKILLS_REPO_URL — the runner
 	// clones it to resolve the design's applied skills locally (nil → the URL
@@ -161,6 +165,14 @@ func (e *CodingExecutor) WithBuildSecrets(stager BuildSecretStager, authRetryBud
 // receiver for chained construction.
 func (e *CodingExecutor) WithRunnerSecrets(r RunnerSecretResolver) *CodingExecutor {
 	e.runnerSecrets = r
+	return e
+}
+
+// WithWiringPublisher enables publishing the platform-resolved `endpoints:`
+// wiring comment on every cycle dispatch (nil → not published). Returns the
+// receiver for chained construction.
+func (e *CodingExecutor) WithWiringPublisher(w WiringPublisher) *CodingExecutor {
+	e.wiring = w
 	return e
 }
 

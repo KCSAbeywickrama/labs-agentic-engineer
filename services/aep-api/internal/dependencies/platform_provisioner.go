@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
+	"github.com/wso2/aep/aep-api/internal/platform/ocname"
 )
 
 // ResourceProvisioner is the narrow swap-point for platform resources: it
@@ -174,7 +175,7 @@ func (p *OCNativeProvisioner) Deprovision(ctx context.Context, orgHandle, projec
 // same name — the status read (status_service.go) recomputes a platform binding
 // name via ExternalResourceBindingName and relies on that identity.
 func platformResourceName(project, depName string) string {
-	return ExternalResourceName(project, depName)
+	return ocname.ExternalResourceName(project, depName)
 }
 
 // platformBindingName is the per-env ResourceReleaseBinding name — the single
@@ -182,7 +183,7 @@ func platformResourceName(project, depName string) string {
 // delegates to ExternalResourceBindingName, inheriting the maxOCBindingName
 // bound that keeps the OC-rendered CloudNativePG Cluster within its 50-char cap.
 func platformBindingName(project, depName, env string) string {
-	return ExternalResourceBindingName(project, depName, env)
+	return ocname.ExternalResourceBindingName(project, depName, env)
 }
 
 // BuildPlatformResource references a DISCOVERED ClusterResourceType (Type.Kind

@@ -63,6 +63,10 @@ type AppParams struct {
 	// from packages/contracts/api/internal/v1 behind runnerAuthGate.
 	InternalDeps InternalDeps
 
+	// WorkspaceReady, when non-nil, backs GET /readyz (R8b root-health).
+	// Nil means always ready — Fake()/component tests without a workspace volume.
+	WorkspaceReady interface{ Ready() bool }
+
 	ConfigRepo projects.ConfigRepository
 
 	// OrganizationService backs the JIT org-provisioning middleware. nil

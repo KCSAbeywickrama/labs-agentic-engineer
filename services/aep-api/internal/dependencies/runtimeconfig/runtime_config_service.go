@@ -27,6 +27,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/dependencies"
 	"github.com/wso2/aep/aep-api/internal/platform/k8sname"
+	"github.com/wso2/aep/aep-api/internal/platform/ocname"
 	"github.com/wso2/aep/aep-api/internal/spec"
 )
 
@@ -358,7 +359,7 @@ func (s *RuntimeConfigService) layerPlatformResources(ctx context.Context, orgID
 	ready := true
 	for i := range deps {
 		dep := deps[i]
-		bindingName := dependencies.ExternalResourceBindingName(projectID, dep.Name, bindingEnv)
+		bindingName := ocname.ExternalResourceBindingName(projectID, dep.Name, bindingEnv)
 		m := markers[dep.ResourceType]
 
 		// Annotation-driven consumer-URL patch. Gate on ConsumerURLEnvConfig (the
@@ -404,7 +405,7 @@ func (s *RuntimeConfigService) layerPlatformResources(ctx context.Context, orgID
 			continue
 		}
 		for _, o := range b.Status.Outputs {
-			out[dependencies.EnvVarName(dep.Name, o.Name)] = o.Value
+			out[ocname.EnvVarName(dep.Name, o.Name)] = o.Value
 		}
 	}
 	return ready

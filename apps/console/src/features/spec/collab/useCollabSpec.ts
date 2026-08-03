@@ -20,7 +20,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import * as Y from "yjs";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import { listDocPaths } from "@aep/collab-doc";
-import { getAccessToken } from "../../../auth/token";
+import {
+  getAccessToken,
+  renewAccessToken,
+  subscribeAccessTokenRefresh,
+} from "../../../auth/token";
 
 // Console side of #86 phase 5: connect the spec view to the collab service.
 // One room + one Y.Doc per project (`spec-<org>-<project>`), Y.Map('files')
@@ -30,7 +34,9 @@ import { getAccessToken } from "../../../auth/token";
 // The connection authenticates with the session's access token (#91): a real
 // Thunder JWT in thunder mode (verified by the BFF oracle), the unsigned
 // mock token in mock mode (decoded by the collab mock BFF). The token is a
-// getter so reconnects pick up silently-renewed tokens.
+// getter so reconnects pick up silently-renewed tokens. Live refresh also
+// pushes `{type:"token"}` over the stateless channel (D6) so long sessions
+// keep flushing after the initial handshake token expires.
 
 export interface CollabPeer {
   clientId: number;
@@ -68,6 +74,10 @@ export interface CollabSpec {
    *  tags HEAD. Resolves immediately when offline (nothing shared to commit);
    *  rejects on a flush error or timeout. */
   flush: () => Promise<void>;
+  /** Last committer/flush failure message for UI surfacing (D6); null when clear. */
+  flushError: string | null;
+  /** Dismiss the flush-error banner. */
+  clearFlushError: () => void;
 }
 
 // A forced flush is one files/apply commit — quick, but allow slack for the
@@ -98,6 +108,7 @@ export function useCollabSpec(
   const [docReady, setDocReady] = useState(false);
   const [peers, setPeers] = useState<CollabPeer[]>([]);
   const [version, setVersion] = useState(0);
+  const [flushError, setFlushError] = useState<string | null>(null);
   const docRef = useRef<Y.Doc | null>(null);
   const providerRef = useRef<HocuspocusProvider | null>(null);
   // Last-seen file-path set (serialized) so we re-render the list only when a
@@ -168,27 +179,70 @@ export function useCollabSpec(
     };
     doc.on("afterAllTransactions", onDocChange);
 
-    // Flush acks (#162): the server replies to a flush request with a stateless
-    // {type:"flushed"|"flush-error", id} — resolve/reject the matching promise.
+    // Stateless protocol: flush acks (#162), token push/pull (D6), flush-error UI.
     const onStateless = ({ payload }: { payload: string }) => {
-      let msg: { type?: string; id?: string; message?: string };
+      let msg: {
+        type?: string;
+        id?: string;
+        message?: string;
+        value?: string;
+      };
       try {
         msg = JSON.parse(payload) as typeof msg;
       } catch {
         return;
       }
+
+      // D6 pull: server asks for a fresh bearer after apply 401/403.
+      if (msg.type === "token-please" && msg.id) {
+        const requestId = msg.id;
+        void (async () => {
+          const token =
+            (await renewAccessToken()) ?? (await getAccessToken());
+          if (!token || providerRef.current !== provider) return;
+          provider.sendStateless(
+            JSON.stringify({
+              type: "token",
+              value: token,
+              id: requestId,
+            }),
+          );
+        })();
+        return;
+      }
+
+      if (msg.type === "flush-error") {
+        const errMsg = msg.message ?? "Failed to commit the workspace.";
+        setFlushError(errMsg);
+        if (msg.id) {
+          const pending = pendingFlushes.current.get(msg.id);
+          if (pending) {
+            pendingFlushes.current.delete(msg.id);
+            pending.reject(new Error(errMsg));
+          }
+        }
+        return;
+      }
+
       if (!msg.id) return;
       const pending = pendingFlushes.current.get(msg.id);
       if (!pending) return;
       pendingFlushes.current.delete(msg.id);
       if (msg.type === "flushed") pending.resolve();
-      else if (msg.type === "flush-error")
-        pending.reject(new Error(msg.message ?? "Failed to commit the workspace."));
     };
     provider.on("stateless", onStateless);
 
+    // D6 push: whenever OIDC silently renews, ship the new JWT to the room.
+    const unsubscribeToken = subscribeAccessTokenRefresh((newToken) => {
+      if (providerRef.current !== provider) return;
+      provider.sendStateless(
+        JSON.stringify({ type: "token", value: newToken }),
+      );
+    });
+
     provider.attach();
     return () => {
+      unsubscribeToken();
       doc.off("afterAllTransactions", onDocChange);
       awareness?.off("change", onAwareness);
       provider.off("stateless", onStateless);
@@ -208,6 +262,8 @@ export function useCollabSpec(
       status,
       peers,
       version,
+      flushError,
+      clearFlushError: () => setFlushError(null),
       getFileText: (path: string) =>
         status === "connected"
           ? (docRef.current?.getMap<Y.Text>("files").get(path) ?? null)
@@ -254,6 +310,6 @@ export function useCollabSpec(
           provider.sendStateless(JSON.stringify({ type: "flush", id }));
         }),
     }),
-    [status, peers, version, user.name, docReady],
+    [status, peers, version, user.name, docReady, flushError],
   );
 }

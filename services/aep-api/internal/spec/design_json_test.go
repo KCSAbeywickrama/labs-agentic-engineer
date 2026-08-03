@@ -65,7 +65,14 @@ const fullComponentDesignJSON = `{
           "key": "OPENWEATHER_REGION",
           "defaultValue": "us-east-1"
         }
-      ]
+      ],
+      "wiring": {
+        "ref": "shop-openweather",
+        "envBindings": {
+          "OPENWEATHER_API_KEY": "OPENWEATHER_API_KEY",
+          "OPENWEATHER_REGION": "OPENWEATHER_REGION"
+        }
+      }
     },
     {
       "kind": "platform-resource",
@@ -73,6 +80,13 @@ const fullComponentDesignJSON = `{
       "resourceType": "postgres",
       "parameters": {
         "size": "small"
+      },
+      "wiring": {
+        "ref": "shop-orders-db",
+        "envBindings": {
+          "host": "ORDERS_DB_HOST",
+          "port": "ORDERS_DB_PORT"
+        }
       }
     }
   ],
@@ -630,4 +644,97 @@ func keysOf(m map[string]string) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+// The codec must carry the platform-stamped `wiring` in BOTH directions, and the
+// byte-identical round-trip above only proves it because the fixture contains one.
+// This test names the failure mode directly, because it shipped once: `wiring` was
+// added to the model and to both write-gates but NOT to this codec, so every
+// derivation was silently discarded on write — design.json came back from a build
+// with `exposesAPI.auth` stamped and no wiring at all, and the coding agent was
+// left with nothing to copy into workload.yaml.
+func TestComponentDesignJSON_CarriesPlatformStampedWiring(t *testing.T) {
+	comp, err := parseComponentDesignJSON("checkout", fullComponentDesignJSON)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	byName := map[string]Dependency{}
+	for _, d := range comp.Dependencies {
+		byName[d.Name] = d
+	}
+
+	// READ: a platform-resource's prefixed bindings reach the model.
+	db := byName["orders-db"]
+	if db.Wiring == nil {
+		t.Fatal("read dropped wiring on the platform-resource dependency")
+	}
+	if db.Wiring.Ref != "shop-orders-db" || db.Wiring.EnvBindings["host"] != "ORDERS_DB_HOST" {
+		t.Errorf("platform-resource wiring = %+v", db.Wiring)
+	}
+	// READ: an external's verbatim config-key bindings reach the model.
+	ow := byName["openweather"]
+	if ow.Wiring == nil || ow.Wiring.EnvBindings["OPENWEATHER_API_KEY"] != "OPENWEATHER_API_KEY" {
+		t.Errorf("external wiring = %+v", ow.Wiring)
+	}
+
+	// WRITE: a wiring set on the model reaches the file.
+	out, err := marshalComponentDesignJSON("checkout", comp)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, want := range []string{`"wiring"`, `"ref": "shop-orders-db"`, `"host": "ORDERS_DB_HOST"`} {
+		if !strings.Contains(string(out), want) {
+			t.Errorf("write dropped %s:\n%s", want, out)
+		}
+	}
+}
+
+// The endpoints[] variant has to survive the same round trip, and its loss is the
+// one that hides: a missing `ref` leaves the coding agent with nothing to write,
+// but a missing `endpoint` leaves it free to invent a plausible sibling name — and
+// the wrong one builds, deploys and serves while its ReleaseBinding never reaches
+// Ready.
+func TestComponentDesignJSON_CarriesTheSiblingEndpointWiring(t *testing.T) {
+	comp := DesignComponent{
+		Name: "todo-webapp", ComponentType: "web-application", Version: "0.1.0",
+		Language: "TypeScript", Buildpack: "docker", AppPath: "todo-webapp",
+		Dependencies: []Dependency{{
+			Kind: DependencyKindComponent, Name: "todo-api",
+			Wiring: &DependencyWiring{Endpoint: &EndpointWiring{
+				Component:   "todo-api99-todo-api",
+				Name:        "http",
+				Visibility:  "project",
+				EnvBindings: map[string]string{"address": "TODO_API_URL"},
+			}},
+		}},
+	}
+
+	out, err := marshalComponentDesignJSON("todo-webapp", comp)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, want := range []string{`"endpoint"`, `"component": "todo-api99-todo-api"`, `"visibility": "project"`, `"address": "TODO_API_URL"`} {
+		if !strings.Contains(string(out), want) {
+			t.Errorf("write dropped %s:\n%s", want, out)
+		}
+	}
+	// The variants are exclusive on the wire too: an empty `ref` alongside the
+	// endpoint is a mixed object, which both write gates reject.
+	if strings.Contains(string(out), `"ref"`) {
+		t.Errorf("endpoint-variant wiring emitted an empty ref — the write gates reject the mix:\n%s", out)
+	}
+
+	back, err := parseComponentDesignJSON("todo-webapp", string(out))
+	if err != nil {
+		t.Fatalf("re-parse: %v", err)
+	}
+	got := back.Dependencies[0].Wiring
+	if got == nil || got.Endpoint == nil {
+		t.Fatalf("read dropped the endpoint wiring: %+v", got)
+	}
+	if got.Endpoint.Component != "todo-api99-todo-api" || got.Endpoint.Name != "http" ||
+		got.Endpoint.Visibility != "project" || got.Endpoint.EnvBindings["address"] != "TODO_API_URL" {
+		t.Errorf("round-trip changed the endpoint wiring: %+v", got.Endpoint)
+	}
 }

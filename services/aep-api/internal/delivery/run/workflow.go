@@ -47,6 +47,13 @@ const (
 	// "the agent died" (including a Job that exited without opening a pull
 	// request) is a named failure class with a named budget.
 	cycleLandingTimeout = 2 * time.Hour
+
+	// traitSyncTimeout bounds the WHOLE managed-API trait sync including its
+	// retries. It is bounded rather than left to Temporal's unlimited default
+	// because the sync is a convergence step, not a step the version depends on:
+	// a cycle must not hang on it. See syncAPITraits for what happens when it
+	// runs out.
+	traitSyncTimeout = 5 * time.Minute
 )
 
 // RunInput starts a supervisor over one milestone. Everything in it is already
@@ -500,4 +507,42 @@ func dispatchActivityCtx(ctx workflow.Context) workflow.Context {
 		StartToCloseTimeout: activityTimeout,
 		RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 1},
 	})
+}
+
+// traitSyncActivityCtx retries the managed-API trait sync under an overall
+// deadline. Retries are wanted — the failures this sees are transient
+// OpenChoreo round trips, and the previous owner of this write dropped them
+// silently — but they are bounded, because no part of delivering the version
+// depends on the answer.
+func traitSyncActivityCtx(ctx workflow.Context) workflow.Context {
+	return workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+		StartToCloseTimeout:    activityTimeout,
+		ScheduleToCloseTimeout: traitSyncTimeout,
+	})
+}
+
+// syncAPITraits converges the managed-API gateway policy for the project after
+// a cycle's builds go green.
+//
+// It NEVER fails the cycle. The reason is not that the write is unimportant —
+// an unset `jwtAuth` leaves a protected API's gateway passing every request
+// through unauthenticated — but that failing here would not undo it: the
+// component is already deployed and serving by the time this runs, so a red
+// cycle would add noise without removing exposure. Only convergence removes it,
+// which is why the outcome is logged loudly and left to be re-asserted.
+//
+// This is the interim trigger. It is coupled to THIS build rail, which is
+// exactly how its predecessor died — the trait sync used to hang off the
+// ExecWatcher's build terminal, and stopped firing the moment builds moved to
+// this loop and stopped writing the execution rows that watcher reads. A
+// rail-agnostic reconcile sweep is what makes the guarantee; this only makes it
+// prompt.
+func (l *loop) syncAPITraits(ctx workflow.Context) {
+	err := workflow.ExecuteActivity(traitSyncActivityCtx(ctx), (*Activities).SyncAPITraits,
+		ProjectRef{OrgID: l.in.OrgID, ProjectID: l.in.ProjectID}).Get(ctx, nil)
+	if err != nil {
+		workflow.GetLogger(ctx).Error(
+			"managed-API trait sync did not converge; protected APIs in this project may be serving unauthenticated",
+			"orgID", l.in.OrgID, "projectID", l.in.ProjectID, "error", err)
+	}
 }

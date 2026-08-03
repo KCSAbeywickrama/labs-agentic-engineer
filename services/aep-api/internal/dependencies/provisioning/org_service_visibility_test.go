@@ -95,7 +95,6 @@ func newVisibilityService(t *testing.T) (*Service, visibilitySpies) {
 	svc := NewService(Deps{
 		Issues: issues,
 		Execs:  &fakeExecStore{},
-		Reeval: &fakeReeval{},
 		Design: fakeDesign{comps: []spec.DesignComponent{consumer}},
 		Repos:  fakeRepos{},
 		Access: access,
@@ -164,7 +163,7 @@ func TestStartOrgServiceVisibility_Idempotent(t *testing.T) {
 }
 
 // The grant cascade completes a provision run on the consumer visibility gate so
-// it derives deployed, closes the gate, and reevaluates the funnel.
+// it derives deployed and closes the gate.
 func TestGrantByProviderComponent_ResolvesConsumerVisibilityGate(t *testing.T) {
 	svc, spies := newVisibilityService(t)
 	ctx := context.Background()
@@ -174,10 +173,6 @@ func TestGrantByProviderComponent_ResolvesConsumerVisibilityGate(t *testing.T) {
 	if err := svc.StartOrgServiceVisibility(ctx, "acme", "shop", "billing"); err != nil {
 		t.Fatalf("StartOrgServiceVisibility: %v", err)
 	}
-	// Re-point the design + repo the grant tail reads: the CONSUMER gate lives in
-	// project "shop" (fakeRepos returns a single repo "o/r" + acme/warehouse, which
-	// is fine — findProvisionIssue reads the consumer issue list).
-	reeval := svc.reeval.(*fakeReeval)
 	execs := svc.execs.(*fakeExecStore)
 
 	// The consumer gate issue number (the org-service-visibility gate).
@@ -204,12 +199,9 @@ func TestGrantByProviderComponent_ResolvesConsumerVisibilityGate(t *testing.T) {
 	if r.Component != "billing" {
 		t.Fatalf("provision run must be keyed by the org-service dep name, got %q", r.Component)
 	}
-	// The gate issue closed and the funnel reevaluated (held consumer dispatches).
+	// The gate issue closed (held consumer dispatches via gate-close webhook + sweep).
 	if _, closed := spies.issues.closed[consumerGate]; !closed {
 		t.Fatalf("consumer visibility gate must be closed on grant")
-	}
-	if reeval.calls == 0 {
-		t.Fatalf("grant cascade must reevaluate the funnel")
 	}
 	// The rider flipped to granted.
 	if spies.access.rows[0].Status != dependencies.AccessRequestStatusGranted {

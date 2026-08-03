@@ -50,6 +50,7 @@ aepAgents:
 # it; it calls aep-api for room auth + spec seeding. Without it, agents spec
 # generation returns 503 ("collab is not configured on this deployment").
 collab:
+  # mandatory: in-memory rooms Map; 2nd replica silently overwrites commits (doc-wins)
   replicas: 1
   image:
     repository: ghcr.io/wso2/aep/collab
@@ -62,7 +63,7 @@ collab:
       memory: "128Mi"
     limits:
       cpu: "500m"
-      memory: "256Mi"
+      memory: "512Mi"
 
 # Streamable-HTTP MCP server wrapping aep-api's issue-create + coding-agent
 # dispatch endpoints. The OpenChoreo SRE/RCA agent calls it (AE_API_URL) during
@@ -194,16 +195,18 @@ openbao:
   # Address of the OpenBao service. Matches: helm install aep ./bundle -n wso2-aep
   addr: "http://aep-aep-openbao.wso2-aep.svc.cluster.local:8200"
 
-# Shared git workspaces (RWX PVC) — bare repo mirrors + per-SHA snapshots.
-# aep-api is the sole writer; agents mounts read-only.
-# See docs/design/shared-volume-clone-architecture.md §13.
+# Shared git workspaces (RWO PVC + co-located pods). aep-api writes; agents mounts RO.
+# See services/aep-api/design/shared-workspace-volume.md.
 workspaces:
   storage: "10Gi"
-  # StorageClass for the claim. Empty = cluster default.
   storageClassName: ""
-  # Access mode. Use ReadWriteOnce for local k3d (local-path does not support RWX).
-  # Use ReadWriteMany in production with NFS/EFS/CephFS.
-  accessMode: "ReadWriteMany"
+  accessMode: "ReadWriteOnce"
+  snapshotMaxAge: "1h"
+  trashMaxAge: "1h"
+  orgQuotaBytes: "2147483648"
+  diskHighPct: "85"
+  diskLowPct: "70"
+  reapInterval: "5m"
 
 postgres:
   version: "16"

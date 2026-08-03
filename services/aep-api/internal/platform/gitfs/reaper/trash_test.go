@@ -63,7 +63,7 @@ func TestTrashThenPurgeKeepsOpenFds(t *testing.T) {
 	// Phase 2 — purge: TrashMaxAge 1ns means everything qualifies.
 	cfg := testCfg()
 	cfg.TrashMaxAge = time.Nanosecond
-	r := New(fx.Engine, staticLister(nil), cfg)
+	r := New(fx.Engine, staticLister(nil), cfg, nil)
 	if err := r.reclaimTrash(ctx); err != nil {
 		t.Fatalf("reclaim trash: %v", err)
 	}

@@ -14,12 +14,46 @@
 // specific language governing permissions and limitations
 // under the License.
 
-package dependencies
+package ocname
 
 import (
 	"regexp"
 	"testing"
 )
+
+// TestScopedComponentName pins the sibling-endpoint `component` value against the
+// LIVE OpenChoreo lookup key. A friendly name here is the whole "deploying
+// forever" bug: OC resolves a workload endpoint dependency by scoped name, so
+// `todo-api` matched no ReleaseBinding and the consumer's Ready condition never
+// flipped.
+func TestScopedComponentName(t *testing.T) {
+	t.Parallel()
+
+	if got := ScopedComponentName("todo-api99", "todo-api"); got != "todo-api99-todo-api" {
+		t.Errorf("ScopedComponentName = %q, want todo-api99-todo-api", got)
+	}
+	// No project ⇒ nothing to disambiguate against; the name passes through.
+	if got := ScopedComponentName("", "todo-api"); got != "todo-api" {
+		t.Errorf("ScopedComponentName with no project = %q, want todo-api", got)
+	}
+}
+
+// TestServiceURLEnvName pins the `address` binding to the key a browser app's
+// window._env_ already carries, so the coding agent's workload.yaml and the SPA
+// config name the same variable.
+func TestServiceURLEnvName(t *testing.T) {
+	t.Parallel()
+
+	for dep, want := range map[string]string{
+		"todo-api":     "TODO_API_URL",
+		"orders":       "ORDERS_URL",
+		"employee-api": "EMPLOYEE_API_URL",
+	} {
+		if got := ServiceURLEnvName(dep); got != want {
+			t.Errorf("ServiceURLEnvName(%q) = %q, want %q", dep, got, want)
+		}
+	}
+}
 
 func TestExternalResourceNaming(t *testing.T) {
 	t.Parallel()

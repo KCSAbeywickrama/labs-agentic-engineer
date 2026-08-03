@@ -140,6 +140,35 @@ type RepoRef struct {
 	FullName  string // "owner/name"
 }
 
+// ComponentResources is what the wiring-conformance check compares against: a
+// component's App Path (where its workload.yaml lives) and the wiring its design
+// declares, one field per workload `dependencies:` sub-block. Primitives only, so
+// this package names no design entity.
+type ComponentResources struct {
+	AppPath string
+	// Refs are the OC resource refs the design declares — the expected
+	// `dependencies.resources[].ref` values.
+	Refs []string
+	// EndpointTargets are the SCOPED provider component names the design declares
+	// — the expected `dependencies.endpoints[].component` values.
+	//
+	// Unlike Refs, these are checked for the value as well as the presence. A
+	// missing ref leaves the agent with nothing wired and something eventually
+	// notices; a WRONG endpoint target is the quiet one — it parses, renders,
+	// deploys and serves, and only the ReleaseBinding's Ready condition ever
+	// disagrees.
+	EndpointTargets []string
+}
+
+// WorkloadReader reads a file from the project repo at HEAD of the default
+// branch. The conformance check uses it for the shipped workload.yaml, and HEAD
+// is the right ref: the check runs on the merged-PR fan-out, so the merge is
+// already the newest state, and judging a later state than the merge SHA is if
+// anything more correct. Wired from the Files surface; nil → the check is skipped.
+type WorkloadReader interface {
+	ReadFile(ctx context.Context, orgID, projectID, path string) (content string, ok bool, err error)
+}
+
 // RepoLister enumerates every project repository the reconcile sweep walks.
 type RepoLister interface {
 	ListAll(ctx context.Context) ([]RepoRef, error)
@@ -153,6 +182,14 @@ type DesignReader interface {
 	// root. An empty appPath means the component builds from the repo root and
 	// therefore matches any change. Nil when the project has no design.
 	ComponentPaths(ctx context.Context, orgID, projectID string) (map[string]string, error)
+
+	// DeclaredResources returns, per component, the wiring its design says it
+	// consumes — read off each dependency's platform-stamped `wiring`, resource
+	// refs and endpoint targets alike. A dependency with no wiring contributes
+	// nothing: it is not derivable yet, so the agent could not have wired it and
+	// it is not the agent's defect. Keyed by the component's design name, like
+	// ComponentPaths.
+	DeclaredResources(ctx context.Context, orgID, projectID string) (map[string]ComponentResources, error)
 }
 
 // BuildRun is one OpenChoreo WorkflowRun as the event plane reads it back.

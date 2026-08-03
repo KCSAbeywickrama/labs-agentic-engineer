@@ -20,7 +20,7 @@
 // Architectural context: BuildCredentialsService stores the per-org credential
 // in Postgres. To make that credential reachable by the build
 // pod's checkout step — which mounts a `kubernetes.io/basic-auth` Secret as a
-// volume — git-service writes the Secret straight into `workflows-<ocOrgID>`,
+// volume — aep-api writes the Secret straight into `workflows-<ocOrgID>`,
 // bypassing OpenBao + External-Secrets + SecretReference entirely for git
 // creds. The dockerfile-builder ClusterWorkflow now passes the WP Secret name
 // to checkout-source as a regular volume.secret.secretName.
@@ -44,9 +44,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 )
 
-// FieldOwner is the Server-Side Apply field-manager string git-service stamps
+// FieldOwner is the Server-Side Apply field-manager string aep-api stamps
 // on objects it owns. Picking a stable, distinctive value makes audit + drift
-// reconciliation tractable.
+// reconciliation tractable. (Historical name: aep-git-service.)
 const FieldOwner = "aep-git-service"
 
 // NewInClusterClient returns a controller-runtime client wired against the
@@ -54,8 +54,8 @@ const FieldOwner = "aep-git-service"
 // available (e.g. running outside a pod with no KUBECONFIG).
 //
 // The returned client knows core/v1 (Secret, Namespace); we don't register
-// the OC v1alpha1 scheme because git-service intentionally writes only
-// native K8s objects.
+// the OC v1alpha1 scheme because aep-api intentionally writes only
+// native K8s objects here.
 func NewInClusterClient() (client.Client, error) {
 	cfg, err := config.GetConfig()
 	if err != nil {

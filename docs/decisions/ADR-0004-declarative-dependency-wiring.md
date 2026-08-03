@@ -1,5 +1,12 @@
 # ADR-0004 — Dependency wiring is authored by the coding agent, never patched by the platform
 
+> **Narrowed by [ADR-0013][adr13].** The decision below — the agent authors the
+> whole `workload.yaml`, the platform says rather than patches — stands unchanged.
+> What narrowed is the CHANNEL: the `resources:` half is derived at design time and
+> stamped into `design.json`, so only the `endpoints:` half is still posted as a
+> comment, and that post moved from gate resolution to cycle dispatch. Read the
+> "Telling the agent what to write" section below as history for the resource half.
+
 A component's `workload.yaml` is written entirely by the coding agent, including
 the consumer-side `dependencies:` block that names the services and resources it
 consumes. The platform never patches a deployed `Workload` CR.
@@ -57,10 +64,18 @@ always the complete answer.
   build's dependency step runs before the planning turn, so a dependency that
   resolves synchronously there — an external connection whose values were already
   collected, or one already provisioned from an earlier version — resolves into an
-  empty working set and posts nothing. The async resolutions (a platform resource
-  reaching Ready, an org-service publishing) land after the plan and are unaffected.
-  Closing it means the run supervisor asking for the already-resolved wiring once
-  the plan exists, at the cycle's first dispatch.
+  empty working set and posts nothing. Closing it means the run supervisor asking
+  for the already-resolved wiring once the plan exists, at the cycle's first
+  dispatch — which is what [ADR-0013][adr13] did.
+
+  This entry also carried a wrong assumption, and it is the one that bit: *"the
+  async resolutions (a platform resource reaching Ready, an org-service publishing)
+  land after the plan and are unaffected."* They do not have to. A platform
+  resource whose `ClusterResourceType` exposes static outputs goes Ready in
+  seconds, which beats an LLM planning turn every time — so the async path landed
+  in the same empty working set as the synchronous one, and a component shipped its
+  own SQLite file for a declared `postgres-cnpg`. "Async, therefore later" was
+  never a guarantee; only the dispatch predicate is.
 - **A partially resolved block is normal.** Anything unresolvable is omitted rather
   than guessed at, and the next resolution re-posts the fuller block.
 
@@ -69,6 +84,7 @@ The mechanism lives where it is enforced:
 ([ADR-0008][adr8]).
 
 [adr8]: ADR-0008-architecture-in-readme-ladder.md
+[adr13]: ADR-0013-derived-wiring-lives-in-the-design.md
 [adr10]: ADR-0010-coding-agent-researches-external-contracts.md
 [adr11]: ADR-0011-milestone-is-the-unit-of-execution.md
 [deps]: ../../services/aep-api/internal/dependencies/README.md

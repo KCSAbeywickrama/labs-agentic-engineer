@@ -41,7 +41,6 @@ const defaultEnv = openchoreo.DevEnvironmentName
 type Service struct {
 	issues    IssueClient
 	execs     ExecutionStore
-	reeval    Reevaluator
 	design    DesignReader
 	repos     RepoLocator
 	rtCatalog ExternalRTCatalog
@@ -79,14 +78,12 @@ func (s *Service) SetOrgPublishMarker(m OrgPublishMarker) { s.orgPublish = m }
 // org-service visibility flow. Nil is a documented best-effort no-op (logged).
 func (s *Service) SetProviderBuildTrigger(t ProviderBuildTrigger) { s.providerBuild = t }
 
-// Deps is the provisioning service's collaborator set. reeval / projects /
-// access / providers may be nil (a nil reeval skips the release nudge — the
-// sweep heals it; a nil projects skips the cross-project consumer scan; nil
-// access / providers disable the access-request surface).
+// Deps is the provisioning service's collaborator set. projects / access /
+// providers may be nil (a nil projects skips the cross-project consumer scan;
+// nil access / providers disable the access-request surface).
 type Deps struct {
 	Issues    IssueClient
 	Execs     ExecutionStore
-	Reeval    Reevaluator
 	Design    DesignReader
 	Repos     RepoLocator
 	RTCatalog ExternalRTCatalog
@@ -103,7 +100,6 @@ func NewService(d Deps) *Service {
 	return &Service{
 		issues:    d.Issues,
 		execs:     d.Execs,
-		reeval:    d.Reeval,
 		design:    d.Design,
 		repos:     d.Repos,
 		rtCatalog: d.RTCatalog,
@@ -199,33 +195,33 @@ func (s *Service) admitProvisionRow(ctx context.Context, orgID, projectID, repo,
 	return row, admitted, err
 }
 
-// completeProvisionRow finishes a provision Execution succeeded, closes the gate
-// issue with a no-secrets reference, posts the dependency's resolved wiring to
-// the run's working set (ADR-0004), and re-evaluates the funnel so consumer tasks
-// gated on this dependency dispatch. Used by the synchronous external path and
-// the readiness watcher.
+// completeProvisionRow finishes a provision Execution succeeded and closes the
+// gate issue with a no-secrets reference. Consumer tasks gated on this
+// dependency release via the gate-issue-close webhook and the eventcore sweep.
+// Used by the synchronous external path and the readiness watcher.
 //
-// depName is the dependency this gate held. It is what the wiring comment is
-// about, so every caller passes it — the execution row's Component carries it on
-// the watcher path.
+// depName is the dependency this gate held, carried for the log line and (on the
+// watcher path) read off the execution row's Component.
 //
-// ORDER: the wiring comment goes up BEFORE the re-evaluation that may release a
-// coding cycle, so an agent dispatched by this very resolution finds the block
-// already on its issues.
+// It no longer posts the wiring comment. That used to happen here, and the
+// audience was whatever working-set issues existed AT THIS MOMENT — which on a
+// first build is none, because fillMilestone provisions before it plans. The
+// resource half the agent cannot invent now travels in design.json
+// (spec/derive_wiring.go), and the endpoint half is published at cycle dispatch
+// (wiring.go), where the dispatch predicate guarantees both a resolved design and
+// a non-empty audience.
 func (s *Service) completeProvisionRow(ctx context.Context, orgID, projectID, depName string, issueNumber int, execID, reference string) {
-	if _, err := s.execs.Finish(ctx, execID, string(taskmeta.ExecSucceeded), reference); err != nil {
+	exec, err := s.execs.Finish(ctx, execID, string(taskmeta.ExecSucceeded), reference)
+	if err != nil {
 		slog.WarnContext(ctx, "provisioning: finish provision run failed", "execution", execID, "error", err)
 		return
+	}
+	if exec == nil {
+		return // lost the race — another replica already finished
 	}
 	comment := "✅ Provisioned. " + reference + "\n\nClosing — dependent tasks will dispatch automatically."
 	if err := s.issues.CloseIssue(ctx, orgID, projectID, issueNumber, comment); err != nil {
 		slog.WarnContext(ctx, "provisioning: close gate issue failed", "issue", issueNumber, "error", err)
-	}
-	s.postResolvedWiring(ctx, orgID, projectID, depName)
-	if s.reeval != nil {
-		if err := s.reeval.Reevaluate(ctx); err != nil {
-			slog.WarnContext(ctx, "provisioning: reevaluate after provision failed", "error", err)
-		}
 	}
 }
 
@@ -241,8 +237,12 @@ func (s *Service) failProvisionRow(ctx context.Context, orgID, projectID string,
 	// terminal must always succeed, so it runs on a cancellation-free context
 	// (values — the user JWT for the issue comment — are preserved).
 	ctx = context.WithoutCancel(ctx)
-	if _, err := s.execs.Finish(ctx, execID, string(taskmeta.ExecFailed), reason); err != nil {
+	exec, err := s.execs.Finish(ctx, execID, string(taskmeta.ExecFailed), reason)
+	if err != nil {
 		slog.WarnContext(ctx, "provisioning: finish provision run (failed) failed", "execution", execID, "error", err)
+	}
+	if exec == nil && err == nil {
+		return // lost the race — another replica already finished
 	}
 	if issueNumber > 0 {
 		if err := s.issues.CommentIssue(ctx, orgID, projectID, issueNumber, "⚠️ Provisioning failed: "+reason); err != nil {

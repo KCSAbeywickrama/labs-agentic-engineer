@@ -20,6 +20,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { FileBundle, type LoadSkillResult, type LoadSkillReferenceResult } from "@aep/agent-stream";
 import { buildFileTools, LOAD_SKILL, LOAD_SKILL_REFERENCE } from "../src/agents/main/tools/files.js";
+import { SkillReadError, type SkillSource } from "../src/agents/main/skill-source.js";
 import { testSkillSource, type TestSkill } from "./skill-source.js";
 
 const SKILL_LIST: TestSkill[] = [
@@ -144,5 +145,31 @@ test("loadSkillReference refuses a binary aux file with a corrective error namin
   if (!res.ok) {
     assert.equal(res.error, "assets/logo.png is a binary file — it cannot be loaded into context");
     assert.deepEqual(res.available, ["assets/logo.png", "references/schema.md"]);
+  }
+});
+
+test("loadSkill I/O fault returns could-not-read — never unknown skills", async () => {
+  const base = testSkillSource(SKILL_LIST);
+  const ioFault: SkillSource = {
+    catalog: () => base.catalog(),
+    load: (name) => {
+      if (name === "openapi-conventions") throw new SkillReadError("/snap/skills/openapi/SKILL.md");
+      return base.load(name);
+    },
+    loadReference: (n, p) => base.loadReference(n, p),
+  };
+  const res = await loadSkillExec(ioFault as SkillSourceArg)(
+    { names: ["component-architecture", "openapi-conventions"] },
+    {},
+  );
+  assert.equal(res.ok, false);
+  if (!res.ok) {
+    assert.match(res.error, /could not read skill openapi-conventions/);
+    assert.doesNotMatch(res.error, /unknown skills/);
+    assert.deepEqual(res.missing, []);
+    assert.deepEqual(
+      res.skills.map((s) => s.name),
+      ["component-architecture"],
+    );
   }
 });

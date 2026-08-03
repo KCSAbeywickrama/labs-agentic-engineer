@@ -77,6 +77,17 @@ type DesignComponent struct {
 // declares no explicit endpoint.
 const DefaultEndpointName = "http"
 
+const (
+	// EndpointVisibilityProject is the reachability of a same-project sibling's
+	// endpoint — the `visibility` on a workload `dependencies.endpoints[]` entry
+	// pointing at one.
+	EndpointVisibilityProject = "project"
+	// EndpointAddressOutput is the single output an endpoint dependency exposes:
+	// the provider's resolved base URL. It is the `envBindings` KEY on an
+	// endpoints[] entry (the value is the env var it lands in).
+	EndpointAddressOutput = "address"
+)
+
 // ComponentEndpoint is the component's single network endpoint as declared in
 // design.json. Only Name is carried: it is the SINGLE SOURCE OF TRUTH for the
 // endpoint name shared between the coding agent's workload.yaml
@@ -159,6 +170,16 @@ type Dependency = contracts.Dependency
 // DependencyCandidate is one option in an ambiguous external dependency's
 // resolution set (see Dependency.Candidates). Wire shape in the contracts leaf.
 type DependencyCandidate = contracts.DependencyCandidate
+
+// DependencyWiring is the platform-stamped consumer-side wiring for a component /
+// platform-resource / external dependency (see derive_wiring.go). Wire shape in
+// the contracts leaf.
+type DependencyWiring = contracts.DependencyWiring
+
+// EndpointWiring is the `endpoints[]` variant of a dependency's wiring — a
+// sibling component's endpoint (see derive_wiring.go). Wire shape in the
+// contracts leaf.
+type EndpointWiring = contracts.EndpointWiring
 
 // ConfigKey is one env-var key a component reads at runtime. Wire shape in the
 // contracts leaf (re-exported here).

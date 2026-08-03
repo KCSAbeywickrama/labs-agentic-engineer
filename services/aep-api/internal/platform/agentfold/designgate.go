@@ -57,6 +57,11 @@ var (
 		"style": true, "package": true, "specPath": true,
 		"candidates": true,
 		"config":     true, "resourceType": true, "parameters": true,
+		// wiring is platform-stamped, not agent-authored — but it IS persisted in
+		// design.json, so it must fold. Design save re-derives and overwrites it,
+		// so an agent echoing back what it read is harmless (see the zod gate's
+		// dependencyWiringSchema for why this is accepted rather than rejected).
+		"wiring": true,
 	}
 	// externalOnlyDependencyKeys are meaningful only on kind="external" — a
 	// platform-resource is catalog-picked, an org-service is catalog-resolved,
@@ -217,6 +222,92 @@ func validateDependency(i int, d any) *designProblem {
 	}
 	if p := validateDependencyParameters(i, dep["parameters"]); p != nil {
 		return p
+	}
+	if p := validateDependencyWiring(i, dep["wiring"]); p != nil {
+		return p
+	}
+	return nil
+}
+
+// validateDependencyWiring mirrors the zod dependencyWiringSchema union: when
+// present, `wiring` is EXACTLY ONE of two variants, each carrying only its own
+// keys —
+//
+//	{ref, envBindings}  — one workload dependencies.resources[] entry
+//	{endpoint}          — one workload dependencies.endpoints[] entry
+//
+// Every field of a variant is required together. A half-stamped wiring (a ref with
+// no bindings, an endpoint with no component) renders a workload.yaml entry
+// OpenChoreo silently ignores, which is worse than an absent wiring the agent
+// reports as a platform fault.
+func validateDependencyWiring(i int, raw any) *designProblem {
+	if raw == nil {
+		return nil // absent (optional) — not yet derivable
+	}
+	violation := func(format string, args ...any) *designProblem {
+		return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("dependencies[%d].wiring"+format, append([]any{i}, args...)...)}
+	}
+	wiring, ok := raw.(map[string]any)
+	if !ok {
+		return violation(": must be an object")
+	}
+	_, hasEndpoint := wiring["endpoint"]
+	if hasEndpoint {
+		// The variants are exclusive: one dependency resolves to a resource or to
+		// an endpoint, never both, so a mixed object is a defect and not a
+		// tolerable superset.
+		for k := range wiring {
+			if k != "endpoint" {
+				return violation(": %s cannot be combined with endpoint — a dependency wires to a resource or to an endpoint, not both", k)
+			}
+		}
+		return validateEndpointWiring(violation, wiring["endpoint"])
+	}
+	for k := range wiring {
+		if k != "ref" && k != "envBindings" {
+			return violation(": unknown property %s", k)
+		}
+	}
+	if ref, ok := wiring["ref"].(string); !ok || ref == "" {
+		return violation(".ref: must be a non-empty string")
+	}
+	return validateEnvBindings(violation, ".envBindings", wiring["envBindings"])
+}
+
+// validateEndpointWiring mirrors the zod endpointWiringSchema.strictObject: the
+// scoped provider component, its endpoint name, the target's visibility, and the
+// address binding — all required, nothing else.
+func validateEndpointWiring(violation func(string, ...any) *designProblem, raw any) *designProblem {
+	endpoint, ok := raw.(map[string]any)
+	if !ok {
+		return violation(".endpoint: must be an object")
+	}
+	for k := range endpoint {
+		switch k {
+		case "component", "name", "visibility", "envBindings":
+		default:
+			return violation(".endpoint: unknown property %s", k)
+		}
+	}
+	for _, field := range []string{"component", "name", "visibility"} {
+		if v, ok := endpoint[field].(string); !ok || v == "" {
+			return violation(".endpoint.%s: must be a non-empty string", field)
+		}
+	}
+	return validateEnvBindings(violation, ".endpoint.envBindings", endpoint["envBindings"])
+}
+
+// validateEnvBindings is the output→env-var map both variants carry: an object of
+// string values. Shared so the two variants cannot drift on what a binding is.
+func validateEnvBindings(violation func(string, ...any) *designProblem, path string, raw any) *designProblem {
+	bindings, ok := raw.(map[string]any)
+	if !ok {
+		return violation("%s: must be an object", path)
+	}
+	for k, v := range bindings {
+		if _, ok := v.(string); !ok {
+			return violation("%s.%s: must be a string", path, k)
+		}
 	}
 	return nil
 }
