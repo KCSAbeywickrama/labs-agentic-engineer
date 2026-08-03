@@ -914,6 +914,7 @@ export function SpecView({ projectName }: { projectName: string }) {
             >
               <SpecFileList
                 files={files}
+                phase={cutPreview.phase}
                 selection={effectiveSelection}
                 onSelect={setSelection}
                 onAddArtifact={() => setAddArtifactOpen(true)}
