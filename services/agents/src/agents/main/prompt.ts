@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import { EMPTY_SKILL_SOURCE, type SkillSource } from "./skill-source.js";
+import { EMPTY_SKILL_SOURCE, SERVICE_AUDIENCE, type SkillSource } from "./skill-source.js";
 
 /** System instructions for the file-mutating main agent. */
 export const instructions = `You are a spec-bundle editing agent. You are given a set of existing files
@@ -42,7 +42,7 @@ Reacting to tool results (each result tells you the next move):
 - INVALID_YAML — your edit would break the YAML and was rejected; fix the indentation of newString and retry.
 - INVALID_JSON / SCHEMA_VIOLATION — a components/<name>/design.json write was rejected (broken JSON or a
   schema problem, listed in the message); re-emit the WHOLE corrected file with removeFile + addFile.
-  skillsApplied (the skills that component's build needs) is a per-component key inside its design.json,
+  skillsPinned (the skills that component's build needs) is a per-component key inside its design.json,
   not project-level frontmatter.
 - INVALID_DSL — a wireframes .dsl write was rejected (bad lines listed with line numbers: an unknown
   keyword, a misplaced left/right/table-row, or retired x,y coordinates). Fix EVERY listed line and
@@ -62,20 +62,56 @@ Keep prose outside tool calls to a single short sentence. When the instruction i
 export function buildSkillCatalog(skills: SkillSource | undefined): string {
   const entries = (skills ?? EMPTY_SKILL_SOURCE).catalog();
   if (entries.length === 0) return "";
-  const lines = entries.map((e) => `- ${e.name}: ${e.description}`).join("\n");
-  // The reference note appears only when some skill actually carries reference
-  // files, so a references-free library keeps today's byte-identical catalog.
-  const hasRefs = entries.some((e) => e.hasReferences);
+  // Audience split (ADR-0013): `loadable` is this service's own (design) rows —
+  // the catalog and reference note below are built from those ONLY, so a
+  // design-only library (every unmarked skill included) renders byte-identical
+  // to the pre-audience catalog. `pinOnly` rows still get a line — the design
+  // agent has to NAME a coding skill to pin it onto a component's design.json —
+  // just no loadSkill invitation, appended as a separate block.
+  const loadable = entries.filter((e) => e.audience.includes(SERVICE_AUDIENCE));
+  const pinOnly = entries.filter((e) => !e.audience.includes(SERVICE_AUDIENCE));
+
+  const lines = loadable.map((e) => `- ${e.name}: ${e.description}`).join("\n");
+  // The reference note appears only when some LOADABLE skill carries reference
+  // files — a reference note about a skill this agent cannot load is useless.
+  const hasRefs = loadable.some((e) => e.hasReferences);
   const refNote = hasRefs
     ? " Some skills carry reference files: loadSkill lists their paths, and loadSkillReference(name, path) reads one — call it only when the skill's guidance points you there."
     : "";
-  return `
+
+  // Emitted ONLY when something is pin-only, so a design-only library keeps the
+  // exact prompt text (and cached prefix) it had before audiences existed.
+  // The lead-in wording adapts to whether anything is loadable at all, so a
+  // pin-only-only library (`loadable` empty) doesn't dangle a "these skills"
+  // referring to nothing above it.
+  const pinLeadIn =
+    loadable.length === 0
+      ? `No skills here are loadable by this agent — every one below is the coding agent's, listed only so you can pin it.`
+      : `These skills are the coding agent's — you cannot load them here.`;
+  const pinBlock =
+    pinOnly.length === 0
+      ? ""
+      : `\n\n${pinLeadIn} When a component's build needs one, add it to that component's skillsPinned ` +
+        `in its design.json:\n\n` +
+        pinOnly.map((e) => `- ${e.name}: ${e.description}`).join("\n");
+
+  // If nothing is loadable (a pin-only-only library), skip the "call
+  // loadSkill" invitation and its empty list — only the heading survives, and
+  // `pinBlock` carries the rest of the explanation.
+  const header =
+    loadable.length === 0
+      ? `
+
+# Skills`
+      : `
 
 # Skills
 
 You have access to skills — reusable guidance for specific tasks. Only their names and one-line descriptions are listed below; the full guidance is hidden until you load it. Call loadSkill ONCE with every relevant skill's name (names: [...]) to read their guidance BEFORE applying any of them — never guess a skill's contents.${refNote}
 
 ${lines}`;
+
+  return header + pinBlock;
 }
 
 /** Base instructions + the skill catalog (empty when no skills are supplied). */

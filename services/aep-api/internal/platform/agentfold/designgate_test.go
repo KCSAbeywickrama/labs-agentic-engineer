@@ -258,11 +258,11 @@ func TestValidateComponentDesign_Wiring(t *testing.T) {
 }
 
 // designWithSkills builds a minimal valid component design.json for dir "svc",
-// optionally injecting a `skillsApplied` value verbatim from fragment.
+// optionally injecting a `skillsPinned` value verbatim from fragment.
 func designWithSkills(fragment string) string {
 	sa := ""
 	if fragment != "" {
-		sa = `,"skillsApplied":` + fragment
+		sa = `,"skillsPinned":` + fragment
 	}
 	return fmt.Sprintf(`{"name":"svc","type":"service","version":"0.1.0",`+
 		`"language":"Go","buildpack":"docker","appPath":"svc",`+
@@ -348,7 +348,7 @@ func TestDesignGate_RetiredExternalFieldsRejected(t *testing.T) {
 	}
 }
 
-func TestDesignGate_SkillsApplied(t *testing.T) {
+func TestDesignGate_SkillsPinned(t *testing.T) {
 	cases := []struct {
 		name     string
 		fragment string
@@ -368,6 +368,33 @@ func TestDesignGate_SkillsApplied(t *testing.T) {
 			}
 			if !c.wantOK && p == nil {
 				t.Fatalf("want rejected, got accepted")
+			}
+		})
+	}
+}
+
+// designWithSkillsKey builds a minimal valid component design.json for dir
+// "svc", splicing in the given skills array fragment under the given key
+// name (e.g. "skillsPinned" or the legacy "skillsPinned").
+func designWithSkillsKey(key, fragment string) string {
+	return fmt.Sprintf(`{"name":"svc","type":"service","version":"0.1.0",`+
+		`"language":"Go","buildpack":"docker","appPath":"svc",`+
+		`"entrypoint":"deployment/service","exposure":"internet",`+
+		`"description":"x","dependencies":[],"%s":%s}`, key, fragment)
+}
+
+// TestDesignGate_SkillsPinned_And_LegacyAccepted locks the rename's
+// compatibility rule: `skillsPinned` is the name the design agent now
+// writes, but `skillsPinned` designs already committed in customer org
+// repos must keep validating forever — the schema's root
+// additionalProperties:false must accept BOTH keys. See
+// packages/agent-stream/src/component-design-schema.ts.
+func TestDesignGate_SkillsPinned_And_LegacyAccepted(t *testing.T) {
+	for _, key := range []string{"skillsPinned", "skillsPinned"} {
+		t.Run(key+"/valid", func(t *testing.T) {
+			p := validateComponentDesign(designWithSkillsKey(key, `["go","openapi-conventions"]`), "svc")
+			if p != nil {
+				t.Fatalf("want accepted (%s), got: %s", key, p.message)
 			}
 		})
 	}

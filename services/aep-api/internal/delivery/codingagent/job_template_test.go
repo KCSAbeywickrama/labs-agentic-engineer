@@ -115,35 +115,18 @@ func TestBuild_OneImageServesBothTaskKinds(t *testing.T) {
 	}
 }
 
-// TestBuild_StampsSkillsRepoURLWhenSet pins the new optional AEP_SKILLS_REPO_URL
-// env: present with the clone URL when the org's skills repo resolved.
-func TestBuild_StampsSkillsRepoURLWhenSet(t *testing.T) {
-	in := validJobInputs()
-	in.SkillsRepoURL = "https://github.com/acme/org-skills"
-
-	job, err := Build(in)
+// TestBuild_NeverStampsSkillsRepoURL guards the retired per-task skills clone.
+// The runner reads skills from `.claude/skills/` in its project clone, which
+// the BFF mirrors there — so no dispatch may hand it an org-skills URL to
+// clone. Reintroducing that env var would revive a second delivery mechanism
+// (and the per-dispatch repo provisioning that fed it).
+func TestBuild_NeverStampsSkillsRepoURL(t *testing.T) {
+	job, err := Build(validJobInputs())
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	env := jobEnv(t, job)
-	if got := env["AEP_SKILLS_REPO_URL"]; got != in.SkillsRepoURL {
-		t.Errorf("AEP_SKILLS_REPO_URL = %q, want %q", got, in.SkillsRepoURL)
-	}
-}
-
-// TestBuild_OmitsSkillsRepoURLWhenEmpty pins the degrade contract: an
-// unprovisioned org (empty URL) stamps no env var, so the runner falls back to
-// the base plugin rather than cloning "".
-func TestBuild_OmitsSkillsRepoURLWhenEmpty(t *testing.T) {
-	in := validJobInputs() // SkillsRepoURL left empty
-
-	job, err := Build(in)
-	if err != nil {
-		t.Fatalf("Build: %v", err)
-	}
-	env := jobEnv(t, job)
-	if _, present := env["AEP_SKILLS_REPO_URL"]; present {
-		t.Errorf("AEP_SKILLS_REPO_URL must be absent when SkillsRepoURL is empty, got %q", env["AEP_SKILLS_REPO_URL"])
+	if _, present := jobEnv(t, job)["AEP_SKILLS_REPO_URL"]; present {
+		t.Error("AEP_SKILLS_REPO_URL must never be stamped: skills come from the project clone's .claude/skills/")
 	}
 }
 

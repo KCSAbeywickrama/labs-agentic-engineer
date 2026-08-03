@@ -46,7 +46,7 @@
 #     so we leave it off and let the default apply.
 #
 #   aep.wso2.com/skill: thunder-authentication
-#     Design save ensures this skill is present in the design's `skillsApplied`
+#     Design save ensures this skill is present in the design's `skillsPinned`
 #     whenever a dependency of this type exists — the per-type teaching lives in
 #     the skill, not in platform code.
 ---
@@ -68,7 +68,7 @@ metadata:
     # consumer-url-env-config → platform patches <spaOrigin><path> into this env-config key.
     aep.wso2.com/consumer-url-env-config: redirectUris
     # consumer-url-path omitted → defaults to /callback (the path this OAuth app expects).
-    # skill → design-save appends this skill to the design's skillsApplied when this dep is present.
+    # skill → design-save appends this skill to the design's skillsPinned when this dep is present.
     aep.wso2.com/skill: thunder-authentication
 spec:
   retainPolicy: Delete

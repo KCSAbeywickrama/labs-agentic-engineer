@@ -61,10 +61,10 @@ type DesignComponent struct {
 	OpenAPISpec                string             `json:"openAPISpec"`
 	ComponentAgentInstructions string             `json:"componentAgentInstructions"`
 	ExposesAPI                 *ExposesAPI        `json:"exposesAPI,omitempty"`
-	// SkillsApplied are the skill names applied to THIS component (per-component
+	// SkillsPinned are the skill names applied to THIS component (per-component
 	// — the coding runner materializes exactly these when building it). Sourced
-	// from the component design.json `skillsApplied` key.
-	SkillsApplied []string `json:"skillsApplied,omitempty"`
+	// from the component design.json `skillsPinned` key.
+	SkillsPinned []string `json:"skillsPinned,omitempty"`
 	// DisableAutoRca opts this component out of the platform's default
 	// "error → RCA" observability-alert-rule trait (auto-provisioned for
 	// service components). Default false ⇒ auto-RCA on. Sourced from the

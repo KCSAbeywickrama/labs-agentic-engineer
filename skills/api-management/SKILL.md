@@ -4,6 +4,7 @@ description: How the platform's API gateway fronts a service — it validates th
 metadata:
   aep:
     kind: org
+    audience: [design, coding]
 ---
 
 # API Management

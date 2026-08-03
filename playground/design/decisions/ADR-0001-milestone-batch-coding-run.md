@@ -57,7 +57,7 @@ The playground's coding run now mirrors the milestone loop:
    Only a crash or the agent giving up entirely is a failure.
 6. **Skills resolve at project scope.** `local.ts` reads
    `{kind: "project"}` (the union of every component's `design.json`
-   `skillsApplied`) instead of one component's — the same
+   `skillsPinned`) instead of one component's — the same
    already-shared mechanism `skills_resolver.ts` uses for prod's milestone
    Jobs. Its `AEP_COMPONENT_NAME` carries a label-only sentinel
    (`aep-local-milestone`), mirroring prod's `aep-milestone`.

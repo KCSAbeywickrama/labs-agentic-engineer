@@ -156,14 +156,26 @@ func TestReconcile_BackfillStampsPreManifestRepo(t *testing.T) {
 	if m["demo"].BaseHash == "" {
 		t.Fatal("backfill did not stamp baseHash")
 	}
-	// Divergent pre-manifest copy → stamped but NEVER overwritten.
+	// Divergent pre-manifest copy → ADOPTS the shipped content. This reverses
+	// the original "never clobbered during migration" rule: the platform could
+	// not tell a pre-manifest edit from a merely stale copy, and recording the
+	// embedded sha as the baseline of a copy the org did not have fabricated a
+	// third value matching neither side — every later release then read as
+	// "both moved" and surfaced an unresolvable conflict on untouched skills.
+	// A post-manifest edit is still preserved; see
+	// TestReconcile_PostManifestEditStillSurvives.
 	host.writeAtHead("org1", skillsManifestPath, "")
 	host.writeAtHead("org1", skillRepoPath("demo"), demoMD("org custom"))
 	if _, err := svc.Reconcile(ctx, "org1"); err != nil {
 		t.Fatalf("backfill divergent: %v", err)
 	}
-	if got := host.readAtHead("org1", skillRepoPath("demo")); !strings.Contains(got, "org custom") {
-		t.Fatalf("divergent pre-manifest copy clobbered during migration: %q", got)
+	got := host.readAtHead("org1", skillRepoPath("demo"))
+	if strings.Contains(got, "org custom") {
+		t.Fatalf("a pre-manifest copy must adopt the shipped content, still diverged: %q", got)
+	}
+	after := parseSkillsManifest([]byte(host.readAtHead("org1", skillsManifestPath)))["demo"].BaseHash
+	if after == "" || !strings.Contains(got, "v1") {
+		t.Fatalf("adoption must leave copy and baseline agreeing: base=%q copy=%q", after, got)
 	}
 }
 

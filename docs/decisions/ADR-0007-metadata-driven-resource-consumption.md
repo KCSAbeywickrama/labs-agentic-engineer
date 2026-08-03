@@ -32,7 +32,7 @@ The marker vocabulary:
 | `aep.wso2.com/role: end-user-auth` | label | A `service` component that declares a dependency of this type gets `exposesAPI.auth: end-user-required` stamped automatically at design save. An explicit, conflicting `exposesAPI.auth: service-required` on such a component is rejected as a validation error, not silently overridden. |
 | `aep.wso2.com/consumer-url-env-config: <key>` | annotation | Once the consuming web-app's public URL resolves, aep-api patches `<spaOrigin><consumer-url-path>` into this key on the dependency's dev `ResourceReleaseBinding` environment configs. |
 | `aep.wso2.com/consumer-url-path: <path>` | annotation | Path appended to the consumer's origin for the patch above. Defaults to `/callback` when the env-config annotation is present without it. |
-| `aep.wso2.com/skill: <skill-name>` | annotation | Design save ensures the named skill is present in the design's `skillsApplied` whenever a dependency of this type exists. |
+| `aep.wso2.com/skill: <skill-name>` | annotation | Design save ensures the named skill is present in the design's `skillsPinned` whenever a dependency of this type exists. |
 
 Ownership is split cleanly by who authors what:
 

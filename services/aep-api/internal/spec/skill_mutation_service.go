@@ -174,7 +174,7 @@ func (m *SkillMutationService) Create(ctx context.Context, orgID, actor string, 
 	slog.InfoContext(ctx, "skill created", "orgID", orgID, "name", name, "actor", actor)
 	// Return the just-written skill from validated input — no read-back (a
 	// transient post-commit read could nil-panic the handler on a real success).
-	return newSkillValue(orgID, SkillKindOrg, name, stamped, refs, fm), nil
+	return newSkillValue(orgID, SkillKindOrg, name, stamped, refs, fm, true), nil
 }
 
 // Update rewrites an existing editable skill (org or imported) in place,
@@ -242,7 +242,7 @@ func (m *SkillMutationService) Update(ctx context.Context, orgID, actor, name st
 		return nil, fmt.Errorf("commit update for %q: %w", name, err)
 	}
 	slog.InfoContext(ctx, "skill updated", "orgID", orgID, "name", name, "actor", actor)
-	return newSkillValue(orgID, existing.Kind, name, stamped, refs, fm), nil
+	return newSkillValue(orgID, existing.Kind, name, stamped, refs, fm, existing.Enabled), nil
 }
 
 // Delete removes an editable skill (deletes the skill's directory and
@@ -274,6 +274,60 @@ func (m *SkillMutationService) Delete(ctx context.Context, orgID, actor, name st
 	}
 	slog.InfoContext(ctx, "skill deleted", "orgID", orgID, "name", name, "actor", actor)
 	return nil
+}
+
+// SetEnabled flips a skill's manifest-level availability (ADR-0014) without
+// touching a single SKILL.md byte — a manifest-only commit, unlike
+// writeSkillFiles (which upserts a WHOLE entry and deliberately preserves any
+// prior Disabled, so it can never CLEAR the flag). Applies to any visible
+// kind — platform-shipped or org-authored, editable or not — because
+// availability is an org-admin call, orthogonal to the content-edit guard
+// that gates PUT/DELETE. Returns ErrSkillNotFound when the name resolves to
+// no row at all.
+func (m *SkillMutationService) SetEnabled(ctx context.Context, orgID, actor, name string, enabled bool) (*Skill, error) {
+	if m == nil || m.skills == nil {
+		return nil, fmt.Errorf("skill mutation service: not configured")
+	}
+	existing, err := m.skills.Resolve(ctx, orgID, name)
+	if err != nil {
+		return nil, fmt.Errorf("resolve %q: %w", name, err)
+	}
+	if existing == nil {
+		return nil, ErrSkillNotFound
+	}
+
+	repo, err := m.skills.ensureSkillsRepo(ctx, orgID)
+	if err != nil {
+		return nil, fmt.Errorf("ensure skills repo: %w", err)
+	}
+	// Re-read + re-applied against the CAS attempt's own base inside
+	// commitFiles (same lost-update fix as writeSkillFiles/deleteSkillDir): a
+	// concurrent commit's manifest entry is folded in, never clobbered. An
+	// absent entry is left absent when enabling — that is already the enabled
+	// state (ManifestEntry.Disabled's zero value), so there is nothing to
+	// clear and no reason to manufacture an empty {origin:"",baseHash:""} row.
+	manifestFn := func(mf SkillsManifest) SkillsManifest {
+		e, has := mf[name]
+		if !has && enabled {
+			return mf
+		}
+		e.Disabled = !enabled
+		mf[name] = e
+		return mf
+	}
+	verb := "disable"
+	if enabled {
+		verb = "enable"
+	}
+	msg := fmt.Sprintf("chore(skills): %s %s skill %q\n\nby %s", verb, existing.Kind, name, actor)
+	if _, err := m.skills.commitFiles(ctx, orgID, repo, msg, nil, nil, manifestFn); err != nil {
+		return nil, fmt.Errorf("%s skill %q: %w", verb, name, err)
+	}
+	slog.InfoContext(ctx, "skill availability changed", "orgID", orgID, "name", name, "actor", actor, "enabled", enabled)
+
+	out := *existing
+	out.Enabled = enabled
+	return &out, nil
 }
 
 // ---- shared validation helpers ---------------------------------------------

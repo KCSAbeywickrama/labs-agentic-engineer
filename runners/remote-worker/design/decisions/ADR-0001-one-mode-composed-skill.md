@@ -67,7 +67,8 @@ git commit -m "<type>: <short summary> (#<number>)"
 `lib/skill_compose.ts` strips the regions that don't apply and writes the
 resolved plugin to a scratch dir, which is what the SDK session loads.
 `plugin-local/` and the `aep-local` skill are deleted; both modes load the
-plugin named `aep` and preload the skill named `aep:aep`.
+plugin named `aep` and allow the skill named `aep:aep` (which the agent then
+invokes — allowing a skill does not load its body; see ADR-0003).
 
 **The platform text is the trunk.** A `mode:github` wrapper is a cost, not a
 neutral choice: it means the passage has a local twin to keep in step. So the
