@@ -114,6 +114,12 @@ function readDispatchFromEnv(): DispatchRequest {
     mcpUrl: mcpUrl || undefined,
     mcpToken: mcpToken || undefined,
     taskKind,
+    // OFF unless a human opts this pod in. The sinks are files in a workspace
+    // nothing collects, so in the cluster they are write-only — and the debug
+    // log holds prompt text. The opt-in exists because a stall that only
+    // reproduces here would otherwise be undiagnosable: set AEP_RUNNER_DEBUG=1
+    // on the Job and read the files off the pod before it exits.
+    debug: process.env.AEP_RUNNER_DEBUG === "1",
   };
 }
 

@@ -18,12 +18,14 @@
 
 import path from "node:path";
 import { query, type McpServerConfig, type Query } from "@anthropic-ai/claude-agent-sdk";
-import type { TaskLog } from "./logger.js";
+import { openDebugSinks, type DebugSinks, type TaskLog } from "./logger.js";
 import type { DispatchRequest } from "./types.js";
 import type { WorkspaceLayout } from "./workspace.js";
 import { emit } from "./progress/emitter.js";
 import { createSdkTranslator } from "./progress/from-sdk.js";
 import { createRunWatchdog } from "./progress/watchdog.js";
+import { apiRetryLine, isStreamFrame, readApiRetry } from "./progress/diagnostics.js";
+import { scrubber } from "./progress/scrubber.js";
 import { createWebSearchDlpHook, stagedSecretValues } from "./websearch_dlp.js";
 import { createForegroundFanOutHook } from "./fanout_foreground.js";
 import { createWorkspaceWriteGuard } from "./workspace_guard.js";
@@ -292,6 +294,34 @@ export function alwaysOnSkills(taskKind: DispatchRequest["taskKind"]): string[] 
   return taskKind === "validation" ? ["aep", "aep-validation"] : ["aep"];
 }
 
+/**
+ * The SDK options that exist only to be read by a developer afterwards.
+ *
+ * Split out as a pure function so the boundary is testable: the expensive,
+ * prompt-bearing options must be provably absent from a run that did not ask
+ * for them, and "absent" is not something an integration test of a live session
+ * can assert.
+ *
+ * `includePartialMessages` is in here for volume, not secrecy — it multiplies
+ * the message count by roughly the token count, and the run loop drops every
+ * frame it produces on the floor after the watchdog has seen it. The other two
+ * are in here for both reasons.
+ */
+export interface DebugQueryOptions {
+  includePartialMessages?: true;
+  debugFile?: string;
+  stderr?: (data: string) => void;
+}
+
+export function debugQueryOptions(sinks: DebugSinks | undefined): DebugQueryOptions {
+  if (!sinks) return {};
+  return {
+    includePartialMessages: true,
+    debugFile: sinks.debugFilePath,
+    stderr: (data: string) => sinks.onStderr(data),
+  };
+}
+
 export function runClaudeQuery(
   req: DispatchRequest,
   layout: WorkspaceLayout,
@@ -398,6 +428,12 @@ export function runClaudeQuery(
   // a different agent. The workflow goes FIRST: it is the procedure, and a pinned
   // stack skill's rules are read against it.
   const appended = [workflowBodies, perTaskSkills?.pinnedBodies ?? ""].filter((s) => s !== "").join("\n\n");
+
+  // Opened before the session so the sinks exist for its first byte, and closed
+  // in the run loop's finally. Absent on a normal run, which is what keeps the
+  // prompt-bearing debug log out of the cluster — see DispatchRequest.debug.
+  const debugSinks = req.debug ? openDebugSinks(log.dir, (line) => scrubber.scrub(line)) : undefined;
+
   const q = query({
     prompt: promptWithProjectRoot(req.prompt, layout.workspace, contractReferencePath(layout.workspace)),
     options: {
@@ -427,6 +463,7 @@ export function runClaudeQuery(
       // settingSources: [] used to give implicitly, kept explicitly.
       strictMcpConfig: true,
       env: childEnv,
+      ...debugQueryOptions(debugSinks),
       // NOT canUseTool — the Task 12 spike found canUseTool is never
       // invoked for the server-executed WebSearch tool (confirmed under
       // bypassPermissions above too). PreToolUse is the mechanism that
@@ -487,7 +524,27 @@ export function runClaudeQuery(
   const completion = (async (): Promise<RunResult> => {
     try {
       for await (const message of q) {
+        // Streaming frames arrive per token and are pure watchdog fuel: they
+        // reach neither the feed nor claude.log, because writing them to a
+        // JSON-per-message file would turn a diagnostic into the hang it exists
+        // to report. Only present under `debug` at all.
+        if (isStreamFrame(message)) {
+          watchdog.observeStream();
+          continue;
+        }
         log.write(message);
+        // A retryable API failure is the answer to "waiting on the model" —
+        // see progress/diagnostics.ts. It is recorded and reported but NOT
+        // passed to observe(): a retry means the run failed to progress, and
+        // counting it as activity would suppress the very report it explains.
+        // The translator drops this message, so emitting here adds a line
+        // rather than duplicating one.
+        const retry = readApiRetry(message);
+        if (retry) {
+          watchdog.observeRetry(retry);
+          emit({ kind: "log", level: "warn", summary: apiRetryLine(retry) });
+          continue;
+        }
         const events = translate(message);
         watchdog.observe(events);
         for (const event of events) {
@@ -530,6 +587,7 @@ export function runClaudeQuery(
       process.removeListener("SIGTERM", onTerminate);
       process.removeListener("SIGINT", onTerminate);
       log.close();
+      debugSinks?.close();
     }
   })();
 

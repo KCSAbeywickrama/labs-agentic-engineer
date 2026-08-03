@@ -48,6 +48,22 @@ into the runner pod at `/app/skills` for live skill edits (see
   `remote-worker/design/decisions/ADR-0002-run-observability.md`; read it before
   changing what a line says, because several of its entries are corrections of
   the obvious-looking choice.
+- **API retries are on the feed for every run; the rest of the diagnostics are
+  developer-only files.** A stalled model turn used to be reported as bare
+  silence. The SDK emits `system`/`api_retry` for every retryable failure and
+  `from-sdk.ts` was discarding it, so `progress/diagnostics.ts` reads it into a
+  `warn` line and the watchdog names it in its own. Ungated on purpose: a healthy
+  run emits nothing, the `error` field is a closed enum (no prompt or credential
+  can ride it into a console build log), and overload is load-dependent so a flag
+  would be off during every incident. **A retry must never reach
+  `watchdog.observe`** — it is the absence of progress, and resetting the idle
+  clock hides the stall it explains. `debugFile`, `stderr` and
+  `includePartialMessages` are the opposite call: on for every playground run,
+  off in a pod unless `AEP_RUNNER_DEBUG=1`, and they write files beside
+  `claude.log` rather than to the feed — nothing collects a pod's files and the
+  debug log holds prompt text. Streaming frames reach neither the feed nor
+  `claude.log`. ADR-0002 decisions 14–15 have the measurements, including why
+  stderr is *not* where retry detail lives.
 - **Fan-out runs in the foreground.** A `PreToolUse` hook
   (`lib/fanout_foreground.ts`) forces `run_in_background: false` on every
   `Agent`/`Task` call that did not already say so. Backgrounding does not add

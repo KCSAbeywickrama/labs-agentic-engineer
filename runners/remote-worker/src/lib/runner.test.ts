@@ -27,6 +27,7 @@ import {
   alwaysOnSkills,
   buildMcpOptions,
   contractReferencePath,
+  debugQueryOptions,
   promptWithProjectRoot,
 } from "./runner.js";
 import { MissingWorkflowSkillError, requireWorkflowBodies } from "./skills_presence.js";
@@ -268,4 +269,27 @@ test("AGENT_SETTING_SOURCES admits the project source, and only that one", () =>
   // neither belongs in a dispatched container run.
   assert.ok(!AGENT_SETTING_SOURCES.includes("user" as never));
   assert.ok(!AGENT_SETTING_SOURCES.includes("local" as never));
+});
+
+test("debugQueryOptions: a normal run carries NONE of the developer options", () => {
+  // The boundary this whole split exists for. debugFile holds prompt text and
+  // includePartialMessages multiplies the message count by the token count, so
+  // "absent by default" is the property worth pinning — and an integration test
+  // against a live session could not assert an absence.
+  assert.deepEqual(debugQueryOptions(undefined), {});
+});
+
+test("debugQueryOptions: a debug run wires all three at the sinks it was given", () => {
+  const written: string[] = [];
+  const opts = debugQueryOptions({
+    debugFilePath: "/run/.logs/claude-debug.log",
+    onStderr: (c) => written.push(c),
+    close: () => {},
+  });
+  assert.equal(opts.includePartialMessages, true);
+  assert.equal(opts.debugFile, "/run/.logs/claude-debug.log");
+  // Routed through the sink rather than to a stream of its own, which is what
+  // gets it scrubbed on the way to disk.
+  opts.stderr?.("boom");
+  assert.deepEqual(written, ["boom"]);
 });

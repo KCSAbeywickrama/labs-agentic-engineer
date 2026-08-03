@@ -226,6 +226,12 @@ async function main(): Promise<number> {
       "Work the issues in this project. Follow the `aep` skill loaded in your session — " +
       "it defines discovery, ordering, fan-out, verification and how to finish.",
     taskKind: "implementation",
+    // Always on here, and off by default in a pod. A playground run exists to be
+    // debugged: its artifacts sit in a run directory the developer who started it
+    // is already looking at, which is the only place the SDK's debug log and
+    // stderr can be read at all. Not a flag — a run whose diagnostics depend on
+    // remembering an env var is a run that will lack them the one time it matters.
+    debug: true,
   };
 
   const log = openTaskLog(run.runDir);

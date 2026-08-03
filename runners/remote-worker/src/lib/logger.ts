@@ -22,6 +22,13 @@ import path from "node:path";
 export interface TaskLog {
   write(data: unknown): void;
   close(): void;
+  /**
+   * Where this run's artifacts live. Exposed because the debug sinks land
+   * beside `claude.log` and the two entrypoints do not agree on the base: a pod
+   * logs into the workspace, the playground into its own run directory. One
+   * decision about where a run writes, made here.
+   */
+  dir: string;
 }
 
 export function openTaskLog(workspacePath: string): TaskLog {
@@ -33,6 +40,51 @@ export function openTaskLog(workspacePath: string): TaskLog {
   return {
     write(data: unknown) {
       stream.write(JSON.stringify(data) + "\n");
+    },
+    close() {
+      stream.end();
+    },
+    dir: logDir,
+  };
+}
+
+/**
+ * The developer-only sinks: the SDK's own debug log, and the CLI's stderr.
+ *
+ * Files, never the feed — and that is what makes them developer-only in
+ * practice as well as by policy. Nothing collects a pod's files (`claude.log`
+ * has been written unconditionally for as long as it has existed and only the
+ * playground has ever read one), so a sink here is by construction for someone
+ * sitting in front of the run directory. Both can be large and the debug log
+ * carries prompt text, which is the whole reason they stay off a build log the
+ * console forwards to a browser.
+ *
+ * `claude-stderr.log` is written by us and scrubbed on the way in;
+ * `debugFilePath` is handed to the SDK, which writes it directly and
+ * unscrubbed. Some content overlaps and that is accepted — one of the two being
+ * the complete record matters more than neither being redundant.
+ *
+ * The SDK also drops a `latest` symlink beside the debug file it is given. That
+ * is its artifact, not ours; it is harmless here because this directory holds
+ * nothing but one run's logs.
+ */
+export interface DebugSinks {
+  /** Pass to the SDK's `debugFile` option. */
+  debugFilePath: string;
+  /** Pass to the SDK's `stderr` option. */
+  onStderr(chunk: string): void;
+  close(): void;
+}
+
+export function openDebugSinks(logDir: string, scrub: (line: string) => string): DebugSinks {
+  fs.mkdirSync(logDir, { recursive: true, mode: 0o755 });
+  const stream = fs.createWriteStream(path.join(logDir, "claude-stderr.log"), {
+    flags: "w",
+  });
+  return {
+    debugFilePath: path.join(logDir, "claude-debug.log"),
+    onStderr(chunk: string) {
+      stream.write(scrub(chunk));
     },
     close() {
       stream.end();
