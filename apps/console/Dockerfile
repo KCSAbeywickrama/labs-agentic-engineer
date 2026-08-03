@@ -91,8 +91,14 @@ COPY --from=builder --chown=10001:10001 /repo/apps/console/dist /usr/share/nginx
 COPY --chown=10001:10001 apps/console/docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 
+# Alpine's packaged nginx (and any `apk upgrade nginx` in cloud overlays) defaults
+# temp paths to /var/lib/nginx/tmp/*, owned by the distro `nginx` user. UID 10001
+# must own that tree or boot fails with:
+#   mkdir() "/var/lib/nginx/tmp/client_body" failed (13: Permission denied)
+# Official nginx image temps under /var/cache/nginx — chown both.
 RUN chown -R 10001:10001 /var/cache/nginx && \
     chown -R 10001:10001 /var/log/nginx && \
+    chown -R 10001:10001 /var/lib/nginx && \
     chown -R 10001:10001 /etc/nginx && \
     chown -R 10001:10001 /usr/share/nginx/html
 
