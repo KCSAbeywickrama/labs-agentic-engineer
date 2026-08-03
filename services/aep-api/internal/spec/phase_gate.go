@@ -129,6 +129,11 @@ func validatePhaseGate(reqFiles, designFiles map[string]string) []FileValidation
 				Path: designPath, Code: codeUnenrichedComponent,
 				Message: fmt.Sprintf("component %q is still the platform scaffold — enrich its design.json before building", c.ID),
 			})
+		} else if strings.Contains(content, `"language": "`+scaffoldLanguageSentinel+`"`) || strings.Contains(content, `"language":"`+scaffoldLanguageSentinel+`"`) {
+			errs = append(errs, FileValidationError{
+				Path: designPath, Code: codeUnenrichedComponent,
+				Message: fmt.Sprintf("component %q has no language decided — set it from the organization Tech stack default, the requirements, or the platform default", c.ID),
+			})
 		}
 		var artifact string
 		switch componentType {

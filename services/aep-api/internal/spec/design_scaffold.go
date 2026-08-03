@@ -46,19 +46,19 @@ var deployableCellTypes = map[string]string{
 	"scheduled-task":  "scheduled-task",
 }
 
-// scaffoldDefaults per component type: language follows the org stack default
-// (Ballerina services, TypeScript web apps — the architecture skill's rule);
-// exposure defaults to the safe side per type. All of it is enrichable.
-type scaffoldDefaults struct {
-	language string
-	exposure string
-}
+// scaffoldLanguageSentinel is what the scaffold writes for `language`: a
+// non-empty value (the schema demands one) that the build-tag gate REFUSES.
+// Language is a judgment call the platform never makes — the agent fills it
+// from the organization skill's Tech stack default, else the requirements,
+// else the platform stack default the architecture skill names.
+const scaffoldLanguageSentinel = "TBD"
 
-var scaffoldByType = map[string]scaffoldDefaults{
-	"service":         {language: "Ballerina", exposure: "intranet"},
-	"web-application": {language: "TypeScript", exposure: "internet"},
-	"worker":          {language: "Ballerina", exposure: "intranet"},
-	"scheduled-task":  {language: "Ballerina", exposure: "intranet"},
+// scaffoldExposureByType is the safe mechanical default per type; enrichable.
+var scaffoldExposureByType = map[string]string{
+	"service":         "intranet",
+	"web-application": "internet",
+	"worker":          "intranet",
+	"scheduled-task":  "intranet",
 }
 
 func componentDesignPath(id string) string {
@@ -93,7 +93,6 @@ func scaffoldFromCell(cellSource string, exists func(path string) bool) map[stri
 // Key order is stable (marshal of an ordered struct) so scaffolds are
 // byte-deterministic.
 func renderScaffold(id, componentType string) string {
-	d := scaffoldByType[componentType]
 	skeleton := struct {
 		Name         string   `json:"name"`
 		Type         string   `json:"type"`
@@ -109,13 +108,13 @@ func renderScaffold(id, componentType string) string {
 		Name:         id,
 		Type:         componentType,
 		Version:      "0.1.0",
-		Language:     d.language,
+		Language:     scaffoldLanguageSentinel,
 		Buildpack:    "docker",
 		AppPath:      id,
 		Entrypoint:   "deployment/" + componentType,
-		Exposure:     d.exposure,
+		Exposure:     scaffoldExposureByType[componentType],
 		Dependencies: []any{},
-		Description:  "Scaffolded from design.cell — enrich with this component's responsibility, dependencies, and pinned skills.",
+		Description:  "Scaffolded from design.cell — enrich with this component's responsibility, language (org Tech stack default first), dependencies, and pinned skills.",
 	}
 	b, _ := json.MarshalIndent(skeleton, "", "  ")
 	return string(b) + "\n"

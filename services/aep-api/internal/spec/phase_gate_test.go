@@ -152,3 +152,23 @@ func TestPhaseGate_StubsAndInfrastructureExempt(t *testing.T) {
 		}
 	}
 }
+
+// TestPhaseGate_LanguageSentinelRefused pins that the platform never decides a
+// component's language: a design.json enriched everywhere EXCEPT the
+// scaffold's "TBD" language sentinel still refuses the tag — the agent must
+// set it (org Tech stack default → requirements → platform default).
+func TestPhaseGate_LanguageSentinelRefused(t *testing.T) {
+	files := completeDesignFiles()
+	files["components/lunch-api/design.json"] = strings.Replace(
+		enriched("lunch-api", "service"), `"language":"Ballerina"`, `"language":"TBD"`, 1)
+	errs := gateErrors(t, nil, files)
+	found := false
+	for _, e := range errs {
+		if e.Code == "UNENRICHED_COMPONENT" && strings.Contains(e.Message, "language") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("want UNENRICHED_COMPONENT for the TBD language sentinel, got %+v", errs)
+	}
+}

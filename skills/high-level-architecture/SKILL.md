@@ -82,8 +82,11 @@ Do NOT add platform-owned boilerplate: no Kubernetes/monitoring/backup
 sections, no generic performance targets, no "future enhancements" — unless
 the requirements state them.
 
-**Backend services are written in Ballerina** unless the requirements name a
-different language, in which case honour what they say. That choice is a fact
+**Language is decided in this order**: the organization skill's Tech stack
+default first, then a language the requirements name, then the platform
+default — **Ballerina** for backend services, TypeScript for web apps.
+Replace the scaffold's `"language": "TBD"` sentinel with the decided value;
+the build gate refuses a component whose language is still TBD. That choice is a fact
 you record, not a preference you re-derive per component: write it as the
 component's `language` and pin the matching stack skill in `skillsPinned`.
 
