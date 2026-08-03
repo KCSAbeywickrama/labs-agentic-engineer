@@ -25,7 +25,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildSpecGenerationInstruction, slashSkillInstruction } from "@aep/contracts/prompts";
+import { slashSkillInstruction } from "@aep/contracts/prompts";
 
 // --- expands ----------------------------------------------------------------
 
@@ -92,25 +92,3 @@ test("empty / whitespace-only input is literal", () => {
   assert.equal(slashSkillInstruction("   "), null);
 });
 
-// --- buildSpecGenerationInstruction -----------------------------------------
-// The headless `requirements` verb still composes this instruction client-side
-// (interactive kickoffs go through `/start`, which the SERVER expands). These
-// pins moved here from the console when its Generate-spec CTA switched to
-// `/start` and the localStorage prompt store was retired — the playground is
-// now the only consumer, so the tests live with it.
-
-test("buildSpecGenerationInstruction wraps an idea in an explicit generate command", () => {
-  const out = buildSpecGenerationInstruction("An online store for handmade ceramics");
-  assert.match(out, /^Generate a complete requirements specification/);
-  assert.ok(out.includes("requirements/requirements.md"));
-  assert.ok(out.includes("An online store for handmade ceramics"));
-});
-
-test("buildSpecGenerationInstruction falls back to a generic instruction with no idea", () => {
-  for (const empty of [null, "", "   "]) {
-    const out = buildSpecGenerationInstruction(empty);
-    assert.match(out, /^Generate a complete requirements specification/);
-    assert.ok(out.includes("requirements/requirements.md"));
-    assert.ok(out.endsWith(" for this project."));
-  }
-});

@@ -27,7 +27,8 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DESCRIPTOR_PATH, descriptorFile, readIdea, writeDescriptor } from "../src/state/descriptor.js";
-import { startInstruction, START_INSTRUCTION, IDEA_STEER_PREFIX } from "../src/engine/compose.js";
+import { startInstruction } from "../src/engine/compose.js";
+import { startInstruction as startInstructionText, ideaSteerPrefix } from "@aep/contracts/prompts";
 import { classifyChatInput } from "../src/tui/chat-commands.js";
 import { readProjectFiles } from "../src/kit/project-fs.js";
 import { renderPart } from "../src/kit/render.js";
@@ -132,7 +133,7 @@ test("a pending question card renders as awaiting, not as an error", () => {
 });
 
 test("startInstruction appends the idea, or nothing when there is none", () => {
-  assert.equal(startInstruction("an expense tracker"), START_INSTRUCTION + IDEA_STEER_PREFIX + "an expense tracker");
-  assert.equal(startInstruction(null), START_INSTRUCTION);
-  assert.equal(startInstruction("   "), START_INSTRUCTION);
+  assert.equal(startInstruction("an expense tracker"), startInstructionText + ideaSteerPrefix + "an expense tracker");
+  assert.equal(startInstruction(null), startInstructionText);
+  assert.equal(startInstruction("   "), startInstructionText);
 });

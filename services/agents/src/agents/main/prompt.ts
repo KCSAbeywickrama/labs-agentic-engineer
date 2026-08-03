@@ -18,7 +18,14 @@
 
 import { EMPTY_SKILL_SOURCE, type SkillSource } from "./skill-source.js";
 
-/** System instructions for the file-mutating main agent. */
+/**
+ * System instructions for the file-mutating main agent. Layer charter (#373):
+ * this prompt carries ONLY the tool contract, the error-reaction table (write
+ * gates fire unconditionally, so reactions must always be in context), and the
+ * narration meta-rule — stage behavior lives in skills. TODO(#377 Phase D):
+ * the skillsApplied placement hint in the SCHEMA_VIOLATION row moves to the
+ * `architecture` skill when it lands.
+ */
 export const instructions = `You are a spec-bundle editing agent. You are given a set of existing files
 (inlined in the user message) and an instruction. Apply the instruction by calling the file tools.
 
@@ -49,7 +56,9 @@ Reacting to tool results (each result tells you the next move):
   re-emit the WHOLE corrected file with removeFile + addFile — layout comes from structure, never
   from coordinates.
 
-Keep prose outside tool calls to a single short sentence. When the instruction is fully applied, stop.`;
+Narration: keep prose outside tool calls to a single short sentence by default. A LOADED skill may define
+the narration for its own flow (what to say as you work, and how to close) — when one does, follow the skill.
+When the instruction is fully applied, stop.`;
 
 /**
  * The skill catalog appended to the END of the system prompt (ADR-0002): skill
@@ -117,8 +126,8 @@ ${blocks}
  * `task-planning` skill, not this prompt; the prompt only fixes the invariants.
  */
 export const taskPlanInstructions = `You are a task-planning agent. You are given a project's spec and design
-(inlined as CURRENT STATE) plus any existing Tasks, and an instruction to plan the work. You plan Tasks by calling
-the task tools. You do NOT edit files — the CURRENT STATE is read-only.
+(inlined under "Existing files:") plus any existing Tasks, and an instruction to plan the work. You plan Tasks by
+calling the task tools. You do NOT edit files — the existing files are read-only context.
 
 The unit of work is the DESIGN COMPONENT. Each component under specs/design/components/<name>/ that needs work gets a
 Task. Never invent a component: if a requirement is covered by no design component, do not plan a Task for it — say so
@@ -141,8 +150,8 @@ Reacting to tool results (each result tells you the next move):
 - DUPLICATE_TITLE — the title is already taken (listed); choose a distinct one.
 - DEPENDENCY_CYCLE — the dependsOn would form a cycle (the path is listed); break it.
 
-Load the task-planning skill before planning, and follow it. Keep prose outside tool calls to a single short sentence,
-except a final note flagging anything that needs a human (e.g. a requirement no component covers).`;
+Keep prose outside tool calls to a single short sentence, except a final note flagging anything that needs a human
+(e.g. a requirement no component covers).`;
 
 /** Task-plan instructions + the skill catalog (empty when no skills are supplied). */
 export function buildTaskPlanInstructions(skills?: SkillSource): string {

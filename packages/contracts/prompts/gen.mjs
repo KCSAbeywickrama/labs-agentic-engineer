@@ -74,4 +74,3 @@ writeFileSync(
   `${license("//")}\n\n// ${banner}\n\n// Package prompts holds the generated prompt strings shared with the TS\n// consumers via packages/contracts/prompts/strings.json — the single authored\n// copy. Edit the JSON and run \`make gen\`; never edit this file.\npackage prompts\n\n${goEntries}\n`,
 );
 
-console.log("prompts/gen.mjs: wrote strings.gen.ts and internal/prompts/strings_gen.go");

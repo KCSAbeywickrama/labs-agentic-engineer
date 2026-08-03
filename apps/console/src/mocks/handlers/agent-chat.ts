@@ -30,7 +30,6 @@
 
 import { http, HttpResponse } from "msw";
 import { ANSWER_PREFIX, ANSWERS_PREFIX } from "@aep/agent-stream";
-import { GRILLING_DIRECTIVE } from "@aep/contracts/prompts";
 import {
   activeTeammateTurn,
   multiuserHistory,
@@ -108,15 +107,15 @@ export const agentChatHandlers = [
         { type: "turn-failed", message: "Mock turn failure (instruction contained 'fail')." },
       ]);
     }
-    // Grilling scenarios (ADR-0012 / #270) — keyed on the shared directive or a
-    // typed trigger, never on a mere mention of "grill" in an edit instruction.
+    // Grilling scenarios (ADR-0012 / #270) — keyed on the /start flow command
+    // or a typed trigger, never on a mere mention of "grill" in an edit
+    // instruction (the retired GRILLING_DIRECTIVE died with #373).
     // An answer turn (instruction begins with the shared answer prefix) falls
     // through to the normal generation stream below.
     const isAnswer =
       instruction.startsWith(ANSWER_PREFIX) || instruction.startsWith(ANSWERS_PREFIX);
     if (!isAnswer) {
-      const grillSingle =
-        instruction.includes(GRILLING_DIRECTIVE) || /\bgrill me\b/i.test(instruction);
+      const grillSingle = instruction.trim().startsWith("/start") || /\bgrill me\b/i.test(instruction);
       const grillBatch = /\ball at once\b|\bask me everything\b/i.test(instruction);
       if (grillBatch) {
         // A full interview — long enough to exercise the form's scrolling.

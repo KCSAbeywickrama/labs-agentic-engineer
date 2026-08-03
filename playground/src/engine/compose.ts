@@ -20,49 +20,29 @@
  * Instruction composition — the playground mirrors what aep-api composes
  * server-side for every console turn (docs/design/playground.md §9):
  *
- *   instruction + steeringByUseCase["general"] + collabDepsSteer + targetSuffix
+ *   instruction + specPathsRule + targetSuffix
  *
  * and for the plan turn: planInstruction + renderPlanContext(contextFiles).
  *
- * The three live steer strings below are VERBATIM COPIES of the Go constants
- * (extraction was rejected as overkill — see §9). Each carries a provenance
- * comment; `test/steer-parity.test.ts` asserts every copy still appears
- * verbatim in its Go source file, so drift fails CI without any build
- * coupling. The canned phase prompts are shared for real via
- * `@aep/contracts/prompts`.
+ * Every prompt string here is imported from the GENERATED canonical module
+ * (`@aep/contracts/prompts` ← packages/contracts/prompts/strings.json — the
+ * same file `make gen` compiles into aep-api's internal/prompts), so the Go
+ * and TS compositions cannot drift: there is exactly one authored copy and no
+ * parity test to maintain.
  */
 
-export { buildSpecGenerationInstruction, buildDesignGenerationInstruction } from "@aep/contracts/prompts";
+import {
+  headlessNote,
+  ideaSteerPrefix,
+  planContextHeader,
+  planInstruction,
+  specPathsRule,
+  startInstruction as startInstructionText,
+  targetSuffixClose,
+  targetSuffixPrefix,
+} from "@aep/contracts/prompts";
 
-// MUST match steeringByUseCase[useCaseGeneral],
-// services/aep-api/internal/spec/steering.go
-export const GENERAL_STEER =
-  "\n\nApply the requested change to the spec bundle, or answer the question if no change is requested. " +
-  "Spec sources live under specs/ (requirements under specs/requirements/, design under specs/design/) — when creating a file that does not exist yet, always use its full path, never a bare filename.";
-
-// MUST match collabDepsSteer,
-// services/aep-api/internal/spec/steering.go
-export const COLLAB_DEPS_STEER =
-  "\n\nBefore editing any design.json, load the `high-level-architecture` skill. " +
-  "When your change adds or edits a component's `dependencies` — especially an `org-service` referencing another project — " +
-  "FIRST call `list_org_endpoints` and copy the provider component name VERBATIM; never invent a role-based name. " +
-  "When the requested change ALTERS THE ARCHITECTURE — a component added, removed, or renamed; an edge, exposure, or external/SaaS dependency changed — " +
-  "load the `cell-architecture-dsl` skill and update specs/design/design.cell FIRST with targeted editFile edits (removeFile + ONE addFile only when restructuring MOST of the diagram), " +
-  "then update design.md and every affected design.json to match; do not narrate the process.";
-
-// MUST match planInstruction,
-// services/aep-api/internal/delivery/task/plan.go
-export const PLAN_INSTRUCTION =
-  "Plan the implementation Tasks for this project. Load the task-planning skill and follow it: create one Task per design component with planTask, wire dependsOn by component name, and write each Task's body with updateTask in the same turn. The design is under specs/design/ and the requirements under specs/requirements/. Existing open Tasks (if any) are listed at the end of this message for reference — add Tasks ONLY for components they do not cover, and do not recreate or update the listed Tasks in this turn. Never invent a component the design does not define.";
-
-// MUST match StartInstruction,
-// services/aep-api/internal/spec/start_command.go — itself the expansion
-// slashSkillInstruction("/start") produces in @aep/contracts/prompts.
-export const START_INSTRUCTION = "Load the start skill and follow it.";
-
-// MUST match the ideaSteer prefix,
-// services/aep-api/internal/spec/descriptor.go
-export const IDEA_STEER_PREFIX = "\n\nThe user's idea for this project:\n\n";
+export { headlessNote };
 
 /**
  * Mirrors ideaSteer, services/aep-api/internal/spec/descriptor.go: the captured
@@ -71,36 +51,34 @@ export const IDEA_STEER_PREFIX = "\n\nThe user's idea for this project:\n\n";
  */
 export function ideaSteer(idea: string | null | undefined): string {
   const trimmed = (idea ?? "").trim();
-  return trimmed === "" ? "" : IDEA_STEER_PREFIX + trimmed;
+  return trimmed === "" ? "" : ideaSteerPrefix + trimmed;
 }
 
 /**
  * The expanded `/start` turn — mirrors what aep-api composes in
- * genai_service.go when it sees the command.
+ * expandFlowInstruction when it sees the command.
  *
- * `/start` is the ONE slash command the server owns rather than the client,
- * because only the server can enrich it with the descriptor's idea. The
+ * The server owns every `/<skill>` expansion in production (#373); the
  * playground composes its own instructions instead of calling aep-api, so it
- * has to perform the same expansion here or the two surfaces would diverge on
- * the kickoff.
+ * performs the same expansion here or the two surfaces would diverge on the
+ * kickoff.
  */
 export function startInstruction(idea: string | null | undefined): string {
-  return START_INSTRUCTION + ideaSteer(idea);
+  return startInstructionText + ideaSteer(idea);
 }
 
 /** Mirrors targetSuffix, services/aep-api/internal/spec/genai_service.go. */
 export function targetSuffix(target: string | undefined): string {
   if (!target || target.trim() === "") return "";
-  return "\n\n(target: " + target + ")";
+  return targetSuffixPrefix + target + targetSuffixClose;
 }
 
 /**
- * The full server-side composition every console spec turn gets (all console
- * turns are collab turns, so `collabDepsSteer` always rides — kept here for
- * byte parity even though the playground runs no MCP by default; §10).
+ * The full server-side composition every console spec turn gets (#373: the
+ * spec-paths rule is the ONE surviving steer; flow content lives in skills).
  */
 export function composeSpecInstruction(text: string, target?: string): string {
-  return text + GENERAL_STEER + COLLAB_DEPS_STEER + targetSuffix(target);
+  return text + specPathsRule + targetSuffix(target);
 }
 
 /**
@@ -113,7 +91,7 @@ export function renderPlanContext(files: Record<string, string>): string {
   const paths = Object.keys(files);
   if (paths.length === 0) return "";
   paths.sort();
-  let out = "\n\n## Existing open Tasks in this version (reference)\n";
+  let out = planContextHeader;
   for (const p of paths) {
     out += `\n--- ${p} ---\n${files[p]}\n`;
   }
@@ -122,5 +100,5 @@ export function renderPlanContext(files: Record<string, string>): string {
 
 /** The plan turn's full instruction (production channel, §5 phase 3). */
 export function composePlanInstruction(contextFiles: Record<string, string>): string {
-  return PLAN_INSTRUCTION + renderPlanContext(contextFiles);
+  return planInstruction + renderPlanContext(contextFiles);
 }

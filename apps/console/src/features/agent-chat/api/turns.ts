@@ -31,12 +31,6 @@ export async function startCollabTurn(
   projectName: string,
   conversationId: string,
   instruction: string,
-  opts?: {
-    /** Skill names the agents service inlines into the turn's prompt up front
-     *  (#335 latency) — set on the seeded grilling turn so the model skips the
-     *  loadSkill round-trip. */
-    eagerSkills?: string[];
-  },
 ): Promise<string> {
   const { data, error, response } = await client.POST(
     "/projects/{projectName}/agents/{conversationId}/messages",
@@ -45,7 +39,6 @@ export async function startCollabTurn(
       body: {
         instruction,
         collab: true,
-        ...(opts?.eagerSkills?.length ? { eagerSkills: opts.eagerSkills } : {}),
       },
     },
   );

@@ -27,12 +27,8 @@ import { randomUUID } from "node:crypto";
 import { stdout as output } from "node:process";
 import { renderPart, renderSummary } from "./kit/render.js";
 import type { StreamPart } from "@aep/agent-stream";
-import {
-  composePlanInstruction,
-  composeSpecInstruction,
-  buildSpecGenerationInstruction,
-  buildDesignGenerationInstruction,
-} from "./engine/compose.js";
+import { composePlanInstruction, composeSpecInstruction, headlessNote, startInstruction } from "./engine/compose.js";
+import { slashSkillInstruction } from "@aep/contracts/prompts";
 import { designGate, requirementsGate, tasksGate, type GateResult } from "./engine/gates.js";
 import { openSession, type OpenOptions, type PlaygroundSession } from "./engine/session.js";
 import { pendingQuestions, type PendingQuestions } from "./engine/questions.js";
@@ -118,14 +114,16 @@ export async function requirementsCommand(
   // and rewriting it would churn createdAt for nothing.
   if (idea && idea !== readIdea(projectDir)) writeDescriptor(projectDir, projectSlug(projectDir), idea);
 
-  return runPhaseTurn(projectDir, buildSpecGenerationInstruction(idea ?? null), opts);
+  // One-shot phase run — no human answers questions here, so the channel says
+  // so explicitly (#373: posture is channel state, not skill prose).
+  return runPhaseTurn(projectDir, startInstruction(idea) + headlessNote, opts);
 }
 
 /** Phase 2 — design, derived from the current requirements (§5 phase 2). */
 export async function designCommand(projectDir: string, opts: PhaseOptions): Promise<PhaseOutcome> {
   const gate = designGate(projectDir);
   if (!gate.ok) return gateFail(gate);
-  return runPhaseTurn(projectDir, buildDesignGenerationInstruction(), opts);
+  return runPhaseTurn(projectDir, (slashSkillInstruction("/design") as string) + headlessNote, opts);
 }
 
 /**

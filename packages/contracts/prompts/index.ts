@@ -17,70 +17,18 @@
  */
 
 /**
- * The canned phase-generation instructions — ONE source for every client that
- * starts a spec turn (the console's CTAs and the root-level playground; see
- * docs/design/playground.md §9). These are the CLIENT half of the instruction:
- * the server appends its live steering (`steeringByUseCase["general"]` +
- * `collabDepsSteer` + the target suffix — services/aep-api
- * internal/feature/genai) on every turn. Console turns never send a `useCase`,
- * so all of these run as `general` turns server-side.
+ * The `/<skill>` flow-command helpers shared by every TS surface, plus the
+ * GENERATED canonical prompt strings (./strings.gen.ts ← ./strings.json — the
+ * same file `make gen` compiles into aep-api's internal/prompts). In
+ * production the SERVER expands every flow command (#373); the helpers here
+ * exist for surfaces that compose turns without aep-api (the playground and
+ * the evals) and for client-side command parsing.
  *
  * Exported as `@aep/contracts/prompts` — plain source, no build step, so a
  * prompt edit applies on the next playground run.
  */
 
-/**
- * The grilling-interview directive (#270, console ADR-0012): interview-first
- * via the structured `ask_question`/`ask_questions` tools — options + a
- * recommended answer — with an explicit skip valve (the user can always say
- * "just generate"). Deliberately NOT baked into the generation builders:
- * an interactive client (the console's Generate-spec CTA) opts in with
- * `withGrillingInterview`, so headless/programmatic dispatchers of the same
- * builders (the playground CLI, evals) keep their one-shot, never-interrupted
- * turns.
- */
-export const GRILLING_DIRECTIVE =
-  "Before writing any files, interview me about this idea with the ask_question / ask_questions tools: " +
-  "structured questions with candidate options and the one you recommend. Make every question decidable " +
-  "on its own — explain in its detail why you ask and what it affects, and in each option's description " +
-  "what choosing it means and its trade-offs. " +
-  "Work through the idea's ambiguities until the requirements are unambiguous. " +
-  "Follow the grilling skill: if its guidance is already included in this message, apply it directly; " +
-  "otherwise, if it is available in your catalog, load it first. " +
-  "If I ask you to skip ahead or just generate, stop interviewing and proceed on " +
-  "stated assumptions. When the interview is done, proceed with the following. ";
-
-/** Wrap a generation instruction with the interview-first directive (#270). */
-export function withGrillingInterview(instruction: string): string {
-  return GRILLING_DIRECTIVE + instruction;
-}
-
-/**
- * The instruction the "Generate spec" CTA sends into the room turn (#150): an
- * explicit generate command (not the raw idea, which the agent might treat as
- * a chat opener) wrapping the stored create prompt. Falls back to a generic
- * instruction when no prompt was stored (older project / other browser /
- * cleared storage) — the CTA still works and the agent can ask for detail.
- * One-shot by itself; the console wraps it with `withGrillingInterview`.
- */
-export function buildSpecGenerationInstruction(prompt: string | null): string {
-  const base =
-    "Generate a complete requirements specification (requirements/requirements.md) for this project";
-  return prompt && prompt.trim()
-    ? `${base} based on the following idea:\n\n${prompt.trim()}`
-    : `${base}.`;
-}
-
-/**
- * The instruction the "Generate / Re-generate design" CTA sends into the room
- * turn (#159): the `/design` slash-skill expansion, so the button is exactly
- * the keyboard shortcut — one channel, whether the user clicks or types. The
- * `design` skill (skills/design/) owns the flow: derive the design from the
- * current requirements, then mint the validation criteria.
- */
-export function buildDesignGenerationInstruction(): string {
-  return slashSkillInstruction(DESIGN_COMMAND) as string;
-}
+export * from "./strings.gen";
 
 /**
  * The chat-composer slash-command expander: a `/<skill>` message is a keyboard

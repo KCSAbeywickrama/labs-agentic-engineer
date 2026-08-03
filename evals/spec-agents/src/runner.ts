@@ -29,10 +29,13 @@
 import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { openSession } from "@aep/playground/src/engine/session.js";
-import {
-  buildDesignGenerationInstruction,
-  startInstruction,
-} from "@aep/playground/src/engine/compose.js";
+import { startInstruction } from "@aep/playground/src/engine/compose.js";
+import { slashSkillInstruction } from "@aep/contracts/prompts";
+
+// The design flow's expanded instruction — in production the SERVER expands
+// the /design token (#373); the evals compose turns without aep-api, so they
+// perform the same expansion here.
+const designInstruction = slashSkillInstruction("/design") as string;
 import { PROJECTS_HOME } from "./config.js";
 import { prepareProject, readProjectFile } from "./project.js";
 import type { ChainScenario, DesignScenario, RequirementsScenario, Rubric, TasksScenario } from "./scenario.js";
@@ -205,7 +208,7 @@ export async function runDesignScenario(sc: DesignScenario, runName: string): Pr
   const session = await openSession(projectDir, {});
   let run: SectionRunResult;
   try {
-    run = await runConversationalSection(session, "design", buildDesignGenerationInstruction(), sc.brief);
+    run = await runConversationalSection(session, "design", designInstruction, sc.brief);
   } finally {
     await session.close();
   }
@@ -244,7 +247,7 @@ export async function runChainScenario(sc: ChainScenario, runName: string): Prom
     if (reqOutcome.verdict.band === "fail") {
       designSkipped = true;
     } else {
-      const design = await runConversationalSection(session, "design", buildDesignGenerationInstruction(), sc.brief);
+      const design = await runConversationalSection(session, "design", designInstruction, sc.brief);
       records.push(...design.records);
       const designOutcome = await scoreConversational(projectDir, design, sc.rubrics.design, requirementsAnswers);
       outcomes.push(designOutcome);

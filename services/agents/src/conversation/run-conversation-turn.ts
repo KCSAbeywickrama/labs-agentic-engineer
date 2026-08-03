@@ -80,8 +80,8 @@ export class TurnGuard {
 }
 
 const DIVERGENCE_NOTE =
-  "NOTE: files were changed outside your last proposals — the CURRENT STATE " +
-  "below is authoritative; ignore any earlier value you proposed.\n\n";
+  "NOTE: files were changed outside your last proposals — the \"Existing files:\" " +
+  "below are authoritative; ignore any earlier value you proposed.\n\n";
 
 function freshConversation(id: string): Conversation {
   const now = new Date(); // store re-stamps on save; this is the lazy-create placeholder
