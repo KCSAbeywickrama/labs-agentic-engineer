@@ -77,6 +77,11 @@ func (h *Handler) ListSkills(ctx context.Context, _ gen.ListSkillsRequestObject)
 			ContentSha:  sum.ContentSHA,
 			Editable:    sum.Editable,
 			Deletable:   sum.Deletable,
+			// The skills page renders its availability toggle from THIS list,
+			// not from the per-skill detail — omitting it made every row read
+			// as disabled, so a toggle click sent "enable" for a skill that
+			// was already enabled and nothing appeared to happen.
+			Enabled: sum.Enabled,
 		})
 	}
 	return gen.ListSkills200JSONResponse(out), nil
