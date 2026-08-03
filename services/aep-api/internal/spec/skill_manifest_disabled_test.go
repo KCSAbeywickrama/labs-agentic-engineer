@@ -212,3 +212,81 @@ func TestSetEnabled(t *testing.T) {
 		t.Fatalf("unknown name: got %v, want ErrSkillNotFound", err)
 	}
 }
+
+// A pre-manifest org repo (skills on disk, no skills-manifest.json) is the
+// migration case. Backfill used to stamp the EMBEDDED sha as the baseline of a
+// copy the org did not have — a third value matching neither side — so every
+// later platform release read as "both moved" and surfaced a conflict on a
+// skill nobody had touched. The manifest is created here for the first time, so
+// the platform is authoritative: adopt its content and stamp from the same
+// bytes. What must NOT change is the post-manifest case, pinned below.
+func TestReconcile_PreManifestCopyAdoptsShippedContent(t *testing.T) {
+	t.Parallel()
+	svc, host := newTestStoreWithLibrary(t, libWith("v2"))
+	ctx := context.Background()
+
+	// An org repo as it looked before manifests: a STALE copy, no manifest.
+	if _, err := svc.Reconcile(ctx, "org1"); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	host.writeAtHead("org1", skillRepoPath("demo"), demoMD("v1-stale"))
+	host.removeAtHead("org1", skillsManifestPath)
+
+	if _, err := svc.Reconcile(ctx, "org1"); err != nil {
+		t.Fatalf("backfill reconcile: %v", err)
+	}
+
+	// The copy is now the shipped content, and the baseline agrees with it.
+	got := host.readAtHead("org1", skillRepoPath("demo"))
+	if !strings.Contains(got, "v2") || strings.Contains(got, "v1-stale") {
+		t.Fatalf("pre-manifest copy must adopt the shipped content, got:\n%s", got)
+	}
+	emb, err := loadLibrary(svc.library)
+	if err != nil {
+		t.Fatalf("load library: %v", err)
+	}
+	base := parseSkillsManifest([]byte(host.readAtHead("org1", skillsManifestPath)))["demo"].BaseHash
+	if want := contentSHAOf(t, emb, "demo"); base != want {
+		t.Fatalf("baseline must be stamped from the adopted bytes: got %q want %q", base, want)
+	}
+
+	// The whole point: a LATER platform release is a clean update, not a
+	// conflict on a skill the org never edited.
+	svc.SwapLibrary(libWith("v3"))
+	ups, err := svc.UpdatesAvailable(ctx, "org1")
+	if err != nil {
+		t.Fatalf("UpdatesAvailable: %v", err)
+	}
+	if st := stateOf(ups, "demo"); st != "update" {
+		t.Fatalf("after backfill, a platform move must read as \"update\", got %q", st)
+	}
+}
+
+// The guard on the change above: adoption applies ONLY to the migration. Once a
+// baseline exists, a real org edit is still preserved and reported as an
+// override — reconcile must never clobber it.
+func TestReconcile_PostManifestEditStillSurvives(t *testing.T) {
+	t.Parallel()
+	svc, host := newTestStoreWithLibrary(t, libWith("v1"))
+	ctx := context.Background()
+	if _, err := svc.Reconcile(ctx, "org1"); err != nil { // seeds + stamps a baseline
+		t.Fatalf("seed: %v", err)
+	}
+
+	// The org edits AFTER the baseline exists — a genuine override.
+	host.writeAtHead("org1", skillRepoPath("demo"), demoMD("my own words"))
+
+	if _, err := svc.Reconcile(ctx, "org1"); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if got := host.readAtHead("org1", skillRepoPath("demo")); !strings.Contains(got, "my own words") {
+		t.Fatalf("a post-manifest org edit must survive reconcile, got:\n%s", got)
+	}
+	ups, err := svc.UpdatesAvailable(ctx, "org1")
+	if err != nil {
+		t.Fatalf("UpdatesAvailable: %v", err)
+	}
+	if st := stateOf(ups, "demo"); st != "overridden" {
+		t.Fatalf("a post-manifest org edit must read as \"overridden\", got %q", st)
+	}
+}

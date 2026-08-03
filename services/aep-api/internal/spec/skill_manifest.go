@@ -141,8 +141,7 @@ const (
 	actionSkip             reconcileAction = iota // nothing to do
 	actionSeed                                    // no repo copy: write files + stamp baseHash
 	actionRefresh                                 // org clean, platform moved: write files + advance baseHash
-	actionBackfill                                // pre-manifest copy matching embed: stamp baseHash only
-	actionBackfillOverride                        // pre-manifest copy diverged: stamp baseHash, treat as override, never write files
+	actionBackfill                                // pre-manifest copy: adopt the shipped content + stamp baseHash
 	actionOverride                                // org moved, platform not: leave alone
 	actionConflict                                // both moved: leave alone, surface for review
 )
@@ -155,13 +154,23 @@ func decideReconcile(embeddedSHA, repoSHA string, repoExists bool, entry *Manife
 		return actionSeed
 	}
 	if entry == nil {
-		// Migration backfill (issue #293): stamp the baseline; a copy that
-		// matches the shipped content is clean, anything else is treated as
-		// an override — never clobbered during migration.
-		if repoSHA == embeddedSHA {
-			return actionBackfill
-		}
-		return actionBackfillOverride
+		// Migration backfill: no entry means the manifest is being created for
+		// this skill RIGHT NOW, so there is no recorded agreement to reason
+		// from — the platform is authoritative at that moment. Adopt the
+		// shipped content and stamp the baseline from the same bytes.
+		//
+		// This supersedes #293's "a diverged pre-manifest copy is an override,
+		// never clobbered". That protected a pre-manifest org edit, but it
+		// could not tell one from a merely STALE copy, and it recorded the
+		// EMBEDDED sha as the baseline of a copy the org did not have — a
+		// third value matching neither side. Every later platform release then
+		// read as "both moved" and surfaced an unresolvable conflict on skills
+		// nobody had touched. A one-time adoption is visible in the org repo's
+		// git history; a fabricated baseline is visible nowhere.
+		//
+		// Only the MIGRATION is affected: once an entry exists, a genuine org
+		// edit is still actionOverride/actionConflict and is never clobbered.
+		return actionBackfill
 	}
 	if entry.Origin != ManifestOriginPlatform {
 		return actionSkip // imported-owned name: reconcile never manages it
