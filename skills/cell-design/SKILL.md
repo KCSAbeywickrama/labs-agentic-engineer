@@ -65,7 +65,12 @@ south west`.
 
 **Phase** — `phase <N>` (a positive integer): the ONE PRD phase this design
 version details. Every design.cell carries exactly one phase statement, near
-the top.
+the top. The cell still shows the WHOLE architecture — a component whose
+cited stories all belong to LATER phases appears as a walking-skeleton stub
+(`component slack-notifier service [stories: 11, 12]`): the platform
+scaffolds it and exempts it from detail until its phase arrives. Leaving a
+later-phase capability out of the cell entirely hides architecture the MVP
+slice was meant to surface.
 
 **Component** (inside the cell) — `component <id> [as <label>] [type]`
 - The optional `type` is the LAST bare token. **There is no `:` before it.**
