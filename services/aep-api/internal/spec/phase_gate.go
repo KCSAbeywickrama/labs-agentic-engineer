@@ -184,7 +184,7 @@ func parsePRDPhasing(prd string) map[int]map[int]bool {
 				set = map[int]bool{}
 				out[currentPhase] = set
 			}
-			for _, tok := range strings.FieldsFunc(m[1], func(r rune) bool { return r == ',' || r == ' ' || r == '\t' }) {
+			for _, tok := range strings.FieldsFunc(m[1], func(r rune) bool { return r == ',' || r == ' ' || r == '\t' || r == '\n' || r == '\r' }) {
 				if n, err := strconv.Atoi(tok); err == nil && n > 0 {
 					set[n] = true
 				}

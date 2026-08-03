@@ -23,6 +23,7 @@ package spec
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 )
 
@@ -32,11 +33,11 @@ import (
 // the layout gates AND the phase gate (#370/#371) demand.
 func validSpecSeed() map[string]string {
 	return map[string]string{
-		"specs/requirements/prd.md": "# PRD\n\n## User Stories\n\n1. As a user, I want the thing, so that value.\n\n## Phasing\n\n- **Phase 1 — slice**: everything. Stories: 1.\n",
-		"specs/design/design.cell":                "phase 1\ncomponent svc service [stories: 1]\n",
-		"specs/design/design.md":                  "# System\n",
-		"specs/design/components/svc/design.md":   "---\ntype: service\n---\n# svc\n",
-		"specs/design/components/svc/design.json": validComponentDesignJSON("svc"),
+		"specs/requirements/prd.md":                "# PRD\n\n## User Stories\n\n1. As a user, I want the thing, so that value.\n\n## Phasing\n\n- **Phase 1 — slice**: everything. Stories: 1.\n",
+		"specs/design/design.cell":                 "phase 1\ncomponent svc service [stories: 1]\n",
+		"specs/design/design.md":                   "# System\n",
+		"specs/design/components/svc/design.md":    "---\ntype: service\n---\n# svc\n",
+		"specs/design/components/svc/design.json":  validComponentDesignJSON("svc"),
 		"specs/design/components/svc/openapi.yaml": "openapi: 3.0.3\n",
 	}
 }
@@ -277,5 +278,33 @@ func TestLatestSpecTag(t *testing.T) {
 	r.tag("v1-3", "legacy design rev — must not win")
 	if got := r.svc.LatestSpecTag(ctx, r.org, r.proj); got != "v1" {
 		t.Errorf("LatestSpecTag = %q, want v1", got)
+	}
+}
+
+func TestBuildScopeAtTag(t *testing.T) {
+	t.Parallel()
+	seed := validSpecSeed()
+	seed["specs/requirements/prd.md"] = "# PRD\n\n## User Stories\n\n1. As a user, I want A, so that a.\n2. As a user, I want B, so that b.\n7. As a user, I want S, so that s.\n\n## Phasing\n\n- **Phase 1 — slice**: core. Stories: 1, 2.\n- **Phase 2 — later**: Stories: 7.\n"
+	seed["specs/design/design.cell"] = "phase 1\ncomponent svc service [stories: 1, 2]\ncomponent later-svc service [stories: 7]\n"
+	r := newRig(t, seed)
+	if _, err := r.svc.SaveRequirements(context.Background(), r.org, r.proj, SaveRequest{}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	scope, err := r.svc.BuildScopeAtTag(context.Background(), r.org, r.proj, "v1")
+	if err != nil {
+		t.Fatalf("BuildScopeAtTag: %v", err)
+	}
+	if scope.Phase != 1 || scope.PhaseTitle() != "Phase 1" || scope.Tag != "v1" {
+		t.Fatalf("scope identity = %+v", scope)
+	}
+	if fmt.Sprint(scope.InScope) != "[1 2]" {
+		t.Errorf("inScope = %v", scope.InScope)
+	}
+	if scope.StoryTitles[1] == "" || scope.StoryTitles[7] != "" {
+		t.Errorf("story titles = %v", scope.StoryTitles)
+	}
+	if fmt.Sprint(scope.ComponentStories["svc"]) != "[1 2]" || scope.ComponentStories["later-svc"] != nil {
+		t.Errorf("componentStories = %v", scope.ComponentStories)
 	}
 }

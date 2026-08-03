@@ -152,7 +152,7 @@ export const skillsSyncError: ApiError = {
 // python-service, postgres-schema), user-authored (acme-deploy-checklist,
 // acme-api-style), or imported (find-skills, commit-conventions) — are
 // editable:true, deletable:true; platform-kind skills (high-level-
-// architecture, task-breakdown, wireframes, validation-files) are always
+// architecture, security-design, wireframes, validation-files) are always
 // managed by reconcile and are editable:false, deletable:false. Both Delete
 // states render in mock mode. More than one page of skills (10/page, issue
 // #172) so the flat list's pagination is exercisable in mock mode.
@@ -235,15 +235,15 @@ Derive the component architecture from the approved requirements.`,
   },
   {
     orgId: "org-1",
-    name: "task-breakdown",
+    name: "security-design",
     kind: "platform",
     editable: false,
     deletable: false,
     enabled: true,
-    description: "Breaks a design into buildable tasks.",
+    description: "Designs roles, permissions, and Thunder auth.",
     skillMd: `---
-name: task-breakdown
-description: Breaks a design into buildable tasks.
+name: security-design
+description: Designs roles, permissions, and Thunder auth.
 ---
 
 Break the approved design into a sequence of buildable tasks.`,
@@ -442,7 +442,7 @@ description: Conventional-commit message rules for agent-authored PRs.
 // seeds are state "update" (clean copies the sync will refresh); the
 // overridden/conflict states get their own fixtures with the review UI.
 export const seedSkillUpdates: SkillUpdate[] = [
-  { name: "task-breakdown", state: "update" },
+  { name: "security-design", state: "update" },
   { name: "go", state: "update" },
   { name: "code-review", state: "update" },
 ];

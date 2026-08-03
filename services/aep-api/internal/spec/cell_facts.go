@@ -90,7 +90,7 @@ func parseCellComponent(statement string, line int) (CellComponent, error) {
 	var stories []int
 	if m := storiesSuffixPattern.FindStringSubmatch(statement); m != nil {
 		body = strings.TrimSpace(m[1])
-		items := strings.FieldsFunc(m[2], func(r rune) bool { return r == ',' || r == ' ' || r == '\t' })
+		items := strings.FieldsFunc(m[2], func(r rune) bool { return r == ',' || r == ' ' || r == '\t' || r == '\n' || r == '\r' })
 		if len(items) == 0 {
 			return CellComponent{}, fmt.Errorf("design.cell line %d: empty stories suffix", line)
 		}

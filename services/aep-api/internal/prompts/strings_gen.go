@@ -24,7 +24,7 @@ package prompts
 const StartInstruction = "Load the start skill and follow it."
 const IdeaSteerPrefix = "\n\nThe user's idea for this project:\n\n"
 const SpecPathsRule = "\n\nSpec sources live under specs/ (requirements under specs/requirements/, design under specs/design/) — when creating a file that does not exist yet, always use its full path, never a bare filename."
-const PlanInstruction = "Plan the implementation Tasks for this project. Load the task-planning skill and follow it. The design is under specs/design/ and the requirements under specs/requirements/. Existing open Tasks (if any) are listed at the end of this message for reference — add Tasks ONLY for work they do not cover, and do not recreate or update the listed Tasks in this turn."
+const PlanInstruction = "Plan the implementation Tasks for this project. Load the task-planning skill and follow it. The design is under specs/design/ and the requirements under specs/requirements/. When a \"Milestone scope\" section lists in-scope stories, cover every story marked NEEDS TASKS and leave COVERED stories' Tasks untouched. Existing open Tasks (if any) are listed at the end of this message for reference — add Tasks ONLY for work they do not cover, and do not recreate or update the listed Tasks in this turn."
 const PlanContextHeader = "\n\n## Existing open Tasks in this version (reference)\n"
 const TargetSuffixPrefix = "\n\n(target: "
 const TargetSuffixClose = ")"

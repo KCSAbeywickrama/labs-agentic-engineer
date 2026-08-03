@@ -201,10 +201,15 @@ type MilestoneRun struct {
 
 	// MilestoneNumber is the GitHub milestone this run works — the platform key.
 	MilestoneNumber int `gorm:"index;not null" json:"milestoneNumber"`
-	// MilestoneTitle is the milestone's title at creation, equal to the spec tag
-	// (`v<N>`). Display + `?tag=` resolution only; never a lookup key against
-	// GitHub.
+	// MilestoneTitle is the milestone's title at creation — the PHASE title
+	// ("Phase <N>", #370), or the spec tag on a scope-less legacy build. The
+	// runner's `gh issue list --milestone` needs the real GitHub title, so this
+	// stays the created title; never a lookup key against GitHub.
 	MilestoneTitle string `gorm:"index;not null" json:"milestoneTitle"`
+	// Tag is the spec version (`v<N>`) this run builds. `?tag=` resolution and
+	// display; empty only on pre-phase legacy rows (fall back to
+	// MilestoneTitle, which then equals the tag).
+	Tag string `gorm:"index" json:"tag,omitempty"`
 
 	Origin string `gorm:"not null;index" json:"origin"`                // spec-build | incident-adoption
 	State  string `gorm:"not null;index;default:waiting" json:"state"` // planning | waiting | running | succeeded | failed | cancelled

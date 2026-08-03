@@ -146,6 +146,10 @@ type fakeVersions struct {
 	spec []spec.RequirementsVersionInfo
 }
 
+func (fakeVersions) BuildScopeAtTag(context.Context, string, string, string) (spec.BuildScope, error) {
+	return spec.BuildScope{}, nil
+}
+
 func (f fakeVersions) ListRequirementsVersions(context.Context, string, string) ([]spec.RequirementsVersionInfo, error) {
 	return f.spec, nil
 }

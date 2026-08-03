@@ -18,6 +18,7 @@ package task
 
 import (
 	"context"
+	"fmt"
 	"errors"
 	"io"
 	"os"
@@ -34,7 +35,14 @@ import (
 	"github.com/wso2/aep/aep-api/internal/spec"
 )
 
-type planVersions struct{ specTag string }
+func (p planVersions) BuildScopeAtTag(context.Context, string, string, string) (spec.BuildScope, error) {
+	return p.scope, nil
+}
+
+type planVersions struct {
+	specTag string
+	scope   spec.BuildScope
+}
 
 func (p planVersions) ListRequirementsVersions(context.Context, string, string) ([]spec.RequirementsVersionInfo, error) {
 	return []spec.RequirementsVersionInfo{{Tag: p.specTag}}, nil
@@ -78,6 +86,11 @@ type planRig struct {
 	svc          *PlanService
 }
 
+// rigScope is the phase scope newPlanRig's version reader serves — zero by
+// default (legacy scope-less planning); a test that needs a phase sets it and
+// restores it.
+var rigScope spec.BuildScope
+
 func newPlanRig(t *testing.T, seed map[string]string, specTag string) *planRig {
 	t.Helper()
 	fx := workspacetest.New(t, seed)
@@ -93,7 +106,7 @@ func newPlanRig(t *testing.T, seed map[string]string, specTag string) *planRig {
 	issues := newFakeIssues()
 	svc := NewPlanService(
 		fakeRepos{repo: repoRow},
-		planVersions{specTag: specTag},
+		planVersions{specTag: specTag, scope: rigScope},
 		sourcecontrol.NewGitOpsService(nilResolver{}, fx.Engine),
 		func(context.Context, string) (string, error) { return "sk-test", nil },
 		turn,
@@ -265,5 +278,42 @@ func TestPlanIntoMilestone_WriteFailureIsAnError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "milestone 7") {
 		t.Errorf("error = %v, want it to name the milestone", err)
+	}
+}
+
+// TestPlanIntoMilestone_DeltaScopeAndStamp pins the phase-native plan (#369/
+// #370): the instruction carries the platform-computed milestone scope with
+// per-story coverage, and a created Task is stamped with its component's
+// in-scope citations — zero LLM discretion on either.
+func TestPlanIntoMilestone_DeltaScopeAndStamp(t *testing.T) {
+	rigScope = spec.BuildScope{
+		Tag: "v2", Phase: 1, InScope: []int{1, 2},
+		StoryTitles:      map[int]string{1: "As a user, I want A.", 2: "As a user, I want B."},
+		ComponentStories: map[string][]int{"svc": {1, 2}},
+	}
+	defer func() { rigScope = spec.BuildScope{} }()
+
+	r := newPlanRig(t, map[string]string{"specs/design/design.md": "# d\n"}, "v2")
+	r.turn.script = "data: {\"type\":\"tool-result\",\"output\":" +
+		`{"ok":true,"op":"plan","component":"svc","title":"Build svc","dependsOn":[],"origin":"spec-plan","rationale":"core"}` +
+		"}\n\ndata: [DONE]\n\n"
+	if err := r.svc.PlanIntoMilestone(context.Background(), "org1", "proj1", 7); err != nil {
+		t.Fatalf("PlanIntoMilestone: %v", err)
+	}
+
+	instr := r.turn.req.Instruction
+	if !strings.Contains(instr, "## Milestone scope — Phase 1 (spec v2)") {
+		t.Errorf("instruction missing the scope section: %q", instr)
+	}
+	if !strings.Contains(instr, "Story 1: As a user, I want A. — NEEDS TASKS") {
+		t.Errorf("instruction missing the uncovered story line: %q", instr)
+	}
+
+	created := r.issues.created
+	if len(created) != 1 {
+		t.Fatalf("created %d issues, want 1", len(created))
+	}
+	if got := delivery.ParseServesStories(created[0].Body); fmt.Sprint(got) != "[1 2]" {
+		t.Errorf("stamped stories = %v, want [1 2] (body: %q)", got, created[0].Body)
 	}
 }

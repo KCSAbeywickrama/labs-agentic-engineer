@@ -62,6 +62,10 @@ type fakeTagger struct {
 	called int
 }
 
+func (f *fakeTagger) BuildScopeAtTag(ctx context.Context, orgID, projectID, tag string) (spec.BuildScope, error) {
+	return spec.BuildScope{Tag: tag}, nil
+}
+
 func (f *fakeTagger) TagSpec(context.Context, string, string) (*spec.SpecSaveResult, error) {
 	f.called++
 	return f.res, f.err

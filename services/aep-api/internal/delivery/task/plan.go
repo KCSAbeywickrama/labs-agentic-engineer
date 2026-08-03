@@ -34,6 +34,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/delivery"
 	"github.com/wso2/aep/aep-api/internal/platform/taskplan"
 	"github.com/wso2/aep/aep-api/internal/prompts"
+	"github.com/wso2/aep/aep-api/internal/spec"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 )
 
@@ -193,6 +194,25 @@ func (s *PlanService) startPlanLocked(ctx context.Context, orgID, projectID stri
 	// exists for.
 	contextFiles := map[string]string{}
 	preload, slugs := s.assembleMilestoneTasks(ctx, orgID, projectID, milestoneNumber, contextFiles)
+	// The tag's PHASE scope (#370): the in-scope story set drives DELTA
+	// planning — stories already covered by existing Tasks (their platform
+	// stamps, #369) need no new work. Best-effort: a scope-less snapshot
+	// degrades to the legacy plan-everything behavior.
+	scope := spec.BuildScope{}
+	if tag := s.versions.LatestSpecTag(ctx, orgID, projectID); tag != "" {
+		if sc, serr := s.versions.BuildScopeAtTag(ctx, orgID, projectID, tag); serr == nil {
+			scope = sc
+		} else {
+			slog.WarnContext(ctx, "plan: phase scope read failed — planning without milestone scope",
+				"project", projectID, "tag", tag, "error", serr)
+		}
+	}
+	covered := map[int]bool{}
+	for _, p := range preload {
+		for _, n := range delivery.ParseServesStories(p.Body) {
+			covered[n] = true
+		}
+	}
 	// Freeze the set of issue numbers the agent actually received as context: an
 	// updateTask{issueNumber} ref is fenced to it (a hallucinated / out-of-context
 	// number must never be written — plan_tap.resolveRef).
@@ -237,7 +257,7 @@ func (s *PlanService) startPlanLocked(ctx context.Context, orgID, projectID stri
 	// Detached context so the turn drains even if the client disconnects (§6).
 	detached := context.WithoutCancel(ctx)
 	body, err := s.client.Turn(detached, conversationID, orgID, apiKey, agentsvc.TurnRequest{
-		Instruction: planInstruction + renderPlanContext(contextFiles),
+		Instruction: planInstruction + renderScopeContext(scope, covered) + renderPlanContext(contextFiles),
 		Workspace: agentsvc.WorkspaceRef{
 			ConversationID: conversationID,
 			TurnID:         uuid.NewString(),
@@ -253,6 +273,7 @@ func (s *PlanService) startPlanLocked(ctx context.Context, orgID, projectID stri
 
 	tap := newPlanTap(detached, orgID, projectID, s.issues)
 	tap.milestone = milestoneNumber
+	tap.componentStories = scope.ComponentStories
 	tap.appPaths = s.componentPaths(ctx, orgID, projectID)
 	tap.state = preload
 	tap.existingSlugs = slugs
@@ -320,6 +341,32 @@ func (s *PlanService) assembleMilestoneTasks(ctx context.Context, orgID, project
 		preload[issue.Number] = plannedTask{Body: issue.Body}
 	}
 	return preload, slugs
+}
+
+// renderScopeContext renders the milestone's phase scope (#370) as the plan
+// turn's delta directive: which in-scope stories the existing Tasks already
+// cover, and which this plan must. Platform-computed — the model never
+// decides coverage. "" when the snapshot declares no phase.
+func renderScopeContext(scope spec.BuildScope, covered map[int]bool) string {
+	if scope.Phase == 0 || len(scope.InScope) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "\n\n## Milestone scope — Phase %d (spec %s)\n\n", scope.Phase, scope.Tag)
+	sb.WriteString("Plan Tasks so every story marked NEEDS TASKS below is covered. COVERED stories already have Tasks — leave them alone.\n\n")
+	for _, n := range scope.InScope {
+		status := "NEEDS TASKS"
+		if covered[n] {
+			status = "COVERED"
+		}
+		title := scope.StoryTitles[n]
+		if title == "" {
+			fmt.Fprintf(&sb, "- Story %d — %s\n", n, status)
+		} else {
+			fmt.Fprintf(&sb, "- Story %d: %s — %s\n", n, title, status)
+		}
+	}
+	return sb.String()
 }
 
 // renderPlanContext renders the milestone's existing-task context files as
