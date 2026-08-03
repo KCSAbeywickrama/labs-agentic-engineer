@@ -4,6 +4,7 @@ description: How to build a React SPA on the platform — project layout, the bu
 metadata:
   aep:
     kind: org
+    audience: [coding]
 ---
 
 # React Webapp

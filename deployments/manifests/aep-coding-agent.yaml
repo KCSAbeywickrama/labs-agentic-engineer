@@ -94,8 +94,6 @@ spec:
             value: ${parameters.task.correlationId}
           - name: repo-url
             value: ${parameters.repository.url}
-          - name: skills-repo-url
-            value: ${parameters.repository.skillsUrl}
           - name: identity-name
             value: ${parameters.repository.identity.name}
           - name: identity-email
@@ -153,8 +151,6 @@ spec:
                 value: '{{workflow.parameters.component-name}}'
               - name: AEP_REPO_URL
                 value: '{{workflow.parameters.repo-url}}'
-              - name: AEP_SKILLS_REPO_URL
-                value: '{{workflow.parameters.skills-repo-url}}'
               - name: AEP_IDENTITY_NAME
                 value: '{{workflow.parameters.identity-name}}'
               - name: AEP_IDENTITY_EMAIL

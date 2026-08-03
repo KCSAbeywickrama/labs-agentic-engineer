@@ -10,6 +10,7 @@
   // per-workspace `entry`/`project` override, it silently breaks detection.
   "ignoreWorkspaces": [
     "apps/*",
+    "evals/*",
     "packages/*",
     "packages/ui/*",
     "runners/*",

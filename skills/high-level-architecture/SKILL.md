@@ -4,6 +4,7 @@ description: Use when turning requirements into a design — creating or restruc
 metadata:
   aep:
     kind: platform
+    audience: [design]
 ---
 
 
@@ -87,7 +88,7 @@ you record, not a preference you re-derive per component: write it as the
 component's `language` and pin the matching stack skill in `skillsApplied`.
 
 After emitting or changing a component's design, record the skills that
-component's build actually needs as a `skillsApplied` array **inside that
+component's build actually needs as a `skillsPinned` array **inside that
 component's `specs/design/components/<name>/design.json`** — use the exact
 catalog names, e.g. a Ballerina API service →
 `["openapi-conventions", "ballerina"]` (a Go one → `["openapi-conventions",
@@ -96,7 +97,7 @@ catalog names, e.g. a Ballerina API service →
 `"thunder-authentication"` to **both** sides of sign-in — the SPA *and* every
 protected backend it calls, since that skill owns how each resolves the caller's
 role. It is a JSON key on the component's design object, so include it when you
-write that `design.json` (addFile/editFile) — do NOT put `skillsApplied` in
+write that `design.json` (addFile/editFile) — do NOT put `skillsPinned` in
 `design.md` frontmatter. Each component carries only the skills its own build
 needs.
 

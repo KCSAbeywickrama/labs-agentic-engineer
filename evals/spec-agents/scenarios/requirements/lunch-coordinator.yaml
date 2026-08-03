@@ -1,0 +1,37 @@
+# One eval case: brief = the sim user's world (never sees the rubric);
+# rubric = weighted mustCover + declared mustNot (#354/#355).
+
+brief:
+  name: lunch-coordinator
+  idea: >-
+    A web app for coordinating team lunch orders: someone opens a daily order,
+    teammates add items from a chosen restaurant before a cutoff, and the
+    opener gets one consolidated order to place.
+  persona: >-
+    Engineering manager at a 40-person startup; pragmatic, wants a small v1
+    shipped fast; non-technical answers, plain language.
+  facts:
+    - Users sign in with their existing Google workspace accounts; no separate registration.
+    - One order round per day is enough; the opener picks the restaurant and the cutoff time.
+    - Teammates only add/edit/remove their own items before the cutoff; after cutoff the round locks.
+    - The opener needs a consolidated view grouped by menu item, plus per-person cost totals.
+    - Payment stays offline (people pay the opener back directly); the app only tracks who owes what.
+    - "Notifications: a message to the team's existing Slack channel when a round opens and at cutoff is enough; no email."
+    - Mobile browser support matters; a native app does not.
+  fallback: >-
+    Prefer the smallest reasonable v1; defer anything speculative; pick the
+    recommended option when genuinely indifferent.
+
+rubric:
+  mustCover:
+    - item: Google-workspace sign-in captured; no separate registration flow invented
+      weight: 2
+    - item: "Daily order round lifecycle: open (restaurant + cutoff) -> teammates add own items -> lock at cutoff"
+      weight: 2
+    - Consolidated order view grouped by item with per-person cost totals
+    - Payment explicitly out of scope beyond tracking who owes what
+    - Slack notifications at round open and cutoff; no email flows invented
+    - Mobile-browser support noted
+  mustNot:
+    - Native mobile app scope
+    - In-app payment processing or money movement

@@ -66,7 +66,7 @@ const BASE_PLUGIN_NAME = "aep";
  * the SDK loads a plugin as one directory and a description-triggered load is
  * how a validation run reaches them.
  */
-const BASE_PLUGIN_SKILLS = ["aep", "aep-validation", "playwright-cli"] as const;
+export const BASE_PLUGIN_SKILLS = ["aep", "aep-validation", "playwright-cli"] as const;
 
 /** The workflow skill, and the one file an overlay may edit. */
 const WORKFLOW_SKILL = "aep";

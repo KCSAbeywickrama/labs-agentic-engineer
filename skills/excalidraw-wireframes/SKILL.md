@@ -4,6 +4,7 @@ description: Use when creating or updating UI wireframes for a webapp component 
 metadata:
   aep:
     kind: platform
+    audience: [design, coding]
 ---
 
 # Wireframes (Excalidraw DSL)

@@ -83,10 +83,35 @@ runner pod at `/app/skills` for live skill edits (see
   no next session, and a reachable-but-useless tool is somewhere a run will spend
   a turn. Corollary: a typo in `BASE_ALLOWED_TOOLS` cannot fail loudly — it named
   `Task` for a whole SDK generation after the tool became `Agent`.
+- **`settingSources` is `["project"]`, and that is load-bearing.** The BFF
+  mirrors the org's coding-relevant skills into the project clone at
+  `.claude/skills/`, and the SDK only discovers them if the project source is
+  admitted — its `skills:` option is an ALLOWLIST over discovered skills, not a
+  loader, so a name matching nothing is dropped in silence. That shipped once:
+  the run reported success while the agent compensated by grepping `SKILL.md`
+  out of the tree. `AGENT_SETTING_SOURCES` is exported and
+  pinned by a test so a revert to `[]` fails there instead of in a build, and
+  `runClaudeQuery` warns when the `init` message's resolved list is missing
+  something we asked for (`skills_preload_check.ts`). 'user' and 'local' stay
+  out — a developer's `~/.claude` has no place in a container run. The MCP
+  isolation that `[]` used to give for free is now explicit: `strictMcpConfig`
+  keeps a project's own `.mcp.json` from declaring servers into a run.
+- **`skills:` is an allowlist, and it preloads nothing.** Both halves are
+  measured, not assumed. A mirrored skill absent from the array is *rejected* by
+  the Skill tool, so the run lists the WHOLE mirror
+  (`listMirroredSkills`) — the BFF already decided what this build may use, and
+  omitting the unpinned copies would leave them as inert files on disk. And
+  membership only buys a name and a description in the catalog: the body arrives
+  when the model invokes the skill. So a pin, which asserts the guidance IS
+  needed for this work, appends that body to the system prompt
+  (`readSkillBodies`) instead of trusting the model to go looking. The comment
+  claiming `skills:` "injects full bodies at startup" was wrong for as long as it
+  existed, through the earlier `aep-task-skills` plugin too — an agent given a
+  listed skill cannot state a codeword from its body until it calls the tool.
 - Self-contained: all agent and SDK-specific wiring lives here.
 - **Skills scope is stated by the caller, never read off `AEP_COMPONENT_NAME`.**
   A milestone Job carries a sentinel there (`aep-milestone`), so an
-  implementation run resolves the union of `skillsApplied` across every
+  implementation run resolves the union of `skillsPinned` across every
   `specs/design/components/*/design.json`; a validation run applies no design
   skills at all. The local harness (`local.ts`) carries its own sentinel
   (`aep-local-milestone`) for the same reason: a playground coding run works

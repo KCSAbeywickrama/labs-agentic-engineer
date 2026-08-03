@@ -218,7 +218,11 @@ func (s *SkillService) reconcileEmbedded(ctx context.Context, orgID string, repo
 		}
 	}
 	setBase := func(name, sha string) {
-		want := ManifestEntry{Origin: ManifestOriginPlatform, BaseHash: sha}
+		// Disabled is org intent (ADR-0014), not baseline state: carry the
+		// prior entry's flag through so a platform refresh — which advances
+		// BaseHash and may rewrite content — never silently re-enables a
+		// skill the org switched off.
+		want := ManifestEntry{Origin: ManifestOriginPlatform, BaseHash: sha, Disabled: manifest[name].Disabled}
 		if manifest[name] != want {
 			manifest[name] = want
 			manifestDirty = true
@@ -271,12 +275,19 @@ func (s *SkillService) reconcileEmbedded(ctx context.Context, orgID string, repo
 			deletes = append(deletes, skillRepoDir(b.Name))
 			stageWrite(b.Name, b.SkillMD, b.References)
 			setBase(b.Name, b.ContentSHA)
-		case actionBackfill, actionBackfillOverride:
-			setBase(b.Name, b.ContentSHA) // stamp only — no file writes
+		case actionBackfill:
+			// Pre-manifest copy: adopt the shipped content and stamp the
+			// baseline from the same bytes, so copy and baseline agree from
+			// here on. Writing is what makes the migration honest — stamping
+			// alone left a baseline describing content the org did not have.
+			written++
+			deletes = append(deletes, skillRepoDir(b.Name))
+			stageWrite(b.Name, b.SkillMD, b.References)
+			setBase(b.Name, b.ContentSHA)
 		case actionOverride, actionConflict:
 			// Org-owned divergence: never write files, never move the base.
-			// (These actions only arise with an existing entry — the nil-entry
-			// divergent case is actionBackfillOverride above.)
+			// These arise only with an existing entry — i.e. a divergence that
+			// appeared AFTER a baseline was agreed, which is a real org edit.
 		case actionSkip:
 		}
 	}
@@ -420,7 +431,7 @@ func (s *SkillService) UpdatesAvailable(ctx context.Context, orgID string) ([]Sk
 		switch decideReconcile(b.ContentSHA, cur.ContentSHA, ok, entry) {
 		case actionSeed, actionRefresh:
 			out = append(out, SkillUpdate{Name: b.Name, State: "update"})
-		case actionOverride, actionBackfillOverride:
+		case actionOverride:
 			out = append(out, SkillUpdate{Name: b.Name, State: "overridden"})
 		case actionConflict:
 			out = append(out, SkillUpdate{Name: b.Name, State: "conflict"})
@@ -539,6 +550,7 @@ func loadLibrary(fsys fs.FS) ([]Skill, error) {
 			SkillMD:     string(raw),
 			References:  refs,
 			ContentSHA:  contentSHA(string(raw), refs),
+			Audience:    frontmatterAudience(fm),
 		})
 	}
 	return out, nil

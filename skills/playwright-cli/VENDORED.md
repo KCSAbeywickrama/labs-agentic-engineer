@@ -13,12 +13,12 @@ cp -R package/skills/playwright-cli/* skills/playwright-cli/
 cp package/LICENSE skills/playwright-cli/LICENSE
 ```
 
-**One local edit survives a refresh**: a `metadata.aep.kind: platform`
-block in the `SKILL.md` frontmatter. It is what tells this repo's skill
-library that the skill is platform-owned and read-only — without it the
-library's default kind (`org`) would seed it into every organization's
-skills repo as an editable, deletable org skill. Re-add it after
-copying the upstream file over.
+**One local edit survives a refresh**: a `metadata.aep` block in the
+`SKILL.md` frontmatter. `kind: platform` tells this repo's skill library
+the skill is platform-owned and read-only — without it the library's
+default kind (`org`) would seed it into every organization's skills repo
+as an editable, deletable org skill. Re-add it after copying the upstream
+file over.
 
 AEP-specific authoring/healing discipline lives in the `aep-validation`
 skill's `references/authoring.md` and `references/healing.md`, which
@@ -26,13 +26,14 @@ defer all CLI mechanics to this one.
 
 ## Why vendored (interim)
 
-The platform has no third-party skill/plugin install channel for the
-runner today: the SDK session only loads the programmatic plugins (the
-assembled base plugin + the per-task skills plugin), `settingSources: []`
-deliberately ignores `.claude/skills/` (where `playwright-cli install
---skills` writes), and the dev flow bind-mounts the repo-root `skills/`
-library over the image so a build-time copy elsewhere would be masked.
-Building that channel for a single skill isn't warranted. If more
-third-party skills accumulate, the natural home is an import source on
-the org skills repo with task-kind-based attachment — then this vendored
-copy can be dropped.
+The platform has no third-party skill install channel for the runner
+today. A session reads exactly two places: the base plugin the runner
+assembles from this library, and the project clone's `.claude/skills/`,
+which is the BFF's mirror of the org library and not somewhere a
+third-party installer may write — `playwright-cli install --skills`
+targets `$HOME`, outside every source the runner admits. The dev flow
+also bind-mounts the repo-root `skills/` library over the image, so a
+build-time copy elsewhere would be masked. Building that channel for a
+single skill isn't warranted. If more third-party skills accumulate, the
+natural home is an import source on the org skills repo with
+task-kind-based attachment — then this vendored copy can be dropped.

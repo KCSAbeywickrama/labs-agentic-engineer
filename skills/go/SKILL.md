@@ -4,6 +4,7 @@ description: How to build a Go service on the platform — project layout, the b
 metadata:
   aep:
     kind: org
+    audience: [coding]
 ---
 
 # Go

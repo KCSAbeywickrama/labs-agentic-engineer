@@ -56,6 +56,7 @@
 
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { runClaudeQuery } from "./lib/runner.js";
@@ -65,7 +66,9 @@ import type { WorkspaceLayout } from "./lib/workspace.js";
 import { emit, primeScrubber } from "./lib/progress/emitter.js";
 import { installConsoleScrubber } from "./lib/progress/console_scrub.js";
 import { resolveTaskSkills } from "./lib/skills_resolver.js";
-import { materializeSkills } from "./lib/skills_materializer.js";
+import { listMirroredSkills, readSkillBodies, resolvePinnedSkills } from "./lib/skills_presence.js";
+import { mirrorLocalSkillLibrary } from "./lib/local_skill_mirror.js";
+import { BASE_PLUGIN_SKILLS } from "./lib/base_plugin.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // The SAME authored library production reads (repo-root `skills/`, baked in at
@@ -132,13 +135,6 @@ function localDirWorkspace(run: LocalRun): WorkspaceLayout {
   };
 }
 
-// The injected "clone": copy the working-tree skill library into the scratch
-// dir under the flat org-skills layout (skills/<name>/…) the resolver reads.
-async function copyLocalSkillLibrary(skillsDir: string, destDir: string): Promise<void> {
-  await fs.promises.rm(destDir, { recursive: true, force: true });
-  await fs.promises.mkdir(path.join(destDir, "skills"), { recursive: true });
-  await fs.promises.cp(skillsDir, path.join(destDir, "skills"), { recursive: true });
-}
 
 async function main(): Promise<number> {
   installConsoleScrubber();
@@ -164,34 +160,48 @@ async function main(): Promise<number> {
   }
   emit({ kind: "phase", phase: "workspace_ready" });
 
-  // Per-task skills: same readSkillsApplied → resolveTaskSkills →
-  // materializeSkills pipeline as production, with the git clone swapped for a
-  // working-tree copy. Failure degrades to the base plugin, loudly.
-  let skillsPluginDir: string | undefined;
+  // Per-task skills: the same pin read as production, resolved against
+  // `.claude/skills/` in the project dir — the SAME location the SDK discovers
+  // natively via `cwd: layout.workspace` (== run.projectDir here). No clone, no
+  // second plugin. The playground has no BFF, so it writes that mirror itself,
+  // applying the production copy rule so a local run sees the same filtered set
+  // a real project would. Pins are read BEFORE the mirror because they are an
+  // INPUT to that rule.
+  //
+  // `withheld` is the runner's own base-plugin selection. Those three skills
+  // reach the session from the assembled plugin, so mirroring them too would put
+  // a second copy of the workflow in the same session — and in local mode the
+  // mirrored copy is the un-overlaid GitHub procedure, which is the exact
+  // failure ADR-0004 decision 1 exists to prevent.
+  //
+  // Failure degrades to the base plugin, loudly.
+  let availableSkillNames: string[] = [];
+  let pinnedBodies = "";
   try {
-    const libraryDir = run.libraryDir;
-    const resolutions = await resolveTaskSkills({
+    const pinned = await resolveTaskSkills({
       workspace: run.projectDir,
       // A run works the whole project, same as prod's milestone loop — the
-      // union of every component's skillsApplied, never one componentName.
+      // union of every component's skillsPinned, never one componentName.
       scope: { kind: "project" },
-      skillsRepoURL: "local:working-tree",
-      // No git, no platform: the clone below is a working-tree copy.
-      cloneAuth: { helperPath: "", bearerFile: "" },
-      scratchDir: path.join(run.runDir, "skills-clone"),
       log: (l) => console.log(l),
-      clone: (_url, _auth, dest) => copyLocalSkillLibrary(libraryDir, dest),
     });
-    // Materialize under the run dir — never inside the user's project tree.
-    skillsPluginDir = (await materializeSkills(run.runDir, resolutions)) ?? undefined;
-    if (skillsPluginDir) {
-      console.log(`[local] materialised ${resolutions.length} skill(s) — all loaded on demand, none preloaded`);
-    } else {
-      console.log("[local] no per-task skills to materialise");
+    await mirrorLocalSkillLibrary(run.libraryDir, run.projectDir, new Set(pinned), (l) => console.log(l), {
+      withheld: new Set(BASE_PLUGIN_SKILLS),
+    });
+    const { preload, dangling } = await resolvePinnedSkills(run.projectDir, pinned, (l) => console.log(l));
+    if (dangling.length > 0) {
+      console.warn(`[local] ⚠️  pinned skill(s) missing from .claude/skills/ — proceeding without them: ${dangling.join(", ")}`);
     }
+    // The whole mirror is allowed (the SDK rejects anything unlisted); the
+    // pinned subset additionally rides in on the system prompt.
+    availableSkillNames = await listMirroredSkills(run.projectDir);
+    pinnedBodies = await readSkillBodies(run.projectDir, preload);
+    console.log(
+      `[local] ${availableSkillNames.length} skill(s) available, ${preload.length} pinned into context`,
+    );
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.warn(`[local] ⚠️  SKILLS UNAVAILABLE — proceeding without the per-task skill plugin: ${msg}`);
+    console.warn(`[local] ⚠️  SKILLS UNAVAILABLE — proceeding without per-task skills: ${msg}`);
   }
 
   const req: DispatchRequest = {
@@ -216,20 +226,20 @@ async function main(): Promise<number> {
   };
 
   const log = openTaskLog(run.runDir);
-  const { completion } = runClaudeQuery(
-    req,
-    layout,
-    log,
-    skillsPluginDir,
-    {
-      libraryPath: run.libraryDir,
-      mode: "local",
-      // Under the run dir, not the OS temp dir: the assembled skill is the exact
-      // text the agent was steered by, and "what did it actually read?" is a
-      // question a developer tuning the skill asks constantly.
-      composeDir: path.join(run.runDir, "base-plugin"),
-    },
-  );
+  // Assemble the base plugin CONTAINER-LOCAL, never under run.runDir. In docker
+  // mode that dir is a bind mount from the host, and the assembler copies the
+  // plugin tree with fs.cpSync — which fails EACCES on the mount even at mode
+  // 0777 and even though mkdir, write and shell `cp -r` all succeed there. It is
+  // the file-sharing backend, not the permissions: the same cpSync into /tmp
+  // works. Composing into the mount killed every docker-mode run before the
+  // agent started. So "what text did the agent actually read?" is answered by
+  // `make runner-plugin` off the critical path, not by the run dir.
+  const composeDir = path.join(os.tmpdir(), "aep-base-plugin", req.taskId);
+  const { completion } = runClaudeQuery(req, layout, log, { availableSkillNames, pinnedBodies }, {
+    libraryPath: run.libraryDir,
+    mode: "local",
+    composeDir,
+  });
   const result = await completion;
   return result.exitCode;
 }

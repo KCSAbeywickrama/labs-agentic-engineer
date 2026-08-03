@@ -1,0 +1,96 @@
+{
+  "id": "project",
+  "name": "lunch-coordinator",
+  "modelVersion": "0.2.0",
+  "components": [
+    {
+      "id": "lunch-api",
+      "label": "lunch-api",
+      "version": "0.1.0",
+      "type": "service",
+      "buildPack": "Go",
+      "services": {
+        "lunch-api:api": {
+          "id": "lunch-api:api",
+          "label": "API",
+          "type": "HTTP",
+          "dependencyIds": [],
+          "deploymentMetadata": {
+            "gateways": {
+              "internet": {
+                "isExposed": false
+              },
+              "intranet": {
+                "isExposed": true
+              }
+            }
+          }
+        }
+      },
+      "connections": [
+        {
+          "id": "default:external-apis:lunch-db",
+          "label": "lunch-db",
+          "type": "datastore",
+          "onPlatform": true,
+          "tooltip": "datastore"
+        },
+        {
+          "id": "default:external-apis:team-auth",
+          "label": "team-auth",
+          "type": "datastore",
+          "onPlatform": true,
+          "tooltip": "datastore"
+        },
+        {
+          "id": "default:external-apis:slack",
+          "label": "slack",
+          "type": "http",
+          "onPlatform": false,
+          "tooltip": "http (off-platform)"
+        }
+      ]
+    },
+    {
+      "id": "lunch-webapp",
+      "label": "lunch-webapp",
+      "version": "0.1.0",
+      "type": "service",
+      "buildPack": "TypeScript",
+      "services": {
+        "lunch-webapp:api": {
+          "id": "lunch-webapp:api",
+          "label": "API",
+          "type": "HTTP",
+          "dependencyIds": [
+            "lunch-api:api"
+          ],
+          "deploymentMetadata": {
+            "gateways": {
+              "internet": {
+                "isExposed": false
+              },
+              "intranet": {
+                "isExposed": false
+              }
+            }
+          }
+        }
+      },
+      "connections": [
+        {
+          "id": "default:project:lunch-api",
+          "label": "lunch-api",
+          "onPlatform": true
+        },
+        {
+          "id": "default:external-apis:team-auth",
+          "label": "team-auth",
+          "type": "datastore",
+          "onPlatform": true,
+          "tooltip": "datastore"
+        }
+      ]
+    }
+  ]
+}

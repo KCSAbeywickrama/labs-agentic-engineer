@@ -179,6 +179,16 @@ func TestSkillsComponent_List_MatchesGolden(t *testing.T) {
 			if s["kind"] != "org" || s["editable"] != true {
 				t.Fatalf("go summary: %v", s)
 			}
+			// A seeded skill is AVAILABLE. Asserted by value, not by field
+			// presence: `enabled` is required on the wire so it serializes
+			// even when the handler forgets to populate it, and the golden
+			// compares field NAMES — an always-false field is indistinguishable
+			// from a correct one there. It shipped that way once, and the
+			// skills page (which renders its toggle from THIS list, not from
+			// the per-skill detail) showed every skill as disabled.
+			if s["enabled"] != true {
+				t.Fatalf("a seeded skill must list as enabled, got %v: %v", s["enabled"], s)
+			}
 		}
 	}
 	if !sawGo {

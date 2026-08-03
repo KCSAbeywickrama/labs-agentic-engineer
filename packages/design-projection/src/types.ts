@@ -39,8 +39,13 @@ export interface ProjectDesignComponent {
   id: string;
   type: string; // authored kind, passed through ("service" | "webapp" | future kinds)
   version: string;
-  /** Skill names applied to this component (its design.json `skillsApplied`). */
-  skillsApplied: string[];
+  /**
+   * Skill names preloaded for this component's coding agent (from the
+   * component's design.json `skillsPinned`, née `skillsPinned`). Normalized
+   * output — always the winning value; the raw-document dual-key
+   * compatibility lives in project-design.ts, not here.
+   */
+  skillsPinned: string[];
   /** Build facts for the coding agent / OpenChoreo (from frontmatter). */
   build: {
     language?: string;

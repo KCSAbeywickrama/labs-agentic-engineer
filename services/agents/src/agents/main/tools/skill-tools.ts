@@ -98,6 +98,7 @@ export function buildSkillTools(skills?: SkillSource): Record<string, Tool> {
       execute: async ({ names }): Promise<LoadSkillResult> => {
         const skills: LoadedSkill[] = [];
         const missing: string[] = [];
+        const refused: string[] = [];
         for (const name of names) {
           let loaded;
           try {
@@ -119,14 +120,35 @@ export function buildSkillTools(skills?: SkillSource): Record<string, Tool> {
             missing.push(name);
             continue;
           }
+          if ("refused" in loaded) {
+            refused.push(name);
+            continue;
+          }
           skills.push({
             name,
             content: loaded.content,
             ...(loaded.references.length > 0 ? { references: loaded.references } : {}),
           });
         }
-        if (missing.length > 0) {
-          return { ok: false, error: `unknown skills: ${missing.join(", ")}`, skills, missing, available };
+        if (missing.length > 0 || refused.length > 0) {
+          // Two different faults, phrased differently on purpose: an unknown name is
+          // a mistake to correct, a refusal is a redirect to the right mechanism.
+          const parts: string[] = [];
+          if (refused.length > 0) {
+            parts.push(
+              `not yours to load: ${refused.join(", ")} — these are the coding agent's guidance. ` +
+                "If a component's build needs one, add it to that component's skillsPinned in its design.json.",
+            );
+          }
+          if (missing.length > 0) parts.push(`unknown skills: ${missing.join(", ")}`);
+          return {
+            ok: false,
+            error: parts.join(" "),
+            skills,
+            missing,
+            available,
+            ...(refused.length > 0 ? { refused } : {}),
+          };
         }
         return { ok: true, skills };
       },
@@ -151,7 +173,10 @@ export function buildSkillTools(skills?: SkillSource): Record<string, Tool> {
           }
           throw err;
         }
-        if (loaded === undefined || loaded.references.length === 0) {
+        // A refusal is treated like a miss HERE only: a reference belongs to a
+        // skill this agent may not load at all, so there is nothing to redirect
+        // it to — unlike loadSkill, where the redirect to pinning is the point.
+        if (loaded === undefined || "refused" in loaded || loaded.references.length === 0) {
           return { ok: false, name, path, error: `unknown skill: ${name}`, available: refSkillNames };
         }
         let loadedRef;

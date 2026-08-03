@@ -22,6 +22,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  AGENT_SETTING_SOURCES,
   DISALLOWED_TOOLS,
   buildMcpOptions,
   buildSessionSkills,
@@ -168,36 +169,36 @@ test("resolveBaseAgentConfig: an explicit basePreload owns the FULL list (no val
   assert.deepEqual(pinned.preload, ["aep:aep"]);
 });
 
-// --- buildSessionSkills: attached skills are loaded, never preloaded --------
+// --- buildSessionSkills: one plugin, and the whole mirror in the allowlist ---
 
-// The regression this file exists to prevent: an attached skill's body must not
-// reach the session at startup. Preloading them made a run's startup context
-// grow with the number of designed components (a two-component project already
-// injected four full stack-skill bodies before the first turn), and it decided
-// for the agent which of them mattered. Loading is the agent's call now — which
-// makes every attached skill's `description` the trigger, so a thin one is a
-// real defect. Pinned per kind: nothing about `org` earns an exception.
-test("buildSessionSkills: the per-task plugin loads and adds nothing to the preload", () => {
-  const withSkills = buildSessionSkills("/run/base-plugin", "/ws/.aep/skills-plugin", ["aep:aep"]);
-  assert.deepEqual(withSkills.plugins, [
-    { type: "local", path: "/run/base-plugin" },
-    { type: "local", path: "/ws/.aep/skills-plugin" },
-  ]);
-  assert.deepEqual(withSkills.skills, ["aep:aep"]);
-
-  // …and the preload is identical when there is no per-task plugin at all, so
-  // the two paths differ only in what is DISCOVERABLE.
-  const without = buildSessionSkills("/run/base-plugin", undefined, ["aep:aep"]);
-  assert.deepEqual(without.plugins, [{ type: "local", path: "/run/base-plugin" }]);
-  assert.deepEqual(without.skills, ["aep:aep"]);
+// There is exactly ONE plugin: the base plugin the runner assembled. The
+// per-task `aep-task-skills` plugin is gone — project skills arrive as the BFF's
+// `.claude/skills/` mirror inside the workspace, which the SDK discovers itself.
+// A second plugin entry appearing here again would mean someone reintroduced a
+// fetch the mirror exists to replace.
+test("buildSessionSkills: one plugin, and every mirrored name joins the allowlist", () => {
+  const built = buildSessionSkills("/run/base-plugin", ["go", "openapi-conventions"], ["aep:aep"]);
+  assert.deepEqual(built.plugins, [{ type: "local", path: "/run/base-plugin" }]);
+  // The WHOLE mirror, not just the pins: `skills:` is an allowlist, so a
+  // mirrored skill left out of it is rejected by the Skill tool outright.
+  assert.deepEqual(built.skills, ["aep:aep", "go", "openapi-conventions"]);
 });
 
-// The base preload is the caller's and stays whole — a validation run's second
-// workflow body is the one thing that still MUST be in context at startup.
+// An empty mirror is the normal shape for a validation run (no design skills
+// apply) — it must leave the base preload exactly as it was, not degrade it.
+test("buildSessionSkills: an empty mirror leaves the base preload alone", () => {
+  const built = buildSessionSkills("/run/base-plugin", [], ["aep:aep", "aep:aep-validation"]);
+  assert.deepEqual(built.plugins, [{ type: "local", path: "/run/base-plugin" }]);
+  assert.deepEqual(built.skills, ["aep:aep", "aep:aep-validation"]);
+});
+
+// The base preload is the caller's array, and a validation run's second workflow
+// body is the one thing that still MUST be in context at startup — so mutating
+// the result must not reach back and corrupt it.
 test("buildSessionSkills: the base preload rides through unchanged, and is copied", () => {
   const basePreload = ["aep:aep", "aep:aep-validation"];
-  const built = buildSessionSkills("/run/base-plugin", "/ws/.aep/skills-plugin", basePreload);
-  assert.deepEqual(built.skills, ["aep:aep", "aep:aep-validation"]);
+  const built = buildSessionSkills("/run/base-plugin", ["go"], basePreload);
+  assert.deepEqual(built.skills, ["aep:aep", "aep:aep-validation", "go"]);
 
   built.skills.push("aep:playwright-cli");
   assert.deepEqual(basePreload, ["aep:aep", "aep:aep-validation"], "must not alias the caller's array");
@@ -259,4 +260,16 @@ test("promptWithProjectRoot: omitting the contract path leaves the prompt as it 
   const out = promptWithProjectRoot("Work the issues", "/workspace/project");
   assert.ok(!out.includes("component-contract.md"));
   assert.ok(out.endsWith("Work the issues"));
+});
+
+test("AGENT_SETTING_SOURCES admits the project source, and only that one", () => {
+  // Verified against the real SDK: with [] a skill in the clone's
+  // .claude/skills/ is absent from the init message's resolved list; with
+  // ["project"] it is present. Dropping 'project' silently un-ships the whole
+  // mirror, so this is the guard, not a restatement.
+  assert.deepEqual([...AGENT_SETTING_SOURCES], ["project"]);
+  // 'user' is a developer's ~/.claude and 'local' their personal overrides —
+  // neither belongs in a dispatched container run.
+  assert.ok(!AGENT_SETTING_SOURCES.includes("user" as never));
+  assert.ok(!AGENT_SETTING_SOURCES.includes("local" as never));
 });

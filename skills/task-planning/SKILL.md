@@ -4,6 +4,7 @@ description: Use when asked to plan or re-plan a project's implementation Tasks 
 metadata:
   aep:
     kind: platform
+    audience: [design]
 ---
 
 # Task planning

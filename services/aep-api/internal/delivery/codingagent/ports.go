@@ -81,6 +81,15 @@ type WiringPublisher interface {
 	PublishResolvedWiring(ctx context.Context, orgID, projectID string)
 }
 
+// SkillMirror refreshes the project repo's `.claude/skills/` copies from the
+// org library. Called before the Job launches so the clone the agent works in
+// carries the guidance its build was designed against. Diff-first: an
+// already-current repo costs a read and no commit. Wired from
+// spec.SkillService at the composition root; nil → skipped.
+type SkillMirror interface {
+	SyncProjectSkills(ctx context.Context, orgID, projectID string) error
+}
+
 // AnthropicProvisioner materializes the per-org Anthropic key Secret on the
 // workflow plane and returns its ref. Best-effort at dispatch. Wired from
 // orgcreds.AnthropicCredentialService.

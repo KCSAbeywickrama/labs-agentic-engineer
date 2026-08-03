@@ -69,15 +69,18 @@ export function verdictSentence(
       // Names coverage, not just the result: `passed` now REQUIRES that every
       // criterion was checked, which is the whole point of the vocabulary.
       return counted
-        ? `All ${total} acceptance criteria were covered by a test and passed.`
-        : "Every acceptance criterion was covered by a test and passed.";
+        ? `All ${total} validation criteria were covered by a test and passed.`
+        : "Every validation criterion was covered by a test and passed.";
     case "partial": {
       const uncovered = tally ? uncoveredCount(tally) : 0;
+      // Ends on what the reader can do about it. The count is the gap between
+      // what was authored and what a test actually answered, so the ask is
+      // specific rather than a vague "not a clean pass".
       return counted && uncovered > 0
-        ? `Everything that ran passed, but ${uncovered} of ${total} criteria ${
-            uncovered === 1 ? "was" : "were"
-          } never covered by a test — so this is not a clean pass.`
-        : "Everything that ran passed, but some criteria were never covered by a test — so this is not a clean pass.";
+        ? `Everything that ran passed, but ${uncovered} of ${total} validation criteria couldn't be automated — please validate ${
+            uncovered === 1 ? "it" : "them"
+          } manually.`
+        : "Everything that ran passed, but some validation criteria couldn't be automated — please validate them manually.";
     }
     case "failed": {
       const failed = tally ? countOf(tally, "fail") : 0;
@@ -88,12 +91,13 @@ export function verdictSentence(
     }
     case "inconclusive":
       return counted
-        ? `None of the ${total} acceptance criteria produced a result, so nothing here is confirmed.`
-        : "No criterion produced a result, so nothing here is confirmed.";
+        ? `None of the ${total} validation criteria could be automated — please validate them manually.`
+        : "None of the validation criteria could be automated — please validate them manually.";
     case "unreported":
-      // An agent-contract breach, not a test outcome — so the sentence names the
-      // omission and the terminal reason the run settled under.
-      return "The validation agent merged its pull request without committing a report, so this run proved nothing. It was failed under validation-unreported.";
+      // A reporting failure, not a test outcome: no criterion produced one. The
+      // terminal reason (`validation-unreported`) is deliberately NOT quoted —
+      // a wire value is not something to hand a reader.
+      return "Something went wrong while generating the validation report, so there are no results to show for this run.";
     default:
       return "";
   }
@@ -113,10 +117,10 @@ export function verdictCounts(tally: CriterionTally | undefined): string {
 /**
  * The verdict tile: what the validation run concluded, above the per-criterion
  * evidence. It exists because a chip label cannot finish the sentence for the
- * verdicts that matter most — "Partially validated" begs *which part*, "No test
- * results" begs *why*, "Validation didn't report" begs *so what* — and because
- * `failed` and `unreported` now end the run, which is a consequence no chip can
- * state.
+ * verdicts that matter most — "Validated*" begs *which part*, "Validation
+ * inconclusive" begs *why*, "Validation reporting error" begs *so what* — and
+ * because three of the five ask the reader to do something (validate the rest by
+ * hand, fix a failure), which no chip can say.
  *
  * The headline is the SHARED mapper's label (projects/lib/pipeline), capitalized,
  * never restated — so the tile and the header chip cannot drift apart. Only the

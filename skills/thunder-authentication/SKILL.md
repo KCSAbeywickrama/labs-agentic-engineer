@@ -4,6 +4,7 @@ description: How end-user identity works on the platform — Thunder, the IDP wi
 metadata:
   aep:
     kind: org
+    audience: [coding]
 ---
 
 # Thunder Authentication

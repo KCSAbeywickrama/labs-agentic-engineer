@@ -57,7 +57,7 @@ const (
 	DefaultConsumerURLPath = "/callback"
 
 	// AnnotationSkill names a skill that must be present in a design's
-	// skillsApplied whenever a dependency of this resource type exists.
+	// skillsPinned whenever a dependency of this resource type exists.
 	// Design save appends it (append-only; unknown skill names warn, they
 	// never fail the save).
 	AnnotationSkill = "aep.wso2.com/skill"
@@ -86,7 +86,7 @@ type TypeMarkers struct {
 	// patch above. Defaults to DefaultConsumerURLPath when
 	// ConsumerURLEnvConfig is set but no explicit path annotation is present.
 	ConsumerURLPath string
-	// Skill is the skill name that must appear in skillsApplied, or "" when
+	// Skill is the skill name that must appear in skillsPinned, or "" when
 	// the type carries no skill annotation.
 	Skill string
 	// Description is the human prose off AnnotationDescription — what the

@@ -33,6 +33,7 @@ import {
   Divider,
   Pagination,
   SearchBar,
+  Switch,
   Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
@@ -47,6 +48,7 @@ import { StatusChip } from "../../../components/StatusChip";
 import {
   useConfig,
   useDeleteSkill,
+  useSetSkillEnabled,
   useSkillUpdates,
   useSkills,
   useSyncSkills,
@@ -106,6 +108,7 @@ export function SkillsSection() {
 
   const deleteSkill = useDeleteSkill();
   const syncSkills = useSyncSkills();
+  const setSkillEnabled = useSetSkillEnabled();
 
   if (configLoading) {
     return (
@@ -261,6 +264,15 @@ export function SkillsSection() {
           {syncSkills.error.message}
         </Alert>
       )}
+      {setSkillEnabled.isError && (
+        <Alert
+          severity="error"
+          sx={{ mb: 2 }}
+          onClose={() => setSkillEnabled.reset()}
+        >
+          {setSkillEnabled.error.message}
+        </Alert>
+      )}
 
       {total === 0 ? (
         <Typography
@@ -284,6 +296,9 @@ export function SkillsSection() {
                     ? STATUS_META.review
                     : null;
                 const StatusIcon = status?.icon;
+                const isTogglingThisRow =
+                  setSkillEnabled.isPending &&
+                  setSkillEnabled.variables?.name === skill.name;
                 return (
                   <Box key={skill.name}>
                     {idx > 0 && <Divider />}
@@ -311,7 +326,11 @@ export function SkillsSection() {
                             flexWrap: "wrap",
                           }}
                         >
-                          <Typography variant="body1" fontWeight={600}>
+                          <Typography
+                            variant="body1"
+                            fontWeight={600}
+                            sx={{ color: skill.enabled ? "text.primary" : "text.disabled" }}
+                          >
                             {skill.name}
                           </Typography>
                           {/* The kind chip is the flat list's only kind
@@ -353,18 +372,45 @@ export function SkillsSection() {
                         )}
                         <Typography
                           variant="body2"
-                          color="text.secondary"
+                          color={skill.enabled ? "text.secondary" : "text.disabled"}
                           sx={{ mt: 0.5 }}
                         >
                           {skill.description}
                         </Typography>
                       </Box>
-                      {/* One uniform action per row — View. Edit and Delete
-                          live inside the viewer (gated on the skill's own
-                          editable/deletable), so every row aligns the same way
-                          regardless of kind, and mutations happen while looking
-                          at the skill. */}
-                      <Box sx={{ flexShrink: 0 }}>
+                      {/* Availability (this switch) and platform-update state
+                          (the stripe/status line above) are independent axes —
+                          disabling a skill withholds it from the platform's
+                          agents without touching its content, so neither the
+                          kind chip nor the update status is hidden here. */}
+                      <Box sx={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 1 }}>
+                        <Tooltip
+                          title={
+                            skill.enabled
+                              ? "Disable this skill to withhold it from the platform's agents. It stays in your org's skills repo and can be switched back on anytime."
+                              : "Enable this skill to make it available to the platform's agents again."
+                          }
+                        >
+                          <span>
+                            <Switch
+                              size="small"
+                              checked={skill.enabled}
+                              disabled={isTogglingThisRow}
+                              onChange={(e) =>
+                                setSkillEnabled.mutate({
+                                  name: skill.name,
+                                  enabled: e.target.checked,
+                                })
+                              }
+                              slotProps={{
+                                input: {
+                                  role: "switch",
+                                  "aria-label": `${skill.enabled ? "Disable" : "Enable"} ${skill.name}`,
+                                },
+                              }}
+                            />
+                          </span>
+                        </Tooltip>
                         <Button
                           size="small"
                           startIcon={<Eye size={16} />}

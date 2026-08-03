@@ -42,8 +42,8 @@ export function requirementsStatus(projectDir: string): RequirementsStatus {
 
 export interface DesignStatus {
   components: string[];
-  /** Union of every component design.json's skillsApplied. */
-  skillsApplied: string[];
+  /** Union of every component design.json's skillsPinned. */
+  skillsPinned: string[];
 }
 
 export function designStatus(projectDir: string): DesignStatus {
@@ -53,15 +53,15 @@ export function designStatus(projectDir: string): DesignStatus {
     const file = join(projectDir, "specs/design/components", name, "design.json");
     if (!existsSync(file)) continue;
     try {
-      const parsed = JSON.parse(readFileSync(file, "utf8")) as { skillsApplied?: unknown };
-      if (Array.isArray(parsed.skillsApplied)) {
-        for (const s of parsed.skillsApplied) if (typeof s === "string") skills.add(s);
+      const parsed = JSON.parse(readFileSync(file, "utf8")) as { skillsPinned?: unknown };
+      if (Array.isArray(parsed.skillsPinned)) {
+        for (const s of parsed.skillsPinned) if (typeof s === "string") skills.add(s);
       }
     } catch {
       // unparseable design.json — the check command reports it; status stays quiet
     }
   }
-  return { components, skillsApplied: [...skills].sort() };
+  return { components, skillsPinned: [...skills].sort() };
 }
 
 /**

@@ -32,8 +32,6 @@
 // watcher picks up via the WorkflowRun terminal status.
 
 import { randomUUID } from "node:crypto";
-import os from "node:os";
-import path from "node:path";
 import { provisionWorkspace } from "./lib/workspace.js";
 import { runClaudeQuery } from "./lib/runner.js";
 import { openTaskLog } from "./lib/logger.js";
@@ -42,7 +40,7 @@ import type { DispatchRequest } from "./lib/types.js";
 import { emit, primeScrubber } from "./lib/progress/emitter.js";
 import { installConsoleScrubber } from "./lib/progress/console_scrub.js";
 import { resolveTaskSkills } from "./lib/skills_resolver.js";
-import { materializeSkills } from "./lib/skills_materializer.js";
+import { listMirroredSkills, readSkillBodies, resolvePinnedSkills } from "./lib/skills_presence.js";
 import { ClientCredentialsTokenProvider } from "./lib/oauth.js";
 import {
   fetchValidationContext,
@@ -192,20 +190,24 @@ async function main(): Promise<number> {
 
   emit({ kind: "phase", phase: "workspace_ready" });
 
-  // Per-task skills — clone the org's org-skills repo (URL stamped by the BFF
-  // as AEP_SKILLS_REPO_URL), resolve the design's applied skills locally, and
-  // materialise them into the AgentSkills plugin tree under .aep/skills-plugin/.
-  // On any failure we log LOUDLY and continue without the per-task plugin
-  // (runner falls back to the base aep plugin only).
+  // Per-task skills — read the design's pinned skill names from the project
+  // clone (no network: `.claude/skills/` is already the BFF-mirrored, filtered
+  // set of the org's coding-relevant skills), then resolve those pins against
+  // the copies actually on disk. A dangling pin is warned about and skipped,
+  // never fatal — the guidance is missing, which degrades the build, but
+  // aborting loses it entirely. If `.claude/skills/` is absent altogether the
+  // run proceeds with the base plugin only.
   //
   // Scope: an implementation run is a MILESTONE cycle — one branch, one PR,
   // any component in the milestone — so it takes the union of every component's
-  // skillsApplied. Its AEP_COMPONENT_NAME is the `aep-milestone` sentinel and
+  // skillsPinned. Its AEP_COMPONENT_NAME is the `aep-milestone` sentinel and
   // must not be used to pick a design file. A validation run applies no design
   // skills at all: it is black-box verification driven by the `aep-validation`
   // skill (AEP_TASK_KIND), and builds nothing.
-  let skillsPluginDir: string | undefined;
-  const skillsRepoURL = process.env.AEP_SKILLS_REPO_URL ?? "";
+  // A validation run stays at the base plugin: no mirror is allowed and nothing
+  // is pinned, so the allowlist below leaves the design skills out entirely.
+  let availableSkillNames: string[] = [];
+  let pinnedBodies = "";
   if (req.taskKind === "validation") {
     console.log("[oneshot] validation run — no design skills apply; using the aep-validation skill only");
     // PREFLIGHT: where the deployed system is, fetched by the platform before the
@@ -227,40 +229,34 @@ async function main(): Promise<number> {
       console.error(`[oneshot] validation context unavailable — not starting the agent: ${msg}`);
       return 2;
     }
-  } else if (skillsRepoURL) {
-    try {
-      const resolutions = await resolveTaskSkills({
-        workspace: layout.workspace,
-        scope: { kind: "project" },
-        skillsRepoURL,
-        // Same credential helper the project clone used — one exchange
-        // implementation, and no GitHub token in this process.
-        cloneAuth: { helperPath: layout.helperBin, bearerFile: layout.bearerFile },
-        // Clone OUTSIDE the work tree so its nested .git never enters the
-        // agent's git status / commits.
-        scratchDir: path.join(os.tmpdir(), "aep-skills", req.taskId),
-        log: (l) => console.log(l),
-      });
-      skillsPluginDir = (await materializeSkills(layout.workspace, resolutions)) ?? undefined;
-      if (skillsPluginDir) {
-        console.log(
-          `[oneshot] materialised ${resolutions.length} skill(s) — all loaded on demand, none preloaded`,
-        );
-      } else {
-        console.log("[oneshot] no per-task skills to materialise");
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+  } else {
+    const pinned = await resolveTaskSkills({
+      workspace: layout.workspace,
+      scope: { kind: "project" },
+      log: (l) => console.log(l),
+    });
+    const { preload, dangling } = await resolvePinnedSkills(layout.workspace, pinned, (l) => console.log(l));
+    if (dangling.length > 0) {
       console.warn(
-        `[oneshot] ⚠️  SKILLS UNAVAILABLE — coding agent proceeding WITHOUT its per-task skill plugin (guidance degraded; if this project has skills the output may be wrong): ${msg}`,
+        `[oneshot] ⚠️  ${dangling.length} pinned skill(s) missing from .claude/skills/ — proceeding without them: ${dangling.join(", ")}`,
       );
     }
-  } else {
-    console.log("[oneshot] AEP_SKILLS_REPO_URL not set — skipping per-task skills");
+    // Every mirrored skill is allowed — the SDK's `skills:` is an allowlist, so
+    // anything omitted here cannot be invoked at all. The pinned subset also
+    // goes into the system prompt, which is the only thing that actually
+    // preloads guidance.
+    availableSkillNames = await listMirroredSkills(layout.workspace);
+    pinnedBodies = await readSkillBodies(layout.workspace, preload);
+    console.log(
+      `[oneshot] ${availableSkillNames.length} skill(s) available, ${preload.length} pinned into context`,
+    );
   }
 
   const log = openTaskLog(layout.workspace);
-  const { completion } = runClaudeQuery(req, layout, log, skillsPluginDir);
+  const { completion } = runClaudeQuery(req, layout, log, {
+    availableSkillNames,
+    pinnedBodies,
+  });
   const result = await completion;
   return result.exitCode;
 }

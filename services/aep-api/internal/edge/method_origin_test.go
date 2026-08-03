@@ -123,6 +123,7 @@ var opOwner = map[string]string{
 	"ReadFile":                      embedSpec,
 	"RequestOrgServiceAccess":       embedDependencies,
 	"RotateIdpClientSecret":         embedOrganization,
+	"SetSkillEnabled":               embedSpec,
 	"StartGitProviderConnect":       embedOrganization,
 	"StreamActivity":                embedProjects,
 	"StreamRunProgress":             embedDelivery,
