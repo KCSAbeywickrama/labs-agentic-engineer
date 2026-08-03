@@ -31,7 +31,7 @@ const DESIGN: ProjectDesign = {
       id: "expense-api",
       type: "service",
       version: "0.2.0",
-      skillsApplied: ["high-level-architecture"],
+      skillsPinned: ["high-level-architecture"],
       build: { language: "Go" },
       services: {
         "expense-api": {
@@ -51,7 +51,7 @@ const DESIGN: ProjectDesign = {
       id: "expense-webapp",
       type: "webapp",
       version: "0.1.0",
-      skillsApplied: [],
+      skillsPinned: [],
       build: { language: "TypeScript" },
       connections: [{ id: "http://expense-api", type: "http", onPlatform: true }],
       artifacts: {},
@@ -109,7 +109,7 @@ test("a platform-resource dependency carries type:datastore + onPlatform:true, n
         id: "orders-api",
         type: "service",
         version: "0.1.0",
-        skillsApplied: [],
+        skillsPinned: [],
         build: {},
         services: {
           "orders-api": {
@@ -152,7 +152,7 @@ test("off-platform `external` deps are distinguished from on-platform `org-servi
         id: "billing-api",
         type: "service",
         version: "0.1.0",
-        skillsApplied: [],
+        skillsPinned: [],
         build: {},
         connections: [
           // org-service: another on-platform project's service.

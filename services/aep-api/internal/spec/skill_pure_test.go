@@ -154,3 +154,43 @@ func TestFrontmatterKind(t *testing.T) {
 		})
 	}
 }
+
+// frontmatterAudience derivation: metadata.aep.audience names the agent(s)
+// this skill's guidance is written for (design | coding); an empty, absent,
+// or all-unrecognised list defaults to BOTH — the permissive default so an
+// unmarked or org-authored skill stays visible everywhere it always was.
+func TestFrontmatterAudience(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		fm   string
+		want []string
+	}{
+		{"coding only", "---\nname: s\ndescription: d.\nmetadata:\n  aep:\n    audience: [coding]\n---\nbody", []string{"coding"}},
+		{"design only", "---\nname: s\ndescription: d.\nmetadata:\n  aep:\n    audience: [design]\n---\nbody", []string{"design"}},
+		{"both explicit", "---\nname: s\ndescription: d.\nmetadata:\n  aep:\n    audience: [design, coding]\n---\nbody", []string{"design", "coding"}},
+		{"absent metadata", "---\nname: s\ndescription: d.\n---\nbody", []string{"design", "coding"}},
+		{"empty list", "---\nname: s\ndescription: d.\nmetadata:\n  aep:\n    audience: []\n---\nbody", []string{"design", "coding"}},
+		{"unrecognised values only", "---\nname: s\ndescription: d.\nmetadata:\n  aep:\n    audience: [ops, qa]\n---\nbody", []string{"design", "coding"}},
+		{"unrecognised value dropped, one kept", "---\nname: s\ndescription: d.\nmetadata:\n  aep:\n    audience: [coding, ops]\n---\nbody", []string{"coding"}},
+		{"whitespace value", "---\nname: s\ndescription: d.\nmetadata:\n  aep:\n    audience: ['  coding  ']\n---\nbody", []string{"coding"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			fm, _, err := parseSkillMD(tc.fm)
+			if err != nil {
+				t.Fatalf("parseSkillMD: %v", err)
+			}
+			got := frontmatterAudience(fm)
+			if len(got) != len(tc.want) {
+				t.Fatalf("frontmatterAudience = %v, want %v", got, tc.want)
+			}
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Fatalf("frontmatterAudience = %v, want %v", got, tc.want)
+				}
+			}
+		})
+	}
+}

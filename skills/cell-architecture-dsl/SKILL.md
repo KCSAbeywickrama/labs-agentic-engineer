@@ -4,6 +4,7 @@ description: Use when generating a design OR when ANY change alters the architec
 metadata:
   aep:
     kind: platform
+    audience: [design]
 ---
 
 

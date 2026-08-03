@@ -25,6 +25,20 @@ turn's `_skills` snapshot on the mount (`src/conversation/load-workspace.ts`);
 they never travel in the turn payload. No skills → no catalog, behaves as today.
 See ADR-0002 and `services/aep-api/design/shared-workspace-volume.md`.
 
+**Audience** (ADR-0013) splits that catalog. A skill's `metadata.aep.audience`
+lists the agents its guidance is written for — `design` or `coding` — and this
+service is always the **design** side (`SERVICE_AUDIENCE`; the coding agent runs
+in the remote-worker runner and never calls here), so nothing is passed per
+request. Coding-agent rows are still **listed**: the design agent has to name a
+skill to pin it onto a component's `design.json`, which is how that guidance
+reaches the build — so the catalog groups them into a pin-only block, and
+`load()` returns `{ refused: true }` rather than a body. `loadSkill` reports
+those separately from unknown names (`refused` vs `missing`), because a refusal
+indistinguishable from "no such skill" invites the agent to skip pinning. An
+absent audience means every audience, so unmarked and org-authored skills are
+unaffected — and a library with nothing pin-only renders the catalog
+byte-identically, preserving the cached instruction prefix.
+
 **Tool sets** (`TurnRequest.toolset`, tasks-github-native §9.3): the turn selects
 which domain tools the generic loop registers. `files` (default, and identical to
 an absent value) is the file-mutation set (`src/agents/main/tools/files.ts`) over a

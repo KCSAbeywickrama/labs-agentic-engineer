@@ -21,10 +21,12 @@ defer all CLI mechanics to this one.
 
 The platform has no third-party skill/plugin install channel for the
 runner today: the SDK session only loads the programmatic plugins
-(`/app/plugin` + the per-task pull), `settingSources: []` deliberately
-ignores `.claude/skills/` (where `playwright-cli install --skills`
-writes), and dev flows bind-mount `plugin/` over the image so a
-build-time copy would be masked. Building that channel for a single
+(`/app/plugin` + the per-task pull) plus the project clone's own
+`.claude/skills/` — which is the BFF's mirror of the org library, not a
+place a third-party installer may write (`playwright-cli install
+--skills` targets `$HOME`, outside every source the runner admits) — and
+dev flows bind-mount `plugin/` over the image so a build-time copy would
+be masked. Building that channel for a single
 skill isn't warranted. If more third-party skills accumulate, the
 natural home is the BFF skills system (org skills repo + per-task
 pull) with an upstream-package import source and task-kind-based

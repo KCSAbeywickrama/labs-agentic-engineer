@@ -23,7 +23,8 @@
  * always read skills through `SnapshotSkillSource` (§12).
  */
 
-import type { LoadedReference, LoadedSkillBody, SkillCatalogEntry, SkillSource } from "../src/agents/main/skill-source.js";
+import type { LoadedReference, LoadedSkillBody, SkillAudience, SkillCatalogEntry, SkillSource } from "../src/agents/main/skill-source.js";
+import { ALL_AUDIENCES } from "../src/agents/main/skill-source.js";
 
 /** One in-test skill: a resolved SKILL.md (body + optional aux files). */
 export interface TestSkill {
@@ -34,6 +35,8 @@ export interface TestSkill {
   references?: Record<string, string>;
   /** aux paths that resolve to a binary marker instead of text (for `loadSkillReference` binary-guard tests). */
   binaryReferences?: readonly string[];
+  /** Audiences allowed to load it; omitted means every audience, as an unmarked SKILL.md does. */
+  audience?: readonly SkillAudience[];
 }
 
 /** Wrap test skills into a `SkillSource` (same semantics as the snapshot source). */
@@ -43,6 +46,7 @@ export function testSkillSource(skills: readonly TestSkill[]): SkillSource {
     name: s.name,
     description: s.description,
     hasReferences: !!s.references && Object.keys(s.references).length > 0,
+    audience: s.audience ?? ALL_AUDIENCES,
   }));
   return {
     catalog: () => entries,

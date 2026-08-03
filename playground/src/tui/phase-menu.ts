@@ -54,7 +54,7 @@ export async function phaseMenu(projectDir: string, slug: string, skillCount: nu
   const designLabel = !dGate.ok
     ? `2 Design         ✗ blocked: ${dGate.reason}`
     : design.components.length > 0
-      ? `2 Design         ✓ ${design.components.length} component(s)${design.skillsApplied.length ? ` · skillsApplied: ${design.skillsApplied.join(", ")}` : ""}`
+      ? `2 Design         ✓ ${design.components.length} component(s)${design.skillsPinned.length ? ` · skillsPinned: ${design.skillsPinned.join(", ")}` : ""}`
       : "2 Design         — not generated yet";
   const pending = issues.filter((i) => !i.resolved).length;
   const issueCounts = issues.length ? ` (${issues.length - pending} resolved, ${pending} pending)` : "";

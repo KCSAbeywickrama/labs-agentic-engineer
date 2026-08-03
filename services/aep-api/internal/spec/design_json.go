@@ -53,7 +53,7 @@ import (
 //	dependencies               ↔ Dependencies  (unified kind-discriminated union; replaces connections[])
 //	exposesAPI                 ↔ ExposesAPI     (platform-owned; {managed, auth, userContext, orgPublished})
 //	componentAgentInstructions ↔ ComponentAgentInstructions (platform-owned; optional)
-//	skillsApplied              ↔ SkillsApplied  (optional; skill names applied to this component)
+//	skillsPinned              ↔ SkillsPinned  (optional; skill names applied to this component)
 //
 // OpenAPISpec is NOT a design.json key: it stays in the sibling
 // `components/<name>/openapi.yaml` file, assembled/split separately.
@@ -86,7 +86,7 @@ type componentDesignJSON struct {
 	// Platform-owned blocks (absent = zero value).
 	ExposesAPI                 *exposesAPIJSON `json:"exposesAPI,omitempty"`
 	ComponentAgentInstructions string          `json:"componentAgentInstructions,omitempty"`
-	SkillsApplied              []string        `json:"skillsApplied,omitempty"`
+	SkillsPinned              []string        `json:"skillsPinned,omitempty"`
 }
 
 // endpointJSON is the on-disk shape of the optional `endpoint` block. Only the
@@ -217,7 +217,7 @@ func parseComponentDesignJSON(dir, raw string) (DesignComponent, error) {
 		Endpoint:                   toModelEndpoint(dj.Endpoint),
 		ComponentAgentInstructions: dj.ComponentAgentInstructions,
 		ExposesAPI:                 toModelExposesAPI(dj.ExposesAPI),
-		SkillsApplied:              append([]string(nil), dj.SkillsApplied...),
+		SkillsPinned:              append([]string(nil), dj.SkillsPinned...),
 	}, nil
 }
 
@@ -321,7 +321,7 @@ func marshalComponentDesignJSON(dir string, comp DesignComponent) ([]byte, error
 		Dependencies:               toJSONDeps(comp.Dependencies),
 		ExposesAPI:                 toJSONExposesAPI(comp.ExposesAPI),
 		ComponentAgentInstructions: comp.ComponentAgentInstructions,
-		SkillsApplied:              comp.SkillsApplied,
+		SkillsPinned:              comp.SkillsPinned,
 	}
 
 	var buf bytes.Buffer

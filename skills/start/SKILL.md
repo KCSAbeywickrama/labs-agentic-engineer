@@ -4,6 +4,7 @@ description: Use when kicking off a project from its idea — the /start flow th
 metadata:
   aep:
     kind: platform
+    audience: [design]
 ---
 
 # Start

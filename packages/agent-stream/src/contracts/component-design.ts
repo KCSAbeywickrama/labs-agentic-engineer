@@ -22,7 +22,7 @@
  * component-level design.md: the spec agent writes it (whole-file rewrites,
  * schema-validated by the FileBundle on every write), downstream consumers
  * (design projection, coding-agent dispatch, task generation) read it
- * directly. `skillsApplied` is a key HERE (per-component), NOT in design.md
+ * directly. `skillsPinned` is a key HERE (per-component), NOT in design.md
  * frontmatter; the top-level design.md is prose + an optional `sourceSpec`
  * frontmatter only. The Zod validator (`componentDesignSchema` in
  * `../component-design-schema.ts`) is drift-guarded against this type.
@@ -87,9 +87,13 @@ export interface ComponentDesign {
    * downstream coding agent. Passthrough — the design agent must not author it.
    */
   componentAgentInstructions?: string;
-  /** Skill names applied to THIS component (per-component; the coding runner
-   *  materializes exactly these for a build of this component). */
-  skillsApplied?: string[];
+  /**
+   * Skills the coding agent PRELOADS for this component's build. Deliberately
+   * NOT an exhaustive list of what the build may consult — the rest of the
+   * copied skill library stays loadable on demand. Per-component; the
+   * coding runner materializes exactly these for a build of this component.
+   */
+  skillsPinned?: string[];
 }
 
 /**

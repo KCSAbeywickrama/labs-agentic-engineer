@@ -144,7 +144,7 @@ describe("DeploymentsPage — validation chip", () => {
 
     render(<DeploymentsPage projectName="acme" />);
 
-    const chip = screen.getByRole("link", { name: /Validation passed/ });
+    const chip = screen.getByRole("link", { name: /^Validated$/ });
     expect(chip).toHaveAttribute("href", "/projects/acme/validation");
     expect(chip).not.toHaveAttribute("target");
   });

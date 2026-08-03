@@ -4,6 +4,7 @@ description: Use when generating the validation criteria — write specs/validat
 metadata:
   aep:
     kind: platform
+    audience: [design]
 ---
 
 # Generate `validation-criteria.json`

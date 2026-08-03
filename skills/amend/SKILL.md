@@ -4,6 +4,7 @@ description: Use for a scoped change to an existing PRD — adding a feature, ad
 metadata:
   aep:
     kind: platform
+    audience: [design]
 ---
 
 # Amend

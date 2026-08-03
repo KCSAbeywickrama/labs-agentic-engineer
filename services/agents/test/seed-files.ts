@@ -54,7 +54,7 @@ A simple API that responds with "Hello, World!" when called.
   "entrypoint": "deployment/service",
   "exposure": "internet",
   "dependencies": [],
-  "skillsApplied": ["go", "api-management"],
+  "skillsPinned": ["go", "api-management"],
   "description": "A simple public Go HTTP service (port 9090, net/http) that returns a hello-world JSON message. No authentication. Endpoints are specified in openapi.yaml."
 }
 `,

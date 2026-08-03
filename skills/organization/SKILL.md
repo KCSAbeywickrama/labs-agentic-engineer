@@ -4,6 +4,7 @@ description: The organization's standing defaults. Consult before asking the use
 metadata:
   aep:
     kind: org
+    audience: [design]
 ---
 
 # Organization defaults

@@ -34,6 +34,70 @@ _Avoid_: workspace, repo, project.
 One request→response cycle of the main agent: a user instruction plus the current
 spec bundle in, a stream of file mutations out. One turn = one POST.
 
+## Org skills (`services/aep-api`)
+
+**Org skills repo**:
+The per-organization repository that IS the org's skill library — the single source
+of truth an agent's Skills are resolved from. The platform seeds it from its own
+shipped library and keeps offering updates; the org may edit, add, and remove
+skills in it freely.
+_Avoid_: skill store, skill database (there is no table — the repo is the record).
+
+**Skill kind**:
+**Ownership** of a skill, and nothing else: `platform` (AE-owned), `org`
+(the organization's — both platform-seeded defaults and ones it authored), or
+`imported` (brought in from a third-party ecosystem). Deliberately independent of
+who may edit a skill and of where its updates come from.
+_Avoid_: type, category, custom (a retired fourth value that folded into `org`).
+
+**Origin (of a skill)**:
+Where a skill's platform-tracked baseline came from, and therefore how its updates
+arrive: seeded from the shipped library, or reviewed in from an upstream source.
+Orthogonal to ownership — a skill can be the org's to edit while the platform still
+offers it updates. Distinct from a Task's **Origin**; the two never appear in the
+same conversation, so each is qualified when ambiguity is possible.
+_Avoid_: kind (the overload this term was introduced to end).
+
+**Skills manifest**:
+The platform-managed record, kept beside the skills themselves, of what the platform
+believes about each one — its origin and its baseline. Having no record for a skill
+is meaningful: it means the org authored it, so the platform tracks nothing and
+offers it nothing.
+_Avoid_: index, lockfile, registry.
+
+**Manifest baseline**:
+The version of a skill the platform last agreed with the org on — the third point
+that lets a comparison distinguish "the platform moved" from "the org edited" from
+"both did". Qualified as *manifest* baseline because **Lineage** already uses
+"baseline" for Task-generation idempotency.
+_Avoid_: original, upstream version, base batch.
+
+**Skill override**:
+An org's edit to a skill the platform still tracks. The edit is preserved, never
+overwritten — the platform's newer version is offered for review instead. An
+override that happens to arrive at exactly the platform's current content is not a
+divergence at all: the baseline simply advances.
+_Avoid_: conflict, fork, dirty (the org's own edit is a normal act, not a fault).
+
+**Pinned skills**:
+The skills a component's build is guaranteed to have loaded, recorded on that
+component by the agent that designed it. Deliberately not an exhaustive list of
+what a build might consult — the rest of the library stays available, and skills
+that turn out to be loaded repeatedly are candidates for pinning.
+_Avoid_: required skills, needed skills (both imply the list is complete).
+
+**Design agent**:
+The agent that authors and edits a project's spec, design, and Task plan. It reads
+skills as guidance for that work, and records which skills each component's build
+will need.
+_Avoid_: engineering agent (coding is engineering too), architect (a role heading
+inside a skill's body, not the agent).
+
+**Coding agent**:
+The agent that implements a component — it builds, verifies, and opens the pull
+request. It reads skills as guidance for construction.
+_Avoid_: builder, implementer agent, runner (the runner is the pod it executes in).
+
 ## Dependencies (`services/aep-api`)
 
 **Platform resource**:
@@ -122,9 +186,10 @@ executor, e.g. create a database, provision an IDP application). Carried as a la
 on the Task.
 _Avoid_: task type, sre (a role, not a work class; incident-born code fixes are `coding`).
 
-**Origin**:
+**Origin (of a Task)**:
 Where a Task came from: spec-plan generation, an incident, or a human. Non-routing
-metadata — an incident-born Task needing a code fix is still `coding`.
+metadata — an incident-born Task needing a code fix is still `coding`. Distinct from
+a skill's **Origin**, which describes where its tracked baseline came from.
 _Avoid_: source (collides with source spec/design version lineage).
 
 **Machine block**:

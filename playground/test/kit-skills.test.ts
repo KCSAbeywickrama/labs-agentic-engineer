@@ -23,6 +23,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseSkill, loadRepoSkills } from "../src/kit/skills.js";
+import { renderSkillFiles, skillsSnapshotSha } from "../src/kit/snapshot.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 // playground/test → repo root is two up; skills/ lives there (ADR-0002).
@@ -84,4 +85,59 @@ test("loadRepoSkills reads references/*.md into the skill's references map", () 
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// The service reads `metadata.aep.kind` (ownership) and `metadata.aep.audience`
+// (which agent may load a skill) straight off the materialized SKILL.md. The
+// renderer used to synthesize a name+description-only frontmatter, so the
+// playground handed the agent an UNMARKED library — every skill loadable by
+// every agent, unlike any real org. These pin the round trip.
+test("parseSkill carries the metadata block through", () => {
+  const raw =
+    "---\nname: go\ndescription: builds Go\nmetadata:\n  aep:\n    kind: org\n    audience: [coding]\n---\n\nbody\n";
+  const s = parseSkill("go", raw);
+  assert.deepEqual(s.metadata, { aep: { kind: "org", audience: ["coding"] } });
+});
+
+test("renderSkillFiles writes the metadata block back, so audience survives materialization", () => {
+  const files = renderSkillFiles([
+    {
+      name: "go",
+      description: "builds Go",
+      content: "body",
+      metadata: { aep: { kind: "org", audience: ["coding"] } },
+    },
+  ]);
+  const md = files["skills/go/SKILL.md"] ?? "";
+  assert.match(md, /audience:/);
+  assert.match(md, /coding/);
+  assert.match(md, /kind: org/);
+});
+
+test("a metadata-free skill still renders a plain frontmatter", () => {
+  const files = renderSkillFiles([{ name: "plain", description: "does plain things", content: "body" }]);
+  // Match the KEY at line start — a description mentioning the word must not
+  // make this pass or fail by accident.
+  assert.ok(!/^metadata:/m.test(files["skills/plain/SKILL.md"] ?? ""));
+});
+
+// AEP_DISABLED_SKILLS stands in for the org admin's availability toggle: the
+// platform keeps it in the org repo's skills-manifest.json, which the service
+// reads from the snapshot ROOT — so that is where the playground writes it.
+test("disabled skills land in a manifest at the snapshot root", () => {
+  const files = renderSkillFiles([{ name: "go", description: "builds Go", content: "body" }], ["go"]);
+  const manifest = JSON.parse(files["skills-manifest.json"] ?? "{}") as Record<string, { disabled?: boolean }>;
+  assert.equal(manifest.go?.disabled, true);
+  // The skill's own file is untouched — availability never edits content.
+  assert.ok((files["skills/go/SKILL.md"] ?? "").includes("body"));
+});
+
+test("no manifest is written when nothing is disabled", () => {
+  const files = renderSkillFiles([{ name: "go", description: "builds Go", content: "body" }]);
+  assert.equal(files["skills-manifest.json"], undefined);
+});
+
+test("toggling availability mints a new snapshot sha", () => {
+  const skills = [{ name: "go", description: "builds Go", content: "body" }];
+  assert.notEqual(skillsSnapshotSha(skills), skillsSnapshotSha(skills, ["go"]));
 });

@@ -4,6 +4,7 @@ description: Conventions to follow when writing go applications.
 metadata:
   aep:
     kind: org
+    audience: [coding]
 ---
 
 # Go

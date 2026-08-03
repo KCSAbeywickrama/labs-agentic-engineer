@@ -76,7 +76,7 @@ var (
 		"buildpack": true, "appPath": true, "entrypoint": true,
 		"exposure": true, "dependencies": true, "description": true,
 		"endpoint": true, "exposesAPI": true, "componentAgentInstructions": true,
-		"skillsApplied": true,
+		"skillsPinned": true,
 	}
 )
 
@@ -135,8 +135,8 @@ func validateComponentDesign(content, dirName string) *designProblem {
 			return p
 		}
 	}
-	if sa, present := obj["skillsApplied"]; present {
-		if p := validateSkillsApplied(sa); p != nil {
+	if sp, present := obj["skillsPinned"]; present {
+		if p := validateSkillsPinned(sp); p != nil {
 			return p
 		}
 	}
@@ -172,18 +172,19 @@ func validateEndpoint(v any) *designProblem {
 	return nil
 }
 
-// validateSkillsApplied mirrors the zod `skillsApplied: z.array(z.string())`:
-// when present it must be an array whose every element is a string. Parity with
-// the agent's zod gate — without it the Go fold would accept a shape the agent
-// rejected (or vice versa), diverging the fold. (JSON arrays unmarshal to []any.)
-func validateSkillsApplied(raw any) *designProblem {
+// validateSkillsPinned mirrors the zod `skillsPinned` field
+// (`z.array(z.string())`): when present it must be an array whose every element
+// is a string. Parity with the agent's zod gate — without it the Go fold would
+// accept a shape the agent rejected (or vice versa), diverging the fold. (JSON
+// arrays unmarshal to []any.)
+func validateSkillsPinned(raw any) *designProblem {
 	arr, ok := raw.([]any)
 	if !ok {
-		return &designProblem{code: ErrSchemaViolation, message: "skillsApplied: must be an array"}
+		return &designProblem{code: ErrSchemaViolation, message: "skillsPinned: must be an array"}
 	}
 	for i, v := range arr {
 		if _, ok := v.(string); !ok {
-			return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("skillsApplied[%d]: must be a string", i)}
+			return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("skillsPinned[%d]: must be a string", i)}
 		}
 	}
 	return nil

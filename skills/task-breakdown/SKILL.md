@@ -4,6 +4,7 @@ description: Use when turning a published design into implementation tasks — p
 metadata:
   aep:
     kind: platform
+    audience: [design]
 ---
 
 # Task breakdown
