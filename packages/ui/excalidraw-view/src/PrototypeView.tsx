@@ -27,6 +27,14 @@ import { hotspotToViewport, type ViewportRect } from "./hotspotOverlay.js";
 
 const FLASH_MS = 900;
 
+// Hotspot highlight: the wireframes' flow-accent blue, NOT the brand orange —
+// primary CTAs are drawn filled orange, so an orange ring on top of one is
+// invisible. The white halo keeps the ring legible over blue-ish elements
+// (info badges, links) as well.
+const HIGHLIGHT_BORDER = "#1971c2";
+const HIGHLIGHT_FILL = "rgba(25, 113, 194, 0.12)";
+const HIGHLIGHT_HALO = "0 0 0 2px rgba(255, 255, 255, 0.9)";
+
 /** Excalidraw's own scroll/zoom snapshot — the shape hotspotToViewport needs. */
 type CameraState = { scrollX: number; scrollY: number; zoom: { value: number } };
 
@@ -220,11 +228,16 @@ export function PrototypeView({ model, initialScreen, onScreenChange, fillHeight
                 borderRadius: 1,
                 border: "2px solid transparent",
                 ...(flash
-                  ? { borderColor: "primary.main", bgcolor: "rgba(250,123,63,0.12)" }
+                  ? {
+                      borderColor: HIGHLIGHT_BORDER,
+                      bgcolor: HIGHLIGHT_FILL,
+                      boxShadow: HIGHLIGHT_HALO,
+                    }
                   : {
                       "&:hover": {
-                        borderColor: "primary.main",
-                        bgcolor: "rgba(250,123,63,0.12)",
+                        borderColor: HIGHLIGHT_BORDER,
+                        bgcolor: HIGHLIGHT_FILL,
+                        boxShadow: HIGHLIGHT_HALO,
                       },
                     }),
               }}
