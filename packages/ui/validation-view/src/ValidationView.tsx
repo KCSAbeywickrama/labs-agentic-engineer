@@ -128,9 +128,9 @@ function CriterionRow({
 }) {
   const failed = report?.status === "fail";
   return (
-    // The row divider is applied by RequirementCard, not here — a row cannot know
-    // whether it is the last one. It hangs off this Box, so it lands BELOW a
-    // failure block rather than between the assertion and its own failure detail.
+    // RequirementCard draws the rule that separates rows; it lands on THIS box, so
+    // a failure block stays inside the criterion it belongs to instead of being cut
+    // off from its own assertion.
     <Box sx={{ py: 1 }}>
       <Box sx={{ display: "flex", gap: 1.5, alignItems: "flex-start" }}>
         <Box sx={{ minWidth: 92, flexShrink: 0, pt: "1px" }}>
@@ -237,15 +237,17 @@ function RequirementCard({
           No criteria.
         </Typography>
       ) : (
-        // The criteria get their own box so the divider can hang off
-        // `:not(:last-child)`: the badge row and the statement above are siblings
-        // of the rows, so a `:last-of-type` on the rows themselves would not
-        // reliably mean "last criterion".
-        <Box
-          sx={{
-            "& > *:not(:last-child)": { borderBottom: 1, borderColor: "divider" },
-          }}
-        >
+        // A rule on the TOP of every row, not between rows. Bottom-of-all-but-last
+        // left the first criterion as the only one with no boundary above it, so it
+        // read as belonging to the statement in a way its siblings did not — and it
+        // made a one-criterion requirement render with no rule at all. This way the
+        // statement is the card's header, every criterion is bounded the same, and
+        // the card's own border closes the list at the bottom.
+        //
+        // Owned here rather than by CriterionRow because it is a property of the
+        // LIST; the rows get their own box because the badge row and the statement
+        // above are their siblings.
+        <Box sx={{ "& > *": { borderTop: 1, borderColor: "divider" } }}>
           {requirement.criteria.map((c) => (
             <CriterionRow key={c.id} criterion={c} report={statuses?.get(c.id)} />
           ))}
