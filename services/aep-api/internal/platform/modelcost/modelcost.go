@@ -78,14 +78,51 @@ func NewStamper(rows []ModelRate) *Stamper {
 // only for any aggregate that includes the unstamped row. The historical
 // record is immutable: this is computed once, at capture, and never revisited.
 func (s *Stamper) Cost(t Tokens) *float64 {
-	rate, ok := s.rates[t.ModelID]
-	if !ok || t.ModelID == "" {
+	usd, ok := s.raw(t)
+	if !ok {
 		return nil
 	}
-	usd := (float64(t.InputTokens)*rate.InputPerMTok +
-		float64(t.OutputTokens)*rate.OutputPerMTok +
-		float64(t.CacheReadTokens)*rate.CacheReadPerMTok +
-		float64(t.CacheCreationTokens)*rate.CacheWritePerMTok) / 1e6
 	usd = math.Round(usd*100) / 100
 	return &usd
+}
+
+// SumCost prices a multi-model capture (#291): each slice at its own rate row,
+// summed unrounded and rounded to cents once — per-slice rounding would zero
+// out small contributors. All-or-nothing: a token-bearing slice the stamper
+// cannot price (unknown/empty model) makes the WHOLE stamp nil, because a
+// partial dollar figure silently under-reports spend, and null degrades to the
+// honest tokens-only display. Zero-token slices are ignored; no priceable
+// traffic at all is nil (nothing was spent, nothing to stamp).
+func (s *Stamper) SumCost(slices []Tokens) *float64 {
+	total := 0.0
+	priced := false
+	for _, t := range slices {
+		if t.InputTokens+t.OutputTokens+t.CacheReadTokens+t.CacheCreationTokens == 0 {
+			continue
+		}
+		usd, ok := s.raw(t)
+		if !ok {
+			return nil
+		}
+		total += usd
+		priced = true
+	}
+	if !priced {
+		return nil
+	}
+	total = math.Round(total*100) / 100
+	return &total
+}
+
+// raw is the unrounded USD for one record; ok is false when the model has no
+// rate row (or no id at all).
+func (s *Stamper) raw(t Tokens) (float64, bool) {
+	rate, ok := s.rates[t.ModelID]
+	if !ok || t.ModelID == "" {
+		return 0, false
+	}
+	return (float64(t.InputTokens)*rate.InputPerMTok +
+		float64(t.OutputTokens)*rate.OutputPerMTok +
+		float64(t.CacheReadTokens)*rate.CacheReadPerMTok +
+		float64(t.CacheCreationTokens)*rate.CacheWritePerMTok) / 1e6, true
 }

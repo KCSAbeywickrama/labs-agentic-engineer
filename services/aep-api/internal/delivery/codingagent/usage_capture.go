@@ -27,10 +27,11 @@ import (
 // usageFromLog extracts the run's token usage (#249) from the captured pod
 // log: the last runner NDJSON `result` event carrying a usage object wins
 // (there is one per run; "last" guards against a retried in-container agent).
-// nil when the log carries none — pre-capture runners, or a run that died
-// before its terminal message.
-func usageFromLog(text string) *contracts.TokenUsage {
-	var found *contracts.TokenUsage
+// The capture keeps the per-model split (#291) so RecordUsage can price each
+// model's slice against its own rate row. nil when the log carries none —
+// pre-capture runners, or a run that died before its terminal message.
+func usageFromLog(text string) *contracts.CapturedUsage {
+	var found *contracts.CapturedUsage
 	scanner := bufio.NewScanner(strings.NewReader(text))
 	// The runner's terminal `result` line carries the full usage JSON and can
 	// be large; size the buffer generously (16 MiB) so a long line is scanned,
