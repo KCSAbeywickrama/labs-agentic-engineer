@@ -478,6 +478,22 @@ describe("BuildsPage — one version's story", () => {
     mockCycleBuilds = [];
   });
 
+  it("shows a quiet busy block, not a hold notice, before the first cycle", () => {
+    // Pre-dispatch is progress, not a hold: no leading-edge rule, and the
+    // spinner carries the "working" signal. A hold above replaces it entirely.
+    mockBuilds = [build("v2", "in_progress")];
+    mockRuns = [run({ state: "running", cycles: [] })];
+    mockIssues = withOpenWork();
+    renderPage();
+
+    expect(
+      screen.getByText("Waiting to dispatch the first cycle"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByLabelText("Waiting to dispatch the first cycle"),
+    ).toBeInTheDocument();
+  });
+
   it("says validation is what keeps a delivered session open", () => {
     // After the merge the platform dispatches a VALIDATION cycle the Builds
     // rail deliberately does not narrate — but an open one is the answer to

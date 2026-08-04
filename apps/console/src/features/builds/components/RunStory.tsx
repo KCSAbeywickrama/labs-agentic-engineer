@@ -23,6 +23,7 @@ import {
   Button,
   Card,
   CardContent,
+  CircularProgress,
   Divider,
   Stack,
   Typography,
@@ -300,12 +301,38 @@ export function RunStory({
               // wait: the supervisor is between dispatches. Busy rather than
               // static, because "nothing here" and "about to start" look
               // identical in text and are opposite things to a reader.
-              <RunHoldNotice
-                tone="info"
-                busy
-                title="Waiting to dispatch the first cycle"
-                body="Nothing has started yet — the supervisor dispatches a cycle as soon as this session's predicate clears, and the stages appear here as it does."
-              />
+              //
+              // Not a RunHoldNotice: this is progress, not a hold — the rule
+              // down a notice's leading edge marks something that needs
+              // reading, and a spinner already carries the "working" signal on
+              // its own. A plain quiet surface, spinner sized to the title.
+              <Stack
+                direction="row"
+                spacing={1.5}
+                sx={{
+                  alignItems: "flex-start",
+                  p: 2,
+                  borderRadius: 1.5,
+                  bgcolor: (t) => alpha(t.palette.info.main, 0.06),
+                }}
+              >
+                <CircularProgress
+                  size={18}
+                  thickness={4.5}
+                  aria-label="Waiting to dispatch the first cycle"
+                  sx={{ mt: 0.25, flexShrink: 0 }}
+                />
+                <Box sx={{ minWidth: 0 }}>
+                  <Typography variant="subtitle2">
+                    Waiting to dispatch the first cycle
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25 }}>
+                    Nothing has started yet — the supervisor dispatches a cycle
+                    as soon as this session's predicate clears, and the stages
+                    appear here as it does.
+                  </Typography>
+                </Box>
+              </Stack>
             )}
           </>
         )}
