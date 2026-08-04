@@ -165,7 +165,7 @@ function AgentLogDrawer({
 
   const newest = lines.at(-1);
   const preview = !showLog
-    ? "Not attached — open to replay this session's log."
+    ? "Not attached — open to replay this run's log."
     : newest
       ? formatLine(newest).text
       : phase === "ended"

@@ -105,7 +105,7 @@ export function BuildsPage({
     if (!claims.has(issue.issueNumber)) return undefined;
     const index = currentCycles.findIndex((c) => !c.endedAt);
     if (index === -1) return undefined;
-    return `Claimed by cycle ${index + 1} · ${currentCycles[index]?.kind ?? ""}`.trim();
+    return `Claimed by build session ${index + 1} · ${currentCycles[index]?.kind ?? ""}`.trim();
   };
 
   // The same query IssueSections reads, on the same key — react-query serves
@@ -232,7 +232,7 @@ export function BuildsPage({
         </Box>
       ) : runList.length === 0 ? (
         <Alert severity="info" sx={{ mb: 3 }}>
-          {selected.tag} has no build-session rows — the version was tagged before
+          {selected.tag} has no run rows — the version was tagged before
           this platform started keeping them.
         </Alert>
       ) : (

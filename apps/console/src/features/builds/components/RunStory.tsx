@@ -209,7 +209,7 @@ export function RunStory({
                 },
               }}
             >
-              {cancel.isPending ? "Cancelling…" : "Cancel session"}
+              {cancel.isPending ? "Cancelling…" : "Cancel run"}
             </Button>
           )}
         </Stack>
@@ -225,7 +225,7 @@ export function RunStory({
 
         {cancel.isError && (
           <Alert severity="error" sx={{ mt: 2 }}>
-            {cancel.error instanceof Error ? cancel.error.message : "Failed to cancel the build session"}
+            {cancel.error instanceof Error ? cancel.error.message : "Failed to cancel the run"}
             . Nothing was cancelled — you can retry.
           </Alert>
         )}
@@ -293,8 +293,8 @@ export function RunStory({
               // Over, and it never started one. A spinner here would promise
               // work that is never coming.
               <Typography variant="body2" color="text.secondary">
-                No cycle was ever dispatched — the session settled before the
-                supervisor started one.
+                No build session was ever dispatched — the run settled before
+                the supervisor started one.
               </Typography>
             ) : hold ? null : (
               // Live, no cycle yet, and no hold above already explaining the
@@ -319,16 +319,16 @@ export function RunStory({
                 <CircularProgress
                   size={18}
                   thickness={4.5}
-                  aria-label="Waiting to dispatch the first cycle"
+                  aria-label="Waiting to dispatch the first build session"
                   sx={{ mt: 0.25, flexShrink: 0 }}
                 />
                 <Box sx={{ minWidth: 0 }}>
                   <Typography variant="subtitle2">
-                    Waiting to dispatch the first cycle
+                    Waiting to dispatch the first build session
                   </Typography>
                   <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25 }}>
-                    Nothing has started yet — the supervisor dispatches a cycle
-                    as soon as this session's predicate clears, and the stages
+                    Nothing has started yet — the supervisor dispatches a build
+                    session as soon as this run's predicate clears, and the stages
                     appear here as it does.
                   </Typography>
                 </Box>

@@ -71,7 +71,7 @@ export function RunHistoryList({
           color: "text.secondary",
         }}
       >
-        EARLIER BUILD SESSIONS OF {tag.toUpperCase()}
+        EARLIER RUNS OF {tag.toUpperCase()}
       </Typography>
       <Stack spacing={1}>
         {runs.map((run) => (
@@ -97,15 +97,15 @@ function SessionRow({ run }: { run: MilestoneRunView }) {
   const outcome =
     reason ||
     (merged > 0
-      ? `${merged} of ${cycles.length} cycle${cycles.length === 1 ? "" : "s"} merged`
-      : "Landed nothing — no cycle merged.");
+      ? `${merged} of ${cycles.length} build session${cycles.length === 1 ? "" : "s"} merged`
+      : "Landed nothing — no build session merged.");
 
   return (
     <Card variant="outlined">
       <ButtonBase
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        aria-label={`${open ? "Hide" : "Show"} this build session's detail`}
+        aria-label={`${open ? "Hide" : "Show"} this run's detail`}
         sx={{ width: "100%", justifyContent: "flex-start", px: 2, py: 1.25 }}
       >
         <Stack
@@ -156,7 +156,7 @@ function SessionRow({ run }: { run: MilestoneRunView }) {
         <Box sx={{ px: 2, py: 1.5 }}>
           {cycles.length === 0 ? (
             <Typography variant="body2" color="text.secondary">
-              No cycle was ever dispatched — the session settled before the
+              No build session was ever dispatched — the run settled before the
               supervisor started one.
             </Typography>
           ) : (

@@ -56,7 +56,7 @@ export function EarlierSessions({
           color: "text.secondary",
         }}
       >
-        EARLIER CYCLES IN THIS SESSION
+        EARLIER BUILD SESSIONS IN THIS RUN
       </Typography>
       <CycleLines cycles={cycles} />
     </Box>
@@ -88,7 +88,7 @@ export function CycleLines({ cycles }: { cycles: RunCycleView[] }) {
             }}
           />
           <Typography variant="body2" sx={{ fontWeight: 500 }}>
-            {`Cycle ${i + 1} · ${cycle.kind}`}
+            {`Build session ${i + 1} · ${cycle.kind}`}
           </Typography>
           <Typography variant="caption" color="text.secondary">
             {cycleOutcome(cycle)}
