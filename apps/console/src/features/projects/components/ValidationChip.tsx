@@ -79,6 +79,11 @@ const GLYPH: Record<string, Glyph> = {
 
 const GLYPH_ICON = { check: Check, cross: X, dash: Minus } as const;
 
+/** Leading a control, not sitting mid-sentence — used for both of the chip's names. */
+function capitalize(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
 // StatusMark is a tone-filled disc with a bare glyph inside — composed rather
 // than taken from lucide's circle family because those are outlines: rendering
 // CircleCheck with fill="currentColor" fills its check path too and the glyph
@@ -155,7 +160,12 @@ export function ValidationChip({
   // The shared labels are lowercase so they read mid-sentence in the overview
   // deploy line; leading a control, this one is capitalized — the same
   // conversion VerdictTile makes for its headline.
-  const label = view.label.charAt(0).toUpperCase() + view.label.slice(1);
+  const label = capitalize(view.label);
+  // `validated*` and `validation?` say what they mean with a mark no screen reader
+  // announces, so those two states carry a spoken form and it becomes the accessible
+  // name. Run through the SAME capitalize step rather than pre-cased at the mapper,
+  // so there is one casing rule for this control instead of two that can drift.
+  const spoken = capitalize(view.spoken ?? view.label);
   const glyph = GLYPH[validation];
 
   return (
@@ -163,6 +173,9 @@ export function ValidationChip({
       to="/projects/$projectName/validation"
       params={{ projectName }}
       title="Open validation"
+      // Equal to the visible label for every state that has no spoken form, so this
+      // is a no-op override in seven of nine — see `spoken` above for the other two.
+      aria-label={spoken}
       size="small"
       color="inherit"
       disableElevation

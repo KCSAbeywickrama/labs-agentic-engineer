@@ -117,8 +117,8 @@ export function verdictCounts(tally: CriterionTally | undefined): string {
 /**
  * The verdict tile: what the validation run concluded, above the per-criterion
  * evidence. It exists because a chip label cannot finish the sentence for the
- * verdicts that matter most — "Validated*" begs *which part*, "Validation
- * inconclusive" begs *why*, "Validation reporting error" begs *so what* — and
+ * verdicts that matter most — "Validated*" begs *which part*, "Validation?" begs
+ * *why is that a question*, "Validation error" begs *what broke* — and
  * because three of the five ask the reader to do something (validate the rest by
  * hand, fix a failure), which no chip can say.
  *

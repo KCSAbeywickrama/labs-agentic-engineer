@@ -78,6 +78,28 @@ describe("ValidationChip", () => {
     expect(screen.getByRole("link", { name: "Validated" })).toBeInTheDocument();
   });
 
+  // "Validated*" and "Validation?" differ from "Validated" and "Validation" by a mark
+  // no screen reader announces, so as visible text alone each would collapse onto a
+  // neighbouring state's name. The spoken form is what keeps `partial` distinguishable
+  // from `passed`, and `inconclusive` from the word the page is titled with.
+  it("announces the spoken form for the labels whose meaning is punctuation", () => {
+    for (const [validation, name] of [
+      ["partial", "Validated, partially"],
+      ["inconclusive", "Validation inconclusive"],
+    ] as const) {
+      const { unmount } = render(
+        <ValidationChip projectName="acme" validation={validation} />,
+      );
+
+      expect(screen.getByRole("link", { name })).toBeInTheDocument();
+      // The visible text is still the terse label — the override is for the a11y
+      // name only, not a second copy of the vocabulary.
+      expect(screen.getByRole("link").textContent).not.toBe(name);
+
+      unmount();
+    }
+  });
+
   // A verdict with no glyph would still render, just bare — which reads as
   // "nothing to say about this state" rather than as an omission. Catch it here.
   it("renders a link and a status mark for every verdict the contract can send", () => {
