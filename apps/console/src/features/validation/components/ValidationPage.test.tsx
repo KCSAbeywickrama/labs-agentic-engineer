@@ -369,7 +369,7 @@ describe("ValidationPage lifecycle", () => {
     renderPage(undefined);
 
     expect(screen.queryByTestId("run-feed")).not.toBeInTheDocument();
-    expect(screen.getAllByText("Validation inconclusive").length).toBe(2);
+    expect(screen.getAllByText("Validation?").length).toBe(2);
     expect(screen.getByText(/please validate them manually/)).toBeInTheDocument();
   });
 
@@ -386,7 +386,7 @@ describe("ValidationPage lifecycle", () => {
     renderPage(undefined);
 
     expect(screen.queryByTestId("run-feed")).not.toBeInTheDocument();
-    expect(screen.getAllByText("Validation reporting error").length).toBe(2);
+    expect(screen.getAllByText("Validation error").length).toBe(2);
     expect(
       screen.getByText(/generating the validation report/),
     ).toBeInTheDocument();

@@ -1,5 +1,9 @@
 import type { components } from "../../generated/aep-api";
 import { taskUsage } from "./usage";
+import {
+  DEFAULT_VALIDATION_CRITERIA,
+  DEFAULT_VALIDATION_REPORT,
+} from "./validation";
 
 type ProjectStatus = components["schemas"]["ProjectStatus"];
 type ComponentList = components["schemas"]["ComponentList"];
@@ -161,7 +165,9 @@ export const projectStatuses: Record<
       version: "v1",
       status: "deployed",
       components: { total: 3, ready: 3 },
-      validation: "passed",
+      // Mirrors settledRun's verdict below — the chip and the run story are read
+      // side by side on the deployments board, so they cannot disagree here.
+      validation: "partial",
     },
   },
   // v1 build done but the dev deployment failed.
@@ -582,12 +588,18 @@ const waitingRun: BuildRunList = {
 };
 // A run that SELF-HEALED: its first validation attempt failed, the platform filed
 // the failed criterion as ordinary work, a coding cycle repaired it, and the second
-// attempt passed. Four cycles — coding, validation, coding, validation — with a
-// verdict on each attempt, because the run's own verdict is only its latest.
+// attempt came back clean. Four cycles — coding, validation, coding, validation —
+// with a verdict on each attempt, because the run's own verdict is only its latest.
 //
 // The shape matters to the console beyond looking realistic: the report is read at
 // the LAST validation cycle's merge commit, so a fixture with two of them is what
 // catches a reader that takes the first.
+//
+// The verdict is `partial`, not `passed`, because the default oracle carries a
+// manual and a scenario criterion — methods no runner executes. `passed` REQUIRES
+// full coverage, so claiming it here would have the tile say "all criteria passed"
+// over a report showing two nobody checked. Every other verdict is one devtools
+// key away: see fixtures/validation.ts.
 const settledRun: BuildRunList = {
   tag: "v1",
   milestoneNumber: 1,
@@ -596,7 +608,7 @@ const settledRun: BuildRunList = {
       state: "succeeded",
       endedAt: "2026-07-10T10:41:00Z",
       validation: {
-        verdict: "passed",
+        verdict: "partial",
         issue: 12,
         reportPath: "tests/validation/report.json",
       },
@@ -648,7 +660,7 @@ const settledRun: BuildRunList = {
           prNumber: 6,
           prUrl: `${REPO_URL}/pull/6`,
           mergeSha: "7ab41c90ee31d5f0",
-          validationVerdict: "passed",
+          validationVerdict: "partial",
           validationIssue: 12,
           createdAt: "2026-07-10T10:24:00Z",
           endedAt: "2026-07-10T10:40:00Z",
@@ -906,159 +918,9 @@ const validationPlan = `# Demo Shop — Validation plan
 - Each service exposes /healthz returning 200.
 `;
 
-// The acceptance oracle authored by the validation-criteria skill — the
-// read-only structure the "Validation Criteria" view renders. Mixes the three
-// methods; per-criterion outcomes live in the run report below, not here.
-const validationCriteriaJson = JSON.stringify(
-  {
-    requirements: [
-      {
-        id: "REQ-001",
-        statement:
-          "Shoppers can browse and search the catalog by name and category.",
-        criteria: [
-          {
-            id: "AC-001-a",
-            must: "A shopper can search products by name and see matching results",
-            method: "e2e",
-          },
-          {
-            id: "AC-001-b",
-            must: "A shopper can filter the catalog by category",
-            method: "e2e",
-          },
-        ],
-      },
-      {
-        id: "REQ-002",
-        statement: "Cart contents persist across browser sessions.",
-        criteria: [
-          {
-            id: "AC-002-a",
-            must: "A cart's contents survive a browser restart for the same shopper",
-            method: "e2e",
-          },
-          {
-            id: "AC-002-b",
-            must: "The cart total updates promptly as items are added or removed",
-            method: "scenario",
-          },
-        ],
-      },
-      {
-        id: "REQ-003",
-        statement:
-          "Checkout produces an order visible in the shopper's order history.",
-        criteria: [
-          {
-            id: "AC-003-a",
-            must: "Completing checkout creates an order visible in order history",
-            method: "e2e",
-          },
-          {
-            id: "AC-003-b",
-            must: "Payment details are transmitted over an encrypted connection",
-            method: "manual",
-          },
-        ],
-      },
-    ],
-  },
-  null,
-  2,
-);
-
-// The runner's committed run report (tests/validation/report.json, schemaVersion
-// 1) joined onto the oracle by criterion id — exercises every state chip
-// (pass / fail / not_run / not_validated / manual) plus the flaky, healed, and
-// failure-detail arms of the view.
-const validationReportJson = JSON.stringify(
-  {
-    schemaVersion: 1,
-    issue: 30,
-    commit: "a1b2c3d",
-    generatedAt: "2026-07-20T10:00:00.000Z",
-    playwrightVersion: "1.55.0",
-    totals: {
-      e2e: { total: 4, pass: 2, fail: 1, notRun: 1 },
-      manual: 1,
-      scenario: 1,
-    },
-    criteria: [
-      {
-        id: "AC-001-a",
-        requirementId: "REQ-001",
-        must: "A shopper can search products by name and see matching results",
-        method: "e2e",
-        status: "pass",
-        spec: "tests/e2e/specs/AC-001-a.spec.ts",
-        healed: false,
-        flaky: false,
-        durationMs: 1840,
-        failure: null,
-      },
-      {
-        id: "AC-001-b",
-        requirementId: "REQ-001",
-        must: "A shopper can filter the catalog by category",
-        method: "e2e",
-        status: "fail",
-        spec: "tests/e2e/specs/AC-001-b.spec.ts",
-        healed: false,
-        flaky: true,
-        durationMs: 2600,
-        // The real shape the runner writes: an object, not a bare string. A
-        // string-shaped mock is what let the view's dead failure block look fine.
-        failure: {
-          message:
-            "TimeoutError: locator.click: Timeout 5000ms exceeded.\n  waiting for getByRole('option', { name: 'Accessories' })",
-          location: "tests/e2e/specs/AC-001-b.spec.ts:31",
-        },
-      },
-      {
-        id: "AC-002-a",
-        requirementId: "REQ-002",
-        must: "A cart's contents survive a browser restart for the same shopper",
-        method: "e2e",
-        status: "not_run",
-        spec: null,
-        healed: false,
-        flaky: false,
-        durationMs: 0,
-        failure: null,
-      },
-      {
-        id: "AC-002-b",
-        requirementId: "REQ-002",
-        must: "The cart total updates promptly as items are added or removed",
-        method: "scenario",
-        status: "not_validated",
-      },
-      {
-        id: "AC-003-a",
-        requirementId: "REQ-003",
-        must: "Completing checkout creates an order visible in order history",
-        method: "e2e",
-        status: "pass",
-        spec: "tests/e2e/specs/AC-003-a.spec.ts",
-        healed: true,
-        healAttempts: 1,
-        flaky: false,
-        durationMs: 3120,
-        failure: null,
-      },
-      {
-        id: "AC-003-b",
-        requirementId: "REQ-003",
-        must: "Payment details are transmitted over an encrypted connection",
-        method: "manual",
-        status: "manual",
-      },
-    ],
-  },
-  null,
-  2,
-);
+// The two validation artifacts come from ./validation.ts, which builds the oracle
+// and the run report from ONE outcome map so they cannot disagree — and which the
+// aep:mock:validation switch swaps wholesale to reach every verdict.
 
 // Spec files as the Files API serves them (#113): repo-relative paths under
 // specs/, metadata (list-files) split from content (read-file).
@@ -1098,10 +960,10 @@ const fullFiles: MockSpecFile[] = [
   { path: "specs/validation/validation-plan.md", content: validationPlan },
   {
     path: "specs/validation/validation-criteria.json",
-    content: validationCriteriaJson,
+    content: DEFAULT_VALIDATION_CRITERIA,
   },
   // Runner artifact outside specs/ — reachable via the read-file allow-list.
-  { path: "tests/validation/report.json", content: validationReportJson },
+  { path: "tests/validation/report.json", content: DEFAULT_VALIDATION_REPORT },
 ];
 
 export const projectSpecFiles: Record<
