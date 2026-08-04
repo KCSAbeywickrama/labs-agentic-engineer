@@ -5319,6 +5319,15 @@ components:
           type: string
         content:
           type: string
+        encoding:
+          default: utf8
+          description: How `content` is encoded. `base64` lets a write carry binary
+            bytes (e.g. a PDF reference document); the server decodes before validation
+            and commit, and size limits apply to the decoded bytes.
+          enum:
+          - utf8
+          - base64
+          type: string
         path:
           type: string
       required:

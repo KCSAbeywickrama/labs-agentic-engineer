@@ -83,6 +83,12 @@ Features currently being built. One line each; **must be emptied on ship**
 (the line moves to the inventory below). If a line sits here for weeks,
 that's a stalled feature — investigate, don't ignore.
 
+- Project create — reference document upload on the "What do you want to
+  build?" view: `.md`/`.txt`/`.pdf` (≤10 files, ≤5 MB each) committed post-create
+  to `specs/requirements/references/` via one atomic `files/apply` (base64 for
+  PDF), surfaced to the `/start` kickoff through the idea-steer channel —
+  [#383](https://github.com/wso2/labs-agentic-engineer/issues/383)
+  (BE handshake: [#384](https://github.com/wso2/labs-agentic-engineer/issues/384))
 - Agent chat — structured question cards: `ask_question` (single) +
   `ask_questions` (batch form) tool-calls rendered as native Oxygen UI cards
   in the activity stream (answer returns as the next turn's plain text);

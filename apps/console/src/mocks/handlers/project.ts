@@ -1,8 +1,13 @@
 import type { components } from "../../generated/aep-api";
 
 type ApiError = components["schemas"]["Error"];
+type ApplyRequest = components["schemas"]["ApplyRequest"];
+type ApplyResult = components["schemas"]["ApplyResult"];
 import { http, HttpResponse, type JsonBodyType } from "msw";
 import {
+  appliedFileContent,
+  appliedFileMetas,
+  applyFilesError,
   componentDeployments,
   componentOpenApi,
   projectBuildRuns,
@@ -14,6 +19,7 @@ import {
   projectStatuses,
   projectTags,
   projectTasks,
+  recordAppliedFiles,
   specFileContent,
   specFileMetas,
   specFileNotFound,
@@ -266,25 +272,65 @@ export const projectHandlers = [
     respond((s) => projectTags[s]),
   ),
   // Files API (#113): list-files metadata + per-file content reads, exactly
-  // as aep-api serves them (repo-relative specs/ paths).
-  http.get("*/api/v1/projects/:projectName/files", () =>
-    respond((s) => specFileMetas(projectSpecFiles[s])),
+  // as aep-api serves them (repo-relative specs/ paths). Files applied through
+  // the mock files/apply (#383's reference uploads) are merged in per project.
+  http.get("*/api/v1/projects/:projectName/files", ({ params }) =>
+    respond((s) => [
+      ...specFileMetas(projectSpecFiles[s]),
+      ...appliedFileMetas(String(params.projectName)),
+    ]),
   ),
-  http.get("*/api/v1/projects/:projectName/files/*", ({ request }) => {
-    const s = scenario();
-    if (s === "error") {
-      return HttpResponse.json(projectSectionError, {
-        status: 500,
-      });
-    }
-    const pathname = new URL(request.url).pathname;
-    const path = decodeURIComponent(pathname.replace(/^.*\/files\//, ""));
-    const file = specFileContent(projectSpecFiles[s], path);
-    if (!file) {
-      return HttpResponse.json(specFileNotFound(path), {
-        status: 404,
-      });
-    }
-    return HttpResponse.json(file);
-  }),
+  http.get(
+    "*/api/v1/projects/:projectName/files/*",
+    ({ request, params }) => {
+      const s = scenario();
+      if (s === "error") {
+        return HttpResponse.json(projectSectionError, {
+          status: 500,
+        });
+      }
+      const pathname = new URL(request.url).pathname;
+      const path = decodeURIComponent(pathname.replace(/^.*\/files\//, ""));
+      const file =
+        specFileContent(projectSpecFiles[s], path) ??
+        appliedFileContent(String(params.projectName), path);
+      if (!file) {
+        return HttpResponse.json(specFileNotFound(path), {
+          status: 404,
+        });
+      }
+      return HttpResponse.json(file);
+    },
+  ),
+  // apply-files: the reference-document batch the create flow commits right
+  // after POST /projects (#383). Error state (the confirm step's Retry /
+  // Continue-without-documents surface) via
+  // localStorage.setItem('aep:mock:project:apply', 'error').
+  http.post(
+    "*/api/v1/projects/:projectName/files/apply",
+    async ({ request, params }) => {
+      if (localStorage.getItem("aep:mock:project:apply") === "error") {
+        return HttpResponse.json(applyFilesError, { status: 500 });
+      }
+      const body = (await request.json()) as ApplyRequest;
+      const writes = body.writes ?? [];
+      const invalid =
+        writes.length === 0
+          ? "empty apply (no writes or deletes)"
+          : writes.find((w) => !w.path.startsWith("specs/"))
+            ? "only specs/ paths are accessible via this API"
+            : null;
+      if (invalid) {
+        return HttpResponse.json(
+          { code: "invalid_path", message: invalid } satisfies ApiError,
+          { status: 400 },
+        );
+      }
+      const files = recordAppliedFiles(String(params.projectName), writes);
+      return HttpResponse.json({
+        commitSha: files[0]?.sha ?? "0000000000000000000000000000000000000000",
+        files,
+      } satisfies ApplyResult);
+    },
+  ),
 ];

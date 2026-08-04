@@ -457,6 +457,24 @@ func (e TurnInputBodyUseCase) Valid() bool {
 	}
 }
 
+// Defines values for WriteOpEncoding.
+const (
+	Base64 WriteOpEncoding = "base64"
+	UTF8   WriteOpEncoding = "utf8"
+)
+
+// Valid indicates whether the value is a known member of the WriteOpEncoding enum.
+func (e WriteOpEncoding) Valid() bool {
+	switch e {
+	case Base64:
+		return true
+	case UTF8:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ListTasksParamsState.
 const (
 	All    ListTasksParamsState = "all"
@@ -1783,8 +1801,14 @@ type WorkflowRunTask struct {
 type WriteOp struct {
 	BaseSha string `json:"baseSha,omitempty"`
 	Content string `json:"content"`
-	Path    string `json:"path"`
+
+	// Encoding How `content` is encoded. `base64` lets a write carry binary bytes (e.g. a PDF reference document); the server decodes before validation and commit, and size limits apply to the decoded bytes.
+	Encoding WriteOpEncoding `json:"encoding,omitempty"`
+	Path     string          `json:"path"`
 }
+
+// WriteOpEncoding How `content` is encoded. `base64` lets a write carry binary bytes (e.g. a PDF reference document); the server decodes before validation and commit, and size limits apply to the decoded bytes.
+type WriteOpEncoding string
 
 // userJWTContextKey is the context key for userJWT security scheme
 type userJWTContextKey string

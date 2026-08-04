@@ -28,6 +28,7 @@ import type { components } from "../../../generated/aep-api";
 import { client } from "../../../api/client";
 import { useConfig } from "../../settings/api/queries";
 import { firstEndpointUrl } from "../lib/deploymentUrl";
+import { toReferenceWrites } from "../lib/referenceFiles";
 import { deploymentsAreMoving } from "../lib/deploymentRows";
 import { projectKeys } from "./keys";
 import { apiErrorMessage } from "../../../api/errors";
@@ -378,6 +379,37 @@ export function useBuildProject(projectName: string) {
 // section), so this rides the settings feature's shared useConfig query
 // instead of a second, independent fetch of the same endpoint. gitProvider
 // is nullable (not connected yet), hence the optional chaining.
+// The create view's reference documents (#383): one atomic files/apply batch
+// committed right after POST /projects succeeds. Deliberately NOT part of
+// useCreateProject — a failed upload must leave the created project intact so
+// the confirm step can offer Retry / Continue without documents.
+export function useUploadReferences() {
+  return useMutation({
+    mutationFn: async ({
+      projectName,
+      files,
+    }: {
+      projectName: string;
+      files: File[];
+    }) => {
+      const writes = await toReferenceWrites(files);
+      const { data, error } = await client.POST(
+        "/projects/{projectName}/files/apply",
+        {
+          params: { path: { projectName } },
+          body: { writes, message: "Add reference documents" },
+        },
+      );
+      if (error || data === undefined) {
+        throw new Error(
+          apiErrorMessage(error, "Failed to upload the reference documents"),
+        );
+      }
+      return data;
+    },
+  });
+}
+
 export function useGithubOrg() {
   const { data } = useConfig();
   return {
