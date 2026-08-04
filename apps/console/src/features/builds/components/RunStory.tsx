@@ -168,7 +168,8 @@ export function RunStory({
           spacing={1.5}
           sx={{ alignItems: "center", flexWrap: "wrap", rowGap: 1 }}
         >
-          <Typography variant="h6">{run.milestoneTitle}</Typography>
+          {/* No version here either — the page header's picker owns it, and
+              every run on this page belongs to that version by construction. */}
           <StatusChip label={chip.label} tone={chip.tone} appearance="soft" dot />
           <StatusChip label={runOriginLabel(run.origin)} tone="neutral" appearance="soft" />
           <Typography variant="body2" color="text.secondary">

@@ -21,8 +21,8 @@ import { createRoot } from "react-dom/client";
 import { RouterProvider } from "@tanstack/react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
+  AcrylicOrangeTheme,
   CssBaseline,
-  OxygenTheme,
   OxygenUIThemeProvider,
 } from "@wso2/oxygen-ui";
 import { AppAuthProvider } from "./auth/AuthProvider";
@@ -53,12 +53,7 @@ void enableMocking().then(() => {
     <StrictMode>
       {/* Auth outermost (issue #91): the OIDC session exists before any UI. */}
       <AppAuthProvider>
-        {/* Flat surfaces, not acrylic: the Builds redesign puts a stage strip,
-            a live log and a milestone panel on the same screen, and the
-            acrylic theme's orange wash tinted every one of them. Oxygen's base
-            theme keeps the same orange for accents (links, primary buttons)
-            over a neutral background. */}
-        <OxygenUIThemeProvider theme={OxygenTheme}>
+        <OxygenUIThemeProvider theme={AcrylicOrangeTheme}>
           <CssBaseline />
           <QueryClientProvider client={queryClient}>
             <RouterProvider router={router} />

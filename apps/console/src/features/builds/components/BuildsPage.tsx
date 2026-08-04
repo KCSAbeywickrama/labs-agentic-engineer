@@ -209,18 +209,9 @@ export function BuildsPage({
 
   return (
     <>
-      <PageHeader
-        title="Builds"
-        // The version being read, and the milestone it is building — the two
-        // facts that say WHICH builds these are.
-        subtitle={
-          current?.milestoneTitle && current.milestoneTitle !== selected.tag
-            ? `${selected.tag} · ${current.milestoneTitle}`
-            : selected.tag
-        }
-        backTo={backTo}
-        actions={versionSelector}
-      />
+      {/* No version subtitle: the picker on the right already names the
+          version, and repeating it under the title said it twice. */}
+      <PageHeader title="Builds" backTo={backTo} actions={versionSelector} />
 
       {runs.isError ? (
         <Alert
