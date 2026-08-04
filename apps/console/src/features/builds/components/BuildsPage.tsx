@@ -87,7 +87,12 @@ export function BuildsPage({
   const earlierSessions = currentCycles.slice(0, -1);
 
   const status = useProjectStatus(projectName);
-  const repoUrl = status.data?.repoUrl?.replace(/\/+$/, "");
+  // The platform records a CLONE url, which carries a `.git` suffix — appending
+  // a path to it straight off yields `…/repo.git/issues`, which 404s. Strip the
+  // suffix (and any trailing slash) to get the repo's web root.
+  const repoUrl = status.data?.repoUrl
+    ?.replace(/\/+$/, "")
+    .replace(/\.git$/, "");
   const issuesUrl = repoUrl ? `${repoUrl}/issues` : undefined;
 
   // Which CYCLE claimed an in-flight issue. `resolves` is the merge policy's

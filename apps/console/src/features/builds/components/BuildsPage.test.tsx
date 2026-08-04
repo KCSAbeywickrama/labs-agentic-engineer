@@ -107,8 +107,10 @@ vi.mock("../../tasks/api/queries", () => ({
 // The repo URL behind the milestone panel's "view all issues" link. Same query
 // key the project layout already reads, so react-query serves it from cache
 // rather than issuing a second request.
+// The platform records a CLONE url — it carries a `.git` suffix.
+const mockRepoUrl = "https://github.com/acme/demo.git";
 vi.mock("../../projects/api/queries", () => ({
-  useProjectStatus: () => ({ data: { repoUrl: "https://github.com/acme/demo" } }),
+  useProjectStatus: () => ({ data: { repoUrl: mockRepoUrl } }),
 }));
 
 let mockBuilds: BuildSummary[] = [];
@@ -428,6 +430,19 @@ describe("BuildsPage — one version's story", () => {
     renderPage();
     expect(screen.getByText("Incident")).toBeInTheDocument();
     expect(screen.getByText("Spec build")).toBeInTheDocument();
+  });
+
+  it("links issues at the repo's web root, not at its clone url", () => {
+    // repoUrl is a CLONE url. Appending straight to it gave
+    // `…/demo.git/issues`, which 404s on GitHub.
+    mockBuilds = [build("v2", "in_progress")];
+    mockRuns = [run()];
+    mockIssues = withOpenWork();
+    renderPage();
+
+    expect(
+      screen.getByRole("link", { name: /View all issues/ }),
+    ).toHaveAttribute("href", "https://github.com/acme/demo/issues");
   });
 
   it("keeps an earlier session collapsed until asked, then shows its cycles", () => {

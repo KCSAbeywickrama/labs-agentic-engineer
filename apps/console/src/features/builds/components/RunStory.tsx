@@ -140,6 +140,11 @@ export function RunStory({
     ? (progress.cycles.find((c) => c.cycle.id === current.id)?.lines ?? [])
     : [];
 
+  // Is there anything below the header worth ruling off? The strip and NOW when
+  // a cycle exists; the "never dispatched" line on a settled session; the
+  // waiting notice otherwise — unless a hold above is already saying it.
+  const hasBody = Boolean(current) || terminal || !hold;
+
   // The card carries state in its EDGE, not a fill — but only for the two
   // states worth a ring: something is moving (info), or something broke
   // (error). Ringing a merely-waiting run in amber painted the whole card
@@ -234,8 +239,10 @@ export function RunStory({
         )}
 
         {/* A planning run has provably no build sessions — the supervisor that
-            dispatches them has not been started yet. */}
-        {!planning && (
+            dispatches them has not been started yet. And when a hold above has
+            already explained the wait, there is no body to rule off — a divider
+            with nothing under it reads as something that failed to render. */}
+        {!planning && hasBody && (
           <>
             <Divider sx={{ my: 2 }} />
 
@@ -269,11 +276,24 @@ export function RunStory({
                   />
                 )}
               </Stack>
-            ) : (
+            ) : terminal ? (
+              // Over, and it never started one. A spinner here would promise
+              // work that is never coming.
               <Typography variant="body2" color="text.secondary">
-                No cycle has been dispatched yet — the session is waiting on
-                its dispatch predicate.
+                No cycle was ever dispatched — the session settled before the
+                supervisor started one.
               </Typography>
+            ) : hold ? null : (
+              // Live, no cycle yet, and no hold above already explaining the
+              // wait: the supervisor is between dispatches. Busy rather than
+              // static, because "nothing here" and "about to start" look
+              // identical in text and are opposite things to a reader.
+              <RunHoldNotice
+                tone="info"
+                busy
+                title="Waiting to dispatch the first cycle"
+                body="Nothing has started yet — the supervisor dispatches a cycle as soon as this session's predicate clears, and the stages appear here as it does."
+              />
             )}
           </>
         )}
