@@ -31,12 +31,44 @@ import {
   runCycleLines,
   runHeartbeatLine,
 } from "../fixtures/run-progress";
+import {
+  VALIDATION_FILE_PATHS,
+  VALIDATION_SCENARIOS,
+  validationFiles,
+  validationRuns,
+  type ValidationScenario,
+} from "../fixtures/validation";
 
 function scenario(): ProjectScenario {
-  return (
-    (localStorage.getItem("aep:mock:project") as ProjectScenario | null) ??
-    "building"
-  );
+  const chosen = localStorage.getItem("aep:mock:project") as ProjectScenario | null;
+  if (chosen) return chosen;
+  // A verdict override is only reachable on a version whose run got that far, so
+  // one devtools key is enough to see it: the base defaults to the deployed story
+  // rather than the usual mid-build one.
+  return validationScenario() ? "deployed" : "building";
+}
+
+// The validation override (aep:mock:validation), or null when the project
+// scenario's own fixtures should stand. Unknown values are ignored rather than
+// passed through — a typo would otherwise render as the `none` empty state and
+// look like the switch is broken.
+function validationScenario(): ValidationScenario | null {
+  const raw = localStorage.getItem("aep:mock:validation");
+  return raw && VALIDATION_SCENARIOS.includes(raw as ValidationScenario)
+    ? (raw as ValidationScenario)
+    : null;
+}
+
+// The project's files with the two validation artifacts swapped for the ones the
+// overridden verdict implies. Dropping them first is what makes `unreported` and
+// `skipped` reachable: those scenarios contribute FEWER files, not different ones.
+function specFiles(s: Exclude<ProjectScenario, "error">) {
+  const v = validationScenario();
+  if (!v) return projectSpecFiles[s];
+  return [
+    ...projectSpecFiles[s].filter((f) => !VALIDATION_FILE_PATHS.includes(f.path)),
+    ...validationFiles(v),
+  ];
 }
 
 function respond<T extends JsonBodyType>(
@@ -55,7 +87,13 @@ function respond<T extends JsonBodyType>(
 // itself (GET /projects/:projectName) is served by handlers/projects.ts.
 export const projectHandlers = [
   http.get("*/api/v1/projects/:projectName/status", () =>
-    respond((s) => projectStatuses[s]),
+    respond((s) => {
+      const v = validationScenario();
+      const base = projectStatuses[s];
+      // Only deploy.validation moves: the rest of the status is the project
+      // scenario's, so the override can be read against any of them.
+      return v ? { ...base, deploy: { ...base.deploy, validation: v } } : base;
+    }),
   ),
   http.get("*/api/v1/projects/:projectName/components", () =>
     respond((s) => projectComponents[s]),
@@ -89,7 +127,14 @@ export const projectHandlers = [
   ),
   // …and one version's whole run story: run rows + cycle records, DB-only.
   http.get("*/api/v1/projects/:projectName/builds/:tag/runs", ({ params }) =>
-    respond((s) => ({ ...projectBuildRuns[s], tag: String(params.tag) })),
+    respond((s) => {
+      const v = validationScenario();
+      // The verdict lives on the RUN, and its cycles are what the page reads the
+      // report at — so an override has to replace the whole story, not patch a
+      // field onto the project scenario's.
+      const runs = v ? validationRuns(v) : projectBuildRuns[s];
+      return { ...runs, tag: String(params.tag) };
+    }),
   ),
   // A build session's fan-out. Derived from the cluster on the real server, so
   // the console only ever asks for a session whose merge landed — and asks per
@@ -268,7 +313,7 @@ export const projectHandlers = [
   // Files API (#113): list-files metadata + per-file content reads, exactly
   // as aep-api serves them (repo-relative specs/ paths).
   http.get("*/api/v1/projects/:projectName/files", () =>
-    respond((s) => specFileMetas(projectSpecFiles[s])),
+    respond((s) => specFileMetas(specFiles(s))),
   ),
   http.get("*/api/v1/projects/:projectName/files/*", ({ request }) => {
     const s = scenario();
@@ -279,7 +324,7 @@ export const projectHandlers = [
     }
     const pathname = new URL(request.url).pathname;
     const path = decodeURIComponent(pathname.replace(/^.*\/files\//, ""));
-    const file = specFileContent(projectSpecFiles[s], path);
+    const file = specFileContent(specFiles(s), path);
     if (!file) {
       return HttpResponse.json(specFileNotFound(path), {
         status: 404,
