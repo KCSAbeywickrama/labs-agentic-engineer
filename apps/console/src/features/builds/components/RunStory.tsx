@@ -108,9 +108,14 @@ export function RunStory({
   const tone = run.state === "succeeded" ? "text.secondary" : "error.main";
 
   // Validation is not this surface's session — the deployment is what gets
-  // validated, and its verdict renders there.
+  // validated, and its verdict renders there. But an OPEN validation cycle is
+  // still the answer to "why is this session running when everything is
+  // green", so the delivered banner names it.
   const cycles = run.cycles.filter((c) =>
     (BUILD_CYCLE_KINDS as readonly string[]).includes(c.kind),
+  );
+  const validating = run.cycles.some(
+    (c) => c.kind === "validation" && !c.endedAt,
   );
   // The glance narrates the CURRENT build session. Earlier sessions of the same
   // run are history, listed below the card — putting them inside it turned the
@@ -268,6 +273,7 @@ export function RunStory({
                     milestoneTitle={run.milestoneTitle}
                     cycles={cycles}
                     work={work}
+                    validating={validating}
                     {...(run.endedAt ? { endedAt: run.endedAt } : {})}
                   />
                 ) : (

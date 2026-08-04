@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import { Box, Button, Stack, Typography, alpha } from "@wso2/oxygen-ui";
+import { Box, Button, CircularProgress, Stack, Typography, alpha } from "@wso2/oxygen-ui";
 import { ArrowRight, CircleCheck } from "@wso2/oxygen-ui-icons-react";
 import { useNavigate } from "@tanstack/react-router";
 import type { components } from "../../../generated/aep-api";
@@ -37,6 +37,7 @@ export function RunDelivered({
   milestoneTitle,
   cycles,
   work,
+  validating = false,
   endedAt,
 }: {
   projectName: string;
@@ -45,6 +46,10 @@ export function RunDelivered({
   cycles: RunCycleView[];
   /** The milestone's agent work, open and closed. */
   work: TaskView[];
+  /** True while the run holds an OPEN validation cycle: the agent work is
+   *  done, and the platform is now validating the deployed system — which is
+   *  exactly why the session chip still says Running. */
+  validating?: boolean;
   endedAt?: string | null;
 }) {
   const navigate = useNavigate();
@@ -101,6 +106,16 @@ export function RunDelivered({
           </Typography>
         </Box>
       </Stack>
+
+      {validating && (
+        <Stack direction="row" spacing={1} sx={{ mt: 1.5, alignItems: "center" }}>
+          <CircularProgress size={14} thickness={5} aria-label="Validation running" />
+          <Typography variant="body2" color="text.secondary">
+            Validation is running against the deployed system — that is what
+            keeps this session open. Its verdict lands on the Validation board.
+          </Typography>
+        </Stack>
+      )}
 
       <Stack direction="row" spacing={1.5} sx={{ mt: 2, flexWrap: "wrap", rowGap: 1 }}>
         <Button

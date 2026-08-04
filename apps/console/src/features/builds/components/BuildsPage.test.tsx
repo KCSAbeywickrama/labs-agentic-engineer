@@ -478,6 +478,47 @@ describe("BuildsPage — one version's story", () => {
     mockCycleBuilds = [];
   });
 
+  it("says validation is what keeps a delivered session open", () => {
+    // After the merge the platform dispatches a VALIDATION cycle the Builds
+    // rail deliberately does not narrate — but an open one is the answer to
+    // "why is this session still running when everything is green".
+    mockBuilds = [build("v2", "in_progress")];
+    mockRuns = [
+      run({
+        state: "running",
+        cycles: [
+          {
+            id: "cycle-1",
+            kind: "coding",
+            attempts: 1,
+            branch: "aep/m2-c1",
+            prNumber: 5,
+            mergeSha: "1dc26ba1fe04",
+            createdAt: "2026-08-04T06:02:00Z",
+            endedAt: "2026-08-04T06:21:00Z",
+          },
+          {
+            id: "cycle-2",
+            kind: "validation",
+            attempts: 1,
+            createdAt: "2026-08-04T06:29:00Z",
+          },
+        ],
+      }),
+    ];
+    mockIssues = [issue(3, "Implement gym-tracker-api", "coding", "merged")];
+    mockCycleBuilds = [
+      { component: "gym-tracker-api", status: "Succeeded", completed: true },
+    ];
+    renderPage();
+
+    expect(screen.getByText("All agent work for v2 is done")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Validation is running against the deployed system/),
+    ).toBeInTheDocument();
+    mockCycleBuilds = [];
+  });
+
   it("reads a merged issue as CLOSED in the milestone panel", () => {
     // The regression: with the retired ten-value bucketing, a merged issue fell
     // into "in progress" AT the very merge that closed it, and the closed count
