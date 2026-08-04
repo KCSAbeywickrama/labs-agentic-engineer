@@ -57,6 +57,7 @@ export function MilestonePanel({
   work,
   gates,
   claimed,
+  presumeOpenWork = false,
   claimedBy,
   issuesUrl,
 }: {
@@ -70,6 +71,8 @@ export function MilestonePanel({
   gates: TaskView[];
   /** Issue numbers the run's OPEN cycle has claimed (openCycleClaims). */
   claimed: ReadonlySet<number>;
+  /** A live session with no claims yet — presume it works the open issues. */
+  presumeOpenWork?: boolean;
   /** Which cycle claimed an issue, for the ones in flight. */
   claimedBy?: (issue: TaskView) => string | undefined;
   /** The repo's issue list — omitted when the project has no repo URL yet. */
@@ -77,7 +80,7 @@ export function MilestonePanel({
 }) {
   // The two-value vocabulary plus the run's recorded claims — see
   // lib/milestoneBuckets for why nothing here reads liveness off a row.
-  const { inProgress, open, closed } = bucketMilestone(work, claimed);
+  const { inProgress, open, closed } = bucketMilestone(work, claimed, presumeOpenWork);
 
   const delivered = work.length > 0 && closed.length === work.length;
   const percent = work.length === 0 ? 0 : (closed.length / work.length) * 100;

@@ -102,6 +102,34 @@ describe("bucketMilestone", () => {
     expect(buckets.inProgress).toEqual([]);
   });
 
+  it("presumes the open work in progress while a session is live and unclaimed", () => {
+    // The NOW panel's own inference, applied to the panel: before the pull
+    // request there is no recorded set, and "the agent is working these" is
+    // more truthful than "open".
+    const buckets = bucketMilestone(
+      [issue(3, "pending"), issue(4, "merged")],
+      new Set(),
+      true,
+    );
+
+    expect(numbers(buckets.inProgress)).toEqual([3]);
+    expect(numbers(buckets.closed)).toEqual([4]);
+    expect(buckets.open).toEqual([]);
+  });
+
+  it("lets a recorded claim outrank the presumption", () => {
+    // Once resolves exist the working set is exact — the unclaimed remainder
+    // is genuinely open, so the presumption must not fire alongside claims.
+    const buckets = bucketMilestone(
+      [issue(3, "pending"), issue(4, "pending")],
+      new Set([3]),
+      false,
+    );
+
+    expect(numbers(buckets.inProgress)).toEqual([3]);
+    expect(numbers(buckets.open)).toEqual([4]);
+  });
+
   it("counts a status it does not know as open, not closed", () => {
     const buckets = bucketMilestone([issue(9, "something-new")], new Set());
 

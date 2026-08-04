@@ -101,11 +101,23 @@ export function BuildsPage({
   // only the still-open cycle counts: a closed cycle's merge already closed its
   // issues, so its claims are history, not something "in flight".
   const claims = openCycleClaims(currentCycles);
-  const claimedBy = (issue: { issueNumber: number }): string | undefined => {
-    if (!claims.has(issue.issueNumber)) return undefined;
-    const index = currentCycles.findIndex((c) => !c.endedAt);
-    if (index === -1) return undefined;
-    return `Claimed by build session ${index + 1} · ${currentCycles[index]?.kind ?? ""}`.trim();
+  const openIndex = currentCycles.findIndex((c) => !c.endedAt);
+  // Before its pull request a live session has recorded nothing, so the panel
+  // PRESUMES it works the open issues — the NOW panel's own inference. The
+  // note keeps the two strengths apart: "Claimed by" is the merge policy's
+  // recorded set; "Being worked by" is the presumption, exact at the PR.
+  const presumeOpenWork = openIndex !== -1 && claims.size === 0;
+  const claimedBy = (issue: {
+    issueNumber: number;
+    derivedStatus: string;
+  }): string | undefined => {
+    if (openIndex === -1) return undefined;
+    const label = `build session ${openIndex + 1} · ${currentCycles[openIndex]?.kind ?? ""}`.trim();
+    if (claims.has(issue.issueNumber)) return `Claimed by ${label}`;
+    if (presumeOpenWork && issue.derivedStatus === "pending") {
+      return `Being worked by ${label}`;
+    }
+    return undefined;
   };
 
   // The same query IssueSections reads, on the same key — react-query serves
@@ -276,6 +288,7 @@ export function BuildsPage({
               work={milestone.work}
               gates={milestone.gates}
               claimed={claims}
+              presumeOpenWork={presumeOpenWork}
               claimedBy={claimedBy}
               {...(issuesUrl ? { issuesUrl } : {})}
             />

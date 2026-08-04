@@ -32,12 +32,13 @@ type RunCycleView = components["schemas"]["RunCycleView"];
 // issue reading as in-progress, appearing there at the very merge that closed
 // it.
 //
-// "In progress" is therefore DERIVED, not read off the row: an issue is in
-// progress when the run's still-open cycle has claimed it — `resolves`, the
-// merge policy's recorded matched set. Before the cycle opens its pull request
-// no claim exists, and the honest answer for its issues is "open"; the NOW
-// panel is the surface that narrates what the agent is working before then,
-// with a caption saying it is the milestone's open work, not a recorded set.
+// "In progress" is therefore DERIVED, not read off the row, from two sources
+// of different strength. A CLAIM is a fact: the run's still-open build session
+// recorded its matched set (`resolves`) when it opened its pull request. A
+// PRESUMPTION covers the stretch before that: a live session with no claims
+// yet is working the milestone's open issues — the same inference the NOW
+// panel makes, with the same honesty rule: the note says "being worked", not
+// "claimed", and the set becomes exact at the pull request.
 
 export interface MilestoneBuckets {
   /** Claimed by the run's open cycle and not yet closed by a merge. */
@@ -60,12 +61,20 @@ export function openCycleClaims(cycles: RunCycleView[]): ReadonlySet<number> {
 export function bucketMilestone(
   work: TaskView[],
   claimed: ReadonlySet<number>,
+  /** A build session is live with no recorded claims yet — presume it is
+   *  working the open issues. Never set once claims exist: a recorded set
+   *  outranks a guess, and the unclaimed remainder is genuinely open. */
+  presumeOpenWork = false,
 ): MilestoneBuckets {
   const buckets: MilestoneBuckets = { inProgress: [], open: [], closed: [] };
   for (const task of work) {
     if (task.derivedStatus === "merged") buckets.closed.push(task);
-    else if (claimed.has(task.issueNumber)) buckets.inProgress.push(task);
-    else buckets.open.push(task);
+    else if (
+      claimed.has(task.issueNumber) ||
+      (presumeOpenWork && task.derivedStatus === "pending")
+    ) {
+      buckets.inProgress.push(task);
+    } else buckets.open.push(task);
   }
   return buckets;
 }
