@@ -46,16 +46,16 @@ export interface PrototypeViewProps {
   onScreenChange?: (screen: string) => void;
   /** Fill the parent's height (else fixed 600px), like ExcalidrawView. */
   fillHeight?: boolean;
-  /** Left-aligned toolbar slot (e.g. the console's Canvas | Prototype switch,
+  /** Right-aligned toolbar slot (e.g. the console's Canvas | Prototype switch,
    *  so the switch and this view's own chrome read as one toolbar row). */
-  leadingSlot?: ReactNode;
+  trailingSlot?: ReactNode;
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // Expects to be remounted (e.g. via a `key`) when `model` changes: `initialData`
 // is captured once at mount, and the screen-swap effect only reacts to
 // navigation, not to a new `model` identity.
-export function PrototypeView({ model, initialScreen, onScreenChange, fillHeight, leadingSlot }: PrototypeViewProps) {
+export function PrototypeView({ model, initialScreen, onScreenChange, fillHeight, trailingSlot }: PrototypeViewProps) {
   const byName = useMemo(() => new Map(model.screens.map((s) => [s.name, s])), [model]);
   const first = model.screens[0]!.name;
   const start = initialScreen && byName.has(initialScreen) ? initialScreen : first;
@@ -144,10 +144,9 @@ export function PrototypeView({ model, initialScreen, onScreenChange, fillHeight
         "& .App-menu_top__left": { display: "none !important" },
       }}
     >
-      {/* Toolbar: leading slot (e.g. the console's view switch) · back ·
-          screen picker · description — one coherent row. */}
+      {/* Toolbar: back · screen picker · description · trailing slot (e.g.
+          the console's view switch, pushed to the right edge) — one row. */}
       <Box sx={{ px: 1.5, py: 1, display: "flex", alignItems: "center", gap: 1, borderBottom: 1, borderColor: "divider" }}>
-        {leadingSlot}
         <IconButton size="small" aria-label="Back" disabled={nav.stack.length === 0} onClick={() => dispatch({ type: "back" })}>
           <ArrowLeft size={16} />
         </IconButton>
@@ -168,6 +167,7 @@ export function PrototypeView({ model, initialScreen, onScreenChange, fillHeight
             {screen.description}
           </Typography>
         )}
+        {trailingSlot && <Box sx={{ ml: "auto" }}>{trailingSlot}</Box>}
       </Box>
       <Box sx={{ position: "relative", flex: 1, minHeight: 0 }} onClick={onDeadAreaClick}>
         <Box sx={{ position: "absolute", inset: 0 }}>

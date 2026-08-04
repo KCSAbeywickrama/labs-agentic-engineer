@@ -163,7 +163,7 @@ export function WireframePanel({
   );
 
   // Prototype mode with a rendered model hands the switch to PrototypeView's
-  // `leadingSlot`, so the switch joins PrototypeView's own toolbar row (back ·
+  // `trailingSlot`, so the switch joins PrototypeView's own toolbar row (back ·
   // picker · description) instead of stacking a second gray bar above it.
   // Every other state (canvas, loading, error) keeps its own minimal header —
   // just the switch — since there's no PrototypeView toolbar to join.
@@ -199,6 +199,7 @@ export function WireframePanel({
             py: 1,
             display: "flex",
             alignItems: "center",
+            justifyContent: "flex-end",
             borderBottom: 1,
             borderColor: "divider",
           }}
@@ -212,7 +213,7 @@ export function WireframePanel({
             <CircularProgress aria-label="Loading prototype" />
           </Box>
         ) : prototypeModel ? (
-          <PrototypeView key={sha} model={prototypeModel} fillHeight leadingSlot={viewSwitch} />
+          <PrototypeView key={sha} model={prototypeModel} fillHeight trailingSlot={viewSwitch} />
         ) : (
           <Typography variant="body2" color="text.secondary" sx={{ p: 2 }}>
             This wireframe could not be rendered as a prototype.

@@ -32,9 +32,9 @@ vi.mock("@aep/ui-excalidraw-view", () => ({
       data-elements={String(JSON.parse(scene).elements?.length ?? 0)}
     />
   ),
-  PrototypeView: (p: { model: { screens: unknown[] }; leadingSlot?: unknown }) => (
+  PrototypeView: (p: { model: { screens: unknown[] }; trailingSlot?: unknown }) => (
     <div data-testid="prototype" data-screens={p.model.screens.length}>
-      {p.leadingSlot as never}
+      {p.trailingSlot as never}
     </div>
   ),
 }));
