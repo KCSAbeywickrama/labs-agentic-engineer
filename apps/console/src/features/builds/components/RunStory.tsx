@@ -73,6 +73,40 @@ type TaskView = components["schemas"]["TaskView"];
  * supervisor, and during the plan window there is no supervisor yet to receive
  * it.
  */
+/**
+ * The platform working, said quietly: a spinner sized to the title on a soft
+ * surface. Deliberately NOT a RunHoldNotice — its leading-edge rule marks
+ * something that needs reading, and its wrapping layout let the spinner break
+ * onto its own line. Progress needs neither.
+ */
+function RunBusy({ title, body }: { title: string; body: string }) {
+  return (
+    <Stack
+      direction="row"
+      spacing={1.5}
+      sx={{
+        alignItems: "flex-start",
+        p: 2,
+        borderRadius: 1.5,
+        bgcolor: (t) => alpha(t.palette.info.main, 0.06),
+      }}
+    >
+      <CircularProgress
+        size={18}
+        thickness={4.5}
+        aria-label={title}
+        sx={{ mt: 0.25, flexShrink: 0 }}
+      />
+      <Box sx={{ minWidth: 0 }}>
+        <Typography variant="subtitle2">{title}</Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25 }}>
+          {body}
+        </Typography>
+      </Box>
+    </Stack>
+  );
+}
+
 export function RunStory({
   projectName,
   tag,
@@ -86,6 +120,17 @@ export function RunStory({
   milestone?: { gates: TaskView[]; work: TaskView[] };
 }) {
   const cancel = useCancelRun(projectName, tag);
+  // Cancel is ACCEPTED, not performed: the endpoint answers 202 the moment the
+  // signal is queued, and the run only turns cancelled when the supervisor
+  // processes it and the runs poll observes that — seconds later. isPending
+  // covers just the HTTP round trip, so on its own the button re-armed while
+  // the run was still winding down. This flag keeps it held from the click
+  // until the run leaves the live state (the whole button unmounts then) —
+  // released only by an error, which is the one case where clicking again is
+  // the right thing to do.
+  const [cancelRequested, setCancelRequested] = useState(false);
+  const cancelling =
+    cancel.isPending || (cancelRequested && !cancel.isError);
   const chip = runStateChip(run);
   const terminal = isTerminalRun(run.state);
   const planning = run.state === "planning";
@@ -194,8 +239,11 @@ export function RunStory({
               color="inherit"
               variant="outlined"
               startIcon={<X size={16} />}
-              disabled={cancel.isPending}
-              onClick={() => cancel.mutate(run.id)}
+              disabled={cancelling}
+              onClick={() => {
+                setCancelRequested(true);
+                cancel.mutate(run.id);
+              }}
               // Neutral edge, taking its colour from the text: near-white on a
               // dark theme, near-black on a light one. A warning-coloured
               // outline made an escape hatch look like an alarm, and put a
@@ -209,19 +257,21 @@ export function RunStory({
                 },
               }}
             >
-              {cancel.isPending ? "Cancelling…" : "Cancel run"}
+              {cancelling ? "Cancelling…" : "Cancel run"}
             </Button>
           )}
         </Stack>
 
-        {hold && (
-          <RunHoldNotice
-            tone={hold.tone}
-            title={hold.title}
-            body={hold.body}
-            busy={hold.kind === "planning"}
-          />
-        )}
+        {hold &&
+          (hold.kind === "planning" ? (
+            // Planning is progress, not a hold — same rule as the pre-dispatch
+            // wait below: no leading-edge rule, spinner sized to the title.
+            <Box sx={{ mt: 2 }}>
+              <RunBusy title={hold.title} body={hold.body} />
+            </Box>
+          ) : (
+            <RunHoldNotice tone={hold.tone} title={hold.title} body={hold.body} />
+          ))}
 
         {cancel.isError && (
           <Alert severity="error" sx={{ mt: 2 }}>
@@ -306,33 +356,10 @@ export function RunStory({
               // down a notice's leading edge marks something that needs
               // reading, and a spinner already carries the "working" signal on
               // its own. A plain quiet surface, spinner sized to the title.
-              <Stack
-                direction="row"
-                spacing={1.5}
-                sx={{
-                  alignItems: "flex-start",
-                  p: 2,
-                  borderRadius: 1.5,
-                  bgcolor: (t) => alpha(t.palette.info.main, 0.06),
-                }}
-              >
-                <CircularProgress
-                  size={18}
-                  thickness={4.5}
-                  aria-label="Waiting to dispatch the first build session"
-                  sx={{ mt: 0.25, flexShrink: 0 }}
-                />
-                <Box sx={{ minWidth: 0 }}>
-                  <Typography variant="subtitle2">
-                    Waiting to dispatch the first build session
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25 }}>
-                    Nothing has started yet — the supervisor dispatches a build
-                    session as soon as this run's predicate clears, and the stages
-                    appear here as it does.
-                  </Typography>
-                </Box>
-              </Stack>
+              <RunBusy
+                title="Waiting to dispatch the first build session"
+                body="Nothing has started yet — the supervisor dispatches a build session as soon as this run's predicate clears, and the stages appear here as it does."
+              />
             )}
           </>
         )}

@@ -410,6 +410,22 @@ describe("BuildsPage — one version's story", () => {
     expect(screen.getByText(/closed no issues/)).toBeInTheDocument();
   });
 
+  it("keeps cancel held down after the click — 202 is accepted, not done", () => {
+    // The endpoint answers the moment the signal is queued; the run turns
+    // cancelled only when the supervisor processes it and the poll sees that.
+    // Releasing the button on the HTTP response invited double-cancels.
+    mockBuilds = [build("v2", "in_progress")];
+    mockRuns = [run({ state: "waiting" })];
+    mockIssues = withOpenWork();
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: /Cancel run/ }));
+
+    const held = screen.getByRole("button", { name: /Cancelling…/ });
+    expect(held).toBeDisabled();
+    expect(cancelMutate).toHaveBeenCalledTimes(1);
+  });
+
   it("says nothing was cancelled when the engine is unreachable", () => {
     mockBuilds = [build("v2", "in_progress")];
     mockRuns = [run({ state: "waiting" })];
