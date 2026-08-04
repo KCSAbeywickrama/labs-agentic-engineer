@@ -250,14 +250,19 @@ export function RunStory({
             {current ? (
               <Stack spacing={2}>
                 <RunGlanceStrip stages={glance.stages} nowIndex={glance.nowIndex} />
-                {/* A succeeded run whose flow actually finished has no "now" to
-                    narrate: what it produced, and where that now lives, is the
-                    whole story. The nowIndex check is not redundant — a run can
-                    be marked succeeded while a stage is still unreadable (the
-                    console cannot see this merge's builds yet), and claiming
-                    "all done" over a strip that says "Builds · now" would be
-                    the surface contradicting itself. */}
-                {run.state === "succeeded" && glance.nowIndex === null ? (
+                {/* Once every stage of the cycle is done there is no "now" to
+                    narrate: what it produced, and where it now lives, is the
+                    whole story — and that is true the moment deployment goes
+                    green, BEFORE the supervisor settles the run, so the gate is
+                    the FLOW (nowIndex), not run.state. Gating on `succeeded`
+                    left a finished flow showing a bare "every stage is done"
+                    line for as long as the run stayed formally running. A run
+                    that re-enters with a fix cycle makes that cycle current and
+                    the NOW panel returns on its own; failed and cancelled runs
+                    keep the panel, because their story is where they stopped. */}
+                {glance.nowIndex === null &&
+                run.state !== "failed" &&
+                run.state !== "cancelled" ? (
                   <RunDelivered
                     projectName={projectName}
                     milestoneTitle={run.milestoneTitle}

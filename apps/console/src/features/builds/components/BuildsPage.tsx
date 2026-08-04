@@ -36,6 +36,7 @@ import { taskKeys } from "../../tasks/api/keys";
 import { partitionIssues } from "../../tasks/lib/issueRows";
 import { useProjectStatus } from "../../projects/api/queries";
 import { useBuildRuns, useBuilds } from "../api/queries";
+import { openCycleClaims } from "../lib/milestoneBuckets";
 import { BUILD_CYCLE_KINDS, versionIsLive } from "../lib/runView";
 import { EarlierSessions } from "./EarlierSessions";
 import { MilestonePanel } from "./MilestonePanel";
@@ -95,13 +96,14 @@ export function BuildsPage({
     .replace(/\.git$/, "");
   const issuesUrl = repoUrl ? `${repoUrl}/issues` : undefined;
 
-  // Which CYCLE claimed an in-flight issue. `resolves` is the merge policy's
-  // recorded matched set, so this is a fact rather than a guess — an issue no
-  // cycle has claimed yet simply gets no note.
+  // Which OPEN cycle claimed an in-flight issue. `resolves` is the merge
+  // policy's recorded matched set, so this is a fact rather than a guess — and
+  // only the still-open cycle counts: a closed cycle's merge already closed its
+  // issues, so its claims are history, not something "in flight".
+  const claims = openCycleClaims(currentCycles);
   const claimedBy = (issue: { issueNumber: number }): string | undefined => {
-    const index = currentCycles.findIndex((c) =>
-      (c.resolves ?? []).includes(issue.issueNumber),
-    );
+    if (!claims.has(issue.issueNumber)) return undefined;
+    const index = currentCycles.findIndex((c) => !c.endedAt);
     if (index === -1) return undefined;
     return `Claimed by cycle ${index + 1} · ${currentCycles[index]?.kind ?? ""}`.trim();
   };
@@ -273,6 +275,7 @@ export function BuildsPage({
               {...(current?.milestoneTitle ? { title: current.milestoneTitle } : {})}
               work={milestone.work}
               gates={milestone.gates}
+              claimed={claims}
               claimedBy={claimedBy}
               {...(issuesUrl ? { issuesUrl } : {})}
             />

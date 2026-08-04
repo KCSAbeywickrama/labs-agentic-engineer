@@ -445,6 +445,84 @@ describe("BuildsPage — one version's story", () => {
     ).toHaveAttribute("href", "https://github.com/acme/demo/issues");
   });
 
+  it("shows the delivered result the moment the flow finishes, before the run settles", () => {
+    // The supervisor can hold the run formally "running" after deployment goes
+    // green. The reader's story is over either way — gating the banner on
+    // run.state left a finished flow showing a bare "every stage is done" line.
+    mockBuilds = [build("v2", "in_progress")];
+    mockRuns = [
+      run({
+        state: "running",
+        cycles: [
+          {
+            id: "cycle-1",
+            kind: "coding",
+            attempts: 1,
+            branch: "aep/m2-c1",
+            prNumber: 5,
+            mergeSha: "1dc26ba1fe04",
+            createdAt: "2026-08-04T06:02:00Z",
+            endedAt: "2026-08-04T06:20:00Z",
+          },
+        ],
+      }),
+    ];
+    mockIssues = [issue(3, "Implement gym-tracker-api", "coding", "merged")];
+    mockCycleBuilds = [
+      { component: "gym-tracker-api", status: "Succeeded", completed: true },
+    ];
+    renderPage();
+
+    expect(screen.getByText("All agent work for v2 is done")).toBeInTheDocument();
+    expect(screen.getByText("View deployment status")).toBeInTheDocument();
+    mockCycleBuilds = [];
+  });
+
+  it("reads a merged issue as CLOSED in the milestone panel", () => {
+    // The regression: with the retired ten-value bucketing, a merged issue fell
+    // into "in progress" AT the very merge that closed it, and the closed count
+    // sat at 0/N forever.
+    mockBuilds = [build("v2", "in_progress")];
+    mockRuns = [run()];
+    mockIssues = [
+      issue(3, "Implement gym-tracker-api", "coding", "merged"),
+      issue(4, "Implement gym-tracker-webapp", "coding", "merged"),
+    ];
+    renderPage();
+
+    expect(screen.getByText("2 closed")).toBeInTheDocument();
+    expect(screen.getByText("2 / 2 closed")).toBeInTheDocument();
+    expect(screen.queryByText(/in progress/)).not.toBeInTheDocument();
+  });
+
+  it("marks an issue in progress only while an open cycle claims it", () => {
+    mockBuilds = [build("v2", "in_progress")];
+    mockRuns = [
+      run({
+        cycles: [
+          {
+            id: "cycle-1",
+            kind: "coding",
+            attempts: 1,
+            resolves: [3],
+            createdAt: "2026-08-04T06:02:00Z",
+          },
+        ],
+      }),
+    ];
+    mockIssues = [
+      issue(3, "Implement gym-tracker-api", "coding"),
+      issue(4, "Implement gym-tracker-webapp", "coding"),
+    ];
+    renderPage();
+
+    // #3 is claimed by the open cycle; #4 is not — it stays open rather than
+    // being guessed into motion.
+    expect(screen.getByText("1 in progress")).toBeInTheDocument();
+    expect(screen.getByText("Claimed by cycle 1 · coding")).toBeInTheDocument();
+    expect(screen.getByText("1 open")).toBeInTheDocument();
+  });
+
   it("keeps an earlier session collapsed until asked, then shows its cycles", () => {
     mockBuilds = [build("v2", "in_progress")];
     mockRuns = [

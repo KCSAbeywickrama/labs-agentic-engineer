@@ -35,6 +35,7 @@ import { Link as RouterLink } from "@tanstack/react-router";
 import { StatusChip } from "../../../components/StatusChip";
 import type { components } from "../../../generated/aep-api";
 import { gateSubject } from "../../tasks/lib/issueRows";
+import { bucketMilestone } from "../lib/milestoneBuckets";
 import { gateDrive } from "../lib/runView";
 
 type TaskView = components["schemas"]["TaskView"];
@@ -55,6 +56,7 @@ export function MilestonePanel({
   title,
   work,
   gates,
+  claimed,
   claimedBy,
   issuesUrl,
 }: {
@@ -66,22 +68,16 @@ export function MilestonePanel({
   work: TaskView[];
   /** Every connection gate, resolved ones included. */
   gates: TaskView[];
-  /** Which build session claimed an issue, for the ones in flight. */
+  /** Issue numbers the run's OPEN cycle has claimed (openCycleClaims). */
+  claimed: ReadonlySet<number>;
+  /** Which cycle claimed an issue, for the ones in flight. */
   claimedBy?: (issue: TaskView) => string | undefined;
   /** The repo's issue list — omitted when the project has no repo URL yet. */
   issuesUrl?: string;
 }) {
-  const closed = work.filter((t) => t.derivedStatus === "deployed");
-  const failed = work.filter((t) =>
-    ["failed", "rejected", "abandoned"].includes(t.derivedStatus),
-  );
-  const open = work.filter((t) =>
-    ["pending", "on_hold"].includes(t.derivedStatus),
-  );
-  const inProgress = work.filter(
-    (t) =>
-      !closed.includes(t) && !failed.includes(t) && !open.includes(t),
-  );
+  // The two-value vocabulary plus the run's recorded claims — see
+  // lib/milestoneBuckets for why nothing here reads liveness off a row.
+  const { inProgress, open, closed } = bucketMilestone(work, claimed);
 
   const delivered = work.length > 0 && closed.length === work.length;
   const percent = work.length === 0 ? 0 : (closed.length / work.length) * 100;
@@ -162,18 +158,8 @@ export function MilestonePanel({
               appearance="soft"
             />
           )}
-          {failed.length > 0 && (
-            <StatusChip
-              label={`${failed.length} failed`}
-              tone="error"
-              appearance="soft"
-              dot
-            />
-          )}
         </Stack>
 
-        {/* Failures first: the only bucket that needs a human. */}
-        <IssueGroup title="Needs attention" projectName={projectName} issues={failed} tone="error.main" counted />
         {/* The one bucket with an agent on it right now gets a surface of its
             own — it is the panel's answer to "what is being worked", and a
             plain row buried it among the six open ones. */}
@@ -191,11 +177,6 @@ export function MilestonePanel({
           issues={open}
           tone="text.disabled"
           counted
-          note={(t) =>
-            t.derivedStatus === "on_hold" && t.blockedBy?.length
-              ? `Waiting for ${t.blockedBy.join(", ")}`
-              : undefined
-          }
         />
         <ClosedGroup title="Closed" projectName={projectName} issues={closed} />
 

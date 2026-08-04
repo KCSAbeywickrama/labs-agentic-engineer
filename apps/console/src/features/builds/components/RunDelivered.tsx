@@ -49,7 +49,9 @@ export function RunDelivered({
 }) {
   const navigate = useNavigate();
 
-  const closed = work.filter((t) => t.derivedStatus === "deployed").length;
+  // Closed by merge — the only way an agent issue closes. (`deployed` is the
+  // retired ten-value vocabulary; it never occurs on rows any more.)
+  const closed = work.filter((t) => t.derivedStatus === "merged").length;
   const merged = cycles.filter((c) => c.mergeSha);
   const prs = merged
     .map((c) => c.prNumber)
