@@ -1,0 +1,28 @@
+{
+  "name": "@aep/progress-view",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The ONE rendering of a coding run's progress feed. Pure functions over the runner's NDJSON progress contract, consumed by both the console (React) and the playground (TUI) so a run reads identically wherever it is watched.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "test": "tsx --test \"test/**/*.test.ts\"",
+    "dev": "echo \"@aep/progress-view: no dev server\""
+  },
+  "devDependencies": {
+    "tsx": "^4.21.0"
+  }
+}

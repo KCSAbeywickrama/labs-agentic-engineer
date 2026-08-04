@@ -4,6 +4,7 @@ description: How the platform's API gateway fronts a service — it validates th
 metadata:
   aep:
     kind: org
+    audience: [design, coding]
 ---
 
 # API Management
@@ -58,32 +59,18 @@ required-but-injected: the gateway adds it, clients never set it.
 
 ## Implementation
 
-Read `X-User-Id` in every protected handler; 401 when missing. Gate per-user
-queries on it — both filters, always:
+Two rules, and both are mandatory in every protected handler:
 
-```go
-func mustUserID(w http.ResponseWriter, r *http.Request) (string, bool) {
-    uid := r.Header.Get("X-User-Id")
-    if uid == "" {
-        http.Error(w, `{"error":"missing X-User-Id"}`, http.StatusUnauthorized)
-        return "", false
-    }
-    return uid, true
-}
+1. **Read `X-User-Id`; 401 when it is missing.** Resolve it once, in one helper,
+   rather than re-reading the header at each call site.
+2. **Gate every per-user query on it — both filters, always.** A bare
+   `WHERE id = ?` lets a caller reach any user's row by guessing its id; it must
+   be `WHERE id = ? AND user_id = ?`. The same pairing applies to updates and
+   deletes, and a query that matches nothing is a `404`, not a `500`.
 
-func updateTodo(w http.ResponseWriter, r *http.Request) {
-    uid, ok := mustUserID(w, r); if !ok { return }
-    id := r.PathValue("id")
-    // AND user_id = ? — both filters are mandatory. A bare `WHERE id = ?`
-    // would let a caller toggle any user's row by guessing its id.
-    res, _ := db.ExecContext(r.Context(),
-        `UPDATE todos SET done = 1 - done WHERE id = ? AND user_id = ?`, id, uid)
-    if n, _ := res.RowsAffected(); n == 0 {
-        http.NotFound(w, r); return
-    }
-    w.WriteHeader(http.StatusNoContent)
-}
-```
+Express both in your stack's own idiom — its routing style, where a shared
+helper lives, and how a handler returns a status — following the conventions
+that skill already sets rather than inventing a second one here.
 
 Role-based and directory-scoped handlers build on this — see
 `thunder-authentication`.

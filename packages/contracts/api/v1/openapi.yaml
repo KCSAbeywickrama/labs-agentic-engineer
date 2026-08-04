@@ -2345,6 +2345,46 @@ paths:
       summary: Get a skill
       tags:
       - Skills
+    patch:
+      operationId: set-skill-enabled
+      parameters:
+      - description: Skill name (slug)
+        in: path
+        name: name
+        required: true
+        schema:
+          description: Skill name (slug)
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              additionalProperties: false
+              properties:
+                enabled:
+                  type: boolean
+              required:
+              - enabled
+              type: object
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillDetailBody'
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Error
+      security:
+      - userJWT: []
+      summary: Enable or disable a skill
+      tags:
+      - Skills
     put:
       operationId: update-skill
       parameters:
@@ -3285,23 +3325,30 @@ components:
             `unreported` at exactly the surface that needs them, and `completed`
             never said whether anything passed.
 
-            none (the run has not reached validation) and running (a validation
-            CYCLE is in flight — not merely a live run with no verdict yet) are
-            lifecycle values; the rest are the verdict verbatim. They are mutually
-            exclusive in time, so nothing is hidden behind another.
+            Three LIFECYCLE values: none (the run has not reached validation),
+            running (a validation CYCLE is in flight — not merely a live run with
+            no verdict yet) and awaiting-fix (validation failed and the run is
+            repairing it — the work in flight is a CODING cycle, which is why the
+            state names the implementation rather than validation). The rest are
+            the verdict verbatim. They are mutually exclusive in time, so nothing
+            is hidden behind another.
 
             passed (every criterion was automated and passed), partial (some
             passed, none failed, some were never covered), failed (a criterion
-            asserted and lost — this fails the run), inconclusive (no test results
-            at all), unreported (no usable report at the validation cycle's merge
-            commit — this fails the run), skipped (no acceptance criteria, and
-            incident runs, which get no validation cycle).
+            asserted and lost), inconclusive (no test results at all), unreported
+            (no usable report at the validation cycle's merge commit), skipped (no
+            acceptance criteria, and incident runs, which get no validation cycle).
+
+            failed and unreported fail the run only once its validation attempts
+            are spent: while attempts remain the run repairs and re-validates, and
+            reads awaiting-fix in the meantime.
 
             The report path and per-cycle detail live on the version's run story
             (list-build-runs).
           enum:
           - none
           - running
+          - awaiting-fix
           - passed
           - partial
           - failed
@@ -3889,6 +3936,11 @@ components:
           type: string
         completedAt:
           type: string
+        durationMs:
+          description: '`tool_result` only: how long the call took, measured by the runner between
+            the call and its outcome, so it includes model turnaround.'
+          format: int64
+          type: integer
         emitter:
           description: Who produced the line — `subagent` for work the main agent fanned out with the
             Task tool, absent for the main agent itself. Absence is a positive fact, not an unknown.
@@ -3896,8 +3948,23 @@ components:
           - main
           - subagent
           type: string
+        emitterId:
+          description: Which subagent, for the cycles that fan out to several at once — the id of the
+            fan-out tool call, stable for that subagent's whole life. Absent on main-agent lines.
+          type: string
+        emitterLabel:
+          description: The description the main agent gave that subagent ("Implement todo-api service
+            (issue #3)"). Absent on main-agent lines, and on a fan-out that carried no description.
+          type: string
         error:
           type: string
+        exitCode:
+          description: '`tool_result` only: the process status of a failed shell call, parsed from the
+            SDK''s own `Exit code N` first line. Absent when the tool was not a shell — those report a
+            `<tool_use_error>` with no code — so read absence as "no code was reported", never as
+            "exited 0".'
+          format: int64
+          type: integer
         files:
           format: int64
           type: integer
@@ -3905,8 +3972,21 @@ components:
           type: string
         level:
           type: string
+        linesAdded:
+          description: A fanned-out subagent's total lines added, off the SDK's own report on its fan-out
+            call's result. Present only there; nothing in the feed can reconstruct it.
+          format: int64
+          type: integer
+        linesRemoved:
+          description: A fanned-out subagent's total lines removed, from the same report.
+          format: int64
+          type: integer
         message:
           type: string
+        ok:
+          description: '`tool_result` only: whether the call succeeded. Absent on every other kind — so
+            read absence as "not a tool result", never as success.'
+          type: boolean
         phase:
           type: string
         schemaVersion:
@@ -3926,6 +4006,16 @@ components:
         summary:
           type: string
         tool:
+          type: string
+        toolCount:
+          description: A fanned-out subagent's total tool calls, off the SDK's own report on its fan-out
+            call's result. Present only there.
+          format: int64
+          type: integer
+        toolUseId:
+          description: The tool call this line is about. A `tool_result` carries the id of the `tool_use`
+            it answers, which is what pairs a call with its outcome once several subagents interleave
+            the feed.
           type: string
         ts:
           type: string
@@ -4204,12 +4294,18 @@ components:
         fixCycles:
           format: int64
           type: integer
+        validationCycles:
+          description: Validation ATTEMPTS this run has opened. A run repairs and re-validates while this
+            is under its allowance, so more than one means the run self-healed (or tried to).
+          format: int64
+          type: integer
       required:
       - cyclesTotal
       - cycleCeiling
       - fixCycles
       - conflictCycles
       - buildRetriggers
+      - validationCycles
       type: object
     RunCycleView:
       additionalProperties: false
@@ -4292,6 +4388,28 @@ components:
             format: int64
             type: integer
           type: array
+        validationIssue:
+          description: >-
+            The validation issue this cycle was dispatched at. Set on validation
+            cycles only, and recorded per cycle rather than only on the run so a
+            repeated validation stays navigable to the issue that framed each
+            attempt.
+          format: int64
+          type: integer
+        validationVerdict:
+          description: >-
+            What THIS validation attempt concluded, from the report at its own
+            `mergeSha`. Set on validation cycles only, and only once the attempt
+            settles. The run carries the latest attempt's verdict; this is how a
+            self-healed run shows that an earlier attempt failed.
+          enum:
+          - passed
+          - partial
+          - failed
+          - inconclusive
+          - unreported
+          - skipped
+          type: string
       required:
       - id
       - kind
@@ -4346,6 +4464,11 @@ components:
         cycleKind:
           description: Kind of that cycle (coding | conflict | fix | validation) — the section label.
           type: string
+        durationMs:
+          description: '`tool_result` only: how long the call took, measured by the runner between
+            the call and its outcome, so it includes model turnaround.'
+          format: int64
+          type: integer
         emitter:
           description: Who produced the line. The runner stamps `subagent` only on lines forwarded from
             inside a Task tool call; everything else is the main agent.
@@ -4356,8 +4479,23 @@ components:
           x-enum-varnames:
           - RunProgressLineEmitterMain
           - RunProgressLineEmitterSubagent
+        emitterId:
+          description: Which subagent, for the cycles that fan out to several at once — the id of the
+            fan-out tool call, stable for that subagent's whole life. Absent on main-agent lines.
+          type: string
+        emitterLabel:
+          description: The description the main agent gave that subagent ("Implement todo-api service
+            (issue #3)"). Absent on main-agent lines, and on a fan-out that carried no description.
+          type: string
         error:
           type: string
+        exitCode:
+          description: '`tool_result` only: the process status of a failed shell call, parsed from the
+            SDK''s own `Exit code N` first line. Absent when the tool was not a shell — those report a
+            `<tool_use_error>` with no code — so read absence as "no code was reported", never as
+            "exited 0".'
+          format: int64
+          type: integer
         files:
           format: int64
           type: integer
@@ -4365,6 +4503,19 @@ components:
           type: string
         level:
           type: string
+        linesAdded:
+          description: A fanned-out subagent's total lines added, off the SDK's own report on its fan-out
+            call's result. Present only there; nothing in the feed can reconstruct it.
+          format: int64
+          type: integer
+        linesRemoved:
+          description: A fanned-out subagent's total lines removed, from the same report.
+          format: int64
+          type: integer
+        ok:
+          description: '`tool_result` only: whether the call succeeded. Absent on every other kind — so
+            read absence as "not a tool result", never as success.'
+          type: boolean
         phase:
           type: string
         schemaVersion:
@@ -4380,6 +4531,16 @@ components:
         summary:
           type: string
         tool:
+          type: string
+        toolCount:
+          description: A fanned-out subagent's total tool calls, off the SDK's own report on its fan-out
+            call's result. Present only there.
+          format: int64
+          type: integer
+        toolUseId:
+          description: The tool call this line is about. A `tool_result` carries the id of the `tool_use`
+            it answers, which is what pairs a call with its outcome once several subagents interleave
+            the feed.
           type: string
         ts:
           type: string
@@ -4469,6 +4630,8 @@ components:
           type: string
         editable:
           type: boolean
+        enabled:
+          type: boolean
         kind:
           type: string
         license:
@@ -4486,9 +4649,19 @@ components:
         updatedAt:
           format: date-time
           type: string
+        required:
+          description: >-
+            True when the coding runner reads this skill on every run and cannot
+            start without it (`aep`, and `aep-validation` for a validation task).
+            The mirror only copies enabled skills, so disabling one of these would
+            take the procedure away from every build in the org — `PATCH
+            /skills/{name}` refuses it with 409. The console renders the
+            availability toggle as unavailable rather than letting the call fail.
+          type: boolean
       required:
       - editable
       - deletable
+      - enabled
       - orgId
       - name
       - kind
@@ -4498,6 +4671,7 @@ components:
       - binaryReferences
       - contentSha
       - updatedAt
+      - required
       type: object
     SkillSummary:
       additionalProperties: false
@@ -4510,10 +4684,21 @@ components:
           type: string
         editable:
           type: boolean
+        enabled:
+          type: boolean
         kind:
           type: string
         name:
           type: string
+        required:
+          description: >-
+            True when the coding runner reads this skill on every run and cannot
+            start without it (`aep`, and `aep-validation` for a validation task).
+            The mirror only copies enabled skills, so disabling one of these would
+            take the procedure away from every build in the org — `PATCH
+            /skills/{name}` refuses it with 409. The console renders the
+            availability toggle as unavailable rather than letting the call fail.
+          type: boolean
       required:
       - name
       - kind
@@ -4521,6 +4706,8 @@ components:
       - contentSha
       - editable
       - deletable
+      - enabled
+      - required
       type: object
     SkillSummaryList:
       additionalProperties: false
@@ -4849,6 +5036,11 @@ components:
           type: string
         completedAt:
           type: string
+        durationMs:
+          description: '`tool_result` only: how long the call took, measured by the runner between
+            the call and its outcome, so it includes model turnaround.'
+          format: int64
+          type: integer
         emitter:
           description: Who produced the line — `subagent` for work the main agent fanned out with the
             Task tool, absent for the main agent itself. Absence is a positive fact, not an unknown.
@@ -4856,8 +5048,23 @@ components:
           - main
           - subagent
           type: string
+        emitterId:
+          description: Which subagent, for the cycles that fan out to several at once — the id of the
+            fan-out tool call, stable for that subagent's whole life. Absent on main-agent lines.
+          type: string
+        emitterLabel:
+          description: The description the main agent gave that subagent ("Implement todo-api service
+            (issue #3)"). Absent on main-agent lines, and on a fan-out that carried no description.
+          type: string
         error:
           type: string
+        exitCode:
+          description: '`tool_result` only: the process status of a failed shell call, parsed from the
+            SDK''s own `Exit code N` first line. Absent when the tool was not a shell — those report a
+            `<tool_use_error>` with no code — so read absence as "no code was reported", never as
+            "exited 0".'
+          format: int64
+          type: integer
         executionId:
           description: Id of the execution attempt this line belongs to.
           type: string
@@ -4871,8 +5078,21 @@ components:
           type: string
         level:
           type: string
+        linesAdded:
+          description: A fanned-out subagent's total lines added, off the SDK's own report on its fan-out
+            call's result. Present only there; nothing in the feed can reconstruct it.
+          format: int64
+          type: integer
+        linesRemoved:
+          description: A fanned-out subagent's total lines removed, from the same report.
+          format: int64
+          type: integer
         message:
           type: string
+        ok:
+          description: '`tool_result` only: whether the call succeeded. Absent on every other kind — so
+            read absence as "not a tool result", never as success.'
+          type: boolean
         phase:
           type: string
         schemaVersion:
@@ -4892,6 +5112,16 @@ components:
         summary:
           type: string
         tool:
+          type: string
+        toolCount:
+          description: A fanned-out subagent's total tool calls, off the SDK's own report on its fan-out
+            call's result. Present only there.
+          format: int64
+          type: integer
+        toolUseId:
+          description: The tool call this line is about. A `tool_result` carries the id of the `tool_use`
+            it answers, which is what pairs a call with its outcome once several subagents interleave
+            the feed.
           type: string
         ts:
           type: string

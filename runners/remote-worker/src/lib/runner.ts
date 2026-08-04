@@ -16,26 +16,42 @@
  * under the License.
  */
 
-import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { query, type McpServerConfig, type Query } from "@anthropic-ai/claude-agent-sdk";
-import { composeBasePlugin, type AgentMode } from "./skill_compose.js";
-import type { TaskLog } from "./logger.js";
+import { openDebugSinks, type DebugSinks, type TaskLog } from "./logger.js";
 import type { DispatchRequest } from "./types.js";
 import type { WorkspaceLayout } from "./workspace.js";
 import { emit } from "./progress/emitter.js";
-import { progressFromSdkMessage } from "./progress/from-sdk.js";
+import { createSdkTranslator } from "./progress/from-sdk.js";
+import { createRunWatchdog } from "./progress/watchdog.js";
+import { apiRetryLine, isStreamFrame, readApiRetry } from "./progress/diagnostics.js";
+import { scrubber } from "./progress/scrubber.js";
 import { createWebSearchDlpHook, stagedSecretValues } from "./websearch_dlp.js";
+import { createForegroundFanOutHook } from "./fanout_foreground.js";
+import { createWorkspaceWriteGuard } from "./workspace_guard.js";
 import { createWebFetchGuardHook } from "./webfetch_guard.js";
+import { checkPreload, preloadWarning } from "./skills_preload_check.js";
+import { SKILLS_MIRROR_DIR, requireWorkflowBodies } from "./skills_presence.js";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const PLUGIN_PATH = path.resolve(__dirname, "../../plugin");
+/**
+ * The mirror the BFF wrote into the project clone, as an absolute path.
+ *
+ * Every skill a coding session reads lives here — the run's own workflow skill
+ * included. There is no second source: no plugin the runner builds, no library
+ * it fetches. `.claude/skills/` sits at the root of `cwd`, which is what makes
+ * the SDK discover it (with AGENT_SETTING_SOURCES admitting the project source).
+ */
+function mirrorDir(workspace: string): string {
+  return path.join(workspace, SKILLS_MIRROR_DIR);
+}
 
 // Phase 0 allowed-tools: git, gh, build/test/lint via Bash; standard file
 // tools. Endpoint Spec Discovery (B2) re-introduces MCP — but only as an
 // in-process remote HTTP server (see buildMcpOptions below), never the
-// file-based .mcp.json that settingSources: [] deliberately blocks.
+// file-based .mcp.json — which strictMcpConfig blocks. That used to fall out
+// of settingSources: [] for free; admitting the project source to discover the
+// skills mirror re-admits the project's .mcp.json with it, so the exclusion is
+// now stated rather than inherited.
 // D9 secure search (Task 12) adds WebSearch, gated by the PreToolUse DLP
 // hook wired in runClaudeQuery below (see websearch_dlp.ts for why
 // PreToolUse, not canUseTool, and .superpowers/sdd/task-12-report.md for
@@ -44,14 +60,68 @@ const PLUGIN_PATH = path.resolve(__dirname, "../../plugin");
 // (see webfetch_guard.ts) — fail-closed, so pod egress to arbitrary
 // fetched pages never reaches internal/private/link-local/metadata
 // addresses or leaks a staged secret in the URL.
-// Task joins the set for the milestone run loop (docs/design §9.3): a cycle
+// Agent joins the set for the milestone run loop (docs/design §9.3): a cycle
 // works several issues, and the main agent fans the big, prose-independent,
 // disjoint-App-Path ones out to subagents. The main agent stays the SOLE git
 // writer — subagents Edit/Write only. That split is a SKILL rule, not a tool
 // restriction: the SDK hands a subagent the same allowedTools as its parent,
 // so `aep`'s deny-list is what keeps a subagent off git, and its fan-out
 // section is what keeps small issues inline.
-const BASE_ALLOWED_TOOLS = ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "WebSearch", "WebFetch", "Task"];
+//
+// The fan-out tool is `Agent`. It was `Task` until the SDK 0.2 → 0.3 bump, and
+// this list still said `Task` afterwards — a name with no tool behind it in
+// 0.3.220 (`sdk-tools.d.ts` declares `AgentInput` and no `TaskInput`). Nothing
+// broke loudly, which is the point of the note below.
+const BASE_ALLOWED_TOOLS = ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "WebSearch", "WebFetch", "Agent"];
+
+// allowedTools does NOT restrict anything in this run: `bypassPermissions` plus
+// `allowDangerouslySkipPermissions` (see the query() options below) allows every
+// tool the harness has, whether or not it is named above. Measured on a live run
+// — the agent called `Agent` and `ScheduleWakeup`, neither of which was in the
+// list, and both dispatched. So BASE_ALLOWED_TOOLS documents the intended
+// surface, and this is the list that actually holds a boundary.
+//
+// What it excludes is the harness's *session-management* surface: tools that
+// assume an interactive user, a scheduler, or a durable session, none of which a
+// one-shot pod has. They are not merely useless here — a run reached for
+// `ScheduleWakeup` to wait on its own detached subagents (it failed the schema
+// and the session exited anyway), so an unreachable tool is a real invitation to
+// spend a turn on a dead end. File/shell/search tools are deliberately absent
+// from this list: `aep`'s deny-list governs those by path and command, and
+// blocking them wholesale would end the run.
+export const DISALLOWED_TOOLS = [
+  "ScheduleWakeup",
+  "Monitor",
+  "CronCreate",
+  "CronDelete",
+  "CronList",
+  "TaskCreate",
+  "TaskUpdate",
+  "TaskGet",
+  "TaskList",
+  "TaskStop",
+  "TaskOutput",
+  "Workflow",
+  "Artifact",
+  "AskUserQuestion",
+  "EnterPlanMode",
+  "ExitPlanMode",
+  "SendMessage",
+  "PushNotification",
+  "RemoteTrigger",
+  "SendFeedback",
+  "EnterWorktree",
+  "ExitWorktree",
+];
+
+// 128 + SIGTERM(15), the shell's own convention for "killed by a signal". The
+// run reports this only when it is torn down from outside, never on its own.
+const TERMINATED_EXIT_CODE = 143;
+
+// How long the terminal dump gets to reach the pipe before the hard exit. Well
+// under any sane SIGTERM grace period (Kubernetes defaults to 30s), so this
+// never turns into the SIGKILL it is trying to beat.
+const TERMINATE_FLUSH_MS = 50;
 
 // The server key the BFF MCP endpoint is registered under. The SDK
 // namespaces MCP tools as `mcp__<serverKey>__<toolName>` (confirmed from
@@ -67,6 +137,55 @@ const MCP_TOOL_NAMES = [
   `mcp__${MCP_SERVER_KEY}__get_remote_git_file_contents`,
   `mcp__${MCP_SERVER_KEY}__search_remote_git_code`,
 ];
+
+/**
+ * Prepends the two absolute paths a run cannot derive to the caller's prompt.
+ *
+ * The `aep` skill says "the current working directory **is** the project" and
+ * never names it, because static skill text cannot. Neither prompt builder can
+ * either: the playground's is a TS literal and the platform's is a Go one
+ * (`delivery/codingagent/coding_executor.go`), and the paths are decided here,
+ * after `provisionWorkspace`. So this is the only place
+ * that both knows the values and reaches every run — stating them in two prompt
+ * builders would duplicate facts across a language boundary neither owns.
+ *
+ * **The project root** is worth stating because the alternative was measured:
+ * with only relative framing, a run inferred the run directory was the project
+ * root and built a whole component there.
+ *
+ * **The contract path** is stated for the same reason, one level down. A fan-out
+ * subagent gets no skill of its own, so the lead has to hand it
+ * `references/component-contract.md` as an absolute path — and a lead that has to
+ * transcribe one gets it wrong: in the first playground run of the split, the
+ * lead pasted `/run/base-plugin/…` to one of two subagents, dropping the
+ * workspace prefix. That subagent's read failed and it fell to scanning `/` for
+ * the file, which the deny-list forbids. Handing the lead the exact string to
+ * copy removes the class. (It now sits under the workspace, so a dropped prefix
+ * would resolve to nothing at all — but the lead still cannot derive it, because
+ * nothing in the skill text names the mirror.)
+ */
+export function promptWithProjectRoot(prompt: string, workspaceRoot: string, contractPath?: string): string {
+  const contract =
+    contractPath === undefined
+      ? ""
+      : `The component contract every implementer follows is ${contractPath} — ` +
+        `hand that exact path to every subagent you fan out to.\n`;
+  return (
+    `Your project root — the current working directory — is ${workspaceRoot}. ` +
+    `Every file you author lives under it; nothing else on this filesystem is a project root.\n` +
+    `${contract}\n${prompt}`
+  );
+}
+
+/**
+ * Where the `aep` skill's component contract sits, for the lead to hand on.
+ *
+ * The mirror, like everything else — so a fan-out subagent reads the same bytes
+ * the lead does, and a developer who clones the project repo can read them too.
+ */
+export function contractReferencePath(workspace: string): string {
+  return path.join(mirrorDir(workspace), "aep", "references", "component-contract.md");
+}
 
 export interface McpQueryOptions {
   mcpServers?: Record<string, McpServerConfig>;
@@ -95,6 +214,28 @@ export function buildMcpOptions(mcpUrl: string | undefined, mcpToken: string | u
   };
 }
 
+/**
+ * The filesystem settings sources a dispatched run admits.
+ *
+ * 'project' resolves relative to `cwd` — the per-task clone the platform
+ * provisioned and the BFF wrote `.claude/skills/` into. Admitting it is what
+ * makes the mirrored skills discoverable AT ALL: the SDK's `skills` option is a
+ * context filter over discovered skills, not a loader, so with no filesystem
+ * source the pinned names match nothing and vanish without a word. That is not
+ * theoretical — it shipped, and the agent compensated by grepping SKILL.md out
+ * of the tree, which reads like the feature working.
+ *
+ * The isolation this replaces was about 'user' — a developer's ~/.claude
+ * leaking into a container agent — which stays excluded, as does 'local' (a
+ * personal .claude/settings.local.json has no place in a dispatched run).
+ * 'project' admits only content the platform itself put in the clone. It also
+ * loads that repo's CLAUDE.md, which is the project's own guidance and belongs
+ * in a build of that project.
+ *
+ * Exported so a revert to `[]` fails a test rather than a customer's build.
+ */
+export const AGENT_SETTING_SOURCES = ["project"] as const;
+
 export interface RunResult {
   exitCode: number;
   error?: string;
@@ -105,79 +246,80 @@ export interface StartedRun {
   completion: Promise<RunResult>;
 }
 
-// PerTaskSkills carries the materialised AgentSkills plugin into the SDK
-// query options (built by skills_resolver.ts + skills_materializer.ts).
+// PerTaskSkills carries the run's pinned, present skills into the SDK query
+// options (built by skills_resolver.ts + skills_presence.ts).
 //
-// `skillsPluginDir` is the absolute path to .aep/skills-plugin/. If
-// set, runner.ts adds a second `{type:"local"}` plugin entry pointing
-// at it. `preloadSkillNames` lists the materialised names of every
-// platform-shipped (`kind: org`) skill in that plugin, which we push
-// into the SDK's `skills:` array so their full bodies inject at
-// startup. Custom and imported skills sit in the same plugin and
-// surface via the SDK's standard skill listing (description in
-// context, body on invoke) — they are NOT in the preload array,
-// because a run must not pay for every attached skill's full body
-// when only the stack ones are certain to apply.
+// The BFF mirrors the org's coding-relevant skills into the project clone at
+// `.claude/skills/`, which the SDK discovers because `cwd: layout.workspace`
+// puts it at the working-directory root AND the project setting source is
+// admitted (see AGENT_SETTING_SOURCES — `cwd` alone is not enough, which cost
+// us a release). There is no per-task plugin to load. All names are BARE and kind-agnostic: the copies are
+// already the filtered set, so the runner does no filtering of its own.
+//
+// The split between these two fields is the SDK's, not ours:
+//
+//   availableSkillNames → the `skills:` ALLOWLIST. A mirrored skill absent from
+//     it is rejected by the Skill tool outright, so this is every skill in the
+//     mirror, not just the pinned ones. Listing only pins would leave the rest
+//     of what the BFF decided this build may use as inert files on disk.
+//
+//   pinnedBodies → the actual preload. Nothing in `skills:` arrives in context;
+//     the model gets names and descriptions, and a body only when it invokes
+//     the skill. A pin says the guidance IS needed for this work, so its body
+//     is appended to the system prompt instead of left to the model's
+//     discretion. Empty string when nothing is pinned.
 export interface PerTaskSkills {
-  skillsPluginDir?: string;
-  preloadSkillNames: string[];
+  availableSkillNames: string[];
+  pinnedBodies: string;
 }
 
-// BaseAgentConfig parameterizes what the always-loaded workflow plugin is and
-// how it is composed. Every field defaults to production behavior, so
-// `oneshot.ts` passes nothing at all (pinned in runner.test.ts).
-//
-// `mode` is stated by the caller, never inferred. The entrypoint unambiguously
-// knows which flavour of run this is; deriving it from something incidental (an
-// empty `repoUrl`, an absent MCP token) would tie the agent's whole procedure to
-// a signal whose meaning could shift for an unrelated reason. It defaults to
-// `github` because that is the safe direction: a local run mistakenly composed
-// for GitHub fails loudly the first time `gh` is invoked, whereas a production
-// run mistakenly composed for local would be told there is no remote and no PR
-// to open — the exact opposite of its contract.
-//
-// A caller that overrides `basePreload` owns the FULL preload list — the
-// validation-task append only applies to the default.
-export interface BaseAgentConfig {
-  /** The authored workflow plugin dir; defaults to the shipped `plugin/`. */
-  basePluginPath?: string;
-  /** The startup `skills:` preload; defaults to ["aep:aep"] (+ the validation body for validation tasks). */
-  basePreload?: string[];
-  /** Which mode to compose the workflow skill for; defaults to "github". */
-  mode?: AgentMode;
-  /** Where the composed plugin is written; defaults to a per-task dir under the OS temp dir. */
-  composeDir?: string;
+/**
+ * The skills a run is steered by whatever its design says — read from the mirror
+ * like every other skill, but not optional and not the design's to choose.
+ *
+ * `aep` is the run's procedure. `aep-validation` REPLACES its run section for a
+ * validation task, and a validation run cannot afford the agent declining a
+ * description-triggered load of the workflow it is supposed to follow.
+ *
+ * Everything else a component needs is a `skillsPinned` entry in its
+ * `design.json`, and that is the design's call. This list is not: no design
+ * decides whether a coding run follows the coding workflow.
+ *
+ * `playwright-cli` is deliberately absent. It carries the browser mechanics a
+ * validation run reaches for, and `aep-validation` names it — a description
+ * -triggered load is the right shape for mechanics a run may or may not need,
+ * and paying for its body on every turn of every validation run is not.
+ */
+export function alwaysOnSkills(taskKind: DispatchRequest["taskKind"]): string[] {
+  return taskKind === "validation" ? ["aep", "aep-validation"] : ["aep"];
 }
 
-export interface ResolvedBaseAgentConfig {
-  /** The authored plugin dir to compose FROM (not what the SDK loads). */
-  sourcePluginPath: string;
-  preload: string[];
-  mode: AgentMode;
-  composeDir: string;
+/**
+ * The SDK options that exist only to be read by a developer afterwards.
+ *
+ * Split out as a pure function so the boundary is testable: the expensive,
+ * prompt-bearing options must be provably absent from a run that did not ask
+ * for them, and "absent" is not something an integration test of a live session
+ * can assert.
+ *
+ * `includePartialMessages` is in here for volume, not secrecy — it multiplies
+ * the message count by roughly the token count, and the run loop drops every
+ * frame it produces on the floor after the watchdog has seen it. The other two
+ * are in here for both reasons.
+ */
+export interface DebugQueryOptions {
+  includePartialMessages?: true;
+  debugFile?: string;
+  stderr?: (data: string) => void;
 }
 
-// resolveBaseAgentConfig is a pure seam (the buildMcpOptions pattern) so the
-// defaults are unit-pinnable without constructing a query() or touching disk.
-export function resolveBaseAgentConfig(
-  base: BaseAgentConfig | undefined,
-  taskKind: DispatchRequest["taskKind"],
-  taskId: string,
-): ResolvedBaseAgentConfig {
-  const sourcePluginPath = base?.basePluginPath ?? PLUGIN_PATH;
-  const mode = base?.mode ?? "github";
-  // Outside the workspace in both modes: in production the workspace is a git
-  // clone the agent commits from, and in the playground it is the developer's
-  // own project dir. Neither should grow a copy of the plugin tree.
-  const composeDir = base?.composeDir ?? path.join(os.tmpdir(), "aep-base-plugin", taskId);
-  const preload = base?.basePreload ? [...base.basePreload] : defaultPreload(taskKind);
-  return { sourcePluginPath, preload, mode, composeDir };
-}
-
-function defaultPreload(taskKind: DispatchRequest["taskKind"]): string[] {
-  const preload = ["aep:aep"];
-  if (taskKind === "validation") preload.push("aep:aep-validation");
-  return preload;
+export function debugQueryOptions(sinks: DebugSinks | undefined): DebugQueryOptions {
+  if (!sinks) return {};
+  return {
+    includePartialMessages: true,
+    debugFile: sinks.debugFilePath,
+    stderr: (data: string) => sinks.onStderr(data),
+  };
 }
 
 export function runClaudeQuery(
@@ -185,7 +327,6 @@ export function runClaudeQuery(
   layout: WorkspaceLayout,
   log: TaskLog,
   perTaskSkills?: PerTaskSkills,
-  base?: BaseAgentConfig,
 ): StartedRun {
   // Spawn env: bearer + git-service URL passed by file path / URL only.
   // No tokens cross via env, so transcripts cannot leak credentials.
@@ -207,43 +348,34 @@ export function runClaudeQuery(
     AEP_CORRELATION_ID: req.correlationId ?? "",
   };
 
-  // Two-tier plugin list: the base `aep` plugin (workflow + base
-  // conventions) is always loaded; the per-task `aep-task-skills`
-  // plugin (project-attached skills) is loaded conditionally when
-  // workspace.ts materialised it. Per-task org skills land in the
-  // `skills:` preload so the SDK injects their full bodies at startup;
-  // custom + imported sit in the same plugin and surface via the SDK's
-  // standard discovery (description in context, body on invoke).
+  // NO plugins. Every skill this session reads is a directory in the project's
+  // `.claude/skills/` mirror, which Claude Code discovers natively because the
+  // mirror sits at the root of `cwd` and the project setting source is admitted
+  // (AGENT_SETTING_SOURCES). The runner used to load two plugins — one it
+  // assembled from the library and one it materialised per task — and both are
+  // gone: the workflow skill it selected is now mirrored like any other, so what
+  // reaches a build is decided in exactly one place, by the BFF.
+  //
   // Related-issue discovery/cross-linking moved to the SRE agent's handoff
   // stage (a "## Related issues" section in the issue body; GitHub #N
   // mentions back-link automatically) — issues arrive pre-linked, so the
   // former aep:related-issues preload is gone. See AE-HANDOFF-DESIGN.md in
   // openchoreo/agents/sre-agent.
-  // Validation tasks additionally preload the validation workflow body:
-  // it replaces the implementation workflow and the run cannot afford
-  // the agent skipping a description-triggered load of it.
   //
-  // The base plugin is COMPOSED, never loaded from the authored tree: the `aep`
-  // skill carries `<!-- mode:… -->` blocks for the GitHub/local split, and this
-  // is the single choke point that resolves them (see skill_compose.ts). Doing
-  // it here rather than in each entrypoint means no caller can forget and ship a
-  // session the raw source, markers and both procedures included.
-  const resolvedBase = resolveBaseAgentConfig(base, req.taskKind, req.taskId);
-  const basePluginDir = composeBasePlugin({
-    sourceDir: resolvedBase.sourcePluginPath,
-    destDir: resolvedBase.composeDir,
-    mode: resolvedBase.mode,
-  });
-  const plugins: Array<{ type: "local"; path: string }> = [
-    { type: "local", path: basePluginDir },
-  ];
-  const skillPreload: string[] = resolvedBase.preload;
-  if (perTaskSkills?.skillsPluginDir) {
-    plugins.push({ type: "local", path: perTaskSkills.skillsPluginDir });
-    for (const name of perTaskSkills.preloadSkillNames) {
-      skillPreload.push(`aep-task-skills:${name}`);
-    }
-  }
+  // Where the skills are, for the one skill that has to name a file inside them:
+  // `aep-validation` runs the platform's report generator rather than a copy the
+  // repo committed. The runner is still the only layer that knows the path, so it
+  // still stamps it — the value is now the mirror rather than the image's library.
+  childEnv.AEP_SKILLS_DIR = mirrorDir(layout.workspace);
+  // An ALLOWLIST, not a preload: a mirrored skill absent from it is rejected by
+  // the Skill tool outright, so this is the whole mirror. The BFF already decided
+  // what this build may use; listing only the pins would leave the rest as inert
+  // files on disk.
+  const skills = perTaskSkills?.availableSkillNames ?? [];
+  // FATAL when the workflow is missing — see requireWorkflowBodies. This is the
+  // structural guarantee that no entrypoint can start a coding run with no
+  // procedure: it throws here, before a session exists, not in each caller.
+  const workflowBodies = requireWorkflowBodies(layout.workspace, alwaysOnSkills(req.taskKind));
 
   // Endpoint Spec Discovery (B2) — register the BFF's MCP server in-process
   // when the dispatch carries both AEP_MCP_URL and AEP_MCP_TOKEN. Older
@@ -266,25 +398,72 @@ export function runClaudeQuery(
   // truth for "what's secret in this run".
   const webFetchGuardHook = createWebFetchGuardHook(stagedSecrets);
 
-  // SDK v0.2.126 auto-discovers the bundled native binary — no
-  // pathToClaudeCodeExecutable needed. settingSources: [] ensures no
-  // host filesystem settings leak into the container agent.
+  // Fan-out stays in the foreground — see fanout_foreground.ts. Backgrounding a
+  // subagent detaches it, and the SDK then forwards none of its messages, so the
+  // run's whole implementation phase reaches the feed as an empty section.
+  const foregroundFanOutHook = createForegroundFanOutHook((label) => {
+    emit({
+      kind: "log",
+      level: "info",
+      summary: `[fan-out] ${label} — running in the foreground so its steps stay on the feed`,
+    });
+  });
+
+  // Authored files land in the project — see workspace_guard.ts. A run once built
+  // a whole component into the run directory and finished green, so the skill's
+  // "everything you produce goes inside it" needs an enforcer too.
+  const workspaceWriteGuard = createWorkspaceWriteGuard(layout.workspace, (reason) => {
+    emit({ kind: "log", level: "warn", summary: `[workspace] ${reason}` });
+  });
+
+  // The SDK auto-discovers the bundled native binary — no
+  // pathToClaudeCodeExecutable needed. See settingSources below for why the
+  // project source — and only the project source — is admitted.
+  //
+  // The workflow body and any pinned bodies ride in on the system prompt, because
+  // `skills:` does not carry them: membership buys a name and a description, and
+  // the body arrives only when the model invokes the skill. Appended to the
+  // claude_code preset rather than replacing it — the preset is what makes the
+  // harness's own tools and conventions work, and this is additional context, not
+  // a different agent. The workflow goes FIRST: it is the procedure, and a pinned
+  // stack skill's rules are read against it.
+  const appended = [workflowBodies, perTaskSkills?.pinnedBodies ?? ""].filter((s) => s !== "").join("\n\n");
+
+  // Opened before the session so the sinks exist for its first byte, and closed
+  // in the run loop's finally. Absent on a normal run, which is what keeps the
+  // prompt-bearing debug log out of the cluster — see DispatchRequest.debug.
+  const debugSinks = req.debug ? openDebugSinks(log.dir, (line) => scrubber.scrub(line)) : undefined;
+
   const q = query({
-    prompt: req.prompt,
+    prompt: promptWithProjectRoot(req.prompt, layout.workspace, contractReferencePath(layout.workspace)),
     options: {
       cwd: layout.workspace,
-      plugins,
-      // Force built-in skill bodies into context at startup. Do NOT
-      // replace with 'all': that would inject every custom + imported
-      // skill's body too, which is what the on-demand listing is for.
-      skills: skillPreload as unknown as string[],
+      systemPrompt: { type: "preset" as const, preset: "claude_code" as const, append: appended },
+      // Pinned rather than left to the SDK's own default, which drifts across
+      // SDK releases (seen live: an unpinned run resolved to claude-sonnet-4-6).
+      model: "claude-sonnet-5",
+      // An ALLOWLIST, not a preload — a name absent here cannot be invoked at
+      // all. Do NOT replace with 'all': the point of naming them is that the BFF
+      // already decided which skills this build may use, and 'all' would readmit
+      // whatever else a checkout happens to carry.
+      skills: skills as unknown as string[],
       allowedTools,
+      // The boundary that actually holds under bypassPermissions — see
+      // DISALLOWED_TOOLS.
+      disallowedTools: DISALLOWED_TOOLS,
       ...(mcpServers ? { mcpServers } : {}),
       permissionMode: "bypassPermissions",
       allowDangerouslySkipPermissions: true,
       persistSession: false,
-      settingSources: [],
+      settingSources: [...AGENT_SETTING_SOURCES],
+      // The project source above admits the clone's .claude/, and a project
+      // repo can carry a .mcp.json declaring arbitrary servers. The runner's
+      // MCP surface is the platform's to decide, not a checkout's, so only
+      // servers from buildMcpOptions are honoured — the isolation that
+      // settingSources: [] used to give implicitly, kept explicitly.
+      strictMcpConfig: true,
       env: childEnv,
+      ...debugQueryOptions(debugSinks),
       // NOT canUseTool — the Task 12 spike found canUseTool is never
       // invoked for the server-executed WebSearch tool (confirmed under
       // bypassPermissions above too). PreToolUse is the mechanism that
@@ -297,17 +476,90 @@ export function runClaudeQuery(
         PreToolUse: [
           { matcher: "WebSearch", hooks: [webSearchDlpHook] },
           { matcher: "WebFetch", hooks: [webFetchGuardHook] },
+          // Not a guard: this one rewrites the call rather than gating it. Two
+          // entries rather than one alternation, because the matcher's grammar
+          // is unspecified in the SDK's types and a pattern that silently failed
+          // to match would take the feed down with it. The hook re-checks the
+          // tool name itself, so a matcher that over-matches is harmless.
+          { matcher: "Agent", hooks: [foregroundFanOutHook] },
+          { matcher: "Task", hooks: [foregroundFanOutHook] },
+          // One matcher per authoring tool, same reasoning as the pair above: the
+          // matcher grammar is unspecified, and the hook re-checks the tool name
+          // itself, so over-matching is harmless and a silent non-match is not.
+          { matcher: "Write", hooks: [workspaceWriteGuard] },
+          { matcher: "Edit", hooks: [workspaceWriteGuard] },
+          { matcher: "NotebookEdit", hooks: [workspaceWriteGuard] },
         ],
       },
     },
   });
 
+  // One translator per run — it carries this run's subagent labels and
+  // in-flight tool calls (see createSdkTranslator).
+  const translate = createSdkTranslator();
+  // …and one watchdog, so a silent stretch says what it is waiting on rather
+  // than looking identical to a dead run.
+  const watchdog = createRunWatchdog();
+  const stopWatchdog = watchdog.start();
+
+  // A killed run must still explain itself. Without this, SIGTERM (what the
+  // playground's Ctrl-C and a Job eviction both send) tears the process down
+  // mid-tool and leaves nothing behind — the state that would have named the
+  // culprit dies with it. Handling the signal means we now own the exit, so
+  // this MUST terminate: a handler that only logged would convert a kill into
+  // the very hang it exists to diagnose.
+  const onTerminate = (signal: NodeJS.Signals): void => {
+    emit({ kind: "log", level: "error", summary: `[watchdog] terminated by ${signal} — ${watchdog.describe()}` });
+    stopWatchdog();
+    // stdout is a PIPE here (a pod's log stream; the playground's child stdio),
+    // and pipe writes are asynchronous on POSIX — exiting on this tick can
+    // truncate the dump just written, losing the one line the handler exists
+    // to produce. Give the fd a bounded moment to drain and then exit hard: a
+    // blocked reader must not turn a kill into a hang.
+    setTimeout(() => process.exit(TERMINATED_EXIT_CODE), TERMINATE_FLUSH_MS);
+  };
+  process.once("SIGTERM", onTerminate);
+  process.once("SIGINT", onTerminate);
+
   const completion = (async (): Promise<RunResult> => {
     try {
       for await (const message of q) {
+        // Streaming frames arrive per token and are pure watchdog fuel: they
+        // reach neither the feed nor claude.log, because writing them to a
+        // JSON-per-message file would turn a diagnostic into the hang it exists
+        // to report. Only present under `debug` at all.
+        if (isStreamFrame(message)) {
+          watchdog.observeStream();
+          continue;
+        }
         log.write(message);
-        for (const event of progressFromSdkMessage(message)) {
+        // A retryable API failure is the answer to "waiting on the model" —
+        // see progress/diagnostics.ts. It is recorded and reported but NOT
+        // passed to observe(): a retry means the run failed to progress, and
+        // counting it as activity would suppress the very report it explains.
+        // The translator drops this message, so emitting here adds a line
+        // rather than duplicating one.
+        const retry = readApiRetry(message);
+        if (retry) {
+          watchdog.observeRetry(retry);
+          emit({ kind: "log", level: "warn", summary: apiRetryLine(retry) });
+          continue;
+        }
+        const events = translate(message);
+        watchdog.observe(events);
+        for (const event of events) {
           emit(event);
+        }
+        // The SDK reports what it actually resolved; a preload that matched
+        // nothing is dropped in silence (see skills_preload_check.ts for the
+        // run this cost us). Warn rather than fail: the guidance is missing,
+        // not the build, and a run that can still produce something useful
+        // should — but it must not look clean while doing it.
+        if (message.type === "system" && message.subtype === "init") {
+          const { missing } = checkPreload(skills, message.skills ?? []);
+          if (missing.length > 0) {
+            emit({ kind: "log", level: "warn", summary: preloadWarning(missing) });
+          }
         }
         if (message.type === "result") {
           if (message.subtype === "success") {
@@ -331,7 +583,11 @@ export function runClaudeQuery(
       emit({ kind: "result", status: "failure", error: msg });
       return { exitCode: 1, error: msg };
     } finally {
+      stopWatchdog();
+      process.removeListener("SIGTERM", onTerminate);
+      process.removeListener("SIGINT", onTerminate);
       log.close();
+      debugSinks?.close();
     }
   })();
 

@@ -34,8 +34,28 @@ spec:
           ports:
             - containerPort: {{ .Values.aepApi.port }}
               name: http
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 5
           resources: {{ toYaml .Values.aepApi.resources | nindent 12 }}
           env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
             - name: SERVER_HOST
               value: "0.0.0.0"
             - name: SERVER_PORT
@@ -50,6 +70,18 @@ spec:
               value: "false"
             - name: AEP_WORKSPACE_ROOT
               value: "/workspaces"
+            - name: AEP_WORKSPACE_REAP_INTERVAL
+              value: {{ .Values.workspaces.reapInterval | default "5m" | quote }}
+            - name: AEP_WORKSPACE_SNAPSHOT_MAX_AGE
+              value: {{ .Values.workspaces.snapshotMaxAge | default "1h" | quote }}
+            - name: AEP_WORKSPACE_TRASH_MAX_AGE
+              value: {{ .Values.workspaces.trashMaxAge | default "1h" | quote }}
+            - name: AEP_WORKSPACE_ORG_QUOTA_BYTES
+              value: {{ .Values.workspaces.orgQuotaBytes | default "2147483648" | quote }}
+            - name: AEP_WORKSPACE_DISK_HIGH_PCT
+              value: {{ .Values.workspaces.diskHighPct | default "85" | quote }}
+            - name: AEP_WORKSPACE_DISK_LOW_PCT
+              value: {{ .Values.workspaces.diskLowPct | default "70" | quote }}
             # aep-* covers the AEP clients (aud = client id, all aep-*).
             # openchoreo-rca-agent is added so the SRE/RCA agent's token (aud =
             # its client id) is accepted for issue-create + report publish —
@@ -67,8 +99,11 @@ spec:
                   key: AEP_API_CLIENT_SECRET
             - name: SERVICE_AUTH_HOST_HEADER
               value: ""
-            - name: BFF_TASK_SIGNING_KEY_PATH
-              value: "/app/keys/task-signing.pem"
+            - name: BFF_TASK_SIGNING_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: aep-task-signing-key
+                  key: task-signing.pem
             - name: BFF_TASK_TOKEN_ISSUER
               value: {{ .Values.taskSigning.issuer | quote }}
             - name: BFF_TASK_TOKEN_AUDIENCE
@@ -180,15 +215,9 @@ spec:
               value: {{ .Values.temporal.taskQueue | quote }}
             {{- end }}
           volumeMounts:
-            - name: task-signing-key
-              mountPath: /app/keys
-              readOnly: true
             - name: workspaces
               mountPath: /workspaces
       volumes:
-        - name: task-signing-key
-          secret:
-            secretName: aep-task-signing-key
         - name: workspaces
           persistentVolumeClaim:
             claimName: aep-workspaces

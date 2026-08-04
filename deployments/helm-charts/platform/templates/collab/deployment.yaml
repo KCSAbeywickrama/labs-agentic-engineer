@@ -9,6 +9,8 @@ metadata:
     app.kubernetes.io/part-of: aep
 spec:
   replicas: {{ .Values.collab.replicas | default 1 }}
+  # replicas MUST stay 1: rooms are a process-local Map with no sticky sessions;
+  # a second replica's flush doc-wins over the first (silent data loss).
   selector:
     matchLabels:
       app: collab-server
@@ -18,6 +20,7 @@ spec:
         app: collab-server
         app.kubernetes.io/part-of: wso2-agentic-engineer
     spec:
+      terminationGracePeriodSeconds: 30
       containers:
         - name: collab-server
           image: "{{ .Values.collab.image.repository }}:{{ .Values.collab.image.tag }}"
@@ -25,6 +28,18 @@ spec:
           ports:
             - containerPort: {{ .Values.collab.port }}
               name: http
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 5
           resources: {{ toYaml .Values.collab.resources | nindent 12 }}
           env:
             - name: COLLAB_PORT

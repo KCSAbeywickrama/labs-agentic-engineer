@@ -47,6 +47,13 @@ const (
 	// "the agent died" (including a Job that exited without opening a pull
 	// request) is a named failure class with a named budget.
 	cycleLandingTimeout = 2 * time.Hour
+
+	// traitSyncTimeout bounds the WHOLE managed-API trait sync including its
+	// retries. It is bounded rather than left to Temporal's unlimited default
+	// because the sync is a convergence step, not a step the version depends on:
+	// a cycle must not hang on it. See syncAPITraits for what happens when it
+	// runs out.
+	traitSyncTimeout = 5 * time.Minute
 )
 
 // RunInput starts a supervisor over one milestone. Everything in it is already
@@ -112,8 +119,19 @@ type loop struct {
 	// record rather than from the signal that announced it.
 	prNumber int
 	mergeSHA string
+	// cycleID is the current cycle's record id. Surfaced on the loop because the
+	// verdict write lands after runCycle has returned.
+	cycleID string
 
-	validationDone bool
+	// validationAttempts counts validation cycles this run has opened, bounded by
+	// delivery.RunMaxValidationAttempts. It replaced a `validationDone bool`: once a
+	// failed validation is repairable, "has it validated yet" stopped being the
+	// question and "how many times" started.
+	validationAttempts int
+	// lastReportDigest fingerprints the previous attempt's report. A repeat whose
+	// report digests the same learned nothing, so the loop stops instead of
+	// spending the rest of the budget on the same answer.
+	lastReportDigest string
 }
 
 func newLoop(ctx workflow.Context, in RunInput) *loop {
@@ -263,7 +281,13 @@ func (l *loop) onEmptyWorkingSet(ctx workflow.Context) (settled bool, res RunRes
 	// Validation is a SPEC-run property: an incident run fixes one thing in an
 	// already-validated version, and re-validating the whole system for it would
 	// price every incident like a release.
-	if l.in.Origin != delivery.RunOriginSpecBuild || l.validationDone {
+	//
+	// The second clause is what makes the repeat loop possible: this boundary is
+	// re-entered after every repair cycle, and validation runs again while the run
+	// has attempts left. Spending them is not settled here — runValidation settles
+	// on the verdict it is already holding, so the reason names the failure rather
+	// than the budget.
+	if l.in.Origin != delivery.RunOriginSpecBuild {
 		res, err = l.settle(ctx, delivery.RunStateSucceeded, "")
 		return true, res, err
 	}
@@ -271,17 +295,59 @@ func (l *loop) onEmptyWorkingSet(ctx workflow.Context) (settled bool, res RunRes
 }
 
 // runValidation mints the validation issue at deployed-green and works it with
-// a fresh dispatch of the same loop.
+// a fresh dispatch of the same loop — then, when the attempt failed and the run
+// has attempts left, files the repair work and hands the boundary back so an
+// ordinary coding cycle can fix it.
 //
 // Minting HERE, and not at plan time, is what makes the coverage honest:
 // mid-run adoption postpones deployed-green by construction, so by the time
 // this runs the validation issue covers everything the run landed.
+//
+// The two recoverable verdicts take different routes to the same boundary, and
+// neither needs a branch anywhere else in the loop:
+//
+//   - `failed` is a defect. One issue per failed criterion joins the working set,
+//     so the next boundary poll dispatches an ordinary coding cycle, its builds go
+//     green, the working set empties, and control arrives back here.
+//   - `unreported` is an agent that merged without a report. Nothing is wrong with
+//     the software, so nothing is minted — the working set stays empty and the
+//     boundary bounces straight back into this function, which is exactly the
+//     remedy: dispatch validation again. Note this is NOT RunMaxRedispatchPerCycle
+//     territory; that budget answers an agent that never landed a pull request,
+//     and this one did.
 func (l *loop) runValidation(ctx workflow.Context) (settled bool, res RunResult, err error) {
+	// Is validation still this run's business? Answered from the verdict already
+	// held, which is what the boundary cannot decide for itself.
+	//
+	// This is the guard that replaced a `validationDone bool`. The flag carried two
+	// meanings at once — "validation has run" and "validation is finished" — and
+	// they came apart the moment a failure could be repaired. Only a FATAL verdict
+	// leaves anything to do.
+	if l.st.ValidationVerdict != "" {
+		reason, fatal := delivery.ValidationVerdictFailsRun(l.st.ValidationVerdict)
+		if !fatal {
+			// Already answered, and the answer stands. Re-entering the boundary after a
+			// non-fatal verdict exists to pick up work adopted while validation ran; an
+			// empty working set on the way back means the version is delivered.
+			res, err = l.settle(ctx, delivery.RunStateSucceeded, "")
+			return true, res, err
+		}
+		if l.validationAttempts >= delivery.RunMaxValidationAttempts {
+			// Out of attempts: accept the answer this run keeps getting. Settling on the
+			// HELD verdict rather than on a budget of its own is why `validation-failed`
+			// now means "still failing after every attempt", and why the repeat loop
+			// needed no new terminal reason.
+			res, err = l.settle(ctx, delivery.RunStateFailed, reason)
+			return true, res, err
+		}
+		// Fatal, with attempts left: repair landed (or there was nothing to repair),
+		// so try again below.
+	}
+
 	issue, err := l.ensureValidationIssue(ctx)
 	if err != nil {
 		return true, l.result(), err
 	}
-	l.validationDone = true
 	if issue == 0 {
 		// No acceptance oracle — nothing to validate, which is itself a verdict.
 		if err := l.setVerdict(ctx, delivery.ValidationVerdictSkipped); err != nil {
@@ -296,6 +362,10 @@ func (l *loop) runValidation(ctx workflow.Context) (settled bool, res RunResult,
 		res, err = l.settle(ctx, delivery.RunStateFailed, reason)
 		return true, res, err
 	}
+	l.validationAttempts++
+	if err := l.bump(ctx, delivery.RunBudgetValidationCycles); err != nil {
+		return true, l.result(), err
+	}
 	outcome, err := l.runCycle(ctx, delivery.CycleKindValidation, issue)
 	if err != nil {
 		return true, l.result(), err
@@ -309,11 +379,11 @@ func (l *loop) runValidation(ctx workflow.Context) (settled bool, res RunResult,
 		return true, res, err
 	}
 
-	verdict, err := l.readVerdict(ctx)
+	out, err := l.readVerdict(ctx)
 	if err != nil {
 		return true, l.result(), err
 	}
-	if err := l.setVerdict(ctx, verdict); err != nil {
+	if err := l.setVerdict(ctx, out.Verdict); err != nil {
 		return true, l.result(), err
 	}
 	// Which verdicts are fatal, and under which reason, is delivery's to say — one
@@ -321,14 +391,69 @@ func (l *loop) runValidation(ctx workflow.Context) (settled bool, res RunResult,
 	// a version settled green. `failed` is a real assertion loss; `unreported` is
 	// an agent that merged a pull request and delivered no report at its own merge
 	// commit. `partial` and `inconclusive` are honest reports of incomplete
-	// evidence, not defects, so they fall through.
-	if reason, fatal := delivery.ValidationVerdictFailsRun(verdict); fatal {
+	// evidence, not defects, so they fall through and settle the run green.
+	reason, fatal := delivery.ValidationVerdictFailsRun(out.Verdict)
+	if !fatal {
+		return l.reenterAfterValidation()
+	}
+
+	// A repeat that reached the SAME answer learned nothing: the criteria, their
+	// outcomes and their failure messages all digest identically, so the repair did
+	// not move the system and another attempt would only produce this report a third
+	// time. Stop here rather than spending the rest of the budget.
+	if l.lastReportDigest != "" && out.Digest == l.lastReportDigest {
 		res, err = l.settle(ctx, delivery.RunStateFailed, reason)
 		return true, res, err
 	}
-	// A validation cycle closes no working-set issue and mints none, so the
-	// no-progress rule must not see it — re-enter the boundary clean, which also
-	// picks up anything adopted while validation was running.
+	l.lastReportDigest = out.Digest
+
+	if l.validationAttempts >= delivery.RunMaxValidationAttempts {
+		res, err = l.settle(ctx, delivery.RunStateFailed, reason)
+		return true, res, err
+	}
+
+	// Attempts remain, so the failure becomes work. `unreported` mints nothing on
+	// purpose: the software is not what failed, and an empty working set is what
+	// sends the boundary straight back here to validate again.
+	if out.Verdict == delivery.ValidationVerdictFailed {
+		filed, merr := l.mintRepairIssues(ctx, issue)
+		if merr != nil {
+			return true, l.result(), merr
+		}
+		if len(filed) == 0 {
+			// `failed` with nothing to file means the report named a failure the
+			// minter could not turn into work. Repairing is then impossible and
+			// another attempt would be the same dispatch, so settle honestly.
+			res, err = l.settle(ctx, delivery.RunStateFailed, reason)
+			return true, res, err
+		}
+		// PARK before handing the boundary back. GitHub's issue index lags a write
+		// (validation_issues.go records a read-back that answered "no validation
+		// issue" for one this platform had just filed), so the very next
+		// pollMilestone can legitimately see an empty working set — which would fall
+		// into onEmptyWorkingSet and settle this run SUCCEEDED over a failure it just
+		// filed repair work for. Signal channels buffer, so parking after the mint
+		// cannot miss the `issues` webhook that wakes it.
+		cancelled, perr := l.park(ctx)
+		if perr != nil {
+			return true, l.result(), perr
+		}
+		if cancelled {
+			res, err = l.settle(ctx, delivery.RunStateCancelled, "")
+			return true, res, err
+		}
+	}
+	return l.reenterAfterValidation()
+}
+
+// reenterAfterValidation hands control back to the cycle boundary with the loop's
+// progress state cleared.
+//
+// A validation cycle closes no working-set issue, so the no-progress rule must not
+// see it: comparing the working set before and after would read a cycle that was
+// never about the working set as a cycle that achieved nothing. Clearing also picks
+// up anything adopted while validation was running.
+func (l *loop) reenterAfterValidation() (bool, RunResult, error) {
 	l.lastResult = cycleNone
 	l.workBefore = 0
 	return false, RunResult{}, nil
@@ -463,12 +588,32 @@ func (l *loop) bump(ctx workflow.Context, counter delivery.RunBudget) error {
 func (l *loop) setVerdict(ctx workflow.Context, verdict string) error {
 	if err := workflow.ExecuteActivity(activityCtx(ctx), (*Activities).SetValidationVerdict,
 		SetValidationVerdictInput{
-			RunID: l.in.RunID, Verdict: verdict, Issue: l.st.ValidationIssue,
+			RunID: l.in.RunID, CycleID: l.cycleID, Verdict: verdict, Issue: l.st.ValidationIssue,
 		}).Get(ctx, nil); err != nil {
 		return err
 	}
 	l.st.ValidationVerdict = verdict
 	return nil
+}
+
+// mintRepairIssues files one issue per failed criterion from the attempt whose
+// report was just read, at the same pinned commit.
+func (l *loop) mintRepairIssues(ctx workflow.Context, issue int) ([]int, error) {
+	var filed []int
+	err := workflow.ExecuteActivity(activityCtx(ctx), (*Activities).MintValidationRepairIssues,
+		MintValidationRepairIssuesInput{
+			OrgID:           l.in.OrgID,
+			ProjectID:       l.in.ProjectID,
+			MilestoneNumber: l.in.MilestoneNumber,
+			At:              l.mergeSHA,
+			CycleID:         l.cycleID,
+		}).Get(ctx, &filed)
+	if err != nil {
+		return nil, err
+	}
+	workflow.GetLogger(ctx).Info("validation attempt failed; filed repair work",
+		"validationIssue", issue, "repairIssues", filed, "attempt", l.validationAttempts)
+	return filed, nil
 }
 
 func (l *loop) closeMilestone(ctx workflow.Context) error {
@@ -485,11 +630,11 @@ func (l *loop) ensureValidationIssue(ctx workflow.Context) (int, error) {
 // cycle's own merge commit (l.mergeSHA, learned from the polled PR facts). Without
 // the pin the read would follow the branch tip and a later run's report could
 // answer for this one.
-func (l *loop) readVerdict(ctx workflow.Context) (string, error) {
-	var verdict string
+func (l *loop) readVerdict(ctx workflow.Context) (ValidationOutcome, error) {
+	var out ValidationOutcome
 	err := workflow.ExecuteActivity(activityCtx(ctx), (*Activities).ReadValidationVerdict,
-		ValidationReportRef{OrgID: l.in.OrgID, ProjectID: l.in.ProjectID, At: l.mergeSHA}).Get(ctx, &verdict)
-	return verdict, err
+		ValidationReportRef{OrgID: l.in.OrgID, ProjectID: l.in.ProjectID, At: l.mergeSHA}).Get(ctx, &out)
+	return out, err
 }
 
 // dispatchActivityCtx runs the agent launch with retries OFF. A launch that did
@@ -500,4 +645,42 @@ func dispatchActivityCtx(ctx workflow.Context) workflow.Context {
 		StartToCloseTimeout: activityTimeout,
 		RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 1},
 	})
+}
+
+// traitSyncActivityCtx retries the managed-API trait sync under an overall
+// deadline. Retries are wanted — the failures this sees are transient
+// OpenChoreo round trips, and the previous owner of this write dropped them
+// silently — but they are bounded, because no part of delivering the version
+// depends on the answer.
+func traitSyncActivityCtx(ctx workflow.Context) workflow.Context {
+	return workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+		StartToCloseTimeout:    activityTimeout,
+		ScheduleToCloseTimeout: traitSyncTimeout,
+	})
+}
+
+// syncAPITraits converges the managed-API gateway policy for the project after
+// a cycle's builds go green.
+//
+// It NEVER fails the cycle. The reason is not that the write is unimportant —
+// an unset `jwtAuth` leaves a protected API's gateway passing every request
+// through unauthenticated — but that failing here would not undo it: the
+// component is already deployed and serving by the time this runs, so a red
+// cycle would add noise without removing exposure. Only convergence removes it,
+// which is why the outcome is logged loudly and left to be re-asserted.
+//
+// This is the interim trigger. It is coupled to THIS build rail, which is
+// exactly how its predecessor died — the trait sync used to hang off the
+// ExecWatcher's build terminal, and stopped firing the moment builds moved to
+// this loop and stopped writing the execution rows that watcher reads. A
+// rail-agnostic reconcile sweep is what makes the guarantee; this only makes it
+// prompt.
+func (l *loop) syncAPITraits(ctx workflow.Context) {
+	err := workflow.ExecuteActivity(traitSyncActivityCtx(ctx), (*Activities).SyncAPITraits,
+		ProjectRef{OrgID: l.in.OrgID, ProjectID: l.in.ProjectID}).Get(ctx, nil)
+	if err != nil {
+		workflow.GetLogger(ctx).Error(
+			"managed-API trait sync did not converge; protected APIs in this project may be serving unauthenticated",
+			"orgID", l.in.OrgID, "projectID", l.in.ProjectID, "error", err)
+	}
 }

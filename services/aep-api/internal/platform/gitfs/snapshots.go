@@ -33,7 +33,8 @@ import (
 // one os.Rename publishes it. Concurrent double-invocation is safe: both
 // stage privately, one rename wins, the loser detects the existing dir and
 // cleans up — a torn dir is never observable at the canonical path.
-func (e *Engine) Ensure(ctx context.Context, ref RepoRef, sha string) error {
+func (e *Engine) Ensure(ctx context.Context, ref RepoRef, sha string) (err error) {
+	defer func() { err = e.mapDiskErr(err) }()
 	p, err := e.pathsFor(ref)
 	if err != nil {
 		return err
@@ -44,6 +45,9 @@ func (e *Engine) Ensure(ctx context.Context, ref RepoRef, sha string) error {
 	}
 	if dirExists(dest) {
 		return nil
+	}
+	if pct := e.DiskUsagePct(); pct >= DiskAdmissionRefusePct {
+		return fmt.Errorf("%w (usage=%d%%)", ErrDiskAdmission, pct)
 	}
 	cloned, err := e.ensureMirror(ctx, ref, p)
 	if err != nil {

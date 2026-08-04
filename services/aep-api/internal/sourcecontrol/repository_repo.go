@@ -30,10 +30,10 @@ import (
 type RepoRepository interface {
 	GetByOrgAndProjectID(ctx context.Context, ocOrgID, projectID string) (*GitRepository, error)
 	GetByOrgAndSlug(ctx context.Context, ocOrgID, repoSlug string) (*GitRepository, error)
-	// ListAllReady returns every repo in `ready` status. Used by the
-	// startup pre-warm path to ensure clones are on disk before traffic
-	// arrives. Bounded by the table size; not paginated because the
-	// caller bounds concurrency separately.
+	// ListAllReady returns every repo in `ready` status across all orgs.
+	// Used by cross-org sweeps (eventcore) and org-filtered project listing
+	// (provisioning) — not a clone pre-warm. Bounded by the table size; not
+	// paginated because the caller bounds concurrency separately.
 	ListAllReady(ctx context.Context) ([]GitRepository, error)
 	// ListAll returns every repo row across all orgs and ALL statuses. The
 	// disk reaper's orphan reconciliation set-differences the on-disk mirror

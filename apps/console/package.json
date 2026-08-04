@@ -22,6 +22,7 @@
     "@aep/collab-doc": "workspace:*",
     "@aep/contracts": "workspace:*",
     "@aep/excalidraw-dsl": "workspace:*",
+    "@aep/progress-view": "workspace:*",
     "@aep/ui-cell-diagram-view": "workspace:*",
     "@aep/ui-design-view": "workspace:*",
     "@aep/ui-excalidraw-view": "workspace:*",

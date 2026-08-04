@@ -60,6 +60,7 @@ function run(over: {
       fixCycles: 0,
       conflictCycles: 0,
       buildRetriggers: 0,
+      validationCycles: 1,
     },
     validation: over.validation ?? {},
     cycles: over.cycles ?? [],
@@ -331,7 +332,7 @@ describe("ValidationPage lifecycle", () => {
     renderPage(undefined);
     // The header chip and the tile headline, both from the shared mapper — which
     // is why they read identically rather than being written twice.
-    expect(screen.getAllByText("Validation passed").length).toBe(2);
+    expect(screen.getAllByText("Validated").length).toBe(2);
   });
 
   // The three verdicts this page was blind to. It used to map the verdict with a
@@ -350,7 +351,7 @@ describe("ValidationPage lifecycle", () => {
     renderPage(undefined);
 
     expect(screen.queryByTestId("run-feed")).not.toBeInTheDocument();
-    expect(screen.getAllByText("Partially validated").length).toBe(2);
+    expect(screen.getAllByText("Validated*").length).toBe(2);
     expect(screen.getByText("Shoppers can search the catalog.")).toBeInTheDocument();
   });
 
@@ -368,8 +369,8 @@ describe("ValidationPage lifecycle", () => {
     renderPage(undefined);
 
     expect(screen.queryByTestId("run-feed")).not.toBeInTheDocument();
-    expect(screen.getAllByText("No test results").length).toBe(2);
-    expect(screen.getByText(/nothing here is confirmed/)).toBeInTheDocument();
+    expect(screen.getAllByText("Validation inconclusive").length).toBe(2);
+    expect(screen.getByText(/please validate them manually/)).toBeInTheDocument();
   });
 
   // `unreported` means no report was committed at that commit, and the server
@@ -385,8 +386,10 @@ describe("ValidationPage lifecycle", () => {
     renderPage(undefined);
 
     expect(screen.queryByTestId("run-feed")).not.toBeInTheDocument();
-    expect(screen.getAllByText("Validation didn't report").length).toBe(2);
-    expect(screen.getByText(/validation-unreported/)).toBeInTheDocument();
+    expect(screen.getAllByText("Validation reporting error").length).toBe(2);
+    expect(
+      screen.getByText(/generating the validation report/),
+    ).toBeInTheDocument();
     expect(screen.queryByText(/report wasn't found/)).not.toBeInTheDocument();
     // The criteria still render — they live under specs/, not in the report.
     expect(screen.getByText("Shoppers can search the catalog.")).toBeInTheDocument();

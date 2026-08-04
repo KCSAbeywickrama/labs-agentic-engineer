@@ -46,7 +46,7 @@ LICENSE_HEADER := .github/license-header.txt
 LICENSE_MATCH = grep -E '\.(go|ts|tsx|sh)$$|(^|/)Dockerfile$$' | \
 	grep -vE '\.gen\.(go|ts)$$|_mock\.go$$|/mocks/|/node_modules/|/dist/|/generated/|(^|/)\.(agents|claude)/'
 
-.PHONY: install gen build dev test lint typecheck license license-check tools clean eval cover build-runner deadcode-ts deadcode-ts-check setup-local dev-cluster deploy-local
+.PHONY: install gen build dev test lint eval-ui typecheck license license-check tools clean eval cover build-runner workflow-skill deadcode-ts deadcode-ts-check setup-local dev-cluster deploy-local
 
 install:
 	$(PNPM) install
@@ -78,6 +78,16 @@ cover:
 	@echo ">> TS coverage — @aep/agents (node:test --experimental-test-coverage)"
 	@$(PNPM) --filter @aep/agents exec node --experimental-test-coverage --import tsx --test "test/**/*.test.ts" 2>/dev/null \
 		| grep -E '^# (tests|pass|fail|all files)' || echo "  (TS coverage unavailable — run 'pnpm --filter @aep/agents test' to debug)"
+
+# Spec-agent evals (evals/spec-agents). On-demand only — never wired into CI.
+#   make eval                 run every eval (real model calls, costs money)
+#   make eval EVAL=<file>     one eval file, e.g. EVAL=evals/requirements.eval.ts
+#   make eval-ui              run once + serve the local results UI
+eval:
+	$(PNPM) --filter @aep/spec-agent-evals eval $(if $(EVAL),-- $(EVAL),)
+
+eval-ui:
+	$(PNPM) --filter @aep/spec-agent-evals eval:ui
 
 lint:
 	$(TURBO) run lint
@@ -114,6 +124,15 @@ deadcode-ts-check:
 # the runner's TS — `make build-runner FORCE=1`.
 build-runner:
 	FORCE=$(FORCE) bash deployments/scripts/build-runner.sh
+
+# Print the `aep` workflow skill exactly as a coding session reads it. Local
+# mode's text is DERIVED (the authored SKILL.md + skills/aep/overlays/local.md),
+# so it exists in no file; this runs the same composer a run runs, which is why
+# there is no second copy to drift.
+#   make workflow-skill             # the platform's dispatched run, verbatim
+#   MODE=local make workflow-skill  # what a playground run reads
+workflow-skill:
+	@cd runners/remote-worker && npx tsx src/compose_workflow.ts
 
 # ── Local in-cluster dev (Skaffold + k3d) ────────────────────────────────────
 # Run once per cluster after setup-k3d.sh. Creates K8s Secrets and registers

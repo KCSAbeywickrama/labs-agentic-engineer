@@ -18,10 +18,11 @@
 
 // Local-mode entrypoint — oneshot.ts's sibling for the AEP playground: the
 // workspace IS a plain local project dir (no clone, no credhelper, no PAT),
-// and the workflow skill is the SAME `aep` skill production loads, composed
-// for `mode: "local"` (edit-in-place, no PR). See skill_compose.ts: the two
-// modes share one authored SKILL.md, so the project conventions the playground
-// exists to tune cannot drift from the ones a real run uses.
+// and the workflow skill is the SAME `aep` skill production loads, with
+// `overlays/local.md` applied for `mode: "local"` (edit-in-place, no PR). See
+// workflow_skill.ts: both modes read one authored SKILL.md, so the project
+// conventions the playground exists to tune cannot drift from the ones a real
+// run uses.
 // Mirrors prod's milestone dispatch (`docs/decisions/ADR-0011`; playground
 // decision: `playground/design/decisions/ADR-0001-milestone-batch-coding-run.md`):
 // the run is scoped to the WHOLE project, not one issue — the prompt names
@@ -37,16 +38,25 @@
 //
 // Env contract (stamped by the playground CLI):
 //   AEP_LOCAL_PROJECT_DIR  the project directory (becomes the cwd)
-//   AEP_LOCAL_SKILLS_DIR   the working-tree skill library (optional)
-//   AEP_LOCAL_PLUGIN_DIR   the authored base plugin (default: ../plugin)
+//   AEP_LOCAL_SKILLS_DIR   the skill library to mirror from — the same one the
+//                          BFF reconciles into an org's repo in production
+//                          (default: ../skills, the library baked into the image)
 //   AEP_LOCAL_RUN_DIR      scratch/log dir (default: <project>/.aep-playground/runner)
-//   ANTHROPIC_API_KEY      the SDK session's key
+//   ANTHROPIC_API_KEY      OPTIONAL. Present (the containerised playground run,
+//                          which can reach no credential store) → the SDK
+//                          session authenticates with it. Absent (a `--host`
+//                          run) → the SDK falls back to the developer's own
+//                          Claude credentials, the ones `claude login` wrote.
+//                          Not validated here: this entrypoint cannot tell
+//                          which of the two it is in, and the caller can — the
+//                          playground refuses a keyless docker run up front.
 //
 // This module imports nothing outside the package — remote-worker stays
 // workspace-dep-free for its standalone image.
 
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { runClaudeQuery } from "./lib/runner.js";
@@ -56,12 +66,14 @@ import type { WorkspaceLayout } from "./lib/workspace.js";
 import { emit, primeScrubber } from "./lib/progress/emitter.js";
 import { installConsoleScrubber } from "./lib/progress/console_scrub.js";
 import { resolveTaskSkills } from "./lib/skills_resolver.js";
-import { materializeSkills } from "./lib/skills_materializer.js";
+import { listMirroredSkills, readSkillBodies, resolvePinnedSkills } from "./lib/skills_presence.js";
+import { mirrorLocalSkillLibrary } from "./lib/local_skill_mirror.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-// The SAME authored plugin production loads. `mode: "local"` below is what
-// swaps the GitHub-shaped steps out of it at compose time.
-const DEFAULT_PLUGIN = path.resolve(__dirname, "../plugin");
+// The SAME authored library production reads (repo-root `skills/`, baked in at
+// /app/skills). `mode: "local"` below is what applies the local overlay to its
+// workflow skill; the playground bind-mounts its working tree over this path.
+const DEFAULT_LIBRARY = path.resolve(__dirname, "../skills");
 
 // A run is scoped to the whole project, not one component — the agent works
 // every open issue it discovers and may touch several components. This is a
@@ -81,27 +93,25 @@ function requireEnv(name: string): string {
 
 interface LocalRun {
   projectDir: string;
-  skillsDir?: string;
-  pluginDir: string;
+  /** The skill library this run mirrors into the project dir, standing in for the BFF's write. */
+  libraryDir: string;
   runDir: string;
 }
 
 function readLocalRunFromEnv(): LocalRun {
   const projectDir = path.resolve(requireEnv("AEP_LOCAL_PROJECT_DIR"));
-  requireEnv("ANTHROPIC_API_KEY");
 
   if (!fs.existsSync(projectDir) || !fs.statSync(projectDir).isDirectory()) {
     throw new Error(`AEP_LOCAL_PROJECT_DIR is not a directory: ${projectDir}`);
   }
 
-  const skillsDir = process.env.AEP_LOCAL_SKILLS_DIR || undefined;
-  if (skillsDir && !fs.existsSync(skillsDir)) {
-    throw new Error(`AEP_LOCAL_SKILLS_DIR does not exist: ${skillsDir}`);
+  const libraryDir = process.env.AEP_LOCAL_SKILLS_DIR || DEFAULT_LIBRARY;
+  if (!fs.existsSync(libraryDir)) {
+    throw new Error(`skill library does not exist: ${libraryDir}`);
   }
-  const pluginDir = process.env.AEP_LOCAL_PLUGIN_DIR || DEFAULT_PLUGIN;
   const runDir = process.env.AEP_LOCAL_RUN_DIR || path.join(projectDir, ".aep-playground", "runner");
 
-  return { projectDir, ...(skillsDir ? { skillsDir } : {}), pluginDir, runDir };
+  return { projectDir, libraryDir, runDir };
 }
 
 // The workspace IS the project dir; the auth-flavored layout fields point at
@@ -124,13 +134,6 @@ function localDirWorkspace(run: LocalRun): WorkspaceLayout {
   };
 }
 
-// The injected "clone": copy the working-tree skill library into the scratch
-// dir under the flat org-skills layout (skills/<name>/…) the resolver reads.
-async function copyLocalSkillLibrary(skillsDir: string, destDir: string): Promise<void> {
-  await fs.promises.rm(destDir, { recursive: true, force: true });
-  await fs.promises.mkdir(path.join(destDir, "skills"), { recursive: true });
-  await fs.promises.cp(skillsDir, path.join(destDir, "skills"), { recursive: true });
-}
 
 async function main(): Promise<number> {
   installConsoleScrubber();
@@ -156,41 +159,52 @@ async function main(): Promise<number> {
   }
   emit({ kind: "phase", phase: "workspace_ready" });
 
-  // Per-task skills: same readSkillsApplied → resolveTaskSkills →
-  // materializeSkills pipeline as production, with the git clone swapped for a
-  // working-tree copy. Failure degrades to the base plugin, loudly.
-  let preloadSkillNames: string[] = [];
-  let skillsPluginDir: string | undefined;
-  if (run.skillsDir) {
-    try {
-      const skillsDir = run.skillsDir;
-      const resolutions = await resolveTaskSkills({
-        workspace: run.projectDir,
-        // A run works the whole project, same as prod's milestone loop — the
-        // union of every component's skillsApplied, never one componentName.
-        scope: { kind: "project" },
-        skillsRepoURL: "local:working-tree",
-        // No git, no platform: the clone below is a working-tree copy.
-        cloneAuth: { helperPath: "", bearerFile: "" },
-        scratchDir: path.join(run.runDir, "skills-clone"),
-        log: (l) => console.log(l),
-        clone: (_url, _auth, dest) => copyLocalSkillLibrary(skillsDir, dest),
-      });
-      // Materialize under the run dir — never inside the user's project tree.
-      const result = await materializeSkills(run.runDir, resolutions);
-      if (result) {
-        skillsPluginDir = result.pluginDir;
-        preloadSkillNames = result.preloadNames;
-        console.log(`[local] materialised ${resolutions.length} skill(s); preload=${preloadSkillNames.length}`);
-      } else {
-        console.log("[local] no per-task skills to materialise");
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.warn(`[local] ⚠️  SKILLS UNAVAILABLE — proceeding without the per-task skill plugin: ${msg}`);
+  // The playground writes its own mirror, standing in for the BFF write that
+  // production gets for free — into `.claude/skills/` in the project dir, the
+  // SAME location the SDK discovers natively via `cwd: layout.workspace`
+  // (== run.projectDir here). No clone, no plugin. It applies the production copy
+  // rule, so a local run sees the same filtered set a real project would, and
+  // pins are read BEFORE it because they are an INPUT to that rule.
+  //
+  // `mode: "local"` is what makes the mirrored `aep` skill the playground's
+  // procedure rather than the platform's. It is stated, never inferred: deriving
+  // it from something incidental (an empty `repoUrl`, an absent MCP token) would
+  // tie the agent's whole procedure to a signal whose meaning could shift for an
+  // unrelated reason. `github` is the default in the mirror writer for the same
+  // reason it always was — a local run wrongly given the platform's procedure
+  // dies on its first `gh` call, where the reverse would quietly finish without
+  // opening a PR.
+  //
+  // A failure here is NOT recoverable: the mirror is where the workflow skill
+  // comes from, so a run whose mirror never got written has no procedure to
+  // follow. runClaudeQuery refuses to start such a session (see
+  // requireWorkflowBodies), which is why this only warns — the fatal check is one
+  // place, not two.
+  let availableSkillNames: string[] = [];
+  let pinnedBodies = "";
+  try {
+    const pinned = await resolveTaskSkills({
+      workspace: run.projectDir,
+      // A run works the whole project, same as prod's milestone loop — the
+      // union of every component's skillsPinned, never one componentName.
+      scope: { kind: "project" },
+      log: (l) => console.log(l),
+    });
+    await mirrorLocalSkillLibrary(run.libraryDir, run.projectDir, new Set(pinned), "local", (l) => console.log(l));
+    const { preload, dangling } = await resolvePinnedSkills(run.projectDir, pinned, (l) => console.log(l));
+    if (dangling.length > 0) {
+      console.warn(`[local] ⚠️  pinned skill(s) missing from .claude/skills/ — proceeding without them: ${dangling.join(", ")}`);
     }
-  } else {
-    console.log("[local] AEP_LOCAL_SKILLS_DIR not set — skipping per-task skills");
+    // The whole mirror is allowed (the SDK rejects anything unlisted); the
+    // pinned subset additionally rides in on the system prompt.
+    availableSkillNames = await listMirroredSkills(run.projectDir);
+    pinnedBodies = await readSkillBodies(run.projectDir, preload);
+    console.log(
+      `[local] ${availableSkillNames.length} skill(s) available, ${preload.length} pinned into context`,
+    );
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`[local] ⚠️  SKILLS UNAVAILABLE — proceeding without per-task skills: ${msg}`);
   }
 
   const req: DispatchRequest = {
@@ -212,23 +226,28 @@ async function main(): Promise<number> {
       "Work the issues in this project. Follow the `aep` skill loaded in your session — " +
       "it defines discovery, ordering, fan-out, verification and how to finish.",
     taskKind: "implementation",
+    // Always on here, and off by default in a pod. A playground run exists to be
+    // debugged: its artifacts sit in a run directory the developer who started it
+    // is already looking at, which is the only place the SDK's debug log and
+    // stderr can be read at all. Not a flag — a run whose diagnostics depend on
+    // remembering an env var is a run that will lack them the one time it matters.
+    debug: true,
   };
 
   const log = openTaskLog(run.runDir);
-  const { completion } = runClaudeQuery(
-    req,
-    layout,
-    log,
-    { ...(skillsPluginDir ? { skillsPluginDir } : {}), preloadSkillNames },
-    {
-      basePluginPath: run.pluginDir,
-      mode: "local",
-      // Under the run dir, not the OS temp dir: the composed skill is the exact
-      // text the agent was steered by, and "what did it actually read?" is a
-      // question a developer tuning the skill asks constantly.
-      composeDir: path.join(run.runDir, "base-plugin"),
-    },
-  );
+  let completion: Promise<{ exitCode: number }>;
+  try {
+    ({ completion } = runClaudeQuery(req, layout, log, { availableSkillNames, pinnedBodies }));
+  } catch (err) {
+    // The mirror carries no workflow skill, so there is no procedure to run —
+    // see requireWorkflowBodies. In the playground that means the library or the
+    // overlay is broken, which is exactly what a developer here wants told
+    // plainly rather than discovered from a session that improvised.
+    const msg = err instanceof Error ? err.message : String(err);
+    emit({ kind: "result", status: "failure", error: `skills: ${msg}` });
+    console.error(`[local] ${msg}`);
+    return 2;
+  }
   const result = await completion;
   return result.exitCode;
 }

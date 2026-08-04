@@ -260,7 +260,15 @@ export interface LoadedSkill {
  */
 export type LoadSkillResult =
   | { ok: true; skills: LoadedSkill[] }
-  | { ok: false; error: string; skills: LoadedSkill[]; missing: string[]; available: string[] };
+  | {
+      ok: false;
+      error: string;
+      skills: LoadedSkill[];
+      missing: string[];
+      available: string[];
+      /** Names refused because they are written for a different agent — visible in the catalog so they can be pinned, but not loadable here. */
+      refused?: string[];
+    };
 
 /** The `loadSkillReference` tool input. WIRE source of truth; drift-guarded in `tool.ts`. */
 export interface LoadSkillReferenceInput {
@@ -356,8 +364,8 @@ export interface Change {
 // --- The turn request (the `POST /conversations/:id/turns` body) -------------
 
 /**
- * The shared-volume workspace reference (shared-volume-clone-architecture §12,
- * D9): IDs + shas only — **no filesystem path ever crosses the boundary**. The
+ * The shared-volume workspace reference (shared-workspace-volume, D9): IDs +
+ * shas only — **no filesystem path ever crosses the boundary**. The
  * agents service derives
  * `$WORKSPACE_MOUNT_ROOT/repos/<org>/<proj>/<repoSlug>/snapshots/<ref>/` (and
  * the `_skills` analog) itself from these fields, so a hostile payload has no
@@ -451,7 +459,7 @@ export function isToolset(v: unknown): v is Toolset {
   return (TOOLSETS as readonly unknown[]).includes(v);
 }
 
-// --- The terminal manifest (shared-volume-clone-architecture D14) ------------
+// --- The terminal manifest (shared-workspace-volume D14) --------------------
 
 /**
  * Per-turn token usage carried on the terminal manifest (#249). Field names are

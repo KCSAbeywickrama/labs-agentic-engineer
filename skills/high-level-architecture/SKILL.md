@@ -4,6 +4,7 @@ description: Use when turning requirements into a design — creating or restruc
 metadata:
   aep:
     kind: platform
+    audience: [design]
 ---
 
 
@@ -81,16 +82,22 @@ Do NOT add platform-owned boilerplate: no Kubernetes/monitoring/backup
 sections, no generic performance targets, no "future enhancements" — unless
 the requirements state them.
 
+**Backend services are written in Ballerina** unless the requirements name a
+different language, in which case honour what they say. That choice is a fact
+you record, not a preference you re-derive per component: write it as the
+component's `language` and pin the matching stack skill in `skillsPinned`.
+
 After emitting or changing a component's design, record the skills that
-component's build actually needs as a `skillsApplied` array **inside that
+component's build actually needs as a `skillsPinned` array **inside that
 component's `specs/design/components/<name>/design.json`** — use the exact
-catalog names, e.g. a Go API service → `["openapi-conventions", "go"]`; a
-web-application → `["excalidraw-wireframes", "react-webapp"]`. Add
+catalog names, e.g. a Ballerina API service →
+`["openapi-conventions", "ballerina"]` (a Go one → `["openapi-conventions",
+"go"]`); a web-application → `["excalidraw-wireframes", "react-webapp"]`. Add
 `"api-management"` to any service that sits behind the gateway, and
 `"thunder-authentication"` to **both** sides of sign-in — the SPA *and* every
 protected backend it calls, since that skill owns how each resolves the caller's
 role. It is a JSON key on the component's design object, so include it when you
-write that `design.json` (addFile/editFile) — do NOT put `skillsApplied` in
+write that `design.json` (addFile/editFile) — do NOT put `skillsPinned` in
 `design.md` frontmatter. Each component carries only the skills its own build
 needs.
 
@@ -110,7 +117,7 @@ A requirement justifies a SEPARATE component when it shows:
   worker/batch processor beside an interactive API, or a long-running
   AI/inference service;
 - a technology the rest of the system doesn't share — e.g. a Python ML
-  service beside a Go API;
+  service beside a Ballerina API;
 - an explicitly separate lifecycle or ownership stated in the requirements.
 
 Do NOT split by:
@@ -154,7 +161,7 @@ violations:
   "name": "expense-api",              // MUST equal the directory name
   "type": "service",                  // EXACT kind: "service" or "web-application" (NEVER "webapp"/"web-app"), or another the requirements imply ("scheduled-task", "worker", ...)
   "version": "0.1.0",                 // semantic version; 0.1.0 for a new component
-  "language": "Go",                   // implementation language, e.g. "Go", "TypeScript"
+  "language": "Ballerina",            // implementation language — "Ballerina" for a service unless the requirements say otherwise; "TypeScript" for a web-application
   "buildpack": "docker",              // always "docker"
   "appPath": "expense-api",           // repo-relative source dir — the component name
   "entrypoint": "deployment/service", // deploy entry — PAIRS with `type`: "deployment/service" for a service, "deployment/web-application" for a web-application

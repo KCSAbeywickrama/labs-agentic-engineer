@@ -50,6 +50,7 @@ jobs:
           - name: remote-worker
             dockerfile: runners/remote-worker/Dockerfile
             context: runners/remote-worker
+            buildContexts: skills=skills
           - name: console
             dockerfile: apps/console/Dockerfile
             context: .
@@ -74,8 +75,10 @@ jobs:
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
-          # aep-api pulls repo-root skills/ in as a named context (empty for
-          # every other image); see services/aep-api/Dockerfile COPY --from=skills.
+          # aep-api and remote-worker pull repo-root skills/ in as a named context
+          # (empty for every other image) — the BFF seeds the library into org
+          # skills repos, and the runner's local (playground) mode mirrors it into
+          # a project dir. See the COPY --from=skills line in each Dockerfile.
           build-contexts: ${{ matrix.buildContexts }}
           push: true
           platforms: linux/amd64,linux/arm64

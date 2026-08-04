@@ -46,7 +46,7 @@ func TestCorruptionSoak(t *testing.T) {
 
 	fx := workspacetest.New(t, map[string]string{"count.txt": "0\n"})
 	seedSHA := fx.Origin.HeadSHA(t)
-	engine2, err := gitfs.New(fx.Engine.Root())
+	engine2, _, err := gitfs.New(fx.Engine.Root())
 	if err != nil {
 		t.Fatalf("second engine on shared root: %v", err)
 	}

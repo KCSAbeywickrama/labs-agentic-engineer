@@ -156,14 +156,26 @@ func TestReconcile_BackfillStampsPreManifestRepo(t *testing.T) {
 	if m["demo"].BaseHash == "" {
 		t.Fatal("backfill did not stamp baseHash")
 	}
-	// Divergent pre-manifest copy → stamped but NEVER overwritten.
+	// Divergent pre-manifest copy → ADOPTS the shipped content. This reverses
+	// the original "never clobbered during migration" rule: the platform could
+	// not tell a pre-manifest edit from a merely stale copy, and recording the
+	// embedded sha as the baseline of a copy the org did not have fabricated a
+	// third value matching neither side — every later release then read as
+	// "both moved" and surfaced an unresolvable conflict on untouched skills.
+	// A post-manifest edit is still preserved; see
+	// TestReconcile_PostManifestEditStillSurvives.
 	host.writeAtHead("org1", skillsManifestPath, "")
 	host.writeAtHead("org1", skillRepoPath("demo"), demoMD("org custom"))
 	if _, err := svc.Reconcile(ctx, "org1"); err != nil {
 		t.Fatalf("backfill divergent: %v", err)
 	}
-	if got := host.readAtHead("org1", skillRepoPath("demo")); !strings.Contains(got, "org custom") {
-		t.Fatalf("divergent pre-manifest copy clobbered during migration: %q", got)
+	got := host.readAtHead("org1", skillRepoPath("demo"))
+	if strings.Contains(got, "org custom") {
+		t.Fatalf("a pre-manifest copy must adopt the shipped content, still diverged: %q", got)
+	}
+	after := parseSkillsManifest([]byte(host.readAtHead("org1", skillsManifestPath)))["demo"].BaseHash
+	if after == "" || !strings.Contains(got, "v1") {
+		t.Fatalf("adoption must leave copy and baseline agreeing: base=%q copy=%q", after, got)
 	}
 }
 
@@ -236,9 +248,11 @@ func TestReconcile_UserAuthoredOrgSkillUntouched(t *testing.T) {
 	}
 }
 
-// A NEW org-kind default the org has never had is NOT auto-added on ongoing
-// Sync (opt-in). Only first-creation seeds org defaults.
-func TestReconcile_OngoingSync_DoesNotAddNewOrgSkill(t *testing.T) {
+// A NEW org-kind default — one shipped after this org's repo was created — IS
+// added on ongoing Sync. Without this, the org-kind half of the library is
+// frozen for every existing org and a newly shipped stack skill only ever
+// reaches brand-new orgs.
+func TestReconcile_OngoingSync_AddsNewOrgDefault(t *testing.T) {
 	t.Parallel()
 	// library v1 ships only "demo" (org kind). Seed a repo with it.
 	svc, host := newTestStoreWithLibrary(t, orgLib("demo", "v1"))
@@ -246,17 +260,24 @@ func TestReconcile_OngoingSync_DoesNotAddNewOrgSkill(t *testing.T) {
 	if _, err := svc.List(ctx, "org1"); err != nil { // first-creation seed
 		t.Fatalf("seed: %v", err)
 	}
-	// Platform now also ships "rust" (org kind). Ongoing Sync must NOT add it.
+	// Platform now also ships "rust" (org kind). Ongoing Sync must add it.
 	svc.SwapLibrary(orgLib2("demo", "v1", "rust", "v1"))
 	if _, err := svc.Reconcile(ctx, "org1"); err != nil {
 		t.Fatalf("sync: %v", err)
 	}
-	if got := host.readAtHead("org1", skillRepoPath("rust")); got != "" {
-		t.Fatalf("ongoing sync auto-added a new org default: %q", got)
+	if got := host.readAtHead("org1", skillRepoPath("rust")); got == "" {
+		t.Fatal("ongoing sync did not add a newly shipped org default")
+	}
+	// ...and it is stamped, so the next sync compares rather than re-seeds.
+	if e := parseSkillsManifest([]byte(host.readAtHead("org1", skillsManifestPath)))["rust"]; e.BaseHash == "" || e.Removed {
+		t.Fatalf("newly seeded org default has no clean baseline: %#v", e)
 	}
 }
 
-// A DELETED org default stays gone across ongoing Sync (opt-in; not re-seeded).
+// A DELETED org default stays gone across ongoing Sync. The delete goes
+// through the real mutation path so the tombstone it writes is what the
+// reconcile actually reads — hand-forging the repo state would test the
+// fixture rather than the mechanism.
 func TestReconcile_OngoingSync_DoesNotReAddDeletedOrgSkill(t *testing.T) {
 	t.Parallel()
 	svc, host := newTestStoreWithLibrary(t, orgLib("demo", "v1"))
@@ -264,9 +285,9 @@ func TestReconcile_OngoingSync_DoesNotReAddDeletedOrgSkill(t *testing.T) {
 	if _, err := svc.List(ctx, "org1"); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	// Simulate the org deleting "demo": remove its file AND its manifest entry.
-	host.removeAtHead("org1", skillRepoPath("demo"))
-	host.writeAtHead("org1", skillsManifestPath, "{}")
+	if err := NewSkillMutationService(svc).Delete(ctx, "org1", "tester", "demo"); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
 	if _, err := svc.Reconcile(ctx, "org1"); err != nil {
 		t.Fatalf("sync: %v", err)
 	}

@@ -23,7 +23,21 @@ at the end of the system prompt, and the agent pulls a body on demand via the
 (`src/agents/main/skill-source.ts`). One supply: skills load lazily from the
 turn's `_skills` snapshot on the mount (`src/conversation/load-workspace.ts`);
 they never travel in the turn payload. No skills → no catalog, behaves as today.
-See ADR-0002 and `docs/design/shared-volume-clone-architecture.md` §12.
+See ADR-0002 and `services/aep-api/design/shared-workspace-volume.md`.
+
+**Audience** (ADR-0013) splits that catalog. A skill's `metadata.aep.audience`
+lists the agents its guidance is written for — `design` or `coding` — and this
+service is always the **design** side (`SERVICE_AUDIENCE`; the coding agent runs
+in the remote-worker runner and never calls here), so nothing is passed per
+request. Coding-agent rows are still **listed**: the design agent has to name a
+skill to pin it onto a component's `design.json`, which is how that guidance
+reaches the build — so the catalog groups them into a pin-only block, and
+`load()` returns `{ refused: true }` rather than a body. `loadSkill` reports
+those separately from unknown names (`refused` vs `missing`), because a refusal
+indistinguishable from "no such skill" invites the agent to skip pinning. An
+absent audience means every audience, so unmarked and org-authored skills are
+unaffected — and a library with nothing pin-only renders the catalog
+byte-identically, preserving the cached instruction prefix.
 
 **Tool sets** (`TurnRequest.toolset`, tasks-github-native §9.3): the turn selects
 which domain tools the generic loop registers. `files` (default, and identical to
@@ -55,8 +69,12 @@ off the stream. The plan tool contract (inputs, results, error codes, the
 - **M2M gate is always on**: set `AGENT_JWT_JWKS_URL` (RS256) **or**
   `AGENT_JWT_SECRET` (HS256) — the server refuses to boot with neither. `aud`
   defaults to `agents-service` (`AGENT_JWT_AUDIENCE`); `AGENT_JWT_ISSUER` optional.
-- **Store**: Postgres when `DATABASE_URL` is set (idempotent bootstrap + TTL
-  sweep, `CONVERSATIONS_TTL_MS` / `CONVERSATIONS_SWEEP_MS`), else in-memory.
+- **Store**: Postgres when a connection URL resolves — `DATABASE_URL` verbatim
+  (local dev) or discrete `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD` /
+  `DB_NAME` (+ optional `DB_SSLMODE`) assembled like aep-api (platform
+  release-binding); `DATABASE_URL` wins when both are set. Incomplete discrete
+  fields → in-memory. Idempotent bootstrap + TTL sweep
+  (`CONVERSATIONS_TTL_MS` / `CONVERSATIONS_SWEEP_MS`).
 - Keep-alives every `AGENT_KEEPALIVE_MS` (default 15s) while a turn streams.
 - Callers (e.g. the `@aep/playground` CLI) read `ANTHROPIC_API_KEY` themselves and
   send it (plus an HS256 M2M token) as headers — the service holds no key.

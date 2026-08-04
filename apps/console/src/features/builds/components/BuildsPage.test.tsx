@@ -149,6 +149,7 @@ function run(over: Partial<MilestoneRunView> = {}): MilestoneRunView {
       fixCycles: 1,
       conflictCycles: 0,
       buildRetriggers: 0,
+      validationCycles: 0,
     },
     validation: {},
     cycles: [
@@ -272,6 +273,7 @@ describe("BuildsPage — one version's story", () => {
           fixCycles: 1,
           conflictCycles: 0,
           buildRetriggers: 0,
+          validationCycles: 0,
         },
       }),
     ];

@@ -70,4 +70,21 @@ export interface DispatchRequest {
    * loading proved unreliable for a skill the whole run depends on.
    */
   taskKind: "implementation" | "validation";
+  /**
+   * Developer diagnostics for this run: the SDK's own debug log, its stderr,
+   * and per-token streaming frames for the watchdog. All three land in files
+   * beside `claude.log`; none of them reach the progress feed.
+   *
+   * Stated by the entrypoint, never inferred — the same discipline as skills
+   * scope. `local.ts` turns it on, because a playground run is read off disk by
+   * the developer who started it. `oneshot.ts` leaves it off, because a pod's
+   * files die with the pod and its debug log would hold prompt text.
+   * `AEP_RUNNER_DEBUG=1` overrides for the one case that needs it: a stall that
+   * only reproduces in the cluster, where a diagnostic you cannot enable is a
+   * diagnostic you do not have.
+   *
+   * Note what does NOT depend on this flag: API retries. Those are reported on
+   * every run — see progress/diagnostics.ts for why they are safe to be.
+   */
+  debug?: boolean;
 }

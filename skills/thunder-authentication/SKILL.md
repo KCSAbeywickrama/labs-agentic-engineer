@@ -4,6 +4,7 @@ description: How end-user identity works on the platform — Thunder, the IDP wi
 metadata:
   aep:
     kind: org
+    audience: [coding]
 ---
 
 # Thunder Authentication
@@ -196,61 +197,32 @@ so a directory lookup keyed on it 404s. Split the two questions a caller raises:
 ## Implementation
 
 Resolve the role from `X-User-Groups`, never by looking `X-User-Id` up anywhere.
-**403**, never 401, when no group maps:
+**403**, never 401, when no group maps. One resolver, called by every protected
+handler:
 
-```go
-func callerRole(r *http.Request) string { // "" = no recognized role
-    for _, g := range parseGroups(r.Header.Get("X-User-Groups")) {
-        lg := strings.ToLower(g)
-        switch { // adapt the keywords to the spec's role names
-        case strings.Contains(lg, "admin"):   return "admin"
-        case strings.Contains(lg, "auditor"): return "auditor"
-        }
-    }
-    return ""
-}
-
-// X-User-Groups is a JSON array (e.g. ["Compliance Admin"]); accept a
-// comma-separated fallback too.
-func parseGroups(h string) []string {
-    h = strings.TrimSpace(h)
-    if h == "" { return nil }
-    var arr []string
-    if strings.HasPrefix(h, "[") && json.Unmarshal([]byte(h), &arr) == nil {
-        return arr
-    }
-    return strings.Split(h, ",")
-}
-```
+- **Parsing `X-User-Groups`.** It arrives as a JSON array (e.g.
+  `["Compliance Admin"]`); accept a comma-separated string as a fallback. Match
+  each group case-insensitively against the spec's role names — a substring
+  match on the keyword (`admin`, `auditor`) survives the org renaming its
+  groups, an equality check does not.
+- **No recognized group → no role → 403.** Return the empty/absent case
+  explicitly rather than defaulting to the least-privileged real role; a
+  default role is a silent authorization grant.
 
 When roles scope by the caller's own directory attributes — their unit, their own
-id — resolve the caller's **directory record** by `X-User-Name` and filter on that
-record's fields. Absent or unresolved → 403:
+id — resolve the caller's **directory record** by `X-User-Name` and filter on
+that record's fields:
 
-```go
-// ok == false → answer 403, never 401.
-func resolveCaller(r *http.Request) (DirectoryRecord, bool) {
-    username := r.Header.Get("X-User-Name")
-    if username == "" {
-        return DirectoryRecord{}, false
-    }
-    return directory.FindByUsername(r.Context(), username)
-}
+- Missing `X-User-Name`, or a username that resolves to no record → **403**.
+- An admin-equivalent role takes no filter; every other role filters on a field
+  of the resolved record — never on `X-User-Id` (opaque) and never on a group
+  name.
 
-func listScoped(w http.ResponseWriter, r *http.Request) {
-    switch callerRole(r) {
-    case "":      /* 403: no role */ return
-    case "admin": // no filter — sees everything
-    default:
-        rec, ok := resolveCaller(r); if !ok { /* 403 */ return }
-        // Filter on rec.Unit or rec.ID — the attribute the spec scopes by.
-        // NOT X-User-Id (opaque) and NOT a group name.
-    }
-}
-```
-
-The directory's real endpoint, its username field, and the dependency wiring are
-org-specific — `internal-services` owns them; do not hardcode a roster.
+Express this in your stack's own idiom — where the resolver lives, its
+signature, and how a handler returns 403 — following the conventions that skill
+already sets. The directory's real endpoint, its username field, and the
+dependency wiring are org-specific — `internal-services` owns them; do not
+hardcode a roster.
 
 ---
 

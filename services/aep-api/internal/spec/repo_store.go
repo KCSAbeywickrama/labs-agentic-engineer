@@ -56,6 +56,11 @@ const (
 	skillsRootDir = "skills"
 	skillFileName = "SKILL.md"
 	refsPrefix    = "references/"
+	// skillOverlaysDir names the one subdirectory of an authored skill that is
+	// NOT skill content: the coding runner's mode overlays (compose-time input
+	// for a session it assembles — ADR-0004 in runners/remote-worker). loadLibrary
+	// skips it, so it never reaches an org's skills repo or a ContentSHA.
+	skillOverlaysDir = "overlays"
 )
 
 // legacyKindDirs maps the RETIRED kind path-segments (skills/<kindDir>/<name>/,
@@ -165,6 +170,30 @@ func (s *SkillService) resolveFresh(ctx context.Context, orgID, name string) (*S
 	return findByName(skills, name), nil
 }
 
+// ListForMirror is List with read errors SURFACED rather than degraded to
+// empty — the same "same read, errors surfaced" shape as resolveFresh, for the
+// one caller that must NOT treat a git outage as "the org library is empty":
+// the project-skill mirror (skill_mirror.go). List/catalog degrade to nil on
+// any failure (§12) because a design/task run reading a stale-but-nonempty
+// catalog is far better than failing the run outright; the mirror's pruning
+// step has the opposite failure mode — an empty read would delete every
+// project's copy of every skill — so it must be able to tell "the library is
+// genuinely empty" apart from "the read failed".
+func (s *SkillService) ListForMirror(ctx context.Context, orgID string) ([]Skill, error) {
+	if s == nil || s.git == nil || s.repos == nil || orgID == "" {
+		return nil, fmt.Errorf("skills: service not configured for org %q", orgID)
+	}
+	repo, err := s.ensureSkillsRepo(ctx, orgID)
+	if err != nil {
+		return nil, fmt.Errorf("ensure skills repo: %w", err)
+	}
+	skills, err := s.loadCatalog(ctx, orgID, repo)
+	if err != nil {
+		return nil, fmt.Errorf("load skills catalog: %w", err)
+	}
+	return skills, nil
+}
+
 // List returns every skill visible to the org (including platform skills —
 // the internal catalog), sorted by kind then name. Callers that feed
 // user-facing or per-turn surfaces filter kinds themselves (ListSummaries
@@ -177,7 +206,9 @@ func (s *SkillService) List(ctx context.Context, orgID string) ([]Skill, error) 
 // (name, kind, description, ...). Platform skills list READ-ONLY (the page
 // shows the generation-flow guidance for inspection); org + imported are
 // editable and deletable per SkillEditable/SkillDeletable — both are pure
-// kind checks, so a single catalog() read is enough; no manifest load.
+// kind checks; Enabled comes straight through from catalog()'s own
+// manifest cross-reference (loadCatalog), so a single catalog() read still
+// covers everything this projection needs.
 func (s *SkillService) ListSummaries(ctx context.Context, orgID string) ([]SkillSummary, error) {
 	skills := s.catalog(ctx, orgID)
 	out := make([]SkillSummary, 0, len(skills))
@@ -189,6 +220,7 @@ func (s *SkillService) ListSummaries(ctx context.Context, orgID string) ([]Skill
 			ContentSHA:  sk.ContentSHA,
 			Editable:    SkillEditable(sk.Kind),
 			Deletable:   SkillDeletable(sk.Kind),
+			Enabled:     sk.Enabled,
 		})
 	}
 	return out, nil
@@ -234,26 +266,13 @@ func (s *SkillService) catalog(ctx context.Context, orgID string) []Skill {
 	return skills
 }
 
-// loadCatalogEntries reads skills/ at the branch tip: one Workspace.ReadBundle
-// (fetch + local ls-tree/cat-file) filtered to the catalog layout, parsed
-// in-memory — with per-entry layout info for the reconciler. Branch-tip reads
-// always revalidate origin, so freshness matches the retired REST walk without
-// any cache.
-func (s *SkillService) loadCatalogEntries(ctx context.Context, orgID string, repo *sourcecontrol.GitRepository) ([]catalogEntry, error) {
-	ref, err := sourcecontrol.ResolveWorkspaceRef(ctx, s.git.Resolver(), orgID, repo)
-	if err != nil {
-		return nil, err
-	}
-	files, _, err := s.git.Workspace().ReadBundle(ctx, ref, "", isCatalogPath)
-	if err != nil {
-		return nil, fmt.Errorf("read skills bundle: %w", err)
-	}
-	return parseBundleEntries(ctx, files), nil
-}
-
-// loadEntriesAndManifest is loadCatalogEntries plus the skills-manifest.json
-// baseline, read from the SAME ref so entries and manifest are a consistent
-// snapshot. The manifest is tolerant-parsed (absent/corrupt → empty). The
+// loadEntriesAndManifest reads skills/ at the branch tip (one
+// Workspace.ReadBundle: fetch + local ls-tree/cat-file, filtered to the
+// catalog layout, parsed in-memory — with per-entry layout info for the
+// reconciler) plus the skills-manifest.json baseline, read from the SAME ref
+// so entries and manifest are a consistent snapshot. Branch-tip reads always
+// revalidate origin, so freshness matches the retired REST walk without any
+// cache. The manifest is tolerant-parsed (absent/corrupt → empty). The
 // returned manifestPresent reports whether the manifest FILE existed at all —
 // distinct from an empty parse — so a caller can tell a pre-manifest (or
 // manually deleted) repo apart from one whose manifest is simply empty, and
@@ -274,15 +293,20 @@ func (s *SkillService) loadEntriesAndManifest(ctx context.Context, orgID string,
 	return parseBundleEntries(ctx, files), manifest, manifestPresent, nil
 }
 
-// loadCatalog is loadCatalogEntries projected to the Skill catalog shape.
+// loadCatalog is loadEntriesAndManifest projected to the Skill catalog shape,
+// with each skill's Enabled cross-referenced against its skills-manifest.json
+// entry (absent entry, or no manifest at all, means enabled — see
+// ManifestEntry.Disabled).
 func (s *SkillService) loadCatalog(ctx context.Context, orgID string, repo *sourcecontrol.GitRepository) ([]Skill, error) {
-	entries, err := s.loadCatalogEntries(ctx, orgID, repo)
+	entries, manifest, _, err := s.loadEntriesAndManifest(ctx, orgID, repo)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]Skill, 0, len(entries))
 	for _, e := range entries {
-		out = append(out, e.Skill)
+		sk := e.Skill
+		sk.Enabled = !manifest[sk.Name].Disabled
+		out = append(out, sk)
 	}
 	return out, nil
 }
@@ -447,6 +471,11 @@ func parseBundleEntries(ctx context.Context, files map[string]string) []catalogE
 				ContentSHA:    contentSHA(bodies[k], r),
 				License:       fm.License,
 				Compatibility: fm.Compatibility,
+				// Enabled defaults true here (no manifest is in scope for this
+				// pure parse); loadCatalog cross-references skills-manifest.json
+				// and flips it for any entry the org disabled.
+				Enabled:  true,
+				Audience: frontmatterAudience(fm),
 			},
 			legacyDir: k.legacyDir,
 		}
@@ -566,7 +595,17 @@ func (s *SkillService) writeSkillFiles(ctx context.Context, orgID, name, skillMD
 	if entry != nil {
 		e := *entry
 		manifestFn = func(m SkillsManifest) SkillsManifest {
-			m[name] = e
+			// The upsert replaces the WHOLE entry, but availability is org
+			// intent and independent of the baseline this write records: a
+			// converging console edit or a re-import must not silently
+			// re-enable a skill the org switched off. Carry the prior flag here
+			// so no caller has to remember to. Re-enabling is a manifest-only
+			// write (SetEnabled), which never routes through this path.
+			next := e
+			if prior, ok := m[name]; ok && prior.Disabled {
+				next.Disabled = true
+			}
+			m[name] = next
 			return m
 		}
 	}
@@ -589,13 +628,21 @@ func (s *SkillService) deleteSkillDir(ctx context.Context, orgID, name, message 
 	if err != nil {
 		return err
 	}
-	// Drop the name's manifest entry (if any) INSIDE the commit closure so the
-	// entry never outlives its files AND a concurrent commit's entries survive
-	// the CAS retry — see commitFiles. commitFiles stages the manifest only
-	// when this delete actually removes an entry (an absent name is a no-op
-	// that never conjures an empty manifest file).
+	// TOMBSTONE the name's manifest entry (if any) INSIDE the commit closure so
+	// a concurrent commit's entries survive the CAS retry — see commitFiles.
+	// The entry deliberately outlives its files: it is the only record that
+	// this org threw the skill away, which is what stops reconcile handing it
+	// back on the next sync. A name with NO entry is left untouched — it is
+	// org-authored, and inventing a tombstone for it would both conjure an
+	// empty manifest file and permanently block a future platform default of
+	// the same name. commitFiles stages the manifest only when these bytes
+	// actually change, so that case stays a clean no-op.
 	manifestFn := func(m SkillsManifest) SkillsManifest {
-		delete(m, name)
+		if e, ok := m[name]; ok {
+			e.Removed = true
+			e.BaseHash = "" // no live copy to compare against any more
+			m[name] = e
+		}
 		return m
 	}
 	_, err = s.commitFiles(ctx, orgID, repo, message, nil, append([]string{skillRepoDir(name)}, legacySkillDirs(name)...), manifestFn)

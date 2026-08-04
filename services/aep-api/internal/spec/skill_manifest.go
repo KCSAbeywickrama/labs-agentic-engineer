@@ -22,8 +22,11 @@ package spec
 // skills get origin "platform" (whatever their frontmatter kind — the manifest
 // origin is provenance, the frontmatter kind is a human ownership label),
 // imports get origin "imported" + their source. baseHash is contentSHA output
-// (bare hex). A
-// skill with NO entry is org-authored: reconcile never touches it. Parsing
+// (bare hex). An entry also OUTLIVES its files as a tombstone (removed:true)
+// when the org deletes the skill, so "the org threw this away" stays
+// distinguishable from "never offered". A
+// skill with NO entry is org-authored or never-offered: reconcile never
+// touches an org-authored name, and seeds a never-offered default. Parsing
 // is tolerant — a corrupt manifest must never brick reads; the next
 // reconcile rewrites it. Rendering is deterministic (encoding/json sorts map
 // keys) so commits diff cleanly.
@@ -46,11 +49,31 @@ const (
 )
 
 // ManifestEntry is one skill's baseline: what it is, where it came from, and
-// the contentSHA it was last handed at.
+// the contentSHA it was last handed at. Removed marks a TOMBSTONE — the org
+// deleted this name, so it is never handed back (see the Removed doc below).
 type ManifestEntry struct {
 	Origin   string `json:"origin"`
 	Source   string `json:"source,omitempty"`
 	BaseHash string `json:"baseHash"`
+
+	// Disabled withholds the skill from the agents (catalog + project-repo
+	// copies) without touching SKILL.md — availability must never alter
+	// contentSHA, or a disabled skill would read as a divergence from the
+	// platform baseline and surface as a pending platform update. Stored as the
+	// NEGATIVE so an entry written before this field existed, and every newly
+	// seeded entry, is enabled by its zero value. ADR-0014. Distinct from
+	// Removed below: disabled means the files are present but withheld,
+	// removed means the org threw the files away.
+	Disabled bool `json:"disabled,omitempty"`
+
+	// Removed records that the org deleted this skill. The entry outlives the
+	// files precisely so reconcile can tell "the org threw this away" apart
+	// from "this org has never been offered it" — a name with NO entry is the
+	// latter, and gets seeded like any other default. Without the tombstone
+	// the two states are identical (delete used to drop the entry), which is
+	// why seeding an absent org-kind default had to be refused wholesale and
+	// no new org-kind default could ever reach an existing org.
+	Removed bool `json:"removed,omitempty"`
 }
 
 // UnmarshalJSON tolerates the pre-rename "kind" field (manifests written
@@ -62,6 +85,8 @@ func (e *ManifestEntry) UnmarshalJSON(b []byte) error {
 		Kind     string `json:"kind"`
 		Source   string `json:"source"`
 		BaseHash string `json:"baseHash"`
+		Disabled bool   `json:"disabled"`
+		Removed  bool   `json:"removed"`
 	}
 	if err := json.Unmarshal(b, &raw); err != nil {
 		return err
@@ -72,6 +97,8 @@ func (e *ManifestEntry) UnmarshalJSON(b []byte) error {
 	}
 	e.Source = raw.Source
 	e.BaseHash = raw.BaseHash
+	e.Disabled = raw.Disabled
+	e.Removed = raw.Removed
 	return nil
 }
 
@@ -114,8 +141,7 @@ const (
 	actionSkip             reconcileAction = iota // nothing to do
 	actionSeed                                    // no repo copy: write files + stamp baseHash
 	actionRefresh                                 // org clean, platform moved: write files + advance baseHash
-	actionBackfill                                // pre-manifest copy matching embed: stamp baseHash only
-	actionBackfillOverride                        // pre-manifest copy diverged: stamp baseHash, treat as override, never write files
+	actionBackfill                                // pre-manifest copy: adopt the shipped content + stamp baseHash
 	actionOverride                                // org moved, platform not: leave alone
 	actionConflict                                // both moved: leave alone, surface for review
 )
@@ -128,13 +154,23 @@ func decideReconcile(embeddedSHA, repoSHA string, repoExists bool, entry *Manife
 		return actionSeed
 	}
 	if entry == nil {
-		// Migration backfill (issue #293): stamp the baseline; a copy that
-		// matches the shipped content is clean, anything else is treated as
-		// an override — never clobbered during migration.
-		if repoSHA == embeddedSHA {
-			return actionBackfill
-		}
-		return actionBackfillOverride
+		// Migration backfill: no entry means the manifest is being created for
+		// this skill RIGHT NOW, so there is no recorded agreement to reason
+		// from — the platform is authoritative at that moment. Adopt the
+		// shipped content and stamp the baseline from the same bytes.
+		//
+		// This supersedes #293's "a diverged pre-manifest copy is an override,
+		// never clobbered". That protected a pre-manifest org edit, but it
+		// could not tell one from a merely STALE copy, and it recorded the
+		// EMBEDDED sha as the baseline of a copy the org did not have — a
+		// third value matching neither side. Every later platform release then
+		// read as "both moved" and surfaced an unresolvable conflict on skills
+		// nobody had touched. A one-time adoption is visible in the org repo's
+		// git history; a fabricated baseline is visible nowhere.
+		//
+		// Only the MIGRATION is affected: once an entry exists, a genuine org
+		// edit is still actionOverride/actionConflict and is never clobbered.
+		return actionBackfill
 	}
 	if entry.Origin != ManifestOriginPlatform {
 		return actionSkip // imported-owned name: reconcile never manages it

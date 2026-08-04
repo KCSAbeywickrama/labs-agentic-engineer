@@ -101,9 +101,10 @@ test("targetSuffix + renderPlanContext shapes appear in their Go sources", () =>
 // its own dispatch). Both are deliberately just a subject plus a pointer at the
 // `aep` skill for the procedure — so the pointer clause is the one string that
 // has to survive in both, and a rename of the skill has to move both. The skill
-// BODIES no longer need a parity test: there is one authored SKILL.md now, and
-// the mode blocks in it are checked by
-// runners/remote-worker/src/lib/skill_compose.test.ts.
+// BODIES no longer need a parity test: there is one authored SKILL.md in the
+// repo-root library, and the local-mode edits that produce the playground's copy
+// of it (skills/aep/overlays/local.md) are checked by
+// runners/remote-worker/src/lib/workflow_skill.test.ts.
 
 const SKILL_POINTER = "Follow the `aep` skill loaded in your session — it defines discovery, ordering, fan-out";
 

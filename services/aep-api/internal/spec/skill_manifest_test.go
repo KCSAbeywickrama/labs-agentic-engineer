@@ -74,9 +74,13 @@ func TestDecideReconcile(t *testing.T) {
 		// No repo copy at all → seed (fresh org, or org deleted a platform copy).
 		{"absent", "E1", "", false, nil, actionSeed},
 		{"absent despite entry", "E1", "", false, plat("E1"), actionSeed},
-		// Pre-manifest repo copy (migration/backfill — issue #293 policy).
+		// Pre-manifest repo copy: no entry means the manifest is being created
+		// now, so the platform is authoritative — BOTH the matching and the
+		// diverged copy adopt the shipped content. The diverged case used to be
+		// an override, which fabricated a baseline matching neither side and
+		// surfaced later as an unresolvable conflict on untouched skills.
 		{"backfill clean", "E1", "E1", true, nil, actionBackfill},
-		{"backfill divergent = override", "E1", "X9", true, nil, actionBackfillOverride},
+		{"backfill divergent adopts the shipped content", "E1", "X9", true, nil, actionBackfill},
 		// Steady state, entry present.
 		{"nothing moved", "E1", "E1", true, plat("E1"), actionSkip},
 		{"platform moved, org clean", "E2", "E1", true, plat("E1"), actionRefresh},

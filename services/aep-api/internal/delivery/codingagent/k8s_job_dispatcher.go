@@ -46,7 +46,6 @@ type K8sJobInput struct {
 	IdentityEmail string
 	IdentityLogin string
 	Bearer        string
-	SkillsRepoURL string
 }
 
 // K8sJobDispatcher is the direct in-cluster Job dispatch path. It remains

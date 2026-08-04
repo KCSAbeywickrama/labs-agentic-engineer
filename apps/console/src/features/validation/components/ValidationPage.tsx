@@ -143,7 +143,11 @@ export function ValidationPage({
   const rawVerdict = run?.validation?.verdict ?? "";
   const verdict = validationView(rawVerdict);
   const reportPath = run?.validation?.reportPath ?? "";
-  const validationCycle = run?.cycles?.find((c) => c.kind === "validation");
+  // The LAST validation cycle, not the first. A run can validate more than once —
+  // a failed attempt is repaired and re-validated — and the run's verdict is its
+  // latest attempt's. `find` returns the OLDEST match, which would pair attempt 1's
+  // merge commit (and so attempt 1's report) with attempt 2's verdict.
+  const validationCycle = run?.cycles?.filter((c) => c.kind === "validation").at(-1);
   // The cycle carries the pull request's page as the webhook reported it. This
   // page used to build one from the project's repoUrl and the number, which is a
   // CLONE url — a `.git` suffix produced a link that 404s.
@@ -278,7 +282,7 @@ export function ValidationPage({
         {header}
         <EmptyState
           compact
-          description="This version was not validated — it has no acceptance criteria, or it was an incident run, which gets no validation cycle."
+          description="This version was not validated — it has no validation criteria, or it was an incident run, which gets no validation cycle."
         />
       </>
     );

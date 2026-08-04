@@ -22,11 +22,11 @@
 # What each layer is for:
 #   - git / gh / curl / bash / python3 — workspace provisioning, the git
 #     credential helper + `gh` wrapper, and the agent's Bash tool.
-#   - Go (pinned tarball, not a distro package) + node/npm from the base —
-#     the agent's compile-level build verification (`go build`,
-#     `tsc --noEmit`, lockfile resolution) before it opens a PR. There is
-#     no container runtime here: Dockerfiles are verified by the
-#     post-merge OpenChoreo build, not in this pod.
+#   - Go and Ballerina (pinned archives, not distro packages) + node/npm
+#     from the base — the agent's compile-level build verification
+#     (`go build`, `bal build`, `tsc --noEmit`, lockfile resolution) before
+#     it opens a PR. There is no container runtime here: Dockerfiles are
+#     verified by the post-merge OpenChoreo build, not in this pod.
 #   - Playwright + a baked chromium — validation runs author and execute
 #     e2e specs against the deployed system and must never download a
 #     browser at task time.
@@ -39,6 +39,7 @@ RUN apt-get update \
         curl \
         bash \
         python3 \
+        unzip \
         ca-certificates \
     && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
         -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
@@ -55,6 +56,36 @@ ARG GO_VERSION=1.25.5
 RUN curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-$(dpkg --print-architecture).tar.gz" \
     | tar -C /usr/local -xz
 ENV PATH="/usr/local/go/bin:${PATH}"
+
+# Pinned Ballerina distribution, same reasoning as the Go tarball above. The
+# release zip is the archive to take over the published .deb: it carries the
+# same payload, but unpacking a version-pinned archive to a fixed path is the
+# shape this image already uses for Go, and it keeps dpkg/apt out of a 300MB
+# third-party install.
+#
+# No JDK is installed alongside it. The distribution bundles its own
+# (dependencies/jdk-21.0.5+11-jre) and `bal` resolves that, so `bal version`
+# and `bal build` both work on an image with no system `java` — verified on
+# this base. Adding a second JDK would be ~180MB of dead weight.
+#
+# Arch note: the amd64 asset is "…-swan-lake-linux", the arm64 one
+# "…-swan-lake-linux-arm" (the .deb spells the latter "linux-arm-x64" — the
+# zip does not). Both exist for every release; the GitHub release *page*
+# renders only the x64 rows, so read the asset list via the API, not the page.
+ARG BALLERINA_VERSION=2201.13.5
+RUN case "$(dpkg --print-architecture)" in \
+        amd64) BAL_ARCH="linux" ;; \
+        arm64) BAL_ARCH="linux-arm" ;; \
+        *) echo "no Ballerina distribution for $(dpkg --print-architecture)" >&2; exit 1 ;; \
+    esac \
+    && BAL_DIR="ballerina-${BALLERINA_VERSION}-swan-lake-${BAL_ARCH}" \
+    && curl -fsSL -o /tmp/ballerina.zip \
+        "https://github.com/ballerina-platform/ballerina-distribution/releases/download/v${BALLERINA_VERSION}/${BAL_DIR}.zip" \
+    && unzip -q /tmp/ballerina.zip -d /usr/lib \
+    && mv "/usr/lib/${BAL_DIR}" /usr/lib/ballerina \
+    && rm /tmp/ballerina.zip \
+    && chmod -R a+rX /usr/lib/ballerina
+ENV PATH="/usr/lib/ballerina/bin:${PATH}"
 
 # Playwright toolchain, pinned as a pair: AEP_PLAYWRIGHT_VERSION is the
 # contract the aep-validation skill pins tests/e2e/package.json to, so
@@ -95,6 +126,16 @@ RUN npm ci --include=optional \
 # `chown -R /app` (which would rewrite every file as a fresh layer and
 # roughly double the image size).
 COPY --chown=aep:aep . .
+
+# The authored skill library. A session's base plugin is ASSEMBLED from it at
+# startup (lib/base_plugin.ts selects the runner's skills and applies the mode
+# overlay), so the runner reads the same repo-root skills/ the BFF seeds into org
+# skills repos — one authored source, two delivery mechanisms. Supplied as a
+# BuildKit named build context (`--build-context skills=<repo>/skills`) because
+# the library sits outside this image's build context; the dev flow and the
+# playground bind-mount their working tree over /app/skills, so a skill edit
+# never needs a rebuild.
+COPY --from=skills --chown=aep:aep . /app/skills
 
 USER aep
 ENTRYPOINT ["npx", "tsx", "src/oneshot.ts"]

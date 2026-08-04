@@ -145,6 +145,7 @@ function run(
       fixCycles: 0,
       conflictCycles: 0,
       buildRetriggers: 0,
+      validationCycles: 0,
     },
     validation: {},
     cycles,

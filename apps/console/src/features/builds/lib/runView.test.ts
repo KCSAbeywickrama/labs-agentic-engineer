@@ -41,6 +41,7 @@ const budgets = (over: Partial<RunBudgets> = {}): RunBudgets => ({
   fixCycles: 0,
   conflictCycles: 0,
   buildRetriggers: 0,
+  validationCycles: 0,
   ...over,
 });
 
@@ -243,7 +244,7 @@ describe("terminalReasonText", () => {
   // sentences because they are separate failures, and the fallback below means a
   // gap here degrades silently to a raw slug rather than to anything noisy.
   it("spells both of the validating phase's reasons", () => {
-    expect(terminalReasonText("validation-failed")).toMatch(/acceptance criteria/);
+    expect(terminalReasonText("validation-failed")).toMatch(/validation criteria/);
     expect(terminalReasonText("validation-unreported")).toMatch(/without committing a report/);
   });
 

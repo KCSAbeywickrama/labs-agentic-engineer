@@ -1,6 +1,18 @@
 # ADR-0001 — One authored workflow skill, composed per mode
 
-**Status:** Accepted · shipped 2026-07-29
+**Status:** Superseded by
+[ADR-0004](ADR-0004-library-owned-workflow-skills.md) (2026-08-02) · originally
+shipped 2026-07-29
+
+> **What changed:** the skill moved to the repo-root library and the in-file
+> `<!-- mode:… -->` markers became an anchored overlay
+> (`skills/aep/overlays/local.md`). What did NOT change is why this ADR exists:
+> local mode must never be a second copy of the platform's skill. The drift this
+> document measured — a CORS rule that was never copied over, a filesystem
+> boundary stricter on one side for no reason, 55 lines duplicated in a later
+> edit — is the failure ADR-0004 still has to prevent, and its content findings
+> below are all live in the trunk today. Read this one for the evidence; read
+> ADR-0004 for the mechanism.
 
 ## Context
 
@@ -67,7 +79,8 @@ git commit -m "<type>: <short summary> (#<number>)"
 `lib/skill_compose.ts` strips the regions that don't apply and writes the
 resolved plugin to a scratch dir, which is what the SDK session loads.
 `plugin-local/` and the `aep-local` skill are deleted; both modes load the
-plugin named `aep` and preload the skill named `aep:aep`.
+plugin named `aep` and allow the skill named `aep:aep` (which the agent then
+invokes — allowing a skill does not load its body; see ADR-0003).
 
 **The platform text is the trunk.** A `mode:github` wrapper is a cost, not a
 neutral choice: it means the passage has a local twin to keep in step. So the

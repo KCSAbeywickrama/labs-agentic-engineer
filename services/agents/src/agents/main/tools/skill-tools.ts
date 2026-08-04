@@ -41,7 +41,7 @@ import type {
   LoadSkillReferenceInput,
   LoadSkillReferenceResult,
 } from "@aep/agent-stream";
-import { EMPTY_SKILL_SOURCE, type SkillSource } from "../skill-source.js";
+import { EMPTY_SKILL_SOURCE, SkillReadError, type SkillSource } from "../skill-source.js";
 
 /** Progressive-disclosure skill loader — registered only when skills are supplied. */
 export const LOAD_SKILL = "loadSkill" as const;
@@ -98,10 +98,30 @@ export function buildSkillTools(skills?: SkillSource): Record<string, Tool> {
       execute: async ({ names }): Promise<LoadSkillResult> => {
         const skills: LoadedSkill[] = [];
         const missing: string[] = [];
+        const refused: string[] = [];
         for (const name of names) {
-          const loaded = source.load(name);
+          let loaded;
+          try {
+            loaded = source.load(name);
+          } catch (err) {
+            if (err instanceof SkillReadError) {
+              // I/O fault — do NOT list as unknown skills; fail loudly.
+              return {
+                ok: false,
+                error: `could not read skill ${name}`,
+                skills,
+                missing: [],
+                available,
+              };
+            }
+            throw err;
+          }
           if (loaded === undefined) {
             missing.push(name);
+            continue;
+          }
+          if ("refused" in loaded) {
+            refused.push(name);
             continue;
           }
           skills.push({
@@ -110,8 +130,25 @@ export function buildSkillTools(skills?: SkillSource): Record<string, Tool> {
             ...(loaded.references.length > 0 ? { references: loaded.references } : {}),
           });
         }
-        if (missing.length > 0) {
-          return { ok: false, error: `unknown skills: ${missing.join(", ")}`, skills, missing, available };
+        if (missing.length > 0 || refused.length > 0) {
+          // Two different faults, phrased differently on purpose: an unknown name is
+          // a mistake to correct, a refusal is a redirect to the right mechanism.
+          const parts: string[] = [];
+          if (refused.length > 0) {
+            parts.push(
+              `not yours to load: ${refused.join(", ")} — these are the coding agent's guidance. ` +
+                "If a component's build needs one, add it to that component's skillsPinned in its design.json.",
+            );
+          }
+          if (missing.length > 0) parts.push(`unknown skills: ${missing.join(", ")}`);
+          return {
+            ok: false,
+            error: parts.join(" "),
+            skills,
+            missing,
+            available,
+            ...(refused.length > 0 ? { refused } : {}),
+          };
         }
         return { ok: true, skills };
       },
@@ -127,11 +164,36 @@ export function buildSkillTools(skills?: SkillSource): Record<string, Tool> {
         "re-call with one of those.",
       inputSchema: loadSkillReferenceInputSchema,
       execute: async ({ name, path }): Promise<LoadSkillReferenceResult> => {
-        const loaded = source.load(name);
-        if (loaded === undefined || loaded.references.length === 0) {
+        let loaded;
+        try {
+          loaded = source.load(name);
+        } catch (err) {
+          if (err instanceof SkillReadError) {
+            return { ok: false, name, path, error: `could not read skill ${name}`, available: refSkillNames };
+          }
+          throw err;
+        }
+        // A refusal is treated like a miss HERE only: a reference belongs to a
+        // skill this agent may not load at all, so there is nothing to redirect
+        // it to — unlike loadSkill, where the redirect to pinning is the point.
+        if (loaded === undefined || "refused" in loaded || loaded.references.length === 0) {
           return { ok: false, name, path, error: `unknown skill: ${name}`, available: refSkillNames };
         }
-        const loadedRef = source.loadReference(name, path);
+        let loadedRef;
+        try {
+          loadedRef = source.loadReference(name, path);
+        } catch (err) {
+          if (err instanceof SkillReadError) {
+            return {
+              ok: false,
+              name,
+              path,
+              error: `could not read skill ${name} reference ${path}`,
+              available: loaded.references,
+            };
+          }
+          throw err;
+        }
         if (loadedRef === undefined) {
           return { ok: false, name, path, error: `unknown reference: ${path}`, available: loaded.references };
         }

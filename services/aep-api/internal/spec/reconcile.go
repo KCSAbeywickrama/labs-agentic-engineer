@@ -20,14 +20,14 @@ package spec
 // ships in the BFF container as on-disk files (config.SkillsDir, read at
 // runtime; platform + org kinds, kind in frontmatter) and is seeded +
 // reconciled into each org's skills repo (the live store) under the FLAT
-// layout skills/<name>/. Seeding is split by ownership: platform-kind
-// defaults are always managed (seeded on first creation AND on every
-// ongoing sync); org-kind defaults are seeded only at first creation — an
-// org-kind default absent on an ongoing sync (never had it, or the org
-// deleted it) stays out until an explicit opt-in adds it back. A PRESENT
-// org-kind skill is unaffected by that gate and still gets the full
-// three-way below on every reconcile, including ongoing sync, so a clean
-// copy keeps auto-refreshing. Reconcile is a THREE-WAY compare per skill
+// layout skills/<name>/. Every shipped default — platform-kind and org-kind
+// alike — is seeded on first creation AND on every ongoing sync, so adding a
+// skill to the library reaches EXISTING orgs, not just new ones. The single
+// exception is a name the org DELETED: delete leaves a manifest tombstone
+// (ManifestEntry.Removed) and reconcile never hands a tombstoned name back.
+// That tombstone is what separates "the org threw this away" from "this org
+// has never been offered it"; a name with no entry at all is the latter.
+// Reconcile is a THREE-WAY compare per skill
 // against skills-manifest.json (§3), the org's baseline of what a
 // platform-managed skill was last handed at: did the org's copy move off
 // the baseline, and did the platform's move off the baseline? absent repo
@@ -103,7 +103,7 @@ func (s *SkillService) ensureSkillsRepo(ctx context.Context, orgID string) (*sou
 	if err != nil {
 		return nil, err
 	}
-	if n, serr := s.reconcileEmbedded(ctx, orgID, repo, true); serr != nil {
+	if n, serr := s.reconcileEmbedded(ctx, orgID, repo); serr != nil {
 		slog.WarnContext(ctx, "skills: seed embedded skills failed (repo provisioned)", "org", orgID, "error", serr)
 	} else {
 		slog.InfoContext(ctx, "skills: seeded embedded skills into new repo", "org", orgID, "count", n)
@@ -129,7 +129,7 @@ func (s *SkillService) Reconcile(ctx context.Context, orgID string) (int, error)
 	if err != nil {
 		return 0, err
 	}
-	return s.reconcileEmbedded(ctx, orgID, repo, false)
+	return s.reconcileEmbedded(ctx, orgID, repo)
 }
 
 // isUserKind reports whether a kind is user-owned (never touched by
@@ -144,19 +144,17 @@ func isUserKind(kind string) bool {
 
 // reconcileEmbedded drives the whole repo to the desired flat state in ONE
 // commit, deciding each embedded skill's fate with the three-way compare
-// (decideReconcile, §3) against its skills-manifest.json baseline. Ownership
-// gates seeding: platform-kind is always managed, but an org-kind default
-// absent from the repo (never had it, or the org deleted it) is only seeded
-// when seedOrgDefaults is true — first creation seeds the starter set;
-// ongoing Sync leaves an absent org default alone (opt-in). A PRESENT org
-// skill is unaffected by seedOrgDefaults and still gets the full three-way
-// below.
+// (decideReconcile, §3) against its skills-manifest.json baseline. Seeding is
+// NOT gated on kind: every shipped default the org does not already have is
+// seeded, on first creation and on every ongoing sync alike. The one thing
+// that keeps a default out is a tombstone — the manifest entry a delete
+// leaves behind — so an org's removal sticks while a newly shipped default
+// still lands.
 //
 //   - every embedded skill absent from the repo, or clean with the platform
 //     moved, is (re)written flat and its baseline advanced — unless a user
 //     kind owns the name (the user copy wins, the embedded skill is
-//     skipped), or an org-kind default is absent and seedOrgDefaults is
-//     false (opt-in on ongoing sync — see above);
+//     skipped), or the org deleted the name (tombstoned — see above);
 //   - a repo copy the org diverged (with the platform not moving, or a
 //     conflict where both moved) is left alone — reconcile never clobbers an
 //     org edit;
@@ -180,7 +178,7 @@ func isUserKind(kind string) bool {
 // linger. Returns the number of skills written + migrated + purged (the
 // manifest-only stamp of a backfill is not counted, but still committed).
 // §6.2.
-func (s *SkillService) reconcileEmbedded(ctx context.Context, orgID string, repo *sourcecontrol.GitRepository, seedOrgDefaults bool) (int, error) {
+func (s *SkillService) reconcileEmbedded(ctx context.Context, orgID string, repo *sourcecontrol.GitRepository) (int, error) {
 	embedded, err := loadLibrary(s.library)
 	if err != nil {
 		return 0, err
@@ -220,7 +218,11 @@ func (s *SkillService) reconcileEmbedded(ctx context.Context, orgID string, repo
 		}
 	}
 	setBase := func(name, sha string) {
-		want := ManifestEntry{Origin: ManifestOriginPlatform, BaseHash: sha}
+		// Disabled is org intent (ADR-0014), not baseline state: carry the
+		// prior entry's flag through so a platform refresh — which advances
+		// BaseHash and may rewrite content — never silently re-enables a
+		// skill the org switched off.
+		want := ManifestEntry{Origin: ManifestOriginPlatform, BaseHash: sha, Disabled: manifest[name].Disabled}
 		if manifest[name] != want {
 			manifest[name] = want
 			manifestDirty = true
@@ -234,12 +236,13 @@ func (s *SkillService) reconcileEmbedded(ctx context.Context, orgID string, repo
 		if ok && isUserKind(cur.Kind) {
 			continue // an imported copy owns this name — never touch it
 		}
-		// Org-kind skills are opt-in on ongoing sync: seed them only at first
-		// creation. A brand-new or org-deleted org default stays out until an
-		// add-surface (deferred UI) brings it in. Platform-kind is always
-		// managed; a PRESENT org skill (ok==true) still gets the full
-		// three-way below.
-		if b.Kind == SkillKindOrg && !ok && !seedOrgDefaults {
+		// A skill the org DELETED never comes back: its manifest tombstone says
+		// so. A name with NO entry has never been offered to this org — a
+		// default added to the library after the org was created — so it seeds
+		// like any other, which is what lets a new org-kind default reach
+		// EXISTING orgs and not just new ones. `setBase` re-stamps a fresh
+		// entry on every write, so seeding or refreshing clears a tombstone.
+		if !ok && manifest[b.Name].Removed {
 			continue
 		}
 		var entry *ManifestEntry
@@ -272,12 +275,19 @@ func (s *SkillService) reconcileEmbedded(ctx context.Context, orgID string, repo
 			deletes = append(deletes, skillRepoDir(b.Name))
 			stageWrite(b.Name, b.SkillMD, b.References)
 			setBase(b.Name, b.ContentSHA)
-		case actionBackfill, actionBackfillOverride:
-			setBase(b.Name, b.ContentSHA) // stamp only — no file writes
+		case actionBackfill:
+			// Pre-manifest copy: adopt the shipped content and stamp the
+			// baseline from the same bytes, so copy and baseline agree from
+			// here on. Writing is what makes the migration honest — stamping
+			// alone left a baseline describing content the org did not have.
+			written++
+			deletes = append(deletes, skillRepoDir(b.Name))
+			stageWrite(b.Name, b.SkillMD, b.References)
+			setBase(b.Name, b.ContentSHA)
 		case actionOverride, actionConflict:
 			// Org-owned divergence: never write files, never move the base.
-			// (These actions only arise with an existing entry — the nil-entry
-			// divergent case is actionBackfillOverride above.)
+			// These arise only with an existing entry — i.e. a divergence that
+			// appeared AFTER a baseline was agreed, which is a real org edit.
 		case actionSkip:
 		}
 	}
@@ -421,7 +431,7 @@ func (s *SkillService) UpdatesAvailable(ctx context.Context, orgID string) ([]Sk
 		switch decideReconcile(b.ContentSHA, cur.ContentSHA, ok, entry) {
 		case actionSeed, actionRefresh:
 			out = append(out, SkillUpdate{Name: b.Name, State: "update"})
-		case actionOverride, actionBackfillOverride:
+		case actionOverride:
 			out = append(out, SkillUpdate{Name: b.Name, State: "overridden"})
 		case actionConflict:
 			out = append(out, SkillUpdate{Name: b.Name, State: "conflict"})
@@ -506,6 +516,15 @@ func loadLibrary(fsys fs.FS) ([]Skill, error) {
 				}
 				return nil
 			}
+			// `overlays/` is COMPOSE-TIME input, not skill content: the coding
+			// runner assembles its base plugin out of this same library and
+			// applies skills/aep/overlays/local.md to get the playground's
+			// local-mode workflow (ADR-0004, runners/remote-worker). Seeding it
+			// would put playground-only prose in every org's skills repo, count
+			// it in ContentSHA, and hand it to any agent that loads the skill.
+			if d.IsDir() && base == skillOverlaysDir {
+				return fs.SkipDir
+			}
 			if d.IsDir() {
 				return nil
 			}
@@ -531,6 +550,7 @@ func loadLibrary(fsys fs.FS) ([]Skill, error) {
 			SkillMD:     string(raw),
 			References:  refs,
 			ContentSHA:  contentSHA(string(raw), refs),
+			Audience:    frontmatterAudience(fm),
 		})
 	}
 	return out, nil

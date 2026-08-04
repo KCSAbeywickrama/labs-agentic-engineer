@@ -53,7 +53,7 @@ import (
 //	dependencies               ↔ Dependencies  (unified kind-discriminated union; replaces connections[])
 //	exposesAPI                 ↔ ExposesAPI     (platform-owned; {managed, auth, userContext, orgPublished})
 //	componentAgentInstructions ↔ ComponentAgentInstructions (platform-owned; optional)
-//	skillsApplied              ↔ SkillsApplied  (optional; skill names applied to this component)
+//	skillsPinned              ↔ SkillsPinned  (optional; skill names applied to this component)
 //
 // OpenAPISpec is NOT a design.json key: it stays in the sibling
 // `components/<name>/openapi.yaml` file, assembled/split separately.
@@ -86,7 +86,7 @@ type componentDesignJSON struct {
 	// Platform-owned blocks (absent = zero value).
 	ExposesAPI                 *exposesAPIJSON `json:"exposesAPI,omitempty"`
 	ComponentAgentInstructions string          `json:"componentAgentInstructions,omitempty"`
-	SkillsApplied              []string        `json:"skillsApplied,omitempty"`
+	SkillsPinned              []string        `json:"skillsPinned,omitempty"`
 }
 
 // endpointJSON is the on-disk shape of the optional `endpoint` block. Only the
@@ -126,8 +126,23 @@ type dependencyJSON struct {
 
 // dependencyWiringJSON is the on-disk shape of a dependency's `wiring` object.
 // Mirrors DependencyWiring; its own field order is the emitted key order.
+//
+// Every field is omitempty because the shape is a two-variant union (see
+// DependencyWiring): the resources[] variant must not emit a null `endpoint`, and
+// the endpoints[] variant must not emit an empty `ref` — either would fail the
+// write gates, which require each variant to carry exactly its own keys.
 type dependencyWiringJSON struct {
-	Ref         string            `json:"ref"`
+	Ref         string              `json:"ref,omitempty"`
+	EnvBindings map[string]string   `json:"envBindings,omitempty"`
+	Endpoint    *endpointWiringJSON `json:"endpoint,omitempty"`
+}
+
+// endpointWiringJSON is the on-disk shape of the `wiring.endpoint` object — one
+// workload `dependencies.endpoints[]` entry. Mirrors EndpointWiring.
+type endpointWiringJSON struct {
+	Component   string            `json:"component"`
+	Name        string            `json:"name"`
+	Visibility  string            `json:"visibility"`
 	EnvBindings map[string]string `json:"envBindings"`
 }
 
@@ -202,7 +217,7 @@ func parseComponentDesignJSON(dir, raw string) (DesignComponent, error) {
 		Endpoint:                   toModelEndpoint(dj.Endpoint),
 		ComponentAgentInstructions: dj.ComponentAgentInstructions,
 		ExposesAPI:                 toModelExposesAPI(dj.ExposesAPI),
-		SkillsApplied:              append([]string(nil), dj.SkillsApplied...),
+		SkillsPinned:              append([]string(nil), dj.SkillsPinned...),
 	}, nil
 }
 
@@ -306,7 +321,7 @@ func marshalComponentDesignJSON(dir string, comp DesignComponent) ([]byte, error
 		Dependencies:               toJSONDeps(comp.Dependencies),
 		ExposesAPI:                 toJSONExposesAPI(comp.ExposesAPI),
 		ComponentAgentInstructions: comp.ComponentAgentInstructions,
-		SkillsApplied:              comp.SkillsApplied,
+		SkillsPinned:              comp.SkillsPinned,
 	}
 
 	var buf bytes.Buffer
@@ -326,18 +341,41 @@ func marshalComponentDesignJSON(dir string, comp DesignComponent) ([]byte, error
 // and the coding agent is back to having nothing to copy), and dropping it on READ
 // makes each derivation see no prior value, so the change detection reports a diff
 // and commits on every single save.
+//
+// Both VARIANTS ride the same rule. The endpoints[] half is the one whose loss is
+// invisible: a missing `ref` leaves the agent with nothing to write, but a missing
+// `endpoint` leaves it free to guess a plausible sibling name, and a wrong one
+// deploys and serves without ever reaching Ready.
 func toJSONWiring(in *DependencyWiring) *dependencyWiringJSON {
 	if in == nil {
 		return nil
 	}
-	return &dependencyWiringJSON{Ref: in.Ref, EnvBindings: in.EnvBindings}
+	out := &dependencyWiringJSON{Ref: in.Ref, EnvBindings: in.EnvBindings}
+	if in.Endpoint != nil {
+		out.Endpoint = &endpointWiringJSON{
+			Component:   in.Endpoint.Component,
+			Name:        in.Endpoint.Name,
+			Visibility:  in.Endpoint.Visibility,
+			EnvBindings: in.Endpoint.EnvBindings,
+		}
+	}
+	return out
 }
 
 func toModelWiring(in *dependencyWiringJSON) *DependencyWiring {
 	if in == nil {
 		return nil
 	}
-	return &DependencyWiring{Ref: in.Ref, EnvBindings: in.EnvBindings}
+	out := &DependencyWiring{Ref: in.Ref, EnvBindings: in.EnvBindings}
+	if in.Endpoint != nil {
+		out.Endpoint = &EndpointWiring{
+			Component:   in.Endpoint.Component,
+			Name:        in.Endpoint.Name,
+			Visibility:  in.Endpoint.Visibility,
+			EnvBindings: in.Endpoint.EnvBindings,
+		}
+	}
+	return out
 }
 
 // toJSONDeps converts the unified model back to on-disk dependency entries.

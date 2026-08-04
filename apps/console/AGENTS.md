@@ -29,6 +29,11 @@ React SPA console for AEP. Vite + TypeScript + Oxygen UI, talking to the
 - Request/response types come from the generated OpenAPI client — never
   redefined locally.
 - Runtime config via `window._env_` (BFF-owned `env-config.js`).
+- **Adding a `@aep/*` dep whose `types` resolves to `./dist` means adding a
+  `RUN pnpm --filter … build` line to `apps/console/Dockerfile`.** The list is
+  hand-maintained, host builds hide the omission, and the image build fails with
+  TS2307 plus a cascade of unrelated-looking type errors. Rationale inline in
+  the Dockerfile.
 
 ## Feature docs (issue-driven — ADR-0001)
 

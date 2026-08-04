@@ -166,6 +166,8 @@ export const seedSkills: SkillDetailBody[] = [
     // it's absent, never overwrites a present copy.
     editable: true,
     deletable: true,
+    enabled: true,
+    required: false,
     description:
       "How to build a Go service on the platform — layout, port 9090, multi-stage Dockerfile.",
     skillMd: `---
@@ -196,6 +198,8 @@ Expose \`GET /health\` for liveness on port **9090**.`,
     // Platform-seeded org skill: editable and deletable (deletable = editable).
     editable: true,
     deletable: true,
+    enabled: true,
+    required: false,
     description:
       "How to build a React SPA on the platform — Vite layout, nginx runtime, window._env_ config.",
     skillMd: `---
@@ -218,6 +222,8 @@ config from \`window._env_\`. Throw on a missing key rather than defaulting.`,
     kind: "platform",
     editable: false,
     deletable: false,
+    enabled: true,
+    required: false,
     description: "Derives component architecture from requirements.",
     skillMd: `---
 name: high-level-architecture
@@ -236,6 +242,8 @@ Derive the component architecture from the approved requirements.`,
     kind: "platform",
     editable: false,
     deletable: false,
+    enabled: true,
+    required: false,
     description: "Breaks a design into buildable tasks.",
     skillMd: `---
 name: task-breakdown
@@ -256,6 +264,8 @@ Break the approved design into a sequence of buildable tasks.`,
     // deletable — this is what exercises the Delete button in mock mode.
     editable: true,
     deletable: true,
+    enabled: true,
+    required: false,
     description: "Acme's internal pre-deploy checklist.",
     skillMd: `---
 name: acme-deploy-checklist
@@ -280,6 +290,8 @@ description: Acme's internal pre-deploy checklist.
     kind: "imported",
     editable: true,
     deletable: true,
+    enabled: true,
+    required: false,
     description: "Discover and evaluate community AgentSkills before adopting.",
     skillMd: `---
 name: find-skills
@@ -299,6 +311,8 @@ Search the registry, read the SKILL.md, and check the declared license.`,
     // Platform-seeded org skill: editable and deletable (deletable = editable).
     editable: true,
     deletable: true,
+    enabled: true,
+    required: false,
     description: "How to build a Node.js service on the platform.",
     skillMd: `---
 name: node-service
@@ -318,6 +332,8 @@ Pin the LTS base image; expose \`GET /health\` on port **9090**.`,
     // Platform-seeded org skill: editable and deletable (deletable = editable).
     editable: true,
     deletable: true,
+    enabled: true,
+    required: false,
     description: "How to build a Python service on the platform.",
     skillMd: `---
 name: python-service
@@ -337,6 +353,8 @@ Use \`uv\` for dependency management; expose \`GET /health\` on port **9090**.`,
     // Platform-seeded org skill: editable and deletable (deletable = editable).
     editable: true,
     deletable: true,
+    enabled: true,
+    required: false,
     description: "Schema and migration conventions for platform databases.",
     skillMd: `---
 name: postgres-schema
@@ -355,6 +373,8 @@ One migration per change; never edit an applied migration.`,
     kind: "platform",
     editable: false,
     deletable: false,
+    enabled: true,
+    required: false,
     description: "Derives per-component wireframes from the design file.",
     skillMd: `---
 name: wireframes
@@ -373,6 +393,8 @@ Derive one wireframe per user-facing component in the approved design.`,
     kind: "platform",
     editable: false,
     deletable: false,
+    enabled: true,
+    required: false,
     description: "Derives validation files from approved requirements.",
     skillMd: `---
 name: validation-files
@@ -392,6 +414,8 @@ Every requirement gets at least one validation criterion.`,
     // User-authored org skill: editable AND deletable.
     editable: true,
     deletable: true,
+    enabled: true,
+    required: false,
     description: "Acme's REST API naming and versioning conventions.",
     skillMd: `---
 name: acme-api-style
@@ -410,6 +434,8 @@ Plural nouns, kebab-case paths, \`/v1\` prefix, RFC 9457 errors.`,
     kind: "imported",
     editable: true,
     deletable: true,
+    enabled: true,
+    required: false,
     description: "Conventional-commit message rules for agent-authored PRs.",
     skillMd: `---
 name: commit-conventions

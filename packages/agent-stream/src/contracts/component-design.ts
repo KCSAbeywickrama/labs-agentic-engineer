@@ -22,7 +22,7 @@
  * component-level design.md: the spec agent writes it (whole-file rewrites,
  * schema-validated by the FileBundle on every write), downstream consumers
  * (design projection, coding-agent dispatch, task generation) read it
- * directly. `skillsApplied` is a key HERE (per-component), NOT in design.md
+ * directly. `skillsPinned` is a key HERE (per-component), NOT in design.md
  * frontmatter; the top-level design.md is prose + an optional `sourceSpec`
  * frontmatter only. The Zod validator (`componentDesignSchema` in
  * `../component-design-schema.ts`) is drift-guarded against this type.
@@ -87,9 +87,13 @@ export interface ComponentDesign {
    * downstream coding agent. Passthrough — the design agent must not author it.
    */
   componentAgentInstructions?: string;
-  /** Skill names applied to THIS component (per-component; the coding runner
-   *  materializes exactly these for a build of this component). */
-  skillsApplied?: string[];
+  /**
+   * Skills the coding agent PRELOADS for this component's build. Deliberately
+   * NOT an exhaustive list of what the build may consult — the rest of the
+   * copied skill library stays loadable on demand. Per-component; the
+   * coding runner materializes exactly these for a build of this component.
+   */
+  skillsPinned?: string[];
 }
 
 /**
@@ -164,31 +168,46 @@ export interface Dependency {
    */
   parameters?: Record<string, string | number | boolean>;
   /**
-   * platform-resource / external: the consumer-side wiring, PLATFORM-STAMPED at
-   * design save and re-derived on every save — never authored. See `DependencyWiring`.
+   * component / platform-resource / external: the consumer-side wiring,
+   * PLATFORM-STAMPED at design save and re-derived on every save — never
+   * authored. See `DependencyWiring`.
    */
   wiring?: DependencyWiring;
 }
 
 /**
- * The resolved consumer-side wiring for a `platform-resource` or `external`
- * dependency — everything the coding agent needs to reach it, and the only part
- * of the `workload.yaml` `dependencies:` block that is knowable without asking
- * the cluster. Its shape is byte-identical to one `dependencies.resources[]`
- * entry so the agent copies the object rather than transforming it.
+ * The resolved consumer-side wiring for a dependency — everything the coding
+ * agent needs to reach it, and the part of the `workload.yaml` `dependencies:`
+ * block that is knowable without asking the cluster.
  *
- * PLATFORM-STAMPED, never authored: the platform derives it at design save from
- * the dependency name plus the resource type's declared outputs, and OVERWRITES
- * it on every save. An agent-authored value is therefore corrected rather than
- * rejected — the design agent reads the design, edits and writes it back, so a
- * rejection rule would reject its own echo.
+ * ONE VARIANT PER `dependencies:` SUB-BLOCK, and each variant is byte-identical
+ * to one entry of its block, so the agent COPIES the object rather than
+ * transforming it:
+ *   - `{ ref, envBindings }`  → one `dependencies.resources[]` entry
+ *     (`platform-resource` / `external`)
+ *   - `{ endpoint }`          → one `dependencies.endpoints[]` entry
+ *     (`component` — a sibling in the same project)
+ *
+ * The variants are exclusive: a dependency resolves to a resource OR to an
+ * endpoint, never both, and the `kind` already says which. Keeping them as
+ * separate variants rather than one object of optional fields is what preserves
+ * each block's own all-or-nothing rule — a half-stamped entry renders a
+ * workload.yaml OpenChoreo silently ignores.
+ *
+ * PLATFORM-STAMPED, never authored: the platform derives it at design save and
+ * OVERWRITES it on every save. An agent-authored value is therefore corrected
+ * rather than rejected — the design agent reads the design, edits and writes it
+ * back, so a rejection rule would reject its own echo.
  *
  * Absent means "not derivable yet" — the resource type is unknown to the
  * cluster, or (for an external dep) no config keys are declared. It never means
  * "this dependency needs no wiring": a declared dependency with no `wiring` is a
  * platform fault the coding agent reports rather than works around.
  */
-export interface DependencyWiring {
+export type DependencyWiring = ResourceWiring | EndpointWiringVariant;
+
+/** The `platform-resource` / `external` variant — one `resources[]` entry. */
+export interface ResourceWiring {
   /** The OpenChoreo Resource name — the `dependencies.resources[].ref` value. */
   ref: string;
   /**
@@ -197,6 +216,44 @@ export interface DependencyWiring {
    * prefixed with the dependency name (`orders-db` + `host` → `ORDERS_DB_HOST`);
    * an external resource's are already namespaced by its own config schema, so
    * the env var IS the key.
+   */
+  envBindings: Record<string, string>;
+}
+
+/** The `component` variant — wraps one `endpoints[]` entry. */
+export interface EndpointWiringVariant {
+  endpoint: EndpointWiring;
+}
+
+/**
+ * One `dependencies.endpoints[]` entry pointing at a sibling component in the
+ * same project.
+ *
+ * Every field is a pure function of the design, which is why this is stamped here
+ * instead of resolved from the live cluster at dispatch time. That distinction is
+ * the entire point: the live endpoint catalog is only populated once a component
+ * has DEPLOYED, so on a first delivery — where siblings are coded in one cycle,
+ * before anything is running — the cluster could answer nothing and the agent was
+ * left to invent `component`. It invented the friendly name, OpenChoreo resolves
+ * endpoint dependencies by SCOPED name, and the consumer's ReleaseBinding sat at
+ * `Ready=False / ConnectionsPending` indefinitely while the platform reported
+ * "deploying".
+ */
+export interface EndpointWiring {
+  /**
+   * The provider's SCOPED OpenChoreo component name (`<project>-<component>`) —
+   * the key OpenChoreo resolves the binding by. NOT the friendly name the design
+   * declares as the dependency's `name`.
+   */
+  component: string;
+  /** The provider's workload endpoint name — its design's `endpoint.name`, default "http". */
+  name: string;
+  /** Reachability of the target endpoint; "project" for a same-project sibling. */
+  visibility: string;
+  /**
+   * Endpoint output → the env var OpenChoreo injects it as. One key, `address`,
+   * bound to the provider's base-URL variable (`todo-api` → `TODO_API_URL`) —
+   * the same name a browser app already reads from `window._env_`.
    */
   envBindings: Record<string, string>;
 }

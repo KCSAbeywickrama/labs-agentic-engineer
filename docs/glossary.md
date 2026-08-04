@@ -359,3 +359,45 @@ aep-api's rule that a spec (requirements + design) is authoritative only once it
 committed to git `main`. An agent turn's output is hash-parity checked by the fold
 (`platform/agentfold`) before commit; a mismatch rejects the turn and leaves `main`
 untouched. The git commit — not any draft buffer — is the source of truth.
+
+## Skills
+
+### Skill audience
+`metadata.aep.audience` on a `SKILL.md` — a list over `design` and `coding`,
+naming which agent the guidance is written for. **Absent means both**, so
+narrowing is opt-in and an unmarked or org-authored skill is never hidden by
+omission. The design agent's catalog still *lists* a coding-audience skill (it
+has to name one in order to pin it) but `load()` refuses to serve the body.
+Audience never crosses a service boundary: the agents service is always the
+design side, the runner always the coding side. ADR-0014.
+
+### Skill availability (enabled / disabled)
+Whether an org serves a skill at all, stored as `disabled` on the org's
+`skills-manifest.json` entry rather than in frontmatter — frontmatter is part of
+the content hash, so writing availability there would make a disabled skill read
+as a divergence from the platform. Stored as the negative so the Go zero value
+means *enabled*. A disabled skill is still reconciled and still surfaces platform
+updates: disabled means "do not serve", not "do not track". ADR-0015.
+
+### Pinned skill (`skillsPinned`)
+Skills a component's `design.json` names as needed for its build, written by the
+design agent. A pin does two things: it forces the skill into the project-repo
+mirror even if audience or availability would withhold it, and it puts that
+skill's body into the coding agent's context at startup. Named "pinned" rather
+than "applied" (past-tense provenance) or "needed" (the list is deliberately not
+exhaustive).
+
+### Skill mirror
+The `.claude/skills/` directory the BFF writes into a project repo, holding the
+skills that build's agent may use: `(audience ∋ coding AND enabled) OR pinned`.
+Written at project creation, pre-tag and dispatch, diff-first, and best-effort —
+it can never fail a creation, publish or dispatch. The mirror *is* the filtered
+set, so the runner applies no policy of its own.
+
+### Skill allowlist
+The SDK's `skills:` array. A skill the session discovered but which is absent
+from this array is rejected outright when invoked, so the runner lists the whole
+mirror, not just the pins. Membership grants a name and a description in the
+model's catalog — **not** the body, which arrives on invocation. This is why a
+pin additionally appends its body to the system prompt.
+remote-worker ADR-0003.

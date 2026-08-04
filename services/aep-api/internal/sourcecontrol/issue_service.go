@@ -38,6 +38,9 @@ type IssueService interface {
 	GetIssue(ctx context.Context, orgID, projectID string, number int) (*IssueInfo, error)
 	// CloseIssue closes the issue, optionally posting a closing comment first.
 	CloseIssue(ctx context.Context, orgID, projectID string, number int, comment string) error
+	// ReopenIssue reopens a closed issue. Idempotent on an already-open one.
+	// Used by the validation issue across repeated validation attempts.
+	ReopenIssue(ctx context.Context, orgID, projectID string, number int) error
 	// CommentIssue posts a comment on the issue.
 	CommentIssue(ctx context.Context, orgID, projectID string, number int, body string) error
 	// EditIssueBody replaces the issue's body. Used by the tech-lead detail
@@ -301,6 +304,14 @@ func (s *issueService) CloseIssue(ctx context.Context, orgID, projectID string, 
 	}
 
 	return s.github.CloseIssue(ctx, owner, repoName, cred, number)
+}
+
+func (s *issueService) ReopenIssue(ctx context.Context, orgID, projectID string, number int) error {
+	owner, repoName, cred, err := s.resolveRepoAndCredential(ctx, orgID, projectID)
+	if err != nil {
+		return err
+	}
+	return s.github.ReopenIssue(ctx, owner, repoName, cred, number)
 }
 
 func (s *issueService) CommentIssue(ctx context.Context, orgID, projectID string, number int, body string) error {

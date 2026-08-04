@@ -20,10 +20,13 @@ dist
 coverage
 .env
 .env.*
-plugin/node_modules
 local
-# Playground local-mode assets — never shipped in the production image
-# (docs/design/playground.md §13 step 6). oneshot.ts never loads them; this
-# keeps the bytes out too.
-plugin-local
+# Playground local-mode entrypoint — never shipped in the production image
+# (docs/design/playground.md §13 step 6). oneshot.ts never loads it; this keeps
+# the bytes out too. NOTE the local-mode SKILL overlay is NOT excluded: it lives
+# in the skill library (skills/aep/overlays/), which arrives via the `skills`
+# named build context, and every writer that copies a skill filters `overlays/`
+# out — in production `loadLibrary` never seeds it, so the mirror cannot carry it.
 src/local.ts
+# Dev CLI for printing the composed workflow skill; no run path touches it.
+src/compose_workflow.ts

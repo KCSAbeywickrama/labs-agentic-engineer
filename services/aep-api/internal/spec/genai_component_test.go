@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Component tier for the committed-truth turn surface (shared-volume-clone
+// Component tier for the committed-truth turn surface (shared-workspace-volume
 // Phase 4 exit gate): the REAL contract-first strict handler (componenttest)
 // fronting the REAL genai service — turn repository semantics faked in memory
 // (the D18 guard's DB tier is covered by dbtest), the workspace engine REAL

@@ -39,9 +39,9 @@
  *     non-root `aep` user), so a skill authored here behaves under the same
  *     toolchain a real cluster run gives it. `local.ts` is never baked into
  *     that image (`.dockerignore` — see `remote-worker/AGENTS.md`), so it is
- *     bind-mounted in at run time alongside the plugin/project/skills/run
- *     dirs; only the entrypoint command is overridden, the image itself is
- *     untouched.
+ *     bind-mounted in at run time alongside the working-tree skill library and
+ *     the project/run dirs; only the entrypoint command is overridden, the
+ *     image itself is untouched.
  *   host — the prior bare `npx tsx` child process, no Docker dependency.
  *     Opt in with `--host` (faster iteration, weaker parity) when Docker
  *     isn't available or a fast loop matters more than environment fidelity.
@@ -51,56 +51,188 @@ import { spawn } from "node:child_process";
 import { createWriteStream, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { stdout as output } from "node:process";
+import {
+  formatLine,
+  formatOutcome,
+  formatSubagentStatus,
+  groupBySubagent,
+  mergeOutcomes,
+  type AttributedLine,
+  type ProgressLineView,
+} from "@aep/progress-view";
 import { REPO_ROOT } from "../paths.js";
 
 const LOCAL_ENTRY = join(REPO_ROOT, "runners", "remote-worker", "src", "local.ts");
-const DEFAULT_PLUGIN_DIR = join(REPO_ROOT, "runners", "remote-worker", "plugin");
 const BUILD_RUNNER_SCRIPT = join(REPO_ROOT, "deployments", "scripts", "build-runner.sh");
+// Where the image keeps the skill library. Mounting the working tree over it is
+// what makes a skill edit — including the local-mode overlay — apply to the next
+// run with no rebuild. It is the ONE library the run reads, and local mode mirrors
+// it into the project dir's .claude/skills/, standing in for the BFF's write.
+const IMAGE_LIBRARY_DIR = "/app/skills";
 const RUNNER_IMAGE = process.env.AGENT_RUNNER_IMAGE || "aep-runner:dev";
+// The Agent SDK's project state inside the image, which is where a fanned-out
+// subagent's own transcript lives (`<slug>/<session>/subagents/agent-<taskId>.jsonl`).
+// That transcript is the ONLY record of what a subagent was doing beyond the
+// one-line summary on the feed. Under `--rm` it died with the container, exactly
+// when it mattered: two consecutive todo-api99 runs each lost a subagent to
+// `Agent stalled: no progress for 600s (stream watchdog did not recover)`, and the
+// evidence that would distinguish a dropped stream from a model that genuinely
+// emitted nothing was already gone.
+//
+// NOT `/tmp/claude-<uid>`, which is where the failure event points: the files it
+// keeps under `tasks/` are symlinks into this directory, so copying that one out
+// of a container yields nothing but broken links. The `taskId` in the failure
+// event is the `agent-<taskId>.jsonl` here — that is the whole mapping.
+//
+// The lead's transcript is duplicated here (we already stream it to `.logs/`), a
+// few hundred KB per run and worth not having to special-case a session id.
+//
+// Snapshotted WHEN A SUBAGENT FAILS, not at the end, because the SDK deletes a
+// subagent's transcript the moment that subagent completes: probing a live
+// container found `subagents/agent-<id>.meta.json` mid-run and an empty directory
+// minutes later, which is also why the symlinks under `/tmp/claude-<uid>/tasks/`
+// are already broken by the time a run exits. A failure line on the feed is the
+// last moment the evidence is still on disk.
+//
+// Neither mounting nor redirecting this path works, so don't retry them: the CLI
+// refuses a temp dir whose owner is not its own uid, and on macOS every path
+// inside a bind mount reports the HOST uid no matter who created it — so any
+// mounted location fails the check at startup and takes the whole run with it.
+// `docker cp` touches nothing the run can see, which keeps the environment
+// identical to production's.
+//
+// Playground-only. Production's oneshot pod keeps this on its own ephemeral
+// filesystem, and giving it a durable home there is a decision for the pod's
+// log/artifact story, not something to smuggle in through a dev harness.
+const IMAGE_AGENT_SESSION_DIR = "/home/aep/.claude/projects";
 
-export interface ProgressEvent {
-  kind: string;
-  phase?: string;
-  tool?: string;
-  summary?: string;
-  status?: string;
-  error?: string;
-  level?: string;
-  command?: string;
-  sha?: string;
+/** One NDJSON line off the runner's feed, as this harness reads it. */
+export type ProgressEvent = ProgressLineView & AttributedLine;
+
+// Attribution is a fixed-width tag so the glyphs stay in one column and a
+// fanned-out run still scans as a single timeline. The tag is a NUMBER, not the
+// subagent's label: labels run to a full sentence ("Implement todo-api
+// Ballerina service (issue #3)") and would push every line off the right edge.
+// The label is announced once, the first time that subagent appears.
+const TAG_WIDTH = "[#1] ".length;
+
+export type TimelineRenderer = (e: ProgressEvent) => string[];
+
+// The one place the local harness legitimately says something the console does
+// not. A local run has no remote and no GitHub, so a push or a `gh` call is a
+// no-op the agent may not realise it made — worth flagging where it is true,
+// and meaningless in a cluster run where both exist.
+function annotateForLocalMode(e: ProgressEvent, text: string): string {
+  if (!text) return text;
+  if (e.kind === "git_push") return `${text} — no remote in local mode`;
+  if (e.kind === "gh_action") return `${text} — no GitHub in local mode`;
+  return text;
 }
 
-/** One NDJSON line → a formatted timeline line (docs §7 coding-run screen). */
-export function renderProgressLine(e: ProgressEvent): string {
-  switch (e.kind) {
-    case "phase":
-      return `  ▸ ${String(e.phase ?? "").replace(/_/g, " ")}`;
-    case "tool_use":
-      return `  ${e.tool === "Bash" ? "$" : "⚙"} ${e.summary || e.tool || "tool"}`;
-    case "git_commit":
-      return `  ✓ commit ${e.sha?.slice(0, 8) ?? ""} ${e.summary ?? ""}`.trimEnd();
-    case "git_push":
-      return `  ⚠ push attempted (local mode has no remote) ${e.summary ?? ""}`.trimEnd();
-    case "gh_action":
-      return `  ⚠ gh ${e.command ?? ""} (local mode has no GitHub)`.trimEnd();
-    case "log":
-      return `  ${e.level === "error" ? "✗" : e.level === "warn" ? "⚠" : "·"} ${e.summary ?? ""}`.trimEnd();
-    case "result":
-      return e.status === "success" ? "  ■ result success" : `  ■ result failure${e.error ? ` — ${e.error}` : ""}`;
-    default:
-      return `  · ${e.kind}`;
+/**
+ * Build the renderer for ONE run: it numbers subagents as they appear, so
+ * concurrent fan-outs stay tellable apart across lines. Returns zero lines for
+ * a silent event, one for a normal line, and two the first time a subagent
+ * speaks (its announcement, then its line).
+ *
+ * The WORDING of every line comes from @aep/progress-view, the same module the
+ * console renders through — so what you iterate on here is what a cluster run
+ * shows, and a wording defect cannot hide in one surface. Only the terminal
+ * presentation (the tags, the column) is this harness's own.
+ */
+export function createTimelineRenderer(): TimelineRenderer {
+  const tags = new Map<string, string>();
+
+  return function render(e: ProgressEvent): string[] {
+    const text = annotateForLocalMode(e, formatLine(e).text);
+    if (!text) return [];
+
+    // One line at a time, so the grouping the console applies over a whole
+    // cycle degrades here to "is this line a subagent's, and which one".
+    const [row] = groupBySubagent([e]);
+    if (!row || row.kind !== "group") {
+      // A subagent line from a runner too old to stamp an id cannot be grouped,
+      // but it is still a subagent's — the console keeps its chip for exactly
+      // this case, and dropping the marker here would read as the main agent.
+      const tag = e.emitter === "subagent" ? "[sub]" : "";
+      return [`  ${tag.padEnd(TAG_WIDTH)}${text}`];
+    }
+
+    const { id, label } = row.group;
+    const announce: string[] = [];
+    let tag = tags.get(id);
+    if (!tag) {
+      tag = `[#${tags.size + 1}]`;
+      tags.set(id, tag);
+      if (label !== "subagent") announce.push(`  ${" ".repeat(TAG_WIDTH)}⑂ ${tag} ${label}`);
+    }
+    return [...announce, `  ${`${tag} `.padEnd(TAG_WIDTH)}${text}`];
+  };
+}
+
+// Where an outcome's column starts in the merged pass. Wide enough for the
+// commands a real run issues; anything longer pushes its outcome right rather
+// than being cut, because a truncated command is worse than a ragged column.
+const OUTCOME_COLUMN = 62;
+
+/**
+ * The whole run again, once every event is in hand: one row per step with its
+ * outcome attached, and each subagent's work gathered under its own report.
+ *
+ * This exists because a terminal cannot go back and rewrite a line it printed.
+ * The live stream above is honest about that — an outcome follows as a
+ * continuation row — but it means the fast local loop is NOT shaped like the
+ * console, which is the surface being iterated on. Printing a merged pass at the
+ * end gives both: live while it runs, console-shaped afterwards.
+ */
+export function renderMergedTimeline(events: readonly ProgressEvent[]): string[] {
+  const out: string[] = [];
+  const row = (indent: string, text: string, outcome: string): void => {
+    if (!text) return;
+    out.push(outcome ? `${(indent + text).padEnd(OUTCOME_COLUMN)} ${outcome}` : `${indent}${text}`);
+  };
+
+  const rows = groupBySubagent(events);
+  // The main agent's lines are merged as ONE stream: its action and its outcome
+  // are routinely separated by a subagent section that spoke in between, so
+  // pairing has to survive the gap. Looked up per line afterwards, which keeps
+  // each section printed where its subagent first spoke.
+  const mainByLine = new Map(
+    mergeOutcomes(rows.flatMap((r) => (r.kind === "line" ? [r.line] : []))).map((m) => [m.line, m]),
+  );
+
+  for (const r of rows) {
+    if (r.kind === "group") {
+      out.push(`  ⑂ ${r.group.label} — ${formatSubagentStatus(r.group.report)}`);
+      for (const m of mergeOutcomes(r.group.lines)) {
+        const { text } = formatLine(m.line);
+        const { detail, duration } = formatOutcome(m.outcome);
+        row("    │ ", annotateForLocalMode(m.line, text), [detail, duration].filter(Boolean).join(" · "));
+      }
+      continue;
+    }
+    const m = mainByLine.get(r.line);
+    if (!m) continue; // folded into an earlier action's row
+    const { text } = formatLine(r.line);
+    const { detail, duration } = formatOutcome(m.outcome);
+    row("  ", annotateForLocalMode(r.line, text), [detail, duration].filter(Boolean).join(" · "));
   }
+  return out;
 }
 
 export interface CodingRunOptions {
   projectDir: string;
-  /** Working-tree skills library dir; omit to run skill-free. */
-  skillsDir?: string;
-  /** Override the authored base plugin (defaults to remote-worker/plugin). */
-  pluginDir?: string;
+  /** The authored skill library (repo-root `skills/`); the run reads nothing else. */
+  skillsDir: string;
   silent?: boolean;
   /** "docker" (default): same image prod runs. "host": bare `npx tsx`, no Docker. */
   mode?: "docker" | "host";
+  /**
+   * `--api-key`: host mode authenticates with `ANTHROPIC_API_KEY` instead of the
+   * developer's own Claude credentials. Ignored by docker mode, which always
+   * needs the key. See `hostInvocation`.
+   */
+  useApiKey?: boolean;
 }
 
 export interface CodingRunResult {
@@ -115,48 +247,107 @@ interface Invocation {
   env: NodeJS.ProcessEnv;
 }
 
-function hostInvocation(opts: CodingRunOptions, pluginDir: string, runDir: string): Invocation {
+/**
+ * Host mode runs on the developer's own machine, so it uses the developer's own
+ * Claude credentials: the key is WITHHELD and the Agent SDK falls back to
+ * whatever `claude login` left in the OS credential store.
+ *
+ * Deliberate, not an omission. The playground CLI resolves `ANTHROPIC_API_KEY`
+ * out of `deployments/.env` for the ENGINEERING agent, which is an AI SDK model
+ * call and has no other way to authenticate. The coding agent is not — it is a
+ * Claude Code session, which already knows how to authenticate itself — so
+ * inheriting that key would silently bill a local skill-tuning loop to the
+ * platform's key instead of the developer's own subscription, and would put a
+ * shared credential in the environment of a bypassPermissions process running
+ * against the developer's filesystem.
+ *
+ * Docker mode keeps the key (`dockerInvocation`): a container reaches no
+ * keychain, so there is nothing to fall back to.
+ *
+ * `--api-key` opts back into key auth, and it is a FLAG rather than the
+ * repo's usual "an exported env var beats `.env`" rule because that rule cannot
+ * be evaluated here: `@aep/agents` calls `loadDotenv()` at module scope, so
+ * `deployments/.env` is already merged into `process.env` before this package's
+ * own entrypoint runs, and a shell-exported key is by then indistinguishable
+ * from a file-supplied one. An explicit flag says what an unreadable heuristic
+ * only implied.
+ */
+export function hostInvocation(opts: CodingRunOptions, runDir: string): Invocation {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     AEP_LOCAL_PROJECT_DIR: opts.projectDir,
     AEP_LOCAL_RUN_DIR: runDir,
-    AEP_LOCAL_PLUGIN_DIR: pluginDir,
-    ...(opts.skillsDir ? { AEP_LOCAL_SKILLS_DIR: opts.skillsDir } : {}),
+    AEP_LOCAL_SKILLS_DIR: opts.skillsDir,
   };
+  if (!opts.useApiKey) delete env.ANTHROPIC_API_KEY;
   return { command: "npx", args: ["tsx", LOCAL_ENTRY], env };
 }
 
-// Mounts local.ts + the plugin/project/skills/run dirs over the unmodified
-// production image and overrides only the command (image ENTRYPOINT runs
-// oneshot.ts) — the image itself never gains playground-only bytes.
-function dockerInvocation(opts: CodingRunOptions, pluginDir: string, runDir: string): Invocation {
+// Mounts local.ts + the library/project/run dirs over the unmodified production
+// image and overrides only the command (image ENTRYPOINT runs oneshot.ts) — the
+// image itself never gains playground-only bytes. The library is mounted over the
+// path the image already bakes it at, so the runner's own default resolves to the
+// working tree and there is ONE library in play rather than two.
+export function dockerInvocation(opts: CodingRunOptions, runDir: string, containerName: string): Invocation {
   const args = [
     "run",
     "--rm",
+    // Named so a failed subagent's transcript can be copied out of the container
+    // while it is still running (see IMAGE_AGENT_SESSION_DIR).
+    "--name",
+    containerName,
     "--entrypoint",
     "npx",
     "--shm-size=1g",
     "-v",
     `${LOCAL_ENTRY}:/app/src/local.ts:ro`,
     "-v",
-    `${pluginDir}:/app/plugin:ro`,
+    `${opts.skillsDir}:${IMAGE_LIBRARY_DIR}:ro`,
     "-v",
     `${opts.projectDir}:/workspace/project`,
     "-v",
     `${runDir}:/workspace/run`,
-    ...(opts.skillsDir ? ["-v", `${opts.skillsDir}:/workspace/skills:ro`] : []),
     "-e",
     "ANTHROPIC_API_KEY",
     "-e",
     "AEP_LOCAL_PROJECT_DIR=/workspace/project",
     "-e",
     "AEP_LOCAL_RUN_DIR=/workspace/run",
-    ...(opts.skillsDir ? ["-e", "AEP_LOCAL_SKILLS_DIR=/workspace/skills"] : []),
+    "-e",
+    `AEP_LOCAL_SKILLS_DIR=${IMAGE_LIBRARY_DIR}`,
     RUNNER_IMAGE,
     "tsx",
     "src/local.ts",
   ];
   return { command: "docker", args, env: process.env };
+}
+
+/**
+ * A fan-out subagent that ended in failure — a stall, a crash, a killed task.
+ * `Agent` is the SDK's fan-out tool; `ok === false` is how the runner's feed
+ * reports a tool that did not succeed.
+ */
+export function isFailedSubagent(e: ProgressEvent): boolean {
+  return e.kind === "tool_result" && e.ok === false && e.tool === "Agent";
+}
+
+/**
+ * Copy the SDK's per-subagent transcripts out of the still-running container into
+ * the run dir, one directory per failure (see IMAGE_AGENT_SESSION_DIR for why the
+ * timing is what it is).
+ *
+ * Best-effort and silent: a run in progress is not worth interrupting over
+ * diagnostics, and the copy legitimately finds nothing when a failure lands before
+ * the SDK has written anything.
+ */
+async function snapshotAgentSessions(containerName: string, runDir: string, label: string): Promise<void> {
+  const dest = join(runDir, "agent-sessions", label);
+  try {
+    mkdirSync(dest, { recursive: true });
+    await runProcess("docker", ["cp", `${containerName}:${IMAGE_AGENT_SESSION_DIR}/.`, dest], "ignore");
+  } catch {
+    // nothing to rescue, or docker refused — the run's own outcome is unaffected
+  }
 }
 
 function runProcess(
@@ -202,9 +393,22 @@ export async function runCodingAgent(opts: CodingRunOptions): Promise<CodingRunR
   const progressLog = createWriteStream(join(runDir, "progress.ndjson"), { flags: "w" });
 
   const mode = opts.mode ?? "docker";
-  const pluginDir = opts.pluginDir ?? DEFAULT_PLUGIN_DIR;
 
   if (mode === "docker") {
+    // A container reaches no credential store, so the key is the only auth it
+    // can have. Checked here rather than inside the runner: this is knowable
+    // before a multi-minute image build, and the runner itself is now
+    // mode-agnostic about the key (see `local.ts`).
+    if (!process.env.ANTHROPIC_API_KEY) {
+      progressLog.end();
+      if (!opts.silent) {
+        output.write(
+          "  ✗ ANTHROPIC_API_KEY is not set — docker mode needs it (export it, or add it to deployments/.env).\n" +
+            "    `--host` instead runs on your own Claude credentials (`claude login`).\n",
+        );
+      }
+      return { exitCode: 2, runDir };
+    }
     try {
       await ensureRunnerImage(opts.silent);
     } catch (err) {
@@ -214,12 +418,20 @@ export async function runCodingAgent(opts: CodingRunOptions): Promise<CodingRunR
     }
   }
 
+  // Names this run's container so its scratch can be copied out after it exits.
+  // The run dir's timestamp is already unique per run; `docker` accepts it as-is.
+  const containerName = mode === "docker" ? `aep-play-${stamp}` : "";
   const { command, args, env } =
-    mode === "docker" ? dockerInvocation(opts, pluginDir, runDir) : hostInvocation(opts, pluginDir, runDir);
+    mode === "docker" ? dockerInvocation(opts, runDir, containerName) : hostInvocation(opts, runDir);
 
   return new Promise((resolvePromise) => {
     const child = spawn(command, args, { cwd: REPO_ROOT, env, stdio: ["ignore", "pipe", "pipe"] });
 
+    // One renderer per run — it numbers this run's subagents (see above).
+    const render = createTimelineRenderer();
+    // Kept so the run can be re-rendered console-shaped once it ends. Bounded by
+    // the run itself, same as the progress.ndjson beside it.
+    const events: ProgressEvent[] = [];
     let buffer = "";
     child.stdout.on("data", (chunk: Buffer) => {
       buffer += chunk.toString("utf8");
@@ -230,12 +442,23 @@ export async function runCodingAgent(opts: CodingRunOptions): Promise<CodingRunR
         buffer = buffer.slice(nl + 1);
         if (line.trim() === "") continue;
         progressLog.write(line + "\n");
-        if (opts.silent) continue;
+        let event: ProgressEvent;
         try {
-          output.write(renderProgressLine(JSON.parse(line) as ProgressEvent) + "\n");
+          event = JSON.parse(line) as ProgressEvent;
         } catch {
-          output.write(`  ${line}\n`); // non-NDJSON runner logging — pass through
+          // non-NDJSON runner logging — pass through
+          if (!opts.silent) output.write(`  ${line}\n`);
+          continue;
         }
+        events.push(event);
+        // Fire-and-forget: the copy races the SDK's own cleanup of that
+        // subagent's files, so it starts now rather than after this batch of
+        // lines is rendered.
+        if (containerName && isFailedSubagent(event)) {
+          void snapshotAgentSessions(containerName, runDir, event.toolUseId ?? `seq-${events.length}`);
+        }
+        if (opts.silent) continue;
+        for (const rendered of render(event)) output.write(rendered + "\n");
       }
     });
     child.stderr.on("data", (chunk: Buffer) => {
@@ -244,6 +467,10 @@ export async function runCodingAgent(opts: CodingRunOptions): Promise<CodingRunR
 
     const settle = (exitCode: number): void => {
       progressLog.end();
+      if (!opts.silent && events.length > 0) {
+        output.write("\n  ── the run, merged ──\n");
+        for (const line of renderMergedTimeline(events)) output.write(line + "\n");
+      }
       resolvePromise({ exitCode, runDir });
     };
     child.on("error", (err) => {

@@ -454,3 +454,58 @@ func TestRunCycleRepository_RecordUsageAndPhaseRollup(t *testing.T) {
 		t.Fatalf("cross-org rollup = (%v, %v, %v), want empty", b2, v2, err)
 	}
 }
+
+// The validation verdict is the ONE cycle field written after the cycle closes: it
+// is derived from the report at the cycle's own merge commit, which does not exist
+// until the cycle has landed. So it cannot inherit the closed-cycle fence every
+// other mutator uses, and it gets a write-once one instead.
+func TestRunCycleRepository_SetValidationVerdictIsWriteOnceAfterClose(t *testing.T) {
+	t.Parallel()
+	db := dbtest.New(t)
+	runs := delivery.NewMilestoneRunRepository(db)
+	cycles := delivery.NewRunCycleRepository(db, nil)
+	ctx := context.Background()
+
+	run := admitRun(t, runs, "orgv", "proj", 9, "v9")
+	cycle := &delivery.RunCycle{
+		OrgID: run.OrgID, ProjectID: run.ProjectID, RunID: run.ID,
+		Kind: delivery.CycleKindValidation,
+	}
+	if err := cycles.Append(ctx, cycle); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+	if _, err := cycles.Finish(ctx, cycle.ID, "deadbeefcafe0001"); err != nil {
+		t.Fatalf("Finish: %v", err)
+	}
+
+	// A CLOSED cycle still accepts its verdict — the point of the different fence.
+	got, err := cycles.SetValidationVerdict(ctx, cycle.ID, delivery.ValidationVerdictFailed, 77)
+	if err != nil || got == nil {
+		t.Fatalf("SetValidationVerdict on a closed cycle = (%+v, %v), want the row back", got, err)
+	}
+	if got.ValidationVerdict != delivery.ValidationVerdictFailed || got.ValidationIssue != 77 {
+		t.Fatalf("recorded (%q, %d), want (failed, 77)", got.ValidationVerdict, got.ValidationIssue)
+	}
+
+	// A second write is a no-op, not a rewrite: an attempt concludes once, so a
+	// repeat can only be an activity retry. (nil, nil) is the no-op contract.
+	again, err := cycles.SetValidationVerdict(ctx, cycle.ID, delivery.ValidationVerdictPassed, 77)
+	if err != nil {
+		t.Fatalf("SetValidationVerdict(retry): %v", err)
+	}
+	if again != nil {
+		t.Fatalf("a second verdict write returned %+v, want the (nil, nil) no-op", again)
+	}
+	reread, err := cycles.GetByIDScoped(ctx, run.OrgID, cycle.ID)
+	if err != nil || reread == nil {
+		t.Fatalf("GetByIDScoped = (%+v, %v)", reread, err)
+	}
+	if reread.ValidationVerdict != delivery.ValidationVerdictFailed {
+		t.Fatalf("verdict was overwritten to %q; an attempt's answer is final", reread.ValidationVerdict)
+	}
+
+	// The closed vocabulary is enforced here too, so a typo cannot reach the column.
+	if _, err := cycles.SetValidationVerdict(ctx, cycle.ID, "kinda-passed", 77); err == nil {
+		t.Fatal("SetValidationVerdict accepted an unknown verdict")
+	}
+}

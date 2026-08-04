@@ -76,7 +76,7 @@ var (
 		"buildpack": true, "appPath": true, "entrypoint": true,
 		"exposure": true, "dependencies": true, "description": true,
 		"endpoint": true, "exposesAPI": true, "componentAgentInstructions": true,
-		"skillsApplied": true,
+		"skillsPinned": true,
 	}
 )
 
@@ -135,8 +135,8 @@ func validateComponentDesign(content, dirName string) *designProblem {
 			return p
 		}
 	}
-	if sa, present := obj["skillsApplied"]; present {
-		if p := validateSkillsApplied(sa); p != nil {
+	if sp, present := obj["skillsPinned"]; present {
+		if p := validateSkillsPinned(sp); p != nil {
 			return p
 		}
 	}
@@ -172,18 +172,19 @@ func validateEndpoint(v any) *designProblem {
 	return nil
 }
 
-// validateSkillsApplied mirrors the zod `skillsApplied: z.array(z.string())`:
-// when present it must be an array whose every element is a string. Parity with
-// the agent's zod gate — without it the Go fold would accept a shape the agent
-// rejected (or vice versa), diverging the fold. (JSON arrays unmarshal to []any.)
-func validateSkillsApplied(raw any) *designProblem {
+// validateSkillsPinned mirrors the zod `skillsPinned` field
+// (`z.array(z.string())`): when present it must be an array whose every element
+// is a string. Parity with the agent's zod gate — without it the Go fold would
+// accept a shape the agent rejected (or vice versa), diverging the fold. (JSON
+// arrays unmarshal to []any.)
+func validateSkillsPinned(raw any) *designProblem {
 	arr, ok := raw.([]any)
 	if !ok {
-		return &designProblem{code: ErrSchemaViolation, message: "skillsApplied: must be an array"}
+		return &designProblem{code: ErrSchemaViolation, message: "skillsPinned: must be an array"}
 	}
 	for i, v := range arr {
 		if _, ok := v.(string); !ok {
-			return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("skillsApplied[%d]: must be a string", i)}
+			return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("skillsPinned[%d]: must be a string", i)}
 		}
 	}
 	return nil
@@ -229,11 +230,17 @@ func validateDependency(i int, d any) *designProblem {
 	return nil
 }
 
-// validateDependencyWiring mirrors the zod dependencyWiringSchema.strictObject:
-// when present, `wiring` carries a non-empty `ref` plus an `envBindings` object
-// of string values, and nothing else. Both halves are required together — a ref
-// with no bindings (or bindings with no ref) renders an unusable workload.yaml
-// resource entry, which is worse than an absent wiring the agent reports.
+// validateDependencyWiring mirrors the zod dependencyWiringSchema union: when
+// present, `wiring` is EXACTLY ONE of two variants, each carrying only its own
+// keys —
+//
+//	{ref, envBindings}  — one workload dependencies.resources[] entry
+//	{endpoint}          — one workload dependencies.endpoints[] entry
+//
+// Every field of a variant is required together. A half-stamped wiring (a ref with
+// no bindings, an endpoint with no component) renders a workload.yaml entry
+// OpenChoreo silently ignores, which is worse than an absent wiring the agent
+// reports as a platform fault.
 func validateDependencyWiring(i int, raw any) *designProblem {
 	if raw == nil {
 		return nil // absent (optional) — not yet derivable
@@ -245,6 +252,18 @@ func validateDependencyWiring(i int, raw any) *designProblem {
 	if !ok {
 		return violation(": must be an object")
 	}
+	_, hasEndpoint := wiring["endpoint"]
+	if hasEndpoint {
+		// The variants are exclusive: one dependency resolves to a resource or to
+		// an endpoint, never both, so a mixed object is a defect and not a
+		// tolerable superset.
+		for k := range wiring {
+			if k != "endpoint" {
+				return violation(": %s cannot be combined with endpoint — a dependency wires to a resource or to an endpoint, not both", k)
+			}
+		}
+		return validateEndpointWiring(violation, wiring["endpoint"])
+	}
 	for k := range wiring {
 		if k != "ref" && k != "envBindings" {
 			return violation(": unknown property %s", k)
@@ -253,13 +272,42 @@ func validateDependencyWiring(i int, raw any) *designProblem {
 	if ref, ok := wiring["ref"].(string); !ok || ref == "" {
 		return violation(".ref: must be a non-empty string")
 	}
-	bindings, ok := wiring["envBindings"].(map[string]any)
+	return validateEnvBindings(violation, ".envBindings", wiring["envBindings"])
+}
+
+// validateEndpointWiring mirrors the zod endpointWiringSchema.strictObject: the
+// scoped provider component, its endpoint name, the target's visibility, and the
+// address binding — all required, nothing else.
+func validateEndpointWiring(violation func(string, ...any) *designProblem, raw any) *designProblem {
+	endpoint, ok := raw.(map[string]any)
 	if !ok {
-		return violation(".envBindings: must be an object")
+		return violation(".endpoint: must be an object")
+	}
+	for k := range endpoint {
+		switch k {
+		case "component", "name", "visibility", "envBindings":
+		default:
+			return violation(".endpoint: unknown property %s", k)
+		}
+	}
+	for _, field := range []string{"component", "name", "visibility"} {
+		if v, ok := endpoint[field].(string); !ok || v == "" {
+			return violation(".endpoint.%s: must be a non-empty string", field)
+		}
+	}
+	return validateEnvBindings(violation, ".endpoint.envBindings", endpoint["envBindings"])
+}
+
+// validateEnvBindings is the output→env-var map both variants carry: an object of
+// string values. Shared so the two variants cannot drift on what a binding is.
+func validateEnvBindings(violation func(string, ...any) *designProblem, path string, raw any) *designProblem {
+	bindings, ok := raw.(map[string]any)
+	if !ok {
+		return violation("%s: must be an object", path)
 	}
 	for k, v := range bindings {
 		if _, ok := v.(string); !ok {
-			return violation(".envBindings.%s: must be a string", k)
+			return violation("%s.%s: must be a string", path, k)
 		}
 	}
 	return nil

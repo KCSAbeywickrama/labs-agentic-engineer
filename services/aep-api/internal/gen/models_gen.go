@@ -66,6 +66,7 @@ func (e BuildSummaryStatus) Valid() bool {
 
 // Defines values for DeployStageValidation.
 const (
+	DeployStageValidationAwaitingFix  DeployStageValidation = "awaiting-fix"
 	DeployStageValidationFailed       DeployStageValidation = "failed"
 	DeployStageValidationInconclusive DeployStageValidation = "inconclusive"
 	DeployStageValidationNone         DeployStageValidation = "none"
@@ -79,6 +80,8 @@ const (
 // Valid indicates whether the value is a known member of the DeployStageValidation enum.
 func (e DeployStageValidation) Valid() bool {
 	switch e {
+	case DeployStageValidationAwaitingFix:
+		return true
 	case DeployStageValidationFailed:
 		return true
 	case DeployStageValidationInconclusive:
@@ -238,6 +241,36 @@ func (e RunCycleViewMergeVerdict) Valid() bool {
 	}
 }
 
+// Defines values for RunCycleViewValidationVerdict.
+const (
+	RunCycleViewValidationVerdictFailed       RunCycleViewValidationVerdict = "failed"
+	RunCycleViewValidationVerdictInconclusive RunCycleViewValidationVerdict = "inconclusive"
+	RunCycleViewValidationVerdictPartial      RunCycleViewValidationVerdict = "partial"
+	RunCycleViewValidationVerdictPassed       RunCycleViewValidationVerdict = "passed"
+	RunCycleViewValidationVerdictSkipped      RunCycleViewValidationVerdict = "skipped"
+	RunCycleViewValidationVerdictUnreported   RunCycleViewValidationVerdict = "unreported"
+)
+
+// Valid indicates whether the value is a known member of the RunCycleViewValidationVerdict enum.
+func (e RunCycleViewValidationVerdict) Valid() bool {
+	switch e {
+	case RunCycleViewValidationVerdictFailed:
+		return true
+	case RunCycleViewValidationVerdictInconclusive:
+		return true
+	case RunCycleViewValidationVerdictPartial:
+		return true
+	case RunCycleViewValidationVerdictPassed:
+		return true
+	case RunCycleViewValidationVerdictSkipped:
+		return true
+	case RunCycleViewValidationVerdictUnreported:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RunProgressEventType.
 const (
 	RunProgressEventTypeCycle RunProgressEventType = "cycle"
@@ -279,28 +312,28 @@ func (e RunProgressLineEmitter) Valid() bool {
 
 // Defines values for RunValidationVerdict.
 const (
-	RunValidationVerdictFailed       RunValidationVerdict = "failed"
-	RunValidationVerdictInconclusive RunValidationVerdict = "inconclusive"
-	RunValidationVerdictPartial      RunValidationVerdict = "partial"
-	RunValidationVerdictPassed       RunValidationVerdict = "passed"
-	RunValidationVerdictSkipped      RunValidationVerdict = "skipped"
-	RunValidationVerdictUnreported   RunValidationVerdict = "unreported"
+	Failed       RunValidationVerdict = "failed"
+	Inconclusive RunValidationVerdict = "inconclusive"
+	Partial      RunValidationVerdict = "partial"
+	Passed       RunValidationVerdict = "passed"
+	Skipped      RunValidationVerdict = "skipped"
+	Unreported   RunValidationVerdict = "unreported"
 )
 
 // Valid indicates whether the value is a known member of the RunValidationVerdict enum.
 func (e RunValidationVerdict) Valid() bool {
 	switch e {
-	case RunValidationVerdictFailed:
+	case Failed:
 		return true
-	case RunValidationVerdictInconclusive:
+	case Inconclusive:
 		return true
-	case RunValidationVerdictPartial:
+	case Partial:
 		return true
-	case RunValidationVerdictPassed:
+	case Passed:
 		return true
-	case RunValidationVerdictSkipped:
+	case Skipped:
 		return true
-	case RunValidationVerdictUnreported:
+	case Unreported:
 		return true
 	default:
 		return false
@@ -844,8 +877,9 @@ type DeployStage struct {
 	Status string `json:"status"`
 
 	// Validation Validation state of the newest milestone run. This MIRRORS the run's verdict rather than folding it, so the chip says what the run concluded: a fold would have to discard `partial`, `inconclusive` and `unreported` at exactly the surface that needs them, and `completed` never said whether anything passed.
-	// none (the run has not reached validation) and running (a validation CYCLE is in flight — not merely a live run with no verdict yet) are lifecycle values; the rest are the verdict verbatim. They are mutually exclusive in time, so nothing is hidden behind another.
-	// passed (every criterion was automated and passed), partial (some passed, none failed, some were never covered), failed (a criterion asserted and lost — this fails the run), inconclusive (no test results at all), unreported (no usable report at the validation cycle's merge commit — this fails the run), skipped (no acceptance criteria, and incident runs, which get no validation cycle).
+	// Three LIFECYCLE values: none (the run has not reached validation), running (a validation CYCLE is in flight — not merely a live run with no verdict yet) and awaiting-fix (validation failed and the run is repairing it — the work in flight is a CODING cycle, which is why the state names the implementation rather than validation). The rest are the verdict verbatim. They are mutually exclusive in time, so nothing is hidden behind another.
+	// passed (every criterion was automated and passed), partial (some passed, none failed, some were never covered), failed (a criterion asserted and lost), inconclusive (no test results at all), unreported (no usable report at the validation cycle's merge commit), skipped (no acceptance criteria, and incident runs, which get no validation cycle).
+	// failed and unreported fail the run only once its validation attempts are spent: while attempts remain the run repairs and re-validates, and reads awaiting-fix in the meantime.
 	// The report path and per-cycle detail live on the version's run story (list-build-runs).
 	Validation DeployStageValidation `json:"validation"`
 
@@ -854,8 +888,9 @@ type DeployStage struct {
 }
 
 // DeployStageValidation Validation state of the newest milestone run. This MIRRORS the run's verdict rather than folding it, so the chip says what the run concluded: a fold would have to discard `partial`, `inconclusive` and `unreported` at exactly the surface that needs them, and `completed` never said whether anything passed.
-// none (the run has not reached validation) and running (a validation CYCLE is in flight — not merely a live run with no verdict yet) are lifecycle values; the rest are the verdict verbatim. They are mutually exclusive in time, so nothing is hidden behind another.
-// passed (every criterion was automated and passed), partial (some passed, none failed, some were never covered), failed (a criterion asserted and lost — this fails the run), inconclusive (no test results at all), unreported (no usable report at the validation cycle's merge commit — this fails the run), skipped (no acceptance criteria, and incident runs, which get no validation cycle).
+// Three LIFECYCLE values: none (the run has not reached validation), running (a validation CYCLE is in flight — not merely a live run with no verdict yet) and awaiting-fix (validation failed and the run is repairing it — the work in flight is a CODING cycle, which is why the state names the implementation rather than validation). The rest are the verdict verbatim. They are mutually exclusive in time, so nothing is hidden behind another.
+// passed (every criterion was automated and passed), partial (some passed, none failed, some were never covered), failed (a criterion asserted and lost), inconclusive (no test results at all), unreported (no usable report at the validation cycle's merge commit), skipped (no acceptance criteria, and incident runs, which get no validation cycle).
+// failed and unreported fail the run only once its validation attempts are spent: while attempts remain the run repairs and re-validates, and reads awaiting-fix in the meantime.
 // The report path and per-cycle detail live on the version's run story (list-build-runs).
 type DeployStageValidation string
 
@@ -1089,23 +1124,50 @@ type ProgressEvent struct {
 	Command     string `json:"command,omitempty"`
 	CompletedAt string `json:"completedAt,omitempty"`
 
+	// DurationMs `tool_result` only: how long the call took, measured by the runner between the call and its outcome, so it includes model turnaround.
+	DurationMs int64 `json:"durationMs,omitempty"`
+
 	// Emitter Who produced the line — `subagent` for work the main agent fanned out with the Task tool, absent for the main agent itself. Absence is a positive fact, not an unknown.
-	Emitter       ProgressEventEmitter `json:"emitter,omitempty"`
-	Error         string               `json:"error,omitempty"`
-	Files         int64                `json:"files,omitempty"`
-	Kind          string               `json:"kind"`
-	Level         string               `json:"level,omitempty"`
-	Message       string               `json:"message,omitempty"`
-	Phase         string               `json:"phase,omitempty"`
-	SchemaVersion int64                `json:"schemaVersion"`
-	Seq           int64                `json:"seq"`
-	Sha           string               `json:"sha,omitempty"`
-	StartedAt     string               `json:"startedAt,omitempty"`
-	Status        string               `json:"status,omitempty"`
-	Step          string               `json:"step,omitempty"`
-	Summary       string               `json:"summary,omitempty"`
-	Tool          string               `json:"tool,omitempty"`
-	TS            string               `json:"ts"`
+	Emitter ProgressEventEmitter `json:"emitter,omitempty"`
+
+	// EmitterID Which subagent, for the cycles that fan out to several at once — the id of the fan-out tool call, stable for that subagent's whole life. Absent on main-agent lines.
+	EmitterID string `json:"emitterId,omitempty"`
+
+	// EmitterLabel The description the main agent gave that subagent ("Implement todo-api service (issue
+	EmitterLabel string `json:"emitterLabel,omitempty"`
+	Error        string `json:"error,omitempty"`
+
+	// ExitCode `tool_result` only: the process status of a failed shell call, parsed from the SDK's own `Exit code N` first line. Absent when the tool was not a shell — those report a `<tool_use_error>` with no code — so read absence as "no code was reported", never as "exited 0".
+	ExitCode int64  `json:"exitCode,omitempty"`
+	Files    int64  `json:"files,omitempty"`
+	Kind     string `json:"kind"`
+	Level    string `json:"level,omitempty"`
+
+	// LinesAdded A fanned-out subagent's total lines added, off the SDK's own report on its fan-out call's result. Present only there; nothing in the feed can reconstruct it.
+	LinesAdded int64 `json:"linesAdded,omitempty"`
+
+	// LinesRemoved A fanned-out subagent's total lines removed, from the same report.
+	LinesRemoved int64  `json:"linesRemoved,omitempty"`
+	Message      string `json:"message,omitempty"`
+
+	// Ok `tool_result` only: whether the call succeeded. Absent on every other kind — so read absence as "not a tool result", never as success.
+	Ok            bool   `json:"ok,omitempty"`
+	Phase         string `json:"phase,omitempty"`
+	SchemaVersion int64  `json:"schemaVersion"`
+	Seq           int64  `json:"seq"`
+	Sha           string `json:"sha,omitempty"`
+	StartedAt     string `json:"startedAt,omitempty"`
+	Status        string `json:"status,omitempty"`
+	Step          string `json:"step,omitempty"`
+	Summary       string `json:"summary,omitempty"`
+	Tool          string `json:"tool,omitempty"`
+
+	// ToolCount A fanned-out subagent's total tool calls, off the SDK's own report on its fan-out call's result. Present only there.
+	ToolCount int64 `json:"toolCount,omitempty"`
+
+	// ToolUseID The tool call this line is about. A `tool_result` carries the id of the `tool_use` it answers, which is what pairs a call with its outcome once several subagents interleave the feed.
+	ToolUseID string `json:"toolUseId,omitempty"`
+	TS        string `json:"ts"`
 }
 
 // ProgressEventEmitter Who produced the line — `subagent` for work the main agent fanned out with the Task tool, absent for the main agent itself. Absence is a positive fact, not an unknown.
@@ -1253,6 +1315,9 @@ type RunBudgets struct {
 	CycleCeiling int64 `json:"cycleCeiling"`
 	CyclesTotal  int64 `json:"cyclesTotal"`
 	FixCycles    int64 `json:"fixCycles"`
+
+	// ValidationCycles Validation ATTEMPTS this run has opened. A run repairs and re-validates while this is under its allowance, so more than one means the run self-healed (or tried to).
+	ValidationCycles int64 `json:"validationCycles"`
 }
 
 // RunCycleView One dispatch within a run. Branch, pull request (number and URL) and merge SHA are LEARNED FROM WEBHOOKS — the agent derives its own branch identity — so they stay empty on a cycle whose agent died before opening a pull request.
@@ -1284,6 +1349,12 @@ type RunCycleView struct {
 
 	// Resolves The milestone agent-work issues this cycle's pull request claims — the merge policy's matched set, which is what the merge closes. Recorded so a cycle's working set survives its issues being closed; empty until a pull request is seen.
 	Resolves []int64 `json:"resolves,omitempty"`
+
+	// ValidationIssue The validation issue this cycle was dispatched at. Set on validation cycles only, and recorded per cycle rather than only on the run so a repeated validation stays navigable to the issue that framed each attempt.
+	ValidationIssue int64 `json:"validationIssue,omitempty"`
+
+	// ValidationVerdict What THIS validation attempt concluded, from the report at its own `mergeSha`. Set on validation cycles only, and only once the attempt settles. The run carries the latest attempt's verdict; this is how a self-healed run shows that an earlier attempt failed.
+	ValidationVerdict RunCycleViewValidationVerdict `json:"validationVerdict,omitempty"`
 }
 
 // RunCycleViewKind defines model for RunCycleView.Kind.
@@ -1291,6 +1362,9 @@ type RunCycleViewKind string
 
 // RunCycleViewMergeVerdict Why this cycle's pull request did NOT merge, when something decided so: `declined` is the auto-merge policy saying the pull request is not this run's work, `refused` is the host declining an open pull request (a conflict — a conflict issue is minted and the next cycle works it). Absent on a cycle whose merge was never decided against, which includes every cycle that merged: a merge is recorded by `mergeSha`, and each fresh decision overwrites this field, so a declined pull request that later merges does not keep the verdict.
 type RunCycleViewMergeVerdict string
+
+// RunCycleViewValidationVerdict What THIS validation attempt concluded, from the report at its own `mergeSha`. Set on validation cycles only, and only once the attempt settles. The run carries the latest attempt's verdict; this is how a self-healed run shows that an earlier attempt failed.
+type RunCycleViewValidationVerdict string
 
 // RunProgressEvent One SSE frame on the run progress stream. `type` discriminates the payload: `cycle` carries a RunCycleView (client upserts by id and renders one accordion section per cycle), `line` one RunProgressLine attributed to its cycle, and `done` the terminal run state (the server then closes the stream).
 type RunProgressEvent struct {
@@ -1322,20 +1396,47 @@ type RunProgressLine struct {
 	// CycleKind Kind of that cycle (coding | conflict | fix | validation) — the section label.
 	CycleKind string `json:"cycleKind"`
 
+	// DurationMs `tool_result` only: how long the call took, measured by the runner between the call and its outcome, so it includes model turnaround.
+	DurationMs int64 `json:"durationMs,omitempty"`
+
 	// Emitter Who produced the line. The runner stamps `subagent` only on lines forwarded from inside a Task tool call; everything else is the main agent.
-	Emitter       RunProgressLineEmitter `json:"emitter"`
-	Error         string                 `json:"error,omitempty"`
-	Files         int64                  `json:"files,omitempty"`
-	Kind          string                 `json:"kind"`
-	Level         string                 `json:"level,omitempty"`
-	Phase         string                 `json:"phase,omitempty"`
-	SchemaVersion int64                  `json:"schemaVersion,omitempty"`
-	Seq           int64                  `json:"seq,omitempty"`
-	Sha           string                 `json:"sha,omitempty"`
-	Status        string                 `json:"status,omitempty"`
-	Summary       string                 `json:"summary,omitempty"`
-	Tool          string                 `json:"tool,omitempty"`
-	TS            string                 `json:"ts,omitempty"`
+	Emitter RunProgressLineEmitter `json:"emitter"`
+
+	// EmitterID Which subagent, for the cycles that fan out to several at once — the id of the fan-out tool call, stable for that subagent's whole life. Absent on main-agent lines.
+	EmitterID string `json:"emitterId,omitempty"`
+
+	// EmitterLabel The description the main agent gave that subagent ("Implement todo-api service (issue
+	EmitterLabel string `json:"emitterLabel,omitempty"`
+	Error        string `json:"error,omitempty"`
+
+	// ExitCode `tool_result` only: the process status of a failed shell call, parsed from the SDK's own `Exit code N` first line. Absent when the tool was not a shell — those report a `<tool_use_error>` with no code — so read absence as "no code was reported", never as "exited 0".
+	ExitCode int64  `json:"exitCode,omitempty"`
+	Files    int64  `json:"files,omitempty"`
+	Kind     string `json:"kind"`
+	Level    string `json:"level,omitempty"`
+
+	// LinesAdded A fanned-out subagent's total lines added, off the SDK's own report on its fan-out call's result. Present only there; nothing in the feed can reconstruct it.
+	LinesAdded int64 `json:"linesAdded,omitempty"`
+
+	// LinesRemoved A fanned-out subagent's total lines removed, from the same report.
+	LinesRemoved int64 `json:"linesRemoved,omitempty"`
+
+	// Ok `tool_result` only: whether the call succeeded. Absent on every other kind — so read absence as "not a tool result", never as success.
+	Ok            bool   `json:"ok,omitempty"`
+	Phase         string `json:"phase,omitempty"`
+	SchemaVersion int64  `json:"schemaVersion,omitempty"`
+	Seq           int64  `json:"seq,omitempty"`
+	Sha           string `json:"sha,omitempty"`
+	Status        string `json:"status,omitempty"`
+	Summary       string `json:"summary,omitempty"`
+	Tool          string `json:"tool,omitempty"`
+
+	// ToolCount A fanned-out subagent's total tool calls, off the SDK's own report on its fan-out call's result. Present only there.
+	ToolCount int64 `json:"toolCount,omitempty"`
+
+	// ToolUseID The tool call this line is about. A `tool_result` carries the id of the `tool_use` it answers, which is what pairs a call with its outcome once several subagents interleave the feed.
+	ToolUseID string `json:"toolUseId,omitempty"`
+	TS        string `json:"ts,omitempty"`
 }
 
 // RunProgressLineEmitter Who produced the line. The runner stamps `subagent` only on lines forwarded from inside a Task tool call; everything else is the main agent.
@@ -1380,13 +1481,17 @@ type SkillDetailBody struct {
 	Deletable        bool              `json:"deletable"`
 	Description      string            `json:"description"`
 	Editable         bool              `json:"editable"`
+	Enabled          bool              `json:"enabled"`
 	Kind             string            `json:"kind"`
 	License          string            `json:"license,omitempty"`
 	Name             string            `json:"name"`
 	OrgID            string            `json:"orgId"`
 	References       map[string]string `json:"references"`
-	SkillMd          string            `json:"skillMd"`
-	UpdatedAt        time.Time         `json:"updatedAt"`
+
+	// Required True when the coding runner reads this skill on every run and cannot start without it (`aep`, and `aep-validation` for a validation task). The mirror only copies enabled skills, so disabling one of these would take the procedure away from every build in the org — `PATCH /skills/{name}` refuses it with 409. The console renders the availability toggle as unavailable rather than letting the call fail.
+	Required  bool      `json:"required"`
+	SkillMd   string    `json:"skillMd"`
+	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 // SkillSummary defines model for SkillSummary.
@@ -1395,8 +1500,12 @@ type SkillSummary struct {
 	Deletable   bool   `json:"deletable"`
 	Description string `json:"description"`
 	Editable    bool   `json:"editable"`
+	Enabled     bool   `json:"enabled"`
 	Kind        string `json:"kind"`
 	Name        string `json:"name"`
+
+	// Required True when the coding runner reads this skill on every run and cannot start without it (`aep`, and `aep-validation` for a validation task). The mirror only copies enabled skills, so disabling one of these would take the procedure away from every build in the org — `PATCH /skills/{name}` refuses it with 409. The console renders the availability toggle as unavailable rather than letting the call fail.
+	Required bool `json:"required"`
 }
 
 // SkillSummaryList defines model for SkillSummaryList.
@@ -1552,19 +1661,40 @@ type TimelineEvent struct {
 	Command     string `json:"command,omitempty"`
 	CompletedAt string `json:"completedAt,omitempty"`
 
+	// DurationMs `tool_result` only: how long the call took, measured by the runner between the call and its outcome, so it includes model turnaround.
+	DurationMs int64 `json:"durationMs,omitempty"`
+
 	// Emitter Who produced the line — `subagent` for work the main agent fanned out with the Task tool, absent for the main agent itself. Absence is a positive fact, not an unknown.
 	Emitter TimelineEventEmitter `json:"emitter,omitempty"`
-	Error   string               `json:"error,omitempty"`
+
+	// EmitterID Which subagent, for the cycles that fan out to several at once — the id of the fan-out tool call, stable for that subagent's whole life. Absent on main-agent lines.
+	EmitterID string `json:"emitterId,omitempty"`
+
+	// EmitterLabel The description the main agent gave that subagent ("Implement todo-api service (issue
+	EmitterLabel string `json:"emitterLabel,omitempty"`
+	Error        string `json:"error,omitempty"`
 
 	// ExecutionID Id of the execution attempt this line belongs to.
 	ExecutionID string `json:"executionId"`
 
 	// ExecutionKind Kind of that attempt (coding | build | ops) — client-side grouping/section labels.
 	ExecutionKind string `json:"executionKind"`
-	Files         int64  `json:"files,omitempty"`
-	Kind          string `json:"kind"`
-	Level         string `json:"level,omitempty"`
-	Message       string `json:"message,omitempty"`
+
+	// ExitCode `tool_result` only: the process status of a failed shell call, parsed from the SDK's own `Exit code N` first line. Absent when the tool was not a shell — those report a `<tool_use_error>` with no code — so read absence as "no code was reported", never as "exited 0".
+	ExitCode int64  `json:"exitCode,omitempty"`
+	Files    int64  `json:"files,omitempty"`
+	Kind     string `json:"kind"`
+	Level    string `json:"level,omitempty"`
+
+	// LinesAdded A fanned-out subagent's total lines added, off the SDK's own report on its fan-out call's result. Present only there; nothing in the feed can reconstruct it.
+	LinesAdded int64 `json:"linesAdded,omitempty"`
+
+	// LinesRemoved A fanned-out subagent's total lines removed, from the same report.
+	LinesRemoved int64  `json:"linesRemoved,omitempty"`
+	Message      string `json:"message,omitempty"`
+
+	// Ok `tool_result` only: whether the call succeeded. Absent on every other kind — so read absence as "not a tool result", never as success.
+	Ok            bool   `json:"ok,omitempty"`
 	Phase         string `json:"phase,omitempty"`
 	SchemaVersion int64  `json:"schemaVersion"`
 	Seq           int64  `json:"seq"`
@@ -1574,7 +1704,13 @@ type TimelineEvent struct {
 	Step          string `json:"step,omitempty"`
 	Summary       string `json:"summary,omitempty"`
 	Tool          string `json:"tool,omitempty"`
-	TS            string `json:"ts"`
+
+	// ToolCount A fanned-out subagent's total tool calls, off the SDK's own report on its fan-out call's result. Present only there.
+	ToolCount int64 `json:"toolCount,omitempty"`
+
+	// ToolUseID The tool call this line is about. A `tool_result` carries the id of the `tool_use` it answers, which is what pairs a call with its outcome once several subagents interleave the feed.
+	ToolUseID string `json:"toolUseId,omitempty"`
+	TS        string `json:"ts"`
 }
 
 // TimelineEventEmitter Who produced the line — `subagent` for work the main agent fanned out with the Task tool, absent for the main agent itself. Absence is a positive fact, not an unknown.
@@ -1828,6 +1964,11 @@ type ImportSkillMultipartBody struct {
 	File openapi_types.File `json:"file"`
 }
 
+// SetSkillEnabledJSONBody defines parameters for SetSkillEnabled.
+type SetSkillEnabledJSONBody struct {
+	Enabled bool `json:"enabled"`
+}
+
 // UpdateConfigJSONRequestBody defines body for UpdateConfig for application/json ContentType.
 type UpdateConfigJSONRequestBody = ConfigPatch
 
@@ -1869,6 +2010,9 @@ type CreateSkillJSONRequestBody = CreateSkillInput
 
 // ImportSkillMultipartRequestBody defines body for ImportSkill for multipart/form-data ContentType.
 type ImportSkillMultipartRequestBody ImportSkillMultipartBody
+
+// SetSkillEnabledJSONRequestBody defines body for SetSkillEnabled for application/json ContentType.
+type SetSkillEnabledJSONRequestBody SetSkillEnabledJSONBody
 
 // UpdateSkillJSONRequestBody defines body for UpdateSkill for application/json ContentType.
 type UpdateSkillJSONRequestBody = UpdateSkillInput

@@ -16,6 +16,7 @@
  * under the License.
  */
 
+import { resolveDatabaseUrl } from "./database-url.js";
 import { loadDotenv, intEnv, boolEnv } from "./env.js";
 
 // Load the nearest .env BEFORE reading process.env, so AGENT_MODEL /
@@ -63,7 +64,7 @@ export const config = {
   keepAliveMs: intEnv(process.env.AGENT_KEEPALIVE_MS, 15_000),
 
   // Shared workspaces mount root — read-only per-SHA snapshots written by
-  // aep-api (docs/design/shared-volume-clone-architecture.md). Compose/k8s
+  // aep-api (services/aep-api/design/shared-workspace-volume.md). Compose/k8s
   // mount the volume :ro; nothing in this service ever writes it.
   workspaceMountRoot: process.env.WORKSPACE_MOUNT_ROOT || "/workspaces",
 
@@ -85,11 +86,12 @@ export const config = {
     secret: process.env.AGENT_JWT_SECRET || undefined,
   },
 
-  // ConversationStore selection: Postgres when DATABASE_URL is set, else the
-  // in-memory store (tests/evals). Threads embed inlined file snapshots, so
-  // stored rows have real size — a TTL sweep on updated_at reclaims them.
+  // ConversationStore selection: Postgres when a URL resolves (DATABASE_URL or
+  // discrete DB_*), else the in-memory store (tests/evals). Threads embed
+  // inlined file snapshots, so stored rows have real size — a TTL sweep on
+  // updated_at reclaims them.
   database: {
-    url: process.env.DATABASE_URL || undefined,
+    url: resolveDatabaseUrl(),
     conversationsTtlMs: intEnv(process.env.CONVERSATIONS_TTL_MS, 7 * DAY_MS),
     conversationsSweepMs: intEnv(process.env.CONVERSATIONS_SWEEP_MS, 60 * 60 * 1000),
   },

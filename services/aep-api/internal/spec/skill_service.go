@@ -38,7 +38,7 @@ import (
 // (nil, nil) on a GitHub blip (the cache was just evicted by the write), which
 // would make the success path hand the controller a nil *Skill and panic.
 // Every field here is derivable from what we just committed.
-func newSkillValue(orgID, kind, name, skillMD string, refs References, fm skillFrontmatter) *Skill {
+func newSkillValue(orgID, kind, name, skillMD string, refs References, fm skillFrontmatter, enabled bool) *Skill {
 	return &Skill{
 		OrgID:         orgID,
 		Name:          name,
@@ -50,6 +50,8 @@ func newSkillValue(orgID, kind, name, skillMD string, refs References, fm skillF
 		License:       fm.License,
 		Compatibility: fm.Compatibility,
 		UpdatedAt:     time.Now().UTC(),
+		Enabled:       enabled,
+		Audience:      frontmatterAudience(fm),
 	}
 }
 
@@ -66,6 +68,7 @@ type SkillSummary struct {
 	ContentSHA  string `json:"contentSha"`
 	Editable    bool   `json:"editable"`
 	Deletable   bool   `json:"deletable"`
+	Enabled     bool   `json:"enabled"`
 }
 
 // ---- frontmatter parsing ----------------------------------------------------
@@ -90,9 +93,12 @@ type skillMetadata struct {
 }
 
 // skillAepMetadata is the platform namespace inside `metadata`. `kind` names
-// the skill kind: platform | org | imported.
+// the skill kind: platform | org | imported. `audience` names the agent(s)
+// this skill's guidance is written for: design | coding (ADR-0013); see
+// frontmatterAudience for the parse/default rule.
 type skillAepMetadata struct {
-	Kind string `yaml:"kind,omitempty"`
+	Kind     string   `yaml:"kind,omitempty"`
+	Audience []string `yaml:"audience,omitempty"`
 }
 
 // frontmatterKind derives a skill's kind from its frontmatter: the trimmed
@@ -110,6 +116,29 @@ func frontmatterKind(fm skillFrontmatter) string {
 	default:
 		return SkillKindOrg
 	}
+}
+
+// frontmatterAudience derives a skill's audience from its frontmatter:
+// `metadata.aep.audience`, filtered to the two recognised values (design,
+// coding — unrecognised entries are dropped rather than becoming a third
+// audience). An empty or absent list — including one that named only
+// unrecognised values — resolves to BOTH: narrowing is opt-in, so an unmarked
+// SKILL.md (and any an org authors without knowing the field exists) stays
+// readable by whoever asks. Mirrors the TS agents service's
+// conversation/load-workspace.ts audience derivation (ADR-0013), which Go
+// must agree with byte-for-byte since both read the same stored frontmatter.
+func frontmatterAudience(fm skillFrontmatter) []string {
+	out := make([]string, 0, len(fm.Metadata.Aep.Audience))
+	for _, a := range fm.Metadata.Aep.Audience {
+		switch strings.TrimSpace(a) {
+		case SkillAudienceDesign, SkillAudienceCoding:
+			out = append(out, strings.TrimSpace(a))
+		}
+	}
+	if len(out) == 0 {
+		return []string{SkillAudienceDesign, SkillAudienceCoding}
+	}
+	return out
 }
 
 // parseSkillMD splits frontmatter from body and decodes it. Returns the

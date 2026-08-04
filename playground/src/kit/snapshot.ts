@@ -38,9 +38,18 @@ export function filesSnapshotSha(files: Record<string, string>): string {
   return fakeSha(JSON.stringify(Object.entries(files).sort(([a], [b]) => a.localeCompare(b))));
 }
 
-/** The skill-library snapshot sha — an edited library yields a new one. */
-export function skillsSnapshotSha(skills: readonly RepoSkill[]): string {
-  return fakeSha(JSON.stringify(skills.map((s) => [s.name, s.description, s.content, s.references ?? {}])));
+/**
+ * The skill-library snapshot sha — an edited library yields a new one. metadata
+ * is part of the key: changing a skill's audience changes what the agent may
+ * load, so it must mint a fresh snapshot rather than reuse the old dir.
+ */
+export function skillsSnapshotSha(skills: readonly RepoSkill[], disabled: readonly string[] = []): string {
+  return fakeSha(
+    JSON.stringify([
+      skills.map((s) => [s.name, s.description, s.content, s.references ?? {}, s.metadata ?? {}]),
+      [...disabled].sort(),
+    ]),
+  );
 }
 
 /**
@@ -48,10 +57,32 @@ export function skillsSnapshotSha(skills: readonly RepoSkill[]): string {
  * (`skills/<name>/SKILL.md` + references — the shape reconcile writes to
  * every org-skills repo).
  */
-export function renderSkillFiles(skills: readonly RepoSkill[]): Record<string, string> {
+export function renderSkillFiles(
+  skills: readonly RepoSkill[],
+  disabled: readonly string[] = [],
+): Record<string, string> {
   const out: Record<string, string> = {};
+  // The platform-managed sidecar sits at the snapshot ROOT, beside skills/ —
+  // the same place reconcile writes it in a real org-skills repo, which is where
+  // the service looks for it. Written only when something is disabled, so an
+  // unrestricted library materializes byte-identically to before.
+  if (disabled.length > 0) {
+    const manifest: Record<string, { origin: string; baseHash: string; disabled: true }> = {};
+    for (const name of [...disabled].sort()) {
+      manifest[name] = { origin: "platform", baseHash: "", disabled: true };
+    }
+    out["skills-manifest.json"] = `${JSON.stringify(manifest, null, 2)}\n`;
+  }
   for (const skill of skills) {
-    const front = stringifyYaml({ name: skill.name, description: skill.description }).replace(/\n+$/, "");
+    // metadata is written back verbatim when the authored skill carried one: the
+    // service reads `metadata.aep.kind` and `metadata.aep.audience` off these
+    // files, so synthesizing a name+description-only frontmatter would hand the
+    // agent an unmarked library — every skill loadable, unlike any real org.
+    const front = stringifyYaml({
+      name: skill.name,
+      description: skill.description,
+      ...(skill.metadata ? { metadata: skill.metadata } : {}),
+    }).replace(/\n+$/, "");
     out[`skills/${skill.name}/SKILL.md`] = `---\n${front}\n---\n\n${skill.content}\n`;
     for (const [refPath, body] of Object.entries(skill.references ?? {})) {
       out[`skills/${skill.name}/${refPath}`] = body;

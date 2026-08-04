@@ -61,10 +61,10 @@ type DesignComponent struct {
 	OpenAPISpec                string             `json:"openAPISpec"`
 	ComponentAgentInstructions string             `json:"componentAgentInstructions"`
 	ExposesAPI                 *ExposesAPI        `json:"exposesAPI,omitempty"`
-	// SkillsApplied are the skill names applied to THIS component (per-component
+	// SkillsPinned are the skill names applied to THIS component (per-component
 	// — the coding runner materializes exactly these when building it). Sourced
-	// from the component design.json `skillsApplied` key.
-	SkillsApplied []string `json:"skillsApplied,omitempty"`
+	// from the component design.json `skillsPinned` key.
+	SkillsPinned []string `json:"skillsPinned,omitempty"`
 	// DisableAutoRca opts this component out of the platform's default
 	// "error → RCA" observability-alert-rule trait (auto-provisioned for
 	// service components). Default false ⇒ auto-RCA on. Sourced from the
@@ -76,6 +76,17 @@ type DesignComponent struct {
 // managed-API (api-configuration) trait binds to when a component's design.json
 // declares no explicit endpoint.
 const DefaultEndpointName = "http"
+
+const (
+	// EndpointVisibilityProject is the reachability of a same-project sibling's
+	// endpoint — the `visibility` on a workload `dependencies.endpoints[]` entry
+	// pointing at one.
+	EndpointVisibilityProject = "project"
+	// EndpointAddressOutput is the single output an endpoint dependency exposes:
+	// the provider's resolved base URL. It is the `envBindings` KEY on an
+	// endpoints[] entry (the value is the env var it lands in).
+	EndpointAddressOutput = "address"
+)
 
 // ComponentEndpoint is the component's single network endpoint as declared in
 // design.json. Only Name is carried: it is the SINGLE SOURCE OF TRUTH for the
@@ -160,10 +171,15 @@ type Dependency = contracts.Dependency
 // resolution set (see Dependency.Candidates). Wire shape in the contracts leaf.
 type DependencyCandidate = contracts.DependencyCandidate
 
-// DependencyWiring is the platform-stamped consumer-side wiring for a
+// DependencyWiring is the platform-stamped consumer-side wiring for a component /
 // platform-resource / external dependency (see derive_wiring.go). Wire shape in
 // the contracts leaf.
 type DependencyWiring = contracts.DependencyWiring
+
+// EndpointWiring is the `endpoints[]` variant of a dependency's wiring — a
+// sibling component's endpoint (see derive_wiring.go). Wire shape in the
+// contracts leaf.
+type EndpointWiring = contracts.EndpointWiring
 
 // ConfigKey is one env-var key a component reads at runtime. Wire shape in the
 // contracts leaf (re-exported here).

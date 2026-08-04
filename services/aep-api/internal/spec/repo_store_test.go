@@ -36,11 +36,16 @@ import (
 // ---- engine-backed test host -------------------------------------------------
 
 // testGitHost is the workspacetest-backed fixture these tests run against: one
-// gitfs engine rooted in t.TempDir() plus one REAL bare file:// origin per org,
-// provisioned lazily by EnsureBareRepo exactly like production provisions the
-// GitHub repo (it supersedes the old in-memory git-host fake — the store now
-// drives genuine git plumbing end to end). It implements sourcecontrol.RepoService
-// (the row store) and hands out origins for arrange/assert.
+// gitfs engine rooted in t.TempDir() plus one REAL bare file:// origin per
+// (org, project) pair, provisioned lazily by EnsureBareRepo exactly like
+// production provisions the GitHub repo (it supersedes the old in-memory
+// git-host fake — the store now drives genuine git plumbing end to end). It
+// implements sourcecontrol.RepoService (the row store) and hands out origins
+// for arrange/assert. Rows/origins are keyed by repoKey(orgID, projectID) —
+// most existing tests only ever address the org's skills repo (a single
+// implicit projectID, SkillsRepoProject), so keying on the pair is a
+// no-behaviour-change refactor for them; the skill-mirror tests are the first
+// to also provision a distinct PROJECT repo for the same org.
 type testGitHost struct {
 	sourcecontrol.RepoService // embedded: unimplemented methods panic (untouched by these tests)
 
@@ -60,10 +65,14 @@ func newTestGitHost(t *testing.T) *testGitHost {
 	}
 }
 
-func (h *testGitHost) GetRepo(_ context.Context, orgID, _ string) (*sourcecontrol.GitRepository, error) {
+// repoKey composes the (orgID, projectID) pair into the map key rows/origins
+// are stored under.
+func repoKey(orgID, projectID string) string { return orgID + "\x00" + projectID }
+
+func (h *testGitHost) GetRepo(_ context.Context, orgID, projectID string) (*sourcecontrol.GitRepository, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if r, ok := h.rows[orgID]; ok {
+	if r, ok := h.rows[repoKey(orgID, projectID)]; ok {
 		return r, nil
 	}
 	return nil, sourcecontrol.ErrRepoNotFound
@@ -72,7 +81,8 @@ func (h *testGitHost) GetRepo(_ context.Context, orgID, _ string) (*sourcecontro
 func (h *testGitHost) EnsureBareRepo(_ context.Context, orgID, projectID, repoName string) (*sourcecontrol.GitRepository, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if r, ok := h.rows[orgID]; ok {
+	key := repoKey(orgID, projectID)
+	if r, ok := h.rows[key]; ok {
 		return r, nil
 	}
 	origin := workspacetest.NewOrigin(h.t, nil)
@@ -87,37 +97,55 @@ func (h *testGitHost) EnsureBareRepo(_ context.Context, orgID, projectID, repoNa
 		// the path key the engine derives the mirror location from.
 		RepoSlug: repoName,
 	}
-	h.origins[orgID] = origin
-	h.rows[orgID] = r
+	h.origins[key] = origin
+	h.rows[key] = r
 	return r, nil
 }
 
-// origin returns the org's provisioned bare origin for arrange/assert (nil
-// before the first read provisions it).
-func (h *testGitHost) origin(orgID string) *gittest.Remote {
+// originFor returns the (org, project) pair's provisioned bare origin for
+// arrange/assert (nil before the first read provisions it).
+func (h *testGitHost) originFor(orgID, projectID string) *gittest.Remote {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return h.origins[orgID]
+	return h.origins[repoKey(orgID, projectID)]
 }
 
-// writeAtHead / removeAtHead commit content changes directly on the ORIGIN
-// (advancing main) the way an external writer would — the store's branch-tip
-// reads must observe them on the very next read (no cache to evict).
+// origin is originFor pinned to the org's skills repo — the sentinel project
+// every pre-existing test in this package addresses.
+func (h *testGitHost) origin(orgID string) *gittest.Remote {
+	return h.originFor(orgID, SkillsRepoProject)
+}
+
+// writeAtHeadIn / removeAtHeadIn commit content changes directly on the
+// (org, project) pair's ORIGIN (advancing main) the way an external writer
+// would — the store's branch-tip reads must observe them on the very next
+// read (no cache to evict). writeAtHead/removeAtHead below are the
+// skills-repo-scoped convenience wrappers every pre-existing test uses.
+func (h *testGitHost) writeAtHeadIn(orgID, projectID, path, content string) {
+	h.originFor(orgID, projectID).Seed(h.t, map[string]string{path: content}, "test write "+path)
+}
+
+func (h *testGitHost) removeAtHeadIn(orgID, projectID, path string) {
+	h.originFor(orgID, projectID).Remove(h.t, "test remove "+path, path)
+}
+
 func (h *testGitHost) writeAtHead(orgID, path, content string) {
-	h.origin(orgID).Seed(h.t, map[string]string{path: content}, "test write "+path)
+	h.writeAtHeadIn(orgID, SkillsRepoProject, path, content)
 }
 
 func (h *testGitHost) removeAtHead(orgID, path string) {
-	h.origin(orgID).Remove(h.t, "test remove "+path, path)
+	h.removeAtHeadIn(orgID, SkillsRepoProject, path)
 }
 
-// readAtHead returns one file's exact content at the org's origin main tip
-// ("" if the org, the ref, or the path is absent), so tests can assert
-// committed bytes outside the skill catalog (e.g. skills-manifest.json)
-// without failing the test on a legitimate absence. Mirrors gitDirOut's
-// plumbing but tolerates the not-found case gittest.Remote.FileAt does not.
-func (h *testGitHost) readAtHead(orgID, path string) string {
-	origin := h.origin(orgID)
+// readAtHeadIn returns one file's exact content at the (org, project) pair's
+// origin main tip ("" if the pair, the ref, or the path is absent), so tests
+// can assert committed bytes outside the skill catalog (e.g.
+// skills-manifest.json) without failing the test on a legitimate absence.
+// Mirrors gitDirOut's plumbing but tolerates the not-found case
+// gittest.Remote.FileAt does not. readAtHead is the skills-repo-scoped
+// convenience wrapper every pre-existing test uses.
+func (h *testGitHost) readAtHeadIn(orgID, projectID, path string) string {
+	origin := h.originFor(orgID, projectID)
 	if origin == nil {
 		return ""
 	}
@@ -130,16 +158,26 @@ func (h *testGitHost) readAtHead(orgID, path string) string {
 	return string(out)
 }
 
-// mirrorGitDir is the engine-side bare mirror location for the org's skills repo.
-func (h *testGitHost) mirrorGitDir(orgID string) (string, error) {
+func (h *testGitHost) readAtHead(orgID, path string) string {
+	return h.readAtHeadIn(orgID, SkillsRepoProject, path)
+}
+
+// mirrorGitDirIn is the engine-side bare mirror location for the (org,
+// project) pair's repo. mirrorGitDir is the skills-repo-scoped convenience
+// wrapper every pre-existing test uses.
+func (h *testGitHost) mirrorGitDirIn(orgID, projectID string) (string, error) {
 	h.mu.Lock()
-	row := h.rows[orgID]
+	row := h.rows[repoKey(orgID, projectID)]
 	h.mu.Unlock()
 	repoDir, err := gitfs.RepoDir(h.engine.Root(), sourcecontrol.WorkspaceRefFor(orgID, row, nil))
 	if err != nil {
 		return "", err
 	}
 	return gitfs.GitSubdir(repoDir), nil
+}
+
+func (h *testGitHost) mirrorGitDir(orgID string) (string, error) {
+	return h.mirrorGitDirIn(orgID, SkillsRepoProject)
 }
 
 // ---- fake credential + resolver ----------------------------------------------
@@ -199,7 +237,7 @@ func TestList_SeedsBuiltinsOnFirstRead(t *testing.T) {
 		t.Fatalf("List: %v", err)
 	}
 	by := nameSet(got)
-	for _, want := range []string{"go", "api-management", "react-webapp", "thunder-authentication"} {
+	for _, want := range []string{"ballerina", "go", "api-management", "react-webapp", "thunder-authentication"} {
 		sk, ok := by[want]
 		if !ok {
 			t.Fatalf("expected org skill %q to be seeded; got %v", want, skillKeysOf(by))

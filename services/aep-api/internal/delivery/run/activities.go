@@ -42,6 +42,7 @@ type Activities struct {
 	builds     BuildReader
 	validation ValidationCoordinator
 	dispatcher delivery.MilestoneDispatcher
+	apiTraits  APITraitSyncer
 }
 
 // Deps carries the activity adapters. runs/cycles/milestones are required; the
@@ -55,6 +56,7 @@ type Deps struct {
 	Builds     BuildReader
 	Validation ValidationCoordinator
 	Dispatcher delivery.MilestoneDispatcher
+	APITraits  APITraitSyncer
 }
 
 // NewActivities wires the activity adapters.
@@ -68,6 +70,7 @@ func NewActivities(d Deps) *Activities {
 		builds:     d.Builds,
 		validation: d.Validation,
 		dispatcher: d.Dispatcher,
+		apiTraits:  d.APITraits,
 	}
 }
 
@@ -121,22 +124,37 @@ func (a *Activities) BumpRunBudget(ctx context.Context, in BumpRunBudgetInput) e
 	return a.runs.BumpBudget(ctx, in.RunID, delivery.RunBudget(in.Counter))
 }
 
-// SetValidationVerdictInput records the validation cycle's outcome and the issue
+// SetValidationVerdictInput records one validation ATTEMPT's outcome and the issue
 // it came from. Issue is 0 when there is no validation issue to name (an incident
-// run, or a skip decided before minting).
+// run, or a skip decided before minting). CycleID is empty for a verdict that
+// belongs to no cycle — `skipped`, decided before any validation cycle opens.
 type SetValidationVerdictInput struct {
 	RunID   string `json:"runId"`
+	CycleID string `json:"cycleId,omitempty"`
 	Verdict string `json:"verdict"`
 	Issue   int    `json:"issue,omitempty"`
 }
 
-// SetValidationVerdict writes the verdict onto the run. It is a RUN property,
-// not a per-issue one — the deployment surface reads it from here. The issue
-// number rides along because it is only otherwise in live workflow state, and a
-// verdict nobody can trace back to its criteria is not much of an answer.
+// SetValidationVerdict records the attempt's verdict in the two places that need
+// it, in one activity so they cannot drift: the CYCLE row, which keeps this
+// attempt's own answer for good, and the RUN row, which carries the latest
+// attempt's answer because that is what the deployment surface reads.
+//
+// The cycle write comes first. If only one of the two lands, the run row lagging
+// its cycle ledger is the recoverable direction — the workflow retries and the
+// cycle write is write-once, so the retry is a no-op there and completes the run
+// write. The reverse would leave a run claiming a verdict no attempt admits to.
 func (a *Activities) SetValidationVerdict(ctx context.Context, in SetValidationVerdictInput) error {
 	if a.runs == nil {
 		return errNotConfigured
+	}
+	if in.CycleID != "" {
+		if a.cycles == nil {
+			return errNotConfigured
+		}
+		if err := a.cycles.SetValidationVerdict(ctx, in.CycleID, in.Verdict, in.Issue); err != nil {
+			return err
+		}
 	}
 	return a.runs.SetValidationVerdict(ctx, in.RunID, in.Verdict, in.Issue)
 }
@@ -338,6 +356,42 @@ func (a *Activities) PollCycleBuilds(ctx context.Context, in CycleBuildsInput) (
 	return out, nil
 }
 
+// ---- managed-API traits -----------------------------------------------------
+
+// ProjectRef names the project an activity acts on, for the activities whose
+// scope is the whole project rather than one milestone or one cycle.
+type ProjectRef struct {
+	OrgID     string `json:"orgId"`
+	ProjectID string `json:"projectId"`
+}
+
+// SyncAPITraits lands the per-environment `api-configuration` trait config on
+// every protected component's ReleaseBinding in the project.
+//
+// Called once per cycle at builds-green, which is the earliest point in a run
+// where the write target exists: OpenChoreo creates the ReleaseBinding from the
+// workload the build's last step generates, so before green there may be
+// nothing to patch. The supervisor observes green on a poll up to
+// buildPollInterval after the WorkflowRun actually completed, by which time the
+// deploy chain has long since produced the binding.
+//
+// Degrades to "nothing to do" when unwired, like the other optional
+// collaborators: a deployment with no trait emitter has no managed-API policy
+// to converge, which is a legitimate configuration rather than a failed run.
+func (a *Activities) SyncAPITraits(ctx context.Context, in ProjectRef) error {
+	if a.apiTraits == nil {
+		return nil
+	}
+	if err := a.apiTraits.SyncProjectAPITraits(ctx, in.OrgID, in.ProjectID); err != nil {
+		// Logged here as well as returned: Temporal retries this activity, and the
+		// per-attempt cause is otherwise only visible in workflow history.
+		slog.ErrorContext(ctx, "run: managed-API trait sync failed",
+			"orgID", in.OrgID, "projectID", in.ProjectID, "error", err)
+		return err
+	}
+	return nil
+}
+
 // ---- validation ------------------------------------------------------------
 
 // EnsureValidationIssue mints the run's validation issue into the milestone and
@@ -362,18 +416,61 @@ type ValidationReportRef struct {
 	At        string `json:"at,omitempty"`
 }
 
+// ValidationOutcome is one attempt's answer: the verdict, and a digest of the
+// evidence behind it.
+//
+// The digest is what lets the loop stop early. Two attempts whose reports agree on
+// every criterion and every message learned the same nothing — the repair did not
+// change the answer — so spending the rest of the attempt budget could only produce
+// the same report a third time. It covers the criteria and their outcomes only, not
+// the file, because the report embeds the commit it was generated at.
+type ValidationOutcome struct {
+	Verdict string `json:"verdict"`
+	Digest  string `json:"digest,omitempty"`
+}
+
 // ReadValidationVerdict reads the runner's committed report at the cycle's merge
 // commit and returns one of the delivery.ValidationVerdict* values.
 //
 // An unwired coordinator yields "skipped" — there is genuinely no validation in
 // that configuration. A report that is absent AT THAT COMMIT is a different
-// matter and yields "unreported", which fails the run: the read is pinned, so an
-// absence is a fact about this run rather than a propagation artifact.
-func (a *Activities) ReadValidationVerdict(ctx context.Context, in ValidationReportRef) (string, error) {
+// matter and yields "unreported", which fails the run once its attempts are spent:
+// the read is pinned, so an absence is a fact about this run rather than a
+// propagation artifact.
+func (a *Activities) ReadValidationVerdict(ctx context.Context, in ValidationReportRef) (ValidationOutcome, error) {
 	if a.validation == nil {
-		return delivery.ValidationVerdictSkipped, nil
+		return ValidationOutcome{Verdict: delivery.ValidationVerdictSkipped}, nil
 	}
-	return a.validation.Verdict(ctx, in.OrgID, in.ProjectID, in.At)
+	verdict, digest, err := a.validation.Verdict(ctx, in.OrgID, in.ProjectID, in.At)
+	if err != nil {
+		return ValidationOutcome{}, err
+	}
+	return ValidationOutcome{Verdict: verdict, Digest: digest}, nil
+}
+
+// MintValidationRepairIssuesInput names the attempt whose failures become work.
+type MintValidationRepairIssuesInput struct {
+	OrgID           string `json:"orgId"`
+	ProjectID       string `json:"projectId"`
+	MilestoneNumber int    `json:"milestoneNumber"`
+	// At is the validation cycle's merge commit — the same pin the verdict was read
+	// at, so the failures filed are the ones this attempt actually reported.
+	At string `json:"at"`
+	// CycleID is the attempt's identity and the issues' dedupe key.
+	CycleID string `json:"cycleId"`
+}
+
+// MintValidationRepairIssues files one issue per failed criterion into the
+// milestone, and returns their numbers.
+//
+// An unwired coordinator mints nothing, like the other optional collaborators —
+// but the count matters to the caller here, because an empty result means the next
+// boundary poll will find no new work.
+func (a *Activities) MintValidationRepairIssues(ctx context.Context, in MintValidationRepairIssuesInput) ([]int, error) {
+	if a.validation == nil {
+		return nil, nil
+	}
+	return a.validation.MintRepairIssues(ctx, in.OrgID, in.ProjectID, in.MilestoneNumber, in.At, in.CycleID)
 }
 
 // ---- dispatch --------------------------------------------------------------

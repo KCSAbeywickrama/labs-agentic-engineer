@@ -42,7 +42,8 @@ import (
 //     caller's conflict/409 path.
 //   - A no-op overlay (nothing staged, or staged content identical to base)
 //     returns CommitResult{Changed: false} without committing or pushing.
-func (e *Engine) Mutate(ctx context.Context, ref RepoRef, fn func(Tx) error, opts CommitOpts) (CommitResult, error) {
+func (e *Engine) Mutate(ctx context.Context, ref RepoRef, fn func(Tx) error, opts CommitOpts) (res CommitResult, err error) {
+	defer func() { err = e.mapDiskErr(err) }()
 	p, err := e.pathsFor(ref)
 	if err != nil {
 		return CommitResult{}, err

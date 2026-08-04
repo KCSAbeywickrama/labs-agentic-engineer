@@ -17,6 +17,7 @@
 package reaper
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -28,6 +29,78 @@ import (
 
 	"github.com/wso2/aep/aep-api/internal/platform/gitfs"
 )
+
+func TestNewPanicsOnInvalidWatermarks(t *testing.T) {
+	eng, _, err := gitfs.New(filepath.Join(t.TempDir(), "workspaces"))
+	if err != nil {
+		t.Fatalf("gitfs.New: %v", err)
+	}
+	cfg := testCfg()
+	cfg.DiskLowPct = 90
+	cfg.DiskHighPct = 85 // low >= high after floors
+	defer func() {
+		if recover() == nil {
+			t.Fatal("expected panic for DiskLowPct >= DiskHighPct")
+		}
+	}()
+	_ = New(eng, staticLister(nil), cfg, nil)
+}
+
+func TestNewPanicsOnDiskHighOver100(t *testing.T) {
+	eng, _, err := gitfs.New(filepath.Join(t.TempDir(), "workspaces"))
+	if err != nil {
+		t.Fatalf("gitfs.New: %v", err)
+	}
+	cfg := testCfg()
+	cfg.DiskHighPct = 101
+	defer func() {
+		if recover() == nil {
+			t.Fatal("expected panic for DiskHighPct > 100")
+		}
+	}()
+	_ = New(eng, staticLister(nil), cfg, nil)
+}
+
+// TestLeaderLockTakeoverOnExpiry: lease metadata names the holding pod;
+// after the prior holder releases flock (simulating a dead leader), the
+// next tryLeaderLock acquires and refreshes expiry\npodName in the lock file.
+func TestLeaderLockTakeoverOnExpiry(t *testing.T) {
+	r, root := newSyntheticReaper(t, testCfg(), staticLister(nil))
+	r.diskUsage = fakeDisk(1000, 900)
+	r.leaderLease = 50 * time.Millisecond // test seam; production ~2*ReapInterval
+
+	path := filepath.Join(root, leaderLockName)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("POD_NAME", "aep-api-0")
+	release, held := r.tryLeaderLock(context.Background())
+	if held {
+		release()
+		t.Fatal("expected not held while competing flock is held")
+	}
+
+	_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+	_ = f.Close()
+
+	release2, held2 := r.tryLeaderLock(context.Background())
+	if !held2 {
+		t.Fatal("expected leadership after prior release")
+	}
+	release2()
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(body, []byte("aep-api-0")) {
+		t.Fatalf("lease file missing pod name: %q", body)
+	}
+}
 
 // TestLeaderFlockGatesGlobalPasses: while another holder owns
 // <root>/.reaper.lock, a Sweep still runs the local passes (trash purge)
@@ -69,9 +142,9 @@ func TestLeaderFlockGatesGlobalPasses(t *testing.T) {
 func TestSweepPassIsolation(t *testing.T) {
 	r, _ := newSyntheticReaper(t, testCfg(), errLister{err: errors.New("db down")})
 	statfsCalled := false
-	r.diskUsage = func(string) (uint64, uint64, error) {
+	r.diskUsage = func(string) (uint64, uint64, uint64, uint64, error) {
 		statfsCalled = true
-		return 1000, 900, nil
+		return 1000, 900, 1000, 1000, nil
 	}
 	r.Sweep(context.Background())
 	if !statfsCalled {
