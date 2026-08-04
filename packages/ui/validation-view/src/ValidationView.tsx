@@ -128,7 +128,10 @@ function CriterionRow({
 }) {
   const failed = report?.status === "fail";
   return (
-    <Box sx={{ py: 0.75 }}>
+    // The row divider is applied by RequirementCard, not here — a row cannot know
+    // whether it is the last one. It hangs off this Box, so it lands BELOW a
+    // failure block rather than between the assertion and its own failure detail.
+    <Box sx={{ py: 1 }}>
       <Box sx={{ display: "flex", gap: 1.5, alignItems: "flex-start" }}>
         <Box sx={{ minWidth: 92, flexShrink: 0, pt: "1px" }}>
           <MethodBadge method={criterion.method} />
@@ -211,7 +214,10 @@ function RequirementCard({
         borderColor: "divider",
         borderRadius: 1,
         p: 2,
-        mb: 1.5,
+        // Twice the gap between two criteria (16px). These were both 12px, so a
+        // requirement boundary carried the same weight as a row boundary and the
+        // nesting was invisible in the rhythm.
+        mb: 3,
       }}
     >
       <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.75 }}>
@@ -220,7 +226,10 @@ function RequirementCard({
           {count} {count === 1 ? "criterion" : "criteria"}
         </Typography>
       </Box>
-      <Typography variant="body1" sx={{ fontWeight: 500, mb: count > 0 ? 1 : 0 }}>
+      <Typography
+        variant="body1"
+        sx={{ fontWeight: 500, mb: count > 0 ? 1.5 : 0 }}
+      >
         {requirement.statement}
       </Typography>
       {count === 0 ? (
@@ -228,9 +237,19 @@ function RequirementCard({
           No criteria.
         </Typography>
       ) : (
-        requirement.criteria.map((c) => (
-          <CriterionRow key={c.id} criterion={c} report={statuses?.get(c.id)} />
-        ))
+        // The criteria get their own box so the divider can hang off
+        // `:not(:last-child)`: the badge row and the statement above are siblings
+        // of the rows, so a `:last-of-type` on the rows themselves would not
+        // reliably mean "last criterion".
+        <Box
+          sx={{
+            "& > *:not(:last-child)": { borderBottom: 1, borderColor: "divider" },
+          }}
+        >
+          {requirement.criteria.map((c) => (
+            <CriterionRow key={c.id} criterion={c} report={statuses?.get(c.id)} />
+          ))}
+        </Box>
       )}
     </Box>
   );
