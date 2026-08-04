@@ -139,7 +139,10 @@ export function VerdictTile({
 
   const counts = verdictCounts(tally);
   return (
-    <Alert severity={SEVERITY[view.tone]} sx={{ mx: 3, mt: 2 }}>
+    // No margins: the page's body container owns the gap below and PageTitle owns
+    // the space above. A tile that insets itself put the page's one 24px-inset
+    // element beside bodies that were flush.
+    <Alert severity={SEVERITY[view.tone]}>
       {/* The shared labels are lowercase for mid-sentence use; a headline leads. */}
       <AlertTitle>
         {view.label.charAt(0).toUpperCase() + view.label.slice(1)}
