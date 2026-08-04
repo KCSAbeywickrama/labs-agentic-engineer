@@ -560,3 +560,91 @@ func TestSyncProjectSkills_Lifecycle(t *testing.T) {
 		"go": false, "react": true, "wireframes": true, "planning": false,
 	})
 }
+
+// The seam between the AUTHORED library and the mirror: the runner's own skills
+// reach a build only because their frontmatter says `audience: [coding]`, and
+// nothing else in the system re-states that. There is no runner-side selection
+// left to fall back on (ADR-0005), so if this frontmatter is reformatted, dropped,
+// or a fourth runner skill is added without it, a coding run silently loses its
+// procedure and `requireWorkflowBodies` fails every build.
+//
+// Driven against the REAL library rather than a fixture, because the thing under
+// test is the authored bytes as much as the parser — flow-style `[coding]` has to
+// decode the same way the TS mirror decodes it.
+func TestRealLibrary_RunnerSkillsAreCodingAudienceAndMirrored(t *testing.T) {
+	t.Parallel()
+	lib, err := loadLibrary(testLibraryFS(t))
+	if err != nil {
+		t.Fatalf("loadLibrary: %v", err)
+	}
+
+	byName := map[string]Skill{}
+	for _, sk := range lib {
+		byName[sk.Name] = sk
+	}
+
+	// Every skill the runner reads on its own behalf, and what it must be.
+	for name := range RequiredSkills {
+		sk, ok := byName[name]
+		if !ok {
+			t.Fatalf("the authored library has no %q — every coding run needs it", name)
+		}
+		if got := sk.Audience; len(got) != 1 || got[0] != SkillAudienceCoding {
+			t.Errorf("%s audience = %v, want exactly [coding] — the design agent must not be able to load it", name, got)
+		}
+		if sk.Kind != SkillKindPlatform {
+			t.Errorf("%s kind = %q, want %q (read-only in the console)", name, sk.Kind, SkillKindPlatform)
+		}
+	}
+	// playwright-cli is not in RequiredSkills (it loads on demand), but it is still
+	// the coding agent's and still has to reach the mirror.
+	if got := byName["playwright-cli"].Audience; len(got) != 1 || got[0] != SkillAudienceCoding {
+		t.Errorf("playwright-cli audience = %v, want exactly [coding]", got)
+	}
+
+	// …and the copy rule admits them with nothing pinned, which is what a real
+	// dispatch looks like before any design has pinned a stack skill.
+	//
+	// `Enabled` is stamped here rather than read off the library, and the
+	// asymmetry is worth naming: `loadLibrary` describes the SHIPPED bytes and
+	// leaves Enabled at its zero value, because availability is a per-org fact
+	// that lives in that org's `skills-manifest.json`. What `desiredMirror`
+	// consumes in production is the ORG's library (`newSkillValue`, which sets
+	// Enabled from the manifest) — so feeding it `loadLibrary` output directly
+	// would mirror nothing at all. `true` here is a freshly-seeded org, where no
+	// admin has disabled anything.
+	enabled := make([]Skill, 0, len(lib))
+	for _, sk := range lib {
+		sk.Enabled = true
+		enabled = append(enabled, sk)
+	}
+	mirror := desiredMirror(enabled, nil)
+	for _, name := range []string{"aep", "aep-validation", "playwright-cli"} {
+		if _, ok := mirror[claudeSkillsDir+"/"+name+"/SKILL.md"]; !ok {
+			t.Errorf("%s is absent from the mirror — a dispatched run would not receive it", name)
+		}
+	}
+	// The `aep` skill's references travel too: a fan-out subagent is handed
+	// component-contract.md by absolute path and can read nothing else.
+	if _, ok := mirror[claudeSkillsDir+"/aep/references/component-contract.md"]; !ok {
+		t.Error("aep/references/component-contract.md is absent from the mirror — fan-out subagents get a dead path")
+	}
+	// aep-validation is useless without its report generator, which lives under
+	// scripts/ rather than references/ — proving References is not refs-only.
+	if _, ok := mirror[claudeSkillsDir+"/aep-validation/scripts/generate-report.mjs"]; !ok {
+		t.Error("aep-validation/scripts/generate-report.mjs is absent from the mirror")
+	}
+	// And the design-flow skills stay out, which is what replaced the runner's
+	// explicit base-plugin selection.
+	for _, name := range []string{"design", "task-planning", "high-level-architecture"} {
+		if _, ok := mirror[claudeSkillsDir+"/"+name+"/SKILL.md"]; ok {
+			t.Errorf("%s reached a build's mirror — a coding session must not see it", name)
+		}
+	}
+	// Compose-time input is never skill content, in production as in the playground.
+	for p := range mirror {
+		if strings.Contains(p, "/overlays/") {
+			t.Errorf("mirror carries compose-time input: %s", p)
+		}
+	}
+}

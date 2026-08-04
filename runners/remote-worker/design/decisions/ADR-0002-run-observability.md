@@ -166,6 +166,52 @@ Four further gaps, all verified rather than assumed:
    pull is legitimate. A SIGTERM handler dumps the same snapshot, so a killed
    run still explains itself.
 
+14. **A stalled model turn names its cause, and API retries are reported on
+    every run.** "Nothing in flight" was where decision 7 stopped, and it is a
+    symptom with two very different causes. The SDK already distinguishes them
+    and we were discarding the evidence: it emits `system`/`api_retry` per
+    retryable failure (`attempt`, `max_retries`, `retry_delay_ms`,
+    `error_status`, `error`) and `from-sdk.ts` dropped it with every other
+    unrecognised system subtype. Measured against a dead endpoint: 8 retries in
+    69s and not one line about any of them. So retries now become a `warn` log
+    event and the watchdog's line names them — `(API retry 7/10, overloaded,
+    last 10s ago)` — in the tool-in-flight branch too, because a fan-out lead's
+    `Agent` call stays open for its subagent's whole run.
+
+    This is **not** gated behind a debug flag, and that is deliberate on three
+    counts: a healthy run emits nothing (no retries, no messages, no lines);
+    `error` is a closed enum, so unlike stderr or the debug log there is no free
+    text here to carry a prompt or a credential into a build log the console
+    forwards; and overload is load-dependent, so a flag would be off during
+    every incident worth having it for.
+
+    A retry is recorded but does **not** count as activity. Routing it through
+    `observe()` would reset the idle clock, and the measured backoff climbs
+    0.2s → 33.6s — all inside the 120s window — so the watchdog would have gone
+    quiet through exactly the stall it exists to report. Verified live: the
+    report now fires mid-storm naming attempt 6/10.
+
+15. **The developer options are opt-in, and they are files.** `debugFile`,
+    `stderr` and `includePartialMessages` are on for every playground run and
+    off in a pod unless `AEP_RUNNER_DEBUG=1` opts one in. The split is by sink,
+    not by taste: nothing collects a pod's files (`claude.log` has been written
+    unconditionally for as long as it has existed and only the playground has
+    ever read one), so these are for someone sitting in front of a run
+    directory — and the debug log holds prompt text, which is why it stays off a
+    channel the console renders to a browser. Streaming frames reach neither the
+    feed nor `claude.log`; they exist so the watchdog can tell a long generation
+    from a wedged one, and writing one JSON line per token would turn a
+    diagnostic into the hang it reports on.
+
+    They do not change *when* the watchdog fires — frames are recorded without
+    counting as activity, same as retries — because a diagnostic that alters the
+    symptom cannot be used to reproduce it.
+
+    `stderr` was where we first went looking for retry detail and it carries
+    none: probed against the same dead endpoint it produced one unrelated
+    startup warning while all 8 retries went past on the message channel. It is
+    kept as a sink for what else the CLI says, not as the diagnosis.
+
 8. **`console.*` is converted, not merely scrubbed.** It shares the fd with the
    feed, so a bare line makes the stream unparseable — and a watchdog cannot
    watch a feed it cannot parse. Every call becomes a typed `log` event. The

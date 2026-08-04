@@ -97,12 +97,12 @@ RUN chmod +x /docker-entrypoint.sh
 #   mkdir() "/var/lib/nginx/tmp/client_body" failed (13: Permission denied)
 # Official nginx image temps under /var/cache/nginx — chown both.
 #
-# /var/lib/nginx is CREATED here, not merely chowned: this base image
-# (nginx:1.28-alpine, the official one) does not ship it, so an unconditional
-# chown fails the build with "No such file or directory". Only the cloud
-# overlay's `apk upgrade nginx` introduces the directory — and it finds a tree
-# UID 10001 already owns, which is the point.
-RUN mkdir -p /var/lib/nginx/tmp && \
+# /var/lib/nginx is CREATED first because the official `nginx:*-alpine` base does
+# not ship it — only the apk package does. Without the mkdir, `chown -R` on a
+# missing path fails the build outright, so the overlay this line exists for could
+# never be reached. Creating it is correct for both cases: owned by 10001 up front,
+# whether or not a later `apk upgrade nginx` populates it.
+RUN mkdir -p /var/lib/nginx && \
     chown -R 10001:10001 /var/cache/nginx && \
     chown -R 10001:10001 /var/log/nginx && \
     chown -R 10001:10001 /var/lib/nginx && \

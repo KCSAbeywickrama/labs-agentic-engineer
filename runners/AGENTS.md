@@ -2,11 +2,15 @@
 
 One-shot / job images (not long-lived services). Run to completion in a pod.
 
-**Status:** `remote-worker/` holds the `aep` skill plugin loaded by the
-coding-agent runner — a TS Claude Agent SDK one-shot pod that provisions a
-workspace, loads the `aep` skill, and runs the Agent SDK. The dev flow
-bind-mounts `runners/remote-worker/plugin` into the runner pod for live skill
-edits (see `deployments/scripts/setup-k3d.sh`).
+**Status:** `remote-worker/` is the coding-agent runner — a TS Claude Agent SDK
+one-shot pod that provisions a workspace and runs the Agent SDK against it.
+Skills are **authored in `<repo>/skills/`, not here** (`skills/AGENTS.md` has
+the authoring rules) and **delivered by the BFF, not here either**: a run reads
+the `.claude/skills/` mirror in its own clone. What this package owns is
+consuming that mirror correctly — the always-on workflow, the allowlist, and the
+playground's stand-in for the BFF write. The dev flow bind-mounts the library
+into the runner pod at `/app/skills` for live skill edits (see
+`deployments/scripts/setup-k3d.sh`), which is what the playground mirrors from.
 
 ## Conventions
 
@@ -44,6 +48,22 @@ edits (see `deployments/scripts/setup-k3d.sh`).
   `remote-worker/design/decisions/ADR-0002-run-observability.md`; read it before
   changing what a line says, because several of its entries are corrections of
   the obvious-looking choice.
+- **API retries are on the feed for every run; the rest of the diagnostics are
+  developer-only files.** A stalled model turn used to be reported as bare
+  silence. The SDK emits `system`/`api_retry` for every retryable failure and
+  `from-sdk.ts` was discarding it, so `progress/diagnostics.ts` reads it into a
+  `warn` line and the watchdog names it in its own. Ungated on purpose: a healthy
+  run emits nothing, the `error` field is a closed enum (no prompt or credential
+  can ride it into a console build log), and overload is load-dependent so a flag
+  would be off during every incident. **A retry must never reach
+  `watchdog.observe`** — it is the absence of progress, and resetting the idle
+  clock hides the stall it explains. `debugFile`, `stderr` and
+  `includePartialMessages` are the opposite call: on for every playground run,
+  off in a pod unless `AEP_RUNNER_DEBUG=1`, and they write files beside
+  `claude.log` rather than to the feed — nothing collects a pod's files and the
+  debug log holds prompt text. Streaming frames reach neither the feed nor
+  `claude.log`. ADR-0002 decisions 14–15 have the measurements, including why
+  stderr is *not* where retry detail lives.
 - **Fan-out runs in the foreground.** A `PreToolUse` hook
   (`lib/fanout_foreground.ts`) forces `run_in_background: false` on every
   `Agent`/`Task` call that did not already say so. Backgrounding does not add
@@ -115,56 +135,54 @@ edits (see `deployments/scripts/setup-k3d.sh`).
   (`aep-local-milestone`) for the same reason: a playground coding run works
   the whole project, same as the milestone loop, and may touch several
   components — there is no single one to name.
-- **ONE authored workflow skill, composed per mode.** `plugin/skills/aep/SKILL.md`
-  serves both the platform's GitHub-backed runs and the playground's file-based
-  ones. Where they differ, the text is marked `<!-- mode:github -->` /
-  `<!-- mode:local -->` — alone on a line to gate whole lines, or with content
-  beside it to gate a clause — and `lib/skill_compose.ts` resolves it at session
-  start. Anything unmarked is shared and cannot drift. Both modes go through the
-  strip step: an unstripped marker region would inject the wrong procedure, so
-  there is no "raw" path that skips it. Mode is stated by the entrypoint
-  (`BaseAgentConfig.mode`, default `github`), never inferred.
-  **`# The component contract` is the single home of the per-component platform
-  contract** (App Path, `workload.yaml`, dependency wiring, the runtime rules),
-  stated as information rather than a build procedure so it reads the same for a
-  component's first line and for a change to one that has shipped. `# The run`
-  stays a dispatcher over the issue set and the git record and never restates a
-  contract rule; the tie-break is that a rule naming `git`/`gh`/an issue/a PR
-  belongs to the run and one naming a path, a file or an env var belongs to the
-  contract. That tie-break lives here, not in the skill — it is authoring
-  guidance, useless to the agent at runtime.
-  **`## Contract-first` carries the premise both of those rest on** — `specs/` is
-  fixed at design time and is what implementation targets, so no issue waits for
-  another's code. Keep it to the premise; the ordering rule is the run's and the
-  per-dependency lookup the contract's. A dependency declaration (`dependsOn`,
-  `Depends on #N`) is a **runtime** edge, and text reading it as a build order is
-  a defect.
-  **The platform text is the trunk** — gate a region only when the ungated
-  version would make a mode attempt something impossible, and prefer gating one
-  side to writing two variants. A *paired* region is prose duplicated per mode
-  and is what the test suite caps; reading an inert paragraph is cheaper than
-  maintaining a second copy of it. ADR:
-  `remote-worker/design/decisions/ADR-0001-one-mode-composed-skill.md`.
-- **`aep` is the umbrella skill; the stack skills sit under it.** It owns the run
-  (start the cycle → work the issues → finish) and the platform contract every
-  component obeys whatever it is written in — App Path, `workload.yaml`, port,
-  config + error shape, CORS ownership, dependency wiring, deny-list. A
-  cross-stack *practice* (config read in one place at startup) is the contract's;
-  **which file it lands in** is the stack skill's.
-  The repo-root `skills/` entries (`go`, `ballerina`, `react-webapp`,
-  `api-management`, `thunder-authentication`) own only their stack: layout,
-  `Dockerfile`, libraries, the verify command, their own pitfalls. Restating a
-  platform-contract rule in a stack skill is a defect — it is preloaded context
-  paid twice, and the two copies drift (a live example: the deny-list once
-  banned CORS middleware outright while the `go` skill required it for an
-  unmanaged service). Niche material that only
-  some runs need goes to `plugin/skills/aep/references/`, not into the body.
-- **Running the `aep` skill by hand.** Install the plugin into your own Claude
-  Code (`claude plugin install <repo>/runners/remote-worker/plugin`) and use your
-  own `gh auth login`; the workflow is the platform's. Note the installed plugin
-  is the *authored* source, markers and all — the composed form is what a real
-  run loads, so use the playground (`pnpm play <dir> code`) if you want the
-  local-mode body.
+- **There are NO plugins, and the mirror is the only skill source.** The runner
+  once loaded two — one it assembled from the library, one it materialised per
+  task — and both are gone. `aep`, `aep-validation` and `playwright-cli` are
+  library skills carrying `audience: [coding]`, so the BFF mirrors them into the
+  project repo exactly like `go`, and a coding session reads one directory. What
+  reaches a build is therefore decided in one place, by the BFF: `design`'s
+  description cannot appear in a coding session's catalog because
+  `audience: [design]` keeps it out of the mirror, not because the runner filters
+  a library. ADR:
+  `remote-worker/design/decisions/ADR-0005-the-workflow-rides-the-project-mirror.md`.
+- **The always-on set is the runner's, not the design's.** `alwaysOnSkills`
+  (`lib/runner.ts`) names `aep` for every run and `aep-validation` for a
+  validation task; `requireWorkflowBodies` reads those bodies out of the mirror
+  and appends them to the `claude_code` preset. Everything else a component needs
+  is a `skillsPinned` entry someone put in a `design.json` — but no design decides
+  whether a coding run follows the coding workflow. `playwright-cli` is
+  deliberately NOT always-on: `aep-validation` names it, and mechanics a run may
+  not reach for should cost a load, not every turn.
+- **A mirror with no workflow skill is FATAL.** `requireWorkflowBodies` throws and
+  both entrypoints report a failed run. Every other skill degrades — a dangling
+  pin warns and the build continues — because missing guidance costs quality and
+  aborting costs the whole build. The workflow is the exception: a session without
+  it improvises a procedure and reports success, which is invisible from outside.
+  The mirror's writes are best-effort by design (they may not fail a creation,
+  publish or dispatch), so this is where that becomes visible. **Do not add an
+  image fallback**: two sources drift, and the fallback would silently discard an
+  org's own edit to the skill. The check sits in `runClaudeQuery`, so no new
+  entrypoint can start a procedure-less session.
+- **Anything a skill must invoke by absolute path reads `$AEP_SKILLS_DIR`**, now
+  `<workspace>/.claude/skills`. The runner stamps it (`lib/runner.ts`) because it
+  is still the only layer that knows the value. `aep-validation` runs the
+  platform's report generator through it, and the component contract a lead hands
+  to fan-out subagents (`contractReferencePath`) resolves the same way. A
+  hardcoded path is wrong somewhere — it was, and it named `/app/plugin`.
+- **`lib/workflow_skill.ts` composes ONE file**: `skills/aep/SKILL.md` for a mode.
+  Production mirrors the authored trunk verbatim; local mode applies
+  `skills/aep/overlays/local.md`, and `local_skill_mirror.ts` does it **while
+  writing the mirror**, which is what keeps it unskippable. Every writer filters
+  `overlays/` out — `loadLibrary` never seeds it, so no org repo has one for the
+  BFF to copy — because the `aep` skill lets the agent read its own directory and
+  an overlay beside `SKILL.md` is a second procedure it can find.
+  `make workflow-skill` prints either mode without spawning a session.
+- **The library arrives as a BuildKit named context**
+  (`--build-context skills=<repo>/skills` → `COPY --from=skills . /app/skills`),
+  the same mechanism `aep-api` uses. Add it to any new build path or the
+  playground has no library to mirror: `build-runner.sh`, `release.yml`'s matrix
+  row, and `local/run-local.sh` all pass it. A dispatched run does not read it —
+  its skills come from the clone — but `local.ts` does.
 - **One image**, `remote-worker/Dockerfile`, serves BOTH task kinds
   (`AEP_TASK_KIND=implementation` and `=validation`). It is Debian-based
   because Playwright's browsers are glibc-linked; do not reintroduce a second,

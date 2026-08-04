@@ -23,7 +23,13 @@ import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { createTimelineRenderer, renderMergedTimeline } from "../src/engine/coding-run.js";
+import {
+  createTimelineRenderer,
+  dockerInvocation,
+  hostInvocation,
+  isFailedSubagent,
+  renderMergedTimeline,
+} from "../src/engine/coding-run.js";
 import { formatLine } from "@aep/progress-view";
 
 // The playground renders through the SAME formatter the console does, so these
@@ -48,6 +54,49 @@ function tempProject(): string {
   );
   return dir;
 }
+
+// Which credential a coding run authenticates with is decided HERE and nowhere
+// else — the runner entrypoint deliberately no longer validates the key, so a
+// regression in these four would not fail anywhere downstream. It would just
+// quietly bill the wrong account, or hand a shared key to a bypassPermissions
+// process on the developer's own machine.
+const invocationOpts = { projectDir: "/p", skillsDir: "/s" };
+
+function withKeyInEnv(value: string, body: () => void): void {
+  const restore = process.env.ANTHROPIC_API_KEY;
+  process.env.ANTHROPIC_API_KEY = value;
+  try {
+    body();
+  } finally {
+    if (restore === undefined) delete process.env.ANTHROPIC_API_KEY;
+    else process.env.ANTHROPIC_API_KEY = restore;
+  }
+}
+
+test("host mode withholds the key, so the SDK falls back to the developer's own credentials", () => {
+  withKeyInEnv("sk-ant-from-dotenv", () => {
+    const { env } = hostInvocation(invocationOpts, "/r");
+    assert.equal(env.ANTHROPIC_API_KEY, undefined, "the key must not reach a host session by default");
+    // The rest of the environment still has to arrive, or the SDK cannot find
+    // HOME — and with it the credential store it is being sent to.
+    assert.equal(env.AEP_LOCAL_PROJECT_DIR, "/p");
+    assert.ok(env.PATH, "PATH must survive");
+  });
+});
+
+test("host mode --api-key opts back into key auth", () => {
+  withKeyInEnv("sk-ant-explicit", () => {
+    const { env } = hostInvocation({ ...invocationOpts, useApiKey: true }, "/r");
+    assert.equal(env.ANTHROPIC_API_KEY, "sk-ant-explicit");
+  });
+});
+
+test("docker mode always passes the key through — a container reaches no credential store", () => {
+  const { args } = dockerInvocation(invocationOpts, "/r", "c1");
+  const at = args.indexOf("ANTHROPIC_API_KEY");
+  assert.ok(at > 0, "the key must be forwarded into the container");
+  assert.equal(args[at - 1], "-e", "forwarded by name, so the value never lands in argv");
+});
 
 test("undo snapshot + restore round-trips edits and removes new files", () => {
   const dir = tempProject();
@@ -212,4 +261,33 @@ test("merged pass: each subagent's work sits under its own report", () => {
 test("merged pass: local mode still says a push went nowhere", () => {
   const out = renderMergedTimeline([{ kind: "git_push", branch: "aep/m3", toolUseId: "p1" }]).join("\n");
   assert.match(out, /↑ push aep\/m3 — no remote in local mode/);
+});
+
+// The trigger for rescuing a stalled subagent's transcript. It is pinned against
+// a VERBATIM event off a real run's progress.ndjson (todo-api99, 2026-08-02),
+// because the copy it drives races the SDK's own cleanup: if a field name drifts,
+// the snapshot silently never fires and the next stall is undiagnosable again.
+test("failed-subagent trigger: fires on a real stalled Agent result, and nothing else", () => {
+  const stalled = {
+    schemaVersion: 1,
+    ts: "2026-08-02T14:58:44.607Z",
+    seq: 279,
+    kind: "tool_result",
+    ok: false,
+    toolUseId: "toolu_01XTtpLCgiY6V9iiBASr8Fsz",
+    tool: "Agent",
+    summary: "Implement todo-api Ballerina service",
+    durationMs: 1_027_107,
+    emitter: "subagent",
+    emitterId: "toolu_01XTtpLCgiY6V9iiBASr8Fsz",
+    emitterLabel: "Implement todo-api Ballerina service",
+  };
+  assert.equal(isFailedSubagent(stalled), true);
+
+  // A subagent that succeeded, a failing ordinary tool, and the subagent's own
+  // in-flight lines are all normal traffic — snapshotting on any of them would
+  // copy the container's state on every failed `bal build`.
+  assert.equal(isFailedSubagent({ ...stalled, ok: true, status: "completed" }), false);
+  assert.equal(isFailedSubagent({ ...stalled, tool: "Bash", summary: "bal build" }), false);
+  assert.equal(isFailedSubagent({ ...stalled, kind: "tool_use" }), false);
 });

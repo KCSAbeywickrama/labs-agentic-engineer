@@ -179,11 +179,12 @@ export interface CodeOptions extends PhaseOptions {
   restore?: boolean;
   /** Headless consent to run bypassPermissions on this directory (`--yes`). */
   yes?: boolean;
-  /** Override the skills library / plugin (tests). */
+  /** Override the skill library the run reads (tests). */
   codingSkillsDir?: string;
-  pluginDir?: string;
   /** `--host`: bare `npx tsx` on the host instead of the default Docker-image run. */
   host?: boolean;
+  /** `--api-key`: with `--host`, authenticate with `ANTHROPIC_API_KEY` rather than your Claude login. */
+  apiKey?: boolean;
   /** `log` only: which view, and which archived run (default: the newest). */
   view?: LogView;
   run?: string;
@@ -230,8 +231,8 @@ export async function codeCommand(
   const result = await runCodingAgent({
     projectDir,
     skillsDir: opts.codingSkillsDir ?? SKILLS_DIR,
-    ...(opts.pluginDir ? { pluginDir: opts.pluginDir } : {}),
     ...(opts.silent ? { silent: true } : {}),
+    ...(opts.apiKey ? { useApiKey: true } : {}),
     mode: opts.host ? "host" : "docker",
   });
   if (!opts.silent) {

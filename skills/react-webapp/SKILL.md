@@ -1,6 +1,6 @@
 ---
 name: react-webapp
-description: How to build a React SPA on the platform.
+description: How to build a React SPA on the platform — project layout, the build-verify command, and this stack's constraints and pitfalls. Apply when a component's `type` is `web-application`.
 metadata:
   aep:
     kind: org
@@ -23,11 +23,21 @@ per-env values (API URLs, OIDC config, flags) arrive at request time in
    failure if broken, not a style preference.
 3. **Verify** — from the app path:
    ```bash
-   npm install 2>&1 | tail -30   # regenerates package-lock.json
+   npm install                   # regenerates package-lock.json
    npx tsc --noEmit              # type-check without emitting
-   npm run build 2>&1 | tail -20 # actually build
+   npm run build                 # actually build
    ```
    Commit the `package-lock.json` this produces. Never commit `node_modules/`.
+
+   The `build` script is `tsc --noEmit && vite build` — **not** `tsc -b`, which
+   needs a composite project: a `tsconfig.json` that `references` a
+   `tsconfig.node.json` setting `noEmit` fails with `TS6310: Referenced project
+   may not disable emit`, and unwinding that costs more than it buys.
+
+   Verification ends at exit 0. **Never run `npm audit` or `npm audit fix`** —
+   the advisories land on Vite's dev-only transitive dependencies, which never
+   reach a static bundle served by nginx, and `audit fix` bumps pinned
+   dependencies behind your back.
 4. **PR** — only once step 3 exits 0.
 
 ## Constraints
@@ -89,7 +99,7 @@ there is no later stage that can reach the sibling spec to regenerate it.
 ```
 <app-path>/
 ├── package.json
-├── tsconfig.json
+├── tsconfig.json         # ONE file — no project references, no tsconfig.node.json
 ├── vite.config.ts        # no `base` — served at host root
 ├── index.html
 ├── src/
@@ -209,17 +219,9 @@ EXPOSE 9090
 CMD ["nginx", "-g", "daemon off;"]
 ```
 
-`workload.yaml` follows the standard format (one `http` endpoint,
-`visibility: [external]`). A web-app may additionally declare its own safe
-defaults, which become entries in `window._env_` — never secrets or per-env
-values, which the platform owns:
-
-```yaml
-configurations:
-  env:
-    - name: SUPPORT_EMAIL
-      value: support@example.com
-```
+`workload.yaml` follows your prompt — as given when it carries one, else per the
+component contract. Any default it declares under `configurations.env` arrives as
+a `window._env_` entry (see Config above).
 
 ## Pitfalls
 

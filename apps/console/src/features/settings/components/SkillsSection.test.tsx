@@ -54,6 +54,7 @@ function skill(overrides: Partial<SkillSummary>): SkillSummary {
     editable: true,
     deletable: true,
     enabled: true,
+    required: false,
     ...overrides,
   };
 }
@@ -170,6 +171,44 @@ describe("SkillsSection — availability toggle", () => {
 
     fireEvent.click(screen.getByRole("switch", { name: "Disable go" }));
 
+    expect(setSkillEnabled.mutate).toHaveBeenCalledWith({
+      name: "go",
+      enabled: false,
+    });
+  });
+
+  // The coding runner reads `aep` out of the project mirror on every run and
+  // refuses to start without it, and the mirror only copies enabled skills — so
+  // the server rejects this PATCH with 409. A toggle that can only fail is worse
+  // than one that renders as unavailable and says why, so `required` (the
+  // server's own flag, never a name match here) takes the control out of play.
+  it("takes the toggle out of play for a required skill, per row", () => {
+    resetMocks();
+    skillsData = {
+      skills: [
+        skill({ name: "aep", kind: "platform", enabled: true, required: true }),
+        skill({ name: "go", enabled: true }),
+      ],
+    };
+
+    render(<SkillsSection />);
+
+    // `disabled` IS the mechanism — a real user cannot reach the change handler
+    // through it. Asserted rather than clicked: jsdom's fireEvent dispatches
+    // synthetically and so bypasses the disabled check, which would make a
+    // "mutation not fired" assertion a statement about the harness. This package
+    // has no @testing-library/user-event to respect it properly.
+    const aepSwitch = screen.getByRole("switch", { name: "Disable aep" });
+    expect(aepSwitch).toBeDisabled();
+    // Still shown as ON: it IS enabled, and rendering it off would misreport
+    // what every build actually loads.
+    expect(aepSwitch).toBeChecked();
+
+    // Per row, not a mode the whole section drops into — an ordinary skill
+    // beside it stays operable, mutation and all.
+    const goSwitch = screen.getByRole("switch", { name: "Disable go" });
+    expect(goSwitch).not.toBeDisabled();
+    fireEvent.click(goSwitch);
     expect(setSkillEnabled.mutate).toHaveBeenCalledWith({
       name: "go",
       enabled: false,

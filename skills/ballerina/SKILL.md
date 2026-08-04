@@ -18,19 +18,19 @@ bal new <project-name>   # scaffolds main.bal + Ballerina.toml
 cd <project-name>
 ```
 
-- For a workspace (multiple packages in one repo), see workspace rules in [code-rules.md](code-rules.md)
+- For a workspace (multiple packages in one repo), see workspace rules in [code-rules.md](references/code-rules.md)
 
 ## Writing Ballerina Code
 
-**File layout.** New code belongs in the file that fits its concern — `.bal` files and `Ballerina.toml` show the existing layout (see [code-rules.md](code-rules.md)).
+**File layout.** New code belongs in the file that fits its concern — `.bal` files and `Ballerina.toml` show the existing layout (see [code-rules.md](references/code-rules.md)).
 
-**Finding an external connector or library.** For a package [code-rules.md](code-rules.md) already names, write the `import` and let `bal build` resolve it — `bal search` and `bal pull` are Central round-trips for something already decided. Reach for them only for a genuinely unknown connector. Where a `ballerinax/*` connector and a standalone `trigger.*` package cover the same events, use the connector — `trigger.*` is being superseded regardless of modified date.
+**Finding an external connector or library.** For a package [code-rules.md](references/code-rules.md) already names, write the `import` and let `bal build` resolve it — `bal search` and `bal pull` are Central round-trips for something already decided. Reach for them only for a genuinely unknown connector. Where a `ballerinax/*` connector and a standalone `trigger.*` package cover the same events, use the connector — `trigger.*` is being superseded regardless of modified date.
 
 `ballerinax/postgresql` pulls `ballerinax/cdc` and its Debezium jars transitively at every version; the jar-conflict warning that follows is expected and not yours to fix.
 
-**Never fetch Ballerina documentation from the web.** `central.ballerina.io` and `lib.ballerina.io` spend a network round-trip on prose about a module whose exact source is already on this machine.
+**Never fetch Ballerina documentation from the web.** `central.ballerina.io` and `lib.ballerina.io` spend a network round-trip on prose about a module whose README and exact source are already on this machine.
 
-**Code rules.** [code-rules.md](code-rules.md) is the source of truth for how code is written and structured, including dependency management (`Dependencies.toml`/`Ballerina.toml` are auto-managed, never hand-edited) — check code against it as it's written.
+**Code rules.** [code-rules.md](references/code-rules.md) is the source of truth for how code is written and structured, including dependency management (`Dependencies.toml`/`Ballerina.toml` are auto-managed, never hand-edited) — check code against it as it's written.
 
 **Code first, then build, then look things up — in that order.**
 
@@ -44,9 +44,9 @@ Configurables are read at **runtime**, never at build time. Do not prefix `bal b
 
 When the build does name a symbol, in this order:
 
-1. [code-rules.md](code-rules.md) — `http` resources, `sql` queries, `time`.
-2. [langlib-reference.md](langlib-reference.md) — the `lang.*` libraries (string, array, map, json, regexp, query expressions).
-3. Only beyond those, the module's own source. `ballerina/*` ships with the distribution at `$(bal home)/repo/bala/<org>/<name>/<version>/<any|java21>/modules/<name>/`. `ballerinax/*` lands under `~/.ballerina/repositories/central.ballerina.io/bala/` in the same layout — **but only once a `bal build` has resolved it.** Before that the tree does not exist at all, so `ls` fails rather than returning empty.
+1. [code-rules.md](references/code-rules.md) — `http` resources, `sql` queries, `time`.
+2. [langlib-reference.md](references/langlib-reference.md) — the `lang.*` libraries (string, array, map, json, regexp, query expressions).
+3. Only beyond those, the package itself — **`docs/README.md` before `modules/`**: the README is the package's own guide and leads with usage samples, the modules hold the exact signatures. A stub README — some are a paragraph — is a dead end; go straight to the module. Both sit under `$(bal home)/repo/bala/<org>/<name>/<version>/<any|java21>/` for `ballerina/*`; `ballerinax/*` lands under `~/.ballerina/repositories/central.ballerina.io/bala/` in the same layout — **but only once a `bal build` has resolved it.** Before that the tree does not exist at all, so `ls` fails rather than returning empty.
 
 Derive the distribution root with `bal home`, never a hardcoded version; both roots are read-only. Grep for the declaration rather than paging the file — a `grep` that lands in a 31KB `types.bal` carries that much context for the rest of the run. An error still unresolved after several attempts is worth reporting with its file and line instead of guessing again.
 
@@ -56,7 +56,7 @@ Derive the distribution root with `bal home`, never a hardcoded version; both ro
 - Generate a service stub from a spec: `bal openapi -i oas.yaml --mode service`
 - Generate a client from a spec: `bal openapi -i oas.yaml --mode client`
 
-**The generated stub is the starting point — implement it, never delete it.** Three things it always needs:
+**The generated stub is the starting point — fill it using Edit, never delete it.** Three things it always needs:
 
 - Resource bodies come out empty, You need to fill the implementation. Failing to fill will result a compiler error.
 - The listener is generated as `new (9090, config = {host: "localhost"})` — **drop the config, leave `new (9090)`**. A container bound to localhost answers from inside and refuses every request from outside, so the deployed service is unreachable while looking healthy.
