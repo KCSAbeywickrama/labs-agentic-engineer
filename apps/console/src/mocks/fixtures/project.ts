@@ -535,6 +535,7 @@ function milestoneRun(over: Partial<MilestoneRunView> = {}): MilestoneRunView {
       fixCycles: 1,
       conflictCycles: 0,
       buildRetriggers: 1,
+      validationCycles: 1,
     },
     validation: {},
     cycles: [
@@ -579,15 +580,24 @@ const waitingRun: BuildRunList = {
   milestoneNumber: 1,
   runs: [milestoneRun({ state: "waiting" })],
 };
+// A run that SELF-HEALED: its first validation attempt failed, the platform filed
+// the failed criterion as ordinary work, a coding cycle repaired it, and the second
+// attempt passed. Four cycles — coding, validation, coding, validation — with a
+// verdict on each attempt, because the run's own verdict is only its latest.
+//
+// The shape matters to the console beyond looking realistic: the report is read at
+// the LAST validation cycle's merge commit, so a fixture with two of them is what
+// catches a reader that takes the first.
 const settledRun: BuildRunList = {
   tag: "v1",
   milestoneNumber: 1,
   runs: [
     milestoneRun({
       state: "succeeded",
-      endedAt: "2026-07-10T10:03:00Z",
+      endedAt: "2026-07-10T10:41:00Z",
       validation: {
         verdict: "passed",
+        issue: 12,
         reportPath: "tests/validation/report.json",
       },
       cycles: [
@@ -610,9 +620,38 @@ const settledRun: BuildRunList = {
           branch: "aep/m1-c2",
           prNumber: 4,
           prUrl: `${REPO_URL}/pull/4`,
-          mergeSha: "7ab41c90ee31d5f0",
+          mergeSha: "5c0de1a77b3f2049",
+          validationVerdict: "failed",
+          validationIssue: 12,
           createdAt: "2026-07-10T09:45:00Z",
           endedAt: "2026-07-10T10:02:00Z",
+        },
+        // The repair: an ordinary coding cycle over the repair issue the failed
+        // attempt filed. No "repair" kind exists, because a repair is ordinary work.
+        {
+          id: "cycle-3",
+          kind: "coding",
+          attempts: 1,
+          branch: "aep/m1-c3",
+          prNumber: 5,
+          prUrl: `${REPO_URL}/pull/5`,
+          resolves: [13],
+          mergeSha: "9f2ab4c81de60357",
+          createdAt: "2026-07-10T10:05:00Z",
+          endedAt: "2026-07-10T10:21:00Z",
+        },
+        {
+          id: "cycle-4",
+          kind: "validation",
+          attempts: 1,
+          branch: "aep/m1-c4",
+          prNumber: 6,
+          prUrl: `${REPO_URL}/pull/6`,
+          mergeSha: "7ab41c90ee31d5f0",
+          validationVerdict: "passed",
+          validationIssue: 12,
+          createdAt: "2026-07-10T10:24:00Z",
+          endedAt: "2026-07-10T10:40:00Z",
         },
       ],
     }),

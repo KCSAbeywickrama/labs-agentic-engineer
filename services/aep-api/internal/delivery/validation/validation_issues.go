@@ -57,9 +57,19 @@ func NewService(d Deps) *Service {
 // EnsureValidationIssue mints ONE aep:validation issue per version — filed into
 // that version's milestone — and returns its number. 0 means there is nothing to
 // validate, which settles the run `skipped`; a missing or malformed criteria file
-// is that clean no-op. It is idempotent: the run supervisor calls it at
-// deployed-green, and a re-entered validation cycle must find the version's own
-// issue rather than mint a second.
+// is that clean no-op.
+//
+// It is idempotent ACROSS ATTEMPTS, which is stronger than it sounds. A run may
+// validate more than once (RunMaxValidationAttempts), and every attempt's pull
+// request carries `Closes #<N>`, so by the time a repeat attempt asks, the
+// version's validation issue is CLOSED. This therefore looks for the issue in any
+// state and reopens a closed one rather than filing a second — the previous filter
+// was `state: open`, which was only ever right for a run that validated once.
+//
+// The body is NOT rewritten on reopen. It embeds the oracle as rendered at first
+// mint, which is the question this version is being asked; each attempt's own
+// summary comment (the skill posts one when it opens its pull request) is what
+// makes the thread readable across attempts.
 //
 // Per VERSION and not per project, because the issue body embeds the criteria
 // table rendered at mint time. Adopting the previous version's issue would hand
@@ -101,9 +111,20 @@ func (s *Service) EnsureValidationIssue(ctx context.Context, orgID, projectID st
 	// Does THIS version already have one? Nothing has been written at this point,
 	// so the read is a straight question about GitHub's settled state rather than
 	// a read-back of our own write. It also adopts an issue a human filed by hand.
-	existing, err := s.findOpenValidationIssue(ctx, orgID, projectID, milestoneNumber)
-	if err != nil || existing > 0 {
-		return existing, err
+	existing, open, err := s.findValidationIssue(ctx, orgID, projectID, milestoneNumber)
+	if err != nil {
+		return 0, err
+	}
+	if existing > 0 {
+		if !open {
+			// A repeat attempt: the previous attempt's pull request closed it.
+			if rerr := s.issues.ReopenIssue(ctx, orgID, projectID, existing); rerr != nil {
+				return 0, fmt.Errorf("validation: reopen issue #%d: %w", existing, rerr)
+			}
+			slog.InfoContext(ctx, "validation: reopened validation issue for a repeat attempt",
+				"project", projectID, "milestone", milestoneNumber, "issue", existing)
+		}
+		return existing, nil
 	}
 
 	req := sourcecontrol.CreateIssueRequest{
@@ -132,23 +153,36 @@ func (s *Service) EnsureValidationIssue(ctx context.Context, orgID, projectID st
 	return res.Number, nil
 }
 
-// findOpenValidationIssue returns the number of the milestone's open
-// aep:validation issue, or 0 when that version has none. The milestone and the
-// LABEL are the whole query — nothing parses a body, and nothing looks outside
-// the version.
-func (s *Service) findOpenValidationIssue(ctx context.Context, orgID, projectID string, milestoneNumber int) (int, error) {
+// findValidationIssue returns the number of the milestone's aep:validation issue
+// and whether it is currently open, or (0, false) when that version has none. The
+// milestone and the LABEL are the whole query — nothing parses a body, and nothing
+// looks outside the version.
+//
+// State is `all` rather than `open` on purpose: a closed validation issue is the
+// NORMAL state between attempts, because every attempt's pull request closes it.
+// Asking only for open ones made a repeat attempt file a second issue for the same
+// version, each embedding its own snapshot of the oracle.
+func (s *Service) findValidationIssue(ctx context.Context, orgID, projectID string, milestoneNumber int) (number int, open bool, err error) {
 	issues, err := s.issues.ListMilestoneIssues(ctx, orgID, projectID, sourcecontrol.MilestoneIssuesFilter{
 		Number: milestoneNumber,
-		State:  "open",
+		State:  "all",
 		Labels: []string{delivery.LabelValidationWork},
 	})
 	if err != nil {
-		return 0, fmt.Errorf("validation: list milestone issues: %w", err)
+		return 0, false, fmt.Errorf("validation: list milestone issues: %w", err)
 	}
 	if len(issues) == 0 {
-		return 0, nil
+		return 0, false, nil
 	}
-	return issues[0].Number, nil
+	// Prefer an OPEN one when the version somehow has several — a human may have
+	// filed one by hand alongside a platform-minted one, and the open issue is the
+	// one an agent would be dispatched at.
+	for i := range issues {
+		if strings.EqualFold(issues[i].State, "open") {
+			return issues[i].Number, true, nil
+		}
+	}
+	return issues[0].Number, false, nil
 }
 
 // rationale is the one-line blockquote summary in the issue body.

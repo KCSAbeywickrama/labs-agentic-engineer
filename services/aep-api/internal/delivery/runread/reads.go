@@ -93,11 +93,12 @@ func runView(row *delivery.MilestoneRun, cycles []delivery.RunCycle) gen.Milesto
 		State:           gen.MilestoneRunViewState(row.State),
 		TerminalReason:  row.TerminalReason,
 		Budgets: gen.RunBudgets{
-			CyclesTotal:     int64(row.CyclesTotal),
-			CycleCeiling:    int64(row.CycleCeiling),
-			FixCycles:       int64(row.FixCycles),
-			ConflictCycles:  int64(row.ConflictCycles),
-			BuildRetriggers: int64(row.BuildRetriggers),
+			CyclesTotal:      int64(row.CyclesTotal),
+			CycleCeiling:     int64(row.CycleCeiling),
+			FixCycles:        int64(row.FixCycles),
+			ConflictCycles:   int64(row.ConflictCycles),
+			BuildRetriggers:  int64(row.BuildRetriggers),
+			ValidationCycles: int64(row.ValidationCycles),
 		},
 		Validation: validationView(row.ValidationVerdict, row.ValidationIssue),
 		Cycles:     make([]gen.RunCycleView, 0, len(cycles)),
@@ -111,15 +112,19 @@ func runView(row *delivery.MilestoneRun, cycles []delivery.RunCycle) gen.Milesto
 	return view
 }
 
-// validationView carries the run's verdict, the issue behind it, and — when there
-// is one to fetch — where the report lives. The deployment surface reads the
-// verdict HERE; there is no separate validation endpoint.
+// validationView carries the run's verdict — its LATEST attempt's — the issue
+// behind it, and, when there is one to fetch, where the report lives. The
+// deployment surface reads the verdict HERE; there is no separate validation
+// endpoint.
 //
 // The path is a path and not a body because the run story is polled at 5s and a
-// report body per run would ride every poll. The consumer pairs it with the
+// report body per run would ride every poll. The consumer pairs it with the LATEST
 // validation cycle's mergeSha (CycleView) and reads it through read-file's `ref`:
-// the report sits at ONE fixed path that every run overwrites, so reading the
-// branch tip would hand a historical run the newest run's results.
+// the report sits at ONE fixed path that every run — and every ATTEMPT within a run
+// — overwrites, so reading the branch tip would hand a historical run the newest
+// results. A run that validated more than once has several validation cycles, each
+// with its own merge SHA and its own verdict, so "the validation cycle" is the last
+// one for the run-level verdict and each one individually for a per-attempt read.
 //
 // A path is advertised only when a report can actually be there. `skipped` never
 // ran a cycle, and `unreported` is precisely the verdict meaning nothing was
@@ -162,7 +167,12 @@ func CycleView(c *delivery.RunCycle) gen.RunCycleView {
 		MergeSha:     c.MergeSHA,
 		MergeVerdict: gen.RunCycleViewMergeVerdict(c.MergeVerdict),
 		MergeReason:  c.MergeReason,
-		CreatedAt:    c.CreatedAt,
-		EndedAt:      c.EndedAt,
+		// Set on validation cycles only. A run may validate more than once, so the
+		// run's single verdict is the LATEST attempt's — this is how the timeline
+		// shows that an earlier attempt failed and the next one passed.
+		ValidationVerdict: gen.RunCycleViewValidationVerdict(c.ValidationVerdict),
+		ValidationIssue:   int64(c.ValidationIssue),
+		CreatedAt:         c.CreatedAt,
+		EndedAt:           c.EndedAt,
 	}
 }

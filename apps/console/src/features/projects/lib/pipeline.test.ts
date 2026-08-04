@@ -210,6 +210,19 @@ describe("validationView", () => {
       tone: "info",
     });
   });
+  // The repairing state names the IMPLEMENTATION, because the cycle in flight is
+  // ordinary coding work on the defect validation found — "fixing validation" would
+  // point at the wrong phase. Warning, not error: the verdict is real but not final,
+  // and sharing `failed`'s tone would read as terminal mid-repair.
+  it("awaiting-fix → awaiting implementation fix (warning, never error)", () => {
+    expect(validationView("awaiting-fix")).toEqual({
+      label: "awaiting implementation fix",
+      tone: "warning",
+    });
+    expect(validationView("awaiting-fix")?.tone).not.toBe(
+      validationView("failed")?.tone,
+    );
+  });
   // deploy.validation MIRRORS the verdict, so every label names the outcome
   // rather than naming an artifact the reader would have to open to find it.
   it("passed → validated (success)", () => {

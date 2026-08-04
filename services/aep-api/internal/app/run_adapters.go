@@ -99,6 +99,11 @@ func (a runCycles) Finish(ctx context.Context, cycleID, mergeSHA string) error {
 	return err
 }
 
+func (a runCycles) SetValidationVerdict(ctx context.Context, cycleID, verdict string, issue int) error {
+	_, err := a.cycles.SetValidationVerdict(ctx, cycleID, verdict, issue)
+	return err
+}
+
 func (a runCycles) Latest(ctx context.Context, orgID, runID string) (*delivery.RunCycle, error) {
 	return a.cycles.Latest(ctx, orgID, runID)
 }
@@ -146,19 +151,42 @@ func (a runValidation) EnsureValidationIssue(ctx context.Context, orgID, project
 	return a.svc.EnsureValidationIssue(ctx, orgID, projectID, milestoneNumber)
 }
 
-func (a runValidation) Verdict(ctx context.Context, orgID, projectID, at string) (string, error) {
+func (a runValidation) Verdict(ctx context.Context, orgID, projectID, at string) (string, string, error) {
+	raw, err := a.report(ctx, orgID, projectID, at)
+	if err != nil {
+		return "", "", err
+	}
+	// Both derived from the same bytes, in one read: the verdict the run stores, and
+	// the digest that tells a later attempt whether anything changed.
+	return validation.VerdictFromReport(raw), validation.ReportDigest(raw), nil
+}
+
+func (a runValidation) MintRepairIssues(ctx context.Context, orgID, projectID string, milestoneNumber int, at, cycleID string) ([]int, error) {
+	raw, err := a.report(ctx, orgID, projectID, at)
+	if err != nil {
+		return nil, err
+	}
+	return a.svc.MintRepairIssues(ctx, orgID, projectID, milestoneNumber, raw, cycleID)
+}
+
+// report reads the runner's committed report at a pinned commit. It is the ONE
+// reader of that file on the run path — the verdict and the repair issues are
+// separate activities, each deriving from ground truth on its own retry, but they
+// derive from the same read implementation so they can never disagree about which
+// bytes the attempt produced.
+//
+// An absent file is not an error: the validation cycle merged and committed no
+// report AT ITS OWN MERGE COMMIT, which is a fact about this run rather than a
+// stale read. Nil bytes are what VerdictFromReport maps to `unreported`.
+func (a runValidation) report(ctx context.Context, orgID, projectID, at string) ([]byte, error) {
 	fc, err := a.files.ReadAt(ctx, orgID, projectID, validation.ReportFilePath, at)
 	if err != nil {
 		if errors.Is(err, spec.ErrFileNotFound) {
-			// The validation cycle merged but committed no report AT ITS OWN MERGE
-			// COMMIT, so this is a fact about this run and not a stale read: the
-			// agent shipped a pull request and reported nothing. VerdictFromReport
-			// maps the empty case to `unreported`, which fails the run.
-			return validation.VerdictFromReport(nil), nil
+			return nil, nil
 		}
-		return "", err
+		return nil, err
 	}
-	return validation.VerdictFromReport([]byte(fc.Content)), nil
+	return []byte(fc.Content), nil
 }
 
 // runreadProjectBuilds reads every build WorkflowRun in a project so the run

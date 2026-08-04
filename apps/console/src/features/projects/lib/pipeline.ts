@@ -122,12 +122,21 @@ export function validationView(
   validation: string,
 ): { label: string; tone: StageTone } | null {
   switch (validation) {
-    // The one lifecycle value with anything to say: a validation CYCLE is in
-    // flight. It is derived from the run's latest cycle, not from "the run is live
-    // and has no verdict" — that older rule made the chip claim to be validating
-    // through every coding cycle of every run.
+    // Two lifecycle values with something to say, both derived from the run's latest
+    // CYCLE rather than from "the run is live and has no verdict" — that older rule
+    // made the chip claim to be validating through every coding cycle of every run.
+    // A validation cycle is in flight:
     case "running":
       return { label: "validating", tone: "info" };
+
+    // A live run REPAIRING a failed validation. It names the implementation, not
+    // validation: the cycle in flight is ordinary coding work on the defect
+    // validation found, so "fixing validation" would misattribute it. Warning
+    // rather than error because the verdict is real but not final — `error` belongs
+    // to the settled "validation failed" below, and using it here would read as
+    // terminal while the platform is actively resolving it.
+    case "awaiting-fix":
+      return { label: "awaiting implementation fix", tone: "warning" };
 
     // The rest are the run's verdict verbatim, which is why each label can name
     // the outcome instead of naming an artifact to go and open.

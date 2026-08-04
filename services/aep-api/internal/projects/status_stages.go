@@ -49,13 +49,19 @@ const (
 	deployDeployed  = "deployed"
 	deployFailed    = "failed"
 
-	// Validation state (the deploy.validation contract enum). Only the two
+	// Validation state (the deploy.validation contract enum). Only the three
 	// LIFECYCLE values live here — the rest of the enum is the run's verdict
 	// verbatim (delivery.ValidationVerdict*), because a fold would have to discard
 	// `partial`, `inconclusive` and `unreported` at the one surface that needs
 	// them, and `completed` never said whether anything passed.
 	validationNone    = "none"
 	validationRunning = "running"
+	// validationAwaitingFix is a live run REPAIRING a failed validation: the run
+	// holds a fatal verdict but has attempts left, and the work in flight is a
+	// CODING cycle. It names the implementation rather than validation because that
+	// is what is being fixed — rendering the bare `failed` verdict here would read
+	// as terminal while the platform is actively resolving it.
+	validationAwaitingFix = "awaiting-fix"
 )
 
 // milestoneRunRows is the narrow port over the milestone_runs index: the status
@@ -220,11 +226,12 @@ func (s *Service) populateStages(ctx context.Context, orgName, projectName strin
 // validationStage resolves the deploy.validation value, reading the run's latest
 // cycle ONLY when the verdict alone cannot answer.
 //
-// That conditional read is the whole point of the split: once a verdict exists it
-// is the answer, and a settled run without one never reached validation — both
-// decided from the row already in hand. The extra query happens only for a LIVE
-// run with no verdict yet, which is precisely the case the old code got wrong by
-// calling every such run "validating".
+// That conditional read is the whole point of the split: a verdict that is final is
+// the answer, and a settled run without one never reached validation — both decided
+// from the row already in hand. The extra query happens for the two cases the row
+// cannot settle: a live run with no verdict yet (the case the old code got wrong by
+// calling every such run "validating"), and a live run holding a REPAIRABLE verdict,
+// which is mid-loop rather than finished.
 func (s *Service) validationStage(ctx context.Context, orgID string, run *delivery.MilestoneRun) (string, error) {
 	state, decided := validationStageFromRun(run)
 	if decided {
@@ -237,6 +244,12 @@ func (s *Service) validationStage(ctx context.Context, orgID string, run *delive
 	if cycle != nil && cycle.Kind == delivery.CycleKindValidation && cycle.EndedAt == nil {
 		return validationRunning, nil
 	}
+	// A live run carrying a repairable verdict, whose current cycle is ordinary
+	// work: this is the self-healing loop mid-flight. The verdict is real but not
+	// final, and the cycle in flight is what will make it stale.
+	if _, fatal := delivery.ValidationVerdictFailsRun(run.ValidationVerdict); fatal {
+		return validationAwaitingFix, nil
+	}
 	// A live run whose current cycle is coding, fixing or resolving a conflict has
 	// nothing to say about validation yet. Saying "validating" here was wrong for
 	// most of every run's life.
@@ -246,25 +259,36 @@ func (s *Service) validationStage(ctx context.Context, orgID string, run *delive
 // validationStageFromRun answers deploy.validation from the run row alone,
 // reporting decided=false when only the run's latest cycle can settle it.
 //
-// The verdict is MIRRORED, not folded: it is written exactly once, when the
-// validation cycle settles, and it is the thing a reader wants to know. Folding it
-// into a coarser word is how "completed" came to mean "passed" without saying so,
-// and it would discard partial, inconclusive and unreported entirely.
+// The verdict is MIRRORED, not folded: it is the thing a reader wants to know, and
+// folding it into a coarser word is how "completed" came to mean "passed" without
+// saying so — it would discard partial, inconclusive and unreported entirely.
 //
-// Undecided means: a live run with no verdict yet. Whether a validation cycle is
-// actually in flight is not on this row — loop position is never a stored enum,
-// because a fix or conflict cycle re-enters an earlier phase and a flat enum would
-// lie mid-loop.
+// A verdict is final on a TERMINAL run, and on a live run when it is not one the
+// loop repairs. A live run holding a repairable verdict is undecided: the verdict is
+// mid-loop, so rendering it would tell a reader the version failed validation while
+// the platform is repairing it and about to validate again. Which verdicts the loop
+// repairs is delivery's to say (ValidationVerdictFailsRun), so this cannot drift
+// from what the supervisor actually does.
+//
+// Undecided therefore means: a live run with no verdict yet, or one whose verdict is
+// still repairable. Whether a validation cycle is in flight is not on this row —
+// loop position is never a stored enum, because a fix or conflict cycle re-enters an
+// earlier phase and a flat enum would lie mid-loop.
 func validationStageFromRun(run *delivery.MilestoneRun) (state string, decided bool) {
 	if run == nil {
 		return validationNone, true
 	}
-	if run.ValidationVerdict != "" {
-		return run.ValidationVerdict, true
-	}
-	// Settled without ever recording a verdict: the run never reached validation.
 	if delivery.IsTerminalRunState(run.State) {
+		if run.ValidationVerdict != "" {
+			return run.ValidationVerdict, true
+		}
+		// Settled without ever recording a verdict: the run never reached validation.
 		return validationNone, true
+	}
+	if run.ValidationVerdict != "" {
+		if _, fatal := delivery.ValidationVerdictFailsRun(run.ValidationVerdict); !fatal {
+			return run.ValidationVerdict, true
+		}
 	}
 	return "", false
 }

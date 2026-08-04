@@ -96,6 +96,10 @@ func (l *loop) runCycle(ctx workflow.Context, kind string, anchorIssue int) (cyc
 	l.st.CycleAttempt = 0
 	l.st.CyclePR = 0
 	l.prNumber, l.mergeSHA = 0, ""
+	// Held on the loop because the validation verdict is written AFTER this returns:
+	// it is derived from the report at the cycle's own merge commit, which does not
+	// exist until the cycle has landed and closed.
+	l.cycleID = cycleID
 	if err := l.setState(ctx, delivery.RunStateRunning); err != nil {
 		return cycleNone, err
 	}

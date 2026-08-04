@@ -60,6 +60,7 @@ function run(over: {
       fixCycles: 0,
       conflictCycles: 0,
       buildRetriggers: 0,
+      validationCycles: 1,
     },
     validation: over.validation ?? {},
     cycles: over.cycles ?? [],
