@@ -91,6 +91,7 @@ export function SpecFileList({
 
   const requirements = files.filter((f) => f.group === "requirements");
   const validation = files.filter((f) => f.group === "validation");
+  const references = files.filter((f) => f.group === "references");
   const design = buildDesignSection(files);
 
   // Per-component expand/collapse — default expanded, remembered by name so
@@ -292,6 +293,11 @@ export function SpecFileList({
       </Box>
 
       {flatGroup("Validation", validation)}
+
+      {/* References — the documents the user attached at create (#383).
+          Optional by nature, so the section only exists when files do:
+          an empty "no files yet" row here would be noise on every project. */}
+      {references.length > 0 && flatGroup("References", references)}
     </Box>
   );
 }

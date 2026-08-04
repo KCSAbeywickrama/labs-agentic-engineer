@@ -32,6 +32,25 @@ describe("toSpecEntry", () => {
     ).toEqual({ path: "specs/validation/plan.md", sha: "c3", group: "validation" });
   });
 
+  it("splits uploaded reference documents into their own group (#383)", () => {
+    expect(
+      toSpecEntry({ path: "specs/requirements/references/prd.pdf", sha: "e5" }),
+    ).toEqual({
+      path: "specs/requirements/references/prd.pdf",
+      sha: "e5",
+      group: "references",
+    });
+    // Only the references folder itself — a requirements file in any other
+    // subfolder stays a requirement.
+    expect(
+      toSpecEntry({ path: "specs/requirements/drafts/old.md", sha: "f6" }),
+    ).toEqual({
+      path: "specs/requirements/drafts/old.md",
+      sha: "f6",
+      group: "requirements",
+    });
+  });
+
   it("keeps nested paths intact", () => {
     expect(
       toSpecEntry({ path: "specs/design/components/orders/design.json", sha: "d4" }),
