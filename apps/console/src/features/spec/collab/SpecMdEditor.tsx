@@ -22,7 +22,7 @@ import { Check, Sparkles, X } from "@wso2/oxygen-ui-icons-react";
 import { EditorContent, useEditor } from "@tiptap/react";
 import { BubbleMenu } from "@tiptap/react/menus";
 import StarterKit from "@tiptap/starter-kit";
-import { MermaidCodeBlock } from "./MermaidCodeBlock";
+import { AgentStreamingContext, MermaidCodeBlock } from "./MermaidCodeBlock";
 import { Markdown } from "@tiptap/markdown";
 import Collaboration from "@tiptap/extension-collaboration";
 import CollaborationCaret from "@tiptap/extension-collaboration-caret";
@@ -264,7 +264,11 @@ export function SpecMdEditor({
             the tail-follow engages for agent writes and stays out of the way
             of normal editing. */}
         <Box ref={agentStreaming ? contentRef : undefined}>
-          <EditorContent editor={editor} />
+          {/* Node views render through portals into this tree, so the mermaid
+              blocks read the streaming flag from here to hide their control. */}
+          <AgentStreamingContext.Provider value={agentStreaming}>
+            <EditorContent editor={editor} />
+          </AgentStreamingContext.Provider>
         </Box>
       </Box>
     </Box>
