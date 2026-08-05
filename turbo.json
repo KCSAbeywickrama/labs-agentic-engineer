@@ -2,9 +2,17 @@
   "$schema": "https://turbo.build/schema.json",
   "ui": "stream",
   "tasks": {
+    // Codegen is never cached. Two of the three `gen` scripts write OUTSIDE
+    // their own package — @aep/agent-stream emits into packages/contracts/
+    // schemas/, @aep/contracts emits into services/aep-api/internal/prompts/ —
+    // and turbo can neither hash nor restore across a package boundary. The
+    // previous `inputs` globs matched none of the files any of these tasks
+    // actually read (the console's spec lives two packages up), so a source
+    // edit hashed identically and turbo replayed a FULL TURBO hit without
+    // regenerating anything. A whole uncached run is ~3s; correctness is worth
+    // more than that.
     "gen": {
-      "inputs": ["openapi/**", "**/*.schema.json"],
-      "outputs": ["src/generated/**", "generated/**"]
+      "cache": false
     },
     "build": {
       "dependsOn": ["^build", "gen"],
