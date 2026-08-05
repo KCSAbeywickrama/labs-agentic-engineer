@@ -16,14 +16,24 @@
  * under the License.
  */
 
-import { useMemo, useRef } from "react";
-import { Alert, Box, Chip, CircularProgress, Typography } from "@wso2/oxygen-ui";
-import { ExcalidrawView } from "@aep/ui-excalidraw-view";
-import { useDerivedWireframe } from "../api/useDerivedDesign";
+import { useMemo, useRef, useState } from "react";
+import {
+  Alert,
+  Box,
+  Chip,
+  CircularProgress,
+  ToggleButton,
+  ToggleButtonGroup,
+  Typography,
+} from "@wso2/oxygen-ui";
+import { ExcalidrawView, PrototypeView } from "@aep/ui-excalidraw-view";
+import { useDerivedPrototype, useDerivedWireframe } from "../api/useDerivedDesign";
 import { deriveWireframeScene } from "../derive/deriveWireframe";
 import type { SpecFileEntry } from "../api/mapping";
 import type { CollabSpec } from "../collab/useCollabSpec";
 import { useYTextString } from "../collab/useYTextString";
+
+type ViewMode = "canvas" | "prototype";
 
 export function WireframePanel({
   projectName,
@@ -37,6 +47,7 @@ export function WireframePanel({
   collab: CollabSpec;
 }) {
   const sha = files.find((f) => f.path === dslPath)?.sha;
+  const [mode, setMode] = useState<ViewMode>("canvas");
 
   // The collab doc is the SOURCE while collab is up — the design.md rule.
   // Rooms are seeded with every committed specs/ file (non-md as Y.Text), and
@@ -70,6 +81,16 @@ export function WireframePanel({
     sha,
   );
 
+  // The toggle (and prototype derivation) only makes sense on a settled,
+  // committed render — the streaming/agent-busy paths above return early
+  // before this ever renders. Called unconditionally to keep hooks order
+  // stable; the "" path convention disables the query while unsettled.
+  const settled = !streaming && !agentBusy;
+  const {
+    model: prototypeModel,
+    isPending: prototypePending,
+  } = useDerivedPrototype(projectName, settled ? dslPath : "", sha);
+
   if (!streaming && agentBusy) {
     // The committed fetch is suppressed while an agent is in the room (the
     // doc will deliver the file) — "drawing about to start", not a failure.
@@ -99,6 +120,55 @@ export function WireframePanel({
     );
   }
 
+  // The toggle only makes sense once we've settled on a committed scene — the
+  // streaming/agent-busy/pending/error branches above all return before here.
+  const showToggle = settled && scene != null;
+
+  // A compact segmented control (Oxygen's ToggleButtonGroup, restyled as a
+  // pill) rather than the default chunky outlined pair — reads as a native
+  // small view switch instead of a stray widget. Colors come from theme
+  // tokens so it follows the active Oxygen theme.
+  const viewSwitch = showToggle && (
+    <ToggleButtonGroup
+      size="small"
+      exclusive
+      value={mode}
+      onChange={(_, next: ViewMode | null) => {
+        if (next) setMode(next);
+      }}
+      sx={{
+        bgcolor: "action.hover",
+        borderRadius: 999,
+        p: 0.25,
+        "& .MuiToggleButtonGroup-grouped": {
+          border: 0,
+          borderRadius: 999,
+          px: 1.5,
+          minHeight: 28,
+          textTransform: "none",
+          fontSize: "0.8125rem",
+          color: "text.secondary",
+          "&.Mui-selected": {
+            bgcolor: "background.paper",
+            color: "text.primary",
+            boxShadow: 1,
+            "&:hover": { bgcolor: "background.paper" },
+          },
+        },
+      }}
+    >
+      <ToggleButton value="canvas">Canvas</ToggleButton>
+      <ToggleButton value="prototype">Prototype</ToggleButton>
+    </ToggleButtonGroup>
+  );
+
+  // Prototype mode with a rendered model hands the switch to PrototypeView's
+  // `trailingSlot`, so the switch joins PrototypeView's own toolbar row (back ·
+  // picker · description) instead of stacking a second gray bar above it.
+  // Every other state (canvas, loading, error) keeps its own minimal header —
+  // just the switch — since there's no PrototypeView toolbar to join.
+  const showOwnHeader = showToggle && !(mode === "prototype" && prototypeModel && !prototypePending);
+
   // While streaming, ONE mounted canvas takes successive scenes through
   // ExcalidrawView's updateScene path (no `key`, no remount per line). The
   // committed render keeps the remount-by-sha behavior. ExcalidrawView
@@ -122,7 +192,34 @@ export function WireframePanel({
           <Chip size="small" color="primary" variant="outlined" label="Drawing…" />
         </Box>
       )}
-      {streaming ? (
+      {showOwnHeader && (
+        <Box
+          sx={{
+            px: 1.5,
+            py: 1,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "flex-end",
+            borderBottom: 1,
+            borderColor: "divider",
+          }}
+        >
+          {viewSwitch}
+        </Box>
+      )}
+      {mode === "prototype" && showToggle ? (
+        prototypePending ? (
+          <Box sx={{ flex: 1, minHeight: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <CircularProgress aria-label="Loading prototype" />
+          </Box>
+        ) : prototypeModel ? (
+          <PrototypeView key={sha} model={prototypeModel} fillHeight trailingSlot={viewSwitch} />
+        ) : (
+          <Typography variant="body2" color="text.secondary" sx={{ p: 2 }}>
+            This wireframe could not be rendered as a prototype.
+          </Typography>
+        )
+      ) : streaming ? (
         <ExcalidrawView scene={liveScene!} fillHeight />
       ) : (
         <ExcalidrawView key={sha} scene={scene!} fillHeight />

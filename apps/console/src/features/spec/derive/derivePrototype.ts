@@ -16,7 +16,16 @@
  * under the License.
  */
 
-export { ExcalidrawView } from "./ExcalidrawView.js";
-export type { ExcalidrawViewProps } from "./ExcalidrawView.js";
-export { PrototypeView } from "./PrototypeView.js";
-export type { PrototypeViewProps } from "./PrototypeView.js";
+import { tryDslToPrototype, type PrototypeModel } from "@aep/excalidraw-dsl";
+import { kindFor } from "./deriveWireframe";
+
+/**
+ * Compile a wireframes `.dsl` into the per-screen prototype model. Returns
+ * null for non-wireframe sources or uncompilable DSL — mirroring
+ * deriveWireframeScene, a bad source never throws into the render tree.
+ */
+export function derivePrototypeModel(path: string, dsl: string): PrototypeModel | null {
+  if (kindFor(path) !== "wireframes") return null;
+  const res = tryDslToPrototype(dsl);
+  return res.ok ? res.model : null;
+}

@@ -259,6 +259,87 @@ export function tryDslToExcalidraw(
   }
 }
 
+// ---------- Prototype (click-through) compile mode ----------
+
+export interface PrototypeHotspot {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  target: string;
+}
+
+export interface PrototypeScreen {
+  name: string;
+  description?: string;
+  width: number;
+  height: number;
+  /** Serialized ExcalidrawScene: this ONE screen, frame at origin (0,0). */
+  sceneJson: string;
+  hotspots: PrototypeHotspot[];
+}
+
+export interface PrototypeModel {
+  screens: PrototypeScreen[];
+}
+
+export function tryDslToPrototype(
+  dsl: string,
+): { ok: true; model: PrototypeModel } | { ok: false; error: string } {
+  if (!dsl || dsl.trim().length === 0) return { ok: false, error: 'empty DSL source' };
+  try {
+    const ast = parseWireframesDsl(dsl);
+    if (ast.screens.length === 0) {
+      return { ok: false, error: 'no screens parsed — expected `screen <Name>` blocks' };
+    }
+    const validTargets = new Map(ast.screens.map((s) => [s.name.toLowerCase(), s.name]));
+    const screens: PrototypeScreen[] = ast.screens.map((screen) => {
+      const elements = renderWireframes(
+        { screens: [screen], flows: [] },
+        { prototype: { validTargets } },
+      );
+      const scene: ExcalidrawScene = {
+        type: 'excalidraw',
+        version: 2,
+        source: 'aep-generator',
+        elements,
+        appState: { viewBackgroundColor: '#ffffff' },
+        files: {},
+      };
+      // A hotspot promises a screen change, so it is claimed only by a control
+      // whose target EXISTS and is a DIFFERENT screen. A `-> ThisScreen` says
+      // "go to where you already are": agents write it meaning "acts in place"
+      // (an Add beside a search box that appends a row), and honouring it would
+      // render a control that highlights, invites a click, and cannot change
+      // anything — which reads as a broken prototype. Dropped here so it looks
+      // exactly like the un-annotated controls it belongs with.
+      const hotspots: PrototypeHotspot[] = screen.elements
+        .filter(
+          (el): el is WireframeElement & { navTo: string } =>
+            Boolean(el.navTo) && el.kind !== 'navbar' && el.kind !== 'sidebar' &&
+            validTargets.has(el.navTo!.toLowerCase()) &&
+            validTargets.get(el.navTo!.toLowerCase()) !== screen.name,
+        )
+        .map((el) => ({
+          x: el.x, y: el.y, width: el.width, height: el.height,
+          target: validTargets.get(el.navTo.toLowerCase())!,
+        }));
+      const out: PrototypeScreen = {
+        name: screen.name,
+        width: screen.width,
+        height: screen.height, // post-layout: layout may have grown it
+        sceneJson: JSON.stringify(scene),
+        hotspots,
+      };
+      if (screen.description) out.description = screen.description;
+      return out;
+    });
+    return { ok: true, model: { screens } };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
 // ---------- Wireframes layout validation ----------
 
 /**
@@ -960,7 +1041,14 @@ const ACCENT_FILL: Record<WireframeVariant, string> = {
   muted: '#f1f3f5',
 };
 
-function renderWireframes(ast: WireframeAst): ExcalidrawElement[] {
+interface WireframeRenderOpts {
+  /** Prototype mode: one-screen scene with the canvas decorations suppressed —
+   *  navigation lives in the model's hotspots, not on the elements. Maps
+   *  lowercased screen name → canonical name. */
+  prototype?: { validTargets: Map<string, string> };
+}
+
+function renderWireframes(ast: WireframeAst, opts?: WireframeRenderOpts): ExcalidrawElement[] {
   const out: ExcalidrawElement[] = [];
   // Screen-name → 1-based number, shown as "Screen N" in the corner and in
   // each element's `→ Screen N · Name` navigation marker. Precomputed so an
@@ -986,55 +1074,57 @@ function renderWireframes(ast: WireframeAst): ExcalidrawElement[] {
     // Title block above the frame: a prominent screen name, plus an optional
     // description subtitle explaining what the view is for (or which role it
     // serves). Taller when a description is present.
-    const titleH = TITLE_H + (screen.description ? DESC_H : 0);
+    const titleH = opts?.prototype ? 0 : TITLE_H + (screen.description ? DESC_H : 0);
     rowMaxH = Math.max(rowMaxH, screen.height + titleH);
     const screenId = stableId(`screen:${screen.name}:${idx}`);
 
     // Screen name + number badge sit ABOVE the outline so chrome (navbar)
     // can occupy the screen's full interior.
-    out.push(
-      makeText(
-        stableId(`screen-label:${screen.name}:${idx}`),
-        sx,
-        sy,
-        screen.width - 60,
-        24,
-        screen.name,
-        20,
-        'left',
-      ),
-    );
-    out.push(
-      withColor(
+    if (!opts?.prototype) {
+      out.push(
         makeText(
-          stableId(`screen-num:${screen.name}:${idx}`),
-          sx + screen.width - 120,
+          stableId(`screen-label:${screen.name}:${idx}`),
+          sx,
           sy,
-          108,
-          18,
-          `Screen ${number}`,
-          14,
-          'right',
+          screen.width - 60,
+          24,
+          screen.name,
+          20,
+          'left',
         ),
-        FLOW_ACCENT,
-      ),
-    );
-    if (screen.description) {
+      );
       out.push(
         withColor(
           makeText(
-            stableId(`screen-desc:${screen.name}:${idx}`),
-            sx,
-            sy + 26,
-            screen.width - 20,
+            stableId(`screen-num:${screen.name}:${idx}`),
+            sx + screen.width - 120,
+            sy,
+            108,
             18,
-            screen.description,
+            `Screen ${number}`,
             14,
-            'left',
+            'right',
           ),
-          '#868e96',
+          FLOW_ACCENT,
         ),
       );
+      if (screen.description) {
+        out.push(
+          withColor(
+            makeText(
+              stableId(`screen-desc:${screen.name}:${idx}`),
+              sx,
+              sy + 26,
+              screen.width - 20,
+              18,
+              screen.description,
+              14,
+              'left',
+            ),
+            '#868e96',
+          ),
+        );
+      }
     }
     const frameY = sy + titleH;
     out.push(makeRect(screenId, sx, frameY, screen.width, screen.height, SCREEN_STROKE, '#ffffff', null));
@@ -1053,7 +1143,7 @@ function renderWireframes(ast: WireframeAst): ExcalidrawElement[] {
       const eid = stableId(`el:${screen.name}:${el.kind}:${el.label}:${ex}:${ey}`);
       // A `-> ScreenName` on this element draws a navigation marker right
       // beside it, so the reader sees exactly which control goes where.
-      if (el.navTo) {
+      if (!opts?.prototype && el.navTo) {
         const num = screenNumber.get(el.navTo.toLowerCase());
         if (num !== undefined) {
           const label = `→ Screen ${num} · ${el.navTo}`;
