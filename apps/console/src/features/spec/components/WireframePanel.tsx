@@ -29,6 +29,7 @@ import {
 import { ExcalidrawView, PrototypeView } from "@aep/ui-excalidraw-view";
 import { useDerivedPrototype, useDerivedWireframe } from "../api/useDerivedDesign";
 import { deriveWireframeScene } from "../derive/deriveWireframe";
+import { derivePrototypeModel } from "../derive/derivePrototype";
 import type { SpecFileEntry } from "../api/mapping";
 import type { CollabSpec } from "../collab/useCollabSpec";
 import { useYTextString } from "../collab/useYTextString";
@@ -60,38 +61,57 @@ export function WireframePanel({
   // The writer flushes on line boundaries, so the live text is whole lines —
   // but a mid-stream compile can still fail (e.g. a screen header typed ahead
   // of its body). Hold the last GOOD scene so a bad intermediate never blanks
-  // the already-drawn screens.
-  const lastGoodLive = useRef<string | null>(null);
+  // the already-drawn screens. The held scene is tagged with the file it came
+  // from: SpecView renders this panel unkeyed, so the ref survives a move to
+  // another component, and untagged it would let component A's last good render
+  // stand in for component B's uncompilable source.
+  const lastGoodLive = useRef<{ path: string; scene: string } | null>(null);
   const liveScene = useMemo(() => {
     if (typeof liveSource !== "string" || liveSource.trim().length === 0) return null;
     const compiled = deriveWireframeScene(dslPath, liveSource);
-    if (compiled) lastGoodLive.current = compiled;
-    return lastGoodLive.current;
+    if (compiled) lastGoodLive.current = { path: dslPath, scene: compiled };
+    return lastGoodLive.current?.path === dslPath ? lastGoodLive.current.scene : null;
   }, [dslPath, liveSource]);
 
-  const streaming = liveScene != null;
+  // Two independent facts, deliberately NOT one flag:
+  //   hasLiveContent — the doc has something renderable, so the doc is the
+  //     source (the design.md rule above) and the committed states are moot.
+  //   agentBusy      — a turn is running.
+  // Rooms are seeded with every committed spec file, so live content says
+  // nothing about whether a turn is running; folding them together is what
+  // used to keep the view switch permanently hidden (#348).
+  const hasLiveContent = liveScene != null;
   const agentBusy = collab.peers.some((p) => p.kind === "agent");
+
   // Committed fetch: the collab-less base path only (mirrors `usesCollab`
   // disabling the content query for markdown) — passing "" disables it. An
   // agent in the room also suppresses it: the doc WILL deliver the file, and
   // probing git for a not-yet-committed path just sprays retrying 404s.
-  const { scene, isPending, isError } = useDerivedWireframe(
-    projectName,
-    streaming || agentBusy ? "" : dslPath,
-    sha,
+  // Canvas and prototype read the SAME path so the shared query key (see
+  // useDerivedDesign) means switching modes never refetches.
+  const committedPath = hasLiveContent || agentBusy ? "" : dslPath;
+  const { scene, isPending, isError } = useDerivedWireframe(projectName, committedPath, sha);
+  const { model: committedPrototype, isPending: committedPrototypePending } =
+    useDerivedPrototype(projectName, committedPath, sha);
+
+  // The prototype rides the same source as the canvas, or the two views would
+  // disagree about one file: after a turn ends the doc holds the new DSL while
+  // the committed read still answers with the pre-turn copy. derivePrototypeModel
+  // is pure, so the live model is just a compile of the text we already have.
+  const livePrototype = useMemo(
+    () =>
+      typeof liveSource === "string" && liveSource.trim().length > 0
+        ? derivePrototypeModel(dslPath, liveSource)
+        : null,
+    [dslPath, liveSource],
   );
+  const prototypeModel = hasLiveContent ? livePrototype : committedPrototype;
+  // A disabled query reports `isPending`, so only the committed path can pend.
+  const prototypePending = !hasLiveContent && committedPrototypePending;
 
-  // The toggle (and prototype derivation) only makes sense on a settled,
-  // committed render — the streaming/agent-busy paths above return early
-  // before this ever renders. Called unconditionally to keep hooks order
-  // stable; the "" path convention disables the query while unsettled.
-  const settled = !streaming && !agentBusy;
-  const {
-    model: prototypeModel,
-    isPending: prototypePending,
-  } = useDerivedPrototype(projectName, settled ? dslPath : "", sha);
-
-  if (!streaming && agentBusy) {
+  // These four states all belong to the committed read, so they only speak when
+  // the doc has nothing to render.
+  if (!hasLiveContent && agentBusy) {
     // The committed fetch is suppressed while an agent is in the room (the
     // doc will deliver the file) — "drawing about to start", not a failure.
     return (
@@ -102,17 +122,17 @@ export function WireframePanel({
       </Box>
     );
   }
-  if (!streaming && isPending) {
+  if (!hasLiveContent && isPending) {
     return (
       <Box sx={{ flex: 1, minHeight: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
         <CircularProgress aria-label="Loading wireframe" />
       </Box>
     );
   }
-  if (!streaming && isError) {
+  if (!hasLiveContent && isError) {
     return <Alert severity="error">Failed to load {dslPath}.</Alert>;
   }
-  if (!streaming && !scene) {
+  if (!hasLiveContent && !scene) {
     return (
       <Typography variant="body2" color="text.secondary">
         This wireframe source could not be rendered.
@@ -120,9 +140,10 @@ export function WireframePanel({
     );
   }
 
-  // The toggle only makes sense once we've settled on a committed scene — the
-  // streaming/agent-busy/pending/error branches above all return before here.
-  const showToggle = settled && scene != null;
+  // Settled means no turn is running — a seeded room with no agent IS settled,
+  // which is the state every user browsing between turns is actually in. By
+  // here we know something is renderable: the live scene, or the committed one.
+  const showToggle = !agentBusy;
 
   // A compact segmented control (Oxygen's ToggleButtonGroup, restyled as a
   // pill) rather than the default chunky outlined pair — reads as a native
@@ -169,16 +190,16 @@ export function WireframePanel({
   // just the switch — since there's no PrototypeView toolbar to join.
   const showOwnHeader = showToggle && !(mode === "prototype" && prototypeModel && !prototypePending);
 
-  // While streaming, ONE mounted canvas takes successive scenes through
-  // ExcalidrawView's updateScene path (no `key`, no remount per line). The
-  // committed render keeps the remount-by-sha behavior. ExcalidrawView
+  // On the live branch ONE mounted canvas takes successive scenes through
+  // ExcalidrawView's updateScene path (no `key`, no remount per flushed line).
+  // The committed render keeps the remount-by-sha behavior. ExcalidrawView
   // (fillHeight) sets `flex: 1` on its own root inside the flex column.
   return (
     <Box sx={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-      {streaming && agentBusy && (
+      {agentBusy && hasLiveContent && (
         // The chip means "actively being generated", not "rendered from the
         // live doc" — the doc is ALWAYS the source while collab is up (rooms
-        // are seeded), so gate the chip on the agent actually being in the room.
+        // are seeded), so it MUST key on the peer, not on the live text.
         <Box
           sx={{
             px: 1.5,
@@ -219,7 +240,7 @@ export function WireframePanel({
             This wireframe could not be rendered as a prototype.
           </Typography>
         )
-      ) : streaming ? (
+      ) : hasLiveContent ? (
         <ExcalidrawView scene={liveScene!} fillHeight />
       ) : (
         <ExcalidrawView key={sha} scene={scene!} fillHeight />
