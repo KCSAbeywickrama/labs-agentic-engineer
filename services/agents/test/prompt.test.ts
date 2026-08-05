@@ -19,7 +19,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { testSkillSource, type TestSkill } from "./skill-source.js";
-import { instructions, buildInstructions, buildSkillCatalog, buildEagerSkillsBlock } from "../src/agents/main/prompt.js";
+import {
+  instructions,
+  taskPlanInstructions,
+  buildInstructions,
+  buildTaskPlanInstructions,
+  buildSkillCatalog,
+  buildEagerSkillsBlock,
+  buildOrgDefaultsBlock,
+} from "../src/agents/main/prompt.js";
 
 const SKILL_LIST: TestSkill[] = [
   { name: "a-skill", description: "does A", content: "BODY A — secret guidance" },
@@ -85,4 +93,46 @@ test("eager skills: unknown names skip; nothing resolved → empty string", () =
 
 test("eager skills never touch the SYSTEM instructions (cacheable prefix)", () => {
   assert.equal(buildInstructions(SKILLS), instructions + buildSkillCatalog(SKILLS));
+});
+
+// --- Organization defaults --------------------------------------------------
+//
+// The org's standing decisions ride the SYSTEM prompt of every turn rather than
+// a per-flow eager block: they answer interview questions the agent would
+// otherwise put to the user, and pin providers at design time, on every turn
+// regardless of flow.
+
+const ORG: TestSkill = {
+  name: "organization",
+  description: "The organization's standing defaults.",
+  content: "# Organization defaults\n\n## 1. Authentication & identity\n\nUse Thunder.",
+};
+
+test("the org defaults are inlined into the system prompt, body and all", () => {
+  const out = buildInstructions(testSkillSource([...SKILL_LIST, ORG]));
+  assert.match(out, /# Organization defaults/);
+  assert.match(out, /Use Thunder\./, "the BODY is inlined — unlike every other skill");
+  assert.match(out, /do NOT call loadSkill for "organization"/);
+});
+
+test("the org defaults trail the catalog, leaving the base prefix intact", () => {
+  const skills = testSkillSource([...SKILL_LIST, ORG]);
+  assert.equal(buildInstructions(skills), instructions + buildSkillCatalog(skills) + buildOrgDefaultsBlock(skills));
+  assert.ok(buildInstructions(skills).startsWith(instructions));
+});
+
+test("no org skill in the snapshot → byte-identical to a turn without it", () => {
+  // An older org, or one that never seeded the skill: the prompt must not grow
+  // an empty heading.
+  assert.equal(buildOrgDefaultsBlock(SKILLS), "");
+  assert.equal(buildOrgDefaultsBlock(undefined), "");
+  assert.equal(buildOrgDefaultsBlock(testSkillSource([{ ...ORG, content: "   " }])), "");
+  assert.equal(buildInstructions(SKILLS), instructions + buildSkillCatalog(SKILLS));
+});
+
+test("the task planner gets the org defaults too", () => {
+  const out = buildTaskPlanInstructions(testSkillSource([ORG]));
+  assert.match(out, /# Organization defaults/);
+  assert.match(out, /Use Thunder\./);
+  assert.ok(out.startsWith(taskPlanInstructions), "the planner's own charter still leads");
 });

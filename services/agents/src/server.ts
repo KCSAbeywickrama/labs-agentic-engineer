@@ -50,12 +50,15 @@ import {
   SSE_DONE,
   TOOLSETS,
   isToolset,
+  isTurnSpec,
   isCollabConfig,
   type CollabConfig,
   type McpConfig,
   type StreamPart,
   type Toolset,
+  type TurnSpec,
 } from "@aep/agent-stream";
+import { composeInstruction, eagerSkillsFor, toolsetFor } from "./prompts/turn.js";
 import type { ConversationStore } from "./store/conversation-store.js";
 import { runConversationTurn, TurnGuard, ConcurrentTurnError } from "./conversation/run-conversation-turn.js";
 import { joinRoom, type RoomPeer } from "./collab/room-peer.js";
@@ -132,6 +135,10 @@ export function createApp(deps: CreateAppDeps): Express {
     }
 
     const body = (req.body ?? {}) as {
+      turn?: unknown;
+      target?: unknown;
+      previousTurnFailed?: unknown;
+      headless?: unknown;
       instruction?: unknown;
       workspace?: unknown;
       files?: unknown;
@@ -145,10 +152,35 @@ export function createApp(deps: CreateAppDeps): Express {
     };
 
     // Pre-stream validation → HTTP status (no SSE headers sent yet).
-    if (typeof body.instruction !== "string" || body.instruction.trim() === "") {
-      res.status(400).json({ error: "instruction is required" });
+    //
+    // `turn` is the current contract: the caller states what the turn is FOR
+    // and this service composes the wording (see prompts/turn.ts). A
+    // pre-composed `instruction` is the outgoing shape, accepted until every
+    // caller has moved.
+    let turn: TurnSpec | undefined;
+    if (body.turn !== undefined) {
+      if (!isTurnSpec(body.turn)) {
+        res.status(400).json({ error: "turn must be a valid turn spec (kind: chat | flow | start | plan)" });
+        return;
+      }
+      turn = body.turn;
+    } else if (typeof body.instruction !== "string" || body.instruction.trim() === "") {
+      res.status(400).json({ error: "turn is required" });
       return;
     }
+    // Turn-level modifiers — only meaningful alongside `turn`, since a
+    // pre-composed instruction already carries whatever the caller wanted.
+    if (body.target !== undefined && typeof body.target !== "string") {
+      res.status(400).json({ error: "target must be a string" });
+      return;
+    }
+    const instruction = turn
+      ? composeInstruction(turn, {
+          target: typeof body.target === "string" ? body.target : undefined,
+          previousTurnFailed: body.previousTurnFailed === true,
+          headless: body.headless === true,
+        })
+      : (body.instruction as string);
 
     // The pre-§12 inline contract is GONE — reject it loudly so a stale caller
     // cannot silently run a turn against the wrong file/skill supply.
@@ -188,10 +220,15 @@ export function createApp(deps: CreateAppDeps): Express {
       return;
     }
 
-    // toolset (optional): which domain tools to register (§9.3). Absent → "files"
-    // (byte-identical to today). Reject an unknown value pre-stream as a clean 400.
+    // toolset: which domain tools to register (§9.3). DERIVED from the turn —
+    // planning registers the task tools and no file tools, everything else
+    // mutates the bundle — so callers no longer send it. The legacy field is
+    // still honoured for a pre-composed `instruction`; unknown values are a
+    // clean pre-stream 400.
     let toolset: Toolset | undefined;
-    if (body.toolset !== undefined) {
+    if (turn) {
+      toolset = toolsetFor(turn);
+    } else if (body.toolset !== undefined) {
       if (!isToolset(body.toolset)) {
         res.status(400).json({ error: `toolset must be ${TOOLSETS.map((t) => `"${t}"`).join(" or ")}` });
         return;
@@ -234,12 +271,18 @@ export function createApp(deps: CreateAppDeps): Express {
       collab = body.collab;
     }
 
-    // eagerSkills (optional, #335 latency): skill names the caller wants
-    // inlined into this turn's prompt up front, skipping the loadSkill
-    // round-trip. Names are validated for shape only — unknown names are
-    // ignored downstream (the snapshot decides what exists).
+    // eagerSkills (#335 latency): skill bodies inlined into this turn's prompt
+    // up front, skipping the loadSkill round-trip. DERIVED from the turn —
+    // which guidance a flow needs is a property of the flow, not of the call,
+    // so a console CTA, a typed command and a playground run cannot diverge.
+    // The legacy caller-supplied list survives only for a pre-composed
+    // `instruction`; names are validated for shape only, since unknown names
+    // are ignored downstream (the snapshot decides what exists).
     let eagerSkills: string[] | undefined;
-    if (body.eagerSkills !== undefined) {
+    if (turn) {
+      const derived = eagerSkillsFor(turn);
+      eagerSkills = derived.length > 0 ? derived : undefined;
+    } else if (body.eagerSkills !== undefined) {
       const list = body.eagerSkills;
       if (
         !Array.isArray(list) ||
@@ -316,7 +359,7 @@ export function createApp(deps: CreateAppDeps): Express {
     try {
       await runConversationTurn({
         id,
-        instruction: body.instruction,
+        instruction,
         files,
         filesChangedExternally: body.filesChangedExternally === true,
         skillSource,

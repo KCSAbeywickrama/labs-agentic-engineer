@@ -123,9 +123,51 @@ ${lines}`;
   return header + pinBlock;
 }
 
-/** Base instructions + the skill catalog (empty when no skills are supplied). */
+/**
+ * The name of the org-defaults skill, inlined into EVERY turn's system prompt.
+ * The one skill that is not "guidance for a task" but standing policy: filled
+ * sections answer interview questions the agent would otherwise ask the user,
+ * and pin providers at design time. An agent that has to remember to load it
+ * asks questions the org already answered.
+ */
+const ORG_DEFAULTS_SKILL = "organization";
+
+/**
+ * The org's standing defaults, appended to the system prompt of every turn.
+ *
+ * Placed here rather than in the per-turn eager block because it applies to
+ * every turn regardless of flow: it is part of the agent's standing context,
+ * not a property of the request. Being system-prompt-stable also makes it
+ * cache-friendly the day prompt caching is switched on — the body is identical
+ * across a conversation's turns, since the `_skills` snapshot pins it.
+ *
+ * Absent from the org's snapshot (an older org, or one that never seeded it) →
+ * "", leaving the prompt byte-identical to a turn without it. A skill the
+ * audience gate refuses is likewise skipped: `load()` returns `{refused: true}`,
+ * which carries no content.
+ */
+export function buildOrgDefaultsBlock(skills: SkillSource | undefined): string {
+  const body = (skills ?? EMPTY_SKILL_SOURCE).load(ORG_DEFAULTS_SKILL);
+  if (body === undefined || !("content" in body)) return "";
+  const content = body.content.trim();
+  if (content === "") return "";
+  return `
+
+# Organization defaults
+
+The following is ALREADY LOADED for every turn — apply it directly and do NOT call loadSkill for "${ORG_DEFAULTS_SKILL}".
+
+${content}`;
+}
+
+/**
+ * Base instructions + the skill catalog + the org's standing defaults (each
+ * empty when its source is). The catalog stays immediately after the base
+ * instructions so its "call loadSkill" invitation reads against the skill list
+ * it introduces, with the org block last.
+ */
 export function buildInstructions(skills?: SkillSource): string {
-  return instructions + buildSkillCatalog(skills);
+  return instructions + buildSkillCatalog(skills) + buildOrgDefaultsBlock(skills);
 }
 
 /**
@@ -189,9 +231,14 @@ Reacting to tool results (each result tells you the next move):
 Keep prose outside tool calls to a single short sentence, except a final note flagging anything that needs a human
 (e.g. a requirement no component covers).`;
 
-/** Task-plan instructions + the skill catalog (empty when no skills are supplied). */
+/**
+ * Task-plan instructions + the skill catalog + the org's standing defaults.
+ * The planner gets the org block for the same reason the editing agent does:
+ * a filled entry pins a provider or a stack, which is exactly what the Tasks it
+ * writes will be built against.
+ */
 export function buildTaskPlanInstructions(skills?: SkillSource): string {
-  return taskPlanInstructions + buildSkillCatalog(skills);
+  return taskPlanInstructions + buildSkillCatalog(skills) + buildOrgDefaultsBlock(skills);
 }
 
 /** Build the user prompt: the current bundle inlined + the mutation instruction. */

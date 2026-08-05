@@ -237,9 +237,9 @@ test("400 when instruction is empty or workspace is missing; inline files/skills
     const token = await mintToken();
     const post = (body: unknown) => fetch(`${baseUrl}/conversations/${WS_CONV}/turns`, turnPost(body, { token, org: WS_ORG }));
 
-    const noInstruction = await post(wsBody({ instruction: "" }));
-    assert.equal(noInstruction.status, 400);
-    assert.match(((await noInstruction.json()) as { error: string }).error, /instruction/);
+    const noTurn = await post(wsBody({ instruction: "" }));
+    assert.equal(noTurn.status, 400);
+    assert.match(((await noTurn.json()) as { error: string }).error, /turn is required/);
 
     // The deleted pre-§12 inline contract: a stale caller gets a loud 400, never a silent turn.
     const inlineFiles = await post(wsBody({ files: { "a.md": "x" } }));
@@ -305,6 +305,76 @@ test("400 on a malformed mcp value (missing/wrong-typed url or token)", async ()
       assert.equal(res.status, 400);
       assert.match(((await res.json()) as { error: string }).error, /mcp must be/);
     }
+  } finally {
+    await close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// --- The turn spec (composition lives here, not in the caller) ------------------
+
+test("a turn spec is composed server-side and streams like any turn", async () => {
+  const root = makeMountRoot(SEED_FILES);
+  const { baseUrl, close } = await boot(mockModel([{ kind: "text", text: "done." }]), root);
+  try {
+    const token = await mintToken();
+    const res = await fetch(
+      `${baseUrl}/conversations/${WS_CONV}/turns`,
+      turnPost(
+        // No `instruction` anywhere in this body — the caller states facts only.
+        wsBody({ instruction: undefined, turn: { kind: "start", idea: "an expense tracker" } }),
+        { token, org: WS_ORG },
+      ),
+    );
+    assert.equal(res.status, 200);
+    assert.match(await res.text(), /done\./);
+  } finally {
+    await close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a malformed turn spec is a clean pre-stream 400, never a composed nonsense turn", async () => {
+  const { baseUrl, close } = await boot(mockModel([{ kind: "text", text: "ok" }]));
+  try {
+    const token = await mintToken();
+    const post = (turn: unknown) =>
+      fetch(`${baseUrl}/conversations/${WS_CONV}/turns`, turnPost(wsBody({ instruction: undefined, turn }), { token, org: WS_ORG }));
+
+    for (const bad of [{ kind: "flow" }, { kind: "chat" }, { kind: "generate" }, {}, "start", null]) {
+      const res = await post(bad);
+      assert.equal(res.status, 400, `${JSON.stringify(bad)} must not reach the model`);
+      assert.match(((await res.json()) as { error: string }).error, /turn must be a valid turn spec/);
+    }
+  } finally {
+    await close();
+  }
+});
+
+test("a plan turn derives the task-plan tool set — the caller never sends toolset", async () => {
+  const root = makeMountRoot(SEED_FILES);
+  const { baseUrl, close } = await boot(
+    mockModel([
+      {
+        kind: "toolCall",
+        toolCallId: "p1",
+        toolName: "planTask",
+        input: { component: "hello-api", title: "Build hello-api", dependsOn: [], rationale: "the core service." },
+      },
+      { kind: "text", text: "planned." },
+    ]),
+    root,
+  );
+  try {
+    const token = await mintToken();
+    const res = await fetch(
+      `${baseUrl}/conversations/${WS_CONV}/turns`,
+      turnPost(wsBody({ instruction: undefined, turn: { kind: "plan" } }), { token, org: WS_ORG }),
+    );
+    assert.equal(res.status, 200);
+    const text = await res.text();
+    assert.match(text, /"toolName":"planTask"/, "kind:plan registered the task tools on its own");
+    assert.doesNotMatch(text, /"toolName":"addFile"/);
   } finally {
     await close();
     rmSync(root, { recursive: true, force: true });
