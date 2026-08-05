@@ -65,43 +65,18 @@ vi.mock("@tanstack/react-query", () => ({
   useQueryClient: () => ({ invalidateQueries }),
 }));
 
-// The issue list is its own tested surface; here it is a marker that proves
-// which liveness the page hands down.
-vi.mock("../../tasks/components/IssueSections", () => ({
-  IssueSections: ({ tag, live }: { tag: string; live: boolean }) => (
-    <div data-testid="issues">{`${tag}:${String(live)}`}</div>
-  ),
-}));
-
-// The build sessions open an SSE stream and read the cluster for builds; stub
-// the whole block and record what it was handed, so this file stays about the
-// PAGE (version selection, run cards, cancel) — RunSpine has its own test.
-vi.mock("./RunSpine", () => ({
-  RunSpine: ({
-    run,
-    work,
-    gates,
-  }: {
-    run: MilestoneRunView;
-    work: TaskView[];
-    gates: TaskView[];
-  }) => (
-    <div
-      data-testid="run-spine"
-      data-work={work.map((t) => t.issueNumber).join(",")}
-      data-gates={gates.map((t) => t.issueNumber).join(",")}
-    >
-      {run.cycles.map((c) => `${c.kind}:${c.branch ?? ""}:${c.mergeSha ?? ""}`).join("|")}
-    </div>
-  ),
-}));
-
 // The issue plane the run card reads to tell its holds apart. `undefined` is
 // the list not having arrived yet, which is a different thing from an empty
 // milestone.
 let mockIssues: TaskView[] | undefined = [];
+let mockIssuesError = false;
 vi.mock("../../tasks/api/queries", () => ({
-  useAllTasks: () => ({ data: mockIssues }),
+  useAllTasks: () => ({
+    data: mockIssues,
+    isError: mockIssuesError,
+    error: mockIssuesError ? new Error("boom") : null,
+    refetch: vi.fn(),
+  }),
 }));
 
 // The repo URL behind the milestone panel's "view all issues" link. Same query
@@ -218,6 +193,7 @@ afterEach(() => {
   mockBuilds = [];
   mockRuns = [];
   mockIssues = [];
+  mockIssuesError = false;
   cancelState.isPending = false;
   cancelState.isError = false;
   cancelState.error = null;
@@ -626,6 +602,95 @@ describe("BuildsPage — one version's story", () => {
     expect(screen.queryByText(/^\d+ open$/)).not.toBeInTheDocument();
   });
 
+  it("claims no delivery on a run parked between sessions with open work", () => {
+    // The last session's stages are all done, but the milestone still has an
+    // open issue ahead — "all agent work is done" is a fact the platform has
+    // not established, so the banner must not fire (contract review finding).
+    mockBuilds = [build("v2", "in_progress")];
+    mockRuns = [
+      run({
+        state: "waiting",
+        cycles: [
+          {
+            id: "cycle-1",
+            kind: "coding",
+            attempts: 1,
+            branch: "aep/m2-c1",
+            prNumber: 5,
+            mergeSha: "1dc26ba1fe04",
+            createdAt: "2026-08-04T06:02:00Z",
+            endedAt: "2026-08-04T06:21:00Z",
+          },
+        ],
+      }),
+    ];
+    mockIssues = [
+      issue(3, "Implement gym-tracker-api", "coding", "merged"),
+      issue(7, "Add workout charts", "coding", "pending"),
+    ];
+    mockCycleBuilds = [
+      { component: "gym-tracker-api", status: "Succeeded", completed: true },
+    ];
+    renderPage();
+
+    expect(
+      screen.queryByText(/All agent work for .* is done/),
+    ).not.toBeInTheDocument();
+    mockCycleBuilds = [];
+  });
+
+  it("tells the gate story before the first session, not a generic wait", () => {
+    // runHold defers an open-gate wait to the provisioning section — so the
+    // card must actually mount it. Without this, a run stalled on a
+    // connection a human must supply read as a routine busy wait.
+    mockBuilds = [build("v2", "in_progress")];
+    mockRuns = [run({ state: "waiting", cycles: [] })];
+    mockIssues = [
+      issue(1, "Provide configuration: url-shortener-db", "provision"),
+      ...withOpenWork(),
+    ];
+    renderPage();
+
+    // The idle gate names the person — on the card AND in the panel — and
+    // the generic wait stays out.
+    expect(screen.getAllByText("needs you").length).toBeGreaterThan(0);
+    expect(
+      screen.queryByText("Waiting to dispatch the first build session"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders ledger issues apart from agent work", () => {
+    // ADR-0013 §7: bare human issues joined the milestone but are never
+    // worked — listing them as agent work would misrepresent both.
+    mockBuilds = [build("v2", "in_progress")];
+    mockRuns = [run()];
+    mockIssues = [
+      ...withOpenWork(),
+      issue(21, "Checkout is slow on mobile", "ledger"),
+    ];
+    renderPage();
+
+    expect(screen.getByText("LEDGER")).toBeInTheDocument();
+    expect(screen.getByText("Checkout is slow on mobile")).toBeInTheDocument();
+    // Not in the issue count: 1 agent issue, not 2.
+    expect(screen.getByText("1 issue")).toBeInTheDocument();
+  });
+
+  it("ships an error state for the milestone column", () => {
+    // api-guidelines non-negotiable #2 — a failed issue fetch must not read
+    // as "no milestone".
+    mockBuilds = [build("v2", "in_progress")];
+    mockRuns = [run()];
+    mockIssues = undefined;
+    mockIssuesError = true;
+    renderPage();
+
+    expect(
+      screen.getByText(/Failed to load the version's issues/),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+  });
+
   it("keeps an earlier session collapsed until asked, then shows its cycles", () => {
     mockBuilds = [build("v2", "in_progress")];
     mockRuns = [
@@ -688,9 +753,10 @@ describe("BuildsPage — one version's story", () => {
         ],
       }),
     ];
-    mockIssues = withOpenWork();
-    // `completed` is what makes an outcome readable at all — a green status on
-    // an unfinished build is not a success yet.
+    // Milestone fully closed — the banner requires the issue plane to agree,
+    // not just the session's own stages. `completed` on the build is what
+    // makes an outcome readable at all.
+    mockIssues = [issue(2, "Implement the shortener API", "coding", "merged")];
     mockCycleBuilds = [
       { component: "storefront", status: "Succeeded", completed: true },
     ];

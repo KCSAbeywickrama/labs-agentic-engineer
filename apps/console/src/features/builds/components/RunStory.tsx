@@ -44,8 +44,10 @@ import {
   spentBudgets,
   terminalReasonText,
 } from "../lib/runView";
+import { provisioningStage } from "../lib/provisioning";
 import { sessionIssues, sessionStages } from "../lib/sessionSpine";
 import { runDuration, runStamp } from "../lib/format";
+import { ProvisioningGates } from "./ProvisioningGates";
 import { RunDelivered } from "./RunDelivered";
 import { RunGlanceStrip } from "./RunGlanceStrip";
 import { RunHoldNotice } from "./RunHoldNotice";
@@ -135,6 +137,14 @@ export function RunStory({
   const terminal = isTerminalRun(run.state);
   const planning = run.state === "planning";
   const work = milestone?.work ?? [];
+  const gates = milestone?.gates ?? [];
+  // runHold DEFERS an open-gate wait to the provisioning section — it expects
+  // the gate story, with its who-is-acting rows and its "resolve connections"
+  // way out, to be ON the card. The rail that carried it is gone, so the card
+  // mounts ProvisioningGates itself whenever a gate is not yet resolved;
+  // without this, a run stalled on a connection reads as a routine wait.
+  const gateStage = provisioningStage(gates);
+  const openGateStory = gateStage && gateStage.state !== "done" ? gateStage : null;
 
   const hold = runHold(
     run,
@@ -192,9 +202,10 @@ export function RunStory({
     : [];
 
   // Is there anything below the header worth ruling off? The strip and NOW when
-  // a cycle exists; the "never dispatched" line on a settled session; the
-  // waiting notice otherwise — unless a hold above is already saying it.
-  const hasBody = Boolean(current) || terminal || !hold;
+  // a cycle exists; the "never dispatched" line on a settled run; the gate
+  // story when a connection is unresolved; the waiting notice otherwise —
+  // unless a hold above is already saying it.
+  const hasBody = Boolean(current) || terminal || Boolean(openGateStory) || !hold;
 
   // The card carries state in its EDGE, not a fill — but only for the two
   // states worth a ring: something is moving (info), or something broke
@@ -306,19 +317,23 @@ export function RunStory({
             {current ? (
               <Stack spacing={2}>
                 <RunGlanceStrip stages={glance.stages} nowIndex={glance.nowIndex} />
-                {/* Once every stage of the cycle is done there is no "now" to
-                    narrate: what it produced, and where it now lives, is the
-                    whole story — and that is true the moment deployment goes
-                    green, BEFORE the supervisor settles the run, so the gate is
-                    the FLOW (nowIndex), not run.state. Gating on `succeeded`
-                    left a finished flow showing a bare "every stage is done"
-                    line for as long as the run stayed formally running. A run
-                    that re-enters with a fix cycle makes that cycle current and
-                    the NOW panel returns on its own; failed and cancelled runs
-                    keep the panel, because their story is where they stopped. */}
+                {/* Once every stage of the cycle is done AND the milestone has
+                    nothing left, the result is the whole story — true the
+                    moment deployment goes green, BEFORE the supervisor settles
+                    the run, so the gate is the flow (nowIndex) plus the issue
+                    plane, not run.state. Both halves matter: gating on
+                    `succeeded` alone hid a finished flow behind a bare "every
+                    stage is done" line, and gating on the flow alone claimed
+                    "all agent work is done" on a run PARKED between sessions
+                    with open issues still ahead — a fact the platform never
+                    established. Failed and cancelled runs keep the panel,
+                    because their story is where they stopped. */}
                 {glance.nowIndex === null &&
                 run.state !== "failed" &&
-                run.state !== "cancelled" ? (
+                run.state !== "cancelled" &&
+                (work.length > 0
+                  ? work.every((t) => t.derivedStatus === "merged")
+                  : run.state === "succeeded") ? (
                   <RunDelivered
                     projectName={projectName}
                     milestoneTitle={run.milestoneTitle}
@@ -346,6 +361,14 @@ export function RunStory({
                 No build session was ever dispatched — the run settled before
                 the supervisor started one.
               </Typography>
+            ) : openGateStory ? (
+              // The gate story runHold deferred here: each connection, who is
+              // acting on it, and the way out — instead of a generic wait.
+              <ProvisioningGates
+                projectName={projectName}
+                gates={gates}
+                state={openGateStory.state}
+              />
             ) : hold ? null : (
               // Live, no cycle yet, and no hold above already explaining the
               // wait: the supervisor is between dispatches. Busy rather than

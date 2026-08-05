@@ -31,12 +31,12 @@ import {
   alpha,
 } from "@wso2/oxygen-ui";
 import { ChevronRight } from "@wso2/oxygen-ui-icons-react";
-import { Link as RouterLink } from "@tanstack/react-router";
 import { StatusChip } from "../../../components/StatusChip";
 import type { components } from "../../../generated/aep-api";
+import { GitHubIssueLink } from "../../tasks/components/GitHubIssueLink";
 import { gateSubject } from "../../tasks/lib/issueRows";
 import { bucketMilestone } from "../lib/milestoneBuckets";
-import { gateDrive } from "../lib/runView";
+import { gateRows } from "../lib/provisioning";
 
 type TaskView = components["schemas"]["TaskView"];
 
@@ -51,17 +51,16 @@ type TaskView = components["schemas"]["TaskView"];
  * what it did, not only what it has left.
  */
 export function MilestonePanel({
-  projectName,
   tag,
   title,
   work,
   gates,
+  ledger,
   claimed,
   presumeOpenWork = false,
   claimedBy,
   issuesUrl,
 }: {
-  projectName: string;
   tag: string;
   /** The milestone's own name, when it carries one richer than the tag. */
   title?: string;
@@ -69,6 +68,10 @@ export function MilestonePanel({
   work: TaskView[];
   /** Every connection gate, resolved ones included. */
   gates: TaskView[];
+  /** Bare human issues that joined the milestone — never worked, never
+   *  stalling settle (ADR-0013 §7). Their own section, so they are not read
+   *  as agent work. */
+  ledger: TaskView[];
   /** Issue numbers the run's OPEN cycle has claimed (openCycleClaims). */
   claimed: ReadonlySet<number>;
   /** A live session with no claims yet — presume it works the open issues. */
@@ -168,7 +171,6 @@ export function MilestonePanel({
             plain row buried it among the six open ones. */}
         <IssueGroup
           title="In progress"
-          projectName={projectName}
           issues={inProgress}
           tone="info.main"
           highlight
@@ -176,21 +178,23 @@ export function MilestonePanel({
         />
         <IssueGroup
           title="Open"
-          projectName={projectName}
           issues={open}
           tone="text.disabled"
           counted
         />
-        <ClosedGroup title="Closed" projectName={projectName} issues={closed} />
+        <ClosedGroup title="Closed" issues={closed} />
 
         {gates.length > 0 && (
           <Box sx={{ mt: 2 }}>
             <Divider sx={{ mb: 1.5 }} />
             <GroupLabel title="Connections" />
             <Stack spacing={1} sx={{ mt: 1 }}>
-              {gates.map((gate) => (
+              {/* gateRows is the ONE mapping from a gate to who is acting —
+                  reinventing it here once collapsed "idle" (a human must
+                  supply something) into "provisioning" (nothing needed). */}
+              {gateRows(gates).map(({ gate, state, label }) => (
                 <Stack key={gate.issueNumber} direction="row" spacing={1} sx={{ alignItems: "baseline" }}>
-                  <Dot color={gateDrive(gate) === "failed" ? "error.main" : gate.derivedStatus === "pending" ? "info.main" : "success.main"} />
+                  <Dot color={GATE_STATE_COLOR[state] ?? "text.disabled"} />
                   <Typography variant="caption" color="text.secondary" sx={{ fontFamily: "monospace" }}>
                     #{gate.issueNumber}
                   </Typography>
@@ -199,18 +203,31 @@ export function MilestonePanel({
                   </Typography>
                   <Typography
                     variant="caption"
-                    sx={{
-                      color:
-                        gateDrive(gate) === "failed"
-                          ? "error.main"
-                          : gate.derivedStatus === "pending"
-                            ? "info.main"
-                            : "success.main",
-                    }}
+                    sx={{ color: GATE_STATE_COLOR[state] ?? "text.secondary" }}
                   >
-                    {gateState(gate)}
+                    {label}
                   </Typography>
                 </Stack>
+              ))}
+            </Stack>
+          </Box>
+        )}
+
+        {ledger.length > 0 && (
+          <Box sx={{ mt: 2 }}>
+            <Divider sx={{ mb: 1.5 }} />
+            <GroupLabel title="Ledger" />
+            <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
+              Filed against this version by a human — never worked by an agent,
+              and never holding the run.
+            </Typography>
+            <Stack spacing={1} sx={{ mt: 1 }}>
+              {ledger.map((issue) => (
+                <IssueRow
+                  key={issue.issueNumber}
+                  issue={issue}
+                  tone="text.disabled"
+                />
               ))}
             </Stack>
           </Box>
@@ -232,12 +249,14 @@ export function MilestonePanel({
   );
 }
 
-/** A gate's state, said the way the provisioning stage says it. */
-function gateState(gate: TaskView): string {
-  if (gateDrive(gate) === "failed") return "needs you";
-  if (gate.derivedStatus === "pending") return "provisioning";
-  return "provisioned";
-}
+// StageState → the panel's colour vocabulary, matching StatusChip tones.
+const GATE_STATE_COLOR: Record<string, string> = {
+  done: "success.main",
+  active: "info.main",
+  attention: "warning.main",
+  failed: "error.main",
+  waiting: "text.disabled",
+};
 
 function Dot({ color }: { color: string }) {
   return (
@@ -267,12 +286,10 @@ function GroupLabel({ title, count }: { title: string; count?: number }) {
 }
 
 function IssueRow({
-  projectName,
   issue,
   tone,
   note,
 }: {
-  projectName: string;
   issue: TaskView;
   tone: string;
   note?: string;
@@ -283,34 +300,26 @@ function IssueRow({
       <Typography variant="caption" color="text.secondary" sx={{ fontFamily: "monospace", flexShrink: 0 }}>
         #{issue.issueNumber}
       </Typography>
-      <Box sx={{ minWidth: 0 }}>
-        {/* The router's own Link, styled by a Typography child: MUI's
-            `component` prop cannot carry TanStack's typed `params`. */}
-        <RouterLink
-          to="/projects/$projectName/builds/$issueNumber"
-          params={{ projectName, issueNumber: issue.issueNumber }}
-          style={{ textDecoration: "none" }}
-        >
-          <Typography
-            variant="body2"
-            sx={{ color: "text.primary", "&:hover": { textDecoration: "underline" } }}
-          >
-            {issue.title}
-          </Typography>
-        </RouterLink>
+      <Box sx={{ minWidth: 0, flexGrow: 1 }}>
+        {/* Durable facts only, and NOT clickable (ADR-0013 §5): the run's
+            story is the card beside this, and the issue itself lives on
+            GitHub — which is the one link the row carries. */}
+        <Typography variant="body2" sx={{ color: "text.primary" }}>
+          {issue.title}
+        </Typography>
         {note && (
           <Typography variant="caption" sx={{ display: "block", color: "text.secondary" }}>
             {note}
           </Typography>
         )}
       </Box>
+      <GitHubIssueLink issueNumber={issue.issueNumber} issueUrl={issue.issueUrl} />
     </Stack>
   );
 }
 
 function IssueGroup({
   title,
-  projectName,
   issues,
   tone,
   note,
@@ -318,7 +327,6 @@ function IssueGroup({
   counted = false,
 }: {
   title: string;
-  projectName: string;
   issues: TaskView[];
   tone: string;
   note?: (issue: TaskView) => string | undefined;
@@ -336,7 +344,6 @@ function IssueGroup({
           const detail = note?.(issue);
           const row = (
             <IssueRow
-              projectName={projectName}
               issue={issue}
               tone={tone}
               {...(detail ? { note: detail } : {})}
@@ -369,11 +376,9 @@ function IssueGroup({
 /** Closed work: a count by default, the list on demand. */
 function ClosedGroup({
   title,
-  projectName,
   issues,
 }: {
   title: string;
-  projectName: string;
   issues: TaskView[];
 }) {
   const [open, setOpen] = useState(false);
@@ -409,7 +414,6 @@ function ClosedGroup({
           {issues.map((issue) => (
             <IssueRow
               key={issue.issueNumber}
-              projectName={projectName}
               issue={issue}
               tone="success.main"
             />

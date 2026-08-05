@@ -48,7 +48,7 @@ export function RunDelivered({
   work: TaskView[];
   /** True while the run holds an OPEN validation cycle: the agent work is
    *  done, and the platform is now validating the deployed system — which is
-   *  exactly why the session chip still says Running. */
+   *  exactly why the run's chip still says Running. */
   validating?: boolean;
   endedAt?: string | null;
 }) {
@@ -112,7 +112,7 @@ export function RunDelivered({
           <CircularProgress size={14} thickness={5} aria-label="Validation running" />
           <Typography variant="body2" color="text.secondary">
             Validation is running against the deployed system — that is what
-            keeps this session open. Its verdict lands on the Validation board.
+            keeps this run open. Its verdict lands on the Validation board.
           </Typography>
         </Stack>
       )}

@@ -42,13 +42,13 @@ import { CycleLines } from "./EarlierSessions";
 type MilestoneRunView = components["schemas"]["MilestoneRunView"];
 
 /**
- * The milestone's EARLIER BUILD SESSIONS — one collapsed line each.
+ * The milestone's EARLIER RUNS — one collapsed line each.
  *
- * A settled session is a record, not something to watch, so the line carries
- * only what a reader scans for: how it ended, what started it, when it ran, and
- * what it left behind. Everything else — its cycles, the reason it stopped, any
- * budget it spent — is one click down, because a page that shows all of it for
- * every past session is the rail this redesign replaced.
+ * A settled run is a record, not something to watch, so the line carries only
+ * what a reader scans for: how it ended, what started it, when it ran, and
+ * what it left behind. Everything else — its build sessions, the reason it
+ * stopped, any budget it spent — is one click down, because a page that shows
+ * all of it for every past run is the rail this redesign replaced.
  */
 export function RunHistoryList({
   runs,
@@ -92,8 +92,8 @@ function SessionRow({ run }: { run: MilestoneRunView }) {
   const reason = terminalReasonText(run.terminalReason ?? "");
   const spent = spentBudgets(run.budgets);
 
-  // What it left behind, in the platform's own terms: a session that merged
-  // nothing landed nothing, and that is the fact worth reading at a glance.
+  // What it left behind, in the platform's own terms: a run whose sessions
+  // merged nothing landed nothing — the fact worth reading at a glance.
   const outcome =
     reason ||
     (merged > 0

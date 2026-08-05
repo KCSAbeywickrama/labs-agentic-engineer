@@ -21,14 +21,11 @@ import type { components } from "../../../generated/aep-api";
 
 type RunCycleView = components["schemas"]["RunCycleView"];
 
-// VOCABULARY. A build SESSION is one run of the milestone loop — the thing the
-// card narrates and the history below it lists. A session contains CYCLES: each
-// one an agent dispatch, its pull request, the merge, and the builds that
-// follow. A cycle in turn may take two runner ATTEMPTS.
-//
-// The platform's own type is RunCycleView, so "cycle" is its word, not one
-// invented here — and it keeps "session" free to mean the one thing the design
-// calls a build session.
+// VOCABULARY (docs/glossary.md, ADR-0014 §1). A RUN is one pass of the
+// milestone loop — the card, the Cancel button, the history rows. A BUILD
+// SESSION is one cycle inside it: agent dispatch, pull request, merge, builds.
+// "Build session" is copy only — the model stays `cycle` (RunCycleView) — and
+// the bare word "session" is never used: that belongs to the spec Room.
 
 /**
  * The current session's earlier cycles.

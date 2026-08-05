@@ -120,8 +120,7 @@ export function BuildsPage({
     return undefined;
   };
 
-  // The same query IssueSections reads, on the same key — react-query serves
-  // both from one request. The run card needs it because only the issue plane
+  // One query feeds the milestone panel AND the run card. The card needs it because only the issue plane
   // can tell a gate hold apart from an empty working set, and undefined until
   // it lands is what stops a card accusing a run of having no work on the
   // strength of a list that has not arrived.
@@ -135,6 +134,7 @@ export function BuildsPage({
   const milestone = partition && {
     gates: partition.gates,
     work: partition.work,
+    ledger: partition.ledger,
   };
 
   // One final issue fetch at settle. The GitHub-backed list stops polling the
@@ -280,18 +280,35 @@ export function BuildsPage({
             <RunHistoryList runs={earlier} tag={selected.tag} />
           </Stack>
 
-          {milestone && (
+          {/* Every view ships loading and error states (api-guidelines #2):
+              the old issue table carried them for this query; its replacement
+              must too, or a failed fetch reads as "no milestone". */}
+          {issues.isError ? (
+            <Alert
+              severity="error"
+              action={<Button onClick={() => void issues.refetch()}>Retry</Button>}
+            >
+              Failed to load the version&apos;s issues
+              {issues.error instanceof Error && issues.error.message
+                ? `: ${issues.error.message}`
+                : ""}
+            </Alert>
+          ) : milestone ? (
             <MilestonePanel
-              projectName={projectName}
               tag={selected.tag}
               {...(current?.milestoneTitle ? { title: current.milestoneTitle } : {})}
               work={milestone.work}
               gates={milestone.gates}
+              ledger={milestone.ledger}
               claimed={claims}
               presumeOpenWork={presumeOpenWork}
               claimedBy={claimedBy}
               {...(issuesUrl ? { issuesUrl } : {})}
             />
+          ) : (
+            <Box sx={{ display: "flex", justifyContent: "center", p: 4 }}>
+              <CircularProgress aria-label="Loading the version's issues" />
+            </Box>
           )}
         </Box>
       )}
