@@ -16,7 +16,11 @@
 
 package codingagent
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/wso2/aep/aep-api/internal/contracts"
+)
 
 func TestUsageFromLogReadsTheResultLine(t *testing.T) {
 	log := `2026-07-21T10:00:00.000000000Z {"schemaVersion":1,"ts":"t","seq":1,"kind":"phase","phase":"agent"}
@@ -40,6 +44,34 @@ func TestUsageFromLogLastResultWins(t *testing.T) {
 	u := usageFromLog(log)
 	if u == nil || u.InputTokens != 7 {
 		t.Fatalf("expected the last result's usage, got %+v", u)
+	}
+}
+
+func TestUsageFromLogKeepsThePerModelSplit(t *testing.T) {
+	log := `{"schemaVersion":1,"ts":"t","seq":1,"kind":"result","status":"success","usage":{"inputTokens":110,"outputTokens":55,"cacheReadTokens":1000,"cacheCreationTokens":200,"model":"","models":[{"inputTokens":100,"outputTokens":50,"cacheReadTokens":1000,"cacheCreationTokens":200,"model":"claude-sonnet-5"},{"inputTokens":10,"outputTokens":5,"cacheReadTokens":0,"cacheCreationTokens":0,"model":"claude-haiku-4-5"}]}}
+`
+	u := usageFromLog(log)
+	if u == nil {
+		t.Fatal("expected usage, got nil")
+	}
+	if u.Model != "" || u.InputTokens != 110 {
+		t.Fatalf("unexpected aggregate: %+v", u.TokenUsage)
+	}
+	want := []contracts.TokenUsage{
+		{InputTokens: 100, OutputTokens: 50, CacheReadTokens: 1000, CacheCreationTokens: 200, Model: "claude-sonnet-5"},
+		{InputTokens: 10, OutputTokens: 5, Model: "claude-haiku-4-5"},
+	}
+	if len(u.Models) != len(want) || u.Models[0] != want[0] || u.Models[1] != want[1] {
+		t.Fatalf("models = %+v, want %+v", u.Models, want)
+	}
+	// PricingSlices prefers the split…
+	if got := u.PricingSlices(); len(got) != 2 || got[0].Model != "claude-sonnet-5" {
+		t.Fatalf("PricingSlices = %+v, want the per-model split", got)
+	}
+	// …and falls back to the aggregate for pre-split runners.
+	legacy := contracts.CapturedUsage{TokenUsage: contracts.TokenUsage{InputTokens: 7, Model: "claude-sonnet-5"}}
+	if got := legacy.PricingSlices(); len(got) != 1 || got[0].Model != "claude-sonnet-5" {
+		t.Fatalf("PricingSlices(legacy) = %+v, want the aggregate as one slice", got)
 	}
 }
 

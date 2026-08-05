@@ -59,6 +59,29 @@ func (u TokenUsage) Add(other TokenUsage) TokenUsage {
 	}
 }
 
+// CapturedUsage is the wire shape of a runner result event's `usage` (#291):
+// the folded aggregate every reader already consumed, plus the per-model split
+// the stamper prices. Models carries one entry per model that spent tokens
+// (canonical ids — the runner collapses versioned release ids), and is empty
+// on captures from runners that predate the split; the capture path then falls
+// back to pricing the aggregate by its single Model. The split exists because
+// a real coding run regularly touches a second model (the SDK's small-model
+// helpers), which blanks the aggregate Model under Add's agreement rule and
+// made every such run unpriceable.
+type CapturedUsage struct {
+	TokenUsage
+	Models []TokenUsage `json:"models,omitempty"`
+}
+
+// PricingSlices returns what the stamper should price: the per-model split
+// when the runner reported one, else the aggregate as a single slice.
+func (c CapturedUsage) PricingSlices() []TokenUsage {
+	if len(c.Models) > 0 {
+		return c.Models
+	}
+	return []TokenUsage{c.TokenUsage}
+}
+
 // StampedUsage is an aggregate of usage rows plus the sum of the USD stamped on
 // them at capture (#291). CostUsd is nil when NO contributing row carried a
 // stamp (SQL SUM(cost_usd) over all-null rows is NULL) — the console then shows

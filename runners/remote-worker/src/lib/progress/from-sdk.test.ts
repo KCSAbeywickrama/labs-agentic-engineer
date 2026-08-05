@@ -72,6 +72,78 @@ test("from-sdk: result usage with multiple models → model '' (mixed)", () => {
   assert.equal((events[0] as { usage: { model: string } }).usage.model, "");
 });
 
+test("from-sdk: result usage carries per-model slices for aep-api to price (#291)", () => {
+  const events = progressFromSdkMessage({
+    type: "result",
+    subtype: "success",
+    usage: {
+      input_tokens: 110,
+      output_tokens: 55,
+      cache_read_input_tokens: 1000,
+      cache_creation_input_tokens: 200,
+    },
+    modelUsage: {
+      "claude-sonnet-5": {
+        inputTokens: 100, outputTokens: 50,
+        cacheReadInputTokens: 1000, cacheCreationInputTokens: 200,
+        canonicalModel: "claude-sonnet-5",
+      },
+      "claude-haiku-4-5-20251001": {
+        inputTokens: 10, outputTokens: 5,
+        cacheReadInputTokens: 0, cacheCreationInputTokens: 0,
+        canonicalModel: "claude-haiku-4-5",
+      },
+    },
+  });
+  const usage = (events[0] as unknown as { usage: Record<string, unknown> }).usage;
+  // Mixed models: the single aggregate model stays "", but the split survives.
+  assert.equal(usage.model, "");
+  assert.deepEqual(usage.models, [
+    {
+      model: "claude-sonnet-5",
+      inputTokens: 100, outputTokens: 50,
+      cacheReadTokens: 1000, cacheCreationTokens: 200,
+    },
+    {
+      model: "claude-haiku-4-5",
+      inputTokens: 10, outputTokens: 5,
+      cacheReadTokens: 0, cacheCreationTokens: 0,
+    },
+  ]);
+});
+
+test("from-sdk: versioned modelUsage keys collapse onto their canonical model", () => {
+  const events = progressFromSdkMessage({
+    type: "result",
+    subtype: "success",
+    usage: { input_tokens: 30, output_tokens: 3, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+    modelUsage: {
+      "claude-sonnet-5-20260101": { inputTokens: 10, outputTokens: 1, canonicalModel: "claude-sonnet-5" },
+      "claude-sonnet-5-20260201": { inputTokens: 20, outputTokens: 2, canonicalModel: "claude-sonnet-5" },
+    },
+  });
+  const usage = (events[0] as unknown as { usage: Record<string, unknown> }).usage;
+  // Two dated releases of ONE model are still a single-model run.
+  assert.equal(usage.model, "claude-sonnet-5");
+  assert.deepEqual(usage.models, [{
+    model: "claude-sonnet-5",
+    inputTokens: 30, outputTokens: 3,
+    cacheReadTokens: 0, cacheCreationTokens: 0,
+  }]);
+});
+
+test("from-sdk: zero-token modelUsage entries produce no slices and keep the single model", () => {
+  const events = progressFromSdkMessage({
+    type: "result",
+    subtype: "success",
+    usage: { input_tokens: 5, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+    modelUsage: { "claude-sonnet-5": {} },
+  });
+  const usage = (events[0] as unknown as { usage: Record<string, unknown> }).usage;
+  assert.equal(usage.model, "claude-sonnet-5");
+  assert.equal("models" in usage, false);
+});
+
 test("from-sdk: result error → failure result with errors joined", () => {
   const events = progressFromSdkMessage({
     type: "result",
