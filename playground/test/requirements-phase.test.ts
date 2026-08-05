@@ -32,6 +32,7 @@ import { mockModel } from "@aep/agents/shared/mock-model";
 import { requirementsCommand, chatTurn } from "../src/commands.js";
 import { openSession } from "../src/engine/session.js";
 import { readIdea } from "../src/state/descriptor.js";
+import { chatSpec } from "../src/engine/turn-spec.js";
 
 function tempProject(): string {
   return mkdtempSync(join(tmpdir(), "aep-play-test-"));
@@ -95,7 +96,7 @@ test("chat resumes the SAME general conversation across sessions (console parity
     const second = mockModel([{ kind: "text", text: "sure — noted." }]);
     const session = await openSession(projectDir, { model: second, skillsDir });
     try {
-      const outcome = await chatTurn(session, "add a wishlist requirement", { silent: true });
+      const outcome = await chatTurn(session, chatSpec("add a wishlist requirement"), { silent: true });
       assert.equal(outcome.ok, true, outcome.detail);
     } finally {
       await session.close();

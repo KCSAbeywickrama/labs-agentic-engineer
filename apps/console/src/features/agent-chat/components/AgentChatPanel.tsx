@@ -60,7 +60,7 @@ import { Button, Menu, MenuItem } from "@wso2/oxygen-ui";
 import {
   DESIGN_COMMAND,
   START_COMMAND,
-} from "@aep/contracts/prompts";
+} from "@aep/contracts/commands";
 
 // Default a touch wider than the old 380 so the activity rail + narration
 // breathe; the user can drag-resize and the choice persists.

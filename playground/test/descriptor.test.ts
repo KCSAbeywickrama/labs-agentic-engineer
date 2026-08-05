@@ -27,8 +27,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DESCRIPTOR_PATH, descriptorFile, readIdea, writeDescriptor } from "../src/state/descriptor.js";
-import { startInstruction } from "../src/engine/compose.js";
-import { startInstruction as startInstructionText, ideaSteerPrefix } from "@aep/contracts/prompts";
+import { startSpec } from "../src/engine/turn-spec.js";
 import { classifyChatInput } from "../src/tui/chat-commands.js";
 import { readProjectFiles } from "../src/kit/project-fs.js";
 import { renderPart } from "../src/kit/render.js";
@@ -132,8 +131,12 @@ test("a pending question card renders as awaiting, not as an error", () => {
   assert.doesNotMatch(out, /error/);
 });
 
-test("startInstruction appends the idea, or nothing when there is none", () => {
-  assert.equal(startInstruction("an expense tracker"), startInstructionText + ideaSteerPrefix + "an expense tracker");
-  assert.equal(startInstruction(null), startInstructionText);
-  assert.equal(startInstruction("   "), startInstructionText);
+// The playground plays the server's role: it carries the captured idea as a
+// FACT on the turn. What that becomes in the prompt is the agents service's
+// business (services/agents/test/turn-compose.test.ts covers the wording).
+test("startSpec carries the idea, or nothing when there is none", () => {
+  assert.deepEqual(startSpec("an expense tracker"), { kind: "start", idea: "an expense tracker" });
+  assert.deepEqual(startSpec("  an expense tracker  "), { kind: "start", idea: "an expense tracker" });
+  assert.deepEqual(startSpec(null), { kind: "start" });
+  assert.deepEqual(startSpec("   "), { kind: "start" });
 });

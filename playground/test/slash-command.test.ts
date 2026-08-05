@@ -17,78 +17,96 @@
  */
 
 /**
- * The `/<skill>` chat-composer shortcut (shared `@aep/contracts/prompts`
- * helper). One pure text→text function backs both the console composer and the
- * playground chat surfaces, so its grammar is pinned here: what expands to a
- * "load the skill and follow it" instruction, and what stays literal chat.
+ * The `/<skill>` chat grammar (`@aep/contracts/commands`). It yields FACTS —
+ * which skill, which trailing text — never prompt wording, so what is pinned
+ * here is the boundary between "this line is a flow" and "this line is chat".
+ *
+ * Getting that boundary wrong in the permissive direction eats a user's actual
+ * message; getting it wrong the other way silently demotes a command to chat.
+ * `aep-api` keeps its own copy of this grammar (internal/spec/start_command.go)
+ * because it must classify the same lines in production.
  */
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { slashSkillInstruction } from "@aep/contracts/prompts";
+import { parseFlowCommand, parseStartCommand } from "@aep/contracts/commands";
 
-// --- expands ----------------------------------------------------------------
+// --- a flow -----------------------------------------------------------------
 
-test("bare /<skill> → just the load directive", () => {
-  assert.equal(slashSkillInstruction("/spec"), "Load the spec skill and follow it.");
-  assert.equal(slashSkillInstruction("/design"), "Load the design skill and follow it.");
+test("bare /<skill> names the skill and no text", () => {
+  assert.deepEqual(parseFlowCommand("/spec"), { skill: "spec", text: "" });
+  assert.deepEqual(parseFlowCommand("/design"), { skill: "design", text: "" });
 });
 
-test("/<skill> with follow-up text rides after a blank line", () => {
-  assert.equal(
-    slashSkillInstruction("/spec an expense tracker"),
-    "Load the spec skill and follow it.\n\nan expense tracker",
-  );
+test("/<skill> with follow-up text carries it", () => {
+  assert.deepEqual(parseFlowCommand("/spec an expense tracker"), {
+    skill: "spec",
+    text: "an expense tracker",
+  });
 });
 
 test("kebab-case skill tokens are allowed", () => {
-  assert.equal(
-    slashSkillInstruction("/architecture redo the edges"),
-    "Load the architecture skill and follow it.\n\nredo the edges",
-  );
+  assert.deepEqual(parseFlowCommand("/architecture redo the edges"), {
+    skill: "architecture",
+    text: "redo the edges",
+  });
 });
 
 test("surrounding + inner whitespace is normalized", () => {
-  assert.equal(slashSkillInstruction("  /spec   an app  "), "Load the spec skill and follow it.\n\nan app");
+  assert.deepEqual(parseFlowCommand("  /spec   an app  "), { skill: "spec", text: "an app" });
 });
 
 test("multi-line follow-up text is preserved", () => {
-  assert.equal(
-    slashSkillInstruction("/spec line one\nline two"),
-    "Load the spec skill and follow it.\n\nline one\nline two",
-  );
+  assert.deepEqual(parseFlowCommand("/spec line one\nline two"), {
+    skill: "spec",
+    text: "line one\nline two",
+  });
 });
 
-// --- stays literal (returns null) -------------------------------------------
+// --- stays literal chat (returns null) --------------------------------------
 
 test("a plain chat line is not a command", () => {
-  assert.equal(slashSkillInstruction("please regenerate the design"), null);
+  assert.equal(parseFlowCommand("please regenerate the design"), null);
 });
 
 test("a mid-message slash is literal", () => {
-  assert.equal(slashSkillInstruction("fix the /spec route please"), null);
+  assert.equal(parseFlowCommand("fix the /spec route please"), null);
 });
 
 test("a bare slash is literal", () => {
-  assert.equal(slashSkillInstruction("/"), null);
-  assert.equal(slashSkillInstruction("/ spec"), null);
+  assert.equal(parseFlowCommand("/"), null);
+  assert.equal(parseFlowCommand("/ spec"), null);
 });
 
-test("a doubled slash escapes expansion", () => {
-  assert.equal(slashSkillInstruction("//spec"), null);
+test("a doubled slash escapes the command", () => {
+  assert.equal(parseFlowCommand("//spec"), null);
 });
 
 test("a trailing-punctuation token is literal (token must end at whitespace/EOL)", () => {
-  assert.equal(slashSkillInstruction("/spec."), null);
-  assert.equal(slashSkillInstruction("/design?"), null);
+  assert.equal(parseFlowCommand("/spec."), null);
+  assert.equal(parseFlowCommand("/design?"), null);
 });
 
 test("uppercase tokens do not match the lowercase skill charset", () => {
-  assert.equal(slashSkillInstruction("/SPEC"), null);
+  assert.equal(parseFlowCommand("/SPEC"), null);
 });
 
 test("empty / whitespace-only input is literal", () => {
-  assert.equal(slashSkillInstruction(""), null);
-  assert.equal(slashSkillInstruction("   "), null);
+  assert.equal(parseFlowCommand(""), null);
+  assert.equal(parseFlowCommand("   "), null);
 });
 
+// --- /start -----------------------------------------------------------------
+
+test("/start is recognised bare and with an inline idea", () => {
+  assert.deepEqual(parseStartCommand("/start"), { inlineIdea: "" });
+  assert.deepEqual(parseStartCommand("  /start  "), { inlineIdea: "" });
+  assert.deepEqual(parseStartCommand("/start an expense tracker"), {
+    inlineIdea: "an expense tracker",
+  });
+});
+
+test("prose that merely mentions /start is not the command", () => {
+  assert.equal(parseStartCommand("where do I /start with the design?"), null);
+  assert.equal(parseStartCommand("/started"), null);
+});

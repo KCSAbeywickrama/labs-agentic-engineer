@@ -27,7 +27,7 @@
 import { randomUUID } from "node:crypto";
 import { openSession } from "@aep/playground/src/engine/session.js";
 import { runSpecTurn } from "@aep/playground/src/engine/turn.js";
-import { composePlanInstruction } from "@aep/playground/src/engine/compose.js";
+import { planSpec } from "@aep/playground/src/engine/turn-spec.js";
 import { tasksGate } from "@aep/playground/src/engine/gates.js";
 import { FsIssueStore, type FoldOutcome, type Issue } from "@aep/playground/src/ports/issue-store.js";
 import { saveProjectState } from "@aep/playground/src/state/project.js";
@@ -52,10 +52,9 @@ export async function runTaskPlanSection(projectDir: string): Promise<TaskPlanRu
     const store = new FsIssueStore(projectDir, session.state.slug);
     const rec = newTurnRecord("tasks", 1, "task-plan (one-shot)");
     const start = Date.now();
-    const result = await runSpecTurn(session, composePlanInstruction(store.planContextFiles()), {
+    const result = await runSpecTurn(session, planSpec(store.planContextFiles()), {
       useCase: "task-plan",
       conversationUuid: randomUUID(), // one-shot per plan turn, as production
-      toolset: "task-plan",
       foldToDisk: false,
       onPart: (part) => collectPart(rec, part),
     });

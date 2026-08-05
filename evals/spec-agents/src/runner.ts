@@ -29,13 +29,12 @@
 import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { openSession } from "@aep/playground/src/engine/session.js";
-import { startInstruction } from "@aep/playground/src/engine/compose.js";
-import { slashSkillInstruction } from "@aep/contracts/prompts";
+import { flowSpec, startSpec } from "@aep/playground/src/engine/turn-spec.js";
 
-// The design flow's expanded instruction — in production the SERVER expands
-// the /design token (#373); the evals compose turns without aep-api, so they
-// perform the same expansion here.
-const designInstruction = slashSkillInstruction("/design") as string;
+// The design flow, as a fact. In production aep-api classifies the /design
+// token; the evals run without aep-api, so they state the same thing directly —
+// and the agents service composes identical wording for both.
+const designTurn = flowSpec("design");
 import { PROJECTS_HOME } from "./config.js";
 import { prepareProject, readProjectFile } from "./project.js";
 import type { ChainScenario, DesignScenario, RequirementsScenario, Rubric, TasksScenario } from "./scenario.js";
@@ -193,7 +192,7 @@ export async function runRequirementsScenario(sc: RequirementsScenario, runName:
   const session = await openSession(projectDir, {});
   let run: SectionRunResult;
   try {
-    run = await runConversationalSection(session, "requirements", startInstruction(sc.brief.idea), sc.brief);
+    run = await runConversationalSection(session, "requirements", startSpec(sc.brief.idea), sc.brief);
   } finally {
     await session.close();
   }
@@ -208,7 +207,7 @@ export async function runDesignScenario(sc: DesignScenario, runName: string): Pr
   const session = await openSession(projectDir, {});
   let run: SectionRunResult;
   try {
-    run = await runConversationalSection(session, "design", designInstruction, sc.brief);
+    run = await runConversationalSection(session, "design", designTurn, sc.brief);
   } finally {
     await session.close();
   }
@@ -238,7 +237,7 @@ export async function runChainScenario(sc: ChainScenario, runName: string): Prom
   let designSkipped = false;
   let requirementsAnswers: SimAnswer[] = [];
   try {
-    const req = await runConversationalSection(session, "requirements", startInstruction(sc.brief.idea), sc.brief);
+    const req = await runConversationalSection(session, "requirements", startSpec(sc.brief.idea), sc.brief);
     records.push(...req.records);
     requirementsAnswers = req.answers;
     const reqOutcome = await scoreConversational(projectDir, req, sc.rubrics.requirements, []);
@@ -247,7 +246,7 @@ export async function runChainScenario(sc: ChainScenario, runName: string): Prom
     if (reqOutcome.verdict.band === "fail") {
       designSkipped = true;
     } else {
-      const design = await runConversationalSection(session, "design", designInstruction, sc.brief);
+      const design = await runConversationalSection(session, "design", designTurn, sc.brief);
       records.push(...design.records);
       const designOutcome = await scoreConversational(projectDir, design, sc.rubrics.design, requirementsAnswers);
       outcomes.push(designOutcome);
