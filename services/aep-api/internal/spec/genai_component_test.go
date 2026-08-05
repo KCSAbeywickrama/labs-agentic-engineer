@@ -697,8 +697,8 @@ func Test202Flow_PreviewOnlyAndStreamReplays(t *testing.T) {
 	if sent.req.FilesChangedExternally {
 		t.Error("first turn must not carry filesChangedExternally")
 	}
-	if !strings.HasPrefix(sent.req.Instruction, "tidy the requirements") {
-		t.Errorf("instruction = %q", sent.req.Instruction)
+	if sent.req.Turn.Kind != agentsvc.TurnKindChat || sent.req.Turn.Text != "tidy the requirements" {
+		t.Errorf("turn = %+v, want the user's text as a chat turn", sent.req.Turn)
 	}
 
 	// Stream replay: every non-manifest part + terminal + [DONE], id-stamped.
@@ -796,12 +796,14 @@ func TestGenericTurn_NoUseCase(t *testing.T) {
 	if sent.req.Workspace.ConversationID != wantConv || !strings.Contains(sent.path, wantConv) {
 		t.Errorf("namespaced conversation = %q (path %q), want %q", sent.req.Workspace.ConversationID, sent.path, wantConv)
 	}
-	// The one surviving steer (#373): the spec-paths rule, and nothing else.
-	if !strings.Contains(sent.req.Instruction, "Spec sources live under specs/") {
-		t.Errorf("instruction missing the spec-paths rule: %q", sent.req.Instruction)
+	// The BFF states facts and stops: no steering text of any kind rides the
+	// wire now (the spec-paths rule is the agents service's to append). The
+	// retired steers cannot come back through this door.
+	if sent.req.Turn.Kind != agentsvc.TurnKindChat || sent.req.Turn.Text != "touch the design" {
+		t.Errorf("turn = %+v, want the user's prose as a chat turn", sent.req.Turn)
 	}
-	if strings.Contains(sent.req.Instruction, "requirements draft") || strings.Contains(sent.req.Instruction, "list_org_endpoints") {
-		t.Errorf("turn carries retired steering: %q", sent.req.Instruction)
+	if strings.Contains(sent.req.Turn.Text, "requirements draft") || strings.Contains(sent.req.Turn.Text, "list_org_endpoints") {
+		t.Errorf("turn carries retired steering: %+v", sent.req.Turn)
 	}
 }
 
@@ -949,8 +951,8 @@ func TestCollabTurn_RoomScopedDispatchNoCommit(t *testing.T) {
 	// collabDepsSteer is retired (#373): the skills own dependency discovery,
 	// and MCP + WebSearch attachment (asserted above) is what the collab turn
 	// still guarantees.
-	if strings.Contains(sent.req.Instruction, "list_org_endpoints") {
-		t.Errorf("collab instruction carries the retired dependency-discovery steer: %q", sent.req.Instruction)
+	if strings.Contains(sent.req.Turn.Text, "list_org_endpoints") {
+		t.Errorf("collab turn carries the retired dependency-discovery steer: %+v", sent.req.Turn)
 	}
 	// external-dependency-discovery: a collab room-scoped turn also carries
 	// WebSearch:true, the same gate as MCP.
@@ -1000,8 +1002,8 @@ func TestMCPGate_AttachAndLeak(t *testing.T) {
 		if sent.req.MCP != nil {
 			t.Errorf("plain requirements-chat turn leaked an MCP block: %+v", sent.req.MCP)
 		}
-		if strings.Contains(sent.req.Instruction, "list_org_endpoints") {
-			t.Errorf("non-collab turn leaked the collab dependency-discovery steer: %q", sent.req.Instruction)
+		if strings.Contains(sent.req.Turn.Text, "list_org_endpoints") {
+			t.Errorf("non-collab turn leaked the collab dependency-discovery steer: %+v", sent.req.Turn)
 		}
 	})
 
@@ -1109,8 +1111,8 @@ func TestD20_FilesChangedExternallyAndDivergenceNote(t *testing.T) {
 	if !second.req.FilesChangedExternally {
 		t.Error("second dispatch must carry filesChangedExternally=true")
 	}
-	if strings.Contains(second.req.Instruction, "were NOT applied") {
-		t.Error("completed prior turn must not add the divergence note")
+	if second.req.PreviousTurnFailed {
+		t.Error("completed prior turn must not flag a previous failure")
 	}
 
 	// Turn 3 fails (severed) → turn 4 carries the divergence note.
@@ -1125,8 +1127,8 @@ func TestD20_FilesChangedExternallyAndDivergenceNote(t *testing.T) {
 	r.fake.mu.Unlock()
 	r.waitTerminal(t, r.startTurn(t, convUUID, "requirements-chat", "four"))
 	fourth := r.fake.sentTurn(t, 3)
-	if !strings.HasPrefix(fourth.req.Instruction, "Note: your previous turn's changes were NOT applied; the workspace reflects the repository state.") {
-		t.Errorf("divergence note missing: %q", fourth.req.Instruction)
+	if !fourth.req.PreviousTurnFailed {
+		t.Errorf("previousTurnFailed missing after a failed turn: %+v", fourth.req)
 	}
 }
 

@@ -22,6 +22,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -34,6 +35,15 @@ import (
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 	"github.com/wso2/aep/aep-api/internal/spec"
 )
+
+// contextPaths lists the task-context paths a dispatched plan turn carried.
+func contextPaths(turn agentsvc.TurnSpec) []string {
+	out := make([]string, 0, len(turn.TaskContext))
+	for _, f := range turn.TaskContext {
+		out = append(out, f.Path)
+	}
+	return out
+}
 
 func (p planVersions) BuildScopeAtTag(context.Context, string, string, string) (spec.BuildScope, error) {
 	return p.scope, nil
@@ -140,8 +150,10 @@ func TestPlanIntoMilestone_DispatchesWorkspaceShape(t *testing.T) {
 	}, "v1")
 	req := r.start(t)
 
-	if req.Toolset != "task-plan" {
-		t.Errorf("toolset = %q, want task-plan", req.Toolset)
+	// The tool set is DERIVED by the agents service from kind:"plan" — the BFF
+	// states what the turn is for and stops there.
+	if req.Turn.Kind != agentsvc.TurnKindPlan {
+		t.Errorf("turn kind = %q, want %q", req.Turn.Kind, agentsvc.TurnKindPlan)
 	}
 	ws := req.Workspace
 	if ws.Ref != r.fx.Origin.HeadSHA(t) {
@@ -178,11 +190,8 @@ func TestPlanIntoMilestone_DispatchesWorkspaceShape(t *testing.T) {
 	if _, err := os.Stat(skillsSnap + "/skills/task-planning/SKILL.md"); err != nil {
 		t.Errorf("task-planning flow skill missing from skills snapshot: %v", err)
 	}
-	if !strings.HasPrefix(req.Instruction, planInstruction) {
-		t.Errorf("instruction must start with the plan directive: %q", req.Instruction)
-	}
-	if strings.Contains(req.Instruction, "## Existing open Tasks") {
-		t.Errorf("no existing tasks — instruction must carry no context section: %q", req.Instruction)
+	if len(req.Turn.TaskContext) != 0 {
+		t.Errorf("no existing tasks — the turn must carry no task context: %+v", req.Turn.TaskContext)
 	}
 }
 
@@ -252,13 +261,13 @@ func TestPlanIntoMilestone_ContextIsTheMilestonesOwnWork(t *testing.T) {
 	if err := r.svc.PlanIntoMilestone(context.Background(), "org1", "proj1", 7); err != nil {
 		t.Fatalf("PlanIntoMilestone: %v", err)
 	}
-	instr := r.turn.req.Instruction
-	if !strings.Contains(instr, "--- tasks/201.md ---") {
-		t.Errorf("the milestone's own Task is missing from the plan context:\n%s", instr)
+	paths := contextPaths(r.turn.req.Turn)
+	if !slices.Contains(paths, "tasks/201.md") {
+		t.Errorf("the milestone's own Task is missing from the plan context: %v", paths)
 	}
 	for _, leaked := range []string{"tasks/202.md", "tasks/203.md", "tasks/199.md"} {
-		if strings.Contains(instr, leaked) {
-			t.Errorf("%s leaked into the plan context — only the milestone's agent work is context:\n%s", leaked, instr)
+		if slices.Contains(paths, leaked) {
+			t.Errorf("%s leaked into the plan context — only the milestone's agent work is context: %v", leaked, paths)
 		}
 	}
 }
@@ -301,12 +310,16 @@ func TestPlanIntoMilestone_DeltaScopeAndStamp(t *testing.T) {
 		t.Fatalf("PlanIntoMilestone: %v", err)
 	}
 
-	instr := r.turn.req.Instruction
-	if !strings.Contains(instr, "## Milestone scope — Phase 1 (spec v2)") {
-		t.Errorf("instruction missing the scope section: %q", instr)
+	scope := r.turn.req.Turn.Scope
+	if scope == nil {
+		t.Fatalf("turn carries no milestone scope")
 	}
-	if !strings.Contains(instr, "Story 1: As a user, I want A. — NEEDS TASKS") {
-		t.Errorf("instruction missing the uncovered story line: %q", instr)
+	if scope.Phase != 1 || scope.Tag != "v2" {
+		t.Errorf("scope = phase %d tag %q, want phase 1 tag v2", scope.Phase, scope.Tag)
+	}
+	want := agentsvc.PlanStory{Number: 1, Title: "As a user, I want A.", Covered: false}
+	if !slices.Contains(scope.Stories, want) {
+		t.Errorf("scope missing the uncovered story: %+v", scope.Stories)
 	}
 
 	created := r.issues.created

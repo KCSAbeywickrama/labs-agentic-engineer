@@ -53,21 +53,18 @@ const (
 	turnHeartbeatEvery = 15 * time.Second
 )
 
-// divergenceNote is the D20 note prepended to the next dispatch after a
-// FAILED turn: the conversation history claims work git never received.
-const divergenceNote = "Note: your previous turn's changes were NOT applied; the workspace reflects the repository state."
-
 // turnJob is everything the detached runner needs, captured at POST time
 // (identities, key, refs — D20: nothing is re-read from a request context).
 type turnJob struct {
 	turnID           string
 	orgID            string
 	projectID        string
-	flow             string // expanded `/<skill>` token ("start", "design", …); "" for plain chat
+	flow             string // recognised `/<skill>` token ("start", "design", …); "" for plain chat
 	conversationID   string // FE-chosen uuid (agent_turns key)
 	nsConversationID string // namespaced agents-service id
-	instruction      string // expanded instruction + spec-paths rule + target suffix
-	summary          string // raw user instruction (feed line subject)
+	turn             agentsvc.TurnSpec // what this turn is FOR (the agents service composes the text)
+	target           string            // spec-bundle path this turn should write to, when pinned
+	summary          string            // raw user instruction (feed line subject)
 	repoRef          sourcecontrol.RepoRef
 	baseRef          string
 	skillsRef        string
@@ -78,9 +75,6 @@ type turnJob struct {
 	// relays frames but folds nothing and commits nothing.
 	collabRoomID string
 	collabToken  string
-	// eagerSkills carries the server-decided flow skills (#335, #373) the
-	// agents service inlines into the turn's prompt up front.
-	eagerSkills []string
 }
 
 // runTurnSafe is the panic barrier around the detached turn goroutine: a panic
@@ -160,12 +154,13 @@ func (s *Service) mcpForTurn(ctx context.Context, job turnJob) *agentsvc.MCPBloc
 
 // executeTurn produces the turn's terminal state (never panics the goroutine).
 func (s *Service) executeTurn(ctx context.Context, job turnJob) TurnTerminal {
-	instruction := job.instruction
 	filesChangedExternally := false
-	// D20: filesChangedExternally is server-derived — the last terminal turn
-	// of this conversation landed a ref different from the current base (an
-	// Apply, another conversation's turn, or an external push moved main).
-	// A failed prior turn additionally gets the divergence note.
+	previousTurnFailed := false
+	// D20: both flags are server-derived — the last terminal turn of this
+	// conversation landed a ref different from the current base (an Apply,
+	// another conversation's turn, or an external push moved main), and/or it
+	// failed, leaving the conversation history claiming work git never
+	// received. The agents service turns each into its note.
 	if last, err := s.turns.LastTerminal(ctx, job.orgID, job.projectID, job.conversationID); err != nil {
 		slog.WarnContext(ctx, "genai: last-terminal lookup failed — dispatching without the D20 flags",
 			"turn", job.turnID, "error", err)
@@ -175,9 +170,7 @@ func (s *Service) executeTurn(ctx context.Context, job turnJob) TurnTerminal {
 			landed = last.BaseRef
 		}
 		filesChangedExternally = landed != job.baseRef
-		if last.Status == turnStatusFailed {
-			instruction = divergenceNote + "\n\n" + instruction
-		}
+		previousTurnFailed = last.Status == turnStatusFailed
 	}
 
 	var collab *agentsvc.CollabBlock
@@ -185,7 +178,7 @@ func (s *Service) executeTurn(ctx context.Context, job turnJob) TurnTerminal {
 		collab = &agentsvc.CollabBlock{RoomID: job.collabRoomID, Token: job.collabToken}
 	}
 	body, err := s.client.Turn(ctx, job.nsConversationID, job.orgID, job.anthropicKey, agentsvc.TurnRequest{
-		Instruction: instruction,
+		Turn: job.turn,
 		Workspace: agentsvc.WorkspaceRef{
 			ConversationID: job.nsConversationID,
 			TurnID:         job.turnID,
@@ -193,11 +186,12 @@ func (s *Service) executeTurn(ctx context.Context, job turnJob) TurnTerminal {
 			Ref:            job.baseRef,
 			SkillsRef:      job.skillsRef,
 		},
+		Target:                 job.target,
 		FilesChangedExternally: filesChangedExternally,
+		PreviousTurnFailed:     previousTurnFailed,
 		MCP:                    s.mcpForTurn(ctx, job),
 		WebSearch:              designOrCollabTurn(job),
 		Collab:                 collab,
-		EagerSkills:            job.eagerSkills,
 	})
 	if err != nil {
 		slog.WarnContext(ctx, "genai: turn dispatch failed", "turn", job.turnID, "error", err)

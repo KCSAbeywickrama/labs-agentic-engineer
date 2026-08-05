@@ -37,7 +37,6 @@ import (
 	"github.com/wso2/aep/aep-api/internal/clients/agentsvc"
 	"github.com/wso2/aep/aep-api/internal/platform/auth"
 	"github.com/wso2/aep/aep-api/internal/platform/secrets"
-	"github.com/wso2/aep/aep-api/internal/prompts"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 )
 
@@ -300,15 +299,14 @@ func (s *Service) StartTurn(ctx context.Context, orgID, projectID string, in Tur
 		return "", fmt.Errorf("resolve base ref: %w", err)
 	}
 
-	// Flow expansion (#373): `/<skill>` commands arrive VERBATIM and the server
-	// expands every one of them — the flow's eager skills are decided HERE, so
-	// a console CTA and a typed command produce byte-identical turns. `/start`
-	// is additionally enriched with the captured idea from
-	// specs/.agentic-engineer.toml, which no client parses and the agent cannot
-	// read (dot-led segments are stripped from every turn snapshot; an idea
-	// typed inline wins). Best-effort — no descriptor, no append, and the start
-	// skill asks the user instead.
-	instructionText, flow, eagerSkills := s.expandFlowInstruction(ctx, ref, baseRef, in.Instruction)
+	// Flow recognition (#373): `/<skill>` commands arrive VERBATIM and the
+	// server classifies them into a TurnSpec — WHAT the turn is for, never its
+	// wording (the agents service composes that). `/start` additionally carries
+	// the captured idea from specs/.agentic-engineer.toml, which no client
+	// parses and the agent cannot read (dot-led segments are stripped from
+	// every turn snapshot; an idea typed inline wins). Best-effort — no
+	// descriptor, no idea, and the start skill asks the user instead.
+	turnSpec, flow := s.turnSpecFor(ctx, ref, baseRef, in.Instruction)
 
 	// Skills resolve failures are typed: both arms mean the org's _skills repo
 	// is unusable right now (row missing/unprovisionable, or the backing repo
@@ -355,7 +353,8 @@ func (s *Service) StartTurn(ctx context.Context, orgID, projectID string, in Tur
 		flow:             flow,
 		conversationID:   in.ConversationID,
 		nsConversationID: namespacedID(repo, useCaseGeneral, in.ConversationID),
-		instruction:      instructionText + prompts.SpecPathsRule + targetSuffix(in.Target),
+		turn:             turnSpec,
+		target:           in.Target,
 		summary:          in.Instruction,
 		repoRef:          ref,
 		baseRef:          baseRef,
@@ -363,7 +362,6 @@ func (s *Service) StartTurn(ctx context.Context, orgID, projectID string, in Tur
 		anthropicKey:     key,
 		collabRoomID:     collabRoomID,
 		collabToken:      collabToken,
-		eagerSkills:      eagerSkills,
 	}
 	// Detached: the turn runs to completion (or a terminal failure) server-
 	// side regardless of the client connection (D16). runTurnSafe is the panic
@@ -491,11 +489,4 @@ func validConversationID(id string) bool {
 // extra segments.
 func namespacedID(repo *sourcecontrol.GitRepository, useCase, uuid string) string {
 	return agentsvc.ConversationID(repo.OrgID, repo.ProjectID, useCase, uuid)
-}
-
-func targetSuffix(target string) string {
-	if strings.TrimSpace(target) == "" {
-		return ""
-	}
-	return prompts.TargetSuffixPrefix + target + prompts.TargetSuffixClose
 }

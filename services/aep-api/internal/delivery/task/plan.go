@@ -33,24 +33,9 @@ import (
 	"github.com/wso2/aep/aep-api/internal/clients/agentsvc"
 	"github.com/wso2/aep/aep-api/internal/delivery"
 	"github.com/wso2/aep/aep-api/internal/platform/taskplan"
-	"github.com/wso2/aep/aep-api/internal/prompts"
 	"github.com/wso2/aep/aep-api/internal/spec"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 )
-
-// planInstruction is the plan-turn directive the BFF composes server-side
-// (§9.1: the request body is empty; the BFF assembles the whole generation
-// directive). Per the layer charter (#373) it carries ONLY the skill pointer,
-// the bundle paths, and the existing-Tasks fence — the planning invariants
-// live once in the task-plan system prompt, the mechanics once in the
-// task-planning skill. The text is a generated prompt string
-// (internal/prompts), authored once in packages/contracts/prompts/strings.json
-// for every Go and TS consumer. The design/requirements content is NOT inlined
-// — the agents service reads it from the workspace snapshot
-// (shared-workspace-volume D9); the existing-task renders + lineage diffs are
-// appended to this instruction (they are platform state, not repository files,
-// so they cannot ride in the snapshot — see renderPlanContext).
-const planInstruction = prompts.PlanInstruction
 
 // PlanService assembles the plan-turn context, starts the upstream turn, and
 // hands back a PlanSession the HTTP edge streams. One active plan turn per
@@ -257,7 +242,11 @@ func (s *PlanService) startPlanLocked(ctx context.Context, orgID, projectID stri
 	// Detached context so the turn drains even if the client disconnects (§6).
 	detached := context.WithoutCancel(ctx)
 	body, err := s.client.Turn(detached, conversationID, orgID, apiKey, agentsvc.TurnRequest{
-		Instruction: planInstruction + renderScopeContext(scope, covered) + renderPlanContext(contextFiles),
+		Turn: agentsvc.TurnSpec{
+			Kind:        agentsvc.TurnKindPlan,
+			Scope:       planScopeFor(scope, covered),
+			TaskContext: planContextFor(contextFiles),
+		},
 		Workspace: agentsvc.WorkspaceRef{
 			ConversationID: conversationID,
 			TurnID:         uuid.NewString(),
@@ -265,7 +254,6 @@ func (s *PlanService) startPlanLocked(ctx context.Context, orgID, projectID stri
 			Ref:            baseRef,
 			SkillsRef:      skillsRef,
 		},
-		Toolset: "task-plan",
 	})
 	if err != nil {
 		return nil, err // typed *agentsvc.UpstreamError (409 → plan_in_progress passthrough)
@@ -343,48 +331,41 @@ func (s *PlanService) assembleMilestoneTasks(ctx context.Context, orgID, project
 	return preload, slugs
 }
 
-// renderScopeContext renders the milestone's phase scope (#370) as the plan
-// turn's delta directive: which in-scope stories the existing Tasks already
-// cover, and which this plan must. Platform-computed — the model never
-// decides coverage. "" when the snapshot declares no phase.
-func renderScopeContext(scope spec.BuildScope, covered map[int]bool) string {
+// planScopeFor states the milestone's phase scope (#370) as facts: which
+// in-scope stories the existing Tasks already cover, and which this plan must.
+// Platform-computed — the model never decides coverage, and never sees this as
+// anything but the section the agents service renders from it. nil when the
+// snapshot declares no phase.
+func planScopeFor(scope spec.BuildScope, covered map[int]bool) *agentsvc.PlanScope {
 	if scope.Phase == 0 || len(scope.InScope) == 0 {
-		return ""
+		return nil
 	}
-	var sb strings.Builder
-	fmt.Fprintf(&sb, "\n\n## Milestone scope — Phase %d (spec %s)\n\n", scope.Phase, scope.Tag)
-	sb.WriteString("Plan Tasks so every story marked NEEDS TASKS below is covered. COVERED stories already have Tasks — leave them alone.\n\n")
+	stories := make([]agentsvc.PlanStory, 0, len(scope.InScope))
 	for _, n := range scope.InScope {
-		status := "NEEDS TASKS"
-		if covered[n] {
-			status = "COVERED"
-		}
-		title := scope.StoryTitles[n]
-		if title == "" {
-			fmt.Fprintf(&sb, "- Story %d — %s\n", n, status)
-		} else {
-			fmt.Fprintf(&sb, "- Story %d: %s — %s\n", n, title, status)
-		}
+		stories = append(stories, agentsvc.PlanStory{
+			Number:  n,
+			Title:   scope.StoryTitles[n],
+			Covered: covered[n],
+		})
 	}
-	return sb.String()
+	return &agentsvc.PlanScope{Phase: scope.Phase, Tag: scope.Tag, Stories: stories}
 }
 
-// renderPlanContext renders the milestone's existing-task context files as
-// deterministic instruction sections. They keep their historical tasks/<n>.md
-// names so the model's mental layout is unchanged.
-func renderPlanContext(files map[string]string) string {
+// planContextFor carries the milestone's existing-Task renders as facts, sorted
+// by path so the same inputs always produce the same turn. They keep their
+// historical tasks/<n>.md names so the model's mental layout is unchanged.
+func planContextFor(files map[string]string) []agentsvc.PlanContextFile {
 	if len(files) == 0 {
-		return ""
+		return nil
 	}
 	paths := make([]string, 0, len(files))
 	for p := range files {
 		paths = append(paths, p)
 	}
 	sort.Strings(paths)
-	var sb strings.Builder
-	sb.WriteString(prompts.PlanContextHeader)
+	out := make([]agentsvc.PlanContextFile, 0, len(paths))
 	for _, p := range paths {
-		fmt.Fprintf(&sb, "\n--- %s ---\n%s\n", p, files[p])
+		out = append(out, agentsvc.PlanContextFile{Path: p, Body: files[p]})
 	}
-	return sb.String()
+	return out
 }

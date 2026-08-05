@@ -49,7 +49,6 @@ import (
 
 	"github.com/BurntSushi/toml"
 
-	"github.com/wso2/aep/aep-api/internal/prompts"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 )
 
@@ -163,23 +162,4 @@ func (s *Service) readProjectIdea(ctx context.Context, ref sourcecontrol.RepoRef
 		return ""
 	}
 	return d.Idea
-}
-
-// ideaSteer is the server half of the idea channel: the text appended to the
-// expanded `/start` instruction so the turn carries what the user actually
-// asked for. A blank idea appends NOTHING — the turn is then byte-identical to
-// a bare skill load, and the start skill asks the user instead.
-//
-// The wording is neutral about provenance because the idea reaches here two
-// ways: typed inline (`/start an expense tracker`) or captured at project
-// creation and read back from the descriptor.
-//
-// The prefix is a generated prompt string (internal/prompts) — authored once
-// in packages/contracts/prompts/strings.json for every Go and TS consumer.
-func ideaSteer(idea string) string {
-	idea = strings.TrimSpace(idea)
-	if idea == "" {
-		return ""
-	}
-	return prompts.IdeaSteerPrefix + idea
 }
