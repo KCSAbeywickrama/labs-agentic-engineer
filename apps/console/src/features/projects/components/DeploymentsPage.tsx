@@ -30,7 +30,7 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import { ExternalLink } from "@wso2/oxygen-ui-icons-react";
-import { createLink, Link } from "@tanstack/react-router";
+import { Link } from "@tanstack/react-router";
 import { EmptyState } from "../../../components/EmptyState";
 import { PageHeader } from "../../../components/PageHeader";
 import { SectionTitle } from "../../../components/SectionTitle";
@@ -45,9 +45,7 @@ import {
   type DeploymentCard,
 } from "../lib/deploymentRows";
 import { projectChip } from "../lib/projectChip";
-import { CHIP_COLOR, validationView } from "../lib/pipeline";
-
-const LinkChip = createLink(Chip);
+import { ValidationChip } from "./ValidationChip";
 
 // Chip vocabulary for a card's state (#216): the label keeps the backend's
 // raw condition reason (it's the vocabulary operators see in OpenChoreo),
@@ -192,14 +190,11 @@ function BoardColumn({
   emptyText: string;
   projectName: string;
   version?: string;
-  // The whole-project validation run state for this environment (dev only).
-  // null = nothing to show; otherwise the chip opens the Validation page.
-  validation?: ReturnType<typeof validationView>;
+  // The whole-project validation run state for this environment (dev only), as
+  // the raw `deploy.validation` value — ValidationChip owns both the wording and
+  // the decision that there is nothing to show.
+  validation?: string;
 }) {
-  // Capitalize the shared lowercase label for the chip ("validating" → "Validating").
-  const validationLabel = validation
-    ? validation.label.charAt(0).toUpperCase() + validation.label.slice(1)
-    : "";
   return (
     <Box
       sx={{
@@ -226,17 +221,9 @@ function BoardColumn({
               />
             )}
             {validation && (
-              // Opens the top-level Validation page, which owns the report, the
-              // run log, and the issue/PR links across every lifecycle state.
-              <LinkChip
-                label={validationLabel}
-                size="small"
-                color={CHIP_COLOR[validation.tone]}
-                variant="outlined"
-                clickable
-                to="/projects/$projectName/validation"
-                params={{ projectName }}
-                title="Open validation"
+              <ValidationChip
+                projectName={projectName}
+                validation={validation}
               />
             )}
           </>
@@ -274,11 +261,10 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
   // dev ("v1"); the layout already runs this query, so the read is free.
   const status = useProjectStatus(projectName);
   const devVersion = status.data?.deploy.version || undefined;
-  // Whole-project validation runs against dev after components deploy; surface
-  // its coarse state on the Development column header. The chip opens the
-  // top-level Validation page, which owns the report, the run log, and the
-  // issue/PR links across every lifecycle state.
-  const devValidation = validationView(status.data?.deploy.validation ?? "");
+  // Whole-project validation runs against dev after components deploy, so its
+  // state belongs to the Development column header and nowhere else on the
+  // board. ValidationChip owns the rest.
+  const devValidation = status.data?.deploy.validation;
 
   // Unconditional, like Builds (Task 5): the back link and project status
   // stay reachable through every state below, not just the loaded board.
@@ -362,7 +348,7 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
           emptyText="Nothing in development yet."
           projectName={projectName}
           {...(devVersion && { version: devVersion })}
-          validation={devValidation}
+          {...(devValidation && { validation: devValidation })}
         />
         <BoardColumn
           title="Production"

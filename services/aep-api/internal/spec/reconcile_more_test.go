@@ -260,13 +260,20 @@ func TestLoadEmbeddedLibrary(t *testing.T) {
 	// Every top-level dir under skills/ is presently a well-formed skill, so
 	// the loader must carry all of them through. Derived from the tree itself
 	// (not a hardcoded literal) so this never needs bumping when a skill is
-	// added to or removed from skills/.
-	dirs, err := fs.ReadDir(fsys, ".")
+	// added to or removed from skills/. Loose files at the library root are not
+	// skills and are not counted — skills/AGENTS.md is one.
+	entries, err := fs.ReadDir(fsys, ".")
 	if err != nil {
 		t.Fatalf("read skills dir: %v", err)
 	}
-	if len(got) != len(dirs) {
-		t.Fatalf("library size = %d, want %d (dirs in skills/): %v", len(got), len(dirs), skillKeysOf(by))
+	skillDirs := 0
+	for _, e := range entries {
+		if e.IsDir() {
+			skillDirs++
+		}
+	}
+	if len(got) != skillDirs {
+		t.Fatalf("library size = %d, want %d (dirs in skills/): %v", len(got), skillDirs, skillKeysOf(by))
 	}
 	wantKinds := map[string]string{
 		"api-management": "org", "ballerina": "org", "go": "org", "react-webapp": "org",

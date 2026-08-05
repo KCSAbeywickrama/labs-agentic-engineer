@@ -68,6 +68,11 @@ type CycleStore interface {
 	Append(ctx context.Context, cycle *delivery.RunCycle) (cycleID string, err error)
 	NoteDispatch(ctx context.Context, cycleID, jobRef string) error
 	Finish(ctx context.Context, cycleID, mergeSHA string) error
+	// SetValidationVerdict records one validation ATTEMPT's outcome on its own cycle
+	// row, so a run that validated more than once keeps every attempt's answer
+	// rather than only the last. Written after Finish — the verdict comes from the
+	// report at the cycle's merge commit, which does not exist until it has one.
+	SetValidationVerdict(ctx context.Context, cycleID, verdict string, issue int) error
 	Latest(ctx context.Context, orgID, runID string) (*delivery.RunCycle, error)
 }
 
@@ -134,14 +139,29 @@ type ValidationCoordinator interface {
 	EnsureValidationIssue(ctx context.Context, orgID, projectID string, milestoneNumber int) (int, error)
 	// Verdict reads the validation runner's committed report AT `at` — the
 	// validation cycle's own merge commit — and returns one of the
-	// delivery.ValidationVerdict* values.
+	// delivery.ValidationVerdict* values, plus a DIGEST of the evidence it was
+	// derived from.
 	//
 	// The commit is not optional in spirit: the report lives at one fixed path
 	// that every run overwrites, so reading the branch tip returns the newest
 	// run's results regardless of which run is asking. A run whose agent shipped
 	// no report would inherit its predecessor's and be handed a confidently wrong
 	// verdict. An empty `at` still reads the tip, for a caller that has no commit.
-	Verdict(ctx context.Context, orgID, projectID, at string) (string, error)
+	//
+	// The digest exists so the loop can tell a repeat attempt that learned something
+	// from one that learned nothing. It covers the criteria and their outcomes ONLY,
+	// never the raw file — the report embeds the commit it was generated at, so a
+	// whole-file hash would differ on every attempt and could never match.
+	Verdict(ctx context.Context, orgID, projectID, at string) (verdict, digest string, err error)
+
+	// MintRepairIssues turns a `failed` attempt's report into ordinary work: one
+	// issue per failed criterion, filed into the milestone, which the next cycle
+	// picks out of the working set like any other. Returns the issue numbers.
+	//
+	// It reads the report at the same pinned commit the verdict came from. cycleID
+	// is the attempt's identity and becomes the issues' dedupe key, so a retry
+	// within one attempt files nothing new while the next attempt files fresh work.
+	MintRepairIssues(ctx context.Context, orgID, projectID string, milestoneNumber int, at, cycleID string) ([]int, error)
 }
 
 // Dispatcher launches one agent run over the milestone. It is the locally

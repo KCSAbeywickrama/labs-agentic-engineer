@@ -78,3 +78,7 @@ deployments/local-secret-manager-api/local-secret-manager-api
 # Local session artifacts — dev-tool config and working notes, not repo content
 /.agents/launch.json
 /docs/superpowers/
+
+# aider's local repo-map cache — a tool's scratch, never source.
+.aider.tags.cache.v*/
+.aider*

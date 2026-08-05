@@ -28,9 +28,11 @@ import (
 // reads are adapted from artifacts/files by the composition root so this package
 // imports neither.
 
-// IssueClient is the GitHub issue surface the minter needs: read one MILESTONE's
-// issues (to find the version's own aep:validation issue) and create the
-// validation issue into that milestone. sourcecontrol.IssueService satisfies it.
+// IssueClient is the GitHub issue surface this package needs: read one
+// MILESTONE's issues (to find the version's own aep:validation issue), create
+// issues into that milestone (the validation issue, and the repair issues a failed
+// attempt files), and reopen the validation issue for a repeat attempt.
+// sourcecontrol.IssueService satisfies it.
 //
 // The read is milestone-scoped rather than project-wide because the milestone is
 // the version pin: a project-wide question would answer with another version's
@@ -38,6 +40,11 @@ import (
 type IssueClient interface {
 	ListMilestoneIssues(ctx context.Context, orgID, projectID string, filter sourcecontrol.MilestoneIssuesFilter) ([]sourcecontrol.IssueInfo, error)
 	CreateIssue(ctx context.Context, orgID, projectID string, req sourcecontrol.CreateIssueRequest) (*sourcecontrol.IssueResult, error)
+	// ReopenIssue is needed because every validation attempt's pull request closes
+	// the validation issue with `Closes #<N>`. A repeat attempt must find that same
+	// issue and reopen it — re-filing would erase the version's oracle from the
+	// ledger and hand the next attempt a second issue to disagree with.
+	ReopenIssue(ctx context.Context, orgID, projectID string, number int) error
 }
 
 // CriteriaReader reads the acceptance oracle (specs/validation/validation-criteria.json)

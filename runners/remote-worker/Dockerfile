@@ -127,5 +127,15 @@ RUN npm ci --include=optional \
 # roughly double the image size).
 COPY --chown=aep:aep . .
 
+# The authored skill library. A session's base plugin is ASSEMBLED from it at
+# startup (lib/base_plugin.ts selects the runner's skills and applies the mode
+# overlay), so the runner reads the same repo-root skills/ the BFF seeds into org
+# skills repos — one authored source, two delivery mechanisms. Supplied as a
+# BuildKit named build context (`--build-context skills=<repo>/skills`) because
+# the library sits outside this image's build context; the dev flow and the
+# playground bind-mount their working tree over /app/skills, so a skill edit
+# never needs a rebuild.
+COPY --from=skills --chown=aep:aep . /app/skills
+
 USER aep
 ENTRYPOINT ["npx", "tsx", "src/oneshot.ts"]

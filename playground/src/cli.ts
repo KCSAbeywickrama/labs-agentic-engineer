@@ -88,6 +88,7 @@ function printUsage(): void {
       "  --restore         restore the latest undo snapshot before the run",
       "  --yes             headless consent for the coding agent (bypass-permissions)",
       "  --host            (code) run the coding agent as a bare host process, not the runner image",
+      "  --api-key         (code --host) authenticate with ANTHROPIC_API_KEY instead of your Claude login",
       "  --slow            (log) only the calls that took 3s or more, slowest first",
       "  --thinking        (log) the model's reasoning blocks (main agent only — subagents emit none)",
       "  --run <name>      (log) an older archived run instead of the newest",
@@ -96,7 +97,7 @@ function printUsage(): void {
       "Tracing: AI SDK DevTools is on by default — run `npx @ai-sdk/devtools` (port 4983).",
       "",
       "Example:",
-      '  pnpm play .projects/expense-app requirements --idea "Expense claim tracking app"',
+      '  pnpm play playground/.projects/expense-app requirements --idea "Expense claim tracking app"',
       "",
     ].join("\n"),
   );
@@ -268,6 +269,7 @@ async function main(): Promise<number> {
       restore: { type: "boolean" },
       yes: { type: "boolean" },
       host: { type: "boolean" },
+      "api-key": { type: "boolean" },
       slow: { type: "boolean" },
       thinking: { type: "boolean" },
       run: { type: "string" },
@@ -291,6 +293,7 @@ async function main(): Promise<number> {
     ...(values.restore ? { restore: true } : {}),
     ...(values.yes ? { yes: true } : {}),
     ...(values.host ? { host: true } : {}),
+    ...(values["api-key"] ? { apiKey: true } : {}),
     // `log` defaults to the per-step view; --slow and --thinking narrow it.
     ...(values.slow ? { view: "slow" as const } : values.thinking ? { view: "thinking" as const } : {}),
     ...(values.run ? { run: values.run } : {}),
@@ -306,7 +309,7 @@ async function main(): Promise<number> {
 
   // paths.ts is the single fence: relative paths resolve against the user's
   // invocation dir (INIT_CWD — pnpm rewrites the process cwd to the package),
-  // and inside the repo only the gitignored playground/projects/ subtree is
+  // and inside the repo only the gitignored playground/.projects/ subtree is
   // a legal project home.
   let projectDir = dirArg ? expandProjectPath(dirArg) : null;
   let createdProject = false;

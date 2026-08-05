@@ -82,6 +82,11 @@ func (h *Handler) ListSkills(ctx context.Context, _ gen.ListSkillsRequestObject)
 			// as disabled, so a toggle click sent "enable" for a skill that
 			// was already enabled and nothing appeared to happen.
 			Enabled: sum.Enabled,
+			// The console renders the toggle as unavailable rather than letting
+			// the PATCH 409 — a control that only fails is worse than one that
+			// explains itself. Served from the server's own list so the policy
+			// lives in one place (spec.RequiredSkills), not in the UI.
+			Required: spec.RequiredSkills[sum.Name],
 		})
 	}
 	return gen.ListSkills200JSONResponse(out), nil
@@ -223,7 +228,9 @@ func (h *Handler) DeleteSkill(ctx context.Context, request gen.DeleteSkillReques
 //
 // Deliberately NOT gated on editability. Availability is an org-admin call over
 // its own library, orthogonal to who may edit a skill's text — so a read-only
-// platform skill can still be switched off.
+// platform skill can still be switched off. The exception is spec.RequiredSkills:
+// the coding run reads its workflow out of the project mirror, so disabling those
+// would stop them being copied and every build in the org would refuse to start.
 func (h *Handler) SetSkillEnabled(ctx context.Context, request gen.SetSkillEnabledRequestObject) (gen.SetSkillEnabledResponseObject, error) {
 	org := tenant.BoundOrgFromContext(ctx)
 	if h.mut == nil {
@@ -265,6 +272,9 @@ func skillDetailBody(sk *spec.Skill, editable, deletable bool) gen.SkillDetailBo
 		// Read back from the manifest by loadCatalog, so the console can render
 		// the toggle's current state rather than guessing it.
 		Enabled: sk.Enabled,
+		// See the list projection: one source of truth for what may not be
+		// disabled, and it is the server's.
+		Required: spec.RequiredSkills[sk.Name],
 	}
 }
 
@@ -336,6 +346,14 @@ func mapSkillError(err error) error {
 		return apierr.Conflict(err.Error())
 	case errors.Is(err, spec.ErrSkillNotEditable):
 		return apierr.Forbidden("built-in skills are read-only")
+	case errors.Is(err, spec.ErrSkillRequired):
+		// Conflict, not Forbidden: the caller has every right to manage their
+		// library — this one skill just cannot be absent from it. The message says
+		// what breaks, because "forbidden" alone invites a retry.
+		return apierr.Conflict(
+			"this skill carries the coding run's workflow and cannot be disabled — " +
+				"every build in this organization would refuse to start without it",
+		)
 	case errors.Is(err, spec.ErrSkillNotFound):
 		return apierr.NotFound("skill not found")
 	}

@@ -17,7 +17,7 @@
  */
 
 import { useMemo } from "react";
-import { Alert, Box, Chip, Typography } from "@wso2/oxygen-ui";
+import { Alert, alpha, Box, Chip, Typography } from "@wso2/oxygen-ui";
 import { Check } from "@wso2/oxygen-ui-icons-react";
 import {
   parseValidationCriteria,
@@ -128,7 +128,10 @@ function CriterionRow({
 }) {
   const failed = report?.status === "fail";
   return (
-    <Box sx={{ py: 0.75 }}>
+    // RequirementCard draws the rule that separates rows; it lands on THIS box, so
+    // a failure block stays inside the criterion it belongs to instead of being cut
+    // off from its own assertion.
+    <Box sx={{ py: 1 }}>
       <Box sx={{ display: "flex", gap: 1.5, alignItems: "flex-start" }}>
         <Box sx={{ minWidth: 92, flexShrink: 0, pt: "1px" }}>
           <MethodBadge method={criterion.method} />
@@ -165,12 +168,20 @@ function CriterionRow({
             <Box
               component="pre"
               sx={{
-                mt: 0.5,
+                // `m: 0` first: it is a shorthand, so declaring it after `mt`
+                // silently overrode the gap this block is supposed to keep.
                 m: 0,
+                mt: 0.5,
                 p: 1,
                 borderRadius: 1,
-                bgcolor: "error.main",
-                color: (theme) => theme.palette.getContrastText(theme.palette.error.main),
+                // A wash, not a saturated fill. The state chip on the row above
+                // already says "failed", so the surface's job is to be READABLE —
+                // a stack trace is the longest text on the page and it was set in
+                // monospace on solid error.main. The tint composites over
+                // whichever surface is beneath it, so it holds in both themes;
+                // same idiom as StatusChip's soft tones.
+                bgcolor: (theme) => alpha(theme.palette.error.main, 0.08),
+                color: "text.primary",
                 fontFamily: "monospace",
                 fontSize: "0.75rem",
                 whiteSpace: "pre-wrap",
@@ -203,7 +214,10 @@ function RequirementCard({
         borderColor: "divider",
         borderRadius: 1,
         p: 2,
-        mb: 1.5,
+        // Twice the gap between two criteria (16px). These were both 12px, so a
+        // requirement boundary carried the same weight as a row boundary and the
+        // nesting was invisible in the rhythm.
+        mb: 3,
       }}
     >
       <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.75 }}>
@@ -212,7 +226,10 @@ function RequirementCard({
           {count} {count === 1 ? "criterion" : "criteria"}
         </Typography>
       </Box>
-      <Typography variant="body1" sx={{ fontWeight: 500, mb: count > 0 ? 1 : 0 }}>
+      <Typography
+        variant="body1"
+        sx={{ fontWeight: 500, mb: count > 0 ? 1.5 : 0 }}
+      >
         {requirement.statement}
       </Typography>
       {count === 0 ? (
@@ -220,9 +237,21 @@ function RequirementCard({
           No criteria.
         </Typography>
       ) : (
-        requirement.criteria.map((c) => (
-          <CriterionRow key={c.id} criterion={c} report={statuses?.get(c.id)} />
-        ))
+        // A rule on the TOP of every row, not between rows. Bottom-of-all-but-last
+        // left the first criterion as the only one with no boundary above it, so it
+        // read as belonging to the statement in a way its siblings did not — and it
+        // made a one-criterion requirement render with no rule at all. This way the
+        // statement is the card's header, every criterion is bounded the same, and
+        // the card's own border closes the list at the bottom.
+        //
+        // Owned here rather than by CriterionRow because it is a property of the
+        // LIST; the rows get their own box because the badge row and the statement
+        // above are their siblings.
+        <Box sx={{ "& > *": { borderTop: 1, borderColor: "divider" } }}>
+          {requirement.criteria.map((c) => (
+            <CriterionRow key={c.id} criterion={c} report={statuses?.get(c.id)} />
+          ))}
+        </Box>
       )}
     </Box>
   );
@@ -231,9 +260,15 @@ function RequirementCard({
 function ValidationBody({
   criteria,
   statuses,
+  noPadding,
+  fullWidth,
 }: {
   criteria: ValidationCriteria;
   statuses: ValidationReport | undefined;
+  /** Required, not optional: `exactOptionalPropertyTypes` is on, so the public
+   *  props are defaulted at the boundary rather than forwarded as `undefined`. */
+  noPadding: boolean;
+  fullWidth: boolean;
 }) {
   const { requirements } = criteria;
   // Per-method tally for the summary header, kept in a stable order. The
@@ -259,8 +294,18 @@ function ValidationBody({
 
   const reqCount = requirements.length;
   return (
-    <Box sx={{ height: "100%", overflow: "auto", p: 3 }}>
-      <Box sx={{ maxWidth: 960, mx: "auto" }}>
+    // `height`/`overflow` are the file-pane contract and stay unconditional: on a
+    // page they are inert (PageContent's inner box has auto height, so the
+    // percentage resolves to auto and nothing ever scrolls here). Only `p: 3`
+    // renders differently between the two consumers, so only it is switched.
+    <Box
+      sx={{
+        height: "100%",
+        overflow: "auto",
+        ...(noPadding ? {} : { p: 3 }),
+      }}
+    >
+      <Box sx={fullWidth ? undefined : { maxWidth: 960, mx: "auto" }}>
         <Typography variant="h4" sx={{ fontWeight: 700, lineHeight: 1.2 }}>
           Validation Criteria
         </Typography>
@@ -312,9 +357,33 @@ export interface ValidationViewProps {
    * plus failure detail. Absent → the plain oracle (the Spec-view preview).
    */
   report?: string;
+  /**
+   * The consumer owns the padding. Default off, because this view's first home is
+   * the Spec view's file pane, which hands each renderer an unpadded box — the
+   * same contract OpenApiView is written to. A PAGE owns its own edges and its own
+   * rhythm, so a page consumer opts out instead of the view guessing.
+   */
+  noPadding?: boolean;
+  /**
+   * Fill the consumer's width instead of centring the criteria in a 960px reading
+   * column. Default off, for the same reason as `noPadding`: in the Spec view this
+   * is a file preview beside a 280px file list, where a measured column reads
+   * better than prose stretched across the pane. A console PAGE is the opposite —
+   * no page in this app caps its body (see BuildsPage, DeploymentsPage), and
+   * PageContent already supplies the outer 1400px cap and the centring.
+   *
+   * Separate from `noPadding` on purpose: a prop named for padding should not also
+   * govern width. Oxygen's own PageContent draws the same line.
+   */
+  fullWidth?: boolean;
 }
 
-export function ValidationView({ criteria, report }: ValidationViewProps) {
+export function ValidationView({
+  criteria,
+  report,
+  noPadding = false,
+  fullWidth = false,
+}: ValidationViewProps) {
   const parsed = useMemo(() => parseValidationCriteria(criteria), [criteria]);
   // The report is optional and tolerant: a bad report never blocks the oracle —
   // it degrades to a non-blocking warning below and the criteria still render.
@@ -329,7 +398,7 @@ export function ValidationView({ criteria, report }: ValidationViewProps) {
 
   if ("kind" in parsed) {
     return (
-      <Box sx={{ p: 3 }}>
+      <Box sx={noPadding ? {} : { p: 3 }}>
         <Alert severity="error">
           Couldn't parse validation-criteria.json: {parsed.message}
         </Alert>
@@ -339,13 +408,18 @@ export function ValidationView({ criteria, report }: ValidationViewProps) {
   return (
     <>
       {reportError && (
-        <Box sx={{ px: 3, pt: 2 }}>
+        <Box sx={noPadding ? {} : { px: 3, pt: 2 }}>
           <Alert severity="warning">
             Couldn't parse the validation report: {reportError.message}
           </Alert>
         </Box>
       )}
-      <ValidationBody criteria={parsed} statuses={statuses} />
+      <ValidationBody
+        criteria={parsed}
+        statuses={statuses}
+        noPadding={noPadding}
+        fullWidth={fullWidth}
+      />
     </>
   );
 }

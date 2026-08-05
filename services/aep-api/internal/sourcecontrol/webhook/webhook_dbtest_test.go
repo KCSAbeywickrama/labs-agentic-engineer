@@ -235,6 +235,9 @@ func (f *fakeIssueSvc) GetIssue(context.Context, string, string, int) (*sourceco
 func (f *fakeIssueSvc) CloseIssue(context.Context, string, string, int, string) error {
 	panic("fakeIssueSvc: CloseIssue not expected")
 }
+func (f *fakeIssueSvc) ReopenIssue(context.Context, string, string, int) error {
+	panic("fakeIssueSvc: ReopenIssue not expected")
+}
 func (f *fakeIssueSvc) EditIssueBody(context.Context, string, string, int, string) error {
 	panic("fakeIssueSvc: EditIssueBody not expected")
 }

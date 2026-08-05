@@ -143,7 +143,11 @@ export function ValidationPage({
   const rawVerdict = run?.validation?.verdict ?? "";
   const verdict = validationView(rawVerdict);
   const reportPath = run?.validation?.reportPath ?? "";
-  const validationCycle = run?.cycles?.find((c) => c.kind === "validation");
+  // The LAST validation cycle, not the first. A run can validate more than once —
+  // a failed attempt is repaired and re-validated — and the run's verdict is its
+  // latest attempt's. `find` returns the OLDEST match, which would pair attempt 1's
+  // merge commit (and so attempt 1's report) with attempt 2's verdict.
+  const validationCycle = run?.cycles?.filter((c) => c.kind === "validation").at(-1);
   // The cycle carries the pull request's page as the webhook reported it. This
   // page used to build one from the project's repoUrl and the number, which is a
   // CLONE url — a `.git` suffix produced a link that 404s.
@@ -284,57 +288,68 @@ export function ValidationPage({
     );
   }
 
-  if (showLogs) {
-    return (
-      <>
-        {header}
-        {tile}
-        <RunFeed
-          projectName={projectName}
-          runId={run.id}
-          cycleKinds={VALIDATION_CYCLE}
-        />
-      </>
-    );
-  }
+  // The two bodies, computed rather than returned, so ONE container below owns
+  // every inset and every gap. Each used to return its own fragment and rely on
+  // whatever spacing its children happened to carry: the report body got 24px from
+  // ValidationView's own padding, the log feed got none, and the tile inset itself
+  // — so the log sat 24px outside the tile and butted straight against it.
+  const body = showLogs ? (
+    <RunFeed
+      projectName={projectName}
+      runId={run.id}
+      cycleKinds={VALIDATION_CYCLE}
+    />
+  ) : criteria.isPending || (!criteria.isError && !criteria.data) ? (
+    <Box sx={{ display: "flex", justifyContent: "center", p: 6 }}>
+      <CircularProgress aria-label="Loading validation report" />
+    </Box>
+  ) : criteria.isError ? (
+    <Alert
+      severity="error"
+      action={<Button onClick={() => void criteria.refetch()}>Retry</Button>}
+    >
+      Failed to load the validation criteria
+      {criteria.error instanceof Error && criteria.error.message
+        ? `: ${criteria.error.message}`
+        : ""}
+    </Alert>
+  ) : (
+    <>
+      {/* Only for a verdict that EXPECTED a report. `unreported` already said so,
+          in the tile, with its cause — repeating it as a vague note would be
+          weaker and say it twice. */}
+      {report.isError && !missingReport && (
+        <Alert severity="info">
+          The run reached a verdict but its report wasn't found — showing the
+          criteria without per-criterion results.
+        </Alert>
+      )}
+      {/* The page owns its edges and its width, the same way SpecView says
+          `<PageContent fullWidth noPadding>`: this view pads itself and centres a
+          960px reading column for the Spec file pane, and a page wants neither —
+          no page in this console caps its body, and PageContent already supplies
+          the outer cap and the centring. */}
+      <ValidationView
+        noPadding
+        fullWidth
+        criteria={criteria.data.content}
+        {...(report.data ? { report: report.data.content } : {})}
+      />
+    </>
+  );
 
   return (
     <>
       {header}
-      {tile}
-      {criteria.isPending || (!criteria.isError && !criteria.data) ? (
-        <Box sx={{ display: "flex", justifyContent: "center", p: 6 }}>
-          <CircularProgress aria-label="Loading validation report" />
-        </Box>
-      ) : criteria.isError ? (
-        <Alert
-          severity="error"
-          action={<Button onClick={() => void criteria.refetch()}>Retry</Button>}
-        >
-          Failed to load the validation criteria
-          {criteria.error instanceof Error && criteria.error.message
-            ? `: ${criteria.error.message}`
-            : ""}
-        </Alert>
-      ) : (
-        <>
-          {/* Only for a verdict that EXPECTED a report. `unreported` already
-              said so, in the tile, with its cause — repeating it as a vague note
-              would be weaker and say it twice. */}
-          {report.isError && !missingReport && (
-            <Box sx={{ px: 3, pt: 2 }}>
-              <Alert severity="info">
-                The run reached a verdict but its report wasn't found — showing
-                the criteria without per-criterion results.
-              </Alert>
-            </Box>
-          )}
-          <ValidationView
-            criteria={criteria.data.content}
-            {...(report.data ? { report: report.data.content } : {})}
-          />
-        </>
-      )}
+      {/* A Stack, not margins on the children: VerdictTile renders NOTHING for a
+          verdict outside its five, and a Stack given no DOM node for `tile` leaves
+          no phantom gap — which a `mb` on the tile could not express. A fragment
+          body contributes no node either, so its Alert and the view below it are
+          both direct children and both get the same rhythm. */}
+      <Stack spacing={3}>
+        {tile}
+        {body}
+      </Stack>
     </>
   );
 }

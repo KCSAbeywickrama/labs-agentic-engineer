@@ -34,7 +34,29 @@ var (
 	ErrSkillNotFound = errors.New("skill not found")
 	// ErrSkillNameCollision is returned when a create reuses a visible name.
 	ErrSkillNameCollision = errors.New("skill name already in use")
+	// ErrSkillRequired is returned when a PATCH tries to disable a skill the
+	// coding runner cannot start without. See RequiredSkills.
+	ErrSkillRequired = errors.New("skill is required by every coding run and cannot be disabled")
 )
+
+// RequiredSkills names the skills the coding runner reads out of the project
+// mirror on EVERY run, whatever the design pinned. `aep` is the run's procedure
+// and `aep-validation` replaces its run section for a validation task.
+//
+// Availability is deliberately not gated on `editable` — an org admin may
+// withhold a read-only platform skill from their own library, and that is the
+// right default. These two are the exception, because the mirror is the only
+// place a run gets its workflow from: disabling `aep` would stop it being
+// copied, and every build in the org would then refuse to start (the runner
+// fails fast rather than improvise — `requireWorkflowBodies`).
+//
+// Refused here rather than force-copied in desiredMirror on purpose. Copying a
+// disabled skill anyway would leave the console showing `aep` as off while every
+// build loaded it, which makes the flag a lie; a refusal tells the admin why.
+var RequiredSkills = map[string]bool{
+	"aep":            true,
+	"aep-validation": true,
+}
 
 // maxSkillBytes caps total skill size (SKILL.md + references). Matches the
 // design's 400 KB ceiling.
@@ -283,10 +305,13 @@ func (m *SkillMutationService) Delete(ctx context.Context, orgID, actor, name st
 // kind — platform-shipped or org-authored, editable or not — because
 // availability is an org-admin call, orthogonal to the content-edit guard
 // that gates PUT/DELETE. Returns ErrSkillNotFound when the name resolves to
-// no row at all.
+// no row at all, and ErrSkillRequired for the coding run's own workflow.
 func (m *SkillMutationService) SetEnabled(ctx context.Context, orgID, actor, name string, enabled bool) (*Skill, error) {
 	if m == nil || m.skills == nil {
 		return nil, fmt.Errorf("skill mutation service: not configured")
+	}
+	if !enabled && RequiredSkills[name] {
+		return nil, fmt.Errorf("%w: %s", ErrSkillRequired, name)
 	}
 	existing, err := m.skills.Resolve(ctx, orgID, name)
 	if err != nil {

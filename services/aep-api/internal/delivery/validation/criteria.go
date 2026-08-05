@@ -70,6 +70,21 @@ func parseCriteria(raw []byte) (*criteriaDoc, error) {
 	return &doc, nil
 }
 
+// mustByID flattens the oracle to criterion id → its `must` text. Used to give a
+// repair issue the requirement the failed criterion was asserting, which the run
+// report does not carry.
+func (d *criteriaDoc) mustByID() map[string]string {
+	out := make(map[string]string)
+	for _, r := range d.Requirements {
+		for _, c := range r.Criteria {
+			if c.ID != "" {
+				out[c.ID] = c.Must
+			}
+		}
+	}
+	return out
+}
+
 // summarize tallies criteria by method — mirrors
 // scripts/create-validation-issue.mjs:summarize.
 func (d *criteriaDoc) summarize() criteriaSummary {

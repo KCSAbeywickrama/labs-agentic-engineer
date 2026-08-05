@@ -394,6 +394,18 @@ func (c *Client) EditIssueTitle(ctx context.Context, owner, repo string, cred se
 	return c.doJSON(ctx, http.MethodPatch, url, "issue title edit", cred, map[string]string{"title": title}, nil, http.StatusOK)
 }
 
+// ReopenIssue sets the issue state back to open via PATCH /issues/{number}. The
+// inverse of CloseIssue, and it deliberately clears no state_reason: GitHub drops
+// the closed reason itself on reopen, and naming one here would be inventing a
+// reason for an issue that has none.
+//
+// Reopening an already-open issue is a 200 no-op on GitHub's side, so callers need
+// no read-before-write.
+func (c *Client) ReopenIssue(ctx context.Context, owner, repo string, cred secrets.Credential, number int) error {
+	url := fmt.Sprintf(c.apiBase+"/repos/%s/%s/issues/%d", owner, repo, number)
+	return c.doJSON(ctx, http.MethodPatch, url, "issue reopen", cred, map[string]string{"state": "open"}, nil, http.StatusOK)
+}
+
 // SetIssueMilestone assigns an existing issue to a milestone via
 // PATCH /issues/{number}. The value is the milestone NUMBER — GitHub answers
 // 422 to a title here, and the number is the only stable key anyway. Used by

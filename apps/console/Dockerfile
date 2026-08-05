@@ -95,9 +95,13 @@ RUN chmod +x /docker-entrypoint.sh
 # temp paths to /var/lib/nginx/tmp/*, owned by the distro `nginx` user. UID 10001
 # must own that tree or boot fails with:
 #   mkdir() "/var/lib/nginx/tmp/client_body" failed (13: Permission denied)
-# Official nginx image temps under /var/cache/nginx — chown both. The official
-# image doesn't ship /var/lib/nginx, so create it first (mkdir -p is a no-op
-# when the distro package already made it).
+# Official nginx image temps under /var/cache/nginx — chown both.
+#
+# /var/lib/nginx is CREATED first because the official `nginx:*-alpine` base does
+# not ship it — only the apk package does. Without the mkdir, `chown -R` on a
+# missing path fails the build outright, so the overlay this line exists for could
+# never be reached. Creating it is correct for both cases: owned by 10001 up front,
+# whether or not a later `apk upgrade nginx` populates it.
 RUN mkdir -p /var/lib/nginx && \
     chown -R 10001:10001 /var/cache/nginx && \
     chown -R 10001:10001 /var/log/nginx && \

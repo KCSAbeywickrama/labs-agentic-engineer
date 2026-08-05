@@ -114,6 +114,12 @@ function readDispatchFromEnv(): DispatchRequest {
     mcpUrl: mcpUrl || undefined,
     mcpToken: mcpToken || undefined,
     taskKind,
+    // OFF unless a human opts this pod in. The sinks are files in a workspace
+    // nothing collects, so in the cluster they are write-only — and the debug
+    // log holds prompt text. The opt-in exists because a stall that only
+    // reproduces here would otherwise be undiagnosable: set AEP_RUNNER_DEBUG=1
+    // on the Job and read the files off the pod before it exits.
+    debug: process.env.AEP_RUNNER_DEBUG === "1",
   };
 }
 
@@ -196,7 +202,7 @@ async function main(): Promise<number> {
   // the copies actually on disk. A dangling pin is warned about and skipped,
   // never fatal — the guidance is missing, which degrades the build, but
   // aborting loses it entirely. If `.claude/skills/` is absent altogether the
-  // run proceeds with the base plugin only.
+  // run proceeds with the workflow skill only.
   //
   // Scope: an implementation run is a MILESTONE cycle — one branch, one PR,
   // any component in the milestone — so it takes the union of every component's
@@ -204,7 +210,7 @@ async function main(): Promise<number> {
   // must not be used to pick a design file. A validation run applies no design
   // skills at all: it is black-box verification driven by the `aep-validation`
   // skill (AEP_TASK_KIND), and builds nothing.
-  // A validation run stays at the base plugin: no mirror is allowed and nothing
+  // A validation run applies no DESIGN skills: nothing is pinned and nothing
   // is pinned, so the allowlist below leaves the design skills out entirely.
   let availableSkillNames: string[] = [];
   let pinnedBodies = "";
@@ -253,10 +259,19 @@ async function main(): Promise<number> {
   }
 
   const log = openTaskLog(layout.workspace);
-  const { completion } = runClaudeQuery(req, layout, log, {
-    availableSkillNames,
-    pinnedBodies,
-  });
+  let completion: Promise<{ exitCode: number }>;
+  try {
+    ({ completion } = runClaudeQuery(req, layout, log, { availableSkillNames, pinnedBodies }));
+  } catch (err) {
+    // The mirror carries no workflow skill (see requireWorkflowBodies), so this
+    // run has no procedure to follow. Fail the build rather than let the agent
+    // improvise one and report success — the mirror's writes are best-effort by
+    // design, and this is the point where the cause is still obvious.
+    const msg = err instanceof Error ? err.message : String(err);
+    emit({ kind: "result", status: "failure", error: `skills: ${msg}` });
+    console.error(`[oneshot] ${msg}`);
+    return 2;
+  }
   const result = await completion;
   return result.exitCode;
 }
