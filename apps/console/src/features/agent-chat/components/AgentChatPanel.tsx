@@ -457,32 +457,10 @@ export function AgentChatPanel({
         </Box>
       </Box>
 
-      {/* Actions menu (#372): every scoped launcher in one place. Direct-send
-          items start their interview immediately; prefill items need the
-          user's subject first. */}
-      <Box sx={{ px: 1.5, pt: 1 }}>
-        <Button
-          size="small"
-          variant="outlined"
-          onClick={(e: React.MouseEvent<HTMLElement>) => setActionsAnchor(e.currentTarget)}
-          disabled={inputDisabled}
-        >
-          Actions ▾
-        </Button>
-        <Menu anchorEl={actionsAnchor} open={actionsAnchor !== null} onClose={() => setActionsAnchor(null)}>
-          <MenuItem onClick={() => runAction("/amend Add a feature")}>+ Feature</MenuItem>
-          <MenuItem onClick={() => runAction("/amend Add an actor")}>+ Actor</MenuItem>
-          <MenuItem onClick={() => runAction(null, "/amend Go deeper on ")}>Go deeper on…</MenuItem>
-          <MenuItem onClick={() => runAction("/amend Resolve the open questions")}>
-            Resolve open questions
-          </MenuItem>
-          <MenuItem onClick={() => runAction("/design Start the next phase — delta pass, protect shipped components")}>
-            Start next phase
-          </MenuItem>
-        </Menu>
-      </Box>
-
-      {/* Composer */}
+      {/* Composer — the Actions menu (#372) leads the context row, so every
+          scoped launcher sits with the input it feeds. Direct-send items start
+          their interview immediately; prefill items need the user's subject
+          first. */}
       <ChatInput
         value={draft}
         onChange={setDraft}
@@ -490,6 +468,34 @@ export function AgentChatPanel({
         disabled={inputDisabled}
         contextLabel={displayName ?? projectName}
         hint={hint}
+        actions={
+          <>
+            <Button
+              size="small"
+              variant="outlined"
+              onClick={(e: React.MouseEvent<HTMLElement>) => setActionsAnchor(e.currentTarget)}
+              disabled={inputDisabled}
+              sx={{ flexShrink: 0 }}
+            >
+              Actions ▾
+            </Button>
+            <Menu
+              anchorEl={actionsAnchor}
+              open={actionsAnchor !== null}
+              onClose={() => setActionsAnchor(null)}
+            >
+              <MenuItem onClick={() => runAction("/amend Add a feature")}>+ Feature</MenuItem>
+              <MenuItem onClick={() => runAction("/amend Add an actor")}>+ Actor</MenuItem>
+              <MenuItem onClick={() => runAction(null, "/amend Go deeper on ")}>Go deeper on…</MenuItem>
+              <MenuItem onClick={() => runAction("/amend Resolve the open questions")}>
+                Resolve open questions
+              </MenuItem>
+              <MenuItem onClick={() => runAction("/design Start the next phase — delta pass, protect shipped components")}>
+                Start next phase
+              </MenuItem>
+            </Menu>
+          </>
+        }
       />
     </Box>
   );
