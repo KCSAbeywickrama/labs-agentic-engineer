@@ -95,8 +95,11 @@ RUN chmod +x /docker-entrypoint.sh
 # temp paths to /var/lib/nginx/tmp/*, owned by the distro `nginx` user. UID 10001
 # must own that tree or boot fails with:
 #   mkdir() "/var/lib/nginx/tmp/client_body" failed (13: Permission denied)
-# Official nginx image temps under /var/cache/nginx — chown both.
-RUN chown -R 10001:10001 /var/cache/nginx && \
+# Official nginx image temps under /var/cache/nginx — chown both. The official
+# image doesn't ship /var/lib/nginx, so create it first (mkdir -p is a no-op
+# when the distro package already made it).
+RUN mkdir -p /var/lib/nginx && \
+    chown -R 10001:10001 /var/cache/nginx && \
     chown -R 10001:10001 /var/log/nginx && \
     chown -R 10001:10001 /var/lib/nginx && \
     chown -R 10001:10001 /etc/nginx && \
