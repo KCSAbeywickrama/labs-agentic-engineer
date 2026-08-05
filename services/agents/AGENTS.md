@@ -17,6 +17,10 @@ against the wire `*Input` types there. See `design/`
 (`ADR-0001-anchored-file-edits.md`, `ADR-0002-skills-progressive-disclosure.md`,
 `agent-loop.md`).
 
+**Prompt wording lives HERE** (`src/prompts/`, ADR-0003): callers state facts on
+a `TurnSpec` and this service composes the instruction. Nothing outside this
+service holds prompt text — see `src/prompts/README.md`.
+
 **Skills** are guidance (not code): the service shows a name+description **catalog**
 at the end of the system prompt, and the agent pulls a body on demand via the
 **`loadSkill`** tool — both built over the `SkillSource` seam
@@ -39,15 +43,16 @@ absent audience means every audience, so unmarked and org-authored skills are
 unaffected — and a library with nothing pin-only renders the catalog
 byte-identically, preserving the cached instruction prefix.
 
-**Tool sets** (`TurnRequest.toolset`, tasks-github-native §9.3): the turn selects
-which domain tools the generic loop registers. `files` (default, and identical to
+**Tool sets** (derived from `TurnSpec.kind`, tasks-github-native §9.3): the turn
+selects which domain tools the generic loop registers. `files` (default, and identical to
 an absent value) is the file-mutation set (`src/agents/main/tools/files.ts`) over a
-`FileBundle` — nothing changes for the generation flows. `task-plan`
+`FileBundle` — the generation flows. `task-plan`
 (`tools/task-plan.ts`) registers `planTask`/`updateTask` over a per-turn `TaskPlan`
 accumulator (`task-plan-accumulator.ts`) and NO file tools; `files` then carries
 READ-ONLY context (the spec/design bundle + one `tasks/<issueNumber>.md` rendering
-per existing open Task) and nothing mutates it. Selection lives in
-`run-conversation-turn.ts` (the loop stays generic); the shared skill loaders
+per existing open Task) and nothing mutates it. `kind: "plan"` selects `task-plan`; every other kind selects `files`. Callers do
+not send a tool set — two ways to say what a turn is for is two ways to
+disagree. Selection lives in `run-conversation-turn.ts` (the loop stays generic); the shared skill loaders
 (`tools/skill-tools.ts`) attach to either set. `execute()` validates + accumulates
 only — the service never touches GitHub; the BFF plan tap performs the issue writes
 off the stream. The plan tool contract (inputs, results, error codes, the
@@ -61,9 +66,11 @@ off the stream. The plan tool contract (inputs, results, error codes, the
 - **No boot-time Anthropic key**: the model is built per turn from the
   `X-Anthropic-Key` header (missing → 400). `X-Org-Id` is LOAD-BEARING: the
   conversation's `org_` segment must equal it (403 otherwise — the §12 fence).
-- **One turn shape**: `workspace` (IDs + shas; files/skills read from
-  `WORKSPACE_MOUNT_ROOT` snapshots via `snapshot-path.ts` +
-  `load-workspace.ts`). Inline `files`/`skills` in the body → 400.
+- **One turn shape**: `turn` (a `TurnSpec` — what the turn is FOR) + `workspace`
+  (IDs + shas; files/skills read from `WORKSPACE_MOUNT_ROOT` snapshots via
+  `snapshot-path.ts` + `load-workspace.ts`). Inline `files`/`skills`, a
+  pre-composed `instruction`, or a caller-chosen `toolset`/`eagerSkills` in the
+  body → 400.
   Every successful turn ends with a terminal `manifest` frame (D14:
   mutated-paths → sha256) before `[DONE]`; a failed/severed stream has none.
 - **M2M gate is always on**: set `AGENT_JWT_JWKS_URL` (RS256) **or**

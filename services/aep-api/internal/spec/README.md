@@ -84,13 +84,15 @@ the genai turn engine (runner/broker/sweeper), and the files / design / skills s
 - **The project descriptor** (`specs/.agentic-engineer.toml`, `descriptor.go`) — the marker identifying a
   repo as an Agentic Engineer project, carrying the idea the user gave at creation. Written by `projects`
   at create through the `DescriptorWriter` port (best-effort: a failed write never fails the create) and
-  read back here to enrich `/start`. TOML rather than the YAML/JSON used elsewhere because its one
+  read back here to put the idea on a `/start` turn. TOML rather than the YAML/JSON used elsewhere because its one
   load-bearing field is a paragraph of free text a user typed — a real encoder keeps quotes, backslashes
   and newlines intact.
-- **Flow-command expansion** (`start_command.go`) — every `/<skill>` command arrives VERBATIM and the
-  server expands it, deciding the flow's eager skills (start/amend → grilling + organization, design →
-  design) so a console CTA and a typed command produce byte-identical turns. `/start` is additionally
-  enriched with the descriptor's idea, which only the server can read.
+- **Flow-command recognition** (`start_command.go`) — every `/<skill>` command arrives VERBATIM and the
+  server classifies it into an `agentsvc.TurnSpec`: what the turn is FOR, never its wording. `/start`
+  additionally carries the descriptor's idea, which only the server can read. The agents service composes
+  the instruction and derives the flow's eager skills from the spec, so a console CTA, a typed command and
+  a playground run produce identical turns (services/agents/design/ADR-0003). This domain holds NO prompt
+  text; the flow token is kept here because it also gates web search and MCP minting for design turns.
 - **Persistence**: the `agent_turns` gorm lives in this domain (`repository_turn.go` over the
   `agent_turn.go` entity), single write-authority. Spec content itself is not gorm — it lives in git,
   reached through sourcecontrol's `Workspace`/gitfs engine.

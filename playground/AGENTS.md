@@ -59,7 +59,7 @@ creating silently), and a NEWLY created project captures its idea right there �
 from `--idea`, or by asking once. In chat, slash commands drive every phase
 without leaving: `/start [idea]` kicks the project off (interview →
 requirements); `/spec` `/design` `/<skill>` load a working-tree skill and follow
-it (the same channel `PLAN_INSTRUCTION` uses); `/task` `/code` `/validate`
+it (a flow turn, the same channel the plan turn uses); `/task` `/code` `/validate`
 `/undo` run the existing phase engines; `/menu` opens the status dashboard,
 `/help` the guide.
 
@@ -67,10 +67,10 @@ The idea lives in `<project>/specs/.agentic-engineer.toml` — the **project
 descriptor**, identical to what aep-api commits on project create. It marks the
 directory as an Agentic Engineer project and carries the idea `/start` builds
 requirements from. Being dot-prefixed it is stripped from every turn snapshot,
-so the agent can never read it: the idea reaches a turn ONLY through the
-`/start` expansion in `engine/compose.ts`, mirroring the server — both sides
-built from the same generated canonical strings (`@aep/contracts/prompts` ←
-`packages/contracts/prompts/strings.json`).
+so the agent can never read it: the idea reaches a turn ONLY as a FACT on the
+turn spec (`engine/turn-spec.ts`'s `startSpec`), exactly as aep-api attaches it
+in production. The wording it becomes is the agents service's
+(`services/agents/src/prompts/turn.ts`).
 
 `code` mirrors prod's milestone cycle (ADR-0011): the CLI never picks an issue
 or an order — the `aep` skill discovers its own working set from
@@ -121,9 +121,9 @@ and never pre-created on the host: the CLI refuses a temp dir it does not own.
 
 The bytes reaching the model are production-identical: the same server code
 path (auth middleware, TurnGuard, workspace shape, snapshot filter, write
-gates), the same instruction composition (`src/engine/compose.ts` and the Go composer
-are both generated from `packages/contracts/prompts/strings.json`, so drift is
-impossible by construction), the same skills materialization,
+gates), the same instruction composition (the playground sends a `TurnSpec` and
+the agents service composes it, exactly as it does for aep-api — there is one
+composer, so there is nothing to drift), the same skills materialization,
 the same runner session options (`resolveBaseAgentConfig` defaults are
 unit-pinned in remote-worker), and and the same authored workflow skill
 out of the same library (only the GitHub-shaped passages are swapped, by
