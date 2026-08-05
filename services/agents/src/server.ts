@@ -48,8 +48,6 @@ import type { Express, Request, Response, NextFunction } from "express";
 import type { LanguageModel } from "ai";
 import {
   SSE_DONE,
-  TOOLSETS,
-  isToolset,
   isTurnSpec,
   isCollabConfig,
   type CollabConfig,
@@ -151,36 +149,44 @@ export function createApp(deps: CreateAppDeps): Express {
       eagerSkills?: unknown;
     };
 
+    // The retired pre-composition contract — reject it loudly, exactly as the
+    // pre-§12 inline `files`/`skills` shape is rejected below. A stale caller
+    // must never run a turn whose wording this service did not compose.
+    if (body.instruction !== undefined) {
+      res.status(400).json({ error: "instruction is no longer accepted — send a turn spec" });
+      return;
+    }
+    if (body.toolset !== undefined) {
+      res.status(400).json({ error: "toolset is no longer accepted — it is derived from turn.kind" });
+      return;
+    }
+    if (body.eagerSkills !== undefined) {
+      res.status(400).json({ error: "eagerSkills is no longer accepted — they are derived from the turn" });
+      return;
+    }
+
     // Pre-stream validation → HTTP status (no SSE headers sent yet).
     //
-    // `turn` is the current contract: the caller states what the turn is FOR
-    // and this service composes the wording (see prompts/turn.ts). A
-    // pre-composed `instruction` is the outgoing shape, accepted until every
-    // caller has moved.
-    let turn: TurnSpec | undefined;
-    if (body.turn !== undefined) {
-      if (!isTurnSpec(body.turn)) {
-        res.status(400).json({ error: "turn must be a valid turn spec (kind: chat | flow | start | plan)" });
-        return;
-      }
-      turn = body.turn;
-    } else if (typeof body.instruction !== "string" || body.instruction.trim() === "") {
+    // The caller states what the turn is FOR; this service composes the wording
+    // (see prompts/turn.ts).
+    if (body.turn === undefined) {
       res.status(400).json({ error: "turn is required" });
       return;
     }
-    // Turn-level modifiers — only meaningful alongside `turn`, since a
-    // pre-composed instruction already carries whatever the caller wanted.
+    if (!isTurnSpec(body.turn)) {
+      res.status(400).json({ error: "turn must be a valid turn spec (kind: chat | flow | start | plan)" });
+      return;
+    }
+    const turn: TurnSpec = body.turn;
     if (body.target !== undefined && typeof body.target !== "string") {
       res.status(400).json({ error: "target must be a string" });
       return;
     }
-    const instruction = turn
-      ? composeInstruction(turn, {
-          target: typeof body.target === "string" ? body.target : undefined,
-          previousTurnFailed: body.previousTurnFailed === true,
-          headless: body.headless === true,
-        })
-      : (body.instruction as string);
+    const instruction = composeInstruction(turn, {
+      target: typeof body.target === "string" ? body.target : undefined,
+      previousTurnFailed: body.previousTurnFailed === true,
+      headless: body.headless === true,
+    });
 
     // The pre-§12 inline contract is GONE — reject it loudly so a stale caller
     // cannot silently run a turn against the wrong file/skill supply.
@@ -222,19 +228,8 @@ export function createApp(deps: CreateAppDeps): Express {
 
     // toolset: which domain tools to register (§9.3). DERIVED from the turn —
     // planning registers the task tools and no file tools, everything else
-    // mutates the bundle — so callers no longer send it. The legacy field is
-    // still honoured for a pre-composed `instruction`; unknown values are a
-    // clean pre-stream 400.
-    let toolset: Toolset | undefined;
-    if (turn) {
-      toolset = toolsetFor(turn);
-    } else if (body.toolset !== undefined) {
-      if (!isToolset(body.toolset)) {
-        res.status(400).json({ error: `toolset must be ${TOOLSETS.map((t) => `"${t}"`).join(" or ")}` });
-        return;
-      }
-      toolset = body.toolset;
-    }
+    // mutates the bundle.
+    const toolset: Toolset = toolsetFor(turn);
 
     // mcp (optional, dependency-management migration Phase 5): the BFF-minted
     // discovery endpoint + short-lived bearer for this turn. Absent → no MCP
@@ -275,25 +270,8 @@ export function createApp(deps: CreateAppDeps): Express {
     // up front, skipping the loadSkill round-trip. DERIVED from the turn —
     // which guidance a flow needs is a property of the flow, not of the call,
     // so a console CTA, a typed command and a playground run cannot diverge.
-    // The legacy caller-supplied list survives only for a pre-composed
-    // `instruction`; names are validated for shape only, since unknown names
-    // are ignored downstream (the snapshot decides what exists).
-    let eagerSkills: string[] | undefined;
-    if (turn) {
-      const derived = eagerSkillsFor(turn);
-      eagerSkills = derived.length > 0 ? derived : undefined;
-    } else if (body.eagerSkills !== undefined) {
-      const list = body.eagerSkills;
-      if (
-        !Array.isArray(list) ||
-        list.length > 8 ||
-        !list.every((s) => typeof s === "string" && s.trim() !== "")
-      ) {
-        res.status(400).json({ error: "eagerSkills must be an array of at most 8 skill names" });
-        return;
-      }
-      eagerSkills = list as string[];
-    }
+    const derivedEager = eagerSkillsFor(turn);
+    const eagerSkills = derivedEager.length > 0 ? derivedEager : undefined;
 
     // Build the per-turn model from the request key (fail as a pre-stream 500).
     let model: LanguageModel;

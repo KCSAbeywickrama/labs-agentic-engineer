@@ -446,12 +446,7 @@ export interface TurnRequest {
    * What this turn is for. The agents service composes the instruction text
    * from it — see `TurnSpec`.
    */
-  turn?: TurnSpec;
-  /**
-   * @deprecated Pre-composed instruction text. Being removed: the caller no
-   * longer decides wording. Send `turn` instead.
-   */
-  instruction?: string;
+  turn: TurnSpec;
   /**
    * The spec-bundle path this turn should write to, when the caller pins one.
    * The service renders it into the instruction; callers never format it.
@@ -472,18 +467,6 @@ export interface TurnRequest {
   /** Where to read files + skills from the shared mount (IDs + shas only). */
   workspace: WorkspaceRef;
   filesChangedExternally?: boolean;
-  /**
-   * Which domain tool set to register (tasks-github-native §9.3). `files`
-   * (default, and identical to an absent value) registers the file-mutation
-   * tools — nothing changes for the generation flows. `task-plan` registers the
-   * `planTask`/`updateTask` tools instead (no file tools); `files` then carries
-   * READ-ONLY context (spec/design bundle + existing-Task renderings), nothing
-   * mutates it. See `contracts/task-tools.ts`.
-   *
-   * @deprecated Being removed — derived from `turn.kind` (`plan` → `task-plan`,
-   * everything else → `files`). Two ways to say it is two ways to disagree.
-   */
-  toolset?: Toolset;
   /**
    * Caller-supplied MCP discovery endpoint for this turn (dependency-management
    * migration Phase 5). Present → the turn loop fetches `tools/list` from it
@@ -509,27 +492,18 @@ export interface TurnRequest {
    * the tool map is byte-identical to a turn without it.
    */
   webSearch?: boolean;
-  /**
-   * Skill names whose guidance the service should inline into THIS turn's
-   * prompt up front (#335 latency): when the caller already knows a skill will
-   * be needed (the console's seeded grilling turn), inlining it saves the
-   * model's `loadSkill` round-trip — one full model step before any output.
-   * Bodies ride the per-turn user prompt, never the system prompt, so the
-   * cacheable instruction prefix is untouched. Unknown names are ignored; the
-   * catalog + lazy `loadSkill` remain for everything else (ADR-0002).
-   *
-   * @deprecated Being removed — which skills a flow needs eagerly is a property
-   * of the flow, not of the call, so the service derives it from `turn`.
-   */
-  eagerSkills?: string[];
 }
 
-/** The registrable tool sets a turn may request (`TurnRequest.toolset`). */
+/**
+ * The registrable tool sets. NOT a wire field: the agents service derives the
+ * set from `TurnSpec.kind` (`plan` → task-plan, everything else → files), so a
+ * caller cannot ask for a tool set that disagrees with what its turn is for.
+ */
 export const TOOLSETS = ["files", "task-plan"] as const;
 
 export type Toolset = (typeof TOOLSETS)[number];
 
-/** Runtime guard for an untrusted `toolset` value (the server's pre-stream 400 check). */
+/** Runtime guard for a `Toolset` value. */
 export function isToolset(v: unknown): v is Toolset {
   return (TOOLSETS as readonly unknown[]).includes(v);
 }
