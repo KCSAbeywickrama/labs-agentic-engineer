@@ -306,11 +306,19 @@ export function tryDslToPrototype(
         appState: { viewBackgroundColor: '#ffffff' },
         files: {},
       };
+      // A hotspot promises a screen change, so it is claimed only by a control
+      // whose target EXISTS and is a DIFFERENT screen. A `-> ThisScreen` says
+      // "go to where you already are": agents write it meaning "acts in place"
+      // (an Add beside a search box that appends a row), and honouring it would
+      // render a control that highlights, invites a click, and cannot change
+      // anything — which reads as a broken prototype. Dropped here so it looks
+      // exactly like the un-annotated controls it belongs with.
       const hotspots: PrototypeHotspot[] = screen.elements
         .filter(
           (el): el is WireframeElement & { navTo: string } =>
             Boolean(el.navTo) && el.kind !== 'navbar' && el.kind !== 'sidebar' &&
-            validTargets.has(el.navTo!.toLowerCase()),
+            validTargets.has(el.navTo!.toLowerCase()) &&
+            validTargets.get(el.navTo!.toLowerCase()) !== screen.name,
         )
         .map((el) => ({
           x: el.x, y: el.y, width: el.width, height: el.height,

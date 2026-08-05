@@ -103,6 +103,35 @@ test("a dead -> target compiles to no link and no hotspot", () => {
   assert.ok(!m.screens[1]!.hotspots.some((h) => h.target === "Missing"));
 });
 
+// A `-> ThisScreen` says "go to where you already are". Agents reach for it to
+// mean "this control acts in place" (an Add beside a search box that appends a
+// row), so it renders a control that invites a click and then cannot change
+// anything — indistinguishable from broken. The skill states the rule; the
+// compiler refuses to advertise the affordance.
+test("a self-targeting -> compiles to no hotspot", () => {
+  const m = model(`screen LogSession
+  search "Add exercise…"
+  button "Add" -> LogSession
+  button "Done" -> Summary
+screen Summary
+`);
+  const logSession = m.screens[0]!;
+  assert.ok(
+    !logSession.hotspots.some((h) => h.target === "LogSession"),
+    "a self-target must not produce a hotspot",
+  );
+  assert.equal(logSession.hotspots.length, 1, "the cross-screen target survives");
+  assert.equal(logSession.hotspots[0]!.target, "Summary");
+});
+
+test("a self-target is dropped case-insensitively", () => {
+  const m = model(`screen LogSession
+  button "Add" -> logsession
+screen Summary
+`);
+  assert.equal(m.screens[0]!.hotspots.length, 0);
+});
+
 test("prototype compile is deterministic", () => {
   const a = model(DSL).screens[0]!.sceneJson;
   const b = model(DSL).screens[0]!.sceneJson;
