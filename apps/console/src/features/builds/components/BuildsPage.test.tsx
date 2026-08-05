@@ -194,6 +194,7 @@ afterEach(() => {
   mockRuns = [];
   mockIssues = [];
   mockIssuesError = false;
+  mockCycleBuilds = [];
   cancelState.isPending = false;
   cancelState.isError = false;
   cancelState.error = null;
@@ -467,7 +468,6 @@ describe("BuildsPage — one version's story", () => {
 
     expect(screen.getByText("All agent work for v2 is done")).toBeInTheDocument();
     expect(screen.getByText("View deployment status")).toBeInTheDocument();
-    mockCycleBuilds = [];
   });
 
   it("shows a quiet busy block, not a hold notice, before the first cycle", () => {
@@ -524,7 +524,6 @@ describe("BuildsPage — one version's story", () => {
     expect(
       screen.getByText(/Validation is running against the deployed system/),
     ).toBeInTheDocument();
-    mockCycleBuilds = [];
   });
 
   it("reads a merged issue as CLOSED in the milestone panel", () => {
@@ -636,7 +635,6 @@ describe("BuildsPage — one version's story", () => {
     expect(
       screen.queryByText(/All agent work for .* is done/),
     ).not.toBeInTheDocument();
-    mockCycleBuilds = [];
   });
 
   it("tells the gate story before the first session, not a generic wait", () => {
@@ -676,6 +674,22 @@ describe("BuildsPage — one version's story", () => {
     expect(screen.getByText("1 issue")).toBeInTheDocument();
   });
 
+  it("keeps cached milestone data through a failed background refetch", () => {
+    // react-query keeps the last good list when a later refetch fails —
+    // replacing a populated panel with an error card would throw away
+    // progress the reader still has.
+    mockBuilds = [build("v2", "in_progress")];
+    mockRuns = [run()];
+    mockIssues = withOpenWork();
+    mockIssuesError = true;
+    renderPage();
+
+    expect(screen.getByText("MILESTONE")).toBeInTheDocument();
+    expect(
+      screen.queryByText(/Failed to load the version's issues/),
+    ).not.toBeInTheDocument();
+  });
+
   it("ships an error state for the milestone column", () => {
     // api-guidelines non-negotiable #2 — a failed issue fetch must not read
     // as "no milestone".
@@ -700,22 +714,23 @@ describe("BuildsPage — one version's story", () => {
     mockIssues = withOpenWork();
     renderPage();
 
-    const toggle = screen.getByRole("button", {
-      name: "Show this run's detail",
-    });
+    // The row's accessible name IS its content now (no aria-label), so the
+    // toggle is found the way a reader finds it: by what it says.
+    const toggle = screen
+      .getByText("1 of 2 build sessions merged")
+      .closest("button");
+    expect(toggle).not.toBeNull();
     // Both runs carry the same cycle fixture, so count rather than match: the
     // current session's own cycle list is the one occurrence on screen while
     // the earlier session stays collapsed.
     const merged = () => screen.getAllByText(/merged pull request #3/).length;
     expect(merged()).toBe(1);
 
-    fireEvent.click(toggle);
+    fireEvent.click(toggle!);
 
-    // Expanded, the earlier session accounts for itself cycle by cycle.
+    // Expanded, the earlier run accounts for itself session by session.
     expect(merged()).toBe(2);
-    expect(
-      screen.getByRole("button", { name: "Hide this run's detail" }),
-    ).toBeInTheDocument();
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
   });
 
   it("declares a run delivered only once its flow actually finished", () => {
@@ -767,7 +782,6 @@ describe("BuildsPage — one version's story", () => {
     expect(screen.getByText("View deployment status")).toBeInTheDocument();
     // Nothing is happening, so there is no "now" to narrate.
     expect(screen.queryByText("NOW")).not.toBeInTheDocument();
-    mockCycleBuilds = [];
   });
 
   it("explains a version tagged before the platform kept session rows", () => {

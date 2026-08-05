@@ -107,7 +107,7 @@ function cycleOutcome(cycle: RunCycleView): string {
   }
   if (cycle.endedAt) {
     return cycle.attempts > 1
-      ? "ended without a pull request, on its second attempt"
+      ? `ended without a pull request, after ${cycle.attempts} attempts`
       : "ended without opening a pull request";
   }
   return "no pull request yet";

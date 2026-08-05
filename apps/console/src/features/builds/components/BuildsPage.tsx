@@ -37,7 +37,7 @@ import { partitionIssues } from "../../tasks/lib/issueRows";
 import { useProjectStatus } from "../../projects/api/queries";
 import { useBuildRuns, useBuilds } from "../api/queries";
 import { openCycleClaims } from "../lib/milestoneBuckets";
-import { BUILD_CYCLE_KINDS, versionIsLive } from "../lib/runView";
+import { buildCycles, versionIsLive } from "../lib/runView";
 import { EarlierSessions } from "./EarlierSessions";
 import { MilestonePanel } from "./MilestonePanel";
 import { RunHistoryList } from "./RunHistoryList";
@@ -82,9 +82,7 @@ export function BuildsPage({
 
   // This session's CYCLES. Validation is not one of them, so it is filtered
   // the same way the card filters it.
-  const currentCycles = (current?.cycles ?? []).filter((c) =>
-    (BUILD_CYCLE_KINDS as readonly string[]).includes(c.kind),
-  );
+  const currentCycles = buildCycles(current?.cycles ?? []);
   const earlierSessions = currentCycles.slice(0, -1);
 
   const status = useProjectStatus(projectName);
@@ -282,18 +280,10 @@ export function BuildsPage({
 
           {/* Every view ships loading and error states (api-guidelines #2):
               the old issue table carried them for this query; its replacement
-              must too, or a failed fetch reads as "no milestone". */}
-          {issues.isError ? (
-            <Alert
-              severity="error"
-              action={<Button onClick={() => void issues.refetch()}>Retry</Button>}
-            >
-              Failed to load the version&apos;s issues
-              {issues.error instanceof Error && issues.error.message
-                ? `: ${issues.error.message}`
-                : ""}
-            </Alert>
-          ) : milestone ? (
+              must too, or a failed fetch reads as "no milestone". Data first:
+              react-query keeps the last good list through a failed background
+              refetch, and cached progress beats an error card. */}
+          {milestone ? (
             <MilestonePanel
               tag={selected.tag}
               {...(current?.milestoneTitle ? { title: current.milestoneTitle } : {})}
@@ -305,6 +295,16 @@ export function BuildsPage({
               claimedBy={claimedBy}
               {...(issuesUrl ? { issuesUrl } : {})}
             />
+          ) : issues.isError ? (
+            <Alert
+              severity="error"
+              action={<Button onClick={() => void issues.refetch()}>Retry</Button>}
+            >
+              Failed to load the version&apos;s issues
+              {issues.error instanceof Error && issues.error.message
+                ? `: ${issues.error.message}`
+                : ""}
+            </Alert>
           ) : (
             <Box sx={{ display: "flex", justifyContent: "center", p: 4 }}>
               <CircularProgress aria-label="Loading the version's issues" />

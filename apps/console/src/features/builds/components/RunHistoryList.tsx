@@ -31,7 +31,7 @@ import { StatusChip } from "../../../components/StatusChip";
 import type { components } from "../../../generated/aep-api";
 import { runStamp } from "../lib/format";
 import {
-  BUILD_CYCLE_KINDS,
+  buildCycles,
   runOriginLabel,
   runStateChip,
   spentBudgets,
@@ -75,19 +75,17 @@ export function RunHistoryList({
       </Typography>
       <Stack spacing={1}>
         {runs.map((run) => (
-          <SessionRow key={run.id} run={run} />
+          <RunRow key={run.id} run={run} />
         ))}
       </Stack>
     </Box>
   );
 }
 
-function SessionRow({ run }: { run: MilestoneRunView }) {
+function RunRow({ run }: { run: MilestoneRunView }) {
   const [open, setOpen] = useState(false);
   const chip = runStateChip(run);
-  const cycles = run.cycles.filter((c) =>
-    (BUILD_CYCLE_KINDS as readonly string[]).includes(c.kind),
-  );
+  const cycles = buildCycles(run.cycles);
   const merged = cycles.filter((c) => c.mergeSha).length;
   const reason = terminalReasonText(run.terminalReason ?? "");
   const spent = spentBudgets(run.budgets);
@@ -105,7 +103,9 @@ function SessionRow({ run }: { run: MilestoneRunView }) {
       <ButtonBase
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        aria-label={`${open ? "Hide" : "Show"} this run's detail`}
+        // No aria-label: it would REPLACE the row's accessible name, hiding
+        // the state, origin, times and outcome from assistive technology.
+        // The content is the name; aria-expanded says which way it toggles.
         sx={{ width: "100%", justifyContent: "flex-start", px: 2, py: 1.25 }}
       >
         <Stack

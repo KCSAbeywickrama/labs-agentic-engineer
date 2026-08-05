@@ -36,7 +36,7 @@ import { useCancelRun, useCycleBuilds } from "../api/queries";
 import { useRunProgress } from "../hooks/useRunProgress";
 import { buildGlance } from "../lib/runGlance";
 import {
-  BUILD_CYCLE_KINDS,
+  buildCycles,
   isTerminalRun,
   runHold,
   runOriginLabel,
@@ -57,24 +57,6 @@ type MilestoneRunView = components["schemas"]["MilestoneRunView"];
 type TaskView = components["schemas"]["TaskView"];
 
 
-/**
- * One run of the version's milestone loop, NOW-FIRST.
- *
- * The flow is a strip — every stage on one line, the current one badged — and
- * only that stage gets words. This replaced a rail that rendered all six stages
- * expanded, each with its note, issues and a 420px log: correct for reading a
- * finished run end to end, and far too much for the question a reader actually
- * arrives with, which is what is happening right now.
- *
- * What is NOT lost: every stage keeps its note in the strip's tooltip, the
- * agent's log is one click down in the NOW panel's drawer, and each issue links
- * to its own page. What IS lost is reading every stage's detail at once — the
- * deliberate trade the redesign makes.
- *
- * Cancel is quiet and ABSENT while planning: cancel is a signal to the
- * supervisor, and during the plan window there is no supervisor yet to receive
- * it.
- */
 /**
  * The platform working, said quietly: a spinner sized to the title on a soft
  * surface. Deliberately NOT a RunHoldNotice — its leading-edge rule marks
@@ -109,6 +91,24 @@ function RunBusy({ title, body }: { title: string; body: string }) {
   );
 }
 
+/**
+ * One run of the version's milestone loop, NOW-FIRST.
+ *
+ * The flow is a strip — every stage on one line, the current one badged — and
+ * only that stage gets words. This replaced a rail that rendered all six stages
+ * expanded, each with its note, issues and a 420px log: correct for reading a
+ * finished run end to end, and far too much for the question a reader actually
+ * arrives with, which is what is happening right now.
+ *
+ * What is NOT lost: every stage keeps its note in the strip's tooltip, the
+ * agent's log is one click down in the NOW panel's drawer, and each issue links
+ * to its own page. What IS lost is reading every stage's detail at once — the
+ * deliberate trade the redesign makes.
+ *
+ * Cancel is quiet and ABSENT while planning: cancel is a signal to the
+ * supervisor, and during the plan window there is no supervisor yet to receive
+ * it.
+ */
 export function RunStory({
   projectName,
   tag,
@@ -167,9 +167,7 @@ export function RunStory({
   // validated, and its verdict renders there. But an OPEN validation cycle is
   // still the answer to "why is this session running when everything is
   // green", so the delivered banner names it.
-  const cycles = run.cycles.filter((c) =>
-    (BUILD_CYCLE_KINDS as readonly string[]).includes(c.kind),
-  );
+  const cycles = buildCycles(run.cycles);
   const validating = run.cycles.some(
     (c) => c.kind === "validation" && !c.endedAt,
   );
@@ -331,6 +329,11 @@ export function RunStory({
                 {glance.nowIndex === null &&
                 run.state !== "failed" &&
                 run.state !== "cancelled" &&
+                // The issue plane must have LOADED before the banner reads it:
+                // work=[] also means "not arrived yet", and a banner that says
+                // "no issues needed changing" and then rewrites itself is the
+                // card contradicting itself across two seconds.
+                milestone !== undefined &&
                 (work.length > 0
                   ? work.every((t) => t.derivedStatus === "merged")
                   : run.state === "succeeded") ? (

@@ -87,7 +87,9 @@ export function buildGlance(stages: SpineStage[], stepFrom = 1): RunGlance {
  * a stage this map has not learned yet still reads correctly.
  */
 const ACTIVE_HEADLINE: Record<string, string> = {
-  provisioning: "Standing up this version's connections",
+  // provisioningStage emits id "provision" — not "provisioning" — and an
+  // unmatched id silently falls back to the generic form.
+  provision: "Standing up this version's connections",
   agent: "Coding agent is writing code",
   pr: "Waiting on the agent's pull request",
   merge: "Merging the agent's work",

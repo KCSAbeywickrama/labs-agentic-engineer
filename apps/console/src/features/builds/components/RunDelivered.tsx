@@ -20,6 +20,7 @@ import { Box, Button, CircularProgress, Stack, Typography, alpha } from "@wso2/o
 import { ArrowRight, CircleCheck } from "@wso2/oxygen-ui-icons-react";
 import { useNavigate } from "@tanstack/react-router";
 import type { components } from "../../../generated/aep-api";
+import { runStamp } from "../lib/format";
 
 type RunCycleView = components["schemas"]["RunCycleView"];
 type TaskView = components["schemas"]["TaskView"];
@@ -62,7 +63,7 @@ export function RunDelivered({
     .map((c) => c.prNumber)
     .filter((n): n is number => typeof n === "number");
 
-  const finished = endedAt ? stamp(endedAt) : "";
+  const finished = endedAt ? runStamp(endedAt) : "";
 
   // Only facts this surface actually holds. Build counts are per-session
   // cluster reads the settled view no longer makes, so they are not claimed
@@ -146,14 +147,3 @@ export function RunDelivered({
   );
 }
 
-function stamp(value: string): string {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? ""
-    : date.toLocaleString(undefined, {
-        day: "numeric",
-        month: "short",
-        hour: "2-digit",
-        minute: "2-digit",
-      });
-}
