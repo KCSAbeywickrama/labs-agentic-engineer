@@ -28,8 +28,11 @@ type TaskView = components["schemas"]["TaskView"];
 
 // Router stubbed to plain anchors — no RouterProvider needed. createLink is
 // what the gate hold's deep link uses, so it has to survive the stub.
+const navigate = vi.fn();
 vi.mock("@tanstack/react-router", () => ({
   Link: ({ children }: { children?: React.ReactNode }) => <a>{children}</a>,
+  // The delivered result routes on to the deployments and validation boards.
+  useNavigate: () => navigate,
   createLink: (Component: React.ElementType) =>
     ({
       to,
@@ -62,47 +65,38 @@ vi.mock("@tanstack/react-query", () => ({
   useQueryClient: () => ({ invalidateQueries }),
 }));
 
-// The issue list is its own tested surface; here it is a marker that proves
-// which liveness the page hands down.
-vi.mock("../../tasks/components/IssueSections", () => ({
-  IssueSections: ({ tag, live }: { tag: string; live: boolean }) => (
-    <div data-testid="issues">{`${tag}:${String(live)}`}</div>
-  ),
-}));
-
-// The build sessions open an SSE stream and read the cluster for builds; stub
-// the whole block and record what it was handed, so this file stays about the
-// PAGE (version selection, run cards, cancel) — RunSpine has its own test.
-vi.mock("./RunSpine", () => ({
-  RunSpine: ({
-    run,
-    work,
-    gates,
-  }: {
-    run: MilestoneRunView;
-    work: TaskView[];
-    gates: TaskView[];
-  }) => (
-    <div
-      data-testid="run-spine"
-      data-work={work.map((t) => t.issueNumber).join(",")}
-      data-gates={gates.map((t) => t.issueNumber).join(",")}
-    >
-      {run.cycles.map((c) => `${c.kind}:${c.branch ?? ""}:${c.mergeSha ?? ""}`).join("|")}
-    </div>
-  ),
-}));
-
 // The issue plane the run card reads to tell its holds apart. `undefined` is
 // the list not having arrived yet, which is a different thing from an empty
 // milestone.
 let mockIssues: TaskView[] | undefined = [];
+let mockIssuesError = false;
 vi.mock("../../tasks/api/queries", () => ({
-  useAllTasks: () => ({ data: mockIssues }),
+  useAllTasks: () => ({
+    data: mockIssues,
+    isError: mockIssuesError,
+    error: mockIssuesError ? new Error("boom") : null,
+    refetch: vi.fn(),
+  }),
+}));
+
+// The repo URL behind the milestone panel's "view all issues" link. Same query
+// key the project layout already reads, so react-query serves it from cache
+// rather than issuing a second request.
+// The platform records a CLONE url — it carries a `.git` suffix.
+const mockRepoUrl = "https://github.com/acme/demo.git";
+vi.mock("../../projects/api/queries", () => ({
+  useProjectStatus: () => ({ data: { repoUrl: mockRepoUrl } }),
 }));
 
 let mockBuilds: BuildSummary[] = [];
 let mockRuns: MilestoneRunView[] = [];
+// This merge's builds, as the cluster read answers them. `[]` is "the merge
+// landed but no build has appeared yet", which leaves the Builds stage active.
+let mockCycleBuilds: {
+  component: string;
+  status: string;
+  completed: boolean;
+}[] = [];
 const cancelMutate = vi.fn();
 const cancelState = { isPending: false, isError: false, error: null as unknown };
 
@@ -122,7 +116,7 @@ vi.mock("../api/queries", () => ({
     refetch: vi.fn(),
   }),
   useCancelRun: () => ({ mutate: cancelMutate, ...cancelState }),
-  useCycleBuilds: () => ({ data: [], isPending: false }),
+  useCycleBuilds: () => ({ data: mockCycleBuilds, isPending: false }),
 }));
 
 import { BuildsPage } from "./BuildsPage";
@@ -199,6 +193,8 @@ afterEach(() => {
   mockBuilds = [];
   mockRuns = [];
   mockIssues = [];
+  mockIssuesError = false;
+  mockCycleBuilds = [];
   cancelState.isPending = false;
   cancelState.isError = false;
   cancelState.error = null;
@@ -225,15 +221,20 @@ describe("BuildsPage — one version's story", () => {
     renderPage();
 
     // The newest version's run is the page — no intermediate list of versions.
-    expect(screen.getByText("v2")).toBeInTheDocument();
-    expect(screen.getByTestId("issues")).toHaveTextContent("v2:true");
+    // The tag now appears twice by design: the run card's milestone title, and
+    // the milestone panel beside it.
+    expect(screen.getAllByText("v2").length).toBeGreaterThan(0);
+    expect(screen.getByRole("combobox", { name: "Version" })).toHaveValue("v2");
   });
 
   it("falls back to newest for an unknown ?tag rather than erroring", () => {
     mockBuilds = [build("v2", "completed"), build("v1", "completed")];
     mockRuns = [run({ state: "succeeded" })];
     renderPage("v99");
-    expect(screen.getByTestId("issues")).toHaveTextContent("v2:false");
+    // The version picker and the milestone both land on the newest tag rather
+    // than erroring on one nobody built.
+    expect(screen.getByRole("combobox", { name: "Version" })).toHaveValue("v2");
+    expect(screen.getAllByText("v2").length).toBeGreaterThan(0);
   });
 
   it("lands on the run's build sessions, handed the facts webhooks taught it", () => {
@@ -242,15 +243,16 @@ describe("BuildsPage — one version's story", () => {
     mockIssues = withOpenWork();
     renderPage();
 
-    // Which sessions the page hands down, and the learned facts riding on them —
-    // the rendering of a session is RunSpine's own test.
-    expect(screen.getByTestId("run-spine")).toHaveTextContent(
-      "coding:aep/m2-c1:dcb1edc5fe04|fix::",
-    );
-    // Plus the milestone's agent work, which is what a session attributes its
-    // issues from. WHOLE, not narrowed to the open ones: a settled session's
-    // issues were closed by the very merge that completed it.
-    expect(screen.getByTestId("run-spine").dataset.work).toBe("2");
+    // The strip narrates the CURRENT session's five stages…
+    for (const stage of ["Coding agent", "Pull request", "Merge", "Builds", "Deployment"]) {
+      expect(screen.getAllByText(stage).length).toBeGreaterThan(0);
+    }
+    // …and the session behind it stays visible, because the re-entry loop is
+    // the thing a reader of a multi-session run is trying to understand.
+    // …below the card, not inside it — the card is the strip and the NOW.
+    expect(screen.getByText("EARLIER BUILD SESSIONS IN THIS RUN")).toBeInTheDocument();
+    expect(screen.getByText("Build session 1 · coding")).toBeInTheDocument();
+    expect(screen.getByText(/merged .* as dcb1edc5/)).toBeInTheDocument();
   });
 
   it("shows no budget counters on a healthy run — unspent allowance is not the user's business", () => {
@@ -284,7 +286,7 @@ describe("BuildsPage — one version's story", () => {
     expect(screen.queryByText(/Fix sessions/)).not.toBeInTheDocument();
   });
 
-  it("makes cancel PROMINENT and explained on a waiting run", () => {
+  it("offers cancel, quietly, on a waiting session", () => {
     mockBuilds = [build("v2", "in_progress")];
     mockRuns = [run({ state: "waiting" })];
     mockIssues = withOpenWork();
@@ -292,6 +294,8 @@ describe("BuildsPage — one version's story", () => {
 
     expect(screen.getByText("Waiting")).toBeInTheDocument();
     expect(screen.getByText(/wait is unbounded/)).toBeInTheDocument();
+    // Neutral, not alarm-coloured — cancel is an escape hatch, not the page's
+    // primary action.
     fireEvent.click(screen.getByRole("button", { name: /Cancel run/ }));
     expect(cancelMutate).toHaveBeenCalledWith("run-1");
   });
@@ -330,7 +334,12 @@ describe("BuildsPage — one version's story", () => {
     ];
     renderPage();
 
-    expect(screen.getByTestId("run-spine")).toHaveAttribute("data-gates", "1,3");
+    // Every gate stays on the page, resolved ones included — that is the
+    // version's record. The OPEN one leads in the run card, because it is what
+    // holds dispatch; the resolved one is history, and lives in the milestone
+    // panel's connections beside it.
+    expect(screen.getAllByText(/url-shortener-db/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/cache/).length).toBeGreaterThan(0);
     // A gate hold is NOT the unbounded park — the fix for one is nothing like
     // the fix for the other, so the notice must not claim it.
     expect(screen.queryByText(/wait is unbounded/)).not.toBeInTheDocument();
@@ -378,6 +387,22 @@ describe("BuildsPage — one version's story", () => {
     expect(screen.getByText(/closed no issues/)).toBeInTheDocument();
   });
 
+  it("keeps cancel held down after the click — 202 is accepted, not done", () => {
+    // The endpoint answers the moment the signal is queued; the run turns
+    // cancelled only when the supervisor processes it and the poll sees that.
+    // Releasing the button on the HTTP response invited double-cancels.
+    mockBuilds = [build("v2", "in_progress")];
+    mockRuns = [run({ state: "waiting" })];
+    mockIssues = withOpenWork();
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: /Cancel run/ }));
+
+    const held = screen.getByRole("button", { name: /Cancelling…/ });
+    expect(held).toBeDisabled();
+    expect(cancelMutate).toHaveBeenCalledTimes(1);
+  });
+
   it("says nothing was cancelled when the engine is unreachable", () => {
     mockBuilds = [build("v2", "in_progress")];
     mockRuns = [run({ state: "waiting" })];
@@ -400,7 +425,366 @@ describe("BuildsPage — one version's story", () => {
     expect(screen.getByText("Spec build")).toBeInTheDocument();
   });
 
-  it("explains a version tagged before the platform kept run rows", () => {
+  it("links issues at the repo's web root, not at its clone url", () => {
+    // repoUrl is a CLONE url. Appending straight to it gave
+    // `…/demo.git/issues`, which 404s on GitHub.
+    mockBuilds = [build("v2", "in_progress")];
+    mockRuns = [run()];
+    mockIssues = withOpenWork();
+    renderPage();
+
+    expect(
+      screen.getByRole("link", { name: /View all issues/ }),
+    ).toHaveAttribute("href", "https://github.com/acme/demo/issues");
+  });
+
+  it("shows the delivered result the moment the flow finishes, before the run settles", () => {
+    // The supervisor can hold the run formally "running" after deployment goes
+    // green. The reader's story is over either way — gating the banner on
+    // run.state left a finished flow showing a bare "every stage is done" line.
+    mockBuilds = [build("v2", "in_progress")];
+    mockRuns = [
+      run({
+        state: "running",
+        cycles: [
+          {
+            id: "cycle-1",
+            kind: "coding",
+            attempts: 1,
+            branch: "aep/m2-c1",
+            prNumber: 5,
+            mergeSha: "1dc26ba1fe04",
+            createdAt: "2026-08-04T06:02:00Z",
+            endedAt: "2026-08-04T06:20:00Z",
+          },
+        ],
+      }),
+    ];
+    mockIssues = [issue(3, "Implement gym-tracker-api", "coding", "merged")];
+    mockCycleBuilds = [
+      { component: "gym-tracker-api", status: "Succeeded", completed: true },
+    ];
+    renderPage();
+
+    expect(screen.getByText("All agent work for v2 is done")).toBeInTheDocument();
+    expect(screen.getByText("View deployment status")).toBeInTheDocument();
+  });
+
+  it("shows a quiet busy block, not a hold notice, before the first cycle", () => {
+    // Pre-dispatch is progress, not a hold: no leading-edge rule, and the
+    // spinner carries the "working" signal. A hold above replaces it entirely.
+    mockBuilds = [build("v2", "in_progress")];
+    mockRuns = [run({ state: "running", cycles: [] })];
+    mockIssues = withOpenWork();
+    renderPage();
+
+    expect(
+      screen.getByText("Waiting to dispatch the first build session"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByLabelText("Waiting to dispatch the first build session"),
+    ).toBeInTheDocument();
+  });
+
+  it("says validation is what keeps a delivered session open", () => {
+    // After the merge the platform dispatches a VALIDATION cycle the Builds
+    // rail deliberately does not narrate — but an open one is the answer to
+    // "why is this session still running when everything is green".
+    mockBuilds = [build("v2", "in_progress")];
+    mockRuns = [
+      run({
+        state: "running",
+        cycles: [
+          {
+            id: "cycle-1",
+            kind: "coding",
+            attempts: 1,
+            branch: "aep/m2-c1",
+            prNumber: 5,
+            mergeSha: "1dc26ba1fe04",
+            createdAt: "2026-08-04T06:02:00Z",
+            endedAt: "2026-08-04T06:21:00Z",
+          },
+          {
+            id: "cycle-2",
+            kind: "validation",
+            attempts: 1,
+            createdAt: "2026-08-04T06:29:00Z",
+          },
+        ],
+      }),
+    ];
+    mockIssues = [issue(3, "Implement gym-tracker-api", "coding", "merged")];
+    mockCycleBuilds = [
+      { component: "gym-tracker-api", status: "Succeeded", completed: true },
+    ];
+    renderPage();
+
+    expect(screen.getByText("All agent work for v2 is done")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Validation is running against the deployed system/),
+    ).toBeInTheDocument();
+  });
+
+  it("reads a merged issue as CLOSED in the milestone panel", () => {
+    // The regression: with the retired ten-value bucketing, a merged issue fell
+    // into "in progress" AT the very merge that closed it, and the closed count
+    // sat at 0/N forever.
+    mockBuilds = [build("v2", "in_progress")];
+    mockRuns = [run()];
+    mockIssues = [
+      issue(3, "Implement gym-tracker-api", "coding", "merged"),
+      issue(4, "Implement gym-tracker-webapp", "coding", "merged"),
+    ];
+    renderPage();
+
+    expect(screen.getByText("2 closed")).toBeInTheDocument();
+    expect(screen.getByText("2 / 2 closed")).toBeInTheDocument();
+    expect(screen.queryByText(/in progress/)).not.toBeInTheDocument();
+  });
+
+  it("marks an issue in progress only while an open cycle claims it", () => {
+    mockBuilds = [build("v2", "in_progress")];
+    mockRuns = [
+      run({
+        cycles: [
+          {
+            id: "cycle-1",
+            kind: "coding",
+            attempts: 1,
+            resolves: [3],
+            createdAt: "2026-08-04T06:02:00Z",
+          },
+        ],
+      }),
+    ];
+    mockIssues = [
+      issue(3, "Implement gym-tracker-api", "coding"),
+      issue(4, "Implement gym-tracker-webapp", "coding"),
+    ];
+    renderPage();
+
+    // #3 is claimed by the open cycle; #4 is not — it stays open rather than
+    // being guessed into motion.
+    expect(screen.getByText("1 in progress")).toBeInTheDocument();
+    expect(screen.getByText("Claimed by build session 1 · coding")).toBeInTheDocument();
+    expect(screen.getByText("1 open")).toBeInTheDocument();
+  });
+
+  it("shows open issues as being worked while the coding agent runs unclaimed", () => {
+    // Before the pull request, nothing is recorded — the panel presumes the
+    // live session works the open issues, and says so as a presumption
+    // ("Being worked by"), not as the recorded claim ("Claimed by").
+    mockBuilds = [build("v2", "in_progress")];
+    mockRuns = [
+      run({
+        cycles: [
+          {
+            id: "cycle-1",
+            kind: "coding",
+            attempts: 1,
+            createdAt: "2026-08-04T06:02:00Z",
+          },
+        ],
+      }),
+    ];
+    mockIssues = [
+      issue(3, "Implement gym-tracker-api", "coding"),
+      issue(4, "Implement gym-tracker-webapp", "coding"),
+    ];
+    renderPage();
+
+    expect(screen.getByText("2 in progress")).toBeInTheDocument();
+    expect(
+      screen.getAllByText("Being worked by build session 1 · coding").length,
+    ).toBe(2);
+    expect(screen.queryByText(/^\d+ open$/)).not.toBeInTheDocument();
+  });
+
+  it("claims no delivery on a run parked between sessions with open work", () => {
+    // The last session's stages are all done, but the milestone still has an
+    // open issue ahead — "all agent work is done" is a fact the platform has
+    // not established, so the banner must not fire (contract review finding).
+    mockBuilds = [build("v2", "in_progress")];
+    mockRuns = [
+      run({
+        state: "waiting",
+        cycles: [
+          {
+            id: "cycle-1",
+            kind: "coding",
+            attempts: 1,
+            branch: "aep/m2-c1",
+            prNumber: 5,
+            mergeSha: "1dc26ba1fe04",
+            createdAt: "2026-08-04T06:02:00Z",
+            endedAt: "2026-08-04T06:21:00Z",
+          },
+        ],
+      }),
+    ];
+    mockIssues = [
+      issue(3, "Implement gym-tracker-api", "coding", "merged"),
+      issue(7, "Add workout charts", "coding", "pending"),
+    ];
+    mockCycleBuilds = [
+      { component: "gym-tracker-api", status: "Succeeded", completed: true },
+    ];
+    renderPage();
+
+    expect(
+      screen.queryByText(/All agent work for .* is done/),
+    ).not.toBeInTheDocument();
+  });
+
+  it("tells the gate story before the first session, not a generic wait", () => {
+    // runHold defers an open-gate wait to the provisioning section — so the
+    // card must actually mount it. Without this, a run stalled on a
+    // connection a human must supply read as a routine busy wait.
+    mockBuilds = [build("v2", "in_progress")];
+    mockRuns = [run({ state: "waiting", cycles: [] })];
+    mockIssues = [
+      issue(1, "Provide configuration: url-shortener-db", "provision"),
+      ...withOpenWork(),
+    ];
+    renderPage();
+
+    // The idle gate names the person — on the card AND in the panel — and
+    // the generic wait stays out.
+    expect(screen.getAllByText("needs you").length).toBeGreaterThan(0);
+    expect(
+      screen.queryByText("Waiting to dispatch the first build session"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders ledger issues apart from agent work", () => {
+    // ADR-0013 §7: bare human issues joined the milestone but are never
+    // worked — listing them as agent work would misrepresent both.
+    mockBuilds = [build("v2", "in_progress")];
+    mockRuns = [run()];
+    mockIssues = [
+      ...withOpenWork(),
+      issue(21, "Checkout is slow on mobile", "ledger"),
+    ];
+    renderPage();
+
+    expect(screen.getByText("LEDGER")).toBeInTheDocument();
+    expect(screen.getByText("Checkout is slow on mobile")).toBeInTheDocument();
+    // Not in the issue count: 1 agent issue, not 2.
+    expect(screen.getByText("1 issue")).toBeInTheDocument();
+  });
+
+  it("keeps cached milestone data through a failed background refetch", () => {
+    // react-query keeps the last good list when a later refetch fails —
+    // replacing a populated panel with an error card would throw away
+    // progress the reader still has.
+    mockBuilds = [build("v2", "in_progress")];
+    mockRuns = [run()];
+    mockIssues = withOpenWork();
+    mockIssuesError = true;
+    renderPage();
+
+    expect(screen.getByText("MILESTONE")).toBeInTheDocument();
+    expect(
+      screen.queryByText(/Failed to load the version's issues/),
+    ).not.toBeInTheDocument();
+  });
+
+  it("ships an error state for the milestone column", () => {
+    // api-guidelines non-negotiable #2 — a failed issue fetch must not read
+    // as "no milestone".
+    mockBuilds = [build("v2", "in_progress")];
+    mockRuns = [run()];
+    mockIssues = undefined;
+    mockIssuesError = true;
+    renderPage();
+
+    expect(
+      screen.getByText(/Failed to load the version's issues/),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+  });
+
+  it("keeps an earlier session collapsed until asked, then shows its cycles", () => {
+    mockBuilds = [build("v2", "in_progress")];
+    mockRuns = [
+      run({ id: "run-2", origin: "incident-adoption" }),
+      run({ id: "run-1", state: "cancelled", endedAt: "2026-07-10T09:42:00Z" }),
+    ];
+    mockIssues = withOpenWork();
+    renderPage();
+
+    // The row's accessible name IS its content now (no aria-label), so the
+    // toggle is found the way a reader finds it: by what it says.
+    const toggle = screen
+      .getByText("1 of 2 build sessions merged")
+      .closest("button");
+    expect(toggle).not.toBeNull();
+    // Both runs carry the same cycle fixture, so count rather than match: the
+    // current session's own cycle list is the one occurrence on screen while
+    // the earlier session stays collapsed.
+    const merged = () => screen.getAllByText(/merged pull request #3/).length;
+    expect(merged()).toBe(1);
+
+    fireEvent.click(toggle!);
+
+    // Expanded, the earlier run accounts for itself session by session.
+    expect(merged()).toBe(2);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("declares a run delivered only once its flow actually finished", () => {
+    // A run can be marked succeeded while a stage is still unreadable — here
+    // the merge landed but no build has appeared in the cluster yet, so the
+    // strip says "Builds · now". Claiming "all agent work is done" over that
+    // would be the page contradicting itself in two places at once.
+    mockBuilds = [build("v2", "completed")];
+    mockRuns = [run({ state: "succeeded" })];
+    mockIssues = withOpenWork();
+    mockCycleBuilds = [];
+    renderPage();
+
+    expect(screen.queryByText(/All agent work for .* is done/)).not.toBeInTheDocument();
+    expect(screen.getByText("NOW")).toBeInTheDocument();
+  });
+
+  it("shows the delivered result once every stage is done", () => {
+    mockBuilds = [build("v2", "completed")];
+    mockRuns = [
+      run({
+        state: "succeeded",
+        endedAt: "2026-07-10T10:03:00Z",
+        cycles: [
+          {
+            id: "cycle-1",
+            kind: "coding",
+            attempts: 1,
+            branch: "aep/m2-c1",
+            prNumber: 3,
+            mergeSha: "dcb1edc5fe04",
+            createdAt: "2026-07-10T09:05:00Z",
+            endedAt: "2026-07-10T09:40:00Z",
+          },
+        ],
+      }),
+    ];
+    // Milestone fully closed — the banner requires the issue plane to agree,
+    // not just the session's own stages. `completed` on the build is what
+    // makes an outcome readable at all.
+    mockIssues = [issue(2, "Implement the shortener API", "coding", "merged")];
+    mockCycleBuilds = [
+      { component: "storefront", status: "Succeeded", completed: true },
+    ];
+    renderPage();
+
+    expect(screen.getByText("All agent work for v2 is done")).toBeInTheDocument();
+    // The way out: the board that actually knows what is running.
+    expect(screen.getByText("View deployment status")).toBeInTheDocument();
+    // Nothing is happening, so there is no "now" to narrate.
+    expect(screen.queryByText("NOW")).not.toBeInTheDocument();
+  });
+
+  it("explains a version tagged before the platform kept session rows", () => {
     mockBuilds = [build("v2", "completed")];
     mockRuns = [];
     renderPage();
