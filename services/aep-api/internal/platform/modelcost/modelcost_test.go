@@ -81,3 +81,71 @@ func TestCostZeroTokensStampsZero(t *testing.T) {
 		t.Fatalf("cost = %v, want 0", got)
 	}
 }
+
+func multiModelStamper() *Stamper {
+	return NewStamper([]ModelRate{
+		{ModelID: "claude-sonnet-5", InputPerMTok: 2.00, OutputPerMTok: 10.00, CacheReadPerMTok: 0.20, CacheWritePerMTok: 2.50},
+		{ModelID: "claude-haiku-4-5", InputPerMTok: 1.00, OutputPerMTok: 5.00, CacheReadPerMTok: 0.10, CacheWritePerMTok: 1.25},
+	})
+}
+
+func TestSumCostPricesEachSliceAtItsOwnRate(t *testing.T) {
+	s := multiModelStamper()
+	// sonnet: 1M in + 100k out = $2 + $1 = $3.00; haiku: 1M in = $1.00.
+	got := s.SumCost([]Tokens{
+		{ModelID: "claude-sonnet-5", InputTokens: 1_000_000, OutputTokens: 100_000},
+		{ModelID: "claude-haiku-4-5", InputTokens: 1_000_000},
+	})
+	if got == nil || *got != 4.00 {
+		t.Fatalf("cost = %v, want 4.00", got)
+	}
+}
+
+func TestSumCostRoundsOnceOverTheSum(t *testing.T) {
+	s := multiModelStamper()
+	// Each slice alone is $0.004 (rounds to $0.00); the sum is $0.008, which
+	// must round to $0.01 — per-slice rounding would report a false zero.
+	got := s.SumCost([]Tokens{
+		{ModelID: "claude-sonnet-5", InputTokens: 2_000},
+		{ModelID: "claude-haiku-4-5", InputTokens: 4_000},
+	})
+	if got == nil || *got != 0.01 {
+		t.Fatalf("cost = %v, want 0.01", got)
+	}
+}
+
+func TestSumCostNilWhenAnyTokenBearingSliceUnpriceable(t *testing.T) {
+	s := multiModelStamper()
+	// One slice with no rate row poisons the whole stamp: a partial dollar
+	// figure would silently under-report the run's spend.
+	got := s.SumCost([]Tokens{
+		{ModelID: "claude-sonnet-5", InputTokens: 1_000_000},
+		{ModelID: "some-unknown-model", InputTokens: 10},
+	})
+	if got != nil {
+		t.Fatalf("cost = %v, want nil when a contributing slice has no rate", *got)
+	}
+}
+
+func TestSumCostIgnoresZeroTokenSlices(t *testing.T) {
+	s := multiModelStamper()
+	// A zero-token slice — even for an unknown model — contributed nothing and
+	// must not block pricing the real spend.
+	got := s.SumCost([]Tokens{
+		{ModelID: "claude-sonnet-5", InputTokens: 1_000_000},
+		{ModelID: "some-unknown-model"},
+	})
+	if got == nil || *got != 2.00 {
+		t.Fatalf("cost = %v, want 2.00", got)
+	}
+}
+
+func TestSumCostNilOnEmptyOrAllZero(t *testing.T) {
+	s := multiModelStamper()
+	if got := s.SumCost(nil); got != nil {
+		t.Fatalf("cost = %v, want nil for no slices", *got)
+	}
+	if got := s.SumCost([]Tokens{{ModelID: "claude-sonnet-5"}}); got != nil {
+		t.Fatalf("cost = %v, want nil for all-zero slices", *got)
+	}
+}

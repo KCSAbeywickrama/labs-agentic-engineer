@@ -31,12 +31,16 @@ import {
 import { Link } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { PageHeader } from "../../../components/PageHeader";
-import { IssueSections } from "../../tasks/components/IssueSections";
 import { useAllTasks } from "../../tasks/api/queries";
 import { taskKeys } from "../../tasks/api/keys";
 import { partitionIssues } from "../../tasks/lib/issueRows";
+import { useProjectStatus } from "../../projects/api/queries";
 import { useBuildRuns, useBuilds } from "../api/queries";
-import { versionIsLive } from "../lib/runView";
+import { openCycleClaims } from "../lib/milestoneBuckets";
+import { buildCycles, versionIsLive } from "../lib/runView";
+import { EarlierSessions } from "./EarlierSessions";
+import { MilestonePanel } from "./MilestonePanel";
+import { RunHistoryList } from "./RunHistoryList";
 import { RunStory } from "./RunStory";
 
 /**
@@ -71,9 +75,50 @@ export function BuildsPage({
   const runs = useBuildRuns(projectName, selectedTag);
   const runList = runs.data?.runs ?? [];
   const live = versionIsLive(runList);
+  // Newest first, and only the newest can be live — so the head is the run the
+  // page leads with and the tail is history.
+  const current = runList[0];
+  const earlier = runList.slice(1);
 
-  // The same query IssueSections reads, on the same key — react-query serves
-  // both from one request. The run card needs it because only the issue plane
+  // This session's CYCLES. Validation is not one of them, so it is filtered
+  // the same way the card filters it.
+  const currentCycles = buildCycles(current?.cycles ?? []);
+  const earlierSessions = currentCycles.slice(0, -1);
+
+  const status = useProjectStatus(projectName);
+  // The platform records a CLONE url, which carries a `.git` suffix — appending
+  // a path to it straight off yields `…/repo.git/issues`, which 404s. Strip the
+  // suffix (and any trailing slash) to get the repo's web root.
+  const repoUrl = status.data?.repoUrl
+    ?.replace(/\/+$/, "")
+    .replace(/\.git$/, "");
+  const issuesUrl = repoUrl ? `${repoUrl}/issues` : undefined;
+
+  // Which OPEN cycle claimed an in-flight issue. `resolves` is the merge
+  // policy's recorded matched set, so this is a fact rather than a guess — and
+  // only the still-open cycle counts: a closed cycle's merge already closed its
+  // issues, so its claims are history, not something "in flight".
+  const claims = openCycleClaims(currentCycles);
+  const openIndex = currentCycles.findIndex((c) => !c.endedAt);
+  // Before its pull request a live session has recorded nothing, so the panel
+  // PRESUMES it works the open issues — the NOW panel's own inference. The
+  // note keeps the two strengths apart: "Claimed by" is the merge policy's
+  // recorded set; "Being worked by" is the presumption, exact at the PR.
+  const presumeOpenWork = openIndex !== -1 && claims.size === 0;
+  const claimedBy = (issue: {
+    issueNumber: number;
+    derivedStatus: string;
+  }): string | undefined => {
+    if (openIndex === -1) return undefined;
+    const label = `build session ${openIndex + 1} · ${currentCycles[openIndex]?.kind ?? ""}`.trim();
+    if (claims.has(issue.issueNumber)) return `Claimed by ${label}`;
+    if (presumeOpenWork && issue.derivedStatus === "pending") {
+      return `Being worked by ${label}`;
+    }
+    return undefined;
+  };
+
+  // One query feeds the milestone panel AND the run card. The card needs it because only the issue plane
   // can tell a gate hold apart from an empty working set, and undefined until
   // it lands is what stops a card accusing a run of having no work on the
   // strength of a list that has not arrived.
@@ -87,6 +132,7 @@ export function BuildsPage({
   const milestone = partition && {
     gates: partition.gates,
     work: partition.work,
+    ledger: partition.ledger,
   };
 
   // One final issue fetch at settle. The GitHub-backed list stops polling the
@@ -175,6 +221,8 @@ export function BuildsPage({
 
   return (
     <>
+      {/* No version subtitle: the picker on the right already names the
+          version, and repeating it under the title said it twice. */}
       <PageHeader title="Builds" backTo={backTo} actions={versionSelector} />
 
       {runs.isError ? (
@@ -183,38 +231,87 @@ export function BuildsPage({
           sx={{ mb: 3 }}
           action={<Button onClick={() => void runs.refetch()}>Retry</Button>}
         >
-          Failed to load {selected.tag}'s runs
+          Failed to load {selected.tag}'s build sessions
           {runs.error instanceof Error && runs.error.message
             ? `: ${runs.error.message}`
             : ""}
         </Alert>
       ) : runs.isPending ? (
         <Box sx={{ display: "flex", justifyContent: "center", p: 4 }}>
-          <CircularProgress aria-label="Loading the version's runs" />
+          <CircularProgress aria-label="Loading the version's build sessions" />
         </Box>
       ) : runList.length === 0 ? (
         <Alert severity="info" sx={{ mb: 3 }}>
-          {selected.tag} has no run rows — the version was tagged before this
-          platform started keeping them.
+          {selected.tag} has no run rows — the version was tagged before
+          this platform started keeping them.
         </Alert>
       ) : (
-        // A milestone sees SEQUENTIAL runs across its life: the spec build that
-        // created the version, then any incident adopted into it. Newest first,
-        // and only the newest can be live.
-        <Stack spacing={2} sx={{ mb: 4 }}>
-          {runList.map((run) => (
-            <RunStory
-              key={run.id}
-              projectName={projectName}
-              tag={selected.tag}
-              run={run}
-              {...(milestone ? { milestone } : {})}
-            />
-          ))}
-        </Stack>
-      )}
+        // Now-first: the CURRENT run leads at full detail, and the milestone
+        // sits beside it so "what is happening" and "how much is left" are one
+        // glance apart. Earlier runs of the same milestone — the spec build that
+        // created the version, then any incident adopted into it — collapse to
+        // history rows, because a settled run is a record, not a thing to watch.
+        <Box
+          sx={{
+            display: "grid",
+            gap: 2,
+            alignItems: "start",
+            mb: 4,
+            // The milestone drops below the run on narrow viewports rather than
+            // squeezing the log into an unreadable column.
+            gridTemplateColumns: { xs: "1fr", lg: "minmax(0, 1fr) 320px" },
+          }}
+        >
+          <Stack spacing={2} sx={{ minWidth: 0 }}>
+            {current && (
+              <RunStory
+                projectName={projectName}
+                tag={selected.tag}
+                run={current}
+                {...(milestone ? { milestone } : {})}
+              />
+            )}
+            {/* The current run's own earlier sessions, then the milestone's
+                earlier runs — both are history, and both belong below the
+                card rather than inside it. */}
+            <EarlierSessions cycles={earlierSessions} />
+            <RunHistoryList runs={earlier} tag={selected.tag} />
+          </Stack>
 
-      <IssueSections projectName={projectName} tag={selected.tag} live={live} />
+          {/* Every view ships loading and error states (api-guidelines #2):
+              the old issue table carried them for this query; its replacement
+              must too, or a failed fetch reads as "no milestone". Data first:
+              react-query keeps the last good list through a failed background
+              refetch, and cached progress beats an error card. */}
+          {milestone ? (
+            <MilestonePanel
+              tag={selected.tag}
+              {...(current?.milestoneTitle ? { title: current.milestoneTitle } : {})}
+              work={milestone.work}
+              gates={milestone.gates}
+              ledger={milestone.ledger}
+              claimed={claims}
+              presumeOpenWork={presumeOpenWork}
+              claimedBy={claimedBy}
+              {...(issuesUrl ? { issuesUrl } : {})}
+            />
+          ) : issues.isError ? (
+            <Alert
+              severity="error"
+              action={<Button onClick={() => void issues.refetch()}>Retry</Button>}
+            >
+              Failed to load the version&apos;s issues
+              {issues.error instanceof Error && issues.error.message
+                ? `: ${issues.error.message}`
+                : ""}
+            </Alert>
+          ) : (
+            <Box sx={{ display: "flex", justifyContent: "center", p: 4 }}>
+              <CircularProgress aria-label="Loading the version's issues" />
+            </Box>
+          )}
+        </Box>
+      )}
     </>
   );
 }

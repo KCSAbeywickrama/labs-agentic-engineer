@@ -112,7 +112,7 @@ func (f *fakeExecs) DistinctDeployedProjects(context.Context) ([]delivery.Deploy
 	return nil, nil
 }
 
-func (f *fakeExecs) RecordUsage(context.Context, string, contracts.TokenUsage) error { return nil }
+func (f *fakeExecs) RecordUsage(context.Context, string, contracts.CapturedUsage) error { return nil }
 
 func (f *fakeExecs) SumUsageByProjectPhase(context.Context, string) (map[string]contracts.StampedUsage, map[string]contracts.StampedUsage, error) {
 	return nil, nil, nil

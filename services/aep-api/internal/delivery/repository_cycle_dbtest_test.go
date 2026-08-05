@@ -380,21 +380,21 @@ func TestRunCycleRepository_RecordUsageAndPhaseRollup(t *testing.T) {
 		InputTokens: 1_000_000, OutputTokens: 100_000, CacheReadTokens: 2_000_000,
 		Model: "model-a",
 	}
-	if err := cycles.RecordUsage(ctx, coding.ID, usage); err != nil {
+	if err := cycles.RecordUsage(ctx, coding.ID, contracts.CapturedUsage{TokenUsage: usage}); err != nil {
 		t.Fatalf("RecordUsage(closed coding cycle): %v", err)
 	}
 	// A second, smaller build-phase contributor so the rollup is proven to SUM
 	// rather than to return the last row it saw.
-	if err := cycles.RecordUsage(ctx, fix.ID, contracts.TokenUsage{
+	if err := cycles.RecordUsage(ctx, fix.ID, contracts.CapturedUsage{TokenUsage: contracts.TokenUsage{
 		InputTokens: 1_000_000, Model: "model-a", // $1.00
-	}); err != nil {
+	}}); err != nil {
 		t.Fatalf("RecordUsage(fix): %v", err)
 	}
 	// An UNPRICEABLE validation run: real tokens, a model with no rate row. Its
 	// cost must stay null while its tokens still count.
-	if err := cycles.RecordUsage(ctx, validation.ID, contracts.TokenUsage{
+	if err := cycles.RecordUsage(ctx, validation.ID, contracts.CapturedUsage{TokenUsage: contracts.TokenUsage{
 		InputTokens: 500_000, OutputTokens: 10_000, Model: "model-unknown",
-	}); err != nil {
+	}}); err != nil {
 		t.Fatalf("RecordUsage(validation): %v", err)
 	}
 
@@ -452,6 +452,87 @@ func TestRunCycleRepository_RecordUsageAndPhaseRollup(t *testing.T) {
 	if b2, v2, err := cycles.SumUsageByProjectPhase(ctx, "other-org"); err != nil ||
 		len(b2) != 0 || len(v2) != 0 {
 		t.Fatalf("cross-org rollup = (%v, %v, %v), want empty", b2, v2, err)
+	}
+}
+
+// TestRunCycleRepository_RecordUsageStampsMultiModelSplit pins the fix for the
+// tokens-instead-of-dollars Usage chips: a real coding run regularly touches a
+// second model (the SDK's small-model helpers), which blanks the aggregate
+// model id — but the runner now ships the per-model split, and the stamp must
+// price each slice at its own rate and sum. A split containing a model with no
+// rate row still stamps null (all-or-nothing), never a partial figure.
+func TestRunCycleRepository_RecordUsageStampsMultiModelSplit(t *testing.T) {
+	t.Parallel()
+	db := dbtest.New(t)
+	runs := delivery.NewMilestoneRunRepository(db)
+	stamper := modelcost.NewStamper([]modelcost.ModelRate{
+		{ModelID: "model-a", InputPerMTok: 1, OutputPerMTok: 10, CacheReadPerMTok: 0.1},
+		{ModelID: "model-b", InputPerMTok: 2, OutputPerMTok: 20},
+	})
+	cycles := delivery.NewRunCycleRepository(db, stamper)
+	ctx := context.Background()
+
+	run := admitRun(t, runs, "orgm", "shop", 1, "v1")
+	appendCycle := func() *delivery.RunCycle {
+		t.Helper()
+		c := &delivery.RunCycle{OrgID: run.OrgID, ProjectID: run.ProjectID, RunID: run.ID, Kind: delivery.CycleKindCoding}
+		if err := cycles.Append(ctx, c); err != nil {
+			t.Fatalf("Append: %v", err)
+		}
+		return c
+	}
+	mixed := appendCycle()
+	poisoned := appendCycle()
+
+	// model-a: 1M in + 100k out = $2.00; model-b: 500k in = $1.00 → $3.00. The
+	// aggregate model is "" (mixed), which used to make the whole cycle
+	// unpriceable.
+	if err := cycles.RecordUsage(ctx, mixed.ID, contracts.CapturedUsage{
+		TokenUsage: contracts.TokenUsage{InputTokens: 1_500_000, OutputTokens: 100_000, Model: ""},
+		Models: []contracts.TokenUsage{
+			{InputTokens: 1_000_000, OutputTokens: 100_000, Model: "model-a"},
+			{InputTokens: 500_000, Model: "model-b"},
+		},
+	}); err != nil {
+		t.Fatalf("RecordUsage(mixed): %v", err)
+	}
+	if err := cycles.RecordUsage(ctx, poisoned.ID, contracts.CapturedUsage{
+		TokenUsage: contracts.TokenUsage{InputTokens: 1_000_010, Model: ""},
+		Models: []contracts.TokenUsage{
+			{InputTokens: 1_000_000, Model: "model-a"},
+			{InputTokens: 10, Model: "model-unrated"},
+		},
+	}); err != nil {
+		t.Fatalf("RecordUsage(poisoned): %v", err)
+	}
+
+	timeline, err := cycles.ListByRun(ctx, "orgm", run.ID)
+	if err != nil {
+		t.Fatalf("ListByRun: %v", err)
+	}
+	byID := map[string]delivery.RunCycle{}
+	for _, c := range timeline {
+		byID[c.ID] = c
+	}
+	if got := byID[mixed.ID]; got.CostUsd == nil || *got.CostUsd != 3.00 {
+		t.Fatalf("mixed-model cost_usd = %v, want 3.00", got.CostUsd)
+	}
+	if got := byID[poisoned.ID]; got.CostUsd != nil {
+		t.Fatalf("cost_usd with an unrated slice = %v, want null", *got.CostUsd)
+	}
+
+	// The phase rollup sums the mixed cycle's stamp and keeps the aggregate
+	// tokens; the poisoned cycle contributes tokens but no dollars.
+	build, _, err := cycles.SumUsageByProjectPhase(ctx, "orgm")
+	if err != nil {
+		t.Fatalf("SumUsageByProjectPhase: %v", err)
+	}
+	b := build["shop"]
+	if b.CostUsd == nil || *b.CostUsd != 3.00 {
+		t.Fatalf("build cost = %v, want 3.00", b.CostUsd)
+	}
+	if b.Tokens.InputTokens != 2_500_010 {
+		t.Fatalf("build input tokens = %d, want 2_500_010", b.Tokens.InputTokens)
 	}
 }
 

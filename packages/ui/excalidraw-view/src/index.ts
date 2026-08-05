@@ -18,3 +18,5 @@
 
 export { ExcalidrawView } from "./ExcalidrawView.js";
 export type { ExcalidrawViewProps } from "./ExcalidrawView.js";
+export { PrototypeView } from "./PrototypeView.js";
+export type { PrototypeViewProps } from "./PrototypeView.js";

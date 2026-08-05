@@ -19,7 +19,7 @@
 import { tryDslToExcalidraw, type DslKind } from "@aep/excalidraw-dsl";
 
 /** `erd`/`domain` filenames are domain-model DSL; everything else is wireframes. */
-function kindFor(path: string): DslKind {
+export function kindFor(path: string): DslKind {
   const base = (path.split("/").at(-1) ?? "").toLowerCase();
   return base.startsWith("erd") || base.startsWith("domain") ? "domain-model" : "wireframes";
 }

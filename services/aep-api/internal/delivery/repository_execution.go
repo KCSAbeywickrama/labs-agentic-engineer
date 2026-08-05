@@ -117,11 +117,12 @@ type ExecutionRepository interface {
 	DistinctDeployedProjects(ctx context.Context) ([]DeployedProjectRef, error)
 
 	// RecordUsage stamps the run's captured token usage onto the row (#249),
-	// and its write-time USD onto cost_usd (#291). Unguarded by status — usage
-	// arrives from the final-log capture, which can land before or after the row
-	// goes terminal (coding successes end via the PR webhook). Last write wins;
-	// the capture is idempotent upstream.
-	RecordUsage(ctx context.Context, id string, u contracts.TokenUsage) error
+	// and its write-time USD onto cost_usd (#291) — each per-model slice priced
+	// at its own rate row, so a multi-model run still stamps. Unguarded by
+	// status — usage arrives from the final-log capture, which can land before
+	// or after the row goes terminal (coding successes end via the PR webhook).
+	// Last write wins; the capture is idempotent upstream.
+	RecordUsage(ctx context.Context, id string, u contracts.CapturedUsage) error
 
 	// SumUsageByProjectPhase rolls up captured execution usage per project
 	// across an org (#291), split into the build and validation SDLC phases —
@@ -365,7 +366,7 @@ func (r *executionRepository) getByID(ctx context.Context, id string) (*Executio
 	return &e, nil
 }
 
-func (r *executionRepository) RecordUsage(ctx context.Context, id string, u contracts.TokenUsage) error {
+func (r *executionRepository) RecordUsage(ctx context.Context, id string, u contracts.CapturedUsage) error {
 	updates := map[string]any{
 		"input_tokens":          u.InputTokens,
 		"output_tokens":         u.OutputTokens,
@@ -374,15 +375,10 @@ func (r *executionRepository) RecordUsage(ctx context.Context, id string, u cont
 		"model_id":              u.Model,
 	}
 	// Stamp USD at capture from the rates in force now (#291): frozen on the
-	// row, never re-derived. Null when unpriceable (no rate / no model).
+	// row, never re-derived. Null when unpriceable (any token-bearing slice
+	// without a rate row).
 	if r.stamper != nil {
-		updates["cost_usd"] = r.stamper.Cost(modelcost.Tokens{
-			ModelID:             u.Model,
-			InputTokens:         u.InputTokens,
-			OutputTokens:        u.OutputTokens,
-			CacheReadTokens:     u.CacheReadTokens,
-			CacheCreationTokens: u.CacheCreationTokens,
-		})
+		updates["cost_usd"] = stampCapturedCost(r.stamper, u)
 	}
 	return r.db.WithContext(ctx).
 		Model(&Execution{}).

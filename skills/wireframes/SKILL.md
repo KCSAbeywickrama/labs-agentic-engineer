@@ -209,8 +209,11 @@ screen <Name> ["what this view is for"]   // one per view; description renders a
 **Navigation** is attached to the control that triggers it: put `-> ScreenName`
 at the end of the button (or link, or table) that leads there, and the compiler
 draws a `→ Screen N · ScreenName` marker beside it. The target must be a
-`screen` name that exists. When two buttons sit in a row, put the `->` on the
-primary/forward one.
+`screen` name that exists, and it must be a **different** screen — an arrow
+pointing back at the screen it sits on says "go to where you already are", and
+the prototype drops it. If the action opens a picker, modal or form, that is a
+view — give it its own `screen` and point at that. When two buttons sit in a
+row, put the `->` on the primary/forward one.
 
 Syntax is validated at write time: an unknown keyword, a misplaced
 `left`/`right`/table-`row`, or old-style x,y coordinates rejects the write with

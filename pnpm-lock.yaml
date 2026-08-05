@@ -443,6 +443,9 @@ importers:
 
   packages/ui/excalidraw-view:
     dependencies:
+      '@aep/excalidraw-dsl':
+        specifier: workspace:*
+        version: link:../../excalidraw-dsl
       '@excalidraw/excalidraw':
         specifier: ^0.18.0
         version: 0.18.1(@types/react-dom@19.0.2(@types/react@19.1.6))(@types/react@19.1.6)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
@@ -462,6 +465,12 @@ importers:
       '@wso2/oxygen-ui':
         specifier: 0.11.0
         version: 0.11.0(@mui/system@7.3.11(@emotion/react@11.14.0(@types/react@19.1.6)(react@19.2.3))(@emotion/styled@11.14.1(@emotion/react@11.14.0(@types/react@19.1.6)(react@19.2.3))(@types/react@19.1.6)(react@19.2.3))(@types/react@19.1.6)(react@19.2.3))(@types/react@19.1.6)(@wso2/oxygen-ui-icons-react@0.11.0(react@19.2.3))(dayjs@1.11.21)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      '@wso2/oxygen-ui-icons-react':
+        specifier: 0.11.0
+        version: 0.11.0(react@19.2.3)
+      tsx:
+        specifier: ^4.21.0
+        version: 4.22.4
       typescript:
         specifier: 5.9.3
         version: 5.9.3
