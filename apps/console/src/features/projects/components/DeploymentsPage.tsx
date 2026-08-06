@@ -419,15 +419,17 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
     deploy && deploy.version && board.production.length === 0,
   );
 
-  // What the "What is running" surface is doing right now, as one chip.
+  // The card's header IS the deploy lifecycle chip (review on #401): the
+  // status word does the work a "What is running" heading duplicated. Every
+  // state renders one, so the header never stands empty.
   const liveChip =
     deploy?.status === "deployed"
-      ? { label: "Live", tone: "success" as const }
+      ? { label: "Deployed", tone: "success" as const }
       : deploy?.status === "deploying"
         ? { label: "Deploying", tone: "info" as const }
         : deploy?.status === "failed"
           ? { label: "Deploy failed", tone: "error" as const }
-          : null;
+          : { label: "Nothing deployed", tone: "neutral" as const };
 
   return (
     <>
@@ -463,15 +465,12 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
             spacing={1.5}
             sx={{ alignItems: "center", flexWrap: "wrap", rowGap: 0.5 }}
           >
-            <Typography variant="h6">What is running</Typography>
-            {liveChip && (
-              <StatusChip
-                label={liveChip.label}
-                tone={liveChip.tone}
-                appearance="soft"
-                dot
-              />
-            )}
+            <StatusChip
+              label={liveChip.label}
+              tone={liveChip.tone}
+              appearance="soft"
+              dot
+            />
             {updated && (
               <Typography variant="caption" color="text.secondary">
                 Updated {updated}

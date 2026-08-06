@@ -233,7 +233,8 @@ describe("DeploymentsPage — story rail", () => {
 
     render(<DeploymentsPage projectName="acme" />);
 
-    expect(screen.getByText("What is running")).toBeInTheDocument();
+    // The card header is the deploy-lifecycle chip itself — no heading.
+    expect(screen.getByText("Deployed")).toBeInTheDocument();
     expect(screen.getByText("Development")).toBeInTheDocument();
     expect(screen.getByText("Validation")).toBeInTheDocument();
     // Twice: the rail's stage and the side panel's section share the name.
