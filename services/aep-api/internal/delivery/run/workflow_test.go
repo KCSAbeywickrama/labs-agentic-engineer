@@ -24,6 +24,7 @@ import (
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/testsuite"
 
 	"github.com/wso2/aep/aep-api/internal/delivery"
@@ -147,14 +148,22 @@ func newHarness(t *testing.T) *harness {
 			defer h.mu.Unlock()
 			h.closed++
 		}).Return(nil)
-	h.env.OnActivity(acts.DispatchAgent, mock.Anything, mock.Anything).
+	return h
+}
+
+// dispatchIs pins what launching the cycle's agent answers. Registered per test
+// rather than as a constructor default for the reason traitSyncIs gives: the
+// harness consumes expectations in registration order, so an unlimited default
+// set in newHarness would swallow the override. Every dispatch is recorded
+// either way, so the budget assertions hold for a failing dispatch too.
+func (h *harness) dispatchIs(jobRef string, err error) {
+	h.set["dispatch"] = true
+	h.env.OnActivity(h.acts.DispatchAgent, mock.Anything, mock.Anything).
 		Run(func(args mock.Arguments) {
 			h.mu.Lock()
 			defer h.mu.Unlock()
 			h.dispatches = append(h.dispatches, args.Get(1).(delivery.MilestoneDispatch))
-		}).Return("job-1", nil)
-
-	return h
+		}).Return(jobRef, err)
 }
 
 // traitSyncIs pins what the managed-API convergence answers. Registered per
@@ -261,6 +270,9 @@ func (h *harness) repairMintCount() int {
 // applyDefaults fills in the facts a test did not pin: every cycle lands, every
 // build is green, and the project has no acceptance oracle.
 func (h *harness) applyDefaults() {
+	if !h.set["dispatch"] {
+		h.dispatchIs("job-1", nil)
+	}
 	if !h.set["facts"] {
 		h.mergesAt(testMergeSHA)
 	}
@@ -842,6 +854,29 @@ func TestRedispatchBudget_AgentDeathEndsTheRun(t *testing.T) {
 	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonRedispatchBudget)
 	require.Equal(t, delivery.RunMaxRedispatchPerCycle, h.dispatchCount())
 	require.Equal(t, "", h.finishes[0].MergeSHA)
+}
+
+// TestAgentQuotaBlocked_SettlesBlockedWithoutSpendingTheBudget is the
+// billing-cap exit, and the reason it is not a failure: nothing was launched,
+// nothing is broken, and the only thing that changes the answer is a human
+// freeing a slot. So the run settles BLOCKED under its own reason, on the FIRST
+// refusal — spending the re-dispatch budget on two more identical refusals
+// would only delay the message the user needs.
+func TestAgentQuotaBlocked_SettlesBlockedWithoutSpendingTheBudget(t *testing.T) {
+	h := newHarness(t)
+	h.milestoneIs(MilestoneSnapshot{Work: 1, Total: 1})
+	h.dispatchIs("", temporal.NewNonRetryableApplicationError(
+		delivery.AgentQuotaBlockedMessage, delivery.ErrTypeAgentQuotaBlocked, delivery.ErrAgentQuotaExceeded))
+
+	h.run(delivery.RunOriginSpecBuild, 0)
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateBlocked, delivery.RunReasonAgentQuotaBlocked)
+	require.Equal(t, 1, h.dispatchCount(),
+		"a quota refusal must not be re-attempted — the answer cannot change without a human")
+	require.Equal(t, 0, h.closed, "a blocked increment keeps its milestone open")
+	require.True(t, delivery.IsTerminalRunState(delivery.RunStateBlocked),
+		"blocked must be terminal, or the spec-run mutex stays armed forever")
 }
 
 // TestBuildRetriggerBudget_RedWithNothingToFix is the exit for a build that

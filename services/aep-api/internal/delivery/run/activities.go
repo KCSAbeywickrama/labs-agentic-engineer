@@ -21,6 +21,8 @@ import (
 	"errors"
 	"log/slog"
 
+	"go.temporal.io/sdk/temporal"
+
 	"github.com/wso2/aep/aep-api/internal/delivery"
 )
 
@@ -485,5 +487,14 @@ func (a *Activities) DispatchAgent(ctx context.Context, in delivery.MilestoneDis
 	if a.dispatcher == nil {
 		return "", errNotConfigured
 	}
-	return a.dispatcher.Dispatch(ctx, in)
+	jobRef, err := a.dispatcher.Dispatch(ctx, in)
+	if errors.Is(err, delivery.ErrAgentQuotaExceeded) {
+		// A sentinel does not survive the activity boundary — Temporal
+		// round-trips errors as data — so the refusal is re-expressed as a
+		// TYPED, non-retryable ApplicationError the workflow can branch on.
+		// Non-retryable because no retry can free a billing slot.
+		return "", temporal.NewNonRetryableApplicationError(
+			err.Error(), delivery.ErrTypeAgentQuotaBlocked, err)
+	}
+	return jobRef, err
 }

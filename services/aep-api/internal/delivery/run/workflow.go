@@ -214,6 +214,8 @@ func (l *loop) run(ctx workflow.Context) (RunResult, error) {
 			return l.settle(ctx, delivery.RunStateCancelled, "")
 		case cycleAgentDead:
 			return l.settle(ctx, delivery.RunStateFailed, delivery.RunReasonRedispatchBudget)
+		case cycleQuotaBlocked:
+			return l.settle(ctx, delivery.RunStateBlocked, delivery.RunReasonAgentQuotaBlocked)
 		}
 		l.lastResult = res
 	}
@@ -376,6 +378,9 @@ func (l *loop) runValidation(ctx workflow.Context) (settled bool, res RunResult,
 		return true, res, err
 	case cycleAgentDead:
 		res, err = l.settle(ctx, delivery.RunStateFailed, delivery.RunReasonRedispatchBudget)
+		return true, res, err
+	case cycleQuotaBlocked:
+		res, err = l.settle(ctx, delivery.RunStateBlocked, delivery.RunReasonAgentQuotaBlocked)
 		return true, res, err
 	}
 

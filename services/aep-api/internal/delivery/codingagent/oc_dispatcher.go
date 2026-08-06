@@ -24,12 +24,9 @@ import (
 	"strings"
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
+	"github.com/wso2/aep/aep-api/internal/delivery"
 	"github.com/wso2/aep/aep-api/internal/gen"
 )
-
-// ErrAgentQuotaExceeded is returned when CreateComponent refuses with HTTP 402
-// (agent concurrency quota). Blocked, not failed — nothing was launched.
-var ErrAgentQuotaExceeded = errors.New("agent quota exceeded")
 
 // RetentionEnforcer frees finished coding-agent Component slots before create.
 // Task 5 fills the LRU implementation; nil or a no-op is fine for Task 4.
@@ -149,7 +146,7 @@ func (d *OCDispatcher) Dispatch(ctx context.Context, in OCDispatchInputs) (strin
 	}
 	if _, err := d.oc.CreateComponent(ctx, in.OrgID, in.ProjectID, req); err != nil {
 		if errors.Is(err, openchoreo.ErrPaymentRequired) {
-			return "", fmt.Errorf("%w: create component %q", ErrAgentQuotaExceeded, in.RunName)
+			return "", fmt.Errorf("%w: create component %q", delivery.ErrAgentQuotaExceeded, in.RunName)
 		}
 		return "", fmt.Errorf("oc dispatch: create component %q: %w", in.RunName, err)
 	}

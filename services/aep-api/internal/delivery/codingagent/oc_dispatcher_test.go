@@ -24,6 +24,7 @@ import (
 	"testing"
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
+	"github.com/wso2/aep/aep-api/internal/delivery"
 	"github.com/wso2/aep/aep-api/internal/gen"
 )
 
@@ -200,8 +201,8 @@ func TestOCDispatcher_402MapsToQuotaExceeded(t *testing.T) {
 	d := NewOCDispatcher(fake)
 
 	_, err := d.Dispatch(context.Background(), ocDispatchInputs())
-	if !errors.Is(err, ErrAgentQuotaExceeded) {
-		t.Fatalf("want ErrAgentQuotaExceeded, got %v", err)
+	if !errors.Is(err, delivery.ErrAgentQuotaExceeded) {
+		t.Fatalf("want delivery.ErrAgentQuotaExceeded, got %v", err)
 	}
 	if fmt.Sprint(fake.calls) != fmt.Sprint([]string{"ensure-type", "create-component"}) {
 		t.Errorf("chain must stop after 402 create, got %v", fake.calls)
