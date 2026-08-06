@@ -51,6 +51,9 @@ var _ openchoreo.ComponentClient = &ComponentClientMock{}
 //			ListDeploymentsFunc: func(ctx context.Context, orgName string, projectName string, componentName string) (*gen.DeploymentList, error) {
 //				panic("mock out the ListDeployments method")
 //			},
+//			ListInternalComponentsFunc: func(ctx context.Context, orgName string, projectName string) ([]openchoreo.InternalComponent, error) {
+//				panic("mock out the ListInternalComponents method")
+//			},
 //			ListProjectReleaseBindingsFunc: func(ctx context.Context, orgName string, projectName string) ([]openchoreo.ReleaseBindingSummary, error) {
 //				panic("mock out the ListProjectReleaseBindings method")
 //			},
@@ -117,6 +120,9 @@ type ComponentClientMock struct {
 
 	// ListDeploymentsFunc mocks the ListDeployments method.
 	ListDeploymentsFunc func(ctx context.Context, orgName string, projectName string, componentName string) (*gen.DeploymentList, error)
+
+	// ListInternalComponentsFunc mocks the ListInternalComponents method.
+	ListInternalComponentsFunc func(ctx context.Context, orgName string, projectName string) ([]openchoreo.InternalComponent, error)
 
 	// ListProjectReleaseBindingsFunc mocks the ListProjectReleaseBindings method.
 	ListProjectReleaseBindingsFunc func(ctx context.Context, orgName string, projectName string) ([]openchoreo.ReleaseBindingSummary, error)
@@ -264,6 +270,15 @@ type ComponentClientMock struct {
 			// ComponentName is the componentName argument value.
 			ComponentName string
 		}
+		// ListInternalComponents holds details about calls to the ListInternalComponents method.
+		ListInternalComponents []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// OrgName is the orgName argument value.
+			OrgName string
+			// ProjectName is the projectName argument value.
+			ProjectName string
+		}
 		// ListProjectReleaseBindings holds details about calls to the ListProjectReleaseBindings method.
 		ListProjectReleaseBindings []struct {
 			// Ctx is the ctx argument value.
@@ -403,6 +418,7 @@ type ComponentClientMock struct {
 	lockGetWorkflowRun                         sync.RWMutex
 	lockListComponents                         sync.RWMutex
 	lockListDeployments                        sync.RWMutex
+	lockListInternalComponents                 sync.RWMutex
 	lockListProjectReleaseBindings             sync.RWMutex
 	lockListProjectWorkflowRuns                sync.RWMutex
 	lockListWorkflowRuns                       sync.RWMutex
@@ -860,6 +876,46 @@ func (mock *ComponentClientMock) ListDeploymentsCalls() []struct {
 	mock.lockListDeployments.RLock()
 	calls = mock.calls.ListDeployments
 	mock.lockListDeployments.RUnlock()
+	return calls
+}
+
+// ListInternalComponents calls ListInternalComponentsFunc.
+func (mock *ComponentClientMock) ListInternalComponents(ctx context.Context, orgName string, projectName string) ([]openchoreo.InternalComponent, error) {
+	if mock.ListInternalComponentsFunc == nil {
+		panic("ComponentClientMock.ListInternalComponentsFunc: method is nil but ComponentClient.ListInternalComponents was just called")
+	}
+	callInfo := struct {
+		Ctx         context.Context
+		OrgName     string
+		ProjectName string
+	}{
+		Ctx:         ctx,
+		OrgName:     orgName,
+		ProjectName: projectName,
+	}
+	mock.lockListInternalComponents.Lock()
+	mock.calls.ListInternalComponents = append(mock.calls.ListInternalComponents, callInfo)
+	mock.lockListInternalComponents.Unlock()
+	return mock.ListInternalComponentsFunc(ctx, orgName, projectName)
+}
+
+// ListInternalComponentsCalls gets all the calls that were made to ListInternalComponents.
+// Check the length with:
+//
+//	len(mockedComponentClient.ListInternalComponentsCalls())
+func (mock *ComponentClientMock) ListInternalComponentsCalls() []struct {
+	Ctx         context.Context
+	OrgName     string
+	ProjectName string
+} {
+	var calls []struct {
+		Ctx         context.Context
+		OrgName     string
+		ProjectName string
+	}
+	mock.lockListInternalComponents.RLock()
+	calls = mock.calls.ListInternalComponents
+	mock.lockListInternalComponents.RUnlock()
 	return calls
 }
 
