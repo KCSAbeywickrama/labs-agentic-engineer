@@ -106,8 +106,11 @@ a field could be read from the workspace, it would not need to be on the wire.
 - Go has no discriminated unions, so `agentsvc.TurnSpec` is a flat struct with a
   `Kind` tag. The TS side validates the combination (`isTurnSpec`) and rejects a
   mismatch pre-stream, which is where that asymmetry is absorbed.
-- The `organization` body is now in every turn's system prompt (~640 tokens).
-  Prompt caching is not configured today, so it is paid per turn until it is.
+- The `organization` body is now in every turn's system prompt, so its cost
+  scales with how much the org has settled. Prompt caching is not configured
+  today, so it is paid per turn until it is. The skill is excluded from the
+  catalog for the same reason — listed *and* inlined would charge for its
+  description twice and offer a load that returns text already in the window.
 - The slash grammar is duplicated in Go and TS. Deliberate: a regex cannot be
   shared across languages without a generator, and the two never see the same
   input — a divergence shows up as the playground routing a line differently

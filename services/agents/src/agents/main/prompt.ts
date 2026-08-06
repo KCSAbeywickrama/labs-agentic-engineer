@@ -61,6 +61,15 @@ the narration for its own flow (what to say as you work, and how to close) — w
 When the instruction is fully applied, stop.`;
 
 /**
+ * The name of the org-defaults skill, inlined into EVERY turn's system prompt.
+ * The one skill that is not "guidance for a task" but standing policy: settled
+ * sections answer interview questions the agent would otherwise ask the user,
+ * and pin providers at design time. An agent that has to remember to load it
+ * asks questions the org already answered.
+ */
+const ORG_DEFAULTS_SKILL = "organization";
+
+/**
  * The skill catalog appended to the END of the system prompt (ADR-0002): skill
  * names + one-line descriptions only, never bodies. It is identical across a
  * conversation's turns (the `_skills` snapshot pins the same catalog), so the
@@ -69,7 +78,10 @@ When the instruction is fully applied, stop.`;
  * byte-identical to a skill-free turn.
  */
 export function buildSkillCatalog(skills: SkillSource | undefined): string {
-  const entries = (skills ?? EMPTY_SKILL_SOURCE).catalog();
+  // The org skill never appears here: its body is already inlined below the
+  // catalog, so a line offering it as loadable advertises a round-trip that
+  // would return text the agent is holding — and paid for its description twice.
+  const entries = (skills ?? EMPTY_SKILL_SOURCE).catalog().filter((e) => e.name !== ORG_DEFAULTS_SKILL);
   if (entries.length === 0) return "";
   // Audience split (ADR-0013): `loadable` is this service's own (design) rows —
   // the catalog and reference note below are built from those ONLY, so a
@@ -124,15 +136,6 @@ ${lines}`;
 }
 
 /**
- * The name of the org-defaults skill, inlined into EVERY turn's system prompt.
- * The one skill that is not "guidance for a task" but standing policy: filled
- * sections answer interview questions the agent would otherwise ask the user,
- * and pin providers at design time. An agent that has to remember to load it
- * asks questions the org already answered.
- */
-const ORG_DEFAULTS_SKILL = "organization";
-
-/**
  * The org's standing defaults, appended to the system prompt of every turn.
  *
  * Placed here rather than in the per-turn eager block because it applies to
@@ -145,6 +148,10 @@ const ORG_DEFAULTS_SKILL = "organization";
  * "", leaving the prompt byte-identical to a turn without it. A skill the
  * audience gate refuses is likewise skipped: `load()` returns `{refused: true}`,
  * which carries no content.
+ *
+ * The heading is this composer's, not the file's — it is what makes the block a
+ * sibling of `# Skills` in the prompt, and an org may edit the body to anything.
+ * The seeded skill therefore carries no title of its own.
  */
 export function buildOrgDefaultsBlock(skills: SkillSource | undefined): string {
   const body = (skills ?? EMPTY_SKILL_SOURCE).load(ORG_DEFAULTS_SKILL);
@@ -154,8 +161,6 @@ export function buildOrgDefaultsBlock(skills: SkillSource | undefined): string {
   return `
 
 # Organization defaults
-
-The following is ALREADY LOADED for every turn — apply it directly and do NOT call loadSkill for "${ORG_DEFAULTS_SKILL}".
 
 ${content}`;
 }

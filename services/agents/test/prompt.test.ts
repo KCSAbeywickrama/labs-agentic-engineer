@@ -104,15 +104,27 @@ test("eager skills never touch the SYSTEM instructions (cacheable prefix)", () =
 
 const ORG: TestSkill = {
   name: "organization",
-  description: "The organization's standing defaults.",
-  content: "# Organization defaults\n\n## 1. Authentication & identity\n\nUse Thunder.",
+  description: "The organization's settled decisions.",
+  content: "## Authentication & identity\n\nUse Thunder.",
 };
 
 test("the org defaults are inlined into the system prompt, body and all", () => {
   const out = buildInstructions(testSkillSource([...SKILL_LIST, ORG]));
   assert.match(out, /# Organization defaults/);
   assert.match(out, /Use Thunder\./, "the BODY is inlined — unlike every other skill");
-  assert.match(out, /do NOT call loadSkill for "organization"/);
+});
+
+test("the org skill is never catalogued — its body is already in the prompt", () => {
+  const skills = testSkillSource([...SKILL_LIST, ORG]);
+  // A catalog line would offer a loadSkill round-trip returning text the agent
+  // is already holding, and charge for the description a second time.
+  assert.ok(!buildSkillCatalog(skills).includes("organization"));
+  // Its heading is the composer's alone, so it appears exactly once.
+  assert.equal(buildInstructions(skills).match(/# Organization defaults/g)?.length, 1);
+});
+
+test("a library of nothing but the org skill renders no catalog at all", () => {
+  assert.equal(buildSkillCatalog(testSkillSource([ORG])), "");
 });
 
 test("the org defaults trail the catalog, leaving the base prefix intact", () => {
