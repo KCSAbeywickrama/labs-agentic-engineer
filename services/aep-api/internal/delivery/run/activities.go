@@ -479,10 +479,11 @@ func (a *Activities) MintValidationRepairIssues(ctx context.Context, in MintVali
 
 // DispatchAgent launches the cycle's agent run and returns the Job reference.
 //
-// It is the ONE activity whose failure is not retried by Temporal: a launch
-// that did not happen is agent death, which the cycle's own re-dispatch budget
-// already answers. Letting Temporal retry it as well would spend that budget
-// invisibly.
+// Two non-retryable failure classes are stamped here (Temporal must not retry
+// either): agent death — a launch that did not happen, answered by the cycle's
+// re-dispatch budget — and quota blocked — entitlement refused, not death.
+// Letting Temporal retry agent death would spend that budget invisibly; quota
+// blocked cannot be cleared by retry.
 func (a *Activities) DispatchAgent(ctx context.Context, in delivery.MilestoneDispatch) (string, error) {
 	if a.dispatcher == nil {
 		return "", errNotConfigured
