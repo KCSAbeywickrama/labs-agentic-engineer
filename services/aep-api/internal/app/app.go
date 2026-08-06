@@ -617,6 +617,26 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		slog.Info("coding executor: direct k8s-job dispatcher wired (secret delivery unavailable; configure cluster-gateway-proxy + secret refs)",
 			"runnerImage", cfg.AgentRunnerImage, "configured", k8sJobDispatcher.Configured())
 	}
+	// The OpenChoreo Component dispatch path (phase 08): one Component per run
+	// cycle in the milestone's own project, rendered by OC into the project's
+	// dataplane namespace. It needs only the OC client and the runner image —
+	// no proxy, no in-cluster Kubernetes client, no per-env branch — and it is
+	// selected ahead of both legacy paths when wired.
+	//
+	// Retention shares the same OC client: before each create it deletes the
+	// project's oldest RETIRED agent components (liveness read from the cycle
+	// rows), because a finished component still holds a billing concurrency
+	// slot.
+	if cfg.AgentRunnerImage != "" {
+		ocDispatcher := codingagent.NewOCDispatcher(componentClient).
+			WithImage(cfg.AgentRunnerImage).
+			WithRetention(codingagent.NewComponentRetention(
+				componentClient, runCycleRepo, codingagent.DefaultCodingAgentComponentRetention))
+		codingExecutor.WithOCDispatch(ocDispatcher)
+		slog.Info("coding executor: OpenChoreo component dispatch path enabled",
+			"runnerImage", cfg.AgentRunnerImage,
+			"componentRetention", codingagent.DefaultCodingAgentComponentRetention)
+	}
 	// Build-secret staging so the post-merge build clones a PRIVATE project repo
 	// (the local plane sets GITHUB_REPO_VISIBILITY=private). Reuses the same
 	// per-org build GitSecret stager feature/component uses for manual builds.
@@ -1330,10 +1350,12 @@ func computeDegradations(cfg config.Config, in Infra, secretsDelivery bool) []De
 	if cfg.OAuthStateSigningKey == "" {
 		off("connect-oauth-state", "OAUTH_STATE_SIGNING_KEY not set — GitHub App connect-state JWTs will fail to mint")
 	}
-	// Working dispatch requires cluster-gateway-proxy + secrets delivery
-	// (refs-only ExternalSecrets). Direct k8s-job secret delivery is disabled
-	// even when the in-cluster client / runner image / platform URL are set.
+	// Working dispatch requires OpenChoreo (AGENT_RUNNER_IMAGE) or
+	// cluster-gateway-proxy + secrets delivery (refs-only ExternalSecrets).
+	// Direct k8s-job secret delivery is disabled even when the in-cluster
+	// client / runner image / platform URL are set.
 	proxyDispatch := cfg.ClusterGatewayProxyURL != "" && secretsDelivery
+	ocDispatch := cfg.AgentRunnerImage != ""
 	k8sWired := in.K8sClient != nil && cfg.AgentRunnerImage != "" && cfg.AgentPlatformURL != ""
 	if !proxyDispatch {
 		off("coding-dispatch-proxy", "cluster-gateway-proxy + secrets delivery not both set — cloud proxy dispatch path off")
@@ -1343,8 +1365,8 @@ func computeDegradations(cfg config.Config, in Infra, secretsDelivery bool) []De
 	} else {
 		off("coding-dispatch-k8s", "direct k8s-job secret delivery is disabled; configure cluster-gateway-proxy + secret refs")
 	}
-	if !proxyDispatch {
-		off("coding-dispatch-any", "NO working dispatch path — coding/validation runs require cluster-gateway-proxy + secret refs")
+	if !proxyDispatch && !ocDispatch {
+		off("coding-dispatch-any", "NO working dispatch path — coding/validation runs require AGENT_RUNNER_IMAGE (OpenChoreo) or cluster-gateway-proxy + secret refs")
 	}
 	if cfg.RCAAgentAnthropicPushNamespace == "" || cfg.RCAAgentAnthropicPushSecretName == "" {
 		off("rca-agent-key-push", "RCA_AGENT_ANTHROPIC_PUSH_* not set — org Anthropic key not pushed to a consumer ExternalSecret")

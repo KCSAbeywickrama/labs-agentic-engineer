@@ -52,13 +52,15 @@ type OCJobSurface interface {
 // only SecretEnv refs (name + key) for ESO.
 type OCDispatchInputs struct {
 	OrgID, ProjectID, CycleID string
-	MilestoneNumber           int
-	MilestoneTitle            string
-	Kind                      string // coding|validation|…
-	RunName                   string // ca-… deterministic for this attempt
-	Image                     string
-	ActiveDeadlineSeconds     int
-	Env                       map[string]string
+	// RunID is the milestone run the cycle belongs to — Component description only.
+	RunID           string
+	MilestoneNumber int
+	MilestoneTitle  string
+	Kind            string // coding|validation|…
+	RunName         string // ca-… deterministic for this attempt
+	Image           string
+	ActiveDeadlineSeconds int
+	Env                   map[string]string
 	// SecretEnv is refs-only (anthropic/github/publisher/external) — values
 	// never written by the BFF.
 	SecretEnv []SecretEnvRef
@@ -71,17 +73,39 @@ type SecretEnvRef struct {
 	SecretKey  string
 }
 
+// codingAgentWorkspacePath mirrors the runner's own default (remote-worker's
+// config.ts) and the ComponentType's volume mount.
+const codingAgentWorkspacePath = "/home/aep/aep-workspace"
+
+// The runner's secret env var names. They are the RUNNER's contract, not a
+// credential's identity: the value behind each arrives from whichever
+// SecretReference the org's row names.
+const (
+	envAnthropicAPIKey = "ANTHROPIC_API_KEY"
+	envGitHubToken     = "GITHUB_TOKEN"
+)
+
 // OCDispatcher creates the ephemeral coding-agent Component chain:
 // EnsureComponentType → CreateComponent → EnsureWorkload → EnsureRelease →
 // EnsureReleaseBinding into openchoreo.DevEnvironmentName.
 type OCDispatcher struct {
 	oc        OCJobSurface
 	retention RetentionEnforcer
+	// image is THE runner image (adaptation of the brief's NewOCJobDispatcher
+	// image arg). Used when OCDispatchInputs.Image is empty.
+	image string
 }
 
 // NewOCDispatcher wires the dispatcher against an OC surface.
 func NewOCDispatcher(oc OCJobSurface) *OCDispatcher {
 	return &OCDispatcher{oc: oc}
+}
+
+// WithImage sets the runner image used when OCDispatchInputs.Image is empty.
+// Returns the receiver for chained construction.
+func (d *OCDispatcher) WithImage(image string) *OCDispatcher {
+	d.image = image
+	return d
 }
 
 // WithRetention sets the pre-create retention helper (Task 5). Nil skips.
@@ -107,11 +131,16 @@ func (d *OCDispatcher) Dispatch(ctx context.Context, in OCDispatchInputs) (strin
 		}
 	}
 
+	image := d.resolveImage(in)
 	labels := d.markers(in)
+	desc := fmt.Sprintf("AEP internal: agent run cycle %s.", in.CycleID)
+	if in.RunID != "" {
+		desc = fmt.Sprintf("AEP internal: agent run cycle %s of run %s.", in.CycleID, in.RunID)
+	}
 	req := &openchoreo.CreateComponentRequest{
 		Name:        in.RunName,
 		DisplayName: displayNameFor(in),
-		Description: fmt.Sprintf("AEP internal: agent run cycle %s.", in.CycleID),
+		Description: desc,
 		Type:        openchoreo.CodingAgentComponentTypeRef,
 		AutoBuild:   false,
 		AutoDeploy:  false,
@@ -127,7 +156,7 @@ func (d *OCDispatcher) Dispatch(ctx context.Context, in OCDispatchInputs) (strin
 
 	if err := d.oc.EnsureWorkload(ctx, in.OrgID, in.ProjectID, openchoreo.WorkloadInput{
 		ComponentName: in.RunName,
-		Image:         in.Image,
+		Image:         image,
 		Env:           workloadEnv(in),
 		Labels:        labels,
 	}); err != nil {
@@ -146,6 +175,13 @@ func (d *OCDispatcher) Dispatch(ctx context.Context, in OCDispatchInputs) (strin
 	return in.RunName, nil
 }
 
+func (d *OCDispatcher) resolveImage(in OCDispatchInputs) string {
+	if img := strings.TrimSpace(in.Image); img != "" {
+		return img
+	}
+	return strings.TrimSpace(d.image)
+}
+
 func (d *OCDispatcher) validate(in OCDispatchInputs) error {
 	var missing []string
 	check := func(name, v string) {
@@ -157,7 +193,7 @@ func (d *OCDispatcher) validate(in OCDispatchInputs) error {
 	check("ProjectID", in.ProjectID)
 	check("CycleID", in.CycleID)
 	check("RunName", in.RunName)
-	check("Image", in.Image)
+	check("Image", d.resolveImage(in))
 	if len(missing) > 0 {
 		return fmt.Errorf("oc dispatch: missing required field(s): %s", strings.Join(missing, ", "))
 	}

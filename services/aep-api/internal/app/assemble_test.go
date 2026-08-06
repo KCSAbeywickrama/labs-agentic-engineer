@@ -213,8 +213,10 @@ func TestAssemble_Degradations(t *testing.T) {
 		if !strings.Contains(k8s.Reason, "secret delivery is disabled") {
 			t.Fatalf("k8s degradation must say secret delivery disabled, got %q", k8s.Reason)
 		}
-		if !hasCapability(degs, "coding-dispatch-any") {
-			t.Error("without proxy+secrets, coding-dispatch-any must stay degraded (k8s is not a working path)")
+		// AGENT_RUNNER_IMAGE wires the OpenChoreo path, so coding-dispatch-any
+		// clears even without proxy+secrets.
+		if hasCapability(degs, "coding-dispatch-any") {
+			t.Error("with AGENT_RUNNER_IMAGE set, coding-dispatch-any must not be degraded (OC path is working)")
 		}
 	})
 

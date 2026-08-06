@@ -40,13 +40,16 @@ import (
 // (RetryAuthFailedBuild), which is why it still holds the build-secret stager
 // and the executions repository.
 //
-// Two dispatch paths:
+// Three dispatch paths (selected in order):
+//   - OpenChoreo Component dispatch (phase 08): one Component per run cycle in
+//     the milestone's own project — THE agent path when wired (carries task
+//     kind, deadline, and refs-only secrets in both planes);
 //   - the cluster-gateway-proxy path (per-org NS + per-run ExternalSecrets + a
 //     K8s Job), used when the proxy dispatcher + the org's SM-API triplets are
-//     configured — this is what the cloud / local-proxy plane exercises (`ca-…` jobs);
-//   - the direct K8s Job fallback (K8sJobDispatcher) when the proxy path is not
+//     configured — remains until retirement (phase 08c);
+//   - the direct K8s Job fallback (K8sJobDispatcher) when neither above is
 //     configured — constructible, but Dispatch fails closed (direct k8s-job
-//     secret delivery is disabled; configure cluster-gateway-proxy + secret refs).
+//     secret delivery is disabled; configure OC or cluster-gateway-proxy).
 type CodingExecutor struct {
 	oc            openchoreo.ComponentClient
 	repos         ProjectRepos
@@ -59,6 +62,13 @@ type CodingExecutor struct {
 
 	// Proxy dispatch (nil → fall through to the direct k8sJob path).
 	proxy *Dispatcher
+
+	// ocJobs is the OpenChoreo Component dispatch path — one Component per run
+	// cycle in the milestone's own project. When wired it is THE agent path:
+	// it is the only one that carries the task kind, the deadline and
+	// refs-only secrets in both local and cloud planes, so it is selected
+	// ahead of the proxy and the direct-Job fallback below.
+	ocJobs *OCDispatcher
 
 	// Org-scoped repository reads, always wired at the composition root: the
 	// per-org Anthropic/GitHub SM-API triplets + IDP publisher profile for the
@@ -128,6 +138,15 @@ func (e *CodingExecutor) WithProxy(proxy *Dispatcher, idp OrgPublisherProvisione
 	return e
 }
 
+// WithOCDispatch enables the OpenChoreo Component dispatch path (phase 08). It
+// takes precedence over the proxy and the direct K8s Job paths for agent
+// launches; those remain wired only until their retirement lands, and they
+// still serve nothing else. Returns the receiver for chained construction.
+func (e *CodingExecutor) WithOCDispatch(d *OCDispatcher) *CodingExecutor {
+	e.ocJobs = d
+	return e
+}
+
 // WithK8sJobDispatch wires the direct K8s Job dispatch path. The org UUID
 // lookup (needed to derive the data-plane namespace) reads through the org
 // repository wired at construction. Direct k8s-job secret delivery is disabled
@@ -189,19 +208,23 @@ func (e *CodingExecutor) AuthRetryBudget() int {
 // prompt shape differ.
 //
 // It performs NO state write: a cycle dispatch mints no execution row, because
-// the cycle record is the run supervisor'"'"'s own bookkeeping.
+// the cycle record is the run supervisor's own bookkeeping.
 type agentLaunch struct {
 	orgID     string
 	projectID string
 
 	// correlationID is the platform id the pod carries: it is stamped as
 	// AEP_TASK_ID, seeds the `ca-…` run name, and is the subject of the runner
-	// bearer. It is the dispatching CYCLE'"'"'s id.
+	// bearer. It is the dispatching CYCLE's id.
 	correlationID string
+
+	// runID is the milestone run the cycle belongs to. Carried for the created
+	// Component's description only — nothing resolves state through it.
+	runID string
 
 	shape dispatchShape
 
-	// secretComponent, when non-empty, mounts that component'"'"'s external-resource
+	// secretComponent, when non-empty, mounts that component's external-resource
 	// secrets into the runner. It is always empty today: a cycle spans the whole
 	// milestone rather than one component, so there is no single component whose
 	// secrets to mount.
@@ -242,6 +265,12 @@ func (e *CodingExecutor) launchAgent(ctx context.Context, in agentLaunch) (strin
 	if err != nil {
 		return "", fmt.Errorf("mint MCP token: %w", err)
 	}
+	// OpenChoreo Component dispatch: the agent path. One Component per run
+	// cycle in the milestone's own project, and the only path that carries the
+	// task kind, the deadline override and refs-only secrets in BOTH planes.
+	if e.ocJobs != nil {
+		return e.dispatchViaOC(ctx, in, repo, name, email, login, bearer, mcpToken)
+	}
 	// Proxy path (cloud / local-proxy plane): per-org NS + per-run ExternalSecrets
 	// + K8s Job via the cluster-gateway-proxy. Falls back to the direct K8s Job
 	// path below when the proxy / SM-API is not configured.
@@ -251,15 +280,6 @@ func (e *CodingExecutor) launchAgent(ctx context.Context, in agentLaunch) (strin
 	}
 	if used {
 		return runName, nil
-	}
-
-	// Validation has no non-proxy fallback. The image is no longer the reason
-	// (one image serves both kinds); K8sJobInput is: it carries no TaskKind and
-	// no deadline override, so the direct path would launch a runner that never
-	// preloads the `aep-validation` skill and dies at the 1h default. Fail
-	// loudly rather than launch a run that cannot do the job.
-	if in.shape.taskKind != "" || in.shape.deadline != 0 {
-		return "", fmt.Errorf("dispatch kind %q requires the cluster-gateway-proxy path; the direct K8s Job fallback carries no AEP_TASK_KIND or deadline override", in.shape.taskKind)
 	}
 
 	// Direct K8s Job path: Dispatch fails closed — secret delivery requires
@@ -291,7 +311,7 @@ func (e *CodingExecutor) launchAgent(ctx context.Context, in agentLaunch) (strin
 		return rn, nil
 	}
 
-	return "", fmt.Errorf("no coding-agent dispatch path configured: set CLUSTER_GATEWAY_PROXY_URL or ensure in-cluster client + AGENT_RUNNER_IMAGE + AGENT_PLATFORM_URL are set")
+	return "", fmt.Errorf("no coding-agent dispatch path configured: set AGENT_RUNNER_IMAGE (OpenChoreo) or CLUSTER_GATEWAY_PROXY_URL, or ensure in-cluster client + AGENT_RUNNER_IMAGE + AGENT_PLATFORM_URL are set")
 }
 
 // dispatchViaProxy runs the cluster-gateway-proxy apply-chain for one agent
@@ -395,6 +415,67 @@ func (e *CodingExecutor) dispatchViaProxy(ctx context.Context, in agentLaunch, r
 		return false, "", err
 	}
 	return true, rn, nil
+}
+
+// dispatchViaOC launches one cycle through the OpenChoreo Component chain.
+//
+// The executor's job here is credential and identity resolution — the org's
+// refs-only secret triplets, the runner bearer, the MCP token — and the
+// dispatcher's job is the OC chain. The run name is derived from the CYCLE id,
+// deterministically within a dispatch attempt, so a crashed dispatch resumes
+// over the same Component instead of orphaning it.
+//
+// No ApplyWPSecret: credentials reach the pod through the ComponentType's
+// ExternalSecret / Workload secretEnv (refs only).
+func (e *CodingExecutor) dispatchViaOC(ctx context.Context, in agentLaunch, repo *sourcecontrol.GitRepository,
+	name, email, login, bearer, mcpToken string) (string, error) {
+	anthropicSR, githubSR, err := e.resolveRunnerSecretRefs(ctx, in.orgID)
+	if err != nil {
+		return "", err
+	}
+	disp := in.shape
+	image := e.runnerImage
+	platform := strings.TrimRight(e.platformURL, "/")
+	env := map[string]string{
+		"AEP_TASK_ID":         in.correlationID,
+		"AEP_ORG_ID":          in.orgID,
+		"AEP_PROJECT_ID":      in.projectID,
+		"AEP_COMPONENT_NAME":  disp.componentName,
+		"AEP_REPO_URL":        repo.RepoURL,
+		"AEP_PROMPT":          disp.prompt,
+		"AEP_GIT_SERVICE_URL": e.gitServiceURL,
+		"AEP_PLATFORM_URL":    e.platformURL,
+		"AEP_MCP_URL":         platform + "/internal/v1/mcp",
+		"AEP_IDENTITY_NAME":   name,
+		"AEP_IDENTITY_EMAIL":  email,
+		"AEP_IDENTITY_LOGIN":  login,
+		"AEP_CORRELATION_ID":  in.correlationID,
+		"AEP_TASK_KIND":       taskKindOrDefault(disp.taskKind),
+		"WORKSPACE_BASE_PATH": codingAgentWorkspacePath,
+	}
+	if bearer != "" {
+		env["AEP_BEARER"] = bearer
+	}
+	if mcpToken != "" {
+		env["AEP_MCP_TOKEN"] = mcpToken
+	}
+	return e.ocJobs.Dispatch(ctx, OCDispatchInputs{
+		OrgID:                 in.orgID,
+		ProjectID:             in.projectID,
+		CycleID:               in.correlationID,
+		RunID:                 in.runID,
+		MilestoneNumber:       disp.milestoneNumber,
+		MilestoneTitle:        disp.milestoneTitle,
+		Kind:                  disp.taskKind,
+		RunName:               codingAgentRunNameFor(in.correlationID),
+		Image:                 image,
+		ActiveDeadlineSeconds: int(disp.deadline),
+		Env:                   env,
+		SecretEnv: []SecretEnvRef{
+			{Key: envAnthropicAPIKey, SecretName: anthropicSR.SecretRefName, SecretKey: anthropicSR.Property},
+			{Key: envGitHubToken, SecretName: githubSR.SecretRefName, SecretKey: githubSR.Property},
+		},
+	})
 }
 
 // stageBuildSecret pre-stages the org's build git credential and returns the
@@ -600,7 +681,12 @@ type dispatchShape struct {
 	prompt        string
 	componentName string
 	taskKind      string // "" (coding) | "validation"
-	deadline      int64  // 0 → job_template's 1h default
+	deadline      int64  // 0 → the ComponentType's 1h default
+	// The milestone the cycle works, carried for the human-facing display name
+	// on the created Component. A cycle spans a milestone's whole working set,
+	// so the milestone (and the cycle kind) is what names it — not an issue.
+	milestoneNumber int
+	milestoneTitle  string
 }
 
 // buildValidationPrompt is the validation-runner directive: it points at the
