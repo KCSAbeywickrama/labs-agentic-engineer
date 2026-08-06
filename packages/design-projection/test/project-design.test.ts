@@ -30,7 +30,7 @@ const BUNDLE: Record<string, string> = {
     appPath: "expense-api",
     entrypoint: "deployment/service",
     exposure: "internet",
-    skillsPinned: ["high-level-architecture", "openapi-conventions"],
+    skillsPinned: ["architecture", "openapi-conventions"],
     dependencies: [
       { kind: "platform-resource", name: "postgres", resourceType: "postgres" },
       { kind: "external", name: "email-gateway" },
@@ -62,7 +62,7 @@ test("projects the bundle into the cell-diagram-compatible design json", () => {
   const api = dj.components.find((c) => c.id === "expense-api")!;
   assert.equal(api.type, "service");
   assert.equal(api.version, "0.2.0");
-  assert.deepEqual(api.skillsPinned, ["high-level-architecture", "openapi-conventions"]);
+  assert.deepEqual(api.skillsPinned, ["architecture", "openapi-conventions"]);
   assert.equal(api.build.language, "Go");
   assert.equal(api.services!["expense-api"]!.deploymentMetadata.gateways.internet.isExposed, true);
   assert.deepEqual(api.connections, [

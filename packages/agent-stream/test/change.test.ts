@@ -54,8 +54,8 @@ test("readToolInputPath resolves the path once its string closes, decoding escap
   assert.equal(readToolInputPath('{"path":"specs/req'), undefined);
   // Path closed (content just starting) → resolved even though the object isn't.
   assert.equal(
-    readToolInputPath('{"path":"specs/requirements/requirements.md","content":"# R'),
-    "specs/requirements/requirements.md",
+    readToolInputPath('{"path":"specs/requirements/prd.md","content":"# R'),
+    "specs/requirements/prd.md",
   );
   // JSON escapes in the path are decoded.
   assert.equal(readToolInputPath('{"path":"a\\"b.md"'), 'a"b.md');

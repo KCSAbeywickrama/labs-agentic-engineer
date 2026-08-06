@@ -31,7 +31,7 @@ const DESIGN: ProjectDesign = {
       id: "expense-api",
       type: "service",
       version: "0.2.0",
-      skillsPinned: ["high-level-architecture"],
+      skillsPinned: ["architecture"],
       build: { language: "Go" },
       services: {
         "expense-api": {

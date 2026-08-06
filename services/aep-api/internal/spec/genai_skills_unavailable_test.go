@@ -40,7 +40,7 @@ func TestSkillsRepoGone_Clear503(t *testing.T) {
 		Status:        "ready",
 		RepoSlug:      "org-skills",
 	}
-	r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"},
+	r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"},
 		withSkillsRepo(func(context.Context, string) (*sourcecontrol.GitRepository, error) {
 			return staleRow, nil
 		}))

@@ -25,7 +25,8 @@
  */
 
 import { runSpecTurn } from "@aep/playground/src/engine/turn.js";
-import { composeSpecInstruction } from "@aep/playground/src/engine/compose.js";
+import { chatSpec } from "@aep/playground/src/engine/turn-spec.js";
+import type { TurnSpec } from "@aep/agent-stream";
 import { pendingQuestions } from "@aep/playground/src/engine/questions.js";
 import type { PlaygroundSession } from "@aep/playground/src/engine/session.js";
 import { buildAnswerInstruction, buildAnswersInstruction } from "@aep/agent-stream";
@@ -44,6 +45,20 @@ export interface SectionRunResult {
   error?: string;
 }
 
+/** A short human label for the trace record — never what is sent to the model. */
+function turnLabel(turn: TurnSpec): string {
+  switch (turn.kind) {
+    case "chat":
+      return turn.text;
+    case "flow":
+      return turn.text ? `/${turn.skill} ${turn.text}` : `/${turn.skill}`;
+    case "start":
+      return turn.idea ? `/start ${turn.idea}` : "/start";
+    case "plan":
+      return "task-plan (one-shot)";
+  }
+}
+
 /**
  * Run one HITL section to completion inside an open session. The fatigue
  * counter starts at zero — per-section reset (#357).
@@ -51,7 +66,7 @@ export interface SectionRunResult {
 export async function runConversationalSection(
   session: PlaygroundSession,
   section: "requirements" | "design",
-  firstInstruction: string,
+  firstTurn: TurnSpec,
   brief: ScenarioBrief,
 ): Promise<SectionRunResult> {
   const maxTurns = brief.maxTurns ?? DEFAULT_MAX_TURNS;
@@ -61,11 +76,12 @@ export async function runConversationalSection(
   let finishedInterview = false;
   let error: string | undefined;
 
-  let text = firstInstruction;
+  let turn = firstTurn;
+  let label = turnLabel(firstTurn);
   while (records.length < maxTurns) {
-    const rec = newTurnRecord(section, records.length + 1, text);
+    const rec = newTurnRecord(section, records.length + 1, label);
     const start = Date.now();
-    const result = await runSpecTurn(session, composeSpecInstruction(text), {
+    const result = await runSpecTurn(session, turn, {
       onPart: (part) => collectPart(rec, part),
     });
     rec.ms = Date.now() - start;
@@ -91,9 +107,11 @@ export async function runConversationalSection(
     answers.push(...batch);
     reportTurnTrace(rec, start);
 
-    text = pending.batch
+    // An answer is ordinary chat, whatever kind of turn asked the question.
+    label = pending.batch
       ? buildAnswersInstruction(batch)
       : buildAnswerInstruction(batch[0]!.question, batch[0]!.selected, batch[0]!.freeText);
+    turn = chatSpec(label);
   }
 
   return {

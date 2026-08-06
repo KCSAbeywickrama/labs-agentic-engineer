@@ -18,9 +18,12 @@
 
 /**
  * The chat command taxonomy (pure `classifyChatInput`): precedence between
- * control words, phase-runners, and skill-load / plain-chat turns is pinned
- * here, and the non-interactive branches of the shared `ensureProjectDir`
+ * control words, phase-runners, and flow / plain-chat turns is pinned here,
+ * along with the non-interactive branches of the shared `ensureProjectDir`
  * fence-and-create helper.
+ *
+ * These assert the FACTS a line classifies into — never prompt wording, which
+ * this package no longer owns.
  */
 
 import { test } from "node:test";
@@ -61,35 +64,53 @@ test("/code takes an optional issue argument", () => {
 test("a phase name must match exactly — /code-all and /tasky are not phases", () => {
   assert.deepEqual(classifyChatInput("/code-all"), {
     kind: "turn",
-    instruction: "Load the code-all skill and follow it.",
+    turn: { kind: "flow", skill: "code-all" },
   });
   assert.deepEqual(classifyChatInput("/tasky"), {
     kind: "turn",
-    instruction: "Load the tasky skill and follow it.",
+    turn: { kind: "flow", skill: "tasky" },
   });
 });
 
 // --- classifyChatInput: skill-load / plain chat -----------------------------
 
-test("skill commands expand via slashSkillInstruction", () => {
+// A command names a FLOW; it never becomes prompt text here. What "Load the
+// spec skill and follow it." reads like is the agents service's business
+// (services/agents/test/turn-compose.test.ts).
+test("skill commands become flow turns", () => {
   assert.deepEqual(classifyChatInput("/spec an app"), {
     kind: "turn",
-    instruction: "Load the spec skill and follow it.\n\nan app",
+    turn: { kind: "flow", skill: "spec", text: "an app" },
   });
   assert.deepEqual(classifyChatInput("/design"), {
     kind: "turn",
-    instruction: "Load the design skill and follow it.",
+    turn: { kind: "flow", skill: "design" },
   });
   assert.deepEqual(classifyChatInput("/grilling"), {
     kind: "turn",
-    instruction: "Load the grilling skill and follow it.",
+    turn: { kind: "flow", skill: "grilling" },
+  });
+});
+
+test("the flow grammar stays narrow — a mid-message slash is ordinary chat", () => {
+  assert.deepEqual(classifyChatInput("fix the /spec route please"), {
+    kind: "turn",
+    turn: { kind: "chat", text: "fix the /spec route please" },
+  });
+  assert.deepEqual(classifyChatInput("//spec"), {
+    kind: "turn",
+    turn: { kind: "chat", text: "//spec" },
+  });
+  assert.deepEqual(classifyChatInput("/spec."), {
+    kind: "turn",
+    turn: { kind: "chat", text: "/spec." },
   });
 });
 
 test("a plain line is a verbatim chat turn", () => {
   assert.deepEqual(classifyChatInput("please regenerate the design"), {
     kind: "turn",
-    instruction: "please regenerate the design",
+    turn: { kind: "chat", text: "please regenerate the design" },
   });
 });
 

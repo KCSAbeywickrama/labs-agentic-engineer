@@ -507,6 +507,60 @@ PY
     echo "$rendered"
 }
 
+# Ensure Thunder's aep-console-client accepts logins from the public console
+# origin. Thunder ≥0.34 keeps OAuth config in APP_OAUTH_INBOUND_CONFIG.OAUTH_CONFIG
+# (JSON — there is no CLIENT_ID column); the clientId→app mapping lives in
+# userdb's ENTITY_IDENTIFIER table. Thunder matches redirect URIs exactly, so
+# each origin needs its bare, trailing-slash, and /callback forms registered.
+# Idempotent: only writes (and restarts Thunder) when a URI is missing.
+sync_console_redirect_uris() {
+    local pod app_id current desired
+    pod="$(kubectl -n thunder get pod -l app.kubernetes.io/name=thunder \
+            -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+    if [ -z "$pod" ]; then
+        echo "⚠️  no thunder pod found — skipping console redirect-URI sync"
+        return 0
+    fi
+    app_id="$(kubectl -n thunder exec "$pod" -- sqlite3 \
+        /opt/thunder/repository/database/userdb.db \
+        "SELECT ENTITY_ID FROM ENTITY_IDENTIFIER WHERE NAME='clientId' AND VALUE='aep-console-client';" \
+        2>/dev/null || true)"
+    if [ -z "$app_id" ]; then
+        echo "⚠️  aep-console-client not registered in Thunder (run scripts/setup-local.sh) — skipping redirect-URI sync"
+        return 0
+    fi
+    current="$(kubectl -n thunder exec "$pod" -- sqlite3 \
+        /opt/thunder/repository/database/configdb.db \
+        "SELECT json_extract(OAUTH_CONFIG, '\$.redirect_uris') FROM APP_OAUTH_INBOUND_CONFIG WHERE APP_ID='$app_id';" \
+        2>/dev/null || true)"
+    # Union of the registered URIs and the required console origins; empty
+    # output means nothing is missing.
+    desired="$(python3 -c '
+import json, sys
+current = json.loads(sys.argv[1]) if sys.argv[1] else []
+uris = list(current)
+for origin in sys.argv[2:]:
+    origin = origin.rstrip("/")
+    for uri in (origin, origin + "/", origin + "/callback"):
+        if uri not in uris:
+            uris.append(uri)
+print("" if uris == current else json.dumps(uris))
+' "$current" "http://localhost:8090" "$PUBLIC_CONSOLE_URL")"
+    if [ -z "$desired" ]; then
+        echo "   ✓ console redirect URIs already registered"
+        return 0
+    fi
+    kubectl -n thunder exec -i "$pod" -- sqlite3 \
+        /opt/thunder/repository/database/configdb.db <<SQL
+UPDATE APP_OAUTH_INBOUND_CONFIG
+SET OAUTH_CONFIG = json_set(OAUTH_CONFIG, '\$.redirect_uris', json('$desired'))
+WHERE APP_ID = '$app_id';
+SQL
+    kubectl -n thunder rollout restart deployment thunder-deployment >/dev/null
+    kubectl -n thunder rollout status deployment thunder-deployment --timeout=120s >/dev/null
+    echo "   ✓ console redirect URIs updated: $desired"
+}
+
 # Patch the running cluster to match the current PUBLIC_* env vars.
 # Surgical kubectl patches, not `helm upgrade` — avoids field-manager conflicts
 # with prior kubectl-replace/kubectl-patch operations on the same fields.
@@ -521,21 +575,30 @@ apply_public_urls_to_cluster() {
     echo "   thunder: ${PUBLIC_THUNDER_URL}"
     echo "   console: ${PUBLIC_CONSOLE_URL}"
 
+    # Thunder ≥0.34 renders deployment.yaml scalars unquoted — accept both
+    # styles here or the comparison below always looks like a URL change.
     local current_public_url
     current_public_url="$(kubectl -n thunder get cm thunder-config-map \
         -o jsonpath='{.data.deployment\.yaml}' 2>/dev/null \
-        | sed -nE 's/^[[:space:]]*public_url:[[:space:]]*"([^"]+)".*/\1/p' | head -1)"
+        | sed -nE 's/^[[:space:]]*public_url:[[:space:]]*"?([^" ]+)"?.*/\1/p' | head -1)"
 
     if [ "$current_public_url" != "$PUBLIC_THUNDER_URL" ]; then
-        # Fetch each ConfigMap data field as a decoded plain string (kubectl
-        # jsonpath unescapes YAML flow-scalar escapes), rewrite the URL fields
-        # with real text, then rebuild the ConfigMap via dry-run + replace.
-        local dep_yaml console_js gate_js
-        local f_dep f_console f_gate
-        f_dep="$(mktemp)"; f_console="$(mktemp)"; f_gate="$(mktemp)"
-        kubectl -n thunder get cm thunder-config-map -o jsonpath='{.data.deployment\.yaml}'    > "$f_dep"
-        kubectl -n thunder get cm thunder-config-map -o jsonpath='{.data.console-config\.js}'  > "$f_console"
-        kubectl -n thunder get cm thunder-config-map -o jsonpath='{.data.gate-config\.js}'     > "$f_gate"
+        # Fetch EVERY ConfigMap data key to a file, rewrite the URL fields in
+        # the ones we manage, then rebuild the ConfigMap from all of them.
+        # The chart grows keys over time (e.g. consent-deployment.yaml); a
+        # rebuild that misses one breaks that key's subPath mount on the next
+        # pod start (CrashLoopBackOff).
+        local cm_dir f_dep f_console f_gate
+        cm_dir="$(mktemp -d)"
+        kubectl -n thunder get cm thunder-config-map -o json | python3 -c '
+import json, sys, pathlib
+outdir = pathlib.Path(sys.argv[1])
+for key, value in json.load(sys.stdin)["data"].items():
+    (outdir / key).write_text(value)
+' "$cm_dir"
+        f_dep="$cm_dir/deployment.yaml"
+        f_console="$cm_dir/console-config.js"
+        f_gate="$cm_dir/gate-config.js"
 
         python3 - "$f_dep" "$f_console" "$f_gate" \
                   "$PUBLIC_THUNDER_URL" "$PUBLIC_CONSOLE_URL" \
@@ -546,22 +609,24 @@ import sys, re, pathlib
  gate_port, gate_scheme) = sys.argv[1:]
 gate_port = int(gate_port)
 
-# Console + gate config.js: only public_url to swap
+# Console + gate config.js: only public_url to swap (JS — value stays quoted)
 for f in (f_console, f_gate):
     p = pathlib.Path(f)
     p.write_text(re.sub(r'public_url:\s*"[^"]*"',
                         f'public_url: "{thunder_url}"', p.read_text()))
 
-# deployment.yaml: public_url, gate_client block, cors origins
+# deployment.yaml: public_url, gate_client block, cors origins.
+# Thunder ≥0.34 renders these YAML scalars unquoted — match either style
+# and write unquoted to stay consistent with the chart.
 p = pathlib.Path(f_dep)
 text = p.read_text()
-text = re.sub(r'public_url:\s*"[^"]*"', f'public_url: "{thunder_url}"', text)
+text = re.sub(r'public_url:[ \t]*"?[^"\n]*"?', f'public_url: {thunder_url}', text)
 
 def fix_gate_client(m):
     block = m.group(0)
-    block = re.sub(r'(hostname:\s*)"[^"]*"', f'\\1"{thunder_host}"', block)
-    block = re.sub(r'(port:\s*)\d+', f'\\g<1>{gate_port}', block)
-    block = re.sub(r'(scheme:\s*)"[^"]*"', f'\\1"{gate_scheme}"', block)
+    block = re.sub(r'(hostname:[ \t]*)"?[^"\n]*"?', f'\\g<1>{thunder_host}', block)
+    block = re.sub(r'(port:[ \t]*)\d+', f'\\g<1>{gate_port}', block)
+    block = re.sub(r'(scheme:[ \t]*)"?[^"\n]*"?', f'\\g<1>{gate_scheme}', block)
     return block
 text = re.sub(r'gate_client:\n(?:\s+\S.*\n){2,6}', fix_gate_client, text, count=1)
 
@@ -576,22 +641,24 @@ seen, dedup = set(), []
 for o in origins:
     if o not in seen: seen.add(o); dedup.append(o)
 new_block = "cors:\n  allowed_origins:\n" + "".join(
-    f'    - "{o}"\n' for o in dedup)
+    f'  - {o}\n' for o in dedup)
 text = re.sub(
-    r'cors:\n\s*allowed_origins:\n(?:\s*-\s*"[^"]*"\n)+',
+    r'cors:\n\s*allowed_origins:\n(?:\s*-\s*"?[^"\n]*"?\n)+',
     new_block, text, count=1)
 p.write_text(text)
 PY
 
-        # Recreate the ConfigMap from the rewritten files (dry-run + replace
+        # Recreate the ConfigMap from ALL fetched files (dry-run + replace
         # preserves namespace + name; data is fully replaced from --from-file).
+        local cm_file from_args=()
+        for cm_file in "$cm_dir"/*; do
+            from_args+=(--from-file="$(basename "$cm_file")=$cm_file")
+        done
         kubectl create configmap thunder-config-map \
             --namespace=thunder --dry-run=client -o yaml \
-            --from-file=deployment.yaml="$f_dep" \
-            --from-file=console-config.js="$f_console" \
-            --from-file=gate-config.js="$f_gate" \
+            "${from_args[@]}" \
             | kubectl replace -f - >/dev/null
-        rm -f "$f_dep" "$f_console" "$f_gate"
+        rm -rf "$cm_dir"
 
         # Update Thunder's HTTPRoute so it routes the public hostname.
         local hostnames_json
@@ -603,21 +670,13 @@ PY
         kubectl -n thunder patch httproute thunder-httproute --type=merge \
             -p "{\"spec\":{\"hostnames\":${hostnames_json}}}" >/dev/null
 
-        # Update the aep-console-client redirect_uris in Thunder's SQLite.
+        # Clear stale OAuth/flow state from prior public URL. (The console
+        # redirect_uris themselves are synced by sync_console_redirect_uris
+        # below — unconditionally, since they can drift without a URL change.)
         local pod
         pod="$(kubectl -n thunder get pod -l app.kubernetes.io/name=thunder \
                 -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"
         if [ -n "$pod" ]; then
-            kubectl -n thunder exec -i "$pod" -- sqlite3 \
-                /opt/thunder/repository/database/configdb.db <<SQL >/dev/null
-UPDATE APP_OAUTH_INBOUND_CONFIG
-SET OAUTH_CONFIG_JSON = json_set(
-  OAUTH_CONFIG_JSON,
-  '\$.redirect_uris',
-  json('["http://localhost:8090","${PUBLIC_CONSOLE_URL}"]'))
-WHERE CLIENT_ID = 'aep-console-client';
-SQL
-            # Clear stale OAuth/flow state from prior public URL.
             kubectl -n thunder exec -i "$pod" -- sqlite3 \
                 /opt/thunder/repository/database/runtimedb.db <<'SQL' >/dev/null 2>&1 || true
 DELETE FROM FLOW_CONTEXT;
@@ -630,8 +689,10 @@ SQL
 
         kubectl -n thunder rollout restart deployment thunder-deployment >/dev/null
         kubectl -n thunder rollout status deployment thunder-deployment --timeout=120s >/dev/null
-        echo "   ✓ thunder ConfigMap, HTTPRoute, redirect_uris updated"
+        echo "   ✓ thunder ConfigMap, HTTPRoute updated"
     fi
+
+    sync_console_redirect_uris
 
     # OpenChoreo API: only the OIDC issuer changes. Patch its ConfigMap directly.
     if kubectl get cm openchoreo-api-config -n openchoreo-control-plane >/dev/null 2>&1; then

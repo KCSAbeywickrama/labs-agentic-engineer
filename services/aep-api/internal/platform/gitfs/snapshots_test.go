@@ -44,9 +44,9 @@ func assertSnapshotContent(t *testing.T, dir string) {
 	if err != nil || string(readme) != "hello\n" {
 		t.Fatalf("snapshot README.md = (%q, %v)", readme, err)
 	}
-	req, err := os.ReadFile(filepath.Join(dir, "specs", "requirements", "requirements.md"))
+	req, err := os.ReadFile(filepath.Join(dir, "specs", "requirements", "prd.md"))
 	if err != nil || string(req) != "req v1\n" {
-		t.Fatalf("snapshot requirements.md = (%q, %v)", req, err)
+		t.Fatalf("snapshot prd.md = (%q, %v)", req, err)
 	}
 }
 

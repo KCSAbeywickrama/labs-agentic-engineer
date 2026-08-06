@@ -103,9 +103,9 @@ describe("TurnBlock", () => {
   });
 
   it("renders a tool call as an activity step with the file leaf", () => {
-    renderTurn(turn({ items: [toolGroup("specs/requirements/requirements.md")] }));
+    renderTurn(turn({ items: [toolGroup("specs/requirements/prd.md")] }));
     expect(screen.getByTestId("activity-step")).toBeInTheDocument();
-    expect(screen.getByText("requirements.md")).toBeInTheDocument();
+    expect(screen.getByText("prd.md")).toBeInTheDocument();
   });
 
   it("shows the committed footer with a working Open spec link", () => {

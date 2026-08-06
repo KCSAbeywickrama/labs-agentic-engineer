@@ -61,8 +61,9 @@ question can take, one convention:
 ## Delivery
 
 Front-end (this PR): the wire contract additions in `@aep/agent-stream`, the
-`withGrillingInterview` opt-in in `@aep/contracts/prompts`, and the console
-rendering — mock-verified. The agents-service tool registration + stop
+`withGrillingInterview` opt-in in `@aep/contracts/prompts` (since retired —
+`/start` carries the interview flow and the server owns expansion), and the
+console rendering — mock-verified. The agents-service tool registration + stop
 condition, and the platform grilling skill, land via the backend handshake
 (#271); until then real-mode cards don't render (the agent never calls the
 tools) and the FE is mock-complete by design.

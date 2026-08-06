@@ -48,7 +48,6 @@ func TestMapGenAITurnError_Table(t *testing.T) {
 	}{
 		{"project repo not found", spec.ErrProjectRepoNotFound, 404},
 		{"turn not found", spec.ErrTurnNotFound, 404},
-		{"invalid use case", spec.ErrInvalidUseCase, 400},
 		{"invalid conversation id", spec.ErrInvalidConversationID, 400},
 		{"empty instruction", spec.ErrEmptyInstruction, 400},
 		{"no anthropic key", spec.ErrNoAnthropicKey, 400},
@@ -66,11 +65,11 @@ func TestMapGenAITurnError_Table(t *testing.T) {
 	}
 }
 
-// TestTurnConflictOf_PinnedBodies pins the two StartTurn conflict rejections'
-// wire shapes — 409 with {"code":"turn_in_progress","activeTurnId":…} /
-// {"code":"requirements_missing"} (NOT the flat {code,message} envelope;
-// declared in the contract as TurnConflict and served via the generated
-// type). Field set + values are the contract; JSON key order is not.
+// TestTurnConflictOf_PinnedBodies pins the StartTurn conflict rejection's
+// wire shape — 409 with {"code":"turn_in_progress","activeTurnId":…} (NOT the
+// flat {code,message} envelope; declared in the contract as TurnConflict and
+// served via the generated type). Field set + values are the contract; JSON
+// key order is not.
 func TestTurnConflictOf_PinnedBodies(t *testing.T) {
 	resp, ok := turnConflictOf(fmt.Errorf("start turn: %w", &spec.TurnInProgressError{ActiveTurnID: "t1"}))
 	if !ok {
@@ -89,25 +88,6 @@ func TestTurnConflictOf_PinnedBodies(t *testing.T) {
 	}
 	if !reflect.DeepEqual(inProgress, map[string]string{"code": "turn_in_progress", "activeTurnId": "t1"}) {
 		t.Errorf("turn-in-progress body = %s", rec.Body.String())
-	}
-
-	resp, ok = turnConflictOf(spec.ErrRequirementsMissing)
-	if !ok {
-		t.Fatal("requirements-missing not recognized")
-	}
-	rec = httptest.NewRecorder()
-	if err := resp.VisitCreateTurnResponse(rec); err != nil {
-		t.Fatalf("visit: %v", err)
-	}
-	if rec.Code != 409 {
-		t.Errorf("requirements-missing status = %d, want 409", rec.Code)
-	}
-	var missing map[string]string
-	if err := json.Unmarshal(rec.Body.Bytes(), &missing); err != nil {
-		t.Fatalf("requirements-missing body not JSON: %v", err)
-	}
-	if !reflect.DeepEqual(missing, map[string]string{"code": "requirements_missing"}) {
-		t.Errorf("requirements-missing body = %s", rec.Body.String())
 	}
 
 	if _, ok := turnConflictOf(spec.ErrTurnNotFound); ok {

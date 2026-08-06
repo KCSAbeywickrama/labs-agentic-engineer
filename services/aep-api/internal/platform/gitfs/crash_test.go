@@ -38,7 +38,7 @@ func TestMutateCrashBetweenCommitTreeAndPush(t *testing.T) {
 	fx := workspacetest.New(t, seedFiles())
 	base := fx.Origin.HeadSHA(t)
 	write := func(tx gitfs.Tx) error {
-		tx.Write("specs/requirements/requirements.md", []byte("crashed write\n"))
+		tx.Write("specs/requirements/prd.md", []byte("crashed write\n"))
 		return nil
 	}
 
@@ -81,7 +81,7 @@ func TestMutateCrashBetweenCommitTreeAndPush(t *testing.T) {
 	if head := fx.Origin.HeadSHA(t); head != res.CommitSHA {
 		t.Fatalf("origin tip = %s, want re-run commit %s", head, res.CommitSHA)
 	}
-	if got := fx.Origin.FileAt(t, "main", "specs/requirements/requirements.md"); got != "crashed write\n" {
+	if got := fx.Origin.FileAt(t, "main", "specs/requirements/prd.md"); got != "crashed write\n" {
 		t.Fatalf("origin content = %q after re-run", got)
 	}
 	gitOut(t, mirror, "fsck", "--strict", "--connectivity-only")

@@ -389,6 +389,49 @@ export interface WorkspaceRef {
 }
 
 /**
+ * What a turn is FOR, as facts rather than prose. The caller states the intent
+ * and the values only it can know (the captured idea, the milestone scope);
+ * the agents service turns that into instruction text. No caller composes
+ * prompt wording — that is the whole point of this type.
+ *
+ *  - `chat`  — an ordinary user message, sent verbatim.
+ *  - `flow`  — a `/<skill>` command: load that skill and follow it, with the
+ *              user's trailing text (if any) riding along.
+ *  - `start` — the project kickoff. `idea` is what the user asked for, read by
+ *              the BFF from `specs/.agentic-engineer.toml` — a dot-led path
+ *              stripped from every turn snapshot, so the agent cannot read it
+ *              itself. Absent/blank → the start skill asks the user instead.
+ *  - `plan`  — Task planning. `scope` is the milestone's story coverage and
+ *              `taskContext` the existing-Task renders; both are platform
+ *              state, not repository files, so they cannot ride the snapshot.
+ */
+export type TurnSpec =
+  | { kind: "chat"; text: string }
+  | { kind: "flow"; skill: string; text?: string }
+  | { kind: "start"; idea?: string }
+  | { kind: "plan"; scope?: PlanScope; taskContext?: PlanContextFile[] };
+
+/** The turn kinds a `TurnSpec` may declare (the server's pre-stream 400 check). */
+export const TURN_KINDS = ["chat", "flow", "start", "plan"] as const;
+
+export type TurnKind = (typeof TURN_KINDS)[number];
+
+/** The milestone a plan turn is scoped to, and which of its stories already have Tasks. */
+export interface PlanScope {
+  phase: number;
+  /** The spec tag the milestone is pinned to. */
+  tag: string;
+  stories: { number: number; title?: string; covered: boolean }[];
+}
+
+/** One existing-Task render passed as read-only planning context. */
+export interface PlanContextFile {
+  /** Historical `tasks/<n>.md` name — kept so the model's mental layout is unchanged. */
+  path: string;
+  body: string;
+}
+
+/**
  * The turn-request body (D9/§12): the body carries a `WorkspaceRef` and the
  * service reads the file snapshot AND the skills from the shared read-only
  * mount — no file content or skill bodies ever cross the wire.
@@ -399,19 +442,31 @@ export interface WorkspaceRef {
  * it — one definition, no drift.
  */
 export interface TurnRequest {
-  instruction: string;
+  /**
+   * What this turn is for. The agents service composes the instruction text
+   * from it — see `TurnSpec`.
+   */
+  turn: TurnSpec;
+  /**
+   * The spec-bundle path this turn should write to, when the caller pins one.
+   * The service renders it into the instruction; callers never format it.
+   */
+  target?: string;
+  /**
+   * The previous turn of this conversation FAILED (D20): its changes never
+   * reached git, though the conversation history claims they did. The service
+   * prepends the note that reconciles the two.
+   */
+  previousTurnFailed?: boolean;
+  /**
+   * No interview is possible in this run (the playground's headless phases):
+   * the service tells the agent to generate on stated assumptions rather than
+   * calling the question tools.
+   */
+  headless?: boolean;
   /** Where to read files + skills from the shared mount (IDs + shas only). */
   workspace: WorkspaceRef;
   filesChangedExternally?: boolean;
-  /**
-   * Which domain tool set to register (tasks-github-native §9.3). `files`
-   * (default, and identical to an absent value) registers the file-mutation
-   * tools — nothing changes for the generation flows. `task-plan` registers the
-   * `planTask`/`updateTask` tools instead (no file tools); `files` then carries
-   * READ-ONLY context (spec/design bundle + existing-Task renderings), nothing
-   * mutates it. See `contracts/task-tools.ts`.
-   */
-  toolset?: Toolset;
   /**
    * Caller-supplied MCP discovery endpoint for this turn (dependency-management
    * migration Phase 5). Present → the turn loop fetches `tools/list` from it
@@ -437,26 +492,75 @@ export interface TurnRequest {
    * the tool map is byte-identical to a turn without it.
    */
   webSearch?: boolean;
-  /**
-   * Skill names whose guidance the service should inline into THIS turn's
-   * prompt up front (#335 latency): when the caller already knows a skill will
-   * be needed (the console's seeded grilling turn), inlining it saves the
-   * model's `loadSkill` round-trip — one full model step before any output.
-   * Bodies ride the per-turn user prompt, never the system prompt, so the
-   * cacheable instruction prefix is untouched. Unknown names are ignored; the
-   * catalog + lazy `loadSkill` remain for everything else (ADR-0002).
-   */
-  eagerSkills?: string[];
 }
 
-/** The registrable tool sets a turn may request (`TurnRequest.toolset`). */
+/**
+ * The registrable tool sets. NOT a wire field: the agents service derives the
+ * set from `TurnSpec.kind` (`plan` → task-plan, everything else → files), so a
+ * caller cannot ask for a tool set that disagrees with what its turn is for.
+ */
 export const TOOLSETS = ["files", "task-plan"] as const;
 
 export type Toolset = (typeof TOOLSETS)[number];
 
-/** Runtime guard for an untrusted `toolset` value (the server's pre-stream 400 check). */
+/** Runtime guard for a `Toolset` value. */
 export function isToolset(v: unknown): v is Toolset {
   return (TOOLSETS as readonly unknown[]).includes(v);
+}
+
+/**
+ * Runtime guard for an untrusted `turn` value (the server's pre-stream 400
+ * check). Validates the discriminant AND the fields that kind requires, so a
+ * malformed body fails with a status code rather than composing a nonsense
+ * instruction: a `flow` with no skill, or a `chat` with no text, is not a turn.
+ * Optional fields are checked for TYPE when present and ignored when absent;
+ * unknown extra keys are tolerated (forward compatibility, as everywhere else
+ * on this body).
+ */
+export function isTurnSpec(v: unknown): v is TurnSpec {
+  if (v === null || typeof v !== "object") return false;
+  const t = v as Record<string, unknown>;
+  const str = (x: unknown): boolean => typeof x === "string";
+  const optStr = (x: unknown): boolean => x === undefined || typeof x === "string";
+  switch (t.kind) {
+    case "chat":
+      return str(t.text) && (t.text as string).trim() !== "";
+    case "flow":
+      return str(t.skill) && (t.skill as string).trim() !== "" && optStr(t.text);
+    case "start":
+      return optStr(t.idea);
+    case "plan":
+      return isPlanScopeOrAbsent(t.scope) && isPlanContextOrAbsent(t.taskContext);
+    default:
+      return false;
+  }
+}
+
+function isPlanScopeOrAbsent(v: unknown): boolean {
+  if (v === undefined) return true;
+  if (v === null || typeof v !== "object") return false;
+  const s = v as Record<string, unknown>;
+  if (typeof s.phase !== "number" || typeof s.tag !== "string") return false;
+  if (!Array.isArray(s.stories)) return false;
+  return s.stories.every((row) => {
+    if (row === null || typeof row !== "object") return false;
+    const r = row as Record<string, unknown>;
+    return (
+      typeof r.number === "number" &&
+      typeof r.covered === "boolean" &&
+      (r.title === undefined || typeof r.title === "string")
+    );
+  });
+}
+
+function isPlanContextOrAbsent(v: unknown): boolean {
+  if (v === undefined) return true;
+  if (!Array.isArray(v)) return false;
+  return v.every((row) => {
+    if (row === null || typeof row !== "object") return false;
+    const r = row as Record<string, unknown>;
+    return typeof r.path === "string" && typeof r.body === "string";
+  });
 }
 
 // --- The terminal manifest (shared-workspace-volume D14) --------------------

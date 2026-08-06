@@ -40,6 +40,10 @@ func (t buildSpecTagger) TagSpec(ctx context.Context, orgID, projectID string) (
 	return t.art.SaveSpec(ctx, orgID, projectID, spec.SaveRequest{Message: "Build"})
 }
 
+func (t buildSpecTagger) BuildScopeAtTag(ctx context.Context, orgID, projectID, tag string) (spec.BuildScope, error) {
+	return t.art.BuildScopeAtTag(ctx, orgID, projectID, tag)
+}
+
 // designFactDeriver is the composition root's narrow consumer view of the
 // concrete *design service — the pre-tag step the thin POST /build path reuses
 // (issue #164). The design package no longer exports an interface (its read

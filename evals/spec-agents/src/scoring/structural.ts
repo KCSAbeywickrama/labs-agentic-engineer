@@ -56,10 +56,10 @@ const check = (name: string, ok: boolean, detail?: string): CheckResult => ({
 });
 
 export function requirementsChecks(projectDir: string, run: SectionRunResult): StructuralReport {
-  const md = readSafe(join(projectDir, "specs/requirements/requirements.md"));
+  const md = readSafe(join(projectDir, "specs/requirements/prd.md"));
   const headings = (md.match(/^#{1,3} /gm) ?? []).length;
   return report([
-    check("requirements.md exists", md.trim().length > 0, "specs/requirements/requirements.md missing or empty"),
+    check("prd.md exists", md.trim().length > 0, "specs/requirements/prd.md missing or empty"),
     check("substantial (≥800 chars)", md.length >= 800, `${md.length} chars`),
     check("structured (≥3 headings)", headings >= 3, `${headings} headings`),
     check("interview happened", run.questionsAsked > 0, "the agent never asked a question"),

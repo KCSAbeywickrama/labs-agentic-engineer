@@ -32,7 +32,7 @@
  * `FileConversationStore` — this loop owns only the disk reconcile.
  */
 
-import { FileBundle, applyToolCall, streamTurn, type StreamPart, type TurnRequest } from "@aep/agent-stream";
+import { FileBundle, applyToolCall, streamTurn, type StreamPart, type TurnRequest, type TurnSpec } from "@aep/agent-stream";
 import { filterTurnSnapshot } from "@aep/agents/conversation/load-workspace";
 import { sha256Hex } from "@aep/agents/shared/hash";
 import { loadRepoSkills, type RepoSkill } from "../kit/skills.js";
@@ -57,10 +57,15 @@ export interface SpecTurnOptions {
   useCase?: string;
   /** Overrides the project's general-conversation uuid (one-shot plan turns). */
   conversationUuid?: string;
-  toolset?: "task-plan";
   mcp?: { url: string; token: string };
-  /** Skill names the service inlines into the turn's prompt up front (#335). */
-  eagerSkills?: string[];
+  /** The spec-bundle path this turn should write to, when one is pinned. */
+  target?: string;
+  /**
+   * No interview is possible in this run (the one-shot phase verbs): the
+   * service tells the agent to generate on stated assumptions instead of
+   * calling the question tools.
+   */
+  headless?: boolean;
   /** Live rendering hook; every streamed part passes through it. */
   onPart?: (part: StreamPart) => void;
   /** Skip the disk reconcile (plan turns mutate nothing under specs/). */
@@ -77,8 +82,12 @@ export interface SpecTurnResult {
   error?: string;
 }
 
-/** Run one turn with `instruction` (already composed — see engine/compose.ts). */
-export async function runSpecTurn(session: TurnSession, instruction: string, opts: SpecTurnOptions = {}): Promise<SpecTurnResult> {
+/**
+ * Run one turn. `turn` states what the turn is FOR (see engine/turn-spec.ts);
+ * the agents service composes the instruction text from it, so the playground
+ * and production send byte-identical prompts.
+ */
+export async function runSpecTurn(session: TurnSession, turn: TurnSpec, opts: SpecTurnOptions = {}): Promise<SpecTurnResult> {
   const { projectDir, ws, state } = session;
   const useCase = opts.useCase ?? "general";
   const conversationId = playConversationId(state.slug, useCase, opts.conversationUuid ?? state.conversationUuid);
@@ -90,12 +99,12 @@ export async function runSpecTurn(session: TurnSession, instruction: string, opt
   const filesChangedExternally = state.lastFoldedHash !== undefined && hashFiles(before) !== state.lastFoldedHash;
 
   const body: TurnRequest = {
-    instruction,
+    turn,
     workspace: ws.workspaceRef(conversationId, before, skills),
     ...(filesChangedExternally ? { filesChangedExternally: true } : {}),
-    ...(opts.toolset ? { toolset: opts.toolset } : {}),
+    ...(opts.target ? { target: opts.target } : {}),
+    ...(opts.headless ? { headless: true } : {}),
     ...(opts.mcp ? { mcp: opts.mcp } : {}),
-    ...(opts.eagerSkills ? { eagerSkills: opts.eagerSkills } : {}),
   };
 
   const parts: StreamPart[] = [];

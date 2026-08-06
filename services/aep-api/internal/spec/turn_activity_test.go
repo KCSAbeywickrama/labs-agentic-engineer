@@ -31,7 +31,6 @@ import (
 func (r *genaiRig) startCollabTurn(t *testing.T, uuid, instruction string) string {
 	t.Helper()
 	body, _ := json.Marshal(map[string]any{
-		"useCase":     "requirements-chat",
 		"instruction": instruction,
 		"collab":      true,
 	})
@@ -72,39 +71,29 @@ func (c *captureTurnActivity) all() []recordedTurnActivity {
 	return append([]recordedTurnActivity(nil), c.rows...)
 }
 
-// A turn that lands a real commit records exactly one spec_updated line,
-// carrying the instruction subject. The actor is the agent (decided by the
-// app-root adapter), so no user identity is threaded here.
-func TestTurnActivity_RecordedOnCommit(t *testing.T) {
+// A non-collab turn is preview-only (#373: genai turns never commit), so even
+// a turn whose fold carries real edits records NO spec_updated line — the feed
+// attributes only room-scoped turns, whose edits actually persist via the
+// collab save path.
+func TestTurnActivity_PreviewTurnRecordsNothing(t *testing.T) {
 	rec := &captureTurnActivity{}
-	r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"}, withRecorder(rec))
+	r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"}, withRecorder(rec))
 
-	final := map[string]string{"specs/requirements/requirements.md": "# Requirements\n"}
+	final := map[string]string{"specs/requirements/prd.md": "# Requirements\n"}
 	r.fake.parts = []string{
-		editFilePart("specs/requirements/requirements.md", "# Reqs\n", "# Requirements\n"),
+		editFilePart("specs/requirements/prd.md", "# Reqs\n", "# Requirements\n"),
 	}
 	m := manifestPart(final, nil)
 	r.fake.manifest = &m
 
-	turnID := r.startTurn(t, convUUID, "requirements-chat", "tidy the requirements")
+	turnID := r.startTurn(t, convUUID, "", "tidy the requirements")
 	st := r.waitTerminal(t, turnID)
-	if st.Status != "completed" || st.NoChanges {
-		t.Fatalf("terminal = %+v, want completed with changes", st)
+	if st.Status != "completed" || !st.NoChanges {
+		t.Fatalf("terminal = %+v, want completed preview-only", st)
 	}
 
-	rows := rec.all()
-	if len(rows) != 1 {
-		t.Fatalf("recorded rows = %d, want 1: %+v", len(rows), rows)
-	}
-	got := rows[0]
-	if got.orgID != testOrg || got.projectID != testProj {
-		t.Errorf("scope = (%q, %q), want (%q, %q)", got.orgID, got.projectID, testOrg, testProj)
-	}
-	if got.turnID != turnID {
-		t.Errorf("turnID = %q, want %q", got.turnID, turnID)
-	}
-	if got.title != "tidy the requirements" {
-		t.Errorf("title = %q, want the instruction subject", got.title)
+	if rows := rec.all(); len(rows) != 0 {
+		t.Fatalf("recorded rows = %d, want 0 for a preview-only turn: %+v", len(rows), rows)
 	}
 }
 
@@ -115,7 +104,7 @@ func TestTurnActivity_RecordedOnCommit(t *testing.T) {
 // regression that made the Spec view show only "Admin updated the spec".
 func TestTurnActivity_RoomScopedTurnRecordsAgentEdit(t *testing.T) {
 	rec := &captureTurnActivity{}
-	r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"}, withRecorder(rec))
+	r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"}, withRecorder(rec))
 
 	r.fake.parts = []string{
 		editFilePart("requirements/requirements.md", "# Reqs\n", "# Requirements\n"),
@@ -147,7 +136,7 @@ func TestTurnActivity_RoomScopedTurnRecordsAgentEdit(t *testing.T) {
 // reply) records no line.
 func TestTurnActivity_RoomScopedNoEditsRecordsNothing(t *testing.T) {
 	rec := &captureTurnActivity{}
-	r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"}, withRecorder(rec))
+	r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"}, withRecorder(rec))
 
 	r.fake.parts = []string{textPart("just answering your question")}
 	m := manifestPart(map[string]string{}, nil)
@@ -166,7 +155,7 @@ func TestTurnActivity_RoomScopedNoEditsRecordsNothing(t *testing.T) {
 // A completed turn that changes nothing records no line.
 func TestTurnActivity_NoChangesRecordsNothing(t *testing.T) {
 	rec := &captureTurnActivity{}
-	r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"}, withRecorder(rec))
+	r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"}, withRecorder(rec))
 
 	r.fake.parts = []string{textPart("nothing to do")}
 	m := manifestPart(map[string]string{}, nil)

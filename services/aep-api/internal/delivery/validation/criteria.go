@@ -30,9 +30,12 @@ type criteriaDoc struct {
 }
 
 type requirement struct {
-	ID        string      `json:"id"`
-	Statement string      `json:"statement"`
-	Criteria  []criterion `json:"criteria"`
+	ID        string `json:"id"`
+	Statement string `json:"statement"`
+	// Stories are the PRD story numbers this requirement traces to (#369) —
+	// carried for the traceability surfaces; absent in older oracles.
+	Stories  []int       `json:"stories,omitempty"`
+	Criteria []criterion `json:"criteria"`
 }
 
 type criterion struct {

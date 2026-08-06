@@ -83,7 +83,7 @@ const settledHistory: MockConversationMessage[] = [
         output: {
           ok: true,
           op: "edit",
-          path: "specs/requirements/requirements.md",
+          path: "specs/requirements/prd.md",
         },
       },
     ],

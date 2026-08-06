@@ -33,21 +33,9 @@ import (
 	"github.com/wso2/aep/aep-api/internal/clients/agentsvc"
 	"github.com/wso2/aep/aep-api/internal/delivery"
 	"github.com/wso2/aep/aep-api/internal/platform/taskplan"
+	"github.com/wso2/aep/aep-api/internal/spec"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 )
-
-// NOTE: playground/src/engine/compose.ts carries a verbatim copy of this
-// string (and mirrors renderPlanContext); its steer-parity test fails when
-// they drift. Update both together.
-//
-// planInstruction is the steering directive the BFF composes server-side (§9.1:
-// the request body is empty; the BFF assembles the whole generation directive).
-// The design/requirements content is NOT inlined anymore — the agents service
-// reads it from the workspace snapshot (shared-workspace-volume D9); the existing-
-// task renders + lineage diffs are appended to this instruction (they are
-// platform state, not repository files, so they cannot ride in the snapshot —
-// see renderPlanContext).
-const planInstruction = "Plan the implementation Tasks for this project. Load the task-planning skill and follow it: create one Task per design component with planTask, wire dependsOn by component name, and write each Task's body with updateTask in the same turn. The design is under specs/design/ and the requirements under specs/requirements/. Existing open Tasks (if any) are listed at the end of this message for reference — add Tasks ONLY for components they do not cover, and do not recreate or update the listed Tasks in this turn. Never invent a component the design does not define."
 
 // PlanService assembles the plan-turn context, starts the upstream turn, and
 // hands back a PlanSession the HTTP edge streams. One active plan turn per
@@ -191,6 +179,25 @@ func (s *PlanService) startPlanLocked(ctx context.Context, orgID, projectID stri
 	// exists for.
 	contextFiles := map[string]string{}
 	preload, slugs := s.assembleMilestoneTasks(ctx, orgID, projectID, milestoneNumber, contextFiles)
+	// The tag's PHASE scope (#370): the in-scope story set drives DELTA
+	// planning — stories already covered by existing Tasks (their platform
+	// stamps, #369) need no new work. Best-effort: a scope-less snapshot
+	// degrades to the legacy plan-everything behavior.
+	scope := spec.BuildScope{}
+	if tag := s.versions.LatestSpecTag(ctx, orgID, projectID); tag != "" {
+		if sc, serr := s.versions.BuildScopeAtTag(ctx, orgID, projectID, tag); serr == nil {
+			scope = sc
+		} else {
+			slog.WarnContext(ctx, "plan: phase scope read failed — planning without milestone scope",
+				"project", projectID, "tag", tag, "error", serr)
+		}
+	}
+	covered := map[int]bool{}
+	for _, p := range preload {
+		for _, n := range delivery.ParseServesStories(p.Body) {
+			covered[n] = true
+		}
+	}
 	// Freeze the set of issue numbers the agent actually received as context: an
 	// updateTask{issueNumber} ref is fenced to it (a hallucinated / out-of-context
 	// number must never be written — plan_tap.resolveRef).
@@ -235,7 +242,11 @@ func (s *PlanService) startPlanLocked(ctx context.Context, orgID, projectID stri
 	// Detached context so the turn drains even if the client disconnects (§6).
 	detached := context.WithoutCancel(ctx)
 	body, err := s.client.Turn(detached, conversationID, orgID, apiKey, agentsvc.TurnRequest{
-		Instruction: planInstruction + renderPlanContext(contextFiles),
+		Turn: agentsvc.TurnSpec{
+			Kind:        agentsvc.TurnKindPlan,
+			Scope:       planScopeFor(scope, covered),
+			TaskContext: planContextFor(contextFiles),
+		},
 		Workspace: agentsvc.WorkspaceRef{
 			ConversationID: conversationID,
 			TurnID:         uuid.NewString(),
@@ -243,7 +254,6 @@ func (s *PlanService) startPlanLocked(ctx context.Context, orgID, projectID stri
 			Ref:            baseRef,
 			SkillsRef:      skillsRef,
 		},
-		Toolset: "task-plan",
 	})
 	if err != nil {
 		return nil, err // typed *agentsvc.UpstreamError (409 → plan_in_progress passthrough)
@@ -251,6 +261,7 @@ func (s *PlanService) startPlanLocked(ctx context.Context, orgID, projectID stri
 
 	tap := newPlanTap(detached, orgID, projectID, s.issues)
 	tap.milestone = milestoneNumber
+	tap.componentStories = scope.ComponentStories
 	tap.appPaths = s.componentPaths(ctx, orgID, projectID)
 	tap.state = preload
 	tap.existingSlugs = slugs
@@ -320,22 +331,41 @@ func (s *PlanService) assembleMilestoneTasks(ctx context.Context, orgID, project
 	return preload, slugs
 }
 
-// renderPlanContext renders the milestone's existing-task context files as
-// deterministic instruction sections. They keep their historical tasks/<n>.md
-// names so the model's mental layout is unchanged.
-func renderPlanContext(files map[string]string) string {
+// planScopeFor states the milestone's phase scope (#370) as facts: which
+// in-scope stories the existing Tasks already cover, and which this plan must.
+// Platform-computed — the model never decides coverage, and never sees this as
+// anything but the section the agents service renders from it. nil when the
+// snapshot declares no phase.
+func planScopeFor(scope spec.BuildScope, covered map[int]bool) *agentsvc.PlanScope {
+	if scope.Phase == 0 || len(scope.InScope) == 0 {
+		return nil
+	}
+	stories := make([]agentsvc.PlanStory, 0, len(scope.InScope))
+	for _, n := range scope.InScope {
+		stories = append(stories, agentsvc.PlanStory{
+			Number:  n,
+			Title:   scope.StoryTitles[n],
+			Covered: covered[n],
+		})
+	}
+	return &agentsvc.PlanScope{Phase: scope.Phase, Tag: scope.Tag, Stories: stories}
+}
+
+// planContextFor carries the milestone's existing-Task renders as facts, sorted
+// by path so the same inputs always produce the same turn. They keep their
+// historical tasks/<n>.md names so the model's mental layout is unchanged.
+func planContextFor(files map[string]string) []agentsvc.PlanContextFile {
 	if len(files) == 0 {
-		return ""
+		return nil
 	}
 	paths := make([]string, 0, len(files))
 	for p := range files {
 		paths = append(paths, p)
 	}
 	sort.Strings(paths)
-	var sb strings.Builder
-	sb.WriteString("\n\n## Existing open Tasks in this version (reference)\n")
+	out := make([]agentsvc.PlanContextFile, 0, len(paths))
 	for _, p := range paths {
-		fmt.Fprintf(&sb, "\n--- %s ---\n%s\n", p, files[p])
+		out = append(out, agentsvc.PlanContextFile{Path: p, Body: files[p]})
 	}
-	return sb.String()
+	return out
 }

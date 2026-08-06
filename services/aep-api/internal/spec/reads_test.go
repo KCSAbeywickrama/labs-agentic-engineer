@@ -34,7 +34,7 @@ func TestListDesignFiles_AtHead(t *testing.T) {
 		"specs/design/components/svc/design.md":    "svc\n",
 		"specs/design/components/svc/openapi.yaml": "openapi: 3.0.0\n",
 		"specs/design/components/svc/design.json":  validComponentDesignJSON("svc"),
-		"specs/requirements/requirements.md":       "wrong subtree\n",
+		"specs/requirements/prd.md":       "wrong subtree\n",
 	})
 	got, err := r.svc.ListDesignFiles(context.Background(), r.org, r.proj)
 	if err != nil {
@@ -53,26 +53,26 @@ func TestListDesignFiles_AtHead(t *testing.T) {
 
 func TestGetRequirementsAtTag_PinsApprovedVersion(t *testing.T) {
 	t.Parallel()
-	r := newRig(t, map[string]string{"specs/requirements/requirements.md": "v1 content\n"})
+	r := newRig(t, map[string]string{"specs/requirements/prd.md": "v1 content\n"})
 	ctx := context.Background()
 	if _, err := r.svc.SaveRequirements(ctx, r.org, r.proj, SaveRequest{}); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 	// Draft moves past v1 on HEAD.
-	r.seed(map[string]string{"specs/requirements/requirements.md": "later draft\n"}, "draft")
+	r.seed(map[string]string{"specs/requirements/prd.md": "later draft\n"}, "draft")
 
 	at, err := r.svc.GetRequirementsAtTag(ctx, r.org, r.proj, "v1")
 	if err != nil {
 		t.Fatalf("GetRequirementsAtTag: %v", err)
 	}
-	if at["requirements.md"] != "v1 content\n" {
-		t.Errorf("at v1 = %q, want the pinned v1 content (not HEAD)", at["requirements.md"])
+	if at["prd.md"] != "v1 content\n" {
+		t.Errorf("at v1 = %q, want the pinned v1 content (not HEAD)", at["prd.md"])
 	}
 }
 
 func TestGetDesignAtTag_PinsApprovedVersion(t *testing.T) {
 	t.Parallel()
-	r := newRig(t, map[string]string{"specs/requirements/requirements.md": "spec\n"})
+	r := newRig(t, map[string]string{"specs/requirements/prd.md": "spec\n"})
 	ctx := context.Background()
 	if _, err := r.svc.SaveRequirements(ctx, r.org, r.proj, SaveRequest{}); err != nil {
 		t.Fatalf("save requirements: %v", err)
@@ -97,7 +97,7 @@ func TestGetDesignAtTag_PinsApprovedVersion(t *testing.T) {
 
 func TestGetRequirementsAtTag_MissingTag(t *testing.T) {
 	t.Parallel()
-	r := newRig(t, map[string]string{"specs/requirements/requirements.md": "x\n"})
+	r := newRig(t, map[string]string{"specs/requirements/prd.md": "x\n"})
 	_, err := r.svc.GetRequirementsAtTag(context.Background(), r.org, r.proj, "v9")
 	if !errors.Is(err, ErrArtifactNotFound) {
 		t.Fatalf("err = %v, want ErrArtifactNotFound for an absent tag", err)
@@ -106,7 +106,7 @@ func TestGetRequirementsAtTag_MissingTag(t *testing.T) {
 
 func TestGetRequirementsAtTag_InvalidTag(t *testing.T) {
 	t.Parallel()
-	r := newRig(t, map[string]string{"specs/requirements/requirements.md": "x\n"})
+	r := newRig(t, map[string]string{"specs/requirements/prd.md": "x\n"})
 	_, err := r.svc.GetRequirementsAtTag(context.Background(), r.org, r.proj, "not-a-tag")
 	if !errors.Is(err, ErrInvalidVersionTag) {
 		t.Fatalf("err = %v, want ErrInvalidVersionTag", err)
@@ -115,12 +115,12 @@ func TestGetRequirementsAtTag_InvalidTag(t *testing.T) {
 
 func TestListRequirementsVersions_Descending(t *testing.T) {
 	t.Parallel()
-	r := newRig(t, map[string]string{"specs/requirements/requirements.md": "v1\n"})
+	r := newRig(t, map[string]string{"specs/requirements/prd.md": "v1\n"})
 	ctx := context.Background()
 	if _, err := r.svc.SaveRequirements(ctx, r.org, r.proj, SaveRequest{}); err != nil {
 		t.Fatalf("save v1: %v", err)
 	}
-	r.seed(map[string]string{"specs/requirements/requirements.md": "v2\n"}, "edit")
+	r.seed(map[string]string{"specs/requirements/prd.md": "v2\n"}, "edit")
 	if _, err := r.svc.SaveRequirements(ctx, r.org, r.proj, SaveRequest{}); err != nil {
 		t.Fatalf("save v2: %v", err)
 	}
@@ -146,7 +146,7 @@ func TestListRequirementsVersions_Descending(t *testing.T) {
 // artifact kinds — the no-tags edge of the version endpoints.
 func TestListVersions_NoTagsYet_Empty(t *testing.T) {
 	t.Parallel()
-	r := newRig(t, map[string]string{"specs/requirements/requirements.md": "draft\n"})
+	r := newRig(t, map[string]string{"specs/requirements/prd.md": "draft\n"})
 	ctx := context.Background()
 	reqs, err := r.svc.ListRequirementsVersions(ctx, r.org, r.proj)
 	if err != nil || len(reqs) != 0 {

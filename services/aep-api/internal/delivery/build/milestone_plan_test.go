@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/wso2/aep/aep-api/internal/delivery"
+	"github.com/wso2/aep/aep-api/internal/spec"
 	"github.com/wso2/aep/aep-api/internal/platform/gittest"
 	"github.com/wso2/aep/aep-api/internal/platform/secrets"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
@@ -230,7 +231,7 @@ func TestClaimVersion_MintsTheMilestoneAndAdmitsTheRun(t *testing.T) {
 	h.stub.OnFunc(http.MethodGet, "/repos/acme/widgets/milestones", jsonPage(`[]`))
 	h.stub.On(http.MethodPost, "/repos/acme/widgets/milestones", http.StatusCreated, `{"number":9,"title":"v3"}`)
 
-	run, err := h.svc.claimVersion(context.Background(), "acme", "shop", "v3")
+	run, err := h.svc.claimVersion(context.Background(), "acme", "shop", spec.BuildScope{Tag: "v3"})
 	if err != nil {
 		t.Fatalf("claimVersion: %v", err)
 	}
@@ -265,7 +266,7 @@ func TestClaimVersion_DoubleCreate_RecoversTheNumber(t *testing.T) {
 		h := newPlanHarness(t)
 		h.stub.OnFunc(http.MethodGet, "/repos/acme/widgets/milestones", jsonPage(`[{"number":4,"title":"V3","state":"open"}]`))
 
-		run, err := h.svc.claimVersion(context.Background(), "acme", "shop", "v3")
+		run, err := h.svc.claimVersion(context.Background(), "acme", "shop", spec.BuildScope{Tag: "v3"})
 		if err != nil {
 			t.Fatalf("claimVersion: %v", err)
 		}
@@ -299,7 +300,7 @@ func TestClaimVersion_DoubleCreate_RecoversTheNumber(t *testing.T) {
 		h.stub.On(http.MethodPost, "/repos/acme/widgets/milestones", http.StatusUnprocessableEntity,
 			`{"message":"Validation Failed","errors":[{"resource":"Milestone","code":"already_exists","field":"title"}]}`)
 
-		run, err := h.svc.claimVersion(context.Background(), "acme", "shop", "v3")
+		run, err := h.svc.claimVersion(context.Background(), "acme", "shop", spec.BuildScope{Tag: "v3"})
 		if err != nil {
 			t.Fatalf("claimVersion: %v", err)
 		}
@@ -317,7 +318,7 @@ func TestClaimVersion_AdmissionRaceLost_IsAConflict(t *testing.T) {
 	h.stub.OnFunc(http.MethodGet, "/repos/acme/widgets/milestones", jsonPage(`[]`))
 	h.stub.On(http.MethodPost, "/repos/acme/widgets/milestones", http.StatusCreated, `{"number":9,"title":"v3"}`)
 
-	_, err := h.svc.claimVersion(context.Background(), "acme", "shop", "v3")
+	_, err := h.svc.claimVersion(context.Background(), "acme", "shop", spec.BuildScope{Tag: "v3"})
 	if err != ErrBuildAlreadyRunning {
 		t.Fatalf("err = %v, want ErrBuildAlreadyRunning", err)
 	}
@@ -349,7 +350,7 @@ func TestSupersede_ClosesOpenWorkThenGatesThenTheMilestone(t *testing.T) {
 	h.stub.OnFunc(http.MethodGet, "/repos/acme/widgets/milestones", jsonPage(`[]`))
 	h.stub.On(http.MethodPost, "/repos/acme/widgets/milestones", http.StatusCreated, `{"number":9,"title":"v3"}`)
 
-	if _, err := h.svc.claimVersion(context.Background(), "acme", "shop", "v3"); err != nil {
+	if _, err := h.svc.claimVersion(context.Background(), "acme", "shop", spec.BuildScope{Tag: "v3"}); err != nil {
 		t.Fatalf("claimVersion: %v", err)
 	}
 
@@ -493,4 +494,31 @@ func requestsTo(stub *gittest.Stub, method, path string) []gittest.RecordedReque
 		}
 	}
 	return out
+}
+
+// TestClaimVersion_PhaseMilestone pins #370: a phase-scoped claim mints the
+// PHASE-titled milestone with the tag on the run row, and a same-phase
+// re-claim (a delta build) supersedes nothing — the earlier run row for the
+// same phase title is skipped, so its milestone stays open to be topped up.
+func TestClaimVersion_PhaseMilestone(t *testing.T) {
+	h := newPlanHarness(t)
+	h.stub.OnFunc(http.MethodGet, "/repos/acme/widgets/milestones", jsonPage(`[]`))
+	h.stub.On(http.MethodPost, "/repos/acme/widgets/milestones", http.StatusCreated, `{"number":4,"title":"Phase 2"}`)
+	// An earlier run of the SAME phase exists (tag v2) — a supersede here
+	// would close the milestone the delta is topping up.
+	h.runs.rows = []delivery.MilestoneRun{{
+		OrgID: "acme", ProjectID: "shop", MilestoneNumber: 4,
+		MilestoneTitle: "Phase 2", Tag: "v2", Origin: delivery.RunOriginSpecBuild,
+	}}
+
+	run, err := h.svc.claimVersion(context.Background(), "acme", "shop", spec.BuildScope{Tag: "v3", Phase: 2})
+	if err != nil {
+		t.Fatalf("claimVersion: %v", err)
+	}
+	if run.MilestoneTitle != "Phase 2" || run.Tag != "v3" || run.MilestoneNumber != 4 {
+		t.Fatalf("run identity = %+v, want Phase 2 / v3 / milestone 4", run)
+	}
+	if n := countRequests(t, h.stub, http.MethodPatch, "/repos/acme/widgets/milestones/4"); n != 0 {
+		t.Errorf("same-phase re-claim must supersede nothing, got %d PATCHes", n)
+	}
 }

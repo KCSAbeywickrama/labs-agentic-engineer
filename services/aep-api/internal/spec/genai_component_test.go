@@ -476,7 +476,7 @@ func newGenaiRig(t *testing.T, seed map[string]string, opts ...rigOption) *genai
 	}
 	fx := workspacetest.New(t, seed)
 	skillsOrigin := gittest.NewRemote(t, gittest.WithSeed(map[string]string{
-		"skills/high-level-architecture/SKILL.md": "---\nname: high-level-architecture\ndescription: d\nmetadata:\n  aep:\n    kind: platform\n---\nbody",
+		"skills/architecture/SKILL.md": "---\nname: architecture\ndescription: d\nmetadata:\n  aep:\n    kind: platform\n---\nbody",
 	}, "seed skills"))
 
 	rec := &sourcecontrol.GitRepository{
@@ -528,14 +528,12 @@ func newGenaiRig(t *testing.T, seed map[string]string, opts ...rigOption) *genai
 	return rig
 }
 
-func (r *genaiRig) post(t *testing.T, uuid, useCase, instruction string) *httptest.ResponseRecorder {
+func (r *genaiRig) post(t *testing.T, uuid, _, instruction string) *httptest.ResponseRecorder {
 	t.Helper()
-	// An empty useCase models the field being OMITTED (the generic turn), so it
-	// is left out of the body entirely rather than sent as "".
+	// The old per-flow "useCase" field is gone from the wire (#373) — flows
+	// ride /<skill> instructions; the middle parameter is retained only to
+	// keep call sites readable and is ignored.
 	payload := map[string]any{"instruction": instruction}
-	if useCase != "" {
-		payload["useCase"] = useCase
-	}
 	body, _ := json.Marshal(payload)
 	return r.h.AsOrg(testOrg).Post(turnsPath(uuid), string(body))
 }
@@ -637,55 +635,41 @@ func parseSSE(t *testing.T, body string) []sseEvent {
 
 // ---- exit-gate tests ------------------------------------------------------------
 
-// Test202Flow_CommitLandsAndStreamReplays is the happy path: 202 → detached
-// turn → fold verified against the manifest → ONE commit on origin with
-// author=user / committer=bot → stream replay carries every part + the
-// terminal (and never the manifest).
-func Test202Flow_CommitLandsAndStreamReplays(t *testing.T) {
-	r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"})
+// Test202Flow_PreviewOnlyAndStreamReplays is the happy path: 202 → detached
+// turn → fold verified against the manifest → preview-only terminal (#373:
+// genai turns never commit; room turns persist via the collab save path) →
+// stream replay carries every part + the terminal (and never the manifest).
+func Test202Flow_PreviewOnlyAndStreamReplays(t *testing.T) {
+	r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"})
 	baseRef := r.fx.Origin.HeadSHA(t)
 
 	final := map[string]string{
 		"specs/requirements/notes.md":        "# Notes\nBody\n",
-		"specs/requirements/requirements.md": "# Requirements\n",
+		"specs/requirements/prd.md": "# Requirements\n",
 	}
 	r.fake.parts = []string{
 		textPart("working"),
 		addFilePart("specs/requirements/notes.md", "# Notes\nBody\n"),
-		editFilePart("specs/requirements/requirements.md", "# Reqs\n", "# Requirements\n"),
+		editFilePart("specs/requirements/prd.md", "# Reqs\n", "# Requirements\n"),
 	}
 	m := manifestPart(final, nil)
 	r.fake.manifest = &m
 
-	turnID := r.startTurn(t, convUUID, "requirements-chat", "tidy the requirements")
+	turnID := r.startTurn(t, convUUID, "", "tidy the requirements")
 	st := r.waitTerminal(t, turnID)
-	if st.Status != "completed" || st.NoChanges {
-		t.Fatalf("terminal = %+v, want completed with changes", st)
+	// Preview-only (#373): the fold streams for display, nothing is committed —
+	// the terminal reports a no-op completion pinned to the base sha.
+	if st.Status != "completed" || !st.NoChanges {
+		t.Fatalf("terminal = %+v, want completed preview-only", st)
 	}
-	if st.ConversationID != convUUID || st.UseCase != "requirements-chat" {
+	if st.ConversationID != convUUID || st.UseCase != "general" {
 		t.Errorf("status identity fields = %+v", st)
 	}
-
-	// Commit visible on origin, exactly the folded content.
-	head := r.fx.Origin.HeadSHA(t)
-	if head == baseRef {
-		t.Fatal("origin head did not advance")
+	if head := r.fx.Origin.HeadSHA(t); head != baseRef {
+		t.Fatal("preview-only turn must not advance origin")
 	}
-	if st.CommitSHA != head {
-		t.Errorf("commitSha = %s, want origin head %s", st.CommitSHA, head)
-	}
-	for path, want := range final {
-		if got := r.fx.Origin.FileAt(t, "main", path); got != want {
-			t.Errorf("origin %s = %q, want %q", path, got, want)
-		}
-	}
-	// D20 identities: author = prompting user, committer = bot (credential).
-	if id := r.originGit(t, "log", "-1", "--format=%an|%ae|%cn|%ce"); id != "componenttest-user|componenttest-user@users.noreply.aep.dev|Bot|bot@aep.dev" {
-		t.Errorf("commit identities = %q", id)
-	}
-	// D20 message convention.
-	if msg := r.originGit(t, "log", "-1", "--format=%s"); msg != "chat(requirements): tidy the requirements" {
-		t.Errorf("commit message = %q", msg)
+	if st.CommitSHA != baseRef {
+		t.Errorf("commitSha = %s, want base %s", st.CommitSHA, baseRef)
 	}
 
 	// Dispatch carried the workspace shape (ref = base, skills head) and the
@@ -700,7 +684,7 @@ func Test202Flow_CommitLandsAndStreamReplays(t *testing.T) {
 	if sent.req.Workspace.TurnID != turnID {
 		t.Errorf("dispatched turnId = %s, want %s", sent.req.Workspace.TurnID, turnID)
 	}
-	wantConv := "org_" + testOrg + "--proj_" + testProj + "--requirements-chat--" + convUUID
+	wantConv := "org_" + testOrg + "--proj_" + testProj + "--general--" + convUUID
 	if sent.req.Workspace.ConversationID != wantConv || !strings.Contains(sent.path, wantConv) {
 		t.Errorf("namespaced conversation = %q (path %q), want %q", sent.req.Workspace.ConversationID, sent.path, wantConv)
 	}
@@ -713,8 +697,8 @@ func Test202Flow_CommitLandsAndStreamReplays(t *testing.T) {
 	if sent.req.FilesChangedExternally {
 		t.Error("first turn must not carry filesChangedExternally")
 	}
-	if !strings.HasPrefix(sent.req.Instruction, "tidy the requirements") {
-		t.Errorf("instruction = %q", sent.req.Instruction)
+	if sent.req.Turn.Kind != agentsvc.TurnKindChat || sent.req.Turn.Text != "tidy the requirements" {
+		t.Errorf("turn = %+v, want the user's text as a chat turn", sent.req.Turn)
 	}
 
 	// Stream replay: every non-manifest part + terminal + [DONE], id-stamped.
@@ -739,7 +723,7 @@ func Test202Flow_CommitLandsAndStreamReplays(t *testing.T) {
 		NoChanges bool   `json:"noChanges"`
 	}
 	if err := json.Unmarshal([]byte(events[3].data), &terminal); err != nil ||
-		terminal.Type != "turn-committed" || terminal.CommitSHA != head || terminal.NoChanges {
+		terminal.Type != "turn-committed" || terminal.CommitSHA != baseRef || !terminal.NoChanges {
 		t.Errorf("terminal event = %s", events[3].data)
 	}
 
@@ -775,7 +759,7 @@ func Test202Flow_CommitLandsAndStreamReplays(t *testing.T) {
 // case — and, crucially, it COMMITS NOTHING: the fold streams for display but
 // main never advances.
 func TestGenericTurn_NoUseCase(t *testing.T) {
-	r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"})
+	r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"})
 	baseRef := r.fx.Origin.HeadSHA(t)
 
 	// The agent proposes a design.md edit; the manifest vouches for it. A
@@ -812,29 +796,28 @@ func TestGenericTurn_NoUseCase(t *testing.T) {
 	if sent.req.Workspace.ConversationID != wantConv || !strings.Contains(sent.path, wantConv) {
 		t.Errorf("namespaced conversation = %q (path %q), want %q", sent.req.Workspace.ConversationID, sent.path, wantConv)
 	}
-	// Generic steering names the whole spec bundle, not a requirements/design flow.
-	if !strings.Contains(sent.req.Instruction, "spec bundle") {
-		t.Errorf("instruction missing generic steering: %q", sent.req.Instruction)
+	// The BFF states facts and stops: no steering text of any kind rides the
+	// wire now (the spec-paths rule is the agents service's to append). The
+	// retired steers cannot come back through this door.
+	if sent.req.Turn.Kind != agentsvc.TurnKindChat || sent.req.Turn.Text != "touch the design" {
+		t.Errorf("turn = %+v, want the user's prose as a chat turn", sent.req.Turn)
 	}
-	if strings.Contains(sent.req.Instruction, "requirements draft") {
-		t.Errorf("general turn leaked requirements-chat steering: %q", sent.req.Instruction)
+	if strings.Contains(sent.req.Turn.Text, "requirements draft") || strings.Contains(sent.req.Turn.Text, "list_org_endpoints") {
+		t.Errorf("turn carries retired steering: %+v", sent.req.Turn)
 	}
 }
 
-// TestGenericTurn_NoDesignGate proves the general turn skips the design-generate
-// requirements gate: on a repo with no requirements content, a general turn is
-// accepted (202) where a design-generate turn is rejected (409).
-func TestGenericTurn_NoDesignGate(t *testing.T) {
+// TestNoDesignGate pins the design gate's removal (#373): a /design turn on a
+// requirements-less repo is ACCEPTED — completeness is enforced at the v<N>
+// tag (the build gate), not at turn start.
+func TestNoDesignGate(t *testing.T) {
 	r := newGenaiRig(t, map[string]string{"README.md": "no requirements yet\n"})
 	r.fake.parts = []string{textPart("ok")}
 	m := manifestPart(nil, nil)
 	r.fake.manifest = &m
 
-	if rec := r.post(t, convUUID, "design-generate", "design it"); rec.Code != http.StatusConflict {
-		t.Fatalf("design-generate on requirements-less repo: code %d, want 409 (%s)", rec.Code, rec.Body.String())
-	}
-	if rec := r.post(t, "general-conv-uuid", "", "do something"); rec.Code != http.StatusAccepted {
-		t.Fatalf("general turn on requirements-less repo: code %d, want 202 (%s)", rec.Code, rec.Body.String())
+	if rec := r.post(t, convUUID, "", "/design"); rec.Code != http.StatusAccepted {
+		t.Fatalf("/design on requirements-less repo: code %d, want 202 (%s)", rec.Code, rec.Body.String())
 	}
 }
 
@@ -843,7 +826,7 @@ func TestGenericTurn_NoDesignGate(t *testing.T) {
 // manifest → completed noChanges (no commit).
 func TestManifestGate_MismatchSeveredEmpty(t *testing.T) {
 	t.Run("hash mismatch", func(t *testing.T) {
-		r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"})
+		r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"})
 		base := r.fx.Origin.HeadSHA(t)
 		r.fake.parts = []string{addFilePart("specs/requirements/notes.md", "# Notes\n")}
 		m := manifestPart(map[string]string{"specs/requirements/notes.md": "CORRUPTED content"}, nil)
@@ -859,7 +842,7 @@ func TestManifestGate_MismatchSeveredEmpty(t *testing.T) {
 	})
 
 	t.Run("severed stream", func(t *testing.T) {
-		r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"})
+		r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"})
 		base := r.fx.Origin.HeadSHA(t)
 		r.fake.parts = []string{addFilePart("specs/requirements/notes.md", "# Notes\n")}
 		r.fake.sever = true
@@ -874,7 +857,7 @@ func TestManifestGate_MismatchSeveredEmpty(t *testing.T) {
 	})
 
 	t.Run("empty manifest", func(t *testing.T) {
-		r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"})
+		r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"})
 		base := r.fx.Origin.HeadSHA(t)
 		r.fake.parts = []string{textPart("chat only")}
 		m := manifestPart(nil, nil)
@@ -906,7 +889,7 @@ func TestCollabTurn_RoomScopedDispatchNoCommit(t *testing.T) {
 	// MCP discovery is wired: a collab room-scoped turn must carry the BFF-minted
 	// MCP block so the Spec-view architect can discover real org endpoints (the
 	// regression pin for the invented-org-service-name bug).
-	r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"}, withMCP())
+	r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"}, withMCP())
 	base := r.fx.Origin.HeadSHA(t)
 	// Room-scheme (unprefixed) paths: in committed mode this would fail the
 	// fold; room mode never folds — pinning that the fold is bypassed.
@@ -918,7 +901,6 @@ func TestCollabTurn_RoomScopedDispatchNoCommit(t *testing.T) {
 	r.fake.manifest = &m
 
 	body, _ := json.Marshal(map[string]any{
-		"useCase":     "requirements-chat",
 		"instruction": "edit the doc live",
 		"collab":      true,
 	})
@@ -966,9 +948,11 @@ func TestCollabTurn_RoomScopedDispatchNoCommit(t *testing.T) {
 	if sent.req.MCP.Token != testMCPToken {
 		t.Errorf("MCP token = %q, want %q", sent.req.MCP.Token, testMCPToken)
 	}
-	// The collab dependency-discovery steer rides the instruction.
-	if !strings.Contains(sent.req.Instruction, "list_org_endpoints") {
-		t.Errorf("collab instruction missing the dependency-discovery steer: %q", sent.req.Instruction)
+	// collabDepsSteer is retired (#373): the skills own dependency discovery,
+	// and MCP + WebSearch attachment (asserted above) is what the collab turn
+	// still guarantees.
+	if strings.Contains(sent.req.Turn.Text, "list_org_endpoints") {
+		t.Errorf("collab turn carries the retired dependency-discovery steer: %+v", sent.req.Turn)
 	}
 	// external-dependency-discovery: a collab room-scoped turn also carries
 	// WebSearch:true, the same gate as MCP.
@@ -983,13 +967,12 @@ func TestCollabTurn_RoomScopedDispatchNoCommit(t *testing.T) {
 // + collab); a design-generate turn still attaches MCP.
 func TestMCPGate_AttachAndLeak(t *testing.T) {
 	t.Run("collab turn, MCP unwired → no block", func(t *testing.T) {
-		r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"})
+		r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"})
 		r.fake.parts = []string{textPart("editing the shared doc")}
 		m := manifestPart(nil, nil)
 		r.fake.manifest = &m
 
 		body, _ := json.Marshal(map[string]any{
-			"useCase":     "requirements-chat",
 			"instruction": "edit the doc live",
 			"collab":      true,
 		})
@@ -1008,7 +991,7 @@ func TestMCPGate_AttachAndLeak(t *testing.T) {
 	})
 
 	t.Run("non-collab requirements-chat, MCP wired → no leak", func(t *testing.T) {
-		r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"}, withMCP())
+		r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"}, withMCP())
 		r.fake.parts = []string{textPart("chatting")}
 		m := manifestPart(nil, nil)
 		r.fake.manifest = &m
@@ -1019,22 +1002,22 @@ func TestMCPGate_AttachAndLeak(t *testing.T) {
 		if sent.req.MCP != nil {
 			t.Errorf("plain requirements-chat turn leaked an MCP block: %+v", sent.req.MCP)
 		}
-		if strings.Contains(sent.req.Instruction, "list_org_endpoints") {
-			t.Errorf("non-collab turn leaked the collab dependency-discovery steer: %q", sent.req.Instruction)
+		if strings.Contains(sent.req.Turn.Text, "list_org_endpoints") {
+			t.Errorf("non-collab turn leaked the collab dependency-discovery steer: %+v", sent.req.Turn)
 		}
 	})
 
-	t.Run("design-generate, MCP wired → attaches", func(t *testing.T) {
-		r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"}, withMCP())
+	t.Run("design flow, MCP wired → attaches", func(t *testing.T) {
+		r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"}, withMCP())
 		r.fake.parts = []string{textPart("designing")}
 		m := manifestPart(nil, nil)
 		r.fake.manifest = &m
 
-		turnID := r.startTurn(t, convUUID, "design-generate", "design it")
+		turnID := r.startTurn(t, convUUID, "", "/design")
 		r.waitTerminal(t, turnID)
 		sent := r.fake.sentTurn(t, 0)
 		if sent.req.MCP == nil {
-			t.Fatal("design-generate turn dispatched without an MCP discovery block")
+			t.Fatal("design-flow turn dispatched without an MCP discovery block")
 		}
 		if want := testMCPBaseURL + "/internal/v1/mcp"; sent.req.MCP.URL != want {
 			t.Errorf("MCP url = %q, want %q", sent.req.MCP.URL, want)
@@ -1053,13 +1036,12 @@ func TestMCPGate_AttachAndLeak(t *testing.T) {
 // subtests call withMCP(), proving that independence.
 func TestWebSearchGate_AttachAndLeak(t *testing.T) {
 	t.Run("collab turn, MCP unwired → WebSearch still attaches", func(t *testing.T) {
-		r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"})
+		r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"})
 		r.fake.parts = []string{textPart("editing the shared doc")}
 		m := manifestPart(nil, nil)
 		r.fake.manifest = &m
 
 		body, _ := json.Marshal(map[string]any{
-			"useCase":     "requirements-chat",
 			"instruction": "edit the doc live",
 			"collab":      true,
 		})
@@ -1078,7 +1060,7 @@ func TestWebSearchGate_AttachAndLeak(t *testing.T) {
 	})
 
 	t.Run("non-collab requirements-chat → no WebSearch", func(t *testing.T) {
-		r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"})
+		r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"})
 		r.fake.parts = []string{textPart("chatting")}
 		m := manifestPart(nil, nil)
 		r.fake.manifest = &m
@@ -1092,12 +1074,12 @@ func TestWebSearchGate_AttachAndLeak(t *testing.T) {
 	})
 
 	t.Run("design-generate → WebSearch attaches", func(t *testing.T) {
-		r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"})
+		r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"})
 		r.fake.parts = []string{textPart("designing")}
 		m := manifestPart(nil, nil)
 		r.fake.manifest = &m
 
-		turnID := r.startTurn(t, convUUID, "design-generate", "design it")
+		turnID := r.startTurn(t, convUUID, "", "/design")
 		r.waitTerminal(t, turnID)
 		sent := r.fake.sentTurn(t, 0)
 		if !sent.req.WebSearch {
@@ -1106,186 +1088,13 @@ func TestWebSearchGate_AttachAndLeak(t *testing.T) {
 	})
 }
 
-// TestD15_ConcurrentBaseMovement pins disjoint→rebase, overlap→fail: an
-// unrelated commit landing mid-turn does not kill the generation; a commit
-// touching a folded path fails the turn with the conflicting path listed.
-func TestD15_ConcurrentBaseMovement(t *testing.T) {
-	t.Run("unrelated path rebases", func(t *testing.T) {
-		r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"})
-		r.fake.parts = []string{addFilePart("specs/requirements/notes.md", "# Notes\n")}
-		m := manifestPart(map[string]string{"specs/requirements/notes.md": "# Notes\n"}, nil)
-		r.fake.manifest = &m
-		r.fake.gated = true
-
-		turnID := r.startTurn(t, convUUID, "requirements-chat", "x")
-		<-r.fake.entered
-		// A concurrent save to an UNRELATED path lands while the turn streams.
-		r.fx.Origin.Seed(t, map[string]string{"docs/unrelated.md": "external\n"}, "external apply")
-		close(r.fake.release)
-
-		st := r.waitTerminal(t, turnID)
-		if st.Status != "completed" {
-			t.Fatalf("terminal = %+v, want completed (disjoint rebase)", st)
-		}
-		// Both changes are on main.
-		if got := r.fx.Origin.FileAt(t, "main", "docs/unrelated.md"); got != "external\n" {
-			t.Errorf("external change lost: %q", got)
-		}
-		if got := r.fx.Origin.FileAt(t, "main", "specs/requirements/notes.md"); got != "# Notes\n" {
-			t.Errorf("turn change lost: %q", got)
-		}
-	})
-
-	t.Run("overlapping path fails base-moved", func(t *testing.T) {
-		r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"})
-		r.fake.parts = []string{editFilePart("specs/requirements/requirements.md", "# Reqs\n", "# Agent version\n")}
-		m := manifestPart(map[string]string{"specs/requirements/requirements.md": "# Agent version\n"}, nil)
-		r.fake.manifest = &m
-		r.fake.gated = true
-
-		turnID := r.startTurn(t, convUUID, "requirements-chat", "x")
-		<-r.fake.entered
-		// A concurrent save to the SAME path the fold touched.
-		r.fx.Origin.Seed(t, map[string]string{"specs/requirements/requirements.md": "# Human version\n"}, "concurrent human edit")
-		humanHead := r.fx.Origin.HeadSHA(t)
-		close(r.fake.release)
-
-		st := r.waitTerminal(t, turnID)
-		if st.Status != "failed" || st.Reason != "base-moved" {
-			t.Fatalf("terminal = %+v, want failed base-moved", st)
-		}
-		if len(st.Paths) != 1 || st.Paths[0] != "specs/requirements/requirements.md" {
-			t.Errorf("conflicting paths = %v", st.Paths)
-		}
-		// The human edit survives; the agent version never landed.
-		if r.fx.Origin.HeadSHA(t) != humanHead {
-			t.Error("origin advanced past the human edit")
-		}
-	})
-}
-
-// TestD18_OneActiveTurnPerProject pins the guard: a second POST during a run
-// 409s with the active turn id; after the terminal a new turn is admitted.
-func TestD18_OneActiveTurnPerProject(t *testing.T) {
-	r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"})
-	r.fake.parts = []string{textPart("thinking")}
-	m := manifestPart(nil, nil)
-	r.fake.manifest = &m
-	r.fake.gated = true
-
-	turnID := r.startTurn(t, convUUID, "requirements-chat", "first")
-	<-r.fake.entered
-
-	// Second POST (any conversation, any use case) → 409 {turn_in_progress}.
-	rec := r.post(t, "other-conv-uuid", "requirements-generate", "second")
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("second POST: code %d, want 409 (%s)", rec.Code, rec.Body.String())
-	}
-	var conflict struct {
-		Code         string `json:"code"`
-		ActiveTurnID string `json:"activeTurnId"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &conflict); err != nil ||
-		conflict.Code != "turn_in_progress" || conflict.ActiveTurnID != turnID {
-		t.Fatalf("409 body = %s", rec.Body.String())
-	}
-
-	// GET /turns/active while running → 200 with the same shape.
-	active := r.h.AsOrg(testOrg).Get(turnPath("active"))
-	if active.Code != http.StatusOK {
-		t.Fatalf("active: code %d (%s)", active.Code, active.Body.String())
-	}
-	var activeSt spec.TurnStatus
-	_ = json.Unmarshal(active.Body.Bytes(), &activeSt)
-	if activeSt.TurnID != turnID || activeSt.Status != "running" {
-		t.Errorf("active = %+v", activeSt)
-	}
-
-	close(r.fake.release)
-	r.waitTerminal(t, turnID)
-
-	// Guard released: active → 204, next POST admitted.
-	if rec := r.h.AsOrg(testOrg).Get(turnPath("active")); rec.Code != http.StatusNoContent {
-		t.Errorf("active after terminal: code %d, want 204", rec.Code)
-	}
-	r.fake.mu.Lock()
-	r.fake.gated = false
-	r.fake.mu.Unlock()
-	next := r.startTurn(t, convUUID, "requirements-chat", "second try")
-	if st := r.waitTerminal(t, next); st.Status != "completed" {
-		t.Errorf("post-release turn = %+v", st)
-	}
-}
-
-// TestDesignGateAndHeadRead pins the single-tag-flow design gate: missing
-// requirements CONTENT → 409 requirements_missing and agents never
-// dispatched; content with NO tag proceeds (the build endpoint cuts the tag
-// AFTER design exists — requiring one here deadlocked new projects); with a
-// tag the turn reads HEAD (not the tagged sha) and stamps SpecTag.
-func TestDesignGateAndHeadRead(t *testing.T) {
-	t.Run("no requirements content → 409", func(t *testing.T) {
-		r := newGenaiRig(t, map[string]string{"README.md": "no requirements yet\n"})
-		rec := r.post(t, convUUID, "design-generate", "design it")
-		if rec.Code != http.StatusConflict {
-			t.Fatalf("no-content design POST: code %d, want 409 (%s)", rec.Code, rec.Body.String())
-		}
-		if !strings.Contains(rec.Body.String(), `"requirements_missing"`) {
-			t.Errorf("409 body = %s", rec.Body.String())
-		}
-		if r.fake.turns(t) != 0 {
-			t.Error("agents dispatched despite failed gate")
-		}
-	})
-
-	t.Run("untagged requirements → proceeds with empty SpecTag", func(t *testing.T) {
-		// The deadlock-fix pin: a first-build project has requirements content
-		// but no v<N> tag yet — design generation MUST still start.
-		r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"})
-		r.fake.parts = []string{textPart("designing")}
-		m := manifestPart(nil, nil)
-		r.fake.manifest = &m
-
-		turnID := r.startTurn(t, convUUID, "design-generate", "design it")
-		st := r.waitTerminal(t, turnID)
-		if st.Status != "completed" {
-			t.Fatalf("terminal = %+v", st)
-		}
-		if row := r.turns.row(t, turnID); row.SpecTag != "" {
-			t.Errorf("SpecTag = %q, want empty on a first build", row.SpecTag)
-		}
-	})
-
-	t.Run("tagged → proceeds at HEAD with SpecTag", func(t *testing.T) {
-		r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Approved reqs\n"})
-		r.fx.Origin.Tag(t, "v1", "Requirements v1")
-		// HEAD moves past the approved tag — the turn reads HEAD (D19).
-		r.fx.Origin.Seed(t, map[string]string{"specs/requirements/requirements.md": "# Newer than v1\n"}, "post-approval edit")
-		head := r.fx.Origin.HeadSHA(t)
-
-		r.fake.parts = []string{textPart("designing")}
-		m := manifestPart(nil, nil)
-		r.fake.manifest = &m
-
-		turnID := r.startTurn(t, convUUID, "design-generate", "design it")
-		st := r.waitTerminal(t, turnID)
-		if st.Status != "completed" {
-			t.Fatalf("terminal = %+v", st)
-		}
-		if got := r.fake.sentTurn(t, 0).req.Workspace.Ref; got != head {
-			t.Errorf("design turn dispatched ref %s, want HEAD %s (no tag pinning)", got, head)
-		}
-		if row := r.turns.row(t, turnID); row.SpecTag != "v1" {
-			t.Errorf("SpecTag = %q, want v1", row.SpecTag)
-		}
-	})
-}
 
 // TestD20_FilesChangedExternallyAndDivergenceNote pins the server-derived
 // flag: a second turn in the same conversation after main moved externally
 // dispatches filesChangedExternally=true; after a FAILED turn the divergence
 // note is prepended.
 func TestD20_FilesChangedExternallyAndDivergenceNote(t *testing.T) {
-	r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"})
+	r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"})
 	m := manifestPart(nil, nil)
 	r.fake.parts = []string{textPart("ok")}
 	r.fake.manifest = &m
@@ -1294,7 +1103,7 @@ func TestD20_FilesChangedExternallyAndDivergenceNote(t *testing.T) {
 	r.waitTerminal(t, r.startTurn(t, convUUID, "requirements-chat", "one"))
 
 	// An external Apply advances main behind the conversation's back.
-	r.fx.Origin.Seed(t, map[string]string{"specs/requirements/requirements.md": "# Externally edited\n"}, "external")
+	r.fx.Origin.Seed(t, map[string]string{"specs/requirements/prd.md": "# Externally edited\n"}, "external")
 
 	// Turn 2, same conversation → filesChangedExternally=true, no note.
 	r.waitTerminal(t, r.startTurn(t, convUUID, "requirements-chat", "two"))
@@ -1302,8 +1111,8 @@ func TestD20_FilesChangedExternallyAndDivergenceNote(t *testing.T) {
 	if !second.req.FilesChangedExternally {
 		t.Error("second dispatch must carry filesChangedExternally=true")
 	}
-	if strings.Contains(second.req.Instruction, "were NOT applied") {
-		t.Error("completed prior turn must not add the divergence note")
+	if second.req.PreviousTurnFailed {
+		t.Error("completed prior turn must not flag a previous failure")
 	}
 
 	// Turn 3 fails (severed) → turn 4 carries the divergence note.
@@ -1318,8 +1127,8 @@ func TestD20_FilesChangedExternallyAndDivergenceNote(t *testing.T) {
 	r.fake.mu.Unlock()
 	r.waitTerminal(t, r.startTurn(t, convUUID, "requirements-chat", "four"))
 	fourth := r.fake.sentTurn(t, 3)
-	if !strings.HasPrefix(fourth.req.Instruction, "Note: your previous turn's changes were NOT applied; the workspace reflects the repository state.") {
-		t.Errorf("divergence note missing: %q", fourth.req.Instruction)
+	if !fourth.req.PreviousTurnFailed {
+		t.Errorf("previousTurnFailed missing after a failed turn: %+v", fourth.req)
 	}
 }
 
@@ -1327,7 +1136,7 @@ func TestD20_FilesChangedExternallyAndDivergenceNote(t *testing.T) {
 // D16/D18 viewer): it receives the already-buffered parts, live-tails the
 // rest, and sees the terminal + [DONE].
 func TestLiveAttach_SecondViewerTails(t *testing.T) {
-	r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"})
+	r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"})
 	r.fake.parts = []string{textPart("before-gate")}
 	m := manifestPart(nil, nil)
 	r.fake.manifest = &m
@@ -1386,20 +1195,13 @@ func TestLiveAttach_SecondViewerTails(t *testing.T) {
 // conversation id / missing Anthropic key — agents is never dispatched, no
 // turn row is created.
 func TestPre202Failures(t *testing.T) {
-	r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"})
+	r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"})
 
-	// An enum-invalid useCase is rejected by the contract validator: 400
-	// validation_failed on the flat envelope (the Huma edge answered 422).
-	if rec := r.post(t, convUUID, "bogus", "x"); rec.Code != http.StatusBadRequest {
-		t.Errorf("invalid useCase: code %d, want 400", rec.Code)
-	} else if env := componenttest.DecodeEnvelope(t, rec.Body.String()); env.Code != "validation_failed" {
-		t.Errorf("invalid useCase envelope code = %q, want validation_failed (%s)", env.Code, rec.Body.String())
-	}
-	if rec := r.post(t, "a--b", "requirements-chat", "x"); rec.Code != http.StatusBadRequest {
+	if rec := r.post(t, "a--b", "", "x"); rec.Code != http.StatusBadRequest {
 		t.Errorf("invalid conversation id: code %d, want 400", rec.Code)
 	}
 	r.key = ""
-	if rec := r.post(t, convUUID, "requirements-generate", "x"); rec.Code != http.StatusBadRequest {
+	if rec := r.post(t, convUUID, "", "x"); rec.Code != http.StatusBadRequest {
 		t.Errorf("missing key: code %d, want 400", rec.Code)
 	}
 	if r.fake.turns(t) != 0 {
@@ -1413,7 +1215,7 @@ func TestPre202Failures(t *testing.T) {
 // TestTurnStatus_CrossOrg404 pins the row fence: another org cannot read a
 // foreign turn's status or stream.
 func TestTurnStatus_CrossOrg404(t *testing.T) {
-	r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"})
+	r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"})
 	m := manifestPart(nil, nil)
 	r.fake.parts = []string{textPart("ok")}
 	r.fake.manifest = &m
@@ -1436,7 +1238,7 @@ func TestTurnStatus_CrossOrg404(t *testing.T) {
 // ---- rehydrate (unchanged surface) ----------------------------------------------
 
 func TestRehydrate_ChatMessages(t *testing.T) {
-	r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"})
+	r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"})
 	rec := r.h.AsOrg(testOrg).Get(convPath(convUUID))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("rehydrate code %d: %s", rec.Code, rec.Body.String())
@@ -1456,7 +1258,7 @@ func TestRehydrate_ChatMessages(t *testing.T) {
 }
 
 func TestRehydrate_CrossTenantOrUnknown_404(t *testing.T) {
-	r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"})
+	r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"})
 	r.fake.mu.Lock()
 	r.fake.convStatus = http.StatusNotFound
 	r.fake.mu.Unlock()
@@ -1466,7 +1268,7 @@ func TestRehydrate_CrossTenantOrUnknown_404(t *testing.T) {
 }
 
 func TestGenAI_NoAuth_401(t *testing.T) {
-	r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"})
+	r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"})
 	if rec := r.h.NoAuth().Get(convPath(convUUID)); rec.Code != http.StatusUnauthorized {
 		t.Errorf("no-auth rehydrate: code %d, want 401", rec.Code)
 	}
@@ -1495,7 +1297,7 @@ func (panicClient) GetConversation(context.Context, string, string) (json.RawMes
 // the D18 one-active guard releases, and a subsequent turn on the same project
 // is admitted (and its own panic is likewise contained).
 func TestPanicBarrier_TurnFailsAndGuardReleases(t *testing.T) {
-	r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"},
+	r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"},
 		withAgentsClient(panicClient{}))
 	base := r.fx.Origin.HeadSHA(t)
 
@@ -1523,7 +1325,7 @@ func TestPanicBarrier_TurnFailsAndGuardReleases(t *testing.T) {
 // whitespace-only instruction is 400 pre-202 — agents is never dispatched, no
 // turn row is created, and the D18 guard is untaken (active → 204).
 func TestEmptyInstruction_400NoRow(t *testing.T) {
-	r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"})
+	r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"})
 
 	if rec := r.post(t, convUUID, "requirements-chat", "  \t\n  "); rec.Code != http.StatusBadRequest {
 		t.Fatalf("whitespace instruction: code %d, want 400 (%s)", rec.Code, rec.Body.String())

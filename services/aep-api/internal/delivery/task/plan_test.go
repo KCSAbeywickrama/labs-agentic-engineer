@@ -18,9 +18,11 @@ package task
 
 import (
 	"context"
+	"fmt"
 	"errors"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -34,7 +36,23 @@ import (
 	"github.com/wso2/aep/aep-api/internal/spec"
 )
 
-type planVersions struct{ specTag string }
+// contextPaths lists the task-context paths a dispatched plan turn carried.
+func contextPaths(turn agentsvc.TurnSpec) []string {
+	out := make([]string, 0, len(turn.TaskContext))
+	for _, f := range turn.TaskContext {
+		out = append(out, f.Path)
+	}
+	return out
+}
+
+func (p planVersions) BuildScopeAtTag(context.Context, string, string, string) (spec.BuildScope, error) {
+	return p.scope, nil
+}
+
+type planVersions struct {
+	specTag string
+	scope   spec.BuildScope
+}
 
 func (p planVersions) ListRequirementsVersions(context.Context, string, string) ([]spec.RequirementsVersionInfo, error) {
 	return []spec.RequirementsVersionInfo{{Tag: p.specTag}}, nil
@@ -78,6 +96,11 @@ type planRig struct {
 	svc          *PlanService
 }
 
+// rigScope is the phase scope newPlanRig's version reader serves — zero by
+// default (legacy scope-less planning); a test that needs a phase sets it and
+// restores it.
+var rigScope spec.BuildScope
+
 func newPlanRig(t *testing.T, seed map[string]string, specTag string) *planRig {
 	t.Helper()
 	fx := workspacetest.New(t, seed)
@@ -93,7 +116,7 @@ func newPlanRig(t *testing.T, seed map[string]string, specTag string) *planRig {
 	issues := newFakeIssues()
 	svc := NewPlanService(
 		fakeRepos{repo: repoRow},
-		planVersions{specTag: specTag},
+		planVersions{specTag: specTag, scope: rigScope},
 		sourcecontrol.NewGitOpsService(nilResolver{}, fx.Engine),
 		func(context.Context, string) (string, error) { return "sk-test", nil },
 		turn,
@@ -123,12 +146,14 @@ func TestPlanIntoMilestone_DispatchesWorkspaceShape(t *testing.T) {
 	r := newPlanRig(t, map[string]string{
 		"specs/design/design.md":                              "# design",
 		"specs/design/components/hello-world-api/design.json": `{"name":"hello-world-api"}`,
-		"specs/requirements/requirements.md":                  "# reqs",
+		"specs/requirements/prd.md":                  "# reqs",
 	}, "v1")
 	req := r.start(t)
 
-	if req.Toolset != "task-plan" {
-		t.Errorf("toolset = %q, want task-plan", req.Toolset)
+	// The tool set is DERIVED by the agents service from kind:"plan" — the BFF
+	// states what the turn is for and stops there.
+	if req.Turn.Kind != agentsvc.TurnKindPlan {
+		t.Errorf("turn kind = %q, want %q", req.Turn.Kind, agentsvc.TurnKindPlan)
 	}
 	ws := req.Workspace
 	if ws.Ref != r.fx.Origin.HeadSHA(t) {
@@ -165,11 +190,8 @@ func TestPlanIntoMilestone_DispatchesWorkspaceShape(t *testing.T) {
 	if _, err := os.Stat(skillsSnap + "/skills/task-planning/SKILL.md"); err != nil {
 		t.Errorf("task-planning flow skill missing from skills snapshot: %v", err)
 	}
-	if !strings.HasPrefix(req.Instruction, planInstruction) {
-		t.Errorf("instruction must start with the plan directive: %q", req.Instruction)
-	}
-	if strings.Contains(req.Instruction, "## Existing open Tasks") {
-		t.Errorf("no existing tasks — instruction must carry no context section: %q", req.Instruction)
+	if len(req.Turn.TaskContext) != 0 {
+		t.Errorf("no existing tasks — the turn must carry no task context: %+v", req.Turn.TaskContext)
 	}
 }
 
@@ -180,7 +202,7 @@ func TestPlanIntoMilestone_SkillsRepoGone_TypedError(t *testing.T) {
 	fx := workspacetest.New(t, map[string]string{
 		"specs/design/design.md":                              "# design",
 		"specs/design/components/hello-world-api/design.json": `{"name":"hello-world-api"}`,
-		"specs/requirements/requirements.md":                  "# reqs",
+		"specs/requirements/prd.md":                  "# reqs",
 	})
 	repoRow := &sourcecontrol.GitRepository{OrgID: "org1", ProjectID: "proj1", RepoURL: fx.Origin.URL(),
 		DefaultBranch: "main", RepoSlug: workspacetest.DefaultSlug, Status: "ready"}
@@ -239,13 +261,13 @@ func TestPlanIntoMilestone_ContextIsTheMilestonesOwnWork(t *testing.T) {
 	if err := r.svc.PlanIntoMilestone(context.Background(), "org1", "proj1", 7); err != nil {
 		t.Fatalf("PlanIntoMilestone: %v", err)
 	}
-	instr := r.turn.req.Instruction
-	if !strings.Contains(instr, "--- tasks/201.md ---") {
-		t.Errorf("the milestone's own Task is missing from the plan context:\n%s", instr)
+	paths := contextPaths(r.turn.req.Turn)
+	if !slices.Contains(paths, "tasks/201.md") {
+		t.Errorf("the milestone's own Task is missing from the plan context: %v", paths)
 	}
 	for _, leaked := range []string{"tasks/202.md", "tasks/203.md", "tasks/199.md"} {
-		if strings.Contains(instr, leaked) {
-			t.Errorf("%s leaked into the plan context — only the milestone's agent work is context:\n%s", leaked, instr)
+		if slices.Contains(paths, leaked) {
+			t.Errorf("%s leaked into the plan context — only the milestone's agent work is context: %v", leaked, paths)
 		}
 	}
 }
@@ -265,5 +287,46 @@ func TestPlanIntoMilestone_WriteFailureIsAnError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "milestone 7") {
 		t.Errorf("error = %v, want it to name the milestone", err)
+	}
+}
+
+// TestPlanIntoMilestone_DeltaScopeAndStamp pins the phase-native plan (#369/
+// #370): the instruction carries the platform-computed milestone scope with
+// per-story coverage, and a created Task is stamped with its component's
+// in-scope citations — zero LLM discretion on either.
+func TestPlanIntoMilestone_DeltaScopeAndStamp(t *testing.T) {
+	rigScope = spec.BuildScope{
+		Tag: "v2", Phase: 1, InScope: []int{1, 2},
+		StoryTitles:      map[int]string{1: "As a user, I want A.", 2: "As a user, I want B."},
+		ComponentStories: map[string][]int{"svc": {1, 2}},
+	}
+	defer func() { rigScope = spec.BuildScope{} }()
+
+	r := newPlanRig(t, map[string]string{"specs/design/design.md": "# d\n"}, "v2")
+	r.turn.script = "data: {\"type\":\"tool-result\",\"output\":" +
+		`{"ok":true,"op":"plan","component":"svc","title":"Build svc","dependsOn":[],"origin":"spec-plan","rationale":"core"}` +
+		"}\n\ndata: [DONE]\n\n"
+	if err := r.svc.PlanIntoMilestone(context.Background(), "org1", "proj1", 7); err != nil {
+		t.Fatalf("PlanIntoMilestone: %v", err)
+	}
+
+	scope := r.turn.req.Turn.Scope
+	if scope == nil {
+		t.Fatalf("turn carries no milestone scope")
+	}
+	if scope.Phase != 1 || scope.Tag != "v2" {
+		t.Errorf("scope = phase %d tag %q, want phase 1 tag v2", scope.Phase, scope.Tag)
+	}
+	want := agentsvc.PlanStory{Number: 1, Title: "As a user, I want A.", Covered: false}
+	if !slices.Contains(scope.Stories, want) {
+		t.Errorf("scope missing the uncovered story: %+v", scope.Stories)
+	}
+
+	created := r.issues.created
+	if len(created) != 1 {
+		t.Fatalf("created %d issues, want 1", len(created))
+	}
+	if got := delivery.ParseServesStories(created[0].Body); fmt.Sprint(got) != "[1 2]" {
+		t.Errorf("stamped stories = %v, want [1 2] (body: %q)", got, created[0].Body)
 	}
 }

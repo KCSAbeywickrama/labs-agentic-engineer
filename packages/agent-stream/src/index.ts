@@ -47,6 +47,10 @@ export type {
   LoadSkillReferenceResult,
   Change,
   TurnRequest,
+  TurnSpec,
+  TurnKind,
+  PlanScope,
+  PlanContextFile,
   WorkspaceRef,
   McpConfig,
   CollabConfig,
@@ -59,6 +63,7 @@ export {
   AGENT_SSE_EVENT_TYPES,
   SSE_DONE,
   TOOLSETS,
+  TURN_KINDS,
   ASK_QUESTION_TOOL,
   ASK_QUESTIONS_TOOL,
   ANSWER_PREFIX,
@@ -66,6 +71,7 @@ export {
   buildAnswerInstruction,
   buildAnswersInstruction,
   isToolset,
+  isTurnSpec,
   isCollabConfig,
 } from "./contracts/sse-events.js";
 export type {

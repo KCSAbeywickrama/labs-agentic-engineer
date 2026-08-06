@@ -29,6 +29,7 @@ package spec_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -196,7 +197,7 @@ func mustJSON(t *testing.T, v any) string {
 
 func TestListAtHead_FilteredByPrefix(t *testing.T) {
 	r := newFilesRig(t, map[string]string{
-		"specs/requirements/requirements.md": "req",
+		"specs/requirements/prd.md": "req",
 		"specs/design/design.md":             "des",
 		"README.md":                          "root",
 	})
@@ -217,14 +218,14 @@ func TestListAtHead_FilteredByPrefix(t *testing.T) {
 }
 
 func TestReadAtHead(t *testing.T) {
-	r := newFilesRig(t, map[string]string{"specs/requirements/requirements.md": "hello world"})
-	rec := r.get(apiBase + "/specs/requirements/requirements.md")
+	r := newFilesRig(t, map[string]string{"specs/requirements/prd.md": "hello world"})
+	rec := r.get(apiBase + "/specs/requirements/prd.md")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("code %d: %s", rec.Code, rec.Body.String())
 	}
 	var fc spec.FileContent
 	_ = json.Unmarshal(rec.Body.Bytes(), &fc)
-	if fc.Content != "hello world" || fc.Path != "specs/requirements/requirements.md" || fc.SHA == "" {
+	if fc.Content != "hello world" || fc.Path != "specs/requirements/prd.md" || fc.SHA == "" {
 		t.Fatalf("read wrong: %+v", fc)
 	}
 
@@ -271,16 +272,16 @@ func TestReadAtHead_ValidationReportAllowListed(t *testing.T) {
 
 func TestApply_MultiWriteAndDelete_SingleCommit(t *testing.T) {
 	r := newFilesRig(t, map[string]string{
-		"specs/requirements/requirements.md": "old",
+		"specs/requirements/prd.md": "old",
 		"specs/requirements/todo.md":         "scratch",
 	})
-	reqSHA := r.readSHA(t, "specs/requirements/requirements.md")
+	reqSHA := r.readSHA(t, "specs/requirements/prd.md")
 	todoSHA := r.readSHA(t, "specs/requirements/todo.md")
 	headBefore := r.remote.HeadSHA(t)
 
 	body := mustJSON(t, spec.ApplyRequest{
 		Writes: []spec.WriteOp{
-			{Path: "specs/requirements/requirements.md", Content: "new", BaseSHA: reqSHA},
+			{Path: "specs/requirements/prd.md", Content: "new", BaseSHA: reqSHA},
 			{Path: "specs/design/design.md", Content: "# Design"}, // baseSha omitted ⇒ create
 		},
 		Deletes: []spec.DeleteOp{{Path: "specs/requirements/todo.md", BaseSHA: todoSHA}},
@@ -300,7 +301,7 @@ func TestApply_MultiWriteAndDelete_SingleCommit(t *testing.T) {
 	if r.remote.HeadSHA(t) == headBefore {
 		t.Error("HEAD did not advance")
 	}
-	if got := r.remote.FileAt(t, "main", "specs/requirements/requirements.md"); got != "new" {
+	if got := r.remote.FileAt(t, "main", "specs/requirements/prd.md"); got != "new" {
 		t.Errorf("requirements.md = %q, want new", got)
 	}
 	if got := r.remote.FileAt(t, "main", "specs/design/design.md"); got != "# Design" {
@@ -318,11 +319,11 @@ func TestApply_MultiWriteAndDelete_SingleCommit(t *testing.T) {
 // (issue #239), keyed by the commit sha; a byte-identical re-apply makes no
 // commit and records nothing.
 func TestApply_RecordsSpecUpdatedActivity(t *testing.T) {
-	r := newFilesRig(t, map[string]string{"specs/requirements/requirements.md": "old"})
-	sha := r.readSHA(t, "specs/requirements/requirements.md")
+	r := newFilesRig(t, map[string]string{"specs/requirements/prd.md": "old"})
+	sha := r.readSHA(t, "specs/requirements/prd.md")
 
 	rec := r.apply(mustJSON(t, spec.ApplyRequest{
-		Writes:  []spec.WriteOp{{Path: "specs/requirements/requirements.md", Content: "new", BaseSHA: sha}},
+		Writes:  []spec.WriteOp{{Path: "specs/requirements/prd.md", Content: "new", BaseSHA: sha}},
 		Message: "from test",
 	}))
 	if rec.Code != http.StatusOK {
@@ -340,9 +341,9 @@ func TestApply_RecordsSpecUpdatedActivity(t *testing.T) {
 	}
 
 	// Byte-identical re-apply: preconditions pass, nothing changes, no line.
-	sha2 := r.readSHA(t, "specs/requirements/requirements.md")
+	sha2 := r.readSHA(t, "specs/requirements/prd.md")
 	rec2 := r.apply(mustJSON(t, spec.ApplyRequest{
-		Writes:  []spec.WriteOp{{Path: "specs/requirements/requirements.md", Content: "new", BaseSHA: sha2}},
+		Writes:  []spec.WriteOp{{Path: "specs/requirements/prd.md", Content: "new", BaseSHA: sha2}},
 		Message: "noop",
 	}))
 	if rec2.Code != http.StatusOK {
@@ -354,12 +355,12 @@ func TestApply_RecordsSpecUpdatedActivity(t *testing.T) {
 }
 
 func TestApply_StaleBaseSHA_409_NothingApplied(t *testing.T) {
-	r := newFilesRig(t, map[string]string{"specs/requirements/requirements.md": "v1"})
+	r := newFilesRig(t, map[string]string{"specs/requirements/prd.md": "v1"})
 	headBefore := r.remote.HeadSHA(t)
 
 	body := mustJSON(t, spec.ApplyRequest{
 		Writes: []spec.WriteOp{
-			{Path: "specs/requirements/requirements.md", Content: "v2", BaseSHA: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"},
+			{Path: "specs/requirements/prd.md", Content: "v2", BaseSHA: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"},
 		},
 	})
 	rec := r.apply(body)
@@ -377,7 +378,7 @@ func TestApply_StaleBaseSHA_409_NothingApplied(t *testing.T) {
 		t.Fatalf("409 body not JSON: %v\n%s", err, rec.Body.String())
 	}
 	want409 := []map[string]string{{
-		"path":       "specs/requirements/requirements.md",
+		"path":       "specs/requirements/prd.md",
 		"baseSha":    "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
 		"currentSha": "28c218c44b49222f91536daf5b4d9871638edc8e",
 	}}
@@ -388,7 +389,7 @@ func TestApply_StaleBaseSHA_409_NothingApplied(t *testing.T) {
 	if r.remote.HeadSHA(t) != headBefore {
 		t.Error("HEAD advanced on a conflicting apply")
 	}
-	if got := r.remote.FileAt(t, "main", "specs/requirements/requirements.md"); got != "v1" {
+	if got := r.remote.FileAt(t, "main", "specs/requirements/prd.md"); got != "v1" {
 		t.Errorf("content mutated on conflict: %q", got)
 	}
 }
@@ -397,7 +398,7 @@ func TestApply_StaleBaseSHA_409_NothingApplied(t *testing.T) {
 // must not be applied (all-or-nothing), and every conflict is collected.
 func TestApply_BatchConflict_AllOrNothing_CollectsAllConflicts(t *testing.T) {
 	r := newFilesRig(t, map[string]string{
-		"specs/requirements/requirements.md": "keep me",
+		"specs/requirements/prd.md": "keep me",
 		"specs/requirements/todo.md":         "scratch",
 	})
 	todoSHA := r.readSHA(t, "specs/requirements/todo.md")
@@ -405,7 +406,7 @@ func TestApply_BatchConflict_AllOrNothing_CollectsAllConflicts(t *testing.T) {
 
 	body := mustJSON(t, spec.ApplyRequest{
 		Writes: []spec.WriteOp{
-			{Path: "specs/requirements/requirements.md", Content: "clobber", BaseSHA: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"},
+			{Path: "specs/requirements/prd.md", Content: "clobber", BaseSHA: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"},
 			{Path: "specs/design/design.md", Content: "new", BaseSHA: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"}, // absent + baseSha set ⇒ conflict too
 		},
 		Deletes: []spec.DeleteOp{{Path: "specs/requirements/todo.md", BaseSHA: todoSHA}}, // valid — must still NOT apply
@@ -432,10 +433,10 @@ func TestApply_BatchConflict_AllOrNothing_CollectsAllConflicts(t *testing.T) {
 }
 
 func TestApply_BaseSHAOmittedButExists_409(t *testing.T) {
-	r := newFilesRig(t, map[string]string{"specs/requirements/requirements.md": "exists"})
+	r := newFilesRig(t, map[string]string{"specs/requirements/prd.md": "exists"})
 	body := mustJSON(t, spec.ApplyRequest{
 		Writes: []spec.WriteOp{
-			{Path: "specs/requirements/requirements.md", Content: "clobber"}, // no baseSha ⇒ must-not-exist
+			{Path: "specs/requirements/prd.md", Content: "clobber"}, // no baseSha ⇒ must-not-exist
 		},
 	})
 	rec := r.apply(body)
@@ -452,7 +453,7 @@ func TestApply_BaseSHAOmittedButExists_409(t *testing.T) {
 }
 
 func TestApply_PathRejections(t *testing.T) {
-	r := newFilesRig(t, map[string]string{"specs/requirements/requirements.md": "x"})
+	r := newFilesRig(t, map[string]string{"specs/requirements/prd.md": "x"})
 	cases := map[string]string{
 		"traversal": mustJSON(t, spec.ApplyRequest{Writes: []spec.WriteOp{{Path: "specs/../etc/passwd", Content: "x"}}}),
 		"non-specs": mustJSON(t, spec.ApplyRequest{Writes: []spec.WriteOp{{Path: "README.md", Content: "x"}}}),
@@ -466,7 +467,7 @@ func TestApply_PathRejections(t *testing.T) {
 }
 
 func TestApply_SizeCap(t *testing.T) {
-	r := newFilesRig(t, map[string]string{"specs/requirements/requirements.md": "x"})
+	r := newFilesRig(t, map[string]string{"specs/requirements/prd.md": "x"})
 	huge := strings.Repeat("A", (5<<20)+1)
 	body := mustJSON(t, spec.ApplyRequest{Writes: []spec.WriteOp{{Path: "specs/requirements/big.md", Content: huge}}})
 	if rec := r.apply(body); rec.Code != http.StatusBadRequest {
@@ -518,7 +519,7 @@ func TestApply_SchemaViolationWarning_NonBlocking(t *testing.T) {
 }
 
 func TestFiles_NoAuth_401(t *testing.T) {
-	r := newFilesRig(t, map[string]string{"specs/requirements/requirements.md": "x"})
+	r := newFilesRig(t, map[string]string{"specs/requirements/prd.md": "x"})
 	if rec := r.h.NoAuth().Get(apiBase); rec.Code != http.StatusUnauthorized {
 		t.Errorf("no-auth list: code %d, want 401", rec.Code)
 	}
@@ -528,11 +529,11 @@ func TestFiles_NoAuth_401(t *testing.T) {
 // by it — a caller from another org resolves no repo and gets a 404, never the
 // project's files (the mount path deriver consults only the row, D6).
 func TestFiles_CrossOrg_404(t *testing.T) {
-	r := newFilesRig(t, map[string]string{"specs/requirements/requirements.md": "secret"})
+	r := newFilesRig(t, map[string]string{"specs/requirements/prd.md": "secret"})
 	if rec := r.h.AsOrg("intruder-org").Get(apiBase); rec.Code != http.StatusNotFound {
 		t.Errorf("cross-org list: code %d, want 404 (%s)", rec.Code, rec.Body.String())
 	}
-	if rec := r.h.AsOrg("intruder-org").Get(apiBase + "/specs/requirements/requirements.md"); rec.Code != http.StatusNotFound {
+	if rec := r.h.AsOrg("intruder-org").Get(apiBase + "/specs/requirements/prd.md"); rec.Code != http.StatusNotFound {
 		t.Errorf("cross-org read: code %d, want 404", rec.Code)
 	}
 }
@@ -598,12 +599,12 @@ func TestReadAtHead_LargeFile(t *testing.T) {
 // response are the exact blob shas a subsequent read (ls-tree) returns — the
 // FE folds them into its next baseShas.
 func TestApply_ShaConsistency_OriginMirrorAndReadBack(t *testing.T) {
-	r := newFilesRig(t, map[string]string{"specs/requirements/requirements.md": "v1"})
-	reqSHA := r.readSHA(t, "specs/requirements/requirements.md")
+	r := newFilesRig(t, map[string]string{"specs/requirements/prd.md": "v1"})
+	reqSHA := r.readSHA(t, "specs/requirements/prd.md")
 
 	body := mustJSON(t, spec.ApplyRequest{
 		Writes: []spec.WriteOp{
-			{Path: "specs/requirements/requirements.md", Content: "v2", BaseSHA: reqSHA},
+			{Path: "specs/requirements/prd.md", Content: "v2", BaseSHA: reqSHA},
 			{Path: "specs/design/design.md", Content: "# Design"},
 		},
 	})
@@ -634,7 +635,7 @@ func TestApply_ShaConsistency_OriginMirrorAndReadBack(t *testing.T) {
 // is push-rejected, re-fetches, re-checks its (still valid) preconditions and
 // lands — both 200, both files present, exactly two commits, linear history.
 func TestApply_ConcurrentDisjointApplies_BothLand(t *testing.T) {
-	r := newFilesRig(t, map[string]string{"specs/requirements/requirements.md": "seed"})
+	r := newFilesRig(t, map[string]string{"specs/requirements/prd.md": "seed"})
 	base := r.remote.HeadSHA(t)
 
 	bodies := []string{
@@ -671,7 +672,7 @@ func TestApply_ConcurrentDisjointApplies_BothLand(t *testing.T) {
 // lands, the other re-runs its precondition against the winner's commit and
 // gets the clean 409 — never a lost update.
 func TestApply_ConcurrentSamePath_OneLandsOne409(t *testing.T) {
-	const path = "specs/requirements/requirements.md"
+	const path = "specs/requirements/prd.md"
 	r := newFilesRig(t, map[string]string{path: "seed"})
 	baseSHA := r.readSHA(t, path)
 
@@ -711,7 +712,7 @@ func TestApply_ConcurrentSamePath_OneLandsOne409(t *testing.T) {
 // on the ORIGIN (an external writer) is visible on the very next read, with the
 // new blob sha — there is no cache tier to go stale.
 func TestRead_SeesOriginAdvanceImmediately(t *testing.T) {
-	const path = "specs/requirements/requirements.md"
+	const path = "specs/requirements/prd.md"
 	r := newFilesRig(t, map[string]string{path: "v1"})
 
 	sha1 := r.readSHA(t, path)
@@ -730,5 +731,104 @@ func TestRead_SeesOriginAdvanceImmediately(t *testing.T) {
 	}
 	if fc.SHA == sha1 {
 		t.Error("blob sha did not change across an origin advance")
+	}
+}
+
+// TestApply_ScaffoldsComponentsFromCell pins the scaffold engine (#371): a
+// batch that writes specs/design/design.cell also lands a design.json skeleton
+// for every deployable component the cell declares that has none yet — in the
+// SAME commit. Non-deployable nodes (database) get no directory; a component
+// whose design.json already exists (in the tree or in the batch) is untouched.
+func TestApply_ScaffoldsComponentsFromCell(t *testing.T) {
+	existing := `{"name":"lunch-api","type":"service","version":"0.1.0","language":"Go","buildpack":"docker","appPath":"lunch-api","entrypoint":"deployment/service","exposure":"intranet","dependencies":[],"description":"hand-written"}`
+	r := newFilesRig(t, map[string]string{
+		"specs/design/components/lunch-api/design.json": existing,
+	})
+
+	cell := "phase 1\n" +
+		"component lunch-api service [stories: 1, 2]\n" +
+		"component lunch-web web-application [stories: 1]\n" +
+		"component slack-notifier service [stories: 7]\n" +
+		"component orders-db database\n"
+	body := mustJSON(t, spec.ApplyRequest{
+		Writes:  []spec.WriteOp{{Path: "specs/design/design.cell", Content: cell}},
+		Message: "design cell",
+	})
+	rec := r.apply(body)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("apply code %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// Scaffolded skeletons exist, valid per the design gate, name == dir.
+	for id, wantType := range map[string]string{"lunch-web": "web-application", "slack-notifier": "service"} {
+		content := r.remote.FileAt(t, "main", "specs/design/components/"+id+"/design.json")
+		var parsed map[string]any
+		if err := json.Unmarshal([]byte(content), &parsed); err != nil {
+			t.Fatalf("scaffolded %s design.json not JSON: %v", id, err)
+		}
+		if parsed["name"] != id || parsed["type"] != wantType {
+			t.Errorf("scaffold %s = name %v type %v", id, parsed["name"], parsed["type"])
+		}
+		if parsed["language"] == "" || parsed["description"] == "" {
+			t.Errorf("scaffold %s missing enrichable defaults: %v", id, parsed)
+		}
+	}
+	// Existing component: enrichment survives; only the platform-recomputed
+	// stories field is restamped from the cell (lunch-api cites 1, 2).
+	var existingParsed map[string]any
+	if err := json.Unmarshal([]byte(r.remote.FileAt(t, "main", "specs/design/components/lunch-api/design.json")), &existingParsed); err != nil {
+		t.Fatalf("existing design.json parse: %v", err)
+	}
+	if existingParsed["language"] != "Go" || existingParsed["description"] != "hand-written" {
+		t.Errorf("existing enrichment clobbered: %v", existingParsed)
+	}
+	if got := fmt.Sprint(existingParsed["stories"]); got != "[1 2]" {
+		t.Errorf("existing stories = %v, want restamped [1 2]", existingParsed["stories"])
+	}
+	// The database node scaffolds nothing.
+	if rec := r.get(apiBase + "/specs/design/components/orders-db/design.json"); rec.Code != http.StatusNotFound {
+		t.Errorf("orders-db dir should not exist: code %d", rec.Code)
+	}
+}
+
+// TestApply_StoriesDerivedFromCell pins the platform-recomputed `stories`
+// field: scaffolds are born with their cell citations, an existing enriched
+// design.json is restamped when the cell's citations change, and an authored
+// stories value is overwritten (like a dependency's wiring).
+func TestApply_StoriesDerivedFromCell(t *testing.T) {
+	enriched := `{"name":"lunch-api","type":"service","version":"0.1.0","language":"Go","buildpack":"docker","appPath":"lunch-api","entrypoint":"deployment/service","exposure":"intranet","dependencies":[],"description":"hand-written","stories":[9]}`
+	r := newFilesRig(t, map[string]string{
+		"specs/design/components/lunch-api/design.json": enriched,
+	})
+
+	cell := "phase 1\n" +
+		"component lunch-api service [stories: 1, 2]\n" +
+		"component lunch-web web-application [stories: 1]\n"
+	rec := r.apply(mustJSON(t, spec.ApplyRequest{
+		Writes:  []spec.WriteOp{{Path: "specs/design/design.cell", Content: cell}},
+		Message: "design cell",
+	}))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("apply code %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var parsed map[string]any
+	// Scaffolded component is born citing its cell stories.
+	if err := json.Unmarshal([]byte(r.remote.FileAt(t, "main", "specs/design/components/lunch-web/design.json")), &parsed); err != nil {
+		t.Fatalf("scaffold parse: %v", err)
+	}
+	if got := fmt.Sprint(parsed["stories"]); got != "[1]" {
+		t.Errorf("scaffold stories = %v, want [1]", parsed["stories"])
+	}
+	// The existing component's authored [9] is OVERWRITTEN by the cell's [1 2];
+	// its hand-written fields survive.
+	if err := json.Unmarshal([]byte(r.remote.FileAt(t, "main", "specs/design/components/lunch-api/design.json")), &parsed); err != nil {
+		t.Fatalf("restamp parse: %v", err)
+	}
+	if got := fmt.Sprint(parsed["stories"]); got != "[1 2]" {
+		t.Errorf("restamped stories = %v, want [1 2]", parsed["stories"])
+	}
+	if parsed["description"] != "hand-written" || parsed["language"] != "Go" {
+		t.Errorf("restamp clobbered enrichment: %v", parsed)
 	}
 }

@@ -5140,26 +5140,13 @@ components:
           description: 'Room-scoped turn (#86 phase 4): the agent joins the project''s spec collab room
             as a live peer, reads and edits the shared doc, and commits nothing to git.'
           type: boolean
-        eagerSkills:
-          description: 'Skill names whose guidance the agents service inlines into this turn''s prompt
-            up front (#335 latency) — skips the model''s loadSkill round-trip when the caller already
-            knows a skill applies (the seeded grilling turn). Unknown names are ignored.'
-          items:
-            type: string
-          maxItems: 8
-          type: array
         instruction:
-          description: User message / generation directive
+          description: User message / generation directive. `/<skill>` flow commands (`/start`, `/design`,
+            …) are sent VERBATIM — the server expands them, attaches the flow's eager skills, and enriches
+            `/start` with the captured project idea.
           type: string
         target:
           description: Optional target (e.g. a doc type)
-          type: string
-        useCase:
-          description: Which generation/chat flow. Omit to run a generic spec turn.
-          enum:
-          - requirements-generate
-          - requirements-chat
-          - design-generate
           type: string
       required:
       - instruction

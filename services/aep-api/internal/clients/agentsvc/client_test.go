@@ -60,7 +60,7 @@ func TestTurn_SendsExactRequestAndHeaders(t *testing.T) {
 
 	c := New(Config{BaseURL: srv.URL, Secret: "shh", Audience: "agents-service", Issuer: "aep-bff"})
 	req := TurnRequest{
-		Instruction: "Generate the design.",
+		Turn: TurnSpec{Kind: TurnKindFlow, Skill: "design"},
 		Workspace: WorkspaceRef{
 			ConversationID: "org_o--proj_p--design-generate--uuid1",
 			TurnID:         "turn-1",
@@ -149,8 +149,8 @@ func TestTurn_SendsExactRequestAndHeaders(t *testing.T) {
 	if err := json.Unmarshal([]byte(srv.body), &sent); err != nil {
 		t.Fatalf("unmarshal sent body: %v", err)
 	}
-	if sent.Instruction != req.Instruction || !sent.FilesChangedExternally {
-		t.Errorf("instruction/flag mismatch: %+v", sent)
+	if sent.Turn.Kind != req.Turn.Kind || sent.Turn.Skill != req.Turn.Skill || !sent.FilesChangedExternally {
+		t.Errorf("turn/flag mismatch: %+v", sent)
 	}
 }
 
@@ -158,7 +158,7 @@ func TestTurn_UpstreamErrorIsTyped(t *testing.T) {
 	srv := newRecordingServer(t, http.StatusConflict, `{"error":"turn in progress"}`, "application/json")
 	c := New(Config{BaseURL: srv.URL, Secret: "shh"})
 
-	_, err := c.Turn(context.Background(), "cid", "org", "key", TurnRequest{Instruction: "x"})
+	_, err := c.Turn(context.Background(), "cid", "org", "key", TurnRequest{Turn: TurnSpec{Kind: TurnKindChat, Text: "x"}})
 	var ue *UpstreamError
 	if !errors.As(err, &ue) {
 		t.Fatalf("want *UpstreamError, got %v", err)

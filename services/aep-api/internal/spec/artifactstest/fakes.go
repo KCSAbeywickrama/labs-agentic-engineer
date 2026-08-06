@@ -67,6 +67,10 @@ func (f *FakeArtifactService) SaveSpec(ctx context.Context, orgID, projectID str
 	return f.SaveSpecFunc(ctx, orgID, projectID, req)
 }
 
+func (f *FakeArtifactService) BuildScopeAtTag(ctx context.Context, orgID, projectID, tag string) (spec.BuildScope, error) {
+	return spec.BuildScope{Tag: tag}, nil
+}
+
 func (f *FakeArtifactService) ValidateSpecAtTag(ctx context.Context, orgID, projectID, tag string) error {
 	if f.ValidateSpecAtTagFunc == nil {
 		panic("artifactstest: ValidateSpecAtTag called but ValidateSpecAtTagFunc is not set")

@@ -18,10 +18,10 @@
 
 // @vitest-environment jsdom
 
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ComponentProps } from "react";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { buildDesignGenerationInstruction } from "@aep/contracts/prompts";
 import { AgentChatPanel } from "./AgentChatPanel";
 import { chatKeyFor, consumePendingSeed, setPendingSeed } from "../chatStore";
 
@@ -81,8 +81,17 @@ function panelProps(overrides: Partial<PanelProps> = {}): PanelProps {
   return { org: ORG, projectName: PROJECT, onClose: () => {}, ...overrides };
 }
 
+// The panel reads the spec file list (flow stepper, #372) through
+// react-query, so tests provide the same QueryClientProvider the app root
+// does — with retries off and no network (queries just stay pending).
+const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, enabled: false } } });
+
+function withProviders(node: React.ReactElement) {
+  return <QueryClientProvider client={queryClient}>{node}</QueryClientProvider>;
+}
+
 function renderPanel(overrides: Partial<PanelProps> = {}) {
-  return render(<AgentChatPanel {...panelProps(overrides)} />);
+  return render(withProviders(<AgentChatPanel {...panelProps(overrides)} />));
 }
 
 describe("AgentChatPanel — pendingSeed + turn-end wiring (#252 Task 5)", () => {
@@ -143,16 +152,16 @@ describe("AgentChatPanel — /<skill> composer shortcut", () => {
     fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" });
   }
 
-  it("expands /spec with follow-up text into a skill-load instruction", () => {
+  // #373: the SERVER expands every /<skill> token now — the composer sends
+  // commands verbatim, so a typed command and a CTA are byte-identical turns.
+  it("sends /spec with follow-up text verbatim for the server to expand", () => {
     typeAndSubmit("/spec an expense tracker");
-    expect(mockSend).toHaveBeenCalledWith(
-      "Load the spec skill and follow it.\n\nan expense tracker",
-    );
+    expect(mockSend).toHaveBeenCalledWith("/spec an expense tracker");
   });
 
-  it("expands a bare /design into just the load directive", () => {
+  it("sends a bare /design verbatim for the server to expand", () => {
     typeAndSubmit("/design");
-    expect(mockSend).toHaveBeenCalledWith("Load the design skill and follow it.");
+    expect(mockSend).toHaveBeenCalledWith("/design");
   });
 
   it("sends a plain chat message verbatim", () => {
@@ -184,21 +193,21 @@ describe("AgentChatPanel — generation CTAs", () => {
     consumePendingSeed(KEY);
   });
 
-  it("auto-sends /start for the requirements signal, with the grilling skill inlined", () => {
+  it("auto-sends /start verbatim for the requirements signal", () => {
     renderPanel({ autoGenerate: "requirements" });
-    // `/start` IS the interview turn, so the skill rides along and the agent
-    // skips its loadSkill round-trip (#335).
-    expect(mockSend).toHaveBeenCalledWith("/start", { eagerSkills: ["grilling"] });
+    // Flow commands go verbatim (#373): the SERVER expands the token and
+    // decides the flow's eager skills, so the CTA equals a typed /start.
+    expect(mockSend).toHaveBeenCalledWith("/start");
   });
 
-  it("auto-sends the design instruction for the design signal", () => {
+  it("auto-sends /design verbatim for the design signal", () => {
     renderPanel({ autoGenerate: "design" });
-    expect(mockSend).toHaveBeenCalledWith(buildDesignGenerationInstruction());
+    expect(mockSend).toHaveBeenCalledWith("/design");
   });
 
   it("fires the signal exactly once", () => {
     const { rerender } = renderPanel({ autoGenerate: "requirements" });
-    rerender(<AgentChatPanel {...panelProps({ autoGenerate: "requirements" })} />);
+    rerender(withProviders(<AgentChatPanel {...panelProps({ autoGenerate: "requirements" })} />));
     expect(mockSend).toHaveBeenCalledTimes(1);
   });
 });

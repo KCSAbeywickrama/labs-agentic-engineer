@@ -92,23 +92,3 @@ func TestNewDescriptorStampsAPIVersion(t *testing.T) {
 		t.Fatalf("apiVersion = %q, want %q", d.APIVersion, DescriptorAPIVersion)
 	}
 }
-
-// ideaSteer is the server half that carries the captured idea into a
-// requirements-generate turn. Empty/whitespace idea appends NOTHING, so a turn
-// without a descriptor is byte-identical to one before this feature.
-func TestIdeaSteer(t *testing.T) {
-	t.Parallel()
-	if got := ideaSteer("   \n  "); got != "" {
-		t.Fatalf("blank idea must append nothing, got %q", got)
-	}
-	got := ideaSteer("  an expense claim tracker  ")
-	if !strings.HasPrefix(got, "\n\n") {
-		t.Fatalf("steer must start with the paragraph break, got %q", got)
-	}
-	if !strings.Contains(got, "an expense claim tracker") {
-		t.Fatalf("steer must carry the idea verbatim, got %q", got)
-	}
-	if strings.Contains(got, "  an expense") {
-		t.Fatalf("steer must trim the idea, got %q", got)
-	}
-}

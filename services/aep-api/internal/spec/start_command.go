@@ -14,54 +14,75 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// `/start` — the project kickoff command, and the ONE slash command the server
-// owns rather than the client.
+// `/<skill>` flow commands — RECOGNISED by the server, for every token (#373).
 //
-// Every other `/<skill>` shortcut is expanded client-side by
-// slashSkillInstruction (@aep/contracts/prompts) before the turn is sent, so
-// the server only ever sees prose. `/start` is passed through VERBATIM instead,
-// because the server has to recognize it: it is the only command whose
-// instruction must be enriched with state the client cannot see — the idea
-// captured in specs/.agentic-engineer.toml, a file no client parses and the
-// agent cannot read.
+// Clients send commands VERBATIM, and the server turns one into a TurnSpec: a
+// statement of what the turn is for. It does not compose the instruction text —
+// the agents service does that (services/agents/src/prompts/turn.ts), so the
+// wording exists once, in the service that talks to the model. See
+// services/agents/design/ADR-0003.
 //
-// Deliberately NOT signalled through `useCase`: that field is baked into the
-// conversation identity (namespacedID → org_X--proj_Y--<useCase>--<uuid>), so
-// keying the kickoff on it would put the turn in a different conversation from
-// the chat around it. `/start` runs an INTERVIEW, so its follow-up answers —
-// ordinary chat turns — must land in the same conversation or the agent loses
-// the thread of its own questions.
+// Recognising the command HERE is still load-bearing:
 //
-// The idea only ever rides the FIRST turn: after that it is in the
+//   - `/start` carries state no client sees and the agent cannot read — the
+//     idea captured in specs/.agentic-engineer.toml, whose dot-led segment is
+//     stripped from every turn snapshot. Only this side can read it.
+//   - The flow token gates web search + MCP minting for design turns
+//     (designOrCollabTurn), and MCP needs a BFF-signed bearer.
+//
+// Flows are deliberately NOT a conversation-identity dimension: a flow runs an
+// interview whose answers are ordinary chat turns, so every turn of a project
+// conversation must share one namespace (see useCaseGeneral).
+//
+// The idea only ever rides the FIRST `/start` turn: after that it is in the
 // conversation history, so nothing needs re-attaching.
 
 package spec
 
-import "strings"
+import (
+	"context"
+	"regexp"
+	"strings"
 
-// startCommand is the verbatim token clients pass through unexpanded.
+	"github.com/wso2/aep/aep-api/internal/clients/agentsvc"
+	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
+)
+
+// startCommand is the one token carrying server-read state beyond the token.
 const startCommand = "/start"
 
-// StartInstruction is the server-side expansion of `/start`.
+// slashCommandPattern is deliberately narrow so real chat is never eaten: a
+// single leading `/`, a skill-name token ending at whitespace or message end,
+// optional free text after it. A bare `/`, a mid-message slash, `//x`, or
+// trailing punctuation on the token all fail the match and pass through as
+// ordinary chat.
 //
-// MUST match slashSkillInstruction("/start") in packages/contracts/prompts —
-// the client-side expander every other `/<skill>` command goes through.
-// playground/test/steer-parity.test.ts pins the two together.
-const StartInstruction = "Load the start skill and follow it."
+// The playground keeps its own copy of this grammar (it plays the server role
+// when running without the platform). Duplication is deliberate: a regex cannot
+// be shared across languages without a generator, and the two never run on the
+// same input — a mismatch shows up as the playground routing a line differently
+// from production, not as a wrong prompt.
+var slashCommandPattern = regexp.MustCompile(`^/([a-z0-9-]+)(?:\s+([\s\S]+))?$`)
 
-// parseStartCommand reports whether a raw instruction is the `/start` command,
-// returning any idea typed inline after it (`/start an expense tracker`).
-//
-// The grammar is deliberately narrow — the exact token, alone or followed by
-// whitespace — so ordinary prose that merely mentions the word is never eaten.
-func parseStartCommand(instruction string) (inlineIdea string, ok bool) {
-	trimmed := strings.TrimSpace(instruction)
-	if trimmed == startCommand {
-		return "", true
+// turnSpecFor classifies a raw instruction. Non-command text is an ordinary
+// chat turn with an empty flow. A `/<skill>` command names the skill; `/start`
+// additionally carries the project idea (typed inline wins, else read from the
+// descriptor at `at` — best-effort: no descriptor, no idea, and the start skill
+// asks the user instead).
+func (s *Service) turnSpecFor(ctx context.Context, ref sourcecontrol.RepoRef, at, raw string) (agentsvc.TurnSpec, string) {
+	m := slashCommandPattern.FindStringSubmatch(strings.TrimSpace(raw))
+	if m == nil {
+		return agentsvc.TurnSpec{Kind: agentsvc.TurnKindChat, Text: raw}, ""
 	}
-	rest, found := strings.CutPrefix(trimmed, startCommand+" ")
-	if !found {
-		return "", false
+	token, rest := m[1], strings.TrimSpace(m[2])
+
+	if "/"+token == startCommand {
+		idea := rest
+		if idea == "" {
+			idea = s.readProjectIdea(ctx, ref, at)
+		}
+		return agentsvc.TurnSpec{Kind: agentsvc.TurnKindStart, Idea: strings.TrimSpace(idea)}, token
 	}
-	return strings.TrimSpace(rest), true
+
+	return agentsvc.TurnSpec{Kind: agentsvc.TurnKindFlow, Skill: token, Text: rest}, token
 }

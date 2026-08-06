@@ -32,6 +32,7 @@ import { mockModel } from "@aep/agents/shared/mock-model";
 import { requirementsCommand, chatTurn } from "../src/commands.js";
 import { openSession } from "../src/engine/session.js";
 import { readIdea } from "../src/state/descriptor.js";
+import { chatSpec } from "../src/engine/turn-spec.js";
 
 function tempProject(): string {
   return mkdtempSync(join(tmpdir(), "aep-play-test-"));
@@ -53,14 +54,14 @@ test("requirements phase: idea → folded requirements.md + captured descriptor 
         kind: "toolCall",
         toolCallId: "t1",
         toolName: "addFile",
-        input: { path: "specs/requirements/requirements.md", content: "# Requirements\n\n- ceramics catalog\n" },
+        input: { path: "specs/requirements/prd.md", content: "# Requirements\n\n- ceramics catalog\n" },
       },
       { kind: "text", text: "Requirements generated." },
     ]);
     const outcome = await requirementsCommand(projectDir, { model, skillsDir, silent: true, idea: "An online ceramics store" });
     assert.equal(outcome.ok, true, outcome.detail);
 
-    assert.match(readFileSync(join(projectDir, "specs/requirements/requirements.md"), "utf8"), /ceramics catalog/);
+    assert.match(readFileSync(join(projectDir, "specs/requirements/prd.md"), "utf8"), /ceramics catalog/);
     // --idea is CAPTURED into the descriptor, so a later /start carries the same idea.
     assert.equal(readIdea(projectDir), "An online ceramics store");
     assert.ok(existsSync(join(projectDir, ".aep-playground/conversations/general.json")), "general conversation persisted");
@@ -80,7 +81,7 @@ test("chat resumes the SAME general conversation across sessions (console parity
         kind: "toolCall",
         toolCallId: "t1",
         toolName: "addFile",
-        input: { path: "specs/requirements/requirements.md", content: "# Requirements\n" },
+        input: { path: "specs/requirements/prd.md", content: "# Requirements\n" },
       },
       { kind: "text", text: "done" },
     ]);
@@ -95,7 +96,7 @@ test("chat resumes the SAME general conversation across sessions (console parity
     const second = mockModel([{ kind: "text", text: "sure — noted." }]);
     const session = await openSession(projectDir, { model: second, skillsDir });
     try {
-      const outcome = await chatTurn(session, "add a wishlist requirement", { silent: true });
+      const outcome = await chatTurn(session, chatSpec("add a wishlist requirement"), { silent: true });
       assert.equal(outcome.ok, true, outcome.detail);
     } finally {
       await session.close();
@@ -119,14 +120,14 @@ test("issues/ never enters a spec-turn snapshot; hand-edits set filesChangedExte
     mkdirSync(join(projectDir, "issues"), { recursive: true });
     writeFileSync(join(projectDir, "issues", "1.md"), "---\ntitle: leak?\n---\n");
     mkdirSync(join(projectDir, "specs/requirements"), { recursive: true });
-    writeFileSync(join(projectDir, "specs/requirements/requirements.md"), "# R\n");
+    writeFileSync(join(projectDir, "specs/requirements/prd.md"), "# R\n");
 
     const model = mockModel([{ kind: "text", text: "ok" }]);
     const session = await openSession(projectDir, { model, skillsDir });
     try {
       const files = session.ws.readSpecFiles();
       assert.ok(!Object.keys(files).some((p) => p.startsWith("issues/")), "issues/ excluded from spec turns");
-      assert.ok("specs/requirements/requirements.md" in files);
+      assert.ok("specs/requirements/prd.md" in files);
     } finally {
       await session.close();
     }
