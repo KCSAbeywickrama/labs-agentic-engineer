@@ -114,6 +114,15 @@ type RunCycleRepository interface {
 	// Unscoped by org on purpose: it drives a platform watcher, not an HTTP read.
 	ListRecentDispatched(ctx context.Context, since time.Time) ([]RunCycle, error)
 
+	// ListOpenCycleIDs returns the ids of the project's cycles that have not
+	// ended — the LIVE set. The agent-component reaper reads it to decide what
+	// it may delete: OpenChoreo registers no health check for a `batch/v1 Job`,
+	// so a Component's own status cannot say whether its pod is still running,
+	// while a cycle row with no ended_at can.
+	//
+	// Org-scoped because it is derived from an already-org-resolved dispatch.
+	ListOpenCycleIDs(ctx context.Context, orgID, projectID string) ([]string, error)
+
 	// DeleteByProject purges a project's cycle records — the project-delete
 	// cascade, paired with MilestoneRunRepository.DeleteByProject so a recreated
 	// same-named project starts with a clean timeline.
@@ -279,6 +288,19 @@ func (r *runCycleRepository) ListRecentDispatched(ctx context.Context, since tim
 		return nil, err
 	}
 	return rows, nil
+}
+
+func (r *runCycleRepository) ListOpenCycleIDs(ctx context.Context, orgID, projectID string) ([]string, error) {
+	var ids []string
+	err := r.db.WithContext(ctx).
+		Model(&RunCycle{}).
+		Where("org_id = ? AND project_id = ? AND ended_at IS NULL", orgID, projectID).
+		Order("created_at ASC").
+		Pluck("id", &ids).Error
+	if err != nil {
+		return nil, err
+	}
+	return ids, nil
 }
 
 func (r *runCycleRepository) DeleteByProject(ctx context.Context, orgID, projectID string) error {
