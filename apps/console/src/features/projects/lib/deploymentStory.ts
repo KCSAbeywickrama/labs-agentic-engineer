@@ -68,6 +68,12 @@ export function developmentStage(
   const loud = cards.map(cardState).filter((s) => s !== "waiting");
   const state: StageState =
     deployed.length === 0 || loud.length === 0 ? "waiting" : loudestState(loud);
+  // Counted from the CARDS the stage renders, never from the status
+  // aggregate's components tally: the two are computed by different backend
+  // paths and the aggregate has been seen to disagree with the bindings on
+  // screen ("2 of 0 components ready", #401 feedback). The note must agree
+  // with the rows directly under it.
+  const ready = cards.filter((c) => c.kind === "success").length;
   return {
     id: "development",
     // "… environment" on both PLACE stages (#401 feedback): bare
@@ -80,7 +86,7 @@ export function developmentStage(
     note:
       deployed.length === 0
         ? "Nothing running yet — agents deploy to dev when a build merges."
-        : `${deploy.components.ready} of ${deploy.components.total} components ready`,
+        : `${ready} of ${cards.length} components ready`,
   };
 }
 

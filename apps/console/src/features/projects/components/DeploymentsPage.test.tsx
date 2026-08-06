@@ -267,9 +267,10 @@ describe("DeploymentsPage — connections", () => {
 
     render(<DeploymentsPage projectName="acme" />);
 
-    // Exactly ONE Configure on screen — the side panel's connection action;
-    // the rail rows stay uniform with no per-row extras.
-    fireEvent.click(screen.getByRole("button", { name: "Configure" }));
+    // Exactly ONE Configure on screen — the side panel's connection action,
+    // named per connection for screen readers; the rail rows stay uniform
+    // with no per-row extras.
+    fireEvent.click(screen.getByRole("button", { name: "Configure stripe" }));
     const dialog = screen.getByRole("dialog");
     expect(
       within(dialog).getByText("Configure — stripe"),
@@ -311,6 +312,14 @@ describe("DeploymentsPage — connections", () => {
         dependencies: [
           { kind: "component", name: "orders-api" },
           { kind: "platform-resource", name: "shop-db", resourceType: "postgres-cnpg" },
+          // Config-carrying but platform-owned: no Configure, no
+          // "provisioned" inference — the platform manages its credentials.
+          {
+            kind: "platform-resource",
+            name: "shop-auth",
+            resourceType: "thunder-app",
+            config: [{ key: "CLIENT_SECRET", secret: true }],
+          },
         ],
       },
     ];
@@ -319,8 +328,9 @@ describe("DeploymentsPage — connections", () => {
 
     expect(screen.getByText("shop-db (postgres-cnpg)")).toBeInTheDocument();
     expect(screen.getByText("provisioned")).toBeInTheDocument();
+    expect(screen.getByText("platform-managed")).toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: "Configure" }),
+      screen.queryByRole("button", { name: /Configure/ }),
     ).not.toBeInTheDocument();
   });
 });

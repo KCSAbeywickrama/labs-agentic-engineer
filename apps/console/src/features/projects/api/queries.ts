@@ -269,7 +269,9 @@ export function useSaveConnectionValues(projectName: string) {
           body: { environments: { [environment]: values } },
         },
       );
-      if (error || data === undefined) {
+      // Gate on `error` alone (#401 review): the contract declares a JSON 200,
+      // and an empty-body success must not read as a failure.
+      if (error) {
         throw new Error(apiErrorMessage(error, "Failed to save the connection's values"));
       }
       return data;

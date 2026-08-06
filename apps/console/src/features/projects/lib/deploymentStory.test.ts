@@ -53,7 +53,9 @@ describe("developmentStage", () => {
     const s = developmentStage([card("success")], deploy());
     expect(s.state).toBe("done");
     expect(s.fact).toBe("v1");
-    expect(s.note).toBe("2 of 2 components ready");
+    // Counted from the CARDS, not the aggregate's tally (which says 2/2
+    // here) — the note must agree with the rows rendered under it.
+    expect(s.note).toBe("1 of 1 components ready");
   });
 
   it("fails loudly when any binding failed", () => {

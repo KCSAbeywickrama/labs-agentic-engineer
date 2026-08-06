@@ -406,6 +406,10 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
       dependencies.isPending ? null : connections.length,
     );
   const devDeployed = board.development.filter((c) => c.deployment);
+  // Rollout numbers come from the cards (the truth the page renders), not
+  // the status aggregate's components tally — see developmentStage.
+  const devReady = board.development.filter((c) => c.kind === "success").length;
+  const devTotal = board.development.length;
   const updatedAt = deployments.deployments
     .map((d) => d.createdAt ?? "")
     .filter(Boolean)
@@ -560,8 +564,7 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
               delivered rule, not a standing accent. */}
           <PanelOverline
             color={
-              deploy?.status === "deployed" &&
-              deploy.components.ready === deploy.components.total
+              deploy?.status === "deployed" && devTotal > 0 && devReady === devTotal
                 ? "success.main"
                 : "text.secondary"
             }
@@ -576,7 +579,11 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
           <Typography variant="body2" color="text.secondary">
             {devDeployed.length} component{devDeployed.length === 1 ? "" : "s"} live
           </Typography>
-          {deploy && deploy.components.total > 0 && (
+          {/* Card-derived counts, like the rail's note — the status
+              aggregate's tally has disagreed with the bindings on screen
+              ("2 of 0", #401 feedback), and the panel must agree with the
+              rows beside it. */}
+          {devTotal > 0 && (
             <Stack
               direction="row"
               spacing={1.5}
@@ -584,8 +591,8 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
             >
               <LinearProgress
                 variant="determinate"
-                value={(deploy.components.ready / deploy.components.total) * 100}
-                aria-label={`${deploy.components.ready} of ${deploy.components.total} components ready`}
+                value={(devReady / devTotal) * 100}
+                aria-label={`${devReady} of ${devTotal} components ready`}
                 sx={{
                   flexGrow: 1,
                   height: 6,
@@ -593,10 +600,7 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
                   // Neutral track, coloured fill only — MilestonePanel's bar.
                   bgcolor: "action.selected",
                   "& .MuiLinearProgress-bar": {
-                    bgcolor:
-                      deploy.components.ready === deploy.components.total
-                        ? "success.main"
-                        : "info.main",
+                    bgcolor: devReady === devTotal ? "success.main" : "info.main",
                     borderRadius: 3,
                   },
                 }}
@@ -604,15 +608,12 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
               <Typography
                 variant="caption"
                 sx={{
-                  color:
-                    deploy.components.ready === deploy.components.total
-                      ? "success.main"
-                      : "text.secondary",
+                  color: devReady === devTotal ? "success.main" : "text.secondary",
                   fontVariantNumeric: "tabular-nums",
                   whiteSpace: "nowrap",
                 }}
               >
-                {deploy.components.ready} / {deploy.components.total} ready
+                {devReady} / {devTotal} ready
               </Typography>
             </Stack>
           )}
@@ -649,6 +650,10 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
                         size="small"
                         color="inherit"
                         disableElevation
+                        // The row label holds the connection name; the button's
+                        // accessible name must too, or every row reads
+                        // "Configure" to a screen reader (#401 review).
+                        aria-label={`Configure ${row.name}`}
                         onClick={() => setValuesTarget(row)}
                         sx={(theme) => ({
                           borderRadius: 999,
@@ -675,9 +680,17 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
                       >
                         Configure
                       </Button>
-                    ) : (
+                    ) : row.provisioned ? (
                       <Typography variant="caption" color="success.main">
                         provisioned
+                      </Typography>
+                    ) : (
+                      // Config-carrying but not user-updatable here (a platform
+                      // resource like an identity app): the platform owns its
+                      // credentials, so say that instead of inferring
+                      // "provisioned" from the else-branch (#401 review).
+                      <Typography variant="caption" color="text.secondary">
+                        platform-managed
                       </Typography>
                     )
                   }
