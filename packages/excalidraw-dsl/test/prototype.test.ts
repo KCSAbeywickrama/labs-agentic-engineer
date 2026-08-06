@@ -150,3 +150,85 @@ test("canvas compile is unchanged: decorations present, links null", () => {
   assert.ok(texts.includes("Login"), "canvas keeps screen titles");
   assert.ok(els.every((e) => (e.link ?? null) === null), "canvas emits no links");
 });
+
+// Chrome (navbar/sidebar) is how a real webapp reaches its top-level views, so
+// each item may carry its own target. Without this the sidebar is a drawing and
+// whole sections of a generated app have no way in.
+const CHROME_DSL = `screen Dashboard
+  sidebar "Dashboard -> Dashboard | Templates -> Templates | Progress -> Progress | Help"
+  navbar "WorkoutTracker | History -> History | Missing -> Nowhere"
+  heading "Today"
+screen Templates
+screen Progress
+screen History
+`;
+
+test("a sidebar item's target becomes a full-row hotspot", () => {
+  const dash = model(CHROME_DSL).screens[0]!;
+  const templates = dash.hotspots.find((h) => h.target === "Templates");
+  assert.ok(templates, "annotated sidebar item produced no hotspot");
+  // Item index 1 → the active-pill box: x 8, y 64 + 1*40, 224x32.
+  assert.deepEqual(templates, { x: 8, y: 104, width: 224, height: 32, target: "Templates" });
+});
+
+test("chrome items render their text without the arrow clause", () => {
+  const els = elements(model(CHROME_DSL).screens[0]!.sceneJson);
+  const texts = els.filter((e) => e.type === "text").map((e) => e.text ?? "");
+  assert.ok(texts.includes("Templates"), "sidebar item should draw its label alone");
+  assert.ok(texts.includes("History"), "navbar item should draw its label alone");
+  assert.ok(
+    !texts.some((t) => t.includes("->")),
+    `no drawn text may contain a raw arrow: ${JSON.stringify(texts)}`,
+  );
+});
+
+test("an unannotated chrome item claims no hotspot", () => {
+  const dash = model(CHROME_DSL).screens[0]!;
+  assert.ok(!dash.hotspots.some((h) => h.target === "Help"));
+});
+
+test("a chrome item pointing at its own screen claims no hotspot", () => {
+  // The sidebar's "Dashboard" entry, seen from Dashboard, goes nowhere.
+  const dash = model(CHROME_DSL).screens[0]!;
+  assert.ok(!dash.hotspots.some((h) => h.target === "Dashboard"));
+  // …but the same sidebar seen from another screen does navigate.
+  const templates = model(`screen Dashboard
+screen Templates
+  sidebar "Dashboard -> Dashboard | Templates -> Templates"
+`).screens[1]!;
+  assert.ok(templates.hotspots.some((h) => h.target === "Dashboard"));
+  assert.ok(!templates.hotspots.some((h) => h.target === "Templates"));
+});
+
+test("a chrome item with a dead target claims no hotspot", () => {
+  const dash = model(CHROME_DSL).screens[0]!;
+  assert.ok(!dash.hotspots.some((h) => h.target === "Nowhere"));
+});
+
+test("a navbar item's target becomes a hotspot on its text box", () => {
+  const dash = model(CHROME_DSL).screens[0]!;
+  const history = dash.hotspots.find((h) => h.target === "History");
+  assert.ok(history, "annotated navbar item produced no hotspot");
+  assert.equal(history.y, 19, "navbar hotspot sits on the item's text row");
+  assert.equal(history.height, 18);
+  assert.ok(history.width >= 40 && history.x > 0);
+});
+
+test("the navbar brand never navigates", () => {
+  const m = model(`screen Dashboard
+  navbar "WorkoutTracker -> Templates | History -> History"
+screen Templates
+screen History
+`);
+  assert.ok(!m.screens[0]!.hotspots.some((h) => h.target === "Templates"));
+});
+
+test("body hotspots still work alongside chrome ones", () => {
+  const m = model(`screen Dashboard
+  sidebar "Dashboard -> Dashboard | Templates -> Templates"
+  button "Start" primary -> Templates
+screen Templates
+`);
+  // One from the sidebar item, one from the button — same target, two hotspots.
+  assert.equal(m.screens[0]!.hotspots.filter((h) => h.target === "Templates").length, 2);
+});
