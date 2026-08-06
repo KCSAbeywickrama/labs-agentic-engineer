@@ -22,7 +22,7 @@ import { tryDslToPrototype, dslToExcalidraw } from "../src/index.js";
 
 type El = {
   type: string; x: number; y: number; width: number; height: number;
-  text?: string; link?: string | null;
+  text?: string; link?: string | null; strokeColor?: string; backgroundColor?: string;
 };
 
 const DSL = `screen Login "Sign-in for all roles"
@@ -149,4 +149,154 @@ test("canvas compile is unchanged: decorations present, links null", () => {
   assert.ok(texts.some((t) => t.includes("→ Screen")), "canvas keeps nav markers");
   assert.ok(texts.includes("Login"), "canvas keeps screen titles");
   assert.ok(els.every((e) => (e.link ?? null) === null), "canvas emits no links");
+});
+
+// Chrome (navbar/sidebar) is how a real webapp reaches its top-level views, so
+// each item may carry its own target. Without this the sidebar is a drawing and
+// whole sections of a generated app have no way in.
+const CHROME_DSL = `screen Dashboard
+  sidebar "Dashboard -> Dashboard | Templates -> Templates | Progress -> Progress | Help"
+  navbar "WorkoutTracker | History -> History | Missing -> Nowhere"
+  heading "Today"
+screen Templates
+screen Progress
+screen History
+`;
+
+test("a sidebar item's target becomes a full-row hotspot", () => {
+  const dash = model(CHROME_DSL).screens[0]!;
+  const templates = dash.hotspots.find((h) => h.target === "Templates");
+  assert.ok(templates, "annotated sidebar item produced no hotspot");
+  // Item index 1 → the active-pill box: x 8, y 64 + 1*40, 224x32.
+  assert.deepEqual(templates, { x: 8, y: 104, width: 224, height: 32, target: "Templates" });
+});
+
+test("chrome items render their text without the arrow clause", () => {
+  const els = elements(model(CHROME_DSL).screens[0]!.sceneJson);
+  const texts = els.filter((e) => e.type === "text").map((e) => e.text ?? "");
+  assert.ok(texts.includes("Templates"), "sidebar item should draw its label alone");
+  assert.ok(texts.includes("History"), "navbar item should draw its label alone");
+  assert.ok(
+    !texts.some((t) => t.includes("->")),
+    `no drawn text may contain a raw arrow: ${JSON.stringify(texts)}`,
+  );
+});
+
+test("an unannotated chrome item claims no hotspot", () => {
+  const dash = model(CHROME_DSL).screens[0]!;
+  assert.ok(!dash.hotspots.some((h) => h.target === "Help"));
+});
+
+test("a chrome item pointing at its own screen claims no hotspot", () => {
+  // The sidebar's "Dashboard" entry, seen from Dashboard, goes nowhere.
+  const dash = model(CHROME_DSL).screens[0]!;
+  assert.ok(!dash.hotspots.some((h) => h.target === "Dashboard"));
+  // …but the same sidebar seen from another screen does navigate.
+  const templates = model(`screen Dashboard
+screen Templates
+  sidebar "Dashboard -> Dashboard | Templates -> Templates"
+`).screens[1]!;
+  assert.ok(templates.hotspots.some((h) => h.target === "Dashboard"));
+  assert.ok(!templates.hotspots.some((h) => h.target === "Templates"));
+});
+
+test("a chrome item with a dead target claims no hotspot", () => {
+  const dash = model(CHROME_DSL).screens[0]!;
+  assert.ok(!dash.hotspots.some((h) => h.target === "Nowhere"));
+});
+
+test("a navbar item's target becomes a hotspot on its text box", () => {
+  const dash = model(CHROME_DSL).screens[0]!;
+  const history = dash.hotspots.find((h) => h.target === "History");
+  assert.ok(history, "annotated navbar item produced no hotspot");
+  assert.equal(history.y, 19, "navbar hotspot sits on the item's text row");
+  assert.equal(history.height, 18);
+  assert.ok(history.width >= 40 && history.x > 0);
+});
+
+test("the navbar brand never navigates", () => {
+  const m = model(`screen Dashboard
+  navbar "WorkoutTracker -> Templates | History -> History"
+screen Templates
+screen History
+`);
+  assert.ok(!m.screens[0]!.hotspots.some((h) => h.target === "Templates"));
+});
+
+// Colors mirror BRAND_DARK / BRAND_TINT in src/index.ts — not exported, so
+// asserted here by value.
+const BRAND_DARK = "#e74420";
+const BRAND_TINT = "#fff0e8";
+
+test("sidebar active pill follows the rendered screen, not always index 0", () => {
+  const dsl = `screen Dashboard
+  sidebar "Dashboard -> Dashboard | Templates -> Templates | Progress -> Progress"
+screen Templates
+  sidebar "Dashboard -> Dashboard | Templates -> Templates | Progress -> Progress"
+screen Progress
+  sidebar "Dashboard -> Dashboard | Templates -> Templates | Progress -> Progress"
+`;
+  const m = model(dsl);
+  // Order in the annotated sidebar matches screen declaration order, so the
+  // active row index equals the screen's own index (0, 1, 2).
+  m.screens.forEach((s, expectedActiveIndex) => {
+    const els = elements(s.sceneJson);
+    const pillY = 68 + expectedActiveIndex * 40 - 4; // frameY(0) + NAVBAR_H(56) + 12 + i*40 - 4
+    const pill = els.find(
+      (e) => e.type === "rectangle" && e.x === 8 && e.y === pillY && e.backgroundColor === BRAND_TINT,
+    );
+    assert.ok(pill, `screen ${s.name}: expected active pill at row ${expectedActiveIndex}`);
+
+    const texts = els.filter((e) => e.type === "text");
+    texts.forEach((t) => {
+      const rowIndex = ["Dashboard", "Templates", "Progress"].indexOf(t.text ?? "");
+      if (rowIndex === -1) return; // not a sidebar item text
+      const expectedColor = rowIndex === expectedActiveIndex ? BRAND_DARK : "#1e1e1e";
+      assert.equal(
+        t.strokeColor,
+        expectedColor,
+        `screen ${s.name}: row "${t.text}" should be ${expectedColor}`,
+      );
+    });
+  });
+});
+
+test("an unannotated sidebar still highlights index 0 on every screen", () => {
+  const dsl = `screen Dashboard
+  sidebar "Dashboard | Templates | Progress"
+screen Templates
+  sidebar "Dashboard | Templates | Progress"
+`;
+  const m = model(dsl);
+  m.screens.forEach((s) => {
+    const els = elements(s.sceneJson);
+    const pill = els.find(
+      (e) => e.type === "rectangle" && e.x === 8 && e.y === 64 && e.backgroundColor === BRAND_TINT,
+    );
+    assert.ok(pill, `screen ${s.name}: unannotated sidebar should default to index 0`);
+    const dashboard = els.find((e) => e.type === "text" && e.text === "Dashboard")!;
+    assert.equal(dashboard.strokeColor, BRAND_DARK);
+  });
+});
+
+test("an item that is only an arrow draws its raw text and claims no target", () => {
+  const m = model(`screen Dashboard
+  sidebar "-> Templates | Home"
+screen Templates
+`);
+  const dash = m.screens[0]!;
+  assert.equal(dash.hotspots.length, 0, "an arrow-only item must not claim a hotspot");
+  const els = elements(dash.sceneJson);
+  const texts = els.filter((e) => e.type === "text").map((e) => e.text ?? "");
+  assert.ok(texts.includes("-> Templates"), "an arrow-only item draws its raw text literally");
+});
+
+test("body hotspots still work alongside chrome ones", () => {
+  const m = model(`screen Dashboard
+  sidebar "Dashboard -> Dashboard | Templates -> Templates"
+  button "Start" primary -> Templates
+screen Templates
+`);
+  // One from the sidebar item, one from the button — same target, two hotspots.
+  assert.equal(m.screens[0]!.hotspots.filter((h) => h.target === "Templates").length, 2);
 });
