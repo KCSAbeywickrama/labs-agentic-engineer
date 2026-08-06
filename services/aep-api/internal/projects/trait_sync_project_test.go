@@ -175,11 +175,19 @@ func TestSyncProjectAPITraits_SyncsAllServiceComponents(t *testing.T) {
 		t.Errorf("end-user API reconcile must list the web-app sibling's deployments")
 	}
 
-	// The env-config emitted for "api" carries the sibling origin in CORS with
-	// credentials on; "s2s" falls back to wildcard CORS (no allowedOrigins).
+	// The env-config emitted for "api" carries the sibling origin in CORS;
+	// "s2s" falls back to wildcard CORS (no allowedOrigins).
 	apiCORS := traitCORSFor(t, oc, "api")
-	if got, _ := apiCORS["allowCredentials"].(bool); !got {
-		t.Errorf("end-user API CORS should set allowCredentials=true; got %+v", apiCORS)
+	// Credentials MUST stay off and headers MUST stay `["*"]`. Bearer auth
+	// needs neither, and the WSO2 gateway answers a `*`-plus-credentials
+	// preflight with no CORS headers at all — a browser then blocks the
+	// request before sending it, which reads as a blanket CORS outage.
+	if got, ok := apiCORS["allowCredentials"].(bool); !ok || got {
+		t.Errorf("end-user API CORS must set allowCredentials=false; got %+v", apiCORS)
+	}
+	hdrs, _ := apiCORS["allowedHeaders"].([]interface{})
+	if len(hdrs) != 1 || hdrs[0] != "*" {
+		t.Errorf("end-user API CORS allowedHeaders = %v; want [*] (gateway reflects the requested names)", apiCORS["allowedHeaders"])
 	}
 	origins, _ := apiCORS["allowedOrigins"].([]interface{})
 	if len(origins) != 1 || origins[0] != "http://web.local" {

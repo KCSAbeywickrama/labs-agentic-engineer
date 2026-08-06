@@ -561,10 +561,29 @@ func DesiredAPIConfigurationTrait(componentName, endpointName string, enabled bo
 //
 // `allowedOrigins` lists the SPA hostnames the gateway should
 // echo on CORS preflight. Empty/nil falls back to the trait schema's
-// default of `["*"]` (wildcard, allowCredentials=false). When non-empty
-// the BFF sets `allowCredentials: true` so browsers can send the
-// `Authorization: Bearer …` header on cross-origin fetches (the WSO2
-// platform forbids the `*` + credentials combo).
+// default of `["*"]` (wildcard). Either way `allowedHeaders` stays `["*"]`
+// and `allowCredentials` stays false:
+//
+//   - Bearer auth does NOT need `allowCredentials`. That flag governs
+//     cookies, TLS client certs and browser-managed HTTP auth; an
+//     `Authorization` header set by JS is an ordinary header and only has to
+//     appear in `Access-Control-Allow-Headers`. Every SPA this platform
+//     generates keeps its token in localStorage and the gateway strips
+//     `authorization` before the upstream, so no cookie ever rides the API
+//     call.
+//   - Credentials-off is what makes the header wildcard legal — the WSO2
+//     platform forbids `*` combined with credentials and answers such a
+//     preflight with NO CORS headers at all, which browsers report as a
+//     blanket CORS failure.
+//   - `["*"]` rather than a fixed list because the gateway REFLECTS the
+//     requested header names back. A generated client sending anything the
+//     list did not anticipate (the gateway-injected `X-User-*` identity
+//     headers, `If-Match`, `X-Request-Id`) otherwise gets the same
+//     all-or-nothing blackout: the browser blocks the request before it is
+//     ever sent, so nothing reaches the access log to diagnose.
+//
+// Origins stay pinned to the sibling SPA list — this widens headers, never
+// the origin, and CORS constrains browsers only (curl was never gated).
 //
 // `configs` is keyed by trait instance name; the value is the parameters
 // block that lands at `ReleaseBinding.spec.traitEnvironmentConfigs[<inst>]`.
@@ -611,9 +630,9 @@ func DesiredAPIConfigurationTraitWithIssuers(componentName, endpointName string,
 			originsIface = append(originsIface, o)
 		}
 		cors["allowedOrigins"] = originsIface
-		cors["allowedMethods"] = []interface{}{"GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"}
-		cors["allowedHeaders"] = []interface{}{"Authorization", "Content-Type", "Accept", "Origin"}
-		cors["allowCredentials"] = true
+		cors["allowedMethods"] = []interface{}{"GET", "HEAD", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"}
+		cors["allowedHeaders"] = []interface{}{"*"}
+		cors["allowCredentials"] = false
 	}
 	configs = map[string]map[string]interface{}{
 		inst: {
