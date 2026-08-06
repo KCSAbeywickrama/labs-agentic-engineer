@@ -235,10 +235,13 @@ describe("DeploymentsPage — story rail", () => {
 
     // The card header is the deploy-lifecycle chip itself — no heading.
     expect(screen.getByText("Deployed")).toBeInTheDocument();
-    expect(screen.getByText("Development")).toBeInTheDocument();
+    // The place stages name themselves as environments (#401 feedback);
+    // Validation is the check between them, not a place.
+    expect(screen.getByText("Development environment")).toBeInTheDocument();
     expect(screen.getByText("Validation")).toBeInTheDocument();
-    // Twice: the rail's stage and the side panel's section share the name.
-    expect(screen.getAllByText("Production")).toHaveLength(2);
+    expect(screen.getByText("Production environment")).toBeInTheDocument();
+    // The side panel's scoped section label keeps the short name.
+    expect(screen.getByText("Production")).toBeInTheDocument();
     expect(screen.getByText("1 of 1 components ready")).toBeInTheDocument();
     // The side panel's at-a-glance facts.
     expect(screen.getByText("1 / 1 ready")).toBeInTheDocument();

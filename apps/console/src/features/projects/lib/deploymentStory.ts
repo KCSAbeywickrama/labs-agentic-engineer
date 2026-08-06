@@ -70,7 +70,10 @@ export function developmentStage(
     deployed.length === 0 || loud.length === 0 ? "waiting" : loudestState(loud);
   return {
     id: "development",
-    name: "Development",
+    // "… environment" on both PLACE stages (#401 feedback): bare
+    // "Development" read as a lifecycle phase, and naming the places is also
+    // what lets "Validation" read correctly as the check between them.
+    name: "Development environment",
     actor: "OpenChoreo",
     state,
     ...(deploy.version && { fact: deploy.version }),
@@ -133,7 +136,7 @@ export function productionStage(
     const ready = cards.filter((c) => c.kind === "success").length;
     return {
       id: "production",
-      name: "Production",
+      name: "Production environment",
       actor: "OpenChoreo",
       state: loudestState(cards.map(cardState)),
       note: `${ready} of ${cards.length} components ready`,
@@ -142,7 +145,7 @@ export function productionStage(
   if (canPromote(deploy)) {
     return {
       id: "production",
-      name: "Production",
+      name: "Production environment",
       actor: "You",
       state: "attention",
       note:
@@ -155,7 +158,7 @@ export function productionStage(
   }
   return {
     id: "production",
-    name: "Production",
+    name: "Production environment",
     actor: "You",
     state: "waiting",
     note: "Opens once the dev deployment settles and validation has its say.",
