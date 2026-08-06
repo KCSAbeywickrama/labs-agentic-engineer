@@ -222,6 +222,24 @@ func TestOCDispatcher_ValidationDisplayName(t *testing.T) {
 	}
 }
 
+func TestOCDispatcher_RetentionErrorContinuesCreate(t *testing.T) {
+	fake := &fakeOCSurface{}
+	ret := &fakeRetention{err: errors.New("list internal components: unavailable")}
+	d := NewOCDispatcher(fake).WithRetention(ret)
+
+	got, err := d.Dispatch(context.Background(), ocDispatchInputs())
+	if err != nil {
+		t.Fatalf("Dispatch: %v", err)
+	}
+	if got != "ca-11111111-2608061200" {
+		t.Errorf("got %q, want RunName", got)
+	}
+	want := []string{"ensure-type", "create-component", "ensure-workload", "ensure-release", "ensure-binding"}
+	if fmt.Sprint(fake.calls) != fmt.Sprint(want) {
+		t.Errorf("chain = %v, want full create path after retention error", want)
+	}
+}
+
 func TestOCDispatcher_RetentionCalledBeforeCreate(t *testing.T) {
 	var order []string
 	fake := &fakeOCSurface{orderLog: &order}
@@ -239,11 +257,12 @@ func TestOCDispatcher_RetentionCalledBeforeCreate(t *testing.T) {
 
 type fakeRetention struct {
 	orderLog *[]string
+	err      error
 }
 
 func (f *fakeRetention) Enforce(context.Context, string, string) error {
 	if f.orderLog != nil {
 		*f.orderLog = append(*f.orderLog, "retention")
 	}
-	return nil
+	return f.err
 }

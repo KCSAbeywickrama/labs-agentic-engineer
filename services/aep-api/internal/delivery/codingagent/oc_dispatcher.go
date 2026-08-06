@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
@@ -101,7 +102,8 @@ func (d *OCDispatcher) Dispatch(ctx context.Context, in OCDispatchInputs) (strin
 
 	if d.retention != nil {
 		if err := d.retention.Enforce(ctx, in.OrgID, in.ProjectID); err != nil {
-			return "", fmt.Errorf("oc dispatch: retention: %w", err)
+			slog.WarnContext(ctx, "oc dispatch: retention enforce failed; continuing create",
+				"org", in.OrgID, "project", in.ProjectID, "error", err)
 		}
 	}
 
