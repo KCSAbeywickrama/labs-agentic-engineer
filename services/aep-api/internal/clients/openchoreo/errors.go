@@ -37,6 +37,10 @@ var (
 	ErrForbidden           = errors.New("forbidden")
 	ErrNotFound            = errors.New("not found")
 	ErrConflict            = errors.New("conflict")
+	// ErrPaymentRequired is the entitlement gate's HTTP 402 (agent concurrency
+	// quota). Mapped by the coding-agent dispatcher to a blocked-not-failed
+	// sentinel — never a retryable create failure.
+	ErrPaymentRequired     = errors.New("payment required")
 	ErrInternalServerError = errors.New("internal server error")
 )
 
@@ -103,6 +107,8 @@ func sentinelForStatus(statusCode int) error {
 		return ErrForbidden
 	case 404:
 		return ErrNotFound
+	case 402:
+		return ErrPaymentRequired
 	case 409:
 		return ErrConflict
 	case 500:

@@ -94,6 +94,22 @@ type CreateComponentRequest struct {
 	// `exposesAPI.auth: end-user-required`). See services/trait_sync.go for the
 	// canonical emitter.
 	Traits []ComponentTrait `json:"traits,omitempty"`
+	// Labels are stamped onto metadata.labels (e.g. aep.wso2.com/* markers on
+	// ephemeral coding-agent Components).
+	Labels map[string]string `json:"labels,omitempty"`
+	// Parameters are ComponentType parameter values (schema from the
+	// referenced type — e.g. activeDeadlineSeconds for coding-agent).
+	Parameters map[string]any `json:"parameters,omitempty"`
+}
+
+// WorkloadInput is the BFF-side payload for EnsureWorkload: image + env
+// (plain values and secretKeyRef entries — never secret values).
+type WorkloadInput struct {
+	// ComponentName is the FRIENDLY component name; the client scopes it.
+	ComponentName string
+	Image         string
+	Env           []WorkflowEnvVarRef
+	Labels        map[string]string
 }
 
 // ComponentTrait is the BFF-internal shape of a ClusterTrait attachment

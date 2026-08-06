@@ -57,6 +57,18 @@ const (
 	LabelKeyAepCodingAgentTask LabelKeys = "aep.openchoreo.dev/coding-agent-task"
 	LabelKeyAepProject         LabelKeys = "aep.openchoreo.dev/project"
 	LabelKeyAepComponent       LabelKeys = "aep.openchoreo.dev/component"
+
+	// Markers on ephemeral coding-agent Components (and their Workloads).
+	// ListComponents filters on LabelKeyAepInternal; retention / cancel /
+	// watchers key on the rest.
+	LabelKeyAepInternal  LabelKeys = "aep.wso2.com/internal"
+	LabelKeyAepMilestone LabelKeys = "aep.wso2.com/milestone"
+	LabelKeyAepCycle     LabelKeys = "aep.wso2.com/cycle"
+	LabelKeyAepRunName   LabelKeys = "aep.wso2.com/run-name"
+
+	LabelKeyK8sManagedBy LabelKeys = "app.kubernetes.io/managed-by"
+	LabelKeyK8sPartOf    LabelKeys = "app.kubernetes.io/part-of"
+	LabelKeyK8sName      LabelKeys = "app.kubernetes.io/name"
 )
 
 // Stable label values we stamp on secret-references created by aep-service.
@@ -67,6 +79,9 @@ const (
 	LabelValueSecretTypeGitCreds  = "git-credentials"
 	LabelValueClusterWorkflowKind = "ClusterWorkflowPlane"
 	LabelValueWorkflowPlaneName   = "default"
+
+	LabelValueAepInternal = "true"
+	LabelValueAep         = "aep"
 )
 
 // WorkflowRun condition types — match OC's CRD's status.conditions[].type

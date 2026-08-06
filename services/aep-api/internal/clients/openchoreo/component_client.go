@@ -37,12 +37,10 @@ import (
 //
 // Deploy chain: with AutoDeploy=true set on the Component (see
 // dispatch_service.ensureOCComponent), OC's Component controller owns the
-// Workload → ComponentRelease → ReleaseBinding fan-out. The build
-// workflow's `generate-workload-cr` step POSTs the Workload; the
-// controller picks it up, hashes the spec, creates a ComponentRelease,
-// and binds it into the project's first environment. The BFF only reads
-// the result back via ListDeployments. Wrappers for the write side of
-// that chain are deliberately absent — no caller needs them yet.
+// Workload → ComponentRelease → ReleaseBinding fan-out for USER components.
+// Ephemeral platform components (coding-agent) have no build WorkflowRun —
+// the BFF drives EnsureWorkload / EnsureRelease / EnsureReleaseBinding
+// explicitly instead.
 type ComponentClient interface {
 	ListComponents(ctx context.Context, orgName, projectName string, limit int, cursor string) (*gen.ComponentList, error)
 	GetComponent(ctx context.Context, orgName, projectName, componentName string) (*gen.Component, error)
@@ -53,6 +51,15 @@ type ComponentClient interface {
 	// body is the raw CR map (e.g. CodingAgentComponentType()) posted via the
 	// gen client's WithBody path — no typed converter.
 	EnsureComponentType(ctx context.Context, orgName string, body map[string]any) error
+
+	// The explicit deploy chain for the platform's own ephemeral components:
+	// Workload → ComponentRelease → ReleaseBinding. User components ride
+	// AutoDeploy instead (see the interface header); an agent cycle has no
+	// build to post a Workload, so the BFF drives all three writes. Every one
+	// treats 409 as success so a crashed dispatch resumes.
+	EnsureWorkload(ctx context.Context, orgName, projectName string, in WorkloadInput) error
+	EnsureRelease(ctx context.Context, orgName, projectName, componentName, releaseName string) (releaseNameOut string, err error)
+	EnsureReleaseBinding(ctx context.Context, orgName, projectName, componentName, environment, releaseName string) error
 
 	// UpdateComponentWorkflowEnvVars writes per-component env vars onto each
 	// of the component's ReleaseBindings at
@@ -427,6 +434,11 @@ func (c *componentClient) CreateComponent(ctx context.Context, orgName, projectN
 	}
 
 	switch {
+	case resp.StatusCode() == http.StatusPaymentRequired:
+		// Org is at its agent-concurrency cap. Own sentinel so the dispatcher
+		// can map this to blocked-not-failed (never a retryable create failure).
+		return nil, fmt.Errorf("%w: create component %q: %s",
+			ErrPaymentRequired, req.Name, strings.TrimSpace(string(resp.Body)))
 	case resp.StatusCode() == http.StatusCreated && resp.JSON201 != nil:
 		comp := componentToModel(*resp.JSON201)
 		return &comp, nil
@@ -808,6 +820,18 @@ func buildCreateComponentBody(projectName string, req *CreateComponentRequest) o
 				Name: req.Type,
 			},
 		},
+	}
+
+	if len(req.Labels) > 0 {
+		labels := make(map[string]string, len(req.Labels))
+		for k, v := range req.Labels {
+			labels[k] = v
+		}
+		body.Metadata.Labels = &labels
+	}
+	if len(req.Parameters) > 0 {
+		params := cloneParameterMap(req.Parameters)
+		body.Spec.Parameters = &params
 	}
 
 	if req.Workflow != nil {

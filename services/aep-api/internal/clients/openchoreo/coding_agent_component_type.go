@@ -20,6 +20,10 @@ package openchoreo
 // per org. Billing aliases key on this exact string (and job/coding-agent).
 const CodingAgentComponentTypeName = "coding-agent"
 
+// CodingAgentComponentTypeRef is what a Component's spec.componentType.name
+// carries — {workloadType}/{typeName}. Matches OC's API name format.
+const CodingAgentComponentTypeRef = "job/coding-agent"
+
 // CodingAgentComponentType returns the desired namespaced ComponentType body
 // for EnsureComponentType. workloadType=job; ExternalSecrets from
 // ${dataplane.secretStore}; pins match the former job_template.go envelope
