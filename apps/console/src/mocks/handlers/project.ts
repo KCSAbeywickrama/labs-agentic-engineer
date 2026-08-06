@@ -3,13 +3,16 @@ import type { components } from "../../generated/aep-api";
 type ApiError = components["schemas"]["Error"];
 import { http, HttpResponse, type JsonBodyType } from "msw";
 import {
+  componentConfig,
   componentDeployments,
   componentOpenApi,
   projectBuildRuns,
   projectCycleBuilds,
   projectBuilds,
   projectComponents,
+  projectDependencies,
   projectSectionError,
+  seedComponentEnvVars,
   projectSpecFiles,
   projectStatuses,
   projectTags,
@@ -71,6 +74,46 @@ function specFiles(s: Exclude<ProjectScenario, "error">) {
   ];
 }
 
+// Env-var edits (#395), layered over the seeds so a save survives reload —
+// the same pattern handlers/projects.ts uses for created projects.
+const ENV_VARS_KEY = "aep:mock:componentEnvVars";
+type EnvVar = components["schemas"]["EnvVar"];
+
+function storedEnvVars(): Record<string, EnvVar[]> {
+  try {
+    const raw = localStorage.getItem(ENV_VARS_KEY);
+    return raw ? (JSON.parse(raw) as Record<string, EnvVar[]>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function envVarsOf(projectName: string, componentName: string): EnvVar[] {
+  return (
+    storedEnvVars()[`${projectName}/${componentName}`] ??
+    seedComponentEnvVars[componentName] ??
+    []
+  );
+}
+
+function saveEnvVars(
+  projectName: string,
+  componentName: string,
+  envVars: EnvVar[],
+): void {
+  try {
+    localStorage.setItem(
+      ENV_VARS_KEY,
+      JSON.stringify({
+        ...storedEnvVars(),
+        [`${projectName}/${componentName}`]: envVars,
+      }),
+    );
+  } catch {
+    /* quota — non-fatal in mock mode */
+  }
+}
+
 function respond<T extends JsonBodyType>(
   pick: (s: Exclude<ProjectScenario, "error">) => T,
 ) {
@@ -97,6 +140,40 @@ export const projectHandlers = [
   ),
   http.get("*/api/v1/projects/:projectName/components", () =>
     respond((s) => projectComponents[s]),
+  ),
+  // Read-time dependency status for the whole design (#252) — the Spec view's
+  // status chips and the Deployments page's promotion connections.
+  http.get("*/api/v1/projects/:projectName/design/dependencies", () =>
+    respond((s) => projectDependencies(s)),
+  ),
+  // Component env-var configuration (#395): read + full-replace save, edits
+  // persisted to localStorage over the seeds.
+  http.get(
+    "*/api/v1/projects/:projectName/components/:componentName/configs",
+    ({ params }) =>
+      respond(() =>
+        componentConfig(
+          String(params.projectName),
+          String(params.componentName),
+          envVarsOf(String(params.projectName), String(params.componentName)),
+        ),
+      ),
+  ),
+  http.put(
+    "*/api/v1/projects/:projectName/components/:componentName/configs",
+    async ({ params, request }) => {
+      if (scenario() === "error") {
+        return HttpResponse.json(projectSectionError, { status: 500 });
+      }
+      const body = (await request.json()) as { envVars: EnvVar[] | null };
+      const projectName = String(params.projectName);
+      const componentName = String(params.componentName);
+      const envVars = body.envVars ?? [];
+      saveEnvVars(projectName, componentName, envVars);
+      return HttpResponse.json(
+        componentConfig(projectName, componentName, envVars),
+      );
+    },
   ),
   // The component's OpenAPI contract for the in-app viewer dialog. Errors
   // follow the section scenario; otherwise a spec keyed to the component name.

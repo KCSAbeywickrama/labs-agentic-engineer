@@ -246,6 +246,58 @@ export function useComponentOpenApi(
   });
 }
 
+// A component's env-var configuration (#395). Lazy (`enabled`) — fetched when
+// the user opens the Configure dialog, not per row on page load.
+export function useComponentConfig(
+  projectName: string,
+  componentName: string,
+  enabled: boolean,
+) {
+  return useQuery({
+    queryKey: projectKeys.componentConfig(projectName, componentName),
+    enabled,
+    queryFn: async () => {
+      const { data, error } = await client.GET(
+        "/projects/{projectName}/components/{componentName}/configs",
+        { params: { path: { projectName, componentName } } },
+      );
+      if (error || data === undefined) {
+        throw new Error(apiErrorMessage(error, "Failed to load configuration"));
+      }
+      return data;
+    },
+  });
+}
+
+type UpdateConfigBody = components["schemas"]["UpdateConfigBody"];
+
+// Full-replace save (the endpoint's own semantics — PUT of the whole list).
+// No automatic retry: a failed write is surfaced, never silently repeated.
+export function useUpdateComponentConfig(
+  projectName: string,
+  componentName: string,
+) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: UpdateConfigBody) => {
+      const { data, error } = await client.PUT(
+        "/projects/{projectName}/components/{componentName}/configs",
+        { params: { path: { projectName, componentName } }, body },
+      );
+      if (error || data === undefined) {
+        throw new Error(apiErrorMessage(error, "Failed to save configuration"));
+      }
+      return data;
+    },
+    onSuccess: (data) => {
+      queryClient.setQueryData(
+        projectKeys.componentConfig(projectName, componentName),
+        data,
+      );
+    },
+  });
+}
+
 // Spec version tags (#117). The BE hasn't implemented /tags yet, so a failed
 // read degrades to "no tags" instead of an error card — the version chips
 // simply don't render until the endpoint lands.

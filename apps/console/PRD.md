@@ -83,6 +83,14 @@ Features currently being built. One line each; **must be emptied on ship**
 (the line moves to the inventory below). If a line sits here for weeks,
 that's a stalled feature — investigate, don't ignore.
 
+- Deployments page — one-story rail + environment panel: Development /
+  Validation / Production as one numbered rail (Builds-spine vocabulary,
+  ADR-0014) with a side panel (version, rollout, endpoints, production
+  readiness); per-component env-var editor over `GET/PUT …/configs`;
+  validation verdict with criteria counts; promotion via a live-configuration
+  dialog gated on per-connection values (values page-state only until a
+  promote BE surface exists; no contract change) —
+  [#395](https://github.com/wso2/labs-agentic-engineer/issues/395)
 - Spec view — wireframe prototype mode: a **Canvas | Prototype** toggle on
   settled wireframes swaps to a single-screen, click-through view — controls
   annotated `-> Target` in the `.dsl` jump screens Figma-prototype style, with
