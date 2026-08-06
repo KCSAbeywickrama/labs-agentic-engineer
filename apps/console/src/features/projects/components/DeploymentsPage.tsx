@@ -251,7 +251,8 @@ function VerdictBanner({
   );
 }
 
-/** A side-panel section heading. */
+/** A side-panel section heading — MilestonePanel's exact eyebrow recipe
+ *  (caption, 700, 0.08em tracking), so the two panels' type matches. */
 function PanelOverline({
   children,
   color = "text.secondary",
@@ -261,8 +262,14 @@ function PanelOverline({
 }) {
   return (
     <Typography
-      variant="overline"
-      sx={{ color, fontWeight: 700, letterSpacing: "0.08em", lineHeight: 2 }}
+      variant="caption"
+      sx={{
+        color,
+        fontWeight: 700,
+        letterSpacing: "0.08em",
+        textTransform: "uppercase",
+        display: "block",
+      }}
     >
       {children}
     </Typography>
@@ -480,7 +487,8 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
               dot
             />
             {updated && (
-              <Typography variant="caption" color="text.secondary">
+              // body2 like RunStory's header line, not caption.
+              <Typography variant="body2" color="text.secondary">
                 Updated {updated}
               </Typography>
             )}
@@ -561,33 +569,65 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
             plain outlined Card, no fill of its own. ——— */}
         <Card variant="outlined">
           <CardContent>
-          <PanelOverline color="success.main">Environment · Dev</PanelOverline>
-          <Typography variant="h4" sx={{ mt: 0.5 }}>
+          {/* Green only when everything is live and ready — MilestonePanel's
+              delivered rule, not a standing accent. */}
+          <PanelOverline
+            color={
+              deploy?.status === "deployed" &&
+              deploy.components.ready === deploy.components.total
+                ? "success.main"
+                : "text.secondary"
+            }
+          >
+            Environment · Dev
+          </PanelOverline>
+          {/* subtitle1/600 like MilestonePanel's tag title — the panels sit in
+              the same grid slot and their headline type must agree. */}
+          <Typography variant="subtitle1" sx={{ fontWeight: 600, mt: 0.5 }}>
             {deploy?.version || "—"}
           </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+          <Typography variant="body2" color="text.secondary">
             {devDeployed.length} component{devDeployed.length === 1 ? "" : "s"} live
           </Typography>
           {deploy && deploy.components.total > 0 && (
-            <Box sx={{ mt: 1.5 }}>
+            <Stack
+              direction="row"
+              spacing={1.5}
+              sx={{ alignItems: "center", mt: 1.5 }}
+            >
               <LinearProgress
                 variant="determinate"
                 value={(deploy.components.ready / deploy.components.total) * 100}
-                color={
-                  deploy.components.ready === deploy.components.total
-                    ? "success"
-                    : "info"
-                }
-                sx={{ borderRadius: 1 }}
+                aria-label={`${deploy.components.ready} of ${deploy.components.total} components ready`}
+                sx={{
+                  flexGrow: 1,
+                  height: 6,
+                  borderRadius: 3,
+                  // Neutral track, coloured fill only — MilestonePanel's bar.
+                  bgcolor: "action.selected",
+                  "& .MuiLinearProgress-bar": {
+                    bgcolor:
+                      deploy.components.ready === deploy.components.total
+                        ? "success.main"
+                        : "info.main",
+                    borderRadius: 3,
+                  },
+                }}
               />
               <Typography
                 variant="caption"
-                color="text.secondary"
-                sx={{ display: "block", textAlign: "right", mt: 0.5 }}
+                sx={{
+                  color:
+                    deploy.components.ready === deploy.components.total
+                      ? "success.main"
+                      : "text.secondary",
+                  fontVariantNumeric: "tabular-nums",
+                  whiteSpace: "nowrap",
+                }}
               >
                 {deploy.components.ready} / {deploy.components.total} ready
               </Typography>
-            </Box>
+            </Stack>
           )}
           {deploy?.validation && (
             <Box sx={{ mt: 1.25 }}>
