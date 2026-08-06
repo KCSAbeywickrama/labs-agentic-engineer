@@ -36,7 +36,24 @@ export function setMermaidRenderer(fn: RenderFn | null): void {
 async function load(): Promise<RenderFn> {
   if (!renderImpl) {
     const mermaid = (await import("mermaid")).default;
-    mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme: "neutral" });
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: "strict",
+      theme: "neutral",
+      // Without this, a failed parse LEAKS into the page. `render()` is called
+      // with no container, so mermaid builds its scratch element under
+      // <body>; on a parse error it draws its "Syntax error in text" bomb
+      // there, throws, and skips the cleanup that only runs on the success
+      // return. The bomb is outside React's tree, so nothing ever removes it —
+      // it sits below the app and survives navigation, one per failure.
+      //
+      // Failures are ROUTINE here, which is what makes the leak visible: the
+      // node view re-renders on every keystroke of the agent's stream, so a
+      // half-written diagram is parsed (and fails) many times before the block
+      // is complete. Suppressed, mermaid cleans up and rethrows instead, and
+      // the node view shows its own inline error until the source parses.
+      suppressErrorRendering: true,
+    });
     renderImpl = (renderID, src) => mermaid.render(renderID, src);
   }
   return renderImpl;
