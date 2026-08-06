@@ -170,8 +170,8 @@ position comes from structure:
 
 ```
 screen <Name> ["what this view is for"]   // one per view; description renders as a subtitle
-  navbar "App | Nav1 | Nav2"     // top bar; pipe-separated; bell+avatar added automatically
-  sidebar "Item1 | Item2"        // left rail; same items on every screen of the app
+  navbar "App | Nav1 -> Screen | Nav2"    // top bar; first item is the brand; bell+avatar automatic
+  sidebar "Item1 -> Screen | Item2"       // left rail; same items on every screen of the app
   <kind> "<label>" [WxH] [variant] [-> Screen]   // a block: stacks below the previous one
   row                            // children go side by side (equal shares, 16px gaps)
     <kind> "<label>" …
@@ -214,6 +214,18 @@ pointing back at the screen it sits on says "go to where you already are", and
 the prototype drops it. If the action opens a picker, modal or form, that is a
 view — give it its own `screen` and point at that. When two buttons sit in a
 row, put the `->` on the primary/forward one.
+
+**Chrome navigates too.** A `navbar` or `sidebar` item may carry its own
+`-> ScreenName`, and that is what makes an app walkable: the rail is how a real
+user reaches Templates, History or Settings, so annotate every item that names a
+view. The rail repeats on each screen, so annotate it each time; an item pointing
+at the screen it sits on is correctly inert.
+
+**Decide the screens and the paths together.** A wireframe set is a flow, not a
+gallery: when you pick the screens, work out how each one is reached. Every
+screen should be reachable by clicking — or be a landing screen whose
+description says which role it serves. Not every control needs an arrow; what
+matters is that no view is stranded.
 
 Syntax is validated at write time: an unknown keyword, a misplaced
 `left`/`right`/table-`row`, or old-style x,y coordinates rejects the write with
