@@ -574,7 +574,8 @@ describe("BuildsPage — one version's story", () => {
   it("shows open issues as being worked while the coding agent runs unclaimed", () => {
     // Before the pull request, nothing is recorded — the panel presumes the
     // live session works the open issues, and says so as a presumption
-    // ("Being worked by"), not as the recorded claim ("Claimed by").
+    // ("With …", possession without proof), not as the recorded claim
+    // ("Claimed by").
     mockBuilds = [build("v2", "in_progress")];
     mockRuns = [
       run({
@@ -596,7 +597,7 @@ describe("BuildsPage — one version's story", () => {
 
     expect(screen.getByText("2 in progress")).toBeInTheDocument();
     expect(
-      screen.getAllByText("Being worked by build session 1 · coding").length,
+      screen.getAllByText("With build session 1 · coding").length,
     ).toBe(2);
     expect(screen.queryByText(/^\d+ open$/)).not.toBeInTheDocument();
   });
