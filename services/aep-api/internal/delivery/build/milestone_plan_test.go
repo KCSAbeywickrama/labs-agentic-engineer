@@ -496,29 +496,33 @@ func requestsTo(stub *gittest.Stub, method, path string) []gittest.RecordedReque
 	return out
 }
 
-// TestClaimVersion_PhaseMilestone pins #370: a phase-scoped claim mints the
-// PHASE-titled milestone with the tag on the run row, and a same-phase
-// re-claim (a delta build) supersedes nothing — the earlier run row for the
-// same phase title is skipped, so its milestone stays open to be topped up.
-func TestClaimVersion_PhaseMilestone(t *testing.T) {
+// TestClaimVersion_MilestoneIsTitledAfterTheVersion pins SINGLE-PHASE MODE: a
+// claim names its milestone after the TAG even when the scope declares a phase,
+// and the previous VERSION's milestone is superseded. The declared phase still
+// rides the scope — it drives the gate and the plan — it just does not name the
+// milestone. Delete this when per-phase milestones come back.
+func TestClaimVersion_MilestoneIsTitledAfterTheVersion(t *testing.T) {
 	h := newPlanHarness(t)
 	h.stub.OnFunc(http.MethodGet, "/repos/acme/widgets/milestones", jsonPage(`[]`))
-	h.stub.On(http.MethodPost, "/repos/acme/widgets/milestones", http.StatusCreated, `{"number":4,"title":"Phase 2"}`)
-	// An earlier run of the SAME phase exists (tag v2) — a supersede here
-	// would close the milestone the delta is topping up.
+	h.stub.On(http.MethodPost, "/repos/acme/widgets/milestones", http.StatusCreated, `{"number":4,"title":"v3"}`)
+	h.stub.OnFunc(http.MethodGet, "/repos/acme/widgets/issues", jsonPage(`[]`))
+	h.stub.On(http.MethodPatch, "/repos/acme/widgets/milestones/2", http.StatusOK, `{}`)
+	// The previous version ran the same PHASE. Under phase-titled milestones
+	// this claim would top milestone 2 up; under single-phase mode v3 is its own
+	// version and supersedes v2.
 	h.runs.rows = []delivery.MilestoneRun{{
-		OrgID: "acme", ProjectID: "shop", MilestoneNumber: 4,
-		MilestoneTitle: "Phase 2", Tag: "v2", Origin: delivery.RunOriginSpecBuild,
+		OrgID: "acme", ProjectID: "shop", MilestoneNumber: 2,
+		MilestoneTitle: "v2", Tag: "v2", Origin: delivery.RunOriginSpecBuild,
 	}}
 
-	run, err := h.svc.claimVersion(context.Background(), "acme", "shop", spec.BuildScope{Tag: "v3", Phase: 2})
+	run, err := h.svc.claimVersion(context.Background(), "acme", "shop", spec.BuildScope{Tag: "v3", Phase: 1})
 	if err != nil {
 		t.Fatalf("claimVersion: %v", err)
 	}
-	if run.MilestoneTitle != "Phase 2" || run.Tag != "v3" || run.MilestoneNumber != 4 {
-		t.Fatalf("run identity = %+v, want Phase 2 / v3 / milestone 4", run)
+	if run.MilestoneTitle != "v3" || run.Tag != "v3" || run.MilestoneNumber != 4 {
+		t.Fatalf("run identity = %+v, want v3 / v3 / milestone 4", run)
 	}
-	if n := countRequests(t, h.stub, http.MethodPatch, "/repos/acme/widgets/milestones/4"); n != 0 {
-		t.Errorf("same-phase re-claim must supersede nothing, got %d PATCHes", n)
+	if n := countRequests(t, h.stub, http.MethodPatch, "/repos/acme/widgets/milestones/2"); n != 1 {
+		t.Errorf("the previous version's milestone must be closed, got %d PATCHes", n)
 	}
 }

@@ -49,15 +49,20 @@ type BuildScope struct {
 	ComponentStories map[string][]int
 }
 
-// PhaseTitle is the milestone title a scope claims: "Phase <N>", or the tag
-// itself when no phase is declared (legacy fallback — one milestone per
-// version, as before phases existed).
-func (s BuildScope) PhaseTitle() string {
-	if s.Phase <= 0 {
-		return s.Tag
-	}
-	return fmt.Sprintf("Phase %d", s.Phase)
-}
+// MilestoneTitle is the title of the milestone this scope claims — currently
+// the TAG, always.
+//
+// TEMPORARY (single-phase mode): the product ships one phase per app for now,
+// so a phase-named milestone would only ever read "Phase 1" while the version
+// beside it moved v1 → v2 → v3. Naming it after the version keeps one milestone
+// per version, as before phases existed.
+//
+// The rest of the phase story is untouched — the gate still requires a declared
+// phase and full in-scope coverage, and planning still works the declared
+// phase's stories. To restore per-phase milestones, return
+// fmt.Sprintf("Phase %d", s.Phase) for a declared phase and fall back to the
+// tag when s.Phase <= 0.
+func (s BuildScope) MilestoneTitle() string { return s.Tag }
 
 // storyLinePattern matches one numbered PRD story line: "7. As a member, ...".
 var storyLinePattern = regexp.MustCompile(`(?m)^(\d+)\.\s+(.+)$`)

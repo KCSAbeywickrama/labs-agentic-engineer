@@ -283,9 +283,14 @@ func (r *milestoneRunRepository) ListByMilestone(ctx context.Context, orgID, pro
 
 func (r *milestoneRunRepository) MilestoneNumberForTag(ctx context.Context, orgID, projectID, tag string) (int, bool, error) {
 	var row MilestoneRun
+	// The predicate is SpecTag() in SQL: the tag column when it is set, the
+	// title only for rows that predate it. Matching the title unconditionally
+	// would resolve a phase-titled row by its PHASE name and answer 404 for the
+	// version the console actually asked about.
 	err := r.db.WithContext(ctx).
 		Select("milestone_number").
-		Where("org_id = ? AND project_id = ? AND milestone_title = ?", orgID, projectID, tag).
+		Where("org_id = ? AND project_id = ? AND (tag = ? OR (COALESCE(tag, '') = '' AND milestone_title = ?))",
+			orgID, projectID, tag, tag).
 		Order("created_at DESC").
 		First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
