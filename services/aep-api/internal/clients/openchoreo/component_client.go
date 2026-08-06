@@ -47,6 +47,13 @@ type ComponentClient interface {
 	ListComponents(ctx context.Context, orgName, projectName string, limit int, cursor string) (*gen.ComponentList, error)
 	GetComponent(ctx context.Context, orgName, projectName, componentName string) (*gen.Component, error)
 	CreateComponent(ctx context.Context, orgName, projectName string, req *CreateComponentRequest) (*gen.Component, error)
+
+	// EnsureComponentType get-or-creates a namespaced ComponentType. Idempotent
+	// on (orgName, metadata.name): HTTP 409 GETs the existing type and succeeds.
+	// body is the raw CR map (e.g. CodingAgentComponentType()) posted via the
+	// gen client's WithBody path — no typed converter.
+	EnsureComponentType(ctx context.Context, orgName string, body map[string]any) error
+
 	// UpdateComponentWorkflowEnvVars writes per-component env vars onto each
 	// of the component's ReleaseBindings at
 	// `spec.workloadOverrides.container.env`. Per-env (one RB per

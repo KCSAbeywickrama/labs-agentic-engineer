@@ -27,6 +27,9 @@ var _ openchoreo.ComponentClient = &ComponentClientMock{}
 //			DeleteComponentFunc: func(ctx context.Context, orgName string, projectName string, componentName string) error {
 //				panic("mock out the DeleteComponent method")
 //			},
+//			EnsureComponentTypeFunc: func(ctx context.Context, orgName string, body map[string]any) error {
+//				panic("mock out the EnsureComponentType method")
+//			},
 //			GetComponentFunc: func(ctx context.Context, orgName string, projectName string, componentName string) (*gen.Component, error) {
 //				panic("mock out the GetComponent method")
 //			},
@@ -81,6 +84,9 @@ type ComponentClientMock struct {
 
 	// DeleteComponentFunc mocks the DeleteComponent method.
 	DeleteComponentFunc func(ctx context.Context, orgName string, projectName string, componentName string) error
+
+	// EnsureComponentTypeFunc mocks the EnsureComponentType method.
+	EnsureComponentTypeFunc func(ctx context.Context, orgName string, body map[string]any) error
 
 	// GetComponentFunc mocks the GetComponent method.
 	GetComponentFunc func(ctx context.Context, orgName string, projectName string, componentName string) (*gen.Component, error)
@@ -147,6 +153,15 @@ type ComponentClientMock struct {
 			ProjectName string
 			// ComponentName is the componentName argument value.
 			ComponentName string
+		}
+		// EnsureComponentType holds details about calls to the EnsureComponentType method.
+		EnsureComponentType []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// OrgName is the orgName argument value.
+			OrgName string
+			// Body is the body argument value.
+			Body map[string]any
 		}
 		// GetComponent holds details about calls to the GetComponent method.
 		GetComponent []struct {
@@ -323,6 +338,7 @@ type ComponentClientMock struct {
 	}
 	lockCreateComponent                        sync.RWMutex
 	lockDeleteComponent                        sync.RWMutex
+	lockEnsureComponentType                    sync.RWMutex
 	lockGetComponent                           sync.RWMutex
 	lockGetWorkflowRun                         sync.RWMutex
 	lockListComponents                         sync.RWMutex
@@ -424,6 +440,46 @@ func (mock *ComponentClientMock) DeleteComponentCalls() []struct {
 	mock.lockDeleteComponent.RLock()
 	calls = mock.calls.DeleteComponent
 	mock.lockDeleteComponent.RUnlock()
+	return calls
+}
+
+// EnsureComponentType calls EnsureComponentTypeFunc.
+func (mock *ComponentClientMock) EnsureComponentType(ctx context.Context, orgName string, body map[string]any) error {
+	if mock.EnsureComponentTypeFunc == nil {
+		panic("ComponentClientMock.EnsureComponentTypeFunc: method is nil but ComponentClient.EnsureComponentType was just called")
+	}
+	callInfo := struct {
+		Ctx     context.Context
+		OrgName string
+		Body    map[string]any
+	}{
+		Ctx:     ctx,
+		OrgName: orgName,
+		Body:    body,
+	}
+	mock.lockEnsureComponentType.Lock()
+	mock.calls.EnsureComponentType = append(mock.calls.EnsureComponentType, callInfo)
+	mock.lockEnsureComponentType.Unlock()
+	return mock.EnsureComponentTypeFunc(ctx, orgName, body)
+}
+
+// EnsureComponentTypeCalls gets all the calls that were made to EnsureComponentType.
+// Check the length with:
+//
+//	len(mockedComponentClient.EnsureComponentTypeCalls())
+func (mock *ComponentClientMock) EnsureComponentTypeCalls() []struct {
+	Ctx     context.Context
+	OrgName string
+	Body    map[string]any
+} {
+	var calls []struct {
+		Ctx     context.Context
+		OrgName string
+		Body    map[string]any
+	}
+	mock.lockEnsureComponentType.RLock()
+	calls = mock.calls.EnsureComponentType
+	mock.lockEnsureComponentType.RUnlock()
 	return calls
 }
 
