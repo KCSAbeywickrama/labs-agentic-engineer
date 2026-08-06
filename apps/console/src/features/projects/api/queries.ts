@@ -343,7 +343,15 @@ export function useBuildProject(projectName: string) {
         body,
       });
       if (error || data === undefined) {
-        throw new Error(apiErrorMessage(error, "Failed to start the build"));
+        const err = new Error(apiErrorMessage(error, "Failed to start the build"));
+        // The build gate's 422 carries per-file detail rows ({field, message})
+        // — surface them so the console can render the refusal as a checklist
+        // (#372) instead of one flattened string.
+        const details = (error as { details?: unknown } | undefined)?.details;
+        if (Array.isArray(details)) {
+          (err as Error & { details?: unknown }).details = details;
+        }
+        throw err;
       }
       return data;
     },

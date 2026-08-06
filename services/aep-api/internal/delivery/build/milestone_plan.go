@@ -23,6 +23,7 @@ import (
 
 	"github.com/wso2/aep/aep-api/internal/delivery"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
+	"github.com/wso2/aep/aep-api/internal/spec"
 )
 
 // The MILESTONE PLAN PATH: everything the build click does once the whole-spec
@@ -116,17 +117,20 @@ func (s *Service) activeSpecRun(ctx context.Context, orgID, projectID string) er
 //
 // Everything here is a GitHub round trip or a single INSERT — bounded work the
 // POST can afford, unlike the planning turn that follows it.
-func (s *Service) claimVersion(ctx context.Context, orgID, projectID, tag string) (*delivery.MilestoneRun, error) {
+func (s *Service) claimVersion(ctx context.Context, orgID, projectID string, scope spec.BuildScope) (*delivery.MilestoneRun, error) {
 	p := s.plan
-	// Supersede FIRST: v<N+1> is planned fresh from the new spec, so the old
-	// version's leftovers must be closed before the new milestone exists —
-	// otherwise a sweep pass between the two writes could see two milestones
-	// holding open agent work for one project.
-	s.supersedePreviousMilestone(ctx, orgID, projectID, tag)
+	tag, phaseTitle := scope.Tag, scope.PhaseTitle()
+	// Supersede FIRST — but only milestones of OTHER phases (#370): a
+	// same-phase re-tag (v1.1 after a mid-phase amend) reuses the phase's
+	// milestone and tops it up; closing its open work would abandon the very
+	// tasks the delta plan is about to extend.
+	s.supersedePreviousMilestone(ctx, orgID, projectID, phaseTitle)
 
+	// CreateMilestone is get-or-create by title, so a same-phase re-tag lands
+	// on the existing "Phase <N>" milestone (res.Created=false).
 	res, err := p.milestones.CreateMilestone(ctx, orgID, projectID, sourcecontrol.CreateMilestoneRequest{
-		Title:       tag,
-		Description: "Delivery increment and ledger for spec version " + tag + ".",
+		Title:       phaseTitle,
+		Description: "Delivery increment and ledger for " + phaseTitle + " (spec " + tag + ").",
 	})
 	if err != nil {
 		return nil, &EdgeError{Status: 502, Message: "create milestone: " + err.Error()}
@@ -136,7 +140,8 @@ func (s *Service) claimVersion(ctx context.Context, orgID, projectID, tag string
 		OrgID:           orgID,
 		ProjectID:       projectID,
 		MilestoneNumber: res.Number,
-		MilestoneTitle:  tag,
+		MilestoneTitle:  phaseTitle,
+		Tag:             tag,
 		Origin:          delivery.RunOriginSpecBuild,
 		// PLANNING, not waiting: fillMilestone has not run yet, so for the next
 		// minutes this row is a version being written, not a run parked on
@@ -168,7 +173,7 @@ func (s *Service) claimVersion(ctx context.Context, orgID, projectID, tag string
 // case-insensitive while create-uniqueness is not, so the number recorded on the
 // row is the only sound index. Any milestone number this project has ever run a
 // SPEC BUILD on, other than the one being cut now, is a previous version.
-func (s *Service) supersedePreviousMilestone(ctx context.Context, orgID, projectID, tag string) {
+func (s *Service) supersedePreviousMilestone(ctx context.Context, orgID, projectID, phaseTitle string) {
 	p := s.plan
 	rows, err := p.runs.ListByProject(ctx, orgID, projectID)
 	if err != nil {
@@ -176,12 +181,12 @@ func (s *Service) supersedePreviousMilestone(ctx context.Context, orgID, project
 			"project", projectID, "error", err)
 		return
 	}
-	prev, ok := previousSpecMilestone(rows, tag)
+	prev, ok := previousSpecMilestone(rows, phaseTitle)
 	if !ok {
 		return // first version of this project: nothing to supersede
 	}
 
-	comment := fmt.Sprintf("Superseded by %s.", tag)
+	comment := fmt.Sprintf("Superseded by %s.", phaseTitle)
 	// Both populations, in the order §6 names them: the agent work first, then
 	// the gates that were holding it. `state: open` is the filter; no label
 	// filter, because a milestone's leftovers are exactly "everything still open
@@ -210,22 +215,22 @@ func (s *Service) supersedePreviousMilestone(ctx context.Context, orgID, project
 	}
 	slog.InfoContext(ctx, "build: superseded previous milestone",
 		"project", projectID, "milestone", prev.MilestoneNumber, "title", prev.MilestoneTitle,
-		"issuesClosed", closed, "supersededBy", tag)
+		"issuesClosed", closed, "supersededBy", phaseTitle)
 }
 
 // previousSpecMilestone picks the newest spec-build milestone that is not the
-// one being cut. rows arrive newest-first from the repository.
+// PHASE being claimed. rows arrive newest-first from the repository.
 //
-// Comparing on TITLE here is not a GitHub title match: it compares the tag this
-// platform recorded against the tag it is cutting now, both platform-side
-// values. An unchanged spec re-build returns the SAME tag, and a version must
-// never supersede itself.
-func previousSpecMilestone(rows []delivery.MilestoneRun, tag string) (delivery.MilestoneRun, bool) {
+// Comparing on TITLE here is not a GitHub title match: it compares the
+// platform-recorded milestone title against the phase title being claimed,
+// both platform-side values. A same-phase re-tag (and an unchanged re-build)
+// matches and is skipped — a phase must never supersede itself.
+func previousSpecMilestone(rows []delivery.MilestoneRun, phaseTitle string) (delivery.MilestoneRun, bool) {
 	for i := range rows {
 		if rows[i].Origin != delivery.RunOriginSpecBuild {
 			continue // incident runs work their own (older) milestones
 		}
-		if rows[i].MilestoneTitle == tag {
+		if rows[i].MilestoneTitle == phaseTitle {
 			continue
 		}
 		return rows[i], true

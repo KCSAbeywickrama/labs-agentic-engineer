@@ -24,15 +24,17 @@
  *   1. control words     — /menu, /quit, /help (the loop's own affordances)
  *   2. phase-runners      — /task, /code, /validate, /undo (invoke the
  *                           existing engine commands, NOT chat turns)
- *   3. skill-load / chat  — /spec, /design, /grilling, /<skill> expand via the
- *                           shared `slashSkillInstruction`; anything else is a
- *                           plain chat turn sent verbatim.
+ *   3. skill-load / chat  — /spec, /design, /grilling, /<skill> become a FLOW
+ *                           turn via the shared `parseFlowCommand`; anything
+ *                           else is a plain chat turn sent verbatim.
  *
  * Phase-runners are matched BEFORE the generic skill loader so `/task` runs the
  * task-plan phase rather than becoming "Load the task skill and follow it".
  */
 
-import { parseStartCommand, slashSkillInstruction } from "@aep/contracts/prompts";
+import { parseStartCommand, parseFlowCommand } from "@aep/contracts/commands";
+import type { TurnSpec } from "@aep/agent-stream";
+import { chatSpec, flowSpec } from "../engine/turn-spec.js";
 
 export type PhaseName = "task" | "code" | "validate" | "undo";
 
@@ -40,7 +42,7 @@ export type ChatIntent =
   | { kind: "control"; name: "menu" | "quit" | "help" }
   | { kind: "phase"; name: PhaseName; arg?: string }
   | { kind: "start"; inlineIdea?: string }
-  | { kind: "turn"; instruction: string };
+  | { kind: "turn"; turn: TurnSpec };
 
 const PHASES = new Set<PhaseName>(["task", "code", "validate", "undo"]);
 
@@ -54,11 +56,11 @@ export function classifyChatInput(line: string): ChatIntent {
   if (trimmed === "/quit") return { kind: "control", name: "quit" };
   if (trimmed === "/help") return { kind: "control", name: "help" };
 
-  // `/start` is resolved before the generic skill loader because its
-  // instruction is not a plain skill load: the captured idea has to be appended
-  // to it, and that read is I/O this pure classifier must not do. The caller
-  // (chat.ts) resolves the idea and composes via `startInstruction`. The
-  // grammar itself is shared with the console via @aep/contracts/prompts.
+  // `/start` is resolved before the generic skill loader because it is not a
+  // plain skill load: the captured idea has to ride with it, and that read is
+  // I/O this pure classifier must not do. The caller
+  // (chat.ts) resolves the idea and builds the spec via `startSpec`. The
+  // grammar itself is shared via @aep/contracts/commands.
   const start = parseStartCommand(trimmed);
   if (start) return start.inlineIdea ? { kind: "start", inlineIdea: start.inlineIdea } : { kind: "start" };
 
@@ -72,5 +74,6 @@ export function classifyChatInput(line: string): ChatIntent {
     return arg ? { kind: "phase", name, arg } : { kind: "phase", name };
   }
 
-  return { kind: "turn", instruction: slashSkillInstruction(trimmed) ?? trimmed };
+  const flow = parseFlowCommand(trimmed);
+  return { kind: "turn", turn: flow ? flowSpec(flow.skill, flow.text) : chatSpec(trimmed) };
 }

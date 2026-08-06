@@ -23,7 +23,7 @@ handoff that makes the skill reach the build at all.
 Ownership kind is not a usable proxy either. Today's twelve skills correlate
 perfectly — the four `org`-kind stack skills are coding-agent material, the
 eight `platform`-kind ones are design-agent material — but the correlation is
-coincidental. `excalidraw-wireframes` is `platform`-kind and serves **both**
+coincidental. `wireframes` is `platform`-kind and serves **both**
 (the design agent authors the DSL, the coding agent implements it), and an
 org-authored conventions skill is `org`-kind while being squarely design-agent
 material. #310 separated ownership from origin and editability for this class of
@@ -36,7 +36,7 @@ lists coding skills it is not permitted to load.**
 
 - Skills carry `metadata.aep.audience`, a **list** over `design` and `coding`.
   A list rather than a single value because dual-audience is real today
-  (`excalidraw-wireframes` is `[design, coding]`), and a singular field invites
+  (`wireframes` is `[design, coding]`), and a singular field invites
   duplicating a skill to serve both.
 - **Absent means both.** Narrowing is opt-in: every unmarked skill — including
   every skill an org authors without knowing the field exists — behaves exactly
@@ -72,7 +72,7 @@ frontend and a backend component together.
   machine-readable declaration became unavoidable.
 - Migration is a frontmatter stamp on the shipped library: `[coding]` on `go`,
   `react-webapp`, `api-management`, `thunder-authentication`;
-  `[design, coding]` on `excalidraw-wireframes`; the rest left absent or marked
+  `[design, coding]` on `wireframes`; the rest left absent or marked
   `[design]`.
 - **Enforcement is asymmetric.** The design side has a seam we own:
   `load()` refuses and names the alternative. The coding side has no comparable

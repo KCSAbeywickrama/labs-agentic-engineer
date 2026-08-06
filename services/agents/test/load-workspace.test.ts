@@ -53,7 +53,7 @@ function makeTree(files: Record<string, string | Buffer>): string {
 
 test("readSnapshot walks recursively with POSIX keys and applies the turn filter", () => {
   const root = makeTree({
-    "specs/requirements/requirements.md": "# Req\n",
+    "specs/requirements/prd.md": "# Req\n",
     "specs/design/design.md": "# Design\n",
     "specs/design/design.cell": "title Shop\n",
     "specs/design/system.dsl": "workspace {}\n",
@@ -80,9 +80,9 @@ test("readSnapshot walks recursively with POSIX keys and applies the turn filter
       "specs/design/design.cell",
       "specs/design/design.md",
       "specs/design/system.dsl",
-      "specs/requirements/requirements.md",
+      "specs/requirements/prd.md",
     ]);
-    assert.equal(snap["specs/requirements/requirements.md"], "# Req\n");
+    assert.equal(snap["specs/requirements/prd.md"], "# Req\n");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -133,8 +133,8 @@ test("skills snapshot: FLAT layout (skills/<name>/) with kind in frontmatter", (
     // The current org-skills repo shape: no kind dirs; kind lives in
     // metadata.aep.kind (and is irrelevant to the catalog scan).
     "skills/go/SKILL.md": SKILL_MD("go", "Go conventions", "Write idiomatic Go."),
-    "skills/high-level-architecture/SKILL.md":
-      "---\nname: high-level-architecture\ndescription: derive components\nmetadata:\n  aep:\n    kind: platform\n---\n\nComponents live under specs/design.\n",
+    "skills/architecture/SKILL.md":
+      "---\nname: architecture\ndescription: derive components\nmetadata:\n  aep:\n    kind: platform\n---\n\nComponents live under specs/design.\n",
     "skills/org-style/SKILL.md": SKILL_MD("org-style", "house style", "Use our tone."),
     "skills/org-style/references/tone.md": "REF BODY — tone guide",
     // A dir without SKILL.md that is NOT a legacy kind dir is not a skill:
@@ -144,10 +144,10 @@ test("skills snapshot: FLAT layout (skills/<name>/) with kind in frontmatter", (
     const source = loadSkillsFromSnapshot(root);
     assert.deepEqual(
       source.catalog().map((e) => e.name),
-      ["go", "high-level-architecture", "org-style"],
+      ["architecture", "go", "org-style"],
     );
     assert.equal(body(source.load("go"))?.content, "Write idiomatic Go.");
-    assert.equal(body(source.load("high-level-architecture"))?.content, "Components live under specs/design.");
+    assert.equal(body(source.load("architecture"))?.content, "Components live under specs/design.");
     assert.deepEqual(source.loadReference("org-style", "references/tone.md"), { content: "REF BODY — tone guide" });
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -177,8 +177,8 @@ test("skills snapshot: mixed flat + legacy — flat wins a duplicate name", () =
 test("skills snapshot: LEGACY nested layout still scans (old snapshots), lazy bodies, references", () => {
   const root = makeTree({
     "skills/builtin/go/SKILL.md": SKILL_MD("go", "Go conventions", "Write idiomatic Go."),
-    "skills/flow/high-level-architecture/SKILL.md": SKILL_MD(
-      "high-level-architecture",
+    "skills/flow/architecture/SKILL.md": SKILL_MD(
+      "architecture",
       "derive components",
       "Components live under specs/design/components.",
     ),
@@ -193,7 +193,7 @@ test("skills snapshot: LEGACY nested layout still scans (old snapshots), lazy bo
     // Deterministic order: kinds sorted (builtin < custom < flow < imported), dirs sorted within.
     assert.deepEqual(
       source.catalog().map((e) => e.name),
-      ["go", "org-style", "high-level-architecture"],
+      ["go", "org-style", "architecture"],
     );
     assert.deepEqual(
       source.catalog().map((e) => e.hasReferences),

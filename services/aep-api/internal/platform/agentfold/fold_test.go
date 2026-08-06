@@ -159,10 +159,10 @@ func TestAddFile_NoopAndAlreadyExists(t *testing.T) {
 
 func TestRemoveFile_ProtectedPathsRefused(t *testing.T) {
 	f := NewFromSnapshot(map[string]string{
-		"specs/requirements/requirements.md": "req",
+		"specs/requirements/prd.md": "req",
 		"specs/design/design.md":             "des",
 	})
-	for _, p := range []string{"specs/requirements/requirements.md", "specs/design/design.md"} {
+	for _, p := range []string{"specs/requirements/prd.md", "specs/design/design.md"} {
 		res, err := f.RemoveFile(ctx, p)
 		mustErrCode(t, res, err, ErrProtectedPath)
 	}
@@ -364,7 +364,7 @@ func TestManifestOfAndIsEmpty(t *testing.T) {
 }
 
 func TestSnapshotFilter(t *testing.T) {
-	if !KeepInTurnSnapshot("specs/requirements/requirements.md") ||
+	if !KeepInTurnSnapshot("specs/requirements/prd.md") ||
 		!KeepInTurnSnapshot("a.dsl") ||
 		!KeepInTurnSnapshot("specs/design/design.cell") ||
 		!KeepInTurnSnapshot("specs/design/components/x/design.json") ||

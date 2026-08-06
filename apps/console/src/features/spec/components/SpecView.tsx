@@ -19,11 +19,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
+  AlertTitle,
   Avatar,
   AvatarGroup,
   Box,
   Button,
   CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   Divider,
   IconButton,
   PageContent,
@@ -48,12 +53,14 @@ import { toSpecEntry } from "../api/mapping";
 import { computeDependencyUsedBy } from "../lib/dependencyUsedBy";
 import { useCollabSpec } from "../collab/useCollabSpec";
 import { SpecQuestionForm } from "./SpecQuestionForm";
+import { countBlockingOpenQuestions } from "../lib/openQuestions";
+import { nextVersionLabel, parseCellPhase, parsePhasingStories } from "../lib/phaseScope";
 import { useRoomQuestion } from "../../agent-chat/useRoomQuestion";
 import { CollabTextArea } from "../collab/CollabTextArea";
 import { SpecMdEditor } from "../collab/SpecMdEditor";
 import { useYTextString } from "../collab/useYTextString";
 import { useTurnEndFlush } from "../collab/useTurnEndFlush";
-import { chatKeyFor, subscribeTurnEnd } from "../../agent-chat/chatStore";
+import { chatKeyFor, setPendingSeed, subscribeTurnEnd } from "../../agent-chat/chatStore";
 import { useResolveDependencyViaChat } from "../../agent-chat/useResolveDependencyViaChat";
 import type { DependencyResolutionIntent } from "../../projects/lib/dependencyResolutionMessage.js";
 import { useDesignCellChangeCount } from "../collab/useDesignCellChange";
@@ -122,6 +129,13 @@ export function SpecView({ projectName }: { projectName: string }) {
     "committing" | "checking" | "building" | null
   >(null);
   const [buildError, setBuildError] = useState<string | null>(null);
+  // The build gate's 422 refusal, rendered as an actionable checklist (#372)
+  // rather than one flattened alert string.
+  const [gateRefusal, setGateRefusal] = useState<Array<{ field?: string; message: string }> | null>(null);
+  // The "Cut version" ceremony (#370/#372): Build first shows what the click
+  // does — the next version, the phase, its in-scope stories, the milestone —
+  // and only a confirm POSTs. The backend cuts the real tag.
+  const [cutDialogOpen, setCutDialogOpen] = useState(false);
   const [dependencyDrawerOpen, setDependencyDrawerOpen] = useState(false);
   const [preflightItems, setPreflightItems] = useState<PreflightItem[]>([]);
 
@@ -427,6 +441,30 @@ export function SpecView({ projectName }: { projectName: string }) {
   const failed = specStatus === "failed";
   // The design gate: Build arms once design files are generated (#80).
   const hasDesignFiles = files.some((f) => f.group === "designs");
+  // The PRD's Open Questions gate (#365/#372): undeferred questions block
+  // Generate design, and the header says why instead of a mystery-grey button.
+  const prdEntry = files.find((f) => f.path === "specs/requirements/prd.md") ?? null;
+  const prdContent = useSpecFileContent(
+    projectName,
+    prdEntry ? { path: prdEntry.path, sha: prdEntry.sha } : null,
+  );
+  const openQuestions = useMemo(
+    () => (prdContent.data ? countBlockingOpenQuestions(prdContent.data.content) : 0),
+    [prdContent.data],
+  );
+  const cellEntry = files.find((f) => f.path === "specs/design/design.cell") ?? null;
+  const cellContent = useSpecFileContent(
+    projectName,
+    cellEntry ? { path: cellEntry.path, sha: cellEntry.sha } : null,
+  );
+  const cutPreview = useMemo(() => {
+    const phase = cellContent.data ? parseCellPhase(cellContent.data.content) : null;
+    const stories = phase !== null && prdContent.data ? parsePhasingStories(prdContent.data.content, phase) : [];
+    return { phase, stories, nextVersion: nextVersionLabel(tags.data?.latest) };
+  }, [cellContent.data, prdContent.data, tags.data?.latest]);
+
+  const seedChat = (message: string) =>
+    setPendingSeed(chatKeyFor(orgHandle ?? "default", projectName), message);
   // #159: design is derived FROM requirements, so its CTA needs them first.
   const hasRequirementsFiles = files.some((f) => f.group === "requirements");
 
@@ -475,16 +513,38 @@ export function SpecView({ projectName }: { projectName: string }) {
           setDependencyDrawerOpen(true);
           return;
         }
-        setBuildPhase("building");
+        setCutDialogOpen(true);
+      } catch (e) {
+        setBuildError(
+          e instanceof Error ? e.message : "Failed to start the build.",
+        );
+      } finally {
+        setBuildPhase(null);
+      }
+    })();
+  };
+
+  // The ceremony's confirm: POST the build; a 422 refusal renders as the
+  // gate checklist, anything else as the plain build error.
+  const runBuild = () => {
+    setCutDialogOpen(false);
+    setGateRefusal(null);
+    setBuildError(null);
+    setBuildPhase("building");
+    void (async () => {
+      try {
         await build.mutateAsync({ inputs: [] });
         void navigate({
           to: "/projects/$projectName",
           params: { projectName },
         });
       } catch (e) {
-        setBuildError(
-          e instanceof Error ? e.message : "Failed to start the build.",
-        );
+        const details = (e as Error & { details?: Array<{ field?: string; message: string }> }).details;
+        if (Array.isArray(details) && details.length > 0) {
+          setGateRefusal(details);
+        } else {
+          setBuildError(e instanceof Error ? e.message : "Failed to start the build.");
+        }
       } finally {
         setBuildPhase(null);
       }
@@ -664,13 +724,33 @@ export function SpecView({ projectName }: { projectName: string }) {
             </>
           ) : (
             <>
+            {/* Hand-picked flow launchers (#372): only the two that matter at
+                this gate ride the header; the full set lives in the chat's
+                Actions menu. Both seed the scoped /amend flow. */}
+            {hasRequirementsFiles && (
+              <Button size="small" variant="outlined" onClick={() => seedChat("/amend Add a feature")}>
+                + Feature
+              </Button>
+            )}
+            {openQuestions > 0 && (
+              <Button
+                size="small"
+                variant="outlined"
+                color="warning"
+                onClick={() => seedChat("/amend Resolve the open questions")}
+              >
+                Resolve open questions ({openQuestions})
+              </Button>
+            )}
             <Tooltip
               title={
                 agentBusy
                   ? "An agent is still working — Generate design is available once it finishes"
-                  : hasRequirementsFiles
-                    ? "Derive the component design from your requirements"
-                    : "Generate requirements first"
+                  : openQuestions > 0
+                    ? `${openQuestions} open question${openQuestions === 1 ? "" : "s"} block design — answer or defer them first`
+                    : hasRequirementsFiles
+                      ? "Derive the component design from your requirements"
+                      : "Generate requirements first"
               }
             >
               {/* span so the tooltip works while the button is disabled */}
@@ -678,7 +758,7 @@ export function SpecView({ projectName }: { projectName: string }) {
                 <Button
                   variant="contained"
                   startIcon={<Sparkles size={18} />}
-                  disabled={!hasRequirementsFiles || agentBusy}
+                  disabled={!hasRequirementsFiles || agentBusy || openQuestions > 0}
                   onClick={generateDesign}
                 >
                   Generate design
@@ -691,10 +771,79 @@ export function SpecView({ projectName }: { projectName: string }) {
 
         {failed && (
           <Alert severity="error" sx={{ borderRadius: 0 }}>
-            Spec derivation hit a problem. Existing files remain browsable;
-            the agents' error details will surface here in a follow-up.
+            <AlertTitle>The agent's last turn failed</AlertTitle>
+            Your files are safe — everything already written remains browsable.
+            Ask the agent to continue from where it stopped in the chat panel.
           </Alert>
         )}
+
+        {/* The build gate's refusal, as an actionable checklist (#372): each
+            unmet condition with the file it names, and one handoff to the
+            agent. Build stays available — the same click re-checks. */}
+        {gateRefusal && (
+          <Alert
+            severity="warning"
+            sx={{ borderRadius: 0 }}
+            onClose={() => setGateRefusal(null)}
+            action={
+              <Button
+                color="inherit"
+                size="small"
+                onClick={() => {
+                  seedChat(
+                    "/design Fix these build-gate refusals:\n" +
+                      gateRefusal.map((d) => `- ${d.field ? `${d.field}: ` : ""}${d.message}`).join("\n"),
+                  );
+                  setGateRefusal(null);
+                }}
+              >
+                Fix via chat
+              </Button>
+            }
+          >
+            <AlertTitle>Build refused — the design isn&apos;t complete for its phase</AlertTitle>
+            {gateRefusal.map((d, i) => (
+              <Typography key={i} variant="body2">
+                • {d.field ? `${d.field}: ` : ""}
+                {d.message}
+              </Typography>
+            ))}
+          </Alert>
+        )}
+
+        {/* The "Cut version" ceremony (#370/#372): what the Build click does,
+            before it does it. The version shown is predictive — the BACKEND
+            assigns the real tag at cut time. */}
+        <Dialog data-testid="cut-version-dialog" open={cutDialogOpen} onClose={() => setCutDialogOpen(false)} maxWidth="xs" fullWidth>
+          <DialogTitle>Cut version {cutPreview.nextVersion}</DialogTitle>
+          <DialogContent>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+              Snapshots the PRD and design together as a git tag; the build runs
+              against that snapshot, so you can keep editing afterwards.
+            </Typography>
+            <Stack spacing={0.5}>
+              <Typography variant="body2">
+                <b>Phase:</b> {cutPreview.phase ?? "not declared — the gate will refuse"}
+              </Typography>
+              <Typography variant="body2">
+                <b>Stories in scope:</b>{" "}
+                {cutPreview.stories.length > 0 ? cutPreview.stories.join(", ") : "—"}
+              </Typography>
+              <Typography variant="body2">
+                <b>Milestone:</b>{" "}
+                {cutPreview.phase !== null
+                  ? `"Phase ${cutPreview.phase}" — created, or topped up with tasks for newly uncovered stories`
+                  : "one per version (no phase declared)"}
+              </Typography>
+            </Stack>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setCutDialogOpen(false)}>Cancel</Button>
+            <Button variant="contained" onClick={runBuild}>
+              Cut {cutPreview.nextVersion} &amp; build
+            </Button>
+          </DialogActions>
+        </Dialog>
 
         {/* Build failed to start (#162): commit or POST /build errored. */}
         {buildError && (
@@ -765,6 +914,7 @@ export function SpecView({ projectName }: { projectName: string }) {
             >
               <SpecFileList
                 files={files}
+                phase={cutPreview.phase}
                 selection={effectiveSelection}
                 onSelect={setSelection}
                 onAddArtifact={() => setAddArtifactOpen(true)}

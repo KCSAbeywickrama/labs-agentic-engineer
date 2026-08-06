@@ -20,6 +20,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/wso2/aep/aep-api/internal/clients/agentsvc"
 	"github.com/wso2/aep/aep-api/internal/spec"
 )
 
@@ -34,15 +35,19 @@ func descriptorTOML(t *testing.T, idea string) string {
 	return string(raw)
 }
 
-// startInstruction seeds a project and returns the instruction dispatched for
-// `msg`. `/start` turns carry NO useCase — that field is part of the
-// conversation identity, and the kickoff must share the conversation with the
-// chat around it so its interview answers land in the same history.
-func startInstruction(t *testing.T, seed map[string]string, msg string) string {
+// startTurnSpec seeds a project and returns the TURN SPEC dispatched for `msg`
+// — what the BFF decided the turn is for. It carries no prompt text: the
+// agents service composes that (services/agents/src/prompts/turn.ts), so these
+// tests assert the facts, which is all this side owns.
+//
+// `/start` turns carry NO useCase — that field is part of the conversation
+// identity, and the kickoff must share the conversation with the chat around it
+// so its interview answers land in the same history.
+func startTurnSpec(t *testing.T, seed map[string]string, msg string) agentsvc.TurnSpec {
 	t.Helper()
 	r := newGenaiRig(t, seed)
-	r.fake.parts = []string{addFilePart("specs/requirements/requirements.md", "# Reqs\n")}
-	m := manifestPart(map[string]string{"specs/requirements/requirements.md": "# Reqs\n"}, nil)
+	r.fake.parts = []string{addFilePart("specs/requirements/prd.md", "# Reqs\n")}
+	m := manifestPart(map[string]string{"specs/requirements/prd.md": "# Reqs\n"}, nil)
 	r.fake.manifest = &m
 
 	turnID := r.startTurn(t, convUUID, "", msg)
@@ -50,83 +55,95 @@ func startInstruction(t *testing.T, seed map[string]string, msg string) string {
 	if st.Status != "completed" {
 		t.Fatalf("turn status = %q, want completed", st.Status)
 	}
-	return r.fake.sentTurn(t, 0).req.Instruction
+	return r.fake.sentTurn(t, 0).req.Turn
 }
 
-// The server owns `/start`: it expands the bare command into the skill load and
-// appends the idea captured at project creation — neither of which the client
-// sent, and neither of which the agent could read for itself.
-func TestStartCommand_ExpandsAndCarriesCapturedIdea(t *testing.T) {
-	got := startInstruction(t, map[string]string{
+// The server owns `/start`: it recognises the bare command and attaches the
+// idea captured at project creation — which the client never sent, and which
+// the agent cannot read for itself (the descriptor's dot-led segment is
+// stripped from every turn snapshot).
+func TestStartCommand_RecognisedAndCarriesCapturedIdea(t *testing.T) {
+	got := startTurnSpec(t, map[string]string{
 		spec.DescriptorPath: descriptorTOML(t, testIdea),
 	}, "/start")
 
-	if !strings.Contains(got, spec.StartInstruction) {
-		t.Fatalf("/start was not expanded to the skill load: %q", got)
+	if got.Kind != agentsvc.TurnKindStart {
+		t.Fatalf("/start was not recognised as a start turn: %+v", got)
 	}
-	if !strings.Contains(got, testIdea) {
-		t.Fatalf("instruction missing the captured idea: %q", got)
+	if got.Idea != testIdea {
+		t.Fatalf("turn missing the captured idea: %+v", got)
 	}
-	if strings.Contains(got, "/start") {
-		t.Fatalf("the raw command must not survive into the instruction: %q", got)
+	if strings.Contains(got.Text, "/start") {
+		t.Fatalf("the raw command must not survive onto the turn: %+v", got)
 	}
 }
 
 // An idea typed inline wins over the descriptor — the user is restating what
 // they want right now.
 func TestStartCommand_InlineIdeaOverridesDescriptor(t *testing.T) {
-	got := startInstruction(t, map[string]string{
+	got := startTurnSpec(t, map[string]string{
 		spec.DescriptorPath: descriptorTOML(t, testIdea),
 	}, "/start a rota planner for nurses")
 
-	if !strings.Contains(got, "a rota planner for nurses") {
-		t.Fatalf("inline idea missing: %q", got)
+	if got.Idea != "a rota planner for nurses" {
+		t.Fatalf("inline idea missing: %+v", got)
 	}
-	if strings.Contains(got, testIdea) {
-		t.Fatalf("descriptor idea must not also ride when one was typed inline: %q", got)
+	if strings.Contains(got.Idea, testIdea) {
+		t.Fatalf("descriptor idea must not also ride when one was typed inline: %+v", got)
 	}
 }
 
-// No descriptor → the command still expands, just with nothing appended. An
-// older project (or a best-effort descriptor write that failed) still starts;
-// the skill asks the user for the idea instead.
-func TestStartCommand_NoDescriptorStillExpands(t *testing.T) {
-	got := startInstruction(t, map[string]string{"README.md": "hi\n"}, "/start")
+// The idea is trimmed on the way onto the turn: the agents service renders it
+// into a prompt paragraph, and stray whitespace there is the platform's to fix,
+// not the model's to cope with.
+func TestStartCommand_InlineIdeaIsTrimmed(t *testing.T) {
+	got := startTurnSpec(t, map[string]string{"README.md": "hi\n"}, "/start   a rota planner for nurses  ")
 
-	if !strings.Contains(got, spec.StartInstruction) {
-		t.Fatalf("/start must still expand without a descriptor: %q", got)
+	if got.Idea != "a rota planner for nurses" {
+		t.Fatalf("idea = %q, want it trimmed", got.Idea)
 	}
-	if strings.Contains(got, "The user's idea") {
-		t.Fatalf("no descriptor must append no idea: %q", got)
+}
+
+// No descriptor → the turn still dispatches, just with no idea. An older
+// project (or a best-effort descriptor write that failed) still starts; the
+// skill asks the user for the idea instead.
+func TestStartCommand_NoDescriptorStillDispatches(t *testing.T) {
+	got := startTurnSpec(t, map[string]string{"README.md": "hi\n"}, "/start")
+
+	if got.Kind != agentsvc.TurnKindStart {
+		t.Fatalf("/start must still be recognised without a descriptor: %+v", got)
+	}
+	if got.Idea != "" {
+		t.Fatalf("no descriptor must carry no idea: %+v", got)
 	}
 }
 
 // A corrupt descriptor is best-effort: losing the idea costs one question,
 // failing the turn costs the user their kickoff.
 func TestStartCommand_CorruptDescriptorDoesNotFailTheTurn(t *testing.T) {
-	got := startInstruction(t, map[string]string{
+	got := startTurnSpec(t, map[string]string{
 		spec.DescriptorPath: "this is not = = toml [[[",
 	}, "/start")
 
-	if !strings.Contains(got, spec.StartInstruction) {
-		t.Fatalf("/start must still expand: %q", got)
+	if got.Kind != agentsvc.TurnKindStart {
+		t.Fatalf("/start must still be recognised: %+v", got)
 	}
-	if strings.Contains(got, "The user's idea") {
-		t.Fatalf("corrupt descriptor must append no idea: %q", got)
+	if got.Idea != "" {
+		t.Fatalf("corrupt descriptor must carry no idea: %+v", got)
 	}
 }
 
 // The command grammar is narrow: ordinary prose that merely mentions the word
 // is a normal turn, sent through untouched.
 func TestStartCommand_OrdinaryProseIsUntouched(t *testing.T) {
-	got := startInstruction(t, map[string]string{
+	got := startTurnSpec(t, map[string]string{
 		spec.DescriptorPath: descriptorTOML(t, testIdea),
 	}, "where do I /start with the design?")
 
-	if !strings.Contains(got, "where do I /start with the design?") {
-		t.Fatalf("ordinary prose must ride verbatim: %q", got)
+	if got.Kind != agentsvc.TurnKindChat || got.Text != "where do I /start with the design?" {
+		t.Fatalf("ordinary prose must ride verbatim as chat: %+v", got)
 	}
-	if strings.Contains(got, testIdea) {
-		t.Fatalf("a non-command turn must not carry the idea: %q", got)
+	if got.Idea != "" {
+		t.Fatalf("a non-command turn must not carry the idea: %+v", got)
 	}
 }

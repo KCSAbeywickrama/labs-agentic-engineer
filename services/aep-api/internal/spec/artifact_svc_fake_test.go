@@ -61,6 +61,10 @@ func (f *fakeArtifactSvc) SaveSpec(ctx context.Context, orgID, projectID string,
 	return f.SaveSpecFunc(ctx, orgID, projectID, req)
 }
 
+func (f *fakeArtifactSvc) BuildScopeAtTag(ctx context.Context, orgID, projectID, tag string) (BuildScope, error) {
+	return BuildScope{Tag: tag}, nil
+}
+
 func (f *fakeArtifactSvc) ValidateSpecAtTag(ctx context.Context, orgID, projectID, tag string) error {
 	if f.ValidateSpecAtTagFunc == nil {
 		panic("spec test: ValidateSpecAtTag called but ValidateSpecAtTagFunc is not set")

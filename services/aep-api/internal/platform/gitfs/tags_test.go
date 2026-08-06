@@ -206,7 +206,7 @@ func TestDiffThreeDot(t *testing.T) {
 	res, err := fx.Engine.Mutate(ctx, fx.Ref, func(tx gitfs.Tx) error {
 		tx.Write("README.md", []byte("hello\nchanged\n"))
 		tx.Write("specs/design/design.md", []byte("design\n"))
-		tx.Delete("specs/requirements/requirements.md")
+		tx.Delete("specs/requirements/prd.md")
 		return nil
 	}, gitfs.CommitOpts{Message: "reshape", Retry: fastRetry})
 	if err != nil {
@@ -229,7 +229,7 @@ func TestDiffThreeDot(t *testing.T) {
 	want := map[string]string{
 		"README.md":                          "modified",
 		"specs/design/design.md":             "added",
-		"specs/requirements/requirements.md": "removed",
+		"specs/requirements/prd.md": "removed",
 	}
 	for path, status := range want {
 		if statuses[path] != status {
@@ -250,7 +250,7 @@ func TestDiffThreeDot(t *testing.T) {
 	if p := patches["specs/design/design.md"]; !strings.Contains(p, "+design") {
 		t.Fatalf("added-file patch = %q, want +design", p)
 	}
-	if p := patches["specs/requirements/requirements.md"]; !strings.Contains(p, "-") || strings.Contains(p, "diff --git") {
+	if p := patches["specs/requirements/prd.md"]; !strings.Contains(p, "-") || strings.Contains(p, "diff --git") {
 		t.Fatalf("removed-file patch = %q, want hunks without the diff header", p)
 	}
 
@@ -273,14 +273,14 @@ func TestDiffThreeDot(t *testing.T) {
 func TestDiffBetweenTags(t *testing.T) {
 	fx := workspacetest.New(t, seedFiles())
 	fx.Origin.Tag(t, "v1", "req v1")
-	fx.Origin.Seed(t, map[string]string{"specs/requirements/requirements.md": "req v2\n"}, "update")
+	fx.Origin.Seed(t, map[string]string{"specs/requirements/prd.md": "req v2\n"}, "update")
 	fx.Origin.Tag(t, "v2", "req v2")
 
 	cmp, err := fx.Engine.Diff(context.Background(), fx.Ref, "v1", "v2")
 	if err != nil {
 		t.Fatalf("Diff(tags): %v", err)
 	}
-	if len(cmp.Files) != 1 || cmp.Files[0].Filename != "specs/requirements/requirements.md" ||
+	if len(cmp.Files) != 1 || cmp.Files[0].Filename != "specs/requirements/prd.md" ||
 		cmp.Files[0].Status != "modified" {
 		t.Fatalf("Diff(v1...v2) files = %+v", cmp.Files)
 	}

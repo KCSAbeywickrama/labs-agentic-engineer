@@ -1,5 +1,5 @@
 ---
-name: cell-architecture-dsl
+name: cell-design
 description: Use when generating a design OR when ANY change alters the architecture — a component added, removed, or renamed; an edge or dependency changed; exposure changed; an external/SaaS dependency added or dropped. specs/design/design.cell moves FIRST, before design.md and the component design.json files. Covers the grammar, the AEP boundary semantics (where each dependency goes), and the write protocol that drives the live architecture diagram.
 metadata:
   aep:
@@ -8,13 +8,16 @@ metadata:
 ---
 
 
-# Cell architecture DSL (design.cell)
+# Cell design (design.cell)
 
-`specs/design/design.cell` is a small, project-level text file describing the
-architecture as a **cell**. The console renders it live as you write it, so it
-is the FIRST design artifact you emit — before design.md and the component
-design.json files. The component ids here MUST match the
-`components/<name>/design.json` names you write afterwards.
+`specs/design/design.cell` is the PRIMARY design source: a small project-level
+text file describing the architecture as a **cell**, carrying the design
+version's `phase` and every component's story citations. The console renders
+it live as you write it, so it is the FIRST design artifact you emit — and the
+platform derives from it: when the cell is saved, a design.json skeleton is
+scaffolded for every deployable component that has none, born with the cell's
+story citations. The component ids here MUST match the
+`components/<name>/design.json` names.
 
 ## Cell-based architecture in AEP
 
@@ -60,6 +63,15 @@ south west`.
 
 **Title** — `title <text>` (rest of line).
 
+**Phase** — `phase <N>` (a positive integer): the ONE PRD phase this design
+version details. Every design.cell carries exactly one phase statement, near
+the top. The cell still shows the WHOLE architecture — a component whose
+cited stories all belong to LATER phases appears as a walking-skeleton stub
+(`component slack-notifier service [stories: 11, 12]`): the platform
+scaffolds it and exempts it from detail until its phase arrives. Leaving a
+later-phase capability out of the cell entirely hides architecture the MVP
+slice was meant to surface.
+
 **Component** (inside the cell) — `component <id> [as <label>] [type]`
 - The optional `type` is the LAST bare token. **There is no `:` before it.**
 - Without `as`, everything after the id is the type. With `as`, one trailing
@@ -67,6 +79,10 @@ south west`.
   rest is the label.
 - `component ceramics-api` → id only.
 - `component ceramics-api service` → id + type `service`.
+- A component cites the PRD stories it serves with a trailing
+  `[stories: <n>, <n>, …]` suffix (positive integers, the PRD's story
+  numbers): `component ceramics-api service [stories: 1, 2, 4]`. Cite every
+  story the component serves — the platform's coverage check reads these.
 - `component ceramics-api as "Ceramics API" service` → id, label, type.
 
 **External** (on a boundary) — `<direction> <id> [as <label>] [type]` where

@@ -44,7 +44,7 @@ class SpyPeer implements RoomPeer {
   leave(): void {}
 }
 
-const MD = "specs/requirements/requirements.md";
+const MD = "specs/requirements/prd.md";
 
 test("addFile mirrors the new file UNMARKED (accept-by-default, no flicker)", () => {
   const peer = new SpyPeer();

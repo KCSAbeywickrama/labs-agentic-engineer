@@ -167,7 +167,7 @@ func TestProvision_SeedsFlatLayout(t *testing.T) {
 	if strings.Contains(goMD, "kind: platform") {
 		t.Fatalf("org skill must not carry the platform marker:\n%s", goMD)
 	}
-	hlaMD := c.host.origin("org1").FileAt(t, "main", "skills/high-level-architecture/SKILL.md")
+	hlaMD := c.host.origin("org1").FileAt(t, "main", "skills/architecture/SKILL.md")
 	if !strings.Contains(hlaMD, "kind: platform") {
 		t.Fatalf("platform skill must carry metadata.aep.kind: platform:\n%s", hlaMD)
 	}

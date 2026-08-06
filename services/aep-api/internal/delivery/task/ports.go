@@ -83,6 +83,9 @@ type VersionReader interface {
 	// The list read path (ListRequirementsVersions) still fetches; this one
 	// must not, so a task-list page load pays no per-read GitHub round-trip.
 	LatestSpecTag(ctx context.Context, orgID, projectID string) string
+	// BuildScopeAtTag reads a tag's phase scope (#370/#369) — the plan turn's
+	// in-scope story set and per-component citations.
+	BuildScopeAtTag(ctx context.Context, orgID, projectID, tag string) (spec.BuildScope, error)
 	GetRequirementsAtTag(ctx context.Context, orgID, projectID, tag string) (map[string]string, error)
 }
 

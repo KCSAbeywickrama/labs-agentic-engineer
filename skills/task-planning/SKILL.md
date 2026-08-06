@@ -1,6 +1,6 @@
 ---
 name: task-planning
-description: Use when asked to plan or re-plan a project's implementation Tasks from its spec and design — one Task per design component, with dependencies, using planTask/updateTask.
+description: Use when planning implementation Tasks from a design — the plan turn that covers the milestone's in-scope stories with one Task per design component, wires dependsOn, and writes each Task's body.
 metadata:
   aep:
     kind: platform
@@ -9,84 +9,74 @@ metadata:
 
 # Task planning
 
-Turn the design into a set of Tasks the platform can execute. **The unit of work
-is the design component.** Every component under
-`specs/design/components/<name>/` that needs work gets exactly one Task; the
-component is the only thing a Task may target. Never invent a component.
+Cover the milestone's in-scope stories. The instruction carries a
+**"Milestone scope"** section the platform computed: each in-scope story is
+marked COVERED (an existing Task already serves it) or NEEDS TASKS. Your job
+ends when every NEEDS TASKS story is served by a Task; COVERED stories'
+existing Tasks are reference, never rework. With no scope section, plan every
+component that needs work — same rules, whole design in scope.
 
-Load this skill, read the design (`specs/design/design.md` and each
-`components/<name>/design.json`), and any existing Tasks (`tasks/<issueNumber>.md`),
-then plan.
+**The unit of work stays the design component.** A story is served by the
+component that cites it (`stories` in `components/<name>/design.json`, derived
+from the cell): plan or extend THAT component's Task. Never invent a
+component; a story no component cites is the design's gap — say so in your
+final text and recommend extending the design, never a Task without a home.
+The platform stamps each Task's "Serves stories" block from the design's
+citations — you never write it.
 
 ## What a Task is
 
-- **One component, one Task.** Title it after the work, e.g.
-  "Implement order-service" for fresh work or "Add refunds to order-service" for
-  a change. Keep titles unique and human-readable.
-- **rationale** is one sentence: why this Task exists (what the component must do,
-  or what changed).
-- **dependsOn** are **component names** taken from the design's relationships:
-  if `order-service`'s `design.json` connects to `user-service` and `catalog`
-  (or the design's Interactions section says so), its Task `dependsOn`
-  `["user-service", "catalog"]`. Never list issue numbers; never depend on the
-  platform's own infrastructure (databases, gateways, IDPs). A dependency must be
-  a real component with its own Task or design directory.
+- **One component, one Task.** Title it after the work — "Implement
+  order-service" fresh, "Add refunds to order-service" for a delta. Titles
+  unique and human-readable.
+- **rationale** is one sentence: why this Task exists.
+- **dependsOn** are **component names** from the design's edges: if
+  `order-service` calls `user-service`, its Task depends on
+  `["user-service"]`. Never issue numbers; never platform infrastructure
+  (databases, gateways, IDPs). For every component edge A→B, A's Task lists B
+  — `dependsOn` carries the build order (a cycle is rejected; break it).
+
+## Dependency kinds and gates
+
+| Dependency kind | Ordering effect | What the rationale records |
+|---|---|---|
+| `component` | consumer's Task lists the provider in `dependsOn` | the build-order edge |
+| `org-service` | none — the provider lives in another project | the cross-project binding |
+| `external` | none | names the value-collection **gate** |
+| `platform-resource` | none | names the provisioning **gate** |
+
+**Gates are flagged, never minted**: the platform authors gate issues; you
+emit no Task for a gate. Each design dependency is accounted for exactly once
+— in `dependsOn` (component kind) or in a rationale (the other three).
 
 ## Fresh and incremental are the same flow
 
-Plan against the CURRENT STATE. When the `tasks/` context is empty this is a
-fresh plan; when it is non-empty it is incremental — the SAME reasoning, just
-with existing Tasks in view:
-
 - **Pending Task of an affected component** → `updateTask` it (re-state scope,
   refresh `dependsOn`, rewrite the body) rather than planning a duplicate.
-- **A component whose work is already done** but the design changed → plan a
-  **delta** Task for just the new work (a new, distinctly-titled Task).
-- **In-flight work** → `updateTask` with a note that the change lands on top of
-  what is running; do not silently rewrite its scope.
-- **Untouched components** → **do nothing.** Silence is correct; do not re-plan a
-  component whose design did not change.
+- **Component work already done, new stories arrived** → plan a **delta** Task
+  for just the new work, distinctly titled.
+- **In-flight work** → `updateTask` with a note that the change lands on top;
+  never silently rewrite its scope.
+- **Untouched components and COVERED stories** → do nothing. Silence is
+  correct.
+- **Obsolete component** (has a Task, gone from the design) → `updateTask`
+  with an obsolescence note; a human closes it.
 
-Because the accumulator dedupes by title and component, re-planning an unchanged
-design converges to no-ops by construction — you will simply have nothing to add.
-
-## Never invent a component
-
-If a requirement is covered by **no** design component, do not plan a Task for
-it and do not stretch an unrelated component to fit. Say so in your final text
-and recommend regenerating the design so a component exists. Conversely, an
-**obsolete** component (still has a Task but was removed from the design) →
-`updateTask` its Task with an obsolescence note and stop; a human closes it (you
-have no close tool).
+Split one component into several Tasks only when a single PR physically
+cannot land the work (e.g. a migration must merge before feature code).
 
 ## Write the bodies in the same turn
 
-After you have planned the Tasks, write each one's full body with `updateTask`
-(`set.body`) in this same turn — the whole design and the sibling Tasks are still
-in context. A good body has:
-
-- **Scope** — what to build/change in this component, concretely.
-- **Acceptance criteria** — how we know it is done.
-- **References** — point into the spec/design (the capabilities, the
-  `design.json`, the `openapi.yaml`) rather than restating them.
-- **Web-application bodies** — instruct building it against the API contract of
-  the service it depends on, citing that component's
-  `specs/design/components/<api-component-name>/openapi.yaml`.
-- **Service bodies** — instruct implementing the API to its own contract, citing
-  this component's `specs/design/components/<api-component-name>/openapi.yaml`.
-
-Reference a Task you planned this turn by its `{ title }`; reference an existing
-Task by its `{ issueNumber }`.
+After planning, write every planned Task's full body via `updateTask` before
+the turn ends — `## Scope` (the concrete work, citing the component's
+design.json and its openapi.yaml/wireframes.dsl), `## Acceptance` (what done
+means, at work altitude — the validation oracle owns product acceptance), and
+`## References` (the spec paths the coding agent reads). A Task without a body
+is unfinished planning.
 
 ## When a tool rejects you
 
-Each error carries what you need to fix it in one step:
-
-- **UNKNOWN_COMPONENT** — the component (or a `dependsOn` entry) is not a known
-  component; the result lists the known ones. Pick one, or drop the dependency.
-- **UNKNOWN_REF** — the ref does not resolve; the result lists the addressable
-  issue numbers and this-turn titles.
-- **DUPLICATE_TITLE** — the title is taken (listed); choose a distinct one, or
-  `updateTask` the existing Task instead of planning a new one.
-- **DEPENDENCY_CYCLE** — the `dependsOn` would form a cycle (the path is listed);
-  the design's relationships are acyclic, so re-read them and break the cycle.
+The result names the fix: UNKNOWN_COMPONENT lists the known components;
+UNKNOWN_REF lists the addressable refs; DUPLICATE_TITLE means pick a distinct
+title; DEPENDENCY_CYCLE shows the path to break. Correct and re-issue — never
+re-emit an op that succeeded.

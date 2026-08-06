@@ -29,7 +29,7 @@ import (
 
 func seedSpec() map[string]string {
 	return map[string]string{
-		"specs/requirements/requirements.md": "# Reqs\n",
+		"specs/requirements/prd.md": "# Reqs\n",
 		"specs/design/design.md":             "# Design\n",
 		"src/main.go":                        "package main\n",
 	}
@@ -70,7 +70,7 @@ func TestListSpecVersionTags_DirtyWhenSpecsMovedAfterTag(t *testing.T) {
 	r := newRig(t, seedSpec())
 	r.remote.Tag(t, "v1", "spec v1")
 	r.remote.Seed(t, map[string]string{
-		"specs/requirements/requirements.md": "# Reqs — edited after v1\n",
+		"specs/requirements/prd.md": "# Reqs — edited after v1\n",
 	}, "post-tag spec edit")
 
 	got, err := r.svc.ListSpecVersionTags(context.Background(), r.org, r.proj)

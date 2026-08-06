@@ -28,7 +28,7 @@ const skill = (name: string, kind = "org", description = "") => ({
 const catalogue = [
   skill("react-webapp", "org", "How to build a React SPA on the platform."),
   skill("go", "org", "How to build a Go service on the platform."),
-  skill("task-breakdown", "platform", "Breaks a design into buildable tasks."),
+  skill("security-design", "platform", "Designs roles, permissions, and Thunder auth."),
   skill("acme-deploy-checklist", "org", "Acme's internal checklist."),
   skill("find-skills", "imported", "Discover community AgentSkills."),
 ];
@@ -41,7 +41,7 @@ describe("paginateSkills", () => {
       "find-skills",
       "go",
       "react-webapp",
-      "task-breakdown",
+      "security-design",
     ]);
   });
 

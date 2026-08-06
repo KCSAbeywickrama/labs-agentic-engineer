@@ -36,8 +36,8 @@ import { parseArgs } from "node:util";
 import { stdout as output } from "node:process";
 import * as clack from "@clack/prompts";
 import { loadRepoSkills } from "./kit/skills.js";
-import { parseStartCommand, slashSkillInstruction } from "@aep/contracts/prompts";
-import { startInstruction } from "./engine/compose.js";
+import { parseStartCommand, parseFlowCommand } from "@aep/contracts/commands";
+import { chatSpec, flowSpec, startSpec } from "./engine/turn-spec.js";
 import { loadDotenv } from "@aep/agents/shared/env";
 import {
   chatTurn,
@@ -181,14 +181,17 @@ async function runHeadless(
         // `play <dir> chat "/spec an expense app"`); a plain message rides
         // through verbatim. No reserved control words in the one-shot verb.
         //
-        // `/start` is expanded HERE rather than sent verbatim: production
-        // relies on aep-api to expand it, but the playground talks to the
-        // agents service directly, so it does the server's job itself.
+        // `/start` is resolved HERE rather than sent verbatim: production
+        // relies on aep-api to attach the captured idea, but the playground
+        // talks to the agents service directly, so it does the server's job.
         const start = parseStartCommand(commandArg);
-        const instruction = start
-          ? startInstruction(start.inlineIdea || readIdea(projectDir))
-          : (slashSkillInstruction(commandArg) ?? commandArg);
-        outcome = await chatTurn(session, instruction, opts);
+        const flow = !start ? parseFlowCommand(commandArg) : null;
+        const turn = start
+          ? startSpec(start.inlineIdea || readIdea(projectDir))
+          : flow
+            ? flowSpec(flow.skill, flow.text)
+            : chatSpec(commandArg);
+        outcome = await chatTurn(session, turn, opts);
       } finally {
         await session.close();
       }
