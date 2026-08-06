@@ -97,3 +97,14 @@ type CycleLogReader interface {
 type RunCanceller interface {
 	CancelRun(ctx context.Context, row *delivery.MilestoneRun) error
 }
+
+// CycleReaper deletes the cancelled run's in-flight agent Component. Satisfied
+// by codingagent.CycleReaper, reached as a port because dispatch and its
+// cleanup belong to that slice.
+//
+// Optional: a boot without the OpenChoreo client cancels without reaping (the
+// run still settles; the leaked component is swept). Cancel never fails on a
+// reap error — see Commands.Cancel.
+type CycleReaper interface {
+	ReapRunCycle(ctx context.Context, orgID, projectID, runID string) error
+}

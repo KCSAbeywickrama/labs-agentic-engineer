@@ -1083,7 +1083,11 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		TaskStream:     taskStreamSvc,
 		RunReads:       runReads,
 		RunProgress:    runProgress,
-		RunCommands:    runread.NewCommands(milestoneRunRepo, runSupervisor),
+		// Cancel signals the supervisor AND deletes the cycle's agent
+		// Component, which is what actually stops the pod and frees the org's
+		// billing concurrency slot.
+		RunCommands: runread.NewCommands(milestoneRunRepo, runSupervisor).
+			WithCycleReaper(codingagent.NewCycleReaper(componentClient, runCycleRepo)),
 		RunCycleBuilds: runCycleBuilds,
 	})
 	if err != nil {
