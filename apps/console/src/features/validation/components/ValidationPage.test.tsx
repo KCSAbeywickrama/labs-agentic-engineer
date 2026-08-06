@@ -351,7 +351,9 @@ describe("ValidationPage lifecycle", () => {
     renderPage(undefined);
 
     expect(screen.queryByTestId("run-feed")).not.toBeInTheDocument();
-    expect(screen.getAllByText("Validated*").length).toBe(2);
+    // Partial shares `passed`'s visible label since #401; the tile's copy and
+    // the spoken form carry the uncovered-criteria distinction.
+    expect(screen.getAllByText("Validated").length).toBe(2);
     expect(screen.getByText("Shoppers can search the catalog.")).toBeInTheDocument();
   });
 
