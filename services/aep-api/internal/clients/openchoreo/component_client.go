@@ -350,6 +350,15 @@ func formatEndpointURL(u *ocgen.EndpointURL) string {
 
 // -- Component CRUD ----------------------------------------------------------
 
+const annotationInternal = "aep.wso2.com/internal"
+
+func isInternalComponent(annotations, labels map[string]string) bool {
+	if annotations[annotationInternal] == "true" {
+		return true
+	}
+	return labels[annotationInternal] == "true"
+}
+
 func (c *componentClient) ListComponents(ctx context.Context, orgName, projectName string, limit int, cursor string) (*gen.ComponentList, error) {
 	params := &ocgen.ListComponentsParams{}
 	sel := ocgen.LabelSelectorParam(fmt.Sprintf("%s=%s", string(LabelKeyProject), projectName))
@@ -376,9 +385,19 @@ func (c *componentClient) ListComponents(ctx context.Context, orgName, projectNa
 		})
 	}
 
-	items := make([]gen.Component, len(resp.JSON200.Items))
-	for i, comp := range resp.JSON200.Items {
-		items[i] = componentToModel(comp)
+	items := make([]gen.Component, 0, len(resp.JSON200.Items))
+	for _, comp := range resp.JSON200.Items {
+		var ann, lbls map[string]string
+		if comp.Metadata.Annotations != nil {
+			ann = *comp.Metadata.Annotations
+		}
+		if comp.Metadata.Labels != nil {
+			lbls = *comp.Metadata.Labels
+		}
+		if isInternalComponent(ann, lbls) {
+			continue
+		}
+		items = append(items, componentToModel(comp))
 	}
 	return &gen.ComponentList{Items: items}, nil
 }
