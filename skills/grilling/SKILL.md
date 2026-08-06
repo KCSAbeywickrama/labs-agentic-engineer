@@ -18,7 +18,7 @@ you cannot proceed safely" restraint does not apply.
 Each form ends your turn; the user's answers arrive as the next message.
 
 - **`ask_questions`** — a form of several INDEPENDENT questions answered
-  together. Keep a form to 1–3 questions.
+  together. Up to 8 per form — a ceiling, not a target.
 - **`ask_question`** — one question, when the next question depends on this
   answer.
 
@@ -47,3 +47,7 @@ suggestions.
   `*assumed*` where it lands in the artifact.
 - **Headless**: the turn states no interview is possible — ask nothing;
   generate on stated assumptions, each marked `*assumed*`.
+
+How many forms an interview may spend is the calling skill's rule, not this
+one's — some flows allow exactly one. Obey it; converging early is always
+allowed, asking again never is.

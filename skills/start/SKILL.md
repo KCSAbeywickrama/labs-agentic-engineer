@@ -1,6 +1,6 @@
 ---
 name: start
-description: Use when kicking off a project from its idea — the /start flow that interviews the user section by section and writes the PRD at specs/requirements/prd.md; also the flow for re-running /start on a project that already has a PRD.
+description: Use when kicking off a project from its idea — the /start flow that interviews the user in a single round of questions and writes the PRD at specs/requirements/prd.md; also the flow for re-running /start on a project that already has a PRD.
 metadata:
   aep:
     kind: platform
@@ -12,7 +12,8 @@ metadata:
 A user arrives with one sentence and leaves with a PRD the rest of the flow can
 build on. The interview is a **coverage walk**: the PRD's own sections are the
 plan, you visit every one, and nothing lands in the document that was neither
-asked about nor visibly assumed.
+asked about nor visibly assumed. You visit them all before you ask anything —
+**`/start` asks exactly once**.
 
 ## The idea comes to you
 
@@ -20,11 +21,12 @@ The user's idea is attached to this instruction when the project captured one.
 Read it as the brief — it is what the user actually asked for, in their words.
 It is not a file: it is attached or it is absent. When absent, open with one
 `ask_question`: "What are you building?" — a few concrete example options,
-free text welcome. The answer is the brief.
+free text welcome. The answer is the brief. Getting the brief is not the
+interview: it is the only thing that may precede the one form below.
 
 ## The coverage walk
 
-Interview section by section, in the PRD's own order:
+Walk the PRD's own sections, in its own order:
 
 1. **Problem** — who hurts, how, today.
 2. **Actors** — who uses the system, at product altitude.
@@ -33,18 +35,30 @@ Interview section by section, in the PRD's own order:
 5. **Phasing** — what ships first; a thin vertical slice makes the best MVP.
 6. **Out of scope** — what this project is explicitly not.
 
-For each section, in this order:
+The walk is **planning, not turns**: you take it silently, in full, before the
+user sees a single question. For each section:
 
 - **Consult the organization skill first.** A question its defaults answer is
   never asked — record the default as a plain Product Decision instead. A
-  section fully covered by defaults and the brief asks nothing.
-- **Ask ONE `ask_questions` form** (the `grilling` skill owns the question
-  mechanics) with the 1–3 questions whose answers change the document. Skip
-  questions the brief already answers.
+  section fully covered by defaults and the brief needs nothing.
+- **Note the questions whose answers would change the document**, and only
+  those. Skip what the brief already answers.
 
-The walk is complete when every section has been visited — covered by the
-brief, by org defaults, by a form, or by the skip valve below. Depth is opt-in:
-after generating, the user can go deeper in chat on any feature.
+## Ask once
+
+Then ask **ONE `ask_questions` form** — the `grilling` skill owns the question
+mechanics — carrying the questions the walk noted, and write the PRD from the
+answers. There is no second form: the next thing the user sees after answering
+is their document.
+
+- **The bar, not the budget.** Ask only what changes the PRD. Three questions
+  is a good form; padding one out to the cap is an interrogation.
+- **More questions than a form holds** → ask those whose answers change the
+  document most, and treat every one left behind exactly as the skip valve
+  does: your recommended answer, tagged `*assumed*`.
+
+Depth is opt-in: after generating, the user can go deeper in chat on any
+feature.
 
 ## The skip valve
 
@@ -70,7 +84,8 @@ guess it.
 rewrite: append new stories with fresh numbers (story numbers are permanent),
 update only the sections the change touches, and leave the user's hand-edits
 alone. Regenerate from scratch only when the user explicitly asks, and confirm
-before overwriting.
+before overwriting. One form here too — a scoped change earns fewer questions
+than a cold start, never more.
 
 ## Where this stops
 
