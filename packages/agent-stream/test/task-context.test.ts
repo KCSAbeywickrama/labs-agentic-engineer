@@ -22,7 +22,7 @@ import { parseKnownComponents, parseTaskContextFile } from "../src/task-context.
 
 test("parseKnownComponents collects sorted, unique component dir names", () => {
   const files = {
-    "specs/requirements/requirements.md": "…",
+    "specs/requirements/prd.md": "…",
     "specs/design/design.md": "…",
     "specs/design/components/order-service/design.json": "{}",
     "specs/design/components/order-service/openapi.yaml": "…",

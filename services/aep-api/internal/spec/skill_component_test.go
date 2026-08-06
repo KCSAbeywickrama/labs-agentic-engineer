@@ -231,7 +231,7 @@ func TestSkillsComponent_PlatformSkillsReadOnlySurface(t *testing.T) {
 	}
 
 	// Resolvable read-only…
-	resp = h.AsOrg("acme").Get(base + "/high-level-architecture")
+	resp = h.AsOrg("acme").Get(base + "/architecture")
 	if resp.Code != 200 {
 		t.Fatalf("get platform: want 200, got %d body=%s", resp.Code, resp.Body.String())
 	}

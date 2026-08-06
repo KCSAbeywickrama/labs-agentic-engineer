@@ -34,7 +34,7 @@ import (
 // Spec-gate error codes not owned by designspec (the design codes pass
 // through so the console renders one vocabulary).
 const (
-	// codeMissingRequirements — specs/requirements/requirements.md is absent.
+	// codeMissingRequirements — specs/requirements/prd.md is absent.
 	codeMissingRequirements = "MISSING_REQUIREMENTS"
 	// codeMissingDesign — the design layout gate failed at its root
 	// (specs/design/design.md absent).
@@ -187,7 +187,7 @@ func validateSpecBundles(reqFiles, designFiles map[string]string) error {
 		files = append(files, FileValidationError{
 			Path:    RequirementsDir + "/" + requirementsMainFile,
 			Code:    codeMissingRequirements,
-			Message: "requirements.md missing — populate requirements before building",
+			Message: "prd.md missing — populate the PRD before building",
 		})
 	}
 	if err := validateDesignBundle(designFiles); err != nil {
@@ -204,6 +204,15 @@ func validateSpecBundles(reqFiles, designFiles map[string]string) error {
 				Path:    DesignDir + "/" + designRootFile,
 				Code:    codeMissingDesign,
 				Message: "design.md missing — generate the design before building",
+			})
+		}
+	}
+	// The phase gate (#369/#370/#371) runs only once the basic layout gates
+	// pass — its checks presuppose a PRD and a design tree to read.
+	if len(files) == 0 {
+		for _, f := range validatePhaseGate(reqFiles, designFiles) {
+			files = append(files, FileValidationError{
+				Path: DesignDir + "/" + f.Path, Code: f.Code, Message: f.Message,
 			})
 		}
 	}

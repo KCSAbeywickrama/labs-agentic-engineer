@@ -34,7 +34,7 @@ export interface RequirementsStatus {
 }
 
 export function requirementsStatus(projectDir: string): RequirementsStatus {
-  const file = join(projectDir, "specs/requirements/requirements.md");
+  const file = join(projectDir, "specs/requirements/prd.md");
   if (!existsSync(file)) return { present: false, sizeBytes: 0 };
   const st = statSync(file);
   return { present: st.size > 0, sizeBytes: st.size, modifiedAt: st.mtime };

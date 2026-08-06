@@ -54,12 +54,16 @@ func (s *Service) List(ctx context.Context, orgID, projectID string) (BuildList,
 	builds := make([]BuildSummary, 0, len(rows))
 	for i := range rows {
 		row := rows[i]
-		if row.MilestoneTitle == "" || seen[row.MilestoneTitle] {
+		tag := row.Tag
+		if tag == "" {
+			tag = row.MilestoneTitle // pre-phase legacy rows: title == tag
+		}
+		if tag == "" || seen[tag] {
 			continue
 		}
-		seen[row.MilestoneTitle] = true
+		seen[tag] = true
 		builds = append(builds, BuildSummary{
-			Tag:             row.MilestoneTitle,
+			Tag:             tag,
 			MilestoneNumber: row.MilestoneNumber,
 			Status:          statusFromRunState(row.State),
 			Reason:          row.TerminalReason,

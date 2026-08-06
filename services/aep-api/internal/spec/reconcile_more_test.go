@@ -257,7 +257,7 @@ func TestLoadEmbeddedLibrary(t *testing.T) {
 		t.Fatalf("loadEmbeddedLibrary: %v", err)
 	}
 	by := nameSet(got)
-	// Every top-level DIRECTORY under skills/ is presently a well-formed skill, so
+	// Every top-level dir under skills/ is presently a well-formed skill, so
 	// the loader must carry all of them through. Derived from the tree itself
 	// (not a hardcoded literal) so this never needs bumping when a skill is
 	// added to or removed from skills/. Loose files at the library root are not
@@ -278,10 +278,10 @@ func TestLoadEmbeddedLibrary(t *testing.T) {
 	wantKinds := map[string]string{
 		"api-management": "org", "ballerina": "org", "go": "org", "react-webapp": "org",
 		"thunder-authentication": "org",
-		"cell-architecture-dsl":  "platform", "design": "platform",
-		"excalidraw-wireframes": "platform", "grilling": "platform",
-		"high-level-architecture": "platform", "openapi-conventions": "platform", "start": "platform",
-		"task-breakdown": "platform", "task-planning": "platform", "validation-criteria": "platform",
+		"cell-design": "platform", "design": "platform",
+		"wireframes": "platform", "grilling": "platform",
+		"architecture": "platform", "openapi-conventions": "platform", "start": "platform",
+		"task-planning": "platform", "validation-criteria": "platform",
 	}
 	for name, kind := range wantKinds {
 		sk, ok := by[name]
@@ -345,45 +345,6 @@ func TestLoadLibrary_StandardStructure(t *testing.T) {
 	}
 	if _, ok := sk.References["scripts/.cache/x"]; ok {
 		t.Fatalf("nested dot-dir file must not be carried: %v", keysOf(sk.References))
-	}
-}
-
-// TestLoadLibrary_SkipsOverlays: `overlays/` is compose-time input for the
-// coding runner (it assembles its base plugin from this same library and applies
-// skills/aep/overlays/local.md for a playground run — ADR-0004). It is NOT skill
-// content: seeding it would put playground-only prose in every org's skills repo,
-// fold it into ContentSHA, and hand it to any agent that loads the skill.
-func TestLoadLibrary_SkipsOverlays(t *testing.T) {
-	t.Parallel()
-	fsys := fstest.MapFS{
-		"demo/SKILL.md":             {Data: []byte(mkSkillMD("demo", "platform", "demo body"))},
-		"demo/references/a.md":      {Data: []byte("ref a")},
-		"demo/overlays/local.md":    {Data: []byte("<!-- drop-section: ## Where you are -->")},
-		"demo/overlays/nested/x.md": {Data: []byte("also skipped")},
-	}
-	got, err := loadLibrary(fsys)
-	if err != nil {
-		t.Fatalf("loadLibrary: %v", err)
-	}
-	if len(got) != 1 {
-		t.Fatalf("want 1 skill, got %d", len(got))
-	}
-	if want := map[string]string{"references/a.md": "ref a"}; len(got[0].References) != len(want) {
-		t.Fatalf("aux files = %v, want only %v", keysOf(got[0].References), keysOf(want))
-	}
-
-	// ContentSHA must not move when an overlay is added or edited: an org would
-	// otherwise see a spurious "update available" for a file it never receives.
-	noOverlay := fstest.MapFS{
-		"demo/SKILL.md":        {Data: []byte(mkSkillMD("demo", "platform", "demo body"))},
-		"demo/references/a.md": {Data: []byte("ref a")},
-	}
-	bare, err := loadLibrary(noOverlay)
-	if err != nil {
-		t.Fatalf("loadLibrary (no overlay): %v", err)
-	}
-	if got[0].ContentSHA != bare[0].ContentSHA {
-		t.Fatalf("overlay changed ContentSHA: %s != %s", got[0].ContentSHA, bare[0].ContentSHA)
 	}
 }
 

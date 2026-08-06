@@ -24,7 +24,7 @@
  * client-side copy for the fold tests.
  */
 export const SEED_FILES: Record<string, string> = {
-  "specs/requirements/requirements.md": `# Overview
+  "specs/requirements/prd.md": `# Overview
 
 A simple API that responds with "Hello, World!" when called.
 

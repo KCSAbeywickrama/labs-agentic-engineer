@@ -47,10 +47,10 @@ There is **no `phase` field**: which agent a skill serves is carried by its desc
 
 ### Audience-structured skills (how routing is authored)
 
-Many skills serve a workflow that **spans agents** — e.g. `excalidraw-wireframes`: the design agent must *author* `wireframes.dsl`, the coding agent must *implement* screens from it. Authoring structure carries that:
+Many skills serve a workflow that **spans agents** — e.g. `wireframes`: the design agent must *author* `wireframes.dsl`, the coding agent must *implement* screens from it. Authoring structure carries that:
 
 ```
-skills/excalidraw-wireframes/
+skills/wireframes/
   SKILL.md          # description names BOTH uses; body = shared core (DSL concepts)
   references/
     authoring.md    # design agent: sketching screens, writing wireframes.dsl

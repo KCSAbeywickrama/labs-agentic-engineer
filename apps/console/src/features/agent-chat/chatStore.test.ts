@@ -129,7 +129,7 @@ describe("chatStore", () => {
       turnId: "t1",
       toolCallId: "c1",
       op: "add",
-      path: "specs/requirements/requirements.md",
+      path: "specs/requirements/prd.md",
       ok: true,
     };
     upsertToolMessage(key, { ...base, status: "streaming" });

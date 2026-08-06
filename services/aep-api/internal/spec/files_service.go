@@ -341,8 +341,10 @@ func (s *service) Apply(ctx context.Context, orgID, projectID string, req ApplyR
 			return errConflictSentinel // fn error aborts Mutate — no retry, the 409 path
 		}
 
+		batch := map[string]bool{}
 		for _, w := range req.Writes {
 			tx.Write(w.Path, []byte(w.Content))
+			batch[w.Path] = true
 			// The staged blob's object name is a pure function of its content
 			// (what `git hash-object` will produce), so the response carries
 			// the exact sha a subsequent read returns — the FE folds it into
@@ -352,6 +354,77 @@ func (s *service) Apply(ctx context.Context, orgID, projectID string, req ApplyR
 		}
 		for _, d := range req.Deletes {
 			tx.Delete(d.Path)
+		}
+		// Scaffold engine (#371): a batch that lands design.cell also lands a
+		// design.json skeleton for every deployable component the cell declares
+		// that has none yet — same commit, platform-authored; the agent only
+		// enriches. Rides the SAME warnings channel so the caller sees what was
+		// generated.
+		batchContent := map[string]string{}
+		for _, w := range req.Writes {
+			batchContent[w.Path] = w.Content
+		}
+		cellSource, cellInBatch := batchContent[DesignCellPath]
+		if !cellInBatch {
+			if _, inTree := current[DesignCellPath]; inTree {
+				if raw, _, rerr := tx.Base().Read(DesignCellPath); rerr == nil {
+					cellSource = string(raw)
+				}
+			}
+		}
+		if cellInBatch {
+			scaffolds := scaffoldFromCell(cellSource, func(path string) bool {
+				_, inTree := current[path]
+				return inTree || batch[path]
+			})
+			for _, path := range sortedPaths(scaffolds) {
+				content := scaffolds[path]
+				tx.Write(path, []byte(content))
+				files = append(files, FileMeta{Path: path, SHA: blobSHA([]byte(content))})
+				warnings = append(warnings, Warning{Path: path, Message: "scaffolded from design.cell — enrich, don't author, the mechanical fields"})
+			}
+		}
+		// `stories` is platform-recomputed from the cell's citations (#369/#371,
+		// like a dependency's wiring): a cell save restamps every existing
+		// design.json whose citations moved, and a design.json save is restamped
+		// from the current cell — an authored value never survives.
+		if cellSource != "" {
+			if facts, ferr := parseCellFacts(cellSource); ferr == nil {
+				storiesByID := map[string][]int{}
+				for _, c := range facts.Components {
+					storiesByID[c.ID] = c.Stories
+				}
+				restamp := func(path, content string) {
+					id, ok := componentIDOfDesignPath(path)
+					if !ok {
+						return
+					}
+					updated, changed := restampDesignStories(content, storiesByID[id])
+					if !changed {
+						return
+					}
+					tx.Write(path, []byte(updated))
+					files = append(files, FileMeta{Path: path, SHA: blobSHA([]byte(updated))})
+				}
+				for path, content := range batchContent {
+					if path != DesignCellPath {
+						restamp(path, content)
+					}
+				}
+				if cellInBatch {
+					for path := range current {
+						if batch[path] {
+							continue
+						}
+						if _, ok := componentIDOfDesignPath(path); !ok {
+							continue
+						}
+						if raw, _, rerr := tx.Base().Read(path); rerr == nil {
+							restamp(path, string(raw))
+						}
+					}
+				}
+			}
 		}
 		return nil
 	}, sourcecontrol.CommitOpts{

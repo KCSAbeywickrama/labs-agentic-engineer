@@ -41,9 +41,9 @@ export function requirementsGate(): GateResult {
 }
 
 export function designGate(projectDir: string): GateResult {
-  const file = join(projectDir, "specs/requirements/requirements.md");
-  if (!existsSync(file)) return blocked("specs/requirements/requirements.md is missing — run the requirements phase first");
-  if (readFileSync(file, "utf8").trim() === "") return blocked("specs/requirements/requirements.md is empty");
+  const file = join(projectDir, "specs/requirements/prd.md");
+  if (!existsSync(file)) return blocked("specs/requirements/prd.md is missing — run the requirements phase first");
+  if (readFileSync(file, "utf8").trim() === "") return blocked("specs/requirements/prd.md is empty");
   return ok;
 }
 

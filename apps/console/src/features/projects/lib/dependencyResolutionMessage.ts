@@ -31,7 +31,7 @@
 // entry + a resolution playbook — every field the agent needed, spelled out
 // here. That duplicated context the agent already has: the chat agent reads
 // the dependency's CURRENT entry straight from design.json in its own turn
-// snapshot, and loads the high-level-architecture skill via collab steering
+// snapshot, and loads the architecture skill via collab steering
 // (Task 16 added the resolve/reconsider-a-named-dependency playbook there).
 // So the seed message only needs to NAME the dependency, the component, and
 // the intent — everything else is redundant noise the agent already has a

@@ -27,11 +27,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"runtime/debug"
-	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -55,47 +53,28 @@ const (
 	turnHeartbeatEvery = 15 * time.Second
 )
 
-// divergenceNote is the D20 note prepended to the next dispatch after a
-// FAILED turn: the conversation history claims work git never received.
-const divergenceNote = "Note: your previous turn's changes were NOT applied; the workspace reflects the repository state."
-
 // turnJob is everything the detached runner needs, captured at POST time
 // (identities, key, refs — D20: nothing is re-read from a request context).
 type turnJob struct {
 	turnID           string
 	orgID            string
 	projectID        string
-	useCase          string
+	flow             string // recognised `/<skill>` token ("start", "design", …); "" for plain chat
 	conversationID   string // FE-chosen uuid (agent_turns key)
 	nsConversationID string // namespaced agents-service id
-	instruction      string // user instruction + steering + target suffix
-	summary          string // raw user instruction (commit message subject)
+	turn             agentsvc.TurnSpec // what this turn is FOR (the agents service composes the text)
+	target           string            // spec-bundle path this turn should write to, when pinned
+	summary          string            // raw user instruction (feed line subject)
 	repoRef          sourcecontrol.RepoRef
 	baseRef          string
 	skillsRef        string
 	anthropicKey     string
-	author           *sourcecontrol.GitIdentity
-	committer        *sourcecontrol.GitIdentity
 	// Room-scoped turn (#86 phase 4): non-empty collabRoomID makes the agents
 	// service a live peer of this room (joining with collabToken, the
 	// prompting user's bearer). The doc is the write surface — the runner
 	// relays frames but folds nothing and commits nothing.
 	collabRoomID string
 	collabToken  string
-	// eagerSkills passes TurnInput.EagerSkills through to the agents-service
-	// turn request (#335) — skill bodies the service inlines up front.
-	eagerSkills []string
-}
-
-// baseMovedError is the D15 overlap conflict: main moved past the turn's base
-// and the movement touched paths the fold also touched. fn returns it inside
-// Mutate → immediate abort, no retry.
-type baseMovedError struct {
-	Paths []string
-}
-
-func (e *baseMovedError) Error() string {
-	return "base moved with overlapping changes: " + strings.Join(e.Paths, ", ")
 }
 
 // runTurnSafe is the panic barrier around the detached turn goroutine: a panic
@@ -134,18 +113,17 @@ func (s *Service) runTurn(ctx context.Context, job turnJob) {
 	s.finishTurn(finishCtx, job, term)
 }
 
-// designOrCollabTurn is the shared gate design-generation turns AND collab
-// room-scoped turns (regardless of useCase) satisfy: the Spec view authors
-// design.json interactively through collab (useCase "requirements-chat"), so
-// gating on design-generate alone starved the collab architect of
-// list_org_endpoints, causing invented cross-project org-service names that
-// fail exact-name resolution at build. mcpForTurn (additionally gated on the
-// MCP token minter being wired) and the dispatched TurnRequest.WebSearch flag
-// (external-dependency-discovery #252 — Anthropic's web_search provider tool,
-// which needs no BFF-minted credential) key off this SAME condition. A plain
-// requirements-chat/general turn with no room does not qualify.
+// designOrCollabTurn is the shared gate design-flow turns AND collab
+// room-scoped turns satisfy: the Spec view authors design.json interactively
+// through collab, so gating on the design flow alone would starve the collab
+// architect of list_org_endpoints, causing invented cross-project org-service
+// names that fail exact-name resolution at build. mcpForTurn (additionally
+// gated on the MCP token minter being wired) and the dispatched
+// TurnRequest.WebSearch flag (external-dependency-discovery #252 — Anthropic's
+// web_search provider tool, which needs no BFF-minted credential) key off this
+// SAME condition. A plain chat turn with no room does not qualify.
 func designOrCollabTurn(job turnJob) bool {
-	return job.useCase == useCaseDesignGenerate || job.collabRoomID != ""
+	return job.flow == "design" || job.collabRoomID != ""
 }
 
 // mcpForTurn mints the per-turn MCP discovery block for design-generation turns
@@ -176,12 +154,13 @@ func (s *Service) mcpForTurn(ctx context.Context, job turnJob) *agentsvc.MCPBloc
 
 // executeTurn produces the turn's terminal state (never panics the goroutine).
 func (s *Service) executeTurn(ctx context.Context, job turnJob) TurnTerminal {
-	instruction := job.instruction
 	filesChangedExternally := false
-	// D20: filesChangedExternally is server-derived — the last terminal turn
-	// of this conversation landed a ref different from the current base (an
-	// Apply, another conversation's turn, or an external push moved main).
-	// A failed prior turn additionally gets the divergence note.
+	previousTurnFailed := false
+	// D20: both flags are server-derived — the last terminal turn of this
+	// conversation landed a ref different from the current base (an Apply,
+	// another conversation's turn, or an external push moved main), and/or it
+	// failed, leaving the conversation history claiming work git never
+	// received. The agents service turns each into its note.
 	if last, err := s.turns.LastTerminal(ctx, job.orgID, job.projectID, job.conversationID); err != nil {
 		slog.WarnContext(ctx, "genai: last-terminal lookup failed — dispatching without the D20 flags",
 			"turn", job.turnID, "error", err)
@@ -191,9 +170,7 @@ func (s *Service) executeTurn(ctx context.Context, job turnJob) TurnTerminal {
 			landed = last.BaseRef
 		}
 		filesChangedExternally = landed != job.baseRef
-		if last.Status == turnStatusFailed {
-			instruction = divergenceNote + "\n\n" + instruction
-		}
+		previousTurnFailed = last.Status == turnStatusFailed
 	}
 
 	var collab *agentsvc.CollabBlock
@@ -201,7 +178,7 @@ func (s *Service) executeTurn(ctx context.Context, job turnJob) TurnTerminal {
 		collab = &agentsvc.CollabBlock{RoomID: job.collabRoomID, Token: job.collabToken}
 	}
 	body, err := s.client.Turn(ctx, job.nsConversationID, job.orgID, job.anthropicKey, agentsvc.TurnRequest{
-		Instruction: instruction,
+		Turn: job.turn,
 		Workspace: agentsvc.WorkspaceRef{
 			ConversationID: job.nsConversationID,
 			TurnID:         job.turnID,
@@ -209,11 +186,12 @@ func (s *Service) executeTurn(ctx context.Context, job turnJob) TurnTerminal {
 			Ref:            job.baseRef,
 			SkillsRef:      job.skillsRef,
 		},
+		Target:                 job.target,
 		FilesChangedExternally: filesChangedExternally,
+		PreviousTurnFailed:     previousTurnFailed,
 		MCP:                    s.mcpForTurn(ctx, job),
 		WebSearch:              designOrCollabTurn(job),
 		Collab:                 collab,
-		EagerSkills:            job.eagerSkills,
 	})
 	if err != nil {
 		slog.WarnContext(ctx, "genai: turn dispatch failed", "turn", job.turnID, "error", err)
@@ -366,15 +344,14 @@ func (s *Service) executeTurn(ctx context.Context, job turnJob) TurnTerminal {
 		// terminal still carries the base sha as the "content as of" pin.
 		return withUsage(TurnTerminal{Status: turnStatusCompleted, CommitSHA: job.baseRef, NoChanges: true}, manifest)
 	}
-	if job.useCase == useCaseGeneral {
-		// The generic turn (no useCase) is conversational/preview-only: its file
-		// mutations stream to the client for display via the fold, but NOTHING is
-		// committed to main. A non-empty fold is reported like a no-op completion
-		// (base sha pinned, noChanges), so a refetch on the terminal reconciles
-		// the live preview back to the unchanged tree.
-		return withUsage(TurnTerminal{Status: turnStatusCompleted, CommitSHA: job.baseRef, NoChanges: true}, manifest)
-	}
-	return withUsage(s.commitFold(ctx, job, fold), manifest)
+	// Every genai turn is conversational/preview-only (#373 — the old
+	// commit-on-turn useCases are gone): file mutations stream to the client
+	// for display via the fold, but NOTHING is committed to main here — room
+	// turns persist through the collab server's save path instead. A non-empty
+	// fold is reported like a no-op completion (base sha pinned, noChanges),
+	// so a refetch on the terminal reconciles the live preview back to the
+	// unchanged tree.
+	return withUsage(TurnTerminal{Status: turnStatusCompleted, CommitSHA: job.baseRef, NoChanges: true}, manifest)
 }
 
 // withUsage stamps the manifest's token spend (#249) onto a terminal. A nil
@@ -391,92 +368,6 @@ func withUsage(term TurnTerminal, m *agentfold.Manifest) TurnTerminal {
 		Model:               m.Usage.Model,
 	}
 	return term
-}
-
-// commitFold lands the verified fold as one commit on main (D13/D15).
-func (s *Service) commitFold(ctx context.Context, job turnJob, fold *agentfold.Fold) TurnTerminal {
-	touched := fold.Touched()
-	paths := make([]string, 0, len(touched))
-	for path := range touched {
-		paths = append(paths, path)
-	}
-	sort.Strings(paths)
-
-	// Baseline blob SHAs at the turn's base — the D15 overlap input. Read
-	// BEFORE Mutate: Diff/ReadFile take their own flock, and Mutate holds the
-	// exclusive one (locks are per-acquisition, so a nested read would
-	// self-deadlock).
-	ws := s.git.Workspace()
-	baseline := make(map[string]string, len(paths))
-	for _, path := range paths {
-		_, blobSHA, err := ws.ReadFile(ctx, job.repoRef, job.baseRef, path)
-		if errors.Is(err, sourcecontrol.ErrPathNotFound) {
-			baseline[path] = ""
-			continue
-		}
-		if err != nil {
-			return failedTerminal(turnReasonInternal, "read base blob "+path+": "+err.Error(), nil)
-		}
-		baseline[path] = blobSHA
-	}
-
-	res, err := ws.Mutate(ctx, job.repoRef, func(tx sourcecontrol.Tx) error {
-		// D15: main moved past the turn's base. Overlap = a touched path
-		// whose committed content differs between the turn's base and the
-		// current base (equivalent to changed(base..HEAD) ∩ touched,
-		// computed against Tx.Base() so no nested Workspace call is needed).
-		if tx.Base().CommitSHA() != job.baseRef {
-			var conflicts []string
-			for _, path := range paths {
-				_, blobSHA, rerr := tx.Base().Read(path)
-				if errors.Is(rerr, sourcecontrol.ErrPathNotFound) {
-					blobSHA = ""
-				} else if rerr != nil {
-					return fmt.Errorf("re-read %s at new base: %w", path, rerr)
-				}
-				if blobSHA != baseline[path] {
-					conflicts = append(conflicts, path)
-				}
-			}
-			if len(conflicts) > 0 {
-				return &baseMovedError{Paths: conflicts}
-			}
-			// Disjoint movement → replay the overlay on the new base (the
-			// Mutate CAS loop pushes it).
-		}
-		for _, path := range paths {
-			if content := touched[path]; content == nil {
-				tx.Delete(path)
-			} else {
-				tx.Write(path, []byte(*content))
-			}
-		}
-		return nil
-	}, sourcecontrol.CommitOpts{
-		Message:   commitMessage(job.useCase, job.summary),
-		Author:    job.author,
-		Committer: job.committer,
-	})
-
-	var bm *baseMovedError
-	switch {
-	case errors.As(err, &bm):
-		slog.WarnContext(ctx, "genai: turn failed base-moved", "turn", job.turnID, "paths", bm.Paths)
-		return failedTerminal(turnReasonBaseMoved, "main moved past the turn's base with overlapping changes", bm.Paths)
-	case errors.Is(err, sourcecontrol.ErrRefNotFastForward):
-		return failedTerminal(turnReasonInternal, "commit retries exhausted (origin kept advancing)", nil)
-	case err != nil:
-		slog.WarnContext(ctx, "genai: turn commit failed", "turn", job.turnID, "error", err)
-		return failedTerminal(turnReasonInternal, "commit failed: "+err.Error(), nil)
-	}
-	// Changed=false: the fold re-produced content identical to base — no
-	// commit object, but the turn is a valid completion.
-	return TurnTerminal{
-		Status:     turnStatusCompleted,
-		CommitSHA:  res.CommitSHA,
-		NoChanges:  !res.Changed,
-		SpecEdited: res.Changed,
-	}
 }
 
 // finishTurn stamps the terminal row state and emits the ONE terminal stream
@@ -502,7 +393,7 @@ func (s *Service) finishTurn(ctx context.Context, job turnJob, term TurnTerminal
 		go func() {
 			hookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			hook(hookCtx, job.orgID, job.projectID, job.turnID, job.useCase, term.Status)
+			hook(hookCtx, job.orgID, job.projectID, job.turnID, useCaseGeneral, term.Status)
 		}()
 	}
 }
@@ -542,22 +433,6 @@ func (s *Service) turnBaseReader(ref sourcecontrol.RepoRef, baseRef string) agen
 		}
 		return content, true, nil
 	}
-}
-
-// commitMessage renders the D20 conventional message:
-// generate(requirements|design)/chat(requirements): <first line of the user
-// instruction, truncated>. The generic turn (useCaseGeneral) never commits, so
-// it is deliberately absent here.
-func commitMessage(useCase, summary string) string {
-	verb := "generate"
-	scope := "requirements"
-	switch useCase {
-	case useCaseRequirementsChat:
-		verb = "chat"
-	case useCaseDesignGenerate:
-		scope = "design"
-	}
-	return verb + "(" + scope + "): " + firstLine(summary, 72)
 }
 
 func firstLine(s string, max int) string {

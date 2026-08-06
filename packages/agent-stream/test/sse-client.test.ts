@@ -121,7 +121,7 @@ test("BFF `id:`-prefixed frames parse — the data line is not hidden by the id 
   const { parts, end } = await collect(
     byteStream([
       'id: 0\ndata: {"type":"tool-input-start","id":"t1","toolName":"addFile"}\n\n',
-      'id: 1\ndata: {"type":"tool-call","toolCallId":"t1","toolName":"addFile","input":{"path":"specs/requirements/requirements.md","content":"# Reqs\\n"}}\n\n',
+      'id: 1\ndata: {"type":"tool-call","toolCallId":"t1","toolName":"addFile","input":{"path":"specs/requirements/prd.md","content":"# Reqs\\n"}}\n\n',
       'id: 2\ndata: {"type":"turn-committed","commitSha":"abc123"}\n\n',
       "data: [DONE]\n\n", // the [DONE] sentinel is written WITHOUT an id
     ]),

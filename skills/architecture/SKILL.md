@@ -1,98 +1,43 @@
 ---
-name: high-level-architecture
-description: Use when turning requirements into a design — creating or restructuring specs/design/design.md, deciding which components the system decomposes into, writing the specs/design/design.cell architecture diagram, or writing a component's design.json.
+name: architecture
+description: Use when deriving or enriching a component's design — deciding the component decomposition, filling a scaffolded design.json (language, dependencies, description, pinned skills), or resolving/reconsidering any dependency.
 metadata:
   aep:
     kind: platform
     audience: [design]
 ---
 
+# Architecture
 
-# High-level architecture
+Component decomposition and per-component facts. The cell (`cell-design`
+skill) declares WHAT exists; this skill owns deciding the decomposition and
+ENRICHING each component's `design.json`.
 
-Derive the design tree from `requirements.md`. The design lives under
-`specs/design/` — never at the bundle root.
+## Scaffold first, enrich second
 
-```
-specs/design/design.cell                      # project-level architecture diagram DSL (this skill) — emit FIRST
-specs/design/design.md                        # the top-level design (this skill)
-specs/design/components/<name>/design.json    # one per component (structured facts)
-specs/design/components/<name>/wireframes.dsl  # web-applications only (excalidraw-wireframes skill)
-specs/design/components/<name>/openapi.yaml   # services only (openapi-conventions skill) — emit LAST
-```
+When the cell is saved, the platform scaffolds
+`specs/design/components/<id>/design.json` for every deployable component —
+the mechanical fields (name, type, version, buildpack, appPath, entrypoint, a
+default exposure) plus a `"language": "TBD"` sentinel. Your job is the
+JUDGMENT fields, and the build gate refuses an in-phase component left
+unenriched:
 
-## The architecture diagram — design.cell
-
-`specs/design/design.cell` is a single project-level file holding the
-cell-diagram DSL. Emit it **FIRST**, before design.md and the component
-design.json files: it is small, it fixes the component decomposition up front,
-and the console streams it into the live architecture diagram as you write, so
-the user watches the architecture take shape.
-
-**Load the `cell-architecture-dsl` skill before writing design.cell.** It
-carries the full grammar, the AEP boundary semantics (own components inside the
-cell; Thunder auth and org services on east; third-party SaaS on south;
-internet/intranet exposure on north/west), and the single-`addFile` write
-protocol. Do not guess the syntax — `resource`/`external` are NOT keywords, and
-the node `type` is a bare trailing token with no colon.
-
-**design.cell is the architecture contract.** The rest of the design must match
-it: every `components/<name>/design.json` uses the SAME component id as its
-`design.cell` node, and every edge in design.cell that touches a component
-appears as a `dependencies[]` entry on that component's design.json (and vice
-versa — an interaction in design.json must be an edge in design.cell). A
-mismatch between the two is a defect, not a stylistic choice.
-
-## Incremental architecture changes
-
-When a later change alters the ARCHITECTURE of an existing design — a component
-added/removed/renamed, an edge or exposure changed, an external/SaaS dependency
-added or dropped — keep the generation order: update
-`specs/design/design.cell` FIRST (load `cell-architecture-dsl`; targeted
-editFile edits, or removeFile + ONE addFile only for a restructure), then the
-design.md Components/Interactions sections, then every affected component's
-design.json. design.cell stays the architecture contract after every change,
-not just the first one. A change that alters none of those leaves design.cell
-untouched.
-
-## The top-level design.md
-
-These sections, in order. Depth rule: **every requirement must have a home** in
-a capability, entity, role, or screen below — a requirement you can't point to
-in this document is a defect, not an editing choice.
-
-1. **Overview** — what the system is, in one paragraph.
-2. **Components** — a bullet per component: name, `type`, one-line
-   responsibility.
-3. **Capabilities** — per component, the exhaustive feature list the
-   requirements imply, each with 1–2 sentences of responsibility. Group by
-   module when the requirements do (e.g. "Risk register", "Audit evidence").
-   This list drives the component's API resources and screens — anything
-   missing here silently disappears downstream.
-4. **Data model** — the core entities, their key fields, and relationships.
-   These become the API's `components/schemas`.
-5. **Roles & access** — the actors from the requirements and what each may
-   see/do. Drives auth design and per-role screens.
-6. **Interactions** — who calls whom and for what: component-to-component
-   plus external integrations (email, AI/LLM, object storage, ...).
-7. **Data flow** — the main lifecycles end to end (one numbered walkthrough
-   per core workflow).
-
-Do NOT add platform-owned boilerplate: no Kubernetes/monitoring/backup
-sections, no generic performance targets, no "future enhancements" — unless
-the requirements state them.
-
-**Backend services are written in Ballerina** unless the requirements name a
-different language, in which case honour what they say. That choice is a fact
+- **language** — **Language is decided in this order**: the organization skill's Tech stack
+default first, then a language the requirements name, then the platform
+default — **Ballerina** for backend services, TypeScript for web apps.
+Replace the scaffold's `"language": "TBD"` sentinel with the decided value;
+the build gate refuses a component whose language is still TBD. That choice is a fact
 you record, not a preference you re-derive per component: write it as the
 component's `language` and pin the matching stack skill in `skillsPinned`.
-
-After emitting or changing a component's design, record the skills that
+- **dependencies** — the playbook below.
+- **description** — one paragraph: single responsibility, port/entrypoint
+  expectations, and what it explicitly does NOT do.
+- **skillsPinned** — After emitting or changing a component's design, record the skills that
 component's build actually needs as a `skillsPinned` array **inside that
 component's `specs/design/components/<name>/design.json`** — use the exact
 catalog names, e.g. a Ballerina API service →
 `["openapi-conventions", "ballerina"]` (a Go one → `["openapi-conventions",
-"go"]`); a web-application → `["excalidraw-wireframes", "react-webapp"]`. Add
+"go"]`); a web-application → `["wireframes", "react-webapp"]`. Add
 `"api-management"` to any service that sits behind the gateway, and
 `"thunder-authentication"` to **both** sides of sign-in — the SPA *and* every
 protected backend it calls, since that skill owns how each resolves the caller's
@@ -100,6 +45,11 @@ role. It is a JSON key on the component's design object, so include it when you
 write that `design.json` (addFile/editFile) — do NOT put `skillsPinned` in
 `design.md` frontmatter. Each component carries only the skills its own build
 needs.
+
+`stories` is platform-recomputed from the cell's citations — cite stories in
+the CELL, never here; an authored value is overwritten on save. Writing the
+whole enriched file yourself (removeFile + addFile with every field) is
+equally valid — the scaffold is a safety net, not a required intermediate.
 
 ## Deriving components — deployment units the requirements justify
 
@@ -189,7 +139,9 @@ into `workload.yaml` and the managed-API gateway binds to. The port lives in
 - **Preserved verbatim** where the platform has already written them:
   `exposesAPI`, `componentAgentInstructions`, and any dependency
   `status`/`reason`.
-- **Recomputed and overwritten** on every save: a dependency's `wiring` object.
+- **Recomputed and overwritten** on every save: a dependency's `wiring` object,
+  and the component's `stories` array — the platform restamps it from the
+  design.cell citations, so cite stories in the CELL, never here.
   The platform derives its `ref` and its env-var names from the dependency's name
   and its resource type's declared outputs, so anything you write there is
   discarded.
@@ -415,7 +367,7 @@ console shows it in the dependency drawer and the coding agent relies on it to
 integrate correctly.
 
 One component per directory. Every `web-application` gets a `wireframes.dsl`
-(load `excalidraw-wireframes` before writing it); every `service` gets an
+(load `wireframes` before writing it); every `service` gets an
 `openapi.yaml` (load `openapi-conventions` before writing it), emitted LAST.
 Other kinds (scheduled tasks, workers, …) carry no extra artifact yet — capture
 their behaviour fully in `description` and `dependencies`.

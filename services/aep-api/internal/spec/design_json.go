@@ -80,6 +80,9 @@ type componentDesignJSON struct {
 	AppPath      string           `json:"appPath,omitempty"`
 	Entrypoint   string           `json:"entrypoint,omitempty"`
 	Exposure     string           `json:"exposure,omitempty"`
+	// Stories is the platform-recomputed citation copy from the cell (#369) —
+	// carried losslessly through the codec so a save never strips it.
+	Stories      []int            `json:"stories,omitempty"`
 	Description  string           `json:"description,omitempty"`
 	Endpoint     *endpointJSON    `json:"endpoint,omitempty"`
 	Dependencies []dependencyJSON `json:"dependencies"`
@@ -213,6 +216,7 @@ func parseComponentDesignJSON(dir, raw string) (DesignComponent, error) {
 		Buildpack:                  dj.Buildpack,
 		AppPath:                    dj.AppPath,
 		Exposure:                   dj.Exposure,
+		Stories:                    append([]int(nil), dj.Stories...),
 		Description:                dj.Description,
 		Endpoint:                   toModelEndpoint(dj.Endpoint),
 		ComponentAgentInstructions: dj.ComponentAgentInstructions,
@@ -316,6 +320,7 @@ func marshalComponentDesignJSON(dir string, comp DesignComponent) ([]byte, error
 		AppPath:                    comp.AppPath,
 		Entrypoint:                 comp.Entrypoint,
 		Exposure:                   comp.Exposure,
+		Stories:                    comp.Stories,
 		Description:                comp.Description,
 		Endpoint:                   toJSONEndpoint(comp.Endpoint),
 		Dependencies:               toJSONDeps(comp.Dependencies),

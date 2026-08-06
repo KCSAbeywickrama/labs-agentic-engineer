@@ -52,16 +52,16 @@ const FLOW_DSL = `screen Login
 function seedProject(): string {
   const dir = mkdtempSync(join(tmpdir(), "aep-play-design-"));
   mkdirSync(join(dir, "specs/requirements"), { recursive: true });
-  writeFileSync(join(dir, "specs/requirements/requirements.md"), "# Requirements\n\n- login\n");
+  writeFileSync(join(dir, "specs/requirements/prd.md"), "# Requirements\n\n- login\n");
   return dir;
 }
 
 function tempSkills(): string {
   const dir = mkdtempSync(join(tmpdir(), "aep-play-skills-"));
-  mkdirSync(join(dir, "high-level-architecture"), { recursive: true });
+  mkdirSync(join(dir, "architecture"), { recursive: true });
   writeFileSync(
-    join(dir, "high-level-architecture", "SKILL.md"),
-    "---\nname: high-level-architecture\ndescription: architecture flow\n---\n\nAuthor skillsPinned in design.json.\n",
+    join(dir, "architecture", "SKILL.md"),
+    "---\nname: architecture\ndescription: architecture flow\n---\n\nAuthor skillsPinned in design.json.\n",
   );
   return dir;
 }

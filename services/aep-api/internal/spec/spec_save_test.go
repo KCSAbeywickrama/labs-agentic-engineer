@@ -23,17 +23,22 @@ package spec
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 )
 
-// validSpecSeed is a buildable spec: requirements main doc + a valid design
-// bundle (root + one component with schema-valid design.json).
+// validSpecSeed is a buildable spec: a PRD with a parseable Phasing section,
+// a design.cell declaring the phase + story citations, and a valid design
+// bundle (root + one enriched component with its type artifact) — everything
+// the layout gates AND the phase gate (#370/#371) demand.
 func validSpecSeed() map[string]string {
 	return map[string]string{
-		"specs/requirements/requirements.md":      "the spec\n",
-		"specs/design/design.md":                  "# System\n",
-		"specs/design/components/svc/design.md":   "---\ntype: service\n---\n# svc\n",
-		"specs/design/components/svc/design.json": validComponentDesignJSON("svc"),
+		"specs/requirements/prd.md":                "# PRD\n\n## User Stories\n\n1. As a user, I want the thing, so that value.\n\n## Phasing\n\n- **Phase 1 — slice**: everything. Stories: 1.\n",
+		"specs/design/design.cell":                 "phase 1\ncomponent svc service [stories: 1]\n",
+		"specs/design/design.md":                   "# System\n",
+		"specs/design/components/svc/design.md":    "---\ntype: service\n---\n# svc\n",
+		"specs/design/components/svc/design.json":  validComponentDesignJSON("svc"),
+		"specs/design/components/svc/openapi.yaml": "openapi: 3.0.3\n",
 	}
 }
 
@@ -85,13 +90,13 @@ func TestSaveSpec_TagsAtHead(t *testing.T) {
 func TestSaveSpec_GateRequirementsMissing(t *testing.T) {
 	t.Parallel()
 	seed := validSpecSeed()
-	delete(seed, "specs/requirements/requirements.md")
+	delete(seed, "specs/requirements/prd.md")
 	r := newRig(t, seed)
 
 	_, err := r.svc.SaveSpec(context.Background(), r.org, r.proj, SaveRequest{})
 	paths := specErrPaths(t, err)
-	if !containsPath(paths, "specs/requirements/requirements.md") {
-		t.Fatalf("validation paths = %v, want specs/requirements/requirements.md", paths)
+	if !containsPath(paths, "specs/requirements/prd.md") {
+		t.Fatalf("validation paths = %v, want specs/requirements/prd.md", paths)
 	}
 	if got := r.tags(); len(got) != 0 {
 		t.Errorf("tags = %v, want none (nothing may be tagged when the gate fails)", got)
@@ -100,7 +105,7 @@ func TestSaveSpec_GateRequirementsMissing(t *testing.T) {
 
 func TestSaveSpec_GateDesignMissing(t *testing.T) {
 	t.Parallel()
-	r := newRig(t, map[string]string{"specs/requirements/requirements.md": "the spec\n"})
+	r := newRig(t, map[string]string{"specs/requirements/prd.md": "the spec\n"})
 
 	_, err := r.svc.SaveSpec(context.Background(), r.org, r.proj, SaveRequest{})
 	paths := specErrPaths(t, err)
@@ -139,7 +144,7 @@ func TestSaveSpec_GateAggregatesRequirementsAndDesign(t *testing.T) {
 
 	_, err := r.svc.SaveSpec(context.Background(), r.org, r.proj, SaveRequest{})
 	paths := specErrPaths(t, err)
-	if !containsPath(paths, "specs/requirements/requirements.md") || !containsPath(paths, "specs/design/design.md") {
+	if !containsPath(paths, "specs/requirements/prd.md") || !containsPath(paths, "specs/design/design.md") {
 		t.Fatalf("validation paths = %v, want both the requirements and design entries", paths)
 	}
 }
@@ -199,7 +204,7 @@ func TestSaveSpec_LegacyDesignTagsExcluded(t *testing.T) {
 	r.tag("v1", "spec v1")
 	r.tag("v1-1", "legacy design rev")
 	r.tag("v1-2", "legacy design rev")
-	r.seed(map[string]string{"specs/requirements/requirements.md": "moved on\n"}, "spec edit")
+	r.seed(map[string]string{"specs/requirements/prd.md": "# PRD v2\n\n## User Stories\n\n1. As a user, I want the thing, so that value.\n\n## Phasing\n\n- **Phase 1 — slice**: moved on. Stories: 1.\n"}, "spec edit")
 
 	res, err := r.svc.SaveSpec(context.Background(), r.org, r.proj, SaveRequest{})
 	if err != nil {
@@ -215,7 +220,7 @@ func TestSaveSpec_AtProvidedCommit_TagsThatCommit(t *testing.T) {
 	r := newRig(t, validSpecSeed())
 	applied := r.headSHA()
 	// main moves on after the apply — the save must still pin the caller's commit.
-	r.seed(map[string]string{"specs/requirements/requirements.md": "newer draft\n"}, "later edit")
+	r.seed(map[string]string{"specs/requirements/prd.md": "newer draft\n"}, "later edit")
 
 	res, err := r.svc.SaveSpec(context.Background(), r.org, r.proj, SaveRequest{CommitSHA: applied})
 	if err != nil {
@@ -250,7 +255,7 @@ func TestValidateSpecAtTag(t *testing.T) {
 func TestValidateSpecAtTag_InvalidSpecAtTag(t *testing.T) {
 	t.Parallel()
 	// A tag cut externally over a design-less tree fails re-validation.
-	r := newRig(t, map[string]string{"specs/requirements/requirements.md": "the spec\n"})
+	r := newRig(t, map[string]string{"specs/requirements/prd.md": "the spec\n"})
 	r.tag("v1", "external tag over an unbuildable tree")
 
 	err := r.svc.ValidateSpecAtTag(context.Background(), r.org, r.proj, "v1")
@@ -273,5 +278,33 @@ func TestLatestSpecTag(t *testing.T) {
 	r.tag("v1-3", "legacy design rev — must not win")
 	if got := r.svc.LatestSpecTag(ctx, r.org, r.proj); got != "v1" {
 		t.Errorf("LatestSpecTag = %q, want v1", got)
+	}
+}
+
+func TestBuildScopeAtTag(t *testing.T) {
+	t.Parallel()
+	seed := validSpecSeed()
+	seed["specs/requirements/prd.md"] = "# PRD\n\n## User Stories\n\n1. As a user, I want A, so that a.\n2. As a user, I want B, so that b.\n7. As a user, I want S, so that s.\n\n## Phasing\n\n- **Phase 1 — slice**: core. Stories: 1, 2.\n- **Phase 2 — later**: Stories: 7.\n"
+	seed["specs/design/design.cell"] = "phase 1\ncomponent svc service [stories: 1, 2]\ncomponent later-svc service [stories: 7]\n"
+	r := newRig(t, seed)
+	if _, err := r.svc.SaveRequirements(context.Background(), r.org, r.proj, SaveRequest{}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	scope, err := r.svc.BuildScopeAtTag(context.Background(), r.org, r.proj, "v1")
+	if err != nil {
+		t.Fatalf("BuildScopeAtTag: %v", err)
+	}
+	if scope.Phase != 1 || scope.PhaseTitle() != "Phase 1" || scope.Tag != "v1" {
+		t.Fatalf("scope identity = %+v", scope)
+	}
+	if fmt.Sprint(scope.InScope) != "[1 2]" {
+		t.Errorf("inScope = %v", scope.InScope)
+	}
+	if scope.StoryTitles[1] == "" || scope.StoryTitles[7] != "" {
+		t.Errorf("story titles = %v", scope.StoryTitles)
+	}
+	if fmt.Sprint(scope.ComponentStories["svc"]) != "[1 2]" || scope.ComponentStories["later-svc"] != nil {
+		t.Errorf("componentStories = %v", scope.ComponentStories)
 	}
 }

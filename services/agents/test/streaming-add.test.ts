@@ -68,7 +68,7 @@ async function feed(writer: StreamingDocWriter, parts: StreamPart[]): Promise<vo
   await writer.drain();
 }
 
-const MD_PATH = "specs/requirements/requirements.md";
+const MD_PATH = "specs/requirements/prd.md";
 const MD = "# Todo App\n\n## Overview\nManage todo items.\n\n## Rules\n- title\n- done flag\n";
 
 test("streams markdown addFile incrementally, line-by-line, converging to full content", async () => {

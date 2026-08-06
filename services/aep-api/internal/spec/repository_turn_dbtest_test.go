@@ -100,7 +100,7 @@ func TestTurnRepo_GuardAndLifecycle(t *testing.T) {
 	// Finish is guarded on running and releases the guard.
 	ok, err := repo.Finish(ctx, first.ID, spec.TurnTerminal{
 		Status: "failed", Reason: "base-moved",
-		Paths: []string{"specs/requirements/requirements.md"}, Message: "conflict",
+		Paths: []string{"specs/requirements/prd.md"}, Message: "conflict",
 	})
 	if err != nil || !ok {
 		t.Fatalf("Finish = (%v, %v)", ok, err)

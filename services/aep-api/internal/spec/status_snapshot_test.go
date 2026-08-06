@@ -57,7 +57,7 @@ func TestStatusSnapshot_LadderAndDirty(t *testing.T) {
 	}
 
 	// Requirements land.
-	r.seed(map[string]string{"specs/requirements/requirements.md": "# req\n"}, "spec")
+	r.seed(map[string]string{"specs/requirements/prd.md": "# req\n"}, "spec")
 	r.freshen()
 	snap = r.snapshot()
 	if !snap.HasSpec || snap.HasDesign || snap.SpecVersion != "" {
@@ -96,7 +96,7 @@ func TestStatusSnapshot_LadderAndDirty(t *testing.T) {
 	if snap = r.snapshot(); snap.SpecDirty {
 		t.Fatal("non-spec commit flagged dirty")
 	}
-	r.seed(map[string]string{"specs/requirements/requirements.md": "# req v2\n"}, "spec edit")
+	r.seed(map[string]string{"specs/requirements/prd.md": "# req v2\n"}, "spec edit")
 	r.freshen()
 	snap = r.snapshot()
 	if !snap.SpecDirty || snap.SpecVersion != "v1" {
@@ -116,13 +116,13 @@ func TestStatusSnapshot_LadderAndDirty(t *testing.T) {
 // invisible until some fetch-bearing operation runs.
 func TestStatusSnapshot_ServesMirrorWithoutFetch(t *testing.T) {
 	t.Parallel()
-	r := newRig(t, map[string]string{"specs/requirements/requirements.md": "# req\n"})
+	r := newRig(t, map[string]string{"specs/requirements/prd.md": "# req\n"})
 	r.freshen() // prime the mirror
 
 	before := r.snapshot()
 
 	// Origin moves out-of-band: new spec content and a version tag.
-	r.seed(map[string]string{"specs/requirements/requirements.md": "# req v2\n"}, "oob edit")
+	r.seed(map[string]string{"specs/requirements/prd.md": "# req v2\n"}, "oob edit")
 	r.tag("v1", "oob tag")
 
 	after := r.snapshot()
@@ -147,7 +147,7 @@ func TestStatusSnapshot_ServesMirrorWithoutFetch(t *testing.T) {
 func TestComponentCountAtTag(t *testing.T) {
 	t.Parallel()
 	r := newRig(t, map[string]string{
-		"specs/requirements/requirements.md":      "# req\n",
+		"specs/requirements/prd.md":      "# req\n",
 		"specs/design/design.md":                  "# design\n",
 		"specs/design/components/api/design.json": `{"type":"service"}`,
 		"specs/design/components/web/design.json": `{"type":"webapp"}`,

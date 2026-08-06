@@ -95,7 +95,7 @@ const VALID_DESIGN = (name: string): string =>
 function seedDesignedProject(): string {
   const dir = mkdtempSync(join(tmpdir(), "aep-play-tasks-"));
   mkdirSync(join(dir, "specs/requirements"), { recursive: true });
-  writeFileSync(join(dir, "specs/requirements/requirements.md"), "# R\n");
+  writeFileSync(join(dir, "specs/requirements/prd.md"), "# R\n");
   mkdirSync(join(dir, "specs/design/components/user-service"), { recursive: true });
   mkdirSync(join(dir, "specs/design/components/web-frontend"), { recursive: true });
   writeFileSync(join(dir, "specs/design/design.md"), "# Design\n");

@@ -96,7 +96,7 @@ func TestDslGateAcceptsRowInsideCard(t *testing.T) {
 }
 
 func TestDslGateSkipsOtherPaths(t *testing.T) {
-	if code, _ := checkWireframeDslGuard("specs/requirements/requirements.md", dslLegacy); code != "" {
+	if code, _ := checkWireframeDslGuard("specs/requirements/prd.md", dslLegacy); code != "" {
 		t.Fatalf("markdown gated")
 	}
 	if code, _ := checkWireframeDslGuard("specs/design/components/api/erd.dsl", dslLegacy); code != "" {

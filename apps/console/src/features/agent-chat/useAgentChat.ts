@@ -51,7 +51,7 @@ export interface AgentChat {
   /** The turn currently streaming into this log, if any (task 3: the
    *  authoritative "running" signal for the feed, incl. re-attached turns). */
   activeTurnId: string | undefined;
-  send: (instruction: string, opts?: { eagerSkills?: string[] }) => void;
+  send: (instruction: string) => void;
   /** Clear the log + mint a fresh conversation id (header action). */
   newConversation: () => void;
 }
@@ -115,7 +115,7 @@ export function useAgentChat(org: string, projectName: string): AgentChat {
   }, [chatKey, org, projectName, onTurnCommitted]);
 
   const send = useCallback(
-    (instruction: string, opts?: { eagerSkills?: string[] }) => {
+    (instruction: string) => {
       const text = instruction.trim();
       if (!text || isSending) return;
       const convId = conversationIdFor(org, projectName, { create: true })!;
@@ -123,7 +123,7 @@ export function useAgentChat(org: string, projectName: string): AgentChat {
       void (async () => {
         let turnId: string;
         try {
-          turnId = await startCollabTurn(projectName, convId, text, opts);
+          turnId = await startCollabTurn(projectName, convId, text);
         } catch (err) {
           addMessage(chatKey, {
             role: "user",

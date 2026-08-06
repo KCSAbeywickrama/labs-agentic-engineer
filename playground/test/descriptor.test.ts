@@ -27,7 +27,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DESCRIPTOR_PATH, descriptorFile, readIdea, writeDescriptor } from "../src/state/descriptor.js";
-import { startInstruction, START_INSTRUCTION, IDEA_STEER_PREFIX } from "../src/engine/compose.js";
+import { startSpec } from "../src/engine/turn-spec.js";
 import { classifyChatInput } from "../src/tui/chat-commands.js";
 import { readProjectFiles } from "../src/kit/project-fs.js";
 import { renderPart } from "../src/kit/render.js";
@@ -81,10 +81,10 @@ test("the descriptor never enters a turn snapshot", () => {
   try {
     writeDescriptor(dir, "expense-tracker", "an expense claim tracker");
     mkdirSync(join(dir, "specs/requirements"), { recursive: true });
-    writeFileSync(join(dir, "specs/requirements/requirements.md"), "# Reqs\n", "utf8");
+    writeFileSync(join(dir, "specs/requirements/prd.md"), "# Reqs\n", "utf8");
 
     const files = readProjectFiles(dir);
-    assert.ok(files["specs/requirements/requirements.md"], "ordinary spec files still ride");
+    assert.ok(files["specs/requirements/prd.md"], "ordinary spec files still ride");
     assert.equal(files[DESCRIPTOR_PATH], undefined, "the descriptor must never reach the agent");
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -131,8 +131,12 @@ test("a pending question card renders as awaiting, not as an error", () => {
   assert.doesNotMatch(out, /error/);
 });
 
-test("startInstruction appends the idea, or nothing when there is none", () => {
-  assert.equal(startInstruction("an expense tracker"), START_INSTRUCTION + IDEA_STEER_PREFIX + "an expense tracker");
-  assert.equal(startInstruction(null), START_INSTRUCTION);
-  assert.equal(startInstruction("   "), START_INSTRUCTION);
+// The playground plays the server's role: it carries the captured idea as a
+// FACT on the turn. What that becomes in the prompt is the agents service's
+// business (services/agents/test/turn-compose.test.ts covers the wording).
+test("startSpec carries the idea, or nothing when there is none", () => {
+  assert.deepEqual(startSpec("an expense tracker"), { kind: "start", idea: "an expense tracker" });
+  assert.deepEqual(startSpec("  an expense tracker  "), { kind: "start", idea: "an expense tracker" });
+  assert.deepEqual(startSpec(null), { kind: "start" });
+  assert.deepEqual(startSpec("   "), { kind: "start" });
 });

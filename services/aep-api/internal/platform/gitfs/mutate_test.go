@@ -55,7 +55,7 @@ func TestMutateWriteAndDeleteLandOnOrigin(t *testing.T) {
 		t.Fatalf("deleted README.md still readable (err=%v)", err)
 	}
 	// The untouched seeded file survives the overlay.
-	if got := fx.Origin.FileAt(t, "main", "specs/requirements/requirements.md"); got != "req v1\n" {
+	if got := fx.Origin.FileAt(t, "main", "specs/requirements/prd.md"); got != "req v1\n" {
 		t.Fatalf("untouched file corrupted: %q", got)
 	}
 }
@@ -128,7 +128,7 @@ func TestMutateBaseSnapshotFeedsPreconditions(t *testing.T) {
 		}); err != nil {
 			t.Errorf("Walk: %v", err)
 		}
-		if len(walked) != 1 || walked[0] != "specs/requirements/requirements.md" {
+		if len(walked) != 1 || walked[0] != "specs/requirements/prd.md" {
 			t.Errorf("Walk(specs/) = %v", walked)
 		}
 		return nil

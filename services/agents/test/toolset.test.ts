@@ -72,6 +72,8 @@ test("files instructions are unchanged; task-plan instructions are a distinct mi
   assert.equal(buildInstructions(), instructions); // today's prompt, byte-identical
   assert.ok(buildTaskPlanInstructions().startsWith(taskPlanInstructions));
   assert.match(taskPlanInstructions, /planTask/);
-  assert.match(taskPlanInstructions, /task-planning skill/);
+  // #373 layer charter: the skill POINTER rides the plan instruction (the BFF's
+  // PlanInstruction), not this system prompt — the prompt fixes invariants only.
+  assert.doesNotMatch(taskPlanInstructions, /task-planning skill/);
   assert.doesNotMatch(taskPlanInstructions, /editFile/); // the plan turn does not edit files
 });

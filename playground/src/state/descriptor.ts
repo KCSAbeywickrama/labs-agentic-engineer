@@ -32,7 +32,7 @@
  * The agent still cannot read it. Dot-led path segments are stripped from every
  * turn snapshot (`readProjectFiles`, mirroring agentfold.InTurnSnapshot), so
  * the idea reaches a turn ONLY through the `/start` expansion in
- * `engine/compose.ts` — never by the model opening the file.
+ * `engine/turn-spec.ts` — never by the model opening the file.
  */
 
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";

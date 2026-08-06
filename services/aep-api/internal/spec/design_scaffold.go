@@ -1,0 +1,218 @@
+// Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+package spec
+
+// design_scaffold.go — the scaffold engine (spec-agent redesign #371): the
+// cell is the primary design source, so the moment a save lands
+// specs/design/design.cell, the platform derives a design.json SKELETON for
+// every deployable component the cell declares that has none yet — in the same
+// commit. The agent then only ENRICHES (language, dependencies, description,
+// skillsPinned); it never authors the mechanical fields. Skeletons satisfy the
+// design write-gate outright (strict schema, non-empty strings), so a
+// scaffolded-but-unenriched component is valid on disk and the build-tag gate
+// (spec_save.go) is what demands enrichment for in-phase components.
+
+import (
+	"encoding/json"
+	"sort"
+	"strings"
+)
+
+// DesignCellPath is the project-level cell file the scaffold keys off.
+const DesignCellPath = "specs/design/design.cell"
+
+// deployableCellTypes maps a cell node type to the design.json component type
+// it scaffolds. Nodes typed otherwise (database, cache, identity-server, …)
+// are dependencies of components, never component directories.
+var deployableCellTypes = map[string]string{
+	"service":         "service",
+	"web-application": "web-application",
+	"web-app":         "web-application",
+	"worker":          "worker",
+	"scheduled-task":  "scheduled-task",
+}
+
+// scaffoldLanguageSentinel is what the scaffold writes for `language`: a
+// non-empty value (the schema demands one) that the build-tag gate REFUSES.
+// Language is a judgment call the platform never makes — the agent fills it
+// from the organization skill's Tech stack default, else the requirements,
+// else the platform stack default the architecture skill names.
+const scaffoldLanguageSentinel = "TBD"
+
+// scaffoldExposureByType is the safe mechanical default per type; enrichable.
+var scaffoldExposureByType = map[string]string{
+	"service":         "intranet",
+	"web-application": "internet",
+	"worker":          "intranet",
+	"scheduled-task":  "intranet",
+}
+
+func componentDesignPath(id string) string {
+	return "specs/design/components/" + id + "/design.json"
+}
+
+// scaffoldFromCell derives the missing design.json skeletons for a design.cell
+// source. `exists` answers whether a repo path is already present (committed
+// tree or the same batch). A cell that fails fact extraction scaffolds nothing
+// — the TS grammar validator owns surfacing the syntax error.
+func scaffoldFromCell(cellSource string, exists func(path string) bool) map[string]string {
+	facts, err := parseCellFacts(cellSource)
+	if err != nil {
+		return nil
+	}
+	out := map[string]string{}
+	for _, c := range facts.Components {
+		componentType, deployable := deployableCellTypes[strings.ToLower(strings.TrimSpace(c.Type))]
+		if !deployable || c.ID == "" {
+			continue
+		}
+		path := componentDesignPath(c.ID)
+		if exists(path) {
+			continue
+		}
+		out[path] = renderScaffold(c.ID, componentType, c.Stories)
+	}
+	return out
+}
+
+// renderScaffold emits a skeleton that passes the strict design write-gate.
+// Key order is stable (marshal of an ordered struct) so scaffolds are
+// byte-deterministic. `stories` is the platform-recomputed citation copy from
+// the cell (omitted when the node cites nothing).
+func renderScaffold(id, componentType string, stories []int) string {
+	skeleton := struct {
+		Name         string `json:"name"`
+		Type         string `json:"type"`
+		Version      string `json:"version"`
+		Language     string `json:"language"`
+		Buildpack    string `json:"buildpack"`
+		AppPath      string `json:"appPath"`
+		Entrypoint   string `json:"entrypoint"`
+		Exposure     string `json:"exposure"`
+		Stories      []int  `json:"stories,omitempty"`
+		Dependencies []any  `json:"dependencies"`
+		Description  string `json:"description"`
+	}{
+		Name:         id,
+		Type:         componentType,
+		Version:      "0.1.0",
+		Language:     scaffoldLanguageSentinel,
+		Buildpack:    "docker",
+		AppPath:      id,
+		Entrypoint:   "deployment/" + componentType,
+		Exposure:     scaffoldExposureByType[componentType],
+		Stories:      stories,
+		Dependencies: []any{},
+		Description:  "Scaffolded from design.cell — enrich with this component's responsibility, language (org Tech stack default first), dependencies, and pinned skills.",
+	}
+	b, _ := json.MarshalIndent(skeleton, "", "  ")
+	return string(b) + "\n"
+}
+
+// designCanonicalKeyOrder is the top-level key order restamped design.json
+// files are re-emitted in — the scaffold's order first, the remaining known
+// keys after; unknown keys cannot occur (the strict gates reject them).
+var designCanonicalKeyOrder = []string{
+	"name", "type", "version", "language", "buildpack", "appPath",
+	"entrypoint", "exposure", "stories", "dependencies", "description",
+	"endpoint", "skillsPinned", "exposesAPI", "componentAgentInstructions",
+}
+
+// restampDesignStories overwrites the `stories` field of a design.json with
+// the cell's citations (the field is platform-recomputed, like a dependency's
+// wiring — an authored value never survives). Returns the updated content and
+// whether it changed; malformed JSON returns unchanged (the write-gates own
+// rejecting it).
+func restampDesignStories(content string, stories []int) (string, bool) {
+	var obj map[string]any
+	if err := json.Unmarshal([]byte(content), &obj); err != nil {
+		return content, false
+	}
+	current, _ := obj["stories"].([]any)
+	if len(current) == len(stories) {
+		same := true
+		for i, v := range current {
+			n, ok := v.(float64)
+			if !ok || int(n) != stories[i] {
+				same = false
+				break
+			}
+		}
+		if same {
+			return content, false
+		}
+	}
+	if len(stories) == 0 {
+		if _, present := obj["stories"]; !present {
+			return content, false
+		}
+		delete(obj, "stories")
+	} else {
+		obj["stories"] = stories
+	}
+
+	var b strings.Builder
+	b.WriteString("{")
+	first := true
+	for _, key := range designCanonicalKeyOrder {
+		v, present := obj[key]
+		if !present {
+			continue
+		}
+		enc, err := json.MarshalIndent(v, "  ", "  ")
+		if err != nil {
+			return content, false
+		}
+		if !first {
+			b.WriteString(",")
+		}
+		first = false
+		b.WriteString("\n  ")
+		nameEnc, _ := json.Marshal(key)
+		b.Write(nameEnc)
+		b.WriteString(": ")
+		b.Write(enc)
+	}
+	b.WriteString("\n}\n")
+	return b.String(), true
+}
+
+// sortedPaths returns the scaffold map's paths in stable order (deterministic
+// commit contents + response metas).
+func sortedPaths(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for p := range m {
+		out = append(out, p)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// componentIDOfDesignPath extracts <id> from
+// specs/design/components/<id>/design.json; ok=false for any other path.
+func componentIDOfDesignPath(path string) (string, bool) {
+	const prefix = "specs/design/components/"
+	const suffix = "/design.json"
+	if !strings.HasPrefix(path, prefix) || !strings.HasSuffix(path, suffix) {
+		return "", false
+	}
+	id := strings.TrimSuffix(strings.TrimPrefix(path, prefix), suffix)
+	if id == "" || strings.Contains(id, "/") {
+		return "", false
+	}
+	return id, true
+}

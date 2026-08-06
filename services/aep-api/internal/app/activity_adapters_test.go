@@ -55,8 +55,8 @@ func newRecorders() (turnActivityRecorder, filesActivityRecorder, *captureActivi
 func TestSpecAuthorship_AgentTurnThenFlush_OneAgentLine(t *testing.T) {
 	turn, files, repo := newRecorders()
 
-	turn.RecordSpecUpdated(context.Background(), "acme", "web", "turn-1", "add a gym tracker", []string{"specs/requirements/requirements.md"})
-	files.RecordSpecUpdated(context.Background(), "acme", "web", "commit-sha-abc", []string{"specs/requirements/requirements.md"})
+	turn.RecordSpecUpdated(context.Background(), "acme", "web", "turn-1", "add a gym tracker", []string{"specs/requirements/prd.md"})
+	files.RecordSpecUpdated(context.Background(), "acme", "web", "commit-sha-abc", []string{"specs/requirements/prd.md"})
 
 	if len(repo.rows) != 1 {
 		t.Fatalf("recorded rows = %d, want 1 (agent line only, flush suppressed): %+v", len(repo.rows), repo.rows)
@@ -78,7 +78,7 @@ func TestSpecAuthorship_AgentTurnThenFlush_OneAgentLine(t *testing.T) {
 func TestSpecAuthorship_ManualFlush_RecordsUser(t *testing.T) {
 	_, files, repo := newRecorders()
 
-	files.RecordSpecUpdated(context.Background(), "acme", "web", "commit-sha-manual", []string{"specs/requirements/requirements.md"})
+	files.RecordSpecUpdated(context.Background(), "acme", "web", "commit-sha-manual", []string{"specs/requirements/prd.md"})
 
 	if len(repo.rows) != 1 {
 		t.Fatalf("recorded rows = %d, want 1 (manual user edit): %+v", len(repo.rows), repo.rows)
@@ -101,12 +101,12 @@ func TestSpecAuthorship_ManualFlush_RecordsUser(t *testing.T) {
 func TestSpecAuthorship_UserFlushBetweenTurnAndAgentFlush(t *testing.T) {
 	turn, files, repo := newRecorders()
 
-	turn.RecordSpecUpdated(context.Background(), "acme", "web", "turn-1", "add a gym tracker", []string{"specs/requirements/requirements.md"})
+	turn.RecordSpecUpdated(context.Background(), "acme", "web", "turn-1", "add a gym tracker", []string{"specs/requirements/prd.md"})
 	// Interim debounce flush: only the user's hand-edited file (the agent's
 	// markdown is still held pending review).
 	files.RecordSpecUpdated(context.Background(), "acme", "web", "commit-user", []string{"specs/design/design.json"})
 	// Session-end force flush finally lands the agent's markdown.
-	files.RecordSpecUpdated(context.Background(), "acme", "web", "commit-agent", []string{"specs/requirements/requirements.md"})
+	files.RecordSpecUpdated(context.Background(), "acme", "web", "commit-agent", []string{"specs/requirements/prd.md"})
 
 	if len(repo.rows) != 2 {
 		t.Fatalf("recorded rows = %d, want 2 (agent turn + user's own edit): %+v", len(repo.rows), repo.rows)
@@ -125,9 +125,9 @@ func TestSpecAuthorship_UserFlushBetweenTurnAndAgentFlush(t *testing.T) {
 func TestSpecAuthorship_MarkConsumedOnce(t *testing.T) {
 	turn, files, repo := newRecorders()
 
-	turn.RecordSpecUpdated(context.Background(), "acme", "web", "turn-1", "add a gym tracker", []string{"specs/requirements/requirements.md"})
-	files.RecordSpecUpdated(context.Background(), "acme", "web", "commit-1", []string{"specs/requirements/requirements.md"}) // agent flush — suppressed
-	files.RecordSpecUpdated(context.Background(), "acme", "web", "commit-2", []string{"specs/requirements/requirements.md"}) // later manual edit — user
+	turn.RecordSpecUpdated(context.Background(), "acme", "web", "turn-1", "add a gym tracker", []string{"specs/requirements/prd.md"})
+	files.RecordSpecUpdated(context.Background(), "acme", "web", "commit-1", []string{"specs/requirements/prd.md"}) // agent flush — suppressed
+	files.RecordSpecUpdated(context.Background(), "acme", "web", "commit-2", []string{"specs/requirements/prd.md"}) // later manual edit — user
 
 	if len(repo.rows) != 2 {
 		t.Fatalf("recorded rows = %d, want 2 (agent turn + later manual edit): %+v", len(repo.rows), repo.rows)
@@ -147,7 +147,7 @@ func TestSpecAuthorship_CommittedTurnMarksNothing(t *testing.T) {
 	turn, files, repo := newRecorders()
 
 	turn.RecordSpecUpdated(context.Background(), "acme", "web", "turn-1", "add a gym tracker", nil)
-	files.RecordSpecUpdated(context.Background(), "acme", "web", "commit-manual", []string{"specs/requirements/requirements.md"})
+	files.RecordSpecUpdated(context.Background(), "acme", "web", "commit-manual", []string{"specs/requirements/prd.md"})
 
 	if len(repo.rows) != 2 {
 		t.Fatalf("recorded rows = %d, want 2 (agent turn + manual edit): %+v", len(repo.rows), repo.rows)
@@ -162,8 +162,8 @@ func TestSpecAuthorship_CommittedTurnMarksNothing(t *testing.T) {
 func TestSpecAuthorship_ScopedPerProject(t *testing.T) {
 	turn, files, repo := newRecorders()
 
-	turn.RecordSpecUpdated(context.Background(), "acme", "web", "turn-1", "add a gym tracker", []string{"specs/requirements/requirements.md"})
-	files.RecordSpecUpdated(context.Background(), "acme", "other", "commit-other", []string{"specs/requirements/requirements.md"})
+	turn.RecordSpecUpdated(context.Background(), "acme", "web", "turn-1", "add a gym tracker", []string{"specs/requirements/prd.md"})
+	files.RecordSpecUpdated(context.Background(), "acme", "other", "commit-other", []string{"specs/requirements/prd.md"})
 
 	if len(repo.rows) != 2 {
 		t.Fatalf("recorded rows = %d, want 2 (agent in web + user in other): %+v", len(repo.rows), repo.rows)
