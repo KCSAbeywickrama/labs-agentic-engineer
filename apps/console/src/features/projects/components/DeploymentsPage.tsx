@@ -23,6 +23,8 @@ import {
   Avatar,
   Box,
   Button,
+  Card,
+  CardContent,
   CircularProgress,
   Divider,
   LinearProgress,
@@ -130,10 +132,11 @@ function ComponentRow({
       spacing={1.5}
       sx={{
         alignItems: "center",
+        // Outlined only, like every Builds surface — the row's border does
+        // the separating, no fill (#401 review: no solid backgrounds).
         border: 1,
         borderColor: "divider",
         borderRadius: 2,
-        bgcolor: "background.default",
         px: 1.75,
         py: 1.25,
         ...(card.kind === "notDeployed" && { opacity: 0.6, borderStyle: "dashed" }),
@@ -443,23 +446,28 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
       )}
       <Box
         sx={{
+          // The Builds page's exact grid (BuildsPage.tsx), so the two pages'
+          // main columns and side panels line up when switching between them.
           display: "grid",
-          gridTemplateColumns: { xs: "1fr", lg: "minmax(0, 1fr) 340px" },
-          gap: 2.5,
+          gridTemplateColumns: { xs: "1fr", lg: "minmax(0, 1fr) 320px" },
+          gap: 2,
           alignItems: "start",
         }}
       >
-        {/* ——— The story: what is running, one numbered rail ——— */}
-        <Box
+        {/* ——— The story: what is running, one numbered rail. Same surface
+            vocabulary as the Builds page's RunStory card: an outlined Card
+            with a near-transparent tint (never a solid fill), state carried
+            in the EDGE only when something is moving or broke. ——— */}
+        <Card
+          variant="outlined"
           sx={{
-            bgcolor: "background.default",
-            border: 1,
-            borderColor: "divider",
-            borderRadius: 3,
-            px: 3,
-            py: 2.5,
+            bgcolor: (t) => alpha(t.palette.text.primary, 0.02),
+            ...((liveChip.tone === "info" || liveChip.tone === "error") && {
+              borderColor: (t) => alpha(t.palette[liveChip.tone].main, 0.35),
+            }),
           }}
         >
+          <CardContent sx={{ "&:last-child": { pb: 2.5 } }}>
           <Stack
             direction="row"
             spacing={1.5}
@@ -546,18 +554,13 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
               ) : null}
             </StageRow>
           )}
-        </Box>
+          </CardContent>
+        </Card>
 
-        {/* ——— The side panel: the same facts at a glance ——— */}
-        <Box
-          sx={{
-            border: 1,
-            borderColor: "divider",
-            borderRadius: 3,
-            px: 3,
-            py: 2.5,
-          }}
-        >
+        {/* ——— The side panel: the same facts at a glance — MilestonePanel's
+            plain outlined Card, no fill of its own. ——— */}
+        <Card variant="outlined">
+          <CardContent>
           <PanelOverline color="success.main">Environment · Dev</PanelOverline>
           <Typography variant="h4" sx={{ mt: 0.5 }}>
             {deploy?.version || "—"}
@@ -676,7 +679,8 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
           >
             View the build that shipped this →
           </RouterLink>
-        </Box>
+          </CardContent>
+        </Card>
       </Box>
 
       {configTarget && (
