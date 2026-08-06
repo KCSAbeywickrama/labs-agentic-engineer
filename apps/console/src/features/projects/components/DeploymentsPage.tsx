@@ -65,9 +65,10 @@ import {
   configuredCount,
   connectionRows,
   seedValues,
+  type ConnectionRow,
   type ConnectionValues,
 } from "../lib/promotion";
-import { ComponentConfigDialog } from "./ComponentConfigDialog";
+import { ConnectionValuesDialog } from "./ConnectionValuesDialog";
 import { PromoteDialog } from "./PromoteDialog";
 import { ValidationChip } from "./ValidationChip";
 
@@ -115,15 +116,11 @@ function formatWhen(iso: string): string | null {
   return Number.isNaN(date.getTime()) ? null : date.toLocaleString();
 }
 
-/** One component under a stage: identity, its release, its state, its ways in
- *  (the app itself, and — on dev rows — its env-var configuration). */
-function ComponentRow({
-  card,
-  onConfigure,
-}: {
-  card: DeploymentCard;
-  onConfigure?: () => void;
-}) {
+/** One component under a stage: identity, its release, its state, its way in.
+ *  Deliberately UNIFORM — every row carries the same controls (#401 review:
+ *  no per-row optional actions; connection configuration lives on the side
+ *  panel's Connections section). */
+function ComponentRow({ card }: { card: DeploymentCard }) {
   const chip = cardChip(card);
   const d = card.deployment;
   return (
@@ -175,22 +172,15 @@ function ComponentRow({
         tone={chip.tone}
         {...(chip.outlined && { variant: "outlined" as const })}
       />
-      {onConfigure && (
-        <Button
-          size="small"
-          color="inherit"
-          onClick={onConfigure}
-          sx={{ flexShrink: 0, color: "text.secondary", fontWeight: 500 }}
-        >
-          Configure
-        </Button>
-      )}
       {d?.endpointUrl && (
         <MuiLink
           href={d.endpointUrl}
           target="_blank"
           rel="noreferrer"
           variant="body2"
+          // Every row's link reads "Open" — the accessible name carries the
+          // component so a screen reader hears which app it opens (#401 review).
+          aria-label={`Open ${card.displayName}`}
           sx={{ display: "inline-flex", alignItems: "center", gap: 0.5, flexShrink: 0 }}
         >
           Open <ExternalLink size={14} />
@@ -344,11 +334,10 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
   const liveValues = values ?? seedValues(connections);
   const [promoteOpen, setPromoteOpen] = useState(false);
   const [promoteNotice, setPromoteNotice] = useState(false);
-  // The component whose env-var editor is open (#395, decision 4).
-  const [configTarget, setConfigTarget] = useState<{
-    name: string;
-    displayName: string;
-  } | null>(null);
+  // The connection whose dev values are being re-collected (#395: dummy
+  // values at build time, real ones now), and the saved confirmation.
+  const [valuesTarget, setValuesTarget] = useState<ConnectionRow | null>(null);
+  const [valuesSaved, setValuesSaved] = useState(false);
 
   const header = (
     <PageHeader
@@ -417,7 +406,6 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
       dependencies.isPending ? null : connections.length,
     );
   const devDeployed = board.development.filter((c) => c.deployment);
-  const endpoints = devDeployed.filter((c) => c.deployment?.endpointUrl);
   const updatedAt = deployments.deployments
     .map((d) => d.createdAt ?? "")
     .filter(Boolean)
@@ -439,7 +427,12 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
         ? { label: "Deploying", tone: "info" as const }
         : deploy?.status === "failed"
           ? { label: "Deploy failed", tone: "error" as const }
-          : { label: "Nothing deployed", tone: "neutral" as const };
+          : // The status poll gates nothing above, so the header must not
+            // claim "nothing deployed" before the poll has answered (#401
+            // review) — an unknown state says it is unknown.
+            !deploy && status.isPending
+            ? { label: "Loading status", tone: "neutral" as const }
+            : { label: "Nothing deployed", tone: "neutral" as const };
 
   return (
     <>
@@ -502,12 +495,6 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
                     <ComponentRow
                       key={`${card.componentName}/${card.deployment?.environment ?? ""}`}
                       card={card}
-                      onConfigure={() =>
-                        setConfigTarget({
-                          name: card.componentName,
-                          displayName: card.displayName,
-                        })
-                      }
                     />
                   ))}
                 </Stack>
@@ -638,37 +625,67 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
             </Box>
           )}
           <Divider sx={{ my: 2 }} />
-          <PanelOverline>Endpoints</PanelOverline>
+          {/* The design's connections, and the way to hand the platform their
+              REAL values after build-time placeholders (#395 follow-up):
+              Update values re-collects an external connection's dev values
+              through the same provisioning surface the build drawer used.
+              Component Open links live on the rail rows — this section owns
+              what the rail doesn't say. */}
+          <PanelOverline>Connections</PanelOverline>
           <Stack spacing={1.25} sx={{ mt: 1 }}>
-            {endpoints.length > 0 ? (
-              endpoints.map((card) => (
+            {connections.length > 0 ? (
+              connections.map((row) => (
                 <PanelRow
-                  key={card.componentName}
-                  dotColor={
-                    card.kind === "success" ? "success.main" : "warning.main"
-                  }
-                  label={card.displayName}
+                  key={row.id}
+                  dotColor="success.main"
+                  label={row.detail ? `${row.name} (${row.detail})` : row.name}
                   trailing={
-                    <MuiLink
-                      href={card.deployment?.endpointUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      variant="body2"
-                      sx={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: 0.5,
-                        flexShrink: 0,
-                      }}
-                    >
-                      Open <ExternalLink size={13} />
-                    </MuiLink>
+                    row.kind === "external" && row.config.length > 0 ? (
+                      // The ValidationChip pill recipe, in the app's accent —
+                      // an ACTION among readouts must out-rank its neighbours'
+                      // quiet captions, and this is the console's one shape
+                      // for "a pill you can press".
+                      <Button
+                        size="small"
+                        color="inherit"
+                        disableElevation
+                        onClick={() => setValuesTarget(row)}
+                        sx={(theme) => ({
+                          borderRadius: 999,
+                          minWidth: 0,
+                          px: 1.25,
+                          py: 0.25,
+                          flexShrink: 0,
+                          fontWeight: 600,
+                          fontSize: theme.typography.body2.fontSize,
+                          lineHeight: 1.6,
+                          color: "primary.main",
+                          border: `1px solid ${alpha(theme.palette.primary.main, 0.3)}`,
+                          bgcolor: alpha(theme.palette.primary.main, 0.14),
+                          transition: "background-color 120ms, border-color 120ms",
+                          "&:hover, &.Mui-focusVisible": {
+                            bgcolor: alpha(theme.palette.primary.main, 0.24),
+                            borderColor: alpha(theme.palette.primary.main, 0.5),
+                          },
+                          "&.Mui-focusVisible": {
+                            outline: `2px solid ${alpha(theme.palette.primary.main, 0.6)}`,
+                            outlineOffset: 2,
+                          },
+                        })}
+                      >
+                        Configure
+                      </Button>
+                    ) : (
+                      <Typography variant="caption" color="success.main">
+                        provisioned
+                      </Typography>
+                    )
                   }
                 />
               ))
             ) : (
               <Typography variant="body2" color="text.secondary">
-                No public endpoints yet.
+                This design declares no connections.
               </Typography>
             )}
           </Stack>
@@ -723,13 +740,17 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
         </Card>
       </Box>
 
-      {configTarget && (
-        <ComponentConfigDialog
+      {valuesTarget && (
+        <ConnectionValuesDialog
           open
-          onClose={() => setConfigTarget(null)}
+          onClose={() => setValuesTarget(null)}
+          onSaved={() => {
+            setValuesTarget(null);
+            setValuesSaved(true);
+          }}
           projectName={projectName}
-          componentName={configTarget.name}
-          displayName={configTarget.displayName}
+          connection={valuesTarget}
+          environment="development"
         />
       )}
       {deploy && (
@@ -764,6 +785,15 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
         <Alert severity="info" onClose={() => setPromoteNotice(false)}>
           Production promotion isn't wired to the platform yet — your live
           configuration is kept for this session.
+        </Alert>
+      </Snackbar>
+      <Snackbar
+        open={valuesSaved}
+        autoHideDuration={6000}
+        onClose={() => setValuesSaved(false)}
+      >
+        <Alert severity="success" onClose={() => setValuesSaved(false)}>
+          Values saved — the connection re-provisions with them.
         </Alert>
       </Snackbar>
     </>

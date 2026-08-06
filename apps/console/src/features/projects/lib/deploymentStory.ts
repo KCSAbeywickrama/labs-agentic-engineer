@@ -91,6 +91,10 @@ const TONE_STATE: Partial<Record<StageTone, StageState>> = {
   error: "failed",
   warning: "attention",
   info: "active",
+  // `skipped` (the one neutral verdict) is SETTLED, not pending — no criteria
+  // were authored, so the stage must not claim validation has yet to run
+  // (#401 review).
+  neutral: "done",
 };
 
 /** How many criteria passed, of how many the oracle authored (#395). */
@@ -121,7 +125,11 @@ export function validationStage(
         ? "Runs against the dev deployment once every component is ready."
         : state === "active"
           ? "The deployment is being checked against the spec's acceptance criteria."
-          : "The deployed system was checked against the spec's acceptance criteria.",
+          : view?.tone === "neutral"
+            ? // The settled-but-neutral verdict (skipped): nothing WAS checked,
+              // so the note must not claim it was.
+              "This version has no acceptance criteria — there was nothing to check."
+            : "The deployed system was checked against the spec's acceptance criteria.",
   };
 }
 

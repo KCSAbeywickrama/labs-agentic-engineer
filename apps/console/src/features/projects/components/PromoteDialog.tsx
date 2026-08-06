@@ -32,7 +32,7 @@ import {
 import { ArrowUpRight, X } from "@wso2/oxygen-ui-icons-react";
 import { createLink } from "@tanstack/react-router";
 import { StatusChip } from "../../../components/StatusChip";
-import { validationView } from "../lib/pipeline";
+import { validationView, type StageTone } from "../lib/pipeline";
 import {
   allConnectionsSet,
   connectionIsSet,
@@ -54,9 +54,14 @@ const LinkButton = createLink(Button);
 // enabled Promote hands control back to the page.
 
 /** The verdict banner's sentence — the label validationView already owns,
- *  set in the dialog's own framing. */
-function verdictSentence(label: string): string {
-  return `Validated in dev — ${label}.`;
+ *  set in the dialog's own framing. Only a success verdict gets the
+ *  "Validated" claim; every other tone leads neutrally so "Validated in dev —
+ *  validation skipped." can never be said above a Promote button (#401
+ *  review). */
+function verdictSentence(label: string, tone: StageTone): string {
+  return tone === "success"
+    ? `Validated in dev — ${label}.`
+    : `Validation in dev — ${label}.`;
 }
 
 function ConnectionCard({
@@ -118,7 +123,11 @@ function ConnectionCard({
           {row.config.map((key) => (
             <TextField
               key={key.key}
-              label={key.description || key.key}
+              // The KEY labels the field; the description wraps below as
+              // helper text instead of truncating in the floating label
+              // (#401 feedback).
+              label={key.key}
+              {...(key.description && { helperText: key.description })}
               size="small"
               fullWidth
               // A secret's value is write-only here: masked while typing, and
@@ -128,6 +137,7 @@ function ConnectionCard({
               {...(key.secret && { type: "password" })}
               value={values[row.id]?.[key.key] ?? ""}
               onChange={(e) => onValueChange(row.id, key.key, e.target.value)}
+              sx={{ "& input": { fontFamily: "monospace" } }}
             />
           ))}
         </Box>
@@ -199,7 +209,7 @@ export function PromoteDialog({
               }}
             >
               <Typography variant="body2" color="text.secondary" sx={{ flexGrow: 1 }}>
-                {verdictSentence(verdict.label)}
+                {verdictSentence(verdict.label, verdict.tone)}
               </Typography>
               <LinkButton
                 to="/projects/$projectName/validation"
@@ -245,7 +255,8 @@ export function PromoteDialog({
           color="text.secondary"
           sx={{ flexGrow: 1, minWidth: 0 }}
         >
-          Values are stored as sealed secrets in the production data plane.
+          Values are kept for this session only — promotion isn't connected to
+          the platform yet.
         </Typography>
         <Button onClick={onClose} variant="outlined" color="inherit">
           Cancel

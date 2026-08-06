@@ -60,7 +60,7 @@ const deps: ComponentDependencies[] = [
         ],
       },
       {
-        kind: "external-config",
+        kind: "external",
         name: "stripe",
         config: [{ key: "STRIPE_SECRET_KEY", secret: true }],
       },

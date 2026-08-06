@@ -60,14 +60,16 @@ let mockDeploy: DeployStage = {
   validation: "none",
 };
 
-// The design's dependency read (the promote dialog's connection list) —
-// overridden per test; defaults to one required external connection.
-let mockDependencies: ComponentDependencies[] = [
+// The design's dependency read (the promote dialog's connection list, and
+// the Configure button's own gate) — overridden per test; defaults to one
+// required external connection, reset in beforeEach so a test that mutates
+// it can't bleed into the next.
+const DEFAULT_DEPENDENCIES: ComponentDependencies[] = [
   {
     componentName: "storefront",
     dependencies: [
       {
-        kind: "external-config",
+        kind: "external",
         name: "stripe",
         config: [
           { key: "STRIPE_SECRET_KEY", description: "Secret key", secret: true },
@@ -76,6 +78,7 @@ let mockDependencies: ComponentDependencies[] = [
     ],
   },
 ];
+let mockDependencies: ComponentDependencies[] = DEFAULT_DEPENDENCIES;
 
 function status(): ProjectStatus {
   return {
@@ -93,26 +96,12 @@ function status(): ProjectStatus {
   };
 }
 
-// The config dialog's hooks are mocked at module level so opening it needs no
-// QueryClientProvider; mutate is captured for the save assertion.
+// The connection-values dialog's mutation is mocked at module level so opening
+// it needs no QueryClientProvider; mutate is captured for the save assertion.
 const mockMutate = vi.fn();
 
 vi.mock("../api/queries", () => ({
-  useComponentConfig: () => ({
-    data: {
-      id: "cfg-storefront",
-      projectName: "acme",
-      componentName: "storefront",
-      envVars: [{ key: "LOG_LEVEL", value: "info" }],
-      createdAt: "2026-07-12T05:00:00Z",
-      updatedAt: "2026-07-12T05:00:00Z",
-    },
-    isPending: false,
-    isError: false,
-    error: null,
-    refetch: vi.fn(),
-  }),
-  useUpdateComponentConfig: () => ({
+  useSaveConnectionValues: () => ({
     mutate: mockMutate,
     isPending: false,
     isError: false,
@@ -156,6 +145,7 @@ vi.mock("../../validation/api/counts", () => ({
 beforeEach(() => {
   mockCounts = undefined;
   mockMutate.mockClear();
+  mockDependencies = DEFAULT_DEPENDENCIES;
 });
 
 describe("DeploymentsPage — validation chip", () => {
@@ -266,8 +256,8 @@ describe("DeploymentsPage — story rail", () => {
   });
 });
 
-describe("DeploymentsPage — component configuration", () => {
-  it("opens the env-var editor from a dev row and saves the full list", () => {
+describe("DeploymentsPage — connections", () => {
+  it("re-collects an external connection's values from the side panel", () => {
     mockDeploy = {
       version: "v1",
       status: "deployed",
@@ -277,23 +267,61 @@ describe("DeploymentsPage — component configuration", () => {
 
     render(<DeploymentsPage projectName="acme" />);
 
+    // Exactly ONE Configure on screen — the side panel's connection action;
+    // the rail rows stay uniform with no per-row extras.
     fireEvent.click(screen.getByRole("button", { name: "Configure" }));
     const dialog = screen.getByRole("dialog");
     expect(
-      within(dialog).getByText("Configuration — Storefront"),
+      within(dialog).getByText("Configure — stripe"),
     ).toBeInTheDocument();
-    // Seeded from the read.
-    expect(within(dialog).getByDisplayValue("LOG_LEVEL")).toBeInTheDocument();
 
-    fireEvent.change(within(dialog).getByDisplayValue("info"), {
-      target: { value: "debug" },
-    });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+    // Write-only: the field opens empty and masked, never echoing a stored
+    // value; Save enables once every value is set.
+    // The key labels the field; the description renders as helper text.
+    const field = within(dialog).getByLabelText("STRIPE_SECRET_KEY");
+    expect(within(dialog).getByText("Secret key")).toBeInTheDocument();
+    expect(field).toHaveAttribute("type", "password");
+    expect(field).toHaveValue("");
+    const saveButton = within(dialog).getByRole("button", { name: /Save values/ });
+    expect(saveButton).toBeDisabled();
+    fireEvent.change(field, { target: { value: "sk_live_real" } });
+    expect(saveButton).toBeEnabled();
+    fireEvent.click(saveButton);
 
     expect(mockMutate).toHaveBeenCalledWith(
-      { envVars: [{ key: "LOG_LEVEL", value: "debug" }] },
+      {
+        name: "stripe",
+        environment: "development",
+        values: { STRIPE_SECRET_KEY: "sk_live_real" },
+      },
       expect.anything(),
     );
+  });
+
+  it("shows platform-provisioned connections without an update action", () => {
+    mockDeploy = {
+      version: "v1",
+      status: "deployed",
+      components: { total: 1, ready: 1 },
+      validation: "passed",
+    };
+    mockDependencies = [
+      {
+        componentName: "storefront",
+        dependencies: [
+          { kind: "component", name: "orders-api" },
+          { kind: "platform-resource", name: "shop-db", resourceType: "postgres-cnpg" },
+        ],
+      },
+    ];
+
+    render(<DeploymentsPage projectName="acme" />);
+
+    expect(screen.getByText("shop-db (postgres-cnpg)")).toBeInTheDocument();
+    expect(screen.getByText("provisioned")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Configure" }),
+    ).not.toBeInTheDocument();
   });
 });
 
@@ -319,7 +347,7 @@ describe("DeploymentsPage — promotion", () => {
     const promote = within(dialog).getByRole("button", { name: /^Promote$/ });
     expect(promote).toBeDisabled();
 
-    fireEvent.change(within(dialog).getByLabelText(/Secret key/), {
+    fireEvent.change(within(dialog).getByLabelText(/STRIPE_SECRET_KEY/), {
       target: { value: "sk_live_x" },
     });
     expect(promote).toBeEnabled();
@@ -357,7 +385,7 @@ describe("DeploymentsPage — promotion", () => {
           { kind: "platform-resource", name: "shop-db", resourceType: "postgres-cnpg" },
           // …and a defaulted key arrives already set.
           {
-            kind: "external-config",
+            kind: "external",
             name: "stripe",
             config: [{ key: "KEY", description: "Key", defaultValue: "k" }],
           },

@@ -76,6 +76,13 @@ describe("validationStage", () => {
     expect(validationStage("none").state).toBe("waiting");
   });
 
+  it("treats skipped as settled, with a note that claims no check happened", () => {
+    const s = validationStage("skipped");
+    expect(s.state).toBe("done");
+    expect(s.fact).toBe("validation skipped");
+    expect(s.note).toContain("no acceptance criteria");
+  });
+
   it("carries the verdict label as the stage fact", () => {
     expect(validationStage("passed").fact).toBe("validated");
     expect(validationStage("none").fact).toBeUndefined();

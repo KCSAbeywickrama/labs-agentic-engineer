@@ -246,54 +246,33 @@ export function useComponentOpenApi(
   });
 }
 
-// A component's env-var configuration (#395). Lazy (`enabled`) — fetched when
-// the user opens the Configure dialog, not per row on page load.
-export function useComponentConfig(
-  projectName: string,
-  componentName: string,
-  enabled: boolean,
-) {
-  return useQuery({
-    queryKey: projectKeys.componentConfig(projectName, componentName),
-    enabled,
-    queryFn: async () => {
-      const { data, error } = await client.GET(
-        "/projects/{projectName}/components/{componentName}/configs",
-        { params: { path: { projectName, componentName } } },
-      );
-      if (error || data === undefined) {
-        throw new Error(apiErrorMessage(error, "Failed to load configuration"));
-      }
-      return data;
-    },
-  });
-}
-
-type UpdateConfigBody = components["schemas"]["UpdateConfigBody"];
-
-// Full-replace save (the endpoint's own semantics — PUT of the whole list).
-// No automatic retry: a failed write is surfaced, never silently repeated.
-export function useUpdateComponentConfig(
-  projectName: string,
-  componentName: string,
-) {
-  const queryClient = useQueryClient();
+// Re-collect an external connection's values (#395: dummy values at build
+// time, real ones later). POST …/external-resources/{name}/values re-splits
+// plain/secret by the design's schema, rewrites secrets to the secret
+// manager and re-authors the OC resource — values never echo back, so this
+// is write-only by design. No automatic retry (a failed write is surfaced).
+export function useSaveConnectionValues(projectName: string) {
   return useMutation({
-    mutationFn: async (body: UpdateConfigBody) => {
-      const { data, error } = await client.PUT(
-        "/projects/{projectName}/components/{componentName}/configs",
-        { params: { path: { projectName, componentName } }, body },
+    mutationFn: async ({
+      name,
+      environment,
+      values,
+    }: {
+      name: string;
+      environment: string;
+      values: Record<string, string>;
+    }) => {
+      const { data, error } = await client.POST(
+        "/projects/{projectName}/dependencies/external-resources/{name}/values",
+        {
+          params: { path: { projectName, name } },
+          body: { environments: { [environment]: values } },
+        },
       );
       if (error || data === undefined) {
-        throw new Error(apiErrorMessage(error, "Failed to save configuration"));
+        throw new Error(apiErrorMessage(error, "Failed to save the connection's values"));
       }
       return data;
-    },
-    onSuccess: (data) => {
-      queryClient.setQueryData(
-        projectKeys.componentConfig(projectName, componentName),
-        data,
-      );
     },
   });
 }

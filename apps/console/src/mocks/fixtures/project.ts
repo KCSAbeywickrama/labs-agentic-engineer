@@ -16,8 +16,6 @@ type MilestoneRunView = components["schemas"]["MilestoneRunView"];
 type CycleBuild = components["schemas"]["CycleBuild"];
 type DeploymentList = components["schemas"]["DeploymentList"];
 type ComponentDependencies = components["schemas"]["ComponentDependencies"];
-type ComponentConfig = components["schemas"]["ComponentConfig"];
-type EnvVar = components["schemas"]["EnvVar"];
 type FileMeta = components["schemas"]["FileMeta"];
 type FileContent = components["schemas"]["FileContent"];
 type ApiError = components["schemas"]["Error"];
@@ -415,7 +413,7 @@ const designDependencies: ComponentDependencies[] = [
       { kind: "platform-resource", name: "shop-db", resourceType: "postgres-cnpg" },
       sharedAuthDependency,
       {
-        kind: "external-config",
+        kind: "external",
         name: "stripe",
         config: [
           { key: "STRIPE_SECRET_KEY", description: "Secret key", secret: true },
@@ -437,31 +435,6 @@ export function projectDependencies(
   return s === "fresh" || s === "repo-error" ? [] : designDependencies;
 }
 
-// Component env-var configuration backing get/update-component-config
-// (#395). Seeds below; edits are layered in localStorage by the handler so a
-// save survives reload, like created projects do.
-export const seedComponentEnvVars: Record<string, EnvVar[]> = {
-  storefront: [
-    { key: "VITE_FEATURE_REVIEWS", value: "true" },
-    { key: "VITE_SUPPORT_EMAIL", value: "help@demo-shop.dev" },
-  ],
-  "catalog-api": [{ key: "LOG_LEVEL", value: "info" }],
-};
-
-export function componentConfig(
-  projectName: string,
-  componentName: string,
-  envVars: EnvVar[],
-): ComponentConfig {
-  return {
-    id: `cfg-${componentName}`,
-    projectName,
-    componentName,
-    envVars,
-    createdAt: "2026-07-12T05:00:00Z",
-    updatedAt: "2026-07-12T05:00:00Z",
-  };
-}
 
 // The OpenAPI contract served by GET .../components/:name/openapi — a
 // `{ spec }` envelope carrying a raw document, exactly as aep-api returns it

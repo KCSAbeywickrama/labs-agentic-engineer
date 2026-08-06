@@ -38,6 +38,10 @@ export interface ConnectionRow {
   /** Dedupe identity — also the key entered values are stored under. */
   id: string;
   name: string;
+  /** The dependency's kind — an "external" connection's values can be
+   *  re-collected through collect-external-resource-values; a platform
+   *  resource's cannot (the platform owns its credentials). */
+  kind: string;
   /** The platform resource type ("postgres-cnpg"), shown beside the name. */
   detail?: string;
   /** The production values this connection needs; [] when there are none. */
@@ -77,6 +81,7 @@ export function connectionRows(
       byId.set(id, {
         id,
         name: dep.name,
+        kind: dep.kind,
         ...(dep.resourceType && { detail: dep.resourceType }),
         config,
         provisioned: config.length === 0,
