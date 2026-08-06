@@ -32,19 +32,24 @@ type fakeOCSurface struct {
 	mu sync.Mutex
 
 	calls  []string
+	orderLog *[]string // optional shared call-order log (retention tests)
 	create *openchoreo.CreateComponentRequest
 	load   openchoreo.WorkloadInput
 	rel    string
 	bind   [2]string // environment, releaseName
 
-	createErr     error
-	ensureTypeErr error
+	createErr              error
+	ensureTypeErr          error
+	simulateCreateConflict bool // mirrors ComponentClient 409 → GetComponent
 }
 
 func (f *fakeOCSurface) note(op string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, op)
+	if f.orderLog != nil {
+		*f.orderLog = append(*f.orderLog, op)
+	}
 }
 
 func (f *fakeOCSurface) EnsureComponentType(_ context.Context, _ string, _ map[string]any) error {
@@ -57,9 +62,15 @@ func (f *fakeOCSurface) CreateComponent(_ context.Context, _, _ string, req *ope
 	f.mu.Lock()
 	f.create = req
 	err := f.createErr
+	simulateConflict := f.simulateCreateConflict
 	f.mu.Unlock()
 	if err != nil {
 		return nil, err
+	}
+	if simulateConflict {
+		// ComponentClient.CreateComponent coalesces 409 into a GetComponent refetch.
+		f.note("create-conflict-refetch")
+		return &gen.Component{Name: req.Name, DisplayName: "pre-existing"}, nil
 	}
 	return &gen.Component{Name: req.Name}, nil
 }
@@ -160,7 +171,7 @@ func TestOCDispatcher_ConflictIsSuccess(t *testing.T) {
 	// Mirrors ComponentClient: CreateComponent 409 → refetch → nil error.
 	// Dispatch must still walk Workload → Release → Binding over the existing
 	// Component name.
-	fake := &fakeOCSurface{}
+	fake := &fakeOCSurface{simulateCreateConflict: true}
 	d := NewOCDispatcher(fake)
 
 	got, err := d.Dispatch(context.Background(), ocDispatchInputs())
@@ -170,9 +181,12 @@ func TestOCDispatcher_ConflictIsSuccess(t *testing.T) {
 	if got != "ca-11111111-2608061200" {
 		t.Errorf("got %q", got)
 	}
-	want := []string{"ensure-type", "create-component", "ensure-workload", "ensure-release", "ensure-binding"}
+	want := []string{
+		"ensure-type", "create-component", "create-conflict-refetch",
+		"ensure-workload", "ensure-release", "ensure-binding",
+	}
 	if fmt.Sprint(fake.calls) != fmt.Sprint(want) {
-		t.Errorf("chain = %v, want full chain after conflict-handled create", fake.calls)
+		t.Errorf("chain = %v, want conflict-refetch path then downstream ensures", fake.calls)
 	}
 	if fake.load.ComponentName != "ca-11111111-2608061200" {
 		t.Errorf("workload component = %q, want the existing run name", fake.load.ComponentName)
@@ -209,25 +223,27 @@ func TestOCDispatcher_ValidationDisplayName(t *testing.T) {
 }
 
 func TestOCDispatcher_RetentionCalledBeforeCreate(t *testing.T) {
-	fake := &fakeOCSurface{}
-	ret := &fakeRetention{}
+	var order []string
+	fake := &fakeOCSurface{orderLog: &order}
+	ret := &fakeRetention{orderLog: &order}
 	d := NewOCDispatcher(fake).WithRetention(ret)
 
 	if _, err := d.Dispatch(context.Background(), ocDispatchInputs()); err != nil {
 		t.Fatalf("Dispatch: %v", err)
 	}
-	if !ret.called {
-		t.Fatal("retention Enforce must run before CreateComponent")
-	}
-	// ensure-type, then retention (outside fake.calls), then create…
-	if fake.calls[0] != "ensure-type" || fake.calls[1] != "create-component" {
-		t.Errorf("chain = %v", fake.calls)
+	wantPrefix := []string{"ensure-type", "retention", "create-component"}
+	if len(order) < len(wantPrefix) || fmt.Sprint(order[:len(wantPrefix)]) != fmt.Sprint(wantPrefix) {
+		t.Errorf("call order prefix = %v, want %v", order, wantPrefix)
 	}
 }
 
-type fakeRetention struct{ called bool }
+type fakeRetention struct {
+	orderLog *[]string
+}
 
 func (f *fakeRetention) Enforce(context.Context, string, string) error {
-	f.called = true
+	if f.orderLog != nil {
+		*f.orderLog = append(*f.orderLog, "retention")
+	}
 	return nil
 }
