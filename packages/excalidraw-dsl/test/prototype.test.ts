@@ -22,7 +22,7 @@ import { tryDslToPrototype, dslToExcalidraw } from "../src/index.js";
 
 type El = {
   type: string; x: number; y: number; width: number; height: number;
-  text?: string; link?: string | null;
+  text?: string; link?: string | null; strokeColor?: string; backgroundColor?: string;
 };
 
 const DSL = `screen Login "Sign-in for all roles"
@@ -221,6 +221,74 @@ screen Templates
 screen History
 `);
   assert.ok(!m.screens[0]!.hotspots.some((h) => h.target === "Templates"));
+});
+
+// Colors mirror BRAND_DARK / BRAND_TINT in src/index.ts — not exported, so
+// asserted here by value.
+const BRAND_DARK = "#e74420";
+const BRAND_TINT = "#fff0e8";
+
+test("sidebar active pill follows the rendered screen, not always index 0", () => {
+  const dsl = `screen Dashboard
+  sidebar "Dashboard -> Dashboard | Templates -> Templates | Progress -> Progress"
+screen Templates
+  sidebar "Dashboard -> Dashboard | Templates -> Templates | Progress -> Progress"
+screen Progress
+  sidebar "Dashboard -> Dashboard | Templates -> Templates | Progress -> Progress"
+`;
+  const m = model(dsl);
+  // Order in the annotated sidebar matches screen declaration order, so the
+  // active row index equals the screen's own index (0, 1, 2).
+  m.screens.forEach((s, expectedActiveIndex) => {
+    const els = elements(s.sceneJson);
+    const pillY = 68 + expectedActiveIndex * 40 - 4; // frameY(0) + NAVBAR_H(56) + 12 + i*40 - 4
+    const pill = els.find(
+      (e) => e.type === "rectangle" && e.x === 8 && e.y === pillY && e.backgroundColor === BRAND_TINT,
+    );
+    assert.ok(pill, `screen ${s.name}: expected active pill at row ${expectedActiveIndex}`);
+
+    const texts = els.filter((e) => e.type === "text");
+    texts.forEach((t) => {
+      const rowIndex = ["Dashboard", "Templates", "Progress"].indexOf(t.text ?? "");
+      if (rowIndex === -1) return; // not a sidebar item text
+      const expectedColor = rowIndex === expectedActiveIndex ? BRAND_DARK : "#1e1e1e";
+      assert.equal(
+        t.strokeColor,
+        expectedColor,
+        `screen ${s.name}: row "${t.text}" should be ${expectedColor}`,
+      );
+    });
+  });
+});
+
+test("an unannotated sidebar still highlights index 0 on every screen", () => {
+  const dsl = `screen Dashboard
+  sidebar "Dashboard | Templates | Progress"
+screen Templates
+  sidebar "Dashboard | Templates | Progress"
+`;
+  const m = model(dsl);
+  m.screens.forEach((s) => {
+    const els = elements(s.sceneJson);
+    const pill = els.find(
+      (e) => e.type === "rectangle" && e.x === 8 && e.y === 64 && e.backgroundColor === BRAND_TINT,
+    );
+    assert.ok(pill, `screen ${s.name}: unannotated sidebar should default to index 0`);
+    const dashboard = els.find((e) => e.type === "text" && e.text === "Dashboard")!;
+    assert.equal(dashboard.strokeColor, BRAND_DARK);
+  });
+});
+
+test("an item that is only an arrow draws its raw text and claims no target", () => {
+  const m = model(`screen Dashboard
+  sidebar "-> Templates | Home"
+screen Templates
+`);
+  const dash = m.screens[0]!;
+  assert.equal(dash.hotspots.length, 0, "an arrow-only item must not claim a hotspot");
+  const els = elements(dash.sceneJson);
+  const texts = els.filter((e) => e.type === "text").map((e) => e.text ?? "");
+  assert.ok(texts.includes("-> Templates"), "an arrow-only item draws its raw text literally");
 });
 
 test("body hotspots still work alongside chrome ones", () => {

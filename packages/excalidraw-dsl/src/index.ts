@@ -1001,7 +1001,11 @@ function splitItems(label: string): string[] {
 function parseChromeItem(item: string): { text: string; target?: string } {
   const m = /^(.*?)\s*->\s*([\w-]+)$/.exec(item);
   if (!m) return { text: item };
-  return { text: m[1]!.trim(), target: m[2]! };
+  const text = m[1]!.trim();
+  // An arrow with nothing in front of it ("-> Screen") has no label — draw the
+  // clause literally rather than producing an invisible full-row hotspot.
+  if (!text) return { text: item };
+  return { text, target: m[2]! };
 }
 
 /**
@@ -1077,6 +1081,11 @@ function renderWireframes(ast: WireframeAst, opts?: WireframeRenderOpts): Excali
   // element can point at a screen that appears later in the file.
   const screenNumber = new Map<string, number>();
   ast.screens.forEach((s, i) => screenNumber.set(s.name.toLowerCase(), i + 1));
+  // Lowercase screen name → canonical name, so a chrome item's `-> Screen`
+  // target can be compared against the screen currently being rendered
+  // (case-insensitively) to decide which rail entry is "active".
+  const screenNameByLower = new Map<string, string>();
+  ast.screens.forEach((s) => screenNameByLower.set(s.name.toLowerCase(), s.name));
 
   // Variable-size screens flow left-to-right, COLUMNS per row; each row is as
   // tall as its tallest screen.
@@ -1247,9 +1256,19 @@ function renderWireframes(ast: WireframeAst, opts?: WireframeRenderOpts): Excali
           out.push(
             makeRect(eid, sx, frameY + NAVBAR_H, SIDEBAR_W, screen.height - NAVBAR_H, STROKE, FILL_CHROME, null),
           );
-          splitItems(el.label).map(parseChromeItem).forEach((item, i) => {
+          const sidebarItems = splitItems(el.label).map(parseChromeItem);
+          // The active row is the one whose target names the screen currently
+          // being rendered — that's the entry a real rail would highlight
+          // after navigating here. Unannotated chrome has no targets, so
+          // nothing matches and the old "first item" default still applies,
+          // keeping canvas output byte-identical for unannotated sidebars.
+          const activeIndex = sidebarItems.findIndex((item) => {
+            if (!item.target) return false;
+            return screenNameByLower.get(item.target.toLowerCase()) === screen.name;
+          });
+          sidebarItems.forEach((item, i) => {
             const iy = frameY + NAVBAR_H + 12 + i * 40;
-            const active = i === 0; // first item shown selected
+            const active = activeIndex === -1 ? i === 0 : i === activeIndex;
             if (active) {
               // A brand-tinted pill behind the active item, Oxygen-style.
               out.push(makeRect(stableId(`${eid}:active:${i}`), sx + 8, iy - 4, SIDEBAR_W - 16, 32, BRAND_TINT, BRAND_TINT, { type: 3 }));

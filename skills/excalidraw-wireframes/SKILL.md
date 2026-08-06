@@ -218,8 +218,12 @@ row, put the `->` on the primary/forward one.
 **Chrome navigates too.** A `navbar` or `sidebar` item may carry its own
 `-> ScreenName`, and that is what makes an app walkable: the rail is how a real
 user reaches Templates, History or Settings, so annotate every item that names a
-view. The rail repeats on each screen, so annotate it each time; an item pointing
-at the screen it sits on is correctly inert.
+view. The arrow goes inside the label, on the item itself, before the closing
+quote (`"Home | Templates -> Templates"`) — one after the quote attaches to
+nothing and silently does not navigate. The first `navbar` item is the brand
+and takes no target; put arrows on the links after it. The rail repeats on
+each screen, so annotate it each time; an item pointing at the screen it sits
+on is correctly inert.
 
 **Decide the screens and the paths together.** A wireframe set is a flow, not a
 gallery: when you pick the screens, work out how each one is reached. Every
