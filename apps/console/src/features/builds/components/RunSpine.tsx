@@ -112,7 +112,11 @@ function SessionStages({
           return (
             <StageRow key={stage.id} stage={stage} step={step} last={lastStage}>
               <Stack spacing={1.5}>
-                <IssueChips issues={issues.issues} caption={issues.caption} />
+                <IssueChips
+                  projectName={projectName}
+                  issues={issues.issues}
+                  caption={issues.caption}
+                />
                 {/* The agent's own output, in the stage that owns it: tall while
                     it runs, shorter once it has exited — but never gone, because
                     that log is the record of how the code got written. */}

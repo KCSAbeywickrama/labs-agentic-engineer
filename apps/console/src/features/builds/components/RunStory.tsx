@@ -347,6 +347,7 @@ export function RunStory({
                   />
                 ) : (
                   <RunNowPanel
+                    projectName={projectName}
                     glance={glance}
                     issues={issues?.issues ?? []}
                     {...(issues?.caption ? { issuesCaption: issues.caption } : {})}

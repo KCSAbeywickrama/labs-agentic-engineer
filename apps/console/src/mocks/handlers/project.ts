@@ -9,6 +9,7 @@ import {
   projectCycleBuilds,
   projectBuilds,
   projectComponents,
+  projectDependencies,
   projectSectionError,
   projectSpecFiles,
   projectStatuses,
@@ -97,6 +98,23 @@ export const projectHandlers = [
   ),
   http.get("*/api/v1/projects/:projectName/components", () =>
     respond((s) => projectComponents[s]),
+  ),
+  // Read-time dependency status for the whole design (#252) — the Spec view's
+  // status chips and the Deployments page's promotion connections.
+  http.get("*/api/v1/projects/:projectName/design/dependencies", () =>
+    respond((s) => projectDependencies(s)),
+  ),
+  // Re-collect an external connection's values (#395 follow-up). Values are
+  // write-only on the real platform (secrets go to the secret manager and
+  // never echo), so the mock just acknowledges.
+  http.post(
+    "*/api/v1/projects/:projectName/dependencies/external-resources/:name/values",
+    () => {
+      if (scenario() === "error") {
+        return HttpResponse.json(projectSectionError, { status: 500 });
+      }
+      return HttpResponse.json({ status: "provisioned" });
+    },
   ),
   // The component's OpenAPI contract for the in-app viewer dialog. Errors
   // follow the section scenario; otherwise a spec keyed to the component name.

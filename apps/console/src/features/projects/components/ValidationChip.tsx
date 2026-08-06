@@ -161,7 +161,7 @@ export function ValidationChip({
   // deploy line; leading a control, this one is capitalized — the same
   // conversion VerdictTile makes for its headline.
   const label = capitalize(view.label);
-  // `validated*` and `validation?` say what they mean with a mark no screen reader
+  // `partial`'s "validated" and `validation?` carry meaning no screen reader
   // announces, so those two states carry a spoken form and it becomes the accessible
   // name. Run through the SAME capitalize step rather than pre-cased at the mapper,
   // so there is one casing rule for this control instead of two that can drift.

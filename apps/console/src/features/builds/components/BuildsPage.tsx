@@ -103,7 +103,8 @@ export function BuildsPage({
   // Before its pull request a live session has recorded nothing, so the panel
   // PRESUMES it works the open issues — the NOW panel's own inference. The
   // note keeps the two strengths apart: "Claimed by" is the merge policy's
-  // recorded set; "Being worked by" is the presumption, exact at the PR.
+  // recorded set; "With" is the presumption (possession without proof),
+  // exact at the PR.
   const presumeOpenWork = openIndex !== -1 && claims.size === 0;
   const claimedBy = (issue: {
     issueNumber: number;
@@ -113,7 +114,7 @@ export function BuildsPage({
     const label = `build session ${openIndex + 1} · ${currentCycles[openIndex]?.kind ?? ""}`.trim();
     if (claims.has(issue.issueNumber)) return `Claimed by ${label}`;
     if (presumeOpenWork && issue.derivedStatus === "pending") {
-      return `Being worked by ${label}`;
+      return `With ${label}`;
     }
     return undefined;
   };

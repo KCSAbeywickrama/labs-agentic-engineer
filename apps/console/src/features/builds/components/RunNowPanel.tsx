@@ -38,6 +38,7 @@ type TaskView = components["schemas"]["TaskView"];
  * "not yet".
  */
 export function RunNowPanel({
+  projectName,
   glance,
   issues,
   issuesCaption,
@@ -46,6 +47,7 @@ export function RunNowPanel({
   showLog,
   onOpenLog,
 }: {
+  projectName: string;
   glance: RunGlance;
   /** The issues the current build session is working. */
   issues: TaskView[];
@@ -113,6 +115,7 @@ export function RunNowPanel({
         )}
 
         <IssueChips
+          projectName={projectName}
           issues={issues}
           {...(issuesCaption ? { caption: issuesCaption } : {})}
         />

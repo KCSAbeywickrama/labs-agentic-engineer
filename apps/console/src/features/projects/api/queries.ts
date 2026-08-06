@@ -246,6 +246,39 @@ export function useComponentOpenApi(
   });
 }
 
+// Re-collect an external connection's values (#395: dummy values at build
+// time, real ones later). POST …/external-resources/{name}/values re-splits
+// plain/secret by the design's schema, rewrites secrets to the secret
+// manager and re-authors the OC resource — values never echo back, so this
+// is write-only by design. No automatic retry (a failed write is surfaced).
+export function useSaveConnectionValues(projectName: string) {
+  return useMutation({
+    mutationFn: async ({
+      name,
+      environment,
+      values,
+    }: {
+      name: string;
+      environment: string;
+      values: Record<string, string>;
+    }) => {
+      const { data, error } = await client.POST(
+        "/projects/{projectName}/dependencies/external-resources/{name}/values",
+        {
+          params: { path: { projectName, name } },
+          body: { environments: { [environment]: values } },
+        },
+      );
+      // Gate on `error` alone (#401 review): the contract declares a JSON 200,
+      // and an empty-body success must not read as a failure.
+      if (error) {
+        throw new Error(apiErrorMessage(error, "Failed to save the connection's values"));
+      }
+      return data;
+    },
+  });
+}
+
 // Spec version tags (#117). The BE hasn't implemented /tags yet, so a failed
 // read degrades to "no tags" instead of an error card — the version chips
 // simply don't render until the endpoint lands.

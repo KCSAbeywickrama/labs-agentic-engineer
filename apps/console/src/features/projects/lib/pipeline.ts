@@ -154,10 +154,11 @@ export function validationView(
       return { label: "validated", tone: "success" };
     case "partial":
       // Something passed, nothing failed, and some criteria were never covered.
-      // The asterisk is the whole hedge: nothing about this run failed, so amber
-      // would overstate the alarm, but the bare word "validated" would claim a
-      // result for criteria nobody checked. `info` says "done, with a note".
-      return { label: "validated*", tone: "info", spoken: "validated, partially" };
+      // Green like `passed` (#401 review): nothing about this run failed, and the
+      // deployments surface prints the actual counts ("3/6 passed") beside the
+      // chip, so the numbers carry the hedge the old asterisk did. The spoken
+      // form keeps the distinction screen readers can't get from a shared label.
+      return { label: "validated", tone: "success", spoken: "validated, partially" };
     case "failed":
       return { label: "validation failed", tone: "error" };
     case "inconclusive":

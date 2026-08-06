@@ -15,6 +15,7 @@ type BuildRunList = components["schemas"]["BuildRunList"];
 type MilestoneRunView = components["schemas"]["MilestoneRunView"];
 type CycleBuild = components["schemas"]["CycleBuild"];
 type DeploymentList = components["schemas"]["DeploymentList"];
+type ComponentDependencies = components["schemas"]["ComponentDependencies"];
 type FileMeta = components["schemas"]["FileMeta"];
 type FileContent = components["schemas"]["FileContent"];
 type ApiError = components["schemas"]["Error"];
@@ -365,6 +366,75 @@ export function componentDeployments(
 ): DeploymentList {
   return { items: deploymentsByScenario[s]?.[componentName] ?? [] };
 }
+
+// Design dependencies backing list-design-dependencies — the Spec view's
+// status chips and the Deployments page's promotion connections. Shared
+// dependencies are declared on EVERY consuming component's own list, exactly
+// as the real read model serves them (the console dedupes). The auth app
+// carries config defaults (so it demos as "Set"), stripe carries none (so
+// the promote dialog has a required connection to collect).
+const sharedAuthDependency = {
+  kind: "platform-resource",
+  name: "shop-auth",
+  resourceType: "thunder-app",
+  config: [
+    {
+      key: "TENANT_DOMAIN",
+      description: "Tenant domain",
+      defaultValue: "auth.demo-shop.dev",
+    },
+    {
+      key: "CLIENT_SECRET",
+      description: "Client secret",
+      secret: true,
+      defaultValue: "dev-client-secret",
+    },
+  ],
+};
+
+const designDependencies: ComponentDependencies[] = [
+  {
+    componentName: "storefront",
+    dependencies: [
+      { kind: "component", name: "catalog-api" },
+      { kind: "component", name: "orders-api" },
+      sharedAuthDependency,
+    ],
+  },
+  {
+    componentName: "catalog-api",
+    dependencies: [
+      { kind: "platform-resource", name: "shop-db", resourceType: "postgres-cnpg" },
+    ],
+  },
+  {
+    componentName: "orders-api",
+    dependencies: [
+      { kind: "platform-resource", name: "shop-db", resourceType: "postgres-cnpg" },
+      sharedAuthDependency,
+      {
+        kind: "external",
+        name: "stripe",
+        config: [
+          { key: "STRIPE_SECRET_KEY", description: "Secret key", secret: true },
+          {
+            key: "STRIPE_WEBHOOK_SECRET",
+            description: "Webhook signing secret",
+            secret: true,
+          },
+        ],
+      },
+    ],
+  },
+];
+
+export function projectDependencies(
+  s: Exclude<ProjectScenario, "error">,
+): ComponentDependencies[] {
+  // No design yet, nothing to declare dependencies.
+  return s === "fresh" || s === "repo-error" ? [] : designDependencies;
+}
+
 
 // The OpenAPI contract served by GET .../components/:name/openapi — a
 // `{ spec }` envelope carrying a raw document, exactly as aep-api returns it

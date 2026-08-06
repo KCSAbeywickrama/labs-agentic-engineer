@@ -238,13 +238,14 @@ describe("validationView", () => {
       tone: "error",
     });
   });
-  // The pair the vocabulary exists for: something passed and nothing failed, but
-  // criteria were left uncovered. Reporting this as "passed" is the lie the whole
-  // change removes, so it must never share a label or a tone with it.
-  it("partial → validated* (info, never success)", () => {
+  // Something passed and nothing failed, but criteria were left uncovered.
+  // Visually this shares `passed`'s green label (#401 review — the deployments
+  // surface prints the counts beside it, which carry the hedge); the SPOKEN
+  // form is what still distinguishes it, so that is what this test pins.
+  it("partial → validated (success), spoken form keeps the distinction", () => {
     expect(validationView("partial")).toEqual({
-      label: "validated*",
-      tone: "info",
+      label: "validated",
+      tone: "success",
       spoken: "validated, partially",
     });
   });
