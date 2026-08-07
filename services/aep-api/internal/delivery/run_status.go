@@ -89,8 +89,15 @@ const (
 	// RunPhaseCoding is dispatched, waiting for the agent's pull request to
 	// land.
 	RunPhaseCoding = "coding"
-	// RunPhaseBuilding is merged, waiting for the fan-out's builds (and, via
-	// AutoDeploy, their deployments) to settle.
+	// RunPhaseBuilding is merged, waiting for the fan-out's BUILDS to settle.
+	//
+	// Builds only. It said "and, via AutoDeploy, their deployments" and that was
+	// never true: the deploy chain is kicked off from INSIDE the build (its last
+	// step posts the Workload CR) and OpenChoreo's controller runs it afterwards,
+	// so a green WorkflowRun means the deployment has been asked for, not that it
+	// has landed. Nothing in this loop observes a ReleaseBinding — deployment is a
+	// continuously reconciled level with no link back to the cycle that caused it,
+	// so a cycle could not honestly claim it.
 	RunPhaseBuilding = "building"
 	// RunPhaseValidating is the validation cycle.
 	RunPhaseValidating = "validating"

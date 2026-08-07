@@ -16,12 +16,19 @@
  * under the License.
  */
 
-import { Box, Stack, Typography } from "@wso2/oxygen-ui";
+import { Box, Link as MuiLink, Stack, Typography } from "@wso2/oxygen-ui";
+import { createLink } from "@tanstack/react-router";
 import { StatusChip } from "../../../components/StatusChip";
 import type { components } from "../../../generated/aep-api";
 import { issueStateChip } from "../../tasks/api/status";
 
 type TaskView = components["schemas"]["TaskView"];
+
+// Router-typed link (the console's createLink pattern): an issue row opens the
+// console's OWN task page — the issue's log view — not GitHub. The task page
+// carries the agent's execution log and links out to GitHub itself, so nothing
+// is lost and the reader stays in the story they were following.
+const TaskLink = createLink(MuiLink);
 
 // The issues a build session worked, as links — the CODING AGENT stage's own
 // content.
@@ -40,11 +47,13 @@ type TaskView = components["schemas"]["TaskView"];
 // they are this session's.
 
 export function IssueChips({
+  projectName,
   issues,
   caption,
   /** Trim long platform-authored titles (gate titles are prose). */
   label,
 }: {
+  projectName: string;
   issues: TaskView[];
   /** How the console knows these are this stage's issues. */
   caption?: string;
@@ -75,11 +84,12 @@ export function IssueChips({
               >
                 #{issue.issueNumber}
               </Typography>
-              <Typography
-                component="a"
-                href={issue.issueUrl}
-                target="_blank"
-                rel="noreferrer"
+              <TaskLink
+                to="/projects/$projectName/tasks/$issueNumber"
+                params={{
+                  projectName,
+                  issueNumber: String(issue.issueNumber),
+                }}
                 variant="body2"
                 sx={{
                   color: "text.primary",
@@ -89,7 +99,7 @@ export function IssueChips({
                 }}
               >
                 {label ? label(issue) : issue.title}
-              </Typography>
+              </TaskLink>
               <StatusChip label={chip.label} tone={chip.tone} appearance="soft" />
             </Stack>
           );

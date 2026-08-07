@@ -59,7 +59,7 @@ creating silently), and a NEWLY created project captures its idea right there �
 from `--idea`, or by asking once. In chat, slash commands drive every phase
 without leaving: `/start [idea]` kicks the project off (interview →
 requirements); `/spec` `/design` `/<skill>` load a working-tree skill and follow
-it (the same channel `PLAN_INSTRUCTION` uses); `/task` `/code` `/validate`
+it (a flow turn, the same channel the plan turn uses); `/task` `/code` `/validate`
 `/undo` run the existing phase engines; `/menu` opens the status dashboard,
 `/help` the guide.
 
@@ -67,9 +67,10 @@ The idea lives in `<project>/specs/.agentic-engineer.toml` — the **project
 descriptor**, identical to what aep-api commits on project create. It marks the
 directory as an Agentic Engineer project and carries the idea `/start` builds
 requirements from. Being dot-prefixed it is stripped from every turn snapshot,
-so the agent can never read it: the idea reaches a turn ONLY through the
-`/start` expansion in `engine/compose.ts`, mirroring the server
-(`spec.StartInstruction` + `ideaSteer`, both pinned by `steer-parity.test.ts`).
+so the agent can never read it: the idea reaches a turn ONLY as a FACT on the
+turn spec (`engine/turn-spec.ts`'s `startSpec`), exactly as aep-api attaches it
+in production. The wording it becomes is the agents service's
+(`services/agents/src/prompts/turn.ts`).
 
 `code` mirrors prod's milestone cycle (ADR-0011): the CLI never picks an issue
 or an order — the `aep` skill discovers its own working set from
@@ -120,9 +121,9 @@ and never pre-created on the host: the CLI refuses a temp dir it does not own.
 
 The bytes reaching the model are production-identical: the same server code
 path (auth middleware, TurnGuard, workspace shape, snapshot filter, write
-gates), the same instruction composition (`src/engine/compose.ts` carries
-provenance-pinned verbatim copies of the live Go steer strings —
-`test/steer-parity.test.ts` fails on drift), the same skills materialization,
+gates), the same instruction composition (the playground sends a `TurnSpec` and
+the agents service composes it, exactly as it does for aep-api — there is one
+composer, so there is nothing to drift), the same skills materialization,
 the same runner session options (`resolveBaseAgentConfig` defaults are
 unit-pinned in remote-worker), and and the same authored workflow skill
 out of the same library (only the GitHub-shaped passages are swapped, by
@@ -150,7 +151,6 @@ push it to a repo and let the platform's normal flow build/deploy it.
 |---|---|---|
 | `issues/` excluded from spec-turn snapshots | production spec turns never see tasks (they live in GitHub) | n/a — this IS parity in effect |
 | MCP off by default | no cluster; avoids a localhost mint attempt per turn | run aep-api locally + AEP_MCP_URL (its MCP resolver) |
-| `collabDepsSteer` present without a live MCP tool | kept for byte parity — all console turns carry it | MCP passthrough makes the named tool real |
 | No CRT-annotation append, no lineage diffs in replans | platform resources/tags don't exist locally | manual edit; replan is still files-based |
 | Issue `key` lineage constant `"local"`; no spec/design tags | no builds/tags locally | dedupe across replans still works |
 | Design/tasks gates are playground-side UX | production has no server gate on the console's spec paths | advisory only |

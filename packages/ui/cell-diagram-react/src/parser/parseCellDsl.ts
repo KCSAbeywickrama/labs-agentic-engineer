@@ -47,6 +47,35 @@ function edgeId(direction: EdgeDirection, source: string, target: string, line: 
   return `${direction}-${source}-${target}-${line}`;
 }
 
+// A trailing `[stories: 1, 2, 4]` suffix cites the PRD stories a component
+// serves (#371). Returns the statement with the suffix removed plus the parsed
+// numbers; `invalid` marks a suffix that is present but not a list of positive
+// integers.
+function splitStoriesSuffix(statement: string): {
+  body: string;
+  stories?: number[];
+  invalid: boolean;
+} {
+  const match = /^(.*?)\s*\[\s*stories\s*:([^\]]*)\]\s*$/i.exec(statement);
+
+  if (!match) {
+    return { body: statement, invalid: false };
+  }
+
+  const body = match[1].trim();
+  const items = match[2]
+    .split(/[\s,]+/)
+    .map((t) => t.trim())
+    .filter(Boolean);
+  const stories = items.map((t) => Number(t));
+
+  if (items.length === 0 || stories.some((n) => !Number.isInteger(n) || n <= 0)) {
+    return { body, invalid: true };
+  }
+
+  return { body, stories, invalid: false };
+}
+
 function parseTypedDeclaration(tokens: string[]) {
   const id = tokens[0];
 
@@ -203,7 +232,7 @@ function parseArrow(statement: string, line: number): ParsedEdge | null {
 function unknownStatement(line: number): Diagnostic {
   return {
     severity: "error",
-    message: "Unknown statement. Expected title, version, component, or dependency arrow.",
+    message: "Unknown statement. Expected title, version, phase, component, or dependency arrow.",
     line,
     column: 1
   };
@@ -218,6 +247,7 @@ export function parseCellDsl(source: string): ParseResult {
   const externalNames = new Set<string>();
   let title: string | undefined;
   let version: string | undefined;
+  let phase: number | undefined;
 
   source.split(/\r?\n/).forEach((rawLine, index) => {
     const line = index + 1;
@@ -237,8 +267,37 @@ export function parseCellDsl(source: string): ParseResult {
       return;
     }
 
+    if (statement === "phase" || statement.startsWith("phase ")) {
+      const value = Number(statement.slice("phase".length).trim());
+
+      if (!Number.isInteger(value) || value <= 0) {
+        diagnostics.push({
+          severity: "error",
+          message: "Phase statements must use: phase <positive integer>.",
+          line,
+          column: 1
+        });
+        return;
+      }
+
+      phase = value;
+      return;
+    }
+
     if (statement.startsWith("component ")) {
-      const declaration = parseTypedDeclaration(tokenize(statement).slice(1));
+      const { body, stories, invalid } = splitStoriesSuffix(statement);
+
+      if (invalid) {
+        diagnostics.push({
+          severity: "error",
+          message: "Story citations must use: [stories: <n>, <n>, …] with positive integers.",
+          line,
+          column: 1
+        });
+        return;
+      }
+
+      const declaration = parseTypedDeclaration(tokenize(body).slice(1));
 
       if (!declaration) {
         diagnostics.push({
@@ -273,7 +332,7 @@ export function parseCellDsl(source: string): ParseResult {
       }
 
       componentNames.add(id);
-      components.push({ ...declaration, line });
+      components.push(stories ? { ...declaration, stories, line } : { ...declaration, line });
       return;
     }
 
@@ -329,6 +388,7 @@ export function parseCellDsl(source: string): ParseResult {
   const document: ParsedCellDocument = {
     title,
     version,
+    phase,
     components,
     externals,
     edges

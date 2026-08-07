@@ -132,8 +132,9 @@ describe("verdictCounts", () => {
 describe("VerdictTile", () => {
   it("leads with the shared mapper's label as its headline", () => {
     render(<VerdictTile verdict="partial" tally={tally(40, { pass: 35, manual: 5 })} />);
-    // "validated*" in the mapper; a headline leads.
-    expect(screen.getByText("Validated*")).toBeInTheDocument();
+    // "validated" in the mapper (green since #401; the tile's copy carries
+    // the uncovered-criteria hedge); a headline leads.
+    expect(screen.getByText("Validated")).toBeInTheDocument();
   });
 
   it("renders the counts under the sentence", () => {
@@ -141,12 +142,12 @@ describe("VerdictTile", () => {
     expect(screen.getByText("40 passed")).toBeInTheDocument();
   });
 
-  // Never success: a tile that looked like a clean pass would reintroduce exactly
-  // the lie the verdict split removed. `info` rather than warning because nothing
-  // about a partial run FAILED — the asterisk carries the hedge.
-  it("tones partial as info and passed as a success", () => {
+  // Both green since #401: nothing about a partial run FAILED, and the tile's
+  // own sentence + counts ("35 passed / 5 manual") carry the uncovered-criteria
+  // hedge the old info tone and asterisk did.
+  it("tones partial and passed as a success", () => {
     const { unmount } = render(<VerdictTile verdict="partial" />);
-    expect(screen.getByRole("alert").className).toMatch(/Info/);
+    expect(screen.getByRole("alert").className).toMatch(/Success/);
     unmount();
     render(<VerdictTile verdict="passed" />);
     expect(screen.getByRole("alert").className).toMatch(/Success/);

@@ -69,17 +69,80 @@ type WorkspaceRef struct {
 	SkillsRef string `json:"skillsRef"`
 }
 
-// TurnRequest is the body POSTed to the turn endpoint (design D9): the
-// instruction plus the WorkspaceRef naming the snapshot to read.
-// FilesChangedExternally is SERVER-derived now (D20 — the previous turn's
-// landed ref differs from the current base). Toolset selects the per-turn
-// tool registration ("" / "files" default; "task-plan" registers
-// planTask/updateTask with no file tools).
+// TurnSpec states what a turn is FOR. The BFF sends facts; the agents service
+// composes the instruction text from them (services/agents/src/prompts/turn.ts).
+// No prompt wording lives on this side of the wire — see that file, and
+// services/agents/design/ADR-0003, for why.
+//
+// Go has no discriminated unions, so this is one flat struct with a Kind tag
+// and per-kind fields; the TS side (@aep/agent-stream `TurnSpec`) is a proper
+// union and rejects a mismatched combination with a pre-stream 400.
+type TurnSpec struct {
+	// Kind is one of: chat | flow | start | plan.
+	Kind string `json:"kind"`
+	// Text is the user's message (chat), or the free text riding after a flow
+	// command (flow).
+	Text string `json:"text,omitempty"`
+	// Skill is the `/<skill>` token a flow turn names.
+	Skill string `json:"skill,omitempty"`
+	// Idea is the project idea for a start turn — typed inline, else read from
+	// specs/.agentic-engineer.toml. A dot-led path is stripped from every turn
+	// snapshot, so ONLY the BFF can supply it.
+	Idea string `json:"idea,omitempty"`
+	// Scope is the milestone a plan turn covers, and which of its stories
+	// already have Tasks.
+	Scope *PlanScope `json:"scope,omitempty"`
+	// TaskContext carries the existing-Task renders: platform state, not
+	// repository files, so it cannot ride the workspace snapshot.
+	TaskContext []PlanContextFile `json:"taskContext,omitempty"`
+}
+
+// Turn kinds (the `TurnSpec.Kind` discriminant).
+const (
+	TurnKindChat  = "chat"
+	TurnKindFlow  = "flow"
+	TurnKindStart = "start"
+	TurnKindPlan  = "plan"
+)
+
+// PlanScope is a plan turn's milestone and its story coverage.
+type PlanScope struct {
+	Phase   int         `json:"phase"`
+	Tag     string      `json:"tag"`
+	Stories []PlanStory `json:"stories"`
+}
+
+// PlanStory is one in-scope story; Covered means it already has Tasks and the
+// planner must leave it alone.
+type PlanStory struct {
+	Number  int    `json:"number"`
+	Title   string `json:"title,omitempty"`
+	Covered bool   `json:"covered"`
+}
+
+// PlanContextFile is one existing-Task render, keeping its historical
+// tasks/<n>.md name so the model's mental layout is unchanged.
+type PlanContextFile struct {
+	Path string `json:"path"`
+	Body string `json:"body"`
+}
+
+// TurnRequest is the body POSTed to the turn endpoint (design D9): what the
+// turn is for plus the WorkspaceRef naming the snapshot to read.
+// FilesChangedExternally is SERVER-derived (D20 — the previous turn's landed
+// ref differs from the current base). The tool set and the flow's eager skills
+// are NOT sent: the agents service derives both from Turn.
 type TurnRequest struct {
-	Instruction            string       `json:"instruction"`
+	Turn                   TurnSpec     `json:"turn"`
 	Workspace              WorkspaceRef `json:"workspace"`
 	FilesChangedExternally bool         `json:"filesChangedExternally,omitempty"`
-	Toolset                string       `json:"toolset,omitempty"`
+	// Target is the spec-bundle path this turn should write to, when the caller
+	// pins one. The agents service renders it; the BFF never formats it.
+	Target string `json:"target,omitempty"`
+	// PreviousTurnFailed (D20) says the last terminal turn of this conversation
+	// failed: the conversation history claims work git never received, and the
+	// agents service leads the instruction with the note that reconciles them.
+	PreviousTurnFailed bool `json:"previousTurnFailed,omitempty"`
 	// MCP, when set, is the BFF-minted discovery endpoint + short-lived bearer
 	// for this turn (dependency-management migration Phase 5). Omitted → the
 	// agents service registers no MCP discovery tools (byte-identical to a turn
@@ -100,9 +163,6 @@ type TurnRequest struct {
 	// depending on the MCP minter being wired. Anthropic-only on the agents
 	// side; false/omitted is byte-identical to a turn without it.
 	WebSearch bool `json:"webSearch,omitempty"`
-	// EagerSkills names skills whose bodies the agents service inlines into
-	// this turn's prompt up front (#335 latency); unknown names are ignored.
-	EagerSkills []string `json:"eagerSkills,omitempty"`
 }
 
 // CollabBlock names the room and carries the prompting user's bearer,

@@ -1,6 +1,6 @@
 ---
 name: grilling
-description: Use when the user wants to be interviewed or "grilled" about an idea before you generate requirements or design — run a structured interview with the ask_question / ask_questions tools until the idea is unambiguous, then generate.
+description: Use when an instruction or skill asks you to interview, grill, or clarify with the user before generating — the structured-question mechanics for ask_question and ask_questions.
 metadata:
   aep:
     kind: platform
@@ -9,46 +9,45 @@ metadata:
 
 # Grilling
 
-Interview the user before you write anything. A vague idea generates a vague
-spec; a few sharp questions up front turn it into requirements you can build.
-Use the structured question tools — **`ask_question`** (one question) and
-**`ask_questions`** (a form of several) — not free-form prose. Each ends your
-turn; the user's answer arrives as the next message, and you continue.
+Interview mechanics. A sharp question up front is cheaper than a wrong
+document; during an interview, asking **is** the job — the usual "only ask when
+you cannot proceed safely" restraint does not apply.
 
-## When this applies
+## The tools
 
-Load and follow this skill whenever the instruction asks you to interview,
-grill, or clarify before generating — or whenever the idea is too thin to
-design from. It **loosens** the default "only ask when you cannot proceed
-safely" rule: during an interview, asking is the job. It does **not** apply to
-one-shot/headless generation (no interview was requested) — just generate.
+Each form ends your turn; the user's answers arrive as the next message.
 
-## How to run the interview
+- **`ask_questions`** — a form of several INDEPENDENT questions answered
+  together. Up to 8 per form — a ceiling, not a target.
+- **`ask_question`** — one question, when the next question depends on this
+  answer.
 
-1. **Find the ambiguities that change the output.** Target users, scale,
-   platform, must-have vs nice-to-have, hard constraints, the one-sentence
-   success criterion. Skip anything that wouldn't change what you build.
-2. **Ask in structured questions.** Give each question **0–5 concrete options**
-   and mark the **one** you'd recommend (`recommended: true`). Add a short
-   `description` when an option's meaning isn't obvious. Set `multiSelect: true`
-   only when several options can genuinely co-apply. When the answer must be
-   typed (no sensible presets), pass an **empty options list** — the form always
-   offers a free-text field, so never invent placeholder options like
-   "Type my own answer" or "Other".
-   - Use `ask_questions` to batch **independent** questions into one form so the
-     user answers them together.
-   - Use `ask_question` when the next question depends on the last answer.
-3. **Keep options honest.** The user can always pick "Other" and type their own
-   answer — options are a starting point, not a cage. Never invent a constraint
-   the user didn't state; ask instead.
-4. **Converge, don't interrogate.** Stop when the requirements are unambiguous —
-   usually two or three rounds. Don't ask what you can reasonably assume; don't
-   re-ask what's already answered.
-5. **Honor the skip valve.** If the user says "just generate" / "skip ahead",
-   stop interviewing immediately and proceed on the stated assumptions.
+## Writing questions
 
-## After the interview
+- Ask only questions whose answers **change the artifact**. Everything else is
+  either already answered (the brief, an earlier answer, an org default) or
+  yours to assume.
+- Give **0–5 concrete options** and mark exactly **one** `recommended: true`.
+  Add a `description` where an option's meaning isn't obvious. `multiSelect:
+  true` only when several options genuinely co-apply.
+- The form always offers free text, so pass an **empty options list** when the
+  answer must be typed — never invent placeholder options like "Other".
+- Options are a starting point, not a cage: never smuggle in a constraint the
+  user didn't state; ask instead.
 
-Summarize the decisions in one short paragraph, then generate the requested
-artifact (requirements or design) reflecting them. The answers are ordinary
-messages in the conversation — treat them as the authoritative brief.
+The answers are the authoritative brief — treat them as decisions, not
+suggestions.
+
+## Ending the interview
+
+- **Converged**: the remaining unknowns no longer change the artifact — stop
+  and generate.
+- **Skip valve**: the user says "just generate" / "skip" — stop immediately,
+  apply your recommended answer to every remaining decision, and tag each one
+  `*assumed*` where it lands in the artifact.
+- **Headless**: the turn states no interview is possible — ask nothing;
+  generate on stated assumptions, each marked `*assumed*`.
+
+How many forms an interview may spend is the calling skill's rule, not this
+one's — some flows allow exactly one. Obey it; converging early is always
+allowed, asking again never is.

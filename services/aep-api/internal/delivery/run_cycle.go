@@ -113,6 +113,22 @@ type RunCycle struct {
 	// in the system can attribute a closed issue to the cycle that closed it.
 	Resolves IssueNumbers `gorm:"type:jsonb;serializer:json" json:"resolves,omitempty"`
 
+	// ValidationVerdict is what THIS validation attempt concluded, derived from the
+	// report at this cycle's own MergeSHA. Empty on every other kind, and until the
+	// attempt settles.
+	//
+	// It lives here as well as on the run for the same reason the loop's position
+	// is read from the latest cycle rather than a stored phase enum: a run may
+	// validate more than once (RunMaxValidationAttempts), so the run's single
+	// column can only hold the LATEST answer. Without a per-cycle copy, attempt 1's
+	// verdict would exist only in Temporal history and vanish with its retention,
+	// leaving a self-healed run indistinguishable from one that passed first time.
+	ValidationVerdict string `gorm:"type:text" json:"validationVerdict,omitempty"`
+	// ValidationIssue is the validation issue this cycle was dispatched at. Same
+	// reasoning: the issue is reused across attempts, but which attempt asked is a
+	// per-cycle fact, and it keeps a settled run navigable to its criteria.
+	ValidationIssue int `gorm:"not null;default:0" json:"validationIssue,omitempty"`
+
 	// MergeVerdict is why the pull request did NOT merge, when something decided
 	// so: CycleMergeDeclined (the policy: not this run's work) or
 	// CycleMergeRefused (the host: it does not merge cleanly). Empty on a cycle

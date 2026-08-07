@@ -259,6 +259,89 @@ export function tryDslToExcalidraw(
   }
 }
 
+// ---------- Prototype (click-through) compile mode ----------
+
+export interface PrototypeHotspot {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  target: string;
+}
+
+export interface PrototypeScreen {
+  name: string;
+  description?: string;
+  width: number;
+  height: number;
+  /** Serialized ExcalidrawScene: this ONE screen, frame at origin (0,0). */
+  sceneJson: string;
+  hotspots: PrototypeHotspot[];
+}
+
+export interface PrototypeModel {
+  screens: PrototypeScreen[];
+}
+
+export function tryDslToPrototype(
+  dsl: string,
+): { ok: true; model: PrototypeModel } | { ok: false; error: string } {
+  if (!dsl || dsl.trim().length === 0) return { ok: false, error: 'empty DSL source' };
+  try {
+    const ast = parseWireframesDsl(dsl);
+    if (ast.screens.length === 0) {
+      return { ok: false, error: 'no screens parsed — expected `screen <Name>` blocks' };
+    }
+    const validTargets = new Map(ast.screens.map((s) => [s.name.toLowerCase(), s.name]));
+    const screens: PrototypeScreen[] = ast.screens.map((screen) => {
+      const chromeHotspots: PrototypeHotspot[] = [];
+      const elements = renderWireframes(
+        { screens: [screen], flows: [] },
+        { prototype: { validTargets, chromeHotspots } },
+      );
+      const scene: ExcalidrawScene = {
+        type: 'excalidraw',
+        version: 2,
+        source: 'aep-generator',
+        elements,
+        appState: { viewBackgroundColor: '#ffffff' },
+        files: {},
+      };
+      // A hotspot promises a screen change, so it is claimed only by a control
+      // whose target EXISTS and is a DIFFERENT screen. A `-> ThisScreen` says
+      // "go to where you already are": agents write it meaning "acts in place"
+      // (an Add beside a search box that appends a row), and honouring it would
+      // render a control that highlights, invites a click, and cannot change
+      // anything — which reads as a broken prototype. Dropped here so it looks
+      // exactly like the un-annotated controls it belongs with.
+      const bodyHotspots: PrototypeHotspot[] = screen.elements
+        .filter(
+          (el): el is WireframeElement & { navTo: string } =>
+            Boolean(el.navTo) && el.kind !== 'navbar' && el.kind !== 'sidebar' &&
+            validTargets.has(el.navTo!.toLowerCase()) &&
+            validTargets.get(el.navTo!.toLowerCase()) !== screen.name,
+        )
+        .map((el) => ({
+          x: el.x, y: el.y, width: el.width, height: el.height,
+          target: validTargets.get(el.navTo.toLowerCase())!,
+        }));
+      const hotspots: PrototypeHotspot[] = [...chromeHotspots, ...bodyHotspots];
+      const out: PrototypeScreen = {
+        name: screen.name,
+        width: screen.width,
+        height: screen.height, // post-layout: layout may have grown it
+        sceneJson: JSON.stringify(scene),
+        hotspots,
+      };
+      if (screen.description) out.description = screen.description;
+      return out;
+    });
+    return { ok: true, model: { screens } };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
 // ---------- Wireframes layout validation ----------
 
 /**
@@ -908,6 +991,24 @@ function splitItems(label: string): string[] {
 }
 
 /**
+ * Split a chrome (navbar/sidebar) item into the text it draws and its optional
+ * `-> Screen` target. Chrome is how a real webapp reaches its top-level views,
+ * so each item navigates independently — a target on the whole element could
+ * only ever name one destination. Applies to navbar/sidebar ONLY: `splitItems`
+ * is shared with lists, tabs, table columns and card stat tiles, whose text is
+ * content rather than navigation.
+ */
+function parseChromeItem(item: string): { text: string; target?: string } {
+  const m = /^(.*?)\s*->\s*([\w-]+)$/.exec(item);
+  if (!m) return { text: item };
+  const text = m[1]!.trim();
+  // An arrow with nothing in front of it ("-> Screen") has no label — draw the
+  // clause literally rather than producing an invisible full-row hotspot.
+  if (!text) return { text: item };
+  return { text, target: m[2]! };
+}
+
+/**
  * Read a progress fraction from a label — accepts "60%", "0.6", or "3/4".
  * Falls back to 0.5 so a bare `progress` still draws something sensible.
  */
@@ -960,13 +1061,31 @@ const ACCENT_FILL: Record<WireframeVariant, string> = {
   muted: '#f1f3f5',
 };
 
-function renderWireframes(ast: WireframeAst): ExcalidrawElement[] {
+interface WireframeRenderOpts {
+  /** Prototype mode: one-screen scene with the canvas decorations suppressed —
+   *  navigation lives in the model's hotspots, not on the elements. Maps
+   *  lowercased screen name → canonical name. `chromeHotspots` is an out-param:
+   *  navbar/sidebar item geometry is computed HERE during rendering (the layout
+   *  pass never positions chrome), so the renderer is the only place that can
+   *  report those bounds. */
+  prototype?: {
+    validTargets: Map<string, string>;
+    chromeHotspots?: PrototypeHotspot[];
+  };
+}
+
+function renderWireframes(ast: WireframeAst, opts?: WireframeRenderOpts): ExcalidrawElement[] {
   const out: ExcalidrawElement[] = [];
   // Screen-name → 1-based number, shown as "Screen N" in the corner and in
   // each element's `→ Screen N · Name` navigation marker. Precomputed so an
   // element can point at a screen that appears later in the file.
   const screenNumber = new Map<string, number>();
   ast.screens.forEach((s, i) => screenNumber.set(s.name.toLowerCase(), i + 1));
+  // Lowercase screen name → canonical name, so a chrome item's `-> Screen`
+  // target can be compared against the screen currently being rendered
+  // (case-insensitively) to decide which rail entry is "active".
+  const screenNameByLower = new Map<string, string>();
+  ast.screens.forEach((s) => screenNameByLower.set(s.name.toLowerCase(), s.name));
 
   // Variable-size screens flow left-to-right, COLUMNS per row; each row is as
   // tall as its tallest screen.
@@ -986,58 +1105,72 @@ function renderWireframes(ast: WireframeAst): ExcalidrawElement[] {
     // Title block above the frame: a prominent screen name, plus an optional
     // description subtitle explaining what the view is for (or which role it
     // serves). Taller when a description is present.
-    const titleH = TITLE_H + (screen.description ? DESC_H : 0);
+    const titleH = opts?.prototype ? 0 : TITLE_H + (screen.description ? DESC_H : 0);
     rowMaxH = Math.max(rowMaxH, screen.height + titleH);
     const screenId = stableId(`screen:${screen.name}:${idx}`);
 
     // Screen name + number badge sit ABOVE the outline so chrome (navbar)
     // can occupy the screen's full interior.
-    out.push(
-      makeText(
-        stableId(`screen-label:${screen.name}:${idx}`),
-        sx,
-        sy,
-        screen.width - 60,
-        24,
-        screen.name,
-        20,
-        'left',
-      ),
-    );
-    out.push(
-      withColor(
+    if (!opts?.prototype) {
+      out.push(
         makeText(
-          stableId(`screen-num:${screen.name}:${idx}`),
-          sx + screen.width - 120,
+          stableId(`screen-label:${screen.name}:${idx}`),
+          sx,
           sy,
-          108,
-          18,
-          `Screen ${number}`,
-          14,
-          'right',
+          screen.width - 60,
+          24,
+          screen.name,
+          20,
+          'left',
         ),
-        FLOW_ACCENT,
-      ),
-    );
-    if (screen.description) {
+      );
       out.push(
         withColor(
           makeText(
-            stableId(`screen-desc:${screen.name}:${idx}`),
-            sx,
-            sy + 26,
-            screen.width - 20,
+            stableId(`screen-num:${screen.name}:${idx}`),
+            sx + screen.width - 120,
+            sy,
+            108,
             18,
-            screen.description,
+            `Screen ${number}`,
             14,
-            'left',
+            'right',
           ),
-          '#868e96',
+          FLOW_ACCENT,
         ),
       );
+      if (screen.description) {
+        out.push(
+          withColor(
+            makeText(
+              stableId(`screen-desc:${screen.name}:${idx}`),
+              sx,
+              sy + 26,
+              screen.width - 20,
+              18,
+              screen.description,
+              14,
+              'left',
+            ),
+            '#868e96',
+          ),
+        );
+      }
     }
     const frameY = sy + titleH;
     out.push(makeRect(screenId, sx, frameY, screen.width, screen.height, SCREEN_STROKE, '#ffffff', null));
+
+    // Claim a hotspot for a chrome item that names a real, different screen.
+    const claimChromeItem = (
+      target: string | undefined,
+      x: number, y: number, width: number, height: number,
+    ): void => {
+      const proto = opts?.prototype;
+      if (!target || !proto?.chromeHotspots) return;
+      const canonical = proto.validTargets.get(target.toLowerCase());
+      if (!canonical || canonical === screen.name) return;
+      proto.chromeHotspots.push({ x, y, width, height, target: canonical });
+    };
 
     for (const el of screen.elements) {
       // Coordinates are screen-local from the outline's top-left corner —
@@ -1053,7 +1186,7 @@ function renderWireframes(ast: WireframeAst): ExcalidrawElement[] {
       const eid = stableId(`el:${screen.name}:${el.kind}:${el.label}:${ex}:${ey}`);
       // A `-> ScreenName` on this element draws a navigation marker right
       // beside it, so the reader sees exactly which control goes where.
-      if (el.navTo) {
+      if (!opts?.prototype && el.navTo) {
         const num = screenNumber.get(el.navTo.toLowerCase());
         if (num !== undefined) {
           const label = `→ Screen ${num} · ${el.navTo}`;
@@ -1081,12 +1214,12 @@ function renderWireframes(ast: WireframeAst): ExcalidrawElement[] {
           // remaining nav links are grouped on the RIGHT, ending at a
           // notification bell + account avatar in the top-right corner.
           out.push(makeRect(eid, sx, frameY, screen.width, NAVBAR_H, STROKE, FILL_NAV, null));
-          const items = splitItems(el.label);
+          const items = splitItems(el.label).map(parseChromeItem);
           const textY = frameY + (NAVBAR_H - 18) / 2;
           if (items[0]) {
             out.push(
               withColor(
-                makeText(stableId(`${eid}:brand`), sx + 24, textY, Math.max(60, items[0].length * 9), 18, items[0], 14, 'left'),
+                makeText(stableId(`${eid}:brand`), sx + 24, textY, Math.max(60, items[0].text.length * 9), 18, items[0].text, 14, 'left'),
                 BRAND,
               ),
             );
@@ -1103,11 +1236,12 @@ function renderWireframes(ast: WireframeAst): ExcalidrawElement[] {
           let cursor = bx - 28;
           for (let i = items.length - 1; i >= 1; i--) {
             const item = items[i]!;
-            const w = Math.max(40, item.length * 8.5);
+            const w = Math.max(40, item.text.length * 8.5);
             cursor -= w;
             out.push(
-              makeText(stableId(`${eid}:item:${item}:${i}`), cursor, textY, w, 18, item, 14, 'left'),
+              makeText(stableId(`${eid}:item:${item.text}:${i}`), cursor, textY, w, 18, item.text, 14, 'left'),
             );
+            claimChromeItem(item.target, cursor, textY, w, 18);
             cursor -= 32;
           }
           out.push({ ...makeRect(stableId(`${eid}:bell`), bx, by, BELL, BELL, STROKE, FILL_NAV, { type: 3 }), type: 'ellipse' });
@@ -1122,22 +1256,35 @@ function renderWireframes(ast: WireframeAst): ExcalidrawElement[] {
           out.push(
             makeRect(eid, sx, frameY + NAVBAR_H, SIDEBAR_W, screen.height - NAVBAR_H, STROKE, FILL_CHROME, null),
           );
-          splitItems(el.label).forEach((item, i) => {
+          const sidebarItems = splitItems(el.label).map(parseChromeItem);
+          // The active row is the one whose target names the screen currently
+          // being rendered — that's the entry a real rail would highlight
+          // after navigating here. Unannotated chrome has no targets, so
+          // nothing matches and the old "first item" default still applies,
+          // keeping canvas output byte-identical for unannotated sidebars.
+          const activeIndex = sidebarItems.findIndex((item) => {
+            if (!item.target) return false;
+            return screenNameByLower.get(item.target.toLowerCase()) === screen.name;
+          });
+          sidebarItems.forEach((item, i) => {
             const iy = frameY + NAVBAR_H + 12 + i * 40;
-            const active = i === 0; // first item shown selected
+            const active = activeIndex === -1 ? i === 0 : i === activeIndex;
             if (active) {
               // A brand-tinted pill behind the active item, Oxygen-style.
               out.push(makeRect(stableId(`${eid}:active:${i}`), sx + 8, iy - 4, SIDEBAR_W - 16, 32, BRAND_TINT, BRAND_TINT, { type: 3 }));
             }
+            // The whole row is the click target, as in a real sidebar — not
+            // just the glyphs.
+            claimChromeItem(item.target, sx + 8, iy - 4, SIDEBAR_W - 16, 32);
             out.push(
               withColor(
                 makeText(
-                  stableId(`${eid}:item:${item}:${i}`),
+                  stableId(`${eid}:item:${item.text}:${i}`),
                   sx + 20,
                   iy + 4,
                   SIDEBAR_W - 40,
                   18,
-                  item,
+                  item.text,
                   14,
                   'left',
                 ),

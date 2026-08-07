@@ -150,7 +150,7 @@ func (f *fakeExecRepo) count() int {
 	return len(f.rows)
 }
 
-func (f *fakeExecRepo) RecordUsage(context.Context, string, contracts.TokenUsage) error { return nil }
+func (f *fakeExecRepo) RecordUsage(context.Context, string, contracts.CapturedUsage) error { return nil }
 
 func (f *fakeExecRepo) SumUsageByProjectPhase(context.Context, string) (map[string]contracts.StampedUsage, map[string]contracts.StampedUsage, error) {
 	return nil, nil, nil

@@ -43,6 +43,15 @@ export const BUILD_CYCLE_KINDS = ["coding", "fix", "conflict"] as const;
 /** Terminal run states: the loop is over and nothing will move again. */
 const TERMINAL_RUN_STATES = new Set(["succeeded", "failed", "cancelled"]);
 
+/** The run's build sessions in order — the validation cycle filtered out,
+ *  because the deployment is what gets validated and its verdict renders on
+ *  the Validation board, not on this rail. */
+export function buildCycles(cycles: RunCycleView[]): RunCycleView[] {
+  return cycles.filter((c) =>
+    (BUILD_CYCLE_KINDS as readonly string[]).includes(c.kind),
+  );
+}
+
 export function isTerminalRun(state: string): boolean {
   return TERMINAL_RUN_STATES.has(state);
 }

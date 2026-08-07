@@ -74,9 +74,9 @@ const (
 	// `components/<name>/design.md` (+ optional `openapi.yaml`) per component.
 	// Versioned as a single artifact under `v<N>-<M>` tags.
 	DesignDir = "specs/design"
-	// requirementsMainFile is the canonical "main" requirements document. Its
-	// presence is the requirements save gate.
-	requirementsMainFile = "requirements.md"
+	// requirementsMainFile is the canonical "main" requirements document (the
+	// PRD). Its presence is the requirements save gate.
+	requirementsMainFile = "prd.md"
 	// designRootFile is the canonical root design document (system overview).
 	// Its presence is part of the design save gate (layout).
 	designRootFile = "design.md"
@@ -153,6 +153,11 @@ type ArtifactService interface {
 	// ValidateSpecAtTag re-runs the whole-spec gate at a `v<N>` tag — the dev
 	// workflow's defensive pre-plan check.
 	ValidateSpecAtTag(ctx context.Context, orgID, projectID, tag string) error
+	// BuildScopeAtTag computes the tag's PHASE scope (#370/#369): the declared
+	// phase, its in-scope story set + titles, and per-component in-scope
+	// citations. Consumed by delivery/build (phase milestone identity) and
+	// delivery/task (delta planning + the Serves-stories stamp).
+	BuildScopeAtTag(ctx context.Context, orgID, projectID, tag string) (BuildScope, error)
 	// LatestSpecTag returns the newest `v<N>` tag name from the local mirror
 	// WITHOUT a fetch, degrading to "" — the task stale-spec attention read.
 	LatestSpecTag(ctx context.Context, orgID, projectID string) string
@@ -203,8 +208,10 @@ var allowedRequirementExts = []string{".md", ".excalidraw", ".dsl"}
 // JSON is the post-#70 component `design.json` (structured facts, save-gated
 // against the published schema) plus the FE-derived `*.gen.json` projections;
 // `.cell` is the project-level cell-diagram DSL (design.cell) that drives the
-// live architecture diagram.
-var allowedDesignExts = []string{".md", ".yaml", ".yml", ".json", ".cell"}
+// live architecture diagram; `.dsl` is the per-component wireframes DSL
+// (wireframes.dsl) — the phase gate demands it for in-phase web-applications,
+// so it must ride the bundle the gate reads.
+var allowedDesignExts = []string{".md", ".yaml", ".yml", ".json", ".cell", ".dsl"}
 
 func hasAllowedDesignExt(name string) bool {
 	lower := strings.ToLower(name)
@@ -297,7 +304,7 @@ func (s *artifactService) ListDesignVersions(ctx context.Context, orgID, project
 
 // ----- Save (hard gate → tag at HEAD) -----
 
-// SaveRequirements runs the requirements hard gate (requirements.md must exist
+// SaveRequirements runs the requirements hard gate (prd.md must exist
 // at HEAD) and cuts the next `v<N>` annotated tag pointing at HEAD. No commit is
 // created — the accepted draft is already on `main`. When HEAD already matches
 // the latest tag the save is a no-op ("unchanged").

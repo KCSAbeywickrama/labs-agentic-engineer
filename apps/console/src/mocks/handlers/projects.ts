@@ -123,10 +123,15 @@ export const projectsHandlers = [
     return HttpResponse.json(project, { status: 201 });
   }),
 
+  // One project by name. The seed is consulted EVEN IN THE `empty` SCENARIO —
+  // that scenario is about what the LIST shows, and letting it 404 a directly
+  // navigated project page made every project-scoped fixture (overview, builds,
+  // deployments, validation — all keyed to the seed names) unreachable under the
+  // default switch. Deletions still mask, so the delete flow is unaffected.
   http.get("*/api/v1/projects/:projectName", ({ params }) => {
-    const project = currentProjects().find(
-      (p) => p.name === params.projectName,
-    );
+    const project = [...seedProjects, ...createdProjects]
+      .filter((p) => !deletedProjects.has(p.name))
+      .find((p) => p.name === params.projectName);
     if (!project) {
       return HttpResponse.json(
         {

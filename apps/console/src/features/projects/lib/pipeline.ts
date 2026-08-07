@@ -118,16 +118,35 @@ export function deployStageView(status: ProjectStatus): StageView {
 // what lets every label name the outcome instead of naming an artifact the reader
 // would have to open to find the outcome out — the failing of the old vocabulary,
 // where "completed" covered a green run and a red one alike.
+//
+// `spoken` is the accessible name for the two labels that carry their meaning in
+// PUNCTUATION — "validated*" and "validation?". Screen readers do not announce
+// either mark, so both would collapse onto a neighbouring state's name ("Validated",
+// "Validation") and the distinction the vocabulary exists for would be sighted-only.
+// It is absent everywhere else, so the default stays "the name is the visible label"
+// and a caller that ignores the field is still correct for seven of the nine states.
 export function validationView(
   validation: string,
-): { label: string; tone: StageTone } | null {
+): { label: string; tone: StageTone; spoken?: string } | null {
   switch (validation) {
-    // The one lifecycle value with anything to say: a validation CYCLE is in
-    // flight. It is derived from the run's latest cycle, not from "the run is live
-    // and has no verdict" — that older rule made the chip claim to be validating
-    // through every coding cycle of every run.
+    // Two lifecycle values with something to say, both derived from the run's latest
+    // CYCLE rather than from "the run is live and has no verdict" — that older rule
+    // made the chip claim to be validating through every coding cycle of every run.
+    // A validation cycle is in flight:
     case "running":
       return { label: "validating", tone: "info" };
+
+    // A live run REPAIRING a failed validation. Deliberately terse and deliberately
+    // silent about WHAT is being fixed: naming it costs a pill twice the width of its
+    // neighbours, and the two surfaces a reader lands on next — the verdict tile and
+    // the validation cycle's feed — both say it in full. What the label must not do is
+    // imply validation is what's being repaired; the cycle in flight is ordinary coding
+    // work on the defect validation found. Warning rather than error because the
+    // verdict is real but not final: `error` belongs to the settled "validation failed"
+    // below, and using it here would read as terminal while the platform is actively
+    // resolving it.
+    case "awaiting-fix":
+      return { label: "awaiting fix", tone: "warning" };
 
     // The rest are the run's verdict verbatim, which is why each label can name
     // the outcome instead of naming an artifact to go and open.
@@ -135,26 +154,35 @@ export function validationView(
       return { label: "validated", tone: "success" };
     case "partial":
       // Something passed, nothing failed, and some criteria were never covered.
-      // The asterisk is the whole hedge: nothing about this run failed, so amber
-      // would overstate the alarm, but the bare word "validated" would claim a
-      // result for criteria nobody checked. `info` says "done, with a note".
-      return { label: "validated*", tone: "info" };
+      // Green like `passed` (#401 review): nothing about this run failed, and the
+      // deployments surface prints the actual counts ("3/6 passed") beside the
+      // chip, so the numbers carry the hedge the old asterisk did. The spoken
+      // form keeps the distinction screen readers can't get from a shared label.
+      return { label: "validated", tone: "success", spoken: "validated, partially" };
     case "failed":
       return { label: "validation failed", tone: "error" };
     case "inconclusive":
-      // Nothing was automated, so nothing here is confirmed. "validation"
-      // prefixes the word because the chip is read on surfaces (the overview
-      // line, the board) where the subject is otherwise the deployment.
-      return { label: "validation inconclusive", tone: "warning" };
+      // Nothing was automated, so nothing here is confirmed — and the question mark
+      // is exactly that: the state has no answer to report, so the label poses the
+      // question instead of dressing "we don't know" up as an outcome. "validation"
+      // prefixes it because the chip is read on surfaces (the overview line, the
+      // board) where the subject is otherwise the deployment.
+      return {
+        label: "validation?",
+        tone: "warning",
+        spoken: "validation inconclusive",
+      };
     case "unreported":
-      // No usable report at the validation cycle's merge commit, so the run
-      // learned nothing. Named as a reporting failure rather than as an outcome,
-      // because no criterion produced one.
-      return { label: "validation reporting error", tone: "error" };
+      // No usable report at the validation cycle's merge commit, so the run learned
+      // nothing. The label points at validation ITSELF having broken rather than at
+      // anything the criteria concluded — no criterion produced a result here — and
+      // leaves the tile's sentence to say what broke.
+      return { label: "validation error", tone: "error" };
     case "skipped":
-      // No criteria authored. Distinct from `none` and actionable — "author
-      // some" — where none means there is nothing to say yet.
-      return { label: "no validation criteria", tone: "neutral" };
+      // No criteria authored, so the run reached validation and passed over it.
+      // Distinct from `none`, which is the run not having got here yet: this one is
+      // settled, and its emptiness is a choice the project can revisit.
+      return { label: "validation skipped", tone: "neutral" };
 
     default: // "none" | "" | unknown
       return null;

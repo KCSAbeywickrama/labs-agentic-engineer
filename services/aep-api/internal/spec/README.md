@@ -14,7 +14,7 @@ flowchart LR
     SL["slices — genaiturns · files · tags · skills · collab"]
     CORE["artifacts store/versioning + turn engine + files + design + skills services"]
     SL --> CORE
-    CORE --> GIT[("git: requirements.md · specs/design/** · v<N> tags · org-skills repo")]
+    CORE --> GIT[("git: prd.md · specs/design/** · v<N> tags · org-skills repo")]
     CORE --> TURNS[("agent_turns")]
   end
   CORE -->|Workspace · GitOps engine| SC[[sourcecontrol]]
@@ -46,7 +46,7 @@ the genai turn engine (runner/broker/sweeper), and the files / design / skills s
 | `CredentialsRefreshService`-adjacent turn/tag reads | offers | delivery/build (SpecTagger, validation criteria) |
 
 ## Owns
-- git spec content (`requirements.md`, `specs/design/**`), the annotated `v<N>` tag (the version store),
+- git spec content (`prd.md`, `specs/design/**`), the annotated `v<N>` tag (the version store),
   the org-skills repo, `AgentTurn` (turn lifecycle) + the resumable-turn SSE broker (in-memory seam).
 - **The Skill library.** One flat authored library at repo-root `skills/`, COPY'd into the image and read
   at runtime from `config.SkillsDir` (default `/app/skills`) — not go:embed'd. A skill dir is `SKILL.md`
@@ -84,12 +84,15 @@ the genai turn engine (runner/broker/sweeper), and the files / design / skills s
 - **The project descriptor** (`specs/.agentic-engineer.toml`, `descriptor.go`) — the marker identifying a
   repo as an Agentic Engineer project, carrying the idea the user gave at creation. Written by `projects`
   at create through the `DescriptorWriter` port (best-effort: a failed write never fails the create) and
-  read back here to enrich `/start`. TOML rather than the YAML/JSON used elsewhere because its one
+  read back here to put the idea on a `/start` turn. TOML rather than the YAML/JSON used elsewhere because its one
   load-bearing field is a paragraph of free text a user typed — a real encoder keeps quotes, backslashes
   and newlines intact.
-- **The `/start` command** (`start_command.go`) — the ONE slash command the server expands. Every other
-  `/<skill>` is rewritten client-side by `slashSkillInstruction` before the turn is sent; `/start` arrives
-  verbatim because only the server can enrich it with the descriptor's idea.
+- **Flow-command recognition** (`start_command.go`) — every `/<skill>` command arrives VERBATIM and the
+  server classifies it into an `agentsvc.TurnSpec`: what the turn is FOR, never its wording. `/start`
+  additionally carries the descriptor's idea, which only the server can read. The agents service composes
+  the instruction and derives the flow's eager skills from the spec, so a console CTA, a typed command and
+  a playground run produce identical turns (services/agents/design/ADR-0003). This domain holds NO prompt
+  text; the flow token is kept here because it also gates web search and MCP minting for design turns.
 - **Persistence**: the `agent_turns` gorm lives in this domain (`repository_turn.go` over the
   `agent_turn.go` entity), single write-authority. Spec content itself is not gorm — it lives in git,
   reached through sourcecontrol's `Workspace`/gitfs engine.

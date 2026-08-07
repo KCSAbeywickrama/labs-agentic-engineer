@@ -117,8 +117,8 @@ export function verdictCounts(tally: CriterionTally | undefined): string {
 /**
  * The verdict tile: what the validation run concluded, above the per-criterion
  * evidence. It exists because a chip label cannot finish the sentence for the
- * verdicts that matter most — "Validated*" begs *which part*, "Validation
- * inconclusive" begs *why*, "Validation reporting error" begs *so what* — and
+ * verdicts that matter most — "Validated*" begs *which part*, "Validation?" begs
+ * *why is that a question*, "Validation error" begs *what broke* — and
  * because three of the five ask the reader to do something (validate the rest by
  * hand, fix a failure), which no chip can say.
  *
@@ -139,7 +139,10 @@ export function VerdictTile({
 
   const counts = verdictCounts(tally);
   return (
-    <Alert severity={SEVERITY[view.tone]} sx={{ mx: 3, mt: 2 }}>
+    // No margins: the page's body container owns the gap below and PageTitle owns
+    // the space above. A tile that insets itself put the page's one 24px-inset
+    // element beside bodies that were flush.
+    <Alert severity={SEVERITY[view.tone]}>
       {/* The shared labels are lowercase for mid-sentence use; a headline leads. */}
       <AlertTitle>
         {view.label.charAt(0).toUpperCase() + view.label.slice(1)}

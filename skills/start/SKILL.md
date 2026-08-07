@@ -1,6 +1,6 @@
 ---
 name: start
-description: Use when kicking off a project from its idea — the /start flow that establishes what the user wants built, interviews until it is unambiguous, then writes specs/requirements/requirements.md.
+description: Use when kicking off a project from its idea — the /start flow that interviews the user in a single round of questions and writes the PRD at specs/requirements/prd.md; also the flow for re-running /start on a project that already has a PRD.
 metadata:
   aep:
     kind: platform
@@ -9,67 +9,88 @@ metadata:
 
 # Start
 
-The project kickoff. A user arrives with one sentence about what they want and
-leaves with requirements the rest of the flow can build on. This skill owns that
-first step and nothing after it.
+A user arrives with one sentence and leaves with a PRD the rest of the flow can
+build on. The interview is a **coverage walk**: the PRD's own sections are the
+plan, you visit every one, and nothing lands in the document that was neither
+asked about nor visibly assumed. You visit them all before you ask anything —
+**`/start` asks exactly once**.
 
 ## The idea comes to you
 
-The user's original idea is captured when the project is created, and the
-platform attaches it to this instruction. Read it as the brief — it is what the
-user actually asked for, in their words.
+The user's idea is attached to this instruction when the project captured one.
+Read it as the brief — it is what the user actually asked for, in their words.
+It is not a file: it is attached or it is absent. When absent, open with one
+`ask_question`: "What are you building?" — a few concrete example options,
+free text welcome. The answer is the brief. Getting the brief is not the
+interview: it is the only thing that may precede the one form below.
 
-**Never go looking for it on disk.** The idea is not a file you can open: it is
-attached to the instruction or it is absent. Searching for it wastes a turn and
-finds nothing.
+## The coverage walk
 
-When no idea is attached — an older project, or one created outside the normal
-flow — open by asking for it with **`ask_question`**:
+Walk the PRD's own sections, in its own order:
 
-> What are you building?
+1. **Problem** — who hurts, how, today.
+2. **Actors** — who uses the system, at product altitude.
+3. **Journey & stories** — what each actor does, end to end.
+4. **Product decisions** — policy choices: sign-in, notifications, integrations.
+5. **Phasing** — what ships first; a thin vertical slice makes the best MVP.
+6. **Out of scope** — what this project is explicitly not.
 
-Give a few concrete example answers as options so the question is easy to
-answer, and make clear the user can describe anything. Their answer is the
-brief; carry on exactly as if it had been attached.
+The walk is **planning, not turns**: you take it silently, in full, before the
+user sees a single question. For each section:
 
-## Interview before you write
+- **Consult the organization skill first.** A question its defaults answer is
+  never asked — record the default as a plain Product Decision instead. A
+  section fully covered by defaults and the brief needs nothing.
+- **Note the questions whose answers would change the document**, and only
+  those. Skip what the brief already answers.
 
-A one-line idea is never enough to specify a system. Load the **`grilling`**
-skill and follow it: structured questions via `ask_question` / `ask_questions`,
-each with concrete options and the one you recommend, until the ambiguities that
-would change what gets built are resolved.
+## Ask once
 
-Interviewing **is** the job here — the usual "only ask when you cannot proceed
-safely" restraint does not apply. Two or three rounds is normal.
+Then ask **ONE `ask_questions` form** — the `grilling` skill owns the question
+mechanics — carrying the questions the walk noted, and write the PRD from the
+answers. There is no second form: the next thing the user sees after answering
+is their document.
 
-If the user says "just generate" or "skip ahead", stop interviewing immediately
-and proceed on stated assumptions. Make those assumptions explicit in the
-requirements rather than hiding them.
+- **The bar, not the budget.** Ask only what changes the PRD. Three questions
+  is a good form; padding one out to the cap is an interrogation.
+- **More questions than a form holds** → ask those whose answers change the
+  document most, and treat every one left behind exactly as the skip valve
+  does: your recommended answer, tagged `*assumed*`.
 
-## Then write the requirements
+Depth is opt-in: after generating, the user can go deeper in chat on any
+feature.
 
-Write `specs/requirements/requirements.md` — always that full path, never a bare
-filename. It is the main requirements document and the rest of the flow reads it
-as the source of truth.
+## The skip valve
 
-Ground it in what the user told you. The idea and the interview answers are the
-authoritative brief; do not quietly widen the scope with features nobody asked
-for, and do not narrow it to what seems easy. Where you had to assume something,
-say so in the document.
+At any point the user may say "just generate" / "skip". Stop asking
+immediately: fill every remaining decision with your recommended answer and tag
+each one `*assumed*` where it lands in the PRD. An assumption the user can see
+is a decision they can overturn; a silent one is an invention.
+
+## Write the PRD
+
+Write `specs/requirements/prd.md` — always that full path. Load this skill's
+reference `references/prd-contract.md` (via `loadSkillReference`) and follow it
+exactly: it defines every section, the story numbering rules, and what the PRD
+deliberately excludes. Per-feature depth goes to
+`specs/requirements/features/<slug>.md`, never into the PRD body.
+
+Anything genuinely unanswerable now goes to **Open Questions** — mark it, never
+guess it.
+
+## Running /start again
+
+`specs/requirements/prd.md` already exists → this is an **amendment**, never a
+rewrite: append new stories with fresh numbers (story numbers are permanent),
+update only the sections the change touches, and leave the user's hand-edits
+alone. Regenerate from scratch only when the user explicitly asks, and confirm
+before overwriting. One form here too — a scoped change earns fewer questions
+than a cold start, never more.
 
 ## Where this stops
 
-`/start` ends at requirements. Do **not** write a design, do not create
-components, do not plan tasks — those are separate steps with their own skills
-and their own gates.
-
-Close by summarizing the decisions in a short paragraph and telling the user
-what comes next: review `specs/requirements/requirements.md`, then run
-`/design` when it reads right.
-
-## Starting again
-
-`/start` can be run on a project that already has requirements — it always
-begins from the idea. If `specs/requirements/requirements.md` already exists,
-say so and ask whether to regenerate it from the idea or refine what is there.
-Do not silently overwrite work the user may have edited by hand.
+`/start` ends at the PRD. Design, components, and tasks are later steps with
+their own skills and gates. Close with a one-paragraph summary of the decisions
+taken (calling out every `*assumed*` one), then point the user at the next
+step: review `specs/requirements/prd.md`, then run `/design` — open questions
+must be answered or explicitly deferred before design can proceed.

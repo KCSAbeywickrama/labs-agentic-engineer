@@ -43,14 +43,21 @@ const (
 	// RunBudgetBuildRetriggers tallies automatic build re-triggers
 	// (RunReasonBuildRetriggerBudget).
 	RunBudgetBuildRetriggers RunBudget = "build_retriggers"
+	// RunBudgetValidationCycles counts VALIDATION ATTEMPTS, bounding the
+	// repair-and-re-validate loop (RunMaxValidationAttempts). Unlike the other
+	// three it names no terminal reason of its own: exhausting it settles the run
+	// on the verdict the last attempt already produced, so `validation-failed`
+	// means "still failing after every attempt".
+	RunBudgetValidationCycles RunBudget = "validation_cycles"
 )
 
 // runBudgetColumns whitelists the columns BumpBudget may increment.
 var runBudgetColumns = map[RunBudget]bool{
-	RunBudgetCycles:          true,
-	RunBudgetFixCycles:       true,
-	RunBudgetConflictCycles:  true,
-	RunBudgetBuildRetriggers: true,
+	RunBudgetCycles:           true,
+	RunBudgetFixCycles:        true,
+	RunBudgetConflictCycles:   true,
+	RunBudgetBuildRetriggers:  true,
+	RunBudgetValidationCycles: true,
 }
 
 // MilestoneRunRepository is the write-authority over milestone run rows — the

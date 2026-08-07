@@ -302,7 +302,7 @@ func TestFreshOrgProvisioning_SeedsEmbeddedLibrary(t *testing.T) {
 		t.Fatalf("fresh org must list built-ins, got %v", summaries)
 	}
 	// Platform skills are seeded and list READ-ONLY on the skills page.
-	for _, platformName := range []string{"high-level-architecture", "excalidraw-wireframes", "openapi-conventions", "task-planning"} {
+	for _, platformName := range []string{"architecture", "wireframes", "openapi-conventions", "task-planning"} {
 		sum, ok := byName[platformName]
 		if !ok {
 			t.Fatalf("platform skill %q missing from the user-facing list", platformName)
@@ -315,7 +315,7 @@ func TestFreshOrgProvisioning_SeedsEmbeddedLibrary(t *testing.T) {
 	// The internal catalog carries them as kind=platform, references included.
 	all, _ := svc.List(ctx, "org1")
 	by := nameSet(all)
-	hla, ok := by["high-level-architecture"]
+	hla, ok := by["architecture"]
 	if !ok || hla.Kind != SkillKindPlatform {
 		t.Fatalf("internal catalog must carry platform skills; got %+v", hla)
 	}
@@ -326,7 +326,7 @@ func TestFreshOrgProvisioning_SeedsEmbeddedLibrary(t *testing.T) {
 
 	// And they are genuinely IN the repo tree on origin under flat skills/.
 	origin := host.origin("org1")
-	if got := origin.FileAt(t, "main", "skills/high-level-architecture/SKILL.md"); !strings.Contains(got, "name: high-level-architecture") {
+	if got := origin.FileAt(t, "main", "skills/architecture/SKILL.md"); !strings.Contains(got, "name: architecture") {
 		t.Fatalf("platform SKILL.md not committed to origin:\n%s", got)
 	}
 	if got := origin.FileAt(t, "main", "skills/openapi-conventions/references/wso2-rest-api-design-guidelines.md"); got == "" {
@@ -345,20 +345,20 @@ func TestReconcile_RewritesMissingBuiltin(t *testing.T) {
 	if _, err := svc.List(ctx, "org1"); err != nil { // triggers seed
 		t.Fatalf("seed: %v", err)
 	}
-	// Simulate the `high-level-architecture` platform builtin being deleted
+	// Simulate the `architecture` platform builtin being deleted
 	// from the repo.
-	host.removeAtHead("org1", skillRepoPath("high-level-architecture"))
+	host.removeAtHead("org1", skillRepoPath("architecture"))
 
 	n, err := svc.Reconcile(ctx, "org1")
 	if err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
 	if n != 1 {
-		t.Fatalf("Reconcile wrote %d, want 1 (only `high-level-architecture` was missing)", n)
+		t.Fatalf("Reconcile wrote %d, want 1 (only `architecture` was missing)", n)
 	}
 	got, _ := svc.List(ctx, "org1")
-	if _, ok := nameSet(got)["high-level-architecture"]; !ok {
-		t.Fatalf("`high-level-architecture` should be restored after reconcile")
+	if _, ok := nameSet(got)["architecture"]; !ok {
+		t.Fatalf("`architecture` should be restored after reconcile")
 	}
 }
 

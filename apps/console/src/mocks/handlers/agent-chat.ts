@@ -30,7 +30,6 @@
 
 import { http, HttpResponse } from "msw";
 import { ANSWER_PREFIX, ANSWERS_PREFIX } from "@aep/agent-stream";
-import { GRILLING_DIRECTIVE } from "@aep/contracts/prompts";
 import {
   activeTeammateTurn,
   multiuserHistory,
@@ -108,15 +107,15 @@ export const agentChatHandlers = [
         { type: "turn-failed", message: "Mock turn failure (instruction contained 'fail')." },
       ]);
     }
-    // Grilling scenarios (ADR-0012 / #270) — keyed on the shared directive or a
-    // typed trigger, never on a mere mention of "grill" in an edit instruction.
+    // Grilling scenarios (ADR-0012 / #270) — keyed on the /start flow command
+    // or a typed trigger, never on a mere mention of "grill" in an edit
+    // instruction (the retired GRILLING_DIRECTIVE died with #373).
     // An answer turn (instruction begins with the shared answer prefix) falls
     // through to the normal generation stream below.
     const isAnswer =
       instruction.startsWith(ANSWER_PREFIX) || instruction.startsWith(ANSWERS_PREFIX);
     if (!isAnswer) {
-      const grillSingle =
-        instruction.includes(GRILLING_DIRECTIVE) || /\bgrill me\b/i.test(instruction);
+      const grillSingle = instruction.trim().startsWith("/start") || /\bgrill me\b/i.test(instruction);
       const grillBatch = /\ball at once\b|\bask me everything\b/i.test(instruction);
       if (grillBatch) {
         // A full interview — long enough to exercise the form's scrolling.
@@ -438,13 +437,13 @@ export const agentChatHandlers = [
     return sse([
       { type: "text-delta", delta: "Joining the spec workspace… " },
       { type: "text-delta", delta: "I'll create the requirements now." },
-      // Streamed tool input: the panel shows "Creating requirements.md" as soon
+      // Streamed tool input: the panel shows "Creating prd.md" as soon
       // as the path resolves, then flips to "Created" on the tool-result.
       { type: "tool-input-start", id: "tc-1", toolName: "addFile" },
       {
         type: "tool-input-delta",
         id: "tc-1",
-        delta: '{"path":"specs/requirements/requirements.md","content":"# Requirements',
+        delta: '{"path":"specs/requirements/prd.md","content":"# Requirements',
       },
       { type: "tool-input-delta", id: "tc-1", delta: '\\n\\n## Overview\\nA simple todo app.' },
       { type: "tool-input-end", id: "tc-1" },
@@ -452,8 +451,8 @@ export const agentChatHandlers = [
         type: "tool-result",
         toolName: "addFile",
         toolCallId: "tc-1",
-        input: { path: "specs/requirements/requirements.md" },
-        output: { ok: true, op: "add", path: "specs/requirements/requirements.md", status: "applied" },
+        input: { path: "specs/requirements/prd.md" },
+        output: { ok: true, op: "add", path: "specs/requirements/prd.md", status: "applied" },
       },
       { type: "text-delta", delta: "\n\nDone — the change is live in the shared doc." },
       { type: "turn-committed", noChanges: true },

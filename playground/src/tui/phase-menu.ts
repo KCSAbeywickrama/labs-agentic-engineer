@@ -49,7 +49,7 @@ export async function phaseMenu(projectDir: string, slug: string, skillCount: nu
   const tGate = tasksGate(projectDir);
 
   const reqLabel = req.present
-    ? `1 Requirements   ✓ requirements.md (${kb(req.sizeBytes)}, edited ${ago(req.modifiedAt)})`
+    ? `1 Requirements   ✓ prd.md (${kb(req.sizeBytes)}, edited ${ago(req.modifiedAt)})`
     : "1 Requirements   — not generated yet";
   const designLabel = !dGate.ok
     ? `2 Design         ✗ blocked: ${dGate.reason}`

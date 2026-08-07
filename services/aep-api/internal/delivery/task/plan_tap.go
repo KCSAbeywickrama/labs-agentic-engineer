@@ -63,6 +63,10 @@ type planTap struct {
 	// Zero leaves creations unassigned (no milestone was minted for this turn).
 	milestone int
 	// appPaths maps a design component name (lowercased) to its source directory,
+	// componentStories maps a component id (lowercased) to its IN-SCOPE story
+	// citations (#369) — the source of the platform-stamped Serves-stories
+	// block. Nil on a scope-less legacy plan.
+	componentStories map[string][]int
 	// rendered into the body as the App Path the agent works in. Empty when no
 	// design reader is wired.
 	appPaths map[string]string
@@ -97,6 +101,12 @@ type planTap struct {
 
 // newPlanTap builds a tap with every map initialised. Callers set the milestone,
 // the preloaded state and the app paths.
+// storiesFor resolves a component's in-scope story citations for the stamp;
+// nil when the scope carries none for it.
+func (t *planTap) storiesFor(component string) []int {
+	return t.componentStories[strings.ToLower(strings.TrimSpace(component))]
+}
+
 func newPlanTap(ctx context.Context, orgID, projectID string, issues IssueClient) *planTap {
 	return &planTap{
 		ctx:               ctx,
@@ -259,7 +269,9 @@ func (t *planTap) handlePlan(out *taskplan.PlanTaskOk) {
 	}
 	req := sourcecontrol.CreateIssueRequest{
 		Title: out.Title,
-		Body:  composeTaskBody(planned, t.issueForComponent),
+		// The Serves-stories stamp is platform-authored from the design's
+		// citations (#369) — the planner has zero discretion over it.
+		Body:  delivery.StampServesStories(composeTaskBody(planned, t.issueForComponent), t.storiesFor(out.Component)),
 		// The working-set marker, and nothing else: a Task is agent work. Gates
 		// (aep:provision) and the validation Task (aep:validation) are minted
 		// elsewhere and are deliberately not this population.
@@ -321,6 +333,7 @@ func (t *planTap) handleUpdate(out *taskplan.UpdateTaskOk) {
 		return
 	}
 	st := t.state[number] // zero value is a benign empty state for a pre-existing miss
+	prior := delivery.ParseServesStories(st.Body)
 
 	set := out.Set
 	if set.Title != nil && strings.TrimSpace(*set.Title) != "" {
@@ -349,8 +362,15 @@ func (t *planTap) handleUpdate(out *taskplan.UpdateTaskOk) {
 	// The whole body is re-rendered from the current facts, so a patch never
 	// accumulates: the dependency lines are re-resolved too, which is how a
 	// forward reference planned before its dependency picks up the real issue
-	// number once updateTask touches it.
-	body := composeTaskBody(st, t.issueForComponent)
+	// number once updateTask touches it. The Serves-stories stamp is restamped
+	// from the design's citations, falling back to the stamp the body carried
+	// (a pre-existing task whose component the scope no longer names must not
+	// lose its lineage).
+	stories := t.storiesFor(st.Component)
+	if len(stories) == 0 {
+		stories = prior
+	}
+	body := delivery.StampServesStories(composeTaskBody(st, t.issueForComponent), stories)
 	if err := t.issues.EditIssueBody(t.ctx, t.orgID, t.projectID, number, body); err != nil {
 		t.recordFlag(number, err)
 	}

@@ -17,7 +17,11 @@
 package validation
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"sort"
+	"strings"
 
 	"github.com/wso2/aep/aep-api/internal/delivery"
 )
@@ -40,6 +44,124 @@ type reportCriterion struct {
 	// Status is the runner's per-criterion outcome: pass | fail | not_run |
 	// not_validated | manual.
 	Status string `json:"status"`
+	// Must is the criterion's requirement, echoed into the report by the generator.
+	// Having it here is what makes a report self-contained: a repair issue can name
+	// what the criterion demanded without a second read of the oracle.
+	Must string `json:"must"`
+	// Failure is what the assertion said, on a `fail`. generate-report.mjs writes
+	// it as an OBJECT — a bare string is tolerated because reports already merged
+	// into project repos carry that older shape, and a report is read long after it
+	// was written. Same reasoning as the console parser's parseFailure.
+	Failure reportFailure `json:"failure"`
+	// Spec is the Playwright spec file that produced the outcome.
+	Spec string `json:"spec"`
+}
+
+// reportFailure is a criterion's failure detail, decoded from either shape.
+type reportFailure struct {
+	Message  string `json:"message"`
+	Location string `json:"location"`
+}
+
+// UnmarshalJSON accepts both the object shape generate-report.mjs writes and the
+// bare string older reports carry.
+func (f *reportFailure) UnmarshalJSON(data []byte) error {
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		f.Message, f.Location = s, ""
+		return nil
+	}
+	var obj struct {
+		Message  string `json:"message"`
+		Location string `json:"location"`
+	}
+	if err := json.Unmarshal(data, &obj); err != nil {
+		// Neither shape. A failure we cannot read is not a reason to discard the
+		// verdict the status already carries, so it degrades to no detail.
+		f.Message, f.Location = "", ""
+		return nil
+	}
+	f.Message, f.Location = obj.Message, obj.Location
+	return nil
+}
+
+// FailedCriterion is one criterion the report says lost its assertion, with
+// everything a repair issue needs to name it — including the `must`, which the
+// generator echoes into the report so this is answerable from one read.
+type FailedCriterion struct {
+	ID       string
+	Method   string
+	Must     string
+	Message  string
+	Location string
+	Spec     string
+}
+
+// ReportDigest fingerprints WHAT A REPORT CONCLUDED, so two validation attempts
+// can be compared. Empty for an absent or unparseable report — there is nothing to
+// compare, and two empty digests must not read as "the same answer twice".
+//
+// It covers the criteria only: each one's id, status and failure message, sorted by
+// id. Explicitly NOT the file bytes. The runner generates the report with
+// `--commit "$(git rev-parse HEAD)"`, so a whole-file hash changes on every attempt
+// and would make an identical-answer check dead code that silently never fires.
+//
+// Sorted because report order is the runner's spec-discovery order, which is not a
+// promise; two attempts that found the same outcomes in a different order reached
+// the same answer.
+func ReportDigest(raw []byte) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var doc reportDoc
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return ""
+	}
+	if len(doc.Criteria) == 0 {
+		return ""
+	}
+	lines := make([]string, 0, len(doc.Criteria))
+	for _, c := range doc.Criteria {
+		// The failure message is part of the answer: the same criterion failing for a
+		// different reason means the repair changed something, even if it is still red.
+		lines = append(lines, c.ID+"\x00"+c.Status+"\x00"+c.Failure.Message)
+	}
+	sort.Strings(lines)
+	sum := sha256.Sum256([]byte(strings.Join(lines, "\x1e")))
+	return hex.EncodeToString(sum[:])
+}
+
+// FailedCriteria returns the criteria the report records as failed, in report
+// order. Empty for an absent, unparseable or all-green report — every case where
+// there is nothing to repair.
+//
+// It is deliberately separate from VerdictFromReport rather than folded into it.
+// The verdict is a single value the run stores; this is a list the supervisor turns
+// into issues, and the two are read by different callers at different moments (the
+// second only when the first came back `failed`).
+func FailedCriteria(raw []byte) []FailedCriterion {
+	if len(raw) == 0 {
+		return nil
+	}
+	var doc reportDoc
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return nil
+	}
+	var out []FailedCriterion
+	for _, c := range doc.Criteria {
+		if c.Status != criterionFail {
+			continue
+		}
+		out = append(out, FailedCriterion{
+			ID:       c.ID,
+			Method:   c.Method,
+			Must:     c.Must,
+			Message:  c.Failure.Message,
+			Location: c.Failure.Location,
+			Spec:     c.Spec,
+		})
+	}
+	return out
 }
 
 // Per-criterion outcomes the runner writes. Shared with the console's

@@ -18,7 +18,14 @@
 
 import { EMPTY_SKILL_SOURCE, SERVICE_AUDIENCE, type SkillSource } from "./skill-source.js";
 
-/** System instructions for the file-mutating main agent. */
+/**
+ * System instructions for the file-mutating main agent. Layer charter (#373):
+ * this prompt carries ONLY the tool contract, the error-reaction table (write
+ * gates fire unconditionally, so reactions must always be in context), and the
+ * narration meta-rule — stage behavior lives in skills. TODO(#377 Phase D):
+ * the skillsPinned placement hint in the SCHEMA_VIOLATION row moves to the
+ * `architecture` skill when it lands.
+ */
 export const instructions = `You are a spec-bundle editing agent. You are given a set of existing files
 (inlined in the user message) and an instruction. Apply the instruction by calling the file tools.
 
@@ -49,7 +56,18 @@ Reacting to tool results (each result tells you the next move):
   re-emit the WHOLE corrected file with removeFile + addFile — layout comes from structure, never
   from coordinates.
 
-Keep prose outside tool calls to a single short sentence. When the instruction is fully applied, stop.`;
+Narration: keep prose outside tool calls to a single short sentence by default. A LOADED skill may define
+the narration for its own flow (what to say as you work, and how to close) — when one does, follow the skill.
+When the instruction is fully applied, stop.`;
+
+/**
+ * The name of the org-defaults skill, inlined into EVERY turn's system prompt.
+ * The one skill that is not "guidance for a task" but standing policy: settled
+ * sections answer interview questions the agent would otherwise ask the user,
+ * and pin providers at design time. An agent that has to remember to load it
+ * asks questions the org already answered.
+ */
+const ORG_DEFAULTS_SKILL = "organization";
 
 /**
  * The skill catalog appended to the END of the system prompt (ADR-0002): skill
@@ -60,7 +78,10 @@ Keep prose outside tool calls to a single short sentence. When the instruction i
  * byte-identical to a skill-free turn.
  */
 export function buildSkillCatalog(skills: SkillSource | undefined): string {
-  const entries = (skills ?? EMPTY_SKILL_SOURCE).catalog();
+  // The org skill never appears here: its body is already inlined below the
+  // catalog, so a line offering it as loadable advertises a round-trip that
+  // would return text the agent is holding — and paid for its description twice.
+  const entries = (skills ?? EMPTY_SKILL_SOURCE).catalog().filter((e) => e.name !== ORG_DEFAULTS_SKILL);
   if (entries.length === 0) return "";
   // Audience split (ADR-0013): `loadable` is this service's own (design) rows —
   // the catalog and reference note below are built from those ONLY, so a
@@ -114,9 +135,44 @@ ${lines}`;
   return header + pinBlock;
 }
 
-/** Base instructions + the skill catalog (empty when no skills are supplied). */
+/**
+ * The org's standing defaults, appended to the system prompt of every turn.
+ *
+ * Placed here rather than in the per-turn eager block because it applies to
+ * every turn regardless of flow: it is part of the agent's standing context,
+ * not a property of the request. Being system-prompt-stable also makes it
+ * cache-friendly the day prompt caching is switched on — the body is identical
+ * across a conversation's turns, since the `_skills` snapshot pins it.
+ *
+ * Absent from the org's snapshot (an older org, or one that never seeded it) →
+ * "", leaving the prompt byte-identical to a turn without it. A skill the
+ * audience gate refuses is likewise skipped: `load()` returns `{refused: true}`,
+ * which carries no content.
+ *
+ * The heading is this composer's, not the file's — it is what makes the block a
+ * sibling of `# Skills` in the prompt, and an org may edit the body to anything.
+ * The seeded skill therefore carries no title of its own.
+ */
+export function buildOrgDefaultsBlock(skills: SkillSource | undefined): string {
+  const body = (skills ?? EMPTY_SKILL_SOURCE).load(ORG_DEFAULTS_SKILL);
+  if (body === undefined || !("content" in body)) return "";
+  const content = body.content.trim();
+  if (content === "") return "";
+  return `
+
+# Organization defaults
+
+${content}`;
+}
+
+/**
+ * Base instructions + the skill catalog + the org's standing defaults (each
+ * empty when its source is). The catalog stays immediately after the base
+ * instructions so its "call loadSkill" invitation reads against the skill list
+ * it introduces, with the org block last.
+ */
 export function buildInstructions(skills?: SkillSource): string {
-  return instructions + buildSkillCatalog(skills);
+  return instructions + buildSkillCatalog(skills) + buildOrgDefaultsBlock(skills);
 }
 
 /**
@@ -153,8 +209,8 @@ ${blocks}
  * `task-planning` skill, not this prompt; the prompt only fixes the invariants.
  */
 export const taskPlanInstructions = `You are a task-planning agent. You are given a project's spec and design
-(inlined as CURRENT STATE) plus any existing Tasks, and an instruction to plan the work. You plan Tasks by calling
-the task tools. You do NOT edit files — the CURRENT STATE is read-only.
+(inlined under "Existing files:") plus any existing Tasks, and an instruction to plan the work. You plan Tasks by
+calling the task tools. You do NOT edit files — the existing files are read-only context.
 
 The unit of work is the DESIGN COMPONENT. Each component under specs/design/components/<name>/ that needs work gets a
 Task. Never invent a component: if a requirement is covered by no design component, do not plan a Task for it — say so
@@ -177,12 +233,17 @@ Reacting to tool results (each result tells you the next move):
 - DUPLICATE_TITLE — the title is already taken (listed); choose a distinct one.
 - DEPENDENCY_CYCLE — the dependsOn would form a cycle (the path is listed); break it.
 
-Load the task-planning skill before planning, and follow it. Keep prose outside tool calls to a single short sentence,
-except a final note flagging anything that needs a human (e.g. a requirement no component covers).`;
+Keep prose outside tool calls to a single short sentence, except a final note flagging anything that needs a human
+(e.g. a requirement no component covers).`;
 
-/** Task-plan instructions + the skill catalog (empty when no skills are supplied). */
+/**
+ * Task-plan instructions + the skill catalog + the org's standing defaults.
+ * The planner gets the org block for the same reason the editing agent does:
+ * a filled entry pins a provider or a stack, which is exactly what the Tasks it
+ * writes will be built against.
+ */
 export function buildTaskPlanInstructions(skills?: SkillSource): string {
-  return taskPlanInstructions + buildSkillCatalog(skills);
+  return taskPlanInstructions + buildSkillCatalog(skills) + buildOrgDefaultsBlock(skills);
 }
 
 /** Build the user prompt: the current bundle inlined + the mutation instruction. */

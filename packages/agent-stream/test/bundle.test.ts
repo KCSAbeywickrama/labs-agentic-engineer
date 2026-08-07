@@ -23,7 +23,7 @@ import { SEED_FILES } from "./seed.js";
 
 const OPENAPI = "specs/design/components/hello-api/openapi.yaml";
 const DESIGN = "specs/design/design.md";
-const REQUIREMENTS = "specs/requirements/requirements.md";
+const REQUIREMENTS = "specs/requirements/prd.md";
 
 function fresh(): FileBundle {
   return new FileBundle(SEED_FILES);

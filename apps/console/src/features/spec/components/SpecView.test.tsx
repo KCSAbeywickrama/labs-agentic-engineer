@@ -18,7 +18,7 @@
 
 // @vitest-environment jsdom
 
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import type { components } from "../../../generated/aep-api";
@@ -284,12 +284,19 @@ describe("SpecView onBuild routing (#164)", () => {
     );
   });
 
-  it("needsInput:false — builds immediately with empty inputs and navigates, no drawer", async () => {
+  it("needsInput:false — shows the Cut-version ceremony; confirming builds and navigates (#370/#372)", async () => {
     mockPreflightRefetch.mockResolvedValue({ data: { needsInput: false, items: [] } });
     mockMutateAsync.mockResolvedValue({ tag: "v1" } satisfies BuildResponse);
 
     render(<SpecView projectName="proj1" />);
     clickBuild();
+
+    // The ceremony intervenes: nothing POSTs until the user confirms — the
+    // BACKEND cuts the real tag on confirm.
+    const dialog = await screen.findByTestId("cut-version-dialog");
+    const confirm = within(dialog).getByRole("button", { name: /cut v\d+ & build/i, hidden: true });
+    expect(mockMutateAsync).not.toHaveBeenCalled();
+    fireEvent.click(confirm);
 
     await waitFor(() =>
       expect(mockMutateAsync).toHaveBeenCalledWith({ inputs: [] }),

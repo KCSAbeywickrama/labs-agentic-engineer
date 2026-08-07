@@ -163,22 +163,3 @@ func (s *Service) readProjectIdea(ctx context.Context, ref sourcecontrol.RepoRef
 	}
 	return d.Idea
 }
-
-// ideaSteer is the server half of the idea channel: the text appended to the
-// expanded `/start` instruction so the turn carries what the user actually
-// asked for. A blank idea appends NOTHING — the turn is then byte-identical to
-// a bare skill load, and the start skill asks the user instead.
-//
-// The wording is neutral about provenance because the idea reaches here two
-// ways: typed inline (`/start an expense tracker`) or captured at project
-// creation and read back from the descriptor.
-//
-// MIRRORED in playground/src/engine/compose.ts (see the provenance note at the
-// top of steering.go); test/steer-parity.test.ts fails when the two drift.
-func ideaSteer(idea string) string {
-	idea = strings.TrimSpace(idea)
-	if idea == "" {
-		return ""
-	}
-	return "\n\nThe user's idea for this project:\n\n" + idea
-}

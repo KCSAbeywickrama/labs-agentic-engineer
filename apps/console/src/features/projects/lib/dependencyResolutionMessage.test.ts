@@ -53,7 +53,7 @@ const resolvedDep: Dependency = {
 
 // #252 Task 17 (Q4): the message dropped the embedded dependency JSON + the
 // resolution playbook — the chat agent gets both from design.json's live
-// snapshot and the high-level-architecture skill (Task 16), so the seed
+// snapshot and the architecture skill (Task 16), so the seed
 // message only needs to name the component + dependency + intent.
 describe("buildDependencyResolutionMessage — lean seed message (#252 Task 17)", () => {
   it("resolve intent: names the dependency and component, asking to resolve", () => {
@@ -107,7 +107,7 @@ describe("buildDependencyResolutionMessage — lean seed message (#252 Task 17)"
       ambiguousDep,
       "resolve",
     );
-    expect(msg).not.toContain("high-level-architecture");
+    expect(msg).not.toContain("architecture");
     expect(msg).not.toContain("specPath");
     expect(msg).not.toContain("docsUrl");
     expect(msg).not.toMatch(/only this dependency/i);

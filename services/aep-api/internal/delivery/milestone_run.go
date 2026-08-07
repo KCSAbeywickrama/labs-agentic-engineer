@@ -138,6 +138,13 @@ func IsValidationTerminalReason(reason string) bool {
 // `inconclusive` are honest reports of incomplete evidence, not defects in the
 // increment — telling "the oracle had nothing automatable" apart from "the agent
 // ran nothing" is deferred to internal-agent-error handling.
+//
+// "Fatal" is now about the END of the loop, not the first occurrence. The two
+// fatal verdicts are exactly the two the run REPAIRS: `failed` mints an issue per
+// failed criterion and re-validates, `unreported` re-dispatches validation. This
+// only settles a run once RunMaxValidationAttempts is spent — which is also why
+// the same predicate tells the read model when a live run should read
+// `awaiting-fix` instead of its verdict.
 func ValidationVerdictFailsRun(verdict string) (reason string, fatal bool) {
 	switch verdict {
 	case ValidationVerdictFailed:
@@ -164,6 +171,16 @@ const (
 	// RunMaxFixCycles / RunMaxConflictCycles bound the two recovery chains.
 	RunMaxFixCycles      = 2
 	RunMaxConflictCycles = 2
+	// RunMaxValidationAttempts bounds the repair-and-re-validate loop: how many
+	// times ONE run may validate before it accepts the answer it keeps getting.
+	//
+	// It counts validation ATTEMPTS rather than the coding cycles between them,
+	// because attempts are the thing being repeated — the repair cycles are
+	// ordinary work and are already bounded by the cycle ceiling. Alone among the
+	// budgets it names no failure class: spending it settles the run on the verdict
+	// the last attempt produced (see ValidationVerdictFailsRun), which is why
+	// `validation-failed` now means "still failing after every attempt".
+	RunMaxValidationAttempts = 2
 	// RunDefaultCycleCeiling is the total-cycle ceiling a run starts with when
 	// the caller does not pin one. The legitimate worst case uses 4–5 cycles.
 	RunDefaultCycleCeiling = 8
@@ -201,10 +218,15 @@ type MilestoneRun struct {
 
 	// MilestoneNumber is the GitHub milestone this run works — the platform key.
 	MilestoneNumber int `gorm:"index;not null" json:"milestoneNumber"`
-	// MilestoneTitle is the milestone's title at creation, equal to the spec tag
-	// (`v<N>`). Display + `?tag=` resolution only; never a lookup key against
-	// GitHub.
+	// MilestoneTitle is the milestone's title at creation — the PHASE title
+	// ("Phase <N>", #370), or the spec tag on a scope-less legacy build. The
+	// runner's `gh issue list --milestone` needs the real GitHub title, so this
+	// stays the created title; never a lookup key against GitHub.
 	MilestoneTitle string `gorm:"index;not null" json:"milestoneTitle"`
+	// Tag is the spec version (`v<N>`) this run builds. `?tag=` resolution and
+	// display; empty only on pre-phase legacy rows (fall back to
+	// MilestoneTitle, which then equals the tag).
+	Tag string `gorm:"index" json:"tag,omitempty"`
 
 	Origin string `gorm:"not null;index" json:"origin"`                // spec-build | incident-adoption
 	State  string `gorm:"not null;index;default:waiting" json:"state"` // planning | waiting | running | succeeded | failed | cancelled
@@ -222,12 +244,21 @@ type MilestoneRun struct {
 	FixCycles       int `gorm:"not null;default:0" json:"fixCycles"`
 	ConflictCycles  int `gorm:"not null;default:0" json:"conflictCycles"`
 	BuildRetriggers int `gorm:"not null;default:0" json:"buildRetriggers"`
+	// ValidationCycles is the number of validation ATTEMPTS this run has opened,
+	// bounded by RunMaxValidationAttempts. More than one means the run repaired a
+	// failed validation and tried again.
+	ValidationCycles int `gorm:"not null;default:0" json:"validationCycles"`
 	// CycleCeiling is the run's total-cycle ceiling, snapshotted at start so a
 	// config change cannot retroactively fail (or rescue) a live run.
 	CycleCeiling int `gorm:"not null" json:"cycleCeiling"`
 
-	// ValidationVerdict is a run property (the validation cycle's outcome), not
-	// a per-issue one. Empty until the validation cycle settles.
+	// ValidationVerdict is a run property, not a per-issue one: the LATEST
+	// validation attempt's outcome. Empty until the first attempt settles.
+	//
+	// A run may validate more than once (see RunMaxValidationAttempts), and each
+	// attempt records its own verdict on its RunCycle. This column is the run's
+	// answer — the last thing validation concluded — so a self-healed run reads
+	// `passed` here while its cycle ledger still shows the attempt that failed.
 	ValidationVerdict string `gorm:"type:text" json:"validationVerdict,omitempty"`
 	// ValidationIssue is the validation issue this run minted, persisted so a
 	// SETTLED run stays navigable to its criteria. It is otherwise only in live

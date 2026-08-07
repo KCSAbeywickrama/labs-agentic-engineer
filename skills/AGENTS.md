@@ -148,5 +148,9 @@ which is exactly what your own Claude Code reads.
   warns and **skips** a mismatch, so the skill silently disappears from every org.
 - Keep a description to one sentence that names when to load the skill, not what
   it contains. It is the only part of a skill most agents ever see.
+- `organization` is the one skill nothing loads: the design service inlines its
+  body into every system prompt and keeps it out of the catalog (ADR-0003). It
+  therefore carries no `#` title — the composer supplies the heading, and a
+  second one in the file renders it twice.
 - A skill is prose for a model, so the usual writing rules apply harder: state
   the rule and the reason it exists, never both halves of a choice.

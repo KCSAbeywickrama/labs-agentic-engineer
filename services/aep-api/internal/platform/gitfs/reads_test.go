@@ -80,7 +80,7 @@ func TestListReadFileReadBundle(t *testing.T) {
 	for _, e := range entries {
 		byPath[e.Path] = e
 	}
-	req, ok := byPath["specs/requirements/requirements.md"]
+	req, ok := byPath["specs/requirements/prd.md"]
 	if !ok || len(entries) != 2 {
 		t.Fatalf("List entries = %+v, want README.md + specs file", entries)
 	}
@@ -88,7 +88,7 @@ func TestListReadFileReadBundle(t *testing.T) {
 		t.Fatalf("List entry = %+v, want size %d and a 40-hex blob sha", req, len("req v1\n"))
 	}
 
-	content, blobSHA, err := fx.Engine.ReadFile(ctx, fx.Ref, "", "specs/requirements/requirements.md")
+	content, blobSHA, err := fx.Engine.ReadFile(ctx, fx.Ref, "", "specs/requirements/prd.md")
 	if err != nil {
 		t.Fatalf("ReadFile: %v", err)
 	}
@@ -110,7 +110,7 @@ func TestListReadFileReadBundle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadBundle: %v", err)
 	}
-	if bundleHead != head || len(files) != 1 || files["specs/requirements/requirements.md"] != "req v1\n" {
+	if bundleHead != head || len(files) != 1 || files["specs/requirements/prd.md"] != "req v1\n" {
 		t.Fatalf("ReadBundle = (%v, %s), want the one specs file at %s", files, bundleHead, head)
 	}
 	// nil keep = keep everything.
@@ -173,10 +173,10 @@ func TestReadsAtTagAndShaSeeOldTree(t *testing.T) {
 	ctx := context.Background()
 	sha1 := fx.Origin.HeadSHA(t)
 	fx.Origin.Tag(t, "v1", "release v1")
-	fx.Origin.Seed(t, map[string]string{"specs/requirements/requirements.md": "req v2\n"}, "update")
+	fx.Origin.Seed(t, map[string]string{"specs/requirements/prd.md": "req v2\n"}, "update")
 
 	for _, at := range []string{"v1", sha1} {
-		content, _, err := fx.Engine.ReadFile(ctx, fx.Ref, at, "specs/requirements/requirements.md")
+		content, _, err := fx.Engine.ReadFile(ctx, fx.Ref, at, "specs/requirements/prd.md")
 		if err != nil {
 			t.Fatalf("ReadFile at %q: %v", at, err)
 		}
@@ -184,7 +184,7 @@ func TestReadsAtTagAndShaSeeOldTree(t *testing.T) {
 			t.Fatalf("ReadFile at %q = %q, want old content", at, content)
 		}
 	}
-	content, _, err := fx.Engine.ReadFile(ctx, fx.Ref, "", "specs/requirements/requirements.md")
+	content, _, err := fx.Engine.ReadFile(ctx, fx.Ref, "", "specs/requirements/prd.md")
 	if err != nil || string(content) != "req v2\n" {
 		t.Fatalf("ReadFile at branch = (%q, %v), want new content", content, err)
 	}

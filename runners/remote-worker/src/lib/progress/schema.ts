@@ -156,16 +156,32 @@ export interface LogEvent extends ProgressEnvelope {
   summary: string;
 }
 
+// TurnModelUsage is one model's slice of the run's usage, read off the SDK
+// result's per-model `modelUsage` record (#291). The model id is the SDK's
+// canonicalModel where it reports one (versioned release ids collapse onto the
+// alias aep-api's model_rates table is keyed by), else the record key.
+export interface TurnModelUsage {
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+}
+
 // TurnUsage is the run's token usage off the SDK result (#291) — the cross-
-// runtime wire shape aep-api parses (usageFromLog → contracts.TokenUsage), so
-// the camelCase field names must match byte-for-byte. model is "" when the run
-// spanned multiple models (or the SDK reported none).
+// runtime wire shape aep-api parses (usageFromLog → contracts.CapturedUsage),
+// so the camelCase field names must match byte-for-byte. model is "" when the
+// run spanned multiple models (or the SDK reported none); `models` is the
+// per-model split that lets aep-api price a multi-model run — without it a
+// single blanked model id made the whole run unpriceable and the console fell
+// back to token counts.
 export interface TurnUsage {
   inputTokens: number;
   outputTokens: number;
   cacheReadTokens: number;
   cacheCreationTokens: number;
   model: string;
+  models?: TurnModelUsage[];
 }
 
 export interface ResultEvent extends ProgressEnvelope {

@@ -210,6 +210,20 @@ describe("validationView", () => {
       tone: "info",
     });
   });
+  // The repairing state stays terse and says nothing about WHAT is being fixed — the
+  // tile and the cycle feed say that in full. What it must not do is read as repairing
+  // validation, when the cycle in flight is ordinary coding work on the defect
+  // validation found. Warning, not error: the verdict is real but not final, and
+  // sharing `failed`'s tone would read as terminal mid-repair.
+  it("awaiting-fix → awaiting fix (warning, never error)", () => {
+    expect(validationView("awaiting-fix")).toEqual({
+      label: "awaiting fix",
+      tone: "warning",
+    });
+    expect(validationView("awaiting-fix")?.tone).not.toBe(
+      validationView("failed")?.tone,
+    );
+  });
   // deploy.validation MIRRORS the verdict, so every label names the outcome
   // rather than naming an artifact the reader would have to open to find it.
   it("passed → validated (success)", () => {
@@ -224,36 +238,52 @@ describe("validationView", () => {
       tone: "error",
     });
   });
-  // The pair the vocabulary exists for: something passed and nothing failed, but
-  // criteria were left uncovered. Reporting this as "passed" is the lie the whole
-  // change removes, so it must never share a label or a tone with it.
-  it("partial → validated* (info, never success)", () => {
+  // Something passed and nothing failed, but criteria were left uncovered.
+  // Visually this shares `passed`'s green label (#401 review — the deployments
+  // surface prints the counts beside it, which carry the hedge); the SPOKEN
+  // form is what still distinguishes it, so that is what this test pins.
+  it("partial → validated (success), spoken form keeps the distinction", () => {
     expect(validationView("partial")).toEqual({
-      label: "validated*",
-      tone: "info",
+      label: "validated",
+      tone: "success",
+      spoken: "validated, partially",
     });
   });
-  it("inconclusive → validation inconclusive (warning)", () => {
+  it("inconclusive → validation? (warning)", () => {
     expect(validationView("inconclusive")).toEqual({
-      label: "validation inconclusive",
+      label: "validation?",
       tone: "warning",
+      spoken: "validation inconclusive",
     });
   });
-  // A reporting failure that fails the run — so error, not warning, and worded
-  // distinctly from a failing suite: no criterion produced a result here.
-  it("unreported → validation reporting error (error)", () => {
+  // A validation failure that fails the run — so error, not warning, and pointed at
+  // validation itself rather than at anything the criteria concluded: no criterion
+  // produced a result here.
+  it("unreported → validation error (error)", () => {
     expect(validationView("unreported")).toEqual({
-      label: "validation reporting error",
+      label: "validation error",
       tone: "error",
     });
   });
-  // Surfaced rather than folded into null: "author some criteria" is actionable,
-  // where null means there is nothing to say yet.
-  it("skipped → no validation criteria (neutral)", () => {
+  // Surfaced rather than folded into null: this run reached validation and passed
+  // over it, where null means it has not got there yet.
+  it("skipped → validation skipped (neutral)", () => {
     expect(validationView("skipped")).toEqual({
-      label: "no validation criteria",
+      label: "validation skipped",
       tone: "neutral",
     });
+  });
+  // `spoken` is opt-in, and that is what makes "the accessible name is the visible
+  // label" the default: a state that gained one by accident would announce itself
+  // differently from what it shows, for no reason a reader could see.
+  it("carries a spoken form ONLY where a mark carries the meaning", () => {
+    for (const v of ["running", "awaiting-fix", "passed", "failed", "unreported", "skipped"]) {
+      expect(validationView(v)?.spoken, `${v} should not need a spoken form`)
+        .toBeUndefined();
+    }
+    // The two whose labels differ from a neighbour's by punctuation alone.
+    expect(validationView("partial")?.spoken).toBeTruthy();
+    expect(validationView("inconclusive")?.spoken).toBeTruthy();
   });
   // Every value the contract can send must map to something — a new verdict that
   // silently rendered nothing would be invisible on every surface.

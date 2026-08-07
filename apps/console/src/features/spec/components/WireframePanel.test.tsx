@@ -18,13 +18,13 @@
 
 // @vitest-environment jsdom
 
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import { WireframePanel } from "./WireframePanel";
 import type { CollabSpec } from "../collab/useCollabSpec";
 
-// The heavy lazy canvas is irrelevant here — record what scene it receives.
+// The heavy lazy canvas is irrelevant here — record what scene/model it receives.
 vi.mock("@aep/ui-excalidraw-view", () => ({
   ExcalidrawView: ({ scene }: { scene: string }) => (
     <div
@@ -32,15 +32,23 @@ vi.mock("@aep/ui-excalidraw-view", () => ({
       data-elements={String(JSON.parse(scene).elements?.length ?? 0)}
     />
   ),
+  PrototypeView: (p: { model: { screens: unknown[] }; trailingSlot?: unknown }) => (
+    <div data-testid="prototype" data-screens={p.model.screens.length}>
+      {p.trailingSlot as never}
+    </div>
+  ),
 }));
 
 // The committed-file query is configured per test.
 const mockDerived = vi.fn();
+const mockDerivedPrototype = vi.fn();
 vi.mock("../api/useDerivedDesign", () => ({
   useDerivedWireframe: (...args: unknown[]) => mockDerived(...args),
+  useDerivedPrototype: (...args: unknown[]) => mockDerivedPrototype(...args),
 }));
 
 const DSL_PATH = "specs/design/components/shop-webapp/wireframes.dsl";
+const OTHER_DSL_PATH = "specs/design/components/admin-webapp/wireframes.dsl";
 
 function makeCollab(ytext: Y.Text | null, agent = true): CollabSpec {
   return {
@@ -57,6 +65,8 @@ function renderPanel(collab: CollabSpec) {
 
 beforeEach(() => {
   mockDerived.mockReset();
+  mockDerivedPrototype.mockReset();
+  mockDerivedPrototype.mockReturnValue({ model: null, isPending: false, isError: false });
 });
 
 describe("WireframePanel streaming", () => {
@@ -146,5 +156,115 @@ describe("WireframePanel streaming", () => {
     mockDerived.mockReturnValue({ scene: null, isPending: false, isError: true });
     renderPanel(makeCollab(null, false));
     expect(screen.getByText(/failed to load/i)).toBeInTheDocument();
+  });
+
+  it("keeps a held scene with its own file — one component's wireframe never stands in for another's", () => {
+    // Committed read resolves with nothing to render (not an error), so the
+    // fallback below is the honest "nothing here", never component A's scene.
+    mockDerived.mockReturnValue({ scene: null, isPending: false, isError: false });
+    const doc = new Y.Doc();
+    const a = doc.getText(DSL_PATH);
+    a.insert(0, 'screen Catalog "A"\n  heading "Browse"\n');
+    // Component B's doc holds text that does not compile.
+    const b = doc.getText(OTHER_DSL_PATH);
+    b.insert(0, "garbage {{{");
+    const collab = {
+      peers: [],
+      getFileText: (p: string) => (p === DSL_PATH ? a : p === OTHER_DSL_PATH ? b : null),
+    } as unknown as CollabSpec;
+
+    const { rerender } = render(
+      <WireframePanel projectName="p" dslPath={DSL_PATH} files={[]} collab={collab} />,
+    );
+    expect(Number(screen.getByTestId("excalidraw").dataset.elements)).toBeGreaterThan(0);
+
+    // The panel is not remounted on selection change (SpecView renders it
+    // unkeyed), so the held scene must not leak across the path switch.
+    rerender(
+      <WireframePanel projectName="p" dslPath={OTHER_DSL_PATH} files={[]} collab={collab} />,
+    );
+    expect(screen.queryByTestId("excalidraw")).not.toBeInTheDocument();
+    expect(screen.getByText(/could not be rendered/i)).toBeInTheDocument();
+  });
+});
+
+describe("WireframePanel prototype toggle", () => {
+  const SCENE = JSON.stringify({ elements: [{ type: "rectangle" }] });
+  const MODEL = { screens: [{ name: "Login", width: 1280, height: 800, sceneJson: SCENE, hotspots: [] }] };
+
+  it("shows the toggle only when settled, and swaps to PrototypeView", () => {
+    mockDerived.mockReturnValue({ scene: SCENE, isPending: false, isError: false });
+    mockDerivedPrototype.mockReturnValue({ model: MODEL, isPending: false, isError: false });
+    renderPanel(makeCollab(null, false)); // no agent, no live doc → settled
+    expect(screen.getByRole("button", { name: /prototype/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /prototype/i }));
+    expect(screen.getByTestId("prototype")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /canvas/i }));
+    expect(screen.getByTestId("excalidraw")).toBeInTheDocument();
+  });
+
+  // The state every real user is in: collab connected, the room seeded with the
+  // committed .dsl (#86 phase 4), no turn running. Every test above this block
+  // passed a null Y.Text — i.e. collab OFFLINE — which is why #348 shipped: the
+  // seeded room was never exercised, and there the switch never appeared.
+  describe("in a seeded room between turns (no agent)", () => {
+    function seededCollab() {
+      const doc = new Y.Doc();
+      const ytext = doc.getText(DSL_PATH);
+      ytext.insert(0, 'screen Catalog "Seeded committed content"\n  heading "Browse"\n');
+      return makeCollab(ytext, false);
+    }
+
+    it("shows the view switch", () => {
+      // The committed fetch is disabled in this state, so it reports pending
+      // with no scene — the switch must not depend on it.
+      mockDerived.mockReturnValue({ scene: null, isPending: true, isError: false });
+      mockDerivedPrototype.mockReturnValue({ model: null, isPending: true, isError: false });
+      renderPanel(seededCollab());
+
+      expect(screen.getByRole("button", { name: /prototype/i })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /canvas/i })).toBeInTheDocument();
+      expect(screen.queryByText("Drawing…")).not.toBeInTheDocument();
+    });
+
+    it("renders the prototype from the LIVE doc, not the committed copy", () => {
+      // Committed read is disabled here and answers with nothing; the prototype
+      // must still compile off the doc, or Canvas and Prototype would disagree
+      // about the same file right after a turn ends.
+      mockDerived.mockReturnValue({ scene: null, isPending: true, isError: false });
+      mockDerivedPrototype.mockReturnValue({ model: null, isPending: true, isError: false });
+      renderPanel(seededCollab());
+
+      fireEvent.click(screen.getByRole("button", { name: /prototype/i }));
+      const proto = screen.getByTestId("prototype");
+      expect(proto).toBeInTheDocument();
+      expect(Number(proto.dataset.screens)).toBeGreaterThan(0);
+    });
+
+    it("does not spin or error on the suppressed committed read", () => {
+      mockDerived.mockReturnValue({ scene: null, isPending: false, isError: true });
+      renderPanel(seededCollab());
+
+      expect(screen.queryByLabelText("Loading wireframe")).not.toBeInTheDocument();
+      expect(screen.queryByText(/failed to load/i)).not.toBeInTheDocument();
+      expect(Number(screen.getByTestId("excalidraw").dataset.elements)).toBeGreaterThan(0);
+    });
+  });
+
+  it("hides the toggle while the agent is drawing", () => {
+    mockDerived.mockReturnValue({ scene: null, isPending: false, isError: true });
+    const doc = new Y.Doc();
+    const ytext = doc.getText(DSL_PATH);
+    renderPanel(makeCollab(ytext)); // agent in room
+    act(() => { ytext.insert(0, 'screen Catalog\n  navbar "Shop"\n'); });
+    expect(screen.queryByRole("button", { name: /prototype/i })).not.toBeInTheDocument();
+  });
+
+  it("explains when the prototype model cannot be derived", () => {
+    mockDerived.mockReturnValue({ scene: SCENE, isPending: false, isError: false });
+    mockDerivedPrototype.mockReturnValue({ model: null, isPending: false, isError: false });
+    renderPanel(makeCollab(null, false));
+    fireEvent.click(screen.getByRole("button", { name: /prototype/i }));
+    expect(screen.getByText(/could not be rendered as a prototype/i)).toBeInTheDocument();
   });
 });

@@ -70,6 +70,19 @@ type RunCycleRepository interface {
 	// so the first close wins.
 	Finish(ctx context.Context, id, mergeSHA string) (*RunCycle, error)
 
+	// SetValidationVerdict records what one validation ATTEMPT concluded, and the
+	// issue it was dispatched at.
+	//
+	// It is the ONE mutator not fenced on the cycle being open, and deliberately:
+	// the verdict is derived from the report at the cycle's own merge commit, which
+	// the supervisor can only read AFTER Finish has stamped ended_at. The fence is
+	// write-once instead — an empty verdict — because an attempt concludes exactly
+	// once and a second write could only be a retry or a bug. Guarded that way, a
+	// redelivered activity is a no-op rather than a rewrite.
+	//
+	// Returns (nil, nil) when the cycle is absent or already carries a verdict.
+	SetValidationVerdict(ctx context.Context, id, verdict string, issue int) (*RunCycle, error)
+
 	// Latest returns a run's newest cycle, or (nil, nil) when the run has not
 	// dispatched yet. This is how loop POSITION is read — never from a stored
 	// phase enum on the run row.
@@ -107,7 +120,8 @@ type RunCycleRepository interface {
 	DeleteByProject(ctx context.Context, orgID, projectID string) error
 
 	// RecordUsage stamps the cycle's captured token usage onto the row, and its
-	// write-time USD onto cost_usd (#291).
+	// write-time USD onto cost_usd (#291) — each per-model slice priced at its
+	// own rate row, so a multi-model run still stamps.
 	//
 	// It is the ONE mutator NOT guarded on the cycle being open, and that is the
 	// whole point: usage arrives from the terminal-log capture, and a cycle
@@ -115,7 +129,7 @@ type RunCycleRepository interface {
 	// before the watcher's next tick. Fencing this on ended_at IS NULL would
 	// discard nearly every capture. Idempotent by value: the capture re-derives
 	// the same figures from the same log, so a repeat write is a no-op in effect.
-	RecordUsage(ctx context.Context, id string, u contracts.TokenUsage) error
+	RecordUsage(ctx context.Context, id string, u contracts.CapturedUsage) error
 
 	// SumUsageByProjectPhase rolls up captured CYCLE usage per project across an
 	// org, split into the build and validation SDLC phases (#291) — delivery's
@@ -189,6 +203,28 @@ func (r *runCycleRepository) Finish(ctx context.Context, id, mergeSHA string) (*
 	})
 }
 
+func (r *runCycleRepository) SetValidationVerdict(ctx context.Context, id, verdict string, issue int) (*RunCycle, error) {
+	if !ValidationVerdicts[verdict] {
+		return nil, fmt.Errorf("run cycle: unknown validation verdict %q", verdict)
+	}
+	// Not updateOpen: this write lands after Finish. The write-once fence replaces
+	// the closed-cycle one — see SetValidationVerdict on the interface.
+	res := r.db.WithContext(ctx).
+		Model(&RunCycle{}).
+		Where("id = ? AND (validation_verdict IS NULL OR validation_verdict = '')", id).
+		Updates(map[string]any{
+			"validation_verdict": verdict,
+			"validation_issue":   issue,
+		})
+	if res.Error != nil {
+		return nil, res.Error
+	}
+	if res.RowsAffected == 0 {
+		return nil, nil
+	}
+	return r.getByID(ctx, id)
+}
+
 func (r *runCycleRepository) Latest(ctx context.Context, orgID, runID string) (*RunCycle, error) {
 	var row RunCycle
 	err := r.db.WithContext(ctx).
@@ -251,7 +287,7 @@ func (r *runCycleRepository) DeleteByProject(ctx context.Context, orgID, project
 		Delete(&RunCycle{}).Error
 }
 
-func (r *runCycleRepository) RecordUsage(ctx context.Context, id string, u contracts.TokenUsage) error {
+func (r *runCycleRepository) RecordUsage(ctx context.Context, id string, u contracts.CapturedUsage) error {
 	updates := map[string]any{
 		"input_tokens":          u.InputTokens,
 		"output_tokens":         u.OutputTokens,
@@ -260,15 +296,10 @@ func (r *runCycleRepository) RecordUsage(ctx context.Context, id string, u contr
 		"model_id":              u.Model,
 	}
 	// Stamp USD at capture from the rates in force now (#291): frozen on the row,
-	// never re-derived. Null when unpriceable (no rate row / no model).
+	// never re-derived. Null when unpriceable (any token-bearing slice without a
+	// rate row).
 	if r.stamper != nil {
-		updates["cost_usd"] = r.stamper.Cost(modelcost.Tokens{
-			ModelID:             u.Model,
-			InputTokens:         u.InputTokens,
-			OutputTokens:        u.OutputTokens,
-			CacheReadTokens:     u.CacheReadTokens,
-			CacheCreationTokens: u.CacheCreationTokens,
-		})
+		updates["cost_usd"] = stampCapturedCost(r.stamper, u)
 	}
 	// NOT applyOpen: see RecordUsage's contract — a closed cycle is exactly the
 	// case this has to serve.
@@ -276,6 +307,25 @@ func (r *runCycleRepository) RecordUsage(ctx context.Context, id string, u contr
 		Model(&RunCycle{}).
 		Where("id = ?", id).
 		Updates(updates).Error
+}
+
+// stampCapturedCost prices a capture for a row write (#291): the runner's
+// per-model split when present (each slice at its own rate, summed by
+// Stamper.SumCost's all-or-nothing rule), else the aggregate as one slice —
+// the pre-split runner shape, where a mixed run has model "" and stays null.
+func stampCapturedCost(stamper *modelcost.Stamper, u contracts.CapturedUsage) *float64 {
+	slices := u.PricingSlices()
+	ts := make([]modelcost.Tokens, 0, len(slices))
+	for _, s := range slices {
+		ts = append(ts, modelcost.Tokens{
+			ModelID:             s.Model,
+			InputTokens:         s.InputTokens,
+			OutputTokens:        s.OutputTokens,
+			CacheReadTokens:     s.CacheReadTokens,
+			CacheCreationTokens: s.CacheCreationTokens,
+		})
+	}
+	return stamper.SumCost(ts)
 }
 
 func (r *runCycleRepository) SumUsageByProjectPhase(ctx context.Context, orgID string) (build, validation map[string]contracts.StampedUsage, err error) {

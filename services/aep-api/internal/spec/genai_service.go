@@ -31,7 +31,6 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -41,40 +40,22 @@ import (
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 )
 
-// Valid use cases (the FE-supplied "useCase" field).
-const (
-	useCaseRequirementsGenerate = "requirements-generate"
-	useCaseRequirementsChat     = "requirements-chat"
-	useCaseDesignGenerate       = "design-generate"
-	// useCaseGeneral is the INTERNAL use case a turn runs under when the client
-	// omits "useCase" — a generic spec turn with generic steering, a generic
-	// commit message, and no requirements/design gating. It is not a client
-	// value (absent from validUseCases): the edge reaches it only by normalizing
-	// an absent field, so the wire enum stays the three real flows.
-	useCaseGeneral = "general"
-)
-
-var validUseCases = map[string]bool{
-	useCaseRequirementsGenerate: true,
-	useCaseRequirementsChat:     true,
-	useCaseDesignGenerate:       true,
-}
+// useCaseGeneral is the single flow identity every genai turn runs under. The
+// old FE-supplied "useCase" field is gone (#373): flows ride `/<skill>`
+// instructions, and this constant survives only because it is baked into
+// conversation identities (namespacedID) and turn rows — changing it would
+// strand every existing conversation.
+const useCaseGeneral = "general"
 
 // Errors — pre-202, mapped to HTTP status by the huma layer.
 var (
 	ErrProjectRepoNotFound   = errors.New("project repository not found")
-	ErrInvalidUseCase        = errors.New("invalid use case")
 	ErrInvalidConversationID = errors.New("invalid conversation id")
 	ErrEmptyInstruction      = errors.New("instruction must not be empty")
 	// ErrCollabNoToken rejects a room-scoped turn whose request carried no
 	// bearer — the agent joins the room with the caller's token (#86 d7).
-	ErrCollabNoToken  = errors.New("collab turn requires a bearer token")
-	ErrNoAnthropicKey = errors.New("organization has no Anthropic API key configured")
-	// ErrRequirementsMissing gates design generation on requirements CONTENT
-	// at HEAD (single-tag build flow: the version tag is cut by the build
-	// endpoint AFTER the design exists, so a tag can never be a precondition
-	// for generating the first design).
-	ErrRequirementsMissing  = errors.New("design generation requires requirements content — write or generate requirements first")
+	ErrCollabNoToken        = errors.New("collab turn requires a bearer token")
+	ErrNoAnthropicKey       = errors.New("organization has no Anthropic API key configured")
 	ErrConversationNotFound = errors.New("conversation not found")
 	ErrTurnNotFound         = errors.New("turn not found")
 	// ErrSkillsRepoUnavailable means the org's _skills repo (the turn's
@@ -146,7 +127,6 @@ type SkillsRepoResolver func(ctx context.Context, orgID string) (*sourcecontrol.
 // committed snapshot at HEAD (D13), and filesChangedExternally is
 // server-derived (D20).
 type TurnInput struct {
-	UseCase        string
 	ConversationID string
 	Instruction    string
 	Target         string
@@ -154,11 +134,6 @@ type TurnInput struct {
 	// joins the project's spec room as a live Yjs peer with the prompting
 	// user's bearer, edits the shared doc, and nothing is committed to git.
 	Collab bool
-	// EagerSkills names skills the agents service inlines into this turn's
-	// prompt up front (#335 latency) — skips the model's loadSkill round-trip
-	// when the caller already knows a skill applies. Passed through verbatim;
-	// unknown names are ignored downstream.
-	EagerSkills []string
 }
 
 // TurnStatus is the read view of one turn (the status GET body).
@@ -282,17 +257,6 @@ func NewService(d ServiceDeps) *Service {
 }
 
 func (s *Service) StartTurn(ctx context.Context, orgID, projectID string, in TurnInput) (string, error) {
-	// useCase is optional. An ABSENT value runs the generic turn (useCaseGeneral):
-	// generic steering + commit message, no requirements/design gate. A PRESENT
-	// value must be one of the three real flows (the wire enum already fences
-	// HTTP callers; this guards direct service/test callers too).
-	if in.UseCase != "" && !validUseCases[in.UseCase] {
-		return "", ErrInvalidUseCase
-	}
-	useCase := in.UseCase
-	if useCase == "" {
-		useCase = useCaseGeneral
-	}
 	if !validConversationID(in.ConversationID) {
 		return "", ErrInvalidConversationID
 	}
@@ -311,18 +275,10 @@ func (s *Service) StartTurn(ctx context.Context, orgID, projectID string, in Tur
 		return "", fmt.Errorf("resolve workspace ref: %w", err)
 	}
 
-	specTag := ""
-
 	key, err := s.resolveKey(ctx, orgID)
 	if err != nil {
 		return "", err
 	}
-
-	// D20: identities are captured NOW — the turn runs detached, with no
-	// request context left to consult. Author = the prompting user (JWT
-	// subject + a noreply address; Thunder claims carry no email), committer
-	// = the org credential's save identity (the AEP bot fallback).
-	author, committer := s.captureIdentities(ctx, ref)
 
 	// Room-scoped turn (#86 phase 4): capture the room + the prompting user's
 	// bearer NOW (D20 — the runner has no request context). Access is
@@ -337,53 +293,20 @@ func (s *Service) StartTurn(ctx context.Context, orgID, projectID string, in Tur
 		collabRoomID = "spec-" + orgID + "-" + projectID
 	}
 
-	// Collab room-scoped turns author design.json live under the
-	// requirements-chat useCase, whose steering never names the design flow —
-	// append the dependency-discovery steer so the collab architect loads the
-	// architecture skill and resolves real provider names via list_org_endpoints
-	// (the MCP block is attached in mcpForTurn) instead of inventing role-based
-	// org-service names that fail exact-name resolution at build.
-	collabSteer := ""
-	if in.Collab {
-		collabSteer = collabDepsSteer
-	}
-
 	ws := s.git.Workspace()
 	baseRef, err := ws.Head(ctx, ref, "")
 	if err != nil {
 		return "", fmt.Errorf("resolve base ref: %w", err)
 	}
 
-	// Design gate (single-tag build flow): requirements CONTENT must exist at
-	// HEAD — generating a design from an empty spec is always a user error.
-	// The old D19 approve-first gate (a v<N> tag as precondition) is gone: the
-	// build endpoint cuts the tag AFTER the design exists, so requiring one
-	// here deadlocked every new project. The latest v<N>, when one exists,
-	// still stamps the turn's lineage specTag ("" on a first build).
-	if useCase == useCaseDesignGenerate {
-		if err := s.requireRequirementsContent(ctx, ref, baseRef); err != nil {
-			return "", err
-		}
-		if specTag, err = s.latestRequirementsTag(ctx, ref); err != nil {
-			return "", err
-		}
-	}
-
-	// `/start` (start_command.go) is the one slash command the server expands,
-	// because only the server can enrich it: the idea lives in
-	// specs/.agentic-engineer.toml, which no client parses and the agent cannot
-	// read (dot-led segments are stripped from every turn snapshot). An idea
-	// typed inline wins; otherwise the captured one is read from the descriptor.
-	// Best-effort throughout — no descriptor, no append, and the start skill
-	// asks the user instead.
-	instructionText := in.Instruction
-	if inlineIdea, isStart := parseStartCommand(in.Instruction); isStart {
-		idea := inlineIdea
-		if idea == "" {
-			idea = s.readProjectIdea(ctx, ref, baseRef)
-		}
-		instructionText = StartInstruction + ideaSteer(idea)
-	}
+	// Flow recognition (#373): `/<skill>` commands arrive VERBATIM and the
+	// server classifies them into a TurnSpec — WHAT the turn is for, never its
+	// wording (the agents service composes that). `/start` additionally carries
+	// the captured idea from specs/.agentic-engineer.toml, which no client
+	// parses and the agent cannot read (dot-led segments are stripped from
+	// every turn snapshot; an idea typed inline wins). Best-effort — no
+	// descriptor, no idea, and the start skill asks the user instead.
+	turnSpec, flow := s.turnSpecFor(ctx, ref, baseRef, in.Instruction)
 
 	// Skills resolve failures are typed: both arms mean the org's _skills repo
 	// is unusable right now (row missing/unprovisionable, or the backing repo
@@ -410,11 +333,10 @@ func (s *Service) StartTurn(ctx context.Context, orgID, projectID string, in Tur
 		OrgID:          orgID,
 		ProjectID:      projectID,
 		ConversationID: in.ConversationID,
-		UseCase:        useCase,
+		UseCase:        useCaseGeneral,
 		BaseRef:        baseRef,
 		SkillsRef:      skillsRef,
 		Status:         turnStatusRunning,
-		SpecTag:        specTag,
 	})
 	if errors.Is(err, ErrTurnActive) {
 		return "", &TurnInProgressError{ActiveTurnID: row.ID}
@@ -428,22 +350,18 @@ func (s *Service) StartTurn(ctx context.Context, orgID, projectID string, in Tur
 		turnID:           row.ID,
 		orgID:            orgID,
 		projectID:        projectID,
-		useCase:          useCase,
+		flow:             flow,
 		conversationID:   in.ConversationID,
-		nsConversationID: namespacedID(repo, useCase, in.ConversationID),
-		// The idea rides BEFORE the useCase steering so that steering's "from
-		// the direction above" covers the idea as well as the instruction.
-		instruction:  instructionText + steeringByUseCase[useCase] + collabSteer + targetSuffix(in.Target),
-		summary:      in.Instruction,
-		repoRef:      ref,
-		baseRef:      baseRef,
-		skillsRef:    skillsRef,
-		anthropicKey: key,
-		author:       author,
-		committer:    committer,
-		collabRoomID: collabRoomID,
-		collabToken:  collabToken,
-		eagerSkills:  in.EagerSkills,
+		nsConversationID: namespacedID(repo, useCaseGeneral, in.ConversationID),
+		turn:             turnSpec,
+		target:           in.Target,
+		summary:          in.Instruction,
+		repoRef:          ref,
+		baseRef:          baseRef,
+		skillsRef:        skillsRef,
+		anthropicKey:     key,
+		collabRoomID:     collabRoomID,
+		collabToken:      collabToken,
 	}
 	// Detached: the turn runs to completion (or a terminal failure) server-
 	// side regardless of the client connection (D16). runTurnSafe is the panic
@@ -557,82 +475,6 @@ func (s *Service) resolveKey(ctx context.Context, orgID string) (string, error) 
 	return key, nil
 }
 
-// latestRequirementsTag lists the v* tags and returns the highest `v<N>` spec
-// tag name, or "" when none exists yet (a first-build project) — the design
-// turn's lineage stamp, no longer a gate.
-func (s *Service) latestRequirementsTag(ctx context.Context, ref sourcecontrol.RepoRef) (string, error) {
-	tags, err := s.git.Workspace().ListTags(ctx, ref, "v")
-	if err != nil {
-		return "", fmt.Errorf("list requirement tags: %w", err)
-	}
-	bestN := -1
-	best := ""
-	for _, tag := range tags {
-		m := requirementsTagPattern.FindStringSubmatch(tag.Name)
-		if m == nil {
-			continue
-		}
-		n, err := strconv.Atoi(m[1])
-		if err != nil {
-			continue
-		}
-		if n > bestN {
-			bestN, best = n, tag.Name
-		}
-	}
-	return best, nil
-}
-
-// requireRequirementsContent is the design-generate gate: the requirements
-// main doc must be non-empty at the turn's base ref.
-func (s *Service) requireRequirementsContent(ctx context.Context, ref sourcecontrol.RepoRef, at string) error {
-	const mainDoc = "specs/requirements/requirements.md"
-	files, _, err := s.git.Workspace().ReadBundle(ctx, ref, at, func(rel string) bool {
-		return rel == mainDoc
-	})
-	if err != nil {
-		return fmt.Errorf("read requirements at %s: %w", at, err)
-	}
-	if strings.TrimSpace(files[mainDoc]) == "" {
-		return ErrRequirementsMissing
-	}
-	return nil
-}
-
-// captureIdentities resolves the D20 commit identities at POST time: author =
-// the prompting user from the verified JWT claims (subject + noreply email —
-// Thunder claims carry no email/display name), committer = the org
-// credential's save identity (falls back to the AEP bot). When no claims are
-// present (should not happen on the authed edge), both fall back to the
-// committer.
-func (s *Service) captureIdentities(ctx context.Context, ref sourcecontrol.RepoRef) (author, committer *sourcecontrol.GitIdentity) {
-	_, committer = s.git.ResolveSaveIdentities(ref.Cred)
-	author = committer
-	if claims := auth.ClaimsFromContext(ctx); claims != nil && claims.Subject != "" {
-		author = &sourcecontrol.GitIdentity{
-			Name:  claims.Subject,
-			Email: noreplyEmail(claims.Subject),
-		}
-	}
-	return author, committer
-}
-
-// noreplyEmail derives a stable, valid noreply address from a JWT subject.
-func noreplyEmail(subject string) string {
-	var b strings.Builder
-	for _, r := range subject {
-		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '.', r == '_', r == '-':
-			b.WriteRune(r)
-		}
-	}
-	local := b.String()
-	if local == "" {
-		local = "aep-user"
-	}
-	return local + "@users.noreply.aep.dev"
-}
-
 // ---- pure helpers ----------------------------------------------------------
 
 // validConversationID enforces the safe shape and rejects the namespace
@@ -647,11 +489,4 @@ func validConversationID(id string) bool {
 // extra segments.
 func namespacedID(repo *sourcecontrol.GitRepository, useCase, uuid string) string {
 	return agentsvc.ConversationID(repo.OrgID, repo.ProjectID, useCase, uuid)
-}
-
-func targetSuffix(target string) string {
-	if strings.TrimSpace(target) == "" {
-		return ""
-	}
-	return "\n\n(target: " + target + ")"
 }

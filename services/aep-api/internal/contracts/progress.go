@@ -101,8 +101,9 @@ type ProgressEvent struct {
 	Message     string `json:"message,omitempty"`
 
 	// result: the run's token usage (#249), present once the runner captures
-	// it from the SDK terminal message.
-	Usage *TokenUsage `json:"usage,omitempty"`
+	// it from the SDK terminal message. CapturedUsage carries the aggregate
+	// plus the per-model split the capture path prices (#291).
+	Usage *CapturedUsage `json:"usage,omitempty"`
 }
 
 // ProgressResponse is the envelope the progress reader returns per execution.

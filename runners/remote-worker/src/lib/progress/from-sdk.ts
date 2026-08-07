@@ -28,7 +28,7 @@
 // outcome are two different messages). Building that state per run keeps it out
 // of module scope, so tests and concurrent runs cannot see each other's.
 
-import type { ProgressAttribution, ProgressEventInput, TurnUsage } from "./schema.js";
+import type { ProgressAttribution, ProgressEventInput, TurnModelUsage, TurnUsage } from "./schema.js";
 
 const MAX_SUMMARY = 200;
 
@@ -65,22 +65,45 @@ function num(v: unknown): number {
 }
 
 // usageFromResult reads the SDK result message's token usage (#291). Tokens
-// come from `usage` (snake_case SDK fields); the model comes from `modelUsage`,
-// a record keyed by model id — a single key is the run's model, anything else
-// (multi-model, or none) reports "" so aep-api treats it as unpriceable/mixed,
-// matching contracts.TokenUsage semantics. Returns undefined when the result
-// carried no usage at all (older SDKs / nothing to stamp).
+// come from `usage` (snake_case SDK fields); the per-model split comes from
+// `modelUsage`, a record keyed by model id whose entries carry camelCase token
+// counts and (on current SDKs) the `canonicalModel` alias. Versioned release
+// ids collapse onto their canonical model — two dated releases of one model
+// are still a single-model run. `model` names the run's one model, or "" when
+// several genuinely mixed (matching contracts.TokenUsage.Add); `models` keeps
+// the split either way, because aep-api prices each slice against its own rate
+// row — a real coding run regularly touches a second model (the SDK's small-
+// model helpers), and collapsing to "" made every such run unpriceable.
+// Returns undefined when the result carried no usage at all (older SDKs /
+// nothing to stamp).
 function usageFromResult(m: Record<string, unknown>): TurnUsage | undefined {
   const u = m.usage;
   if (!u || typeof u !== "object") return undefined;
   const usage = u as Record<string, unknown>;
 
-  let model = "";
+  const byModel = new Map<string, TurnModelUsage>();
   const mu = m.modelUsage;
   if (mu && typeof mu === "object") {
-    const models = Object.keys(mu as Record<string, unknown>);
-    if (models.length === 1) model = models[0];
+    for (const [key, val] of Object.entries(mu as Record<string, unknown>)) {
+      const entry = val && typeof val === "object" ? (val as Record<string, unknown>) : {};
+      const canonical = typeof entry.canonicalModel === "string" && entry.canonicalModel !== "" ? entry.canonicalModel : key;
+      const slice = byModel.get(canonical) ?? {
+        model: canonical, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0,
+      };
+      slice.inputTokens += num(entry.inputTokens);
+      slice.outputTokens += num(entry.outputTokens);
+      slice.cacheReadTokens += num(entry.cacheReadInputTokens);
+      slice.cacheCreationTokens += num(entry.cacheCreationInputTokens);
+      byModel.set(canonical, slice);
+    }
   }
+  // The aggregate model considers every entry (a zero-token entry still names
+  // the run's model); the slices carry only entries that spent something —
+  // aep-api's pricing has nothing to do with an all-zero slice.
+  const model = byModel.size === 1 ? [...byModel.keys()][0] : "";
+  const models = [...byModel.values()].filter(
+    (s) => s.inputTokens + s.outputTokens + s.cacheReadTokens + s.cacheCreationTokens > 0,
+  );
 
   return {
     inputTokens: num(usage.input_tokens),
@@ -88,6 +111,7 @@ function usageFromResult(m: Record<string, unknown>): TurnUsage | undefined {
     cacheReadTokens: num(usage.cache_read_input_tokens),
     cacheCreationTokens: num(usage.cache_creation_input_tokens),
     model,
+    ...(models.length > 0 ? { models } : {}),
   };
 }
 

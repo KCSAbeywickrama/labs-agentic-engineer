@@ -49,7 +49,7 @@ func (f fakeOrgsForCycle) GetByName(context.Context, string) (*organization.Orga
 type fakeCycleRepo struct {
 	delivery.RunCycleRepository
 	dispatched  []delivery.RunCycle
-	recorded    map[string]contracts.TokenUsage
+	recorded    map[string]contracts.CapturedUsage
 	recordCalls int
 }
 
@@ -57,9 +57,9 @@ func (f *fakeCycleRepo) ListRecentDispatched(context.Context, time.Time) ([]deli
 	return f.dispatched, nil
 }
 
-func (f *fakeCycleRepo) RecordUsage(_ context.Context, id string, u contracts.TokenUsage) error {
+func (f *fakeCycleRepo) RecordUsage(_ context.Context, id string, u contracts.CapturedUsage) error {
 	if f.recorded == nil {
-		f.recorded = map[string]contracts.TokenUsage{}
+		f.recorded = map[string]contracts.CapturedUsage{}
 	}
 	f.recorded[id] = u
 	f.recordCalls++
@@ -143,11 +143,11 @@ func TestCaptureCycleLog_RecordsUsageOnTheCycle(t *testing.T) {
 	if !ok {
 		t.Fatalf("no usage recorded for the cycle; recorded = %+v", cycles.recorded)
 	}
-	want := contracts.TokenUsage{
+	want := contracts.CapturedUsage{TokenUsage: contracts.TokenUsage{
 		InputTokens: 1200, OutputTokens: 340, CacheReadTokens: 50000,
 		CacheCreationTokens: 700, Model: "claude-fable-5",
-	}
-	if got != want {
+	}}
+	if got.TokenUsage != want.TokenUsage || len(got.Models) != 0 {
 		t.Fatalf("recorded usage = %+v, want %+v", got, want)
 	}
 }

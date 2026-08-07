@@ -60,6 +60,7 @@ function run(over: {
       fixCycles: 0,
       conflictCycles: 0,
       buildRetriggers: 0,
+      validationCycles: 1,
     },
     validation: over.validation ?? {},
     cycles: over.cycles ?? [],
@@ -350,7 +351,9 @@ describe("ValidationPage lifecycle", () => {
     renderPage(undefined);
 
     expect(screen.queryByTestId("run-feed")).not.toBeInTheDocument();
-    expect(screen.getAllByText("Validated*").length).toBe(2);
+    // Partial shares `passed`'s visible label since #401; the tile's copy and
+    // the spoken form carry the uncovered-criteria distinction.
+    expect(screen.getAllByText("Validated").length).toBe(2);
     expect(screen.getByText("Shoppers can search the catalog.")).toBeInTheDocument();
   });
 
@@ -368,7 +371,7 @@ describe("ValidationPage lifecycle", () => {
     renderPage(undefined);
 
     expect(screen.queryByTestId("run-feed")).not.toBeInTheDocument();
-    expect(screen.getAllByText("Validation inconclusive").length).toBe(2);
+    expect(screen.getAllByText("Validation?").length).toBe(2);
     expect(screen.getByText(/please validate them manually/)).toBeInTheDocument();
   });
 
@@ -385,7 +388,7 @@ describe("ValidationPage lifecycle", () => {
     renderPage(undefined);
 
     expect(screen.queryByTestId("run-feed")).not.toBeInTheDocument();
-    expect(screen.getAllByText("Validation reporting error").length).toBe(2);
+    expect(screen.getAllByText("Validation error").length).toBe(2);
     expect(
       screen.getByText(/generating the validation report/),
     ).toBeInTheDocument();

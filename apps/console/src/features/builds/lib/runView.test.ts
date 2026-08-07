@@ -41,6 +41,7 @@ const budgets = (over: Partial<RunBudgets> = {}): RunBudgets => ({
   fixCycles: 0,
   conflictCycles: 0,
   buildRetriggers: 0,
+  validationCycles: 0,
   ...over,
 });
 
