@@ -214,10 +214,12 @@ service auth (e.g. `AEP_BFF_TO_PLATFORM_API`,
 sourced from Vault on cloud; a literal env var locally.
 
 ### `Task JWT`
-The short-lived bearer the BFF mints per coding-agent dispatch (`AEP_BEARER`
-in the WorkflowRun param today). M1 plan replaces this with **AMP's eval-job
-pattern**: per-org OAuth client-secret + per-run ExternalSecret +
-`client_credentials` exchange at runner startup.
+The short-lived RS256 bearer the BFF mints once per cycle at dispatch, with
+the cycle id as subject. Injected as `AEP_BEARER` on the ephemeral
+`coding-agent` job Component; the runner pod presents it back to aep-api for
+platform callbacks (credential refresh, MCP). Verifiers fetch the BFF's public
+key from `/auth/external/jwks.json`. Distinct from Thunder user/M2M tokens and
+from the retired `AEP_BFF_TO_REMOTE_WORKER` client.
 
 ---
 
