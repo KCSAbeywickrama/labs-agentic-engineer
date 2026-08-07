@@ -21,7 +21,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
+
 	"github.com/wso2/aep/aep-api/internal/delivery"
+	"github.com/wso2/aep/aep-api/internal/organization"
+	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 )
 
 // chainRecorder is the OC create-chain fake under the brief's name so the
@@ -30,20 +34,112 @@ type chainRecorder = fakeOCSurface
 
 func (r *chainRecorder) client() OCJobSurface { return r }
 
-// newOCDispatchExecutor is newCodingDispatchExecutor with the OC path wired and
-// the proxy DELIBERATELY also configured — the OC path must win, because it is
-// the only one that works in cloud after this phase.
+func strPtr(s string) *string { return &s }
+
+type fakeOrgRepo struct {
+	org *organization.Organization
+}
+
+func (f fakeOrgRepo) ListByNames(context.Context, []string) ([]organization.Organization, error) {
+	return nil, nil
+}
+func (f fakeOrgRepo) GetByName(context.Context, string) (*organization.Organization, error) {
+	return f.org, nil
+}
+func (f fakeOrgRepo) Create(context.Context, *organization.Organization) error { return nil }
+func (f fakeOrgRepo) SetThunderOrgUUID(context.Context, string, uuid.UUID) error {
+	return nil
+}
+
+type fakeAnthropicCreds struct {
+	row *organization.OrgAnthropicCredential
+}
+
+func (f fakeAnthropicCreds) GetByOrg(context.Context, string) (*organization.OrgAnthropicCredential, error) {
+	return f.row, nil
+}
+func (f fakeAnthropicCreds) UpdateColumns(context.Context, string, map[string]any) error { return nil }
+func (f fakeAnthropicCreds) Tx(context.Context, func(organization.OrgAnthropicTx) error) error {
+	return nil
+}
+
+type fakeGitHubCreds struct {
+	row *organization.OrgCredential
+}
+
+func (f fakeGitHubCreds) GetByOrg(context.Context, string) (*organization.OrgCredential, error) {
+	return f.row, nil
+}
+func (f fakeGitHubCreds) GetByInstallationID(context.Context, int64) (*organization.OrgCredential, error) {
+	return nil, nil
+}
+func (f fakeGitHubCreds) UpdateColumns(context.Context, string, map[string]any) error { return nil }
+func (f fakeGitHubCreds) ListActiveRows(context.Context) ([]organization.OrgCredential, error) {
+	return nil, nil
+}
+func (f fakeGitHubCreds) ListBoundInstallations(context.Context) ([]organization.BoundInstallation, error) {
+	return nil, nil
+}
+func (f fakeGitHubCreds) OrgIDByRepoURL(context.Context, string) (string, error) { return "", nil }
+func (f fakeGitHubCreds) Tx(context.Context, func(organization.OrgCredentialTx) error) error {
+	return nil
+}
+
+func fullSecretRefs() (*organization.OrgAnthropicCredential, *organization.OrgCredential) {
+	return &organization.OrgAnthropicCredential{
+			SecretRefName:      strPtr("acme-anthropic-secrets"),
+			SecretRefKVPath:    strPtr("user-app-secrets/wc-acme/acme-anthropic-secrets"),
+			SecretRefProperty:  strPtr("api-key"),
+			SMAPISecretRefName: strPtr("acme-anthropic-secrets"),
+			SMAPIKVPath:        strPtr("user-app-secrets/wc-acme/acme-anthropic-secrets"),
+			SMAPIProperty:      strPtr("api-key"),
+		}, &organization.OrgCredential{
+			SecretRefName:      strPtr("acme-github-pat-secrets"),
+			SecretRefKVPath:    strPtr("user-app-secrets/wc-acme/acme-github-pat-secrets"),
+			SecretRefProperty:  strPtr("token"),
+			SMAPISecretRefName: strPtr("acme-github-pat-secrets"),
+			SMAPIKVPath:        strPtr("user-app-secrets/wc-acme/acme-github-pat-secrets"),
+			SMAPIProperty:      strPtr("token"),
+		}
+}
+
+func newCodingDispatchExecutor(anthropic *organization.OrgAnthropicCredential, github *organization.OrgCredential) *CodingExecutor {
+	orgUUID := uuid.MustParse("d3adbeef-1234-4321-abcd-c0ffee123456")
+	return NewCodingExecutor(
+		nil,
+		fakeRepos{repo: &sourcecontrol.GitRepository{RepoURL: "https://github.com/acme/widgets", RepoSlug: "acme-widgets"}},
+		fakeIdentities{},
+		fakeTokens{},
+		newFakeExecRepo(),
+		"http://git",
+		"http://platform",
+		fakeOrgRepo{org: &organization.Organization{Name: "acme", UUID: orgUUID}},
+		fakeAnthropicCreds{row: anthropic},
+		fakeGitHubCreds{row: github},
+		nil,
+	)
+}
+
+func codingMilestoneDispatch() delivery.MilestoneDispatch {
+	return delivery.MilestoneDispatch{
+		OrgID: "acme", ProjectID: "widgets",
+		MilestoneNumber: 1, MilestoneTitle: "v1",
+		Kind:    delivery.CycleKindCoding,
+		RunID:   "run-1",
+		CycleID: "11111111-1111-1111-1111-111111111111",
+	}
+}
+
 func newOCDispatchExecutor(rec *chainRecorder) *CodingExecutor {
 	anthropic, github := fullSecretRefs()
-	e := newCodingDispatchExecutor(anthropic, github, nil, true)
+	e := newCodingDispatchExecutor(anthropic, github)
 	e.WithOCDispatch(NewOCDispatcher(rec.client()).WithImage("ghcr.io/wso2/aep/remote-worker:latest"))
 	return e
 }
 
-// TestDispatch_OCPathWinsOverTheProxy pins the selection: with an OC dispatcher
-// wired, a milestone cycle goes through OpenChoreo and the proxy is never
-// consulted.
-func TestDispatch_OCPathWinsOverTheProxy(t *testing.T) {
+// TestDispatch_OCPathDispatchesThroughOpenChoreo pins the only dispatch path:
+// a milestone cycle goes through OpenChoreo.
+func TestDispatch_OCPathDispatchesThroughOpenChoreo(t *testing.T) {
 	rec := &chainRecorder{}
 	e := newOCDispatchExecutor(rec)
 
@@ -55,21 +151,18 @@ func TestDispatch_OCPathWinsOverTheProxy(t *testing.T) {
 		t.Errorf("run name = %q, want the ca- prefix (the watcher discriminator)", runName)
 	}
 	if len(rec.calls) == 0 {
-		t.Fatal("the OC chain was never walked — the proxy path was taken instead")
+		t.Fatal("the OC chain was never walked")
 	}
 	if rec.create.Name != runName {
 		t.Errorf("component name %q != returned run name %q", rec.create.Name, runName)
 	}
 }
 
-// TestDispatch_ValidationCycleNoLongerRefusesWithoutTheProxy is the deletion
-// this task makes real: validation used to be refused outright unless the
-// cluster-gateway-proxy path was configured, because the fallback carried no
-// task kind and no deadline. The OC path carries both.
-func TestDispatch_ValidationCycleNoLongerRefusesWithoutTheProxy(t *testing.T) {
+// TestDispatch_ValidationCycleDispatchesOnOCPath: validation carries task kind
+// and deadline through the OpenChoreo Component path.
+func TestDispatch_ValidationCycleDispatchesOnOCPath(t *testing.T) {
 	rec := &chainRecorder{}
 	e := newOCDispatchExecutor(rec)
-	e.proxy = nil // no proxy at all
 
 	req := codingMilestoneDispatch()
 	req.Kind = delivery.CycleKindValidation
@@ -102,7 +195,7 @@ func TestDispatch_OCPathStillRequiresTheOrgsSecretRefs(t *testing.T) {
 	anthropic, github := fullSecretRefs()
 	anthropic.SecretRefName = nil
 	anthropic.SMAPISecretRefName = nil
-	e := newCodingDispatchExecutor(anthropic, github, nil, false)
+	e := newCodingDispatchExecutor(anthropic, github)
 	e.WithOCDispatch(NewOCDispatcher(rec.client()).WithImage("runner:1"))
 
 	_, err := e.Dispatch(context.Background(), codingMilestoneDispatch())

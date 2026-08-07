@@ -213,15 +213,6 @@ type Config struct {
 	// functional with the workflow endpoints answering 503.
 	Temporal TemporalConfig
 
-	// AgentClusterSecretStore is the ESO ClusterSecretStore that backs
-	// per-run ExternalSecret reads in the remote-worker NS on DP.
-	// On cloud-dp-oc-dp this MUST be `application-secrets-read` (Vault
-	// AppRole `approle-creds-application-read-permission` — covers
-	// `user-app-secrets/*`). `secretstore-read` on the same cluster only
-	// covers platform-component paths (CA bundles, observability creds)
-	// and will silently no-op our reads. Local k3d reuses the existing
-	// `default` CSS.
-	AgentClusterSecretStore string
 }
 
 // Validate checks format/consistency invariants the per-field env readers

@@ -148,7 +148,6 @@ func Load() (Config, error) {
 		// callbacks deploy as a matched pair. Empty disables dispatch, which
 		// fails loudly, rather than silently running an unpinned image.
 		AgentRunnerImage:        r.readOptionalString("AGENT_RUNNER_IMAGE", ""),
-		AgentClusterSecretStore: r.readOptionalString("AGENT_CLUSTER_SECRET_STORE", "default"),
 	}
 
 	if len(r.errors) > 0 {

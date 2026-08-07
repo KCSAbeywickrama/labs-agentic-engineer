@@ -19,18 +19,15 @@
 // It has ONE dispatch entry point — delivery.MilestoneDispatcher: one cycle of
 // a milestone run, one agent pod — and writes no platform state on that path,
 // because the cycle record is the run supervisor's bookkeeping. What state it
-// does write belongs to the two watchers it owns: the JobWatcher (Job phase and
-// terminal token usage) and the ExecWatcher (OpenChoreo WorkflowRun outcomes,
-// including the git-clone-auth build retry).
+// does write belongs to the two watchers it owns: the cycle watcher (pod-truth
+// phase and the captured agent log) and the ExecWatcher (OpenChoreo WorkflowRun
+// outcomes, including the git-clone-auth build retry).
 //
-// The JobWatcher classifies a cycle from the Pod OpenChoreo rendered for its
-// Component — never from the ReleaseBinding's Ready condition, which OpenChoreo
-// leaves green for a `batch/v1 Job` it registers no health check for. It writes
-// exactly two things: a terminal agent reason on a cycle whose agent died
-// without a pull request, and the run's captured token usage. Agent logs are
-// not stored by this platform: they are read live from OpenChoreo and, once the
-// pod is gone, from the observability plane for as long as the Component is
-// retained.
+// One dispatch path: an ephemeral OpenChoreo Component per run cycle, created
+// through the OC API in the milestone's own project. OpenChoreo renders the
+// batch/v1 Job into that project's dataplane namespace and materialises the
+// cycle's secrets from the org's secret store — this package holds no
+// Kubernetes client and writes no secret material.
 package codingagent
 
 import (
@@ -57,13 +54,26 @@ type DeployObserver interface {
 	OnComponentDeployed(ctx context.Context, orgID, projectID, component string) error
 }
 
+// SecretRef is one org credential's refs-only SM-API triplet.
+type SecretRef struct {
+	SecretRefName string
+	KVPath        string
+	Property      string
+}
+
+// ExternalResourceSecretInputs is one external resource's per-env secret bundle
+// (vault path + secret keys) referenced by the cycle Workload.
+type ExternalResourceSecretInputs struct {
+	KVPath string
+	Keys   []string
+}
+
 // RunnerSecretResolver resolves the coding runner's per-run external-resource
-// secret bundles for a component (SM-API vault path + secret keys) — the
-// dispatcher materialises each into a per-run ExternalSecret so the agent can
-// integration-test against the live external service. Wired from the
-// provisioning feature at the composition root; nil → the runner gets no
-// external-resource secrets. Returns the codingagent input type so this feature
-// holds no provisioning/resources import.
+// secret bundles for a component (SM-API vault path + secret keys) so the cycle
+// Workload can reference them. Wired from the provisioning feature at the
+// composition root; nil → the runner gets no external-resource secrets.
+// Returns the codingagent input type so this feature holds no
+// provisioning/resources import.
 type RunnerSecretResolver interface {
 	ResolveRunnerSecrets(ctx context.Context, orgID, projectID, component, env string) ([]ExternalResourceSecretInputs, error)
 }
@@ -96,13 +106,6 @@ type SkillMirror interface {
 	SyncProjectSkills(ctx context.Context, orgID, projectID string) error
 }
 
-// AnthropicProvisioner materializes the per-org Anthropic key Secret on the
-// workflow plane and returns its ref. Best-effort at dispatch. Wired from
-// orgcreds.AnthropicCredentialService.
-type AnthropicProvisioner interface {
-	ApplyWPSecret(ctx context.Context, ocOrgID string) (secretRef string, err error)
-}
-
 // TokenIssuer mints the runner's bearer (§9.2: the id it carries is the
 // dispatching CYCLE's id). Wired from auth.TaskTokenManager.
 type TokenIssuer interface {
@@ -120,13 +123,6 @@ type TokenIssuer interface {
 // sourcecontrol.RepoService.
 type ProjectRepos interface {
 	GetRepo(ctx context.Context, orgID, projectID string) (*sourcecontrol.GitRepository, error)
-}
-
-// OrgPublisherProvisioner get-or-creates the org's Thunder publisher OAuth
-// client (for the proxy-dispatched runner's cc auth through the cloud gateway).
-// Optional — nil / a local http platform URL skips it. Wired from idp.IDPService.
-type OrgPublisherProvisioner interface {
-	EnsureOrgPublisher(ctx context.Context, orgID, actor string) (clientID, clientSecret string, created bool, err error)
 }
 
 // BuildSecretStager pre-stages the org's build git credential on the workflow

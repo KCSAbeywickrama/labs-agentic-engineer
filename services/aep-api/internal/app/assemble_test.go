@@ -25,12 +25,10 @@ package app
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	"github.com/wso2/aep/aep-api/internal/clients/secretmanagersvc"
 	"github.com/wso2/aep/aep-api/internal/config"
-	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
 // baseCfg is the minimal config that Assemble accepts. GitProvider must be
@@ -156,10 +154,10 @@ func TestAssemble_Degradations(t *testing.T) {
 		// Every optional capability is off, including no working coding-dispatch
 		// path (proxy+secrets unset; k8s is not a secrets-capable path).
 		for _, want := range []string{
-			"m2m-service-auth", "build-logs", "cycle-log-archive", "secrets-delivery",
+			"m2m-service-auth", "build-logs", "secrets-delivery",
 			"cluster-gateway-proxy", "mcp-discovery", "idp-mutations",
-			"connect-oauth-state", "coding-dispatch-proxy", "coding-dispatch-k8s",
-			"coding-dispatch-any", "rca-agent-key-push", "run-temporal",
+			"connect-oauth-state", "coding-dispatch-oc", "rca-agent-key-push",
+			"run-temporal",
 		} {
 			if !hasCapability(degs, want) {
 				t.Errorf("minimal config: expected degradation %q, missing from %+v", want, degs)
@@ -167,57 +165,16 @@ func TestAssemble_Degradations(t *testing.T) {
 		}
 	})
 
-	t.Run("proxy + secrets provider clears the dispatch degradations", func(t *testing.T) {
-		cfg := baseCfg()
-		cfg.ClusterGatewayProxyURL = "http://cgw"
-		app, err := Assemble(cfg, Fake(), Seam{SecretsProvider: stubSecretsProvider{}})
+	t.Run("a secrets provider clears the OC dispatch degradation", func(t *testing.T) {
+		app, err := Assemble(baseCfg(), Fake(), Seam{SecretsProvider: stubSecretsProvider{}})
 		if err != nil {
 			t.Fatalf("Assemble = %v", err)
 		}
 		degs := app.Degradations()
-		for _, gone := range []string{
-			"cluster-gateway-proxy", "secrets-delivery",
-			"coding-dispatch-proxy", "coding-dispatch-any",
-		} {
+		for _, gone := range []string{"secrets-delivery", "coding-dispatch-oc"} {
 			if hasCapability(degs, gone) {
-				t.Errorf("with proxy+secrets provider: %q should NOT be degraded, got %+v", gone, degs)
+				t.Errorf("with a secrets provider: %q should NOT be degraded, got %+v", gone, degs)
 			}
-		}
-		// The direct K8s path is never a working secrets capability (refs-only
-		// via proxy). With a nil k8s client it stays degraded for "not wired".
-		if !hasCapability(degs, "coding-dispatch-k8s") {
-			t.Errorf("with a nil k8s client the direct-dispatch degradation should remain")
-		}
-	})
-
-	t.Run("k8s client wired still reports coding-dispatch-k8s unavailable for secrets", func(t *testing.T) {
-		cfg := baseCfg()
-		cfg.AgentRunnerImage = "runner:1"
-		cfg.AgentPlatformURL = "http://platform"
-		in := Fake()
-		in.K8sClient = fake.NewClientBuilder().Build()
-		app, err := Assemble(cfg, in, Seam{})
-		if err != nil {
-			t.Fatalf("Assemble = %v", err)
-		}
-		degs := app.Degradations()
-		var k8s Degradation
-		for _, d := range degs {
-			if d.Capability == "coding-dispatch-k8s" {
-				k8s = d
-				break
-			}
-		}
-		if k8s.Capability == "" {
-			t.Fatal("coding-dispatch-k8s must remain degraded when secret delivery is unavailable")
-		}
-		if !strings.Contains(k8s.Reason, "secret delivery is disabled") {
-			t.Fatalf("k8s degradation must say secret delivery disabled, got %q", k8s.Reason)
-		}
-		// AGENT_RUNNER_IMAGE wires the OpenChoreo path, so coding-dispatch-any
-		// clears even without proxy+secrets.
-		if hasCapability(degs, "coding-dispatch-any") {
-			t.Error("with AGENT_RUNNER_IMAGE set, coding-dispatch-any must not be degraded (OC path is working)")
 		}
 	})
 

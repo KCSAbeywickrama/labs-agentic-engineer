@@ -237,9 +237,9 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// case when smClient is nil is fine).
 	secretRefWriter := organization.NewSecretRefWriter(smClient, orgCredRepo, orgAnthropicRepo, idpRepo)
 
-	// cluster-gateway-proxy client. Used for the proxy DISPATCH path when
-	// secrets delivery is also configured. When CLUSTER_GATEWAY_PROXY_URL is
-	// empty, dispatch uses the direct K8sJobDispatcher.
+	// cluster-gateway-proxy client. Used for legacy progress reads until Task 3
+	// retires the proxy entirely. When CLUSTER_GATEWAY_PROXY_URL is empty, proxy
+	// progress reads are unavailable.
 	var cgwClient *clustergatewayproxy.Client
 	if cfg.ClusterGatewayProxyURL != "" {
 		cgwCfg := clustergatewayproxy.Config{BaseURL: cfg.ClusterGatewayProxyURL}
@@ -584,35 +584,9 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// re-try the exec watcher asks for.
 	codingExecutor := codingagent.NewCodingExecutor(
 		componentClient, repoService, identities{cred: credService},
-		anthropicProvisioner{svc: anthropicCredService}, taskTokens, executionRepo,
+		taskTokens, executionRepo,
 		cfg.AgentPlatformURL, cfg.AgentPlatformURL,
 		orgRepo, orgAnthropicRepo, orgCredRepo, idpRepo)
-	// The cluster-gateway-proxy DISPATCH path (per-org NS + per-run
-	// ExternalSecrets + a K8s Job via the proxy) requires secrets delivery:
-	// the per-run ExternalSecrets source their values from SecretReferences
-	// authored via the injected provider. Gated on BOTH the proxy AND a
-	// secrets client — cloud/prod posture. Locally the proxy stub may still be
-	// present for the legacy progress reader even when delivery is off; then
-	// dispatch falls through to the direct K8sJobDispatcher.
-	if cgwClient != nil && smClient != nil {
-		codingExecutor.WithProxy(codingagent.New(cgwClient), idpService, cfg.AgentRunnerImage, cfg.AgentClusterSecretStore)
-		slog.Info("coding executor: cluster-gateway-proxy dispatch path enabled (proxy + secrets delivery)",
-			"runnerImage", cfg.AgentRunnerImage, "clusterSecretStore", cfg.AgentClusterSecretStore)
-	}
-	// Direct K8s Job dispatcher remains constructible for a future Job path,
-	// but is not reported as an available coding capability: secret delivery
-	// requires cluster-gateway-proxy + secret refs. Wire only so fail-closed
-	// Dispatch surfaces a clear error when the proxy path is absent.
-	if wpClient != nil && cfg.AgentRunnerImage != "" && cfg.AgentPlatformURL != "" {
-		k8sJobDispatcher := codingagent.NewK8sJobDispatcher(
-			wpClient,
-			cfg.AgentPlatformURL,
-			cfg.AgentRunnerImage,
-		)
-		codingExecutor.WithK8sJobDispatch(k8sJobDispatcher)
-		slog.Info("coding executor: direct k8s-job dispatcher wired (secret delivery unavailable; configure cluster-gateway-proxy + secret refs)",
-			"runnerImage", cfg.AgentRunnerImage, "configured", k8sJobDispatcher.Configured())
-	}
 	// The OpenChoreo Component dispatch path (phase 08): one Component per run
 	// cycle in the milestone's own project, rendered by OC into the project's
 	// dataplane namespace. It needs only the OC client and the runner image —
@@ -1333,23 +1307,12 @@ func computeDegradations(cfg config.Config, in Infra, secretsDelivery bool) []De
 	if cfg.OAuthStateSigningKey == "" {
 		off("connect-oauth-state", "OAUTH_STATE_SIGNING_KEY not set — GitHub App connect-state JWTs will fail to mint")
 	}
-	// Working dispatch requires OpenChoreo (AGENT_RUNNER_IMAGE) or
-	// cluster-gateway-proxy + secrets delivery (refs-only ExternalSecrets).
-	// Direct k8s-job secret delivery is disabled even when the in-cluster
-	// client / runner image / platform URL are set.
-	proxyDispatch := cfg.ClusterGatewayProxyURL != "" && secretsDelivery
-	ocDispatch := cfg.AgentRunnerImage != ""
-	k8sWired := in.K8sClient != nil && cfg.AgentRunnerImage != "" && cfg.AgentPlatformURL != ""
-	if !proxyDispatch {
-		off("coding-dispatch-proxy", "cluster-gateway-proxy + secrets delivery not both set — cloud proxy dispatch path off")
-	}
-	if !k8sWired {
-		off("coding-dispatch-k8s", "in-cluster k8s client / AGENT_RUNNER_IMAGE / AGENT_PLATFORM_URL not all set — direct K8s-Job dispatcher not wired")
-	} else {
-		off("coding-dispatch-k8s", "direct k8s-job secret delivery is disabled; configure cluster-gateway-proxy + secret refs")
-	}
-	if !proxyDispatch && !ocDispatch {
-		off("coding-dispatch-any", "NO working dispatch path — coding/validation runs require AGENT_RUNNER_IMAGE (OpenChoreo) or cluster-gateway-proxy + secret refs")
+	// Working dispatch is the OpenChoreo component path: the BFF creates the run
+	// cycle's Component through platform-api-service and OC renders the Job. It
+	// still needs secrets delivery, because the cycle's ExternalSecrets resolve
+	// against the org's secret store — the BFF writes no secret material itself.
+	if !secretsDelivery {
+		off("coding-dispatch-oc", "secrets delivery not configured — the OpenChoreo coding-agent dispatch path cannot resolve its cycle secret refs")
 	}
 	if cfg.RCAAgentAnthropicPushNamespace == "" || cfg.RCAAgentAnthropicPushSecretName == "" {
 		off("rca-agent-key-push", "RCA_AGENT_ANTHROPIC_PUSH_* not set — org Anthropic key not pushed to a consumer ExternalSecret")
