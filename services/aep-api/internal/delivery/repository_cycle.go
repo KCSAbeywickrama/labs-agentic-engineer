@@ -70,6 +70,17 @@ type RunCycleRepository interface {
 	// so the first close wins.
 	Finish(ctx context.Context, id, mergeSHA string) (*RunCycle, error)
 
+	// FinishAgentFailed closes a cycle whose agent died without landing a pull
+	// request, recording why. It is the pod-truth watcher's ONE write.
+	//
+	// It is fenced twice — the cycle must be OPEN and must carry NO pull request
+	// — and the second fence is the important one: a pull request means the side
+	// effects landed, so a pod that exits badly afterwards is not evidence
+	// against it. Closing such a cycle here would fence out the very
+	// pull_request webhook that completes the run. Returns (nil, nil) when
+	// either fence rejects, which is the ordinary outcome of a re-tick.
+	FinishAgentFailed(ctx context.Context, id, reason string) (*RunCycle, error)
+
 	// SetValidationVerdict records what one validation ATTEMPT concluded, and the
 	// issue it was dispatched at.
 	//
@@ -210,6 +221,23 @@ func (r *runCycleRepository) Finish(ctx context.Context, id, mergeSHA string) (*
 		"merge_sha": mergeSHA,
 		"ended_at":  time.Now().UTC(),
 	})
+}
+
+func (r *runCycleRepository) FinishAgentFailed(ctx context.Context, id, reason string) (*RunCycle, error) {
+	res := r.db.WithContext(ctx).
+		Model(&RunCycle{}).
+		Where("id = ? AND ended_at IS NULL AND pr_number = 0", id).
+		Updates(map[string]any{
+			"agent_reason": reason,
+			"ended_at":     time.Now().UTC(),
+		})
+	if res.Error != nil {
+		return nil, res.Error
+	}
+	if res.RowsAffected == 0 {
+		return nil, nil
+	}
+	return r.getByID(ctx, id)
 }
 
 func (r *runCycleRepository) SetValidationVerdict(ctx context.Context, id, verdict string, issue int) (*RunCycle, error) {

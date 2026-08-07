@@ -1301,6 +1301,9 @@ type RunBudgets struct {
 
 // RunCycleView One dispatch within a run. Branch, pull request (number and URL) and merge SHA are LEARNED FROM WEBHOOKS — the agent derives its own branch identity — so they stay empty on a cycle whose agent died before opening a pull request.
 type RunCycleView struct {
+	// AgentReason Why this cycle's agent stopped without opening a pull request, as the platform's pod-truth watcher classified it — `timed_out` (the run deadline), `agent_failed[:<reason>]` (a non-zero exit or a killed container), `startup_failed:<reason>: <message>` (the runner never started: image pull, scheduling, or a secret that had not materialised) or `job_not_found` (the runner's workload disappeared). Absent on every cycle that opened a pull request: there the pull request is the outcome.
+	AgentReason string `json:"agentReason,omitempty"`
+
 	// Attempts Dispatches of THIS cycle (the per-cycle re-dispatch budget, which resets at every cycle boundary).
 	Attempts  int64      `json:"attempts"`
 	Branch    string     `json:"branch,omitempty"`
