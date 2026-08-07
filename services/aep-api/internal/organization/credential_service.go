@@ -32,6 +32,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"github.com/wso2/aep/aep-api/internal/platform/text"
 	"net/http"
 	"strings"
 	"time"
@@ -284,16 +285,10 @@ func generateRandomHex(byteLen int) (string, error) {
 	return hex.EncodeToString(buf), nil
 }
 
+// truncateForError bounds an upstream error body for a user-visible message.
+// The result lands in ValidationError.Message, which the console shows
+// verbatim, so it is flattened to one line; text.Truncate owns the rune-safe
+// cut (see its doc for why a byte cut is not safe here).
 func truncateForError(b []byte) string {
-	s := string(b)
-	if len(s) > 200 {
-		// Drop a rune the byte cut split. This lands in ValidationError.Message,
-		// which the console shows verbatim, and GitHub/Anthropic both return
-		// non-ASCII prose: invalid UTF-8 is re-encoded by json as U+FFFD, so the
-		// user reads a replacement glyph. Note a RuneStart walk does NOT fix this
-		// — a lead byte IS a rune start, so it leaves the dangling head of the
-		// split rune behind.
-		s = strings.ToValidUTF8(s[:200], "") + "…"
-	}
-	return strings.ReplaceAll(s, "\n", " ")
+	return strings.ReplaceAll(text.Truncate(string(b), 200), "\n", " ")
 }

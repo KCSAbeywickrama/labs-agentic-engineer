@@ -412,7 +412,8 @@ func TestLivePodLogOptionsBoundsByLines(t *testing.T) {
 
 // TestDropTruncatedTail pins exactly which trailing lines are treated as cut
 // mid-write. The rule has to be narrow: dropping a complete final line would
-// lose the runner's terminal `result` event (and with it the run's usage).
+// lose the runner's terminal `result` event, which is how the feed reports the
+// run's outcome.
 func TestDropTruncatedTail(t *testing.T) {
 	t.Parallel()
 

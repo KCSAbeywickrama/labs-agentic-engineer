@@ -101,9 +101,12 @@ const (
 	seqBootConfig     = -13 // CreateContainerConfigError / secrets not yet materialised
 	seqBootStarting   = -14 // container Running, agent has not emitted its first line
 
-	// seqHeadDropped marks the "earlier output omitted" row. Same stable-negative
-	// contract as the bootstrap seqs above, for the same dedup reason.
-	seqHeadDropped = -20
+	// seqHeadDropped marks the "earlier output omitted" row; seqScanTruncated the
+	// "line over the size cap" one. Same stable-negative contract as the bootstrap
+	// seqs above, for the same dedup reason: both are re-derived on every poll and
+	// must collapse to one row rather than accumulate.
+	seqHeadDropped   = -20
+	seqScanTruncated = -21
 )
 
 // bootstrapEvent maps a pre-stdout runner state to the synthetic progress line
@@ -454,6 +457,7 @@ func textToProgressEvents(text string) ([]contracts.ProgressEvent, bool) {
 		out = append(out, contracts.ProgressEvent{
 			Kind:          "log",
 			SchemaVersion: progressSchemaVersion,
+			Seq:           seqScanTruncated,
 			Summary:       "… an agent log line exceeded the reader's size cap; the rest of this page was skipped",
 		})
 	}
@@ -491,7 +495,9 @@ func headDroppedEvent(dropped int) contracts.ProgressEvent {
 // closes is unambiguously a fragment. That pair of conditions is what keeps the
 // rule safe: complete prose lines (bootstrap output, stray library writes) and
 // complete envelopes both still reach the feed, including a final line the pod
-// wrote without a trailing newline.
+// wrote without a trailing newline — the runner's terminal `result` among them,
+// which is how the feed reports the run's outcome. (Token usage is NOT at stake
+// here: usageFromLog parses the raw captured body, not this function's output.)
 //
 // Without this, parseProgressLine falls back to wrapping the raw bytes as a
 // `log` event and the console renders `{"schemaVersion":1,"ts":"2026-` verbatim.

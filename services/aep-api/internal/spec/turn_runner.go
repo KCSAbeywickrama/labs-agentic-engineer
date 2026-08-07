@@ -27,6 +27,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/wso2/aep/aep-api/internal/platform/text"
 	"io"
 	"log/slog"
 	"runtime/debug"
@@ -440,12 +441,9 @@ func firstLine(s string, max int) string {
 		s = s[:i]
 	}
 	s = strings.TrimSpace(s)
-	if len(s) > max {
-		// Do not leave half a rune behind. Walking back to a RuneStart is NOT
-		// enough — a lead byte is itself a rune start, so `é` cut after its first
-		// byte survives the walk and the result is still invalid UTF-8, which json
-		// re-encodes as U+FFFD. ToValidUTF8 drops the incomplete sequence outright.
-		s = strings.TrimSpace(strings.ToValidUTF8(s[:max], "")) + "…"
+	if cut := text.Truncate(s, max); cut != s {
+		// Re-trim: the cut can land just after a space.
+		s = strings.TrimSpace(strings.TrimSuffix(cut, "…")) + "…"
 	}
 	if s == "" {
 		s = "agent turn"

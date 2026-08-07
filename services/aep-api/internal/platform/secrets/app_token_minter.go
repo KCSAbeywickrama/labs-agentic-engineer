@@ -28,6 +28,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"github.com/wso2/aep/aep-api/internal/platform/text"
 	"io"
 	"net/http"
 	"strings"
@@ -259,14 +260,7 @@ func parseRSAPrivateKey(pemBytes []byte) (*rsa.PrivateKey, error) {
 // truncateBody bounds error-message body so we don't dump multi-MB
 // responses into logs. 200 chars is enough for GitHub's structured errors.
 func truncateBody(body []byte) string {
-	s := string(body)
-	if len(s) > 200 {
-		// Drop a rune the byte cut split — invalid UTF-8 is re-encoded by json as
-		// U+FFFD in the surfaced error. A RuneStart walk is not enough: a lead
-		// byte is itself a rune start, so it leaves the split rune's head behind.
-		s = strings.ToValidUTF8(s[:200], "") + "…"
-	}
-	return strings.ReplaceAll(s, "\n", " ")
+	return strings.ReplaceAll(text.Truncate(string(body), 200), "\n", " ")
 }
 
 // LoadAppWebhookSecrets reads the App-wide webhook secret list from the

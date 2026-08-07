@@ -44,6 +44,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/wso2/aep/aep-api/internal/platform/text"
 	"io"
 	"net/http"
 	"net/url"
@@ -359,12 +360,5 @@ func escapePath(p string) string {
 // truncateForError bounds an error body so a large failure response is not
 // echoed wholesale into logs/errors.
 func truncateForError(b []byte) string {
-	const max = 512
-	if len(b) > max {
-		// Drop a rune the byte cut split — invalid UTF-8 is re-encoded by json as
-		// U+FFFD in the surfaced error. A RuneStart walk is not enough: a lead
-		// byte is itself a rune start, so it leaves the split rune's head behind.
-		return strings.ToValidUTF8(string(b[:max]), "") + "…"
-	}
-	return string(b)
+	return text.Truncate(string(b), 512)
 }

@@ -232,8 +232,16 @@ func (t *planTap) Stream(body io.ReadCloser, w io.Writer, flush func()) {
 	// below does on purpose) wrote a half-written `data: {…` to the client. The
 	// console drops unparseable frames, so this was survivable, but a proxy
 	// should not emit a frame it did not finish reading.
+	//
+	// A scan error also ENDS the drain, where the old unbounded ReadBytes would
+	// have kept going — so it is counted like the idle abort below rather than
+	// only logged. Anything past the offending frame is unread, which means
+	// GitHub writes the turn intended may not have landed, and the terminal
+	// surface has to say so.
 	if err := scanner.Err(); err != nil {
-		slog.WarnContext(t.ctx, "task.planTap: upstream stream ended mid-frame; partial frame dropped", "error", err)
+		t.failures++
+		slog.WarnContext(t.ctx, "task.planTap: upstream stream ended mid-frame — drain stopped, remaining frames unread",
+			"error", err, "maxLineBytes", planTapMaxLineBytes)
 	}
 	if idleAborted.Load() {
 		// Record the aborted drain so the terminal surface reports it; the plan

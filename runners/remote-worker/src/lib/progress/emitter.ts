@@ -34,7 +34,7 @@ export function emit(event: ProgressEventInput): void {
     seq: seqCounter,
     ...event,
   } as ProgressEvent;
-  process.stdout.write(JSON.stringify(scrubEventValues(enriched)) + "\n");
+  process.stdout.write(JSON.stringify(scrubValue(enriched)) + "\n");
 }
 
 /**
@@ -53,10 +53,6 @@ export function emit(event: ProgressEventInput): void {
  * Values carry no JSON syntax, so a greedy match can only ever consume the
  * secret it was aimed at.
  */
-function scrubEventValues(event: ProgressEvent): ProgressEvent {
-  return scrubValue(event) as ProgressEvent;
-}
-
 // Walks the whole event rather than just its top level, so a nested string
 // added to the schema later is scrubbed without anyone remembering to opt in.
 function scrubValue(value: unknown): unknown {
