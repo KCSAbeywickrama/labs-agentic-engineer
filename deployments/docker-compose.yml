@@ -223,25 +223,6 @@ services:
       GITHUB_CLIENT_SECRET: "${GITHUB_CLIENT_SECRET:-}"
       GITHUB_APP_PRIVATE_KEY_PATH: "${GITHUB_APP_PRIVATE_KEY_PATH:-/etc/github-app/private-key.pem}"
 
-      # ── Secrets delivery + cluster-gateway-proxy. OPENBAO_* drives the
-      # in-process OpenBao-direct provider (local-only). CLUSTER_GATEWAY_PROXY_URL
-      # points at the compose stub for streaming + JobWatcher.
-      CLUSTER_GATEWAY_PROXY_URL: "http://local-cluster-gateway-proxy:8085"
-      # Push target for AnthropicCredentialService.pushExternalSecret: on every
-      # successful Connect (first-time connect AND rotation), aep-api applies
-      # an ExternalSecret here via the proxy above, pointed at the freshly
-      # mirrored SM-API/OpenBao path. Closes the gap where a console-side key
-      # change would otherwise sit unused until something re-discovers it.
-      # Both empty disables the push (no consumer assumed) — set here because
-      # this local demo's only consumer is the OC SRE/RCA agent.
-      RCA_AGENT_ANTHROPIC_PUSH_NAMESPACE: "openchoreo-observability-plane"
-      RCA_AGENT_ANTHROPIC_PUSH_SECRET_NAME: "rca-agent-anthropic-secret"
-      # Required for mint-build (per-org build Secret SSA into
-      # workflows-<orgID>) and apply-wp-secret (per-org Anthropic Secret
-      # SSA). Without it the binary degrades: builds fail at clone,
-      # coding-agent dispatch fails on the pre-flight.
-      KUBECONFIG: "/app/.kube/config"
-
       # ── Temporal (devflow workflows). aep-api runs the worker in-process and
       # dials the k3d-hosted Temporal frontend via the k3d docker network.
       # Reaches the in-cluster Temporal dev server via the k3d node container on
@@ -274,7 +255,6 @@ services:
     volumes:
       - ./keys/task-signing.pem:/app/keys/task-signing.pem:ro
       - ./github-app-private-key.pem:/etc/github-app/private-key.pem:ro
-      - ./.kube/config:/app/.kube/config:ro
       - aep-workspaces:/workspaces
     networks:
       - aep
@@ -367,31 +347,6 @@ services:
       - aep-api
     networks:
       - aep
-
-  # ---------------------------------------------------------------------------
-  # local-cluster-gateway-proxy — local stand-in for the cloud
-  # cluster-gateway-proxy. Serves `<verb>
-  # /cloud-dp-cgw/<k8s path>` by forwarding to the local k3d k8s API
-  # using the mounted kubeconfig. No mTLS to a remote cluster-gateway
-  # (the cloud proxy bridges to a remote dataplane via the cluster-
-  # agent tunnel); this version exists only so aep-api's dispatch
-  # path can speak the same HTTP shape in local + cloud.
-  # ---------------------------------------------------------------------------
-  local-cluster-gateway-proxy:
-    build:
-      context: ./local-cluster-gateway-proxy
-    container_name: aep-local-cluster-gateway-proxy
-    ports:
-      - "8085:8085"
-    environment:
-      LISTEN_ADDR: ":8085"
-      LOG_LEVEL: "debug"
-      KUBECONFIG: "/app/.kube/config"
-    volumes:
-      - ./.kube/config:/app/.kube/config:ro
-    networks:
-      - aep
-      - k3d-openchoreo
 
   # ---------------------------------------------------------------------------
   # smee-client — forwards GitHub webhook events from the public smee.io
