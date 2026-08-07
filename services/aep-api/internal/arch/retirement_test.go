@@ -55,3 +55,21 @@ func TestClusterGatewayProxyClientIsDeleted(t *testing.T) {
 		t.Errorf("%s still resolves — the cluster-gateway-proxy client must stay deleted", pkg)
 	}
 }
+
+// TestNoInClusterKubernetesClient asserts the aep-api binary pulls in no
+// Kubernetes client at all. Every cluster-side effect — the cycle Job, its
+// secrets, the build credential — is authored through the OpenChoreo API, which
+// is what keeps a single audited write path and lets the deployment run without
+// cluster RBAC of its own.
+func TestNoInClusterKubernetesClient(t *testing.T) {
+	const main = mod + "/cmd/aep-api"
+	banned := map[string]string{
+		"sigs.k8s.io/controller-runtime/pkg/client": "OpenChoreo owns every cluster write; aep-api holds no Kubernetes client",
+		mod + "/internal/clients/k8s":               "the in-cluster client wrapper is retired with the last SSA writer",
+	}
+	for dep, why := range banned {
+		if imports(t, main, dep) {
+			t.Errorf("cmd/aep-api reaches %s — %s", dep, why)
+		}
+	}
+}

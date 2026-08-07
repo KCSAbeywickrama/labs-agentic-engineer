@@ -129,7 +129,6 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	credStore := in.CredentialStore
 	minter := in.Minter
 	appClientSecret := in.AppClientSecret
-	wpClient := in.K8sClient
 	workspaceEngine := in.Workspace
 
 	// Skills are repo-backed now (one private org-skills repo per org —
@@ -280,7 +279,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	credService := organization.NewCredentialService(orgCredRepo, credStore, minter, cfg.WebhookHMACSecret, cfg.GitHubAppClientID, appClientSecret, gitHost)
 	buildCredService := organization.NewBuildCredentialsService(repoRepo, credResolver, gitSecretClient)
 	credService.WithBuildSecretCleaner(buildCredService)
-	anthropicCredService := organization.NewAnthropicCredentialService(orgAnthropicRepo, credStore, wpClient)
+	anthropicCredService := organization.NewAnthropicCredentialService(orgAnthropicRepo, credStore)
 
 	// Task JWT manager — RS256, 24h TTL. The public key is published on the
 	// JWKS endpoint (/auth/external/jwks.json) and verified by both the runner
@@ -1231,7 +1230,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	return &App{
 		Handler:      handler,
 		Watchers:     watchers,
-		degradations: computeDegradations(cfg, in, smClient != nil),
+		degradations: computeDegradations(cfg, smClient != nil),
 	}, nil
 }
 
@@ -1250,7 +1249,7 @@ type Degradation struct {
 // config.Validate boot-fails on it, so it can never be a degradation here.
 func (a *App) Degradations() []Degradation { return a.degradations }
 
-func computeDegradations(cfg config.Config, in Infra, secretsDelivery bool) []Degradation {
+func computeDegradations(cfg config.Config, secretsDelivery bool) []Degradation {
 	var d []Degradation
 	off := func(capability, reason string) { d = append(d, Degradation{capability, reason}) }
 

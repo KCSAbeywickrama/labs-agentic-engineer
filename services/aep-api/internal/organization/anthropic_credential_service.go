@@ -22,17 +22,10 @@
 //   - EffectiveKey (GET .../anthropic/effective-key) — returns the org key
 //     (or "none"), used by agents-service per-call. There is no platform
 //     fallback: orgs bring their own key.
-//   - ApplyWPSecret (POST .../anthropic/apply-wp-secret) — refreshes the
-//     per-org K8s Secret in workflows-<ocOrgID> with the freshest value
-//     from `org_secrets`. Same model as MintBuildToken's per-dispatch
-//     SSA — see build_credentials_service.go.
 //
-// Secret bytes live in the same `org_secrets` (Postgres + AES-256-GCM)
-// table as the GitHub PAT, keyed by `anthropic/key`. The metadata
-// (prefix / last4 / status / connected_at / last_validated_at) lives in
-// the `org_anthropic_credentials` table.
-//
-// See docs/design/anthropic-key-dual-token.md.
+// Connect mirrors the key into the org's secret store through SM-API; the
+// coding runner reads it from an ExternalSecret rendered against that path, so
+// this service writes nothing into any cluster.
 package organization
 
 import (
@@ -46,21 +39,13 @@ import (
 	"strings"
 	"time"
 
-	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	"github.com/wso2/aep/aep-api/internal/clients/k8s"
 	"github.com/wso2/aep/aep-api/internal/platform/secrets"
-	"github.com/wso2/aep/aep-api/internal/platform/tenant"
 )
 
 // AnthropicCredentialService — see package doc.
 type AnthropicCredentialService struct {
 	repo         OrgAnthropicRepository
 	store        secrets.CredentialStore
-	wpClient     client.Client
 	anthropicAPI string // "https://api.anthropic.com" by default; overridden in tests
 	httpClient   *http.Client
 
@@ -83,18 +68,14 @@ func (s *AnthropicCredentialService) WithAnthropicAPIBase(base string) *Anthropi
 	return s
 }
 
-// NewAnthropicCredentialService wires the service. db, store must be
-// non-nil; wpClient may be nil (off-cluster degraded mode — same shape as
-// BuildCredentialsService).
+// NewAnthropicCredentialService wires the service. repo and store must be non-nil.
 func NewAnthropicCredentialService(
 	repo OrgAnthropicRepository,
 	store secrets.CredentialStore,
-	wpClient client.Client,
 ) *AnthropicCredentialService {
 	return &AnthropicCredentialService{
 		repo:         repo,
 		store:        store,
-		wpClient:     wpClient,
 		anthropicAPI: "https://api.anthropic.com",
 		httpClient:   &http.Client{Timeout: 15 * time.Second},
 	}
@@ -149,9 +130,6 @@ type AnthropicConnectRequest struct {
 // the org-scoped advisory lock — concurrent Connects produce one consistent
 // row. The BFF resolves the effective key per request and forwards it to
 // agents-service, so there is no remote cache to invalidate.
-//
-// Does NOT touch the workflow-plane namespace; the K8s Secret is materialised
-// lazily on first dispatch via ApplyWPSecret.
 func (s *AnthropicCredentialService) Connect(ctx context.Context, ocOrgID string, req AnthropicConnectRequest) (*AnthropicProjection, error) {
 	key := strings.TrimSpace(req.APIKey)
 	if err := s.ValidateKey(ctx, key); err != nil {
@@ -250,9 +228,9 @@ func (s *AnthropicCredentialService) Status(ctx context.Context, ocOrgID string)
 // ----------------------------------------------------------------------------
 
 // Disconnect removes the org's Anthropic key: deletes the encrypted bytes
-// from `org_secrets`, drops the metadata row (status flip first, then
-// delete via best-effort sweep is overkill for a single per-org credential),
-// and best-effort deletes the per-org WP Secret.
+// from `org_secrets` and drops the metadata row. The runner reads the key
+// through the org's ExternalSecret, so there is no cluster-side Secret to
+// tear down here.
 //
 // Idempotent: missing row is a no-op (200 → 204 at the API edge).
 func (s *AnthropicCredentialService) Disconnect(ctx context.Context, ocOrgID string) error {
@@ -276,10 +254,6 @@ func (s *AnthropicCredentialService) Disconnect(ctx context.Context, ocOrgID str
 	// Best-effort GC. Failures are logged, not surfaced.
 	if err := s.store.Delete(ctx, ocOrgID, "anthropic/key"); err != nil {
 		slog.WarnContext(ctx, "anthropic disconnect: store delete failed",
-			"ocOrgId", ocOrgID, "error", err)
-	}
-	if err := s.DeleteAnthropicSecret(ctx, ocOrgID); err != nil {
-		slog.WarnContext(ctx, "anthropic disconnect: wp secret delete failed",
 			"ocOrgId", ocOrgID, "error", err)
 	}
 
@@ -313,115 +287,6 @@ func (s *AnthropicCredentialService) EffectiveKey(ctx context.Context, ocOrgID s
 	}
 	// Row absent (NotFoundError) or not active, or bytes missing.
 	return &EffectiveKeyResponse{Source: "none"}, nil
-}
-
-// ----------------------------------------------------------------------------
-// ApplyWPSecret
-// ----------------------------------------------------------------------------
-
-// ApplyWPSecretResult is returned to the dispatch caller — the K8s Secret
-// name to thread into the WorkflowRun's `parameters.anthropic.secretRef`.
-type ApplyWPSecretResult struct {
-	SecretRefName string `json:"secretRefName"`
-}
-
-// ApplyWPSecret reads the per-org key from `org_secrets`, decrypts it, and
-// SSA-applies the per-org K8s Secret in `workflows-<ocOrgID>`. Returns
-// ErrAnthropicKeyRequired when no org row exists or it's not active —
-// the dispatch path maps to 422. Returns a wrapped error when the
-// underlying SSA fails.
-//
-// Same model as `BuildCredentialsService.MintBuildToken` → `applyBuildSecret`:
-// per-dispatch refresh, idempotent SSA with FieldOwner, no long-term K8s
-// state ownership.
-func (s *AnthropicCredentialService) ApplyWPSecret(ctx context.Context, ocOrgID string) (*ApplyWPSecretResult, error) {
-	row, err := s.fetchRow(ctx, ocOrgID)
-	if err != nil {
-		return nil, ErrAnthropicKeyRequired
-	}
-	if row.Status != "active" {
-		return nil, ErrAnthropicKeyRequired
-	}
-
-	key, err := s.store.Get(ctx, ocOrgID, "anthropic/key")
-	if err != nil {
-		// Row is active but the bytes are missing — refuse rather than
-		// silently fall through.
-		return nil, fmt.Errorf("anthropic apply-wp-secret: store get: %w", err)
-	}
-	if len(key) == 0 {
-		return nil, ErrAnthropicKeyRequired
-	}
-
-	if err := s.applyAnthropicSecret(ctx, ocOrgID, key); err != nil {
-		return nil, fmt.Errorf("anthropic apply-wp-secret: ssa: %w", err)
-	}
-
-	return &ApplyWPSecretResult{SecretRefName: tenant.AnthropicSecretName}, nil
-}
-
-// applyAnthropicSecret SSA-applies the per-org Opaque Secret carrying
-// ANTHROPIC_API_KEY into workflows-<ocOrgID>. No-op (with a warn) when
-// wpClient is nil — same degraded-mode behaviour as build_credentials_service.
-func (s *AnthropicCredentialService) applyAnthropicSecret(ctx context.Context, ocOrgID string, key []byte) error {
-	if s.wpClient == nil {
-		slog.WarnContext(ctx, "anthropic apply-wp-secret: wp k8s client not configured — Secret write skipped",
-			"ocOrgId", ocOrgID)
-		return nil
-	}
-
-	ns := tenant.WorkflowPlaneNamespace(ocOrgID)
-	secret := &corev1.Secret{
-		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      tenant.AnthropicSecretName,
-			Namespace: ns,
-			Labels: map[string]string{
-				"app.kubernetes.io/managed-by":   "aep-git-service",
-				"aep.openchoreo.dev/oc-org-id":   ocOrgID,
-				"aep.openchoreo.dev/secret-type": "anthropic-credentials",
-			},
-		},
-		Type: corev1.SecretTypeOpaque,
-		StringData: map[string]string{
-			"ANTHROPIC_API_KEY": string(key),
-		},
-	}
-
-	if err := s.wpClient.Patch(
-		ctx, secret,
-		client.Apply,
-		client.ForceOwnership,
-		client.FieldOwner(k8s.FieldOwner),
-	); err != nil {
-		return fmt.Errorf("ssa anthropic secret: %w", err)
-	}
-	return nil
-}
-
-// DeleteAnthropicSecret removes the per-org Anthropic Secret from
-// workflows-<ocOrgID>. Idempotent — NotFound + nil wpClient are no-ops.
-// Implements the AnthropicSecretCleaner interface.
-func (s *AnthropicCredentialService) DeleteAnthropicSecret(ctx context.Context, ocOrgID string) error {
-	if s.wpClient == nil {
-		return nil
-	}
-	ns := tenant.WorkflowPlaneNamespace(ocOrgID)
-	secret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      tenant.AnthropicSecretName,
-			Namespace: ns,
-		},
-	}
-	if err := s.wpClient.Delete(ctx, secret); err != nil {
-		if apierrors.IsNotFound(err) {
-			return nil
-		}
-		return fmt.Errorf("delete anthropic secret %s/%s: %w", ns, secret.Name, err)
-	}
-	slog.InfoContext(ctx, "anthropic.deleted-wp-secret",
-		"ocOrgId", ocOrgID, "namespace", ns, "secret", secret.Name)
-	return nil
 }
 
 // ----------------------------------------------------------------------------
