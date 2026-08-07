@@ -14,16 +14,30 @@
 # specific language governing permissions and limitations
 # under the License.
 
-FROM golang:1.26-alpine AS builder
+# Pinned to BUILDPLATFORM and cross-compiling via GOARCH, so the arm64 image is
+# never compiled under QEMU. Removing the pin makes this the most expensive step
+# in the release: emulating the Go toolchain costs ~8x here (measured on a cold
+# release: ~19 min against ~2 min native) and buys nothing, because CGO_ENABLED=0
+# cross-compiles to a static binary for any GOARCH.
+#
+# TARGETARCH comes from buildx and is the arch being built for, so a local
+# single-arch build resolves it to the host's. BuildKit is required — the legacy
+# builder leaves $BUILDPLATFORM unset and fails to parse the empty --platform.
+# That was already true here because of the cache mounts below, and BuildKit has
+# been Docker's default since 23.0.
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS builder
 
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY . .
 # Cache the Go module + build caches (BuildKit) so incremental rebuilds
-# reuse compiled packages instead of recompiling from scratch.
+# reuse compiled packages instead of recompiling from scratch. One shared mount
+# serves both target arches: Go's build cache is content-addressed and already
+# namespaces entries by GOARCH.
+ARG TARGETARCH
 RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 GOOS=linux go build -o bin/aep-api ./cmd/aep-api
+    CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH go build -o bin/aep-api ./cmd/aep-api
 
 FROM alpine:3.21
 
