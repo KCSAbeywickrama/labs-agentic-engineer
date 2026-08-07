@@ -133,13 +133,14 @@ func (a eventcoreCycles) FinishCycle(ctx context.Context, cycleID, mergeSHA stri
 	return err
 }
 
-// eventcoreBuilds is the OpenChoreo half: trigger a build pinned to a commit
-// under a caller-chosen name, and read a component's runs back.
+// eventcoreBuilds is the OpenChoreo half: stage the org's clone credential,
+// trigger a build pinned to a commit under a caller-chosen name, and read a
+// component's runs back.
 //
 // The name matters — it carries the (component, commit, attempt) triple the
-// re-trigger budget is counted on — which is why the build secret is staged
-// under the SAME name the caller picked, exactly as the coding executor does
-// for its own builds.
+// re-trigger budget is counted on. Staging is deliberately NOT keyed to that
+// name: the credential is one per-org object, so the name it is staged "under"
+// is a log correlation string and nothing more.
 type eventcoreBuilds struct {
 	oc     openchoreo.ComponentClient
 	repos  sourcecontrol.RepoRepository
@@ -153,20 +154,20 @@ type codingagentBuildStager interface {
 	StageBuildSecret(ctx context.Context, orgID, repoSlug, runName string) (string, error)
 }
 
-func (a eventcoreBuilds) TriggerBuildAtCommit(ctx context.Context, orgID, projectID, component, commitSHA, runName string) error {
-	secretRef, err := a.stageSecret(ctx, orgID, projectID, runName)
-	if err != nil {
-		return err
-	}
-	_, err = a.oc.TriggerBuildAtCommit(ctx, orgID, projectID, component, commitSHA, secretRef, runName)
+func (a eventcoreBuilds) TriggerBuildAtCommit(ctx context.Context, orgID, projectID, component, commitSHA, runName, secretRef string) error {
+	_, err := a.oc.TriggerBuildAtCommit(ctx, orgID, projectID, component, commitSHA, secretRef, runName)
 	return err
 }
 
-// stageSecret mirrors the coding executor's staging contract: no stager or no
-// repo slug means clone unauthenticated (correct for a public repo), while a
-// staging refusal blocks the build rather than producing a build that cannot
+// StageBuildCredential mirrors the coding executor's staging contract: no stager
+// or no repo slug means clone unauthenticated (correct for a public repo), while
+// a staging refusal blocks the build rather than producing a build that cannot
 // clone.
-func (a eventcoreBuilds) stageSecret(ctx context.Context, orgID, projectID, runName string) (string, error) {
+//
+// The event plane calls this ONCE per fan-out rather than once per component —
+// the credential is per-org, so per-component staging was N concurrent writes to
+// one object (see the BuildTrigger port contract).
+func (a eventcoreBuilds) StageBuildCredential(ctx context.Context, orgID, projectID, correlation string) (string, error) {
 	if a.stager == nil || a.repos == nil {
 		return "", nil
 	}
@@ -176,7 +177,7 @@ func (a eventcoreBuilds) stageSecret(ctx context.Context, orgID, projectID, runN
 			"org", orgID, "project", projectID, "error", err)
 		return "", nil
 	}
-	return a.stager.StageBuildSecret(ctx, orgID, repo.RepoSlug, runName)
+	return a.stager.StageBuildSecret(ctx, orgID, repo.RepoSlug, correlation)
 }
 
 // ListBuildRuns reads the component's WorkflowRuns — the fact the re-trigger
@@ -195,7 +196,12 @@ func (a eventcoreBuilds) ListBuildRuns(ctx context.Context, orgID, projectID, co
 	}
 	out := make([]eventcore.BuildRun, 0, len(list.Items))
 	for _, item := range list.Items {
-		out = append(out, eventcore.BuildRun{Name: item.Name, Status: item.Status, Completed: item.Completed})
+		out = append(out, eventcore.BuildRun{
+			Name:      item.Name,
+			Status:    item.Status,
+			Completed: item.Completed,
+			Succeeded: item.Status == openchoreo.ReasonWorkflowSucceeded,
+		})
 	}
 	return out, nil
 }

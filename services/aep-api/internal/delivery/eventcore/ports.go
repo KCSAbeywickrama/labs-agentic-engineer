@@ -197,6 +197,11 @@ type BuildRun struct {
 	Name      string
 	Status    string
 	Completed bool
+	// Succeeded is the terminal verdict, decided by the adapter rather than here.
+	// Status is OpenChoreo's condition Reason — an open string, not a closed set —
+	// so comparing it to a vendor constant is the adapter's job; the event plane
+	// reads a bool and stays free of the spelling.
+	Succeeded bool
 }
 
 // BuildTrigger is the OpenChoreo build surface: pin a build to a commit, and
@@ -208,10 +213,28 @@ type BuildRun struct {
 // which is exactly the automatic re-trigger budget. Deploy needs no verb here:
 // components carry AutoDeploy, so a green build deploys itself.
 type BuildTrigger interface {
+	// StageBuildCredential provisions the org's git clone credential and returns
+	// the reference the builds triggered against it must carry.
+	//
+	// It is a SEPARATE verb from the trigger because the credential is scoped to
+	// the ORG while a trigger is scoped to a component: staging is a write to one
+	// shared object, so a caller that builds N components must stage once and
+	// reuse the reference, never stage per component. Doing it per component made
+	// the fan-out's goroutines contend on that single object, and the loser
+	// dispatched a build with an empty reference — which clones anonymously and
+	// dies at checkout against a private repo.
+	//
+	// correlation names the work being staged for, for logs only; it does not
+	// scope the credential.
+	//
+	// An empty reference with a nil error is a deliberate outcome, not a bug: it
+	// means "clone unauthenticated", which is correct for a public repo.
+	StageBuildCredential(ctx context.Context, orgID, projectID, correlation string) (string, error)
 	// TriggerBuildAtCommit creates a WorkflowRun named runName, pinned to
-	// commitSHA. The caller owns the name because the name is what encodes the
-	// (component, commit, attempt) triple the budget is counted on.
-	TriggerBuildAtCommit(ctx context.Context, orgID, projectID, component, commitSHA, runName string) error
+	// commitSHA, cloning with secretRef. The caller owns the name because the
+	// name is what encodes the (component, commit, attempt) triple the budget is
+	// counted on, and owns secretRef because staging is per-org, not per-build.
+	TriggerBuildAtCommit(ctx context.Context, orgID, projectID, component, commitSHA, runName, secretRef string) error
 	// ListBuildRuns returns the component's WorkflowRuns, newest first.
 	ListBuildRuns(ctx context.Context, orgID, projectID, component string) ([]BuildRun, error)
 }

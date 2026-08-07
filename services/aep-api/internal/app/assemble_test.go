@@ -86,8 +86,8 @@ func TestAssemble_MinimalConfigBuildsTheGraph(t *testing.T) {
 	if app.Handler == nil {
 		t.Fatal("assembled app has a nil Handler")
 	}
-	if len(app.Watchers) != 6 {
-		t.Fatalf("minimal watcher count = %d, want 6 (the unconditional watchers; reaper omitted with Fake nil Workspace)", len(app.Watchers))
+	if len(app.Watchers) != 7 {
+		t.Fatalf("minimal watcher count = %d, want 7 (the unconditional watchers; reaper omitted with Fake nil Workspace)", len(app.Watchers))
 	}
 	for i, w := range app.Watchers {
 		if w == nil {
@@ -98,25 +98,26 @@ func TestAssemble_MinimalConfigBuildsTheGraph(t *testing.T) {
 
 // TestAssemble_WatcherRegistration pins the two conditional watchers: the
 // JobWatcher rides on CLUSTER_GATEWAY_PROXY_URL, and the run-supervisor worker
-// rides on TEMPORAL_HOSTPORT. The base is 6 — Fake() omits the disk reaper
-// (nil Workspace); the event plane's reconcile sweep is unconditional.
+// rides on TEMPORAL_HOSTPORT. The base is 7 — Fake() omits the disk reaper
+// (nil Workspace); the event plane's reconcile AND build sweeps are both
+// unconditional.
 func TestAssemble_WatcherRegistration(t *testing.T) {
 	tests := []struct {
 		name   string
 		mutate func(*config.Config)
 		want   int
 	}{
-		{"base", func(*config.Config) {}, 6},
+		{"base", func(*config.Config) {}, 7},
 		{"+cluster-gateway-proxy adds JobWatcher", func(c *config.Config) {
 			c.ClusterGatewayProxyURL = "http://cgw"
-		}, 7},
+		}, 8},
 		{"+temporal adds the run worker", func(c *config.Config) {
 			c.Temporal.HostPort = "temporal:7233"
-		}, 7},
+		}, 8},
 		{"+both", func(c *config.Config) {
 			c.ClusterGatewayProxyURL = "http://cgw"
 			c.Temporal.HostPort = "temporal:7233"
-		}, 8},
+		}, 9},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

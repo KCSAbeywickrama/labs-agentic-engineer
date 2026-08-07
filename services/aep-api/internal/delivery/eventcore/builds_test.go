@@ -74,7 +74,7 @@ func TestBuildTerminal_FirstRedRetriggersExactlyOnce(t *testing.T) {
 	h := buildHarness(t)
 	// The original attempt exists in OpenChoreo, as it would after the merge
 	// fan-out triggered it.
-	if _, err := h.events.ensureBuildRun(context.Background(), testOrg, testProject, "order-service", testMergeSHA, mergeBuildLimit); err != nil {
+	if _, err := h.events.ensureBuildRun(context.Background(), testOrg, testProject, "order-service", testMergeSHA, staged("org-git-secret"), mergeBuildLimit); err != nil {
 		t.Fatalf("seed attempt 1: %v", err)
 	}
 
@@ -103,7 +103,7 @@ func TestBuildTerminal_FirstRedRetriggersExactlyOnce(t *testing.T) {
 func TestBuildTerminal_SecondRedMintsTheFixIssueOnce(t *testing.T) {
 	h := buildHarness(t)
 	ctx := context.Background()
-	if _, err := h.events.ensureBuildRun(ctx, testOrg, testProject, "order-service", testMergeSHA, mergeBuildLimit); err != nil {
+	if _, err := h.events.ensureBuildRun(ctx, testOrg, testProject, "order-service", testMergeSHA, staged("org-git-secret"), mergeBuildLimit); err != nil {
 		t.Fatalf("seed attempt 1: %v", err)
 	}
 	if err := h.events.OnBuildTerminal(ctx, terminal("order-service", false, "step docker-build failed")); err != nil {
