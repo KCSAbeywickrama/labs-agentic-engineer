@@ -201,12 +201,13 @@ func (w *JobWatcher) checkCycle(ctx context.Context, cycle *delivery.RunCycle) {
 }
 
 // noteReadFailure applies B9: a not-found read counts toward the sustained-404
-// verdict, and anything else — a 5xx, a timeout, a DNS blip — counts toward
-// nothing at all.
+// verdict, and anything else — a 5xx, a timeout, a DNS blip — does not count
+// and breaks the streak.
 func (w *JobWatcher) noteReadFailure(ctx context.Context, cycle *delivery.RunCycle, err error, what string) {
 	if !errors.Is(err, openchoreo.ErrNotFound) {
 		slog.WarnContext(ctx, "codingagent.JobWatcher: "+what+" failed (transient; no verdict)",
 			"cycle", cycle.ID, "run", cycle.JobRef, "error", err)
+		delete(w.missing, cycle.ID)
 		return
 	}
 	w.missing[cycle.ID]++

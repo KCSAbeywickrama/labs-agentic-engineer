@@ -229,6 +229,38 @@ func TestTick_SustainedNotFoundFailsTheCycleOnTheThirdTick(t *testing.T) {
 	}
 }
 
+// A transient 5xx between missing reads breaks consecutiveness, so 404/503
+// interleaving cannot accumulate to three without three NotFound ticks in a row.
+func TestTick_TransientErrorResetsNotFoundStreak(t *testing.T) {
+	rt := &fakeRuntime{bindingErr: fmt.Errorf("%w: gone", openchoreo.ErrNotFound)}
+	cycles := newWatchedCycles(dispatchedCycle("c8b", time.Minute))
+	w := newTestWatcher(rt, cycles)
+
+	w.Tick(context.Background())
+	w.Tick(context.Background())
+	if len(cycles.finished) != 0 {
+		t.Fatalf("two missing ticks must not be enough: %+v", cycles.finished)
+	}
+
+	rt.bindingErr = fmt.Errorf("%w: status 503", openchoreo.ErrInternalServerError)
+	w.Tick(context.Background())
+	if len(cycles.finished) != 0 {
+		t.Fatalf("transient error must not fail the cycle: %+v", cycles.finished)
+	}
+
+	rt.bindingErr = fmt.Errorf("%w: gone", openchoreo.ErrNotFound)
+	w.Tick(context.Background())
+	w.Tick(context.Background())
+	if len(cycles.finished) != 0 {
+		t.Fatalf("two missing ticks after reset must not be enough: %+v", cycles.finished)
+	}
+
+	w.Tick(context.Background())
+	if got := cycles.finished["c8b"]; got != ReasonJobNotFound {
+		t.Fatalf("finished = %q, want %s", got, ReasonJobNotFound)
+	}
+}
+
 // A Component that comes back (a slow render, a re-list) resets the streak, so
 // three NON-consecutive misses never add up to a verdict.
 func TestTick_NotFoundStreakResetsWhenTheBindingReturns(t *testing.T) {
