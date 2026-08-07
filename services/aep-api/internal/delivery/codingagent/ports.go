@@ -152,3 +152,22 @@ type LiveTail struct {
 type LiveLogSource interface {
 	Tail(ctx context.Context, orgName, projectName, componentName string, maxBytes int) (LiveTail, error)
 }
+
+// ArchiveScope names one cycle's archived log: its component, and the window
+// the cycle ran in. The window matters — the observer has no cursor, so the
+// only way to bound a read is to ask for the time the work happened.
+type ArchiveScope struct {
+	OrgName       string
+	ProjectName   string
+	ComponentName string
+	From          time.Time
+	To            time.Time
+}
+
+// ArchiveLogSource is a finished cycle's log, read from the observability plane
+// while its Component is still retained. Satisfied by *ObserverArchive; nil at
+// the composition root when no observer is configured, which the reader
+// reports to the console as "unavailable" rather than as an empty log.
+type ArchiveLogSource interface {
+	CycleArchive(ctx context.Context, scope ArchiveScope) (string, error)
+}
