@@ -71,7 +71,7 @@ func (r *CycleReaper) ReapRunCycle(ctx context.Context, orgID, projectID, runID 
 	// The `ca-` prefix is the ONE discriminator that says this ref names an
 	// agent component rather than an OpenChoreo build WorkflowRun. Deleting a
 	// component by a build's run name would be a different object entirely.
-	if !isProxyJobRun(cycle.JobRef) {
+	if !isCodingAgentRun(cycle.JobRef) {
 		return nil
 	}
 	if err := r.oc.DeleteComponent(ctx, orgID, projectID, cycle.JobRef); err != nil {

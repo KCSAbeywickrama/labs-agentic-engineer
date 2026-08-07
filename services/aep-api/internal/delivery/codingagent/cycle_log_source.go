@@ -38,8 +38,9 @@ import (
 // tells the user the logs are gone.
 var ErrComponentGone = errors.New("codingagent: component no longer exists")
 
-// logPageBytes bounds one live read — the last 64KiB of pod stdout, so old
-// lines scroll off and the console gets fresh content on every poll.
+// logPageBytes bounds how much live pod stdout is kept AFTER the OpenChoreo
+// read returns — the last 64KiB, so old lines scroll off and the console gets
+// fresh content on every poll. The OC call itself is unbounded (sinceSeconds=0).
 const logPageBytes = 64 * 1024
 
 // OCLogSource reads a cycle pod's log through the OpenChoreo API.

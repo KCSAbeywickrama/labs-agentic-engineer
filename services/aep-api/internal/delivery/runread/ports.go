@@ -78,11 +78,11 @@ type ProjectBuildLister interface {
 	ListProjectBuildRuns(ctx context.Context, orgID, projectID string) ([]delivery.MergeBuild, error)
 }
 
-// CycleLogReader is one cycle's agent activity — the captured snapshot once the
-// cycle's Job is terminal, the live pod tail before that. Satisfied by
+// CycleLogReader is one cycle's agent activity — live OpenChoreo pod logs while
+// the Component exists, then the observability archive while it is retained, or
+// a synthetic unavailable line when neither can answer. Satisfied by
 // codingagent.AgentProgressReader, reached as a port because that is a sibling
-// slice and because a boot without the cluster-gateway-proxy has no log source
-// at all (nil → the stream carries cycles and no lines).
+// slice. nil → the stream carries cycles and no lines.
 type CycleLogReader interface {
 	CycleProgress(ctx context.Context, cycle *delivery.RunCycle, sinceMillis int64) (*contracts.ProgressResponse, error)
 }

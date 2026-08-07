@@ -158,11 +158,11 @@ func TestExecWatcher_BuildSuccess_FinishesSucceeded(t *testing.T) {
 	}
 }
 
-// TestExecWatcher_SkipsProxyJobRuns proves the ExecWatcher ignores
-// proxy-dispatched coding-agent Jobs (`ca-…`, owned by the JobWatcher) and polls
-// only OpenChoreo WorkflowRuns (`wf-…`) — otherwise it spams "WorkflowRun not
-// found" every tick for the Job rows.
-func TestExecWatcher_SkipsProxyJobRuns(t *testing.T) {
+// TestExecWatcher_SkipsCodingAgentRuns proves the ExecWatcher ignores
+// coding-agent runs (`ca-…`, owned by the JobWatcher) and polls only OpenChoreo
+// WorkflowRuns (`wf-…`) — otherwise it spams "WorkflowRun not found" every tick
+// for the agent rows.
+func TestExecWatcher_SkipsCodingAgentRuns(t *testing.T) {
 	caRow := &delivery.Execution{ID: "j1", OrgID: "acme", Repo: "acme/widgets", IssueNumber: 7,
 		Kind: string(taskmeta.KindCoding), Status: string(taskmeta.ExecRunning), RunName: "ca-abc12345-2601011200"}
 	wfRow := &delivery.Execution{ID: "w1", OrgID: "acme", Repo: "acme/widgets", IssueNumber: 8,
@@ -187,8 +187,8 @@ func TestExecWatcher_SkipsProxyJobRuns(t *testing.T) {
 }
 
 func TestExecWatcher_CodingFailure_FinishesFailed_SuccessRidesPRWebhook(t *testing.T) {
-	// A ClusterWorkflow (`wf-…`) coding run — the ExecWatcher's domain; proxy
-	// `ca-…` runs are the JobWatcher's and are skipped here.
+	// A ClusterWorkflow (`wf-…`) coding run — the ExecWatcher's domain;
+	// `ca-…` coding-agent runs are the JobWatcher's and are skipped here.
 	coding := &delivery.Execution{ID: "c1", OrgID: "acme", Repo: "acme/widgets", IssueNumber: 7,
 		Kind: string(taskmeta.KindCoding), Status: string(taskmeta.ExecRunning), RunName: "wf-1"}
 	repo := newFakeExecRepo(coding)

@@ -598,17 +598,18 @@ func (e *CodingExecutor) lookupOrgUUID(ctx context.Context, ocOrgID string) (str
 	return org.UUID.String(), nil
 }
 
-// proxyJobRunPrefix marks a run name as a cluster-gateway-proxy coding-agent Job
-// (a K8s Job owned by the JobWatcher) rather than an OpenChoreo WorkflowRun. It
-// is the ONE discriminator both watchers key on so they never poll each other's
-// runs: the JobWatcher processes ONLY these, the ExecWatcher skips them.
-const proxyJobRunPrefix = "ca-"
+// codingAgentRunPrefix marks a run name as a coding-agent workload (an
+// OpenChoreo coding-agent Component, historically also a proxy/K8s Job)
+// rather than an OpenChoreo WorkflowRun (`wf-…`). It is the ONE discriminator
+// both watchers key on so they never poll each other's runs: the JobWatcher
+// processes ONLY these, the ExecWatcher skips them.
+const codingAgentRunPrefix = "ca-"
 
-// isProxyJobRun reports whether runName is a proxy-dispatched coding-agent Job
+// isCodingAgentRun reports whether runName is a coding-agent workload
 // (vs an OpenChoreo WorkflowRun). Shared by the ExecWatcher (skips) and the
-// JobWatcher (claims).
-func isProxyJobRun(runName string) bool {
-	return strings.HasPrefix(runName, proxyJobRunPrefix)
+// JobWatcher / CycleReaper (claim).
+func isCodingAgentRun(runName string) bool {
+	return strings.HasPrefix(runName, codingAgentRunPrefix)
 }
 
 // codingAgentRunNameFor derives a deterministic `ca-…` run name from an id + a
@@ -620,7 +621,7 @@ func codingAgentRunNameFor(id string) string {
 	if len(shortID) > 8 {
 		shortID = shortID[:8]
 	}
-	name := fmt.Sprintf("%s%s-%s", proxyJobRunPrefix, shortID, minute)
+	name := fmt.Sprintf("%s%s-%s", codingAgentRunPrefix, shortID, minute)
 	if len(name) > 63 {
 		name = name[:63]
 	}

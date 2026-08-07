@@ -48,9 +48,10 @@ import (
 	"github.com/wso2/aep/aep-api/internal/delivery"
 )
 
-// finalLogTailBytes caps how much of a terminal pod's log is pulled in one read
-// (~3000 lines). It bounds a fetch, and nothing else: the bytes are scanned for
-// the runner's usage line and dropped.
+// finalLogTailBytes caps how much of a terminal pod's log is kept AFTER the
+// OpenChoreo read returns (~3000 lines). The OC call itself is unbounded
+// (sinceSeconds=0); these bytes are scanned for the runner's usage line and
+// then dropped — never written to Postgres.
 const finalLogTailBytes = 256 * 1024
 
 // cycleCaptureWindow bounds how far back a CLOSED cycle is still worth polling.
@@ -156,7 +157,7 @@ func (w *JobWatcher) Tick(ctx context.Context) {
 	live := make(map[string]bool, len(rows))
 	for i := range rows {
 		cycle := &rows[i]
-		if !isProxyJobRun(cycle.JobRef) {
+		if !isCodingAgentRun(cycle.JobRef) {
 			continue
 		}
 		live[cycle.ID] = true

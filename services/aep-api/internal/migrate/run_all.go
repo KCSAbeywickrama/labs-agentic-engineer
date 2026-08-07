@@ -135,10 +135,10 @@ func Steps(db *gorm.DB, deploymentTier string, credKey []byte) []database.Step {
 		// no-op; it stays in the ordered list because the list is frozen and
 		// because an existing deployment's abandoned table keeps its index.
 		ctxStep("workflow_runs", RunWorkflowRuns),
-		// coding_agent_logs (GitHub-native): create the JobWatcher's final-log
-		// sidecar keyed to executions(id). Runs after `executions` (FK target) and
-		// `tasks_github_native` (cascade-drops any legacy component_tasks-keyed
-		// table). Supersedes the guarded phase3_coding_agent_logs no-op above.
+		// coding_agent_logs (GitHub-native): legacy CREATE TABLE for execution-
+		// keyed agent-log rows. New cycle logs are read from OpenChoreo + the
+		// observer; nothing writes this table. Runs after `executions` (FK) and
+		// `tasks_github_native`. Supersedes the phase3_coding_agent_logs no-op.
 		ctxStep("coding_agent_logs", RunCodingAgentLogs),
 		// rca_agent_reports (ops.RcaAgentReport): the store backing the
 		// console's Alerts notification bell and Alerts list/stepper

@@ -147,10 +147,10 @@ func (w *ExecWatcher) Sweep(ctx context.Context) error {
 		if row.Status != string(taskmeta.ExecRunning) || row.RunName == "" {
 			continue
 		}
-		// Proxy-dispatched coding-agent Jobs (`ca-…`) are K8s Jobs owned by the
+		// Coding-agent runs (`ca-…`) are Components/Jobs owned by the
 		// JobWatcher, NOT OpenChoreo WorkflowRuns. Skip them or GetWorkflowRun
 		// spams "WorkflowRun not found" every tick until the row terminates.
-		if isProxyJobRun(row.RunName) {
+		if isCodingAgentRun(row.RunName) {
 			continue
 		}
 		run, gerr := w.oc.GetWorkflowRun(ctx, row.OrgID, row.RunName)
