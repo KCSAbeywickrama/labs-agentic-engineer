@@ -58,10 +58,6 @@ const (
 	// defaultProgressLimit caps events surfaced per poll (matches the retired
 	// pre-cutover reader).
 	defaultProgressLimit = 200
-	// logPageBytes bounds the live-tail window read per poll — the LAST 64KiB of
-	// pod stdout, so old lines scroll off and the console gets fresh content.
-	// Paired with the watcher's 256KiB final-capture (finalLogTailBytes).
-	logPageBytes = 64 * 1024
 )
 
 // Bootstrap seqs identify the synthetic "dark zone" progress lines the reader

@@ -32,6 +32,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 )
 
@@ -135,4 +136,19 @@ type OrgPublisherProvisioner interface {
 // uses), so this feature holds no orgcreds import. Optional — nil skips staging.
 type BuildSecretStager interface {
 	StageBuildSecret(ctx context.Context, ocOrgID, repoSlug, workflowRunName string) (secretRef string, err error)
+}
+
+// LiveTail is one read of a cycle pod's log, plus the pod state that read it.
+// The pod travels with the text because "no output yet" and "no pod yet" are
+// different things to the console, and only the pod says which one happened.
+type LiveTail struct {
+	Text string
+	Pod  openchoreo.RuntimePod
+}
+
+// LiveLogSource is the running agent's log, read while its Component still
+// exists. Satisfied by *OCLogSource. A wrapped ErrComponentGone means the
+// Component has been deleted — the archive's turn, or an unavailable state.
+type LiveLogSource interface {
+	Tail(ctx context.Context, orgName, projectName, componentName string, maxBytes int) (LiveTail, error)
 }
