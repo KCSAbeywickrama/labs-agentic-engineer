@@ -50,14 +50,6 @@ const (
 	LabelKeyComponentType LabelKeys = "openchoreo.dev/component-type"
 	LabelKeyProjectName   LabelKeys = "openchoreo.dev/project-name"
 
-	// aep-specific labels (NOT the openchoreo.dev/* prefix) carry
-	// task / project / component identifiers on coding-agent WorkflowRuns
-	// without triggering OC's ClusterWorkflow ↔ ClusterComponentType
-	// allow-list validation (which keys off `openchoreo.dev/component`).
-	LabelKeyAepCodingAgentTask LabelKeys = "aep.openchoreo.dev/coding-agent-task"
-	LabelKeyAepProject         LabelKeys = "aep.openchoreo.dev/project"
-	LabelKeyAepComponent       LabelKeys = "aep.openchoreo.dev/component"
-
 	// Markers on ephemeral coding-agent Components (and their Workloads).
 	// ListComponents filters on LabelKeyAepInternal; retention / cancel /
 	// watchers key on the rest.

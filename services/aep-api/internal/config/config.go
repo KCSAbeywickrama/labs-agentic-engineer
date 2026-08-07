@@ -125,10 +125,10 @@ type Config struct {
 	SkillsDir string
 
 	// AgentPlatformURL is the URL the coding-agent runner pod uses to call
-	// back to the BFF (every former git-service endpoint is served by the
-	// merged aep-api now) for credentials refresh + skills pull. Reachable
-	// from the WorkflowPlane namespace (`workflows-<ouHandle>`) via
-	// cross-namespace FQDN.
+	// back to the BFF (credentials refresh, MCP, skills). In cloud this is the
+	// public/internal gateway route to app-factory-api — runner pods live in
+	// the dataplane and cannot reach the control-plane ClusterIP. Locally it
+	// is typically http://host.k3d.internal:9090.
 	AgentPlatformURL string
 
 	// AEPInternalBaseURL is the BFF's own base URL as reached by peer

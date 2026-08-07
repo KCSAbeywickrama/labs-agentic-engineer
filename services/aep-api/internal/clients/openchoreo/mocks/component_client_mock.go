@@ -69,9 +69,6 @@ var _ openchoreo.ComponentClient = &ComponentClientMock{}
 //			TriggerBuildAtCommitFunc: func(ctx context.Context, orgName string, projectName string, componentName string, commitSHA string, secretRef string, runName string) (*gen.WorkflowRun, error) {
 //				panic("mock out the TriggerBuildAtCommit method")
 //			},
-//			TriggerCodingAgentFunc: func(ctx context.Context, params openchoreo.CodingAgentParams) (*gen.WorkflowRun, error) {
-//				panic("mock out the TriggerCodingAgent method")
-//			},
 //			UpdateComponentTraitEnvironmentConfigsFunc: func(ctx context.Context, orgName string, projectName string, componentName string, configs map[string]map[string]interface{}) error {
 //				panic("mock out the UpdateComponentTraitEnvironmentConfigs method")
 //			},
@@ -138,9 +135,6 @@ type ComponentClientMock struct {
 
 	// TriggerBuildAtCommitFunc mocks the TriggerBuildAtCommit method.
 	TriggerBuildAtCommitFunc func(ctx context.Context, orgName string, projectName string, componentName string, commitSHA string, secretRef string, runName string) (*gen.WorkflowRun, error)
-
-	// TriggerCodingAgentFunc mocks the TriggerCodingAgent method.
-	TriggerCodingAgentFunc func(ctx context.Context, params openchoreo.CodingAgentParams) (*gen.WorkflowRun, error)
 
 	// UpdateComponentTraitEnvironmentConfigsFunc mocks the UpdateComponentTraitEnvironmentConfigs method.
 	UpdateComponentTraitEnvironmentConfigsFunc func(ctx context.Context, orgName string, projectName string, componentName string, configs map[string]map[string]interface{}) error
@@ -348,13 +342,6 @@ type ComponentClientMock struct {
 			// RunName is the runName argument value.
 			RunName string
 		}
-		// TriggerCodingAgent holds details about calls to the TriggerCodingAgent method.
-		TriggerCodingAgent []struct {
-			// Ctx is the ctx argument value.
-			Ctx context.Context
-			// Params is the params argument value.
-			Params openchoreo.CodingAgentParams
-		}
 		// UpdateComponentTraitEnvironmentConfigs holds details about calls to the UpdateComponentTraitEnvironmentConfigs method.
 		UpdateComponentTraitEnvironmentConfigs []struct {
 			// Ctx is the ctx argument value.
@@ -424,7 +411,6 @@ type ComponentClientMock struct {
 	lockListWorkflowRuns                       sync.RWMutex
 	lockTriggerBuild                           sync.RWMutex
 	lockTriggerBuildAtCommit                   sync.RWMutex
-	lockTriggerCodingAgent                     sync.RWMutex
 	lockUpdateComponentTraitEnvironmentConfigs sync.RWMutex
 	lockUpdateComponentTraits                  sync.RWMutex
 	lockUpdateComponentWorkflowEnvVars         sync.RWMutex
@@ -1164,42 +1150,6 @@ func (mock *ComponentClientMock) TriggerBuildAtCommitCalls() []struct {
 	mock.lockTriggerBuildAtCommit.RLock()
 	calls = mock.calls.TriggerBuildAtCommit
 	mock.lockTriggerBuildAtCommit.RUnlock()
-	return calls
-}
-
-// TriggerCodingAgent calls TriggerCodingAgentFunc.
-func (mock *ComponentClientMock) TriggerCodingAgent(ctx context.Context, params openchoreo.CodingAgentParams) (*gen.WorkflowRun, error) {
-	if mock.TriggerCodingAgentFunc == nil {
-		panic("ComponentClientMock.TriggerCodingAgentFunc: method is nil but ComponentClient.TriggerCodingAgent was just called")
-	}
-	callInfo := struct {
-		Ctx    context.Context
-		Params openchoreo.CodingAgentParams
-	}{
-		Ctx:    ctx,
-		Params: params,
-	}
-	mock.lockTriggerCodingAgent.Lock()
-	mock.calls.TriggerCodingAgent = append(mock.calls.TriggerCodingAgent, callInfo)
-	mock.lockTriggerCodingAgent.Unlock()
-	return mock.TriggerCodingAgentFunc(ctx, params)
-}
-
-// TriggerCodingAgentCalls gets all the calls that were made to TriggerCodingAgent.
-// Check the length with:
-//
-//	len(mockedComponentClient.TriggerCodingAgentCalls())
-func (mock *ComponentClientMock) TriggerCodingAgentCalls() []struct {
-	Ctx    context.Context
-	Params openchoreo.CodingAgentParams
-} {
-	var calls []struct {
-		Ctx    context.Context
-		Params openchoreo.CodingAgentParams
-	}
-	mock.lockTriggerCodingAgent.RLock()
-	calls = mock.calls.TriggerCodingAgent
-	mock.lockTriggerCodingAgent.RUnlock()
 	return calls
 }
 

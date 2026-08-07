@@ -142,12 +142,6 @@ type ComponentClient interface {
 	// agent-manager-service/clients/openchoreosvc/client/builds.go:71-85.
 	// See TriggerBuild for the `runName` + `secretRef` contracts.
 	TriggerBuildAtCommit(ctx context.Context, orgName, projectName, componentName, commitSHA, secretRef, runName string) (*gen.WorkflowRun, error)
-	// TriggerCodingAgent creates a WorkflowRun of ClusterWorkflow
-	// `aep-coding-agent` for the per-task ephemeral pod that runs the
-	// Claude Agent SDK against the task's feature branch. The label
-	// `aep.openchoreo.dev/coding-agent-task` carries the taskId so
-	// the BFF watcher can correlate runs back to the task.
-	TriggerCodingAgent(ctx context.Context, params CodingAgentParams) (*gen.WorkflowRun, error)
 	ListWorkflowRuns(ctx context.Context, orgName, projectName, componentName string, limit int, cursor string) (*gen.WorkflowRunList, error)
 	// ListProjectWorkflowRuns is the same read widened to every component in
 	// the project — one call instead of one per component. The run read uses it
@@ -155,34 +149,6 @@ type ComponentClient interface {
 	// learn which components the merge touched.
 	ListProjectWorkflowRuns(ctx context.Context, orgName, projectName string, limit int, cursor string) (*gen.WorkflowRunList, error)
 	GetWorkflowRun(ctx context.Context, orgName, runName string) (*gen.WorkflowRun, error)
-}
-
-// CodingAgentParams is the input to TriggerCodingAgent. Mirrors the schema
-// of `aep-coding-agent` ClusterWorkflow. All fields are required.
-// The agent itself creates the feature branch and opens the PR (with
-// `Closes #<issueNumber>` so the BFF webhook can link it back to the
-// task), so no branch is plumbed through here.
-type CodingAgentParams struct {
-	OrgName       string
-	ProjectName   string
-	ComponentName string
-	TaskID        string
-	Prompt        string
-	RepoURL       string
-	IdentityName  string
-	IdentityEmail string
-	IdentityLogin string
-	Bearer        string
-	GitServiceURL string
-	// PlatformURL is the BFF base URL the runner pod uses for its callbacks
-	// (credentials refresh). Passed through to the ClusterWorkflow parameter
-	// `bff.platformUrl` → env var AEP_PLATFORM_URL in the pod.
-	PlatformURL string
-	// AnthropicSecretRef is the org-scoped Workload secret name OpenChoreo
-	// resolves from the ComponentType's secretEnv declaration (refs only).
-	// The Component wires it into the pod via `parameters.anthropic.secretRef`
-	// → `secretKeyRef.name`. See docs/design/anthropic-key-dual-token.md §5.
-	AnthropicSecretRef string
 }
 
 type componentClient struct {
@@ -1288,94 +1254,9 @@ func cloneParameterMap(in map[string]interface{}) map[string]interface{} {
 	return out
 }
 
-// TriggerCodingAgent creates a WorkflowRun of ClusterWorkflow
-// `aep-coding-agent`. Each call creates a fresh run; idempotency is
-// the caller's responsibility (see DispatchService.dispatchOne which gates
-// on task.LastCodingAgentRunName + DispatchedAt).
-//
-// NOTE: deliberately NOT setting `openchoreo.dev/component` /
-// `openchoreo.dev/project` labels. OC validates the
-// ClusterWorkflow ↔ ClusterComponentType allowed-workflow pair when a
-// WorkflowRun carries the `openchoreo.dev/component` label, which would
-// reject `aep-coding-agent` because the user's component is
-// `deployment/service` (allowed only the builder ClusterWorkflows). The
-// agent pod has no need to be tied to the user's Component for OC's
-// purposes — the project + component identifiers flow in via the
-// `parameters.task.*` fields that the runner reads. The `aep.*`
-// label catalog carries them for the BFF watcher instead.
-func (c *componentClient) TriggerCodingAgent(ctx context.Context, params CodingAgentParams) (*gen.WorkflowRun, error) {
-	scopedComp := ScopedComponentName(params.ProjectName, params.ComponentName)
-
-	// Run name shape: coding-agent-<short-task>-<unixMs>. K8s names must be
-	// ≤63 chars and start with a letter. Truncate the taskID to 8 to stay
-	// safely inside the budget. The unixMs suffix makes re-dispatch unique.
-	shortTask := params.TaskID
-	if len(shortTask) > 8 {
-		shortTask = shortTask[:8]
-	}
-	runName := fmt.Sprintf("coding-agent-%s-%d", shortTask, time.Now().UnixMilli())
-
-	labels := map[string]string{
-		string(LabelKeyAepCodingAgentTask): params.TaskID,
-		string(LabelKeyAepProject):         params.ProjectName,
-		string(LabelKeyAepComponent):       scopedComp,
-	}
-
-	wfKind := ocgen.WorkflowRunConfigKindClusterWorkflow
-	parameters := codingAgentParameters(params)
-	body := ocgen.CreateWorkflowRunJSONRequestBody{
-		Metadata: ocgen.ObjectMeta{
-			Name:   runName,
-			Labels: &labels,
-		},
-		Spec: &ocgen.WorkflowRunSpec{
-			Workflow: ocgen.WorkflowRunConfig{
-				Kind:       &wfKind,
-				Name:       "aep-coding-agent",
-				Parameters: &parameters,
-			},
-		},
-	}
-
-	return c.createWorkflowRun(ctx, params.OrgName, body, "trigger coding-agent")
-}
-
-// codingAgentParameters builds the `parameters.*` map that the
-// aep-coding-agent ClusterWorkflow's openAPIV3Schema expects. The
-// runner image reads AEP_* env vars substituted from these keys.
-func codingAgentParameters(p CodingAgentParams) map[string]interface{} {
-	return map[string]interface{}{
-		"task": map[string]interface{}{
-			"id":            p.TaskID,
-			"orgId":         p.OrgName,
-			"projectId":     p.ProjectName,
-			"componentName": p.ComponentName,
-			"prompt":        p.Prompt,
-		},
-		"repository": map[string]interface{}{
-			"url":       p.RepoURL,
-			"identity": map[string]interface{}{
-				"name":  p.IdentityName,
-				"email": p.IdentityEmail,
-				"login": p.IdentityLogin,
-			},
-		},
-		"bff": map[string]interface{}{
-			"bearer":      p.Bearer,
-			"platformUrl": p.PlatformURL,
-		},
-		"gitService": map[string]interface{}{
-			"url": p.GitServiceURL,
-		},
-		"anthropic": map[string]interface{}{
-			"secretRef": p.AnthropicSecretRef,
-		},
-	}
-}
-
-// createWorkflowRun is the shared POST path for both trigger flows. opName
+// createWorkflowRun is the shared POST path for WorkflowRun creates. opName
 // goes into the network-error wrap to keep slog logs distinguishable
-// (trigger build / trigger coding-agent).
+// (e.g. trigger build).
 func (c *componentClient) createWorkflowRun(ctx context.Context, orgName string, body ocgen.CreateWorkflowRunJSONRequestBody, opName string) (*gen.WorkflowRun, error) {
 	// Refuse a name OpenChoreo would accept and then never build. This is the
 	// one choke point every WorkflowRun create passes through, and the check is
