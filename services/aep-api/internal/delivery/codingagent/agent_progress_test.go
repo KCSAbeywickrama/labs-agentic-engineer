@@ -435,3 +435,26 @@ func TestDropTruncatedTail(t *testing.T) {
 		})
 	}
 }
+
+// TestTextToProgressEventsSurfacesScanFailure pins that a line past the scanner
+// buffer names itself in the feed. It used to end the scan silently, dropping
+// the rest of the page with no signal to the reader.
+func TestTextToProgressEventsSurfacesScanFailure(t *testing.T) {
+	t.Parallel()
+
+	huge := `{"schemaVersion":1,"kind":"log","summary":"` + strings.Repeat("x", 2*1024*1024) + `"}`
+	text := `{"schemaVersion":1,"seq":1,"kind":"phase","phase":"coding"}` + "\n" + huge + "\n" +
+		`{"schemaVersion":1,"seq":2,"kind":"phase","phase":"done"}` + "\n"
+
+	events, truncated := textToProgressEvents(text)
+	if !truncated {
+		t.Error("a scan that stopped early must report truncated")
+	}
+	if len(events) == 0 {
+		t.Fatal("no events")
+	}
+	last := events[len(events)-1]
+	if last.Kind != "log" || !strings.Contains(last.Summary, "size cap") {
+		t.Errorf("last event must name the dropped page, got %+v", last)
+	}
+}

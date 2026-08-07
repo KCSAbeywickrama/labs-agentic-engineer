@@ -38,6 +38,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -440,10 +441,22 @@ func textToProgressEvents(text string) ([]contracts.ProgressEvent, bool) {
 		}
 		out = append(out, ev)
 	}
+	// A line past the buffer cap stops Scan() early and would drop the whole
+	// REST of the page with no signal — the feed would just go quiet mid-run.
+	// Name it in the stream instead. (Sibling: usageFromLog.)
+	scanFailed := scanner.Err() != nil
+	if scanFailed {
+		slog.Warn("codingagent.textToProgressEvents: log scan stopped early — rest of page dropped", "error", scanner.Err())
+		out = append(out, contracts.ProgressEvent{
+			Kind:          "log",
+			SchemaVersion: progressSchemaVersion,
+			Summary:       "… an agent log line exceeded the reader's size cap; the rest of this page was skipped",
+		})
+	}
 	if len(out) > defaultProgressLimit {
 		return out[len(out)-defaultProgressLimit:], true
 	}
-	return out, false
+	return out, scanFailed
 }
 
 // dropTruncatedTail removes a trailing partial line — one the source cut
