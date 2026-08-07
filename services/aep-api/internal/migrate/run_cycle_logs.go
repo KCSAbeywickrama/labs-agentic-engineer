@@ -23,18 +23,13 @@ import (
 	"gorm.io/gorm"
 )
 
-// run_cycle_logs.go — the milestone loop's captured agent log.
+// run_cycle_logs.go — legacy milestone cycle log table.
 //
-// The cycle-keyed twin of coding_agent_logs. It cannot be that table: it is
-// FK'd to executions(id), and a milestone run mints no execution row, so a
-// cycle's Job log has nothing there to hang off. Keyed instead to
-// run_cycles(id), cascading on the cycle so a project delete takes its logs.
-//
-// Written as raw SQL rather than an AutoMigrate base model for the same reason
-// coding_agent_logs is: the FK and the composite primary key are the point, and
-// keeping the two sidecars shaped identically makes the pair easy to read.
-// Runs after milestone_runs, whose entities (run_cycles included) AutoMigrate at
-// database.Open — so the FK target exists.
+// Created when milestone runs were planned to capture agent logs in Postgres.
+// The shipped design reads logs from OpenChoreo and the observability archive
+// instead; nothing in the codebase writes or reads this table. The migration
+// stays idempotent so existing deployments keep a harmless empty table. FK'd to
+// run_cycles(id); runs after milestone_runs so the target exists.
 func RunRunCycleLogs(ctx context.Context, db *gorm.DB) error {
 	stmt := `
 		CREATE TABLE IF NOT EXISTS run_cycle_logs (

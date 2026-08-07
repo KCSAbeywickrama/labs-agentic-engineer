@@ -20,7 +20,7 @@
 // a milestone run, one agent pod — and writes no platform state on that path,
 // because the cycle record is the run supervisor's bookkeeping. What state it
 // does write belongs to the two watchers it owns: the JobWatcher (Job phase and
-// the captured agent log) and the ExecWatcher (OpenChoreo WorkflowRun outcomes,
+// terminal token usage) and the ExecWatcher (OpenChoreo WorkflowRun outcomes,
 // including the git-clone-auth build retry).
 //
 // The JobWatcher classifies a cycle from the Pod OpenChoreo rendered for its

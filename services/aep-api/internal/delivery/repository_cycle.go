@@ -112,15 +112,15 @@ type RunCycleRepository interface {
 	ListByRun(ctx context.Context, orgID, runID string) ([]RunCycle, error)
 
 	// ListRecentDispatched returns every cycle that has launched a Job and is
-	// either still open or closed no earlier than `since` — the watcher's claim
-	// set for capturing agent logs.
+	// either still open or closed no earlier than `since` — the JobWatcher's
+	// claim set for pod-truth reads and terminal usage capture.
 	//
 	// It is deliberately NOT "open cycles only": the agent Job exits the moment
 	// it opens its pull request, and the auto-merge that CLOSES the cycle follows
 	// within seconds, so a watcher restricted to open cycles would routinely
-	// arrive after the cycle had closed and capture nothing. The window instead
-	// tracks how long the Job's pod survives (its TTL), which is what actually
-	// bounds the capture.
+	// arrive after the cycle had closed and miss the usage stamp. The window
+	// instead tracks how long the Job's pod survives (its TTL), which is what
+	// actually bounds the pass.
 	//
 	// Unscoped by org on purpose: it drives a platform watcher, not an HTTP read.
 	ListRecentDispatched(ctx context.Context, since time.Time) ([]RunCycle, error)

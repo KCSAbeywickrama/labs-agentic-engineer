@@ -39,7 +39,7 @@ flowchart LR
     RUN -.->|ValidationCoordinator| VAL
   end
   EXEC --> EXECS[("executions")]
-  EVENT --> RUNS[("milestone_runs · run_cycles · run_cycle_logs")]
+  EVENT --> RUNS[("milestone_runs · run_cycles")]
   RREAD --> RUNS
   BUILD --> RUNS
   TASK --> RUNS
@@ -133,9 +133,9 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   nothing else: it detects no event and writes no issue.
 - **Persistence**: every gorm in this domain sits at the ROOT (the fence `TestGormFencedToDomainRepository`
   draws), as single write-authority — `repository_execution.go` · `repository_coding_agent_log.go` ·
-  `repository_run.go` · `repository_cycle.go` · `repository_run_cycle_log.go` over the `execution.go` /
-  `coding_agent_log.go` / `milestone_run.go` / `run_cycle.go` / `run_cycle_log.go` entities. Their tables
-  are `executions` · `coding_agent_logs` · `milestone_runs` · `run_cycles` · `run_cycle_logs`.
+  `repository_run.go` · `repository_cycle.go` over the `execution.go` /
+  `coding_agent_log.go` / `milestone_run.go` / `run_cycle.go` entities. Their tables
+  are `executions` · `coding_agent_logs` · `milestone_runs` · `run_cycles`.
   `usage_rollup.go` is the one read that spans two of them, and is a plain function over both
   repositories rather than a third store.
 
@@ -255,13 +255,14 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   A live run — including one parked in `waiting` — holds the stream open indefinitely; a terminal run
   streams its history, sends `done` + `[DONE]`, and the server closes. The server keeps no cursor; the
   client dedups by cycle id and `(cycleId, seq)`.
-- **A cycle's agent log is keyed by the CYCLE, not by an execution.** `coding_agent_logs` is FK'd to
-  `executions(id)` and a milestone run mints no execution row, so the milestone loop has its own sidecar,
-  `run_cycle_logs`, keyed `(cycle_id, run_name)` — one row per attempt, since a re-dispatch keeps the
-  cycle and takes a new Job. The `JobWatcher` captures it when the cycle's Job goes terminal and does
-  NOTHING else on that pass: a Job that exited zero says nothing about whether the cycle landed, and the
-  cycle's outcome is the supervisor's, learned from webhooks. Without the capture a finished run would
-  have no history at all — the Job's TTL reaps the pod long before anyone opens an old version's page.
+- **Agent logs are read, never stored.** Three sources answer, in order: live OpenChoreo pod logs while
+  the Component exists, the observability archive while the Component is retained, and a synthetic
+  `logs_unavailable` line when the Component is gone or no observability plane is configured. An empty
+  stream and a lost log look identical to a reader and mean opposite things about the agent, so the
+  platform never lets "gone" render as "silent". `CycleLogReader` serves the run-progress stream;
+  `codingagent` owns the read path and writes no log text to Postgres. The one thing taken from a
+  terminal pod's log is the runner's token-usage line, stamped onto the cycle row — accounting, not
+  logging. `coding_agent_logs` remains for legacy execution rows; milestone cycles never used it.
 - **The task-log stream is one connection, no server cursor.** `stream-task-log`
   (`GET .../tasks/{issueNumber}/log`, `text/event-stream`) carries a Task's whole live state — `task` /
   `execution` / `line` / `done` frames, the frame kind in a `type` field inside the `data:` payload so it

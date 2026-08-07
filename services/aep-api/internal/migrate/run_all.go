@@ -150,9 +150,10 @@ func Steps(db *gorm.DB, deploymentTier string, credKey []byte) []database.Step {
 		// (org, project). Fresh schema — nothing to backfill from the legacy
 		// executions/workflow_runs tables.
 		ctxStep("milestone_runs", RunMilestoneRuns),
-		// run_cycle_logs: the cycle-keyed agent-log sidecar the run progress
-		// stream reads once the Job's pod is reaped. FK'd to run_cycles(id), so it
-		// follows milestone_runs.
+		// run_cycle_logs: legacy CREATE TABLE from the pre-read-model era. Milestone
+		// cycle logs are read from OpenChoreo and the observability archive, not
+		// stored here; nothing reads or writes the table. The step stays idempotent
+		// for existing schemas.
 		ctxStep("run_cycle_logs", RunRunCycleLogs),
 		// model_rates seed (#291): the platform's active model at today's
 		// rates. AutoMigrate (BaseModels) creates the table; this idempotent
