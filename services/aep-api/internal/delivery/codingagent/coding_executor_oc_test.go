@@ -158,6 +158,21 @@ func TestDispatch_OCPathDispatchesThroughOpenChoreo(t *testing.T) {
 	}
 }
 
+// TestCodingAgentRunNameFor_IsStableAcrossRetries: a Temporal retry after a
+// crash must recreate the same Component name so CreateComponent's 409 path
+// re-reads instead of minting a second billed Component.
+func TestCodingAgentRunNameFor_IsStableAcrossRetries(t *testing.T) {
+	id := "11111111-1111-1111-1111-111111111111"
+	a := codingAgentRunNameFor(id)
+	b := codingAgentRunNameFor(id)
+	if a != b {
+		t.Fatalf("unstable run name: %q then %q", a, b)
+	}
+	if want := "ca-11111111-11111111111111111111"; a != want {
+		t.Fatalf("run name = %q, want %q", a, want)
+	}
+}
+
 // TestDispatch_ValidationCycleDispatchesOnOCPath: validation carries task kind
 // and deadline through the OpenChoreo Component path.
 func TestDispatch_ValidationCycleDispatchesOnOCPath(t *testing.T) {

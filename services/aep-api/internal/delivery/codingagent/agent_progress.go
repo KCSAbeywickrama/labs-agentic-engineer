@@ -210,11 +210,19 @@ func (r *AgentProgressReader) CycleProgress(ctx context.Context, cycle *delivery
 		switch {
 		case err == nil:
 			// Real OCLogSource.Tail returns success + empty text when the
-			// Component is retained but the pod is gone — not ErrComponentGone.
-			// On a closed cycle that empty success is "try the archive"; on an
-			// open cycle it is still the dark zone (scheduling / boot).
-			if closed && strings.TrimSpace(tail.Text) == "" {
+			// Component is retained but the pod has nothing to say — not
+			// ErrComponentGone. Empty live falls through to the archive when
+			// the cycle is closed, the pod is terminal, or the archive already
+			// holds lines (pod reaped while the cycle is still open awaiting
+			// its PR webhook). Otherwise empty live is still scheduling / boot.
+			if strings.TrimSpace(tail.Text) != "" {
+				return r.fromText(resp, tail.Text, sinceMillis, !closed, closed, tail.Pod), nil
+			}
+			if closed || terminalPod(tail.Pod) {
 				break
+			}
+			if text, aerr := r.readArchive(ctx, cycle); aerr == nil && strings.TrimSpace(text) != "" {
+				return r.fromText(resp, text, sinceMillis, false, false, openchoreo.RuntimePod{}), nil
 			}
 			return r.fromText(resp, tail.Text, sinceMillis, !closed, closed, tail.Pod), nil
 		case !errors.Is(err, ErrComponentGone):
@@ -305,6 +313,20 @@ func unavailableReason(err error) string {
 		return "the observability plane is not available"
 	default:
 		return ""
+	}
+}
+
+// terminalPod is true when the live source saw a Job pod that has already
+// finished — empty live then means "try the archive", not "still scheduling".
+func terminalPod(pod openchoreo.RuntimePod) bool {
+	if !pod.Found {
+		return false
+	}
+	switch pod.Phase {
+	case "Succeeded", "Failed":
+		return true
+	default:
+		return false
 	}
 }
 

@@ -600,11 +600,14 @@ func TestCycleProgress_ClosedEmptyLiveWithNoArchiveIsUnavailable(t *testing.T) {
 	}
 }
 
-// Open cycle + live empty success is still the dark zone — do not archive or
-// declare unavailable while the attempt may still be scheduling.
+// Open cycle + live empty success with no archive lines is still the dark
+// zone — the attempt may still be scheduling. An archive that already has
+// lines means the pod finished and was reaped while the cycle stays open
+// (PR webhook pending); that falls through in
+// TestCycleProgress_OpenEmptyLiveFallsThroughToArchiveWhenArchiveHasLines.
 func TestCycleProgress_OpenEmptyLiveStaysOnDarkZone(t *testing.T) {
 	live := &stubLive{tail: LiveTail{Pod: openchoreo.RuntimePod{}}}
-	archive := &stubArchive{text: "2026-08-06T10:00:01Z should not appear\n"}
+	archive := &stubArchive{text: ""}
 
 	resp, err := NewAgentProgressReader(live, nil).WithArchive(archive).
 		CycleProgress(context.Background(), liveCycle("c11"), 0)
@@ -619,5 +622,36 @@ func TestCycleProgress_OpenEmptyLiveStaysOnDarkZone(t *testing.T) {
 	}
 	if resp.Lines[0].Phase == "logs_unavailable" {
 		t.Fatal("open empty live must not report unavailable")
+	}
+}
+
+func TestCycleProgress_OpenEmptyLiveFallsThroughToArchiveWhenArchiveHasLines(t *testing.T) {
+	live := &stubLive{tail: LiveTail{Pod: openchoreo.RuntimePod{}}}
+	archive := &stubArchive{text: "2026-08-06T10:00:01Z archived while cycle still open\n"}
+
+	resp, err := NewAgentProgressReader(live, nil).WithArchive(archive).
+		CycleProgress(context.Background(), liveCycle("c12"), 0)
+	if err != nil {
+		t.Fatalf("CycleProgress: %v", err)
+	}
+	if len(resp.Lines) != 1 || resp.Lines[0].Summary != "archived while cycle still open" {
+		t.Fatalf("unexpected lines: %+v", resp.Lines)
+	}
+	if resp.Final {
+		t.Error("open cycle served from archive must keep polling until the run settles")
+	}
+}
+
+func TestCycleProgress_OpenEmptyLiveOnTerminalPodFallsThroughToArchive(t *testing.T) {
+	live := &stubLive{tail: LiveTail{Pod: openchoreo.RuntimePod{Found: true, Phase: "Succeeded"}}}
+	archive := &stubArchive{text: "2026-08-06T10:00:01Z archived after succeeded pod\n"}
+
+	resp, err := NewAgentProgressReader(live, nil).WithArchive(archive).
+		CycleProgress(context.Background(), liveCycle("c13"), 0)
+	if err != nil {
+		t.Fatalf("CycleProgress: %v", err)
+	}
+	if len(resp.Lines) != 1 || resp.Lines[0].Summary != "archived after succeeded pod" {
+		t.Fatalf("unexpected lines: %+v", resp.Lines)
 	}
 }

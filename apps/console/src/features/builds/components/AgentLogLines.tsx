@@ -28,7 +28,7 @@ import {
 } from "@aep/progress-view";
 import type { components } from "../../../generated/aep-api";
 import { formatLine, formatOutcome } from "../../tasks/lib/timeline";
-import { runLineKey } from "../hooks/useRunProgress";
+import { runLineKey, type RunProgressPhase } from "../hooks/useRunProgress";
 
 type RunProgressLine = components["schemas"]["RunProgressLine"];
 
@@ -113,7 +113,7 @@ export function LogNote({ children }: { children: React.ReactNode }) {
  * settled run that truly had nothing to say.
  */
 export function agentLogEmptyNote(
-  phase: "idle" | "connecting" | "live" | "reconnecting" | "ended",
+  phase: RunProgressPhase,
   opts: { agentRunning?: boolean } = {},
 ): string {
   switch (phase) {
@@ -140,7 +140,7 @@ export function AgentLogPanel({
   maxHeight = 420,
 }: {
   lines: RunProgressLine[];
-  phase: "idle" | "connecting" | "live" | "reconnecting" | "ended";
+  phase: RunProgressPhase;
   agentRunning?: boolean;
   maxHeight?: number;
 }) {

@@ -401,16 +401,30 @@ func isCodingAgentRun(runName string) bool {
 	return strings.HasPrefix(runName, codingAgentRunPrefix)
 }
 
-// codingAgentRunNameFor derives a deterministic `ca-…` run name from an id + a
-// UTC minute bucket (same shape as the legacy codingAgentRunName; a re-dispatch
-// within the minute reuses the name and the immutable Job is DELETE+POST'd).
+// codingAgentRunNameFor derives a stable `ca-<8>-<nonce>` Component / JobRef
+// name from the cycle id. Stability matters: CreateComponent treats 409 as
+// success and re-reads, so a Temporal retry after a crash must hit the same
+// name — a wall-clock suffix would mint a second billed Component.
 func codingAgentRunNameFor(id string) string {
-	minute := time.Now().UTC().Format("0601021504")
-	shortID := id
+	clean := strings.ReplaceAll(id, "-", "")
+	if clean == "" {
+		clean = "unknown"
+	}
+	shortID := clean
 	if len(shortID) > 8 {
 		shortID = shortID[:8]
 	}
-	name := fmt.Sprintf("%s%s-%s", codingAgentRunPrefix, shortID, minute)
+	nonce := clean
+	if len(nonce) > 8 {
+		nonce = nonce[8:]
+	}
+	if len(nonce) > 20 {
+		nonce = nonce[:20]
+	}
+	if nonce == "" {
+		nonce = shortID
+	}
+	name := fmt.Sprintf("%s%s-%s", codingAgentRunPrefix, shortID, nonce)
 	if len(name) > 63 {
 		name = name[:63]
 	}
