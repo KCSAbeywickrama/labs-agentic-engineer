@@ -14,13 +14,19 @@
 # specific language governing permissions and limitations
 # under the License.
 
-FROM golang:1.26-alpine AS builder
+# Pinned to BUILDPLATFORM and cross-compiling via GOARCH, so the arm64 image is
+# never compiled under QEMU — emulating the Go toolchain costs ~8x and buys
+# nothing, since CGO_ENABLED=0 cross-compiles to a static binary for any GOARCH.
+# See the fuller note in services/aep-api/Dockerfile.
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS builder
 
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o bin/local-cluster-gateway-proxy .
+ARG TARGETARCH
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH \
+    go build -o bin/local-cluster-gateway-proxy .
 
 FROM alpine:3.21
 RUN addgroup -g 1000 appgroup && adduser -S -u 1000 -G appgroup appuser
