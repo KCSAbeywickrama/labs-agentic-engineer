@@ -31,6 +31,34 @@ describe("phaseScope display parsers", () => {
     expect(parsePhasingStories(prd, 3)).toEqual([]);
   });
 
+  // The spec agent hard-wraps PRD prose, so "Stories:" routinely ends one line
+  // and its numbers begin the next. A line-scanning parser showed "Stories in
+  // scope: —" in the cut drawer for a PRD that declared them perfectly well.
+  it("reads a hard-wrapped Phasing entry", () => {
+    const prd =
+      "## Phasing\n\n" +
+      "- **Phase 1 — Working hello-world round trip**: build the `GET /hello` API\n" +
+      "endpoint and the web page that calls it and displays the result. Stories:\n" +
+      "1, 2.\n";
+    expect(parsePhasingStories(prd, 1)).toEqual([1, 2]);
+  });
+
+  it("keeps a wrapped entry's stories out of the next entry", () => {
+    const prd =
+      "## Phasing\n" +
+      "- **Phase 1 — core**: the loop. Stories:\n1, 2.\n" +
+      "- **Phase 2 — extras**: the rest.\n  Stories: 7,\n  9.\n";
+    expect(parsePhasingStories(prd, 1)).toEqual([1, 2]);
+    expect(parsePhasingStories(prd, 2)).toEqual([7, 9]);
+  });
+
+  it("stops at the end of the Phasing section", () => {
+    const prd =
+      "## Phasing\n- **Phase 1 — core**: Stories: 1.\n" +
+      "## Out of Scope\n- Phase 1 of something else. Stories: 8, 9.\n";
+    expect(parsePhasingStories(prd, 1)).toEqual([1]);
+  });
+
   it("predicts the next version label", () => {
     expect(nextVersionLabel("v3")).toBe("v4");
     expect(nextVersionLabel(undefined)).toBe("v1");

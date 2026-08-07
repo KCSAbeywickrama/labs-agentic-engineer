@@ -29,31 +29,51 @@ export function parseCellPhase(cell: string): number | null {
   return Number.isInteger(n) && n > 0 ? n : null;
 }
 
-/** The PRD Phasing entry's story numbers for one phase ([] when unparsable). */
+/** The PRD Phasing entry's story numbers for one phase ([] when unparsable).
+ *
+ *  The unit is the BULLET, not the line: authors hard-wrap prose, so a wrapped
+ *  entry leaves "Stories:" ending one line and its numbers starting the next.
+ *  Mirrors the backend's parsePRDPhasing — the drawer must preview exactly the
+ *  scope the gate will compute, or it promises a build the gate then refuses. */
 export function parsePhasingStories(prd: string, phase: number): number[] {
-  const lines = prd.split(/\r?\n/);
-  let inSection = false;
-  let currentPhase = 0;
   const out = new Set<number>();
-  for (const raw of lines) {
+  for (const entry of phasingEntries(prd)) {
+    const phaseMatch = /\bphase\s+(\d+)\b/i.exec(entry);
+    if (!phaseMatch || Number(phaseMatch[1]) !== phase) continue;
+    const storiesMatch = /\bstories:\s*([\d,\s]+)/i.exec(entry);
+    if (!storiesMatch?.[1]) continue;
+    for (const tok of storiesMatch[1].split(/[\s,]+/)) {
+      const n = Number(tok);
+      if (Number.isInteger(n) && n > 0) out.add(n);
+    }
+  }
+  return [...out].sort((a, b) => a - b);
+}
+
+/** The Phasing section's entries — each bullet joined with its continuation
+ *  lines. Text before the first bullet is its own entry. */
+function phasingEntries(prd: string): string[] {
+  const entries: string[] = [];
+  let cur: string[] = [];
+  let inSection = false;
+  const flush = () => {
+    const joined = cur.join(" ").trim();
+    if (joined) entries.push(joined);
+    cur = [];
+  };
+  for (const raw of prd.split(/\r?\n/)) {
     const line = raw.trim();
     if (line.startsWith("## ")) {
+      flush();
       inSection = /^##\s+phasing/i.test(line);
       continue;
     }
     if (!inSection) continue;
-    const phaseMatch = /\bphase\s+(\d+)\b/i.exec(line);
-    if (phaseMatch) currentPhase = Number(phaseMatch[1]);
-    if (currentPhase !== phase) continue;
-    const storiesMatch = /\bstories:\s*([\d,\s]+)/i.exec(line);
-    if (storiesMatch?.[1]) {
-      for (const tok of storiesMatch[1].split(/[\s,]+/)) {
-        const n = Number(tok);
-        if (Number.isInteger(n) && n > 0) out.add(n);
-      }
-    }
+    if (/^([-*+]|\d+\.)\s/.test(line)) flush();
+    cur.push(line);
   }
-  return [...out].sort((a, b) => a - b);
+  flush();
+  return entries;
 }
 
 /** The predictive next version label: v<latest+1>, or v1 with no tags yet.

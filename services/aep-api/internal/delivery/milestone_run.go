@@ -209,10 +209,10 @@ const (
 // Identity is (OrgID, ProjectID, MilestoneNumber). **The milestone NUMBER is
 // the platform key, never the title**: GitHub milestone titles are freely
 // renamable and its title filters are case-insensitive while create-uniqueness
-// is case-sensitive. MilestoneTitle is the title AT CREATION (== the `v<N>` tag
-// the run builds) and is kept for display and for resolving a `?tag=` query to
-// a milestone number through these rows — which is why the read model never
-// title-matches against GitHub.
+// is case-sensitive. MilestoneTitle is the title AT CREATION, kept for display
+// and for the runner's milestone discovery call. A `?tag=` query resolves to a
+// milestone number through the Tag on these rows — which is why the read model
+// never title-matches against GitHub.
 //
 // Loop POSITION is deliberately absent: it renders from the latest RunCycle
 // joined live, because fix and conflict cycles re-enter earlier phases and a
@@ -232,14 +232,15 @@ type MilestoneRun struct {
 
 	// MilestoneNumber is the GitHub milestone this run works — the platform key.
 	MilestoneNumber int `gorm:"index;not null" json:"milestoneNumber"`
-	// MilestoneTitle is the milestone's title at creation — the PHASE title
-	// ("Phase <N>", #370), or the spec tag on a scope-less legacy build. The
-	// runner's `gh issue list --milestone` needs the real GitHub title, so this
-	// stays the created title; never a lookup key against GitHub.
+	// MilestoneTitle is the milestone's GitHub title at creation, whatever
+	// spec.BuildScope.MilestoneTitle resolved to. The runner's `gh issue list
+	// --milestone` needs the real GitHub title, so this stays the created title;
+	// never a lookup key against GitHub, and never the version — read SpecTag
+	// for that.
 	MilestoneTitle string `gorm:"index;not null" json:"milestoneTitle"`
-	// Tag is the spec version (`v<N>`) this run builds. `?tag=` resolution and
-	// display; empty only on pre-phase legacy rows (fall back to
-	// MilestoneTitle, which then equals the tag).
+	// Tag is the spec version (`v<N>`) this run builds — what `?tag=` resolves
+	// against. Empty on the populations SpecTag documents; read it through
+	// SpecTag, never directly.
 	Tag string `gorm:"index" json:"tag,omitempty"`
 
 	Origin string `gorm:"not null;index" json:"origin"`                // spec-build | incident-adoption
@@ -291,6 +292,21 @@ type MilestoneRun struct {
 // TableName pins the table name so a struct rename cannot silently move the
 // table.
 func (MilestoneRun) TableName() string { return "milestone_runs" }
+
+// SpecTag is the `v<N>` version this run belongs to — the ONE place the
+// Tag-with-legacy-fallback rule is written, so a read model can never disagree
+// with the store about what version a row is.
+//
+// Tag is empty on two populations: pre-phase rows, whose MilestoneTitle IS the
+// tag, and incident runs admitted before the tag rode StartRunRequest. Both
+// fall back to the title, which is why the fallback is a read-side rule rather
+// than a backfill.
+func (r MilestoneRun) SpecTag() string {
+	if r.Tag != "" {
+		return r.Tag
+	}
+	return r.MilestoneTitle
+}
 
 // IsTerminalRunState reports whether a run state is settled. Terminal rows are
 // never resurrected: every guarded transition in MilestoneRunRepository is

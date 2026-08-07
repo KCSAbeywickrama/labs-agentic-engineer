@@ -107,6 +107,49 @@ func TestPhaseGate_PhaseAbsentFromPRD(t *testing.T) {
 	}
 }
 
+// TestParsePRDPhasing_WrappedEntry pins the bullet-not-line rule. The spec
+// agent hard-wraps PRD prose, which routinely splits "Stories:" from its
+// numbers; a line-scanning parser then reads a perfectly good Phasing section
+// as defining no phase at all and the build is refused with PHASE_NOT_IN_PRD.
+// This is the exact PRD shape that reproduced it.
+func TestParsePRDPhasing_WrappedEntry(t *testing.T) {
+	prd := "## Phasing\n\n" +
+		"- **Phase 1 — Working hello-world round trip**: build the `GET /hello` API\n" +
+		"endpoint and the web page that calls it and displays the result. Stories:\n" +
+		"1, 2.\n"
+	phasing := parsePRDPhasing(prd)
+	got, ok := phasing[1]
+	if !ok {
+		t.Fatalf("phase 1 absent from %v — a wrapped entry still declares its phase", phasing)
+	}
+	if len(got) != 2 || !got[1] || !got[2] {
+		t.Fatalf("phase 1 stories = %v, want {1, 2}", sortedStorySet(got))
+	}
+}
+
+// One entry's wrapped tail must not leak into the next bullet's story set.
+func TestParsePRDPhasing_WrappedEntriesStaySeparate(t *testing.T) {
+	prd := "## Phasing\n\n" +
+		"- **Phase 1 — core**: the loop end to end. Stories:\n1, 2.\n" +
+		"- **Phase 2 — extras**: the rest.\n  Stories: 7,\n  9.\n"
+	phasing := parsePRDPhasing(prd)
+	if one := sortedStorySet(phasing[1]); len(one) != 2 || one[0] != 1 || one[1] != 2 {
+		t.Errorf("phase 1 stories = %v, want [1 2]", one)
+	}
+	if two := sortedStorySet(phasing[2]); len(two) != 2 || two[0] != 7 || two[1] != 9 {
+		t.Errorf("phase 2 stories = %v, want [7 9]", two)
+	}
+}
+
+// An entry that carries no story list still defines no phase — the contract's
+// machine-read requirement, which the bullet join must not soften.
+func TestParsePRDPhasing_EntryWithoutStoriesDefinesNoPhase(t *testing.T) {
+	phasing := parsePRDPhasing("## Phasing\n\n- **Phase 1 — someday**: no list here.\n")
+	if _, ok := phasing[1]; ok {
+		t.Fatalf("phase 1 present in %v, want absent", phasing)
+	}
+}
+
 func TestPhaseGate_UncoveredStory(t *testing.T) {
 	files := completeDesignFiles()
 	files["design.cell"] = `phase 1

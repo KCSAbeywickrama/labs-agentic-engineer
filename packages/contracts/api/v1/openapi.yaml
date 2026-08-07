@@ -3791,8 +3791,8 @@ components:
           format: int64
           type: integer
         milestoneTitle:
-          description: The milestone's title at creation, equal to the spec tag. Display only — the
-            number is the key.
+          description: The milestone's GitHub title at creation. Display only — the number is the
+            key, and the version this run builds is the list's tag.
           type: string
         origin:
           enum:

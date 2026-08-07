@@ -295,8 +295,13 @@ func TestBuildScopeAtTag(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildScopeAtTag: %v", err)
 	}
-	if scope.Phase != 1 || scope.PhaseTitle() != "Phase 1" || scope.Tag != "v1" {
+	if scope.Phase != 1 || scope.Tag != "v1" {
 		t.Fatalf("scope identity = %+v", scope)
+	}
+	// Single-phase mode: the milestone a scope claims is named after the
+	// VERSION, not the phase, even though the phase is declared and scoped.
+	if scope.MilestoneTitle() != "v1" {
+		t.Errorf("MilestoneTitle() = %q, want the tag", scope.MilestoneTitle())
 	}
 	if fmt.Sprint(scope.InScope) != "[1 2]" {
 		t.Errorf("inScope = %v", scope.InScope)

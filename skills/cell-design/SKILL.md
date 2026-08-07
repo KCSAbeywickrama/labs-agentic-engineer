@@ -63,14 +63,11 @@ south west`.
 
 **Title** — `title <text>` (rest of line).
 
-**Phase** — `phase <N>` (a positive integer): the ONE PRD phase this design
+**Phase** — `phase <N>` (a positive integer): the PRD phase this design
 version details. Every design.cell carries exactly one phase statement, near
-the top. The cell still shows the WHOLE architecture — a component whose
-cited stories all belong to LATER phases appears as a walking-skeleton stub
-(`component slack-notifier service [stories: 11, 12]`): the platform
-scaffolds it and exempts it from detail until its phase arrives. Leaving a
-later-phase capability out of the cell entirely hides architecture the MVP
-slice was meant to surface.
+the top. The product ships in a single phase, so this is `phase 1` and the
+cell details the WHOLE architecture — every component the PRD's stories call
+for, each one fully designed. There are no later-phase stubs to leave out.
 
 **Component** (inside the cell) — `component <id> [as <label>] [type]`
 - The optional `type` is the LAST bare token. **There is no `:` before it.**

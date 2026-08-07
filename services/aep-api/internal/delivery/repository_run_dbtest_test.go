@@ -423,6 +423,23 @@ func TestMilestoneRunRepository_ReadsAndTagResolution(t *testing.T) {
 		t.Fatalf("MilestoneNumberForTag(v99) = (%d, %v, %v), want (0, false, nil)", num, found, err)
 	}
 
+	// The rows above carry no Tag — the legacy population, whose TITLE is the
+	// version. A row whose milestone is titled something else resolves by its
+	// TAG, and its title is not a version: matching the title unconditionally is
+	// what made the console's version read 404 on a phase-titled milestone.
+	if _, err := repo.Settle(ctx, v2.ID, delivery.RunStateSucceeded, ""); err != nil {
+		t.Fatalf("Settle v2: %v", err) // the spec mutex admits one live run at a time
+	}
+	phased := specRun("orga", "proj", 20, "Phase 1")
+	phased.Tag = "v7"
+	mk(phased, 3*time.Minute)
+	if num, found, err := repo.MilestoneNumberForTag(ctx, "orga", "proj", "v7"); err != nil || !found || num != 20 {
+		t.Fatalf("MilestoneNumberForTag(v7) = (%d, %v, %v), want (20, true, nil)", num, found, err)
+	}
+	if num, found, err := repo.MilestoneNumberForTag(ctx, "orga", "proj", "Phase 1"); err != nil || found {
+		t.Fatalf("MilestoneNumberForTag(\"Phase 1\") = (%d, %v, %v), want a miss — a title is not a version", num, found, err)
+	}
+
 	// Org scoping: another org sees none of it — a cross-org read MISSES, so the
 	// HTTP layer renders 404 rather than 403.
 	if got, err := repo.GetByIDScoped(ctx, "orgb", v2.ID); err != nil || got != nil {
