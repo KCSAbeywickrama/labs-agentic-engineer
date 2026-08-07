@@ -149,7 +149,6 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	orgAnthropicRepo := organization.NewOrgAnthropicRepository(db)
 	idpRepo := organization.NewIDPRepository(db, in.ColumnCipher)
 	codingAgentLogRepo := delivery.NewCodingAgentLogRepository(db)
-	runCycleLogRepo := delivery.NewRunCycleLogRepository(db)
 	activityRepo := projects.NewActivityEventRepository(db)
 	activityHub := projects.NewActivityHub()
 	activitySvc := projects.NewActivityService(activityRepo, activityHub)
@@ -464,20 +463,13 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// S2S endpoint is retired — the runner now clones `org-skills` and resolves
 	// applied skills locally, stamped via AEP_SKILLS_REPO_URL above.)
 	execProgressSvc := execution.NewProgressService(executionRepo, componentClient)
-	// Coding-execution activity feed: live-tail the ca-… pod log while running,
-	// serve the captured coding_agent_logs snapshot once terminal. Keyed on the
-	// proxy client alone (NOT on the dispatch path): a local install dispatches
-	// via the direct K8sJobDispatcher but still reads pod logs through the
-	// proxy stub, so streaming works regardless of which dispatcher ran.
-	// The SAME reader serves the milestone run's per-cycle stream through
-	// runread.CycleLogReader — one pod-log edge, two callers — so it is built
-	// once here and held for both. Nil outside the proxy-configured plane.
-	var agentProgressReader *codingagent.AgentProgressReader
-	if cgwClient != nil {
-		agentProgressReader = codingagent.NewAgentProgressReader(cgwClient, codingAgentLogRepo, orgRepo).
-			WithCycleLogs(runCycleLogRepo)
-		execProgressSvc.WithCodingProgress(agentProgressReader)
-	}
+	// Coding-agent activity feed: live OC log while the Component exists;
+	// archive once the pod is gone (WithArchive wired in Task 9). One reader
+	// serves both the task-level progress endpoint and the milestone run's
+	// per-cycle stream (runread.CycleLogReader).
+	agentProgressReader := codingagent.NewAgentProgressReader(
+		codingagent.NewOCLogSource(runtimeClient), codingAgentLogRepo)
+	execProgressSvc.WithCodingProgress(agentProgressReader)
 	// The task-log SSE stream: one connection per open task-detail page carries
 	// the Task's whole live state (status + executions + unified timeline across
 	// attempts). The hub is the in-proc change bus the PR webhook + job/exec
@@ -1063,14 +1055,9 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// constructed just above).
 	// The milestone run READ surface. Both readers are the root repositories
 	// (this is a read model — it writes nothing), and the log source is the same
-	// pod-log reader the task-log stream uses; a boot without the
-	// cluster-gateway-proxy leaves it nil and the stream carries cycles only.
+	// OC/archive reader the task-log stream uses.
 	runReads := runread.NewReads(milestoneRunRepo, runCycleRepo)
-	var runCycleLogs runread.CycleLogReader
-	if agentProgressReader != nil {
-		runCycleLogs = agentProgressReader
-	}
-	runProgress := runread.NewProgressService(milestoneRunRepo, runCycleRepo, runCycleLogs)
+	runProgress := runread.NewProgressService(milestoneRunRepo, runCycleRepo, agentProgressReader)
 	// A cycle's builds are DERIVED from OpenChoreo on read, never stored, so
 	// this read is the one part of the run surface that touches the cluster —
 	// which is why it is its own endpoint rather than a field on the run read.

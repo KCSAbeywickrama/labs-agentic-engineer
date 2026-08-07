@@ -17,10 +17,16 @@
 package codingagent
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
+	"github.com/wso2/aep/aep-api/internal/delivery"
 )
 
 // TestParseProgressLine covers the runner NDJSON → event decode and the
@@ -357,5 +363,166 @@ func TestPageEventsHadOutput(t *testing.T) {
 	}
 	if !hadOutput {
 		t.Error("already-seen page: hadOutput = false, want true (the pod HAS produced output)")
+	}
+}
+
+func liveCycle(id string) *delivery.RunCycle {
+	return &delivery.RunCycle{
+		ID: id, OrgID: "acme", ProjectID: "shop", RunID: "run-1",
+		Kind: delivery.CycleKindCoding, JobRef: "ca-" + id + "-2608061000",
+		CreatedAt: time.Now().UTC().Add(-10 * time.Minute),
+	}
+}
+
+type stubLive struct {
+	tail LiveTail
+	err  error
+}
+
+func (s *stubLive) Tail(context.Context, string, string, string, int) (LiveTail, error) {
+	return s.tail, s.err
+}
+
+type stubArchive struct {
+	text string
+	err  error
+}
+
+func (s *stubArchive) CycleArchive(context.Context, ArchiveScope) (string, error) {
+	return s.text, s.err
+}
+
+func TestCycleProgress_LiveTailIsServedWhileTheComponentExists(t *testing.T) {
+	live := &stubLive{tail: LiveTail{
+		Text: "2026-08-06T10:00:01Z hello\n",
+		Pod:  openchoreo.RuntimePod{Found: true, Name: "p1", Phase: "Running"},
+	}}
+
+	resp, err := NewAgentProgressReader(live, nil).CycleProgress(context.Background(), liveCycle("c1"), 0)
+	if err != nil {
+		t.Fatalf("CycleProgress: %v", err)
+	}
+	if len(resp.Lines) != 1 || resp.Lines[0].Summary != "hello" {
+		t.Fatalf("unexpected lines: %+v", resp.Lines)
+	}
+	if resp.Final {
+		t.Error("a live tail is never final")
+	}
+}
+
+func TestCycleProgress_UnscheduledPodNarratesTheDarkZone(t *testing.T) {
+	live := &stubLive{tail: LiveTail{Pod: openchoreo.RuntimePod{}}}
+
+	resp, err := NewAgentProgressReader(live, nil).CycleProgress(context.Background(), liveCycle("c2"), 0)
+	if err != nil {
+		t.Fatalf("CycleProgress: %v", err)
+	}
+	if len(resp.Lines) != 1 || resp.Lines[0].Phase != "runner_scheduling" {
+		t.Fatalf("unexpected lines: %+v", resp.Lines)
+	}
+}
+
+func TestCycleProgress_PendingPodNarratesItsWaitingReason(t *testing.T) {
+	live := &stubLive{tail: LiveTail{Pod: openchoreo.RuntimePod{
+		Found: true, Name: "p1", Phase: "Pending", WaitingReason: "ImagePullBackOff",
+	}}}
+
+	resp, err := NewAgentProgressReader(live, nil).CycleProgress(context.Background(), liveCycle("c3"), 0)
+	if err != nil {
+		t.Fatalf("CycleProgress: %v", err)
+	}
+	if len(resp.Lines) != 1 || resp.Lines[0].Phase != "runner_image_pull_backoff" {
+		t.Fatalf("unexpected lines: %+v", resp.Lines)
+	}
+}
+
+// The component is gone but the archive still has the log: that is the whole
+// point of retaining components after a cycle ends.
+func TestCycleProgress_FallsBackToTheArchiveWhenThePodIsGone(t *testing.T) {
+	live := &stubLive{err: fmt.Errorf("%w: ca-c4", ErrComponentGone)}
+	archive := &stubArchive{text: "2026-08-06T10:00:01Z archived line\n"}
+	cycle := liveCycle("c4")
+	ended := time.Now().UTC()
+	cycle.EndedAt = &ended
+
+	resp, err := NewAgentProgressReader(live, nil).WithArchive(archive).
+		CycleProgress(context.Background(), cycle, 0)
+	if err != nil {
+		t.Fatalf("CycleProgress: %v", err)
+	}
+	if len(resp.Lines) != 1 || resp.Lines[0].Summary != "archived line" {
+		t.Fatalf("unexpected lines: %+v", resp.Lines)
+	}
+	if !resp.Final {
+		t.Error("a closed cycle served from the archive is final")
+	}
+}
+
+// Nothing left to read must SAY so. An empty stream reads like an agent that
+// never spoke, which is a different and much more alarming thing.
+func TestCycleProgress_UnavailableWhenComponentAndArchiveAreBothGone(t *testing.T) {
+	live := &stubLive{err: fmt.Errorf("%w: ca-c5", ErrComponentGone)}
+	archive := &stubArchive{err: fmt.Errorf("%w: ca-c5", ErrComponentGone)}
+	cycle := liveCycle("c5")
+	ended := time.Now().UTC()
+	cycle.EndedAt = &ended
+
+	resp, err := NewAgentProgressReader(live, nil).WithArchive(archive).
+		CycleProgress(context.Background(), cycle, 0)
+	if err != nil {
+		t.Fatalf("CycleProgress: %v", err)
+	}
+	if len(resp.Lines) != 1 || resp.Lines[0].Phase != "logs_unavailable" {
+		t.Fatalf("unexpected lines: %+v", resp.Lines)
+	}
+	if resp.Lines[0].Seq != seqLogsUnavailable {
+		t.Fatalf("Seq = %d, want the stable %d", resp.Lines[0].Seq, seqLogsUnavailable)
+	}
+	if !resp.Final {
+		t.Error("an unavailable log is a settled answer")
+	}
+}
+
+// A deployment with no observability plane must degrade to the same honest
+// empty state rather than erroring the page.
+func TestCycleProgress_UnavailableWithNoObserverConfigured(t *testing.T) {
+	live := &stubLive{err: fmt.Errorf("%w: ca-c6", ErrComponentGone)}
+	cycle := liveCycle("c6")
+	ended := time.Now().UTC()
+	cycle.EndedAt = &ended
+
+	resp, err := NewAgentProgressReader(live, nil).CycleProgress(context.Background(), cycle, 0)
+	if err != nil {
+		t.Fatalf("CycleProgress: %v", err)
+	}
+	if len(resp.Lines) != 1 || resp.Lines[0].Phase != "logs_unavailable" {
+		t.Fatalf("unexpected lines: %+v", resp.Lines)
+	}
+}
+
+// An observer having a bad minute is not an answer: keep the stream open and
+// let the next poll try again.
+func TestCycleProgress_ArchiveErrorOnAnOpenCycleStaysNonFinal(t *testing.T) {
+	live := &stubLive{err: fmt.Errorf("%w: ca-c7", ErrComponentGone)}
+	archive := &stubArchive{err: fmt.Errorf("%w: 503", ErrArchiveUnavailable)}
+
+	resp, err := NewAgentProgressReader(live, nil).WithArchive(archive).
+		CycleProgress(context.Background(), liveCycle("c7"), 0)
+	if err != nil {
+		t.Fatalf("CycleProgress: %v", err)
+	}
+	if resp.Final {
+		t.Error("an open cycle whose archive hiccuped must keep polling")
+	}
+	if len(resp.Lines) != 1 || resp.Lines[0].Phase != "logs_unavailable" {
+		t.Fatalf("unexpected lines: %+v", resp.Lines)
+	}
+}
+
+func TestCycleProgress_ATransportFailureIsAnError(t *testing.T) {
+	live := &stubLive{err: errors.New("dial tcp: connection refused")}
+
+	if _, err := NewAgentProgressReader(live, nil).CycleProgress(context.Background(), liveCycle("c8"), 0); err == nil {
+		t.Fatal("a transport failure must surface so the caller can degrade")
 	}
 }
