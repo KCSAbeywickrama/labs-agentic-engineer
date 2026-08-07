@@ -1,6 +1,6 @@
 ---
 name: design
-description: Use when generating a project's design from its PRD — the /design flow that turns specs/requirements/prd.md into the cell-first design under specs/design/, then mints the validation criteria. Also the flow for a delta pass when a later phase starts.
+description: Use when generating a project's design from its PRD — the /design flow that turns specs/requirements/prd.md into the cell-first design under specs/design/, then mints the validation criteria. Also the flow for converging an existing design onto an amended PRD.
 metadata:
   aep:
     kind: platform
@@ -9,10 +9,11 @@ metadata:
 
 # Design
 
-The design step: derive the complete design of ONE PRD phase from
-`specs/requirements/prd.md`, cell-first. The build gate checks the result
-mechanically — a phase declared, every in-scope story cited, every in-scope
-component enriched — so the way to a clean Build is to follow the order below.
+The design step: derive the complete design of the PRD from
+`specs/requirements/prd.md`, cell-first. The product ships in a single phase,
+so the design covers EVERY story the PRD defines. The build gate checks the
+result mechanically — a phase declared, every story cited, every component
+enriched — so the way to a clean Build is to follow the order below.
 
 ## The PRD is the brief
 
@@ -30,9 +31,9 @@ resolve-open-questions branch. Deferred questions never block.
    this version details, every component with its story citations, boundaries
    and edges. The console streams it into the live diagram, and the platform
    scaffolds a design.json skeleton per deployable component when it lands.
-   Components whose stories all belong to LATER phases still appear — they are
-   the walking skeleton, and the gate exempts them from detail.
-2. **Component enrichment** — load `architecture` and fill each in-phase
+   Every story the PRD defines is cited by some component — nothing is left
+   for a later phase.
+2. **Component enrichment** — load `architecture` and fill each
    component's design.json: language (org Tech stack default first),
    dependencies (discover before you invent), description, pinned skills.
 3. **design.md** — a DIAGRAM document, mermaid throughout: one Overview
@@ -43,9 +44,9 @@ resolve-open-questions branch. Deferred questions never block.
    Components or Interactions prose — the cell owns C2.
 4. **security.md** — when the design has sign-in or roles, load
    `security-design` and write it.
-5. **Per-component artifacts** — every in-phase `service` gets `openapi.yaml`
-   (load `openapi-conventions`); every in-phase `web-application` gets
-   `wireframes.dsl` (load `wireframes`). Stubs get neither yet.
+5. **Per-component artifacts** — every `service` gets `openapi.yaml`
+   (load `openapi-conventions`); every `web-application` gets
+   `wireframes.dsl` (load `wireframes`).
 6. **Validation criteria** — load `validation-criteria` and mint
    `specs/validation/validation-criteria.json` LAST. A design without its
    acceptance oracle is unfinished — never skip this.
@@ -55,11 +56,11 @@ resolve-open-questions branch. Deferred questions never block.
 A design already exists → CONVERGE it to the current PRD: update what
 drifted, remove what the PRD no longer calls for, keep what holds.
 
-Starting a LATER phase is a **delta pass with shipped parts protected**:
-update the cell's `phase`, deepen that phase's stubs into full detail, and
-touch shipped components only where the new phase's stories require it —
-calling out every such change. When built reality contradicts the skeleton,
-surface the conflict to the user; never silently redraw shipped architecture.
+An amended PRD is a **delta pass with shipped parts protected**: design what
+the new stories require and touch shipped components only where those stories
+force it — calling out every such change. When built reality contradicts the
+design, surface the conflict to the user; never silently redraw shipped
+architecture.
 
 ## Where this stops
 

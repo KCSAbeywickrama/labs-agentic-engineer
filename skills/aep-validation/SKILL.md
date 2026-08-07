@@ -109,6 +109,24 @@ yourself; the URL is not something you can work out from inside the cluster.
   visit) before authoring. Never start, build, or deploy the app — you
   validate what is already running; an unreachable endpoint → issue
   comment + exit failure.
+- **A `.localhost` endpoint fails that probe for a reason that is not the
+  app.** curl and Chromium both implement RFC 6761: they resolve
+  `*.localhost` to loopback THEMSELVES, ignoring DNS and `/etc/hosts`. Inside
+  the runner pod loopback is the pod, so a plain `curl` gets connection
+  refused however healthy the deployment is. Do not read that as an
+  unreachable endpoint, and do not go hunting for the cause — resolve the
+  gateway from DNS and pin it per request:
+
+  ```bash
+  GW=$(getent ahostsv4 development-default.openchoreoapis.localhost | awk 'NR==1{print $1}')
+  curl -sf -o /dev/null --resolve "<host>:19080:$GW" "<url>"
+  ```
+
+  The browser needs the same override, which
+  `playwright.config.template.ts` already applies for you via
+  `--host-resolver-rules` — copy that file unedited and it self-configures.
+  Only treat an endpoint as genuinely down if it still fails WITH the
+  mapping.
 - **Test credentials (on demand):** request them only when a criterion
   needs a login — POST the test-credentials endpoint with an optional
   `role` hint (the role the flow requires). `AEP_TASK_ID` is this run's

@@ -156,11 +156,19 @@ func (s *Supervisor) admit(ctx context.Context, req delivery.StartRunRequest) (*
 		// which is precisely the reconcile sweep's job.
 		return live, nil
 	}
+	// The incident row inherits the milestone's version. Best-effort: a read
+	// failure costs the ledger this run's version label, never the run.
+	tag, err := s.runs.MilestoneSpecTag(ctx, req.OrgID, req.ProjectID, req.MilestoneNumber)
+	if err != nil {
+		slog.WarnContext(ctx, "run: milestone version read failed — admitting the incident run untagged",
+			"project", req.ProjectID, "milestone", req.MilestoneNumber, "error", err)
+	}
 	admitted, row, err := s.runs.TryAdmit(ctx, &delivery.MilestoneRun{
 		OrgID:           req.OrgID,
 		ProjectID:       req.ProjectID,
 		MilestoneNumber: req.MilestoneNumber,
 		MilestoneTitle:  req.MilestoneTitle,
+		Tag:             tag,
 		Origin:          req.Origin,
 		State:           delivery.RunStateWaiting,
 	})

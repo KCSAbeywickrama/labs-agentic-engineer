@@ -122,6 +122,64 @@ func TestSignalAndCancelAreInertWhileTemporalIsDown(t *testing.T) {
 	}
 }
 
+// inheritingRuns answers the two reads admit makes on the incident path: is
+// anybody already on this milestone, and which version does it belong to.
+type inheritingRuns struct {
+	RunStore
+	tag      string
+	tagErr   error
+	admitted *delivery.MilestoneRun
+}
+
+func (r *inheritingRuns) LiveRunForMilestone(context.Context, string, string, int) (*delivery.MilestoneRun, error) {
+	return nil, nil
+}
+
+func (r *inheritingRuns) MilestoneSpecTag(context.Context, string, string, int) (string, error) {
+	return r.tag, r.tagErr
+}
+
+func (r *inheritingRuns) TryAdmit(_ context.Context, row *delivery.MilestoneRun) (bool, *delivery.MilestoneRun, error) {
+	r.admitted = row
+	return true, row, nil
+}
+
+// TestAdmitInheritsTheMilestonesVersion: an incident run holds no tag of its
+// own — it adopts a milestone somebody else's build claimed. Without inheriting
+// that milestone's version it would surface in the version ledger under the
+// milestone's GitHub title instead of a `v<N>`.
+func TestAdmitInheritsTheMilestonesVersion(t *testing.T) {
+	runs := &inheritingRuns{tag: "v4"}
+	s := NewSupervisor(delivery.NewRuntime(configWithNoTemporal()), runs, fakeDispatcher{})
+	row, err := s.admit(context.Background(), delivery.StartRunRequest{
+		OrgID: testOrg, ProjectID: testProject, MilestoneNumber: testMilepost,
+		MilestoneTitle: "Phase 1", Origin: delivery.RunOriginIncidentAdoption,
+	})
+	if err != nil {
+		t.Fatalf("admit: %v", err)
+	}
+	if row.Tag != "v4" || row.SpecTag() != "v4" {
+		t.Fatalf("admitted row = %+v, want the milestone's version v4", row)
+	}
+}
+
+// A version read that fails costs the ledger this run's label, never the run:
+// the incident still has to be worked.
+func TestAdmitSurvivesAVersionReadFailure(t *testing.T) {
+	runs := &inheritingRuns{tagErr: errors.New("db down")}
+	s := NewSupervisor(delivery.NewRuntime(configWithNoTemporal()), runs, fakeDispatcher{})
+	row, err := s.admit(context.Background(), delivery.StartRunRequest{
+		OrgID: testOrg, ProjectID: testProject, MilestoneNumber: testMilepost,
+		MilestoneTitle: "Phase 1", Origin: delivery.RunOriginIncidentAdoption,
+	})
+	if err != nil || row == nil {
+		t.Fatalf("admit = (%+v, %v), want the run admitted anyway", row, err)
+	}
+	if row.Tag != "" {
+		t.Fatalf("admitted row tag = %q, want empty — nothing was read", row.Tag)
+	}
+}
+
 // TestMilestoneRunWorkflowID pins the identity §7 names, which is also the id
 // the event plane's signals and the console's cancel both address.
 func TestMilestoneRunWorkflowID(t *testing.T) {

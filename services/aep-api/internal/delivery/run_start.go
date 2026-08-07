@@ -30,9 +30,10 @@ type StartRunRequest struct {
 	// MilestoneNumber is the platform key of the milestone to work. Titles are
 	// renamable on GitHub; the number never changes.
 	MilestoneNumber int
-	// MilestoneTitle is the title at creation (== the `v<N>` spec tag), carried
-	// for display and for the runner's `gh issue list --milestone "<title>"`
-	// discovery call.
+	// MilestoneTitle is the milestone's GitHub title at creation, carried for
+	// display and for the runner's `gh issue list --milestone "<title>"`
+	// discovery call. It is the milestone's name, not the version — the run row's
+	// SpecTag answers that.
 	MilestoneTitle string
 	// Origin is RunOriginSpecBuild for the plan path and
 	// RunOriginIncidentAdoption for everything the event plane starts.

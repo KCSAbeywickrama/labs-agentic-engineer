@@ -36,10 +36,10 @@ import (
 // fetches it on demand and the Builds page may poll it at 5s while a run is
 // live without spending GitHub rate.
 //
-// Rows arrive newest-first, so the FIRST row seen per milestone title is that
-// version's newest run. Keying on the title is not a GitHub title match: it is
-// the `v<N>` tag THIS platform recorded when it cut the version, and the
-// milestone NUMBER travels with it for anything that needs a lookup key.
+// Rows arrive newest-first, so the FIRST row seen per SpecTag is that version's
+// newest run. The key is the `v<N>` tag THIS platform recorded when it cut the
+// version — never a GitHub title match — and the milestone NUMBER travels with
+// it for anything that needs a lookup key.
 //
 // Builds is always non-nil so the JSON body is [] rather than null.
 func (s *Service) List(ctx context.Context, orgID, projectID string) (BuildList, error) {
@@ -54,10 +54,7 @@ func (s *Service) List(ctx context.Context, orgID, projectID string) (BuildList,
 	builds := make([]BuildSummary, 0, len(rows))
 	for i := range rows {
 		row := rows[i]
-		tag := row.Tag
-		if tag == "" {
-			tag = row.MilestoneTitle // pre-phase legacy rows: title == tag
-		}
+		tag := row.SpecTag()
 		if tag == "" || seen[tag] {
 			continue
 		}

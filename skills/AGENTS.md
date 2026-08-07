@@ -21,15 +21,24 @@ and writes the mirror itself (`local_skill_mirror.ts`), applying the same rule.
 The library is bind-mounted from the working tree in dev (`setup-k3d.sh` for the
 cluster, `pnpm play` for the playground), so **a skill edit needs no rebuild**.
 
+## Temporary: one phase per app
+
+The product ships a single phase for now, so `start`, `amend`, `design` and
+`cell-design` all say the PRD carries exactly ONE Phasing entry holding every
+story, and the design details all of it — no later-phase stubs. The platform
+half is `spec.BuildScope.PhaseTitle` (the milestone is named after the version,
+not the phase); its comment says how to put phases back. Change one half and
+you must change the other, or a build claims a milestone nobody's PRD describes.
+
 ## Kinds — `metadata.aep.kind` in frontmatter
 
 An absent kind means `org`, which is a real decision, not a default to lean on:
 
 - **`platform`** — AE-owned, read-only in the console. The design-flow skills
-  (`design`, `start`, `grilling`, `task-planning`, `task-breakdown`,
-  `high-level-architecture`, `cell-architecture-dsl`, `openapi-conventions`,
-  `excalidraw-wireframes`, `validation-criteria`) and the coding run's own
-  workflow skills (`aep`, `aep-validation`, `playwright-cli`).
+  (`start`, `amend`, `grilling`, `design`, `cell-design`, `architecture`,
+  `security-design`, `openapi-conventions`, `wireframes`, `validation-criteria`,
+  `task-planning`) and the coding run's own workflow skills (`aep`,
+  `aep-validation`, `playwright-cli`).
 - **`org`** — the org-visible stack skills (`go`, `ballerina`, `react-webapp`,
   `api-management`, `thunder-authentication`). Editable and deletable by an org.
 
