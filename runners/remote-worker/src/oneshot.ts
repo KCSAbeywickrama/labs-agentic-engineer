@@ -177,7 +177,17 @@ async function main(): Promise<number> {
     }
   }
 
-  primeScrubber([process.env.ANTHROPIC_API_KEY, req.bearer, publisherClientSecret, req.mcpToken]);
+  // BOTH credential variables: a run authenticates with exactly one of them
+  // (an org may bill its coding agent to a Claude Code OAuth token instead of
+  // an API key), and priming only the one that happens to be unset would leave
+  // the other unredacted in the progress feed. Unset entries are skipped.
+  primeScrubber([
+    process.env.ANTHROPIC_API_KEY,
+    process.env.CLAUDE_CODE_OAUTH_TOKEN,
+    req.bearer,
+    publisherClientSecret,
+    req.mcpToken,
+  ]);
 
   emit({
     kind: "phase",

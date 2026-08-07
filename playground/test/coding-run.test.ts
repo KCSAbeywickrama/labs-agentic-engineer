@@ -176,8 +176,7 @@ test("an OAuth coding token displaces ANTHROPIC_API_KEY in docker mode too", () 
       const { args, env } = dockerInvocation(invocationOpts, "/r", "c1");
       assert.equal(env.CLAUDE_CODE_OAUTH_TOKEN, "sk-ant-oat01-subscription-token");
       assert.equal(env.ANTHROPIC_API_KEY, undefined, "the API key would outrank the token and win");
-      // Both names are forwarded; docker drops whichever is unset, so only the
-      // token crosses into the container.
+      // Exactly one name is forwarded — the one this run authenticates with.
       const tokenAt = args.indexOf("CLAUDE_CODE_OAUTH_TOKEN");
       assert.equal(args[tokenAt - 1], "-e", "forwarded BY NAME");
       assert.ok(

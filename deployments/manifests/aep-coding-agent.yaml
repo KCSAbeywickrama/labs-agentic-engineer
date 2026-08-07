@@ -64,7 +64,6 @@ spec:
             # Name of the per-org K8s Secret in workflows-<orgID> that
             # carries ANTHROPIC_API_KEY. Materialised by git-service in
             # the dispatch pre-flight (ApplyAnthropicWPSecret).
-            # See docs/design/anthropic-key-dual-token.md §5.
             secretRef: { type: string }
   runTemplate:
     apiVersion: argoproj.io/v1alpha1
@@ -195,6 +194,5 @@ spec:
   # Per-WorkflowRun ExternalSecret for the Anthropic key is gone. The key
   # now lives in the per-org Secret git-service materialises into
   # workflows-<orgID>/anthropic-credentials on each dispatch (parity with
-  # the post-d4d309f build-credential Secret). See
-  # docs/design/anthropic-key-dual-token.md §4.3.
+  # the post-d4d309f build-credential Secret).
   resources: []

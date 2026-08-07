@@ -87,7 +87,8 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
 | `MilestoneResolver` (`MilestoneNumberForTag`) | needs | `task` → the root run repository. A `?tag=` query is milestone membership, resolved through the platform's own rows |
 | `SpecTagger` (`*spec.SpecSaveResult`) · `SpecCollector` · `AuthDeriver` | needs | `spec` — the whole-spec gate + tag cut + design reads |
 | `RepoLookup` (`owner/name`) | needs | `sourcecontrol` — repo full-name resolution |
-| org-credential reads · `AnthropicKeyResolver` | needs | `platform/secrets` / P3a org repositories — coding-agent runner secrets |
+| org-credential reads | needs | `platform/secrets` / P3a org repositories — the GitHub + publisher halves of a coding-agent run's secrets |
+| `CodingKeyResolver` (`organization.SecretRefTriplet`) | needs | `organization` — WHICH Anthropic credential this org's coding runs bill (its coding-agent override, else its default key) and the env var it must be mounted as. A domain decision, so the port exposes no way to ask "is there an override?"; dispatch only mounts what it is handed. See ADR-0016 |
 | `ExecutionReader` (`ops.ExecutionFact`) | offers | `ops` — latest-execution-per-kind correlation (`execution.OpsExecutionReader`, P6-retired the app bridge) |
 | `BuildTerminalObserver` (root) | offers | the OpenChoreo watcher → the event plane: a settled build reported outwards, so watcher and event plane stay peer sub-packages |
 | `MilestoneDispatcher` (root, over `MilestoneDispatch`) | offers | the coding agent → the supervisor: launch one agent run at a milestone and answer with its Job ref. The dispatch prompt is a milestone reference; the runner discovers its own working set. Satisfied by `*codingagent.CodingExecutor`, which writes no execution row — the cycle record is the supervisor's bookkeeping |

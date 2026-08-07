@@ -74,11 +74,24 @@ both would authenticate with the API key and ignore the token in silence —
 billing the exact credential the org moved away from, with no error anywhere.
 
 So the ExternalSecret materialises the credential under **one** name, chosen by
-kind, and the other is never mounted. Verified against the live API while
-building this: a valid OAuth token probed with `x-api-key` returns
-`401 invalid x-api-key`, which is also why Connect-time validation branches on
-kind (bearer for tokens, `x-api-key` for keys) instead of probing both the same
-way.
+kind, and the other is never mounted.
+
+Connect-time validation branches on kind for the same reason. Measured against
+the live API with a real `claude setup-token` token:
+
+| probe | result |
+|---|---|
+| `Authorization: Bearer` | **200** |
+| `Authorization: Bearer` + `anthropic-beta: oauth-2025-04-20` | **200** |
+| `x-api-key` | **401** `invalid x-api-key` |
+
+So the pre-existing probe would have rejected every valid token, and bearer
+alone is sufficient — the beta header Claude Code also sends is deliberately NOT
+pinned, since validation would then start failing the day that flag is retired.
+
+The runner's progress scrubber is primed with **both** variable names for the
+same reason the mount picks one: priming only `ANTHROPIC_API_KEY` would leave a
+token unredacted in the feed on exactly the runs that use one.
 
 ### Why "reuse" is row-absence and not a stored mode
 
@@ -151,3 +164,13 @@ Code always has; the control plane decides which one that is and mounts it via
   a new `credential_kind` value plus its env var and probe — the two switch
   points are `AnthropicCredentialKind.RunnerEnvVar` and `validateAnthropicKey`,
   and nothing else branches on kind.
+- **Known gap, pre-existing and now wider**: `Disconnect` deletes the row and the
+  `org_secrets` bytes but never the SM-API/vault copy —
+  `SecretRefWriter.DeleteAnthropic` has no production caller. The cascade now
+  orphans up to two vault entries per org instead of one. The console's "this key
+  cannot be recovered" remains true for the user (they must mint a new one), so
+  this is hygiene rather than correctness, but it should be wired up.
+- The coding row's "an active default must exist" precondition is read through
+  the repository rather than the transaction handle, and is safe only because it
+  runs under the org-scoped advisory lock. There is no DB-level constraint
+  backing it; a partial unique index cannot express "row A requires row B".
