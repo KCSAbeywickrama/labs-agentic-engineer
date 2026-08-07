@@ -34,8 +34,40 @@ export function emit(event: ProgressEventInput): void {
     seq: seqCounter,
     ...event,
   } as ProgressEvent;
-  const line = scrubber.scrub(JSON.stringify(enriched));
-  process.stdout.write(line + "\n");
+  process.stdout.write(JSON.stringify(scrubEventValues(enriched)) + "\n");
+}
+
+/**
+ * Scrub each string VALUE, then serialize — never the other way round.
+ *
+ * Scrubbing the serialized line hands the scrubber JSON syntax as if it were
+ * prose, and its header patterns end in `(\S+)`. `JSON.stringify` puts no
+ * whitespace between fields, so on `…"summary":"curl -H authorization:TOK"}`
+ * that `\S+` runs straight through `TOK"}` and swallows the closing quote and
+ * brace: the line stops being JSON, the BFF's parseProgressLine falls back to
+ * wrapping it as a raw `log` event, and the console prints the fragment. The
+ * quieter half is worse — with fields after the match it eats those instead,
+ * still parses, and silently drops toolUseId/emitterLabel, so the line loses
+ * the attribution that groups it under its subagent.
+ *
+ * Values carry no JSON syntax, so a greedy match can only ever consume the
+ * secret it was aimed at.
+ */
+function scrubEventValues(event: ProgressEvent): ProgressEvent {
+  return scrubValue(event) as ProgressEvent;
+}
+
+// Walks the whole event rather than just its top level, so a nested string
+// added to the schema later is scrubbed without anyone remembering to opt in.
+function scrubValue(value: unknown): unknown {
+  if (typeof value === "string") return scrubber.scrub(value);
+  if (Array.isArray(value)) return value.map(scrubValue);
+  if (value !== null && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value)) out[k] = scrubValue(v);
+    return out;
+  }
+  return value;
 }
 
 export function primeScrubber(secrets: Iterable<string | undefined | null>): void {
