@@ -18,6 +18,7 @@ package task
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -38,6 +39,11 @@ import (
 // when Stream returns), so without this a hang pins plan_in_progress until a BFF
 // restart.
 const planDrainIdleTimeout = 90 * time.Second
+
+// planTapMaxLineBytes ceilings one SSE frame. Frames are tool-call JSON, orders
+// of magnitude under this; the ceiling exists so a delimiter-less upstream
+// cannot grow the read buffer without bound.
+const planTapMaxLineBytes = 4 * 1024 * 1024
 
 // planTap streams the agents-service SSE verbatim to the client while parsing
 // tool-result frames and performing the GitHub writes for planTask/updateTask
@@ -122,6 +128,25 @@ func newPlanTap(ctx context.Context, orgID, projectID string, issues IssueClient
 	}
 }
 
+// scanCompleteLines yields only NEWLINE-TERMINATED lines, delimiter included.
+//
+// Both halves matter here. Keeping the delimiter is what lets the tap forward
+// the upstream's bytes verbatim — the client is reading SSE, where the newline
+// is the framing, and bufio.ScanLines would strip it (and any \r with it).
+// Refusing the undelimited remainder at EOF is what stops a severed upstream
+// from putting a half-written `data: {…` frame on the wire: at that point the
+// bytes are consumed and dropped, not emitted.
+func scanCompleteLines(data []byte, atEOF bool) (advance int, token []byte, err error) {
+	if i := bytes.IndexByte(data, '\n'); i >= 0 {
+		return i + 1, data[:i+1], nil
+	}
+	if atEOF {
+		// Consume the partial so Scan terminates instead of spinning on it.
+		return len(data), nil, nil
+	}
+	return 0, nil, nil // need more bytes to complete the line
+}
+
 // streamPartFrame is the minimal shape of an agents-service SSE frame the tap
 // reads: the raw StreamPart (type + the self-contained tool output).
 type streamPartFrame struct {
@@ -144,7 +169,7 @@ func (t *planTap) Stream(body io.ReadCloser, w io.Writer, flush func()) {
 		idle = planDrainIdleTimeout
 	}
 	// Watchdog: reset on every read; on expiry close body to unblock the pending
-	// ReadBytes and end the drain. atomic flag distinguishes an idle-abort from a
+	// read and end the drain. atomic flag distinguishes an idle-abort from a
 	// clean EOF so it surfaces in the write-failure accounting.
 	var idleAborted atomic.Bool
 	activity := make(chan struct{}, 1)
@@ -173,31 +198,42 @@ func (t *planTap) Stream(body io.ReadCloser, w io.Writer, flush func()) {
 		}
 	}()
 
-	reader := bufio.NewReader(body)
+	// Bound the per-line read. bufio.Reader.ReadBytes grows until it finds the
+	// delimiter, so an upstream that never sends one — a wedged agents-service, a
+	// corrupted stream — would grow it until the BFF dies. Scanner takes an
+	// explicit ceiling and reports hitting it. (Siblings: agent_progress.go 1MiB,
+	// usage_capture.go 16MiB.)
+	scanner := bufio.NewScanner(body)
+	scanner.Buffer(make([]byte, 0, 8*1024), planTapMaxLineBytes)
+	scanner.Split(scanCompleteLines)
 	clientAlive := true
-	for {
-		line, err := reader.ReadBytes('\n')
+	for scanner.Scan() {
+		line := scanner.Bytes()
 		// Reset the idle watchdog on any read return (bytes or a keep-alive line).
 		select {
 		case activity <- struct{}{}:
 		default:
 		}
-		if len(line) > 0 {
-			// Consume BEFORE forwarding: an ok tool-result frame reaching the
-			// client means its GitHub write already landed, so the FE can
-			// refresh its task list on that frame and see the issue (§8).
-			t.consume(line)
-			if clientAlive {
-				if _, werr := w.Write(line); werr != nil {
-					clientAlive = false
-				} else {
-					flush()
-				}
+		// Consume BEFORE forwarding: an ok tool-result frame reaching the
+		// client means its GitHub write already landed, so the FE can
+		// refresh its task list on that frame and see the issue (§8).
+		t.consume(line)
+		if clientAlive {
+			if _, werr := w.Write(line); werr != nil {
+				clientAlive = false
+			} else {
+				flush()
 			}
 		}
-		if err != nil {
-			break
-		}
+	}
+	// Only a delimited line is a whole frame. ReadBytes used to hand back the
+	// trailing partial together with its error, and the loop forwarded it before
+	// noticing — so severing the upstream mid-frame (which the idle watchdog
+	// below does on purpose) wrote a half-written `data: {…` to the client. The
+	// console drops unparseable frames, so this was survivable, but a proxy
+	// should not emit a frame it did not finish reading.
+	if err := scanner.Err(); err != nil {
+		slog.WarnContext(t.ctx, "task.planTap: upstream stream ended mid-frame; partial frame dropped", "error", err)
 	}
 	if idleAborted.Load() {
 		// Record the aborted drain so the terminal surface reports it; the plan
@@ -271,7 +307,7 @@ func (t *planTap) handlePlan(out *taskplan.PlanTaskOk) {
 		Title: out.Title,
 		// The Serves-stories stamp is platform-authored from the design's
 		// citations (#369) — the planner has zero discretion over it.
-		Body:  delivery.StampServesStories(composeTaskBody(planned, t.issueForComponent), t.storiesFor(out.Component)),
+		Body: delivery.StampServesStories(composeTaskBody(planned, t.issueForComponent), t.storiesFor(out.Component)),
 		// The working-set marker, and nothing else: a Task is agent work. Gates
 		// (aep:provision) and the validation Task (aep:validation) are minted
 		// elsewhere and are deliberately not this population.
