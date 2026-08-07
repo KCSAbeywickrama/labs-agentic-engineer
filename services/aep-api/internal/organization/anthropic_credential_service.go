@@ -51,7 +51,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/wso2/aep/aep-api/internal/clients/clustergatewayproxy"
 	"github.com/wso2/aep/aep-api/internal/clients/k8s"
 	"github.com/wso2/aep/aep-api/internal/platform/secrets"
 	"github.com/wso2/aep/aep-api/internal/platform/tenant"
@@ -67,18 +66,6 @@ type AnthropicCredentialService struct {
 
 	// secretRefWriter mirrors the key into SM-API on Connect. nil-safe.
 	secretRefWriter *SecretRefWriter
-
-	// cgwClient + pushNamespace/pushSecretName: when all three are set,
-	// Connect() pushes a fresh ExternalSecret to pushNamespace every time an
-	// org's key is connected OR rotated — see pushExternalSecret. This closes
-	// the gap where the SM-API mirror's vault path changes (a fresh random
-	// suffix on every write, by design of the underlying secret-manager
-	// contract) but nothing tells a consumer's ExternalSecret to follow it.
-	// nil-safe: cgwClient nil or either name empty disables the push
-	// entirely — no consumer is assumed by default.
-	cgwClient      *clustergatewayproxy.Client
-	pushNamespace  string
-	pushSecretName string
 }
 
 // WithSecretRefWriter injects the SM-API writer; chainable. nil disables
@@ -86,23 +73,6 @@ type AnthropicCredentialService struct {
 func (s *AnthropicCredentialService) WithSecretRefWriter(w *SecretRefWriter) *AnthropicCredentialService {
 	s.secretRefWriter = w
 	return s
-}
-
-// WithRCAAgentPush configures the post-Connect ExternalSecret push; chainable.
-// Pass a nil client or empty names to leave the push disabled (the default).
-func (s *AnthropicCredentialService) WithRCAAgentPush(c *clustergatewayproxy.Client, namespace, secretName string) *AnthropicCredentialService {
-	s.cgwClient = c
-	s.pushNamespace = namespace
-	s.pushSecretName = secretName
-	return s
-}
-
-// pushEnabled reports whether the post-Connect ExternalSecret push is
-// configured. All three must be set — a partially configured push (e.g. a
-// namespace with no client) would silently do nothing anyway, so treat that
-// as "disabled" rather than as an error.
-func (s *AnthropicCredentialService) pushEnabled() bool {
-	return s.cgwClient != nil && s.pushNamespace != "" && s.pushSecretName != ""
 }
 
 // WithAnthropicAPIBase points key validation at base instead of the real
@@ -228,80 +198,18 @@ func (s *AnthropicCredentialService) Connect(ctx context.Context, ocOrgID string
 	// Best-effort SM-API mirror. Same posture as
 	// CredentialService.mirrorPATToSMAPI: org_secrets stays authoritative
 	// when SM-API is unavailable; the row's SM-API triplet stays NULL
-	// until the next successful Connect.
+	// until the next successful Connect. Consumers reference the mirrored
+	// path through an ExternalSecret whose refreshInterval re-syncs it, so
+	// nothing has to be pushed anywhere on rotation.
 	if s.secretRefWriter != nil && s.secretRefWriter.Enabled() {
 		if _, err := s.secretRefWriter.WriteAnthropic(ctx, ocOrgID, key); err != nil {
 			slog.WarnContext(ctx, "anthropic: SM-API mirror failed (legacy store still authoritative)",
 				"ocOrgId", ocOrgID, "error", err)
-		} else if s.pushEnabled() {
-			// The mirror just stamped a FRESH secret_ref_kv_path/property onto the
-			// row (every WriteAnthropic call gets a brand-new random-suffixed
-			// vault path — never an in-place update of the previous one). Push
-			// an ExternalSecret pointing at that fresh path now, synchronously
-			// with this Connect() call, rather than waiting for something to
-			// re-discover it later — this is what makes a console-side
-			// connect/rotate take effect without any manual re-run.
-			if err := s.pushExternalSecret(ctx, ocOrgID); err != nil {
-				slog.WarnContext(ctx, "anthropic: ExternalSecret push failed (consumer keeps its last-synced key)",
-					"ocOrgId", ocOrgID, "error", err)
-			}
 		}
 	}
 
 	slog.InfoContext(ctx, "anthropic.connected", "ocOrgId", ocOrgID, "keyPrefix", prefix)
 	return projectionFromAnthropicRow(&row), nil
-}
-
-// pushExternalSecret applies an ExternalSecret in s.pushNamespace whose
-// remoteRef points at the org's CURRENT SM-API-mirrored vault path (read
-// back from the row this call just stamped), via the same
-// cluster-gateway-proxy ApplyExternalSecret the coding-agent dispatcher
-// already uses for its own per-run ExternalSecrets
-// (internal/delivery/codingagent/dispatcher.go). Idempotent: re-applying
-// with the same name updates in place.
-func (s *AnthropicCredentialService) pushExternalSecret(ctx context.Context, ocOrgID string) error {
-	row, err := s.fetchRow(ctx, ocOrgID)
-	if err != nil {
-		return fmt.Errorf("push external secret: reload row: %w", err)
-	}
-	kvPath := row.ResolvedSecretRefKVPath()
-	prop := row.ResolvedSecretRefProperty()
-	if kvPath == nil || prop == nil || *kvPath == "" || *prop == "" {
-		return errors.New("push external secret: row has no secret-ref triplet yet")
-	}
-	manifest := map[string]any{
-		"apiVersion": "external-secrets.io/v1",
-		"kind":       "ExternalSecret",
-		"metadata": map[string]any{
-			"name":      s.pushSecretName,
-			"namespace": s.pushNamespace,
-		},
-		"spec": map[string]any{
-			"refreshInterval": "5m",
-			"secretStoreRef": map[string]any{
-				"kind": "ClusterSecretStore",
-				"name": "default",
-			},
-			"target": map[string]any{
-				"name": s.pushSecretName,
-			},
-			"data": []map[string]any{
-				{
-					"secretKey": "RCA_LLM_API_KEY",
-					"remoteRef": map[string]any{
-						"key":      *kvPath,
-						"property": *prop,
-					},
-				},
-			},
-		},
-	}
-	if err := s.cgwClient.ApplyExternalSecret(ctx, s.pushNamespace, manifest); err != nil {
-		return fmt.Errorf("apply external secret: %w", err)
-	}
-	slog.InfoContext(ctx, "anthropic: pushed ExternalSecret to consumer",
-		"ocOrgId", ocOrgID, "namespace", s.pushNamespace, "secretName", s.pushSecretName)
-	return nil
 }
 
 // ValidateKey runs the connect-time validation for an Anthropic key WITHOUT

@@ -94,11 +94,10 @@ func TestAssemble_MinimalConfigBuildsTheGraph(t *testing.T) {
 	}
 }
 
-// TestAssemble_WatcherRegistration pins conditional watchers. The JobWatcher is
-// always registered (OpenChoreo resource tree; not gated on cluster-gateway-proxy).
-// The run-supervisor worker rides on TEMPORAL_HOSTPORT. The base is 7 — Fake()
-// omits the disk reaper (nil Workspace); the event plane's reconcile sweep is
-// unconditional.
+// TestAssemble_WatcherRegistration pins the one remaining conditional watcher:
+// the run-supervisor worker rides on TEMPORAL_HOSTPORT. The base is 7 — Fake()
+// omits the disk reaper (nil Workspace); the event plane's reconcile sweep and
+// the cycle watcher are unconditional.
 func TestAssemble_WatcherRegistration(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -106,14 +105,7 @@ func TestAssemble_WatcherRegistration(t *testing.T) {
 		want   int
 	}{
 		{"base", func(*config.Config) {}, 7},
-		{"+cluster-gateway-proxy does not add another watcher", func(c *config.Config) {
-			c.ClusterGatewayProxyURL = "http://cgw"
-		}, 7},
 		{"+temporal adds the run worker", func(c *config.Config) {
-			c.Temporal.HostPort = "temporal:7233"
-		}, 8},
-		{"+both", func(c *config.Config) {
-			c.ClusterGatewayProxyURL = "http://cgw"
 			c.Temporal.HostPort = "temporal:7233"
 		}, 8},
 	}
@@ -155,9 +147,8 @@ func TestAssemble_Degradations(t *testing.T) {
 		// path (proxy+secrets unset; k8s is not a secrets-capable path).
 		for _, want := range []string{
 			"m2m-service-auth", "build-logs", "secrets-delivery",
-			"cluster-gateway-proxy", "mcp-discovery", "idp-mutations",
-			"connect-oauth-state", "coding-dispatch-oc", "rca-agent-key-push",
-			"run-temporal",
+			"mcp-discovery", "idp-mutations", "connect-oauth-state",
+			"coding-dispatch-oc", "run-temporal",
 		} {
 			if !hasCapability(degs, want) {
 				t.Errorf("minimal config: expected degradation %q, missing from %+v", want, degs)

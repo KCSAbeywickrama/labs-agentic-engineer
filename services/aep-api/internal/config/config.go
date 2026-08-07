@@ -186,21 +186,6 @@ type Config struct {
 	// sweep interval. Default 24h.
 	CredentialValidatorInterval time.Duration
 
-	// Cluster-gateway-proxy URL the BFF POSTs Job + ExternalSecret manifests
-	// to on dispatch (ou-service shape; un-authed today). Empty disables the
-	// proxy dispatch path; the BFF still boots and serves the spec/design
-	// endpoints.
-	ClusterGatewayProxyURL string
-
-	// RCAAgentAnthropicPushNamespace/SecretName: when both are non-empty,
-	// AnthropicCredentialService pushes an ExternalSecret to this namespace
-	// (via the cluster-gateway-proxy) every time an org's Anthropic key is
-	// connected or rotated — closing the gap where a console-side key change
-	// would otherwise sit unused until something re-discovers it. Empty
-	// (the default) disables the push; no consumer is assumed.
-	RCAAgentAnthropicPushNamespace  string
-	RCAAgentAnthropicPushSecretName string
-
 	// AgentRunnerImage is the docker image the runner Job uses — ONE image
 	// for BOTH task kinds (implementation and validation; it bakes
 	// Playwright + chromium). Pinned at deploy time, no built-in default;

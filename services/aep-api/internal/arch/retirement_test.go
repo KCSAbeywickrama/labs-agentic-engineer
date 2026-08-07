@@ -21,7 +21,10 @@
 // a cluster-gateway-proxy call — the boundary is executable, not documented.
 package arch
 
-import "testing"
+import (
+	"os/exec"
+	"testing"
+)
 
 // TestCodingAgentDispatchesOnlyThroughOpenChoreo asserts the delivery/codingagent
 // package holds no DIRECT edge to the cluster-gateway-proxy client or to a
@@ -38,5 +41,17 @@ func TestCodingAgentDispatchesOnlyThroughOpenChoreo(t *testing.T) {
 		if why, bad := banned[imp]; bad {
 			t.Errorf("delivery/codingagent imports %s — %s", imp, why)
 		}
+	}
+}
+
+// TestClusterGatewayProxyClientIsDeleted asserts the proxy client package does
+// not exist on disk — the strongest form of the boundary, since a re-created
+// package fails here before anything imports it. app-factory is no longer a
+// cluster-gateway-proxy caller: the proxy itself survives in wso2cloud for other
+// platforms, but nothing in this repo speaks to it.
+func TestClusterGatewayProxyClientIsDeleted(t *testing.T) {
+	const pkg = mod + "/internal/clients/clustergatewayproxy"
+	if err := exec.Command("go", "list", pkg).Run(); err == nil {
+		t.Errorf("%s still resolves — the cluster-gateway-proxy client must stay deleted", pkg)
 	}
 }

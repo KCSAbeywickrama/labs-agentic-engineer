@@ -34,7 +34,6 @@ import (
 	"time"
 
 	"github.com/wso2/aep/aep-api/internal/clients/agentsvc"
-	"github.com/wso2/aep/aep-api/internal/clients/clustergatewayproxy"
 	"github.com/wso2/aep/aep-api/internal/clients/observability"
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/clients/secretmanagersvc"
@@ -237,25 +236,6 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// case when smClient is nil is fine).
 	secretRefWriter := organization.NewSecretRefWriter(smClient, orgCredRepo, orgAnthropicRepo, idpRepo)
 
-	// cluster-gateway-proxy client. Used for legacy progress reads until Task 3
-	// retires the proxy entirely. When CLUSTER_GATEWAY_PROXY_URL is empty, proxy
-	// progress reads are unavailable.
-	var cgwClient *clustergatewayproxy.Client
-	if cfg.ClusterGatewayProxyURL != "" {
-		cgwCfg := clustergatewayproxy.Config{BaseURL: cfg.ClusterGatewayProxyURL}
-		// ocauth.AuthProvider is a Token()+Invalidate() superset of the
-		// proxy's Token()-only AuthProvider; bridge via dynamic type assert.
-		if seam.AuthProvider != nil {
-			if ap, ok := seam.AuthProvider.(clustergatewayproxy.AuthProvider); ok {
-				cgwCfg.AuthProvider = ap
-			}
-		}
-		cgwClient = clustergatewayproxy.New(cgwCfg)
-		slog.Info("cluster-gateway-proxy client", "baseURL", cfg.ClusterGatewayProxyURL, "authenticated", cgwCfg.AuthProvider != nil)
-	} else {
-		slog.Warn("CLUSTER_GATEWAY_PROXY_URL not set — proxy-dispatched coding-agent Jobs cannot be launched; direct k8s-job secret delivery is disabled (configure cluster-gateway-proxy + secret refs)")
-	}
-
 	// Credentials + git-service services and controllers. The credential store,
 	// the App-token minter (post OpenBao key-load / dev seed / bot-identity load),
 	// and the App OAuth client_secret are all resolved in Resolve and arrive via
@@ -328,11 +308,6 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// the Enabled() check.
 	credService.WithSecretRefWriter(secretRefWriter)
 	anthropicCredService.WithSecretRefWriter(secretRefWriter)
-	// Push the org's Anthropic key to a consumer's ExternalSecret on every
-	// successful Connect (both first-time connect and later rotation) — see
-	// AnthropicCredentialService.pushExternalSecret. nil-safe: disabled
-	// unless both env vars are set (no consumer assumed by default).
-	anthropicCredService.WithRCAAgentPush(cgwClient, cfg.RCAAgentAnthropicPushNamespace, cfg.RCAAgentAnthropicPushSecretName)
 	validatorProbes := organization.NewValidatorProbes(credService, gitHost, credResolver, minter)
 	credValidator := secrets.NewValidator(db, validatorProbes, nil, cfg.CredentialValidatorInterval)
 
@@ -1291,9 +1266,6 @@ func computeDegradations(cfg config.Config, in Infra, secretsDelivery bool) []De
 	if !secretsDelivery {
 		off("secrets-delivery", "SecretsProvider not injected — secret writes + external-secret cleanup disabled")
 	}
-	if cfg.ClusterGatewayProxyURL == "" {
-		off("cluster-gateway-proxy", "CLUSTER_GATEWAY_PROXY_URL not set — proxy-dispatched coding-agent Jobs cannot be launched")
-	}
 	if cfg.AEPInternalBaseURL == "" {
 		off("mcp-discovery", "AEP_INTERNAL_BASE_URL not set — design-turn MCP discovery omitted")
 	}
@@ -1313,9 +1285,6 @@ func computeDegradations(cfg config.Config, in Infra, secretsDelivery bool) []De
 	// against the org's secret store — the BFF writes no secret material itself.
 	if !secretsDelivery {
 		off("coding-dispatch-oc", "secrets delivery not configured — the OpenChoreo coding-agent dispatch path cannot resolve its cycle secret refs")
-	}
-	if cfg.RCAAgentAnthropicPushNamespace == "" || cfg.RCAAgentAnthropicPushSecretName == "" {
-		off("rca-agent-key-push", "RCA_AGENT_ANTHROPIC_PUSH_* not set — org Anthropic key not pushed to a consumer ExternalSecret")
 	}
 	if !cfg.Temporal.Enabled() {
 		off("run-temporal", "TEMPORAL_HOSTPORT not set — milestone run worker watcher not registered")
