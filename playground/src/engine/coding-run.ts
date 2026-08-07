@@ -287,8 +287,15 @@ export function hostInvocation(opts: CodingRunOptions, runDir: string): Invocati
   const coding = codingCredential();
   if (coding) {
     applyCodingCredential(env, coding);
-  } else if (!opts.useApiKey) {
-    delete env.ANTHROPIC_API_KEY;
+  } else {
+    // Withhold every inherited platform credential so the SDK falls through to
+    // the developer's own login. CLAUDE_CODE_OAUTH_TOKEN goes too, and
+    // unconditionally: `--api-key` opts back into the API KEY specifically, and
+    // a token reaching this process came from `deployments/.env` (the
+    // platform's file) rather than from `claude login`, which stores its
+    // credentials in the OS keychain and not in the environment at all.
+    delete env.CLAUDE_CODE_OAUTH_TOKEN;
+    if (!opts.useApiKey) delete env.ANTHROPIC_API_KEY;
   }
   return { command: "npx", args: ["tsx", LOCAL_ENTRY], env };
 }
@@ -309,6 +316,14 @@ export interface CodingCredential {
  * Accepts EITHER a Console API key or a `claude setup-token` OAuth token, and
  * reports which env var it has to arrive as. The prefix is the discriminator:
  * the two are minted by different systems and cannot collide.
+ *
+ * `AEP_CODING_ANTHROPIC_KEY` is the ONLY source, deliberately — a bare
+ * `CLAUDE_CODE_OAUTH_TOKEN` is NOT adopted even though Claude Code would read
+ * one. `@aep/agents` calls `loadDotenv()` at module scope, so anything in
+ * `deployments/.env` is already in `process.env` before this package runs, and
+ * that file is the PLATFORM's generated env rather than a developer's personal
+ * one. Honouring a token found there would let a shared file silently redirect
+ * who gets billed — the same unreadable heuristic `--api-key` exists to avoid.
  *
  * Returns undefined when unset or blank — blank must NOT count as "set", or a
  * stray `export AEP_CODING_ANTHROPIC_KEY=` would authenticate the run with an
@@ -344,6 +359,12 @@ export function applyCodingCredential(env: NodeJS.ProcessEnv, cred: CodingCreden
 // path the image already bakes it at, so the runner's own default resolves to the
 // working tree and there is ONE library in play rather than two.
 export function dockerInvocation(opts: CodingRunOptions, runDir: string, containerName: string): Invocation {
+  // Forward exactly ONE credential variable — the one this run will actually
+  // authenticate with. Passing both names would hand the container a developer's
+  // subscription token even on runs that bill the API key (which outranks it),
+  // putting a secret somewhere it is never read.
+  const coding = codingCredential();
+  const credentialVar = coding?.envVar ?? "ANTHROPIC_API_KEY";
   const args = [
     "run",
     "--rm",
@@ -363,9 +384,7 @@ export function dockerInvocation(opts: CodingRunOptions, runDir: string, contain
     "-v",
     `${runDir}:/workspace/run`,
     "-e",
-    "ANTHROPIC_API_KEY",
-    "-e",
-    "CLAUDE_CODE_OAUTH_TOKEN",
+    credentialVar,
     "-e",
     "AEP_LOCAL_PROJECT_DIR=/workspace/project",
     "-e",
@@ -376,12 +395,9 @@ export function dockerInvocation(opts: CodingRunOptions, runDir: string, contain
     "tsx",
     "src/local.ts",
   ];
-  // Both credential vars are forwarded BY NAME above; docker drops the ones
-  // that are unset, so whichever the coding credential resolved to is the only
-  // one the container sees. Substituting via docker's OWN environment (rather
-  // than `-e NAME=value`) keeps the secret out of an argv that any user on the
+  // The credential is forwarded BY NAME above and substituted through docker's
+  // OWN environment, so the secret never lands in an argv that any user on the
   // machine can read out of `ps`.
-  const coding = codingCredential();
   let env = process.env;
   if (coding) {
     env = { ...process.env };

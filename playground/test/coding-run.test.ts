@@ -181,6 +181,29 @@ test("an OAuth coding token displaces ANTHROPIC_API_KEY in docker mode too", () 
   });
 });
 
+// deployments/.env is the PLATFORM's file and `@aep/agents` merges it into
+// process.env at module scope, so a CLAUDE_CODE_OAUTH_TOKEN sitting there would
+// otherwise authenticate every host run — silently billing a shared credential
+// on the one path whose whole purpose is to bill the developer's own login.
+// Opting in is AEP_CODING_ANTHROPIC_KEY, and only that.
+test("host mode withholds an inherited OAuth token too", () => {
+  const restore = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  process.env.CLAUDE_CODE_OAUTH_TOKEN = "sk-ant-oat01-from-deployments-env";
+  try {
+    withCodingKeyInEnv(undefined, () => {
+      assert.equal(hostInvocation(invocationOpts, "/r").env.CLAUDE_CODE_OAUTH_TOKEN, undefined);
+      // …including with --api-key, which opts into the API KEY, not a token.
+      assert.equal(
+        hostInvocation({ ...invocationOpts, useApiKey: true }, "/r").env.CLAUDE_CODE_OAUTH_TOKEN,
+        undefined,
+      );
+    });
+  } finally {
+    if (restore === undefined) delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    else process.env.CLAUDE_CODE_OAUTH_TOKEN = restore;
+  }
+});
+
 // An API-key coding credential must NOT leave a stale token behind either.
 test("an API-key coding credential clears any inherited OAuth token", () => {
   const restore = process.env.CLAUDE_CODE_OAUTH_TOKEN;
