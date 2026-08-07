@@ -86,8 +86,8 @@ func TestAssemble_MinimalConfigBuildsTheGraph(t *testing.T) {
 	if app.Handler == nil {
 		t.Fatal("assembled app has a nil Handler")
 	}
-	if len(app.Watchers) != 6 {
-		t.Fatalf("minimal watcher count = %d, want 6 (the unconditional watchers; reaper omitted with Fake nil Workspace)", len(app.Watchers))
+	if len(app.Watchers) != 7 {
+		t.Fatalf("minimal watcher count = %d, want 7 (the unconditional watchers; reaper omitted with Fake nil Workspace)", len(app.Watchers))
 	}
 	for i, w := range app.Watchers {
 		if w == nil {
