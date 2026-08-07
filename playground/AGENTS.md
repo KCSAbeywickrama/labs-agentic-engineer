@@ -105,11 +105,21 @@ wrote — so a local tuning loop bills your subscription, not the platform's key
 local half of the platform's per-org coding-agent key (ADR-0016). It takes
 either a Console API key (`sk-ant-api…`) or a `claude setup-token` OAuth token
 (`sk-ant-oat…`, which bills a Claude subscription instead of API credits), and
-the prefix decides which. Setting it wins in BOTH modes, with or without
-`--api-key`: unlike `ANTHROPIC_API_KEY` (which `deployments/.env` populates for
-everyone), nothing sets this one implicitly, so its presence is already the
-explicit statement `--api-key` exists to make. Either credential satisfies
-docker mode's pre-flight.
+the prefix decides which. Either credential satisfies docker mode's pre-flight.
+
+It changes WHICH credential is used, not WHETHER one is:
+
+| invocation | credential |
+|---|---|
+| `code` (docker) | `AEP_CODING_ANTHROPIC_KEY`, else `ANTHROPIC_API_KEY` |
+| `code --host --api-key` | `AEP_CODING_ANTHROPIC_KEY`, else `ANTHROPIC_API_KEY` |
+| `code --host` | none — your own `claude login` |
+
+Docker needs no flag because a container reaches no keychain to fall back to.
+Host mode still requires `--api-key`: defining a variable is not the same act as
+asking this run to authenticate with it, and a bypassPermissions process on your
+own filesystem should not pick up a shared credential because a file elsewhere
+happened to define one.
 
 An API key arrives as `ANTHROPIC_API_KEY`, an OAuth token as
 `CLAUDE_CODE_OAUTH_TOKEN` — and the run gets **exactly one of them**, same as in

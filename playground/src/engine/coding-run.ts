@@ -272,10 +272,19 @@ interface Invocation {
  * from a file-supplied one. An explicit flag says what an unreadable heuristic
  * only implied.
  *
- * `AEP_CODING_ANTHROPIC_KEY` (see `codingCredential`) overrides all of the
- * above, in both modes: unlike `ANTHROPIC_API_KEY`, nothing populates it
- * implicitly, so its presence IS the explicit statement `--api-key` exists to
- * make. It is the local half of the platform's coding-agent key (ADR-0016).
+ * `AEP_CODING_ANTHROPIC_KEY` (see `codingCredential`) changes WHICH credential
+ * `--api-key` opts into — the coding-agent one rather than the platform key —
+ * but it does not opt in on its own. Setting a variable is not the same act as
+ * asking this run to authenticate with it, and host mode's default has to stay
+ * "the developer's own login" for the reason above: a bypassPermissions process
+ * on a developer's filesystem should not silently acquire a shared credential
+ * because a file elsewhere happened to define one.
+ *
+ *   host                 → nothing; `claude login` answers
+ *   host --api-key       → AEP_CODING_ANTHROPIC_KEY, else ANTHROPIC_API_KEY
+ *   docker               → AEP_CODING_ANTHROPIC_KEY, else ANTHROPIC_API_KEY
+ *
+ * See ADR-0016 for the platform half.
  */
 export function hostInvocation(opts: CodingRunOptions, runDir: string): Invocation {
   const env: NodeJS.ProcessEnv = {
@@ -284,19 +293,18 @@ export function hostInvocation(opts: CodingRunOptions, runDir: string): Invocati
     AEP_LOCAL_RUN_DIR: runDir,
     AEP_LOCAL_SKILLS_DIR: opts.skillsDir,
   };
-  const coding = codingCredential();
+  const coding = opts.useApiKey ? codingCredential() : undefined;
   if (coding) {
     applyCodingCredential(env, coding);
-  } else {
-    // Withhold every inherited platform credential so the SDK falls through to
-    // the developer's own login. CLAUDE_CODE_OAUTH_TOKEN goes too, and
-    // unconditionally: `--api-key` opts back into the API KEY specifically, and
-    // a token reaching this process came from `deployments/.env` (the
-    // platform's file) rather than from `claude login`, which stores its
-    // credentials in the OS keychain and not in the environment at all.
-    delete env.CLAUDE_CODE_OAUTH_TOKEN;
-    if (!opts.useApiKey) delete env.ANTHROPIC_API_KEY;
+    return { command: "npx", args: ["tsx", LOCAL_ENTRY], env };
   }
+  // No coding credential in play. A token reaching this process came from
+  // `deployments/.env` (the platform's file) and never from `claude login`,
+  // which stores credentials in the OS keychain rather than the environment —
+  // so it is withheld unconditionally, including under `--api-key`, which opts
+  // into the API KEY specifically.
+  delete env.CLAUDE_CODE_OAUTH_TOKEN;
+  if (!opts.useApiKey) delete env.ANTHROPIC_API_KEY;
   return { command: "npx", args: ["tsx", LOCAL_ENTRY], env };
 }
 

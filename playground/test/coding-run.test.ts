@@ -84,24 +84,32 @@ test("host mode withholds the key, so the SDK falls back to the developer's own 
   });
 });
 
+// These two are about the org with NO coding credential configured, so they
+// clear it explicitly: `deployments/.env` may define one on a developer's
+// machine, and `@aep/agents` merges that file into process.env at module scope.
 test("host mode --api-key opts back into key auth", () => {
-  withKeyInEnv("sk-ant-explicit", () => {
-    const { env } = hostInvocation({ ...invocationOpts, useApiKey: true }, "/r");
-    assert.equal(env.ANTHROPIC_API_KEY, "sk-ant-explicit");
+  withCodingKeyInEnv(undefined, () => {
+    withKeyInEnv("sk-ant-explicit", () => {
+      const { env } = hostInvocation({ ...invocationOpts, useApiKey: true }, "/r");
+      assert.equal(env.ANTHROPIC_API_KEY, "sk-ant-explicit");
+    });
   });
 });
 
 test("docker mode always passes the key through — a container reaches no credential store", () => {
-  const { args } = dockerInvocation(invocationOpts, "/r", "c1");
-  const at = args.indexOf("ANTHROPIC_API_KEY");
-  assert.ok(at > 0, "the key must be forwarded into the container");
-  assert.equal(args[at - 1], "-e", "forwarded by name, so the value never lands in argv");
+  withCodingKeyInEnv(undefined, () => {
+    const { args } = dockerInvocation(invocationOpts, "/r", "c1");
+    const at = args.indexOf("ANTHROPIC_API_KEY");
+    assert.ok(at > 0, "the key must be forwarded into the container");
+    assert.equal(args[at - 1], "-e", "forwarded by name, so the value never lands in argv");
+  });
 });
 
 // AEP_CODING_ANTHROPIC_KEY is the local half of the platform's per-org
-// coding-agent key. Nothing populates it implicitly (deployments/.env carries
-// only ANTHROPIC_API_KEY), so setting it IS the explicit intent --api-key
-// exists to express — which is why it wins in both modes and without the flag.
+// coding-agent key. It changes WHICH credential --api-key opts into; it does
+// not opt in by itself. Host mode's default stays "the developer's own login",
+// so a bypassPermissions process on their filesystem never picks up a shared
+// credential just because a file elsewhere defined one.
 function withCodingKeyInEnv(value: string | undefined, body: () => void): void {
   const restore = process.env.AEP_CODING_ANTHROPIC_KEY;
   if (value === undefined) delete process.env.AEP_CODING_ANTHROPIC_KEY;
@@ -114,20 +122,21 @@ function withCodingKeyInEnv(value: string | undefined, body: () => void): void {
   }
 }
 
-test("a coding key reaches a host session even without --api-key", () => {
+test("a coding key does NOT reach a host session without --api-key", () => {
   withKeyInEnv("sk-ant-from-dotenv", () => {
     withCodingKeyInEnv("sk-ant-coding", () => {
       const { env } = hostInvocation(invocationOpts, "/r");
-      assert.equal(env.ANTHROPIC_API_KEY, "sk-ant-coding", "the coding key must win over the withhold");
+      assert.equal(env.ANTHROPIC_API_KEY, undefined, "defining a key is not asking to use it here");
+      assert.equal(env.CLAUDE_CODE_OAUTH_TOKEN, undefined);
     });
   });
 });
 
-test("a coding key overrides --api-key's default key rather than losing to it", () => {
+test("--api-key opts into the CODING key when one is configured", () => {
   withKeyInEnv("sk-ant-from-dotenv", () => {
     withCodingKeyInEnv("sk-ant-coding", () => {
       const { env } = hostInvocation({ ...invocationOpts, useApiKey: true }, "/r");
-      assert.equal(env.ANTHROPIC_API_KEY, "sk-ant-coding");
+      assert.equal(env.ANTHROPIC_API_KEY, "sk-ant-coding", "the coding key outranks the platform key");
     });
   });
 });
@@ -147,8 +156,6 @@ test("docker mode substitutes the coding key by value, never into argv", () => {
   });
 });
 
-// A blank export must not count as "configured" — otherwise it would
-// authenticate the run with an empty string instead of falling back.
 // A `claude setup-token` token bills a Claude subscription and must arrive as
 // CLAUDE_CODE_OAUTH_TOKEN. Claude Code ranks ANTHROPIC_API_KEY ABOVE it, and
 // deployments/.env gives nearly every developer one, so leaving that variable
@@ -156,7 +163,7 @@ test("docker mode substitutes the coding key by value, never into argv", () => {
 test("an OAuth coding token displaces ANTHROPIC_API_KEY in host mode", () => {
   withKeyInEnv("sk-ant-from-dotenv", () => {
     withCodingKeyInEnv("sk-ant-oat01-subscription-token", () => {
-      const { env } = hostInvocation(invocationOpts, "/r");
+      const { env } = hostInvocation({ ...invocationOpts, useApiKey: true }, "/r");
       assert.equal(env.CLAUDE_CODE_OAUTH_TOKEN, "sk-ant-oat01-subscription-token");
       assert.equal(env.ANTHROPIC_API_KEY, undefined, "the API key would outrank the token and win");
     });
@@ -210,7 +217,7 @@ test("an API-key coding credential clears any inherited OAuth token", () => {
   process.env.CLAUDE_CODE_OAUTH_TOKEN = "sk-ant-oat01-inherited";
   try {
     withCodingKeyInEnv("sk-ant-api03-coding", () => {
-      const { env } = hostInvocation(invocationOpts, "/r");
+      const { env } = hostInvocation({ ...invocationOpts, useApiKey: true }, "/r");
       assert.equal(env.ANTHROPIC_API_KEY, "sk-ant-api03-coding");
       assert.equal(env.CLAUDE_CODE_OAUTH_TOKEN, undefined, "a stale token must not linger");
     });
@@ -220,11 +227,13 @@ test("an API-key coding credential clears any inherited OAuth token", () => {
   }
 });
 
+// A blank export must not count as "configured" — otherwise --api-key would
+// authenticate the run with an empty string instead of the platform key.
 test("a blank coding key is not a coding key", () => {
   withKeyInEnv("sk-ant-from-dotenv", () => {
     withCodingKeyInEnv("   ", () => {
-      const { env } = hostInvocation(invocationOpts, "/r");
-      assert.equal(env.ANTHROPIC_API_KEY, undefined, "blank must fall back to host mode's withhold");
+      const { env } = hostInvocation({ ...invocationOpts, useApiKey: true }, "/r");
+      assert.equal(env.ANTHROPIC_API_KEY, "sk-ant-from-dotenv", "blank falls back to the platform key");
     });
   });
 });

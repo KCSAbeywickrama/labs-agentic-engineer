@@ -141,12 +141,12 @@ Code always has; the control plane decides which one that is and mounts it via
   default-only by construction, so the rule cannot leak into one by omission.
 - The org-scoped advisory lock is retained (not narrowed to the role) because
   the default's disconnect moves both rows.
-- Locally, `AEP_CODING_ANTHROPIC_KEY` wins in both host and docker mode and
-  with or without `--api-key`. The flag exists because `deployments/.env`
-  populates `ANTHROPIC_API_KEY` for everyone, making an exported key
-  indistinguishable from a file-supplied one; that argument does not apply to a
-  variable nothing sets implicitly, so its presence is itself the explicit
-  statement.
+- Locally, `AEP_CODING_ANTHROPIC_KEY` changes WHICH credential a run uses, not
+  WHETHER it uses one. Docker mode takes it by default (a container reaches no
+  keychain to fall back to); host mode still requires `--api-key`, because
+  defining a variable is not the same act as asking this run to authenticate
+  with it, and a `bypassPermissions` process on a developer's own filesystem
+  should not acquire a shared credential because a file elsewhere defined one.
 - Adding a third credential kind later (a cloud-provider credential, say) means
   a new `credential_kind` value plus its env var and probe — the two switch
   points are `AnthropicCredentialKind.RunnerEnvVar` and `validateAnthropicKey`,
