@@ -381,6 +381,17 @@ type PodLogOptions struct {
 	Timestamps bool
 	// LimitBytes hard-caps the bytes K8s returns (server-side trim).
 	// Zero = no cap.
+	//
+	// It trims the FRONT of the selected range, not the back: K8s stops
+	// reading N bytes in, and the range starts at the beginning of the
+	// log unless TailLines/SinceSeconds narrows it first. So on its own
+	// it pins a reader to the log's OPENING N bytes — a live tail built
+	// on it freezes once stdout passes N — and combined with TailLines
+	// it discards the newest lines of the tail window. Either way the
+	// cut lands mid-line, so the last line comes back a fragment.
+	//
+	// Bound a tail with TailLines. Reach for LimitBytes only when you
+	// genuinely want the head of the log.
 	LimitBytes int64
 }
 
@@ -477,8 +488,9 @@ func isContainerNotStarted(body string) bool {
 
 // TailPodLog reads the pod log in one shot — used by JobWatcher to
 // capture the final tail when a Job hits terminal state. opts.Follow
-// is ignored (forced false). opts.LimitBytes is recommended on
-// runaway-verbose agents to bound the captured snapshot size.
+// is ignored (forced false). Bound the read with opts.TailLines on
+// runaway-verbose agents; opts.LimitBytes would return the log's head
+// instead (see its doc).
 func (c *Client) TailPodLog(ctx context.Context, namespace, podName string, opts PodLogOptions) ([]byte, error) {
 	opts.Follow = false
 	body, err := c.StreamPodLog(ctx, namespace, podName, opts)

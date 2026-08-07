@@ -179,6 +179,18 @@ func TestTextToProgressEvents(t *testing.T) {
 		t.Errorf("empty text → %d events, want 0", len(got))
 	}
 
+	// A pod log read that ends mid-envelope must not surface the fragment. The
+	// complete line before it still does.
+	cut := `{"schemaVersion":1,"seq":8,"kind":"phase","phase":"coding"}` + "\n" +
+		`{"schemaVersion":1,"ts":"2026-`
+	got, _ := textToProgressEvents(cut)
+	if len(got) != 1 {
+		t.Fatalf("truncated tail → %d events, want 1: %+v", len(got), got)
+	}
+	if got[0].Kind != "phase" {
+		t.Errorf("kept the wrong event: %+v", got[0])
+	}
+
 	// Over-cap input keeps the NEWEST window (live-tail freshness).
 	var b strings.Builder
 	for i := 0; i < defaultProgressLimit+50; i++ {
@@ -357,5 +369,69 @@ func TestPageEventsHadOutput(t *testing.T) {
 	}
 	if !hadOutput {
 		t.Error("already-seen page: hadOutput = false, want true (the pod HAS produced output)")
+	}
+}
+
+// TestLivePodLogOptionsBoundsByLines pins the live-tail window to a LINE bound.
+//
+// This is the regression guard for the frozen-console bug: bounding with
+// LimitBytes anchored every poll at the log's first 64KiB, so once the agent
+// wrote past that the console stopped advancing and the final line arrived as a
+// mid-envelope fragment. See livePodLogOptions for the K8s semantics.
+func TestLivePodLogOptionsBoundsByLines(t *testing.T) {
+	t.Parallel()
+
+	opts := livePodLogOptions()
+	if opts.LimitBytes != 0 {
+		t.Errorf("live tail must not byte-bound the read (it reads the log's HEAD), got LimitBytes=%d", opts.LimitBytes)
+	}
+	if opts.TailLines != logPageLines {
+		t.Errorf("TailLines = %d, want %d", opts.TailLines, logPageLines)
+	}
+	if !opts.Timestamps {
+		t.Error("Timestamps must stay on — it is the event ts for non-envelope lines")
+	}
+	// A wider read than the parser keeps would be parsed and then discarded.
+	if logPageLines != defaultProgressLimit {
+		t.Errorf("logPageLines = %d, want defaultProgressLimit (%d)", logPageLines, defaultProgressLimit)
+	}
+}
+
+// TestDropTruncatedTail pins exactly which trailing lines are treated as cut
+// mid-write. The rule has to be narrow: dropping a complete final line would
+// lose the runner's terminal `result` event (and with it the run's usage).
+func TestDropTruncatedTail(t *testing.T) {
+	t.Parallel()
+
+	const envelope = `{"schemaVersion":1,"seq":1,"kind":"phase","phase":"coding"}`
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"newline-terminated is always complete", envelope + "\n", envelope + "\n"},
+		{"unterminated but valid envelope is kept", envelope, envelope},
+		{"unterminated prose is kept", "[oneshot] materialised 3 skill(s)", "[oneshot] materialised 3 skill(s)"},
+		{"unterminated brace-less JSON-ish text is kept", `result: {"ok":true`, `result: {"ok":true`},
+		{"mid-envelope cut is dropped", envelope + "\n" + `{"schemaVersion":1,"ts":"2026-`, envelope + "\n"},
+		{"a lone fragment leaves nothing", `{"schemaVersion":1,"ts":"2026-`, ""},
+		{
+			"k8s timestamp prefix does not hide the cut",
+			"2026-08-07T08:20:30.880659137Z " + `{"schemaVersion":1,"ts":"2026-`,
+			"",
+		},
+		{
+			"a complete final line keeps its terminal result",
+			`{"schemaVersion":1,"seq":9,"kind":"result","usage":{"inputTokens":1}}`,
+			`{"schemaVersion":1,"seq":9,"kind":"result","usage":{"inputTokens":1}}`,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := dropTruncatedTail(tc.in); got != tc.want {
+				t.Errorf("dropTruncatedTail(%q)\n got %q\nwant %q", tc.in, got, tc.want)
+			}
+		})
 	}
 }

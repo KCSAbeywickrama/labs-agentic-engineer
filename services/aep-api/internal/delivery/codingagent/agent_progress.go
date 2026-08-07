@@ -23,7 +23,7 @@ package codingagent
 // (captureFinalLog). This reader surfaces that activity to the console:
 //
 //   - while the ca-… Job runs, it live-tails the pod's stdout via the
-//     cluster-gateway-proxy (`pods/log?timestamps=true&limitBytes=64KiB`);
+//     cluster-gateway-proxy (`pods/log?timestamps=true&tailLines=200`);
 //   - once terminal, it serves the captured coding_agent_logs snapshot.
 //
 // Recovered from the pre-cutover codingagent progress_service (retired in the
@@ -58,11 +58,27 @@ const (
 	// defaultProgressLimit caps events surfaced per poll (matches the retired
 	// pre-cutover reader).
 	defaultProgressLimit = 200
-	// logPageBytes bounds the live-tail window read per poll — the LAST 64KiB of
-	// pod stdout, so old lines scroll off and the console gets fresh content.
-	// Paired with the watcher's 256KiB final-capture (finalLogTailBytes).
-	logPageBytes = 64 * 1024
+	// logPageLines bounds the live-tail window read per poll — the LAST N lines
+	// of pod stdout, so old lines scroll off and the console gets fresh content.
+	// Matches defaultProgressLimit: textToProgressEvents keeps only that many
+	// events anyway, so a wider read would be parsed and then thrown away.
+	logPageLines = defaultProgressLimit
 )
+
+// livePodLogOptions is the ONE definition of the live-tail window. It bounds by
+// LINES, never bytes.
+//
+// K8s `pods/log?limitBytes=N` stops reading N bytes into the selected range and
+// the range is anchored at the START of the log unless tailLines/sinceSeconds
+// narrows it. Byte-bounding a live tail therefore pins the console to the head
+// of the log: once stdout passes N, every poll re-serves the same opening N
+// bytes forever, and the cut lands mid-line so the last event is an unparseable
+// envelope fragment. Pairing the two does not help either — limitBytes trims the
+// FRONT of the tail window, silently dropping the newest lines, which is the
+// opposite of what a live tail owes the reader.
+func livePodLogOptions() clustergatewayproxy.PodLogOptions {
+	return clustergatewayproxy.PodLogOptions{Timestamps: true, TailLines: logPageLines}
+}
 
 // Bootstrap seqs identify the synthetic "dark zone" progress lines the reader
 // emits BEFORE the runner writes its first NDJSON line — the stretch (pod
@@ -223,10 +239,7 @@ func (r *AgentProgressReader) CycleProgress(ctx context.Context, cycle *delivery
 		}
 		return nil, fmt.Errorf("get cycle job pod: %w", err)
 	}
-	body, err := r.proxy.TailPodLog(ctx, ns, pod.Name, clustergatewayproxy.PodLogOptions{
-		Timestamps: true,
-		LimitBytes: logPageBytes,
-	})
+	body, err := r.proxy.TailPodLog(ctx, ns, pod.Name, livePodLogOptions())
 	if err != nil {
 		if errors.Is(err, clustergatewayproxy.ErrNotFound) || errors.Is(err, clustergatewayproxy.ErrPodNotReady) {
 			if live {
@@ -324,10 +337,7 @@ func (r *AgentProgressReader) AgentProgress(ctx context.Context, row *delivery.E
 		}
 		return nil, fmt.Errorf("get job pod: %w", err)
 	}
-	body, err := r.proxy.TailPodLog(ctx, ns, pod.Name, clustergatewayproxy.PodLogOptions{
-		Timestamps: true,
-		LimitBytes: logPageBytes,
-	})
+	body, err := r.proxy.TailPodLog(ctx, ns, pod.Name, livePodLogOptions())
 	if err != nil {
 		// ErrNotFound: pod GC'd / not scheduled. ErrPodNotReady: container still
 		// starting (image pull / ContainerCreating / config). Both mean "no logs
@@ -413,6 +423,7 @@ func textToProgressEvents(text string) ([]contracts.ProgressEvent, bool) {
 	// structured envelope fields alike. See redact.go for why this runs even
 	// though the runner already scrubs at the source.
 	text = redactSecrets(text)
+	text = dropTruncatedTail(text)
 	out := make([]contracts.ProgressEvent, 0, 256)
 	scanner := bufio.NewScanner(strings.NewReader(text))
 	// Allow long lines — agent output occasionally dumps long JSON blobs that
@@ -433,6 +444,33 @@ func textToProgressEvents(text string) ([]contracts.ProgressEvent, bool) {
 		return out[len(out)-defaultProgressLimit:], true
 	}
 	return out, false
+}
+
+// dropTruncatedTail removes a trailing partial line — one the source cut
+// mid-write rather than finished.
+//
+// Only an UNTERMINATED final line can be partial (a newline means the writer
+// completed it), and among those only one that opens a JSON envelope it never
+// closes is unambiguously a fragment. That pair of conditions is what keeps the
+// rule safe: complete prose lines (bootstrap output, stray library writes) and
+// complete envelopes both still reach the feed, including a final line the pod
+// wrote without a trailing newline.
+//
+// Without this, parseProgressLine falls back to wrapping the raw bytes as a
+// `log` event and the console renders `{"schemaVersion":1,"ts":"2026-` verbatim.
+// Live tails re-read the line whole on the next poll; a captured snapshot loses
+// only bytes that were never parseable.
+func dropTruncatedTail(text string) string {
+	if strings.HasSuffix(text, "\n") {
+		return text
+	}
+	nl := strings.LastIndexByte(text, '\n')
+	_, msg := splitTimestampPrefix(text[nl+1:]) // nl == -1 → the whole text
+	trimmed := strings.TrimSpace(msg)
+	if trimmed == "" || trimmed[0] != '{' || json.Valid([]byte(trimmed)) {
+		return text
+	}
+	return text[:nl+1]
 }
 
 // parseProgressLine decodes one runner NDJSON envelope. Non-JSON lines, or lines
