@@ -80,7 +80,7 @@ func (f *fakeRuntimeConfig) calls() [][3]string {
 }
 
 // fakeIdentities / fakeTokens satisfy the coding-dispatch ports for the
-// ClusterWorkflow path (proxy unset).
+// OpenChoreo Component path.
 type fakeIdentities struct{}
 
 func (fakeIdentities) IdentityFor(context.Context, string) (string, string, string, error) {

@@ -565,7 +565,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// cycle in the milestone's own project, rendered by OC into the project's
 	// dataplane namespace. It needs only the OC client and the runner image —
 	// no proxy, no in-cluster Kubernetes client, no per-env branch — and it is
-	// selected ahead of both legacy paths when wired.
+	// the only coding-agent dispatch path.
 	//
 	// Retention shares the same OC client: before each create it deletes the
 	// project's oldest RETIRED agent components (liveness read from the cycle
