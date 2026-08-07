@@ -56,8 +56,9 @@ from the cycle rows, so a BFF restart resumes without duplicating anything.
 
 A zero exit is not completion: a succeeded pod leaves the cycle open, and the
 **pull-request webhook** closes it through the supervisor's ordinary settle path.
-A webhook that arrives after a failure mark **supersedes** it — the side effects
-landed — and the anomaly is logged; the reverse regression is impossible.
+Once the watcher has marked a cycle failed, a late webhook does not reopen it —
+`ended_at` fences the row. The reverse is also fenced: a cycle that already
+opened a pull request is never closed by a later pod failure.
 
 Pod-outcome classification, startup grace, sustained-404 rule, and the
 pull-request webhook interaction are spelled out in
@@ -84,12 +85,11 @@ in [`cycle-status-and-logs.md`](cycle-status-and-logs.md).
 ## Retention, and the one case that deletes immediately
 
 A finished cycle's Component is **retained** so its archive stays queryable, up
-to `DefaultCodingAgentComponentRetention` (10; overridable per process with
-`CODING_AGENT_COMPONENT_RETENTION`). Before each create, terminal Components past
-the cap are pruned oldest-first. Retained Components still hold entitlement
-slots, so the cap is a billing decision as much as a storage one, and an org
-whose plan limit is below the retention cap sees dispatches blocked until
-older cycles are pruned.
+to `DefaultCodingAgentComponentRetention` (10 — a code constant, not a deploy
+env override). Before each create, terminal Components past the cap are pruned
+oldest-first. Retained Components still hold entitlement slots, so the cap is a
+billing decision as much as a storage one, and an org whose plan limit is below
+the retention cap sees dispatches blocked until older cycles are pruned.
 
 **Cancel deletes at once.** A cancel signal settles the run row on the existing
 path; deleting the Component is what stops the pod mid-air and frees the slot,
