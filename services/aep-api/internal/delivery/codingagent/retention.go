@@ -26,10 +26,11 @@ import (
 )
 
 // DefaultCodingAgentComponentRetention is how many coding-agent Components a
-// project may hold. It is a CODE constant with no deployment override, because
-// it is not an operator's tuning knob: a FINISHED component still occupies a
-// billing concurrency slot, so the number is a property of the platform's own
-// housekeeping, and the real cap in cloud is whichever is smaller — this, or
+// project may hold when CODING_AGENT_COMPONENT_RETENTION is unset. A FINISHED
+// component still occupies a billing concurrency slot, so the number is
+// platform housekeeping rather than an operator SLA knob — cloud ships this
+// default; local compose may lower it (via the env) so LRU prune is observable
+// without eleven cycles. The real cloud cap is whichever is smaller — this, or
 // the org's plan limit (wso2cloud#793), which the entitlement gate enforces
 // with a 402 the dispatch path already reports.
 //

@@ -572,14 +572,18 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// rows), because a finished component still holds a billing concurrency
 	// slot.
 	if cfg.AgentRunnerImage != "" {
+		retentionLimit := cfg.CodingAgentComponentRetention
+		if retentionLimit <= 0 {
+			retentionLimit = codingagent.DefaultCodingAgentComponentRetention
+		}
 		ocDispatcher := codingagent.NewOCDispatcher(componentClient).
 			WithImage(cfg.AgentRunnerImage).
 			WithRetention(codingagent.NewComponentRetention(
-				componentClient, runCycleRepo, codingagent.DefaultCodingAgentComponentRetention))
+				componentClient, runCycleRepo, retentionLimit))
 		codingExecutor.WithOCDispatch(ocDispatcher)
 		slog.Info("coding executor: OpenChoreo component dispatch path enabled",
 			"runnerImage", cfg.AgentRunnerImage,
-			"componentRetention", codingagent.DefaultCodingAgentComponentRetention)
+			"componentRetention", retentionLimit)
 	}
 	// Build-secret staging so the post-merge build clones a PRIVATE project repo
 	// (the local plane sets GITHUB_REPO_VISIBILITY=private). Reuses the same

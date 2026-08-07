@@ -193,6 +193,13 @@ type Config struct {
 	// a digest. Empty ⇒ dispatch is off and fails loudly.
 	AgentRunnerImage string
 
+	// CodingAgentComponentRetention is how many finished coding-agent
+	// Components a project may keep (LRU reap before each create). Defaults
+	// to codingagent.DefaultCodingAgentComponentRetention (10). Override via
+	// CODING_AGENT_COMPONENT_RETENTION so local E2E can observe prune without
+	// eleven cycles; cloud keeps the code default unless explicitly set.
+	CodingAgentComponentRetention int
+
 	// Temporal holds the workflow-engine connection settings for the devflow
 	// feature. Enabled iff HostPort is set — unset leaves aep-api fully
 	// functional with the workflow endpoints answering 503.

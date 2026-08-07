@@ -85,11 +85,13 @@ in [`cycle-status-and-logs.md`](cycle-status-and-logs.md).
 ## Retention, and the one case that deletes immediately
 
 A finished cycle's Component is **retained** so its archive stays queryable, up
-to `DefaultCodingAgentComponentRetention` (10 — a code constant, not a deploy
-env override). Before each create, terminal Components past the cap are pruned
-oldest-first. Retained Components still hold entitlement slots, so the cap is a
-billing decision as much as a storage one, and an org whose plan limit is below
-the retention cap sees dispatches blocked until older cycles are pruned.
+to `DefaultCodingAgentComponentRetention` (10), overridable per process with
+`CODING_AGENT_COMPONENT_RETENTION` (local compose lowers it so prune is
+observable without eleven cycles). Before each create, terminal Components past
+the cap are pruned oldest-first. Retained Components still hold entitlement
+slots, so the cap is a billing decision as much as a storage one, and an org
+whose plan limit is below the retention cap sees dispatches blocked until older
+cycles are pruned.
 
 **Cancel deletes at once.** A cancel signal settles the run row on the existing
 path; deleting the Component is what stops the pod mid-air and frees the slot,

@@ -137,7 +137,11 @@ func Load() (Config, error) {
 		// so a BFF release and the runner image that serves its /internal/v1
 		// callbacks deploy as a matched pair. Empty disables dispatch, which
 		// fails loudly, rather than silently running an unpinned image.
-		AgentRunnerImage:        r.readOptionalString("AGENT_RUNNER_IMAGE", ""),
+		AgentRunnerImage: r.readOptionalString("AGENT_RUNNER_IMAGE", ""),
+		// Finished cycle Components stay queryable via the observer until
+		// pruned. Default 10 matches codingagent.DefaultCodingAgentComponentRetention;
+		// local compose lowers this (often to 2) to make LRU prune observable.
+		CodingAgentComponentRetention: r.readOptionalInt("CODING_AGENT_COMPONENT_RETENTION", 10),
 	}
 
 	if len(r.errors) > 0 {
