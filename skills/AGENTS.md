@@ -27,8 +27,9 @@ The product ships a single phase for now, so `start`, `amend`, `design` and
 `cell-design` all say the PRD carries exactly ONE Phasing entry holding every
 story, and the design details all of it — no later-phase stubs. The platform
 half is `spec.BuildScope.MilestoneTitle` (the milestone is named after the
-version, not the phase); its comment says how to put phases back. Change one half and
-you must change the other, or a build claims a milestone nobody's PRD describes.
+version, not the phase); its comment says how to put phases back. Change one
+half and you must change the other, or a build claims a milestone nobody's PRD
+describes.
 
 ## Kinds — `metadata.aep.kind` in frontmatter
 
