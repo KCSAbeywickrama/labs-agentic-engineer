@@ -57,7 +57,7 @@ import (
 //
 // Each WP-Secret-cleanup concern (build, anthropic, future providers)
 // has its own narrowly-typed interface so cred services only depend on
-// what they own. See docs/design/anthropic-key-dual-token.md §S5.
+// what they own.
 type BuildSecretCleaner interface {
 	DeleteBuildSecretsForOrg(ctx context.Context, ocOrgID string) error
 }

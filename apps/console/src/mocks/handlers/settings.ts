@@ -21,6 +21,8 @@ import type { components } from "../../generated/aep-api";
 
 type ApiError = components["schemas"]["Error"];
 import {
+  codingLlmValidationError,
+  codingLlmWithoutDefault,
   configLoadError,
   gitProviderDisconnectRejected,
   githubConnectedFixture,
@@ -65,6 +67,9 @@ function errorJson(body: ApiError, status: number) {
 // handlers/projects.ts's createdProjects pattern.
 let gitProvider: GitProviderProjection | null = null;
 let llm: LLMProjection | null = null;
+// null = the coding agent reuses `llm`'s key. Not a mode flag — the absence of
+// a key IS "reuse", exactly as on the server (ADR-0016).
+let codingLlm: LLMProjection | null = null;
 let skills: SkillDetailBody[] = [];
 let skillUpdates: SkillUpdate[] = [];
 let initialized = false;
@@ -184,6 +189,7 @@ function configProjection(): ConfigProjection {
   return {
     gitProvider,
     llm,
+    codingLlm,
     idp: {
       kind: "platform",
       issuer: "https://idp.aep.local",
@@ -208,6 +214,8 @@ export const settingsHandlers = [
     if (body.llm !== undefined) {
       if (body.llm === null) {
         llm = null;
+        // The coding key overrides `llm` and cannot outlive it.
+        codingLlm = null;
       } else if (body.llm.apiKey === INVALID_CREDENTIAL_VALUE) {
         return errorJson(llmValidationError, 400);
       } else {
@@ -216,6 +224,26 @@ export const settingsHandlers = [
           status: "connected",
           keyPrefix: body.llm.apiKey.slice(0, 7),
           keyLast4: body.llm.apiKey.slice(-4),
+          connectedAt: new Date().toISOString(),
+          lastValidatedAt: new Date().toISOString(),
+        };
+      }
+    }
+
+    if (body.codingLlm !== undefined) {
+      if (body.codingLlm === null) {
+        codingLlm = null;
+      } else if (body.codingLlm.apiKey === INVALID_CREDENTIAL_VALUE) {
+        return errorJson(codingLlmValidationError, 400);
+      } else if (llm === null) {
+        // An override with nothing to override.
+        return errorJson(codingLlmWithoutDefault, 400);
+      } else {
+        codingLlm = {
+          kind: "anthropic",
+          status: "connected",
+          keyPrefix: body.codingLlm.apiKey.slice(0, 7),
+          keyLast4: body.codingLlm.apiKey.slice(-4),
           connectedAt: new Date().toISOString(),
           lastValidatedAt: new Date().toISOString(),
         };

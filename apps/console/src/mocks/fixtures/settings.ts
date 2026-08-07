@@ -114,6 +114,32 @@ export const llmValidationError: ApiError = {
   ],
 };
 
+export const codingLlmValidationError: ApiError = {
+  code: "validation_failed",
+  message: "the provided API key was rejected by Anthropic",
+  details: [
+    {
+      field: "body.codingLlm",
+      message: "the provided API key was rejected by Anthropic",
+    },
+  ],
+};
+
+// The coding agent key overrides the org's key, so it cannot be set before
+// there is one. Same shape the BFF returns (sectionErrorFrom → patchconfig).
+export const codingLlmWithoutDefault: ApiError = {
+  code: "validation_failed",
+  message:
+    "anthropic: connect the organization's Anthropic key before setting a coding-agent key",
+  details: [
+    {
+      field: "body.codingLlm",
+      message:
+        "anthropic: connect the organization's Anthropic key before setting a coding-agent key",
+    },
+  ],
+};
+
 export const gitProviderDisconnectRejected: ApiError = {
   code: "validation_failed",
   message:

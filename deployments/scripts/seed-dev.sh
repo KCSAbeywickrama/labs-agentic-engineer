@@ -33,6 +33,8 @@
 #   LOCAL_DEV_ADMIN_GITHUB_PAT   PAT to register (classic or fine-grained)
 #   LOCAL_DEV_ADMIN_GITHUB_OWNER GitHub login the PAT is scoped to
 #   ANTHROPIC_API_KEY            Anthropic key to register
+#   AEP_CODING_ANTHROPIC_API_KEY optional; bills the CODING agent to its own
+#                                key instead of the one above (ADR-0016)
 #
 # Knobs (env, with defaults):
 #   ENV_FILE                     defaults to deployments/.env
@@ -77,10 +79,14 @@ _load_env_key() {
 _load_env_key LOCAL_DEV_ADMIN_GITHUB_PAT
 _load_env_key LOCAL_DEV_ADMIN_GITHUB_OWNER
 _load_env_key ANTHROPIC_API_KEY
+_load_env_key AEP_CODING_ANTHROPIC_API_KEY
 
 GITHUB_PAT="${LOCAL_DEV_ADMIN_GITHUB_PAT:-}"
 GITHUB_OWNER="${LOCAL_DEV_ADMIN_GITHUB_OWNER:-}"
 ANTHROPIC_KEY="${ANTHROPIC_API_KEY:-}"
+# Optional: bills the coding agent to its own key. The SAME variable the
+# playground reads, so one line in .env covers both flows.
+CODING_ANTHROPIC_KEY="${AEP_CODING_ANTHROPIC_API_KEY:-}"
 
 echo "=== seed-dev (local-dev convenience) ==="
 echo "  BFF:       $BFF_URL"
@@ -173,6 +179,25 @@ if [ -n "$ANTHROPIC_KEY" ]; then
     fi
 else
     echo "⏭️  ANTHROPIC_API_KEY not set in $ENV_FILE — skipping Anthropic seed"
+fi
+
+# The coding-agent key is an OVERRIDE on the key above (ADR-0016), so it can
+# only be seeded when the org has a default key — either already connected, or
+# being connected by this very PATCH. The BFF applies llm before codingLlm
+# within one request, so "both at once" works; "coding alone, no default" is a
+# 400 we pre-empt here with a readable message instead.
+if [ -n "$CODING_ANTHROPIC_KEY" ]; then
+    if _section_connected codingLlm; then
+        echo "✅ Coding-agent Anthropic key already connected — skipping (SEED_FORCE=1 to re-connect)"
+    elif [ -z "$ANTHROPIC_KEY" ] && ! _section_connected llm; then
+        echo "⏭️  AEP_CODING_ANTHROPIC_API_KEY is set but ANTHROPIC_API_KEY is not — skipping"
+        echo "   the coding-agent key overrides the org's Anthropic key; connect that one first"
+    else
+        _sections="${_sections:+$_sections,}$(printf '"codingLlm":{"kind":"anthropic","apiKey":"%s"}' "$CODING_ANTHROPIC_KEY")"
+        _labels="${_labels:+$_labels + }Anthropic (coding agent)"
+    fi
+else
+    echo "⏭️  AEP_CODING_ANTHROPIC_API_KEY not set in $ENV_FILE — the coding agent will reuse the org's Anthropic key"
 fi
 
 if [ -n "$GITHUB_PAT" ] && [ -n "$GITHUB_OWNER" ]; then

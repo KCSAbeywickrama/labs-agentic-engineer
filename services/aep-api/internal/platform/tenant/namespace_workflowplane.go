@@ -49,9 +49,8 @@ func WorkflowPlaneNamespace(ocOrgID string) string {
 // org-id encoding in the name is needed. The coding-agent pod
 // mounts this Secret's ANTHROPIC_API_KEY key via secretKeyRef. Each
 // dispatch SSA-overwrites the same Secret with the freshest value from
-// `org_secrets`.
-//
-// See docs/design/anthropic-key-dual-token.md §4.3.
+// `org_secrets`. It always carries the org's DEFAULT key: the coding-agent
+// override is delivered on the remote-worker path instead (ADR-0016).
 const AnthropicSecretName = "anthropic-credentials"
 
 // boundedDNSName returns prefix+slug — lower-cased and trimmed — bounded

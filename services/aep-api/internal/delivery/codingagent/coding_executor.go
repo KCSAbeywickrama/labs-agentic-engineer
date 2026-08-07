@@ -60,13 +60,15 @@ type CodingExecutor struct {
 	// Proxy dispatch (nil → fall through to the direct k8sJob path).
 	proxy *Dispatcher
 
-	// Org-scoped repository reads, always wired at the composition root: the
-	// per-org Anthropic/GitHub SM-API triplets + IDP publisher profile for the
-	// proxy dispatch, and the org lookup for the data-plane UUID.
-	orgs           organization.OrganizationRepository
-	anthropicCreds organization.OrgAnthropicRepository
-	githubCreds    organization.OrgCredentialRepository
-	idpProfiles    organization.IDPRepository
+	// Org-scoped reads, always wired at the composition root: the per-org
+	// GitHub SM-API triplet + IDP publisher profile for the proxy dispatch, and
+	// the org lookup for the data-plane UUID. The Anthropic side goes through a
+	// resolver rather than a repository because WHICH of the org's two possible
+	// keys a run bills is a domain decision, not a row lookup.
+	orgs         organization.OrganizationRepository
+	anthropicKey CodingKeyResolver
+	githubCreds  organization.OrgCredentialRepository
+	idpProfiles  organization.IDPRepository
 
 	// k8sJob is the direct K8s Job dispatch path — the sole fallback when the
 	// proxy path is not configured (nil → no fallback; dispatch errors out).
@@ -104,14 +106,14 @@ func NewCodingExecutor(
 	execRows delivery.ExecutionRepository,
 	gitServiceURL, platformURL string,
 	orgs organization.OrganizationRepository,
-	anthropicCreds organization.OrgAnthropicRepository,
+	anthropicKey CodingKeyResolver,
 	githubCreds organization.OrgCredentialRepository,
 	idpProfiles organization.IDPRepository,
 ) *CodingExecutor {
 	return &CodingExecutor{
 		oc: oc, repos: repos, identities: identities, anthropic: anthropic,
 		tokens: tokens, execRows: execRows, gitServiceURL: gitServiceURL, platformURL: platformURL,
-		orgs: orgs, anthropicCreds: anthropicCreds, githubCreds: githubCreds, idpProfiles: idpProfiles,
+		orgs: orgs, anthropicKey: anthropicKey, githubCreds: githubCreds, idpProfiles: idpProfiles,
 	}
 }
 
@@ -452,21 +454,24 @@ func (e *CodingExecutor) RetryAuthFailedBuild(ctx context.Context, row *delivery
 	return run.Name, nil
 }
 
+// resolveRunnerSecretRefs resolves the two credentials every coding run mounts.
+//
+// The Anthropic side asks the organization domain WHICH key this org's coding
+// runs bill — its coding-agent key when it configured one, its default key
+// otherwise — and mounts whatever comes back under the same ANTHROPIC_API_KEY
+// name either way. The runner therefore needs no notion of the split at all;
+// only the vault path behind the ExternalSecret differs. The resolver fails
+// closed on a configured-but-unusable coding key, so a run never silently bills
+// the default key an org deliberately scoped away from its coding agent.
 func (e *CodingExecutor) resolveRunnerSecretRefs(ctx context.Context, orgID string) (SecretRef, SecretRef, error) {
-	anthropicRow, err := e.anthropicCreds.GetByOrg(ctx, orgID)
+	triplet, err := e.anthropicKey.ResolveCodingSecretRef(ctx, orgID)
 	if err != nil {
-		return SecretRef{}, SecretRef{}, fmt.Errorf("coding dispatch: anthropic credentials for org %q: %w", orgID, err)
-	}
-	if anthropicRow == nil {
-		return SecretRef{}, SecretRef{}, fmt.Errorf("coding dispatch: anthropic secret reference missing for org %q: org_anthropic_credentials row not found", orgID)
+		return SecretRef{}, SecretRef{}, fmt.Errorf("coding dispatch: %w", err)
 	}
 	anthropicSR := SecretRef{
-		SecretRefName: derefStr(anthropicRow.ResolvedSecretRefName()),
-		KVPath:        derefStr(anthropicRow.ResolvedSecretRefKVPath()),
-		Property:      derefStr(anthropicRow.ResolvedSecretRefProperty()),
-	}
-	if err := validateSecretRefTriplet("anthropic", orgID, anthropicSR); err != nil {
-		return SecretRef{}, SecretRef{}, fmt.Errorf("coding dispatch: %w", err)
+		SecretRefName: triplet.Name,
+		KVPath:        triplet.KVPath,
+		Property:      triplet.Property,
 	}
 
 	githubRow, err := e.githubCreds.GetByOrg(ctx, orgID)

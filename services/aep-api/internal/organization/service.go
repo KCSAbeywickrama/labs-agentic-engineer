@@ -68,6 +68,11 @@ func sectionErrorFrom(section string, err error) error {
 	if errors.As(err, &ue) {
 		return &SectionError{Section: section, Status: http.StatusBadGateway, Message: ue.Error()}
 	}
+	// The coding-agent key is an override on the org's default key, so setting
+	// it without one is a client-fault unprocessable request, not a 500.
+	if errors.Is(err, ErrAnthropicDefaultKeyRequired) {
+		return &SectionError{Section: section, Status: http.StatusUnprocessableEntity, Message: err.Error()}
+	}
 	return err
 }
 
@@ -124,7 +129,7 @@ func (s *Service) Get(ctx context.Context, org string) (*orgconfig.ConfigProject
 	out := &orgconfig.ConfigProjection{}
 
 	if s.anthropicSvc != nil {
-		proj, err := s.anthropicSvc.Status(ctx, org)
+		proj, err := s.anthropicSvc.Status(ctx, org, AnthropicRoleDefault)
 		switch {
 		case err == nil:
 			out.LLM = llmProjectionFrom(proj)
@@ -132,6 +137,20 @@ func (s *Service) Get(ctx context.Context, org string) (*orgconfig.ConfigProject
 			out.LLM = nil
 		default:
 			return nil, fmt.Errorf("orgconfig get llm: %w", err)
+		}
+
+		// A missing coding row is not "not connected" — it is the default
+		// state, "the coding agent reuses the key above" (ADR-0016). Same null
+		// on the wire, different meaning, so it is spelled out here rather than
+		// left to look like the llm branch above.
+		codingProj, err := s.anthropicSvc.Status(ctx, org, AnthropicRoleCoding)
+		switch {
+		case err == nil:
+			out.CodingLLM = llmProjectionFrom(codingProj)
+		case isNotFound(err):
+			out.CodingLLM = nil
+		default:
+			return nil, fmt.Errorf("orgconfig get codingLlm: %w", err)
 		}
 	}
 
@@ -207,6 +226,14 @@ func (s *Service) Patch(ctx context.Context, org, actor string, p orgconfig.Conf
 			return nil, sectionErrorFrom("llm", err)
 		}
 	}
+	if p.CodingLLM.Sent && !p.CodingLLM.Null {
+		if s.anthropicSvc == nil {
+			return nil, fmt.Errorf("orgconfig patch codingLlm: service not configured")
+		}
+		if err := s.anthropicSvc.ValidateKey(ctx, p.CodingLLM.Value.APIKey); err != nil {
+			return nil, sectionErrorFrom("codingLlm", err)
+		}
+	}
 	if p.GitProvider.Sent && !p.GitProvider.Null {
 		if s.credentialSvc == nil {
 			return nil, fmt.Errorf("orgconfig patch gitProvider: service not configured")
@@ -217,17 +244,35 @@ func (s *Service) Patch(ctx context.Context, org, actor string, p orgconfig.Conf
 	}
 
 	// 3. Persist phase — probes already passed, so these are writes over
-	//    freshly-validated inputs. Ordered llm → gitProvider → idp.
+	//    freshly-validated inputs. Ordered llm → codingLlm → gitProvider → idp.
 	sections := []string{}
 	if p.LLM.Sent {
 		if p.LLM.Null {
-			if err := s.anthropicSvc.Disconnect(ctx, org); err != nil {
+			if err := s.anthropicSvc.Disconnect(ctx, org, AnthropicRoleDefault); err != nil {
 				return nil, sectionErrorFrom("llm", err)
 			}
-		} else if _, err := s.anthropicSvc.Connect(ctx, org, AnthropicConnectRequest{APIKey: p.LLM.Value.APIKey}); err != nil {
+		} else if _, err := s.anthropicSvc.Connect(ctx, org, AnthropicRoleDefault, AnthropicConnectRequest{APIKey: p.LLM.Value.APIKey}); err != nil {
 			return nil, sectionErrorFrom("llm", err)
 		}
 		sections = append(sections, "llm")
+	}
+	// codingLlm runs AFTER llm so a single patch can connect both at once: the
+	// coding key's "a default must already exist" check then sees the default
+	// this very request just wrote, rather than 422-ing on the org's prior
+	// state. The reverse order would make {llm, codingLlm} un-sendable.
+	//
+	// null means REMOVE the override, not "disconnect" — the coding agent goes
+	// back to reusing the default key. Disconnect(coding) does exactly that and
+	// is idempotent, so re-sending null on an org already reusing is a no-op.
+	if p.CodingLLM.Sent {
+		if p.CodingLLM.Null {
+			if err := s.anthropicSvc.Disconnect(ctx, org, AnthropicRoleCoding); err != nil {
+				return nil, sectionErrorFrom("codingLlm", err)
+			}
+		} else if _, err := s.anthropicSvc.Connect(ctx, org, AnthropicRoleCoding, AnthropicConnectRequest{APIKey: p.CodingLLM.Value.APIKey}); err != nil {
+			return nil, sectionErrorFrom("codingLlm", err)
+		}
+		sections = append(sections, "codingLlm")
 	}
 	if p.GitProvider.Sent && !p.GitProvider.Null {
 		if _, err := s.credentialSvc.Connect(ctx, org, ConnectRequest{

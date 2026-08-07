@@ -164,7 +164,7 @@ type CodingAgentParams struct {
 	// AnthropicCredentialService.ApplyWPSecret in the dispatch pre-flight.
 	// The ClusterWorkflow wires
 	// it into the pod via `parameters.anthropic.secretRef` →
-	// `secretKeyRef.name`. See docs/design/anthropic-key-dual-token.md §5.
+	// `secretKeyRef.name`.
 	AnthropicSecretRef string
 }
 

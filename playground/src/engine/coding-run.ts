@@ -271,6 +271,11 @@ interface Invocation {
  * own entrypoint runs, and a shell-exported key is by then indistinguishable
  * from a file-supplied one. An explicit flag says what an unreadable heuristic
  * only implied.
+ *
+ * `AEP_CODING_ANTHROPIC_API_KEY` (see `codingApiKey`) overrides all of the
+ * above, in both modes: unlike `ANTHROPIC_API_KEY`, nothing populates it
+ * implicitly, so its presence IS the explicit statement `--api-key` exists to
+ * make. It is the local half of the platform's coding-agent key (ADR-0016).
  */
 export function hostInvocation(opts: CodingRunOptions, runDir: string): Invocation {
   const env: NodeJS.ProcessEnv = {
@@ -279,8 +284,31 @@ export function hostInvocation(opts: CodingRunOptions, runDir: string): Invocati
     AEP_LOCAL_RUN_DIR: runDir,
     AEP_LOCAL_SKILLS_DIR: opts.skillsDir,
   };
-  if (!opts.useApiKey) delete env.ANTHROPIC_API_KEY;
+  const coding = codingApiKey();
+  if (coding) {
+    env.ANTHROPIC_API_KEY = coding;
+  } else if (!opts.useApiKey) {
+    delete env.ANTHROPIC_API_KEY;
+  }
   return { command: "npx", args: ["tsx", LOCAL_ENTRY], env };
+}
+
+/**
+ * The coding agent's own key for a local run: the playground's half of the
+ * platform's per-org coding-agent key, so a developer can point local coding
+ * runs at the same separate key their organization bills them to (ADR-0016).
+ *
+ * Returns undefined when unset or blank — blank must NOT count as "set", or a
+ * stray `export AEP_CODING_ANTHROPIC_API_KEY=` would authenticate the run with
+ * an empty string instead of falling back.
+ *
+ * The runner never learns any of this. Both modes deliver whatever this
+ * resolves to as plain `ANTHROPIC_API_KEY`, exactly as production does — only
+ * the source of the value differs, never the name the agent reads.
+ */
+export function codingApiKey(): string | undefined {
+  const key = process.env.AEP_CODING_ANTHROPIC_API_KEY?.trim();
+  return key ? key : undefined;
 }
 
 // Mounts local.ts + the library/project/run dirs over the unmodified production
@@ -319,7 +347,13 @@ export function dockerInvocation(opts: CodingRunOptions, runDir: string, contain
     "tsx",
     "src/local.ts",
   ];
-  return { command: "docker", args, env: process.env };
+  // `-e ANTHROPIC_API_KEY` above is a name-only pass-through, so a coding key is
+  // substituted by overriding the value in docker's OWN environment rather than
+  // as `-e NAME=value` — an inline value would put the secret in the argv of a
+  // process any user on the machine can read out of `ps`.
+  const coding = codingApiKey();
+  const env = coding ? { ...process.env, ANTHROPIC_API_KEY: coding } : process.env;
+  return { command: "docker", args, env };
 }
 
 /**
@@ -399,11 +433,15 @@ export async function runCodingAgent(opts: CodingRunOptions): Promise<CodingRunR
     // can have. Checked here rather than inside the runner: this is knowable
     // before a multi-minute image build, and the runner itself is now
     // mode-agnostic about the key (see `local.ts`).
-    if (!process.env.ANTHROPIC_API_KEY) {
+    // Either key satisfies it: a coding-specific key is what the container
+    // would be given, so demanding ANTHROPIC_API_KEY as well would reject a
+    // correctly-configured run.
+    if (!codingApiKey() && !process.env.ANTHROPIC_API_KEY) {
       progressLog.end();
       if (!opts.silent) {
         output.write(
-          "  ✗ ANTHROPIC_API_KEY is not set — docker mode needs it (export it, or add it to deployments/.env).\n" +
+          "  ✗ No Anthropic key is set — docker mode needs one (export ANTHROPIC_API_KEY, or add it to deployments/.env).\n" +
+            "    Set AEP_CODING_ANTHROPIC_API_KEY instead to bill coding runs to a separate key.\n" +
             "    `--host` instead runs on your own Claude credentials (`claude login`).\n",
         );
       }

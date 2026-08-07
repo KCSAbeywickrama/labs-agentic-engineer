@@ -1,0 +1,116 @@
+# ADR-0016 — The coding agent's Anthropic key is an override on the org's key, not a peer
+
+An organization brings one Anthropic API key, and every agent in the platform
+runs on it. Orgs asked to bill the **coding agent** separately — it is the
+expensive, long-running, unattended one, and its spend is the number they want
+to see on its own invoice line.
+
+Read literally that is "two keys". But the org's one key is read by four
+different consumers, and they are not equivalent:
+
+| Consumer | How it reads the key |
+|---|---|
+| Design agent | `EffectiveKey` → `X-Anthropic-Key` header → `createModel` per turn |
+| Coding agent | SM-API triplet → per-run ExternalSecret → runner `ANTHROPIC_API_KEY` |
+| Coding agent (workflow plane) | `ApplyWPSecret` → `anthropic-credentials` Secret → ClusterWorkflow |
+| RCA agent | `pushExternalSecret` → `RCA_LLM_API_KEY` ExternalSecret |
+
+The third turned out to be **dead**: `TriggerCodingAgent` and `ApplyWPSecret`
+are wired as interface methods but never called from production
+(`CodingExecutor.anthropic` is assigned and never read), so the remote-worker
+path is the only live coding dispatch. Worth recording because the dead-code
+gate cannot see it — RTA counts interface satisfaction and a constructor-assigned
+struct field as reachability, so an orphaned port still looks live.
+
+That leaves the real question: is the new key a second credential standing
+beside the first, or a narrowing of it?
+
+## Decision
+
+**The coding-agent key is an OVERRIDE on the organization's default key, and
+"reuse" is the absence of that override.**
+
+Concretely:
+
+- `org_anthropic_credentials` is re-keyed to `(oc_org_id, role)`, `role ∈
+  {default, coding}`. Every existing column, helper, and code path is reused
+  verbatim; a pre-migration row backfills to `default`, which is what it always
+  was.
+- Bytes live at `org_secrets[anthropic/key]` (unchanged) and
+  `[anthropic/coding-key]`; the SM-API `EntityName` differs per role
+  (`anthropic` vs `anthropic-coding`) so the two vault paths cannot collide.
+- The wire gets a **peer section**, `codingLlm`, three-state like the others:
+  absent = keep, `null` = remove the override, value = set/rotate it.
+- A coding row may exist **only** while an active default row does. Setting one
+  without a default is rejected; disconnecting the default cascades the coding
+  row away with it.
+- Only the live coding dispatch reads it. The design agent and the RCA agent
+  stay on the default key, permanently.
+
+### Why "reuse" is row-absence and not a stored mode
+
+A `codingKeyMode: reuse | separate` column would be derivable from row presence
+and therefore able to **disagree** with it. `mode=separate` with no key is
+representable, and it is precisely the state where an org believes it has
+isolation and does not. Absence cannot lie: a configuration that claims
+isolation without a key behind it does not typecheck into the schema.
+
+### Why a peer section and not a field on `llm`
+
+`PATCH /config` replaces a section **wholesale** — it is not a deep merge,
+because a section with write-only fields cannot be deep-merged into. Had the
+coding key been `llm.codingApiKey`, then `{"llm":{kind,apiKey}}` — the exact
+body the console already sends to rotate the default key — would silently
+**delete** the coding key. Worse, rotating only the coding key would require
+resending the default key, which is write-only and which no client can read
+back.
+
+As a peer section each key rotates independently, and the destructive act has
+to be spelled out: `{"codingLlm": null}`.
+
+The cost is an asymmetry worth stating plainly: `llm: null` means *not
+connected*, `codingLlm: null` means *reuse*. There is no "disconnected coding
+agent" state, because an org without a coding key is not degraded — it is in
+the normal case.
+
+### Why dispatch fails closed
+
+A coding row that exists but whose secret reference is missing or stale **aborts
+the run**. It does not fall back to the default key.
+
+Falling back is the tempting choice — the run proceeds, availability is
+preserved, a WARN is logged. But the org configured that key precisely so this
+workload would not touch the default one, and a silent fallback delivers the
+opposite of what was asked with no signal anywhere the org can see. A failed
+dispatch is loud, diagnosable, and correct; a quiet mis-bill is discovered on
+an invoice, a month later.
+
+### What the runner knows
+
+Nothing. In both modes the run receives plain `ANTHROPIC_API_KEY` via `envFrom`
+— only the vault path behind the ExternalSecret changes. The split is entirely a
+control-plane concern, so the runner image is untouched, and the same is true
+locally: `AEP_CODING_ANTHROPIC_API_KEY` in the playground resolves to the same
+`ANTHROPIC_API_KEY` the coding process has always read.
+
+## Consequences
+
+- One migration is a **one-way door**: the primary-key swap. It runs
+  expand → verify → contract in guarded `DO` blocks, and drops-and-adds the PK
+  in a single statement so an interrupted boot cannot leave the table without
+  one.
+- The `role` is now part of every accessor's identity
+  (`GetByOrg(ctx, org, role)`). A dropped role filter is a compile error rather
+  than a cross-role write — which is what stops a coding-key rotation from
+  overwriting an org's default key.
+- The reuse fallback is stated **once**, in
+  `AnthropicCredentialService.ResolveCodingSecretRef`. Every other reader is
+  default-only by construction, so the rule cannot leak into one by omission.
+- The org-scoped advisory lock is retained (not narrowed to the role) because
+  the default's disconnect moves both rows.
+- Locally, `AEP_CODING_ANTHROPIC_API_KEY` wins in both host and docker mode and
+  with or without `--api-key`. The flag exists because `deployments/.env`
+  populates `ANTHROPIC_API_KEY` for everyone, making an exported key
+  indistinguishable from a file-supplied one; that argument does not apply to a
+  variable nothing sets implicitly, so its presence is itself the explicit
+  statement.

@@ -98,6 +98,79 @@ test("docker mode always passes the key through — a container reaches no crede
   assert.equal(args[at - 1], "-e", "forwarded by name, so the value never lands in argv");
 });
 
+// AEP_CODING_ANTHROPIC_API_KEY is the local half of the platform's per-org
+// coding-agent key. Nothing populates it implicitly (deployments/.env carries
+// only ANTHROPIC_API_KEY), so setting it IS the explicit intent --api-key
+// exists to express — which is why it wins in both modes and without the flag.
+function withCodingKeyInEnv(value: string | undefined, body: () => void): void {
+  const restore = process.env.AEP_CODING_ANTHROPIC_API_KEY;
+  if (value === undefined) delete process.env.AEP_CODING_ANTHROPIC_API_KEY;
+  else process.env.AEP_CODING_ANTHROPIC_API_KEY = value;
+  try {
+    body();
+  } finally {
+    if (restore === undefined) delete process.env.AEP_CODING_ANTHROPIC_API_KEY;
+    else process.env.AEP_CODING_ANTHROPIC_API_KEY = restore;
+  }
+}
+
+test("a coding key reaches a host session even without --api-key", () => {
+  withKeyInEnv("sk-ant-from-dotenv", () => {
+    withCodingKeyInEnv("sk-ant-coding", () => {
+      const { env } = hostInvocation(invocationOpts, "/r");
+      assert.equal(env.ANTHROPIC_API_KEY, "sk-ant-coding", "the coding key must win over the withhold");
+    });
+  });
+});
+
+test("a coding key overrides --api-key's default key rather than losing to it", () => {
+  withKeyInEnv("sk-ant-from-dotenv", () => {
+    withCodingKeyInEnv("sk-ant-coding", () => {
+      const { env } = hostInvocation({ ...invocationOpts, useApiKey: true }, "/r");
+      assert.equal(env.ANTHROPIC_API_KEY, "sk-ant-coding");
+    });
+  });
+});
+
+test("docker mode substitutes the coding key by value, never into argv", () => {
+  withKeyInEnv("sk-ant-from-dotenv", () => {
+    withCodingKeyInEnv("sk-ant-coding", () => {
+      const { args, env } = dockerInvocation(invocationOpts, "/r", "c1");
+      assert.equal(env.ANTHROPIC_API_KEY, "sk-ant-coding", "the container must receive the coding key");
+      const at = args.indexOf("ANTHROPIC_API_KEY");
+      assert.equal(args[at - 1], "-e", "still forwarded BY NAME");
+      assert.ok(
+        !args.some((a) => a.includes("sk-ant-coding")),
+        "a secret in argv is readable by any user via ps",
+      );
+    });
+  });
+});
+
+// A blank export must not count as "configured" — otherwise it would
+// authenticate the run with an empty string instead of falling back.
+test("a blank coding key is not a coding key", () => {
+  withKeyInEnv("sk-ant-from-dotenv", () => {
+    withCodingKeyInEnv("   ", () => {
+      const { env } = hostInvocation(invocationOpts, "/r");
+      assert.equal(env.ANTHROPIC_API_KEY, undefined, "blank must fall back to host mode's withhold");
+    });
+  });
+});
+
+test("with no coding key set, both modes behave exactly as before", () => {
+  withKeyInEnv("sk-ant-from-dotenv", () => {
+    withCodingKeyInEnv(undefined, () => {
+      assert.equal(hostInvocation(invocationOpts, "/r").env.ANTHROPIC_API_KEY, undefined);
+      assert.equal(
+        hostInvocation({ ...invocationOpts, useApiKey: true }, "/r").env.ANTHROPIC_API_KEY,
+        "sk-ant-from-dotenv",
+      );
+      assert.equal(dockerInvocation(invocationOpts, "/r", "c1").env.ANTHROPIC_API_KEY, "sk-ant-from-dotenv");
+    });
+  });
+});
+
 test("undo snapshot + restore round-trips edits and removes new files", () => {
   const dir = tempProject();
   try {

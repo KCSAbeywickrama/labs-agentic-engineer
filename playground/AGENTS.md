@@ -99,7 +99,18 @@ agent, which is an AI SDK model call with no other way to authenticate. The
 gets the key (a container reaches no credential store), while `--host` withholds
 it and lets the SDK use the developer's own credentials — the ones `claude login`
 wrote — so a local tuning loop bills your subscription, not the platform's key.
-`code --host --api-key` opts back into key auth. Skills load from the
+`code --host --api-key` opts back into key auth.
+
+`AEP_CODING_ANTHROPIC_API_KEY` bills **coding** runs to a separate key — the
+local half of the platform's per-org coding-agent key (ADR-0016). Setting it
+wins in BOTH modes, with or without `--api-key`: unlike `ANTHROPIC_API_KEY`
+(which `deployments/.env` populates for everyone), nothing sets this one
+implicitly, so its presence is already the explicit statement `--api-key` exists
+to make. Either key satisfies docker mode's pre-flight. The runner is unaware of
+any of it — whichever key wins arrives as plain `ANTHROPIC_API_KEY`, exactly as
+in production.
+
+Skills load from the
 working-tree `skills/` on EVERY turn — edits apply next run, no rebuild. That now
 covers the coding run's own workflow skill and its local-mode overlay too: the
 library is mounted over the image's `/app/skills`, so `aep/SKILL.md` and

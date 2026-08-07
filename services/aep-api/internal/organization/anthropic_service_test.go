@@ -301,7 +301,7 @@ func TestAnthropicConnect_ShapeGuardsRejectBeforeAnyIO(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			_, err := svc.Connect(context.Background(), "acme", AnthropicConnectRequest{APIKey: tc.key})
+			_, err := svc.Connect(context.Background(), "acme", AnthropicRoleDefault, AnthropicConnectRequest{APIKey: tc.key})
 			if got := anthropicValidationCode(t, err); got != tc.wantCode {
 				t.Fatalf("code: got %q, want %q (err %v)", got, tc.wantCode, err)
 			}
@@ -315,7 +315,7 @@ func TestAnthropicConnect_UpstreamRejectionShortCircuitsPersistence(t *testing.T
 	// nil db/store: any persistence attempt would panic — passing proves the
 	// upstream 401 fails Connect BEFORE the transaction begins.
 	svc := NewAnthropicCredentialService(nil, nil, nil).WithAnthropicAPIBase(base)
-	_, err := svc.Connect(context.Background(), "acme", AnthropicConnectRequest{APIKey: anthropicUnitKey})
+	_, err := svc.Connect(context.Background(), "acme", AnthropicRoleDefault, AnthropicConnectRequest{APIKey: anthropicUnitKey})
 	if got := anthropicValidationCode(t, err); got != "anthropic_key_invalid" {
 		t.Fatalf("code: got %q, want anthropic_key_invalid (err %v)", got, err)
 	}

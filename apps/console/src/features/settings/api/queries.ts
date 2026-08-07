@@ -68,6 +68,53 @@ export function useConnectAnthropic() {
   });
 }
 
+// The coding-agent key is an OVERRIDE on the key above, so these two mutations
+// are "set/rotate the override" and "remove it", NOT connect/disconnect: with no
+// override the coding agent reuses the org's default key, which is the default
+// state and the one a fresh org is already in. Removing it therefore breaks
+// nothing — it only changes which key coding runs bill.
+export function useConnectCodingAnthropic() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (apiKey: string) => {
+      const { data, error } = await client.PATCH("/config", {
+        body: { codingLlm: { kind: "anthropic", apiKey } },
+      });
+      if (error) {
+        throw new Error(
+          errorMessage(error, "Failed to save the coding agent key"),
+        );
+      }
+      return data;
+    },
+    onSuccess: (data: ConfigProjection) => {
+      queryClient.setQueryData(configKeys.all, data);
+    },
+  });
+}
+
+// codingLlm:null removes the override — the coding agent goes back to reusing
+// the org's default key. Idempotent server-side.
+export function useRemoveCodingAnthropic() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const { data, error } = await client.PATCH("/config", {
+        body: { codingLlm: null },
+      });
+      if (error) {
+        throw new Error(
+          errorMessage(error, "Failed to remove the coding agent key"),
+        );
+      }
+      return data;
+    },
+    onSuccess: (data: ConfigProjection) => {
+      queryClient.setQueryData(configKeys.all, data);
+    },
+  });
+}
+
 // llm:null disconnects directly (unlike gitProvider, which the BE rejects
 // as null and requires the dedicated disconnect endpoint instead).
 export function useDisconnectAnthropic() {

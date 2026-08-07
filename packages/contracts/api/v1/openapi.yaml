@@ -2978,6 +2978,20 @@ components:
         path: github.com/wso2/aep/aep-api/internal/platform/orgconfig
       additionalProperties: false
       properties:
+        codingLlm:
+          additionalProperties: false
+          properties:
+            apiKey:
+              type: string
+            kind:
+              enum:
+              - anthropic
+              type: string
+          required:
+          - kind
+          - apiKey
+          type: object
+          nullable: true
         gitProvider:
           additionalProperties: false
           properties:
@@ -3037,6 +3051,10 @@ components:
         path: github.com/wso2/aep/aep-api/internal/platform/orgconfig
       additionalProperties: false
       properties:
+        codingLlm:
+          allOf:
+          - $ref: '#/components/schemas/LLMProjection'
+          nullable: true
         gitProvider:
           allOf:
           - $ref: '#/components/schemas/GitProviderProjection'
@@ -3049,6 +3067,7 @@ components:
           nullable: true
       required:
       - llm
+      - codingLlm
       - gitProvider
       - idp
       type: object
