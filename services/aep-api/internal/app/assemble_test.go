@@ -156,7 +156,7 @@ func TestAssemble_Degradations(t *testing.T) {
 		// Every optional capability is off, including no working coding-dispatch
 		// path (proxy+secrets unset; k8s is not a secrets-capable path).
 		for _, want := range []string{
-			"m2m-service-auth", "build-logs", "secrets-delivery",
+			"m2m-service-auth", "build-logs", "cycle-log-archive", "secrets-delivery",
 			"cluster-gateway-proxy", "mcp-discovery", "idp-mutations",
 			"connect-oauth-state", "coding-dispatch-proxy", "coding-dispatch-k8s",
 			"coding-dispatch-any", "rca-agent-key-push", "run-temporal",
@@ -230,6 +230,21 @@ func TestAssemble_Degradations(t *testing.T) {
 		}
 		if hasCapability(app.Degradations(), "run-temporal") {
 			t.Errorf("with TEMPORAL_HOSTPORT set, run-temporal must not be degraded")
+		}
+	})
+
+	t.Run("an observer URL clears the archive degradation", func(t *testing.T) {
+		cfg := baseCfg()
+		cfg.Observability.BaseURL = "http://observer"
+		app, err := Assemble(cfg, Fake(), Seam{})
+		if err != nil {
+			t.Fatalf("Assemble = %v", err)
+		}
+		degs := app.Degradations()
+		for _, gone := range []string{"build-logs", "cycle-log-archive"} {
+			if hasCapability(degs, gone) {
+				t.Errorf("with OBSERVER_URL set, %q must not be degraded, got %+v", gone, degs)
+			}
 		}
 	})
 }

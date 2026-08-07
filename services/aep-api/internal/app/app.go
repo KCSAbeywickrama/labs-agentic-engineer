@@ -189,8 +189,9 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// for both cloud (CP/WP split) and local k3d — one unified path.
 	gitSecretClient := openchoreo.NewGitSecretClient(ocConfig)
 	// The runtime reader: a release binding's rendered pods, their logs and
-	// their events. Task 4's JobWatcher classifies cycles from this; Task 9
-	// also wires live/archive log sources onto it.
+	// their events. It is what makes a coding cycle observable without a
+	// Kubernetes client — status from the pod, live logs from the pod, and
+	// (through the observer below) history for as long as the component lives.
 	runtimeClient := openchoreo.NewRuntimeClient(ocConfig)
 
 	// Observability client (optional — build logs disabled when URL not set)
@@ -236,11 +237,9 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// case when smClient is nil is fine).
 	secretRefWriter := organization.NewSecretRefWriter(smClient, orgCredRepo, orgAnthropicRepo, idpRepo)
 
-	// cluster-gateway-proxy client. Used for the proxy DISPATCH path (when
-	// secrets delivery is also configured) and for the still-proxy-backed
-	// progress reader until Task 9 rewires it onto RuntimeClient. When
-	// CLUSTER_GATEWAY_PROXY_URL is empty, dispatch uses the direct
-	// K8sJobDispatcher. JobWatcher no longer depends on this client.
+	// cluster-gateway-proxy client. Used for the proxy DISPATCH path when
+	// secrets delivery is also configured. When CLUSTER_GATEWAY_PROXY_URL is
+	// empty, dispatch uses the direct K8sJobDispatcher.
 	var cgwClient *clustergatewayproxy.Client
 	if cfg.ClusterGatewayProxyURL != "" {
 		cgwCfg := clustergatewayproxy.Config{BaseURL: cfg.ClusterGatewayProxyURL}
@@ -463,12 +462,14 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// S2S endpoint is retired — the runner now clones `org-skills` and resolves
 	// applied skills locally, stamped via AEP_SKILLS_REPO_URL above.)
 	execProgressSvc := execution.NewProgressService(executionRepo, componentClient)
-	// Coding-agent activity feed: live OC log while the Component exists;
-	// archive once the pod is gone (WithArchive wired in Task 9). One reader
-	// serves both the task-level progress endpoint and the milestone run's
-	// per-cycle stream (runread.CycleLogReader).
+	// One agent-log edge, two callers: the task-level progress endpoint and the
+	// milestone run's per-cycle stream both read through this reader. Live logs
+	// come from OpenChoreo; a finished cycle's come from the observability
+	// plane while its component is retained; when neither can answer the reader
+	// says so rather than serving an empty stream.
 	agentProgressReader := codingagent.NewAgentProgressReader(
-		codingagent.NewOCLogSource(runtimeClient), codingAgentLogRepo)
+		codingagent.NewOCLogSource(runtimeClient), codingAgentLogRepo).
+		WithArchive(codingagent.NewObserverArchive(observClient, runtimeClient))
 	execProgressSvc.WithCodingProgress(agentProgressReader)
 	// The task-log SSE stream: one connection per open task-detail page carries
 	// the Task's whole live state (status + executions + unified timeline across
@@ -1309,6 +1310,9 @@ func computeDegradations(cfg config.Config, in Infra, secretsDelivery bool) []De
 	}
 	if cfg.Observability.BaseURL == "" {
 		off("build-logs", "OBSERVABILITY_API_URL not set — build logs disabled")
+	}
+	if cfg.Observability.BaseURL == "" {
+		off("cycle-log-archive", "OBSERVER_URL not set — a finished cycle's agent log cannot be read back")
 	}
 	if !secretsDelivery {
 		off("secrets-delivery", "SecretsProvider not injected — secret writes + external-secret cleanup disabled")

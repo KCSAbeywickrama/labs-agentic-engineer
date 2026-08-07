@@ -23,9 +23,14 @@
 // the captured agent log) and the ExecWatcher (OpenChoreo WorkflowRun outcomes,
 // including the git-clone-auth build retry).
 //
-// Two dispatch paths: the cluster-gateway-proxy path (per-org namespace,
-// per-run ExternalSecrets, a Job through the proxy) when the proxy and SM-API
-// are both configured, and the direct in-cluster K8s Job otherwise.
+// The JobWatcher classifies a cycle from the Pod OpenChoreo rendered for its
+// Component — never from the ReleaseBinding's Ready condition, which OpenChoreo
+// leaves green for a `batch/v1 Job` it registers no health check for. It writes
+// exactly two things: a terminal agent reason on a cycle whose agent died
+// without a pull request, and the run's captured token usage. Agent logs are
+// not stored by this platform: they are read live from OpenChoreo and, once the
+// pod is gone, from the observability plane for as long as the Component is
+// retained.
 package codingagent
 
 import (
