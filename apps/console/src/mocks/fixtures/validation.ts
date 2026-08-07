@@ -411,7 +411,16 @@ const VALIDATION_IN_FLIGHT: RunCycleView = {
   createdAt: "2026-07-10T09:45:00Z",
 };
 
+// The two counters the server DERIVES from the cycle ledger — the supervisor bumps
+// them as it appends cycles, so a fixture that states them by hand states them
+// wrong the moment its cycle list changes. Counting instead is what keeps every
+// scenario self-consistent: `skipped` has one cycle and no validation, `none` has
+// two coding cycles and no validation, and neither can drift again.
+//
+// The rest of the budgets stay literal: they are spend against ceilings, which no
+// cycle list implies.
 function run(over: Partial<MilestoneRunView>): MilestoneRunView {
+  const cycles = over.cycles ?? [CODING_1];
   return {
     id: "run-v1-1",
     milestoneNumber: 1,
@@ -419,15 +428,15 @@ function run(over: Partial<MilestoneRunView>): MilestoneRunView {
     origin: "spec-build",
     state: "succeeded",
     budgets: {
-      cyclesTotal: 2,
+      cyclesTotal: cycles.length,
       cycleCeiling: 8,
       fixCycles: 0,
       conflictCycles: 0,
       buildRetriggers: 1,
-      validationCycles: 1,
+      validationCycles: cycles.filter((c) => c.kind === "validation").length,
     },
     validation: {},
-    cycles: [CODING_1],
+    cycles,
     createdAt: "2026-07-10T09:12:00Z",
     startedAt: "2026-07-10T09:13:00Z",
     endedAt: "2026-07-10T10:41:00Z",
@@ -461,14 +470,6 @@ function exhaustedRun(
       // The server omits the path for `unreported`: advertising one would send the
       // client to a 404 to rediscover what the verdict already said.
       ...(reportPath ? { reportPath: REPORT_PATH } : {}),
-    },
-    budgets: {
-      cyclesTotal: 4,
-      cycleCeiling: 8,
-      fixCycles: 0,
-      conflictCycles: 0,
-      buildRetriggers: 1,
-      validationCycles: 2,
     },
     cycles: [
       CODING_1,
@@ -504,14 +505,6 @@ const RUNS: Record<ValidationScenario, MilestoneRunView> = {
     state: "running",
     endedAt: null,
     validation: { verdict: "failed", issue: 12, reportPath: REPORT_PATH },
-    budgets: {
-      cyclesTotal: 3,
-      cycleCeiling: 8,
-      fixCycles: 0,
-      conflictCycles: 0,
-      buildRetriggers: 1,
-      validationCycles: 1,
-    },
     cycles: [CODING_1, validationCycle(2, "failed"), CODING_IN_FLIGHT],
   }),
   // The run is live and has not reached validation at all — the state every run
