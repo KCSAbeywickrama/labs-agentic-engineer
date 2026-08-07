@@ -189,7 +189,14 @@ func (r *AgentProgressReader) CycleProgress(ctx context.Context, cycle *delivery
 		tail, err := r.live.Tail(ctx, cycle.OrgID, cycle.ProjectID, cycle.JobRef, logPageBytes)
 		switch {
 		case err == nil:
-			return r.fromText(resp, tail.Text, sinceMillis, !closed, tail.Pod), nil
+			// Real OCLogSource.Tail returns success + empty text when the
+			// Component is retained but the pod is gone — not ErrComponentGone.
+			// On a closed cycle that empty success is "try the archive"; on an
+			// open cycle it is still the dark zone (scheduling / boot).
+			if closed && strings.TrimSpace(tail.Text) == "" {
+				break
+			}
+			return r.fromText(resp, tail.Text, sinceMillis, !closed, closed, tail.Pod), nil
 		case !errors.Is(err, ErrComponentGone):
 			// A transport failure is not an answer about the cycle: surface it so
 			// the caller degrades this poll and tries again.
@@ -197,9 +204,10 @@ func (r *AgentProgressReader) CycleProgress(ctx context.Context, cycle *delivery
 		}
 	}
 
-	// The Component is gone (or there is no live source): the archive is the
-	// only remaining reader, and it only answers while the Component is
-	// retained — so this is also where "the component was reclaimed" surfaces.
+	// The Component is gone, live was empty on a closed cycle, or there is no
+	// live source: the archive is the only remaining reader. It only answers
+	// while the Component is retained — so this is also where "the component
+	// was reclaimed" surfaces.
 	text, err := r.readArchive(ctx, cycle)
 	if err != nil {
 		resp.Lines = []contracts.ProgressEvent{logsUnavailableEvent(unavailableReason(err))}
@@ -213,9 +221,7 @@ func (r *AgentProgressReader) CycleProgress(ctx context.Context, cycle *delivery
 		resp.Final = true
 		return resp, nil
 	}
-	out := r.fromText(resp, text, sinceMillis, false, openchoreo.RuntimePod{})
-	out.Final = closed
-	return out, nil
+	return r.fromText(resp, text, sinceMillis, false, closed, openchoreo.RuntimePod{}), nil
 }
 
 // readArchive asks the observability plane for the cycle's window. The window
@@ -241,8 +247,9 @@ func (r *AgentProgressReader) readArchive(ctx context.Context, cycle *delivery.R
 }
 
 // fromText pages raw log text into the response, narrating the dark zone when
-// the pod has said nothing yet and the attempt is still live.
-func (r *AgentProgressReader) fromText(resp *contracts.ProgressResponse, text string, sinceMillis int64, live bool, pod openchoreo.RuntimePod) *contracts.ProgressResponse {
+// the pod has said nothing yet and the attempt is still live. final marks a
+// settled answer (closed cycle / terminal execution) so consumers stop polling.
+func (r *AgentProgressReader) fromText(resp *contracts.ProgressResponse, text string, sinceMillis int64, live bool, final bool, pod openchoreo.RuntimePod) *contracts.ProgressResponse {
 	lines, truncated, hadOutput := pageEvents(text, sinceMillis)
 	if !hadOutput {
 		// Only a source that has said NOTHING is still booting. A page that
@@ -252,12 +259,14 @@ func (r *AgentProgressReader) fromText(resp *contracts.ProgressResponse, text st
 		if live {
 			resp.Lines = []contracts.ProgressEvent{bootstrapEvent(pod.Found, pod.Phase, pod.WaitingReason)}
 		}
+		resp.Final = final
 		return resp
 	}
 	resp.Lines, resp.Truncated = lines, truncated
 	if cur := lastEventMillis(resp.Lines); cur > resp.CursorMillis {
 		resp.CursorMillis = cur
 	}
+	resp.Final = final
 	return resp
 }
 
@@ -324,7 +333,7 @@ func (r *AgentProgressReader) AgentProgress(ctx context.Context, row *delivery.E
 		}
 		return nil, fmt.Errorf("tail pod log: %w", err)
 	}
-	return r.fromText(resp, tail.Text, sinceMillis, live, tail.Pod), nil
+	return r.fromText(resp, tail.Text, sinceMillis, live, !live, tail.Pod), nil
 }
 
 // pageEvents parses a raw pod-log page into events newer than sinceMillis,

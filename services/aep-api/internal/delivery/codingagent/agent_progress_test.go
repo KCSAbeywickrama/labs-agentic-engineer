@@ -526,3 +526,66 @@ func TestCycleProgress_ATransportFailureIsAnError(t *testing.T) {
 		t.Fatal("a transport failure must surface so the caller can degrade")
 	}
 }
+
+// Closed cycle + live empty success (Component retained, pod gone — not
+// ErrComponentGone) must fall through to the archive.
+func TestCycleProgress_ClosedEmptyLiveFallsThroughToArchive(t *testing.T) {
+	live := &stubLive{tail: LiveTail{Pod: openchoreo.RuntimePod{Found: false}}}
+	archive := &stubArchive{text: "2026-08-06T10:00:01Z archived after empty live\n"}
+	cycle := liveCycle("c9")
+	ended := time.Now().UTC()
+	cycle.EndedAt = &ended
+
+	resp, err := NewAgentProgressReader(live, nil).WithArchive(archive).
+		CycleProgress(context.Background(), cycle, 0)
+	if err != nil {
+		t.Fatalf("CycleProgress: %v", err)
+	}
+	if len(resp.Lines) != 1 || resp.Lines[0].Summary != "archived after empty live" {
+		t.Fatalf("unexpected lines: %+v", resp.Lines)
+	}
+	if !resp.Final {
+		t.Error("closed cycle served from archive after empty live must be final")
+	}
+}
+
+// Closed cycle + live empty success + no archive → settled unavailable.
+func TestCycleProgress_ClosedEmptyLiveWithNoArchiveIsUnavailable(t *testing.T) {
+	live := &stubLive{tail: LiveTail{Text: "", Pod: openchoreo.RuntimePod{Found: true, Phase: "Succeeded"}}}
+	cycle := liveCycle("c10")
+	ended := time.Now().UTC()
+	cycle.EndedAt = &ended
+
+	resp, err := NewAgentProgressReader(live, nil).CycleProgress(context.Background(), cycle, 0)
+	if err != nil {
+		t.Fatalf("CycleProgress: %v", err)
+	}
+	if len(resp.Lines) != 1 || resp.Lines[0].Phase != "logs_unavailable" {
+		t.Fatalf("unexpected lines: %+v", resp.Lines)
+	}
+	if !resp.Final {
+		t.Error("closed cycle with nowhere to read must be final")
+	}
+}
+
+// Open cycle + live empty success is still the dark zone — do not archive or
+// declare unavailable while the attempt may still be scheduling.
+func TestCycleProgress_OpenEmptyLiveStaysOnDarkZone(t *testing.T) {
+	live := &stubLive{tail: LiveTail{Pod: openchoreo.RuntimePod{}}}
+	archive := &stubArchive{text: "2026-08-06T10:00:01Z should not appear\n"}
+
+	resp, err := NewAgentProgressReader(live, nil).WithArchive(archive).
+		CycleProgress(context.Background(), liveCycle("c11"), 0)
+	if err != nil {
+		t.Fatalf("CycleProgress: %v", err)
+	}
+	if len(resp.Lines) != 1 || resp.Lines[0].Phase != "runner_scheduling" {
+		t.Fatalf("unexpected lines: %+v", resp.Lines)
+	}
+	if resp.Final {
+		t.Error("open cycle empty live must keep polling")
+	}
+	if resp.Lines[0].Phase == "logs_unavailable" {
+		t.Fatal("open empty live must not report unavailable")
+	}
+}
