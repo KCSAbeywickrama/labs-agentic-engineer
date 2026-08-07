@@ -396,31 +396,3 @@ func TestExecWatcher_BuildAuthBudgetExhausted_FinishErrorSkipsObserver(t *testin
 		t.Fatalf("row must stay running after Finish error, got %q", got.Status)
 	}
 }
-
-// TestJobWatcher_FinishFailed_LoserSkipsNotify: finishFailed twice on the same
-// row — the second Finish loses and must not Notify the task-stream hub.
-func TestJobWatcher_FinishFailed_LoserSkipsNotify(t *testing.T) {
-	row := &delivery.Execution{
-		ID: "c1", Repo: "acme/widgets", IssueNumber: 7,
-		Kind: string(taskmeta.KindCoding), Status: string(taskmeta.ExecRunning),
-	}
-	repo := newFakeExecRepo(row)
-	hub := delivery.NewTaskStreamHub()
-	ch, cancel := hub.Subscribe(row.Repo, row.IssueNumber)
-	defer cancel()
-	w := &JobWatcher{execRows: repo, notifier: hub}
-
-	ctx := context.Background()
-	w.finishFailed(ctx, row, "job_failed")
-	select {
-	case <-ch:
-	default:
-		t.Fatal("winner must Notify")
-	}
-	w.finishFailed(ctx, row, "job_failed")
-	select {
-	case <-ch:
-		t.Fatal("Finish loser must not Notify")
-	default:
-	}
-}

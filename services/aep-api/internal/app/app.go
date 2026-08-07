@@ -189,6 +189,10 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// plane (via OC → OpenBao → SecretReference). Used by BuildCredentialsService
 	// for both cloud (CP/WP split) and local k3d — one unified path.
 	gitSecretClient := openchoreo.NewGitSecretClient(ocConfig)
+	// The runtime reader: a release binding's rendered pods, their logs and
+	// their events. Task 4's JobWatcher classifies cycles from this; Task 9
+	// also wires live/archive log sources onto it.
+	runtimeClient := openchoreo.NewRuntimeClient(ocConfig)
 
 	// Observability client (optional — build logs disabled when URL not set)
 	var observClient observability.Client
@@ -233,12 +237,11 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// case when smClient is nil is fine).
 	secretRefWriter := organization.NewSecretRefWriter(smClient, orgCredRepo, orgAnthropicRepo, idpRepo)
 
-	// cluster-gateway-proxy client. Used for reading coding-agent pod logs +
-	// job status (streaming feed + JobWatcher) and, when secrets delivery is
-	// also configured, for the full proxy DISPATCH path. When CLUSTER_GATEWAY_PROXY_URL
-	// is empty none of those are wired and dispatch uses the direct
-	// K8sJobDispatcher with no live streaming. In a local install this points at
-	// the in-cluster cluster-gateway-proxy stub (reads only).
+	// cluster-gateway-proxy client. Used for the proxy DISPATCH path (when
+	// secrets delivery is also configured) and for the still-proxy-backed
+	// progress reader until Task 9 rewires it onto RuntimeClient. When
+	// CLUSTER_GATEWAY_PROXY_URL is empty, dispatch uses the direct
+	// K8sJobDispatcher. JobWatcher no longer depends on this client.
 	var cgwClient *clustergatewayproxy.Client
 	if cfg.ClusterGatewayProxyURL != "" {
 		cgwCfg := clustergatewayproxy.Config{BaseURL: cfg.ClusterGatewayProxyURL}
@@ -252,7 +255,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		cgwClient = clustergatewayproxy.New(cgwCfg)
 		slog.Info("cluster-gateway-proxy client", "baseURL", cfg.ClusterGatewayProxyURL, "authenticated", cgwCfg.AuthProvider != nil)
 	} else {
-		slog.Warn("CLUSTER_GATEWAY_PROXY_URL not set — coding-agent live streaming + JobWatcher + proxy dispatch disabled; direct k8s-job secret delivery is disabled (configure cluster-gateway-proxy + secret refs)")
+		slog.Warn("CLUSTER_GATEWAY_PROXY_URL not set — proxy-dispatched coding-agent Jobs cannot be launched; direct k8s-job secret delivery is disabled (configure cluster-gateway-proxy + secret refs)")
 	}
 
 	// Credentials + git-service services and controllers. The credential store,
@@ -595,8 +598,8 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// ExternalSecrets + a K8s Job via the proxy) requires secrets delivery:
 	// the per-run ExternalSecrets source their values from SecretReferences
 	// authored via the injected provider. Gated on BOTH the proxy AND a
-	// secrets client — cloud/prod posture. Locally the proxy stub is present
-	// for reads (streaming + JobWatcher) even when delivery is off; then
+	// secrets client — cloud/prod posture. Locally the proxy stub may still be
+	// present for the legacy progress reader even when delivery is off; then
 	// dispatch falls through to the direct K8sJobDispatcher.
 	if cgwClient != nil && smClient != nil {
 		codingExecutor.WithProxy(codingagent.New(cgwClient), idpService, cfg.AgentRunnerImage, cfg.AgentClusterSecretStore)
@@ -1253,28 +1256,13 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	if workspaceReaper != nil {
 		watchers = append(watchers, workspaceReaper)
 	}
-	// JobWatcher polls the `ca-…` coding-agent Jobs and Finishes the coding
-	// execution FAILED on Job failure (success rides the PR webhook), capturing
-	// the pod's final log. Keyed on the proxy client alone: both dispatch paths
-	// (proxy and direct K8sJobDispatcher) emit `ca-…` run names, so the watcher
-	// reads job status + logs through the proxy stub regardless of dispatcher.
-	if cgwClient != nil {
-		jobWatcher := codingagent.NewJobWatcher(codingAgentLogRepo, orgRepo, cgwClient, executionRepo).
-			WithTaskNotifier(taskStreamHub).
-			// The milestone-run half: capture a run cycle's agent log when its Job
-			// goes terminal, so the run progress stream can serve history after the
-			// pod's TTL reaps it. Capture only — a cycle's outcome is the
-			// supervisor's, and it learns it from webhooks.
-			WithCycleLogCapture(runCycleRepo, runCycleLogRepo)
-		// Per-run ExternalSecret teardown applies only to the proxy dispatch
-		// path (which stages them); the direct K8s-Job path creates none.
-		if smClient != nil {
-			jobWatcher.WithExternalSecretCleanup()
-		}
-		watchers = append(watchers, jobWatcher)
-		slog.Info("codingagent.JobWatcher: enabled (cluster-gateway-proxy configured)",
-			"externalSecretCleanup", smClient != nil)
-	}
+	// The pod-truth watcher: it classifies each dispatched cycle from the Pod
+	// OpenChoreo rendered for it, records a terminal agent reason when the agent
+	// died without a pull request, and banks the run's token spend. It writes no
+	// logs and deletes no components — history is the observability plane's and
+	// deletion is retention's. Always on (no longer gated on cluster-gateway-proxy).
+	watchers = append(watchers, codingagent.NewJobWatcher(runtimeClient, runCycleRepo, asServiceIdentity))
+	slog.Info("codingagent.JobWatcher: enabled (OpenChoreo resource tree)")
 	// The milestone run supervisor's Temporal worker. Registered only when
 	// Temporal is configured (TEMPORAL_HOSTPORT set). The watcher dials in a
 	// retry loop, so a Temporal server that is down at boot is not fatal — the
@@ -1339,7 +1327,7 @@ func computeDegradations(cfg config.Config, in Infra, secretsDelivery bool) []De
 		off("secrets-delivery", "SecretsProvider not injected — secret writes + external-secret cleanup disabled")
 	}
 	if cfg.ClusterGatewayProxyURL == "" {
-		off("cluster-gateway-proxy", "CLUSTER_GATEWAY_PROXY_URL not set — coding-agent live streaming + JobWatcher disabled")
+		off("cluster-gateway-proxy", "CLUSTER_GATEWAY_PROXY_URL not set — proxy-dispatched coding-agent Jobs cannot be launched")
 	}
 	if cfg.AEPInternalBaseURL == "" {
 		off("mcp-discovery", "AEP_INTERNAL_BASE_URL not set — design-turn MCP discovery omitted")

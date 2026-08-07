@@ -96,23 +96,24 @@ func TestAssemble_MinimalConfigBuildsTheGraph(t *testing.T) {
 	}
 }
 
-// TestAssemble_WatcherRegistration pins the two conditional watchers: the
-// JobWatcher rides on CLUSTER_GATEWAY_PROXY_URL, and the run-supervisor worker
-// rides on TEMPORAL_HOSTPORT. The base is 6 — Fake() omits the disk reaper
-// (nil Workspace); the event plane's reconcile sweep is unconditional.
+// TestAssemble_WatcherRegistration pins conditional watchers. The JobWatcher is
+// always registered (OpenChoreo resource tree; not gated on cluster-gateway-proxy).
+// The run-supervisor worker rides on TEMPORAL_HOSTPORT. The base is 7 — Fake()
+// omits the disk reaper (nil Workspace); the event plane's reconcile sweep is
+// unconditional.
 func TestAssemble_WatcherRegistration(t *testing.T) {
 	tests := []struct {
 		name   string
 		mutate func(*config.Config)
 		want   int
 	}{
-		{"base", func(*config.Config) {}, 6},
-		{"+cluster-gateway-proxy adds JobWatcher", func(c *config.Config) {
+		{"base", func(*config.Config) {}, 7},
+		{"+cluster-gateway-proxy does not add another watcher", func(c *config.Config) {
 			c.ClusterGatewayProxyURL = "http://cgw"
 		}, 7},
 		{"+temporal adds the run worker", func(c *config.Config) {
 			c.Temporal.HostPort = "temporal:7233"
-		}, 7},
+		}, 8},
 		{"+both", func(c *config.Config) {
 			c.ClusterGatewayProxyURL = "http://cgw"
 			c.Temporal.HostPort = "temporal:7233"
