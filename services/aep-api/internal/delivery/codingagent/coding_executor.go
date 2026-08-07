@@ -235,8 +235,8 @@ func (e *CodingExecutor) launchAgent(ctx context.Context, in agentLaunch) (strin
 // deterministically within a dispatch attempt, so a crashed dispatch resumes
 // over the same Component instead of orphaning it.
 //
-// No ApplyWPSecret: credentials reach the pod through the ComponentType's
-// ExternalSecret / Workload secretEnv (refs only).
+// Credentials reach the pod through the ComponentType's ExternalSecret /
+// Workload secretEnv (refs only).
 func (e *CodingExecutor) dispatchViaOC(ctx context.Context, in agentLaunch, repo *sourcecontrol.GitRepository,
 	name, email, login, bearer, mcpToken string) (string, error) {
 	anthropicSR, githubSR, err := e.resolveRunnerSecretRefs(ctx, in.orgID)

@@ -178,12 +178,10 @@ type CodingAgentParams struct {
 	// (credentials refresh). Passed through to the ClusterWorkflow parameter
 	// `bff.platformUrl` → env var AEP_PLATFORM_URL in the pod.
 	PlatformURL string
-	// AnthropicSecretRef is the name of the per-org K8s Secret in
-	// workflows-<OrgName> carrying ANTHROPIC_API_KEY. Materialised by
-	// AnthropicCredentialService.ApplyWPSecret in the dispatch pre-flight.
-	// The ClusterWorkflow wires
-	// it into the pod via `parameters.anthropic.secretRef` →
-	// `secretKeyRef.name`. See docs/design/anthropic-key-dual-token.md §5.
+	// AnthropicSecretRef is the org-scoped Workload secret name OpenChoreo
+	// resolves from the ComponentType's secretEnv declaration (refs only).
+	// The Component wires it into the pod via `parameters.anthropic.secretRef`
+	// → `secretKeyRef.name`. See docs/design/anthropic-key-dual-token.md §5.
 	AnthropicSecretRef string
 }
 

@@ -144,7 +144,7 @@ func TestAssemble_Degradations(t *testing.T) {
 		}
 		degs := app.Degradations()
 		// Every optional capability is off, including no working coding-dispatch
-		// path (proxy+secrets unset; k8s is not a secrets-capable path).
+		// path (AGENT_RUNNER_IMAGE unset and no secrets provider).
 		for _, want := range []string{
 			"m2m-service-auth", "build-logs", "secrets-delivery",
 			"mcp-discovery", "idp-mutations", "connect-oauth-state",

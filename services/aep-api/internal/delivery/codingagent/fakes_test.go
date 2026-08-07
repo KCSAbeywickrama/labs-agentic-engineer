@@ -243,8 +243,8 @@ func (f *fakeExecRepo) DistinctDeployedProjects(context.Context) ([]delivery.Dep
 }
 
 // noDispatchPathErr is the error launchAgent returns once it clears credential
-// resolution and reaches the dispatch stage with no path wired (proxy and
-// k8sJob both unset). The dispatch tests assert it to prove control reached
-// that stage: they exercise the SHAPE of a launch, not any particular dispatch
-// mechanism (the K8s Job / proxy paths need cluster infra to unit-test).
+// resolution and reaches the dispatch stage with no OpenChoreo client wired.
+// The dispatch tests assert it to prove control reached that stage: they
+// exercise the SHAPE of a launch, not the OC Component chain (which needs
+// cluster infra to unit-test).
 const noDispatchPathErr = "no coding-agent dispatch path configured"

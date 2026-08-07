@@ -1240,7 +1240,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 // Assemble, and one assembly test enumerates the whole degraded-mode matrix off
 // Degradations() — no capability/Profile abstraction.
 type Degradation struct {
-	Capability string // stable slug (e.g. "build-logs", "coding-dispatch-any")
+	Capability string // stable slug (e.g. "build-logs", "coding-dispatch-oc")
 	Reason     string // which config is missing and what it turns off
 }
 

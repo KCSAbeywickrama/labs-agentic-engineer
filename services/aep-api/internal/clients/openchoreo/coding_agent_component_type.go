@@ -26,8 +26,8 @@ const CodingAgentComponentTypeRef = "job/coding-agent"
 
 // CodingAgentComponentType returns the desired namespaced ComponentType body
 // for EnsureComponentType. workloadType=job; ExternalSecrets from
-// ${dataplane.secretStore}; pins match the former job_template.go envelope
-// plus schema-bounded resources.
+// ${dataplane.secretStore}; pins match the retired proxy Job envelope plus
+// schema-bounded resources.
 //
 // Shape is derived from the scheduled-task ClusterComponentType (CronJob)
 // by flattening to a batch/v1 Job: schedule / history / concurrency fields
@@ -51,7 +51,7 @@ func CodingAgentComponentType() map[string]any {
 				"openAPIV3Schema": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
-						// Cost-envelope pins ported from job_template.go.
+						// Cost-envelope pins for the cycle Job.
 						// backoffLimit maximum 0 — runner has side effects (pushes, PRs).
 						"backoffLimit": map[string]any{
 							"type": "integer", "default": 0, "maximum": 0,
@@ -139,7 +139,7 @@ func codingAgentComponentTypeResources() []any {
 									},
 									"env":     "${dependencies.toContainerEnvs()}",
 									"envFrom": "${configurations.toContainerEnvFrom()}",
-									// Runner workspace contract (job_template.go emptyDirs)
+									// Runner workspace contract (emptyDirs)
 									// plus any Workload-declared config/secret file mounts.
 									"volumeMounts": []any{
 										map[string]any{
