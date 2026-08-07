@@ -22,7 +22,11 @@
 package arch
 
 import (
+	"io/fs"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -71,5 +75,48 @@ func TestNoInClusterKubernetesClient(t *testing.T) {
 		if imports(t, main, dep) {
 			t.Errorf("cmd/aep-api reaches %s — %s", dep, why)
 		}
+	}
+}
+
+// TestRemoteWorkerNamespaceIsGone asserts no Go source in the module names the
+// retired per-org `-remote-worker` namespace. Cycle Jobs render into the
+// project's own `dp-…` dataplane namespace, so nothing derives that name any
+// more. The needle is assembled at compile time so this file does not match
+// itself.
+func TestRemoteWorkerNamespaceIsGone(t *testing.T) {
+	needle := "RemoteWorker" + "Namespace"
+	var hits []string
+	root := "../.."
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			switch d.Name() {
+			case ".git", "node_modules", "testdata":
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") {
+			return nil
+		}
+		if filepath.Base(path) == "retirement_test.go" {
+			return nil
+		}
+		b, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		if strings.Contains(string(b), needle) {
+			hits = append(hits, path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk %s: %v", root, err)
+	}
+	if len(hits) > 0 {
+		t.Errorf("%s is still referenced in %v — cycle Jobs render into the project's dp-… dataplane namespace; the -remote-worker namespace is retired", needle, hits)
 	}
 }

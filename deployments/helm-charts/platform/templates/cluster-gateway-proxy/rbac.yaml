@@ -1,10 +1,10 @@
 {{- if .Values.codingAgentDispatch.localStubs.enabled }}
 # LOCAL DEV ONLY — see values.yaml codingAgentDispatch.localStubs.
 # The cluster-gateway-proxy stub runs coding-agent dispatch on aep-api's behalf:
-# ensure org remote-worker namespace + SA, apply per-run ExternalSecrets, create
-# the Job, then stream logs / watch Job status. It authenticates to the K8s API
-# with THIS ServiceAccount's token, so the role covers those write + read verbs
-# cluster-wide (wc-<org>-remote-worker namespaces are created on demand).
+# ensure the milestone project's dp-… dataplane namespace + SA, apply per-run
+# ExternalSecrets, create the Job, then stream logs / watch Job status. It
+# authenticates to the K8s API with THIS ServiceAccount's token, so the role
+# covers those write + read verbs cluster-wide (dp-… namespaces are created on demand).
 apiVersion: v1
 kind: ServiceAccount
 metadata:

@@ -109,7 +109,7 @@ console:
 codingAgentRunner:
   # Docker image for the runner Job — ONE image for both task kinds
   # (implementation and validation; it bakes Playwright + chromium).
-  # Dispatched as a K8s Job in the org's data-plane remote-worker namespace.
+  # Dispatched as an OpenChoreo Component Job in the milestone project's dp-… dataplane namespace.
   # The release pipeline pins this to ghcr.io/wso2/aep/remote-worker:<version>;
   # empty disables coding dispatch (it fails loudly).
   image: "ghcr.io/wso2/aep/remote-worker:latest"

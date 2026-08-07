@@ -19,9 +19,9 @@
 // Captures the final pod-log tail for cluster-gateway-proxy coding-agent
 // dispatches when the Job hits terminal state. Read by
 // `progress_service.GetAgentProgress` once the Job is past TTL so the
-// console can still surface diagnostics. The dispatch NS
-// (`wc-…-remote-worker`) doesn't match Observer's hardcoded
-// `workflows-<…>` filter, so the BFF tails `pods/log` itself.
+// console can still surface diagnostics. Cycle Jobs run in the milestone
+// project's `dp-…` dataplane namespace, which doesn't match Observer's
+// hardcoded `workflows-<…>` filter, so the BFF tails `pods/log` itself.
 //
 // Sidecar rather than a column on `component_tasks`: the parent table
 // holds only small hot fields and is read on every list / status /

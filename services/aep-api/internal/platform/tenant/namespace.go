@@ -36,11 +36,12 @@ import (
 // orgUUID always produces the same name.
 //
 // Home rationale (§4.0/§6.10c): this `wc-` derivation is a pure, gorm-free
-// tenancy primitive consumed by both credentials (orgcreds SM-API writer)
-// and codingagent (dispatch + watcher). It lives here in platform/tenant so
-// neither feature has to import the other for it — the only genuine parallel
-// implementation is the external cloud SM-API + the local stub, reconciled by
-// a byte-parity contract test (§8), not a shared import.
+// tenancy primitive consumed by the credentials domain (the SM-API
+// SecretReference writer and the OpenBao provider's vault-path builder). It
+// lives here in platform/tenant so no feature has to import another for it —
+// the only genuine parallel implementation is the external cloud SM-API + the
+// local stub, reconciled by a byte-parity contract test (§8), not a shared
+// import.
 func OrgBaseNamespace(orgUUID string) string {
 	clean := strings.ReplaceAll(orgUUID, "-", "")
 	prefix := clean
