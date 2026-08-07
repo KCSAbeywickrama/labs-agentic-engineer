@@ -120,18 +120,24 @@ func (t *orgAnthropicTx) Upsert(row *OrgAnthropicCredential) error {
 	// connection time; RETURNING that column reads the persisted value back so
 	// the projection we return matches the stored row (on a replace it's the
 	// original, not the in-memory `now`).
+	// credential_kind is written on BOTH the insert and the update. Omitting it
+	// would silently leave the column at its 'api_key' default, and dispatch
+	// would then mount an OAuth token as ANTHROPIC_API_KEY — a name Claude Code
+	// ranks higher, so the run would authenticate and bill the wrong
+	// credential with no error to show for it.
 	return t.tx.Raw(`
 		INSERT INTO org_anthropic_credentials
-		    (oc_org_id, role, key_prefix, key_last4, status, connected_at, last_validated_at, validation_error)
-		VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
+		    (oc_org_id, role, credential_kind, key_prefix, key_last4, status, connected_at, last_validated_at, validation_error)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)
 		ON CONFLICT (oc_org_id, role) DO UPDATE
-		  SET key_prefix         = EXCLUDED.key_prefix,
+		  SET credential_kind    = EXCLUDED.credential_kind,
+		      key_prefix         = EXCLUDED.key_prefix,
 		      key_last4          = EXCLUDED.key_last4,
 		      status             = EXCLUDED.status,
 		      last_validated_at  = EXCLUDED.last_validated_at,
 		      validation_error   = NULL
 		RETURNING connected_at`,
-		row.OcOrgID, row.Role, row.KeyPrefix, row.KeyLast4, row.Status, row.ConnectedAt, row.LastValidatedAt,
+		row.OcOrgID, row.Role, row.CredentialKind, row.KeyPrefix, row.KeyLast4, row.Status, row.ConnectedAt, row.LastValidatedAt,
 	).Scan(&row.ConnectedAt).Error
 }
 

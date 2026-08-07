@@ -121,3 +121,69 @@ func TestDispatcher_Dispatch_AppliesExternalSecretsWithRefsPresent(t *testing.T)
 		t.Error("github ExternalSecret must reference GitHubSR.KVPath")
 	}
 }
+
+// The env var an ExternalSecret materialises the Anthropic credential under is
+// what decides which credential Claude Code actually uses. Claude Code ranks
+// ANTHROPIC_API_KEY above CLAUDE_CODE_OAUTH_TOKEN, so mounting the wrong name
+// (or both) means a subscription token is ignored and the org's default key is
+// billed instead — silently, with a green run. That makes this string the one
+// worth pinning.
+func TestDispatcher_AnthropicEnvVar_ChosenByCredentialKind(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name  string
+		given SecretRef
+		want  string
+	}{
+		{
+			name:  "reuse / API key defaults to ANTHROPIC_API_KEY",
+			given: SecretRef{SecretRefName: "sr", KVPath: "kv", Property: "api-key"},
+			want:  "ANTHROPIC_API_KEY",
+		},
+		{
+			name:  "an explicit API-key mount stays ANTHROPIC_API_KEY",
+			given: SecretRef{SecretRefName: "sr", KVPath: "kv", Property: "api-key", EnvVar: "ANTHROPIC_API_KEY"},
+			want:  "ANTHROPIC_API_KEY",
+		},
+		{
+			name:  "an OAuth token mounts as CLAUDE_CODE_OAUTH_TOKEN",
+			given: SecretRef{SecretRefName: "sr", KVPath: "kv", Property: "api-key", EnvVar: "CLAUDE_CODE_OAUTH_TOKEN"},
+			want:  "CLAUDE_CODE_OAUTH_TOKEN",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := (Inputs{AnthropicSR: tc.given}).AnthropicEnvVar(); got != tc.want {
+				t.Fatalf("AnthropicEnvVar() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// End-to-end through the real manifest builder: an OAuth-token credential must
+// produce an ExternalSecret whose secretKey is CLAUDE_CODE_OAUTH_TOKEN, and the
+// manifest must carry NO ANTHROPIC_API_KEY entry at all.
+func TestDispatcher_OAuthTokenExternalSecret_OmitsApiKeyVar(t *testing.T) {
+	t.Parallel()
+	manifest, err := BuildExternalSecret(ExternalSecretInputs{
+		Name:                   "ca-run1-anthropic-es",
+		Namespace:              "ns",
+		TargetSecretName:       "ca-run1-anthropic",
+		ClusterSecretStoreName: "default",
+		LocalKey:               "CLAUDE_CODE_OAUTH_TOKEN",
+		RemoteRefKey:           "user-app-secrets/org/anthropic-coding",
+		RemoteRefProperty:      "api-key",
+	})
+	if err != nil {
+		t.Fatalf("BuildExternalSecret: %v", err)
+	}
+	b, _ := json.Marshal(manifest)
+	got := string(b)
+	if !strings.Contains(got, "CLAUDE_CODE_OAUTH_TOKEN") {
+		t.Fatalf("manifest must mount the token variable: %s", got)
+	}
+	if strings.Contains(got, "ANTHROPIC_API_KEY") {
+		t.Fatalf("ANTHROPIC_API_KEY would outrank the token and win: %s", got)
+	}
+}

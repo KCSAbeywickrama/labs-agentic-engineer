@@ -3753,6 +3753,11 @@ components:
         connectedAt:
           format: date-time
           type: string
+        credentialKind:
+          enum:
+          - api_key
+          - oauth_token
+          type: string
         keyLast4:
           type: string
         keyPrefix:
@@ -3770,6 +3775,7 @@ components:
           type: string
       required:
       - kind
+      - credentialKind
       - keyPrefix
       - keyLast4
       - status

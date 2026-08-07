@@ -46,6 +46,7 @@ type Coding = Parameters<typeof CodingAgentKeySection>[0]["codingLlm"];
 
 const codingKeySet: NonNullable<Coding> = {
   kind: "anthropic",
+  credentialKind: "api_key",
   status: "connected",
   keyPrefix: "sk-ant-ap03-QRS",
   keyLast4: "wxyz",
@@ -80,7 +81,7 @@ describe("CodingAgentKeySection", () => {
     renderSection(null);
     expect(reuseRadio()).toBeChecked();
     expect(separateRadio()).not.toBeChecked();
-    expect(screen.queryByLabelText("Coding agent key")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Coding agent key or token")).not.toBeInTheDocument();
   });
 
   it("shows separate as selected, with the stored key previewed, when one is set", () => {
@@ -96,7 +97,7 @@ describe("CodingAgentKeySection", () => {
     renderSection(null);
     fireEvent.click(separateRadio());
 
-    expect(screen.getByLabelText("Coding agent key")).toBeInTheDocument();
+    expect(screen.getByLabelText("Coding agent key or token")).toBeInTheDocument();
     expect(saveMutate).not.toHaveBeenCalled();
     expect(removeMutate).not.toHaveBeenCalled();
   });
@@ -108,7 +109,7 @@ describe("CodingAgentKeySection", () => {
     const save = screen.getByRole("button", { name: "Save key" });
     expect(save).toBeDisabled();
 
-    fireEvent.change(screen.getByLabelText("Coding agent key"), {
+    fireEvent.change(screen.getByLabelText("Coding agent key or token"), {
       target: { value: "sk-ant-api03-typed" },
     });
     expect(save).toBeEnabled();

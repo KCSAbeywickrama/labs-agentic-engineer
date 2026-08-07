@@ -169,7 +169,8 @@ var ErrAnthropicDefaultKeyRequired = errors.New("anthropic: connect the organiza
 // ----------------------------------------------------------------------------
 
 type AnthropicProjection struct {
-	OcOrgID         string     `json:"ocOrgId"`
+	OcOrgID         string                  `json:"ocOrgId"`
+	CredentialKind  AnthropicCredentialKind `json:"credentialKind"`
 	KeyPrefix       string     `json:"keyPrefix"`
 	KeyLast4        string     `json:"keyLast4"`
 	Status          string     `json:"status"`
@@ -181,6 +182,7 @@ type AnthropicProjection struct {
 func projectionFromAnthropicRow(r *OrgAnthropicCredential) *AnthropicProjection {
 	return &AnthropicProjection{
 		OcOrgID:         r.OcOrgID,
+		CredentialKind:  r.CredentialKind,
 		KeyPrefix:       r.KeyPrefix,
 		KeyLast4:        r.KeyLast4,
 		Status:          r.Status,
@@ -215,7 +217,7 @@ type AnthropicConnectRequest struct {
 // lazily on first dispatch via ApplyWPSecret.
 func (s *AnthropicCredentialService) Connect(ctx context.Context, ocOrgID string, role AnthropicRole, req AnthropicConnectRequest) (*AnthropicProjection, error) {
 	key := strings.TrimSpace(req.APIKey)
-	if err := s.ValidateKey(ctx, key); err != nil {
+	if err := s.ValidateKey(ctx, role, key); err != nil {
 		return nil, err
 	}
 
@@ -225,6 +227,7 @@ func (s *AnthropicCredentialService) Connect(ctx context.Context, ocOrgID string
 	row := OrgAnthropicCredential{
 		OcOrgID:         ocOrgID,
 		Role:            role,
+		CredentialKind:  AnthropicCredentialKindOf(key),
 		KeyPrefix:       prefix,
 		KeyLast4:        last4,
 		Status:          "active",
@@ -352,23 +355,37 @@ func (s *AnthropicCredentialService) pushExternalSecret(ctx context.Context, ocO
 	return nil
 }
 
-// ValidateKey runs the connect-time validation for an Anthropic key WITHOUT
-// persisting anything: the shape checks plus the live /v1/messages probe.
+// ValidateKey runs the connect-time validation for a credential WITHOUT
+// persisting anything: the shape checks plus the live /v1/messages probe,
+// authenticated the way that KIND of credential authenticates.
+//
+// role bounds which kinds are acceptable: a Claude Code OAuth token is only
+// meaningful for the coding agent, so offering one as the org's default key is
+// rejected here rather than discovered later by a design agent that cannot
+// authenticate with it.
 //
 // It is the probe-only seam the /config PATCH orchestrator calls in its
 // pre-persist phase, so a bad key in one section fails the whole atomic patch
 // before any section is written (docs/design/org-config-consolidation.md §4).
 // Connect calls it too, so the validation logic lives in exactly one place and
 // the two paths can't drift.
-func (s *AnthropicCredentialService) ValidateKey(ctx context.Context, apiKey string) error {
+func (s *AnthropicCredentialService) ValidateKey(ctx context.Context, role AnthropicRole, apiKey string) error {
 	key := strings.TrimSpace(apiKey)
 	if key == "" {
 		return &ValidationError{Code: "anthropic_key_missing", Message: "apiKey is required"}
 	}
 	if !looksLikeAnthropicKey(key) {
-		return &ValidationError{Code: "anthropic_key_invalid", Message: "API key does not look like an Anthropic key (expected prefix 'sk-ant-')"}
+		return &ValidationError{Code: "anthropic_key_invalid", Message: "value does not look like an Anthropic credential (expected prefix 'sk-ant-')"}
 	}
-	return s.validateAnthropicKey(ctx, key)
+	kind := AnthropicCredentialKindOf(key)
+	if kind == AnthropicCredentialOAuth && role != AnthropicRoleCoding {
+		return &ValidationError{
+			Code: "anthropic_oauth_token_coding_only",
+			Message: "a Claude Code OAuth token can only be used as the coding agent's credential; " +
+				"the organization's Anthropic key must be a Console API key (sk-ant-api…)",
+		}
+	}
+	return s.validateAnthropicKey(ctx, kind, key)
 }
 
 // ----------------------------------------------------------------------------
@@ -493,11 +510,19 @@ func (s *AnthropicCredentialService) EffectiveKey(ctx context.Context, ocOrgID s
 // ----------------------------------------------------------------------------
 
 // SecretRefTriplet is a resolved SM-API secret reference: the name plus the
-// vault coordinates an ExternalSecret's remoteRef needs.
+// vault coordinates an ExternalSecret's remoteRef needs, and the env var the
+// materialised value must land under.
 type SecretRefTriplet struct {
 	Name     string
 	KVPath   string
 	Property string
+
+	// EnvVar is the name a coding run must receive this credential as —
+	// ANTHROPIC_API_KEY for a Console API key, CLAUDE_CODE_OAUTH_TOKEN for a
+	// Claude Code OAuth token. Carried here rather than re-derived at the
+	// mount site because the secret bytes are never read on that path, so
+	// nothing downstream can tell the two apart on its own.
+	EnvVar string
 }
 
 // ResolveCodingSecretRef returns the secret reference a coding run must mount
@@ -553,6 +578,7 @@ func tripletFrom(row *OrgAnthropicCredential) (SecretRefTriplet, error) {
 		Name:     derefOrEmpty(row.ResolvedSecretRefName()),
 		KVPath:   derefOrEmpty(row.ResolvedSecretRefKVPath()),
 		Property: derefOrEmpty(row.ResolvedSecretRefProperty()),
+		EnvVar:   row.CredentialKind.RunnerEnvVar(),
 	}
 	switch {
 	case ref.Name == "":
@@ -754,18 +780,34 @@ func (s *AnthropicCredentialService) fetchRow(ctx context.Context, ocOrgID strin
 // client-fault 400. Other unexpected non-5xx statuses (e.g. 429) stay a
 // ValidationError.
 //
-// Anthropic's /v1/messages requires both `x-api-key` and `anthropic-version`
-// headers; a malformed request returns 400 (which still proves the key is
-// recognized). We send a single 1-token completion request that should
+// Anthropic's /v1/messages requires `anthropic-version` plus a credential
+// header; a malformed request returns 400 (which still proves the credential
+// is recognized). We send a single 1-token completion request that should
 // either 200 OK or 401 Unauthorized.
-func (s *AnthropicCredentialService) validateAnthropicKey(ctx context.Context, key string) error {
+//
+// The credential header depends on the kind, because the two authenticate
+// differently: a Console API key goes in `x-api-key`, a Claude Code OAuth token
+// in `Authorization: Bearer`. Verified against the live API — a valid OAuth
+// token probed with `x-api-key` comes back 401 `invalid x-api-key`, so without
+// this branch every good token would be rejected at Connect.
+//
+// Bearer alone is enough; Claude Code additionally sends
+// `anthropic-beta: oauth-2025-04-20`, but the probe deliberately does not. It
+// only needs to prove the credential authenticates, and pinning a beta flag we
+// neither own nor version would make validation start failing the day that flag
+// is retired.
+func (s *AnthropicCredentialService) validateAnthropicKey(ctx context.Context, kind AnthropicCredentialKind, key string) error {
 	body := []byte(`{
 	  "model": "claude-haiku-4-5",
 	  "max_tokens": 1,
 	  "messages": [{"role":"user","content":"ping"}]
 	}`)
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, s.anthropicAPI+"/v1/messages", bytes.NewReader(body))
-	req.Header.Set("x-api-key", key)
+	if kind == AnthropicCredentialOAuth {
+		req.Header.Set("authorization", "Bearer "+key)
+	} else {
+		req.Header.Set("x-api-key", key)
+	}
 	req.Header.Set("anthropic-version", "2023-06-01")
 	req.Header.Set("content-type", "application/json")
 

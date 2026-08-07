@@ -472,6 +472,7 @@ func (e *CodingExecutor) resolveRunnerSecretRefs(ctx context.Context, orgID stri
 		SecretRefName: triplet.Name,
 		KVPath:        triplet.KVPath,
 		Property:      triplet.Property,
+		EnvVar:        triplet.EnvVar,
 	}
 
 	githubRow, err := e.githubCreds.GetByOrg(ctx, orgID)

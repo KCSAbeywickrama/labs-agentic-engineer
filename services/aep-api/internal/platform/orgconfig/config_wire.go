@@ -62,7 +62,13 @@ type ConfigProjection struct {
 // from orgcreds.AnthropicProjection minus ocOrgId (dropped from all
 // projections — the org is implicit from the JWT).
 type LLMProjection struct {
-	Kind            string     `json:"kind" enum:"anthropic"`
+	Kind string `json:"kind" enum:"anthropic"`
+	// CredentialKind distinguishes a Console API key from a Claude Code OAuth
+	// token (`claude setup-token`), which bills a Claude subscription instead
+	// of API credits. Only codingLlm can be an oauth_token; llm is always an
+	// api_key, because the design agent is an AI SDK call that cannot present
+	// a bearer token.
+	CredentialKind  string     `json:"credentialKind" enum:"api_key,oauth_token"`
 	KeyPrefix       string     `json:"keyPrefix"`
 	KeyLast4        string     `json:"keyLast4"`
 	Status          string     `json:"status"`

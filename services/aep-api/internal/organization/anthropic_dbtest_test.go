@@ -187,7 +187,9 @@ func TestAnthropicStatus_AbsentOrgIsNotFound_DB(t *testing.T) {
 	if !errors.As(err, &nfe) {
 		t.Fatalf("want *organization.NotFoundError, got %T: %v", err, err)
 	}
-	if nfe.What != "org_anthropic_credentials.acme" {
+	// Role-qualified: with two possible rows per org, "which one is missing"
+	// is the part that makes the error actionable.
+	if nfe.What != "org_anthropic_credentials.acme.default" {
 		t.Fatalf("NotFoundError.What: got %q", nfe.What)
 	}
 }

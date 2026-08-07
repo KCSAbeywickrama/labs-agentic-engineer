@@ -832,7 +832,7 @@ fi
 
 # Preserve any operator-supplied values across re-runs.
 ANTHROPIC_KEY="$(existing_val ANTHROPIC_API_KEY)"
-CODING_ANTHROPIC_KEY_VAL="$(existing_val AEP_CODING_ANTHROPIC_API_KEY)"
+CODING_ANTHROPIC_KEY_VAL="$(existing_val AEP_CODING_ANTHROPIC_KEY)"
 GITHUB_APP_ID_VAL="$(existing_val GITHUB_APP_ID)"
 GITHUB_CLIENT_ID_VAL="$(existing_val GITHUB_CLIENT_ID)"
 GITHUB_CLIENT_SECRET_VAL="$(existing_val GITHUB_CLIENT_SECRET)"
@@ -915,7 +915,7 @@ ANTHROPIC_API_KEY=${ANTHROPIC_KEY}
 # connects it as the org's coding-agent key) and the playground (which hands it
 # to local coding runs) — leave it empty and the coding agent reuses the key
 # above, which is the default everywhere.
-AEP_CODING_ANTHROPIC_API_KEY=${CODING_ANTHROPIC_KEY_VAL}
+AEP_CODING_ANTHROPIC_KEY=${CODING_ANTHROPIC_KEY_VAL}
 EOF
 
 echo "✅ .env file generated at $(realpath "$ENV_FILE")"

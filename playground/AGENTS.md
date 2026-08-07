@@ -101,14 +101,21 @@ it and lets the SDK use the developer's own credentials — the ones `claude log
 wrote — so a local tuning loop bills your subscription, not the platform's key.
 `code --host --api-key` opts back into key auth.
 
-`AEP_CODING_ANTHROPIC_API_KEY` bills **coding** runs to a separate key — the
-local half of the platform's per-org coding-agent key (ADR-0016). Setting it
-wins in BOTH modes, with or without `--api-key`: unlike `ANTHROPIC_API_KEY`
-(which `deployments/.env` populates for everyone), nothing sets this one
-implicitly, so its presence is already the explicit statement `--api-key` exists
-to make. Either key satisfies docker mode's pre-flight. The runner is unaware of
-any of it — whichever key wins arrives as plain `ANTHROPIC_API_KEY`, exactly as
-in production.
+`AEP_CODING_ANTHROPIC_KEY` bills **coding** runs to a separate credential — the
+local half of the platform's per-org coding-agent key (ADR-0016). It takes
+either a Console API key (`sk-ant-api…`) or a `claude setup-token` OAuth token
+(`sk-ant-oat…`, which bills a Claude subscription instead of API credits), and
+the prefix decides which. Setting it wins in BOTH modes, with or without
+`--api-key`: unlike `ANTHROPIC_API_KEY` (which `deployments/.env` populates for
+everyone), nothing sets this one implicitly, so its presence is already the
+explicit statement `--api-key` exists to make. Either credential satisfies
+docker mode's pre-flight.
+
+An API key arrives as `ANTHROPIC_API_KEY`, an OAuth token as
+`CLAUDE_CODE_OAUTH_TOKEN` — and the run gets **exactly one of them**, same as in
+production. That exclusivity is load-bearing: Claude Code ranks
+`ANTHROPIC_API_KEY` above `CLAUDE_CODE_OAUTH_TOKEN`, so a run holding both would
+authenticate with the API key and ignore the token silently.
 
 Skills load from the
 working-tree `skills/` on EVERY turn — edits apply next run, no rebuild. That now

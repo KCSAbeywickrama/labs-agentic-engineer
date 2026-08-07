@@ -222,7 +222,7 @@ func (s *Service) Patch(ctx context.Context, org, actor string, p orgconfig.Conf
 		if s.anthropicSvc == nil {
 			return nil, fmt.Errorf("orgconfig patch llm: service not configured")
 		}
-		if err := s.anthropicSvc.ValidateKey(ctx, p.LLM.Value.APIKey); err != nil {
+		if err := s.anthropicSvc.ValidateKey(ctx, AnthropicRoleDefault, p.LLM.Value.APIKey); err != nil {
 			return nil, sectionErrorFrom("llm", err)
 		}
 	}
@@ -230,7 +230,7 @@ func (s *Service) Patch(ctx context.Context, org, actor string, p orgconfig.Conf
 		if s.anthropicSvc == nil {
 			return nil, fmt.Errorf("orgconfig patch codingLlm: service not configured")
 		}
-		if err := s.anthropicSvc.ValidateKey(ctx, p.CodingLLM.Value.APIKey); err != nil {
+		if err := s.anthropicSvc.ValidateKey(ctx, AnthropicRoleCoding, p.CodingLLM.Value.APIKey); err != nil {
 			return nil, sectionErrorFrom("codingLlm", err)
 		}
 	}
@@ -355,6 +355,7 @@ func llmProjectionFrom(p *AnthropicProjection) *orgconfig.LLMProjection {
 	}
 	return &orgconfig.LLMProjection{
 		Kind:            "anthropic",
+		CredentialKind:  p.CredentialKind.String(),
 		KeyPrefix:       p.KeyPrefix,
 		KeyLast4:        p.KeyLast4,
 		Status:          p.Status,

@@ -46,6 +46,39 @@ Concretely:
   row away with it.
 - Only the live coding dispatch reads it. The design agent and the RCA agent
   stay on the default key, permanently.
+- The coding credential may be **either** a Console API key or a Claude Code
+  OAuth token from `claude setup-token`. The default key is always an API key.
+
+### Why the coding credential can be an OAuth token
+
+The coding agent is a Claude Code session, and Claude Code authenticates with
+either an API key or a long-lived OAuth token — the same choice the
+[dev container docs](https://code.claude.com/docs/en/devcontainer) offer for
+Codespaces. The token bills a Claude subscription rather than API credits, which
+for most orgs is the actual point of separating the coding agent's spend.
+
+The design agent cannot use one: it is an AI SDK model call, which speaks API
+keys only. So the asymmetry is not a policy choice but a capability one, and it
+is enforced in the schema (`credential_kind = 'api_key' OR role = 'coding'`)
+rather than left to a reader to discover by failing.
+
+`credential_kind` is **persisted on the row**, not re-derived. Dispatch reads
+the metadata row and never the secret bytes, so at mount time it has nothing to
+sniff.
+
+### Why exactly one credential variable reaches the run
+
+Claude Code's [authentication precedence](https://code.claude.com/docs/en/authentication#authentication-precedence)
+ranks `ANTHROPIC_API_KEY` **above** `CLAUDE_CODE_OAUTH_TOKEN`. A run carrying
+both would authenticate with the API key and ignore the token in silence —
+billing the exact credential the org moved away from, with no error anywhere.
+
+So the ExternalSecret materialises the credential under **one** name, chosen by
+kind, and the other is never mounted. Verified against the live API while
+building this: a valid OAuth token probed with `x-api-key` returns
+`401 invalid x-api-key`, which is also why Connect-time validation branches on
+kind (bearer for tokens, `x-api-key` for keys) instead of probing both the same
+way.
 
 ### Why "reuse" is row-absence and not a stored mode
 
@@ -87,11 +120,11 @@ an invoice, a month later.
 
 ### What the runner knows
 
-Nothing. In both modes the run receives plain `ANTHROPIC_API_KEY` via `envFrom`
-— only the vault path behind the ExternalSecret changes. The split is entirely a
-control-plane concern, so the runner image is untouched, and the same is true
-locally: `AEP_CODING_ANTHROPIC_API_KEY` in the playground resolves to the same
-`ANTHROPIC_API_KEY` the coding process has always read.
+Nothing. It reads whatever credential variable is present, exactly as Claude
+Code always has; the control plane decides which one that is and mounts it via
+`envFrom`. The runner image is untouched, and the same holds locally —
+`AEP_CODING_ANTHROPIC_KEY` in the playground resolves to `ANTHROPIC_API_KEY` or
+`CLAUDE_CODE_OAUTH_TOKEN` by prefix, and clears the other.
 
 ## Consequences
 
@@ -108,9 +141,13 @@ locally: `AEP_CODING_ANTHROPIC_API_KEY` in the playground resolves to the same
   default-only by construction, so the rule cannot leak into one by omission.
 - The org-scoped advisory lock is retained (not narrowed to the role) because
   the default's disconnect moves both rows.
-- Locally, `AEP_CODING_ANTHROPIC_API_KEY` wins in both host and docker mode and
+- Locally, `AEP_CODING_ANTHROPIC_KEY` wins in both host and docker mode and
   with or without `--api-key`. The flag exists because `deployments/.env`
   populates `ANTHROPIC_API_KEY` for everyone, making an exported key
   indistinguishable from a file-supplied one; that argument does not apply to a
   variable nothing sets implicitly, so its presence is itself the explicit
   statement.
+- Adding a third credential kind later (a cloud-provider credential, say) means
+  a new `credential_kind` value plus its env var and probe — the two switch
+  points are `AnthropicCredentialKind.RunnerEnvVar` and `validateAnthropicKey`,
+  and nothing else branches on kind.

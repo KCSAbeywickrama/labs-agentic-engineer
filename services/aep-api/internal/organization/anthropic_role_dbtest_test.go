@@ -344,3 +344,94 @@ func TestResolveCodingSecretRef_NoRowsAtAll_Errors_DB(t *testing.T) {
 		t.Fatal("an org with no Anthropic key at all must not resolve a secret ref")
 	}
 }
+
+// --- credential kind: API key vs Claude Code OAuth token ----------------------
+
+// anthropicDBOAuthToken is shaped like a `claude setup-token` result. The probe
+// is faked at the HTTP boundary, so only the SHAPE has to be realistic.
+const anthropicDBOAuthToken = "sk-ant-oat01-SubscriptionTokenForCodingRuns-9f2c"
+
+func TestAnthropicRoles_CodingAcceptsOAuthToken_DB(t *testing.T) {
+	t.Parallel()
+	svc, store, _ := anthropicRoleService(t, http.StatusOK)
+	ctx := context.Background()
+
+	connectRole(t, svc, "acme", organization.AnthropicRoleDefault, anthropicUnitKey)
+	proj := connectRole(t, svc, "acme", organization.AnthropicRoleCoding, anthropicDBOAuthToken)
+
+	if proj.CredentialKind != organization.AnthropicCredentialOAuth {
+		t.Fatalf("an sk-ant-oat token must be stored as an OAuth credential, got %q", proj.CredentialKind)
+	}
+	// The default row is unaffected and still an API key.
+	def, err := svc.Status(ctx, "acme", organization.AnthropicRoleDefault)
+	if err != nil {
+		t.Fatalf("status default: %v", err)
+	}
+	if def.CredentialKind != organization.AnthropicCredentialAPIKey {
+		t.Fatalf("the default key must stay an api_key, got %q", def.CredentialKind)
+	}
+	if got, err := store.Get(ctx, "acme", "anthropic/coding-key"); err != nil || string(got) != anthropicDBOAuthToken {
+		t.Fatalf("token bytes: %q (%v)", string(got), err)
+	}
+}
+
+// The design agent is an AI SDK model call and cannot present a bearer token, so
+// an OAuth token as the ORG's key would leave every non-coding reader unable to
+// authenticate. Rejected up front rather than discovered by a failing turn.
+func TestAnthropicRoles_DefaultRejectsOAuthToken_DB(t *testing.T) {
+	t.Parallel()
+	svc, _, _ := anthropicRoleService(t, http.StatusOK)
+
+	_, err := svc.Connect(context.Background(), "acme", organization.AnthropicRoleDefault,
+		organization.AnthropicConnectRequest{APIKey: anthropicDBOAuthToken})
+	if got := anthropicValidationCode(t, err); got != "anthropic_oauth_token_coding_only" {
+		t.Fatalf("code: got %q, want anthropic_oauth_token_coding_only (err %v)", got, err)
+	}
+}
+
+// The whole reason the kind is persisted: dispatch reads the row, never the
+// bytes, so this is the only thing that can tell it which variable to mount.
+// Getting it wrong means Claude Code ignores the token (ANTHROPIC_API_KEY
+// outranks CLAUDE_CODE_OAUTH_TOKEN) and bills the default key in silence.
+func TestResolveCodingSecretRef_OAuthTokenMountsClaudeCodeVar_DB(t *testing.T) {
+	t.Parallel()
+	svc, _, repo := anthropicRoleService(t, http.StatusOK)
+	ctx := context.Background()
+
+	connectRole(t, svc, "acme", organization.AnthropicRoleDefault, anthropicUnitKey)
+	stampTriplet(t, repo, "acme", organization.AnthropicRoleDefault,
+		"acme-anthropic", "user-app-secrets/wc-acme/acme-anthropic", "api-key")
+	connectRole(t, svc, "acme", organization.AnthropicRoleCoding, anthropicDBOAuthToken)
+	stampTriplet(t, repo, "acme", organization.AnthropicRoleCoding,
+		"acme-anthropic-coding", "user-app-secrets/wc-acme/acme-anthropic-coding", "api-key")
+
+	ref, err := svc.ResolveCodingSecretRef(ctx, "acme")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if ref.EnvVar != "CLAUDE_CODE_OAUTH_TOKEN" {
+		t.Fatalf("an OAuth token must be mounted as CLAUDE_CODE_OAUTH_TOKEN, got %q", ref.EnvVar)
+	}
+	if ref.KVPath != "user-app-secrets/wc-acme/acme-anthropic-coding" {
+		t.Fatalf("wrong vault path: %+v", ref)
+	}
+}
+
+// …and reuse still mounts the API-key variable, so adding OAuth support cannot
+// have changed what an org that never configured a coding key receives.
+func TestResolveCodingSecretRef_ReuseMountsApiKeyVar_DB(t *testing.T) {
+	t.Parallel()
+	svc, _, repo := anthropicRoleService(t, http.StatusOK)
+
+	connectRole(t, svc, "acme", organization.AnthropicRoleDefault, anthropicUnitKey)
+	stampTriplet(t, repo, "acme", organization.AnthropicRoleDefault,
+		"acme-anthropic", "user-app-secrets/wc-acme/acme-anthropic", "api-key")
+
+	ref, err := svc.ResolveCodingSecretRef(context.Background(), "acme")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if ref.EnvVar != "ANTHROPIC_API_KEY" {
+		t.Fatalf("reuse must mount ANTHROPIC_API_KEY, got %q", ref.EnvVar)
+	}
+}

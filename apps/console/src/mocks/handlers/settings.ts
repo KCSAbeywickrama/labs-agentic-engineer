@@ -221,6 +221,7 @@ export const settingsHandlers = [
       } else {
         llm = {
           kind: "anthropic",
+          credentialKind: "api_key",
           status: "connected",
           keyPrefix: body.llm.apiKey.slice(0, 7),
           keyLast4: body.llm.apiKey.slice(-4),
@@ -241,6 +242,11 @@ export const settingsHandlers = [
       } else {
         codingLlm = {
           kind: "anthropic",
+          // The coding agent may bill a Claude subscription instead: a
+          // `claude setup-token` value is an oauth_token, not an api_key.
+          credentialKind: body.codingLlm.apiKey.startsWith("sk-ant-oat")
+            ? "oauth_token"
+            : "api_key",
           status: "connected",
           keyPrefix: body.codingLlm.apiKey.slice(0, 7),
           keyLast4: body.codingLlm.apiKey.slice(-4),

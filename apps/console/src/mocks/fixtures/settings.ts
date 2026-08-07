@@ -85,6 +85,7 @@ export const githubConnectedFixture: GitProviderProjection = {
 
 export const llmConnectedFixture: LLMProjection = {
   kind: "anthropic",
+  credentialKind: "api_key",
   status: "connected",
   keyPrefix: "sk-ant-",
   keyLast4: "wxyz",

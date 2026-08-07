@@ -21,6 +21,7 @@ import {
   Alert,
   Box,
   Button,
+  Chip,
   Dialog,
   DialogActions,
   DialogContent,
@@ -106,7 +107,9 @@ export function CodingAgentKeySection({
         Coding agent key
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-        Bill the coding agent to a separate Anthropic key. Everything else —
+        Bill the coding agent to a separate credential — either another
+        Anthropic API key, or a token from <code>claude setup-token</code> to
+        bill a Claude subscription instead of API credits. Everything else —
         requirements, architecture, and task generation — keeps using the key
         above either way.
       </Typography>
@@ -131,9 +134,22 @@ export function CodingAgentKeySection({
         <Box sx={{ display: "flex", flexDirection: "column", gap: 2, mt: 2 }}>
           {codingLlm && (
             <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
-              <Typography variant="body2" fontFamily="monospace">
-                {codingLlm.keyPrefix}•••••••••{codingLlm.keyLast4}
-              </Typography>
+              <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                <Typography variant="body2" fontFamily="monospace">
+                  {codingLlm.keyPrefix}•••••••••{codingLlm.keyLast4}
+                </Typography>
+                {/* Which of the two it is decides what gets billed, so it is
+                    stated rather than left to be inferred from the prefix. */}
+                <Chip
+                  size="small"
+                  variant="outlined"
+                  label={
+                    codingLlm.credentialKind === "oauth_token"
+                      ? "Claude subscription"
+                      : "API key"
+                  }
+                />
+              </Box>
               <Typography variant="body2" color="text.secondary">
                 Connected {new Date(codingLlm.connectedAt).toLocaleString()}
               </Typography>
@@ -144,7 +160,7 @@ export function CodingAgentKeySection({
           )}
 
           <TextField
-            label={codingLlm ? "Replace coding agent key" : "Coding agent key"}
+            label={codingLlm ? "Replace coding agent key" : "Coding agent key or token"}
             placeholder="sk-ant-..."
             type={showKey ? "text" : "password"}
             value={apiKey}

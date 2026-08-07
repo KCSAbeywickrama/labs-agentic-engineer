@@ -45,23 +45,34 @@ import (
 // failed run is an RDS snapshot restore + corrected re-run (forward-only; no
 // down migration).
 func RunPhase13AnthropicCredentialRole(ctx context.Context, db *gorm.DB) error {
-	// 1. expand — DEFAULT backfills existing rows as part of the ALTER.
+	// 1. expand — DEFAULTs backfill existing rows as part of the ALTER. Every
+	//    pre-migration row is the org's default Console API key, which is
+	//    exactly what both defaults say.
 	if err := db.WithContext(ctx).Exec(
 		`ALTER TABLE org_anthropic_credentials
 		   ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'default'`).Error; err != nil {
 		return fmt.Errorf("phase13 expand (role column): %w", err)
 	}
+	// credential_kind decides how a credential is probed and which env var a
+	// coding run receives it as. Dispatch reads this row and never the secret
+	// bytes, so the kind has to be stored rather than re-derived from the key.
+	if err := db.WithContext(ctx).Exec(
+		`ALTER TABLE org_anthropic_credentials
+		   ADD COLUMN IF NOT EXISTS credential_kind TEXT NOT NULL DEFAULT 'api_key'`).Error; err != nil {
+		return fmt.Errorf("phase13 expand (credential_kind column): %w", err)
+	}
 
-	// 2. verify — expected 0; the column default admits nothing else yet.
+	// 2. verify — expected 0 for both; the column defaults admit nothing else yet.
 	var unknown int64
 	if err := db.WithContext(ctx).Raw(
 		`SELECT count(*) FROM org_anthropic_credentials
-		   WHERE role NOT IN ('default','coding')`).Scan(&unknown).Error; err != nil {
+		   WHERE role NOT IN ('default','coding')
+		      OR credential_kind NOT IN ('api_key','oauth_token')`).Scan(&unknown).Error; err != nil {
 		return fmt.Errorf("phase13 verify: %w", err)
 	}
 	if unknown > 0 {
-		return fmt.Errorf("phase13 aborted: %d org_anthropic_credentials row(s) carry a role "+
-			"outside ('default','coding'); correct them before adding the CHECK", unknown)
+		return fmt.Errorf("phase13 aborted: %d org_anthropic_credentials row(s) carry a role or "+
+			"credential_kind outside the allowed sets; correct them before adding the CHECKs", unknown)
 	}
 
 	// 3. contract — CHECK + composite PK. Both are wrapped in DO blocks because
@@ -78,6 +89,37 @@ func RunPhase13AnthropicCredentialRole(ctx context.Context, db *gorm.DB) error {
 		     ALTER TABLE org_anthropic_credentials
 		       ADD CONSTRAINT org_anthropic_credentials_role_check
 		       CHECK (role IN ('default','coding'));
+		   END IF;
+		 END $$`,
+
+		`DO $$
+		 BEGIN
+		   IF NOT EXISTS (
+		     SELECT 1 FROM pg_constraint
+		      WHERE conrelid = 'org_anthropic_credentials'::regclass
+		        AND conname  = 'org_anthropic_credentials_credential_kind_check'
+		   ) THEN
+		     ALTER TABLE org_anthropic_credentials
+		       ADD CONSTRAINT org_anthropic_credentials_credential_kind_check
+		       CHECK (credential_kind IN ('api_key','oauth_token'));
+		   END IF;
+		 END $$`,
+
+		// An OAuth token bills a Claude subscription and is presented by Claude
+		// Code itself, so only the coding agent can carry one — the design
+		// agent is an AI SDK model call that speaks API keys only. Enforced in
+		// the schema because a default-role OAuth row would leave every
+		// non-coding reader unable to authenticate, with no obvious cause.
+		`DO $$
+		 BEGIN
+		   IF NOT EXISTS (
+		     SELECT 1 FROM pg_constraint
+		      WHERE conrelid = 'org_anthropic_credentials'::regclass
+		        AND conname  = 'org_anthropic_credentials_oauth_is_coding_only'
+		   ) THEN
+		     ALTER TABLE org_anthropic_credentials
+		       ADD CONSTRAINT org_anthropic_credentials_oauth_is_coding_only
+		       CHECK (credential_kind = 'api_key' OR role = 'coding');
 		   END IF;
 		 END $$`,
 

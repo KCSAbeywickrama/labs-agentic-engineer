@@ -98,19 +98,19 @@ test("docker mode always passes the key through — a container reaches no crede
   assert.equal(args[at - 1], "-e", "forwarded by name, so the value never lands in argv");
 });
 
-// AEP_CODING_ANTHROPIC_API_KEY is the local half of the platform's per-org
+// AEP_CODING_ANTHROPIC_KEY is the local half of the platform's per-org
 // coding-agent key. Nothing populates it implicitly (deployments/.env carries
 // only ANTHROPIC_API_KEY), so setting it IS the explicit intent --api-key
 // exists to express — which is why it wins in both modes and without the flag.
 function withCodingKeyInEnv(value: string | undefined, body: () => void): void {
-  const restore = process.env.AEP_CODING_ANTHROPIC_API_KEY;
-  if (value === undefined) delete process.env.AEP_CODING_ANTHROPIC_API_KEY;
-  else process.env.AEP_CODING_ANTHROPIC_API_KEY = value;
+  const restore = process.env.AEP_CODING_ANTHROPIC_KEY;
+  if (value === undefined) delete process.env.AEP_CODING_ANTHROPIC_KEY;
+  else process.env.AEP_CODING_ANTHROPIC_KEY = value;
   try {
     body();
   } finally {
-    if (restore === undefined) delete process.env.AEP_CODING_ANTHROPIC_API_KEY;
-    else process.env.AEP_CODING_ANTHROPIC_API_KEY = restore;
+    if (restore === undefined) delete process.env.AEP_CODING_ANTHROPIC_KEY;
+    else process.env.AEP_CODING_ANTHROPIC_KEY = restore;
   }
 }
 
@@ -149,6 +149,54 @@ test("docker mode substitutes the coding key by value, never into argv", () => {
 
 // A blank export must not count as "configured" — otherwise it would
 // authenticate the run with an empty string instead of falling back.
+// A `claude setup-token` token bills a Claude subscription and must arrive as
+// CLAUDE_CODE_OAUTH_TOKEN. Claude Code ranks ANTHROPIC_API_KEY ABOVE it, and
+// deployments/.env gives nearly every developer one, so leaving that variable
+// in place would silently bill the default key and ignore the token entirely.
+test("an OAuth coding token displaces ANTHROPIC_API_KEY in host mode", () => {
+  withKeyInEnv("sk-ant-from-dotenv", () => {
+    withCodingKeyInEnv("sk-ant-oat01-subscription-token", () => {
+      const { env } = hostInvocation(invocationOpts, "/r");
+      assert.equal(env.CLAUDE_CODE_OAUTH_TOKEN, "sk-ant-oat01-subscription-token");
+      assert.equal(env.ANTHROPIC_API_KEY, undefined, "the API key would outrank the token and win");
+    });
+  });
+});
+
+test("an OAuth coding token displaces ANTHROPIC_API_KEY in docker mode too", () => {
+  withKeyInEnv("sk-ant-from-dotenv", () => {
+    withCodingKeyInEnv("sk-ant-oat01-subscription-token", () => {
+      const { args, env } = dockerInvocation(invocationOpts, "/r", "c1");
+      assert.equal(env.CLAUDE_CODE_OAUTH_TOKEN, "sk-ant-oat01-subscription-token");
+      assert.equal(env.ANTHROPIC_API_KEY, undefined, "the API key would outrank the token and win");
+      // Both names are forwarded; docker drops whichever is unset, so only the
+      // token crosses into the container.
+      const tokenAt = args.indexOf("CLAUDE_CODE_OAUTH_TOKEN");
+      assert.equal(args[tokenAt - 1], "-e", "forwarded BY NAME");
+      assert.ok(
+        !args.some((a) => a.includes("subscription-token")),
+        "a secret in argv is readable by any user via ps",
+      );
+    });
+  });
+});
+
+// An API-key coding credential must NOT leave a stale token behind either.
+test("an API-key coding credential clears any inherited OAuth token", () => {
+  const restore = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  process.env.CLAUDE_CODE_OAUTH_TOKEN = "sk-ant-oat01-inherited";
+  try {
+    withCodingKeyInEnv("sk-ant-api03-coding", () => {
+      const { env } = hostInvocation(invocationOpts, "/r");
+      assert.equal(env.ANTHROPIC_API_KEY, "sk-ant-api03-coding");
+      assert.equal(env.CLAUDE_CODE_OAUTH_TOKEN, undefined, "a stale token must not linger");
+    });
+  } finally {
+    if (restore === undefined) delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    else process.env.CLAUDE_CODE_OAUTH_TOKEN = restore;
+  }
+});
+
 test("a blank coding key is not a coding key", () => {
   withKeyInEnv("sk-ant-from-dotenv", () => {
     withCodingKeyInEnv("   ", () => {

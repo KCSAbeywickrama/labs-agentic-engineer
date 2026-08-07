@@ -16,7 +16,10 @@
 
 package organization
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // AnthropicRole names which reader an org's Anthropic key serves. An org always
 // has at most one row per role, so (OcOrgID, Role) is the table's primary key.
@@ -37,6 +40,61 @@ const (
 
 // String renders the role for SQL binding and log fields.
 func (r AnthropicRole) String() string { return string(r) }
+
+// AnthropicCredentialKind names HOW a stored credential authenticates, which
+// decides both how it is validated and which environment variable it must be
+// delivered as. It is persisted rather than re-derived, because dispatch reads
+// the metadata row and never the secret bytes — it has nothing to sniff.
+type AnthropicCredentialKind string
+
+const (
+	// AnthropicCredentialAPIKey is a Console API key (`sk-ant-api…`),
+	// authenticated with the `x-api-key` header. The only kind the design
+	// agent can use: it is an AI SDK model call, which speaks API keys.
+	AnthropicCredentialAPIKey AnthropicCredentialKind = "api_key"
+
+	// AnthropicCredentialOAuth is a long-lived Claude Code OAuth token from
+	// `claude setup-token`, authenticated with `Authorization: Bearer`. It
+	// bills a Claude subscription (Pro/Max/Team/Enterprise) instead of API
+	// credits, and only the coding agent can use one — it is a Claude Code
+	// session, and Claude Code is what knows how to present the token.
+	AnthropicCredentialOAuth AnthropicCredentialKind = "oauth_token"
+)
+
+// String renders the kind for SQL binding and log fields.
+func (k AnthropicCredentialKind) String() string { return string(k) }
+
+// oauthTokenPrefix is what `claude setup-token` mints. Anything else carrying
+// the `sk-ant-` shape is treated as a Console API key.
+const oauthTokenPrefix = "sk-ant-oat"
+
+// AnthropicCredentialKindOf classifies a raw credential by its prefix. The two
+// kinds are issued by different systems with non-overlapping prefixes, so the
+// value itself is the most reliable discriminator available — asking a user to
+// also declare the kind only creates a second source of truth that can
+// disagree with the key they pasted.
+func AnthropicCredentialKindOf(key string) AnthropicCredentialKind {
+	if strings.HasPrefix(key, oauthTokenPrefix) {
+		return AnthropicCredentialOAuth
+	}
+	return AnthropicCredentialAPIKey
+}
+
+// RunnerEnvVar is the environment variable a coding run must receive this
+// credential as.
+//
+// The two are mutually exclusive by necessity, not by preference: Claude Code
+// ranks `ANTHROPIC_API_KEY` ABOVE `CLAUDE_CODE_OAUTH_TOKEN`, so a container
+// holding both would authenticate with the API key and silently ignore the
+// token. Mounting exactly one is what makes the org's choice actually take
+// effect. See docs/decisions/ADR-0016 and
+// https://code.claude.com/docs/en/authentication#authentication-precedence.
+func (k AnthropicCredentialKind) RunnerEnvVar() string {
+	if k == AnthropicCredentialOAuth {
+		return "CLAUDE_CODE_OAUTH_TOKEN"
+	}
+	return "ANTHROPIC_API_KEY"
+}
 
 // SecretStoreKey is the `org_secrets` key holding this role's encrypted bytes.
 // The default role keeps the historical "anthropic/key" so no secret data has
@@ -65,8 +123,9 @@ func (r AnthropicRole) SecretRefEntity() string {
 //
 // See docs/decisions/ADR-0016-coding-agent-key-is-an-override-not-a-peer.md.
 type OrgAnthropicCredential struct {
-	OcOrgID         string        `gorm:"primaryKey;type:text" json:"ocOrgId"`
-	Role            AnthropicRole `gorm:"primaryKey;type:text;not null;default:default" json:"role"`
+	OcOrgID         string                  `gorm:"primaryKey;type:text" json:"ocOrgId"`
+	Role            AnthropicRole           `gorm:"primaryKey;type:text;not null;default:default" json:"role"`
+	CredentialKind  AnthropicCredentialKind `gorm:"type:text;not null;default:api_key;column:credential_kind" json:"credentialKind"`
 	KeyPrefix       string     `gorm:"type:text;not null;column:key_prefix" json:"keyPrefix"`
 	KeyLast4        string     `gorm:"type:text;not null;column:key_last4" json:"keyLast4"`
 	Status          string     `gorm:"type:text;not null;default:active;column:status" json:"status"`
