@@ -88,6 +88,11 @@ const (
 // to one row instead of repeating forever.
 const seqLogsUnavailable = -20
 
+// seqLogsTruncated is the stable seq of the "newest window only" banner when a
+// finished cycle's archive exceeds defaultProgressLimit. Same negative-space
+// reason as seqLogsUnavailable.
+const seqLogsTruncated = -21
+
 // logsUnavailableEvent is the console's empty state for a cycle whose log no
 // longer exists anywhere — the component was reclaimed, or this deployment has
 // no observability plane to have archived it.
@@ -102,6 +107,21 @@ func logsUnavailableEvent(reason string) contracts.ProgressEvent {
 		Kind:          "phase",
 		Phase:         "logs_unavailable",
 		Summary:       summary,
+	}
+}
+
+// logsTruncatedEvent tells the console the finished cycle had more output than
+// one progress page can carry — we kept the newest window, not the whole run.
+func logsTruncatedEvent() contracts.ProgressEvent {
+	return contracts.ProgressEvent{
+		SchemaVersion: progressSchemaVersion,
+		Seq:           seqLogsTruncated,
+		Kind:          "phase",
+		Phase:         "logs_truncated",
+		Summary: fmt.Sprintf(
+			"Showing the newest %d lines of this cycle's output.",
+			defaultProgressLimit,
+		),
 	}
 }
 
@@ -263,6 +283,11 @@ func (r *AgentProgressReader) fromText(resp *contracts.ProgressResponse, text st
 		return resp
 	}
 	resp.Lines, resp.Truncated = lines, truncated
+	if truncated && final {
+		// A settled cycle whose archive exceeded one page: lead with an honest
+		// banner so the console never looks like the whole run was this short.
+		resp.Lines = append([]contracts.ProgressEvent{logsTruncatedEvent()}, resp.Lines...)
+	}
 	if cur := lastEventMillis(resp.Lines); cur > resp.CursorMillis {
 		resp.CursorMillis = cur
 	}
@@ -308,6 +333,9 @@ func (r *AgentProgressReader) AgentProgress(ctx context.Context, row *delivery.E
 		}
 		if snap != nil {
 			resp.Lines, resp.Truncated, _ = pageEvents(snap.LogText, sinceMillis)
+			if resp.Truncated {
+				resp.Lines = append([]contracts.ProgressEvent{logsTruncatedEvent()}, resp.Lines...)
+			}
 			if cur := lastEventMillis(resp.Lines); cur > resp.CursorMillis {
 				resp.CursorMillis = cur
 			}

@@ -458,6 +458,38 @@ func TestCycleProgress_FallsBackToTheArchiveWhenThePodIsGone(t *testing.T) {
 	}
 }
 
+// A finished cycle whose archive exceeds one progress page leads with an honest
+// banner so the console never looks like the whole run was this short.
+func TestCycleProgress_ClosedArchiveOverCapLeadsWithTruncatedBanner(t *testing.T) {
+	var b strings.Builder
+	for i := 0; i < defaultProgressLimit+25; i++ {
+		fmt.Fprintf(&b, "{\"schemaVersion\":1,\"kind\":\"log\",\"summary\":\"line-%d\",\"ts\":\"2026-08-06T10:00:00.%09dZ\"}\n", i, i)
+	}
+	live := &stubLive{err: fmt.Errorf("%w: ca-trunc", ErrComponentGone)}
+	archive := &stubArchive{text: b.String()}
+	cycle := liveCycle("trunc")
+	ended := time.Now().UTC()
+	cycle.EndedAt = &ended
+
+	resp, err := NewAgentProgressReader(live, nil).WithArchive(archive).
+		CycleProgress(context.Background(), cycle, 0)
+	if err != nil {
+		t.Fatalf("CycleProgress: %v", err)
+	}
+	if len(resp.Lines) < 2 || resp.Lines[0].Phase != "logs_truncated" {
+		t.Fatalf("want leading logs_truncated banner, got %+v", resp.Lines)
+	}
+	if resp.Lines[0].Seq != seqLogsTruncated {
+		t.Fatalf("Seq = %d, want %d", resp.Lines[0].Seq, seqLogsTruncated)
+	}
+	if !resp.Truncated || !resp.Final {
+		t.Fatalf("Truncated=%v Final=%v, want both true", resp.Truncated, resp.Final)
+	}
+	if got := len(resp.Lines) - 1; got != defaultProgressLimit {
+		t.Fatalf("content lines = %d, want %d", got, defaultProgressLimit)
+	}
+}
+
 // Nothing left to read must SAY so. An empty stream reads like an agent that
 // never spoke, which is a different and much more alarming thing.
 func TestCycleProgress_UnavailableWhenComponentAndArchiveAreBothGone(t *testing.T) {

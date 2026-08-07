@@ -45,6 +45,9 @@ The platform stores no agent logs. Three sources answer, in order:
    the Component has been reclaimed or no observability plane is configured. An
    empty stream and a lost log look identical to a reader and mean opposite
    things about the agent, so the platform never lets "gone" render as "silent".
+4. **Truncated** — when a finished cycle's archive exceeds one progress page
+   (200 events), the response leads with a `logs_truncated` phase line naming
+   the window, then the newest lines. Older output is not paged into the UI yet.
 
 The one thing taken out of a terminal pod's log is the runner's token-usage
 line, stamped onto the cycle row. That is accounting, not logging.
