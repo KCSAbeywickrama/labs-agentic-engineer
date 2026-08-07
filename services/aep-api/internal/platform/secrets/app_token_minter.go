@@ -261,7 +261,10 @@ func parseRSAPrivateKey(pemBytes []byte) (*rsa.PrivateKey, error) {
 func truncateBody(body []byte) string {
 	s := string(body)
 	if len(s) > 200 {
-		s = s[:200] + "…"
+		// Drop a rune the byte cut split — invalid UTF-8 is re-encoded by json as
+		// U+FFFD in the surfaced error. A RuneStart walk is not enough: a lead
+		// byte is itself a rune start, so it leaves the split rune's head behind.
+		s = strings.ToValidUTF8(s[:200], "") + "…"
 	}
 	return strings.ReplaceAll(s, "\n", " ")
 }

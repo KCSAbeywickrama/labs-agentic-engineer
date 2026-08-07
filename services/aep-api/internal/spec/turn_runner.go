@@ -59,9 +59,9 @@ type turnJob struct {
 	turnID           string
 	orgID            string
 	projectID        string
-	flow             string // recognised `/<skill>` token ("start", "design", …); "" for plain chat
-	conversationID   string // FE-chosen uuid (agent_turns key)
-	nsConversationID string // namespaced agents-service id
+	flow             string            // recognised `/<skill>` token ("start", "design", …); "" for plain chat
+	conversationID   string            // FE-chosen uuid (agent_turns key)
+	nsConversationID string            // namespaced agents-service id
 	turn             agentsvc.TurnSpec // what this turn is FOR (the agents service composes the text)
 	target           string            // spec-bundle path this turn should write to, when pinned
 	summary          string            // raw user instruction (feed line subject)
@@ -441,20 +441,17 @@ func firstLine(s string, max int) string {
 	}
 	s = strings.TrimSpace(s)
 	if len(s) > max {
-		cut := s[:max]
-		// Do not split a multi-byte rune.
-		for len(cut) > 0 && !isRuneStart(cut[len(cut)-1]) {
-			cut = cut[:len(cut)-1]
-		}
-		s = strings.TrimSpace(cut) + "…"
+		// Do not leave half a rune behind. Walking back to a RuneStart is NOT
+		// enough — a lead byte is itself a rune start, so `é` cut after its first
+		// byte survives the walk and the result is still invalid UTF-8, which json
+		// re-encodes as U+FFFD. ToValidUTF8 drops the incomplete sequence outright.
+		s = strings.TrimSpace(strings.ToValidUTF8(s[:max], "")) + "…"
 	}
 	if s == "" {
 		s = "agent turn"
 	}
 	return s
 }
-
-func isRuneStart(b byte) bool { return b&0xC0 != 0x80 }
 
 // failedTerminal builds a failed TurnTerminal.
 func failedTerminal(reason, message string, paths []string) TurnTerminal {

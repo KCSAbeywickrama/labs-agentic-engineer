@@ -287,7 +287,13 @@ func generateRandomHex(byteLen int) (string, error) {
 func truncateForError(b []byte) string {
 	s := string(b)
 	if len(s) > 200 {
-		s = s[:200] + "…"
+		// Drop a rune the byte cut split. This lands in ValidationError.Message,
+		// which the console shows verbatim, and GitHub/Anthropic both return
+		// non-ASCII prose: invalid UTF-8 is re-encoded by json as U+FFFD, so the
+		// user reads a replacement glyph. Note a RuneStart walk does NOT fix this
+		// — a lead byte IS a rune start, so it leaves the dangling head of the
+		// split rune behind.
+		s = strings.ToValidUTF8(s[:200], "") + "…"
 	}
 	return strings.ReplaceAll(s, "\n", " ")
 }

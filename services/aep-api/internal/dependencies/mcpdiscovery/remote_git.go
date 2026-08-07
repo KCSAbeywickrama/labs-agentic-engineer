@@ -361,7 +361,10 @@ func escapePath(p string) string {
 func truncateForError(b []byte) string {
 	const max = 512
 	if len(b) > max {
-		return string(b[:max]) + "…"
+		// Drop a rune the byte cut split — invalid UTF-8 is re-encoded by json as
+		// U+FFFD in the surfaced error. A RuneStart walk is not enough: a lead
+		// byte is itself a rune start, so it leaves the split rune's head behind.
+		return strings.ToValidUTF8(string(b[:max]), "") + "…"
 	}
 	return string(b)
 }
