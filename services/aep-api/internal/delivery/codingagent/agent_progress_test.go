@@ -196,9 +196,22 @@ func TestTextToProgressEvents(t *testing.T) {
 	for i := 0; i < defaultProgressLimit+50; i++ {
 		b.WriteString(`{"schemaVersion":1,"kind":"log","summary":"line"}` + "\n")
 	}
-	capped, _ := textToProgressEvents(b.String())
+	capped, cappedTruncated := textToProgressEvents(b.String())
 	if len(capped) != defaultProgressLimit {
 		t.Errorf("capped len = %d, want %d", len(capped), defaultProgressLimit)
+	}
+	if !cappedTruncated {
+		t.Error("an over-cap page must report truncated")
+	}
+	// …and it must SAY so, because nothing consumes the truncated flag.
+	if capped[0].Seq != seqHeadDropped || !strings.Contains(capped[0].Summary, "earlier line(s) omitted") {
+		t.Errorf("first event must be the omission marker, got %+v", capped[0])
+	}
+	if capped[0].Ts != "" {
+		t.Errorf("the marker must stay untimestamped so it cannot advance the cursor, got %q", capped[0].Ts)
+	}
+	if last := capped[len(capped)-1]; last.Seq == seqHeadDropped {
+		t.Error("the marker belongs at the head of the window, not the tail")
 	}
 }
 

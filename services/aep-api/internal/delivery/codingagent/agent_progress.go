@@ -100,6 +100,10 @@ const (
 	seqBootBackoff    = -12 // ImagePullBackOff / ErrImagePull (pull retrying)
 	seqBootConfig     = -13 // CreateContainerConfigError / secrets not yet materialised
 	seqBootStarting   = -14 // container Running, agent has not emitted its first line
+
+	// seqHeadDropped marks the "earlier output omitted" row. Same stable-negative
+	// contract as the bootstrap seqs above, for the same dedup reason.
+	seqHeadDropped = -20
 )
 
 // bootstrapEvent maps a pre-stdout runner state to the synthetic progress line
@@ -454,9 +458,29 @@ func textToProgressEvents(text string) ([]contracts.ProgressEvent, bool) {
 		})
 	}
 	if len(out) > defaultProgressLimit {
-		return out[len(out)-defaultProgressLimit:], true
+		// Keeping the NEWEST window is right, but dropping the rest in silence is
+		// not: a fresh attach to a long finished run showed its last 200 events
+		// with nothing to say the run had started earlier. Truncated carries that
+		// fact on the response and no reader has ever consumed it (no wire field,
+		// no console branch), so say it in the feed — the same way the scanner
+		// overflow above does.
+		kept := out[len(out)-(defaultProgressLimit-1):]
+		return append([]contracts.ProgressEvent{headDroppedEvent(len(out) - len(kept))}, kept...), true
 	}
 	return out, scanFailed
+}
+
+// headDroppedEvent is the "earlier output omitted" row. Its seq is stable and
+// negative for the same reason the bootstrap seqs are: the console dedups by
+// (cycle, seq), positive seqs belong to the runner, and Ts is left empty so the
+// marker never advances the cursor past a line the reader has not seen.
+func headDroppedEvent(dropped int) contracts.ProgressEvent {
+	return contracts.ProgressEvent{
+		SchemaVersion: progressSchemaVersion,
+		Seq:           seqHeadDropped,
+		Kind:          "log",
+		Summary:       fmt.Sprintf("… %d earlier line(s) omitted — showing the most recent %d", dropped, defaultProgressLimit-1),
+	}
 }
 
 // dropTruncatedTail removes a trailing partial line — one the source cut
