@@ -69,7 +69,7 @@ it), and every former feature→feature edge becomes a legal slice→root type r
 | `build` (buildpipe) | the whole-spec gate + `v<N>` tag cut, **the milestone plan path** (supersede the previous version, mint `v<N>`'s milestone, admit the run row, then plan its Tasks and mint its gates), the version ledger, dep-drawer preflight | `MilestoneRun`/`StartRunRequest`, and the planner via `SpecPlanner` |
 | `task` (taskflow) | the GitHub-native Task READ surface (list/get, scoped to a version by milestone membership) + the plan turn, which mints one **prose** issue per Task **into the version's milestone**, assigned at creation; plus the SRE/RCA handoff's adoption leg | the read DTOs, the milestone label vocabulary, and the run rows (via `MilestoneResolver`) |
 | `execution` | the executions READ surface: the per-Task progress endpoint, the task-log SSE stream, `OpsExecutionReader`. It writes nothing and dispatches nothing — the only execution rows left are the provisioning gates' | `TaskStreamHub`, the executions kernel |
-| `eventcore` | the event plane of the milestone-run loop: the auto-merge policy seam, the merged-PR path-diff build fan-out + per-`(component, SHA)` re-trigger budget, fix/conflict/red-main issue minting, milestone-matched predicate re-evaluation, adoption, and the reconcile sweep | the milestone model (labels, `MilestoneRun`/`RunCycle`, run signals), `DiffComponents`/`BuildRunName` and `BuildTerminalObserver`; **no Temporal** — it reaches the supervisor only through the `RunSignaler`/`RunStarter` ports |
+| `eventcore` | the event plane of the milestone-run loop: the auto-merge policy seam, the merged-PR path-diff build fan-out + per-`(component, SHA)` re-trigger budget, fix/conflict/red-main issue minting, milestone-matched predicate re-evaluation, adoption, the reconcile sweep, and the build sweep that observes those builds reaching terminal | the milestone model (labels, `MilestoneRun`/`RunCycle`, run signals), `DiffComponents`/`BuildRunName` and `BuildTerminalObserver`; **no Temporal** — it reaches the supervisor only through the `RunSignaler`/`RunStarter` ports |
 | `run` | the milestone run SUPERVISOR: the wait state + dispatch predicate, the cycle loop, the four budgets + no-progress + ceiling, the validation cycle, settle, and cancel. Plus the `Supervisor` handle the event plane and the build click signal and start runs through | `Runtime`, the milestone model, `RunStatus`/`MilestoneRunWorkflowID`, `MilestoneDispatch`, `DiffComponents`/`BuildRunNamePrefix`; **no GitHub client, no gorm** |
 | `runread` | the run READ surface: a version's runs + their cycles, ONE SSE stream stitching the per-cycle agent logs, and cancel. Owns no state and decides nothing | the run/cycle entities and `IsTerminalRunState`; reaches the pod log through `CycleLogReader` and the supervisor through `RunCanceller`, so it drags in neither a cluster client nor a workflow engine |
 | `codingagent` | the CodingExecutor (ONE dispatch entry point: launch a cycle's agent Job), the build-auth retry, the job watchers and the Job templates | `MilestoneDispatch`/`MilestoneDispatcher`, `TaskStreamHub`, `BuildTerminalObserver` |
@@ -99,7 +99,7 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
 | `MilestoneRunStore` (active-run read · admit · settle · list) | needs | `build` → the root run repository. The 409 pre-check and the admission that arms the spec-run mutex |
 | `SpecPlanner` (`PlanIntoMilestone`) | needs | `build` → `task`. The planning turn, reached through the root exactly as `TaskReader` is, so `build` names no sibling |
 | `GateResolver` (author dependencies + mint gates into a milestone) | needs | `build` → `dependencies/provisioning`. Gates are dispatch holds, never agent work |
-| `BuildTrigger` (trigger at commit + list a component's runs) | needs | `clients/openchoreo` — the fan-out, and the run list the re-trigger budget is derived from |
+| `BuildTrigger` (stage the org clone credential · trigger at commit · list a component's runs) | needs | `clients/openchoreo` — the fan-out, and the run list the re-trigger budget is derived from. Staging is its own verb because the credential is per-ORG while a trigger is per-component: a caller building N components stages once and reuses the reference |
 | `IssueClient` (mint · milestone membership · milestone counts · assign) · `PRReader` · `PRMerger` | needs | `sourcecontrol` — every GitHub write the event plane makes, on the org's own credential |
 | `ValidationContext` · `ValidationCredentials` | offers | the S2S runner callbacks (`/internal/v1/validation/{cycleId}/…`, via the internalServer — not the public edge). Keyed by the CYCLE the pod was dispatched for, which is the only identity a runner has |
 
@@ -241,6 +241,18 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   WorkflowRuns OpenChoreo already holds for `(component, commit)` — the same count that enforces the
   one-automatic-re-trigger budget, so idempotency and the budget can never disagree. Per-component build
   state is derived from OpenChoreo on read, never stored, which is why a counter column would be wrong.
+- **A run-loop build reaches `OnBuildTerminal` through `eventcore`'s build sweep, and nothing else.** The
+  `BuildTerminalObserver`'s other caller is the `codingagent` ExecWatcher, which sweeps `kind=build`
+  execution rows — and the run loop records its cycles in `run_cycles`, so it mints none. The sweep derives
+  everything per pass (live runs → the cycle's merge SHA → the merged PR's path diff → the component's
+  WorkflowRuns) and reports only the NEWEST attempt, and only once that attempt is itself terminal. That
+  last rule is what makes re-reporting safe: a terminal run stays terminal and is re-read every pass, so
+  reporting an older attempt would spend the re-trigger budget twice and mint a fix issue while the retry
+  was still in flight.
+- **The build clone credential is staged once per fan-out, never per component.** It is ONE per-org
+  object and OpenChoreo has no update verb, so staging is delete-then-create; staging inside the fan-out's
+  per-component goroutines had them racing to delete and recreate the same object, and the loser dispatched
+  a build with an empty `secretRef` that cloned anonymously and died at checkout against a private repo.
 - **The kernel names no feature.** The root holds only types/ports/Temporal infra; it never imports a
   sub-package (`root ⊥ slice`), and the domain never imports `internal/feature/*`.
 - **`*run.Supervisor` stays a nil-safe concrete type**, not an interface, at the composition root — the

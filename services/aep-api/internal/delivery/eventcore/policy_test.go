@@ -237,7 +237,7 @@ func TestBudgetIsOnePerComponentPerSHA(t *testing.T) {
 
 	// The merge fan-out: one run, and a redelivery adds none.
 	for i := 0; i < 3; i++ {
-		if _, err := h.events.ensureBuildRun(ctx, testOrg, testProject, "order-service", sha, mergeBuildLimit); err != nil {
+		if _, err := h.events.ensureBuildRun(ctx, testOrg, testProject, "order-service", sha, staged("org-git-secret"), mergeBuildLimit); err != nil {
 			t.Fatalf("fan-out %d: %v", i, err)
 		}
 	}
@@ -246,11 +246,11 @@ func TestBudgetIsOnePerComponentPerSHA(t *testing.T) {
 	}
 
 	// The red path allows one more, and never a third.
-	attempt, err := h.events.ensureBuildRun(ctx, testOrg, testProject, "order-service", sha, redBuildLimit)
+	attempt, err := h.events.ensureBuildRun(ctx, testOrg, testProject, "order-service", sha, staged("org-git-secret"), redBuildLimit)
 	if err != nil || attempt != 2 {
 		t.Fatalf("the first red must re-trigger attempt 2, got (%d, %v)", attempt, err)
 	}
-	attempt, err = h.events.ensureBuildRun(ctx, testOrg, testProject, "order-service", sha, redBuildLimit)
+	attempt, err = h.events.ensureBuildRun(ctx, testOrg, testProject, "order-service", sha, staged("org-git-secret"), redBuildLimit)
 	if err != nil || attempt != 0 {
 		t.Fatalf("the budget is spent after one re-trigger, got (%d, %v)", attempt, err)
 	}
@@ -259,7 +259,7 @@ func TestBudgetIsOnePerComponentPerSHA(t *testing.T) {
 	}
 
 	// A NEW commit starts a fresh allowance — the budget is per SHA.
-	attempt, err = h.events.ensureBuildRun(ctx, testOrg, testProject, "order-service", "feedfacefeed0", mergeBuildLimit)
+	attempt, err = h.events.ensureBuildRun(ctx, testOrg, testProject, "order-service", "feedfacefeed0", staged("org-git-secret"), mergeBuildLimit)
 	if err != nil || attempt != 1 {
 		t.Fatalf("a new merge SHA gets its own attempt 1, got (%d, %v)", attempt, err)
 	}

@@ -73,6 +73,19 @@ func (e *Events) fanOutBuilds(ctx context.Context, orgID, projectID string, run 
 		return nil
 	}
 
+	// Stage the org's clone credential ONCE, before the fan-out, and hand every
+	// component the same reference. The credential is per-org and every component
+	// would stage byte-identical content, so staging inside the goroutines below
+	// bought nothing and cost correctness: OpenChoreo has no update verb, so a
+	// stage is delete-then-create against one shared object, and N of those in
+	// parallel let one goroutine delete what another had just created. The loser
+	// got an empty reference and built a component that could not clone.
+	secretRef, err := e.p.Builds.StageBuildCredential(ctx, orgID, projectID,
+		fmt.Sprintf("fanout %s@%s", projectID, delivery.ShortSHA(mergeSHA)))
+	if err != nil {
+		return fmt.Errorf("stage build credential for fan-out: %w", err)
+	}
+
 	var (
 		mu   sync.Mutex
 		errs []error
@@ -99,7 +112,7 @@ func (e *Events) fanOutBuilds(ctx context.Context, orgID, projectID string, run 
 			// the build output is how the agent learns whether its code compiles.
 			e.checkWiringConformance(ctx, run, component)
 
-			attempt, berr := e.ensureBuildRun(ctx, orgID, projectID, component, mergeSHA, mergeBuildLimit)
+			attempt, berr := e.ensureBuildRun(ctx, orgID, projectID, component, mergeSHA, staged(secretRef), mergeBuildLimit)
 			if berr != nil {
 				mu.Lock()
 				errs = append(errs, berr)
@@ -144,7 +157,16 @@ func (e *Events) ensureComponent(ctx context.Context, orgID, projectID, componen
 // The attempt ordinal rides the run NAME, which is what makes the count
 // possible: attempts of one (component, commit) share a name prefix and differ
 // only in the trailing ordinal.
-func (e *Events) ensureBuildRun(ctx context.Context, orgID, projectID, component, commitSHA string, limit int) (int, error) {
+// stage supplies the clone credential, and is called ONLY once the budget has
+// allowed a trigger. Both halves of that matter. Who stages depends on how many
+// components the caller is about to build — the fan-out stages once for all of
+// them and hands back the same reference, while a single-component caller
+// stages on demand — and staging is a destructive delete-then-create against
+// one per-org object, so a caller whose budget is already spent must not pay
+// for it. Reporting a terminal build is idempotent and repeats every sweep
+// pass; staging eagerly there would rewrite the org's live credential every
+// pass, for a build that was never going to be triggered again.
+func (e *Events) ensureBuildRun(ctx context.Context, orgID, projectID, component, commitSHA string, stage stageFunc, limit int) (int, error) {
 	runs, err := e.p.Builds.ListBuildRuns(ctx, orgID, projectID, component)
 	if err != nil {
 		return 0, err
@@ -153,12 +175,27 @@ func (e *Events) ensureBuildRun(ctx context.Context, orgID, projectID, component
 	if existing >= limit {
 		return 0, nil
 	}
+	secretRef, err := stage(ctx)
+	if err != nil {
+		return 0, err
+	}
 	attempt := existing + 1
 	name := delivery.BuildRunName(projectID, component, commitSHA, attempt)
-	if err := e.p.Builds.TriggerBuildAtCommit(ctx, orgID, projectID, component, commitSHA, name); err != nil {
+	if err := e.p.Builds.TriggerBuildAtCommit(ctx, orgID, projectID, component, commitSHA, name, secretRef); err != nil {
 		return 0, err
 	}
 	return attempt, nil
+}
+
+// stageFunc yields the clone credential a build should carry. An empty
+// reference with a nil error means "clone unauthenticated", which is correct
+// for a public repo.
+type stageFunc func(context.Context) (string, error)
+
+// staged wraps an already-resolved reference — the fan-out's case, where one
+// stage serves every component.
+func staged(secretRef string) stageFunc {
+	return func(context.Context) (string, error) { return secretRef, nil }
 }
 
 // OnBuildTerminal is the build half of the routing table (§8 row 4): one
@@ -195,7 +232,20 @@ func (e *Events) OnBuildTerminal(ctx context.Context, ev delivery.BuildTerminal)
 		return nil
 	}
 	if e.p.Builds != nil {
-		attempt, berr := e.ensureBuildRun(ctx, ev.OrgID, ev.ProjectID, ev.Component, ev.CommitSHA, redBuildLimit)
+		// One component, so this stages for itself — there is no sibling to
+		// contend with, unlike the merge fan-out which stages once for all. It is
+		// deliberately lazy: this path re-runs on every sweep pass for as long as
+		// the build stays terminal, and a component whose budget is spent must not
+		// rewrite the org's credential each time.
+		stage := func(ctx context.Context) (string, error) {
+			ref, serr := e.p.Builds.StageBuildCredential(ctx, ev.OrgID, ev.ProjectID,
+				fmt.Sprintf("retrigger %s@%s", ev.Component, delivery.ShortSHA(ev.CommitSHA)))
+			if serr != nil {
+				return "", fmt.Errorf("stage build credential for re-trigger: %w", serr)
+			}
+			return ref, nil
+		}
+		attempt, berr := e.ensureBuildRun(ctx, ev.OrgID, ev.ProjectID, ev.Component, ev.CommitSHA, stage, redBuildLimit)
 		if berr != nil {
 			return berr
 		}

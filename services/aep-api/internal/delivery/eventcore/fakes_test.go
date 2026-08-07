@@ -478,17 +478,38 @@ type fakeBuilds struct {
 	runs      map[string][]BuildRun
 	triggered []string
 	err       error
+
+	// staged counts StageBuildCredential calls and secretRefs records the
+	// reference each trigger carried — the pair the fan-out's "stage once, reuse
+	// everywhere" invariant is asserted on.
+	staged    int
+	stageRef  string
+	stageErr  error
+	secretRef []string
 }
 
-func newFakeBuilds() *fakeBuilds { return &fakeBuilds{runs: map[string][]BuildRun{}} }
+func newFakeBuilds() *fakeBuilds {
+	return &fakeBuilds{runs: map[string][]BuildRun{}, stageRef: "org-git-secret"}
+}
 
-func (f *fakeBuilds) TriggerBuildAtCommit(_ context.Context, _, _, component, _, runName string) error {
+func (f *fakeBuilds) StageBuildCredential(_ context.Context, _, _, _ string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.stageErr != nil {
+		return "", f.stageErr
+	}
+	f.staged++
+	return f.stageRef, nil
+}
+
+func (f *fakeBuilds) TriggerBuildAtCommit(_ context.Context, _, _, component, _, runName, secretRef string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.err != nil {
 		return f.err
 	}
 	f.triggered = append(f.triggered, runName)
+	f.secretRef = append(f.secretRef, secretRef)
 	f.runs[component] = append(f.runs[component], BuildRun{Name: runName, Status: "Running"})
 	return nil
 }

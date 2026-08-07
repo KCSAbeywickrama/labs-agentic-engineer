@@ -82,3 +82,5 @@ deployments/local-secret-manager-api/local-secret-manager-api
 # aider's local repo-map cache — a tool's scratch, never source.
 .aider.tags.cache.v*/
 .aider*
+
+.devtools

@@ -32,8 +32,12 @@ import (
 	"github.com/wso2/aep/aep-api/internal/delivery"
 )
 
-// finalLogTailBytes caps the captured snapshot size (~3000 lines).
-const finalLogTailBytes = 256 * 1024
+// finalLogTailLines caps the captured snapshot at the last N lines of pod
+// stdout. Bounded by LINES, not bytes: `limitBytes` reads from the START of the
+// log, so byte-capping a "final tail" would persist the run's OPENING window and
+// discard its ending — exactly where the outcome and any failure live. See
+// livePodLogOptions for the full semantics.
+const finalLogTailLines = 3000
 
 // JobWatcher polls per-Execution coding-agent Jobs via cluster-gateway-proxy
 // (the `ca-…` proxy dispatch path) and projects terminal phases onto the
@@ -207,7 +211,7 @@ func (w *JobWatcher) captureCycleLog(ctx context.Context, cycle *delivery.RunCyc
 		slog.WarnContext(ctx, "codingagent.JobWatcher: cycle pod lookup failed", "cycle", cycle.ID, "ns", ns, "run", cycle.JobRef, "error", err)
 		return
 	}
-	body, err := w.proxy.TailPodLog(ctx, ns, podName, clustergatewayproxy.PodLogOptions{Timestamps: true, LimitBytes: finalLogTailBytes})
+	body, err := w.proxy.TailPodLog(ctx, ns, podName, clustergatewayproxy.PodLogOptions{Timestamps: true, TailLines: finalLogTailLines})
 	if err != nil {
 		slog.WarnContext(ctx, "codingagent.JobWatcher: cycle tail failed", "cycle", cycle.ID, "ns", ns, "pod", podName, "error", err)
 		return
@@ -318,7 +322,7 @@ func (w *JobWatcher) captureFinalLog(ctx context.Context, row *delivery.Executio
 		slog.WarnContext(ctx, "codingagent.JobWatcher: captureFinalLog: pod lookup failed", "execution", row.ID, "ns", ns, "run", row.RunName, "error", err)
 		return
 	}
-	body, err := w.proxy.TailPodLog(ctx, ns, podName, clustergatewayproxy.PodLogOptions{Timestamps: true, LimitBytes: finalLogTailBytes})
+	body, err := w.proxy.TailPodLog(ctx, ns, podName, clustergatewayproxy.PodLogOptions{Timestamps: true, TailLines: finalLogTailLines})
 	if err != nil {
 		slog.WarnContext(ctx, "codingagent.JobWatcher: captureFinalLog: tail failed", "execution", row.ID, "ns", ns, "pod", podName, "error", err)
 		return
