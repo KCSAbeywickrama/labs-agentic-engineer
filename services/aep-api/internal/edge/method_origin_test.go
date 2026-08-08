@@ -121,6 +121,7 @@ var opOwner = map[string]string{
 	"PromoteTaskFromIssue":          embedDelivery,
 	"ProvisionPlatformResource":     embedDependencies,
 	"ReadFile":                      embedSpec,
+	"ReadFileBundle":                embedSpec,
 	"RequestOrgServiceAccess":       embedDependencies,
 	"RotateIdpClientSecret":         embedOrganization,
 	"SetSkillEnabled":               embedSpec,

@@ -52,6 +52,15 @@ export const config = {
   // Sonnet-class models support 64k output tokens; default high so a single-doc
   // generation completes in one step. intEnv guards a non-numeric override.
   maxOutputTokens: intEnv(process.env.AGENT_MAX_OUTPUT_TOKENS, 64_000),
+  // Anthropic prompt caching (AGENT_PROMPT_CACHE, default ON). Caching is
+  // opt-in per request: with no `cache_control` breakpoint Anthropic caches
+  // nothing, so every step of a tool loop re-bills the whole prefix — measured
+  // at ~1.07M input tokens across one 19-step turn, every token uncached.
+  // History is append-only, so the prefix is stable and cacheable by
+  // construction (run-conversation-turn.ts). Off by env only as an escape
+  // hatch: a cache WRITE costs more than plain input, so a deployment whose
+  // turns are reliably single-step could rationally decline.
+  promptCache: boolEnv(process.env.AGENT_PROMPT_CACHE, true),
   logLevel: process.env.LOG_LEVEL || "info",
   // AI SDK DevTools (AGENT_DEVTOOLS, default off): wrap the model in
   // `devToolsMiddleware` so every LLM call is captured to

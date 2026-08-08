@@ -27,8 +27,10 @@
  */
 
 import pg from "pg";
+import { registerTelemetry } from "ai";
 import { createApp } from "./server.js";
 import { createModel, resolveModelId } from "./shared/model.js";
+import { captureTelemetry } from "./shared/telemetry.js";
 import { intEnv } from "./shared/env.js";
 import { config } from "./shared/config.js";
 import type { AgentsAuthConfig } from "./shared/auth.js";
@@ -74,6 +76,15 @@ async function buildStore(): Promise<ConversationStore> {
 }
 
 async function main(): Promise<void> {
+  // Trace capture registers ONCE per process — it is a property of the
+  // deployment, not of a turn. It used to be a middleware wrapped around the
+  // per-turn model, which is what made every turn its own unrelated run: the
+  // capture minted a run id when that short-lived object was constructed.
+  // Registering here leaves model lifetimes alone; each turn stamps its own
+  // functionId instead (shared/telemetry.ts).
+  const telemetry = captureTelemetry();
+  if (telemetry) registerTelemetry(telemetry);
+
   const store = await buildStore();
   const app = createApp({
     store,
