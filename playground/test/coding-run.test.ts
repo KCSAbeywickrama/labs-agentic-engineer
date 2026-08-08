@@ -84,18 +84,170 @@ test("host mode withholds the key, so the SDK falls back to the developer's own 
   });
 });
 
+// These two are about the org with NO coding credential configured, so they
+// clear it explicitly: `deployments/.env` may define one on a developer's
+// machine, and `@aep/agents` merges that file into process.env at module scope.
 test("host mode --api-key opts back into key auth", () => {
-  withKeyInEnv("sk-ant-explicit", () => {
-    const { env } = hostInvocation({ ...invocationOpts, useApiKey: true }, "/r");
-    assert.equal(env.ANTHROPIC_API_KEY, "sk-ant-explicit");
+  withCodingKeyInEnv(undefined, () => {
+    withKeyInEnv("sk-ant-explicit", () => {
+      const { env } = hostInvocation({ ...invocationOpts, useApiKey: true }, "/r");
+      assert.equal(env.ANTHROPIC_API_KEY, "sk-ant-explicit");
+    });
   });
 });
 
 test("docker mode always passes the key through — a container reaches no credential store", () => {
-  const { args } = dockerInvocation(invocationOpts, "/r", "c1");
-  const at = args.indexOf("ANTHROPIC_API_KEY");
-  assert.ok(at > 0, "the key must be forwarded into the container");
-  assert.equal(args[at - 1], "-e", "forwarded by name, so the value never lands in argv");
+  withCodingKeyInEnv(undefined, () => {
+    const { args } = dockerInvocation(invocationOpts, "/r", "c1");
+    const at = args.indexOf("ANTHROPIC_API_KEY");
+    assert.ok(at > 0, "the key must be forwarded into the container");
+    assert.equal(args[at - 1], "-e", "forwarded by name, so the value never lands in argv");
+  });
+});
+
+// AEP_CODING_ANTHROPIC_KEY is the local half of the platform's per-org
+// coding-agent key. It changes WHICH credential --api-key opts into; it does
+// not opt in by itself. Host mode's default stays "the developer's own login",
+// so a bypassPermissions process on their filesystem never picks up a shared
+// credential just because a file elsewhere defined one.
+function withCodingKeyInEnv(value: string | undefined, body: () => void): void {
+  const restore = process.env.AEP_CODING_ANTHROPIC_KEY;
+  if (value === undefined) delete process.env.AEP_CODING_ANTHROPIC_KEY;
+  else process.env.AEP_CODING_ANTHROPIC_KEY = value;
+  try {
+    body();
+  } finally {
+    if (restore === undefined) delete process.env.AEP_CODING_ANTHROPIC_KEY;
+    else process.env.AEP_CODING_ANTHROPIC_KEY = restore;
+  }
+}
+
+test("a coding key does NOT reach a host session without --api-key", () => {
+  withKeyInEnv("sk-ant-from-dotenv", () => {
+    withCodingKeyInEnv("sk-ant-coding", () => {
+      const { env } = hostInvocation(invocationOpts, "/r");
+      assert.equal(env.ANTHROPIC_API_KEY, undefined, "defining a key is not asking to use it here");
+      assert.equal(env.CLAUDE_CODE_OAUTH_TOKEN, undefined);
+    });
+  });
+});
+
+test("--api-key opts into the CODING key when one is configured", () => {
+  withKeyInEnv("sk-ant-from-dotenv", () => {
+    withCodingKeyInEnv("sk-ant-coding", () => {
+      const { env } = hostInvocation({ ...invocationOpts, useApiKey: true }, "/r");
+      assert.equal(env.ANTHROPIC_API_KEY, "sk-ant-coding", "the coding key outranks the platform key");
+    });
+  });
+});
+
+test("docker mode substitutes the coding key by value, never into argv", () => {
+  withKeyInEnv("sk-ant-from-dotenv", () => {
+    withCodingKeyInEnv("sk-ant-coding", () => {
+      const { args, env } = dockerInvocation(invocationOpts, "/r", "c1");
+      assert.equal(env.ANTHROPIC_API_KEY, "sk-ant-coding", "the container must receive the coding key");
+      const at = args.indexOf("ANTHROPIC_API_KEY");
+      assert.equal(args[at - 1], "-e", "still forwarded BY NAME");
+      assert.ok(
+        !args.some((a) => a.includes("sk-ant-coding")),
+        "a secret in argv is readable by any user via ps",
+      );
+    });
+  });
+});
+
+// A `claude setup-token` token bills a Claude subscription and must arrive as
+// CLAUDE_CODE_OAUTH_TOKEN. Claude Code ranks ANTHROPIC_API_KEY ABOVE it, and
+// deployments/.env gives nearly every developer one, so leaving that variable
+// in place would silently bill the default key and ignore the token entirely.
+test("an OAuth coding token displaces ANTHROPIC_API_KEY in host mode", () => {
+  withKeyInEnv("sk-ant-from-dotenv", () => {
+    withCodingKeyInEnv("sk-ant-oat01-subscription-token", () => {
+      const { env } = hostInvocation({ ...invocationOpts, useApiKey: true }, "/r");
+      assert.equal(env.CLAUDE_CODE_OAUTH_TOKEN, "sk-ant-oat01-subscription-token");
+      assert.equal(env.ANTHROPIC_API_KEY, undefined, "the API key would outrank the token and win");
+    });
+  });
+});
+
+test("an OAuth coding token displaces ANTHROPIC_API_KEY in docker mode too", () => {
+  withKeyInEnv("sk-ant-from-dotenv", () => {
+    withCodingKeyInEnv("sk-ant-oat01-subscription-token", () => {
+      const { args, env } = dockerInvocation(invocationOpts, "/r", "c1");
+      assert.equal(env.CLAUDE_CODE_OAUTH_TOKEN, "sk-ant-oat01-subscription-token");
+      assert.equal(env.ANTHROPIC_API_KEY, undefined, "the API key would outrank the token and win");
+      // Exactly one name is forwarded — the one this run authenticates with.
+      const tokenAt = args.indexOf("CLAUDE_CODE_OAUTH_TOKEN");
+      assert.equal(args[tokenAt - 1], "-e", "forwarded BY NAME");
+      assert.ok(
+        !args.some((a) => a.includes("subscription-token")),
+        "a secret in argv is readable by any user via ps",
+      );
+    });
+  });
+});
+
+// deployments/.env is the PLATFORM's file and `@aep/agents` merges it into
+// process.env at module scope, so a CLAUDE_CODE_OAUTH_TOKEN sitting there would
+// otherwise authenticate every host run — silently billing a shared credential
+// on the one path whose whole purpose is to bill the developer's own login.
+// Opting in is AEP_CODING_ANTHROPIC_KEY, and only that.
+test("host mode withholds an inherited OAuth token too", () => {
+  const restore = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  process.env.CLAUDE_CODE_OAUTH_TOKEN = "sk-ant-oat01-from-deployments-env";
+  try {
+    withCodingKeyInEnv(undefined, () => {
+      assert.equal(hostInvocation(invocationOpts, "/r").env.CLAUDE_CODE_OAUTH_TOKEN, undefined);
+      // …including with --api-key, which opts into the API KEY, not a token.
+      assert.equal(
+        hostInvocation({ ...invocationOpts, useApiKey: true }, "/r").env.CLAUDE_CODE_OAUTH_TOKEN,
+        undefined,
+      );
+    });
+  } finally {
+    if (restore === undefined) delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    else process.env.CLAUDE_CODE_OAUTH_TOKEN = restore;
+  }
+});
+
+// An API-key coding credential must NOT leave a stale token behind either.
+test("an API-key coding credential clears any inherited OAuth token", () => {
+  const restore = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  process.env.CLAUDE_CODE_OAUTH_TOKEN = "sk-ant-oat01-inherited";
+  try {
+    withCodingKeyInEnv("sk-ant-api03-coding", () => {
+      const { env } = hostInvocation({ ...invocationOpts, useApiKey: true }, "/r");
+      assert.equal(env.ANTHROPIC_API_KEY, "sk-ant-api03-coding");
+      assert.equal(env.CLAUDE_CODE_OAUTH_TOKEN, undefined, "a stale token must not linger");
+    });
+  } finally {
+    if (restore === undefined) delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    else process.env.CLAUDE_CODE_OAUTH_TOKEN = restore;
+  }
+});
+
+// A blank export must not count as "configured" — otherwise --api-key would
+// authenticate the run with an empty string instead of the platform key.
+test("a blank coding key is not a coding key", () => {
+  withKeyInEnv("sk-ant-from-dotenv", () => {
+    withCodingKeyInEnv("   ", () => {
+      const { env } = hostInvocation({ ...invocationOpts, useApiKey: true }, "/r");
+      assert.equal(env.ANTHROPIC_API_KEY, "sk-ant-from-dotenv", "blank falls back to the platform key");
+    });
+  });
+});
+
+test("with no coding key set, both modes behave exactly as before", () => {
+  withKeyInEnv("sk-ant-from-dotenv", () => {
+    withCodingKeyInEnv(undefined, () => {
+      assert.equal(hostInvocation(invocationOpts, "/r").env.ANTHROPIC_API_KEY, undefined);
+      assert.equal(
+        hostInvocation({ ...invocationOpts, useApiKey: true }, "/r").env.ANTHROPIC_API_KEY,
+        "sk-ant-from-dotenv",
+      );
+      assert.equal(dockerInvocation(invocationOpts, "/r", "c1").env.ANTHROPIC_API_KEY, "sk-ant-from-dotenv");
+    });
+  });
 });
 
 test("undo snapshot + restore round-trips edits and removes new files", () => {

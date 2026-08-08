@@ -67,7 +67,7 @@ func anthropicDBService(t *testing.T, apiStatus int) (*organization.AnthropicCre
 // anthropicMustConnect connects key for org or fails the test.
 func anthropicMustConnect(t *testing.T, svc *organization.AnthropicCredentialService, org, key string) *organization.AnthropicProjection {
 	t.Helper()
-	proj, err := svc.Connect(context.Background(), org, organization.AnthropicConnectRequest{APIKey: key})
+	proj, err := svc.Connect(context.Background(), org, organization.AnthropicRoleDefault, organization.AnthropicConnectRequest{APIKey: key})
 	if err != nil {
 		t.Fatalf("connect %s: %v", org, err)
 	}
@@ -81,7 +81,7 @@ func TestAnthropicConnect_HappyPath_DB(t *testing.T) {
 	start := time.Now().UTC().Add(-time.Second)
 
 	// The key arrives padded — Connect must trim before shape-check + store.
-	proj, err := svc.Connect(ctx, "acme", organization.AnthropicConnectRequest{APIKey: "  " + anthropicUnitKey + "\n"})
+	proj, err := svc.Connect(ctx, "acme", organization.AnthropicRoleDefault, organization.AnthropicConnectRequest{APIKey: "  " + anthropicUnitKey + "\n"})
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestAnthropicConnect_HappyPath_DB(t *testing.T) {
 	}
 
 	// Status serves the persisted row with the same projection field values.
-	st, err := svc.Status(ctx, "acme")
+	st, err := svc.Status(ctx, "acme", organization.AnthropicRoleDefault)
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}
@@ -119,14 +119,14 @@ func TestAnthropicConnect_RejectedKeyLeavesNoTrace_DB(t *testing.T) {
 	svc, store := anthropicDBService(t, http.StatusUnauthorized)
 	ctx := context.Background()
 
-	_, err := svc.Connect(ctx, "acme", organization.AnthropicConnectRequest{APIKey: anthropicUnitKey})
+	_, err := svc.Connect(ctx, "acme", organization.AnthropicRoleDefault, organization.AnthropicConnectRequest{APIKey: anthropicUnitKey})
 	if got := anthropicValidationCode(t, err); got != "anthropic_key_invalid" {
 		t.Fatalf("code: got %q, want anthropic_key_invalid", got)
 	}
 
 	// No metadata row…
 	var nfe *organization.NotFoundError
-	if _, err := svc.Status(ctx, "acme"); !errors.As(err, &nfe) {
+	if _, err := svc.Status(ctx, "acme", organization.AnthropicRoleDefault); !errors.As(err, &nfe) {
 		t.Fatalf("status after rejected connect: want NotFoundError, got %v", err)
 	}
 	// …and no secret bytes.
@@ -141,7 +141,7 @@ func TestAnthropicConnect_ReplaceUpserts_DB(t *testing.T) {
 	ctx := context.Background()
 
 	anthropicMustConnect(t, svc, "acme", anthropicUnitKey)
-	st1, err := svc.Status(ctx, "acme")
+	st1, err := svc.Status(ctx, "acme", organization.AnthropicRoleDefault)
 	if err != nil {
 		t.Fatalf("status after first connect: %v", err)
 	}
@@ -150,7 +150,7 @@ func TestAnthropicConnect_ReplaceUpserts_DB(t *testing.T) {
 	proj2 := anthropicMustConnect(t, svc, "acme", anthropicDBKey2)
 
 	// One row, now carrying key2's preview; the stored bytes are key2.
-	st2, err := svc.Status(ctx, "acme")
+	st2, err := svc.Status(ctx, "acme", organization.AnthropicRoleDefault)
 	if err != nil {
 		t.Fatalf("status after replace: %v", err)
 	}
@@ -182,12 +182,14 @@ func TestAnthropicStatus_AbsentOrgIsNotFound_DB(t *testing.T) {
 	t.Parallel()
 	svc, _ := anthropicDBService(t, http.StatusOK)
 
-	_, err := svc.Status(context.Background(), "acme")
+	_, err := svc.Status(context.Background(), "acme", organization.AnthropicRoleDefault)
 	var nfe *organization.NotFoundError
 	if !errors.As(err, &nfe) {
 		t.Fatalf("want *organization.NotFoundError, got %T: %v", err, err)
 	}
-	if nfe.What != "org_anthropic_credentials.acme" {
+	// Role-qualified: with two possible rows per org, "which one is missing"
+	// is the part that makes the error actionable.
+	if nfe.What != "org_anthropic_credentials.acme.default" {
 		t.Fatalf("NotFoundError.What: got %q", nfe.What)
 	}
 }
@@ -198,11 +200,11 @@ func TestAnthropicDisconnect_RemovesRowAndBytes_Idempotent_DB(t *testing.T) {
 	ctx := context.Background()
 	anthropicMustConnect(t, svc, "acme", anthropicUnitKey)
 
-	if err := svc.Disconnect(ctx, "acme"); err != nil {
+	if err := svc.Disconnect(ctx, "acme", organization.AnthropicRoleDefault); err != nil {
 		t.Fatalf("disconnect: %v", err)
 	}
 	var nfe *organization.NotFoundError
-	if _, err := svc.Status(ctx, "acme"); !errors.As(err, &nfe) {
+	if _, err := svc.Status(ctx, "acme", organization.AnthropicRoleDefault); !errors.As(err, &nfe) {
 		t.Fatalf("status after disconnect: want NotFoundError, got %v", err)
 	}
 	if _, err := store.Get(ctx, "acme", "anthropic/key"); !errors.Is(err, secrets.ErrSecretNotFound) {
@@ -211,7 +213,7 @@ func TestAnthropicDisconnect_RemovesRowAndBytes_Idempotent_DB(t *testing.T) {
 
 	// Disconnecting an org with no row is a clean no-op (the edge serves the
 	// same success body).
-	if err := svc.Disconnect(ctx, "acme"); err != nil {
+	if err := svc.Disconnect(ctx, "acme", organization.AnthropicRoleDefault); err != nil {
 		t.Fatalf("second disconnect must be idempotent, got %v", err)
 	}
 }
@@ -255,11 +257,11 @@ func TestAnthropicOrgIsolation_DB(t *testing.T) {
 
 	// Each org's row + secret resolve to its OWN key — fetchRow and the
 	// org_secrets lookups are (oc_org_id)-scoped.
-	stA, err := svc.Status(ctx, "acme")
+	stA, err := svc.Status(ctx, "acme", organization.AnthropicRoleDefault)
 	if err != nil || stA.KeyLast4 != anthropicUnitKey[len(anthropicUnitKey)-4:] {
 		t.Fatalf("acme status: %+v err %v", stA, err)
 	}
-	stB, err := svc.Status(ctx, "globex")
+	stB, err := svc.Status(ctx, "globex", organization.AnthropicRoleDefault)
 	if err != nil || stB.KeyLast4 != anthropicDBKey2[len(anthropicDBKey2)-4:] {
 		t.Fatalf("globex status: %+v err %v", stB, err)
 	}
@@ -274,15 +276,15 @@ func TestAnthropicOrgIsolation_DB(t *testing.T) {
 
 	// A third org sharing the table sees nothing.
 	var nfe *organization.NotFoundError
-	if _, err := svc.Status(ctx, "intruder"); !errors.As(err, &nfe) {
+	if _, err := svc.Status(ctx, "intruder", organization.AnthropicRoleDefault); !errors.As(err, &nfe) {
 		t.Fatalf("intruder must get NotFound, got %v", err)
 	}
 
 	// Disconnecting one org must not touch the other's row or bytes.
-	if err := svc.Disconnect(ctx, "acme"); err != nil {
+	if err := svc.Disconnect(ctx, "acme", organization.AnthropicRoleDefault); err != nil {
 		t.Fatalf("disconnect acme: %v", err)
 	}
-	if _, err := svc.Status(ctx, "globex"); err != nil {
+	if _, err := svc.Status(ctx, "globex", organization.AnthropicRoleDefault); err != nil {
 		t.Fatalf("globex must survive acme's disconnect: %v", err)
 	}
 	if got, err := store.Get(ctx, "globex", "anthropic/key"); err != nil || string(got) != anthropicDBKey2 {

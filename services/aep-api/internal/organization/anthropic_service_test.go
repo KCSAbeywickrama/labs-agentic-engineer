@@ -162,7 +162,7 @@ func TestAnthropicProjectionFromRow(t *testing.T) {
 
 	// Wire shape: with no validation error the marshaled field set is EXACTLY
 	// the golden's — {connectedAt, keyLast4, keyPrefix, lastValidatedAt,
-	// ocOrgId, status} — and never the SM-API triplet.
+	// ocOrgId, status} plus credentialKind — and never the SM-API triplet.
 	p.ValidationError = nil
 	raw, err := json.Marshal(p)
 	if err != nil {
@@ -177,7 +177,7 @@ func TestAnthropicProjectionFromRow(t *testing.T) {
 		got = append(got, k)
 	}
 	sort.Strings(got)
-	want := []string{"connectedAt", "keyLast4", "keyPrefix", "lastValidatedAt", "ocOrgId", "status"}
+	want := []string{"connectedAt", "credentialKind", "keyLast4", "keyPrefix", "lastValidatedAt", "ocOrgId", "status"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("projection JSON field set drifted from golden:\n got %v\nwant %v", got, want)
 	}
@@ -208,7 +208,7 @@ func TestAnthropicValidateKey_StatusBranches(t *testing.T) {
 			t.Parallel()
 			base, rec := anthropicFakeAPI(t, tc.status)
 			svc := NewAnthropicCredentialService(nil, nil, nil).WithAnthropicAPIBase(base)
-			err := svc.validateAnthropicKey(context.Background(), anthropicUnitKey)
+			err := svc.validateAnthropicKey(context.Background(), AnthropicCredentialAPIKey, anthropicUnitKey)
 			if tc.wantCode == "" {
 				if err != nil {
 					t.Fatalf("status %d must accept the key, got %v", tc.status, err)
@@ -235,7 +235,7 @@ func TestAnthropicValidateKey_UpstreamServerErrorIs502(t *testing.T) {
 			t.Parallel()
 			base, _ := anthropicFakeAPI(t, status)
 			svc := NewAnthropicCredentialService(nil, nil, nil).WithAnthropicAPIBase(base)
-			err := svc.validateAnthropicKey(context.Background(), anthropicUnitKey)
+			err := svc.validateAnthropicKey(context.Background(), AnthropicCredentialAPIKey, anthropicUnitKey)
 			var ue *UpstreamError
 			if !errors.As(err, &ue) {
 				t.Fatalf("upstream %d must yield *UpstreamError, got %T: %v", status, err, err)
@@ -252,7 +252,7 @@ func TestAnthropicValidateKey_ProbeShape(t *testing.T) {
 	t.Parallel()
 	base, rec := anthropicFakeAPI(t, http.StatusOK)
 	svc := NewAnthropicCredentialService(nil, nil, nil).WithAnthropicAPIBase(base)
-	if err := svc.validateAnthropicKey(context.Background(), anthropicUnitKey); err != nil {
+	if err := svc.validateAnthropicKey(context.Background(), AnthropicCredentialAPIKey, anthropicUnitKey); err != nil {
 		t.Fatalf("validate: %v", err)
 	}
 	// The probe is POST /v1/messages carrying the key in x-api-key plus the
@@ -274,7 +274,7 @@ func TestAnthropicValidateKey_NetworkFailureIsUnreachable(t *testing.T) {
 	srv := httptest.NewServer(http.NotFoundHandler())
 	srv.Close() // dead endpoint → connection refused
 	svc := NewAnthropicCredentialService(nil, nil, nil).WithAnthropicAPIBase(srv.URL)
-	err := svc.validateAnthropicKey(context.Background(), anthropicUnitKey)
+	err := svc.validateAnthropicKey(context.Background(), AnthropicCredentialAPIKey, anthropicUnitKey)
 	if got := anthropicValidationCode(t, err); got != "anthropic_unreachable" {
 		t.Fatalf("code: got %q, want anthropic_unreachable (err %v)", got, err)
 	}
@@ -301,7 +301,7 @@ func TestAnthropicConnect_ShapeGuardsRejectBeforeAnyIO(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			_, err := svc.Connect(context.Background(), "acme", AnthropicConnectRequest{APIKey: tc.key})
+			_, err := svc.Connect(context.Background(), "acme", AnthropicRoleDefault, AnthropicConnectRequest{APIKey: tc.key})
 			if got := anthropicValidationCode(t, err); got != tc.wantCode {
 				t.Fatalf("code: got %q, want %q (err %v)", got, tc.wantCode, err)
 			}
@@ -315,7 +315,7 @@ func TestAnthropicConnect_UpstreamRejectionShortCircuitsPersistence(t *testing.T
 	// nil db/store: any persistence attempt would panic — passing proves the
 	// upstream 401 fails Connect BEFORE the transaction begins.
 	svc := NewAnthropicCredentialService(nil, nil, nil).WithAnthropicAPIBase(base)
-	_, err := svc.Connect(context.Background(), "acme", AnthropicConnectRequest{APIKey: anthropicUnitKey})
+	_, err := svc.Connect(context.Background(), "acme", AnthropicRoleDefault, AnthropicConnectRequest{APIKey: anthropicUnitKey})
 	if got := anthropicValidationCode(t, err); got != "anthropic_key_invalid" {
 		t.Fatalf("code: got %q, want anthropic_key_invalid (err %v)", got, err)
 	}

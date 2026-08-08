@@ -21,6 +21,8 @@ import type { components } from "../../generated/aep-api";
 
 type ApiError = components["schemas"]["Error"];
 import {
+  codingLlmValidationError,
+  codingLlmWithoutDefault,
   configLoadError,
   gitProviderDisconnectRejected,
   githubConnectedFixture,
@@ -65,6 +67,9 @@ function errorJson(body: ApiError, status: number) {
 // handlers/projects.ts's createdProjects pattern.
 let gitProvider: GitProviderProjection | null = null;
 let llm: LLMProjection | null = null;
+// null = the coding agent reuses `llm`'s key. Not a mode flag — the absence of
+// a key IS "reuse", exactly as on the server (ADR-0016).
+let codingLlm: LLMProjection | null = null;
 let skills: SkillDetailBody[] = [];
 let skillUpdates: SkillUpdate[] = [];
 let initialized = false;
@@ -184,6 +189,7 @@ function configProjection(): ConfigProjection {
   return {
     gitProvider,
     llm,
+    codingLlm,
     idp: {
       kind: "platform",
       issuer: "https://idp.aep.local",
@@ -205,14 +211,42 @@ export const settingsHandlers = [
     ensureInitialized();
     const body = (await request.json()) as ConfigPatch;
 
+    // Reject phase — every section is judged BEFORE any of them is applied,
+    // mirroring the real PATCH: a rejected section must never leave an earlier
+    // one half-written, or the console would render state the server never had.
+    if (body.llm != null && body.llm.apiKey === INVALID_CREDENTIAL_VALUE) {
+      return errorJson(llmValidationError, 400);
+    }
+    if (body.codingLlm != null) {
+      if (body.codingLlm.apiKey === INVALID_CREDENTIAL_VALUE) {
+        return errorJson(codingLlmValidationError, 400);
+      }
+      // An override with nothing to override — including the case where this
+      // very patch clears the key it would override.
+      const defaultAfterPatch = body.llm === undefined ? llm : body.llm;
+      if (defaultAfterPatch === null) {
+        return errorJson(codingLlmWithoutDefault, 400);
+      }
+    }
+    if (body.gitProvider !== undefined) {
+      if (body.gitProvider === null) {
+        return errorJson(gitProviderDisconnectRejected, 400);
+      }
+      if (body.gitProvider.pat === INVALID_CREDENTIAL_VALUE) {
+        return errorJson(gitProviderValidationError, 400);
+      }
+    }
+
+    // Persist phase.
     if (body.llm !== undefined) {
       if (body.llm === null) {
         llm = null;
-      } else if (body.llm.apiKey === INVALID_CREDENTIAL_VALUE) {
-        return errorJson(llmValidationError, 400);
+        // The coding key overrides `llm` and cannot outlive it.
+        codingLlm = null;
       } else {
         llm = {
           kind: "anthropic",
+          credentialKind: "api_key",
           status: "connected",
           keyPrefix: body.llm.apiKey.slice(0, 7),
           keyLast4: body.llm.apiKey.slice(-4),
@@ -222,13 +256,27 @@ export const settingsHandlers = [
       }
     }
 
-    if (body.gitProvider !== undefined) {
-      if (body.gitProvider === null) {
-        return errorJson(gitProviderDisconnectRejected, 400);
+    if (body.codingLlm !== undefined) {
+      if (body.codingLlm === null) {
+        codingLlm = null;
+      } else {
+        codingLlm = {
+          kind: "anthropic",
+          // The coding agent may bill a Claude subscription instead: a
+          // `claude setup-token` value is an oauth_token, not an api_key.
+          credentialKind: body.codingLlm.apiKey.startsWith("sk-ant-oat")
+            ? "oauth_token"
+            : "api_key",
+          status: "connected",
+          keyPrefix: body.codingLlm.apiKey.slice(0, 7),
+          keyLast4: body.codingLlm.apiKey.slice(-4),
+          connectedAt: new Date().toISOString(),
+          lastValidatedAt: new Date().toISOString(),
+        };
       }
-      if (body.gitProvider.pat === INVALID_CREDENTIAL_VALUE) {
-        return errorJson(gitProviderValidationError, 400);
-      }
+    }
+
+    if (body.gitProvider != null) {
       const login = body.gitProvider.githubLogin || "acme-dev";
       gitProvider = {
         kind: "github",

@@ -23,22 +23,26 @@ import (
 	"gorm.io/gorm"
 )
 
-// OrgAnthropicRepository persists the per-org Anthropic API key metadata row
-// (`org_anthropic_credentials`, one row per OC org — the non-secret projection
-// fields; the encrypted key bytes live in org_secrets). Every accessor is
-// keyed by oc_org_id, so a dropped filter is a missing method, not a
-// cross-org write.
+// OrgAnthropicRepository persists the per-org, per-role Anthropic API key
+// metadata rows (`org_anthropic_credentials`, PK (oc_org_id, role) — the
+// non-secret projection fields; the encrypted key bytes live in org_secrets).
+// Every accessor is keyed by BOTH oc_org_id and role, so a dropped filter is a
+// missing method, not a cross-org write or a cross-role one (which would let a
+// coding-key rotation silently overwrite the org's default key).
 //
 // Connect's advisory-lock-guarded upsert and Disconnect's delete run inside
 // Tx: it begins the transaction, holds the org-scoped advisory xact lock
 // across the credential-store write + the row write, and commits (fn returns
-// nil) or rolls back (fn returns an error).
+// nil) or rolls back (fn returns an error). The lock is org-scoped rather than
+// role-scoped because the default role's disconnect cascades into the coding
+// role — both rows move under one lock.
 type OrgAnthropicRepository interface {
-	// GetByOrg returns the row for ocOrgID, or nil when absent (not an error).
-	GetByOrg(ctx context.Context, ocOrgID string) (*OrgAnthropicCredential, error)
+	// GetByOrg returns the row for (ocOrgID, role), or nil when absent (not an
+	// error).
+	GetByOrg(ctx context.Context, ocOrgID string, role AnthropicRole) (*OrgAnthropicCredential, error)
 	// UpdateColumns writes the given columns onto the row scoped to
-	// oc_org_id (a map so nil values are written as NULL, not skipped).
-	UpdateColumns(ctx context.Context, ocOrgID string, updates map[string]any) error
+	// (oc_org_id, role) (a map so nil values are written as NULL, not skipped).
+	UpdateColumns(ctx context.Context, ocOrgID string, role AnthropicRole, updates map[string]any) error
 
 	// Tx begins a transaction, runs fn, and commits on nil / rolls back on
 	// error. fn holds the advisory lock (via OrgAnthropicTx.AdvisoryLock)
@@ -50,12 +54,21 @@ type OrgAnthropicRepository interface {
 type OrgAnthropicTx interface {
 	// AdvisoryLock runs pg_advisory_xact_lock(hashtext(key)).
 	AdvisoryLock(key string) error
-	// Upsert INSERTs the row or, on oc_org_id conflict, UPDATEs the metadata
-	// columns — deliberately preserving the ORIGINAL connected_at on a
+	// GetByOrg reads one role's row THROUGH the transaction, so a precondition
+	// checked after AdvisoryLock is read from the same snapshot the write that
+	// depends on it will use. The repository's own GetByOrg runs on the pool —
+	// a different connection, which cannot see this transaction at all.
+	GetByOrg(ocOrgID string, role AnthropicRole) (*OrgAnthropicCredential, error)
+	// Upsert INSERTs the row or, on (oc_org_id, role) conflict, UPDATEs the
+	// metadata columns — deliberately preserving the ORIGINAL connected_at on a
 	// replace — and scans the persisted connected_at back into row.ConnectedAt.
 	Upsert(row *OrgAnthropicCredential) error
-	// DeleteByOrg removes the metadata row for ocOrgID within the tx.
-	DeleteByOrg(ocOrgID string) error
+	// DeleteByOrg removes the metadata row for (ocOrgID, role) within the tx.
+	DeleteByOrg(ocOrgID string, role AnthropicRole) error
+	// DeleteAllRoles removes EVERY role's row for ocOrgID within the tx. This
+	// is the default role's disconnect cascade: the coding key is an override
+	// on the default, so it cannot outlive it (ADR-0016).
+	DeleteAllRoles(ocOrgID string) error
 }
 
 type orgAnthropicRepository struct {
@@ -67,9 +80,9 @@ func NewOrgAnthropicRepository(db *gorm.DB) OrgAnthropicRepository {
 	return &orgAnthropicRepository{db: db}
 }
 
-func (r *orgAnthropicRepository) GetByOrg(ctx context.Context, ocOrgID string) (*OrgAnthropicCredential, error) {
+func (r *orgAnthropicRepository) GetByOrg(ctx context.Context, ocOrgID string, role AnthropicRole) (*OrgAnthropicCredential, error) {
 	var row OrgAnthropicCredential
-	err := r.db.WithContext(ctx).Where("oc_org_id = ?", ocOrgID).First(&row).Error
+	err := r.db.WithContext(ctx).Where("oc_org_id = ? AND role = ?", ocOrgID, role).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
@@ -79,10 +92,10 @@ func (r *orgAnthropicRepository) GetByOrg(ctx context.Context, ocOrgID string) (
 	return &row, nil
 }
 
-func (r *orgAnthropicRepository) UpdateColumns(ctx context.Context, ocOrgID string, updates map[string]any) error {
+func (r *orgAnthropicRepository) UpdateColumns(ctx context.Context, ocOrgID string, role AnthropicRole, updates map[string]any) error {
 	return r.db.WithContext(ctx).
 		Model(&OrgAnthropicCredential{}).
-		Where("oc_org_id = ?", ocOrgID).
+		Where("oc_org_id = ? AND role = ?", ocOrgID, role).
 		Updates(updates).Error
 }
 
@@ -106,27 +119,49 @@ func (t *orgAnthropicTx) AdvisoryLock(key string) error {
 	return t.tx.Exec(`SELECT pg_advisory_xact_lock(hashtext(?))`, key).Error
 }
 
+func (t *orgAnthropicTx) GetByOrg(ocOrgID string, role AnthropicRole) (*OrgAnthropicCredential, error) {
+	var row OrgAnthropicCredential
+	err := t.tx.Where("oc_org_id = ? AND role = ?", ocOrgID, role).First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &row, nil
+}
+
 func (t *orgAnthropicTx) Upsert(row *OrgAnthropicCredential) error {
 	// Upsert via ON CONFLICT DO UPDATE so Replace is idempotent. The UPDATE
 	// deliberately omits connected_at so a replace preserves the ORIGINAL
 	// connection time; RETURNING that column reads the persisted value back so
 	// the projection we return matches the stored row (on a replace it's the
 	// original, not the in-memory `now`).
+	// credential_kind is written on BOTH the insert and the update. Omitting it
+	// would silently leave the column at its 'api_key' default, and dispatch
+	// would then mount an OAuth token as ANTHROPIC_API_KEY — a name Claude Code
+	// ranks higher, so the run would authenticate and bill the wrong
+	// credential with no error to show for it.
 	return t.tx.Raw(`
 		INSERT INTO org_anthropic_credentials
-		    (oc_org_id, key_prefix, key_last4, status, connected_at, last_validated_at, validation_error)
-		VALUES (?, ?, ?, ?, ?, ?, NULL)
-		ON CONFLICT (oc_org_id) DO UPDATE
-		  SET key_prefix         = EXCLUDED.key_prefix,
+		    (oc_org_id, role, credential_kind, key_prefix, key_last4, status, connected_at, last_validated_at, validation_error)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)
+		ON CONFLICT (oc_org_id, role) DO UPDATE
+		  SET credential_kind    = EXCLUDED.credential_kind,
+		      key_prefix         = EXCLUDED.key_prefix,
 		      key_last4          = EXCLUDED.key_last4,
 		      status             = EXCLUDED.status,
 		      last_validated_at  = EXCLUDED.last_validated_at,
 		      validation_error   = NULL
 		RETURNING connected_at`,
-		row.OcOrgID, row.KeyPrefix, row.KeyLast4, row.Status, row.ConnectedAt, row.LastValidatedAt,
+		row.OcOrgID, row.Role, row.CredentialKind, row.KeyPrefix, row.KeyLast4, row.Status, row.ConnectedAt, row.LastValidatedAt,
 	).Scan(&row.ConnectedAt).Error
 }
 
-func (t *orgAnthropicTx) DeleteByOrg(ocOrgID string) error {
+func (t *orgAnthropicTx) DeleteByOrg(ocOrgID string, role AnthropicRole) error {
+	return t.tx.Exec(`DELETE FROM org_anthropic_credentials WHERE oc_org_id = ? AND role = ?`, ocOrgID, role).Error
+}
+
+func (t *orgAnthropicTx) DeleteAllRoles(ocOrgID string) error {
 	return t.tx.Exec(`DELETE FROM org_anthropic_credentials WHERE oc_org_id = ?`, ocOrgID).Error
 }

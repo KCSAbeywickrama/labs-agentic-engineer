@@ -189,3 +189,25 @@ test("scrub: handles multi-line strings", () => {
   const out = s.scrub("line1\nsuper-secret-bearer-1234567890\nline3");
   assert.equal(out, "line1\n[REDACTED]\nline3");
 });
+
+// A run authenticates with EXACTLY ONE of ANTHROPIC_API_KEY /
+// CLAUDE_CODE_OAUTH_TOKEN — an org may bill its coding agent to a Claude
+// subscription instead of API credits. Both entrypoints therefore prime the
+// scrubber with both names: priming only one would leave the credential
+// unredacted in the progress feed on precisely the runs that use the other.
+test("scrub: an unset credential name does not disturb the one that is set", () => {
+  const s = fresh();
+  for (const v of [undefined, "sk-ant-oat01-subscription-token"]) s.addLiteral(v);
+  const out = s.scrub("auth failed for sk-ant-oat01-subscription-token");
+  assert.match(out, /\[REDACTED\]/);
+  assert.ok(!out.includes("sk-ant-oat01-subscription-token"));
+});
+
+test("scrub: redacts an OAuth token exactly as it does an API key", () => {
+  for (const secret of ["sk-ant-api03-a-console-api-key", "sk-ant-oat01-a-subscription-token"]) {
+    const s = fresh();
+    s.addLiteral(secret);
+    const out = s.scrub(`ANTHROPIC error: ${secret} rejected`);
+    assert.ok(!out.includes(secret), `${secret} leaked`);
+  }
+});

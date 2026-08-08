@@ -126,7 +126,7 @@ func TestSecretRefWriter_WriteAnthropic(t *testing.T) {
 	t.Run("disabled (nil client) is a no-op", func(t *testing.T) {
 		t.Parallel()
 		w := organization.NewSecretRefWriter(nil, nil, nil, nil)
-		ref, err := w.WriteAnthropic(context.Background(), "acme", "sk-ant-key")
+		ref, err := w.WriteAnthropic(context.Background(), "acme", organization.AnthropicRoleDefault, "sk-ant-key")
 		if err != nil || ref != "" {
 			t.Fatalf("disabled WriteAnthropic = (%q, %v); want (\"\", nil)", ref, err)
 		}
@@ -136,7 +136,7 @@ func TestSecretRefWriter_WriteAnthropic(t *testing.T) {
 		t.Parallel()
 		fake := &fakeSMClient{}
 		w := organization.NewSecretRefWriter(fake, nil, nil, nil)
-		if _, err := w.WriteAnthropic(context.Background(), "  ", "sk-ant-key"); err == nil {
+		if _, err := w.WriteAnthropic(context.Background(), "  ", organization.AnthropicRoleDefault, "sk-ant-key"); err == nil {
 			t.Fatalf("want an error for empty ocOrgID")
 		}
 		if len(fake.createCalls) != 0 {
@@ -148,7 +148,7 @@ func TestSecretRefWriter_WriteAnthropic(t *testing.T) {
 		t.Parallel()
 		fake := &fakeSMClient{}
 		w := organization.NewSecretRefWriter(fake, nil, nil, nil)
-		if _, err := w.WriteAnthropic(context.Background(), "acme", "   "); err == nil {
+		if _, err := w.WriteAnthropic(context.Background(), "acme", organization.AnthropicRoleDefault, "   "); err == nil {
 			t.Fatalf("want an error for empty apiKey")
 		}
 		if len(fake.createCalls) != 0 {
@@ -162,7 +162,7 @@ func TestSecretRefWriter_WriteAnthropic(t *testing.T) {
 		seedAnthropicRow(t, db, "acme", nil, nil, nil)
 		fake := &fakeSMClient{}
 		w := organization.NewSecretRefWriter(fake, organization.NewOrgCredentialRepository(db, nil), organization.NewOrgAnthropicRepository(db), organization.NewIDPRepository(db, nil))
-		ref, err := w.WriteAnthropic(claimsCtx("ou-acme-uuid"), "acme", "sk-ant-key")
+		ref, err := w.WriteAnthropic(claimsCtx("ou-acme-uuid"), "acme", organization.AnthropicRoleDefault, "sk-ant-key")
 		if err != nil {
 			t.Fatalf("WriteAnthropic: %v", err)
 		}
@@ -186,7 +186,7 @@ func TestSecretRefWriter_WriteAnthropic(t *testing.T) {
 		t.Parallel()
 		fake := &fakeSMClient{}
 		w := organization.NewSecretRefWriter(fake, nil, nil, nil)
-		_, err := w.WriteAnthropic(context.Background(), "acme", "sk-ant-key")
+		_, err := w.WriteAnthropic(context.Background(), "acme", organization.AnthropicRoleDefault, "sk-ant-key")
 		if err == nil || !strings.Contains(err.Error(), "anthropic upload") {
 			t.Fatalf("want a wrapped upload error, got %v", err)
 		}
@@ -202,7 +202,7 @@ func TestSecretRefWriter_WriteAnthropic(t *testing.T) {
 		t.Parallel()
 		fake := &fakeSMClient{createErr: errors.New("sm-api: 503")}
 		w := organization.NewSecretRefWriter(fake, nil, nil, nil)
-		ref, err := w.WriteAnthropic(claimsCtx("ou-acme-uuid"), "acme", "sk-ant-key")
+		ref, err := w.WriteAnthropic(claimsCtx("ou-acme-uuid"), "acme", organization.AnthropicRoleDefault, "sk-ant-key")
 		if err == nil || ref != "" {
 			t.Fatalf("WriteAnthropic = (%q, %v); want (\"\", wrapped error)", ref, err)
 		}
@@ -467,7 +467,7 @@ func TestSecretRefWriter_WritePublisher(t *testing.T) {
 func TestSecretRefWriter_ResolveVaultKey_NoClaimsInContext(t *testing.T) {
 	t.Parallel()
 	w := organization.NewSecretRefWriter(&fakeSMClient{}, nil, nil, nil)
-	_, err := w.WriteAnthropic(context.Background(), "acme", "sk-ant-key")
+	_, err := w.WriteAnthropic(context.Background(), "acme", organization.AnthropicRoleDefault, "sk-ant-key")
 	if err == nil {
 		t.Fatalf("want an error when ctx carries no JWT claims")
 	}
@@ -506,7 +506,7 @@ func TestSecretRefWriter_DeleteAnthropic_DB(t *testing.T) {
 	t.Run("disabled (nil client) is a no-op", func(t *testing.T) {
 		t.Parallel()
 		w := organization.NewSecretRefWriter(nil, nil, nil, nil)
-		if err := w.DeleteAnthropic(context.Background(), "acme"); err != nil {
+		if err := w.DeleteAnthropic(context.Background(), "acme", organization.AnthropicRoleDefault); err != nil {
 			t.Fatalf("disabled DeleteAnthropic = %v; want nil", err)
 		}
 	})
@@ -516,7 +516,7 @@ func TestSecretRefWriter_DeleteAnthropic_DB(t *testing.T) {
 		db := dbtest.New(t)
 		fake := &fakeSMClient{}
 		w := organization.NewSecretRefWriter(fake, organization.NewOrgCredentialRepository(db, nil), organization.NewOrgAnthropicRepository(db), organization.NewIDPRepository(db, nil))
-		if err := w.DeleteAnthropic(context.Background(), "ghost-org"); err != nil {
+		if err := w.DeleteAnthropic(context.Background(), "ghost-org", organization.AnthropicRoleDefault); err != nil {
 			t.Fatalf("DeleteAnthropic on a missing row = %v; want nil", err)
 		}
 		if len(fake.deleteCalls) != 0 {
@@ -531,7 +531,7 @@ func TestSecretRefWriter_DeleteAnthropic_DB(t *testing.T) {
 
 		fake := &fakeSMClient{}
 		w := organization.NewSecretRefWriter(fake, organization.NewOrgCredentialRepository(db, nil), organization.NewOrgAnthropicRepository(db), organization.NewIDPRepository(db, nil))
-		if err := w.DeleteAnthropic(claimsCtx("ou-acme-uuid"), "acme"); err != nil {
+		if err := w.DeleteAnthropic(claimsCtx("ou-acme-uuid"), "acme", organization.AnthropicRoleDefault); err != nil {
 			t.Fatalf("DeleteAnthropic: %v", err)
 		}
 		if len(fake.deleteCalls) != 1 {
@@ -559,7 +559,7 @@ func TestSecretRefWriter_DeleteAnthropic_DB(t *testing.T) {
 
 		fake := &fakeSMClient{}
 		w := organization.NewSecretRefWriter(fake, organization.NewOrgCredentialRepository(db, nil), organization.NewOrgAnthropicRepository(db), organization.NewIDPRepository(db, nil))
-		if err := w.DeleteAnthropic(claimsCtx("ou-acme-uuid"), "acme"); err != nil {
+		if err := w.DeleteAnthropic(claimsCtx("ou-acme-uuid"), "acme", organization.AnthropicRoleDefault); err != nil {
 			t.Fatalf("DeleteAnthropic: %v", err)
 		}
 		if len(fake.deleteCalls) != 1 || fake.deleteCalls[0].secretRefName != "" {
@@ -574,7 +574,7 @@ func TestSecretRefWriter_DeleteAnthropic_DB(t *testing.T) {
 
 		fake := &fakeSMClient{deleteErr: errors.New("sm-api: 500")}
 		w := organization.NewSecretRefWriter(fake, organization.NewOrgCredentialRepository(db, nil), organization.NewOrgAnthropicRepository(db), organization.NewIDPRepository(db, nil))
-		if err := w.DeleteAnthropic(claimsCtx("ou-acme-uuid"), "acme"); err == nil {
+		if err := w.DeleteAnthropic(claimsCtx("ou-acme-uuid"), "acme", organization.AnthropicRoleDefault); err == nil {
 			t.Fatalf("want the SM-API error to propagate")
 		}
 		var got organization.OrgAnthropicCredential
@@ -829,7 +829,7 @@ func TestSecretRefWriter_WriteAnthropic_DualWrite(t *testing.T) {
 
 	fake := &fakeSMClient{createRef: "acme-anthropic-secrets"}
 	w := organization.NewSecretRefWriter(fake, organization.NewOrgCredentialRepository(db, nil), organization.NewOrgAnthropicRepository(db), organization.NewIDPRepository(db, nil))
-	ref, err := w.WriteAnthropic(claimsCtx("ou-acme-uuid"), "acme", "sk-ant-key")
+	ref, err := w.WriteAnthropic(claimsCtx("ou-acme-uuid"), "acme", organization.AnthropicRoleDefault, "sk-ant-key")
 	if err != nil {
 		t.Fatalf("WriteAnthropic: %v", err)
 	}

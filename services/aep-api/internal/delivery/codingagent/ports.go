@@ -32,6 +32,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/wso2/aep/aep-api/internal/organization"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 )
 
@@ -95,6 +96,16 @@ type SkillMirror interface {
 // orgcreds.AnthropicCredentialService.
 type AnthropicProvisioner interface {
 	ApplyWPSecret(ctx context.Context, ocOrgID string) (secretRef string, err error)
+}
+
+// CodingKeyResolver answers which Anthropic credential this run must bill: the
+// org's coding-agent key when it configured one, its default key otherwise. The
+// choice is the organization domain's to make — dispatch only mounts what it is
+// handed — so this port deliberately exposes no way to ask "is there an
+// override?", which is what keeps the reuse rule stated in exactly one place
+// (ADR-0016). Wired from organization.AnthropicCredentialService.
+type CodingKeyResolver interface {
+	ResolveCodingSecretRef(ctx context.Context, ocOrgID string) (organization.SecretRefTriplet, error)
 }
 
 // TokenIssuer mints the runner's bearer (§9.2: the id it carries is the

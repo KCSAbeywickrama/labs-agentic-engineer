@@ -590,7 +590,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		componentClient, repoService, identities{cred: credService},
 		anthropicProvisioner{svc: anthropicCredService}, taskTokens, executionRepo,
 		cfg.AgentPlatformURL, cfg.AgentPlatformURL,
-		orgRepo, orgAnthropicRepo, orgCredRepo, idpRepo)
+		orgRepo, anthropicCredService, orgCredRepo, idpRepo)
 	// The cluster-gateway-proxy DISPATCH path (per-org NS + per-run
 	// ExternalSecrets + a K8s Job via the proxy) requires secrets delivery:
 	// the per-run ExternalSecrets source their values from SecretReferences
