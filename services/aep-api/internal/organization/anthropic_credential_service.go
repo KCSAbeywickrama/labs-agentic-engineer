@@ -241,7 +241,11 @@ func (s *AnthropicCredentialService) Connect(ctx context.Context, ocOrgID string
 		}
 
 		if role == AnthropicRoleCoding {
-			base, err := s.repo.GetByOrg(ctx, ocOrgID, AnthropicRoleDefault)
+			// Read through the TX, not the pool: this precondition and the
+			// write that depends on it must see one snapshot, so "a default
+			// exists" holds by construction rather than by an argument about
+			// the advisory lock.
+			base, err := tx.GetByOrg(ocOrgID, AnthropicRoleDefault)
 			if err != nil {
 				return fmt.Errorf("anthropic connect: load default row: %w", err)
 			}

@@ -85,10 +85,10 @@ export function AnthropicCredentialCard({
         <Divider sx={{ mb: 3 }} />
 
         <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-          Every agent in this organization runs on this key — requirements,
-          architecture, and task generation as well as the coding agent. There
-          is no platform-provided fallback, so agents cannot run until one is
-          configured here.
+          Requirements, architecture, and task generation run on this key, and
+          so does the coding agent unless you give it one of its own below.
+          There is no platform-provided fallback, so agents cannot run until a
+          key is configured here.
         </Typography>
 
         {connected && (

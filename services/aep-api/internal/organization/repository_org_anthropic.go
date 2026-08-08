@@ -54,6 +54,11 @@ type OrgAnthropicRepository interface {
 type OrgAnthropicTx interface {
 	// AdvisoryLock runs pg_advisory_xact_lock(hashtext(key)).
 	AdvisoryLock(key string) error
+	// GetByOrg reads one role's row THROUGH the transaction, so a precondition
+	// checked after AdvisoryLock is read from the same snapshot the write that
+	// depends on it will use. The repository's own GetByOrg runs on the pool —
+	// a different connection, which cannot see this transaction at all.
+	GetByOrg(ocOrgID string, role AnthropicRole) (*OrgAnthropicCredential, error)
 	// Upsert INSERTs the row or, on (oc_org_id, role) conflict, UPDATEs the
 	// metadata columns — deliberately preserving the ORIGINAL connected_at on a
 	// replace — and scans the persisted connected_at back into row.ConnectedAt.
@@ -112,6 +117,18 @@ type orgAnthropicTx struct {
 
 func (t *orgAnthropicTx) AdvisoryLock(key string) error {
 	return t.tx.Exec(`SELECT pg_advisory_xact_lock(hashtext(?))`, key).Error
+}
+
+func (t *orgAnthropicTx) GetByOrg(ocOrgID string, role AnthropicRole) (*OrgAnthropicCredential, error) {
+	var row OrgAnthropicCredential
+	err := t.tx.Where("oc_org_id = ? AND role = ?", ocOrgID, role).First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &row, nil
 }
 
 func (t *orgAnthropicTx) Upsert(row *OrgAnthropicCredential) error {

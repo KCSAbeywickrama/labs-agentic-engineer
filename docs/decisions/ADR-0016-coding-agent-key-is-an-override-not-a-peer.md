@@ -171,6 +171,23 @@ Code always has; the control plane decides which one that is and mounts it via
   cannot be recovered" remains true for the user (they must mint a new one), so
   this is hygiene rather than correctness, but it should be wired up.
 - The coding row's "an active default must exist" precondition is read through
-  the repository rather than the transaction handle, and is safe only because it
-  runs under the org-scoped advisory lock. There is no DB-level constraint
-  backing it; a partial unique index cannot express "row A requires row B".
+  the **transaction** handle (`OrgAnthropicTx.GetByOrg`), so the check and the
+  write that depends on it share one snapshot. Reading it off the pool would
+  have been a different connection, leaving the invariant resting on the
+  advisory lock alone — true today, but silently false the moment a write is
+  added ahead of it. No DB-level constraint backs the rule either way; a partial
+  unique index cannot express "row A requires row B".
+- `{"llm": null, "codingLlm": {…}}` is rejected in the patch's **reject** phase.
+  It is the one section pair the probe phase cannot judge, because each half
+  probes clean alone: only the persist phase discovers that clearing the default
+  cascaded away the row the override needs. Caught there it would already have
+  disconnected the org's key before failing — the half-applied patch this
+  endpoint exists to prevent.
+- **Known gap, pre-existing and now reachable by a second path**: the SM-API
+  mirror is best-effort, so `Connect` can return an `active` projection while
+  the row carries no usable triplet — and `ResolveCodingSecretRef` then fails
+  every coding run for that org, with the console still showing a connected key.
+  This is not new to the coding role (a default-key connect whose mirror failed
+  has always broken coding dispatch the same way), but the override adds a
+  second row that can land in it. Surfacing it properly means a degraded status
+  on the projection for **both** roles, which is its own change.

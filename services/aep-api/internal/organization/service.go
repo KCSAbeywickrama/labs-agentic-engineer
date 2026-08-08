@@ -216,6 +216,18 @@ func (s *Service) Patch(ctx context.Context, org, actor string, p orgconfig.Conf
 			Message: `an org always has an IDP; reset it with {"kind":"platform"}`,
 		}
 	}
+	// Clearing the default key cascades the override away with it, so this
+	// combination has no reachable end state — and it is the one pair the probe
+	// phase cannot catch, because both sections probe clean in isolation. Left
+	// to the persist phase it would disconnect the org's default key and THEN
+	// fail on the override, which is exactly the half-applied patch this
+	// endpoint promises never to produce.
+	if p.LLM.Sent && p.LLM.Null && p.CodingLLM.Sent && !p.CodingLLM.Null {
+		return nil, &SectionError{
+			Section: "codingLlm", Status: http.StatusUnprocessableEntity,
+			Message: "a coding-agent key cannot be set in the same patch that clears the organization's Anthropic key — it overrides that key and cannot outlive it",
+		}
+	}
 
 	// 2. Probe phase — no writes. Any failure aborts the whole patch.
 	if p.LLM.Sent && !p.LLM.Null {

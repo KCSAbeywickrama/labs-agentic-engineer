@@ -458,9 +458,11 @@ func (e *CodingExecutor) RetryAuthFailedBuild(ctx context.Context, row *delivery
 //
 // The Anthropic side asks the organization domain WHICH key this org's coding
 // runs bill — its coding-agent key when it configured one, its default key
-// otherwise — and mounts whatever comes back under the same ANTHROPIC_API_KEY
-// name either way. The runner therefore needs no notion of the split at all;
-// only the vault path behind the ExternalSecret differs. The resolver fails
+// otherwise — and mounts whatever comes back under the variable name that came
+// back WITH it, since a Claude Code OAuth token has to arrive as
+// CLAUDE_CODE_OAUTH_TOKEN rather than ANTHROPIC_API_KEY. The runner therefore
+// needs no notion of the split at all; it reads whichever of the two is
+// present, exactly as Claude Code always has. The resolver fails
 // closed on a configured-but-unusable coding key, so a run never silently bills
 // the default key an org deliberately scoped away from its coding agent.
 func (e *CodingExecutor) resolveRunnerSecretRefs(ctx context.Context, orgID string) (SecretRef, SecretRef, error) {

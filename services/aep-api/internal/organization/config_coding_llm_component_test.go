@@ -25,7 +25,6 @@
 package organization_test
 
 import (
-	"net/http"
 	"strings"
 	"testing"
 )
@@ -203,13 +202,19 @@ func TestConfigComponent_K7_BadCodingKeyIsAtomic(t *testing.T) {
 	if r := c.h.AsOrg("acme").Patch(configPath, llmConnect(goodAnthKey)); r.Code != 200 {
 		t.Fatalf("default connect: %d %s", r.Code, r.Body.String())
 	}
-	c.anth.setStatus(http.StatusUnauthorized)
+	// ONLY the coding key is rejected: the default key in the same body must
+	// still probe clean, or the patch would abort on the `llm` section and this
+	// test would never reach the path it is named for.
+	c.anth.rejectOnly(goodCodingKey)
 
 	body := `{"llm":{"kind":"anthropic","apiKey":"` + goodAnthKey2 + `"},` +
 		`"codingLlm":{"kind":"anthropic","apiKey":"` + goodCodingKey + `"}}`
 	resp := c.h.AsOrg("acme").Patch(configPath, body)
-	if resp.Code == 200 {
-		t.Fatalf("a rejected coding key must fail the patch: %s", resp.Body.String())
+	if resp.Code != 400 {
+		t.Fatalf("a rejected coding key must fail the patch: want 400, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	if !strings.Contains(resp.Body.String(), "body.codingLlm") {
+		t.Fatalf("the failure must be attributed to the coding section, not the default: %s", resp.Body.String())
 	}
 
 	// The default key must NOT have rotated to goodAnthKey2.
@@ -220,5 +225,42 @@ func TestConfigComponent_K7_BadCodingKeyIsAtomic(t *testing.T) {
 	}
 	if m["codingLlm"] != nil {
 		t.Fatalf("a rejected coding key must not be persisted: %v", m["codingLlm"])
+	}
+}
+
+// Clearing the default key and setting the override in ONE patch has no
+// reachable end state — the cascade would delete the very row the override
+// needs. It is the one pair the probe phase cannot see (both sections probe
+// clean on their own), so it is rejected up front rather than discovered
+// halfway through the writes, which would leave the org with no Anthropic key
+// at all AND an error to show for it.
+func TestConfigComponent_K8_ClearDefaultAndSetCodingRejected(t *testing.T) {
+	t.Parallel()
+	c := newConfigHarness(t)
+	if r := c.h.AsOrg("acme").Patch(configPath, llmConnect(goodAnthKey)); r.Code != 200 {
+		t.Fatalf("default connect: %d %s", r.Code, r.Body.String())
+	}
+
+	body := `{"llm":null,"codingLlm":{"kind":"anthropic","apiKey":"` + goodCodingKey + `"}}`
+	resp := c.h.AsOrg("acme").Patch(configPath, body)
+	if resp.Code != 400 {
+		t.Fatalf("clearing the default while setting the override: want 400, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	if !strings.Contains(resp.Body.String(), "body.codingLlm") {
+		t.Fatalf("the error must point at the codingLlm section: %s", resp.Body.String())
+	}
+
+	// The default key MUST survive: the rejection has to happen before the
+	// disconnect, not after it.
+	m := decodeCfg(t, c.h.AsOrg("acme").Get(configPath).Body.Bytes())
+	llm, ok := m["llm"].(map[string]any)
+	if !ok {
+		t.Fatalf("a rejected patch must not disconnect the default key: %v", m["llm"])
+	}
+	if llm["keyLast4"] != goodAnthKey[len(goodAnthKey)-4:] {
+		t.Fatalf("the default key must be untouched: %v", llm)
+	}
+	if m["codingLlm"] != nil {
+		t.Fatalf("a rejected override must not be persisted: %v", m["codingLlm"])
 	}
 }
