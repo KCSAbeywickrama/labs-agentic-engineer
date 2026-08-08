@@ -549,6 +549,11 @@ func (l *loop) cancelRequested() bool { return l.cancel.ReceiveAsync(nil) }
 // deliberate: none of these activities has a "give up" answer that would be
 // better than waiting. A supervisor that cannot reach GitHub should stall
 // visibly, not settle a run on a network blip.
+//
+// Unbounded applies to the blips only. A failure that repeating cannot change —
+// the project deleted underneath the run, a rejected credential — is marked
+// non-retryable by the activity itself (errors.go) and fails on its first
+// attempt, so the policy here never gets to spend a lifetime on it.
 func activityCtx(ctx workflow.Context) workflow.Context {
 	return workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
 		StartToCloseTimeout: activityTimeout,

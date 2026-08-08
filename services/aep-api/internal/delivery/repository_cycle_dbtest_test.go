@@ -346,6 +346,9 @@ func TestRunCycleRepository_RecordUsageAndPhaseRollup(t *testing.T) {
 		ModelID: "model-a", InputPerMTok: 1, OutputPerMTok: 10, CacheReadPerMTok: 0.1,
 	}})
 	cycles := delivery.NewRunCycleRepository(db, stamper)
+	// The rollup reads the LEDGER, which RecordUsage mirrors into as it stamps —
+	// the dispatch row is the run spine's copy, not a second source of spend.
+	ledger := delivery.NewAgentUsageLedgerRepository(db)
 	ctx := context.Background()
 
 	run := admitRun(t, runs, "orgu", "shop", 7, "v7")
@@ -421,13 +424,13 @@ func TestRunCycleRepository_RecordUsageAndPhaseRollup(t *testing.T) {
 		t.Fatalf("unpriceable validation cost_usd = %v, want null", got.CostUsd)
 	}
 
-	build, valid, err := cycles.SumUsageByProjectPhase(ctx, "orgu")
+	build, valid, err := ledger.SumUsageByProjectPhase(ctx, "orgu")
 	if err != nil {
 		t.Fatalf("SumUsageByProjectPhase: %v", err)
 	}
 	// coding + fix fold into build; conflict contributed nothing and must not
 	// appear as a project of its own or dilute the model id.
-	b := build["shop"]
+	b := build[liveScope("shop")]
 	if b.Tokens.InputTokens != 2_000_000 || b.Tokens.OutputTokens != 100_000 ||
 		b.Tokens.CacheReadTokens != 2_000_000 {
 		t.Fatalf("build tokens = %+v, want 2M/100k/2M", b.Tokens)
@@ -440,7 +443,7 @@ func TestRunCycleRepository_RecordUsageAndPhaseRollup(t *testing.T) {
 	}
 	// The validation cycle lands in the VALIDATION phase, not build — the split
 	// this whole rollup exists to get right.
-	v := valid["shop"]
+	v := valid[liveScope("shop")]
 	if v.Tokens.InputTokens != 500_000 || v.Tokens.OutputTokens != 10_000 {
 		t.Fatalf("validation tokens = %+v, want 500k/10k", v.Tokens)
 	}
@@ -449,7 +452,7 @@ func TestRunCycleRepository_RecordUsageAndPhaseRollup(t *testing.T) {
 	}
 
 	// Org fence: another org's rollup sees none of it.
-	if b2, v2, err := cycles.SumUsageByProjectPhase(ctx, "other-org"); err != nil ||
+	if b2, v2, err := ledger.SumUsageByProjectPhase(ctx, "other-org"); err != nil ||
 		len(b2) != 0 || len(v2) != 0 {
 		t.Fatalf("cross-org rollup = (%v, %v, %v), want empty", b2, v2, err)
 	}
@@ -523,11 +526,11 @@ func TestRunCycleRepository_RecordUsageStampsMultiModelSplit(t *testing.T) {
 
 	// The phase rollup sums the mixed cycle's stamp and keeps the aggregate
 	// tokens; the poisoned cycle contributes tokens but no dollars.
-	build, _, err := cycles.SumUsageByProjectPhase(ctx, "orgm")
+	build, _, err := delivery.NewAgentUsageLedgerRepository(db).SumUsageByProjectPhase(ctx, "orgm")
 	if err != nil {
 		t.Fatalf("SumUsageByProjectPhase: %v", err)
 	}
-	b := build["shop"]
+	b := build[liveScope("shop")]
 	if b.CostUsd == nil || *b.CostUsd != 3.00 {
 		t.Fatalf("build cost = %v, want 3.00", b.CostUsd)
 	}

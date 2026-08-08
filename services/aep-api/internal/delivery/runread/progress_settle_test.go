@@ -23,6 +23,7 @@ package runread
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -32,10 +33,14 @@ import (
 )
 
 // flipRuns answers with a run whose state the test flips under a lock — the
-// supervisor settling its row, seen through the reader.
+// supervisor settling its row, seen through the reader. It can also stop
+// answering with a row at all (the project-delete purge) or start failing (a
+// database blip), which are the two ways a live derive comes back without one.
 type flipRuns struct {
-	mu  sync.Mutex
-	row delivery.MilestoneRun
+	mu     sync.Mutex
+	row    delivery.MilestoneRun
+	purged bool
+	err    error
 }
 
 func (f *flipRuns) set(state string) {
@@ -44,9 +49,31 @@ func (f *flipRuns) set(state string) {
 	f.row.State = state
 }
 
+// purge is the project-delete cascade seen through the reader: the row is gone
+// for good.
+func (f *flipRuns) purge() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.purged = true
+}
+
+// fail makes the read error — a transient outage, which says nothing about
+// whether the row is still there.
+func (f *flipRuns) fail(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.err = err
+}
+
 func (f *flipRuns) GetByIDScoped(context.Context, string, string) (*delivery.MilestoneRun, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.err != nil {
+		return nil, f.err
+	}
+	if f.purged {
+		return nil, nil
+	}
 	row := f.row
 	return &row, nil
 }
@@ -152,6 +179,51 @@ func TestRunProgress_SettlesWhenTheRunGoesTerminal(t *testing.T) {
 	waitFor(t, buf, "data: [DONE]", time.Second)
 	if got := buf.String(); !strings.Contains(got, `"state":"cancelled"`) {
 		t.Errorf("the done frame must carry the terminal state\n---\n%s", got)
+	}
+}
+
+// TestRunProgress_SettlesWhenTheRunRowIsPurged: a run row deleted underneath a
+// live stream (a project delete purges its runs) ends the stream. It never goes
+// terminal, so without this the loop ticked forever and the console spun on a
+// run that was never coming back.
+//
+// The `done` frame carries NO state: `state` is the run's TERMINAL state, and a
+// row that was deleted mid-flight reached none.
+func TestRunProgress_SettlesWhenTheRunRowIsPurged(t *testing.T) {
+	runs := &flipRuns{row: delivery.MilestoneRun{
+		ID: "r1", OrgID: "acme", ProjectID: "widgets", State: delivery.RunStateRunning,
+	}}
+	buf, cancel := startStream(t, runs)
+	defer cancel()
+
+	time.Sleep(20 * time.Millisecond)
+	if strings.Contains(buf.String(), "[DONE]") {
+		t.Fatal("a running run must not settle the stream")
+	}
+	runs.purge()
+
+	waitFor(t, buf, `"type":"done"`, time.Second)
+	waitFor(t, buf, "data: [DONE]", time.Second)
+	if got := buf.String(); strings.Contains(got, `"state":`) {
+		t.Errorf("a purged run has no terminal state to report\n---\n%s", got)
+	}
+}
+
+// TestRunProgress_ReadFailure_DoesNotSettle: the counterweight to the purge
+// case. A read that FAILED says nothing about whether the row is there, so it
+// keeps the stream and retries — settling on it would end every live run's
+// stream on one database blip. Negative assertion, 50ms window.
+func TestRunProgress_ReadFailure_DoesNotSettle(t *testing.T) {
+	runs := &flipRuns{row: delivery.MilestoneRun{
+		ID: "r1", OrgID: "acme", ProjectID: "widgets", State: delivery.RunStateRunning,
+	}}
+	buf, cancel := startStream(t, runs)
+	defer cancel()
+
+	runs.fail(errors.New("connection reset"))
+	time.Sleep(50 * time.Millisecond)
+	if got := buf.String(); strings.Contains(got, "[DONE]") {
+		t.Fatalf("a failed read must not settle the stream\n---\n%s", got)
 	}
 }
 
