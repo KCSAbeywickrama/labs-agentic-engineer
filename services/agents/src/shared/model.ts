@@ -137,6 +137,22 @@ export function modelProviderOptions(): ProviderOptions {
 }
 
 /**
+ * The provider-specific PROMPT-CACHE breakpoint, or undefined when caching is
+ * off. Lives in this seam for the same reason `modelProviderOptions` does: the
+ * marker is Anthropic's (`cacheControl`), and the turn loop stays
+ * provider-agnostic by passing whatever this returns through opaquely.
+ *
+ * Anthropic caches the prompt prefix UP TO AND INCLUDING the marked block, so a
+ * caller marks the last stable block rather than every block — the API allows
+ * only a handful of breakpoints, and marking history messages individually
+ * would exhaust them as a conversation grows.
+ */
+export function modelCacheBreakpoint(): ProviderOptions | undefined {
+  if (!config.promptCache) return undefined;
+  return { anthropic: { cacheControl: { type: "ephemeral" } } };
+}
+
+/**
  * True iff `model` is served by the Anthropic provider (`provider` starts with
  * "anthropic") — gates the provider-executed `web_search` tool (external-
  * dependency-discovery #252), which is Anthropic-specific: injecting it

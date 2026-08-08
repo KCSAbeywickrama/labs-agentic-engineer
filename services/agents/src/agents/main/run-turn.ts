@@ -32,6 +32,7 @@
 import {
   ToolLoopAgent,
   isStepCount,
+  type Instructions,
   type StopCondition,
   type ModelMessage,
   type LanguageModel,
@@ -73,11 +74,52 @@ export interface RunTurnInput {
    * provider-agnostic.
    */
   providerOptions?: ProviderOptions;
+  /**
+   * Provider-specific prompt-cache breakpoint, built by the model seam and
+   * applied opaquely — runTurn never names a provider. Absent → nothing is
+   * marked and the request is byte-identical to an uncached one.
+   *
+   * Applied to the system block and to the LAST message of this turn's prompt,
+   * which together cover the whole stable prefix (tools + system + history).
+   * The marker never reaches `input.messages`: the stored history must stay
+   * clean, or every turn would leave another breakpoint behind and a long
+   * conversation would blow the provider's per-request limit.
+   */
+  cacheBreakpoint?: ProviderOptions;
 }
 
 export interface RunTurnResult {
   finishReason: string;
   usage: LanguageModelUsage;
+}
+
+/**
+ * The instructions as a system message carrying `breakpoint`, or the plain
+ * string when there is none. `Instructions` accepts a `SystemModelMessage`,
+ * which is the only place a provider option can ride on the system block.
+ */
+function withCacheBreakpoint(
+  instructions: string,
+  breakpoint: ProviderOptions | undefined,
+): Instructions {
+  if (!breakpoint) return instructions;
+  return { role: "system", content: instructions, providerOptions: breakpoint };
+}
+
+/**
+ * `messages` with `breakpoint` on its last entry — as a COPY. The caller's
+ * array is the conversation that gets persisted and it must not carry cache
+ * markers, so the last message is cloned rather than mutated. Everything before
+ * it is shared by reference: nothing downstream mutates message objects, and
+ * copying a long history every step would be the expensive part.
+ */
+function markLastMessage(
+  messages: ModelMessage[],
+  breakpoint: ProviderOptions | undefined,
+): ModelMessage[] {
+  if (!breakpoint || messages.length === 0) return messages;
+  const last = messages[messages.length - 1]!;
+  return [...messages.slice(0, -1), { ...last, providerOptions: breakpoint }];
 }
 
 export async function runTurn(input: RunTurnInput): Promise<RunTurnResult> {
@@ -87,7 +129,7 @@ export async function runTurn(input: RunTurnInput): Promise<RunTurnResult> {
 
   const agent = new ToolLoopAgent({
     model: input.model,
-    instructions: input.instructions,
+    instructions: withCacheBreakpoint(input.instructions, input.cacheBreakpoint),
     tools: input.tools,
     stopWhen: input.stopWhen ?? [isStepCount(input.maxSteps ?? 20)],
     ...(input.maxOutputTokens ? { maxOutputTokens: input.maxOutputTokens } : {}),
@@ -95,7 +137,7 @@ export async function runTurn(input: RunTurnInput): Promise<RunTurnResult> {
   });
 
   const result = await agent.stream({
-    messages: input.messages,
+    messages: markLastMessage(input.messages, input.cacheBreakpoint),
     ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
   });
 
