@@ -37,6 +37,7 @@ import {
   type ModelMessage,
   type LanguageModel,
   type LanguageModelUsage,
+  type TelemetryOptions,
   type ToolLoopAgentSettings,
   type ToolSet,
 } from "ai";
@@ -86,6 +87,13 @@ export interface RunTurnInput {
    * conversation would blow the provider's per-request limit.
    */
   cacheBreakpoint?: ProviderOptions;
+  /**
+   * Trace-capture options for this turn (the `functionId` its steps are stamped
+   * with), built by the telemetry seam and passed through opaquely — runTurn
+   * knows nothing about which tool is capturing. Absent → the call is
+   * byte-identical to an untraced one.
+   */
+  telemetry?: TelemetryOptions;
 }
 
 export interface RunTurnResult {
@@ -138,6 +146,7 @@ export async function runTurn(input: RunTurnInput): Promise<RunTurnResult> {
 
   const result = await agent.stream({
     messages: markLastMessage(input.messages, input.cacheBreakpoint),
+    ...(input.telemetry ? { telemetry: input.telemetry } : {}),
     ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
   });
 
