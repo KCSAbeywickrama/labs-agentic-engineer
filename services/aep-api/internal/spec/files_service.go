@@ -24,6 +24,12 @@
 // one commit and pushes it to origin under `--force-with-lease` (origin stays
 // the CAS arbiter; Mutate owns the bounded fast-forward retry).
 //
+// Reads come in three shapes and the choice matters: `list` for metadata, `read`
+// for one file, and `bundle` for a whole prefix. Reach for `bundle` whenever the
+// answer is more than one file — a List-then-Read-each fan-out costs one origin
+// round trip PER FILE (serialized behind the mirror lock) and resolves the branch
+// tip separately for each, so it can also straddle two commits. See Bundle.
+//
 // Draft state lives on the frontend; committed truth is the git origin. `apply`
 // carries per-file baseSha optimistic-concurrency: a stale baseSha (or a
 // baseSha-omitted write to a path that already exists) fails the whole batch
@@ -77,6 +83,15 @@ type FileContent struct {
 	Path    string `json:"path"`
 	Content string `json:"content"`
 	SHA     string `json:"sha"`
+}
+
+// FileBundle is many FileContents read at ONE commit. CommitSHA names it; every
+// entry's SHA is a blob of that same tree, so a caller can use the whole set as
+// its baseSha baseline without the entries disagreeing about which tree they
+// came from.
+type FileBundle struct {
+	CommitSHA string
+	Files     []FileContent
 }
 
 // WriteOp is one file write. BaseSHA omitted (empty) means "must not exist yet".
@@ -168,6 +183,11 @@ type FilesService interface {
 	// no matter which run you asked about. Pinning to the run's own merge commit is
 	// what makes a per-run report addressable at all.
 	ReadAt(ctx context.Context, orgID, projectID, path, at string) (*FileContent, error)
+	// Bundle reads every file under prefix at ONE commit — List plus a Read per
+	// entry, collapsed into a single operation. Any caller that wants a whole
+	// directory should use it rather than fanning out; see the implementation for
+	// why the fan-out is expensive AND incoherent.
+	Bundle(ctx context.Context, orgID, projectID, prefix, at string) (*FileBundle, error)
 	Apply(ctx context.Context, orgID, projectID string, req ApplyRequest) (*ApplyResult, []Conflict, error)
 }
 
@@ -267,6 +287,79 @@ func (s *service) ReadAt(ctx context.Context, orgID, projectID, path, at string)
 		return nil, fmt.Errorf("read %s at %s: %w", path, commitLabel(at), err)
 	}
 	return &FileContent{Path: path, Content: string(content), SHA: blobSHA}, nil
+}
+
+// Bundle returns every readable file under prefix at one commit.
+//
+// It exists because the fan-out it replaces — List, then Read per entry — is
+// wrong on two counts, and only one of them is speed.
+//
+// SPEED: a Workspace read addressed by branch name revalidates against origin
+// before it serves, and that fetch runs under the mirror's exclusive lock. So a
+// fan-out over N files pays N network round trips, SERIALIZED, while the git
+// plumbing it exists to perform costs nothing measurable. Resolving the commit
+// once and addressing every read by that sha pays the round trip once: gitfs
+// freshens only for symbolic addresses, and a raw object name is served from
+// local objects.
+//
+// COHERENCE: a fan-out resolves the branch tip independently per request, so a
+// push landing mid-read hands back content from two different trees along with
+// blob shas from two different trees. Callers precondition their later writes on
+// exactly those shas, so the incoherence does not stay a read problem. One
+// resolved commit means one tree and one self-consistent set of shas.
+func (s *service) Bundle(ctx context.Context, orgID, projectID, prefix, at string) (*FileBundle, error) {
+	if err := validateCommit(at); err != nil {
+		return nil, err
+	}
+	ref, err := s.resolveRef(ctx, orgID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	// The one operation here that addresses a ref rather than an object, and so
+	// the only one that touches the network.
+	commit, err := s.git.Workspace().Head(ctx, ref, at)
+	if err != nil {
+		if errors.Is(err, sourcecontrol.ErrRefNotFound) {
+			return nil, ErrFileNotFound
+		}
+		return nil, fmt.Errorf("resolve %s: %w", commitLabel(at), err)
+	}
+
+	// prefix says what the caller WANTS; validateReadPath says what it MAY have.
+	// A path failing the gate is omitted rather than refused: the tree also holds
+	// application code, so a bundle is a filter over it, not a lookup that can
+	// miss. This is the same gate ReadAt applies per file, so the bundle exposes
+	// no path a caller could not already read one at a time.
+	keep := func(path string) bool {
+		return strings.HasPrefix(path, prefix) && validateReadPath(path) == nil
+	}
+	entries, _, err := s.git.Workspace().List(ctx, ref, commit)
+	if err != nil {
+		return nil, fmt.Errorf("list files at %s: %w", commit, err)
+	}
+	contents, _, err := s.git.Workspace().ReadBundle(ctx, ref, commit, keep)
+	if err != nil {
+		return nil, fmt.Errorf("read bundle at %s: %w", commit, err)
+	}
+
+	shaOf := make(map[string]string, len(entries))
+	for _, e := range entries {
+		shaOf[e.Path] = e.SHA
+	}
+	files := make([]FileContent, 0, len(contents))
+	for path, content := range contents {
+		sha, ok := shaOf[path]
+		if !ok {
+			// Both reads addressed the same commit, so a blob with content but no
+			// tree entry means the mirror moved under us mid-bundle. Fail rather
+			// than hand back a file whose baseSha is the empty string, which the
+			// apply gate reads as "this file must not exist yet".
+			return nil, fmt.Errorf("bundle at %s: %s has content but no tree entry", commit, path)
+		}
+		files = append(files, FileContent{Path: path, Content: content, SHA: sha})
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
+	return &FileBundle{CommitSHA: commit, Files: files}, nil
 }
 
 // commitLabel names the pin for an error message: "head" reads better than an
