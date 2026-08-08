@@ -109,5 +109,8 @@ this service ships only the runtime + its unit tests.
   here; the client-safe fold + wire contracts live in `@aep/agent-stream`.
 - Latest Claude models by default (see the `claude-api` skill for model ids).
 - One agent per `src/agents/<name>/`; the loop (`run-turn.ts`) is shared.
-- `src/` writes no files; its only filesystem READS are the §12 snapshot dirs
-  (`load-workspace.ts`, paths derived solely by `snapshot-path.ts`).
+- `src/` writes no files **on the turn path**; its only filesystem READS are the
+  §12 snapshot dirs (`load-workspace.ts`, paths derived solely by
+  `snapshot-path.ts`). The one write is DevTools retention
+  (`shared/devtools-retention.ts`), which prunes the debug capture once at boot
+  before the server listens — never while a turn runs, and never a spec file.

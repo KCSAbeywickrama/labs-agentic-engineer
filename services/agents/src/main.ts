@@ -31,6 +31,7 @@ import { registerTelemetry } from "ai";
 import { createApp } from "./server.js";
 import { createModel, resolveModelId } from "./shared/model.js";
 import { captureTelemetry } from "./shared/telemetry.js";
+import { pruneDevtoolsFile } from "./shared/devtools-retention.js";
 import { intEnv } from "./shared/env.js";
 import { config } from "./shared/config.js";
 import type { AgentsAuthConfig } from "./shared/auth.js";
@@ -76,6 +77,17 @@ async function buildStore(): Promise<ConversationStore> {
 }
 
 async function main(): Promise<void> {
+  // DevTools retention, BEFORE anything can capture. The library lazily loads
+  // the whole capture into a process-memory cache on its first write and
+  // flushes it back whole on every step, so this is the only moment a prune
+  // sticks — and doing it here is also what keeps it off the turn path: the
+  // server is not listening yet, so no turn (`/start` included) ever waits on
+  // it. Best-effort; a null result means nothing to do or something unreadable.
+  if (config.devtools && config.devtoolsRetentionDays > 0) {
+    const summary = pruneDevtoolsFile(config.devtoolsRetentionDays);
+    if (summary) process.stdout.write(summary);
+  }
+
   // Trace capture registers ONCE per process — it is a property of the
   // deployment, not of a turn. It used to be a middleware wrapped around the
   // per-turn model, which is what made every turn its own unrelated run: the

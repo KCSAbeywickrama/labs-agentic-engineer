@@ -68,6 +68,13 @@ export const config = {
   // (`npx @ai-sdk/devtools`, port AI_SDK_DEVTOOLS_PORT / 4983). Heavier than the
   // timing lines (per-call file write + viewer notify), so it is opt-in.
   devtools: boolEnv(process.env.AGENT_DEVTOOLS, false),
+  // How much DevTools capture history to keep (AGENT_DEVTOOLS_RETENTION_DAYS).
+  // The library caps nothing, and `saveDb` rewrites the WHOLE file synchronously
+  // on every step — so an unbounded capture turns into an ever-larger blocking
+  // write on the event loop mid-turn. Applied once at boot, never on a turn.
+  // 3 days: at the observed ~12MB/day a 7-day window reclaims nothing until
+  // week two, by which point the file is ~170MB. 0 disables retention.
+  devtoolsRetentionDays: intEnv(process.env.AGENT_DEVTOOLS_RETENTION_DAYS, 3),
   // SSE keep-alive cadence: a `: keep-alive` comment this often while a turn
   // streams, so long generations don't die behind an idle-timeout ingress.
   keepAliveMs: intEnv(process.env.AGENT_KEEPALIVE_MS, 15_000),
