@@ -37,9 +37,14 @@ type UsageByProjectFunc func(ctx context.Context, orgID string) (map[string]cont
 // deleted project whose spend still counts.
 type ProjectNameLister func(ctx context.Context, orgID string) (map[string]string, error)
 
-// ExecPhaseUsageFunc rolls up captured execution usage per project split into
-// the build and validation phases — the delivery repository's shape.
-type ExecPhaseUsageFunc func(ctx context.Context, orgID string) (build, validation map[string]contracts.StampedUsage, err error)
+// DeliveryPhaseUsageFunc rolls up delivery's captured agent usage split into the
+// build and validation phases — the delivery ledger's shape.
+//
+// It is keyed by contracts.UsageScope, not by slug, because a slug is not an
+// identity: a project deleted and recreated under the same name is two
+// lifetimes, and the roll-up hands them over separately so this service can
+// render them as two cards instead of one inflated one.
+type DeliveryPhaseUsageFunc func(ctx context.Context, orgID string) (build, validation map[contracts.UsageScope]contracts.StampedUsage, err error)
 
 // UsageService assembles the org-wide Settings → Usage roll-up (#291): per
 // project it folds the three SDLC phases (spec/design turns, build + coding
@@ -49,14 +54,14 @@ type ExecPhaseUsageFunc func(ctx context.Context, orgID string) (build, validati
 // every costUsd is a sum of stamps frozen at capture (amended ADR-0011).
 type UsageService struct {
 	specUsage      UsageByProjectFunc
-	execPhaseUsage ExecPhaseUsageFunc
+	deliveryPhaseUsage DeliveryPhaseUsageFunc
 	liveNames      ProjectNameLister
 }
 
 // NewUsageService wires the roll-up from the spec-turn source, the phase-split
 // execution source, and the live project lister.
-func NewUsageService(specUsage UsageByProjectFunc, execPhaseUsage ExecPhaseUsageFunc, liveNames ProjectNameLister) *UsageService {
-	return &UsageService{specUsage: specUsage, execPhaseUsage: execPhaseUsage, liveNames: liveNames}
+func NewUsageService(specUsage UsageByProjectFunc, deliveryPhaseUsage DeliveryPhaseUsageFunc, liveNames ProjectNameLister) *UsageService {
+	return &UsageService{specUsage: specUsage, deliveryPhaseUsage: deliveryPhaseUsage, liveNames: liveNames}
 }
 
 // ListProjectUsage returns a card for every LIVE project in the org (zero usage
@@ -69,7 +74,7 @@ func (s *UsageService) ListProjectUsage(ctx context.Context, orgID string) (gen.
 	if err != nil {
 		return gen.ProjectUsageList{}, err
 	}
-	build, validation, err := s.execPhaseUsage(ctx, orgID)
+	build, validation, err := s.deliveryPhaseUsage(ctx, orgID)
 	if err != nil {
 		return gen.ProjectUsageList{}, err
 	}
@@ -78,42 +83,49 @@ func (s *UsageService) ListProjectUsage(ctx context.Context, orgID string) (gen.
 		return gen.ProjectUsageList{}, err
 	}
 
-	// The set of projects with real spend is the union of the three phase maps
-	// (each already drops zero-token projects).
-	slugs := map[string]struct{}{}
+	// The set of LIFETIMES with real spend is the union of the phase maps (each
+	// already drops zero-token entries). Delivery's two are already scoped; spec
+	// turns are not — see specScope.
+	scopes := map[contracts.UsageScope]struct{}{}
+	for scope := range build {
+		scopes[scope] = struct{}{}
+	}
+	for scope := range validation {
+		scopes[scope] = struct{}{}
+	}
 	for slug := range spec {
-		slugs[slug] = struct{}{}
-	}
-	for slug := range build {
-		slugs[slug] = struct{}{}
-	}
-	for slug := range validation {
-		slugs[slug] = struct{}{}
+		scopes[specScope(slug, names)] = struct{}{}
 	}
 
-	cards := make([]gen.ProjectUsageCard, 0, len(slugs)+len(names))
-	for slug := range slugs {
-		displayName, live := names[slug]
-		if !live {
-			displayName = slug // deleted project: fall back to the stored slug
+	cards := make([]gen.ProjectUsageCard, 0, len(scopes)+len(names))
+	for scope := range scopes {
+		displayName, live := names[scope.ProjectID]
+		if scope.Retired || !live {
+			displayName = scope.ProjectID // deleted project: fall back to the stored slug
 		}
-		total := spec[slug].Add(build[slug]).Add(validation[slug])
+		// Spec-turn usage joins the lifetime specScope assigned it to, and only
+		// that one, so it is never counted on both cards of a recreated slug.
+		specUsage := contracts.StampedUsage{}
+		if specScope(scope.ProjectID, names) == scope {
+			specUsage = spec[scope.ProjectID]
+		}
+		total := specUsage.Add(build[scope]).Add(validation[scope])
 		cards = append(cards, gen.ProjectUsageCard{
-			ProjectName: slug,
+			ProjectName: scope.ProjectID,
 			DisplayName: displayName,
-			Deleted:     !live,
+			Deleted:     scope.Retired || !live,
 			Usage:       toGenUsage(total),
 			Phases: gen.PhaseUsage{
-				Spec:       phaseUsage(spec, slug),
-				Build:      phaseUsage(build, slug),
-				Validation: phaseUsage(validation, slug),
+				Spec:       stampedOrZero(specUsage),
+				Build:      scopeUsage(build, scope),
+				Validation: scopeUsage(validation, scope),
 			},
 		})
 	}
 	// Every live project with no spend yet gets a $0 card so the page lists the
 	// org's projects, not only the ones that happen to have run an agent.
 	for slug, displayName := range names {
-		if _, hasSpend := slugs[slug]; hasSpend {
+		if _, hasSpend := scopes[contracts.UsageScope{ProjectID: slug}]; hasSpend {
 			continue
 		}
 		cards = append(cards, gen.ProjectUsageCard{
@@ -128,14 +140,40 @@ func (s *UsageService) ListProjectUsage(ctx context.Context, orgID string) (gen.
 	return gen.ProjectUsageList{Projects: cards}, nil
 }
 
-// phaseUsage maps a project's phase entry to wire Usage: a captured phase keeps
-// its stamped/unpriced figures; a phase that never ran shows a real $0 rather
-// than a null "0 tok", so all three phase rows read cleanly.
-func phaseUsage(m map[string]contracts.StampedUsage, slug string) gen.Usage {
-	if u, ok := m[slug]; ok {
+// specScope decides which lifetime a project's SPEC-turn spend belongs to.
+//
+// Spec turns are the one capture surface with no lifetime marker: `agent_turns`
+// is never purged and carries no retirement stamp, so a recreated slug's turns sit
+// in the same rows as its predecessor's and cannot be told apart. The honest
+// placement is therefore the whole slug's spec spend on the LIVE card while the
+// project exists, and on the retired card once it does not — which is exactly what
+// the page showed before delivery's half learned to distinguish lifetimes.
+//
+// A recreated project consequently inherits the deleted one's SPEC figure while
+// keeping none of its build or validation figure. Splitting it needs a lifetime
+// marker on the turns themselves, which is the spec domain's to add.
+func specScope(slug string, names map[string]string) contracts.UsageScope {
+	_, live := names[slug]
+	return contracts.UsageScope{ProjectID: slug, Retired: !live}
+}
+
+// scopeUsage maps one lifetime's phase entry to wire Usage: a captured phase
+// keeps its stamped/unpriced figures; a phase that never ran shows a real $0
+// rather than a null "0 tok", so all three phase rows read cleanly.
+func scopeUsage(m map[contracts.UsageScope]contracts.StampedUsage, scope contracts.UsageScope) gen.Usage {
+	if u, ok := m[scope]; ok {
 		return toGenUsage(u)
 	}
 	return zeroUsage()
+}
+
+// stampedOrZero renders a phase aggregate the caller already holds, showing a
+// real $0 for one that never ran.
+func stampedOrZero(u contracts.StampedUsage) gen.Usage {
+	if u.Tokens.IsZero() && u.CostUsd == nil {
+		return zeroUsage()
+	}
+	return toGenUsage(u)
 }
 
 // zeroUsage is an idle phase/project: a real $0 (the model is known to be

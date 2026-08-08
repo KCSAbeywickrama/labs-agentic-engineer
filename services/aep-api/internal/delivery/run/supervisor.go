@@ -210,6 +210,60 @@ func (s *Supervisor) CancelRun(ctx context.Context, row *delivery.MilestoneRun) 
 	})
 }
 
+// AbandonRun ends the supervisor over a milestone whose PROJECT is going away.
+//
+// It TERMINATES where CancelRun signals, and the difference is the whole reason
+// it exists. Cancel is the graceful expiry: the loop wakes, settles its run row
+// and closes the version's milestone on GitHub. Both of those targets are gone
+// by the time a project is deleted — the rows are purged in the same teardown
+// and the repository with them — so a cancel would leave the workflow retrying
+// against what is no longer there. Terminate needs neither.
+//
+// Nothing else ends a run workflow, which is what made this necessary: the
+// supervisor outlives the rows it writes, its milestone poll retries forever
+// (Temporal's default policy is unbounded) against a deleted repository, and its
+// workflow id — run-<org>-<project>-<milestone> — is claimed again by any
+// project later created under the same name, whose first run would then be
+// refused as AlreadyStarted and never supervised at all.
+//
+// A workflow that is not running is success: the id may never have been started,
+// and terminating a settled execution is the same no-op. Temporal reports both
+// as NotFound.
+//
+// An unreachable engine is reported, not swallowed — the same choice CancelRun
+// makes and for the same reason. A supervisor this could not reach is still
+// there when the engine comes back, so the caller has to be able to say so.
+func (s *Supervisor) AbandonRun(ctx context.Context, orgID, projectID string, milestoneNumber int) error {
+	if s == nil {
+		return nil
+	}
+	if s.rt == nil || !s.rt.Available() {
+		return delivery.ErrTemporalUnavailable
+	}
+	c, err := s.rt.Client()
+	if err != nil {
+		return nil // raced with a client teardown
+	}
+	workflowID := delivery.MilestoneRunWorkflowID(orgID, projectID, milestoneNumber)
+	ctx, cancel := context.WithTimeout(ctx, signalTimeout)
+	defer cancel()
+	if terr := c.TerminateWorkflow(ctx, workflowID, "", abandonReason); terr != nil {
+		var notFound *serviceerror.NotFound
+		if errors.As(terr, &notFound) {
+			return nil
+		}
+		return terr
+	}
+	slog.InfoContext(ctx, "run: abandoned a supervisor whose project was deleted",
+		"workflowId", workflowID, "project", projectID, "milestone", milestoneNumber)
+	return nil
+}
+
+// abandonReason is what a terminated run's history records. It is a sentence
+// rather than a code because the only reader is a human looking at why a
+// workflow stopped.
+const abandonReason = "the project was deleted — its run rows are purged and its repository is gone"
+
 func (s *Supervisor) signal(ctx context.Context, orgID, projectID string, milestoneNumber int, name string, payload delivery.RunSignal) error {
 	c, err := s.rt.Client()
 	if err != nil {

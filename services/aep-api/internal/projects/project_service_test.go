@@ -86,8 +86,14 @@ func (f *fakeRepoSvc) DeleteRepo(ctx context.Context, orgID, projectID string) e
 }
 
 type fakeWebhookSvc struct {
-	RegisterFunc func(ctx context.Context, orgID, projectID string) (*int64, error)
-	calls        int
+	RegisterFunc   func(ctx context.Context, orgID, projectID string) (*int64, error)
+	UnregisterFunc func(ctx context.Context, orgID, projectID string) error
+	calls          int
+	// trace, when set, records the unregister step in the delete cascade so its
+	// ORDER relative to the repo-row delete can be asserted.
+	trace           *deleteTrace
+	unregisterArgs  [2]string
+	unregisterCalls int
 }
 
 func (f *fakeWebhookSvc) Register(ctx context.Context, orgID, projectID string) (*int64, error) {
@@ -96,6 +102,18 @@ func (f *fakeWebhookSvc) Register(ctx context.Context, orgID, projectID string) 
 		return nil, nil
 	}
 	return f.RegisterFunc(ctx, orgID, projectID)
+}
+
+func (f *fakeWebhookSvc) Unregister(ctx context.Context, orgID, projectID string) error {
+	f.unregisterCalls++
+	f.unregisterArgs = [2]string{orgID, projectID}
+	if f.trace != nil {
+		f.trace.steps = append(f.trace.steps, "webhook")
+	}
+	if f.UnregisterFunc == nil {
+		return nil
+	}
+	return f.UnregisterFunc(ctx, orgID, projectID)
 }
 
 // fakeExecs fakes the slice of delivery.ExecutionRepository the project
@@ -524,8 +542,9 @@ func TestDeleteProject_CleansUpRepoAndPurgesExecutions(t *testing.T) {
 		t.Error("git repo cleanup was not invoked")
 	}
 	// The platform-owned executions rows are purged, org+project scoped (§7).
-	// The Task issues themselves are GitHub-owned (deleted with the repo) — the
-	// service never calls an issue-delete path.
+	// The Task issues themselves are GitHub-owned and SURVIVE: the delete leaves
+	// the remote repository standing, and the service never calls an issue-delete
+	// path.
 	if execs.deleteCalls != 1 || execs.deleteArgs != [2]string{"acme", "web"} {
 		t.Errorf("executions purge: calls=%d args=%v, want 1 (acme,web)", execs.deleteCalls, execs.deleteArgs)
 	}
@@ -545,10 +564,17 @@ func TestDeleteProject_ExecutionsPurgeFailureIsSwallowed(t *testing.T) {
 	}
 }
 
+// TestDeleteProject_OCErrorSkipsCleanup: a delete that could not REACH
+// OpenChoreo has established nothing about the project, so the platform's half
+// of it stays put. Tearing down the repo and the rows underneath a project that
+// still exists in OC would strand it.
+//
+// The one OC failure that does NOT stop the cascade is not-found — see
+// TestDeleteProject_AlreadyGoneOCProjectStillTearsDownPlatformState.
 func TestDeleteProject_OCErrorSkipsCleanup(t *testing.T) {
 	t.Parallel()
 	oc := &ocmocks.ProjectClientMock{
-		DeleteProjectFunc: func(context.Context, string, string) error { return openchoreo.ErrNotFound },
+		DeleteProjectFunc: func(context.Context, string, string) error { return openchoreo.ErrForbidden },
 	}
 	repoSvc := &fakeRepoSvc{DeleteRepoFunc: func(context.Context, string, string) error {
 		t.Error("repo cleanup must not run when the OC delete failed")
@@ -559,8 +585,8 @@ func TestDeleteProject_OCErrorSkipsCleanup(t *testing.T) {
 		return nil
 	}}
 	svc := NewProjectService(oc, repoSvc, nil, nil, execs)
-	if err := svc.DeleteProject(context.Background(), "acme", "web"); !errors.Is(err, ErrProjectNotFound) {
-		t.Fatalf("want ErrProjectNotFound, got %v", err)
+	if err := svc.DeleteProject(context.Background(), "acme", "web"); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("want ErrForbidden, got %v", err)
 	}
 	if execs.deleteCalls != 0 {
 		t.Errorf("executions purge ran despite OC delete failure (%d calls)", execs.deleteCalls)
@@ -578,6 +604,141 @@ func TestDeleteProject_RepoCleanupFailureIsSwallowed(t *testing.T) {
 	svc := NewProjectService(oc, repoSvc, nil, nil, &fakeExecs{})
 	if err := svc.DeleteProject(context.Background(), "acme", "web"); err != nil {
 		t.Fatalf("repo cleanup failure must be best-effort, got %v", err)
+	}
+}
+
+// --- the run-supervisor half of the delete cascade ---------------------------
+
+// deleteTrace records the teardown steps in the order the service ran them. The
+// ORDER is the contract, not just the calls: a supervisor abandoned after its
+// repository is gone has already spent a poll on a repository that no longer
+// exists, and one abandoned after its rows are purged has nothing left to
+// identify.
+type deleteTrace struct {
+	steps []string
+}
+
+// fakeRunAbandoner is the run-supervisor teardown port.
+type fakeRunAbandoner struct {
+	trace *deleteTrace
+	args  [2]string
+	calls int
+	err   error
+}
+
+func (f *fakeRunAbandoner) AbandonProjectRuns(_ context.Context, orgID, projectID string) error {
+	f.calls++
+	f.args = [2]string{orgID, projectID}
+	f.trace.steps = append(f.trace.steps, "abandon")
+	return f.err
+}
+
+// tracingRunRows is the milestoneRunRows port with its purge traced.
+type tracingRunRows struct {
+	trace *deleteTrace
+	err   error
+}
+
+func (tracingRunRows) ListByProject(context.Context, string, string) ([]delivery.MilestoneRun, error) {
+	return nil, nil
+}
+
+func (tracingRunRows) LatestCycle(context.Context, string, string) (*delivery.RunCycle, error) {
+	return nil, nil
+}
+
+func (t tracingRunRows) DeleteByProject(context.Context, string, string) error {
+	t.trace.steps = append(t.trace.steps, "purge")
+	return t.err
+}
+
+// TestDeleteProject_AbandonsRunSupervisorsBeforeTheirRepoAndRows: purging a
+// project's run rows does not stop the workflows that write them. Left running,
+// a supervisor retries its milestone poll forever against a deleted repository,
+// and its workflow id — keyed on (org, project, milestone) alone — collides with
+// any project later created under the same name, whose first run is then refused
+// as AlreadyStarted and never supervised.
+func TestDeleteProject_AbandonsRunSupervisorsBeforeTheirRepoAndRows(t *testing.T) {
+	t.Parallel()
+	trace := &deleteTrace{}
+	oc := &ocmocks.ProjectClientMock{
+		DeleteProjectFunc: func(context.Context, string, string) error { return nil },
+	}
+	repoSvc := &fakeRepoSvc{
+		GetRepoFunc: func(context.Context, string, string) (*sourcecontrol.GitRepository, error) {
+			return nil, nil
+		},
+		DeleteRepoFunc: func(context.Context, string, string) error {
+			trace.steps = append(trace.steps, "repo")
+			return nil
+		},
+	}
+	abandoner := &fakeRunAbandoner{trace: trace}
+	svc := NewProjectService(oc, repoSvc, nil, nil, &fakeExecs{})
+	svc.SetStageSources(tracingRunRows{trace: trace}, fakeBindingsReader{})
+	svc.SetRunAbandoner(abandoner)
+
+	if err := svc.DeleteProject(context.Background(), "acme", "web"); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if abandoner.calls != 1 || abandoner.args != [2]string{"acme", "web"} {
+		t.Fatalf("abandon: calls=%d args=%v, want 1 (acme,web)", abandoner.calls, abandoner.args)
+	}
+	want := []string{"abandon", "repo", "purge"}
+	if len(trace.steps) != len(want) {
+		t.Fatalf("teardown order = %v, want %v", trace.steps, want)
+	}
+	for i := range want {
+		if trace.steps[i] != want[i] {
+			t.Fatalf("teardown order = %v, want %v", trace.steps, want)
+		}
+	}
+}
+
+// TestDeleteProject_AbandonFailureIsSwallowed: the OC delete has already been
+// committed by the time the teardown runs, so a Temporal outage must not leave
+// the caller a half-deleted project it cannot retry — the rest of the cascade
+// still runs.
+func TestDeleteProject_AbandonFailureIsSwallowed(t *testing.T) {
+	t.Parallel()
+	trace := &deleteTrace{}
+	oc := &ocmocks.ProjectClientMock{
+		DeleteProjectFunc: func(context.Context, string, string) error { return nil },
+	}
+	abandoner := &fakeRunAbandoner{trace: trace, err: errors.New("temporal down")}
+	svc := NewProjectService(oc, nil, nil, nil, &fakeExecs{})
+	svc.SetStageSources(tracingRunRows{trace: trace}, fakeBindingsReader{})
+	svc.SetRunAbandoner(abandoner)
+
+	if err := svc.DeleteProject(context.Background(), "acme", "web"); err != nil {
+		t.Fatalf("abandon failure must be best-effort, got %v", err)
+	}
+	if len(trace.steps) != 2 || trace.steps[1] != "purge" {
+		t.Errorf("the purge must still run after a failed abandon: %v", trace.steps)
+	}
+}
+
+// TestDeleteProject_UnreachableOCSkipsTheRunTeardown: a delete that could not
+// REACH OpenChoreo has established nothing, so the project still exists there —
+// and killing the supervisors of a project that is still alive would strand it
+// mid-run with no way to resume.
+func TestDeleteProject_UnreachableOCSkipsTheRunTeardown(t *testing.T) {
+	t.Parallel()
+	trace := &deleteTrace{}
+	unreachable := errors.New("openchoreo unreachable")
+	oc := &ocmocks.ProjectClientMock{
+		DeleteProjectFunc: func(context.Context, string, string) error { return unreachable },
+	}
+	abandoner := &fakeRunAbandoner{trace: trace}
+	svc := NewProjectService(oc, nil, nil, nil, &fakeExecs{})
+	svc.SetStageSources(tracingRunRows{trace: trace}, fakeBindingsReader{})
+	svc.SetRunAbandoner(abandoner)
+
+	if err := svc.DeleteProject(context.Background(), "acme", "web"); !errors.Is(err, unreachable) {
+		t.Fatalf("want the OC error, got %v", err)
+	}
+	if abandoner.calls != 0 {
+		t.Errorf("run supervisors abandoned despite a failed OC delete (%d calls)", abandoner.calls)
 	}
 }
 

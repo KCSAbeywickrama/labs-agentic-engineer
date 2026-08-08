@@ -77,8 +77,11 @@ export function UsageSection() {
 
   return (
     <Stack spacing={1.5}>
+      {/* The name alone is not a key: a project deleted and recreated under the
+          same one is two cards — the live project and the incarnation whose
+          spend it does not inherit. */}
       {cards.map((card) => (
-        <ProjectCard key={card.projectName} card={card} />
+        <ProjectCard key={`${card.projectName}:${card.deleted}`} card={card} />
       ))}
     </Stack>
   );
