@@ -84,10 +84,10 @@ const PLAN_INSTRUCTION =
 const PLAN_CONTEXT_HEADER = "\n\n## Existing open Tasks in this version (reference)\n";
 
 /**
- * Skills whose bodies are inlined up front for a flow (#335 latency): when the
- * flow already tells us which guidance applies, inlining it saves the model's
- * `loadSkill` round-trip — one whole model step before any output. A flow absent
- * here still runs; its skill loads lazily.
+ * SUPPORTING skills a flow needs beyond its own (#335 latency). The flow's own
+ * skill is always inlined — see `eagerSkillsFor` — so this map holds only the
+ * extras that skill's playbook then walks. A flow absent here inlines just its
+ * own skill; anything else it names loads lazily.
  *
  * This is a property of the FLOW, not of the call, which is why it lives beside
  * the wording rather than riding the wire: a console CTA, a typed command and a
@@ -98,10 +98,27 @@ const PLAN_CONTEXT_HEADER = "\n\n## Existing open Tasks in this version (referen
  * instructions on EVERY turn (see `buildOrgDefaultsBlock`), so listing it as a
  * per-flow eager skill would inline the same body twice.
  */
-const FLOW_EAGER_SKILLS: Record<string, string[]> = {
-  start: ["grilling"],
-  amend: ["grilling"],
-  design: ["design"],
+const FLOW_SUPPORTING_SKILLS: Record<string, string[]> = {
+  // The interview mechanics both playbooks defer to, plus the shape of the
+  // document they both write. `prd-contract` is a sibling skill rather than a
+  // `start` reference so an amend turn can hold the contract without also
+  // inlining the cold-start interview playbook, whose frame ("the idea comes to
+  // you", "asks exactly once") is wrong for a scoped edit.
+  start: ["grilling", "prd-contract"],
+  amend: ["grilling", "prd-contract"],
+  // The rest of the design lineup, in the order the `design` skill walks it.
+  // `design` names every one, so the model's first act was always to batch-load
+  // the set: one model step, and ~70KB arriving as a tool RESULT — landing AFTER
+  // the turn prompt's cache breakpoint, where it is re-prefilled per step rather
+  // than read. Inlined, the same bytes sit INSIDE the marked prompt, cached from
+  // the first step and again on the next turn.
+  //
+  // Three of them are conditional (a project with no `web-application` never
+  // writes a wireframes.dsl), but which components exist is decided DURING the
+  // turn — there is nothing to condition on when the prompt is composed, and a
+  // cached read costs a tenth of a re-prefill. Org-authored design skills stay
+  // lazy: this map is flow wording and cannot know a given org's catalog.
+  design: ["cell-design", "architecture", "security-design", "openapi-conventions", "wireframes", "validation-criteria"],
 };
 
 // --- Composition -------------------------------------------------------------
@@ -199,12 +216,42 @@ function planContext(files: PlanContextFile[] | undefined): string {
 
 // --- Derived turn properties -------------------------------------------------
 
-/** Which skills to inline up front for this turn (empty for kinds with none). */
-export function eagerSkillsFor(turn: TurnSpec): string[] {
-  if (turn.kind === "flow") return FLOW_EAGER_SKILLS[turn.skill] ?? [];
-  if (turn.kind === "start") return FLOW_EAGER_SKILLS.start ?? [];
-  return [];
+/**
+ * The skill this turn's instruction tells the model to load by name — `start`,
+ * `task-planning`, or whichever skill a `/<skill>` command names. A plain chat
+ * turn names none: the user's words are the instruction.
+ */
+function instructedSkill(turn: TurnSpec): string | undefined {
+  switch (turn.kind) {
+    case "start":
+      return "start";
+    case "plan":
+      return "task-planning";
+    case "flow":
+      return turn.skill;
+    case "chat":
+      return undefined;
+  }
 }
+
+/**
+ * Which skills to inline up front for this turn (empty for kinds with none).
+ *
+ * The instructed skill always leads: every non-chat instruction opens with "Load
+ * the <skill> skill and follow it", so sending the catalog and waiting for the
+ * model to ask for a body we already hold spends a whole model step — measured at
+ * 3.8s on `/start` and 3.6s on a plan turn — before a single useful token. If we
+ * name a skill in the instruction, we ship it. Resolution runs through the
+ * `SkillSource`, so an ORG-authored flow (`/<their-skill>`) inlines too, and a
+ * name that resolves to nothing is skipped silently — `loadSkill` then reports it
+ * missing exactly as before.
+ */
+export function eagerSkillsFor(turn: TurnSpec): string[] {
+  const instructed = instructedSkill(turn);
+  if (instructed === undefined) return [];
+  return [instructed, ...(FLOW_SUPPORTING_SKILLS[instructed] ?? [])];
+}
+
 
 /**
  * Which tool set the turn needs. Planning registers `planTask`/`updateTask` and

@@ -1,3 +1,12 @@
+---
+name: prd-contract
+description: The shape of specs/requirements/prd.md — its sections in order, the story-numbering rules, and what the PRD deliberately excludes. Use whenever writing or amending the PRD.
+metadata:
+  aep:
+    kind: platform
+    audience: [design]
+---
+
 # The PRD contract — specs/requirements/prd.md
 
 The PRD speaks **product language**: what the system does and for whom, never

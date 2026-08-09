@@ -55,6 +55,7 @@ export type ErrCode =
   | "INVALID_JSON"
   | "SCHEMA_VIOLATION"
   | "INVALID_DSL"
+  | "INVALID_OPENAPI"
   | "PROTECTED_PATH";
 
 /** A candidate line echoed back for NOT_UNIQUE / NOT_FOUND re-anchoring. */

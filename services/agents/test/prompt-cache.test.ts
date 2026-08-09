@@ -26,15 +26,27 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { FileBundle } from "@aep/agent-stream";
 import type { ModelMessage } from "ai";
 import { runTurn } from "../src/agents/main/run-turn.js";
+import { buildFileTools } from "../src/agents/main/tools/files.js";
 import { mockModel } from "../src/shared/mock-model.js";
+import { SEED_FILES } from "./seed-files.js";
 
 const BREAKPOINT = { anthropic: { cacheControl: { type: "ephemeral" } } };
 
 /** The prompt the model actually received for `callIndex`. */
 function promptAt(model: ReturnType<typeof mockModel>, callIndex: number): ModelMessage[] {
   return model.doStreamCalls[callIndex]!.prompt as unknown as ModelMessage[];
+}
+
+/**
+ * Indexes of the conversation messages carrying a cache marker. The system block
+ * is excluded: it is marked once and permanently (it fronts the tools+system
+ * prefix), so counting it would obscure which CONVERSATION messages are marked.
+ */
+function markedIndexes(prompt: ModelMessage[]): number[] {
+  return prompt.flatMap((m, i) => (m.role !== "system" && m.providerOptions ? [i] : []));
 }
 
 test("the cache breakpoint rides the system block and the last message", async () => {
@@ -91,6 +103,75 @@ test("the breakpoint never reaches the persisted conversation", async () => {
       undefined,
       `persisted ${m.role} message must carry no cache marker`,
     );
+  }
+});
+
+test("the breakpoint rolls onto the newest message on every step of the loop", async () => {
+  const openapi = "specs/design/components/hello-api/openapi.yaml";
+  const bundle = new FileBundle(SEED_FILES);
+  const model = mockModel([
+    {
+      kind: "toolCall",
+      toolCallId: "call_1",
+      toolName: "editFile",
+      input: { path: openapi, oldString: 'example: "Hello, World!"', newString: 'example: "one"' },
+    },
+    {
+      kind: "toolCall",
+      toolCallId: "call_2",
+      toolName: "editFile",
+      input: { path: openapi, oldString: 'example: "one"', newString: 'example: "two"' },
+    },
+    { kind: "text", text: "Done." },
+  ]);
+  const messages: ModelMessage[] = [];
+
+  await runTurn({
+    model,
+    instructions: "You are a spec agent.",
+    tools: buildFileTools(bundle),
+    messages,
+    prompt: "edit it twice",
+    cacheBreakpoint: BREAKPOINT,
+  });
+
+  assert.equal(model.doStreamCalls.length, 3, "expected a three-step loop");
+
+  // Step 1: only the turn prompt is marked — nothing has been appended yet.
+  const step1 = promptAt(model, 0);
+  assert.deepEqual(markedIndexes(step1), [step1.length - 1]);
+
+  // Steps 2 and 3: the marker MOVES to the newest message, so the step just
+  // completed joins the cached prefix instead of being re-prefilled uncached.
+  // Without the roll, the marker would still sit on the turn prompt and every
+  // appended assistant/tool message would be re-sent at full price each step.
+  for (const callIndex of [1, 2]) {
+    const prompt = promptAt(model, callIndex);
+    const marked = markedIndexes(prompt);
+    assert.ok(
+      marked.includes(prompt.length - 1),
+      `step ${callIndex + 1}: newest message must carry the breakpoint (marked ${marked})`,
+    );
+    // The provider allows only a handful of breakpoints and silently drops the
+    // rest, so a stale marker left behind on each step would break caching
+    // outright on a long loop.
+    assert.ok(
+      marked.length <= 2,
+      `step ${callIndex + 1}: markers must not accumulate (marked ${marked})`,
+    );
+  }
+
+  // The turn prompt keeps its marker throughout: it is the boundary the NEXT
+  // turn of this conversation reads its cached prefix from.
+  const turnPromptIndex = step1.length - 1;
+  assert.ok(
+    markedIndexes(promptAt(model, 2)).includes(turnPromptIndex),
+    "the turn-prompt breakpoint must survive the roll",
+  );
+
+  // And none of it reaches the persisted aggregate.
+  for (const m of messages) {
+    assert.equal(m.providerOptions, undefined, `persisted ${m.role} message must be unmarked`);
   }
 });
 

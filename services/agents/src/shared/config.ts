@@ -44,7 +44,15 @@ export const config = {
   // A fresh "write an app" generation needs 10–15 file calls; steps batch
   // parallel tool calls, so the loop budget is higher than the call count.
   // intEnv guards a non-numeric value (which would NaN out the step cap).
-  maxSteps: intEnv(process.env.AGENT_MAX_STEPS, 20),
+  //
+  // 60, not 20: a measured design generation consumed all 20 steps and ended on
+  // `finishReason: tool-calls` — the model still had work queued when the cap
+  // stopped the loop. The cap is a runaway guard, and hitting it is not benign:
+  // the turn still succeeds, so it still emits its terminal manifest and the
+  // fold commits a half-written design as if it were complete. Paying for a
+  // second turn to finish the job costs far more latency than the headroom does,
+  // since an unused step costs nothing.
+  maxSteps: intEnv(process.env.AGENT_MAX_STEPS, 60),
   // Per-step output-token ceiling. The Anthropic provider defaults to a low cap
   // (~4096) when unset, which truncates a real spec/design mid-tool-call: the
   // model hits the limit before the `addFile` input JSON closes, so NO `tool-call`

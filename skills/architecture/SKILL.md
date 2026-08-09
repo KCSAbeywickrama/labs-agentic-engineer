@@ -367,7 +367,7 @@ console shows it in the dependency drawer and the coding agent relies on it to
 integrate correctly.
 
 One component per directory. Every `web-application` gets a `wireframes.dsl`
-(load `wireframes` before writing it); every `service` gets an
-`openapi.yaml` (load `openapi-conventions` before writing it), emitted LAST.
+(`wireframes` governs it); every `service` gets an `openapi.yaml`
+(`openapi-conventions` governs it), emitted after design.md's ER model.
 Other kinds (scheduled tasks, workers, …) carry no extra artifact yet — capture
 their behaviour fully in `description` and `dependencies`.
