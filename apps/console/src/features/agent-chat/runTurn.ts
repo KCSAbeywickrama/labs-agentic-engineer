@@ -139,6 +139,28 @@ export async function attachAndFoldTurn(
     }
   };
 
+  /**
+   * The pre-verdict writes of one file card: identical but for the status, and
+   * both deliberately WITHOUT `ok`. The store merges each write onto the card, so
+   * an `ok` set at either stage would survive into the settled state and show a
+   * success tick the tool-result never granted.
+   */
+  const writeFileCard = (
+    toolCallId: string,
+    st: { toolName: string },
+    path: string,
+    status: "streaming" | "done",
+  ): void => {
+    upsertToolMessage(chatKey, {
+      role: "tool",
+      turnId,
+      toolCallId,
+      status,
+      op: opForTool(st.toolName),
+      path,
+    });
+  };
+
   const fold = (part: StreamPart): void => {
     switch (part.type) {
       case "text-delta":
@@ -171,16 +193,25 @@ export async function attachAndFoldTurn(
         const path = readToolInputPath(st.buf);
         if (path) {
           st.carded = true;
-          upsertToolMessage(chatKey, {
-            role: "tool",
-            turnId,
-            toolCallId: part.id!,
-            status: "streaming",
-            op: opForTool(st.toolName),
-            path,
-            ok: true,
-          });
+          writeFileCard(part.id!, st, path, "streaming");
         }
+        break;
+      }
+      case "tool-input-end": {
+        // The file's body is COMPLETE here — for a file tool the input is the
+        // body, so a closed input stream means nothing more is coming. Stop the
+        // spinner now and leave `ok` unset until the result settles it.
+        //
+        // Why this event and not `tool-result`: one step can issue several file
+        // writes (the design turn emits five in a batch), and the SDK flushes
+        // every result only after the LAST call in the step. Keying "finished"
+        // off the result made all five cards spin for the whole batch and then
+        // settle together, long after the earlier files were done.
+        const st = part.id ? inputs.get(part.id) : undefined;
+        if (!st || !st.carded) break; // no card was ever shown (path never resolved)
+        const path = readToolInputPath(st.buf);
+        if (!path) break;
+        writeFileCard(part.id!, st, path, "done");
         break;
       }
       case "tool-call": {
@@ -252,7 +283,7 @@ export async function attachAndFoldTurn(
         });
         break;
       default:
-        break; // start/finish/tool-input-end plumbing — nothing to render
+        break; // start/finish plumbing — nothing to render
     }
   };
 

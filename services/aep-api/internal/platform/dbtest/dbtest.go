@@ -41,6 +41,22 @@
 //     so production paths that use `FOR UPDATE SKIP LOCKED` / manual Begin/Commit
 //     test truthfully (an outer wrapping txn would break them).
 //
+// Container lifetime is owned by the test process itself, not by a sidecar. The
+// container must outlive every clone, so exactly one thing may end it: Main,
+// after the package's last test. Every package whose tests reach New therefore
+// delegates its TestMain to this harness:
+//
+//	func TestMain(m *testing.M) { dbtest.Main(m) }
+//
+// arch's TestDBTestPackagesShutDownTheirContainer fails the build if one does
+// not — `go test ./...` gives each package its own process, so a package that
+// forgets it strands its own Postgres. Testcontainers' Ryuk sidecar stays
+// enabled as a backstop for the exits Main cannot reach (a panicking or
+// signal-killed binary), but only as a backstop: Ryuk reaps on a timer, is
+// shared by every test binary in one `go test` session, and is itself an
+// auto-removed container, so a reaper that dies without reaping leaves a
+// Postgres that nothing owns.
+//
 // Fast lane: New calls t.Skip under `testing.Short()`, so `make test`
 // (go test -short ./...) needs no Docker and `make test-db` (go test ./...)
 // runs the DB tier. There is no build tag — every test compiles in one world.
@@ -52,8 +68,10 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/peterldowns/pgtestdb"
 	"github.com/testcontainers/testcontainers-go"
@@ -93,17 +111,54 @@ const (
 	// needs to be stable within a run. Bump it when internal/migrate's step list
 	// or base-model set changes, purely as documentation of intent.
 	schemaVersion = "9"
+
+	// shutdownTimeout bounds the teardown in Main. It only has to cover a stop +
+	// remove of a local container; if Docker is wedged for longer than this the
+	// run should still report its test result rather than hang.
+	shutdownTimeout = 60 * time.Second
 )
 
 // container holds the process-wide testcontainers Postgres, started once by
-// startContainer and reused by every New call. It is torn down by Ryuk when the
-// test process exits (never per test — the container must outlive every clone).
+// startContainer and reused by every New call. It is torn down once, by Main,
+// after the package's last test — never per test, because it must outlive every
+// clone.
 var (
 	containerOnce sync.Once
 	baseConfig    pgtestdb.Config
 	containerErr  error
-	container     *tcpostgres.PostgresContainer //nolint:unused // kept alive for the process lifetime
+	container     *tcpostgres.PostgresContainer
 )
+
+// Main runs a DB-backed package's tests and then terminates the container that
+// New started, so a run leaves no Postgres behind. Every package whose tests
+// reach New delegates its TestMain to it:
+//
+//	func TestMain(m *testing.M) { dbtest.Main(m) }
+//
+// It is deliberately the only teardown path: by the time m.Run returns, every
+// per-test clone has been dropped by its own t.Cleanup, and nothing else in the
+// process can still want the container.
+func Main(m *testing.M) {
+	code := m.Run()
+	shutdown()
+	os.Exit(code)
+}
+
+// shutdown terminates the process-wide container if one was ever started.
+// Failure is reported on stderr but never changes the exit code: the tests have
+// already run, and turning a teardown hiccup into a red build would hide their
+// result. Ryuk remains the backstop for that case.
+func shutdown() {
+	if container == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+	if err := container.Terminate(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "dbtest: terminate Postgres container: %v\n", err)
+	}
+	container = nil
+}
 
 // New returns a fresh, fully-migrated, isolated *gorm.DB for the test, dropped
 // on t.Cleanup. It skips under -short (fast lane) and where Docker is

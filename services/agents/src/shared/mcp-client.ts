@@ -68,8 +68,28 @@ interface McpToolCallResult {
 
 let nextRpcId = 1;
 
+/**
+ * Wall-clock ceiling on one JSON-RPC round trip.
+ *
+ * "Best-effort" covered every failure the server could REPORT but not the one
+ * where it says nothing: `fetch` has no default timeout, so an unresponsive
+ * server left both calls hanging indefinitely. The two hangs read differently
+ * to a user and neither is attributable without a trace — `tools/list` runs
+ * BEFORE the first model call, so it stalls time-to-first-token with the stream
+ * already open and nothing on it; `tools/call` stalls mid-turn between steps.
+ *
+ * 10s is well past a healthy discovery response and well short of the kind of
+ * wait a user reads as a hang.
+ */
+const RPC_TIMEOUT_MS = 10_000;
+
 /** POST one JSON-RPC request; throws on a non-2xx response or an `error` envelope. */
-async function rpc(config: McpConfig, method: string, params: unknown): Promise<unknown> {
+async function rpc(
+  config: McpConfig,
+  method: string,
+  params: unknown,
+  timeoutMs: number,
+): Promise<unknown> {
   const res = await fetch(config.url, {
     method: "POST",
     headers: {
@@ -78,6 +98,9 @@ async function rpc(config: McpConfig, method: string, params: unknown): Promise<
       Authorization: `Bearer ${config.token}`,
     },
     body: JSON.stringify({ jsonrpc: "2.0", id: nextRpcId++, method, params }),
+    // A timeout aborts the request, which surfaces as a thrown TimeoutError —
+    // the same degradation path as any other transport failure.
+    signal: AbortSignal.timeout(timeoutMs),
   });
   if (!res.ok) {
     throw new Error(`mcp ${method}: HTTP ${res.status}`);
@@ -91,12 +114,23 @@ async function rpc(config: McpConfig, method: string, params: unknown): Promise<
 
 /**
  * Connect to the MCP server in `config`, discover its tools, and return them as
- * an AI SDK `ToolSet`. On any failure (unreachable, 401, malformed JSON/shape)
- * it logs a warning and returns `{}` — the caller merges an empty set as a no-op.
+ * an AI SDK `ToolSet`. On any failure (unreachable, 401, malformed JSON/shape,
+ * unresponsive past `timeoutMs`) it logs a warning and returns `{}` — the caller
+ * merges an empty set as a no-op.
+ *
+ * `options.timeoutMs` overrides `RPC_TIMEOUT_MS` for this server. Callers leave
+ * it unset; the tests set it small so the no-response path is assertable without
+ * a ten-second wait.
  */
-export async function loadMcpTools(config: McpConfig): Promise<ToolSet> {
+export async function loadMcpTools(
+  config: McpConfig,
+  options: { timeoutMs?: number } = {},
+): Promise<ToolSet> {
+  const timeoutMs = options.timeoutMs ?? RPC_TIMEOUT_MS;
   try {
-    const listed = (await rpc(config, "tools/list", {})) as { tools?: McpToolDescriptor[] } | undefined;
+    const listed = (await rpc(config, "tools/list", {}, timeoutMs)) as
+      | { tools?: McpToolDescriptor[] }
+      | undefined;
     const descriptors = Array.isArray(listed?.tools) ? listed.tools : [];
     const tools: ToolSet = {};
     for (const d of descriptors) {
@@ -105,9 +139,12 @@ export async function loadMcpTools(config: McpConfig): Promise<ToolSet> {
         description: typeof d.description === "string" ? d.description : "",
         inputSchema: jsonSchema(d.inputSchema ?? { type: "object", properties: {} }),
         execute: async (args) => {
-          const result = (await rpc(config, "tools/call", { name: d.name, arguments: args ?? {} })) as
-            | McpToolCallResult
-            | undefined;
+          const result = (await rpc(
+            config,
+            "tools/call",
+            { name: d.name, arguments: args ?? {} },
+            timeoutMs,
+          )) as McpToolCallResult | undefined;
           // MCP tool result: { content: [{ type: 'text', text }], isError? }.
           const text = (result?.content ?? [])
             .filter((c) => c?.type === "text" && typeof c.text === "string")

@@ -70,10 +70,9 @@ is a decision they can overturn; a silent one is an invention.
 
 ## Write the PRD
 
-Write `specs/requirements/prd.md` — always that full path. Load this skill's
-reference `references/prd-contract.md` (via `loadSkillReference`) and follow it
-exactly: it defines every section, the story numbering rules, and what the PRD
-deliberately excludes. Per-feature depth goes to
+Write `specs/requirements/prd.md` — always that full path. Follow the
+`prd-contract` skill exactly: it defines every section, the story numbering
+rules, and what the PRD deliberately excludes. Per-feature depth goes to
 `specs/requirements/features/<slug>.md`, never into the PRD body.
 
 Anything genuinely unanswerable now goes to **Open Questions** — mark it, never
