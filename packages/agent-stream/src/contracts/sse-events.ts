@@ -619,6 +619,14 @@ export const AGENT_SSE_EVENT_TYPES = [
   "text-delta",
   "tool-input-start",
   "tool-input-delta",
+  // The per-call completion signal, and the ONLY one a consumer can use to tell
+  // that one tool's arguments are fully written: a step may issue several calls,
+  // and every `tool-result` for that step flushes only after its LAST call, so
+  // `tool-result` marks the end of the STEP's work, not of this call's. For a
+  // file tool the arguments are the file body, which makes this the moment the
+  // file is complete. The ordering is pinned by
+  // `services/agents/test/frame-order.test.ts` (it needs the real SDK loop).
+  "tool-input-end",
   "tool-call",
   "tool-result",
   "tool-error",
