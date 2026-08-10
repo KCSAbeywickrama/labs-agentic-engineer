@@ -293,23 +293,27 @@ func TestBootstrapEvent(t *testing.T) {
 		podFound      bool
 		phase         string
 		waitingReason string
+		message       string
 		wantSeq       int64
 		wantPhase     string
+		wantInSummary string
 	}{
-		{"no pod yet", false, "", "", seqBootScheduling, "runner_scheduling"},
-		{"container creating", true, "Pending", "ContainerCreating", seqBootPulling, "runner_pulling_image"},
-		{"pod initializing", true, "Pending", "PodInitializing", seqBootPulling, "runner_pulling_image"},
-		{"image pull backoff", true, "Pending", "ImagePullBackOff", seqBootBackoff, "runner_image_pull_backoff"},
-		{"err image pull", true, "Pending", "ErrImagePull", seqBootBackoff, "runner_image_pull_backoff"},
-		{"config error", true, "Pending", "CreateContainerConfigError", seqBootConfig, "runner_config_error"},
-		{"invalid image name", true, "Pending", "InvalidImageName", seqBootConfig, "runner_config_error"},
-		{"running no output", true, "Running", "", seqBootStarting, "runner_starting"},
-		{"pending no reason", true, "Pending", "", seqBootScheduling, "runner_scheduling"},
-		{"unknown reason", true, "Pending", "SomethingWeird", seqBootPulling, "runner_pulling_image"},
+		{"no pod yet", false, "", "", "", seqBootScheduling, "runner_scheduling", ""},
+		{"container creating", true, "Pending", "ContainerCreating", "", seqBootPulling, "runner_pulling_image", ""},
+		{"pod initializing", true, "Pending", "PodInitializing", "", seqBootPulling, "runner_pulling_image", ""},
+		{"image pull backoff", true, "Pending", "ImagePullBackOff", "", seqBootBackoff, "runner_image_pull_backoff", ""},
+		{"err image pull", true, "Pending", "ErrImagePull", "", seqBootBackoff, "runner_image_pull_backoff", ""},
+		{"config error", true, "Pending", "CreateContainerConfigError", "", seqBootConfig, "runner_config_error", ""},
+		{"invalid image name", true, "Pending", "InvalidImageName", "", seqBootConfig, "runner_config_error", ""},
+		{"unschedulable capacity", true, "Pending", "Unschedulable", "0/5 nodes are available: 5 Too many pods.", seqBootUnschedulable, "runner_unschedulable", "Too many pods"},
+		{"scheduler error", true, "Pending", "SchedulerError", "", seqBootUnschedulable, "runner_unschedulable", "No capacity"},
+		{"running no output", true, "Running", "", "", seqBootStarting, "runner_starting", ""},
+		{"pending no reason", true, "Pending", "", "", seqBootScheduling, "runner_scheduling", ""},
+		{"unknown reason", true, "Pending", "SomethingWeird", "", seqBootPulling, "runner_pulling_image", ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			ev := bootstrapEvent(tc.podFound, tc.phase, tc.waitingReason)
+			ev := bootstrapEvent(tc.podFound, tc.phase, tc.waitingReason, tc.message)
 			if ev.Kind != "phase" {
 				t.Errorf("kind = %q, want phase", ev.Kind)
 			}
@@ -328,11 +332,14 @@ func TestBootstrapEvent(t *testing.T) {
 			if ev.Summary == "" {
 				t.Error("summary must be a non-empty human fallback")
 			}
+			if tc.wantInSummary != "" && !strings.Contains(ev.Summary, tc.wantInSummary) {
+				t.Errorf("summary = %q, want it to contain %q", ev.Summary, tc.wantInSummary)
+			}
 		})
 	}
 
 	// An unrecognised reason is surfaced verbatim so nothing hides.
-	if ev := bootstrapEvent(true, "Pending", "SomethingWeird"); !strings.Contains(ev.Summary, "SomethingWeird") {
+	if ev := bootstrapEvent(true, "Pending", "SomethingWeird", ""); !strings.Contains(ev.Summary, "SomethingWeird") {
 		t.Errorf("unknown reason summary = %q, want it to contain the raw reason", ev.Summary)
 	}
 
@@ -340,9 +347,9 @@ func TestBootstrapEvent(t *testing.T) {
 	// different transitions into one row).
 	seqs := map[int64]bool{
 		seqBootScheduling: true, seqBootPulling: true, seqBootBackoff: true,
-		seqBootConfig: true, seqBootStarting: true,
+		seqBootConfig: true, seqBootStarting: true, seqBootUnschedulable: true,
 	}
-	if len(seqs) != 5 {
+	if len(seqs) != 6 {
 		t.Errorf("bootstrap seqs collide: %v", seqs)
 	}
 }

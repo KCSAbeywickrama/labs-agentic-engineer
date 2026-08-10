@@ -76,11 +76,12 @@ const (
 // untimestamped events, and lastEventMillis ignores them, so the cursor never
 // advances past a synthetic line).
 const (
-	seqBootScheduling = -10 // Job applied, pod not scheduled / created yet
-	seqBootPulling    = -11 // ContainerCreating / PodInitializing (image pull + setup)
-	seqBootBackoff    = -12 // ImagePullBackOff / ErrImagePull (pull retrying)
-	seqBootConfig     = -13 // CreateContainerConfigError / secrets not yet materialised
-	seqBootStarting   = -14 // container Running, agent has not emitted its first line
+	seqBootScheduling    = -10 // Job applied, pod not scheduled / created yet
+	seqBootPulling       = -11 // ContainerCreating / PodInitializing (image pull + setup)
+	seqBootBackoff       = -12 // ImagePullBackOff / ErrImagePull (pull retrying)
+	seqBootConfig        = -13 // CreateContainerConfigError / secrets not yet materialised
+	seqBootStarting      = -14 // container Running, agent has not emitted its first line
+	seqBootUnschedulable = -15 // PodScheduled=False (cluster capacity / Too many pods)
 
 	// seqHeadDropped marks the "earlier output omitted" row; seqScanTruncated the
 	// "line over the size cap" one. Same stable-negative contract as the bootstrap
@@ -135,11 +136,12 @@ func logsTruncatedEvent() contracts.ProgressEvent {
 
 // bootstrapEvent maps a pre-stdout runner state to the synthetic progress line
 // the console renders during the dark zone. podFound=false means the Job exists
-// but no pod object does yet; otherwise phase/waitingReason come from the pod's
-// status (waitingReason is the first waiting container's reason, "" once the
+// but no pod object does yet; otherwise phase/waitingReason/message come from
+// the pod's status (waitingReason is the first waiting container's reason, or
+// PodScheduled's Unschedulable when the pod never got a node; "" once the
 // container is running). Phase names are stable ids the console maps to friendly
 // labels; Summary is the human fallback when it doesn't.
-func bootstrapEvent(podFound bool, phase, waitingReason string) contracts.ProgressEvent {
+func bootstrapEvent(podFound bool, phase, waitingReason, message string) contracts.ProgressEvent {
 	mk := func(seq int64, name, summary string) contracts.ProgressEvent {
 		return contracts.ProgressEvent{
 			SchemaVersion: progressSchemaVersion,
@@ -160,6 +162,15 @@ func bootstrapEvent(podFound bool, phase, waitingReason string) contracts.Progre
 		return mk(seqBootConfig, "runner_config_error", "Runner is waiting on its configuration and secrets…")
 	case "ContainerCreating", "PodInitializing":
 		return mk(seqBootPulling, "runner_pulling_image", "Pulling the agent image and preparing the container…")
+	case "Unschedulable", "SchedulerError":
+		// Cluster has no room (Too many pods / Insufficient cpu/memory). Do not
+		// reuse runner_scheduling — that reads as "still queuing" when the truth
+		// is capacity. Prefer the scheduler's first-line message when present.
+		summary := "No capacity to schedule the runner on the cluster…"
+		if detail := firstLine(message); detail != "" {
+			summary = "No capacity to schedule the runner: " + detail
+		}
+		return mk(seqBootUnschedulable, "runner_unschedulable", summary)
 	case "":
 		// No waiting reason: a Running pod is booting the agent; anything else
 		// (Pending with no container status yet) is still being scheduled.
@@ -172,6 +183,13 @@ func bootstrapEvent(podFound bool, phase, waitingReason string) contracts.Progre
 		// bucketed under the pulling seq (its most common cause).
 		return mk(seqBootPulling, "runner_pulling_image", "Preparing the runner container ("+waitingReason+")…")
 	}
+}
+
+// firstLine returns the first non-empty line of s, trimmed — kubelet / scheduler
+// messages are often multi-line and the console only wants one sentence.
+func firstLine(s string) string {
+	s = strings.TrimSpace(strings.SplitN(s, "\n", 2)[0])
+	return s
 }
 
 // AgentProgressReader serves a cycle's (or a legacy execution's) agent activity
@@ -293,7 +311,7 @@ func (r *AgentProgressReader) fromText(resp *contracts.ProgressResponse, text st
 		// mid-thought, and narrating there would pin a bootstrap line into the
 		// middle of a running stream.
 		if live {
-			resp.Lines = []contracts.ProgressEvent{bootstrapEvent(pod.Found, pod.Phase, pod.WaitingReason)}
+			resp.Lines = []contracts.ProgressEvent{bootstrapEvent(pod.Found, pod.Phase, pod.WaitingReason, pod.Message)}
 		}
 		resp.Final = final
 		return resp

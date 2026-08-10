@@ -16,7 +16,10 @@
 
 package openchoreo
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func podObject(phase, reason string, containerState map[string]interface{}) map[string]interface{} {
 	status := map[string]interface{}{"phase": phase}
@@ -84,5 +87,60 @@ func TestPodFromNodeObject_ContainerTerminatedReasonWhenPodHasNone(t *testing.T)
 func TestPodFromNodeObject_EmptyObjectIsNotFound(t *testing.T) {
 	if got := PodFromNodeObject(nil, ""); got.Found {
 		t.Fatalf("a nil object must decode to Found=false, got %+v", got)
+	}
+}
+
+// A Pending pod that never got a node has no containerStatuses — its failure
+// lives on PodScheduled=False. Without this, the console narrates the generic
+// "waiting for a runner" forever while the cluster is at pod capacity.
+func TestPodFromNodeObject_UnschedulableConditionIsSurfaced(t *testing.T) {
+	obj := map[string]interface{}{
+		"status": map[string]interface{}{
+			"phase": "Pending",
+			"conditions": []interface{}{
+				map[string]interface{}{
+					"type":    "PodScheduled",
+					"status":  "False",
+					"reason":  "Unschedulable",
+					"message": "0/5 nodes are available: 5 Too many pods.",
+				},
+			},
+		},
+	}
+	got := PodFromNodeObject(obj, "pod-pending")
+	if got.WaitingReason != "Unschedulable" {
+		t.Fatalf("WaitingReason = %q, want Unschedulable", got.WaitingReason)
+	}
+	if !strings.Contains(got.Message, "Too many pods") {
+		t.Fatalf("Message = %q, want the scheduler's capacity sentence", got.Message)
+	}
+}
+
+func TestPodFromNodeObject_ContainerWaitingWinsOverScheduledCondition(t *testing.T) {
+	obj := map[string]interface{}{
+		"status": map[string]interface{}{
+			"phase": "Pending",
+			"conditions": []interface{}{
+				map[string]interface{}{
+					"type":   "PodScheduled",
+					"status": "True",
+				},
+			},
+			"containerStatuses": []interface{}{
+				map[string]interface{}{
+					"name": "agent",
+					"state": map[string]interface{}{
+						"waiting": map[string]interface{}{
+							"reason":  "ContainerCreating",
+							"message": "",
+						},
+					},
+				},
+			},
+		},
+	}
+	got := PodFromNodeObject(obj, "pod-creating")
+	if got.WaitingReason != "ContainerCreating" {
+		t.Fatalf("WaitingReason = %q, want ContainerCreating", got.WaitingReason)
 	}
 }

@@ -16,7 +16,10 @@
 
 package openchoreo
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // RuntimePod is the BFF's view of the coding-agent Job's child Pod, decoded
 // from the resource tree. It is deliberately NOT a k8s type: the tree hands us
@@ -98,5 +101,42 @@ func PodFromNodeObject(obj map[string]interface{}, name string) RuntimePod {
 			}
 		}
 	}
+	// A Pending pod with no containerStatuses yet (never scheduled) carries its
+	// failure on PodScheduled=False — container waiting reasons never appear.
+	// Surface Unschedulable / scheduling failures there so the console can
+	// narrate capacity pressure instead of a generic "waiting for a runner".
+	if pod.WaitingReason == "" {
+		if reason, msg := podScheduledFailure(status); reason != "" {
+			pod.WaitingReason = reason
+			if msg != "" && pod.Message == "" {
+				pod.Message = msg
+			}
+		}
+	}
 	return pod
+}
+
+// podScheduledFailure returns the reason/message from a PodScheduled=False
+// condition (Unschedulable, SchedulerError, …). Empty when the pod is scheduled
+// or the condition is absent.
+func podScheduledFailure(status map[string]interface{}) (reason, message string) {
+	conditions, _ := status["conditions"].([]interface{})
+	for _, raw := range conditions {
+		c, _ := raw.(map[string]interface{})
+		if c == nil {
+			continue
+		}
+		typ, _ := c["type"].(string)
+		if typ != "PodScheduled" {
+			continue
+		}
+		condStatus, _ := c["status"].(string)
+		if !strings.EqualFold(condStatus, "False") {
+			return "", ""
+		}
+		reason, _ = c["reason"].(string)
+		message, _ = c["message"].(string)
+		return reason, message
+	}
+	return "", ""
 }
