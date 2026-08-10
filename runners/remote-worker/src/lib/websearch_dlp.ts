@@ -59,8 +59,9 @@ const MIN_SECRET_VALUE_LEN = 8;
 // there is no fixed prefix or pattern to allowlist FOR secrets — so the
 // only safe posture is the reverse: allowlist the small, fixed set of
 // names that are never secret, and treat everything else (including
-// ANTHROPIC_API_KEY, AEP_BEARER, AEP_MCP_TOKEN, PUBLISHER_CLIENT_SECRET,
-// and any per-dependency key like OPENWEATHER_API_KEY) as a candidate.
+// ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN, AEP_BEARER, AEP_MCP_TOKEN,
+// PUBLISHER_CLIENT_SECRET, and any per-dependency key like
+// OPENWEATHER_API_KEY) as a candidate.
 const SAFE_ENV_KEYS: ReadonlySet<string> = new Set<string>([
   // Runner/K8s plumbing — see runner.ts childEnv and
   // oneshot.ts readDispatchFromEnv / job_template.go envVars.

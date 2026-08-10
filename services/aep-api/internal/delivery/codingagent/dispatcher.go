@@ -57,6 +57,10 @@ type Inputs struct {
 	// from `org_anthropic_credentials` / `org_credentials`. Both must
 	// be populated — the orchestrator refuses to dispatch if the
 	// Connect flow hasn't completed the SM-API mirror.
+	//
+	// AnthropicSR additionally carries EnvVar: the org may bill its coding
+	// agent to a Claude Code OAuth token instead of an API key, and the two
+	// must arrive under DIFFERENT names (see AnthropicEnvVar).
 	AnthropicSR SecretRef
 	GitHubSR    SecretRef
 
@@ -90,6 +94,23 @@ type SecretRef struct {
 	SecretRefName string
 	KVPath        string
 	Property      string
+
+	// EnvVar names the environment variable the materialised value must land
+	// under inside the run. Only the Anthropic ref sets it (the others have a
+	// single fixed name); empty means "use the caller's default".
+	EnvVar string
+}
+
+// AnthropicEnvVar is the variable this run's Anthropic credential is mounted
+// as. Exactly ONE of ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN is ever
+// present, because Claude Code ranks the former above the latter: a run holding
+// both would authenticate with the API key and silently ignore the OAuth token,
+// billing the credential the org deliberately moved away from.
+func (in Inputs) AnthropicEnvVar() string {
+	if in.AnthropicSR.EnvVar != "" {
+		return in.AnthropicSR.EnvVar
+	}
+	return "ANTHROPIC_API_KEY"
 }
 
 // ExternalResourceSecretInputs is one external resource's per-env secret bundle
@@ -178,7 +199,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, in Inputs) (string, error) {
 	}
 
 	// 3) ExternalSecrets.
-	if err := d.applyExternalSecret(ctx, in, ns, runName+"-anthropic-es", anthropicSecret, "ANTHROPIC_API_KEY", in.AnthropicSR); err != nil {
+	if err := d.applyExternalSecret(ctx, in, ns, runName+"-anthropic-es", anthropicSecret, in.AnthropicEnvVar(), in.AnthropicSR); err != nil {
 		return "", fmt.Errorf("dispatcher: apply anthropic ExternalSecret: %w", err)
 	}
 	if err := d.applyExternalSecret(ctx, in, ns, runName+"-github-es", githubSecret, "GITHUB_TOKEN", in.GitHubSR); err != nil {

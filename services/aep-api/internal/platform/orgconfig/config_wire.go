@@ -46,8 +46,14 @@ import (
 // A null llm/gitProvider means "not connected" (replacing the legacy
 // {status:"not_connected"} sentinel objects); idp is always present because an
 // org always has at least the platform default.
+//
+// codingLlm is the one section whose null does NOT mean "not connected": the
+// coding agent key is an OVERRIDE on llm, so null means the coding agent reuses
+// llm's key (ADR-0016). It is still a required field so a client can tell
+// "reuse" from "the server is too old to know about the section".
 type ConfigProjection struct {
 	LLM         *LLMProjection         `json:"llm"`         // null = not connected
+	CodingLLM   *LLMProjection         `json:"codingLlm"`   // null = reuse LLM's key
 	GitProvider *GitProviderProjection `json:"gitProvider"` // null = not connected
 	IDP         IDPProjection          `json:"idp"`         // always present
 }
@@ -56,7 +62,13 @@ type ConfigProjection struct {
 // from orgcreds.AnthropicProjection minus ocOrgId (dropped from all
 // projections — the org is implicit from the JWT).
 type LLMProjection struct {
-	Kind            string     `json:"kind" enum:"anthropic"`
+	Kind string `json:"kind" enum:"anthropic"`
+	// CredentialKind distinguishes a Console API key from a Claude Code OAuth
+	// token (`claude setup-token`), which bills a Claude subscription instead
+	// of API credits. Only codingLlm can be an oauth_token; llm is always an
+	// api_key, because the design agent is an AI SDK call that cannot present
+	// a bearer token.
+	CredentialKind  string     `json:"credentialKind" enum:"api_key,oauth_token"`
 	KeyPrefix       string     `json:"keyPrefix"`
 	KeyLast4        string     `json:"keyLast4"`
 	Status          string     `json:"status"`
@@ -103,12 +115,20 @@ type IDPProjection struct {
 // write-only fields can't be deep-merged into).
 type ConfigPatch struct {
 	LLM         patch.Field[LLMWrite]         `json:"llm,omitempty"`
+	CodingLLM   patch.Field[LLMWrite]         `json:"codingLlm,omitempty"`
 	GitProvider patch.Field[GitProviderWrite] `json:"gitProvider,omitempty"`
 	IDP         patch.Field[IDPWrite]         `json:"idp,omitempty"`
 }
 
-// LLMWrite is the llm section's write shape. The apiKey is write-only: probed
-// against Anthropic, never echoed in any projection.
+// LLMWrite is the write shape of both LLM sections — llm (the org's default
+// key) and codingLlm (the coding agent's override). The apiKey is write-only:
+// probed against Anthropic, never echoed in any projection.
+//
+// codingLlm's three states read differently from every other section's, because
+// the section models an override rather than a connection: absent = keep,
+// null = REMOVE the override (the coding agent goes back to reusing the default
+// key), value = set/rotate it. There is no "disconnected coding agent" state to
+// clear into. See ADR-0016.
 type LLMWrite struct {
 	Kind   string `json:"kind" enum:"anthropic" required:"true"`
 	APIKey string `json:"apiKey" required:"true"`

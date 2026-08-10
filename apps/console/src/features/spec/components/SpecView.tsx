@@ -831,9 +831,7 @@ export function SpecView({ projectName }: { projectName: string }) {
               </Typography>
               <Typography variant="body2">
                 <b>Milestone:</b>{" "}
-                {cutPreview.phase !== null
-                  ? `"Phase ${cutPreview.phase}" — created, or topped up with tasks for newly uncovered stories`
-                  : "one per version (no phase declared)"}
+                {`"${cutPreview.nextVersion}" — one per version, holding this build's tasks`}
               </Typography>
             </Stack>
           </DialogContent>

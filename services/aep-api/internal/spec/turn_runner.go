@@ -27,6 +27,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/wso2/aep/aep-api/internal/platform/text"
 	"io"
 	"log/slog"
 	"runtime/debug"
@@ -59,9 +60,9 @@ type turnJob struct {
 	turnID           string
 	orgID            string
 	projectID        string
-	flow             string // recognised `/<skill>` token ("start", "design", …); "" for plain chat
-	conversationID   string // FE-chosen uuid (agent_turns key)
-	nsConversationID string // namespaced agents-service id
+	flow             string            // recognised `/<skill>` token ("start", "design", …); "" for plain chat
+	conversationID   string            // FE-chosen uuid (agent_turns key)
+	nsConversationID string            // namespaced agents-service id
 	turn             agentsvc.TurnSpec // what this turn is FOR (the agents service composes the text)
 	target           string            // spec-bundle path this turn should write to, when pinned
 	summary          string            // raw user instruction (feed line subject)
@@ -440,21 +441,15 @@ func firstLine(s string, max int) string {
 		s = s[:i]
 	}
 	s = strings.TrimSpace(s)
-	if len(s) > max {
-		cut := s[:max]
-		// Do not split a multi-byte rune.
-		for len(cut) > 0 && !isRuneStart(cut[len(cut)-1]) {
-			cut = cut[:len(cut)-1]
-		}
-		s = strings.TrimSpace(cut) + "…"
+	if cut := text.Truncate(s, max); cut != s {
+		// Re-trim: the cut can land just after a space.
+		s = strings.TrimSpace(strings.TrimSuffix(cut, "…")) + "…"
 	}
 	if s == "" {
 		s = "agent turn"
 	}
 	return s
 }
-
-func isRuneStart(b byte) bool { return b&0xC0 != 0x80 }
 
 // failedTerminal builds a failed TurnTerminal.
 func failedTerminal(reason, message string, paths []string) TurnTerminal {

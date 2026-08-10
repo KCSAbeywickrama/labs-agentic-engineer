@@ -120,7 +120,7 @@ func (e *Events) mintRedMainIssue(ctx context.Context, ev delivery.BuildTerminal
 			"- OpenChoreo WorkflowRun: %s\n\n"+
 			"Failure output:\n\n```\n%s\n```\n\n"+
 			"This issue is a ledger entry: no agent is dispatched for it. Add the `%s` label to hand it to the coding agent.",
-		ev.Component, orNone(deployed.MilestoneTitle), ev.Component, ev.CommitSHA, orNone(ev.RunName),
+		ev.Component, orNone(deployed.SpecTag()), ev.Component, ev.CommitSHA, orNone(ev.RunName),
 		orNone(ev.Reason), delivery.LabelAdopt)
 
 	_, err = e.mint(ctx, deployed.OrgID, deployed.ProjectID, sourcecontrol.CreateIssueRequest{

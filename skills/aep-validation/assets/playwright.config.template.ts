@@ -21,8 +21,66 @@
 // comment says so. Retries stay 0 — flake repair is the healer's job,
 // and retries would mask the brittleness signal it needs.
 
+import { execSync } from "node:child_process";
 import { defineConfig } from "@playwright/test";
 import { primaryTarget } from "./lib/targets";
+
+// Chromium implements RFC 6761: it maps `localhost` and every `*.localhost`
+// name to loopback ITSELF, without consulting DNS or /etc/hosts. On a local
+// plane the deployed endpoints are `*.openchoreoapis.localhost`, so the
+// cluster's CoreDNS rewrite never gets asked, and inside the runner pod
+// loopback is the pod — every request dies with ERR_CONNECTION_REFUSED.
+// `--host-resolver-rules` is the one override Chromium honours.
+//
+// Resolve the addresses at load time rather than hard-coding them: they are
+// per-cluster and change on every cluster rebuild, so a baked-in IP passes once
+// and then silently points at nothing.
+const HOSTNAME_PATTERN = /^[A-Za-z0-9.-]+$/;
+
+function resolveIPv4(host: string): string | undefined {
+  // DNS is the discovery channel: the CoreDNS rewrite answers any
+  // `*.openchoreoapis.localhost` with the data-plane gateway's ClusterIP.
+  if (!HOSTNAME_PATTERN.test(host)) {
+    return undefined;
+  }
+  try {
+    const first = execSync(`getent ahostsv4 ${host}`, {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).split(/\s+/)[0];
+    return first || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// Only a `.localhost` target needs this. A real DNS name resolves normally, so
+// on a cloud plane the browser is left completely alone.
+function hostResolverArgs(baseURL: string): string[] {
+  const targetHost = new URL(baseURL).hostname;
+  if (!targetHost.endsWith(".localhost")) {
+    return [];
+  }
+
+  // The app endpoints (webapp + API) both sit behind the data-plane gateway.
+  const ingressIP = process.env.AEP_E2E_INGRESS_IP ?? resolveIPv4(targetHost);
+
+  // The IdP does NOT: `thunder.openchoreo.localhost` is served by the
+  // CONTROL-plane gateway, while the CoreDNS rewrite points every
+  // `*.openchoreo.localhost` name at the data-plane one — so DNS is the wrong
+  // answer here and the login redirect has to be mapped separately. The k3d
+  // host bridge publishes it on 8080.
+  const authIP = process.env.AEP_E2E_AUTH_IP ?? resolveIPv4("host.k3d.internal");
+
+  const rules = [
+    ingressIP ? `MAP *.openchoreoapis.localhost ${ingressIP}` : "",
+    authIP ? `MAP *.openchoreo.localhost ${authIP}` : "",
+  ].filter(Boolean);
+
+  return rules.length ? [`--host-resolver-rules=${rules.join(",")}`] : [];
+}
+
+const baseURL = primaryTarget();
 
 export default defineConfig({
   testDir: "./specs",
@@ -40,7 +98,10 @@ export default defineConfig({
   ],
   outputDir: "test-results/artifacts",
   use: {
-    baseURL: primaryTarget(),
+    baseURL,
     trace: "retain-on-failure",
+    launchOptions: {
+      args: hostResolverArgs(baseURL),
+    },
   },
 });

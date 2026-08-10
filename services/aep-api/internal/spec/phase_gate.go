@@ -155,43 +155,82 @@ func validatePhaseGate(reqFiles, designFiles map[string]string) []FileValidation
 	return errs
 }
 
-// phasingEntryPattern matches one Phasing entry's phase number, anywhere on
-// the line: "Phase 1 — core loop … Stories: 1, 2, 4."
+// phasingEntryPattern matches one Phasing entry's phase number, anywhere in
+// the entry: "Phase 1 — core loop … Stories: 1, 2, 4."
 var phasingEntryPattern = regexp.MustCompile(`(?i)\bphase\s+(\d+)\b`)
 var storiesListPattern = regexp.MustCompile(`(?i)\bstories:\s*([\d,\s]+)`)
+
+// bulletStartPattern matches the start of a Phasing list item — "- ", "* ",
+// "+ " or "1. " — which is where one entry ends and the next begins.
+var bulletStartPattern = regexp.MustCompile(`^\s*([-*+]|\d+\.)\s`)
 
 // parsePRDPhasing extracts phase → story set from the PRD's "## Phasing"
 // section. The contract requires each phase entry to carry a
 // "Stories: <n, n, …>" list; an entry without one defines no phase here (the
 // gate then reports PHASE_NOT_IN_PRD, pointing the user at the contract).
+//
+// The unit is the BULLET, not the line. Authors hard-wrap prose, and a wrapped
+// entry puts "Stories:" at the end of one line and its numbers at the start of
+// the next — which a line-scanning parser reads as an entry with no story list,
+// refusing a build over a PRD that says exactly the right thing. Joining an
+// entry's continuation lines before matching is what makes the machine-read
+// form survive ordinary markdown authoring.
 func parsePRDPhasing(prd string) map[int]map[int]bool {
 	out := map[int]map[int]bool{}
 	section := markdownSection(prd, "Phasing")
 	if section == "" {
 		return out
 	}
-	currentPhase := 0
-	for _, line := range strings.Split(section, "\n") {
-		if m := phasingEntryPattern.FindStringSubmatch(line); m != nil {
-			currentPhase, _ = strconv.Atoi(m[1])
-		}
-		if currentPhase == 0 {
+	for _, entry := range phasingEntries(section) {
+		m := phasingEntryPattern.FindStringSubmatch(entry)
+		if m == nil {
 			continue
 		}
-		if m := storiesListPattern.FindStringSubmatch(line); m != nil {
-			set := out[currentPhase]
-			if set == nil {
-				set = map[int]bool{}
-				out[currentPhase] = set
-			}
-			for _, tok := range strings.FieldsFunc(m[1], func(r rune) bool { return r == ',' || r == ' ' || r == '\t' || r == '\n' || r == '\r' }) {
-				if n, err := strconv.Atoi(tok); err == nil && n > 0 {
-					set[n] = true
-				}
+		phase, _ := strconv.Atoi(m[1])
+		if phase == 0 {
+			continue
+		}
+		sm := storiesListPattern.FindStringSubmatch(entry)
+		if sm == nil {
+			continue // an entry with no story list defines no phase
+		}
+		set := out[phase]
+		if set == nil {
+			set = map[int]bool{}
+			out[phase] = set
+		}
+		for _, tok := range strings.FieldsFunc(sm[1], func(r rune) bool {
+			return r == ',' || r == ' ' || r == '\t' || r == '\n' || r == '\r'
+		}) {
+			if n, err := strconv.Atoi(tok); err == nil && n > 0 {
+				set[n] = true
 			}
 		}
 	}
 	return out
+}
+
+// phasingEntries splits a Phasing section into logical entries, each a bullet
+// plus the wrapped continuation lines that belong to it, joined with spaces.
+// Text before the first bullet is its own entry so a section written as plain
+// paragraphs still parses.
+func phasingEntries(section string) []string {
+	var entries []string
+	var cur []string
+	flush := func() {
+		if joined := strings.TrimSpace(strings.Join(cur, " ")); joined != "" {
+			entries = append(entries, joined)
+		}
+		cur = nil
+	}
+	for _, line := range strings.Split(section, "\n") {
+		if bulletStartPattern.MatchString(line) {
+			flush()
+		}
+		cur = append(cur, strings.TrimSpace(line))
+	}
+	flush()
+	return entries
 }
 
 // markdownSection returns the body of the `## <title>` section (up to the next

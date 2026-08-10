@@ -2978,6 +2978,20 @@ components:
         path: github.com/wso2/aep/aep-api/internal/platform/orgconfig
       additionalProperties: false
       properties:
+        codingLlm:
+          additionalProperties: false
+          properties:
+            apiKey:
+              type: string
+            kind:
+              enum:
+              - anthropic
+              type: string
+          required:
+          - kind
+          - apiKey
+          type: object
+          nullable: true
         gitProvider:
           additionalProperties: false
           properties:
@@ -3037,6 +3051,10 @@ components:
         path: github.com/wso2/aep/aep-api/internal/platform/orgconfig
       additionalProperties: false
       properties:
+        codingLlm:
+          allOf:
+          - $ref: '#/components/schemas/LLMProjection'
+          nullable: true
         gitProvider:
           allOf:
           - $ref: '#/components/schemas/GitProviderProjection'
@@ -3049,6 +3067,7 @@ components:
           nullable: true
       required:
       - llm
+      - codingLlm
       - gitProvider
       - idp
       type: object
@@ -3734,6 +3753,11 @@ components:
         connectedAt:
           format: date-time
           type: string
+        credentialKind:
+          enum:
+          - api_key
+          - oauth_token
+          type: string
         keyLast4:
           type: string
         keyPrefix:
@@ -3751,6 +3775,7 @@ components:
           type: string
       required:
       - kind
+      - credentialKind
       - keyPrefix
       - keyLast4
       - status
@@ -3791,8 +3816,8 @@ components:
           format: int64
           type: integer
         milestoneTitle:
-          description: The milestone's title at creation, equal to the spec tag. Display only — the
-            number is the key.
+          description: The milestone's GitHub title at creation. Display only — the number is the
+            key, and the version this run builds is the list's tag.
           type: string
         origin:
           enum:

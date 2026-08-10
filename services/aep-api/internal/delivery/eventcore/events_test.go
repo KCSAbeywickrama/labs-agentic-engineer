@@ -379,6 +379,60 @@ func TestPullRequestMerged_BuildsEveryTouchedComponentAtTheMergeSHA(t *testing.T
 	}
 }
 
+// TestPullRequestMerged_StagesTheCloneCredentialOncePerFanOut pins the fix for
+// the race that produced a build with an empty secretRef.
+//
+// The clone credential is ONE per-org object and OpenChoreo has no update verb,
+// so staging it is delete-then-create. Staging per component therefore had every
+// goroutine in the fan-out racing to delete and recreate the same object; the
+// loser's create collided with a sibling's in-flight delete, degraded to an
+// empty reference, and shipped a build that cloned anonymously and died at
+// checkout against a private repo.
+//
+// Two assertions, and both are load-bearing: staged exactly once (no contention
+// is possible if there is only one writer), and every component carrying that
+// same reference (staging once is worthless if a component builds without it).
+func TestPullRequestMerged_StagesTheCloneCredentialOncePerFanOut(t *testing.T) {
+	h := newHarness(t, aRun("run-1", 7, delivery.RunStateRunning))
+	h.cycles.latest = aCycle("cycle-1", "run-1")
+	h.prs.files = []string{"services/order/main.go", "apps/web/src/app.tsx"}
+
+	if err := h.deliver(t, "pull_request", prBody("closed", "aep/m7-c1", "Resolves #12", 42, false, true, "abc123def456789")); err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	if h.builds.staged != 1 {
+		t.Fatalf("a fan-out over 2 components must stage the org credential exactly once, staged %d times", h.builds.staged)
+	}
+	if len(h.builds.secretRef) != 2 {
+		t.Fatalf("both components must build, got %v", h.builds.triggered)
+	}
+	for i, ref := range h.builds.secretRef {
+		if ref != h.builds.stageRef {
+			t.Fatalf("build %d cloned with %q, want the staged reference %q — an empty or stale ref is the bug this pins",
+				i, ref, h.builds.stageRef)
+		}
+	}
+}
+
+// TestPullRequestMerged_StagingRefusalBlocksTheFanOut pins that a credential the
+// platform REFUSED to stage stops the fan-out rather than dispatching builds
+// that cannot clone. A staging error is distinct from an empty reference with a
+// nil error, which means "this repo is public" and is allowed through.
+func TestPullRequestMerged_StagingRefusalBlocksTheFanOut(t *testing.T) {
+	h := newHarness(t, aRun("run-1", 7, delivery.RunStateRunning))
+	h.cycles.latest = aCycle("cycle-1", "run-1")
+	h.prs.files = []string{"services/order/main.go"}
+	h.builds.stageErr = errors.New("openchoreo unreachable")
+
+	err := h.deliver(t, "pull_request", prBody("closed", "aep/m7-c1", "Resolves #12", 42, false, true, "abc123def456789"))
+	if err == nil {
+		t.Fatal("a staging refusal must surface, not dispatch a build that cannot clone")
+	}
+	if len(h.builds.triggered) != 0 {
+		t.Fatalf("no build may be triggered when the credential could not be staged, got %v", h.builds.triggered)
+	}
+}
+
 // The `opened` delivery can be missed (an install that predates the run, a
 // dropped delivery), and the merge is then the only place the cycle can learn
 // which pull request it landed — link included, or the finished session would

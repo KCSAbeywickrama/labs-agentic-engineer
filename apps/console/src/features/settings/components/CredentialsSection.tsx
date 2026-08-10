@@ -39,7 +39,7 @@ export function CredentialsSection() {
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
       <GitHubCredentialCard gitProvider={data.gitProvider} />
-      <AnthropicCredentialCard llm={data.llm} />
+      <AnthropicCredentialCard llm={data.llm} codingLlm={data.codingLlm} />
     </Box>
   );
 }

@@ -1041,7 +1041,7 @@ type MilestoneRunView struct {
 	ID              string         `json:"id"`
 	MilestoneNumber int64          `json:"milestoneNumber"`
 
-	// MilestoneTitle The milestone's title at creation, equal to the spec tag. Display only — the number is the key.
+	// MilestoneTitle The milestone's GitHub title at creation. Display only — the number is the key, and the version this run builds is the list's tag.
 	MilestoneTitle string                 `json:"milestoneTitle"`
 	Origin         MilestoneRunViewOrigin `json:"origin"`
 	StartedAt      *time.Time             `json:"startedAt,omitempty"`

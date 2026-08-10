@@ -18,6 +18,7 @@ package codingagent
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -45,16 +46,18 @@ func (f fakeOrgRepo) SetThunderOrgUUID(context.Context, string, uuid.UUID) error
 	return nil
 }
 
-type fakeAnthropicCreds struct {
-	row *organization.OrgAnthropicCredential
+// fakeCodingKey stands in for the organization domain's answer to "which
+// Anthropic credential does this org's coding run bill". WHICH key that is —
+// the coding override or the default — is decided and tested in the
+// organization package (TestResolveCodingSecretRef_*); dispatch's job is only
+// to mount whatever it is handed, and to abort when nothing can be handed to it.
+type fakeCodingKey struct {
+	ref organization.SecretRefTriplet
+	err error
 }
 
-func (f fakeAnthropicCreds) GetByOrg(context.Context, string) (*organization.OrgAnthropicCredential, error) {
-	return f.row, nil
-}
-func (f fakeAnthropicCreds) UpdateColumns(context.Context, string, map[string]any) error { return nil }
-func (f fakeAnthropicCreds) Tx(context.Context, func(organization.OrgAnthropicTx) error) error {
-	return nil
+func (f fakeCodingKey) ResolveCodingSecretRef(context.Context, string) (organization.SecretRefTriplet, error) {
+	return f.ref, f.err
 }
 
 type fakeGitHubCreds struct {
@@ -79,15 +82,12 @@ func (f fakeGitHubCreds) Tx(context.Context, func(organization.OrgCredentialTx) 
 	return nil
 }
 
-func fullSecretRefs() (*organization.OrgAnthropicCredential, *organization.OrgCredential) {
-	return &organization.OrgAnthropicCredential{
-			SecretRefName:      strPtr("acme-anthropic-secrets"),
-			SecretRefKVPath:    strPtr("user-app-secrets/wc-acme/acme-anthropic-secrets"),
-			SecretRefProperty:  strPtr("api-key"),
-			SMAPISecretRefName: strPtr("acme-anthropic-secrets"),
-			SMAPIKVPath:        strPtr("user-app-secrets/wc-acme/acme-anthropic-secrets"),
-			SMAPIProperty:      strPtr("api-key"),
-		}, &organization.OrgCredential{
+func fullSecretRefs() (fakeCodingKey, *organization.OrgCredential) {
+	return fakeCodingKey{ref: organization.SecretRefTriplet{
+			Name:     "acme-anthropic-secrets",
+			KVPath:   "user-app-secrets/wc-acme/acme-anthropic-secrets",
+			Property: "api-key",
+		}}, &organization.OrgCredential{
 			SecretRefName:      strPtr("acme-github-pat-secrets"),
 			SecretRefKVPath:    strPtr("user-app-secrets/wc-acme/acme-github-pat-secrets"),
 			SecretRefProperty:  strPtr("token"),
@@ -97,7 +97,7 @@ func fullSecretRefs() (*organization.OrgAnthropicCredential, *organization.OrgCr
 		}
 }
 
-func newCodingDispatchExecutor(anthropic *organization.OrgAnthropicCredential, github *organization.OrgCredential, k8sJob *K8sJobDispatcher, proxyConfigured bool) *CodingExecutor {
+func newCodingDispatchExecutor(anthropic fakeCodingKey, github *organization.OrgCredential, k8sJob *K8sJobDispatcher, proxyConfigured bool) *CodingExecutor {
 	orgUUID := uuid.MustParse("d3adbeef-1234-4321-abcd-c0ffee123456")
 	e := NewCodingExecutor(
 		nil,
@@ -109,7 +109,7 @@ func newCodingDispatchExecutor(anthropic *organization.OrgAnthropicCredential, g
 		"http://git",
 		"http://platform",
 		fakeOrgRepo{org: &organization.Organization{Name: "acme", UUID: orgUUID}},
-		fakeAnthropicCreds{row: anthropic},
+		anthropic,
 		fakeGitHubCreds{row: github},
 		nil,
 	)
@@ -134,18 +134,21 @@ func codingMilestoneDispatch() delivery.MilestoneDispatch {
 	}
 }
 
-func TestDispatch_ProxyConfigured_MissingAnthropicRef_ErrorsNoFallback(t *testing.T) {
-	anthropic, github := fullSecretRefs()
-	anthropic.SecretRefKVPath = nil
-	anthropic.SMAPIKVPath = nil
+// A run whose Anthropic credential cannot be resolved must not quietly take the
+// direct-k8s path instead: that path delivers no secrets at all, so "fall back"
+// would mean launching an agent with no key rather than reporting the problem.
+func TestDispatch_ProxyConfigured_UnresolvableAnthropicKey_ErrorsNoFallback(t *testing.T) {
+	_, github := fullSecretRefs()
+	anthropic := fakeCodingKey{err: errors.New(
+		"coding-agent Anthropic key for org \"acme\" is configured but secret_ref_kv_path is not populated")}
 	e := newCodingDispatchExecutor(anthropic, github, &K8sJobDispatcher{}, true)
 
 	_, err := e.Dispatch(context.Background(), codingMilestoneDispatch())
 	if err == nil {
-		t.Fatal("expected error when anthropic secret ref is missing")
+		t.Fatal("expected error when the anthropic secret ref cannot be resolved")
 	}
-	if !strings.Contains(err.Error(), "anthropic") || !strings.Contains(err.Error(), "secret_ref_kv_path") {
-		t.Fatalf("error must name missing anthropic ref, got: %v", err)
+	if !strings.Contains(err.Error(), "Anthropic") || !strings.Contains(err.Error(), "secret_ref_kv_path") {
+		t.Fatalf("error must carry the resolver's diagnosis, got: %v", err)
 	}
 }
 

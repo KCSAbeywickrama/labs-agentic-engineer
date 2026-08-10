@@ -44,6 +44,12 @@ type RunStore interface {
 	// milestone, or (nil, nil). It is what makes StartRun idempotent under the
 	// reconcile sweep, which re-offers the same milestone every pass.
 	LiveRunForMilestone(ctx context.Context, orgID, projectID string, milestoneNumber int) (*delivery.MilestoneRun, error)
+	// MilestoneSpecTag returns the `v<N>` version the milestone's existing runs
+	// belong to, "" when it has none. An incident run is admitted against a
+	// milestone somebody else's build already claimed, and it holds no tag of its
+	// own — without inheriting one it would surface in the version ledger under
+	// the milestone's GitHub name instead of a version.
+	MilestoneSpecTag(ctx context.Context, orgID, projectID string, milestoneNumber int) (string, error)
 	// SetState moves the run between waiting and running.
 	SetState(ctx context.Context, id, state string) error
 	// Settle writes the terminal state and its reason, once.

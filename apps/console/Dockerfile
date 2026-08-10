@@ -21,7 +21,16 @@
 # run here because src/generated/* is gitignored and absent from a fresh
 # checkout. corepack picks the pnpm version from the root `packageManager`
 # field once package.json is copied in.
-FROM node:22-alpine AS builder
+#
+# Pinned to BUILDPLATFORM: this stage emits `dist/` — JS, CSS and static assets,
+# none of it architecture-specific — so one native run serves BOTH published
+# platforms and buildx reuses the identical stage across them. Only the nginx
+# stage below is genuinely per-arch, and it takes nothing from here but `dist`.
+# Remove the pin and the entire toolchain (pnpm install, six workspace builds,
+# vite) runs under QEMU for the arm64 image at ~6x the cost — the vite build
+# alone ~7x. Native modules installed here resolve for the BUILDPLATFORM, which
+# is what we want: they execute at build time and never reach the runtime image.
+FROM --platform=$BUILDPLATFORM node:22-alpine AS builder
 
 RUN corepack enable
 WORKDIR /repo

@@ -109,6 +109,24 @@ yourself; the URL is not something you can work out from inside the cluster.
   visit) before authoring. Never start, build, or deploy the app — you
   validate what is already running; an unreachable endpoint → issue
   comment + exit failure.
+- **A `.localhost` endpoint fails that probe for a reason that is not the
+  app.** curl and Chromium both implement RFC 6761: they resolve
+  `*.localhost` to loopback THEMSELVES, ignoring DNS and `/etc/hosts`. Inside
+  the runner pod loopback is the pod, so a plain `curl` gets connection
+  refused however healthy the deployment is. Do not read that as an
+  unreachable endpoint, and do not go hunting for the cause — resolve the
+  gateway from DNS and pin it per request:
+
+  ```bash
+  GW=$(getent ahostsv4 development-default.openchoreoapis.localhost | awk 'NR==1{print $1}')
+  curl -sf -o /dev/null --resolve "<host>:19080:$GW" "<url>"
+  ```
+
+  The browser needs the same override, which
+  `playwright.config.template.ts` already applies for you via
+  `--host-resolver-rules` — copy that file unedited and it self-configures.
+  Only treat an endpoint as genuinely down if it still fails WITH the
+  mapping.
 - **Test credentials (on demand):** request them only when a criterion
   needs a login — POST the test-credentials endpoint with an optional
   `role` hint (the role the flow requires). `AEP_TASK_ID` is this run's
@@ -206,9 +224,39 @@ counts only after passing twice consecutively against the live app.
 
 ### 7. RUN
 
+The suite outlives the Bash tool's DEFAULT timeout (120s), so ask for the
+time up front — `timeout` is a parameter on the Bash call, max `600000`:
+
 ```bash
-cd tests/e2e && npx playwright test
+cd tests/e2e
+rm -f test-results/results.json          # never read a previous run's verdict
+npx playwright test                      # Bash timeout: 600000
 ```
+
+Two things about this step will mislead you if you let them:
+
+- **A timed-out command still reports success.** Past the timeout the
+  harness detaches the command and hands back an OK result with no
+  output — identical, from where you sit, to a suite that finished. So
+  never infer the run completed from the call returning. Confirm
+  `test-results/results.json` exists and is NEWER than the moment you
+  started the run; if it is missing or stale, the run was severed and
+  its results do not exist.
+- **You cannot wait for a detached run.** `sleep` is blocked, and
+  `Monitor`/`TaskOutput` are not available to you, so a severed run is
+  unrecoverable — there is no way to attach to it or read its output
+  later. Getting the timeout right up front is the whole game.
+
+If the suite is too big for one window, **shard it** — never let one
+call run past the limit:
+
+```bash
+npx playwright test specs/AC-001-a.spec.ts specs/AC-001-b.spec.ts   # a batch that fits
+```
+
+Merge each batch's results yourself and keep the per-criterion verdicts;
+sharding changes how the suite is run, never what the report claims. A
+batch that severs is a batch you re-run smaller, not one you skip.
 
 The config writes `test-results/results.json`. The run includes the
 regression set — that's free regression coverage, not an accident.
@@ -220,7 +268,10 @@ binding HEAL discipline** before touching any spec. Then: triage each
 one against the live app, repair only *brittleness* (locators, waits,
 setup), never weaken what a test asserts. Log each heal in
 `tests/e2e/heal-log.json`. When the budget is exhausted, finish with
-one final full run so `results.json` reflects the authoritative state.
+one final full run so `results.json` reflects the authoritative state —
+under the same timeout discipline as step 7, sharded if that is what it
+takes. A final run that severs leaves you with no authoritative state at
+all, which is worse than a slower one that lands.
 
 ### 9. REPORT
 

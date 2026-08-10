@@ -26,13 +26,13 @@ any policy it implies — skip what the instruction already says). Then:
 
 - append the feature's stories with fresh numbers,
 - write or extend `specs/requirements/features/<slug>.md` with the depth,
-- place the new stories in **Phasing**: default them to the next unshipped
-  phase and say so — pull them into a phase already being built only when the
-  user explicitly asks,
+- add the new story numbers to the single **Phasing** entry — the product
+  ships in one phase, so there is no later phase to defer them to; a feature
+  that should not ship yet is an Out of Scope line instead,
 - record any new product decisions (org defaults answer silently, as ever).
 
-Done when every new story has a number, a phase, and an actor the Actors
-section defines.
+Done when every new story has a number, a place in the Phasing entry, and an
+actor the Actors section defines.
 
 ## Add an actor
 

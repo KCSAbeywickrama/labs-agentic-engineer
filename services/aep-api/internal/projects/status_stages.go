@@ -129,7 +129,11 @@ func (s *Service) populateStages(ctx context.Context, orgName, projectName strin
 		// live v1).
 		for i := range runs {
 			if runs[i].Origin == delivery.RunOriginSpecBuild && runs[i].State == delivery.RunStateSucceeded {
-				deployVer = runs[i].MilestoneTitle
+				// SpecTag, not the milestone title: the title is the milestone's
+				// GitHub name and ComponentCountAtTag below resolves this as a GIT
+				// TAG — a title that is not the tag reads as a vanished tag and
+				// silently blanks the deploy denominator.
+				deployVer = runs[i].SpecTag()
 				break
 			}
 		}
@@ -180,7 +184,7 @@ func (s *Service) populateStages(ctx context.Context, orgName, projectName strin
 	var latest *delivery.MilestoneRun
 	if len(runs) > 0 {
 		latest = &runs[0]
-		status.Build.Version = latest.MilestoneTitle
+		status.Build.Version = latest.SpecTag()
 		status.Build.Status = buildStageStatus(latest.State)
 		// A VALIDATING-phase failure is not a build failure: every coding cycle
 		// landed and the failure already rides deploy.validation below. Without this

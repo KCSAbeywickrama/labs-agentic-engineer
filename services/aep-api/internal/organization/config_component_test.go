@@ -73,17 +73,21 @@ const (
 // previously-good key to rejected.
 type anthropicFake struct {
 	*httptest.Server
-	mu     sync.Mutex
-	status int
+	mu        sync.Mutex
+	status    int
+	rejectKey string
 }
 
 func newAnthropicFake(t *testing.T) *anthropicFake {
 	t.Helper()
 	a := &anthropicFake{status: http.StatusOK}
-	a.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	a.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		a.mu.Lock()
-		code := a.status
+		code, reject := a.status, a.rejectKey
 		a.mu.Unlock()
+		if reject != "" && presentedKey(r) == reject {
+			code = http.StatusUnauthorized
+		}
 		w.WriteHeader(code)
 		_, _ = io.WriteString(w, `{"id":"msg_fake"}`)
 	}))
@@ -95,6 +99,25 @@ func (a *anthropicFake) setStatus(code int) {
 	a.mu.Lock()
 	a.status = code
 	a.mu.Unlock()
+}
+
+// rejectOnly fails the probe for ONE key and keeps every other key good. A
+// blanket setStatus cannot isolate a later section's probe: the earlier ones
+// abort the patch first, so the test would pass while never reaching the path
+// it names.
+func (a *anthropicFake) rejectOnly(key string) {
+	a.mu.Lock()
+	a.rejectKey = key
+	a.mu.Unlock()
+}
+
+// presentedKey reads whichever credential header the probe used — an API key
+// goes out as x-api-key, a Claude Code OAuth token as a bearer.
+func presentedKey(r *http.Request) string {
+	if k := r.Header.Get("x-api-key"); k != "" {
+		return k
+	}
+	return strings.TrimPrefix(r.Header.Get("authorization"), "Bearer ")
 }
 
 // cfgFakeGH is the external-package fake api.github.com (mirrors the orgcreds

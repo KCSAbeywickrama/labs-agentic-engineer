@@ -31,12 +31,10 @@ Decisions taken from org defaults or the skip valve are ordinary entries;
 skip-valve entries carry the *assumed* tag.>
 
 ## Phasing
-<thin: every story lands in exactly ONE phase. Each entry names the phase and
-carries its stories in EXACTLY this machine-read form — the build gate parses
-it:
-- **Phase 1 — <one-line goal>**: <goal detail>. Stories: 1, 2, 4.
-Phase 1 works best as a thin vertical slice that touches every core
-capability. No story left unphased.>
+<ONE phase, holding EVERY story. Exactly one entry, in EXACTLY this
+machine-read form — the build gate parses it:
+- **Phase 1 — <one-line goal>**: <goal detail>. Stories: 1, 2, 3, 4, 5.
+List every story number the PRD defines. Never write a second phase entry.>
 
 ## Out of Scope
 <what this project deliberately does not do>
@@ -62,7 +60,10 @@ section) or explicitly deferred ("deferred — does not block design") before
   defect.
 - **Actors before citation.** A story only names actors the Actors section
   defines.
-- **Phasing is total.** Every story is in exactly one phase.
+- **One phase, and it is total.** The product ships in a single phase for now:
+  Phase 1 lists every story, and there is no Phase 2. Work that should come
+  later is not a later phase — it is an Out of Scope line, or it is not a
+  story yet.
 - **No acceptance criteria.** Validation criteria live in
   `specs/validation/validation-criteria.json` — the single acceptance oracle.
   The PRD never duplicates them.
