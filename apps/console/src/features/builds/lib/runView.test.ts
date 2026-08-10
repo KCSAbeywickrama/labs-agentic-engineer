@@ -22,6 +22,7 @@ import {
   buildOutcome,
   buildSessionLabel,
   gateDrive,
+  isDeliveryRun,
   isTerminalRun,
   runHold,
   runOriginLabel,
@@ -81,6 +82,49 @@ describe("isTerminalRun / versionIsLive", () => {
     expect(versionIsLive([run({ state: "succeeded" }), run({ state: "running" })])).toBe(
       false,
     );
+  });
+});
+
+describe("isDeliveryRun", () => {
+  type Cycle = MilestoneRunView["cycles"][number];
+  const cycle = (kind: Cycle["kind"]): Cycle => ({
+    id: `cycle-${kind}`,
+    kind,
+    attempts: 1,
+    createdAt: "2026-07-10T10:00:00Z",
+  });
+
+  it("keeps every run that delivered the version", () => {
+    expect(isDeliveryRun(run({ cycles: [cycle("coding")] }))).toBe(true);
+    expect(
+      isDeliveryRun(run({ origin: "incident-adoption", cycles: [cycle("coding")] })),
+    ).toBe(true);
+  });
+
+  // The copy this protects — "No build session was ever dispatched" — is TRUE for a
+  // spec build that died before dispatching, so that run has to stay on the rail.
+  it("keeps a spec build that never dispatched a session", () => {
+    expect(isDeliveryRun(run({ cycles: [] }))).toBe(true);
+  });
+
+  // A run that only re-judged the version has no build session to show, and its
+  // verdict belongs on the Validation board. Leading with one made the page claim
+  // nothing had been dispatched — false, since a validation cycle ran and merged.
+  it("drops a revalidation that only validated", () => {
+    expect(
+      isDeliveryRun(run({ origin: "revalidate", cycles: [cycle("validation")] })),
+    ).toBe(false);
+  });
+
+  // But a revalidation left at the default attempt allowance repairs what it finds:
+  // an issue per failed criterion, then an ordinary coding cycle, then builds. Once
+  // it has done that it IS a build story, so the test is what the run did.
+  it("keeps a revalidation that repaired and rebuilt", () => {
+    expect(
+      isDeliveryRun(
+        run({ origin: "revalidate", cycles: [cycle("validation"), cycle("coding")] }),
+      ),
+    ).toBe(true);
   });
 });
 
