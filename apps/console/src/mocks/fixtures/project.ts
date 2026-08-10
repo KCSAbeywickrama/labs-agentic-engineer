@@ -1015,20 +1015,66 @@ const validationPlan = `# Demo Shop — Validation plan
 // aep:mock:validation switch swaps wholesale to reach every verdict.
 
 // Spec files as the Files API serves them (#113): repo-relative paths under
-// specs/, metadata (list-files) split from content (read-file).
+// specs/, metadata (list-files) split from content (read-file). `encoding`
+// mirrors the read half of #384's WriteOp.encoding contract: set to
+// "base64" for a binary reference document (a PDF), whose `content` is then
+// the base64 TEXT, not the raw bytes — same shape the real read-file
+// endpoint answers with (services/aep-api's fileContentToWire).
 interface MockSpecFile {
   path: string;
   content: string;
+  encoding?: "base64";
 }
 
 const prdOnlyFiles: MockSpecFile[] = [
   { path: "specs/requirements/prd.md", content: seededPrd },
 ];
 
+// Reference documents (#383): the create view's uploaded source material,
+// exercising all three preview types the Spec view renders — markdown, plain
+// text, and a real (byte-valid, parseable) tiny PDF, base64-encoded exactly
+// as a binary read-file response carries it. The PDF bytes are a minimal
+// single-page document (`%PDF-1.4` header, one Helvetica text object, a
+// correct xref/trailer) — not a placeholder string — so the mock's PDF
+// preview exercises the real base64 -> Blob -> <object> decode path, not a
+// stub.
+const referenceNotesMd = `# Reference notes
+
+Background the requirements agent read while drafting the PRD — pulled from
+the uploaded document at create time (#383).
+
+- Competitive scan: three incumbents, all charge per-seat.
+- Support SLA target: first response under 4 hours.
+`;
+
+const referenceRawTxt = `Raw meeting notes, 2026-01-14
+- Customer wants CSV export of order history.
+- Ops asked for a webhook on fulfillment status change.
+- Legal: retain order records for 7 years minimum.
+`;
+
+// A minimal, valid, parseable one-page PDF ("AEP reference doc fixture"),
+// base64-encoded. Regenerate with a fresh xref/trailer if this content ever
+// needs to change — the byte offsets in the PDF's own xref table must stay
+// correct for the bytes to decode as a real PDF.
+const referenceSpecPdfBase64 =
+  "JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2JqCjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCAyMDAgMjAwXSAvUmVzb3VyY2VzIDw8IC9Gb250IDw8IC9GMSA0IDAgUiA+PiA+PiAvQ29udGVudHMgNSAwIFIgPj4KZW5kb2JqCjQgMCBvYmoKPDwgL1R5cGUgL0ZvbnQgL1N1YnR5cGUgL1R5cGUxIC9CYXNlRm9udCAvSGVsdmV0aWNhID4+CmVuZG9iago1IDAgb2JqCjw8IC9MZW5ndGggNTYgPj4Kc3RyZWFtCkJUIC9GMSAxMiBUZiAyMCAxMDAgVGQgKEFFUCByZWZlcmVuY2UgZG9jIGZpeHR1cmUpIFRqIEVUCmVuZHN0cmVhbQplbmRvYmoKeHJlZgowIDYKMDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDA5IDAwMDAwIG4gCjAwMDAwMDAwNTggMDAwMDAgbiAKMDAwMDAwMDExNSAwMDAwMCBuIAowMDAwMDAwMjQxIDAwMDAwIG4gCjAwMDAwMDAzMTEgMDAwMDAgbiAKdHJhaWxlcgo8PCAvU2l6ZSA2IC9Sb290IDEgMCBSID4+CnN0YXJ0eHJlZgo0MTcKJSVFT0Y=";
+
+const referenceFiles: MockSpecFile[] = [
+  { path: "specs/requirements/references/notes.md", content: referenceNotesMd },
+  { path: "specs/requirements/references/meeting-notes.txt", content: referenceRawTxt },
+  {
+    path: "specs/requirements/references/spec.pdf",
+    content: referenceSpecPdfBase64,
+    encoding: "base64",
+  },
+];
+
 const collaborationFiles: MockSpecFile[] = [
   ...prdOnlyFiles,
   { path: "specs/requirements/user-stories.md", content: userStories },
   { path: "specs/design/architecture.md", content: architectureMd },
+  ...referenceFiles,
 ];
 
 const fullFiles: MockSpecFile[] = [
@@ -1088,7 +1134,10 @@ export function specFileMetas(files: MockSpecFile[]): FileMeta[] {
     .map((f) => ({
       path: f.path,
       sha: mockSha(f.path + f.content),
-      size: f.content.length,
+      // A base64 file's `content` is the base64 TEXT — size must reflect the
+      // DECODED byte count (what the real server reports off the git blob),
+      // not the ~33%-larger base64 string length.
+      size: decodedByteLength(f.content, f.encoding),
     }))
     .sort((a, b) => a.path.localeCompare(b.path));
 }
@@ -1101,6 +1150,12 @@ export function specFileContent(
   if (!file) return null;
   return {
     path: file.path,
+    // The generated FileContent.encoding is non-optional (openapi-typescript
+    // fills the schema's `default: utf8` in as a non-nullable member), so the
+    // mock always sets it explicitly — "utf8" for a plain-text file, exactly
+    // what the real server would answer with if it didn't take the
+    // omit-when-default shortcut (see fileContentToWire's comment).
+    encoding: file.encoding ?? "utf8",
     content: file.content,
     sha: mockSha(file.path + file.content),
   };
@@ -1186,7 +1241,10 @@ export function appliedFileContent(
     (f) => f.path === path,
   );
   if (!file) return null;
-  return { path: file.path, content: file.content, sha: file.sha };
+  // Base64 writes keep their metadata but drop the content (see the
+  // AppliedFile comment above) — the mock has no real bytes to answer
+  // "base64" with, so this always reports "utf8" for what it does hold.
+  return { path: file.path, content: file.content, sha: file.sha, encoding: "utf8" };
 }
 
 export const applyFilesError: ApiError = {
