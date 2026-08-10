@@ -199,8 +199,8 @@ func mustJSON(t *testing.T, v any) string {
 func TestListAtHead_FilteredByPrefix(t *testing.T) {
 	r := newFilesRig(t, map[string]string{
 		"specs/requirements/prd.md": "req",
-		"specs/design/design.md":             "des",
-		"README.md":                          "root",
+		"specs/design/design.md":    "des",
+		"README.md":                 "root",
 	})
 	rec := r.get(apiBase + "?prefix=specs/design/")
 	if rec.Code != http.StatusOK {
@@ -273,8 +273,8 @@ func TestReadAtHead_ValidationReportAllowListed(t *testing.T) {
 
 func TestApply_MultiWriteAndDelete_SingleCommit(t *testing.T) {
 	r := newFilesRig(t, map[string]string{
-		"specs/requirements/prd.md": "old",
-		"specs/requirements/todo.md":         "scratch",
+		"specs/requirements/prd.md":  "old",
+		"specs/requirements/todo.md": "scratch",
 	})
 	reqSHA := r.readSHA(t, "specs/requirements/prd.md")
 	todoSHA := r.readSHA(t, "specs/requirements/todo.md")
@@ -399,8 +399,8 @@ func TestApply_StaleBaseSHA_409_NothingApplied(t *testing.T) {
 // must not be applied (all-or-nothing), and every conflict is collected.
 func TestApply_BatchConflict_AllOrNothing_CollectsAllConflicts(t *testing.T) {
 	r := newFilesRig(t, map[string]string{
-		"specs/requirements/prd.md": "keep me",
-		"specs/requirements/todo.md":         "scratch",
+		"specs/requirements/prd.md":  "keep me",
+		"specs/requirements/todo.md": "scratch",
 	})
 	todoSHA := r.readSHA(t, "specs/requirements/todo.md")
 	headBefore := r.remote.HeadSHA(t)
@@ -498,6 +498,33 @@ func TestApply_SizeCap_MeasuresDecodedNotEncoded(t *testing.T) {
 	if got := r.remote.FileAt(t, "main", "specs/requirements/references/big.pdf"); len(got) != len(raw) {
 		t.Errorf("committed %d bytes, want the decoded %d", len(got), len(raw))
 	}
+}
+
+// A multi-file batch at the per-file limit passes the EDGE body ceiling: two
+// 5 MiB documents are ~13.4 MiB of base64 on the wire, which the old 10 MiB
+// edge-wide cap 413'd before any handler ran — the create view's upload died
+// in transport while every per-file check would have passed. The edge must
+// admit what the files contract permits; the per-file cap stays the limiter.
+func TestApply_MultiFileBatch_PassesTheEdgeBodyCap(t *testing.T) {
+	r := newFilesRig(t, nil)
+	fiveMiB := strings.Repeat("A", 5<<20)
+	encoded := base64.StdEncoding.EncodeToString([]byte(fiveMiB))
+	body := fmt.Sprintf(
+		`{"writes":[{"path":"specs/requirements/references/a.pdf","content":%q,"encoding":"base64"},{"path":"specs/requirements/references/b.pdf","content":%q,"encoding":"base64"}]}`,
+		encoded, encoded)
+
+	rec := r.apply(body)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("apply code %d, want 200 — two in-limit files must not be rejected by the transport: %s",
+			rec.Code, firstBytes(rec.Body.String(), 200))
+	}
+}
+
+func firstBytes(s string, n int) string {
+	if len(s) > n {
+		return s[:n]
+	}
+	return s
 }
 
 // A base64 write commits the file's real bytes, end to end through the real
