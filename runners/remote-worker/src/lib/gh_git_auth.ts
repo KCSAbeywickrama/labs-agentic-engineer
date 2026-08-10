@@ -17,6 +17,7 @@
  */
 
 import { exec } from "node:child_process";
+import path from "node:path";
 import { promisify } from "node:util";
 
 const execAsync = promisify(exec);
@@ -34,20 +35,33 @@ const execAsync = promisify(exec);
  * binary's absolute path.
  */
 export function envHasGitHubToken(env: NodeJS.ProcessEnv = process.env): boolean {
-  const token = env.GITHUB_TOKEN ?? env.GH_TOKEN ?? "";
-  return token !== "";
+  // Check each independently: `GITHUB_TOKEN=""` must not mask a set GH_TOKEN
+  // (`??` would keep the empty string and skip the fallback).
+  return (env.GITHUB_TOKEN ?? "") !== "" || (env.GH_TOKEN ?? "") !== "";
+}
+
+/** First absolute path from `which gh` stdout, or null. */
+export function absoluteGhPathFromWhich(stdout: string): string | null {
+  const p = stdout.trim().split(/\r?\n/, 1)[0]?.trim() ?? "";
+  if (p === "" || !path.isAbsolute(p)) return null;
+  return p;
 }
 
 /** Absolute path to the real `gh` binary (never the workspace `.aep/gh` wrapper). */
 export async function resolveRealGhPath(): Promise<string> {
   try {
     const which = await execAsync("which gh");
-    const p = which.stdout.trim();
-    if (p !== "") return p;
+    const p = absoluteGhPathFromWhich(which.stdout);
+    if (p !== null) return p;
   } catch {
     // fall through
   }
-  return "/usr/bin/env gh";
+  // Must be absolute: ghPassthroughScript quotes the value as one executable
+  // (`exec "/usr/bin/env gh"`), which cannot run. Same requirement for the
+  // durable `!/abs/path/gh auth git-credential` helper pin.
+  throw new Error(
+    "could not resolve an absolute path to `gh` (required for git credential helper and .aep/gh)",
+  );
 }
 
 /**

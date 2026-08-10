@@ -34,7 +34,7 @@
 // neutered, a developer running this gets keychain prompts and git's post-success
 // `store` writes the test token into their real keychain.
 
-import { test } from "node:test";
+import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -50,6 +50,11 @@ const GH_TOKEN = "ghs_TESTONLYabcdefghijklmnopqrstuv01";
 const BEARER = "test-platform-bearer";
 const EXPECTED_BASIC = Buffer.from(`x-access-token:${GH_TOKEN}`).toString("base64");
 
+function restoreEnvVar(name: string, previous: string | undefined): void {
+  if (previous === undefined) delete process.env[name];
+  else process.env[name] = previous;
+}
+
 // Neuter host git config BEFORE anything imports or runs git. buildCloneInvocation
 // spreads process.env into the clone child, so setting it here covers that too.
 process.env.GIT_CONFIG_GLOBAL = "/dev/null";
@@ -58,9 +63,17 @@ process.env.GIT_CONFIG_NOSYSTEM = "1";
 process.env.GIT_TERMINAL_PROMPT = "0";
 // This suite exercises the AEP credhelper → refresh path. A developer machine
 // with GITHUB_TOKEN/GH_TOKEN set would take the gh-token provision branch and
-// skip the helper under test.
+// skip the helper under test. Capture both before deleting so suite cleanup
+// can restore the host environment.
+const suitePrevGithubToken = process.env.GITHUB_TOKEN;
+const suitePrevGhToken = process.env.GH_TOKEN;
 delete process.env.GITHUB_TOKEN;
 delete process.env.GH_TOKEN;
+
+after(() => {
+  restoreEnvVar("GITHUB_TOKEN", suitePrevGithubToken);
+  restoreEnvVar("GH_TOKEN", suitePrevGhToken);
+});
 
 // config.workspaceBasePath is captured at module load and defaults to the
 // developer's homedir, so it must be set before workspace.js is imported —
@@ -348,9 +361,11 @@ exit 1
     const stub = await startRefreshStub(TASK_ID);
 
     const prevPath = process.env.PATH;
-    const prevToken = process.env.GITHUB_TOKEN;
+    const prevGithubToken = process.env.GITHUB_TOKEN;
+    const prevGhToken = process.env.GH_TOKEN;
     process.env.PATH = `${binDir}:${prevPath ?? ""}`;
     process.env.GITHUB_TOKEN = GH_TOKEN;
+    delete process.env.GH_TOKEN;
 
     try {
       const layout = await provisionWorkspace({
@@ -402,8 +417,8 @@ exit 1
       assert.match(refs.stdout, /refs\/heads\/aep\/m1-c1/);
     } finally {
       process.env.PATH = prevPath;
-      if (prevToken === undefined) delete process.env.GITHUB_TOKEN;
-      else process.env.GITHUB_TOKEN = prevToken;
+      restoreEnvVar("GITHUB_TOKEN", prevGithubToken);
+      restoreEnvVar("GH_TOKEN", prevGhToken);
       await gitServer.close();
       await stub.close();
       await fs.promises.rm(root, { recursive: true, force: true });

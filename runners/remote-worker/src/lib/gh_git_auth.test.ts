@@ -19,6 +19,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  absoluteGhPathFromWhich,
   envHasGitHubToken,
   ghGitCredentialHelper,
   ghPassthroughScript,
@@ -27,8 +28,20 @@ import {
 test("envHasGitHubToken: true when GITHUB_TOKEN or GH_TOKEN is non-empty", () => {
   assert.equal(envHasGitHubToken({}), false);
   assert.equal(envHasGitHubToken({ GITHUB_TOKEN: "" }), false);
+  assert.equal(envHasGitHubToken({ GH_TOKEN: "" }), false);
   assert.equal(envHasGitHubToken({ GITHUB_TOKEN: "ghs_x" }), true);
   assert.equal(envHasGitHubToken({ GH_TOKEN: "ghs_x" }), true);
+  // Empty GITHUB_TOKEN must not mask a set GH_TOKEN (`??` would).
+  assert.equal(envHasGitHubToken({ GITHUB_TOKEN: "", GH_TOKEN: "ghs_x" }), true);
+  assert.equal(envHasGitHubToken({ GITHUB_TOKEN: "ghs_x", GH_TOKEN: "" }), true);
+});
+
+test("absoluteGhPathFromWhich: only absolute paths", () => {
+  assert.equal(absoluteGhPathFromWhich(""), null);
+  assert.equal(absoluteGhPathFromWhich("gh\n"), null);
+  assert.equal(absoluteGhPathFromWhich("./gh\n"), null);
+  assert.equal(absoluteGhPathFromWhich("/usr/bin/gh\n"), "/usr/bin/gh");
+  assert.equal(absoluteGhPathFromWhich("/opt/homebrew/bin/gh\n/other\n"), "/opt/homebrew/bin/gh");
 });
 
 test("ghGitCredentialHelper: setup-git equivalent pinned to an absolute binary", () => {
