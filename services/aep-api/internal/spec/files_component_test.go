@@ -476,6 +476,30 @@ func TestApply_SizeCap(t *testing.T) {
 	}
 }
 
+// The 5 MiB cap measures the DECODED file, not the base64 text carrying it.
+// Base64 inflates by ~33%, so a 4.5 MiB PDF arrives as ~6 MiB of text: cap the
+// wire string and a document comfortably inside the documented limit is
+// rejected. This is the one test that tells the two readings apart — it fails
+// the moment the check moves anywhere ahead of the decode.
+func TestApply_SizeCap_MeasuresDecodedNotEncoded(t *testing.T) {
+	r := newFilesRig(t, map[string]string{"specs/requirements/prd.md": "x"})
+	raw := strings.Repeat("A", 9*(1<<20)/2) // 4.5 MiB decoded — under the cap
+	encoded := base64.StdEncoding.EncodeToString([]byte(raw))
+	if len(encoded) <= 5<<20 {
+		t.Fatalf("test is not exercising the gap: encoded len %d must exceed the %d-byte cap", len(encoded), 5<<20)
+	}
+	body := fmt.Sprintf(
+		`{"writes":[{"path":"specs/requirements/references/big.pdf","content":%q,"encoding":"base64"}]}`, encoded)
+
+	rec := r.apply(body)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("apply code %d, want 200 — a 4.5 MiB file is under the 5 MiB cap: %s", rec.Code, rec.Body.String())
+	}
+	if got := r.remote.FileAt(t, "main", "specs/requirements/references/big.pdf"); len(got) != len(raw) {
+		t.Errorf("committed %d bytes, want the decoded %d", len(got), len(raw))
+	}
+}
+
 // A base64 write commits the file's real bytes, end to end through the real
 // handler chain and a real git origin. This is the reference-document upload
 // the create view performs (#383) over the WriteOp.encoding contract (#384):

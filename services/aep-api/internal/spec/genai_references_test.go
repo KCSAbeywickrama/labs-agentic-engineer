@@ -74,10 +74,14 @@ func TestStartCommand_OnlyReferenceFolderFilesRide(t *testing.T) {
 		// Siblings that must NOT ride: one beside the references folder, one in
 		// another specs/ subtree, one outside specs/ entirely. (prd.md is left
 		// out deliberately — the shared rig writes it as the turn's own output.)
-		"specs/requirements/scope.md":            "# Scope\n",
-		"specs/design/design.md":                 "# Design\n",
-		"README.md":                              "hi\n",
-		"specs/requirements/references/brief.md": "# Brief\n",
+		"specs/requirements/scope.md": "# Scope\n",
+		"specs/design/design.md":      "# Design\n",
+		"README.md":                   "hi\n",
+		// The name-prefix trap: this folder SHARES a prefix with the real one
+		// and must not ride. Drop the trailing slash from ReferencesDir and
+		// this file starts leaking into every kickoff.
+		"specs/requirements/references-old/superseded.md": "# Old\n",
+		"specs/requirements/references/brief.md":          "# Brief\n",
 	}, "/start")
 
 	want := []string{"specs/requirements/references/brief.md"}

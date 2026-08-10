@@ -38,6 +38,7 @@ import * as clack from "@clack/prompts";
 import { loadRepoSkills } from "./kit/skills.js";
 import { parseStartCommand, parseFlowCommand } from "@aep/contracts/commands";
 import { chatSpec, flowSpec, startSpec } from "./engine/turn-spec.js";
+import { readReferences } from "./state/references.js";
 import { loadDotenv } from "@aep/agents/shared/env";
 import {
   chatTurn,
@@ -194,7 +195,7 @@ async function runHeadless(
         const start = parseStartCommand(commandArg);
         const flow = !start ? parseFlowCommand(commandArg) : null;
         const turn = start
-          ? startSpec(start.inlineIdea || readIdea(projectDir))
+          ? startSpec(start.inlineIdea || readIdea(projectDir), readReferences(projectDir))
           : flow
             ? flowSpec(flow.skill, flow.text)
             : chatSpec(commandArg);

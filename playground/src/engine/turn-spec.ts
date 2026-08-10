@@ -46,11 +46,15 @@ export function flowSpec(skill: string, text?: string): TurnSpec {
 
 /**
  * The kickoff. A blank idea carries nothing — the start skill then opens by
- * asking for one, exactly as it does for a project with no descriptor.
+ * asking for one, exactly as it does for a project with no descriptor. The
+ * attached reference documents ride the same way: no documents, no key, so the
+ * turn is byte-identical to one from before that channel existed (aep-api's
+ * `references` field is `omitempty` for the same reason).
  */
-export function startSpec(idea: string | null | undefined): TurnSpec {
+export function startSpec(idea: string | null | undefined, references?: string[]): TurnSpec {
   const trimmed = (idea ?? "").trim();
-  return trimmed === "" ? { kind: "start" } : { kind: "start", idea: trimmed };
+  const spec: TurnSpec = trimmed === "" ? { kind: "start" } : { kind: "start", idea: trimmed };
+  return references?.length ? { ...spec, references } : spec;
 }
 
 /**
