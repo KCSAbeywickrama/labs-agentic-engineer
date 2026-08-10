@@ -48,6 +48,8 @@ delivery's kernel: shared behaviour belongs in the root the slices import.
 | design read · spec-stage snapshot | needs | `spec` — the Stage aggregate's spec column + component OpenAPI source |
 | `descriptorWriter` | needs | `spec` — stamps `specs/.agentic-engineer.toml` on create (best-effort; nil is a no-op) |
 | build/exec status (`SetStageSources` port) | needs | `delivery` — the build/deploy columns of the Stage aggregate, wired at the root |
+| `runAbandoner` (`SetRunAbandoner`) | needs | `delivery` — ends the supervisors of a deleted project's live runs, wired at the root (nil is a no-op) |
+| per-project agent usage (`UsageService`) | needs | `delivery` — the agent-usage ledger, keyed by lifetime (`contracts.UsageScope`) |
 | OC `Project`/`Component`/`ReleaseBinding` CRUD | needs | `openchoreo` client — OC is the store |
 | `Service` · `ComponentService` · `ConfigService` | offers | the edge (the 14 public ops) |
 
@@ -84,4 +86,15 @@ delivery's kernel: shared behaviour belongs in the root the slices import.
   exactly one failure class, so no tally or recency heuristic is needed. Every other terminal reason keeps
   the Build card as the catch-all. `deploy.validation` itself is the run row's VERDICT column; the report
   and the per-cycle detail behind it live on the version's run story (list-build-runs).
+- **A project delete takes its run SUPERVISORS down before its run ROWS.** Purging the rows does not stop
+  the workflows that write them: nothing else ends a run workflow, its milestone poll retries unbounded
+  against a repository the same delete removes, and its id is keyed on (org, project, milestone) alone —
+  so a project later created under the same name collides with the survivor and its first run is refused
+  as already-started, leaving it unsupervised. Order is therefore abandon → repo → rows, and every step is
+  best-effort because the OC delete upstream has already been committed.
+- **Deleting a project does not delete what it cost.** The delete purges its runs and cycles; delivery's
+  `agent_usage_ledger` is retired, not purged, so Settings → Usage keeps the greyed card the page was
+  always designed to show. A slug deleted and recreated therefore renders TWO cards — the live project
+  billed only for its own work, and the incarnation that spent the rest — because a slug is not an
+  identity. Spec-turn spend carries no lifetime marker and sits whole on whichever card is current.
 - Platform-wide rules (tenant gate, secrets fence, feature-free domains) → [../../README.md](../../README.md).

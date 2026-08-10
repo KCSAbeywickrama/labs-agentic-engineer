@@ -91,6 +91,20 @@ type StampedUsage struct {
 	CostUsd *float64
 }
 
+// UsageScope names ONE project lifetime's spend. It is the key the delivery
+// roll-up returns, because a project slug is not an identity: a project can be
+// deleted and recreated under the same name, and the two must not share a bill.
+//
+// Retired is the whole discriminator. False is the incarnation that is live now;
+// true is spend that belonged to one the platform has already torn down. All
+// retired generations of a slug share the scope — they are one closed story
+// ("what this name used to cost"), and the record that separates them
+// generation-by-generation stays in the ledger for anyone who needs it.
+type UsageScope struct {
+	ProjectID string
+	Retired   bool
+}
+
 // Add folds another stamped aggregate in: tokens via TokenUsage.Add, and the
 // USD sums only where present — nil + nil stays nil, nil + x is x.
 func (s StampedUsage) Add(other StampedUsage) StampedUsage {

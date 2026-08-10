@@ -66,6 +66,7 @@ func BaseModels() []any {
 		&projects.ActivityEvent{},
 		&delivery.MilestoneRun{},
 		&delivery.RunCycle{},
+		&delivery.AgentUsageLedgerEntry{},
 	}
 }
 
@@ -154,6 +155,11 @@ func Steps(db *gorm.DB, deploymentTier string, credKey []byte) []database.Step {
 		// stream reads once the Job's pod is reaped. FK'd to run_cycles(id), so it
 		// follows milestone_runs.
 		ctxStep("run_cycle_logs", RunRunCycleLogs),
+		// agent_usage_ledger: the spend record that outlives the project. Its
+		// upsert arbiter index, plus the one-time backfill from the dispatch rows
+		// spend used to live on — so it must follow both of those tables
+		// (AutoMigrate) and the milestone_runs it joins for the version label.
+		ctxStep("agent_usage_ledger", RunAgentUsageLedger),
 		// model_rates seed (#291): the platform's active model at today's
 		// rates. AutoMigrate (BaseModels) creates the table; this idempotent
 		// step inserts the claude-sonnet-5 row so write-time USD stamping has

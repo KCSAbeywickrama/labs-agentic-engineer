@@ -36,9 +36,9 @@ describes.
 An absent kind means `org`, which is a real decision, not a default to lean on:
 
 - **`platform`** — AE-owned, read-only in the console. The design-flow skills
-  (`start`, `amend`, `grilling`, `design`, `cell-design`, `architecture`,
-  `security-design`, `openapi-conventions`, `wireframes`, `validation-criteria`,
-  `task-planning`) and the coding run's own workflow skills (`aep`,
+  (`start`, `amend`, `grilling`, `prd-contract`, `design`, `cell-design`,
+  `architecture`, `security-design`, `openapi-conventions`, `wireframes`,
+  `validation-criteria`, `task-planning`) and the coding run's own workflow skills (`aep`,
   `aep-validation`, `playwright-cli`).
 - **`org`** — the org-visible stack skills (`go`, `ballerina`, `react-webapp`,
   `api-management`, `thunder-authentication`). Editable and deletable by an org.

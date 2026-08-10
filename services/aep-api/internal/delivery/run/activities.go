@@ -277,7 +277,7 @@ func (a *Activities) PollMilestone(ctx context.Context, in MilestoneRef) (Milest
 	}
 	counts, err := a.milestones.MilestoneIssueCounts(ctx, in.OrgID, in.ProjectID, in.MilestoneNumber)
 	if err != nil {
-		return MilestoneSnapshot{}, err
+		return MilestoneSnapshot{}, sourceControlErr(err)
 	}
 	if counts == nil {
 		return MilestoneSnapshot{}, nil
@@ -331,11 +331,11 @@ func (a *Activities) PollCycleBuilds(ctx context.Context, in CycleBuildsInput) (
 	}
 	files, err := a.prs.ListPullRequestFiles(ctx, in.OrgID, in.ProjectID, in.PRNumber)
 	if err != nil {
-		return CycleBuildState{}, err
+		return CycleBuildState{}, sourceControlErr(err)
 	}
 	paths, err := a.design.ComponentPaths(ctx, in.OrgID, in.ProjectID)
 	if err != nil {
-		return CycleBuildState{}, err
+		return CycleBuildState{}, sourceControlErr(err)
 	}
 	diff := delivery.DiffComponents(files, paths)
 	out := CycleBuildState{Expected: len(diff.Components)}
@@ -404,7 +404,8 @@ func (a *Activities) EnsureValidationIssue(ctx context.Context, in MilestoneRef)
 	if a.validation == nil {
 		return 0, nil
 	}
-	return a.validation.EnsureValidationIssue(ctx, in.OrgID, in.ProjectID, in.MilestoneNumber)
+	issue, err := a.validation.EnsureValidationIssue(ctx, in.OrgID, in.ProjectID, in.MilestoneNumber)
+	return issue, sourceControlErr(err)
 }
 
 // ValidationReportRef identifies the report to read: the project, plus the commit
@@ -443,7 +444,7 @@ func (a *Activities) ReadValidationVerdict(ctx context.Context, in ValidationRep
 	}
 	verdict, digest, err := a.validation.Verdict(ctx, in.OrgID, in.ProjectID, in.At)
 	if err != nil {
-		return ValidationOutcome{}, err
+		return ValidationOutcome{}, sourceControlErr(err)
 	}
 	return ValidationOutcome{Verdict: verdict, Digest: digest}, nil
 }
@@ -470,7 +471,8 @@ func (a *Activities) MintValidationRepairIssues(ctx context.Context, in MintVali
 	if a.validation == nil {
 		return nil, nil
 	}
-	return a.validation.MintRepairIssues(ctx, in.OrgID, in.ProjectID, in.MilestoneNumber, in.At, in.CycleID)
+	filed, err := a.validation.MintRepairIssues(ctx, in.OrgID, in.ProjectID, in.MilestoneNumber, in.At, in.CycleID)
+	return filed, sourceControlErr(err)
 }
 
 // ---- dispatch --------------------------------------------------------------

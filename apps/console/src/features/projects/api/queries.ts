@@ -314,9 +314,11 @@ export function useCreateProject() {
   });
 }
 
-// Delete a project (#107). The BFF cascade destroys the OC project, its
-// deployments, and the GitHub repo; the confirm dialog owns the warning.
-// Invalidates every list page so the card leaves the grid on success.
+// Delete a project (#107). The BFF cascade destroys the OC project and its
+// deployments, ends the run supervisors, and purges the platform's own repo
+// record, executions and run ledger. It does NOT delete the GitHub repository —
+// that survives, and the confirm dialog says so. Invalidates every list page so
+// the card leaves the grid on success.
 export function useDeleteProject() {
   const queryClient = useQueryClient();
   return useMutation({

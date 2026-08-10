@@ -40,6 +40,7 @@
 
 import { parse as parseYaml } from "yaml";
 import { checkComponentDesign } from "./component-design-schema.js";
+import { checkOpenapiSpec } from "./openapi-spec.js";
 import { checkWireframeLayout } from "./wireframe-layout.js";
 import type {
   Op,
@@ -197,9 +198,13 @@ export class FileBundle {
   }
 
   /**
-   * Apply `content` to `path`, gated by the YAML reparse guard: invalid YAML
-   * aborts with INVALID_YAML and no write (leaves the bundle byte-for-byte
-   * unchanged — the safe in-memory contract).
+   * Apply `content` to `path` through the write-gate ladder: YAML reparse, then
+   * each artifact-specific gate that claims the path (component `design.json`
+   * schema, `wireframes.dsl` syntax, `openapi.yaml` structure). The first
+   * problem aborts with its own code and NO write, leaving the bundle
+   * byte-for-byte unchanged — the safe in-memory contract. Every gate is a pure
+   * (path, content) => problem | null function, so a new artifact kind is one
+   * module and one call here.
    */
   private commit(path: string, op: Op, content: string, rejectMsg: (yamlErr: string) => string): OpResult {
     const yamlErr = checkYaml(path, content);
@@ -219,6 +224,13 @@ export class FileBundle {
     const layoutProblem = checkWireframeLayout(path, content);
     if (layoutProblem) {
       return err(path, op, layoutProblem.code, layoutProblem.message);
+    }
+    // A component's openapi.yaml is structure-gated on the same terms, which is
+    // what makes asking a separate tool to validate it unnecessary — that ask
+    // cost a round trip plus a full re-emission of the document as tool input.
+    const specProblem = checkOpenapiSpec(path, content);
+    if (specProblem) {
+      return err(path, op, specProblem.code, specProblem.message);
     }
     this.files.set(path, content);
     this.touchedPaths.add(path);

@@ -28,8 +28,11 @@ Each form ends your turn; the user's answers arrive as the next message.
   either already answered (the brief, an earlier answer, an org default) or
   yours to assume.
 - Give **0–5 concrete options** and mark exactly **one** `recommended: true`.
-  Add a `description` where an option's meaning isn't obvious. `multiSelect:
-  true` only when several options genuinely co-apply.
+  Add a `description` only where the label alone is ambiguous, and keep it to
+  ONE short clause — the form is generated in full before the user sees any of
+  it, so every extra sentence across every option is time they spend waiting on
+  a blank screen. `multiSelect: true` only when several options genuinely
+  co-apply.
 - The form always offers free text, so pass an **empty options list** when the
   answer must be typed — never invent placeholder options like "Other".
 - Options are a starting point, not a cage: never smuggle in a constraint the
