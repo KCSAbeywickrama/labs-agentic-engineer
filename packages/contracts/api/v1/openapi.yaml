@@ -3539,6 +3539,16 @@ components:
       properties:
         content:
           type: string
+        encoding:
+          default: utf8
+          description: How `content` is encoded — the read half of `WriteOp.encoding`.
+            `base64` means the file is binary (e.g. a PDF reference document) and
+            `content` carries its bytes base64-encoded; serving binary as raw JSON
+            text would silently corrupt it.
+          enum:
+          - utf8
+          - base64
+          type: string
         path:
           type: string
         sha:

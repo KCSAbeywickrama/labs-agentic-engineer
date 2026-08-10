@@ -26,7 +26,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { Conversation } from "../src/store/conversation-store.js";
-import { PostgresConversationStore, type Queryable } from "../src/store/postgres-store.js";
+import { PostgresConversationStore, sanitizeForJsonb, type Queryable } from "../src/store/postgres-store.js";
 
 interface Row {
   id: string;
@@ -166,6 +166,99 @@ test("save upserts; createdAt is preserved, updatedAt advances", async () => {
   assert.equal(second.status, "done");
   assert.equal(second.createdAt.getTime(), first.createdAt.getTime(), "createdAt is first-seen");
   assert.ok(second.updatedAt.getTime() > first.updatedAt.getTime(), "updatedAt advances on upsert");
+});
+
+// --- NUL sanitization at the persistence boundary (#384) ---------------------
+//
+// PostgreSQL's jsonb column rejects any string containing the U+0000 escape
+// sequence ("unsupported Unicode escape sequence") — real turns hit this when
+// a tool result contained embedded NUL bytes (e.g. a binary file read as
+// "text"), which killed the INSERT and, with it, the whole turn.
+
+/** A pg double that records the exact params of the last INSERT, unparsed. */
+class RecordingPg implements Queryable {
+  lastInsertParams: unknown[] | undefined;
+  query(text: string, params: unknown[] = []): Promise<{ rows: Array<Record<string, unknown>> }> {
+    if (text.trimStart().toUpperCase().startsWith("INSERT")) {
+      this.lastInsertParams = params;
+    }
+    return Promise.resolve({ rows: [] });
+  }
+}
+
+test("sanitizeForJsonb recursively replaces U+0000 with U+FFFD; everything else is byte-identical", () => {
+  const input = {
+    a: "keep me",
+    b: ["x\u0000y", 42, null, true],
+    c: { nested: "z\u0000\u0000z", untouched: "fine" },
+  };
+  const out = sanitizeForJsonb(input);
+  assert.deepEqual(out, {
+    a: "keep me",
+    b: ["x�y", 42, null, true],
+    c: { nested: "z��z", untouched: "fine" },
+  });
+  // The original value is untouched (no in-place mutation).
+  assert.equal(input.b[0], "x\u0000y");
+});
+
+test("save strips the NUL escape sequence from the jsonb payload sent to Postgres", async () => {
+  const db = new RecordingPg();
+  const store = new PostgresConversationStore(db);
+  const withNul: Conversation = {
+    id: "nul1",
+    messages: [
+      { role: "user", content: "hi" },
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "t1",
+            toolName: "loadSkillReference",
+            output: { type: "text", value: "binary junk: \u0000\u0000 more text" },
+          },
+        ],
+      },
+    ],
+    status: "done",
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+
+  await store.save(withNul);
+
+  const payload = String(db.lastInsertParams?.[1]);
+  assert.equal(payload.includes("\u0000"), false, "no literal NUL byte in the jsonb payload");
+  assert.equal(payload.includes("\\u0000"), false, "no NUL unicode escape — this is what Postgres rejects");
+  assert.match(payload, /binary junk: �� more text/, "the NUL was replaced with U+FFFD, not dropped");
+});
+
+test("save/get round-trips a NUL-bearing message through a real jsonb-shaped store", async () => {
+  const db = new FakePg();
+  const store = new PostgresConversationStore(db);
+  await store.save({
+    id: "nul2",
+    messages: [
+      { role: "user", content: "hi" },
+      {
+        role: "tool",
+        content: [
+          { type: "tool-result", toolCallId: "t1", toolName: "x", output: { type: "text", value: "a\u0000b" } },
+        ],
+      },
+    ],
+    status: "done",
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
+
+  const got = await store.get("nul2");
+  assert.ok(got);
+  const toolMsg = got.messages[1] as { content: Array<{ output: { value: string } }> };
+  assert.equal(toolMsg.content[0]?.output.value, "a�b");
+  // The rest of the aggregate is untouched.
+  assert.equal((got.messages[0] as { content: string }).content, "hi");
 });
 
 test("sweepExpired deletes rows past the TTL and keeps fresh ones", async () => {

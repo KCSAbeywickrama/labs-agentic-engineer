@@ -29,7 +29,7 @@
  * preserved across turns.
  */
 
-import { hasToolCall, isStepCount, type LanguageModel, type ModelMessage, type ToolSet } from "ai";
+import { hasToolCall, isStepCount, type FilePart, type LanguageModel, type ModelMessage, type ToolSet } from "ai";
 import {
   FileBundle,
   ASK_QUESTION_TOOL,
@@ -122,6 +122,15 @@ export interface RunConversationTurnInput {
    * no catalog, no `loadSkill`.
    */
   skillSource?: SkillSource;
+  /**
+   * Native file parts (currently: `.pdf` reference documents, #384) attached to
+   * THIS turn's user message alongside `instruction` — resolved by the caller
+   * from `TurnSpec.references` against the snapshot dir (`load-workspace.ts`'s
+   * `readReferenceAttachments`), since this function only sees `files`/
+   * `instruction`, never the raw `TurnSpec` or a filesystem path. Absent/empty
+   * → the message stays a plain string, byte-identical to a turn without it.
+   */
+  referenceAttachments?: FilePart[];
   /**
    * Skill names to inline into THIS turn's prompt up front (#335 latency):
    * bodies resolve through `skillSource` and ride the user prompt — never the
@@ -274,6 +283,7 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
       instructions,
       prompt: note + eagerBlock + buildPrompt(input.files, input.instruction),
       messages: conv.messages, // appended in place by runTurn
+      ...(input.referenceAttachments?.length ? { fileParts: input.referenceAttachments } : {}),
       tools,
       // End the turn at a HITL question call (the question tools live on the
       // `files` set only, so these never fire on a task-plan turn).

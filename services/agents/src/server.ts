@@ -45,7 +45,7 @@
 
 import express from "express";
 import type { Express, Request, Response, NextFunction } from "express";
-import type { LanguageModel } from "ai";
+import type { FilePart, LanguageModel } from "ai";
 import {
   SSE_DONE,
   isTurnSpec,
@@ -61,7 +61,7 @@ import type { ConversationStore } from "./store/conversation-store.js";
 import { runConversationTurn, TurnGuard, ConcurrentTurnError } from "./conversation/run-conversation-turn.js";
 import { joinRoom, type RoomPeer } from "./collab/room-peer.js";
 import type { SkillSource } from "./agents/main/skill-source.js";
-import { readSnapshot, loadSkillsFromSnapshot } from "./conversation/load-workspace.js";
+import { readSnapshot, loadSkillsFromSnapshot, readReferenceAttachments } from "./conversation/load-workspace.js";
 import { resolveWorkspace, WorkspaceRefError } from "./shared/snapshot-path.js";
 import { createAuthMiddleware, type AgentsAuthConfig } from "./shared/auth.js";
 import { startKeepAlive } from "./shared/keepalive.js";
@@ -207,6 +207,12 @@ export function createApp(deps: CreateAppDeps): Express {
     // read the files and the lazy skill source from the mount.
     let files: Record<string, string>;
     let skillSource: SkillSource;
+    // Reference PDFs (#384): a `start` turn's TurnSpec.references may name
+    // `.pdf` documents — readSnapshot's walk SKIPS anything with a NUL byte, so
+    // a binary PDF is never in `files`. Attached separately as native file
+    // parts (see run-conversation-turn.ts / run-turn.ts); every other kind, and
+    // a start turn with no PDF references, leaves this empty.
+    let referenceAttachments: FilePart[] = [];
     try {
       const ws = resolveWorkspace({
         conversationIdParam: id,
@@ -216,6 +222,9 @@ export function createApp(deps: CreateAppDeps): Express {
       });
       files = readSnapshot(ws.snapshotDir);
       skillSource = loadSkillsFromSnapshot(ws.skillsSnapshotDir);
+      if (turn.kind === "start") {
+        referenceAttachments = readReferenceAttachments(ws.snapshotDir, turn.references);
+      }
     } catch (err) {
       if (err instanceof WorkspaceRefError) {
         res.status(err.status).json({ error: err.message });
@@ -341,6 +350,7 @@ export function createApp(deps: CreateAppDeps): Express {
         files,
         filesChangedExternally: body.filesChangedExternally === true,
         skillSource,
+        ...(referenceAttachments.length ? { referenceAttachments } : {}),
         ...(toolset ? { toolset } : {}),
         ...(mcp ? { mcp } : {}),
         ...(eagerSkills ? { eagerSkills } : {}),

@@ -476,6 +476,61 @@ func TestApply_SizeCap(t *testing.T) {
 	}
 }
 
+// Reading a binary file answers base64 with the encoding flag set — the read
+// half of WriteOp.encoding. Serving raw bytes in a JSON string silently
+// corrupts them (Go's json.Marshal swaps invalid UTF-8 for U+FFFD), which is
+// what made PDF preview impossible: what came back was never the file.
+func TestRead_BinaryFileAnswersBase64_ByteExact(t *testing.T) {
+	raw := "%PDF-1.4\n\x00\x00\xff\xfebinary body"
+	r := newFilesRig(t, map[string]string{"specs/requirements/references/doc.pdf": raw})
+
+	rec := r.get(apiBase + "/specs/requirements/references/doc.pdf")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("read code %d: %s", rec.Code, rec.Body.String())
+	}
+	var fc struct {
+		Path     string `json:"path"`
+		Content  string `json:"content"`
+		Encoding string `json:"encoding"`
+		Sha      string `json:"sha"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &fc); err != nil {
+		t.Fatalf("decode read: %v", err)
+	}
+	if fc.Encoding != "base64" {
+		t.Fatalf("encoding = %q, want base64 for a binary file", fc.Encoding)
+	}
+	got, err := base64.StdEncoding.DecodeString(fc.Content)
+	if err != nil {
+		t.Fatalf("content is not valid base64: %v", err)
+	}
+	if string(got) != raw {
+		t.Fatalf("round-trip lost bytes: got %d bytes, want %d byte-identical", len(got), len(raw))
+	}
+}
+
+// A text file keeps today's wire shape exactly — no encoding key at all, so
+// every existing consumer (the spec editor, the FE viewer) is untouched.
+func TestRead_TextFileKeepsTodaysWireShape(t *testing.T) {
+	r := newFilesRig(t, map[string]string{"specs/requirements/prd.md": "# PRD\nplain text ✅\n"})
+
+	rec := r.get(apiBase + "/specs/requirements/prd.md")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("read code %d: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, `"encoding"`) {
+		t.Fatalf("text read grew an encoding key — the default must stay implicit: %s", firstBytes(body, 200))
+	}
+	var fc spec.FileContent
+	if err := json.Unmarshal(rec.Body.Bytes(), &fc); err != nil {
+		t.Fatalf("decode read: %v", err)
+	}
+	if fc.Content != "# PRD\nplain text ✅\n" {
+		t.Fatalf("content = %q, want it verbatim", fc.Content)
+	}
+}
+
 // The 5 MiB cap measures the DECODED file, not the base64 text carrying it.
 // Base64 inflates by ~33%, so a 4.5 MiB PDF arrives as ~6 MiB of text: cap the
 // wire string and a document comfortably inside the documented limit is

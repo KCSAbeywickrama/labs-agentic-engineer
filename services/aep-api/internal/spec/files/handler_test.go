@@ -55,7 +55,7 @@ func TestApplyRequestFromWire_Base64WriteDecodesToRawBytes(t *testing.T) {
 	body := gen.ApplyRequest{Writes: []gen.WriteOp{{
 		Path:     "specs/requirements/references/doc.pdf",
 		Content:  base64.StdEncoding.EncodeToString(raw),
-		Encoding: gen.Base64,
+		Encoding: gen.WriteOpEncodingBase64,
 	}}}
 
 	got, err := applyRequestFromWire(body)
@@ -75,7 +75,7 @@ func TestApplyRequestFromWire_Base64WriteDecodesToRawBytes(t *testing.T) {
 // caller predating the field keeps working.
 func TestApplyRequestFromWire_UTF8AndDefaultPassContentThrough(t *testing.T) {
 	const content = "# Requirements\n\nplain markdown — with unicode ✅\n"
-	for _, enc := range []gen.WriteOpEncoding{gen.UTF8, ""} {
+	for _, enc := range []gen.WriteOpEncoding{gen.WriteOpEncodingUTF8, ""} {
 		body := gen.ApplyRequest{Writes: []gen.WriteOp{{
 			Path: "specs/requirements/requirements.md", Content: content, Encoding: enc,
 		}}}
@@ -95,7 +95,7 @@ func TestApplyRequestFromWire_UTF8AndDefaultPassContentThrough(t *testing.T) {
 // garbage bytes.
 func TestApplyRequestFromWire_InvalidBase64IsBadRequest(t *testing.T) {
 	body := gen.ApplyRequest{Writes: []gen.WriteOp{{
-		Path: "specs/requirements/references/doc.pdf", Content: "!!!not base64!!!", Encoding: gen.Base64,
+		Path: "specs/requirements/references/doc.pdf", Content: "!!!not base64!!!", Encoding: gen.WriteOpEncodingBase64,
 	}}}
 
 	_, err := applyRequestFromWire(body)

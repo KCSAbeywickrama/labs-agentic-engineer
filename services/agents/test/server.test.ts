@@ -68,13 +68,13 @@ const WS_SKILLS_REF = "2".repeat(40);
 const WS_CONV = `org_${WS_ORG}--proj_${WS_PROJ}--requirements-generate--conv1`;
 
 /** Materialize a fake mount: one repo snapshot (given files) + one skills snapshot. */
-function makeMountRoot(files: Record<string, string>, skillMd?: { dir: string; content: string }): string {
+function makeMountRoot(files: Record<string, string | Buffer>, skillMd?: { dir: string; content: string }): string {
   const root = mkdtempSync(join(tmpdir(), "aep-srv-ws-"));
   const snapDir = join(root, "repos", WS_ORG, WS_PROJ, WS_SLUG, "snapshots", WS_REF);
   for (const [rel, content] of Object.entries(files)) {
     const abs = join(snapDir, rel);
     mkdirSync(dirname(abs), { recursive: true });
-    writeFileSync(abs, content, "utf8");
+    writeFileSync(abs, content);
   }
   const skillsDir = join(root, "repos", WS_ORG, "_skills", "org-skills", "snapshots", WS_SKILLS_REF);
   mkdirSync(skillsDir, { recursive: true });
@@ -325,6 +325,57 @@ test("a turn spec is composed server-side and streams like any turn", async () =
     );
     assert.equal(res.status, 200);
     assert.match(await res.text(), /done\./);
+  } finally {
+    await close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// --- Reference PDF attachments (#384) ----------------------------------------
+
+test("start turn: a .pdf reference is attached to the model as a native file part", async () => {
+  const pdfBytes = Buffer.from("%PDF-1.4 minimal pdf\n");
+  const refPath = "specs/requirements/references/brief.pdf";
+  const root = makeMountRoot({ [REQUIREMENTS]: "# Req\n", [refPath]: pdfBytes });
+  const { baseUrl, close, store } = await boot(mockModel([{ kind: "text", text: "ok" }]), root);
+  try {
+    const token = await mintToken();
+    const res = await fetch(
+      `${baseUrl}/conversations/${WS_CONV}/turns`,
+      turnPost(wsBody({ turn: { kind: "start", idea: "an app", references: [refPath] } }), { token, org: WS_ORG }),
+    );
+    assert.equal(res.status, 200);
+    await res.text();
+
+    const stored = await store.get(WS_CONV);
+    const firstUser = stored!.messages.find((m) => m.role === "user")!;
+    assert.ok(Array.isArray(firstUser.content), "the user message became a content array");
+    const parts = firstUser.content as unknown as Array<Record<string, unknown>>;
+    const filePart = parts.find((p) => p.type === "file");
+    assert.ok(filePart, "expected a file part on the user message");
+    assert.equal(filePart!.mediaType, "application/pdf");
+    assert.equal(Buffer.from(filePart!.data as string, "base64").toString("hex"), pdfBytes.toString("hex"));
+  } finally {
+    await close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("start turn: only .md references produce no file parts (byte-identical message shape)", async () => {
+  const root = makeMountRoot({ [REQUIREMENTS]: "# Req\n" });
+  const { baseUrl, close, store } = await boot(mockModel([{ kind: "text", text: "ok" }]), root);
+  try {
+    const token = await mintToken();
+    const res = await fetch(
+      `${baseUrl}/conversations/${WS_CONV}/turns`,
+      turnPost(wsBody({ turn: { kind: "start", idea: "an app", references: [REQUIREMENTS] } }), { token, org: WS_ORG }),
+    );
+    assert.equal(res.status, 200);
+    await res.text();
+
+    const stored = await store.get(WS_CONV);
+    const firstUser = stored!.messages.find((m) => m.role === "user")!;
+    assert.equal(typeof firstUser.content, "string", "no PDF references ⇒ the message content stays a plain string");
   } finally {
     await close();
     rmSync(root, { recursive: true, force: true });

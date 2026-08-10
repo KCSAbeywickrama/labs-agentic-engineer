@@ -31,6 +31,11 @@ created the project, named in the instruction by path. When they are listed,
 **read every one before you plan anything.** They are the primary brief; the
 typed idea is the anchor that says which part of them matters.
 
+Every listed document is already in front of you: text documents are in your
+workspace files, and PDFs are attached to this conversation natively. Never
+fetch a reference document through a repository or MCP tool — a binary fetched
+as text is garbage, and the tool will refuse it anyway.
+
 Read them, then take the coverage walk against what they say:
 
 - **Do not ask what a document already answers.** A document that settles a

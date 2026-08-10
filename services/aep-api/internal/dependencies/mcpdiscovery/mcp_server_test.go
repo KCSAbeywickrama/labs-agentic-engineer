@@ -768,6 +768,59 @@ func TestMCP_GetRemoteGitFileContents_Directory(t *testing.T) {
 	}
 }
 
+// Binary content never rides a tool result as text. A real turn died on this:
+// the model fetched an 868KB PDF through this tool, the raw bytes became ~1.5M
+// junk tokens per model step, and the NUL bytes (json ) then killed the
+// conversation's jsonb persist. The tool answers with the file's facts and a
+// refusal instead — the model can still reason about the file existing.
+func TestMCP_GetRemoteGitFileContents_BinaryIsRefusedAsFacts(t *testing.T) {
+	pdf := "%PDF-1.4\n\x00\x00binary\xff\xfe"
+	rg := &fakeRemoteGit{file: &RemoteGitFile{Content: pdf, SHA: "abc"}}
+	h := NewMCPHandler(newExternalCatalogFixture(nil), nil, nil, rg, nil, nil, nil)
+	resp := decodeRPC(t, postRPC(t, h, "org-1",
+		callBody("get_remote_git_file_contents", `{"owner":"acme","repo":"billing-svc","path":"specs/requirements/references/form.pdf"}`)))
+	text := toolText(t, resp, false)
+
+	var payload remoteGitFileView
+	if err := json.Unmarshal([]byte(text), &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if payload.Content != "" {
+		t.Fatalf("binary content leaked into the tool result (%d bytes) — must be empty", len(payload.Content))
+	}
+	if payload.SHA != "abc" {
+		t.Errorf("sha = %q, want abc (the facts still ride)", payload.SHA)
+	}
+	if payload.Note == "" || !strings.Contains(payload.Note, "binary") {
+		t.Errorf("note = %q, want an explanation naming the file as binary", payload.Note)
+	}
+}
+
+// Oversized text is truncated with a note, not returned whole: a tool result
+// is prompt input, and an unbounded file becomes an unbounded prompt.
+func TestMCP_GetRemoteGitFileContents_OversizedTextIsTruncated(t *testing.T) {
+	huge := strings.Repeat("line of an enormous but honest yaml file\n", 10000) // ~420KB
+	rg := &fakeRemoteGit{file: &RemoteGitFile{Content: huge, SHA: "abc"}}
+	h := NewMCPHandler(newExternalCatalogFixture(nil), nil, nil, rg, nil, nil, nil)
+	resp := decodeRPC(t, postRPC(t, h, "org-1",
+		callBody("get_remote_git_file_contents", `{"owner":"acme","repo":"billing-svc","path":"specs/openapi.yaml"}`)))
+	text := toolText(t, resp, false)
+
+	var payload remoteGitFileView
+	if err := json.Unmarshal([]byte(text), &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if len(payload.Content) >= len(huge) {
+		t.Fatalf("content not truncated: %d bytes returned", len(payload.Content))
+	}
+	if len(payload.Content) == 0 {
+		t.Fatal("truncation must keep a leading slice, not drop the file")
+	}
+	if payload.Note == "" || !strings.Contains(payload.Note, "truncated") {
+		t.Errorf("note = %q, want a truncation notice", payload.Note)
+	}
+}
+
 func TestMCP_GetRemoteGitFileContents_OwnerMismatch_ToolError(t *testing.T) {
 	// The reader refuses a cross-org owner; the handler must surface it as a
 	// tool-level error (isError=true), not data.

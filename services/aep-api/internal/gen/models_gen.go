@@ -103,6 +103,24 @@ func (e DeployStageValidation) Valid() bool {
 	}
 }
 
+// Defines values for FileContentEncoding.
+const (
+	FileContentEncodingBase64 FileContentEncoding = "base64"
+	FileContentEncodingUTF8   FileContentEncoding = "utf8"
+)
+
+// Valid indicates whether the value is a known member of the FileContentEncoding enum.
+func (e FileContentEncoding) Valid() bool {
+	switch e {
+	case FileContentEncodingBase64:
+		return true
+	case FileContentEncodingUTF8:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for MilestoneRunViewOrigin.
 const (
 	IncidentAdoption MilestoneRunViewOrigin = "incident-adoption"
@@ -471,16 +489,16 @@ func (e TurnConflictCode) Valid() bool {
 
 // Defines values for WriteOpEncoding.
 const (
-	Base64 WriteOpEncoding = "base64"
-	UTF8   WriteOpEncoding = "utf8"
+	WriteOpEncodingBase64 WriteOpEncoding = "base64"
+	WriteOpEncodingUTF8   WriteOpEncoding = "utf8"
 )
 
 // Valid indicates whether the value is a known member of the WriteOpEncoding enum.
 func (e WriteOpEncoding) Valid() bool {
 	switch e {
-	case Base64:
+	case WriteOpEncodingBase64:
 		return true
-	case UTF8:
+	case WriteOpEncodingUTF8:
 		return true
 	default:
 		return false
@@ -968,9 +986,15 @@ type ExternalResourceDTO struct {
 // FileContent defines model for FileContent.
 type FileContent struct {
 	Content string `json:"content"`
-	Path    string `json:"path"`
-	Sha     string `json:"sha"`
+
+	// Encoding How `content` is encoded — the read half of `WriteOp.encoding`. `base64` means the file is binary (e.g. a PDF reference document) and `content` carries its bytes base64-encoded; serving binary as raw JSON text would silently corrupt it.
+	Encoding FileContentEncoding `json:"encoding,omitempty"`
+	Path     string              `json:"path"`
+	Sha      string              `json:"sha"`
 }
+
+// FileContentEncoding How `content` is encoded — the read half of `WriteOp.encoding`. `base64` means the file is binary (e.g. a PDF reference document) and `content` carries its bytes base64-encoded; serving binary as raw JSON text would silently corrupt it.
+type FileContentEncoding string
 
 // FileMeta defines model for FileMeta.
 type FileMeta struct {

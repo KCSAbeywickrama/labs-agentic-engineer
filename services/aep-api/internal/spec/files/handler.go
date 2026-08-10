@@ -20,6 +20,8 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/wso2/aep/aep-api/internal/gen"
 	"github.com/wso2/aep/aep-api/internal/platform/apierr"
@@ -75,11 +77,20 @@ func (h *Handler) ReadFile(ctx context.Context, request gen.ReadFileRequestObjec
 	if err != nil {
 		return nil, mapFilesError(err)
 	}
-	return gen.ReadFile200JSONResponse(gen.FileContent{
-		Path:    fc.Path,
-		Content: fc.Content,
-		Sha:     fc.SHA,
-	}), nil
+	return gen.ReadFile200JSONResponse(fileContentToWire(fc)), nil
+}
+
+// fileContentToWire is the read half of decodeContent: a binary file rides
+// base64 with the encoding flag set, because a JSON string cannot carry its
+// bytes (json.Marshal swaps invalid UTF-8 for U+FFFD — silent corruption).
+// Text keeps today's wire shape exactly, encoding omitted.
+func fileContentToWire(fc *spec.FileContent) gen.FileContent {
+	out := gen.FileContent{Path: fc.Path, Content: fc.Content, Sha: fc.SHA}
+	if !utf8.ValidString(fc.Content) || strings.ContainsRune(fc.Content, 0) {
+		out.Content = base64.StdEncoding.EncodeToString([]byte(fc.Content))
+		out.Encoding = gen.FileContentEncodingBase64
+	}
+	return out
 }
 
 func (h *Handler) ApplyFiles(ctx context.Context, request gen.ApplyFilesRequestObject) (gen.ApplyFilesResponseObject, error) {
@@ -159,7 +170,7 @@ func applyRequestFromWire(in gen.ApplyRequest) (spec.ApplyRequest, error) {
 // bytes. Undecodable base64 is the caller's error, so it is a 400: committing
 // it would silently corrupt the file.
 func decodeContent(content string, encoding gen.WriteOpEncoding) (string, error) {
-	if encoding != gen.Base64 {
+	if encoding != gen.WriteOpEncodingBase64 {
 		return content, nil
 	}
 	raw, err := base64.StdEncoding.DecodeString(content)

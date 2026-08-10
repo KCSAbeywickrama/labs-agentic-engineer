@@ -26,6 +26,8 @@ import {
   filterTurnSnapshot,
   keepInTurnSnapshot,
   loadSkillsFromSnapshot,
+  readReferenceAttachments,
+  MAX_REFERENCE_ATTACHMENT_BYTES,
   SkillReadError,
 } from "../src/conversation/load-workspace.js";
 import { buildSkillCatalog } from "../src/agents/main/prompt.js";
@@ -123,6 +125,88 @@ test("keepInTurnSnapshot admits the two OpenAPI contract shapes but still reject
   assert.equal(keepInTurnSnapshot("specs/design/components/orders/openapi.yml"), false);
   // A `*` must not cross a path segment: nesting the dep name breaks the shape.
   assert.equal(keepInTurnSnapshot("specs/design/components/orders/dependencies/nested/stripe.openapi.yaml"), false);
+});
+
+// --- Reference PDF attachments (#384) -----------------------------------------
+
+const REF_DIR = "specs/requirements/references";
+
+test("readReferenceAttachments: a .pdf reference becomes a native file part with its exact bytes", () => {
+  const pdfBytes = Buffer.from("%PDF-1.4 fake but binary-ish bytes \x00\x01\x02");
+  const root = makeTree({ [`${REF_DIR}/brief.pdf`]: pdfBytes });
+  try {
+    const parts = readReferenceAttachments(root, [`${REF_DIR}/brief.pdf`]);
+    assert.equal(parts.length, 1);
+    const part = parts[0]!;
+    assert.equal(part.type, "file");
+    assert.equal(part.mediaType, "application/pdf");
+    assert.equal(Buffer.from(part.data as string, "base64").toString("hex"), pdfBytes.toString("hex"));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("readReferenceAttachments: the .pdf match is case-insensitive", () => {
+  const pdfBytes = Buffer.from("upper-case extension");
+  const root = makeTree({ [`${REF_DIR}/BRIEF.PDF`]: pdfBytes });
+  try {
+    const parts = readReferenceAttachments(root, [`${REF_DIR}/BRIEF.PDF`]);
+    assert.equal(parts.length, 1);
+    assert.equal(parts[0]?.mediaType, "application/pdf");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("readReferenceAttachments: non-pdf references are ignored — they are already in the text snapshot", () => {
+  const root = makeTree({ [`${REF_DIR}/notes.md`]: "# Notes\n", [`${REF_DIR}/notes.txt`]: "plain\n" });
+  try {
+    assert.deepEqual(readReferenceAttachments(root, [`${REF_DIR}/notes.md`, `${REF_DIR}/notes.txt`]), []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("readReferenceAttachments: a missing pdf is skipped, never throws", () => {
+  const root = mkdtempSync(join(tmpdir(), "aep-refs-"));
+  try {
+    assert.deepEqual(readReferenceAttachments(root, [`${REF_DIR}/absent.pdf`]), []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("readReferenceAttachments: absent/empty references list yields no parts", () => {
+  const root = mkdtempSync(join(tmpdir(), "aep-refs-"));
+  try {
+    assert.deepEqual(readReferenceAttachments(root, undefined), []);
+    assert.deepEqual(readReferenceAttachments(root, []), []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("readReferenceAttachments: a file over the cap is skipped, not truncated or thrown", () => {
+  const big = Buffer.alloc(MAX_REFERENCE_ATTACHMENT_BYTES + 1, 1);
+  const root = makeTree({ [`${REF_DIR}/huge.pdf`]: big });
+  try {
+    assert.deepEqual(readReferenceAttachments(root, [`${REF_DIR}/huge.pdf`]), []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("readReferenceAttachments: a reference that would escape the snapshot dir is refused, never read", () => {
+  const root = makeTree({ [`${REF_DIR}/brief.pdf`]: Buffer.from("in bounds") });
+  const outside = makeTree({ "secret.pdf": Buffer.from("must never be read") });
+  try {
+    const outsideName = outside.split("/").pop();
+    const parts = readReferenceAttachments(root, [`../${outsideName}/secret.pdf`]);
+    assert.deepEqual(parts, []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
 });
 
 const SKILL_MD = (name: string, description: string, body: string): string =>
