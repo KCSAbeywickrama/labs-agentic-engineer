@@ -49,7 +49,7 @@ import {
   useProjectTags,
 } from "../../projects/api/queries";
 import { useDesignDependencies, useSpecFileContent, useSpecFiles } from "../api/queries";
-import { toSpecEntry } from "../api/mapping";
+import { toSpecEntry, type SpecFileEntry } from "../api/mapping";
 import { computeDependencyUsedBy } from "../lib/dependencyUsedBy";
 import { useCollabSpec } from "../collab/useCollabSpec";
 import { SpecQuestionForm } from "./SpecQuestionForm";
@@ -66,6 +66,7 @@ import type { DependencyResolutionIntent } from "../../projects/lib/dependencyRe
 import { useDesignCellChangeCount } from "../collab/useDesignCellChange";
 import { AddArtifactDialog } from "./AddArtifactDialog";
 import { BuildDependencyDrawer } from "./BuildDependencyDrawer";
+import { ReferencePreviewDialog } from "./ReferencePreviewDialog";
 import { SpecFileList } from "./SpecFileList";
 import { CellDiagramPanel } from "./CellDiagramPanel";
 import { WireframePanel } from "./WireframePanel";
@@ -118,6 +119,10 @@ export function SpecView({ projectName }: { projectName: string }) {
   );
   const [selection, setSelection] = useState<SpecSelection | null>(null);
   const [addArtifactOpen, setAddArtifactOpen] = useState(false);
+  // Reference-document preview (#383): a dialog over the References row's
+  // click, entirely separate from `selection` — see SpecFileList's
+  // onPreviewReference doc comment for why.
+  const [previewReference, setPreviewReference] = useState<SpecFileEntry | null>(null);
   // Build (#162): commit-then-build. buildPhase drives the button label /
   // loading; an agent peer in the room means a turn is writing → block Build.
   const build = useBuildProject(projectName);
@@ -917,6 +922,7 @@ export function SpecView({ projectName }: { projectName: string }) {
                 onSelect={setSelection}
                 onAddArtifact={() => setAddArtifactOpen(true)}
                 onRegenerateDesign={generateDesign}
+                onPreviewReference={setPreviewReference}
                 regenerateDisabled={agentBusy}
                 deriving={deriving}
                 failed={failed}
@@ -1099,6 +1105,12 @@ export function SpecView({ projectName }: { projectName: string }) {
       <AddArtifactDialog
         open={addArtifactOpen}
         onClose={() => setAddArtifactOpen(false)}
+      />
+
+      <ReferencePreviewDialog
+        projectName={projectName}
+        file={previewReference}
+        onClose={() => setPreviewReference(null)}
       />
 
       <BuildDependencyDrawer
