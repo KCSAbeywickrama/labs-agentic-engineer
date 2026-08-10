@@ -17,9 +17,12 @@
 package openchoreo
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo/gen"
 )
@@ -37,9 +40,9 @@ var (
 	ErrForbidden    = errors.New("forbidden")
 	ErrNotFound     = errors.New("not found")
 	ErrConflict     = errors.New("conflict")
-	// ErrPaymentRequired is the entitlement gate's HTTP 402 (agent concurrency
-	// quota). Mapped by the coding-agent dispatcher to a blocked-not-failed
-	// sentinel — never a retryable create failure.
+	// ErrPaymentRequired is the entitlement gate's HTTP 402 — project quota,
+	// inactive subscription, or agent concurrency. Coding-agent dispatch maps
+	// it to blocked-not-failed; project create forwards the platform message.
 	ErrPaymentRequired     = errors.New("payment required")
 	ErrInternalServerError = errors.New("internal server error")
 )
@@ -89,6 +92,33 @@ func handleErrorResponse(statusCode int, errs ErrorResponses) error {
 		return fmt.Errorf("%w: status %d", sentinel, statusCode)
 	}
 	return fmt.Errorf("openchoreo: unexpected status %d", statusCode)
+}
+
+// humanErrorMessage extracts a human sentence from an OC / platform error body.
+// Platform writeError uses {"success":false,"error":"…"}; typed OC errors use
+// the same `error` field. Falls back to a trimmed body, then fallback.
+func humanErrorMessage(body []byte, fallback string) string {
+	body = bytes.TrimSpace(body)
+	if len(body) == 0 {
+		return fallback
+	}
+	var envelope struct {
+		Error   string `json:"error"`
+		Message string `json:"message"`
+	}
+	if json.Unmarshal(body, &envelope) == nil {
+		if m := strings.TrimSpace(envelope.Error); m != "" {
+			return m
+		}
+		if m := strings.TrimSpace(envelope.Message); m != "" {
+			return m
+		}
+	}
+	s := string(body)
+	if len(s) > 300 {
+		s = s[:300]
+	}
+	return s
 }
 
 // sentinelForStatus maps an HTTP status code to its matching sentinel error,
