@@ -18,6 +18,7 @@
 
 import {
   Alert,
+  alpha,
   Box,
   Button,
   CircularProgress,
@@ -25,9 +26,9 @@ import {
   Stack,
   Tooltip,
 } from "@wso2/oxygen-ui";
-import { FileText, GitPullRequest, ScrollText } from "@wso2/oxygen-ui-icons-react";
+import { FileText, GitPullRequest, ScrollText, X } from "@wso2/oxygen-ui-icons-react";
 import { Link } from "@tanstack/react-router";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   parseValidationCriteria,
   parseValidationReport,
@@ -39,8 +40,9 @@ import { PageHeader, type PageHeaderStatus } from "../../../components/PageHeade
 import type { StatusTone } from "../../../components/StatusChip";
 import { EmptyState } from "../../../components/EmptyState";
 import { useProjectStatus } from "../../projects/api/queries";
-import { useBuildRuns } from "../../builds/api/queries";
+import { useBuildRuns, useCancelRun } from "../../builds/api/queries";
 import { RunFeed } from "../../builds/components/RunFeed";
+import { isTerminalRun } from "../../builds/lib/runView";
 import { validationView, type StageTone } from "../../projects/lib/pipeline";
 import { useValidationCriteria, useValidationReport } from "../api/queries";
 import { VerdictTile } from "./VerdictTile";
@@ -215,6 +217,20 @@ export function ValidationPage({
   );
   const tally = useTally(criteria.data?.content, report.data?.content);
 
+  // The run this page can still cancel. Taken from the whole list rather than
+  // from `run` above, because only ONE run on a milestone can be live and it is
+  // not necessarily the one answering for the version — a revalidation in flight
+  // is live while the spec build that owns the current verdict is long settled.
+  const liveRun = runList.find((r) => !isTerminalRun(r.state));
+  const cancel = useCancelRun(projectName, version || undefined);
+  // Cancel is ACCEPTED, not performed: the endpoint answers 202 the moment the
+  // signal is queued, and the run turns cancelled only once the supervisor acts
+  // and the runs poll observes it. isPending covers the HTTP round trip alone, so
+  // this flag holds the button from the click until the run leaves the live state
+  // — released by an error, the one case where clicking again is right.
+  const [cancelRequested, setCancelRequested] = useState(false);
+  const cancelling = cancel.isPending || (cancelRequested && !cancel.isError);
+
   // Body rule: the log shows while there is no report to show (running, failed
   // mechanically, nothing settled yet) OR the user toggled ?view=logs.
   const showLogs = !settled || view === "logs";
@@ -236,6 +252,34 @@ export function ValidationPage({
       {...(chip ? { status: chip } : {})}
       actions={
         <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+          {/* A validating run has the same escape hatch the Builds rail gives a
+              coding one — same endpoint, same hook, same wording, because it is
+              the same act on the same run. Absent once the run is terminal: the
+              whole point of cancel is that the unbounded wait has no other
+              expiry, and a settled run has nothing left to expire. */}
+          {liveRun && (
+            <Button
+              size="small"
+              color="inherit"
+              variant="outlined"
+              startIcon={<X size={16} />}
+              disabled={cancelling}
+              onClick={() => {
+                setCancelRequested(true);
+                cancel.mutate(liveRun.id);
+              }}
+              sx={{
+                borderRadius: 999,
+                color: "text.primary",
+                borderColor: (t) => alpha(t.palette.text.primary, 0.3),
+                "&:hover": {
+                  borderColor: (t) => alpha(t.palette.text.primary, 0.55),
+                },
+              }}
+            >
+              {cancelling ? "Cancelling…" : "Cancel run"}
+            </Button>
+          )}
           {prUrl && (
             <Tooltip title="Open the validation PR">
               <IconButton
@@ -274,10 +318,28 @@ export function ValidationPage({
     />
   );
 
+  // A failed cancel rides WITH the header rather than in one body, because every
+  // branch below renders the header and any of them can be on screen when the
+  // write fails. The copy is the Builds rail's: a 503 here means the workflow
+  // engine was unreachable and nothing was cancelled, so retrying is the fix.
+  const headerWithCancelError = (
+    <>
+      {header}
+      {cancel.isError && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          {cancel.error instanceof Error
+            ? cancel.error.message
+            : "Failed to cancel the run"}
+          . Nothing was cancelled — you can retry.
+        </Alert>
+      )}
+    </>
+  );
+
   if (status.isPending || (version !== "" && runs.isPending)) {
     return (
       <>
-        {header}
+        {headerWithCancelError}
         <Box sx={{ display: "flex", justifyContent: "center", p: 6 }}>
           <CircularProgress aria-label="Loading validation" />
         </Box>
@@ -288,7 +350,7 @@ export function ValidationPage({
   if (status.isError) {
     return (
       <>
-        {header}
+        {headerWithCancelError}
         <Alert
           severity="error"
           action={<Button onClick={() => void status.refetch()}>Retry</Button>}
@@ -306,7 +368,7 @@ export function ValidationPage({
   if (!run || (!validationCycle && !verdict)) {
     return (
       <>
-        {header}
+        {headerWithCancelError}
         <EmptyState
           compact
           description="No validation has run yet — it runs automatically once the project's components are deployed to dev and the version's work is done."
@@ -318,7 +380,7 @@ export function ValidationPage({
   if (rawVerdict === "skipped") {
     return (
       <>
-        {header}
+        {headerWithCancelError}
         <EmptyState
           compact
           description="This version was not validated — it has no validation criteria, or it was an incident run, which gets no validation cycle."
@@ -392,7 +454,7 @@ export function ValidationPage({
 
   return (
     <>
-      {header}
+      {headerWithCancelError}
       {/* A Stack, not margins on the children: VerdictTile renders NOTHING for a
           verdict outside its five, and a Stack given no DOM node for `tile` leaves
           no phantom gap — which a `mb` on the tile could not express. A fragment

@@ -119,7 +119,19 @@ vi.mock("../../projects/api/queries", () => ({
   }),
 }));
 
+// The cancel mutation, spied so a test can assert WHICH run the button targets —
+// only one run on a milestone can be live, and it is not necessarily the one
+// answering for the version.
+const mockCancelMutate = vi.fn();
+let mockCancelError: Error | null = null;
+
 vi.mock("../../builds/api/queries", () => ({
+  useCancelRun: () => ({
+    mutate: mockCancelMutate,
+    isPending: false,
+    isError: mockCancelError !== null,
+    error: mockCancelError,
+  }),
   // Models two things the real hook does, both of which a laxer mock would hide:
   // `enabled: Boolean(tag)` (no tag → the query never runs, so no data), and
   // per-version scoping (list-build-runs answers with THAT version's runs). The
@@ -217,6 +229,8 @@ afterEach(() => {
   mockValidation = "none";
   mockRun = undefined;
   mockNewerRuns = [];
+  mockCancelMutate.mockClear();
+  mockCancelError = null;
   mockBuildVersion = "v1";
   mockDeployVersion = "v1";
   mockCriteria.isPending = false;
@@ -230,6 +244,51 @@ afterEach(() => {
 // validate, so "the newest run" is not this page's subject — "the newest run that
 // ASKED" is. These reproduce without any revalidation: an incident adoption alone
 // was enough to erase a version's validation record.
+// Cancel is the only expiry a run's unbounded wait has, and until now it was
+// reachable only from the Builds rail — so a validation, which can hold an agent
+// for up to two hours, had no stop button on the page that owns it.
+describe("ValidationPage cancel", () => {
+  it("offers cancel while a run is live", () => {
+    mockValidation = "running";
+    mockRun = run({ cycles: [validationCycle] });
+    mockNewerRuns = [
+      { ...run({ cycles: [validationCycle] }), id: "run-live", origin: "revalidate", state: "running" },
+    ];
+
+    renderPage(undefined);
+    fireEvent.click(screen.getByRole("button", { name: /Cancel run/ }));
+
+    // The LIVE run, not the one answering for the version: only one run on a
+    // milestone can be live, and it need not be the one holding the verdict.
+    expect(mockCancelMutate).toHaveBeenCalledWith("run-live");
+  });
+
+  it("hides cancel once every run has settled", () => {
+    mockRun = run({ validation: { verdict: "passed" }, cycles: [validationCycle] });
+    mockCriteria.data = { content: CRITERIA };
+    mockReport.data = { content: REPORT };
+
+    renderPage(undefined);
+
+    expect(screen.queryByRole("button", { name: /Cancel run/ })).not.toBeInTheDocument();
+  });
+
+  // A 503 means the workflow engine was unreachable and NOTHING was cancelled,
+  // so the failure has to say that rather than leave the reader assuming it took.
+  it("surfaces a failed cancel and says nothing was cancelled", () => {
+    mockValidation = "running";
+    mockRun = run({ cycles: [validationCycle] });
+    mockNewerRuns = [
+      { ...run({ cycles: [validationCycle] }), id: "run-live", origin: "revalidate", state: "running" },
+    ];
+    mockCancelError = new Error("the workflow engine is unavailable");
+
+    renderPage(undefined);
+
+    expect(screen.getByText(/Nothing was cancelled/)).toBeInTheDocument();
+  });
+});
+
 describe("ValidationPage across a milestone's runs", () => {
   // The incident run never validates, and settle stamps `skipped` on a succeeded
   // run that never did. Reading the newest run therefore sent a version that had
