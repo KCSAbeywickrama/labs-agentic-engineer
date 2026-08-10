@@ -43,6 +43,10 @@ vi.mock("../../builds/components/RunFeed", () => ({
 // Controllable status + runs + file queries (no QueryClientProvider / MSW).
 let mockValidation = "none";
 let mockRun: MilestoneRunView | undefined;
+// Runs NEWER than mockRun on the same milestone, newest first — list-build-runs
+// answers newest-first, so these sit ahead of it. A milestone accumulates runs
+// across its life and only some of them validate, which is what these exercise.
+let mockNewerRuns: MilestoneRunView[] = [];
 
 function run(over: {
   validation?: RunValidation;
@@ -130,7 +134,10 @@ vi.mock("../../builds/api/queries", () => ({
       ? {
           tag,
           milestoneNumber: 1,
-          runs: mockRun && tag === mockBuildVersion ? [mockRun] : [],
+          runs:
+            mockRun && tag === mockBuildVersion
+              ? [...mockNewerRuns, mockRun]
+              : [],
         }
       : undefined,
   }),
@@ -209,6 +216,7 @@ function renderPage(view: "logs" | undefined, onViewChange = vi.fn()) {
 afterEach(() => {
   mockValidation = "none";
   mockRun = undefined;
+  mockNewerRuns = [];
   mockBuildVersion = "v1";
   mockDeployVersion = "v1";
   mockCriteria.isPending = false;
@@ -216,6 +224,74 @@ afterEach(() => {
   mockCriteria.data = undefined;
   mockReport.isError = false;
   mockReport.data = undefined;
+});
+
+// A milestone sees SEQUENTIAL runs across its life and only some of them
+// validate, so "the newest run" is not this page's subject — "the newest run that
+// ASKED" is. These reproduce without any revalidation: an incident adoption alone
+// was enough to erase a version's validation record.
+describe("ValidationPage across a milestone's runs", () => {
+  // The incident run never validates, and settle stamps `skipped` on a succeeded
+  // run that never did. Reading the newest run therefore sent a version that had
+  // PASSED to the "not validated" empty state, and stopped the report being
+  // fetched at all.
+  it("keeps the verdict when a later incident run never validated", () => {
+    mockRun = run({
+      validation: { verdict: "passed", reportPath: "tests/validation/report.md" },
+      cycles: [validationCycle],
+    });
+    mockNewerRuns = [
+      {
+        ...run({ validation: { verdict: "skipped" } }),
+        id: "run-incident",
+        origin: "incident-adoption",
+      },
+    ];
+    mockCriteria.data = { content: "{}" };
+    mockReport.data = { content: "# report" };
+
+    renderPage(undefined);
+
+    expect(screen.queryByText(/This version was not validated/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/No validation has run yet/)).not.toBeInTheDocument();
+  });
+
+  // One feed per validating run, so the version reads as a chronology of attempts
+  // rather than only its latest. A revalidation is a second run on the milestone,
+  // and keying the feed to the newest run hid every earlier attempt's log.
+  it("feeds every validating run, not just the newest", () => {
+    mockValidation = "running";
+    mockRun = run({ cycles: [validationCycle] });
+    mockNewerRuns = [
+      {
+        ...run({ cycles: [validationCycle] }),
+        id: "run-revalidate",
+        origin: "revalidate",
+      },
+    ];
+
+    renderPage(undefined);
+
+    expect(screen.getAllByTestId("run-feed")).toHaveLength(2);
+  });
+
+  // The counterpart: a run with no validation cycle contributes no feed, so an
+  // incident adoption does not add an empty section to the version's story.
+  it("gives a non-validating run no feed of its own", () => {
+    mockValidation = "running";
+    mockRun = run({ cycles: [validationCycle] });
+    mockNewerRuns = [
+      {
+        ...run({}),
+        id: "run-incident",
+        origin: "incident-adoption",
+      },
+    ];
+
+    renderPage(undefined);
+
+    expect(screen.getAllByTestId("run-feed")).toHaveLength(1);
+  });
 });
 
 describe("ValidationPage lifecycle", () => {

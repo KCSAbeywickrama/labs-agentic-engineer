@@ -133,6 +133,32 @@ func TestBuildStage_IgnoresRunsOnOlderVersions(t *testing.T) {
 	}
 }
 
+// TestValidationStage_IncidentRunDoesNotEraseTheVerdict.
+//
+// This one needs no revalidation to reproduce, which is the point: an incident
+// adoption gets no validation cycle, and `settle` stamps `skipped` on a succeeded
+// run that never validated. So the newest run on a milestone routinely carries a
+// verdict meaning "I was never asked" — and reading it reported a version that had
+// genuinely PASSED as unvalidated. One adopted issue was enough.
+func TestValidationStage_IncidentRunDoesNotEraseTheVerdict(t *testing.T) {
+	t.Parallel()
+	build := specRun("v3", delivery.RunStateSucceeded)
+	build.ValidationVerdict = delivery.ValidationVerdictPassed
+	// An issue adopted into the delivered version's milestone afterwards. It never
+	// validates, so its own verdict is `skipped`.
+	incident := specRun("v3", delivery.RunStateSucceeded)
+	incident.Origin = delivery.RunOriginIncidentAdoption
+	incident.ValidationVerdict = delivery.ValidationVerdictSkipped
+
+	st := mustStatus(t, statusFixture{
+		runs:   []delivery.MilestoneRun{incident, build},
+		counts: map[string]int{"v3": 4},
+	})
+	if got := string(st.Deploy.Validation); got != delivery.ValidationVerdictPassed {
+		t.Errorf("validation = %q, want passed — an incident run never asked, so it cannot answer", got)
+	}
+}
+
 // TestValidationStage_FollowsTheNewestRunOnTheVersion is the other half: a
 // version CAN be re-judged, and the answer is then the later run's.
 //

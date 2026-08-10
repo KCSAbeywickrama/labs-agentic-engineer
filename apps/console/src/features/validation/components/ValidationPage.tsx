@@ -56,6 +56,17 @@ import { VerdictTile } from "./VerdictTile";
 // loop is the Builds page's story.
 const VALIDATION_CYCLE = ["validation"] as const;
 
+// The run origins that ask a version's acceptance criteria — the console's mirror
+// of delivery.RunValidates. A spec build validates the version it delivered, and a
+// revalidation exists to ask again; an incident adoption is absent on purpose,
+// because it fixes one thing in an already-judged version.
+//
+// It matters that this is an ORIGIN test and not "does the run have a validation
+// cycle": a spec build with no criteria authored settles `skipped` and opens no
+// cycle, and that is still the version's answer — the one the "not validated"
+// empty state below is written for.
+const VALIDATING_ORIGINS: readonly string[] = ["spec-build", "revalidate"];
+
 // StageTone → StatusTone. The two unions differ only in `ghost`, which the shared
 // validation mapper never returns; it is mapped for exhaustiveness only.
 const TONE_TO_STATUS: Record<StageTone, StatusTone> = {
@@ -133,21 +144,49 @@ export function ValidationPage({
   // previous version's report under a chip reading "Validating".
   const version = status.data?.build.version ?? "";
 
-  // The version's runs: the newest is the one that landed it, and its validation
-  // record is this page's subject.
+  // The version's runs, newest first. A milestone sees SEQUENTIAL runs across its
+  // life and only some of them validate, so "the newest run" is not this page's
+  // subject. TWO different questions are asked of that list, and conflating them is
+  // the bug this page had:
+  //
+  //   who OWNED the question  → by origin. Its verdict is the version's answer,
+  //                             including when the answer is `skipped` because no
+  //                             criteria were ever authored.
+  //   who ANSWERED it         → by cycles. Those carry the report and the logs.
+  //
+  // Keying both on the newest run meant one adopted issue erased a version's whole
+  // validation record: an incident adoption never validates, and settle stamps
+  // `skipped` on it, which sent a genuinely PASSED version to the "not validated"
+  // empty state and stopped the report being fetched at all. A revalidation is the
+  // same shape from the other side — it validates and nothing else, so the run that
+  // DELIVERED the version stops being the newest.
   const runs = useBuildRuns(projectName, version || undefined);
-  const run = runs.data?.runs?.[0];
+  const runList = runs.data?.runs ?? [];
+  // Origins that ask the question at all — delivery/RunValidates, in the console's
+  // terms. An incident run is deliberately absent: it fixes one thing in a version
+  // already judged, and re-validating the system for it would price every incident
+  // like a release.
+  const run = runList.find((r) => VALIDATING_ORIGINS.includes(r.origin));
   // The verdict VALUE drives every decision below. Deriving them from the chip's
   // rendered label instead (as this page used to) breaks silently the moment the
   // copy changes — and swapping in the shared mapper changes its casing.
   const rawVerdict = run?.validation?.verdict ?? "";
   const verdict = validationView(rawVerdict);
   const reportPath = run?.validation?.reportPath ?? "";
-  // The LAST validation cycle, not the first. A run can validate more than once —
-  // a failed attempt is repaired and re-validated — and the run's verdict is its
-  // latest attempt's. `find` returns the OLDEST match, which would pair attempt 1's
-  // merge commit (and so attempt 1's report) with attempt 2's verdict.
-  const validationCycle = run?.cycles?.filter((c) => c.kind === "validation").at(-1);
+  // Every run that actually produced an attempt, OLDEST first — the version's
+  // chronology. Separate from `run` above because a run can own the question
+  // without having answered it yet (a revalidation mid-flight), and because the
+  // attempts that matter may span several runs.
+  const attemptRuns = runList
+    .filter((r) => (r.cycles ?? []).some((c) => c.kind === "validation"))
+    .reverse();
+  // The LAST attempt across the whole version, not the first, and not the newest
+  // run's. A version can be judged more than once — a failed attempt is repaired
+  // and re-validated, and a revalidation asks again later — so pairing an older
+  // attempt's merge commit with the current verdict would show the wrong report.
+  const validationCycle = attemptRuns
+    .flatMap((r) => (r.cycles ?? []).filter((c) => c.kind === "validation"))
+    .at(-1);
   // The cycle carries the pull request's page as the webhook reported it. This
   // page used to build one from the project's repoUrl and the number, which is a
   // CLONE url — a `.git` suffix produced a link that 404s.
@@ -293,12 +332,25 @@ export function ValidationPage({
   // whatever spacing its children happened to carry: the report body got 24px from
   // ValidationView's own padding, the log feed got none, and the tile inset itself
   // — so the log sat 24px outside the tile and butted straight against it.
+  // One feed per validating run, OLDEST first, so the version reads as a
+  // chronology of attempts rather than only its latest.
+  //
+  // A feed per run rather than one stream over the milestone because the progress
+  // endpoint is run-keyed, and the cost of that is near zero here: a settled run's
+  // stream is finite — the server sends `done` and closes, and the client stops
+  // without reattaching — so every historical attempt opens briefly and closes,
+  // leaving at most ONE connection held open, since only the newest run can be live.
   const body = showLogs ? (
-    <RunFeed
-      projectName={projectName}
-      runId={run.id}
-      cycleKinds={VALIDATION_CYCLE}
-    />
+    <Stack spacing={2}>
+      {attemptRuns.map((r) => (
+        <RunFeed
+          key={r.id}
+          projectName={projectName}
+          runId={r.id}
+          cycleKinds={VALIDATION_CYCLE}
+        />
+      ))}
+    </Stack>
   ) : criteria.isPending || (!criteria.isError && !criteria.data) ? (
     <Box sx={{ display: "flex", justifyContent: "center", p: 6 }}>
       <CircularProgress aria-label="Loading validation report" />

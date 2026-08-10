@@ -232,7 +232,7 @@ func (s *Service) populateStages(ctx context.Context, orgName, projectName strin
 	// The report itself, and the per-cycle detail behind it, live on the version'"'"'s
 	// run story (list-build-runs), which is where the console'"'"'s validation surface
 	// reads them; validationUrl/validationIssue are therefore no longer served here.
-	state, err := s.validationStage(ctx, orgName, newestOnMilestone(runs, latest))
+	state, err := s.validationStage(ctx, orgName, newestValidatingOnMilestone(runs, latest))
 	if err != nil {
 		return err
 	}
@@ -285,20 +285,29 @@ func newestByOrigin(rows []delivery.MilestoneRun, origin string) *delivery.Miles
 	return nil
 }
 
-// newestOnMilestone returns the newest run working the same milestone as ref —
-// which is ref itself unless something later re-judged that version.
+// newestValidatingOnMilestone returns the newest run on ref's milestone that could
+// have produced a verdict — which is ref itself unless something later re-judged
+// that version.
 //
 // It exists because a version's answer and the version's BUILD can come from
 // different rows: the spec build delivers it, and a revalidation started
-// afterwards may hold a newer verdict for the very same milestone. Keyed on the
-// milestone number, which is the platform key; nil ref means there is no version
-// to answer about.
-func newestOnMilestone(rows []delivery.MilestoneRun, ref *delivery.MilestoneRun) *delivery.MilestoneRun {
+// afterwards may hold a newer verdict for the very same milestone.
+//
+// The ORIGIN filter is the load-bearing half, and it predates revalidation. An
+// incident adoption never validates, and `settle` stamps `skipped` on any
+// succeeded run that never did — so the newest run on a milestone is routinely one
+// whose verdict means "I was never asked". Returning it made a single adopted issue
+// report a genuinely passed version as unvalidated. RunValidates is delivery's own
+// answer to which origins ask the question, so this cannot drift from the loop.
+//
+// Keyed on the milestone number, which is the platform key; nil ref means there is
+// no version to answer about.
+func newestValidatingOnMilestone(rows []delivery.MilestoneRun, ref *delivery.MilestoneRun) *delivery.MilestoneRun {
 	if ref == nil {
 		return nil
 	}
 	for i := range rows {
-		if rows[i].MilestoneNumber == ref.MilestoneNumber {
+		if rows[i].MilestoneNumber == ref.MilestoneNumber && delivery.RunValidates(rows[i].Origin) {
 			return &rows[i]
 		}
 	}
