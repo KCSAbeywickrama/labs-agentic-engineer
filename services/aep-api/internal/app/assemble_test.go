@@ -84,8 +84,8 @@ func TestAssemble_MinimalConfigBuildsTheGraph(t *testing.T) {
 	if app.Handler == nil {
 		t.Fatal("assembled app has a nil Handler")
 	}
-	if len(app.Watchers) != 7 {
-		t.Fatalf("minimal watcher count = %d, want 7 (the unconditional watchers; reaper omitted with Fake nil Workspace)", len(app.Watchers))
+	if len(app.Watchers) != 8 {
+		t.Fatalf("minimal watcher count = %d, want 8 (the unconditional watchers; reaper omitted with Fake nil Workspace)", len(app.Watchers))
 	}
 	for i, w := range app.Watchers {
 		if w == nil {
@@ -95,19 +95,20 @@ func TestAssemble_MinimalConfigBuildsTheGraph(t *testing.T) {
 }
 
 // TestAssemble_WatcherRegistration pins the one remaining conditional watcher:
-// the run-supervisor worker rides on TEMPORAL_HOSTPORT. The base is 7 — Fake()
-// omits the disk reaper (nil Workspace); the event plane's reconcile sweep and
-// the cycle watcher are unconditional.
+// the run-supervisor worker rides on TEMPORAL_HOSTPORT. The base is 8 — Fake()
+// omits the disk reaper (nil Workspace); the event plane's reconcile AND build
+// sweeps, and the OpenChoreo pod-truth watcher, are all unconditional (no
+// longer gated on cluster-gateway-proxy).
 func TestAssemble_WatcherRegistration(t *testing.T) {
 	tests := []struct {
 		name   string
 		mutate func(*config.Config)
 		want   int
 	}{
-		{"base", func(*config.Config) {}, 7},
+		{"base", func(*config.Config) {}, 8},
 		{"+temporal adds the run worker", func(c *config.Config) {
 			c.Temporal.HostPort = "temporal:7233"
-		}, 8},
+		}, 9},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

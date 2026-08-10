@@ -119,5 +119,12 @@ func packedRef(gitDir, refName string) string {
 			return sha
 		}
 	}
+	// A line over the scanner's buffer ends the loop early, and "" is this
+	// function's "no such ref" answer — so an unread remainder would read as a
+	// definitive absence. Say which one it was.
+	if err := scanner.Err(); err != nil {
+		slog.Warn("reaper: packed-refs scan stopped early — ref treated as absent",
+			"gitDir", gitDir, "ref", refName, "error", err)
+	}
 	return ""
 }

@@ -185,14 +185,39 @@ func TestTextToProgressEvents(t *testing.T) {
 		t.Errorf("empty text → %d events, want 0", len(got))
 	}
 
+	// A pod log read that ends mid-envelope must not surface the fragment. The
+	// complete line before it still does.
+	cut := `{"schemaVersion":1,"seq":8,"kind":"phase","phase":"coding"}` + "\n" +
+		`{"schemaVersion":1,"ts":"2026-`
+	got, _ := textToProgressEvents(cut)
+	if len(got) != 1 {
+		t.Fatalf("truncated tail → %d events, want 1: %+v", len(got), got)
+	}
+	if got[0].Kind != "phase" {
+		t.Errorf("kept the wrong event: %+v", got[0])
+	}
+
 	// Over-cap input keeps the NEWEST window (live-tail freshness).
 	var b strings.Builder
 	for i := 0; i < defaultProgressLimit+50; i++ {
 		b.WriteString(`{"schemaVersion":1,"kind":"log","summary":"line"}` + "\n")
 	}
-	capped, _ := textToProgressEvents(b.String())
+	capped, cappedTruncated := textToProgressEvents(b.String())
 	if len(capped) != defaultProgressLimit {
 		t.Errorf("capped len = %d, want %d", len(capped), defaultProgressLimit)
+	}
+	if !cappedTruncated {
+		t.Error("an over-cap page must report truncated")
+	}
+	// …and it must SAY so, because nothing consumes the truncated flag.
+	if capped[0].Seq != seqHeadDropped || !strings.Contains(capped[0].Summary, "earlier line(s) omitted") {
+		t.Errorf("first event must be the omission marker, got %+v", capped[0])
+	}
+	if capped[0].Ts != "" {
+		t.Errorf("the marker must stay untimestamped so it cannot advance the cursor, got %q", capped[0].Ts)
+	}
+	if last := capped[len(capped)-1]; last.Seq == seqHeadDropped {
+		t.Error("the marker belongs at the head of the window, not the tail")
 	}
 }
 
@@ -653,5 +678,68 @@ func TestCycleProgress_OpenEmptyLiveOnTerminalPodFallsThroughToArchive(t *testin
 	}
 	if len(resp.Lines) != 1 || resp.Lines[0].Summary != "archived after succeeded pod" {
 		t.Fatalf("unexpected lines: %+v", resp.Lines)
+	}
+}
+
+// TestDropTruncatedTail pins exactly which trailing lines are treated as cut
+// mid-write. The rule has to be narrow: dropping a complete final line would
+// lose the runner's terminal `result` event, which is how the feed reports the
+// run's outcome.
+func TestDropTruncatedTail(t *testing.T) {
+	t.Parallel()
+
+	const envelope = `{"schemaVersion":1,"seq":1,"kind":"phase","phase":"coding"}`
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"newline-terminated is always complete", envelope + "\n", envelope + "\n"},
+		{"unterminated but valid envelope is kept", envelope, envelope},
+		{"unterminated prose is kept", "[oneshot] materialised 3 skill(s)", "[oneshot] materialised 3 skill(s)"},
+		{"unterminated brace-less JSON-ish text is kept", `result: {"ok":true`, `result: {"ok":true`},
+		{"mid-envelope cut is dropped", envelope + "\n" + `{"schemaVersion":1,"ts":"2026-`, envelope + "\n"},
+		{"a lone fragment leaves nothing", `{"schemaVersion":1,"ts":"2026-`, ""},
+		{
+			"k8s timestamp prefix does not hide the cut",
+			"2026-08-07T08:20:30.880659137Z " + `{"schemaVersion":1,"ts":"2026-`,
+			"",
+		},
+		{
+			"a complete final line keeps its terminal result",
+			`{"schemaVersion":1,"seq":9,"kind":"result","usage":{"inputTokens":1}}`,
+			`{"schemaVersion":1,"seq":9,"kind":"result","usage":{"inputTokens":1}}`,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := dropTruncatedTail(tc.in); got != tc.want {
+				t.Errorf("dropTruncatedTail(%q)\n got %q\nwant %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestTextToProgressEventsSurfacesScanFailure pins that a line past the scanner
+// buffer names itself in the feed. It used to end the scan silently, dropping
+// the rest of the page with no signal to the reader.
+func TestTextToProgressEventsSurfacesScanFailure(t *testing.T) {
+	t.Parallel()
+
+	huge := `{"schemaVersion":1,"kind":"log","summary":"` + strings.Repeat("x", 2*1024*1024) + `"}`
+	text := `{"schemaVersion":1,"seq":1,"kind":"phase","phase":"coding"}` + "\n" + huge + "\n" +
+		`{"schemaVersion":1,"seq":2,"kind":"phase","phase":"done"}` + "\n"
+
+	events, truncated := textToProgressEvents(text)
+	if !truncated {
+		t.Error("a scan that stopped early must report truncated")
+	}
+	if len(events) == 0 {
+		t.Fatal("no events")
+	}
+	last := events[len(events)-1]
+	if last.Kind != "log" || !strings.Contains(last.Summary, "size cap") {
+		t.Errorf("last event must name the dropped page, got %+v", last)
 	}
 }

@@ -32,6 +32,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"github.com/wso2/aep/aep-api/internal/platform/text"
 	"net/http"
 	"strings"
 	"time"
@@ -56,7 +57,7 @@ import (
 //
 // Each WP-Secret-cleanup concern (build, anthropic, future providers)
 // has its own narrowly-typed interface so cred services only depend on
-// what they own. See docs/design/anthropic-key-dual-token.md §S5.
+// what they own.
 type BuildSecretCleaner interface {
 	DeleteBuildSecretsForOrg(ctx context.Context, ocOrgID string) error
 }
@@ -278,10 +279,10 @@ func generateRandomHex(byteLen int) (string, error) {
 	return hex.EncodeToString(buf), nil
 }
 
+// truncateForError bounds an upstream error body for a user-visible message.
+// The result lands in ValidationError.Message, which the console shows
+// verbatim, so it is flattened to one line; text.Truncate owns the rune-safe
+// cut (see its doc for why a byte cut is not safe here).
 func truncateForError(b []byte) string {
-	s := string(b)
-	if len(s) > 200 {
-		s = s[:200] + "…"
-	}
-	return strings.ReplaceAll(s, "\n", " ")
+	return strings.ReplaceAll(text.Truncate(string(b), 200), "\n", " ")
 }

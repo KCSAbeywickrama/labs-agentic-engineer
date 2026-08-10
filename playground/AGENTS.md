@@ -99,7 +99,35 @@ agent, which is an AI SDK model call with no other way to authenticate. The
 gets the key (a container reaches no credential store), while `--host` withholds
 it and lets the SDK use the developer's own credentials — the ones `claude login`
 wrote — so a local tuning loop bills your subscription, not the platform's key.
-`code --host --api-key` opts back into key auth. Skills load from the
+`code --host --api-key` opts back into key auth.
+
+`AEP_CODING_ANTHROPIC_KEY` bills **coding** runs to a separate credential — the
+local half of the platform's per-org coding-agent key (ADR-0016). It takes
+either a Console API key (`sk-ant-api…`) or a `claude setup-token` OAuth token
+(`sk-ant-oat…`, which bills a Claude subscription instead of API credits), and
+the prefix decides which. Either credential satisfies docker mode's pre-flight.
+
+It changes WHICH credential is used, not WHETHER one is:
+
+| invocation | credential |
+|---|---|
+| `code` (docker) | `AEP_CODING_ANTHROPIC_KEY`, else `ANTHROPIC_API_KEY` |
+| `code --host --api-key` | `AEP_CODING_ANTHROPIC_KEY`, else `ANTHROPIC_API_KEY` |
+| `code --host` | none — your own `claude login` |
+
+Docker needs no flag because a container reaches no keychain to fall back to.
+Host mode still requires `--api-key`: defining a variable is not the same act as
+asking this run to authenticate with it, and a bypassPermissions process on your
+own filesystem should not pick up a shared credential because a file elsewhere
+happened to define one.
+
+An API key arrives as `ANTHROPIC_API_KEY`, an OAuth token as
+`CLAUDE_CODE_OAUTH_TOKEN` — and the run gets **exactly one of them**, same as in
+production. That exclusivity is load-bearing: Claude Code ranks
+`ANTHROPIC_API_KEY` above `CLAUDE_CODE_OAUTH_TOKEN`, so a run holding both would
+authenticate with the API key and ignore the token silently.
+
+Skills load from the
 working-tree `skills/` on EVERY turn — edits apply next run, no rebuild. That now
 covers the coding run's own workflow skill and its local-mode overlay too: the
 library is mounted over the image's `/app/skills`, so `aep/SKILL.md` and

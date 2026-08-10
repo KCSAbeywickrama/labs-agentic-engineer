@@ -28,6 +28,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"github.com/wso2/aep/aep-api/internal/platform/text"
 	"io"
 	"net/http"
 	"strings"
@@ -259,11 +260,7 @@ func parseRSAPrivateKey(pemBytes []byte) (*rsa.PrivateKey, error) {
 // truncateBody bounds error-message body so we don't dump multi-MB
 // responses into logs. 200 chars is enough for GitHub's structured errors.
 func truncateBody(body []byte) string {
-	s := string(body)
-	if len(s) > 200 {
-		s = s[:200] + "…"
-	}
-	return strings.ReplaceAll(s, "\n", " ")
+	return strings.ReplaceAll(text.Truncate(string(body), 200), "\n", " ")
 }
 
 // LoadAppWebhookSecrets reads the App-wide webhook secret list from the

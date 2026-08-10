@@ -823,6 +823,41 @@ func TestValidationCycle_EachAttemptRecordsAgainstItsOwnCycle(t *testing.T) {
 	require.Equal(t, delivery.ValidationVerdictPassed, h.verdictWrites[1].Verdict)
 }
 
+// A `skipped` verdict belongs to NO cycle, and both places that write it are
+// reached with l.cycleID still holding the last CODING cycle's id — there is no
+// validation cycle to name, because none was opened.
+//
+// The cycle write is write-once, so an id sent here would put a validation verdict
+// on a coding row permanently, contradicting RunCycle.ValidationVerdict (documented
+// empty on every other kind) and CycleView, which publishes the field as a
+// validation-cycle property.
+func TestSkippedVerdict_BelongsToNoCycle(t *testing.T) {
+	for name, origin := range map[string]string{
+		// Decided before a validation cycle opens: the project has no oracle.
+		"no acceptance oracle": delivery.RunOriginSpecBuild,
+		// Decided in settle: an incident run never reaches validation at all, so it
+		// arrives at the end with an empty verdict.
+		"validation never reached": delivery.RunOriginIncidentAdoption,
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			h.milestoneIs(MilestoneSnapshot{Work: 1, Total: 1}, MilestoneSnapshot{})
+			h.merges(1)
+
+			h.run(origin, 0)
+			res := h.result(t)
+
+			h.assertSettled(t, res, delivery.RunStateSucceeded, "")
+			require.Equal(t, delivery.ValidationVerdictSkipped, res.ValidationVerdict)
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			require.Len(t, h.verdictWrites, 1, "the verdict is written once")
+			require.Empty(t, h.verdictWrites[0].CycleID,
+				"skipped was stamped onto the last coding cycle's row")
+		})
+	}
+}
+
 // TestIncidentRun_GetsNoValidationCycle pins the origin split: an incident fixes
 // one thing in an already-validated version, and re-validating the whole system
 // for it would price every incident like a release.

@@ -18,11 +18,13 @@ package codingagent
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/google/uuid"
 
+	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/delivery"
 	"github.com/wso2/aep/aep-api/internal/organization"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
@@ -51,16 +53,18 @@ func (f fakeOrgRepo) SetThunderOrgUUID(context.Context, string, uuid.UUID) error
 	return nil
 }
 
-type fakeAnthropicCreds struct {
-	row *organization.OrgAnthropicCredential
+// fakeCodingKey stands in for the organization domain's answer to "which
+// Anthropic credential does this org's coding run bill". WHICH key that is —
+// the coding override or the default — is decided and tested in the
+// organization package (TestResolveCodingSecretRef_*); dispatch's job is only
+// to mount whatever it is handed, and to abort when nothing can be handed to it.
+type fakeCodingKey struct {
+	ref organization.SecretRefTriplet
+	err error
 }
 
-func (f fakeAnthropicCreds) GetByOrg(context.Context, string) (*organization.OrgAnthropicCredential, error) {
-	return f.row, nil
-}
-func (f fakeAnthropicCreds) UpdateColumns(context.Context, string, map[string]any) error { return nil }
-func (f fakeAnthropicCreds) Tx(context.Context, func(organization.OrgAnthropicTx) error) error {
-	return nil
+func (f fakeCodingKey) ResolveCodingSecretRef(context.Context, string) (organization.SecretRefTriplet, error) {
+	return f.ref, f.err
 }
 
 type fakeGitHubCreds struct {
@@ -85,15 +89,13 @@ func (f fakeGitHubCreds) Tx(context.Context, func(organization.OrgCredentialTx) 
 	return nil
 }
 
-func fullSecretRefs() (*organization.OrgAnthropicCredential, *organization.OrgCredential) {
-	return &organization.OrgAnthropicCredential{
-			SecretRefName:      strPtr("acme-anthropic-secrets"),
-			SecretRefKVPath:    strPtr("user-app-secrets/wc-acme/acme-anthropic-secrets"),
-			SecretRefProperty:  strPtr("api-key"),
-			SMAPISecretRefName: strPtr("acme-anthropic-secrets"),
-			SMAPIKVPath:        strPtr("user-app-secrets/wc-acme/acme-anthropic-secrets"),
-			SMAPIProperty:      strPtr("api-key"),
-		}, &organization.OrgCredential{
+func fullSecretRefs() (fakeCodingKey, *organization.OrgCredential) {
+	return fakeCodingKey{ref: organization.SecretRefTriplet{
+			Name:     "acme-anthropic-secrets",
+			KVPath:   "user-app-secrets/wc-acme/acme-anthropic-secrets",
+			Property: "api-key",
+			EnvVar:   "ANTHROPIC_API_KEY",
+		}}, &organization.OrgCredential{
 			SecretRefName:      strPtr("acme-github-pat-secrets"),
 			SecretRefKVPath:    strPtr("user-app-secrets/wc-acme/acme-github-pat-secrets"),
 			SecretRefProperty:  strPtr("token"),
@@ -103,7 +105,7 @@ func fullSecretRefs() (*organization.OrgAnthropicCredential, *organization.OrgCr
 		}
 }
 
-func newCodingDispatchExecutor(anthropic *organization.OrgAnthropicCredential, github *organization.OrgCredential) *CodingExecutor {
+func newCodingDispatchExecutor(anthropic fakeCodingKey, github *organization.OrgCredential) *CodingExecutor {
 	orgUUID := uuid.MustParse("d3adbeef-1234-4321-abcd-c0ffee123456")
 	return NewCodingExecutor(
 		nil,
@@ -114,7 +116,7 @@ func newCodingDispatchExecutor(anthropic *organization.OrgAnthropicCredential, g
 		"http://git",
 		"http://platform",
 		fakeOrgRepo{org: &organization.Organization{Name: "acme", UUID: orgUUID}},
-		fakeAnthropicCreds{row: anthropic},
+		anthropic,
 		fakeGitHubCreds{row: github},
 		nil,
 	)
@@ -155,6 +157,89 @@ func TestDispatch_OCPathDispatchesThroughOpenChoreo(t *testing.T) {
 	}
 	if rec.create.Name != runName {
 		t.Errorf("component name %q != returned run name %q", rec.create.Name, runName)
+	}
+}
+
+// anthropicSecretEnv returns the Anthropic entry of a dispatched Workload's
+// secret env — the one whose ValueFrom names the Anthropic SecretReference —
+// so a test can assert which env var name it was mounted under.
+func anthropicSecretEnv(t *testing.T, in openchoreo.WorkloadInput, secretRefName string) openchoreo.WorkflowEnvVarRef {
+	t.Helper()
+	for _, ev := range in.Env {
+		if ev.ValueFrom != nil && ev.ValueFrom.SecretKeyRef != nil && ev.ValueFrom.SecretKeyRef.Name == secretRefName {
+			return ev
+		}
+	}
+	t.Fatalf("no secret env entry found for secretRef %q in %+v", secretRefName, in.Env)
+	return openchoreo.WorkflowEnvVarRef{}
+}
+
+// TestDispatch_AnthropicAPIKey_MountsAsAnthropicAPIKeyEnvVar pins ADR-0016's
+// rule for the OC path: a Console API key credential rides the Job as
+// ANTHROPIC_API_KEY, named by the resolver's EnvVar rather than hardcoded here.
+func TestDispatch_AnthropicAPIKey_MountsAsAnthropicAPIKeyEnvVar(t *testing.T) {
+	rec := &chainRecorder{}
+	anthropic, github := fullSecretRefs()
+	anthropic.ref.EnvVar = "ANTHROPIC_API_KEY"
+	e := newCodingDispatchExecutor(anthropic, github)
+	e.WithOCDispatch(NewOCDispatcher(rec.client()).WithImage("ghcr.io/wso2/aep/remote-worker:latest"))
+
+	if _, err := e.Dispatch(context.Background(), codingMilestoneDispatch()); err != nil {
+		t.Fatalf("Dispatch: %v", err)
+	}
+	ev := anthropicSecretEnv(t, rec.load, anthropic.ref.Name)
+	if ev.Key != "ANTHROPIC_API_KEY" {
+		t.Errorf("anthropic env key = %q, want ANTHROPIC_API_KEY", ev.Key)
+	}
+}
+
+// TestDispatch_AnthropicOAuthToken_MountsAsClaudeCodeOAuthTokenEnvVar pins the
+// other half of ADR-0016's rule: a Claude Code OAuth credential rides the Job
+// as CLAUDE_CODE_OAUTH_TOKEN, never alongside ANTHROPIC_API_KEY (Claude Code
+// ranks the API key above the token, so mounting both would silently ignore
+// the org's OAuth choice).
+func TestDispatch_AnthropicOAuthToken_MountsAsClaudeCodeOAuthTokenEnvVar(t *testing.T) {
+	rec := &chainRecorder{}
+	anthropic, github := fullSecretRefs()
+	anthropic.ref.EnvVar = "CLAUDE_CODE_OAUTH_TOKEN"
+	e := newCodingDispatchExecutor(anthropic, github)
+	e.WithOCDispatch(NewOCDispatcher(rec.client()).WithImage("ghcr.io/wso2/aep/remote-worker:latest"))
+
+	if _, err := e.Dispatch(context.Background(), codingMilestoneDispatch()); err != nil {
+		t.Fatalf("Dispatch: %v", err)
+	}
+	ev := anthropicSecretEnv(t, rec.load, anthropic.ref.Name)
+	if ev.Key != "CLAUDE_CODE_OAUTH_TOKEN" {
+		t.Errorf("anthropic env key = %q, want CLAUDE_CODE_OAUTH_TOKEN", ev.Key)
+	}
+	for _, other := range rec.load.Env {
+		if other.Key == "ANTHROPIC_API_KEY" {
+			t.Errorf("ANTHROPIC_API_KEY must not also be mounted alongside an OAuth token, got %+v", other)
+		}
+	}
+}
+
+// TestDispatch_UnresolvableAnthropicKey_ErrorsNoFallback: a run whose
+// Anthropic credential cannot be resolved must not quietly dispatch with no
+// key mounted — the OC path is the only path, so a resolver failure aborts
+// the dispatch and nothing is created.
+func TestDispatch_UnresolvableAnthropicKey_ErrorsNoFallback(t *testing.T) {
+	rec := &chainRecorder{}
+	_, github := fullSecretRefs()
+	anthropic := fakeCodingKey{err: errors.New(
+		"coding-agent Anthropic key for org \"acme\" is configured but secret_ref_kv_path is not populated")}
+	e := newCodingDispatchExecutor(anthropic, github)
+	e.WithOCDispatch(NewOCDispatcher(rec.client()).WithImage("ghcr.io/wso2/aep/remote-worker:latest"))
+
+	_, err := e.Dispatch(context.Background(), codingMilestoneDispatch())
+	if err == nil {
+		t.Fatal("expected error when the anthropic secret ref cannot be resolved")
+	}
+	if !strings.Contains(err.Error(), "Anthropic") || !strings.Contains(err.Error(), "secret_ref_kv_path") {
+		t.Fatalf("error must carry the resolver's diagnosis, got: %v", err)
+	}
+	if len(rec.calls) != 0 {
+		t.Errorf("nothing may be created before the refs resolve, saw %v", rec.calls)
 	}
 }
 
@@ -205,19 +290,21 @@ func TestDispatch_ValidationCycleDispatchesOnOCPath(t *testing.T) {
 
 // TestDispatch_OCPathStillRequiresTheOrgsSecretRefs: refs-only means the run
 // cannot start without them, and the message must name which one is missing.
+// (The Anthropic side's equivalent — a resolver that cannot answer — is
+// TestDispatch_UnresolvableAnthropicKey_ErrorsNoFallback below.)
 func TestDispatch_OCPathStillRequiresTheOrgsSecretRefs(t *testing.T) {
 	rec := &chainRecorder{}
 	anthropic, github := fullSecretRefs()
-	anthropic.SecretRefName = nil
-	anthropic.SMAPISecretRefName = nil
+	github.SecretRefName = nil
+	github.SMAPISecretRefName = nil
 	e := newCodingDispatchExecutor(anthropic, github)
 	e.WithOCDispatch(NewOCDispatcher(rec.client()).WithImage("runner:1"))
 
 	_, err := e.Dispatch(context.Background(), codingMilestoneDispatch())
 	if err == nil {
-		t.Fatal("expected an error when the anthropic secret ref is missing")
+		t.Fatal("expected an error when the github secret ref is missing")
 	}
-	if !strings.Contains(err.Error(), "anthropic") {
+	if !strings.Contains(err.Error(), "github") {
 		t.Errorf("error must name the missing credential, got %v", err)
 	}
 	if len(rec.calls) != 0 {

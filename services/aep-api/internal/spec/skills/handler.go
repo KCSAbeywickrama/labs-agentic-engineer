@@ -17,8 +17,10 @@
 package skills
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"sort"
@@ -121,10 +123,24 @@ func (h *Handler) ImportSkill(ctx context.Context, request gen.ImportSkillReques
 	if err != nil {
 		return nil, err
 	}
-	// Cap the bytes handed to the import service to the legacy upload
-	// ceiling; the service applies its own decompressed-payload budget.
-	var reader io.Reader = io.LimitReader(file, skillImportMaxUploadBytes)
-	result, err := h.imp.Import(ctx, org, org, reader)
+	// Bound the upload to the legacy ceiling, then REJECT an overage rather than
+	// importing a prefix of it. io.LimitReader ends a capped read with io.EOF,
+	// which is indistinguishable from the end of a small file, so capping alone
+	// handed the importer a truncated tarball: the user got "not a valid gzip
+	// stream" or "read tar: unexpected EOF" for what was only an oversized file.
+	// The service's own importMaxBytes budget does not cover this — it bounds the
+	// DECOMPRESSED payload, so a 4.1MiB upload never reaches it intact.
+	// Reading one byte past the ceiling is what makes the overage visible; same
+	// pattern as spec_collect.go's fetch.
+	body, err := io.ReadAll(io.LimitReader(file, skillImportMaxUploadBytes+1))
+	if err != nil {
+		return nil, apierr.BadRequest("read upload: " + err.Error())
+	}
+	if len(body) > skillImportMaxUploadBytes {
+		return nil, apierr.BadRequest(fmt.Sprintf(
+			"skill archive exceeds the %d MiB upload limit", skillImportMaxUploadBytes>>20))
+	}
+	result, err := h.imp.Import(ctx, org, org, bytes.NewReader(body))
 	if err != nil {
 		return nil, mapSkillError(err)
 	}

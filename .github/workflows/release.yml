@@ -22,6 +22,12 @@ jobs:
     name: Build + push ${{ matrix.name }}
     if: ${{ inputs.component == 'platform' || inputs.component == 'all' }}
     runs-on: ubuntu-latest
+    # Generous because remote-worker is the outlier: it cannot cross-compile (see
+    # its Dockerfile) so its arm64 half stays emulated, and a cold build of it has
+    # been measured at 28 min. The ceiling is here to catch a wedged build rather
+    # than let it hold a runner slot for the GitHub 6h default, not to enforce a
+    # budget — raise it rather than trim it if a build legitimately grows.
+    timeout-minutes: 45
     permissions:
       contents: read
       packages: write
@@ -82,8 +88,17 @@ jobs:
           tags: |
             ${{ env.IMAGE_PREFIX }}/${{ matrix.name }}:${{ inputs.version }}
             ${{ env.IMAGE_PREFIX }}/${{ matrix.name }}:latest
-          cache-from: type=gha,scope=${{ matrix.name }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+          # Registry cache rather than type=gha. The Actions cache is capped at
+          # 10 GB per repository and CI's own entries already fill it, so eight
+          # images x two platforms of mode=max layers were evicted by LRU between
+          # releases and every release rebuilt from scratch. GHCR has no such cap.
+          #
+          # Kept under a buildcache/ prefix so it is not a tag on the released
+          # package. mode=max caches the builder stages, which is where the time
+          # goes — and therefore publishes those intermediate layers, so no build
+          # stage may hold a secret.
+          cache-from: type=registry,ref=${{ env.IMAGE_PREFIX }}/buildcache/${{ matrix.name }}:main
+          cache-to: type=registry,ref=${{ env.IMAGE_PREFIX }}/buildcache/${{ matrix.name }}:main,mode=max
 
   # ─── Platform: package + push Helm charts ───────────────────────────────────
   package-push-charts:
@@ -91,6 +106,7 @@ jobs:
     if: ${{ inputs.component == 'platform' || inputs.component == 'all' }}
     needs: build-push-images
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
       packages: write
@@ -159,6 +175,7 @@ jobs:
     if: ${{ inputs.component == 'platform' || inputs.component == 'all' }}
     needs: package-push-charts
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write
     steps:
@@ -198,6 +215,7 @@ jobs:
     name: Build aep binary (${{ matrix.goos }}/${{ matrix.goarch }})
     if: ${{ inputs.component == 'ctl' || inputs.component == 'all' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -243,6 +261,7 @@ jobs:
     if: ${{ inputs.component == 'ctl' || inputs.component == 'all' }}
     needs: build-ctl-binaries
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write
     steps:

@@ -42,6 +42,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -80,6 +81,13 @@ const (
 	seqBootBackoff    = -12 // ImagePullBackOff / ErrImagePull (pull retrying)
 	seqBootConfig     = -13 // CreateContainerConfigError / secrets not yet materialised
 	seqBootStarting   = -14 // container Running, agent has not emitted its first line
+
+	// seqHeadDropped marks the "earlier output omitted" row; seqScanTruncated the
+	// "line over the size cap" one. Same stable-negative contract as the bootstrap
+	// seqs above, for the same dedup reason: both are re-derived on every poll and
+	// must collapse to one row rather than accumulate.
+	seqHeadDropped   = -20
+	seqScanTruncated = -21
 )
 
 // seqLogsUnavailable is the stable seq of the "logs are gone" line. It sits in
@@ -420,6 +428,7 @@ func textToProgressEvents(text string) ([]contracts.ProgressEvent, bool) {
 	// structured envelope fields alike. See redact.go for why this runs even
 	// though the runner already scrubs at the source.
 	text = redactSecrets(text)
+	text = dropTruncatedTail(text)
 	out := make([]contracts.ProgressEvent, 0, 256)
 	scanner := bufio.NewScanner(strings.NewReader(text))
 	// Allow long lines — agent output occasionally dumps long JSON blobs that
@@ -436,10 +445,72 @@ func textToProgressEvents(text string) ([]contracts.ProgressEvent, bool) {
 		}
 		out = append(out, ev)
 	}
-	if len(out) > defaultProgressLimit {
-		return out[len(out)-defaultProgressLimit:], true
+	// A line past the buffer cap stops Scan() early and would drop the whole
+	// REST of the page with no signal — the feed would just go quiet mid-run.
+	// Name it in the stream instead. (Sibling: usageFromLog.)
+	scanFailed := scanner.Err() != nil
+	if scanFailed {
+		slog.Warn("codingagent.textToProgressEvents: log scan stopped early — rest of page dropped", "error", scanner.Err())
+		out = append(out, contracts.ProgressEvent{
+			Kind:          "log",
+			SchemaVersion: progressSchemaVersion,
+			Seq:           seqScanTruncated,
+			Summary:       "… an agent log line exceeded the reader's size cap; the rest of this page was skipped",
+		})
 	}
-	return out, false
+	if len(out) > defaultProgressLimit {
+		// Keeping the NEWEST window is right, but dropping the rest in silence is
+		// not: a fresh attach to a long finished run showed its last 200 events
+		// with nothing to say the run had started earlier. Truncated carries that
+		// fact on the response and no reader has ever consumed it (no wire field,
+		// no console branch), so say it in the feed — the same way the scanner
+		// overflow above does.
+		kept := out[len(out)-(defaultProgressLimit-1):]
+		return append([]contracts.ProgressEvent{headDroppedEvent(len(out) - len(kept))}, kept...), true
+	}
+	return out, scanFailed
+}
+
+// headDroppedEvent is the "earlier output omitted" row. Its seq is stable and
+// negative for the same reason the bootstrap seqs are: the console dedups by
+// (cycle, seq), positive seqs belong to the runner, and Ts is left empty so the
+// marker never advances the cursor past a line the reader has not seen.
+func headDroppedEvent(dropped int) contracts.ProgressEvent {
+	return contracts.ProgressEvent{
+		SchemaVersion: progressSchemaVersion,
+		Seq:           seqHeadDropped,
+		Kind:          "log",
+		Summary:       fmt.Sprintf("… %d earlier line(s) omitted — showing the most recent %d", dropped, defaultProgressLimit-1),
+	}
+}
+
+// dropTruncatedTail removes a trailing partial line — one the source cut
+// mid-write rather than finished.
+//
+// Only an UNTERMINATED final line can be partial (a newline means the writer
+// completed it), and among those only one that opens a JSON envelope it never
+// closes is unambiguously a fragment. That pair of conditions is what keeps the
+// rule safe: complete prose lines (bootstrap output, stray library writes) and
+// complete envelopes both still reach the feed, including a final line the pod
+// wrote without a trailing newline — the runner's terminal `result` among them,
+// which is how the feed reports the run's outcome. (Token usage is NOT at stake
+// here: usageFromLog parses the raw captured body, not this function's output.)
+//
+// Without this, parseProgressLine falls back to wrapping the raw bytes as a
+// `log` event and the console renders `{"schemaVersion":1,"ts":"2026-` verbatim.
+// Live tails re-read the line whole on the next poll; a captured snapshot loses
+// only bytes that were never parseable.
+func dropTruncatedTail(text string) string {
+	if strings.HasSuffix(text, "\n") {
+		return text
+	}
+	nl := strings.LastIndexByte(text, '\n')
+	_, msg := splitTimestampPrefix(text[nl+1:]) // nl == -1 → the whole text
+	trimmed := strings.TrimSpace(msg)
+	if trimmed == "" || trimmed[0] != '{' || json.Valid([]byte(trimmed)) {
+		return text
+	}
+	return text[:nl+1]
 }
 
 // parseProgressLine decodes one runner NDJSON envelope. Non-JSON lines, or lines

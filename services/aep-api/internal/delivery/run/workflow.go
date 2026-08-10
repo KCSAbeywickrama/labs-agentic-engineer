@@ -351,8 +351,10 @@ func (l *loop) runValidation(ctx workflow.Context) (settled bool, res RunResult,
 		return true, l.result(), err
 	}
 	if issue == 0 {
-		// No acceptance oracle — nothing to validate, which is itself a verdict.
-		if err := l.setVerdict(ctx, delivery.ValidationVerdictSkipped); err != nil {
+		// No acceptance oracle — nothing to validate, which is itself a verdict. It
+		// belongs to no cycle: none has been opened, and l.cycleID is still the last
+		// coding cycle's.
+		if err := l.setVerdict(ctx, noCycle, delivery.ValidationVerdictSkipped); err != nil {
 			return true, l.result(), err
 		}
 		res, err = l.settle(ctx, delivery.RunStateSucceeded, "")
@@ -388,7 +390,9 @@ func (l *loop) runValidation(ctx workflow.Context) (settled bool, res RunResult,
 	if err != nil {
 		return true, l.result(), err
 	}
-	if err := l.setVerdict(ctx, out.Verdict); err != nil {
+	// The one verdict a cycle owns: l.cycleID is the validation cycle runCycle just
+	// closed, and out.Verdict was derived from the report at its own merge commit.
+	if err := l.setVerdict(ctx, l.cycleID, out.Verdict); err != nil {
 		return true, l.result(), err
 	}
 	// Which verdicts are fatal, and under which reason, is delivery's to say — one
@@ -472,8 +476,9 @@ func (l *loop) settle(ctx workflow.Context, state, reason string) (RunResult, er
 	if state == delivery.RunStateSucceeded {
 		if l.st.ValidationVerdict == "" {
 			// "The run finished and did not validate" is an honest verdict; an
-			// empty one would read as "not yet".
-			if err := l.setVerdict(ctx, delivery.ValidationVerdictSkipped); err != nil {
+			// empty one would read as "not yet". An empty verdict here means no
+			// validation cycle ever produced one, so it belongs to no cycle.
+			if err := l.setVerdict(ctx, noCycle, delivery.ValidationVerdictSkipped); err != nil {
 				return l.result(), err
 			}
 		}
@@ -586,14 +591,29 @@ func (l *loop) bump(ctx workflow.Context, counter delivery.RunBudget) error {
 		BumpRunBudgetInput{RunID: l.in.RunID, Counter: string(counter)}).Get(ctx, nil)
 }
 
-// setVerdict records the verdict and the issue that produced it in one write. The
-// issue is persisted because it otherwise lives only here, in workflow state — so
-// once Temporal retention lapses a settled run would carry a verdict with no way
+// noCycle is the cycle id for a verdict that belongs to no cycle. Named rather
+// than written as a bare "" at the call sites, because which verdicts have a
+// cycle behind them is the whole point of the argument.
+const noCycle = ""
+
+// setVerdict records the verdict and the issue that produced it in one write: on
+// the run always, and on a cycle only when that cycle is the attempt the verdict
+// came from.
+//
+// cycleID is a PARAMETER rather than a read of l.cycleID, because the loop's
+// current cycle is not always the verdict's source. `skipped` is decided in two
+// places that have no validation cycle at all — before one is opened, and in
+// settle — and at both of them l.cycleID still holds the last CODING cycle's id.
+// Writing there would contradict RunCycle.ValidationVerdict, documented as empty
+// on every other kind, and the cycle write is write-once, so it would be permanent.
+//
+// The issue is persisted because it otherwise lives only here, in workflow state —
+// so once Temporal retention lapses a settled run would carry a verdict with no way
 // back to the criteria, the pull request, or the runner's own summary.
-func (l *loop) setVerdict(ctx workflow.Context, verdict string) error {
+func (l *loop) setVerdict(ctx workflow.Context, cycleID, verdict string) error {
 	if err := workflow.ExecuteActivity(activityCtx(ctx), (*Activities).SetValidationVerdict,
 		SetValidationVerdictInput{
-			RunID: l.in.RunID, CycleID: l.cycleID, Verdict: verdict, Issue: l.st.ValidationIssue,
+			RunID: l.in.RunID, CycleID: cycleID, Verdict: verdict, Issue: l.st.ValidationIssue,
 		}).Get(ctx, nil); err != nil {
 		return err
 	}

@@ -56,14 +56,16 @@ type CodingExecutor struct {
 	// cycle in the milestone's own project.
 	ocJobs *OCDispatcher
 
-	// Org-scoped repository reads, always wired at the composition root: the
-	// per-org Anthropic/GitHub SM-API triplets + IDP publisher profile the
-	// Workload's secret-env refs are built from, and the org lookup for the
-	// data-plane UUID.
-	orgs           organization.OrganizationRepository
-	anthropicCreds organization.OrgAnthropicRepository
-	githubCreds    organization.OrgCredentialRepository
-	idpProfiles    organization.IDPRepository
+	// Org-scoped reads, always wired at the composition root: the per-org
+	// GitHub SM-API triplet + IDP publisher profile the Workload's secret-env
+	// refs are built from, and the org lookup for the data-plane UUID. The
+	// Anthropic side goes through a resolver rather than a repository because
+	// WHICH of the org's two possible keys a run bills is a domain decision,
+	// not a row lookup.
+	orgs         organization.OrganizationRepository
+	anthropicKey CodingKeyResolver
+	githubCreds  organization.OrgCredentialRepository
+	idpProfiles  organization.IDPRepository
 
 	// Build-secret staging (nil → unauthenticated clone, correct for public
 	// repos). buildSecrets pre-stages the org's build git credential so a build's
@@ -92,14 +94,14 @@ func NewCodingExecutor(
 	execRows delivery.ExecutionRepository,
 	gitServiceURL, platformURL string,
 	orgs organization.OrganizationRepository,
-	anthropicCreds organization.OrgAnthropicRepository,
+	anthropicKey CodingKeyResolver,
 	githubCreds organization.OrgCredentialRepository,
 	idpProfiles organization.IDPRepository,
 ) *CodingExecutor {
 	return &CodingExecutor{
 		oc: oc, repos: repos, identities: identities,
 		tokens: tokens, execRows: execRows, gitServiceURL: gitServiceURL, platformURL: platformURL,
-		orgs: orgs, anthropicCreds: anthropicCreds, githubCreds: githubCreds, idpProfiles: idpProfiles,
+		orgs: orgs, anthropicKey: anthropicKey, githubCreds: githubCreds, idpProfiles: idpProfiles,
 	}
 }
 
@@ -280,7 +282,7 @@ func (e *CodingExecutor) dispatchViaOC(ctx context.Context, in agentLaunch, repo
 		ActiveDeadlineSeconds: int(disp.deadline),
 		Env:                   env,
 		SecretEnv: []SecretEnvRef{
-			{Key: envAnthropicAPIKey, SecretName: anthropicSR.SecretRefName, SecretKey: anthropicSR.Property},
+			{Key: anthropicEnvVarOrDefault(anthropicSR.EnvVar), SecretName: anthropicSR.SecretRefName, SecretKey: anthropicSR.Property},
 			{Key: envGitHubToken, SecretName: githubSR.SecretRefName, SecretKey: githubSR.Property},
 		},
 	})
@@ -341,21 +343,27 @@ func (e *CodingExecutor) RetryAuthFailedBuild(ctx context.Context, row *delivery
 	return run.Name, nil
 }
 
+// resolveRunnerSecretRefs resolves the two credentials every coding run mounts.
+//
+// The Anthropic side asks the organization domain WHICH key this org's coding
+// runs bill — its coding-agent key when it configured one, its default key
+// otherwise — and mounts whatever comes back under the variable name that came
+// back WITH it, since a Claude Code OAuth token has to arrive as
+// CLAUDE_CODE_OAUTH_TOKEN rather than ANTHROPIC_API_KEY. The runner therefore
+// needs no notion of the split at all; it reads whichever of the two is
+// present, exactly as Claude Code always has. The resolver fails
+// closed on a configured-but-unusable coding key, so a run never silently bills
+// the default key an org deliberately scoped away from its coding agent.
 func (e *CodingExecutor) resolveRunnerSecretRefs(ctx context.Context, orgID string) (SecretRef, SecretRef, error) {
-	anthropicRow, err := e.anthropicCreds.GetByOrg(ctx, orgID)
+	triplet, err := e.anthropicKey.ResolveCodingSecretRef(ctx, orgID)
 	if err != nil {
-		return SecretRef{}, SecretRef{}, fmt.Errorf("coding dispatch: anthropic credentials for org %q: %w", orgID, err)
-	}
-	if anthropicRow == nil {
-		return SecretRef{}, SecretRef{}, fmt.Errorf("coding dispatch: anthropic secret reference missing for org %q: org_anthropic_credentials row not found", orgID)
+		return SecretRef{}, SecretRef{}, fmt.Errorf("coding dispatch: %w", err)
 	}
 	anthropicSR := SecretRef{
-		SecretRefName: derefStr(anthropicRow.ResolvedSecretRefName()),
-		KVPath:        derefStr(anthropicRow.ResolvedSecretRefKVPath()),
-		Property:      derefStr(anthropicRow.ResolvedSecretRefProperty()),
-	}
-	if err := validateSecretRefTriplet("anthropic", orgID, anthropicSR); err != nil {
-		return SecretRef{}, SecretRef{}, fmt.Errorf("coding dispatch: %w", err)
+		SecretRefName: triplet.Name,
+		KVPath:        triplet.KVPath,
+		Property:      triplet.Property,
+		EnvVar:        triplet.EnvVar,
 	}
 
 	githubRow, err := e.githubCreds.GetByOrg(ctx, orgID)
@@ -374,6 +382,17 @@ func (e *CodingExecutor) resolveRunnerSecretRefs(ctx context.Context, orgID stri
 		return SecretRef{}, SecretRef{}, fmt.Errorf("coding dispatch: %w", err)
 	}
 	return anthropicSR, githubSR, nil
+}
+
+// anthropicEnvVarOrDefault names the Job's Anthropic SecretEnv entry from
+// organization.SecretRefTriplet.EnvVar (ANTHROPIC_API_KEY or
+// CLAUDE_CODE_OAUTH_TOKEN — ADR-0016), falling back to the runner's default
+// only if a resolver ever returns the zero value.
+func anthropicEnvVarOrDefault(envVar string) string {
+	if envVar == "" {
+		return envAnthropicAPIKey
+	}
+	return envVar
 }
 
 func validateSecretRefTriplet(credential, orgID string, ref SecretRef) error {

@@ -560,7 +560,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		componentClient, repoService, identities{cred: credService},
 		taskTokens, executionRepo,
 		cfg.AgentPlatformURL, cfg.AgentPlatformURL,
-		orgRepo, orgAnthropicRepo, orgCredRepo, idpRepo)
+		orgRepo, anthropicCredService, orgCredRepo, idpRepo)
 	// The OpenChoreo Component dispatch path (phase 08): one Component per run
 	// cycle in the milestone's own project, rendered by OC into the project's
 	// dataplane namespace. It needs only the OC client and the runner image —
@@ -642,6 +642,11 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// The reconcile sweep (missed webhooks / disaster recovery) + the exec
 	// watcher (OC WorkflowRun → execution-row outcomes + build terminals).
 	eventPlaneSweep := eventcore.NewSweep(eventPlane, eventcoreRepoLister{repos: repoRepo}, 0)
+	// The build half of the same plane. The ExecWatcher below only reports build
+	// terminals for `kind=build` execution rows, and the run loop records its
+	// cycles in run_cycles instead — so for anything the run loop builds, this
+	// sweep is the only thing that observes a build finishing.
+	buildSweep := eventcore.NewBuildSweep(eventPlane, eventcoreRepoLister{repos: repoRepo}, 0)
 	execWatcher := codingagent.NewExecWatcher(componentClient, executionRepo, asServiceIdentity, 0).
 		WithTaskNotifier(taskStreamHub).
 		// Build terminals reach the milestone-run loop through the root observer
@@ -1170,6 +1175,10 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		// adoption-versus-settle race, and walks only milestones the platform has
 		// run — so it, too, is inert until run rows exist.
 		eventPlaneSweep,
+		// Observes run-loop builds reaching terminal and drives the re-trigger /
+		// fix-issue / supervisor-signal path that OnBuildTerminal owns. Without it
+		// a red build in a run never reaches a verdict and the run polls forever.
+		buildSweep,
 		execWatcher,
 		// Resource-readiness watcher: turns platform-resource bindings going Ready
 		// into provision-Execution terminals + gate-issue closes, releasing gated

@@ -98,6 +98,29 @@ The agent that implements a component — it builds, verifies, and opens the pul
 request. It reads skills as guidance for construction.
 _Avoid_: builder, implementer agent, runner (the runner is the pod it executes in).
 
+## LLM credentials (`services/aep-api`)
+
+**Default key**:
+The organization's Anthropic API key. Every reader uses it — the design agent, the
+coding agent, the RCA agent — unless a more specific key overrides it. An org
+without one cannot run any agent; there is no platform-provided fallback.
+_Avoid_: platform key (the platform provides none), primary key (implies a
+secondary that does not exist, and collides with the SQL sense).
+
+**Coding agent key**:
+An organization's optional second Anthropic API key, used by the coding agent and
+by nothing else. It is an override on the default key, not a peer: it can only
+exist while a default key exists, and it changes which key is billed, never
+whether an agent can run.
+_Avoid_: secondary key, coding LLM credential.
+
+**Reuse**:
+The state of an org that has no coding agent key, so the coding agent runs on the
+default key. It is the absence of a key, not a stored setting — nothing records
+"reuse", and there is no configuration that can claim isolation without a key
+behind it.
+_Avoid_: shared mode, inherit (nothing is copied — the same key is read).
+
 ## Dependencies (`services/aep-api`)
 
 **Platform resource**:

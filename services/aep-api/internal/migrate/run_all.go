@@ -167,6 +167,11 @@ func Steps(db *gorm.DB, deploymentTier string, credKey []byte) []database.Step {
 		ctxStep("phase12_encrypt_credential_columns", func(ctx context.Context, db *gorm.DB) error {
 			return RunPhase12EncryptCredentialColumns(ctx, db, credKey)
 		}),
+		// Re-key org_anthropic_credentials to (oc_org_id, role) so an org can
+		// hold a coding-agent-only key alongside its default one (ADR-0016).
+		// Follows phase11, which added the secret_ref_* columns the new row
+		// carries just like the default row does.
+		ctxStep("phase13_anthropic_credential_role", RunPhase13AnthropicCredentialRole),
 	}
 }
 

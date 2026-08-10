@@ -49,9 +49,12 @@ import (
 )
 
 // finalLogTailBytes caps how much of a terminal pod's log is kept AFTER the
-// OpenChoreo read returns (~3000 lines). The OC call itself is unbounded
-// (sinceSeconds=0); these bytes are scanned for the runner's usage line and
-// then dropped — never written to Postgres.
+// OpenChoreo read returns. The OC call itself is unbounded (sinceSeconds=0)
+// and returns whatever the platform still holds for the pod — never a
+// head-anchored k8s `limitBytes` window — so trimming to the last N bytes
+// here keeps the run's ENDING (where the outcome and any failure live), not
+// its opening. These bytes are scanned for the runner's usage line and then
+// dropped — never written to Postgres.
 const finalLogTailBytes = 256 * 1024
 
 // cycleCaptureWindow bounds how far back a CLOSED cycle is still worth polling.

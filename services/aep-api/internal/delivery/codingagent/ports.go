@@ -35,6 +35,7 @@ import (
 	"time"
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
+	"github.com/wso2/aep/aep-api/internal/organization"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 )
 
@@ -59,6 +60,13 @@ type SecretRef struct {
 	SecretRefName string
 	KVPath        string
 	Property      string
+
+	// EnvVar is the env var name the runner reads this secret under. Empty
+	// means the caller supplies its own fixed name (e.g. GITHUB_TOKEN); the
+	// Anthropic credential sets this from organization.SecretRefTriplet.EnvVar
+	// because exactly which of ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN
+	// applies is the organization domain's decision, not dispatch's.
+	EnvVar string
 }
 
 // ExternalResourceSecretInputs is one external resource's per-env secret bundle
@@ -104,6 +112,16 @@ type WiringPublisher interface {
 // spec.SkillService at the composition root; nil → skipped.
 type SkillMirror interface {
 	SyncProjectSkills(ctx context.Context, orgID, projectID string) error
+}
+
+// CodingKeyResolver answers which Anthropic credential this run must bill: the
+// org's coding-agent key when it configured one, its default key otherwise. The
+// choice is the organization domain's to make — dispatch only mounts what it is
+// handed — so this port deliberately exposes no way to ask "is there an
+// override?", which is what keeps the reuse rule stated in exactly one place
+// (ADR-0016). Wired from organization.AnthropicCredentialService.
+type CodingKeyResolver interface {
+	ResolveCodingSecretRef(ctx context.Context, ocOrgID string) (organization.SecretRefTriplet, error)
 }
 
 // TokenIssuer mints the runner's bearer (§9.2: the id it carries is the
