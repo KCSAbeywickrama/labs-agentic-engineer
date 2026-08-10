@@ -28,6 +28,7 @@ package spec_test
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -472,6 +473,42 @@ func TestApply_SizeCap(t *testing.T) {
 	body := mustJSON(t, spec.ApplyRequest{Writes: []spec.WriteOp{{Path: "specs/requirements/big.md", Content: huge}}})
 	if rec := r.apply(body); rec.Code != http.StatusBadRequest {
 		t.Errorf("size cap: code %d, want 400", rec.Code)
+	}
+}
+
+// A base64 write commits the file's real bytes, end to end through the real
+// handler chain and a real git origin. This is the reference-document upload
+// the create view performs (#383) over the WriteOp.encoding contract (#384):
+// what lands in the repo must be the PDF itself, never its base64 text.
+func TestApply_Base64Write_CommitsDecodedBytes(t *testing.T) {
+	r := newFilesRig(t, nil)
+	// Bytes that are not valid UTF-8, so a pass-through is unmistakable.
+	raw := "%PDF-1.4\n\xff\xfe\x00 binary"
+	body := fmt.Sprintf(
+		`{"writes":[{"path":"specs/requirements/references/doc.pdf","content":%q,"encoding":"base64"}],"message":"refs"}`,
+		base64.StdEncoding.EncodeToString([]byte(raw)))
+
+	rec := r.apply(body)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("apply code %d: %s", rec.Code, rec.Body.String())
+	}
+	if got := r.remote.FileAt(t, "main", "specs/requirements/references/doc.pdf"); got != raw {
+		t.Errorf("committed content = %q, want the decoded bytes %q", got, raw)
+	}
+}
+
+// The same path with content that is not decodable base64 is the caller's
+// error: a 400, and nothing committed.
+func TestApply_InvalidBase64_400_NothingCommitted(t *testing.T) {
+	r := newFilesRig(t, map[string]string{"specs/requirements/prd.md": "x"})
+	headBefore := r.remote.HeadSHA(t)
+	body := `{"writes":[{"path":"specs/requirements/references/doc.pdf","content":"!!!not base64!!!","encoding":"base64"}]}`
+
+	if rec := r.apply(body); rec.Code != http.StatusBadRequest {
+		t.Fatalf("apply code %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+	if r.remote.HeadSHA(t) != headBefore {
+		t.Error("HEAD advanced on a rejected apply — nothing should have been committed")
 	}
 }
 

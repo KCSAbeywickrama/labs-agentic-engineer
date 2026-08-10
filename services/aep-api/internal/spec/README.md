@@ -100,6 +100,11 @@ the genai turn engine (runner/broker/sweeper), and the files / design / skills s
 ## Invariants — don't break
 - **Single write-authority** over the git spec-content store and its `v<N>` tags — every save/tag/discard
   runs through this domain's gitfs Workspace engine; no other domain writes spec content.
+- **`WriteOp.encoding` dies at the edge.** The files handler decodes a write's content (`base64` → raw
+  bytes; `utf8`, and an omitted field, are already raw) before the request reaches `FilesService`, so
+  everything below — path/size validation, soft-validation warnings, the commit — only ever sees the
+  file's real bytes. The 5 MiB cap therefore measures the decoded file, not its ~33%-larger base64 text.
+  Undecodable base64 is a 400, never a commit of garbage.
 - **`CRTType` is a projection, not a re-export.** design-save reads the dependencies resource-type catalog
   through the `resourceTypeCatalog` port in spec's OWN vocabulary (`CRTType`), mapped by a root
   adapter — the spec domain names the dependencies domain nowhere.

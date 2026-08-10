@@ -18,6 +18,7 @@ package files
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 
 	"github.com/wso2/aep/aep-api/internal/gen"
@@ -86,7 +87,11 @@ func (h *Handler) ApplyFiles(ctx context.Context, request gen.ApplyFilesRequestO
 	if request.Body == nil {
 		return nil, apierr.BadRequest("request body required")
 	}
-	res, conflicts, err := h.files.Apply(ctx, org, request.ProjectName, applyRequestFromWire(*request.Body))
+	applyReq, err := applyRequestFromWire(*request.Body)
+	if err != nil {
+		return nil, err
+	}
+	res, conflicts, err := h.files.Apply(ctx, org, request.ProjectName, applyReq)
 	if err != nil {
 		if errors.Is(err, spec.ErrApplyConflict) {
 			return applyConflictsToWire(conflicts), nil
@@ -129,16 +134,39 @@ func appliedPaths(body gen.ApplyRequest, res *spec.ApplyResult) []string {
 	return paths
 }
 
-// applyRequestFromWire converts the generated body into the service's shape.
-func applyRequestFromWire(in gen.ApplyRequest) spec.ApplyRequest {
+// applyRequestFromWire converts the generated body into the service's shape,
+// decoding each write's content to the file's real bytes. `encoding` is the
+// wire's concern only: everything below this line — validation, size limits,
+// the commit itself — sees raw content, so a base64 write of a PDF lands as
+// the PDF, not as its base64 text.
+func applyRequestFromWire(in gen.ApplyRequest) (spec.ApplyRequest, error) {
 	out := spec.ApplyRequest{Message: in.Message}
 	for _, w := range in.Writes {
-		out.Writes = append(out.Writes, spec.WriteOp{Path: w.Path, Content: w.Content, BaseSHA: w.BaseSha})
+		content, err := decodeContent(w.Content, w.Encoding)
+		if err != nil {
+			return spec.ApplyRequest{}, err
+		}
+		out.Writes = append(out.Writes, spec.WriteOp{Path: w.Path, Content: content, BaseSHA: w.BaseSha})
 	}
 	for _, d := range in.Deletes {
 		out.Deletes = append(out.Deletes, spec.DeleteOp{Path: d.Path, BaseSHA: d.BaseSha})
 	}
-	return out
+	return out, nil
+}
+
+// decodeContent turns a write's wire content into the bytes to commit. utf8 —
+// the contract's default, and what an omitted field means — is already those
+// bytes. Undecodable base64 is the caller's error, so it is a 400: committing
+// it would silently corrupt the file.
+func decodeContent(content string, encoding gen.WriteOpEncoding) (string, error) {
+	if encoding != gen.Base64 {
+		return content, nil
+	}
+	raw, err := base64.StdEncoding.DecodeString(content)
+	if err != nil {
+		return "", apierr.BadRequest("content is not valid base64")
+	}
+	return string(raw), nil
 }
 
 // applyResultToWire converts the service result into the contract schema.
