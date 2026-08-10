@@ -49,6 +49,16 @@ const START_INSTRUCTION = "Load the start skill and follow it.";
 const IDEA_PREFIX = "\n\nThe user's idea for this project:\n\n";
 
 /**
+ * The documents the user attached at project create, appended to a `start`
+ * turn as PATHS. They are ordinary spec content, already in the agent's
+ * snapshot, so this points rather than pastes — and says what they are FOR,
+ * because "some files exist" is not an instruction.
+ */
+const REFERENCES_PREFIX =
+  "\n\nThe user attached reference documents for this project. Read them before " +
+  "interviewing — they are the primary brief, and the idea above is the anchor:\n\n";
+
+/**
  * The ONE surviving content steer for spec turns (#373): flow behaviour lives
  * in skills, but a file created at a bare filename lands in the wrong place and
  * no skill is loaded early enough to prevent it.
@@ -145,8 +155,9 @@ function specBody(turn: Exclude<TurnSpec, { kind: "plan" }>): string {
     }
     case "start":
       // A blank idea appends NOTHING, leaving a bare skill load — the start
-      // skill then asks the user for it.
-      return START_INSTRUCTION + idea(turn.idea);
+      // skill then asks the user for it. References behave the same way: no
+      // documents, no paragraph, so a docless kickoff is unchanged.
+      return START_INSTRUCTION + idea(turn.idea) + references(turn.references);
   }
 }
 
@@ -158,6 +169,11 @@ function planBody(turn: Extract<TurnSpec, { kind: "plan" }>): string {
 function idea(raw: string | undefined): string {
   const trimmed = (raw ?? "").trim();
   return trimmed === "" ? "" : IDEA_PREFIX + trimmed;
+}
+
+function references(paths: string[] | undefined): string {
+  const listed = (paths ?? []).map((p) => p.trim()).filter((p) => p !== "");
+  return listed.length === 0 ? "" : REFERENCES_PREFIX + listed.map((p) => `- ${p}`).join("\n");
 }
 
 function target(raw: string | undefined): string {

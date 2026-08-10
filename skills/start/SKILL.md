@@ -24,6 +24,29 @@ It is not a file: it is attached or it is absent. When absent, open with one
 free text welcome. The answer is the brief. Getting the brief is not the
 interview: it is the only thing that may precede the one form below.
 
+## Reference documents outrank the idea
+
+Some kickoffs list reference documents — files the user attached when they
+created the project, named in the instruction by path. When they are listed,
+**read every one before you plan anything.** They are the primary brief; the
+typed idea is the anchor that says which part of them matters.
+
+Read them, then take the coverage walk against what they say:
+
+- **Do not ask what a document already answers.** A document that settles a
+  section settles it — the walk records the answer and moves on. Attaching a
+  20-page spec and then being asked its contents back is the failure this
+  channel exists to prevent.
+- **Interview only where the documents are silent, ambiguous, or contradict
+  each other.** A contradiction between two documents is a real question, and
+  a good one: quote both and ask which holds.
+- **Cite what informed what.** Where a PRD section rests on a document, say so
+  in the section, by filename. The user must be able to see their material
+  landed, and a later reader must be able to trace a decision to its source.
+
+No documents listed is the ordinary case: the instruction says nothing and
+you interview from the idea alone, exactly as below.
+
 ## The coverage walk
 
 Walk the PRD's own sections, in its own order:

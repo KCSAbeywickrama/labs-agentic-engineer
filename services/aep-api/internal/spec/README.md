@@ -100,6 +100,14 @@ the genai turn engine (runner/broker/sweeper), and the files / design / skills s
 ## Invariants — don't break
 - **Single write-authority** over the git spec-content store and its `v<N>` tags — every save/tag/discard
   runs through this domain's gitfs Workspace engine; no other domain writes spec content.
+- **A `/start` turn carries what the agent cannot read for itself, and nothing more.** Two channels,
+  both best-effort and both silent when empty: the captured idea (from the dot-led descriptor, which
+  every turn snapshot strips) and the reference documents attached at create (paths only, listed from
+  `specs/requirements/references/` at the turn's base commit — the files themselves are ordinary spec
+  content already in the agent's snapshot, so listing them points rather than pastes). Neither may
+  fail a kickoff: an unreadable descriptor or an unlistable repo degrades to "no steer". When both are
+  empty the turn is byte-identical to one from before either channel existed — which is the path every
+  pre-existing project takes.
 - **`WriteOp.encoding` dies at the edge.** The files handler decodes a write's content (`base64` → raw
   bytes; `utf8`, and an omitted field, are already raw) before the request reaches `FilesService`, so
   everything below — path/size validation, soft-validation warnings, the commit — only ever sees the
