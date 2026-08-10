@@ -498,6 +498,18 @@ func (l *loop) reenterAfterValidation() (bool, RunResult, error) {
 // forward from it is more work in the same version.
 func (l *loop) settle(ctx workflow.Context, state, reason string) (RunResult, error) {
 	l.st.Phase = delivery.RunPhaseSettling
+	// A cancelled run's agent is still working. Stop it here, on the ordinary code
+	// path with a live context — which is the reason cancel was made a signal
+	// rather than a Temporal cancellation in the first place, and the same reason
+	// applies to stopping the work as to recording the outcome.
+	//
+	// ONLY on cancel. A run that settles any other way has already stopped: the
+	// cycle merged, or its dispatch died. Deleting a Job on those paths would race
+	// the watcher's own log capture — it snapshots seconds after a Job exits — and
+	// destroy the very log the run is being settled to explain.
+	if state == delivery.RunStateCancelled {
+		l.stopAgent(ctx)
+	}
 	if state == delivery.RunStateSucceeded {
 		if l.st.ValidationVerdict == "" {
 			// "The run finished and did not validate" is an honest verdict; an
@@ -609,6 +621,21 @@ func (l *loop) setState(ctx workflow.Context, state string) error {
 	}
 	l.st.State = state
 	return nil
+}
+
+// stopAgent kills the in-flight cycle's agent Job. Best-effort and deliberately
+// so: the run is being cancelled either way, and a settle that could fail because
+// the cluster was unreachable would trade a stranded agent for a stranded RUN —
+// the worse of the two. The failure is logged loudly because the cost of missing
+// it is an agent billing the org until its own deadline.
+func (l *loop) stopAgent(ctx workflow.Context) {
+	err := workflow.ExecuteActivity(activityCtx(ctx), (*Activities).StopCycleAgent,
+		StopCycleAgentInput{OrgID: l.in.OrgID, RunID: l.in.RunID}).Get(ctx, nil)
+	if err != nil {
+		workflow.GetLogger(ctx).Error(
+			"could not stop the cancelled run's agent; it will run until its own deadline",
+			"run", l.in.RunID, "error", err)
+	}
 }
 
 func (l *loop) settleRun(ctx workflow.Context, state, reason string) error {

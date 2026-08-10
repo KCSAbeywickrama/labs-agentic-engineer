@@ -244,6 +244,14 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   one queue with disjoint registrations would fail whichever tasks each picked up by accident.
 - **Cancel is a signal, not a Temporal cancellation.** A cancelled context could not run the activities
   that record the outcome, so the run settles its own row and closes its own cycle on the ordinary path.
+  That live context is also what lets it **stop the agent**: settle deletes the in-flight cycle's Job
+  (`MilestoneAgentStopper`) on the cancel path and only there. Without it, cancel settled the row in a
+  second and left the agent working — and billing the org's model budget — until the Job's own
+  `activeDeadlineSeconds` expired an hour or two later, which is not what the button says. The log is
+  SNAPSHOTTED before the delete: deletion propagates to the pods, and that log is the only record of what
+  the agent did before it was stopped. No other terminal path deletes a Job — the agent has already
+  exited there, and a delete would race the watcher's own capture (it snapshots seconds after a Job
+  exits) and destroy the log the run is being settled to explain.
 - **Echo suppression is `issues.*`-only.** Every label, comment and milestone assignment the platform
   writes fires an `issues.*` delivery straight back, so those handlers drop self-sender deliveries. It is
   deliberately NOT applied to `pull_request.*`: in App mode the coding runner opens its PR as the same

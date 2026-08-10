@@ -74,6 +74,10 @@ type harness struct {
 	// traitSyncs records every managed-API trait convergence the loop asked for,
 	// so a test can assert WHEN it fires rather than merely that it was wired.
 	traitSyncs []ProjectRef
+	// agentStops records every request to kill an in-flight agent. Cancel used to
+	// settle the row and leave the agent running to its own deadline, so this is
+	// the difference between the button meaning "stop watching" and "stop".
+	agentStops []StopCycleAgentInput
 	// verdictWrites keeps the full payload so a test can assert on what was
 	// PERSISTED (verdict + issue), not merely on the verdict the run returned.
 	verdictWrites []SetValidationVerdictInput
@@ -110,6 +114,7 @@ func newHarness(t *testing.T) *harness {
 	h.env.RegisterActivity(acts.MintValidationRepairIssues)
 	h.env.RegisterActivity(acts.DispatchAgent)
 	h.env.RegisterActivity(acts.SyncAPITraits)
+	h.env.RegisterActivity(acts.StopCycleAgent)
 
 	h.env.OnActivity(acts.SetRunState, mock.Anything, mock.Anything).
 		Run(func(args mock.Arguments) {
@@ -125,6 +130,12 @@ func newHarness(t *testing.T) *harness {
 			h.settle = args.Get(1).(SettleRunInput)
 		}).Return(nil)
 	h.env.OnActivity(acts.BumpRunBudget, mock.Anything, mock.Anything).Return(nil)
+	h.env.OnActivity(acts.StopCycleAgent, mock.Anything, mock.Anything).
+		Run(func(args mock.Arguments) {
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			h.agentStops = append(h.agentStops, args.Get(1).(StopCycleAgentInput))
+		}).Return(nil)
 	h.env.OnActivity(acts.SetValidationVerdict, mock.Anything, mock.Anything).
 		Run(func(args mock.Arguments) {
 			in := args.Get(1).(SetValidationVerdictInput)
@@ -1090,6 +1101,51 @@ func TestCycleCeiling_StopsARunThatIsStillMakingProgress(t *testing.T) {
 
 	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonCycleCeiling)
 	require.Equal(t, 2, h.dispatchCount())
+}
+
+// TestCancel_StopsTheAgent is the difference between "stop watching" and "stop".
+//
+// Cancel settles the run row and closes the cycle, and for a long time that was
+// ALL it did: nothing killed the pod, so a cancelled run reported `cancelled`
+// within a second while its agent kept working — and kept billing the org — until
+// the Job's own activeDeadlineSeconds expired, an hour or two later.
+func TestCancel_StopsTheAgent(t *testing.T) {
+	h := newHarness(t)
+	h.milestoneIs(MilestoneSnapshot{Work: 1, Total: 1})
+	h.signal(delivery.SigRunCancel, time.Second)
+
+	h.run(delivery.RunOriginSpecBuild, 0)
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateCancelled, "")
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	require.Len(t, h.agentStops, 1, "a cancelled run must stop the agent it dispatched")
+	require.Equal(t, testRunID, h.agentStops[0].RunID)
+	require.Equal(t, testOrg, h.agentStops[0].OrgID)
+}
+
+// The counterpart, and the reason the stop is NOT on every settle path: a run
+// that ended any other way has no agent left to kill, and deleting the Job would
+// race the watcher's own log capture — it snapshots seconds after a Job exits —
+// destroying the log the run is being settled to explain.
+func TestSettle_LeavesTheJobAloneWhenNotCancelled(t *testing.T) {
+	h := newHarness(t)
+	h.milestoneIs(
+		MilestoneSnapshot{Work: 1, Total: 1},
+		MilestoneSnapshot{},
+		MilestoneSnapshot{},
+	)
+	h.validationIs(77, delivery.ValidationVerdictPassed)
+	h.merges(2)
+
+	h.run(delivery.RunOriginSpecBuild, 0)
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	require.Empty(t, h.agentStops, "a run that merged its way to green has no agent to stop")
 }
 
 // TestCancel_FromWaiting: cancel is the ONLY expiry the unbounded wait has.

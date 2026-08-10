@@ -1256,6 +1256,11 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// the pod's final log. Keyed on the proxy client alone: both dispatch paths
 	// (proxy and direct K8sJobDispatcher) emit `ca-…` run names, so the watcher
 	// reads job status + logs through the proxy stub regardless of dispatcher.
+	//
+	// It doubles as the run supervisor's agent STOPPER (wired below): stopping a
+	// cancelled cycle's agent is mostly a log-capture problem — the delete takes
+	// the pod with it — and the capture already lives on this watcher.
+	var agentStopper delivery.MilestoneAgentStopper
 	if cgwClient != nil {
 		jobWatcher := codingagent.NewJobWatcher(codingAgentLogRepo, orgRepo, cgwClient, executionRepo).
 			WithTaskNotifier(taskStreamHub).
@@ -1269,6 +1274,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		if smClient != nil {
 			jobWatcher.WithExternalSecretCleanup()
 		}
+		agentStopper = jobWatcher
 		watchers = append(watchers, jobWatcher)
 		slog.Info("codingagent.JobWatcher: enabled (cluster-gateway-proxy configured)",
 			"externalSecretCleanup", smClient != nil)
@@ -1290,6 +1296,11 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 			// its Job ref. It mints no execution row — the cycle record is the
 			// supervisor's own bookkeeping.
 			Dispatcher: codingExecutor,
+			// …and its counterpart: a cancelled run's agent is stopped rather than
+			// left to bill the org until the Job's own deadline. Nil without the
+			// cluster-gateway-proxy, which is the degraded boot that also has no
+			// dispatcher.
+			Stopper: agentStopper,
 			// Managed-API gateway policy, converged at builds-green. This rail is
 			// where the trait sync has to hang now: it took over building from the
 			// ExecWatcher deploy path (which reached the same emitter through
