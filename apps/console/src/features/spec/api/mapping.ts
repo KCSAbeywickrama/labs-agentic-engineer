@@ -36,6 +36,10 @@ export interface SpecFileEntry {
   /** Git blob sha at HEAD; changes when content changes. */
   sha: string;
   group: SpecGroup;
+  /** Byte size from the list endpoint (#383 preview: the References row's
+   *  human-readable size). Undefined for entries synthesized off the live
+   *  collab doc's path list (SpecView's union), which carries no size. */
+  size?: number;
 }
 
 // Spec-view section per folder directly under specs/. Files outside these
@@ -57,11 +61,21 @@ export function toSpecEntry(meta: FileMeta): SpecFileEntry | null {
   const segments = meta.path.split("/");
   if (segments[0] !== "specs" || segments.length < 3) return null;
   if (meta.path.startsWith(REFERENCES_PREFIX)) {
-    return { path: meta.path, sha: meta.sha, group: "references" };
+    return {
+      path: meta.path,
+      sha: meta.sha,
+      group: "references",
+      ...(meta.size !== undefined ? { size: meta.size } : {}),
+    };
   }
   const group = GROUP_BY_FOLDER[segments[1] ?? ""];
   if (!group) return null;
-  return { path: meta.path, sha: meta.sha, group };
+  return {
+    path: meta.path,
+    sha: meta.sha,
+    group,
+    ...(meta.size !== undefined ? { size: meta.size } : {}),
+  };
 }
 
 export function toSpecEntries(metas: FileMeta[]): SpecFileEntry[] {

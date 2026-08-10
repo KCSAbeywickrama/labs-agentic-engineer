@@ -51,6 +51,21 @@ describe("toSpecEntry", () => {
     });
   });
 
+  it("carries the list-endpoint's size through for the reference list row (#383 preview)", () => {
+    expect(
+      toSpecEntry({
+        path: "specs/requirements/references/prd.pdf",
+        sha: "e5",
+        size: 20480,
+      }),
+    ).toEqual({
+      path: "specs/requirements/references/prd.pdf",
+      sha: "e5",
+      group: "references",
+      size: 20480,
+    });
+  });
+
   it("keeps nested paths intact", () => {
     expect(
       toSpecEntry({ path: "specs/design/components/orders/design.json", sha: "d4" }),
