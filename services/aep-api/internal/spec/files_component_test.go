@@ -199,8 +199,8 @@ func mustJSON(t *testing.T, v any) string {
 func TestListAtHead_FilteredByPrefix(t *testing.T) {
 	r := newFilesRig(t, map[string]string{
 		"specs/requirements/prd.md": "req",
-		"specs/design/design.md":             "des",
-		"README.md":                          "root",
+		"specs/design/design.md":    "des",
+		"README.md":                 "root",
 	})
 	rec := r.get(apiBase + "?prefix=specs/design/")
 	if rec.Code != http.StatusOK {
@@ -273,8 +273,8 @@ func TestReadAtHead_ValidationReportAllowListed(t *testing.T) {
 
 func TestApply_MultiWriteAndDelete_SingleCommit(t *testing.T) {
 	r := newFilesRig(t, map[string]string{
-		"specs/requirements/prd.md": "old",
-		"specs/requirements/todo.md":         "scratch",
+		"specs/requirements/prd.md":  "old",
+		"specs/requirements/todo.md": "scratch",
 	})
 	reqSHA := r.readSHA(t, "specs/requirements/prd.md")
 	todoSHA := r.readSHA(t, "specs/requirements/todo.md")
@@ -399,8 +399,8 @@ func TestApply_StaleBaseSHA_409_NothingApplied(t *testing.T) {
 // must not be applied (all-or-nothing), and every conflict is collected.
 func TestApply_BatchConflict_AllOrNothing_CollectsAllConflicts(t *testing.T) {
 	r := newFilesRig(t, map[string]string{
-		"specs/requirements/prd.md": "keep me",
-		"specs/requirements/todo.md":         "scratch",
+		"specs/requirements/prd.md":  "keep me",
+		"specs/requirements/todo.md": "scratch",
 	})
 	todoSHA := r.readSHA(t, "specs/requirements/todo.md")
 	headBefore := r.remote.HeadSHA(t)
@@ -474,6 +474,112 @@ func TestApply_SizeCap(t *testing.T) {
 	if rec := r.apply(body); rec.Code != http.StatusBadRequest {
 		t.Errorf("size cap: code %d, want 400", rec.Code)
 	}
+}
+
+// Reading a binary file answers base64 with the encoding flag set — the read
+// half of WriteOp.encoding. Serving raw bytes in a JSON string silently
+// corrupts them (Go's json.Marshal swaps invalid UTF-8 for U+FFFD), which is
+// what made PDF preview impossible: what came back was never the file.
+func TestRead_BinaryFileAnswersBase64_ByteExact(t *testing.T) {
+	raw := "%PDF-1.4\n\x00\x00\xff\xfebinary body"
+	r := newFilesRig(t, map[string]string{"specs/requirements/references/doc.pdf": raw})
+
+	rec := r.get(apiBase + "/specs/requirements/references/doc.pdf")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("read code %d: %s", rec.Code, rec.Body.String())
+	}
+	var fc struct {
+		Path     string `json:"path"`
+		Content  string `json:"content"`
+		Encoding string `json:"encoding"`
+		Sha      string `json:"sha"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &fc); err != nil {
+		t.Fatalf("decode read: %v", err)
+	}
+	if fc.Encoding != "base64" {
+		t.Fatalf("encoding = %q, want base64 for a binary file", fc.Encoding)
+	}
+	got, err := base64.StdEncoding.DecodeString(fc.Content)
+	if err != nil {
+		t.Fatalf("content is not valid base64: %v", err)
+	}
+	if string(got) != raw {
+		t.Fatalf("round-trip lost bytes: got %d bytes, want %d byte-identical", len(got), len(raw))
+	}
+}
+
+// A text file keeps today's wire shape exactly — no encoding key at all, so
+// every existing consumer (the spec editor, the FE viewer) is untouched.
+func TestRead_TextFileKeepsTodaysWireShape(t *testing.T) {
+	r := newFilesRig(t, map[string]string{"specs/requirements/prd.md": "# PRD\nplain text ✅\n"})
+
+	rec := r.get(apiBase + "/specs/requirements/prd.md")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("read code %d: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, `"encoding"`) {
+		t.Fatalf("text read grew an encoding key — the default must stay implicit: %s", firstBytes(body, 200))
+	}
+	var fc spec.FileContent
+	if err := json.Unmarshal(rec.Body.Bytes(), &fc); err != nil {
+		t.Fatalf("decode read: %v", err)
+	}
+	if fc.Content != "# PRD\nplain text ✅\n" {
+		t.Fatalf("content = %q, want it verbatim", fc.Content)
+	}
+}
+
+// The 5 MiB cap measures the DECODED file, not the base64 text carrying it.
+// Base64 inflates by ~33%, so a 4.5 MiB PDF arrives as ~6 MiB of text: cap the
+// wire string and a document comfortably inside the documented limit is
+// rejected. This is the one test that tells the two readings apart — it fails
+// the moment the check moves anywhere ahead of the decode.
+func TestApply_SizeCap_MeasuresDecodedNotEncoded(t *testing.T) {
+	r := newFilesRig(t, map[string]string{"specs/requirements/prd.md": "x"})
+	raw := strings.Repeat("A", 9*(1<<20)/2) // 4.5 MiB decoded — under the cap
+	encoded := base64.StdEncoding.EncodeToString([]byte(raw))
+	if len(encoded) <= 5<<20 {
+		t.Fatalf("test is not exercising the gap: encoded len %d must exceed the %d-byte cap", len(encoded), 5<<20)
+	}
+	body := fmt.Sprintf(
+		`{"writes":[{"path":"specs/requirements/references/big.pdf","content":%q,"encoding":"base64"}]}`, encoded)
+
+	rec := r.apply(body)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("apply code %d, want 200 — a 4.5 MiB file is under the 5 MiB cap: %s", rec.Code, rec.Body.String())
+	}
+	if got := r.remote.FileAt(t, "main", "specs/requirements/references/big.pdf"); len(got) != len(raw) {
+		t.Errorf("committed %d bytes, want the decoded %d", len(got), len(raw))
+	}
+}
+
+// A multi-file batch at the per-file limit passes the EDGE body ceiling: two
+// 5 MiB documents are ~13.4 MiB of base64 on the wire, which the old 10 MiB
+// edge-wide cap 413'd before any handler ran — the create view's upload died
+// in transport while every per-file check would have passed. The edge must
+// admit what the files contract permits; the per-file cap stays the limiter.
+func TestApply_MultiFileBatch_PassesTheEdgeBodyCap(t *testing.T) {
+	r := newFilesRig(t, nil)
+	fiveMiB := strings.Repeat("A", 5<<20)
+	encoded := base64.StdEncoding.EncodeToString([]byte(fiveMiB))
+	body := fmt.Sprintf(
+		`{"writes":[{"path":"specs/requirements/references/a.pdf","content":%q,"encoding":"base64"},{"path":"specs/requirements/references/b.pdf","content":%q,"encoding":"base64"}]}`,
+		encoded, encoded)
+
+	rec := r.apply(body)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("apply code %d, want 200 — two in-limit files must not be rejected by the transport: %s",
+			rec.Code, firstBytes(rec.Body.String(), 200))
+	}
+}
+
+func firstBytes(s string, n int) string {
+	if len(s) > n {
+		return s[:n]
+	}
+	return s
 }
 
 // A base64 write commits the file's real bytes, end to end through the real

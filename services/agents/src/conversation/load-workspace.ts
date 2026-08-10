@@ -18,7 +18,7 @@
 
 /**
  * Workspace-shape input loading (shared-workspace-volume, D4): the ONLY module
- * that reads the shared mount. Both readers take a directory that
+ * that reads the shared mount. All three readers take a directory that
  * `snapshot-path.ts` derived and stat-checked — nothing here touches untrusted
  * paths, and nothing here writes.
  *
@@ -37,10 +37,21 @@
  *    drop any skill an org admin has DISABLED — such a skill never becomes a
  *    row, so it is absent from the catalog and `load`/`loadReference` return
  *    `undefined` for it, same as an unknown name.
+ *  - `readReferenceAttachments(dir, references)` reads the `.pdf` entries of a
+ *    `start` turn's `TurnSpec.references` as native AI SDK file parts (#384):
+ *    `readSnapshot`'s walk SKIPS any file containing a NUL byte, so a binary
+ *    PDF never reaches the text `files` map — without this, the model's only
+ *    way to see one was pulling it through a tool as "text", which is how a
+ *    real turn died (an 868KB PDF read as ~1.5M junk tokens, then the turn
+ *    failed at history persistence on the NUL bytes that trip carried). Every
+ *    failure mode here is best-effort: a missing/unreadable/oversized file is
+ *    warned and skipped, never thrown — same posture as the skill readers
+ *    above for ENOENT.
  */
 
-import { existsSync, readFileSync, readdirSync, type Dirent } from "node:fs";
-import { basename, join } from "node:path";
+import { existsSync, readFileSync, readdirSync, statSync, type Dirent } from "node:fs";
+import { basename, join, resolve, sep } from "node:path";
+import type { FilePart } from "ai";
 import { parse as parseYaml } from "yaml";
 // Reuse the bundle's single frontmatter grammar + LF canonicalizer so SKILL.md
 // fence parsing cannot drift from the spec-file fence parsing (same approach as
@@ -171,6 +182,73 @@ export function readSnapshot(snapshotDir: string): Record<string, string> {
   const out: Record<string, string> = {};
   walk(snapshotDir, "", out);
   return out;
+}
+
+// --- Reference PDFs → native AI SDK file parts (#384) -------------------------
+
+/** Anthropic's request size limit is ~32MB; this leaves headroom for everything else on the wire. */
+export const MAX_REFERENCE_ATTACHMENT_BYTES = 30 * 1024 * 1024;
+
+function isPdfPath(path: string): boolean {
+  return path.toLowerCase().endsWith(".pdf");
+}
+
+/**
+ * Read one reference's PDF bytes as a `FilePart`, or `undefined` on any
+ * best-effort skip (never throws): outside the snapshot dir (a hostile or
+ * malformed path — resolved and prefix-checked rather than string-matched, so
+ * no `..` trick or symlink-adjacent spelling slips through), missing, unreadable,
+ * or over `MAX_REFERENCE_ATTACHMENT_BYTES`. `data` is base64 — the AI SDK
+ * accepts a bare base64 string as `DataContent`, and it keeps the eventual
+ * conversation-history JSON compact (a `Buffer` would serialize as a giant
+ * `{type:"Buffer",data:[...]}` byte array instead).
+ */
+function readOneReferenceAttachment(snapshotDir: string, refPath: string, snapshotRoot: string): FilePart | undefined {
+  const abs = resolve(snapshotDir, refPath);
+  if (abs !== snapshotRoot && !abs.startsWith(snapshotRoot + sep)) {
+    console.warn(`[references] skipping reference outside the snapshot: ${refPath}`);
+    return undefined;
+  }
+  let size: number;
+  try {
+    size = statSync(abs).size;
+  } catch (err) {
+    console.warn(`[references] skipping unreadable reference ${refPath}: ${err instanceof Error ? err.message : String(err)}`);
+    return undefined;
+  }
+  if (size > MAX_REFERENCE_ATTACHMENT_BYTES) {
+    console.warn(`[references] skipping oversized reference ${refPath}: ${size} bytes > ${MAX_REFERENCE_ATTACHMENT_BYTES} cap`);
+    return undefined;
+  }
+  let bytes: Buffer;
+  try {
+    bytes = readFileSync(abs);
+  } catch (err) {
+    console.warn(`[references] failed to read reference ${refPath}: ${err instanceof Error ? err.message : String(err)}`);
+    return undefined;
+  }
+  return { type: "file", data: bytes.toString("base64"), mediaType: "application/pdf", filename: refPath };
+}
+
+/**
+ * Attach every `.pdf` (case-insensitive) path in a `start` turn's
+ * `TurnSpec.references` as a native AI SDK document file part — Anthropic
+ * reads PDFs directly via document blocks, so the model no longer has to pull
+ * one through a tool as raw "text" (see the module doc for why that mattered).
+ * Non-PDF references (`.md`/`.txt`) are already inlined by `readSnapshot` and
+ * are left alone here. Absent/empty `references` → `[]`, so a turn with no
+ * PDFs builds byte-identical messages to before this existed.
+ */
+export function readReferenceAttachments(snapshotDir: string, references: string[] | undefined): FilePart[] {
+  const snapshotRoot = resolve(snapshotDir);
+  const parts: FilePart[] = [];
+  for (const raw of references ?? []) {
+    const refPath = raw.trim();
+    if (refPath === "" || !isPdfPath(refPath)) continue;
+    const part = readOneReferenceAttachment(snapshotDir, refPath, snapshotRoot);
+    if (part) parts.push(part);
+  }
+  return parts;
 }
 
 // --- The `_skills` snapshot → lazy SkillSource --------------------------------

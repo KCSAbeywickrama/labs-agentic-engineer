@@ -19,6 +19,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer, type ServerResponse } from "node:http";
+import type { FilePart } from "ai";
 import { runConversationTurn, TurnGuard, ConcurrentTurnError } from "../src/conversation/run-conversation-turn.js";
 import { InMemoryConversationStore } from "../src/store/memory-store.js";
 import type { Conversation } from "../src/store/conversation-store.js";
@@ -127,6 +128,52 @@ test("default turn (no flag) carries no divergence note", async () => {
   const content =
     typeof firstUser?.content === "string" ? firstUser.content : JSON.stringify(firstUser?.content);
   assert.doesNotMatch(content, /files were changed outside/);
+});
+
+// --- Reference PDF attachments (#384) ----------------------------------------
+
+test("referenceAttachments ride the turn's user message as native file parts", async () => {
+  const store = new InMemoryConversationStore();
+  const guard = new TurnGuard();
+  const { onEvent } = collector();
+  const filePart: FilePart = {
+    type: "file",
+    data: "JVBERi0xLjQ=",
+    mediaType: "application/pdf",
+    filename: "specs/requirements/references/brief.pdf",
+  };
+
+  await runConversationTurn({
+    id: "refs1",
+    instruction: "start",
+    files: SEED_FILES,
+    referenceAttachments: [filePart],
+    model: textModel("ok"),
+    store,
+    guard,
+    onEvent,
+  });
+
+  const stored = (await store.get("refs1"))!;
+  const firstUser = stored.messages.find((m) => m.role === "user")!;
+  assert.ok(Array.isArray(firstUser.content), "the user message became a content array");
+  const parts = firstUser.content as unknown as Array<Record<string, unknown>>;
+  assert.ok(
+    parts.some((p) => p.type === "file" && p.mediaType === "application/pdf" && p.data === filePart.data),
+    "the file part is present with its mediaType and bytes",
+  );
+});
+
+test("no referenceAttachments ⇒ the user message stays a plain string (byte-identical to today)", async () => {
+  const store = new InMemoryConversationStore();
+  const guard = new TurnGuard();
+  const { onEvent } = collector();
+
+  await runConversationTurn({ id: "refs2", instruction: "start", files: SEED_FILES, model: textModel("ok"), store, guard, onEvent });
+
+  const stored = (await store.get("refs2"))!;
+  const firstUser = stored.messages.find((m) => m.role === "user")!;
+  assert.equal(typeof firstUser.content, "string");
 });
 
 test("skills: loadSkill is registered over the skillSource, executes server-side, and its body reaches history", async () => {

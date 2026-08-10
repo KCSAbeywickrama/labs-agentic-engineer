@@ -26,6 +26,15 @@
  * `pg` directly, so the SQL and (de)serialization are unit-tested with a faked
  * client and `npm test` needs no live Postgres. The composition root owns the
  * real pool, `init()`, and the TTL sweep.
+ *
+ * `save()` runs every message through `sanitizeForJsonb` before it is
+ * stringified (#384): PostgreSQL's jsonb type rejects any string containing a
+ * U+0000 codepoint ("unsupported Unicode escape sequence") — surfaced by a real
+ * turn where a tool pulled a binary file's bytes in as "text" (an 868KB PDF
+ * read through an MCP tool), which then killed the INSERT and, with it, the
+ * whole turn (the BFF only ever saw "stream ended without a manifest"). This is
+ * the ONE choke point every write passes through, so no call site upstream has
+ * to know the rule or remember to apply it.
  */
 
 import type { ModelMessage } from "ai";
@@ -60,6 +69,32 @@ const SWEEP = `DELETE FROM conversations
   WHERE updated_at < now() - (interval '1 millisecond' * $1::double precision)
   RETURNING id`;
 
+/**
+ * Recursively replace every U+0000 codepoint in a JSON-shaped value's string
+ * leaves with U+FFFD (the Unicode replacement character), leaving everything
+ * else — other characters, array order, object keys, non-string values —
+ * byte-identical. Never mutates its input. `unknown` in/out rather than typed
+ * to `ModelMessage[]`: this is a structural JSON transform, not a message-shape
+ * one, and it must apply uniformly regardless of which part type carries the
+ * NUL (tool-result output, text, anything future).
+ */
+export function sanitizeForJsonb<T>(value: T): T {
+  if (typeof value === "string") {
+    return (value.includes("\u0000") ? value.replaceAll("\u0000", "�") : value) as T;
+  }
+  if (Array.isArray(value)) {
+    return value.map((v) => sanitizeForJsonb(v)) as T;
+  }
+  if (value !== null && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = sanitizeForJsonb(v);
+    }
+    return out as T;
+  }
+  return value;
+}
+
 function asDate(value: unknown): Date {
   return value instanceof Date ? value : new Date(String(value));
 }
@@ -90,7 +125,7 @@ export class PostgresConversationStore implements ConversationStore {
   }
 
   async save(c: Conversation): Promise<void> {
-    await this.db.query(UPSERT, [c.id, JSON.stringify(c.messages), c.status]);
+    await this.db.query(UPSERT, [c.id, JSON.stringify(sanitizeForJsonb(c.messages)), c.status]);
   }
 
   /** Delete rows whose `updated_at` is older than `ttlMs`. Returns the count purged. */

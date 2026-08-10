@@ -33,11 +33,13 @@ import {
   ToolLoopAgent,
   isStepCount,
   type StopCondition,
+  type FilePart,
   type ModelMessage,
   type LanguageModel,
   type LanguageModelUsage,
   type ToolLoopAgentSettings,
   type ToolSet,
+  type UserContent,
 } from "ai";
 import type { StreamPart } from "@aep/agent-stream";
 
@@ -52,6 +54,14 @@ export interface RunTurnInput {
   messages: ModelMessage[];
   /** This turn's user instruction text (pushed as a `user` message before streaming). */
   prompt: string;
+  /**
+   * Native AI SDK file parts (currently: `.pdf` reference documents, #384) to
+   * ride the SAME user message as `prompt`, so Anthropic reads them as document
+   * blocks instead of the model having to pull one through a tool as raw text.
+   * Absent/empty → the message content stays the plain `prompt` string,
+   * byte-identical to a turn without this feature.
+   */
+  fileParts?: FilePart[];
   /**
    * Stop conditions; defaults to `[isStepCount(maxSteps ?? 20)]`. Stays generic
    * — the main wiring passes `[isStepCount(n), hasToolCall('ask_question'),
@@ -82,8 +92,14 @@ export interface RunTurnResult {
 
 export async function runTurn(input: RunTurnInput): Promise<RunTurnResult> {
   // Single source of conversation truth: push this turn, then stream({ messages })
-  // ONLY (prompt + messages are mutually exclusive in v7).
-  input.messages.push({ role: "user", content: input.prompt });
+  // ONLY (prompt + messages are mutually exclusive in v7). fileParts turns the
+  // content into an array ONLY when there is at least one — an idle feature
+  // must never change the shape of a turn that carries no attachments.
+  const content: UserContent =
+    input.fileParts && input.fileParts.length > 0
+      ? [{ type: "text", text: input.prompt }, ...input.fileParts]
+      : input.prompt;
+  input.messages.push({ role: "user", content });
 
   const agent = new ToolLoopAgent({
     model: input.model,

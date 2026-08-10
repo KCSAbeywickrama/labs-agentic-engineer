@@ -41,7 +41,9 @@ package spec
 
 import (
 	"context"
+	"log/slog"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/wso2/aep/aep-api/internal/clients/agentsvc"
@@ -81,8 +83,44 @@ func (s *Service) turnSpecFor(ctx context.Context, ref sourcecontrol.RepoRef, at
 		if idea == "" {
 			idea = s.readProjectIdea(ctx, ref, at)
 		}
-		return agentsvc.TurnSpec{Kind: agentsvc.TurnKindStart, Idea: strings.TrimSpace(idea)}, token
+		return agentsvc.TurnSpec{
+			Kind:       agentsvc.TurnKindStart,
+			Idea:       strings.TrimSpace(idea),
+			References: s.listReferenceDocs(ctx, ref, at),
+		}, token
 	}
 
 	return agentsvc.TurnSpec{Kind: agentsvc.TurnKindFlow, Skill: token, Text: rest}, token
+}
+
+// ReferencesDir is where the console commits the documents attached at project
+// create (#383). It is ordinary versioned spec content — the agent can read it
+// from its own snapshot — so the turn carries only the PATHS, as a pointer.
+const ReferencesDir = "specs/requirements/references/"
+
+// listReferenceDocs lists the reference documents at `at`, sorted. Nothing
+// there (the ordinary case — most projects attach none) returns nil, so the
+// field drops out of the turn JSON entirely and the turn is byte-identical to
+// one from before this channel existed.
+//
+// Best-effort, exactly like the captured idea: a repo we cannot list is not a
+// reason to fail someone's kickoff. Worst case the agent interviews without
+// knowing the documents are there, which is what it did before #384.
+func (s *Service) listReferenceDocs(ctx context.Context, ref sourcecontrol.RepoRef, at string) []string {
+	entries, _, err := s.git.Workspace().List(ctx, ref, at)
+	if err != nil {
+		slog.WarnContext(ctx, "references unlistable; turn continues without them",
+			"dir", ReferencesDir, "error", err)
+		return nil
+	}
+	var out []string
+	for _, e := range entries {
+		// HasPrefix on the trailing-slash dir also excludes the folder entry
+		// itself, and any sibling that merely starts with the same name.
+		if strings.HasPrefix(e.Path, ReferencesDir) {
+			out = append(out, e.Path)
+		}
+	}
+	slices.Sort(out)
+	return out
 }
