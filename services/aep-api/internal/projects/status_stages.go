@@ -175,15 +175,21 @@ func (s *Service) populateStages(ctx context.Context, orgName, projectName strin
 	}
 	applyFlatArtifactFields(status, snap)
 
-	// Build stage: the newest milestone run (ListByProject is newest-first).
+	// Build stage: the newest SPEC BUILD (ListByProject is newest-first).
+	//
+	// Spec builds specifically, not simply the newest row, because only a spec
+	// build advances the project's version — "what version is this project on" has
+	// always meant the last one built. The other origins work an EXISTING
+	// milestone, which may be any version's: an incident adopted into v3 while the
+	// project is on v5, or a revalidation of v3, would otherwise walk the overview
+	// backwards and report the project as being on v3.
 	//
 	// The task tally is deliberately ZERO. Its only honest source is the
 	// version's milestone on GitHub, and this endpoint is polled at 5s — a
 	// per-poll GitHub read is exactly what the #184 budget forbids. The console
 	// renders per-version counts from the list-tasks response it already holds.
-	var latest *delivery.MilestoneRun
-	if len(runs) > 0 {
-		latest = &runs[0]
+	latest := newestByOrigin(runs, delivery.RunOriginSpecBuild)
+	if latest != nil {
 		status.Build.Version = latest.SpecTag()
 		status.Build.Status = buildStageStatus(latest.State)
 		// A VALIDATING-phase failure is not a build failure: every coding cycle
@@ -214,12 +220,19 @@ func (s *Service) populateStages(ctx context.Context, orgName, projectName strin
 	status.Deploy.Status = deployStageStatus(dev)
 	status.Deploy.Components.Ready = int64(countReady(dev))
 
-	// Validation: the newest run'"'"'s own verdict — a column on the row already
-	// read above, so the poll costs nothing extra. The report itself, and the
-	// per-cycle detail behind it, live on the version'"'"'s run story
-	// (list-build-runs), which is where the console'"'"'s validation surface reads
-	// them; validationUrl/validationIssue are therefore no longer served here.
-	state, err := s.validationStage(ctx, orgName, latest)
+	// Validation: the newest verdict for the version the build stage just named —
+	// a column on a row already read above, so the poll costs nothing extra.
+	//
+	// Scoped to that MILESTONE rather than to the spec-build run, because a version
+	// can be judged more than once: a revalidation is a later run on the same
+	// milestone and its verdict is the version'"'"'s current answer. Scoped to the
+	// milestone rather than to the whole project for the reason above — a run on an
+	// older version must not answer for this one.
+	//
+	// The report itself, and the per-cycle detail behind it, live on the version'"'"'s
+	// run story (list-build-runs), which is where the console'"'"'s validation surface
+	// reads them; validationUrl/validationIssue are therefore no longer served here.
+	state, err := s.validationStage(ctx, orgName, newestOnMilestone(runs, latest))
 	if err != nil {
 		return err
 	}
@@ -258,6 +271,38 @@ func (s *Service) validationStage(ctx context.Context, orgID string, run *delive
 	// nothing to say about validation yet. Saying "validating" here was wrong for
 	// most of every run's life.
 	return validationNone, nil
+}
+
+// newestByOrigin returns the newest run of one origin, or nil. rows must be
+// newest-first, which is what ListByProject guarantees — so this is a scan, not a
+// sort, and costs nothing on a slice the caller already holds.
+func newestByOrigin(rows []delivery.MilestoneRun, origin string) *delivery.MilestoneRun {
+	for i := range rows {
+		if rows[i].Origin == origin {
+			return &rows[i]
+		}
+	}
+	return nil
+}
+
+// newestOnMilestone returns the newest run working the same milestone as ref —
+// which is ref itself unless something later re-judged that version.
+//
+// It exists because a version's answer and the version's BUILD can come from
+// different rows: the spec build delivers it, and a revalidation started
+// afterwards may hold a newer verdict for the very same milestone. Keyed on the
+// milestone number, which is the platform key; nil ref means there is no version
+// to answer about.
+func newestOnMilestone(rows []delivery.MilestoneRun, ref *delivery.MilestoneRun) *delivery.MilestoneRun {
+	if ref == nil {
+		return nil
+	}
+	for i := range rows {
+		if rows[i].MilestoneNumber == ref.MilestoneNumber {
+			return &rows[i]
+		}
+	}
+	return ref
 }
 
 // validationStageFromRun answers deploy.validation from the run row alone,

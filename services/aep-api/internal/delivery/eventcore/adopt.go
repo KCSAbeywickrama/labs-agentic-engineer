@@ -19,6 +19,7 @@ package eventcore
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 
 	"github.com/wso2/aep/aep-api/internal/delivery"
@@ -97,8 +98,9 @@ func (e *Events) AdoptIssue(ctx context.Context, orgID, projectID string, target
 }
 
 // startRun asks the supervisor for an incident run over a milestone. Every run
-// this package starts is an incident adoption — the spec-build origin belongs
-// to the plan path alone, where the version mutex lives.
+// this package starts BY DETECTION is an incident adoption — the spec-build
+// origin belongs to the plan path alone, where the version mutex lives, and the
+// revalidate origin is only ever asked for by a human (Revalidate below).
 func (e *Events) startRun(ctx context.Context, orgID, projectID string, milestone MilestoneRef) error {
 	if e.p.Starter == nil {
 		slog.DebugContext(ctx, "eventcore: no run starter wired — nothing to start",
@@ -112,4 +114,93 @@ func (e *Events) startRun(ctx context.Context, orgID, projectID string, mileston
 		MilestoneTitle:  milestone.Title,
 		Origin:          delivery.RunOriginIncidentAdoption,
 	})
+}
+
+// Revalidate asks a version's acceptance criteria again, against the system
+// already deployed.
+//
+// It is AdoptIssue's sibling and deliberately so: both hand a milestone to the
+// run loop, both refuse to start a second run on one milestone, and both are
+// reached from a human's request rather than from a delivery. The difference is
+// what the run does first — adoption files work and the loop picks it up, while
+// this files nothing and the loop enters at validation, because the milestone's
+// working set is already empty.
+//
+// The three guards all run BEFORE the supervisor is asked, and the order is the
+// cheap-and-certain first:
+//
+//  1. A live run on the milestone. This one must precede admission for a
+//     structural reason: the revalidate origin sits outside the spec-run partial
+//     index, so nothing in the database would refuse a second row. The supervisor
+//     would admit one, find the workflow id already taken (AlreadyStarted), and
+//     return successfully — leaving a row nobody drives.
+//  2. Open work in the milestone.
+//  3. An acceptance oracle to validate against.
+//
+// attempts and ceiling ride through untouched; zero on either means the
+// platform default, resolved at the run row and again in the workflow.
+func (e *Events) Revalidate(ctx context.Context, orgID, projectID string, milestone MilestoneRef, attempts, ceiling int) (runID string, err error) {
+	if e.p.Runs == nil || e.p.Issues == nil || e.p.Starter == nil {
+		return "", fmt.Errorf("eventcore: revalidate not configured")
+	}
+	live, err := e.p.Runs.LiveRunForMilestone(ctx, orgID, projectID, milestone.Number)
+	if err != nil {
+		return "", err
+	}
+	if live != nil {
+		return "", delivery.ErrRunAlreadyLive
+	}
+	counts, err := e.p.Issues.MilestoneIssueCounts(ctx, orgID, projectID, milestone.Number)
+	if err != nil {
+		return "", err
+	}
+	// The WORKING SET, not every open issue: a stray gate or the version's own
+	// validation issue must not read as unfinished work, and neither is something
+	// a coding cycle would pick up.
+	if counts != nil && counts.OpenNonGateWork() > 0 {
+		return "", delivery.ErrMilestoneHasOpenWork
+	}
+	if e.p.Criteria != nil {
+		hasCriteria, cerr := e.p.Criteria.HasValidationCriteria(ctx, orgID, projectID)
+		if cerr != nil {
+			return "", cerr
+		}
+		if !hasCriteria {
+			return "", delivery.ErrNoAcceptanceCriteria
+		}
+	}
+
+	slog.InfoContext(ctx, "eventcore: revalidating a deployed version",
+		"project", projectID, "milestone", milestone.Number, "version", milestone.Title,
+		"validationAttempts", attempts, "cycleCeiling", ceiling)
+	if serr := e.p.Starter.StartRun(ctx, delivery.StartRunRequest{
+		OrgID:              orgID,
+		ProjectID:          projectID,
+		MilestoneNumber:    milestone.Number,
+		MilestoneTitle:     milestone.Title,
+		Origin:             delivery.RunOriginRevalidate,
+		ValidationAttempts: attempts,
+		CycleCeiling:       ceiling,
+	}); serr != nil {
+		return "", serr
+	}
+	// The row the supervisor just admitted. Read back rather than returned by
+	// StartRun, which is shared with the detection paths and has no caller waiting
+	// on an id — a revalidation's caller does, since the run's progress stream is
+	// keyed by it.
+	//
+	// Its ABSENCE is the more important answer. StartRun reports success for
+	// several states in which nothing was actually started — no agent dispatcher
+	// wired, the workflow engine unreachable, the admission losing a race — because
+	// its other callers re-offer on a timer and a degraded boot must not fail them.
+	// A human waiting on a verdict has no such loop, so an empty read here is
+	// reported rather than dressed up as a 202 over a run that does not exist.
+	started, err := e.p.Runs.LiveRunForMilestone(ctx, orgID, projectID, milestone.Number)
+	if err != nil {
+		return "", err
+	}
+	if started == nil {
+		return "", delivery.ErrRunNotStarted
+	}
+	return started.ID, nil
 }

@@ -296,16 +296,20 @@ func (h *harness) merges(n int) {
 }
 
 func (h *harness) run(origin string, ceiling int) {
+	h.runWith(RunInput{Origin: origin, CycleCeiling: ceiling})
+}
+
+// runWith starts the workflow with the caller's budgets, filling in the identity
+// every test shares. It exists for the inputs that only some runs pin —
+// ValidationAttempts above all — so the common `run` stays two arguments.
+func (h *harness) runWith(in RunInput) {
 	h.applyDefaults()
-	h.env.ExecuteWorkflow(MilestoneRunWorkflow, RunInput{
-		RunID:           testRunID,
-		OrgID:           testOrg,
-		ProjectID:       testProject,
-		MilestoneNumber: testMilepost,
-		MilestoneTitle:  "v3",
-		Origin:          origin,
-		CycleCeiling:    ceiling,
-	})
+	in.RunID = testRunID
+	in.OrgID = testOrg
+	in.ProjectID = testProject
+	in.MilestoneNumber = testMilepost
+	in.MilestoneTitle = "v3"
+	h.env.ExecuteWorkflow(MilestoneRunWorkflow, in)
 }
 
 func (h *harness) result(t *testing.T) RunResult {
@@ -860,6 +864,130 @@ func TestIncidentRun_GetsNoValidationCycle(t *testing.T) {
 	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
 	require.Equal(t, []string{delivery.CycleKindCoding}, h.dispatchKinds())
 	h.env.AssertNotCalled(t, "EnsureValidationIssue", mock.Anything, mock.Anything)
+}
+
+// TestRevalidateRun_EntersAtValidation is the origin's whole point: the milestone
+// is a version that already shipped, so the very first poll returns an empty
+// working set — the shape that parks every other run forever, because with no
+// cycles behind it an empty milestone is indistinguishable from one mid-plan.
+//
+// A revalidation is the case where that ambiguity does not exist, and the proof is
+// the dispatch list: one validation cycle, no coding cycle, nothing built.
+func TestRevalidateRun_EntersAtValidation(t *testing.T) {
+	h := newHarness(t)
+	h.milestoneIs(
+		MilestoneSnapshot{}, // already delivered → straight to validation
+		MilestoneSnapshot{}, // passed → settle
+	)
+	h.validationIs(77, delivery.ValidationVerdictPassed)
+	h.merges(1)
+
+	h.run(delivery.RunOriginRevalidate, 0)
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
+	require.Equal(t, []string{delivery.CycleKindValidation}, h.dispatchKinds(),
+		"a revalidation validates and does nothing else")
+	require.Equal(t, delivery.ValidationVerdictPassed, res.ValidationVerdict)
+	require.Equal(t, 77, h.dispatches[0].IssueNumber,
+		"the version's existing validation issue is reopened, not re-minted")
+}
+
+// TestRevalidateRun_OneAttemptFilesNoRepairWork is the dev-loop shape, and it
+// rests on an ORDERING rather than on a flag: runValidation settles on an
+// exhausted attempt allowance BEFORE it reaches the mint, so an allowance of one
+// makes repair work unreachable.
+//
+// That is why the endpoint needs no separate "should it fix things" switch. The
+// contrast with TestValidationCycle_RepairsAFailureAndRevalidates is the whole
+// test: same verdict, same harness, one fewer attempt — and no repair issues, no
+// coding cycle, nothing rebuilt.
+func TestRevalidateRun_OneAttemptFilesNoRepairWork(t *testing.T) {
+	h := newHarness(t)
+	h.milestoneIs(MilestoneSnapshot{})
+	h.validationIs(77, delivery.ValidationVerdictFailed)
+	h.merges(1)
+
+	h.runWith(RunInput{Origin: delivery.RunOriginRevalidate, ValidationAttempts: 1})
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonValidationFailed)
+	require.Equal(t, []string{delivery.CycleKindValidation}, h.dispatchKinds())
+	require.Equal(t, delivery.ValidationVerdictFailed, res.ValidationVerdict,
+		"the answer is recorded even though nothing was repaired")
+	require.Equal(t, 0, h.closed, "a failed version keeps its milestone open")
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	require.Empty(t, h.repairMints,
+		"one attempt is spent by the first fatal verdict, so the mint is never reached")
+}
+
+// TestRevalidateRun_DefaultAttemptsRepairAndRebuild is the same origin taking the
+// other route — the one that exists to fix what it finds on an already-deployed
+// system.
+//
+// Left at the default allowance, a revalidation is an ordinary run that happened
+// to start at validation: the failure becomes issues, the boundary dispatches a
+// CODING cycle which merges and builds, and validation runs again. The dispatch
+// sequence is the assertion — validation, coding, validation — and it is the
+// repair loop the spec build already had, reached from a different door.
+func TestRevalidateRun_DefaultAttemptsRepairAndRebuild(t *testing.T) {
+	h := newHarness(t)
+	h.milestoneIs(
+		MilestoneSnapshot{},                  // deployed → validation attempt 1
+		MilestoneSnapshot{Work: 1, Total: 1}, // the repair issue → coding cycle
+		MilestoneSnapshot{},                  // green again → validation attempt 2
+		MilestoneSnapshot{},                  // passed → settle
+	)
+	h.validationAttemptsAre(77,
+		ValidationOutcome{Verdict: delivery.ValidationVerdictFailed, Digest: "red-1"},
+		ValidationOutcome{Verdict: delivery.ValidationVerdictPassed, Digest: "green"},
+	)
+	h.merges(3)
+
+	h.run(delivery.RunOriginRevalidate, 0)
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
+	require.Equal(t, []string{
+		delivery.CycleKindValidation, delivery.CycleKindCoding, delivery.CycleKindValidation,
+	}, h.dispatchKinds(), "it repairs on the ordinary path — the repair is not a special kind")
+	require.Equal(t, delivery.ValidationVerdictPassed, res.ValidationVerdict)
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	require.Len(t, h.repairMints, 1, "the failed attempt filed repair work")
+}
+
+// TestRevalidateRun_ZeroAttemptsMeansTheDefault is the replay guard, written as a
+// behaviour rather than as a unit test of newLoop.
+//
+// A workflow input lives in Temporal history, so an execution started before the
+// field existed replays with the zero value. Zero therefore has to mean the
+// platform default — if it meant "no attempts", every run in flight across the
+// deploy would settle without validating. The proof is that a zero-attempt input
+// still repairs and re-validates, which only the default allowance permits.
+func TestRevalidateRun_ZeroAttemptsMeansTheDefault(t *testing.T) {
+	h := newHarness(t)
+	h.milestoneIs(
+		MilestoneSnapshot{},
+		MilestoneSnapshot{Work: 1, Total: 1},
+		MilestoneSnapshot{},
+		MilestoneSnapshot{},
+	)
+	h.validationAttemptsAre(77,
+		ValidationOutcome{Verdict: delivery.ValidationVerdictFailed, Digest: "red-1"},
+		ValidationOutcome{Verdict: delivery.ValidationVerdictPassed, Digest: "green"},
+	)
+	h.merges(3)
+
+	h.runWith(RunInput{Origin: delivery.RunOriginRevalidate, ValidationAttempts: 0})
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
+	require.Len(t, h.dispatchKinds(), 3,
+		"zero fell back to the default allowance, so the run got its second attempt")
 }
 
 // TestRedispatchBudget_AgentDeathEndsTheRun: the dispatch never lands a pull

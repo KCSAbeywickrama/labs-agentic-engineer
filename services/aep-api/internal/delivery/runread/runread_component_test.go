@@ -201,7 +201,7 @@ func newHarnessWithBuilds(t *testing.T, rows []delivery.MilestoneRun, cycles map
 	handlers, err := deliveryhttpapi.New(deliveryhttpapi.Deps{
 		RunReads:       runread.NewReads(runs, cyc),
 		RunProgress:    runread.NewProgressService(runs, cyc, logReader),
-		RunCommands:    runread.NewCommands(runs, canceller),
+		RunCommands:    runread.NewCommands(runs, canceller, nil),
 		RunCycleBuilds: runread.NewCycleBuilds(runs, cyc, builds),
 	})
 	if err != nil {

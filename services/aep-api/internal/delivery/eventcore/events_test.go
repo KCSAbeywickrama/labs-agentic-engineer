@@ -52,6 +52,7 @@ type harness struct {
 	builds *fakeBuilds
 	comps  *fakeComponents
 	sup    *fakeSupervisor
+	oracle *fakeOracle
 }
 
 // newHarness wires the event plane onto a real router. rows seeds the run
@@ -67,7 +68,10 @@ func newHarness(t *testing.T, rows ...delivery.MilestoneRun) *harness {
 		builds: newFakeBuilds(),
 		comps:  &fakeComponents{},
 		sup:    &fakeSupervisor{},
+		oracle: &fakeOracle{has: true},
 	}
+	// The real supervisor admits the run row as part of starting a run.
+	h.sup.admits = h.runs
 	h.events = New(Ports{
 		Runs:           h.runs,
 		Cycles:         h.cycles,
@@ -78,6 +82,7 @@ func newHarness(t *testing.T, rows ...delivery.MilestoneRun) *harness {
 		Design:         fakeDesign{paths: map[string]string{"order-service": "services/order", "web": "apps/web"}},
 		Builds:         h.builds,
 		Components:     h.comps,
+		Criteria:       h.oracle,
 		Signaler:       h.sup,
 		Starter:        h.sup,
 		PlatformSender: platformBot,
@@ -669,6 +674,113 @@ func TestAdoption_NeverDeployedProjectRefusesClearly(t *testing.T) {
 	}
 	if len(h.issues.assigned) != 0 || len(h.sup.started) != 0 {
 		t.Fatal("a refused adoption must write nothing")
+	}
+}
+
+// ---- revalidation ---------------------------------------------------------
+
+// TestRevalidate_StartsARunOverTheVersionsMilestone is the happy path, and the
+// assertion that matters is the ORIGIN: it is what carries the run past the
+// boundary's park guard and into validation, and what keeps it out of the
+// spec-run mutex so a re-check never holds up the next build.
+func TestRevalidate_StartsARunOverTheVersionsMilestone(t *testing.T) {
+	h := newHarness(t, aRun("run-old", 5, delivery.RunStateSucceeded))
+
+	runID, err := h.events.Revalidate(context.Background(), testOrg, testProject,
+		MilestoneRef{Number: 5, Title: "v3"}, 1, 4)
+	if err != nil {
+		t.Fatalf("revalidate: %v", err)
+	}
+	if len(h.sup.started) != 1 {
+		t.Fatalf("exactly one run must start, got %+v", h.sup.started)
+	}
+	got := h.sup.started[0]
+	if got.Origin != delivery.RunOriginRevalidate || got.MilestoneNumber != 5 {
+		t.Fatalf("a revalidate run must start over the version's own milestone, got %+v", got)
+	}
+	if got.ValidationAttempts != 1 || got.CycleCeiling != 4 {
+		t.Fatalf("the caller's budgets must ride through untouched, got %+v", got)
+	}
+	if runID == "" {
+		t.Fatal("the caller needs the run id — its progress stream is keyed by it")
+	}
+}
+
+// TestRevalidate_RefusesWhileARunIsLive. Adoption treats a live run as a no-op
+// because the run picks the issue up at its next boundary; a revalidation has
+// nothing to hand off, so a silent success would answer nothing.
+//
+// The guard also has to run BEFORE admission: the revalidate origin is outside
+// the spec-run partial index, so nothing in the database would refuse a second
+// row — the supervisor would admit one, find the workflow id taken, and return
+// successfully, leaving a row nobody drives.
+func TestRevalidate_RefusesWhileARunIsLive(t *testing.T) {
+	h := newHarness(t, aRun("run-1", 7, delivery.RunStateRunning))
+
+	_, err := h.events.Revalidate(context.Background(), testOrg, testProject,
+		MilestoneRef{Number: 7, Title: "v4"}, 1, 0)
+	if !errors.Is(err, delivery.ErrRunAlreadyLive) {
+		t.Fatalf("a live run must refuse the revalidation, got %v", err)
+	}
+	if len(h.sup.started) != 0 {
+		t.Fatal("a refused revalidation must start nothing")
+	}
+}
+
+// TestRevalidate_RefusesWhileWorkIsOpen. The loop polls before it validates, so
+// a milestone with a working set would get a CODING cycle first — the version
+// rebuilt rather than re-judged. Refusing keeps the button meaning one thing.
+func TestRevalidate_RefusesWhileWorkIsOpen(t *testing.T) {
+	h := newHarness(t, aRun("run-old", 5, delivery.RunStateSucceeded))
+	h.issues.withOpenIssues(5,
+		[]string{delivery.LabelAgentWork},
+		[]string{delivery.LabelAgentWork})
+
+	_, err := h.events.Revalidate(context.Background(), testOrg, testProject,
+		MilestoneRef{Number: 5, Title: "v3"}, 1, 0)
+	if !errors.Is(err, delivery.ErrMilestoneHasOpenWork) {
+		t.Fatalf("open work must refuse the revalidation, got %v", err)
+	}
+	if len(h.sup.started) != 0 {
+		t.Fatal("a refused revalidation must start nothing")
+	}
+}
+
+// TestRevalidate_GateOrValidationIssueIsNotOpenWork guards the WORKING-SET
+// reading of that refusal. A dispatch gate and the version's own validation
+// issue are both open issues in the milestone and neither is work a coding cycle
+// would pick up — counting them would make a version permanently unrevalidatable,
+// since the validation issue is reopened by every attempt.
+func TestRevalidate_GateOrValidationIssueIsNotOpenWork(t *testing.T) {
+	h := newHarness(t, aRun("run-old", 5, delivery.RunStateSucceeded))
+	h.issues.withOpenIssues(5,
+		[]string{delivery.LabelProvisionGate},
+		[]string{delivery.LabelValidationWork})
+
+	if _, err := h.events.Revalidate(context.Background(), testOrg, testProject,
+		MilestoneRef{Number: 5, Title: "v3"}, 1, 0); err != nil {
+		t.Fatalf("excluded issues are not open work: %v", err)
+	}
+	if len(h.sup.started) != 1 {
+		t.Fatalf("the revalidation must start, got %+v", h.sup.started)
+	}
+}
+
+// TestRevalidate_RefusesWithoutAnOracle. A run with nothing to validate concludes
+// `skipped`, and because the newest run on a milestone owns the version's
+// verdict, that would replace a real answer with "not validated". Refusing up
+// front is what keeps a settled verdict safe from a click.
+func TestRevalidate_RefusesWithoutAnOracle(t *testing.T) {
+	h := newHarness(t, aRun("run-old", 5, delivery.RunStateSucceeded))
+	h.oracle.has = false
+
+	_, err := h.events.Revalidate(context.Background(), testOrg, testProject,
+		MilestoneRef{Number: 5, Title: "v3"}, 1, 0)
+	if !errors.Is(err, delivery.ErrNoAcceptanceCriteria) {
+		t.Fatalf("a version with no criteria must refuse, got %v", err)
+	}
+	if len(h.sup.started) != 0 {
+		t.Fatal("a refused revalidation must start nothing")
 	}
 }
 

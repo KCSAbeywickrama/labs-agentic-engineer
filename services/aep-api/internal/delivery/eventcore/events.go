@@ -54,9 +54,14 @@ type Ports struct {
 	// Workloads reads the shipped workload.yaml for the wiring-conformance check
 	// on the merged-PR fan-out. Optional — unwired means the check is skipped and
 	// a component can again ship without declaring the resources it consumes.
-	Workloads  WorkloadReader
-	Signaler   RunSignaler
-	Starter    RunStarter
+	Workloads WorkloadReader
+	// Criteria answers whether a project has an acceptance oracle at all — the
+	// last of Revalidate's guards. Optional: unwired skips that guard, and a
+	// version with no criteria then settles its revalidation `skipped` instead of
+	// being refused up front.
+	Criteria ValidationOracle
+	Signaler RunSignaler
+	Starter  RunStarter
 	// PlatformSender is the platform's own GitHub login (the App bot,
 	// "<slug>[bot]"). Empty disables echo suppression — correct for a dev
 	// install with no App, where every write comes from a human PAT.
