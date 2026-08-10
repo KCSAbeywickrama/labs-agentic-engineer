@@ -121,24 +121,26 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   grammar and that spelling. The milestone **number** is the key; the title is kept
   only as the `v<N>` tag a `?tag=` query resolves through. Loop position is read from the latest cycle, and
   per-component build/deploy status is derived from OpenChoreo on read — neither is stored.
-- **Delivery's agent SPEND**, on the cycle record: a cycle IS one agent run, so its captured token usage
-  and the USD stamped on it at capture (`cost_usd`, amended console ADR-0011) are where both the build and
-  validation phases of Settings → Usage come from. The phase is read from the cycle's kind. `RecordUsage`
-  is the one cycle mutator NOT fenced on `ended_at IS NULL`: usage arrives from the terminal-log capture,
-  and a cycle closes on the merge webhook seconds after its Job exits — fencing it would discard nearly
-  every capture. `PhaseUsageRollup` sums this with the executions table, which today contributes nothing
-  (its only remaining kind, `provision`, runs no model).
+- **Delivery's agent SPEND**, in the `agent_usage_ledger`: an append-only entry per dispatch carrying the
+  captured tokens, the USD stamped at capture (`cost_usd`, amended console ADR-0011), the SDLC phase and
+  the version it paid for. Both capture surfaces mirror into it as part of their own stamp — `RecordUsage`
+  on the cycle and on the execution — so `PhaseUsageRollup` reads the ledger and NOTHING else: adding the
+  dispatch rows back would bill every token twice. `RecordUsage` stays the one cycle mutator NOT fenced on
+  `ended_at IS NULL`: usage arrives from the terminal-log capture, and a cycle closes on the merge webhook
+  seconds after its Job exits — fencing it would discard nearly every capture. Entries are keyed
+  `(source, source_id)`, so a re-read of the same log updates one entry rather than adding a second.
 - The **run loop** (`run`): one Temporal workflow per milestone, `run-<org>-<project>-<milestoneNumber>`,
   whose id is REUSED after a terminal run because a milestone sees sequential runs across its life. It
   owns the four budgets, the no-progress rule, the cycle ceiling, the validation cycle and settle — and
   nothing else: it detects no event and writes no issue.
 - **Persistence**: every gorm in this domain sits at the ROOT (the fence `TestGormFencedToDomainRepository`
   draws), as single write-authority — `repository_execution.go` · `repository_coding_agent_log.go` ·
-  `repository_run.go` · `repository_cycle.go` over the `execution.go` /
-  `coding_agent_log.go` / `milestone_run.go` / `run_cycle.go` entities. Their tables
-  are `executions` · `coding_agent_logs` · `milestone_runs` · `run_cycles`.
-  `usage_rollup.go` is the one read that spans two of them, and is a plain function over both
-  repositories rather than a third store.
+  `repository_run.go` · `repository_cycle.go` · `repository_usage_ledger.go` over the `execution.go` /
+  `coding_agent_log.go` / `milestone_run.go` / `run_cycle.go` / `usage_ledger.go` entities. Their tables
+  are `executions` · `coding_agent_logs` · `milestone_runs` · `run_cycles` · `agent_usage_ledger`.
+  `run_cycle_logs` is retired (migration step is a tombstone; cycle logs are read from OpenChoreo /
+  the observer, not Postgres). `usage_rollup.go` is a plain function over the ledger rather than a
+  third store.
 
 ## Invariants — don't break
 - **`task ⊥ run`.** The GitHub-facing Task surface and the run supervisor are peer sub-packages that never
@@ -204,6 +206,16 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   read model and never read back: a replay must reproduce the same decisions without a database. The one
   budget it does not count is the automatic build re-trigger — that is the event plane's, derived from the
   WorkflowRuns themselves, and the supervisor reads the same runs rather than keeping a second tally.
+- **Activities retry blips forever and answers never.** The supervisor's activities run under Temporal's
+  default policy — unbounded, with backoff — because a supervisor that cannot reach GitHub should stall
+  visibly rather than settle a run on a network blip. A failure that repeating cannot change is told
+  apart wherever the supervisor touches source control and marked non-retryable, so it fails on
+  its first attempt: the project deleted underneath a live run, a milestone or pull request removed on
+  the host, a rejected credential. `sourcecontrol.IsPermanent` owns which failures those are — GitHub's
+  secondary rate limit wears a 403 and is deliberately NOT one — and `run/errors.go` owns turning them
+  into Temporal's vocabulary. The guard is per call site, so an activity added later that returns a
+  source-control error raw is back on unbounded retry; `CloseMilestone` is the one deliberate exception,
+  swallowing its error by contract and so never retrying.
 - **Every terminal reason names exactly one failure class.** `redispatch-budget` is agent death (including
   a Job that exited without a pull request); `build-retrigger-budget` is a build that stayed red through
   its one automatic re-trigger with no fix issue to recover it; `fix-chain-budget` and `conflict-budget`
@@ -276,6 +288,16 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   `codingagent` owns the read path and writes no log text to Postgres. The one thing taken from a
   terminal pod's log is the runner's token-usage line, stamped onto the cycle row — accounting, not
   logging. `coding_agent_logs` remains for legacy execution rows; milestone cycles never used it.
+  (`run_cycle_logs` is retired — do not revive a Postgres sidecar for cycle logs.)
+- **A project delete purges the WORK and retires the SPEND.** `runs` and `run_cycles` are working state and
+  go, so a recreated same-named project cannot inherit a timeline its repo never had; the
+  `agent_usage_ledger` is not purged by anything — `RetireByProject` stamps its live entries instead, and
+  that stamp is the only lifetime discriminator there is. It runs FIRST and aborts the cascade on failure:
+  rows deleted while their spend is still attributed to a live project is the one combination no retry can
+  repair. `contracts.UsageScope{ProjectID, Retired}` is how the roll-up hands the two lifetimes back, so a
+  slug reused after a delete reads as two Usage cards rather than one inflated one. Spec-turn spend has no
+  such marker (`agent_turns` is never purged and never retired) and stays attributed whole to whichever
+  lifetime is current — a known asymmetry the spec domain owns.
 - **The task-log stream is one connection, no server cursor.** `stream-task-log`
   (`GET .../tasks/{issueNumber}/log`, `text/event-stream`) carries a Task's whole live state — `task` /
   `execution` / `line` / `done` frames, the frame kind in a `type` field inside the `data:` payload so it

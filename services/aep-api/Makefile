@@ -43,6 +43,11 @@ cover:
 # No build tag, no shared :5433 — isolation is the template-clone. Tests skip
 # under -short and where Docker is unavailable, so this degrades gracefully.
 #
+# One container per package process, each terminated by that package's
+# `TestMain -> dbtest.Main` once its tests finish, so a run leaves no Postgres
+# on the host. Testcontainers' Ryuk sidecar is only the backstop for binaries
+# that die before that (panic, signal) — it is not what a normal run relies on.
+#
 # DOCKER_HOST and the Ryuk socket-mount override are derived from the active
 # docker context when unset, so testcontainers finds a non-default daemon (e.g.
 # Colima, whose socket lives under ~/.colima) out of the box; an explicit

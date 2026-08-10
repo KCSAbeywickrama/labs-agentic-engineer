@@ -950,6 +950,12 @@ type ExternalResourceDTO struct {
 	Name        string         `json:"name"`
 }
 
+// FileBundle A set of files read at ONE commit. commitSha names that commit; every entry's sha is a blob of that same tree.
+type FileBundle struct {
+	CommitSha string        `json:"commitSha"`
+	Files     []FileContent `json:"files"`
+}
+
 // FileContent defines model for FileContent.
 type FileContent struct {
 	Content string `json:"content"`
@@ -1879,6 +1885,15 @@ type GetDependencyStatusParams struct {
 type ListFilesParams struct {
 	// Prefix Only list paths under this prefix (e.g. specs/design/)
 	Prefix string `form:"prefix,omitempty" json:"prefix,omitempty"`
+}
+
+// ReadFileBundleParams defines parameters for ReadFileBundle.
+type ReadFileBundleParams struct {
+	// Prefix Only include paths under this prefix (e.g. specs/design/). Empty includes everything the read gate admits.
+	Prefix string `form:"prefix,omitempty" json:"prefix,omitempty"`
+
+	// Ref Commit to read at (a hex object name). Empty reads the branch tip. Same gate as read-file's ref: an object name, never a revision expression.
+	Ref string `form:"ref,omitempty" json:"ref,omitempty"`
 }
 
 // ReadFileParams defines parameters for ReadFile.

@@ -142,6 +142,10 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	repoRepo := sourcecontrol.NewRepoRepository(db)
 	milestoneRunRepo := delivery.NewMilestoneRunRepository(db)
 	runCycleRepo := delivery.NewRunCycleRepository(db, in.RateStamper)
+	// The agent-usage ledger: the read + retire half of delivery's spend record.
+	// The WRITE half needs no wiring — each capture repository mirrors into it as
+	// part of its own stamp, so there is no way to run one without the other.
+	usageLedgerRepo := delivery.NewAgentUsageLedgerRepository(db)
 	orgRepo := organization.NewOrganizationRepository(db)
 	orgCredRepo := organization.NewOrgCredentialRepository(db, in.ColumnCipher)
 	orgAnthropicRepo := organization.NewOrgAnthropicRepository(db)
@@ -399,7 +403,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// Build/deploy stage sources for the status poll (#184): the milestone-run
 	// index (one row read) + the org-scoped release-binding list —
 	// consumer-side ports wired here so projects imports neither.
-	projectService.SetStageSources(projectRunRows{runs: milestoneRunRepo, cycles: runCycleRepo}, componentClient)
+	projectService.SetStageSources(projectRunRows{runs: milestoneRunRepo, cycles: runCycleRepo, ledger: usageLedgerRepo}, componentClient)
 	organizationService := organization.NewOrganizationService(orgRepo, namespaceClient)
 	// componentService takes repoSvc + buildCredSvc so TriggerBuild can
 	// pre-stage the per-WorkflowRun build Secret in workflows-<orgID>
@@ -600,6 +604,11 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// its agent dispatcher (delivery.MilestoneDispatcher): a supervisor with no
 	// dispatcher refuses to start runs, so the two must be wired together.
 	runSupervisor := run.NewSupervisor(temporalRuntime, runRuns{runs: milestoneRunRepo}, codingExecutor)
+	// The run-supervisor half of the project-delete cascade. Wired HERE rather
+	// than beside SetStageSources because the supervisor does not exist until the
+	// coding executor does: purging a project's run ROWS leaves the workflows that
+	// write them running, polling a repository the same delete is about to remove.
+	projectService.SetRunAbandoner(projectRunSupervision{runs: milestoneRunRepo, supervisor: runSupervisor})
 
 	platformSender := githubBotLogin(cfg.GitHubAppSlug)
 	registerWebhook := func(event, action string, h func(ctx context.Context, event, action string, payload []byte) error) {
@@ -858,12 +867,13 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// composite; the edge holds no project/component/config service.
 	// Settings → Usage (#291): fold spec-turn + delivery per-project usage,
 	// labelled by the org's live projects (a usage slug with no live project is a
-	// since-deleted project, shown greyed). Delivery's half sums BOTH its capture
-	// tables — cycles, where every agent run lands after the issue-driven flip,
-	// and the older execution rows (see delivery.PhaseUsageRollup).
+	// since-deleted project, shown greyed). Delivery's half reads the agent-usage
+	// LEDGER — the one delivery table a project delete does not purge, and the one
+	// place both its capture surfaces mirror into, so spend survives the project
+	// and is never counted twice (see delivery.PhaseUsageRollup).
 	usageService := projects.NewUsageService(
 		turnRepo.SumUsageByProject,
-		delivery.PhaseUsageRollup(executionRepo, runCycleRepo),
+		delivery.PhaseUsageRollup(usageLedgerRepo),
 		func(ctx context.Context, orgID string) (map[string]string, error) {
 			names := map[string]string{}
 			list, err := projectService.ListProjects(ctx, orgID, 100, "", "")

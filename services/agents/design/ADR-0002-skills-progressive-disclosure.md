@@ -56,7 +56,14 @@ drift-guarded against them, as with the file tools.
   tools. Wrong shape for this need.
 - **Inline every skill body into the system prompt.** Simplest, but spends tokens on
   bodies the agent never uses and weakens focus as the library grows. Progressive
-  disclosure keeps the always-on cost to one catalog line per skill.
+  disclosure keeps the always-on cost to one catalog line per skill. A **flow's**
+  named lineup is the bounded exception (`FLOW_SUPPORTING_SKILLS` in
+  `src/prompts/turn.ts`, plus the flow's own skill): that guidance is known before
+  the turn starts, so it rides the per-turn prompt — never the system prompt, and
+  never the whole library. Corollary for skill authors: guidance a flow is CERTAIN
+  to read belongs in a skill, not a `references/` file, because only skills are
+  inlinable — the PRD contract moved out of `start/references/` for exactly that
+  reason. References stay for what a flow reads only sometimes.
 - **Service reads `skills/` from disk (packed into the image).** Considered first;
   rejected to keep the service free of a skills loader, path config, and a Dockerfile
   dependency, and to preserve the "`src/` touches no fs" invariant. Resolution is the

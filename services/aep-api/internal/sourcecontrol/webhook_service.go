@@ -18,6 +18,7 @@ package sourcecontrol
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 
@@ -37,6 +38,15 @@ type WebhookService interface {
 	// Register installs a webhook on the repo. No-op when the credential's
 	// strategy is WebhookPlatform. Idempotent on (repo, deliveryURL).
 	Register(ctx context.Context, orgID, projectID string) (hookID *int64, err error)
+
+	// Unregister removes the hook Register installed, addressed by the hook ID
+	// persisted on the repo row. It is the project teardown's counterpart to
+	// Register and is total: a project with no repo row, no stored hook, a
+	// platform-strategy credential, or a hook GitHub no longer has all resolve to
+	// "nothing to remove" and return nil. Only a live failure to reach GitHub is
+	// an error, and even that is best-effort at the call site — the delete is
+	// never blocked by webhook cleanup.
+	Unregister(ctx context.Context, orgID, projectID string) error
 }
 
 // issueRepoResolver is the private capability webhookService borrows from the
@@ -131,4 +141,49 @@ func (s *webhookService) Register(ctx context.Context, orgID, projectID string) 
 		return nil, fmt.Errorf("persist webhook id: %w", err)
 	}
 	return &hookID, nil
+}
+
+// Unregister removes the hook Register installed. See the interface for the
+// contract; the shape below is Register's, run backwards.
+//
+// It must be called BEFORE the repo row is deleted: the row carries both the
+// hook ID and the repo identity the credential resolves against, and once it is
+// gone the platform has no way left to name the hook it created.
+func (s *webhookService) Unregister(ctx context.Context, orgID, projectID string) error {
+	// The hook ID is the whole point: it is what makes this removal precise. A
+	// project that never registered one — App-mode delivery, a failed
+	// registration, a repo provisioned before hooks existed — has nothing of ours
+	// on the repo to remove.
+	repo, err := s.repoSvc.GetRepo(ctx, orgID, projectID)
+	if err != nil {
+		if errors.Is(err, ErrRepoNotFound) {
+			return nil
+		}
+		return fmt.Errorf("get repo: %w", err)
+	}
+	if repo == nil || repo.WebhookID == nil {
+		return nil
+	}
+
+	resolver, ok := s.issue.(issueRepoResolver)
+	if !ok {
+		return fmt.Errorf("webhook: issue service %T cannot resolve repo credentials", s.issue)
+	}
+	owner, repoName, cred, err := resolver.resolveRepoAndCredential(ctx, orgID, projectID)
+	if err != nil {
+		return err
+	}
+
+	// Same short-circuit as Register, and for the same reason: under App-mode
+	// delivery no per-repo hook was ever installed, so there is none to remove.
+	if cred.WebhookStrategy() == secrets.WebhookPlatform {
+		return nil
+	}
+
+	if err := s.github.DeleteWebhook(ctx, owner, repoName, cred, *repo.WebhookID); err != nil {
+		return fmt.Errorf("delete webhook: %w", err)
+	}
+	slog.InfoContext(ctx, "webhook unregistered from repo",
+		"org", orgID, "project", projectID, "hookId", *repo.WebhookID)
+	return nil
 }

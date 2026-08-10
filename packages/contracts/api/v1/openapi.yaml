@@ -1401,6 +1401,68 @@ paths:
       summary: List spec files at HEAD
       tags:
       - Files
+  /projects/{projectName}/files/bundle:
+    get:
+      operationId: read-file-bundle
+      description: |-
+        Every readable file under `prefix`, with content, in ONE response read at ONE
+        commit. Equivalent to list-files followed by a read-file per entry, except that
+        the whole bundle is resolved at a single commit — so a push landing mid-read
+        cannot yield a mix of two trees, and the returned shas are all from that one
+        tree (the caller's baseSha preconditions stay coherent).
+
+        Reads are gated exactly like read-file: only paths under specs/ plus the
+        read-only allow-list are included. Anything else in the tree is omitted, never
+        an error — `prefix` narrows what a caller wants, the gate decides what it may
+        have.
+
+        `bundle` is a literal segment under a path that is otherwise a trailing
+        wildcard. It can never shadow a real read: a readable path always starts with
+        `specs/`, so `files/bundle` is not a reachable file address.
+      parameters:
+      - description: Project name (DNS-label slug)
+        in: path
+        name: projectName
+        required: true
+        schema:
+          description: Project name (DNS-label slug)
+          type: string
+      - description: Only include paths under this prefix (e.g. specs/design/). Empty includes everything
+          the read gate admits.
+        explode: false
+        in: query
+        name: prefix
+        schema:
+          description: Only include paths under this prefix (e.g. specs/design/). Empty includes everything
+            the read gate admits.
+          type: string
+      - description: 'Commit to read at (a hex object name). Empty reads the branch tip. Same gate as
+          read-file''s ref: an object name, never a revision expression.'
+        explode: false
+        in: query
+        name: ref
+        schema:
+          description: 'Commit to read at (a hex object name). Empty reads the branch tip. Same gate as
+            read-file''s ref: an object name, never a revision expression.'
+          type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileBundle'
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Error
+      security:
+      - userJWT: []
+      summary: Read every readable file under a prefix at one commit
+      tags:
+      - Files
   /projects/{projectName}/files/apply:
     post:
       operationId: apply-files
@@ -3533,6 +3595,22 @@ components:
       - name
       - config
       - consumers
+      type: object
+    FileBundle:
+      additionalProperties: false
+      description: A set of files read at ONE commit. commitSha names that commit; every entry's sha is
+        a blob of that same tree.
+      properties:
+        commitSha:
+          type: string
+        files:
+          items:
+            $ref: '#/components/schemas/FileContent'
+          type: array
+          nullable: true
+      required:
+      - commitSha
+      - files
       type: object
     FileContent:
       additionalProperties: false

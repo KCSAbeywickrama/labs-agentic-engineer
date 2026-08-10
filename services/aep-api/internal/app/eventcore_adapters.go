@@ -18,6 +18,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
@@ -287,6 +288,9 @@ func (a eventcoreAdopter) AdoptIssue(ctx context.Context, orgID, projectID strin
 type projectRunRows struct {
 	runs   delivery.MilestoneRunRepository
 	cycles delivery.RunCycleRepository
+	// ledger is what the purge does NOT delete. It is retired instead — see
+	// DeleteByProject.
+	ledger delivery.AgentUsageLedgerRepository
 }
 
 func (a projectRunRows) ListByProject(ctx context.Context, orgID, projectID string) ([]delivery.MilestoneRun, error) {
@@ -301,9 +305,73 @@ func (a projectRunRows) LatestCycle(ctx context.Context, orgID, runID string) (*
 	return a.cycles.Latest(ctx, orgID, runID)
 }
 
+// DeleteByProject is delivery's whole answer to a project delete, and it is two
+// different verbs on purpose.
+//
+// The cycles and runs are WORKING STATE and go: a recreated same-named project
+// must not inherit a predecessor's timeline, or the status poll would chase
+// versions the fresh repo never had. What that work COST is not working state,
+// and does not go — the Settings → Usage page is built to keep reporting a
+// deleted project's spend, and purging the rows it was stamped on is what
+// silently emptied it.
+//
+// So the ledger is RETIRED first, before the rows it mirrors are removed. The
+// order is load-bearing in one direction only — retirement reads nothing from
+// the cycles — but doing it first means a failure leaves the spend attributed to
+// a live project rather than the rows deleted with their lifetime still open,
+// which is the difference between a retry that fixes it and one that cannot.
 func (a projectRunRows) DeleteByProject(ctx context.Context, orgID, projectID string) error {
+	if err := a.ledger.RetireByProject(ctx, orgID, projectID); err != nil {
+		return err
+	}
 	if err := a.cycles.DeleteByProject(ctx, orgID, projectID); err != nil {
 		return err
 	}
 	return a.runs.DeleteByProject(ctx, orgID, projectID)
+}
+
+// projectRunSupervision adapts the milestone-run index + the run supervisor onto
+// the projects domain's run-teardown port: on a project delete, end the workflows
+// supervising its live runs.
+//
+// It is keyed by MILESTONE rather than by run, because the workflow is: a run's
+// identity is its milestone (delivery.MilestoneRunWorkflowID), so several rows of
+// the same milestone name one supervisor and abandoning it once is enough.
+type projectRunSupervision struct {
+	runs       delivery.MilestoneRunRepository
+	supervisor runAbandonment
+}
+
+// runAbandonment is the single supervisor verb the teardown needs. It is an
+// interface rather than the concrete *run.Supervisor only so the milestone
+// SELECTION below can be proven without a Temporal client — the selection is the
+// part with a decision in it.
+type runAbandonment interface {
+	AbandonRun(ctx context.Context, orgID, projectID string, milestoneNumber int) error
+}
+
+// AbandonProjectRuns terminates the supervisor of every milestone the project
+// still has a LIVE run on. Settled runs are skipped: their workflows have already
+// ended, and a run that settled is not one anything is still polling for.
+//
+// One milestone's failure does not stop the others — this runs inside a delete
+// that has already been committed upstream, so the most complete teardown
+// possible is worth more than a clean early return.
+func (a projectRunSupervision) AbandonProjectRuns(ctx context.Context, orgID, projectID string) error {
+	rows, err := a.runs.ListByProject(ctx, orgID, projectID)
+	if err != nil {
+		return err
+	}
+	seen := make(map[int]bool, len(rows))
+	var errs []error
+	for i := range rows {
+		if delivery.IsTerminalRunState(rows[i].State) || seen[rows[i].MilestoneNumber] {
+			continue
+		}
+		seen[rows[i].MilestoneNumber] = true
+		if aerr := a.supervisor.AbandonRun(ctx, orgID, projectID, rows[i].MilestoneNumber); aerr != nil {
+			errs = append(errs, aerr)
+		}
+	}
+	return errors.Join(errs...)
 }
