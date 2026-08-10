@@ -56,9 +56,10 @@ type Ports struct {
 	// a component can again ship without declaring the resources it consumes.
 	Workloads WorkloadReader
 	// Criteria answers whether a project has an acceptance oracle at all — the
-	// last of Revalidate's guards. Optional: unwired skips that guard, and a
-	// version with no criteria then settles its revalidation `skipped` instead of
-	// being refused up front.
+	// last of Revalidate's guards, and REQUIRED by it. Unwired, a revalidation
+	// could start against a version with nothing to validate and settle `skipped`,
+	// replacing a real verdict; Revalidate therefore refuses as unconfigured
+	// rather than proceeding without the check.
 	Criteria ValidationOracle
 	Signaler RunSignaler
 	Starter  RunStarter

@@ -704,6 +704,14 @@ func TestRevalidate_StartsARunOverTheVersionsMilestone(t *testing.T) {
 	if runID == "" {
 		t.Fatal("the caller needs the run id — its progress stream is keyed by it")
 	}
+	// The budgets must reach the ROW, not merely the request: the workflow reads
+	// them from there, so a run admitted without them would silently take the
+	// platform defaults and repair a version the caller asked only to re-check.
+	admitted := h.runs.rows[len(h.runs.rows)-1]
+	if admitted.ValidationAttempts != 1 || admitted.CycleCeiling != 4 {
+		t.Fatalf("the admitted row must carry the caller's budgets, got attempts=%d ceiling=%d",
+			admitted.ValidationAttempts, admitted.CycleCeiling)
+	}
 }
 
 // TestRevalidate_RefusesWhileARunIsLive. Adoption treats a live run as a no-op

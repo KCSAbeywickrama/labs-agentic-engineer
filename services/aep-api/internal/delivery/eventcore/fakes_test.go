@@ -584,6 +584,10 @@ func (f *fakeSupervisor) StartRun(_ context.Context, req delivery.StartRunReques
 		ID: fmt.Sprintf("run-started-%d", len(f.admits.rows)+1), OrgID: testOrg, ProjectID: testProject,
 		MilestoneNumber: req.MilestoneNumber, MilestoneTitle: req.MilestoneTitle,
 		Origin: req.Origin, State: delivery.RunStateWaiting,
+		// The budgets are SNAPSHOTTED onto the row in production, and the workflow
+		// reads them from there rather than from the request — so a fake that
+		// dropped them would let a test pass while the values never reached the run.
+		CycleCeiling: req.CycleCeiling, ValidationAttempts: req.ValidationAttempts,
 	})
 	return nil
 }

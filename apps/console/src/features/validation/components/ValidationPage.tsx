@@ -226,10 +226,16 @@ export function ValidationPage({
   // Cancel is ACCEPTED, not performed: the endpoint answers 202 the moment the
   // signal is queued, and the run turns cancelled only once the supervisor acts
   // and the runs poll observes it. isPending covers the HTTP round trip alone, so
-  // this flag holds the button from the click until the run leaves the live state
-  // — released by an error, the one case where clicking again is right.
-  const [cancelRequested, setCancelRequested] = useState(false);
-  const cancelling = cancel.isPending || (cancelRequested && !cancel.isError);
+  // this holds the button from the click until the run leaves the live state —
+  // released by an error, the one case where clicking again is right.
+  //
+  // It stores the RUN, not a boolean. This page outlives the run it is watching:
+  // a version can be re-judged, so one cancelled run is followed by another live
+  // one on the same mounted page, and a latched boolean would leave the new run's
+  // button disabled until a reload.
+  const [cancelRequestedFor, setCancelRequestedFor] = useState<string | null>(null);
+  const cancelling =
+    cancel.isPending || (cancelRequestedFor === liveRun?.id && !cancel.isError);
 
   // Body rule: the log shows while there is no report to show (running, failed
   // mechanically, nothing settled yet) OR the user toggled ?view=logs.
@@ -265,7 +271,7 @@ export function ValidationPage({
               startIcon={<X size={16} />}
               disabled={cancelling}
               onClick={() => {
-                setCancelRequested(true);
+                setCancelRequestedFor(liveRun.id);
                 cancel.mutate(liveRun.id);
               }}
               sx={{

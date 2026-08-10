@@ -56,6 +56,18 @@ SEEDER_CLIENT_ID="${SEEDER_CLIENT_ID:-aep-local-dev-seeder}"
 SEEDER_CLIENT_SECRET="${SEEDER_CLIENT_SECRET:-aep-local-dev-seeder-secret}"
 ATTEMPTS="${ATTEMPTS:-1}"
 
+# Both budgets are interpolated into hand-built JSON below, so a non-numeric or
+# leading-zero value would ship a malformed body and come back as an opaque 400.
+# Refuse it here, where the message can name the variable.
+if ! [[ "$ATTEMPTS" =~ ^[1-9][0-9]*$ ]]; then
+    echo "❌ ATTEMPTS must be a positive integer (got '${ATTEMPTS}')." >&2
+    exit 1
+fi
+if [ -n "${CEILING:-}" ] && ! [[ "$CEILING" =~ ^[1-9][0-9]*$ ]]; then
+    echo "❌ CEILING must be a positive integer (got '${CEILING}')." >&2
+    exit 1
+fi
+
 if ! curl -fsS --max-time 3 "$BFF_URL/healthz" > /dev/null 2>&1; then
     echo "❌ BFF not reachable at $BFF_URL"
     echo "   Bring the compose stack up first: cd deployments && bash scripts/start.sh"

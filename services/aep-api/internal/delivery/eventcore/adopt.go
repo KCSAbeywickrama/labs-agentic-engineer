@@ -129,18 +129,25 @@ func (e *Events) startRun(ctx context.Context, orgID, projectID string, mileston
 // The three guards all run BEFORE the supervisor is asked, and the order is the
 // cheap-and-certain first:
 //
-//  1. A live run on the milestone. This one must precede admission for a
-//     structural reason: the revalidate origin sits outside the spec-run partial
-//     index, so nothing in the database would refuse a second row. The supervisor
-//     would admit one, find the workflow id already taken (AlreadyStarted), and
-//     return successfully — leaving a row nobody drives.
+//  1. A live run on the milestone. This one ANSWERS the caller; it does not make
+//     the invariant true. Two concurrent requests can both pass it, so the rule
+//     itself lives in the database — a partial unique index admitting one
+//     non-terminal run per milestone, which the insert's ON CONFLICT DO NOTHING
+//     catches. Without that index the loser's row was admitted with no workflow
+//     behind it (Temporal answers AlreadyStarted on the reused id) and, being
+//     non-terminal, refused every later revalidation of that version forever.
 //  2. Open work in the milestone.
 //  3. An acceptance oracle to validate against.
 //
 // attempts and ceiling ride through untouched; zero on either means the
 // platform default, resolved at the run row and again in the workflow.
 func (e *Events) Revalidate(ctx context.Context, orgID, projectID string, milestone MilestoneRef, attempts, ceiling int) (runID string, err error) {
-	if e.p.Runs == nil || e.p.Issues == nil || e.p.Starter == nil {
+	// Criteria is required, not optional. Without it the oracle guard is skipped,
+	// and a version with no criteria would run a revalidation that can only
+	// conclude `skipped` — overwriting a real verdict, since the newest run owns
+	// the version's answer. A misconfigured boot must refuse, not silently widen
+	// what a revalidation may do.
+	if e.p.Runs == nil || e.p.Issues == nil || e.p.Starter == nil || e.p.Criteria == nil {
 		return "", fmt.Errorf("eventcore: revalidate not configured")
 	}
 	live, err := e.p.Runs.LiveRunForMilestone(ctx, orgID, projectID, milestone.Number)
@@ -160,14 +167,12 @@ func (e *Events) Revalidate(ctx context.Context, orgID, projectID string, milest
 	if counts != nil && counts.OpenNonGateWork() > 0 {
 		return "", delivery.ErrMilestoneHasOpenWork
 	}
-	if e.p.Criteria != nil {
-		hasCriteria, cerr := e.p.Criteria.HasValidationCriteria(ctx, orgID, projectID)
-		if cerr != nil {
-			return "", cerr
-		}
-		if !hasCriteria {
-			return "", delivery.ErrNoAcceptanceCriteria
-		}
+	hasCriteria, cerr := e.p.Criteria.HasValidationCriteria(ctx, orgID, projectID)
+	if cerr != nil {
+		return "", cerr
+	}
+	if !hasCriteria {
+		return "", delivery.ErrNoAcceptanceCriteria
 	}
 
 	slog.InfoContext(ctx, "eventcore: revalidating a deployed version",
