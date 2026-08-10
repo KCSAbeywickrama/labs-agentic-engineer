@@ -98,7 +98,8 @@ func (r *ComponentRetention) ReapBeforeCreate(ctx context.Context, orgID, projec
 
 	agents := make([]openchoreo.InternalComponent, 0, len(all))
 	for _, c := range all {
-		if c.TypeName == openchoreo.CodingAgentComponentTypeRef {
+		// Match the lister: accept bare `coding-agent` and `job/coding-agent`.
+		if openchoreo.IsCodingAgentTypeName(c.TypeName) {
 			agents = append(agents, c)
 		}
 	}

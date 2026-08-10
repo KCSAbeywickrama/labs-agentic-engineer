@@ -399,10 +399,12 @@ func internalComponentFrom(c ocgen.Component) InternalComponent {
 	}
 }
 
-// isCodingAgentTypeName reports whether typeName is a coding-agent ComponentType
+// IsCodingAgentTypeName reports whether typeName is a coding-agent ComponentType
 // reference. OC may surface either the bare name (`coding-agent`) or the
-// workload-qualified form (`job/coding-agent`).
-func isCodingAgentTypeName(typeName string) bool {
+// workload-qualified form (`job/coding-agent`). Shared by the internal lister
+// and retention so a surface that returns one form cannot be silently pruned
+// by a check that only accepts the other.
+func IsCodingAgentTypeName(typeName string) bool {
 	return typeName == CodingAgentComponentTypeRef || typeName == CodingAgentComponentTypeName
 }
 
@@ -448,7 +450,7 @@ func (c *componentClient) ListInternalComponents(ctx context.Context, orgName, p
 			if comp.Spec == nil || comp.Spec.Owner.ProjectName != projectName {
 				continue
 			}
-			if !isCodingAgentTypeName(comp.Spec.ComponentType.Name) {
+			if !IsCodingAgentTypeName(comp.Spec.ComponentType.Name) {
 				continue
 			}
 			out = append(out, internalComponentFrom(comp))
@@ -485,6 +487,22 @@ func (c *componentClient) GetComponent(ctx context.Context, orgName, projectName
 }
 
 func (c *componentClient) CreateComponent(ctx context.Context, orgName, projectName string, req *CreateComponentRequest) (*gen.Component, error) {
+	// Refuse a coding-agent Component whose SCOPED name leaves OpenChoreo no
+	// room for `-{env}-{hash8}` inside the Kubernetes label-value limit. Same
+	// failure class as an overlong WorkflowRun name: OC accepts the parent CR,
+	// then ResourceApplyFailed on the Job, then no runner pod — only the Job
+	// path surfaces on the ReleaseBinding, which the console's progress dark
+	// zone does not read. Catch it here, where the cause is still known.
+	if req != nil && req.Type == CodingAgentComponentTypeRef {
+		scoped := ScopedComponentName(projectName, req.Name)
+		if len(scoped) > CodingAgentComponentNameBudget {
+			return nil, fmt.Errorf(
+				"create component: coding-agent name %q is %d chars after project scoping, over the %d-char budget "+
+					"(OpenChoreo appends -%s-<hash8> into a pod label, so this Component would be accepted and then never schedule a runner)",
+				scoped, len(scoped), CodingAgentComponentNameBudget, DevEnvironmentName)
+		}
+	}
+
 	resp, err := c.oc.CreateComponentWithResponse(ctx, orgName, buildCreateComponentBody(projectName, req))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create component: %w", err)

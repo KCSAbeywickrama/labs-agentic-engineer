@@ -68,8 +68,12 @@ func CodingAgentComponentType() map[string]any {
 							"enum": []any{"Never"},
 						},
 						// Resource ceilings — schema, not caller, enforces the cap.
+						// Requests are enum-bounded too: an unbounded request can
+						// schedule-starve the dataplane the same way an unbounded
+						// limit can.
 						"cpuRequest": map[string]any{
 							"type": "string", "default": "500m",
+							"enum": []any{"500m", "1"},
 						},
 						"cpuLimit": map[string]any{
 							"type": "string", "default": "1",
@@ -77,6 +81,7 @@ func CodingAgentComponentType() map[string]any {
 						},
 						"memoryRequest": map[string]any{
 							"type": "string", "default": "1Gi",
+							"enum": []any{"1Gi", "2Gi"},
 						},
 						"memoryLimit": map[string]any{
 							"type": "string", "default": "2Gi",

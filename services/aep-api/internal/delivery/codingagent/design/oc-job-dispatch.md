@@ -95,10 +95,12 @@ cycles are pruned.
 
 **Cancel deletes at once.** A cancel signal settles the run row on the existing
 path; deleting the Component is what stops the pod mid-air and frees the slot,
-so it does not wait for retention. A cancelled cycle is quiet by design: the
-watcher recognises the deliberate deletion and never reports it as a missing
-job. Cancel writes no `ExecCanceled` and mints no execution row — agent work has
-none.
+so it does not wait for retention. **User-facing consequence:** a cancelled
+cycle's agent log is gone with the Component (no archive, no live tail) — that
+is intentional, not a capture bug. A cancelled cycle is quiet by design for the
+watcher too: it recognises the deliberate deletion and never reports it as a
+missing job. Cancel writes no `ExecCanceled` and mints no execution row — agent
+work has none.
 
 Every delete goes through the OC API. An out-of-band `kubectl` delete emits no
 billing decrement, which is why no code path may hold a Kubernetes client, and

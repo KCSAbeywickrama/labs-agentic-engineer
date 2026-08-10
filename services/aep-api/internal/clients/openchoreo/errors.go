@@ -32,11 +32,11 @@ import (
 // the openchoreo package here because the OC client is the only producer.
 // If a second client adopts the same scheme, hoist them to a shared package.
 var (
-	ErrBadRequest          = errors.New("bad request")
-	ErrUnauthorized        = errors.New("unauthorized")
-	ErrForbidden           = errors.New("forbidden")
-	ErrNotFound            = errors.New("not found")
-	ErrConflict            = errors.New("conflict")
+	ErrBadRequest   = errors.New("bad request")
+	ErrUnauthorized = errors.New("unauthorized")
+	ErrForbidden    = errors.New("forbidden")
+	ErrNotFound     = errors.New("not found")
+	ErrConflict     = errors.New("conflict")
 	// ErrPaymentRequired is the entitlement gate's HTTP 402 (agent concurrency
 	// quota). Mapped by the coding-agent dispatcher to a blocked-not-failed
 	// sentinel — never a retryable create failure.

@@ -204,7 +204,6 @@ type Config struct {
 	// feature. Enabled iff HostPort is set — unset leaves aep-api fully
 	// functional with the workflow endpoints answering 503.
 	Temporal TemporalConfig
-
 }
 
 // Validate checks format/consistency invariants the per-field env readers

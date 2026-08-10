@@ -295,11 +295,12 @@ resolves number-through-run-rows and never matches a title.
 ### Milestone run
 One supervised pass over one milestone — the platform's single dispatch door.
 Origin is `spec-build` or `incident-adoption`; state is
-`planning | waiting | running | succeeded | failed | cancelled`. `planning` is
-the fill window — the row is admitted (arming the mutex) before its milestone
-is written, so it names work the platform is doing; `waiting` is the unbounded
-wait, where something outside the platform is needed. A milestone sees
-**sequential** runs across its life, so the workflow id is reused.
+`planning | waiting | running | succeeded | failed | cancelled | blocked`.
+`planning` is the fill window — the row is admitted (arming the mutex) before its
+milestone is written, so it names work the platform is doing; `waiting` is the
+unbounded wait, where something outside the platform is needed; `blocked` is
+terminal and is not a failure — the org has no agent concurrency slot left.
+A milestone sees **sequential** runs across its life, so the workflow id is reused.
 A run dispatches its cycles **one at a time**, so an org's concurrent-agent
 entitlement counts in-flight milestone runs rather than tasks.
 
@@ -318,7 +319,8 @@ read through the OC API; once the pod is gone, the cycle's log is an observer
 query, which is answerable only while the Component is retained. A finished
 cycle's Component is **retained** and later **pruned oldest-first** past the
 retention cap; a **cancelled** cycle's Component is deleted at once, because that
-is what stops the pod and frees the org's entitlement slot. A cycle whose
+is what stops the pod and frees the org's entitlement slot — and with it the
+cycle's agent log (cancelled runs keep no progress history). A cycle whose
 Component has been pruned reports its log as unavailable — the platform keeps no
 second copy.
 

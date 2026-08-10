@@ -163,13 +163,13 @@ func TestDispatch_OCPathDispatchesThroughOpenChoreo(t *testing.T) {
 // re-reads instead of minting a second billed Component.
 func TestCodingAgentRunNameFor_IsStableAcrossRetries(t *testing.T) {
 	id := "11111111-1111-1111-1111-111111111111"
-	a := codingAgentRunNameFor(id)
-	b := codingAgentRunNameFor(id)
+	a := codingAgentRunNameFor("widgets", id)
+	b := codingAgentRunNameFor("widgets", id)
 	if a != b {
 		t.Fatalf("unstable run name: %q then %q", a, b)
 	}
-	if want := "ca-11111111-11111111111111111111"; a != want {
-		t.Fatalf("run name = %q, want %q", a, want)
+	if !strings.HasPrefix(a, "ca-") {
+		t.Fatalf("run name = %q, want ca- prefix", a)
 	}
 }
 

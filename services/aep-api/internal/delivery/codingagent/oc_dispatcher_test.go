@@ -32,12 +32,12 @@ import (
 type fakeOCSurface struct {
 	mu sync.Mutex
 
-	calls  []string
+	calls    []string
 	orderLog *[]string // optional shared call-order log (retention tests)
-	create *openchoreo.CreateComponentRequest
-	load   openchoreo.WorkloadInput
-	rel    string
-	bind   [2]string // environment, releaseName
+	create   *openchoreo.CreateComponentRequest
+	load     openchoreo.WorkloadInput
+	rel      string
+	bind     [2]string // environment, releaseName
 
 	createErr              error
 	ensureTypeErr          error

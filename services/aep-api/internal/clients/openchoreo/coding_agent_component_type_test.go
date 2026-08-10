@@ -78,8 +78,12 @@ func assertIntDefault(t *testing.T, props map[string]any, key string, want int) 
 func assertResourceCeilingsPresent(t *testing.T, props map[string]any) {
 	t.Helper()
 	for _, k := range []string{"cpuRequest", "cpuLimit", "memoryRequest", "memoryLimit"} {
-		if props[k] == nil {
+		p, ok := props[k].(map[string]any)
+		if !ok {
 			t.Fatalf("missing resource schema key %q", k)
+		}
+		if _, ok := p["enum"]; !ok {
+			t.Fatalf("%s must have an enum ceiling (requests and limits)", k)
 		}
 	}
 }

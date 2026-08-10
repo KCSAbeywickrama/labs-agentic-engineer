@@ -150,10 +150,9 @@ func Steps(db *gorm.DB, deploymentTier string, credKey []byte) []database.Step {
 		// (org, project). Fresh schema — nothing to backfill from the legacy
 		// executions/workflow_runs tables.
 		ctxStep("milestone_runs", RunMilestoneRuns),
-		// run_cycle_logs: legacy CREATE TABLE from the pre-read-model era. Milestone
-		// cycle logs are read from OpenChoreo and the observability archive, not
-		// stored here; nothing reads or writes the table. The step stays idempotent
-		// for existing schemas.
+		// run_cycle_logs: RETIRED tombstone. Writers deleted (grill Q2); step
+		// kept for frozen order and no longer creates the table (see
+		// run_cycle_logs.go).
 		ctxStep("run_cycle_logs", RunRunCycleLogs),
 		// model_rates seed (#291): the platform's active model at today's
 		// rates. AutoMigrate (BaseModels) creates the table; this idempotent

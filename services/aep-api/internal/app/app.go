@@ -1018,14 +1018,14 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		runreadProjectBuilds{oc: componentClient})
 
 	deliveryHandlers, err := deliveryhttpapi.New(deliveryhttpapi.Deps{
-		BuildSvc:       buildSvc,
-		PreflightSvc:   preflightSvc,
-		BuildActivity:  buildActivityRecorder{svc: activitySvc},
-		TaskReads:      taskReads,
-		TaskCommands:   taskCommands,
-		TaskStream:     taskStreamSvc,
-		RunReads:       runReads,
-		RunProgress:    runProgress,
+		BuildSvc:      buildSvc,
+		PreflightSvc:  preflightSvc,
+		BuildActivity: buildActivityRecorder{svc: activitySvc},
+		TaskReads:     taskReads,
+		TaskCommands:  taskCommands,
+		TaskStream:    taskStreamSvc,
+		RunReads:      runReads,
+		RunProgress:   runProgress,
 		// Cancel signals the supervisor AND deletes the cycle's agent
 		// Component, which is what actually stops the pod and frees the org's
 		// billing concurrency slot.
@@ -1262,8 +1262,6 @@ func computeDegradations(cfg config.Config, secretsDelivery bool) []Degradation 
 	}
 	if cfg.Observability.BaseURL == "" {
 		off("build-logs", "OBSERVABILITY_API_URL not set — build logs disabled")
-	}
-	if cfg.Observability.BaseURL == "" {
 		off("cycle-log-archive", "OBSERVER_URL not set — a finished cycle's agent log cannot be read back")
 	}
 	if !secretsDelivery {

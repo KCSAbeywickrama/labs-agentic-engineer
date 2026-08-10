@@ -158,11 +158,10 @@ func TestExecWatcher_BuildSuccess_FinishesSucceeded(t *testing.T) {
 	}
 }
 
-// TestExecWatcher_SkipsCodingAgentRuns proves the ExecWatcher ignores
-// coding-agent runs (`ca-…`, owned by the JobWatcher) and polls only OpenChoreo
-// WorkflowRuns (`wf-…`) — otherwise it spams "WorkflowRun not found" every tick
-// for the agent rows.
-func TestExecWatcher_SkipsCodingAgentRuns(t *testing.T) {
+// TestExecWatcher_ClosesLegacyCodingAgentExecutions: ca- KindCoding rows are
+// not WorkflowRuns. Skipping them forever left pre-migration executions
+// `running`; the watcher now Finishes them failed so the issue mutex releases.
+func TestExecWatcher_ClosesLegacyCodingAgentExecutions(t *testing.T) {
 	caRow := &delivery.Execution{ID: "j1", OrgID: "acme", Repo: "acme/widgets", IssueNumber: 7,
 		Kind: string(taskmeta.KindCoding), Status: string(taskmeta.ExecRunning), RunName: "ca-abc12345-2601011200"}
 	wfRow := &delivery.Execution{ID: "w1", OrgID: "acme", Repo: "acme/widgets", IssueNumber: 8,
@@ -182,7 +181,13 @@ func TestExecWatcher_SkipsCodingAgentRuns(t *testing.T) {
 		t.Fatalf("Sweep: %v", err)
 	}
 	if len(polled) != 1 || polled[0] != "wf-xyz" {
-		t.Fatalf("ExecWatcher must skip ca- rows and poll only wf-, polled=%v", polled)
+		t.Fatalf("ExecWatcher must not poll ca- as WorkflowRuns, polled=%v", polled)
+	}
+	if got := repo.get("j1"); got.Status != string(taskmeta.ExecFailed) || got.Reason != legacyCodingExecutionReason {
+		t.Fatalf("legacy ca- row = status %q reason %q, want failed/%s", got.Status, got.Reason, legacyCodingExecutionReason)
+	}
+	if got := repo.get("w1"); got.Status != string(taskmeta.ExecRunning) {
+		t.Fatalf("wf- coding row must stay running until WorkflowRun completes, got %q", got.Status)
 	}
 }
 

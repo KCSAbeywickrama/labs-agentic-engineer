@@ -123,6 +123,7 @@ func (e MilestoneRunViewOrigin) Valid() bool {
 
 // Defines values for MilestoneRunViewState.
 const (
+	MilestoneRunViewStateBlocked   MilestoneRunViewState = "blocked"
 	MilestoneRunViewStateCancelled MilestoneRunViewState = "cancelled"
 	MilestoneRunViewStateFailed    MilestoneRunViewState = "failed"
 	MilestoneRunViewStatePlanning  MilestoneRunViewState = "planning"
@@ -134,6 +135,8 @@ const (
 // Valid indicates whether the value is a known member of the MilestoneRunViewState enum.
 func (e MilestoneRunViewState) Valid() bool {
 	switch e {
+	case MilestoneRunViewStateBlocked:
+		return true
 	case MilestoneRunViewStateCancelled:
 		return true
 	case MilestoneRunViewStateFailed:
@@ -1028,10 +1031,10 @@ type MilestoneRunView struct {
 	Origin         MilestoneRunViewOrigin `json:"origin"`
 	StartedAt      *time.Time             `json:"startedAt,omitempty"`
 
-	// State planning is the fill window — the version's milestone is still being written (gates minted, then issues planned in). waiting is the unbounded wait between cycles, where something outside the platform is needed.
+	// State planning is the fill window — the version's milestone is still being written (gates minted, then issues planned in). waiting is the unbounded wait between cycles, where something outside the platform is needed. blocked is terminal and is NOT a failure — the org has no agent concurrency slot left, so the cycle was never launched (see terminalReason agent-quota-blocked).
 	State MilestoneRunViewState `json:"state"`
 
-	// TerminalReason Why a non-succeeded run stopped. Each value names exactly one failure class; empty while the run is non-terminal and on a succeeded run.
+	// TerminalReason Why a non-succeeded run stopped. Each value names exactly one failure class; empty while the run is non-terminal and on a succeeded run. agent-quota-blocked explains state=blocked.
 	TerminalReason string `json:"terminalReason,omitempty"`
 
 	// Validation The run's validation outcome. The verdict is a RUN property, not a per-issue one, and this is where the deployment surface reads it.
@@ -1041,7 +1044,7 @@ type MilestoneRunView struct {
 // MilestoneRunViewOrigin defines model for MilestoneRunView.Origin.
 type MilestoneRunViewOrigin string
 
-// MilestoneRunViewState planning is the fill window — the version's milestone is still being written (gates minted, then issues planned in). waiting is the unbounded wait between cycles, where something outside the platform is needed.
+// MilestoneRunViewState planning is the fill window — the version's milestone is still being written (gates minted, then issues planned in). waiting is the unbounded wait between cycles, where something outside the platform is needed. blocked is terminal and is NOT a failure — the org has no agent concurrency slot left, so the cycle was never launched (see terminalReason agent-quota-blocked).
 type MilestoneRunViewState string
 
 // OrganizationList defines model for OrganizationList.

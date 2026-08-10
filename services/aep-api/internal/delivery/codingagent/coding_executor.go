@@ -276,7 +276,7 @@ func (e *CodingExecutor) dispatchViaOC(ctx context.Context, in agentLaunch, repo
 		MilestoneNumber:       disp.milestoneNumber,
 		MilestoneTitle:        disp.milestoneTitle,
 		Kind:                  disp.taskKind,
-		RunName:               codingAgentRunNameFor(in.correlationID),
+		RunName:               codingAgentRunNameFor(in.projectID, in.correlationID),
 		ActiveDeadlineSeconds: int(disp.deadline),
 		Env:                   env,
 		SecretEnv: []SecretEnvRef{
@@ -401,34 +401,14 @@ func isCodingAgentRun(runName string) bool {
 	return strings.HasPrefix(runName, codingAgentRunPrefix)
 }
 
-// codingAgentRunNameFor derives a stable `ca-<8>-<nonce>` Component / JobRef
-// name from the cycle id. Stability matters: CreateComponent treats 409 as
-// success and re-reads, so a Temporal retry after a crash must hit the same
-// name — a wall-clock suffix would mint a second billed Component.
-func codingAgentRunNameFor(id string) string {
-	clean := strings.ReplaceAll(id, "-", "")
-	if clean == "" {
-		clean = "unknown"
-	}
-	shortID := clean
-	if len(shortID) > 8 {
-		shortID = shortID[:8]
-	}
-	nonce := clean
-	if len(nonce) > 8 {
-		nonce = nonce[8:]
-	}
-	if len(nonce) > 20 {
-		nonce = nonce[:20]
-	}
-	if nonce == "" {
-		nonce = shortID
-	}
-	name := fmt.Sprintf("%s%s-%s", codingAgentRunPrefix, shortID, nonce)
-	if len(name) > 63 {
-		name = name[:63]
-	}
-	return name
+// codingAgentRunNameFor derives a stable `ca-…` Component / JobRef name from
+// the project + cycle id. Delegates to openchoreo.NewCodingAgentRunName so the
+// SCOPED Component name leaves room for OpenChoreo's Job label decoration
+// (see CodingAgentComponentNameBudget). Stability matters: CreateComponent
+// treats 409 as success and re-reads, so a Temporal retry after a crash must
+// hit the same name — a wall-clock suffix would mint a second billed Component.
+func codingAgentRunNameFor(projectID, cycleID string) string {
+	return openchoreo.NewCodingAgentRunName(projectID, cycleID)
 }
 
 func derefStr(s *string) string {

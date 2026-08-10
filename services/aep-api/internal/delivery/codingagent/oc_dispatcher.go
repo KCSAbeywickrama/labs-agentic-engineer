@@ -50,12 +50,12 @@ type OCJobSurface interface {
 type OCDispatchInputs struct {
 	OrgID, ProjectID, CycleID string
 	// RunID is the milestone run the cycle belongs to — Component description only.
-	RunID           string
-	MilestoneNumber int
-	MilestoneTitle  string
-	Kind            string // coding|validation|…
-	RunName         string // ca-… deterministic for this attempt
-	Image           string
+	RunID                 string
+	MilestoneNumber       int
+	MilestoneTitle        string
+	Kind                  string // coding|validation|…
+	RunName               string // ca-… deterministic for this attempt
+	Image                 string
 	ActiveDeadlineSeconds int
 	Env                   map[string]string
 	// SecretEnv is refs-only (anthropic/github/publisher/external) — values
