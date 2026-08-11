@@ -89,6 +89,14 @@ const FLUSH_TIMEOUT_MS = 30_000;
 // there; this only stops a server that accepts-then-drops from spinning a
 // full resync per round-trip.
 const REBUILD_DELAY_MS = 1_000;
+// …and the ceiling once that delay doubles per consecutive rebuild. A rebuild
+// costs the SERVER a room load and a git seed, so a crash-looping collab pod
+// must not be held at one per second by every open tab.
+const REBUILD_MAX_DELAY_MS = 30_000;
+// A session that stayed synced this long was healthy, so the next drop starts
+// the backoff over. Without it, a server that syncs before each drop would
+// reset the count every round and never back off at all.
+const REBUILD_RESET_MS = 30_000;
 
 const PEER_COLORS = [
   "#e57373", "#64b5f6", "#81c784", "#ffb74d",
@@ -124,6 +132,10 @@ export function useCollabSpec(
   // needs a rebuild — see `scheduleRebuild`.
   const syncedRef = useRef(false);
   const rebuildTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Consecutive rebuilds with no healthy session between them, and when the
+  // live one last synced — together they set the backoff (see `scheduleRebuild`).
+  const rebuildAttemptsRef = useRef(0);
+  const syncedAtRef = useRef(0);
   // Last-seen file-path set (serialized) so we re-render the list only when a
   // file is added/removed/created — not on every keystroke within a file.
   const pathKeyRef = useRef("");
@@ -158,13 +170,35 @@ export function useCollabSpec(
     // are lost, which is the same content the server already discarded when it
     // unloaded the room. Before the first sync the doc is still empty and can
     // carry nothing back, so the provider's own retry is left to do its job.
+    //
+    // A rejected bearer is the one drop this must NOT answer: the rebuild would
+    // present the same token and be rejected again, so `authFailed` latches for
+    // the life of this provider.
+    let authFailed = false;
     const scheduleRebuild = () => {
-      if (!syncedRef.current || rebuildTimerRef.current) return;
+      if (authFailed || !syncedRef.current || rebuildTimerRef.current) return;
       syncedRef.current = false;
-      rebuildTimerRef.current = setTimeout(() => {
-        rebuildTimerRef.current = null;
-        setEpoch((e) => e + 1);
-      }, REBUILD_DELAY_MS);
+      // Silence the OLD provider's own retry first. Its websocket re-arms a
+      // reconnect from `onClose` on the same 1s delay as ours, so a socket that
+      // reopens before React commits the teardown would carry this doc's
+      // already-seeded fragments into the room the server just reseeded — the
+      // exact doubling the rebuild exists to prevent. The doc is being thrown
+      // away regardless, so there is nothing to lose by closing it now.
+      provider.disconnect();
+      // Back off while drops keep coming, and start over once a session has
+      // held long enough to count as healthy.
+      const attempt =
+        Date.now() - syncedAtRef.current >= REBUILD_RESET_MS
+          ? 0
+          : rebuildAttemptsRef.current;
+      rebuildAttemptsRef.current = attempt + 1;
+      rebuildTimerRef.current = setTimeout(
+        () => {
+          rebuildTimerRef.current = null;
+          setEpoch((e) => e + 1);
+        },
+        Math.min(REBUILD_DELAY_MS * 2 ** attempt, REBUILD_MAX_DELAY_MS),
+      );
     };
 
     const provider = new HocuspocusProvider({
@@ -174,6 +208,7 @@ export function useCollabSpec(
       token: async () => (await getAccessToken()) ?? "",
       onSynced: () => {
         syncedRef.current = true;
+        syncedAtRef.current = Date.now();
         setStatus("connected");
       },
       onStatus: ({ status: s }) => {
@@ -182,8 +217,19 @@ export function useCollabSpec(
           scheduleRebuild();
         }
       },
-      // Terminal: a rejected bearer will be rejected again on a rebuild.
-      onAuthenticationFailed: () => setStatus("offline"),
+      // Terminal: a rejected bearer will be rejected again on a rebuild. The
+      // server closes the socket right after rejecting, and the provider emits
+      // the rejection and the close in either order, so this both latches the
+      // flag and cancels a bump the close already queued. The room stays
+      // offline until something else remounts the hook.
+      onAuthenticationFailed: () => {
+        authFailed = true;
+        if (rebuildTimerRef.current) {
+          clearTimeout(rebuildTimerRef.current);
+          rebuildTimerRef.current = null;
+        }
+        setStatus("offline");
+      },
     });
     providerRef.current = provider;
 

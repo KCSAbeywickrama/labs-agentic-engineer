@@ -34,17 +34,30 @@ interface FakeConfig {
   document: Y.Doc;
   onSynced: () => void;
   onStatus: (data: { status: string }) => void;
+  onAuthenticationFailed: (data: { reason: string }) => void;
 }
 
-const instances: FakeConfig[] = [];
+/** A recorded room: the hook's callbacks plus what it did to the provider. */
+interface FakeRoom extends FakeConfig {
+  disconnectCalls: number;
+}
+
+const instances: FakeRoom[] = [];
 
 vi.mock("@hocuspocus/provider", () => {
   class FakeProvider {
     document: Y.Doc;
+    room: FakeRoom;
     awareness = { on: () => {}, off: () => {}, getStates: () => new Map() };
     constructor(config: FakeConfig) {
       this.document = config.document;
-      instances.push(config);
+      this.room = { ...config, disconnectCalls: 0 };
+      instances.push(this.room);
+    }
+    // The real provider's websocket re-arms its own reconnect on close; the
+    // hook calls this to silence it before rebuilding.
+    disconnect() {
+      this.room.disconnectCalls += 1;
     }
     setAwarenessField() {}
     on() {}
@@ -133,5 +146,120 @@ describe("useCollabSpec — rejoin from scratch after a post-sync drop", () => {
     });
 
     expect(instances).toHaveLength(1);
+  });
+
+  // The old provider's websocket re-arms a reconnect from its own `onClose`,
+  // on the same 1s delay as the rebuild. If that socket reopens before React
+  // commits the teardown it carries the seeded fragments back into a reseeded
+  // room — the doubling this all exists to prevent. So the drop must silence
+  // the old provider immediately, not merely outrace it.
+  it("silences the old provider before the rebuild is even due", () => {
+    renderCollab();
+    act(() => instances[0]!.onSynced());
+    act(() => instances[0]!.onStatus({ status: "disconnected" }));
+
+    expect(instances[0]!.disconnectCalls).toBe(1);
+    expect(instances).toHaveLength(1); // still only armed, not yet rebuilt
+  });
+});
+
+// A rejected bearer is the one drop a rebuild must not answer: the fresh
+// provider would present the same token and be rejected again. The server
+// closes the socket right after rejecting, so the rejection and the close
+// arrive in either order — both must end offline and stay there.
+describe("useCollabSpec — an authentication failure is terminal", () => {
+  beforeEach(() => {
+    instances.length = 0;
+    vi.useFakeTimers();
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it("cancels a rebuild the preceding drop already queued", async () => {
+    const { result } = renderCollab();
+    act(() => instances[0]!.onSynced());
+    act(() => instances[0]!.onStatus({ status: "disconnected" }));
+    act(() => instances[0]!.onAuthenticationFailed({ reason: "expired" }));
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+
+    expect(instances).toHaveLength(1);
+    expect(result.current.status).toBe("offline");
+  });
+
+  it("blocks a rebuild the following drop would have queued", async () => {
+    const { result } = renderCollab();
+    act(() => instances[0]!.onSynced());
+    act(() => instances[0]!.onAuthenticationFailed({ reason: "expired" }));
+    act(() => instances[0]!.onStatus({ status: "disconnected" }));
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+
+    expect(instances).toHaveLength(1);
+    expect(result.current.status).toBe("offline");
+  });
+});
+
+// A rebuild costs the server a room load and a git seed. A pod that
+// accepts-then-drops must not be held at one of those per second, per tab.
+describe("useCollabSpec — rebuilds back off while drops keep coming", () => {
+  beforeEach(() => {
+    instances.length = 0;
+    vi.useFakeTimers();
+  });
+  afterEach(() => vi.useRealTimers());
+
+  /** Sync the newest room, then drop it. */
+  const syncThenDrop = () => {
+    const room = instances[instances.length - 1]!;
+    act(() => room.onSynced());
+    act(() => room.onStatus({ status: "disconnected" }));
+  };
+
+  it("doubles the delay when a session drops again right after syncing", async () => {
+    renderCollab();
+    syncThenDrop();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    expect(instances).toHaveLength(2);
+
+    // Second drop with no healthy session in between: 2s, not 1s.
+    syncThenDrop();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    expect(instances).toHaveLength(2);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    expect(instances).toHaveLength(3);
+  });
+
+  it("starts over after a session that held", async () => {
+    renderCollab();
+    syncThenDrop();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    expect(instances).toHaveLength(2);
+
+    // This one stays synced past the reset window, so it was healthy: the
+    // next drop is back to the base delay instead of the doubled one.
+    act(() => instances[1]!.onSynced());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(31_000);
+    });
+    act(() => instances[1]!.onStatus({ status: "disconnected" }));
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    expect(instances).toHaveLength(3);
   });
 });
