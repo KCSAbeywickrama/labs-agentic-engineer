@@ -251,6 +251,30 @@ export function readReferenceAttachments(snapshotDir: string, references: string
   return parts;
 }
 
+/** Where the console commits uploaded reference documents (#383/#384). */
+export const REFERENCES_PREFIX = "specs/requirements/references/";
+
+/**
+ * Overlay the GIT snapshot's reference-document texts onto a room-scoped
+ * turn's files. The collab room deliberately excludes reference documents
+ * (they are inputs, not collaboratively-edited spec), so a turn whose CURRENT
+ * STATE comes from the room would silently lose the user's text references —
+ * a live /start did exactly that: the steer listed claim.md, the snapshot
+ * held it, and the prompt never saw it. Git is the authority for references,
+ * so a stale room copy (seeded before the exclusion existed) is overwritten,
+ * and the room stays the authority for everything else.
+ */
+export function overlayReferenceTexts(
+  roomFiles: Record<string, string>,
+  gitFiles: Record<string, string>,
+): Record<string, string> {
+  const refs = Object.entries(gitFiles).filter(([path]) => path.startsWith(REFERENCES_PREFIX));
+  if (refs.length === 0) return roomFiles;
+  const out = { ...roomFiles };
+  for (const [path, content] of refs) out[path] = content;
+  return out;
+}
+
 // --- The `_skills` snapshot → lazy SkillSource --------------------------------
 
 /** Split a `SKILL.md` into frontmatter fields + body (mirrors the caller-side skill resolver). */

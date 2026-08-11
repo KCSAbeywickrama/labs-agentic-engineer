@@ -27,6 +27,7 @@ import {
   keepInTurnSnapshot,
   loadSkillsFromSnapshot,
   readReferenceAttachments,
+  overlayReferenceTexts,
   MAX_REFERENCE_ATTACHMENT_BYTES,
   SkillReadError,
 } from "../src/conversation/load-workspace.js";
@@ -450,4 +451,37 @@ test("listReferences throws SkillReadError when an aux dir is unreadable", () =>
     }
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+// A room-scoped turn's CURRENT STATE comes from the collab room, and the room
+// (correctly) excludes reference documents — so text references must ride in
+// from the GIT snapshot, or a room turn silently loses the user's brief. A
+// live /start did exactly that: claim.md was listed in the steer, present in
+// the snapshot, and absent from the prompt.
+test("overlayReferenceTexts: git reference texts join the room files", () => {
+  const room = { "specs/requirements/prd.md": "# PRD (room)" };
+  const git = {
+    "specs/requirements/prd.md": "# PRD (git, stale)",
+    [`${REF_DIR}/claim.md`]: "Single web app.",
+    "README.md": "root",
+  };
+  const merged = overlayReferenceTexts(room, git);
+  assert.equal(merged[`${REF_DIR}/claim.md`], "Single web app.");
+  // The room stays the authority for everything that is not a reference.
+  assert.equal(merged["specs/requirements/prd.md"], "# PRD (room)");
+  assert.equal(merged["README.md"], undefined);
+});
+
+test("overlayReferenceTexts: git wins over a stale room copy of a reference", () => {
+  // Rooms seeded before the exclusion existed may still carry reference
+  // entries (possibly doubled or mangled) — git is the authority for them.
+  const room = { [`${REF_DIR}/claim.md`]: "poisoned room copy" };
+  const git = { [`${REF_DIR}/claim.md`]: "the real content" };
+  assert.equal(overlayReferenceTexts(room, git)[`${REF_DIR}/claim.md`], "the real content");
+});
+
+test("overlayReferenceTexts: no references → the room files return unchanged", () => {
+  const room = { "specs/requirements/prd.md": "# PRD" };
+  const merged = overlayReferenceTexts(room, { "README.md": "hi" });
+  assert.deepEqual(merged, room);
 });

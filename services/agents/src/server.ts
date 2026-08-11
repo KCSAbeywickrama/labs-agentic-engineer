@@ -61,7 +61,7 @@ import type { ConversationStore } from "./store/conversation-store.js";
 import { runConversationTurn, TurnGuard, ConcurrentTurnError } from "./conversation/run-conversation-turn.js";
 import { joinRoom, type RoomPeer } from "./collab/room-peer.js";
 import type { SkillSource } from "./agents/main/skill-source.js";
-import { readSnapshot, loadSkillsFromSnapshot, readReferenceAttachments } from "./conversation/load-workspace.js";
+import { readSnapshot, loadSkillsFromSnapshot, readReferenceAttachments, overlayReferenceTexts } from "./conversation/load-workspace.js";
 import { resolveWorkspace, WorkspaceRefError } from "./shared/snapshot-path.js";
 import { createAuthMiddleware, type AgentsAuthConfig } from "./shared/auth.js";
 import { startKeepAlive } from "./shared/keepalive.js";
@@ -334,7 +334,9 @@ export function createApp(deps: CreateAppDeps): Express {
           roomId: collab.roomId,
           token: collab.token,
         });
-        files = roomPeer.files();
+        // The room excludes reference documents by design — text references
+        // ride in from the git snapshot instead (git is their authority).
+        files = overlayReferenceTexts(roomPeer.files(), files);
       } catch (err) {
         res.status(502).json({
           error: err instanceof Error ? err.message : "collab room join failed",
