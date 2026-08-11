@@ -110,7 +110,11 @@ func (s *Supervisor) StartRun(ctx context.Context, req delivery.StartRunRequest)
 		MilestoneNumber: row.MilestoneNumber,
 		MilestoneTitle:  row.MilestoneTitle,
 		Origin:          row.Origin,
-		CycleCeiling:    row.CycleCeiling,
+		// Budgets come off the ROW, never the request: a run the sweep re-offers is
+		// an existing row, and reading the re-offer's (default) values would quietly
+		// widen a run that was admitted narrower.
+		CycleCeiling:       row.CycleCeiling,
+		ValidationAttempts: row.ValidationAttempts,
 	})
 	var already *serviceerror.WorkflowExecutionAlreadyStarted
 	if errors.As(err, &already) {
@@ -133,14 +137,19 @@ func (s *Supervisor) StartRun(ctx context.Context, req delivery.StartRunRequest)
 // and they are the one being supervised.
 func (s *Supervisor) admit(ctx context.Context, req delivery.StartRunRequest) (*delivery.MilestoneRun, error) {
 	if req.RunID != "" {
+		ceiling := req.CycleCeiling
+		if ceiling <= 0 {
+			ceiling = delivery.RunDefaultCycleCeiling
+		}
 		return &delivery.MilestoneRun{
-			ID:              req.RunID,
-			OrgID:           req.OrgID,
-			ProjectID:       req.ProjectID,
-			MilestoneNumber: req.MilestoneNumber,
-			MilestoneTitle:  req.MilestoneTitle,
-			Origin:          req.Origin,
-			CycleCeiling:    delivery.RunDefaultCycleCeiling,
+			ID:                 req.RunID,
+			OrgID:              req.OrgID,
+			ProjectID:          req.ProjectID,
+			MilestoneNumber:    req.MilestoneNumber,
+			MilestoneTitle:     req.MilestoneTitle,
+			Origin:             req.Origin,
+			CycleCeiling:       ceiling,
+			ValidationAttempts: req.ValidationAttempts,
 		}, nil
 	}
 	if s.runs == nil {
@@ -164,13 +173,15 @@ func (s *Supervisor) admit(ctx context.Context, req delivery.StartRunRequest) (*
 			"project", req.ProjectID, "milestone", req.MilestoneNumber, "error", err)
 	}
 	admitted, row, err := s.runs.TryAdmit(ctx, &delivery.MilestoneRun{
-		OrgID:           req.OrgID,
-		ProjectID:       req.ProjectID,
-		MilestoneNumber: req.MilestoneNumber,
-		MilestoneTitle:  req.MilestoneTitle,
-		Tag:             tag,
-		Origin:          req.Origin,
-		State:           delivery.RunStateWaiting,
+		OrgID:              req.OrgID,
+		ProjectID:          req.ProjectID,
+		MilestoneNumber:    req.MilestoneNumber,
+		MilestoneTitle:     req.MilestoneTitle,
+		Tag:                tag,
+		Origin:             req.Origin,
+		State:              delivery.RunStateWaiting,
+		CycleCeiling:       req.CycleCeiling,
+		ValidationAttempts: req.ValidationAttempts,
 	})
 	if err != nil || !admitted {
 		return nil, err

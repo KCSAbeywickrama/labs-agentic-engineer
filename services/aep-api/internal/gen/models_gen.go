@@ -106,6 +106,7 @@ func (e DeployStageValidation) Valid() bool {
 // Defines values for MilestoneRunViewOrigin.
 const (
 	IncidentAdoption MilestoneRunViewOrigin = "incident-adoption"
+	Revalidate       MilestoneRunViewOrigin = "revalidate"
 	SpecBuild        MilestoneRunViewOrigin = "spec-build"
 )
 
@@ -113,6 +114,8 @@ const (
 func (e MilestoneRunViewOrigin) Valid() bool {
 	switch e {
 	case IncidentAdoption:
+		return true
+	case Revalidate:
 		return true
 	case SpecBuild:
 		return true
@@ -1030,9 +1033,11 @@ type MilestoneRunView struct {
 	MilestoneNumber int64          `json:"milestoneNumber"`
 
 	// MilestoneTitle The milestone's GitHub title at creation. Display only — the number is the key, and the version this run builds is the list's tag.
-	MilestoneTitle string                 `json:"milestoneTitle"`
-	Origin         MilestoneRunViewOrigin `json:"origin"`
-	StartedAt      *time.Time             `json:"startedAt,omitempty"`
+	MilestoneTitle string `json:"milestoneTitle"`
+
+	// Origin Why this run was started. `revalidate` asks a version's criteria again against the already-deployed system; it enters the loop at validation rather than at the working set, and is deliberately outside the one-active-spec-run mutex so it never holds up the next build.
+	Origin    MilestoneRunViewOrigin `json:"origin"`
+	StartedAt *time.Time             `json:"startedAt,omitempty"`
 
 	// State planning is the fill window — the version's milestone is still being written (gates minted, then issues planned in). waiting is the unbounded wait between cycles, where something outside the platform is needed.
 	State MilestoneRunViewState `json:"state"`
@@ -1044,7 +1049,7 @@ type MilestoneRunView struct {
 	Validation RunValidation `json:"validation"`
 }
 
-// MilestoneRunViewOrigin defines model for MilestoneRunView.Origin.
+// MilestoneRunViewOrigin Why this run was started. `revalidate` asks a version's criteria again against the already-deployed system; it enters the loop at validation rather than at the working set, and is deliberately outside the one-active-spec-run mutex so it never holds up the next build.
 type MilestoneRunViewOrigin string
 
 // MilestoneRunViewState planning is the fill window — the version's milestone is still being written (gates minted, then issues planned in). waiting is the unbounded wait between cycles, where something outside the platform is needed.
@@ -1288,6 +1293,23 @@ type RcaAgentReportList struct {
 
 	// NextCursor Cursor for the next page; absent on the last page.
 	NextCursor string `json:"nextCursor,omitempty"`
+}
+
+// RevalidateAccepted The run that will answer the question. Its cycles stream on the ordinary run progress endpoint, and its verdict becomes the version's once it settles.
+type RevalidateAccepted struct {
+	MilestoneNumber int64  `json:"milestoneNumber"`
+	RunID           string `json:"runId"`
+}
+
+// RevalidateRequest Optional knobs on the revalidation run. Both are snapshotted onto the run at start, so a later config change cannot retroactively alter a run already in flight.
+type RevalidateRequest struct {
+	// CycleCeiling Total-cycle ceiling for this run. Omit for the platform default. Only meaningful when the run may repair — a run that validates once uses a single cycle.
+	CycleCeiling int64 `json:"cycleCeiling,omitempty"`
+
+	// ValidationAttempts How many times this run may validate before it accepts the answer it keeps getting. Omit for the platform default.
+	//
+	// Set 1 for a pure re-check: the run reports its verdict and settles, filing no repair work and rebuilding nothing, because the attempt allowance is spent before the loop reaches the point where it would mint issues.
+	ValidationAttempts int64 `json:"validationAttempts,omitempty"`
 }
 
 // RunBudgets The run's budget counters as the supervisor wrote them out. Read-model bookkeeping — the loop counts its own budgets and never reads these back.
@@ -1968,6 +1990,9 @@ type CreateTurnJSONRequestBody = TurnInputBody
 
 // BuildProjectJSONRequestBody defines body for BuildProject for application/json ContentType.
 type BuildProjectJSONRequestBody = BuildRequest
+
+// RevalidateBuildJSONRequestBody defines body for RevalidateBuild for application/json ContentType.
+type RevalidateBuildJSONRequestBody = RevalidateRequest
 
 // UpdateComponentConfigJSONRequestBody defines body for UpdateComponentConfig for application/json ContentType.
 type UpdateComponentConfigJSONRequestBody = UpdateConfigBody
