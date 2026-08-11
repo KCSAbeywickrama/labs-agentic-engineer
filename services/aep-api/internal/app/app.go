@@ -144,6 +144,10 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	repoRepo := sourcecontrol.NewRepoRepository(db)
 	milestoneRunRepo := delivery.NewMilestoneRunRepository(db)
 	runCycleRepo := delivery.NewRunCycleRepository(db, in.RateStamper)
+	// The agent-usage ledger: the read + retire half of delivery's spend record.
+	// The WRITE half needs no wiring — each capture repository mirrors into it as
+	// part of its own stamp, so there is no way to run one without the other.
+	usageLedgerRepo := delivery.NewAgentUsageLedgerRepository(db)
 	orgRepo := organization.NewOrganizationRepository(db)
 	orgCredRepo := organization.NewOrgCredentialRepository(db, in.ColumnCipher)
 	orgAnthropicRepo := organization.NewOrgAnthropicRepository(db)
@@ -424,7 +428,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// Build/deploy stage sources for the status poll (#184): the milestone-run
 	// index (one row read) + the org-scoped release-binding list —
 	// consumer-side ports wired here so projects imports neither.
-	projectService.SetStageSources(projectRunRows{runs: milestoneRunRepo, cycles: runCycleRepo}, componentClient)
+	projectService.SetStageSources(projectRunRows{runs: milestoneRunRepo, cycles: runCycleRepo, ledger: usageLedgerRepo}, componentClient)
 	organizationService := organization.NewOrganizationService(orgRepo, namespaceClient)
 	// componentService takes repoSvc + buildCredSvc so TriggerBuild can
 	// pre-stage the per-WorkflowRun build Secret in workflows-<orgID>
@@ -632,6 +636,11 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// its agent dispatcher (delivery.MilestoneDispatcher): a supervisor with no
 	// dispatcher refuses to start runs, so the two must be wired together.
 	runSupervisor := run.NewSupervisor(temporalRuntime, runRuns{runs: milestoneRunRepo}, codingExecutor)
+	// The run-supervisor half of the project-delete cascade. Wired HERE rather
+	// than beside SetStageSources because the supervisor does not exist until the
+	// coding executor does: purging a project's run ROWS leaves the workflows that
+	// write them running, polling a repository the same delete is about to remove.
+	projectService.SetRunAbandoner(projectRunSupervision{runs: milestoneRunRepo, supervisor: runSupervisor})
 
 	platformSender := githubBotLogin(cfg.GitHubAppSlug)
 	registerWebhook := func(event, action string, h func(ctx context.Context, event, action string, payload []byte) error) {
@@ -652,8 +661,11 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		// The wiring-conformance check on the merged-PR fan-out: does what shipped
 		// consume the resources the design declares?
 		Workloads: workloadReader{files: filesSvc},
-		Signaler:  runSupervisor,
-		Starter:   runSupervisor,
+		// The revalidate trigger's last guard: refuse a version with no oracle
+		// rather than starting a run that could only conclude `skipped`.
+		Criteria: validationCriteria{files: filesSvc},
+		Signaler: runSupervisor,
+		Starter:  runSupervisor,
 		// A first-ever component has no OpenChoreo Component CR, and a merged
 		// PR's build would fail "Component not found" — so the fan-out ensures
 		// the CR from the design facts immediately before it triggers.
@@ -890,12 +902,13 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// composite; the edge holds no project/component/config service.
 	// Settings → Usage (#291): fold spec-turn + delivery per-project usage,
 	// labelled by the org's live projects (a usage slug with no live project is a
-	// since-deleted project, shown greyed). Delivery's half sums BOTH its capture
-	// tables — cycles, where every agent run lands after the issue-driven flip,
-	// and the older execution rows (see delivery.PhaseUsageRollup).
+	// since-deleted project, shown greyed). Delivery's half reads the agent-usage
+	// LEDGER — the one delivery table a project delete does not purge, and the one
+	// place both its capture surfaces mirror into, so spend survives the project
+	// and is never counted twice (see delivery.PhaseUsageRollup).
 	usageService := projects.NewUsageService(
 		turnRepo.SumUsageByProject,
-		delivery.PhaseUsageRollup(executionRepo, runCycleRepo),
+		delivery.PhaseUsageRollup(usageLedgerRepo),
 		func(ctx context.Context, orgID string) (map[string]string, error) {
 			names := map[string]string{}
 			list, err := projectService.ListProjects(ctx, orgID, 100, "", "")
@@ -1068,7 +1081,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		TaskStream:     taskStreamSvc,
 		RunReads:       runReads,
 		RunProgress:    runProgress,
-		RunCommands:    runread.NewCommands(milestoneRunRepo, runSupervisor),
+		RunCommands:    runread.NewCommands(milestoneRunRepo, runSupervisor, eventcoreRevalidator{events: eventPlane}),
 		RunCycleBuilds: runCycleBuilds,
 	})
 	if err != nil {
@@ -1243,6 +1256,11 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// the pod's final log. Keyed on the proxy client alone: both dispatch paths
 	// (proxy and direct K8sJobDispatcher) emit `ca-…` run names, so the watcher
 	// reads job status + logs through the proxy stub regardless of dispatcher.
+	//
+	// It doubles as the run supervisor's agent STOPPER (wired below): stopping a
+	// cancelled cycle's agent is mostly a log-capture problem — the delete takes
+	// the pod with it — and the capture already lives on this watcher.
+	var agentStopper delivery.MilestoneAgentStopper
 	if cgwClient != nil {
 		jobWatcher := codingagent.NewJobWatcher(codingAgentLogRepo, orgRepo, cgwClient, executionRepo).
 			WithTaskNotifier(taskStreamHub).
@@ -1256,6 +1274,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		if smClient != nil {
 			jobWatcher.WithExternalSecretCleanup()
 		}
+		agentStopper = jobWatcher
 		watchers = append(watchers, jobWatcher)
 		slog.Info("codingagent.JobWatcher: enabled (cluster-gateway-proxy configured)",
 			"externalSecretCleanup", smClient != nil)
@@ -1277,6 +1296,11 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 			// its Job ref. It mints no execution row — the cycle record is the
 			// supervisor's own bookkeeping.
 			Dispatcher: codingExecutor,
+			// …and its counterpart: a cancelled run's agent is stopped rather than
+			// left to bill the org until the Job's own deadline. Nil without the
+			// cluster-gateway-proxy, which is the degraded boot that also has no
+			// dispatcher.
+			Stopper: agentStopper,
 			// Managed-API gateway policy, converged at builds-green. This rail is
 			// where the trait sync has to hang now: it took over building from the
 			// ExecWatcher deploy path (which reached the same emitter through

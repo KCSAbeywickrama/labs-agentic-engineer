@@ -184,3 +184,21 @@ test("server unreachable degrades to an empty tool set, never throws", async () 
   const tools = await loadMcpTools({ url: "http://127.0.0.1:1/mcp", token: "tok" });
   assert.deepEqual(tools, {});
 });
+
+test("a server that accepts the request but never answers times out, never hangs", async () => {
+  // The one failure "best-effort" did not cover: a connected server that says
+  // nothing. `fetch` has no default timeout, so this used to hang forever — and
+  // because tools/list runs BEFORE the first model call, the hang stalls
+  // time-to-first-token with the SSE stream already open and empty.
+  const { baseUrl, close } = await fakeServer(() => {
+    /* accept the request and never respond */
+  });
+  try {
+    const started = Date.now();
+    const tools = await loadMcpTools({ url: baseUrl, token: "tok" }, { timeoutMs: 150 });
+    assert.deepEqual(tools, {}, "a timed-out discovery must degrade to no tools");
+    assert.ok(Date.now() - started < 5_000, "must abort at the timeout, not wait on the server");
+  } finally {
+    await close();
+  }
+});

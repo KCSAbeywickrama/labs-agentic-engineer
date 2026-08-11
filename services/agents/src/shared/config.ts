@@ -44,7 +44,15 @@ export const config = {
   // A fresh "write an app" generation needs 10–15 file calls; steps batch
   // parallel tool calls, so the loop budget is higher than the call count.
   // intEnv guards a non-numeric value (which would NaN out the step cap).
-  maxSteps: intEnv(process.env.AGENT_MAX_STEPS, 20),
+  //
+  // 60, not 20: a measured design generation consumed all 20 steps and ended on
+  // `finishReason: tool-calls` — the model still had work queued when the cap
+  // stopped the loop. The cap is a runaway guard, and hitting it is not benign:
+  // the turn still succeeds, so it still emits its terminal manifest and the
+  // fold commits a half-written design as if it were complete. Paying for a
+  // second turn to finish the job costs far more latency than the headroom does,
+  // since an unused step costs nothing.
+  maxSteps: intEnv(process.env.AGENT_MAX_STEPS, 60),
   // Per-step output-token ceiling. The Anthropic provider defaults to a low cap
   // (~4096) when unset, which truncates a real spec/design mid-tool-call: the
   // model hits the limit before the `addFile` input JSON closes, so NO `tool-call`
@@ -52,6 +60,15 @@ export const config = {
   // Sonnet-class models support 64k output tokens; default high so a single-doc
   // generation completes in one step. intEnv guards a non-numeric override.
   maxOutputTokens: intEnv(process.env.AGENT_MAX_OUTPUT_TOKENS, 64_000),
+  // Anthropic prompt caching (AGENT_PROMPT_CACHE, default ON). Caching is
+  // opt-in per request: with no `cache_control` breakpoint Anthropic caches
+  // nothing, so every step of a tool loop re-bills the whole prefix — measured
+  // at ~1.07M input tokens across one 19-step turn, every token uncached.
+  // History is append-only, so the prefix is stable and cacheable by
+  // construction (run-conversation-turn.ts). Off by env only as an escape
+  // hatch: a cache WRITE costs more than plain input, so a deployment whose
+  // turns are reliably single-step could rationally decline.
+  promptCache: boolEnv(process.env.AGENT_PROMPT_CACHE, true),
   logLevel: process.env.LOG_LEVEL || "info",
   // AI SDK DevTools (AGENT_DEVTOOLS, default off): wrap the model in
   // `devToolsMiddleware` so every LLM call is captured to
@@ -59,6 +76,13 @@ export const config = {
   // (`npx @ai-sdk/devtools`, port AI_SDK_DEVTOOLS_PORT / 4983). Heavier than the
   // timing lines (per-call file write + viewer notify), so it is opt-in.
   devtools: boolEnv(process.env.AGENT_DEVTOOLS, false),
+  // How much DevTools capture history to keep (AGENT_DEVTOOLS_RETENTION_DAYS).
+  // The library caps nothing, and `saveDb` rewrites the WHOLE file synchronously
+  // on every step — so an unbounded capture turns into an ever-larger blocking
+  // write on the event loop mid-turn. Applied once at boot, never on a turn.
+  // 3 days: at the observed ~12MB/day a 7-day window reclaims nothing until
+  // week two, by which point the file is ~170MB. 0 disables retention.
+  devtoolsRetentionDays: intEnv(process.env.AGENT_DEVTOOLS_RETENTION_DAYS, 3),
   // SSE keep-alive cadence: a `: keep-alive` comment this often while a turn
   // streams, so long generations don't die behind an idle-timeout ingress.
   keepAliveMs: intEnv(process.env.AGENT_KEEPALIVE_MS, 15_000),

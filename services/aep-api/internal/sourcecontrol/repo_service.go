@@ -50,6 +50,10 @@ type RepoService interface {
 	// is provisioned for the repo on GitHub. Stored alongside the repo record
 	// so cleanup can deregister.
 	SetWebhookID(ctx context.Context, orgID, projectID string, hookID int64) error
+	// DeleteRepo drops the repo record and trashes its workspace clone. It
+	// ensures ABSENCE rather than performing a removal, so a project with no
+	// repo row — never provisioned, or a teardown being re-run after it got
+	// this far once — succeeds with nothing to do. The remote is untouched.
 	DeleteRepo(ctx context.Context, orgID, projectID string) error
 }
 
@@ -265,12 +269,25 @@ func (s *repoService) DeleteRepo(ctx context.Context, orgID, projectID string) e
 		return fmt.Errorf("get repo: %w", err)
 	}
 	if repo == nil {
-		return ErrRepoNotFound
+		// Nothing to delete IS the requested end state. Reporting ErrRepoNotFound
+		// here made the project teardown log an error on every legitimate re-run
+		// and gave callers no way to tell "already clean" from "cleanup broke".
+		return nil
 	}
 
 	if err := s.repo.DeleteByOrgAndProjectID(ctx, orgID, projectID); err != nil {
 		return fmt.Errorf("delete repo record: %w", err)
 	}
+
+	// The REMOTE is deliberately left standing, and this is the last moment
+	// anything can name it: the row that resolved (org, project) to a URL has
+	// just been dropped, so after this line the platform has no route back to
+	// the repository, its issues, its milestones or the webhook registered at
+	// create. Announce it rather than leak it silently — and note the practical
+	// consequence, which is that the repo NAME stays taken: a project recreated
+	// under it is refused with ErrRepoNameConflict until a human intervenes.
+	slog.InfoContext(ctx, "repo record deleted; the remote repository is left in place",
+		"org", orgID, "project", projectID, "repoUrl", repo.RepoURL)
 
 	// Best-effort disk cleanup AFTER the DB delete succeeded: rename the
 	// workspace subtree into trash (O(1); open fds keep working — design

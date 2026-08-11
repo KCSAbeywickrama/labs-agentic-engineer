@@ -42,6 +42,7 @@ type Activities struct {
 	builds     BuildReader
 	validation ValidationCoordinator
 	dispatcher delivery.MilestoneDispatcher
+	stopper    delivery.MilestoneAgentStopper
 	apiTraits  APITraitSyncer
 }
 
@@ -56,7 +57,12 @@ type Deps struct {
 	Builds     BuildReader
 	Validation ValidationCoordinator
 	Dispatcher delivery.MilestoneDispatcher
-	APITraits  APITraitSyncer
+	// Stopper kills a cancelled cycle's agent. Optional: unwired means a cancel
+	// settles the run and leaves the agent to its own deadline, which is exactly
+	// the behaviour this port was added to end — so a degraded boot is the only
+	// place that should ever see it nil.
+	Stopper   delivery.MilestoneAgentStopper
+	APITraits APITraitSyncer
 }
 
 // NewActivities wires the activity adapters.
@@ -70,6 +76,7 @@ func NewActivities(d Deps) *Activities {
 		builds:     d.Builds,
 		validation: d.Validation,
 		dispatcher: d.Dispatcher,
+		stopper:    d.Stopper,
 		apiTraits:  d.APITraits,
 	}
 }
@@ -97,6 +104,14 @@ type SettleRunInput struct {
 	RunID  string `json:"runId"`
 	State  string `json:"state"`
 	Reason string `json:"reason,omitempty"`
+}
+
+// StopCycleAgentInput names the run whose in-flight agent should be stopped. The
+// CYCLE is resolved from it rather than passed, because the Job ref is learned at
+// dispatch and lives on the cycle row.
+type StopCycleAgentInput struct {
+	OrgID string `json:"orgId"`
+	RunID string `json:"runId"`
 }
 
 // SettleRun writes the run's outcome. Guarded in the repository on the run not
@@ -277,7 +292,7 @@ func (a *Activities) PollMilestone(ctx context.Context, in MilestoneRef) (Milest
 	}
 	counts, err := a.milestones.MilestoneIssueCounts(ctx, in.OrgID, in.ProjectID, in.MilestoneNumber)
 	if err != nil {
-		return MilestoneSnapshot{}, err
+		return MilestoneSnapshot{}, sourceControlErr(err)
 	}
 	if counts == nil {
 		return MilestoneSnapshot{}, nil
@@ -331,11 +346,11 @@ func (a *Activities) PollCycleBuilds(ctx context.Context, in CycleBuildsInput) (
 	}
 	files, err := a.prs.ListPullRequestFiles(ctx, in.OrgID, in.ProjectID, in.PRNumber)
 	if err != nil {
-		return CycleBuildState{}, err
+		return CycleBuildState{}, sourceControlErr(err)
 	}
 	paths, err := a.design.ComponentPaths(ctx, in.OrgID, in.ProjectID)
 	if err != nil {
-		return CycleBuildState{}, err
+		return CycleBuildState{}, sourceControlErr(err)
 	}
 	diff := delivery.DiffComponents(files, paths)
 	out := CycleBuildState{Expected: len(diff.Components)}
@@ -404,7 +419,8 @@ func (a *Activities) EnsureValidationIssue(ctx context.Context, in MilestoneRef)
 	if a.validation == nil {
 		return 0, nil
 	}
-	return a.validation.EnsureValidationIssue(ctx, in.OrgID, in.ProjectID, in.MilestoneNumber)
+	issue, err := a.validation.EnsureValidationIssue(ctx, in.OrgID, in.ProjectID, in.MilestoneNumber)
+	return issue, sourceControlErr(err)
 }
 
 // ValidationReportRef identifies the report to read: the project, plus the commit
@@ -443,7 +459,7 @@ func (a *Activities) ReadValidationVerdict(ctx context.Context, in ValidationRep
 	}
 	verdict, digest, err := a.validation.Verdict(ctx, in.OrgID, in.ProjectID, in.At)
 	if err != nil {
-		return ValidationOutcome{}, err
+		return ValidationOutcome{}, sourceControlErr(err)
 	}
 	return ValidationOutcome{Verdict: verdict, Digest: digest}, nil
 }
@@ -470,7 +486,8 @@ func (a *Activities) MintValidationRepairIssues(ctx context.Context, in MintVali
 	if a.validation == nil {
 		return nil, nil
 	}
-	return a.validation.MintRepairIssues(ctx, in.OrgID, in.ProjectID, in.MilestoneNumber, in.At, in.CycleID)
+	filed, err := a.validation.MintRepairIssues(ctx, in.OrgID, in.ProjectID, in.MilestoneNumber, in.At, in.CycleID)
+	return filed, sourceControlErr(err)
 }
 
 // ---- dispatch --------------------------------------------------------------
@@ -481,6 +498,28 @@ func (a *Activities) MintValidationRepairIssues(ctx context.Context, in MintVali
 // that did not happen is agent death, which the cycle's own re-dispatch budget
 // already answers. Letting Temporal retry it as well would spend that budget
 // invisibly.
+// StopCycleAgent stops the agent the run's latest cycle dispatched.
+//
+// It reads the cycle rather than taking a Job ref from the workflow because the
+// ref is learned at dispatch and lives on the row — the loop holds the cycle id,
+// which is the durable key. The LATEST cycle is the right one by construction:
+// only one cycle of a run is ever in flight.
+//
+// Best-effort by contract. Every caller is on a path that is already ending the
+// run, and a run that cannot be settled because its agent could not be reached
+// would be a worse failure than an agent that outlives its run — the outcome the
+// platform records must not depend on the cluster answering.
+func (a *Activities) StopCycleAgent(ctx context.Context, in StopCycleAgentInput) error {
+	if a.stopper == nil || a.cycles == nil {
+		return nil
+	}
+	cycle, err := a.cycles.Latest(ctx, in.OrgID, in.RunID)
+	if err != nil || cycle == nil || cycle.JobRef == "" {
+		return err
+	}
+	return a.stopper.StopAgent(ctx, in.OrgID, cycle.ID, cycle.JobRef)
+}
+
 func (a *Activities) DispatchAgent(ctx context.Context, in delivery.MilestoneDispatch) (string, error) {
 	if a.dispatcher == nil {
 		return "", errNotConfigured
