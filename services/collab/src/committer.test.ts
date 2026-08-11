@@ -129,6 +129,26 @@ test("baseline advances after a flush — the next one is a no-op", async () => 
   assert.equal(applies.length, 1);
 });
 
+// A room that already contains reference-document entries (seeded before the
+// exclusion existed — the live-incident state) must not write them back: the
+// flush is where the corruption landed in git, so the flush filters too.
+test("flush never writes reference documents, even when the doc holds them", async () => {
+  const doc = seededDoc();
+  setDocFile(doc, "specs/requirements/references/rfp.pdf", "JVBERi0xLjQK");
+  setDocFile(doc, "design/arch.excalidraw", '{"v":2}'); // a real change rides along
+  const { bff, applies } = fakeBff();
+
+  await flushRoom({ bff }, ROOM, doc, ctx);
+
+  assert.equal(applies.length, 1);
+  const paths = applies[0]!.writes.map((w) => w.path);
+  assert.ok(paths.includes("design/arch.excalidraw"), "the real change must still flush");
+  assert.ok(
+    !paths.some((p: string) => p.includes("references/")),
+    `reference document leaked into the flush: ${paths.join(", ")}`,
+  );
+});
+
 test("deleted non-md files become DeleteOps", async () => {
   const doc = seededDoc();
   doc.getMap("files").delete("design/arch.excalidraw");

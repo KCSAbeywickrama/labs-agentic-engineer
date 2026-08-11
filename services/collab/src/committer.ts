@@ -29,6 +29,7 @@ import {
   isMarkdownPath,
   snapshotDoc,
 } from "@aep/collab-doc";
+import { isReferenceDocPath } from "./seed.js";
 import {
   ApplyAuthError,
   ApplyConflictError,
@@ -128,6 +129,9 @@ export function pendingChanges(
   const deletes: ApplyDelete[] = [];
   const held: string[] = [];
   for (const [path, content] of Object.entries(current)) {
+    // A room seeded before the reference exclusion existed may still hold
+    // reference-document entries — they never flush (see isReferenceDocPath).
+    if (isReferenceDocPath(path)) continue;
     const base = state.baseline.get(path);
     if (base && base.content === content) continue;
     // Emptied md fragments write as empty (top-level fragments cannot be
