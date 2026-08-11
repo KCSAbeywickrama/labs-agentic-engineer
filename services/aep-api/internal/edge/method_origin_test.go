@@ -70,6 +70,7 @@ var opOwner = map[string]string{
 	"ApplyFiles":                    embedSpec,
 	"BuildProject":                  embedDelivery,
 	"CancelRun":                     embedDelivery,
+	"RevalidateBuild":               embedDelivery,
 	"CollectExternalResourceValues": embedDependencies,
 	"CreateIssue":                   embedSourceControl,
 	"CreateProject":                 embedProjects,

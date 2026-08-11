@@ -629,8 +629,11 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		// The wiring-conformance check on the merged-PR fan-out: does what shipped
 		// consume the resources the design declares?
 		Workloads: workloadReader{files: filesSvc},
-		Signaler:  runSupervisor,
-		Starter:   runSupervisor,
+		// The revalidate trigger's last guard: refuse a version with no oracle
+		// rather than starting a run that could only conclude `skipped`.
+		Criteria: validationCriteria{files: filesSvc},
+		Signaler: runSupervisor,
+		Starter:  runSupervisor,
 		// A first-ever component has no OpenChoreo Component CR, and a merged
 		// PR's build would fail "Component not found" — so the fan-out ensures
 		// the CR from the design facts immediately before it triggers.
@@ -1043,8 +1046,8 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		RunProgress:   runProgress,
 		// Cancel signals the supervisor AND deletes the cycle's agent
 		// Component, which is what actually stops the pod and frees the org's
-		// billing concurrency slot.
-		RunCommands: runread.NewCommands(milestoneRunRepo, runSupervisor).
+		// billing concurrency slot. Revalidate is the event plane's.
+		RunCommands: runread.NewCommands(milestoneRunRepo, runSupervisor, eventcoreRevalidator{events: eventPlane}).
 			WithCycleReaper(codingagent.NewCycleReaper(componentClient, runCycleRepo)),
 		RunCycleBuilds: runCycleBuilds,
 	})

@@ -43,6 +43,10 @@ vi.mock("../../builds/components/RunFeed", () => ({
 // Controllable status + runs + file queries (no QueryClientProvider / MSW).
 let mockValidation = "none";
 let mockRun: MilestoneRunView | undefined;
+// Runs NEWER than mockRun on the same milestone, newest first — list-build-runs
+// answers newest-first, so these sit ahead of it. A milestone accumulates runs
+// across its life and only some of them validate, which is what these exercise.
+let mockNewerRuns: MilestoneRunView[] = [];
 
 function run(over: {
   validation?: RunValidation;
@@ -115,7 +119,19 @@ vi.mock("../../projects/api/queries", () => ({
   }),
 }));
 
+// The cancel mutation, spied so a test can assert WHICH run the button targets —
+// only one run on a milestone can be live, and it is not necessarily the one
+// answering for the version.
+const mockCancelMutate = vi.fn();
+let mockCancelError: Error | null = null;
+
 vi.mock("../../builds/api/queries", () => ({
+  useCancelRun: () => ({
+    mutate: mockCancelMutate,
+    isPending: false,
+    isError: mockCancelError !== null,
+    error: mockCancelError,
+  }),
   // Models two things the real hook does, both of which a laxer mock would hide:
   // `enabled: Boolean(tag)` (no tag → the query never runs, so no data), and
   // per-version scoping (list-build-runs answers with THAT version's runs). The
@@ -130,7 +146,10 @@ vi.mock("../../builds/api/queries", () => ({
       ? {
           tag,
           milestoneNumber: 1,
-          runs: mockRun && tag === mockBuildVersion ? [mockRun] : [],
+          runs:
+            mockRun && tag === mockBuildVersion
+              ? [...mockNewerRuns, mockRun]
+              : [],
         }
       : undefined,
   }),
@@ -209,6 +228,9 @@ function renderPage(view: "logs" | undefined, onViewChange = vi.fn()) {
 afterEach(() => {
   mockValidation = "none";
   mockRun = undefined;
+  mockNewerRuns = [];
+  mockCancelMutate.mockClear();
+  mockCancelError = null;
   mockBuildVersion = "v1";
   mockDeployVersion = "v1";
   mockCriteria.isPending = false;
@@ -216,6 +238,119 @@ afterEach(() => {
   mockCriteria.data = undefined;
   mockReport.isError = false;
   mockReport.data = undefined;
+});
+
+// A milestone sees SEQUENTIAL runs across its life and only some of them
+// validate, so "the newest run" is not this page's subject — "the newest run that
+// ASKED" is. These reproduce without any revalidation: an incident adoption alone
+// was enough to erase a version's validation record.
+// Cancel is the only expiry a run's unbounded wait has, and until now it was
+// reachable only from the Builds rail — so a validation, which can hold an agent
+// for up to two hours, had no stop button on the page that owns it.
+describe("ValidationPage cancel", () => {
+  it("offers cancel while a run is live", () => {
+    mockValidation = "running";
+    mockRun = run({ cycles: [validationCycle] });
+    mockNewerRuns = [
+      { ...run({ cycles: [validationCycle] }), id: "run-live", origin: "revalidate", state: "running" },
+    ];
+
+    renderPage(undefined);
+    fireEvent.click(screen.getByRole("button", { name: /Cancel run/ }));
+
+    // The LIVE run, not the one answering for the version: only one run on a
+    // milestone can be live, and it need not be the one holding the verdict.
+    expect(mockCancelMutate).toHaveBeenCalledWith("run-live");
+  });
+
+  it("hides cancel once every run has settled", () => {
+    mockRun = run({ validation: { verdict: "passed" }, cycles: [validationCycle] });
+    mockCriteria.data = { content: CRITERIA };
+    mockReport.data = { content: REPORT };
+
+    renderPage(undefined);
+
+    expect(screen.queryByRole("button", { name: /Cancel run/ })).not.toBeInTheDocument();
+  });
+
+  // A 503 means the workflow engine was unreachable and NOTHING was cancelled,
+  // so the failure has to say that rather than leave the reader assuming it took.
+  it("surfaces a failed cancel and says nothing was cancelled", () => {
+    mockValidation = "running";
+    mockRun = run({ cycles: [validationCycle] });
+    mockNewerRuns = [
+      { ...run({ cycles: [validationCycle] }), id: "run-live", origin: "revalidate", state: "running" },
+    ];
+    mockCancelError = new Error("the workflow engine is unavailable");
+
+    renderPage(undefined);
+
+    expect(screen.getByText(/Nothing was cancelled/)).toBeInTheDocument();
+  });
+});
+
+describe("ValidationPage across a milestone's runs", () => {
+  // The incident run never validates, and settle stamps `skipped` on a succeeded
+  // run that never did. Reading the newest run therefore sent a version that had
+  // PASSED to the "not validated" empty state, and stopped the report being
+  // fetched at all.
+  it("keeps the verdict when a later incident run never validated", () => {
+    mockRun = run({
+      validation: { verdict: "passed", reportPath: "tests/validation/report.md" },
+      cycles: [validationCycle],
+    });
+    mockNewerRuns = [
+      {
+        ...run({ validation: { verdict: "skipped" } }),
+        id: "run-incident",
+        origin: "incident-adoption",
+      },
+    ];
+    mockCriteria.data = { content: "{}" };
+    mockReport.data = { content: "# report" };
+
+    renderPage(undefined);
+
+    expect(screen.queryByText(/This version was not validated/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/No validation has run yet/)).not.toBeInTheDocument();
+  });
+
+  // One feed per validating run, so the version reads as a chronology of attempts
+  // rather than only its latest. A revalidation is a second run on the milestone,
+  // and keying the feed to the newest run hid every earlier attempt's log.
+  it("feeds every validating run, not just the newest", () => {
+    mockValidation = "running";
+    mockRun = run({ cycles: [validationCycle] });
+    mockNewerRuns = [
+      {
+        ...run({ cycles: [validationCycle] }),
+        id: "run-revalidate",
+        origin: "revalidate",
+      },
+    ];
+
+    renderPage(undefined);
+
+    expect(screen.getAllByTestId("run-feed")).toHaveLength(2);
+  });
+
+  // The counterpart: a run with no validation cycle contributes no feed, so an
+  // incident adoption does not add an empty section to the version's story.
+  it("gives a non-validating run no feed of its own", () => {
+    mockValidation = "running";
+    mockRun = run({ cycles: [validationCycle] });
+    mockNewerRuns = [
+      {
+        ...run({}),
+        id: "run-incident",
+        origin: "incident-adoption",
+      },
+    ];
+
+    renderPage(undefined);
+
+    expect(screen.getAllByTestId("run-feed")).toHaveLength(1);
+  });
 });
 
 describe("ValidationPage lifecycle", () => {

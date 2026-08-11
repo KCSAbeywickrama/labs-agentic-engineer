@@ -38,7 +38,7 @@ func (f *fakeReaper) ReapRunCycle(_ context.Context, orgID, projectID, runID str
 
 func cancelCommands(canceller runread.RunCanceller, reaper runread.CycleReaper) *runread.Commands {
 	runs := fakeRuns{org: "acme", rows: []delivery.MilestoneRun{specRun("r1", delivery.RunStateRunning)}}
-	return runread.NewCommands(runs, canceller).WithCycleReaper(reaper)
+	return runread.NewCommands(runs, canceller, nil).WithCycleReaper(reaper)
 }
 
 // TestCancel_ReapsTheCyclesComponentAfterSignalling is the cancel contract this
@@ -98,7 +98,7 @@ func TestCancel_ReapFailureStillCancels(t *testing.T) {
 func TestCancel_WithoutAReaperStillCancels(t *testing.T) {
 	canceller := &fakeCanceller{}
 	runs := fakeRuns{org: "acme", rows: []delivery.MilestoneRun{specRun("r1", delivery.RunStateRunning)}}
-	if err := runread.NewCommands(runs, canceller).Cancel(context.Background(), "acme", "widgets", "r1"); err != nil {
+	if err := runread.NewCommands(runs, canceller, nil).Cancel(context.Background(), "acme", "widgets", "r1"); err != nil {
 		t.Fatalf("Cancel: %v", err)
 	}
 	if canceller.cancels != 1 {

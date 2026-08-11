@@ -24,6 +24,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/delivery"
 	"github.com/wso2/aep/aep-api/internal/delivery/eventcore"
+	"github.com/wso2/aep/aep-api/internal/delivery/runread"
 	"github.com/wso2/aep/aep-api/internal/platform/gitfs/naming"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 )
@@ -278,6 +279,19 @@ type eventcoreAdopter struct{ events *eventcore.Events }
 
 func (a eventcoreAdopter) AdoptIssue(ctx context.Context, orgID, projectID string, issueNumber int) error {
 	return a.events.AdoptIssue(ctx, orgID, projectID, eventcore.AdoptTarget{Number: issueNumber})
+}
+
+// eventcoreRevalidator adapts the event plane onto the run read surface's
+// Revalidator port. It is only a type bridge: the read surface resolved the tag
+// to a milestone through its own rows, and every guard the revalidation needs
+// lives on the other side of this call, where GitHub and the project repo are
+// reachable.
+type eventcoreRevalidator struct{ events *eventcore.Events }
+
+func (a eventcoreRevalidator) Revalidate(ctx context.Context, orgID, projectID string, target runread.RevalidateTarget) (string, error) {
+	return a.events.Revalidate(ctx, orgID, projectID,
+		eventcore.MilestoneRef{Number: target.MilestoneNumber, Title: target.MilestoneTitle},
+		target.Attempts, target.Ceiling)
 }
 
 // projectRunRows adapts the milestone-run + cycle repositories onto the

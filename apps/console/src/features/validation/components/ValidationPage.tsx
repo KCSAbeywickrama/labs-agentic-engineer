@@ -18,6 +18,7 @@
 
 import {
   Alert,
+  alpha,
   Box,
   Button,
   CircularProgress,
@@ -25,9 +26,9 @@ import {
   Stack,
   Tooltip,
 } from "@wso2/oxygen-ui";
-import { FileText, GitPullRequest, ScrollText } from "@wso2/oxygen-ui-icons-react";
+import { FileText, GitPullRequest, ScrollText, X } from "@wso2/oxygen-ui-icons-react";
 import { Link } from "@tanstack/react-router";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   parseValidationCriteria,
   parseValidationReport,
@@ -39,8 +40,9 @@ import { PageHeader, type PageHeaderStatus } from "../../../components/PageHeade
 import type { StatusTone } from "../../../components/StatusChip";
 import { EmptyState } from "../../../components/EmptyState";
 import { useProjectStatus } from "../../projects/api/queries";
-import { useBuildRuns } from "../../builds/api/queries";
+import { useBuildRuns, useCancelRun } from "../../builds/api/queries";
 import { RunFeed } from "../../builds/components/RunFeed";
+import { isTerminalRun } from "../../builds/lib/runView";
 import { validationView, type StageTone } from "../../projects/lib/pipeline";
 import { useValidationCriteria, useValidationReport } from "../api/queries";
 import { VerdictTile } from "./VerdictTile";
@@ -55,6 +57,17 @@ import { VerdictTile } from "./VerdictTile";
 // The validation cycle is the phase of the run this page owns; the rest of the
 // loop is the Builds page's story.
 const VALIDATION_CYCLE = ["validation"] as const;
+
+// The run origins that ask a version's acceptance criteria — the console's mirror
+// of delivery.RunValidates. A spec build validates the version it delivered, and a
+// revalidation exists to ask again; an incident adoption is absent on purpose,
+// because it fixes one thing in an already-judged version.
+//
+// It matters that this is an ORIGIN test and not "does the run have a validation
+// cycle": a spec build with no criteria authored settles `skipped` and opens no
+// cycle, and that is still the version's answer — the one the "not validated"
+// empty state below is written for.
+const VALIDATING_ORIGINS: readonly string[] = ["spec-build", "revalidate"];
 
 // StageTone → StatusTone. The two unions differ only in `ghost`, which the shared
 // validation mapper never returns; it is mapped for exhaustiveness only.
@@ -133,21 +146,49 @@ export function ValidationPage({
   // previous version's report under a chip reading "Validating".
   const version = status.data?.build.version ?? "";
 
-  // The version's runs: the newest is the one that landed it, and its validation
-  // record is this page's subject.
+  // The version's runs, newest first. A milestone sees SEQUENTIAL runs across its
+  // life and only some of them validate, so "the newest run" is not this page's
+  // subject. TWO different questions are asked of that list, and conflating them is
+  // the bug this page had:
+  //
+  //   who OWNED the question  → by origin. Its verdict is the version's answer,
+  //                             including when the answer is `skipped` because no
+  //                             criteria were ever authored.
+  //   who ANSWERED it         → by cycles. Those carry the report and the logs.
+  //
+  // Keying both on the newest run meant one adopted issue erased a version's whole
+  // validation record: an incident adoption never validates, and settle stamps
+  // `skipped` on it, which sent a genuinely PASSED version to the "not validated"
+  // empty state and stopped the report being fetched at all. A revalidation is the
+  // same shape from the other side — it validates and nothing else, so the run that
+  // DELIVERED the version stops being the newest.
   const runs = useBuildRuns(projectName, version || undefined);
-  const run = runs.data?.runs?.[0];
+  const runList = runs.data?.runs ?? [];
+  // Origins that ask the question at all — delivery/RunValidates, in the console's
+  // terms. An incident run is deliberately absent: it fixes one thing in a version
+  // already judged, and re-validating the system for it would price every incident
+  // like a release.
+  const run = runList.find((r) => VALIDATING_ORIGINS.includes(r.origin));
   // The verdict VALUE drives every decision below. Deriving them from the chip's
   // rendered label instead (as this page used to) breaks silently the moment the
   // copy changes — and swapping in the shared mapper changes its casing.
   const rawVerdict = run?.validation?.verdict ?? "";
   const verdict = validationView(rawVerdict);
   const reportPath = run?.validation?.reportPath ?? "";
-  // The LAST validation cycle, not the first. A run can validate more than once —
-  // a failed attempt is repaired and re-validated — and the run's verdict is its
-  // latest attempt's. `find` returns the OLDEST match, which would pair attempt 1's
-  // merge commit (and so attempt 1's report) with attempt 2's verdict.
-  const validationCycle = run?.cycles?.filter((c) => c.kind === "validation").at(-1);
+  // Every run that actually produced an attempt, OLDEST first — the version's
+  // chronology. Separate from `run` above because a run can own the question
+  // without having answered it yet (a revalidation mid-flight), and because the
+  // attempts that matter may span several runs.
+  const attemptRuns = runList
+    .filter((r) => (r.cycles ?? []).some((c) => c.kind === "validation"))
+    .reverse();
+  // The LAST attempt across the whole version, not the first, and not the newest
+  // run's. A version can be judged more than once — a failed attempt is repaired
+  // and re-validated, and a revalidation asks again later — so pairing an older
+  // attempt's merge commit with the current verdict would show the wrong report.
+  const validationCycle = attemptRuns
+    .flatMap((r) => (r.cycles ?? []).filter((c) => c.kind === "validation"))
+    .at(-1);
   // The cycle carries the pull request's page as the webhook reported it. This
   // page used to build one from the project's repoUrl and the number, which is a
   // CLONE url — a `.git` suffix produced a link that 404s.
@@ -176,6 +217,26 @@ export function ValidationPage({
   );
   const tally = useTally(criteria.data?.content, report.data?.content);
 
+  // The run this page can still cancel. Taken from the whole list rather than
+  // from `run` above, because only ONE run on a milestone can be live and it is
+  // not necessarily the one answering for the version — a revalidation in flight
+  // is live while the spec build that owns the current verdict is long settled.
+  const liveRun = runList.find((r) => !isTerminalRun(r.state));
+  const cancel = useCancelRun(projectName, version || undefined);
+  // Cancel is ACCEPTED, not performed: the endpoint answers 202 the moment the
+  // signal is queued, and the run turns cancelled only once the supervisor acts
+  // and the runs poll observes it. isPending covers the HTTP round trip alone, so
+  // this holds the button from the click until the run leaves the live state —
+  // released by an error, the one case where clicking again is right.
+  //
+  // It stores the RUN, not a boolean. This page outlives the run it is watching:
+  // a version can be re-judged, so one cancelled run is followed by another live
+  // one on the same mounted page, and a latched boolean would leave the new run's
+  // button disabled until a reload.
+  const [cancelRequestedFor, setCancelRequestedFor] = useState<string | null>(null);
+  const cancelling =
+    cancel.isPending || (cancelRequestedFor === liveRun?.id && !cancel.isError);
+
   // Body rule: the log shows while there is no report to show (running, failed
   // mechanically, nothing settled yet) OR the user toggled ?view=logs.
   const showLogs = !settled || view === "logs";
@@ -197,6 +258,34 @@ export function ValidationPage({
       {...(chip ? { status: chip } : {})}
       actions={
         <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+          {/* A validating run has the same escape hatch the Builds rail gives a
+              coding one — same endpoint, same hook, same wording, because it is
+              the same act on the same run. Absent once the run is terminal: the
+              whole point of cancel is that the unbounded wait has no other
+              expiry, and a settled run has nothing left to expire. */}
+          {liveRun && (
+            <Button
+              size="small"
+              color="inherit"
+              variant="outlined"
+              startIcon={<X size={16} />}
+              disabled={cancelling}
+              onClick={() => {
+                setCancelRequestedFor(liveRun.id);
+                cancel.mutate(liveRun.id);
+              }}
+              sx={{
+                borderRadius: 999,
+                color: "text.primary",
+                borderColor: (t) => alpha(t.palette.text.primary, 0.3),
+                "&:hover": {
+                  borderColor: (t) => alpha(t.palette.text.primary, 0.55),
+                },
+              }}
+            >
+              {cancelling ? "Cancelling…" : "Cancel run"}
+            </Button>
+          )}
           {prUrl && (
             <Tooltip title="Open the validation PR">
               <IconButton
@@ -235,10 +324,28 @@ export function ValidationPage({
     />
   );
 
+  // A failed cancel rides WITH the header rather than in one body, because every
+  // branch below renders the header and any of them can be on screen when the
+  // write fails. The copy is the Builds rail's: a 503 here means the workflow
+  // engine was unreachable and nothing was cancelled, so retrying is the fix.
+  const headerWithCancelError = (
+    <>
+      {header}
+      {cancel.isError && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          {cancel.error instanceof Error
+            ? cancel.error.message
+            : "Failed to cancel the run"}
+          . Nothing was cancelled — you can retry.
+        </Alert>
+      )}
+    </>
+  );
+
   if (status.isPending || (version !== "" && runs.isPending)) {
     return (
       <>
-        {header}
+        {headerWithCancelError}
         <Box sx={{ display: "flex", justifyContent: "center", p: 6 }}>
           <CircularProgress aria-label="Loading validation" />
         </Box>
@@ -249,7 +356,7 @@ export function ValidationPage({
   if (status.isError) {
     return (
       <>
-        {header}
+        {headerWithCancelError}
         <Alert
           severity="error"
           action={<Button onClick={() => void status.refetch()}>Retry</Button>}
@@ -267,7 +374,7 @@ export function ValidationPage({
   if (!run || (!validationCycle && !verdict)) {
     return (
       <>
-        {header}
+        {headerWithCancelError}
         <EmptyState
           compact
           description="No validation has run yet — it runs automatically once the project's components are deployed to dev and the version's work is done."
@@ -279,7 +386,7 @@ export function ValidationPage({
   if (rawVerdict === "skipped") {
     return (
       <>
-        {header}
+        {headerWithCancelError}
         <EmptyState
           compact
           description="This version was not validated — it has no validation criteria, or it was an incident run, which gets no validation cycle."
@@ -293,12 +400,25 @@ export function ValidationPage({
   // whatever spacing its children happened to carry: the report body got 24px from
   // ValidationView's own padding, the log feed got none, and the tile inset itself
   // — so the log sat 24px outside the tile and butted straight against it.
+  // One feed per validating run, OLDEST first, so the version reads as a
+  // chronology of attempts rather than only its latest.
+  //
+  // A feed per run rather than one stream over the milestone because the progress
+  // endpoint is run-keyed, and the cost of that is near zero here: a settled run's
+  // stream is finite — the server sends `done` and closes, and the client stops
+  // without reattaching — so every historical attempt opens briefly and closes,
+  // leaving at most ONE connection held open, since only the newest run can be live.
   const body = showLogs ? (
-    <RunFeed
-      projectName={projectName}
-      runId={run.id}
-      cycleKinds={VALIDATION_CYCLE}
-    />
+    <Stack spacing={2}>
+      {attemptRuns.map((r) => (
+        <RunFeed
+          key={r.id}
+          projectName={projectName}
+          runId={r.id}
+          cycleKinds={VALIDATION_CYCLE}
+        />
+      ))}
+    </Stack>
   ) : criteria.isPending || (!criteria.isError && !criteria.data) ? (
     <Box sx={{ display: "flex", justifyContent: "center", p: 6 }}>
       <CircularProgress aria-label="Loading validation report" />
@@ -340,7 +460,7 @@ export function ValidationPage({
 
   return (
     <>
-      {header}
+      {headerWithCancelError}
       {/* A Stack, not margins on the children: VerdictTile renders NOTHING for a
           verdict outside its five, and a Stack given no DOM node for `tile` leaves
           no phantom gap — which a `mb` on the tile could not express. A fragment
