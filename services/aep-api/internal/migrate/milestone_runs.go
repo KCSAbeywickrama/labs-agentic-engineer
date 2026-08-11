@@ -66,5 +66,32 @@ func RunMilestoneRuns(ctx context.Context, db *gorm.DB) error {
 		`DROP INDEX IF EXISTS ux_milestone_runs_spec_active`).Error; err != nil {
 		return fmt.Errorf("milestone_runs drop superseded mutex index: %w", err)
 	}
+	// ONE LIVE RUN PER MILESTONE, whatever its origin.
+	//
+	// This is not a new rule — it is the one the whole loop already assumes and
+	// nothing enforced. The workflow id is per-milestone
+	// (run-<org>-<project>-<milestone>), the read model states that only the
+	// newest run can be live, and adoption refuses to start a second. Two live
+	// runs on one milestone would put two agents on one branch.
+	//
+	// The mutex above cannot express it: it is keyed on (org, project) and
+	// narrowed to spec-build, which is a per-PROJECT rule about starting a new
+	// version. Every other origin sat outside it, so the guard against a second
+	// run was a read-then-insert in application code — a check two concurrent
+	// requests both pass. The loser's row is then admitted with no workflow behind
+	// it (Temporal answers AlreadyStarted on the reused id), and because it is
+	// non-terminal it makes LiveRunForMilestone answer forever: every later
+	// revalidation of that version is refused until somebody cancels a run that
+	// was never running.
+	//
+	// Insertion goes through the same ON CONFLICT DO NOTHING, which names no
+	// conflict target and so catches this index too — the losing racer writes
+	// zero rows and TryAdmit reports admitted=false, unchanged.
+	if err := db.WithContext(ctx).Exec(`
+		CREATE UNIQUE INDEX IF NOT EXISTS ux_milestone_runs_active_per_milestone_v1
+		ON milestone_runs (org_id, project_id, milestone_number)
+		WHERE state IN ('planning', 'waiting', 'running')`).Error; err != nil {
+		return fmt.Errorf("milestone_runs per-milestone active index: %w", err)
+	}
 	return nil
 }

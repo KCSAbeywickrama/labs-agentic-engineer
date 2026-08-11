@@ -82,7 +82,7 @@ test("validate: rooms outside the caller's org are denied", async () => {
   );
 });
 
-test("spec files: list + per-file reads through the real client, full specs/ paths verbatim", async () => {
+test("spec files: one bundle read through the real client, full specs/ paths verbatim", async () => {
   const bff = createBffClient(base);
   const files = await bff.fetchSpecFiles("opaque-token", "demo-shop");
   assert.equal(files.length, devSpecFiles.length);

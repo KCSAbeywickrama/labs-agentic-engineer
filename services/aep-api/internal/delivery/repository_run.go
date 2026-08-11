@@ -150,7 +150,7 @@ func (r *milestoneRunRepository) TryAdmit(ctx context.Context, run *MilestoneRun
 	// Validate the origin rather than trusting it: the mutex is a partial index
 	// keyed on origin = 'spec-build', so a typo'd origin would silently escape
 	// the one-active-spec-run-per-project invariant.
-	if run.Origin != RunOriginSpecBuild && run.Origin != RunOriginIncidentAdoption {
+	if !IsRunOrigin(run.Origin) {
 		return false, nil, fmt.Errorf("milestone run: unknown origin %q", run.Origin)
 	}
 	if run.State == "" {

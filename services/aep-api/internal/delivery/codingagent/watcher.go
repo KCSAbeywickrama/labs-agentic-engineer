@@ -19,6 +19,7 @@ package codingagent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -38,6 +39,9 @@ import (
 // discard its ending — exactly where the outcome and any failure live. See
 // livePodLogOptions for the full semantics.
 const finalLogTailLines = 3000
+
+// Compile-time proof the watcher satisfies the supervisor's stop port.
+var _ delivery.MilestoneAgentStopper = (*JobWatcher)(nil)
 
 // JobWatcher polls per-Execution coding-agent Jobs via cluster-gateway-proxy
 // (the `ca-…` proxy dispatch path) and projects terminal phases onto the
@@ -179,13 +183,6 @@ func (w *JobWatcher) captureCycleLogs(ctx context.Context) {
 }
 
 func (w *JobWatcher) captureCycleLog(ctx context.Context, cycle *delivery.RunCycle) {
-	cycleUUID, err := uuid.Parse(cycle.ID)
-	if err != nil {
-		return
-	}
-	if existing, gerr := w.cycleLogs.GetByRun(ctx, cycleUUID, cycle.JobRef); gerr != nil || existing != nil {
-		return
-	}
 	ns, ok := w.resolveNS(ctx, cycle.OrgID)
 	if !ok {
 		return
@@ -205,6 +202,26 @@ func (w *JobWatcher) captureCycleLog(ctx context.Context, cycle *delivery.RunCyc
 		phase = "Failed"
 	default:
 		return // still running — the live tail serves the stream meanwhile
+	}
+	w.snapshotCycleLog(ctx, cycle, ns, phase)
+}
+
+// snapshotCycleLog persists one cycle's pod log under a given phase.
+//
+// Split out of captureCycleLog because the WATCHER only ever snapshots a Job it
+// found terminal, while a cancel has to snapshot one that is still running — the
+// pod is about to be deleted, and after that there is nothing left to read. The
+// phase is therefore the caller's to name.
+//
+// Idempotent on (cycle, run name), so a stop racing the watcher's own pass costs
+// a wasted read rather than a second row.
+func (w *JobWatcher) snapshotCycleLog(ctx context.Context, cycle *delivery.RunCycle, ns, phase string) {
+	cycleUUID, err := uuid.Parse(cycle.ID)
+	if err != nil {
+		return
+	}
+	if existing, gerr := w.cycleLogs.GetByRun(ctx, cycleUUID, cycle.JobRef); gerr != nil || existing != nil {
+		return
 	}
 	podName, err := w.proxy.GetJobPodName(ctx, ns, cycle.JobRef)
 	if err != nil {
@@ -239,6 +256,44 @@ func (w *JobWatcher) captureCycleLog(ctx context.Context, cycle *delivery.RunCyc
 	}
 	slog.InfoContext(ctx, "codingagent.JobWatcher: captured cycle log",
 		"cycle", cycle.ID, "run", cycle.JobRef, "phase", phase, "bytes", len(body))
+}
+
+// StopAgent stops the agent a cycle dispatched: snapshot its log, then delete
+// the Job.
+//
+// It exists because cancelling a run did not stop its agent. Cancel is a signal
+// that settles the run row and closes the cycle, and NOTHING killed the pod — so
+// the console reported `cancelled` in a second while the agent kept working,
+// kept spending the org's model budget, and kept its branch moving, until the
+// Job's own activeDeadlineSeconds expired an hour or two later.
+//
+// The ORDER is the whole design. Deletion propagates to the pods, so deleting
+// first would take the log with it — and that log is the only record of what the
+// agent did before it was stopped. Which is also why this lives on the WATCHER
+// and not on the executor that launched the Job: stopping an agent is mostly a
+// capture problem, and the capture already lives here.
+//
+// A failed snapshot does not block the delete. Losing the log of a cancelled
+// cycle is a real cost, but leaving the agent running is a worse one, and the
+// caller asked for it to stop.
+func (w *JobWatcher) StopAgent(ctx context.Context, orgID, cycleID, jobRef string) error {
+	if w == nil || jobRef == "" {
+		return nil // never dispatched — nothing to stop
+	}
+	if w.cycleLogs == nil || w.cycles == nil {
+		return fmt.Errorf("codingagent: StopAgent needs the cycle-log capture wiring")
+	}
+	ns, ok := w.resolveNS(ctx, orgID)
+	if !ok {
+		return fmt.Errorf("codingagent: no namespace for org %s", orgID)
+	}
+	w.snapshotCycleLog(ctx, &delivery.RunCycle{ID: cycleID, OrgID: orgID, JobRef: jobRef}, ns, "Cancelled")
+	if err := w.proxy.DeleteJob(ctx, ns, jobRef); err != nil {
+		return fmt.Errorf("codingagent: delete job %s: %w", jobRef, err)
+	}
+	slog.InfoContext(ctx, "codingagent: stopped a cancelled cycle's agent",
+		"cycle", cycleID, "ns", ns, "run", jobRef)
+	return nil
 }
 
 func (w *JobWatcher) checkOne(ctx context.Context, row *delivery.Execution) {

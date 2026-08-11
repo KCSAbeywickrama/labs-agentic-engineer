@@ -247,6 +247,14 @@ const BASE_FILES = [
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // clearAllMocks() clears recorded CALLS, not a queued mockResolvedValueOnce:
+  // a one-shot value a test queued but never consumed survives into the NEXT
+  // test and answers its first call. That turns one failure into two — the
+  // drawer tests below queue one-shots, so a single missed refetch strands a
+  // `needsInput:false`, which then tells the following test's Build click that
+  // nothing is unresolved and its drawer never opens. Reset the queue instead,
+  // so each test starts from an empty one and a failure stays where it began.
+  mockPreflightRefetch.mockReset();
   mockUseSpecFiles.mockReturnValue({
     data: BASE_FILES,
     isPending: false,
@@ -660,16 +668,30 @@ describe("SpecView build dependency drawer (#252 Task 10)", () => {
     await waitFor(() =>
       expect(screen.getByText("Resolve drawer item")).toBeInTheDocument(),
     );
+    // PAINTED is not SUBSCRIBED. The drawer's items land in a commit, but the
+    // effect that registers SpecView's turn-end listener is a passive effect
+    // React flushes after that commit — and `waitFor` resolves on the DOM
+    // mutation itself. Notifying in that gap dispatches to nobody: no refetch,
+    // no state change, and the assertion below then burns its whole budget
+    // staring at an unchanged drawer. Drain the pending effects first so the
+    // listener is provably live before the turn ends.
+    await act(async () => {});
 
     // The seeded chat turn ends — same chatKey SpecView computes
     // (orgHandle "acme" from the useSession mock, matching AppLayout's
     // "default" fallback convention when there's no claim).
+    // Build already flushed once on its way here, so the listener's own flush
+    // has to be counted, not merely observed.
+    const flushesBeforeTurnEnd = mockFlush.mock.calls.length;
     notifyTurnEnd(chatKeyFor("acme", "proj1"), "completed");
+    // notifyTurnEnd dispatches SYNCHRONOUSLY and the listener's first act is
+    // that flush, so this pins "a listener actually ran" right here — rather
+    // than leaving it to be inferred from an unchanged drawer five seconds on.
+    expect(mockFlush).toHaveBeenCalledTimes(flushesBeforeTurnEnd + 1);
 
     await waitFor(() =>
       expect(screen.queryByText("Resolve drawer item")).not.toBeInTheDocument(),
     );
-    expect(mockFlush).toHaveBeenCalled();
     expect(mockPreflightRefetch).toHaveBeenCalledTimes(2);
   });
 

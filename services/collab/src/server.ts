@@ -186,8 +186,13 @@ export function buildLoadDocumentHook(config: CollabConfig, deps: CollabDeps) {
   ) => {
     const { document, documentName, context } = data;
 
+    // A seed anomaly is never fatal (the content still lands) but it must not be
+    // silent — it is the one path where this room could lose a file's identity.
+    const onAnomaly = (message: string) =>
+      deps.log?.(`seed anomaly in ${documentName}: ${message}`);
+
     if (config.devMode) {
-      seedDocument(document, devSeedFiles);
+      seedDocument(document, devSeedFiles, onAnomaly);
       deps.log?.(`seeded ${documentName} from dev fixtures`);
       return document;
     }
@@ -211,7 +216,7 @@ export function buildLoadDocumentHook(config: CollabConfig, deps: CollabDeps) {
       // Reference documents never enter the room — not seeded, not baselined
       // (the committer filters its side too; see isReferenceDocPath).
       const files = fetched.filter((f) => !isReferenceDocPath(f.path));
-      seedDocument(document, files);
+      seedDocument(document, files, onAnomaly);
       // Committer baseline (#133): the flush diffs the live doc against what
       // was seeded (content) and preconditions on the shas we read.
       const state = ensureRoomState(documentName, context.projectName);

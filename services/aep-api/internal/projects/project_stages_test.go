@@ -107,6 +107,86 @@ func TestStageDerivation_FullPipeline(t *testing.T) {
 	}
 }
 
+// TestBuildStage_IgnoresRunsOnOlderVersions.
+//
+// The rows arrive newest-first across the WHOLE project, and only a spec build
+// advances the version — the other origins work an existing milestone, which may
+// be any version's. A revalidation of v1, or an incident adopted into it, is
+// newer than the v3 build that shipped, so picking the newest row outright walks
+// the overview backwards and reports the project as being on v1.
+func TestBuildStage_IgnoresRunsOnOlderVersions(t *testing.T) {
+	t.Parallel()
+	old := specRun("v1", delivery.RunStateSucceeded)
+	// A revalidation of the OLD version, started after the newer build shipped.
+	revalidate := specRun("v1", delivery.RunStateRunning)
+	revalidate.Origin = delivery.RunOriginRevalidate
+
+	st := mustStatus(t, statusFixture{
+		runs:   []delivery.MilestoneRun{revalidate, specRun("v3", delivery.RunStateSucceeded), old},
+		counts: map[string]int{"v3": 4},
+	})
+	if st.Build.Version != "v3" {
+		t.Errorf("build version = %q, want v3 — a run on an older milestone must not move it", st.Build.Version)
+	}
+	if st.Build.Status != "succeeded" {
+		t.Errorf("build status = %q, want succeeded — the revalidation's state is not the build's", st.Build.Status)
+	}
+}
+
+// TestValidationStage_IncidentRunDoesNotEraseTheVerdict.
+//
+// This one needs no revalidation to reproduce, which is the point: an incident
+// adoption gets no validation cycle, and `settle` stamps `skipped` on a succeeded
+// run that never validated. So the newest run on a milestone routinely carries a
+// verdict meaning "I was never asked" — and reading it reported a version that had
+// genuinely PASSED as unvalidated. One adopted issue was enough.
+func TestValidationStage_IncidentRunDoesNotEraseTheVerdict(t *testing.T) {
+	t.Parallel()
+	build := specRun("v3", delivery.RunStateSucceeded)
+	build.ValidationVerdict = delivery.ValidationVerdictPassed
+	// An issue adopted into the delivered version's milestone afterwards. It never
+	// validates, so its own verdict is `skipped`.
+	incident := specRun("v3", delivery.RunStateSucceeded)
+	incident.Origin = delivery.RunOriginIncidentAdoption
+	incident.ValidationVerdict = delivery.ValidationVerdictSkipped
+
+	st := mustStatus(t, statusFixture{
+		runs:   []delivery.MilestoneRun{incident, build},
+		counts: map[string]int{"v3": 4},
+	})
+	if got := string(st.Deploy.Validation); got != delivery.ValidationVerdictPassed {
+		t.Errorf("validation = %q, want passed — an incident run never asked, so it cannot answer", got)
+	}
+}
+
+// TestValidationStage_FollowsTheNewestRunOnTheVersion is the other half: a
+// version CAN be re-judged, and the answer is then the later run's.
+//
+// So the chip is scoped to the milestone the build stage named — not to the
+// spec-build row (which would pin the verdict to the first judgement forever) and
+// not to the project (which would let an older version answer for this one).
+func TestValidationStage_FollowsTheNewestRunOnTheVersion(t *testing.T) {
+	t.Parallel()
+	build := specRun("v3", delivery.RunStateSucceeded)
+	build.ValidationVerdict = delivery.ValidationVerdictFailed
+	build.TerminalReason = delivery.RunReasonValidationFailed
+	// A revalidation of the SAME version that has since passed.
+	revalidate := specRun("v3", delivery.RunStateSucceeded)
+	revalidate.Origin = delivery.RunOriginRevalidate
+	revalidate.ValidationVerdict = delivery.ValidationVerdictPassed
+
+	st := mustStatus(t, statusFixture{
+		runs:   []delivery.MilestoneRun{revalidate, build},
+		counts: map[string]int{"v3": 4},
+	})
+	if got := string(st.Deploy.Validation); got != delivery.ValidationVerdictPassed {
+		t.Errorf("validation = %q, want passed — the newest judgement of this version is its answer", got)
+	}
+	if st.Build.Version != "v3" {
+		t.Errorf("build version = %q, want v3", st.Build.Version)
+	}
+}
+
 // TestBuildStage_RunStateMapping pins the run-state → BuildStage enum table. A
 // version is "running" for as long as its run is live — waiting between cycles
 // included, because the version is still being delivered.

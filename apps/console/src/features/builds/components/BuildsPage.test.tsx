@@ -815,3 +815,76 @@ describe("BuildsPage — one version's story", () => {
     expect(invalidateQueries).toHaveBeenCalledTimes(1);
   });
 });
+
+// A milestone accumulates runs across its life, and a revalidation is one that
+// only re-judges the version. This rail is about how the version was DELIVERED —
+// validation cycles are already filtered out of it, on the grounds that a verdict
+// shown twice invites the two to disagree.
+describe("BuildsPage — a revalidation is not a build story", () => {
+  const revalidateRun = (over: Partial<MilestoneRunView> = {}): MilestoneRunView => ({
+    ...run(),
+    id: "run-revalidate",
+    origin: "revalidate",
+    state: "failed",
+    terminalReason: "validation-failed",
+    cycles: [
+      {
+        id: "cycle-v",
+        kind: "validation",
+        attempts: 1,
+        mergeSha: "b6505515aaaa",
+        createdAt: "2026-07-11T09:00:00Z",
+        endedAt: "2026-07-11T09:07:00Z",
+      },
+    ],
+    ...over,
+  });
+
+  // The bug: a revalidation has no build session, so leading with it tripped the
+  // empty state written for a run that died before dispatching — and said nothing
+  // had been dispatched about a run whose validation cycle ran for 7 minutes and
+  // merged a pull request.
+  it("leads with the run that delivered the version, not the one that re-judged it", () => {
+    mockBuilds = [build("v2", "failed")];
+    // Newest first, as list-build-runs answers.
+    mockRuns = [revalidateRun(), run({ state: "succeeded" })];
+
+    renderPage();
+
+    expect(
+      screen.queryByText(/No build session was ever dispatched/),
+    ).not.toBeInTheDocument();
+    // The delivery run's own sessions are what the card shows.
+    expect(screen.getByText(/Build session/)).toBeInTheDocument();
+  });
+
+  // The converse, and why the test is on what the run DID rather than its origin:
+  // left at the default attempt allowance a revalidation repairs what it finds —
+  // an issue per failed criterion, an ordinary coding cycle, then builds.
+  it("keeps a revalidation that went on to repair and rebuild", () => {
+    mockBuilds = [build("v2", "in_progress")];
+    const repairing = revalidateRun({
+      state: "running",
+      cycles: [
+        ...revalidateRun().cycles,
+        {
+          id: "cycle-repair",
+          kind: "coding",
+          attempts: 1,
+          branch: "aep/m2-repair",
+          createdAt: "2026-07-11T09:10:00Z",
+        },
+      ],
+    });
+    mockRuns = [repairing, run({ state: "succeeded" })];
+
+    renderPage();
+
+    // It is the newest build activity on the version, so it leads — and the
+    // never-dispatched copy stays absent because it has a session.
+    expect(
+      screen.queryByText(/No build session was ever dispatched/),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText(/Revalidate/i)).toBeInTheDocument();
+  });
+});

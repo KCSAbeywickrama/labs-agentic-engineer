@@ -71,7 +71,7 @@ it), and every former feature→feature edge becomes a legal slice→root type r
 | `execution` | the executions READ surface: the per-Task progress endpoint, the task-log SSE stream, `OpsExecutionReader`. It writes nothing and dispatches nothing — the only execution rows left are the provisioning gates' | `TaskStreamHub`, the executions kernel |
 | `eventcore` | the event plane of the milestone-run loop: the auto-merge policy seam, the merged-PR path-diff build fan-out + per-`(component, SHA)` re-trigger budget, fix/conflict/red-main issue minting, milestone-matched predicate re-evaluation, adoption, the reconcile sweep, and the build sweep that observes those builds reaching terminal | the milestone model (labels, `MilestoneRun`/`RunCycle`, run signals), `DiffComponents`/`BuildRunName` and `BuildTerminalObserver`; **no Temporal** — it reaches the supervisor only through the `RunSignaler`/`RunStarter` ports |
 | `run` | the milestone run SUPERVISOR: the wait state + dispatch predicate, the cycle loop, the four budgets + no-progress + ceiling, the validation cycle, settle, and cancel. Plus the `Supervisor` handle the event plane and the build click signal and start runs through | `Runtime`, the milestone model, `RunStatus`/`MilestoneRunWorkflowID`, `MilestoneDispatch`, `DiffComponents`/`BuildRunNamePrefix`; **no GitHub client, no gorm** |
-| `runread` | the run READ surface: a version's runs + their cycles, ONE SSE stream stitching the per-cycle agent logs, and cancel. Owns no state and decides nothing | the run/cycle entities and `IsTerminalRunState`; reaches the pod log through `CycleLogReader` and the supervisor through `RunCanceller`, so it drags in neither a cluster client nor a workflow engine |
+| `runread` | the run READ surface: a version's runs + their cycles, ONE SSE stream stitching the per-cycle agent logs, and the two writes beside them — cancel, and revalidate. Owns no state and decides nothing: both writes resolve their target through the org-scoped read, then hand off | the run/cycle entities and `IsTerminalRunState`; reaches the pod log through `CycleLogReader`, the supervisor through `RunCanceller` and the event plane through `Revalidator`, so it drags in neither a cluster client, a workflow engine nor GitHub |
 | `codingagent` | the CodingExecutor (ONE dispatch entry point: launch a cycle's agent Job), the build-auth retry, the job watchers and the Job templates | `MilestoneDispatch`/`MilestoneDispatcher`, `TaskStreamHub`, `BuildTerminalObserver` |
 | `validation` | the two S2S validation runner callbacks (context / test-credentials), the per-version validation issue, and the report → verdict rule | — (no cross-edges; least entangled) |
 | `httpapi` | the aggregator: embeds build/task/execution/runread handlers; **holds `Deps`** (see below) | imports the sub-packages (the exempt aggregator) |
@@ -93,7 +93,7 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
 | `BuildTerminalObserver` (root) | offers | the OpenChoreo watcher → the event plane: a settled build reported outwards, so watcher and event plane stay peer sub-packages |
 | `MilestoneDispatcher` (root, over `MilestoneDispatch`) | offers | the coding agent → the supervisor: launch one agent run at a milestone and answer with its Job ref. The dispatch prompt is a milestone reference; the runner discovers its own working set. Satisfied by `*codingagent.CodingExecutor`, which writes no execution row — the cycle record is the supervisor's bookkeeping |
 | `ComponentEnsurer` | needs | `eventcore` → the projects component service + the runtime-config emitter. Provision a component's OpenChoreo CR immediately before its first build; see the invariant below |
-| `RunReader` · `CycleReader` · `CycleLogReader` · `RunCanceller` | needs | `runread` → the root run/cycle repositories, `codingagent`'s pod-log reader, and `*run.Supervisor`. Four reads and one write, which is the whole dependency surface of the read model |
+| `RunReader` · `CycleReader` · `CycleLogReader` · `RunCanceller` · `Revalidator` | needs | `runread` → the root run/cycle repositories, `codingagent`'s pod-log reader, `*run.Supervisor` and the event plane. Four reads and two writes, which is the whole dependency surface of the read model. `Revalidator` is a port for the same reason `RunCanceller` is: deciding a revalidation needs GitHub (is there open work?) and the project repo (is there an oracle?), and this surface must stay free-to-poll |
 | `RunSignaler` · `RunStarter` | needs | `eventcore` and `build` → the run supervisor. Signal a run, start one. Interfaces, which is what keeps both the event plane and the build click free of a workflow engine; both are declared over the root `StartRunRequest`, and `*run.Supervisor` satisfies both |
 | `RunStore` · `CycleStore` · `MilestoneReader` · `PRReader` · `DesignReader` · `BuildReader` · `ValidationCoordinator` | needs | `run` → the root repositories, `sourcecontrol`, the design reader, `clients/openchoreo` and `delivery/validation`. Every I/O the loop performs, named once; `BuildReader` is read-ONLY because the supervisor never triggers a build |
 | `MilestoneClient` (mint · list a milestone's issues · close issue · close milestone) | needs | `build` → `sourcecontrol`. The plan path's whole GitHub surface: create `v<N>` idempotently, and supersede `v<N-1>` |
@@ -121,24 +121,25 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   grammar and that spelling. The milestone **number** is the key; the title is kept
   only as the `v<N>` tag a `?tag=` query resolves through. Loop position is read from the latest cycle, and
   per-component build/deploy status is derived from OpenChoreo on read — neither is stored.
-- **Delivery's agent SPEND**, on the cycle record: a cycle IS one agent run, so its captured token usage
-  and the USD stamped on it at capture (`cost_usd`, amended console ADR-0011) are where both the build and
-  validation phases of Settings → Usage come from. The phase is read from the cycle's kind. `RecordUsage`
-  is the one cycle mutator NOT fenced on `ended_at IS NULL`: usage arrives from the terminal-log capture,
-  and a cycle closes on the merge webhook seconds after its Job exits — fencing it would discard nearly
-  every capture. `PhaseUsageRollup` sums this with the executions table, which today contributes nothing
-  (its only remaining kind, `provision`, runs no model).
+- **Delivery's agent SPEND**, in the `agent_usage_ledger`: an append-only entry per dispatch carrying the
+  captured tokens, the USD stamped at capture (`cost_usd`, amended console ADR-0011), the SDLC phase and
+  the version it paid for. Both capture surfaces mirror into it as part of their own stamp — `RecordUsage`
+  on the cycle and on the execution — so `PhaseUsageRollup` reads the ledger and NOTHING else: adding the
+  dispatch rows back would bill every token twice. `RecordUsage` stays the one cycle mutator NOT fenced on
+  `ended_at IS NULL`: usage arrives from the terminal-log capture, and a cycle closes on the merge webhook
+  seconds after its Job exits — fencing it would discard nearly every capture. Entries are keyed
+  `(source, source_id)`, so a re-read of the same log updates one entry rather than adding a second.
 - The **run loop** (`run`): one Temporal workflow per milestone, `run-<org>-<project>-<milestoneNumber>`,
   whose id is REUSED after a terminal run because a milestone sees sequential runs across its life. It
   owns the four budgets, the no-progress rule, the cycle ceiling, the validation cycle and settle — and
   nothing else: it detects no event and writes no issue.
 - **Persistence**: every gorm in this domain sits at the ROOT (the fence `TestGormFencedToDomainRepository`
   draws), as single write-authority — `repository_execution.go` · `repository_coding_agent_log.go` ·
-  `repository_run.go` · `repository_cycle.go` · `repository_run_cycle_log.go` over the `execution.go` /
-  `coding_agent_log.go` / `milestone_run.go` / `run_cycle.go` / `run_cycle_log.go` entities. Their tables
-  are `executions` · `coding_agent_logs` · `milestone_runs` · `run_cycles` · `run_cycle_logs`.
-  `usage_rollup.go` is the one read that spans two of them, and is a plain function over both
-  repositories rather than a third store.
+  `repository_run.go` · `repository_cycle.go` · `repository_run_cycle_log.go` · `repository_usage_ledger.go`
+  over the `execution.go` / `coding_agent_log.go` / `milestone_run.go` / `run_cycle.go` / `run_cycle_log.go`
+  / `usage_ledger.go` entities. Their tables are `executions` · `coding_agent_logs` · `milestone_runs` ·
+  `run_cycles` · `run_cycle_logs` · `agent_usage_ledger`. `usage_rollup.go` is a plain function over the
+  ledger rather than a third store.
 
 ## Invariants — don't break
 - **`task ⊥ run`.** The GitHub-facing Task surface and the run supervisor are peer sub-packages that never
@@ -204,6 +205,16 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   read model and never read back: a replay must reproduce the same decisions without a database. The one
   budget it does not count is the automatic build re-trigger — that is the event plane's, derived from the
   WorkflowRuns themselves, and the supervisor reads the same runs rather than keeping a second tally.
+- **Activities retry blips forever and answers never.** The supervisor's activities run under Temporal's
+  default policy — unbounded, with backoff — because a supervisor that cannot reach GitHub should stall
+  visibly rather than settle a run on a network blip. A failure that repeating cannot change is told
+  apart wherever the supervisor touches source control and marked non-retryable, so it fails on
+  its first attempt: the project deleted underneath a live run, a milestone or pull request removed on
+  the host, a rejected credential. `sourcecontrol.IsPermanent` owns which failures those are — GitHub's
+  secondary rate limit wears a 403 and is deliberately NOT one — and `run/errors.go` owns turning them
+  into Temporal's vocabulary. The guard is per call site, so an activity added later that returns a
+  source-control error raw is back on unbounded retry; `CloseMilestone` is the one deliberate exception,
+  swallowing its error by contract and so never retrying.
 - **Every terminal reason names exactly one failure class.** `redispatch-budget` is agent death (including
   a Job that exited without a pull request); `build-retrigger-budget` is a build that stayed red through
   its one automatic re-trigger with no fix issue to recover it; `fix-chain-budget` and `conflict-budget`
@@ -233,6 +244,14 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   one queue with disjoint registrations would fail whichever tasks each picked up by accident.
 - **Cancel is a signal, not a Temporal cancellation.** A cancelled context could not run the activities
   that record the outcome, so the run settles its own row and closes its own cycle on the ordinary path.
+  That live context is also what lets it **stop the agent**: settle deletes the in-flight cycle's Job
+  (`MilestoneAgentStopper`) on the cancel path and only there. Without it, cancel settled the row in a
+  second and left the agent working — and billing the org's model budget — until the Job's own
+  `activeDeadlineSeconds` expired an hour or two later, which is not what the button says. The log is
+  SNAPSHOTTED before the delete: deletion propagates to the pods, and that log is the only record of what
+  the agent did before it was stopped. No other terminal path deletes a Job — the agent has already
+  exited there, and a delete would race the watcher's own capture (it snapshots seconds after a Job
+  exits) and destroy the log the run is being settled to explain.
 - **Echo suppression is `issues.*`-only.** Every label, comment and milestone assignment the platform
   writes fires an `issues.*` delivery straight back, so those handlers drop self-sender deliveries. It is
   deliberately NOT applied to `pull_request.*`: in App mode the coding runner opens its PR as the same
@@ -275,6 +294,15 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   NOTHING else on that pass: a Job that exited zero says nothing about whether the cycle landed, and the
   cycle's outcome is the supervisor's, learned from webhooks. Without the capture a finished run would
   have no history at all — the Job's TTL reaps the pod long before anyone opens an old version's page.
+- **A project delete purges the WORK and retires the SPEND.** `runs` and `run_cycles` are working state and
+  go, so a recreated same-named project cannot inherit a timeline its repo never had; the
+  `agent_usage_ledger` is not purged by anything — `RetireByProject` stamps its live entries instead, and
+  that stamp is the only lifetime discriminator there is. It runs FIRST and aborts the cascade on failure:
+  rows deleted while their spend is still attributed to a live project is the one combination no retry can
+  repair. `contracts.UsageScope{ProjectID, Retired}` is how the roll-up hands the two lifetimes back, so a
+  slug reused after a delete reads as two Usage cards rather than one inflated one. Spec-turn spend has no
+  such marker (`agent_turns` is never purged and never retired) and stays attributed whole to whichever
+  lifetime is current — a known asymmetry the spec domain owns.
 - **The task-log stream is one connection, no server cursor.** `stream-task-log`
   (`GET .../tasks/{issueNumber}/log`, `text/event-stream`) carries a Task's whole live state — `task` /
   `execution` / `line` / `done` frames, the frame kind in a `type` field inside the `data:` payload so it
@@ -295,6 +323,24 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   the body embeds the criteria as they stood at mint time, so adopting an older version's issue would
   hand this version's agent the wrong oracle, and re-filing it would erase it from the ledger of the
   version it actually validated. The version's own open issue is looked up by milestone, and only there.
+- **A version can be judged more than once, and the NEWEST run owns its verdict.** `revalidate` is the
+  third run origin (`POST .../builds/{tag}/revalidate`): a fresh run over an already-shipped version's
+  milestone that ENTERS THE LOOP AT VALIDATION, because its working set is already empty. Nothing is
+  rebuilt to ask the question. What follows the verdict is the loop's ordinary behaviour, selected by ONE
+  number — the run's validation-attempt allowance: at 1 the allowance is spent by the first fatal verdict,
+  which settles the run *before* it reaches the repair mint, so no work is filed and nothing is rebuilt;
+  at the default the full chain runs (issue per failed criterion → coding cycle → builds → validate
+  again). There is deliberately no separate "should it repair" flag — that ordering is the switch.
+  Three guards refuse it up front, each beside the collaborator that can answer it: a live run on the
+  milestone (409 — unlike adoption there is nothing to hand off to it, and the revalidate origin sits
+  outside the spec-run mutex so nothing in the database would refuse a second row), open work in the
+  working set (409 — the loop would build it, not re-check it), and no acceptance oracle (422 — a run
+  with nothing to validate concludes `skipped`, which would overwrite a real verdict).
+- **The overview's build stage reads the newest SPEC BUILD; its validation chip reads the newest run on
+  THAT milestone.** Only a spec build advances the project's version, and the other two origins work an
+  existing milestone that may be any version's — so picking the newest row outright let a revalidation
+  (or an incident adoption) on an older version walk the reported version backwards. Both are in-memory
+  scans of the run list the status poll already holds, so neither costs a query.
 - **The list read returns three populations, and hides one** (`task/reads.go` `ListByTag`, the read-model
   boundary). Every row carries the label-derived `executorClass` the console sections on: `coding` (agent
   work), `provision` (a dispatch gate, which the console renders as a hold banner rather than a row), and

@@ -49,8 +49,14 @@ import { buildInstructions, buildTaskPlanInstructions, buildPrompt, buildEagerSk
 import type { SkillSource } from "../agents/main/skill-source.js";
 import { buildManifestPart, toTurnUsage } from "./manifest.js";
 import { config } from "../shared/config.js";
-import { isAnthropicModel, modelProviderOptions, webSearchTool } from "../shared/model.js";
+import {
+  isAnthropicModel,
+  modelCacheBreakpoint,
+  modelProviderOptions,
+  webSearchTool,
+} from "../shared/model.js";
 import { loadMcpTools } from "../shared/mcp-client.js";
+import { turnTelemetry } from "../shared/telemetry.js";
 import type { Conversation, ConversationStore } from "../store/conversation-store.js";
 
 /** Thrown when a second turn starts for an id whose turn is still in flight (→ HTTP 409). */
@@ -277,6 +283,10 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
     // spending a whole model call on loadSkill. Unknown names skip silently
     // (the snapshot is the authority on what exists).
     const eagerBlock = buildEagerSkillsBlock(skills, input.eagerSkills);
+    const cacheBreakpoint = modelCacheBreakpoint();
+    // Stamps this turn's steps with the conversation they belong to, so two
+    // projects generating at once are attributable in the trace UI.
+    const telemetry = turnTelemetry(conv.id);
     const startLen = conv.messages.length;
     const res = await runTurn({
       model: input.model,
@@ -294,6 +304,12 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
       ],
       maxOutputTokens: config.maxOutputTokens,
       providerOptions: modelProviderOptions(),
+      // History is append-only (see the module doc above), so the prefix this
+      // marks is byte-identical on the next step and the next turn — which is
+      // exactly what makes it cacheable. Omitted entirely when caching is off,
+      // so the request is byte-identical to before this existed.
+      ...(cacheBreakpoint ? { cacheBreakpoint } : {}),
+      ...(telemetry ? { telemetry } : {}),
       onEvent,
       ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
     });

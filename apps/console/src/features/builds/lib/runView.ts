@@ -57,6 +57,31 @@ export function isTerminalRun(state: string): boolean {
 }
 
 /**
+ * Does this run belong on the BUILD rail — is it part of how the version was
+ * delivered, rather than a re-judgement of it?
+ *
+ * The rail already filters validation cycles out (buildCycles above), on the
+ * grounds that a verdict shown in two places invites the two to disagree. A run
+ * that ONLY validated is that same argument one level up: it has no build session
+ * to show, and its verdict belongs on the Validation board. Leading with one made
+ * this page announce "No build session was ever dispatched" — copy written for a
+ * run that died before dispatching, and false here, because a validation cycle was
+ * dispatched, ran, and merged.
+ *
+ * Not a plain origin test, and that is the whole subtlety: a revalidation left at
+ * the default attempt allowance REPAIRS what it finds — one issue per failed
+ * criterion, then an ordinary coding cycle, then builds. Once it has done that it
+ * is a build story like any other, so it is judged on what it actually did.
+ *
+ * The converse also has to hold: a spec build that died before dispatching has no
+ * build sessions either, and it MUST stay — "nothing was ever dispatched" is the
+ * true and useful thing to say about it. Hence the origin clause first.
+ */
+export function isDeliveryRun(run: MilestoneRunView): boolean {
+  return run.origin !== "revalidate" || buildCycles(run.cycles ?? []).length > 0;
+}
+
+/**
  * Is this version still moving? Only the newest run can be live (a milestone
  * sees SEQUENTIAL runs across its life), so this is the whole page's poll
  * predicate and the gate on every GitHub-backed read.

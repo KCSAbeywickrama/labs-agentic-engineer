@@ -162,6 +162,9 @@ point at enforcement, they don't restate it.
   `TestAllDomainsLanded`
 - Secret-backend SDKs are fenced to `platform/secrets` → `TestImportFences`
   (in `platform/secrets`)
+- Every package that imports the DB harness terminates its container in
+  `TestMain` (`dbtest.Main`), so `make test-db` leaves no Postgres on the host →
+  `TestDBTestPackagesShutDownTheirContainer`
 
 **Hygiene — CI-enforced by `make deadcode-check`:**
 
