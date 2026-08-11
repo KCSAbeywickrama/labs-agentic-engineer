@@ -269,6 +269,65 @@ beforeEach(() => {
   });
 });
 
+describe("SpecView default selection never opens a reference document (#383)", () => {
+  // A fresh project may hold ONLY the uploaded reference documents (the PRD
+  // arrives later, from /start). The default-selection fallback must not pull
+  // one into the main editor pane — a binary reference rendered as editor
+  // text is the base64-wall bug. References open through the preview dialog,
+  // and only through it.
+  it("with only reference files present, no file content is requested for the pane", () => {
+    mockUseSpecFiles.mockReturnValue({
+      data: [
+        {
+          path: "specs/requirements/references/claim-form.pdf",
+          sha: "r1",
+          group: "references",
+          size: 868409,
+        },
+      ],
+      isPending: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    render(<SpecView projectName="proj1" />);
+    // The content hook is disabled (empty path) rather than pointed at the
+    // reference document.
+    const requestedPaths = mockUseSpecFileContent.mock.calls.map(
+      (c) => (c[1] as { path: string } | null)?.path ?? null,
+    );
+    expect(requestedPaths).not.toContain(
+      "specs/requirements/references/claim-form.pdf",
+    );
+  });
+
+  it("a requirements file still wins the default as before", () => {
+    mockUseSpecFiles.mockReturnValue({
+      data: [
+        {
+          path: "specs/requirements/references/claim-form.pdf",
+          sha: "r1",
+          group: "references",
+          size: 868409,
+        },
+        { path: "specs/requirements/prd.md", sha: "p1", group: "requirements" },
+      ],
+      isPending: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    render(<SpecView projectName="proj1" />);
+    const requestedPaths = mockUseSpecFileContent.mock.calls.map(
+      (c) => (c[1] as { path: string } | null)?.path ?? null,
+    );
+    expect(requestedPaths).toContain("specs/requirements/prd.md");
+    expect(requestedPaths).not.toContain(
+      "specs/requirements/references/claim-form.pdf",
+    );
+  });
+});
+
 describe("SpecView onBuild routing (#164)", () => {
   beforeEach(() => {
     vi.clearAllMocks();

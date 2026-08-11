@@ -255,14 +255,19 @@ export function SpecView({ projectName }: { projectName: string }) {
   // requirements file (the seeded PRD). A manual click sets `selection` and
   // always wins over this default.
   const firstRequirements = files.find((f) => f.group === "requirements");
+  // References never enter the main pane — not by click (they open the
+  // preview dialog) and not by default either: a fresh project may hold ONLY
+  // its uploaded references, and a binary one rendered as editor text is
+  // garbage. The fallback skips them; with nothing else, the pane stays empty.
+  const firstEditable = files.find((f) => f.group !== "references");
   const effectiveSelection: SpecSelection =
     selection ??
     (agentInRoom && hasDesignCell
       ? { kind: "cell-diagram" }
       : firstRequirements
         ? { kind: "file", path: firstRequirements.path }
-        : files[0]
-          ? { kind: "file", path: files[0].path }
+        : firstEditable
+          ? { kind: "file", path: firstEditable.path }
           : { kind: "file", path: "" });
 
   // The concrete file entry when the selection is a file (else null: the
