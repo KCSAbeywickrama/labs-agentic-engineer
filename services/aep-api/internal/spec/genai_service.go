@@ -224,35 +224,39 @@ type TurnActivityRecorder interface {
 // implementation and no test fake (the old GenAIService interface had no
 // substitution; the component tier exercises the real service).
 type Service struct {
-	repos      RepoResolver
-	git        GitReader
-	keys       AnthropicKeyResolver
-	client     agentsvc.Client
-	turns      TurnRepository
-	broker     *TurnBroker
-	snapshots  sourcecontrol.SnapshotProvider
-	skillsRepo SkillsRepoResolver
-	mcpTokens  MCPTokenMinter
-	mcpBaseURL string
-	finishHook func(ctx context.Context, orgID, projectID, turnID, useCase, outcome string)
-	recorder   TurnActivityRecorder
+	repos  RepoResolver
+	git    GitReader
+	keys   AnthropicKeyResolver
+	client agentsvc.Client
+	turns  TurnRepository
+	broker *TurnBroker
+	// heartbeatEvery is the agent_turns heartbeat cadence. A field rather than
+	// the constant so a component test can drive it faster than 15s.
+	heartbeatEvery time.Duration
+	snapshots      sourcecontrol.SnapshotProvider
+	skillsRepo     SkillsRepoResolver
+	mcpTokens      MCPTokenMinter
+	mcpBaseURL     string
+	finishHook     func(ctx context.Context, orgID, projectID, turnID, useCase, outcome string)
+	recorder       TurnActivityRecorder
 }
 
 // NewService wires the genai service.
 func NewService(d ServiceDeps) *Service {
 	return &Service{
-		repos:      d.Repos,
-		git:        d.Git,
-		keys:       d.Keys,
-		client:     d.Client,
-		turns:      d.Turns,
-		broker:     d.Broker,
-		snapshots:  d.Snapshots,
-		skillsRepo: d.SkillsRepo,
-		mcpTokens:  d.MCPTokens,
-		mcpBaseURL: d.MCPBaseURL,
-		finishHook: d.TurnFinishHook,
-		recorder:   d.Recorder,
+		repos:          d.Repos,
+		git:            d.Git,
+		keys:           d.Keys,
+		client:         d.Client,
+		turns:          d.Turns,
+		broker:         d.Broker,
+		snapshots:      d.Snapshots,
+		heartbeatEvery: turnHeartbeatEvery,
+		skillsRepo:     d.SkillsRepo,
+		mcpTokens:      d.MCPTokens,
+		mcpBaseURL:     d.MCPBaseURL,
+		finishHook:     d.TurnFinishHook,
+		recorder:       d.Recorder,
 	}
 }
 
