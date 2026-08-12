@@ -47,6 +47,8 @@ type Activities struct {
 	deployer   Deployer
 	deployRead DeploymentReader
 	deployMint DeployIssueMinter
+	gates      Gates
+	planner    Planner
 }
 
 // Deps carries the activity adapters. runs/cycles/milestones are required; the
@@ -63,6 +65,8 @@ type Deps struct {
 	Deploy       Deployer
 	Deployments  DeploymentReader
 	DeployIssues DeployIssueMinter
+	Gates        Gates
+	Planner      Planner
 }
 
 // NewActivities wires the activity adapters.
@@ -79,6 +83,8 @@ func NewActivities(d Deps) *Activities {
 		deployer:   d.Deploy,
 		deployRead: d.Deployments,
 		deployMint: d.DeployIssues,
+		gates:      d.Gates,
+		planner:    d.Planner,
 	}
 }
 
@@ -362,6 +368,44 @@ func (a *Activities) PollCycleBuilds(ctx context.Context, in CycleBuildsInput) (
 		}
 	}
 	return out, nil
+}
+
+// ---- planning ---------------------------------------------------------------
+
+// PlanMilestoneInput fills a version's milestone: mint its dependency gates,
+// then plan its Tasks into it.
+type PlanMilestoneInput struct {
+	OrgID           string                    `json:"orgId"`
+	ProjectID       string                    `json:"projectId"`
+	MilestoneNumber int                       `json:"milestoneNumber"`
+	Tag             string                    `json:"tag"`
+	ProvisionInputs []delivery.ProvisionInput `json:"provisionInputs,omitempty"`
+}
+
+// ProvisionGates authors the version's dependencies and mints its gate issues.
+//
+// Unwired degrades to "nothing to do", like the other optional collaborators: a
+// project with no dependency drawer has no gates to mint, which is an ordinary
+// configuration rather than a failed version.
+func (a *Activities) ProvisionGates(ctx context.Context, in PlanMilestoneInput) error {
+	if a.gates == nil {
+		return nil
+	}
+	return planErr(a.gates.ProvisionForBuild(ctx, in.OrgID, in.ProjectID, in.Tag, in.MilestoneNumber, in.ProvisionInputs))
+}
+
+// PlanMilestone runs the version's planning turn.
+//
+// Idempotent by construction, which is what makes it safe under Temporal's
+// retries AND under a fresh execution started to recover a run: minting dedupes
+// on the title slug against the milestone's own issues, so a re-plan is additive
+// only. A retry after a partially-minted plan completes it rather than doubling
+// it.
+func (a *Activities) PlanMilestone(ctx context.Context, in PlanMilestoneInput) error {
+	if a.planner == nil {
+		return nil
+	}
+	return planErr(a.planner.PlanIntoMilestone(ctx, in.OrgID, in.ProjectID, in.MilestoneNumber))
 }
 
 // ---- deploy -----------------------------------------------------------------

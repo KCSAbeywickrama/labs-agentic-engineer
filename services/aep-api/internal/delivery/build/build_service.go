@@ -284,11 +284,19 @@ func (s *Service) Run(ctx context.Context, orgID, projectID string, inputs []Bui
 		if cerr != nil {
 			return "", nil, cerr
 		}
-		// Detached: a planning turn is an LLM turn, and the click must not hold
-		// the request open for it. The version is already claimed, so a second
-		// click 409s while this runs.
-		detached := context.WithoutCancel(ctx)
-		go s.fillMilestone(detached, orgID, projectID, res.Tag, run, provInputs)
+		// Synchronous, and fast: this hands the version to the supervisor, which
+		// then fills the milestone as its own first phase. The click used to run
+		// the planning turn itself, in a detached goroutine, because an LLM turn
+		// must not hold a request open — and paid for it with a step that could
+		// not survive a restart, could not retry a blip, and left no history.
+		//
+		// A start that did not happen is settled HERE. The row is the spec-run
+		// mutex; leaving it non-terminal with no workflow behind it would refuse
+		// every later build on this project, and nothing would ever heal it (the
+		// reconcile sweep reads such a row as live).
+		if serr := s.startRun(ctx, orgID, projectID, res.Tag, run, provInputs); serr != nil {
+			return "", nil, serr
+		}
 	}
 
 	slog.InfoContext(ctx, "build started",

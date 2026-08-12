@@ -195,6 +195,30 @@ type Deployer interface {
 	Deploy(ctx context.Context, orgID, projectID string, components []string, commitSHA string) ([]delivery.ComponentDeploy, error)
 }
 
+// Gates authors the version's dependencies and mints its `aep:provision` gate
+// issues into the milestone. Satisfied by an app-root adapter over the
+// provisioning service — `run` names no sibling, exactly as `build` reaches the
+// same capability through its own GateResolver port.
+//
+// It runs BEFORE Planner, and the order is the contract: an open gate is a
+// dispatch hold, so minting the gates first is what makes the dispatch
+// predicate honest from the moment the first Task lands.
+type Gates interface {
+	ProvisionForBuild(ctx context.Context, orgID, projectID, tag string, milestoneNumber int, inputs []delivery.ProvisionInput) error
+}
+
+// Planner runs the version's planning turn, minting one prose issue per planned
+// Task into the milestone. Satisfied by `*task.PlanService` at the composition
+// root; declaring it here rather than importing keeps `task ⊥ run` intact, which
+// TestTaskRunSplit enforces as an import ban in both directions.
+//
+// It BLOCKS for the length of an LLM turn. That is precisely why it belongs in
+// the workflow: as an activity it is durable across a worker restart, retried on
+// a blip and failed fast on an answer — none of which a detached goroutine had.
+type Planner interface {
+	PlanIntoMilestone(ctx context.Context, orgID, projectID string, milestoneNumber int) error
+}
+
 // DeploymentReader reads back what the cluster says about those deployments —
 // the readiness poll. Separate from Deployer because they run at different
 // cadences: the promote happens once per cycle, the read happens every

@@ -84,6 +84,20 @@ type RunInput struct {
 	// value. An int that falls back to the default replays identically; a bool
 	// would have flipped behaviour under every live run.
 	ValidationAttempts int `json:"validationAttempts,omitempty"`
+
+	// Tag and ProvisionInputs are what the PLANNING phase needs: the version
+	// being filled, and the dependency inputs its gates are minted from.
+	//
+	// Both empty means "this run does not plan" — which is the correct reading
+	// for every origin that adopts an already-filled milestone, AND for an
+	// execution started before planning moved into this workflow. Same
+	// replay-safety rule as ValidationAttempts above: a zero value has to mean
+	// the pre-existing behaviour, or live runs change shape mid-flight.
+	//
+	// ProvisionInput carries SM-API references and non-secret config, never a
+	// secret value (see its doc), so it is safe in workflow history.
+	Tag             string                    `json:"tag,omitempty"`
+	ProvisionInputs []delivery.ProvisionInput `json:"provisionInputs,omitempty"`
 }
 
 // RunResult is the run's outcome, mirroring what was written to the run row.
@@ -199,6 +213,9 @@ func newLoop(ctx workflow.Context, in RunInput) *loop {
 // the milestone itself — and every decision below is made from that poll and
 // the workflow's own counters. No branch here trusts a signal's payload.
 func (l *loop) run(ctx workflow.Context) (RunResult, error) {
+	if settled, res, err := l.fillMilestone(ctx); settled || err != nil {
+		return res, err
+	}
 	for {
 		if l.cancelRequested() {
 			return l.settle(ctx, delivery.RunStateCancelled, "")
@@ -268,11 +285,62 @@ func (l *loop) run(ctx workflow.Context) (RunResult, error) {
 	}
 }
 
+// fillMilestone is the PLANNING phase: mint the version's dependency gates, then
+// plan its Tasks into the milestone. It runs once, before the cycle loop.
+//
+// It lives here rather than in the build click because planning is the longest
+// and most failure-prone step in a version's life — an LLM turn wrapped around
+// git and GitHub — and the click had nowhere to put it but a detached goroutine.
+// As a pair of activities it is durable across a worker restart, retried on a
+// blip, and failed fast on an answer (planErr). None of that was true of the
+// goroutine, where a seven-second connect timeout settled the whole version.
+//
+// Only a run that OWNS a version plans one. Every other origin adopts a
+// milestone somebody already filled: an incident adoption works one issue in a
+// shipped version, and a revalidation exists precisely because the working set
+// is empty. Both are recognised by carrying no Tag.
+//
+// A permanent failure settles the row `plan-failed` — the same terminal reason
+// the click used to write, so the read model is unchanged.
+func (l *loop) fillMilestone(ctx workflow.Context) (settled bool, res RunResult, err error) {
+	if l.in.Tag == "" {
+		return false, RunResult{}, nil
+	}
+	l.st.Phase = delivery.RunPhasePlanning
+	in := PlanMilestoneInput{
+		OrgID:           l.in.OrgID,
+		ProjectID:       l.in.ProjectID,
+		MilestoneNumber: l.in.MilestoneNumber,
+		Tag:             l.in.Tag,
+		ProvisionInputs: l.in.ProvisionInputs,
+	}
+	// Gates FIRST. An open gate is a dispatch hold, so minting the gates before
+	// the work is what makes the dispatch predicate honest from the moment the
+	// first Task lands — the same order the click ran them in.
+	if gerr := workflow.ExecuteActivity(activityCtx(ctx), (*Activities).ProvisionGates, in).Get(ctx, nil); gerr != nil {
+		res, err = l.settle(ctx, delivery.RunStateFailed, delivery.RunReasonPlanFailed)
+		if err != nil {
+			return true, l.result(), err
+		}
+		workflow.GetLogger(ctx).Error("provisioning the version's gates failed", "error", gerr)
+		return true, res, nil
+	}
+	if perr := workflow.ExecuteActivity(activityCtx(ctx), (*Activities).PlanMilestone, in).Get(ctx, nil); perr != nil {
+		res, err = l.settle(ctx, delivery.RunStateFailed, delivery.RunReasonPlanFailed)
+		if err != nil {
+			return true, l.result(), err
+		}
+		workflow.GetLogger(ctx).Error("planning the version's tasks failed", "error", perr)
+		return true, res, nil
+	}
+	return false, RunResult{}, nil
+}
+
 // onEmptyWorkingSet decides what an exhausted milestone means. Four different
 // things, in this order:
 //
-//  1. Nothing has EVER been dispatched — there is no increment to call
-//     delivered, so the run waits rather than settling. See below.
+//  1. Nothing was ever dispatched — planning produced no work, so the version is
+//     delivered without validating (see below).
 //  2. The last cycle ended badly and NOTHING came back to recover it. The
 //     recovery issue the event plane should have minted is not there, so the
 //     run cannot proceed and fails naming the budget that ran out.
@@ -280,44 +348,34 @@ func (l *loop) run(ctx workflow.Context) (RunResult, error) {
 //     issue and work it with a fresh dispatch of the same loop.
 //  4. Otherwise the version is delivered.
 //
-// Case 1 is the one that must NOT settle. "Empty working set" means delivered
-// only in contrast to work this run actually did; with zero cycles behind it
-// the same reading is indistinguishable from a milestone whose issues have not
-// been minted yet — the plan path admits the run row BEFORE its planning turn
-// (so the spec mutex is armed across it), so a poll can legitimately land in
-// that window and see nothing. Settling there closes a version nobody built.
-// §7's wait is unbounded and cancel is its only expiry, so the run parks and
-// re-derives on every `issues` webhook and at the poll backstop.
+// An empty working set with ZERO cycles behind it used to be a fourth case, and
+// it had to park rather than settle: the click admitted the run row before its
+// planning turn, so a poll could legitimately land mid-plan and see a milestone
+// whose issues had not been minted yet. Settling there would have closed a
+// version nobody built.
 //
-// What ends such a run, then: work arriving (it dispatches), a human cancelling
-// (§7's only expiry), or — when the planning turn itself failed and no issue is
-// ever coming — the PLAN PATH settling the row it armed with
-// RunReasonPlanFailed. Those two cannot race: the plan path starts the
-// supervisor only after planning returns, so a run that failed to plan has no
-// workflow behind it, and a workflow that exists is past planning. The
-// repository's non-terminal guard on Settle is the backstop if that ordering
-// ever changes — the first settle wins, and this loop never issues one here.
+// Planning is now this workflow's own first phase, so that window is gone — by
+// the time the loop polls anything, the plan has either landed or settled the
+// run. An empty working set is therefore unambiguous, and it means delivered.
+// That is also the right answer for a re-build of a version whose Tasks all
+// already exist and are closed, where planning legitimately mints nothing.
 //
-// It returns settled=false for the two cases that continue: the zero-cycle wait
-// above, and a validation cycle that passed — after which the boundary is
-// re-entered so anything adopted while validation ran is picked up.
-//
-// A REVALIDATION is the one run that must skip case 1. Its milestone is a
-// version that already shipped, so an empty working set is not an ambiguous
-// reading of a milestone mid-plan — it is the expected state, and the whole
-// reason the run exists is to go straight to validation. Parking it would be a
-// run that waits forever for work nobody is going to file.
+// It returns settled=false for the one case that continues: a validation cycle
+// that passed, after which the boundary is re-entered so anything adopted while
+// validation ran is picked up.
 func (l *loop) onEmptyWorkingSet(ctx workflow.Context) (settled bool, res RunResult, err error) {
 	if l.st.CyclesTotal == 0 && l.in.Origin != delivery.RunOriginRevalidate {
-		cancelled, perr := l.park(ctx)
-		if perr != nil {
-			return true, l.result(), perr
-		}
-		if cancelled {
-			res, err = l.settle(ctx, delivery.RunStateCancelled, "")
-			return true, res, err
-		}
-		return false, RunResult{}, nil
+		// Planning landed and produced nothing to work — either the version has
+		// no Tasks, or a re-build found them all already closed. Delivered.
+		//
+		// Settled here rather than falling through to validation, which is the
+		// difference between this and the same milestone emptying after a cycle:
+		// validation asserts against what a run LANDED, and this one landed
+		// nothing. A revalidation is the exception and always was — an empty
+		// working set is its expected state and going straight to validation is
+		// the whole reason it exists.
+		res, err = l.settle(ctx, delivery.RunStateSucceeded, "")
+		return true, res, err
 	}
 	switch l.lastResult {
 	case cycleRed:

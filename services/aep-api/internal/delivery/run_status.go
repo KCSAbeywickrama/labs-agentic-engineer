@@ -83,6 +83,16 @@ type RunStatus struct {
 // decision branches on them, which is what lets the loop re-enter earlier
 // phases without inventing a state machine.
 const (
+	// RunPhasePlanning is the run FILLING its milestone: minting the version's
+	// dependency gates, then planning its Tasks into it. It runs once, before the
+	// first cycle boundary, and only for a run that owns a version — every other
+	// origin adopts a milestone somebody already filled.
+	//
+	// It is a phase rather than a pre-run step because planning is the longest
+	// and most failure-prone thing a version does, and the click had nowhere
+	// durable to put it. As the workflow's own first phase it survives a worker
+	// restart and retries a blip, where a detached goroutine could do neither.
+	RunPhasePlanning = "planning"
 	// RunPhaseWaiting is the unbounded wait between cycles, and the state a
 	// dispatch-holding gate parks the run in.
 	RunPhaseWaiting = "waiting"

@@ -94,6 +94,7 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
 | `MilestoneDispatcher` (root, over `MilestoneDispatch`) | offers | the coding agent → the supervisor: launch one agent run at a milestone and answer with its Job ref. The dispatch prompt is a milestone reference; the runner discovers its own working set. Satisfied by `*codingagent.CodingExecutor`, which writes no execution row — the cycle record is the supervisor's bookkeeping |
 | `ComponentEnsurer` | needs | `eventcore` → the projects component service + the runtime-config emitter. Provision a component's OpenChoreo CR immediately before its first build; see the invariant below |
 | `RunReader` · `CycleReader` · `CycleLogReader` · `RunCanceller` · `Revalidator` | needs | `runread` → the root run/cycle repositories, `codingagent`'s cycle-log reader (the pod's log through the OC API while it lives, the observer's archive while the Component is retained), `*run.Supervisor` and the event plane. Four reads and two writes, which is the whole dependency surface of the read model. `Revalidator` is a port for the same reason `RunCanceller` is: deciding a revalidation needs GitHub (is there open work?) and the project repo (is there an oracle?), and this surface must stay free-to-poll |
+| `Gates` · `Planner` | needs | `run` → `dependencies/provisioning` (through an app-root adapter) and `task`. Mint the version's dependency gates, then plan its Tasks — the run's first phase. Declared here rather than imported for the same reason `build` declares its own: `task ⊥ run` is an import ban in both directions, and a port over root types satisfies it |
 | `Deployer` · `DeploymentReader` | needs | `run` → `projects.DeploymentService`. Promote a cycle's built components and read back whether they are serving. The supervisor owns the ORDER and the verdict; the projects domain owns the OpenChoreo writes, which is why `run` still names no cluster client |
 | `DeployIssueMinter` | needs | `run` → the event plane. The ONE recovery issue the plane cannot mint on its own initiative: every other one has a webhook behind it, and a ReleaseBinding that never becomes Ready delivers nothing. The supervisor observes it and asks; the plane still owns the write, the labels and the dedupe key |
 | `RunSignaler` · `RunStarter` | needs | `eventcore` and `build` → the run supervisor. Signal a run, start one. Interfaces, which is what keeps both the event plane and the build click free of a workflow engine; both are declared over the root `StartRunRequest`, and `*run.Supervisor` satisfies both |
@@ -160,11 +161,21 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   `INSERT … ON CONFLICT DO NOTHING`, so the invariant holds under concurrency and not merely under the
   endpoint's pre-check. Both answers are the same 409. `incident-adoption` runs sit deliberately outside
   the index and execute concurrently on their own milestones.
-- **The version is claimed before it is planned.** The run row IS that mutex, so the build click admits it
-  synchronously — supersede, mint the milestone, admit — and only then runs the planning turn, detached
-  from the request. Admitting after planning would leave the mutex unarmed for the minutes an LLM turn
-  takes, which is exactly the window a double-click lands in. A plan that cannot land settles the run it
-  armed (`plan-failed`), so a failure never wedges the project behind its own mutex.
+- **The version is claimed before it is planned, and the RUN does the planning.** The run row IS the spec
+  mutex, so the build click admits it synchronously — supersede, mint the milestone, admit — before
+  anything slow happens. Admitting after planning would leave the mutex unarmed for the minutes an LLM
+  turn takes, which is exactly the window a double-click lands in.
+  The click then starts the supervisor and returns; filling the milestone (gates, then the planning turn)
+  is the run's own first phase. It used to be a detached goroutine, and that cost the platform its three
+  usual guarantees: a restart killed it mid-turn, a seven-second connect timeout to GitHub settled the
+  whole version because nothing told a blip from an answer, and it left no history to diagnose. As
+  activities it is durable, retried, and classified by `planErr` exactly as every other I/O the loop does.
+  A planning failure still settles `plan-failed` — same terminal reason, now written by the supervisor.
+- **The supervisor is the ONLY writer that settles a run row.** The one exception is a start that never
+  happened: `StartRun` reports `ErrRunNotStarted` from a degraded boot, and the click settles the row it
+  armed rather than leaving a non-terminal row with no workflow behind it. That state is unhealable by
+  construction — a non-terminal row makes `LiveRunForMilestone` answer forever, so the reconcile sweep
+  skips it while the partial indexes refuse every later build on the project.
 - **A version supersedes its predecessor, found through the run rows.** Before `v<N+1>`'s milestone exists,
   `v<N>`'s still-open issues are closed with a `Superseded by v<N+1>` comment — the agent work first, then
   the gates that were holding it — and then the milestone. The previous milestone is located by the NUMBER
@@ -256,16 +267,14 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   milestones still accept new issues, and a failed or cancelled increment leaves its milestone OPEN
   because the way forward from it is more work in the same version. A stray gate never blocks settle:
   gates hold dispatch, and with an empty working set they hold nothing.
-- **A run that has never dispatched does not settle on an empty working set — it waits.** "Nothing
-  left to do" means DELIVERED only in contrast to work the run actually did; with zero cycles behind
-  it the same reading is indistinguishable from a milestone whose issues have not been minted yet,
-  because the version is claimed before it is planned (above) and a poll can land inside that window.
-  So the run parks in the unbounded wait and re-derives on every `issues` webhook and at the poll
-  backstop. Three things end it: work arriving, a human cancelling, or — when the planning turn itself
-  failed and no issue is ever coming — the plan path settling the row it armed with `plan-failed`.
-  Those two writers cannot race: the plan path starts the supervisor only after planning returns, so a
-  run that failed to plan has no workflow behind it, and the repository's non-terminal guard on
-  `Settle` is the backstop if that ordering ever changes.
+- **A run that planned nothing settles DELIVERED, and does not validate.** An empty working set with zero
+  cycles behind it used to park in the unbounded wait, because the click admitted the row before its
+  planning turn and a poll could legitimately land mid-plan — "not planned yet" and "nothing to do" were
+  the same reading. Planning is the workflow's own first phase now, so by the time anything is polled the
+  plan has either landed or settled the run, and the ambiguity is gone. It is also the right answer for a
+  re-build of a version whose Tasks all already exist and are closed, where planning legitimately mints
+  nothing. It does NOT validate: validation asserts against what a run landed, and this one landed
+  nothing. A revalidation is the exception and always was — an empty working set is its expected state.
 - **One task queue, one worker.** `run.WorkerWatcher` owns it: a task queue must be served by ONE worker
   that knows every workflow on it, and the run supervisor is the only workflow left. Two workers polling
   one queue with disjoint registrations would fail whichever tasks each picked up by accident.

@@ -27,6 +27,7 @@ import (
 	"go.temporal.io/sdk/testsuite"
 
 	"github.com/wso2/aep/aep-api/internal/delivery"
+	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 )
 
 // The run loop is tested end-to-end with the Temporal Go SDK test suite: every
@@ -71,6 +72,10 @@ type harness struct {
 	states     []string
 	settle     SettleRunInput
 	verdicts   []string
+	// gateMints / plans record the planning phase's two activities, in the order
+	// the loop drove them.
+	gateMints []PlanMilestoneInput
+	plans     []PlanMilestoneInput
 	// deploys records every promote the loop asked for, and deployMints every
 	// deploy-fix filing.
 	deploys     []DeployCycleInput
@@ -113,6 +118,8 @@ func newHarness(t *testing.T) *harness {
 	h.env.RegisterActivity(acts.ReadValidationVerdict)
 	h.env.RegisterActivity(acts.MintValidationRepairIssues)
 	h.env.RegisterActivity(acts.DispatchAgent)
+	h.env.RegisterActivity(acts.ProvisionGates)
+	h.env.RegisterActivity(acts.PlanMilestone)
 	h.env.RegisterActivity(acts.DeployCycle)
 	h.env.RegisterActivity(acts.PollCycleDeployments)
 	h.env.RegisterActivity(acts.MintDeployFixIssues)
@@ -169,6 +176,32 @@ func (h *harness) dispatchIs(jobRef string, err error) {
 			defer h.mu.Unlock()
 			h.dispatches = append(h.dispatches, args.Get(1).(delivery.MilestoneDispatch))
 		}).Return(jobRef, err)
+}
+
+// planIs pins what the planning phase's two activities answer. Registered per
+// test rather than as a constructor default for the reason dispatchIs gives:
+// the harness consumes expectations in registration order.
+func (h *harness) planIs(gatesErr, planErr error) {
+	h.set["plan"] = true
+	h.env.OnActivity(h.acts.ProvisionGates, mock.Anything, mock.Anything).
+		Run(func(args mock.Arguments) {
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			h.gateMints = append(h.gateMints, args.Get(1).(PlanMilestoneInput))
+		}).Return(gatesErr)
+	h.env.OnActivity(h.acts.PlanMilestone, mock.Anything, mock.Anything).
+		Run(func(args mock.Arguments) {
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			h.plans = append(h.plans, args.Get(1).(PlanMilestoneInput))
+		}).Return(planErr)
+}
+
+// planCounts reports the two tallies, read safely.
+func (h *harness) planCounts() (gates, plans int) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return len(h.gateMints), len(h.plans)
 }
 
 // deployIs pins what promoting the cycle's components answers. Registered per
@@ -319,6 +352,9 @@ func (h *harness) applyDefaults() {
 	}
 	if !h.set["milestone"] {
 		h.milestoneIs(MilestoneSnapshot{})
+	}
+	if !h.set["plan"] {
+		h.planIs(nil, nil)
 	}
 	if !h.set["deploy"] {
 		h.deployIs(nil)
@@ -1440,67 +1476,103 @@ func TestQueryRunStatus(t *testing.T) {
 	require.Equal(t, delivery.RunStateSucceeded, res.State)
 }
 
-// TestZeroCycleRun_WaitsForWorkInsteadOfSettling is the regression for a run
-// that closed its version having never dispatched anything.
-//
-// The plan path admits the run row BEFORE its planning turn, so the supervisor
-// can legitimately poll a milestone whose issues have not been minted yet. An
-// empty working set at that moment means "not planned yet", not "delivered" —
-// the run must park in §7's unbounded wait, and the work that arrives
-// afterwards must still be worked.
-func TestZeroCycleRun_WaitsForWorkInsteadOfSettling(t *testing.T) {
-	h := newHarness(t)
-	h.milestoneIs(
-		MilestoneSnapshot{},                  // the planning turn has not minted its issues yet
-		MilestoneSnapshot{Work: 1, Total: 1}, // they land
-		MilestoneSnapshot{},                  // and the cycle delivers them
-	)
+// ---- the planning phase ------------------------------------------------------
 
-	var waiting delivery.RunStatus
-	var closedWhileWaiting, dispatchedWhileWaiting int
-	var settledWhileWaiting string
-	h.env.RegisterDelayedCallback(func() {
-		resp, err := h.env.QueryWorkflow(delivery.QueryRunStatus)
-		require.NoError(t, err)
-		require.NoError(t, resp.Get(&waiting))
-		closedWhileWaiting, dispatchedWhileWaiting = h.closedCount(), h.dispatchCount()
-		settledWhileWaiting = h.settledState()
-		h.env.SignalWorkflow(delivery.SigRunWorkable, delivery.RunSignal{Signal: delivery.SigRunWorkable})
-	}, time.Second)
-	h.signal(delivery.SigRunPRMerged, 2*time.Second)
-
-	h.run(delivery.RunOriginSpecBuild, 0)
-	res := h.result(t)
-
-	require.Equal(t, delivery.RunStateWaiting, waiting.State,
-		"a run that has never dispatched must park on an empty working set, not settle")
-	require.Equal(t, delivery.RunPhaseWaiting, waiting.Phase)
-	require.Equal(t, "", settledWhileWaiting, "nothing may write the run's outcome while it waits")
-	require.Equal(t, 0, closedWhileWaiting, "the version's milestone must still be open")
-	require.Equal(t, 0, dispatchedWhileWaiting)
-
-	// The work that arrived later is picked up by the very next boundary.
-	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
-	require.Equal(t, []string{delivery.CycleKindCoding}, h.dispatchKinds())
-	require.Equal(t, 1, res.Cycles)
-	require.Equal(t, 1, h.closed, "the milestone closes only once the run delivered something")
+// errPermanentForTest is what planErr produces for an answer. The mocked
+// activity bypasses planErr, so a test that wants "permanent" has to return the
+// classified error itself — a plain one would sit under Temporal's default
+// unbounded retry and never reach a verdict.
+func errPermanentForTest() error {
+	return temporal.NewNonRetryableApplicationError(
+		"repository not found", errTypePermanentPlan, sourcecontrol.ErrRepoNotFound)
 }
 
-// TestZeroCycleRun_WaitsUntilCancelled is the other half of the same rule: the
-// wait is UNBOUNDED. A milestone that never receives work is not a delivered
-// version, however many poll backstops pass — only a human cancelling ends it,
-// and a cancelled increment keeps its milestone open.
-func TestZeroCycleRun_WaitsUntilCancelled(t *testing.T) {
+// A run that OWNS a version fills its milestone first: gates, then the planning
+// turn. The order is the contract — an open gate is a dispatch hold, so minting
+// the gates before the work is what makes the dispatch predicate honest from the
+// moment the first Task lands.
+func TestPlanningPhase_MintsGatesThenPlansBeforeWorking(t *testing.T) {
 	h := newHarness(t)
-	h.milestoneIs(MilestoneSnapshot{})
-	h.signal(delivery.SigRunCancel, time.Hour) // several poll backstops later
+	h.milestoneIs(MilestoneSnapshot{Work: 1, Total: 1}, MilestoneSnapshot{})
+	h.merges(1)
 
-	h.run(delivery.RunOriginSpecBuild, 0)
+	h.runWith(RunInput{Origin: delivery.RunOriginSpecBuild, Tag: "v3"})
 	res := h.result(t)
 
-	h.assertSettled(t, res, delivery.RunStateCancelled, "")
+	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
+	gates, plans := h.planCounts()
+	require.Equal(t, 1, gates, "the version's gates are minted exactly once")
+	require.Equal(t, 1, plans, "the planning turn runs exactly once")
+	require.Equal(t, "v3", h.plans[0].Tag)
+	require.Equal(t, testMilepost, h.plans[0].MilestoneNumber)
+	// The cycle still ran, so planning did not replace working the milestone.
+	require.Equal(t, []string{delivery.CycleKindCoding}, h.dispatchKinds())
+}
+
+// Only a run that owns a version plans one. Every other origin adopts a
+// milestone somebody already filled, and is recognised by carrying no Tag —
+// re-planning there would re-derive a version from a run that was only meant to
+// resume.
+func TestPlanningPhase_SkippedWhenTheRunOwnsNoVersion(t *testing.T) {
+	for _, origin := range []string{delivery.RunOriginIncidentAdoption, delivery.RunOriginRevalidate} {
+		t.Run(origin, func(t *testing.T) {
+			h := newHarness(t)
+			h.milestoneIs(MilestoneSnapshot{Work: 1, Total: 1}, MilestoneSnapshot{})
+			h.merges(1)
+
+			h.runWith(RunInput{Origin: origin}) // no Tag
+			h.result(t)
+
+			gates, plans := h.planCounts()
+			require.Equal(t, 0, gates, "an adopted milestone is already filled")
+			require.Equal(t, 0, plans)
+		})
+	}
+}
+
+// The whole point of moving planning here: a planning failure that repeating
+// cannot change settles the version, exactly as the detached goroutine did —
+// but a transient one is now Temporal's to retry, not a version-killer.
+func TestPlanningPhase_PermanentFailureSettlesPlanFailed(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		gatesErr, planEr error
+	}{
+		{"gates", errPermanentForTest(), nil},
+		{"planner", nil, errPermanentForTest()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.milestoneIs(MilestoneSnapshot{Work: 1, Total: 1})
+			h.planIs(tc.gatesErr, tc.planEr)
+
+			h.runWith(RunInput{Origin: delivery.RunOriginSpecBuild, Tag: "v3"})
+			res := h.result(t)
+
+			h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonPlanFailed)
+			require.Equal(t, 0, h.dispatchCount(), "a version that could not be planned dispatches nothing")
+		})
+	}
+}
+
+// A plan that mints nothing settles the version DELIVERED rather than parking.
+//
+// This is the rule that replaced the zero-cycle wait. That wait existed only
+// because the click admitted the run row before its planning turn, so a poll
+// could land mid-plan and read "not planned yet" as "nothing to do". Planning is
+// this workflow's own first phase now, so by the time anything is polled the
+// plan has landed — and an empty milestone is exactly what a re-build of a
+// version whose Tasks all already exist and are closed should produce.
+func TestPlanningPhase_EmptyPlanSettlesDelivered(t *testing.T) {
+	h := newHarness(t)
+	h.milestoneIs(MilestoneSnapshot{}) // planning minted nothing
+
+	h.runWith(RunInput{Origin: delivery.RunOriginSpecBuild, Tag: "v3"})
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
 	require.Equal(t, 0, h.dispatchCount())
-	require.Equal(t, 0, h.closed, "a run that delivered nothing must not close the version")
+	require.Equal(t, 1, h.closed, "a delivered version closes its milestone")
 }
 
 // dedupeStates collapses repeated run-state writes so a test can assert the

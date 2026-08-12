@@ -1233,6 +1233,11 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 			Deploy:       deploymentService,
 			Deployments:  deploymentService,
 			DeployIssues: eventPlane,
+			// The planning phase. These are the same two collaborators the build
+			// click used to drive in a detached goroutine; behind an activity they
+			// are durable across a restart and retried on a blip.
+			Gates:   buildGateResolver{prov: provisioningSvc},
+			Planner: taskPlan,
 		})
 		watchers = append(watchers, run.NewWorkerWatcher(temporalRuntime, runActs))
 		slog.Info("run: temporal worker watcher registered", "hostPort", cfg.Temporal.HostPort)
