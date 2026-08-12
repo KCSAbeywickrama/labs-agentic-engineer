@@ -189,6 +189,13 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// plane (via OC → OpenBao → SecretReference). Used by BuildCredentialsService
 	// for both cloud (CP/WP split) and local k3d — one unified path.
 	gitSecretClient := openchoreo.NewGitSecretClient(ocConfig)
+	// SecretReference client for ai-agent model access (component_service.go's
+	// EnsureComponent → wireModelAccess): always goes through OC's own
+	// SecretReference CRUD directly (docs/glossary.md's SecretReference
+	// entry — authored in the org NS, materialized by ESO into the
+	// consuming-plane NS), independent of which secrets provider owns the
+	// KV-write/mirroring path below.
+	modelAccessSecretRefClient := openchoreo.NewSecretReferenceClient(ocConfig)
 
 	// Observability client (optional — build logs disabled when URL not set)
 	var observClient observability.Client
@@ -433,7 +440,10 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// (NewBuildCredentialsService always returns a value; its gitSecrets are
 	// nil-safe internally), so the stager is always wired.
 	buildStager := buildSecretStagerAdapter{svc: buildCredService}
-	componentService := projects.NewComponentService(componentClient, observClient, artifactStore, repoService, buildStager)
+	// anthropicCredService already satisfies projects.AnthropicKeyResolver
+	// structurally (DefaultKeyRef has the exact same signature) — no
+	// adapter needed, unlike buildStager above.
+	componentService := projects.NewComponentService(componentClient, observClient, artifactStore, repoService, buildStager, anthropicCredService, modelAccessSecretRefClient)
 	configService := projects.NewConfigService(configRepo, componentService)
 	designService := spec.NewDesignService(artifactStore, artifactSvcGit)
 

@@ -26,6 +26,8 @@ import (
 
 	"github.com/wso2/aep/aep-api/internal/clients/observability"
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
+	"github.com/wso2/aep/aep-api/internal/clients/secretmanagersvc"
+	"github.com/wso2/aep/aep-api/internal/organization"
 	"github.com/wso2/aep/aep-api/internal/platform/k8sname"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 	"github.com/wso2/aep/aep-api/internal/spec"
@@ -81,6 +83,43 @@ type BuildSecretStager interface {
 	StageBuildSecret(ctx context.Context, ocOrgID, repoSlug, workflowRunName string) (secretRef string, err error)
 }
 
+// AnthropicKeyResolver is the narrow port EnsureComponent needs from
+// *organization.AnthropicCredentialService to wire an ai-agent component's
+// MODEL_API_KEY: the org's default-role Anthropic key's vault coordinates.
+// Declared consumer-side (same pattern as OrgPublisher in trait_sync.go) so
+// this package takes only the one method it needs, not the concrete
+// service. Returns an *organization.NotFoundError when the org has no
+// active default key — see wireModelAccess.
+type AnthropicKeyResolver interface {
+	DefaultKeyRef(ctx context.Context, ocOrgID string) (organization.SecretRefTriplet, error)
+}
+
+// -- model access for ai-agent components (see ai_agent_model_access.go) ----
+//
+// modelEndpointDefault / modelNameDefault are literals for now: no
+// multi-provider or multi-model choice exists yet (agent.afm.md's
+// model.provider is validated to "anthropic" | "openai" by the AFM schema,
+// but only Anthropic is wired end-to-end — ADR-0016). Named here, not
+// scattered as string literals, so a later "org-configurable model" change
+// has one place to touch.
+const (
+	modelEndpointEnvVar = "MODEL_ENDPOINT"
+	modelNameEnvVar     = "MODEL_NAME"
+	modelAPIKeyEnvVar   = "MODEL_API_KEY"
+
+	modelEndpointDefault = "https://api.anthropic.com/v1"
+	modelNameDefault     = "claude-sonnet-5"
+
+	// modelAccessSecretRefName is the org-scoped SecretReference every
+	// ai-agent component's MODEL_API_KEY points at — one per org, upserted
+	// (not per component), since every agent shares the organisation's one
+	// Anthropic key (ADR-0016) and there is nothing per-agent to provision.
+	modelAccessSecretRefName = "ai-agent-model-access"
+	// modelAccessSecretRefRefresh mirrors pushExternalSecret's cadence for
+	// the same underlying credential.
+	modelAccessSecretRefRefresh = "5m"
+)
+
 type componentService struct {
 	client        openchoreo.ComponentClient
 	observClient  observability.Client
@@ -90,18 +129,30 @@ type componentService struct {
 	// (tests / unit-only flows).
 	repoSvc      sourcecontrol.RepoService
 	buildCredSvc BuildSecretStager
+	// modelKeyResolver + secretRefClient wire MODEL_* into every ai-agent
+	// component at EnsureComponent time (see ai_agent_model_access.go).
+	// Optional — nil means "not configured" (tests / unit-only flows, or a
+	// deployment that hasn't wired the composition root yet), and
+	// wireModelAccess logs and continues rather than failing component
+	// creation over it — same discipline as an org with no connected key.
+	modelKeyResolver AnthropicKeyResolver
+	secretRefClient  secretmanagersvc.OpenChoreoSecretReferenceClient
 }
 
-// NewComponentService builds the component service. repoSvc + buildCredSvc
-// may be nil in tests / unit-only flows; production wiring passes both so
-// TriggerBuild can pre-stage the per-WorkflowRun build Secret.
-func NewComponentService(client openchoreo.ComponentClient, observClient observability.Client, artifactStore *spec.ArtifactStore, repoSvc sourcecontrol.RepoService, buildCredSvc BuildSecretStager) ComponentService {
+// NewComponentService builds the component service. repoSvc, buildCredSvc,
+// modelKeyResolver, and secretRefClient may be nil in tests / unit-only
+// flows; production wiring passes all four so TriggerBuild can pre-stage
+// the per-WorkflowRun build Secret and EnsureComponent can wire MODEL_* into
+// ai-agent components.
+func NewComponentService(client openchoreo.ComponentClient, observClient observability.Client, artifactStore *spec.ArtifactStore, repoSvc sourcecontrol.RepoService, buildCredSvc BuildSecretStager, modelKeyResolver AnthropicKeyResolver, secretRefClient secretmanagersvc.OpenChoreoSecretReferenceClient) ComponentService {
 	return &componentService{
-		client:        client,
-		observClient:  observClient,
-		artifactStore: artifactStore,
-		repoSvc:       repoSvc,
-		buildCredSvc:  buildCredSvc,
+		client:           client,
+		observClient:     observClient,
+		artifactStore:    artifactStore,
+		repoSvc:          repoSvc,
+		buildCredSvc:     buildCredSvc,
+		modelKeyResolver: modelKeyResolver,
+		secretRefClient:  secretRefClient,
 	}
 }
 
@@ -202,6 +253,13 @@ func (s *componentService) EnsureComponent(ctx context.Context, orgName, project
 		return fmt.Errorf("ensure component: create OC component %q: %w", k8sName, err)
 	}
 	slog.InfoContext(ctx, "ensure component: OC Component ensured", "org", orgName, "project", projectName, "component", k8sName)
+
+	// Every ai-agent component gets the organisation's Anthropic key —
+	// MODEL_ENDPOINT/MODEL_NAME/MODEL_API_KEY — without declaring a
+	// dependency (ADR-0016). No-op for every other component type; see
+	// ai_agent_model_access.go. Best-effort: never fails EnsureComponent, so
+	// a model-access hiccup cannot block component creation or a build.
+	s.wireModelAccess(ctx, orgName, projectName, k8sName, comp.ComponentType)
 	return nil
 }
 

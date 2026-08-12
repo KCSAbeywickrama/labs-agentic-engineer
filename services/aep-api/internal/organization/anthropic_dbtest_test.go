@@ -247,6 +247,34 @@ func TestAnthropicEffectiveKey_DB(t *testing.T) {
 	}
 }
 
+func TestAnthropicDefaultKeyRef_DB(t *testing.T) {
+	t.Parallel()
+	svc, _ := anthropicDBService(t, http.StatusOK)
+	ctx := context.Background()
+
+	// No org row → NotFoundError, same "not connected yet" contract as
+	// fetchRow's other callers — a consumer wiring model access must treat
+	// this as skip, not fail.
+	if _, err := svc.DefaultKeyRef(ctx, "acme"); !isAnthropicNotFound(err) {
+		t.Fatalf("absent org: got %v, want *organization.NotFoundError", err)
+	}
+
+	// Connected → the vault triplet, not the key's bytes.
+	anthropicMustConnect(t, svc, "acme", anthropicUnitKey)
+	triplet, err := svc.DefaultKeyRef(ctx, "acme")
+	if err != nil {
+		t.Fatalf("DefaultKeyRef after connect: %v", err)
+	}
+	if triplet.KVPath == "" || triplet.Property == "" {
+		t.Fatalf("triplet missing coordinates: %+v", triplet)
+	}
+}
+
+func isAnthropicNotFound(err error) bool {
+	var nf *organization.NotFoundError
+	return errors.As(err, &nf)
+}
+
 func TestAnthropicOrgIsolation_DB(t *testing.T) {
 	t.Parallel()
 	svc, store := anthropicDBService(t, http.StatusOK)

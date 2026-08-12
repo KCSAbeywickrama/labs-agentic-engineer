@@ -575,6 +575,35 @@ func (s *AnthropicCredentialService) ResolveCodingSecretRef(ctx context.Context,
 	return ref, nil
 }
 
+// ----------------------------------------------------------------------------
+// DefaultKeyRef — the default-role vault triplet, for consumers that mount
+// a SecretReference rather than reading the key's bytes
+// ----------------------------------------------------------------------------
+
+// DefaultKeyRef returns the org's DEFAULT-role Anthropic key's vault
+// coordinates — the same {kvPath, property} pushExternalSecret resolves to
+// deliver the RCA agent's ExternalSecret (see that method's doc comment).
+// Distinct from EffectiveKey: this never reads the key's bytes, only where
+// they live, for a caller that points an OpenChoreo SecretReference at the
+// path rather than forwarding the value itself (e.g. wiring an ai-agent
+// component's MODEL_API_KEY — docs/glossary.md's SecretReference entry:
+// "authored in the org NS, ESO materializes it into the consuming-plane
+// NS").
+//
+// Returns NotFoundError when the org has no active default key. Every
+// caller must treat that as "not connected yet", not a hard failure — same
+// discipline EffectiveKey's Source:"none" gives genai callers.
+func (s *AnthropicCredentialService) DefaultKeyRef(ctx context.Context, ocOrgID string) (SecretRefTriplet, error) {
+	row, err := s.fetchRow(ctx, ocOrgID, AnthropicRoleDefault)
+	if err != nil {
+		return SecretRefTriplet{}, err
+	}
+	if row.Status != "active" {
+		return SecretRefTriplet{}, &NotFoundError{What: fmt.Sprintf("org_anthropic_credentials.%s.default (status=%s)", ocOrgID, row.Status)}
+	}
+	return tripletFrom(row)
+}
+
 // tripletFrom reads a row's resolved secret-ref coordinates, naming whichever
 // one is missing so a half-mirrored row is diagnosable from the error alone.
 func tripletFrom(row *OrgAnthropicCredential) (SecretRefTriplet, error) {
