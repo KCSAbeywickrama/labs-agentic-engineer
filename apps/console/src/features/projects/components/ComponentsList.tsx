@@ -22,28 +22,70 @@ import {
   Box,
   Card,
   CardContent,
+  Link as MuiLink,
   Stack,
   Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
-import { Boxes } from "@wso2/oxygen-ui-icons-react";
+import { Boxes, ExternalLink } from "@wso2/oxygen-ui-icons-react";
 import { EmptyState } from "../../../components/EmptyState";
 import type { components } from "../../../generated/aep-api";
+import { useComponentEndpointUrl } from "../api/queries";
 import { ComponentOpenApiDialog } from "./ComponentOpenApiDialog";
 
 type Component = components["schemas"]["Component"];
 
 // The component type is OpenChoreo's own ComponentType name, end-to-end.
 const isWebApp = (c: Component) => c.type === "web-application";
+const isAiAgent = (c: Component) => c.type === "ai-agent";
+
+// A web app's "Open app" link (#196) / an ai-agent's chat link. Both read the
+// same dev-deployment `endpointUrl` (list-components never fills
+// Component.endpointUrl — noted contract drift) via the shared
+// useComponentEndpointUrl read; an agent's chat link is just that URL plus
+// the AFM schema's default chat path. Until a URL exists the row keeps the
+// "URL appears once deployed" placeholder.
+function EndpointLink({
+  projectName,
+  component,
+}: {
+  projectName: string;
+  component: Component;
+}) {
+  const deployed = useComponentEndpointUrl(projectName, component.name);
+  const base = component.endpointUrl ?? deployed.data;
+  if (!base) {
+    return (
+      <Typography variant="caption" color="text.secondary">
+        URL appears once deployed
+      </Typography>
+    );
+  }
+  const href = isAiAgent(component) ? `${base}/chat` : base;
+  const label = isAiAgent(component) ? "Chat" : "Open app";
+  return (
+    <MuiLink
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      variant="body2"
+      sx={{ display: "inline-flex", alignItems: "center", gap: 0.5 }}
+    >
+      {label} <ExternalLink size={14} />
+    </MuiLink>
+  );
+}
 
 // Component cards: one compact single-row card per component — avatar, name and
 // description. Services open their OpenAPI contract on click (JWT-guarded, so
-// via the authenticated dialog, not a raw link).
+// via the authenticated dialog, not a raw link). Web-app and ai-agent rows
+// instead surface their dev endpoint (#196) — a plain "Open app"/"Chat" link.
 //
-// Deliberately state-free. A component's build state used to be rolled up from
-// its tasks, but an issue no longer names a component — issue bodies are prose
-// the platform writes and never reads back — so the roll-up had no input left.
-// What is running lives on the deployments board, which reads the cluster.
+// Deliberately state-free of build status. A component's build state used to
+// be rolled up from its tasks, but an issue no longer names a component —
+// issue bodies are prose the platform writes and never reads back — so the
+// roll-up had no input left. What is running lives on the deployments board,
+// which reads the cluster.
 export function ComponentsList({
   projectName,
   items,
@@ -71,7 +113,8 @@ export function ComponentsList({
       <Stack spacing={1.5}>
         {items.map((c) => {
           const initial = ((c.displayName ?? c.name).trim()[0] ?? "C").toUpperCase();
-          const openable = !isWebApp(c);
+          const hasEndpointLink = isWebApp(c) || isAiAgent(c);
+          const openable = !hasEndpointLink;
           const card = (
             <Card
               key={c.name}
@@ -113,6 +156,9 @@ export function ComponentsList({
                       {c.description ?? "—"}
                     </Typography>
                   </Box>
+                  {hasEndpointLink && (
+                    <EndpointLink projectName={projectName} component={c} />
+                  )}
                 </Stack>
               </CardContent>
             </Card>
