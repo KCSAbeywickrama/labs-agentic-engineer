@@ -573,12 +573,6 @@ type noopAuth struct{}
 
 func (noopAuth) DerivePlatformResourceFactsAtHead(context.Context, string, string) error { return nil }
 
-type noopStager struct{}
-
-func (noopStager) StageExternalSecrets(context.Context, string, string, string, string, map[string]map[string]string) (map[string]string, error) {
-	return nil, nil
-}
-
 // A doctored client (no inputs at all) cannot skip the drawer: an ambiguous
 // external dependency blocks with a failure, no tag is cut, and no workflow
 // starts.
@@ -717,7 +711,7 @@ func TestBuild_DependencyGate_NeedsSpec_ResolvedByThisRequestsDrawerInput_Procee
 		}}}}
 	spy := newPlanSpy()
 	tagger := &fakeTagger{res: &spec.SpecSaveResult{Tag: "v1"}}
-	coord := build.NewInputsCoordinator(&resolvingSpec{design: design}, noopAuth{}, noopStager{}, design)
+	coord := build.NewInputsCoordinator(&resolvingSpec{design: design}, noopAuth{}, design)
 	svc := withPlanPath(build.NewService(build.Deps{
 		Repos: fakeRepos{}, Tagger: tagger, Coord: coord, Design: design,
 	}), spy)

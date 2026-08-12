@@ -110,9 +110,8 @@ type BuildInputItem struct {
 	Component  string `json:"component" doc:"Owning component name"`
 	Dependency string `json:"dependency" doc:"Dependency name"`
 	Kind       string `json:"kind" enum:"external-config,external-spec,platform-resource,org-service"`
-	// external-config: the collected key/value pairs (secret-vs-nonsecret is
-	// decided server-side from the design's ConfigKey.Secret flags — never sent
-	// by the client, never logged).
+	// external-config: retained in the request contract for older clients, but
+	// ignored. The server derives unset/defaulted values from the design.
 	Values []ConfigValue `json:"values,omitempty"`
 	// external-spec: the pasted OpenAPI content, or a URL to fetch it from.
 	SpecContent string `json:"specContent,omitempty"`
@@ -199,8 +198,7 @@ func (s *Service) StartProjectBuild(ctx context.Context, orgID, projectID string
 // failures (tag == "", no error — a fail-fast pre-tag result that cut no tag),
 // OR an error. Errors are already edge-mapped *EdgeError values EXCEPT the
 // ErrBuildAlreadyRunning sentinel, which each caller interprets for its own
-// context (409 vs. idempotent success). NOTE: inputs may carry raw secret
-// values — it must never be logged.
+// context (409 vs. idempotent success).
 //
 // The dependency hard gate (dependencyGateFailures) runs after the pre-tag
 // inputs are applied but before the tag is cut — see the inline comment at
@@ -219,11 +217,11 @@ func (s *Service) Run(ctx context.Context, orgID, projectID string, inputs []Bui
 		return "", nil, &EdgeError{Status: 404, Message: "project repository not found"}
 	}
 
-	// Apply the drawer inputs BEFORE the tag-cut: collect external specs + run the
+	// Apply the relevant drawer inputs BEFORE the tag-cut: collect external specs + run the
 	// design derivations (end-user auth and each resource dependency's wiring —
-	// their commits must land on HEAD so the tag captures them), then stage
-	// external-config secrets to SM-API and assemble the provision payload. A fail-fast pre-tag failure returns {failures} and cuts
-	// NO tag.
+	// their commits must land on HEAD so the tag captures them), then derive
+	// unset/defaulted external authoring and assemble the provision payload. A
+	// fail-fast pre-tag failure returns {failures} and cuts NO tag.
 	var provInputs []delivery.ProvisionInput
 	if s.coord != nil {
 		fails, aerr := s.coord.ApplyPreTag(ctx, orgID, projectID, inputs)
@@ -233,9 +231,9 @@ func (s *Service) Run(ctx context.Context, orgID, projectID string, inputs []Bui
 		if len(fails) > 0 {
 			return "", fails, nil
 		}
-		prov, pfails, perr := s.coord.BuildProvisionInputs(ctx, orgID, orgID, projectID, inputs)
+		prov, pfails, perr := s.coord.BuildProvisionInputs(ctx, orgID, projectID, inputs)
 		if perr != nil {
-			return "", nil, &EdgeError{Status: 502, Message: "stage inputs: " + perr.Error()}
+			return "", nil, &EdgeError{Status: 502, Message: "prepare inputs: " + perr.Error()}
 		}
 		if len(pfails) > 0 {
 			return "", pfails, nil

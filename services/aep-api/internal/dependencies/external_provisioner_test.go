@@ -334,6 +334,42 @@ func TestAuthorWithSecretRef_PreservesConfiguredBindingValues(t *testing.T) {
 	}
 }
 
+func TestAuthorWithSecretRef_AuthorsUnsetKeysAndEmptySecretStorePath(t *testing.T) {
+	t.Parallel()
+
+	rc := newFakeRC("stripe-proj-next")
+	p := newTestProvisioner(nil, rc, &fakeSecretWriter{})
+	er := &ExternalResource{Name: "stripe", ConfigKeys: []spec.ConfigKey{
+		{Key: "STRIPE_URL"},
+		{Key: "STRIPE_REGION", DefaultValue: "us-east-1"},
+		{Key: "STRIPE_KEY", Secret: true},
+	}}
+	_, err := p.AuthorWithSecretRef(context.Background(), "default", "shop", er,
+		map[string]PreparedEnvValues{"development": {Plain: map[string]string{
+			"STRIPE_URL": "", "STRIPE_REGION": "us-east-1",
+		}}})
+	if err != nil {
+		t.Fatalf("AuthorWithSecretRef: %v", err)
+	}
+
+	var got map[string]string
+	if err := json.Unmarshal(rc.EnsureBindingCalls()[0].B.Spec.ResourceTypeEnvironmentConfigs, &got); err != nil {
+		t.Fatal(err)
+	}
+	if value, present := got["STRIPE_URL"]; !present || value != "" {
+		t.Errorf("STRIPE_URL = %q present=%v, want present and empty", value, present)
+	}
+	if got["STRIPE_REGION"] != "us-east-1" {
+		t.Errorf("STRIPE_REGION = %q", got["STRIPE_REGION"])
+	}
+	if value, present := got[openchoreo.SecretStorePathField]; !present || value != "" {
+		t.Errorf("secretStorePath = %q present=%v, want present and empty", value, present)
+	}
+	if _, leaked := got["STRIPE_KEY"]; leaked {
+		t.Fatal("secret key must never be authored as a plain binding value")
+	}
+}
+
 func TestProvision_Validation(t *testing.T) {
 	t.Parallel()
 

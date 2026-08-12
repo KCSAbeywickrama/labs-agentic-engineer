@@ -27,9 +27,8 @@ import (
 	"github.com/wso2/aep/aep-api/internal/spec"
 )
 
-// Input kinds the build drawer emits (issue #164). These are the drawer input
-// kinds carried on ProvisionInput.Kind — NOT the design dependency kinds (an
-// external dependency's config-collection input is "external-config").
+// Input kinds carried on ProvisionInput.Kind. external-config is derived from
+// the design; the others still originate in request inputs.
 const (
 	buildKindExternalConfig = "external-config"
 	buildKindPlatformResrc  = "platform-resource"
@@ -41,7 +40,7 @@ const (
 // package type (this feature must not import the workflow orchestrator; the
 // app-root adapter maps devflow.ProvisionInput ⇄ BuildProvisionInput). A raw
 // secret value is NEVER carried here — SecretRefByEnv holds the SM-API reference
-// per env (staged pre-tag by POST /build).
+// per env. Build-derived external inputs leave it empty; SaveValues owns staging.
 type BuildProvisionInput struct {
 	Component      string
 	Dependency     string
@@ -60,12 +59,11 @@ type ProvisionFailure struct {
 	Reason     string
 }
 
-// ProvisionForBuild authors the project's dependencies from the build drawer
-// inputs the dev workflow carries (issue #164). It mints the aep:provision gate
+// ProvisionForBuild authors the project's dependencies from the inputs the dev
+// workflow carries. It mints platform-resource aep:provision gate
 // issues ONCE, then authors each input BY KIND:
-//   - external-config: the SaveValues-style synchronous flow using the already
-//     staged secret reference (AuthorWithSecretRef — no SM-API write), closing
-//     the gate synchronously.
+//   - external-config: unset/defaulted authoring through AuthorWithSecretRef,
+//     with no SM-API write and no gate.
 //   - platform-resource: the async Provision path (the readiness watcher closes
 //     the gate out-of-band).
 //   - org-service: a no-op here (Task 4 fills it).
@@ -131,7 +129,7 @@ func (s *Service) ProvisionForBuild(ctx context.Context, orgID, ocOrgID, project
 	}
 
 	// Reconcile every provision gate whose dep is NOT in inputs. EnsureProvisionIssues
-	// re-mints an OPEN gate for each external + platform-resource dep in the design,
+	// re-mints an OPEN gate for each platform-resource dep in the design,
 	// but the inputs loop only admits a run for the drawer subset. A dep whose OC
 	// binding is already Ready is deliberately skipped by build preflight, so it
 	// lands here with a fresh gate and no run — deriving `pending` forever and
@@ -158,8 +156,8 @@ func (s *Service) settleReadyGates(ctx context.Context, orgID, projectID string,
 	seen := map[string]bool{}
 	for _, comp := range comps {
 		for _, dep := range comp.Dependencies {
-			// Only external + platform-resource deps mint a provision gate.
-			if dep.Kind != spec.DependencyKindExternal && dep.Kind != spec.DependencyKindPlatformResource {
+			// Only platform resources mint a build-time provision gate.
+			if dep.Kind != spec.DependencyKindPlatformResource {
 				continue
 			}
 			name := strings.ToLower(dep.Name)
@@ -170,8 +168,12 @@ func (s *Service) settleReadyGates(ctx context.Context, orgID, projectID string,
 			seen[name] = true
 			// Only an already-Ready dep is settled here. A not-Ready dep is driven by
 			// its own drawer input (or is genuinely un-actionable) — leave it alone.
-			st, serr := s.Status(ctx, orgID, projectID, dep.Name, "")
-			if serr != nil || st == nil || !st.Ready {
+			st, _, serr := s.bindingStatus(ctx, orgID, projectID, dep.Name, "")
+			if serr != nil {
+				failures = append(failures, ProvisionFailure{Component: comp.Name, Dependency: dep.Name, Reason: serr.Error()})
+				continue
+			}
+			if st == nil || !st.Ready {
 				continue
 			}
 			if cerr := s.completeReadyGate(ctx, orgID, projectID, dep.Name, comp.Name); cerr != nil {
@@ -219,10 +221,8 @@ func (s *Service) completeReadyGate(ctx context.Context, orgID, projectID, depNa
 }
 
 // authorExternalWithRef runs the synchronous external-config provisioning flow
-// from an already-staged secret reference — mirrors SaveValues (admit gate row →
-// author OC binding → complete gate row) but authors via AuthorWithSecretRef
-// (the plain config + the staged secretStorePath per env) so no secret value is
-// re-written to SM-API.
+// from design-derived plain/default values. It authors via AuthorWithSecretRef;
+// no secret value is written to SM-API.
 func (s *Service) authorExternalWithRef(ctx context.Context, orgID, ocOrgID, projectID string, in BuildProvisionInput, gateNumber int) error {
 	_ = ocOrgID // the author half needs no SM-API write; kept for symmetry with SaveValues.
 	// Read the design ONCE (mirrors SaveValues): validate the dep exists as an
@@ -241,21 +241,14 @@ func (s *Service) authorExternalWithRef(ctx context.Context, orgID, ocOrgID, pro
 	er := &dependencies.ExternalResource{
 		Name:        in.Dependency,
 		Description: dep.Description,
-		ConfigKeys:  spec.UnionExternalConfigFor(comps, in.Dependency),
+		ConfigKeys:  externalConfigFor(comps, in.Dependency),
 	}
 	byEnv := preparedEnvValues(in)
 
-	// Admit a provision run for the gate issue (when one exists). The build path
-	// threads the KNOWN gate number (from the mint's CreateIssue result) so we skip
-	// GitHub's eventually-consistent label list, which often lags a just-created
-	// gate (issue #164). Fall back to the list lookup only when no number is known
-	// (defends any caller without one).
+	// External dependencies no longer mint config-collection gates. Keep the
+	// optional number for compatibility with an already-running build that minted
+	// one before this change, but never discover or create a new one here.
 	issueNumber := gateNumber
-	if issueNumber == 0 {
-		if issueNumber, _, err = s.findProvisionIssue(ctx, orgID, projectID, in.Dependency); err != nil {
-			return err
-		}
-	}
 	var execID string
 	if issueNumber > 0 {
 		repo, rerr := s.repos.RepoFullName(ctx, orgID, projectID)
@@ -293,10 +286,14 @@ func (s *Service) authorExternalWithRef(ctx context.Context, orgID, ocOrgID, pro
 	return nil
 }
 
+func externalConfigFor(comps []spec.DesignComponent, depName string) []spec.ConfigKey {
+	keys, _ := spec.UnionExternalConfigFor(comps, depName)
+	return keys
+}
+
 // preparedEnvValues turns a build external-config input into the per-env author
-// inputs: the non-secret Config (applied to every env) + the staged
-// secretStorePath per env. When no secret was staged the input still authors the
-// default env's binding from the plain config alone.
+// inputs: the non-secret Config plus any legacy secretStorePath reference. A
+// design-derived input authors the default environment with an empty path.
 func preparedEnvValues(in BuildProvisionInput) map[string]dependencies.PreparedEnvValues {
 	byEnv := map[string]dependencies.PreparedEnvValues{}
 	for env, ref := range in.SecretRefByEnv {

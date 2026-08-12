@@ -148,22 +148,21 @@ func (p *ExternalResourceProvisioner) Provision(
 	return result, nil
 }
 
-// PreparedEnvValues are one environment's already-resolved binding inputs for
-// the build author path: the non-secret values (Plain) and the SM-API
-// secretStorePath the secret bundle was ALREADY staged under (pre-tag, by
-// POST /build). No secret VALUE is carried — only the reference.
+// PreparedEnvValues are one environment's binding-authoring inputs: plain
+// design-derived values and an optional SM-API secretStorePath reference. The
+// build path passes an empty reference for unset secrets; no secret value is
+// carried here.
 type PreparedEnvValues struct {
 	Plain           map[string]string
 	SecretStorePath string
 }
 
 // AuthorWithSecretRef authors (idempotently) the external resource's OC Resource
-// model for a project from ALREADY-STAGED secret references — the author half of
-// Provision the thin POST /build path uses (issue #164). It mirrors Provision's
+// model for a project from prepared values. It mirrors Provision's
 // steps 1-3 (ensure ResourceType → apply Resource → wait for the release change)
-// but its step 4 pins each per-env binding to the PASSED SecretStorePath instead
-// of writing secrets to SM-API — so it never touches p.sm. `orgHandle` is the OC
-// namespace the CRs live in.
+// but its step 4 pins each binding without writing secrets to SM-API. Existing
+// nonempty values and secretStorePath references win during rebuilds.
+// `orgHandle` is the OC namespace the CRs live in.
 func (p *ExternalResourceProvisioner) AuthorWithSecretRef(
 	ctx context.Context,
 	orgHandle, projectName string,
@@ -257,9 +256,8 @@ func mergeConfiguredBindingValues(existing *openchoreo.ResourceReleaseBinding, p
 
 // StageSecrets writes each env's secret values to SM-API and returns the
 // secretStorePath reference per env — ONLY the SM-API write, no OC Resource or
-// binding authoring. It is the pre-tag half of Provision the thin POST /build
-// path reuses (issue #164): the build stages refs before the tag-cut, and the
-// workflow's provisioning step (Task 3) authors bindings from the same refs.
+// binding authoring. Provision and explicit value-saving flows use it before
+// authoring a binding; builds do not collect or stage external values.
 // An env whose secret map is empty yields no write and no ref. Fails closed
 // when secrets exist but SM-API is disabled (mirrors Provision's guard). The
 // returned map holds references, never secret VALUES.
@@ -419,9 +417,10 @@ func buildExternalResourceBinding(projectName, name, env, latestRelease, secretS
 	for k, v := range plain {
 		cfg[k] = v
 	}
-	if secretStorePath != "" {
-		cfg[openchoreo.SecretStorePathField] = secretStorePath
-	}
+	// The external ResourceType schema always declares this key when it renders
+	// an ExternalSecret. Presence is mandatory even before a secret exists: an
+	// absent key has no schema default and makes OpenChoreo rendering fail.
+	cfg[openchoreo.SecretStorePathField] = secretStorePath
 	raw, err := json.Marshal(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("external resources: marshal env configs: %w", err)
