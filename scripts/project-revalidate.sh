@@ -26,41 +26,38 @@
 # runner image (`make build-runner FORCE=1`), re-run this, watch the agent work
 # against the app already deployed. Nothing is rebuilt to answer the question.
 #
-#   scripts/revalidate.sh                        # the default project + tag below
-#   scripts/revalidate.sh my-project v2
-#   ATTEMPTS=2 scripts/revalidate.sh my-project v2   # let it REPAIR — see below
+#   scripts/project-revalidate.sh                       # the defaults below
+#   scripts/project-revalidate.sh my-project v2
+#   scripts/project-revalidate.sh my-project v2 2       # let it REPAIR — see below
 #
-# ATTEMPTS defaults to 1, and that default is the safe one: a single attempt is
-# spent by the first fatal verdict, which settles the run before the loop reaches
-# the point where it would file repair work — so the run reports and stops,
-# touching neither the repo nor the deployment. Raise it and a `failed` verdict
-# becomes an issue per failed criterion, an ordinary coding cycle, a build and a
-# redeploy. That is a real change to the project, so it is opt-in.
+# The third argument is the validation attempt budget. It defaults to 1, and that
+# default is the safe one: a single attempt is spent by the first fatal verdict,
+# which settles the run before the loop reaches the point where it would file
+# repair work — so the run reports and stops, touching neither the repo nor the
+# deployment. Raise it and a `failed` verdict becomes an issue per failed
+# criterion, an ordinary coding cycle, a build and a redeploy. That is a real
+# change to the project, so it is opt-in.
 #
 # Refusals are the endpoint's, and each is actionable: 409 while a run is already
 # working the version or while its milestone still has open work, 422 when the
 # version has no acceptance criteria to validate against.
 set -e
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=env.sh
-source "$SCRIPT_DIR/env.sh"
-
-# The project this repo's author reaches for most; both are positional overrides.
+# The project this repo's author reaches for most; all three are positional.
 PROJECT="${1:-p18-bare-minimum-hello}"
 TAG="${2:-v1}"
+ATTEMPTS="${3:-1}"
 
 BFF_URL="${BFF_URL:-http://localhost:9090}"
 THUNDER_URL="${THUNDER_URL:-http://thunder.openchoreo.localhost:8080}"
 SEEDER_CLIENT_ID="${SEEDER_CLIENT_ID:-aep-local-dev-seeder}"
 SEEDER_CLIENT_SECRET="${SEEDER_CLIENT_SECRET:-aep-local-dev-seeder-secret}"
-ATTEMPTS="${ATTEMPTS:-1}"
 
 # Both budgets are interpolated into hand-built JSON below, so a non-numeric or
 # leading-zero value would ship a malformed body and come back as an opaque 400.
 # Refuse it here, where the message can name the variable.
 if ! [[ "$ATTEMPTS" =~ ^[1-9][0-9]*$ ]]; then
-    echo "❌ ATTEMPTS must be a positive integer (got '${ATTEMPTS}')." >&2
+    echo "❌ attempts must be a positive integer (got '${ATTEMPTS}')." >&2
     exit 1
 fi
 if [ -n "${CEILING:-}" ] && ! [[ "$CEILING" =~ ^[1-9][0-9]*$ ]]; then
@@ -83,7 +80,7 @@ TOKEN=$(curl -sS -X POST "${THUNDER_URL%/}/oauth2/token" \
 
 if [ -z "$TOKEN" ]; then
     echo "❌ Thunder did not return an access_token for '${SEEDER_CLIENT_ID}'."
-    echo "   The client is registered by scripts/setup-local.sh / start.sh."
+    echo "   The client is registered by deployments/scripts/setup-local.sh / start.sh."
     exit 1
 fi
 
