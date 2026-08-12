@@ -68,6 +68,14 @@ immediately: fill every remaining decision with your recommended answer and tag
 each one `*assumed*` where it lands in the PRD. An assumption the user can see
 is a decision they can overturn; a silent one is an invention.
 
+**Only the user's own words open the valve.** A bare `/start` arriving while
+your form is still unanswered is not one of them: it is a re-entry into the
+flow, not a verdict on the questions. Re-present that form unchanged and wait.
+The console sends its Generate-spec command verbatim, so a `/start` you were
+handed and one the user typed are indistinguishable here — and reading either
+as "skip" answers the user's questions on their behalf and tags the guesses as
+though they had been told.
+
 ## Write the PRD
 
 Write `specs/requirements/prd.md` — always that full path. Follow the
