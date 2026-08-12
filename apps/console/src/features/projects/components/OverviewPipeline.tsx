@@ -165,6 +165,20 @@ function SpecActionStage({
             </>
           )}
         </Stack>
+        {/* The state line the plain stage card would have shown. An amendment
+            replaces that card, and the spec's status ("published", "draft
+            changes") is true throughout — losing it would make an open
+            exchange look like a project with no spec at all. Empty on the
+            cold-start CTA, where there is no spec to have a status. */}
+        {view.line && (
+          <Typography
+            variant="body2"
+            color={view.tone === "error" ? "error.main" : "text.secondary"}
+            sx={{ mb: 1.5 }}
+          >
+            {view.line}
+          </Typography>
+        )}
         <Button
           variant="contained"
           size="small"

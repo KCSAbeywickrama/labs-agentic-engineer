@@ -121,8 +121,10 @@ describe("OverviewPipeline — the spec stage's action", () => {
     renderPipeline({ exists: true, version: "v2" });
 
     expect(screen.getByRole("button", { name: /Continue spec/ })).toBeInTheDocument();
-    // The version stays on screen, so continuing doesn't read as starting over.
+    // The version and its status stay on screen, so continuing doesn't read as
+    // starting over — and the card says no less than the one it replaced.
     expect(screen.getByText("v2")).toBeInTheDocument();
+    expect(screen.getByText("published")).toBeInTheDocument();
   });
 
   it("leaves the plain stage card alone when nothing is in flight", () => {
