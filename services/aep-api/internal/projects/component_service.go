@@ -211,10 +211,14 @@ func (s *componentService) EnsureComponent(ctx context.Context, orgName, project
 // re-attachment, not a translation. Unknown kinds deliberately fall back to
 // deployment/service.
 func ocEntrypoint(componentType string) string {
-	if componentType == spec.ComponentTypeWebApplication {
+	switch componentType {
+	case spec.ComponentTypeWebApplication:
 		return "deployment/web-application"
+	case spec.ComponentTypeAIAgent:
+		return "deployment/ai-agent"
+	default:
+		return "deployment/service"
 	}
-	return "deployment/service"
 }
 
 // UpdateWorkflowEnvVars writes per-component env vars onto each of the

@@ -452,6 +452,7 @@ func TestOcEntrypoint_CanonicalWebAppKind(t *testing.T) {
 		{"retired web-app spelling is not a web application", "web-app", "deployment/service"},
 		{"service", "service", "deployment/service"},
 		{"empty", "", "deployment/service"},
+		{"ai-agent", "ai-agent", "deployment/ai-agent"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
