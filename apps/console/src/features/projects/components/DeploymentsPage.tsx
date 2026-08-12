@@ -123,6 +123,13 @@ function formatWhen(iso: string): string | null {
 function ComponentRow({ card }: { card: DeploymentCard }) {
   const chip = cardChip(card);
   const d = card.deployment;
+  // An ai-agent's dev endpoint serves /chat, not / (agents also serve
+  // /healthz, but that's not a link a person follows) — everything else
+  // about the link (icon, styling, the endpointUrl guard) stays uniform
+  // across component kinds (#401 review).
+  const isAgent = card.componentType === "ai-agent";
+  const linkHref = d?.endpointUrl && (isAgent ? `${d.endpointUrl}/chat` : d.endpointUrl);
+  const linkLabel = isAgent ? "Chat" : "Open";
   return (
     <Stack
       direction="row"
@@ -172,18 +179,18 @@ function ComponentRow({ card }: { card: DeploymentCard }) {
         tone={chip.tone}
         {...(chip.outlined && { variant: "outlined" as const })}
       />
-      {d?.endpointUrl && (
+      {linkHref && (
         <MuiLink
-          href={d.endpointUrl}
+          href={linkHref}
           target="_blank"
           rel="noreferrer"
           variant="body2"
-          // Every row's link reads "Open" — the accessible name carries the
-          // component so a screen reader hears which app it opens (#401 review).
-          aria-label={`Open ${card.displayName}`}
+          // The accessible name carries the component so a screen reader
+          // hears which app it opens (#401 review).
+          aria-label={`${linkLabel} ${card.displayName}`}
           sx={{ display: "inline-flex", alignItems: "center", gap: 0.5, flexShrink: 0 }}
         >
-          Open <ExternalLink size={14} />
+          {linkLabel} <ExternalLink size={14} />
         </MuiLink>
       )}
     </Stack>

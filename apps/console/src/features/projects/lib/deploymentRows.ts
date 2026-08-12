@@ -49,6 +49,10 @@ export function statusKind(status: string | undefined): StatusKind {
 export type DeploymentCard = {
   componentName: string;
   displayName: string;
+  // AEP's design vocabulary kind ("service" | "web-application" | "ai-agent",
+  // matching Component.type) — carried through for rows whose link depends on
+  // kind (an ai-agent's dev endpoint serves /chat, not /).
+  componentType?: string;
   // "notDeployed" marks a component with no binding at all; otherwise the
   // binding's status kind.
   kind: StatusKind | "notDeployed";
@@ -69,14 +73,19 @@ export function groupDeploymentCards(
   deploymentItems: Deployment[] | null | undefined,
 ): DeploymentBoard {
   const displayNames = new Map<string, string>();
+  const componentTypes = new Map<string, string>();
   for (const c of componentItems ?? []) {
     displayNames.set(c.name, c.displayName || c.name);
+    if (c.type) componentTypes.set(c.name, c.type);
   }
   const cardOf = (d: Deployment): DeploymentCard => {
     const componentName = d.componentName ?? "";
     return {
       componentName,
       displayName: displayNames.get(componentName) ?? componentName,
+      ...(componentTypes.has(componentName) && {
+        componentType: componentTypes.get(componentName),
+      }),
       kind: statusKind(d.status),
       deployment: d,
     };
@@ -98,6 +107,9 @@ export function groupDeploymentCards(
       development.push({
         componentName: c.name,
         displayName: displayNames.get(c.name) ?? c.name,
+        ...(componentTypes.has(c.name) && {
+          componentType: componentTypes.get(c.name),
+        }),
         kind: "notDeployed",
       });
     }

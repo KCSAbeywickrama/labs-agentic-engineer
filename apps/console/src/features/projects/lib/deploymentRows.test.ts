@@ -27,12 +27,12 @@ import type { components } from "../../../generated/aep-api";
 type Component = components["schemas"]["Component"];
 type Deployment = components["schemas"]["Deployment"];
 
-function component(name: string, displayName?: string): Component {
+function component(name: string, displayName?: string, type = "service"): Component {
   return {
     name,
     displayName: displayName ?? name,
     description: "",
-    type: "service",
+    type,
     status: "active",
   };
 }
@@ -146,6 +146,25 @@ describe("groupDeploymentCards", () => {
       [],
     );
     expect(development.map((c) => c.componentName)).toEqual(["alpha", "zeta"]);
+  });
+
+  it("carries the component's type onto its card (the ai-agent chat-link check)", () => {
+    const { development } = groupDeploymentCards(
+      [component("leave-agent", "Leave Agent", "ai-agent"), component("catalog-api")],
+      [{ ...devReady, componentName: "leave-agent" }, devReady],
+    );
+    const agentCard = development.find((c) => c.componentName === "leave-agent");
+    const serviceCard = development.find((c) => c.componentName === "catalog-api");
+    expect(agentCard?.componentType).toBe("ai-agent");
+    expect(serviceCard?.componentType).toBe("service");
+  });
+
+  it("carries the component's type onto a Not-deployed card too", () => {
+    const { development } = groupDeploymentCards(
+      [component("leave-agent", "Leave Agent", "ai-agent")],
+      [],
+    );
+    expect(development[0]?.componentType).toBe("ai-agent");
   });
 
   it("marks intentionally undeployed bindings", () => {

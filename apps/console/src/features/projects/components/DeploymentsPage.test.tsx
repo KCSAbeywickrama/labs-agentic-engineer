@@ -100,6 +100,23 @@ function status(): ProjectStatus {
 // it needs no QueryClientProvider; mutate is captured for the save assertion.
 const mockMutate = vi.fn();
 
+// Overridable per test (the chat-link test adds an ai-agent component +
+// deployment); defaults match the single-web-app fixture every other test
+// in this file was written against, reset in beforeEach.
+const DEFAULT_COMPONENTS = [
+  { name: "storefront", displayName: "Storefront", type: "web-application" },
+];
+const DEFAULT_DEPLOYMENTS = [
+  {
+    componentName: "storefront",
+    environment: "development",
+    status: "Ready",
+    endpointUrl: "https://storefront.dev.example.com",
+  },
+];
+let mockComponents = DEFAULT_COMPONENTS;
+let mockDeployments = DEFAULT_DEPLOYMENTS;
+
 vi.mock("../api/queries", () => ({
   useSaveConnectionValues: () => ({
     mutate: mockMutate,
@@ -109,7 +126,7 @@ vi.mock("../api/queries", () => ({
     reset: vi.fn(),
   }),
   useProjectComponents: () => ({
-    data: { items: [{ name: "storefront", displayName: "Storefront", type: "web-application" }] },
+    data: { items: mockComponents },
     isPending: false,
     isError: false,
     error: null,
@@ -117,14 +134,7 @@ vi.mock("../api/queries", () => ({
   }),
   useComponentsDeployments: () => ({
     isPending: false,
-    deployments: [
-      {
-        componentName: "storefront",
-        environment: "development",
-        status: "Ready",
-        endpointUrl: "https://storefront.dev.example.com",
-      },
-    ],
+    deployments: mockDeployments,
     failedCount: 0,
   }),
   useProjectStatus: () => ({ data: status() }),
@@ -146,6 +156,8 @@ beforeEach(() => {
   mockCounts = undefined;
   mockMutate.mockClear();
   mockDependencies = DEFAULT_DEPENDENCIES;
+  mockComponents = DEFAULT_COMPONENTS;
+  mockDeployments = DEFAULT_DEPLOYMENTS;
 });
 
 describe("DeploymentsPage — validation chip", () => {
@@ -253,6 +265,52 @@ describe("DeploymentsPage — story rail", () => {
     expect(
       screen.getByText("Validated — 12 of 12 criteria passed on this deployment."),
     ).toBeInTheDocument();
+  });
+});
+
+describe("DeploymentsPage — component links", () => {
+  it("links an ai-agent card to its chat endpoint, not the plain service link a service card gets", () => {
+    mockDeploy = {
+      version: "v1",
+      status: "deployed",
+      components: { total: 2, ready: 2 },
+      validation: "passed",
+    };
+    mockComponents = [
+      { name: "storefront", displayName: "Storefront", type: "web-application" },
+      { name: "leave-agent", displayName: "Leave Agent", type: "ai-agent" },
+    ];
+    mockDeployments = [
+      {
+        componentName: "storefront",
+        environment: "development",
+        status: "Ready",
+        endpointUrl: "https://storefront.dev.example.com",
+      },
+      {
+        componentName: "leave-agent",
+        environment: "development",
+        status: "Ready",
+        endpointUrl: "https://leave-agent.dev.example.com",
+      },
+    ];
+
+    render(<DeploymentsPage projectName="acme" />);
+
+    // The agent's link reads "Chat" and appends the chat path.
+    const chatLink = screen.getByRole("link", { name: /Chat Leave Agent/ });
+    expect(chatLink).toHaveAttribute(
+      "href",
+      "https://leave-agent.dev.example.com/chat",
+    );
+
+    // The service (web-application) card keeps the plain "Open" link, at
+    // the bare endpoint URL — no /chat suffix.
+    const openLink = screen.getByRole("link", { name: /Open Storefront/ });
+    expect(openLink).toHaveAttribute(
+      "href",
+      "https://storefront.dev.example.com",
+    );
   });
 });
 
