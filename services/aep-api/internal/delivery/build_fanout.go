@@ -17,6 +17,7 @@
 package delivery
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -152,6 +153,19 @@ func BuildRunNamePrefix(projectID, component, sha string) string {
 func BuildRunName(projectID, component, sha string, attempt int) string {
 	return fmt.Sprintf("%s%d", BuildRunNamePrefix(projectID, component, sha), attempt)
 }
+
+// ErrDeployPermanent marks a deploy failure that repeating cannot change: the
+// component is gone from the design, or OpenChoreo does not have it.
+//
+// It exists for the same reason sourcecontrol.IsPermanent does, and splits the
+// same way. The supervisor's activities run under Temporal's DEFAULT unbounded
+// retry, which is right for a blip and wrong for an ANSWER — a component that no
+// longer exists will not start existing on attempt 300, and retrying it hides
+// the one failure that mattered behind a thousand copies. WHICH failures are
+// permanent belongs to the domain that talks to OpenChoreo; turning that into
+// Temporal's vocabulary belongs to run/errors.go. This sentinel is the seam
+// between them, so neither has to import the other's world.
+var ErrDeployPermanent = errors.New("permanent deploy failure")
 
 // ComponentDeploy is one component's deployment in one environment, as the run
 // loop reasons about it: which release was pinned, and what the cluster says

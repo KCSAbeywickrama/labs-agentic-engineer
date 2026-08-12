@@ -466,9 +466,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		taskStreamHub,
 	)
 
-	// trait_sync is the single shared emitter that reconciles the
-	// `api-configuration` ClusterTrait on a Component CR + per-environment
-		// The deployment service: single writer of a user component's ReleaseBinding.
+	// The deployment service: single writer of a user component's ReleaseBinding.
 	// It cuts the release from the Workload a build posted, composes the whole
 	// desired binding — release pin, trait env configs, workload overrides — and
 	// writes it once. Driven by the run supervisor's deploy stage, because
@@ -671,25 +669,6 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// A build that fails at git-clone-auth within budget is re-minted + re-tried
 	// (§7): the build-secret stager is always wired, so the retrier is too.
 	execWatcher.WithBuildRetrier(codingExecutor, codingExecutor.AuthRetryBudget())
-
-	// NOTE: the trait_sync drift watcher enumerated (org,project,component) from
-	// the component_tasks table to periodically reconcile the api-configuration
-	// ClusterTrait. That table is gone (tasks are GitHub issues), so the periodic
-	// watcher is dropped. The per-env traitEnvironmentConfigs (jwtAuth/CORS) are
-	// re-emitted from the run supervisor instead, when a cycle's builds go green
-	// (run.Deps.APITraits below). traitDeployObserver, wired into the
-	// MultiDeployObserver fan-out below, reaches the same emitter from the
-	// ExecWatcher deploy path and is kept for the paths that still mint
-	// `kind=build` execution rows — it is inert for anything the run loop builds,
-	// which is what left every protected API's gateway unauthenticated until the
-	// run-loop trigger was added.
-	//
-	// Both triggers are events, so neither covers drift: a ReleaseBinding
-	// recreated, a config stripped, or a transient OC failure during the write
-	// (the fan-out is best-effort and does not retry) stays broken until the next
-	// green cycle. The component-enumerating reconcile backstop over the OC
-	// component list — the sibling of runtimeconfig.NewWatcher below — is what
-	// would close that, and is still owed.
 
 	// Inbound JWT verifier — Thunder publishes the User JWT and Service JWT
 	// signing keys at JWKSURL. Lazy fetch on first request avoids compose

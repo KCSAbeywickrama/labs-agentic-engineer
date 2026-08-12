@@ -41,8 +41,11 @@ package run
 // because it swallows its error by contract and so never retries at all.
 
 import (
+	"errors"
+
 	"go.temporal.io/sdk/temporal"
 
+	"github.com/wso2/aep/aep-api/internal/delivery"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 )
 
@@ -66,4 +69,20 @@ func sourceControlErr(err error) error {
 		return err
 	}
 	return temporal.NewNonRetryableApplicationError(err.Error(), errTypePermanentSourceControl, err)
+}
+
+// errTypePermanentDeploy is the ApplicationError type a permanent deploy failure
+// carries, named for the class a reader of a failed workflow needs first: the
+// component this run was promoting is gone.
+const errTypePermanentDeploy = "PermanentDeployFailure"
+
+// deployErr is sourceControlErr's twin for the deploy stage, and exists for the
+// same reason: an answer must not be retried like a blip. WHICH deploy failures
+// are permanent is the projects domain's to say (delivery.ErrDeployPermanent) —
+// this package only knows how to say it to Temporal.
+func deployErr(err error) error {
+	if err == nil || !errors.Is(err, delivery.ErrDeployPermanent) {
+		return err
+	}
+	return temporal.NewNonRetryableApplicationError(err.Error(), errTypePermanentDeploy, err)
 }

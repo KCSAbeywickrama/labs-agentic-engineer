@@ -182,9 +182,11 @@ func (s *DeploymentService) deployOne(ctx context.Context, orgID, projectID, com
 
 	comp := findDesignComponent(design, componentName)
 	if comp == nil {
-		// The design lost the component between the build and here. Not this
-		// pass's business to reconcile — report it and let the caller decide.
-		return outcome, fmt.Errorf("no such component in design")
+		// The design lost the component between the build and here. PERMANENT:
+		// no amount of retrying makes a deleted component reappear, and under
+		// Temporal's default policy an unmarked error here would retry until the
+		// run was cancelled by hand.
+		return outcome, fmt.Errorf("%w: no such component %q in design", delivery.ErrDeployPermanent, componentName)
 	}
 
 	// Cut the release from whatever Workload the build posted. The name is
@@ -199,7 +201,7 @@ func (s *DeploymentService) deployOne(ctx context.Context, orgID, projectID, com
 	if commitSHA != "" {
 		releaseName = ReleaseNameFor(projectID, componentName, commitSHA)
 		if _, err := s.components.EnsureRelease(ctx, orgID, projectID, componentName, releaseName); err != nil {
-			return outcome, fmt.Errorf("cut release: %w", err)
+			return outcome, fmt.Errorf("cut release: %w", permanentIfMissing(err))
 		}
 		outcome.Release = releaseName
 	}
@@ -215,7 +217,7 @@ func (s *DeploymentService) deployOne(ctx context.Context, orgID, projectID, com
 		Files:          s.filesFor(ctx, orgID, projectID, componentName),
 	})
 	if err := s.components.ApplyReleaseBinding(ctx, orgID, projectID, desired.Binding); err != nil {
-		return outcome, fmt.Errorf("apply release binding: %w", err)
+		return outcome, fmt.Errorf("apply release binding: %w", permanentIfMissing(err))
 	}
 	slog.InfoContext(ctx, "deployment: release pinned",
 		"org", orgID, "project", projectID, "component", componentName, "release", releaseName)
@@ -439,6 +441,21 @@ func designHasProtectedAPI(design *spec.DesignFile) bool {
 		}
 	}
 	return false
+}
+
+// permanentIfMissing marks an OpenChoreo 404 as permanent. A component the
+// cluster does not have cannot be deployed by trying again — it has to be
+// re-provisioned, which is the fan-out's job on the next cycle, not this
+// activity's to wait for.
+//
+// Deliberately narrow: every other OpenChoreo failure (409, 500, a dropped
+// connection) IS worth repeating, and stays on the unbounded retry that is right
+// for it.
+func permanentIfMissing(err error) error {
+	if errors.Is(err, openchoreo.ErrNotFound) || errors.Is(err, ErrComponentNotFound) {
+		return fmt.Errorf("%w: %w", delivery.ErrDeployPermanent, err)
+	}
+	return err
 }
 
 // findDesignComponent resolves a k8s-shaped component name back to its design

@@ -93,8 +93,9 @@ type CreateComponentRequest struct {
 	Workflow    *ComponentWorkflowSpec `json:"workflow,omitempty"`
 	// Traits are ClusterTrait attachments emitted by the BFF based on
 	// design.json (e.g. `api-configuration` when
-	// `exposesAPI.auth: end-user-required`). See services/trait_sync.go for the
-	// canonical emitter.
+	// `exposesAPI.auth: end-user-required`). projects.DesiredDeploymentFor is the
+	// canonical projection — it computes this shape and the binding's matching
+	// per-environment config together, so the two cannot disagree.
 	Traits []ComponentTrait `json:"traits,omitempty"`
 	// Labels are stamped onto metadata.labels (e.g. aep.wso2.com/* markers on
 	// ephemeral coding-agent Components).

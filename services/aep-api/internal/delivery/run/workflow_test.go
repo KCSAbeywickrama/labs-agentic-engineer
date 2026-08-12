@@ -480,7 +480,8 @@ func TestBuildsGreen_DeploysBeforeSettling(t *testing.T) {
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
-	require.Equal(t, 1, h.deployCount(), "a green cycle promotes its components exactly once")
+	require.Equal(t, 2, h.deployCount(),
+		"one green cycle = two promote passes (promote, then the converge fixpoint)")
 	require.Equal(t, []string{"order-service"}, h.deploys[0].Components,
 		"the deploy promotes the components the BUILD poll reported, not a re-derived set")
 	require.Equal(t, testMergeSHA, h.deploys[0].CommitSHA,
@@ -507,7 +508,47 @@ func TestRedBuild_DoesNotDeploy(t *testing.T) {
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
-	require.Equal(t, 1, h.deployCount(), "only the green cycle promotes")
+	require.Equal(t, 2, h.deployCount(),
+		"only the GREEN cycle promotes — its two passes, and none from the red one")
+}
+
+// TestDeploy_RunsASecondConvergePass pins the fixpoint. A protected API's CORS
+// allowlist is the origins of the project's web apps, and an origin exists only
+// once that web app is serving — so the first pass cannot know the API's own
+// desired state, and a single-pass deploy would leave it on the trait's wildcard
+// default until an out-of-band sweep noticed.
+func TestDeploy_RunsASecondConvergePass(t *testing.T) {
+	h := newHarness(t)
+	h.milestoneIs(MilestoneSnapshot{Work: 1, Total: 1}, MilestoneSnapshot{})
+	h.merges(1)
+
+	h.run(delivery.RunOriginSpecBuild, 0)
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
+	require.Equal(t, 2, h.deployCount(),
+		"one cycle promotes twice: the second pass recomposes now that siblings resolve")
+	require.Len(t, h.deploys, 2)
+	require.Equal(t, h.deploys[0].Components, h.deploys[1].Components,
+		"both passes promote the same component set")
+	require.Equal(t, h.deploys[0].CommitSHA, h.deploys[1].CommitSHA,
+		"the second pass re-pins the SAME release — it converges wiring, it does not promote anew")
+}
+
+// A cycle whose FIRST pass fails must not run a second: there is nothing to
+// converge onto, and the failure is already the cycle's answer.
+func TestDeploy_FailedFirstPassRunsNoSecond(t *testing.T) {
+	h := newHarness(t)
+	h.milestoneIs(MilestoneSnapshot{Work: 1, Total: 1}, MilestoneSnapshot{})
+	h.deploymentsAre(CycleDeployState{Expected: 1, Failed: []string{"order-service"}})
+	h.deployMintsAre(nil)
+	h.merges(1)
+
+	h.run(delivery.RunOriginSpecBuild, 0)
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonDeployBudget)
+	require.Equal(t, 1, h.deployCount(), "a failed pass is the answer; no converge follows it")
 }
 
 // TestDeployFailed_BecomesTheNextCyclesWork is the recovery shape a failed
@@ -579,8 +620,8 @@ func TestValidationCycle_TouchesNoComponent_SkipsDeploy(t *testing.T) {
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
-	require.Equal(t, 1, h.deployCount(),
-		"only the coding cycle promotes; the validation cycle has nothing to deploy")
+	require.Equal(t, 2, h.deployCount(),
+		"only the coding cycle promotes (two passes); the validation cycle has nothing to deploy")
 }
 
 // TestDeployNeverReady_ExpiresIntoAFixIssue pins the loop's SECOND deadline and
@@ -599,7 +640,7 @@ func TestDeployNeverReady_ExpiresIntoADeployFailure(t *testing.T) {
 	)
 	// Neither Ready nor Failed, ever: the rollout that never lands. Only the
 	// deadline can end this — which is the whole point of having one here.
-	h.deploymentsAre(CycleDeployState{Expected: 1})
+	h.deploymentsAre(CycleDeployState{Expected: 1, Pending: []string{"order-service"}})
 	h.deployMintsAre(nil)
 	h.merges(1)
 

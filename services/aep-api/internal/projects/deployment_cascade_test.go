@@ -30,11 +30,11 @@ import (
 // read paths are tested implicitly via the E2E console flow + the unit
 // tests for DesiredAPIConfigurationTrait / componentNameFromDesignPath.
 
-// TestTraitSync_DeleteCascade_HappyPath — calls componentClient.DeleteComponent
+// TestDeployment_DeleteCascade_HappyPath — calls componentClient.DeleteComponent
 // exactly once with the scoped (org, project, componentName) tuple and
 // returns nil. Audit logging is fire-and-forget — we don't assert on
 // it here because slog goes to a global sink.
-func TestTraitSync_DeleteCascade_HappyPath(t *testing.T) {
+func TestDeployment_DeleteCascade_HappyPath(t *testing.T) {
 	calls := 0
 	mock := &mocks.ComponentClientMock{
 		DeleteComponentFunc: func(ctx context.Context, orgName, projectName, componentName string) error {
@@ -54,12 +54,12 @@ func TestTraitSync_DeleteCascade_HappyPath(t *testing.T) {
 	}
 }
 
-// TestTraitSync_DeleteCascade_PropagatesError — when OC's DeleteComponent
+// TestDeployment_DeleteCascade_PropagatesError — when OC's DeleteComponent
 // returns an error (network, 5xx after exhaustion), the cascade surfaces
-// it wrapped with "trait_sync: delete component". The caller
+// it wrapped with "deployment: delete component". The caller
 // (designService.DeleteComponent) treats this as best-effort and logs
 // but does not propagate to the user.
-func TestTraitSync_DeleteCascade_PropagatesError(t *testing.T) {
+func TestDeployment_DeleteCascade_PropagatesError(t *testing.T) {
 	mock := &mocks.ComponentClientMock{
 		DeleteComponentFunc: func(ctx context.Context, orgName, projectName, componentName string) error {
 			return errors.New("simulated OC failure")
@@ -71,17 +71,17 @@ func TestTraitSync_DeleteCascade_PropagatesError(t *testing.T) {
 		t.Fatal("want error from DeleteComponentCascade, got nil")
 	}
 	if !strings.Contains(err.Error(), "delete component") {
-		t.Errorf("error should wrap with trait_sync delete prefix: %v", err)
+		t.Errorf("error should wrap with the deployment delete prefix: %v", err)
 	}
 	if !strings.Contains(err.Error(), "simulated OC failure") {
 		t.Errorf("error should preserve underlying message: %v", err)
 	}
 }
 
-// TestTraitSync_DeleteCascade_EmptyArgsRejected — defensive check: the
+// TestDeployment_DeleteCascade_EmptyArgsRejected — defensive check: the
 // orchestration layer must catch empty IDs before the OC call, so a
 // missing path param never reaches the cluster.
-func TestTraitSync_DeleteCascade_EmptyArgsRejected(t *testing.T) {
+func TestDeployment_DeleteCascade_EmptyArgsRejected(t *testing.T) {
 	mock := &mocks.ComponentClientMock{
 		DeleteComponentFunc: func(ctx context.Context, orgName, projectName, componentName string) error {
 			t.Fatal("DeleteComponent must not be called with empty args")

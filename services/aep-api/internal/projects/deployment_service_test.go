@@ -67,8 +67,8 @@ func traitReadDesign(t *testing.T, files map[string]string) *spec.DesignFile {
 // ocDeployments builds a ComponentClient moq whose ListDeployments returns the
 // mapped external URL for a component (keyed by k8s component name), an empty
 // deployment list for any unmapped component, and canned success for the two
-// trait writes. UpdateComponentTraits* start as success no-ops; a case can
-// override them to inject failure.
+// promote writes. EnsureRelease / ApplyReleaseBinding start as success no-ops;
+// a case can override them to inject failure.
 func ocDeployments(urlsByComponent map[string]string) *mocks.ComponentClientMock {
 	return &mocks.ComponentClientMock{
 		ListDeploymentsFunc: func(_ context.Context, _, _, componentName string) (*gen.DeploymentList, error) {

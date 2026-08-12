@@ -18,6 +18,7 @@ package run
 
 import (
 	"errors"
+	"time"
 
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
@@ -154,6 +155,23 @@ func (l *loop) runCycle(ctx workflow.Context, kind string, anchorIssue int) (cyc
 }
 
 // deployCycle promotes the cycle's components and waits for them to serve.
+//
+// TWO passes, and the second one is not a retry — it is a fixpoint.
+//
+// Part of a component's desired state depends on its siblings already being up:
+// a protected API's CORS allowlist is the origins of the project's web apps, and
+// an origin exists only once that web app has a binding with a resolved
+// endpoint. A cycle that adds a SPA and an API together therefore cannot know
+// the API's own desired state on the first pass — it composes an empty allowlist
+// and the trait falls back to its wildcard default.
+//
+// So: promote, wait for everything to serve, then recompose now that the
+// origins resolve and promote again. The second pass is a no-op whenever nothing
+// moved — the composer is pure and the binding write is idempotent — so the cost
+// in the common case is one round trip per component, not a second rollout. It
+// is bounded at two on purpose: a third could only differ if the desired state
+// depended on itself, which would be a bug in the projection rather than
+// something to iterate out.
 func (l *loop) deployCycle(ctx workflow.Context, components []string) (cycleResult, error) {
 	if len(components) == 0 {
 		// A validation cycle's pull request carries tests and a report and
@@ -161,6 +179,15 @@ func (l *loop) deployCycle(ctx workflow.Context, components []string) (cycleResu
 		// wait for.
 		return cycleGreen, nil
 	}
+	res, err := l.deployPass(ctx, components)
+	if err != nil || res != cycleGreen {
+		return res, err
+	}
+	return l.deployPass(ctx, components)
+}
+
+// deployPass is one promote-and-wait.
+func (l *loop) deployPass(ctx workflow.Context, components []string) (cycleResult, error) {
 	if err := l.deploy(ctx, components); err != nil {
 		return cycleNone, err
 	}
@@ -289,23 +316,38 @@ func (l *loop) awaitBuilds(ctx workflow.Context) (cycleResult, []string, error) 
 			return cycleGreen, state.Components, nil
 		}
 
-		timerCtx, stop := workflow.WithCancel(ctx)
-		cancelled := false
-		sel := workflow.NewSelector(ctx)
-		sel.AddReceive(l.cancel, func(c workflow.ReceiveChannel, _ bool) {
-			c.Receive(ctx, nil)
-			cancelled = true
-		})
-		for _, ch := range []workflow.ReceiveChannel{l.builds, l.workable, l.merged, l.conflict} {
-			sel.AddReceive(ch, func(c workflow.ReceiveChannel, _ bool) { c.Receive(ctx, nil) })
-		}
-		sel.AddFuture(workflow.NewTimer(timerCtx, buildPollInterval), func(workflow.Future) {})
-		sel.Select(ctx)
-		stop()
-		if cancelled {
+		if cancelled, _ := l.awaitWake(ctx, buildPollInterval, nil); cancelled {
 			return cycleCancelled, nil, nil
 		}
 	}
+}
+
+// awaitWake blocks until something worth re-polling happens: a signal, the poll
+// timer, a cancel, or (when given) a stage deadline.
+//
+// Every signal is DRAINED without being read. That is the loop's standing rule —
+// a signal is a wake-up, never evidence — so what a waiter does on waking is
+// always the same: go and re-read ground truth. Both stages therefore need the
+// identical select, and the only things that differ between them are how often
+// to re-poll and whether the stage has an expiry at all.
+func (l *loop) awaitWake(ctx workflow.Context, poll time.Duration, deadline workflow.Future) (cancelled, expired bool) {
+	timerCtx, stop := workflow.WithCancel(ctx)
+	defer stop()
+
+	sel := workflow.NewSelector(ctx)
+	sel.AddReceive(l.cancel, func(c workflow.ReceiveChannel, _ bool) {
+		c.Receive(ctx, nil)
+		cancelled = true
+	})
+	for _, ch := range []workflow.ReceiveChannel{l.builds, l.workable, l.merged, l.conflict} {
+		sel.AddReceive(ch, func(c workflow.ReceiveChannel, _ bool) { c.Receive(ctx, nil) })
+	}
+	sel.AddFuture(workflow.NewTimer(timerCtx, poll), func(workflow.Future) {})
+	if deadline != nil {
+		sel.AddFuture(deadline, func(workflow.Future) { expired = true })
+	}
+	sel.Select(ctx)
+	return cancelled, expired
 }
 
 // awaitDeployments waits for the promoted components to reach a verdict.
@@ -340,43 +382,20 @@ func (l *loop) awaitDeployments(ctx workflow.Context, components []string) (cycl
 			return cycleGreen, nil
 		}
 		if expired {
-			// Out of time with nothing settled. Reported as a failure of the
-			// components that have not come up, so the fix issue names them.
-			l.deployFailed = notReady(components, state)
+			// Out of time. Reported as a failure of the components that have not
+			// come up — and ONLY those: a cycle can expire with some components
+			// serving and others still rolling out, and filing fix work against
+			// one that deployed fine would send an agent after nothing.
+			l.deployFailed = state.Pending
 			return cycleDeployFailed, nil
 		}
 
-		timerCtx, stop := workflow.WithCancel(ctx)
-		cancelled := false
-		sel := workflow.NewSelector(ctx)
-		sel.AddReceive(l.cancel, func(c workflow.ReceiveChannel, _ bool) {
-			c.Receive(ctx, nil)
-			cancelled = true
-		})
-		for _, ch := range []workflow.ReceiveChannel{l.builds, l.workable, l.merged, l.conflict} {
-			sel.AddReceive(ch, func(c workflow.ReceiveChannel, _ bool) { c.Receive(ctx, nil) })
-		}
-		sel.AddFuture(workflow.NewTimer(timerCtx, deployPollInterval), func(workflow.Future) {})
-		sel.AddFuture(deadline, func(workflow.Future) { expired = true })
-		sel.Select(ctx)
-		stop()
+		cancelled, hitDeadline := l.awaitWake(ctx, deployPollInterval, deadline)
 		if cancelled {
 			return cycleCancelled, nil
 		}
+		expired = expired || hitDeadline
 	}
-}
-
-// notReady names the components that never reached a verdict, for the deadline
-// case. The state carries counts rather than names for the ready ones, so the
-// list is derived by elimination — which is correct here precisely because
-// anything that DID settle would have returned above.
-func notReady(components []string, state CycleDeployState) []string {
-	if state.Ready >= len(components) {
-		return nil
-	}
-	out := make([]string, 0, len(components)-state.Ready)
-	out = append(out, components...)
-	return out
 }
 
 // phaseFor names the read-model phase a cycle of this kind starts in.

@@ -657,7 +657,8 @@ func (c *componentClient) UpdateComponentTraitEnvironmentConfigs(ctx context.Con
 	rbs := listResp.JSON200.Items
 	if len(rbs) == 0 {
 		// First build hasn't produced a ReleaseBinding yet — soft no-op.
-		// The trait_sync watcher will retry once the deploy chain catches up.
+		// The deploy stage creates the binding complete; the converge sweep
+		// re-asserts it afterwards.
 		return nil
 	}
 

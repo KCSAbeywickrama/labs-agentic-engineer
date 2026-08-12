@@ -187,13 +187,19 @@ type CycleDeployState struct {
 	Expected int      `json:"expected"`
 	Ready    int      `json:"ready"`
 	Failed   []string `json:"failed,omitempty"`
+	// Pending NAMES the components that have reached no verdict yet, where Ready
+	// is only counted.
+	//
+	// Named because the deadline reports them AS the failure: a cycle can expire
+	// with some components serving and others still rolling out, and a fix issue
+	// that named the whole cycle would file work against components that deployed
+	// perfectly. Counting was enough while the only question was "are we done
+	// yet"; the deadline made "which ones aren't" a question too.
+	Pending []string `json:"pending,omitempty"`
 	// Reasons carries OpenChoreo's own condition reason per failed component,
 	// for the issue body a failed deploy mints. Never branched on.
 	Reasons map[string]string `json:"reasons,omitempty"`
 }
-
-// Settled reports whether every component has reached a verdict, either way.
-func (s CycleDeployState) Settled() bool { return len(s.Failed) > 0 || s.Ready >= s.Expected }
 
 // Green reports whether every component the cycle deployed is serving.
 func (s CycleDeployState) Green() bool { return len(s.Failed) == 0 && s.Ready >= s.Expected }
@@ -217,6 +223,8 @@ func classifyCycleDeploys(expected int, states []delivery.ComponentDeploy) Cycle
 			}
 		case st.Ready:
 			out.Ready++
+		default:
+			out.Pending = append(out.Pending, st.Component)
 		}
 	}
 	return out

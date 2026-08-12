@@ -402,7 +402,7 @@ func (a *Activities) DeployCycle(ctx context.Context, in DeployCycleInput) ([]de
 		// per-attempt cause is otherwise only visible in workflow history.
 		slog.ErrorContext(ctx, "run: deploy failed",
 			"orgID", in.OrgID, "projectID", in.ProjectID, "components", in.Components, "error", err)
-		return nil, err
+		return nil, deployErr(err)
 	}
 	return out, nil
 }
@@ -417,7 +417,7 @@ func (a *Activities) PollCycleDeployments(ctx context.Context, in DeployCycleInp
 	}
 	states, err := a.deployRead.DeploymentState(ctx, in.OrgID, in.ProjectID, in.Components)
 	if err != nil {
-		return CycleDeployState{}, err
+		return CycleDeployState{}, deployErr(err)
 	}
 	return classifyCycleDeploys(len(in.Components), states), nil
 }
