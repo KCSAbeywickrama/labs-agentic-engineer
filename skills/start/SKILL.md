@@ -32,7 +32,8 @@ created the project, named in the instruction by path. When they are listed,
 typed idea is the anchor that says which part of them matters.
 
 Every listed document is already in front of you: text documents are in your
-workspace files, and PDFs are attached to this conversation natively. Never
+workspace files, and PDFs and images are attached to this conversation
+natively — look at an attached mockup or form, don't just acknowledge it. Never
 fetch a reference document through a repository or MCP tool — a binary fetched
 as text is garbage, and the tool will refuse it anyway.
 

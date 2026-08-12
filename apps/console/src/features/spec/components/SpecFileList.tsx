@@ -33,9 +33,11 @@ import {
   ChevronDown,
   ChevronRight,
   FileCode,
+  FileImage,
   FileText,
   FileType2,
-  Plus, RefreshCw,
+  Plus,
+  RefreshCw,
   Network,
   LayoutDashboard,
 } from "@wso2/oxygen-ui-icons-react";
@@ -72,6 +74,7 @@ function fileSel(path: string): SpecSelection {
 const REFERENCE_ICON_BY_KIND: Record<ReferenceFileKind, React.ReactNode> = {
   pdf: <FileType2 size={16} />,
   markdown: <FileCode size={16} />,
+  image: <FileImage size={16} />,
   text: <FileText size={16} />,
 };
 

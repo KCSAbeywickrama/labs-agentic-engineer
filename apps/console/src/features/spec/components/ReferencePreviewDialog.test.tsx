@@ -142,6 +142,25 @@ describe("ReferencePreviewDialog", () => {
     expect(object?.getAttribute("data")).toBe("blob:mock-url");
   });
 
+  it("renders an image reference as an <img> over a blob: URL (#383 follow-up)", () => {
+    const IMG_FILE = { path: "specs/requirements/references/mockup.png", sha: "img1", group: "references" as const };
+    // 1x1 transparent PNG
+    const TINY_PNG_BASE64 =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+    mockContent.mockReturnValue({
+      data: { path: IMG_FILE.path, content: TINY_PNG_BASE64, sha: IMG_FILE.sha, encoding: "base64" },
+      isPending: false,
+      isError: false,
+    });
+    render(<ReferencePreviewDialog projectName="p" file={IMG_FILE} onClose={vi.fn()} />);
+
+    expect(createObjectURLSpy).toHaveBeenCalledTimes(1);
+    const img = document.querySelector("img[alt='mockup.png']");
+    expect(img).not.toBeNull();
+    // Auth never rides an <img> request — the src must be the decoded blob.
+    expect(img?.getAttribute("src")).toBe("blob:mock-url");
+  });
+
   it("revokes the object URL on close/unmount so the blob doesn't leak", () => {
     mockContent.mockReturnValue({
       data: { path: PDF_FILE.path, content: TINY_PDF_BASE64, sha: PDF_FILE.sha, encoding: "base64" },

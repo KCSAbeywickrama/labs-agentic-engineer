@@ -22,7 +22,7 @@
 // every runtime — browser + Node >=18 — already provides) so both are unit
 // tested directly, without mounting anything.
 
-export type ReferenceFileKind = "pdf" | "markdown" | "text";
+export type ReferenceFileKind = "pdf" | "markdown" | "image" | "text";
 
 function extensionOf(path: string): string {
   const base = path.split("/").at(-1) ?? path;
@@ -38,17 +38,19 @@ export function referenceFileKind(path: string): ReferenceFileKind {
   const ext = extensionOf(path);
   if (ext === "pdf") return "pdf";
   if (ext === "md") return "markdown";
+  if (ext === "png" || ext === "jpg" || ext === "jpeg") return "image";
   return "text";
 }
 
-const MIME_TYPE_BY_KIND: Record<ReferenceFileKind, string> = {
-  pdf: "application/pdf",
-  markdown: "text/markdown",
-  text: "text/plain",
-};
-
-export function referenceMimeType(kind: ReferenceFileKind): string {
-  return MIME_TYPE_BY_KIND[kind];
+// MIME by PATH, not kind: the image kind spans two MIME types (png vs jpeg),
+// so the extension is the only honest source.
+export function referenceMimeType(path: string): string {
+  const ext = extensionOf(path);
+  if (ext === "pdf") return "application/pdf";
+  if (ext === "md") return "text/markdown";
+  if (ext === "png") return "image/png";
+  if (ext === "jpg" || ext === "jpeg") return "image/jpeg";
+  return "text/plain";
 }
 
 // Decodes a FileContent.content string that arrived as `encoding: "base64"`

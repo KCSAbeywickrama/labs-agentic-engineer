@@ -49,10 +49,10 @@ describe("referenceFileKind", () => {
 });
 
 describe("referenceMimeType", () => {
-  it("maps each kind to the mime type its preview needs", () => {
-    expect(referenceMimeType("pdf")).toBe("application/pdf");
-    expect(referenceMimeType("markdown")).toBe("text/markdown");
-    expect(referenceMimeType("text")).toBe("text/plain");
+  it("maps a path to the mime type its preview needs", () => {
+    expect(referenceMimeType("a/spec.pdf")).toBe("application/pdf");
+    expect(referenceMimeType("a/notes.md")).toBe("text/markdown");
+    expect(referenceMimeType("a/notes.txt")).toBe("text/plain");
   });
 });
 
@@ -74,5 +74,21 @@ describe("base64ToBlob", () => {
 
     const roundTripped = new Uint8Array(await blob.arrayBuffer());
     expect(Array.from(roundTripped)).toEqual(Array.from(bytes));
+  });
+});
+
+describe("image references (#383 follow-up)", () => {
+  it("classifies png/jpg/jpeg as images", () => {
+    expect(referenceFileKind("specs/requirements/references/mockup.png")).toBe("image");
+    expect(referenceFileKind("specs/requirements/references/photo.jpg")).toBe("image");
+    expect(referenceFileKind("specs/requirements/references/scan.JPEG")).toBe("image");
+  });
+
+  it("maps image mime by extension — png and jpeg differ", () => {
+    expect(referenceMimeType("a/mockup.png")).toBe("image/png");
+    expect(referenceMimeType("a/photo.jpg")).toBe("image/jpeg");
+    expect(referenceMimeType("a/scan.jpeg")).toBe("image/jpeg");
+    expect(referenceMimeType("a/doc.pdf")).toBe("application/pdf");
+    expect(referenceMimeType("a/notes.md")).toBe("text/markdown");
   });
 });

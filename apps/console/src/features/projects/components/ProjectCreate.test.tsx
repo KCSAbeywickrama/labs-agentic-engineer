@@ -90,7 +90,7 @@ describe("ProjectCreate reference documents (#383)", () => {
     attach("spec.docx");
     expect(screen.queryByText(/spec\.docx \(/)).toBeNull();
     expect(
-      screen.getByText(/only \.md, \.txt, \.pdf files are accepted/i),
+      screen.getByText(/only \.md, \.txt, \.pdf, \.png, \.jpg, \.jpeg files are accepted/i),
     ).toBeTruthy();
   });
 

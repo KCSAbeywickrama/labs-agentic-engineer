@@ -27,10 +27,10 @@ type WriteOp = components["schemas"]["WriteOp"];
 export const REFERENCES_DIR = "specs/requirements/references";
 export const MAX_REFERENCE_FILE_BYTES = 5 * 1024 * 1024;
 export const MAX_REFERENCE_FILES = 10;
-export const REFERENCE_ACCEPT = ".md,.txt,.pdf";
+export const REFERENCE_ACCEPT = ".md,.txt,.pdf,.png,.jpg,.jpeg";
 
 const TEXT_EXTENSIONS = new Set(["md", "txt"]);
-const ACCEPTED_EXTENSIONS = new Set([...TEXT_EXTENSIONS, "pdf"]);
+const ACCEPTED_EXTENSIONS = new Set([...TEXT_EXTENSIONS, "pdf", "png", "jpg", "jpeg"]);
 
 export interface RejectedFile {
   name: string;
@@ -56,7 +56,7 @@ export function screenReferenceFiles(
     if (!ACCEPTED_EXTENSIONS.has(extensionOf(file.name))) {
       rejected.push({
         name: file.name,
-        reason: "Only .md, .txt, .pdf files are accepted",
+        reason: "Only .md, .txt, .pdf, .png, .jpg, .jpeg files are accepted",
       });
     } else if (file.size > MAX_REFERENCE_FILE_BYTES) {
       rejected.push({ name: file.name, reason: "Larger than 5 MB" });

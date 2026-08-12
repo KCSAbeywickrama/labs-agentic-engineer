@@ -85,9 +85,28 @@ describe("screenReferenceFiles", () => {
     expect(accepted).toEqual([]);
     expect(rejected[0]?.reason).toMatch(/[Aa]lready attached/);
   });
+
+  it("accepts images (.png, .jpg, .jpeg) — mockups and screenshots are references too", () => {
+    const { accepted, rejected } = screenReferenceFiles(
+      [],
+      [file("mockup.png", "x"), file("photo.jpg", "x"), file("scan.JPEG", "x")],
+    );
+    expect(accepted.map((f) => f.name)).toEqual(["mockup.png", "photo.jpg", "scan.JPEG"]);
+    expect(rejected).toEqual([]);
+  });
 });
 
 describe("toReferenceWrites", () => {
+  it("writes images as base64, byte-exact — same channel as PDF", async () => {
+    const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x00, 0xff, 0xd8]);
+    const writes = await toReferenceWrites([file("mockup.png", bytes, "image/png")]);
+    expect(writes).toHaveLength(1);
+    expect(writes[0]?.path).toBe(`${REFERENCES_DIR}/mockup.png`);
+    expect(writes[0]?.encoding).toBe("base64");
+    const decoded = Uint8Array.from(atob(writes[0]!.content), (c) => c.charCodeAt(0));
+    expect([...decoded]).toEqual([...bytes]);
+  });
+
   it("writes text files as utf8 under the references dir", async () => {
     const writes = await toReferenceWrites([file("prd.md", "# The PRD")]);
     expect(writes).toEqual([

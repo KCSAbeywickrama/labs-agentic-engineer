@@ -57,19 +57,19 @@ export function ReferencePreviewDialog({
   const content = useSpecFileContent(projectName, file);
   const kind = file ? referenceFileKind(file.path) : "text";
 
-  // PDF preview needs an object URL over the DECODED bytes (`content.data` is
-  // base64 text for a binary read — the read half of #384's WriteOp.encoding
-  // contract). Built when the content arrives, revoked on close/unmount/file
-  // change so the blob is never leaked across previews.
-  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  // Binary previews (PDF, images) need an object URL over the DECODED bytes
+  // (`content.data` is base64 text for a binary read — the read half of #384's
+  // WriteOp.encoding contract). Built when the content arrives, revoked on
+  // close/unmount/file change so the blob is never leaked across previews.
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
   useEffect(() => {
-    if (kind !== "pdf" || !content.data) {
-      setPdfUrl(null);
+    if ((kind !== "pdf" && kind !== "image") || !content.data || !file) {
+      setBlobUrl(null);
       return;
     }
-    const blob = base64ToBlob(content.data.content, referenceMimeType("pdf"));
+    const blob = base64ToBlob(content.data.content, referenceMimeType(file.path));
     const url = URL.createObjectURL(blob);
-    setPdfUrl(url);
+    setBlobUrl(url);
     return () => URL.revokeObjectURL(url);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- re-run only when the file identity or its content changes, not on every content object identity churn from refetches of the SAME data
   }, [kind, content.data?.content, file?.path]);
@@ -102,9 +102,9 @@ export function ReferencePreviewDialog({
         )}
 
         {content.data && kind === "pdf" && (
-          pdfUrl ? (
+          blobUrl ? (
             <object
-              data={pdfUrl}
+              data={blobUrl}
               type="application/pdf"
               width="100%"
               height="100%"
@@ -114,13 +114,31 @@ export function ReferencePreviewDialog({
               <Box sx={{ p: 3 }}>
                 <Typography variant="body2">
                   Your browser can&apos;t preview this PDF inline.{" "}
-                  <Link href={pdfUrl} download={title || "document.pdf"}>
+                  <Link href={blobUrl} download={title || "document.pdf"}>
                     Download it
                   </Link>{" "}
                   instead.
                 </Typography>
               </Box>
             </object>
+          ) : (
+            <Box sx={{ display: "flex", justifyContent: "center", py: 6, width: "100%" }}>
+              <CircularProgress aria-label="Preparing preview" />
+            </Box>
+          )
+        )}
+
+        {content.data && kind === "image" && (
+          blobUrl ? (
+            // Auth never rides an <img> request, so the src is the decoded
+            // blob — same rule as the PDF <object> above.
+            <Box sx={{ display: "flex", justifyContent: "center", p: 2 }}>
+              <img
+                src={blobUrl}
+                alt={title}
+                style={{ maxWidth: "100%", maxHeight: "70vh", objectFit: "contain" }}
+              />
+            </Box>
           ) : (
             <Box sx={{ display: "flex", justifyContent: "center", py: 6, width: "100%" }}>
               <CircularProgress aria-label="Preparing preview" />

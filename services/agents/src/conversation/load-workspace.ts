@@ -189,8 +189,22 @@ export function readSnapshot(snapshotDir: string): Record<string, string> {
 /** Anthropic's request size limit is ~32MB; this leaves headroom for everything else on the wire. */
 export const MAX_REFERENCE_ATTACHMENT_BYTES = 30 * 1024 * 1024;
 
-function isPdfPath(path: string): boolean {
-  return path.toLowerCase().endsWith(".pdf");
+/**
+ * The binary reference types the model reads natively, by extension: PDFs as
+ * document blocks, images as image blocks. Anything else binary has no native
+ * representation and is skipped (it is also invisible to the text snapshot,
+ * which is exactly why these ride as parts at all).
+ */
+const NATIVE_MEDIA_BY_EXT: Record<string, string> = {
+  pdf: "application/pdf",
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+};
+
+function nativeMediaTypeFor(path: string): string | undefined {
+  const ext = path.slice(path.lastIndexOf(".") + 1).toLowerCase();
+  return NATIVE_MEDIA_BY_EXT[ext];
 }
 
 /**
@@ -203,7 +217,7 @@ function isPdfPath(path: string): boolean {
  * conversation-history JSON compact (a `Buffer` would serialize as a giant
  * `{type:"Buffer",data:[...]}` byte array instead).
  */
-function readOneReferenceAttachment(snapshotDir: string, refPath: string, snapshotRoot: string): FilePart | undefined {
+function readOneReferenceAttachment(snapshotDir: string, refPath: string, snapshotRoot: string, mediaType: string): FilePart | undefined {
   const abs = resolve(snapshotDir, refPath);
   if (abs !== snapshotRoot && !abs.startsWith(snapshotRoot + sep)) {
     console.warn(`[references] skipping reference outside the snapshot: ${refPath}`);
@@ -227,25 +241,29 @@ function readOneReferenceAttachment(snapshotDir: string, refPath: string, snapsh
     console.warn(`[references] failed to read reference ${refPath}: ${err instanceof Error ? err.message : String(err)}`);
     return undefined;
   }
-  return { type: "file", data: bytes.toString("base64"), mediaType: "application/pdf", filename: refPath };
+  return { type: "file", data: bytes.toString("base64"), mediaType, filename: refPath };
 }
 
 /**
- * Attach every `.pdf` (case-insensitive) path in a `start` turn's
- * `TurnSpec.references` as a native AI SDK document file part — Anthropic
- * reads PDFs directly via document blocks, so the model no longer has to pull
- * one through a tool as raw "text" (see the module doc for why that mattered).
- * Non-PDF references (`.md`/`.txt`) are already inlined by `readSnapshot` and
- * are left alone here. Absent/empty `references` → `[]`, so a turn with no
- * PDFs builds byte-identical messages to before this existed.
+ * Attach every natively-readable binary reference (case-insensitive `.pdf`,
+ * `.png`, `.jpg`/`.jpeg`) in a `start` turn's `TurnSpec.references` as a
+ * native AI SDK file part — Anthropic reads PDFs as document blocks and
+ * images as image blocks, so the model sees the actual mockup or form rather
+ * than pulling bytes through a tool as "text" (see the module doc for why
+ * that mattered). Text references (`.md`/`.txt`) are already inlined by
+ * `readSnapshot` and are left alone here. Absent/empty `references` → `[]`,
+ * so a turn with no attachable references builds byte-identical messages to
+ * before this existed.
  */
 export function readReferenceAttachments(snapshotDir: string, references: string[] | undefined): FilePart[] {
   const snapshotRoot = resolve(snapshotDir);
   const parts: FilePart[] = [];
   for (const raw of references ?? []) {
     const refPath = raw.trim();
-    if (refPath === "" || !isPdfPath(refPath)) continue;
-    const part = readOneReferenceAttachment(snapshotDir, refPath, snapshotRoot);
+    if (refPath === "") continue;
+    const mediaType = nativeMediaTypeFor(refPath);
+    if (!mediaType) continue;
+    const part = readOneReferenceAttachment(snapshotDir, refPath, snapshotRoot, mediaType);
     if (part) parts.push(part);
   }
   return parts;

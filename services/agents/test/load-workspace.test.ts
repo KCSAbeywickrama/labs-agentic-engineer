@@ -485,3 +485,18 @@ test("overlayReferenceTexts: no references → the room files return unchanged",
   const merged = overlayReferenceTexts(room, { "README.md": "hi" });
   assert.deepEqual(merged, room);
 });
+
+test("readReferenceAttachments: image references become native image-typed file parts (#383 follow-up)", () => {
+  const png = Buffer.from("89504e470d0a1a0a0000", "hex"); // PNG magic + padding
+  const jpg = Buffer.from("ffd8ffe000104a464946", "hex"); // JPEG magic
+  const root = makeTree({ [`${REF_DIR}/mockup.png`]: png, [`${REF_DIR}/photo.JPG`]: jpg });
+  try {
+    const parts = readReferenceAttachments(root, [`${REF_DIR}/mockup.png`, `${REF_DIR}/photo.JPG`]);
+    assert.equal(parts.length, 2);
+    assert.equal(parts[0]?.mediaType, "image/png");
+    assert.equal(Buffer.from(parts[0]?.data as string, "base64").toString("hex"), png.toString("hex"));
+    assert.equal(parts[1]?.mediaType, "image/jpeg");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

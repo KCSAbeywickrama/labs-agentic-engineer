@@ -1060,12 +1060,22 @@ const referenceRawTxt = `Raw meeting notes, 2026-01-14
 const referenceSpecPdfBase64 =
   "JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2JqCjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCAyMDAgMjAwXSAvUmVzb3VyY2VzIDw8IC9Gb250IDw8IC9GMSA0IDAgUiA+PiA+PiAvQ29udGVudHMgNSAwIFIgPj4KZW5kb2JqCjQgMCBvYmoKPDwgL1R5cGUgL0ZvbnQgL1N1YnR5cGUgL1R5cGUxIC9CYXNlRm9udCAvSGVsdmV0aWNhID4+CmVuZG9iago1IDAgb2JqCjw8IC9MZW5ndGggNTYgPj4Kc3RyZWFtCkJUIC9GMSAxMiBUZiAyMCAxMDAgVGQgKEFFUCByZWZlcmVuY2UgZG9jIGZpeHR1cmUpIFRqIEVUCmVuZHN0cmVhbQplbmRvYmoKeHJlZgowIDYKMDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDA5IDAwMDAwIG4gCjAwMDAwMDAwNTggMDAwMDAgbiAKMDAwMDAwMDExNSAwMDAwMCBuIAowMDAwMDAwMjQxIDAwMDAwIG4gCjAwMDAwMDAzMTEgMDAwMDAgbiAKdHJhaWxlcgo8PCAvU2l6ZSA2IC9Sb290IDEgMCBSID4+CnN0YXJ0eHJlZgo0MTcKJSVFT0Y=";
 
+// A 1×1 transparent PNG — the smallest byte-valid image, so the mock's image
+// preview exercises the real base64 -> Blob -> <img> decode path.
+const referenceMockupPngBase64 =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+
 const referenceFiles: MockSpecFile[] = [
   { path: "specs/requirements/references/notes.md", content: referenceNotesMd },
   { path: "specs/requirements/references/meeting-notes.txt", content: referenceRawTxt },
   {
     path: "specs/requirements/references/spec.pdf",
     content: referenceSpecPdfBase64,
+    encoding: "base64",
+  },
+  {
+    path: "specs/requirements/references/mockup.png",
+    content: referenceMockupPngBase64,
     encoding: "base64",
   },
 ];
