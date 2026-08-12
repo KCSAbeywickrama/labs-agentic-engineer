@@ -95,9 +95,11 @@ conversational or autonomous surface — a user talking to the system in their o
 words rather than filling in a form. Its behaviour is authored as
 `agent.afm.md` (the `agent-design` skill), it is implemented in TypeScript, and
 it pins `["agent-building"]`. It is a normal deployable that calls other
-components over HTTP: give it a `component` dependency for every API it uses,
-plus a `platform-resource` of type `model-provider` for model access. It owns no
-storage — an agent that needs to remember something calls a service that does.
+components over HTTP: give it a `component` dependency for every API it uses.
+**Declare no dependency for model access** — every `ai-agent` gets it from its
+component type, on the organisation's own key, so there is nothing to choose.
+It owns no storage — an agent that needs to remember something calls a service
+that does.
 
 **Component `type` is a fixed vocabulary — use the EXACT string.** A backend is
 `"service"`; a browser app is `"web-application"` (OpenChoreo's own term). Write

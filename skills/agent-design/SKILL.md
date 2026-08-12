@@ -69,8 +69,9 @@ defining its own `tools.openapi` costs a rename rather than a migration.
 
 **Never write a literal address or credential.** Use `${env:NAME}` and let the
 platform inject the value: a dependency named `lunch-api` in `design.json`
-yields `LUNCH_API_URL`, a `model-provider` resource named `model` yields
-`MODEL_*`. `specs/` is committed to git.
+yields `LUNCH_API_URL`. `MODEL_*` needs no dependency at all — every `ai-agent`
+component gets model access from its component type, on the organisation's own
+key. `specs/` is committed to git.
 
 **`model.provider` is required** — `anthropic` unless the requirements say
 otherwise. It decides which SDK the build compiles against, and it cannot be
