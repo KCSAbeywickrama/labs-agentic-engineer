@@ -63,6 +63,11 @@ func (s *designService) DerivePlatformResourceFactsAtHead(ctx context.Context, o
 	if _, err := s.persistPlatformResourceDerivation(ctx, orgID, projectID, designFile, markers); err != nil {
 		return err
 	}
+	// Agent tool resolution (derive_agent_tools.go): a status, never a write
+	// rejection (see that file's doc comment for why), so it runs after the
+	// persisted derivations above and is never part of what they commit. A
+	// design with no ai-agent component does no work here at all.
+	deriveAgentToolStatuses(ctx, designFile.Components)
 	return nil
 }
 

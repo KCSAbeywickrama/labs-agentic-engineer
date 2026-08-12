@@ -116,6 +116,10 @@ one more thing to get wrong and to drift.
 `operationId` that document actually defines — a name you assumed is a tool the
 agent will never have, discovered at build time or later.
 
+The platform checks this at design-save: an `allow` entry that is not an
+`operationId` of that component's contract, or a `component` that is not a
+declared dependency, computes **unresolved**.
+
 **Include** what the agent's job needs, and nothing more.
 
 **Leave out**, by default:

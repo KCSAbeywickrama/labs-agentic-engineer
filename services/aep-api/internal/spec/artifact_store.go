@@ -101,6 +101,13 @@ const DesignRootFile = "design.md"
 // directories.
 const componentDirPrefix = "components/"
 
+// agentAFMFileName is the sibling AFM document name inside an ai-agent
+// component's directory (components/<name>/agent.afm.md) — mirrors the path
+// agentfold's write-gate matches (agentAfmRe in
+// internal/platform/agentfold/designgate.go), a different package this one
+// cannot reference.
+const agentAFMFileName = "agent.afm.md"
+
 // ListDesignFiles returns the design file map at HEAD, under `specs/design/`.
 // Keys are paths relative to that directory, using forward slashes (e.g.
 // `design.md`, `components/user-api/design.md`).
@@ -325,6 +332,14 @@ func AssembleDesign(files map[string]string) (*DesignFile, error) {
 			openapi = files[componentDirPrefix+name+"/openapi.yml"]
 		}
 		comp.OpenAPISpec = openapi
+		// AgentAFM, likewise, is not a design.json key — fill it from the
+		// sibling agent.afm.md, only for ai-agent components (the file may
+		// legitimately be absent: skills/design's per-component writes have
+		// no guaranteed order, so an agent's document can be written before
+		// its own directory's design.json settles, or vice versa).
+		if comp.ComponentType == ComponentTypeAIAgent {
+			comp.AgentAFM = files[componentDirPrefix+name+"/"+agentAFMFileName]
+		}
 		out.Components = append(out.Components, comp)
 	}
 	return out, nil
