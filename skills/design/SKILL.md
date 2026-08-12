@@ -46,7 +46,8 @@ resolve-open-questions branch. Deferred questions never block.
    `security-design` and write it.
 5. **Per-component artifacts** — every `service` gets `openapi.yaml`
    (load `openapi-conventions`); every `web-application` gets
-   `wireframes.dsl` (load `wireframes`).
+   `wireframes.dsl` (load `wireframes`); every `ai-agent` gets
+   `agent.afm.md` (load `agent-design`).
 6. **Validation criteria** — load `validation-criteria` and mint
    `specs/validation/validation-criteria.json` LAST. A design without its
    acceptance oracle is unfinished — never skip this.

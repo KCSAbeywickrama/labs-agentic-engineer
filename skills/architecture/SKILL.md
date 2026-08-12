@@ -37,7 +37,8 @@ component's build actually needs as a `skillsPinned` array **inside that
 component's `specs/design/components/<name>/design.json`** — use the exact
 catalog names, e.g. a Ballerina API service →
 `["openapi-conventions", "ballerina"]` (a Go one → `["openapi-conventions",
-"go"]`); a web-application → `["wireframes", "react-webapp"]`. Add
+"go"]`); a web-application → `["wireframes", "react-webapp"]`; an ai-agent →
+`["agent-building"]`. Add
 `"api-management"` to any service that sits behind the gateway, and
 `"thunder-authentication"` to **both** sides of sign-in — the SPA *and* every
 protected backend it calls, since that skill owns how each resolves the caller's
@@ -89,6 +90,15 @@ service + one web-application — that is an outcome of the rule, not a target. 
 components in kebab-case after their responsibility (`expense-api`,
 `expense-webapp`, `report-worker`).
 
+**An AI agent is `"ai-agent"`.** Reach for it when the requirements call for a
+conversational or autonomous surface — a user talking to the system in their own
+words rather than filling in a form. Its behaviour is authored as
+`agent.afm.md` (the `agent-design` skill), it is implemented in TypeScript, and
+it pins `["agent-building"]`. It is a normal deployable that calls other
+components over HTTP: give it a `component` dependency for every API it uses,
+plus a `platform-resource` of type `model-provider` for model access. It owns no
+storage — an agent that needs to remember something calls a service that does.
+
 **Component `type` is a fixed vocabulary — use the EXACT string.** A backend is
 `"service"`; a browser app is `"web-application"` (OpenChoreo's own term). Write
 `"web-application"` verbatim — NOT `"webapp"`, `"web-app"`, or `"webApplication"`
@@ -114,7 +124,7 @@ violations:
   "language": "Ballerina",            // implementation language — "Ballerina" for a service unless the requirements say otherwise; "TypeScript" for a web-application
   "buildpack": "docker",              // always "docker"
   "appPath": "expense-api",           // repo-relative source dir — the component name
-  "entrypoint": "deployment/service", // deploy entry — PAIRS with `type`: "deployment/service" for a service, "deployment/web-application" for a web-application
+  "entrypoint": "deployment/service", // deploy entry — PAIRS with `type`: "deployment/service" for a service, "deployment/web-application" for a web-application, "deployment/ai-agent" for an ai-agent
   "exposure": "internet",             // "internet" (public) | "intranet" (internal only)
   "dependencies": [ /* see below — every arrow in Interactions appears here */ ],
   "description": "One paragraph: single responsibility, port/entrypoint expectations, and what it explicitly does NOT do.",
