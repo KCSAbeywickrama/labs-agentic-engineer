@@ -31,8 +31,8 @@ function extensionOf(path: string): string {
 }
 
 // Classifies a reference document by its extension for the list icon and the
-// preview dialog's renderer choice. Anything not recognized as markdown or
-// PDF previews as plain text — the safe default for the .md/.txt/.pdf upload
+// preview dialog's renderer choice. Anything not recognized as markdown,
+// PDF, or an image previews as plain text — the safe default for the upload
 // contract (referenceFiles.ts), and for any file the mock/fixture layer adds.
 export function referenceFileKind(path: string): ReferenceFileKind {
   const ext = extensionOf(path);

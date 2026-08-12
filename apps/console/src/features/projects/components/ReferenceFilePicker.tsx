@@ -107,7 +107,7 @@ export function ReferenceFilePicker({
           color="text.secondary"
           sx={{ display: "block", mt: 1 }}
         >
-          .md, .txt, .pdf — up to {MAX_REFERENCE_FILES} files, 5 MB each
+          .md, .txt, .pdf, .png, .jpg — up to {MAX_REFERENCE_FILES} files, 5 MB each
         </Typography>
       </Box>
       {files.length > 0 && (
