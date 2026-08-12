@@ -58,6 +58,14 @@ var (
 	ErrNoAnthropicKey       = errors.New("organization has no Anthropic API key configured")
 	ErrConversationNotFound = errors.New("conversation not found")
 	ErrTurnNotFound         = errors.New("turn not found")
+	// ErrConversationRotated refuses a turn addressed to a thread that is no
+	// longer the project's current one (#430) — a teammate rotated while this
+	// client held a resolved id. Mapped to the pinned 409 TurnConflict body
+	// (code conversation_rotated); the console re-resolves and retries. The
+	// SINGLE-ERA rule: when multiple live conversations land, this check
+	// relaxes to "id exists and belongs to this project", because posting to
+	// an older thread stops being an error and becomes a feature.
+	ErrConversationRotated = errors.New("conversation is not the project's current thread")
 	// ErrSkillsRepoUnavailable means the org's _skills repo (the turn's
 	// SkillsRef source) could not be resolved — its row is missing or
 	// unprovisionable, or the backing repo is gone/unreachable (live incident:
@@ -191,8 +199,12 @@ type ServiceDeps struct {
 	Broker     *TurnBroker
 	Snapshots  sourcecontrol.SnapshotProvider
 	SkillsRepo SkillsRepoResolver
-	MCPTokens  MCPTokenMinter
-	MCPBaseURL string
+	// Conversations is the project-scoped thread store (#430): resolve/rotate
+	// the current thread, and the single-era admission fence on StartTurn.
+	// Optional (nil skips the fence) — a test seam; production always wires it.
+	Conversations ConversationRepository
+	MCPTokens     MCPTokenMinter
+	MCPBaseURL    string
 	// TurnFinishHook, when set, is invoked once with the terminal outcome of
 	// every turn (outcome is "completed" | "failed"). The devflow feature uses
 	// it to signal a waiting design-generate workflow. Best-effort — a nil hook
@@ -228,37 +240,53 @@ type Service struct {
 	git        GitReader
 	keys       AnthropicKeyResolver
 	client     agentsvc.Client
-	turns      TurnRepository
-	broker     *TurnBroker
-	snapshots  sourcecontrol.SnapshotProvider
-	skillsRepo SkillsRepoResolver
-	mcpTokens  MCPTokenMinter
-	mcpBaseURL string
-	finishHook func(ctx context.Context, orgID, projectID, turnID, useCase, outcome string)
-	recorder   TurnActivityRecorder
+	turns         TurnRepository
+	broker        *TurnBroker
+	snapshots     sourcecontrol.SnapshotProvider
+	skillsRepo    SkillsRepoResolver
+	conversations ConversationRepository
+	mcpTokens     MCPTokenMinter
+	mcpBaseURL    string
+	finishHook    func(ctx context.Context, orgID, projectID, turnID, useCase, outcome string)
+	recorder      TurnActivityRecorder
 }
 
 // NewService wires the genai service.
 func NewService(d ServiceDeps) *Service {
 	return &Service{
-		repos:      d.Repos,
-		git:        d.Git,
-		keys:       d.Keys,
-		client:     d.Client,
-		turns:      d.Turns,
-		broker:     d.Broker,
-		snapshots:  d.Snapshots,
-		skillsRepo: d.SkillsRepo,
-		mcpTokens:  d.MCPTokens,
-		mcpBaseURL: d.MCPBaseURL,
-		finishHook: d.TurnFinishHook,
-		recorder:   d.Recorder,
+		repos:         d.Repos,
+		git:           d.Git,
+		keys:          d.Keys,
+		client:        d.Client,
+		turns:         d.Turns,
+		broker:        d.Broker,
+		snapshots:     d.Snapshots,
+		skillsRepo:    d.SkillsRepo,
+		conversations: d.Conversations,
+		mcpTokens:     d.MCPTokens,
+		mcpBaseURL:    d.MCPBaseURL,
+		finishHook:    d.TurnFinishHook,
+		recorder:      d.Recorder,
 	}
 }
 
 func (s *Service) StartTurn(ctx context.Context, orgID, projectID string, in TurnInput) (string, error) {
 	if !validConversationID(in.ConversationID) {
 		return "", ErrInvalidConversationID
+	}
+	// #430 admission fence, cheap and first: the addressed thread must be the
+	// project's current one, so a send racing a teammate's rotation fails
+	// fast (409 conversation_rotated → the console re-resolves) instead of
+	// landing a turn in a thread nobody is looking at. Nil repo skips — a
+	// test seam; production always wires it.
+	if s.conversations != nil {
+		ok, err := s.conversations.IsCurrent(ctx, orgID, projectID, useCaseGeneral, in.ConversationID)
+		if err != nil {
+			return "", fmt.Errorf("resolve current conversation: %w", err)
+		}
+		if !ok {
+			return "", ErrConversationRotated
+		}
 	}
 	// A blank/whitespace-only instruction can never produce a turn — reject it
 	// synchronously (pre-202, no row, guard untaken) instead of letting it fail

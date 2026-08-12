@@ -26,7 +26,7 @@ flowchart LR
 ## Slices
 | Slice | Use-cases | Entry |
 |---|---|---|
-| `genaiturns` | create / get / active / stream turn + get-conversation (the AgentTurn lifecycle) | `.../agents/{cid}/messages`, `.../turns/...` |
+| `genaiturns` | create / get / active / stream turn + get-conversation (the AgentTurn lifecycle) + list/rotate the project's conversation threads (#430) | `.../agents/{cid}/messages`, `.../agents/conversations`, `.../turns/...` |
 | `files` | list / read / apply files over the project workspace | `GET/POST .../files...` |
 | `tags` | list the project's `v<N>` spec version tags | `GET .../tags` |
 | `skills` | list / create / update / delete / import / sync / get the org Skill library | `/skills...` |
@@ -94,7 +94,11 @@ the genai turn engine (runner/broker/sweeper), and the files / design / skills s
   a playground run produce identical turns (services/agents/design/ADR-0003). This domain holds NO prompt
   text; the flow token is kept here because it also gates web search and MCP minting for design turns.
 - **Persistence**: the `agent_turns` gorm lives in this domain (`repository_turn.go` over the
-  `agent_turn.go` entity), single write-authority. Spec content itself is not gorm — it lives in git,
+  `agent_turn.go` entity), single write-authority — as does `project_conversations`
+  (`repository_conversation.go`): the project's CURRENT chat thread pointer (#430), server-minted,
+  one current row per (org, project, use case) under a partial unique index; StartTurn refuses a
+  non-current id with 409 `conversation_rotated` (the single-era rule — it relaxes to "belongs to
+  this project" when multiple live threads land). Spec content itself is not gorm — it lives in git,
   reached through sourcecontrol's `Workspace`/gitfs engine.
 
 ## Invariants — don't break

@@ -23,6 +23,18 @@ import { apiErrorMessage } from "../../../api/errors";
 export type TurnStatus = components["schemas"]["TurnStatus"];
 
 /**
+ * The addressed thread is no longer the project's current one (#430) — a
+ * teammate rotated while this client held a resolved id. Recovery is
+ * re-resolve + rehydrate, not a retry into the demoted thread.
+ */
+export class ConversationRotatedError extends Error {
+  constructor() {
+    super("The conversation was replaced with a new one — your message was not sent.");
+    this.name = "ConversationRotatedError";
+  }
+}
+
+/**
  * Start a room-scoped agent turn (#86 phase 4 / #130): `collab: true` — the
  * agent joins the project's spec room as a live peer and edits the shared
  * doc; the panel only receives narration + tool results.
@@ -44,6 +56,11 @@ export async function startCollabTurn(
   );
   if (error || data === undefined) {
     if (response.status === 409) {
+      // The 409 body is the pinned TurnConflict: turn_in_progress /
+      // requirements_missing / conversation_rotated (#430).
+      if ((error as { code?: string } | undefined)?.code === "conversation_rotated") {
+        throw new ConversationRotatedError();
+      }
       throw new Error("An agent turn is already running for this project — wait for it to finish.");
     }
     throw new Error(apiErrorMessage(error, "Failed to start the agent turn"));

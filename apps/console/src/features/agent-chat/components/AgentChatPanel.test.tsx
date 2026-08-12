@@ -42,14 +42,26 @@ const KEY = chatKeyFor(ORG, PROJECT);
 // the panel's own send/stream-fold behavior (untested before this task and
 // out of scope here). ------------------------------------------------------
 const mockSend = vi.fn();
+const mockNewConversation = vi.fn();
+// Messages the mocked hook serves — set per test (the rotation dialog's
+// wording reads them); reset in each describe's beforeEach.
+let mockMessages: unknown[] = [];
 vi.mock("../useAgentChat", () => ({
   useAgentChat: () => ({
-    messages: [],
+    messages: mockMessages,
     isSending: false,
     activeTurnId: undefined,
+    conversationReady: true,
     send: mockSend,
-    newConversation: vi.fn(),
+    newConversation: mockNewConversation,
   }),
+}));
+
+// The panel auto-navigates to the spec view when a question card arrives —
+// with messages staged in tests that would crash outside a RouterProvider.
+const mockPanelNavigate = vi.fn();
+vi.mock("@tanstack/react-router", () => ({
+  useNavigate: () => mockPanelNavigate,
 }));
 
 // The merged multi-user panel stamps outgoing messages with the signed-in
@@ -215,6 +227,55 @@ describe("AgentChatPanel — the injected generate is gated on an open exchange"
     );
 
     expect(mockSend).not.toHaveBeenCalled();
+  });
+});
+
+// Rotation (#430 D4): a project-wide act behind a confirmation that NAMES the
+// live state — never a gate, because rotation is also the escape hatch from an
+// abandoned interview.
+describe("AgentChatPanel — New conversation confirms before rotating", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    consumePendingSeed(KEY);
+    replaceMessages(KEY, []);
+    mockMessages = [];
+  });
+
+  it("opens the confirmation and rotates only on confirm", () => {
+    renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: "New conversation" }));
+    expect(screen.getByText("Start a new conversation?")).toBeInTheDocument();
+    expect(
+      screen.getByText(/fresh conversation for everyone on the project/),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Start new conversation" }));
+    expect(mockNewConversation).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancel closes without rotating", () => {
+    renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: "New conversation" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(mockNewConversation).not.toHaveBeenCalled();
+  });
+
+  // The dialog names what is at stake: an unanswered question reads as an
+  // abandonment warning, not a generic "are you sure?".
+  it("names the unanswered questions when an interview is open", () => {
+    mockMessages = [
+      {
+        id: "q1",
+        role: "question",
+        turnId: "t1",
+        toolCallId: "tc1",
+        questions: [{ question: "Who signs in?", options: [{ label: "Anyone" }] }],
+      },
+    ];
+    renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: "New conversation" }));
+    expect(screen.getByText(/an unanswered question/)).toBeInTheDocument();
+    expect(screen.getByText(/abandons them for everyone/)).toBeInTheDocument();
   });
 });
 
