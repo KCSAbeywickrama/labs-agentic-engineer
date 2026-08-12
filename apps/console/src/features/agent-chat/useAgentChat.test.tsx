@@ -105,6 +105,33 @@ describe("useAgentChat — the shared thread (#430)", () => {
     expect(mockGetHistory).toHaveBeenCalledWith(PROJECT, "conv-1");
   });
 
+  // The re-created-project bug: the local cache is keyed by org/project NAME,
+  // so a new project reusing a name inherits the dead project's log. Its fresh
+  // thread has no history ([] — the api maps the BFF's 404 to "empty"), and
+  // empty truth must still REPLACE.
+  it("clears the stale cache when the server thread is empty", async () => {
+    addMessage(KEY, { role: "user", content: "the dead project's log", status: "completed" });
+    mockGetHistory.mockResolvedValue([]);
+
+    const { result } = renderHook(() => useAgentChat(ORG, PROJECT), { wrapper });
+
+    await waitFor(() => expect(result.current.conversationReady).toBe(true));
+    await waitFor(() => expect(getMessages(KEY)).toEqual([]));
+  });
+
+  it("keeps the cache when the rehydrate FAILS (null ≠ empty)", async () => {
+    addMessage(KEY, { role: "user", content: "still worth painting", status: "completed" });
+    mockGetHistory.mockResolvedValue(null); // transient failure
+
+    const { result } = renderHook(() => useAgentChat(ORG, PROJECT), { wrapper });
+
+    await waitFor(() => expect(result.current.conversationReady).toBe(true));
+    await waitFor(() => expect(mockGetHistory).toHaveBeenCalled());
+    expect(getMessages(KEY).some((m) => "content" in m && m.content === "still worth painting")).toBe(
+      true,
+    );
+  });
+
   it("sends against the RESOLVED id, never a local mint", async () => {
     const { result } = renderHook(() => useAgentChat(ORG, PROJECT), { wrapper });
     await waitFor(() => expect(result.current.conversationReady).toBe(true));
