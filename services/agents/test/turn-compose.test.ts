@@ -83,6 +83,23 @@ test("start lists the reference documents, and lists NOTHING when there are none
   assert.doesNotMatch(bare, /reference document/i);
 });
 
+
+test("flow lists the reference documents, and lists NOTHING when there are none", () => {
+  const withRefs = composeInstruction({
+    kind: "flow",
+    skill: "design",
+    references: ["specs/requirements/references/sketch.png"],
+  });
+  assert.match(withRefs, /^Load the design skill and follow it\./);
+  assert.match(withRefs, /specs\/requirements\/references\/sketch\.png/);
+  assert.match(withRefs, /reference document/i);
+
+  // Absent/empty → byte-identical to a plain flow turn.
+  const bare = composeInstruction({ kind: "flow", skill: "design" });
+  assert.equal(bare, composeInstruction({ kind: "flow", skill: "design", references: [] }));
+  assert.doesNotMatch(bare, /reference document/i);
+});
+
 test("target is rendered by the service, never formatted by the caller", () => {
   const out = composeInstruction({ kind: "chat", text: "tighten the spec" }, { target: "specs/requirements/prd.md" });
   assert.ok(out.endsWith("(target: specs/requirements/prd.md)"));

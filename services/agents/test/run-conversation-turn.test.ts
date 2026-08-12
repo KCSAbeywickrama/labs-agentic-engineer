@@ -130,6 +130,49 @@ test("default turn (no flag) carries no divergence note", async () => {
   assert.doesNotMatch(content, /files were changed outside/);
 });
 
+
+test("an attachment already in history is not attached twice (#383 follow-up)", async () => {
+  const store = new InMemoryConversationStore();
+  const guard = new TurnGuard();
+  const filePart: FilePart = {
+    type: "file",
+    data: "JVBERi0xLjQ=",
+    mediaType: "application/pdf",
+    filename: "specs/requirements/references/brief.pdf",
+  };
+
+  // Turn 1 (the kickoff) attaches the document.
+  await runConversationTurn({
+    id: "refs-dedupe",
+    instruction: "start",
+    files: SEED_FILES,
+    referenceAttachments: [filePart],
+    model: textModel("ok"),
+    store,
+    guard,
+    onEvent: collector().onEvent,
+  });
+
+  // Turn 2 (a flow) names the same document — it must NOT re-enter history:
+  // one copy of a 5MB PDF per conversation, not one per flow invocation.
+  await runConversationTurn({
+    id: "refs-dedupe",
+    instruction: "design",
+    files: SEED_FILES,
+    referenceAttachments: [filePart],
+    model: textModel("ok"),
+    store,
+    guard,
+    onEvent: collector().onEvent,
+  });
+
+  const stored = (await store.get("refs-dedupe"))!;
+  const fileParts = stored.messages.flatMap((m) =>
+    Array.isArray(m.content) ? m.content.filter((part) => (part as { type?: string }).type === "file") : [],
+  );
+  assert.equal(fileParts.length, 1, "the document must appear in history exactly once");
+});
+
 // --- Reference PDF attachments (#384) ----------------------------------------
 
 test("referenceAttachments ride the turn's user message as native file parts", async () => {

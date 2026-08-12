@@ -397,7 +397,10 @@ export interface WorkspaceRef {
  *
  *  - `chat`  — an ordinary user message, sent verbatim.
  *  - `flow`  — a `/<skill>` command: load that skill and follow it, with the
- *              user's trailing text (if any) riding along.
+ *              user's trailing text (if any) riding along. `references` names
+ *              the attached reference documents exactly as on `start` — a flow
+ *              generates artifacts (wireframes above all) that must be
+ *              grounded in an attached sketch or spec.
  *  - `start` — the project kickoff. `idea` is what the user asked for, read by
  *              the BFF from `specs/.agentic-engineer.toml` — a dot-led path
  *              stripped from every turn snapshot, so the agent cannot read it
@@ -412,7 +415,7 @@ export interface WorkspaceRef {
  */
 export type TurnSpec =
   | { kind: "chat"; text: string }
-  | { kind: "flow"; skill: string; text?: string }
+  | { kind: "flow"; skill: string; text?: string; references?: string[] }
   | { kind: "start"; idea?: string; references?: string[] }
   | { kind: "plan"; scope?: PlanScope; taskContext?: PlanContextFile[] };
 
@@ -532,7 +535,7 @@ export function isTurnSpec(v: unknown): v is TurnSpec {
     case "chat":
       return str(t.text) && (t.text as string).trim() !== "";
     case "flow":
-      return str(t.skill) && (t.skill as string).trim() !== "" && optStr(t.text);
+      return str(t.skill) && (t.skill as string).trim() !== "" && optStr(t.text) && optStrArr(t.references);
     case "start":
       return optStr(t.idea) && optStrArr(t.references);
     case "plan":

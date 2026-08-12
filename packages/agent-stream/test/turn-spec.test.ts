@@ -36,6 +36,8 @@ test("accepts each well-formed kind", () => {
   // Reference documents ride as paths; a non-string list is a caller bug and
   // must be refused before it reaches prompt composition.
   assert.ok(isTurnSpec({ kind: "start", references: ["specs/requirements/references/rfp.pdf"] }));
+  assert.ok(isTurnSpec({ kind: "flow", skill: "design", references: ["specs/requirements/references/sketch.png"] }));
+  assert.equal(isTurnSpec({ kind: "flow", skill: "design", references: [7] }), false);
   assert.ok(isTurnSpec({ kind: "start", references: [] }));
   assert.equal(isTurnSpec({ kind: "start", references: [1, 2] }), false);
   assert.equal(isTurnSpec({ kind: "start", references: "rfp.pdf" }), false);

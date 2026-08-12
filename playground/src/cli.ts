@@ -197,7 +197,7 @@ async function runHeadless(
         const turn = start
           ? startSpec(start.inlineIdea || readIdea(projectDir), readReferences(projectDir))
           : flow
-            ? flowSpec(flow.skill, flow.text)
+            ? flowSpec(flow.skill, flow.text, readReferences(projectDir))
             : chatSpec(commandArg);
         outcome = await chatTurn(session, turn, opts);
       } finally {

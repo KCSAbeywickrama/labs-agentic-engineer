@@ -168,7 +168,11 @@ function specBody(turn: Exclude<TurnSpec, { kind: "plan" }>): string {
       // not-found and the agent says so, which is a better failure than a
       // client-side allowlist that goes stale against the org's catalog.
       const base = `Load the ${turn.skill} skill and follow it.`;
-      return turn.text?.trim() ? `${base}\n\n${turn.text.trim()}` : base;
+      const withText = turn.text?.trim() ? `${base}\n\n${turn.text.trim()}` : base;
+      // Reference documents ride flows the same way they ride start turns:
+      // a flow generates artifacts, and an attached sketch IS the brief for
+      // wireframes. No documents → byte-identical to a plain flow turn.
+      return withText + references(turn.references);
     }
     case "start":
       // A blank idea appends NOTHING, leaving a bare skill load — the start

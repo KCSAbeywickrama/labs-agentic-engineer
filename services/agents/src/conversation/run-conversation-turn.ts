@@ -287,13 +287,30 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
     // Stamps this turn's steps with the conversation they belong to, so two
     // projects generating at once are attributable in the trace UI.
     const telemetry = turnTelemetry(conv.id);
+    // Attachments dedupe against history by filename: a flow naming the same
+    // document a kickoff already attached must not re-enter it — one copy of a
+    // 5MB PDF per conversation, not one per flow invocation. The model reads
+    // the history copy either way.
+    const attachedAlready = new Set(
+      conv.messages.flatMap((m) =>
+        Array.isArray(m.content)
+          ? m.content.flatMap((part) => {
+              const f = part as { type?: string; filename?: string };
+              return f.type === "file" && f.filename ? [f.filename] : [];
+            })
+          : [],
+      ),
+    );
+    const freshAttachments = (input.referenceAttachments ?? []).filter(
+      (part) => !part.filename || !attachedAlready.has(part.filename),
+    );
     const startLen = conv.messages.length;
     const res = await runTurn({
       model: input.model,
       instructions,
       prompt: note + eagerBlock + buildPrompt(input.files, input.instruction),
       messages: conv.messages, // appended in place by runTurn
-      ...(input.referenceAttachments?.length ? { fileParts: input.referenceAttachments } : {}),
+      ...(freshAttachments.length ? { fileParts: freshAttachments } : {}),
       tools,
       // End the turn at a HITL question call (the question tools live on the
       // `files` set only, so these never fire on a task-plan turn).

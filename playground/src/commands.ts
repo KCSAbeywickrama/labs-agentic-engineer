@@ -125,7 +125,7 @@ export async function requirementsCommand(
 export async function designCommand(projectDir: string, opts: PhaseOptions): Promise<PhaseOutcome> {
   const gate = designGate(projectDir);
   if (!gate.ok) return gateFail(gate);
-  return runPhaseTurn(projectDir, flowSpec("design"), opts);
+  return runPhaseTurn(projectDir, flowSpec("design", undefined, readReferences(projectDir)), opts);
 }
 
 /**

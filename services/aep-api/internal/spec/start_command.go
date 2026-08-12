@@ -90,7 +90,17 @@ func (s *Service) turnSpecFor(ctx context.Context, ref sourcecontrol.RepoRef, at
 		}, token
 	}
 
-	return agentsvc.TurnSpec{Kind: agentsvc.TurnKindFlow, Skill: token, Text: rest}, token
+	// Flow turns carry the reference paths too: a flow generates artifacts
+	// (wireframes.dsl from /design most of all) that must be grounded in what
+	// the user attached — a drawn sketch is the wireframe brief. Chat prose
+	// stays reference-free; the documents already sit in the conversation
+	// history from the kickoff.
+	return agentsvc.TurnSpec{
+		Kind:       agentsvc.TurnKindFlow,
+		Skill:      token,
+		Text:       rest,
+		References: s.listReferenceDocs(ctx, ref, at),
+	}, token
 }
 
 // ReferencesDir is where the console commits the documents attached at project

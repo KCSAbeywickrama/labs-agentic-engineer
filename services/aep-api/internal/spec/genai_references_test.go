@@ -20,6 +20,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/wso2/aep/aep-api/internal/clients/agentsvc"
 	"github.com/wso2/aep/aep-api/internal/spec"
 )
 
@@ -87,5 +88,41 @@ func TestStartCommand_OnlyReferenceFolderFilesRide(t *testing.T) {
 	want := []string{"specs/requirements/references/brief.md"}
 	if !slices.Equal(got.References, want) {
 		t.Fatalf("references = %v, want only the references folder's own file %v", got.References, want)
+	}
+}
+
+// Flow turns carry the references too (#383 follow-up): the design flow
+// generates wireframes.dsl, and a user-drawn sketch attached at create is
+// exactly what those wireframes must follow. Same channel, same sorting,
+// same best-effort posture as the start turn.
+func TestFlowCommand_CarriesReferenceDocuments(t *testing.T) {
+	got := startTurnSpec(t, map[string]string{
+		spec.DescriptorPath:                        descriptorTOML(t, testIdea),
+		"specs/requirements/references/sketch.png": "\x89PNG\r\n",
+	}, "/design")
+
+	if got.Kind != agentsvc.TurnKindFlow || got.Skill != "design" {
+		t.Fatalf("/design was not recognised as a flow turn: %+v", got)
+	}
+	want := []string{"specs/requirements/references/sketch.png"}
+	if !slices.Equal(got.References, want) {
+		t.Fatalf("references = %v, want %v on a flow turn", got.References, want)
+	}
+}
+
+// Ordinary chat prose stays reference-free: the documents are already in the
+// conversation history from the kickoff, and a chat turn generates nothing
+// that must be grounded in them.
+func TestChatProse_CarriesNoReferences(t *testing.T) {
+	got := startTurnSpec(t, map[string]string{
+		spec.DescriptorPath:                        descriptorTOML(t, testIdea),
+		"specs/requirements/references/sketch.png": "\x89PNG\r\n",
+	}, "tighten the second requirement")
+
+	if got.Kind != agentsvc.TurnKindChat {
+		t.Fatalf("prose was not a chat turn: %+v", got)
+	}
+	if len(got.References) != 0 {
+		t.Fatalf("references = %v, want none on a chat turn", got.References)
 	}
 }

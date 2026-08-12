@@ -39,9 +39,14 @@ export function chatSpec(text: string): TurnSpec {
   return { kind: "chat", text };
 }
 
-/** A `/<skill>` flow, with any trailing text the user typed after it. */
-export function flowSpec(skill: string, text?: string): TurnSpec {
-  return text?.trim() ? { kind: "flow", skill, text: text.trim() } : { kind: "flow", skill };
+/**
+ * A `/<skill>` flow, with any trailing text the user typed after it. References
+ * ride exactly as on `startSpec` — a flow generates artifacts that must be
+ * grounded in an attached sketch or document; no documents, no key.
+ */
+export function flowSpec(skill: string, text?: string, references?: string[]): TurnSpec {
+  const spec: TurnSpec = text?.trim() ? { kind: "flow", skill, text: text.trim() } : { kind: "flow", skill };
+  return references?.length ? { ...spec, references } : spec;
 }
 
 /**

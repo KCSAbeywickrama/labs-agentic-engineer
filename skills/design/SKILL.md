@@ -25,6 +25,25 @@ missing or empty PRD means the user needs `/start` first — stop and say so.
 "deferred" blocks design — stop and point the user at the amend flow's
 resolve-open-questions branch. Deferred questions never block.
 
+## Reference documents ground the design
+
+The kickoff may have attached reference documents — and for design, the ones
+that matter most are the user's own sketches: a drawn wireframe, a form
+screenshot, a mockup image. They are attached to this conversation natively
+(images and PDFs) or in your workspace files (text). When any exist:
+
+- **A user-drawn wireframe sketch is the layout brief.** `wireframes.dsl`
+  follows what the user drew — screen structure, navigation, the controls
+  they placed — refined, not reinvented. Look at the image before writing a
+  single screen.
+- A form document (paper form, PDF) is the field inventory: the screens that
+  digitize it carry its fields and sections.
+- Where a sketch and the PRD disagree, the PRD's scope wins, but the sketch's
+  layout intent survives inside that scope — and the discrepancy is worth a
+  line in the design notes.
+
+No documents attached is the ordinary case: design from the PRD alone.
+
 ## The lineup
 
 Each step names the skill that governs it. Those bodies are inlined for this
