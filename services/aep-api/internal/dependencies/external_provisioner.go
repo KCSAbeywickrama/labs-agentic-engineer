@@ -204,7 +204,16 @@ func (p *ExternalResourceProvisioner) AuthorWithSecretRef(
 	// secretStorePath (no SM-API write — the secret was staged pre-tag).
 	result := &ProvisionResult{ResourceName: res.Metadata.Name, LatestRelease: latest, BindingByEnv: map[string]string{}}
 	for env, vals := range byEnv {
-		binding, berr := buildExternalResourceBinding(projectName, er.Name, env, latest, vals.SecretStorePath, vals.Plain)
+		bindingName := ocname.ExternalResourceBindingName(projectName, er.Name, env)
+		existing, rerr := p.rc.GetBinding(ctx, orgHandle, bindingName)
+		if rerr != nil {
+			return nil, fmt.Errorf("external resources: read binding for env %q: %w", env, rerr)
+		}
+		plain, secretStorePath, merr := mergeConfiguredBindingValues(existing, vals.Plain, vals.SecretStorePath)
+		if merr != nil {
+			return nil, fmt.Errorf("external resources: merge binding for env %q: %w", env, merr)
+		}
+		binding, berr := buildExternalResourceBinding(projectName, er.Name, env, latest, secretStorePath, plain)
 		if berr != nil {
 			return nil, berr
 		}
@@ -214,6 +223,36 @@ func (p *ExternalResourceProvisioner) AuthorWithSecretRef(
 		result.BindingByEnv[env] = binding.Metadata.Name
 	}
 	return result, nil
+}
+
+// mergeConfiguredBindingValues preserves every non-empty value already held by
+// a binding and fills only absent or empty entries from the values being
+// authored. This read-then-write is deliberately not atomic: a concurrent value
+// save between GetBinding and EnsureBinding can still be lost (issue #441).
+func mergeConfiguredBindingValues(existing *openchoreo.ResourceReleaseBinding, plain map[string]string, secretStorePath string) (map[string]string, string, error) {
+	merged := make(map[string]string, len(plain))
+	for key, value := range plain {
+		merged[key] = value
+	}
+	if existing == nil || len(existing.Spec.ResourceTypeEnvironmentConfigs) == 0 {
+		return merged, secretStorePath, nil
+	}
+
+	var current map[string]string
+	if err := json.Unmarshal(existing.Spec.ResourceTypeEnvironmentConfigs, &current); err != nil {
+		return nil, "", fmt.Errorf("decode existing environment configs: %w", err)
+	}
+	for key, value := range current {
+		if value == "" {
+			continue
+		}
+		if key == openchoreo.SecretStorePathField {
+			secretStorePath = value
+			continue
+		}
+		merged[key] = value
+	}
+	return merged, secretStorePath, nil
 }
 
 // StageSecrets writes each env's secret values to SM-API and returns the

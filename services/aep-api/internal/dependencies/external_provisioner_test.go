@@ -46,6 +46,9 @@ func newFakeRC(latest string) *ocmocks.ResourceClientMock {
 				Status:   &openchoreo.ResourceStatus{LatestRelease: &openchoreo.ResourceLatestRelease{Name: latest}},
 			}, nil
 		},
+		GetBindingFunc: func(_ context.Context, _, _ string) (*openchoreo.ResourceReleaseBinding, error) {
+			return nil, nil
+		},
 		EnsureBindingFunc: func(_ context.Context, _ string, b *openchoreo.ResourceReleaseBinding) (*openchoreo.ResourceReleaseBinding, error) {
 			return b, nil
 		},
@@ -263,6 +266,71 @@ func TestAuthorWithSecretRef_UsesStagedRefNoSMWrite(t *testing.T) {
 	}
 	if res.BindingByEnv["development"] != "weatherproj-openweather-development" {
 		t.Errorf("BindingByEnv wrong: %+v", res.BindingByEnv)
+	}
+}
+
+// TestAuthorWithSecretRef_PreservesConfiguredBindingValues is the rebuild
+// regression for issue #441: authoring an unset/default-only design must not
+// replace values a developer has already saved on the binding.
+func TestAuthorWithSecretRef_PreservesConfiguredBindingValues(t *testing.T) {
+	t.Parallel()
+
+	rc := newFakeRC("openweather-proj-next")
+	existing, err := json.Marshal(map[string]string{
+		"OPENWEATHER_BASE_URL":          "https://configured.example",
+		"OPENWEATHER_REGION":            "eu-west-1",
+		openchoreo.SecretStorePathField: "user-app-secrets/wc-org/configured-ref",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rc.GetBindingFunc = func(_ context.Context, _, name string) (*openchoreo.ResourceReleaseBinding, error) {
+		if name != "weatherproj-openweather-development" {
+			t.Fatalf("GetBinding name = %q", name)
+		}
+		return &openchoreo.ResourceReleaseBinding{
+			Spec: openchoreo.ResourceReleaseBindingSpec{ResourceTypeEnvironmentConfigs: existing},
+		}, nil
+	}
+	p := newTestProvisioner(nil, rc, &fakeSecretWriter{})
+	er := &ExternalResource{Name: "openweather", ConfigKeys: []spec.ConfigKey{
+		{Key: "OPENWEATHER_BASE_URL"},
+		{Key: "OPENWEATHER_REGION", DefaultValue: "us-east-1"},
+		{Key: "OPENWEATHER_API_KEY", Secret: true},
+	}}
+
+	_, err = p.AuthorWithSecretRef(context.Background(), "default", "weatherproj", er,
+		map[string]PreparedEnvValues{"development": {
+			Plain: map[string]string{
+				"OPENWEATHER_BASE_URL": "",
+				"OPENWEATHER_REGION":   "us-east-1",
+			},
+			SecretStorePath: "",
+		}})
+	if err != nil {
+		t.Fatalf("AuthorWithSecretRef: %v", err)
+	}
+
+	calls := rc.EnsureBindingCalls()
+	if len(calls) != 1 {
+		t.Fatalf("EnsureBinding calls = %d, want 1", len(calls))
+	}
+	var got map[string]string
+	if err := json.Unmarshal(calls[0].B.Spec.ResourceTypeEnvironmentConfigs, &got); err != nil {
+		t.Fatalf("decode authored binding: %v", err)
+	}
+	want := map[string]string{
+		"OPENWEATHER_BASE_URL":          "https://configured.example",
+		"OPENWEATHER_REGION":            "eu-west-1",
+		openchoreo.SecretStorePathField: "user-app-secrets/wc-org/configured-ref",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("authored config = %v, want %v", got, want)
+	}
+	for key, value := range want {
+		if got[key] != value {
+			t.Errorf("authored config[%q] = %q, want %q", key, got[key], value)
+		}
 	}
 }
 
