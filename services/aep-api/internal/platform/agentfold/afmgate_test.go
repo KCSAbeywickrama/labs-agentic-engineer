@@ -17,6 +17,9 @@
 package agentfold
 
 import (
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -53,6 +56,52 @@ You help teammates order lunch.
 
 - Confirm before adding anything.
 `
+
+// liveAfmFixture locates a real agent.afm.md the platform's own design flow
+// produced. Reading the live file (instead of a copy pasted into this test)
+// means a future edit to that document exercises this gate automatically —
+// the whole point being that this gate must never reject the platform's own
+// output.
+func liveAfmFixture(t *testing.T) string {
+	t.Helper()
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	// thisFile: services/aep-api/internal/platform/agentfold/afmgate_test.go
+	repoRoot := filepath.Join(filepath.Dir(thisFile), "..", "..", "..", "..", "..")
+	path := filepath.Join(repoRoot, "playground", ".projects", "lunch-design", "specs", "design",
+		"components", "lunch-chat-agent", "agent.afm.md")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading live fixture %s: %v", path, err)
+	}
+	return string(content)
+}
+
+// TestValidateAgentAfm_LiveFixture guards the class of bug a struct-plus-
+// KnownFields decode produced: it hard-rejected x-aep.memory, x-aep.identity
+// and interfaces[].exposure, which the platform's own AFM generator emits
+// (see the file this reads). The fixture also carries a legacy
+// x-aep.tools.openapi[].spec field the schema does not define — asserted
+// separately below as a correctly-rejected unknown property, so its absence
+// from the "accepted" case is not silently masking a real gap.
+func TestValidateAgentAfm_LiveFixture(t *testing.T) {
+	live := liveAfmFixture(t)
+
+	if problem := validateAgentAfm(live, "lunch-chat-agent"); problem == nil {
+		t.Fatal("want the legacy `spec:` field rejected as an unknown property, got valid")
+	} else if !strings.Contains(problem.message, "unknown property") {
+		t.Errorf("message %q does not mention an unknown property", problem.message)
+	}
+
+	withoutSpecField := strings.Replace(live, "        spec: \"./openapi.yaml\"\n", "", 1)
+	if problem := validateAgentAfm(withoutSpecField, "lunch-chat-agent"); problem != nil {
+		t.Fatalf("want the live fixture (legacy field stripped) accepted — it exercises "+
+			"x-aep.memory, x-aep.identity and interfaces[].exposure, all real optional zod "+
+			"fields — got %q", problem.message)
+	}
+}
 
 func TestValidateAgentAfm(t *testing.T) {
 	tests := []struct {
