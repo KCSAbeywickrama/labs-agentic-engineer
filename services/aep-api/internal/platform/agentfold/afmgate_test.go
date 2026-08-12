@@ -82,24 +82,18 @@ func liveAfmFixture(t *testing.T) string {
 // TestValidateAgentAfm_LiveFixture guards the class of bug a struct-plus-
 // KnownFields decode produced: it hard-rejected x-aep.memory, x-aep.identity
 // and interfaces[].exposure, which the platform's own AFM generator emits
-// (see the file this reads). The fixture also carries a legacy
-// x-aep.tools.openapi[].spec field the schema does not define — asserted
-// separately below as a correctly-rejected unknown property, so its absence
-// from the "accepted" case is not silently masking a real gap.
+// (see the file this reads). The fixture is read from disk at test time
+// (os.ReadFile), not embedded, so the file's content is invisible to the Go
+// build cache's input hash — a fixture edit does NOT invalidate a cached
+// PASS. Always run this test (and this package) with `go test -count=1` to
+// force re-execution; see afmgate_test.go's TestValidateAgentAfm_LiveFixture
+// for why a plain `go test` can report a stale result.
 func TestValidateAgentAfm_LiveFixture(t *testing.T) {
 	live := liveAfmFixture(t)
 
-	if problem := validateAgentAfm(live, "lunch-chat-agent"); problem == nil {
-		t.Fatal("want the legacy `spec:` field rejected as an unknown property, got valid")
-	} else if !strings.Contains(problem.message, "unknown property") {
-		t.Errorf("message %q does not mention an unknown property", problem.message)
-	}
-
-	withoutSpecField := strings.Replace(live, "        spec: \"./openapi.yaml\"\n", "", 1)
-	if problem := validateAgentAfm(withoutSpecField, "lunch-chat-agent"); problem != nil {
-		t.Fatalf("want the live fixture (legacy field stripped) accepted — it exercises "+
-			"x-aep.memory, x-aep.identity and interfaces[].exposure, all real optional zod "+
-			"fields — got %q", problem.message)
+	if problem := validateAgentAfm(live, "lunch-chat-agent"); problem != nil {
+		t.Fatalf("want the live fixture accepted — it exercises x-aep.memory, x-aep.identity "+
+			"and interfaces[].exposure, all real optional zod fields — got %q", problem.message)
 	}
 }
 
