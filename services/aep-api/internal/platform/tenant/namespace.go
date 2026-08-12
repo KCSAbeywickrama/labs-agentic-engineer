@@ -36,11 +36,12 @@ import (
 // orgUUID always produces the same name.
 //
 // Home rationale (§4.0/§6.10c): this `wc-` derivation is a pure, gorm-free
-// tenancy primitive consumed by both credentials (orgcreds SM-API writer)
-// and codingagent (dispatch + watcher). It lives here in platform/tenant so
-// neither feature has to import the other for it — the only genuine parallel
-// implementation is the external cloud SM-API + the local stub, reconciled by
-// a byte-parity contract test (§8), not a shared import.
+// tenancy primitive consumed by the credentials domain (the SM-API
+// SecretReference writer and the OpenBao provider's vault-path builder). It
+// lives here in platform/tenant so no feature has to import another for it —
+// the only genuine parallel implementation is the external cloud SM-API + the
+// local stub, reconciled by a byte-parity contract test (§8), not a shared
+// import.
 func OrgBaseNamespace(orgUUID string) string {
 	clean := strings.ReplaceAll(orgUUID, "-", "")
 	prefix := clean
@@ -50,16 +51,4 @@ func OrgBaseNamespace(orgUUID string) string {
 	hash := sha256.Sum256([]byte(orgUUID))
 	salt := hex.EncodeToString(hash[:])[:8]
 	return fmt.Sprintf("wc-%s-%s", strings.ToLower(prefix), salt)
-}
-
-// RemoteWorkerNamespace returns the per-org remote-worker namespace
-// name = OrgBaseNamespace(orgUUID) + "-remote-worker".
-//
-// The `-remote-worker` suffix is the aep fork — wso2cloud's existing
-// shapes all use `-development`, `-staging`, `-production`. The
-// env-less name is intentional: a coding-agent task isn't bound to a
-// user-facing env (per ADR-0001). When wso2cloud-deployement-main
-// pushes a renamed shape we follow.
-func RemoteWorkerNamespace(orgUUID string) string {
-	return OrgBaseNamespace(orgUUID) + "-remote-worker"
 }

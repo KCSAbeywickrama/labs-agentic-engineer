@@ -44,7 +44,7 @@ echo "🐳 Configuring container registry for Docker builds..."
 configure_registry_mirror
 
 # ============================================================================
-# OpenChoreo workflows (dockerfile-builder + aep-coding-agent)
+# OpenChoreo workflows (dockerfile-builder)
 # ============================================================================
 echo ""
 echo "🔨 Installing OpenChoreo workflows..."
@@ -73,36 +73,7 @@ apply_with_retry() {
 apply_with_retry "${SCRIPT_DIR}/../manifests/docker-build-workflow.yaml" "docker-build-workflow"
 echo "✅ ClusterWorkflow 'dockerfile-builder' installed"
 
-# Default: splice a hostPath overlay onto /app/skills in the runner pod so the
-# host's repo-root skills/ library is read live (skill edits without an image
-# rebuild). The prod manifest stays the single source of truth; yq layers
-# the dev-patch fragment over it at apply time so other fields can't drift.
-# Requires setup-k3d.sh to have baked the bind-mount onto the node.
-# Opt out with AEP_PROD_RUNNER=1 to mirror the published-image flow.
-CODING_AGENT_MANIFEST="${SCRIPT_DIR}/../manifests/aep-coding-agent.yaml"
-CODING_AGENT_PATCH="${SCRIPT_DIR}/../manifests/aep-coding-agent.dev-patch.yaml"
-
-if [ "${AEP_PROD_RUNNER:-0}" = "1" ]; then
-    apply_with_retry "$CODING_AGENT_MANIFEST" "aep-coding-agent"
-    echo "✅ ClusterWorkflow 'aep-coding-agent' installed (PROD — baked-in skill library)"
-else
-    if ! command -v yq &>/dev/null; then
-        echo "❌ Dev skills overlay needs yq for the patch merge — 'brew install yq'"
-        echo "   Or set AEP_PROD_RUNNER=1 to skip the overlay."
-        exit 1
-    fi
-    DEV_MANIFEST="$(mktemp -t aep-coding-agent.dev.XXXXXX.yaml)"
-    trap 'rm -f "$DEV_MANIFEST"' EXIT
-    yq eval "
-        .spec.runTemplate.spec.templates[0].container.volumeMounts +=
-          load(\"${CODING_AGENT_PATCH}\").volumeMounts |
-        .spec.runTemplate.spec.volumes +=
-          load(\"${CODING_AGENT_PATCH}\").volumes
-    " "$CODING_AGENT_MANIFEST" > "$DEV_MANIFEST"
-    apply_with_retry "$DEV_MANIFEST" "aep-coding-agent (dev — hostPath overlay)"
-    echo "✅ ClusterWorkflow 'aep-coding-agent' installed (DEV — /app/skills overlay live from host)"
-fi
-
+# Coding-agent runs as an OpenChoreo Job Component (not a ClusterWorkflow).
 # Build + import the runner image (ONE image, both task kinds: Debian + Go +
 # Playwright + baked chromium). It has no published counterpart on this branch,
 # so it's built locally once per machine and imported into the node —
