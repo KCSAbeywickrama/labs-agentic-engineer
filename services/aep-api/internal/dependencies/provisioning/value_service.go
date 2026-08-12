@@ -29,9 +29,9 @@ import (
 // plain / secret by the UNION of the dependency's config schema across every
 // component in the project's committed design.json that declares it (the user
 // never marks secrecy; secret always wins on conflict), writes the secrets to
-// SM-API + authors the OC external Resource model, then completes the
-// legacy provision gate when one exists. New builds do not mint an external
-// value-collection gate; the external ResourceType remains readyWhen:${true}
+// SM-API + authors the OC external Resource model, then completes an existing
+// provision gate when one exists. Builds do not mint an external value-collection
+// gate; the external ResourceType remains readyWhen:${true}
 // while AEP reports value readiness separately as configured/unset.
 //
 // orgID is the OC namespace + issues org; ocOrgID is the SM-API org id (the

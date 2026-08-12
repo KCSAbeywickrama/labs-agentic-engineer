@@ -27,10 +27,12 @@ import (
 	"github.com/wso2/aep/aep-api/internal/spec"
 )
 
+type ExternalDependencyValueState string
+
 const (
-	ValueStateNotProvisioned = "not-provisioned"
-	ValueStateUnset          = "unset"
-	ValueStateConfigured     = "configured"
+	ValueStateNotProvisioned ExternalDependencyValueState = "not-provisioned"
+	ValueStateUnset          ExternalDependencyValueState = "unset"
+	ValueStateConfigured     ExternalDependencyValueState = "configured"
 )
 
 // DependencyStatus is the masked provisioning status of a dependency: the
@@ -42,12 +44,12 @@ type DependencyStatus struct {
 	Ready   bool     `json:"ready"`   //
 	Outputs []string `json:"outputs"` // output names only (masked)
 	// ValueState is set for external dependencies only.
-	ValueState string `json:"valueState,omitempty"`
+	ValueState ExternalDependencyValueState `json:"valueState,omitempty"`
 }
 
 type ExternalDependencyReadiness struct {
 	Name        string
-	State       string
+	State       ExternalDependencyValueState
 	MissingKeys []string
 }
 
@@ -124,9 +126,7 @@ func normalizedEnv(env string) string {
 // state for one environment. The design is authoritative: bindings are only
 // looked up for the union keys still declared there.
 func (s *Service) ConfigurationReadiness(ctx context.Context, orgID, projectID, env string) (*ProjectDependencyReadiness, error) {
-	if env == "" {
-		env = defaultEnv
-	}
+	env = normalizedEnv(env)
 	comps, err := s.design.ReadDesignComponents(ctx, orgID, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("provisioning: read design: %w", err)
@@ -157,7 +157,7 @@ func (s *Service) ConfigurationReadiness(ctx context.Context, orgID, projectID, 
 	return result, nil
 }
 
-func externalValueState(binding *openchoreo.ResourceReleaseBinding, keys []spec.ConfigKey) (string, []string, error) {
+func externalValueState(binding *openchoreo.ResourceReleaseBinding, keys []spec.ConfigKey) (ExternalDependencyValueState, []string, error) {
 	missing := make([]string, 0, len(keys))
 	if binding == nil {
 		for _, key := range keys {

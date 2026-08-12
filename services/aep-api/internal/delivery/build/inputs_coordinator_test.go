@@ -109,6 +109,12 @@ func TestBuildProvisionInputs_PlatformResourcePassThrough(t *testing.T) {
 	require.True(t, pins[0].Approved)
 }
 
+func TestBuildProvisionInputs_MissingDesignReaderReturnsError(t *testing.T) {
+	c := &InputsCoordinator{}
+	_, _, err := c.BuildProvisionInputs(ctx, "acme", "shop", nil)
+	require.Error(t, err)
+}
+
 // ----- ApplyPreTag -----------------------------------------------------------
 
 // Pre-tag fans out: one CollectSpec per external-spec input (content → rawSpec,

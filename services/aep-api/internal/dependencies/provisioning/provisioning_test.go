@@ -223,12 +223,12 @@ type fakeExtProv struct {
 	// (name/description/config schema) rather than fetched from the catalog.
 	lastER *dependencies.ExternalResource
 
-	// AuthorWithSecretRef spies (the build path's no-SM-write author half).
-	authorRefCalls int
-	authorByEnv    map[string]dependencies.PreparedEnvValues
-	authorResult   *dependencies.ProvisionResult
-	authorErr      error
-	// authorLastER is the *dependencies.ExternalResource the last AuthorWithSecretRef
+	// AuthorPreparedValues spies (the build path's no-SM-write author half).
+	authorPreparedCalls int
+	authorByEnv         map[string]dependencies.PreparedEnvValues
+	authorResult        *dependencies.ProvisionResult
+	authorErr           error
+	// authorLastER is the *dependencies.ExternalResource the last AuthorPreparedValues
 	// call received — same purpose as lastER, for the build author path.
 	authorLastER *dependencies.ExternalResource
 }
@@ -245,8 +245,8 @@ func (f *fakeExtProv) Provision(_ context.Context, _, _, _ string, er *dependenc
 	}
 	return &dependencies.ProvisionResult{ResourceName: "o-ext", BindingByEnv: map[string]string{"development": "o-ext-development"}}, nil
 }
-func (f *fakeExtProv) AuthorWithSecretRef(_ context.Context, _, _ string, er *dependencies.ExternalResource, byEnv map[string]dependencies.PreparedEnvValues) (*dependencies.ProvisionResult, error) {
-	f.authorRefCalls++
+func (f *fakeExtProv) AuthorPreparedValues(_ context.Context, _, _ string, er *dependencies.ExternalResource, byEnv map[string]dependencies.PreparedEnvValues) (*dependencies.ProvisionResult, error) {
+	f.authorPreparedCalls++
 	f.authorByEnv = byEnv
 	f.authorLastER = er
 	if f.authorErr != nil {

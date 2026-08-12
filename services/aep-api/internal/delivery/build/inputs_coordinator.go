@@ -18,6 +18,7 @@ package build
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strings"
 
@@ -121,6 +122,9 @@ func (c *InputsCoordinator) ApplyPreTag(ctx context.Context, orgID, projectID st
 // ignored: builds no longer collect or stage user values. Platform-resource and
 // org-service inputs still pass through; external-spec is handled pre-tag.
 func (c *InputsCoordinator) BuildProvisionInputs(ctx context.Context, orgID, projectID string, inputs []BuildInputItem) ([]delivery.ProvisionInput, []InputFailure, error) {
+	if c.design == nil {
+		return nil, nil, fmt.Errorf("build inputs: design reader is not configured")
+	}
 	comps, err := c.design.ReadDesignComponents(ctx, orgID, projectID)
 	if err != nil {
 		return nil, nil, err
@@ -130,6 +134,11 @@ func (c *InputsCoordinator) BuildProvisionInputs(ctx context.Context, orgID, pro
 		out      []delivery.ProvisionInput
 		failures []InputFailure
 	)
+	union := spec.UnionExternalConfigKeys(comps)
+	unionByName := make(map[string][]spec.ConfigKey, len(union))
+	for name, keys := range union {
+		unionByName[strings.ToLower(name)] = keys
+	}
 	seenExternal := map[string]bool{}
 	for _, component := range comps {
 		for _, dep := range component.Dependencies {
@@ -142,7 +151,7 @@ func (c *InputsCoordinator) BuildProvisionInputs(ctx context.Context, orgID, pro
 			}
 			seenExternal[nameKey] = true
 			config := map[string]string{}
-			keys, _ := spec.UnionExternalConfigFor(comps, dep.Name)
+			keys := unionByName[nameKey]
 			for _, key := range keys {
 				if !key.Secret {
 					config[key.Key] = key.DefaultValue

@@ -31,7 +31,7 @@ import (
 
 // TestProvisionForBuild_ByKind is the Task-3 contract: the workflow's provision
 // step mints platform-resource gate issues once, then authors each dependency
-// BY KIND — external via AuthorWithSecretRef (with no collection gate) and
+// BY KIND — external via AuthorPreparedValues (with no collection gate) and
 // platform-resource via the async Provision (gate left open
 // for the readiness watcher). It must NOT route external through Provision (that
 // would re-write secrets).
@@ -60,16 +60,16 @@ func TestProvisionForBuild_ByKind(t *testing.T) {
 		t.Fatalf("want 1 minted gate issue (orders-db), got %d", len(issues.created))
 	}
 
-	// External authored via AuthorWithSecretRef — NOT via Provision (no SM write).
-	if ext.authorRefCalls != 1 {
-		t.Fatalf("external dep must be authored via AuthorWithSecretRef once, got %d", ext.authorRefCalls)
+	// External authored from the design — NOT from the carried request payload,
+	// and NOT via Provision (which would write secrets).
+	if ext.authorPreparedCalls != 1 {
+		t.Fatalf("external dep must be authored via AuthorPreparedValues once, got %d", ext.authorPreparedCalls)
 	}
 	if ext.calls != 0 {
 		t.Fatalf("external dep must NOT go through Provision (that re-writes secrets), got %d Provision calls", ext.calls)
 	}
-	// The staged reference + plain config reach the author call verbatim.
-	if got := ext.authorByEnv["development"]; got.SecretStorePath != "sm://x" || got.Plain["region"] != "us" {
-		t.Fatalf("author byEnv wrong: %+v", got)
+	if got := ext.authorByEnv["development"]; got.SecretStorePath != "" || got.Plain["region"] != "" {
+		t.Fatalf("author must ignore request config/ref and use empty design values: %+v", got)
 	}
 
 	// Platform-resource authored via the async Provision path.
@@ -172,7 +172,7 @@ func TestProvisionForBuild_OrgServiceUnapprovedIsNoop(t *testing.T) {
 	if err != nil || len(fails) != 0 {
 		t.Fatalf("unapproved org-service must be a silent no-op, got fails=%+v err=%v", fails, err)
 	}
-	if ext.authorRefCalls != 0 || plat.calls != 0 {
+	if ext.authorPreparedCalls != 0 || plat.calls != 0 {
 		t.Fatalf("org-service must author nothing")
 	}
 	if len(issues.created) != 0 {

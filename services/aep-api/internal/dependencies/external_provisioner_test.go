@@ -210,10 +210,10 @@ func TestProvision_SecretValuesWithoutSMAPI_Fails(t *testing.T) {
 	}
 }
 
-// TestAuthorWithSecretRef_UsesStagedRefNoSMWrite pins the build path's author
+// TestAuthorPreparedValues_UsesStagedRefNoSMWrite pins the value authoring path
 // half (issue #164): it authors the per-env binding pinned to the PASSED
 // SecretStorePath (staged pre-tag by POST /build) and NEVER writes to SM-API.
-func TestAuthorWithSecretRef_UsesStagedRefNoSMWrite(t *testing.T) {
+func TestAuthorPreparedValues_UsesStagedRefNoSMWrite(t *testing.T) {
 	t.Parallel()
 
 	rc := newFakeRC("openweather-proj-abc123")
@@ -234,13 +234,13 @@ func TestAuthorWithSecretRef_UsesStagedRefNoSMWrite(t *testing.T) {
 		},
 	}
 
-	res, err := p.AuthorWithSecretRef(context.Background(), "default", "weatherproj", er, byEnv)
+	res, err := p.AuthorPreparedValues(context.Background(), "default", "weatherproj", er, byEnv)
 	if err != nil {
-		t.Fatalf("AuthorWithSecretRef: %v", err)
+		t.Fatalf("AuthorPreparedValues: %v", err)
 	}
 	// The SM-API writer is NEVER touched — the secret was staged pre-tag.
 	if len(sw.wrote) != 0 {
-		t.Fatalf("AuthorWithSecretRef must not write to SM-API, wrote: %v", sw.wrote)
+		t.Fatalf("AuthorPreparedValues must not write to SM-API, wrote: %v", sw.wrote)
 	}
 	// One binding, pinned to the release, carrying the PASSED secretStorePath.
 	bindings := rc.EnsureBindingCalls()
@@ -269,16 +269,18 @@ func TestAuthorWithSecretRef_UsesStagedRefNoSMWrite(t *testing.T) {
 	}
 }
 
-// TestAuthorWithSecretRef_PreservesConfiguredBindingValues is the rebuild
+// TestAuthorPreparedValues_PreservesConfiguredBindingValues is the rebuild
 // regression for issue #441: authoring an unset/default-only design must not
 // replace values a developer has already saved on the binding.
-func TestAuthorWithSecretRef_PreservesConfiguredBindingValues(t *testing.T) {
+func TestAuthorPreparedValues_PreservesConfiguredBindingValues(t *testing.T) {
 	t.Parallel()
 
 	rc := newFakeRC("openweather-proj-next")
 	existing, err := json.Marshal(map[string]string{
 		"OPENWEATHER_BASE_URL":          "https://configured.example",
 		"OPENWEATHER_REGION":            "eu-west-1",
+		"OPENWEATHER_API_KEY":           "plaintext-that-must-not-survive",
+		"DROPPED":                       "stale-value",
 		openchoreo.SecretStorePathField: "user-app-secrets/wc-org/configured-ref",
 	})
 	if err != nil {
@@ -299,7 +301,7 @@ func TestAuthorWithSecretRef_PreservesConfiguredBindingValues(t *testing.T) {
 		{Key: "OPENWEATHER_API_KEY", Secret: true},
 	}}
 
-	_, err = p.AuthorWithSecretRef(context.Background(), "default", "weatherproj", er,
+	_, err = p.AuthorPreparedValues(context.Background(), "default", "weatherproj", er,
 		map[string]PreparedEnvValues{"development": {
 			Plain: map[string]string{
 				"OPENWEATHER_BASE_URL": "",
@@ -308,7 +310,7 @@ func TestAuthorWithSecretRef_PreservesConfiguredBindingValues(t *testing.T) {
 			SecretStorePath: "",
 		}})
 	if err != nil {
-		t.Fatalf("AuthorWithSecretRef: %v", err)
+		t.Fatalf("AuthorPreparedValues: %v", err)
 	}
 
 	calls := rc.EnsureBindingCalls()
@@ -332,9 +334,15 @@ func TestAuthorWithSecretRef_PreservesConfiguredBindingValues(t *testing.T) {
 			t.Errorf("authored config[%q] = %q, want %q", key, got[key], value)
 		}
 	}
+	if _, exists := got["OPENWEATHER_API_KEY"]; exists {
+		t.Fatal("a key now classified secret must not survive as plaintext")
+	}
+	if _, exists := got["DROPPED"]; exists {
+		t.Fatal("a key dropped from the design must not survive rebuild authoring")
+	}
 }
 
-func TestAuthorWithSecretRef_AuthorsUnsetKeysAndEmptySecretStorePath(t *testing.T) {
+func TestAuthorPreparedValues_AuthorsUnsetKeysAndEmptySecretStorePath(t *testing.T) {
 	t.Parallel()
 
 	rc := newFakeRC("stripe-proj-next")
@@ -344,12 +352,12 @@ func TestAuthorWithSecretRef_AuthorsUnsetKeysAndEmptySecretStorePath(t *testing.
 		{Key: "STRIPE_REGION", DefaultValue: "us-east-1"},
 		{Key: "STRIPE_KEY", Secret: true},
 	}}
-	_, err := p.AuthorWithSecretRef(context.Background(), "default", "shop", er,
+	_, err := p.AuthorPreparedValues(context.Background(), "default", "shop", er,
 		map[string]PreparedEnvValues{"development": {Plain: map[string]string{
 			"STRIPE_URL": "", "STRIPE_REGION": "us-east-1",
 		}}})
 	if err != nil {
-		t.Fatalf("AuthorWithSecretRef: %v", err)
+		t.Fatalf("AuthorPreparedValues: %v", err)
 	}
 
 	var got map[string]string

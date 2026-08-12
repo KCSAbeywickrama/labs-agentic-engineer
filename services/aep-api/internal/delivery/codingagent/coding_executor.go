@@ -448,7 +448,7 @@ func derefStr(s *string) string {
 // carries no procedure in the prompt, so the workflow versions with the skill
 // rather than with the BFF binary.
 func buildPrompt(milestoneNumber int, milestoneTitle string) string {
-	return fmt.Sprintf("Work the issues for milestone %d (%q). External credentials are not yet configured; their environment variables may be empty, so live calls will not succeed. Follow the `aep` skill loaded in your session — it defines discovery, ordering, fan-out, branch identity, verification, the PR contract and the deny-list.", milestoneNumber, milestoneTitle)
+	return fmt.Sprintf("Work the issues for milestone %d (%q). External credentials may not yet be configured; their environment variables may be empty, so live calls may not succeed. Follow the `aep` skill loaded in your session — it defines discovery, ordering, fan-out, branch identity, verification, the PR contract and the deny-list.", milestoneNumber, milestoneTitle)
 }
 
 // validationComponentSentinel is the AEP_COMPONENT_NAME a validation Job carries.

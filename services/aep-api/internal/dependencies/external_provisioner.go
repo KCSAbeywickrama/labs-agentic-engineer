@@ -157,13 +157,13 @@ type PreparedEnvValues struct {
 	SecretStorePath string
 }
 
-// AuthorWithSecretRef authors (idempotently) the external resource's OC Resource
+// AuthorPreparedValues authors (idempotently) the external resource's OC Resource
 // model for a project from prepared values. It mirrors Provision's
 // steps 1-3 (ensure ResourceType → apply Resource → wait for the release change)
 // but its step 4 pins each binding without writing secrets to SM-API. Existing
 // nonempty values and secretStorePath references win during rebuilds.
 // `orgHandle` is the OC namespace the CRs live in.
-func (p *ExternalResourceProvisioner) AuthorWithSecretRef(
+func (p *ExternalResourceProvisioner) AuthorPreparedValues(
 	ctx context.Context,
 	orgHandle, projectName string,
 	er *ExternalResource,
@@ -224,10 +224,12 @@ func (p *ExternalResourceProvisioner) AuthorWithSecretRef(
 	return result, nil
 }
 
-// mergeConfiguredBindingValues preserves every non-empty value already held by
-// a binding and fills only absent or empty entries from the values being
-// authored. This read-then-write is deliberately not atomic: a concurrent value
-// save between GetBinding and EnsureBinding can still be lost (issue #441).
+// mergeConfiguredBindingValues preserves non-empty values already held for
+// currently declared plain keys and fills absent or empty entries from the
+// values being authored. Keys removed from the design, and plaintext values for
+// keys that are now secret, are discarded. This read-then-write is deliberately
+// not atomic: a concurrent value save between GetBinding and EnsureBinding can
+// still be lost (issue #441).
 func mergeConfiguredBindingValues(existing *openchoreo.ResourceReleaseBinding, plain map[string]string, secretStorePath string) (map[string]string, string, error) {
 	merged := make(map[string]string, len(plain))
 	for key, value := range plain {
@@ -247,6 +249,9 @@ func mergeConfiguredBindingValues(existing *openchoreo.ResourceReleaseBinding, p
 		}
 		if key == openchoreo.SecretStorePathField {
 			secretStorePath = value
+			continue
+		}
+		if _, declaredPlain := merged[key]; !declaredPlain {
 			continue
 		}
 		merged[key] = value

@@ -110,8 +110,8 @@ type BuildInputItem struct {
 	Component  string `json:"component" doc:"Owning component name"`
 	Dependency string `json:"dependency" doc:"Dependency name"`
 	Kind       string `json:"kind" enum:"external-config,external-spec,platform-resource,org-service"`
-	// external-config: retained in the request contract for older clients, but
-	// ignored. The server derives unset/defaulted values from the design.
+	// external-config request values are ignored. The server derives
+	// unset/defaulted values from the design.
 	Values []ConfigValue `json:"values,omitempty"`
 	// external-spec: the pasted OpenAPI content, or a URL to fetch it from.
 	SpecContent string `json:"specContent,omitempty"`
@@ -122,7 +122,8 @@ type BuildInputItem struct {
 	Approved bool `json:"approved,omitempty"`
 }
 
-// ConfigValue is one external-config key/value pair the drawer collected.
+// ConfigValue is the wire-format shape for an external-config value. Build
+// processing ignores these entries and derives authoring values from design.
 type ConfigValue struct {
 	Key   string `json:"key"`
 	Value string `json:"value"`

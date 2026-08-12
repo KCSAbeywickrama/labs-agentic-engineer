@@ -37,7 +37,7 @@ func TestConfigurationReadiness_UsesDesignUnionSchema(t *testing.T) {
 		name       string
 		binding    *openchoreo.ResourceReleaseBinding
 		designKeys []spec.ConfigKey
-		wantState  string
+		wantState  ExternalDependencyValueState
 		wantMiss   []string
 	}{
 		{name: "absent binding", designKeys: keys, wantState: ValueStateNotProvisioned, wantMiss: []string{"BASE_URL", "REGION", "API_KEY"}},
