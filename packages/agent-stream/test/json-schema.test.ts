@@ -29,11 +29,13 @@ import {
   componentDesignJsonSchema,
   planTaskJsonSchema,
   updateTaskJsonSchema,
+  agentAfmJsonSchema,
 } from "../src/json-schema.js";
 import {
   COMPONENT_DESIGN_SCHEMA_ARTIFACT,
   PLAN_TASK_SCHEMA_ARTIFACT,
   UPDATE_TASK_SCHEMA_ARTIFACT,
+  AGENT_AFM_SCHEMA_ARTIFACT,
 } from "../scripts/artifact-path.js";
 
 // Every published artifact must equal a fresh render of its Zod schema; a stale
@@ -42,6 +44,7 @@ const artifacts: [string, string, () => Record<string, unknown>][] = [
   ["component-design.schema.json", COMPONENT_DESIGN_SCHEMA_ARTIFACT, componentDesignJsonSchema],
   ["plan-task.schema.json", PLAN_TASK_SCHEMA_ARTIFACT, planTaskJsonSchema],
   ["update-task.schema.json", UPDATE_TASK_SCHEMA_ARTIFACT, updateTaskJsonSchema],
+  ["agent-afm.schema.json", AGENT_AFM_SCHEMA_ARTIFACT, agentAfmJsonSchema],
 ];
 
 for (const [name, path, render] of artifacts) {

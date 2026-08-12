@@ -123,8 +123,11 @@ export {
 } from "./component-design-schema.js";
 export type { ComponentDesignProblem } from "./component-design-schema.js";
 
+// --- The agent.afm.md structural write-gate (the ai-agent component kind) ---
+export { checkAgentAfm, splitAfm, type AfmProblem, type AgentAfmFrontMatter } from "./agent-afm-schema.js";
+
 // --- JSON Schema publication (the BFF validates the same definitions) --------
-export { componentDesignJsonSchema, planTaskJsonSchema, updateTaskJsonSchema } from "./json-schema.js";
+export { componentDesignJsonSchema, planTaskJsonSchema, updateTaskJsonSchema, agentAfmJsonSchema } from "./json-schema.js";
 
 // --- The reference SSE reader ------------------------------------------------
 // `streamTurn` = fetch + parse (server-side callers: evals, playground).

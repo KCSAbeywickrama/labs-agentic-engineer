@@ -31,17 +31,20 @@ import {
   componentDesignJsonSchema,
   planTaskJsonSchema,
   updateTaskJsonSchema,
+  agentAfmJsonSchema,
 } from "../src/json-schema.js";
 import {
   COMPONENT_DESIGN_SCHEMA_ARTIFACT,
   PLAN_TASK_SCHEMA_ARTIFACT,
   UPDATE_TASK_SCHEMA_ARTIFACT,
+  AGENT_AFM_SCHEMA_ARTIFACT,
 } from "./artifact-path.js";
 
 const artifacts: [string, Record<string, unknown>][] = [
   [COMPONENT_DESIGN_SCHEMA_ARTIFACT, componentDesignJsonSchema()],
   [PLAN_TASK_SCHEMA_ARTIFACT, planTaskJsonSchema()],
   [UPDATE_TASK_SCHEMA_ARTIFACT, updateTaskJsonSchema()],
+  [AGENT_AFM_SCHEMA_ARTIFACT, agentAfmJsonSchema()],
 ];
 
 for (const [path, schema] of artifacts) {
