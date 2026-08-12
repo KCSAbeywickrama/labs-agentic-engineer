@@ -19,121 +19,68 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"os/exec"
-	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	k8s "github.com/wso2/aep/aepctl/internal/kubernetes"
+	"github.com/wso2/aep/aepctl/internal/openbao"
 )
 
-const (
-	openbaoNamespace     = "openbao"
-	openbaoPodLabelMatch = "app.kubernetes.io/name=openbao,component=server"
+var (
+	secretImportPath  string
+	secretImportValue string
 )
 
 var secretImportCmd = &cobra.Command{
 	Use:   "import",
-	Short: "Import secrets into OpenBao",
-	RunE:  runSecretImport,
+	Short: "Write a secret into OpenChoreo's built-in OpenBao instance",
+	Long: `Writes a single secret value to OpenBao under the AEP secret namespace.
+
+The secret is stored at secret/data/<path> with key "value", matching the
+layout that ExternalSecrets expects when syncing AEP platform secrets.
+
+Example:
+  aep platform secret import --path aep/anthropic-api-key --value sk-ant-...`,
+	RunE: runSecretImport,
 }
 
 func init() {
 	secretCmd.AddCommand(secretImportCmd)
+	secretImportCmd.Flags().StringVar(&secretImportPath, "path", "", "Secret path under secret/data/ (e.g. aep/anthropic-api-key)")
+	secretImportCmd.Flags().StringVar(&secretImportValue, "value", "", "Secret value to write")
+	_ = secretImportCmd.MarkFlagRequired("path")
+	_ = secretImportCmd.MarkFlagRequired("value")
 }
 
 func runSecretImport(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
-	client, err := k8s.NewClient(kubeconfig)
+	pfCmd, err := openbao.PortForward(ctx, ocOpenBaoNamespace, ocOpenBaoRelease, kubeconfig)
 	if err != nil {
-		return fmt.Errorf("connect to cluster: %w", err)
+		return fmt.Errorf("port-forward to OpenBao: %w", err)
+	}
+	defer func() { _ = pfCmd.Process.Kill() }()
+
+	baseURL := "http://localhost:" + openbao.LocalPort
+	if err := openbao.WaitForReachable(ctx, baseURL, 30*time.Second); err != nil {
+		return fmt.Errorf("OpenBao not reachable via port-forward: %w", err)
 	}
 
-	pods, err := client.CoreV1().Pods(openbaoNamespace).List(ctx, metav1.ListOptions{
-		LabelSelector: openbaoPodLabelMatch,
-	})
+	saToken, err := openbao.GetSAToken(ctx, ocOpenBaoNamespace, ocOpenBaoSA, kubeconfig)
 	if err != nil {
-		return fmt.Errorf("list openbao pods: %w", err)
+		return err
 	}
-	if len(pods.Items) == 0 {
-		return fmt.Errorf("no pod matching %q found in namespace %q", openbaoPodLabelMatch, openbaoNamespace)
-	}
-	pod := pods.Items[0].Name
-
-	secrets, err := getBaoSecretsList(ctx, pod)
+	token, err := openbao.KubernetesLogin(ctx, baseURL, ocWriteRole, saToken)
 	if err != nil {
 		return err
 	}
 
-	if !strings.Contains(secrets, "kv") {
-		return fmt.Errorf("failed to store key value secrets: no kv secrets engine found in OpenBao. Enable manually with 'bao secrets enable -path=secret kv-v2'")
+	if _, err := openbao.Must(ctx, "PUT", baseURL, token, "/v1/secret/data/"+secretImportPath, map[string]interface{}{
+		"data": map[string]interface{}{"value": secretImportValue},
+	}); err != nil {
+		return fmt.Errorf("write secret/data/%s: %w", secretImportPath, err)
 	}
 
-	fmt.Println(secrets)
-
-	result, err := seedBaoSecret(ctx, pod, "secret/aepctl-test", "aepctl-secret-import-test", "ok")
-	if err != nil {
-		return err
-	}
-
-	fmt.Println(result)
+	_, _ = fmt.Printf("wrote secret/data/%s\n", secretImportPath)
 	return nil
-}
-
-// getBaoSecretsList runs `bao secrets list` inside the given OpenBao pod and
-// returns its combined output.
-func getBaoSecretsList(ctx context.Context, pod string) (string, error) {
-	kubectlArgs := []string{
-		"exec",
-		"-n", openbaoNamespace,
-		pod,
-		"--",
-		"bao",
-		"secrets",
-		"list",
-	}
-
-	if kubeconfig != "" {
-		kubectlArgs = append([]string{"--kubeconfig", kubeconfig}, kubectlArgs...)
-	}
-
-	execCmd := exec.CommandContext(ctx, "kubectl", kubectlArgs...)
-
-	output, err := execCmd.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("failed to execute bao secrets list: %w: %s", err, output)
-	}
-
-	return string(output), nil
-}
-
-// seedBaoSecret writes a single key/value pair to the given path in OpenBao's
-// kv secrets engine (bao kv put <path> <key>=<value>) inside the given pod.
-func seedBaoSecret(ctx context.Context, pod, path, key, value string) (string, error) {
-	kubectlArgs := []string{
-		"exec",
-		"-n", openbaoNamespace,
-		pod,
-		"--",
-		"bao",
-		"kv",
-		"put",
-		path,
-		fmt.Sprintf("%s=%s", key, value),
-	}
-
-	if kubeconfig != "" {
-		kubectlArgs = append([]string{"--kubeconfig", kubeconfig}, kubectlArgs...)
-	}
-
-	execCmd := exec.CommandContext(ctx, "kubectl", kubectlArgs...)
-
-	output, err := execCmd.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("failed to seed secret at %s: %w: %s", path, err, output)
-	}
-
-	return string(output), nil
 }

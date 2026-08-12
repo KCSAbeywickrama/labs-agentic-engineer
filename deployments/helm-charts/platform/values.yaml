@@ -180,8 +180,8 @@ thunder:
   jwksURL: "http://thunder-service.thunder.svc.cluster.local:8090/oauth2/jwks"
 
 openbao:
-  # Address of the OpenBao service. Matches: helm install aep ./bundle -n wso2-aep
-  addr: "http://aep-aep-openbao.wso2-aep.svc.cluster.local:8200"
+  # Address of OpenChoreo's built-in OpenBao service.
+  addr: "http://openbao.openbao.svc.cluster.local:8200"
 
 # Shared git workspaces (RWO PVC + co-located pods). aep-api writes; agents mounts RO.
 # See services/aep-api/design/shared-workspace-volume.md.

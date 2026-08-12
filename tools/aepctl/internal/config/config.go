@@ -35,7 +35,6 @@ const ConfigMapName = "aep-cli-config"
 // ConfigMapName. thunder.admin_client_secret is intentionally absent — it is
 // managed by OpenBao/ESO and read from the aep-thunder-secrets Secret instead.
 var ConfigMapKeys = []string{
-	"server",
 	"thunder.namespace",
 	"thunder.url",
 	"thunder.config_map",
@@ -94,8 +93,8 @@ func Init() {
 	viper.SetDefault("thunder.url", "http://thunder-service.thunder.svc.cluster.local:8090")
 	viper.SetDefault("thunder.config_map", "thunder-config-map")
 	viper.SetDefault("thunder.deployment", "thunder-deployment")
-	viper.SetDefault("thunder.admin_client_id", "openchoreo-system-app")
-	viper.SetDefault("thunder.admin_client_secret", "openchoreo-system-app-secret")
+	viper.SetDefault("thunder.admin_client_id", "aep-system-client")
+	viper.SetDefault("thunder.admin_client_secret", "aep-system-client-secret")
 	viper.SetDefault("thunder.public_url", "http://thunder.openchoreo.localhost:8080")
 }
 
