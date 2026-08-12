@@ -58,6 +58,15 @@ type Config struct {
 	// local dev. Read from PLAYGROUND_TOKEN_ENABLED.
 	PlaygroundTokenEnabled bool
 
+	// PlatformResourcesEnabled gates discovery of cluster-scoped platform
+	// resource types (ResourceTypeCatalog.List → OC ListClusterResourceTypes).
+	// Defaults TRUE: platform resources are a core capability; deployments that
+	// offer no platform-resource catalog must opt out explicitly
+	// (PLATFORM_RESOURCES_ENABLED=false). Unlike PlaygroundTokenEnabled /
+	// AutoMergeCodingPRs (opt-in extras that default false), this is an
+	// opt-out. Read from PLATFORM_RESOURCES_ENABLED.
+	PlatformResourcesEnabled bool
+
 	// AutoMergeCodingPRs gates auto-merge of coding-agent pull requests: when
 	// true, a coding-agent PR is squash-merged the moment it opens, removing the
 	// human review gate and letting the path-based build fan-out deploy the fix

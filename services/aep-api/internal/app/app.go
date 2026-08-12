@@ -921,7 +921,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	}
 	params.Deps.Ops = opsHandlers
 	params.MCPOrgEndpoints = orgEndpointCatalog
-	resourceTypeCatalog := dependencies.NewResourceTypeCatalog(resourceClient)
+	resourceTypeCatalog := dependencies.NewResourceTypeCatalog(resourceClient, cfg.PlatformResourcesEnabled)
 	params.MCPResourceTypes = resourceTypeCatalog
 	// params.Deps.Dependencies (the strict ListPlatformResourceTypes + provisioning
 	// ops) is assembled below, after provisioningSvc exists.

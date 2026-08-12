@@ -53,6 +53,8 @@ func Load() (Config, error) {
 		LocalOpenBaoRepairEnabled: r.readOptionalBool("LOCAL_OPENBAO_REPAIR", false),
 		DeploymentTier:            r.readOptionalString("DEPLOYMENT_TIER", "dev"),
 		PlaygroundTokenEnabled:    r.readOptionalBool("PLAYGROUND_TOKEN_ENABLED", false),
+		// Default true: core capability, opt-out (unlike other booleans here which are opt-in extras).
+		PlatformResourcesEnabled: r.readOptionalBool("PLATFORM_RESOURCES_ENABLED", true),
 		AutoMergeCodingPRs:        r.readOptionalBool("AUTO_MERGE_CODING_PRS", false),
 		TenantGateMode:            r.readOptionalString("TENANT_GATE_MODE", "enforce"),
 		OAuthStateSigningKey:      r.readOptionalString("OAUTH_STATE_SIGNING_KEY", ""),
