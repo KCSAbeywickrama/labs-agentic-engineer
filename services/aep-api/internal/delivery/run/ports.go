@@ -178,20 +178,40 @@ type Dispatcher interface {
 	Dispatch(ctx context.Context, req delivery.MilestoneDispatch) (jobRef string, err error)
 }
 
-// APITraitSyncer lands the per-environment `api-configuration` trait config —
-// the `jwtAuth` policy the gateway enforces and the sibling-SPA CORS allowlist
-// — on each protected component's ReleaseBinding. projects.TraitSyncService
-// satisfies it.
+// Deployer promotes a cycle's built components into the environment and reports
+// what it did per component. projects.DeploymentService satisfies it.
 //
-// Why the supervisor drives this at all: the config's write target is the
-// ReleaseBinding, which OpenChoreo creates only once a build has produced a
-// workload. The Component CR's trait SHAPE is set far earlier (at component
-// ensure, pre-build) and is what makes OpenChoreo render the RestApi; this is
-// the other half, and it cannot be written before the deploy chain has run.
-// Builds settling green is the first moment in the run where that is true.
+// This is the port that took deploy away from OpenChoreo's AutoDeploy. The
+// supervisor has to own the verb for one reason: a version is not delivered when
+// its builds are green, it is delivered when its components are SERVING, and
+// only a caller that performs the promote can know when to start waiting for it.
+// While the controller promoted on its own, the loop's only honest option was to
+// call a green WorkflowRun the end of the cycle and validate against whatever
+// happened to be running.
 //
-// Idempotent and convergent: re-running it re-asserts the same desired state,
-// so a cycle that syncs twice costs a round trip and changes nothing.
-type APITraitSyncer interface {
-	SyncProjectAPITraits(ctx context.Context, orgID, projectID string) error
+// Idempotent and convergent: the release name is derived from the merge commit,
+// so a retried deploy re-pins the same release and changes nothing.
+type Deployer interface {
+	Deploy(ctx context.Context, orgID, projectID string, components []string, commitSHA string) ([]delivery.ComponentDeploy, error)
+}
+
+// DeploymentReader reads back what the cluster says about those deployments —
+// the readiness poll. Separate from Deployer because they run at different
+// cadences: the promote happens once per cycle, the read happens every
+// deployPollInterval until the answer settles.
+type DeploymentReader interface {
+	DeploymentState(ctx context.Context, orgID, projectID string, components []string) ([]delivery.ComponentDeploy, error)
+}
+
+// DeployIssueMinter files the fix work for components whose deployment did not
+// come up. Satisfied by the event plane, reached through this port so the
+// supervisor still writes no issue of its own.
+//
+// It is the one recovery issue the event plane cannot mint on its own initiative:
+// every other one has a webhook behind it, and a ReleaseBinding that never
+// becomes Ready delivers nothing. The supervisor observes it and asks; the plane
+// still owns the write, the labels and the dedupe key.
+type DeployIssueMinter interface {
+	MintDeployFixIssues(ctx context.Context, orgID, projectID string, milestoneNumber int,
+		components []string, reasons map[string]string, commitSHA string) ([]int, error)
 }

@@ -22,7 +22,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo/mocks"
 )
 
@@ -46,7 +45,7 @@ func TestTraitSync_DeleteCascade_HappyPath(t *testing.T) {
 			return nil
 		},
 	}
-	svc := NewTraitSyncService(mock, nil)
+	svc := NewDeploymentService(mock, nil)
 	if err := svc.DeleteComponentCascade(context.Background(), "org-1", "proj-1", "comp-x"); err != nil {
 		t.Fatalf("DeleteComponentCascade: %v", err)
 	}
@@ -66,7 +65,7 @@ func TestTraitSync_DeleteCascade_PropagatesError(t *testing.T) {
 			return errors.New("simulated OC failure")
 		},
 	}
-	svc := NewTraitSyncService(mock, nil)
+	svc := NewDeploymentService(mock, nil)
 	err := svc.DeleteComponentCascade(context.Background(), "org", "proj", "comp")
 	if err == nil {
 		t.Fatal("want error from DeleteComponentCascade, got nil")
@@ -89,7 +88,7 @@ func TestTraitSync_DeleteCascade_EmptyArgsRejected(t *testing.T) {
 			return nil
 		},
 	}
-	svc := NewTraitSyncService(mock, nil)
+	svc := NewDeploymentService(mock, nil)
 	cases := []struct {
 		name      string
 		org, p, c string
@@ -108,17 +107,12 @@ func TestTraitSync_DeleteCascade_EmptyArgsRejected(t *testing.T) {
 	}
 }
 
-// TestSyncComponentTraits_RejectsEmptyArgs — same defensive contract as
-// DeleteCascade above. Empty IDs should never trigger OC reads.
-func TestSyncComponentTraits_RejectsEmptyArgs(t *testing.T) {
-	mock := &mocks.ComponentClientMock{
-		UpdateComponentTraitsFunc: func(ctx context.Context, orgName, projectName, componentName string, traits []openchoreo.ComponentTrait) error {
-			t.Fatal("UpdateComponentTraits must not be called with empty args")
-			return nil
-		},
-	}
-	svc := NewTraitSyncService(mock, nil)
-	if err := svc.SyncComponentTraits(context.Background(), "", "p", "c"); err == nil {
-		t.Fatal("want error, got nil")
+// TestDeploy_RejectsUnconfiguredService — the defensive contract: a service with
+// no OpenChoreo behind it must refuse rather than silently report a version
+// deployed that was never promoted.
+func TestDeploy_RejectsUnconfiguredService(t *testing.T) {
+	var svc *DeploymentService
+	if _, err := svc.Deploy(context.Background(), "o", "p", []string{"c"}, "sha"); err == nil {
+		t.Fatal("want error from an unconfigured deployment service, got nil")
 	}
 }

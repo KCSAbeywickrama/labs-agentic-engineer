@@ -153,6 +153,35 @@ func BuildRunName(projectID, component, sha string, attempt int) string {
 	return fmt.Sprintf("%s%d", BuildRunNamePrefix(projectID, component, sha), attempt)
 }
 
+// ComponentDeploy is one component's deployment in one environment, as the run
+// loop reasons about it: which release was pinned, and what the cluster says
+// about the binding that pins it.
+//
+// It lives here for the same reason the build contract does — the DEPLOY STAGE
+// writes it and the supervisor reads it back to decide whether a cycle may
+// validate, and a second definition would let the two disagree about what
+// "deployed" means.
+//
+// Ready and Failed are separate booleans rather than a status string because
+// the third state — neither, i.e. still rolling out — is the one the poll spends
+// most of its time in, and it is the state a status enum keeps tempting callers
+// to fold into one of the other two.
+type ComponentDeploy struct {
+	Component   string `json:"component"`
+	Environment string `json:"environment"`
+	// Release is the ComponentRelease this deployment pinned. Empty on a read
+	// that only observed the binding.
+	Release string `json:"release,omitempty"`
+	// Ready is the binding's aggregate Ready condition being True (or the
+	// component being deliberately undeployed).
+	Ready bool `json:"ready"`
+	// Failed is Ready=False — a verdict, not a wait.
+	Failed bool `json:"failed,omitempty"`
+	// Reason is OpenChoreo's own condition reason, carried verbatim for the
+	// issue body a failed deployment mints. Never branched on.
+	Reason string `json:"reason,omitempty"`
+}
+
 // MergeBuild is one component's build at a merge SHA, read back off its
 // WorkflowRun. Status and Completed are the run's own pair, carried verbatim:
 // OpenChoreo's status is a condition Reason string rather than a closed set, so

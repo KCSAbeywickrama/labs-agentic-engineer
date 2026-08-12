@@ -46,6 +46,11 @@ const (
 	cycleAgentDead
 	// cycleCancelled — a human abandoned the increment mid-cycle.
 	cycleCancelled
+	// cycleDeployFailed — merged and built, but a component's ReleaseBinding
+	// never came up. Distinct from cycleRed because the failure is a different
+	// class with a different terminal reason: the code compiled, the platform
+	// could not run it.
+	cycleDeployFailed
 	// cycleQuotaBlocked — the org has no agent-concurrency slot, so the cycle
 	// never launched. Not a failure and not a spent budget: the run settles
 	// blocked with an actionable message.
@@ -68,8 +73,10 @@ const (
 //	                                    ├─ conflict  ─► cycleConflict
 //	                                    ├─ no landing within the deadline ─► re-dispatch
 //	                                    └─ merged ─► wait for the fan-out's builds
-//	                                                 ├─ all green ─► cycleGreen
-//	                                                 └─ a component red ─► cycleRed
+//	                                                 ├─ a component red ─► cycleRed
+//	                                                 └─ all green ─► DEPLOY, then wait for Ready
+//	                                                                ├─ all ready ─► cycleGreen
+//	                                                                └─ a component failed ─► cycleDeployFailed
 //
 // anchorIssue is set only for the validation cycle: every other kind works the
 // milestone's whole working set, because a fix or conflict issue is ordinary
@@ -129,19 +136,35 @@ func (l *loop) runCycle(ctx workflow.Context, kind string, anchorIssue int) (cyc
 		return cycleNone, err
 	}
 	l.st.Phase = delivery.RunPhaseBuilding
-	res, err = l.awaitBuilds(ctx)
+	res, components, err := l.awaitBuilds(ctx)
 	if err != nil {
 		return cycleNone, err
 	}
-	if res == cycleGreen {
-		// Green is the first moment the managed-API trait config has somewhere to
-		// land: OpenChoreo builds the ReleaseBinding that carries it out of the
-		// workload the build's last step generates. Deliberately not on the red
-		// path — a component that did not build has no new binding to converge,
-		// and the fix cycle that follows will pass through here again.
-		l.syncAPITraits(ctx)
+	if res != cycleGreen {
+		return res, nil
 	}
-	return res, nil
+	// Built, not yet running. The deploy is the platform's own act — nothing
+	// promotes a release on its own — so the cycle is not over until the
+	// components this merge touched are serving. Everything downstream of a
+	// green cycle depends on that being true rather than merely requested:
+	// validation asserts against the deployment, and the version is called
+	// delivered on the strength of it.
+	l.st.Phase = delivery.RunPhaseDeploying
+	return l.deployCycle(ctx, components)
+}
+
+// deployCycle promotes the cycle's components and waits for them to serve.
+func (l *loop) deployCycle(ctx workflow.Context, components []string) (cycleResult, error) {
+	if len(components) == 0 {
+		// A validation cycle's pull request carries tests and a report and
+		// touches no component, so there is nothing to promote and nothing to
+		// wait for.
+		return cycleGreen, nil
+	}
+	if err := l.deploy(ctx, components); err != nil {
+		return cycleNone, err
+	}
+	return l.awaitDeployments(ctx, components)
 }
 
 // dispatchUntilLanded spends the cycle's re-dispatch budget trying to land a
@@ -253,17 +276,17 @@ func (l *loop) awaitLanding(ctx workflow.Context, deadline workflow.Future) land
 // fix belongs there too — at the point of creation, where the cause is still
 // known — and not in a timeout here, which could only report "something took too
 // long" about a run that was never going to start.
-func (l *loop) awaitBuilds(ctx workflow.Context) (cycleResult, error) {
+func (l *loop) awaitBuilds(ctx workflow.Context) (cycleResult, []string, error) {
 	for {
 		state, err := l.pollBuilds(ctx)
 		if err != nil {
-			return cycleNone, err
+			return cycleNone, nil, err
 		}
 		if len(state.Red) > 0 {
-			return cycleRed, nil
+			return cycleRed, state.Components, nil
 		}
 		if state.Green() {
-			return cycleGreen, nil
+			return cycleGreen, state.Components, nil
 		}
 
 		timerCtx, stop := workflow.WithCancel(ctx)
@@ -280,9 +303,80 @@ func (l *loop) awaitBuilds(ctx workflow.Context) (cycleResult, error) {
 		sel.Select(ctx)
 		stop()
 		if cancelled {
+			return cycleCancelled, nil, nil
+		}
+	}
+}
+
+// awaitDeployments waits for the promoted components to reach a verdict.
+//
+// Unlike awaitBuilds this stage HAS a deadline, and the difference is not
+// arbitrary. A WorkflowRun always terminates — the platform gives every build an
+// active deadline — so a build poll cannot wait forever by accident. A
+// ReleaseBinding is a continuously reconciled level with no terminal state at
+// all: an image that will never pull and a rollout that is thirty seconds from
+// Ready look identical from here, and the only thing that separates them is how
+// long you are prepared to wait.
+//
+// On expiry the cycle is treated as a deploy failure rather than a hang, which
+// puts a fix issue in the milestone and lets the loop's ordinary recovery run.
+func (l *loop) awaitDeployments(ctx workflow.Context, components []string) (cycleResult, error) {
+	deadlineCtx, stopDeadline := workflow.WithCancel(ctx)
+	defer stopDeadline()
+	deadline := workflow.NewTimer(deadlineCtx, deployReadyTimeout)
+	expired := false
+
+	for {
+		state, err := l.pollDeployments(ctx, components)
+		if err != nil {
+			return cycleNone, err
+		}
+		if len(state.Failed) > 0 {
+			l.deployFailures = state.Reasons
+			l.deployFailed = state.Failed
+			return cycleDeployFailed, nil
+		}
+		if state.Green() {
+			return cycleGreen, nil
+		}
+		if expired {
+			// Out of time with nothing settled. Reported as a failure of the
+			// components that have not come up, so the fix issue names them.
+			l.deployFailed = notReady(components, state)
+			return cycleDeployFailed, nil
+		}
+
+		timerCtx, stop := workflow.WithCancel(ctx)
+		cancelled := false
+		sel := workflow.NewSelector(ctx)
+		sel.AddReceive(l.cancel, func(c workflow.ReceiveChannel, _ bool) {
+			c.Receive(ctx, nil)
+			cancelled = true
+		})
+		for _, ch := range []workflow.ReceiveChannel{l.builds, l.workable, l.merged, l.conflict} {
+			sel.AddReceive(ch, func(c workflow.ReceiveChannel, _ bool) { c.Receive(ctx, nil) })
+		}
+		sel.AddFuture(workflow.NewTimer(timerCtx, deployPollInterval), func(workflow.Future) {})
+		sel.AddFuture(deadline, func(workflow.Future) { expired = true })
+		sel.Select(ctx)
+		stop()
+		if cancelled {
 			return cycleCancelled, nil
 		}
 	}
+}
+
+// notReady names the components that never reached a verdict, for the deadline
+// case. The state carries counts rather than names for the ready ones, so the
+// list is derived by elimination — which is correct here precisely because
+// anything that DID settle would have returned above.
+func notReady(components []string, state CycleDeployState) []string {
+	if state.Ready >= len(components) {
+		return nil
+	}
+	out := make([]string, 0, len(components)-state.Ready)
+	out = append(out, components...)
+	return out
 }
 
 // phaseFor names the read-model phase a cycle of this kind starts in.
@@ -333,6 +427,20 @@ func (l *loop) dispatch(ctx workflow.Context, kind string, anchorIssue int, cycl
 		CycleID:         cycleID,
 	}).Get(ctx, &jobRef)
 	return jobRef, err
+}
+
+func (l *loop) deploy(ctx workflow.Context, components []string) error {
+	return workflow.ExecuteActivity(activityCtx(ctx), (*Activities).DeployCycle, DeployCycleInput{
+		OrgID: l.in.OrgID, ProjectID: l.in.ProjectID, Components: components, CommitSHA: l.mergeSHA,
+	}).Get(ctx, nil)
+}
+
+func (l *loop) pollDeployments(ctx workflow.Context, components []string) (CycleDeployState, error) {
+	var state CycleDeployState
+	err := workflow.ExecuteActivity(activityCtx(ctx), (*Activities).PollCycleDeployments, DeployCycleInput{
+		OrgID: l.in.OrgID, ProjectID: l.in.ProjectID, Components: components, CommitSHA: l.mergeSHA,
+	}).Get(ctx, &state)
+	return state, err
 }
 
 func (l *loop) pollBuilds(ctx workflow.Context) (CycleBuildState, error) {

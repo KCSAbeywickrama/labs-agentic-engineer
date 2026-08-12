@@ -94,30 +94,36 @@ func (s *RuntimeConfigService) SetResourceCatalog(c resourceMarkerCatalog) {
 	s.catalog = c
 }
 
-// EmitForComponent computes the env-config.js content for the named
-// component and writes it onto each of the component's ReleaseBindings.
-// No-op when the component is not a web-app.
+// FilesForComponent computes the literal files the named component's
+// ReleaseBinding must carry — today just env-config.js, for a web app.
 //
-// Idempotent + best-effort. The OC client returns a soft no-op when no
-// ReleaseBindings exist yet — the cascade hook re-fires on every deploy
-// in the project so the file lands after the first build catches up.
-func (s *RuntimeConfigService) EmitForComponent(ctx context.Context, orgID, projectID, componentName string) error {
+// It COMPUTES and does not write. The binding has one writer (the deploy
+// stage), which asks for these values while it is composing the whole desired
+// state, so the file lands in the same object write as the release pin rather
+// than in a follow-up patch that had to wait for the binding to exist.
+//
+// `ready` is false when a required key could not be populated yet — typically a
+// dependency URL that resolves only once a sibling is serving. The caller must
+// then leave the field unmanaged: a partially populated window._env_ is worse
+// than a stale one, because the SPA's src/env.ts throws on it at module load.
+// A non-web-app component wants no files at all, which is (nil, true).
+func (s *RuntimeConfigService) FilesForComponent(ctx context.Context, orgID, projectID, componentName string) ([]openchoreo.WorkflowFileVar, bool, error) {
 	if s == nil {
-		return nil
+		return nil, true, nil
 	}
 	if orgID == "" || projectID == "" || componentName == "" {
-		return fmt.Errorf("runtime_config: empty orgID/projectID/componentName")
+		return nil, false, fmt.Errorf("runtime_config: empty orgID/projectID/componentName")
 	}
 
 	design, err := s.store.ReadDesign(ctx, orgID, projectID)
 	if err != nil {
 		if spec.IsNotFound(err) {
-			return nil
+			return nil, true, nil
 		}
-		return fmt.Errorf("runtime_config: read design: %w", err)
+		return nil, false, fmt.Errorf("runtime_config: read design: %w", err)
 	}
 	if design == nil {
-		return nil
+		return nil, true, nil
 	}
 
 	var match *spec.DesignComponent
@@ -128,84 +134,22 @@ func (s *RuntimeConfigService) EmitForComponent(ctx context.Context, orgID, proj
 		}
 	}
 	if match == nil || match.ComponentType != spec.ComponentTypeWebApplication {
-		return nil
+		return nil, true, nil
 	}
 
 	envValues, ready := s.buildEnvValues(ctx, orgID, projectID, match, design)
 	if !ready {
-		// One or more required keys couldn't be populated yet (transient
-		// OC error, SPA URL not resolved, etc.). DO NOT write a partial
-		// env-config.js — that would either blank previously valid keys
-		// or ship a window._env_ that the SPA's src/env.ts throws on at
-		// module load. The cascade hook re-fires on every deploy event,
-		// so the next sibling deploy (or this SPA's own follow-up
-		// reconcile) will retry.
-		slog.InfoContext(ctx, "runtime_config: required keys not yet ready; deferring env-config.js write",
-			"orgID", orgID,
-			"projectID", projectID,
-			"component", componentName,
-			"keys", sortedKeys(envValues),
-		)
-		return nil
+		slog.InfoContext(ctx, "runtime_config: required keys not yet ready; deferring env-config.js",
+			"orgID", orgID, "projectID", projectID, "component", componentName, "keys", sortedKeys(envValues))
+		return nil, false, nil
 	}
-	file := openchoreo.WorkflowFileVar{
+	slog.InfoContext(ctx, "runtime_config: env-config.js composed",
+		"orgID", orgID, "projectID", projectID, "component", componentName, "keys", sortedKeys(envValues))
+	return []openchoreo.WorkflowFileVar{{
 		Key:       "env-config.js",
 		MountPath: "/usr/share/nginx/html/",
 		Value:     renderEnvConfigJS(envValues),
-	}
-
-	if err := s.componentClient.UpdateComponentWorkflowFiles(ctx, orgID, projectID, componentName, []openchoreo.WorkflowFileVar{file}); err != nil {
-		return fmt.Errorf("runtime_config: update workflow files: %w", err)
-	}
-
-	slog.InfoContext(ctx, "emitting env-config.js",
-		"orgID", orgID,
-		"projectID", projectID,
-		"component", componentName,
-		"keys", sortedKeys(envValues),
-	)
-	return nil
-}
-
-// EmitForProjectSPAs re-emits env-config.js on every web-app component in
-// the project. Called from the dispatch cascade so that when ANY component
-// lands `deployed` (especially a sibling service whose external URL just
-// resolved), every SPA picks up the new value in its ReleaseBinding without
-// waiting for the SPA itself to re-deploy.
-//
-// Idempotent + best-effort: a failure on one component logs and continues.
-func (s *RuntimeConfigService) EmitForProjectSPAs(ctx context.Context, orgID, projectID string) error {
-	if s == nil {
-		return nil
-	}
-	if orgID == "" || projectID == "" {
-		return fmt.Errorf("runtime_config: empty orgID/projectID")
-	}
-	design, err := s.store.ReadDesign(ctx, orgID, projectID)
-	if err != nil {
-		if spec.IsNotFound(err) {
-			return nil
-		}
-		return fmt.Errorf("runtime_config: read design: %w", err)
-	}
-	if design == nil {
-		return nil
-	}
-	for _, c := range design.Components {
-		if c.ComponentType != spec.ComponentTypeWebApplication {
-			continue
-		}
-		k8sName := k8sname.ToK8sName(c.Name)
-		if err := s.EmitForComponent(ctx, orgID, projectID, k8sName); err != nil {
-			slog.WarnContext(ctx, "runtime_config: per-SPA emit failed; continuing",
-				"orgID", orgID,
-				"projectID", projectID,
-				"componentName", k8sName,
-				"error", err,
-			)
-		}
-	}
-	return nil
+	}}, true, nil
 }
 
 // buildEnvValues assembles the map that becomes `window._env_`.

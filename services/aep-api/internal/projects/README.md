@@ -12,7 +12,7 @@ flowchart LR
   API(["/api/v1"]) --> HTTP
   subgraph projects
     HTTP["httpapi — projectcrud · componentread · componentbuild · componentconfig · projectusage"]
-    ROOT["root — Service · ComponentService · ConfigService · TraitSyncService + shared HTTP vocab (httperrors.go)"]
+    ROOT["root — Service · ComponentService · ConfigService · DeploymentService + shared HTTP vocab (httperrors.go)"]
     HTTP --> ROOT
   end
   ROOT -->|Project/Component CRs · builds · deployments| OC[[OpenChoreo]]
@@ -24,7 +24,7 @@ flowchart LR
 
 ## Structure — flat-root domain
 Unlike `delivery` (kernel-root), `projects` is the flat-root-of-services shape `spec`/`organization` use: the
-services (`Service`, `ComponentService`, `ConfigService`, `TraitSyncService`) live in the root package
+services (`Service`, `ComponentService`, `ConfigService`, `DeploymentService`) live in the root package
 `projects`, so `Deps` sits in the root and `httpapi/` assembles the slices from it. The two merged features
 (project + component) had zero symbol collisions, so the domain is one flat package plus its HTTP slices.
 

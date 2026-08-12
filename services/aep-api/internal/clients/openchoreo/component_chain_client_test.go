@@ -227,6 +227,193 @@ func TestEnsureReleaseBinding_ConflictIsSuccess(t *testing.T) {
 	}
 }
 
+// ---- ApplyReleaseBinding ----------------------------------------------------
+
+// sampleDesiredBinding is a user component's full desired binding: the pin plus
+// every field the deploy stage owns.
+func sampleDesiredBinding() ReleaseBindingDesired {
+	return ReleaseBindingDesired{
+		ComponentName: chainTestComp,
+		Environment:   chainTestEnv,
+		ReleaseName:   chainTestRelease,
+		State:         ReleaseBindingStateActive,
+		TraitEnvironmentConfigs: map[string]map[string]interface{}{
+			"widgets-http": {"jwtAuth": map[string]interface{}{"enabled": true}},
+		},
+		Env:   []WorkflowEnvVarRef{{Key: "API_URL", Value: "http://x"}},
+		Files: []WorkflowFileVar{{Key: "env-config.js", MountPath: "/usr/share/nginx/html", Value: "window.x=1"}},
+	}
+}
+
+// The create path must carry the WHOLE desired state in the POST body. That is
+// the invariant the design rests on: a binding is never briefly renderable with
+// a trait attached whose per-environment config has not landed yet.
+func TestApplyReleaseBinding_CreateCarriesWholeDesiredState(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("unexpected method %s", r.Method)
+		}
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		writeJSON(t, w, http.StatusCreated, map[string]any{"metadata": map[string]any{"name": "x"}})
+	}))
+	defer srv.Close()
+
+	c := newTestComponentClient(t, srv)
+	if err := c.ApplyReleaseBinding(context.Background(), chainTestOrg, chainTestProject, sampleDesiredBinding()); err != nil {
+		t.Fatalf("ApplyReleaseBinding: %v", err)
+	}
+	spec, _ := gotBody["spec"].(map[string]any)
+	if spec["releaseName"] != chainTestRelease {
+		t.Errorf("releaseName = %v, want the pin in the create body", spec["releaseName"])
+	}
+	if spec["state"] != ReleaseBindingStateActive {
+		t.Errorf("state = %v, want Active", spec["state"])
+	}
+	if _, ok := spec["traitEnvironmentConfigs"].(map[string]any); !ok {
+		t.Errorf("traitEnvironmentConfigs missing from the create body: %v", spec)
+	}
+	overrides, ok := spec["workloadOverrides"].(map[string]any)
+	if !ok {
+		t.Fatalf("workloadOverrides missing from the create body: %v", spec)
+	}
+	container, _ := overrides["container"].(map[string]any)
+	if container["env"] == nil || container["files"] == nil {
+		t.Errorf("env/files missing from the create body: %v", container)
+	}
+}
+
+// A binding that already exists is CONVERGED, not left alone — re-pinning it is
+// what a redeploy is. This is the behaviour that separates Apply from Ensure.
+func TestApplyReleaseBinding_ConflictConvergesViaPut(t *testing.T) {
+	var methods []string
+	var putBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		methods = append(methods, r.Method)
+		switch r.Method {
+		case http.MethodPost:
+			writeJSON(t, w, http.StatusConflict, map[string]string{"error": "already exists"})
+		case http.MethodGet:
+			writeJSON(t, w, http.StatusOK, map[string]any{
+				"metadata": map[string]any{"name": ReleaseBindingName(chainTestProject, chainTestComp, chainTestEnv)},
+				"spec": map[string]any{
+					"environment": chainTestEnv,
+					"owner":       map[string]any{"componentName": chainScopedName(), "projectName": chainTestProject},
+					"releaseName": "an-older-release",
+					// A field this caller does not own — it must survive the write.
+					"componentTypeEnvironmentConfigs": map[string]any{"keep": "me"},
+				},
+			})
+		case http.MethodPut:
+			_ = json.NewDecoder(r.Body).Decode(&putBody)
+			writeJSON(t, w, http.StatusOK, map[string]any{"metadata": map[string]any{"name": "x"}})
+		}
+	}))
+	defer srv.Close()
+
+	c := newTestComponentClient(t, srv)
+	if err := c.ApplyReleaseBinding(context.Background(), chainTestOrg, chainTestProject, sampleDesiredBinding()); err != nil {
+		t.Fatalf("ApplyReleaseBinding: %v", err)
+	}
+	if len(methods) != 3 || methods[0] != http.MethodPost || methods[1] != http.MethodGet || methods[2] != http.MethodPut {
+		t.Fatalf("expected POST→GET→PUT, got %v", methods)
+	}
+	spec, _ := putBody["spec"].(map[string]any)
+	if spec["releaseName"] != chainTestRelease {
+		t.Errorf("releaseName = %v, want the new pin", spec["releaseName"])
+	}
+	if _, ok := spec["componentTypeEnvironmentConfigs"]; !ok {
+		t.Error("the update dropped a field this caller does not own")
+	}
+}
+
+// A caller that manages only the pin (the ephemeral coding-agent path) must not
+// erase the fields it left nil.
+func TestApplyReleaseBinding_NilFieldsAreUnmanaged(t *testing.T) {
+	var putBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPost:
+			writeJSON(t, w, http.StatusConflict, map[string]string{"error": "already exists"})
+		case http.MethodGet:
+			writeJSON(t, w, http.StatusOK, map[string]any{
+				"metadata": map[string]any{"name": ReleaseBindingName(chainTestProject, chainTestComp, chainTestEnv)},
+				"spec": map[string]any{
+					"environment":             chainTestEnv,
+					"owner":                   map[string]any{"componentName": chainScopedName(), "projectName": chainTestProject},
+					"traitEnvironmentConfigs": map[string]any{"someone-elses": map[string]any{"a": 1}},
+				},
+			})
+		case http.MethodPut:
+			_ = json.NewDecoder(r.Body).Decode(&putBody)
+			writeJSON(t, w, http.StatusOK, map[string]any{"metadata": map[string]any{"name": "x"}})
+		}
+	}))
+	defer srv.Close()
+
+	c := newTestComponentClient(t, srv)
+	err := c.ApplyReleaseBinding(context.Background(), chainTestOrg, chainTestProject, ReleaseBindingDesired{
+		ComponentName: chainTestComp,
+		Environment:   chainTestEnv,
+		ReleaseName:   chainTestRelease,
+	})
+	if err != nil {
+		t.Fatalf("ApplyReleaseBinding: %v", err)
+	}
+	spec, _ := putBody["spec"].(map[string]any)
+	configs, ok := spec["traitEnvironmentConfigs"].(map[string]any)
+	if !ok || configs["someone-elses"] == nil {
+		t.Errorf("a nil TraitEnvironmentConfigs erased the existing map: %v", spec)
+	}
+}
+
+// ---- GetReleaseBindingStatus ------------------------------------------------
+
+func TestGetReleaseBindingStatus_ReadsReadyCondition(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(t, w, http.StatusOK, map[string]any{
+			"metadata": map[string]any{"name": ReleaseBindingName(chainTestProject, chainTestComp, chainTestEnv)},
+			"spec": map[string]any{
+				"environment": chainTestEnv,
+				"owner":       map[string]any{"componentName": chainScopedName(), "projectName": chainTestProject},
+			},
+			"status": map[string]any{
+				"conditions": []any{
+					map[string]any{"type": "Ready", "status": "False", "reason": "RenderFailed"},
+				},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	c := newTestComponentClient(t, srv)
+	got, err := c.GetReleaseBindingStatus(context.Background(), chainTestOrg, chainTestProject, chainTestComp, chainTestEnv)
+	if err != nil {
+		t.Fatalf("GetReleaseBindingStatus: %v", err)
+	}
+	if got == nil || got.ReadyStatus != "False" || got.ReadyReason != "RenderFailed" {
+		t.Errorf("unexpected summary: %+v", got)
+	}
+}
+
+// A binding that has not been admitted yet is "not ready", not an error — the
+// poll has to be able to keep waiting on it.
+func TestGetReleaseBindingStatus_NotFoundIsNilNil(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(t, w, http.StatusNotFound, map[string]string{"error": "not found"})
+	}))
+	defer srv.Close()
+
+	c := newTestComponentClient(t, srv)
+	got, err := c.GetReleaseBindingStatus(context.Background(), chainTestOrg, chainTestProject, chainTestComp, chainTestEnv)
+	if err != nil {
+		t.Fatalf("expected no error for an absent binding, got %v", err)
+	}
+	if got != nil {
+		t.Errorf("expected nil summary, got %+v", got)
+	}
+}
+
 func TestEnsureReleaseBinding_ServerErrorWrapsSentinel(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(t, w, http.StatusInternalServerError, map[string]string{"error": "boom"})

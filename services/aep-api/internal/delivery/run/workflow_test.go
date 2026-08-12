@@ -17,7 +17,6 @@
 package run
 
 import (
-	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -72,6 +71,10 @@ type harness struct {
 	states     []string
 	settle     SettleRunInput
 	verdicts   []string
+	// deploys records every promote the loop asked for, and deployMints every
+	// deploy-fix filing.
+	deploys     []DeployCycleInput
+	deployMints []MintDeployFixIssuesInput
 	// traitSyncs records every managed-API trait convergence the loop asked for,
 	// so a test can assert WHEN it fires rather than merely that it was wired.
 	traitSyncs []ProjectRef
@@ -110,7 +113,9 @@ func newHarness(t *testing.T) *harness {
 	h.env.RegisterActivity(acts.ReadValidationVerdict)
 	h.env.RegisterActivity(acts.MintValidationRepairIssues)
 	h.env.RegisterActivity(acts.DispatchAgent)
-	h.env.RegisterActivity(acts.SyncAPITraits)
+	h.env.RegisterActivity(acts.DeployCycle)
+	h.env.RegisterActivity(acts.PollCycleDeployments)
+	h.env.RegisterActivity(acts.MintDeployFixIssues)
 
 	h.env.OnActivity(acts.SetRunState, mock.Anything, mock.Anything).
 		Run(func(args mock.Arguments) {
@@ -166,25 +171,52 @@ func (h *harness) dispatchIs(jobRef string, err error) {
 		}).Return(jobRef, err)
 }
 
-// traitSyncIs pins what the managed-API convergence answers. Registered per
-// test rather than as a constructor default so a test can make it fail — the
-// harness consumes expectations in registration order, so an unlimited default
-// set in newHarness would swallow the override.
-func (h *harness) traitSyncIs(err error) {
-	h.set["traits"] = true
-	h.env.OnActivity(h.acts.SyncAPITraits, mock.Anything, mock.Anything).
+// deployIs pins what promoting the cycle's components answers. Registered per
+// test rather than as a constructor default for the reason dispatchIs gives:
+// the harness consumes expectations in registration order.
+func (h *harness) deployIs(err error) {
+	h.set["deploy"] = true
+	h.env.OnActivity(h.acts.DeployCycle, mock.Anything, mock.Anything).
 		Run(func(args mock.Arguments) {
 			h.mu.Lock()
 			defer h.mu.Unlock()
-			h.traitSyncs = append(h.traitSyncs, args.Get(1).(ProjectRef))
-		}).Return(err)
+			h.deploys = append(h.deploys, args.Get(1).(DeployCycleInput))
+		}).Return([]delivery.ComponentDeploy(nil), err)
 }
 
-// traitSyncCount is the convergence tally, read safely.
-func (h *harness) traitSyncCount() int {
+// deploymentsAre queues the readiness polls, in order; the last repeats.
+func (h *harness) deploymentsAre(states ...CycleDeployState) {
+	h.set["deployments"] = true
+	for i, st := range states {
+		call := h.env.OnActivity(h.acts.PollCycleDeployments, mock.Anything, mock.Anything).Return(st, nil)
+		if i < len(states)-1 {
+			call.Once()
+		}
+	}
+}
+
+// deployMintsAre pins what filing deploy-fix work answers.
+func (h *harness) deployMintsAre(filed []int) {
+	h.set["deployMint"] = true
+	h.env.OnActivity(h.acts.MintDeployFixIssues, mock.Anything, mock.Anything).
+		Run(func(args mock.Arguments) {
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			h.deployMints = append(h.deployMints, args.Get(1).(MintDeployFixIssuesInput))
+		}).Return(filed, nil)
+}
+
+// deployCount / deployMintCount are the tallies, read safely.
+func (h *harness) deployCount() int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return len(h.traitSyncs)
+	return len(h.deploys)
+}
+
+func (h *harness) deployMintCount() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return len(h.deployMints)
 }
 
 // milestoneIs queues the cycle-boundary polls, in order. The last one repeats
@@ -277,7 +309,7 @@ func (h *harness) applyDefaults() {
 		h.mergesAt(testMergeSHA)
 	}
 	if !h.set["builds"] {
-		h.buildsAre(CycleBuildState{Expected: 1, Settled: 1})
+		h.buildsAre(CycleBuildState{Expected: 1, Settled: 1, Components: []string{"order-service"}})
 	}
 	if !h.set["validation"] {
 		h.validationIs(0, delivery.ValidationVerdictSkipped)
@@ -288,8 +320,14 @@ func (h *harness) applyDefaults() {
 	if !h.set["milestone"] {
 		h.milestoneIs(MilestoneSnapshot{})
 	}
-	if !h.set["traits"] {
-		h.traitSyncIs(nil)
+	if !h.set["deploy"] {
+		h.deployIs(nil)
+	}
+	if !h.set["deployments"] {
+		h.deploymentsAre(CycleDeployState{Expected: 1, Ready: 1})
+	}
+	if !h.set["deployMint"] {
+		h.deployMintsAre([]int{testRepairIssue})
 	}
 }
 
@@ -429,14 +467,11 @@ func TestFixCycle_RedBuildBecomesTheNextCyclesWork(t *testing.T) {
 	require.Equal(t, []string{delivery.CycleKindCoding, delivery.CycleKindFix}, h.dispatchKinds())
 }
 
-// TestBuildsGreen_ConvergesTheManagedAPIGatewayPolicy pins the trigger this
-// loop now owns. The `api-configuration` trait's per-environment half — the
-// `jwtAuth` policy the gateway enforces — is written to the ReleaseBinding,
-// which OpenChoreo creates from the workload the build's last step generates.
-// Builds going green is therefore the first moment in a run where the write has
-// a target, and the loop must take it: nothing else on this rail does, which is
-// how protected APIs came to serve unauthenticated.
-func TestBuildsGreen_ConvergesTheManagedAPIGatewayPolicy(t *testing.T) {
+// TestBuildsGreen_DeploysBeforeSettling pins the stage this loop now owns. A
+// version is not delivered when its builds are green — it is delivered when its
+// components are SERVING — so the cycle promotes the release itself and waits
+// for the binding to be Ready before the boundary can settle the run.
+func TestBuildsGreen_DeploysBeforeSettling(t *testing.T) {
 	h := newHarness(t)
 	h.milestoneIs(MilestoneSnapshot{Work: 1, Total: 1}, MilestoneSnapshot{})
 	h.merges(1)
@@ -445,15 +480,17 @@ func TestBuildsGreen_ConvergesTheManagedAPIGatewayPolicy(t *testing.T) {
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
-	require.Equal(t, []ProjectRef{{OrgID: testOrg, ProjectID: testProject}}, h.traitSyncs,
-		"a green cycle converges the project's managed-API policy exactly once")
+	require.Equal(t, 1, h.deployCount(), "a green cycle promotes its components exactly once")
+	require.Equal(t, []string{"order-service"}, h.deploys[0].Components,
+		"the deploy promotes the components the BUILD poll reported, not a re-derived set")
+	require.Equal(t, testMergeSHA, h.deploys[0].CommitSHA,
+		"the promote is pinned to the cycle's own merge commit")
 }
 
-// TestRedBuild_ConvergesOnlyOnceItGoesGreen: a red cycle produced no new
-// ReleaseBinding, so there is nothing to converge and the loop must not spend a
-// round trip pretending otherwise. The fix cycle that follows passes through the
-// same green path and does the write then.
-func TestRedBuild_ConvergesOnlyOnceItGoesGreen(t *testing.T) {
+// TestRedBuild_DoesNotDeploy: a component that did not build has no image to
+// promote, so the red cycle must not reach the deploy stage at all. The fix
+// cycle that follows passes through the green path and promotes then.
+func TestRedBuild_DoesNotDeploy(t *testing.T) {
 	h := newHarness(t)
 	h.milestoneIs(
 		MilestoneSnapshot{Work: 1, Total: 1},
@@ -461,8 +498,8 @@ func TestRedBuild_ConvergesOnlyOnceItGoesGreen(t *testing.T) {
 		MilestoneSnapshot{},
 	)
 	h.buildsAre(
-		CycleBuildState{Expected: 1, Settled: 1, Red: []string{"order-service"}},
-		CycleBuildState{Expected: 1, Settled: 1},
+		CycleBuildState{Expected: 1, Settled: 1, Red: []string{"order-service"}, Components: []string{"order-service"}},
+		CycleBuildState{Expected: 1, Settled: 1, Components: []string{"order-service"}},
 	)
 	h.merges(2)
 
@@ -470,26 +507,110 @@ func TestRedBuild_ConvergesOnlyOnceItGoesGreen(t *testing.T) {
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
-	require.Equal(t, 1, h.traitSyncCount(),
-		"only the green cycle converges; the red one had no binding to write to")
+	require.Equal(t, 1, h.deployCount(), "only the green cycle promotes")
 }
 
-// TestTraitSyncFailure_DoesNotFailTheRun pins the deliberate asymmetry: the
-// convergence is retried under its own deadline, but its exhaustion is logged,
-// not fatal. Failing the cycle would not undo the exposure — the component is
-// already deployed and serving by the time this runs — so a red run would add
-// noise without removing it. Only a later convergence removes it.
-func TestTraitSyncFailure_DoesNotFailTheRun(t *testing.T) {
+// TestDeployFailed_BecomesTheNextCyclesWork is the recovery shape a failed
+// deployment shares with a red build: the supervisor files the fix work (nothing
+// else can — a ReleaseBinding produces no webhook), and the next cycle picks it
+// out of the working set like any other issue.
+func TestDeployFailed_BecomesTheNextCyclesWork(t *testing.T) {
 	h := newHarness(t)
-	h.milestoneIs(MilestoneSnapshot{Work: 1, Total: 1}, MilestoneSnapshot{})
-	h.traitSyncIs(errors.New("openchoreo unreachable"))
-	h.merges(1)
+	h.milestoneIs(
+		MilestoneSnapshot{Work: 1, Total: 1}, // dispatch
+		MilestoneSnapshot{Work: 1, Total: 1}, // the deploy-fix issue
+		MilestoneSnapshot{},                  // delivered
+	)
+	h.deploymentsAre(
+		CycleDeployState{Expected: 1, Failed: []string{"order-service"}, Reasons: map[string]string{"order-service": "RenderingFailed"}},
+		CycleDeployState{Expected: 1, Ready: 1},
+	)
+	h.merges(2)
 
 	h.run(delivery.RunOriginSpecBuild, 0)
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
-	require.Positive(t, h.traitSyncCount(), "the convergence was attempted")
+	require.Equal(t, []string{delivery.CycleKindCoding, delivery.CycleKindFix}, h.dispatchKinds(),
+		"a failed deployment recovers through an ordinary fix cycle")
+	require.Equal(t, 1, h.deployMintCount(), "the supervisor files the deploy-fix work itself")
+	require.Equal(t, []string{"order-service"}, h.deployMints[0].Components)
+	require.Equal(t, "RenderingFailed", h.deployMints[0].Reasons["order-service"],
+		"OpenChoreo's own reason reaches the issue body")
+}
+
+// TestDeployFailed_WithNoRecovery_SettlesOnTheDeployBudget: the components built
+// but never came up and nothing joined the milestone to fix them. The run must
+// NOT settle delivered — a version that compiled and does not run is exactly the
+// state that would otherwise be mistaken for success.
+func TestDeployFailed_WithNoRecovery_SettlesOnTheDeployBudget(t *testing.T) {
+	h := newHarness(t)
+	h.milestoneIs(
+		MilestoneSnapshot{Work: 1, Total: 1}, // dispatch
+		MilestoneSnapshot{},                  // nothing came back to fix it
+	)
+	h.deploymentsAre(CycleDeployState{Expected: 1, Failed: []string{"order-service"}})
+	h.deployMintsAre(nil)
+	h.merges(1)
+
+	h.run(delivery.RunOriginSpecBuild, 0)
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonDeployBudget)
+}
+
+// TestValidationCycle_TouchesNoComponent_SkipsDeploy: a validation cycle's pull
+// request carries tests and a report, so there is nothing to promote. The stage
+// must be a no-op rather than waiting for a binding that will never change.
+func TestValidationCycle_TouchesNoComponent_SkipsDeploy(t *testing.T) {
+	h := newHarness(t)
+	h.milestoneIs(
+		MilestoneSnapshot{Work: 1, Total: 1}, // the coding cycle
+		MilestoneSnapshot{},                  // deployed-green: validation follows
+	)
+	h.buildsAre(
+		CycleBuildState{Expected: 1, Settled: 1, Components: []string{"order-service"}},
+		CycleBuildState{}, // the validation cycle's merge touched nothing
+	)
+	h.validationIs(77, delivery.ValidationVerdictPassed)
+	h.merges(2)
+
+	h.run(delivery.RunOriginSpecBuild, 0)
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
+	require.Equal(t, 1, h.deployCount(),
+		"only the coding cycle promotes; the validation cycle has nothing to deploy")
+}
+
+// TestDeployNeverReady_ExpiresIntoAFixIssue pins the loop's SECOND deadline and
+// why it exists.
+//
+// awaitBuilds can wait forever safely because a WorkflowRun always terminates.
+// A ReleaseBinding never does: it is a level OpenChoreo reconciles continuously,
+// so an image that will never pull and a rollout thirty seconds from Ready are
+// indistinguishable from inside the loop. Without a deadline the run hangs on
+// the first one; with it, a stuck deployment becomes ordinary fix work.
+func TestDeployNeverReady_ExpiresIntoADeployFailure(t *testing.T) {
+	h := newHarness(t)
+	h.milestoneIs(
+		MilestoneSnapshot{Work: 1, Total: 1}, // dispatch
+		MilestoneSnapshot{},                  // nothing recovered it
+	)
+	// Neither Ready nor Failed, ever: the rollout that never lands. Only the
+	// deadline can end this — which is the whole point of having one here.
+	h.deploymentsAre(CycleDeployState{Expected: 1})
+	h.deployMintsAre(nil)
+	h.merges(1)
+
+	h.run(delivery.RunOriginSpecBuild, 0)
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonDeployBudget)
+	require.Positive(t, h.deployMintCount(),
+		"the expiry files fix work rather than hanging the run")
+	require.Equal(t, []string{"order-service"}, h.deployMints[0].Components,
+		"the components that never came up are the ones named")
 }
 
 // TestConflictCycle_AnUnmergeablePRBecomesTheNextCyclesWork is the same shape

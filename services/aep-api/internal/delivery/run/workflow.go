@@ -41,19 +41,29 @@ const (
 	// terminals arrive as signals, and this is what makes a lost one survivable.
 	buildPollInterval = time.Minute
 
+	// deployPollInterval re-reads the cycle's ReleaseBindings. Nothing signals a
+	// deployment — it is a level OpenChoreo reconciles continuously, with no
+	// event to deliver — so unlike the build poll this is the ONLY way the stage
+	// learns anything, not a backstop for a lost delivery.
+	deployPollInterval = 15 * time.Second
+
+	// deployReadyTimeout bounds the wait for a cycle's components to serve.
+	//
+	// The loop's second real deadline, and the only other one besides
+	// cycleLandingTimeout. It exists because a ReleaseBinding never terminates:
+	// a build always finishes, so awaitBuilds can wait forever safely, but an
+	// image that will never pull and a rollout thirty seconds from Ready are
+	// indistinguishable from outside. Generous enough to cover a cold image pull
+	// on a laptop-sized cluster; short enough that a broken deployment becomes a
+	// fix issue inside one coffee break rather than hanging the version.
+	deployReadyTimeout = 15 * time.Minute
+
 	// cycleLandingTimeout is how long ONE dispatch has to land a merged pull
 	// request before the supervisor calls it agent death and spends a
 	// re-dispatch. It is the only deadline in the loop, and it exists because
 	// "the agent died" (including a Job that exited without opening a pull
 	// request) is a named failure class with a named budget.
 	cycleLandingTimeout = 2 * time.Hour
-
-	// traitSyncTimeout bounds the WHOLE managed-API trait sync including its
-	// retries. It is bounded rather than left to Temporal's unlimited default
-	// because the sync is a convergence step, not a step the version depends on:
-	// a cycle must not hang on it. See syncAPITraits for what happens when it
-	// runs out.
-	traitSyncTimeout = 5 * time.Minute
 )
 
 // RunInput starts a supervisor over one milestone. Everything in it is already
@@ -125,6 +135,15 @@ type loop struct {
 	// record rather than from the signal that announced it.
 	prNumber int
 	mergeSHA string
+
+	// deployFailed / deployFailures carry the last deploy stage's verdict from
+	// the cycle into the issue the boundary mints for it. Held on the loop rather
+	// than returned through cycleResult because every other failure class already
+	// has its issue minted for it by the EVENT PLANE, which sees the failure
+	// first-hand; a deployment has no webhook, so the supervisor is the only
+	// thing that ever knows which component did not come up.
+	deployFailed   []string
+	deployFailures map[string]string
 	// cycleID is the current cycle's record id. Surfaced on the loop because the
 	// verdict write lands after runCycle has returned.
 	cycleID string
@@ -235,6 +254,15 @@ func (l *loop) run(ctx workflow.Context) (RunResult, error) {
 			return l.settle(ctx, delivery.RunStateFailed, delivery.RunReasonRedispatchBudget)
 		case cycleQuotaBlocked:
 			return l.settle(ctx, delivery.RunStateBlocked, delivery.RunReasonAgentQuotaBlocked)
+		case cycleDeployFailed:
+			// File the work before looping. Unlike a red build or a conflict —
+			// where the event plane has already minted the issue by the time the
+			// supervisor hears about it — nothing else observes a deployment, so
+			// if this does not mint, the next boundary finds an empty working set
+			// and settles a run whose version is not running.
+			if err := l.mintDeployFixIssues(ctx); err != nil {
+				return l.result(), err
+			}
 		}
 		l.lastResult = res
 	}
@@ -302,6 +330,13 @@ func (l *loop) onEmptyWorkingSet(ctx workflow.Context) (settled bool, res RunRes
 		// Same shape: the pull request would not merge and no conflict issue
 		// arrived to rebase it.
 		res, err = l.settle(ctx, delivery.RunStateFailed, delivery.RunReasonConflictBudget)
+		return true, res, err
+	case cycleDeployFailed:
+		// The components built but never came up, and nothing joined the
+		// milestone to fix them. Deliberately NOT settled as delivered: the
+		// version compiled, which is exactly the state that would otherwise be
+		// mistaken for success.
+		res, err = l.settle(ctx, delivery.RunStateFailed, delivery.RunReasonDeployBudget)
 		return true, res, err
 	}
 
@@ -409,6 +444,13 @@ func (l *loop) runValidation(ctx workflow.Context) (settled bool, res RunResult,
 		return true, res, err
 	case cycleQuotaBlocked:
 		res, err = l.settle(ctx, delivery.RunStateBlocked, delivery.RunReasonAgentQuotaBlocked)
+		return true, res, err
+	case cycleDeployFailed:
+		// A validation cycle touches no component, so its deploy stage is a
+		// no-op and this is unreachable in practice. Handled anyway: the
+		// alternative is falling through to read a verdict from a cycle that did
+		// not finish.
+		res, err = l.settle(ctx, delivery.RunStateFailed, delivery.RunReasonDeployBudget)
 		return true, res, err
 	}
 
@@ -710,40 +752,32 @@ func dispatchActivityCtx(ctx workflow.Context) workflow.Context {
 	})
 }
 
-// traitSyncActivityCtx retries the managed-API trait sync under an overall
-// deadline. Retries are wanted — the failures this sees are transient
-// OpenChoreo round trips, and the previous owner of this write dropped them
-// silently — but they are bounded, because no part of delivering the version
-// depends on the answer.
-func traitSyncActivityCtx(ctx workflow.Context) workflow.Context {
-	return workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
-		StartToCloseTimeout:    activityTimeout,
-		ScheduleToCloseTimeout: traitSyncTimeout,
-	})
-}
-
-// syncAPITraits converges the managed-API gateway policy for the project after
-// a cycle's builds go green.
+// mintDeployFixIssues files one issue per component that did not come up, so the
+// next cycle can work it like any other fix.
 //
-// It NEVER fails the cycle. The reason is not that the write is unimportant —
-// an unset `jwtAuth` leaves a protected API's gateway passing every request
-// through unauthenticated — but that failing here would not undo it: the
-// component is already deployed and serving by the time this runs, so a red
-// cycle would add noise without removing exposure. Only convergence removes it,
-// which is why the outcome is logged loudly and left to be re-asserted.
-//
-// This is the interim trigger. It is coupled to THIS build rail, which is
-// exactly how its predecessor died — the trait sync used to hang off the
-// ExecWatcher's build terminal, and stopped firing the moment builds moved to
-// this loop and stopped writing the execution rows that watcher reads. A
-// rail-agnostic reconcile sweep is what makes the guarantee; this only makes it
-// prompt.
-func (l *loop) syncAPITraits(ctx workflow.Context) {
-	err := workflow.ExecuteActivity(traitSyncActivityCtx(ctx), (*Activities).SyncAPITraits,
-		ProjectRef{OrgID: l.in.OrgID, ProjectID: l.in.ProjectID}).Get(ctx, nil)
-	if err != nil {
-		workflow.GetLogger(ctx).Error(
-			"managed-API trait sync did not converge; protected APIs in this project may be serving unauthenticated",
-			"orgID", l.in.OrgID, "projectID", l.in.ProjectID, "error", err)
+// This is the supervisor minting an issue, which it does nowhere else — every
+// other recovery issue belongs to the event plane, which observes the failure
+// through a webhook. A deployment produces no webhook, so there is no event
+// plane to route this through, and a failure nobody files is a failure the loop
+// forgets on its next boundary poll.
+func (l *loop) mintDeployFixIssues(ctx workflow.Context) error {
+	if len(l.deployFailed) == 0 {
+		return nil
 	}
+	err := workflow.ExecuteActivity(activityCtx(ctx), (*Activities).MintDeployFixIssues,
+		MintDeployFixIssuesInput{
+			OrgID:           l.in.OrgID,
+			ProjectID:       l.in.ProjectID,
+			MilestoneNumber: l.in.MilestoneNumber,
+			Components:      l.deployFailed,
+			Reasons:         l.deployFailures,
+			CommitSHA:       l.mergeSHA,
+		}).Get(ctx, nil)
+	if err != nil {
+		return err
+	}
+	workflow.GetLogger(ctx).Info("deployment failed; filed fix work",
+		"components", l.deployFailed, "commit", l.mergeSHA)
+	l.deployFailed, l.deployFailures = nil, nil
+	return nil
 }
