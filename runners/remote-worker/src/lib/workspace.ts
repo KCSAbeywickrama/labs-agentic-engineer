@@ -16,10 +16,10 @@
  * under the License.
  */
 
-// Per-task workspace provisioning.
+// Per-cycle workspace provisioning.
 //
-// On dispatch the BFF creates a WorkflowRun of `aep-coding-agent`
-// and Argo schedules an ephemeral pod whose entrypoint (src/oneshot.ts)
+// On dispatch the BFF creates an OpenChoreo coding-agent Job Component and
+// the dataplane schedules an ephemeral pod whose entrypoint (src/oneshot.ts)
 // calls this function. We clone the project's repo on its **default
 // branch** into $WORKSPACE_BASE_PATH/<orgId>/<projectId>/<taskId>/ and
 // configure `.git/config` + `gh` so the agent can git/gh against GitHub
