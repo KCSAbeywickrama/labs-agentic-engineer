@@ -14,9 +14,11 @@
 The OpenChoreo control-plane namespace minted **once per organization** when
 the org subscribes to a product. Created by wso2cloud's `ou` service
 (`backend/core/internal/ou/util/namespace.go::GenerateNamespaceName`) via the
-OC CP API. All OC CRs the platform authors for an org (Project, Component,
-Workload, ReleaseBinding, SecretReference) live here, on cluster
-`cloud-dp-oc-cp`.
+OC CP API. Project, Component, Workload, and ReleaseBinding CRs live here on
+cluster `cloud-dp-oc-cp`. Local OSS uses the OC org handle (`default`) as
+this CP namespace. The `wc-…` string is *also* the vault path segment
+(`OrgBaseNamespace`); that is not automatically the SecretReference CR
+namespace — see SecretReference.
 
 ### `org-env NS` (DP) — `wc-<orgUUID8>-<orgHash8>-<env>`
 The data-plane namespace minted **once per (org, env)** by wso2cloud's `ou`
@@ -60,10 +62,17 @@ handle).
 ## Secrets
 
 ### `SecretReference`
-An OpenChoreo CR (`openchoreo.dev/v1alpha1`) authored in the **org NS** (CP)
-that points at a KV path in the central secret backend. ESO materializes it
-into a K8s `Secret` in the consuming-plane NS. Only the reference (KV path)
-crosses plane boundaries; the value never does.
+An OpenChoreo CR (`openchoreo.dev/v1alpha1`) that points at a KV path in the
+central secret backend. It **must live in the same control-plane namespace
+as the Workload/ReleaseBinding that `secretKeyRef`s it** — OpenChoreo
+ReleaseBinding collect looks up the CR in `releaseBinding.Namespace`, not
+in the vault path. On local OSS that CP namespace is the OC org handle
+(`default`); on cloud it is the org NS. `OrgBaseNamespace` (`wc-…`) is
+only the vault path segment (`user-app-secrets/<wc-…>/<name>`). Do not
+author the CR into `wc-…` unless that is also the Workload's CP
+namespace. ESO materializes the reference into a K8s `Secret` in the
+consuming-plane NS. Only the reference (KV path) crosses plane boundaries;
+the value never does.
 
 ### `GitSecret`
 An OpenChoreo CR for build credentials, bound to `ClusterWorkflowPlane/default`
@@ -87,7 +96,9 @@ AEP selects one secrets provider per process (no fallback chain):
 - **Local / OSS:** in-process OpenBao-direct provider when `OPENBAO_ADDR` (and
   `OPENBAO_TOKEN`) are set. The provider writes KV only
   (`ManagesSecretReferences()=false`); the high-level client authors
-  `SecretReference` CRs via OpenChoreo. See `services/aep-api/design/composition-seam.md`.
+  `SecretReference` CRs via OpenChoreo into the Workload control-plane
+  namespace (not the vault `wc-…` segment). See
+  `services/aep-api/design/composition-seam.md`.
 
 ### `OpenBao`
 HashiCorp Vault fork. Local/OSS secret KV backend behind the
