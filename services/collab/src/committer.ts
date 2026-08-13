@@ -145,6 +145,10 @@ export function pendingChanges(
   }
   for (const [path, base] of state.baseline) {
     if (current[path] !== undefined) continue;
+    // References are never in the doc BY DESIGN, so "absent from the doc"
+    // must not mean "delete from git" for them — that reading removed two
+    // uploaded documents from a real repo.
+    if (isReferenceDocPath(path)) continue;
     if (isMarkdownPath(path)) continue; // fragments never vanish; guard anyway
     if (base.sha === "") continue; // never reached git — nothing to delete
     deletes.push({ path, baseSha: base.sha });
@@ -254,7 +258,10 @@ export async function flushRoom(
           `committer: ${documentName} conflict on ${err.paths.join(", ")} — re-applying (doc wins)`,
         );
         const head = await deps.bff.fetchSpecFiles(token, state.projectName);
-        for (const f of head) {
+        // Same exclusion as the seed: HEAD carries the reference documents,
+        // and adopting them into the baseline is how they reached the delete
+        // loop in the first place.
+        for (const f of head.filter((h) => !isReferenceDocPath(h.path))) {
           const base = state.baseline.get(f.path);
           state.baseline.set(f.path, {
             // Keep OUR notion of content (so the diff still sees the doc's
