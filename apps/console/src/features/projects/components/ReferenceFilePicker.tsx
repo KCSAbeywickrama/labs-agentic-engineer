@@ -107,7 +107,10 @@ export function ReferenceFilePicker({
           color="text.secondary"
           sx={{ display: "block", mt: 1 }}
         >
-          .md, .txt, .pdf, .png, .jpg — up to {MAX_REFERENCE_FILES} files, 5 MB each
+          {/* Read off the input's own accept list, so the hint cannot drift from
+              what the picker actually takes (it had already lost .jpeg). */}
+          {REFERENCE_ACCEPT.split(",").join(", ")} — up to {MAX_REFERENCE_FILES}{" "}
+          files, 5 MB each
         </Typography>
       </Box>
       {files.length > 0 && (

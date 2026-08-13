@@ -21,9 +21,10 @@ import type { components } from "../../../generated/aep-api";
 type WriteOp = components["schemas"]["WriteOp"];
 
 // Reference documents attached on the create view (#383). Grilling decisions:
-// text + PDF only (agents read PDFs natively; DOCX would need conversion
-// tooling), 5 MB per file — the server's own apply cap, checked there on
-// decoded bytes — and at most 10 files so the single atomic apply stays sane.
+// text, PDF and images only (agents read PDFs and images natively; DOCX would
+// need conversion tooling), 5 MB per file — the server's own apply cap, checked
+// there on decoded bytes — and at most 10 files so the single atomic apply
+// stays sane.
 export const REFERENCES_DIR = "specs/requirements/references";
 export const MAX_REFERENCE_FILE_BYTES = 5 * 1024 * 1024;
 export const MAX_REFERENCE_FILES = 10;
@@ -117,8 +118,9 @@ function base64Of(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-// The apply batch for one create's attachments: text rides as utf8, PDF as
-// base64 (the WriteOp.encoding contract of BE handshake #384).
+// The apply batch for one create's attachments: text rides as utf8, every
+// binary kind (PDF and images alike) as base64 (the WriteOp.encoding contract
+// of BE handshake #384).
 export async function toReferenceWrites(files: File[]): Promise<WriteOp[]> {
   return Promise.all(
     files.map(async (file) => {

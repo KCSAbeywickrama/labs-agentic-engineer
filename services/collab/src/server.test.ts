@@ -238,8 +238,20 @@ test("load never seeds reference documents into the room", async () => {
   });
   assert.match(doc.getXmlFragment("specs/requirements/prd.md").toString(), /PRD/);
   // Neither reference file may exist in the doc — not the binary one, and not
-  // the markdown one either: the whole folder is out of collab's scope.
-  assert.ok(!doc.share.has("specs/requirements/references/rfp.pdf"), "pdf seeded into the room");
+  // the markdown one either: the whole folder is out of collab's scope. Each
+  // check has to match where the seed would have PUT that kind, or it proves
+  // nothing: a non-markdown file becomes a Y.Text inside the files map, never a
+  // top-level share key, so `share.has(pdf)` is false whether or not the seed
+  // ran. And `share.has` for the markdown is asked BEFORE any getXmlFragment
+  // call on that path, because that call would itself create the entry.
+  assert.ok(
+    !filesMap(doc).has("specs/requirements/references/rfp.pdf"),
+    "pdf seeded into the room",
+  );
+  assert.ok(
+    !doc.share.has("specs/requirements/references/notes.md"),
+    "reference markdown seeded into the room",
+  );
   assert.equal(
     doc.getXmlFragment("specs/requirements/references/notes.md").length,
     0,

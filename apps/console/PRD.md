@@ -100,9 +100,10 @@ that's a stalled feature — investigate, don't ignore.
   scenes client-side (no BE handshake, no contract change; ADR-0008) —
   [#348](https://github.com/wso2/labs-agentic-engineer/issues/348)
 - Project create — reference document upload on the "What do you want to
-  build?" view: `.md`/`.txt`/`.pdf`/`.png`/`.jpg` (≤10 files, ≤5 MB each) committed post-create
-  to `specs/requirements/references/` via one atomic `files/apply` (base64 for
-  PDF), surfaced to the `/start` kickoff through the idea-steer channel —
+  build?" view: `.md`/`.txt`/`.pdf`/`.png`/`.jpg`/`.jpeg` (≤10 files, ≤5 MB
+  each) committed post-create to `specs/requirements/references/` via one atomic
+  `files/apply` (base64 for every binary kind — PDF and images alike), surfaced
+  to the `/start` kickoff through the idea-steer channel —
   [#383](https://github.com/wso2/labs-agentic-engineer/issues/383)
   (BE handshake: [#384](https://github.com/wso2/labs-agentic-engineer/issues/384))
 - Agent chat — structured question cards: `ask_question` (single) +
