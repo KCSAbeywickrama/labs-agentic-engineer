@@ -1138,8 +1138,14 @@ function loadAppliedFiles(): AppliedFilesByProject {
   }
 }
 
+// The byte count the server would have recorded. A utf8 write is measured
+// encoded, not by `String.length` — that counts UTF-16 code units, so any
+// non-ASCII reference document would report a size smaller than the file the
+// server committed.
 function decodedByteLength(content: string, encoding?: string): number {
-  if (encoding !== "base64") return content.length;
+  if (encoding !== "base64") {
+    return new TextEncoder().encode(content).byteLength;
+  }
   const padding = content.endsWith("==") ? 2 : content.endsWith("=") ? 1 : 0;
   return Math.floor((content.length * 3) / 4) - padding;
 }
