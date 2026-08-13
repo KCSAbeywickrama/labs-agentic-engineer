@@ -466,7 +466,7 @@ describe("ValidationPage lifecycle", () => {
   // page had no lifecycle input: a second attempt runs with a verdict already on the
   // row, so the page opened on the PREVIOUS attempt's report under a tile claiming
   // the run had stopped.
-  it("shows the live log, not the last attempt's report, while a repeat attempt runs", () => {
+  it("opens on the last attempt's report while a repeat attempt runs", () => {
     mockValidation = "running";
     mockRun = {
       ...run({
@@ -479,19 +479,44 @@ describe("ValidationPage lifecycle", () => {
     mockReport.data = { content: REPORT };
     renderPage(undefined);
 
-    expect(screen.getByTestId("run-feed")).toHaveTextContent("validation");
+    // The previous attempt's report is real, and it is what the reader wants while
+    // the fix is being re-checked. That it belongs to the last attempt is the tile's
+    // job to say — twice, in the sentence and in the tally.
+    expect(screen.queryByTestId("run-feed")).not.toBeInTheDocument();
+    expect(screen.getByText("Shoppers can search the catalog.")).toBeInTheDocument();
     // Chip and tile headline both, as with every other state.
     expect(screen.getAllByText("Validating").length).toBe(2);
     expect(screen.queryByText("Validation failed")).not.toBeInTheDocument();
-    // The tile rides over the log — the last attempt's finding is still true — but
-    // ends on the attempt in flight rather than on a run that stopped.
-    // The numbers are the PREVIOUS attempt's and say so, and the fix having shipped
-    // is a fact — a repeat attempt only exists once the repair built and deployed.
     expect(
       screen.getByText(
         "1 of 3 criteria failed in the last attempt. The implementation has been fixed and deployed. Validation is running again.",
       ),
     ).toBeInTheDocument();
+    expect(screen.getByText(/\(last attempt\)$/)).toBeInTheDocument();
+  });
+
+  // The regression this replaced a default with: no state may FORCE a body, because
+  // `?view=logs | absent` has no third value, so `onViewChange(undefined)` cannot
+  // outrank a forced arm and the "View report" button silently does nothing.
+  it("keeps the report/log toggle working while a repeat attempt runs", () => {
+    mockValidation = "running";
+    mockRun = {
+      ...run({
+        validation: { verdict: "failed", reportPath: "tests/validation/report.json" },
+        cycles: [validationCycle],
+      }),
+      state: "running",
+    };
+    mockCriteria.data = { content: CRITERIA };
+    mockReport.data = { content: REPORT };
+
+    const onViewChange = renderPage("logs");
+
+    // ?view=logs is honoured...
+    expect(screen.getByTestId("run-feed")).toHaveTextContent("validation");
+    // ...and the way back is offered and lands on the report.
+    fireEvent.click(screen.getByRole("button", { name: /View report/ }));
+    expect(onViewChange).toHaveBeenCalledWith(undefined);
   });
 
   it("says so, and shows nothing else, when the run SKIPPED validation", () => {

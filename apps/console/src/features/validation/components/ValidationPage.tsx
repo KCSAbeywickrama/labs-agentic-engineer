@@ -256,19 +256,16 @@ export function ValidationPage({
   const cancelling =
     cancel.isPending || (cancelRequestedFor === liveRun?.id && !cancel.isError);
 
-  // Body rule: the log shows while there is no report worth showing — nothing
-  // settled yet, or an attempt IN FLIGHT, whose report does not exist yet and whose
-  // predecessor's is about to be replaced — OR the user toggled ?view=logs.
+  // Body rule: the log shows while there is no report to show at all, or the reader
+  // asked for it. Nothing else — a state that forces the log makes the "View report"
+  // button inert, because `?view=logs | absent` has no third value for a default to
+  // yield to, so `onViewChange(undefined)` cannot outrank it.
   //
-  // The in-flight arm is what makes a repeat attempt read like the first one. It was
-  // unreachable while the page had no lifecycle input: a second attempt runs with a
-  // verdict already on the row, so `settled` was true and the page opened on the
-  // previous attempt's report under a chip announcing that validation was running.
-  //
-  // `awaiting-fix` deliberately does NOT show the log: the cycle in flight then is a
-  // coding one, and this feed is filtered to validation cycles, so it would be a
-  // stale log where the reader wants the report naming what is being fixed.
-  const showLogs = !settled || state === "running" || view === "logs";
+  // A repeat attempt in flight is NOT such a state, though it briefly was. Its
+  // predecessor's report is real and is what the reader wants while the fix is being
+  // re-checked; that it belongs to the previous attempt is said by the tile, in the
+  // sentence and again in the tally.
+  const showLogs = !settled || view === "logs";
 
   // The verdict tile stays visible in BOTH bodies — a verdict does not stop being
   // true because the reader switched to the log. `state` is what it leads with, so
