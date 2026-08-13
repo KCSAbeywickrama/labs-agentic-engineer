@@ -263,10 +263,35 @@ func componentDeployFrom(name string, summary *openchoreo.ReleaseBindingSummary)
 		out.Ready = true
 	case strings.EqualFold(summary.ReadyStatus, "True"):
 		out.Ready = true
-	case strings.EqualFold(summary.ReadyStatus, "False"):
+	case strings.EqualFold(summary.ReadyStatus, "False") && terminalDeployReason(summary.ReadyReason):
 		out.Failed = true
 	}
+	// Everything else is PENDING, and `Ready=False` is mostly everything else.
+	//
+	// A binding reports Ready=False from the moment it is created, while it
+	// renders and rolls out — that is its INITIAL state, not a verdict. Reading
+	// it as failure declared two perfectly healthy components dead two seconds
+	// after they were pinned, and filed a fix issue for each. Which is also what
+	// this stage's deadline is for: a rollout that will land and one that never
+	// will are indistinguishable from out here, so only running out of time may
+	// turn waiting into a failure.
 	return out
+}
+
+// terminalDeployReason reports whether OpenChoreo's Ready condition names a
+// failure that waiting cannot fix.
+//
+// Deliberately a SHORT allow-list rather than "anything that isn't Ready".
+// Being wrong in this direction costs the deadline's patience on a genuinely
+// broken deployment; being wrong the other way condemns a healthy one, which is
+// the bug this replaced. A reason not listed here is treated as "still working
+// on it" and bounded by deployReadyTimeout.
+func terminalDeployReason(reason string) bool {
+	switch strings.ToLower(strings.TrimSpace(reason)) {
+	case "renderingfailed", "renderfailed", "invalidrelease", "releasenotfound":
+		return true
+	}
+	return false
 }
 
 // ReleaseNameFor names the release a component's deployment pins at a commit.

@@ -317,7 +317,7 @@ func TestDeploymentState_ClassifiesReadyFailedAndPending(t *testing.T) {
 	svc := NewDeploymentService(oc, nil)
 
 	got, err := svc.DeploymentState(context.Background(), "acme", "proj",
-		[]string{"ready", "failed", "rolling", "absent", "undeploy"})
+		[]string{"ready", "failed", "rolling", "unknown", "absent", "undeploy"})
 	if err != nil {
 		t.Fatalf("DeploymentState: %v", err)
 	}
@@ -325,6 +325,7 @@ func TestDeploymentState_ClassifiesReadyFailedAndPending(t *testing.T) {
 		"ready":    {true, false},
 		"failed":   {false, true},
 		"rolling":  {false, false},
+		"unknown":  {false, false},
 		"absent":   {false, false},
 		"undeploy": {true, false},
 	}
@@ -336,6 +337,33 @@ func TestDeploymentState_ClassifiesReadyFailedAndPending(t *testing.T) {
 	}
 	if got[1].Reason != "RenderingFailed" {
 		t.Errorf("the failure reason is not carried through: %q", got[1].Reason)
+	}
+}
+
+// A binding reports Ready=False from the moment it is created, while it renders.
+// Reading that as failure declared two healthy components dead two seconds after
+// they were pinned and filed a fix issue for each — the defect this pins.
+//
+// Only a reason that waiting cannot fix is a verdict; everything else is the
+// deadline's business.
+func TestDeploymentState_FreshBindingIsPendingNotFailed(t *testing.T) {
+	t.Parallel()
+	for _, reason := range []string{"", "Progressing", "Reconciling", "NotReady", "PendingRollout"} {
+		oc := &mocks.ComponentClientMock{
+			GetReleaseBindingStatusFunc: func(context.Context, string, string, string, string) (*openchoreo.ReleaseBindingSummary, error) {
+				return &openchoreo.ReleaseBindingSummary{ReadyStatus: "False", ReadyReason: reason}, nil
+			},
+		}
+		got, err := NewDeploymentService(oc, nil).DeploymentState(context.Background(), "acme", "proj", []string{"api"})
+		if err != nil {
+			t.Fatalf("DeploymentState(%q): %v", reason, err)
+		}
+		if got[0].Failed {
+			t.Errorf("reason %q read as FAILED; a rollout in progress must stay pending", reason)
+		}
+		if got[0].Ready {
+			t.Errorf("reason %q read as READY; it is not serving yet", reason)
+		}
 	}
 }
 
