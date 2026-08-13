@@ -110,3 +110,24 @@ func TestApplyRequestFromWire_InvalidBase64IsBadRequest(t *testing.T) {
 		t.Fatalf("status = %d, want 400 (bad content is the caller's fault)", ae.Status)
 	}
 }
+
+// An encoding outside the contract's enum must not fall through to utf8: the
+// caller declared bytes we cannot interpret, and committing the wire string
+// verbatim would write that mistake into the repo.
+func TestApplyRequestFromWire_UnknownEncodingIsBadRequest(t *testing.T) {
+	body := gen.ApplyRequest{Writes: []gen.WriteOp{{
+		Path: "specs/requirements/references/doc.pdf", Content: "H4sIAAAA", Encoding: "gzip",
+	}}}
+
+	_, err := applyRequestFromWire(body)
+	if err == nil {
+		t.Fatal("applyRequestFromWire returned nil error for encoding=gzip, want a 400")
+	}
+	var ae *apierr.Error
+	if !errors.As(err, &ae) {
+		t.Fatalf("error %T is not an *apierr.Error", err)
+	}
+	if ae.Status != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (an unknown encoding is the caller's fault)", ae.Status)
+	}
+}

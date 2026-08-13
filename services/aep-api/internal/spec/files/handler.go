@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"strings"
 	"unicode/utf8"
 
@@ -189,16 +190,22 @@ func applyRequestFromWire(in gen.ApplyRequest) (spec.ApplyRequest, error) {
 // decodeContent turns a write's wire content into the bytes to commit. utf8 —
 // the contract's default, and what an omitted field means — is already those
 // bytes. Undecodable base64 is the caller's error, so it is a 400: committing
-// it would silently corrupt the file.
+// it would silently corrupt the file. So is an encoding outside the contract's
+// enum: nothing here can know what those bytes are, and falling through to utf8
+// would commit the caller's mistake as the file.
 func decodeContent(content string, encoding gen.WriteOpEncoding) (string, error) {
-	if encoding != gen.WriteOpEncodingBase64 {
+	switch encoding {
+	case "", gen.WriteOpEncodingUTF8:
 		return content, nil
+	case gen.WriteOpEncodingBase64:
+		raw, err := base64.StdEncoding.DecodeString(content)
+		if err != nil {
+			return "", apierr.BadRequest("content is not valid base64")
+		}
+		return string(raw), nil
+	default:
+		return "", apierr.BadRequest(fmt.Sprintf("unsupported content encoding %q; want utf8 or base64", encoding))
 	}
-	raw, err := base64.StdEncoding.DecodeString(content)
-	if err != nil {
-		return "", apierr.BadRequest("content is not valid base64")
-	}
-	return string(raw), nil
 }
 
 // applyResultToWire converts the service result into the contract schema.

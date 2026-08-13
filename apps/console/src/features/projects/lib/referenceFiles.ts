@@ -42,8 +42,9 @@ function extensionOf(name: string): string {
 }
 
 // Screens a selection against what is already attached: per-file type and
-// size, the total count cap, and duplicate names. Rejections carry the reason
-// verbatim for the UI — one notice per file, never a silent drop.
+// size, the total count cap, duplicate names, and names that differ but land on
+// one repo path. Rejections carry the reason verbatim for the UI — one notice
+// per file, never a silent drop.
 export function screenReferenceFiles(
   attached: File[],
   incoming: File[],
@@ -51,8 +52,10 @@ export function screenReferenceFiles(
   const accepted: File[] = [];
   const rejected: RejectedFile[] = [];
   const names = new Set(attached.map((f) => f.name));
+  const paths = new Set(attached.map((f) => referencePathOf(f.name)));
   let count = attached.length;
   for (const file of incoming) {
+    const path = referencePathOf(file.name);
     if (!ACCEPTED_EXTENSIONS.has(extensionOf(file.name))) {
       rejected.push({
         name: file.name,
@@ -67,9 +70,18 @@ export function screenReferenceFiles(
       });
     } else if (names.has(file.name)) {
       rejected.push({ name: file.name, reason: "Already attached" });
+    } else if (paths.has(path)) {
+      // `PRD.md` and `prd.md` are two selections but one path: accepting both
+      // would put two writes on it in the apply batch, and the later one would
+      // silently replace the earlier document.
+      rejected.push({
+        name: file.name,
+        reason: `Conflicts with another document's name (${sanitizeName(file.name)})`,
+      });
     } else {
       accepted.push(file);
       names.add(file.name);
+      paths.add(path);
       count++;
     }
   }
@@ -89,6 +101,12 @@ function sanitizeName(name: string): string {
   return `${stem || "document"}${name.slice(dot).toLowerCase()}`;
 }
 
+// The repo path a selection lands on. Screening and the apply batch below both
+// go through here so they can never disagree about what a name becomes.
+function referencePathOf(name: string): string {
+  return `${REFERENCES_DIR}/${sanitizeName(name)}`;
+}
+
 function base64Of(bytes: Uint8Array): string {
   // btoa takes a byte string; chunk to keep the argument list bounded.
   let binary = "";
@@ -104,7 +122,7 @@ function base64Of(bytes: Uint8Array): string {
 export async function toReferenceWrites(files: File[]): Promise<WriteOp[]> {
   return Promise.all(
     files.map(async (file) => {
-      const path = `${REFERENCES_DIR}/${sanitizeName(file.name)}`;
+      const path = referencePathOf(file.name);
       if (TEXT_EXTENSIONS.has(extensionOf(file.name))) {
         return { path, content: await file.text(), encoding: "utf8" as const };
       }
