@@ -95,10 +95,6 @@ func (e *TurnInProgressError) Error() string {
 // never inject the namespace separator and escape its tenant scope.
 var conversationIDPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,200}$`)
 
-// requirementsTagPattern matches a requirements version tag `v<N>` (design
-// tags are `v<N>-<M>` and are deliberately excluded — approval is the
-// requirements version, not a design revision).
-var requirementsTagPattern = regexp.MustCompile(`^v(\d+)$`)
 
 // ---- ports -----------------------------------------------------------------
 
