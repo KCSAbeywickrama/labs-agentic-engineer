@@ -27,7 +27,7 @@ type FileMeta = components["schemas"]["FileMeta"];
 // room-key scheme of #113 decision 2 is retired — it double-prefixed
 // agent-created files).
 
-export type SpecGroup = "requirements" | "designs" | "validation";
+export type SpecGroup = "requirements" | "designs" | "validation" | "references";
 
 export interface SpecFileEntry {
   /** Full repo-relative path (e.g. specs/requirements/prd.md) — also the
@@ -46,11 +46,19 @@ const GROUP_BY_FOLDER: Record<string, SpecGroup> = {
   validation: "validation",
 };
 
+// Uploaded reference documents (#383) live under requirements on disk but get
+// their own spec-view section: they are the user's source material, not an
+// agent-authored requirement artifact.
+const REFERENCES_PREFIX = "specs/requirements/references/";
+
 export function toSpecEntry(meta: FileMeta): SpecFileEntry | null {
   // specs/<folder>/<…file>: needs the prefix, a known folder, and a file name
   // beyond it (segments.length >= 3).
   const segments = meta.path.split("/");
   if (segments[0] !== "specs" || segments.length < 3) return null;
+  if (meta.path.startsWith(REFERENCES_PREFIX)) {
+    return { path: meta.path, sha: meta.sha, group: "references" };
+  }
   const group = GROUP_BY_FOLDER[segments[1] ?? ""];
   if (!group) return null;
   return { path: meta.path, sha: meta.sha, group };

@@ -24,6 +24,7 @@ import {
   Card,
   CardActionArea,
   CardContent,
+  Chip,
   Grid,
   PageContent,
   Stack,
@@ -38,8 +39,13 @@ import {
   ReceiptText,
 } from "@wso2/oxygen-ui-icons-react";
 import { useNavigate } from "@tanstack/react-router";
-import { useCreateProject, useGithubOrg } from "../api/queries";
+import {
+  useCreateProject,
+  useGithubOrg,
+  useUploadReferences,
+} from "../api/queries";
 import { isValidProjectName, suggestProjectName } from "../lib/projectName";
+import { ReferenceFilePicker, formatFileSize } from "./ReferenceFilePicker";
 
 // Issue #71 decision: clicking an example acts as prompt + Start in one
 // click — it jumps straight to the name/repo confirmation step.
@@ -96,8 +102,14 @@ export function ProjectCreate() {
   // feedback: repo name is changeable, the org is fixed).
   const [repoName, setRepoName] = useState("");
   const [repoTouched, setRepoTouched] = useState(false);
+  const [files, setFiles] = useState<File[]>([]);
+  // Set once POST /projects succeeds: from that point the project exists, so
+  // Back is closed off and the primary action can only be the reference
+  // upload's retry (#383 decision: a failed upload is never a failed create).
+  const [createdName, setCreatedName] = useState<string | null>(null);
   const { data: githubOrg } = useGithubOrg();
   const createProject = useCreateProject();
+  const uploadReferences = useUploadReferences();
 
   const start = (chosenPrompt: string) => {
     const suggested = suggestProjectName(chosenPrompt);
@@ -121,7 +133,27 @@ export function ProjectCreate() {
   const repoError =
     repoName && !isValidProjectName(repoName) ? invalidNameMessage : null;
 
+  const goToProject = (projectName: string) => {
+    void navigate({
+      to: "/projects/$projectName",
+      params: { projectName },
+    });
+  };
+
+  const uploadFor = (projectName: string) => {
+    uploadReferences.mutate(
+      { projectName, files },
+      { onSuccess: () => goToProject(projectName) },
+    );
+  };
+
   const accept = () => {
+    // The project already exists — only the reference upload failed, so the
+    // primary action retries just that.
+    if (createdName) {
+      uploadFor(createdName);
+      return;
+    }
     createProject.mutate(
       { name, prompt, ...(repoName !== name && { repoName }) },
       {
@@ -130,14 +162,20 @@ export function ProjectCreate() {
           // project's own descriptor (specs/.agentic-engineer.toml) on create,
           // and `/start` reads it back from there — so the idea survives a
           // different browser, device, or teammate.
-          void navigate({
-            to: "/projects/$projectName",
-            params: { projectName: project.name },
-          });
+          if (files.length === 0) {
+            goToProject(project.name);
+            return;
+          }
+          // Attached reference documents land as one atomic files/apply
+          // commit under specs/requirements/references/ (#383).
+          setCreatedName(project.name);
+          uploadFor(project.name);
         },
       },
     );
   };
+
+  const pending = createProject.isPending || uploadReferences.isPending;
 
   return (
     <PageContent>
@@ -163,6 +201,7 @@ export function ProjectCreate() {
                 autoFocus
                 fullWidth
               />
+              <ReferenceFilePicker files={files} onFilesChange={setFiles} />
               <Box sx={{ textAlign: "right" }}>
                 <Button
                   variant="contained"
@@ -231,6 +270,23 @@ export function ProjectCreate() {
                 },
               }}
             />
+            {files.length > 0 && (
+              <Box>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                  Reference documents to commit to the project:
+                </Typography>
+                <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>
+                  {files.map((file) => (
+                    <Chip
+                      key={file.name}
+                      label={`${file.name} (${formatFileSize(file.size)})`}
+                      variant="outlined"
+                      size="small"
+                    />
+                  ))}
+                </Box>
+              </Box>
+            )}
             {createProject.isError && (
               <Alert severity="error">
                 {createProject.error instanceof Error
@@ -238,21 +294,38 @@ export function ProjectCreate() {
                   : "Failed to create project"}
               </Alert>
             )}
+            {createdName && uploadReferences.isError && (
+              <Alert severity="error">
+                The project was created, but uploading the reference documents
+                failed:{" "}
+                {uploadReferences.error instanceof Error
+                  ? uploadReferences.error.message
+                  : "unknown error"}
+              </Alert>
+            )}
             <Stack direction="row" spacing={2} sx={{ justifyContent: "flex-end" }}>
               <Button
                 startIcon={<ArrowLeft size={18} />}
                 onClick={() => setStep("prompt")}
-                disabled={createProject.isPending}
+                disabled={pending || Boolean(createdName)}
               >
                 Back
               </Button>
+              {createdName && uploadReferences.isError && (
+                <Button
+                  onClick={() => goToProject(createdName)}
+                  disabled={pending}
+                >
+                  Continue without documents
+                </Button>
+              )}
               <Button
                 variant="contained"
                 onClick={accept}
-                disabled={!name || Boolean(nameError) || createProject.isPending}
-                loading={createProject.isPending}
+                disabled={!name || Boolean(nameError) || pending}
+                loading={pending}
               >
-                Create project
+                {createdName ? "Retry upload" : "Create project"}
               </Button>
             </Stack>
           </Stack>

@@ -1111,6 +1111,89 @@ export const specFileNotFound = (path: string): ApiError => ({
   message: `no spec file at ${path}`,
 });
 
+// Reference documents committed through the mock files/apply (#383) — the
+// batch the create flow fires right after POST /projects. Persisted per
+// project to localStorage (like created projects) so the Spec view still
+// lists them after a reload. Base64 writes keep their metadata but drop the
+// content: the bytes are binary (a PDF), unrenderable in the mock reader and
+// heavy for the quota; size still reflects the decoded byte count, matching
+// the server's post-decode accounting.
+const APPLIED_FILES_KEY = "aep:mock:appliedFiles";
+
+interface AppliedFile extends MockSpecFile {
+  size: number;
+  // Computed before a base64 write's content is dropped, so the sha the apply
+  // response returned and the sha the file list serves later stay identical.
+  sha: string;
+}
+
+type AppliedFilesByProject = Record<string, AppliedFile[]>;
+
+function loadAppliedFiles(): AppliedFilesByProject {
+  try {
+    const raw = localStorage.getItem(APPLIED_FILES_KEY);
+    return raw ? (JSON.parse(raw) as AppliedFilesByProject) : {};
+  } catch {
+    return {};
+  }
+}
+
+function decodedByteLength(content: string, encoding?: string): number {
+  if (encoding !== "base64") return content.length;
+  const padding = content.endsWith("==") ? 2 : content.endsWith("=") ? 1 : 0;
+  return Math.floor((content.length * 3) / 4) - padding;
+}
+
+export function recordAppliedFiles(
+  projectName: string,
+  writes: { path: string; content: string; encoding?: string }[],
+): FileMeta[] {
+  const all = loadAppliedFiles();
+  const files = all[projectName] ?? [];
+  const applied = writes.map((w) => ({
+    path: w.path,
+    content: w.encoding === "base64" ? "" : w.content,
+    size: decodedByteLength(w.content, w.encoding),
+    sha: mockSha(w.path + w.content),
+  }));
+  for (const file of applied) {
+    const existing = files.findIndex((f) => f.path === file.path);
+    if (existing >= 0) files[existing] = file;
+    else files.push(file);
+  }
+  all[projectName] = files;
+  try {
+    localStorage.setItem(APPLIED_FILES_KEY, JSON.stringify(all));
+  } catch {
+    /* quota — non-fatal in mock mode */
+  }
+  return applied.map(({ path, sha, size }) => ({ path, sha, size }));
+}
+
+export function appliedFileMetas(projectName: string): FileMeta[] {
+  return (loadAppliedFiles()[projectName] ?? []).map((f) => ({
+    path: f.path,
+    sha: f.sha,
+    size: f.size,
+  }));
+}
+
+export function appliedFileContent(
+  projectName: string,
+  path: string,
+): FileContent | null {
+  const file = (loadAppliedFiles()[projectName] ?? []).find(
+    (f) => f.path === path,
+  );
+  if (!file) return null;
+  return { path: file.path, content: file.content, sha: file.sha };
+}
+
+export const applyFilesError: ApiError = {
+  code: "internal_error",
+  message: "Mock error scenario for files/apply",
+};
+
 export const projectSectionError: ApiError = {
   code: "internal_error",
   message: "Mock error scenario for the project overview",
