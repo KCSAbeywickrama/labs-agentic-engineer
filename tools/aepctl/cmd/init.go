@@ -197,6 +197,9 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 	// endpoint URLs instead (set them via flags or AEP_* env vars).
 	helmArgs = append(helmArgs, "--set",
 		fmt.Sprintf("codingAgentDispatch.localStubs.enabled=%t", viper.GetBool("codingagent.local_stubs.enabled")))
+	if u := viper.GetString("codingagent.cluster_gateway_proxy.url"); u != "" {
+		helmArgs = append(helmArgs, "--set", "codingAgentDispatch.clusterGatewayProxy.url="+u)
+	}
 	if u := viper.GetString("codingagent.secret_manager_api.url"); u != "" {
 		helmArgs = append(helmArgs, "--set", "codingAgentDispatch.secretManagerApi.url="+u)
 	}
