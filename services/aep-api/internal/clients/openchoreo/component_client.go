@@ -114,11 +114,20 @@ type ComponentClient interface {
 	// `spec.traitEnvironmentConfigs`. Configs is keyed by trait instance
 	// name; the value is the parameters block (e.g. `{"jwtAuth": {"enabled": true}}`).
 	// Passing an empty map clears the field. When no RBs exist yet (pre-
-	// first-deploy) the call is a soft no-op — the caller retries via the
-	// trait-sync watcher once the deploy chain catches up.
+	// first-deploy) the call is a soft no-op.
+	//
+	// Superseded for user components by ApplyReleaseBinding, which writes the
+	// trait configs in the SAME object write as the release pin — that is what
+	// closes the window where a binding was renderable with a trait attached and
+	// its config missing. Nothing retries this call any more: the trait-sync
+	// watcher it used to lean on is gone, and the deploy stage composes the whole
+	// binding at once (ADR-0017).
 	UpdateComponentTraitEnvironmentConfigs(ctx context.Context, orgName, projectName, componentName string, configs map[string]map[string]interface{}) error
 
-	// Deploy (read-only — auto-deploy on the Component drives the chain)
+	// Deploy (read-only). The platform drives the chain itself — components carry
+	// autoDeploy: false and the run supervisor performs the promote (ADR-0017) —
+	// so this reads back what OpenChoreo resolved, including the external URLs the
+	// deploy order depends on.
 	ListDeployments(ctx context.Context, orgName, projectName, componentName string) (*gen.DeploymentList, error)
 
 	// ListProjectReleaseBindings returns the org's ReleaseBindings owned by
@@ -591,7 +600,7 @@ func (c *componentClient) ApplyComponentSpec(ctx context.Context, orgName, proje
 	return retryStaleWrite(ctx, "component/"+scopedComp+" spec", func(ctx context.Context) error {
 		getResp, err := c.oc.GetComponentWithResponse(ctx, orgName, scopedComp)
 		if err != nil {
-			return fmt.Errorf("failed to get component for traits update: %w", err)
+			return fmt.Errorf("failed to get component for spec update: %w", err)
 		}
 		if getResp.StatusCode() != http.StatusOK || getResp.JSON200 == nil {
 			return handleErrorResponse(getResp.StatusCode(), ErrorResponses{
