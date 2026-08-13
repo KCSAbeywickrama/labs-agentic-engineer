@@ -53,9 +53,13 @@ const REFERENCES_PREFIX = "specs/requirements/references/";
 
 export function toSpecEntry(meta: FileMeta): SpecFileEntry | null {
   // specs/<folder>/<…file>: needs the prefix, a known folder, and a file name
-  // beyond it (segments.length >= 3).
+  // beyond it (segments.length >= 3). A trailing slash means the path names a
+  // DIRECTORY, not a file: it clears the length check (the empty last segment
+  // counts) and would otherwise become a selectable entry with no file name.
+  // Checked before the references branch below, so it holds for every group.
   const segments = meta.path.split("/");
   if (segments[0] !== "specs" || segments.length < 3) return null;
+  if (segments[segments.length - 1] === "") return null;
   if (meta.path.startsWith(REFERENCES_PREFIX)) {
     return { path: meta.path, sha: meta.sha, group: "references" };
   }
