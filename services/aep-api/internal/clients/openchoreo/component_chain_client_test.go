@@ -161,6 +161,67 @@ func TestEnsureRelease_ConflictIsSuccess(t *testing.T) {
 	}
 }
 
+// The failure this pins was live, not hypothetical: openchoreo-api answers a
+// generate-release for a name that already exists with a bare 500, so the deploy
+// stage's own retry — which re-cuts the releases it already cut — could never
+// succeed again once it had half succeeded once. It retried every ~100 seconds
+// for twenty minutes with the version stuck mid-stage.
+//
+// A 500 is therefore not taken at its word: the release is read back, and one
+// that is there means the write it was refused for had already happened.
+func TestEnsureRelease_ExistingReleaseSurvivesConflictAs500(t *testing.T) {
+	var posts, gets int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPost:
+			posts++
+			writeJSON(t, w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		case http.MethodGet:
+			gets++
+			writeJSON(t, w, http.StatusOK, map[string]any{
+				"metadata": map[string]any{"name": chainTestRelease},
+			})
+		default:
+			t.Errorf("unexpected method %s", r.Method)
+		}
+	}))
+	defer srv.Close()
+
+	c := newTestComponentClient(t, srv)
+	got, err := c.EnsureRelease(context.Background(), chainTestOrg, chainTestProject, chainTestComp, chainTestRelease)
+	if err != nil {
+		t.Fatalf("EnsureRelease with the release already cut: %v", err)
+	}
+	if got != chainTestRelease {
+		t.Errorf("got release %q, want the caller-supplied name", got)
+	}
+	if gets == 0 {
+		t.Error("the release was never read back; a 500 was taken as the final answer")
+	}
+	if posts == 0 {
+		t.Error("no write was attempted; the read must be the fallback, not the pre-flight")
+	}
+}
+
+// The other half of the same rule: a 500 with NO release behind it is a genuine
+// failure and must stay one, or a deploy that never cut anything would report
+// success and the run would validate against nothing.
+func TestEnsureRelease_ServerErrorWithNoReleaseStillFails(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			writeJSON(t, w, http.StatusNotFound, map[string]string{"error": "not found"})
+			return
+		}
+		writeJSON(t, w, http.StatusInternalServerError, map[string]string{"error": "boom"})
+	}))
+	defer srv.Close()
+
+	c := newTestComponentClient(t, srv)
+	if _, err := c.EnsureRelease(context.Background(), chainTestOrg, chainTestProject, chainTestComp, chainTestRelease); err == nil {
+		t.Fatal("a 500 with no release behind it was reported as success")
+	}
+}
+
 func TestEnsureRelease_ServerErrorWrapsSentinel(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(t, w, http.StatusInternalServerError, map[string]string{"error": "boom"})

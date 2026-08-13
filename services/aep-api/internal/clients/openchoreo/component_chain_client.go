@@ -73,7 +73,24 @@ func (c *componentClient) EnsureWorkload(ctx context.Context, orgName, projectNa
 // and returns it. The name is supplied rather than server-generated so a
 // resumed dispatch rebinds the same release instead of cutting a second one.
 //
-// 409 Conflict means the release is already there — return the same name.
+// IDEMPOTENT BY READ-BACK, not by status code. openchoreo-api answers a
+// generate-release for a name that already exists with a bare 500 (the same 58
+// bytes of "Internal server error" any other fault gets), so there is no
+// response this client could read to tell "already cut" from "genuinely broke".
+// It is therefore asked the only question that has an unambiguous answer: is the
+// release there?
+//
+// That matters more than it sounds. Every caller of this function is under
+// Temporal's retry, and a deploy activity that fails on its third component
+// retries all three — so the second attempt re-cuts two existing releases. Read
+// as a fault, that is a stage which can never succeed again once it has half
+// succeeded once, retrying until a human notices. It was observed doing exactly
+// that for twenty minutes.
+//
+// The read happens only AFTER a refused write, not before every one: cutting a
+// release that does not exist yet is the common case by a wide margin (once per
+// component per cycle, against a retry that is rare), and a pre-flight GET would
+// tax all of them to spare the few.
 func (c *componentClient) EnsureRelease(ctx context.Context, orgName, projectName, componentName, releaseName string) (string, error) {
 	scoped := ScopedComponentName(projectName, componentName)
 	name := releaseName
@@ -86,6 +103,15 @@ func (c *componentClient) EnsureRelease(ctx context.Context, orgName, projectNam
 	case http.StatusCreated, http.StatusOK, http.StatusConflict:
 		return releaseName, nil
 	}
+	// Only a 5xx is ambiguous. A 400 or a 404 is OpenChoreo refusing the request
+	// on its own terms — a malformed name, a component that is not there — and a
+	// release lingering from some earlier attempt must not be allowed to answer a
+	// question that was never about whether it exists.
+	if resp.StatusCode() >= http.StatusInternalServerError {
+		if exists, rerr := c.releaseExists(ctx, orgName, releaseName); rerr == nil && exists {
+			return releaseName, nil
+		}
+	}
 	return "", fmt.Errorf("generate release for %q: %w", scoped,
 		handleErrorResponse(resp.StatusCode(), ErrorResponses{
 			JSON400: resp.JSON400,
@@ -94,6 +120,21 @@ func (c *componentClient) EnsureRelease(ctx context.Context, orgName, projectNam
 			JSON404: resp.JSON404,
 			JSON500: resp.JSON500,
 		}))
+}
+
+// releaseExists reports whether a ComponentRelease of that name is already
+// there. An error means "could not tell", and the caller then reports the WRITE's
+// failure rather than this one — the write is the thing that was asked for, and a
+// deploy must never be called successful because a read happened to fail.
+func (c *componentClient) releaseExists(ctx context.Context, orgName, releaseName string) (bool, error) {
+	resp, err := c.oc.GetComponentReleaseWithResponse(ctx, orgName, ocgen.ComponentReleaseNameParam(releaseName))
+	if err != nil {
+		return false, err
+	}
+	// The decoded body, not the status alone: a 200 carrying something this client
+	// could not parse as a ComponentRelease is not evidence that the release is
+	// there, and the caller is about to treat "there" as "the deploy succeeded".
+	return resp.StatusCode() == http.StatusOK && resp.JSON200 != nil, nil
 }
 
 // ReleaseBindingName is the deterministic name of a component's binding in one
