@@ -175,6 +175,23 @@ describe("verdictSentence", () => {
     );
   });
 
+  // A FIRST attempt has no verdict yet. Returning "" sent the deployments banner to
+  // its verdict-naming fallback, which rendered "This deployment's verdict:
+  // validating." — a lifecycle value announced as a verdict, the exact defect this
+  // shared copy exists to stop.
+  it("speaks for a first attempt, which has no verdict yet", () => {
+    expect(verdictSentence("", undefined, "running")).toBe(
+      "Nothing reported yet — the validation attempt is still running.",
+    );
+  });
+
+  // `awaiting-fix` cannot reach this path — it requires a fatal verdict — and a
+  // settled state with no verdict has nothing to say.
+  it("still says nothing with no verdict and no lifecycle state", () => {
+    expect(verdictSentence("", undefined, "awaiting-fix")).toBe("");
+    expect(verdictSentence("", undefined)).toBe("");
+  });
+
   it("is empty for a verdict it does not speak for", () => {
     expect(verdictSentence("skipped", counts({ total: 0 }))).toBe("");
     expect(verdictSentence("", undefined)).toBe("");

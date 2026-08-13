@@ -49,6 +49,7 @@ import {
   type StageTone,
 } from "../../projects/lib/pipeline";
 import { useValidationCriteria, useValidationReport } from "../api/queries";
+import { lastMergedValidationCycle, validatingRun } from "../lib/runs";
 import { VerdictTile } from "./VerdictTile";
 
 // Validation lives on the DEPLOYMENT surface because the deployment is what is
@@ -61,17 +62,6 @@ import { VerdictTile } from "./VerdictTile";
 // The validation cycle is the phase of the run this page owns; the rest of the
 // loop is the Builds page's story.
 const VALIDATION_CYCLE = ["validation"] as const;
-
-// The run origins that ask a version's acceptance criteria — the console's mirror
-// of delivery.RunValidates. A spec build validates the version it delivered, and a
-// revalidation exists to ask again; an incident adoption is absent on purpose,
-// because it fixes one thing in an already-judged version.
-//
-// It matters that this is an ORIGIN test and not "does the run have a validation
-// cycle": a spec build with no criteria authored settles `skipped` and opens no
-// cycle, and that is still the version's answer — the one the "not validated"
-// empty state below is written for.
-const VALIDATING_ORIGINS: readonly string[] = ["spec-build", "revalidate"];
 
 // StageTone → StatusTone. The two unions differ only in `ghost`, which the shared
 // validation mapper never returns; it is mapped for exhaustiveness only.
@@ -174,7 +164,10 @@ export function ValidationPage({
   // terms. An incident run is deliberately absent: it fixes one thing in a version
   // already judged, and re-validating the system for it would price every incident
   // like a release.
-  const run = runList.find((r) => VALIDATING_ORIGINS.includes(r.origin));
+  // An ORIGIN test, not "does the run have a validation cycle": a spec build with no
+  // criteria authored settles `skipped` and opens no cycle, and that is still the
+  // version's answer — the one the "not validated" empty state below is written for.
+  const run = validatingRun(runList);
   // The verdict VALUE drives every decision below. Deriving them from the chip's
   // rendered label instead (as this page used to) breaks silently the moment the
   // copy changes — and swapping in the shared mapper changes its casing.
@@ -211,7 +204,7 @@ export function ValidationPage({
   // happens to hold the previous attempt's report until the new one merges, so the
   // bug returns the right bytes by accident and would stop the moment anything else
   // wrote the path.
-  const reportCycle = validationCycles.filter((c) => c.mergeSha).at(-1);
+  const reportCycle = lastMergedValidationCycle(runList);
   // The cycle carries the pull request's page as the webhook reported it. This
   // page used to build one from the project's repoUrl and the number, which is a
   // CLONE url — a `.git` suffix produced a link that 404s.

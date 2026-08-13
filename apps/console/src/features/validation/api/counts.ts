@@ -23,6 +23,7 @@ import {
   tallyCriterionStates,
 } from "@aep/ui-validation-view";
 import { useBuildRuns } from "../../builds/api/queries";
+import { lastMergedValidationCycle, validatingRun } from "../lib/runs";
 import { countsFromTally, type ValidationCounts } from "../lib/verdict";
 import { useValidationCriteria, useValidationReport } from "./queries";
 
@@ -71,19 +72,18 @@ export function useValidationEvidence(
 ): { verdict: string; counts?: ValidationCounts } {
   const wanted = COUNTABLE.has(deployValidation);
   const runs = useBuildRuns(projectName, wanted && version ? version : undefined);
-  const run = runs.data?.runs?.[0];
+  // Both selections are the Validation page's, shared rather than restated. Reading
+  // `runs[0]` here was the bug #423 fixed on the page and left standing in this hook:
+  // a newer NON-validating run — an incident adoption — hid the verdict and the
+  // report of the run that actually answered, so this surface silently lost its
+  // counts. The report cycle is likewise looked for across every attempt, not only
+  // within one run, because a revalidation is a later run on the same milestone.
+  const runList = runs.data?.runs ?? [];
+  const run = validatingRun(runList);
   const rawVerdict = run?.validation?.verdict ?? "";
   const settled = wanted && rawVerdict !== "" && rawVerdict !== "skipped";
   const missingReport = rawVerdict === "unreported";
-  // The last validation cycle that MERGED, not simply the last one. A cycle still in
-  // flight has no report by definition, and pinning to it passes an empty ref — which
-  // silently degrades to a branch-tip read, the one thing this join exists to avoid.
-  // The tip happens to hold the previous attempt's report until the new one merges,
-  // so the bug returns the right answer by accident and would stop doing so the
-  // moment anything else wrote the path.
-  const cycle = run?.cycles
-    ?.filter((c) => c.kind === "validation" && c.mergeSha)
-    .at(-1);
+  const cycle = lastMergedValidationCycle(runList);
 
   const criteria = useValidationCriteria(projectName, version, settled);
   const report = useValidationReport(

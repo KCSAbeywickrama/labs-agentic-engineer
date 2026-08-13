@@ -214,6 +214,26 @@ describe("DeploymentsPage — validation", () => {
     expect(screen.queryByText(/criteria passed on this deployment/)).not.toBeInTheDocument();
   });
 
+  // A FIRST attempt: live, validating, no verdict on the row yet. The banner used to
+  // fall through to its verdict-naming fallback here and render "This deployment's
+  // verdict: validating." — a lifecycle value announced as a verdict.
+  it("does not call a first running attempt a verdict", () => {
+    mockDeploy = {
+      version: "v1",
+      status: "deployed",
+      components: { total: 1, ready: 1 },
+      validation: "running",
+    };
+    mockVerdict = "";
+
+    render(<DeploymentsPage projectName="acme" />);
+
+    expect(
+      screen.getByText("Nothing reported yet — the validation attempt is still running."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/verdict: validating/)).not.toBeInTheDocument();
+  });
+
   // The same fold, the other way: nothing is filed for an `unreported` attempt, so
   // promising a fix would name work that does not exist.
   it("promises a retry, not a fix, when the repeated verdict was unreported", () => {

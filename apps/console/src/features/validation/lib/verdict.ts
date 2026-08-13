@@ -187,6 +187,17 @@ export function verdictSentence(
           return "The validation report couldn't be generated, so there are no results to show for this run.";
       }
     default:
-      return "";
+      // No verdict yet, which only a LIFECYCLE state can be: the first attempt of a
+      // run, before anything has been concluded. It needs a sentence of its own or
+      // the caller falls through to naming the state as a verdict — "This
+      // deployment's verdict: validating." — the very thing sharing this copy was
+      // meant to stop. `awaiting-fix` cannot reach here; it requires a fatal verdict.
+      //
+      // Says what there is to SEE rather than what is happening: the rail's stage
+      // note beside it already says the deployed system is being checked, and two
+      // adjacent elements saying that is a restatement.
+      return state === "running"
+        ? "Nothing reported yet — the validation attempt is still running."
+        : "";
   }
 }
