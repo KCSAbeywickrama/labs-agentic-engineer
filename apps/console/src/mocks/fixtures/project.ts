@@ -1102,6 +1102,9 @@ export function specFileContent(
   return {
     path: file.path,
     content: file.content,
+    // The contract's `default: utf8` makes this non-optional in the generated
+    // type; every fixture here is text, so it is stated rather than inferred.
+    encoding: "utf8",
     sha: mockSha(file.path + file.content),
   };
 }
@@ -1186,7 +1189,7 @@ export function appliedFileContent(
     (f) => f.path === path,
   );
   if (!file) return null;
-  return { path: file.path, content: file.content, sha: file.sha };
+  return { path: file.path, content: file.content, encoding: "utf8", sha: file.sha };
 }
 
 export const applyFilesError: ApiError = {
