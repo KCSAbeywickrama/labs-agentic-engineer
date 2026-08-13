@@ -48,6 +48,7 @@ import {
   useProjectStatus,
   useProjectTags,
 } from "../../projects/api/queries";
+import { isMarkdownPath } from "@aep/collab-doc";
 import { useDesignDependencies, useSpecFileContent, useSpecFiles } from "../api/queries";
 import { toSpecEntry } from "../api/mapping";
 import { computeDependencyUsedBy } from "../lib/dependencyUsedBy";
@@ -390,7 +391,11 @@ export function SpecView({ projectName }: { projectName: string }) {
   const isDiagramView =
     effectiveSelection.kind === "cell-diagram" ||
     effectiveSelection.kind === "wireframe";
-  const selectedIsMd = selectedFile?.path.endsWith(".md") ?? false;
+  // Ask collab-doc, never the extension: a `.md` file is only a rich-text
+  // fragment if it is PROSE. `agent.afm.md` is structured (YAML front matter a
+  // markdown round-trip would destroy), so it shares as Y.Text like
+  // design.json — and reading it as a fragment renders an empty pane.
+  const selectedIsMd = selectedFile ? isMarkdownPath(selectedFile.path) : false;
   const fragment =
     selectedFile && selectedIsMd && !isOpenApiFile
       ? collab.getFileFragment(selectedFile.path)
