@@ -418,11 +418,19 @@ type genaiRig struct {
 type rigOption func(*rigConfig)
 
 type rigConfig struct {
-	client     agentsvc.Client // overrides the default real-over-fake-HTTP client
-	skillsRepo spec.SkillsRepoResolver
-	mcpTokens  spec.MCPTokenMinter
-	mcpBaseURL string
-	recorder   spec.TurnActivityRecorder
+	client        agentsvc.Client // overrides the default real-over-fake-HTTP client
+	skillsRepo    spec.SkillsRepoResolver
+	mcpTokens     spec.MCPTokenMinter
+	mcpBaseURL    string
+	recorder      spec.TurnActivityRecorder
+	conversations spec.ConversationRepository
+}
+
+// withConversations wires the #430 thread store so the resolve/rotate endpoints
+// and the conversation_rotated admission fence can be exercised (nil skips the
+// fence, keeping the pre-#430 tests' arbitrary conversation uuids valid).
+func withConversations(repo spec.ConversationRepository) rigOption {
+	return func(c *rigConfig) { c.conversations = repo }
 }
 
 // withRecorder wires an activity recorder so a committed turn's spec_updated
@@ -518,11 +526,12 @@ func newGenaiRig(t *testing.T, seed map[string]string, opts ...rigOption) *genai
 		Client:     client,
 		Turns:      turns,
 		Broker:     broker,
-		Snapshots:  fx.Engine,
-		SkillsRepo: skillsRepo,
-		MCPTokens:  cfg.mcpTokens,
-		MCPBaseURL: cfg.mcpBaseURL,
-		Recorder:   cfg.recorder,
+		Snapshots:     fx.Engine,
+		SkillsRepo:    skillsRepo,
+		Conversations: cfg.conversations,
+		MCPTokens:     cfg.mcpTokens,
+		MCPBaseURL:    cfg.mcpBaseURL,
+		Recorder:      cfg.recorder,
 	})
 	rig.h = componenttest.New(t, componenttest.Options{Deps: edge.Deps{Spec: mustSpecHandlers(t, spec.Deps{GenAI: svc})}})
 	return rig
