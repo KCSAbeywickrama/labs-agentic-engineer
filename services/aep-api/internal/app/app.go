@@ -382,7 +382,10 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		Broker:     turnBroker,
 		Snapshots:  workspaceEngine,
 		SkillsRepo: skillsRepoForTurns,
-		Recorder:   turnActivityRecorder{svc: activitySvc, authorship: specAuthored},
+		// #430: the project-scoped thread store — resolve/rotate the current
+		// conversation, and the conversation_rotated admission fence on turns.
+		Conversations: spec.NewConversationRepository(db),
+		Recorder:      turnActivityRecorder{svc: activitySvc, authorship: specAuthored},
 	}
 	// MCP discovery on design-generation turns (dependency-management Phase 5):
 	// the BFF mints a short-lived aud:aep-api-mcp token per turn so the agents

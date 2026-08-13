@@ -35,7 +35,6 @@ const ConfigMapName = "aep-cli-config"
 // ConfigMapName. thunder.admin_client_secret is intentionally absent — it is
 // managed by OpenBao/ESO and read from the aep-thunder-secrets Secret instead.
 var ConfigMapKeys = []string{
-	"server",
 	"thunder.namespace",
 	"thunder.url",
 	"thunder.config_map",
@@ -47,6 +46,7 @@ var ConfigMapKeys = []string{
 	"oc.local_org_provisioning.enabled",
 	"platform.workspaces.access_mode",
 	"codingagent.local_stubs.enabled",
+	"codingagent.cluster_gateway_proxy.url",
 	"codingagent.secret_manager_api.url",
 	"webhook.delivery_url",
 	"webhook.local_smee.enabled",
@@ -79,6 +79,7 @@ func Init() {
 	// delivery (OPENBAO_* on aep-api). Off by default in production; set
 	// secret_manager_api.url to the real managed service URL instead.
 	viper.SetDefault("codingagent.local_stubs.enabled", false)
+	viper.SetDefault("codingagent.cluster_gateway_proxy.url", "")
 	viper.SetDefault("codingagent.secret_manager_api.url", "")
 
 	// GitHub webhook delivery.
@@ -94,8 +95,8 @@ func Init() {
 	viper.SetDefault("thunder.url", "http://thunder-service.thunder.svc.cluster.local:8090")
 	viper.SetDefault("thunder.config_map", "thunder-config-map")
 	viper.SetDefault("thunder.deployment", "thunder-deployment")
-	viper.SetDefault("thunder.admin_client_id", "openchoreo-system-app")
-	viper.SetDefault("thunder.admin_client_secret", "openchoreo-system-app-secret")
+	viper.SetDefault("thunder.admin_client_id", "aep-system-client")
+	viper.SetDefault("thunder.admin_client_secret", "aep-system-client-secret")
 	viper.SetDefault("thunder.public_url", "http://thunder.openchoreo.localhost:8080")
 }
 
