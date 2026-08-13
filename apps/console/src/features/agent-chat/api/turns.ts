@@ -118,19 +118,18 @@ export async function getConversationMessages(
   projectName: string,
   conversationId: string,
 ): Promise<ConversationMessage[] | null> {
-  const { data, error, response } = await client.GET(
+  const { data, error } = await client.GET(
     "/projects/{projectName}/agents/{conversationId}/messages",
     { params: { path: { projectName, conversationId } } },
   );
-  if (error || data === undefined) {
-    // A thread with no turns yet has no agents-store row, so the BFF answers
-    // 404 — that is "this thread is EMPTY", not a failure, and the caller
-    // must replace its cache with nothing (a re-created project would
-    // otherwise paint the dead project's log forever, since the local
-    // storage key is org/project-NAMED, not thread-id'd). Everything else is
-    // a real failure: null, keep painting the cache.
-    return response?.status === 404 ? [] : null;
-  }
+  // null means FAILURE — keep painting the local cache. "This thread is
+  // empty" is not a failure and never arrives as one: the BFF answers a
+  // known-but-turn-less thread with 200 {messages: []} (it owns thread
+  // existence via project_conversations), reserving 404-class errors for
+  // genuinely unknown ids, missing repos, and tenant mismatches — all cases
+  // where wiping the cache would destroy information over a transient or
+  // config problem.
+  if (error || data === undefined) return null;
   const body = data as { messages?: unknown[] };
   if (!body.messages) return null;
   return body.messages

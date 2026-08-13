@@ -269,9 +269,16 @@ export function dropTurnOutput(key: string, turnId: string): void {
 }
 
 export function replaceMessages(key: string, messages: ChatMessage[]): void {
+  // Rows that arrive with an id KEEP it. The D6 rehydrate replaces the whole
+  // log repeatedly (mount, foreign turn, refocus); minting fresh ids each
+  // time made every replace a full React remount, a full localStorage
+  // rewrite, and — worst — re-armed the panel's one-per-question
+  // auto-navigation, which keys off ids it has already seen.
+  // projectableHistory supplies position-stable ids for exactly this reason;
+  // minting here is the fallback for callers that don't.
   persist(
     key,
-    messages.map((m) => ({ ...m, id: nextId() })),
+    messages.map((m) => (m.id ? m : { ...m, id: nextId() })),
   );
 }
 

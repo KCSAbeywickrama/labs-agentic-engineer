@@ -459,6 +459,21 @@ func (s *Service) Rehydrate(ctx context.Context, orgID, projectID, conversationI
 	if err != nil {
 		var ue *agentsvc.UpstreamError
 		if errors.As(err, &ue) && ue.StatusCode == 404 {
+			// A thread the BFF minted (#430) has no agents-store row until its
+			// first turn — and the store's TTL sweep can also reap an idle one.
+			// Either way the thread EXISTS and its history is EMPTY: answer
+			// that, and reserve 404 for genuinely unknown ids, because the
+			// console treats 404-class failures as "keep painting the local
+			// cache" and an empty-thread 404 would leave stale logs immortal.
+			if s.conversations != nil {
+				known, kerr := s.conversations.Exists(ctx, orgID, projectID, useCaseGeneral, conversationID)
+				if kerr != nil {
+					return nil, fmt.Errorf("resolve thread existence: %w", kerr)
+				}
+				if known {
+					return json.RawMessage(`{"messages":[]}`), nil
+				}
+			}
 			return nil, ErrConversationNotFound
 		}
 		return nil, err

@@ -202,7 +202,12 @@ describe("useAgentChat — the shared thread (#430)", () => {
   });
 
   it("attaches to a teammate's already-running turn on mount", async () => {
-    mockGetActive.mockResolvedValue({ turnId: "t-77", status: "running", useCase: "general" });
+    mockGetActive.mockResolvedValue({
+      turnId: "t-77",
+      conversationId: "conv-1",
+      status: "running",
+      useCase: "general",
+    });
     // Keep the attachment open so the running state is observable.
     mockAttach.mockReturnValue(new Promise(() => {}));
 
@@ -211,5 +216,52 @@ describe("useAgentChat — the shared thread (#430)", () => {
     await waitFor(() => expect(result.current.activeTurnId).toBe("t-77"));
     expect(result.current.isSending).toBe(true);
     expect(mockAttach).toHaveBeenCalled();
+  });
+
+  // The rotation escape hatch must actually escape: a running turn that
+  // belongs to ANOTHER thread (the one a teammate rotated away, or into) is
+  // never folded here — it re-resolves instead, and the effect re-run on the
+  // fresh id handles it properly.
+  it("never attaches a turn from a different thread — re-resolves instead", async () => {
+    mockGetActive.mockResolvedValue({
+      turnId: "t-old",
+      conversationId: "conv-DEMOTED",
+      status: "running",
+      useCase: "general",
+    });
+
+    const { result } = renderHook(() => useAgentChat(ORG, PROJECT), { wrapper });
+    await waitFor(() => expect(result.current.conversationReady).toBe(true));
+    await waitFor(() => expect(mockGetActive).toHaveBeenCalled());
+
+    // Give the mount chain a beat: the attach must never fire.
+    await waitFor(() => expect(mockFetchCurrent.mock.calls.length).toBeGreaterThan(1));
+    expect(mockAttach).not.toHaveBeenCalled();
+    expect(result.current.activeTurnId).toBeUndefined();
+  });
+
+  // Local-only rows are the ONE copy of a failed send's text — a refocus
+  // rehydrate must not wash them out (the review's finding 6).
+  it("preserves failed-send rows across a replace", async () => {
+    const { result } = renderHook(() => useAgentChat(ORG, PROJECT), { wrapper });
+    await waitFor(() => expect(result.current.conversationReady).toBe(true));
+
+    mockStartTurn.mockRejectedValue(new Error("502 upstream"));
+    act(() => result.current.send("do not lose me"));
+    await waitFor(() =>
+      expect(getMessages(KEY).some((m) => m.role === "user" && m.status === "failed")).toBe(true),
+    );
+
+    // A later rehydrate replaces with server truth…
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await waitFor(() => {
+      const contents = getMessages(KEY).map((m) => ("content" in m ? m.content : ""));
+      expect(contents).toContain("from the server");
+      // …and the failed row and its error survive it.
+      expect(contents).toContain("do not lose me");
+      expect(contents).toContain("502 upstream");
+    });
   });
 });

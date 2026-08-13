@@ -139,6 +139,83 @@ func TestConversationRepo_RotateMovesCurrent(t *testing.T) {
 	}
 }
 
+// Two members clicking New conversation near-simultaneously: under READ
+// COMMITTED the loser's demote can miss the winner's phantom row and its
+// insert collides with the partial unique — which must retry, never surface
+// as an error. End state: every rotation minted a thread, exactly one is
+// current.
+func TestConversationRepo_RacingRotatesBothSucceed(t *testing.T) {
+	t.Parallel()
+	db := dbtest.New(t)
+	repo := spec.NewConversationRepository(db)
+	ctx := context.Background()
+
+	if _, err := repo.ResolveCurrent(ctx, "o1", "p1", "general", "ada"); err != nil {
+		t.Fatalf("seed ResolveCurrent: %v", err)
+	}
+
+	const racers = 6
+	errs := make([]error, racers)
+	var wg sync.WaitGroup
+	for i := 0; i < racers; i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			_, errs[n] = repo.Rotate(ctx, "o1", "p1", "general", "user")
+		}(i)
+	}
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("racer %d: %v", i, err)
+		}
+	}
+
+	var current, total int64
+	if err := db.Model(&spec.ProjectConversation{}).Where("org_id = 'o1' AND current").Count(&current).Error; err != nil {
+		t.Fatalf("count current: %v", err)
+	}
+	if err := db.Model(&spec.ProjectConversation{}).Where("org_id = 'o1'").Count(&total).Error; err != nil {
+		t.Fatalf("count total: %v", err)
+	}
+	if current != 1 {
+		t.Fatalf("current rows = %d, want exactly 1", current)
+	}
+	if total != racers+1 {
+		t.Fatalf("total rows = %d, want %d (every rotation minted, every thread survives)", total, racers+1)
+	}
+}
+
+// The rehydrate read: a demoted thread still Exists; an unknown id does not;
+// and a NON-UUID id — validConversationID admits far more than uuid syntax —
+// must answer false, never a Postgres cast error surfacing as a 500.
+func TestConversationRepo_ExistsAndNonUUIDSafety(t *testing.T) {
+	t.Parallel()
+	repo := spec.NewConversationRepository(dbtest.New(t))
+	ctx := context.Background()
+
+	old, err := repo.ResolveCurrent(ctx, "o1", "p1", "general", "ada")
+	if err != nil {
+		t.Fatalf("ResolveCurrent: %v", err)
+	}
+	if _, err := repo.Rotate(ctx, "o1", "p1", "general", "ada"); err != nil {
+		t.Fatalf("Rotate: %v", err)
+	}
+
+	if ok, err := repo.Exists(ctx, "o1", "p1", "general", old.ID); err != nil || !ok {
+		t.Fatalf("Exists(demoted) = (%v, %v), want (true, nil)", ok, err)
+	}
+	if ok, err := repo.Exists(ctx, "o1", "p1", "general", "11111111-1111-4111-8111-111111111111"); err != nil || ok {
+		t.Fatalf("Exists(unknown) = (%v, %v), want (false, nil)", ok, err)
+	}
+	if ok, err := repo.Exists(ctx, "o1", "p1", "general", "abc123"); err != nil || ok {
+		t.Fatalf("Exists(non-uuid) = (%v, %v), want (false, nil) — not a cast error", ok, err)
+	}
+	if ok, err := repo.IsCurrent(ctx, "o1", "p1", "general", "abc123"); err != nil || ok {
+		t.Fatalf("IsCurrent(non-uuid) = (%v, %v), want (false, nil) — not a cast error", ok, err)
+	}
+}
+
 // Rotating a project that never resolved is a create, not an error — the
 // console's New-conversation works on a project whose thread was never opened.
 func TestConversationRepo_RotateOnVirginProjectCreates(t *testing.T) {

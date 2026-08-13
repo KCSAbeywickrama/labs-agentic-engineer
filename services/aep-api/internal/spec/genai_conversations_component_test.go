@@ -41,9 +41,10 @@ func conversationsPath() string {
 // memConversationRepo is the in-memory ConversationRepository for the
 // component tier — single-flight semantics without SQL.
 type memConversationRepo struct {
-	mu   sync.Mutex
-	rows map[string]*spec.ProjectConversation // scope key → current row
-	n    int
+	mu      sync.Mutex
+	rows    map[string]*spec.ProjectConversation // scope key → current row
+	demoted []string                             // rotated-away ids (still Exists)
+	n       int
 }
 
 func (m *memConversationRepo) key(org, project, useCase string) string {
@@ -75,6 +76,9 @@ func (m *memConversationRepo) Rotate(ctx context.Context, org, project, useCase,
 	if m.rows == nil {
 		m.rows = map[string]*spec.ProjectConversation{}
 	}
+	if old, ok := m.rows[m.key(org, project, useCase)]; ok {
+		m.demoted = append(m.demoted, old.ID)
+	}
 	delete(m.rows, m.key(org, project, useCase))
 	m.mu.Unlock()
 	return m.ResolveCurrent(ctx, org, project, useCase, createdBy)
@@ -85,6 +89,20 @@ func (m *memConversationRepo) IsCurrent(_ context.Context, org, project, useCase
 	defer m.mu.Unlock()
 	row, ok := m.rows[m.key(org, project, useCase)]
 	return ok && row.ID == id, nil
+}
+
+func (m *memConversationRepo) Exists(_ context.Context, org, project, useCase, id string) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if row, ok := m.rows[m.key(org, project, useCase)]; ok && row.ID == id {
+		return true, nil
+	}
+	for _, d := range m.demoted {
+		if d == id {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 type conversationViewBody struct {
@@ -168,5 +186,40 @@ func TestConversations_TurnFenceAndRotation(t *testing.T) {
 	}
 	if rec := r.post(t, current, "general", "hello again"); rec.Code != http.StatusConflict {
 		t.Fatalf("demoted-id POST: code %d, want 409 (%s)", rec.Code, rec.Body.String())
+	}
+}
+
+// A thread the BFF minted has no agents-store row until its first turn (and
+// the store's TTL sweep can reap an idle one): its rehydrate answers 200 with
+// EMPTY history. 404 is reserved for genuinely unknown ids — the console
+// treats 404-class failures as "keep the local cache", so an empty-thread 404
+// would leave a re-created project's stale log immortal.
+func TestConversations_EmptyThreadRehydratesEmptyNot404(t *testing.T) {
+	r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"},
+		withConversations(&memConversationRepo{}))
+	// The agents store has no row for a turn-less thread — its GET 404s.
+	r.fake.mu.Lock()
+	r.fake.convStatus = http.StatusNotFound
+	r.fake.mu.Unlock()
+
+	current := listConversations(t, r)[0].ConversationID
+
+	rec := r.h.AsOrg(testOrg).Get(convPath(current))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("fresh-thread rehydrate: code %d, want 200 (%s)", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Messages []any `json:"messages"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || body.Messages == nil {
+		t.Fatalf("rehydrate body = %s (err %v), want {\"messages\":[]}", rec.Body.String(), err)
+	}
+	if len(body.Messages) != 0 {
+		t.Fatalf("fresh thread has %d messages, want 0", len(body.Messages))
+	}
+
+	// An id no thread ever had stays a real 404.
+	if rec := r.h.AsOrg(testOrg).Get(convPath("11111111-1111-4111-8111-111111111111")); rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown-id rehydrate: code %d, want 404 (%s)", rec.Code, rec.Body.String())
 	}
 }

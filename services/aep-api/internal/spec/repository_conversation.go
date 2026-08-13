@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 // ProjectConversation is the project's chat thread pointer (#430): which
@@ -68,6 +67,11 @@ type ConversationRepository interface {
 	// IsCurrent reports whether id is the scope's current thread — the turn
 	// admission fence behind the single-era 409 (see StartTurn).
 	IsCurrent(ctx context.Context, orgID, projectID, useCase, id string) (bool, error)
+
+	// Exists reports whether id names ANY of the scope's threads, current or
+	// demoted — the rehydrate read: a known-but-turn-less thread answers an
+	// empty history, never a 404 (which the console must treat as failure).
+	Exists(ctx context.Context, orgID, projectID, useCase, id string) (bool, error)
 }
 
 type conversationRepository struct{ db *gorm.DB }
@@ -77,9 +81,9 @@ func NewConversationRepository(db *gorm.DB) ConversationRepository {
 	return &conversationRepository{db: db}
 }
 
-func (r *conversationRepository) getCurrent(ctx context.Context, orgID, projectID, useCase string) (*ProjectConversation, error) {
+func (r *conversationRepository) getCurrent(db *gorm.DB, orgID, projectID, useCase string) (*ProjectConversation, error) {
 	var row ProjectConversation
-	err := r.db.WithContext(ctx).
+	err := db.
 		Where("org_id = ? AND project_id = ? AND use_case = ? AND current", orgID, projectID, useCase).
 		First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -91,33 +95,54 @@ func (r *conversationRepository) getCurrent(ctx context.Context, orgID, projectI
 	return &row, nil
 }
 
+// lockScope serializes the scope's WRITERS with a Postgres advisory
+// transaction lock (released at commit/rollback, multi-replica safe). Under
+// READ COMMITTED a concurrent writer's freshly committed current row is a
+// phantom to this transaction's UPDATE/SELECT — the demote matches nothing,
+// the re-check sees nothing, and a bare insert then collides with the partial
+// unique and would surface as a 500. Retry loops lose under real contention
+// (a racer can lose every round to a fresh winner — observed at 6 concurrent
+// rotates); the lock removes the race instead of pacing it. The partial
+// unique index stays as the cross-path backstop.
+func lockScope(tx *gorm.DB, orgID, projectID, useCase string) error {
+	return tx.Exec(
+		`SELECT pg_advisory_xact_lock(hashtextextended('project_conversations:' || ? || '/' || ? || '/' || ?, 0))`,
+		orgID, projectID, useCase,
+	).Error
+}
+
 func (r *conversationRepository) ResolveCurrent(ctx context.Context, orgID, projectID, useCase, createdBy string) (*ProjectConversation, error) {
-	// Two attempts, mirroring TryStart: losing the insert race means the
-	// winner's row is committed (or about to be) — read it; a rotate landing
-	// between our read and insert retries once.
-	for attempt := 0; attempt < 2; attempt++ {
-		if row, err := r.getCurrent(ctx, orgID, projectID, useCase); err != nil || row != nil {
-			return row, err
-		}
-		row := &ProjectConversation{
-			OrgID:     orgID,
-			ProjectID: projectID,
-			UseCase:   useCase,
-			Current:   true,
-			CreatedBy: createdBy,
-		}
-		// No conflict target: any unique violation — the partial current index
-		// included — resolves to DO NOTHING (same shape as milestone-run
-		// admission, #420).
-		res := r.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(row)
-		if res.Error != nil {
-			return nil, res.Error
-		}
-		if res.RowsAffected > 0 {
-			return row, nil
-		}
+	// Fast path: the common case is a read of an existing current row — no
+	// lock, no transaction.
+	if row, err := r.getCurrent(r.db.WithContext(ctx), orgID, projectID, useCase); err != nil || row != nil {
+		return row, err
 	}
-	return nil, errors.New("conversations: resolve raced the current guard twice — give up")
+	row := &ProjectConversation{
+		OrgID:     orgID,
+		ProjectID: projectID,
+		UseCase:   useCase,
+		Current:   true,
+		CreatedBy: createdBy,
+	}
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockScope(tx, orgID, projectID, useCase); err != nil {
+			return err
+		}
+		// Re-check under the lock: the racer that held it may have created.
+		existing, err := r.getCurrent(tx, orgID, projectID, useCase)
+		if err != nil {
+			return err
+		}
+		if existing != nil {
+			row = existing
+			return nil
+		}
+		return tx.Create(row).Error
+	})
+	if err != nil {
+		return nil, err
+	}
+	return row, nil
 }
 
 func (r *conversationRepository) Rotate(ctx context.Context, orgID, projectID, useCase, createdBy string) (*ProjectConversation, error) {
@@ -128,12 +153,14 @@ func (r *conversationRepository) Rotate(ctx context.Context, orgID, projectID, u
 		Current:   true,
 		CreatedBy: createdBy,
 	}
+	// Concurrent rotates serialize on the scope lock: each demotes the
+	// previous winner's row and mints its own — as many rotations as clicks,
+	// last one wins, every thread survives. The intended semantics of two
+	// people clicking New conversation.
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Demote-then-insert in one transaction. Two concurrent rotates
-		// serialize on the demoted row's lock (read committed): the second
-		// demotes the first's fresh row and mints its own — two rotations
-		// happened, last one wins, every thread survives. That is the
-		// intended semantics of two people clicking New conversation.
+		if err := lockScope(tx, orgID, projectID, useCase); err != nil {
+			return err
+		}
 		if err := tx.Model(&ProjectConversation{}).
 			Where("org_id = ? AND project_id = ? AND use_case = ? AND current", orgID, projectID, useCase).
 			Update("current", false).Error; err != nil {
@@ -147,10 +174,23 @@ func (r *conversationRepository) Rotate(ctx context.Context, orgID, projectID, u
 	return fresh, nil
 }
 
+// The id columns are uuid-typed, but the id ARRIVES as a client string that
+// validConversationID bounds far looser than uuid syntax — a Postgres cast
+// error on `uuid = 'abc123'` would surface as a 500 where the contract owes a
+// 409/404. Comparing as text makes a non-uuid id simply never match.
+
 func (r *conversationRepository) IsCurrent(ctx context.Context, orgID, projectID, useCase, id string) (bool, error) {
 	var n int64
 	err := r.db.WithContext(ctx).Model(&ProjectConversation{}).
-		Where("org_id = ? AND project_id = ? AND use_case = ? AND current AND id = ?", orgID, projectID, useCase, id).
+		Where("org_id = ? AND project_id = ? AND use_case = ? AND current AND id::text = ?", orgID, projectID, useCase, id).
+		Count(&n).Error
+	return n > 0, err
+}
+
+func (r *conversationRepository) Exists(ctx context.Context, orgID, projectID, useCase, id string) (bool, error) {
+	var n int64
+	err := r.db.WithContext(ctx).Model(&ProjectConversation{}).
+		Where("org_id = ? AND project_id = ? AND use_case = ? AND id::text = ?", orgID, projectID, useCase, id).
 		Count(&n).Error
 	return n > 0, err
 }

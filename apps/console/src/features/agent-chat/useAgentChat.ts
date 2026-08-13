@@ -110,16 +110,33 @@ export function useAgentChat(org: string, projectName: string): AgentChat {
     const ac = new AbortController();
     abortRef.current = ac;
 
+    // Pre-#430 identity cleanup: the FE-minted conversation uuid is dead —
+    // nothing reads it, and leaving it would leak one key per project forever.
+    try {
+      localStorage.removeItem(`aep.chat.conv.${org}.${projectName}`);
+    } catch {
+      // best-effort
+    }
+
     // D6: server truth replaces the local paint-cache — ALWAYS, not only when
     // the cache is empty (the pre-#430 rule, correct for a private thread and
     // wrong for a shared one: a teammate's messages otherwise never appear).
     // Skipped while attached to a stream; the fold is appending live and the
     // replay already reconstructed the thread.
+    //
+    // LOCAL-ONLY rows survive the replace: a failed send's user row (the
+    // typed text) and its error row exist nowhere server-side, and washing
+    // them out on the next refocus would silently destroy the one copy of a
+    // message the user still needs to retry. They persist until the next
+    // rotation clears the log.
     const rehydrate = async () => {
       if (attachedRef.current) return;
       const history = await getConversationMessages(projectName, conversationId);
       if (ac.signal.aborted || attachedRef.current || history === null) return;
-      replaceMessages(chatKey, projectableHistory(history));
+      const localOnly = getMessages(chatKey).filter(
+        (m) => m.role === "error" || (m.role === "user" && m.status === "failed"),
+      );
+      replaceMessages(chatKey, [...projectableHistory(history), ...localOnly]);
     };
 
     // Attach to a running turn (ours or a teammate's) and fold it live.
@@ -142,6 +159,20 @@ export function useAgentChat(org: string, projectName: string): AgentChat {
       }
     };
 
+    // A running turn is attachable only when it belongs to THIS thread. A
+    // turn from another thread means a teammate rotated (their turn runs in
+    // the new current thread, or a demoted thread's turn is still draining):
+    // folding it here would splice one thread's narration into another's log
+    // — so re-resolve instead, and the effect re-run on the new id picks it
+    // up properly.
+    const attachableOrReResolve = (active: { conversationId: string }): boolean => {
+      if (active.conversationId === conversationId) return true;
+      void queryClient.invalidateQueries({
+        queryKey: conversationKeys.current(projectName),
+      });
+      return false;
+    };
+
     // Mount (or rotation — a new id re-runs this effect): rehydrate, then
     // re-attach to a still-running chat turn (replay from 0).
     void (async () => {
@@ -150,6 +181,7 @@ export function useAgentChat(org: string, projectName: string): AgentChat {
       const active = await getActiveTurn(projectName);
       if (ac.signal.aborted || !active || active.status !== "running") return;
       if (active.useCase !== "general") return; // another flow's turn
+      if (!attachableOrReResolve(active)) return;
       await attach(active.turnId);
     })();
 
@@ -162,14 +194,24 @@ export function useAgentChat(org: string, projectName: string): AgentChat {
         const active = await getActiveTurn(projectName);
         if (ac.signal.aborted || attachedRef.current) return;
         if (!active || active.status !== "running" || active.useCase !== "general") return;
+        if (!attachableOrReResolve(active)) return;
         await rehydrate();
         if (!ac.signal.aborted) await attach(active.turnId);
       })();
     }, FOREIGN_TURN_POLL_MS);
 
-    // Refocus trigger: the user was away; catch the thread up.
+    // Refocus trigger: the user was away; catch the thread up — and re-check
+    // WHICH thread is current first, because a teammate may have rotated
+    // while this panel idled (staleTime Infinity never re-asks on its own,
+    // and rehydrating the demoted id would keep succeeding forever). If the
+    // id moved, the invalidation re-runs this effect on the new one; if not,
+    // the manual rehydrate covers ordinary freshness.
     const onVisible = () => {
-      if (document.visibilityState === "visible") void rehydrate();
+      if (document.visibilityState !== "visible") return;
+      void queryClient.invalidateQueries({
+        queryKey: conversationKeys.current(projectName),
+      });
+      void rehydrate();
     };
     document.addEventListener("visibilitychange", onVisible);
 
@@ -181,7 +223,7 @@ export function useAgentChat(org: string, projectName: string): AgentChat {
       setIsSending(false);
       setActiveTurnId(undefined);
     };
-  }, [chatKey, projectName, conversationId, onTurnCommitted]);
+  }, [chatKey, org, projectName, conversationId, onTurnCommitted, queryClient]);
 
   const send = useCallback(
     (instruction: string) => {
