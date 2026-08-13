@@ -94,6 +94,29 @@ describe("screenReferenceFiles", () => {
     expect(accepted.map((f) => f.name)).toEqual(["mockup.png", "photo.jpg", "scan.JPEG"]);
     expect(rejected).toEqual([]);
   });
+
+  // Two names, one repo path: the apply batch would write the path twice and
+  // the second write would silently replace the first document.
+  it("rejects a name that sanitizes onto an attached document's path", () => {
+    const { accepted, rejected } = screenReferenceFiles(
+      [file("prd.md", "old")],
+      [file("PRD.md", "new")],
+    );
+    expect(accepted).toEqual([]);
+    expect(rejected[0]?.name).toBe("PRD.md");
+    expect(rejected[0]?.reason).toMatch(/prd\.md/);
+  });
+
+  it("rejects the second of two incoming names that sanitize to one path", async () => {
+    const { accepted, rejected } = screenReferenceFiles(
+      [],
+      [file("my notes.md", "a"), file("my-notes.md", "b")],
+    );
+    expect(accepted.map((f) => f.name)).toEqual(["my notes.md"]);
+    expect(rejected[0]?.name).toBe("my-notes.md");
+    const writes = await toReferenceWrites(accepted);
+    expect(new Set(writes.map((w) => w.path)).size).toBe(writes.length);
+  });
 });
 
 describe("toReferenceWrites", () => {

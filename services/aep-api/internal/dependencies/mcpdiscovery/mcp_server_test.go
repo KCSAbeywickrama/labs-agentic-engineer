@@ -25,6 +25,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo/mocks"
@@ -770,9 +771,10 @@ func TestMCP_GetRemoteGitFileContents_Directory(t *testing.T) {
 
 // Binary content never rides a tool result as text. A real turn died on this:
 // the model fetched an 868KB PDF through this tool, the raw bytes became ~1.5M
-// junk tokens per model step, and the NUL bytes (json ) then killed the
-// conversation's jsonb persist. The tool answers with the file's facts and a
-// refusal instead — the model can still reason about the file existing.
+// junk tokens per model step, and the NUL bytes the read carried then killed the
+// conversation's jsonb persist (Postgres rejects U+0000 anywhere in a jsonb
+// document). The tool answers with the file's facts and a refusal instead — the
+// model can still reason about the file existing.
 func TestMCP_GetRemoteGitFileContents_BinaryIsRefusedAsFacts(t *testing.T) {
 	pdf := "%PDF-1.4\n\x00\x00binary\xff\xfe"
 	rg := &fakeRemoteGit{file: &RemoteGitFile{Content: pdf, SHA: "abc"}}
@@ -790,6 +792,36 @@ func TestMCP_GetRemoteGitFileContents_BinaryIsRefusedAsFacts(t *testing.T) {
 	}
 	if payload.SHA != "abc" {
 		t.Errorf("sha = %q, want abc (the facts still ride)", payload.SHA)
+	}
+	if payload.Note == "" || !strings.Contains(payload.Note, "binary") {
+		t.Errorf("note = %q, want an explanation naming the file as binary", payload.Note)
+	}
+}
+
+// A NUL byte alone is enough to withhold the content, and it is the byte that
+// actually killed the persist. U+0000 IS valid UTF-8, so the UTF-8 half of the
+// check cannot catch this one — the fixture is otherwise perfectly ordinary
+// text, and the refusal must still fire.
+func TestMCP_GetRemoteGitFileContents_ValidUTF8WithNULIsRefused(t *testing.T) {
+	withNUL := "openapi: 3.0.3" + string(rune(0)) + "\ninfo:\n  title: still valid utf-8\n"
+	if !utf8.ValidString(withNUL) {
+		t.Fatal("fixture is not valid UTF-8 — it would exercise the wrong branch")
+	}
+	rg := &fakeRemoteGit{file: &RemoteGitFile{Content: withNUL, SHA: "def"}}
+	h := NewMCPHandler(newExternalCatalogFixture(nil), nil, nil, rg, nil, nil, nil)
+	resp := decodeRPC(t, postRPC(t, h, "org-1",
+		callBody("get_remote_git_file_contents", `{"owner":"acme","repo":"billing-svc","path":"specs/openapi.yaml"}`)))
+	text := toolText(t, resp, false)
+
+	var payload remoteGitFileView
+	if err := json.Unmarshal([]byte(text), &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if payload.Content != "" {
+		t.Fatalf("NUL-bearing content leaked into the tool result (%q) — must be empty", payload.Content)
+	}
+	if payload.SHA != "def" {
+		t.Errorf("sha = %q, want def (the facts still ride)", payload.SHA)
 	}
 	if payload.Note == "" || !strings.Contains(payload.Note, "binary") {
 		t.Errorf("note = %q, want an explanation naming the file as binary", payload.Note)

@@ -208,8 +208,9 @@ export function createApp(deps: CreateAppDeps): Express {
     let files: Record<string, string>;
     let skillSource: SkillSource;
     // Reference PDFs (#384): a `start` turn's TurnSpec.references may name
-    // `.pdf` documents — readSnapshot's walk SKIPS anything with a NUL byte, so
-    // a binary PDF is never in `files`. Attached separately as native file
+    // `.pdf` documents. They are never in `files` — the snapshot filter admits
+    // no `.pdf`, whatever the bytes look like — so no document can ride one turn
+    // as both prompt text and a file part. Attached separately as native file
     // parts (see run-conversation-turn.ts / run-turn.ts); every other kind, and
     // a start turn with no PDF references, leaves this empty.
     let referenceAttachments: FilePart[] = [];

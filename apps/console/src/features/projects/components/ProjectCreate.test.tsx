@@ -57,12 +57,16 @@ vi.mock("../api/queries", () => ({
 
 import { ProjectCreate } from "./ProjectCreate";
 
-function attach(name: string, content = "content"): void {
+function attachAll(names: string[], content = "content"): void {
   const input = document.querySelector<HTMLInputElement>("input[type=file]");
   expect(input).not.toBeNull();
   fireEvent.change(input!, {
-    target: { files: [new File([content], name)] },
+    target: { files: names.map((name) => new File([content], name)) },
   });
+}
+
+function attach(name: string, content = "content"): void {
+  attachAll([name], content);
 }
 
 function typePrompt(): void {
@@ -92,6 +96,18 @@ describe("ProjectCreate reference documents (#383)", () => {
     expect(
       screen.getByText(/only \.md, \.txt, \.pdf, \.png, \.jpg, \.jpeg files are accepted/i),
     ).toBeTruthy();
+  });
+
+  // Two rejections can carry one name — the same unsupported file picked twice
+  // in a selection. Each gets its own notice, and dismissing one leaves the
+  // other standing.
+  it("keeps one notice per rejected file, dismissed one at a time", () => {
+    render(<ProjectCreate />);
+    attachAll(["spec.docx", "spec.docx"]);
+    expect(screen.getAllByText(/was not attached/i)).toHaveLength(2);
+
+    fireEvent.click(screen.getAllByRole("button", { name: /close/i })[0]!);
+    expect(screen.getAllByText(/was not attached/i)).toHaveLength(1);
   });
 
   it("creates without an upload when nothing is attached", () => {

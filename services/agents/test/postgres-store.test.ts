@@ -202,6 +202,21 @@ test("sanitizeForJsonb recursively replaces U+0000 with U+FFFD; everything else 
   assert.equal(input.b[0], "x\u0000y");
 });
 
+// Postgres refuses the codepoint anywhere in a jsonb document, keys included —
+// sanitizing only the leaves would still lose the turn to a NUL-bearing key.
+test("sanitizeForJsonb replaces U+0000 in object keys, at any depth", () => {
+  const NUL = String.fromCharCode(0);
+  const out = sanitizeForJsonb({
+    [`top${NUL}key`]: "v",
+    nested: { [`deep${NUL}key`]: [`a${NUL}b`] },
+  });
+  assert.deepEqual(out, {
+    "top�key": "v",
+    nested: { "deep�key": ["a�b"] },
+  });
+  assert.equal(JSON.stringify(out).includes(NUL), false);
+});
+
 test("save strips the NUL escape sequence from the jsonb payload sent to Postgres", async () => {
   const db = new RecordingPg();
   const store = new PostgresConversationStore(db);

@@ -125,12 +125,16 @@ export function ReferenceFilePicker({
           ))}
         </Box>
       )}
-      {rejected.map(({ name, reason }) => (
+      {/* Keyed and dismissed by position, not by name: one selection can reject
+          two files under the same name (a duplicate, or two oversized copies),
+          and name identity would collapse them into one notice and then close
+          both at once. */}
+      {rejected.map(({ name, reason }, index) => (
         <Alert
-          key={name}
+          key={`${index}-${name}`}
           severity="warning"
           onClose={() =>
-            setRejected((prev) => prev.filter((r) => r.name !== name))
+            setRejected((prev) => prev.filter((_, i) => i !== index))
           }
         >
           <strong>{name}</strong> was not attached: {reason.toLowerCase()}.
