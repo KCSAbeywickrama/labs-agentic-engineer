@@ -30,6 +30,11 @@ import (
 
 const LocalPort = "18200"
 
+// httpClient is a package-level client with a conservative timeout so that
+// callers using context.Background() cannot block indefinitely on an
+// unresponsive OpenBao endpoint.
+var httpClient = &http.Client{Timeout: 30 * time.Second}
+
 // PortForward starts kubectl port-forward to pod/<release>-0 in the background.
 // Caller must kill the returned process when done.
 func PortForward(ctx context.Context, namespace, release, kubeconfig string) (*exec.Cmd, error) {
@@ -89,7 +94,7 @@ func Req(ctx context.Context, method, baseURL, token, path string, body interfac
 		req.Header.Set("Content-Type", "application/json")
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, 0, err
 	}
