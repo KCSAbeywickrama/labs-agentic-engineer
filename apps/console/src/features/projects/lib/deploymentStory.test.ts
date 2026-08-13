@@ -82,7 +82,7 @@ describe("validationStage", () => {
     const s = validationStage("skipped");
     expect(s.state).toBe("done");
     expect(s.fact).toBe("validation skipped");
-    expect(s.note).toContain("no acceptance criteria");
+    expect(s.note).toContain("no validation criteria");
   });
 
   it("carries the verdict label as the stage fact", () => {

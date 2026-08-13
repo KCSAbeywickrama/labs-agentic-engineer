@@ -186,6 +186,29 @@ describe("DeploymentsPage — validation", () => {
     expect(screen.getByText("Runs again once the fix is built and deployed.")).toBeInTheDocument();
   });
 
+  // A SETTLED failure. The banner wrote its own sentence for these and led with the
+  // count that PASSED ("Validation failed — 4 of 6 criteria passed on this
+  // deployment"), while the tile on the Validation page led with the failures — one
+  // outcome, two voices and two headline numbers, depending which surface you were on.
+  it("leads a settled failure with the failures, in the tile's own words", () => {
+    mockDeploy = {
+      version: "v1",
+      status: "deployed",
+      components: { total: 1, ready: 1 },
+      validation: "failed",
+    };
+    mockCounts = { passed: 4, failed: 2, uncovered: 0, total: 6 };
+
+    render(<DeploymentsPage projectName="acme" />);
+
+    expect(
+      screen.getByText(
+        "2 of 6 criteria failed. The run stopped here, so the milestone stays open for the fix.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/criteria passed on this deployment/)).not.toBeInTheDocument();
+  });
+
   // The same fold, the other way: nothing is filed for an `unreported` attempt, so
   // promising a fix would name work that does not exist.
   it("promises a retry, not a fix, when the repeated verdict was unreported", () => {
@@ -279,8 +302,10 @@ describe("DeploymentsPage — story rail", () => {
     render(<DeploymentsPage projectName="acme" />);
 
     expect(screen.getByText("12/12 passed")).toBeInTheDocument();
+    // The tile's own sentence, word for word — the banner used to write its own,
+    // which is how a settled FAILURE came to lead with the count that passed.
     expect(
-      screen.getByText("Validated — 12 of 12 criteria passed on this deployment."),
+      screen.getByText("All 12 criteria were covered by a test and passed."),
     ).toBeInTheDocument();
   });
 });

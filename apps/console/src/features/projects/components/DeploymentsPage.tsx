@@ -194,15 +194,12 @@ function ComponentRow({ card }: { card: DeploymentCard }) {
  * The validation stage's own evidence: what the last attempt found, and the way to
  * the report.
  *
- * A run mid-loop has no verdict to announce — it has an attempt's result and a plan
- * — so the two lifecycle states take their sentence from the SHARED copy the
- * Validation page's tile reads, word for word. Writing them here instead is how this
- * banner came to render "This deployment's verdict: awaiting fix.", announcing a
- * lifecycle state as a verdict.
- *
- * The settled states keep this surface's own phrasing: "on this deployment" is what
- * makes a verdict read as being about the thing on screen, and the tile does not need
- * it because its whole page is the report.
+ * EVERY state takes its sentence from the SHARED copy the Validation page's tile
+ * reads, word for word. Writing any of them here is what let the two come apart:
+ * this banner announced a lifecycle state as a verdict ("This deployment's verdict:
+ * awaiting fix.") and, on a settled failure, led with the count that PASSED — so a
+ * reader moving between the two surfaces met a different voice and a different
+ * headline number for one outcome.
  */
 function VerdictBanner({
   projectName,
@@ -219,12 +216,19 @@ function VerdictBanner({
 }) {
   const view = validationView(validation);
   if (!view) return null;
+  // WHICH verdict the sentence is about differs by state, and only that. A settled
+  // deploy.validation IS the verdict, mirrored — which is also the only place the
+  // three states outside COUNTABLE (`inconclusive`, `unreported`, `skipped`) can be
+  // read from here, since their run row is never fetched. The two lifecycle values
+  // are the ones that fold a verdict away, so those take the run's.
   const inFlight = validation === "running" || validation === "awaiting-fix";
-  const sentence = inFlight
-    ? verdictSentence(verdict, counts, validation)
-    : counts
-      ? `${view.label.charAt(0).toUpperCase() + view.label.slice(1)} — ${counts.passed} of ${counts.total} criteria passed on this deployment.`
-      : `This deployment's verdict: ${view.label}.`;
+  const sentence =
+    verdictSentence(inFlight ? verdict : validation, counts, validation) ||
+    // `skipped`, and any value from a newer server. The shared copy deliberately has
+    // no sentence for skipped: the stage note beside this already says the version
+    // authored no criteria, and two adjacent elements saying it once each is a
+    // restatement. Naming the verdict complements that instead.
+    `This deployment's verdict: ${view.label}.`;
   return (
     <Box
       sx={(theme) => {
@@ -253,7 +257,10 @@ function VerdictBanner({
         size="small"
         color="inherit"
         endIcon={<ArrowRight size={14} aria-hidden />}
-        sx={{ flexShrink: 0, fontWeight: 500 }}
+        // Text, not outlined — it sits inside the banner's own border. Which
+        // costs it MUI's 5px text padding, half what the outlined navigation
+        // buttons get, so px is said explicitly.
+        sx={{ flexShrink: 0, fontWeight: 500, px: 1.25 }}
       >
         View full report
       </LinkButton>

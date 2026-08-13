@@ -116,7 +116,7 @@ const TONE_STATE: Partial<Record<StageTone, StageState>> = {
 function validationNote(validation: string, view: ReturnType<typeof validationView>) {
   switch (validation) {
     case "running":
-      return "The deployed system is being checked against the spec's acceptance criteria.";
+      return "The deployed system is being checked against the spec's validation criteria.";
     case "awaiting-fix":
       // Answers the "when?" the banner's sentence deliberately leaves out — a merged
       // fix is not a re-checked one, because validation runs against what is deployed.
@@ -128,8 +128,8 @@ function validationNote(validation: string, view: ReturnType<typeof validationVi
   // The settled-but-neutral verdict (skipped): nothing WAS checked, so the note must
   // not claim it was.
   return view.tone === "neutral"
-    ? "This version has no acceptance criteria — there was nothing to check."
-    : "The deployed system was checked against the spec's acceptance criteria.";
+    ? "This version has no validation criteria — there was nothing to check."
+    : "The deployed system was checked against the spec's validation criteria.";
 }
 
 /** Stage 2 — the validation agent's verdict on that deployment. Counts, when
