@@ -47,6 +47,13 @@ const CREATE_TABLE = `CREATE TABLE IF NOT EXISTS conversations (
 
 // Pre-journal deployments created the table without `turns` (#463); CREATE
 // TABLE IF NOT EXISTS never adds a column, so bootstrap alters idempotently.
+// The ALTER runs only when the probe says the column is missing: Postgres
+// takes the table's ACCESS EXCLUSIVE lock BEFORE evaluating IF NOT EXISTS, so
+// an every-boot ALTER queued behind a long transaction would stall every
+// reader on the table; the probe costs one catalog read instead.
+const TURNS_COLUMN_EXISTS = `SELECT 1 FROM information_schema.columns
+  WHERE table_name = 'conversations' AND column_name = 'turns'`;
+
 const ADD_TURNS_COLUMN = `ALTER TABLE conversations
   ADD COLUMN IF NOT EXISTS turns jsonb NOT NULL DEFAULT '[]'`;
 
@@ -73,15 +80,18 @@ function asDate(value: unknown): Date {
 
 /** jsonb comes back already parsed by node-postgres; timestamptz comes back as a Date. */
 function rowToConversation(row: Record<string, unknown>): Conversation {
-  const turns = ((row.turns ?? []) as Array<Record<string, unknown>>).map(
-    (t): TurnJournalEntry => ({
+  const turns = ((row.turns ?? []) as Array<Record<string, unknown>>).map((t): TurnJournalEntry => {
+    const author = t.author as { id?: unknown; displayName?: unknown } | undefined;
+    return {
       turnId: String(t.turnId ?? ""),
-      kind: String(t.kind ?? ""),
       text: String(t.text ?? ""),
-      ...(t.author ? { author: String(t.author) } : {}),
+      ...(author && typeof author.id === "string" && typeof author.displayName === "string"
+        ? { author: { id: author.id, displayName: author.displayName } }
+        : {}),
+      messageIndex: Number(t.messageIndex ?? -1),
       createdAt: asDate(t.createdAt),
-    }),
-  );
+    };
+  });
   return {
     id: String(row.id),
     messages: (row.messages ?? []) as ModelMessage[],
@@ -98,7 +108,8 @@ export class PostgresConversationStore implements ConversationStore {
   /** Idempotent schema bootstrap; safe to call on every startup. */
   async init(): Promise<void> {
     await this.db.query(CREATE_TABLE);
-    await this.db.query(ADD_TURNS_COLUMN);
+    const { rows } = await this.db.query(TURNS_COLUMN_EXISTS);
+    if (rows.length === 0) await this.db.query(ADD_TURNS_COLUMN);
   }
 
   async get(id: string): Promise<Conversation | null> {

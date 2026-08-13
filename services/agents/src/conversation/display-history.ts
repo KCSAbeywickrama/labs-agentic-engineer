@@ -24,29 +24,26 @@
  * turn journal's raw client-sent text + author; assistant/tool rows pass
  * through untouched (the UI projects their text and question tool-calls).
  *
- * Pairing is TAIL-ANCHORED: a turn appends exactly one user message and one
- * journal entry in the same save, but pre-journal turns appended messages with
- * no entry — so the LAST n user messages pair with the n entries, and earlier
- * user messages fall back to their raw stored content (a presence check, never
- * prompt-convention parsing).
+ * Pairing is BY STATED INDEX: each entry carries the `messages` index of the
+ * user message its turn appended, stamped at the append site — so a turn with
+ * no entry (pre-journal history, an older caller mid-rolling-deploy) falls
+ * back to its raw stored content WITHOUT shifting any other turn's pairing.
  */
 
 import type { ModelMessage } from "ai";
-import type { Conversation } from "../store/conversation-store.js";
+import type { Conversation, TurnJournalEntry } from "../store/conversation-store.js";
 
 /** A transcript message as served on the wire: user rows may carry an author. */
-export type DisplayMessage = ModelMessage | { role: "user"; content: string; author?: string };
+export type DisplayMessage =
+  | ModelMessage
+  | { role: "user"; content: string; author?: TurnJournalEntry["author"] };
 
 export function projectDisplayHistory(conv: Conversation): DisplayMessage[] {
-  const turns = conv.turns ?? [];
-  const userCount = conv.messages.filter((m) => m.role === "user").length;
-  let userIndex = 0;
-  return conv.messages.map((m): DisplayMessage => {
+  const byIndex = new Map<number, TurnJournalEntry>();
+  for (const entry of conv.turns ?? []) byIndex.set(entry.messageIndex, entry);
+  return conv.messages.map((m, index): DisplayMessage => {
     if (m.role !== "user") return m;
-    // The i-th user message from the END pairs with the i-th entry from the
-    // END; a negative index (pre-journal turn) reads as undefined → raw.
-    const entry = turns[turns.length - userCount + userIndex];
-    userIndex++;
+    const entry = byIndex.get(index);
     if (!entry) return m;
     return {
       role: "user",

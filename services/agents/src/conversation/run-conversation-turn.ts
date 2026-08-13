@@ -57,7 +57,7 @@ import {
 } from "../shared/model.js";
 import { loadMcpTools } from "../shared/mcp-client.js";
 import { turnTelemetry } from "../shared/telemetry.js";
-import type { Conversation, ConversationStore } from "../store/conversation-store.js";
+import type { Conversation, ConversationStore, TurnJournalEntry } from "../store/conversation-store.js";
 
 /** Thrown when a second turn starts for an id whose turn is still in flight (→ HTTP 409). */
 export class ConcurrentTurnError extends Error {
@@ -181,7 +181,7 @@ export interface RunConversationTurnInput {
    * the display source the get-conversation read serves for user rows. Absent
    * (older callers, evals) → no entry; the read falls back to the raw message.
    */
-  journal?: { kind: string; text: string; author?: string; turnId: string };
+  journal?: Omit<TurnJournalEntry, "messageIndex" | "createdAt">;
   store: ConversationStore;
   guard: TurnGuard;
   onEvent: (p: StreamPart) => void;
@@ -326,11 +326,13 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
     }
 
     // 7. persist the whole aggregate (history is append-only). The journal
-    //    entry (#463) commits in the same save as the transcript it describes:
-    //    a failed turn persists neither, so the nth-user-message ↔ nth-entry
-    //    pairing the read path relies on can never drift.
+    //    entry (#463) commits in the same save as the transcript it describes,
+    //    stamped with the INDEX of the user message this turn appended
+    //    (startLen — runTurn appends the prompt first): the display read pairs
+    //    entry↔message by that stated fact, so an un-journaled turn anywhere
+    //    in the history can never shift another turn's pairing.
     if (input.journal) {
-      conv.turns = [...(conv.turns ?? []), { ...input.journal, createdAt: new Date() }];
+      conv.turns = [...(conv.turns ?? []), { ...input.journal, messageIndex: startLen, createdAt: new Date() }];
     }
     await input.store.save(conv);
 

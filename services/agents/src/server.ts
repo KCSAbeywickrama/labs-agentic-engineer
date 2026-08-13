@@ -54,6 +54,7 @@ import {
   type McpConfig,
   type StreamPart,
   type Toolset,
+  type TurnJournal,
   type TurnSpec,
 } from "@aep/agent-stream";
 import { composeInstruction, eagerSkillsFor, toolsetFor } from "./prompts/turn.js";
@@ -63,7 +64,7 @@ import { projectDisplayHistory } from "./conversation/display-history.js";
 import { joinRoom, type RoomPeer } from "./collab/room-peer.js";
 import type { SkillSource } from "./agents/main/skill-source.js";
 import { readSnapshot, loadSkillsFromSnapshot } from "./conversation/load-workspace.js";
-import { resolveWorkspace, WorkspaceRefError } from "./shared/snapshot-path.js";
+import { conversationOrgId, resolveWorkspace, WorkspaceRefError } from "./shared/snapshot-path.js";
 import { createAuthMiddleware, type AgentsAuthConfig } from "./shared/auth.js";
 import { startKeepAlive } from "./shared/keepalive.js";
 import { config } from "./shared/config.js";
@@ -94,14 +95,14 @@ function isMcpConfig(v: unknown): v is McpConfig {
 }
 
 /** Runtime guard for an untrusted `journal` value (#463). */
-function isJournal(v: unknown): v is { text: string; author?: string } {
+function isJournal(v: unknown): v is TurnJournal {
   if (typeof v !== "object" || v === null) return false;
   const j = v as Record<string, unknown>;
-  return (
-    typeof j.text === "string" &&
-    j.text.trim() !== "" &&
-    (j.author === undefined || typeof j.author === "string")
-  );
+  if (typeof j.text !== "string" || j.text.trim() === "") return false;
+  if (j.author === undefined) return true;
+  if (typeof j.author !== "object" || j.author === null) return false;
+  const a = j.author as Record<string, unknown>;
+  return typeof a.id === "string" && a.id !== "" && typeof a.displayName === "string" && a.displayName !== "";
 }
 
 function startSSE(res: Response): void {
@@ -260,14 +261,21 @@ export function createApp(deps: CreateAppDeps): Express {
     }
 
     // journal (#463): the turn's display record — raw client-sent text + acting
-    // user. Optional (older callers/evals journal nothing); malformed → clean 400.
-    let journal: { text: string; author?: string } | undefined;
+    // user. Optional (older callers/evals journal nothing); malformed → clean
+    // 400. Rebuilt field-by-field: the body object is untrusted, and a spread
+    // would persist whatever extra keys a caller smuggled beside `text`.
+    let journal: TurnJournal | undefined;
     if (body.journal !== undefined) {
       if (!isJournal(body.journal)) {
-        res.status(400).json({ error: "journal must be { text: string, author?: string }" });
+        res.status(400).json({ error: "journal must be { text: string, author?: { id, displayName } }" });
         return;
       }
-      journal = body.journal;
+      journal = {
+        text: body.journal.text,
+        ...(body.journal.author
+          ? { author: { id: body.journal.author.id, displayName: body.journal.author.displayName } }
+          : {}),
+      };
     }
 
     // collab (optional, #86 phase 4): a room-scoped turn. The room replaces
@@ -369,7 +377,7 @@ export function createApp(deps: CreateAppDeps): Express {
         skillSource,
         ...(toolset ? { toolset } : {}),
         ...(mcp ? { mcp } : {}),
-        ...(journal ? { journal: { ...journal, kind: turn.kind, turnId } } : {}),
+        ...(journal ? { journal: { ...journal, turnId } } : {}),
         ...(eagerSkills ? { eagerSkills } : {}),
         webSearch: body.webSearch === true,
         ...(roomPeer ? { collabPeer: roomPeer } : {}),
@@ -410,7 +418,25 @@ export function createApp(deps: CreateAppDeps): Express {
   });
 
   app.get("/conversations/:id", requireAuth, async (req: Request, res: Response) => {
-    const conv = await deps.store.get(req.params.id as string);
+    // The same cross-tenant fence as the turn POST (§12): the id's org segment
+    // must equal the caller's X-Org-Id claim. The M2M token is shared, so
+    // without this any holder could read another org's thread — which now
+    // carries per-turn author identities (#463).
+    const id = req.params.id as string;
+    try {
+      const claim = req.header("x-org-id");
+      if (!claim || conversationOrgId(id) !== claim) {
+        res.status(403).json({ error: "conversation org does not match the caller's organization" });
+        return;
+      }
+    } catch (err) {
+      if (err instanceof WorkspaceRefError) {
+        res.status(err.status).json({ error: err.message });
+        return;
+      }
+      throw err;
+    }
+    const conv = await deps.store.get(id);
     if (!conv) {
       res.status(404).json({ error: "conversation not found" });
       return;

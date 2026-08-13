@@ -192,10 +192,19 @@ type MCPBlock struct {
 }
 
 // JournalBlock is a turn's display record (#463): what the client sent,
-// verbatim, and who sent it.
+// verbatim, and who sent it. Author mirrors the console's live author shape
+// ({id: email, displayName}) so a rehydrated row is attributable — and
+// self-vs-teammate distinguishable — exactly like a live one; nil for callers
+// with no human identity (M2M tokens journal no author, never a bare subject).
 type JournalBlock struct {
-	Text   string `json:"text"`
-	Author string `json:"author,omitempty"`
+	Text   string         `json:"text"`
+	Author *JournalAuthor `json:"author,omitempty"`
+}
+
+// JournalAuthor is the acting user in the console's author shape.
+type JournalAuthor struct {
+	ID          string `json:"id"`
+	DisplayName string `json:"displayName"`
 }
 
 // UpstreamError is a non-2xx pre-stream response from the agents service. The

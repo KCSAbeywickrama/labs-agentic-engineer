@@ -384,9 +384,9 @@ func (s *Service) StartTurn(ctx context.Context, orgID, projectID string, in Tur
 		turn:             turnSpec,
 		target:           in.Target,
 		summary:          in.Instruction,
-		// Captured before the detached goroutine: the display identity reads
-		// the request's bearer, and the journal (#463) attributes the turn.
-		author: displayIdentityFrom(ctx),
+		// Captured before the detached goroutine: the identity reads the
+		// request's bearer, and the journal (#463) attributes the turn.
+		author: journalAuthorFrom(ctx),
 		repoRef:          ref,
 		baseRef:          baseRef,
 		skillsRef:        skillsRef,

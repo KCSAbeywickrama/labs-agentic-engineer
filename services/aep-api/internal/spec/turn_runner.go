@@ -38,6 +38,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/clients/agentsvc"
 	"github.com/wso2/aep/aep-api/internal/contracts"
 	"github.com/wso2/aep/aep-api/internal/platform/agentfold"
+	"github.com/wso2/aep/aep-api/internal/platform/auth"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 )
 
@@ -66,7 +67,10 @@ type turnJob struct {
 	turn             agentsvc.TurnSpec // what this turn is FOR (the agents service composes the text)
 	target           string            // spec-bundle path this turn should write to, when pinned
 	summary          string            // raw user instruction (feed line subject + journal display, #463)
-	author           string            // acting user's display identity (journal attribution; "" = unknown)
+	// author is the acting user for the journal (#463), nil when the bearer
+	// carries no human identity — an M2M token journals no author rather than
+	// a bare subject claim.
+	author *agentsvc.JournalAuthor
 	repoRef          sourcecontrol.RepoRef
 	baseRef          string
 	skillsRef        string
@@ -140,6 +144,26 @@ func journalFor(job turnJob) *agentsvc.JournalBlock {
 		return nil
 	}
 	return &agentsvc.JournalBlock{Text: text, Author: job.author}
+}
+
+// journalAuthorFrom projects the request bearer onto the journal's author
+// shape, EMAIL-ANCHORED to match the console's live author identity
+// ({id: email, displayName}) — that equality is what lets a rehydrated row
+// read as "you" vs a teammate. No email means no attributable human (an M2M
+// token, or a minimal user token): journal no author, never a bare subject.
+func journalAuthorFrom(ctx context.Context) *agentsvc.JournalAuthor {
+	token := auth.GetAuthToken(ctx)
+	if token == "" {
+		return nil
+	}
+	name, email := parseDisplayIdentity("Bearer " + token)
+	if email == "" {
+		return nil
+	}
+	if name == "" {
+		name = email
+	}
+	return &agentsvc.JournalAuthor{ID: email, DisplayName: name}
 }
 
 // mcpForTurn mints the per-turn MCP discovery block for design-generation turns

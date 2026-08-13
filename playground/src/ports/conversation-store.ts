@@ -74,7 +74,9 @@ export class FileConversationStore implements ConversationStore {
     return {
       id: raw.id,
       messages: raw.messages,
-      turns: raw.turns ?? [],
+      // Nested dates need the same revival as the top-level ones — JSON hands
+      // back ISO strings where the type says Date.
+      turns: (raw.turns ?? []).map((t) => ({ ...t, createdAt: new Date(t.createdAt) })),
       // A persisted "active" is always stale here (see module doc).
       status: raw.status === "active" ? "done" : raw.status,
       createdAt: new Date(raw.createdAt),

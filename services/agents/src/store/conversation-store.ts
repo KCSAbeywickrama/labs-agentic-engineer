@@ -38,12 +38,20 @@ import type { ModelMessage } from "ai";
 export interface TurnJournalEntry {
   /** The BFF-minted turn id (WorkspaceRef.turnId). */
   turnId: string;
-  /** The TurnSpec kind the request declared (chat | flow | start | plan). */
-  kind: string;
   /** The raw client-sent instruction — exactly what the sender's UI rendered. */
   text: string;
-  /** Best-effort display identity of the acting user; absent for M2M callers. */
-  author?: string;
+  /**
+   * The acting user, in the console's live author shape ({id: email,
+   * displayName}); absent for M2M callers with no human identity.
+   */
+  author?: { id: string; displayName: string };
+  /**
+   * Index into `messages` of the user message this turn appended — stamped at
+   * write time (the append site knows it exactly), so the display read pairs
+   * entry↔message by position stated as fact, never inferred. Journal-less
+   * turns simply have no entry claiming their index.
+   */
+  messageIndex: number;
   createdAt: Date;
 }
 

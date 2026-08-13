@@ -79,18 +79,32 @@ test("lazy-creates, runs server-side execute, persists, status done", async () =
   assert.ok(stored.messages.some((m) => m.role === "tool"));
 });
 
-// The journal entry (#463) commits in the same save as the transcript, so the
-// nth-user-message ↔ nth-entry pairing the display read relies on never drifts.
-test("a journaled turn appends one entry beside the transcript", async () => {
+// The journal entry (#463) commits in the same save as the transcript, stamped
+// with the INDEX of the user message its turn appended — the fact the display
+// read pairs by.
+test("a journaled turn appends one entry stamped with its user message's index", async () => {
   const store = new InMemoryConversationStore();
   const guard = new TurnGuard();
+  const author = { id: "admin@example.com", displayName: "Admin" };
 
   await runConversationTurn({
     id: "conv-j",
     instruction: "rename the hello message",
     files: SEED_FILES,
     model: textModel("ok"),
-    journal: { kind: "chat", text: "rename the hello message", author: "Admin", turnId: "t-1" },
+    journal: { text: "rename the hello message", author, turnId: "t-1" },
+    store,
+    guard,
+    onEvent: () => {},
+  });
+  // A second journaled turn on the same conversation: its entry must point at
+  // ITS user message, not the first.
+  await runConversationTurn({
+    id: "conv-j",
+    instruction: "now shorten it",
+    files: SEED_FILES,
+    model: textModel("ok"),
+    journal: { text: "now shorten it", author, turnId: "t-2" },
     store,
     guard,
     onEvent: () => {},
@@ -98,12 +112,14 @@ test("a journaled turn appends one entry beside the transcript", async () => {
 
   const stored = await store.get("conv-j");
   assert.ok(stored);
-  assert.equal(stored.turns.length, 1);
+  assert.equal(stored.turns.length, 2);
   assert.equal(stored.turns[0]!.text, "rename the hello message");
-  assert.equal(stored.turns[0]!.author, "Admin");
+  assert.deepEqual(stored.turns[0]!.author, author);
   assert.equal(stored.turns[0]!.turnId, "t-1");
-  assert.equal(stored.turns[0]!.kind, "chat");
-  assert.equal(stored.messages.filter((m) => m.role === "user").length, stored.turns.length);
+  for (const entry of stored.turns) {
+    assert.equal(stored.messages[entry.messageIndex]?.role, "user", "messageIndex points at the turn's user message");
+  }
+  assert.ok(stored.turns[1]!.messageIndex > stored.turns[0]!.messageIndex);
 });
 
 // An un-journaled turn (older caller, eval) stores no entry — the read path
