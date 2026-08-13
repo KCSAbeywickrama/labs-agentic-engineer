@@ -38,18 +38,19 @@
  *    row, so it is absent from the catalog and `load`/`loadReference` return
  *    `undefined` for it, same as an unknown name.
  *  - `readReferenceAttachments(dir, references)` reads the `.pdf` entries of a
- *    `start` turn's `TurnSpec.references` as native AI SDK file parts (#384):
- *    `readSnapshot`'s walk SKIPS any file containing a NUL byte, so a binary
- *    PDF never reaches the text `files` map — without this, the model's only
- *    way to see one was pulling it through a tool as "text", which is how a
- *    real turn died (an 868KB PDF read as ~1.5M junk tokens, then the turn
- *    failed at history persistence on the NUL bytes that trip carried). Every
- *    failure mode here is best-effort: a missing/unreadable/oversized file is
- *    warned and skipped, never thrown — same posture as the skill readers
- *    above for ENOENT.
+ *    `start` turn's `TurnSpec.references` as native AI SDK file parts (#384).
+ *    A PDF is never in the text `files` map — `keepInTurnSnapshot` admits no
+ *    `.pdf` at all, whatever its bytes look like, and the walk's NUL-byte skip
+ *    is a second line behind that — so the two channels cannot double up on one
+ *    document. Without this reader the model's only way to see a PDF was
+ *    pulling it through a tool as "text", which is how a real turn died (an
+ *    868KB PDF read as ~1.5M junk tokens, then the turn failed at history
+ *    persistence on the NUL bytes that trip carried). Every failure mode here
+ *    is best-effort: a missing/unreadable/oversized file is warned and skipped,
+ *    never thrown — same posture as the skill readers above for ENOENT.
  */
 
-import { existsSync, readFileSync, readdirSync, statSync, type Dirent } from "node:fs";
+import { existsSync, readFileSync, readdirSync, realpathSync, statSync, type Dirent } from "node:fs";
 import { basename, join, resolve, sep } from "node:path";
 import type { FilePart } from "ai";
 import { parse as parseYaml } from "yaml";
@@ -186,48 +187,130 @@ export function readSnapshot(snapshotDir: string): Record<string, string> {
 
 // --- Reference PDFs → native AI SDK file parts (#384) -------------------------
 
-/** Anthropic's request size limit is ~32MB; this leaves headroom for everything else on the wire. */
-export const MAX_REFERENCE_ATTACHMENT_BYTES = 30 * 1024 * 1024;
+/**
+ * What one turn's attachments may add to the request, measured in ENCODED
+ * bytes. Anthropic caps a Messages request at 32MB and an attachment rides it
+ * base64 — 4 wire bytes per 3 raw — while the prompt, the text snapshot and the
+ * whole conversation history share that same request. So attachments get a
+ * budget, not the limit: 20MB encoded (~15MB of PDF) leaves ~12MB for
+ * everything else.
+ *
+ * The budget is per TURN, not per file. A per-file cap alone cannot hold the
+ * line twice over: a single 30MB PDF encodes to 40MB and blows the request on
+ * its own, and three 8MB PDFs each pass any per-file check and still overrun it
+ * together.
+ */
+export const MAX_REFERENCE_ATTACHMENT_ENCODED_BYTES = 20 * 1024 * 1024;
+
+/**
+ * The largest single PDF that can fit the budget — the same number expressed as
+ * raw bytes, for the per-file message a reader can act on ("this file is too
+ * big" reads better than "the turn's encoded budget is exhausted").
+ */
+export const MAX_REFERENCE_ATTACHMENT_BYTES = Math.floor(MAX_REFERENCE_ATTACHMENT_ENCODED_BYTES / 4) * 3;
+
+/** Base64 length of `rawBytes` bytes: 4 chars per 3 bytes, rounded up with padding. */
+function encodedLength(rawBytes: number): number {
+  return Math.ceil(rawBytes / 3) * 4;
+}
 
 function isPdfPath(path: string): boolean {
   return path.toLowerCase().endsWith(".pdf");
 }
 
+interface ReferenceAttachment {
+  part: FilePart;
+  /** What this part costs the turn's budget — its base64 length, exactly. */
+  encodedBytes: number;
+}
+
+/**
+ * The snapshot dir under both spellings. `resolved` fences the requested path
+ * before any I/O; `real` fences it again after symlinks are followed. They
+ * differ whenever the mount itself sits behind a link (`/var` → `/private/var`
+ * on macOS, and the shared workspace volume in the cluster), so a check against
+ * the wrong one refuses every honest reference.
+ */
+interface SnapshotBounds {
+  resolved: string;
+  real: string;
+}
+
 /**
  * Read one reference's PDF bytes as a `FilePart`, or `undefined` on any
  * best-effort skip (never throws): outside the snapshot dir (a hostile or
- * malformed path — resolved and prefix-checked rather than string-matched, so
- * no `..` trick or symlink-adjacent spelling slips through), missing, unreadable,
- * or over `MAX_REFERENCE_ATTACHMENT_BYTES`. `data` is base64 — the AI SDK
- * accepts a bare base64 string as `DataContent`, and it keeps the eventual
- * conversation-history JSON compact (a `Buffer` would serialize as a giant
- * `{type:"Buffer",data:[...]}` byte array instead).
+ * malformed path, or a symlink pointing out of it — see below), missing,
+ * unreadable, or more encoded bytes than `remainingEncodedBudget` still allows.
+ * `data` is base64 — the AI SDK accepts a bare base64 string as `DataContent`,
+ * and it keeps the eventual conversation-history JSON compact (a `Buffer` would
+ * serialize as a giant `{type:"Buffer",data:[...]}` byte array instead).
+ *
+ * The bounds check runs twice, on purpose. `resolve` collapses `..` without
+ * touching the filesystem, so a hostile path is refused before any I/O; then
+ * `realpathSync` resolves every symlink on the way down, because the snapshot is
+ * a checkout of a user's repo and a committed symlink — the file itself, or any
+ * parent dir — would otherwise pass a textual prefix check and hand the model a
+ * file from outside the snapshot.
  */
-function readOneReferenceAttachment(snapshotDir: string, refPath: string, snapshotRoot: string): FilePart | undefined {
+function readOneReferenceAttachment(
+  snapshotDir: string,
+  refPath: string,
+  bounds: SnapshotBounds,
+  remainingEncodedBudget: number,
+): ReferenceAttachment | undefined {
   const abs = resolve(snapshotDir, refPath);
-  if (abs !== snapshotRoot && !abs.startsWith(snapshotRoot + sep)) {
+  if (!isWithin(abs, bounds.resolved)) {
     console.warn(`[references] skipping reference outside the snapshot: ${refPath}`);
     return undefined;
   }
+  let real: string;
   let size: number;
   try {
-    size = statSync(abs).size;
+    real = realpathSync(abs);
+    size = statSync(real).size;
   } catch (err) {
     console.warn(`[references] skipping unreadable reference ${refPath}: ${err instanceof Error ? err.message : String(err)}`);
     return undefined;
   }
-  if (size > MAX_REFERENCE_ATTACHMENT_BYTES) {
-    console.warn(`[references] skipping oversized reference ${refPath}: ${size} bytes > ${MAX_REFERENCE_ATTACHMENT_BYTES} cap`);
+  if (!isWithin(real, bounds.real)) {
+    console.warn(`[references] skipping reference that links outside the snapshot: ${refPath}`);
+    return undefined;
+  }
+  const encodedBytes = encodedLength(size);
+  if (encodedBytes > remainingEncodedBudget) {
+    console.warn(
+      `[references] skipping oversized reference ${refPath}: ${size} bytes (${encodedBytes} encoded) > ${remainingEncodedBudget} bytes left of the turn's ${MAX_REFERENCE_ATTACHMENT_ENCODED_BYTES} encoded budget`,
+    );
     return undefined;
   }
   let bytes: Buffer;
   try {
-    bytes = readFileSync(abs);
+    bytes = readFileSync(real);
   } catch (err) {
     console.warn(`[references] failed to read reference ${refPath}: ${err instanceof Error ? err.message : String(err)}`);
     return undefined;
   }
-  return { type: "file", data: bytes.toString("base64"), mediaType: "application/pdf", filename: refPath };
+  const data = bytes.toString("base64");
+  return {
+    part: { type: "file", data, mediaType: "application/pdf", filename: refPath },
+    encodedBytes: data.length,
+  };
+}
+
+/** Is `abs` the snapshot root itself, or something under it? */
+function isWithin(abs: string, root: string): boolean {
+  return abs === root || abs.startsWith(root + sep);
+}
+
+function snapshotBounds(snapshotDir: string): SnapshotBounds {
+  const resolved = resolve(snapshotDir);
+  try {
+    return { resolved, real: realpathSync(resolved) };
+  } catch {
+    // An unreadable root is not this function's error to raise: every reference
+    // under it then fails its own read and is warned and skipped.
+    return { resolved, real: resolved };
+  }
 }
 
 /**
@@ -238,15 +321,28 @@ function readOneReferenceAttachment(snapshotDir: string, refPath: string, snapsh
  * Non-PDF references (`.md`/`.txt`) are already inlined by `readSnapshot` and
  * are left alone here. Absent/empty `references` → `[]`, so a turn with no
  * PDFs builds byte-identical messages to before this existed.
+ *
+ * References are attached in the order given until the turn's encoded budget
+ * runs out; each one that does not fit is warned and skipped, and the rest still
+ * get their chance (a 40MB PDF listed first must not starve the 200KB brief
+ * behind it).
  */
 export function readReferenceAttachments(snapshotDir: string, references: string[] | undefined): FilePart[] {
-  const snapshotRoot = resolve(snapshotDir);
+  const bounds = snapshotBounds(snapshotDir);
   const parts: FilePart[] = [];
+  let spent = 0;
   for (const raw of references ?? []) {
     const refPath = raw.trim();
     if (refPath === "" || !isPdfPath(refPath)) continue;
-    const part = readOneReferenceAttachment(snapshotDir, refPath, snapshotRoot);
-    if (part) parts.push(part);
+    const attachment = readOneReferenceAttachment(
+      snapshotDir,
+      refPath,
+      bounds,
+      MAX_REFERENCE_ATTACHMENT_ENCODED_BYTES - spent,
+    );
+    if (attachment === undefined) continue;
+    parts.push(attachment.part);
+    spent += attachment.encodedBytes;
   }
   return parts;
 }

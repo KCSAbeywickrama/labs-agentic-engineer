@@ -18,7 +18,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { chmodSync, mkdtempSync, mkdirSync, symlinkSync, writeFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -28,6 +28,7 @@ import {
   loadSkillsFromSnapshot,
   readReferenceAttachments,
   MAX_REFERENCE_ATTACHMENT_BYTES,
+  MAX_REFERENCE_ATTACHMENT_ENCODED_BYTES,
   SkillReadError,
 } from "../src/conversation/load-workspace.js";
 import { buildSkillCatalog } from "../src/agents/main/prompt.js";
@@ -191,6 +192,84 @@ test("readReferenceAttachments: a file over the cap is skipped, not truncated or
   const root = makeTree({ [`${REF_DIR}/huge.pdf`]: big });
   try {
     assert.deepEqual(readReferenceAttachments(root, [`${REF_DIR}/huge.pdf`]), []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// The cap is on ENCODED bytes, and base64 costs 4 wire bytes per 3 raw. A file
+// just under the budget in raw bytes is already over it once encoded — the
+// request Anthropic sees is what has to fit.
+test("readReferenceAttachments: the cap counts base64 bytes, not raw ones", () => {
+  const rawJustUnderBudget = Buffer.alloc(MAX_REFERENCE_ATTACHMENT_ENCODED_BYTES - 1, 1);
+  const root = makeTree({ [`${REF_DIR}/wide.pdf`]: rawJustUnderBudget });
+  try {
+    assert.deepEqual(readReferenceAttachments(root, [`${REF_DIR}/wide.pdf`]), []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// One budget for the whole turn: two PDFs that each pass on their own must not
+// overrun the request together. The one that does not fit is dropped; the ones
+// already attached stay.
+test("readReferenceAttachments: the budget is spent across the turn's references", () => {
+  const half = Buffer.alloc(Math.floor((MAX_REFERENCE_ATTACHMENT_ENCODED_BYTES / 4) * 3 * 0.6), 1);
+  const root = makeTree({
+    [`${REF_DIR}/first.pdf`]: half,
+    [`${REF_DIR}/second.pdf`]: half,
+    [`${REF_DIR}/tiny.pdf`]: Buffer.from("%PDF-1.4 small"),
+  });
+  try {
+    const parts = readReferenceAttachments(root, [
+      `${REF_DIR}/first.pdf`,
+      `${REF_DIR}/second.pdf`,
+      `${REF_DIR}/tiny.pdf`,
+    ]);
+    // first fits; second would blow the budget; tiny still gets its chance
+    // behind it — one oversized document must not starve the rest.
+    assert.deepEqual(
+      parts.map((p) => p.filename),
+      [`${REF_DIR}/first.pdf`, `${REF_DIR}/tiny.pdf`],
+    );
+    const encoded = parts.reduce((n, p) => n + (p.data as string).length, 0);
+    assert.ok(
+      encoded <= MAX_REFERENCE_ATTACHMENT_ENCODED_BYTES,
+      `attachments encoded to ${encoded} bytes, over the ${MAX_REFERENCE_ATTACHMENT_ENCODED_BYTES} budget`,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// The snapshot is a checkout of a user's repo, so a reference can be a committed
+// symlink. `resolve` alone cannot see that — the path is textually in bounds —
+// so the file's real path is what gets fenced.
+test("readReferenceAttachments: a symlinked reference pointing out of the snapshot is refused", () => {
+  const root = makeTree({ [`${REF_DIR}/brief.pdf`]: Buffer.from("in bounds") });
+  const outside = makeTree({ "secret.pdf": Buffer.from("must never be read") });
+  try {
+    symlinkSync(join(outside, "secret.pdf"), join(root, REF_DIR, "escape.pdf"));
+    assert.deepEqual(readReferenceAttachments(root, [`${REF_DIR}/escape.pdf`]), []);
+    // The honest neighbour in the same dir still reads.
+    assert.equal(readReferenceAttachments(root, [`${REF_DIR}/brief.pdf`]).length, 1);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+// A PDF reaches the model through exactly one channel. It is not in the text
+// snapshot because `keepInTurnSnapshot` admits no `.pdf` — not because of the
+// walk's NUL-byte skip — so even a PDF whose bytes happen to carry no NUL stays
+// out of `files` and cannot ride the turn twice.
+test("readSnapshot: a NUL-free PDF is still not in the text snapshot", () => {
+  const root = makeTree({
+    [`${REF_DIR}/brief.pdf`]: Buffer.from("%PDF-1.4 no nul bytes in here at all"),
+    [`${REF_DIR}/notes.md`]: "# Notes\n",
+  });
+  try {
+    assert.deepEqual(Object.keys(readSnapshot(root)), [`${REF_DIR}/notes.md`]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

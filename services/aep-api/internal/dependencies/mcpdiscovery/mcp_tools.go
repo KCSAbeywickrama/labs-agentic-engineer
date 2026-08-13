@@ -472,9 +472,10 @@ func toExternalResourceView(er *openchoreo.ExternalResourceDefinition) externalR
 
 // maxToolFileBytes caps the file content one tool result may carry. A tool
 // result is prompt input: an 868KB PDF fetched through this tool once rode a
-// live turn as ~1.5M junk tokens per model step, then killed the
-// conversation's jsonb persist (Postgres refuses ). 128KB of text is
-// far beyond any OpenAPI document this tool exists to read.
+// live turn as ~1.5M junk tokens per model step, then killed the conversation's
+// jsonb persist — Postgres rejects U+0000 anywhere in a jsonb document, and the
+// PDF's bytes carried plenty. 128KB of text is far beyond any OpenAPI document
+// this tool exists to read.
 const maxToolFileBytes = 128 << 10
 
 // toRemoteGitFileView projects a Contents API read to the agent-facing shape,

@@ -70,9 +70,9 @@ const SWEEP = `DELETE FROM conversations
   RETURNING id`;
 
 /**
- * Recursively replace every U+0000 codepoint in a JSON-shaped value's string
- * leaves with U+FFFD (the Unicode replacement character), leaving everything
- * else — other characters, array order, object keys, non-string values —
+ * Recursively replace every U+0000 codepoint in a JSON-shaped value's strings —
+ * leaves AND object keys — with U+FFFD (the Unicode replacement character),
+ * leaving everything else (other characters, array order, non-string values)
  * byte-identical. Never mutates its input. `unknown` in/out rather than typed
  * to `ModelMessage[]`: this is a structural JSON transform, not a message-shape
  * one, and it must apply uniformly regardless of which part type carries the
@@ -88,7 +88,12 @@ export function sanitizeForJsonb<T>(value: T): T {
   if (value !== null && typeof value === "object") {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      out[k] = sanitizeForJsonb(v);
+      // The key goes through the same transform as the value: Postgres refuses
+      // the codepoint anywhere in a jsonb document, so a NUL carried by a key
+      // kills the write exactly as one in a value does. Two keys that differ
+      // only by a NUL collapse into one, last write winning — persisting the
+      // turn beats preserving a distinction Postgres would not store either way.
+      out[sanitizeForJsonb(k)] = sanitizeForJsonb(v);
     }
     return out as T;
   }
