@@ -26,6 +26,8 @@ package spec
 import (
 	"context"
 	"fmt"
+	"maps"
+	"slices"
 )
 
 // BuildScope is one tag's story scope. An empty InScope means the snapshot
@@ -74,27 +76,20 @@ func (s *artifactService) BuildScopeAtTag(ctx context.Context, orgID, projectID,
 	if len(stories) == 0 {
 		return scope, nil
 	}
-	scope.InScope = sortedStoryNumbers(stories)
+	scope.InScope = slices.Sorted(maps.Keys(stories))
 	scope.StoryTitles = stories
 	scope.ComponentStories = map[string][]int{}
-	for _, c := range facts.Components {
+	for id, claims := range componentStoryClaims(facts, designFiles) {
 		var served []int
-		for _, n := range designJSONStories(designFiles["components/"+c.ID+"/design.json"]) {
+		for _, n := range claims {
 			if _, ok := stories[n]; ok {
 				served = append(served, n)
 			}
 		}
 		if len(served) > 0 {
-			scope.ComponentStories[c.ID] = sortedStoryNumbers(toStorySet(served))
+			slices.Sort(served)
+			scope.ComponentStories[id] = slices.Compact(served)
 		}
 	}
 	return scope, nil
-}
-
-func toStorySet(stories []int) map[int]bool {
-	set := make(map[int]bool, len(stories))
-	for _, n := range stories {
-		set[n] = true
-	}
-	return set
 }

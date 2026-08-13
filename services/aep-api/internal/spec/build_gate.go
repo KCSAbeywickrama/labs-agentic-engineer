@@ -37,7 +37,9 @@ package spec
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -47,6 +49,7 @@ import (
 const (
 	codeMissingDesignCell        = "MISSING_DESIGN_CELL"
 	codeInvalidDesignCell        = "INVALID_DESIGN_CELL"
+	codeMissingUserStories       = "MISSING_USER_STORIES"
 	codeUncoveredStory           = "UNCOVERED_STORY"
 	codeUnenrichedComponent      = "UNENRICHED_COMPONENT"
 	codeMissingComponentArtifact = "MISSING_COMPONENT_ARTIFACT"
@@ -77,14 +80,23 @@ func validateBuildGate(reqFiles, designFiles map[string]string) []FileValidation
 
 	var errs []FileValidationError
 
-	// Coverage: every PRD story claimed by some component's design.json.
+	// Coverage: every PRD story claimed by some component's design.json. An
+	// unparseable story list is its own refusal — a silently empty set would
+	// disarm the whole check.
+	prdStories := parsePRDStories(reqFiles[requirementsMainFile])
+	if len(prdStories) == 0 {
+		errs = append(errs, FileValidationError{
+			Path: designCellFile, Code: codeMissingUserStories,
+			Message: "the PRD yields no stories to cover — its `## User Stories` section must hold a numbered `N. As a …` list",
+		})
+	}
 	claimed := map[int]bool{}
-	for _, c := range facts.Components {
-		for _, n := range designJSONStories(designFiles["components/"+c.ID+"/design.json"]) {
+	for _, stories := range componentStoryClaims(facts, designFiles) {
+		for _, n := range stories {
 			claimed[n] = true
 		}
 	}
-	for _, n := range sortedStoryNumbers(parsePRDStories(reqFiles[requirementsMainFile])) {
+	for _, n := range slices.Sorted(maps.Keys(prdStories)) {
 		if !claimed[n] {
 			errs = append(errs, FileValidationError{
 				Path: designCellFile, Code: codeUncoveredStory,
@@ -139,6 +151,20 @@ func validateBuildGate(reqFiles, designFiles map[string]string) []FileValidation
 	return errs
 }
 
+// componentStoryClaims maps each cell component to the stories its design.json
+// claims — the ONE claims read both the gate (coverage union) and
+// BuildScopeAtTag (per-component scope) consume, so they can never disagree on
+// where claims come from.
+func componentStoryClaims(facts *CellFacts, designFiles map[string]string) map[string][]int {
+	out := map[string][]int{}
+	for _, c := range facts.Components {
+		if stories := designJSONStories(designFiles["components/"+c.ID+"/design.json"]); len(stories) > 0 {
+			out[c.ID] = stories
+		}
+	}
+	return out
+}
+
 // designJSONStories reads the `stories` list a component's design.json claims.
 // Malformed JSON or a missing field yields nothing — the design write-gates
 // own rejecting bad JSON; this reader only collects claims.
@@ -162,7 +188,9 @@ func designJSONStories(content string) []int {
 }
 
 // storyLinePattern matches one numbered PRD story line: "7. As a member, ...".
-var storyLinePattern = regexp.MustCompile(`(?m)^(\d+)\.\s+(.+)$`)
+// Leading whitespace is tolerated — markdown authors indent list items, and
+// the console's cut-drawer preview (parsePrdStories) trims lines the same way.
+var storyLinePattern = regexp.MustCompile(`(?m)^\s*(\d+)\.\s+(.+)$`)
 
 // parsePRDStories extracts story number → title from the PRD's
 // "## User Stories" section ("N. <title>" lines).
@@ -198,17 +226,4 @@ func markdownSection(doc, title string) string {
 		}
 	}
 	return strings.Join(body, "\n")
-}
-
-func sortedStoryNumbers[V any](set map[int]V) []int {
-	out := make([]int, 0, len(set))
-	for n := range set {
-		out = append(out, n)
-	}
-	for i := 1; i < len(out); i++ { // insertion sort — sets are tiny
-		for j := i; j > 0 && out[j-1] > out[j]; j-- {
-			out[j-1], out[j] = out[j], out[j-1]
-		}
-	}
-	return out
 }

@@ -17,7 +17,9 @@
 package spec
 
 import (
+	"maps"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -147,7 +149,7 @@ func TestBuildGate_LanguageSentinelRefused(t *testing.T) {
 
 func TestParsePRDStories(t *testing.T) {
 	stories := parsePRDStories(gatePRD)
-	if got := sortedStoryNumbers(stories); !reflect.DeepEqual(got, []int{1, 2, 4, 7}) {
+	if got := slices.Sorted(maps.Keys(stories)); !reflect.DeepEqual(got, []int{1, 2, 4, 7}) {
 		t.Fatalf("story numbers = %v, want [1 2 4 7]", got)
 	}
 	if !strings.Contains(stories[4], "locked at cutoff") {
@@ -155,6 +157,30 @@ func TestParsePRDStories(t *testing.T) {
 	}
 	if len(parsePRDStories("# PRD\n\nno stories section")) != 0 {
 		t.Error("PRD without a User Stories section should yield no stories")
+	}
+	// Markdown authors indent list items; the gate and the console preview
+	// must read them the same way.
+	indented := "## User Stories\n\n  1. As a user, I want A, so that a.\n  2. As a user, I want B, so that b.\n"
+	if got := slices.Sorted(maps.Keys(parsePRDStories(indented))); !reflect.DeepEqual(got, []int{1, 2}) {
+		t.Errorf("indented story numbers = %v, want [1 2]", got)
+	}
+}
+
+// A PRD whose User Stories section yields no numbered stories must refuse the
+// tag rather than silently disarm the coverage check.
+func TestBuildGate_UnparseableStoriesRefused(t *testing.T) {
+	files := completeDesignFiles()
+	errs := validateBuildGate(map[string]string{
+		requirementsMainFile: "# PRD\n\n## User Stories\n\n- As a user, I want bullets, so that no numbers parse.\n",
+	}, files)
+	found := false
+	for _, e := range errs {
+		if e.Code == "MISSING_USER_STORIES" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("want MISSING_USER_STORIES, got %+v", errs)
 	}
 }
 
