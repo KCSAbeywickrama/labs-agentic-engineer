@@ -24,15 +24,27 @@ package spec
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/wso2/aep/aep-api/internal/platform/auth"
 )
 
+// ErrConversationsUnavailable means the service was assembled without the
+// thread store (ServiceDeps.Conversations is a nil-tolerated test seam) yet a
+// conversations endpoint was reached — a wiring bug, not a client error.
+// StartTurn/Rehydrate degrade gracefully on a nil store (fence skipped, 404
+// preserved); these two endpoints ARE the store, so they refuse loudly
+// instead of panicking on a nil interface call.
+var ErrConversationsUnavailable = errors.New("conversation store not configured")
+
 // ListConversations returns the project's threads — today exactly one, the
 // current thread, created lazily on first read so a project's first visitor
 // (whoever they are) mints it and teammates converge on it.
 func (s *Service) ListConversations(ctx context.Context, orgID, projectID string) ([]ProjectConversation, error) {
+	if s.conversations == nil {
+		return nil, ErrConversationsUnavailable
+	}
 	// The repo must exist — same tenant fence as every other genai read.
 	if _, err := s.resolveRepo(ctx, orgID, projectID); err != nil {
 		return nil, err
@@ -49,6 +61,9 @@ func (s *Service) ListConversations(ctx context.Context, orgID, projectID string
 // rotation is the escape hatch from an abandoned interview, so the console
 // confirms intent (naming what is at stake) rather than this refusing.
 func (s *Service) RotateConversation(ctx context.Context, orgID, projectID string) (*ProjectConversation, error) {
+	if s.conversations == nil {
+		return nil, ErrConversationsUnavailable
+	}
 	if _, err := s.resolveRepo(ctx, orgID, projectID); err != nil {
 		return nil, err
 	}

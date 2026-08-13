@@ -53,6 +53,7 @@ vi.mock("../useAgentChat", () => ({
     isSending: false,
     activeTurnId: undefined,
     conversationReady: mockConversationReady,
+    conversationError: false,
     send: mockSend,
     newConversation: mockNewConversation,
   }),

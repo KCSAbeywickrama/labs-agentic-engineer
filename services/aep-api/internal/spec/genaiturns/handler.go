@@ -367,6 +367,12 @@ func mapGenAITurnError(ctx context.Context, err error) error {
 		// today (drop the stale `_skills` row; the next resolve re-provisions).
 		slog.ErrorContext(ctx, "genai turn: org skills repository unavailable", "error", err)
 		return apierr.ServiceUnavailable("org skills repository unavailable — contact your platform admin")
+	case errors.Is(err, spec.ErrConversationsUnavailable):
+		// A wiring bug (the thread store was not assembled), never a client
+		// error — logged 503 with a clear message, same posture as the
+		// skills-repo arm above.
+		slog.ErrorContext(ctx, "genai turn: conversation store not configured", "error", err)
+		return apierr.ServiceUnavailable(spec.ErrConversationsUnavailable.Error())
 	default:
 		return genaiInternalError(ctx, "genai turn", err)
 	}

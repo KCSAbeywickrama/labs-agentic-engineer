@@ -65,6 +65,9 @@ export interface AgentChat {
   activeTurnId: string | undefined;
   /** False until the project's thread id has resolved — sends are held. */
   conversationReady: boolean;
+  /** The resolve failed after retries — the composer is disabled and the
+   *  panel should say why (a focus refetch retries automatically). */
+  conversationError: boolean;
   send: (instruction: string) => void;
   /** Rotate to a fresh PROJECT-WIDE thread (header action, D4). The caller
    *  owns the confirmation — this just performs the rotation. */
@@ -89,11 +92,16 @@ export function useAgentChat(org: string, projectName: string): AgentChat {
   // The project's current thread id (#430) — server-resolved, shared by every
   // member. staleTime Infinity: the id only moves on rotation, and rotation
   // paths update this cache explicitly (newConversation below, and the
-  // conversation_rotated 409 in send).
+  // conversation_rotated 409 in send). refetchOnWindowFocus "always" bypasses
+  // that freshness (a focus refetch normally skips fresh data) — it is the
+  // RECOVERY path when the resolve failed outright: with no id the main
+  // effect never runs, so none of its triggers exist, and without this the
+  // composer would stay disabled until a remount.
   const conversation = useQuery({
     queryKey: conversationKeys.current(projectName),
     queryFn: () => fetchCurrentConversationId(projectName),
     staleTime: Infinity,
+    refetchOnWindowFocus: "always",
   });
   const conversationId = conversation.data;
 
@@ -315,6 +323,7 @@ export function useAgentChat(org: string, projectName: string): AgentChat {
     isSending,
     activeTurnId,
     conversationReady: Boolean(conversationId),
+    conversationError: conversation.isError,
     send,
     newConversation,
   };
