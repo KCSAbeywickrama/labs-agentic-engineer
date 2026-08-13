@@ -121,10 +121,10 @@ codingAgentRunner:
 # aep-api reads its pod logs and resource tree through that same API. The only
 # switch left here is the local-dev stub toggle below.
 codingAgentDispatch:
-  localStubs:
+  openBaoDirect:
     # LOCAL DEV ONLY. Sets OPENBAO_ADDR/TOKEN on aep-api for in-process secrets
     # delivery. NEVER set true in production — prod injects a real
-    # SecretsProvider. `aep init` sets this true for local installs.
+    # SecretsProvider. `aep platform install` sets this true for local installs.
     enabled: false
 
 # GitHub webhook delivery. GitHub delivers pull_request/push/issues events to

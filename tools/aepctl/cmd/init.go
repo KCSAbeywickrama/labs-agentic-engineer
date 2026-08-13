@@ -65,7 +65,7 @@ var (
 	initRegistryService      string
 	initOCNamespace          string
 	initSkipOCVersionCheck   bool
-	initLocalStubs           bool
+	initOpenBaoDirect        bool
 )
 
 var initCmd = &cobra.Command{
@@ -77,8 +77,7 @@ var initCmd = &cobra.Command{
   3. Waits for all platform pods to be ready
   4. Registers AEP OAuth clients in Thunder
   5. Writes cluster config to the aep-cli-config ConfigMap`,
-	Annotations: map[string]string{"skipClusterConfig": "true"},
-	RunE:        runAEPInit,
+	RunE: runAEPInit,
 }
 
 func init() {
@@ -93,18 +92,17 @@ func init() {
 	_ = viper.BindPFlag("platform.workspaces.access_mode", initCmd.Flags().Lookup("workspaces-access-mode"))
 	initCmd.Flags().StringVar(&initBuildPlaneNamespace, "build-plane-namespace", "openchoreo-workflow-plane", "Namespace of the OpenChoreo build/workflow plane (must already exist, incl. its image registry)")
 	initCmd.Flags().StringVar(&initRegistryService, "registry-service", "registry", "Name of the build-plane image registry Service (the coding-agent build pushes/pulls here)")
-	initCmd.Flags().StringVar(&initOCNamespace, "oc-namespace", "openchoreo-system", "Namespace where OpenChoreo control-plane is installed")
+	initCmd.Flags().StringVar(&initOCNamespace, "oc-namespace", "", "Namespace where OpenChoreo control-plane is installed (overrides config)")
+	_ = viper.BindPFlag("oc.system_namespace", initCmd.Flags().Lookup("oc-namespace"))
 	initCmd.Flags().BoolVar(&initSkipOCVersionCheck, "skip-oc-version-check", false, "Skip the OpenChoreo minimum version check (not recommended)")
 	initCmd.Flags().String("oc-api-url", "", "In-cluster URL of the OpenChoreo platform API")
 	_ = viper.BindPFlag("oc.api_url", initCmd.Flags().Lookup("oc-api-url"))
 	initCmd.Flags().String("webhook-delivery-url", "", "Public URL registered on each repo's webhook (e.g. https://webhook.example.com/api/v1/webhooks/github)")
 	_ = viper.BindPFlag("webhook.delivery_url", initCmd.Flags().Lookup("webhook-delivery-url"))
-	initCmd.Flags().BoolVar(&initLocalStubs, "local-stubs", false, "Deploy in-cluster stubs for the cluster-gateway-proxy and secret-manager API (local/dev installs; enables direct OpenBao secret writes)")
-	_ = viper.BindPFlag("codingagent.local_stubs.enabled", initCmd.Flags().Lookup("local-stubs"))
-	initCmd.Flags().String("cluster-gateway-proxy-url", "", "URL of the managed cluster-gateway-proxy service (production; omit to deploy the local stub)")
-	_ = viper.BindPFlag("codingagent.cluster_gateway_proxy.url", initCmd.Flags().Lookup("cluster-gateway-proxy-url"))
-	initCmd.Flags().String("secret-manager-api-url", "", "URL of the managed secret-manager API service (production; omit to deploy the local stub)")
-	_ = viper.BindPFlag("codingagent.secret_manager_api.url", initCmd.Flags().Lookup("secret-manager-api-url"))
+	initCmd.Flags().BoolVar(&initOpenBaoDirect, "openbao-direct", false, "Enable OpenBao-direct secrets delivery — injects OPENBAO_ADDR/TOKEN into aep-api (required for local/OSS installs)")
+	_ = viper.BindPFlag("codingagent.openbao_direct.enabled", initCmd.Flags().Lookup("openbao-direct"))
+	initCmd.Flags().String("openbao-addr", "", "In-cluster URL of the OpenBao service (overrides config)")
+	_ = viper.BindPFlag("openbao.addr", initCmd.Flags().Lookup("openbao-addr"))
 	registerThunderFlags(initCmd)
 }
 
@@ -127,7 +125,7 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 	}
 
 	if !initSkipOCVersionCheck {
-		if err := checkOCVersion(ctx, k8sClient, initOCNamespace, minOCVersion); err != nil {
+		if err := checkOCVersion(ctx, k8sClient, viper.GetString("oc.system_namespace"), minOCVersion); err != nil {
 			return err
 		}
 	}
@@ -143,6 +141,17 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 	}
 	if anthropicKey == "" {
 		return fmt.Errorf("an Anthropic API key is required")
+	}
+
+	openBaoDirect := viper.GetBool("codingagent.openbao_direct.enabled")
+	if openBaoDirect && os.Getenv("AEP_OPENBAO_TOKEN") == "" {
+		obToken, err := readMaskedInput("OpenBao token (Enter = use default \"root\")")
+		if err != nil {
+			return fmt.Errorf("read OpenBao token: %w", err)
+		}
+		if obToken != "" {
+			viper.Set("openbao.token", obToken)
+		}
 	}
 
 	if os.Getenv("AEP_THUNDER_ADMIN_CLIENT_SECRET") == "" {
@@ -191,17 +200,11 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 	if mode := viper.GetString("platform.workspaces.access_mode"); mode != "" {
 		helmArgs = append(helmArgs, "--set", "workspaces.accessMode="+mode)
 	}
-	// Coding-agent dispatch: local installs wire in-process secrets delivery
-	// (OPENBAO_* on aep-api). Prod installs set
-	// codingagent.local_stubs.enabled=false and supply the real managed
-	// endpoint URLs instead (set them via flags or AEP_* env vars).
 	helmArgs = append(helmArgs, "--set",
-		fmt.Sprintf("codingAgentDispatch.localStubs.enabled=%t", viper.GetBool("codingagent.local_stubs.enabled")))
-	if u := viper.GetString("codingagent.cluster_gateway_proxy.url"); u != "" {
-		helmArgs = append(helmArgs, "--set", "codingAgentDispatch.clusterGatewayProxy.url="+u)
-	}
-	if u := viper.GetString("codingagent.secret_manager_api.url"); u != "" {
-		helmArgs = append(helmArgs, "--set", "codingAgentDispatch.secretManagerApi.url="+u)
+		fmt.Sprintf("codingAgentDispatch.openBaoDirect.enabled=%t", openBaoDirect))
+	if openBaoDirect {
+		helmArgs = append(helmArgs, "--set", "openbao.addr="+viper.GetString("openbao.addr"))
+		helmArgs = append(helmArgs, "--set", "openbao.token="+viper.GetString("openbao.token"))
 	}
 	helmArgs = append(helmArgs, "--set",
 		fmt.Sprintf("webhook.localSmee.enabled=%t", viper.GetBool("webhook.local_smee.enabled")))

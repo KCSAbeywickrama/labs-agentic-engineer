@@ -25,7 +25,7 @@ localSecrets:
 # OPENBAO_* on aep-api for in-process secrets delivery. NEVER enable in
 # production.
 codingAgentDispatch:
-  localStubs:
+  openBaoDirect:
     enabled: true
 
 # Provision per-org OC ComponentTypes locally (cloud does this via platform-api).

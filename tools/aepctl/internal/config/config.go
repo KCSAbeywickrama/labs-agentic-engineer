@@ -42,12 +42,12 @@ var ConfigMapKeys = []string{
 	"thunder.admin_client_id",
 	"thunder.public_url",
 	"oc.api_url",
+	"oc.system_namespace",
 	"oc.org_namespace",
 	"oc.local_org_provisioning.enabled",
 	"platform.workspaces.access_mode",
-	"codingagent.local_stubs.enabled",
-	"codingagent.cluster_gateway_proxy.url",
-	"codingagent.secret_manager_api.url",
+	"codingagent.openbao_direct.enabled",
+	"openbao.addr",
 	"webhook.delivery_url",
 	"webhook.local_smee.enabled",
 }
@@ -67,20 +67,22 @@ func Init() {
 
 	// OpenChoreo platform API defaults.
 	viper.SetDefault("oc.api_url", "http://openchoreo-api.openchoreo-control-plane.svc.cluster.local:8080")
-
-	// oc.local_org_provisioning.enabled: creates the per-org namespaced
-	// ComponentTypes locally — only needed when no platform-api ProvisionOrgUnit
-	// is running. Off by default in production.
+	viper.SetDefault("oc.system_namespace", "openchoreo-control-plane")
 	viper.SetDefault("oc.local_org_provisioning.enabled", false)
 	viper.SetDefault("oc.org_namespace", "default")
 
-	// Coding-agent dispatch.
-	// codingagent.local_stubs.enabled: wires the local in-process secrets
-	// delivery (OPENBAO_* on aep-api). Off by default in production; set
-	// secret_manager_api.url to the real managed service URL instead.
-	viper.SetDefault("codingagent.local_stubs.enabled", false)
-	viper.SetDefault("codingagent.cluster_gateway_proxy.url", "")
-	viper.SetDefault("codingagent.secret_manager_api.url", "")
+	// Coding-agent secrets delivery.
+	// codingagent.openbao_direct.enabled: injects OPENBAO_ADDR/TOKEN into
+	// aep-api for direct OpenBao secrets delivery. Required for local/OSS
+	// installs; production overlays inject a managed SecretsProvider instead.
+	viper.SetDefault("codingagent.openbao_direct.enabled", false)
+
+	// OpenBao address — used when codingagent.openbao_direct.enabled=true.
+	viper.SetDefault("openbao.addr", "http://openbao.openbao.svc.cluster.local:8200")
+	// openbao.token is intentionally absent from ConfigMapKeys — it is a
+	// credential and must be supplied via AEP_OPENBAO_TOKEN env var or
+	// prompted interactively. The default "root" applies to local dev only.
+	viper.SetDefault("openbao.token", "root")
 
 	// GitHub webhook delivery.
 	// webhook.delivery_url: registered on each repo's webhook. Set to the real
@@ -102,20 +104,20 @@ func Init() {
 
 // LoadFromCluster reads the aep-cli-config ConfigMap from the given namespace
 // and loads each entry into viper via SetDefault, so CLI flags and AEP_* env
-// vars still take precedence. Returns nil if the ConfigMap does not yet exist
-// (i.e. before `aep init` has run).
-func LoadFromCluster(ctx context.Context, client *kubernetes.Clientset, namespace string) error {
+// vars still take precedence. Returns the number of keys loaded and nil if the
+// ConfigMap does not yet exist (i.e. before `aep init` has run).
+func LoadFromCluster(ctx context.Context, client *kubernetes.Clientset, namespace string) (int, error) {
 	cm, err := client.CoreV1().ConfigMaps(namespace).Get(ctx, ConfigMapName, metav1.GetOptions{})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			return nil
+			return 0, nil
 		}
-		return fmt.Errorf("read %s ConfigMap: %w", ConfigMapName, err)
+		return 0, fmt.Errorf("read %s ConfigMap: %w", ConfigMapName, err)
 	}
 	for k, v := range cm.Data {
 		viper.SetDefault(k, v)
 	}
-	return nil
+	return len(cm.Data), nil
 }
 
 // LoadThunderSecretFromCluster reads the Thunder admin client secret from the
