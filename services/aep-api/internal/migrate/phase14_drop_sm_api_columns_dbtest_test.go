@@ -24,10 +24,10 @@ import (
 	"github.com/wso2/aep/aep-api/internal/platform/dbtest"
 )
 
-// TestPhase11SecretRefColumns_ExpandAndBackfill proves the EXPAND migration
-// added secret_ref_* columns. After phase 09 CONTRACT (phase14) the leftover
-// sm_api_* columns are gone; this test only asserts the expand side survived.
-func TestPhase11SecretRefColumns_ExpandAndBackfill(t *testing.T) {
+// TestPhase14DropSMAPIColumns_Contract proves the CONTRACT migration
+// drops leftover sm_api_* columns while secret_ref_* remain. dbtest.New
+// already applied phase14; re-running the step is the idempotency check.
+func TestPhase14DropSMAPIColumns_Contract(t *testing.T) {
 	db := dbtest.New(t)
 	ctx := context.Background()
 
@@ -55,12 +55,39 @@ func TestPhase11SecretRefColumns_ExpandAndBackfill(t *testing.T) {
 			t.Fatalf("column probe %s.%s: %v", col.table, col.column, err)
 		}
 		if n != 1 {
-			t.Fatalf("expected column %s.%s after phase11 expand, count=%d", col.table, col.column, n)
+			t.Fatalf("secret_ref_* column %s.%s must survive contract, count=%d", col.table, col.column, n)
 		}
 	}
 
-	// Idempotent: re-running expand after CONTRACT must not error.
-	if err := migrate.RunPhase11SecretRefColumns(ctx, db); err != nil {
-		t.Fatalf("idempotent re-run after contract: %v", err)
+	for _, col := range []struct {
+		table, column string
+	}{
+		{"org_anthropic_credentials", "sm_api_secret_ref_name"},
+		{"org_anthropic_credentials", "sm_api_kv_path"},
+		{"org_anthropic_credentials", "sm_api_property"},
+		{"org_credentials", "sm_api_secret_ref_name"},
+		{"org_credentials", "sm_api_kv_path"},
+		{"org_credentials", "sm_api_property"},
+		{"org_credentials", "sm_api_written_at"},
+		{"organization_idp_profiles", "sm_api_secret_ref_name"},
+		{"organization_idp_profiles", "sm_api_kv_path"},
+		{"organization_idp_profiles", "sm_api_property"},
+		{"organization_idp_profiles", "sm_api_written_at"},
+	} {
+		var n int
+		if err := db.Raw(
+			`SELECT COUNT(*) FROM information_schema.columns
+			  WHERE table_schema='public' AND table_name=? AND column_name=?`,
+			col.table, col.column,
+		).Scan(&n).Error; err != nil {
+			t.Fatalf("dropped-column probe %s.%s: %v", col.table, col.column, err)
+		}
+		if n != 0 {
+			t.Fatalf("sm_api_* column %s.%s must be gone after contract, count=%d", col.table, col.column, n)
+		}
+	}
+
+	if err := migrate.RunPhase14DropSMAPIColumns(ctx, db); err != nil {
+		t.Fatalf("idempotent re-run: %v", err)
 	}
 }

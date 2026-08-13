@@ -28,10 +28,8 @@ import (
 // provider-neutral columns alongside the legacy sm_api_* ones, then
 // backfills from old → new where the new side is still null.
 //
-// CONTRACT (drop sm_api_*) is deferred to phase 09, after the old
-// deployment that still reads sm_api_* from the shared app_factory_db
-// is retired. Until then writers dual-write both column sets and
-// readers prefer secret_ref_* with an sm_api_* fallback.
+// CONTRACT (drop sm_api_*) is phase14, after this backfill. Writers
+// no longer dual-write; readers use secret_ref_* only.
 //
 // Idempotent — ADD COLUMN IF NOT EXISTS + conditional UPDATE.
 func RunPhase11SecretRefColumns(ctx context.Context, db *gorm.DB) error {
@@ -43,14 +41,18 @@ func RunPhase11SecretRefColumns(ctx context.Context, db *gorm.DB) error {
 		       ADD COLUMN IF NOT EXISTS secret_ref_name     TEXT,
 		       ADD COLUMN IF NOT EXISTS secret_ref_kv_path  TEXT,
 		       ADD COLUMN IF NOT EXISTS secret_ref_property TEXT;
+		     IF EXISTS (SELECT FROM information_schema.columns
+		                WHERE table_schema='public' AND table_name='org_anthropic_credentials'
+		                  AND column_name='sm_api_secret_ref_name') THEN
+		       UPDATE org_anthropic_credentials
+		          SET secret_ref_name     = sm_api_secret_ref_name,
+		              secret_ref_kv_path  = sm_api_kv_path,
+		              secret_ref_property = sm_api_property
+		        WHERE sm_api_secret_ref_name IS NOT NULL
+		          AND secret_ref_name IS NULL;
+		     END IF;
 		   END IF;
 		 END $$`,
-		`UPDATE org_anthropic_credentials
-		    SET secret_ref_name     = sm_api_secret_ref_name,
-		        secret_ref_kv_path  = sm_api_kv_path,
-		        secret_ref_property = sm_api_property
-		  WHERE sm_api_secret_ref_name IS NOT NULL
-		    AND secret_ref_name IS NULL`,
 
 		`DO $$ BEGIN
 		   IF EXISTS (SELECT FROM information_schema.tables
@@ -60,15 +62,19 @@ func RunPhase11SecretRefColumns(ctx context.Context, db *gorm.DB) error {
 		       ADD COLUMN IF NOT EXISTS secret_ref_kv_path    TEXT,
 		       ADD COLUMN IF NOT EXISTS secret_ref_property   TEXT,
 		       ADD COLUMN IF NOT EXISTS secret_ref_written_at TIMESTAMPTZ;
+		     IF EXISTS (SELECT FROM information_schema.columns
+		                WHERE table_schema='public' AND table_name='org_credentials'
+		                  AND column_name='sm_api_secret_ref_name') THEN
+		       UPDATE org_credentials
+		          SET secret_ref_name       = sm_api_secret_ref_name,
+		              secret_ref_kv_path    = sm_api_kv_path,
+		              secret_ref_property   = sm_api_property,
+		              secret_ref_written_at = sm_api_written_at
+		        WHERE sm_api_secret_ref_name IS NOT NULL
+		          AND secret_ref_name IS NULL;
+		     END IF;
 		   END IF;
 		 END $$`,
-		`UPDATE org_credentials
-		    SET secret_ref_name       = sm_api_secret_ref_name,
-		        secret_ref_kv_path    = sm_api_kv_path,
-		        secret_ref_property   = sm_api_property,
-		        secret_ref_written_at = sm_api_written_at
-		  WHERE sm_api_secret_ref_name IS NOT NULL
-		    AND secret_ref_name IS NULL`,
 
 		`DO $$ BEGIN
 		   IF EXISTS (SELECT FROM information_schema.tables
@@ -78,15 +84,19 @@ func RunPhase11SecretRefColumns(ctx context.Context, db *gorm.DB) error {
 		       ADD COLUMN IF NOT EXISTS secret_ref_kv_path    TEXT,
 		       ADD COLUMN IF NOT EXISTS secret_ref_property   TEXT,
 		       ADD COLUMN IF NOT EXISTS secret_ref_written_at TIMESTAMPTZ;
+		     IF EXISTS (SELECT FROM information_schema.columns
+		                WHERE table_schema='public' AND table_name='organization_idp_profiles'
+		                  AND column_name='sm_api_secret_ref_name') THEN
+		       UPDATE organization_idp_profiles
+		          SET secret_ref_name       = sm_api_secret_ref_name,
+		              secret_ref_kv_path    = sm_api_kv_path,
+		              secret_ref_property   = sm_api_property,
+		              secret_ref_written_at = sm_api_written_at
+		        WHERE sm_api_secret_ref_name IS NOT NULL
+		          AND secret_ref_name IS NULL;
+		     END IF;
 		   END IF;
 		 END $$`,
-		`UPDATE organization_idp_profiles
-		    SET secret_ref_name       = sm_api_secret_ref_name,
-		        secret_ref_kv_path    = sm_api_kv_path,
-		        secret_ref_property   = sm_api_property,
-		        secret_ref_written_at = sm_api_written_at
-		  WHERE sm_api_secret_ref_name IS NOT NULL
-		    AND secret_ref_name IS NULL`,
 	}
 	for i, sql := range stmts {
 		if err := db.WithContext(ctx).Exec(sql).Error; err != nil {
