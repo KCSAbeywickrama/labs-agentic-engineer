@@ -722,6 +722,68 @@ paths:
       summary: List a version's milestone runs and their cycles
       tags:
       - Runs
+  /projects/{projectName}/builds/{tag}/revalidate:
+    post:
+      description: >-
+        Ask a version's acceptance criteria again, against the system already deployed. It starts a
+        fresh run over that version's milestone which ENTERS THE LOOP AT VALIDATION rather than at
+        the working set — nothing is rebuilt to answer the question.
+
+
+        What happens after the verdict is the run loop's ordinary behaviour, selected by
+        `validationAttempts`: with 1, the run reports and settles, so a failure files no work and
+        rebuilds nothing. With the default, a `failed` verdict files one issue per failed criterion,
+        an ordinary coding cycle fixes them, the components build and deploy, and the version is
+        validated again.
+
+
+        The newest run on a milestone owns that version's verdict, so a revalidate's answer becomes
+        the version's answer. 409 when a run is already live on the milestone (nothing to hand off
+        to — its verdict may be hours away or may never come) or when the milestone still has open
+        work (the loop would work that first, which is a build resume, not a revalidation). 422 when
+        the version has no acceptance criteria, refused rather than run so a `skipped` verdict
+        cannot overwrite a real one.
+      operationId: revalidate-build
+      parameters:
+      - description: Project name (DNS-label slug)
+        in: path
+        name: projectName
+        required: true
+        schema:
+          description: Project name (DNS-label slug)
+          type: string
+      - description: Spec version tag (`v<N>`), resolved to a milestone number through the run rows —
+          never by matching titles against GitHub.
+        in: path
+        name: tag
+        required: true
+        schema:
+          description: Spec version tag
+          type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RevalidateRequest'
+      responses:
+        '202':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RevalidateAccepted'
+          description: Revalidation started
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Error
+      security:
+      - userJWT: []
+      summary: Validate a deployed version again
+      tags:
+      - Runs
   /projects/{projectName}/builds/{tag}/cycles/{cycleId}/builds:
     get:
       description: The builds one cycle's merge fanned out to, DERIVED from OpenChoreo and never
@@ -1399,6 +1461,68 @@ paths:
       security:
       - userJWT: []
       summary: List spec files at HEAD
+      tags:
+      - Files
+  /projects/{projectName}/files/bundle:
+    get:
+      operationId: read-file-bundle
+      description: |-
+        Every readable file under `prefix`, with content, in ONE response read at ONE
+        commit. Equivalent to list-files followed by a read-file per entry, except that
+        the whole bundle is resolved at a single commit — so a push landing mid-read
+        cannot yield a mix of two trees, and the returned shas are all from that one
+        tree (the caller's baseSha preconditions stay coherent).
+
+        Reads are gated exactly like read-file: only paths under specs/ plus the
+        read-only allow-list are included. Anything else in the tree is omitted, never
+        an error — `prefix` narrows what a caller wants, the gate decides what it may
+        have.
+
+        `bundle` is a literal segment under a path that is otherwise a trailing
+        wildcard. It can never shadow a real read: a readable path always starts with
+        `specs/`, so `files/bundle` is not a reachable file address.
+      parameters:
+      - description: Project name (DNS-label slug)
+        in: path
+        name: projectName
+        required: true
+        schema:
+          description: Project name (DNS-label slug)
+          type: string
+      - description: Only include paths under this prefix (e.g. specs/design/). Empty includes everything
+          the read gate admits.
+        explode: false
+        in: query
+        name: prefix
+        schema:
+          description: Only include paths under this prefix (e.g. specs/design/). Empty includes everything
+            the read gate admits.
+          type: string
+      - description: 'Commit to read at (a hex object name). Empty reads the branch tip. Same gate as
+          read-file''s ref: an object name, never a revision expression.'
+        explode: false
+        in: query
+        name: ref
+        schema:
+          description: 'Commit to read at (a hex object name). Empty reads the branch tip. Same gate as
+            read-file''s ref: an object name, never a revision expression.'
+          type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileBundle'
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Error
+      security:
+      - userJWT: []
+      summary: Read every readable file under a prefix at one commit
       tags:
       - Files
   /projects/{projectName}/files/apply:
@@ -3534,6 +3658,22 @@ components:
       - config
       - consumers
       type: object
+    FileBundle:
+      additionalProperties: false
+      description: A set of files read at ONE commit. commitSha names that commit; every entry's sha is
+        a blob of that same tree.
+      properties:
+        commitSha:
+          type: string
+        files:
+          items:
+            $ref: '#/components/schemas/FileContent'
+          type: array
+          nullable: true
+      required:
+      - commitSha
+      - files
+      type: object
     FileContent:
       additionalProperties: false
       properties:
@@ -3820,9 +3960,14 @@ components:
             key, and the version this run builds is the list's tag.
           type: string
         origin:
+          description: Why this run was started. `revalidate` asks a version's criteria again against
+            the already-deployed system; it enters the loop at validation rather than at the working
+            set, and is deliberately outside the one-active-spec-run mutex so it never holds up the
+            next build.
           enum:
           - spec-build
           - incident-adoption
+          - revalidate
           type: string
         startedAt:
           format: date-time
@@ -3832,7 +3977,9 @@ components:
         state:
           description: planning is the fill window — the version's milestone is still being
             written (gates minted, then issues planned in). waiting is the unbounded wait
-            between cycles, where something outside the platform is needed.
+            between cycles, where something outside the platform is needed. blocked is
+            terminal and is NOT a failure — the org has no agent concurrency slot left, so
+            the cycle was never launched (see terminalReason agent-quota-blocked).
           enum:
           - planning
           - waiting
@@ -3840,10 +3987,12 @@ components:
           - succeeded
           - failed
           - cancelled
+          - blocked
           type: string
         terminalReason:
           description: Why a non-succeeded run stopped. Each value names exactly one failure class;
-            empty while the run is non-terminal and on a succeeded run.
+            empty while the run is non-terminal and on a succeeded run. agent-quota-blocked
+            explains state=blocked.
           type: string
         validation:
           $ref: '#/components/schemas/RunValidation'
@@ -4296,6 +4445,42 @@ components:
       required:
       - items
       type: object
+    RevalidateAccepted:
+      additionalProperties: false
+      description: The run that will answer the question. Its cycles stream on the ordinary run
+        progress endpoint, and its verdict becomes the version's once it settles.
+      properties:
+        milestoneNumber:
+          format: int64
+          type: integer
+        runId:
+          type: string
+      required:
+      - runId
+      - milestoneNumber
+      type: object
+    RevalidateRequest:
+      additionalProperties: false
+      description: Optional knobs on the revalidation run. Both are snapshotted onto the run at start,
+        so a later config change cannot retroactively alter a run already in flight.
+      properties:
+        cycleCeiling:
+          description: Total-cycle ceiling for this run. Omit for the platform default. Only
+            meaningful when the run may repair — a run that validates once uses a single cycle.
+          format: int64
+          type: integer
+        validationAttempts:
+          description: >-
+            How many times this run may validate before it accepts the answer it keeps getting.
+            Omit for the platform default.
+
+
+            Set 1 for a pure re-check: the run reports its verdict and settles, filing no repair
+            work and rebuilding nothing, because the attempt allowance is spent before the loop
+            reaches the point where it would mint issues.
+          format: int64
+          type: integer
+      type: object
     RunBudgets:
       additionalProperties: false
       description: The run's budget counters as the supervisor wrote them out. Read-model bookkeeping —
@@ -4338,6 +4523,17 @@ components:
         LEARNED FROM WEBHOOKS — the agent derives its own branch identity — so they stay empty on a
         cycle whose agent died before opening a pull request.
       properties:
+        agentReason:
+          description: >-
+            Why this cycle's agent stopped without opening a pull request, as the
+            platform's pod-truth watcher classified it — `timed_out` (the run
+            deadline), `agent_failed[:<reason>]` (a non-zero exit or a killed
+            container), `startup_failed:<reason>: <message>` (the runner never
+            started: image pull, scheduling, or a secret that had not
+            materialised) or `job_not_found` (the runner's workload disappeared).
+            Absent on every cycle that opened a pull request: there the pull
+            request is the outcome.
+          type: string
         attempts:
           description: Dispatches of THIS cycle (the per-cycle re-dispatch budget, which resets at every
             cycle boundary).
@@ -4606,8 +4802,12 @@ components:
             (no usable report at the cycle's merge commit), skipped (no acceptance criteria, and
             incident runs, which get no validation cycle at all).
 
-            `failed` and `unreported` fail the run, under terminal reasons validation-failed and
-            validation-unreported respectively. The rest settle succeeded.
+            `failed` and `unreported` fail the run ONCE ITS VALIDATION ATTEMPTS ARE SPENT, under
+            terminal reasons validation-failed and validation-unreported respectively; while
+            attempts remain the run repairs and validates again, so this field can hold a fatal
+            verdict on a run that is still live and about to try once more. A client rendering it
+            as the run's answer therefore needs the lifecycle too — that is DeployStage.validation,
+            which reports awaiting-fix for exactly that state. The rest settle succeeded.
           enum:
           - passed
           - partial

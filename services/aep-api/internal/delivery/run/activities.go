@@ -21,6 +21,8 @@ import (
 	"errors"
 	"log/slog"
 
+	"go.temporal.io/sdk/temporal"
+
 	"github.com/wso2/aep/aep-api/internal/delivery"
 )
 
@@ -277,7 +279,7 @@ func (a *Activities) PollMilestone(ctx context.Context, in MilestoneRef) (Milest
 	}
 	counts, err := a.milestones.MilestoneIssueCounts(ctx, in.OrgID, in.ProjectID, in.MilestoneNumber)
 	if err != nil {
-		return MilestoneSnapshot{}, err
+		return MilestoneSnapshot{}, sourceControlErr(err)
 	}
 	if counts == nil {
 		return MilestoneSnapshot{}, nil
@@ -331,11 +333,11 @@ func (a *Activities) PollCycleBuilds(ctx context.Context, in CycleBuildsInput) (
 	}
 	files, err := a.prs.ListPullRequestFiles(ctx, in.OrgID, in.ProjectID, in.PRNumber)
 	if err != nil {
-		return CycleBuildState{}, err
+		return CycleBuildState{}, sourceControlErr(err)
 	}
 	paths, err := a.design.ComponentPaths(ctx, in.OrgID, in.ProjectID)
 	if err != nil {
-		return CycleBuildState{}, err
+		return CycleBuildState{}, sourceControlErr(err)
 	}
 	diff := delivery.DiffComponents(files, paths)
 	out := CycleBuildState{Expected: len(diff.Components)}
@@ -404,7 +406,8 @@ func (a *Activities) EnsureValidationIssue(ctx context.Context, in MilestoneRef)
 	if a.validation == nil {
 		return 0, nil
 	}
-	return a.validation.EnsureValidationIssue(ctx, in.OrgID, in.ProjectID, in.MilestoneNumber)
+	issue, err := a.validation.EnsureValidationIssue(ctx, in.OrgID, in.ProjectID, in.MilestoneNumber)
+	return issue, sourceControlErr(err)
 }
 
 // ValidationReportRef identifies the report to read: the project, plus the commit
@@ -443,7 +446,7 @@ func (a *Activities) ReadValidationVerdict(ctx context.Context, in ValidationRep
 	}
 	verdict, digest, err := a.validation.Verdict(ctx, in.OrgID, in.ProjectID, in.At)
 	if err != nil {
-		return ValidationOutcome{}, err
+		return ValidationOutcome{}, sourceControlErr(err)
 	}
 	return ValidationOutcome{Verdict: verdict, Digest: digest}, nil
 }
@@ -470,20 +473,31 @@ func (a *Activities) MintValidationRepairIssues(ctx context.Context, in MintVali
 	if a.validation == nil {
 		return nil, nil
 	}
-	return a.validation.MintRepairIssues(ctx, in.OrgID, in.ProjectID, in.MilestoneNumber, in.At, in.CycleID)
+	filed, err := a.validation.MintRepairIssues(ctx, in.OrgID, in.ProjectID, in.MilestoneNumber, in.At, in.CycleID)
+	return filed, sourceControlErr(err)
 }
 
 // ---- dispatch --------------------------------------------------------------
 
 // DispatchAgent launches the cycle's agent run and returns the Job reference.
 //
-// It is the ONE activity whose failure is not retried by Temporal: a launch
-// that did not happen is agent death, which the cycle's own re-dispatch budget
-// already answers. Letting Temporal retry it as well would spend that budget
-// invisibly.
+// Two non-retryable failure classes are stamped here (Temporal must not retry
+// either): agent death — a launch that did not happen, answered by the cycle's
+// re-dispatch budget — and quota blocked — entitlement refused, not death.
+// Letting Temporal retry agent death would spend that budget invisibly; quota
+// blocked cannot be cleared by retry.
 func (a *Activities) DispatchAgent(ctx context.Context, in delivery.MilestoneDispatch) (string, error) {
 	if a.dispatcher == nil {
 		return "", errNotConfigured
 	}
-	return a.dispatcher.Dispatch(ctx, in)
+	jobRef, err := a.dispatcher.Dispatch(ctx, in)
+	if errors.Is(err, delivery.ErrAgentQuotaExceeded) {
+		// A sentinel does not survive the activity boundary — Temporal
+		// round-trips errors as data — so the refusal is re-expressed as a
+		// TYPED, non-retryable ApplicationError the workflow can branch on.
+		// Non-retryable because no retry can free a billing slot.
+		return "", temporal.NewNonRetryableApplicationError(
+			err.Error(), delivery.ErrTypeAgentQuotaBlocked, err)
+	}
+	return jobRef, err
 }

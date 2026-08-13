@@ -30,6 +30,24 @@ const (
 	// already-deployed version's milestone. Incident runs on other milestones
 	// execute concurrently with each other and with a live spec run.
 	RunOriginIncidentAdoption = "incident-adoption"
+	// RunOriginRevalidate is a run started to ask a version's acceptance criteria
+	// again, against the system already deployed. It is the only origin that
+	// ENTERS THE LOOP AT VALIDATION rather than at the working set: its milestone
+	// has no work left, so the boundary would otherwise park it forever.
+	//
+	// What it does after the verdict is the loop's ordinary behaviour, chosen by
+	// the run's ValidationAttempts. One attempt reports and settles — the
+	// allowance is spent before the loop reaches the point where it would file
+	// repair work, so nothing is rebuilt. The default attempts give the full
+	// repair chain: issues per failed criterion, a coding cycle, builds, and a
+	// second validation.
+	//
+	// Deliberately OUTSIDE the spec-run mutex (its partial index names
+	// `spec-build` alone): a revalidate re-judges a version that already shipped,
+	// so holding up the next build for its duration would be wrong. The cost is
+	// that the database does not serialise two of them, which is why the trigger
+	// checks LiveRunForMilestone before admitting one.
+	RunOriginRevalidate = "revalidate"
 
 	// RunStatePlanning is the FILL WINDOW: the row has been admitted (so the
 	// spec mutex is armed) but the milestone it works is still being written —
@@ -49,6 +67,16 @@ const (
 	RunStateSucceeded = "succeeded"
 	RunStateFailed    = "failed"
 	RunStateCancelled = "cancelled"
+	// RunStateBlocked is terminal and is NOT a failure: the org has no agent
+	// concurrency slot left, so the cycle was never launched. It is its own
+	// state rather than a failure reason because the distinction is what the
+	// user acts on — "wait or stop a run" versus "something went wrong" — and
+	// because a failed run reads as the platform's fault.
+	//
+	// Terminal, so the run row releases the spec-run mutex and the user can
+	// start the version again once a slot frees; the run is never resurrected
+	// in place.
+	RunStateBlocked = "blocked"
 
 	// Terminal reasons. Each names exactly ONE failure class so the reason a run
 	// stopped is never ambiguous. Empty while the run is non-terminal, and empty
@@ -75,6 +103,10 @@ const (
 	// the row it armed. Without it a failed plan would wedge the project behind
 	// its own mutex until a human cancelled.
 	RunReasonPlanFailed = "plan-failed"
+	// RunReasonAgentQuotaBlocked explains RunStateBlocked: the entitlement gate
+	// refused the cycle's component create (HTTP 402). The actionable text the
+	// console shows is AgentQuotaBlockedMessage (agent_quota.go).
+	RunReasonAgentQuotaBlocked = "agent-quota-blocked"
 
 	// Validation verdicts — what the run learned about the deployed system. Empty
 	// until the validation cycle settles.
@@ -180,6 +212,12 @@ const (
 	// budgets it names no failure class: spending it settles the run on the verdict
 	// the last attempt produced (see ValidationVerdictFailsRun), which is why
 	// `validation-failed` now means "still failing after every attempt".
+	//
+	// This is the DEFAULT. A run may pin its own (MilestoneRun.ValidationAttempts),
+	// and one attempt is what turns a revalidation into a pure re-check: the
+	// allowance is exhausted at the first fatal verdict, which settles the run
+	// before the loop reaches the mint, so no repair work is filed and nothing is
+	// rebuilt.
 	RunMaxValidationAttempts = 2
 	// RunDefaultCycleCeiling is the total-cycle ceiling a run starts with when
 	// the caller does not pin one. The legitimate worst case uses 4–5 cycles.
@@ -252,6 +290,17 @@ type MilestoneRun struct {
 	// CycleCeiling is the run's total-cycle ceiling, snapshotted at start so a
 	// config change cannot retroactively fail (or rescue) a live run.
 	CycleCeiling int `gorm:"not null" json:"cycleCeiling"`
+	// ValidationAttempts is how many times THIS run may validate, snapshotted for
+	// the same reason as CycleCeiling. Zero means the platform default
+	// (RunMaxValidationAttempts) — every run admitted before the column existed
+	// reads zero, so the default has to be what zero means.
+	//
+	// It is stored rather than left to the workflow's input alone because the
+	// supervisor is restartable: the reconcile sweep re-offers a row whose
+	// workflow never started, and Supervisor.admit hands that EXISTING row back.
+	// The run then starts from the row, so a value living only in the original
+	// request would be silently replaced by the sweep's default.
+	ValidationAttempts int `gorm:"not null;default:0" json:"validationAttempts,omitempty"`
 
 	// ValidationVerdict is a run property, not a per-issue one: the LATEST
 	// validation attempt's outcome. Empty until the first attempt settles.
@@ -294,13 +343,42 @@ func (r MilestoneRun) SpecTag() string {
 	return r.MilestoneTitle
 }
 
+// IsRunOrigin reports whether a string is one of the three run origins. It is
+// the admission guard's predicate, kept beside the constants because the reason
+// origins are validated at all is the spec-run mutex: that index is a partial
+// one keyed on the literal `spec-build`, so a typo'd origin would not fail — it
+// would silently escape the one-active-spec-run-per-project invariant.
+func IsRunOrigin(origin string) bool {
+	switch origin {
+	case RunOriginSpecBuild, RunOriginIncidentAdoption, RunOriginRevalidate:
+		return true
+	default:
+		return false
+	}
+}
+
+// RunValidates reports whether a run of this origin asks the version's
+// acceptance criteria at all.
+//
+// Validation is a SPEC-run property plus the revalidation that exists to repeat
+// it. An incident run fixes one thing in an already-validated version, and
+// re-validating the whole system for it would price every incident like a
+// release.
+//
+// It lives here rather than inline in the loop so the supervisor and anything
+// that later needs to explain a `skipped` verdict cannot disagree about which
+// runs were ever going to produce one.
+func RunValidates(origin string) bool {
+	return origin == RunOriginSpecBuild || origin == RunOriginRevalidate
+}
+
 // IsTerminalRunState reports whether a run state is settled. Terminal rows are
 // never resurrected: every guarded transition in MilestoneRunRepository is
 // fenced on the state NOT being terminal, and the spec-run mutex only counts
 // non-terminal rows.
 func IsTerminalRunState(state string) bool {
 	switch state {
-	case RunStateSucceeded, RunStateFailed, RunStateCancelled:
+	case RunStateSucceeded, RunStateFailed, RunStateCancelled, RunStateBlocked:
 		return true
 	default:
 		return false

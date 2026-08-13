@@ -69,7 +69,7 @@ datastore · `(["/surface"])` = an inbound HTTP surface.
   wires every domain together, mounts the HTTP surfaces, and runs the deny-by-default
   **tenant gate**. It is the only place domains meet.
 - **`clients/`** — outbound adapters to external systems (`openchoreo`, `thundersvc`,
-  `secretmanagersvc`, `clustergatewayproxy`, `oauth`, `oidc`, `observability`, `k8s`).
+  `secretmanagersvc`, `oauth`, `oidc`, `observability`).
 - **supporting:** `app` (public composition **seam** — `Run(Options)`), `config`,
   `migrate` (ordered schema steps), `gen`/`igen` (generated contract types),
   `arch` (the executable rules), `seed`.
@@ -162,6 +162,9 @@ point at enforcement, they don't restate it.
   `TestAllDomainsLanded`
 - Secret-backend SDKs are fenced to `platform/secrets` → `TestImportFences`
   (in `platform/secrets`)
+- Every package that imports the DB harness terminates its container in
+  `TestMain` (`dbtest.Main`), so `make test-db` leaves no Postgres on the host →
+  `TestDBTestPackagesShutDownTheirContainer`
 
 **Hygiene — CI-enforced by `make deadcode-check`:**
 

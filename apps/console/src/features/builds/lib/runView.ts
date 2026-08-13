@@ -40,8 +40,14 @@ type CycleBuild = components["schemas"]["CycleBuild"];
  */
 export const BUILD_CYCLE_KINDS = ["coding", "fix", "conflict"] as const;
 
-/** Terminal run states: the loop is over and nothing will move again. */
-const TERMINAL_RUN_STATES = new Set(["succeeded", "failed", "cancelled"]);
+/** Terminal run states: the loop is over and nothing will move again.
+ *  `blocked` is terminal and is NOT a failure — the org has no agent slot left. */
+const TERMINAL_RUN_STATES = new Set([
+  "succeeded",
+  "failed",
+  "cancelled",
+  "blocked",
+]);
 
 /** The run's build sessions in order — the validation cycle filtered out,
  *  because the deployment is what gets validated and its verdict renders on
@@ -54,6 +60,31 @@ export function buildCycles(cycles: RunCycleView[]): RunCycleView[] {
 
 export function isTerminalRun(state: string): boolean {
   return TERMINAL_RUN_STATES.has(state);
+}
+
+/**
+ * Does this run belong on the BUILD rail — is it part of how the version was
+ * delivered, rather than a re-judgement of it?
+ *
+ * The rail already filters validation cycles out (buildCycles above), on the
+ * grounds that a verdict shown in two places invites the two to disagree. A run
+ * that ONLY validated is that same argument one level up: it has no build session
+ * to show, and its verdict belongs on the Validation board. Leading with one made
+ * this page announce "No build session was ever dispatched" — copy written for a
+ * run that died before dispatching, and false here, because a validation cycle was
+ * dispatched, ran, and merged.
+ *
+ * Not a plain origin test, and that is the whole subtlety: a revalidation left at
+ * the default attempt allowance REPAIRS what it finds — one issue per failed
+ * criterion, then an ordinary coding cycle, then builds. Once it has done that it
+ * is a build story like any other, so it is judged on what it actually did.
+ *
+ * The converse also has to hold: a spec build that died before dispatching has no
+ * build sessions either, and it MUST stay — "nothing was ever dispatched" is the
+ * true and useful thing to say about it. Hence the origin clause first.
+ */
+export function isDeliveryRun(run: MilestoneRunView): boolean {
+  return run.origin !== "revalidate" || buildCycles(run.cycles ?? []).length > 0;
 }
 
 /**
@@ -86,6 +117,9 @@ export function runStateChip(run: MilestoneRunView): {
       return { label: "Failed", tone: "error" };
     case "cancelled":
       return { label: "Cancelled", tone: "neutral" };
+    case "blocked":
+      // Quota, not a platform fault — warning, not error.
+      return { label: "Blocked", tone: "warning" };
     default:
       // An unknown state renders raw and red rather than hiding.
       return { label: run.state, tone: "error" };
@@ -217,6 +251,9 @@ const TERMINAL_REASONS: Record<string, string> = {
   // rather than an outcome the criteria produced.
   "validation-unreported":
     "The validation agent finished without committing a report, so the run has no results.",
+  "agent-quota-blocked":
+    "This organization is already running the maximum number of agent runs allowed by its plan. " +
+    "Wait for one to finish, or stop a running run, then start this one again.",
 };
 
 /** A sentence for the run's terminal reason; the raw value when unmapped, so

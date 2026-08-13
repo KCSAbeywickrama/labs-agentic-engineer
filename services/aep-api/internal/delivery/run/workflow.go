@@ -68,6 +68,12 @@ type RunInput struct {
 	MilestoneTitle  string `json:"milestoneTitle"`
 	Origin          string `json:"origin"`
 	CycleCeiling    int    `json:"cycleCeiling,omitempty"`
+	// ValidationAttempts pins how many times this run may validate. Zero means the
+	// platform default, and it MUST: a workflow input lives in Temporal history,
+	// so an execution started before this field existed replays with the zero
+	// value. An int that falls back to the default replays identically; a bool
+	// would have flipped behaviour under every live run.
+	ValidationAttempts int `json:"validationAttempts,omitempty"`
 }
 
 // RunResult is the run's outcome, mirroring what was written to the run row.
@@ -124,10 +130,15 @@ type loop struct {
 	cycleID string
 
 	// validationAttempts counts validation cycles this run has opened, bounded by
-	// delivery.RunMaxValidationAttempts. It replaced a `validationDone bool`: once a
+	// maxValidationAttempts. It replaced a `validationDone bool`: once a
 	// failed validation is repairable, "has it validated yet" stopped being the
 	// question and "how many times" started.
 	validationAttempts int
+	// maxValidationAttempts is this run's allowance, resolved once at start from
+	// the input so both places that check it read the same number. One attempt is
+	// what makes a revalidation a pure re-check: it is spent at the first fatal
+	// verdict, which settles the run before the loop reaches the mint.
+	maxValidationAttempts int
 	// lastReportDigest fingerprints the previous attempt's report. A repeat whose
 	// report digests the same learned nothing, so the loop stops instead of
 	// spending the rest of the budget on the same answer.
@@ -139,13 +150,21 @@ func newLoop(ctx workflow.Context, in RunInput) *loop {
 	if ceiling <= 0 {
 		ceiling = delivery.RunDefaultCycleCeiling
 	}
+	// Same <=0 fallback as the ceiling, and load-bearing for the same reason: a
+	// workflow started before the field existed replays with the zero value, so
+	// zero has to mean the default rather than "no attempts".
+	attempts := in.ValidationAttempts
+	if attempts <= 0 {
+		attempts = delivery.RunMaxValidationAttempts
+	}
 	return &loop{
-		in:       in,
-		cancel:   workflow.GetSignalChannel(ctx, delivery.SigRunCancel),
-		workable: workflow.GetSignalChannel(ctx, delivery.SigRunWorkable),
-		merged:   workflow.GetSignalChannel(ctx, delivery.SigRunPRMerged),
-		builds:   workflow.GetSignalChannel(ctx, delivery.SigRunBuildTerminal),
-		conflict: workflow.GetSignalChannel(ctx, delivery.SigRunConflict),
+		in:                    in,
+		maxValidationAttempts: attempts,
+		cancel:                workflow.GetSignalChannel(ctx, delivery.SigRunCancel),
+		workable:              workflow.GetSignalChannel(ctx, delivery.SigRunWorkable),
+		merged:                workflow.GetSignalChannel(ctx, delivery.SigRunPRMerged),
+		builds:                workflow.GetSignalChannel(ctx, delivery.SigRunBuildTerminal),
+		conflict:              workflow.GetSignalChannel(ctx, delivery.SigRunConflict),
 		st: delivery.RunStatus{
 			RunID:           in.RunID,
 			MilestoneNumber: in.MilestoneNumber,
@@ -214,6 +233,8 @@ func (l *loop) run(ctx workflow.Context) (RunResult, error) {
 			return l.settle(ctx, delivery.RunStateCancelled, "")
 		case cycleAgentDead:
 			return l.settle(ctx, delivery.RunStateFailed, delivery.RunReasonRedispatchBudget)
+		case cycleQuotaBlocked:
+			return l.settle(ctx, delivery.RunStateBlocked, delivery.RunReasonAgentQuotaBlocked)
 		}
 		l.lastResult = res
 	}
@@ -252,8 +273,14 @@ func (l *loop) run(ctx workflow.Context) (RunResult, error) {
 // It returns settled=false for the two cases that continue: the zero-cycle wait
 // above, and a validation cycle that passed — after which the boundary is
 // re-entered so anything adopted while validation ran is picked up.
+//
+// A REVALIDATION is the one run that must skip case 1. Its milestone is a
+// version that already shipped, so an empty working set is not an ambiguous
+// reading of a milestone mid-plan — it is the expected state, and the whole
+// reason the run exists is to go straight to validation. Parking it would be a
+// run that waits forever for work nobody is going to file.
 func (l *loop) onEmptyWorkingSet(ctx workflow.Context) (settled bool, res RunResult, err error) {
-	if l.st.CyclesTotal == 0 {
+	if l.st.CyclesTotal == 0 && l.in.Origin != delivery.RunOriginRevalidate {
 		cancelled, perr := l.park(ctx)
 		if perr != nil {
 			return true, l.result(), perr
@@ -278,16 +305,17 @@ func (l *loop) onEmptyWorkingSet(ctx workflow.Context) (settled bool, res RunRes
 		return true, res, err
 	}
 
-	// Validation is a SPEC-run property: an incident run fixes one thing in an
-	// already-validated version, and re-validating the whole system for it would
-	// price every incident like a release.
+	// Which origins validate is delivery's to say (RunValidates): the spec build
+	// that delivers a version, and the revalidation that exists to ask its criteria
+	// again. An incident run fixes one thing in an already-validated version, and
+	// re-validating the whole system for it would price every incident like a
+	// release.
 	//
-	// The second clause is what makes the repeat loop possible: this boundary is
-	// re-entered after every repair cycle, and validation runs again while the run
-	// has attempts left. Spending them is not settled here — runValidation settles
-	// on the verdict it is already holding, so the reason names the failure rather
-	// than the budget.
-	if l.in.Origin != delivery.RunOriginSpecBuild {
+	// Re-entry is what makes the repeat loop possible: this boundary is re-entered
+	// after every repair cycle, and validation runs again while the run has attempts
+	// left. Spending them is not settled here — runValidation settles on the verdict
+	// it is already holding, so the reason names the failure rather than the budget.
+	if !delivery.RunValidates(l.in.Origin) {
 		res, err = l.settle(ctx, delivery.RunStateSucceeded, "")
 		return true, res, err
 	}
@@ -332,7 +360,7 @@ func (l *loop) runValidation(ctx workflow.Context) (settled bool, res RunResult,
 			res, err = l.settle(ctx, delivery.RunStateSucceeded, "")
 			return true, res, err
 		}
-		if l.validationAttempts >= delivery.RunMaxValidationAttempts {
+		if l.validationAttempts >= l.maxValidationAttempts {
 			// Out of attempts: accept the answer this run keeps getting. Settling on the
 			// HELD verdict rather than on a budget of its own is why `validation-failed`
 			// now means "still failing after every attempt", and why the repeat loop
@@ -379,6 +407,9 @@ func (l *loop) runValidation(ctx workflow.Context) (settled bool, res RunResult,
 	case cycleAgentDead:
 		res, err = l.settle(ctx, delivery.RunStateFailed, delivery.RunReasonRedispatchBudget)
 		return true, res, err
+	case cycleQuotaBlocked:
+		res, err = l.settle(ctx, delivery.RunStateBlocked, delivery.RunReasonAgentQuotaBlocked)
+		return true, res, err
 	}
 
 	out, err := l.readVerdict(ctx)
@@ -411,7 +442,11 @@ func (l *loop) runValidation(ctx workflow.Context) (settled bool, res RunResult,
 	}
 	l.lastReportDigest = out.Digest
 
-	if l.validationAttempts >= delivery.RunMaxValidationAttempts {
+	// Out of attempts, so this verdict is the run's answer. It also settles BEFORE
+	// the mint below, which is what makes a one-attempt run a pure re-check: the
+	// allowance is spent by the first fatal verdict, so no repair work is filed and
+	// no coding cycle follows.
+	if l.validationAttempts >= l.maxValidationAttempts {
 		res, err = l.settle(ctx, delivery.RunStateFailed, reason)
 		return true, res, err
 	}
@@ -468,6 +503,9 @@ func (l *loop) reenterAfterValidation() (bool, RunResult, error) {
 // forward from it is more work in the same version.
 func (l *loop) settle(ctx workflow.Context, state, reason string) (RunResult, error) {
 	l.st.Phase = delivery.RunPhaseSettling
+	// Cancel stops the agent at the HTTP surface (runread.CycleReaper →
+	// DeleteComponent), not here: a Temporal-durable stop was tried on main and
+	// dropped in favour of that best-effort reap (phase-08 Cancel B1).
 	if state == delivery.RunStateSucceeded {
 		if l.st.ValidationVerdict == "" {
 			// "The run finished and did not validate" is an honest verdict; an
@@ -549,6 +587,11 @@ func (l *loop) cancelRequested() bool { return l.cancel.ReceiveAsync(nil) }
 // deliberate: none of these activities has a "give up" answer that would be
 // better than waiting. A supervisor that cannot reach GitHub should stall
 // visibly, not settle a run on a network blip.
+//
+// Unbounded applies to the blips only. A failure that repeating cannot change —
+// the project deleted underneath the run, a rejected credential — is marked
+// non-retryable by the activity itself (errors.go) and fails on its first
+// attempt, so the policy here never gets to spend a lifetime on it.
 func activityCtx(ctx workflow.Context) workflow.Context {
 	return workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
 		StartToCloseTimeout: activityTimeout,

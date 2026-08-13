@@ -65,6 +65,7 @@ var goldenStepOrder = []string{
 	"phase10_rca_agent_reports",
 	"milestone_runs",
 	"run_cycle_logs",
+	"agent_usage_ledger",
 	"model_rates_seed",
 	"phase11_secret_ref_columns",
 	"phase12_encrypt_credential_columns",

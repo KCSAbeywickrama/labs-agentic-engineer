@@ -106,6 +106,7 @@ func (e DeployStageValidation) Valid() bool {
 // Defines values for MilestoneRunViewOrigin.
 const (
 	IncidentAdoption MilestoneRunViewOrigin = "incident-adoption"
+	Revalidate       MilestoneRunViewOrigin = "revalidate"
 	SpecBuild        MilestoneRunViewOrigin = "spec-build"
 )
 
@@ -113,6 +114,8 @@ const (
 func (e MilestoneRunViewOrigin) Valid() bool {
 	switch e {
 	case IncidentAdoption:
+		return true
+	case Revalidate:
 		return true
 	case SpecBuild:
 		return true
@@ -123,6 +126,7 @@ func (e MilestoneRunViewOrigin) Valid() bool {
 
 // Defines values for MilestoneRunViewState.
 const (
+	MilestoneRunViewStateBlocked   MilestoneRunViewState = "blocked"
 	MilestoneRunViewStateCancelled MilestoneRunViewState = "cancelled"
 	MilestoneRunViewStateFailed    MilestoneRunViewState = "failed"
 	MilestoneRunViewStatePlanning  MilestoneRunViewState = "planning"
@@ -134,6 +138,8 @@ const (
 // Valid indicates whether the value is a known member of the MilestoneRunViewState enum.
 func (e MilestoneRunViewState) Valid() bool {
 	switch e {
+	case MilestoneRunViewStateBlocked:
+		return true
 	case MilestoneRunViewStateCancelled:
 		return true
 	case MilestoneRunViewStateFailed:
@@ -965,6 +971,12 @@ type ExternalResourceDTO struct {
 	Name        string         `json:"name"`
 }
 
+// FileBundle A set of files read at ONE commit. commitSha names that commit; every entry's sha is a blob of that same tree.
+type FileBundle struct {
+	CommitSha string        `json:"commitSha"`
+	Files     []FileContent `json:"files"`
+}
+
 // FileContent defines model for FileContent.
 type FileContent struct {
 	Content string `json:"content"`
@@ -1042,24 +1054,26 @@ type MilestoneRunView struct {
 	MilestoneNumber int64          `json:"milestoneNumber"`
 
 	// MilestoneTitle The milestone's GitHub title at creation. Display only — the number is the key, and the version this run builds is the list's tag.
-	MilestoneTitle string                 `json:"milestoneTitle"`
-	Origin         MilestoneRunViewOrigin `json:"origin"`
-	StartedAt      *time.Time             `json:"startedAt,omitempty"`
+	MilestoneTitle string `json:"milestoneTitle"`
 
-	// State planning is the fill window — the version's milestone is still being written (gates minted, then issues planned in). waiting is the unbounded wait between cycles, where something outside the platform is needed.
+	// Origin Why this run was started. `revalidate` asks a version's criteria again against the already-deployed system; it enters the loop at validation rather than at the working set, and is deliberately outside the one-active-spec-run mutex so it never holds up the next build.
+	Origin    MilestoneRunViewOrigin `json:"origin"`
+	StartedAt *time.Time             `json:"startedAt,omitempty"`
+
+	// State planning is the fill window — the version's milestone is still being written (gates minted, then issues planned in). waiting is the unbounded wait between cycles, where something outside the platform is needed. blocked is terminal and is NOT a failure — the org has no agent concurrency slot left, so the cycle was never launched (see terminalReason agent-quota-blocked).
 	State MilestoneRunViewState `json:"state"`
 
-	// TerminalReason Why a non-succeeded run stopped. Each value names exactly one failure class; empty while the run is non-terminal and on a succeeded run.
+	// TerminalReason Why a non-succeeded run stopped. Each value names exactly one failure class; empty while the run is non-terminal and on a succeeded run. agent-quota-blocked explains state=blocked.
 	TerminalReason string `json:"terminalReason,omitempty"`
 
 	// Validation The run's validation outcome. The verdict is a RUN property, not a per-issue one, and this is where the deployment surface reads it.
 	Validation RunValidation `json:"validation"`
 }
 
-// MilestoneRunViewOrigin defines model for MilestoneRunView.Origin.
+// MilestoneRunViewOrigin Why this run was started. `revalidate` asks a version's criteria again against the already-deployed system; it enters the loop at validation rather than at the working set, and is deliberately outside the one-active-spec-run mutex so it never holds up the next build.
 type MilestoneRunViewOrigin string
 
-// MilestoneRunViewState planning is the fill window — the version's milestone is still being written (gates minted, then issues planned in). waiting is the unbounded wait between cycles, where something outside the platform is needed.
+// MilestoneRunViewState planning is the fill window — the version's milestone is still being written (gates minted, then issues planned in). waiting is the unbounded wait between cycles, where something outside the platform is needed. blocked is terminal and is NOT a failure — the org has no agent concurrency slot left, so the cycle was never launched (see terminalReason agent-quota-blocked).
 type MilestoneRunViewState string
 
 // OrganizationList defines model for OrganizationList.
@@ -1302,6 +1316,23 @@ type RcaAgentReportList struct {
 	NextCursor string `json:"nextCursor,omitempty"`
 }
 
+// RevalidateAccepted The run that will answer the question. Its cycles stream on the ordinary run progress endpoint, and its verdict becomes the version's once it settles.
+type RevalidateAccepted struct {
+	MilestoneNumber int64  `json:"milestoneNumber"`
+	RunID           string `json:"runId"`
+}
+
+// RevalidateRequest Optional knobs on the revalidation run. Both are snapshotted onto the run at start, so a later config change cannot retroactively alter a run already in flight.
+type RevalidateRequest struct {
+	// CycleCeiling Total-cycle ceiling for this run. Omit for the platform default. Only meaningful when the run may repair — a run that validates once uses a single cycle.
+	CycleCeiling int64 `json:"cycleCeiling,omitempty"`
+
+	// ValidationAttempts How many times this run may validate before it accepts the answer it keeps getting. Omit for the platform default.
+	//
+	// Set 1 for a pure re-check: the run reports its verdict and settles, filing no repair work and rebuilding nothing, because the attempt allowance is spent before the loop reaches the point where it would mint issues.
+	ValidationAttempts int64 `json:"validationAttempts,omitempty"`
+}
+
 // RunBudgets The run's budget counters as the supervisor wrote them out. Read-model bookkeeping — the loop counts its own budgets and never reads these back.
 type RunBudgets struct {
 	// BuildRetriggers Run-wide tally of automatic build re-triggers. The authoritative one-per-component-per-SHA guard is derived at the trigger site, not from this number.
@@ -1319,6 +1350,9 @@ type RunBudgets struct {
 
 // RunCycleView One dispatch within a run. Branch, pull request (number and URL) and merge SHA are LEARNED FROM WEBHOOKS — the agent derives its own branch identity — so they stay empty on a cycle whose agent died before opening a pull request.
 type RunCycleView struct {
+	// AgentReason Why this cycle's agent stopped without opening a pull request, as the platform's pod-truth watcher classified it — `timed_out` (the run deadline), `agent_failed[:<reason>]` (a non-zero exit or a killed container), `startup_failed:<reason>: <message>` (the runner never started: image pull, scheduling, or a secret that had not materialised) or `job_not_found` (the runner's workload disappeared). Absent on every cycle that opened a pull request: there the pull request is the outcome.
+	AgentReason string `json:"agentReason,omitempty"`
+
 	// Attempts Dispatches of THIS cycle (the per-cycle re-dispatch budget, which resets at every cycle boundary).
 	Attempts  int64      `json:"attempts"`
 	Branch    string     `json:"branch,omitempty"`
@@ -1449,13 +1483,13 @@ type RunValidation struct {
 
 	// Verdict What the run learned about the deployed system. Empty until the validation cycle settles.
 	// passed (every criterion was automated and passed), partial (some passed, none failed, and some were never covered — so `passed` would claim a result for criteria nobody checked), failed (a criterion asserted and lost), inconclusive (no test results at all), unreported (no usable report at the cycle's merge commit), skipped (no acceptance criteria, and incident runs, which get no validation cycle at all).
-	// `failed` and `unreported` fail the run, under terminal reasons validation-failed and validation-unreported respectively. The rest settle succeeded.
+	// `failed` and `unreported` fail the run ONCE ITS VALIDATION ATTEMPTS ARE SPENT, under terminal reasons validation-failed and validation-unreported respectively; while attempts remain the run repairs and validates again, so this field can hold a fatal verdict on a run that is still live and about to try once more. A client rendering it as the run's answer therefore needs the lifecycle too — that is DeployStage.validation, which reports awaiting-fix for exactly that state. The rest settle succeeded.
 	Verdict RunValidationVerdict `json:"verdict,omitempty"`
 }
 
 // RunValidationVerdict What the run learned about the deployed system. Empty until the validation cycle settles.
 // passed (every criterion was automated and passed), partial (some passed, none failed, and some were never covered — so `passed` would claim a result for criteria nobody checked), failed (a criterion asserted and lost), inconclusive (no test results at all), unreported (no usable report at the cycle's merge commit), skipped (no acceptance criteria, and incident runs, which get no validation cycle at all).
-// `failed` and `unreported` fail the run, under terminal reasons validation-failed and validation-unreported respectively. The rest settle succeeded.
+// `failed` and `unreported` fail the run ONCE ITS VALIDATION ATTEMPTS ARE SPENT, under terminal reasons validation-failed and validation-unreported respectively; while attempts remain the run repairs and validates again, so this field can hold a fatal verdict on a run that is still live and about to try once more. A client rendering it as the run's answer therefore needs the lifecycle too — that is DeployStage.validation, which reports awaiting-fix for exactly that state. The rest settle succeeded.
 type RunValidationVerdict string
 
 // SaveValuesBody defines model for SaveValuesBody.
@@ -1899,6 +1933,15 @@ type ListFilesParams struct {
 	Prefix string `form:"prefix,omitempty" json:"prefix,omitempty"`
 }
 
+// ReadFileBundleParams defines parameters for ReadFileBundle.
+type ReadFileBundleParams struct {
+	// Prefix Only include paths under this prefix (e.g. specs/design/). Empty includes everything the read gate admits.
+	Prefix string `form:"prefix,omitempty" json:"prefix,omitempty"`
+
+	// Ref Commit to read at (a hex object name). Empty reads the branch tip. Same gate as read-file's ref: an object name, never a revision expression.
+	Ref string `form:"ref,omitempty" json:"ref,omitempty"`
+}
+
 // ReadFileParams defines parameters for ReadFile.
 type ReadFileParams struct {
 	// Ref Commit to read the file AT. Omitted reads the default-branch tip.
@@ -1977,6 +2020,9 @@ type CreateTurnJSONRequestBody = TurnInputBody
 
 // BuildProjectJSONRequestBody defines body for BuildProject for application/json ContentType.
 type BuildProjectJSONRequestBody = BuildRequest
+
+// RevalidateBuildJSONRequestBody defines body for RevalidateBuild for application/json ContentType.
+type RevalidateBuildJSONRequestBody = RevalidateRequest
 
 // UpdateComponentConfigJSONRequestBody defines body for UpdateComponentConfig for application/json ContentType.
 type UpdateComponentConfigJSONRequestBody = UpdateConfigBody
