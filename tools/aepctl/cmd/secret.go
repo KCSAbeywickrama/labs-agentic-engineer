@@ -14,4 +14,15 @@
 // specific language governing permissions and limitations
 // under the License.
 
-package main
+package cmd
+
+import "github.com/spf13/cobra"
+
+var secretCmd = &cobra.Command{
+	Use:   "secret",
+	Short: "Manage AEP secrets",
+}
+
+func init() {
+	platformCmd.AddCommand(secretCmd)
+}
