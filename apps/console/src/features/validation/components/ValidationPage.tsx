@@ -188,16 +188,29 @@ export function ValidationPage({
   const attemptRuns = runList
     .filter((r) => (r.cycles ?? []).some((c) => c.kind === "validation"))
     .reverse();
-  // The LAST attempt across the whole version, not the first, and not the newest
-  // run's. A version can be judged more than once — a failed attempt is repaired
-  // and re-validated, and a revalidation asks again later — so pairing an older
-  // attempt's merge commit with the current verdict would show the wrong report.
-  const validationCycle = attemptRuns
-    .flatMap((r) => (r.cycles ?? []).filter((c) => c.kind === "validation"))
-    .at(-1);
+  // Every attempt across the whole version, oldest first. The LAST is what the page
+  // is about — not the first, and not the newest run's. A version can be judged more
+  // than once (a failed attempt is repaired and re-validated; a revalidation asks
+  // again later), so pairing an older attempt's merge commit with the current verdict
+  // would show the wrong report.
+  const validationCycles = attemptRuns.flatMap((r) =>
+    (r.cycles ?? []).filter((c) => c.kind === "validation"),
+  );
+  const validationCycle = validationCycles.at(-1);
+  // The report is pinned to the last attempt that MERGED, which is not always the
+  // last attempt. A repeat attempt in flight has no report yet by definition, and its
+  // cycle record carries no mergeSha — pinning to it passes an empty ref, which
+  // degrades to a branch-tip read, the one thing this pin exists to prevent. The tip
+  // happens to hold the previous attempt's report until the new one merges, so the
+  // bug returns the right bytes by accident and would stop the moment anything else
+  // wrote the path.
+  const reportCycle = validationCycles.filter((c) => c.mergeSha).at(-1);
   // The cycle carries the pull request's page as the webhook reported it. This
   // page used to build one from the project's repoUrl and the number, which is a
   // CLONE url — a `.git` suffix produced a link that 404s.
+  //
+  // Taken from the LATEST attempt rather than the merged one: mid-repeat the open
+  // pull request is the one a reader wants, and it is the one this link is for.
   const prUrl = validationCycle?.prUrl;
 
   // The run reached an ANSWER — which is not the same as "everything passed", and
@@ -210,16 +223,16 @@ export function ValidationPage({
   // found" note instead of the tile that explains the breach.
   const missingReport = rawVerdict === "unreported";
   const criteria = useValidationCriteria(projectName, version, settled);
-  // Pinned to THIS run's validation-cycle merge commit. Reading the branch tip
-  // would show whichever run last overwrote the path — so an older run in the story
-  // would display the newest run's results, and a run that committed no report
+  // Pinned to the merge commit of the attempt that produced it. Reading the branch
+  // tip would show whichever run last overwrote the path — so an older run in the
+  // story would display the newest run's results, and a run that committed no report
   // would silently inherit its predecessor's.
   const report = useValidationReport(
     projectName,
     version,
     settled && !missingReport,
     reportPath,
-    validationCycle?.mergeSha,
+    reportCycle?.mergeSha,
   );
   const tally = useTally(criteria.data?.content, report.data?.content);
 

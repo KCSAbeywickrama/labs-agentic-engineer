@@ -91,10 +91,10 @@ describe("validationStage", () => {
   });
 
   it("upgrades the fact to criteria counts when the join resolved them", () => {
-    expect(validationStage("passed", { passed: 12, total: 12 }).fact).toBe(
+    expect(validationStage("passed", { passed: 12, failed: 0, uncovered: 0, total: 12 }).fact).toBe(
       "12/12 passed",
     );
-    expect(validationStage("partial", { passed: 8, total: 12 }).fact).toBe(
+    expect(validationStage("partial", { passed: 8, failed: 0, uncovered: 4, total: 12 }).fact).toBe(
       "8/12 passed",
     );
   });

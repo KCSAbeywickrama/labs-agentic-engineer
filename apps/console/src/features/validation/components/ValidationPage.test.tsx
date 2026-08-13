@@ -451,7 +451,9 @@ describe("ValidationPage lifecycle", () => {
     expect(screen.queryByText("Validation failed")).not.toBeInTheDocument();
     expect(screen.queryByText(/the milestone stays open for the fix/)).not.toBeInTheDocument();
     expect(
-      screen.getByText(/The run filed each failure as an issue on this version/),
+      screen.getByText(
+        "1 of 3 criteria failed. The implementation is being fixed. Validation will run again.",
+      ),
     ).toBeInTheDocument();
     // The failed report stays — it is the evidence of WHAT is being fixed, and the
     // coding cycle in flight has no validation log to show in its place.
@@ -483,7 +485,13 @@ describe("ValidationPage lifecycle", () => {
     expect(screen.queryByText("Validation failed")).not.toBeInTheDocument();
     // The tile rides over the log — the last attempt's finding is still true — but
     // ends on the attempt in flight rather than on a run that stopped.
-    expect(screen.getByText(/A new validation attempt is running/)).toBeInTheDocument();
+    // The numbers are the PREVIOUS attempt's and say so, and the fix having shipped
+    // is a fact — a repeat attempt only exists once the repair built and deployed.
+    expect(
+      screen.getByText(
+        "1 of 3 criteria failed in the last attempt. The implementation has been fixed and deployed. Validation is running again.",
+      ),
+    ).toBeInTheDocument();
   });
 
   it("says so, and shows nothing else, when the run SKIPPED validation", () => {
@@ -584,7 +592,7 @@ describe("ValidationPage lifecycle", () => {
     expect(screen.queryByTestId("run-feed")).not.toBeInTheDocument();
     expect(screen.getAllByText("Validation error").length).toBe(2);
     expect(
-      screen.getByText(/generating the validation report/),
+      screen.getByText(/validation report couldn't be generated/),
     ).toBeInTheDocument();
     expect(screen.queryByText(/report wasn't found/)).not.toBeInTheDocument();
     // The criteria still render — they live under specs/, not in the report.

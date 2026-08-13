@@ -35,6 +35,7 @@ import {
 import type { components } from "../../../generated/aep-api";
 import type { StageTone } from "./pipeline";
 import { validationView } from "./pipeline";
+import type { ValidationCounts } from "../../validation/lib/verdict";
 import type { DeploymentCard } from "./deploymentRows";
 import { canPromote } from "./promotion";
 
@@ -90,8 +91,9 @@ export function developmentStage(
   };
 }
 
-// validationView's tone, said as a rail state. `info` is the moving case
-// (validating / awaiting-fix) and gets the hollow pulsing dot.
+// validationView's tone, said as a rail state. `info` is the one moving case
+// (validating); `awaiting-fix` is `warning`, so a repair in flight reads as a stage
+// needing attention rather than as one quietly progressing.
 const TONE_STATE: Partial<Record<StageTone, StageState>> = {
   success: "done",
   error: "failed",
@@ -103,10 +105,31 @@ const TONE_STATE: Partial<Record<StageTone, StageState>> = {
   neutral: "done",
 };
 
-/** How many criteria passed, of how many the oracle authored (#395). */
-export interface ValidationCounts {
-  passed: number;
-  total: number;
+// What the stage is doing or waiting for, keyed on the VALIDATION value rather than
+// on the rail state it maps to. The two lifecycle values both land on a settled rail
+// state (`attention` for awaiting-fix), so a note derived from that said "The
+// deployed system WAS checked" about a version mid-repair.
+//
+// Each is complementary to the verdict banner rendered beside it, never a restatement
+// of it: the banner says what the last attempt found and what is being done, this
+// says what has to happen before the stage moves.
+function validationNote(validation: string, view: ReturnType<typeof validationView>) {
+  switch (validation) {
+    case "running":
+      return "The deployed system is being checked against the spec's acceptance criteria.";
+    case "awaiting-fix":
+      // Answers the "when?" the banner's sentence deliberately leaves out — a merged
+      // fix is not a re-checked one, because validation runs against what is deployed.
+      return "Runs again once the fix is built and deployed.";
+    default:
+      break;
+  }
+  if (!view) return "Runs against the dev deployment once every component is ready.";
+  // The settled-but-neutral verdict (skipped): nothing WAS checked, so the note must
+  // not claim it was.
+  return view.tone === "neutral"
+    ? "This version has no acceptance criteria — there was nothing to check."
+    : "The deployed system was checked against the spec's acceptance criteria.";
 }
 
 /** Stage 2 — the validation agent's verdict on that deployment. Counts, when
@@ -124,18 +147,15 @@ export function validationStage(
     actor: "Validation agent",
     state,
     ...(view && {
-      fact: counts ? `${counts.passed}/${counts.total} passed` : view.label,
+      // `spoken` over `label` in the count-free fallback. Those strings exist because
+      // two labels carry their meaning in PUNCTUATION — "validated" (partial) and
+      // "validation?" — which was hidden behind the validation chip's aria-label
+      // purely because a pill had no room for the longer form. This fact has a whole
+      // row, so it can simply say it, and the distinction stops being sighted-only.
+      // Moot whenever the counts resolve, which is the steady state.
+      fact: counts ? `${counts.passed}/${counts.total} passed` : (view.spoken ?? view.label),
     }),
-    note:
-      state === "waiting"
-        ? "Runs against the dev deployment once every component is ready."
-        : state === "active"
-          ? "The deployment is being checked against the spec's acceptance criteria."
-          : view?.tone === "neutral"
-            ? // The settled-but-neutral verdict (skipped): nothing WAS checked,
-              // so the note must not claim it was.
-              "This version has no acceptance criteria — there was nothing to check."
-            : "The deployed system was checked against the spec's acceptance criteria.",
+    note: validationNote(validation, view),
   };
 }
 
