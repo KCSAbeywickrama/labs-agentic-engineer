@@ -133,6 +133,18 @@ func sanitizeSegment(s string) (string, error) {
 	return s, nil
 }
 
+// CPNamespace is the OpenChoreo control-plane namespace where a
+// SecretReference CR must be authored — the same namespace as the
+// Workload/ReleaseBinding that will secretKeyRef it. Distinct from
+// tenant.OrgBaseNamespace(OrgName), which is only the vault path segment.
+func (l SecretLocation) CPNamespace() (string, error) {
+	ns := strings.TrimSpace(l.ControlPlaneNamespace)
+	if ns == "" {
+		return "", fmt.Errorf("SecretLocation.ControlPlaneNamespace is required to author SecretReferences")
+	}
+	return ns, nil
+}
+
 // KVPath builds the KV-store path from non-empty segments.
 //
 // Shapes (each ends with EntityName, optionally suffixed by SecretKey):

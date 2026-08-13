@@ -85,28 +85,28 @@ type recordingOCClient struct {
 }
 
 type createCall struct {
-	orgNS string
-	req   CreateSecretReferenceRequest
+	cpNS string
+	req  CreateSecretReferenceRequest
 }
 
-func (r *recordingOCClient) GetSecretReference(_ context.Context, orgNS, name string) (*SecretReference, error) {
-	r.gets = append(r.gets, [2]string{orgNS, name})
+func (r *recordingOCClient) GetSecretReference(_ context.Context, cpNS, name string) (*SecretReference, error) {
+	r.gets = append(r.gets, [2]string{cpNS, name})
 	if r.getErr != nil {
 		return nil, r.getErr
 	}
-	return &SecretReference{Namespace: orgNS, Name: name}, nil
+	return &SecretReference{Namespace: cpNS, Name: name}, nil
 }
-func (r *recordingOCClient) CreateSecretReference(_ context.Context, orgNS string, req CreateSecretReferenceRequest) (*SecretReference, error) {
-	r.creates = append(r.creates, createCall{orgNS: orgNS, req: req})
-	return &SecretReference{Namespace: orgNS, Name: req.Name}, nil
+func (r *recordingOCClient) CreateSecretReference(_ context.Context, cpNS string, req CreateSecretReferenceRequest) (*SecretReference, error) {
+	r.creates = append(r.creates, createCall{cpNS: cpNS, req: req})
+	return &SecretReference{Namespace: cpNS, Name: req.Name}, nil
 }
-func (r *recordingOCClient) UpdateSecretReference(_ context.Context, orgNS, name string, req CreateSecretReferenceRequest) (*SecretReference, error) {
-	r.updates = append(r.updates, createCall{orgNS: orgNS, req: req})
+func (r *recordingOCClient) UpdateSecretReference(_ context.Context, cpNS, name string, req CreateSecretReferenceRequest) (*SecretReference, error) {
+	r.updates = append(r.updates, createCall{cpNS: cpNS, req: req})
 	_ = name
-	return &SecretReference{Namespace: orgNS, Name: req.Name}, nil
+	return &SecretReference{Namespace: cpNS, Name: req.Name}, nil
 }
-func (r *recordingOCClient) DeleteSecretReference(_ context.Context, orgNS, name string) error {
-	r.deletes = append(r.deletes, [2]string{orgNS, name})
+func (r *recordingOCClient) DeleteSecretReference(_ context.Context, cpNS, name string) error {
+	r.deletes = append(r.deletes, [2]string{cpNS, name})
 	return nil
 }
 
@@ -167,14 +167,14 @@ func TestCreateSecret_ManagesRefsFalse_AuthorsSRInControlPlaneNamespace(t *testi
 		t.Fatalf("expected 1 CreateSecretReference, got %d (gets=%d updates=%d)", len(oc.creates), len(oc.gets), len(oc.updates))
 	}
 	call := oc.creates[0]
-	if call.orgNS != wantCRNS {
-		t.Fatalf("Create orgNS = %q, want control-plane ns %q", call.orgNS, wantCRNS)
+	if call.cpNS != wantCRNS {
+		t.Fatalf("Create cpNS = %q, want control-plane ns %q", call.cpNS, wantCRNS)
 	}
 	if call.req.Namespace != wantCRNS {
 		t.Fatalf("req.Namespace = %q, want %q", call.req.Namespace, wantCRNS)
 	}
-	if call.orgNS == vaultNS {
-		t.Fatalf("CR namespace %q must not be the vault OrgBaseNamespace", call.orgNS)
+	if call.cpNS == vaultNS {
+		t.Fatalf("CR namespace %q must not be the vault OrgBaseNamespace", call.cpNS)
 	}
 	if call.req.KVPath != vaultPath {
 		t.Fatalf("req.KVPath = %q, want %q", call.req.KVPath, vaultPath)
@@ -186,8 +186,8 @@ func TestCreateSecret_ManagesRefsFalse_AuthorsSRInControlPlaneNamespace(t *testi
 		t.Fatalf("req.SecretKeys = %v", call.req.SecretKeys)
 	}
 	// Guard: never pass the raw UUID as the k8s namespace.
-	if strings.Contains(call.orgNS, "eeeeeeeeeeee") || call.orgNS == loc.OrgName {
-		t.Fatalf("orgNS must not be the raw org UUID, got %q", call.orgNS)
+	if strings.Contains(call.cpNS, "eeeeeeeeeeee") || call.cpNS == loc.OrgName {
+		t.Fatalf("cpNS must not be the raw org UUID, got %q", call.cpNS)
 	}
 }
 
@@ -286,8 +286,8 @@ func TestPatchSecret_ManagesRefsFalse_AuthorsSR(t *testing.T) {
 	if len(oc.creates) != 1 {
 		t.Fatalf("expected 1 create, got %d", len(oc.creates))
 	}
-	if oc.creates[0].orgNS != wantNS {
-		t.Fatalf("orgNS = %q, want %q", oc.creates[0].orgNS, wantNS)
+	if oc.creates[0].cpNS != wantNS {
+		t.Fatalf("cpNS = %q, want %q", oc.creates[0].cpNS, wantNS)
 	}
 }
 
@@ -364,11 +364,15 @@ func TestDeleteSecret_ManagesRefsFalse_DeletesSRInControlPlaneNamespace(t *testi
 	if err := c.DeleteSecret(context.Background(), loc, refName); err != nil {
 		t.Fatalf("DeleteSecret: %v", err)
 	}
-	if len(oc.deletes) != 1 {
-		t.Fatalf("expected 1 delete, got %d", len(oc.deletes))
+	oldNS := tenant.OrgBaseNamespace(loc.OrgName)
+	if len(oc.deletes) != 2 {
+		t.Fatalf("expected CP-ns + leftover OrgBaseNamespace deletes, got %d: %v", len(oc.deletes), oc.deletes)
 	}
 	if oc.deletes[0][0] != wantNS || oc.deletes[0][1] != refName {
-		t.Fatalf("delete call = %v, want [%s %s]", oc.deletes[0], wantNS, refName)
+		t.Fatalf("first delete = %v, want [%s %s]", oc.deletes[0], wantNS, refName)
+	}
+	if oc.deletes[1][0] != oldNS || oc.deletes[1][1] != refName {
+		t.Fatalf("leftover delete = %v, want [%s %s]", oc.deletes[1], oldNS, refName)
 	}
 }
 
@@ -423,8 +427,8 @@ func TestCreateSecret_ManagesRefsFalse_UpdateWhenExists(t *testing.T) {
 	if len(oc.updates) != 1 || len(oc.creates) != 0 {
 		t.Fatalf("expected update-only; creates=%d updates=%d", len(oc.creates), len(oc.updates))
 	}
-	if oc.updates[0].orgNS != wantNS {
-		t.Fatalf("update orgNS = %q, want %q", oc.updates[0].orgNS, wantNS)
+	if oc.updates[0].cpNS != wantNS {
+		t.Fatalf("update cpNS = %q, want %q", oc.updates[0].cpNS, wantNS)
 	}
 }
 
