@@ -183,7 +183,12 @@ describe("DeploymentsPage — validation", () => {
     expect(screen.queryByText(/verdict: awaiting fix/)).not.toBeInTheDocument();
     // The note answers the "when?" the sentence leaves out, and must not claim the
     // system was already checked.
-    expect(screen.getByText("Runs again once the fix is built and deployed.")).toBeInTheDocument();
+    // The note is a WAIT and nothing more. It renders BEFORE the banner, so it names
+    // the implementation rather than saying "the fix" — which has no antecedent yet —
+    // and leaves "runs again" to the banner, whose sentence the Validation page's
+    // tile shares and must keep.
+    expect(screen.getByText("Waits for the implementation fix to deploy.")).toBeInTheDocument();
+    expect(screen.queryByText(/Runs again/)).not.toBeInTheDocument();
   });
 
   // A SETTLED failure. The banner wrote its own sentence for these and led with the

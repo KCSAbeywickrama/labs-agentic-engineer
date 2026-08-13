@@ -105,22 +105,18 @@ const TONE_STATE: Partial<Record<StageTone, StageState>> = {
   neutral: "done",
 };
 
-// What the stage is doing or waiting for, keyed on the VALIDATION value rather than
-// on the rail state it maps to. The two lifecycle values both land on a settled rail
-// state (`attention` for awaiting-fix), so a note derived from that said "The
-// deployed system WAS checked" about a version mid-repair.
-//
-// Each is complementary to the verdict banner rendered beside it, never a restatement
-// of it: the banner says what the last attempt found and what is being done, this
-// says what has to happen before the stage moves.
+// What the stage is doing or waiting for, keyed on the VALIDATION value and not on
+// the rail state it maps to: `awaiting-fix` maps to a settled state (`attention`), so
+// a note derived from that claimed the system "WAS checked" mid-repair.
 function validationNote(validation: string, view: ReturnType<typeof validationView>) {
   switch (validation) {
     case "running":
       return "The deployed system is being checked against the spec's validation criteria.";
     case "awaiting-fix":
-      // Answers the "when?" the banner's sentence deliberately leaves out — a merged
-      // fix is not a re-checked one, because validation runs against what is deployed.
-      return "Runs again once the fix is built and deployed.";
+      // Renders ABOVE the banner, so it names its own subject and leaves "runs again"
+      // to the banner — whose sentence the Validation page's tile shares and cannot
+      // drop. Deploy, not merge: validation runs against the deployed system.
+      return "Waits for the implementation fix to deploy.";
     default:
       break;
   }
