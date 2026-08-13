@@ -90,14 +90,14 @@ type DesignComponent struct {
 	// derivation, so nothing here ever writes it back. Internal to the spec
 	// domain (no external consumer needs the raw markdown yet), hence json:"-".
 	AgentAFM string `json:"-"`
-	// AgentToolStatuses is the design-save computed resolution of THIS
+	// AgentToolStatuses is the read-time computed resolution of THIS
 	// ai-agent component's `x-aep.tools.openapi[].allow` entries against its
 	// declared dependencies and each named component's OpenAPI contract (see
 	// ComputeAgentToolStatus / derive_agent_tools.go). Populated in-memory by
-	// deriveAgentToolStatuses during the design-save derivation pass; NOT
-	// persisted to design.json (recomputed every save, exactly like
-	// Dependency.Status/Reason are recomputed every read) and always empty
-	// for a non-ai-agent component or one with no agent.afm.md yet.
+	// deriveAgentToolStatuses, called from AssembleDesignFrom on every design
+	// read; NOT persisted to design.json (recomputed every read, exactly like
+	// Dependency.Status/Reason) and always empty for a non-ai-agent component
+	// or one with no agent.afm.md yet.
 	AgentToolStatuses []AgentToolStatus `json:"agentToolStatuses,omitempty"`
 }
 

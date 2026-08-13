@@ -3227,9 +3227,38 @@ components:
           additionalProperties: {}
           type: object
           nullable: true
+        operations:
+          description: Read-time computed resolution of every allow-listed
+            operation an ai-agent component's `x-aep.tools.openapi[]` entry
+            names against THIS dependency — populated only when this
+            Dependency is the provider such an entry targets. Never authored,
+            never persisted.
+          items:
+            $ref: '#/components/schemas/DependencyOperationStatus'
+          type: array
+          nullable: true
       required:
       - kind
       - name
+      type: object
+    DependencyOperationStatus:
+      description: One `x-aep.tools.openapi[].allow` entry's read-time computed
+        resolution against the dependency it targets — status/reason are
+        computed by spec.ComputeAgentToolStatus, never authored, never persisted.
+      x-go-type: contracts.DependencyOperationStatus
+      x-go-type-import:
+        path: github.com/wso2/aep/aep-api/internal/contracts
+      additionalProperties: false
+      properties:
+        operation:
+          type: string
+        status:
+          type: string
+        reason:
+          type: string
+      required:
+      - operation
+      - status
       type: object
     DependencyCandidate:
       description: One option in an ambiguous external dependency's resolution set.

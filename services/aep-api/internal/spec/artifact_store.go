@@ -168,6 +168,12 @@ func (s *ArtifactStore) AssembleDesignFrom(ctx context.Context, orgID string, fi
 	}
 	s.resolveOrgServices(ctx, orgID, design)
 	s.resolveExternalDependencies(ctx, orgID, design)
+	// Agent tool resolution (derive_agent_tools.go / agent_tools.go): read-time
+	// computed, exactly like the Status/Reason the two calls above just set —
+	// never persisted, recomputed on every design read so a GET reflects the
+	// current openapi.yaml/agent.afm.md pair even when neither triggered a
+	// save. A design with no ai-agent component does no work here at all.
+	deriveAgentToolStatuses(ctx, design.Components)
 	return design, nil
 }
 

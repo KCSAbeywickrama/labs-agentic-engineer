@@ -35,7 +35,7 @@ import "fmt"
 // precedence table reads. This is a deliberately recorded decision: TWO AFM
 // front-matter readers now exist in this codebase (afmgate.go's, strict and
 // accept/reject, on write; parseAFMToolEntries', lenient and
-// extraction-only, at design-save) because they live in different packages
+// extraction-only, at design read time) because they live in different packages
 // with no shared exported surface, not because either was written without
 // noticing the other.
 type afmFrontMatter struct {

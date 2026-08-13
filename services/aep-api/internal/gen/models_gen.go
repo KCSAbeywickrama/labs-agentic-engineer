@@ -839,6 +839,9 @@ type Dependency = contracts.Dependency
 // DependencyCandidate One option in an ambiguous external dependency's resolution set.
 type DependencyCandidate = contracts.DependencyCandidate
 
+// DependencyOperationStatus One `x-aep.tools.openapi[].allow` entry's read-time computed resolution against the dependency it targets — status/reason are computed by spec.ComputeAgentToolStatus, never authored, never persisted.
+type DependencyOperationStatus = contracts.DependencyOperationStatus
+
 // DependencyStatus defines model for DependencyStatus.
 type DependencyStatus struct {
 	Outputs []string `json:"outputs"`

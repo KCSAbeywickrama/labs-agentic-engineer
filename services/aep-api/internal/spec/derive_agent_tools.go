@@ -26,7 +26,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// AGENT TOOL RESOLUTION AT DESIGN-SAVE.
+// AGENT TOOL RESOLUTION AT DESIGN READ TIME.
 //
 // afmgate.go (internal/platform/agentfold) gates an agent.afm.md document on
 // its OWN shape at write time — it cannot check whether a
@@ -36,14 +36,19 @@ import (
 // guaranteed order, so an agent's document can legitimately land before its
 // provider's contract does. Rejecting on write would fail a correct write.
 //
-// So this file resolves it here instead, at design-save, over the WHOLE
-// design (every component's files are already assembled into one
-// []DesignComponent by the time derive.go runs) — reported as a status on
-// the Go-side design model, never as a write rejection. It reuses
-// ComputeAgentToolStatus (agent_tools.go), the pure precedence table; this
-// file's job is only to gather that function's arguments with no I/O of its
-// own (both its inputs, AgentAFM and OpenAPISpec, are already loaded onto
-// DesignComponent by AssembleDesign).
+// So this file resolves it here instead, on every design READ (called from
+// AssembleDesignFrom, exactly where org-service/external Status/Reason are
+// computed), over the WHOLE design (every component's files are already
+// assembled into one []DesignComponent by the time derive.go runs) —
+// reported as a status on the Go-side design model, never as a write
+// rejection. It reuses ComputeAgentToolStatus (agent_tools.go), the pure
+// precedence table; this file's job is only to gather that function's
+// arguments with no I/O of its own (both its inputs, AgentAFM and
+// OpenAPISpec, are already loaded onto DesignComponent by AssembleDesign).
+// The result rides two consumers: ComponentDependencies.Dependency.Operations
+// (the console's read model, edge/handlers_design.go) and the build-time
+// version-cut hard gate (delivery/build/dependency_gate.go), which blocks on
+// any DependencyStatusUnresolved entry — never on AgentToolStatusUnchecked.
 //
 // This intentionally does not import internal/platform/agentfold: everything
 // afmgate.go exposes for reading front matter is unexported, and
@@ -72,19 +77,22 @@ func hasAIAgentComponent(components []DesignComponent) bool {
 }
 
 // deriveAgentToolStatuses computes AgentToolStatuses for every ai-agent
-// component in components and stamps it in place — a design-save derivation
-// alongside deriveEndUserAuth/deriveDependencyWiring, except its result is
-// NEVER persisted to design.json (it is a read/derive-time status, not an
-// authored or platform-owned design fact, exactly like Dependency.Status).
-// A design with no ai-agent component does no work at all. An ai-agent
-// component with no agent.afm.md yet (AssembleDesign left AgentAFM empty —
-// the document hasn't landed) is left with a nil AgentToolStatuses rather
-// than an error: there is nothing to check yet, and that is not a fault.
+// component in components and stamps it in place — called from
+// AssembleDesignFrom on every design read, alongside
+// resolveOrgServices/resolveExternalDependencies, except its result is NEVER
+// persisted to design.json (it is a read-time status, not an authored or
+// platform-owned design fact, exactly like Dependency.Status). A design with
+// no ai-agent component does no work at all. An ai-agent component with no
+// agent.afm.md yet (AssembleDesign left AgentAFM empty — the document hasn't
+// landed) is left with a nil AgentToolStatuses rather than an error: there is
+// nothing to check yet, and that is not a fault.
 //
 // Every unresolved entry is logged as a single structured line — the check
-// must be observable and demonstrably running even though nothing in this
-// task blocks a write or a version-gate on it (that is a follow-up task,
-// once the console-facing contract surface for it exists).
+// must be observable and demonstrably running, on top of its two real
+// consumers: it rides the wire on ComponentDependencies (Dependency.Operations,
+// edge/handlers_design.go's withAgentToolOperations) and blocks the tag-cut
+// (delivery/build/dependency_gate.go's agentToolGateFailures) exactly like an
+// unresolved external/org-service dependency does.
 func deriveAgentToolStatuses(ctx context.Context, components []DesignComponent) {
 	if !hasAIAgentComponent(components) {
 		return
@@ -100,7 +108,7 @@ func deriveAgentToolStatuses(ctx context.Context, components []DesignComponent) 
 		}
 		afm, err := parseAFMToolEntries(comp.AgentAFM)
 		if err != nil {
-			slog.WarnContext(ctx, "design save: agent.afm.md front matter unreadable, skipping tool resolution",
+			slog.WarnContext(ctx, "design read: agent.afm.md front matter unreadable, skipping tool resolution",
 				"component", comp.Name, "error", err)
 			continue
 		}
@@ -108,7 +116,7 @@ func deriveAgentToolStatuses(ctx context.Context, components []DesignComponent) 
 		comp.AgentToolStatuses = statuses
 		for _, st := range statuses {
 			if st.Status == DependencyStatusUnresolved {
-				slog.WarnContext(ctx, "design save: agent tool allow-list entry unresolved",
+				slog.WarnContext(ctx, "design read: agent tool allow-list entry unresolved",
 					"component", comp.Name, "provider", st.Component, "operation", st.Operation, "reason", st.Reason)
 			}
 		}
