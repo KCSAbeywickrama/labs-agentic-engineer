@@ -1,0 +1,97 @@
+// Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+package sourcecontrol_test
+
+import (
+	"context"
+	"errors"
+	"testing"
+
+	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
+	githubclient "github.com/wso2/aep/aep-api/internal/sourcecontrol/githubhost"
+)
+
+// DeleteRepo ensures ABSENCE rather than performing a removal. Its only caller
+// is the project teardown, which is best-effort and re-runnable, so "there was
+// nothing to delete" has to be reported as success — reporting ErrRepoNotFound
+// made every legitimate re-run log a cleanup error and left callers unable to
+// tell "already clean" from "cleanup broke".
+
+func TestDeleteRepo_DropsTheRowAndTrashesTheWorkspace(t *testing.T) {
+	t.Parallel()
+	repo := newFakeRepoRepo()
+	repo.put(&sourcecontrol.GitRepository{
+		OrgID: "org1", ProjectID: "proj1",
+		RepoURL: "https://github.com/test-org/proj1.git",
+		Status:  "ready", RepoSlug: "test-org-proj1",
+	})
+
+	var trashed [3]string
+	var trashCalls int
+	svc := sourcecontrol.NewRepoService(repo, githubclient.NewClient(), fakeResolver{}, "private",
+		sourcecontrol.WithWorkspaceTrash(func(_ context.Context, orgID, projectID, repoSlug string) {
+			trashCalls++
+			trashed = [3]string{orgID, projectID, repoSlug}
+		}))
+
+	if err := svc.DeleteRepo(testContext(), "org1", "proj1"); err != nil {
+		t.Fatalf("DeleteRepo: %v", err)
+	}
+	// GetRepo, unlike DeleteRepo, is a lookup: an absent row is ErrRepoNotFound.
+	if _, err := svc.GetRepo(testContext(), "org1", "proj1"); !errors.Is(err, sourcecontrol.ErrRepoNotFound) {
+		t.Fatalf("row survived the delete: %v", err)
+	}
+	if trashCalls != 1 || trashed[0] != "org1" || trashed[1] != "proj1" {
+		t.Errorf("workspace trash: calls=%d args=%v", trashCalls, trashed)
+	}
+}
+
+// TestDeleteRepo_AbsentRowIsSuccess covers both shapes of "nothing to delete":
+// a project whose repo was never provisioned, and a teardown being re-run after
+// an earlier attempt already got this far.
+func TestDeleteRepo_AbsentRowIsSuccess(t *testing.T) {
+	t.Parallel()
+	repo := newFakeRepoRepo()
+	trashCalls := 0
+	svc := sourcecontrol.NewRepoService(repo, githubclient.NewClient(), fakeResolver{}, "private",
+		sourcecontrol.WithWorkspaceTrash(func(context.Context, string, string, string) { trashCalls++ }))
+
+	if err := svc.DeleteRepo(testContext(), "org1", "never-provisioned"); err != nil {
+		t.Fatalf("deleting an absent repo must succeed, got %v", err)
+	}
+	// Nothing was renamed into trash, because there was no slug to rename.
+	if trashCalls != 0 {
+		t.Errorf("workspace trash ran %d times for an absent row, want 0", trashCalls)
+	}
+}
+
+func TestDeleteRepo_IsIdempotent(t *testing.T) {
+	t.Parallel()
+	repo := newFakeRepoRepo()
+	repo.put(&sourcecontrol.GitRepository{
+		OrgID: "org1", ProjectID: "proj1",
+		RepoURL: "https://github.com/test-org/proj1.git",
+		Status:  "ready", RepoSlug: "test-org-proj1",
+	})
+	svc := sourcecontrol.NewRepoService(repo, githubclient.NewClient(), fakeResolver{}, "private")
+
+	for attempt := 1; attempt <= 2; attempt++ {
+		if err := svc.DeleteRepo(testContext(), "org1", "proj1"); err != nil {
+			t.Fatalf("attempt %d: %v", attempt, err)
+		}
+	}
+}

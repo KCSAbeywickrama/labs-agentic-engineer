@@ -37,7 +37,7 @@ import { partitionIssues } from "../../tasks/lib/issueRows";
 import { useProjectStatus } from "../../projects/api/queries";
 import { useBuildRuns, useBuilds } from "../api/queries";
 import { openCycleClaims } from "../lib/milestoneBuckets";
-import { buildCycles, versionIsLive } from "../lib/runView";
+import { buildCycles, isDeliveryRun, versionIsLive } from "../lib/runView";
 import { EarlierSessions } from "./EarlierSessions";
 import { MilestonePanel } from "./MilestonePanel";
 import { RunHistoryList } from "./RunHistoryList";
@@ -74,11 +74,19 @@ export function BuildsPage({
 
   const runs = useBuildRuns(projectName, selectedTag);
   const runList = runs.data?.runs ?? [];
+  // Liveness is asked of EVERY run, not just the ones this page renders: a
+  // revalidation in flight means the version is still moving, and the poll that
+  // keeps this page fresh is keyed on the same predicate (queries.ts).
   const live = versionIsLive(runList);
+  // The runs that delivered the version. A run that only re-judged it has no build
+  // session to show and its verdict lives on the Validation board — leading with one
+  // made this page claim nothing had been dispatched. See isDeliveryRun: the test is
+  // what the run DID, so a revalidation that repaired and rebuilt still belongs here.
+  const deliveryRuns = runList.filter(isDeliveryRun);
   // Newest first, and only the newest can be live — so the head is the run the
   // page leads with and the tail is history.
-  const current = runList[0];
-  const earlier = runList.slice(1);
+  const current = deliveryRuns[0];
+  const earlier = deliveryRuns.slice(1);
 
   // This session's CYCLES. Validation is not one of them, so it is filtered
   // the same way the card filters it.

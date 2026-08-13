@@ -22,6 +22,7 @@ import {
   buildOutcome,
   buildSessionLabel,
   gateDrive,
+  isDeliveryRun,
   isTerminalRun,
   runHold,
   runOriginLabel,
@@ -59,10 +60,11 @@ const run = (over: Partial<MilestoneRunView> = {}): MilestoneRunView => ({
 });
 
 describe("isTerminalRun / versionIsLive", () => {
-  it("names the three terminal states and nothing else", () => {
+  it("names the terminal states and nothing else", () => {
     expect(isTerminalRun("succeeded")).toBe(true);
     expect(isTerminalRun("failed")).toBe(true);
     expect(isTerminalRun("cancelled")).toBe(true);
+    expect(isTerminalRun("blocked")).toBe(true);
     expect(isTerminalRun("waiting")).toBe(false);
     expect(isTerminalRun("running")).toBe(false);
   });
@@ -84,10 +86,60 @@ describe("isTerminalRun / versionIsLive", () => {
   });
 });
 
+describe("isDeliveryRun", () => {
+  type Cycle = MilestoneRunView["cycles"][number];
+  const cycle = (kind: Cycle["kind"]): Cycle => ({
+    id: `cycle-${kind}`,
+    kind,
+    attempts: 1,
+    createdAt: "2026-07-10T10:00:00Z",
+  });
+
+  it("keeps every run that delivered the version", () => {
+    expect(isDeliveryRun(run({ cycles: [cycle("coding")] }))).toBe(true);
+    expect(
+      isDeliveryRun(run({ origin: "incident-adoption", cycles: [cycle("coding")] })),
+    ).toBe(true);
+  });
+
+  // The copy this protects — "No build session was ever dispatched" — is TRUE for a
+  // spec build that died before dispatching, so that run has to stay on the rail.
+  it("keeps a spec build that never dispatched a session", () => {
+    expect(isDeliveryRun(run({ cycles: [] }))).toBe(true);
+  });
+
+  // A run that only re-judged the version has no build session to show, and its
+  // verdict belongs on the Validation board. Leading with one made the page claim
+  // nothing had been dispatched — false, since a validation cycle ran and merged.
+  it("drops a revalidation that only validated", () => {
+    expect(
+      isDeliveryRun(run({ origin: "revalidate", cycles: [cycle("validation")] })),
+    ).toBe(false);
+  });
+
+  // But a revalidation left at the default attempt allowance repairs what it finds:
+  // an issue per failed criterion, then an ordinary coding cycle, then builds. Once
+  // it has done that it IS a build story, so the test is what the run did.
+  it("keeps a revalidation that repaired and rebuilt", () => {
+    expect(
+      isDeliveryRun(
+        run({ origin: "revalidate", cycles: [cycle("validation"), cycle("coding")] }),
+      ),
+    ).toBe(true);
+  });
+});
+
 describe("runStateChip", () => {
   it("gives waiting its own warning tone — that is when cancel matters", () => {
     expect(runStateChip(run({ state: "waiting" }))).toEqual({
       label: "Waiting",
+      tone: "warning",
+    });
+  });
+
+  it("gives blocked a warning tone — quota, not a platform fault", () => {
+    expect(runStateChip(run({ state: "blocked" }))).toEqual({
+      label: "Blocked",
       tone: "warning",
     });
   });
@@ -246,6 +298,8 @@ describe("terminalReasonText", () => {
   it("spells both of the validating phase's reasons", () => {
     expect(terminalReasonText("validation-failed")).toMatch(/validation criteria/);
     expect(terminalReasonText("validation-unreported")).toMatch(/without committing a report/);
+    expect(terminalReasonText("agent-quota-blocked")).toMatch(/maximum number of agent runs/);
+    expect(terminalReasonText("agent-quota-blocked")).toMatch(/Wait for one to finish/);
   });
 
   it("passes an unmapped reason through so it still reaches the user", () => {

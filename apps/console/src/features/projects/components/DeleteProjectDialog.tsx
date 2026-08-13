@@ -44,8 +44,13 @@ interface DeleteProjectDialogProps {
 }
 
 // Confirmation dialog for deleting a project from the listing (#107).
-// Names the GitHub repository that the cascade destroys when the list
-// payload carries one; projects without a repo get generic copy.
+//
+// The copy states what the cascade ACTUALLY does. The remote repository is not
+// part of it — the platform drops its own record and stops tracking the repo,
+// but never deletes it from GitHub — so the dialog names the repo as the thing
+// that SURVIVES rather than the thing that is destroyed. Saying otherwise told
+// users their code was gone when it was not, and hid the reason a project
+// recreated under the same repo name is refused.
 export function DeleteProjectDialog({
   project,
   onClose,
@@ -71,15 +76,20 @@ export function DeleteProjectDialog({
       <DialogTitle>Delete {displayName}?</DialogTitle>
       <DialogContent>
         <DialogContentText>
-          This permanently deletes the project, its deployments, and{" "}
+          This permanently deletes the project, its deployments, and its build
+          history.
+        </DialogContentText>
+        <DialogContentText sx={{ mt: 2 }}>
           {project?.repoUrl ? (
             <>
-              the GitHub repository <strong>{repoDisplayName(project.repoUrl)}</strong>
+              The GitHub repository{" "}
+              <strong>{repoDisplayName(project.repoUrl)}</strong> is kept, with
+              all specs, code and issues. Delete it on GitHub if you want the
+              name freed — a new project cannot reuse it while it exists.
             </>
           ) : (
-            "its GitHub repository"
-          )}{" "}
-          — including all specs and code.
+            "The project's GitHub repository is kept, with all specs, code and issues."
+          )}
         </DialogContentText>
         {deleteProject.isError && (
           <Alert severity="error" sx={{ mt: 2 }}>

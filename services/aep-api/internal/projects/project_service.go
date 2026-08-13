@@ -59,7 +59,28 @@ type Service struct {
 	deprovisioner  resourceDeprovisioner // dependency provisioning teardown; may be nil
 	runReader      milestoneRunRows      // build/deploy stage reads + delete purge (status_stages.go)
 	bindingsReader bindingsReader        // deploy stage: OC release bindings (status_stages.go)
+	runAbandoner   runAbandoner          // run-supervisor teardown on delete; may be nil
 }
+
+// runAbandoner is project_service's narrow consumer port for the run-supervisor
+// half of the delete cascade: it ends the workflows supervising the project's
+// live runs. An app-root adapter over the milestone-run index and the run
+// supervisor satisfies it. Wired via SetRunAbandoner; nil is a documented no-op.
+//
+// It is a SEPARATE port from milestoneRunRows, whose purge deletes rows. Deleting
+// the rows is not what stops a supervisor — nothing reads them back — so the two
+// halves are two different writes to two different systems, and folding the
+// workflow teardown behind a name that says "delete rows" would hide a Temporal
+// call inside a database one.
+type runAbandoner interface {
+	// AbandonProjectRuns ends the supervisor over every live run of the project.
+	// Already-settled runs and milestones that were never supervised are no-ops.
+	AbandonProjectRuns(ctx context.Context, orgID, projectID string) error
+}
+
+// SetRunAbandoner wires the run-supervisor teardown so a project delete stops
+// the workflows supervising its runs. A nil abandoner is a documented no-op.
+func (s *Service) SetRunAbandoner(a runAbandoner) { s.runAbandoner = a }
 
 // resourceDeprovisioner is project_service's narrow consumer port for the
 // dependency-provisioning teardown: on project delete it deprovisions the
@@ -279,21 +300,77 @@ func (s *Service) DeleteProject(ctx context.Context, orgName, projectName string
 		}
 	}
 
-	if err := translateHTTPError(s.client.DeleteProject(ctx, orgName, projectName)); err != nil {
+	// An OC Project that is ALREADY GONE is not a failure of this delete — it is
+	// the state this delete exists to reach. Everything below outlives the OC
+	// Project and has no other exit from the system: the run supervisors, the
+	// repository row, the executions and the run ledger. Aborting here would
+	// strand all four permanently, because the second attempt takes this same
+	// branch and never gets past it — which is exactly how a half-deleted project
+	// keeps a supervisor polling a repository nobody can reach any more.
+	//
+	// Every other OC failure still aborts. A delete that could not REACH
+	// OpenChoreo has established nothing, and tearing down the platform's half of
+	// a project that still exists there would strand the project instead.
+	if err := translateHTTPError(s.client.DeleteProject(ctx, orgName, projectName)); err != nil &&
+		!errors.Is(err, ErrProjectNotFound) {
 		return err
 	}
 
-	// Clean up the git clone
+	// The run SUPERVISORS come down before the things they read do — before the
+	// repository they poll and before the rows they write.
+	//
+	// Nothing else ends a run workflow. Its milestone poll retries forever
+	// (Temporal's default policy is unbounded) against a repository that is about
+	// to stop existing, and its workflow id is keyed on (org, project, milestone)
+	// alone — so a project later created under the SAME NAME collides with it, and
+	// that project's first run is refused as AlreadyStarted and never supervised.
+	// Best-effort, like the rest of the teardown: the project delete has already
+	// been committed upstream and cannot be undone by a failure here.
+	if s.runAbandoner != nil {
+		if err := s.runAbandoner.AbandonProjectRuns(ctx, orgName, projectName); err != nil {
+			slog.ErrorContext(ctx, "failed to abandon run supervisors for project — they will keep polling a deleted repository",
+				"org", orgName, "project", projectName, "error", err)
+		}
+	}
+
+	// Stop the deliveries this project's repo would otherwise keep making.
+	//
+	// The remote survives a project delete, so its webhook survives with it —
+	// and it would go on posting `issues`, `push` and `pull_request` events for a
+	// project the platform has already forgotten. This is the last point at which
+	// it can be removed at all: the hook ID and the repo identity both live on
+	// the repo row that the very next step deletes.
+	//
+	// Best-effort by construction. A webhook left on a repository is untidy, not
+	// dangerous — the event plane resolves every delivery through the repo row
+	// and drops what it cannot place — so it must never be the thing that blocks
+	// a delete from completing.
+	if s.webhookSvc != nil {
+		if err := s.webhookSvc.Unregister(ctx, orgName, projectName); err != nil {
+			slog.ErrorContext(ctx, "failed to unregister webhook — the repo will keep posting deliveries for a deleted project",
+				"org", orgName, "project", projectName, "error", err)
+		}
+	}
+
+	// Drop the platform's own repository record and its workspace clone.
+	//
+	// The REMOTE is deliberately not touched, and that is the one piece of this
+	// teardown that leaves something behind: the GitHub repository survives a
+	// project delete, along with its issues and its milestones. DeleteRepo
+	// announces the URL it is orphaning, which is the last moment anything can
+	// name it. The consequence worth knowing at this call site is that the repo
+	// NAME stays taken — a project recreated under it is refused with
+	// ErrRepoNameConflict until a human intervenes.
 	if s.repoSvc != nil {
 		if err := s.repoSvc.DeleteRepo(ctx, orgName, projectName); err != nil {
 			slog.ErrorContext(ctx, "failed to delete git repo for project", "org", orgName, "project", projectName, "error", err)
 		}
 	}
 
-	// Tasks are GitHub issues (deleted with the repo). The platform-owned
-	// executions rows for the project ARE purged here — they are keyed to the
-	// project and would otherwise orphan (no FK to cascade). Best-effort, like
-	// the repo cleanup.
+	// Tasks are GitHub ISSUES, and they survive with the remote above; nothing
+	// here deletes them. The platform-owned executions rows for the project ARE
+	// purged — they are keyed to the project and would otherwise orphan (no FK to
+	// cascade). Best-effort, like the repo cleanup.
 	if s.execs != nil {
 		if err := s.execs.DeleteByProject(ctx, orgName, projectName); err != nil {
 			slog.ErrorContext(ctx, "failed to purge executions for project", "org", orgName, "project", projectName, "error", err)

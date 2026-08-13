@@ -727,6 +727,25 @@ func (c *Client) UpdateWebhookEvents(ctx context.Context, owner, repo string, cr
 	return c.doJSON(ctx, http.MethodPatch, url, "update webhook events", cred, map[string]any{"events": events}, nil, http.StatusOK)
 }
 
+// DeleteWebhook removes one repo webhook via DELETE
+// /repos/{owner}/{repo}/hooks/{id} — the teardown twin of RegisterWebhook.
+//
+// It is addressed by the hook ID the platform PERSISTED at registration, never
+// by scanning the repo's hooks, so it can only ever remove the delivery this
+// platform installed. A repository commonly carries hooks belonging to other
+// integrations, and a project delete has no business touching them.
+//
+// 404 and 410 are success, exactly like RemoveIssueLabel's 404: the hook is
+// already absent (deleted by hand, or by a previous run of this teardown), which
+// is the desired post-state. 410 is what GitHub answers once a hook has been
+// auto-disabled and reaped after repeated delivery failures — precisely the
+// state an orphaned webhook ends up in.
+func (c *Client) DeleteWebhook(ctx context.Context, owner, repo string, cred secrets.Credential, hookID int64) error {
+	url := fmt.Sprintf(c.apiBase+"/repos/%s/%s/hooks/%d", owner, repo, hookID)
+	return c.doJSON(ctx, http.MethodDelete, url, "delete webhook", cred, nil, nil,
+		http.StatusNoContent, http.StatusNotFound, http.StatusGone)
+}
+
 // GetUser performs GET /user using the credential's token. Returns
 // HTTPStatusError for non-2xx responses so the validator can branch on
 // 401 (revoked) vs 5xx (transient).

@@ -24,48 +24,31 @@ import (
 )
 
 // PhaseUsageRollup returns delivery's whole answer to "what did this org's agent
-// work cost, per project, per SDLC phase" (#291): the sum of both places
-// delivery captures usage.
+// work cost, per project lifetime, per SDLC phase" (#291).
 //
-// There are two because delivery has two dispatch histories:
+// It reads the agent-usage LEDGER and nothing else. That is the design, not an
+// optimisation:
 //
-//   - CYCLES are where agent spend lives now. After the issue-driven flip every
-//     token-burning dispatch is a cycle — coding, fix, conflict, validation.
-//   - EXECUTIONS are the older per-issue funnel's rows. The only kind still
-//     minted is KindProvision, which stands up OpenChoreo resources and runs no
-//     model, so in practice this side contributes nothing today. It is summed
-//     anyway rather than dropped: the column and its capture path are real, and a
-//     rollup that silently ignored a populated table would under-report spend
-//     rather than fail visibly.
+//   - ONE SOURCE. Delivery has two dispatch histories — cycles (where agent spend
+//     lives after the issue-driven flip) and the older funnel's executions — and
+//     both mirror every capture into the ledger. Summing the dispatch rows as well
+//     would count the same tokens twice, so they are not summed at all.
+//   - IT OUTLIVES THE PURGE. The dispatch rows are working state and a project
+//     delete removes them; the ledger is deliberately outside that cascade, so the
+//     Settings → Usage page can still answer for a project that no longer exists —
+//     which is exactly what its `deleted` cards are for.
+//   - IT KEEPS LIFETIMES APART. The result is keyed by contracts.UsageScope, so a
+//     project recreated under a deleted one's name does not inherit its bill.
 //
 // The fold lives HERE, not in the composition root and not in the usage service,
-// because "which dispatch records count, and which phase each belongs to" is
-// delivery's knowledge. Callers see one function with the phase-split shape the
-// usage service already consumes.
-func PhaseUsageRollup(execs ExecutionRepository, cycles RunCycleRepository) func(ctx context.Context, orgID string) (build, validation map[string]contracts.StampedUsage, err error) {
-	return func(ctx context.Context, orgID string) (map[string]contracts.StampedUsage, map[string]contracts.StampedUsage, error) {
-		cycleBuild, cycleValidation, err := cycles.SumUsageByProjectPhase(ctx, orgID)
+// because "which records count, and which phase each belongs to" is delivery's
+// knowledge.
+func PhaseUsageRollup(ledger AgentUsageLedgerRepository) func(ctx context.Context, orgID string) (build, validation map[contracts.UsageScope]contracts.StampedUsage, err error) {
+	return func(ctx context.Context, orgID string) (map[contracts.UsageScope]contracts.StampedUsage, map[contracts.UsageScope]contracts.StampedUsage, error) {
+		build, validation, err := ledger.SumUsageByProjectPhase(ctx, orgID)
 		if err != nil {
-			return nil, nil, fmt.Errorf("delivery: cycle usage rollup: %w", err)
+			return nil, nil, fmt.Errorf("delivery: agent usage rollup: %w", err)
 		}
-		execBuild, execValidation, err := execs.SumUsageByProjectPhase(ctx, orgID)
-		if err != nil {
-			return nil, nil, fmt.Errorf("delivery: execution usage rollup: %w", err)
-		}
-		return mergeStamped(cycleBuild, execBuild), mergeStamped(cycleValidation, execValidation), nil
+		return build, validation, nil
 	}
-}
-
-// mergeStamped folds b into a copy of a, per project. StampedUsage.Add carries
-// the model-agreement and nil-cost semantics, so a project present in only one
-// source keeps its own figures untouched.
-func mergeStamped(a, b map[string]contracts.StampedUsage) map[string]contracts.StampedUsage {
-	out := make(map[string]contracts.StampedUsage, len(a)+len(b))
-	for slug, u := range a {
-		out[slug] = u
-	}
-	for slug, u := range b {
-		out[slug] = out[slug].Add(u)
-	}
-	return out
 }

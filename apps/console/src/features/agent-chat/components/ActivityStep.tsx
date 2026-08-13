@@ -46,8 +46,10 @@ function leafName(path: string): string {
   return path.split("/").at(-1) ?? path;
 }
 
-// A small spinning ring shown while a tool is still running.
-function Spinner() {
+// A small ring: spinning while the tool's body is still streaming, static once
+// it has landed but the bundle has not ruled on it yet. Same ring either way, so
+// the transition reads as "it stopped" rather than as a different thing.
+function Ring({ spinning }: { spinning: boolean }) {
   return (
     <Box
       sx={{
@@ -57,22 +59,36 @@ function Spinner() {
         borderRadius: "50%",
         border: "2px solid",
         borderColor: "divider",
-        borderTopColor: "primary.main",
-        animation: "agentChatSpin 0.7s linear infinite",
-        "@keyframes agentChatSpin": { to: { transform: "rotate(360deg)" } },
+        ...(spinning
+          ? {
+              borderTopColor: "primary.main",
+              animation: "agentChatSpin 0.7s linear infinite",
+              "@keyframes agentChatSpin": { to: { transform: "rotate(360deg)" } },
+            }
+          : {}),
       }}
     />
   );
 }
 
+/**
+ * Three states, because two facts arrive at different times (see `ChatMessage`):
+ * the body is still streaming, the body has landed but the bundle has not ruled
+ * on it, or the verdict is in. The middle one is not cosmetic — a batched step's
+ * first file finishes up to a minute before any result flushes, and painting a
+ * success tick there would claim a write the write-gates may still reject.
+ */
 function StatusGlyph({
   status,
   ok,
 }: {
   status: "streaming" | "done";
-  ok: boolean;
+  // `| undefined` is load-bearing under exactOptionalPropertyTypes: the caller
+  // forwards `msg.ok`, which IS `boolean | undefined` on an unsettled card.
+  ok?: boolean | undefined;
 }) {
-  if (status === "streaming") return <Spinner />;
+  if (status === "streaming") return <Ring spinning />;
+  if (ok === undefined) return <Ring spinning={false} />;
   return ok ? (
     <Check size={14} color="var(--oxygen-palette-success-main, currentColor)" />
   ) : (
@@ -120,7 +136,9 @@ function StepLine({ msg, showFile }: { msg: ToolMessage; showFile: boolean }) {
           </Tooltip>
         )}
       </Stack>
-      {!msg.ok && msg.errorText && (
+      {/* `=== false`, not `!msg.ok`: an unsettled card has no verdict yet, and
+          "no verdict" must never read as "failed". */}
+      {msg.ok === false && msg.errorText && (
         <Typography
           variant="caption"
           color="error"

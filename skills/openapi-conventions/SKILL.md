@@ -12,6 +12,13 @@ metadata:
 Every `service` component gets one spec at
 `specs/design/components/<name>/openapi.yaml`, authored as **OpenAPI 3.0.3**.
 
+**The spec is validated as it lands.** A write to that path is rejected
+(`INVALID_OPENAPI`) unless the document is OpenAPI 3.x with at least one path
+and one operation, and a rejected write changes nothing. So a spec that applied
+cleanly has already passed that check: do not re-validate it with a separate
+tool. Handing your own spec back to a validator as pasted text costs a round
+trip and re-emits the entire document — for a check that already ran.
+
 Coverage is checklist-driven, not vibes: walk the PRD (`specs/requirements/prd.md`) against the
 component's `design.json` responsibility, and give every capability the
 requirements assign to THIS component its resource(s) and every core entity
@@ -90,9 +97,27 @@ security:
   - bearerAuth: []
 ```
 
-On a service the gateway protects, also document the injected `X-User-Id` under
-`parameters` so consumers read it as required-but-injected — the gateway sets it
-from the validated token; a client never sends it.
+On a service the gateway protects, the gateway sets `X-User-Id` from the
+validated token and a client never sends it. Define it once under
+`components/parameters`, then `$ref` it from every **path item's**
+`parameters` — path level, not per operation, so one reference covers every
+method on that path. A definition nothing references is not in the spec:
+
+```yaml
+components:
+  parameters:
+    UserId:
+      name: X-User-Id
+      in: header
+      required: true
+      description: caller identity injected by the gateway from the validated token
+      schema: { type: string }
+paths:
+  /expense-claims/{claimId}:
+    parameters:
+      - $ref: '#/components/parameters/ClaimId'
+      - $ref: '#/components/parameters/UserId'
+```
 
 **Never spec an auth endpoint.** No `/auth/login`, `/auth/register`,
 `/auth/logout`, or any other token-issuance path on any service: the IDP issues

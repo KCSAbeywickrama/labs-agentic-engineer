@@ -70,6 +70,17 @@ type RunCycleRepository interface {
 	// so the first close wins.
 	Finish(ctx context.Context, id, mergeSHA string) (*RunCycle, error)
 
+	// FinishAgentFailed closes a cycle whose agent died without landing a pull
+	// request, recording why. It is the pod-truth watcher's ONE write.
+	//
+	// It is fenced twice — the cycle must be OPEN and must carry NO pull request
+	// — and the second fence is the important one: a pull request means the side
+	// effects landed, so a pod that exits badly afterwards is not evidence
+	// against it. Closing such a cycle here would fence out the very
+	// pull_request webhook that completes the run. Returns (nil, nil) when
+	// either fence rejects, which is the ordinary outcome of a re-tick.
+	FinishAgentFailed(ctx context.Context, id, reason string) (*RunCycle, error)
+
 	// SetValidationVerdict records what one validation ATTEMPT concluded, and the
 	// issue it was dispatched at.
 	//
@@ -101,18 +112,27 @@ type RunCycleRepository interface {
 	ListByRun(ctx context.Context, orgID, runID string) ([]RunCycle, error)
 
 	// ListRecentDispatched returns every cycle that has launched a Job and is
-	// either still open or closed no earlier than `since` — the watcher's claim
-	// set for capturing agent logs.
+	// either still open or closed no earlier than `since` — the JobWatcher's
+	// claim set for pod-truth reads and terminal usage capture.
 	//
 	// It is deliberately NOT "open cycles only": the agent Job exits the moment
 	// it opens its pull request, and the auto-merge that CLOSES the cycle follows
 	// within seconds, so a watcher restricted to open cycles would routinely
-	// arrive after the cycle had closed and capture nothing. The window instead
-	// tracks how long the Job's pod survives (its TTL), which is what actually
-	// bounds the capture.
+	// arrive after the cycle had closed and miss the usage stamp. The window
+	// instead tracks how long the Job's pod survives (its TTL), which is what
+	// actually bounds the pass.
 	//
 	// Unscoped by org on purpose: it drives a platform watcher, not an HTTP read.
 	ListRecentDispatched(ctx context.Context, since time.Time) ([]RunCycle, error)
+
+	// ListOpenCycleIDs returns the ids of the project's cycles that have not
+	// ended — the LIVE set. The agent-component reaper reads it to decide what
+	// it may delete: OpenChoreo registers no health check for a `batch/v1 Job`,
+	// so a Component's own status cannot say whether its pod is still running,
+	// while a cycle row with no ended_at can.
+	//
+	// Org-scoped because it is derived from an already-org-resolved dispatch.
+	ListOpenCycleIDs(ctx context.Context, orgID, projectID string) ([]string, error)
 
 	// DeleteByProject purges a project's cycle records — the project-delete
 	// cascade, paired with MilestoneRunRepository.DeleteByProject so a recreated
@@ -129,16 +149,11 @@ type RunCycleRepository interface {
 	// before the watcher's next tick. Fencing this on ended_at IS NULL would
 	// discard nearly every capture. Idempotent by value: the capture re-derives
 	// the same figures from the same log, so a repeat write is a no-op in effect.
+	//
+	// It also mirrors the capture into the agent-usage LEDGER, which this row's
+	// purge does not reach. The rollup reads the ledger and nothing else, so the
+	// stamp here is the run spine's own copy — not a second source of spend.
 	RecordUsage(ctx context.Context, id string, u contracts.CapturedUsage) error
-
-	// SumUsageByProjectPhase rolls up captured CYCLE usage per project across an
-	// org, split into the build and validation SDLC phases (#291) — delivery's
-	// agent spend, since every token-burning dispatch is a cycle after the
-	// issue-driven flip. Validation cycles are the validation phase; coding, fix
-	// and conflict cycles are the build phase (the UsagePhase* constants). Each map
-	// is keyed by project id; CostUsd sums the frozen per-row stamps and is nil
-	// when no contributing row was stamped.
-	SumUsageByProjectPhase(ctx context.Context, orgID string) (build, validation map[string]contracts.StampedUsage, err error)
 }
 
 type runCycleRepository struct {
@@ -201,6 +216,23 @@ func (r *runCycleRepository) Finish(ctx context.Context, id, mergeSHA string) (*
 		"merge_sha": mergeSHA,
 		"ended_at":  time.Now().UTC(),
 	})
+}
+
+func (r *runCycleRepository) FinishAgentFailed(ctx context.Context, id, reason string) (*RunCycle, error) {
+	res := r.db.WithContext(ctx).
+		Model(&RunCycle{}).
+		Where("id = ? AND ended_at IS NULL AND pr_number = 0", id).
+		Updates(map[string]any{
+			"agent_reason": reason,
+			"ended_at":     time.Now().UTC(),
+		})
+	if res.Error != nil {
+		return nil, res.Error
+	}
+	if res.RowsAffected == 0 {
+		return nil, nil
+	}
+	return r.getByID(ctx, id)
 }
 
 func (r *runCycleRepository) SetValidationVerdict(ctx context.Context, id, verdict string, issue int) (*RunCycle, error) {
@@ -281,6 +313,19 @@ func (r *runCycleRepository) ListRecentDispatched(ctx context.Context, since tim
 	return rows, nil
 }
 
+func (r *runCycleRepository) ListOpenCycleIDs(ctx context.Context, orgID, projectID string) ([]string, error) {
+	var ids []string
+	err := r.db.WithContext(ctx).
+		Model(&RunCycle{}).
+		Where("org_id = ? AND project_id = ? AND ended_at IS NULL", orgID, projectID).
+		Order("created_at ASC").
+		Pluck("id", &ids).Error
+	if err != nil {
+		return nil, err
+	}
+	return ids, nil
+}
+
 func (r *runCycleRepository) DeleteByProject(ctx context.Context, orgID, projectID string) error {
 	return r.db.WithContext(ctx).
 		Where("org_id = ? AND project_id = ?", orgID, projectID).
@@ -301,12 +346,24 @@ func (r *runCycleRepository) RecordUsage(ctx context.Context, id string, u contr
 	if r.stamper != nil {
 		updates["cost_usd"] = stampCapturedCost(r.stamper, u)
 	}
-	// NOT applyOpen: see RecordUsage's contract — a closed cycle is exactly the
-	// case this has to serve.
-	return r.db.WithContext(ctx).
-		Model(&RunCycle{}).
-		Where("id = ?", id).
-		Updates(updates).Error
+	// Both writes commit together or not at all. The ledger entry is copied out of
+	// the row this stamps, and PhaseUsageRollup reads the ledger ALONE — so a
+	// stamped row whose ledger copy failed is spend that exists on the cycle and
+	// is invisible everywhere it is reported. The ledger is bound to the same tx
+	// rather than injected, which is what keeps the two impossible to wire apart.
+	//
+	// Ordering inside the tx is load-bearing: the ledger copies the row, so the
+	// row is stamped first and the INSERT … SELECT reads it uncommitted.
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// NOT applyOpen: see RecordUsage's contract — a closed cycle is exactly the
+		// case this has to serve.
+		if err := tx.Model(&RunCycle{}).
+			Where("id = ?", id).
+			Updates(updates).Error; err != nil {
+			return err
+		}
+		return NewAgentUsageLedgerRepository(tx).RecordCycleUsage(ctx, id)
+	})
 }
 
 // stampCapturedCost prices a capture for a row write (#291): the runner's
@@ -326,77 +383,6 @@ func stampCapturedCost(stamper *modelcost.Stamper, u contracts.CapturedUsage) *f
 		})
 	}
 	return stamper.SumCost(ts)
-}
-
-func (r *runCycleRepository) SumUsageByProjectPhase(ctx context.Context, orgID string) (build, validation map[string]contracts.StampedUsage, err error) {
-	var rows []cyclePhaseUsageRow
-	err = r.db.WithContext(ctx).
-		Model(&RunCycle{}).
-		Select("project_id, "+
-			// Validation is its own phase; every other kind (coding, fix, conflict) is
-			// the build phase. This CASE is where that classification LIVES — see the
-			// UsagePhase* constants.
-			"CASE WHEN kind = ? THEN ? ELSE ? END AS phase, "+
-			"COALESCE(SUM(input_tokens),0) AS input_tokens, "+
-			"COALESCE(SUM(output_tokens),0) AS output_tokens, "+
-			"COALESCE(SUM(cache_read_tokens),0) AS cache_read_tokens, "+
-			"COALESCE(SUM(cache_creation_tokens),0) AS cache_creation_tokens, "+
-			"SUM(cost_usd) AS cost_usd, "+ // NULL when no row is stamped — the #291 semantic
-			// The phase's model id survives only while every contributor THAT SPENT
-			// TOKENS agrees on it — exactly contracts.TokenUsage.Add, which keeps the
-			// model across a zero-token contributor and blanks it on a genuine
-			// disagreement. Hence the CASE: a cycle that captured nothing carries
-			// model_id '' and must not drag a single-model phase to "unknown".
-			// COUNT(DISTINCT …) and MAX(…) both ignore NULL, so those rows drop out.
-			"COUNT(DISTINCT CASE WHEN "+cycleHasTokens+" THEN model_id END) AS models, "+
-			"COALESCE(MAX(CASE WHEN "+cycleHasTokens+" THEN model_id END), '') AS max_model",
-			CycleKindValidation, UsagePhaseValidation, UsagePhaseBuild).
-		Where("org_id = ? AND project_id <> ''", orgID).
-		Group("project_id, phase").
-		// Only phases with real token traffic — a cycle that captured nothing
-		// leaves a 0-token row that must not conjure a phase out of nothing.
-		Having("SUM(input_tokens) + SUM(output_tokens) + SUM(cache_read_tokens) + SUM(cache_creation_tokens) > 0").
-		Scan(&rows).Error
-	if err != nil {
-		return nil, nil, err
-	}
-	build = make(map[string]contracts.StampedUsage)
-	validation = make(map[string]contracts.StampedUsage)
-	for _, row := range rows {
-		u := contracts.TokenUsage{
-			InputTokens:         row.InputTokens,
-			OutputTokens:        row.OutputTokens,
-			CacheReadTokens:     row.CacheReadTokens,
-			CacheCreationTokens: row.CacheCreationTokens,
-		}
-		if row.Models == 1 {
-			u.Model = row.MaxModel
-		}
-		stamped := contracts.StampedUsage{Tokens: u, CostUsd: row.CostUsd}
-		if row.Phase == UsagePhaseValidation {
-			validation[row.ProjectID] = stamped
-		} else {
-			build[row.ProjectID] = stamped
-		}
-	}
-	return build, validation, nil
-}
-
-// cycleHasTokens is the "this row actually spent something" predicate, shared by
-// the model-agreement CASEs so the notion of a contributing row is spelled once.
-const cycleHasTokens = "input_tokens + output_tokens + cache_read_tokens + cache_creation_tokens > 0"
-
-// cyclePhaseUsageRow is the per-(project, phase) aggregate scan shape (#291).
-type cyclePhaseUsageRow struct {
-	ProjectID           string
-	Phase               string
-	InputTokens         int64
-	OutputTokens        int64
-	CacheReadTokens     int64
-	CacheCreationTokens int64
-	CostUsd             *float64
-	Models              int64
-	MaxModel            string
 }
 
 // updateOpen applies a guarded update to a cycle that has not been closed and

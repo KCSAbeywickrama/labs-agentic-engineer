@@ -75,6 +75,10 @@ function json(res: http.ServerResponse, status: number, body: unknown): void {
 
 const FILES_LIST_PATH = /^\/api\/v1\/projects\/([^/]+)\/files$/;
 const FILES_APPLY_PATH = /^\/api\/v1\/projects\/([^/]+)\/files\/apply$/;
+const FILES_BUNDLE_PATH = /^\/api\/v1\/projects\/([^/]+)\/files\/bundle$/;
+// Matched LAST: `bundle` and `apply` are literal segments under what is
+// otherwise a trailing wildcard, so they must be tried first here exactly as the
+// real server's ServeMux prefers a literal over a wildcard.
 const FILE_READ_PATH = /^\/api\/v1\/projects\/([^/]+)\/files\/(.+)$/;
 
 let applyCount = 0;
@@ -127,6 +131,28 @@ export function createMockBff(options: MockBffOptions = {}): http.Server {
           size: f.content.length,
         })),
       );
+    }
+
+    // The seed read: every readable file under `prefix`, at one commit. Mirrors
+    // the real endpoint's shape — a commitSha plus content-bearing entries — so
+    // the client's one-call seed path is exercised for real here.
+    const bundleMatch =
+      req.method === "GET" && url.pathname.match(FILES_BUNDLE_PATH);
+    if (bundleMatch) {
+      if (!token) return json(res, 401, { title: "Unauthorized" });
+      const project = decodeURIComponent(bundleMatch[1] ?? "");
+      const prefix = url.searchParams.get("prefix") ?? "";
+      const files = projects[project] ?? devSpecFiles;
+      return json(res, 200, {
+        commitSha: "mockhead",
+        files: files
+          .filter((f) => f.path.startsWith(prefix))
+          .map((f) => ({
+            path: f.path,
+            content: f.content,
+            sha: mockSha(f.path + f.content),
+          })),
+      });
     }
 
     const readMatch =

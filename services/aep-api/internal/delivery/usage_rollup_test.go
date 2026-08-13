@@ -24,42 +24,21 @@ import (
 	"github.com/wso2/aep/aep-api/internal/contracts"
 )
 
-// fakePhaseUsage is the canned answer either repository's phase-split read
-// returns. Held as a NAMED field rather than embedded: embedding it beside the
-// repository interface would make SumUsageByProjectPhase an ambiguous selector,
-// and the fake would satisfy neither interface.
-type fakePhaseUsage struct {
-	build      map[string]contracts.StampedUsage
-	validation map[string]contracts.StampedUsage
+// fakeLedgerUsage answers the one read the rollup makes. It embeds the
+// repository interface for the verbs the rollup never calls — nil, so calling
+// one panics, which is the point.
+type fakeLedgerUsage struct {
+	AgentUsageLedgerRepository
+	build      map[contracts.UsageScope]contracts.StampedUsage
+	validation map[contracts.UsageScope]contracts.StampedUsage
 	err        error
 }
 
-func (f fakePhaseUsage) result() (map[string]contracts.StampedUsage, map[string]contracts.StampedUsage, error) {
+func (f fakeLedgerUsage) SumUsageByProjectPhase(context.Context, string) (map[contracts.UsageScope]contracts.StampedUsage, map[contracts.UsageScope]contracts.StampedUsage, error) {
 	if f.err != nil {
 		return nil, nil, f.err
 	}
 	return f.build, f.validation, nil
-}
-
-// Each fake embeds its repository interface for the methods the rollup never
-// calls (nil — calling one would panic, which is the point) and answers only
-// the read under test.
-type fakeExecUsage struct {
-	ExecutionRepository
-	usage fakePhaseUsage
-}
-
-func (f fakeExecUsage) SumUsageByProjectPhase(context.Context, string) (map[string]contracts.StampedUsage, map[string]contracts.StampedUsage, error) {
-	return f.usage.result()
-}
-
-type fakeCycleUsage struct {
-	RunCycleRepository
-	usage fakePhaseUsage
-}
-
-func (f fakeCycleUsage) SumUsageByProjectPhase(context.Context, string) (map[string]contracts.StampedUsage, map[string]contracts.StampedUsage, error) {
-	return f.usage.result()
 }
 
 func usd(v float64) *float64 { return &v }
@@ -71,98 +50,64 @@ func stamped(in, out int64, model string, cost *float64) contracts.StampedUsage 
 	}
 }
 
-// The whole point of the rollup: a project's build spend is its cycle spend PLUS
-// any execution spend, not one or the other. Before cycles were summed the build
-// phase read empty for every project, because every agent run is a cycle.
-func TestPhaseUsageRollup_SumsCyclesAndExecutions(t *testing.T) {
-	cycles := fakeCycleUsage{usage: fakePhaseUsage{
-		build:      map[string]contracts.StampedUsage{"shop": stamped(100, 20, "m1", usd(3))},
-		validation: map[string]contracts.StampedUsage{"shop": stamped(10, 2, "m1", usd(1))},
-	}}
-	execs := fakeExecUsage{usage: fakePhaseUsage{
-		build: map[string]contracts.StampedUsage{"shop": stamped(5, 1, "m1", usd(2))},
-	}}
+// TestPhaseUsageRollup_ReadsTheLedgerAndKeepsLifetimesApart pins what the rollup
+// is now: ONE source, handed through with its lifetimes intact.
+//
+// It used to sum two — the cycle rows and the execution rows — and that is
+// exactly what it must not do any more. Both capture surfaces mirror into the
+// ledger, so adding the dispatch rows back in would bill every token twice; and
+// the dispatch rows are purged when a project is deleted, which is how the spend
+// record used to vanish with it.
+//
+// The per-lifetime split is the ledger's, not this function's (it is a GROUP BY,
+// proven against real SQL in the ledger dbtests). What is proven here is that the
+// rollup carries it through instead of folding a slug's two lifetimes together.
+func TestPhaseUsageRollup_ReadsTheLedgerAndKeepsLifetimesApart(t *testing.T) {
+	live := contracts.UsageScope{ProjectID: "shop"}
+	retired := contracts.UsageScope{ProjectID: "shop", Retired: true}
+	ledger := fakeLedgerUsage{
+		build: map[contracts.UsageScope]contracts.StampedUsage{
+			live:    stamped(100, 20, "m1", usd(3)),
+			retired: stamped(900, 90, "m1", usd(50)),
+		},
+		validation: map[contracts.UsageScope]contracts.StampedUsage{
+			live: stamped(10, 2, "m1", usd(1)),
+		},
+	}
 
-	build, validation, err := PhaseUsageRollup(execs, cycles)(context.Background(), "org1")
+	build, validation, err := PhaseUsageRollup(ledger)(context.Background(), "org1")
 	if err != nil {
 		t.Fatalf("rollup: %v", err)
 	}
-	got := build["shop"]
-	if got.Tokens.InputTokens != 105 || got.Tokens.OutputTokens != 21 {
-		t.Fatalf("build tokens = %d/%d, want 105/21", got.Tokens.InputTokens, got.Tokens.OutputTokens)
+	if got := build[live]; got.Tokens.InputTokens != 100 || got.CostUsd == nil || *got.CostUsd != 3 {
+		t.Fatalf("live build = %+v, want the live lifetime's own figures", got)
 	}
-	if got.CostUsd == nil || *got.CostUsd != 5 {
-		t.Fatalf("build cost = %v, want 5", got.CostUsd)
+	if got := build[retired]; got.CostUsd == nil || *got.CostUsd != 50 {
+		t.Fatalf("retired build = %+v, want the deleted lifetime's bill intact", got)
 	}
-	// Validation has no execution contributor — it must pass through untouched
-	// rather than be dropped or zeroed.
-	if v := validation["shop"]; v.CostUsd == nil || *v.CostUsd != 1 || v.Tokens.InputTokens != 10 {
-		t.Fatalf("validation = %+v, want the cycle figures intact", v)
+	// The two must not have been folded into one entry for the slug.
+	if len(build) != 2 {
+		t.Fatalf("build scopes = %d, want 2 (one per lifetime): %+v", len(build), build)
 	}
-}
-
-// A project in only one source keeps its own figures, and the model id survives
-// only while contributors agree — StampedUsage.Add's semantics must not be
-// bypassed by the merge.
-func TestPhaseUsageRollup_DisjointProjectsAndModelDisagreement(t *testing.T) {
-	cycles := fakeCycleUsage{usage: fakePhaseUsage{
-		build: map[string]contracts.StampedUsage{
-			"only-cycles": stamped(7, 3, "m1", usd(1)),
-			"mixed":       stamped(7, 3, "m1", usd(1)),
-		},
-	}}
-	execs := fakeExecUsage{usage: fakePhaseUsage{
-		build: map[string]contracts.StampedUsage{
-			"only-execs": stamped(4, 2, "m2", nil),
-			"mixed":      stamped(1, 1, "m2", usd(1)),
-		},
-	}}
-
-	build, _, err := PhaseUsageRollup(execs, cycles)(context.Background(), "org1")
-	if err != nil {
-		t.Fatalf("rollup: %v", err)
+	// A phase the retired lifetime never spent in stays absent rather than
+	// inheriting the live one's.
+	if _, ok := validation[retired]; ok {
+		t.Fatalf("validation must not invent a retired entry: %+v", validation)
 	}
-	if len(build) != 3 {
-		t.Fatalf("build projects = %d, want 3: %+v", len(build), build)
-	}
-	if u := build["only-cycles"]; u.Tokens.Model != "m1" || u.Tokens.InputTokens != 7 {
-		t.Fatalf("cycle-only project = %+v", u)
-	}
-	// Unstamped stays unstamped: nil cost must not become 0.
-	if u := build["only-execs"]; u.CostUsd != nil {
-		t.Fatalf("exec-only project cost = %v, want nil (unpriced)", u.CostUsd)
-	}
-	if u := build["mixed"]; u.Tokens.Model != "" {
-		t.Fatalf("mixed-model aggregate model = %q, want \"\"", u.Tokens.Model)
+	if got := validation[live]; got.Tokens.InputTokens != 10 {
+		t.Fatalf("live validation = %+v, want the ledger figures intact", got)
 	}
 }
 
-// A failure in either source must surface, not silently under-report spend as a
-// partial total the console would render as authoritative.
-func TestPhaseUsageRollup_PropagatesEitherError(t *testing.T) {
+// A read failure must surface, not silently under-report spend as a partial
+// total the console would render as authoritative.
+func TestPhaseUsageRollup_PropagatesTheLedgerError(t *testing.T) {
 	boom := errors.New("boom")
-	for _, tc := range []struct {
-		name   string
-		execs  fakeExecUsage
-		cycles fakeCycleUsage
-	}{
-		{
-			name:   "cycle source fails",
-			cycles: fakeCycleUsage{usage: fakePhaseUsage{err: boom}},
-		},
-		{
-			name:  "execution source fails",
-			execs: fakeExecUsage{usage: fakePhaseUsage{err: boom}},
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			build, validation, err := PhaseUsageRollup(tc.execs, tc.cycles)(context.Background(), "org1")
-			if !errors.Is(err, boom) {
-				t.Fatalf("err = %v, want boom", err)
-			}
-			if build != nil || validation != nil {
-				t.Fatalf("maps must be nil on error, got %v / %v", build, validation)
-			}
-		})
+	build, validation, err := PhaseUsageRollup(fakeLedgerUsage{err: boom})(context.Background(), "org1")
+	if !errors.Is(err, boom) {
+		t.Fatalf("err = %v, want boom", err)
+	}
+	if build != nil || validation != nil {
+		t.Fatalf("maps must be nil on error, got %v / %v", build, validation)
 	}
 }

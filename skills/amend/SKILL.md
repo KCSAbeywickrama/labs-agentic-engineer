@@ -15,8 +15,7 @@ to resolve. **Scope is the contract**: sections the scope doesn't touch stay
 byte-identical, and story numbers only ever append (they are permanent —
 designs, criteria, and tasks cite them).
 
-The PRD's shape is defined by the start skill's contract — load
-`loadSkillReference("start", "references/prd-contract.md")` before writing.
+The PRD's shape is defined by the `prd-contract` skill — follow it when writing.
 The `grilling` skill owns the question mechanics for every branch below.
 
 ## Add a feature

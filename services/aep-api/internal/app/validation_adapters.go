@@ -52,6 +52,16 @@ func (a validationCriteria) ReadValidationCriteria(ctx context.Context, orgID, p
 	return []byte(fc.Content), true, nil
 }
 
+// HasValidationCriteria satisfies the event plane's ValidationOracle: the same
+// read, reduced to the yes/no the revalidate guard asks. Deliberately does not
+// parse — a malformed oracle still means "there is something here to validate",
+// and refusing on it at the trigger would send the caller a shape error about a
+// file they may not have written. The mint parses, and skips one it cannot use.
+func (a validationCriteria) HasValidationCriteria(ctx context.Context, orgID, projectID string) (bool, error) {
+	_, found, err := a.ReadValidationCriteria(ctx, orgID, projectID)
+	return found, err
+}
+
 // validationCycleLocator adapts the run-cycle repository to validation's
 // CycleLocator port: it resolves a runner's cycle id to its project, org-fenced
 // (GetByIDScoped returns nil for a different org — the tenant fence).

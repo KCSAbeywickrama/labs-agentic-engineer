@@ -19,6 +19,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { testSkillSource, type TestSkill } from "./skill-source.js";
+import type { SkillSource } from "../src/agents/main/skill-source.js";
 import {
   instructions,
   taskPlanInstructions,
@@ -79,6 +80,30 @@ test("eager skills inline resolved bodies into a per-turn block (#335)", () => {
   assert.match(block, /## Skill: a-skill/);
   assert.match(block, /BODY A — secret guidance/);
   assert.doesNotMatch(block, /BODY B/);
+});
+
+/**
+ * `load()` has three states, and a refusal is neither a body nor a missing name.
+ * The design flow inlines `wireframes` and `openapi-conventions`, which an org may
+ * legitimately mark coding-only — a refusal there must cost that one body, not the
+ * turn.
+ */
+test("eager skills: an audience refusal skips like a missing name, never throws", () => {
+  const refusing: SkillSource = {
+    catalog: () => [{ name: "a-skill", description: "does A", hasReferences: false, audience: ["coding"] }],
+    load: (name) => (name === "a-skill" ? { refused: true } : undefined),
+    loadReference: () => undefined,
+  };
+  assert.equal(buildEagerSkillsBlock(refusing, ["a-skill"]), "");
+  // Mixed: the readable body still lands, the refused one is simply absent.
+  const mixed: SkillSource = {
+    catalog: () => refusing.catalog(),
+    load: (name) => (name === "a-skill" ? { refused: true } : SKILLS.load(name)),
+    loadReference: () => undefined,
+  };
+  const block = buildEagerSkillsBlock(mixed, ["a-skill", "b-skill"]);
+  assert.match(block, /## Skill: b-skill/);
+  assert.doesNotMatch(block, /## Skill: a-skill/);
 });
 
 test("eager skills: unknown names skip; nothing resolved → empty string", () => {

@@ -18,6 +18,7 @@ package sourcecontrol
 
 import (
 	"errors"
+	"net/http"
 
 	"github.com/wso2/aep/aep-api/internal/platform/gitfs"
 )
@@ -65,4 +66,56 @@ var (
 // IsRepoNameConflict reports whether err represents a host name-conflict rejection.
 func IsRepoNameConflict(err error) bool {
 	return errors.Is(err, ErrRepoNameConflict)
+}
+
+// GraphQLTypeNotFound is GitHub's machine-readable errors[].type for a node the
+// query could not resolve — how a deleted repository or milestone arrives on
+// the GraphQL surface, which answers 200 with a populated errors[] rather than
+// a 404. Spelled once here because IsPermanent branches on it.
+const GraphQLTypeNotFound = "NOT_FOUND"
+
+// IsPermanent reports whether err is an answer rather than a blip: a failure
+// that repeating the same call cannot change.
+//
+// It exists for the callers that retry on a schedule they do not control —
+// above all the Temporal run supervisor, whose activities retry with the SDK
+// default of "forever". There, a deleted project or a revoked credential turns
+// a one-second failure into an unbounded error storm that buries the cause;
+// the supervisor asks this and stops.
+//
+// Permanent:
+//   - ErrRepoNotFound / ErrIssueNotFound / ErrMilestoneNotFound — the subject
+//     is gone, either from the repo ledger or from the host.
+//   - 404 / 410 — the repository, issue or pull request no longer exists for
+//     this credential.
+//   - 401 — the credential was rejected. Tokens are resolved per REQUEST (see
+//     githubhost.authHeaders), so a short-lived App token has already been
+//     re-minted by the time one arrives: a repeat presents the same rejection.
+//   - GraphQL NOT_FOUND — the 404 of the GraphQL surface.
+//
+// Deliberately NOT permanent, and each for a reason:
+//   - 403, because GitHub answers its SECONDARY RATE LIMIT with one, and that
+//     clears on its own. A permission loss shares the status and will retry
+//     pointlessly; the alternative — parsing the body — is worse, and a run
+//     that stalls visibly on a real 403 is the safer of the two mistakes.
+//   - 5xx and every transport error, which are the blips retries exist for.
+//   - GraphQL RATE_LIMITED, same reason as 403.
+//   - ErrRepoNotReady, which is a state the mirror heals out of.
+func IsPermanent(err error) bool {
+	if err == nil {
+		return false
+	}
+	switch {
+	case errors.Is(err, ErrRepoNotFound),
+		errors.Is(err, ErrIssueNotFound),
+		errors.Is(err, ErrMilestoneNotFound):
+		return true
+	case IsHTTPStatus(err, http.StatusNotFound),
+		IsHTTPStatus(err, http.StatusGone),
+		IsHTTPStatus(err, http.StatusUnauthorized):
+		return true
+	case IsGraphQLType(err, GraphQLTypeNotFound):
+		return true
+	}
+	return false
 }

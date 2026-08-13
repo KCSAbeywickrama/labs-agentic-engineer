@@ -19,17 +19,32 @@ package runread
 import (
 	"context"
 	"fmt"
+	"log/slog"
 )
 
-// Commands is the one write on the run surface: cancel.
+// Commands is the run surface's two writes: cancel a run, and ask a version's
+// acceptance criteria again. Neither decides anything — both resolve the target
+// through the org-scoped read first, then hand off.
 type Commands struct {
-	runs   RunReader
-	cancel RunCanceller
+	runs       RunReader
+	cancel     RunCanceller
+	revalidate Revalidator
+	// reaper stops the cancelled cycle's agent pod by deleting its Component.
+	// nil → the run still settles, nothing is reaped.
+	reaper CycleReaper
 }
 
-// NewCommands wires the command service.
-func NewCommands(runs RunReader, cancel RunCanceller) *Commands {
-	return &Commands{runs: runs, cancel: cancel}
+// NewCommands wires the command service. A nil collaborator leaves its own
+// command answering "not configured" rather than panicking.
+func NewCommands(runs RunReader, cancel RunCanceller, revalidate Revalidator) *Commands {
+	return &Commands{runs: runs, cancel: cancel, revalidate: revalidate}
+}
+
+// WithCycleReaper enables reaping the cancelled run's agent Component. Returns
+// the receiver for chained construction.
+func (c *Commands) WithCycleReaper(r CycleReaper) *Commands {
+	c.reaper = r
+	return c
 }
 
 // Cancel abandons an increment — the only expiry the run's unbounded wait state
@@ -51,5 +66,69 @@ func (c *Commands) Cancel(ctx context.Context, orgID, projectID, runID string) e
 	if row == nil || row.ProjectID != projectID {
 		return ErrRunNotFound
 	}
-	return c.cancel.CancelRun(ctx, row)
+	if err := c.cancel.CancelRun(ctx, row); err != nil {
+		return err
+	}
+	// The signal settles the RUN; this stops the POD. Ordered after the signal
+	// deliberately: if the signal failed nothing was cancelled and the caller
+	// retries, so killing the agent first would abandon a run that is about to
+	// carry on.
+	//
+	// A failed reap does NOT fail the cancel: the run is already stopping, and
+	// the only cost is a component that keeps holding a billing slot until it
+	// is swept — answering "cancel failed" would invite a retry that changes
+	// nothing.
+	if c.reaper != nil {
+		if err := c.reaper.ReapRunCycle(ctx, orgID, row.ProjectID, row.ID); err != nil {
+			slog.WarnContext(ctx, "cancel: could not delete the cycle's agent component; the run is still cancelled",
+				"org", orgID, "project", row.ProjectID, "run", row.ID, "error", err)
+		}
+	}
+	return nil
+}
+
+// Revalidate asks a version's acceptance criteria again, against the system
+// already deployed, and answers with the run that will produce the verdict.
+//
+// This surface's whole job is the RESOLUTION: a `v<N>` tag becomes a milestone
+// number through the platform's own run rows — never by matching titles against
+// GitHub, which are renamable and case-folded — and a version this project has
+// never run is a 404 before anything is started. Every substantive guard (a run
+// already live, work still open, no oracle) belongs to the collaborator that can
+// answer it, and rides back as an error.
+//
+// The title comes from the version's OWN runs rather than being re-read: those
+// rows are what the tag resolved through, so their milestone title is the one
+// GitHub was given at creation, which is what the runner's milestone discovery
+// needs.
+func (c *Commands) Revalidate(ctx context.Context, orgID, projectID, tag string, attempts, ceiling int) (runID string, milestoneNumber int, err error) {
+	if c == nil || c.runs == nil || c.revalidate == nil {
+		return "", 0, fmt.Errorf("runread: revalidate not configured")
+	}
+	number, found, err := c.runs.MilestoneNumberForTag(ctx, orgID, projectID, tag)
+	if err != nil {
+		return "", 0, err
+	}
+	if !found {
+		return "", 0, ErrTagNotFound
+	}
+	rows, err := c.runs.ListByMilestone(ctx, orgID, projectID, number)
+	if err != nil {
+		return "", 0, err
+	}
+	if len(rows) == 0 {
+		// The tag resolved through a run row, so this is unreachable short of a
+		// concurrent purge — and returning "not found" is the honest answer if it is.
+		return "", 0, ErrTagNotFound
+	}
+	id, err := c.revalidate.Revalidate(ctx, orgID, projectID, RevalidateTarget{
+		MilestoneNumber: number,
+		MilestoneTitle:  rows[0].MilestoneTitle,
+		Attempts:        attempts,
+		Ceiling:         ceiling,
+	})
+	if err != nil {
+		return "", 0, err
+	}
+	return id, number, nil
 }

@@ -350,6 +350,25 @@ func (f *fakeIssues) MilestoneIssueCounts(_ context.Context, _, _ string, number
 	return &sourcecontrol.MilestoneIssueCounts{}, nil
 }
 
+// withOpenIssues describes a milestone by each open issue's LABELS and counts it
+// the way the host would — the same discipline withCounts follows, reached
+// directly because a validation issue is a population withCounts cannot express
+// (it takes gates, work and a total, and the validation issue is neither).
+func (f *fakeIssues) withOpenIssues(milestone int, issues ...[]string) *fakeIssues {
+	f.counts[milestone] = hostCounts(issues...)
+	return f
+}
+
+// fakeOracle answers whether the project authored acceptance criteria.
+type fakeOracle struct {
+	has bool
+	err error
+}
+
+func (f *fakeOracle) HasValidationCriteria(_ context.Context, _, _ string) (bool, error) {
+	return f.has, f.err
+}
+
 func (f *fakeIssues) SetIssueMilestone(_ context.Context, _, _ string, number, milestoneNumber int) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -538,6 +557,11 @@ type fakeSupervisor struct {
 	mu      sync.Mutex
 	signals []delivery.RunSignal
 	started []delivery.StartRunRequest
+	// admits is the run store the real supervisor writes to as part of starting a
+	// run. Modelled because a caller that needs the run's id reads it back from
+	// there, and a fake that started nothing would make that read look broken when
+	// it is the one honest signal that nothing started.
+	admits *fakeRuns
 }
 
 func (f *fakeSupervisor) SignalRun(_ context.Context, _ *delivery.MilestoneRun, _ string, payload delivery.RunSignal) error {
@@ -549,8 +573,22 @@ func (f *fakeSupervisor) SignalRun(_ context.Context, _ *delivery.MilestoneRun, 
 
 func (f *fakeSupervisor) StartRun(_ context.Context, req delivery.StartRunRequest) error {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.started = append(f.started, req)
+	f.mu.Unlock()
+	if f.admits == nil {
+		return nil
+	}
+	f.admits.mu.Lock()
+	defer f.admits.mu.Unlock()
+	f.admits.rows = append(f.admits.rows, delivery.MilestoneRun{
+		ID: fmt.Sprintf("run-started-%d", len(f.admits.rows)+1), OrgID: testOrg, ProjectID: testProject,
+		MilestoneNumber: req.MilestoneNumber, MilestoneTitle: req.MilestoneTitle,
+		Origin: req.Origin, State: delivery.RunStateWaiting,
+		// The budgets are SNAPSHOTTED onto the row in production, and the workflow
+		// reads them from there rather than from the request — so a fake that
+		// dropped them would let a test pass while the values never reached the run.
+		CycleCeiling: req.CycleCeiling, ValidationAttempts: req.ValidationAttempts,
+	})
 	return nil
 }
 

@@ -70,6 +70,9 @@ func TestSupervisorIsNilSafe(t *testing.T) {
 	if err := s.CancelRun(context.Background(), &delivery.MilestoneRun{}); err != nil {
 		t.Fatalf("CancelRun on a nil supervisor: %v", err)
 	}
+	if err := s.AbandonRun(context.Background(), testOrg, testProject, testMilepost); err != nil {
+		t.Fatalf("AbandonRun on a nil supervisor: %v", err)
+	}
 }
 
 // TestStartRunRefusesWithoutADispatcher: a run that could dispatch nothing must
@@ -119,6 +122,12 @@ func TestSignalAndCancelAreInertWhileTemporalIsDown(t *testing.T) {
 	}
 	if err := s.CancelRun(context.Background(), row); !errors.Is(err, delivery.ErrTemporalUnavailable) {
 		t.Fatalf("CancelRun error = %v, want ErrTemporalUnavailable", err)
+	}
+	// Abandon reports for the same reason cancel does: a supervisor this could
+	// not reach is still there when the engine comes back, and the project-delete
+	// teardown has to be able to say the workflow outlived its project.
+	if err := s.AbandonRun(context.Background(), testOrg, testProject, testMilepost); !errors.Is(err, delivery.ErrTemporalUnavailable) {
+		t.Fatalf("AbandonRun error = %v, want ErrTemporalUnavailable", err)
 	}
 }
 

@@ -44,6 +44,63 @@ func incidentRun(org, project string, n int, title string) *delivery.MilestoneRu
 	return r
 }
 
+func revalidateRun(org, project string, n int, title string) *delivery.MilestoneRun {
+	r := specRun(org, project, n, title)
+	r.Origin = delivery.RunOriginRevalidate
+	return r
+}
+
+// TestMilestoneRunRepository_OneLiveRunPerMilestone pins the second partial
+// index — the one that makes "only the newest run can be live" true rather than
+// merely assumed.
+//
+// The spec-run mutex cannot express it: it is keyed on (org, project) and
+// narrowed to spec-build, which is a rule about starting a new VERSION. Every
+// other origin sat outside it, so the only guard against a second run on one
+// milestone was a read-then-insert in application code — a check two concurrent
+// requests both pass. The loser's row was then admitted with no workflow behind
+// it (Temporal answers AlreadyStarted on the reused id), and being non-terminal
+// it made LiveRunForMilestone answer forever: every later revalidation of that
+// version refused, citing a run that was never running.
+func TestMilestoneRunRepository_OneLiveRunPerMilestone(t *testing.T) {
+	t.Parallel()
+	db := dbtest.New(t)
+	repo := delivery.NewMilestoneRunRepository(db)
+	ctx := context.Background()
+
+	if ok, _, err := repo.TryAdmit(ctx, specRun("orga", "proj", 1, "v1")); err != nil || !ok {
+		t.Fatalf("TryAdmit(spec) = (%v, %v), want admitted", ok, err)
+	}
+	// A revalidation of the SAME milestone while that run is live — the race the
+	// pre-check narrows but cannot close.
+	if ok, row, err := repo.TryAdmit(ctx, revalidateRun("orga", "proj", 1, "v1")); err != nil || ok {
+		t.Fatalf("TryAdmit(revalidate on a live milestone) = (%v, %+v, %v), want refused", ok, row, err)
+	}
+	// An incident adoption is refused for the same reason: two agents on one
+	// branch is the thing every origin is guarded against.
+	if ok, row, err := repo.TryAdmit(ctx, incidentRun("orga", "proj", 1, "v1")); err != nil || ok {
+		t.Fatalf("TryAdmit(incident on a live milestone) = (%v, %+v, %v), want refused", ok, row, err)
+	}
+	// A DIFFERENT milestone is untouched — the rule is per-milestone, not
+	// per-project, so incident runs still work their own versions concurrently.
+	if ok, _, err := repo.TryAdmit(ctx, incidentRun("orga", "proj", 2, "v2")); err != nil || !ok {
+		t.Fatalf("TryAdmit(other milestone) = (%v, %v), want admitted", ok, err)
+	}
+
+	// Settling frees the milestone: a version can be re-judged after it has
+	// finished, which is the whole point of a revalidation.
+	rows, err := repo.ListByMilestone(ctx, "orga", "proj", 1)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("ListByMilestone = (%d rows, %v), want exactly the one admitted run", len(rows), err)
+	}
+	if _, err := repo.Settle(ctx, rows[0].ID, delivery.RunStateFailed, delivery.RunReasonValidationFailed); err != nil {
+		t.Fatalf("Settle: %v", err)
+	}
+	if ok, _, err := repo.TryAdmit(ctx, revalidateRun("orga", "proj", 1, "v1")); err != nil || !ok {
+		t.Fatalf("TryAdmit(revalidate after settle) = (%v, %v), want admitted", ok, err)
+	}
+}
+
 // TestMilestoneRunRepository_AdmitAndReadBack pins the insert path: a fresh run
 // lands waiting with the default cycle ceiling and zeroed budgets, and reads
 // back through the org-fenced lookup.
@@ -119,8 +176,12 @@ func TestMilestoneRunRepository_SpecRunMutex(t *testing.T) {
 		t.Fatalf("second active spec run admitted (%+v) — the spec-run mutex is breached", row)
 	}
 
-	// An incident-adoption run on another milestone runs concurrently.
-	ok, incident, err := repo.TryAdmit(ctx, incidentRun("orga", "proj", 1, "v1"))
+	// An incident-adoption run on another milestone runs concurrently. The
+	// milestone must DIFFER from the spec run's: this said "another milestone" and
+	// passed the spec run's own, which nothing caught while the only index was
+	// keyed on (org, project). One live run per milestone is now enforced, so the
+	// case the comment always described is the case it now exercises.
+	ok, incident, err := repo.TryAdmit(ctx, incidentRun("orga", "proj", 5, "v5"))
 	if err != nil || !ok || incident == nil {
 		t.Fatalf("TryAdmit(incident) = (%v, %+v, %v), want admitted alongside the spec run", ok, incident, err)
 	}

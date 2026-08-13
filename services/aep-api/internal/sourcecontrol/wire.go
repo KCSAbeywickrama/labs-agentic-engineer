@@ -325,11 +325,9 @@ func (e *GraphQLError) Error() string {
 // IsGraphQLType reports true when err is a GraphQLError carrying at least one
 // error of the given machine-readable type (e.g. "NOT_FOUND", "RATE_LIMITED").
 //
-// Retained infra, not a phase leftover: the milestone predicate already
-// surfaces *GraphQLError, but no caller branches on its type yet (the plan path
-// recovers a duplicate milestone through REST's 422 instead).
-//
-//deadcode:keep the typed discriminator for the GraphQL seam — see above.
+// This is the discriminator IsPermanent branches on: the milestone predicate is
+// a GraphQL call, so a deleted repository reaches the run supervisor as a
+// NOT_FOUND entry here rather than as an HTTP 404.
 func IsGraphQLType(err error, typ string) bool {
 	var ge *GraphQLError
 	if !errors.As(err, &ge) {

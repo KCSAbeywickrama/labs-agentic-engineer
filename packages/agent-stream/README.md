@@ -20,6 +20,27 @@ diverge between implementations. The package has **zero server-side dependencies
 | `componentDesignJsonSchema()`, `planTaskJsonSchema()`, `updateTaskJsonSchema()` | the schemas as JSON Schema, for the Go BFF |
 | `streamTurn(baseUrl, id, body, { headers })` | the reference SSE reader (transport-only; caller supplies auth + key headers) |
 
+## Write gates
+
+Every write through `FileBundle` is gated by artifact kind, and a rejected write
+leaves the bundle **byte-for-byte unchanged** — the tool result carries a
+self-correctable error instead, so the model fixes it in the same turn:
+
+| Path | Gate | Code |
+|---|---|---|
+| `*.yaml` / frontmatter | parse-only YAML reparse | `INVALID_YAML` |
+| `components/*/design.json` | `checkComponentDesign` (JSON + schema + `name` = directory) | `INVALID_JSON`, `SCHEMA_VIOLATION` |
+| `wireframes.dsl` | flow-dialect syntax (invalid lines would be silently dropped) | `INVALID_DSL` |
+| `components/*/openapi.yaml` | OpenAPI 3.x, has paths, has operations | `INVALID_OPENAPI` |
+
+The OpenAPI gate deliberately matches the coverage of the platform's
+`validate_openapi_spec` MCP tool — which is itself purely structural — so
+validating a spec no longer costs a round trip. That tool takes the document as a
+string, so an agent asking about a file it had just written had to retype the
+whole thing as tool input (measured: 4.1k output tokens and 28.9s for a 13KB
+spec). A `dependencies/<name>.openapi.yaml` is exempt: those are third-party
+documents recorded as-is.
+
 ## Published JSON Schema
 
 The Zod schemas are published as JSON Schema so the Go BFF validates against the

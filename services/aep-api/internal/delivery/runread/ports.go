@@ -78,11 +78,11 @@ type ProjectBuildLister interface {
 	ListProjectBuildRuns(ctx context.Context, orgID, projectID string) ([]delivery.MergeBuild, error)
 }
 
-// CycleLogReader is one cycle's agent activity — the captured snapshot once the
-// cycle's Job is terminal, the live pod tail before that. Satisfied by
+// CycleLogReader is one cycle's agent activity — live OpenChoreo pod logs while
+// the Component exists, then the observability archive while it is retained, or
+// a synthetic unavailable line when neither can answer. Satisfied by
 // codingagent.AgentProgressReader, reached as a port because that is a sibling
-// slice and because a boot without the cluster-gateway-proxy has no log source
-// at all (nil → the stream carries cycles and no lines).
+// slice. nil → the stream carries cycles and no lines.
 type CycleLogReader interface {
 	CycleProgress(ctx context.Context, cycle *delivery.RunCycle, sinceMillis int64) (*contracts.ProgressResponse, error)
 }
@@ -96,4 +96,43 @@ type CycleLogReader interface {
 // cancelled and the caller may retry.
 type RunCanceller interface {
 	CancelRun(ctx context.Context, row *delivery.MilestoneRun) error
+}
+
+// CycleReaper deletes the cancelled run's in-flight agent Component. Satisfied
+// by codingagent.CycleReaper, reached as a port because dispatch and its
+// cleanup belong to that slice.
+//
+// Optional: a boot without the OpenChoreo client cancels without reaping (the
+// run still settles; the leaked component is swept). Cancel never fails on a
+// reap error — see Commands.Cancel.
+type CycleReaper interface {
+	ReapRunCycle(ctx context.Context, orgID, projectID, runID string) error
+}
+
+// RevalidateTarget is the version to re-judge, already resolved to the platform
+// key. The milestone NUMBER is that key; the title rides along because the run
+// row and the runner's own milestone discovery both want it, and this surface
+// has it in hand from the rows it read to resolve the tag.
+//
+// Attempts and Ceiling are pass-through budgets: zero on either means the
+// platform default. One attempt is what makes a revalidation a pure re-check.
+type RevalidateTarget struct {
+	MilestoneNumber int
+	MilestoneTitle  string
+	Attempts        int
+	Ceiling         int
+}
+
+// Revalidator starts a fresh run that asks a version's acceptance criteria
+// again, against the system already deployed. Satisfied by the event plane's
+// Revalidate.
+//
+// It is a port for the same reason RunCanceller is: the decision needs GitHub
+// (is there open work?) and the project repo (is there an oracle?), and this
+// package touches neither — a read model that reached GitHub could no longer be
+// polled for free, which is the property its whole design rests on. So the
+// handler resolves the tag through the run rows it already reads, and every
+// guard lives beside the collaborator that answers it.
+type Revalidator interface {
+	Revalidate(ctx context.Context, orgID, projectID string, target RevalidateTarget) (runID string, err error)
 }

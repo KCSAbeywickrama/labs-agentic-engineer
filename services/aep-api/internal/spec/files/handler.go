@@ -81,6 +81,27 @@ func (h *Handler) ReadFile(ctx context.Context, request gen.ReadFileRequestObjec
 	}), nil
 }
 
+// ReadFileBundle serves the whole-prefix read. It is registered under the
+// LITERAL path segment `bundle`, which sits beneath read-file's trailing
+// wildcard: ServeMux prefers the literal (it matches a strict subset), and no
+// readable file address can collide with it anyway, since every readable path
+// starts with specs/.
+func (h *Handler) ReadFileBundle(ctx context.Context, request gen.ReadFileBundleRequestObject) (gen.ReadFileBundleResponseObject, error) {
+	org := tenant.BoundOrgFromContext(ctx)
+	bundle, err := h.files.Bundle(ctx, org, request.ProjectName, request.Params.Prefix, request.Params.Ref)
+	if err != nil {
+		return nil, mapFilesError(err)
+	}
+	files := make([]gen.FileContent, 0, len(bundle.Files))
+	for _, f := range bundle.Files {
+		files = append(files, gen.FileContent{Path: f.Path, Content: f.Content, Sha: f.SHA})
+	}
+	return gen.ReadFileBundle200JSONResponse(gen.FileBundle{
+		CommitSha: bundle.CommitSHA,
+		Files:     files,
+	}), nil
+}
+
 func (h *Handler) ApplyFiles(ctx context.Context, request gen.ApplyFilesRequestObject) (gen.ApplyFilesResponseObject, error) {
 	org := tenant.BoundOrgFromContext(ctx)
 	if request.Body == nil {

@@ -51,11 +51,24 @@ export type ChatMessage =
       turnId: string;
       /** Correlates the streaming card with its tool-result (== toolCallId). */
       toolCallId: string;
-      /** `streaming` while the tool input is still arriving; `done` on result. */
+      /**
+       * The tool's STREAM lifecycle: `streaming` while its input is still
+       * arriving, `done` once the input stream closed (`tool-input-end`) — for a
+       * file tool the input IS the body, so that is the moment the file is fully
+       * written. Deliberately independent of `ok`: one step can carry several
+       * file writes, and the SDK flushes every result only after the LAST call
+       * in that step, so "this file is finished" and "the bundle accepted it"
+       * happen at different times and cannot share a field.
+       */
       status: "streaming" | "done";
       op: string;
       path: string;
-      ok: boolean;
+      /**
+       * The bundle's verdict, or `undefined` while it is still unknown (input
+       * closed, result not in yet). Never assume a value here: guessing `true`
+       * would show a success tick on a write the gates may still reject.
+       */
+      ok?: boolean;
       errorText?: string;
     }
   | {
@@ -192,9 +205,12 @@ function upsertByToolCallId<R extends "tool" | "question">(
 }
 
 /**
- * Add or update a tool card: a "streaming" card ("Creating <file>") is written
- * the moment the path resolves mid tool-input, then flipped to "done" on the
- * tool-result — same card, no duplicate row.
+ * Add or update a tool card — same card across its whole life, no duplicate row.
+ * Three writes, in order: a "streaming" card ("Creating <file>") the moment the
+ * path resolves mid tool-input; `done` when that input stream closes (the body is
+ * complete); then the verdict when the tool-result arrives. Each write MERGES
+ * onto the previous, so a field set early survives — which is why `ok` is left
+ * unset until the result actually settles it.
  */
 export function upsertToolMessage(
   key: string,

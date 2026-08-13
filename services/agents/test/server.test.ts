@@ -446,7 +446,12 @@ test("workspace turn: the snapshot filter drops non-spec yaml (workload.yaml is 
 test("workspace turn: the snapshot filter admits a stored openapi.yaml (editable, IS in CURRENT STATE)", async () => {
   const root = makeMountRoot({
     [REQUIREMENTS]: "# Req\n",
-    [OPENAPI]: "openapi: 3.0.3\ninfo:\n  title: X\n", // a turn must be able to read back a spec it just stored
+    // A turn must be able to read back a spec it just stored. Complete enough to
+    // clear the openapi.yaml write gate (3.x + a path + an operation) — an edit
+    // against a stub with no paths is rejected on its content, which would say
+    // nothing about the snapshot filter this test is about.
+    [OPENAPI]:
+      'openapi: 3.0.3\ninfo:\n  title: X\n  version: 0.1.0\npaths:\n  /things:\n    get:\n      responses:\n        "200":\n          description: ok\n',
   });
   const { baseUrl, close } = await boot(
     mockModel([

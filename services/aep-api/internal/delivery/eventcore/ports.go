@@ -273,10 +273,25 @@ type RunSignaler interface {
 	SignalRun(ctx context.Context, run *delivery.MilestoneRun, name string, payload delivery.RunSignal) error
 }
 
+// ValidationOracle answers whether a project has authored acceptance criteria.
+// Satisfied by the same criteria reader the validation feature holds, reached as
+// a port because that is a sibling slice.
+//
+// It exists for ONE caller — Revalidate's third guard — and it deliberately asks
+// only the yes/no question rather than reading the oracle: nothing here decides
+// what the criteria mean, it only refuses to start a run that has nothing to
+// validate. That refusal matters because the newest run on a milestone owns the
+// version's verdict, so a run that concluded `skipped` would replace a real
+// answer with "not validated".
+type ValidationOracle interface {
+	HasValidationCriteria(ctx context.Context, orgID, projectID string) (bool, error)
+}
+
 // RunStarter starts a run over a milestone that has work and no live run: the
 // adoption path and the reconcile sweep's backstop. Everything this package
-// starts carries delivery.RunOriginIncidentAdoption — the spec-build origin
-// belongs to the plan path alone.
+// starts BY DETECTION carries delivery.RunOriginIncidentAdoption — the spec-build
+// origin belongs to the plan path alone, and the revalidate origin only ever
+// comes from a human asking (Revalidate).
 //
 // Admission (the run row) and supervision (the workflow) must happen together
 // or a run row exists that nobody is driving, so both live behind this one

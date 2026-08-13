@@ -133,43 +133,34 @@ export function createBffClient(
 
     async fetchSpecFiles(token, projectName) {
       const project = encodeURIComponent(projectName);
-      const headers = { Authorization: `Bearer ${token}` };
-
-      const listRes = await fetchImpl(`${base}/projects/${project}/files`, {
-        headers,
-      });
-      if (!listRes.ok) {
+      // ONE request for the whole seed. This used to be a list followed by a
+      // read per file, which was slow AND wrong: every one of those reads
+      // revalidated the mirror against origin (a network round trip each,
+      // serialized behind the mirror's write lock — a 10-file spec took ~15s and
+      // blew the agents' room-sync timeout), and each resolved the branch tip
+      // independently, so a push landing mid-seed produced a document mixing two
+      // commits with baseline shas to match. The bundle resolves one commit and
+      // reads everything at it. Server-side `prefix` also means the whole repo's
+      // file list — application code included — is no longer shipped here to be
+      // filtered away in JS.
+      const res = await fetchImpl(
+        `${base}/projects/${project}/files/bundle?prefix=${encodeURIComponent(SPECS_PREFIX)}`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      if (!res.ok) {
         throw new Error(
-          `Failed to list spec files for ${projectName} (${listRes.status})`,
+          `Failed to read spec files for ${projectName} (${res.status})`,
         );
       }
-      const metas = ((await listRes.json()) ?? []) as { path: string }[];
-
-      return Promise.all(
-        metas.flatMap((meta) => {
-          // Spec room seeds only specs/ files; the path is kept VERBATIM.
-          if (!meta.path.startsWith(SPECS_PREFIX)) return [];
-          const encoded = meta.path
-            .split("/")
-            .map(encodeURIComponent)
-            .join("/");
-          return [
-            (async (): Promise<SpecFile> => {
-              const res = await fetchImpl(
-                `${base}/projects/${project}/files/${encoded}`,
-                { headers },
-              );
-              if (!res.ok) {
-                throw new Error(
-                  `Failed to read ${meta.path} for ${projectName} (${res.status})`,
-                );
-              }
-              const body = (await res.json()) as { content: string; sha: string };
-              return { path: meta.path, content: body.content, sha: body.sha };
-            })(),
-          ];
-        }),
-      );
+      const body = (await res.json()) as {
+        files?: SpecFile[] | null;
+      };
+      // Paths arrive VERBATIM (full repo paths) — the one doc-key scheme.
+      return (body.files ?? []).map((f) => ({
+        path: f.path,
+        content: f.content,
+        sha: f.sha,
+      }));
     },
 
     async applyFiles(token, projectName, batch) {

@@ -145,6 +145,11 @@ type WebhookOps interface {
 	// "issues" joined the subscription must be PATCHed to add it
 	// (docs/design/tasks-github-native.md §9.2 cutover).
 	UpdateWebhookEvents(ctx context.Context, owner, repo string, cred secrets.Credential, hookID int64, events []string) error
+	// DeleteWebhook removes the hook the platform registered, addressed by the
+	// stored hook ID so no other integration's delivery can be caught by it. A
+	// hook that is already gone (404, or 410 after GitHub reaped a failing one)
+	// is success — the desired post-state is absence.
+	DeleteWebhook(ctx context.Context, owner, repo string, cred secrets.Credential, hookID int64) error
 }
 
 // AppInstallOps is the GitHub-App installation lifecycle + credential-account

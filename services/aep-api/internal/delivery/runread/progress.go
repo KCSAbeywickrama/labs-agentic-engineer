@@ -30,6 +30,11 @@ package runread
 // ONLY A TERMINAL RUN SETTLES THE STREAM. That is not just a UX rule: it is what
 // makes the endpoint testable, because a terminal run's stream is finite and an
 // httptest recorder can capture the whole of it.
+//
+// The one other ending is a run row that STOPS EXISTING — a project delete purges
+// its runs — because such a run never goes terminal and the stream would otherwise
+// tick forever. It settles with a `done` frame carrying no state: the platform has
+// no outcome to report for a row it no longer holds.
 
 import (
 	"context"
@@ -45,8 +50,8 @@ import (
 
 const (
 	// runStreamTick re-derives the run row, its cycles and their new log lines.
-	// Everything it touches is DB or the cluster proxy — never GitHub — so it can
-	// be fast without spending rate.
+	// Everything it touches is DB or OpenChoreo / the observer — never GitHub —
+	// so it can be fast without spending rate.
 	runStreamTick = 2 * time.Second
 	// runStreamKeepAlive paces `: keep-alive` comments so proxies keep an idle
 	// stream open and a dead client is noticed. A run parked in `waiting` emits
@@ -77,9 +82,9 @@ type ProgressService struct {
 	keepAlive time.Duration
 }
 
-// NewProgressService wires the stream service. logs may be nil (a boot without
-// the cluster-gateway-proxy has no log source): the stream then carries cycle
-// frames and settles normally, just with no lines.
+// NewProgressService wires the stream service. logs may be nil (no progress
+// reader wired): the stream then carries cycle frames and settles normally,
+// just with no lines.
 func NewProgressService(runs RunReader, cycles CycleReader, logs CycleLogReader) *ProgressService {
 	return &ProgressService{runs: runs, cycles: cycles, logs: logs, tick: runStreamTick, keepAlive: runStreamKeepAlive}
 }
@@ -159,20 +164,29 @@ func (s *ProgressService) run(ctx context.Context, w io.Writer, flush func(), or
 	cursor := map[string]int64{}         // cycle id → last emitted log ts millis
 
 	// derive re-reads the run row, walks its cycles oldest-first emitting changed
-	// `cycle` frames and new `line` frames, and reports the run's state. Returns
-	// alive=false when the client is gone; a transient read failure keeps the
-	// stream and retries next tick.
-	derive := func(row *delivery.MilestoneRun) (state string, alive bool) {
+	// `cycle` frames and new `line` frames, and reports the run's state.
+	//
+	// Three outcomes, and telling them apart is the whole contract:
+	//   - alive=false — the client is gone, so stop writing.
+	//   - gone=true — the run ROW is gone (a project delete purges its runs).
+	//   - otherwise — state is what the row says, and a transient read failure
+	//     keeps the stream and retries next tick.
+	derive := func(row *delivery.MilestoneRun) (state string, gone, alive bool) {
 		if row == nil {
 			fresh, err := s.runs.GetByIDScoped(ctx, orgID, first.ID)
-			if err != nil || fresh == nil {
-				return "", true
+			if err != nil {
+				// A read that FAILED says nothing about the row. Hold the stream open
+				// and ask again next tick.
+				return "", false, true
+			}
+			if fresh == nil {
+				return "", true, true
 			}
 			row = fresh
 		}
 		cycles, err := s.cycles.ListByRun(ctx, orgID, row.ID)
 		if err != nil {
-			return row.State, true
+			return row.State, false, true
 		}
 		for i := range cycles {
 			c := &cycles[i]
@@ -181,23 +195,42 @@ func (s *ProgressService) run(ctx context.Context, w io.Writer, flush func(), or
 			if lastCycleJSON[c.ID] != string(b) {
 				lastCycleJSON[c.ID] = string(b)
 				if !writeFrame(&runFrame{Type: "cycle", Cycle: &view}) {
-					return row.State, false
+					return row.State, false, false
 				}
 			}
 			if !s.emitLines(ctx, c, i+1, cursor, writeFrame) {
-				return row.State, false
+				return row.State, false, false
 			}
 		}
-		return row.State, true
+		return row.State, false, true
+	}
+
+	// settled reports whether this pass ends the stream, and closes it when it
+	// does. A VANISHED row settles with no state: the platform has no outcome to
+	// report for a row it no longer holds, and `state` on the `done` frame is
+	// contract-defined as the run's TERMINAL state — so naming the last state seen
+	// would render a run that was deleted mid-flight as one that finished in it.
+	// Holding the connection open instead is the failure this replaced: a deleted
+	// run never goes terminal, so the stream ticked forever and the console spun
+	// on a run that was never coming back.
+	settled := func(state string, gone bool) bool {
+		switch {
+		case gone:
+			writeDone("")
+			return true
+		case delivery.IsTerminalRunState(state):
+			writeDone(state)
+			return true
+		}
+		return false
 	}
 
 	// Initial full derive (reuses the pre-stream row — no double read).
-	state, alive := derive(first)
+	state, gone, alive := derive(first)
 	if !alive {
 		return
 	}
-	if delivery.IsTerminalRunState(state) {
-		writeDone(state)
+	if settled(state, gone) {
 		return
 	}
 
@@ -216,14 +249,13 @@ func (s *ProgressService) run(ctx context.Context, w io.Writer, flush func(), or
 			}
 			flush()
 		case <-tick.C:
-			state, alive := derive(nil)
+			state, gone, alive := derive(nil)
 			if !alive {
 				return
 			}
 			// A terminal run has just had its final derive, so everything the run
 			// ever produced is on the wire before the stream closes.
-			if delivery.IsTerminalRunState(state) {
-				writeDone(state)
+			if settled(state, gone) {
 				return
 			}
 		}

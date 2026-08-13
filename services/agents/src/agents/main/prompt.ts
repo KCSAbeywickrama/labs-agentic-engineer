@@ -16,7 +16,12 @@
  * under the License.
  */
 
-import { EMPTY_SKILL_SOURCE, SERVICE_AUDIENCE, type SkillSource } from "./skill-source.js";
+import {
+  EMPTY_SKILL_SOURCE,
+  SERVICE_AUDIENCE,
+  type LoadedSkillBody,
+  type SkillSource,
+} from "./skill-source.js";
 
 /**
  * System instructions for the file-mutating main agent. Layer charter (#373):
@@ -40,6 +45,10 @@ Editing discipline:
 - To replace MOST of a file, removeFile then addFile — do not chain many edits.
 - openapi.yaml is indentation-sensitive: include the exact leading whitespace in both
   oldString and newString. To keep an anchor unique in a repetitive YAML file, include the parent key line.
+- Issue every edit you have already decided on in ONE step, as parallel tool calls — one call per edit.
+  Waiting for each result before deciding the next edit costs a full round trip per edit and buys nothing
+  when the edits are independent. Sequence them only when a later edit's anchor depends on an earlier
+  edit's outcome.
 
 Reacting to tool results (each result tells you the next move):
 - ok:true — applied. status "already-applied" or "noop" means it was already done; do NOT retry, move on.
@@ -51,6 +60,10 @@ Reacting to tool results (each result tells you the next move):
   schema problem, listed in the message); re-emit the WHOLE corrected file with removeFile + addFile.
   skillsPinned (the skills that component's build needs) is a per-component key inside its design.json,
   not project-level frontmatter.
+- INVALID_OPENAPI — an openapi.yaml write was rejected: it is not an OpenAPI 3.x document, or it declares no
+  paths or no operations. Fix what the message names and re-emit the WHOLE corrected document with
+  removeFile + addFile. Every write to an openapi.yaml is checked this way as it lands, so a spec that
+  applied cleanly is already valid — never spend a tool call asking something else to validate it.
 - INVALID_DSL — a wireframes .dsl write was rejected (bad lines listed with line numbers: an unknown
   keyword, a misplaced left/right/table-row, or retired x,y coordinates). Fix EVERY listed line and
   re-emit the WHOLE corrected file with removeFile + addFile — layout comes from structure, never
@@ -183,12 +196,19 @@ export function buildInstructions(skills?: SkillSource): string {
  * system prompt (whose cacheable prefix must stay byte-stable across turns).
  * Unknown names skip silently — the snapshot is the authority; "" when nothing
  * resolves, leaving the prompt byte-identical to an eager-free turn.
+ *
+ * A REFUSAL skips the same way. `load()` has three states (body / `{refused}` /
+ * undefined, see `SkillLoadResult`), and an org is free to mark a skill this
+ * service's audience may not read — `wireframes` and `openapi-conventions` are
+ * pin targets for the coding agent as much as guidance for this one. Narrowing on
+ * `!== undefined` alone let a refusal through to `body.content.trim()` and threw,
+ * failing the whole turn over guidance it could simply have gone without.
  */
 export function buildEagerSkillsBlock(skills: SkillSource | undefined, names?: string[]): string {
   if (!names?.length || !skills) return "";
   const bodies = names
     .map((name) => ({ name, body: skills.load(name) }))
-    .filter((s): s is { name: string; body: { content: string; references: string[] } } => s.body !== undefined);
+    .filter((s): s is { name: string; body: LoadedSkillBody } => s.body !== undefined && "content" in s.body);
   if (bodies.length === 0) return "";
   const blocks = bodies
     .map(({ name, body }) => `## Skill: ${name}\n\n${body.content.trim()}`)

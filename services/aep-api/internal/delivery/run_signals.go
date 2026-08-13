@@ -49,7 +49,9 @@ const (
 	// Cancel is delivered as a SIGNAL rather than a Temporal workflow
 	// cancellation so the run settles its own row and closes its own cycle on
 	// the ordinary code path, with a live context — a cancelled Temporal context
-	// cannot run the activities that record the outcome.
+	// cannot run the activities that record the outcome. Stopping the agent pod
+	// is the HTTP cancel surface's job (runread.CycleReaper → DeleteComponent),
+	// best-effort and immediate — not a Temporal activity.
 	SigRunCancel = "run-cancel"
 )
 
