@@ -80,12 +80,14 @@ export function groupDeploymentCards(
   }
   const cardOf = (d: Deployment): DeploymentCard => {
     const componentName = d.componentName ?? "";
+    // Narrow on the VALUE, not on `has()`: under exactOptionalPropertyTypes a
+    // `Map.get()` inside a `has()` guard is still `string | undefined`, which
+    // cannot be assigned to an optional property.
+    const componentType = componentTypes.get(componentName);
     return {
       componentName,
       displayName: displayNames.get(componentName) ?? componentName,
-      ...(componentTypes.has(componentName) && {
-        componentType: componentTypes.get(componentName),
-      }),
+      ...(componentType ? { componentType } : {}),
       kind: statusKind(d.status),
       deployment: d,
     };
@@ -104,12 +106,11 @@ export function groupDeploymentCards(
   }
   for (const c of componentItems ?? []) {
     if (!inDevelopment.has(c.name)) {
+      const componentType = componentTypes.get(c.name);
       development.push({
         componentName: c.name,
         displayName: displayNames.get(c.name) ?? c.name,
-        ...(componentTypes.has(c.name) && {
-          componentType: componentTypes.get(c.name),
-        }),
+        ...(componentType ? { componentType } : {}),
         kind: "notDeployed",
       });
     }
