@@ -17,9 +17,9 @@
  */
 
 import { Alert, AlertTitle, Typography } from "@wso2/oxygen-ui";
-import { CRITERION_STATE_LABEL, type CriterionTally } from "@aep/ui-validation-view";
+import type { CriterionTally } from "@aep/ui-validation-view";
 import { validationView, type StageTone } from "../../projects/lib/pipeline";
-import { countsFromTally, verdictSentence } from "../lib/verdict";
+import { countsFromTally, verdictCounts, verdictSentence } from "../lib/verdict";
 
 // The verdicts this tile speaks for. `skipped` is absent on purpose: the page
 // answers it with an empty state, because there is no report and no criteria to
@@ -44,17 +44,6 @@ const SEVERITY: Record<StageTone, "success" | "info" | "warning" | "error"> = {
   success: "success",
   error: "error",
 };
-
-/** "35 passed · 5 manual" — the run's outcome in numbers, or "" with no report. */
-export function verdictCounts(tally: CriterionTally | undefined): string {
-  if (!tally) return "";
-  return tally.states
-    .map(
-      (s) =>
-        `${s.count} ${(CRITERION_STATE_LABEL[s.status] ?? s.status).toLowerCase()}`,
-    )
-    .join(" · ");
-}
 
 /**
  * The verdict tile: what the validation run concluded, above the per-criterion
@@ -91,7 +80,7 @@ export function VerdictTile({
   const view = validationView(state);
   if (!view || !TILE_VERDICTS.has(verdict)) return null;
 
-  const counts = verdictCounts(tally);
+  const counts = verdictCounts(tally, state);
   return (
     // No margins: the page's body container owns the gap below and PageTitle owns
     // the space above. A tile that insets itself put the page's one 24px-inset

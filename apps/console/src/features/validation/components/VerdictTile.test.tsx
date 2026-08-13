@@ -21,7 +21,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { CriterionTally } from "@aep/ui-validation-view";
-import { VerdictTile, verdictCounts } from "./VerdictTile";
+import { VerdictTile } from "./VerdictTile";
 
 function tally(
   total: number,
@@ -32,23 +32,6 @@ function tally(
     states: Object.entries(states).map(([status, count]) => ({ status, count })),
   };
 }
-
-describe("verdictCounts", () => {
-  it("reads as a run-on line, lowercased", () => {
-    expect(verdictCounts(tally(40, { fail: 2, pass: 35, manual: 3 }))).toBe(
-      "2 failed · 35 passed · 3 manual",
-    );
-  });
-
-  it("names an unknown status verbatim rather than dropping it", () => {
-    expect(verdictCounts(tally(1, { quarantined: 1 }))).toBe("1 quarantined");
-  });
-
-  it("is empty with no report and with no tally", () => {
-    expect(verdictCounts(tally(40))).toBe("");
-    expect(verdictCounts(undefined)).toBe("");
-  });
-});
 
 describe("VerdictTile", () => {
   it("leads with the shared mapper's label as its headline", () => {

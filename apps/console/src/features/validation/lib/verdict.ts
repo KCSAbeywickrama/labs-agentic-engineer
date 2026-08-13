@@ -25,7 +25,12 @@
 // state announced as a verdict. Sharing the copy is what makes the two agree by
 // construction rather than by whoever edits both.
 
-import { countOf, uncoveredCount, type CriterionTally } from "@aep/ui-validation-view";
+import {
+  countOf,
+  CRITERION_STATE_LABEL,
+  uncoveredCount,
+  type CriterionTally,
+} from "@aep/ui-validation-view";
 
 /**
  * The oracle joined with a report, as the four numbers any of this copy needs.
@@ -82,19 +87,48 @@ function loopTail(state: string): string {
   }
 }
 
+// A newer attempt is in flight, so every number on screen is the PREVIOUS attempt's
+// and has to say so. True for `running` alone: under `awaiting-fix` nothing has
+// re-run, so the last attempt's numbers are still the current state of the system.
+function numbersAreStale(state: string): boolean {
+  return state === "running";
+}
+
 // "2 of 6 criteria failed." — the evidence half, which is the same sentence on both
-// surfaces. The `running` qualifier is the one thing that varies and it is earned:
-// a repeat attempt is in flight, so these numbers are the PREVIOUS one's and would
-// otherwise read as the current state of the system.
+// surfaces.
 //
 // The numbered form is gated on more than one criterion so nothing has to inflect a
 // verb for a count of one, and it carries no deixis ("marked below") because the
 // banner has nothing below it and the page does not always show the report.
 function failureEvidence(counts: ValidationCounts | undefined, state: string): string {
-  const when = state === "running" ? " in the last attempt" : "";
+  const when = numbersAreStale(state) ? " in the last attempt" : "";
   return counts && counts.total > 1 && counts.failed > 0
     ? `${counts.failed} of ${counts.total} criteria failed${when}.`
     : `At least one criterion failed${when}.`;
+}
+
+/**
+ * "35 passed · 5 manual" — the outcome as a per-state tally, or "" with no report.
+ *
+ * Lives beside the sentence rather than in the tile that renders it because it needs
+ * the same staleness marker for the same reason, in the state where a repeat attempt
+ * is running. It is the most standalone-readable thing on the tile, so unmarked it
+ * reads as the current state of a system that has already been fixed.
+ */
+export function verdictCounts(
+  tally: CriterionTally | undefined,
+  state = "",
+): string {
+  if (!tally) return "";
+  const line = tally.states
+    .map(
+      (s) =>
+        `${s.count} ${(CRITERION_STATE_LABEL[s.status] ?? s.status).toLowerCase()}`,
+    )
+    .join(" · ");
+  // Parenthetical, not the sentence's " in the last attempt": this is a list, and a
+  // clause tacked onto a list of numbers reads as another entry in it.
+  return line && numbersAreStale(state) ? `${line} (last attempt)` : line;
 }
 
 /**

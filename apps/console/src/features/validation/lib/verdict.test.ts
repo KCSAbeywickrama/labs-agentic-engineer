@@ -18,7 +18,12 @@
 
 import { describe, expect, it } from "vitest";
 import type { CriterionTally } from "@aep/ui-validation-view";
-import { countsFromTally, verdictSentence, type ValidationCounts } from "./verdict";
+import {
+  countsFromTally,
+  verdictCounts,
+  verdictSentence,
+  type ValidationCounts,
+} from "./verdict";
 
 function counts(over: Partial<ValidationCounts> = {}): ValidationCounts {
   return { total: 40, passed: 0, failed: 0, uncovered: 0, ...over };
@@ -173,5 +178,52 @@ describe("verdictSentence", () => {
   it("is empty for a verdict it does not speak for", () => {
     expect(verdictSentence("skipped", counts({ total: 0 }))).toBe("");
     expect(verdictSentence("", undefined)).toBe("");
+  });
+});
+
+describe("verdictCounts", () => {
+  const t: CriterionTally = {
+    total: 40,
+    states: [
+      { status: "fail", count: 2 },
+      { status: "pass", count: 35 },
+      { status: "manual", count: 3 },
+    ],
+  };
+
+  it("reads as a run-on line, lowercased", () => {
+    expect(verdictCounts(t)).toBe("2 failed · 35 passed · 3 manual");
+  });
+
+  // The tally is the most standalone-readable thing on the tile, so in the one state
+  // where a newer attempt is already running it has to carry the same staleness the
+  // sentence above it does — unmarked it reads as the current state of a system that
+  // has since been fixed. Parenthetical rather than the sentence's clause: a clause
+  // tacked onto a list of numbers reads as another entry in the list.
+  it("marks the numbers as the last attempt's while a repeat attempt runs", () => {
+    expect(verdictCounts(t, "running")).toBe(
+      "2 failed · 35 passed · 3 manual (last attempt)",
+    );
+  });
+
+  // Nothing has re-run under `awaiting-fix`, so these numbers ARE the current state.
+  it("leaves the numbers unmarked in every other state", () => {
+    for (const state of ["awaiting-fix", "failed", "passed", ""]) {
+      expect(verdictCounts(t, state), `${state} marked its counts`).toBe(
+        "2 failed · 35 passed · 3 manual",
+      );
+    }
+  });
+
+  it("names an unknown status verbatim rather than dropping it", () => {
+    expect(verdictCounts({ total: 1, states: [{ status: "quarantined", count: 1 }] })).toBe(
+      "1 quarantined",
+    );
+  });
+
+  it("is empty with no report and with no tally — marked or not", () => {
+    expect(verdictCounts({ total: 40, states: [] })).toBe("");
+    expect(verdictCounts({ total: 40, states: [] }, "running")).toBe("");
+    expect(verdictCounts(undefined, "running")).toBe("");
   });
 });
