@@ -19,6 +19,8 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -27,8 +29,8 @@ import (
 )
 
 var (
-	secretImportPath  string
-	secretImportValue string
+	secretImportPath      string
+	secretImportValueFile string
 )
 
 var secretImportCmd = &cobra.Command{
@@ -39,20 +41,41 @@ var secretImportCmd = &cobra.Command{
 The secret is stored at secret/data/<path> with key "value", matching the
 layout that ExternalSecrets expects when syncing AEP platform secrets.
 
+The secret value is read from stdin (masked) by default. For non-interactive
+use, supply --value-file pointing to a file containing the secret.
+
 Example:
-  aep platform secret import --path aep/anthropic-api-key --value sk-ant-...`,
+  aep platform secret import --path aep/anthropic-api-key
+  aep platform secret import --path aep/anthropic-api-key --value-file /run/secrets/key`,
 	RunE: runSecretImport,
 }
 
 func init() {
 	secretCmd.AddCommand(secretImportCmd)
 	secretImportCmd.Flags().StringVar(&secretImportPath, "path", "", "Secret path under secret/data/ (e.g. aep/anthropic-api-key)")
-	secretImportCmd.Flags().StringVar(&secretImportValue, "value", "", "Secret value to write")
+	secretImportCmd.Flags().StringVar(&secretImportValueFile, "value-file", "", "File containing the secret value (for non-interactive use)")
 	_ = secretImportCmd.MarkFlagRequired("path")
-	_ = secretImportCmd.MarkFlagRequired("value")
 }
 
 func runSecretImport(cmd *cobra.Command, args []string) error {
+	var value string
+	if secretImportValueFile != "" {
+		b, err := os.ReadFile(secretImportValueFile)
+		if err != nil {
+			return fmt.Errorf("read value file: %w", err)
+		}
+		value = strings.TrimSpace(string(b))
+	} else {
+		v, err := readMaskedInput("Secret value")
+		if err != nil {
+			return fmt.Errorf("read secret value: %w", err)
+		}
+		value = v
+	}
+	if value == "" {
+		return fmt.Errorf("secret value must not be empty")
+	}
+
 	ctx := context.Background()
 
 	pfCmd, err := openbao.PortForward(ctx, ocOpenBaoNamespace, ocOpenBaoRelease, kubeconfig)
@@ -76,7 +99,7 @@ func runSecretImport(cmd *cobra.Command, args []string) error {
 	}
 
 	if _, err := openbao.Must(ctx, "PUT", baseURL, token, "/v1/secret/data/"+secretImportPath, map[string]interface{}{
-		"data": map[string]interface{}{"value": secretImportValue},
+		"data": map[string]interface{}{"value": value},
 	}); err != nil {
 		return fmt.Errorf("write secret/data/%s: %w", secretImportPath, err)
 	}
