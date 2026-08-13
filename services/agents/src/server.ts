@@ -59,6 +59,7 @@ import {
 import { composeInstruction, eagerSkillsFor, toolsetFor } from "./prompts/turn.js";
 import type { ConversationStore } from "./store/conversation-store.js";
 import { runConversationTurn, TurnGuard, ConcurrentTurnError } from "./conversation/run-conversation-turn.js";
+import { projectDisplayHistory } from "./conversation/display-history.js";
 import { joinRoom, type RoomPeer } from "./collab/room-peer.js";
 import type { SkillSource } from "./agents/main/skill-source.js";
 import { readSnapshot, loadSkillsFromSnapshot } from "./conversation/load-workspace.js";
@@ -90,6 +91,17 @@ function isMcpConfig(v: unknown): v is McpConfig {
   if (typeof v !== "object" || v === null) return false;
   const c = v as Record<string, unknown>;
   return typeof c.url === "string" && c.url !== "" && typeof c.token === "string" && c.token !== "";
+}
+
+/** Runtime guard for an untrusted `journal` value (#463). */
+function isJournal(v: unknown): v is { text: string; author?: string } {
+  if (typeof v !== "object" || v === null) return false;
+  const j = v as Record<string, unknown>;
+  return (
+    typeof j.text === "string" &&
+    j.text.trim() !== "" &&
+    (j.author === undefined || typeof j.author === "string")
+  );
 }
 
 function startSSE(res: Response): void {
@@ -144,6 +156,7 @@ export function createApp(deps: CreateAppDeps): Express {
       skills?: unknown;
       toolset?: unknown;
       mcp?: unknown;
+      journal?: unknown;
       collab?: unknown;
       webSearch?: unknown;
       eagerSkills?: unknown;
@@ -207,6 +220,7 @@ export function createApp(deps: CreateAppDeps): Express {
     // read the files and the lazy skill source from the mount.
     let files: Record<string, string>;
     let skillSource: SkillSource;
+    let turnId: string;
     try {
       const ws = resolveWorkspace({
         conversationIdParam: id,
@@ -216,6 +230,7 @@ export function createApp(deps: CreateAppDeps): Express {
       });
       files = readSnapshot(ws.snapshotDir);
       skillSource = loadSkillsFromSnapshot(ws.skillsSnapshotDir);
+      turnId = ws.turnId;
     } catch (err) {
       if (err instanceof WorkspaceRefError) {
         res.status(err.status).json({ error: err.message });
@@ -242,6 +257,17 @@ export function createApp(deps: CreateAppDeps): Express {
         return;
       }
       mcp = body.mcp;
+    }
+
+    // journal (#463): the turn's display record — raw client-sent text + acting
+    // user. Optional (older callers/evals journal nothing); malformed → clean 400.
+    let journal: { text: string; author?: string } | undefined;
+    if (body.journal !== undefined) {
+      if (!isJournal(body.journal)) {
+        res.status(400).json({ error: "journal must be { text: string, author?: string }" });
+        return;
+      }
+      journal = body.journal;
     }
 
     // collab (optional, #86 phase 4): a room-scoped turn. The room replaces
@@ -343,6 +369,7 @@ export function createApp(deps: CreateAppDeps): Express {
         skillSource,
         ...(toolset ? { toolset } : {}),
         ...(mcp ? { mcp } : {}),
+        ...(journal ? { journal: { ...journal, kind: turn.kind, turnId } } : {}),
         ...(eagerSkills ? { eagerSkills } : {}),
         webSearch: body.webSearch === true,
         ...(roomPeer ? { collabPeer: roomPeer } : {}),
@@ -388,10 +415,13 @@ export function createApp(deps: CreateAppDeps): Express {
       res.status(404).json({ error: "conversation not found" });
       return;
     }
-    // Raw ModelMessage[] — the UI projects tool parts to Changes client-side (§9).
+    // Display projection (#463): user rows carry the journal's raw client-sent
+    // text + author instead of the composed model prompt; assistant/tool rows
+    // pass through raw — the UI projects their text, question tool-calls, and
+    // Changes client-side (§9).
     res.json({
       status: conv.status,
-      messages: conv.messages,
+      messages: projectDisplayHistory(conv),
       createdAt: conv.createdAt,
       updatedAt: conv.updatedAt,
     });

@@ -65,7 +65,8 @@ type turnJob struct {
 	nsConversationID string            // namespaced agents-service id
 	turn             agentsvc.TurnSpec // what this turn is FOR (the agents service composes the text)
 	target           string            // spec-bundle path this turn should write to, when pinned
-	summary          string            // raw user instruction (feed line subject)
+	summary          string            // raw user instruction (feed line subject + journal display, #463)
+	author           string            // acting user's display identity (journal attribution; "" = unknown)
 	repoRef          sourcecontrol.RepoRef
 	baseRef          string
 	skillsRef        string
@@ -125,6 +126,20 @@ func (s *Service) runTurn(ctx context.Context, job turnJob) {
 // SAME condition. A plain chat turn with no room does not qualify.
 func designOrCollabTurn(job turnJob) bool {
 	return job.flow == "design" || job.collabRoomID != ""
+}
+
+// journalFor is the turn's display record (#463): the raw client-sent
+// instruction — exactly what the sender's UI rendered as the user bubble —
+// plus the acting user. The agents service stores it beside the transcript;
+// its get-conversation read serves it for user rows so the composed prompt
+// never reaches a browser. A blank instruction (never sent by real clients)
+// journals nothing rather than an empty bubble.
+func journalFor(job turnJob) *agentsvc.JournalBlock {
+	text := strings.TrimSpace(job.summary)
+	if text == "" {
+		return nil
+	}
+	return &agentsvc.JournalBlock{Text: text, Author: job.author}
 }
 
 // mcpForTurn mints the per-turn MCP discovery block for design-generation turns
@@ -193,6 +208,7 @@ func (s *Service) executeTurn(ctx context.Context, job turnJob) TurnTerminal {
 		MCP:                    s.mcpForTurn(ctx, job),
 		WebSearch:              designOrCollabTurn(job),
 		Collab:                 collab,
+		Journal:                journalFor(job),
 	})
 	if err != nil {
 		slog.WarnContext(ctx, "genai: turn dispatch failed", "turn", job.turnID, "error", err)

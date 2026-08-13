@@ -477,6 +477,15 @@ export interface TurnRequest {
    */
   mcp?: McpConfig;
   /**
+   * The turn's display record (#463): the raw client-sent instruction (exactly
+   * what the sender's UI rendered as the user bubble) plus a best-effort acting
+   * user. Journaled beside the transcript and served for user rows on the
+   * get-conversation read — never woven into the model prompt. Omitted (older
+   * callers, evals) → no journal entry; the read falls back to the raw stored
+   * message for that turn.
+   */
+  journal?: { text: string; author?: string };
+  /**
    * Room-scoped turn (#86 phase 4): join this collab room as a live Yjs peer,
    * read files from the doc, apply ops to the doc, commit nothing. Omitted →
    * the committed-truth snapshot turn (byte-identical to today).

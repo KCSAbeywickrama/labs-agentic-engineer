@@ -29,7 +29,7 @@
  */
 
 import type { ModelMessage } from "ai";
-import type { Conversation, ConversationStore } from "./conversation-store.js";
+import type { Conversation, ConversationStore, TurnJournalEntry } from "./conversation-store.js";
 
 /** The subset of a `pg.Pool`/`pg.Client` this store uses. */
 export interface Queryable {
@@ -39,20 +39,27 @@ export interface Queryable {
 const CREATE_TABLE = `CREATE TABLE IF NOT EXISTS conversations (
   id text PRIMARY KEY,
   messages jsonb NOT NULL,
+  turns jsonb NOT NULL DEFAULT '[]',
   status text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 )`;
 
-const SELECT_ONE = `SELECT id, messages, status, created_at, updated_at
+// Pre-journal deployments created the table without `turns` (#463); CREATE
+// TABLE IF NOT EXISTS never adds a column, so bootstrap alters idempotently.
+const ADD_TURNS_COLUMN = `ALTER TABLE conversations
+  ADD COLUMN IF NOT EXISTS turns jsonb NOT NULL DEFAULT '[]'`;
+
+const SELECT_ONE = `SELECT id, messages, turns, status, created_at, updated_at
   FROM conversations WHERE id = $1`;
 
 // created_at is untouched on conflict (store-authoritative first-seen); only the
-// messages/status/updated_at advance.
-const UPSERT = `INSERT INTO conversations (id, messages, status, created_at, updated_at)
-  VALUES ($1, $2::jsonb, $3, now(), now())
+// messages/turns/status/updated_at advance.
+const UPSERT = `INSERT INTO conversations (id, messages, turns, status, created_at, updated_at)
+  VALUES ($1, $2::jsonb, $3::jsonb, $4, now(), now())
   ON CONFLICT (id) DO UPDATE
     SET messages = EXCLUDED.messages,
+        turns = EXCLUDED.turns,
         status = EXCLUDED.status,
         updated_at = now()`;
 
@@ -66,9 +73,19 @@ function asDate(value: unknown): Date {
 
 /** jsonb comes back already parsed by node-postgres; timestamptz comes back as a Date. */
 function rowToConversation(row: Record<string, unknown>): Conversation {
+  const turns = ((row.turns ?? []) as Array<Record<string, unknown>>).map(
+    (t): TurnJournalEntry => ({
+      turnId: String(t.turnId ?? ""),
+      kind: String(t.kind ?? ""),
+      text: String(t.text ?? ""),
+      ...(t.author ? { author: String(t.author) } : {}),
+      createdAt: asDate(t.createdAt),
+    }),
+  );
   return {
     id: String(row.id),
     messages: (row.messages ?? []) as ModelMessage[],
+    turns,
     status: row.status as Conversation["status"],
     createdAt: asDate(row.created_at),
     updatedAt: asDate(row.updated_at),
@@ -81,6 +98,7 @@ export class PostgresConversationStore implements ConversationStore {
   /** Idempotent schema bootstrap; safe to call on every startup. */
   async init(): Promise<void> {
     await this.db.query(CREATE_TABLE);
+    await this.db.query(ADD_TURNS_COLUMN);
   }
 
   async get(id: string): Promise<Conversation | null> {
@@ -90,7 +108,7 @@ export class PostgresConversationStore implements ConversationStore {
   }
 
   async save(c: Conversation): Promise<void> {
-    await this.db.query(UPSERT, [c.id, JSON.stringify(c.messages), c.status]);
+    await this.db.query(UPSERT, [c.id, JSON.stringify(c.messages), JSON.stringify(c.turns), c.status]);
   }
 
   /** Delete rows whose `updated_at` is older than `ttlMs`. Returns the count purged. */

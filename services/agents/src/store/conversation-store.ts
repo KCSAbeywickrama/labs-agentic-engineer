@@ -28,6 +28,25 @@
 
 import type { ModelMessage } from "ai";
 
+/**
+ * One turn's display record (#463): what the CLIENT sent, verbatim, plus who
+ * sent it — the source the get-conversation read serves for user rows, so the
+ * composed model prompt (skills, file dumps, framing) never reaches a browser.
+ * Journaled beside the transcript, never inside it: `messages` is the model's
+ * memory and the prompt-cache prefix, and its bytes must not change.
+ */
+export interface TurnJournalEntry {
+  /** The BFF-minted turn id (WorkspaceRef.turnId). */
+  turnId: string;
+  /** The TurnSpec kind the request declared (chat | flow | start | plan). */
+  kind: string;
+  /** The raw client-sent instruction — exactly what the sender's UI rendered. */
+  text: string;
+  /** Best-effort display identity of the acting user; absent for M2M callers. */
+  author?: string;
+  createdAt: Date;
+}
+
 export interface Conversation {
   /** Caller-supplied id (the BFF owns its id namespace). */
   id: string;
@@ -36,6 +55,13 @@ export interface Conversation {
    * (the wire is raw StreamPart, runTurn is ModelMessage-native), append-only.
    */
   messages: ModelMessage[];
+  /**
+   * The turn journal (#463), one entry per completed turn, in turn order. A
+   * turn appends exactly one user message to `messages`, so the nth user
+   * message pairs with the nth entry; pre-journal turns simply have no entry
+   * (the read path falls back to the raw message for those).
+   */
+  turns: TurnJournalEntry[];
   /** `awaiting-human` = the turn ended on a HITL question call (ask_question / ask_questions). */
   status: "active" | "awaiting-human" | "done";
   /** Store-owned timestamps. */

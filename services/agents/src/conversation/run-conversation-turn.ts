@@ -91,7 +91,7 @@ const DIVERGENCE_NOTE =
 
 function freshConversation(id: string): Conversation {
   const now = new Date(); // store re-stamps on save; this is the lazy-create placeholder
-  return { id, messages: [], status: "active", createdAt: now, updatedAt: now };
+  return { id, messages: [], turns: [], status: "active", createdAt: now, updatedAt: now };
 }
 
 /**
@@ -175,6 +175,13 @@ export interface RunConversationTurnInput {
    * evals) → the manifest usage carries `model: ""`.
    */
   modelId?: string;
+  /**
+   * The turn's journal entry (#463): the raw client-sent instruction + acting
+   * user, appended to `conv.turns` alongside the transcript in the same save —
+   * the display source the get-conversation read serves for user rows. Absent
+   * (older callers, evals) → no entry; the read falls back to the raw message.
+   */
+  journal?: { kind: string; text: string; author?: string; turnId: string };
   store: ConversationStore;
   guard: TurnGuard;
   onEvent: (p: StreamPart) => void;
@@ -318,7 +325,13 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
       );
     }
 
-    // 7. persist the whole aggregate (history is append-only)
+    // 7. persist the whole aggregate (history is append-only). The journal
+    //    entry (#463) commits in the same save as the transcript it describes:
+    //    a failed turn persists neither, so the nth-user-message ↔ nth-entry
+    //    pairing the read path relies on can never drift.
+    if (input.journal) {
+      conv.turns = [...(conv.turns ?? []), { ...input.journal, createdAt: new Date() }];
+    }
     await input.store.save(conv);
 
     // 8. terminal manifest (D14) — emitted LAST, only on full success (any
