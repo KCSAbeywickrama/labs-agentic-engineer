@@ -366,16 +366,21 @@ func provisionOpenBao(ctx context.Context, anthropicKey string) error {
 // by legacy setup scripts (setup-aep.sh) without Helm ownership labels. Helm
 // refuses to adopt them on install, so we delete and let the chart recreate.
 func deleteOrphanedResources(ctx context.Context) error {
-	// These are the cluster-scoped CRD resources the platform Helm chart owns
-	// that setup-aep.sh also creates via bare kubectl apply.
-	resources := []struct{ kind, name string }{
-		{"clusterauthzrolebinding", "aep-api-client-binding"},
-		{"clustertrait", "api-configuration"},
+	// cluster-scoped: clusterauthzrolebinding, clustertrait
+	// namespaced:     secretstore (lives in initPlatformNamespace)
+	resources := []struct {
+		kind, name, namespace string
+	}{
+		{"clusterauthzrolebinding", "aep-api-client-binding", ""},
+		{"clustertrait", "api-configuration", ""},
 		// Old namespaced SecretStore replaced by ClusterSecretStore aep-platform.
-		{"secretstore", "openbao"},
+		{"secretstore", "openbao", initPlatformNamespace},
 	}
 	for _, r := range resources {
 		args := []string{"delete", r.kind, r.name, "--ignore-not-found"}
+		if r.namespace != "" {
+			args = append(args, "-n", r.namespace)
+		}
 		if kubeconfig != "" {
 			args = append([]string{"--kubeconfig", kubeconfig}, args...)
 		}
