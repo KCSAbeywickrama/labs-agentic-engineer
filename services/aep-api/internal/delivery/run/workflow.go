@@ -302,8 +302,13 @@ func (l *loop) run(ctx workflow.Context) (RunResult, error) {
 //
 // A permanent failure settles the row `plan-failed` — the same terminal reason
 // the click used to write, so the read model is unchanged.
+//
+// The predicate is shared with onEmptyWorkingSet on purpose: whether a run may
+// read an empty working set as "delivered" is exactly the question of whether it
+// planned that milestone itself, and two spellings of that could drift into a run
+// settling a version it never filled.
 func (l *loop) fillMilestone(ctx workflow.Context) (settled bool, res RunResult, err error) {
-	if l.in.Tag == "" {
+	if !l.plansItsOwnMilestone() {
 		return false, RunResult{}, nil
 	}
 	l.st.Phase = delivery.RunPhasePlanning
@@ -354,17 +359,27 @@ func (l *loop) fillMilestone(ctx workflow.Context) (settled bool, res RunResult,
 // whose issues had not been minted yet. Settling there would have closed a
 // version nobody built.
 //
-// Planning is now this workflow's own first phase, so that window is gone — by
-// the time the loop polls anything, the plan has either landed or settled the
-// run. An empty working set is therefore unambiguous, and it means delivered.
-// That is also the right answer for a re-build of a version whose Tasks all
-// already exist and are closed, where planning legitimately mints nothing.
+// Planning is now this workflow's own first phase, so for a run that PLANS that
+// window is gone — by the time the loop polls anything, the plan has either
+// landed or settled the run. An empty working set is therefore unambiguous, and
+// it means delivered. That is also the right answer for a re-build of a version
+// whose Tasks all already exist and are closed, where planning legitimately
+// mints nothing.
+//
+// For a run that does NOT plan the window is still wide open, which is why this
+// is gated on the same predicate fillMilestone uses rather than on the origin
+// list. An incident adoption fires on a label write, and GitHub's issue index
+// lags a write (see the park below, and validation_issues.go); a run that polled
+// before the labelled issue was indexed would read an empty working set with no
+// cycles behind it, settle SUCCEEDED, and close the milestone for work nothing
+// had dispatched. Revalidation is the same shape for a different reason — an
+// empty working set is its expected STARTING state.
 //
 // It returns settled=false for the one case that continues: a validation cycle
 // that passed, after which the boundary is re-entered so anything adopted while
 // validation ran is picked up.
 func (l *loop) onEmptyWorkingSet(ctx workflow.Context) (settled bool, res RunResult, err error) {
-	if l.st.CyclesTotal == 0 && l.in.Origin != delivery.RunOriginRevalidate {
+	if l.st.CyclesTotal == 0 && l.plansItsOwnMilestone() {
 		// Planning landed and produced nothing to work — either the version has
 		// no Tasks, or a re-build found them all already closed. Delivered.
 		//
@@ -376,6 +391,28 @@ func (l *loop) onEmptyWorkingSet(ctx workflow.Context) (settled bool, res RunRes
 		// the whole reason it exists.
 		res, err = l.settle(ctx, delivery.RunStateSucceeded, "")
 		return true, res, err
+	}
+	if l.st.CyclesTotal == 0 && l.in.Origin != delivery.RunOriginRevalidate {
+		// Zero cycles behind an empty working set, on a run that did NOT plan this
+		// milestone: the emptiness is not evidence. An incident adoption fires on a
+		// label write and GitHub's issue index lags a write, so the very first poll
+		// can legitimately precede the issue it was started for. PARK and let the
+		// `issues` webhook wake it — signal channels buffer, so the wake cannot be
+		// missed. Settling here would close the milestone over work nothing had
+		// dispatched.
+		//
+		// A revalidation is the exception and always was: an empty working set is
+		// its expected STARTING state, and going straight to validation is the whole
+		// reason it exists.
+		cancelled, perr := l.park(ctx)
+		if perr != nil {
+			return true, l.result(), perr
+		}
+		if cancelled {
+			res, err = l.settle(ctx, delivery.RunStateCancelled, "")
+			return true, res, err
+		}
+		return false, RunResult{}, nil
 	}
 	switch l.lastResult {
 	case cycleRed:
@@ -627,6 +664,19 @@ func (l *loop) settle(ctx workflow.Context, state, reason string) (RunResult, er
 	l.st.CycleKind = ""
 	l.st.CycleAttempt = 0
 	return l.result(), nil
+}
+
+// plansItsOwnMilestone reports whether this run OWNS the version it is working —
+// and therefore whether it fills the milestone itself and may read an empty
+// working set as "delivered".
+//
+// Recognised by carrying a Tag, which only the build click supplies. Every other
+// origin adopts a milestone somebody else filled: an incident adoption works one
+// issue in a shipped version, a revalidation exists precisely because the working
+// set is empty. Neither planned anything, so for neither is an empty working set
+// evidence of anything at all.
+func (l *loop) plansItsOwnMilestone() bool {
+	return l.in.Tag != "" && l.in.Origin != delivery.RunOriginRevalidate
 }
 
 func (l *loop) result() RunResult {

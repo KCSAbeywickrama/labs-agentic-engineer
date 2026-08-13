@@ -101,6 +101,11 @@ func (w *ConvergeWatcher) Run(ctx context.Context) {
 // One project's failure never stops the others: this is the thing that still has
 // to run when something else is broken.
 func (w *ConvergeWatcher) Once(ctx context.Context) {
+	// The same guard Run applies, repeated because this is an exported entry point:
+	// a test or a partially wired root can reach it without ever going through Run.
+	if w == nil || w.projects == nil || w.deploy == nil {
+		return
+	}
 	if w.asService != nil {
 		ctx = w.asService(ctx)
 	}

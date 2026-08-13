@@ -41,7 +41,7 @@ outside that discipline, because it was the one step outside Temporal.
 
 **The build click starts the run; the run fills its own milestone.**
 
-```
+```text
 click:  … → mint milestone → ADMIT ROW (planning) → StartRun → return
                                                        │
 run workflow:                                 phase "planning"

@@ -82,7 +82,7 @@ func TestEnsureWorkload_Create(t *testing.T) {
 func TestEnsureWorkload_ConflictIsSuccess(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			t.Fatalf("unexpected method %s", r.Method)
+			t.Errorf("unexpected method %s", r.Method)
 		}
 		writeJSON(t, w, http.StatusConflict, map[string]string{"error": "already exists"})
 	}))
@@ -145,7 +145,7 @@ func TestEnsureRelease_Create(t *testing.T) {
 func TestEnsureRelease_ConflictIsSuccess(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			t.Fatalf("unexpected method %s", r.Method)
+			t.Errorf("unexpected method %s", r.Method)
 		}
 		writeJSON(t, w, http.StatusConflict, map[string]string{"error": "already exists"})
 	}))
@@ -275,7 +275,7 @@ func TestEnsureReleaseBinding_Create(t *testing.T) {
 func TestEnsureReleaseBinding_ConflictIsSuccess(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			t.Fatalf("unexpected method %s", r.Method)
+			t.Errorf("unexpected method %s", r.Method)
 		}
 		writeJSON(t, w, http.StatusConflict, map[string]string{"error": "already exists"})
 	}))
@@ -313,7 +313,7 @@ func TestApplyReleaseBinding_CreateCarriesWholeDesiredState(t *testing.T) {
 	var gotBody map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			t.Fatalf("unexpected method %s", r.Method)
+			t.Errorf("unexpected method %s", r.Method)
 		}
 		_ = json.NewDecoder(r.Body).Decode(&gotBody)
 		writeJSON(t, w, http.StatusCreated, map[string]any{"metadata": map[string]any{"name": "x"}})

@@ -1685,6 +1685,47 @@ func TestPlanningPhase_SkippedWhenTheRunOwnsNoVersion(t *testing.T) {
 	}
 }
 
+// A run that did NOT plan may not read an empty working set as "delivered".
+//
+// The immediate zero-cycle settle is justified by planning being the workflow's
+// own first phase — by the time the loop polls, the plan has landed or the run has
+// settled. That reasoning covers a run that plans and nothing else. An incident
+// adoption fires on a label write, and GitHub's issue index lags a write: a run
+// that polls before the labelled issue is indexed sees Work == 0 with no cycles
+// behind it. Settling there closes the milestone for work nothing dispatched.
+//
+// So it must PARK and wait for the issue to appear, then dispatch it.
+func TestZeroCycleAdoption_ParksForTheLaggingIndexInsteadOfSettling(t *testing.T) {
+	h := newHarness(t)
+	h.milestoneIs(
+		MilestoneSnapshot{},                  // the index has not caught up yet
+		MilestoneSnapshot{Work: 1, Total: 1}, // the labelled issue appears
+		MilestoneSnapshot{},                  // worked, and now genuinely empty
+	)
+	h.merges(1)
+	// The webhook that wakes the park once the issue is indexed.
+	h.signal(delivery.SigRunWorkable, 2*time.Second)
+
+	h.runWith(RunInput{Origin: delivery.RunOriginIncidentAdoption}) // no Tag
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
+	require.Equal(t, 1, h.dispatchCount(),
+		"the adopted issue was dispatched; an immediate settle would have closed the milestone over it")
+}
+
+// The other side of the same predicate: a run that DOES own its version settles
+// immediately on an empty working set, because its plan has demonstrably run.
+func TestZeroCycleSpecBuild_SettlesImmediately(t *testing.T) {
+	h := newHarness(t)
+	h.milestoneIs(MilestoneSnapshot{}) // planning minted nothing to work
+	h.runWith(RunInput{Origin: delivery.RunOriginSpecBuild, Tag: "v3"})
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
+	require.Zero(t, h.dispatchCount(), "nothing to dispatch — the version is delivered")
+}
+
 // The whole point of moving planning here: a planning failure that repeating
 // cannot change settles the version, exactly as the detached goroutine did —
 // but a transient one is now Temporal's to retry, not a version-killer.

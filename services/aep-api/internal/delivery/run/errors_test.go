@@ -96,6 +96,11 @@ func executePoll(env *testsuite.TestWorkflowEnvironment) {
 		MilestoneNumber: testMilepost,
 		MilestoneTitle:  "v3",
 		Origin:          delivery.RunOriginSpecBuild,
+		// A spec build always carries the tag it claimed — it is what tells the loop
+		// this run OWNS the version and therefore plans its own milestone. Omitting
+		// it would describe a state the click cannot produce, and the run would park
+		// waiting for work nobody was going to file.
+		Tag: "v3",
 	})
 }
 

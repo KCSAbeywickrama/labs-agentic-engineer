@@ -247,7 +247,7 @@ func TestDeploy_PerComponentFailureContinuesThenSurfaces(t *testing.T) {
 
 // Converge re-asserts wiring WITHOUT promoting: a user editing env vars must
 // never move which release is serving.
-func TestConverge_DoesNotCutOrPinAReleaseF(t *testing.T) {
+func TestConverge_DoesNotCutOrPinARelease(t *testing.T) {
 	t.Parallel()
 	files := map[string]string{
 		spec.DesignRootFile:          traitRootMd(),

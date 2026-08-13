@@ -39,7 +39,7 @@ promote again. Three things were wrong with it, and all three were observed live
 
 **Wiring edges are graded, and only the hard ones order the deploy.**
 
-```
+```text
 HARD  the provider's address is stamped into the consumer's own start-up config.
       Orders the deploy. Must form a DAG.
 SOFT  the fact flows the other way — a provider learning about its consumer.
@@ -54,7 +54,7 @@ would refuse two services that call each other, which is an ordinary shape.
 
 The stage becomes:
 
-```
+```text
 builds green
    │
    ├─ wave 0   no unsatisfied hard edge        → promote → wait Ready

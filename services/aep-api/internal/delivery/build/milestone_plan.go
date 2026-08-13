@@ -304,10 +304,19 @@ func (s *Service) startRun(ctx context.Context, orgID, projectID, tag string,
 // failRun settles a run the plan path could not fill, so the mutex it armed is
 // released. The reason names exactly this failure class, keeping the terminal
 // reasons honest.
+//
+// The settle write DELIBERATELY outlives the request. This runs on the click's
+// own context, and a user who navigates away — or a proxy that times out — while
+// StartRun is in flight would otherwise cancel the one write that makes the row
+// terminal. The row would stay `planning`, which is non-terminal, and the
+// project's spec mutex would stay held: no later build could be admitted, and
+// the reconcile sweep counts `planning` as live so nothing would heal it. A
+// cancelled client must not be able to wedge a project.
 func (s *Service) failRun(ctx context.Context, run *delivery.MilestoneRun, cause error) {
 	slog.ErrorContext(ctx, "build: milestone plan path failed — settling the run",
 		"project", run.ProjectID, "run", run.ID, "milestone", run.MilestoneNumber, "error", cause)
-	if _, err := s.plan.runs.Settle(ctx, run.ID, delivery.RunStateFailed, delivery.RunReasonPlanFailed); err != nil {
+	settleCtx := context.WithoutCancel(ctx)
+	if _, err := s.plan.runs.Settle(settleCtx, run.ID, delivery.RunStateFailed, delivery.RunReasonPlanFailed); err != nil {
 		slog.ErrorContext(ctx, "build: settling the failed run ALSO failed — the project's spec mutex is held",
 			"project", run.ProjectID, "run", run.ID, "error", err)
 	}

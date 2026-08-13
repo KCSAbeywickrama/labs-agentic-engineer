@@ -38,7 +38,7 @@ a step it did not perform**:
 **Components carry `autoDeploy: false`, and the run supervisor performs the deploy as a stage of the
 cycle**, between builds-green and validation:
 
-```
+```text
 merge → build fan-out → builds green → DEPLOY → Ready → (working set empties) → validation
 ```
 

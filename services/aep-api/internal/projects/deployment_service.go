@@ -105,7 +105,7 @@ func (s *DeploymentService) SetConfigSources(envVars ComponentEnvVarReader, file
 // ride the returned outcomes AND the joined error, so the supervisor can both
 // see which component failed and know that the pass did not fully succeed.
 func (s *DeploymentService) Deploy(ctx context.Context, orgID, projectID string, components []string, commitSHA string) ([]delivery.ComponentDeploy, error) {
-	if s == nil || s.components == nil {
+	if s == nil || s.components == nil || s.store == nil {
 		return nil, fmt.Errorf("deployment: not configured")
 	}
 	design, err := s.store.ReadDesign(ctx, orgID, projectID)
@@ -159,6 +159,9 @@ func (s *DeploymentService) Deploy(ctx context.Context, orgID, projectID string,
 func (s *DeploymentService) PlanDeploymentWaves(ctx context.Context, orgID, projectID string, components []string) ([][]string, error) {
 	if s == nil || len(components) == 0 {
 		return nil, nil
+	}
+	if s.store == nil {
+		return nil, fmt.Errorf("deployment: not configured")
 	}
 	design, err := s.store.ReadDesign(ctx, orgID, projectID)
 	if err != nil {
