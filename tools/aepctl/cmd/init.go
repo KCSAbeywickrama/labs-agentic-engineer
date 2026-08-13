@@ -227,7 +227,16 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// 5. Register AEP OAuth clients in Thunder.
+	// 5. Load the generated Thunder system-client secret from the ESO-synced
+	// aep-thunder-secrets Secret. aep init skips the PersistentPreRunE loader,
+	// so without this step doThunderSetup would fall back to the hardcoded
+	// viper default instead of the secret that was actually seeded. SetDefault
+	// means an explicit --thunder-admin-client-secret flag still takes precedence.
+	if err := config.LoadThunderSecretFromCluster(ctx, k8sClient, initPlatformNamespace); err != nil {
+		return fmt.Errorf("load Thunder secret: %w", err)
+	}
+
+	// 6. Register AEP OAuth clients in Thunder.
 	_, _ = fmt.Fprintln(os.Stdout, "Configuring Thunder OAuth clients...")
 	if err := doThunderSetup(ctx, k8sClient, initPlatformNamespace,
 		viper.GetString("thunder.namespace"),
@@ -240,7 +249,7 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// 6. Persist non-sensitive config into the in-cluster ConfigMap.
+	// 7. Persist non-sensitive config into the in-cluster ConfigMap.
 	if err := writeClusterConfig(ctx, k8sClient, initPlatformNamespace); err != nil {
 		return fmt.Errorf("write cluster config: %w", err)
 	}
