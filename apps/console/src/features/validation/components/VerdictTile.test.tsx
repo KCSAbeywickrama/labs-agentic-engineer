@@ -36,9 +36,9 @@ function tally(
 describe("VerdictTile", () => {
   it("leads with the shared mapper's label as its headline", () => {
     render(<VerdictTile verdict="partial" tally={tally(40, { pass: 35, manual: 5 })} />);
-    // "validated" in the mapper (green since #401; the tile's copy carries
-    // the uncovered-criteria hedge); a headline leads.
-    expect(screen.getByText("Validated")).toBeInTheDocument();
+    // "validated*" in the mapper — the mark hedges what the sentence below spells
+    // out; a headline leads, so it is capitalized here.
+    expect(screen.getByText("Validated*")).toBeInTheDocument();
   });
 
   it("renders the counts under the sentence", () => {

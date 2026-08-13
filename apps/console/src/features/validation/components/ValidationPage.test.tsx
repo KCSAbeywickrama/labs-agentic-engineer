@@ -578,9 +578,13 @@ describe("ValidationPage lifecycle", () => {
     renderPage(undefined);
 
     expect(screen.queryByTestId("run-feed")).not.toBeInTheDocument();
-    // Partial shares `passed`'s visible label since #401; the tile's copy and
-    // the spoken form carry the uncovered-criteria distinction.
-    expect(screen.getAllByText("Validated").length).toBe(2);
+    // The mark is the hedge, on both the chip and the tile headline.
+    expect(screen.getAllByText("Validated*").length).toBe(2);
+    expect(screen.queryByText("Validated")).not.toBeInTheDocument();
+    // The chip stands alone at the top of the page, so it carries the spoken form —
+    // a screen reader hears nothing of the asterisk otherwise. Visually-hidden TEXT,
+    // because a Chip with no onClick has no role and would ignore an aria-label.
+    expect(screen.getByText("Validated, partially")).toBeInTheDocument();
     expect(screen.getByText("Shoppers can search the catalog.")).toBeInTheDocument();
   });
 

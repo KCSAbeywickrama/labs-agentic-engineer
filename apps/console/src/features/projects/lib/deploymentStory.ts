@@ -143,13 +143,11 @@ export function validationStage(
     actor: "Validation agent",
     state,
     ...(view && {
-      // `spoken` over `label` in the count-free fallback. Those strings exist because
-      // two labels carry their meaning in PUNCTUATION — "validated" (partial) and
-      // "validation?" — which was hidden behind the validation chip's aria-label
-      // purely because a pill had no room for the longer form. This fact has a whole
-      // row, so it can simply say it, and the distinction stops being sighted-only.
-      // Moot whenever the counts resolve, which is the steady state.
-      fact: counts ? `${counts.passed}/${counts.total} passed` : (view.spoken ?? view.label),
+      // The label as written, marks and all — `validated*`, `validation?`. The
+      // spoken form is an accessible name, never a visible substitute, and the
+      // banner directly below spells the hedge out in prose anyway. Moot whenever
+      // the counts resolve, which is the steady state.
+      fact: counts ? `${counts.passed}/${counts.total} passed` : view.label,
     }),
     note: validationNote(validation, view),
   };

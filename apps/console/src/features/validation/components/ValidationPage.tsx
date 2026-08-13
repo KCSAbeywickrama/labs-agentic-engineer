@@ -92,9 +92,16 @@ const TONE_TO_STATUS: Record<StageTone, StatusTone> = {
 // fix" for the same run.
 function headerChip(view: ReturnType<typeof validationView>): PageHeaderStatus | undefined {
   if (!view) return undefined;
+  const lead = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
   return {
     // The shared labels are lowercase for mid-sentence use; the chip leads.
-    label: view.label.charAt(0).toUpperCase() + view.label.slice(1),
+    label: lead(view.label),
+    // This chip stands ALONE at the top of the page — nothing beside it spells out
+    // what "Validated*" hedges — so the two mark-bearing labels need their spoken
+    // form here. Run through the same capitalization rather than pre-cased at the
+    // mapper, so one casing rule covers both names. A no-op for the seven states
+    // that carry no spoken form.
+    ...(view.spoken ? { spokenLabel: lead(view.spoken) } : {}),
     tone: TONE_TO_STATUS[view.tone],
   };
 }
