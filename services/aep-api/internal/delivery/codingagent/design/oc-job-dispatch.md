@@ -17,7 +17,11 @@ The chain is **Component → Workload (per-cycle env + secret-env refs) →
 GenerateRelease → ReleaseBinding** on the project's `development` environment.
 OC renders the `batch/v1 Job` into the project's `dp-…` release namespace and
 materialises the cycle's ExternalSecrets from the org's secret store — the
-platform writes no secret material, only references.
+platform writes no secret material, only references. SecretReference CRs that
+a Workload `secretKeyRef`s must live in the same control-plane namespace as
+that Workload/ReleaseBinding (locally the OC org, e.g. `default`); the vault
+path stays `user-app-secrets/<org-base-ns>/<name>` and is a different
+namespace from the CR.
 
 ## The type is per-org, and it is the billing key
 
