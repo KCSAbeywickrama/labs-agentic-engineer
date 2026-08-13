@@ -1,7 +1,9 @@
 # ADR-0017 — The platform owns deploy
 
 **Status:** Accepted · **Supersedes:** the AutoDeploy assumption recorded in
-`internal/projects/component_service.go` and the retired `trait_sync.go`
+`internal/projects/component_service.go` and the retired `trait_sync.go` · **Refined by:**
+[ADR-0019](ADR-0019-deploy-order-follows-the-hard-wiring-edges.md), which orders the stage into waves —
+the promote described below is what happens within one wave
 
 ## Context
 

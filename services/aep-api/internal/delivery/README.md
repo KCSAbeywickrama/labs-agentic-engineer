@@ -136,7 +136,9 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   component's release from the Workload its build posted, writes the binding that pins it — release
   pin, trait env configs and workload overrides in ONE object write — and waits for every binding to
   report Ready before the cycle is green. Components carry `autoDeploy: false`, so nothing else
-  promotes a release.
+  promotes a release. It promotes WAVE BY WAVE (providers before the consumers whose start-up config
+  carries their address) and finishes with one converge for the facts that flow the other way — see
+  the invariant below and ADR-0019.
 - The **run loop** (`run`): one Temporal workflow per milestone, `run-<org>-<project>-<milestoneNumber>`,
   whose id is REUSED after a terminal run because a milestone sees sequential runs across its life. It
   owns the four budgets, the no-progress rule, the cycle ceiling, the validation cycle and settle — and
@@ -253,6 +255,16 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   the chain was kicked off from inside the build and reconciled afterwards with no link back to the
   cycle that caused it. Everything downstream depended on the weaker fact — validation asserted
   against whatever happened to be serving, and a binding stuck `Ready=False` failed nothing.
+- **Only HARD wiring edges order the deploy.** A hard edge is an address the platform stamps into a
+  component's own start-up config — a web app reads its backend's out of `window._env_` and throws at
+  module load without it, so publishing the SPA alongside its backend serves a blank page. Those edges
+  (`spec.HardConfigEdges`) put the provider in an earlier wave, and each wave must be Ready before the
+  next is promoted. What flows the other way is SOFT — a protected API's CORS allowlist is the
+  project's SPA origins, an OIDC resource wants the SPA's callback registered — and is written by ONE
+  converge at the end, which passes an EMPTY commit so it re-asserts wiring without re-cutting a
+  release. Grading them together is what made the graph look circular: the SPA needs the API's
+  address and the API needs the SPA's, and only one of those has to be true before anything serves. A
+  cycle among hard edges is `ErrDeployPermanent`, not a wait — nobody can go first. ADR-0019.
 - **The deploy stage has a DEADLINE, and the build stage deliberately does not.** A WorkflowRun always
   terminates, so `awaitBuilds` can wait forever safely. A ReleaseBinding never does — it is a level
   OpenChoreo reconciles continuously, so an image that will never pull and a rollout thirty seconds

@@ -191,8 +191,18 @@ type Dispatcher interface {
 //
 // Idempotent and convergent: the release name is derived from the merge commit,
 // so a retried deploy re-pins the same release and changes nothing.
+//
+// An EMPTY commitSHA converges instead of promoting — it re-asserts the wiring
+// of components that are already serving without moving which release is live.
+// That is how the stage's last pass supplies the facts that only exist once
+// everything is up (a protected API's CORS allowlist is the project's SPA
+// origins) without cutting a second release for them.
 type Deployer interface {
 	Deploy(ctx context.Context, orgID, projectID string, components []string, commitSHA string) ([]delivery.ComponentDeploy, error)
+	// PlanDeploymentWaves orders the set: every component in a wave has each of
+	// its hard providers in an earlier one. Ordering lives with the deployer
+	// because it is read off the same design the writes are composed from.
+	PlanDeploymentWaves(ctx context.Context, orgID, projectID string, components []string) ([][]string, error)
 }
 
 // Gates authors the version's dependencies and mints its `aep:provision` gate

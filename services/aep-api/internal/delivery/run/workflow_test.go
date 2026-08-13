@@ -17,6 +17,8 @@
 package run
 
 import (
+	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -77,8 +79,10 @@ type harness struct {
 	gateMints []PlanMilestoneInput
 	plans     []PlanMilestoneInput
 	// deploys records every promote the loop asked for, and deployMints every
-	// deploy-fix filing.
+	// deploy-fix filing. wavePlans records every ordering request, so a test can
+	// assert the stage planned before it wrote.
 	deploys     []DeployCycleInput
+	wavePlans   []DeployCycleInput
 	deployMints []MintDeployFixIssuesInput
 	// traitSyncs records every managed-API trait convergence the loop asked for,
 	// so a test can assert WHEN it fires rather than merely that it was wired.
@@ -120,6 +124,7 @@ func newHarness(t *testing.T) *harness {
 	h.env.RegisterActivity(acts.DispatchAgent)
 	h.env.RegisterActivity(acts.ProvisionGates)
 	h.env.RegisterActivity(acts.PlanMilestone)
+	h.env.RegisterActivity(acts.PlanDeployWaves)
 	h.env.RegisterActivity(acts.DeployCycle)
 	h.env.RegisterActivity(acts.PollCycleDeployments)
 	h.env.RegisterActivity(acts.MintDeployFixIssues)
@@ -215,6 +220,37 @@ func (h *harness) deployIs(err error) {
 			defer h.mu.Unlock()
 			h.deploys = append(h.deploys, args.Get(1).(DeployCycleInput))
 		}).Return([]delivery.ComponentDeploy(nil), err)
+}
+
+// wavesAre pins the deploy order the planner answers.
+func (h *harness) wavesAre(waves [][]string, err error) {
+	h.set["waves"] = true
+	h.env.OnActivity(h.acts.PlanDeployWaves, mock.Anything, mock.Anything).
+		Run(func(args mock.Arguments) {
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			h.wavePlans = append(h.wavePlans, args.Get(1).(DeployCycleInput))
+		}).Return(waves, err)
+}
+
+// wavesAreOneWave is the default: whatever the cycle built, promoted together —
+// what a project with no hard wiring edges gets.
+//
+// Derived from the REQUEST rather than hardcoded, so a test that changes which
+// components its builds report cannot end up silently planning a different set
+// than the one being deployed.
+func (h *harness) wavesAreOneWave() {
+	h.set["waves"] = true
+	h.env.OnActivity(h.acts.PlanDeployWaves, mock.Anything, mock.Anything).
+		Return(func(_ context.Context, in DeployCycleInput) ([][]string, error) {
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			h.wavePlans = append(h.wavePlans, in)
+			if len(in.Components) == 0 {
+				return nil, nil
+			}
+			return [][]string{in.Components}, nil
+		})
 }
 
 // deploymentsAre queues the readiness polls, in order; the last repeats.
@@ -355,6 +391,9 @@ func (h *harness) applyDefaults() {
 	}
 	if !h.set["plan"] {
 		h.planIs(nil, nil)
+	}
+	if !h.set["waves"] {
+		h.wavesAreOneWave()
 	}
 	if !h.set["deploy"] {
 		h.deployIs(nil)
@@ -517,7 +556,7 @@ func TestBuildsGreen_DeploysBeforeSettling(t *testing.T) {
 
 	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
 	require.Equal(t, 2, h.deployCount(),
-		"one green cycle = two promote passes (promote, then the converge fixpoint)")
+		"one green cycle = one wave promoted, then one converge that promotes nothing")
 	require.Equal(t, []string{"order-service"}, h.deploys[0].Components,
 		"the deploy promotes the components the BUILD poll reported, not a re-derived set")
 	require.Equal(t, testMergeSHA, h.deploys[0].CommitSHA,
@@ -545,35 +584,120 @@ func TestRedBuild_DoesNotDeploy(t *testing.T) {
 
 	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
 	require.Equal(t, 2, h.deployCount(),
-		"only the GREEN cycle promotes — its two passes, and none from the red one")
+		"only the GREEN cycle deploys — its one wave and its converge, and nothing from the red one")
 }
 
-// TestDeploy_RunsASecondConvergePass pins the fixpoint. A protected API's CORS
-// allowlist is the origins of the project's web apps, and an origin exists only
-// once that web app is serving — so the first pass cannot know the API's own
-// desired state, and a single-pass deploy would leave it on the trait's wildcard
-// default until an out-of-band sweep noticed.
-func TestDeploy_RunsASecondConvergePass(t *testing.T) {
+// TestDeploy_PromotesWaveByWaveThenConverges pins the whole stage's shape.
+//
+// A web app reads its backend's address out of window._env_ at module load, and
+// that address exists only once the backend has a rendered binding — so the
+// backend's wave goes first and the SPA's config is right the first time it is
+// written. What flows the other way (a protected API's CORS allowlist is the
+// project's SPA origins) cannot be known on the way up and is written by ONE
+// converge at the end.
+//
+// The converge carries no commit, and that is the load-bearing assertion: a
+// second promote re-cuts a release that already exists, which OpenChoreo refuses
+// with a bare 500 and Temporal then retries forever.
+func TestDeploy_PromotesWaveByWaveThenConverges(t *testing.T) {
 	h := newHarness(t)
 	h.milestoneIs(MilestoneSnapshot{Work: 1, Total: 1}, MilestoneSnapshot{})
+	h.wavesAre([][]string{{"todo-api"}, {"todo-webapp"}}, nil)
+	h.buildsAre(CycleBuildState{Expected: 2, Settled: 2, Components: []string{"todo-api", "todo-webapp"}})
 	h.merges(1)
 
 	h.run(delivery.RunOriginSpecBuild, 0)
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
-	require.Equal(t, 2, h.deployCount(),
-		"one cycle promotes twice: the second pass recomposes now that siblings resolve")
-	require.Len(t, h.deploys, 2)
-	require.Equal(t, h.deploys[0].Components, h.deploys[1].Components,
-		"both passes promote the same component set")
-	require.Equal(t, h.deploys[0].CommitSHA, h.deploys[1].CommitSHA,
-		"the second pass re-pins the SAME release — it converges wiring, it does not promote anew")
+	require.Len(t, h.deploys, 3, "two waves promote, then one converge")
+	require.Equal(t, []string{"todo-api"}, h.deploys[0].Components,
+		"the provider goes first — its address is what the consumer's config carries")
+	require.Equal(t, []string{"todo-webapp"}, h.deploys[1].Components)
+	require.Equal(t, testMergeSHA, h.deploys[0].CommitSHA)
+	require.Equal(t, testMergeSHA, h.deploys[1].CommitSHA)
+
+	require.Equal(t, []string{"todo-api", "todo-webapp"}, h.deploys[2].Components,
+		"the converge re-asserts the whole set, not just the last wave")
+	require.Empty(t, h.deploys[2].CommitSHA,
+		"the converge promotes nothing: an empty commit is what keeps it from re-cutting a release")
+
+	require.Len(t, h.wavePlans, 1, "the order is planned once per cycle, before anything is written")
+	require.Equal(t, []string{"todo-api", "todo-webapp"}, h.wavePlans[0].Components)
 }
 
-// A cycle whose FIRST pass fails must not run a second: there is nothing to
-// converge onto, and the failure is already the cycle's answer.
-func TestDeploy_FailedFirstPassRunsNoSecond(t *testing.T) {
+// A wave that cannot come up ends the stage there: the waves after it depend on
+// its addresses, and converging a set that is not serving would write wiring
+// nothing can use.
+func TestDeploy_FailedWaveRunsNoFurtherWaveOrConverge(t *testing.T) {
+	h := newHarness(t)
+	h.milestoneIs(MilestoneSnapshot{Work: 1, Total: 1}, MilestoneSnapshot{})
+	h.wavesAre([][]string{{"todo-api"}, {"todo-webapp"}}, nil)
+	h.buildsAre(CycleBuildState{Expected: 2, Settled: 2, Components: []string{"todo-api", "todo-webapp"}})
+	h.deploymentsAre(CycleDeployState{Expected: 1, Failed: []string{"todo-api"}})
+	h.deployMintsAre(nil)
+	h.merges(1)
+
+	h.run(delivery.RunOriginSpecBuild, 0)
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonDeployBudget)
+	require.Len(t, h.deploys, 1, "the first wave failed; nothing downstream of it runs")
+	require.Equal(t, []string{"todo-api"}, h.deploys[0].Components)
+}
+
+// An order that cannot be satisfied has to arrive as a DEPLOY FAILURE, not as a
+// workflow error.
+//
+// Returned raw it would fail the workflow before the boundary could mint the fix
+// work or settle the row — and a non-terminal run row blocks every later build on
+// the project, which is the wedge this whole stage exists to stop producing. So
+// the permanent error converts to cycleDeployFailed and takes the ordinary
+// recovery path: file the work, settle on the deploy budget when nothing fixes it.
+func TestDeployOrderUnsatisfiable_SettlesAsADeployFailure(t *testing.T) {
+	h := newHarness(t)
+	h.milestoneIs(
+		MilestoneSnapshot{Work: 1, Total: 1}, // dispatch
+		MilestoneSnapshot{},                  // nothing came back to fix it
+	)
+	h.buildsAre(CycleBuildState{Expected: 2, Settled: 2, Components: []string{"web-a", "web-b"}})
+	h.wavesAre(nil, temporal.NewNonRetryableApplicationError(
+		"deployment: hard dependency cycle among components web-a needs [web-b]; web-b needs [web-a]",
+		errTypePermanentDeploy, nil))
+	h.deployMintsAre(nil)
+	h.merges(1)
+
+	h.run(delivery.RunOriginSpecBuild, 0)
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonDeployBudget)
+	require.Empty(t, h.deploys, "an unsatisfiable order promotes nothing")
+	require.Equal(t, 1, h.deployMintCount(), "the fix work is filed, not swallowed by a failed workflow")
+	require.ElementsMatch(t, []string{"web-a", "web-b"}, h.deployMints[0].Components,
+		"a cycle is nobody's individual fault — every component in it is named")
+	require.Contains(t, h.deployMints[0].Reasons["web-a"], "hard dependency cycle",
+		"the cause reaches the issue body rather than only the workflow history")
+}
+
+// A plan that could not be READ is a blip, not an answer, and must keep the
+// unbounded retry that is right for it — the opposite of the case above.
+func TestDeployOrderUnreadable_IsRetriedNotSettled(t *testing.T) {
+	h := newHarness(t)
+	h.milestoneIs(MilestoneSnapshot{Work: 1, Total: 1}, MilestoneSnapshot{})
+	h.buildsAre(CycleBuildState{Expected: 1, Settled: 1, Components: []string{"order-service"}})
+	h.wavesAre(nil, errors.New("oc: design read timed out"))
+	h.merges(1)
+
+	h.run(delivery.RunOriginSpecBuild, 0)
+
+	require.True(t, h.env.IsWorkflowCompleted())
+	require.Error(t, h.env.GetWorkflowError(), "a transient planning failure must not settle the run")
+	require.Zero(t, h.deployMintCount(), "no fix work is filed for a blip")
+}
+
+// The single-wave shape of the same rule: a set that never came up has nothing
+// to converge onto, and the failure is already the cycle's answer.
+func TestDeploy_FailedWaveRunsNoConverge(t *testing.T) {
 	h := newHarness(t)
 	h.milestoneIs(MilestoneSnapshot{Work: 1, Total: 1}, MilestoneSnapshot{})
 	h.deploymentsAre(CycleDeployState{Expected: 1, Failed: []string{"order-service"}})
@@ -657,7 +781,7 @@ func TestValidationCycle_TouchesNoComponent_SkipsDeploy(t *testing.T) {
 
 	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
 	require.Equal(t, 2, h.deployCount(),
-		"only the coding cycle promotes (two passes); the validation cycle has nothing to deploy")
+		"only the coding cycle deploys (its wave plus its converge); the validation cycle has nothing to promote")
 }
 
 // TestDeployNeverReady_ExpiresIntoAFixIssue pins the loop's SECOND deadline and
@@ -688,6 +812,37 @@ func TestDeployNeverReady_ExpiresIntoADeployFailure(t *testing.T) {
 		"the expiry files fix work rather than hanging the run")
 	require.Equal(t, []string{"order-service"}, h.deployMints[0].Components,
 		"the components that never came up are the ones named")
+}
+
+// The deadline belongs to the STAGE, not to a wave.
+//
+// It is created once in deployCycle and passed into every wait, so a design that
+// happens to split into more levels does not buy its run more time to come up. A
+// per-wave timer would be invisible in every other assertion — the run still
+// fails, the same issues are filed — and would silently multiply what a version
+// is allowed by however many waves it has.
+func TestDeployDeadline_IsTheStagesNotEachWaves(t *testing.T) {
+	h := newHarness(t)
+	h.milestoneIs(
+		MilestoneSnapshot{Work: 1, Total: 1},
+		MilestoneSnapshot{},
+	)
+	h.buildsAre(CycleBuildState{Expected: 2, Settled: 2, Components: []string{"api", "web"}})
+	h.wavesAre([][]string{{"api"}, {"web"}}, nil)
+	// The FIRST wave never lands, so the stage can only end on the deadline.
+	h.deploymentsAre(CycleDeployState{Expected: 1, Pending: []string{"api"}})
+	h.deployMintsAre(nil)
+	h.merges(1)
+
+	start := h.env.Now()
+	h.run(delivery.RunOriginSpecBuild, 0)
+	res := h.result(t)
+	elapsed := h.env.Now().Sub(start)
+
+	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonDeployBudget)
+	require.Less(t, elapsed, 2*deployReadyTimeout,
+		"the stage spent more than one deployReadyTimeout: the waves are each running their own clock")
+	require.Len(t, h.deploys, 1, "the second wave never starts — the first never served")
 }
 
 // TestConflictCycle_AnUnmergeablePRBecomesTheNextCyclesWork is the same shape

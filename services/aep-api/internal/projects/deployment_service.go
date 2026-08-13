@@ -142,6 +142,34 @@ func (s *DeploymentService) Deploy(ctx context.Context, orgID, projectID string,
 	return out, errors.Join(failures...)
 }
 
+// PlanDeploymentWaves orders a deploy set by the design's hard wiring edges —
+// the deploy stage's plan (see wiring_graph.go for what the order means).
+//
+// It lives on the service because the order and the writes it orders are read
+// off the same artefact by the same reader — not the same READ: the plan reads
+// the design once and each Deploy reads it again, so a design edit landing
+// mid-stage is seen by the writes and not by the order. That window is
+// deliberately left open. Closing it would mean pinning a design revision
+// through the whole stage, and the failure it would prevent (a component added
+// to the design between the plan and the promote) cannot happen from here — the
+// deploy set comes from the cycle's builds, which were cut from one commit.
+//
+// A project with no design yet is one wave, which is the same answer Deploy
+// gives it — nothing to order by.
+func (s *DeploymentService) PlanDeploymentWaves(ctx context.Context, orgID, projectID string, components []string) ([][]string, error) {
+	if s == nil || len(components) == 0 {
+		return nil, nil
+	}
+	design, err := s.store.ReadDesign(ctx, orgID, projectID)
+	if err != nil {
+		if spec.IsNotFound(err) {
+			return [][]string{components}, nil
+		}
+		return nil, fmt.Errorf("deployment: read design: %w", err)
+	}
+	return deploymentWaves(design, components)
+}
+
 // Converge re-asserts the wiring of components that are already deployed,
 // WITHOUT promoting a release.
 //

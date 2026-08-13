@@ -678,7 +678,11 @@ func Test_buildEnvValues_defers(t *testing.T) {
 		}
 	})
 
-	t.Run("consumer-URL patch failure defers before the read", func(t *testing.T) {
+	// The consumer-URL registration is the SOFT half: the dependency's own outputs
+	// owe it nothing, so a failed patch must not hold back a file the SPA cannot
+	// start without. The converge pass and the converge watcher both retry the
+	// registration; nothing retries a SPA nobody handed a client_id to.
+	t.Run("consumer-URL patch failure does not gate the outputs", func(t *testing.T) {
 		t.Parallel()
 		design := readDesign(t, authWebFiles)
 		web := componentNamed(t, design, "web")
@@ -687,34 +691,44 @@ func Test_buildEnvValues_defers(t *testing.T) {
 		rc := rcOutputs(authOutputs(), errors.New("oc: patch failed"))
 		cat := &fakeCatalog{markers: authMarkers("thunder-app")}
 		out, ready := svcWithCatalog(oc, rc, nil, cat).buildEnvValues(ctx, "acme", "proj", web, design)
-		if ready {
-			t.Fatalf("want ready=false when the consumer-URL patch fails")
+		if !ready {
+			t.Fatalf("want ready=true; a failed callback registration is not a missing start-up value")
 		}
-		for k := range out {
-			if strings.HasPrefix(k, "USER_AUTH_") {
-				t.Errorf("no output keys when the patch failed; got %q", k)
-			}
+		if out["USER_AUTH_CLIENT_ID"] == nil {
+			t.Errorf("the dependency's outputs must still be emitted; out=%v", out)
 		}
-		if n := len(rc.GetBindingCalls()); n != 0 {
-			t.Errorf("GetBinding must not run after a patch failure; got %d", n)
+		if n := len(rc.GetBindingCalls()); n != 1 {
+			t.Errorf("the outputs must be read despite the patch failure; GetBinding calls = %d", n)
 		}
 	})
 
-	t.Run("SPA URL unresolved defers the annotated dep before any patch", func(t *testing.T) {
+	// THE BLANK PAGE, pinned. A SPA's own external URL exists only once it has a
+	// rendered binding, so demanding it before the SPA's first write is a demand
+	// the SPA cannot satisfy until it has already been deployed. Grading that
+	// chicken-and-egg as hard withheld window._env_ entirely — the bundle threw at
+	// module load and the app served nothing until an out-of-band watcher repaired
+	// it up to ten minutes later.
+	t.Run("an unresolved SPA URL still emits the keys the SPA starts with", func(t *testing.T) {
 		t.Parallel()
 		design := readDesign(t, authWebFiles)
 		web := componentNamed(t, design, "web")
 
-		// api resolves, but the SPA's own URL (web) does not → defer before patch.
+		// api resolves (its wave went first); the SPA's own URL does not exist yet.
 		oc := ocResolving(map[string]string{"api": "http://api.local"})
 		rc := rcOutputs(authOutputs(), nil)
 		cat := &fakeCatalog{markers: authMarkers("thunder-app")}
-		_, ready := svcWithCatalog(oc, rc, nil, cat).buildEnvValues(ctx, "acme", "proj", web, design)
-		if ready {
-			t.Fatalf("want ready=false when the SPA external URL is not yet resolved")
+		out, ready := svcWithCatalog(oc, rc, nil, cat).buildEnvValues(ctx, "acme", "proj", web, design)
+		if !ready {
+			t.Fatalf("want ready=true; the SPA's own URL is not a value the SPA reads")
+		}
+		if out["API_BASE_URL"] != "http://api.local" {
+			t.Errorf("the backend address the bundle reads is missing; out=%v", out)
+		}
+		if out["USER_AUTH_CLIENT_ID"] == nil {
+			t.Errorf("the OIDC client_id the bundle reads is missing; out=%v", out)
 		}
 		if n := len(rc.PatchBindingEnvironmentConfigsCalls()); n != 0 {
-			t.Errorf("the binding must not be patched before the SPA URL resolves; got %d", n)
+			t.Errorf("nothing can be registered before the SPA URL resolves; got %d patches", n)
 		}
 	})
 

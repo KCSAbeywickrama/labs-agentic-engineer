@@ -85,7 +85,15 @@ delivery's kernel: shared behaviour belongs in the root the slices import.
   genuinely serving — see [ADR-0017](../../../../docs/decisions/ADR-0017-the-platform-owns-deploy.md).
 - **A converge never re-pins.** `Converge` re-asserts wiring at whatever release is already serving; a user
   editing env vars must not be able to move which release is live. It also skips components with no binding
-  yet — writing one with no release pinned produces an object OpenChoreo cannot render.
+  yet — writing one with no release pinned produces an object OpenChoreo cannot render. The deploy stage's
+  own last pass is a converge for the same reason: it finishes wiring that only became knowable once
+  everything was up, and re-promoting to do it would re-cut a release OpenChoreo then refuses.
+- **The deploy ORDER is the design's hard wiring edges** (`wiring_graph.go` over `spec.HardConfigEdges`).
+  A provider whose address the platform stamps into a consumer's start-up config deploys first, so the
+  consumer is never published with a config nothing could fill. What flows back from consumer to provider
+  (CORS origins, an OIDC callback) orders nothing and is written by the converge. A cycle among hard edges
+  is `ErrDeployPermanent` — nobody can go first — see
+  [ADR-0019](../../../../docs/decisions/ADR-0019-deploy-order-follows-the-hard-wiring-edges.md).
 - **Everything after the OC project + repo is best-effort.** Skills provisioning, the webhook, and the
   project descriptor are each logged-and-continued on failure: none of them may destroy a creation the
   user already committed to. The one exception stays the repo-NAME conflict, which can never succeed on

@@ -451,6 +451,32 @@ func (a *Activities) DeployCycle(ctx context.Context, in DeployCycleInput) ([]de
 	return out, nil
 }
 
+// PlanDeployWaves orders the cycle's components into the levels they can be
+// promoted in — providers before the consumers whose start-up config carries
+// their address.
+//
+// Unwired degrades to ONE wave rather than none, matching DeployCycle's own
+// no-deployer behaviour: a plane without OpenChoreo still walks the stage, it
+// just has nothing to write.
+func (a *Activities) PlanDeployWaves(ctx context.Context, in DeployCycleInput) ([][]string, error) {
+	if a.deployer == nil || len(in.Components) == 0 {
+		return [][]string{in.Components}, nil
+	}
+	waves, err := a.deployer.PlanDeploymentWaves(ctx, in.OrgID, in.ProjectID, in.Components)
+	if err != nil {
+		slog.ErrorContext(ctx, "run: deploy order could not be planned",
+			"orgID", in.OrgID, "projectID", in.ProjectID, "components", in.Components, "error", err)
+		return nil, deployErr(err)
+	}
+	// Logged, not merely returned. The order is the stage's whole premise — a
+	// consumer promoted before its provider is a blank page, and the symptom
+	// appears in a browser rather than anywhere near this code. Reading the plan
+	// off the run beats inferring it from what broke.
+	slog.InfoContext(ctx, "run: deploy order planned",
+		"orgID", in.OrgID, "projectID", in.ProjectID, "waves", waves)
+	return waves, nil
+}
+
 // PollCycleDeployments reads back each component's binding — the readiness poll.
 //
 // With no reader wired every component reads as Ready, which keeps a plane

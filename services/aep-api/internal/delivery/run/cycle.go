@@ -156,22 +156,29 @@ func (l *loop) runCycle(ctx workflow.Context, kind string, anchorIssue int) (cyc
 
 // deployCycle promotes the cycle's components and waits for them to serve.
 //
-// TWO passes, and the second one is not a retry — it is a fixpoint.
+// WAVE BY WAVE, then one CONVERGE — because the wiring between components splits
+// into two kinds that want opposite treatment (spec.HardConfigEdges).
 //
-// Part of a component's desired state depends on its siblings already being up:
-// a protected API's CORS allowlist is the origins of the project's web apps, and
-// an origin exists only once that web app has a binding with a resolved
-// endpoint. A cycle that adds a SPA and an API together therefore cannot know
-// the API's own desired state on the first pass — it composes an empty allowlist
-// and the trait falls back to its wildcard default.
+// A HARD edge is an address the platform stamps into a component's own start-up
+// config: a web app reads API_BASE_URL out of window._env_ at module load and
+// throws without it. That address exists only once the provider has a rendered
+// binding, so a consumer promoted alongside its provider is published with a
+// config nothing could have filled — a blank page served to anyone who visits
+// before the repair. Hard edges therefore ORDER the deploy: each wave waits for
+// the last to serve, and every component's config is right the first time it is
+// written.
 //
-// So: promote, wait for everything to serve, then recompose now that the
-// origins resolve and promote again. The second pass is a no-op whenever nothing
-// moved — the composer is pure and the binding write is idempotent — so the cost
-// in the common case is one round trip per component, not a second rollout. It
-// is bounded at two on purpose: a third could only differ if the desired state
-// depended on itself, which would be a bug in the projection rather than
-// something to iterate out.
+// A SOFT edge runs the other way — a provider learning about its consumer. A
+// protected API's CORS allowlist is the project's SPA origins; an OIDC resource
+// wants the SPA's callback URL registered. Neither is needed before the consumer
+// serves, and requiring them would make the graph circular and unsatisfiable
+// (the SPA needs the API's address, the API needs the SPA's). So they are not
+// ordered at all: one converge at the end, when every address exists.
+//
+// The converge passes an EMPTY commit, and that is what makes it a converge and
+// not a third promote: nothing is re-cut, so it cannot fail on a release that is
+// already there, and no component's live release can move under a pass whose job
+// is only to finish the wiring.
 func (l *loop) deployCycle(ctx workflow.Context, components []string) (cycleResult, error) {
 	if len(components) == 0 {
 		// A validation cycle's pull request carries tests and a report and
@@ -179,20 +186,53 @@ func (l *loop) deployCycle(ctx workflow.Context, components []string) (cycleResu
 		// wait for.
 		return cycleGreen, nil
 	}
-	res, err := l.deployPass(ctx, components)
-	if err != nil || res != cycleGreen {
-		return res, err
+	waves, err := l.planDeployWaves(ctx, components)
+	if err != nil {
+		// An unsatisfiable ORDER is a deployment failure like any other, and has to
+		// arrive as one. Returned raw it would fail the workflow outright: the
+		// boundary returns on a cycle error before it can mint the fix work or
+		// settle the row, leaving a non-terminal run that blocks every later build
+		// on the project — the same wedge this stage exists to stop producing.
+		//
+		// Only a PERMANENT failure converts. A plan that could not be read is a
+		// blip, and Temporal's retry is the right answer for it.
+		if !isPermanentDeploy(err) {
+			return cycleNone, err
+		}
+		l.deployFailed = components
+		l.deployFailures = reasonForAll(components, err)
+		return cycleDeployFailed, nil
 	}
-	return l.deployPass(ctx, components)
-}
 
-// deployPass is one promote-and-wait.
-func (l *loop) deployPass(ctx workflow.Context, components []string) (cycleResult, error) {
-	if err := l.deploy(ctx, components); err != nil {
+	// ONE deadline for the whole stage rather than one per wave. What a version
+	// is owed is a time to be serving; a per-wave budget would silently multiply
+	// that allowance by however many levels the design happens to have.
+	deadlineCtx, stopDeadline := workflow.WithCancel(ctx)
+	defer stopDeadline()
+	deadline := workflow.NewTimer(deadlineCtx, deployReadyTimeout)
+
+	for _, wave := range waves {
+		if err := l.deploy(ctx, wave, l.mergeSHA); err != nil {
+			return cycleNone, err
+		}
+		res, err := l.awaitDeployments(ctx, wave, deadline)
+		if err != nil || res != cycleGreen {
+			return res, err
+		}
+	}
+
+	if err := l.deploy(ctx, components, convergeNoPromotion); err != nil {
 		return cycleNone, err
 	}
-	return l.awaitDeployments(ctx, components)
+	return l.awaitDeployments(ctx, components, deadline)
 }
+
+// convergeNoPromotion is the commit a converge deploys at: none. The deployer
+// reads an empty commit as "re-assert the wiring at whatever release is already
+// serving", so this is the difference between finishing a component's wiring and
+// promoting it again — named rather than spelled `""` at the call site, because
+// which of those two a pass does is the whole point of the pass.
+const convergeNoPromotion = ""
 
 // dispatchUntilLanded spends the cycle's re-dispatch budget trying to land a
 // merged pull request.
@@ -362,10 +402,10 @@ func (l *loop) awaitWake(ctx workflow.Context, poll time.Duration, deadline work
 //
 // On expiry the cycle is treated as a deploy failure rather than a hang, which
 // puts a fix issue in the milestone and lets the loop's ordinary recovery run.
-func (l *loop) awaitDeployments(ctx workflow.Context, components []string) (cycleResult, error) {
-	deadlineCtx, stopDeadline := workflow.WithCancel(ctx)
-	defer stopDeadline()
-	deadline := workflow.NewTimer(deadlineCtx, deployReadyTimeout)
+//
+// The deadline is the STAGE's and is passed in, so a run cannot buy itself more
+// time by having more waves to wait through.
+func (l *loop) awaitDeployments(ctx workflow.Context, components []string, deadline workflow.Future) (cycleResult, error) {
 	expired := false
 
 	for {
@@ -448,10 +488,22 @@ func (l *loop) dispatch(ctx workflow.Context, kind string, anchorIssue int, cycl
 	return jobRef, err
 }
 
-func (l *loop) deploy(ctx workflow.Context, components []string) error {
+// deploy promotes at commitSHA, or converges when it is empty.
+func (l *loop) deploy(ctx workflow.Context, components []string, commitSHA string) error {
 	return workflow.ExecuteActivity(activityCtx(ctx), (*Activities).DeployCycle, DeployCycleInput{
-		OrgID: l.in.OrgID, ProjectID: l.in.ProjectID, Components: components, CommitSHA: l.mergeSHA,
+		OrgID: l.in.OrgID, ProjectID: l.in.ProjectID, Components: components, CommitSHA: commitSHA,
 	}).Get(ctx, nil)
+}
+
+// planDeployWaves asks for the order. No commit rides the request: the order is
+// a property of the DESIGN, not of the release being promoted, and sending one
+// would imply the plan changes with the commit.
+func (l *loop) planDeployWaves(ctx workflow.Context, components []string) ([][]string, error) {
+	var waves [][]string
+	err := workflow.ExecuteActivity(activityCtx(ctx), (*Activities).PlanDeployWaves, DeployCycleInput{
+		OrgID: l.in.OrgID, ProjectID: l.in.ProjectID, Components: components,
+	}).Get(ctx, &waves)
+	return waves, err
 }
 
 func (l *loop) pollDeployments(ctx workflow.Context, components []string) (CycleDeployState, error) {
@@ -480,4 +532,29 @@ func isAgentQuotaBlocked(err error) bool {
 		return appErr.Type() == delivery.ErrTypeAgentQuotaBlocked
 	}
 	return false
+}
+
+// isPermanentDeploy reports whether a deploy-stage activity failed for a reason
+// repeating cannot change. Same mechanism as isAgentQuotaBlocked and for the same
+// reason: deployErr stamps the TYPE on the way out, and a sentinel does not
+// survive Temporal's error round trip.
+func isPermanentDeploy(err error) bool {
+	var appErr *temporal.ApplicationError
+	if errors.As(err, &appErr) {
+		return appErr.Type() == errTypePermanentDeploy
+	}
+	return false
+}
+
+// reasonForAll attributes one stage-wide failure to every component in it.
+//
+// An unsatisfiable order is nobody's individual fault — the components are stuck
+// on each other — so each fix issue carries the same cause, which names the whole
+// cycle rather than the component it happens to be filed against.
+func reasonForAll(components []string, err error) map[string]string {
+	out := make(map[string]string, len(components))
+	for _, name := range components {
+		out[name] = err.Error()
+	}
+	return out
 }
