@@ -107,7 +107,6 @@ const (
 
 // PlanScope is a plan turn's milestone and its story coverage.
 type PlanScope struct {
-	Phase   int         `json:"phase"`
 	Tag     string      `json:"tag"`
 	Stories []PlanStory `json:"stories"`
 }

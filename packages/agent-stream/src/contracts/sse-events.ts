@@ -419,7 +419,6 @@ export type TurnKind = (typeof TURN_KINDS)[number];
 
 /** The milestone a plan turn is scoped to, and which of its stories already have Tasks. */
 export interface PlanScope {
-  phase: number;
   /** The spec tag the milestone is pinned to. */
   tag: string;
   stories: { number: number; title?: string; covered: boolean }[];
@@ -541,7 +540,7 @@ function isPlanScopeOrAbsent(v: unknown): boolean {
   if (v === undefined) return true;
   if (v === null || typeof v !== "object") return false;
   const s = v as Record<string, unknown>;
-  if (typeof s.phase !== "number" || typeof s.tag !== "string") return false;
+  if (typeof s.tag !== "string") return false;
   if (!Array.isArray(s.stories)) return false;
   return s.stories.every((row) => {
     if (row === null || typeof row !== "object") return false;
