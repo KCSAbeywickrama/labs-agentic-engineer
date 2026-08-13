@@ -210,7 +210,20 @@ func (c *secretManagementClient) upsertSecretReference(ctx context.Context, loca
 	return name, nil
 }
 
+func (c *secretManagementClient) requireOpenBaoDirectRefs(location SecretLocation) error {
+	if err := c.requireOCClient(); err != nil {
+		return err
+	}
+	_, err := secretReferenceCPNamespace(location)
+	return err
+}
+
 func (c *secretManagementClient) CreateSecret(ctx context.Context, location SecretLocation, data map[string]string) (string, error) {
+	if !c.managesRefs() {
+		if err := c.requireOpenBaoDirectRefs(location); err != nil {
+			return "", err
+		}
+	}
 	raw, err := json.Marshal(data)
 	if err != nil {
 		return "", fmt.Errorf("marshal secret data: %w", err)
@@ -223,9 +236,6 @@ func (c *secretManagementClient) CreateSecret(ctx context.Context, location Secr
 	if c.managesRefs() {
 		return secretRef, nil
 	}
-	if err := c.requireOCClient(); err != nil {
-		return "", err
-	}
 	keys := make([]string, 0, len(data))
 	for k := range data {
 		keys = append(keys, k)
@@ -234,6 +244,11 @@ func (c *secretManagementClient) CreateSecret(ctx context.Context, location Secr
 }
 
 func (c *secretManagementClient) PatchSecret(ctx context.Context, location SecretLocation, data map[string]string, keysToDelete []string) (string, error) {
+	if !c.managesRefs() {
+		if err := c.requireOpenBaoDirectRefs(location); err != nil {
+			return "", err
+		}
+	}
 	patch := make(map[string]any, len(data)+len(keysToDelete))
 	for k, v := range data {
 		patch[k] = v
@@ -253,9 +268,6 @@ func (c *secretManagementClient) PatchSecret(ctx context.Context, location Secre
 	if c.managesRefs() {
 		return secretRef, nil
 	}
-	if err := c.requireOCClient(); err != nil {
-		return "", err
-	}
 	info, err := c.lowLevelClient.GetSecret(ctx, location)
 	if err != nil {
 		return "", fmt.Errorf("get secret keys after patch: %w", err)
@@ -264,14 +276,16 @@ func (c *secretManagementClient) PatchSecret(ctx context.Context, location Secre
 }
 
 func (c *secretManagementClient) DeleteSecret(ctx context.Context, location SecretLocation, secretRefName string) error {
+	if !c.managesRefs() {
+		if err := c.requireOpenBaoDirectRefs(location); err != nil {
+			return err
+		}
+	}
 	metadata := &SecretMetadata{ManagedBy: c.managedBy}
 	if err := c.lowLevelClient.DeleteSecret(ctx, location, metadata); err != nil {
 		return fmt.Errorf("delete secret: %w", err)
 	}
 	if !c.managesRefs() {
-		if err := c.requireOCClient(); err != nil {
-			return err
-		}
 		orgNS, nsErr := secretReferenceCPNamespace(location)
 		if nsErr != nil {
 			return nsErr

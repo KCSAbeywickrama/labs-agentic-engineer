@@ -27,20 +27,26 @@ import (
 // ---- test doubles ----------------------------------------------------------
 
 type stubSecretsClient struct {
-	pushPath   string
-	patchPath  string
-	deleteErr  error
-	info       *SecretInfo
-	getInfoErr error
+	pushPath    string
+	patchPath   string
+	deleteErr   error
+	info        *SecretInfo
+	getInfoErr  error
+	pushCalls   int
+	patchCalls  int
+	deleteCalls int
 }
 
 func (s *stubSecretsClient) PushSecret(_ context.Context, _ SecretLocation, _ []byte, _ *SecretMetadata) (string, error) {
+	s.pushCalls++
 	return s.pushPath, nil
 }
 func (s *stubSecretsClient) PatchSecret(_ context.Context, _ SecretLocation, _ []byte, _ *SecretMetadata) (string, error) {
+	s.patchCalls++
 	return s.patchPath, nil
 }
 func (s *stubSecretsClient) DeleteSecret(_ context.Context, _ SecretLocation, _ *SecretMetadata) error {
+	s.deleteCalls++
 	return s.deleteErr
 }
 func (s *stubSecretsClient) GetSecret(_ context.Context, _ SecretLocation) (*SecretInfo, error) {
@@ -196,6 +202,7 @@ func TestCreateSecret_ManagesRefsFalse_RequiresControlPlaneNamespace(t *testing.
 		managesRefs: false,
 	}
 	c := newClientForTest(t, p, oc)
+	low := p.client.(*stubSecretsClient)
 
 	_, err := c.CreateSecret(context.Background(), loc, map[string]string{"api-key": "sk-test"})
 	if err == nil {
@@ -203,6 +210,9 @@ func TestCreateSecret_ManagesRefsFalse_RequiresControlPlaneNamespace(t *testing.
 	}
 	if !strings.Contains(err.Error(), "ControlPlaneNamespace") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if low.pushCalls != 0 {
+		t.Fatalf("must not PushSecret without ControlPlaneNamespace; pushes=%d", low.pushCalls)
 	}
 	if len(oc.creates)+len(oc.updates) != 0 {
 		t.Fatalf("must not author a SecretReference without ControlPlaneNamespace; creates=%d updates=%d", len(oc.creates), len(oc.updates))
@@ -295,6 +305,47 @@ func TestPatchSecret_ManagesRefsTrue_SkipsOC(t *testing.T) {
 	}
 	if len(oc.gets)+len(oc.creates)+len(oc.updates) != 0 {
 		t.Fatal("expected no OC calls")
+	}
+}
+
+func TestDeleteSecret_ManagesRefsFalse_RequiresControlPlaneNamespace(t *testing.T) {
+	loc := testLocation()
+	oc := &recordingOCClient{}
+	low := &stubSecretsClient{}
+	p := &stubProvider{client: low, managesRefs: false}
+	c := newClientForTest(t, p, oc)
+
+	err := c.DeleteSecret(context.Background(), loc, loc.SecretRefName())
+	if err == nil {
+		t.Fatal("expected error when ControlPlaneNamespace is empty")
+	}
+	if !strings.Contains(err.Error(), "ControlPlaneNamespace") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if low.deleteCalls != 0 {
+		t.Fatalf("must not DeleteSecret without ControlPlaneNamespace; deletes=%d", low.deleteCalls)
+	}
+	if len(oc.deletes) != 0 {
+		t.Fatalf("must not delete SecretReference without ControlPlaneNamespace; oc.deletes=%d", len(oc.deletes))
+	}
+}
+
+func TestPatchSecret_ManagesRefsFalse_RequiresControlPlaneNamespace(t *testing.T) {
+	loc := testLocation()
+	oc := &recordingOCClient{getErr: ErrNotFound}
+	low := &stubSecretsClient{patchPath: "user-app-secrets/x/y"}
+	p := &stubProvider{client: low, managesRefs: false}
+	c := newClientForTest(t, p, oc)
+
+	_, err := c.PatchSecret(context.Background(), loc, map[string]string{"k": "v"}, nil)
+	if err == nil {
+		t.Fatal("expected error when ControlPlaneNamespace is empty")
+	}
+	if !strings.Contains(err.Error(), "ControlPlaneNamespace") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if low.patchCalls != 0 {
+		t.Fatalf("must not PatchSecret without ControlPlaneNamespace; patches=%d", low.patchCalls)
 	}
 }
 
