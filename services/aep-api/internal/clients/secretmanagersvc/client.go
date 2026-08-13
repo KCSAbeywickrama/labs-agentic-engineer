@@ -37,8 +37,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-
-	"github.com/wso2/aep/aep-api/internal/platform/tenant"
+	"strings"
 )
 
 const (
@@ -162,10 +161,23 @@ func (c *secretManagementClient) requireOCClient() error {
 	return nil
 }
 
+// secretReferenceCPNamespace is the k8s namespace OpenChoreo ReleaseBinding
+// collect uses (Workload/ReleaseBinding ns). Vault paths stay on
+// tenant.OrgBaseNamespace(OrgName); mixing the two is the
+// startup_failed:no_pod_scheduled failure mode.
+func secretReferenceCPNamespace(location SecretLocation) (string, error) {
+	ns := strings.TrimSpace(location.ControlPlaneNamespace)
+	if ns == "" {
+		return "", fmt.Errorf("SecretLocation.ControlPlaneNamespace is required to author SecretReferences")
+	}
+	return ns, nil
+}
+
 func (c *secretManagementClient) upsertSecretReference(ctx context.Context, location SecretLocation, kvPath string, secretKeys []string) (string, error) {
-	// D-SR-namespace: OrgName is the org UUID; OC calls need the derived
-	// k8s base namespace (wc-<ouId8>-<sha256[:8]>), not the raw UUID.
-	orgNS := tenant.OrgBaseNamespace(location.OrgName)
+	orgNS, err := secretReferenceCPNamespace(location)
+	if err != nil {
+		return "", err
+	}
 	name := location.SecretRefName()
 	req := CreateSecretReferenceRequest{
 		Namespace:       orgNS,
@@ -260,7 +272,10 @@ func (c *secretManagementClient) DeleteSecret(ctx context.Context, location Secr
 		if err := c.requireOCClient(); err != nil {
 			return err
 		}
-		orgNS := tenant.OrgBaseNamespace(location.OrgName)
+		orgNS, nsErr := secretReferenceCPNamespace(location)
+		if nsErr != nil {
+			return nsErr
+		}
 		if err := c.ocClient.DeleteSecretReference(ctx, orgNS, secretRefName); err != nil {
 			if !errors.Is(err, ErrNotFound) {
 				return fmt.Errorf("delete SecretReference: %w", err)

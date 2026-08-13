@@ -89,10 +89,19 @@ type OpenBaoAuth struct {
 // All segments are validated against `/` to prevent traversal +
 // path collisions.
 type SecretLocation struct {
-	// OrgName is the org UUID (ouId). The OpenChoreo org namespace is derived
-	// via tenant.OrgBaseNamespace at SecretReference authoring time — do not
-	// pass the derived `wc-…` namespace here. Required.
+	// OrgName is the org UUID (ouId). Used to derive the vault KV path
+	// via tenant.OrgBaseNamespace (`user-app-secrets/<wc-…>/<name>`).
+	// Do not pass the derived `wc-…` namespace here. Required.
 	OrgName string
+
+	// ControlPlaneNamespace is the OpenChoreo k8s namespace where the
+	// SecretReference CR must be authored — the same namespace as the
+	// Workload/ReleaseBinding that will secretKeyRef it (locally the OC
+	// org handle, e.g. "default"). Distinct from OrgBaseNamespace, which
+	// is only the vault path segment. Required when the OpenBao-direct
+	// path authors SecretReferences via the OC API; unused when the
+	// provider manages SecretReferences itself.
+	ControlPlaneNamespace string
 
 	// ProjectName is the OC Project handle. Optional — empty for
 	// org-scoped credentials (Anthropic platform key, App webhook

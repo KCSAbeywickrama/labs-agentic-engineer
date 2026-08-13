@@ -111,6 +111,15 @@ func testLocation() SecretLocation {
 	}
 }
 
+// testLocationWithCP is the OpenBao-direct authoring case: vault path is
+// derived from the org UUID, but the SecretReference CR must land in the
+// OC control-plane namespace (same ns as Workload/ReleaseBinding).
+func testLocationWithCP() SecretLocation {
+	loc := testLocation()
+	loc.ControlPlaneNamespace = "default"
+	return loc
+}
+
 func newClientForTest(t *testing.T, p Provider, oc OpenChoreoSecretReferenceClient) SecretManagementClient {
 	t.Helper()
 	c, err := NewSecretManagementClientWithConfig(SecretManagementClientConfig{
@@ -127,10 +136,11 @@ func newClientForTest(t *testing.T, p Provider, oc OpenChoreoSecretReferenceClie
 
 // ---- gating tests ----------------------------------------------------------
 
-func TestCreateSecret_ManagesRefsFalse_AuthorsSRWithOrgBaseNamespace(t *testing.T) {
-	loc := testLocation()
-	wantNS := tenant.OrgBaseNamespace(loc.OrgName)
-	vaultPath := "user-app-secrets/" + wantNS + "/" + loc.SecretRefName()
+func TestCreateSecret_ManagesRefsFalse_AuthorsSRInControlPlaneNamespace(t *testing.T) {
+	loc := testLocationWithCP()
+	vaultNS := tenant.OrgBaseNamespace(loc.OrgName)
+	wantCRNS := loc.ControlPlaneNamespace
+	vaultPath := "user-app-secrets/" + vaultNS + "/" + loc.SecretRefName()
 
 	oc := &recordingOCClient{getErr: ErrNotFound}
 	p := &stubProvider{
@@ -151,11 +161,14 @@ func TestCreateSecret_ManagesRefsFalse_AuthorsSRWithOrgBaseNamespace(t *testing.
 		t.Fatalf("expected 1 CreateSecretReference, got %d (gets=%d updates=%d)", len(oc.creates), len(oc.gets), len(oc.updates))
 	}
 	call := oc.creates[0]
-	if call.orgNS != wantNS {
-		t.Fatalf("Create orgNS = %q, want OrgBaseNamespace %q (not raw UUID)", call.orgNS, wantNS)
+	if call.orgNS != wantCRNS {
+		t.Fatalf("Create orgNS = %q, want control-plane ns %q", call.orgNS, wantCRNS)
 	}
-	if call.req.Namespace != wantNS {
-		t.Fatalf("req.Namespace = %q, want %q", call.req.Namespace, wantNS)
+	if call.req.Namespace != wantCRNS {
+		t.Fatalf("req.Namespace = %q, want %q", call.req.Namespace, wantCRNS)
+	}
+	if call.orgNS == vaultNS {
+		t.Fatalf("CR namespace %q must not be the vault OrgBaseNamespace", call.orgNS)
 	}
 	if call.req.KVPath != vaultPath {
 		t.Fatalf("req.KVPath = %q, want %q", call.req.KVPath, vaultPath)
@@ -168,7 +181,31 @@ func TestCreateSecret_ManagesRefsFalse_AuthorsSRWithOrgBaseNamespace(t *testing.
 	}
 	// Guard: never pass the raw UUID as the k8s namespace.
 	if strings.Contains(call.orgNS, "eeeeeeeeeeee") || call.orgNS == loc.OrgName {
-		t.Fatalf("orgNS must be OrgBaseNamespace, got raw-looking %q", call.orgNS)
+		t.Fatalf("orgNS must not be the raw org UUID, got %q", call.orgNS)
+	}
+}
+
+func TestCreateSecret_ManagesRefsFalse_RequiresControlPlaneNamespace(t *testing.T) {
+	loc := testLocation() // no ControlPlaneNamespace
+	vaultNS := tenant.OrgBaseNamespace(loc.OrgName)
+	vaultPath := "user-app-secrets/" + vaultNS + "/" + loc.SecretRefName()
+
+	oc := &recordingOCClient{getErr: ErrNotFound}
+	p := &stubProvider{
+		client:      &stubSecretsClient{pushPath: vaultPath},
+		managesRefs: false,
+	}
+	c := newClientForTest(t, p, oc)
+
+	_, err := c.CreateSecret(context.Background(), loc, map[string]string{"api-key": "sk-test"})
+	if err == nil {
+		t.Fatal("expected error when ControlPlaneNamespace is empty")
+	}
+	if !strings.Contains(err.Error(), "ControlPlaneNamespace") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(oc.creates)+len(oc.updates) != 0 {
+		t.Fatalf("must not author a SecretReference without ControlPlaneNamespace; creates=%d updates=%d", len(oc.creates), len(oc.updates))
 	}
 }
 
@@ -214,9 +251,9 @@ func TestCreateSecret_ManagesRefsFalse_RequiresOCClient(t *testing.T) {
 }
 
 func TestPatchSecret_ManagesRefsFalse_AuthorsSR(t *testing.T) {
-	loc := testLocation()
-	wantNS := tenant.OrgBaseNamespace(loc.OrgName)
-	vaultPath := "user-app-secrets/" + wantNS + "/" + loc.SecretRefName()
+	loc := testLocationWithCP()
+	wantNS := loc.ControlPlaneNamespace
+	vaultPath := "user-app-secrets/" + tenant.OrgBaseNamespace(loc.OrgName) + "/" + loc.SecretRefName()
 
 	oc := &recordingOCClient{getErr: ErrNotFound}
 	p := &stubProvider{
@@ -261,9 +298,9 @@ func TestPatchSecret_ManagesRefsTrue_SkipsOC(t *testing.T) {
 	}
 }
 
-func TestDeleteSecret_ManagesRefsFalse_DeletesSRWithOrgBaseNamespace(t *testing.T) {
-	loc := testLocation()
-	wantNS := tenant.OrgBaseNamespace(loc.OrgName)
+func TestDeleteSecret_ManagesRefsFalse_DeletesSRInControlPlaneNamespace(t *testing.T) {
+	loc := testLocationWithCP()
+	wantNS := loc.ControlPlaneNamespace
 	refName := loc.SecretRefName()
 
 	oc := &recordingOCClient{}
@@ -317,9 +354,9 @@ func TestDeleteSecret_ManagesRefsFalse_RequiresOCClient(t *testing.T) {
 }
 
 func TestCreateSecret_ManagesRefsFalse_UpdateWhenExists(t *testing.T) {
-	loc := testLocation()
-	wantNS := tenant.OrgBaseNamespace(loc.OrgName)
-	vaultPath := "user-app-secrets/" + wantNS + "/" + loc.SecretRefName()
+	loc := testLocationWithCP()
+	wantNS := loc.ControlPlaneNamespace
+	vaultPath := "user-app-secrets/" + tenant.OrgBaseNamespace(loc.OrgName) + "/" + loc.SecretRefName()
 
 	oc := &recordingOCClient{} // get succeeds → update path
 	p := &stubProvider{

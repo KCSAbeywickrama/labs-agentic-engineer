@@ -48,7 +48,8 @@ One seam, two providers, no stub:
 - **OSS / local** — `NewOSSOptions` constructs the in-process OpenBao-direct
   provider when `OPENBAO_ADDR` (and `OPENBAO_TOKEN`) are set. The provider writes
   KV; the high-level client authors `SecretReference` CRs via OpenChoreo when
-  `ManagesSecretReferences()` is false.
+  `ManagesSecretReferences()` is false. Those CRs go in the Workload's
+  control-plane namespace (not the vault `wc-…` path segment).
 - **Overlay / cloud** — overlay `main` injects its own provider (sm-api HTTP
   client) through `Options.SecretsProvider`. That client lives outside the
   public module; OSS CI does not exercise it. Coverage is the overlay's unit
