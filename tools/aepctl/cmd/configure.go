@@ -52,8 +52,6 @@ are left untouched. thunder.admin_client_secret is intentionally ignored
 
 Example config file:
 
-  server: http://aep-server.openchoreo.localhost:8080
-
   thunder:
     url: http://thunder-service.thunder.svc.cluster.local:8090
     public_url: https://thunder.example.com

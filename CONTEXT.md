@@ -334,3 +334,11 @@ what keeps the two write paths from racing (only one writer to committed truth w
 a room is open).
 _Avoid_: dry-run, preview turn (a room-mode turn's edits are real, just landed by the
 committer rather than the turn).
+
+## Secrets
+
+**SecretReference**:
+An OpenChoreo CR that names a vault path for a secret. It lives in the same
+control-plane namespace as the Workload that consumes it. The vault path's
+`wc-…` segment (`OrgBaseNamespace`) is a storage key, not that namespace.
+_Avoid_: treating OrgBaseNamespace as the SecretReference CR namespace.

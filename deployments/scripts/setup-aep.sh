@@ -892,13 +892,16 @@ EOF
 echo "✅ .env file generated at $(realpath "$ENV_FILE")"
 
 # ──────────────────────────────────────────────────────────────────────────
-# Local-only: pre-create the default org's base namespace `wc-<…>` that
-# SecretReference CRs land in during Connect (OpenBao-direct provider writes
-# KV; the high-level client authors the SecretReference into this NS).
+# Local-only: pre-create the default org's vault-path namespace `wc-<…>`
+# (`tenant.OrgBaseNamespace(ouId)`). Vault keys are
+# `user-app-secrets/<this-ns>/<secretRefName>`. OpenBao-direct SecretReference
+# CRs do *not* land here — they go in the OC org control-plane namespace
+# (`default`), same as Workload/ReleaseBinding. This Namespace object is
+# still created so leftover pre-fix CRs (and any other wc-… lookups) do not
+# fail with `namespaces wc-… not found`.
 #
 # On cloud, `ou-service` creates this NS at org-onboard time. Locally
-# there is no equivalent. Without this NS, Connect's secrets-delivery
-# path fails (`namespaces wc-… not found`).
+# there is no equivalent.
 #
 # Derives the NS deterministically from Thunder's ouId for the default
 # org (= `wc-<ouId8>-<sha256(ouId)[:8]>`), matching
