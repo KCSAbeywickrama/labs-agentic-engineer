@@ -68,6 +68,17 @@ describe("toSpecEntry", () => {
     // A file literally named like a group folder has no content path.
     expect(toSpecEntry({ path: "specs/requirements", sha: "x" })).toBeNull();
   });
+
+  // A trailing slash names a directory, and its empty last segment clears the
+  // length check — it must not become a selectable entry with no file name, in
+  // the references group or in any other.
+  it("hides directory-like paths", () => {
+    expect(
+      toSpecEntry({ path: "specs/requirements/references/", sha: "x" }),
+    ).toBeNull();
+    expect(toSpecEntry({ path: "specs/requirements/", sha: "x" })).toBeNull();
+    expect(toSpecEntry({ path: "specs/design/components/", sha: "x" })).toBeNull();
+  });
 });
 
 describe("toSpecEntries", () => {
