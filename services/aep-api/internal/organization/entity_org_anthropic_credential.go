@@ -126,12 +126,12 @@ type OrgAnthropicCredential struct {
 	OcOrgID         string                  `gorm:"primaryKey;type:text" json:"ocOrgId"`
 	Role            AnthropicRole           `gorm:"primaryKey;type:text;not null;default:default" json:"role"`
 	CredentialKind  AnthropicCredentialKind `gorm:"type:text;not null;default:api_key;column:credential_kind" json:"credentialKind"`
-	KeyPrefix       string     `gorm:"type:text;not null;column:key_prefix" json:"keyPrefix"`
-	KeyLast4        string     `gorm:"type:text;not null;column:key_last4" json:"keyLast4"`
-	Status          string     `gorm:"type:text;not null;default:active;column:status" json:"status"`
-	ConnectedAt     time.Time  `gorm:"column:connected_at;not null;default:now()" json:"connectedAt"`
-	LastValidatedAt *time.Time `gorm:"column:last_validated_at" json:"lastValidatedAt,omitempty"`
-	ValidationError *string    `gorm:"type:text;column:validation_error" json:"validationError,omitempty"`
+	KeyPrefix       string                  `gorm:"type:text;not null;column:key_prefix" json:"keyPrefix"`
+	KeyLast4        string                  `gorm:"type:text;not null;column:key_last4" json:"keyLast4"`
+	Status          string                  `gorm:"type:text;not null;default:active;column:status" json:"status"`
+	ConnectedAt     time.Time               `gorm:"column:connected_at;not null;default:now()" json:"connectedAt"`
+	LastValidatedAt *time.Time              `gorm:"column:last_validated_at" json:"lastValidatedAt,omitempty"`
+	ValidationError *string                 `gorm:"type:text;column:validation_error" json:"validationError,omitempty"`
 
 	// Secret-ref triplet. Populated by Connect when a secrets provider is
 	// configured; NULL when unset. Dispatch short-circuits the refs path

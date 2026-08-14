@@ -59,19 +59,19 @@ func TestPhase14DropSMAPIColumns_Contract(t *testing.T) {
 	ctx := context.Background()
 
 	for _, col := range secretRefColumns {
-		if !columnExists(t, db, col.table, col.column) {
+		if !leftoverColumnExists(t, db, col.table, col.column) {
 			t.Fatalf("secret_ref_* column %s.%s must survive the drop, missing", col.table, col.column)
 		}
 	}
 	for _, col := range leftoverSMAPIColumns {
-		if columnExists(t, db, col.table, col.column) {
+		if leftoverColumnExists(t, db, col.table, col.column) {
 			t.Fatalf("sm_api_* column %s.%s must be gone after boot, still present", col.table, col.column)
 		}
 	}
 
-	addLegacySMAPIColumns(t, db)
+	addLeftoverSMAPIColumns(t, db)
 	for _, col := range leftoverSMAPIColumns {
-		if !columnExists(t, db, col.table, col.column) {
+		if !leftoverColumnExists(t, db, col.table, col.column) {
 			t.Fatalf("setup: expected restored column %s.%s", col.table, col.column)
 		}
 	}
@@ -80,12 +80,12 @@ func TestPhase14DropSMAPIColumns_Contract(t *testing.T) {
 		t.Fatalf("drop leftover columns: %v", err)
 	}
 	for _, col := range leftoverSMAPIColumns {
-		if columnExists(t, db, col.table, col.column) {
+		if leftoverColumnExists(t, db, col.table, col.column) {
 			t.Fatalf("sm_api_* column %s.%s must be gone after drop, still present", col.table, col.column)
 		}
 	}
 	for _, col := range secretRefColumns {
-		if !columnExists(t, db, col.table, col.column) {
+		if !leftoverColumnExists(t, db, col.table, col.column) {
 			t.Fatalf("secret_ref_* column %s.%s must survive the drop, missing", col.table, col.column)
 		}
 	}

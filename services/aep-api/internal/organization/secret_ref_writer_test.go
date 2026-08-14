@@ -590,11 +590,11 @@ func TestSecretRefWriter_DeleteAnthropic_DB(t *testing.T) {
 func seedIDPProfileRow(t testing.TB, db *gorm.DB, orgID string, refName, kvPath *string) {
 	t.Helper()
 	row := organization.OrganizationIDPProfile{
-		OrgID:              orgID,
-		Kind:               "custom",
-		Issuer:             "https://idp.test",
-		JWKSURL:            "https://idp.test/jwks",
-		PublisherClientID:  "aep-publisher-" + orgID,
+		OrgID:             orgID,
+		Kind:              "custom",
+		Issuer:            "https://idp.test",
+		JWKSURL:           "https://idp.test/jwks",
+		PublisherClientID: "aep-publisher-" + orgID,
 		SecretRefName:     refName,
 		SecretRefKVPath:   kvPath,
 	}
@@ -705,13 +705,13 @@ func TestSecretRefWriter_DeletePublisher_DB(t *testing.T) {
 func seedUserPATRow(t testing.TB, db *gorm.DB, ocOrgID string, refName, kvPath *string) {
 	t.Helper()
 	row := organization.OrgCredential{
-		OcOrgID:            ocOrgID,
-		Kind:               "user-pat",
-		GitHubLogin:        "ada",
-		IdentityName:       "Ada Lovelace",
-		IdentityEmail:      "ada@example.com",
-		IdentityLogin:      "ada",
-		WebhookSecrets:     organization.WebhookSecrets{{Secret: "seed-secret"}},
+		OcOrgID:         ocOrgID,
+		Kind:            "user-pat",
+		GitHubLogin:     "ada",
+		IdentityName:    "Ada Lovelace",
+		IdentityEmail:   "ada@example.com",
+		IdentityLogin:   "ada",
+		WebhookSecrets:  organization.WebhookSecrets{{Secret: "seed-secret"}},
 		SecretRefName:   refName,
 		SecretRefKVPath: kvPath,
 	}
@@ -882,25 +882,3 @@ func TestSecretRefWriter_WriteGitHubPAT_StampsSecretRef(t *testing.T) {
 		t.Fatalf("secret_ref_written_at: %v", got.SecretRefWrittenAt)
 	}
 }
-
-func TestResolvedSecretRef_ReturnsSecretRefColumns(t *testing.T) {
-	t.Parallel()
-	name := "new-ref"
-	row := organization.OrgAnthropicCredential{}
-	if got := row.ResolvedSecretRefName(); got != nil {
-		t.Fatalf("empty row: got %v", got)
-	}
-	row.SecretRefName = &name
-	row.SecretRefKVPath = strPtr("new/path")
-	row.SecretRefProperty = strPtr("new-prop")
-	if got := row.ResolvedSecretRefName(); got == nil || *got != "new-ref" {
-		t.Fatalf("name: got %v", got)
-	}
-	if got := row.ResolvedSecretRefKVPath(); got == nil || *got != "new/path" {
-		t.Fatalf("kv_path: got %v", got)
-	}
-	if got := row.ResolvedSecretRefProperty(); got == nil || *got != "new-prop" {
-		t.Fatalf("property: got %v", got)
-	}
-}
-

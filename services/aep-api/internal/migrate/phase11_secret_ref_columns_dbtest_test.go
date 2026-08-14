@@ -31,7 +31,7 @@ import (
 func TestPhase11SecretRefColumns_ExpandAndBackfill(t *testing.T) {
 	db := dbtest.New(t)
 	ctx := context.Background()
-	addLegacySMAPIColumns(t, db)
+	addLeftoverSMAPIColumns(t, db)
 
 	for _, col := range []struct {
 		table, column string
@@ -42,7 +42,7 @@ func TestPhase11SecretRefColumns_ExpandAndBackfill(t *testing.T) {
 		{"organization_idp_profiles", "secret_ref_name"},
 		{"organization_idp_profiles", "secret_ref_written_at"},
 	} {
-		if !columnExists(t, db, col.table, col.column) {
+		if !leftoverColumnExists(t, db, col.table, col.column) {
 			t.Fatalf("expected column %s.%s after expand", col.table, col.column)
 		}
 	}
@@ -128,5 +128,71 @@ func TestPhase11SecretRefColumns_ExpandAndBackfill(t *testing.T) {
 
 	if err := migrate.RunPhase11SecretRefColumns(ctx, db); err != nil {
 		t.Fatalf("idempotent re-run: %v", err)
+	}
+}
+
+func TestPhase11SecretRefColumns_EmptySecretRefNameIsBackfilled(t *testing.T) {
+	db := dbtest.New(t)
+	ctx := context.Background()
+	addLeftoverSMAPIColumns(t, db)
+
+	if err := db.Exec(`
+		INSERT INTO org_anthropic_credentials
+		  (oc_org_id, role, key_prefix, key_last4, status, connected_at,
+		   secret_ref_name, sm_api_secret_ref_name, sm_api_kv_path, sm_api_property)
+		VALUES
+		  ('org-empty', 'default', 'sk-ant-api03-', 'abcd', 'active', now(),
+		   '', 'from-leftover', 'user-app-secrets/ns/from-leftover', 'api-key')
+	`).Error; err != nil {
+		t.Fatalf("seed blank secret_ref_name: %v", err)
+	}
+
+	if err := migrate.RunPhase11SecretRefColumns(ctx, db); err != nil {
+		t.Fatalf("phase11: %v", err)
+	}
+
+	var name, path, prop string
+	if err := db.Raw(`
+		SELECT secret_ref_name, secret_ref_kv_path, secret_ref_property
+		  FROM org_anthropic_credentials WHERE oc_org_id='org-empty'
+	`).Row().Scan(&name, &path, &prop); err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if name != "from-leftover" || path != "user-app-secrets/ns/from-leftover" || prop != "api-key" {
+		t.Fatalf("blank secret_ref_name must be backfilled, got (%q,%q,%q)", name, path, prop)
+	}
+}
+
+func TestPhase11SecretRefColumns_DoesNotOverwritePopulatedSecretRef(t *testing.T) {
+	db := dbtest.New(t)
+	ctx := context.Background()
+	addLeftoverSMAPIColumns(t, db)
+
+	if err := db.Exec(`
+		INSERT INTO org_anthropic_credentials
+		  (oc_org_id, role, key_prefix, key_last4, status, connected_at,
+		   secret_ref_name, secret_ref_kv_path, secret_ref_property,
+		   sm_api_secret_ref_name, sm_api_kv_path, sm_api_property)
+		VALUES
+		  ('org-keep', 'default', 'sk-ant-api03-', 'keep', 'active', now(),
+		   'keep-me', 'keep/path', 'keep-prop',
+		   'drop-me', 'drop/path', 'drop-prop')
+	`).Error; err != nil {
+		t.Fatalf("seed both-set row: %v", err)
+	}
+
+	if err := migrate.RunPhase11SecretRefColumns(ctx, db); err != nil {
+		t.Fatalf("phase11: %v", err)
+	}
+
+	var name, path, prop string
+	if err := db.Raw(`
+		SELECT secret_ref_name, secret_ref_kv_path, secret_ref_property
+		  FROM org_anthropic_credentials WHERE oc_org_id='org-keep'
+	`).Row().Scan(&name, &path, &prop); err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if name != "keep-me" || path != "keep/path" || prop != "keep-prop" {
+		t.Fatalf("populated secret_ref_* must win, got (%q,%q,%q)", name, path, prop)
 	}
 }

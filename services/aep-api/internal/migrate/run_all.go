@@ -106,7 +106,6 @@ func Steps(db *gorm.DB, deploymentTier string, credKey []byte) []database.Step {
 		ctxStep("org_secrets", RunOrgSecretsMigration),
 		ctxStep("per_org_secret_name", RunPerOrgSecretName),
 		ctxStep("org_anthropic_credentials", RunOrgAnthropicCredentialsMigration),
-		ctxStep("phase3_sm_api_columns", RunPhase3SMAPIColumns),
 		ctxStep("phase3_thunder_org_uuid", RunPhase3ThunderOrgUUID),
 		ctxStep("phase3_coding_agent_logs", RunPhase3CodingAgentLogs),
 		// GitRepository table from the model tag (creates the new composite index).
@@ -115,7 +114,6 @@ func Steps(db *gorm.DB, deploymentTier string, credKey []byte) []database.Step {
 		// which creates the new index from the tag but never drops the old one.
 		ctxStep("git_repositories_composite_unique", RunGitRepoCompositeUnique),
 		dbStep("phase7_skills", RunPhase7Skills),
-		ctxStep("phase8_idp_sm_api_columns", RunPhase8IDPSMAPIColumns),
 		// Executions table (AutoMigrated from the model) gains its partial
 		// admission-mutex unique index, which AutoMigrate cannot express.
 		ctxStep("executions", RunExecutions),
@@ -167,6 +165,7 @@ func Steps(db *gorm.DB, deploymentTier string, credKey []byte) []database.Step {
 		// a price card to resolve against. Ops-managed thereafter.
 		ctxStep("model_rates_seed", RunModelRatesSeed),
 		// secret_ref_* columns, backfilled from leftover sm_api_* if present.
+		// Do not ADD sm_api_* here — phase14 drops leftovers that already exist.
 		ctxStep("phase11_secret_ref_columns", RunPhase11SecretRefColumns),
 		// Encrypt publisher_client_secret + webhook_secrets in place
 		// (phase-03 items 15–16). Uses the same credential-encryption-key.

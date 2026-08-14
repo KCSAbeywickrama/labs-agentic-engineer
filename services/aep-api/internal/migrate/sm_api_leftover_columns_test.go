@@ -22,10 +22,10 @@ import (
 	"gorm.io/gorm"
 )
 
-// addLegacySMAPIColumns reconstructs the pre-drop schema so a test can
+// addLeftoverSMAPIColumns reconstructs the pre-drop schema so a test can
 // exercise phase11 backfill and phase14 DROP against leftover sm_api_*
 // columns. dbtest.New applies every step, so those columns are already gone.
-func addLegacySMAPIColumns(t *testing.T, db *gorm.DB) {
+func addLeftoverSMAPIColumns(t *testing.T, db *gorm.DB) {
 	t.Helper()
 	stmts := []string{
 		`ALTER TABLE org_anthropic_credentials
@@ -50,7 +50,7 @@ func addLegacySMAPIColumns(t *testing.T, db *gorm.DB) {
 	}
 }
 
-func columnExists(t *testing.T, db *gorm.DB, table, column string) bool {
+func leftoverColumnExists(t *testing.T, db *gorm.DB, table, column string) bool {
 	t.Helper()
 	var n int
 	if err := db.Raw(

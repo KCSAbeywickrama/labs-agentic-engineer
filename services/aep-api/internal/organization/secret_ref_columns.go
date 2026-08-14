@@ -18,68 +18,6 @@ package organization
 
 import "time"
 
-func derefString(p *string) string {
-	if p != nil {
-		return *p
-	}
-	return ""
-}
-
-// ResolvedSecretRefName returns secret_ref_name.
-func (c *OrgAnthropicCredential) ResolvedSecretRefName() *string {
-	return c.SecretRefName
-}
-
-// ResolvedSecretRefKVPath returns secret_ref_kv_path.
-func (c *OrgAnthropicCredential) ResolvedSecretRefKVPath() *string {
-	return c.SecretRefKVPath
-}
-
-// ResolvedSecretRefProperty returns secret_ref_property.
-func (c *OrgAnthropicCredential) ResolvedSecretRefProperty() *string {
-	return c.SecretRefProperty
-}
-
-// ResolvedSecretRefName returns secret_ref_name.
-func (c *OrgCredential) ResolvedSecretRefName() *string {
-	return c.SecretRefName
-}
-
-// ResolvedSecretRefKVPath returns secret_ref_kv_path.
-func (c *OrgCredential) ResolvedSecretRefKVPath() *string {
-	return c.SecretRefKVPath
-}
-
-// ResolvedSecretRefProperty returns secret_ref_property.
-func (c *OrgCredential) ResolvedSecretRefProperty() *string {
-	return c.SecretRefProperty
-}
-
-// ResolvedSecretRefWrittenAt returns secret_ref_written_at.
-func (c *OrgCredential) ResolvedSecretRefWrittenAt() *time.Time {
-	return c.SecretRefWrittenAt
-}
-
-// ResolvedSecretRefName returns secret_ref_name.
-func (p *OrganizationIDPProfile) ResolvedSecretRefName() *string {
-	return p.SecretRefName
-}
-
-// ResolvedSecretRefKVPath returns secret_ref_kv_path.
-func (p *OrganizationIDPProfile) ResolvedSecretRefKVPath() *string {
-	return p.SecretRefKVPath
-}
-
-// ResolvedSecretRefProperty returns secret_ref_property.
-func (p *OrganizationIDPProfile) ResolvedSecretRefProperty() *string {
-	return p.SecretRefProperty
-}
-
-// ResolvedSecretRefWrittenAt returns secret_ref_written_at.
-func (p *OrganizationIDPProfile) ResolvedSecretRefWrittenAt() *time.Time {
-	return p.SecretRefWrittenAt
-}
-
 // stampSecretRefTriplet returns UpdateColumns keys for the secret_ref_* columns.
 func stampSecretRefTriplet(secretRefName, vaultKey, prop string) map[string]any {
 	return map[string]any{
