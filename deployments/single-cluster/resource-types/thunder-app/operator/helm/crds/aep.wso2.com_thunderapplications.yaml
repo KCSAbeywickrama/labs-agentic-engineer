@@ -50,6 +50,9 @@ spec:
                 description: ClientType is "public" (default, PKCE authorization_code)
                   or "confidential" (client_credentials). SecretRef is required when
                   clientType=confidential.
+                enum:
+                - public
+                - confidential
                 type: string
               displayName:
                 description: DisplayName shown in the Thunder console. Defaults to

@@ -124,6 +124,9 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 	if _, err := exec.LookPath("helm"); err != nil {
 		return fmt.Errorf("helm is required but was not found in PATH\nInstall it from https://helm.sh/docs/intro/install/ and try again")
 	}
+	if _, err := exec.LookPath("kubectl"); err != nil {
+		return fmt.Errorf("kubectl is required but was not found in PATH\nInstall it from https://kubernetes.io/docs/tasks/tools/ and try again")
+	}
 
 	k8sClient, err := k8s.NewClient(kubeconfig)
 	if err != nil {
@@ -209,9 +212,12 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 		"--set", "thunder.adminURL=" + thunderURL,
 		"--set", "thunder.jwksURL=" + thunderURL + "/oauth2/jwks",
 		"--set", "platformAPI.baseURL=" + viper.GetString("oc.api_url"),
-		// thunder-app-operator credentials come from ESO-synced aep-thunder-operator-creds
-		// Secret (written to OpenBao by provisionOpenBao above — never passed via --set).
-		"--set", "thunder-app-operator.thunder.existingSecret=aep-thunder-operator-creds",
+		// thunder-app-operator subchart: forward the same Thunder admin URL so the
+		// operator talks to the same endpoint as the rest of the platform.
+		// Credentials come from the ESO-synced Secret (written to OpenBao by
+		// provisionOpenBao above — never passed via --set).
+		"--set", "thunder-app-operator.thunder.adminURL=" + thunderURL,
+		"--set", "thunder-app-operator.thunder.existingSecret=" + config.ThunderOperatorCredsSecret,
 	}
 	// helm upgrade --install <release> <chart> [flags]
 	// Chart must be inserted after "upgrade", "--install", <release> (index 3).

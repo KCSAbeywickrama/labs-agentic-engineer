@@ -34,6 +34,7 @@ type ThunderApplicationSpec struct {
 	// "public" creates a PKCE authorization_code client (browser SPA).
 	// "confidential" creates a client_credentials client (service-to-service);
 	// SecretRef is required in that case.
+	// +kubebuilder:validation:Enum=public;confidential
 	ClientType string `json:"clientType,omitempty"`
 	// ClientID overrides the derived aep-<namespace>-<name> identity. Use this
 	// for platform clients that must have a stable, well-known client ID.

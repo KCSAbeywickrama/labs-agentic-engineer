@@ -67,27 +67,37 @@ func doThunderSetup(
 	_, _ = fmt.Fprintf(os.Stdout, "Waiting for Thunder OAuth clients to be provisioned")
 	timeout := 5 * time.Minute
 	deadline := time.Now().Add(timeout)
+	var lastKubectlErr error
 	for {
 		args := kubectlArgs("get", "thunderapplications",
 			"-n", platformNamespace,
 			"-o", `jsonpath={range .items[*]}{.metadata.name}=={.status.ready}{"\n"}{end}`)
 		out, err := exec.CommandContext(ctx, "kubectl", args...).Output()
-		if err == nil && len(strings.TrimSpace(string(out))) > 0 {
-			lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-			allReady := true
-			for _, line := range lines {
-				if !strings.HasSuffix(line, "==true") {
-					allReady = false
+		if err != nil {
+			lastKubectlErr = err
+		} else {
+			lastKubectlErr = nil
+			if len(strings.TrimSpace(string(out))) > 0 {
+				lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+				allReady := true
+				for _, line := range lines {
+					if !strings.HasSuffix(line, "==true") {
+						allReady = false
+						break
+					}
+				}
+				if allReady {
+					_, _ = fmt.Fprintln(os.Stdout, " ready")
 					break
 				}
-			}
-			if allReady {
-				_, _ = fmt.Fprintln(os.Stdout, " ready")
-				break
 			}
 		}
 		if time.Now().After(deadline) {
 			_, _ = fmt.Fprintln(os.Stdout)
+			if lastKubectlErr != nil {
+				return fmt.Errorf("timed out after %s waiting for ThunderApplications in namespace %s: last kubectl error: %w",
+					timeout, platformNamespace, lastKubectlErr)
+			}
 			return fmt.Errorf("timed out after %s waiting for ThunderApplications to be ready in namespace %s",
 				timeout, platformNamespace)
 		}

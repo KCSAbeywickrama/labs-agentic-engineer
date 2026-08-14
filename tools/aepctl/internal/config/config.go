@@ -33,6 +33,14 @@ import (
 // all subsequent commands. It lives in the AEP platform namespace (wso2-aep).
 const ConfigMapName = "aep-cli-config"
 
+// ThunderOperatorCredsSecret is the ESO-synced Secret that holds the Thunder
+// system client credentials used by the thunder-app-operator.
+const ThunderOperatorCredsSecret = "aep-thunder-operator-creds"
+
+// ThunderOperatorCredsSecretKey is the key within ThunderOperatorCredsSecret
+// that holds the OAuth client secret.
+const ThunderOperatorCredsSecretKey = "client-secret"
+
 // ConfigMapKeys is the canonical list of non-sensitive viper keys stored in
 // ConfigMapName. thunder.admin_client_secret is intentionally absent — it is
 // managed by OpenBao/ESO and read from the aep-thunder-secrets Secret instead.
@@ -176,19 +184,19 @@ func LoadFromCluster(ctx context.Context, client *kubernetes.Clientset, namespac
 }
 
 // LoadThunderSecretFromCluster reads the Thunder admin client secret from the
-// ESO-synced aep-thunder-operator-creds Secret and sets it via viper.SetDefault
-// so that AEP_THUNDER_ADMIN_CLIENT_SECRET env and the interactive prompt still
+// ESO-synced ThunderOperatorCredsSecret and sets it via viper.SetDefault so
+// that AEP_THUNDER_ADMIN_CLIENT_SECRET env and the interactive prompt still
 // take precedence. The secret is never stored in the ConfigMap.
 // Returns nil if the Secret does not yet exist (first install).
 func LoadThunderSecretFromCluster(ctx context.Context, client *kubernetes.Clientset, namespace string) error {
-	sec, err := client.CoreV1().Secrets(namespace).Get(ctx, "aep-thunder-operator-creds", metav1.GetOptions{})
+	sec, err := client.CoreV1().Secrets(namespace).Get(ctx, ThunderOperatorCredsSecret, metav1.GetOptions{})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			return nil
 		}
-		return fmt.Errorf("read aep-thunder-operator-creds: %w", err)
+		return fmt.Errorf("read %s: %w", ThunderOperatorCredsSecret, err)
 	}
-	if v, ok := sec.Data["client-secret"]; ok && len(v) > 0 {
+	if v, ok := sec.Data[ThunderOperatorCredsSecretKey]; ok && len(v) > 0 {
 		viper.SetDefault("thunder.admin_client_secret", string(v))
 	}
 	return nil
