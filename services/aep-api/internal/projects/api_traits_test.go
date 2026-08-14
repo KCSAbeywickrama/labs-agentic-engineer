@@ -19,6 +19,8 @@ package projects
 import (
 	"reflect"
 	"testing"
+
+	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 )
 
 func TestAPIConfigurationInstanceName(t *testing.T) {
@@ -46,7 +48,7 @@ func TestAPIConfigurationInstanceName(t *testing.T) {
 // This is the schema the AP gateway-runtime expects (see
 // deployments/manifests/api-platform/api-configuration-trait.yaml).
 func TestDesiredAPIConfigurationTrait_Enabled(t *testing.T) {
-	traits, configs := DesiredAPIConfigurationTrait("svc", "", true)
+	traits, configs := desiredAPIConfigurationTraitForTest("svc", "", true)
 	if len(traits) != 1 {
 		t.Fatalf("want 1 trait, got %d", len(traits))
 	}
@@ -95,7 +97,7 @@ func TestDesiredAPIConfigurationTrait_Enabled(t *testing.T) {
 // `endpointName` parameter and the trait instance name / config key, so the
 // gateway binds to the workload's actual endpoint (no more hardcoded "http").
 func TestDesiredAPIConfigurationTrait_CustomEndpointName(t *testing.T) {
-	traits, configs := DesiredAPIConfigurationTrait("svc", "api", true)
+	traits, configs := desiredAPIConfigurationTraitForTest("svc", "api", true)
 	if len(traits) != 1 {
 		t.Fatalf("want 1 trait, got %d", len(traits))
 	}
@@ -115,7 +117,7 @@ func TestDesiredAPIConfigurationTrait_CustomEndpointName(t *testing.T) {
 // No trait + a tombstone entry in configs so the OC client's merge logic
 // removes any previously-set trait instance from each RB.
 func TestDesiredAPIConfigurationTrait_Disabled(t *testing.T) {
-	traits, configs := DesiredAPIConfigurationTrait("svc", "", false)
+	traits, configs := desiredAPIConfigurationTraitForTest("svc", "", false)
 	if traits != nil {
 		t.Fatalf("want nil traits when disabled, got %+v", traits)
 	}
@@ -150,4 +152,11 @@ func Test_originFromEndpointURL(t *testing.T) {
 			t.Errorf("originFromEndpointURL(%q) = %q; want %q", c.in, got, c.want)
 		}
 	}
+}
+
+// desiredAPIConfigurationTraitForTest is the no-issuers, no-origins shape these
+// table tests exercise. A test helper rather than a production shim: the only
+// production caller is DesiredDeploymentFor, which always has both to pass.
+func desiredAPIConfigurationTraitForTest(componentName, endpointName string, enabled bool) ([]openchoreo.ComponentTrait, map[string]map[string]interface{}) {
+	return DesiredAPIConfigurationTraitWithIssuers(componentName, endpointName, enabled, nil, nil)
 }
