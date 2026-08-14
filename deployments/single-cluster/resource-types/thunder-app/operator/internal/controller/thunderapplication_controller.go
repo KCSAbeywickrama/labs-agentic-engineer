@@ -31,6 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -76,6 +77,7 @@ type Reconciler struct {
 // +kubebuilder:rbac:groups=aep.wso2.com,resources=thunderapplications/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=aep.wso2.com,resources=thunderapplications/finalizers,verbs=update
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups=openchoreo.dev,resources=resourcereleasebindings,verbs=get;list;patch
 
 // Reconcile drives a ThunderApplication toward its desired Thunder OAuth
@@ -99,11 +101,21 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		if err := r.Update(ctx, &app); err != nil {
 			return ctrl.Result{}, err
 		}
+		// Re-fetch so Status().Update below uses the post-finalizer ResourceVersion.
+		if err := r.Get(ctx, req.NamespacedName, &app); err != nil {
+			return ctrl.Result{}, client.IgnoreNotFound(err)
+		}
 	}
 
-	clientID, err := r.Thunder.EnsureApplication(ctx, desiredApp(&app))
+	desired, err := r.buildDesiredApp(ctx, &app)
 	if err != nil {
-		logger.Error(err, "EnsureApplication failed", "thunderApp", thunderAppName(&app))
+		logger.Error(err, "buildDesiredApp failed", "thunderApp", clientIDForApp(&app))
+		return r.markError(ctx, &app, err)
+	}
+
+	clientID, err := r.Thunder.EnsureApplication(ctx, desired)
+	if err != nil {
+		logger.Error(err, "EnsureApplication failed", "thunderApp", clientIDForApp(&app))
 		return r.markError(ctx, &app, err)
 	}
 
@@ -180,8 +192,8 @@ func (r *Reconciler) reconcileDelete(ctx context.Context, app *v1alpha1.ThunderA
 		return ctrl.Result{}, nil
 	}
 
-	if err := r.Thunder.DeleteApplication(ctx, thunderAppName(app)); err != nil {
-		log.FromContext(ctx).Error(err, "DeleteApplication failed", "thunderApp", thunderAppName(app))
+	if err := r.Thunder.DeleteApplication(ctx, clientIDForApp(app)); err != nil {
+		log.FromContext(ctx).Error(err, "DeleteApplication failed", "thunderApp", clientIDForApp(app))
 		return r.markError(ctx, app, err)
 	}
 
@@ -197,9 +209,10 @@ func (r *Reconciler) reconcileDelete(ctx context.Context, app *v1alpha1.ThunderA
 // controller-runtime forbids returning both a non-nil error and RequeueAfter,
 // and the RequeueAfter path is what lets the message reach status.
 func (r *Reconciler) markError(ctx context.Context, app *v1alpha1.ThunderApplication, cause error) (ctrl.Result, error) {
+	base := app.DeepCopy()
 	app.Status.Ready = false
 	app.Status.Message = cause.Error()
-	if err := r.Status().Update(ctx, app); err != nil {
+	if err := r.Status().Patch(ctx, app, client.MergeFrom(base)); err != nil {
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{RequeueAfter: errBackoff}, nil
@@ -225,21 +238,56 @@ func (r *Reconciler) ensureConfigMap(ctx context.Context, app *v1alpha1.ThunderA
 	return err
 }
 
-// desiredApp derives the Thunder desired state from a CR.
+// buildDesiredApp derives the desired Thunder app state from a CR. For
+// confidential clients it reads the client secret from the referenced Secret.
+func (r *Reconciler) buildDesiredApp(ctx context.Context, app *v1alpha1.ThunderApplication) (thunder.DesiredApp, error) {
+	desired := desiredApp(app)
+	if app.Spec.ClientType == "confidential" {
+		if app.Spec.SecretRef == nil {
+			return thunder.DesiredApp{}, fmt.Errorf("confidential client %q requires spec.secretRef", app.Name)
+		}
+		ns := app.Spec.SecretRef.Namespace
+		if ns == "" {
+			ns = app.Namespace
+		}
+		var sec corev1.Secret
+		if err := r.Get(ctx, types.NamespacedName{Name: app.Spec.SecretRef.Name, Namespace: ns}, &sec); err != nil {
+			return thunder.DesiredApp{}, fmt.Errorf("read secretRef %s/%s: %w", ns, app.Spec.SecretRef.Name, err)
+		}
+		desired.ClientSecret = string(sec.Data[app.Spec.SecretRef.Key])
+		if desired.ClientSecret == "" {
+			return thunder.DesiredApp{}, fmt.Errorf("secret %s/%s key %q is empty", ns, app.Spec.SecretRef.Name, app.Spec.SecretRef.Key)
+		}
+	}
+	return desired, nil
+}
+
+// desiredApp derives the Thunder desired state from a CR (without secret lookup).
 func desiredApp(app *v1alpha1.ThunderApplication) thunder.DesiredApp {
 	displayName := app.Spec.DisplayName
 	if displayName == "" {
 		displayName = app.Name
 	}
 	return thunder.DesiredApp{
-		Name:         thunderAppName(app),
+		Name:         clientIDForApp(app),
 		DisplayName:  displayName,
 		Scopes:       strings.Fields(app.Spec.Scopes),
 		RedirectURIs: splitRedirectURIs(app.Spec.RedirectURIs),
+		ClientType:   app.Spec.ClientType,
 	}
 }
 
-// thunderAppName is the deterministic per-CR Thunder application identity.
+// clientIDForApp returns the Thunder client ID for a CR: spec.clientId when
+// set (explicit override), otherwise the derived aep-<namespace>-<name>.
+func clientIDForApp(app *v1alpha1.ThunderApplication) string {
+	if app.Spec.ClientID != "" {
+		return app.Spec.ClientID
+	}
+	return thunderAppName(app)
+}
+
+// thunderAppName is the derived Thunder application identity (fallback when
+// spec.clientId is not set).
 func thunderAppName(app *v1alpha1.ThunderApplication) string {
 	return fmt.Sprintf("aep-%s-%s", app.Namespace, app.Name)
 }

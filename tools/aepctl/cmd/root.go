@@ -26,7 +26,10 @@ import (
 	k8s "github.com/wso2/aep/aepctl/internal/kubernetes"
 )
 
-var kubeconfig string
+var (
+	kubeconfig string
+	configFile string
+)
 
 var rootCmd = &cobra.Command{
 	Use:   "aep",

@@ -297,6 +297,118 @@ func TestReconcile_DeletionThunderError(t *testing.T) {
 	}
 }
 
+// Confidential client: spec.clientId is used as the Thunder name, secret is
+// read from the referenced Kubernetes Secret.
+func TestReconcile_ConfidentialClient(t *testing.T) {
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "my-secrets"},
+		Data:       map[string][]byte{"MY_SECRET": []byte("s3cr3t")},
+	}
+	app := newApp("ns", "svc-client", v1alpha1.ThunderApplicationSpec{
+		DisplayName: "My Service",
+		ClientType:  "confidential",
+		ClientID:    "my-service-client",
+		SecretRef:   &v1alpha1.SecretKeyRef{Name: "my-secrets", Key: "MY_SECRET"},
+	})
+	admin := &fakeAdmin{clientID: "my-service-client"}
+	r, cl := newReconciler(t, admin, app, secret)
+
+	if _, err := r.Reconcile(context.Background(), reqFor(app)); err != nil {
+		t.Fatalf("Reconcile returned error: %v", err)
+	}
+
+	if len(admin.ensureCalls) != 1 {
+		t.Fatalf("EnsureApplication called %d times, want 1", len(admin.ensureCalls))
+	}
+	got := admin.ensureCalls[0]
+	if got.Name != "my-service-client" {
+		t.Errorf("DesiredApp.Name = %q, want my-service-client", got.Name)
+	}
+	if got.ClientType != "confidential" {
+		t.Errorf("DesiredApp.ClientType = %q, want confidential", got.ClientType)
+	}
+	if got.ClientSecret != "s3cr3t" {
+		t.Errorf("DesiredApp.ClientSecret = %q, want s3cr3t", got.ClientSecret)
+	}
+
+	// ConfigMap carries the explicit client_id.
+	var cm corev1.ConfigMap
+	if err := cl.Get(context.Background(), types.NamespacedName{Namespace: "ns", Name: "svc-client-oauth"}, &cm); err != nil {
+		t.Fatalf("get oauth ConfigMap: %v", err)
+	}
+	if cm.Data["client_id"] != "my-service-client" {
+		t.Errorf("ConfigMap client_id = %q, want my-service-client", cm.Data["client_id"])
+	}
+}
+
+// Confidential client with missing secretRef → error, CR marked not ready.
+func TestReconcile_ConfidentialClient_MissingSecretRef(t *testing.T) {
+	app := newApp("ns", "broken", v1alpha1.ThunderApplicationSpec{
+		ClientType: "confidential",
+		ClientID:   "broken-client",
+		// SecretRef intentionally omitted
+	})
+	admin := &fakeAdmin{}
+	r, cl := newReconciler(t, admin, app)
+
+	res, err := r.Reconcile(context.Background(), reqFor(app))
+	if err != nil {
+		t.Fatalf("Reconcile should not return an error: %v", err)
+	}
+	if res.RequeueAfter <= 0 {
+		t.Errorf("RequeueAfter = %v, want > 0 (should retry)", res.RequeueAfter)
+	}
+	if len(admin.ensureCalls) != 0 {
+		t.Errorf("EnsureApplication called %d times, want 0", len(admin.ensureCalls))
+	}
+
+	var updated v1alpha1.ThunderApplication
+	if err := cl.Get(context.Background(), reqFor(app).NamespacedName, &updated); err != nil {
+		t.Fatalf("get CR: %v", err)
+	}
+	if updated.Status.Ready {
+		t.Errorf("Status.Ready = true, want false")
+	}
+}
+
+// spec.clientId override: Thunder name uses the explicit client ID, not derived.
+func TestReconcile_ClientIDOverride(t *testing.T) {
+	app := newApp("some-ns", "some-cr", v1alpha1.ThunderApplicationSpec{
+		ClientID:     "my-explicit-id",
+		Scopes:       "openid",
+		RedirectURIs: "https://app.example.com",
+	})
+	admin := &fakeAdmin{}
+	r, _ := newReconciler(t, admin, app)
+
+	if _, err := r.Reconcile(context.Background(), reqFor(app)); err != nil {
+		t.Fatalf("Reconcile returned error: %v", err)
+	}
+	if len(admin.ensureCalls) != 1 {
+		t.Fatalf("EnsureApplication called %d times, want 1", len(admin.ensureCalls))
+	}
+	if admin.ensureCalls[0].Name != "my-explicit-id" {
+		t.Errorf("DesiredApp.Name = %q, want my-explicit-id", admin.ensureCalls[0].Name)
+	}
+}
+
+// Deletion uses spec.clientId when set.
+func TestReconcile_Deletion_ClientIDOverride(t *testing.T) {
+	now := metav1.Now()
+	app := newApp("ns", "app", v1alpha1.ThunderApplicationSpec{ClientID: "explicit-id"})
+	app.DeletionTimestamp = &now
+	app.Finalizers = []string{thunderFinalizer}
+	admin := &fakeAdmin{}
+	r, _ := newReconciler(t, admin, app)
+
+	if _, err := r.Reconcile(context.Background(), reqFor(app)); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if len(admin.deleteCalls) != 1 || admin.deleteCalls[0] != "explicit-id" {
+		t.Errorf("DeleteApplication calls = %#v, want [explicit-id]", admin.deleteCalls)
+	}
+}
+
 func containsFinalizer(finalizers []string, want string) bool {
 	for _, f := range finalizers {
 		if f == want {

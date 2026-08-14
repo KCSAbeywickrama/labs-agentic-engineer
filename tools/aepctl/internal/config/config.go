@@ -176,18 +176,19 @@ func LoadFromCluster(ctx context.Context, client *kubernetes.Clientset, namespac
 }
 
 // LoadThunderSecretFromCluster reads the Thunder admin client secret from the
-// ESO-synced aep-thunder-secrets Secret and sets it via viper.SetDefault so
-// that CLI flags still override it. The secret is never stored in the ConfigMap.
-// Returns nil if the Secret does not yet exist.
+// ESO-synced aep-thunder-operator-creds Secret and sets it via viper.SetDefault
+// so that AEP_THUNDER_ADMIN_CLIENT_SECRET env and the interactive prompt still
+// take precedence. The secret is never stored in the ConfigMap.
+// Returns nil if the Secret does not yet exist (first install).
 func LoadThunderSecretFromCluster(ctx context.Context, client *kubernetes.Clientset, namespace string) error {
-	sec, err := client.CoreV1().Secrets(namespace).Get(ctx, "aep-thunder-secrets", metav1.GetOptions{})
+	sec, err := client.CoreV1().Secrets(namespace).Get(ctx, "aep-thunder-operator-creds", metav1.GetOptions{})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			return nil
 		}
-		return fmt.Errorf("read aep-thunder-secrets: %w", err)
+		return fmt.Errorf("read aep-thunder-operator-creds: %w", err)
 	}
-	if v, ok := sec.Data["THUNDER_SYSTEM_CLIENT_SECRET"]; ok && len(v) > 0 {
+	if v, ok := sec.Data["client-secret"]; ok && len(v) > 0 {
 		viper.SetDefault("thunder.admin_client_secret", string(v))
 	}
 	return nil
