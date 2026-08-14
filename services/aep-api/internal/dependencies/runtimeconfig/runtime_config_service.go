@@ -368,7 +368,7 @@ func renderEnvConfigJS(values map[string]interface{}) string {
 		}
 		b.WriteString("  ")
 		// JS-side keys are bare identifiers — safe to emit unquoted since
-		// upperSnakeKey returns only [A-Z0-9_].
+		// ocname.EnvVarName returns only [A-Z0-9_].
 		b.WriteString(k)
 		b.WriteString(": ")
 		b.Write(raw)
@@ -388,30 +388,4 @@ func sortedKeys(m map[string]interface{}) []string {
 	}
 	sort.Strings(out)
 	return out
-}
-
-// upperSnakeKey converts a component name (kebab- or camelCase) into the
-// upper-snake form used as a `window._env_` key prefix. Drops any chars
-// outside [A-Za-z0-9_] so the result is a safe JS identifier.
-func upperSnakeKey(name string) string {
-	var b strings.Builder
-	prevAlnum := false
-	for _, r := range name {
-		switch {
-		case r >= 'a' && r <= 'z':
-			b.WriteRune(r - 'a' + 'A')
-			prevAlnum = true
-		case r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
-			b.WriteRune(r)
-			prevAlnum = true
-		case r == '-' || r == '_':
-			if prevAlnum {
-				b.WriteRune('_')
-			}
-			prevAlnum = false
-		default:
-			prevAlnum = false
-		}
-	}
-	return strings.TrimRight(b.String(), "_")
 }

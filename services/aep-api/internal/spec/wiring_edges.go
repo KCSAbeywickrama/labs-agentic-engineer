@@ -73,25 +73,6 @@ func HardConfigEdges(design *DesignFile) map[string][]string {
 	return out
 }
 
-// HardProvidersFor is HardConfigEdges for ONE consumer — what the composer wants,
-// since it is filling in a single component's file and has no use for the rest of
-// the project's edges.
-//
-// Both spellings run the same rule (hardProvidersOf), which is the point: the
-// composer that needs an address and the planner that orders around it must never
-// be able to disagree about which addresses are needed.
-func HardProvidersFor(design *DesignFile, componentName string) []string {
-	if design == nil {
-		return nil
-	}
-	for _, c := range design.Components {
-		if c.Name == componentName {
-			return hardProvidersOf(c, componentsByName(design))
-		}
-	}
-	return nil
-}
-
 func componentsByName(design *DesignFile) map[string]DesignComponent {
 	out := make(map[string]DesignComponent, len(design.Components))
 	for _, c := range design.Components {
