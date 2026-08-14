@@ -81,14 +81,19 @@ debug after it.
 
 ## Platform constraints that override this system's defaults
 
-Four places where Astryx's own guidance assumes a project this platform does not
-build. Each of these is a runtime or build failure, not a style preference:
+Four places where Astryx's own defaults do not fit this platform. Each is a
+runtime, build, or guidance failure, not a style preference:
 
-1. **Never run `astryx init`** (in any form — `npx astryx init`,
-   `npx --no astryx init`, `--features agents`). It scaffolds a fresh app and writes
-   `AGENTS.md`/`CLAUDE.md` into the repo. The app is already scaffolded, and
-   guidance reaches you as skills — a committed agent file is a second, stale
-   authority in the project.
+1. **Never install Astryx's agent docs.** `astryx init` itself is fine — it
+   initializes the design system in an *existing* project, and it is not
+   required, because the Setup section above already states the wiring. What
+   must not land is the `agents` feature: `astryx init --features agents`
+   writes `AGENTS.md` into the repo root, and `--all` includes it. Guidance
+   reaches you as skills, so a committed agent file is a second authority that
+   nothing updates — it is stale the moment this skill changes. `--features` is
+   an allow-list, so name only what you want (`--features theme`) and never
+   `--all`; if agent docs already landed, `astryx init --remove-agents` deletes
+   them.
 2. **Never set `base` in `vite.config.ts`**, whatever an Astryx snippet shows.
    Each web app is served at its own gateway host root; a `base` 404s every asset
    and the page renders blank (`react-webapp`, Served at host root).
