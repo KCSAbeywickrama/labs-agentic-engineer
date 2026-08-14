@@ -97,6 +97,9 @@ func stampSecretRefTripletWithWrittenAt(secretRefName, vaultKey, prop string, wr
 	return m
 }
 
+// clearSecretRefTriplet nulls the three secret_ref_* columns. OrgAnthropicCredential
+// has no secret_ref_written_at; PAT and publisher deletes use
+// clearSecretRefTripletWithWrittenAt.
 func clearSecretRefTriplet() map[string]any {
 	return map[string]any{
 		"secret_ref_name":     nil,

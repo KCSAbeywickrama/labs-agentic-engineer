@@ -36,6 +36,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -599,6 +600,8 @@ func seedIDPProfileRow(t testing.TB, db *gorm.DB, orgID string, refName, kvPath 
 	}
 	if refName != nil {
 		row.SecretRefProperty = strPtr("publisher")
+		written := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
+		row.SecretRefWrittenAt = &written
 	}
 	if err := db.Create(&row).Error; err != nil {
 		t.Fatalf("seed idp profile row %s: %v", orgID, err)
@@ -687,6 +690,9 @@ func TestSecretRefWriter_DeletePublisher_DB(t *testing.T) {
 		if got.SecretRefName == nil || *got.SecretRefName != "acme-publisher-secrets" {
 			t.Fatalf("row must be untouched on delete error: %+v", got)
 		}
+		if got.SecretRefWrittenAt == nil {
+			t.Fatalf("written_at must be untouched on delete error")
+		}
 	})
 }
 
@@ -711,6 +717,8 @@ func seedUserPATRow(t testing.TB, db *gorm.DB, ocOrgID string, refName, kvPath *
 	}
 	if refName != nil {
 		row.SecretRefProperty = strPtr("api-key")
+		written := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
+		row.SecretRefWrittenAt = &written
 	}
 	if err := db.Create(&row).Error; err != nil {
 		t.Fatalf("seed user-pat row %s: %v", ocOrgID, err)
@@ -797,6 +805,9 @@ func TestSecretRefWriter_DeleteGitHubPAT_DB(t *testing.T) {
 		}
 		if got.SecretRefName == nil || *got.SecretRefName != "acme-github-pat-secrets" {
 			t.Fatalf("row must be untouched on delete error: %+v", got)
+		}
+		if got.SecretRefWrittenAt == nil {
+			t.Fatalf("written_at must be untouched on delete error")
 		}
 	})
 }
