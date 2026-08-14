@@ -38,6 +38,8 @@
 set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/env.sh"
+# pin_node_image — keeps the imported tag out of kubelet's image GC.
+source "$SCRIPT_DIR/utils.sh"
 
 IMAGE="${AGENT_RUNNER_IMAGE:-aep-runner:dev}"
 WORKER_DIR="$SCRIPT_DIR/../../runners/remote-worker"
@@ -72,9 +74,23 @@ fi
 if [ "${SKIP_IMPORT:-0}" = "1" ]; then
     echo "⏭️  node import skipped (SKIP_IMPORT=1) — the caller owns it"
 elif command -v k3d &>/dev/null && k3d cluster list "$CLUSTER_NAME" &>/dev/null; then
-    k3d image import "$IMAGE" -c "$CLUSTER_NAME" \
-        && echo "✅ imported $IMAGE into k3d cluster '$CLUSTER_NAME'" \
-        || echo "⚠️  k3d image import failed; first dispatch may cold-pull"
+    if k3d image import "$IMAGE" -c "$CLUSTER_NAME"; then
+        # A successful import is not durable on its own: this tag is local-only and
+        # the largest image on the node, so kubelet's image GC evicts it between
+        # dispatches and the next Job has no registry to fall back to. pin_node_image
+        # both pins it and verifies it actually landed — `k3d image import` is known
+        # to flake and still exit 0, and that shows up here as exit 2 (image in no
+        # node), which is an import failure rather than a pinning one.
+        PIN_RC=0
+        pin_node_image "$IMAGE" || PIN_RC=$?
+        case "$PIN_RC" in
+            0) echo "✅ imported $IMAGE into k3d cluster '$CLUSTER_NAME' (verified in node containerd)" ;;
+            2) echo "⚠️  import reported success but did not land; first dispatch may cold-pull — re-run 'make build-runner'" ;;
+            *) echo "✅ imported $IMAGE into k3d cluster '$CLUSTER_NAME' (unpinned — see the warning above)" ;;
+        esac
+    else
+        echo "⚠️  k3d image import failed; first dispatch may cold-pull"
+    fi
 else
     echo "ℹ️  k3d cluster '$CLUSTER_NAME' not found — built the image only; setup-aep.sh imports it at cluster setup."
 fi

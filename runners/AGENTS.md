@@ -190,3 +190,17 @@ into the runner pod at `/app/skills` for live skill edits (see
   critical path) and imports it in `setup-aep.sh`; `PREBUILD_RUNNER=0` reverts
   to a serial build. The build is skipped when the tag exists, so use
   `FORCE=1 make build-runner` after changing the Dockerfile or `src/`.
+- **The imported tag is pinned in containerd** — `build-runner.sh` calls
+  `pin_node_image` (`deployments/scripts/utils.sh`) after a successful
+  `k3d image import`. `aep-runner:dev` is local-only, so there is no registry to
+  re-pull from, yet it is the largest and coldest image on the k3d node: exactly
+  what kubelet's imageGCManager evicts first once the node's image filesystem
+  crosses its high threshold (85%, freeing down to 80%), which leaves the next
+  dispatch in `ImagePullBackOff` with nothing to recover from. The same helper
+  covers the other local-only imports (`thunder-app-operator:local`, the patched
+  RCA image). It doubles as import verification: an image in no node's containerd
+  means the import silently did not land. Verify a pin from the host with
+  `docker exec k3d-openchoreo-server-0 crictl inspecti aep-runner:dev` →
+  `"pinned": true` (there is no host-side `crictl`). An import replaces the
+  containerd record, so the pin has to live in the import path, not in a manual
+  step.

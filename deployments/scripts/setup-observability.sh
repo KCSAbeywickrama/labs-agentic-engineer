@@ -270,6 +270,9 @@ if docker image inspect "$RCA_IMAGE" >/dev/null 2>&1; then
     done
     if [ -n "$IMPORTED" ]; then
         echo "✅ imported $RCA_IMAGE into k3d-$CLUSTER_NAME (verified in node containerd)"
+        # The patched tag is built locally and exists in no registry, so an image-GC
+        # eviction would be unrecoverable — pin it (see pin_node_image in utils.sh).
+        pin_node_image "$RCA_IMAGE" || true
     else
         echo "⚠️  k3d import failed twice — switching to registry-direct: the cluster"
         echo "    will pull ${RCA_IMAGE_PULL} from Docker Hub instead."

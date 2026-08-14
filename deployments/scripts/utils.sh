@@ -431,6 +431,64 @@ EOF
 
 
 # ----------------------------------------------------------------------------
+# Locally-imported images
+# ----------------------------------------------------------------------------
+# An image that was IMPORTED into the node rather than pulled has no registry
+# behind it, so a kubelet eviction is unrecoverable: the next pod that needs it
+# sits in ImagePullBackOff (or ErrImageNeverPull under `pullPolicy: Never`) until
+# someone re-imports by hand. kubelet's imageGCManager collects unused images once
+# the node's image filesystem crosses its high threshold — 85%, freeing down to
+# 80% — largest and coldest first, which is exactly what these tags are between
+# uses. The thresholds are kubelet defaults; nothing in
+# deployments/k3d-local-config.yaml currently sets them (it could, by the same
+# --kubelet-arg mechanism it already uses for eviction-hard).
+#
+# Labelling the image `io.cri-containerd.pinned=pinned` is containerd's own way of
+# saying an image has no upstream to recover from: CRI reports it as
+# `pinned: true` and the kubelet skips it when collecting. Verify with
+#   docker exec k3d-<cluster>-server-0 crictl inspecti <repo>:<tag> | grep pinned
+#
+# An import REPLACES the containerd record, so this belongs in the import path —
+# a one-off `ctr label` does not survive the next import.
+#
+# Usage: pin_node_image <repo:tag>
+#   0 — pinned on at least one node
+#   1 — the image is there but the label could not be applied
+#   2 — the image is on no node, i.e. the import did not land (k3d image import is
+#       known to flake and still exit 0; see the RCA import in
+#       setup-observability.sh). Callers should treat this as an import failure,
+#       not a pinning failure.
+pin_node_image() {
+    local image="$1" found=0 pinned=0 node ref
+    # Every server/agent node: `k3d image import` loads into all of them, so
+    # pinning only the first would leave the eviction reproducible on whichever
+    # node the pod happens to land on. The loadbalancer node runs no containerd.
+    for node in $(k3d node list --no-headers 2>/dev/null \
+        | awk -v c="$CLUSTER_NAME" '$3 == c && ($2 == "server" || $2 == "agent") { print $1 }'); do
+        # A local tag lands as docker.io/library/<repo>:<tag>; a registry-qualified
+        # name keeps its host. Match the WHOLE ref against both forms — a substring
+        # match would happily select <repo>:<tag>-debug and pin the wrong record.
+        ref="$(docker exec "$node" ctr -n k8s.io images ls -q 2>/dev/null \
+            | grep -m1 -Fx -e "$image" -e "docker.io/library/$image" || true)"
+        [ -n "$ref" ] || continue
+        found=$((found + 1))
+        docker exec "$node" ctr -n k8s.io images label \
+            "$ref" io.cri-containerd.pinned=pinned >/dev/null 2>&1 && pinned=$((pinned + 1))
+    done
+    if [ "$found" -eq 0 ]; then
+        echo "⚠️  $image is in no node's containerd — the import did not land"
+        return 2
+    fi
+    if [ "$pinned" -eq 0 ]; then
+        echo "⚠️  could not pin $image — kubelet image GC may evict this local-only tag"
+        return 1
+    fi
+    echo "📌 pinned $image against kubelet image GC ($pinned node(s))"
+    return 0
+}
+
+
+# ----------------------------------------------------------------------------
 # Public URL handling
 # ----------------------------------------------------------------------------
 # .env carries two canonical fields:

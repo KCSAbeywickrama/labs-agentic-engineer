@@ -565,6 +565,9 @@ echo ""
 echo "🔧 Building + installing thunder-app-operator..."
 docker build -t thunder-app-operator:local "${SCRIPT_DIR}/../single-cluster/resource-types/thunder-app/operator"
 k3d image import thunder-app-operator:local -c "${CLUSTER_NAME}"
+# pullPolicy=Never below means an image-GC eviction of this local-only tag is fatal
+# (ErrImageNeverPull, no registry to recover from) — pin it. See utils.sh.
+pin_node_image thunder-app-operator:local || true
 helm upgrade --install thunder-app-operator \
     "${SCRIPT_DIR}/../single-cluster/resource-types/thunder-app/operator/helm" \
     -n thunder-app-operator-system --create-namespace \
