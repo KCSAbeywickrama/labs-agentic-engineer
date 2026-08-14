@@ -83,6 +83,14 @@ by the same static config as plain JS.
 **Never `exposesAPI`.** That toggle is for backends only; a web-app expresses
 auth through its auth dependency instead.
 
+**The UI comes from Astryx.** Every component, layout primitive, and style under
+`src/` is `@astryxdesign/core` — no raw HTML styling, no second component or
+styling library. `astryx-design-system` owns that half and is pinned on every
+web-application; where an Astryx snippet and this skill disagree (`base`, the
+`index.html` script tags, nginx, `window._env_`), **this skill wins**. The data
+layer is untouched by it: `openapi-fetch` and the committed `src/generated/`
+client stay exactly as specified above.
+
 **Contract-first client, never hand-rolled shapes.** Every dependency has a
 committed OpenAPI contract: `specs/design/components/<component-name>/openapi.yaml`
 for a `component`-kind dependency, or
@@ -109,7 +117,7 @@ there is no later stage that can reach the sibling spec to regenerate it.
 │   ├── generated/        # openapi-typescript output, one file per dependency — commit, never hand-edit
 │   ├── api.ts            # openapi-fetch client(s), typed against generated/
 │   ├── auth.ts           # only with an auth dependency — see thunder-authentication
-│   └── pages/
+│   └── pages/            # Astryx components only — see astryx-design-system
 ├── nginx/
 │   └── default.conf
 └── Dockerfile

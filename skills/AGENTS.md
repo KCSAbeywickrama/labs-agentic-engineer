@@ -41,7 +41,8 @@ An absent kind means `org`, which is a real decision, not a default to lean on:
   `validation-criteria`, `task-planning`) and the coding run's own workflow skills (`aep`,
   `aep-validation`, `playwright-cli`).
 - **`org`** — the org-visible stack skills (`go`, `ballerina`, `react-webapp`,
-  `api-management`, `thunder-authentication`). Editable and deletable by an org.
+  `astryx-design-system`, `api-management`, `thunder-authentication`). Editable
+  and deletable by an org.
 
 Kind decides console visibility and who may edit a skill, and nothing else. It is
 `audience` that decides who may *read* one, and the two are independent — a skill

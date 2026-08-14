@@ -23,5 +23,7 @@ Thunder is available as a dependency.
 
 ## Technology stack
 
-- Web apps: TypeScript + React, single-page app.
+- Web apps: TypeScript + React, single-page app. All UI is built with the
+  **Astryx** design system (`@astryxdesign/core`) — components, layout, and
+  styling. No other component or styling library is a candidate.
 - Services and APIs: Ballerina.
