@@ -59,9 +59,9 @@ is `undefined` at module load. Use these exact spellings:
 | `<NAME>` (any) | you declared it in `workload.yaml` `configurations.env` | app-config default, per-env override possible |
 
 There is **no** `API_BASE_URL` and **no** `<UPSTREAM>_URL` in `window._env_` for
-a sibling service. Those used to be public gateway URLs. The sibling lives at
-**same-origin** `/api` (extra siblings: `/api/<component-name>/`). OpenChoreo
-still injects `<DEP>_URL` as a **pod** env var; only the nginx drop-in reads it.
+a sibling service. The sibling lives at **same-origin** `/api` (extra siblings:
+`/api/<component-name>/`). OpenChoreo still injects `<DEP>_URL` as a **pod**
+env var; only the nginx drop-in reads it.
 
 **Throw on a missing key, never default it.** No `?? ""`, no `|| ''`, for keys
 this table says are set. A silent fallback hides a missing OIDC issuer. Do not
@@ -200,7 +200,7 @@ import type { paths } from "./generated/todo-api";
 export const todoApi = createClient<paths>({ baseUrl: "/api" });
 
 // extra sibling:
-// export const otherApi = createClient<paths>({ baseUrl: "/api/other-api" });
+// export const otherApi = createClient<paths>({ baseUrl: "/api/other-api/" });
 ```
 
 **Done when:** no `env.API_BASE_URL`, no `env.TODO_API_URL`, no

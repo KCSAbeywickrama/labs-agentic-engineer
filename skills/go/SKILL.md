@@ -65,12 +65,6 @@ or middleware chains. Not Gin/Echo/Fiber — large dep trees, little gain at
 SPA's same-origin `/api` proxy, not from the browser to this host. A managed
 API (`exposesAPI`) gets CORS on the gateway; adding your own doubles the headers.
 
-**Endpoint visibility.** A service a sibling SPA calls lists **both**
-`project` and `external` on its own HTTP endpoint — `project` for the nginx
-hop, `external` so the API stays curl-able on the public gateway. The SPA
-must not fetch that public URL; its *dependency* entry is `project` only.
-`design.json` `exposure: intranet` does not drop `external`.
-
 **Upstreams.** `url.JoinPath(base, "path")`, never `base + "/path"` — an
 injected address can end in `/`.
 

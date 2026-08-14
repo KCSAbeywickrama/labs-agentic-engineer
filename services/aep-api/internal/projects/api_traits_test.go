@@ -135,9 +135,9 @@ func keysOfAny[T any](m map[string]T) []string {
 	return out
 }
 
-// desiredAPIConfigurationTraitForTest is the no-issuers, no-origins shape these
-// table tests exercise. A test helper rather than a production shim: the only
-// production caller is DesiredDeploymentFor, which always has both to pass.
+// desiredAPIConfigurationTraitForTest is the no-issuers shape these table
+// tests exercise. Production (DesiredDeploymentFor) passes issuers when the
+// org has a BYO-IDP profile.
 func desiredAPIConfigurationTraitForTest(componentName, endpointName string, enabled bool) ([]openchoreo.ComponentTrait, map[string]map[string]interface{}) {
-	return DesiredAPIConfigurationTraitWithIssuers(componentName, endpointName, enabled, nil, nil)
+	return DesiredAPIConfigurationTraitWithIssuers(componentName, endpointName, enabled, nil)
 }

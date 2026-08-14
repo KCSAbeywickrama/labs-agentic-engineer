@@ -138,7 +138,7 @@ func (s *RuntimeConfigService) FilesForComponent(ctx context.Context, orgID, pro
 		return nil, true, nil
 	}
 
-	envValues, ready := s.buildEnvValues(ctx, orgID, projectID, match, design)
+	envValues, ready := s.buildEnvValues(ctx, orgID, projectID, match)
 	if !ready {
 		slog.InfoContext(ctx, "runtime_config: required keys not yet ready; deferring env-config.js",
 			"orgID", orgID, "projectID", projectID, "component", componentName, "keys", sortedKeys(envValues))
@@ -162,17 +162,15 @@ func (s *RuntimeConfigService) FilesForComponent(ctx context.Context, orgID, pro
 //     dependency's provisioned binding outputs (resolved by OC); the BFF never
 //     calls the upstream from this path.
 //
-// Sibling service URLs are NOT emitted. The browser calls same-origin `/api`
-// (SPA nginx reverse-proxies to the pod env `<DEP>_URL` OpenChoreo injects).
-// Public gateway URLs in window._env_ were the old SPA-reachability workaround.
+// Sibling service URLs are not emitted. The browser calls same-origin `/api`;
+// SPA nginx reverse-proxies to the pod env `<DEP>_URL` OpenChoreo injects.
 //
 // buildEnvValues returns the map + a `ready` flag. The flag is false
 // when a required key couldn't be populated yet (transient OC error,
 // SPA URL not yet resolved for an OIDC consumer-URL patch, etc.). The
 // caller must NOT write a partial env-config.js on `!ready` — see
 // FilesForComponent.
-func (s *RuntimeConfigService) buildEnvValues(ctx context.Context, orgID, projectID string, webapp *spec.DesignComponent, design *spec.DesignFile) (out map[string]interface{}, ready bool) {
-	_ = design // sibling component index is no longer used for window._env_
+func (s *RuntimeConfigService) buildEnvValues(ctx context.Context, orgID, projectID string, webapp *spec.DesignComponent) (out map[string]interface{}, ready bool) {
 	out = map[string]interface{}{}
 	ready = true
 
@@ -237,8 +235,8 @@ func platformResourceDeps(c *spec.DesignComponent) []spec.Dependency {
 //
 // All-or-nothing at the write level: any not-ready dependency sets ready=false,
 // and the caller then skips the whole write — a deferring dependency contributes
-// NO keys of its own, and sibling deps' keys already in `out` are never shipped
-// because the write is gated. The SPA is thus never handed a partial window._env_.
+// NO keys of its own, and keys already in `out` are never shipped because the
+// write is gated. The SPA is thus never handed a partial window._env_.
 func (s *RuntimeConfigService) layerPlatformResources(ctx context.Context, orgID, projectID string, webapp *spec.DesignComponent, deps []spec.Dependency, out map[string]interface{}) bool {
 	if s.resourceClient == nil {
 		slog.WarnContext(ctx, "runtime_config: resourceClient not wired; deferring platform-resource outputs",

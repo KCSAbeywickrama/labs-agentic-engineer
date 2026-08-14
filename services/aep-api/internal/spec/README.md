@@ -106,12 +106,12 @@ the genai turn engine (runner/broker/sweeper), and the files / design / skills s
 - **Single write-authority** over the git spec-content store and its `v<N>` tags — every save/tag/discard
   runs through this domain's gitfs Workspace engine; no other domain writes spec content.
 - **One authority for which wiring edges are HARD** (`wiring_edges.go`). A hard edge is an address the
-  platform stamps into a component's own start-up config — today a web app's sibling *services*, whose
-  URLs land in `env-config.js`. Both consumers read the same rule: `dependencies` composes the file, and
-  `projects` orders the deploy waves around it, so they can never disagree about which addresses are
-  needed. Everything else is soft (it flows consumer→provider: CORS origins, an OIDC callback) and orders
-  nothing. Deliberately NOT hard: service→service, which OpenChoreo resolves through its own connection
-  mechanism — ordering it would refuse two services that call each other. ADR-0019.
+  platform must have before a component can serve its first useful byte — today a web app's sibling
+  *services*, whose cluster Service URLs are injected as pod env for nginx (`<DEP>_URL`). `projects`
+  orders the deploy waves around that rule. Everything else is soft (it flows consumer→provider: an
+  OIDC callback) and orders nothing. Deliberately NOT hard: service→service, which OpenChoreo resolves
+  through its own connection mechanism — ordering it would refuse two services that call each other.
+  ADR-0019.
 - **`CRTType` is a projection, not a re-export.** design-save reads the dependencies resource-type catalog
   through the `resourceTypeCatalog` port in spec's OWN vocabulary (`CRTType`), mapped by a root
   adapter — the spec domain names the dependencies domain nowhere.

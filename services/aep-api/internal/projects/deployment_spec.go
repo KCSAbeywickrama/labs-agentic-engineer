@@ -91,13 +91,11 @@ type DeploymentInputs struct {
 func DesiredDeploymentFor(in DeploymentInputs) DesiredDeployment {
 	apiEnabled := spec.ResolveAPISecurityEnabled(in.Component)
 
-	// CORS: leave allowedOrigins unset so the api-configuration trait schema
-	// default ["*"] applies (OpenChoreo / WSO2 default). Sibling SPA origin
-	// pinning was an AEP override for browser→gateway calls; the SPA now
-	// same-origin proxies via nginx, so that allowlist is unused. Do not set
-	// cors.enabled false — that would be a new deny-all, not an undo.
+	// CORS: omit allowedOrigins so the api-configuration trait schema default
+	// ["*"] applies. Do not set cors.enabled false — that would deny all
+	// origins, including curl-from-the-gateway clients.
 	traits, configs := DesiredAPIConfigurationTraitWithIssuers(
-		in.ComponentName, in.Component.EndpointName(), apiEnabled, in.Issuers, nil)
+		in.ComponentName, in.Component.EndpointName(), apiEnabled, in.Issuers)
 
 	// Appended to the SAME slice/map: `spec.traits` is replaced wholesale on
 	// write, so emitting the alert rule separately would clobber the

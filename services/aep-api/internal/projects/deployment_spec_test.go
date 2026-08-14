@@ -63,8 +63,6 @@ func TestDesiredDeploymentFor(t *testing.T) {
 		wantAPITrait bool
 		// wantJWT: the binding carries a jwtAuth config for it.
 		wantJWT bool
-		// wantOrigins: allowedOrigins is explicitly set (non-production path).
-		wantOrigins bool
 	}{
 		{
 			name: "unprotected service gets no api-configuration trait",
@@ -75,14 +73,12 @@ func TestDesiredDeploymentFor(t *testing.T) {
 			body:         svcJSON("api", "end-user-required", ""),
 			wantAPITrait: true,
 			wantJWT:      true,
-			wantOrigins:  false,
 		},
 		{
 			name:         "service-required is protected but takes no SPA origins",
 			body:         svcJSON("api", "service-required", ""),
 			wantAPITrait: true,
 			wantJWT:      true,
-			wantOrigins:  false,
 		},
 	}
 
@@ -117,9 +113,8 @@ func TestDesiredDeploymentFor(t *testing.T) {
 				t.Errorf("protected component carries no jwtAuth: %+v", cfg)
 			}
 			cors, _ := cfg["cors"].(map[string]interface{})
-			_, gotOrigins := cors["allowedOrigins"]
-			if gotOrigins != tc.wantOrigins {
-				t.Errorf("allowedOrigins present = %v, want %v (%+v)", gotOrigins, tc.wantOrigins, cors)
+			if _, ok := cors["allowedOrigins"]; ok {
+				t.Errorf("allowedOrigins must be omitted (trait default wildcard); got %+v", cors)
 			}
 		})
 	}
