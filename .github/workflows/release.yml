@@ -124,6 +124,7 @@ jobs:
 
       - name: Package platform chart
         run: |
+          helm dependency update deployments/helm-charts/platform
           cp -r deployments/helm-charts/platform /tmp/platform
 
           yq -i '.version = "${{ inputs.version }}"' /tmp/platform/Chart.yaml
