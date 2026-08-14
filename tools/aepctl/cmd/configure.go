@@ -62,6 +62,7 @@ Example config file:
 
   oc:
     api_url: http://openchoreo-api.openchoreo-control-plane.svc.cluster.local:8080
+    system_namespace: openchoreo-control-plane
     org_namespace: default
     local_org_provisioning:
       enabled: false
@@ -71,10 +72,11 @@ Example config file:
       access_mode: ReadWriteMany
 
   codingagent:
-    local_stubs:
+    openbao_direct:
       enabled: false
-    secret_manager_api:
-      url: https://sma.example.com
+
+  openbao:
+    addr: http://openbao.openbao.svc.cluster.local:8200
 
   webhook:
     delivery_url: https://webhook.example.com
@@ -122,6 +124,9 @@ func runConfigImport(cmd *cobra.Command, args []string) error {
 	}
 
 	const aepNamespace = "wso2-aep"
+	if err := ensureNamespace(ctx, client, aepNamespace); err != nil {
+		return err
+	}
 	existing, err := client.CoreV1().ConfigMaps(aepNamespace).Get(ctx, config.ConfigMapName, metav1.GetOptions{})
 	if err != nil {
 		if !apierrors.IsNotFound(err) {
