@@ -169,7 +169,7 @@ func validateViper(v *viper.Viper) []string {
 // and loads each entry into viper via SetDefault, so CLI flags and AEP_* env
 // vars still take precedence. Returns the number of keys loaded and nil if the
 // ConfigMap does not yet exist (i.e. before `aep init` has run).
-func LoadFromCluster(ctx context.Context, client *kubernetes.Clientset, namespace string) (int, error) {
+func LoadFromCluster(ctx context.Context, client kubernetes.Interface, namespace string) (int, error) {
 	cm, err := client.CoreV1().ConfigMaps(namespace).Get(ctx, ConfigMapName, metav1.GetOptions{})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
@@ -188,7 +188,7 @@ func LoadFromCluster(ctx context.Context, client *kubernetes.Clientset, namespac
 // that AEP_THUNDER_ADMIN_CLIENT_SECRET env and the interactive prompt still
 // take precedence. The secret is never stored in the ConfigMap.
 // Returns nil if the Secret does not yet exist (first install).
-func LoadThunderSecretFromCluster(ctx context.Context, client *kubernetes.Clientset, namespace string) error {
+func LoadThunderSecretFromCluster(ctx context.Context, client kubernetes.Interface, namespace string) error {
 	sec, err := client.CoreV1().Secrets(namespace).Get(ctx, ThunderOperatorCredsSecret, metav1.GetOptions{})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
@@ -196,8 +196,10 @@ func LoadThunderSecretFromCluster(ctx context.Context, client *kubernetes.Client
 		}
 		return fmt.Errorf("read %s: %w", ThunderOperatorCredsSecret, err)
 	}
-	if v, ok := sec.Data[ThunderOperatorCredsSecretKey]; ok && len(v) > 0 {
-		viper.SetDefault("thunder.admin_client_secret", string(v))
+	v, ok := sec.Data[ThunderOperatorCredsSecretKey]
+	if !ok || len(v) == 0 {
+		return fmt.Errorf("%s is missing non-empty key %q — ESO sync may be incomplete", ThunderOperatorCredsSecret, ThunderOperatorCredsSecretKey)
 	}
+	viper.SetDefault("thunder.admin_client_secret", string(v))
 	return nil
 }
