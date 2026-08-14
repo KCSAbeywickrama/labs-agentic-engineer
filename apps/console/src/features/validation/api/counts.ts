@@ -23,7 +23,7 @@ import {
   tallyCriterionStates,
 } from "@aep/ui-validation-view";
 import { useBuildRuns } from "../../builds/api/queries";
-import { lastMergedValidationCycle, validatingRun } from "../lib/runs";
+import { answeredRun, isRepairing, lastMergedValidationCycle } from "../lib/runs";
 import { countsFromTally, type ValidationCounts } from "../lib/verdict";
 import { useValidationCriteria, useValidationReport } from "./queries";
 
@@ -69,7 +69,7 @@ export function useValidationEvidence(
   projectName: string,
   version: string,
   deployValidation: string,
-): { verdict: string; counts?: ValidationCounts } {
+): { verdict: string; repairing: boolean; counts?: ValidationCounts } {
   const wanted = COUNTABLE.has(deployValidation);
   const runs = useBuildRuns(projectName, wanted && version ? version : undefined);
   // Both selections are the Validation page's, shared rather than restated. Reading
@@ -79,7 +79,11 @@ export function useValidationEvidence(
   // counts. The report cycle is likewise looked for across every attempt, not only
   // within one run, because a revalidation is a later run on the same milestone.
   const runList = runs.data?.runs ?? [];
-  const run = validatingRun(runList);
+  // The run holding the last ANSWER, not the one being asked. A revalidation is a
+  // fresh row with an empty verdict while the run that delivered the version still
+  // holds its result — reading the asking run reported a validated version as having
+  // nothing to show.
+  const run = answeredRun(runList);
   const rawVerdict = run?.validation?.verdict ?? "";
   const settled = wanted && rawVerdict !== "" && rawVerdict !== "skipped";
   const missingReport = rawVerdict === "unreported";
@@ -105,5 +109,9 @@ export function useValidationEvidence(
     return countsFromTally(tallyCriterionStates(oracle, parsed));
   }, [settled, criteriaContent, reportContent]);
 
-  return { verdict: rawVerdict, ...(counts ? { counts } : {}) };
+  return {
+    verdict: rawVerdict,
+    repairing: isRepairing(runList),
+    ...(counts ? { counts } : {}),
+  };
 }

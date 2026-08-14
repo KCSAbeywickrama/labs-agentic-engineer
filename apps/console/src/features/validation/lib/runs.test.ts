@@ -18,7 +18,12 @@
 
 import { describe, expect, it } from "vitest";
 import type { components } from "../../../generated/aep-api";
-import { lastMergedValidationCycle, validatingRun } from "./runs";
+import {
+  answeredRun,
+  isRepairing,
+  lastMergedValidationCycle,
+  validatingRun,
+} from "./runs";
 
 type MilestoneRunView = components["schemas"]["MilestoneRunView"];
 
@@ -125,5 +130,50 @@ describe("lastMergedValidationCycle", () => {
   it("is undefined when nothing has merged an attempt yet", () => {
     const runs = [run("run-1", "spec-build", [cycle("c2", "validation")])];
     expect(lastMergedValidationCycle(runs)).toBeUndefined();
+  });
+});
+
+// A revalidation is a fresh run row on the same milestone: it enters the loop at
+// validation with an empty verdict while the run that delivered the version still
+// holds `passed`. Reading the ASKING run's verdict there reported a validated version
+// as having nothing to show.
+describe("answeredRun / isRepairing", () => {
+  const revalidating = () => {
+    const reval = run("run-reval", "revalidate");
+    const spec = run("run-spec", "spec-build", [cycle("c2", "validation", "bbb")]);
+    spec.validation = { verdict: "passed" };
+    return [reval, spec];
+  };
+
+  it("finds the verdict on an older run while a revalidation is in flight", () => {
+    const runs = revalidating();
+    expect(validatingRun(runs)?.id).toBe("run-reval"); // who is being asked
+    expect(answeredRun(runs)?.id).toBe("run-spec"); // who last answered
+  });
+
+  // The two are the SAME run only in the self-heal loop, which repeats within one
+  // row — which is what lets the copy claim a fix has been deployed.
+  it("calls a revalidation a re-ask, not a repair", () => {
+    expect(isRepairing(revalidating())).toBe(false);
+  });
+
+  it("calls a repeat on the answering run a repair", () => {
+    const healing = run("run-spec", "spec-build", [cycle("c2", "validation", "bbb")]);
+    healing.validation = { verdict: "failed" };
+    expect(isRepairing([healing])).toBe(true);
+  });
+
+  it("is neither when nothing has answered yet", () => {
+    const first = run("run-spec", "spec-build");
+    expect(answeredRun([first])).toBeUndefined();
+    expect(isRepairing([first])).toBe(false);
+  });
+
+  // `skipped` IS an answer — the version was reached and passed over, which is a
+  // result a revalidation exists to replace.
+  it("counts skipped as an answer", () => {
+    const skipped = run("run-spec", "spec-build");
+    skipped.validation = { verdict: "skipped" };
+    expect(answeredRun([skipped])?.id).toBe("run-spec");
   });
 });

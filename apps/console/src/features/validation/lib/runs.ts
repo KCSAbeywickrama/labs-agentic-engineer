@@ -50,6 +50,42 @@ export function validatingRun(
 }
 
 /**
+ * The run holding the version's last ANSWER, which is not always the run being asked.
+ *
+ * A revalidation is a fresh run row on the same milestone: it enters the loop at
+ * validation with an empty verdict while the run that delivered the version still
+ * holds `passed`. Reading the asking run's verdict there reported a validated version
+ * as having nothing to show, because "no verdict on this row" was being taken to mean
+ * "this version has never been judged" — true of a first attempt and of a self-heal
+ * repeat (which stays on ONE row), false of a revalidation.
+ *
+ * `skipped` counts as an answer: the version was reached and passed over, which is a
+ * result a revalidation is asking to replace.
+ */
+export function answeredRun(
+  runs: readonly MilestoneRunView[],
+): MilestoneRunView | undefined {
+  return runs.find(
+    (r) =>
+      VALIDATING_ORIGINS.includes(r.origin) && (r.validation?.verdict ?? "") !== "",
+  );
+}
+
+/**
+ * Whether the attempt in flight is a REPAIR of the verdict on hand, rather than a
+ * fresh ask of it. True only when one run both holds the verdict and is running
+ * again — the self-heal loop, which repeats within a single run.
+ *
+ * It is what lets the copy say "the implementation has been fixed and deployed",
+ * which is a fact about a repair and false about a revalidation: nothing was fixed
+ * between a passed version and someone asking again.
+ */
+export function isRepairing(runs: readonly MilestoneRunView[]): boolean {
+  const answered = answeredRun(runs);
+  return answered !== undefined && answered.id === validatingRun(runs)?.id;
+}
+
+/**
  * The last validation cycle that MERGED, across every run that attempted one, oldest
  * to newest — the cycle whose merge commit the report should be read at.
  *

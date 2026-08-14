@@ -142,10 +142,14 @@ let mockCounts:
   | { passed: number; failed: number; uncovered: number; total: number }
   | undefined;
 let mockVerdict = "";
+// Whether the attempt in flight REPAIRS that verdict (self-heal, one run repeating)
+// or re-asks it (a revalidation, a fresh run row).
+let mockRepairing = false;
 
 vi.mock("../../validation/api/counts", () => ({
   useValidationEvidence: () => ({
     verdict: mockVerdict,
+    repairing: mockRepairing,
     ...(mockCounts ? { counts: mockCounts } : {}),
   }),
 }));
@@ -153,6 +157,7 @@ vi.mock("../../validation/api/counts", () => ({
 beforeEach(() => {
   mockCounts = undefined;
   mockVerdict = "";
+  mockRepairing = false;
   mockMutate.mockClear();
   mockDependencies = DEFAULT_DEPENDENCIES;
 });
@@ -212,6 +217,29 @@ describe("DeploymentsPage — validation", () => {
       ),
     ).toBeInTheDocument();
     expect(screen.queryByText(/criteria passed on this deployment/)).not.toBeInTheDocument();
+  });
+
+  // Re-running validation on an already-PASSED version. The verdict lives on an
+  // older run row — a revalidation is a fresh one — so reading the asking run made
+  // this say "Nothing reported yet", as if the version had never been judged.
+  it("shows the last result while a revalidation re-asks a passed version", () => {
+    mockDeploy = {
+      version: "v1",
+      status: "deployed",
+      components: { total: 1, ready: 1 },
+      validation: "running",
+    };
+    mockVerdict = "passed";
+    mockCounts = { passed: 6, failed: 0, uncovered: 0, total: 6 };
+
+    render(<DeploymentsPage projectName="acme" />);
+
+    expect(
+      screen.getByText("All 6 criteria passed in the last attempt. Validation is running again."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Nothing reported yet/)).not.toBeInTheDocument();
+    // Nothing was fixed — that clause belongs to a repair, not a re-ask.
+    expect(screen.queryByText(/fixed and deployed/)).not.toBeInTheDocument();
   });
 
   // A FIRST attempt: live, validating, no verdict on the row yet. The banner used to
