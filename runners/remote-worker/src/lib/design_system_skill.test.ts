@@ -51,13 +51,33 @@ const skillDirs = (): string[] =>
     .filter((e) => e.isDirectory() && fs.existsSync(path.join(LIBRARY, e.name, "SKILL.md")))
     .map((e) => e.name);
 
+/**
+ * EVERY markdown file a skill ships, not just its SKILL.md. A mirror copies a
+ * skill's whole directory and the `aep` skill lets an agent read its own
+ * `references/`, so a vendor name in a reference reaches a coding session just
+ * as surely — and is easier to miss in review. (Found by sweeping the library
+ * by hand; the narrower SKILL.md-only check had passed.)
+ */
+const markdownFilesIn = (dir: string): string[] =>
+  fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+    const p = path.join(dir, e.name);
+    if (e.isDirectory()) return markdownFilesIn(p);
+    return e.isFile() && e.name.endsWith(".md") ? [p] : [];
+  });
+
 test("only `organization` and the design-system skill name a design system", () => {
   const allowed = new Set(["organization", DEFAULT_DESIGN_SYSTEM]);
-  const offenders = skillDirs().filter((name) => !allowed.has(name) && VENDOR.test(read(name)));
+  const offenders = skillDirs()
+    .filter((name) => !allowed.has(name))
+    .flatMap((name) =>
+      markdownFilesIn(path.join(LIBRARY, name))
+        .filter((f) => VENDOR.test(fs.readFileSync(f, "utf8")))
+        .map((f) => path.relative(LIBRARY, f)),
+    );
   assert.deepEqual(
     offenders,
     [],
-    `these skills name the design-system vendor, so swapping it would need more than the two org-owned edits: ${offenders.join(", ")}`,
+    `these files name the design-system vendor, so swapping it would need more than the two org-owned edits: ${offenders.join(", ")}`,
   );
 });
 

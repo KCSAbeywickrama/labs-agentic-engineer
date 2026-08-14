@@ -114,7 +114,11 @@ A design-system skill must declare four things to work in that slot:
 
 Only `organization` and the design-system skill itself may name a design system.
 A vendor name anywhere else in this library is a defect — it is the thing that
-would make a swap need more than the two edits above.
+would make a swap need more than the two edits above. That includes
+`references/*.md`: a mirror copies a skill's whole directory, so a vendor name in
+a reference reaches a coding session exactly as a body would.
+`design_system_skill.test.ts` fails on any such name, and on `architecture`
+holding one instead of reading the section.
 
 ## Who owns what
 
