@@ -65,6 +65,12 @@ or middleware chains. Not Gin/Echo/Fiber — large dep trees, little gain at
 SPA's same-origin `/api` proxy, not from the browser to this host. A managed
 API (`exposesAPI`) gets CORS on the gateway; adding your own doubles the headers.
 
+**Endpoint visibility.** A service a sibling SPA calls lists **both**
+`project` and `external` on its own HTTP endpoint — `project` for the nginx
+hop, `external` so the API stays curl-able on the public gateway. The SPA
+must not fetch that public URL; its *dependency* entry is `project` only.
+`design.json` `exposure: intranet` does not drop `external`.
+
 **Upstreams.** `url.JoinPath(base, "path")`, never `base + "/path"` — an
 injected address can end in `/`.
 
@@ -85,6 +91,18 @@ injected address can end in `/`.
 ├── Dockerfile
 └── workload.yaml
 ```
+
+`workload.yaml` HTTP endpoint when a sibling SPA calls this service:
+
+```yaml
+    visibility:
+      - project
+      - external
+```
+
+**Done when:** both list items are present. A single-item `project` list is
+wrong even though the SPA uses `/api`. Never put `external` on a
+*dependency* entry.
 
 `Dockerfile` — multi-stage, pinned builder, slim runtime:
 
@@ -129,3 +147,4 @@ pool, err := pgxpool.New(ctx, os.Getenv("<DB_URL_ENV_VAR>"))
 | Pod won't start; `panic: listen tcp :8080` | Wrong port | Listen on 9090 |
 | `POST` to an injected upstream returns `405` (or a `301` then a `GET`) | Address ended in `/`, so `base + "/path"` built `//path`; `ServeMux` 301s to the clean path and the client re-issues it as `GET` | `url.JoinPath(base, "path")` |
 | Create/POST 500s only when an optional list field is omitted (`[]` works) | Nil slice bound as `NULL` into a `NOT NULL` array column; its `DEFAULT` skipped because the INSERT lists it | Normalize nil→empty, or omit the column |
+| API reachable via SPA `/api` but not curl-able on the public gateway | Provider `visibility` is only `project` (misread "not `external`" as the endpoint list) | List both `- project` and `- external` on the service's own endpoint |

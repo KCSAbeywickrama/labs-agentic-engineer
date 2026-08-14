@@ -194,6 +194,7 @@ const REFERENCE_RULES: Record<string, string[]> = {
     "A `platform-resource` with no `wiring` is broken input",
     "**One that already exists is edited, never regenerated.**",
     "**A sibling SPA reaches a service through same-origin `/api`, not `external`.**",
+    "**Provider endpoint visibility:** a service a sibling SPA calls lists",
   ],
 };
 

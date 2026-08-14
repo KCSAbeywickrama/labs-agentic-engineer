@@ -235,6 +235,11 @@ component contract. Consumer connection to the sibling: `visibility: project`,
 `envBindings.address: <DEP_NAME>_URL` (pod, for nginx). Any default under
 `configurations.env` arrives as a `window._env_` entry.
 
+**Done when:** this app's dependency on the sibling is `visibility: project`
+(never `external`). The sibling *service's* own endpoint lists both
+`project` and `external` — that file is the Go (or other backend) skill's
+to write; do not strip `external` from it because this SPA uses `/api`.
+
 ## Pitfalls
 
 | Symptom | Cause | Fix |
