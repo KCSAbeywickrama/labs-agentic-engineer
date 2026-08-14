@@ -19,6 +19,8 @@ package config
 import (
 	"context"
 	"fmt"
+	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/viper"
@@ -52,54 +54,106 @@ var ConfigMapKeys = []string{
 	"webhook.local_smee.enabled",
 }
 
-// Init sets viper defaults and env-var bindings. Config is no longer read from
-// a local file — it is loaded from the cluster ConfigMap by LoadFromCluster,
-// called in root's PersistentPreRunE for every command except `aep init`.
+// keyKind describes the expected type of a config value for validation.
+type keyKind int
+
+const (
+	kindString keyKind = iota
+	kindBool
+	kindURL
+	kindEnum
+)
+
+type configKeyMeta struct {
+	required   bool
+	kind       keyKind
+	enumValues []string // only for kindEnum
+}
+
+// keyRegistry maps each ConfigMapKey to its validation metadata.
+var keyRegistry = map[string]configKeyMeta{
+	"thunder.namespace":                 {required: true, kind: kindString},
+	"thunder.url":                       {required: true, kind: kindURL},
+	"thunder.config_map":                {required: true, kind: kindString},
+	"thunder.deployment":                {required: true, kind: kindString},
+	"thunder.admin_client_id":           {required: true, kind: kindString},
+	"thunder.public_url":                {required: true, kind: kindURL},
+	"oc.api_url":                        {required: true, kind: kindURL},
+	"oc.system_namespace":               {required: true, kind: kindString},
+	"oc.org_namespace":                  {required: false, kind: kindString},
+	"oc.local_org_provisioning.enabled": {required: false, kind: kindBool},
+	"platform.workspaces.access_mode":   {required: false, kind: kindEnum, enumValues: []string{"", "ReadWriteOnce", "ReadWriteMany", "ReadOnlyMany"}},
+	"codingagent.openbao_direct.enabled": {required: false, kind: kindBool},
+	"openbao.addr":                      {required: false, kind: kindURL},
+	"webhook.delivery_url":              {required: false, kind: kindURL},
+	"webhook.local_smee.enabled":        {required: false, kind: kindBool},
+}
+
+// Init sets env-var bindings. All config values must come from the cluster
+// ConfigMap loaded by LoadFromCluster — no hardcoded defaults are set here.
 func Init() {
 	viper.SetEnvPrefix("AEP")
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	viper.AutomaticEnv()
+}
 
-	// Platform install defaults.
-	// platform.workspaces.access_mode: PVC access mode for the shared git workspaces
-	// volume. Empty means use the chart default (ReadWriteMany).
-	viper.SetDefault("platform.workspaces.access_mode", "")
+// ValidateFile reads the YAML at path into an isolated viper instance and
+// returns one error string per invalid or missing required key. Empty slice
+// means the file is valid.
+func ValidateFile(path string) []string {
+	fv := viper.New()
+	fv.SetConfigFile(path)
+	if err := fv.ReadInConfig(); err != nil {
+		return []string{fmt.Sprintf("cannot read config file: %s", err)}
+	}
+	return validateViper(fv)
+}
 
-	// OpenChoreo platform API defaults.
-	viper.SetDefault("oc.api_url", "http://openchoreo-api.openchoreo-control-plane.svc.cluster.local:8080")
-	viper.SetDefault("oc.system_namespace", "openchoreo-control-plane")
-	viper.SetDefault("oc.local_org_provisioning.enabled", false)
-	viper.SetDefault("oc.org_namespace", "default")
+// ValidateLoaded checks the currently resolved global viper state (populated
+// after LoadFromCluster) and returns one error string per invalid or missing
+// required key.
+func ValidateLoaded() []string {
+	return validateViper(viper.GetViper())
+}
 
-	// Coding-agent secrets delivery.
-	// codingagent.openbao_direct.enabled: injects OPENBAO_ADDR/TOKEN into
-	// aep-api for direct OpenBao secrets delivery. Required for local/OSS
-	// installs; production overlays inject a managed SecretsProvider instead.
-	viper.SetDefault("codingagent.openbao_direct.enabled", false)
-
-	// OpenBao address — used when codingagent.openbao_direct.enabled=true.
-	viper.SetDefault("openbao.addr", "http://openbao.openbao.svc.cluster.local:8200")
-	// openbao.token is intentionally absent from ConfigMapKeys — it is a
-	// credential and must be supplied via AEP_OPENBAO_TOKEN env var or
-	// prompted interactively. The default "root" applies to local dev only.
-	viper.SetDefault("openbao.token", "root")
-
-	// GitHub webhook delivery.
-	// webhook.delivery_url: registered on each repo's webhook. Set to the real
-	// public HTTPS URL of aep-api's /api/v1/webhooks/github in production.
-	// webhook.local_smee.enabled: deploys an in-cluster smee-client — off by
-	// default in production; use a real ingress + public delivery_url instead.
-	viper.SetDefault("webhook.delivery_url", "")
-	viper.SetDefault("webhook.local_smee.enabled", false)
-
-	// Thunder defaults — also overridable via AEP_THUNDER_* env vars.
-	viper.SetDefault("thunder.namespace", "thunder")
-	viper.SetDefault("thunder.url", "http://thunder-service.thunder.svc.cluster.local:8090")
-	viper.SetDefault("thunder.config_map", "thunder-config-map")
-	viper.SetDefault("thunder.deployment", "thunder-deployment")
-	viper.SetDefault("thunder.admin_client_id", "aep-system-client")
-	viper.SetDefault("thunder.admin_client_secret", "aep-system-client-secret")
-	viper.SetDefault("thunder.public_url", "http://thunder.openchoreo.localhost:8080")
+func validateViper(v *viper.Viper) []string {
+	var errs []string
+	for _, k := range ConfigMapKeys {
+		meta, ok := keyRegistry[k]
+		if !ok {
+			continue
+		}
+		val := v.GetString(k)
+		if meta.required && val == "" {
+			errs = append(errs, fmt.Sprintf("%s: required but not set", k))
+			continue
+		}
+		if val == "" {
+			continue // optional + empty → skip further checks
+		}
+		switch meta.kind {
+		case kindBool:
+			if _, err := strconv.ParseBool(val); err != nil {
+				errs = append(errs, fmt.Sprintf("%s: invalid boolean value %q", k, val))
+			}
+		case kindURL:
+			if _, err := url.ParseRequestURI(val); err != nil {
+				errs = append(errs, fmt.Sprintf("%s: not a valid URL: %q", k, val))
+			}
+		case kindEnum:
+			valid := false
+			for _, ev := range meta.enumValues {
+				if val == ev {
+					valid = true
+					break
+				}
+			}
+			if !valid {
+				errs = append(errs, fmt.Sprintf("%s: invalid value %q — must be one of %v", k, val, meta.enumValues))
+			}
+		}
+	}
+	return errs
 }
 
 // LoadFromCluster reads the aep-cli-config ConfigMap from the given namespace
