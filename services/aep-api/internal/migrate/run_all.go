@@ -166,8 +166,7 @@ func Steps(db *gorm.DB, deploymentTier string, credKey []byte) []database.Step {
 		// step inserts the claude-sonnet-5 row so write-time USD stamping has
 		// a price card to resolve against. Ops-managed thereafter.
 		ctxStep("model_rates_seed", RunModelRatesSeed),
-		// EXPAND: provider-neutral secret_ref_* columns alongside sm_api_*
-		// (phase-03 item 14). CONTRACT (drop sm_api_*) is phase14.
+		// secret_ref_* columns, backfilled from leftover sm_api_* if present.
 		ctxStep("phase11_secret_ref_columns", RunPhase11SecretRefColumns),
 		// Encrypt publisher_client_secret + webhook_secrets in place
 		// (phase-03 items 15–16). Uses the same credential-encryption-key.
@@ -183,7 +182,7 @@ func Steps(db *gorm.DB, deploymentTier string, credKey []byte) []database.Step {
 		// one-current-thread-per-scope partial unique index — the admission
 		// fence lazy create and rotation race against.
 		ctxStep("project_conversations", RunProjectConversations),
-		// CONTRACT: drop leftover sm_api_* columns (phase-03 item 14 / phase 09).
+		// Drop leftover sm_api_* columns. secret_ref_* stay.
 		ctxStep("phase14_drop_sm_api_columns", RunPhase14DropSMAPIColumns),
 	}
 }

@@ -23,13 +23,10 @@ import (
 	"gorm.io/gorm"
 )
 
-// RunPhase11SecretRefColumns is the EXPAND half of the sm_api_* →
-// secret_ref_* rename (ticket 09 / phase-03 item 14). It adds the
-// provider-neutral columns alongside the legacy sm_api_* ones, then
-// backfills from old → new where the new side is still null.
-//
-// CONTRACT (drop sm_api_*) is phase14, after this backfill. Writers
-// no longer dual-write; readers use secret_ref_* only.
+// RunPhase11SecretRefColumns adds secret_ref_* columns and copies from
+// leftover sm_api_* columns when those still exist and the new side is
+// null. Writers stamp secret_ref_* only. RunPhase14DropSMAPIColumns
+// drops the leftover columns after this backfill.
 //
 // Idempotent — ADD COLUMN IF NOT EXISTS + conditional UPDATE.
 func RunPhase11SecretRefColumns(ctx context.Context, db *gorm.DB) error {

@@ -135,8 +135,7 @@ type OrgAnthropicCredential struct {
 
 	// Secret-ref triplet. Populated by Connect when a secrets provider is
 	// configured; NULL when unset. Dispatch short-circuits the refs path
-	// when NULL. secret_ref_* is the only column set (phase-09 CONTRACT
-	// dropped sm_api_*).
+	// when NULL.
 	SecretRefName     *string `gorm:"type:text;column:secret_ref_name" json:"-"`
 	SecretRefKVPath   *string `gorm:"type:text;column:secret_ref_kv_path" json:"-"`
 	SecretRefProperty *string `gorm:"type:text;column:secret_ref_property" json:"-"`

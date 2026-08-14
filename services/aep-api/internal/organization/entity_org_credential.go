@@ -51,8 +51,7 @@ type OrgCredential struct {
 	PrevIdentityLogin *string        `gorm:"type:text;column:prev_identity_login" json:"prevIdentityLogin,omitempty"`
 
 	// Secret-ref triplet + write timestamp. See OrgAnthropicCredential for
-	// lifecycle. secret_ref_* is the only column set (phase-09 CONTRACT
-	// dropped sm_api_*).
+	// lifecycle.
 	SecretRefName      *string    `gorm:"type:text;column:secret_ref_name" json:"-"`
 	SecretRefKVPath    *string    `gorm:"type:text;column:secret_ref_kv_path" json:"-"`
 	SecretRefProperty  *string    `gorm:"type:text;column:secret_ref_property" json:"-"`

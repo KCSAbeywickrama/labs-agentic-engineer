@@ -80,8 +80,7 @@ func (p *OrganizationIDPProfile) ResolvedSecretRefWrittenAt() *time.Time {
 	return p.SecretRefWrittenAt
 }
 
-// stampSecretRefTriplet returns UpdateColumns keys for the provider-neutral
-// secret_ref_* columns (phase-09 CONTRACT: sm_api_* are gone).
+// stampSecretRefTriplet returns UpdateColumns keys for the secret_ref_* columns.
 func stampSecretRefTriplet(secretRefName, vaultKey, prop string) map[string]any {
 	return map[string]any{
 		"secret_ref_name":     secretRefName,

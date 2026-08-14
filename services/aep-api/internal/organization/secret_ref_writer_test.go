@@ -808,7 +808,7 @@ func claimsCtx(ouID string) context.Context {
 }
 
 // TestSecretRefWriter_WriteAnthropic_StampsSecretRef proves UpdateColumns
-// stamps secret_ref_* only (phase-09 CONTRACT; sm_api_* are gone).
+// stamps secret_ref_* only.
 func TestSecretRefWriter_WriteAnthropic_StampsSecretRef(t *testing.T) {
 	t.Parallel()
 	db := dbtest.New(t)

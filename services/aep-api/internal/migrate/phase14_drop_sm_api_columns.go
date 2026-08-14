@@ -23,14 +23,12 @@ import (
 	"gorm.io/gorm"
 )
 
-// RunPhase14DropSMAPIColumns is the CONTRACT half of the sm_api_* →
-// secret_ref_* rename (ticket 09 / phase-03 item 14 / phase 09 closeout).
-// The old app-factory deployment that read sm_api_* from the shared
-// app_factory_db is retired; writers no longer dual-write. This drops
-// the leftover columns. secret_ref_* stay.
+// RunPhase14DropSMAPIColumns drops leftover sm_api_* columns from the
+// credential tables. secret_ref_* stay. Writers stamp secret_ref_* only;
+// phase11 already copied leftover sm_api_* values into secret_ref_* where
+// the new side was null.
 //
-// Idempotent — DROP COLUMN IF EXISTS. phase11 already backfilled
-// secret_ref_* from sm_api_* where the new side was null.
+// Idempotent — DROP COLUMN IF EXISTS.
 func RunPhase14DropSMAPIColumns(ctx context.Context, db *gorm.DB) error {
 	stmts := []string{
 		`DO $$ BEGIN
