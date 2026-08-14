@@ -371,6 +371,35 @@ func TestReconcile_ConfidentialClient_MissingSecretRef(t *testing.T) {
 	}
 }
 
+// Unsupported clientType → CR marked not ready, EnsureApplication not called.
+func TestReconcile_UnsupportedClientType(t *testing.T) {
+	app := newApp("ns", "bad-type", v1alpha1.ThunderApplicationSpec{
+		ClientType: "bearer", // not public or confidential
+		ClientID:   "bad-type-client",
+	})
+	admin := &fakeAdmin{}
+	r, cl := newReconciler(t, admin, app)
+
+	res, err := r.Reconcile(context.Background(), reqFor(app))
+	if err != nil {
+		t.Fatalf("Reconcile should not return an error: %v", err)
+	}
+	if res.RequeueAfter <= 0 {
+		t.Errorf("RequeueAfter = %v, want > 0 (should retry)", res.RequeueAfter)
+	}
+	if len(admin.ensureCalls) != 0 {
+		t.Errorf("EnsureApplication called %d times, want 0", len(admin.ensureCalls))
+	}
+
+	var updated v1alpha1.ThunderApplication
+	if err := cl.Get(context.Background(), reqFor(app).NamespacedName, &updated); err != nil {
+		t.Fatalf("get CR: %v", err)
+	}
+	if updated.Status.Ready {
+		t.Errorf("Status.Ready = true, want false")
+	}
+}
+
 // spec.clientId override: Thunder name uses the explicit client ID, not derived.
 func TestReconcile_ClientIDOverride(t *testing.T) {
 	app := newApp("some-ns", "some-cr", v1alpha1.ThunderApplicationSpec{

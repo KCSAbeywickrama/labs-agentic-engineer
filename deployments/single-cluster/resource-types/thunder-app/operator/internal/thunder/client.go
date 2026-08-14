@@ -368,6 +368,12 @@ func (c *client) EnsureApplication(ctx context.Context, app DesiredApp) (string,
 	if app.Name == "" {
 		return "", fmt.Errorf("thunder: DesiredApp.Name is required")
 	}
+	switch app.ClientType {
+	case "", "public", "confidential":
+		// valid
+	default:
+		return "", fmt.Errorf("thunder: unsupported ClientType %q — must be \"public\" or \"confidential\"", app.ClientType)
+	}
 	token, err := c.getSystemToken(ctx)
 	if err != nil {
 		return "", fmt.Errorf("getSystemToken: %w", err)

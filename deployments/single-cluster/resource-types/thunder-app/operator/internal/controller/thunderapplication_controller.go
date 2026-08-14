@@ -241,6 +241,12 @@ func (r *Reconciler) ensureConfigMap(ctx context.Context, app *v1alpha1.ThunderA
 // buildDesiredApp derives the desired Thunder app state from a CR. For
 // confidential clients it reads the client secret from the referenced Secret.
 func (r *Reconciler) buildDesiredApp(ctx context.Context, app *v1alpha1.ThunderApplication) (thunder.DesiredApp, error) {
+	switch app.Spec.ClientType {
+	case "", "public", "confidential":
+		// valid
+	default:
+		return thunder.DesiredApp{}, fmt.Errorf("unsupported clientType %q — must be \"public\" or \"confidential\"", app.Spec.ClientType)
+	}
 	desired := desiredApp(app)
 	if app.Spec.ClientType == "confidential" {
 		if app.Spec.SecretRef == nil {
