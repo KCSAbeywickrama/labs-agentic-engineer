@@ -52,7 +52,7 @@ const CREATE_TABLE = `CREATE TABLE IF NOT EXISTS conversations (
 // an every-boot ALTER queued behind a long transaction would stall every
 // reader on the table; the probe costs one catalog read instead.
 const TURNS_COLUMN_EXISTS = `SELECT 1 FROM information_schema.columns
-  WHERE table_name = 'conversations' AND column_name = 'turns'`;
+  WHERE table_schema = current_schema() AND table_name = 'conversations' AND column_name = 'turns'`;
 
 const ADD_TURNS_COLUMN = `ALTER TABLE conversations
   ADD COLUMN IF NOT EXISTS turns jsonb NOT NULL DEFAULT '[]'`;

@@ -139,11 +139,13 @@ func designOrCollabTurn(job turnJob) bool {
 // never reaches a browser. A blank instruction (never sent by real clients)
 // journals nothing rather than an empty bubble.
 func journalFor(job turnJob) *agentsvc.JournalBlock {
-	text := strings.TrimSpace(job.summary)
-	if text == "" {
+	// Trimming detects a blank instruction only — the journal carries the
+	// instruction VERBATIM (that is its contract; the sender's UI rendered
+	// exactly these bytes).
+	if strings.TrimSpace(job.summary) == "" {
 		return nil
 	}
-	return &agentsvc.JournalBlock{Text: text, Author: job.author}
+	return &agentsvc.JournalBlock{Text: job.summary, Author: job.author}
 }
 
 // journalAuthorFrom projects the request bearer onto the journal's author
