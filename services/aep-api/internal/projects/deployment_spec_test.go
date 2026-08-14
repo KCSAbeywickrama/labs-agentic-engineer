@@ -55,7 +55,6 @@ func TestDesiredDeploymentFor(t *testing.T) {
 	t.Parallel()
 
 	const inst = "api-http"
-	origins := []string{"http://web.local"}
 
 	cases := []struct {
 		name string
@@ -64,7 +63,7 @@ func TestDesiredDeploymentFor(t *testing.T) {
 		wantAPITrait bool
 		// wantJWT: the binding carries a jwtAuth config for it.
 		wantJWT bool
-		// wantOrigins: the sibling SPA allowlist is applied.
+		// wantOrigins: allowedOrigins is explicitly set (non-production path).
 		wantOrigins bool
 	}{
 		{
@@ -72,15 +71,13 @@ func TestDesiredDeploymentFor(t *testing.T) {
 			body: svcJSON("api", "", ""),
 		},
 		{
-			name:         "end-user-required is protected and browser-facing",
+			name:         "end-user-required uses trait-default wildcard CORS",
 			body:         svcJSON("api", "end-user-required", ""),
 			wantAPITrait: true,
 			wantJWT:      true,
-			wantOrigins:  true,
+			wantOrigins:  false,
 		},
 		{
-			// A service-to-service API has no browser caller, so handing it the
-			// project's SPA origins would widen its CORS surface for nothing.
 			name:         "service-required is protected but takes no SPA origins",
 			body:         svcJSON("api", "service-required", ""),
 			wantAPITrait: true,
@@ -93,11 +90,10 @@ func TestDesiredDeploymentFor(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			got := DesiredDeploymentFor(DeploymentInputs{
-				Component:      designComponent(t, tc.body),
-				ComponentName:  "api",
-				Environment:    openchoreo.DevEnvironmentName,
-				ReleaseName:    "rel-1",
-				AllowedOrigins: origins,
+				Component:     designComponent(t, tc.body),
+				ComponentName: "api",
+				Environment:   openchoreo.DevEnvironmentName,
+				ReleaseName:   "rel-1",
 			})
 
 			hasTrait := false

@@ -94,8 +94,8 @@ func APIConfigurationInstanceName(componentName, endpointName string) string {
 //     all-or-nothing blackout: the browser blocks the request before it is
 //     ever sent, so nothing reaches the access log to diagnose.
 //
-// Origins stay pinned to the sibling SPA list — this widens headers, never
-// the origin, and CORS constrains browsers only (curl was never gated).
+// Empty/nil `allowedOrigins` is the production path (schema default `["*"]`).
+// The `len(allowedOrigins) > 0` branch stays for tests / any future caller.
 //
 // `configs` is keyed by trait instance name; the value is the parameters
 // block that lands at `ReleaseBinding.spec.traitEnvironmentConfigs[<inst>]`.
