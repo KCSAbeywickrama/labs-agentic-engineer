@@ -42,6 +42,7 @@ the genai turn engine (runner/broker/sweeper), and the files / design / skills s
 | `resourceTypeCatalog` (returns `CRTType`) | needs | `dependencies` — the PE-authored CRT markers + declared outputs, projected at the root |
 | `AnthropicKeyResolver` · git-token `Resolver` | needs | `platform/secrets` — per-org keys + sealed git tokens |
 | `ArtifactService` · `ArtifactStore` · `SplitFrontmatter` | offers | `delivery` / `projects` / `dependencies` — design reads, spec-save, status snapshots |
+| `HardConfigEdges` · `HardProvidersFor` | offers | `projects` (deploy order) / `dependencies` (runtime-config compose) — which sibling addresses a component cannot start without |
 | `DescriptorWriter` | offers | `projects` — stamps `specs/.agentic-engineer.toml` into a repo at project create |
 | `CredentialsRefreshService`-adjacent turn/tag reads | offers | delivery/build (SpecTagger, validation criteria) |
 
@@ -108,7 +109,14 @@ the genai turn engine (runner/broker/sweeper), and the files / design / skills s
   bytes; `utf8`, and an omitted field, are already raw) before the request reaches `FilesService`, so
   everything below — path/size validation, soft-validation warnings, the commit — only ever sees the
   file's real bytes. The 5 MiB cap therefore measures the decoded file, not its ~33%-larger base64 text.
-  Undecodable base64 is a 400, never a commit of garbage.
+  Undecodable base64 is a 400, and so is an encoding outside the enum — never a commit of garbage.
+- **One authority for which wiring edges are HARD** (`wiring_edges.go`). A hard edge is an address the
+  platform stamps into a component's own start-up config — today a web app's sibling *services*, whose
+  URLs land in `env-config.js`. Both consumers read the same rule: `dependencies` composes the file, and
+  `projects` orders the deploy waves around it, so they can never disagree about which addresses are
+  needed. Everything else is soft (it flows consumer→provider: CORS origins, an OIDC callback) and orders
+  nothing. Deliberately NOT hard: service→service, which OpenChoreo resolves through its own connection
+  mechanism — ordering it would refuse two services that call each other. ADR-0019.
 - **`CRTType` is a projection, not a re-export.** design-save reads the dependencies resource-type catalog
   through the `resourceTypeCatalog` port in spec's OWN vocabulary (`CRTType`), mapped by a root
   adapter — the spec domain names the dependencies domain nowhere.
