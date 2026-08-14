@@ -95,10 +95,6 @@ func (e *TurnInProgressError) Error() string {
 // never inject the namespace separator and escape its tenant scope.
 var conversationIDPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,200}$`)
 
-// requirementsTagPattern matches a requirements version tag `v<N>` (design
-// tags are `v<N>-<M>` and are deliberately excluded — approval is the
-// requirements version, not a design revision).
-var requirementsTagPattern = regexp.MustCompile(`^v(\d+)$`)
 
 // ---- ports -----------------------------------------------------------------
 
@@ -384,6 +380,9 @@ func (s *Service) StartTurn(ctx context.Context, orgID, projectID string, in Tur
 		turn:             turnSpec,
 		target:           in.Target,
 		summary:          in.Instruction,
+		// Captured before the detached goroutine: the identity reads the
+		// request's bearer, and the journal (#463) attributes the turn.
+		author: journalAuthorFrom(ctx),
 		repoRef:          ref,
 		baseRef:          baseRef,
 		skillsRef:        skillsRef,
