@@ -82,8 +82,7 @@ its contract instead.
   convention ("use `modernc.org/sqlite`", "read `window._env_.<DEP>_CLIENT_ID`"), it is
   authoritative — never re-derive one from memory.
 - **CORS belongs to the gateway** for a service whose design sets `exposesAPI`:
-  the gateway attaches a filter to every `visibility: external` route, and your
-  own middleware on top of it breaks the response.
+  the gateway attaches a filter to every `visibility: external` route.
 - **Never commit build output, dependency directories or local env files.** The
   repo-root `.gitignore` covers them; your stack skill names its own.
 

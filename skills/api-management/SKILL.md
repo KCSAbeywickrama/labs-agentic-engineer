@@ -51,7 +51,7 @@ gateway gives you: stamp it on every row this service creates, and gate every
 per-user query on it.
 
 **CORS.** The `api-configuration` ClusterTrait attaches an Envoy CORS filter per
-`visibility: external` HTTPRoute, so a managed API must not add its own.
+`visibility: external` HTTPRoute.
 
 **Document the injected header.** In the OpenAPI you author for a protected
 service, list `X-User-Id` under `parameters` so consumers know it is
