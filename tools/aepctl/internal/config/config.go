@@ -137,8 +137,9 @@ func validateViper(v *viper.Viper) []string {
 				errs = append(errs, fmt.Sprintf("%s: invalid boolean value %q", k, val))
 			}
 		case kindURL:
-			if _, err := url.ParseRequestURI(val); err != nil {
-				errs = append(errs, fmt.Sprintf("%s: not a valid URL: %q", k, val))
+			parsed, err := url.ParseRequestURI(val)
+			if err != nil || parsed.Host == "" {
+				errs = append(errs, fmt.Sprintf("%s: not a valid absolute URL (must include scheme and host): %q", k, val))
 			}
 		case kindEnum:
 			valid := false
