@@ -84,5 +84,5 @@ inbound `Authorization` header verbatim — never re-issue or mint a token.
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| CORS error in the browser when calling this API | The service ships its own CORS middleware (doubled headers), or its `workload.yaml` lacks `visibility: external` | Remove the middleware; confirm `visibility: external`. |
+| CORS error in the browser when calling this API | The SPA is fetching the public gateway URL, or this service ships its own CORS middleware (doubled headers) | Point the SPA at same-origin `"/api"` (`react-webapp`); remove service CORS middleware. |
 | Every protected request 401s in tests | Test calls carry no `X-User-Id` — in production the gateway sets it | Set `X-User-Id` directly on the request in tests; don't try to mint a JWT. |
