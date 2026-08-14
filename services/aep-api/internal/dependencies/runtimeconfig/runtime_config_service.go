@@ -103,9 +103,10 @@ func (s *RuntimeConfigService) SetResourceCatalog(c resourceMarkerCatalog) {
 // than in a follow-up patch that had to wait for the binding to exist.
 //
 // `ready` is false when a required key could not be populated yet — typically a
-// dependency URL that resolves only once a sibling is serving. The caller must
-// then leave the field unmanaged: a partially populated window._env_ is worse
-// than a stale one, because the SPA's src/env.ts throws on it at module load.
+// platform-resource binding whose outputs are not yet resolved, or a transient
+// OC error on that path. The caller must then leave the field unmanaged: a
+// partially populated window._env_ is worse than a stale one, because the
+// SPA's src/env.ts throws on it at module load.
 // A non-web-app component wants no files at all, which is (nil, true).
 func (s *RuntimeConfigService) FilesForComponent(ctx context.Context, orgID, projectID, componentName string) ([]openchoreo.WorkflowFileVar, bool, error) {
 	if s == nil {
@@ -153,10 +154,6 @@ func (s *RuntimeConfigService) FilesForComponent(ctx context.Context, orgID, pro
 }
 
 // buildEnvValues assembles the map that becomes `window._env_`.
-//   - `API_BASE_URL` — first sibling service dep's external URL (the
-//     conventional name for the primary backend).
-//   - `<UPPER_SNAKE_NAME>_URL` — every dep, keyed by component name. Lets
-//     a SPA with multiple backends address each one explicitly.
 //   - `<DEP>_<OUTPUT>` — every platform-resource dependency's resolved binding
 //     outputs, keyed generically (resources.EnvVarName — the same convention
 //     wiring.go injects pod env vars with). No resource-type name is hardcoded:
@@ -165,66 +162,19 @@ func (s *RuntimeConfigService) FilesForComponent(ctx context.Context, orgID, pro
 //     dependency's provisioned binding outputs (resolved by OC); the BFF never
 //     calls the upstream from this path.
 //
-// buildEnvValues returns the map + a `ready` flag, where ready means "every key
-// the SPA needs to START is present" — a sibling backend's address, a platform
-// resource's outputs. The caller must NOT write a partial env-config.js on
-// `!ready`: src/env.ts throws on a missing key at module load, so half a file is
-// worse than the stale one the pod already has.
+// Sibling service URLs are NOT emitted. The browser calls same-origin `/api`
+// (SPA nginx reverse-proxies to the pod env `<DEP>_URL` OpenChoreo injects).
+// Public gateway URLs in window._env_ were the old SPA-reachability workaround.
 //
-// The SPA's OWN external URL is deliberately NOT one of those keys. It exists
-// only once the SPA has a rendered binding, so requiring it before the SPA's
-// first write is a demand the SPA cannot satisfy until it has already been
-// deployed — and the one thing that needs it (registering the callback URL with
-// an OIDC dependency) is not read by the bundle at all. See layerPlatformResources.
+// buildEnvValues returns the map + a `ready` flag. The flag is false
+// when a required key couldn't be populated yet (transient OC error,
+// SPA URL not yet resolved for an OIDC consumer-URL patch, etc.). The
+// caller must NOT write a partial env-config.js on `!ready` — see
+// FilesForComponent.
 func (s *RuntimeConfigService) buildEnvValues(ctx context.Context, orgID, projectID string, webapp *spec.DesignComponent, design *spec.DesignFile) (out map[string]interface{}, ready bool) {
+	_ = design // sibling component index is no longer used for window._env_
 	out = map[string]interface{}{}
 	ready = true
-
-	// The same edge rule the deploy stage orders its waves by. Sharing it is what
-	// makes the order honest: every dependency this loop needs a URL for is one the
-	// scheduler has already waited for within this cycle, so a deferral here means
-	// the provider is outside the cycle and not yet deployed at all.
-	var firstServiceURL string
-	for _, dep := range spec.HardProvidersFor(design, webapp.Name) {
-		k8sName := k8sname.ToK8sName(dep)
-		list, err := s.componentClient.ListDeployments(ctx, orgID, projectID, k8sName)
-		if err != nil {
-			// Transient OC failure on a required dep. Mark not-ready so
-			// the caller skips the write and preserves the previously
-			// valid env-config.js for the pod.
-			slog.WarnContext(ctx, "runtime_config: ListDeployments error for dep; deferring",
-				"projectID", projectID, "component", webapp.Name, "dep", dep, "error", err)
-			ready = false
-			continue
-		}
-		if list == nil {
-			// A required dep with no deployment list is not resolvable
-			// yet — defer rather than ship an incomplete env-config.js.
-			ready = false
-			continue
-		}
-		url := ""
-		for _, d := range list.Items {
-			if d.EndpointURL != "" {
-				url = strings.TrimRight(d.EndpointURL, "/")
-				break
-			}
-		}
-		if url == "" {
-			// Dep not yet deployed — not an error, but we don't have a
-			// URL for it. Defer rather than ship a window._env_ that
-			// will throw at module load.
-			ready = false
-			continue
-		}
-		out[upperSnakeKey(dep)+"_URL"] = url
-		if firstServiceURL == "" {
-			firstServiceURL = url
-		}
-	}
-	if firstServiceURL != "" {
-		out["API_BASE_URL"] = firstServiceURL
-	}
 
 	// Layer every platform-resource dependency's binding outputs generically.
 	// No resource-type name is hardcoded — an OIDC dependency and a database
