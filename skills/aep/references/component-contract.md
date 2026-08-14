@@ -83,9 +83,7 @@ its contract instead.
   authoritative — never re-derive one from memory.
 - **CORS belongs to the gateway** for a service whose design sets `exposesAPI`:
   the gateway attaches a filter to every `visibility: external` route, and your
-  own middleware on top of it breaks the response. A sibling web-app does **not**
-  call this service from the browser; it same-origin proxies via nginx (`react-webapp`).
-  Unmanaged services therefore do not serve CORS for the SPA. Web apps never add CORS.
+  own middleware on top of it breaks the response.
 - **Never commit build output, dependency directories or local env files.** The
   repo-root `.gitignore` covers them; your stack skill names its own.
 

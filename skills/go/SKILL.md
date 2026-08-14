@@ -61,10 +61,6 @@ NULL DEFAULT '{}'`) 500s at runtime. Normalize before insert
 or middleware chains. Not Gin/Echo/Fiber — large dep trees, little gain at
 5–20 endpoints.
 
-**Never add CORS middleware.** A sibling SPA calls this service through that
-SPA's same-origin `/api` proxy, not from the browser to this host. A managed
-API (`exposesAPI`) gets CORS on the gateway; adding your own doubles the headers.
-
 **Upstreams.** `url.JoinPath(base, "path")`, never `base + "/path"` — an
 injected address can end in `/`.
 
