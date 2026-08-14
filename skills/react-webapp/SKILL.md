@@ -24,9 +24,16 @@ per-env values (API URLs, OIDC config, flags) arrive at request time in
 3. **Verify** — from the app path:
    ```bash
    npm install                   # regenerates package-lock.json
+   npx --no astryx doctor        # design-system wiring — see astryx-design-system
    npx tsc --noEmit              # type-check without emitting
    npm run build                 # actually build
    ```
+
+   `astryx doctor` runs second because it catches the whole class of faults the
+   next two steps cannot see: a missing `astryxStylex()` plugin, an unimported
+   theme, a React peer-dependency mismatch. Each one type-checks and builds
+   clean, then renders an unstyled page in the cluster. `--no` keeps the
+   invocation local-only (`astryx-design-system` explains why that matters).
    Commit the `package-lock.json` this produces. Never commit `node_modules/`.
 
    The `build` script is `tsc --noEmit && vite build` — **not** `tsc -b`, which

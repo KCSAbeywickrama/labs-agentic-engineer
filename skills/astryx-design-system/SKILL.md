@@ -26,6 +26,14 @@ right; a guessed prop is never right by comparison. The discipline: **before
 writing JSX for a component you have not confirmed this session, run the CLI,
 then write the JSX** — never the reverse.
 
+**Always invoke it as `npx --no astryx …`.** `--no` restricts resolution to the
+`@astryxdesign/cli` in this app's `node_modules` — the version `package-lock.json`
+pins. Without it, an `npx astryx` in an app whose install has not run fetches and
+executes the unrelated `astryx` package that exists on the public registry. Do not
+drop the flag to shorten a command: if the CLI is missing, the right outcome is the
+loud `could not determine executable to run`, not a stranger's postinstall script
+running in the build pod.
+
 **Violating the letter of this rule is violating the spirit of it.** "It's just a
 placeholder page," "the app doesn't have Astryx wired up yet," and "this screen
 is throwaway" are reasons to wire Astryx up *faster*, not reasons to skip it — a
@@ -66,17 +74,18 @@ import {neutralTheme} from '@astryxdesign/theme-neutral/built';
 // the look, never hand-roll colors instead
 ```
 
-Run `npx astryx doctor` as part of the verify step and treat a non-zero exit like
-a failing build — config, theme wiring, and peer-dependency problems are cheap to
-fix before the Docker build and expensive to debug after it.
+`npx --no astryx doctor` is part of `react-webapp`'s mandatory verify sequence, and
+a non-zero exit fails verification like any other step — config, theme wiring, and
+peer-dependency problems are cheap to fix before the Docker build and expensive to
+debug after it.
 
 ## Platform constraints that override this system's defaults
 
 Four places where Astryx's own guidance assumes a project this platform does not
 build. Each of these is a runtime or build failure, not a style preference:
 
-1. **Never run `npx astryx init`** (in any form, including
-   `--features agents`). It scaffolds a fresh app and writes
+1. **Never run `astryx init`** (in any form — `npx astryx init`,
+   `npx --no astryx init`, `--features agents`). It scaffolds a fresh app and writes
    `AGENTS.md`/`CLAUDE.md` into the repo. The app is already scaffolded, and
    guidance reaches you as skills — a committed agent file is a second, stale
    authority in the project.
@@ -101,11 +110,11 @@ specifies. "Install no other library" below is about UI and styling.
    subpath entry points, e.g. `@astryxdesign/core/Button`,
    `@astryxdesign/core/Layout`) — never from Tailwind, MUI, Chakra, Ant Design,
    Bootstrap, or a hand-rolled component.
-2. **Run `npx astryx component <Name> --dense` before using ANY component**, even
-   one already used earlier in this session — confirm the prop exists before
+2. **Run `npx --no astryx component <Name> --dense` before using ANY component**,
+   even one already used earlier in this session — confirm the prop exists before
    writing it, don't guess.
-3. **Search before building.** Run `npx astryx search "<thing>"` when unsure what
-   exists; Astryx ships more components than you would assume (tag inputs,
+3. **Search before building.** Run `npx --no astryx search "<thing>"` when unsure
+   what exists; Astryx ships more components than you would assume (tag inputs,
    command palettes, tree lists, chat UI) — check before reaching for a wrapper
    `<div>` or a new dependency.
 4. **Layout is `VStack`/`HStack`/`Grid`/`Stack` from `@astryxdesign/core/Layout`**
@@ -114,11 +123,11 @@ specifies. "Install no other library" below is about UI and styling.
    never `style={{...}}`, and never `className`/`style` alongside
    `{...stylex.props()}` (use `mergeProps()` if you must combine).
 6. **Colors and spacing are tokens, never literals.** Run
-   `npx astryx docs tokens --dense`; use the CSS-var color tokens and `spaceN`
-   gap values it documents, not hex/rgb or raw px.
+   `npx --no astryx docs tokens --dense`; use the CSS-var color tokens and
+   `spaceN` gap values it documents, not hex/rgb or raw px.
 7. **Page-level structure follows a template, not intuition.** Run
-   `npx astryx template --list` and `npx astryx template <name> --skeleton` to
-   find and study a layout skeleton before hand-building a page (dashboard,
+   `npx --no astryx template --list` and `npx --no astryx template <name>
+   --skeleton` to find and study a layout skeleton before hand-building a page (dashboard,
    settings, list, wizard, auth) from scratch.
 8. **Navigation uses `useLinkComponent()`**, never a hardcoded `<a>`.
 9. **Dense data is rows, not cards.** Use `Table` or `List`+`Item` for lists of
@@ -142,20 +151,20 @@ specifies. "Install no other library" below is about UI and styling.
 | Breadcrumbs / global search | `Breadcrumbs`, `PowerSearch` |
 | Toggle / choice input | `Switch`, `CheckboxInput`, `CheckboxList`, `RadioList`, `SegmentedControl`, `ToggleButton` |
 
-This table is a quick guide, not the catalog — run `npx astryx component --list`
-for every component grouped by category, or `npx astryx search` when nothing here
-fits.
+This table is a quick guide, not the catalog — run
+`npx --no astryx component --list` for every component grouped by category, or
+`npx --no astryx search` when nothing here fits.
 
 ## Pitfalls
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| Astryx components render unstyled/unthemed | `reset.css`/theme CSS not imported, or imported after other global CSS without layer ordering | Import reset + theme first in `main.tsx`; if the app has other global CSS, assign every stylesheet an explicit `@layer` (`npx astryx docs migration`) |
+| Astryx components render unstyled/unthemed | `reset.css`/theme CSS not imported, or imported after other global CSS without layer ordering | Import reset + theme first in `main.tsx`; if the app has other global CSS, assign every stylesheet an explicit `@layer` (`npx --no astryx docs migration`) |
 | `npm install` fails / peer-dependency warnings on React | `package.json` is on React <19 | Set `react`/`react-dom` to `^19` before installing `@astryxdesign/core` |
 | Build succeeds but StyleX classes/styles don't apply | `astryxStylex()` missing from `vite.config.ts`, or ordered after `react()` | Add `...astryxStylex()` to `plugins`, listed before `react()` |
 | Page renders blank in dev, every asset 404s | `base` was set in `vite.config.ts` from an Astryx snippet | Remove it — served at host root (`react-webapp`) |
-| A prop doesn't exist, or is the old spelling | Answered from memory instead of the CLI | Run `npx astryx component <Name> --dense` — the CLI reflects the installed version, training data doesn't |
-| Every row in a list is wrapped in its own `Card` | Defaulted to a generic "card grid" instead of checking data density | `npx astryx docs principles --dense` — dense data is `Table`/`List`+`Item`; `Card` is for widgets/galleries/settings groups |
+| A prop doesn't exist, or is the old spelling | Answered from memory instead of the CLI | Run `npx --no astryx component <Name> --dense` — the CLI reflects the installed version, training data doesn't |
+| Every row in a list is wrapped in its own `Card` | Defaulted to a generic "card grid" instead of checking data density | `npx --no astryx docs principles --dense` — dense data is `Table`/`List`+`Item`; `Card` is for widgets/galleries/settings groups |
 
 ## Red flags — stop and use Astryx
 
