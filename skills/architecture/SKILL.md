@@ -37,10 +37,14 @@ component's build actually needs as a `skillsPinned` array **inside that
 component's `specs/design/components/<name>/design.json`** — use the exact
 catalog names, e.g. a Ballerina API service →
 `["openapi-conventions", "ballerina"]` (a Go one → `["openapi-conventions",
-"go"]`); a web-application → `["wireframes", "react-webapp",
-"astryx-design-system"]` — a web app's UI toolkit is settled for this
-organization, so `astryx-design-system` is pinned on **every** web-application,
-never left to the description to trigger. Add
+"go"]`); a web-application → `["wireframes", "react-webapp", <design system>]`,
+where `<design system>` is the skill name in the **UI design system** section of
+the Organization defaults block in your instructions. A web app's UI toolkit is
+a settled organization decision, so pin it on **every** web-application rather
+than leaving it to a description to trigger — and read the name from that
+section every time instead of remembering one, because it differs per
+organization. If that section is absent or empty, pin only the two stack skills.
+Never substitute a design system the organization defaults do not name. Add
 `"api-management"` to any service that sits behind the gateway, and
 `"thunder-authentication"` to **both** sides of sign-in — the SPA *and* every
 protected backend it calls, since that skill owns how each resolves the caller's

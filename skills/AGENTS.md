@@ -77,6 +77,45 @@ never loaded to author specs/", and `ballerina`'s says "Apply when a component's
 "Conventions for writing Go applications" names no trigger and is a defect — that
 one was `go`'s, and it was invisible for as long as `go` was preloaded regardless.
 
+## Swapping the UI design system
+
+A web app's UI toolkit is an **organization** decision, and nothing in this
+library hardcodes one. Two edits change it, both in places an org may edit:
+
+1. Add the new design-system skill — author `skills/<name>/SKILL.md`, or import
+   it through Settings → Skills. Delete `astryx-design-system` if the org does
+   not want it available.
+2. Point the **UI design system** section of `organization` at its name.
+
+`architecture` reads the name out of that section rather than holding one of its
+own. It can, because the `organization` body rides the design agent's system
+prompt on **every** turn (`buildOrgDefaultsBlock` in the agents service, not a
+per-flow eager skill), so the name is always in context when a component's
+`design.json` is written. It then pins that skill on every `web-application`, so
+the pin follows the org's choice with **no platform-skill edit** —
+`architecture` is `kind: platform` and read-only in the console, which is exactly
+why the name cannot live there. An empty section means web-app builds carry only
+the stack skills. `astryx-design-system` is the shipped default, nothing more.
+
+A design-system skill must declare four things to work in that slot:
+
+- **`metadata.aep.kind: org` and `metadata.aep.audience: [coding]`.** A design
+  system is built against, not designed with; `[coding]` is what puts it in the
+  project mirror, and `org` is what lets an org edit or delete it.
+- **A `## Verify` section** naming the one command `react-webapp`'s verify
+  sequence should run for it, or nothing if it has none.
+- **Which of its own defaults the platform overrides.** Every vendor's
+  quickstart assumes a project it scaffolded itself; `react-webapp`'s deployment
+  facts (no `base`, static nginx, `window._env_`, one `tsconfig.json`) win, and
+  the skill should say so wherever its own docs would mislead.
+- **Its ownership boundary.** The design system owns UI under `src/`; the data
+  layer (`openapi-fetch` + the committed `src/generated/` client) stays
+  `react-webapp`'s.
+
+Only `organization` and the design-system skill itself may name a design system.
+A vendor name anywhere else in this library is a defect — it is the thing that
+would make a swap need more than the two edits above.
+
 ## Who owns what
 
 - **`aep` is the umbrella**, and it is split by reader. `SKILL.md` is the **run**

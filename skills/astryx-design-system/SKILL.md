@@ -1,6 +1,6 @@
 ---
 name: astryx-design-system
-description: The UI toolkit every web app on this platform is built with — Astryx (`@astryxdesign/core`), its Theme + StyleX wiring, and the CLI you confirm every component's props against before writing JSX. Apply when a component's `type` is `web-application`, for all UI work in it — pages, layouts, forms, tables, dialogs, nav, theming — even when the task never names Astryx.
+description: Astryx (`@astryxdesign/core`) — the platform's default web-app design system, its Theme + StyleX wiring, and the CLI you confirm every component's props against before writing JSX. Apply to all UI work in a `web-application` component that pins this skill — pages, layouts, forms, tables, dialogs, nav, theming — even when the task never names Astryx.
 metadata:
   aep:
     kind: org
@@ -9,11 +9,12 @@ metadata:
 
 # Astryx Design System
 
-Astryx (`@astryxdesign/core`) is the **only** UI toolkit for this platform's web
-apps — components, layout, and styling (via StyleX) all come from it. Never raw
-HTML styling, never another component library, never an invented component prop.
+You are reading this because the component you are building pinned it, which
+means Astryx (`@astryxdesign/core`) is **this organization's** UI toolkit —
+components, layout, and styling (via StyleX) all come from it. Never raw HTML
+styling, never another component library, never an invented component prop.
 
-`react-webapp` owns the app: layout, config, verify command, Dockerfile, nginx.
+`react-webapp` owns the app: layout, config, verify sequence, Dockerfile, nginx.
 This skill owns what goes **inside** `src/` — the UI. Where the two appear to
 disagree, `react-webapp` wins; the conflicts worth naming are listed under
 Platform constraints below.
@@ -74,10 +75,20 @@ import {neutralTheme} from '@astryxdesign/theme-neutral/built';
 // the look, never hand-roll colors instead
 ```
 
-`npx --no astryx doctor` is part of `react-webapp`'s mandatory verify sequence, and
-a non-zero exit fails verification like any other step — config, theme wiring, and
-peer-dependency problems are cheap to fix before the Docker build and expensive to
-debug after it.
+## Verify
+
+This skill's step in `react-webapp`'s verify sequence — after `npm install`,
+before `npx tsc --noEmit`:
+
+```bash
+npx --no astryx doctor
+```
+
+A non-zero exit fails verification like any other step in that sequence. It is
+there because a wiring fault (a missing `astryxStylex()` plugin, an unimported
+theme, a React peer-dependency mismatch) type-checks and builds perfectly clean,
+then renders an unstyled page in the cluster — cheap to fix here, expensive to
+debug after the Docker build.
 
 ## Platform constraints that override this system's defaults
 
