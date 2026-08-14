@@ -36,7 +36,9 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1alpha1 "github.com/wso2/aep/thunder-app-operator/api/v1alpha1"
 	"github.com/wso2/aep/thunder-app-operator/internal/thunder"
@@ -307,12 +309,36 @@ func splitRedirectURIs(raw string) []string {
 	return out
 }
 
-// SetupWithManager wires the reconciler to watch ThunderApplications and the
-// ConfigMaps it owns.
+// SetupWithManager wires the reconciler to watch ThunderApplications, the
+// ConfigMaps it owns, and Secrets referenced by confidential clients so that
+// secret rotation triggers an immediate re-reconcile.
 func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&v1alpha1.ThunderApplication{}).
 		Owns(&corev1.ConfigMap{}).
+		Watches(&corev1.Secret{}, handler.EnqueueRequestsFromMapFunc(r.secretToThunderApps)).
 		Named("thunderapplication").
 		Complete(r)
+}
+
+// secretToThunderApps maps a Secret change to the ThunderApplications in the
+// same namespace that reference it via spec.secretRef, so secret rotation
+// immediately re-queues affected CRs.
+func (r *Reconciler) secretToThunderApps(ctx context.Context, obj client.Object) []reconcile.Request {
+	var appList v1alpha1.ThunderApplicationList
+	if err := r.List(ctx, &appList, client.InNamespace(obj.GetNamespace())); err != nil {
+		return nil
+	}
+	var reqs []reconcile.Request
+	for _, app := range appList.Items {
+		if app.Spec.SecretRef != nil && app.Spec.SecretRef.Name == obj.GetName() {
+			reqs = append(reqs, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Namespace: app.Namespace,
+					Name:      app.Name,
+				},
+			})
+		}
+	}
+	return reqs
 }

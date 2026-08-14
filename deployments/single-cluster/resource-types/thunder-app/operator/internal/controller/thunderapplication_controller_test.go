@@ -475,6 +475,49 @@ func TestReconcile_Deletion_ClientIDOverride(t *testing.T) {
 	}
 }
 
+// Secret rotation: after the referenced Secret's value changes the reconciler
+// picks up the new client secret on the next reconcile (triggered by the
+// Secret watch added to SetupWithManager).
+func TestReconcile_ConfidentialClient_SecretRotation(t *testing.T) {
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "my-secrets"},
+		Data:       map[string][]byte{"MY_SECRET": []byte("original-secret")},
+	}
+	app := newApp("ns", "svc-client", v1alpha1.ThunderApplicationSpec{
+		ClientType: "confidential",
+		ClientID:   "my-service-client",
+		SecretRef:  &v1alpha1.SecretKeyRef{Name: "my-secrets", Key: "MY_SECRET"},
+	})
+	admin := &fakeAdmin{clientID: "my-service-client"}
+	r, cl := newReconciler(t, admin, app, secret)
+
+	// First reconcile uses the original secret.
+	if _, err := r.Reconcile(context.Background(), reqFor(app)); err != nil {
+		t.Fatalf("first Reconcile: %v", err)
+	}
+	if len(admin.ensureCalls) != 1 || admin.ensureCalls[0].ClientSecret != "original-secret" {
+		t.Fatalf("first reconcile: ClientSecret = %q, want original-secret", admin.ensureCalls[0].ClientSecret)
+	}
+
+	// Rotate the secret value in the cluster.
+	secret.Data["MY_SECRET"] = []byte("rotated-secret")
+	if err := cl.Update(context.Background(), secret); err != nil {
+		t.Fatalf("update Secret: %v", err)
+	}
+
+	// Second reconcile (as would be triggered by the Secret watch) picks up
+	// the new value.
+	if _, err := r.Reconcile(context.Background(), reqFor(app)); err != nil {
+		t.Fatalf("second Reconcile: %v", err)
+	}
+	if len(admin.ensureCalls) != 2 {
+		t.Fatalf("EnsureApplication called %d times, want 2", len(admin.ensureCalls))
+	}
+	if admin.ensureCalls[1].ClientSecret != "rotated-secret" {
+		t.Errorf("after rotation: ClientSecret = %q, want rotated-secret", admin.ensureCalls[1].ClientSecret)
+	}
+}
+
 func containsFinalizer(finalizers []string, want string) bool {
 	for _, f := range finalizers {
 		if f == want {
