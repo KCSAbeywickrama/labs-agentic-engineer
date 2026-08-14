@@ -116,9 +116,17 @@ Only `organization` and the design-system skill itself may name a design system.
 A vendor name anywhere else in this library is a defect — it is the thing that
 would make a swap need more than the two edits above. That includes
 `references/*.md`: a mirror copies a skill's whole directory, so a vendor name in
-a reference reaches a coding session exactly as a body would.
-`design_system_skill.test.ts` fails on any such name, and on `architecture`
-holding one instead of reading the section.
+a reference reaches a coding session exactly as a body would. Check it before
+changing a web-app skill:
+
+```bash
+grep -rniE 'astryx|@astryxdesign' skills/ --include='*.md'
+```
+
+Only `skills/organization/SKILL.md`, `skills/astryx-design-system/**` and this
+file should match. A hit anywhere else — especially in `architecture`, which is
+`kind: platform` and read-only in the console — means an org can no longer swap
+its design system without a platform change.
 
 ## Who owns what
 
