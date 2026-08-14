@@ -36,6 +36,11 @@ describe("buildScope display parsers", () => {
     expect(parsePrdStories(prd)).toEqual([1]);
   });
 
+  it("skips a numbered item with a whitespace-only title, like the gate", () => {
+    const prd = "## User Stories\n1. As a user, I want A, so that a.\n2.   \n";
+    expect(parsePrdStories(prd)).toEqual([1]);
+  });
+
   it("yields nothing for a PRD without a User Stories section", () => {
     expect(parsePrdStories("# PRD\n\njust prose")).toEqual([]);
   });

@@ -487,6 +487,10 @@ export function SpecView({ projectName }: { projectName: string }) {
     void (async () => {
       try {
         await collab.flush(); // no-op when offline
+        // The cut drawer previews stories from the COMMITTED PRD; the flush
+        // may just have landed edits, so refresh the file listing (whose shas
+        // drive the PRD content query) before showing what the click will do.
+        await spec.refetch();
         setBuildPhase("checking");
         const { data, isError, error } = await preflight.refetch();
         if (isError || data === undefined) {

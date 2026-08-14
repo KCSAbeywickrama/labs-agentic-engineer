@@ -532,11 +532,17 @@ api -> inv : reserve stock`);
   });
 });
 
-// PRD phasing left the cell grammar: a phase statement is no statement at
-// all, and reads as an ordinary syntax error.
-describe("removed phase syntax", () => {
+// PRD phasing and story citations left the cell grammar: both retired forms
+// must read as visible errors, never silently parse into something else.
+describe("removed phase/stories syntax", () => {
   it("rejects a phase statement as unknown", () => {
     const { diagnostics } = parseCellDsl("phase 1\ncomponent api service");
     expect(diagnostics.some((d) => d.severity === "error" && d.line === 1)).toBe(true);
+  });
+
+  it("rejects a component story-citation suffix", () => {
+    const { document, diagnostics } = parseCellDsl("component api service [stories: 1, 2]");
+    expect(diagnostics.some((d) => d.severity === "error" && /design\.json/.test(d.message))).toBe(true);
+    expect(document.components).toHaveLength(0);
   });
 });

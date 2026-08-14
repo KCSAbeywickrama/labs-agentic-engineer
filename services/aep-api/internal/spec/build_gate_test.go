@@ -164,6 +164,32 @@ func TestParsePRDStories(t *testing.T) {
 	if got := slices.Sorted(maps.Keys(parsePRDStories(indented))); !reflect.DeepEqual(got, []int{1, 2}) {
 		t.Errorf("indented story numbers = %v, want [1 2]", got)
 	}
+	// A numbered item with a whitespace-only title is not a story — the same
+	// rule the console preview applies, or the drawer would preview no story
+	// while the gate demands coverage for it.
+	blank := "## User Stories\n\n1. As a user, I want A, so that a.\n2.   \n"
+	if got := slices.Sorted(maps.Keys(parsePRDStories(blank))); !reflect.DeepEqual(got, []int{1}) {
+		t.Errorf("whitespace-only item counted as a story: %v, want [1]", got)
+	}
+}
+
+// TestBuildGate_FormattedSentinelRefused pins the STRUCTURED enrichment read:
+// design.json is stored byte-verbatim as the agent wrote it, so a formatting
+// variant a substring check would miss ("language" : "TBD") must still refuse
+// the tag.
+func TestBuildGate_FormattedSentinelRefused(t *testing.T) {
+	files := completeDesignFiles()
+	files["components/lunch-api/design.json"] = "{\n  \"name\": \"lunch-api\",\n  \"type\": \"service\",\n  \"version\": \"0.1.0\",\n  \"language\" : \"TBD\",\n  \"buildpack\": \"docker\",\n  \"appPath\": \"lunch-api\",\n  \"entrypoint\": \"deployment/service\",\n  \"exposure\": \"intranet\",\n  \"stories\": [1, 2, 4],\n  \"dependencies\": [],\n  \"description\": \"real responsibility text\"\n}"
+	errs := gateErrors(t, files)
+	found := false
+	for _, e := range errs {
+		if e.Code == "UNENRICHED_COMPONENT" && strings.Contains(e.Message, "language") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("want UNENRICHED_COMPONENT for the formatted TBD sentinel, got %+v", errs)
+	}
 }
 
 // A PRD whose User Stories section yields no numbered stories must refuse the

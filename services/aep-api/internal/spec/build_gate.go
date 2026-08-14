@@ -120,12 +120,21 @@ func validateBuildGate(reqFiles, designFiles map[string]string) []FileValidation
 			})
 			continue
 		}
-		if strings.Contains(content, scaffoldPlaceholderMarker) {
+		// Structured, not substring: the file is stored byte-verbatim as the
+		// agent wrote it, so any whitespace/escaping variant must still read
+		// as the same field values. Malformed JSON never reaches here — the
+		// layout gates run first and own rejecting it.
+		var doc struct {
+			Language    string `json:"language"`
+			Description string `json:"description"`
+		}
+		_ = json.Unmarshal([]byte(content), &doc)
+		if strings.Contains(doc.Description, scaffoldPlaceholderMarker) {
 			errs = append(errs, FileValidationError{
 				Path: designPath, Code: codeUnenrichedComponent,
 				Message: fmt.Sprintf("component %q is still the platform scaffold — enrich its design.json before building", c.ID),
 			})
-		} else if strings.Contains(content, `"language": "`+scaffoldLanguageSentinel+`"`) || strings.Contains(content, `"language":"`+scaffoldLanguageSentinel+`"`) {
+		} else if strings.TrimSpace(doc.Language) == scaffoldLanguageSentinel {
 			errs = append(errs, FileValidationError{
 				Path: designPath, Code: codeUnenrichedComponent,
 				Message: fmt.Sprintf("component %q has no language decided — set it from the organization Tech stack default, the requirements, or the platform default", c.ID),
@@ -188,9 +197,11 @@ func designJSONStories(content string) []int {
 }
 
 // storyLinePattern matches one numbered PRD story line: "7. As a member, ...".
-// Leading whitespace is tolerated — markdown authors indent list items, and
-// the console's cut-drawer preview (parsePrdStories) trims lines the same way.
-var storyLinePattern = regexp.MustCompile(`(?m)^\s*(\d+)\.\s+(.+)$`)
+// Leading whitespace is tolerated — markdown authors indent list items — and
+// the title must contain a non-whitespace character; both rules mirror the
+// console's cut-drawer preview (parsePrdStories), which must compute the same
+// story set this gate does.
+var storyLinePattern = regexp.MustCompile(`(?m)^\s*(\d+)\.\s+(\S.*)$`)
 
 // parsePRDStories extracts story number → title from the PRD's
 // "## User Stories" section ("N. <title>" lines).

@@ -277,7 +277,7 @@ func (s *Service) Run(ctx context.Context, orgID, projectID string, inputs []Bui
 		if sc, serr := s.tagger.BuildScopeAtTag(ctx, orgID, projectID, res.Tag); serr == nil {
 			scope = sc
 		} else {
-			slog.WarnContext(ctx, "build: phase scope read failed — using tag-scoped milestone",
+			slog.WarnContext(ctx, "build: story scope read failed — using tag-scoped milestone",
 				"project", projectID, "tag", res.Tag, "error", serr)
 		}
 		run, cerr := s.claimVersion(ctx, orgID, projectID, scope)

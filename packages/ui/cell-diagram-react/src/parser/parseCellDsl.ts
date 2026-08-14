@@ -238,6 +238,19 @@ export function parseCellDsl(source: string): ParseResult {
     }
 
     if (statement.startsWith("component ")) {
+      // Story citations left the grammar (stories live in each component's
+      // design.json now). Reject the retired suffix loudly — silently folding
+      // it into the type would render a legacy cell as a wrongly-typed
+      // component instead of a visible error.
+      if (/\[\s*stories\s*:/i.test(statement)) {
+        diagnostics.push({
+          severity: "error",
+          message: "Story citations were removed from the cell — list the stories in the component's design.json instead.",
+          line,
+          column: 1
+        });
+        return;
+      }
       const declaration = parseTypedDeclaration(tokenize(statement).slice(1));
 
       if (!declaration) {
