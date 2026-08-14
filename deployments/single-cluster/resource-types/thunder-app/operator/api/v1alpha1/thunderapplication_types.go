@@ -46,12 +46,11 @@ type ThunderApplicationSpec struct {
 	// platform Thunder. A future BYO field slots in here additively.
 }
 
-// SecretKeyRef selects a key from a Kubernetes Secret.
+// SecretKeyRef selects a key from a Kubernetes Secret in the same namespace
+// as the ThunderApplication CR. Cross-namespace references are not supported.
 type SecretKeyRef struct {
 	// Name of the secret.
 	Name string `json:"name"`
-	// Namespace of the secret. Defaults to the CR's namespace when empty.
-	Namespace string `json:"namespace,omitempty"`
 	// Key within the secret.
 	Key string `json:"key"`
 }

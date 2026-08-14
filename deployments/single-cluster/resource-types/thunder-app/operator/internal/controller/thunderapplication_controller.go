@@ -252,17 +252,13 @@ func (r *Reconciler) buildDesiredApp(ctx context.Context, app *v1alpha1.ThunderA
 		if app.Spec.SecretRef == nil {
 			return thunder.DesiredApp{}, fmt.Errorf("confidential client %q requires spec.secretRef", app.Name)
 		}
-		ns := app.Spec.SecretRef.Namespace
-		if ns == "" {
-			ns = app.Namespace
-		}
 		var sec corev1.Secret
-		if err := r.Get(ctx, types.NamespacedName{Name: app.Spec.SecretRef.Name, Namespace: ns}, &sec); err != nil {
-			return thunder.DesiredApp{}, fmt.Errorf("read secretRef %s/%s: %w", ns, app.Spec.SecretRef.Name, err)
+		if err := r.Get(ctx, types.NamespacedName{Name: app.Spec.SecretRef.Name, Namespace: app.Namespace}, &sec); err != nil {
+			return thunder.DesiredApp{}, fmt.Errorf("read secretRef %s/%s: %w", app.Namespace, app.Spec.SecretRef.Name, err)
 		}
 		desired.ClientSecret = string(sec.Data[app.Spec.SecretRef.Key])
 		if desired.ClientSecret == "" {
-			return thunder.DesiredApp{}, fmt.Errorf("secret %s/%s key %q is empty", ns, app.Spec.SecretRef.Name, app.Spec.SecretRef.Key)
+			return thunder.DesiredApp{}, fmt.Errorf("secret %s/%s key %q is empty", app.Namespace, app.Spec.SecretRef.Name, app.Spec.SecretRef.Key)
 		}
 	}
 	return desired, nil

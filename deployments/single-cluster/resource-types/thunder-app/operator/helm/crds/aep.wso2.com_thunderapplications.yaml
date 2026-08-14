@@ -72,16 +72,13 @@ spec:
               secretRef:
                 description: SecretRef points to the Kubernetes Secret key holding
                   the pre-generated OAuth client secret. Required when clientType=confidential.
+                  The Secret must be in the same namespace as the ThunderApplication CR.
                 properties:
                   key:
                     description: Key within the secret.
                     type: string
                   name:
                     description: Name of the secret.
-                    type: string
-                  namespace:
-                    description: Namespace of the secret. Defaults to the CR's namespace
-                      when empty.
                     type: string
                 required:
                 - key

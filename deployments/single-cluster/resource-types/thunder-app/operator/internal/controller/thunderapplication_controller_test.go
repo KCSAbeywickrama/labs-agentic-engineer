@@ -371,6 +371,43 @@ func TestReconcile_ConfidentialClient_MissingSecretRef(t *testing.T) {
 	}
 }
 
+// Confidential client where the Secret exists in a different namespace (not the
+// CR's namespace) → CR marked not ready, EnsureApplication not called. This
+// proves the controller enforces same-namespace Secret access only.
+func TestReconcile_ConfidentialClient_SecretWrongNamespace(t *testing.T) {
+	// Secret is in "other-ns", CR is in "ns" — controller must not find it.
+	secretInOtherNS := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "other-ns", Name: "my-secrets"},
+		Data:       map[string][]byte{"MY_SECRET": []byte("s3cr3t")},
+	}
+	app := newApp("ns", "svc-client", v1alpha1.ThunderApplicationSpec{
+		ClientType: "confidential",
+		ClientID:   "my-service-client",
+		SecretRef:  &v1alpha1.SecretKeyRef{Name: "my-secrets", Key: "MY_SECRET"},
+	})
+	admin := &fakeAdmin{clientID: "my-service-client"}
+	r, cl := newReconciler(t, admin, app, secretInOtherNS)
+
+	res, err := r.Reconcile(context.Background(), reqFor(app))
+	if err != nil {
+		t.Fatalf("Reconcile should not return an error: %v", err)
+	}
+	if res.RequeueAfter <= 0 {
+		t.Errorf("RequeueAfter = %v, want > 0 (should retry)", res.RequeueAfter)
+	}
+	if len(admin.ensureCalls) != 0 {
+		t.Errorf("EnsureApplication called %d times, want 0", len(admin.ensureCalls))
+	}
+
+	var updated v1alpha1.ThunderApplication
+	if err := cl.Get(context.Background(), reqFor(app).NamespacedName, &updated); err != nil {
+		t.Fatalf("get CR: %v", err)
+	}
+	if updated.Status.Ready {
+		t.Errorf("Status.Ready = true, want false")
+	}
+}
+
 // Unsupported clientType → CR marked not ready, EnsureApplication not called.
 func TestReconcile_UnsupportedClientType(t *testing.T) {
 	app := newApp("ns", "bad-type", v1alpha1.ThunderApplicationSpec{
