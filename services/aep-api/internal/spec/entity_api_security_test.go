@@ -63,3 +63,31 @@ func TestResolveAPISecurityCallerKind(t *testing.T) {
 		})
 	}
 }
+
+// IsGatewayProtectableType is the shared answer to "can a component of this
+// type sit behind the API Platform Gateway at all?". Both consumers key on it
+// — the design-save stamp and the trait emitter — so a wrong answer here
+// desynchronises them, which is the specific failure of a design that claims
+// protection it never receives.
+func TestIsGatewayProtectableType(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		componentType string
+		want          bool
+	}{
+		{ComponentTypeService, true},
+		// An agent a SPA calls is a protected backend on the same terms.
+		{ComponentTypeAIAgent, true},
+		// A SPA obtains the token; it never presents one to a gateway.
+		{ComponentTypeWebApplication, false},
+		{"", false},
+		{"database", false},
+	}
+	for _, c := range cases {
+		t.Run(c.componentType, func(t *testing.T) {
+			if got := IsGatewayProtectableType(c.componentType); got != c.want {
+				t.Fatalf("IsGatewayProtectableType(%q) = %v, want %v", c.componentType, got, c.want)
+			}
+		})
+	}
+}

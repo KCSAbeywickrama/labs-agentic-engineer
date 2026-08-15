@@ -391,15 +391,22 @@ func (s *TraitSyncService) SyncProjectAPITraits(ctx context.Context, orgID, proj
 	}
 	var failures []error
 	for _, c := range design.Components {
-		if c.ComponentType != spec.ComponentTypeService {
+		if !spec.IsGatewayProtectableType(c.ComponentType) {
 			continue
 		}
-		// Reconcile a service component when it needs EITHER trait: a managed
+		// Reconcile the component when it needs EITHER trait: a managed
 		// API (api-configuration) or the default error→RCA alert rule
 		// (observability-alert-rule). Including auto-RCA-eligible components
 		// here — not just API-exposing ones — makes a fresh deploy provision
 		// the alert rule immediately via the dispatch path, instead of waiting
 		// for the next reconcile-watcher sweep.
+		//
+		// An `ai-agent` reaches this loop for the api-configuration trait only:
+		// ResolveAutoRCAEnabled is itself gated on ComponentTypeService, which
+		// matches the ai-agent ClusterComponentType deliberately NOT listing
+		// `observability-alert-rule` among its supported traits. So the second
+		// disjunct is always false for an agent, and this never asks OpenChoreo
+		// for a trait the component type would reject.
 		if !spec.ResolveAPISecurityEnabled(c) && !spec.ResolveAutoRCAEnabled(c) {
 			continue
 		}

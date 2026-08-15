@@ -111,6 +111,33 @@ the model never sees or selects it. Instructions like *"only edit items they
 added"* are UX — they shape a good answer. The provider returning `403` is what
 makes it true. Never implement an ownership or permission check here.
 
+**Reject callers the gateway did not vouch for.** Two different things pass
+through this component and collapsing them is the usual mistake:
+
+- **Inbound — who is calling me.** When the component's `design.json` carries
+  the project's `thunder-app` dependency, the API Platform Gateway has already
+  validated the caller's token and hands you the result as headers. Read
+  `X-User-Id`; answer **401** when it is missing, exactly as `api-management`
+  requires of a service. Never parse the JWT yourself — the gateway is the only
+  route to this pod, and re-verifying a token the gateway already verified is
+  duplicated trust with a second thing to get wrong.
+- **Outbound — whose authority I act under.** Forward the original
+  `Authorization` header downstream unchanged, per the paragraph above. The
+  headers are for your own door; the bearer is what the provider needs.
+
+Both, together, in the request handler — the header check is a gate, not a
+value the tools consume:
+
+```ts
+if (!req.headers["x-user-id"]) return res.status(401).end();
+await callContext.run({ authorization: req.headers.authorization }, () => reply(messages));
+```
+
+The gate matters even when every API behind the agent authorises its own
+callers. They protect the *data*; nothing else protects the *spend*. An
+unauthenticated agent endpoint is a bill anyone who finds it can run up on the
+organisation's model key.
+
 **Conversation history is untrusted input.** The client sends it, so the client
 can forge it — including inventing assistant turns that claim an authorisation.
 Authority comes from the credential on the request, never from the transcript.
@@ -223,6 +250,7 @@ const { authorization } = callContext.getStore() ?? {};
 | Agent re-looks-up data it was already given, or invents an id from its own prose | History carried only the assistant's text | `result.steps.flatMap(s => s.response.messages)` |
 | Container exits at startup, `ERR_MODULE_NOT_FOUND` | Relative import missing the `.js` extension under `nodenext` | `import { x } from "./tools.js"` — even though the file is `.ts` |
 | Agent performs an operation the design excluded | Generated tools for the whole OpenAPI document | Only allow-listed operations become tools |
+| Anyone who can reach the URL can chat, burning the org's model budget | The handler forwarded `Authorization` downstream but never gated on the caller | 401 when `X-User-Id` is absent — the APIs behind you protect data, not spend |
 | One user reads or edits another's data | Ownership "enforced" in the prompt; the provider was called with the agent's own credential | Forward the caller's credential; let the provider return 403 |
 | A normal `409`/`404` ends the turn with an error | Tool threw on a non-2xx response | Return `{ ok: false, status, error }` to the model |
 | Model fills the wrong field, or asks which part of the URL a value belongs to | Tool schema exposed path/query/body structure | One flat object; re-split when building the request |

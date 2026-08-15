@@ -120,7 +120,56 @@ func traitServiceJSON(name, auth string) string {
 	return b.String()
 }
 
+// aiAgentMd renders an ai-agent component design.json with an optional
+// exposesAPI.auth policy (empty auth ⇒ no exposesAPI block).
+func aiAgentMd(name, auth string) string {
+	var b strings.Builder
+	b.WriteString("{\n  \"name\": \"" + name + "\",\n  \"type\": \"" + spec.ComponentTypeAIAgent + "\",\n  \"description\": \"Agent.\",\n  \"dependencies\": []")
+	if auth != "" {
+		b.WriteString(",\n  \"exposesAPI\": {\n    \"auth\": \"" + auth + "\"\n  }")
+	}
+	b.WriteString("\n}\n")
+	return b.String()
+}
+
 // --- SyncProjectAPITraits -----------------------------------------------------
+
+// An `ai-agent` reaches the gateway on the same terms as a service — and ONLY
+// for the api-configuration trait. The second assertion is the load-bearing
+// one: widening this loop past `== service` must not sweep agents into the
+// auto-RCA path, because the ai-agent ClusterComponentType deliberately does
+// not list `observability-alert-rule` among its supported traits. A plain
+// service with no auth still syncs (auto-RCA); a plain agent must not.
+func TestSyncProjectAPITraits_ProtectedAIAgentSyncsButPlainAgentDoesNot(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	files := map[string]string{
+		spec.DesignRootFile:             traitRootMd(),
+		"components/chat/design.json":   aiAgentMd("chat", "end-user-required"),
+		"components/helper/design.json": aiAgentMd("helper", ""),
+		"components/worker/design.json": plainServiceMd("worker"),
+	}
+	oc := ocDeployments(nil)
+	svc := NewTraitSyncService(oc, traitStoreWith(files))
+
+	if err := svc.SyncProjectAPITraits(ctx, "acme", "proj"); err != nil {
+		t.Fatalf("SyncProjectAPITraits: %v", err)
+	}
+
+	emitted := map[string]bool{}
+	for _, c := range oc.UpdateComponentTraitsCalls() {
+		emitted[c.ComponentName] = true
+	}
+	if !emitted["chat"] {
+		t.Errorf("a protected ai-agent must be re-emitted; got %v", emitted)
+	}
+	if emitted["helper"] {
+		t.Errorf("an unprotected ai-agent must NOT sync — it has no auto-RCA trait to provision; got %v", emitted)
+	}
+	if !emitted["worker"] {
+		t.Errorf("plain service must still sync via auto-RCA; got %v", emitted)
+	}
+}
 
 func TestSyncProjectAPITraits_SyncsAllServiceComponents(t *testing.T) {
 	t.Parallel()

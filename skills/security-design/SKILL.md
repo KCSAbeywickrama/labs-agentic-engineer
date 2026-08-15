@@ -21,9 +21,12 @@ requirements like everything else.
    screens. Roles come from the PRD's Actors section — define no role the PRD
    has no actor for, and give every actor a row. Cite stories per row.
 2. **Authentication (Thunder)** — the design-altitude Thunder facts: the
-   shared `thunder-app` dependency NAME (the same name on the SPA and every
-   protected service — that shared name is what ties sign-in to
-   token-carrying API calls), the scopes (default `openid profile email`),
+   shared `thunder-app` dependency NAME (the same name on the SPA and on every
+   protected backend it calls — every `service`, and every `ai-agent`, which is
+   a protected backend on identical terms; that shared name is what ties
+   sign-in to token-carrying API calls, and it means ONE registered OAuth app
+   for the project, never one per component), the scopes (default
+   `openid profile email`),
    and the explicit list of which components sit on each side of sign-in.
    The `thunder-authentication` skill owns the build-time mechanics; this
    section owns the design decisions it consumes.
