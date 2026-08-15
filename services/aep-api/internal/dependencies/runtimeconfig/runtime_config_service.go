@@ -241,8 +241,17 @@ func (s *RuntimeConfigService) buildEnvValues(ctx context.Context, orgID, projec
 		if !ok {
 			continue
 		}
-		// Skip non-service deps (peer webapps aren't called over HTTP).
-		if sibling.ComponentType != spec.ComponentTypeService {
+		// A peer web-application is NAVIGATED to, never called — there is no
+		// URL its sibling's JavaScript would fetch. Everything else a SPA
+		// declares as a component dependency, it declares because its own code
+		// calls it over HTTP: a `service`, and now an `ai-agent` (the SPA's
+		// chat client fetches `<AGENT>_URL/chat`).
+		//
+		// Stated as "skip peer webapps" rather than "allow services": the rule
+		// is about what is addressable, and enumerating the addressable kinds
+		// silently drops every kind added later. `ai-agent` was exactly that
+		// omission — the SPA threw at module scope on a missing `<DEP>_URL`.
+		if sibling.ComponentType == spec.ComponentTypeWebApplication {
 			continue
 		}
 		k8sName := k8sname.ToK8sName(dep)

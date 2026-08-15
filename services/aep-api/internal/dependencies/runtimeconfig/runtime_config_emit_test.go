@@ -1088,3 +1088,47 @@ func Test_EmitForProjectSPAs(t *testing.T) {
 		}
 	})
 }
+
+// --- buildEnvValues: which sibling kinds get a URL ---------------------------
+
+// A SPA gets `<DEP>_URL` for every sibling its own JavaScript calls over HTTP.
+// A `service` always did; an `ai-agent` is the same kind of thing — the
+// generated chat client fetches `<AGENT>_URL/chat` — and was silently skipped
+// while the check enumerated allowed kinds instead of excluding the one kind
+// that is navigated to rather than called.
+func Test_buildEnvValues_siblingKindsThatGetAURL(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	files := map[string]string{
+		spec.DesignRootFile:             rootDesignMd(),
+		"components/web/design.json":    buildComponentJSON("web", "web-application", []string{"api", "agent", "portal"}, nil),
+		"components/api/design.json":    buildComponentJSON("api", "service", nil, nil),
+		"components/agent/design.json":  buildComponentJSON("agent", "ai-agent", nil, nil),
+		"components/portal/design.json": buildComponentJSON("portal", "web-application", nil, nil),
+	}
+	design := readDesign(t, files)
+	web := componentNamed(t, design, "web")
+
+	oc := ocResolving(map[string]string{
+		"api":    "http://api.local/",
+		"agent":  "http://agent.local/",
+		"portal": "http://portal.local/",
+	})
+	svc := svcWithCatalog(oc, rcOutputs(nil, nil), nil, &fakeCatalog{})
+
+	out, ready := svc.buildEnvValues(ctx, "acme", "proj", web, design)
+	if !ready {
+		t.Fatalf("want ready=true; got false (out=%v)", out)
+	}
+
+	if got := out["AGENT_URL"]; got != "http://agent.local" {
+		t.Errorf("AGENT_URL = %v; want the agent's endpoint — an ai-agent is called over HTTP by the SPA", got)
+	}
+	if got := out["API_URL"]; got != "http://api.local" {
+		t.Errorf("API_URL = %v; want the service's endpoint", got)
+	}
+	if _, present := out["PORTAL_URL"]; present {
+		t.Errorf("PORTAL_URL present; a peer web-application is navigated to, never called — it must not get a URL")
+	}
+}

@@ -36,11 +36,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/clients/secretmanagersvc"
 	"github.com/wso2/aep/aep-api/internal/organization"
-	"github.com/wso2/aep/aep-api/internal/platform/tenant"
 	"github.com/wso2/aep/aep-api/internal/spec"
 )
 
@@ -122,6 +122,19 @@ func (s *componentService) wireModelAccess(ctx context.Context, ocOrgID, project
 		"org", ocOrgID, "project", projectName, "component", componentName)
 }
 
+// vaultPathPrefix mirrors the constant the OpenBao provider and
+// SecretRefWriter each define for the same path — kept local because both of
+// theirs are unexported.
+const vaultPathPrefix = "user-app-secrets"
+
+func orgNamespaceFromVaultKey(kvPath string) (string, error) {
+	parts := strings.Split(strings.Trim(kvPath, "/"), "/")
+	if len(parts) < 3 || parts[0] != vaultPathPrefix || parts[1] == "" {
+		return "", fmt.Errorf("unexpected vault key shape %q: want %s/<org-ns>/<name>", kvPath, vaultPathPrefix)
+	}
+	return parts[1], nil
+}
+
 // upsertModelAccessSecretReference points modelAccessSecretRefName — one per
 // org, shared by every ai-agent component in it — at the organisation's
 // default Anthropic key's vault coordinates. Mirrors
@@ -132,10 +145,31 @@ func (s *componentService) wireModelAccess(ctx context.Context, ocOrgID, project
 // whereas this needs the EXISTING org key referenced in place — so this
 // goes straight through the OC SecretReference CRUD
 // (secret_reference_client.go) that secretmanagersvc itself is built on,
-// per the same namespace derivation (tenant.OrgBaseNamespace) it uses to
-// address SecretReference CRs today.
+// into the same org namespace every other SecretReference for this org
+// already lives in (see orgNamespaceFromVaultKey).
+// orgNamespaceFromVaultKey reads the org's control-plane namespace out of the
+// vault key the org's own Anthropic row already carries.
+//
+// The key's shape is fixed by the provider that wrote it —
+// `user-app-secrets/{OrgBaseNamespace(orgUUID)}/{secretRefName}` (openbao
+// provider's vaultPath) — so segment 1 IS the namespace every other
+// SecretReference for this org lives in.
+//
+// Taking it from the key rather than recomputing it is deliberate, and this
+// is where an earlier version of this file was wrong: it called
+// `tenant.OrgBaseNamespace(ocOrgID)` with the OpenChoreo org HANDLE
+// ("default"), while the derivation everywhere else uses the Thunder org
+// UUID (the JWT's `ouId`). That produced `wc-default-…`, a namespace which
+// does not exist, so the create 500'd and agents deployed with no MODEL_*.
+//
+// A derived value can disagree with reality; a value read out of the real
+// path cannot. It also needs no JWT — `EnsureComponent` runs on the build
+// path, where there is not always a request context to read claims from.
 func (s *componentService) upsertModelAccessSecretReference(ctx context.Context, ocOrgID string, triplet organization.SecretRefTriplet) error {
-	orgNS := tenant.OrgBaseNamespace(ocOrgID)
+	orgNS, err := orgNamespaceFromVaultKey(triplet.KVPath)
+	if err != nil {
+		return err
+	}
 	req := secretmanagersvc.CreateSecretReferenceRequest{
 		Namespace: orgNS,
 		Name:      modelAccessSecretRefName,
