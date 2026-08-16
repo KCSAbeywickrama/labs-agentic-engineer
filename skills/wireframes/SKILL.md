@@ -325,14 +325,15 @@ stops communicating.
 
 ## Worked example — risk register webapp wireframes
 
-A complete `wireframes.dsl` for a three-screen desktop flow. This example has a
-single role (no diverging permissions), so its chrome is uniform — every
-screen repeats the same `navbar` + `sidebar`; that's a property of this app,
-not the rule to imitate (see "Scope the chrome to the role" above for what
-changes once an app has more than one). Note the rest of the rhythm: blocks
-stack in reading order; `row` groups things side by side; the primary action is
-the one `primary` button per screen; status is carried by `badge`s, not prose.
-No coordinates anywhere — the compiler computes every position.
+A complete `wireframes.dsl` for a three-screen desktop flow. Its manager and
+owner roles happen to reach the same three destinations — dashboard, new-risk
+form, detail view — so their sidebars coincide and the chrome is uniform;
+that's a consequence of overlapping destinations, not evidence of a single
+role (see "Scope the chrome to the role" above — a role that cannot reach a
+destination must not list it). Note the rest of the rhythm: blocks stack in
+reading order; `row` groups things side by side; the primary action is the one
+`primary` button per screen; status is carried by `badge`s, not prose. No
+coordinates anywhere — the compiler computes every position.
 
 ```
 // Risk register — three screens, desktop
