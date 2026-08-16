@@ -325,41 +325,54 @@ stops communicating.
 
 ## Worked example — risk register webapp wireframes
 
-A complete `wireframes.dsl` for a three-screen desktop flow. Its manager and
-owner roles happen to reach the same three destinations — dashboard, new-risk
-form, detail view — so their sidebars coincide and the chrome is uniform;
-that's a consequence of overlapping destinations, not evidence of a single
-role (see "Scope the chrome to the role" above — a role that cannot reach a
-destination must not list it). Note the rest of the rhythm: blocks stack in
-reading order; `row` groups things side by side; the primary action is the one
-`primary` button per screen; status is carried by `badge`s, not prose. No
-coordinates anywhere — the compiler computes every position.
+A complete `wireframes.dsl` for a two-role desktop flow. The manager and the
+owner each get their own dashboard and detail screen — a shared `RiskDetail`
+would need two different sidebars, and a screen can only carry one, so each
+role's landing view and remediation view are split in two. `navbar` stays
+brand-only and identical everywhere; each `sidebar` lists only that role's
+destinations, and the items both roles have (Overview, All Registers, Audits,
+Settings) keep the same label and the same order — only the role-specific
+entry (Review Queue vs. My Risks) differs. Note the rest of the rhythm: blocks
+stack in reading order; `row` groups things side by side; the primary action
+is the one `primary` button per screen; status is carried by `badge`s, not
+prose. No coordinates anywhere — the compiler computes every position.
 
 ```
-// Risk register — three screens, desktop
+// Risk register — two roles, five screens, desktop
 
-screen RiskDashboard "Managers monitor open risk and act on what's overdue"
+screen RiskQueue "Manager monitors open risk across registers and acts on what's overdue"
   navbar "RiskHub"
-  sidebar "Overview | My Risks | All Registers | Audits | Settings"
+  sidebar "Overview | Review Queue -> RiskQueue | All Registers | Audits | Settings"
   row
-    heading "Risk Overview"
+    heading "Risk Queue"
     right
-    button "New risk" primary -> NewRisk
+    select "Register: All"
   row
     card "Open risks | 24 | across 6 registers"
     card "Overdue actions | 6 | need follow-up"
     card "High severity | 3 | review this week"
-  heading "Recent activity"
-  tabs "All | Mine | Watching"
-  table "Risk | Owner | Severity | Status | Updated" -> RiskDetail
+  heading "Needs review"
+  tabs "All | Overdue | High severity"
+  table "Risk | Owner | Severity | Status | Updated" -> QueueRiskDetail
     row "Unpatched edge servers | Platform team | High | Open | 2h ago"
     row "Stale access keys | Security | Medium | In review | 1d ago"
     row "Vendor SOC2 lapse | Compliance | High | Overdue | 3d ago"
 
+screen MyRisks "Owner tracks the risks they own and logs new ones"
+  navbar "RiskHub"
+  sidebar "Overview | My Risks -> MyRisks | All Registers | Audits | Settings"
+  row
+    heading "My Risks"
+    right
+    button "New risk" primary -> NewRisk
+  table "Risk | Severity | Status | Updated" -> RiskDetail
+    row "Unpatched edge servers | High | Open | 2h ago"
+    row "Rotate edge certs | Medium | In progress | 1d ago"
+
 screen NewRisk "An owner logs a new risk into a register"
   navbar "RiskHub"
-  sidebar "Overview | My Risks | All Registers | Audits | Settings"
-  breadcrumb "Risks / New risk"
+  sidebar "Overview | My Risks -> MyRisks | All Registers | Audits | Settings"
+  breadcrumb "My Risks / New risk"
   heading "New Risk"
   input "Title — e.g. Unpatched edge servers"
   textarea "What is the risk and why does it matter?"
@@ -373,12 +386,33 @@ screen NewRisk "An owner logs a new risk into a register"
   row
     right
     button "Cancel"
-    button "Create risk" primary -> RiskDashboard
+    button "Create risk" primary -> MyRisks
 
-screen RiskDetail "The owner tracks remediation for one risk"
+screen QueueRiskDetail "Manager reviews progress and escalates risks that stall"
   navbar "RiskHub"
-  sidebar "Overview | My Risks | All Registers | Audits | Settings"
-  breadcrumb "Risks / Unpatched edge servers"
+  sidebar "Overview | Review Queue -> RiskQueue | All Registers | Audits | Settings"
+  breadcrumb "Risk Queue / Unpatched edge servers"
+  row
+    heading "Unpatched edge servers"
+    badge "High" danger
+    badge "Open" info
+  text "Owner: Platform team — Updated 2h ago"
+  heading "Remediation"
+  progress "60%" info
+  text "6 of 10 actions complete"
+  table "Action | Assignee | Due | Status"
+    row "Patch kernel CVE-2026-1 | A. Chen | Fri | Done"
+    row "Rotate edge certs | M. Diaz | Mon | In progress"
+    row "Close inbound 8443 | Platform | Tue | To do"
+  row
+    right
+    button "Reassign owner"
+    button "Escalate" primary
+
+screen RiskDetail "The owner tracks remediation for the risks they own"
+  navbar "RiskHub"
+  sidebar "Overview | My Risks -> MyRisks | All Registers | Audits | Settings"
+  breadcrumb "My Risks / Unpatched edge servers"
   row
     heading "Unpatched edge servers"
     badge "High" danger
@@ -408,20 +442,22 @@ screen RiskDetail "The owner tracks remediation for one risk"
       text "1d ago — M. Diaz started cert rotation"
 
 flow "Manager path"
-  RiskDashboard
-  RiskDetail
+  RiskQueue
+  QueueRiskDetail
 
 flow "Owner path"
-  RiskDashboard
+  MyRisks
   NewRisk
   RiskDetail
 ```
 
-The two `flow` blocks close the file: they reference the same three screens
-declared above rather than duplicating them, and they are what the prototype's
-flow picker offers the reviewer — "Manager path" walks monitor-then-act,
-"Owner path" walks log-then-remediate, and both start at `RiskDashboard`
-because that's where each role lands first.
+The two `flow` blocks close the file: each lists only its own role's screens,
+entry screen first, and each screen is reachable by clicking from somewhere in
+its own flow — `RiskQueue`'s table leads to `QueueRiskDetail`; `MyRisks`'s
+button leads to `NewRisk` and its table leads to `RiskDetail`. They are what
+the prototype's flow picker offers the reviewer — "Manager path" walks
+queue-then-escalate, "Owner path" walks log-then-remediate — and neither flow
+references a screen the other role can't reach.
 
 Checklist before finishing a wireframe file:
 
