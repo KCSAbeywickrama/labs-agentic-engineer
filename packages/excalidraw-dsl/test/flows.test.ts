@@ -18,7 +18,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { tryDslToPrototype, validateWireframeSyntax } from "../src/index.js";
+import { dslToExcalidraw, tryDslToPrototype, validateWireframeSyntax } from "../src/index.js";
 
 const TWO_FLOWS = `screen Login "Sign in"
   button "Sign in" primary -> AdminQueue
@@ -155,4 +155,51 @@ flow "Admin path"
   Login
 `);
   assert.deepEqual(m.flows[0]!.screens, ["Login", "AdminQueue"]);
+});
+
+function canvasTexts(dsl: string): string[] {
+  const scene = JSON.parse(dslToExcalidraw("wireframes", dsl)) as {
+    elements: Array<{ type: string; text?: string }>;
+  };
+  return scene.elements.filter((e) => e.type === "text").map((e) => e.text ?? "");
+}
+
+test("a screen in exactly one flow is labelled with that flow's name", () => {
+  const texts = canvasTexts(TWO_FLOWS);
+  assert.ok(texts.includes("Admin path · Screen 2"), texts.join(" | "));
+  assert.ok(texts.includes("Customer path · Screen 4"), texts.join(" | "));
+});
+
+test("a screen in two or more flows is labelled Common", () => {
+  const texts = canvasTexts(TWO_FLOWS);
+  assert.ok(texts.includes("Common · Screen 1"), texts.join(" | "));
+});
+
+test("a screen in no flow keeps the bare screen-number marker", () => {
+  const texts = canvasTexts(`screen Login "Sign in"
+screen Stranded "Nobody lists me"
+
+flow "Admin path"
+  Login
+`);
+  assert.ok(texts.includes("Screen 2"), texts.join(" | "));
+  assert.ok(!texts.some((t) => t.endsWith("· Screen 2")), "unassigned screen must carry no flow label");
+});
+
+test("a DSL with no named flows carries no flow label anywhere on the canvas", () => {
+  const texts = canvasTexts(`screen Login "Sign in"
+  button "Sign in" primary -> Dashboard
+screen Dashboard "Home"
+  navbar "App | Home"
+`);
+  assert.ok(texts.includes("Screen 1"), texts.join(" | "));
+  assert.ok(texts.includes("Screen 2"), texts.join(" | "));
+  // Target the flow-label marker format specifically ("... · Screen N" at the
+  // end of a string), not any middle dot on the canvas: the `-> Dashboard`
+  // arrow above legitimately draws its own "→ Screen 2 · Dashboard" nav
+  // marker, which carries a middle dot of its own and must not trip this.
+  assert.ok(
+    !texts.some((t) => /· Screen \d+$/.test(t)),
+    "no screen may gain a flow label",
+  );
 });

@@ -1160,6 +1160,17 @@ function renderWireframes(ast: WireframeAst, opts?: WireframeRenderOpts): Excali
   const screenNameByLower = new Map<string, string>();
   ast.screens.forEach((s) => screenNameByLower.set(s.name.toLowerCase(), s.name));
 
+  // Flow membership, shown on the canvas so the grid answers "whose screen is
+  // this?" without entering the prototype. A screen listed by several flows
+  // reads "Common" rather than a list — the names are the personas' walkthrough
+  // labels, and stacking them makes the marker unreadable at grid zoom.
+  const flowLabelByLower = new Map<string, string>();
+  for (const s of ast.screens) {
+    const owning = ast.namedFlows.filter((f) => f.screens.includes(s.name));
+    if (owning.length === 1) flowLabelByLower.set(s.name.toLowerCase(), owning[0]!.name);
+    else if (owning.length > 1) flowLabelByLower.set(s.name.toLowerCase(), 'Common');
+  }
+
   // Variable-size screens flow left-to-right, COLUMNS per row; each row is as
   // tall as its tallest screen.
   let curX = 0;
@@ -1197,15 +1208,21 @@ function renderWireframes(ast: WireframeAst, opts?: WireframeRenderOpts): Excali
           'left',
         ),
       );
+      // Right-aligned, so widening the box for the flow label moves nothing:
+      // the text still ends at the screen's right edge and the title block
+      // keeps its height.
+      const flowLabel = flowLabelByLower.get(screen.name.toLowerCase());
+      const marker = flowLabel ? `${flowLabel} · Screen ${number}` : `Screen ${number}`;
+      const markerW = 300;
       out.push(
         withColor(
           makeText(
             stableId(`screen-num:${screen.name}:${idx}`),
-            sx + screen.width - 120,
+            sx + screen.width - (markerW + 12),
             sy,
-            108,
+            markerW,
             18,
-            `Screen ${number}`,
+            marker,
             14,
             'right',
           ),
