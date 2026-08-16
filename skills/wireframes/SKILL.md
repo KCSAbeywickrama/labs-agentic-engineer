@@ -173,7 +173,7 @@ position comes from structure:
 ```
 screen <Name> ["what this view is for"]   // one per view; description renders as a subtitle
   navbar "App | Nav1 -> Screen | Nav2"    // top bar; first item is the brand; bell+avatar automatic
-  sidebar "Item1 -> Screen | Item2"       // left rail; same items on every screen of a role's flow
+  sidebar "Item1 -> Screen | Item2"       // left rail; same items on every screen a role sees
   <kind> "<label>" [WxH] [variant] [-> Screen]   // a block: stacks below the previous one
   row                            // children go side by side (equal shares, 16px gaps)
     <kind> "<label>" …
@@ -325,8 +325,11 @@ stops communicating.
 
 ## Worked example — risk register webapp wireframes
 
-A complete `wireframes.dsl` for a three-screen desktop flow. Note the rhythm:
-every screen repeats the same `navbar` + `sidebar` (consistent chrome); blocks
+A complete `wireframes.dsl` for a three-screen desktop flow. This example has a
+single role (no diverging permissions), so its chrome is uniform — every
+screen repeats the same `navbar` + `sidebar`; that's a property of this app,
+not the rule to imitate (see "Scope the chrome to the role" above for what
+changes once an app has more than one). Note the rest of the rhythm: blocks
 stack in reading order; `row` groups things side by side; the primary action is
 the one `primary` button per screen; status is carried by `badge`s, not prose.
 No coordinates anywhere — the compiler computes every position.
