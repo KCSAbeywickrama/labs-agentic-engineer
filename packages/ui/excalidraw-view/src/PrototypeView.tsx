@@ -23,6 +23,7 @@ import type { PrototypeModel } from "@aep/excalidraw-dsl";
 import { ExcalidrawComponent } from "./lazyExcalidraw.js";
 import { parseScene, fitContentToViewport } from "./scene.js";
 import { prototypeNavReducer } from "./prototypeState.js";
+import { resolveFlow, flowEntryScreen, pickerScreens } from "./flowState.js";
 import { hotspotToViewport, type ViewportRect } from "./hotspotOverlay.js";
 
 const FLASH_MS = 900;
@@ -42,8 +43,12 @@ export interface PrototypeViewProps {
   model: PrototypeModel;
   /** Start screen (deep link). Unknown/absent → first screen. */
   initialScreen?: string;
+  /** Start flow (deep link). Unknown/absent → first declared flow. */
+  initialFlow?: string;
   /** Fires on every screen change — the full-screen route syncs the URL. */
   onScreenChange?: (screen: string) => void;
+  /** Fires on every flow change — the full-screen route syncs the URL. */
+  onFlowChange?: (flow: string) => void;
   /** Fill the parent's height (else fixed 600px), like ExcalidrawView. */
   fillHeight?: boolean;
   /** Right-aligned toolbar slot (e.g. the console's Canvas | Prototype switch,
@@ -55,10 +60,27 @@ export interface PrototypeViewProps {
 // Expects to be remounted (e.g. via a `key`) when `model` changes: `initialData`
 // is captured once at mount, and the screen-swap effect only reacts to
 // navigation, not to a new `model` identity.
-export function PrototypeView({ model, initialScreen, onScreenChange, fillHeight, trailingSlot }: PrototypeViewProps) {
+export function PrototypeView({
+  model,
+  initialScreen,
+  initialFlow,
+  onScreenChange,
+  onFlowChange,
+  fillHeight,
+  trailingSlot,
+}: PrototypeViewProps) {
   const byName = useMemo(() => new Map(model.screens.map((s) => [s.name, s])), [model]);
   const first = model.screens[0]!.name;
-  const start = initialScreen && byName.has(initialScreen) ? initialScreen : first;
+  // Flow selection is view state, not navigation state: it survives clicking
+  // across flows (the flow is a starting lens, not a cage), so it lives beside
+  // the nav reducer rather than inside it.
+  const [flow, setFlow] = useState<string | null>(() => resolveFlow(model, initialFlow));
+  // A deep-linked screen wins over the flow's entry screen — a shared link
+  // points at a screen, and honouring the flow instead would silently move the
+  // reader somewhere else.
+  const start = initialScreen && byName.has(initialScreen)
+    ? initialScreen
+    : (flowEntryScreen(model, flow) ?? first);
   const [nav, dispatch] = useReducer(prototypeNavReducer, { current: start, stack: [] });
   const apiRef = useRef<any>(null);
   const [flash, setFlash] = useState(false);
@@ -128,6 +150,13 @@ export function PrototypeView({ model, initialScreen, onScreenChange, fillHeight
     }, FLASH_MS);
   };
 
+  const onFlowSelected = (next: string) => {
+    setFlow(next);
+    onFlowChange?.(next);
+    const entry = flowEntryScreen(model, next);
+    if (entry) dispatch({ type: "reset", to: entry });
+  };
+
   return (
     <Box
       sx={{
@@ -147,6 +176,20 @@ export function PrototypeView({ model, initialScreen, onScreenChange, fillHeight
       {/* Toolbar: back · screen picker · description · trailing slot (e.g.
           the console's view switch, pushed to the right edge) — one row. */}
       <Box sx={{ px: 1.5, py: 1, display: "flex", alignItems: "center", gap: 1, borderBottom: 1, borderColor: "divider" }}>
+        {model.flows.length > 0 && (
+          <Select
+            size="small"
+            value={flow ?? ""}
+            onChange={(e) => onFlowSelected(String(e.target.value))}
+            aria-label="Flow"
+          >
+            {model.flows.map((f) => (
+              <MenuItem key={f.name} value={f.name}>
+                {f.name}
+              </MenuItem>
+            ))}
+          </Select>
+        )}
         <IconButton size="small" aria-label="Back" disabled={nav.stack.length === 0} onClick={() => dispatch({ type: "back" })}>
           <ArrowLeft size={16} />
         </IconButton>
@@ -156,9 +199,9 @@ export function PrototypeView({ model, initialScreen, onScreenChange, fillHeight
           onChange={(e) => dispatch({ type: "navigate", to: String(e.target.value) })}
           aria-label="Screen"
         >
-          {model.screens.map((s) => (
-            <MenuItem key={s.name} value={s.name}>
-              {s.name}
+          {pickerScreens(model, flow, nav.current).map((name) => (
+            <MenuItem key={name} value={name}>
+              {name}
             </MenuItem>
           ))}
         </Select>
