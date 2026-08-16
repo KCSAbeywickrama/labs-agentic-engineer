@@ -107,3 +107,52 @@ flow
     [],
   );
 });
+
+test("the model publishes each declared flow, in declaration order, entry screen first", () => {
+  const m = model(TWO_FLOWS);
+  assert.deepEqual(
+    m.flows.map((f) => f.name),
+    ["Admin path", "Customer path"],
+  );
+  assert.deepEqual(m.flows[0]!.screens, ["Login", "AdminQueue", "AuditDetail"]);
+  assert.deepEqual(m.flows[1]!.screens, ["Login", "Orders"]);
+});
+
+test("a shared screen is compiled once and referenced by both flows", () => {
+  const m = model(TWO_FLOWS);
+  assert.equal(m.screens.filter((s) => s.name === "Login").length, 1);
+  assert.ok(m.flows.every((f) => f.screens.includes("Login")));
+});
+
+test("a DSL with no named flows compiles to an empty flow list", () => {
+  const m = model(`screen Login "Sign in"
+screen Dashboard "Home"
+
+flow
+  Login -> Dashboard
+`);
+  assert.deepEqual(m.flows, []);
+});
+
+test("flow screen references resolve case-insensitively to the canonical name", () => {
+  const m = model(`screen Login "Sign in"
+screen AdminQueue "Queue"
+
+flow "Admin path"
+  login
+  ADMINQUEUE
+`);
+  assert.deepEqual(m.flows[0]!.screens, ["Login", "AdminQueue"]);
+});
+
+test("a screen listed twice in one flow keeps its first position", () => {
+  const m = model(`screen Login "Sign in"
+screen AdminQueue "Queue"
+
+flow "Admin path"
+  Login
+  AdminQueue
+  Login
+`);
+  assert.deepEqual(m.flows[0]!.screens, ["Login", "AdminQueue"]);
+});

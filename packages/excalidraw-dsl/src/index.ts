@@ -292,8 +292,20 @@ export interface PrototypeScreen {
   hotspots: PrototypeHotspot[];
 }
 
+/**
+ * One persona's walkthrough. `screens` are canonical `PrototypeScreen` names,
+ * entry point first — membership lives on the flow, not the screen, so one
+ * screen can belong to several flows without being compiled twice.
+ */
+export interface PrototypeFlow {
+  name: string;
+  screens: string[];
+}
+
 export interface PrototypeModel {
   screens: PrototypeScreen[];
+  /** Empty when the DSL declares no `flow "…"` blocks. */
+  flows: PrototypeFlow[];
 }
 
 export function tryDslToPrototype(
@@ -349,7 +361,11 @@ export function tryDslToPrototype(
       if (screen.description) out.description = screen.description;
       return out;
     });
-    return { ok: true, model: { screens } };
+    const flows: PrototypeFlow[] = ast.namedFlows.map((f) => ({
+      name: f.name,
+      screens: [...f.screens],
+    }));
+    return { ok: true, model: { screens, flows } };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }

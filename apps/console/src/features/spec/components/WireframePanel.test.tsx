@@ -190,7 +190,10 @@ describe("WireframePanel streaming", () => {
 
 describe("WireframePanel prototype toggle", () => {
   const SCENE = JSON.stringify({ elements: [{ type: "rectangle" }] });
-  const MODEL = { screens: [{ name: "Login", width: 1280, height: 800, sceneJson: SCENE, hotspots: [] }] };
+  const MODEL = {
+    screens: [{ name: "Login", width: 1280, height: 800, sceneJson: SCENE, hotspots: [] }],
+    flows: [],
+  };
 
   it("shows the toggle only when settled, and swaps to PrototypeView", () => {
     mockDerived.mockReturnValue({ scene: SCENE, isPending: false, isError: false });

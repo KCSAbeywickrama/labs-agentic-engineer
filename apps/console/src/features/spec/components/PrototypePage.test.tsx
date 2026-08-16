@@ -60,6 +60,7 @@ const FILES = [
 ];
 const MODEL = {
   screens: [{ name: "Login", width: 1280, height: 800, sceneJson: "{}", hotspots: [] }],
+  flows: [{ name: "Admin path", screens: ["Login"] }],
 };
 
 beforeEach(() => {
@@ -128,7 +129,7 @@ describe("PrototypePage", () => {
       isError: false,
     });
     mockDerivedPrototype.mockReturnValue({
-      model: { screens: [...MODEL.screens] },
+      model: { screens: [...MODEL.screens], flows: [...MODEL.flows] },
       isPending: false,
       isError: false,
     });
