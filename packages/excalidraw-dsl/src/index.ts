@@ -106,9 +106,22 @@ interface WireframeFlow {
   to: string;
 }
 
+/**
+ * A named `flow "…"` block: one persona's walkthrough, REFERENCING screen
+ * names rather than defining screens — so a screen shared by two personas
+ * (Login, a sign-out landing) is listed by each flow and still compiled once.
+ * `screens` holds canonical names, entry point first.
+ */
+interface WireframeNamedFlow {
+  name: string;
+  screens: string[];
+}
+
 interface WireframeAst {
   screens: WireframeScreen[];
+  /** Legacy unnamed `flow` block edges — parsed, never rendered. */
   flows: WireframeFlow[];
+  namedFlows: WireframeNamedFlow[];
 }
 
 // ---------- Domain Model DSL ----------
@@ -296,7 +309,7 @@ export function tryDslToPrototype(
     const screens: PrototypeScreen[] = ast.screens.map((screen) => {
       const chromeHotspots: PrototypeHotspot[] = [];
       const elements = renderWireframes(
-        { screens: [screen], flows: [] },
+        { screens: [screen], flows: [], namedFlows: [] },
         { prototype: { validTargets, chromeHotspots } },
       );
       const scene: ExcalidrawScene = {
@@ -502,12 +515,17 @@ function buildWireframes(
   dsl: string,
   errors: string[] | null,
 ): { ast: WireframeAst; legacy: boolean } {
-  const ast: WireframeAst = { screens: [], flows: [] };
+  const ast: WireframeAst = { screens: [], flows: [], namedFlows: [] };
   let screen: FlowScreen | null = null;
   let stack: Ctx[] = [];
   let inFlow = false;
   let legacy = false;
   const err = (no: number, msg: string) => errors?.push(`line ${no}: ${msg}`);
+  // The named `flow "…"` block currently open (null inside a legacy unnamed
+  // block). Screen references are collected with their line numbers and
+  // resolved AFTER the parse — a flow may list a screen declared further down.
+  let currentFlow: WireframeNamedFlow | null = null;
+  const flowRefs: Array<{ flow: WireframeNamedFlow; raw: string; line: number }> = [];
 
   const lines = dsl.split(/\r?\n/);
   for (let no = 1; no <= lines.length; no++) {
@@ -533,11 +551,23 @@ function buildWireframes(
         ast.screens.push(screen);
         stack = [{ level: 0, kind: 'root', nodes: screen.tree }];
         inFlow = false;
+        currentFlow = null;
         continue;
       }
-      if (/^flow\b/i.test(trimmed)) {
+      const flowHead = /^flow(?:\s+"((?:[^"\\]|\\.)*)")?\s*$/i.exec(trimmed);
+      if (flowHead) {
         screen = null;
         inFlow = true;
+        currentFlow = null;
+        if (flowHead[1] !== undefined) {
+          const name = unescapeQuoted(flowHead[1]);
+          if (ast.namedFlows.some((f) => f.name === name)) {
+            err(no, `duplicate flow ${JSON.stringify(name)} — declare each flow once`);
+          } else {
+            currentFlow = { name, screens: [] };
+            ast.namedFlows.push(currentFlow);
+          }
+        }
         continue;
       }
       screen = null;
@@ -547,8 +577,19 @@ function buildWireframes(
     }
 
     if (inFlow) {
-      const flowMatch = /^([\w-]+)\s*->\s*([\w-]+)$/.exec(trimmed);
-      if (flowMatch) ast.flows.push({ from: flowMatch[1]!, to: flowMatch[2]! });
+      const edge = /^([\w-]+)\s*->\s*([\w-]+)$/.exec(trimmed);
+      if (edge) {
+        ast.flows.push({ from: edge[1]!, to: edge[2]! });
+        continue;
+      }
+      if (currentFlow) {
+        const ref = /^([\w-]+)$/.exec(trimmed);
+        if (ref) {
+          flowRefs.push({ flow: currentFlow, raw: ref[1]!, line: no });
+          continue;
+        }
+        err(no, `unknown flow line ${JSON.stringify(trimmed.slice(0, 40))} — expected a screen name`);
+      }
       continue;
     }
     if (!screen) continue;
@@ -657,6 +698,22 @@ function buildWireframes(
   }
 
   for (const s of ast.screens) layoutScreen(s as FlowScreen);
+
+  // Resolved here, not inline, because a flow may list a screen declared
+  // further down the file. An unknown name is always an authoring bug, so it
+  // is reported with its line; a repeat within one flow is the author drawing
+  // a return trip (sign out → Login) that the `-> Target` arrows already
+  // carry, so the first position wins and the duplicate is dropped.
+  const canonicalByLower = new Map(ast.screens.map((s) => [s.name.toLowerCase(), s.name]));
+  for (const ref of flowRefs) {
+    const canonical = canonicalByLower.get(ref.raw.toLowerCase());
+    if (!canonical) {
+      err(ref.line, `flow references unknown screen ${JSON.stringify(ref.raw)}`);
+      continue;
+    }
+    if (!ref.flow.screens.includes(canonical)) ref.flow.screens.push(canonical);
+  }
+
   return { ast, legacy };
 }
 
