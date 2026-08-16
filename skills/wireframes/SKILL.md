@@ -105,11 +105,13 @@ Rules of thumb:
 
 - Name the screen for its role and put the role in the description:
   `screen ReviewQueue "Manager reviews and approves pending requests"`.
-- **A role screen is the SAME app — keep the identical `navbar` and `sidebar`
-  every other screen uses**, with the same items in the same order. The role
-  changes what's *inside* the screen — which buttons, columns, rows — not the
-  shell. Never give a scoped role its own smaller sidebar; that reads as a
-  different app.
+- **Scope the chrome to the role.** An admin screen's `sidebar` lists the
+  admin's destinations; a customer screen's lists the customer's. Real
+  permissioned apps do not show people links they cannot use, and a prototype
+  that does sends the reviewer down another persona's path.
+- **Keep the overlap identical.** Items both roles have use the same label,
+  the same order, and the same `navbar` brand, so the screens still read as one
+  product rather than two. Only the role-specific entries differ.
 - Reflect the real difference in **actions and data** — a role that can't
   approve/assign/delete simply doesn't have that button or column. Don't reskin
   one layout and call it two. The role difference should be legible from the
@@ -171,7 +173,7 @@ position comes from structure:
 ```
 screen <Name> ["what this view is for"]   // one per view; description renders as a subtitle
   navbar "App | Nav1 -> Screen | Nav2"    // top bar; first item is the brand; bell+avatar automatic
-  sidebar "Item1 -> Screen | Item2"       // left rail; same items on every screen of the app
+  sidebar "Item1 -> Screen | Item2"       // left rail; same items on every screen of a role's flow
   <kind> "<label>" [WxH] [variant] [-> Screen]   // a block: stacks below the previous one
   row                            // children go side by side (equal shares, 16px gaps)
     <kind> "<label>" …
@@ -231,6 +233,33 @@ screen should be reachable by clicking — or be a landing screen whose
 description says which role it serves. Not every control needs an arrow; what
 matters is that no view is stranded.
 
+### Flows — one per role
+
+The screens say what exists; a **flow** says who walks which ones, in what
+order. The prototype's top-level control is the flow picker, so a wireframe set
+without flows offers the reviewer no way to ask for the admin's journey.
+
+Declare one `flow` block per role or journey named in `design.md`, listing that
+role's screens in walkthrough order, **entry screen first**:
+
+```
+flow "Admin path"
+  Login
+  AdminQueue
+  AuditDetail
+
+flow "Customer path"
+  Login          // a reference, not a copy — one screen, two memberships
+  Orders
+```
+
+- A flow **references** screens by name; screens stay declared once. List a
+  shared screen (sign-in, a sign-out landing) in every flow that reaches it.
+- The name is quoted and must be unique — declaring one flow twice rejects the
+  write.
+- A name that matches no `screen` rejects the write with its line number.
+- A screen in no flow is allowed, but ask yourself who reaches it.
+
 Syntax is validated at write time: an unknown keyword, a misplaced
 `left`/`right`/table-`row`, or old-style x,y coordinates rejects the write with
 line numbers (`INVALID_DSL`) — fix every listed line and re-emit the file.
@@ -286,8 +315,11 @@ stops communicating.
   dashboard app) uses the `sidebar` for section links and a brand-only
   `navbar` (`navbar "Acme"`). A simple public flow (storefront, checkout) uses
   a link-carrying `navbar` and **no sidebar**. Never both on one screen.
-- Repeat the SAME `navbar` (and `sidebar`) verbatim on every screen of one app
-  — consistent chrome is what makes screens read as one product.
+- Repeat the SAME `navbar` on every screen of one app. Repeat the SAME
+  `sidebar` too, EXCEPT where a role's screens scope it to that role's
+  destinations — the items both roles share still keep the same label and
+  order, so the screens read as one product even when the rail isn't
+  word-for-word identical.
 - Comments start with `//`. Every screen should be reachable from some
   control's `-> Screen`.
 
@@ -370,7 +402,22 @@ screen RiskDetail "The owner tracks remediation for one risk"
       heading "Activity"
       text "2h ago — A. Chen closed CVE-2026-1"
       text "1d ago — M. Diaz started cert rotation"
+
+flow "Manager path"
+  RiskDashboard
+  RiskDetail
+
+flow "Owner path"
+  RiskDashboard
+  NewRisk
+  RiskDetail
 ```
+
+The two `flow` blocks close the file: they reference the same three screens
+declared above rather than duplicating them, and they are what the prototype's
+flow picker offers the reviewer — "Manager path" walks monitor-then-act,
+"Owner path" walks log-then-remediate, and both start at `RiskDashboard`
+because that's where each role lands first.
 
 Checklist before finishing a wireframe file:
 
@@ -378,7 +425,11 @@ Checklist before finishing a wireframe file:
   duplicate takes on the same screen. Where a role changes the view, there's a
   screen per role, named and described for it.
 - Every screen has a one-line description saying what it's for.
-- Chrome (`navbar`, `sidebar`) is identical across screens of the same app.
+- `navbar` is identical across every screen of the app; `sidebar` is scoped
+  to each role's destinations, with shared items kept at the same label and
+  order across roles.
+- Each role or journey named in `design.md` has its own `flow "<name>"` block,
+  entry screen first, referencing existing screens by name.
 - Labels are content-bearing ("Open risks | 24 | across 6 registers",
   "Platform team", "Overdue"), never placeholders like "text" or "label".
 - The right primitive does each job — `badge` for status, `tabs` for section
