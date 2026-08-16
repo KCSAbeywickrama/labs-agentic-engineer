@@ -351,7 +351,10 @@ screen RiskQueue "Manager monitors open risk across registers and acts on what's
     card "Open risks | 24 | across 6 registers"
     card "Overdue actions | 6 | need follow-up"
     card "High severity | 3 | review this week"
-  heading "Needs review"
+  row
+    heading "Needs review"
+    right
+    button "Review next" primary -> QueueRiskDetail
   tabs "All | Overdue | High severity"
   table "Risk | Owner | Severity | Status | Updated" -> QueueRiskDetail
     row "Unpatched edge servers | Platform team | High | Open | 2h ago"
@@ -397,17 +400,29 @@ screen QueueRiskDetail "Manager reviews progress and escalates risks that stall"
     badge "High" danger
     badge "Open" info
   text "Owner: Platform team — Updated 2h ago"
-  heading "Remediation"
-  progress "60%" info
-  text "6 of 10 actions complete"
-  table "Action | Assignee | Due | Status"
-    row "Patch kernel CVE-2026-1 | A. Chen | Fri | Done"
-    row "Rotate edge certs | M. Diaz | Mon | In progress"
-    row "Close inbound 8443 | Platform | Tue | To do"
-  row
+  split 60/40
+    left
+      heading "Remediation"
+      progress "60%" info
+      text "6 of 10 actions complete"
+      table "Action | Assignee | Due | Status"
+        row "Patch kernel CVE-2026-1 | A. Chen | Fri | Done"
+        row "Rotate edge certs | M. Diaz | Mon | In progress"
+        row "Close inbound 8443 | Platform | Tue | To do"
+      row
+        right
+        button "Reassign owner"
+        button "Escalate" primary
     right
-    button "Reassign owner"
-    button "Escalate" primary
+      card "Review notes"
+        text "You · 3d: second week overdue — needs a date."
+        text "R. Osei · 1d: agreed, escalate if Monday slips."
+        row
+          textarea "Add a review note…"
+          button "Post note"
+      heading "Review history"
+      text "1d ago — You flagged this risk for review"
+      text "6d ago — R. Osei reassigned it to Platform team"
 
 screen RiskDetail "The owner tracks remediation for the risks they own"
   navbar "RiskHub"
@@ -436,7 +451,7 @@ screen RiskDetail "The owner tracks remediation for the risks they own"
         text "M. Diaz · 1d: Monday, after the freeze."
         row
           textarea "Add a comment…"
-          button "Post" primary
+          button "Post"
       heading "Activity"
       text "2h ago — A. Chen closed CVE-2026-1"
       text "1d ago — M. Diaz started cert rotation"
@@ -453,7 +468,8 @@ flow "Owner path"
 
 The two `flow` blocks close the file: each lists only its own role's screens,
 entry screen first, and each screen is reachable by clicking from somewhere in
-its own flow — `RiskQueue`'s table leads to `QueueRiskDetail`; `MyRisks`'s
+its own flow — `RiskQueue`'s "Review next" CTA and its table both lead to
+`QueueRiskDetail`; `MyRisks`'s
 button leads to `NewRisk` and its table leads to `RiskDetail`. They are what
 the prototype's flow picker offers the reviewer — "Manager path" walks
 queue-then-escalate, "Owner path" walks log-then-remediate — and neither flow
