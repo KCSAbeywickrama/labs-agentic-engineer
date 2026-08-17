@@ -12,11 +12,18 @@
 
 - **A feature is a GitHub issue** (labels `console` + `feature`): the body is
   the feature doc; while the issue is open it is edited in place to match the
-  current shape of the feature; grilling outcomes are posted as a **decisions
-  comment**.
+  current shape of the feature.
+- **The issue is born grilled.** The grilling interview runs on the raw idea
+  *before* any issue exists, and the issue is created from its outcome — the
+  body carries a **Decisions** section (decided / why / rejected) instead of
+  the outcome arriving later as a comment. An issue therefore always
+  represents a settled feature shape, never a placeholder to grill into.
+- **`/console-feature` is the entry point** for frontend feature work: pass
+  it the idea, it grills, opens the issue, and drives the build.
 - **Closed issues are frozen history** — never edited when superseded.
 - **ADRs in `design/decisions/` are the current truth.** A decision graduates
-  from issue-comment to ADR when it (i) sets a convention other features must
+  from the issue's Decisions section to an ADR when it (i) sets a convention
+  other features must
   follow, (ii) changes the PRD, or (iii) rejects an approach someone would
   plausibly re-propose. Feature-local choices stay in the issue and may
   fossilize. A superseding ADR marks its predecessor `Superseded by ADR-NNNN`.

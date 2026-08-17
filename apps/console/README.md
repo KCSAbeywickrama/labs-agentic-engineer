@@ -20,22 +20,24 @@ to `API_PROXY_TARGET`, default `http://localhost:9090`).
 ## How development works
 
 Console features are built in **Claude Code sessions** following a fixed,
-issue-driven cycle — feature issue → grilling interview → decisions comment
-(durable ones become ADRs) → contract → mocks → UI → ship
+issue-driven cycle — grilling interview → feature issue (durable decisions
+become ADRs) → contract → mocks → UI → ship
 (spec: [`design/development-flow.md`](design/development-flow.md)). Don't
-freestyle a feature — run the cycle with the `/console-feature` skill:
+freestyle a feature — start every one with the `/console-feature` skill,
+passing it the idea in plain words:
 
 ```
 /console-feature I want the project list to show each project's environments
 ```
 
-It reads the PRD and ADRs, drafts the feature issue from the template,
-creates it with `gh` (labels `console` + `feature`, upstream repo), prints
-it, and then asks at each stage whether to continue: grill it (the
-`/grill-me` interview), post the decisions comment, graduate ADRs, open the
-BE handshake issue if the contract changes, mark the PRD in-flight, build
-(contract → `make gen` → mocks → UI in mock mode), and ship. Stop at any
-checkpoint and pick the feature back up later with the issue number:
+It reads the PRD and ADRs, runs the grilling interview on the idea (the
+`/grill-me` session), then drafts the feature issue from the template with
+the decisions in the body, creates it with `gh` (labels `console` +
+`feature`, upstream repo) once you approve the draft, and asks at each
+following stage whether to continue: graduate ADRs, open the BE handshake
+issue if the contract changes, mark the PRD in-flight, build (contract →
+`make gen` → mocks → UI in mock mode), and ship. Stop at any checkpoint and
+pick the feature back up later with the issue number:
 
 ```
 /console-feature 42
