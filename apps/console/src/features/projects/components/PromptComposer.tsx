@@ -27,7 +27,7 @@ import {
   Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
-import { Paperclip, X } from "@wso2/oxygen-ui-icons-react";
+import { Paperclip, Send, X } from "@wso2/oxygen-ui-icons-react";
 import {
   MAX_REFERENCE_FILES,
   REFERENCE_ACCEPT,
@@ -264,6 +264,10 @@ export function PromptComposer({
           </Tooltip>
           <Button
             variant="contained"
+            // Icon on both ends of the toolbar row: the paperclip opens the
+            // picker, this sends. Same shape as the Back button's startIcon
+            // elsewhere in the flow.
+            endIcon={<Send size={16} />}
             disabled={!prompt.trim()}
             onClick={onSubmit}
           >
