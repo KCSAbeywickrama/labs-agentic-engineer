@@ -96,7 +96,8 @@ A design-system skill must declare four things to work in that slot:
   sequence should run for it, or nothing if it has none.
 - **Which of its own defaults the platform overrides.** Every vendor's
   quickstart assumes a project it scaffolded itself; `react-webapp`'s deployment
-  facts (no `base`, static nginx, `window._env_`, one `tsconfig.json`) win, and
+  facts (no `base`, the platform's own nginx assets, `window._env_`, one
+  `tsconfig.json`) win, and
   the skill should say so wherever its own docs would mislead.
 - **Its ownership boundary.** The design system owns UI under `src/`; the data
   layer (`openapi-fetch` + the committed `src/generated/` client) stays

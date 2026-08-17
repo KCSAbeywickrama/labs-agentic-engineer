@@ -29,6 +29,7 @@ browser config — they are pod env for nginx.
    npx tsc --noEmit              # type-check without emitting
    npm run build                 # actually build
    ```
+   Commit the `package-lock.json` this produces. Never commit `node_modules/`.
 
    **The design-system skill contributes one step to this sequence**, and it is
    mandatory: run the command its own Verify section names, after `npm install`
@@ -39,7 +40,6 @@ browser config — they are pod env for nginx.
    perfectly clean, then renders an unstyled page in the cluster. If the pinned
    design-system skill names no such command, the sequence is just the three
    above.
-   Commit the `package-lock.json` this produces. Never commit `node_modules/`.
 
    The `build` script is `tsc --noEmit && vite build` — **not** `tsc -b`, which
    needs a composite project: a `tsconfig.json` that `references` a

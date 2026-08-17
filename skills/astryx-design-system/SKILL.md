@@ -113,8 +113,8 @@ runtime, build, or guidance failure, not a style preference:
    tag first, the module bundle second. Adding a stylesheet or script tag around
    them risks `window._env_` being unset when the first module evaluates.
 4. **Theme tokens are not runtime config.** Colors and spacing come from the
-   theme package at build time. `window._env_` carries URLs and OIDC config only
-   — do not plumb a theme value through it.
+   theme package at build time. `window._env_` carries only what the **browser**
+   needs — OIDC config and flags — so do not plumb a theme value through it.
 
 Astryx replaces hand-written UI, not the platform's data layer: `openapi-fetch`
 and the committed `src/generated/` client stay exactly as `react-webapp`
