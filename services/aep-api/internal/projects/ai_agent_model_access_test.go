@@ -16,7 +16,17 @@
 
 package projects
 
-import "testing"
+import (
+	"context"
+	"testing"
+
+	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
+	ocmocks "github.com/wso2/aep/aep-api/internal/clients/openchoreo/mocks"
+	"github.com/wso2/aep/aep-api/internal/clients/secretmanagersvc"
+	"github.com/wso2/aep/aep-api/internal/organization"
+	"github.com/wso2/aep/aep-api/internal/spec"
+	"github.com/wso2/aep/aep-api/internal/spec/artifactstest"
+)
 
 // The model-access SecretReference must land in the SAME org namespace every
 // other SecretReference for that org already lives in. That namespace is
@@ -91,5 +101,123 @@ func TestOrgNamespaceFromVaultKey_isNotHandleDerived(t *testing.T) {
 	}
 	if got == "wc-default-37a8eec1" {
 		t.Fatalf("computed the handle-derived namespace %q — that namespace does not exist", got)
+	}
+}
+
+// --- SyncProjectModelAccess (the builds-green sweep) --------------------------
+
+// fakeKeyResolver serves a canned org key triplet.
+type fakeKeyResolver struct{ triplet organization.SecretRefTriplet }
+
+func (f fakeKeyResolver) DefaultKeyRef(context.Context, string) (organization.SecretRefTriplet, error) {
+	return f.triplet, nil
+}
+
+// fakeSecretRefClient accepts any SecretReference upsert. GetSecretReference
+// reports not-found so the create branch runs.
+type fakeSecretRefClient struct{}
+
+func (fakeSecretRefClient) GetSecretReference(context.Context, string, string) (*secretmanagersvc.SecretReference, error) {
+	return nil, secretmanagersvc.ErrNotFound
+}
+func (fakeSecretRefClient) CreateSecretReference(context.Context, string, secretmanagersvc.CreateSecretReferenceRequest) (*secretmanagersvc.SecretReference, error) {
+	return &secretmanagersvc.SecretReference{}, nil
+}
+func (fakeSecretRefClient) UpdateSecretReference(context.Context, string, string, secretmanagersvc.CreateSecretReferenceRequest) (*secretmanagersvc.SecretReference, error) {
+	return &secretmanagersvc.SecretReference{}, nil
+}
+func (fakeSecretRefClient) DeleteSecretReference(context.Context, string, string) error { return nil }
+
+func modelAccessStore(files map[string]string) *spec.ArtifactStore {
+	return spec.NewArtifactStore(&artifactstest.FakeArtifactService{
+		ListDesignFilesFunc: func(context.Context, string, string) (map[string]string, error) {
+			return files, nil
+		},
+	})
+}
+
+func agentDesignJSON(name string) string {
+	return "{\n  \"name\": \"" + name + "\",\n  \"type\": \"" + spec.ComponentTypeAIAgent +
+		"\",\n  \"description\": \"Agent.\",\n  \"dependencies\": []\n}\n"
+}
+
+// THE REGRESSION. The write target is the ReleaseBinding, which does not exist
+// until a build has produced a workload — so the pre-build EnsureComponent pass
+// reaches nothing on a first deploy and the agent comes up with no MODEL_* at
+// all. This sweep runs at builds-green, when the binding exists. If it stops
+// writing MODEL_*, every agent's first deploy 500s on every chat request again.
+func TestSyncProjectModelAccess_WritesModelEnvForEveryAIAgent(t *testing.T) {
+	var wrote []openchoreo.WorkflowEnvVarRef
+	var wroteFor []string
+	oc := &ocmocks.ComponentClientMock{
+		UpdateComponentWorkflowEnvVarsFunc: func(_ context.Context, _, _, componentName string, envVars []openchoreo.WorkflowEnvVarRef) error {
+			wroteFor = append(wroteFor, componentName)
+			wrote = append(wrote, envVars...)
+			return nil
+		},
+	}
+	files := map[string]string{
+		spec.DesignRootFile:                  "# Overview\n",
+		"components/hotel-agent/design.json": agentDesignJSON("hotel-agent"),
+		"components/hotel-api/design.json":   "{\n  \"name\": \"hotel-api\",\n  \"type\": \"service\",\n  \"description\": \"API.\",\n  \"dependencies\": []\n}\n",
+	}
+	svc := NewComponentService(oc, nil, modelAccessStore(files), nil, nil,
+		fakeKeyResolver{triplet: organization.SecretRefTriplet{
+			KVPath:   "user-app-secrets/wc-abc123/anthropic-secrets",
+			Property: "apiKey",
+		}}, fakeSecretRefClient{})
+
+	if err := svc.SyncProjectModelAccess(context.Background(), "acme", "hotels"); err != nil {
+		t.Fatalf("SyncProjectModelAccess: %v", err)
+	}
+
+	// Only the ai-agent — a service has no model access to grant.
+	if len(wroteFor) != 1 || wroteFor[0] != "hotel-agent" {
+		t.Fatalf("wrote env for %v, want exactly [hotel-agent]", wroteFor)
+	}
+	got := map[string]bool{}
+	for _, e := range wrote {
+		got[e.Key] = true
+	}
+	for _, want := range []string{modelEndpointEnvVar, modelNameEnvVar, modelAPIKeyEnvVar} {
+		if !got[want] {
+			t.Errorf("missing %s — the agent starts with 'missing config' and 500s on every request", want)
+		}
+	}
+	// MODEL_API_KEY must be a secret reference, never a literal.
+	for _, e := range wrote {
+		if e.Key != modelAPIKeyEnvVar {
+			continue
+		}
+		if e.Value != "" {
+			t.Errorf("MODEL_API_KEY carried a literal value — it must ride a SecretKeyRef")
+		}
+		if e.ValueFrom == nil || e.ValueFrom.SecretKeyRef == nil || e.ValueFrom.SecretKeyRef.Key != "apiKey" {
+			t.Errorf("MODEL_API_KEY secretKeyRef wrong: %+v", e.ValueFrom)
+		}
+	}
+}
+
+// A project with no ai-agent costs no OpenChoreo round trip at all.
+func TestSyncProjectModelAccess_NoAgentIsANoOp(t *testing.T) {
+	calls := 0
+	oc := &ocmocks.ComponentClientMock{
+		UpdateComponentWorkflowEnvVarsFunc: func(context.Context, string, string, string, []openchoreo.WorkflowEnvVarRef) error {
+			calls++
+			return nil
+		},
+	}
+	files := map[string]string{
+		spec.DesignRootFile:                "# Overview\n",
+		"components/hotel-api/design.json": "{\n  \"name\": \"hotel-api\",\n  \"type\": \"service\",\n  \"description\": \"API.\",\n  \"dependencies\": []\n}\n",
+	}
+	svc := NewComponentService(oc, nil, modelAccessStore(files), nil, nil,
+		fakeKeyResolver{}, fakeSecretRefClient{})
+
+	if err := svc.SyncProjectModelAccess(context.Background(), "acme", "hotels"); err != nil {
+		t.Fatalf("SyncProjectModelAccess: %v", err)
+	}
+	if calls != 0 {
+		t.Errorf("a design with no ai-agent must make no env write, got %d", calls)
 	}
 }

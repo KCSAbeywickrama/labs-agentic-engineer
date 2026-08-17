@@ -140,6 +140,12 @@ func (l *loop) runCycle(ctx workflow.Context, kind string, anchorIssue int) (cyc
 		// path — a component that did not build has no new binding to converge,
 		// and the fix cycle that follows will pass through here again.
 		l.syncAPITraits(ctx)
+		// The ai-agent components' MODEL_* ride the same binding and so have the
+		// same earliest moment. Nothing earlier can do it: model access is
+		// granted by component type rather than declared as a dependency
+		// (ADR-0016), so OpenChoreo never resolves it while rendering the
+		// release the way it resolves a declared one.
+		l.syncModelAccess(ctx)
 	}
 	return res, nil
 }

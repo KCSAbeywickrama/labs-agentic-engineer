@@ -121,6 +121,9 @@ func (s *stubComponentSvc) GetComponent(context.Context, string, string, string)
 func (s *stubComponentSvc) EnsureComponent(context.Context, string, string, string) error {
 	return nil
 }
+func (s *stubComponentSvc) SyncProjectModelAccess(context.Context, string, string) error {
+	return nil
+}
 func (s *stubComponentSvc) CreateComponent(context.Context, string, string, *openchoreo.CreateComponentRequest) (*gen.Component, error) {
 	panic("stubComponentSvc: CreateComponent not expected")
 }

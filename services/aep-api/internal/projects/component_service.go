@@ -53,6 +53,11 @@ type ComponentService interface {
 	// must exist by merge/build time or the build fails "Component not found".
 	// Idempotent — CreateComponent is 409-safe, so re-dispatch is a no-op.
 	EnsureComponent(ctx context.Context, orgName, projectName, componentName string) error
+	// SyncProjectModelAccess wires MODEL_* into every ai-agent component in the
+	// project. Runs at builds-green, the earliest point where the write target
+	// (the ReleaseBinding) exists — EnsureComponent runs before the build and so
+	// has nothing to write to on a first deploy. See ai_agent_model_access.go.
+	SyncProjectModelAccess(ctx context.Context, orgID, projectID string) error
 	UpdateWorkflowEnvVars(ctx context.Context, orgName, projectName, componentName string, envVars []openchoreo.WorkflowEnvVarRef) error
 
 	// Deploy (read-only — autoDeploy on the Component drives the chain)

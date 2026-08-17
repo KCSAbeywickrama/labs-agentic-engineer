@@ -1259,6 +1259,12 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 			// traitDeployObserver below) but writes no `kind=build` execution rows,
 			// so that observer no longer fires for anything this loop builds.
 			APITraits: traitSyncService,
+			// ai-agent model access, converged at the same point and for the same
+			// reason: MODEL_* is written onto the ReleaseBinding, which does not
+			// exist until a build has produced a workload. Component ensure runs
+			// before the build, so without this an agent's FIRST deploy comes up
+			// with no model access at all.
+			ModelAccess: componentService,
 		})
 		watchers = append(watchers, run.NewWorkerWatcher(temporalRuntime, runActs))
 		slog.Info("run: temporal worker watcher registered", "hostPort", cfg.Temporal.HostPort)

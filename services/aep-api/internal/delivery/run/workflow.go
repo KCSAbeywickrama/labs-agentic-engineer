@@ -747,3 +747,23 @@ func (l *loop) syncAPITraits(ctx workflow.Context) {
 			"orgID", l.in.OrgID, "projectID", l.in.ProjectID, "error", err)
 	}
 }
+
+// syncModelAccess gives the project's ai-agent components their model access
+// after a cycle's builds go green.
+//
+// Same shape and same reasoning as syncAPITraits, including NOT failing the
+// cycle: the components are already deployed and serving by the time this runs,
+// so a red cycle would add noise without changing what is deployed. The
+// difference is the symptom — an agent without MODEL_* does not serve wrongly,
+// it does not serve at all (503 from /healthz, 500 on every chat), which is
+// loud rather than silent. Convergence is still what fixes it, so the outcome is
+// logged and left to be re-asserted on the next cycle through here.
+func (l *loop) syncModelAccess(ctx workflow.Context) {
+	err := workflow.ExecuteActivity(traitSyncActivityCtx(ctx), (*Activities).SyncModelAccess,
+		ProjectRef{OrgID: l.in.OrgID, ProjectID: l.in.ProjectID}).Get(ctx, nil)
+	if err != nil {
+		workflow.GetLogger(ctx).Error(
+			"ai-agent model access sync did not converge; agents in this project may be deployed without MODEL_* and failing every request",
+			"orgID", l.in.OrgID, "projectID", l.in.ProjectID, "error", err)
+	}
+}

@@ -195,3 +195,26 @@ type Dispatcher interface {
 type APITraitSyncer interface {
 	SyncProjectAPITraits(ctx context.Context, orgID, projectID string) error
 }
+
+// ModelAccessSyncer wires MODEL_ENDPOINT / MODEL_NAME / MODEL_API_KEY onto every
+// ai-agent component's ReleaseBinding in the project.
+// projects.ComponentService satisfies it.
+//
+// It is here for the SAME reason APITraitSyncer is, and the reason is the same
+// sentence: the write target is the ReleaseBinding, which OpenChoreo creates
+// only once a build has produced a workload. Component ensure runs pre-build,
+// so on a FIRST deploy there is no binding and the write silently reaches
+// nothing — the agent then comes up with no model access and 503s on every
+// request. Builds settling green is the first moment there is somewhere to put
+// it.
+//
+// Unlike the trait config, this has no earlier half that does anything for the
+// running pod: model access is granted by COMPONENT TYPE rather than declared as
+// a dependency (ADR-0016), so OpenChoreo does not resolve it while rendering the
+// release the way it resolves `hotel-api` or `hotel-auth`. Nothing else will put
+// these variables there.
+//
+// Idempotent and convergent: re-running re-asserts the same desired state.
+type ModelAccessSyncer interface {
+	SyncProjectModelAccess(ctx context.Context, orgID, projectID string) error
+}

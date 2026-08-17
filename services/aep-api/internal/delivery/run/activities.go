@@ -36,43 +36,46 @@ var errNotConfigured = errors.New("run: activity dependency not configured")
 // over a port — there is no loop logic here, and no decision: the workflow
 // decides, the activity fetches or records.
 type Activities struct {
-	runs       RunStore
-	cycles     CycleStore
-	milestones MilestoneReader
-	prs        PRReader
-	design     DesignReader
-	builds     BuildReader
-	validation ValidationCoordinator
-	dispatcher delivery.MilestoneDispatcher
-	apiTraits  APITraitSyncer
+	runs        RunStore
+	cycles      CycleStore
+	milestones  MilestoneReader
+	prs         PRReader
+	design      DesignReader
+	builds      BuildReader
+	validation  ValidationCoordinator
+	dispatcher  delivery.MilestoneDispatcher
+	apiTraits   APITraitSyncer
+	modelAccess ModelAccessSyncer
 }
 
 // Deps carries the activity adapters. runs/cycles/milestones are required; the
 // rest degrade (see each activity).
 type Deps struct {
-	Runs       RunStore
-	Cycles     CycleStore
-	Milestones MilestoneReader
-	PRs        PRReader
-	Design     DesignReader
-	Builds     BuildReader
-	Validation ValidationCoordinator
-	Dispatcher delivery.MilestoneDispatcher
-	APITraits  APITraitSyncer
+	Runs        RunStore
+	Cycles      CycleStore
+	Milestones  MilestoneReader
+	PRs         PRReader
+	Design      DesignReader
+	Builds      BuildReader
+	Validation  ValidationCoordinator
+	Dispatcher  delivery.MilestoneDispatcher
+	APITraits   APITraitSyncer
+	ModelAccess ModelAccessSyncer
 }
 
 // NewActivities wires the activity adapters.
 func NewActivities(d Deps) *Activities {
 	return &Activities{
-		runs:       d.Runs,
-		cycles:     d.Cycles,
-		milestones: d.Milestones,
-		prs:        d.PRs,
-		design:     d.Design,
-		builds:     d.Builds,
-		validation: d.Validation,
-		dispatcher: d.Dispatcher,
-		apiTraits:  d.APITraits,
+		runs:        d.Runs,
+		cycles:      d.Cycles,
+		milestones:  d.Milestones,
+		prs:         d.PRs,
+		design:      d.Design,
+		builds:      d.Builds,
+		validation:  d.Validation,
+		dispatcher:  d.Dispatcher,
+		apiTraits:   d.APITraits,
+		modelAccess: d.ModelAccess,
 	}
 }
 
@@ -388,6 +391,32 @@ func (a *Activities) SyncAPITraits(ctx context.Context, in ProjectRef) error {
 		// Logged here as well as returned: Temporal retries this activity, and the
 		// per-attempt cause is otherwise only visible in workflow history.
 		slog.ErrorContext(ctx, "run: managed-API trait sync failed",
+			"orgID", in.OrgID, "projectID", in.ProjectID, "error", err)
+		return err
+	}
+	return nil
+}
+
+// SyncModelAccess lands MODEL_ENDPOINT / MODEL_NAME / MODEL_API_KEY on every
+// ai-agent component's ReleaseBinding in the project.
+//
+// Called once per cycle at builds-green, beside SyncAPITraits and for the same
+// reason: that is the earliest point where the ReleaseBinding exists to write
+// to. Component ensure runs before the build, so on a first deploy its write
+// reaches nothing and the agent starts with no model access.
+//
+// Degrades to "nothing to do" when unwired, like the other optional
+// collaborators — and a project with no ai-agent component is a no-op inside
+// the syncer itself, costing no OpenChoreo round trip.
+func (a *Activities) SyncModelAccess(ctx context.Context, in ProjectRef) error {
+	if a.modelAccess == nil {
+		return nil
+	}
+	if err := a.modelAccess.SyncProjectModelAccess(ctx, in.OrgID, in.ProjectID); err != nil {
+		// Logged here as well as returned, same as SyncAPITraits: Temporal
+		// retries this activity, and the per-attempt cause is otherwise only
+		// visible in workflow history.
+		slog.ErrorContext(ctx, "run: ai-agent model access sync failed",
 			"orgID", in.OrgID, "projectID", in.ProjectID, "error", err)
 		return err
 	}
