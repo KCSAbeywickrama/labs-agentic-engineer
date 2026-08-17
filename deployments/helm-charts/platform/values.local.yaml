@@ -45,6 +45,12 @@ webhook:
 openbao:
   addr: "http://openbao.openbao.svc:8200"
 
+# setup-local.sh installs the operator as a standalone Helm release in
+# thunder-app-operator-system. Disable the subchart to avoid a second instance
+# that would race against the standalone one over the same ThunderApplication CRs.
+thunder-app-operator:
+  enabled: false
+
 # k3d's local-path provisioner does not support ReadWriteMany.
 workspaces:
   accessMode: ReadWriteOnce
