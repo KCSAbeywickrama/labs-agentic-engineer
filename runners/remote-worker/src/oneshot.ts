@@ -33,7 +33,8 @@
 
 import { randomUUID } from "node:crypto";
 import { provisionWorkspace } from "./lib/workspace.js";
-import { preferPublisherMcpToken, runClaudeQuery } from "./lib/runner.js";
+import { preferPublisherMcpToken, runClaudeQuery, type McpAuthOpts } from "./lib/runner.js";
+import { staticTokenSource } from "./lib/auth_retry.js";
 import { openTaskLog } from "./lib/logger.js";
 import { isUUID, isSlug } from "./lib/uuid.js";
 import type { DispatchRequest } from "./lib/types.js";
@@ -242,6 +243,8 @@ async function main(): Promise<number> {
         platformUrl: platformURL,
         cycleId: req.taskId,
         bearer: req.bearer,
+        source: ccProvider ?? (req.bearer ? staticTokenSource(req.bearer) : undefined),
+        canRefresh: Boolean(ccProvider),
       });
       console.log(
         `[oneshot] validation context: ${ctx.endpoints.length} deployed endpoint(s) → ${VALIDATION_CONTEXT_FILE}`,
@@ -276,9 +279,16 @@ async function main(): Promise<number> {
   }
 
   const log = openTaskLog(layout.workspace);
+  const mcpAuth: McpAuthOpts | undefined =
+    req.mcpUrl && req.mcpToken
+      ? {
+          source: ccProvider ?? staticTokenSource(req.mcpToken),
+          canRefresh: Boolean(ccProvider),
+        }
+      : undefined;
   let completion: Promise<{ exitCode: number }>;
   try {
-    ({ completion } = runClaudeQuery(req, layout, log, { availableSkillNames, pinnedBodies }));
+    ({ completion } = await runClaudeQuery(req, layout, log, { availableSkillNames, pinnedBodies }, mcpAuth));
   } catch (err) {
     // The mirror carries no workflow skill (see requireWorkflowBodies), so this
     // run has no procedure to follow. Fail the build rather than let the agent

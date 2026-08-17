@@ -67,6 +67,11 @@ export class ClientCredentialsTokenProvider {
     this.fallbackTtlMs = config.fallbackTtlMs ?? DEFAULT_FALLBACK_TTL_MS;
   }
 
+  invalidate(): void {
+    this.cachedToken = undefined;
+    this.expiresAtMs = 0;
+  }
+
   async getToken(): Promise<string> {
     if (this.cachedToken && Date.now() < this.expiresAtMs - this.renewalBufferMs) {
       return this.cachedToken;
