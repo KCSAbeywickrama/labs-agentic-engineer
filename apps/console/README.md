@@ -20,28 +20,19 @@ to `API_PROXY_TARGET`, default `http://localhost:9090`).
 ## How development works
 
 Console features are built in **Claude Code sessions** following a fixed,
-issue-driven cycle — grilling interview → feature issue (durable decisions
-become ADRs) → contract → mocks → UI → ship
-(spec: [`design/development-flow.md`](design/development-flow.md)). Don't
+issue-driven cycle: grilled first, built on mocks, integrated with the
+backend on one feature branch, then tested locally and merged. Don't
 freestyle a feature — start every one with the `/console-feature` skill,
-passing it the idea in plain words:
+which drives that cycle and pauses at each stage. Pass it an idea, or the
+number of an issue that already exists:
 
 ```
 /console-feature I want the project list to show each project's environments
-```
-
-It reads the PRD and ADRs, runs the grilling interview on the idea (the
-`/grill-me` session), then drafts the feature issue from the template with
-the decisions in the body, creates it with `gh` (labels `console` +
-`feature`, upstream repo) once you approve the draft, and asks at each
-following stage whether to continue: graduate ADRs, open the BE handshake
-issue if the contract changes, mark the PRD in-flight, build (contract →
-`make gen` → mocks → UI in mock mode), and ship. Stop at any checkpoint and
-pick the feature back up later with the issue number:
-
-```
 /console-feature 42
 ```
+
+The cycle itself — every stage, rule, and the feature-issue template — is
+specified in [`design/development-flow.md`](design/development-flow.md).
 
 ## Docs map
 
@@ -49,7 +40,7 @@ Start at the top, go down as needed:
 
 | Doc | What it answers |
 |---|---|
-| [`PRD.md`](PRD.md) | What the console does today; what's in flight |
+| [`PRD.md`](PRD.md) | What the console does today (shipped features only) |
 | [`design/development-flow.md`](design/development-flow.md) | How a feature goes from idea to shipped |
 | [`design/design-system.md`](design/design-system.md) | How things should look; which skills to use |
 | [`design/api-guidelines.md`](design/api-guidelines.md) | How to call the BFF; the mock layer; error handling |

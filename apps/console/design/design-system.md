@@ -29,11 +29,12 @@ Never pull raw MUI or another component library alongside Oxygen UI.
   a component.
 - **`dataviz` skill** — read it **before** writing any chart, dashboard, stat
   tile, or visualization code. Non-optional for anything chart-shaped.
-- **`console-feature` skill** — the entry point for a frontend feature: it
-  grills the idea, opens the feature issue from the outcome, and drives the
-  build (see `development-flow.md`). It runs the **`grill-me`** interview for
-  you; reach for `grill-me` directly only to re-grill an existing feature's
-  shape.
+- **`console-feature` skill** — the entry point for a frontend feature, from
+  either an idea or an existing issue number: it grills, records the outcome
+  (new issue body, or a comment on the issue), and drives the build (see
+  `development-flow.md`). It runs the **`grill-me`** interview for you; reach
+  for `grill-me` directly only to re-grill a feature's shape outside the
+  cycle.
 
 ## Conventions
 
