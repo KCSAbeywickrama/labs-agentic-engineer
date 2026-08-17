@@ -57,6 +57,9 @@ jobs:
           - name: console
             dockerfile: apps/console/Dockerfile
             context: .
+          - name: thunder-app-operator
+            dockerfile: deployments/single-cluster/resource-types/thunder-app/operator/Dockerfile
+            context: deployments/single-cluster/resource-types/thunder-app/operator
 
     steps:
       - uses: actions/checkout@v4
@@ -123,28 +126,35 @@ jobs:
               --username ${{ github.actor }} --password-stdin
 
       - name: Package platform chart
+        env:
+          VERSION: ${{ inputs.version }}
         run: |
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]] || { echo "invalid version: $VERSION"; exit 1; }
+
           helm dependency update deployments/helm-charts/platform
           cp -r deployments/helm-charts/platform /tmp/platform
 
-          yq -i '.version = "${{ inputs.version }}"' /tmp/platform/Chart.yaml
-          yq -i '.appVersion = "${{ inputs.version }}"' /tmp/platform/Chart.yaml
-          yq -i '.aepApi.image.repository = "${{ env.IMAGE_PREFIX }}/aep-api"' /tmp/platform/values.yaml
-          yq -i '.aepApi.image.tag = "${{ inputs.version }}"' /tmp/platform/values.yaml
+          yq -i '.version = strenv(VERSION)' /tmp/platform/Chart.yaml
+          yq -i '.appVersion = strenv(VERSION)' /tmp/platform/Chart.yaml
+          yq -i '.aepApi.image.repository = strenv(IMAGE_PREFIX) + "/aep-api"' /tmp/platform/values.yaml
+          yq -i '.aepApi.image.tag = strenv(VERSION)' /tmp/platform/values.yaml
           yq -i '.aepApi.image.pullPolicy = "IfNotPresent"' /tmp/platform/values.yaml
-          yq -i '.aepAgents.image.repository = "${{ env.IMAGE_PREFIX }}/agents"' /tmp/platform/values.yaml
-          yq -i '.aepAgents.image.tag = "${{ inputs.version }}"' /tmp/platform/values.yaml
+          yq -i '.aepAgents.image.repository = strenv(IMAGE_PREFIX) + "/agents"' /tmp/platform/values.yaml
+          yq -i '.aepAgents.image.tag = strenv(VERSION)' /tmp/platform/values.yaml
           yq -i '.aepAgents.image.pullPolicy = "IfNotPresent"' /tmp/platform/values.yaml
-          yq -i '.collab.image.repository = "${{ env.IMAGE_PREFIX }}/collab"' /tmp/platform/values.yaml
-          yq -i '.collab.image.tag = "${{ inputs.version }}"' /tmp/platform/values.yaml
+          yq -i '.collab.image.repository = strenv(IMAGE_PREFIX) + "/collab"' /tmp/platform/values.yaml
+          yq -i '.collab.image.tag = strenv(VERSION)' /tmp/platform/values.yaml
           yq -i '.collab.image.pullPolicy = "IfNotPresent"' /tmp/platform/values.yaml
-          yq -i '.aepMcpServer.image.repository = "${{ env.IMAGE_PREFIX }}/aep-mcp-server"' /tmp/platform/values.yaml
-          yq -i '.aepMcpServer.image.tag = "${{ inputs.version }}"' /tmp/platform/values.yaml
+          yq -i '.aepMcpServer.image.repository = strenv(IMAGE_PREFIX) + "/aep-mcp-server"' /tmp/platform/values.yaml
+          yq -i '.aepMcpServer.image.tag = strenv(VERSION)' /tmp/platform/values.yaml
           yq -i '.aepMcpServer.image.pullPolicy = "IfNotPresent"' /tmp/platform/values.yaml
-          yq -i '.console.image.repository = "${{ env.IMAGE_PREFIX }}/console"' /tmp/platform/values.yaml
-          yq -i '.console.image.tag = "${{ inputs.version }}"' /tmp/platform/values.yaml
+          yq -i '.console.image.repository = strenv(IMAGE_PREFIX) + "/console"' /tmp/platform/values.yaml
+          yq -i '.console.image.tag = strenv(VERSION)' /tmp/platform/values.yaml
           yq -i '.console.image.pullPolicy = "IfNotPresent"' /tmp/platform/values.yaml
-          yq -i '.codingAgentRunner.image = "${{ env.IMAGE_PREFIX }}/remote-worker:${{ inputs.version }}"' /tmp/platform/values.yaml
+          yq -i '.codingAgentRunner.image = strenv(IMAGE_PREFIX) + "/remote-worker:" + strenv(VERSION)' /tmp/platform/values.yaml
+          yq -i '."thunder-app-operator".image.repository = strenv(IMAGE_PREFIX) + "/thunder-app-operator"' /tmp/platform/values.yaml
+          yq -i '."thunder-app-operator".image.tag = strenv(VERSION)' /tmp/platform/values.yaml
+          yq -i '."thunder-app-operator".image.pullPolicy = "IfNotPresent"' /tmp/platform/values.yaml
 
           helm package /tmp/platform --destination /tmp/charts
 
@@ -188,7 +198,8 @@ jobs:
           - \`ghcr.io/wso2/aep/collab:${{ inputs.version }}\`
           - \`ghcr.io/wso2/aep/aep-mcp-server:${{ inputs.version }}\`
           - \`ghcr.io/wso2/aep/remote-worker:${{ inputs.version }}\`
-          - \`ghcr.io/wso2/aep/console:${{ inputs.version }}\`"
+          - \`ghcr.io/wso2/aep/console:${{ inputs.version }}\`
+          - \`ghcr.io/wso2/aep/thunder-app-operator:${{ inputs.version }}\`"
 
   # ─── CTL: build CLI binaries ─────────────────────────────────────────────────
   build-ctl-binaries:
