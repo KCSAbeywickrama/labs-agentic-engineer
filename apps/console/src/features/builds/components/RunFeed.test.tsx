@@ -82,6 +82,76 @@ describe("RunFeed", () => {
     expect(screen.getByText("fix")).toBeInTheDocument();
   });
 
+  // The newest cycle LEADS. It is the one still being written, and a reader who opened
+  // the feed should not scroll past however much history the run accumulated to reach
+  // it. The numbers still count from the OLDEST, so they run down the page — that is
+  // what keeps a box's name stable when the render order flips.
+  it("renders the newest cycle first, numbered from the oldest", () => {
+    mockCycles = [section("c1", "coding", ["main"]), section("c2", "fix", ["main"])];
+    render(<RunFeed projectName="acme" runId="run-1" />);
+    // The ORDER is the assertion: both labels are present whichever end the newest is
+    // drawn at, which is why the tests around this one could not have caught the flip.
+    expect(screen.getAllByText(/^Cycle \d+$/).map((el) => el.textContent)).toEqual([
+      "Cycle 2",
+      "Cycle 1",
+    ]);
+  });
+
+  it("opens the newest cycle and leaves the earlier ones collapsed", () => {
+    mockCycles = [section("c1", "coding", ["main"]), section("c2", "fix", ["main"])];
+    render(<RunFeed projectName="acme" runId="run-1" />);
+    expect(screen.getByRole("button", { name: /Cycle 2/ })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: /Cycle 1/ })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+  });
+
+  // A surface showing one feed per run would otherwise open one box per feed. Only the
+  // newest run's feed may open its newest cycle; every earlier attempt is a record.
+  it("opens nothing when it is not the newest feed on the page", () => {
+    mockCycles = [
+      section("c1", "validation", ["main"]),
+      section("c2", "validation", ["main"]),
+    ];
+    render(<RunFeed projectName="acme" runId="run-1" expandNewest={false} />);
+    const summaries = screen.getAllByRole("button", { name: /Cycle \d/ });
+    expect(summaries).toHaveLength(2);
+    for (const summary of summaries) {
+      expect(summary).toHaveAttribute("aria-expanded", "false");
+    }
+  });
+
+  // The stream keeps moving which cycle is newest, but a reader reading an earlier
+  // one must not have it yanked shut underneath them.
+  it("lets the reader open an earlier cycle instead of the newest", () => {
+    mockCycles = [section("c1", "coding", ["main"]), section("c2", "fix", ["main"])];
+    render(<RunFeed projectName="acme" runId="run-1" />);
+    fireEvent.click(screen.getByRole("button", { name: /Cycle 1/ }));
+    expect(screen.getByRole("button", { name: /Cycle 1/ })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: /Cycle 2/ })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+  });
+
+  // Closing the open one leaves the feed closed rather than snapping back to the
+  // newest, which is what a naive "follow the newest" default re-derives.
+  it("stays closed when the reader shuts the open cycle", () => {
+    mockCycles = [section("c1", "coding", ["main"]), section("c2", "fix", ["main"])];
+    render(<RunFeed projectName="acme" runId="run-1" />);
+    fireEvent.click(screen.getByRole("button", { name: /Cycle 2/ }));
+    for (const summary of screen.getAllByRole("button", { name: /Cycle \d/ })) {
+      expect(summary).toHaveAttribute("aria-expanded", "false");
+    }
+  });
+
   it("stamps a subagent line and leaves the main agent's unstamped", () => {
     mockCycles = [section("c1", "coding", ["main", "subagent"])];
     render(<RunFeed projectName="acme" runId="run-1" />);

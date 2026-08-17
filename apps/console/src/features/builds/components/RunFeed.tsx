@@ -16,6 +16,7 @@
  * under the License.
  */
 
+import { useState } from "react";
 import {
   Accordion,
   AccordionDetails,
@@ -37,22 +38,34 @@ import { useRunProgress, type RunProgressCycle } from "../hooks/useRunProgress";
 // gets its own collapsible section (see AgentLogLines, shared with the task
 // log) — several run at once and their lines arrive interleaved, so read flat
 // they would look like one agent contradicting itself.
+//
+// Sections read NEWEST FIRST. The cycle a reader came to watch is the newest one,
+// so it leads rather than sitting below however much history the run accumulated.
+// The LINES inside a section stay oldest-first — a log read upwards is unreadable,
+// and that is a different tier of ordering from the boxes holding them.
 
 function CycleSection({
   section,
-  index,
-  defaultExpanded,
+  ordinal,
+  expanded,
+  onToggle,
 }: {
   section: RunProgressCycle;
-  index: number;
-  defaultExpanded: boolean;
+  /** The cycle's CHRONOLOGICAL position, counted from the oldest — never its
+   *  position on screen, which is reversed. */
+  ordinal: number;
+  expanded: boolean;
+  onToggle: (open: boolean) => void;
 }) {
   const { cycle, lines } = section;
   return (
     <Accordion
       disableGutters
       elevation={0}
-      defaultExpanded={defaultExpanded}
+      expanded={expanded}
+      onChange={(_, open) => {
+        onToggle(open);
+      }}
       sx={{ "&:before": { display: "none" } }}
     >
       <AccordionSummary expandIcon={<ChevronDown size={16} />}>
@@ -64,7 +77,7 @@ function CycleSection({
           spacing={1}
           sx={{ alignItems: "center", width: "100%", pr: 1 }}
         >
-          <Typography variant="subtitle2">Cycle {index + 1}</Typography>
+          <Typography variant="subtitle2">Cycle {ordinal}</Typography>
           <Chip label={cycle.kind} size="small" variant="outlined" />
           {cycle.attempts > 1 && (
             <Typography variant="caption" color="text.secondary">
@@ -91,7 +104,7 @@ function CycleSection({
               kind="pull"
               number={cycle.prNumber}
               url={cycle.prUrl}
-              name={`Cycle ${index + 1} pull request`}
+              name={`Cycle ${ordinal} pull request`}
               tooltip="Open this cycle's pull request"
               // The summary's whole surface toggles the section — without this,
               // opening the pull request also collapses the log being read.
@@ -118,6 +131,7 @@ export function RunFeed({
   projectName,
   runId,
   cycleKinds,
+  expandNewest = true,
 }: {
   projectName: string;
   runId: string;
@@ -125,6 +139,10 @@ export function RunFeed({
    *  filter is presentational, for a surface that owns one phase of the loop
    *  (the deployment surface owns validation). Omitted = every cycle. */
   cycleKinds?: readonly string[];
+  /** Whether this feed may open its newest section. A page showing several feeds
+   *  passes `false` for the historical ones, so exactly ONE box is open across the
+   *  whole page rather than one per feed. */
+  expandNewest?: boolean;
 }) {
   const all = useRunProgress(projectName, runId);
   const feed = cycleKinds
@@ -133,6 +151,23 @@ export function RunFeed({
         cycles: all.cycles.filter((c) => cycleKinds.includes(c.cycle.kind)),
       }
     : all;
+  // Reversed for RENDER only. `feed.cycles` stays oldest-first, which is the order
+  // the wire promises (the contract documents cycles as "Oldest first" and the SSE
+  // walks them that way), and the ordinals below are still counted from it.
+  const shown = [...feed.cycles].reverse();
+
+  // Which section is open, CONTROLLED. `defaultExpanded` cannot express this: it is
+  // read once at mount, so a cycle arriving mid-stream opened alongside the one
+  // already open — two logs expanded, plus MUI's warning about an uncontrolled
+  // Accordion changing its default. Three meanings, one state:
+  //   undefined — follow the newest cycle, which the stream keeps moving
+  //   null      — the reader closed it and wants nothing open
+  //   string    — the reader picked that section
+  // The reader's choice outranks the stream, the same way the task log releases its
+  // bottom-pin once the reader scrolls up.
+  const [chosen, setChosen] = useState<string | null | undefined>(undefined);
+  const followed = expandNewest ? (shown[0]?.cycle.id ?? null) : null;
+  const openId = chosen === undefined ? followed : chosen;
 
   let tail: string | undefined;
   if (feed.phase === "connecting") {
@@ -150,16 +185,22 @@ export function RunFeed({
           No cycle output yet — the run's first agent has not written a line.
         </Typography>
       ) : (
-        feed.cycles.map((section, i) => (
+        shown.map((section, i) => (
           <CycleSection
             key={section.cycle.id}
             section={section}
-            // Numbered within what is shown; a filtered feed owns one phase and
-            // its section is "Cycle 1" of that phase, not of the whole run.
-            index={i}
-            // The newest cycle is what the user came to watch; older ones stay
-            // collapsed so a long run does not open as a wall of log.
-            defaultExpanded={i === feed.cycles.length - 1}
+            // Counted from the OLDEST, so the stack can be reversed without
+            // renumbering the boxes — cycle 1 is the run's first, wherever it is
+            // drawn. Numbered within what is shown, too: a filtered feed owns one
+            // phase and its section is "Cycle 1" of that phase, not of the whole run.
+            ordinal={feed.cycles.length - i}
+            // The newest cycle is what the user came to watch, and it now LEADS the
+            // stack instead of trailing it; older ones stay collapsed so a long run
+            // does not open as a wall of log.
+            expanded={openId === section.cycle.id}
+            onToggle={(open) => {
+              setChosen(open ? section.cycle.id : null);
+            }}
           />
         ))
       )}

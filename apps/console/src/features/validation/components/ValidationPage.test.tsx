@@ -34,9 +34,26 @@ vi.mock("@tanstack/react-router", () => ({
 // The live log is the RUN feed filtered to the validation cycle, and it opens
 // an SSE stream. Stub it to a marker so we can assert which lifecycle states
 // show the log vs. the report, without a stream.
+// The run it was pointed at and whether it may open a box are attributes rather than
+// rendered text, so the page's WIRING is assertable without a stream: which run leads
+// and which feed owns the one open log are decisions this page makes, not RunFeed.
 vi.mock("../../builds/components/RunFeed", () => ({
-  RunFeed: ({ cycleKinds }: { cycleKinds?: readonly string[] }) => (
-    <div data-testid="run-feed">{(cycleKinds ?? []).join(",")}</div>
+  RunFeed: ({
+    runId,
+    cycleKinds,
+    expandNewest,
+  }: {
+    runId: string;
+    cycleKinds?: readonly string[];
+    expandNewest?: boolean;
+  }) => (
+    <div
+      data-testid="run-feed"
+      data-run-id={runId}
+      data-expand-newest={String(expandNewest)}
+    >
+      {(cycleKinds ?? []).join(",")}
+    </div>
   ),
 }));
 
@@ -377,6 +394,69 @@ describe("ValidationPage across a milestone's runs", () => {
     renderPage(undefined);
 
     expect(screen.getAllByTestId("run-feed")).toHaveLength(1);
+  });
+
+  // The newest run leads, and the line between attempts is drawn at the RUN boundary —
+  // where the Builds page draws its own — so the caption separates the run being read
+  // from the ones before it rather than sitting above everything.
+  it("draws the newest validating run first, with the earlier runs captioned below it", () => {
+    mockValidation = "running";
+    mockRun = run({ cycles: [validationCycle] });
+    mockNewerRuns = [
+      {
+        ...run({ cycles: [validationCycle] }),
+        id: "run-revalidate",
+        origin: "revalidate",
+      },
+    ];
+
+    renderPage(undefined);
+
+    // The whole arrangement in one assertion: presence alone would pass whichever
+    // end the newest run were drawn at, which is the bug this replaces.
+    const stack = screen.getAllByTestId("run-feed")[0]?.parentElement;
+    const arrangement = Array.from(stack?.children ?? []).map((el) =>
+      el.getAttribute("data-testid") === "run-feed"
+        ? el.getAttribute("data-run-id")
+        : el.textContent,
+    );
+    expect(arrangement).toEqual([
+      "run-revalidate",
+      "EARLIER VALIDATION RUNS",
+      "run-1",
+    ]);
+  });
+
+  // Exactly one log is open on the page, not one per feed: a settled attempt is a
+  // record, and only the newest run's is still being written.
+  it("lets only the newest run's feed open a log", () => {
+    mockValidation = "running";
+    mockRun = run({ cycles: [validationCycle] });
+    mockNewerRuns = [
+      {
+        ...run({ cycles: [validationCycle] }),
+        id: "run-revalidate",
+        origin: "revalidate",
+      },
+    ];
+
+    renderPage(undefined);
+
+    expect(
+      screen.getAllByTestId("run-feed").map((f) => f.getAttribute("data-expand-newest")),
+    ).toEqual(["true", "false"]);
+  });
+
+  // The ordinary case: one run validated the version, so there is no history to
+  // separate and a caption would announce a boundary that does not exist.
+  it("draws no caption when a single run validated the version", () => {
+    mockValidation = "running";
+    mockRun = run({ cycles: [validationCycle] });
+
+    renderPage(undefined);
+
+    expect(screen.getAllByTestId("run-feed")).toHaveLength(1);
+    expect(screen.queryByText("EARLIER VALIDATION RUNS")).not.toBeInTheDocument();
   });
 });
 

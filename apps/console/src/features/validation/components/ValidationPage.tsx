@@ -16,10 +16,18 @@
  * under the License.
  */
 
-import { Alert, alpha, Box, Button, CircularProgress, Stack } from "@wso2/oxygen-ui";
+import {
+  Alert,
+  alpha,
+  Box,
+  Button,
+  CircularProgress,
+  Stack,
+  Typography,
+} from "@wso2/oxygen-ui";
 import { FileText, ScrollText, X } from "@wso2/oxygen-ui-icons-react";
 import { Link } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import {
   parseValidationCriteria,
   parseValidationReport,
@@ -60,6 +68,36 @@ import { VerdictTile } from "./VerdictTile";
 // The validation cycle is the phase of the run this page owns; the rest of the
 // loop is the Builds page's story.
 const VALIDATION_CYCLE = ["validation"] as const;
+
+// Hoisted rather than written inline: an sx literal is a new object every render,
+// which emotion has to re-serialize each time.
+const CAPTION_SX = {
+  display: "block",
+  mb: 1,
+  fontWeight: 700,
+  letterSpacing: "0.08em",
+  color: "text.secondary",
+} as const;
+
+/**
+ * The line over the version's earlier validation runs.
+ *
+ * Drawn at the RUN boundary rather than between individual attempts, which is where
+ * the Builds page draws its own ("EARLIER RUNS OF V1", `RunHistoryList`). That keeps
+ * the caption on a boundary this page already owns — between feeds — so no feed has
+ * to know what is rendered above it.
+ *
+ * Local, and matching the Builds page's captions by hand: three copies of this markup
+ * now exist, and they should collapse into a shared component once a fourth caller
+ * appears rather than dragging two Builds-page files into a validation change.
+ */
+function EarlierRunsCaption() {
+  return (
+    <Typography variant="caption" sx={CAPTION_SX}>
+      EARLIER VALIDATION RUNS
+    </Typography>
+  );
+}
 
 // StageTone → StatusTone. The two unions differ only in `ghost`, which the shared
 // validation mapper never returns; it is mapped for exhaustiveness only.
@@ -180,13 +218,19 @@ export function ValidationPage({
   // and the deployments board cannot disagree about the same run.
   const state = validationState(deploy?.validation ?? "", rawVerdict);
   const verdict = validationView(state);
-  // Every run that actually produced an attempt, OLDEST first — the version's
-  // chronology. Separate from `run` above because a run can own the question
-  // without having answered it yet (a revalidation mid-flight), and because the
-  // attempts that matter may span several runs.
-  const attemptRuns = runList
-    .filter((r) => (r.cycles ?? []).some((c) => c.kind === "validation"))
-    .reverse();
+  // Every run that actually produced an attempt, held in BOTH orders because the page
+  // needs both and confusing them would be a silent bug. Separate from `run` above
+  // because a run can own the question without having answered it yet (a revalidation
+  // mid-flight), and because the attempts that matter may span several runs.
+  //
+  // Newest first, exactly as list-build-runs answers: the order the logs are DRAWN in,
+  // so the attempt a reader came for leads the page.
+  const feedRuns = runList.filter((r) =>
+    (r.cycles ?? []).some((c) => c.kind === "validation"),
+  );
+  // Oldest first — the version's chronology. Every derivation below reads it through
+  // `.at(-1)` to mean "the latest attempt", so this order is load-bearing.
+  const attemptRuns = [...feedRuns].reverse();
   // Every attempt across the whole version, oldest first. The LAST is what the page
   // is about — not the first, and not the newest run's. A version can be judged more
   // than once (a failed attempt is repaired and re-validated; a revalidation asks
@@ -468,8 +512,11 @@ export function ValidationPage({
   // whatever spacing its children happened to carry: the report body got 24px from
   // ValidationView's own padding, the log feed got none, and the tile inset itself
   // — so the log sat 24px outside the tile and butted straight against it.
-  // One feed per validating run, OLDEST first, so the version reads as a
-  // chronology of attempts rather than only its latest.
+  // One feed per validating run, NEWEST first. The newest attempt is the one a reader
+  // opened this view for — it is the one still being written — so it leads rather than
+  // sitting below however much history the version accumulated. The version still
+  // reads as a chronology: the boxes are numbered from the oldest, so the numbers
+  // count down the page.
   //
   // A feed per run rather than one stream over the milestone because the progress
   // endpoint is run-keyed, and the cost of that is near zero here: a settled run's
@@ -478,13 +525,21 @@ export function ValidationPage({
   // leaving at most ONE connection held open, since only the newest run can be live.
   const body = showLogs ? (
     <Stack spacing={2}>
-      {attemptRuns.map((r) => (
-        <RunFeed
-          key={r.id}
-          projectName={projectName}
-          runId={r.id}
-          cycleKinds={VALIDATION_CYCLE}
-        />
+      {feedRuns.map((r, i) => (
+        <Fragment key={r.id}>
+          {/* Before the SECOND feed, so the caption separates the run being read
+              from the runs that came before it. Never rendered for a version
+              validated by a single run, which is the ordinary case. */}
+          {i === 1 && <EarlierRunsCaption />}
+          <RunFeed
+            projectName={projectName}
+            runId={r.id}
+            cycleKinds={VALIDATION_CYCLE}
+            // Only the newest run may open a box, so exactly one log is open on the
+            // page rather than one per feed — and it is the one still being written.
+            expandNewest={i === 0}
+          />
+        </Fragment>
       ))}
     </Stack>
   ) : criteria.isPending || (!criteria.isError && !criteria.data) ? (
