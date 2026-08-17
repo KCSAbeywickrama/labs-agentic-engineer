@@ -28,82 +28,6 @@ import (
 	"github.com/wso2/aep/aep-api/internal/spec/artifactstest"
 )
 
-// The model-access SecretReference must land in the SAME org namespace every
-// other SecretReference for that org already lives in. That namespace is
-// derived from the org's Thunder UUID, never from the OpenChoreo org handle —
-// deriving it from the handle produced `wc-default-…`, a namespace that does
-// not exist, so the create 500'd and agents deployed with no MODEL_*.
-//
-// Reading it out of the vault key the org's own row carries cannot disagree
-// with where the key actually lives, in local or cloud.
-func TestOrgNamespaceFromVaultKey(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name    string
-		kvPath  string
-		want    string
-		wantErr bool
-	}{
-		{
-			name:   "reads the org namespace a real key carries",
-			kvPath: "user-app-secrets/wc-019f40d1-b04b186b/anthropic-secrets",
-			want:   "wc-019f40d1-b04b186b",
-		},
-		{
-			name:   "tolerates a leading slash",
-			kvPath: "/user-app-secrets/wc-019f40d1-b04b186b/anthropic-secrets",
-			want:   "wc-019f40d1-b04b186b",
-		},
-		{
-			name:    "rejects a key with no namespace segment",
-			kvPath:  "user-app-secrets/anthropic-secrets",
-			wantErr: true,
-		},
-		{
-			name:    "rejects a key under a different prefix",
-			kvPath:  "some-other-store/wc-019f40d1-b04b186b/anthropic-secrets",
-			wantErr: true,
-		},
-		{
-			name:    "rejects an empty key",
-			kvPath:  "",
-			wantErr: true,
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			got, err := orgNamespaceFromVaultKey(tc.kvPath)
-			if tc.wantErr {
-				if err == nil {
-					t.Fatalf("orgNamespaceFromVaultKey(%q) = %q, nil; want an error", tc.kvPath, got)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("orgNamespaceFromVaultKey(%q): unexpected error: %v", tc.kvPath, err)
-			}
-			if got != tc.want {
-				t.Errorf("orgNamespaceFromVaultKey(%q) = %q; want %q", tc.kvPath, got, tc.want)
-			}
-		})
-	}
-}
-
-// The handle-derived namespace the bug produced must never be what we compute.
-func TestOrgNamespaceFromVaultKey_isNotHandleDerived(t *testing.T) {
-	t.Parallel()
-	got, err := orgNamespaceFromVaultKey("user-app-secrets/wc-019f40d1-b04b186b/anthropic-secrets")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got == "wc-default-37a8eec1" {
-		t.Fatalf("computed the handle-derived namespace %q — that namespace does not exist", got)
-	}
-}
-
 // --- SyncProjectModelAccess (the builds-green sweep) --------------------------
 
 // fakeKeyResolver serves a canned org key triplet.
@@ -220,4 +144,68 @@ func TestSyncProjectModelAccess_NoAgentIsANoOp(t *testing.T) {
 	if calls != 0 {
 		t.Errorf("a design with no ai-agent must make no env write, got %d", calls)
 	}
+}
+
+// The SecretReference must be authored in the ReleaseBinding's namespace —
+// ocOrgID, passed through unmodified — never a namespace derived from the vault
+// path. secretsprovider.SecretLocation.CPNamespace states the rule, and this
+// file got it wrong twice in opposite directions: `wc-default-…` (did not
+// exist, create 500'd) and then the vault key's segment 1, `wc-019f40d1-…`
+// (existed, create SUCCEEDED, and the ReleaseBinding in `default` could not see
+// it — OpenChoreo failed the whole render with `SecretReference
+// "ai-agent-model-access" not found` and the agent never got MODEL_*).
+//
+// The second failure is why this test asserts on the namespace rather than on
+// the call succeeding: a create that succeeds proves the namespace EXISTS, not
+// that the consumer can see it.
+func TestUpsertModelAccessSecretReference_UsesTheReleaseBindingNamespace(t *testing.T) {
+	var gotNS []string
+	sr := &namespaceCapturingSecretRefClient{seen: &gotNS}
+	oc := &ocmocks.ComponentClientMock{
+		UpdateComponentWorkflowEnvVarsFunc: func(context.Context, string, string, string, []openchoreo.WorkflowEnvVarRef) error {
+			return nil
+		},
+	}
+	files := map[string]string{
+		spec.DesignRootFile:                  "# Overview\n",
+		"components/hotel-agent/design.json": agentDesignJSON("hotel-agent"),
+	}
+	svc := NewComponentService(oc, nil, modelAccessStore(files), nil, nil,
+		fakeKeyResolver{triplet: organization.SecretRefTriplet{
+			// The vault path's org segment is DELIBERATELY different from the
+			// control-plane namespace here — that difference is the bug.
+			KVPath:   "user-app-secrets/wc-019f40d1-b04b186b/anthropic-secrets",
+			Property: "api-key",
+		}}, sr)
+
+	if err := svc.SyncProjectModelAccess(context.Background(), "default", "hotels"); err != nil {
+		t.Fatalf("SyncProjectModelAccess: %v", err)
+	}
+	for _, ns := range gotNS {
+		if ns != "default" {
+			t.Fatalf("SecretReference authored in %q, want the ReleaseBinding's namespace %q — a vault-path-derived namespace makes the CR invisible to its consumer", ns, "default")
+		}
+	}
+	if len(gotNS) == 0 {
+		t.Fatal("no SecretReference upsert attempted")
+	}
+}
+
+// namespaceCapturingSecretRefClient records the namespace of every upsert.
+type namespaceCapturingSecretRefClient struct{ seen *[]string }
+
+func (c *namespaceCapturingSecretRefClient) GetSecretReference(_ context.Context, ns, _ string) (*secretmanagersvc.SecretReference, error) {
+	*c.seen = append(*c.seen, ns)
+	return nil, secretmanagersvc.ErrNotFound
+}
+func (c *namespaceCapturingSecretRefClient) CreateSecretReference(_ context.Context, ns string, _ secretmanagersvc.CreateSecretReferenceRequest) (*secretmanagersvc.SecretReference, error) {
+	*c.seen = append(*c.seen, ns)
+	return &secretmanagersvc.SecretReference{}, nil
+}
+func (c *namespaceCapturingSecretRefClient) UpdateSecretReference(_ context.Context, ns, _ string, _ secretmanagersvc.CreateSecretReferenceRequest) (*secretmanagersvc.SecretReference, error) {
+	*c.seen = append(*c.seen, ns)
+	return &secretmanagersvc.SecretReference{}, nil
+}
+func (c *namespaceCapturingSecretRefClient) DeleteSecretReference(context.Context, string, string) error {
+	return nil
 }
