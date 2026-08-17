@@ -240,15 +240,21 @@ order. The prototype's top-level control is the flow picker, so a wireframe set
 without flows offers the reviewer no way to ask for the admin's journey.
 
 Declare one `flow` block per role or journey named in `design.md`, listing that
-role's screens in walkthrough order, **entry screen first**:
+role's screens in walkthrough order, **entry screen first**. Name the flow for
+its **task** ("Approval queue", "Log a risk"), and carry the persona on a
+`role` line — not in the name:
 
 ```
-flow "Admin path"
+flow "Approval queue"
+  role "Admin"
+  description "An admin reviews queued items and audits the outcome"
   Login
   AdminQueue
   AuditDetail
 
-flow "Customer path"
+flow "My orders"
+  role "Customer"
+  description "A signed-in customer checks a placed order"
   Login          // a reference, not a copy — one screen, two memberships
   Orders
 ```
@@ -258,6 +264,11 @@ flow "Customer path"
 - The name is quoted and must be unique — declaring one flow twice rejects the
   write.
 - A name that matches no `screen` rejects the write with its line number.
+- `role "…"` names the persona who walks the flow; `description "…"` says what
+  the journey is, like a screen's description says what the view is. Both are
+  keyword lines inside the block, at most one of each (a duplicate rejects the
+  write). Give every role-serving flow its `role`; a genuinely role-less
+  journey (a public checkout) may omit it.
 - A screen in no flow is allowed, but ask yourself who reaches it.
 
 Syntax is validated at write time: an unknown keyword, a misplaced
@@ -456,24 +467,29 @@ screen RiskDetail "The owner tracks remediation for the risks they own"
       text "2h ago — A. Chen closed CVE-2026-1"
       text "1d ago — M. Diaz started cert rotation"
 
-flow "Manager path"
+flow "Approval queue"
+  role "Manager"
+  description "A manager triages queued risks and reviews each in detail"
   RiskQueue
   QueueRiskDetail
 
-flow "Owner path"
+flow "Log a risk"
+  role "Risk owner"
+  description "An owner records a new risk and tracks its remediation"
   MyRisks
   NewRisk
   RiskDetail
 ```
 
-The two `flow` blocks close the file: each lists only its own role's screens,
-entry screen first, and each screen is reachable by clicking from somewhere in
-its own flow — `RiskQueue`'s "Review next" CTA and its table both lead to
-`QueueRiskDetail`; `MyRisks`'s
-button leads to `NewRisk` and its table leads to `RiskDetail`. They are what
-the prototype's flow picker offers the reviewer — "Manager path" walks
-queue-then-escalate, "Owner path" walks log-then-remediate — and neither flow
-references a screen the other role can't reach.
+The two `flow` blocks close the file: each names its task, carries its `role`
+and a one-line `description`, and lists only its own role's screens, entry
+screen first. Each screen is reachable by clicking from somewhere in its own
+flow — `RiskQueue`'s "Review next" CTA and its table both lead to
+`QueueRiskDetail`; `MyRisks`'s button leads to `NewRisk` and its table leads to
+`RiskDetail`. They are what the prototype's flow picker offers the reviewer —
+the Manager's "Approval queue" walks queue-then-escalate, the Risk owner's
+"Log a risk" walks log-then-remediate — and neither flow references a screen
+the other role can't reach.
 
 Checklist before finishing a wireframe file:
 

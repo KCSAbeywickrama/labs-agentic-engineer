@@ -203,3 +203,103 @@ screen Dashboard "Home"
     "no screen may gain a flow label",
   );
 });
+
+test("role and description keyword lines attach to the flow", () => {
+  const m = model(`screen MyRisks "Owner: my risks"
+screen NewRisk "Owner: log a risk"
+
+flow "Log a risk"
+  role "Risk owner"
+  description "An owner records a new risk and tracks it"
+  MyRisks
+  NewRisk
+`);
+  assert.equal(m.flows[0]!.role, "Risk owner");
+  assert.equal(m.flows[0]!.description, "An owner records a new risk and tracks it");
+  assert.deepEqual(m.flows[0]!.screens, ["MyRisks", "NewRisk"]);
+});
+
+test("role and description are optional and independent", () => {
+  const m = model(`screen A "a"
+screen B "b"
+
+flow "First"
+  role "Admin"
+  A
+
+flow "Second"
+  description "No role declared"
+  B
+
+flow "Third"
+  A
+  B
+`);
+  assert.equal(m.flows[0]!.role, "Admin");
+  assert.equal(m.flows[0]!.description, undefined);
+  assert.equal(m.flows[1]!.role, undefined);
+  assert.equal(m.flows[1]!.description, "No role declared");
+  assert.equal(m.flows[2]!.role, undefined);
+  assert.equal(m.flows[2]!.description, undefined);
+});
+
+test("keyword lines may appear after screen references", () => {
+  const m = model(`screen A "a"
+
+flow "First"
+  A
+  role "Admin"
+`);
+  assert.equal(m.flows[0]!.role, "Admin");
+  assert.deepEqual(m.flows[0]!.screens, ["A"]);
+});
+
+test("a duplicate role line is rejected with its line number", () => {
+  const errs = validateWireframeSyntax(`screen A "a"
+
+flow "First"
+  role "Admin"
+  role "Owner"
+  A
+`);
+  assert.equal(errs.length, 1);
+  assert.match(errs[0]!, /^line 5: /);
+  assert.match(errs[0]!, /duplicate role/);
+});
+
+test("a duplicate description line is rejected with its line number", () => {
+  const errs = validateWireframeSyntax(`screen A "a"
+
+flow "First"
+  description "one"
+  description "two"
+  A
+`);
+  assert.equal(errs.length, 1);
+  assert.match(errs[0]!, /^line 5: /);
+  assert.match(errs[0]!, /duplicate description/);
+});
+
+test("a mistyped keyword falls through to the unknown-flow-line error", () => {
+  const errs = validateWireframeSyntax(`screen A "a"
+
+flow "First"
+  descripton "typo"
+  A
+`);
+  assert.equal(errs.length, 1);
+  assert.match(errs[0]!, /^line 4: /);
+  assert.match(errs[0]!, /unknown flow line/);
+});
+
+test("a screen literally named role still resolves as a bare reference", () => {
+  const m = model(`screen role "An unfortunate name"
+screen A "a"
+
+flow "First"
+  role
+  A
+`);
+  assert.deepEqual(m.flows[0]!.screens, ["role", "A"]);
+  assert.equal(m.flows[0]!.role, undefined);
+});

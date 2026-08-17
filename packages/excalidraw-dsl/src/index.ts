@@ -114,6 +114,10 @@ interface WireframeFlow {
  */
 interface WireframeNamedFlow {
   name: string;
+  /** Optional `role "…"` keyword line: the persona who walks this flow. */
+  role?: string;
+  /** Optional `description "…"` keyword line, mirroring a screen's subtitle. */
+  description?: string;
   screens: string[];
 }
 
@@ -299,6 +303,10 @@ export interface PrototypeScreen {
  */
 export interface PrototypeFlow {
   name: string;
+  /** The persona who walks this flow, from the `role "…"` keyword line. */
+  role?: string;
+  /** What the journey is, from the `description "…"` keyword line. */
+  description?: string;
   screens: string[];
 }
 
@@ -363,6 +371,8 @@ export function tryDslToPrototype(
     });
     const flows: PrototypeFlow[] = ast.namedFlows.map((f) => ({
       name: f.name,
+      ...(f.role !== undefined ? { role: f.role } : {}),
+      ...(f.description !== undefined ? { description: f.description } : {}),
       screens: [...f.screens],
     }));
     return { ok: true, model: { screens, flows } };
@@ -599,6 +609,20 @@ function buildWireframes(
         continue;
       }
       if (currentFlow) {
+        // Keyword metadata (`role "…"`, `description "…"`) is grammar-distinct
+        // from a screen reference: a reference is a BARE name, so a screen
+        // literally named `role` still resolves — only keyword + quoted string
+        // reads as metadata.
+        const kw = /^(role|description)\s+"((?:[^"\\]|\\.)*)"$/i.exec(trimmed);
+        if (kw) {
+          const key = kw[1]!.toLowerCase() as 'role' | 'description';
+          if (currentFlow[key] !== undefined) {
+            err(no, `duplicate ${key} for flow ${JSON.stringify(currentFlow.name)} — declare it once`);
+          } else {
+            currentFlow[key] = unescapeQuoted(kw[2]!);
+          }
+          continue;
+        }
         const ref = /^([\w-]+)$/.exec(trimmed);
         if (ref) {
           flowRefs.push({ flow: currentFlow, raw: ref[1]!, line: no });

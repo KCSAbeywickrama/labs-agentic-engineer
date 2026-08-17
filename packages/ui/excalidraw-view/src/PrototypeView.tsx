@@ -150,6 +150,9 @@ export function PrototypeView({
     }, FLASH_MS);
   };
 
+  const hasFlows = model.flows.length > 0;
+  const selectedFlow = flow === null ? undefined : model.flows.find((f) => f.name === flow);
+
   const onFlowSelected = (next: string) => {
     setFlow(next);
     onFlowChange?.(next);
@@ -173,10 +176,16 @@ export function PrototypeView({
         "& .App-menu_top__left": { display: "none !important" },
       }}
     >
-      {/* Toolbar: back · screen picker · description · trailing slot (e.g.
-          the console's view switch, pushed to the right edge) — one row. */}
-      <Box sx={{ px: 1.5, py: 1, display: "flex", alignItems: "center", gap: 1, borderBottom: 1, borderColor: "divider" }}>
-        {model.flows.length > 0 && (
+      {/* Toolbar, two tiers: the flow is the outer context and screen
+          navigation happens INSIDE it, so the screen row is indented and sits
+          on a recessed surface rather than beside the flow picker as a peer.
+          A wireframe with no declared flows has no outer level, so it keeps
+          the original single row. */}
+      {hasFlows && (
+        <Box sx={{ px: 1.5, py: 1, display: "flex", alignItems: "center", gap: 1, borderBottom: 1, borderColor: "divider" }}>
+          <Typography variant="caption" color="text.secondary">
+            User flow
+          </Typography>
           <Select
             size="small"
             value={flow ?? ""}
@@ -189,10 +198,39 @@ export function PrototypeView({
               </MenuItem>
             ))}
           </Select>
-        )}
+          {/* Who walks this flow and what the journey is — the flow-level
+              counterpart of the screen row's description text. */}
+          {(selectedFlow?.role || selectedFlow?.description) && (
+            <Typography variant="body2" color="text.secondary" noWrap>
+              {[selectedFlow.role, selectedFlow.description].filter(Boolean).join(" · ")}
+            </Typography>
+          )}
+          {trailingSlot && <Box sx={{ ml: "auto" }}>{trailingSlot}</Box>}
+        </Box>
+      )}
+      <Box
+        sx={{
+          // Indented and recessed when it sits under a flow row: the screens
+          // belong to the flow above, and reading them as a nested tier is the
+          // whole point. Without a flow row this IS the toolbar, so it keeps
+          // the plain surface and flush padding.
+          pl: hasFlows ? 3 : 1.5,
+          pr: 1.5,
+          py: hasFlows ? 0.75 : 1,
+          bgcolor: hasFlows ? "action.hover" : undefined,
+          display: "flex",
+          alignItems: "center",
+          gap: 1,
+          borderBottom: 1,
+          borderColor: "divider",
+        }}
+      >
         <IconButton size="small" aria-label="Back" disabled={nav.stack.length === 0} onClick={() => dispatch({ type: "back" })}>
           <ArrowLeft size={16} />
         </IconButton>
+        <Typography variant="caption" color="text.secondary">
+          Screen
+        </Typography>
         <Select
           size="small"
           value={nav.current}
@@ -210,7 +248,7 @@ export function PrototypeView({
             {screen.description}
           </Typography>
         )}
-        {trailingSlot && <Box sx={{ ml: "auto" }}>{trailingSlot}</Box>}
+        {trailingSlot && !hasFlows && <Box sx={{ ml: "auto" }}>{trailingSlot}</Box>}
       </Box>
       <Box sx={{ position: "relative", flex: 1, minHeight: 0 }} onClick={onDeadAreaClick}>
         <Box sx={{ position: "absolute", inset: 0 }}>
