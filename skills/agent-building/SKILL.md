@@ -90,13 +90,51 @@ platform then carries.
 
 | Route | Behaviour |
 |---|---|
-| `POST /chat` | `{ messages }` in; **`{ text, toolCalls, messages }` out** |
+| `POST /chat` | `{ messages: ModelMessage[] }` in; **`{ text, toolCalls, messages: ModelMessage[] }` out** |
 | `GET /healthz` | `200 {ok:true}`, or `503 {ok:false, missing:[…]}` when unconfigured |
 
 The response shape is fixed, not yours to choose: `text` is what a chat UI
 renders, `toolCalls` is what a test asserts on, and `messages` is the turn's
 trail the caller appends to its history. A response carrying only `messages`
 makes every consumer dig the reply out of an array.
+
+**The wire type is `ModelMessage`, in BOTH directions.** The AI SDK has two
+message types and they are not interchangeable:
+
+```ts
+// ModelMessage — what generateText accepts. THIS is the wire type.
+{ role: "user", content: "hi" }
+
+// UIMessage — what useChat keeps for rendering. NOT the wire type.
+{ id: "…", role: "user", parts: [{ type: "text", text: "hi" }] }
+```
+
+Send a `UIMessage` and the SDK rejects the turn before it ever calls the model —
+`Invalid prompt: The messages do not match the ModelMessage[] schema` — which
+surfaces to the user as a 500 on the very first message.
+
+`ModelMessage` both ways is not a coin toss, it is the only self-consistent
+choice: this endpoint RETURNS `ModelMessage[]` (the `result.steps.flatMap`
+trail below), and the caller echoes that array back on the next turn. Accept
+`UIMessage` on the way in and turn two hands you back the `ModelMessage`s you
+just returned — the mismatch moves one turn later instead of going away. If a
+caller holds UI messages, it converts with the SDK's `convertToModelMessages()`
+before sending; that is the caller's job, because only the caller knows whether
+its history came from a UI.
+
+**Validate the shape, do not just check it is an array.** `Array.isArray` lets a
+wrong-typed history through to the SDK, which throws, which becomes a 500 — a
+server error for what is a bad request. Check each entry has a `role` and a
+`content`, and answer **400** naming the expected shape:
+
+```ts
+const ok = Array.isArray(messages) && messages.every(
+  (m) => m && typeof m.role === "string" && m.content !== undefined,
+);
+if (!ok) return sendJson(res, 400, {
+  error: "expected { messages: [{ role, content }] } (ModelMessage[]); UI messages with `parts` must be converted first",
+});
+```
 
 ## Constraints
 
@@ -251,6 +289,7 @@ const { authorization } = callContext.getStore() ?? {};
 | Container exits at startup, `ERR_MODULE_NOT_FOUND` | Relative import missing the `.js` extension under `nodenext` | `import { x } from "./tools.js"` — even though the file is `.ts` |
 | Agent performs an operation the design excluded | Generated tools for the whole OpenAPI document | Only allow-listed operations become tools |
 | Anyone who can reach the URL can chat, burning the org's model budget | The handler forwarded `Authorization` downstream but never gated on the caller | 401 when `X-User-Id` is absent — the APIs behind you protect data, not spend |
+| Every chat 500s on the FIRST message with `messages do not match the ModelMessage[] schema` | The caller sent `UIMessage` (`id` + `parts`); the SDK wants `ModelMessage` (`role` + `content`) | Wire type is `ModelMessage` both ways; callers convert with `convertToModelMessages()`, and the handler 400s on the wrong shape rather than letting the SDK throw |
 | One user reads or edits another's data | Ownership "enforced" in the prompt; the provider was called with the agent's own credential | Forward the caller's credential; let the provider return 403 |
 | A normal `409`/`404` ends the turn with an error | Tool threw on a non-2xx response | Return `{ ok: false, status, error }` to the model |
 | Model fills the wrong field, or asks which part of the URL a value belongs to | Tool schema exposed path/query/body structure | One flat object; re-split when building the request |
