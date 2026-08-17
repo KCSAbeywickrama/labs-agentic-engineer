@@ -32,10 +32,7 @@ import {
 import {
   ChevronDown,
   ChevronRight,
-  FileCode,
-  FileImage,
   FileText,
-  FileType2,
   Plus,
   RefreshCw,
   Network,
@@ -47,8 +44,6 @@ import {
   selectionKey,
   type SpecSelection,
 } from "../api/designTree";
-import { formatFileSize } from "../../projects/components/ReferenceFilePicker";
-import { referenceFileKind, type ReferenceFileKind } from "../lib/referencePreview";
 
 function basename(path: string): string {
   return path.split("/").at(-1) ?? path;
@@ -68,23 +63,12 @@ function fileSel(path: string): SpecSelection {
   return { kind: "file", path };
 }
 
-// Per-type iconography for the References section (#383 preview): PDF, MD
-// source, and everything else (plain text) each get a distinct glyph so the
-// list reads as three kinds of document, not one repeated icon.
-const REFERENCE_ICON_BY_KIND: Record<ReferenceFileKind, React.ReactNode> = {
-  pdf: <FileType2 size={16} />,
-  markdown: <FileCode size={16} />,
-  image: <FileImage size={16} />,
-  text: <FileText size={16} />,
-};
-
 export function SpecFileList({
   files,
   selection,
   onSelect,
   onAddArtifact,
   onRegenerateDesign,
-  onPreviewReference,
   regenerateDisabled,
   deriving,
   failed,
@@ -96,11 +80,6 @@ export function SpecFileList({
   /** Re-generate the design (#159) — shown in the Designs header once a design
    *  exists; fires the same design-generation room turn as the header CTA. */
   onRegenerateDesign: () => void;
-  /** A reference document row was clicked (#383 preview) — opens the preview
-   *  dialog. Deliberately separate from onSelect: references never enter the
-   *  main content pane's file-selection pipeline (collab editor, structured
-   *  views) — they're static, user-uploaded source material. */
-  onPreviewReference: (entry: SpecFileEntry) => void;
   /** Disabled while an agent turn runs — a re-generate would be dropped mid-turn. */
   regenerateDisabled?: boolean;
   /** Agents are still shaping the spec — empty groups say so. */
@@ -113,7 +92,6 @@ export function SpecFileList({
 
   const requirements = files.filter((f) => f.group === "requirements");
   const validation = files.filter((f) => f.group === "validation");
-  const references = files.filter((f) => f.group === "references");
   const design = buildDesignSection(files);
 
   // Per-component expand/collapse — default expanded, remembered by name so
@@ -316,41 +294,6 @@ export function SpecFileList({
 
       {flatGroup("Validation", validation)}
 
-      {/* References — the documents the user attached at create (#383).
-          Optional by nature, so the section only exists when files do:
-          an empty "no files yet" row here would be noise on every project.
-          Rendered separately from flatGroup: a click opens the preview
-          dialog (onPreviewReference) rather than routing through onSelect —
-          references never enter the main pane's collab/structured-view
-          pipeline. Each row also carries per-type iconography and the
-          file's human-readable size (#383 preview). */}
-      {references.length > 0 && (
-        <Box sx={{ mb: 1 }}>
-          <Box sx={{ px: 2, py: 0.5 }}>
-            <Typography variant="overline" color="text.secondary">
-              References
-            </Typography>
-          </Box>
-          <List dense disablePadding>
-            {references.map((f) => (
-              <ListItemButton
-                key={f.path}
-                onClick={() => onPreviewReference(f)}
-                sx={{ pl: 2, pr: 2 }}
-              >
-                <ListItemIcon sx={{ minWidth: 32 }}>
-                  {REFERENCE_ICON_BY_KIND[referenceFileKind(f.path)]}
-                </ListItemIcon>
-                <ListItemText
-                  primary={basename(f.path)}
-                  secondary={f.size !== undefined ? formatFileSize(f.size) : undefined}
-                  slotProps={{ primary: { noWrap: true } }}
-                />
-              </ListItemButton>
-            ))}
-          </List>
-        </Box>
-      )}
     </Box>
   );
 }

@@ -277,30 +277,32 @@ beforeEach(() => {
   });
 });
 
-describe("SpecView default selection never opens a reference document (#383)", () => {
-  // A fresh project may hold ONLY the uploaded reference documents (the PRD
-  // arrives later, from /start). The default-selection fallback must not pull
-  // one into the main editor pane — a binary reference rendered as editor
-  // text is the base64-wall bug. References open through the preview dialog,
-  // and only through it.
-  it("with only reference files present, no file content is requested for the pane", () => {
+describe("SpecView never opens a reference document (#383)", () => {
+  // References are transient turn inputs and are never committed (ADR-0017),
+  // so `toSpecEntry` drops them and they cannot reach the file list from git.
+  // The room is the other way in: a project created under the feature's v1 has
+  // them in git, so a room seeded from that HEAD still carries the paths. This
+  // exercises SpecView's own collab-union call to `toSpecEntry` — the union is
+  // where a room path becomes an entry — and pins that a reference path never
+  // becomes one, and so never reaches the pane as base64 editor text.
+  it("drops a reference path arriving from the collab room", () => {
+    mockCollab = {
+      ...soloCollab(),
+      docPaths: ["specs/requirements/references/claim-form.pdf"],
+    };
     mockUseSpecFiles.mockReturnValue({
-      data: [
-        {
-          path: "specs/requirements/references/claim-form.pdf",
-          sha: "r1",
-          group: "references",
-          size: 868409,
-        },
-      ],
+      data: [],
       isPending: false,
       isError: false,
       error: null,
       refetch: vi.fn(),
     });
     render(<SpecView projectName="proj1" />);
-    // The content hook is disabled (empty path) rather than pointed at the
-    // reference document.
+
+    expect(
+      screen.queryByText("claim-form.pdf"),
+    ).not.toBeInTheDocument();
+    // The content hook is disabled (empty path) rather than pointed at it.
     const requestedPaths = mockUseSpecFileContent.mock.calls.map(
       (c) => (c[1] as { path: string } | null)?.path ?? null,
     );

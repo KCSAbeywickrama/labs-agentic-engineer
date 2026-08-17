@@ -32,14 +32,18 @@ describe("toSpecEntry", () => {
     ).toEqual({ path: "specs/validation/plan.md", sha: "c3", group: "validation" });
   });
 
-  it("splits uploaded reference documents into their own group (#383)", () => {
+  // References are transient turn inputs, never committed (ADR-0017), so no
+  // project created from here on has them in git at all. The guard exists for
+  // the ones created under the feature's v1, which DID commit them: without it
+  // they fall through to the `requirements` group, become selectable, and pour
+  // a PDF's bytes into the editor pane.
+  it("hides reference documents from the spec view entirely (#383)", () => {
     expect(
       toSpecEntry({ path: "specs/requirements/references/prd.pdf", sha: "e5" }),
-    ).toEqual({
-      path: "specs/requirements/references/prd.pdf",
-      sha: "e5",
-      group: "references",
-    });
+    ).toBeNull();
+    expect(
+      toSpecEntry({ path: "specs/requirements/references/notes.md", sha: "e6" }),
+    ).toBeNull();
     // Only the references folder itself — a requirements file in any other
     // subfolder stays a requirement.
     expect(
@@ -48,21 +52,6 @@ describe("toSpecEntry", () => {
       path: "specs/requirements/drafts/old.md",
       sha: "f6",
       group: "requirements",
-    });
-  });
-
-  it("carries the list-endpoint's size through for the reference list row (#383 preview)", () => {
-    expect(
-      toSpecEntry({
-        path: "specs/requirements/references/prd.pdf",
-        sha: "e5",
-        size: 20480,
-      }),
-    ).toEqual({
-      path: "specs/requirements/references/prd.pdf",
-      sha: "e5",
-      group: "references",
-      size: 20480,
     });
   });
 
@@ -85,8 +74,7 @@ describe("toSpecEntry", () => {
   });
 
   // A trailing slash names a directory, and its empty last segment clears the
-  // length check — it must not become a selectable entry with no file name, in
-  // the references group or in any other.
+  // length check — it must not become a selectable entry with no file name.
   it("hides directory-like paths", () => {
     expect(
       toSpecEntry({ path: "specs/requirements/references/", sha: "x" }),

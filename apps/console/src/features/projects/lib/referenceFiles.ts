@@ -16,16 +16,17 @@
  * under the License.
  */
 
-import type { components } from "../../../generated/aep-api";
-
-type WriteOp = components["schemas"]["WriteOp"];
-
 // Reference documents attached on the create view (#383). Grilling decisions:
 // text, PDF and images only (agents read PDFs and images natively; DOCX would
-// need conversion tooling), 5 MB per file — the server's own apply cap, checked
-// there on decoded bytes — and at most 10 files so the single atomic apply
-// stays sane.
-export const REFERENCES_DIR = "specs/requirements/references";
+// need conversion tooling), 5 MB per file, and at most 10 files.
+//
+// The bytes go up as multipart to POST /projects/{name}/references and are
+// never committed (ADR-0017) — the server stores them off-git and overlays them
+// into each turn's snapshot AT this path, which is why the screening below
+// still cares about the repo-path a name lands on.
+// Where the server overlays the stored documents inside each turn's snapshot.
+// The console never writes this path — it only screens for collisions on it.
+const REFERENCES_DIR = "specs/requirements/references";
 export const MAX_REFERENCE_FILE_BYTES = 5 * 1024 * 1024;
 export const MAX_REFERENCE_FILES = 10;
 export const REFERENCE_ACCEPT = ".md,.txt,.pdf,.png,.jpg,.jpeg";
@@ -108,28 +109,9 @@ function referencePathOf(name: string): string {
   return `${REFERENCES_DIR}/${sanitizeName(name)}`;
 }
 
-function base64Of(bytes: Uint8Array): string {
-  // btoa takes a byte string; chunk to keep the argument list bounded.
-  let binary = "";
-  const CHUNK = 0x8000;
-  for (let i = 0; i < bytes.length; i += CHUNK) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
-  }
-  return btoa(binary);
-}
-
-// The apply batch for one create's attachments: text rides as utf8, every
-// binary kind (PDF and images alike) as base64 (the WriteOp.encoding contract
-// of BE handshake #384).
-export async function toReferenceWrites(files: File[]): Promise<WriteOp[]> {
-  return Promise.all(
-    files.map(async (file) => {
-      const path = referencePathOf(file.name);
-      if (TEXT_EXTENSIONS.has(extensionOf(file.name))) {
-        return { path, content: await file.text(), encoding: "utf8" as const };
-      }
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      return { path, content: base64Of(bytes), encoding: "base64" as const };
-    }),
-  );
+// The badge shown on an attachment card — the extension, upper-cased (PDF, MD,
+// PNG). Not the file's size: an oversized file never becomes a card, it becomes
+// a rejection notice, so size has nothing left to tell the user here.
+export function referenceTypeLabel(name: string): string {
+  return extensionOf(name).toUpperCase();
 }

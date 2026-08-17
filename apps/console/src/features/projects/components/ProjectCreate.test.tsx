@@ -83,7 +83,7 @@ beforeEach(() => {
 });
 
 describe("ProjectCreate reference documents (#383)", () => {
-  it("shows an attached file as a removable chip", () => {
+  it("shows an attached file as a card in the composer", () => {
     render(<ProjectCreate />);
     attach("prd.md");
     expect(screen.getByText(/prd\.md/)).toBeTruthy();

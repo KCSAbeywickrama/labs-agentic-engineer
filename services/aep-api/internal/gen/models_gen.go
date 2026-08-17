@@ -103,24 +103,6 @@ func (e DeployStageValidation) Valid() bool {
 	}
 }
 
-// Defines values for FileContentEncoding.
-const (
-	FileContentEncodingBase64 FileContentEncoding = "base64"
-	FileContentEncodingUTF8   FileContentEncoding = "utf8"
-)
-
-// Valid indicates whether the value is a known member of the FileContentEncoding enum.
-func (e FileContentEncoding) Valid() bool {
-	switch e {
-	case FileContentEncodingBase64:
-		return true
-	case FileContentEncodingUTF8:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for MilestoneRunViewOrigin.
 const (
 	IncidentAdoption MilestoneRunViewOrigin = "incident-adoption"
@@ -490,24 +472,6 @@ func (e TurnConflictCode) Valid() bool {
 	case RequirementsMissing:
 		return true
 	case TurnInProgress:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for WriteOpEncoding.
-const (
-	WriteOpEncodingBase64 WriteOpEncoding = "base64"
-	WriteOpEncodingUTF8   WriteOpEncoding = "utf8"
-)
-
-// Valid indicates whether the value is a known member of the WriteOpEncoding enum.
-func (e WriteOpEncoding) Valid() bool {
-	switch e {
-	case WriteOpEncodingBase64:
-		return true
-	case WriteOpEncodingUTF8:
 		return true
 	default:
 		return false
@@ -1001,15 +965,9 @@ type FileBundle struct {
 // FileContent defines model for FileContent.
 type FileContent struct {
 	Content string `json:"content"`
-
-	// Encoding How `content` is encoded — the read half of `WriteOp.encoding`. `base64` means the file is binary (e.g. a PDF reference document) and `content` carries its bytes base64-encoded; serving binary as raw JSON text would silently corrupt it.
-	Encoding FileContentEncoding `json:"encoding,omitempty"`
-	Path     string              `json:"path"`
-	Sha      string              `json:"sha"`
+	Path    string `json:"path"`
+	Sha     string `json:"sha"`
 }
-
-// FileContentEncoding How `content` is encoded — the read half of `WriteOp.encoding`. `base64` means the file is binary (e.g. a PDF reference document) and `content` carries its bytes base64-encoded; serving binary as raw JSON text would silently corrupt it.
-type FileContentEncoding string
 
 // FileMeta defines model for FileMeta.
 type FileMeta struct {
@@ -1892,14 +1850,8 @@ type WorkflowRunTask struct {
 type WriteOp struct {
 	BaseSha string `json:"baseSha,omitempty"`
 	Content string `json:"content"`
-
-	// Encoding How `content` is encoded. `base64` lets a write carry binary bytes (e.g. a PDF reference document); the server decodes before validation and commit, and size limits apply to the decoded bytes.
-	Encoding WriteOpEncoding `json:"encoding,omitempty"`
-	Path     string          `json:"path"`
+	Path    string `json:"path"`
 }
-
-// WriteOpEncoding How `content` is encoded. `base64` lets a write carry binary bytes (e.g. a PDF reference document); the server decodes before validation and commit, and size limits apply to the decoded bytes.
-type WriteOpEncoding string
 
 // userJWTContextKey is the context key for userJWT security scheme
 type userJWTContextKey string
@@ -1999,6 +1951,12 @@ type ListIssuesParams struct {
 	Q string `form:"q,omitempty" json:"q,omitempty"`
 }
 
+// PutProjectReferencesMultipartBody defines parameters for PutProjectReferences.
+type PutProjectReferencesMultipartBody struct {
+	// Files Reference documents — `.md`, `.txt`, `.pdf`, `.png`, `.jpg`, `.jpeg`; at most 10, each at most 5 MiB
+	Files []openapi_types.File `json:"files"`
+}
+
 // GetSpecCollabSessionParams defines parameters for GetSpecCollabSession.
 type GetSpecCollabSessionParams struct {
 	// Authorization Bearer token; the display identity is decoded from it
@@ -2078,6 +2036,9 @@ type ApplyFilesJSONRequestBody = ApplyRequest
 
 // CreateIssueJSONRequestBody defines body for CreateIssue for application/json ContentType.
 type CreateIssueJSONRequestBody = CreateIssueRequest
+
+// PutProjectReferencesMultipartRequestBody defines body for PutProjectReferences for multipart/form-data ContentType.
+type PutProjectReferencesMultipartRequestBody PutProjectReferencesMultipartBody
 
 // PromoteTaskFromIssueJSONRequestBody defines body for PromoteTaskFromIssue for application/json ContentType.
 type PromoteTaskFromIssueJSONRequestBody = PromoteFromIssueRequest

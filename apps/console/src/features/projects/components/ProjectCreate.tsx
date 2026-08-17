@@ -45,7 +45,8 @@ import {
   useUploadReferences,
 } from "../api/queries";
 import { isValidProjectName, suggestProjectName } from "../lib/projectName";
-import { ReferenceFilePicker, formatFileSize } from "./ReferenceFilePicker";
+import { referenceTypeLabel } from "../lib/referenceFiles";
+import { PromptComposer } from "./PromptComposer";
 
 // Issue #71 decision: clicking an example acts as prompt + Start in one
 // click — it jumps straight to the name/repo confirmation step.
@@ -166,8 +167,8 @@ export function ProjectCreate() {
             goToProject(project.name);
             return;
           }
-          // Attached reference documents land as one atomic files/apply
-          // commit under specs/requirements/references/ (#383).
+          // Attached reference documents go up separately, to the project's
+          // off-git reference store (#383/ADR-0017) — never a commit.
           setCreatedName(project.name);
           uploadFor(project.name);
         },
@@ -191,27 +192,13 @@ export function ProjectCreate() {
                 into a project and starts deriving its design.
               </Typography>
             </Box>
-            <Stack spacing={2}>
-              <TextField
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                placeholder="e.g. A booking system for a small hair salon with staff calendars and SMS reminders"
-                multiline
-                minRows={3}
-                autoFocus
-                fullWidth
-              />
-              <ReferenceFilePicker files={files} onFilesChange={setFiles} />
-              <Box sx={{ textAlign: "right" }}>
-                <Button
-                  variant="contained"
-                  disabled={!prompt.trim()}
-                  onClick={() => start(prompt.trim())}
-                >
-                  Start
-                </Button>
-              </Box>
-            </Stack>
+            <PromptComposer
+              prompt={prompt}
+              onPromptChange={setPrompt}
+              files={files}
+              onFilesChange={setFiles}
+              onSubmit={() => start(prompt.trim())}
+            />
             <Grid container spacing={2}>
               {EXAMPLE_PROMPTS.map((example) => (
                 <Grid key={example.title} size={{ xs: 12, sm: 4 }}>
@@ -273,13 +260,16 @@ export function ProjectCreate() {
             {files.length > 0 && (
               <Box>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                  Reference documents to commit to the project:
+                  {/* Not "committed to the project": references are transient
+                      turn inputs and never enter the repo (ADR-0017). This is
+                      also the last place the user ever sees them listed. */}
+                  Reference documents the agents will read:
                 </Typography>
                 <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>
                   {files.map((file) => (
                     <Chip
                       key={file.name}
-                      label={`${file.name} (${formatFileSize(file.size)})`}
+                      label={`${file.name} · ${referenceTypeLabel(file.name)}`}
                       variant="outlined"
                       size="small"
                     />

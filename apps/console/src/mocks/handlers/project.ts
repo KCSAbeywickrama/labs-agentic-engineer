@@ -8,6 +8,7 @@ import {
   appliedFileContent,
   appliedFileMetas,
   applyFilesError,
+  uploadReferencesError,
   componentDeployments,
   componentOpenApi,
   projectBuildRuns,
@@ -378,9 +379,27 @@ export const projectHandlers = [
       return HttpResponse.json(file);
     },
   ),
-  // apply-files: the reference-document batch the create flow commits right
-  // after POST /projects (#383). Error state (the confirm step's Retry /
+  // The create flow's reference upload (#383), fired right after POST
+  // /projects. Nothing is committed and nothing becomes a spec file — the real
+  // server stores the bytes off-git (ADR-0017) — so the mock only asserts the
+  // request shape and answers 204. Error state (the confirm step's Retry /
   // Continue-without-documents surface) via
+  // localStorage.setItem('aep:mock:project:references', 'error').
+  http.post("*/api/v1/projects/:projectName/references", async ({ request }) => {
+    if (localStorage.getItem("aep:mock:project:references") === "error") {
+      return HttpResponse.json(uploadReferencesError, { status: 500 });
+    }
+    const form = await request.formData();
+    const files = form.getAll("files");
+    if (files.length === 0) {
+      return HttpResponse.json(
+        { code: "invalid_request", message: "no reference documents" } satisfies ApiError,
+        { status: 400 },
+      );
+    }
+    return new HttpResponse(null, { status: 204 });
+  }),
+  // apply-files. Error state via
   // localStorage.setItem('aep:mock:project:apply', 'error').
   http.post(
     "*/api/v1/projects/:projectName/files/apply",

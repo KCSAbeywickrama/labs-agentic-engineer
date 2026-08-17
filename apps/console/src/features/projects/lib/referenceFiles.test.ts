@@ -20,9 +20,8 @@ import { describe, expect, it } from "vitest";
 import {
   MAX_REFERENCE_FILES,
   MAX_REFERENCE_FILE_BYTES,
-  REFERENCES_DIR,
+  referenceTypeLabel,
   screenReferenceFiles,
-  toReferenceWrites,
 } from "./referenceFiles";
 
 function file(name: string, content: string | Uint8Array<ArrayBuffer>, type = ""): File {
@@ -95,8 +94,8 @@ describe("screenReferenceFiles", () => {
     expect(rejected).toEqual([]);
   });
 
-  // Two names, one repo path: the apply batch would write the path twice and
-  // the second write would silently replace the first document.
+  // Two names, one stored path: the server would write the path twice and the
+  // second document would silently replace the first.
   it("rejects a name that sanitizes onto an attached document's path", () => {
     const { accepted, rejected } = screenReferenceFiles(
       [file("prd.md", "old")],
@@ -107,55 +106,25 @@ describe("screenReferenceFiles", () => {
     expect(rejected[0]?.reason).toMatch(/prd\.md/);
   });
 
-  it("rejects the second of two incoming names that sanitize to one path", async () => {
+  it("rejects the second of two incoming names that sanitize to one path", () => {
     const { accepted, rejected } = screenReferenceFiles(
       [],
       [file("my notes.md", "a"), file("my-notes.md", "b")],
     );
     expect(accepted.map((f) => f.name)).toEqual(["my notes.md"]);
     expect(rejected[0]?.name).toBe("my-notes.md");
-    const writes = await toReferenceWrites(accepted);
-    expect(new Set(writes.map((w) => w.path)).size).toBe(writes.length);
   });
 });
 
-describe("toReferenceWrites", () => {
-  it("writes images as base64, byte-exact — same channel as PDF", async () => {
-    const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x00, 0xff, 0xd8]);
-    const writes = await toReferenceWrites([file("mockup.png", bytes, "image/png")]);
-    expect(writes).toHaveLength(1);
-    expect(writes[0]?.path).toBe(`${REFERENCES_DIR}/mockup.png`);
-    expect(writes[0]?.encoding).toBe("base64");
-    const decoded = Uint8Array.from(atob(writes[0]!.content), (c) => c.charCodeAt(0));
-    expect([...decoded]).toEqual([...bytes]);
+describe("referenceTypeLabel", () => {
+  it("badges a card with the upper-cased extension", () => {
+    expect(referenceTypeLabel("Anjana Income Expense All Years USD Tax.pdf")).toBe("PDF");
+    expect(referenceTypeLabel("prd.md")).toBe("MD");
+    expect(referenceTypeLabel("mockup.JPEG")).toBe("JPEG");
   });
 
-  it("writes text files as utf8 under the references dir", async () => {
-    const writes = await toReferenceWrites([file("prd.md", "# The PRD")]);
-    expect(writes).toEqual([
-      {
-        path: `${REFERENCES_DIR}/prd.md`,
-        content: "# The PRD",
-        encoding: "utf8",
-      },
-    ]);
-  });
-
-  it("writes PDFs as base64 of the raw bytes", async () => {
-    const bytes = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0xff, 0x00, 0x7f]);
-    const writes = await toReferenceWrites([file("spec.pdf", bytes)]);
-    expect(writes[0]?.path).toBe(`${REFERENCES_DIR}/spec.pdf`);
-    expect(writes[0]?.encoding).toBe("base64");
-    const decoded = Uint8Array.from(atob(writes[0]!.content), (c) =>
-      c.charCodeAt(0),
-    );
-    expect(decoded).toEqual(bytes);
-  });
-
-  it("sanitizes file names into safe repo paths", async () => {
-    const writes = await toReferenceWrites([
-      file("my draft (v2)!.md", "draft"),
-    ]);
-    expect(writes[0]?.path).toBe(`${REFERENCES_DIR}/my-draft-v2.md`);
+  it("reads the LAST dot, so a dotted stem does not become the badge", () => {
+    expect(referenceTypeLabel("01f197b7fc20198885e567acc2d1f4ac.v2.pdf")).toBe("PDF");
   });
 });
+

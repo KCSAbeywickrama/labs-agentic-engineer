@@ -1015,76 +1015,22 @@ const validationPlan = `# Demo Shop — Validation plan
 // aep:mock:validation switch swaps wholesale to reach every verdict.
 
 // Spec files as the Files API serves them (#113): repo-relative paths under
-// specs/, metadata (list-files) split from content (read-file). `encoding`
-// mirrors the read half of #384's WriteOp.encoding contract: set to
-// "base64" for a binary reference document (a PDF), whose `content` is then
-// the base64 TEXT, not the raw bytes — same shape the real read-file
-// endpoint answers with (services/aep-api's fileContentToWire).
+// specs/, metadata (list-files) split from content (read-file). Text only —
+// the Files API carries no binary (ADR-0017 took reference documents out of
+// git, and with them the base64 encoding field).
 interface MockSpecFile {
   path: string;
   content: string;
-  encoding?: "base64";
 }
 
 const prdOnlyFiles: MockSpecFile[] = [
   { path: "specs/requirements/prd.md", content: seededPrd },
 ];
 
-// Reference documents (#383): the create view's uploaded source material,
-// exercising all three preview types the Spec view renders — markdown, plain
-// text, and a real (byte-valid, parseable) tiny PDF, base64-encoded exactly
-// as a binary read-file response carries it. The PDF bytes are a minimal
-// single-page document (`%PDF-1.4` header, one Helvetica text object, a
-// correct xref/trailer) — not a placeholder string — so the mock's PDF
-// preview exercises the real base64 -> Blob -> <object> decode path, not a
-// stub.
-const referenceNotesMd = `# Reference notes
-
-Background the requirements agent read while drafting the PRD — pulled from
-the uploaded document at create time (#383).
-
-- Competitive scan: three incumbents, all charge per-seat.
-- Support SLA target: first response under 4 hours.
-`;
-
-const referenceRawTxt = `Raw meeting notes, 2026-01-14
-- Customer wants CSV export of order history.
-- Ops asked for a webhook on fulfillment status change.
-- Legal: retain order records for 7 years minimum.
-`;
-
-// A minimal, valid, parseable one-page PDF ("AEP reference doc fixture"),
-// base64-encoded. Regenerate with a fresh xref/trailer if this content ever
-// needs to change — the byte offsets in the PDF's own xref table must stay
-// correct for the bytes to decode as a real PDF.
-const referenceSpecPdfBase64 =
-  "JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2JqCjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCAyMDAgMjAwXSAvUmVzb3VyY2VzIDw8IC9Gb250IDw8IC9GMSA0IDAgUiA+PiA+PiAvQ29udGVudHMgNSAwIFIgPj4KZW5kb2JqCjQgMCBvYmoKPDwgL1R5cGUgL0ZvbnQgL1N1YnR5cGUgL1R5cGUxIC9CYXNlRm9udCAvSGVsdmV0aWNhID4+CmVuZG9iago1IDAgb2JqCjw8IC9MZW5ndGggNTYgPj4Kc3RyZWFtCkJUIC9GMSAxMiBUZiAyMCAxMDAgVGQgKEFFUCByZWZlcmVuY2UgZG9jIGZpeHR1cmUpIFRqIEVUCmVuZHN0cmVhbQplbmRvYmoKeHJlZgowIDYKMDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDA5IDAwMDAwIG4gCjAwMDAwMDAwNTggMDAwMDAgbiAKMDAwMDAwMDExNSAwMDAwMCBuIAowMDAwMDAwMjQxIDAwMDAwIG4gCjAwMDAwMDAzMTEgMDAwMDAgbiAKdHJhaWxlcgo8PCAvU2l6ZSA2IC9Sb290IDEgMCBSID4+CnN0YXJ0eHJlZgo0MTcKJSVFT0Y=";
-
-// A 1×1 transparent PNG — the smallest byte-valid image, so the mock's image
-// preview exercises the real base64 -> Blob -> <img> decode path.
-const referenceMockupPngBase64 =
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
-
-const referenceFiles: MockSpecFile[] = [
-  { path: "specs/requirements/references/notes.md", content: referenceNotesMd },
-  { path: "specs/requirements/references/meeting-notes.txt", content: referenceRawTxt },
-  {
-    path: "specs/requirements/references/spec.pdf",
-    content: referenceSpecPdfBase64,
-    encoding: "base64",
-  },
-  {
-    path: "specs/requirements/references/mockup.png",
-    content: referenceMockupPngBase64,
-    encoding: "base64",
-  },
-];
-
 const collaborationFiles: MockSpecFile[] = [
   ...prdOnlyFiles,
   { path: "specs/requirements/user-stories.md", content: userStories },
   { path: "specs/design/architecture.md", content: architectureMd },
-  ...referenceFiles,
 ];
 
 const fullFiles: MockSpecFile[] = [
@@ -1144,10 +1090,7 @@ export function specFileMetas(files: MockSpecFile[]): FileMeta[] {
     .map((f) => ({
       path: f.path,
       sha: mockSha(f.path + f.content),
-      // A base64 file's `content` is the base64 TEXT — size must reflect the
-      // DECODED byte count (what the real server reports off the git blob),
-      // not the ~33%-larger base64 string length.
-      size: decodedByteLength(f.content, f.encoding),
+      size: byteLength(f.content),
     }))
     .sort((a, b) => a.path.localeCompare(b.path));
 }
@@ -1160,12 +1103,6 @@ export function specFileContent(
   if (!file) return null;
   return {
     path: file.path,
-    // The generated FileContent.encoding is non-optional (openapi-typescript
-    // fills the schema's `default: utf8` in as a non-nullable member), so the
-    // mock always sets it explicitly — "utf8" for a plain-text file, exactly
-    // what the real server would answer with if it didn't take the
-    // omit-when-default shortcut (see fileContentToWire's comment).
-    encoding: file.encoding ?? "utf8",
     content: file.content,
     sha: mockSha(file.path + file.content),
   };
@@ -1176,19 +1113,14 @@ export const specFileNotFound = (path: string): ApiError => ({
   message: `no spec file at ${path}`,
 });
 
-// Reference documents committed through the mock files/apply (#383) — the
-// batch the create flow fires right after POST /projects. Persisted per
-// project to localStorage (like created projects) so the Spec view still
-// lists them after a reload. Base64 writes keep their metadata but drop the
-// content: the bytes are binary (a PDF), unrenderable in the mock reader and
-// heavy for the quota; size still reflects the decoded byte count, matching
-// the server's post-decode accounting.
+// Files written through the mock files/apply. Persisted per project to
+// localStorage (like created projects) so the Spec view still lists them after
+// a reload. Reference documents no longer come through here at all — they go
+// to the references endpoint and are never committed (ADR-0017).
 const APPLIED_FILES_KEY = "aep:mock:appliedFiles";
 
 interface AppliedFile extends MockSpecFile {
   size: number;
-  // Computed before a base64 write's content is dropped, so the sha the apply
-  // response returned and the sha the file list serves later stay identical.
   sha: string;
 }
 
@@ -1203,28 +1135,23 @@ function loadAppliedFiles(): AppliedFilesByProject {
   }
 }
 
-// The byte count the server would have recorded. A utf8 write is measured
-// encoded, not by `String.length` — that counts UTF-16 code units, so any
-// non-ASCII reference document would report a size smaller than the file the
-// server committed.
-function decodedByteLength(content: string, encoding?: string): number {
-  if (encoding !== "base64") {
-    return new TextEncoder().encode(content).byteLength;
-  }
-  const padding = content.endsWith("==") ? 2 : content.endsWith("=") ? 1 : 0;
-  return Math.floor((content.length * 3) / 4) - padding;
+// The byte count the server would have recorded — measured ENCODED, not by
+// `String.length`, which counts UTF-16 code units and would under-report any
+// non-ASCII spec file.
+function byteLength(content: string): number {
+  return new TextEncoder().encode(content).byteLength;
 }
 
 export function recordAppliedFiles(
   projectName: string,
-  writes: { path: string; content: string; encoding?: string }[],
+  writes: { path: string; content: string }[],
 ): FileMeta[] {
   const all = loadAppliedFiles();
   const files = all[projectName] ?? [];
   const applied = writes.map((w) => ({
     path: w.path,
-    content: w.encoding === "base64" ? "" : w.content,
-    size: decodedByteLength(w.content, w.encoding),
+    content: w.content,
+    size: byteLength(w.content),
     sha: mockSha(w.path + w.content),
   }));
   for (const file of applied) {
@@ -1257,15 +1184,19 @@ export function appliedFileContent(
     (f) => f.path === path,
   );
   if (!file) return null;
-  // Base64 writes keep their metadata but drop the content (see the
-  // AppliedFile comment above) — the mock has no real bytes to answer
-  // "base64" with, so this always reports "utf8" for what it does hold.
-  return { path: file.path, content: file.content, sha: file.sha, encoding: "utf8" };
+  return { path: file.path, content: file.content, sha: file.sha };
 }
 
 export const applyFilesError: ApiError = {
   code: "internal_error",
   message: "Mock error scenario for files/apply",
+};
+
+// The create flow's reference upload (#383) failing — the surface behind the
+// confirm step's Retry / Continue-without-documents pair.
+export const uploadReferencesError: ApiError = {
+  code: "internal_error",
+  message: "Mock error scenario for the reference upload",
 };
 
 export const projectSectionError: ApiError = {

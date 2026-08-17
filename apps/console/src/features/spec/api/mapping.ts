@@ -27,7 +27,7 @@ type FileMeta = components["schemas"]["FileMeta"];
 // room-key scheme of #113 decision 2 is retired — it double-prefixed
 // agent-created files).
 
-export type SpecGroup = "requirements" | "designs" | "validation" | "references";
+export type SpecGroup = "requirements" | "designs" | "validation";
 
 export interface SpecFileEntry {
   /** Full repo-relative path (e.g. specs/requirements/prd.md) — also the
@@ -36,10 +36,6 @@ export interface SpecFileEntry {
   /** Git blob sha at HEAD; changes when content changes. */
   sha: string;
   group: SpecGroup;
-  /** Byte size from the list endpoint (#383 preview: the References row's
-   *  human-readable size). Undefined for entries synthesized off the live
-   *  collab doc's path list (SpecView's union), which carries no size. */
-  size?: number;
 }
 
 // Spec-view section per folder directly under specs/. Files outside these
@@ -50,9 +46,12 @@ const GROUP_BY_FOLDER: Record<string, SpecGroup> = {
   validation: "validation",
 };
 
-// Uploaded reference documents (#383) live under requirements on disk but get
-// their own spec-view section: they are the user's source material, not an
-// agent-authored requirement artifact.
+// Reference documents (#383) are transient turn inputs, never committed
+// (ADR-0017), so nothing under here should ever reach the spec view. The guard
+// stays anyway: projects created under the feature's v1 DID commit them, and
+// without it those paths fall through to the `requirements` group, become
+// selectable, and pour a PDF's bytes into the editor pane — the exact incident
+// #427 was opened to fix.
 const REFERENCES_PREFIX = "specs/requirements/references/";
 
 export function toSpecEntry(meta: FileMeta): SpecFileEntry | null {
@@ -64,22 +63,10 @@ export function toSpecEntry(meta: FileMeta): SpecFileEntry | null {
   const segments = meta.path.split("/");
   if (segments[0] !== "specs" || segments.length < 3) return null;
   if (segments[segments.length - 1] === "") return null;
-  if (meta.path.startsWith(REFERENCES_PREFIX)) {
-    return {
-      path: meta.path,
-      sha: meta.sha,
-      group: "references",
-      ...(meta.size !== undefined ? { size: meta.size } : {}),
-    };
-  }
+  if (meta.path.startsWith(REFERENCES_PREFIX)) return null;
   const group = GROUP_BY_FOLDER[segments[1] ?? ""];
   if (!group) return null;
-  return {
-    path: meta.path,
-    sha: meta.sha,
-    group,
-    ...(meta.size !== undefined ? { size: meta.size } : {}),
-  };
+  return { path: meta.path, sha: meta.sha, group };
 }
 
 export function toSpecEntries(metas: FileMeta[]): SpecFileEntry[] {

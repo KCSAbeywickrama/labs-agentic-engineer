@@ -1759,6 +1759,59 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
           description: Error
+  /projects/{projectName}/references:
+    post:
+      description: Store the reference documents attached on the create view. References are
+        TRANSIENT TURN INPUTS, not spec artifacts (console ADR-0017) — they are never committed
+        and never reach GitHub. Bytes live in a per-project directory on the shared workspace
+        volume for the project's lifetime and are overlaid into each turn's snapshot at
+        `specs/requirements/references/`, which is also scaffolded into the repo's `.gitignore`.
+        Deliberately outside the `specs/`-scoped Files API — `files/apply` means "commit to the
+        repo", and this is the opposite. multipart carries raw bytes, so the per-file limit is
+        checked on real bytes with no base64 inflation. Replaces the whole upload for the
+        project — a second call overwrites the stored set.
+      operationId: put-project-references
+      parameters:
+      - description: Project name (DNS-label slug)
+        in: path
+        name: projectName
+        required: true
+        schema:
+          description: Project name (DNS-label slug)
+          type: string
+      requestBody:
+        content:
+          multipart/form-data:
+            encoding:
+              files:
+                contentType: application/octet-stream
+            schema:
+              properties:
+                files:
+                  description: Reference documents — `.md`, `.txt`, `.pdf`, `.png`, `.jpg`,
+                    `.jpeg`; at most 10, each at most 5 MiB
+                  items:
+                    format: binary
+                    type: string
+                  type: array
+              required:
+              - files
+              type: object
+        required: true
+      responses:
+        '204':
+          description: References stored
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Error
+      security:
+      - userJWT: []
+      summary: Store a project's reference documents
+      tags:
+      - Projects
   /projects/{projectName}/runs/{runId}/cancel:
     post:
       description: Abandon an increment. Cancel is the only expiry the run's unbounded wait state has.
@@ -3741,16 +3794,6 @@ components:
       properties:
         content:
           type: string
-        encoding:
-          default: utf8
-          description: How `content` is encoded — the read half of `WriteOp.encoding`.
-            `base64` means the file is binary (e.g. a PDF reference document) and
-            `content` carries its bytes base64-encoded; serving binary as raw JSON
-            text would silently corrupt it.
-          enum:
-          - utf8
-          - base64
-          type: string
         path:
           type: string
         sha:
@@ -5674,15 +5717,6 @@ components:
         baseSha:
           type: string
         content:
-          type: string
-        encoding:
-          default: utf8
-          description: How `content` is encoded. `base64` lets a write carry binary
-            bytes (e.g. a PDF reference document); the server decodes before validation
-            and commit, and size limits apply to the decoded bytes.
-          enum:
-          - utf8
-          - base64
           type: string
         path:
           type: string

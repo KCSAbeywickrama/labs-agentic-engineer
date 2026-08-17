@@ -28,7 +28,6 @@ import {
   loadSkillsFromSnapshot,
   readReferenceAttachments,
   overlayReferenceTexts,
-  MAX_REFERENCE_ATTACHMENT_BYTES,
   MAX_REFERENCE_ATTACHMENT_ENCODED_BYTES,
   SkillReadError,
 } from "../src/conversation/load-workspace.js";
@@ -188,8 +187,12 @@ test("readReferenceAttachments: absent/empty references list yields no parts", (
   }
 });
 
+// The largest raw file that can fit the ENCODED budget — derived here rather
+// than exported from the module, which has no production consumer for it.
+const MAX_RAW_BYTES = Math.floor(MAX_REFERENCE_ATTACHMENT_ENCODED_BYTES / 4) * 3;
+
 test("readReferenceAttachments: a file over the cap is skipped, not truncated or thrown", () => {
-  const big = Buffer.alloc(MAX_REFERENCE_ATTACHMENT_BYTES + 1, 1);
+  const big = Buffer.alloc(MAX_RAW_BYTES + 1, 1);
   const root = makeTree({ [`${REF_DIR}/huge.pdf`]: big });
   try {
     assert.deepEqual(readReferenceAttachments(root, [`${REF_DIR}/huge.pdf`]), []);

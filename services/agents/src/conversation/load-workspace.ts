@@ -204,13 +204,6 @@ export function readSnapshot(snapshotDir: string): Record<string, string> {
  */
 export const MAX_REFERENCE_ATTACHMENT_ENCODED_BYTES = 20 * 1024 * 1024;
 
-/**
- * The largest single PDF that can fit the budget — the same number expressed as
- * raw bytes, for the per-file message a reader can act on ("this file is too
- * big" reads better than "the turn's encoded budget is exhausted").
- */
-export const MAX_REFERENCE_ATTACHMENT_BYTES = Math.floor(MAX_REFERENCE_ATTACHMENT_ENCODED_BYTES / 4) * 3;
-
 /** Base64 length of `rawBytes` bytes: 4 chars per 3 bytes, rounded up with padding. */
 function encodedLength(rawBytes: number): number {
   return Math.ceil(rawBytes / 3) * 4;
