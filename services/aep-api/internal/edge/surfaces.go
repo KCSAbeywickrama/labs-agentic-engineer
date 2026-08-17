@@ -156,7 +156,7 @@ func mountSurfaces(params AppParams) *http.ServeMux {
 	// MCPExternalResources/OrgEndpoints/ResourceTypes degrades the corresponding
 	// tool to an empty result (see dependencies.NewMCPHandler).
 	if params.Deps.TaskTokens != nil {
-		mcpVerifier := auth.NewAgentsScopedVerifier(params.Deps.TaskTokens)
+		mcpVerifier := auth.NewAgentsScopedVerifier(params.Deps.TaskTokens, nil)
 		mcpHandler := mcpdiscovery.NewMCPHandler(
 			params.MCPExternalResources, params.MCPOrgEndpoints, params.MCPResourceTypes, params.MCPRemoteGit,
 			params.MCPSpecValidator, params.MCPSpecNormalizer, params.MCPSpecFetcher)
