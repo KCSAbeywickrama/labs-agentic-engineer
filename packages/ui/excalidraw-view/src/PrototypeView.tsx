@@ -171,7 +171,6 @@ export function PrototypeView({
   };
 
   const hasFlows = model.flows.length > 0;
-  const selectedFlow = flow === null ? undefined : model.flows.find((f) => f.name === flow);
 
   const onFlowSelected = (next: string) => {
     setFlow(next);
@@ -196,14 +195,30 @@ export function PrototypeView({
         "& .App-menu_top__left": { display: "none !important" },
       }}
     >
-      {/* Toolbar, two tiers: the flow is the outer context and screen
-          navigation happens INSIDE it, so the screen row is indented and sits
-          on a recessed surface rather than beside the flow picker as a peer.
-          A wireframe with no declared flows has no outer level, so it keeps
-          the original single row. */}
-      {hasFlows && (
-        <Box sx={{ px: 1.5, py: 1, display: "flex", alignItems: "center", gap: 1.5, borderBottom: 1, borderColor: "divider" }}>
-          <FormControl size="small" sx={{ minWidth: 220 }}>
+      {/* Toolbar, ONE row: back · User flow · Screen · screen description.
+          The flow's own description is deliberately absent here — each option
+          in the open flow menu carries it, and repeating it in the row cost
+          the width that forced a second tier. No flows → the flow control
+          simply isn't rendered and the same row serves as before. */}
+      <Box
+        sx={{
+          px: 1.5,
+          // A notched label rides ON a control's top edge, so the row needs a
+          // little more headroom above than below.
+          pt: 1.25,
+          pb: 0.75,
+          display: "flex",
+          alignItems: "center",
+          gap: 1.5,
+          borderBottom: 1,
+          borderColor: "divider",
+        }}
+      >
+        <IconButton size="small" aria-label="Back" disabled={nav.stack.length === 0} onClick={() => dispatch({ type: "back" })}>
+          <ArrowLeft size={16} />
+        </IconButton>
+        {hasFlows && (
+          <FormControl size="small" sx={{ minWidth: 200 }}>
             <InputLabel id="aep-flow-label">User flow</InputLabel>
             <Select
               labelId="aep-flow-label"
@@ -232,61 +247,8 @@ export function PrototypeView({
               })}
             </Select>
           </FormControl>
-          {/* Description only. The role is spelled out per option in the open
-              menu, which is where personas are actually compared — repeating it
-              on the closed row only costs width. */}
-          {selectedFlow?.description && (
-            <Typography variant="body2" color="text.secondary" noWrap sx={{ minWidth: 0 }}>
-              {selectedFlow.description}
-            </Typography>
-          )}
-          {trailingSlot && <Box sx={{ ml: "auto", flexShrink: 0 }}>{trailingSlot}</Box>}
-        </Box>
-      )}
-      <Box
-        sx={{
-          // Recessed and slightly indented when it sits under a flow row: the
-          // screens belong to the flow above. The nesting is carried mostly by
-          // the surface tint and the smaller controls — a deep indent just
-          // strands the back button in whitespace. Without a flow row this IS
-          // the toolbar, so it keeps the plain surface and flush padding.
-          pl: hasFlows ? 2 : 1.5,
-          pr: 1.5,
-          // A notched label rides ON the control's top edge, so the row needs
-          // headroom above the field or the label collides with the row above.
-          pt: hasFlows ? 1.25 : 1,
-          pb: hasFlows ? 0.75 : 1,
-          bgcolor: hasFlows ? "action.hover" : undefined,
-          display: "flex",
-          // Bottom-aligned once the field carries a notched label: the label
-          // makes the field group taller, so centring would leave the back
-          // button floating against the box rather than level with it.
-          alignItems: hasFlows ? "flex-end" : "center",
-          gap: 1,
-          borderBottom: 1,
-          borderColor: "divider",
-        }}
-      >
-        <IconButton
-          size="small"
-          aria-label="Back"
-          disabled={nav.stack.length === 0}
-          onClick={() => dispatch({ type: "back" })}
-          sx={{ mb: hasFlows ? 0.25 : 0 }}
-        >
-          <ArrowLeft size={16} />
-        </IconButton>
-        {/* Deliberately smaller than the flow control above: the inner tier
-            should read as subordinate, and shrinking it is what buys that
-            without a deep indent. */}
-        <FormControl
-          size="small"
-          sx={{
-            minWidth: 180,
-            "& .MuiInputBase-input": { py: 0.75, fontSize: 13 },
-            "& .MuiInputLabel-root": { fontSize: 13 },
-          }}
-        >
+        )}
+        <FormControl size="small" sx={{ minWidth: 180 }}>
           <InputLabel id="aep-screen-label">Screen</InputLabel>
           <Select
             labelId="aep-screen-label"
@@ -303,11 +265,11 @@ export function PrototypeView({
           </Select>
         </FormControl>
         {screen.description && (
-          <Typography variant="caption" color="text.secondary" noWrap sx={{ minWidth: 0, mb: hasFlows ? 0.9 : 0 }}>
+          <Typography variant="body2" color="text.secondary" noWrap sx={{ minWidth: 0 }}>
             {screen.description}
           </Typography>
         )}
-        {trailingSlot && !hasFlows && <Box sx={{ ml: "auto", flexShrink: 0 }}>{trailingSlot}</Box>}
+        {trailingSlot && <Box sx={{ ml: "auto", flexShrink: 0 }}>{trailingSlot}</Box>}
       </Box>
       <Box sx={{ position: "relative", flex: 1, minHeight: 0 }} onClick={onDeadAreaClick}>
         <Box sx={{ position: "absolute", inset: 0 }}>
