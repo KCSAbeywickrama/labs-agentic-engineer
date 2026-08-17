@@ -214,6 +214,23 @@ export function buildMcpOptions(mcpUrl: string | undefined, mcpToken: string | u
   };
 }
 
+// When the Job minted a Thunder publisher CC token (C1), MCP must present
+// that same iss=platform-idp JWT to the public gateway. AEP_MCP_TOKEN is
+// BFF-signed (aud aep-api-mcp) and jwt-auth rejects it. Local http Jobs
+// have no publisher token, so the BFF MCP token remains.
+export function preferPublisherMcpToken(
+  mcpToken: string | undefined,
+  publisherAccessToken: string | undefined,
+): string | undefined {
+  if (publisherAccessToken) {
+    return publisherAccessToken;
+  }
+  if (mcpToken) {
+    return mcpToken;
+  }
+  return undefined;
+}
+
 /**
  * The filesystem settings sources a dispatched run admits.
  *

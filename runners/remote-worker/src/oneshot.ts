@@ -33,7 +33,7 @@
 
 import { randomUUID } from "node:crypto";
 import { provisionWorkspace } from "./lib/workspace.js";
-import { runClaudeQuery } from "./lib/runner.js";
+import { preferPublisherMcpToken, runClaudeQuery } from "./lib/runner.js";
 import { openTaskLog } from "./lib/logger.js";
 import { isUUID, isSlug } from "./lib/uuid.js";
 import type { DispatchRequest } from "./lib/types.js";
@@ -74,6 +74,8 @@ function readDispatchFromEnv(): DispatchRequest {
   // stamps AEP_MCP_URL unconditionally but only stamps AEP_MCP_TOKEN when
   // minting succeeded, so both are optional here; runner.ts guards on BOTH
   // being present before registering the in-process mcpServers entry.
+  // AEP_MCP_TOKEN is the local/BFF default (aud=aep-api-mcp). On https Jobs,
+  // publisher CC overwrites req.mcpToken after mint (preferPublisherMcpToken).
   const mcpUrl = process.env.AEP_MCP_URL || "";
   const mcpToken = process.env.AEP_MCP_TOKEN || "";
 
@@ -169,6 +171,7 @@ async function main(): Promise<number> {
     try {
       const ccToken = await ccProvider.getToken();
       req.bearer = ccToken;
+      req.mcpToken = preferPublisherMcpToken(req.mcpToken, ccToken);
       primeScrubber([ccToken]);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

@@ -56,10 +56,9 @@ export interface DispatchRequest {
    */
   mcpUrl?: string;
   /**
-   * Dedicated `aep-api-mcp`-audience identity token minted by the BFF for
-   * runner→BFF MCP calls (distinct from AEP_BEARER's git-service audience).
-   * Read from AEP_MCP_TOKEN; absent when minting failed or the dispatch
-   * predates Endpoint Spec Discovery.
+   * Token presented to the BFF MCP endpoint. On https Jobs this is the minted
+   * Thunder publisher access token (iss=platform-idp). On http Jobs it remains
+   * AEP_MCP_TOKEN (`aud=aep-api-mcp`). Absent when neither is available.
    */
   mcpToken?: string;
   /**
