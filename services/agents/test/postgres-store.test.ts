@@ -209,6 +209,33 @@ test("sanitizeForJsonb recursively replaces U+0000 with U+FFFD; everything else 
 
 // Postgres refuses the codepoint anywhere in a jsonb document, keys included —
 // sanitizing only the leaves would still lose the turn to a NUL-bearing key.
+// A Date has no enumerable own properties, so the plain-object rebuild used to
+// replace it with {} — and the journal then read back an Invalid Date on every
+// save. Non-plain objects pass through so JSON.stringify can apply toJSON.
+test("sanitizeForJsonb preserves a Date through the JSON round trip", () => {
+  const createdAt = new Date("2026-08-17T10:00:00.000Z");
+
+  const out = sanitizeForJsonb({ turns: [{ turnId: "t1", createdAt }] });
+  const round = JSON.parse(JSON.stringify(out)) as {
+    turns: Array<{ createdAt: string }>;
+  };
+  const back = new Date(round.turns[0]!.createdAt);
+
+  assert.equal(Number.isNaN(back.getTime()), false, "createdAt round-tripped as an Invalid Date");
+  assert.equal(back.toISOString(), createdAt.toISOString());
+});
+
+// The pass-through must not cost the NUL scrub anywhere it still applies.
+test("sanitizeForJsonb still scrubs NULs in strings beside a Date", () => {
+  const out = sanitizeForJsonb({
+    createdAt: new Date("2026-08-17T10:00:00.000Z"),
+    text: "before\u0000after",
+  }) as { createdAt: Date; text: string };
+
+  assert.equal(out.text, "before\ufffdafter");
+  assert.equal(out.createdAt instanceof Date, true);
+});
+
 test("sanitizeForJsonb replaces U+0000 in object keys, at any depth", () => {
   const NUL = String.fromCharCode(0);
   const out = sanitizeForJsonb({

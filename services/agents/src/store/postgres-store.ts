@@ -99,7 +99,19 @@ export function sanitizeForJsonb<T>(value: T): T {
   if (Array.isArray(value)) {
     return value.map((v) => sanitizeForJsonb(v)) as T;
   }
-  if (value !== null && typeof value === "object") {
+  // PLAIN objects only. A `Date` (or any class instance) has no enumerable own
+  // properties, so `Object.entries` returns [] and the rebuild below would
+  // replace it with `{}` — silently destroying it. That is not hypothetical
+  // here: every TurnJournalEntry carries a `createdAt: Date`, so the whole
+  // journal used to persist `{}` and read back `new Date("[object Object]")`,
+  // an Invalid Date, on every save.
+  //
+  // Passing non-plain objects through is safe because the caller hands the
+  // result straight to JSON.stringify, which applies `toJSON` itself — a Date
+  // serializes to its ISO string exactly as it would have without this
+  // function. The inputs are JSON-shaped values plus Dates; there is no
+  // NUL-bearing exotic object for the pass-through to miss.
+  if (value !== null && typeof value === "object" && isPlainObject(value)) {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
       // The key goes through the same transform as the value: Postgres refuses
@@ -112,6 +124,12 @@ export function sanitizeForJsonb<T>(value: T): T {
     return out as T;
   }
   return value;
+}
+
+/** Own-enumerable-properties objects — `{}` literals and null-prototype maps. */
+function isPlainObject(value: object): boolean {
+  const proto = Object.getPrototypeOf(value) as unknown;
+  return proto === Object.prototype || proto === null;
 }
 
 function asDate(value: unknown): Date {

@@ -853,6 +853,36 @@ func TestMCP_GetRemoteGitFileContents_OversizedTextIsTruncated(t *testing.T) {
 	}
 }
 
+// The truncation walks back to a rune boundary, and an ASCII fixture cannot
+// prove that: every byte is a rune start, so the walk-back loop never runs.
+// This one puts a 3-byte rune straddling the cut, so a naive slice at
+// maxToolFileBytes would hand the model a half-rune — invalid UTF-8 riding a
+// prompt, and a jsonb persist that Postgres may well refuse.
+func TestMCP_GetRemoteGitFileContents_TruncationNeverSplitsARune(t *testing.T) {
+	// Land one byte short of the cap, then straddle it with "…" (E2 80 A6).
+	huge := strings.Repeat("a", maxToolFileBytes-1) + "…" + strings.Repeat("b", 1024)
+	rg := &fakeRemoteGit{file: &RemoteGitFile{Content: huge, SHA: "abc"}}
+	h := NewMCPHandler(newExternalCatalogFixture(nil), nil, nil, rg, nil, nil, nil)
+	resp := decodeRPC(t, postRPC(t, h, "org-1",
+		callBody("get_remote_git_file_contents", `{"owner":"acme","repo":"billing-svc","path":"specs/openapi.yaml"}`)))
+	text := toolText(t, resp, false)
+
+	var payload remoteGitFileView
+	if err := json.Unmarshal([]byte(text), &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if !utf8.ValidString(payload.Content) {
+		t.Error("truncated content is not valid UTF-8 — a rune was split at the cut")
+	}
+	if len(payload.Content) > maxToolFileBytes {
+		t.Errorf("content is %d bytes, over the %d cap", len(payload.Content), maxToolFileBytes)
+	}
+	// The straddling rune is dropped whole rather than half-kept.
+	if strings.HasSuffix(payload.Content, "\ufffd") {
+		t.Error("truncation kept a replacement char — the rune was split, not dropped")
+	}
+}
+
 func TestMCP_GetRemoteGitFileContents_OwnerMismatch_ToolError(t *testing.T) {
 	// The reader refuses a cross-org owner; the handler must surface it as a
 	// tool-level error (isError=true), not data.
