@@ -38,8 +38,9 @@ import (
 //	internal S2S   /internal/v1/validation/, BFF Task-JWT or publisher-cc          internal.go · runnerAuthGate
 //	               /internal/v1/executions/  (dual-token verify + INT-6 fence,      ← packages/contracts/api/internal/v1 (non-public)
 //	               (deny-by-default gate)     both keyed to the run CYCLE id)
-//	internal MCP   /internal/v1/mcp     BFF-signed JWT, aud aep-api-mcp            dependencies/mcp_server.go ·
-//	               (POST, JSON-RPC)     (org from ocOrgId claim, never input)       auth.AgentsScopedVerifier (no spec — JSON-RPC)
+//	internal MCP   /internal/v1/mcp     BFF JWT aud=aep-api-mcp or Thunder          dependencies/mcp_server.go ·
+//	               (POST, JSON-RPC)     publisher CC (org from ocOrgId or           auth.AgentsScopedVerifier (no spec — JSON-RPC)
+//	                                    PublisherClaims.OrgHandle, never request)
 //	               /mcp/playground-token  NONE — flag-gated only                   dependencies/playground_token.go
 //	               (POST, local dev)      (PLAYGROUND_TOKEN_ENABLED, off by         (mounted only when the flag is true —
 //	                                      default; docker-compose sets it)          404 by absence otherwise)
@@ -149,14 +150,15 @@ func mountSurfaces(params AppParams) *http.ServeMux {
 	// designing LLM queries for the org's registered external resources,
 	// published endpoints, and platform resource types. Gated by
 	// auth.AgentsScopedVerifier — the caller presents a BFF-signed token with
-	// aud aep-api-mcp and the acting org is bound from its ocOrgId claim, never
-	// from the request. Mounted only when the token manager exists (same
-	// conditional posture as the internal S2S mount): without it nothing could
-	// verify a caller, so the path 404s instead of 503-ing forever. A nil
-	// MCPExternalResources/OrgEndpoints/ResourceTypes degrades the corresponding
-	// tool to an empty result (see dependencies.NewMCPHandler).
+	// aud aep-api-mcp or a Thunder publisher CC token; the acting org is bound
+	// from ocOrgId or PublisherClaims.OrgHandle, never from the request.
+	// Mounted only when the token manager exists (same conditional posture as
+	// the internal S2S mount): without it nothing could verify a caller, so the
+	// path 404s instead of 503-ing forever. A nil PublisherTokens keeps MCP
+	// BFF-only. A nil MCPExternalResources/OrgEndpoints/ResourceTypes degrades
+	// the corresponding tool to an empty result (see dependencies.NewMCPHandler).
 	if params.Deps.TaskTokens != nil {
-		mcpVerifier := auth.NewAgentsScopedVerifier(params.Deps.TaskTokens, nil)
+		mcpVerifier := auth.NewAgentsScopedVerifier(params.Deps.TaskTokens, params.Deps.PublisherTokens)
 		mcpHandler := mcpdiscovery.NewMCPHandler(
 			params.MCPExternalResources, params.MCPOrgEndpoints, params.MCPResourceTypes, params.MCPRemoteGit,
 			params.MCPSpecValidator, params.MCPSpecNormalizer, params.MCPSpecFetcher)

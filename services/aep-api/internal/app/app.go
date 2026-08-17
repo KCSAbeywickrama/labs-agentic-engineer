@@ -768,7 +768,8 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// Strict-handler feature dependencies — everything the contract-first
 	// /api/v1 edge serves (internal/api/handlers_*.go).
 	params.Deps = edge.Deps{
-		TaskTokens: taskTokens,
+		TaskTokens:      taskTokens,
+		PublisherTokens: publisherVerifier,
 		// DesignSvc backs the edge's own GET /projects/{name}/design/dependencies
 		// handler (the one op served directly on the composite, not a domain
 		// embed). *spec.designService satisfies the narrow reader port.
