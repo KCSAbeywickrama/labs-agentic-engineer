@@ -17,8 +17,8 @@
  */
 
 import { useMemo, useReducer, useRef, useState, useEffect, Suspense, type ReactNode } from "react";
-import { Box, CircularProgress, IconButton, MenuItem, Select, Typography } from "@wso2/oxygen-ui";
-import { ArrowLeft } from "@wso2/oxygen-ui-icons-react";
+import { Box, Chip, CircularProgress, IconButton, MenuItem, Select, Typography } from "@wso2/oxygen-ui";
+import { ArrowLeft, UserRound } from "@wso2/oxygen-ui-icons-react";
 import type { PrototypeModel } from "@aep/excalidraw-dsl";
 import { ExcalidrawComponent } from "./lazyExcalidraw.js";
 import { parseScene, fitContentToViewport } from "./scene.js";
@@ -191,18 +191,34 @@ export function PrototypeView({
             value={flow ?? ""}
             onChange={(e) => onFlowSelected(String(e.target.value))}
             aria-label="Flow"
+            // Menu items carry two lines (name + role · journey); the CLOSED
+            // control shows only the name, so it stays one row tall.
+            renderValue={(v) => String(v)}
           >
-            {model.flows.map((f) => (
-              <MenuItem key={f.name} value={f.name}>
-                {f.name}
-              </MenuItem>
-            ))}
+            {model.flows.map((f) => {
+              const detail = [f.role, f.description].filter(Boolean).join(" · ");
+              return (
+                <MenuItem key={f.name} value={f.name}>
+                  <Box sx={{ py: 0.25 }}>
+                    <Typography variant="body2">{f.name}</Typography>
+                    {detail && (
+                      <Typography variant="caption" color="text.secondary" display="block">
+                        {detail}
+                      </Typography>
+                    )}
+                  </Box>
+                </MenuItem>
+              );
+            })}
           </Select>
-          {/* Who walks this flow and what the journey is — the flow-level
-              counterpart of the screen row's description text. */}
-          {(selectedFlow?.role || selectedFlow?.description) && (
+          {/* The persona reads as a labelled chip, not stray prose; the
+              journey description follows muted, mirroring the screen row. */}
+          {selectedFlow?.role && (
+            <Chip size="small" variant="outlined" icon={<UserRound size={14} />} label={selectedFlow.role} />
+          )}
+          {selectedFlow?.description && (
             <Typography variant="body2" color="text.secondary" noWrap>
-              {[selectedFlow.role, selectedFlow.description].filter(Boolean).join(" · ")}
+              {selectedFlow.description}
             </Typography>
           )}
           {trailingSlot && <Box sx={{ ml: "auto" }}>{trailingSlot}</Box>}
