@@ -228,9 +228,11 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: "0"
+          VERSION: ${{ inputs.version }}
         run: |
-          go build -trimpath -ldflags="-s -w -X main.version=${{ inputs.version }}" \
-            -o aectl-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext || '' }} .
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "invalid version: $VERSION"; exit 1; }
+          go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" \
+            -o aectl-${GOOS}-${GOARCH}${{ matrix.ext || '' }} .
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
@@ -260,22 +262,25 @@ jobs:
       - name: Create release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ inputs.version }}
+          REPO: ${{ github.repository }}
         run: |
-          gh release create "ctl/v${{ inputs.version }}" \
-            --title "AECTL v${{ inputs.version }}" \
-            --notes "## AECTL v${{ inputs.version }}
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "invalid version: $VERSION"; exit 1; }
+          gh release create "ctl/v${VERSION}" \
+            --title "AECTL v${VERSION}" \
+            --notes "## AECTL v${VERSION}
 
           ### Install
 
           **Linux (amd64)**
           \`\`\`bash
-          curl -L https://github.com/${{ github.repository }}/releases/download/ctl%2Fv${{ inputs.version }}/aectl-linux-amd64 \
+          curl -L https://github.com/${REPO}/releases/download/ctl%2Fv${VERSION}/aectl-linux-amd64 \
             -o /usr/local/bin/aectl && chmod +x /usr/local/bin/aectl
           \`\`\`
 
           **macOS (Apple Silicon)**
           \`\`\`bash
-          curl -L https://github.com/${{ github.repository }}/releases/download/ctl%2Fv${{ inputs.version }}/aectl-darwin-arm64 \
+          curl -L https://github.com/${REPO}/releases/download/ctl%2Fv${VERSION}/aectl-darwin-arm64 \
             -o /usr/local/bin/aectl && chmod +x /usr/local/bin/aectl
           \`\`\`" \
             dist/aectl-*

@@ -959,7 +959,11 @@ print(json.loads(base64.b64decode(s)).get("ouId", ""))' 2>/dev/null)
         # Compute NS = wc-<ouId8>-<sha256(ouId)[:8]>
         CLEAN=$(printf '%s' "$OUID" | tr -d '-')
         PREFIX=$(printf '%s' "$CLEAN" | cut -c1-8)
-        SALT=$(printf '%s' "$OUID" | shasum -a 256 | cut -c1-8)
+        if command -v sha256sum > /dev/null 2>&1; then
+            SALT=$(printf '%s' "$OUID" | sha256sum | cut -c1-8)
+        else
+            SALT=$(printf '%s' "$OUID" | shasum -a 256 | cut -c1-8)
+        fi
         ORG_NS="wc-${PREFIX}-${SALT}"
         kubectl create namespace "$ORG_NS" --dry-run=client -o yaml | kubectl apply -f -
         echo "✅ org base namespace ready: $ORG_NS (Thunder ouId=$OUID)"

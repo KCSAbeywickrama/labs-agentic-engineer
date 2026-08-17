@@ -534,7 +534,7 @@ func checkOCVersion(ctx context.Context, client *kubernetes.Clientset, namespace
 		}
 		if !ok {
 			return fmt.Errorf("OpenChoreo version %s is below the minimum required version %s: "+
-				"upgrade OpenChoreo to %s or later before running `aectl init`",
+				"upgrade OpenChoreo to %s or later before running `aectl platform install`",
 				ver, minVersion, minVersion)
 		}
 		return nil
@@ -595,7 +595,7 @@ func checkBuildRegistry(ctx context.Context, client *kubernetes.Clientset, names
 		if apierrors.IsNotFound(err) {
 			return fmt.Errorf("build image registry Service %q not found in namespace %q: "+
 				"the coding-agent build pipeline needs an in-cluster image registry (publish + deploy-time pull); "+
-				"provision the OpenChoreo build plane's registry before running `aectl init`, "+
+				"provision the OpenChoreo build plane's registry before running `aectl platform install`, "+
 				"or pass --registry-service if yours is named differently", service, namespace)
 		}
 		return fmt.Errorf("check registry Service %q/%q: %w", namespace, service, err)
