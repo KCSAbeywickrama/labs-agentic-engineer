@@ -518,9 +518,9 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		slog.Info("org OU validation wired — JWT ouId is validated against Thunder before the org→OU mapping is (over)written")
 	}
 	// WithSecretRefWriter mirrors per-org publisher client_secret to SM-API on
-	// EnsureOrgPublisher / RegenerateClientSecret so the dispatcher's
-	// PUBLISHER_CLIENT_SECRET ExternalSecret can materialise it into runner
-	// pods without the BFF holding the plaintext.
+	// EnsureOrgPublisher / RegenerateClientSecret. Coding dispatch mounts
+	// PUBLISHER_CLIENT_ID and PUBLISHER_CLIENT_SECRET from that SecretReference
+	// when AGENT_PLATFORM_URL is https.
 	idpService := organization.NewIDPService(idpRepo, orgRepo, thunderAdminClient, organization.PlatformIDPConfig{
 		Issuer:  cfg.PlatformIDP.Issuer,
 		JWKSURL: cfg.PlatformIDP.JWKSURL,
@@ -569,6 +569,10 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		taskTokens, executionRepo,
 		cfg.AgentPlatformURL, cfg.AgentPlatformURL,
 		orgRepo, anthropicCredService, orgCredRepo, idpRepo)
+	codingExecutor.WithPublisherCredentials(
+		codingagent.NewIDPPublisherResolver(idpService, idpRepo),
+		codingagent.PublisherTokenURLFromJWKS(cfg.PlatformIDP.JWKSURL),
+	)
 	// The OpenChoreo Component dispatch path (phase 08): one Component per run
 	// cycle in the milestone's own project, rendered by OC into the project's
 	// dataplane namespace. It needs only the OC client and the runner image —
