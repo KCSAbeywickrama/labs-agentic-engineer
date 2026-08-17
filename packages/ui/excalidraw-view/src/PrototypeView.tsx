@@ -17,8 +17,17 @@
  */
 
 import { useMemo, useReducer, useRef, useState, useEffect, Suspense, type ReactNode } from "react";
-import { Box, Chip, CircularProgress, IconButton, MenuItem, Select, Typography } from "@wso2/oxygen-ui";
-import { ArrowLeft, UserRound } from "@wso2/oxygen-ui-icons-react";
+import {
+  Box,
+  CircularProgress,
+  FormControl,
+  IconButton,
+  InputLabel,
+  MenuItem,
+  Select,
+  Typography,
+} from "@wso2/oxygen-ui";
+import { ArrowLeft } from "@wso2/oxygen-ui-icons-react";
 import type { PrototypeModel } from "@aep/excalidraw-dsl";
 import { ExcalidrawComponent } from "./lazyExcalidraw.js";
 import { parseScene, fitContentToViewport } from "./scene.js";
@@ -27,6 +36,17 @@ import { resolveFlow, flowEntryScreen, pickerScreens } from "./flowState.js";
 import { hotspotToViewport, type ViewportRect } from "./hotspotOverlay.js";
 
 const FLASH_MS = 900;
+
+// A Select menu defaults to opening OVER its control, aligned on the selected
+// option — which in a toolbar drops the list on top of the row it belongs to
+// and over the panel beside it. Anchor it under the control instead, and cap
+// the width so a long "role · journey" line wraps rather than stretching the
+// menu across the page.
+const MENU_PROPS = {
+  anchorOrigin: { vertical: "bottom", horizontal: "left" },
+  transformOrigin: { vertical: "top", horizontal: "left" },
+  slotProps: { paper: { sx: { maxWidth: 460, mt: 0.5 } } },
+} as const;
 
 // Hotspot highlight: the wireframes' flow-accent blue, NOT the brand orange —
 // primary CTAs are drawn filled orange, so an orange ring on top of one is
@@ -182,89 +202,112 @@ export function PrototypeView({
           A wireframe with no declared flows has no outer level, so it keeps
           the original single row. */}
       {hasFlows && (
-        <Box sx={{ px: 1.5, py: 1, display: "flex", alignItems: "center", gap: 1, borderBottom: 1, borderColor: "divider" }}>
-          <Typography variant="caption" color="text.secondary">
-            User flow
-          </Typography>
-          <Select
-            size="small"
-            value={flow ?? ""}
-            onChange={(e) => onFlowSelected(String(e.target.value))}
-            aria-label="Flow"
-            // Menu items carry two lines (name + role · journey); the CLOSED
-            // control shows only the name, so it stays one row tall.
-            renderValue={(v) => String(v)}
-          >
-            {model.flows.map((f) => {
-              const detail = [f.role, f.description].filter(Boolean).join(" · ");
-              return (
-                <MenuItem key={f.name} value={f.name}>
-                  <Box sx={{ py: 0.25 }}>
-                    <Typography variant="body2">{f.name}</Typography>
-                    {detail && (
-                      <Typography variant="caption" color="text.secondary" display="block">
-                        {detail}
-                      </Typography>
-                    )}
-                  </Box>
-                </MenuItem>
-              );
-            })}
-          </Select>
-          {/* The persona reads as a labelled chip, not stray prose; the
-              journey description follows muted, mirroring the screen row. */}
-          {selectedFlow?.role && (
-            <Chip size="small" variant="outlined" icon={<UserRound size={14} />} label={selectedFlow.role} />
-          )}
+        <Box sx={{ px: 1.5, py: 1, display: "flex", alignItems: "center", gap: 1.5, borderBottom: 1, borderColor: "divider" }}>
+          <FormControl size="small" sx={{ minWidth: 220 }}>
+            <InputLabel id="aep-flow-label">User flow</InputLabel>
+            <Select
+              labelId="aep-flow-label"
+              label="User flow"
+              value={flow ?? ""}
+              onChange={(e) => onFlowSelected(String(e.target.value))}
+              // Menu items carry two lines (name + role · journey); the CLOSED
+              // control shows only the name, so the control stays one row tall.
+              renderValue={(v) => String(v)}
+              MenuProps={MENU_PROPS}
+            >
+              {model.flows.map((f) => {
+                const detail = [f.role, f.description].filter(Boolean).join(" · ");
+                return (
+                  <MenuItem key={f.name} value={f.name}>
+                    <Box sx={{ py: 0.25 }}>
+                      <Typography variant="body2">{f.name}</Typography>
+                      {detail && (
+                        <Typography variant="caption" color="text.secondary" display="block" sx={{ whiteSpace: "normal" }}>
+                          {detail}
+                        </Typography>
+                      )}
+                    </Box>
+                  </MenuItem>
+                );
+              })}
+            </Select>
+          </FormControl>
+          {/* Description only. The role is spelled out per option in the open
+              menu, which is where personas are actually compared — repeating it
+              on the closed row only costs width. */}
           {selectedFlow?.description && (
-            <Typography variant="body2" color="text.secondary" noWrap>
+            <Typography variant="body2" color="text.secondary" noWrap sx={{ minWidth: 0 }}>
               {selectedFlow.description}
             </Typography>
           )}
-          {trailingSlot && <Box sx={{ ml: "auto" }}>{trailingSlot}</Box>}
+          {trailingSlot && <Box sx={{ ml: "auto", flexShrink: 0 }}>{trailingSlot}</Box>}
         </Box>
       )}
       <Box
         sx={{
-          // Indented and recessed when it sits under a flow row: the screens
-          // belong to the flow above, and reading them as a nested tier is the
-          // whole point. Without a flow row this IS the toolbar, so it keeps
-          // the plain surface and flush padding.
-          pl: hasFlows ? 3 : 1.5,
+          // Recessed and slightly indented when it sits under a flow row: the
+          // screens belong to the flow above. The nesting is carried mostly by
+          // the surface tint and the smaller controls — a deep indent just
+          // strands the back button in whitespace. Without a flow row this IS
+          // the toolbar, so it keeps the plain surface and flush padding.
+          pl: hasFlows ? 2 : 1.5,
           pr: 1.5,
-          py: hasFlows ? 0.75 : 1,
+          // A notched label rides ON the control's top edge, so the row needs
+          // headroom above the field or the label collides with the row above.
+          pt: hasFlows ? 1.25 : 1,
+          pb: hasFlows ? 0.75 : 1,
           bgcolor: hasFlows ? "action.hover" : undefined,
           display: "flex",
-          alignItems: "center",
+          // Bottom-aligned once the field carries a notched label: the label
+          // makes the field group taller, so centring would leave the back
+          // button floating against the box rather than level with it.
+          alignItems: hasFlows ? "flex-end" : "center",
           gap: 1,
           borderBottom: 1,
           borderColor: "divider",
         }}
       >
-        <IconButton size="small" aria-label="Back" disabled={nav.stack.length === 0} onClick={() => dispatch({ type: "back" })}>
+        <IconButton
+          size="small"
+          aria-label="Back"
+          disabled={nav.stack.length === 0}
+          onClick={() => dispatch({ type: "back" })}
+          sx={{ mb: hasFlows ? 0.25 : 0 }}
+        >
           <ArrowLeft size={16} />
         </IconButton>
-        <Typography variant="caption" color="text.secondary">
-          Screen
-        </Typography>
-        <Select
+        {/* Deliberately smaller than the flow control above: the inner tier
+            should read as subordinate, and shrinking it is what buys that
+            without a deep indent. */}
+        <FormControl
           size="small"
-          value={nav.current}
-          onChange={(e) => dispatch({ type: "navigate", to: String(e.target.value) })}
-          aria-label="Screen"
+          sx={{
+            minWidth: 180,
+            "& .MuiInputBase-input": { py: 0.75, fontSize: 13 },
+            "& .MuiInputLabel-root": { fontSize: 13 },
+          }}
         >
-          {pickerScreens(model, flow, nav.current).map((name) => (
-            <MenuItem key={name} value={name}>
-              {name}
-            </MenuItem>
-          ))}
-        </Select>
+          <InputLabel id="aep-screen-label">Screen</InputLabel>
+          <Select
+            labelId="aep-screen-label"
+            label="Screen"
+            value={nav.current}
+            onChange={(e) => dispatch({ type: "navigate", to: String(e.target.value) })}
+            MenuProps={MENU_PROPS}
+          >
+            {pickerScreens(model, flow, nav.current).map((name) => (
+              <MenuItem key={name} value={name}>
+                {name}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
         {screen.description && (
-          <Typography variant="body2" color="text.secondary" noWrap>
+          <Typography variant="caption" color="text.secondary" noWrap sx={{ minWidth: 0, mb: hasFlows ? 0.9 : 0 }}>
             {screen.description}
           </Typography>
         )}
-        {trailingSlot && !hasFlows && <Box sx={{ ml: "auto" }}>{trailingSlot}</Box>}
+        {trailingSlot && !hasFlows && <Box sx={{ ml: "auto", flexShrink: 0 }}>{trailingSlot}</Box>}
       </Box>
       <Box sx={{ position: "relative", flex: 1, minHeight: 0 }} onClick={onDeadAreaClick}>
         <Box sx={{ position: "absolute", inset: 0 }}>
