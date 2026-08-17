@@ -47,6 +47,11 @@ let mockRun: MilestoneRunView | undefined;
 // answers newest-first, so these sit ahead of it. A milestone accumulates runs
 // across its life and only some of them validate, which is what these exercise.
 let mockNewerRuns: MilestoneRunView[] = [];
+// What get-task answers with for the validation issue. Settable to undefined so a
+// test can pin the case where the number exists but its url cannot be resolved —
+// a GitHub read that failed is not the same state as "no issue yet", and the page
+// is required to treat them alike.
+let mockIssueUrl: string | undefined = "https://github.com/acme/demo/issues/30";
 
 function run(over: {
   validation?: RunValidation;
@@ -81,6 +86,9 @@ const validationCycle = {
   // `${repoUrl}/pull/42`: repoUrl is a clone URL, and this page used to compose
   // one from it — which 404s the moment the clone URL carries a `.git` suffix.
   prUrl: "https://github.com/acme/demo/pull/42",
+  // The issue that FRAMED this attempt. A number only — the cycle record carries no
+  // issue url, which is why the page has to ask get-task for one.
+  validationIssue: 30,
   createdAt: "2026-07-10T10:00:00Z",
 };
 
@@ -152,6 +160,24 @@ vi.mock("../../builds/api/queries", () => ({
               : [],
         }
       : undefined,
+  }),
+}));
+
+// The validation issue's url, which no run record holds — get-task serves this one
+// by number even though list-tasks hides it. The mock models the real hook's gate
+// (`enabled: issueNumber > 0`): no number means no request and therefore no data,
+// which is what makes "asked before an issue existed" visible rather than silently
+// answered.
+vi.mock("../../tasks/api/queries", () => ({
+  useTask: (_project: string, issueNumber: number) => ({
+    isPending: false,
+    isError: false,
+    error: null,
+    refetch: vi.fn(),
+    data:
+      issueNumber > 0 && mockIssueUrl !== undefined
+        ? { issueNumber, issueUrl: mockIssueUrl }
+        : undefined,
   }),
 }));
 
@@ -238,6 +264,7 @@ afterEach(() => {
   mockCriteria.data = undefined;
   mockReport.isError = false;
   mockReport.data = undefined;
+  mockIssueUrl = "https://github.com/acme/demo/issues/30";
 });
 
 // A milestone sees SEQUENTIAL runs across its life and only some of them
@@ -657,8 +684,55 @@ describe("ValidationPage lifecycle", () => {
     mockCriteria.data = { content: CRITERIA };
     renderPage(undefined);
     expect(
-      screen.getByRole("link", { name: /Validation pull request/ }),
+      screen.getByRole("link", { name: /Validation pull request #42/ }),
     ).toHaveAttribute("href", "https://github.com/acme/demo/pull/42");
+  });
+
+  // The cycle holds the issue NUMBER and nothing else, so the url is asked of
+  // get-task — which serves this issue despite list-tasks hiding it — rather than
+  // composed from the project's repoUrl, for the same reason the PR link isn't.
+  it("links the validation issue, resolved by number rather than composed", () => {
+    mockValidation = "passed";
+    mockRun = run({
+      validation: { verdict: "passed" },
+      cycles: [validationCycle],
+    });
+    mockCriteria.data = { content: CRITERIA };
+    renderPage(undefined);
+    expect(
+      screen.getByRole("link", { name: /Validation issue #30/ }),
+    ).toHaveAttribute("href", "https://github.com/acme/demo/issues/30");
+  });
+
+  it("shows no issue link before a cycle has minted one", () => {
+    mockValidation = "passed";
+    mockRun = run({
+      validation: { verdict: "passed" },
+      // 0 is what the wire carries before a cycle mints an issue — the field is
+      // omitempty, so a run that never validated says 0, not "absent".
+      cycles: [{ ...validationCycle, validationIssue: 0 }],
+    });
+    mockCriteria.data = { content: CRITERIA };
+    renderPage(undefined);
+    expect(screen.queryByRole("link", { name: /Validation issue #30/ })).toBeNull();
+    // The pull request beside it is unaffected — the two links are independent.
+    expect(
+      screen.getByRole("link", { name: /Validation pull request #42/ }),
+    ).toBeInTheDocument();
+  });
+
+  // A GitHub read that failed leaves the number in hand and no url. The page shows
+  // nothing rather than a link it cannot aim, which is the PR's rule too.
+  it("shows no issue link when the issue url could not be resolved", () => {
+    mockValidation = "passed";
+    mockIssueUrl = undefined;
+    mockRun = run({
+      validation: { verdict: "passed" },
+      cycles: [validationCycle],
+    });
+    mockCriteria.data = { content: CRITERIA };
+    renderPage(undefined);
+    expect(screen.queryByRole("link", { name: /Validation issue #30/ })).toBeNull();
   });
 
   it("toggles to the log view via the View logs button", () => {

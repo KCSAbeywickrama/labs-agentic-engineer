@@ -18,7 +18,7 @@
 
 // @vitest-environment jsdom
 
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RunProgressCycle, RunProgressPhase } from "../hooks/useRunProgress";
 
@@ -40,9 +40,20 @@ vi.mock("../hooks/useRunProgress", async (importOriginal) => {
 
 import { RunFeed } from "./RunFeed";
 
-function section(id: string, kind: string, emitters: string[]): RunProgressCycle {
+function section(
+  id: string,
+  kind: string,
+  emitters: string[],
+  pr?: { number: number; url: string },
+): RunProgressCycle {
   return {
-    cycle: { id, kind: kind as never, attempts: 1, createdAt: "2026-07-10T09:00:00Z" },
+    cycle: {
+      id,
+      kind: kind as never,
+      attempts: 1,
+      createdAt: "2026-07-10T09:00:00Z",
+      ...(pr ? { prNumber: pr.number, prUrl: pr.url } : {}),
+    },
     lines: emitters.map((emitter, i) => ({
       cycleId: id,
       cycleKind: kind,
@@ -180,5 +191,51 @@ describe("RunFeed", () => {
     mockPhase = "reconnecting";
     render(<RunFeed projectName="acme" runId="run-1" />);
     expect(screen.getByText(/reconnecting/)).toBeInTheDocument();
+  });
+
+  // Per CYCLE, not per run: a run holds several and each opens its own pull
+  // request, so one run-level link would reach only the last of them.
+  it("links each cycle to the pull request that cycle produced", () => {
+    mockCycles = [
+      section("c1", "validation", ["main"], {
+        number: 41,
+        url: "https://github.com/acme/demo/pull/41",
+      }),
+      section("c2", "validation", ["main"], {
+        number: 47,
+        url: "https://github.com/acme/demo/pull/47",
+      }),
+    ];
+    render(<RunFeed projectName="acme" runId="run-1" />);
+    expect(
+      screen.getByRole("link", { name: /Cycle 1 pull request #41/ }),
+    ).toHaveAttribute("href", "https://github.com/acme/demo/pull/41");
+    expect(
+      screen.getByRole("link", { name: /Cycle 2 pull request #47/ }),
+    ).toHaveAttribute("href", "https://github.com/acme/demo/pull/47");
+  });
+
+  it("shows no pull request link for a cycle that has not opened one", () => {
+    mockCycles = [section("c1", "validation", ["main"])];
+    render(<RunFeed projectName="acme" runId="run-1" />);
+    expect(screen.queryByRole("link", { name: /pull request/ })).toBeNull();
+  });
+
+  // The link sits inside the summary, whose whole surface toggles the section.
+  // Without stopPropagation, opening the pull request would collapse the log the
+  // reader was looking at.
+  it("opens a cycle's pull request without collapsing its log", () => {
+    mockCycles = [
+      section("c1", "validation", ["main"], {
+        number: 41,
+        url: "https://github.com/acme/demo/pull/41",
+      }),
+    ];
+    render(<RunFeed projectName="acme" runId="run-1" />);
+    const summary = screen.getByRole("button", { name: /Cycle 1/ });
+    // The newest cycle opens expanded — that is the state the click must not change.
+    expect(summary).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(screen.getByRole("link", { name: /Cycle 1 pull request #41/ }));
+    expect(summary).toHaveAttribute("aria-expanded", "true");
   });
 });

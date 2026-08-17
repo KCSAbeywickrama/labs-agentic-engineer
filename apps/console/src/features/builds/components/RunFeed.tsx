@@ -26,6 +26,7 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import { ChevronDown } from "@wso2/oxygen-ui-icons-react";
+import { GitHubRefChip } from "../../../components/GitHubRefChip";
 import { AgentLogLines, LogSurface } from "./AgentLogLines";
 import { useRunProgress, type RunProgressCycle } from "../hooks/useRunProgress";
 
@@ -55,7 +56,14 @@ function CycleSection({
       sx={{ "&:before": { display: "none" } }}
     >
       <AccordionSummary expandIcon={<ChevronDown size={16} />}>
-        <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+        {/* Full width so the pull request can sit at the far end: the facts about
+            the cycle read left to right, and the one link the row carries is where
+            the eye lands last. */}
+        <Stack
+          direction="row"
+          spacing={1}
+          sx={{ alignItems: "center", width: "100%", pr: 1 }}
+        >
           <Typography variant="subtitle2">Cycle {index + 1}</Typography>
           <Chip label={cycle.kind} size="small" variant="outlined" />
           {cycle.attempts > 1 && (
@@ -66,6 +74,30 @@ function CycleSection({
           <Typography variant="caption" color="text.secondary">
             {lines.length} line{lines.length === 1 ? "" : "s"}
           </Typography>
+          {/* A spacer rather than `ml: auto` on the link: Stack lays its spacing
+              down as `margin-left` through a descendant selector, which outranks a
+              margin set on the child's own sx and would pin the link beside the
+              counts instead of at the row's end. */}
+          <Box sx={{ flexGrow: 1 }} />
+          {/* The pull request THIS cycle produced — per cycle rather than per run,
+              because a run holds several (a repeat validation, a fix, a conflict
+              resolution) and each opens its own. Absent until the agent opens one;
+              the stream upserts the cycle frame, so it appears the moment the pull
+              request lands rather than on the next page load.
+              Named by section so it stays distinct from the page header's chip,
+              which points at the newest cycle's pull request — the same one. */}
+          {cycle.prUrl && cycle.prNumber ? (
+            <GitHubRefChip
+              kind="pull"
+              number={cycle.prNumber}
+              url={cycle.prUrl}
+              name={`Cycle ${index + 1} pull request`}
+              tooltip="Open this cycle's pull request"
+              // The summary's whole surface toggles the section — without this,
+              // opening the pull request also collapses the log being read.
+              onClick={(e) => e.stopPropagation()}
+            />
+          ) : null}
         </Stack>
       </AccordionSummary>
       <AccordionDetails sx={{ pt: 0 }}>

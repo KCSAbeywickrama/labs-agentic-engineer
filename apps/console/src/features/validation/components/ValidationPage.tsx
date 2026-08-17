@@ -16,17 +16,8 @@
  * under the License.
  */
 
-import {
-  Alert,
-  alpha,
-  Box,
-  Button,
-  CircularProgress,
-  IconButton,
-  Stack,
-  Tooltip,
-} from "@wso2/oxygen-ui";
-import { FileText, GitPullRequest, ScrollText, X } from "@wso2/oxygen-ui-icons-react";
+import { Alert, alpha, Box, Button, CircularProgress, Stack } from "@wso2/oxygen-ui";
+import { FileText, ScrollText, X } from "@wso2/oxygen-ui-icons-react";
 import { Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import {
@@ -39,6 +30,7 @@ import {
 import { PageHeader, type PageHeaderStatus } from "../../../components/PageHeader";
 import type { StatusTone } from "../../../components/StatusChip";
 import { EmptyState } from "../../../components/EmptyState";
+import { GitHubRefChip } from "../../../components/GitHubRefChip";
 import { useProjectStatus } from "../../projects/api/queries";
 import { useBuildRuns, useCancelRun } from "../../builds/api/queries";
 import { RunFeed } from "../../builds/components/RunFeed";
@@ -48,6 +40,7 @@ import {
   validationView,
   type StageTone,
 } from "../../projects/lib/pipeline";
+import { useTask } from "../../tasks/api/queries";
 import { useValidationCriteria, useValidationReport } from "../api/queries";
 import {
   answeredRun,
@@ -217,7 +210,26 @@ export function ValidationPage({
   //
   // Taken from the LATEST attempt rather than the merged one: mid-repeat the open
   // pull request is the one a reader wants, and it is the one this link is for.
+  // The number rides along because the link STATES which pull request it opens: two
+  // GitHub chips sit side by side here, and the log below repeats one of them.
   const prUrl = validationCycle?.prUrl;
+  const prNumber = validationCycle?.prNumber ?? 0;
+  // The validation issue is what FRAMED the attempt the PR above answers, so both
+  // links are read off the same cycle and describe the same attempt.
+  //
+  // "Latest" is a formality here: EnsureValidationIssue is keyed by MILESTONE and
+  // reopens the existing issue for a repeat attempt rather than minting a second
+  // one, so every cycle on this page carries the same number. That is also why the
+  // issue belongs in the header alone while the pull request repeats per cycle — one
+  // issue per version, one PR per attempt.
+  const issueNumber = validationCycle?.validationIssue ?? 0;
+  // Only the NUMBER is on the wire; the cycle record has no issue URL. Asked of
+  // get-task rather than composed from the project's repoUrl for the reason above:
+  // that is a clone url. get-task serves this issue even though list-tasks hides it
+  // — a detail read by number deliberately skips the population filter — and answers
+  // with GitHub's own url. The hook is a no-op while the number is 0.
+  const issue = useTask(projectName, issueNumber);
+  const issueUrl = issue.data?.issueUrl;
 
   // The run reached an ANSWER — which is not the same as "everything passed", and
   // not the same as "there is a report". Hooks stay unconditional; `enabled` gates
@@ -324,18 +336,31 @@ export function ValidationPage({
               {cancelling ? "Cancelling…" : "Cancel run"}
             </Button>
           )}
-          {prUrl && (
-            <Tooltip title="Open the validation PR">
-              <IconButton
-                component="a"
-                href={prUrl}
-                target="_blank"
-                rel="noreferrer"
-                aria-label="Validation pull request"
-              >
-                <GitPullRequest size={18} />
-              </IconButton>
-            </Tooltip>
+          {/* Before the pull request, because the issue frames the work and the PR
+              answers it — GitHub's own ordering. Absent when no cycle has minted an
+              issue yet, and equally when the read that resolves its url failed:
+              same rule as the PR beside it, which shows nothing rather than a link
+              it cannot aim. */}
+          {issueUrl && (
+            <GitHubRefChip
+              kind="issue"
+              number={issueNumber}
+              url={issueUrl}
+              name="Validation issue"
+              tooltip="Open the validation issue"
+            />
+          )}
+          {/* Named "Validation …" rather than the bare default because the log below
+              carries a chip for the same pull request — this one answers "the PR for
+              this validation", that one "the PR this cycle produced". */}
+          {prUrl && prNumber > 0 && (
+            <GitHubRefChip
+              kind="pull"
+              number={prNumber}
+              url={prUrl}
+              name="Validation pull request"
+              tooltip="Open the validation PR"
+            />
           )}
           {settled &&
             (showLogs ? (
