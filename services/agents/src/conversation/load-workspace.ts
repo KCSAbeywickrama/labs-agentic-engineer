@@ -38,7 +38,8 @@
  *    row, so it is absent from the catalog and `load`/`loadReference` return
  *    `undefined` for it, same as an unknown name.
  *  - `readReferenceAttachments(dir, references)` reads the natively-readable
- *    binary entries (`.pdf`, `.png`, `.jpg`/`.jpeg`) of a `start` turn's
+ *    binary entries (`.pdf` and the four image types the models read natively —
+ *    `.png`, `.jpg`/`.jpeg`, `.gif`, `.webp`) of a `start` turn's
  *    `TurnSpec.references` as native AI SDK file parts (#384).
  *    None of them is ever in the text `files` map — `keepInTurnSnapshot` admits
  *    none of those extensions, whatever the bytes look like, and the walk's
@@ -139,8 +140,35 @@ function isAdmittedSpecPath(path: string): boolean {
 export function keepInTurnSnapshot(path: string): boolean {
   if (path.endsWith(".md") || path.endsWith(".dsl") || path.endsWith(".cell")) return true;
   if (isAdmittedSpecPath(path)) return true;
+  if (isTextReferencePath(path)) return true;
   const base = basename(path);
   return base === "design.json" || base === "validation-criteria.json";
+}
+
+/**
+ * A user-uploaded reference the model should read AS TEXT.
+ *
+ * References are the one input here the agent did not author, so the
+ * extension allow-list above — built for agent-authored spec artifacts — is the
+ * wrong test for them: it admits a `.md` reference and silently drops a `.txt`
+ * or `.csv` one, which then reaches the turn as a file on disk that nothing
+ * puts in front of the model. The rule is the folder, not the extension.
+ *
+ * Natively-read binaries are excluded deliberately: they ride as file PARTS
+ * (`readReferenceAttachments`), and admitting them here would either double
+ * them up or, worse, pour a PDF's bytes into the text map — the failure this
+ * channel exists to avoid.
+ */
+/**
+ * Where reference documents appear inside a turn's snapshot (#383). NOT a repo
+ * path: nothing is committed there any more — aep-api stores the documents off
+ * git and overlays them into the extracted snapshot at this prefix (console
+ * ADR-0017), which is exactly why nothing in this file had to change.
+ */
+export const REFERENCES_PREFIX = "specs/requirements/references/";
+
+function isTextReferencePath(path: string): boolean {
+  return path.startsWith(REFERENCES_PREFIX) && nativeMediaTypeFor(path) === undefined;
 }
 
 /**
@@ -220,6 +248,8 @@ const NATIVE_MEDIA_BY_EXT: Record<string, string> = {
   png: "image/png",
   jpg: "image/jpeg",
   jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
 };
 
 function nativeMediaTypeFor(path: string): string | undefined {
@@ -361,14 +391,6 @@ export function readReferenceAttachments(snapshotDir: string, references: string
   }
   return parts;
 }
-
-/**
- * Where reference documents appear inside a turn's snapshot (#383). NOT a repo
- * path: nothing is committed there any more — aep-api stores the documents off
- * git and overlays them into the extracted snapshot at this prefix (console
- * ADR-0017), which is exactly why nothing in this file had to change.
- */
-export const REFERENCES_PREFIX = "specs/requirements/references/";
 
 /**
  * Overlay the SNAPSHOT's reference-document texts onto a room-scoped turn's

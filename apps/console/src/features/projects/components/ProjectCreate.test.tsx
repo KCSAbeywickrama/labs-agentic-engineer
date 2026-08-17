@@ -93,9 +93,7 @@ describe("ProjectCreate reference documents (#383)", () => {
     render(<ProjectCreate />);
     attach("spec.docx");
     expect(screen.queryByText(/spec\.docx \(/)).toBeNull();
-    expect(
-      screen.getByText(/only \.md, \.txt, \.pdf, \.png, \.jpg, \.jpeg files are accepted/i),
-    ).toBeTruthy();
+    expect(screen.getByText(/files are accepted/i)).toBeTruthy();
   });
 
   // Two rejections can carry one name — the same unsupported file picked twice

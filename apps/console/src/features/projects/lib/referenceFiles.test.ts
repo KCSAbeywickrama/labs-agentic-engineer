@@ -29,16 +29,28 @@ function file(name: string, content: string | Uint8Array<ArrayBuffer>, type = ""
 }
 
 describe("screenReferenceFiles", () => {
-  it("accepts .md, .txt, and .pdf", () => {
+  // The two groups the models actually read: PDF plus the four native image
+  // media types, and text in whatever shape a brief or an API spec arrives in.
+  it("accepts every natively-read binary type", () => {
+    const names = ["spec.pdf", "shot.png", "a.jpg", "b.jpeg", "anim.gif", "ui.webp"];
     const { accepted, rejected } = screenReferenceFiles(
       [],
-      [file("prd.md", "# PRD"), file("notes.txt", "notes"), file("spec.pdf", "x")],
+      names.map((n) => file(n, "x")),
     );
-    expect(accepted.map((f) => f.name)).toEqual([
-      "prd.md",
-      "notes.txt",
-      "spec.pdf",
-    ]);
+    expect(accepted.map((f) => f.name)).toEqual(names);
+    expect(rejected).toEqual([]);
+  });
+
+  it("accepts the text formats a brief or an API spec arrives in", () => {
+    const names = [
+      "prd.md", "notes.txt", "rows.csv", "rows.tsv", "schema.json",
+      "openapi.yaml", "config.yml", "feed.xml", "page.html", "doc.rst",
+    ];
+    const { accepted, rejected } = screenReferenceFiles(
+      [],
+      names.map((n) => file(n, "x")),
+    );
+    expect(accepted.map((f) => f.name)).toEqual(names);
     expect(rejected).toEqual([]);
   });
 
@@ -50,7 +62,10 @@ describe("screenReferenceFiles", () => {
     expect(accepted).toEqual([]);
     expect(rejected).toHaveLength(1);
     expect(rejected[0]?.name).toBe("spec.docx");
-    expect(rejected[0]?.reason).toMatch(/\.md, \.txt, \.pdf/);
+    // Office formats are out on purpose: the models don't read them natively,
+    // so accepting one would store bytes no turn can use.
+    expect(rejected[0]?.reason).toMatch(/\.pdf/);
+    expect(rejected[0]?.reason).toMatch(/\.webp/);
   });
 
   it("rejects a file over the size cap", () => {

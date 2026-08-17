@@ -17,8 +17,12 @@
  */
 
 // Reference documents attached on the create view (#383). Grilling decisions:
-// text, PDF and images only (agents read PDFs and images natively; DOCX would
-// need conversion tooling), 5 MB per file, and at most 10 files.
+// 5 MB per file, at most 10 files, and only types the models can actually read
+// — PDF and the four native image media types (png, jpeg, gif, webp), plus text
+// formats a brief or an API spec actually arrives in.
+//
+// Office formats (.docx/.xlsx/.pptx) stay out: the models do not read them
+// natively, so accepting one would store bytes no turn can use.
 //
 // The bytes go up as multipart to POST /projects/{name}/references and are
 // never committed (ADR-0017) — the server stores them off-git and overlays them
@@ -29,10 +33,18 @@
 const REFERENCES_DIR = "specs/requirements/references";
 export const MAX_REFERENCE_FILE_BYTES = 5 * 1024 * 1024;
 export const MAX_REFERENCE_FILES = 10;
-export const REFERENCE_ACCEPT = ".md,.txt,.pdf,.png,.jpg,.jpeg";
+const NATIVE_EXTENSIONS = ["pdf", "png", "jpg", "jpeg", "gif", "webp"] as const;
+const TEXT_EXTENSIONS = [
+  "md", "txt", "csv", "tsv", "json", "yaml", "yml", "xml", "html", "rst",
+] as const;
 
-const TEXT_EXTENSIONS = new Set(["md", "txt"]);
-const ACCEPTED_EXTENSIONS = new Set([...TEXT_EXTENSIONS, "pdf", "png", "jpg", "jpeg"]);
+// The input's own accept list, derived from the two groups so the picker, the
+// screening below, and the hint text can never disagree about what is allowed.
+export const REFERENCE_ACCEPT = [...NATIVE_EXTENSIONS, ...TEXT_EXTENSIONS]
+  .map((e) => `.${e}`)
+  .join(",");
+
+const ACCEPTED_EXTENSIONS = new Set<string>([...NATIVE_EXTENSIONS, ...TEXT_EXTENSIONS]);
 
 export interface RejectedFile {
   name: string;
@@ -61,7 +73,7 @@ export function screenReferenceFiles(
     if (!ACCEPTED_EXTENSIONS.has(extensionOf(file.name))) {
       rejected.push({
         name: file.name,
-        reason: "Only .md, .txt, .pdf, .png, .jpg, .jpeg files are accepted",
+        reason: `Only ${REFERENCE_ACCEPT.split(",").join(", ")} files are accepted`,
       });
     } else if (file.size > MAX_REFERENCE_FILE_BYTES) {
       rejected.push({ name: file.name, reason: "Larger than 5 MB" });

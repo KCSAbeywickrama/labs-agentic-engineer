@@ -65,12 +65,24 @@ var ErrReferenceRejected = errors.New("gitfs: reference document rejected")
 // the store path and a path inside the snapshot.
 var referenceNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$`)
 
-// referenceExtensions are the types agents can actually read: text they parse,
-// PDFs and images they consume natively. Anything else would be dead weight in
-// the snapshot.
+// referenceExtensions are the types the models can actually read.
+//
+// Two groups, and the split matters downstream. The BINARY group is what the
+// model reads NATIVELY as file parts — PDF plus the four image media types the
+// Messages API accepts (image/png, image/jpeg, image/gif, image/webp); there is
+// no fifth. The TEXT group is everything the model reads as plain text, so it
+// is open-ended by nature — these are the formats a requirements brief or an
+// API spec actually arrives in.
+//
+// Deliberately absent: .docx / .xlsx / .pptx. The models do not read Office
+// formats natively — those need the code-execution Skills route — so accepting
+// one here would store bytes no turn can use.
 var referenceExtensions = map[string]bool{
-	".md": true, ".txt": true, ".pdf": true,
-	".png": true, ".jpg": true, ".jpeg": true,
+	// Binary, read natively as file parts.
+	".pdf": true, ".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".webp": true,
+	// Text, read as workspace files.
+	".md": true, ".txt": true, ".csv": true, ".tsv": true, ".json": true,
+	".yaml": true, ".yml": true, ".xml": true, ".html": true, ".rst": true,
 }
 
 // ReferenceDoc is one document to store: a bare file name and its raw bytes.

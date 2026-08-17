@@ -114,6 +114,36 @@ test("filterTurnSnapshot mirrors the walk's rules over an in-memory map", () => 
   ]);
 });
 
+// A user-uploaded reference is not an agent-authored spec artifact, so the
+// extension allow-list is the wrong test for it: it admits a .md reference and
+// drops a .txt or .csv one, which then sits in the snapshot with nothing
+// putting it in front of the model. The folder decides.
+test("keepInTurnSnapshot admits text references whatever their extension", () => {
+  for (const ext of ["md", "txt", "csv", "tsv", "json", "yaml", "yml", "xml", "html", "rst"]) {
+    assert.equal(
+      keepInTurnSnapshot(`specs/requirements/references/brief.${ext}`),
+      true,
+      `.${ext} reference should be readable as text`,
+    );
+  }
+  // Outside the references folder the old rules still hold — admitting these
+  // globally would put arbitrary yaml and json into every turn.
+  assert.equal(keepInTurnSnapshot("specs/design/workload.yaml"), false);
+  assert.equal(keepInTurnSnapshot("specs/requirements/rows.csv"), false);
+});
+
+// Natively-read binaries ride as file PARTS. Admitting one here would pour a
+// PDF's bytes into the text map — the failure that channel exists to avoid.
+test("keepInTurnSnapshot keeps natively-read binary references OUT of the text map", () => {
+  for (const ext of ["pdf", "png", "jpg", "jpeg", "gif", "webp"]) {
+    assert.equal(
+      keepInTurnSnapshot(`specs/requirements/references/doc.${ext}`),
+      false,
+      `.${ext} reference must ride as a file part, not as text`,
+    );
+  }
+});
+
 test("keepInTurnSnapshot admits the two OpenAPI contract shapes but still rejects arbitrary yaml", () => {
   // Produced contract: specs/design/components/<c>/openapi.yaml
   assert.equal(keepInTurnSnapshot("specs/design/components/orders/openapi.yaml"), true);
