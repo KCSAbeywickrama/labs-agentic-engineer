@@ -67,6 +67,11 @@ type CodingExecutor struct {
 	githubCreds  organization.OrgCredentialRepository
 	idpProfiles  organization.IDPRepository
 
+	// publisher is the Thunder publisher SecretReference resolver used when
+	// AGENT_PLATFORM_URL is https (gateway jwt-auth). Nil is allowed on http.
+	publisher         PublisherCredentialResolver
+	publisherTokenURL string
+
 	// Build-secret staging (nil → unauthenticated clone, correct for public
 	// repos). buildSecrets pre-stages the org's build git credential so a build's
 	// checkout-source step can clone a private repo; authRetryBudget bounds the
@@ -274,6 +279,18 @@ func (e *CodingExecutor) dispatchViaOC(ctx context.Context, in agentLaunch, repo
 	if mcpToken != "" {
 		env["AEP_MCP_TOKEN"] = mcpToken
 	}
+	secretEnv := []SecretEnvRef{
+		{Key: anthropicEnvVarOrDefault(anthropicSR.EnvVar), SecretName: anthropicSR.SecretRefName, SecretKey: anthropicSR.Property},
+		{Key: envGitHubToken, SecretName: githubSR.SecretRefName, SecretKey: githubSR.Property},
+	}
+	if requiresGatewayPublisher(e.platformURL) {
+		pub, tokenURL, err := e.publisherSecretEnv(ctx, in.orgID)
+		if err != nil {
+			return "", err
+		}
+		env[envPublisherTokenURL] = tokenURL
+		secretEnv = append(secretEnv, pub...)
+	}
 	return e.ocJobs.Dispatch(ctx, OCDispatchInputs{
 		OrgID:                 in.orgID,
 		ProjectID:             in.projectID,
@@ -285,10 +302,7 @@ func (e *CodingExecutor) dispatchViaOC(ctx context.Context, in agentLaunch, repo
 		RunName:               codingAgentRunNameFor(in.projectID, in.correlationID),
 		ActiveDeadlineSeconds: int(disp.deadline),
 		Env:                   env,
-		SecretEnv: []SecretEnvRef{
-			{Key: anthropicEnvVarOrDefault(anthropicSR.EnvVar), SecretName: anthropicSR.SecretRefName, SecretKey: anthropicSR.Property},
-			{Key: envGitHubToken, SecretName: githubSR.SecretRefName, SecretKey: githubSR.Property},
-		},
+		SecretEnv:             secretEnv,
 	})
 }
 

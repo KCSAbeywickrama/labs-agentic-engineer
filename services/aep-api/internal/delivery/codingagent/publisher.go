@@ -16,7 +16,13 @@
 
 package codingagent
 
-import "strings"
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"github.com/wso2/aep/aep-api/internal/organization"
+)
 
 const (
 	envPublisherClientID     = "PUBLISHER_CLIENT_ID"
@@ -24,6 +30,13 @@ const (
 	envPublisherTokenURL     = "PUBLISHER_TOKEN_URL"
 	publisherDispatchActor   = "coding-dispatch"
 )
+
+// PublisherCredentialResolver ensures the org's Thunder publisher
+// client_credentials SecretReference is ready and returns its name only
+// (never the secret value). Nil is allowed on http platform URLs.
+type PublisherCredentialResolver interface {
+	EnsureReady(ctx context.Context, orgID string) (secretRefName string, err error)
+}
 
 func requiresGatewayPublisher(platformURL string) bool {
 	u := strings.TrimSpace(platformURL)
@@ -37,4 +50,34 @@ func PublisherTokenURLFromJWKS(jwksURL string) string {
 		return ""
 	}
 	return u[:len(u)-len(suffix)] + "/oauth2/token"
+}
+
+// WithPublisherCredentials wires the Thunder publisher SecretReference
+// resolver and the already-derived token URL used on https dispatch.
+func (e *CodingExecutor) WithPublisherCredentials(r PublisherCredentialResolver, tokenURL string) *CodingExecutor {
+	e.publisher = r
+	e.publisherTokenURL = tokenURL
+	return e
+}
+
+func (e *CodingExecutor) publisherSecretEnv(ctx context.Context, orgID string) ([]SecretEnvRef, string, error) {
+	tokenURL := strings.TrimSpace(e.publisherTokenURL)
+	if tokenURL == "" {
+		return nil, "", fmt.Errorf("https AGENT_PLATFORM_URL requires PLATFORM_IDP_JWKS_URL ending in /oauth2/jwks (publisher token URL)")
+	}
+	if e.publisher == nil {
+		return nil, "", fmt.Errorf("https AGENT_PLATFORM_URL requires publisher credentials")
+	}
+	refName, err := e.publisher.EnsureReady(ctx, orgID)
+	if err != nil {
+		return nil, "", fmt.Errorf("publisher credentials: %w", err)
+	}
+	refName = strings.TrimSpace(refName)
+	if refName == "" {
+		return nil, "", fmt.Errorf("publisher SecretReference missing after ensure; rotate with RegenerateClientSecret")
+	}
+	return []SecretEnvRef{
+		{Key: envPublisherClientID, SecretName: refName, SecretKey: organization.PublisherSecretFieldClientID},
+		{Key: envPublisherClientSecret, SecretName: refName, SecretKey: organization.PublisherSecretFieldClientSecret},
+	}, tokenURL, nil
 }
