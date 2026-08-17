@@ -29,7 +29,6 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"golang.org/x/term"
-	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -54,31 +53,34 @@ const (
 )
 
 var (
-	initPlatformChart        string
-	initPlatformVersion      string
-	initPlatformRelease      string
-	initPlatformNamespace    string
-	initConsoleURL           string
-	initAPIURL               string
-	initWorkspacesAccessMode string
-	initBuildPlaneNamespace  string
-	initRegistryService      string
-	initOCNamespace          string
-	initSkipOCVersionCheck   bool
-	initLocalStubs           bool
+	initPlatformChart       string
+	initPlatformVersion     string
+	initPlatformRelease     string
+	initPlatformNamespace   string
+	initConsoleURL          string
+	initAPIURL              string
+	initBuildPlaneNamespace string
+	initRegistryService     string
+	initOCNamespace         string
+	initSkipOCVersionCheck  bool
+	initOpenBaoDirect       bool
+	initReuseSecrets        bool
 )
 
 var initCmd = &cobra.Command{
 	Use:   "install",
 	Short: "Provision OpenBao secrets, install the platform, and configure Thunder",
 	Long: `Full AEP platform installation in one command:
-  1. Seeds all platform secrets into OpenChoreo's built-in OpenBao instance
-  2. Installs or upgrades the platform Helm chart (idempotent)
-  3. Waits for all platform pods to be ready
-  4. Registers AEP OAuth clients in Thunder
-  5. Writes cluster config to the aep-cli-config ConfigMap`,
-	Annotations: map[string]string{"skipClusterConfig": "true"},
-	RunE:        runAEPInit,
+  1. Validates the cluster config (imported via 'aep platform config import')
+  2. Seeds all platform secrets into OpenChoreo's built-in OpenBao instance
+  3. Installs or upgrades the platform Helm chart (idempotent)
+  4. Waits for all platform pods to be ready
+  5. Registers AEP OAuth clients in Thunder
+
+Run 'aep platform config import --config <file>' before this command.
+All configuration values are read from the imported ConfigMap — no
+hardcoded defaults are used.`,
+	RunE: runAEPInit,
 }
 
 func init() {
@@ -89,30 +91,41 @@ func init() {
 	initCmd.Flags().StringVar(&initPlatformNamespace, "namespace", "wso2-aep", "Kubernetes namespace")
 	initCmd.Flags().StringVar(&initConsoleURL, "console-url", "http://console.openchoreo.localhost:8080", "Public URL of the AEP console")
 	initCmd.Flags().StringVar(&initAPIURL, "api-url", "http://api.openchoreo.localhost:8080", "Public URL of the AEP API")
-	initCmd.Flags().StringVar(&initWorkspacesAccessMode, "workspaces-access-mode", "", "PVC access mode for the shared workspaces volume (ReadWriteOnce; override for local k3d)")
-	_ = viper.BindPFlag("platform.workspaces.access_mode", initCmd.Flags().Lookup("workspaces-access-mode"))
 	initCmd.Flags().StringVar(&initBuildPlaneNamespace, "build-plane-namespace", "openchoreo-workflow-plane", "Namespace of the OpenChoreo build/workflow plane (must already exist, incl. its image registry)")
 	initCmd.Flags().StringVar(&initRegistryService, "registry-service", "registry", "Name of the build-plane image registry Service (the coding-agent build pushes/pulls here)")
-	initCmd.Flags().StringVar(&initOCNamespace, "oc-namespace", "openchoreo-system", "Namespace where OpenChoreo control-plane is installed")
+	initCmd.Flags().StringVar(&initOCNamespace, "oc-namespace", "", "Namespace where OpenChoreo control-plane is installed (overrides config)")
+	_ = viper.BindPFlag("oc.system_namespace", initCmd.Flags().Lookup("oc-namespace"))
 	initCmd.Flags().BoolVar(&initSkipOCVersionCheck, "skip-oc-version-check", false, "Skip the OpenChoreo minimum version check (not recommended)")
-	initCmd.Flags().String("oc-api-url", "", "In-cluster URL of the OpenChoreo platform API")
+	initCmd.Flags().String("oc-api-url", "", "In-cluster URL of the OpenChoreo platform API (overrides config)")
 	_ = viper.BindPFlag("oc.api_url", initCmd.Flags().Lookup("oc-api-url"))
-	initCmd.Flags().String("webhook-delivery-url", "", "Public URL registered on each repo's webhook (e.g. https://webhook.example.com/api/v1/webhooks/github)")
+	initCmd.Flags().String("webhook-delivery-url", "", "Public URL registered on each repo's webhook (overrides config)")
 	_ = viper.BindPFlag("webhook.delivery_url", initCmd.Flags().Lookup("webhook-delivery-url"))
-	initCmd.Flags().BoolVar(&initLocalStubs, "local-stubs", false, "Deploy in-cluster stubs for the cluster-gateway-proxy and secret-manager API (local/dev installs; enables direct OpenBao secret writes)")
-	_ = viper.BindPFlag("codingagent.local_stubs.enabled", initCmd.Flags().Lookup("local-stubs"))
-	initCmd.Flags().String("cluster-gateway-proxy-url", "", "URL of the managed cluster-gateway-proxy service (production; omit to deploy the local stub)")
-	_ = viper.BindPFlag("codingagent.cluster_gateway_proxy.url", initCmd.Flags().Lookup("cluster-gateway-proxy-url"))
-	initCmd.Flags().String("secret-manager-api-url", "", "URL of the managed secret-manager API service (production; omit to deploy the local stub)")
-	_ = viper.BindPFlag("codingagent.secret_manager_api.url", initCmd.Flags().Lookup("secret-manager-api-url"))
+	initCmd.Flags().BoolVar(&initOpenBaoDirect, "openbao-direct", false, "Enable OpenBao-direct secrets delivery — injects OPENBAO_ADDR/TOKEN into aep-api (required for local/OSS installs)")
+	_ = viper.BindPFlag("codingagent.openbao_direct.enabled", initCmd.Flags().Lookup("openbao-direct"))
+	initCmd.Flags().String("openbao-addr", "", "In-cluster URL of the OpenBao service (overrides config)")
+	_ = viper.BindPFlag("openbao.addr", initCmd.Flags().Lookup("openbao-addr"))
+	initCmd.Flags().BoolVar(&initReuseSecrets, "reuse-secrets", false, "Skip secret prompts and reuse secrets already seeded in OpenBao (for reinstall or upgrade)")
 	registerThunderFlags(initCmd)
 }
 
 func runAEPInit(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
+	// Pre-flight: all config values must come from the imported ConfigMap.
+	// PersistentPreRunE has already loaded it; fail fast if any required key is missing.
+	if errs := config.ValidateLoaded(); len(errs) > 0 {
+		_, _ = fmt.Fprintln(os.Stderr, "Missing or invalid config. Run 'aep platform config import --config <file>' first:")
+		for _, e := range errs {
+			_, _ = fmt.Fprintf(os.Stderr, "  %s\n", e)
+		}
+		return fmt.Errorf("config validation failed")
+	}
+
 	if _, err := exec.LookPath("helm"); err != nil {
 		return fmt.Errorf("helm is required but was not found in PATH\nInstall it from https://helm.sh/docs/intro/install/ and try again")
+	}
+	if _, err := exec.LookPath("kubectl"); err != nil {
+		return fmt.Errorf("kubectl is required but was not found in PATH\nInstall it from https://kubernetes.io/docs/tasks/tools/ and try again")
 	}
 
 	k8sClient, err := k8s.NewClient(kubeconfig)
@@ -120,14 +133,9 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("connect to cluster: %w", err)
 	}
 
-	_, cmErr := k8sClient.CoreV1().ConfigMaps(initPlatformNamespace).Get(ctx, config.ConfigMapName, metav1.GetOptions{})
-	if cmErr == nil {
-		_, _ = fmt.Fprintf(os.Stderr, "warning: existing %s found — re-running install will overwrite it.\n", config.ConfigMapName)
-		_, _ = fmt.Fprintf(os.Stderr, "  Export your config first with: aep platform config export\n")
-	}
-
+	ocNamespace := viper.GetString("oc.system_namespace")
 	if !initSkipOCVersionCheck {
-		if err := checkOCVersion(ctx, k8sClient, initOCNamespace, minOCVersion); err != nil {
+		if err := checkOCVersion(ctx, k8sClient, ocNamespace, minOCVersion); err != nil {
 			return err
 		}
 	}
@@ -136,29 +144,56 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// 1. Prompt for secrets.
-	anthropicKey, err := readMaskedInput("Anthropic API key")
-	if err != nil {
-		return fmt.Errorf("read Anthropic API key: %w", err)
-	}
-	if anthropicKey == "" {
-		return fmt.Errorf("an Anthropic API key is required")
-	}
+	openBaoDirect := viper.GetBool("codingagent.openbao_direct.enabled")
 
-	if os.Getenv("AEP_THUNDER_ADMIN_CLIENT_SECRET") == "" {
-		thunderSecret, err := readMaskedInput("Thunder admin client secret (Enter = use Thunder default)")
+	// 1. Secrets: either reuse existing OpenBao secrets or prompt + provision fresh ones.
+	if initReuseSecrets {
+		_, _ = fmt.Fprintln(os.Stdout, "Verifying existing OpenBao secrets...")
+		if err := verifyOpenBaoSecrets(ctx); err != nil {
+			return fmt.Errorf("reuse-secrets verification failed: %w\nRemove --reuse-secrets to run a fresh install", err)
+		}
+		_, _ = fmt.Fprintln(os.Stdout, "Existing secrets verified — skipping provisioning.")
+	} else {
+		anthropicKey, err := readMaskedInput("Anthropic API key")
 		if err != nil {
-			return fmt.Errorf("read Thunder admin client secret: %w", err)
+			return fmt.Errorf("read Anthropic API key: %w", err)
 		}
-		if thunderSecret != "" {
-			viper.Set("thunder.admin_client_secret", thunderSecret)
+		if anthropicKey == "" {
+			return fmt.Errorf("an Anthropic API key is required")
 		}
-	}
 
-	// 2. Provision OpenBao — seed all platform secrets into OC's built-in instance.
-	_, _ = fmt.Fprintln(os.Stdout, "Provisioning OpenBao secrets...")
-	if err := provisionOpenBao(ctx, anthropicKey); err != nil {
-		return fmt.Errorf("provision OpenBao: %w", err)
+		if openBaoDirect && os.Getenv("AEP_OPENBAO_TOKEN") == "" {
+			obToken, err := readMaskedInput("OpenBao token (Enter = use default \"root\")")
+			if err != nil {
+				return fmt.Errorf("read OpenBao token: %w", err)
+			}
+			if obToken != "" {
+				viper.Set("openbao.token", obToken)
+			}
+		}
+
+		if os.Getenv("AEP_THUNDER_ADMIN_CLIENT_SECRET") == "" {
+			thunderSecret, err := readMaskedInput("Thunder admin client secret (Enter = use value from config)")
+			if err != nil {
+				return fmt.Errorf("read Thunder admin client secret: %w", err)
+			}
+			if thunderSecret != "" {
+				viper.Set("thunder.admin_client_secret", thunderSecret)
+			}
+		}
+
+		adminClientID := viper.GetString("thunder.admin_client_id")
+		adminClientSecret := viper.GetString("thunder.admin_client_secret")
+		if adminClientID == "" {
+			return fmt.Errorf("thunder.admin_client_id is not set — run 'aep platform config import' first or set it in ~/.aep/config.yaml")
+		}
+		if adminClientSecret == "" {
+			return fmt.Errorf("thunder.admin_client_secret is not set — set it via AEP_THUNDER_ADMIN_CLIENT_SECRET or re-run without --reuse-secrets")
+		}
+		_, _ = fmt.Fprintln(os.Stdout, "Provisioning OpenBao secrets...")
+		if err := provisionOpenBao(ctx, anthropicKey, adminClientID, adminClientSecret); err != nil {
+			return fmt.Errorf("provision OpenBao: %w", err)
+		}
 	}
 
 	// 3. Install the platform chart.
@@ -177,6 +212,12 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 		"--set", "thunder.adminURL=" + thunderURL,
 		"--set", "thunder.jwksURL=" + thunderURL + "/oauth2/jwks",
 		"--set", "platformAPI.baseURL=" + viper.GetString("oc.api_url"),
+		// thunder-app-operator subchart: forward the same Thunder admin URL so the
+		// operator talks to the same endpoint as the rest of the platform.
+		// Credentials come from the ESO-synced Secret (written to OpenBao by
+		// provisionOpenBao above — never passed via --set).
+		"--set", "thunder-app-operator.thunder.adminURL=" + thunderURL,
+		"--set", "thunder-app-operator.thunder.existingSecret=" + config.ThunderOperatorCredsSecret,
 	}
 	// helm upgrade --install <release> <chart> [flags]
 	// Chart must be inserted after "upgrade", "--install", <release> (index 3).
@@ -191,17 +232,11 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 	if mode := viper.GetString("platform.workspaces.access_mode"); mode != "" {
 		helmArgs = append(helmArgs, "--set", "workspaces.accessMode="+mode)
 	}
-	// Coding-agent dispatch: local installs wire in-process secrets delivery
-	// (OPENBAO_* on aep-api). Prod installs set
-	// codingagent.local_stubs.enabled=false and supply the real managed
-	// endpoint URLs instead (set them via flags or AEP_* env vars).
 	helmArgs = append(helmArgs, "--set",
-		fmt.Sprintf("codingAgentDispatch.localStubs.enabled=%t", viper.GetBool("codingagent.local_stubs.enabled")))
-	if u := viper.GetString("codingagent.cluster_gateway_proxy.url"); u != "" {
-		helmArgs = append(helmArgs, "--set", "codingAgentDispatch.clusterGatewayProxy.url="+u)
-	}
-	if u := viper.GetString("codingagent.secret_manager_api.url"); u != "" {
-		helmArgs = append(helmArgs, "--set", "codingAgentDispatch.secretManagerApi.url="+u)
+		fmt.Sprintf("codingAgentDispatch.openBaoDirect.enabled=%t", openBaoDirect))
+	if openBaoDirect {
+		helmArgs = append(helmArgs, "--set", "openbao.addr="+viper.GetString("openbao.addr"))
+		helmArgs = append(helmArgs, "--set", "openbao.token="+viper.GetString("openbao.token"))
 	}
 	helmArgs = append(helmArgs, "--set",
 		fmt.Sprintf("webhook.localSmee.enabled=%t", viper.GetBool("webhook.local_smee.enabled")))
@@ -227,41 +262,87 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// 5. Load the generated Thunder system-client secret from the ESO-synced
-	// aep-thunder-secrets Secret. aep init skips the PersistentPreRunE loader,
-	// so without this step doThunderSetup would fall back to the hardcoded
-	// viper default instead of the secret that was actually seeded. SetDefault
-	// means an explicit --thunder-admin-client-secret flag still takes precedence.
-	if err := config.LoadThunderSecretFromCluster(ctx, k8sClient, initPlatformNamespace); err != nil {
-		return fmt.Errorf("load Thunder secret: %w", err)
-	}
-
-	// 6. Register AEP OAuth clients in Thunder.
+	// 5. Wait for the thunder-app-operator to provision all platform OAuth clients,
+	// then patch Thunder's CORS configuration for the console.
 	_, _ = fmt.Fprintln(os.Stdout, "Configuring Thunder OAuth clients...")
 	if err := doThunderSetup(ctx, k8sClient, initPlatformNamespace,
 		viper.GetString("thunder.namespace"),
-		viper.GetString("thunder.url"),
+		initConsoleURL,
 		viper.GetString("thunder.config_map"),
 		viper.GetString("thunder.deployment"),
-		viper.GetString("thunder.admin_client_id"),
-		initConsoleURL,
 	); err != nil {
 		return err
-	}
-
-	// 7. Persist non-sensitive config into the in-cluster ConfigMap.
-	if err := writeClusterConfig(ctx, k8sClient, initPlatformNamespace); err != nil {
-		return fmt.Errorf("write cluster config: %w", err)
 	}
 
 	_, _ = fmt.Fprintln(os.Stdout, "\nAEP is ready. Open the console to get started.")
 	return nil
 }
 
+// verifyOpenBaoSecrets confirms all required secret paths exist in OpenBao.
+// Used by --reuse-secrets to ensure a previous install seeded everything before
+// skipping the provisioning step.
+func verifyOpenBaoSecrets(ctx context.Context) error {
+	pfCmd, err := openbao.PortForward(ctx, ocOpenBaoNamespace, ocOpenBaoRelease, kubeconfig)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = pfCmd.Process.Kill() }()
+
+	baseURL := "http://localhost:" + openbao.LocalPort
+	if err := openbao.WaitForReachable(ctx, baseURL, 30*time.Second); err != nil {
+		return fmt.Errorf("OpenBao not reachable: %w", err)
+	}
+
+	saToken, err := openbao.GetSAToken(ctx, ocOpenBaoNamespace, ocOpenBaoSA, kubeconfig)
+	if err != nil {
+		return err
+	}
+	token, err := openbao.KubernetesLogin(ctx, baseURL, ocWriteRole, saToken)
+	if err != nil {
+		return err
+	}
+
+	required := []string{
+		"aep/anthropic-api-key",
+		"aep/postgres-password",
+		"aep/task-signing-key",
+		"aep/oauth-state-key",
+		"aep/agents-jwt-secret",
+		"aep/webhook-secret",
+		"aep/opensearch-username",
+		"aep/opensearch-password",
+		"aep/thunder-admin/client-id",
+		"aep/thunder-admin/client-secret",
+		"aep/thunder-clients/oc-workload-publisher",
+		"aep/thunder-clients/oc-observer-reader",
+		"aep/thunder-clients/aep-api-client",
+		"aep/thunder-clients/bff-git-service",
+		"aep/thunder-clients/bff-remote-worker",
+		"aep/thunder-clients/local-dev-seeder",
+		"aep/thunder-clients/system-client",
+		"aep/thunder-clients/openchoreo-rca-agent",
+	}
+
+	var missing []string
+	for _, path := range required {
+		_, status, err := openbao.Req(ctx, "GET", baseURL, token, "/v1/secret/data/"+path, nil)
+		if err != nil {
+			return fmt.Errorf("check secret %s: %w", path, err)
+		}
+		if status == 404 {
+			missing = append(missing, path)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("the following secrets are not in OpenBao:\n  %s", strings.Join(missing, "\n  "))
+	}
+	return nil
+}
+
 // provisionOpenBao seeds all platform secrets into OC's built-in OpenBao instance.
 // Authenticates via Kubernetes auth using openchoreo-secret-writer-role, which OC's
 // postStart already binds to any SA in the openbao namespace — no custom role needed.
-func provisionOpenBao(ctx context.Context, anthropicKey string) error {
+func provisionOpenBao(ctx context.Context, anthropicKey, thunderAdminClientID, thunderAdminClientSecret string) error {
 	progress := func(msg string) { _, _ = fmt.Fprintf(os.Stdout, "  %s\n", msg) }
 
 	progress("Port-forwarding to OpenBao...")
@@ -350,6 +431,8 @@ func provisionOpenBao(ctx context.Context, anthropicKey string) error {
 		{"aep/webhook-secret", webhookSecret},
 		{"aep/opensearch-username", "admin"},
 		{"aep/opensearch-password", openSearchPassword},
+		{"aep/thunder-admin/client-id", thunderAdminClientID},
+		{"aep/thunder-admin/client-secret", thunderAdminClientSecret},
 	}
 	for _, name := range thunderClientNames {
 		secrets = append(secrets, struct{ path, value string }{
@@ -371,10 +454,32 @@ func provisionOpenBao(ctx context.Context, anthropicKey string) error {
 	return nil
 }
 
+// verifyOpenBaoSecrets confirms all required secret paths exist in OpenBao.
+// Used by --reuse-secrets to ensure a previous install seeded everything before
+// skipping the provisioning step.
 // deleteOrphanedResources removes cluster resources that may have been created
 // by legacy setup scripts (setup-aep.sh) without Helm ownership labels. Helm
 // refuses to adopt them on install, so we delete and let the chart recreate.
 func deleteOrphanedResources(ctx context.Context) error {
+	// If setup-aep.sh or setup-local.sh installed the thunder-app-operator as a
+	// standalone Helm release, its ClusterRole/ClusterRoleBinding are owned by
+	// that release and block the platform chart from installing the subchart.
+	// Uninstall it first — the subchart takes over ownership in wso2-aep.
+	helmStatusArgs := []string{"status", "thunder-app-operator", "-n", "thunder-app-operator-system"}
+	if kubeconfig != "" {
+		helmStatusArgs = append(helmStatusArgs, "--kubeconfig", kubeconfig)
+	}
+	if out := exec.CommandContext(ctx, "helm", helmStatusArgs...).Run(); out == nil {
+		_, _ = fmt.Fprintln(os.Stdout, "  Removing standalone thunder-app-operator (replacing with platform subchart)...")
+		helmUninstallArgs := []string{"uninstall", "thunder-app-operator", "-n", "thunder-app-operator-system"}
+		if kubeconfig != "" {
+			helmUninstallArgs = append(helmUninstallArgs, "--kubeconfig", kubeconfig)
+		}
+		if out, err := exec.CommandContext(ctx, "helm", helmUninstallArgs...).CombinedOutput(); err != nil {
+			return fmt.Errorf("uninstall standalone thunder-app-operator: %w\n%s", err, out)
+		}
+	}
+
 	// cluster-scoped: clusterauthzrolebinding, clustertrait
 	// namespaced:     secretstore (lives in initPlatformNamespace)
 	resources := []struct {
@@ -398,33 +503,6 @@ func deleteOrphanedResources(ctx context.Context) error {
 		}
 	}
 	return nil
-}
-
-func writeClusterConfig(ctx context.Context, client *kubernetes.Clientset, namespace string) error {
-	data := make(map[string]string, len(config.ConfigMapKeys))
-	for _, k := range config.ConfigMapKeys {
-		data[k] = viper.GetString(k)
-	}
-
-	existing, err := client.CoreV1().ConfigMaps(namespace).Get(ctx, config.ConfigMapName, metav1.GetOptions{})
-	if err != nil {
-		if !apierrors.IsNotFound(err) {
-			return fmt.Errorf("get %s: %w", config.ConfigMapName, err)
-		}
-		_, err = client.CoreV1().ConfigMaps(namespace).Create(ctx, &corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      config.ConfigMapName,
-				Namespace: namespace,
-				Labels:    map[string]string{"app.kubernetes.io/managed-by": "aepctl"},
-			},
-			Data: data,
-		}, metav1.CreateOptions{})
-		return err
-	}
-
-	existing.Data = data
-	_, err = client.CoreV1().ConfigMaps(namespace).Update(ctx, existing, metav1.UpdateOptions{})
-	return err
 }
 
 func checkOCVersion(ctx context.Context, client *kubernetes.Clientset, namespace, minVersion string) error {
