@@ -60,6 +60,40 @@ func (e *CodingExecutor) WithPublisherCredentials(r PublisherCredentialResolver,
 	return e
 }
 
+type publisherEnsurer interface {
+	EnsureOrgPublisher(ctx context.Context, orgID, actor string) (clientID, clientSecret string, created bool, err error)
+}
+
+type idpPublisherResolver struct {
+	ensure   publisherEnsurer
+	profiles organization.IDPRepository
+}
+
+func NewIDPPublisherResolver(ensure publisherEnsurer, profiles organization.IDPRepository) PublisherCredentialResolver {
+	return &idpPublisherResolver{ensure: ensure, profiles: profiles}
+}
+
+func (r *idpPublisherResolver) EnsureReady(ctx context.Context, orgID string) (string, error) {
+	if r == nil || r.ensure == nil || r.profiles == nil {
+		return "", fmt.Errorf("publisher resolver not wired")
+	}
+	if _, _, _, err := r.ensure.EnsureOrgPublisher(ctx, orgID, publisherDispatchActor); err != nil {
+		return "", fmt.Errorf("ensure org publisher: %w", err)
+	}
+	row, err := r.profiles.GetProfileByOrgID(ctx, orgID)
+	if err != nil {
+		return "", fmt.Errorf("load publisher profile: %w", err)
+	}
+	if row == nil {
+		return "", fmt.Errorf("publisher profile missing after ensure")
+	}
+	name := row.SecretRefName
+	if name == nil {
+		return "", nil
+	}
+	return strings.TrimSpace(*name), nil
+}
+
 func (e *CodingExecutor) publisherSecretEnv(ctx context.Context, orgID string) ([]SecretEnvRef, string, error) {
 	tokenURL := strings.TrimSpace(e.publisherTokenURL)
 	if tokenURL == "" {

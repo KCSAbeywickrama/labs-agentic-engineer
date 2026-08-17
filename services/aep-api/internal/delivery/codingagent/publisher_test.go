@@ -16,7 +16,14 @@
 
 package codingagent
 
-import "testing"
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+
+	"github.com/wso2/aep/aep-api/internal/organization"
+)
 
 func TestRequiresGatewayPublisher(t *testing.T) {
 	t.Parallel()
@@ -56,5 +63,88 @@ func TestPublisherTokenURLFromJWKS(t *testing.T) {
 		if got := PublisherTokenURLFromJWKS(tc.in); got != tc.want {
 			t.Errorf("PublisherTokenURLFromJWKS(%q) = %q, want %q", tc.in, got, tc.want)
 		}
+	}
+}
+
+type fakeEnsure struct {
+	actor string
+	err   error
+}
+
+func (f *fakeEnsure) EnsureOrgPublisher(_ context.Context, _, actor string) (string, string, bool, error) {
+	f.actor = actor
+	return "aep-publisher-acme", "must-not-leak", true, f.err
+}
+
+type fakeIDPRepo struct {
+	profile *organization.OrganizationIDPProfile
+	err     error
+}
+
+func (f fakeIDPRepo) GetProfileByOrgID(context.Context, string) (*organization.OrganizationIDPProfile, error) {
+	return f.profile, f.err
+}
+func (f fakeIDPRepo) CreateProfile(context.Context, *organization.OrganizationIDPProfile) error {
+	return nil
+}
+func (f fakeIDPRepo) UpdateProfileColumns(context.Context, *organization.OrganizationIDPProfile, string, map[string]interface{}) error {
+	return nil
+}
+func (f fakeIDPRepo) CreateAuditEvent(context.Context, *organization.IDPAuditEvent) error {
+	return nil
+}
+
+func TestIDPPublisherResolver_EnsureReady_UsesCodingDispatchActorAndSecretRefName(t *testing.T) {
+	t.Parallel()
+	name := "acme-publisher-secrets"
+	ensure := &fakeEnsure{}
+	r := NewIDPPublisherResolver(ensure, fakeIDPRepo{profile: &organization.OrganizationIDPProfile{
+		SecretRefName: &name,
+	}})
+	got, err := r.EnsureReady(context.Background(), "acme")
+	if err != nil {
+		t.Fatalf("EnsureReady: %v", err)
+	}
+	if got != name {
+		t.Errorf("secret ref = %q, want %q", got, name)
+	}
+	if ensure.actor != publisherDispatchActor {
+		t.Errorf("actor = %q, want %q", ensure.actor, publisherDispatchActor)
+	}
+}
+
+func TestIDPPublisherResolver_EnsureReady_EnsureError(t *testing.T) {
+	t.Parallel()
+	r := NewIDPPublisherResolver(&fakeEnsure{err: errors.New("thunder unavailable")}, fakeIDPRepo{})
+	_, err := r.EnsureReady(context.Background(), "acme")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "thunder unavailable") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestIDPPublisherResolver_EnsureReady_NilProfile(t *testing.T) {
+	t.Parallel()
+	r := NewIDPPublisherResolver(&fakeEnsure{}, fakeIDPRepo{profile: nil})
+	_, err := r.EnsureReady(context.Background(), "acme")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "profile") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestIDPPublisherResolver_EnsureReady_EmptySecretRefReturnsEmpty(t *testing.T) {
+	t.Parallel()
+	r := NewIDPPublisherResolver(&fakeEnsure{}, fakeIDPRepo{profile: &organization.OrganizationIDPProfile{}})
+	got, err := r.EnsureReady(context.Background(), "acme")
+	if err != nil {
+		t.Fatalf("empty ref is dispatch's fail-loud, not resolver error: %v", err)
+	}
+	if got != "" {
+		t.Errorf("got %q, want empty", got)
 	}
 }
