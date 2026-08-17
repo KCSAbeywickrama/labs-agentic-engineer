@@ -18,6 +18,7 @@ package gitfs
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -248,12 +249,19 @@ func (e *Engine) ListReferences(ctx context.Context, ref RepoRef) ([]string, err
 // that are not in its workspace. A re-upload (the confirm step's Retry) has the
 // same shape with stale content instead of missing content.
 //
-// ADD AND UPDATE ONLY — never remove. A project created under the feature's v1
-// has real committed references in this directory, arriving through
-// `git archive` like any other git content; a reconcile that deleted what the
-// store does not list would delete those. A superseded document can therefore
-// linger beside the current set, which is harmless: the turn's reference list
-// comes from the store, so nothing points the agent at it.
+// A replacement upload that DROPS a name retires the old file, and this is not
+// cosmetic: `keepInTurnSnapshot` admits every text file under this directory
+// into the turn's file map, so a lingering document reaches the model whether
+// or not the turn's reference list still names it.
+//
+// Removal is scoped by a manifest (`.aep-references.json`, dot-led so the
+// snapshot walk skips it) recording exactly which names this overlay wrote.
+// Only those are ever retired — a project created under the feature's v1 has
+// real committed references here, arriving through `git archive` like any other
+// git content, and they never enter the manifest. When an overlay had MASKED a
+// committed file of the same name, retiring it restores the git blob rather
+// than deleting it, so dropping a transient document cannot take a committed
+// one with it.
 //
 // Each file is written temp-then-rename inside the destination directory, so a
 // turn reading concurrently sees the old bytes or the new bytes, never a torn
@@ -264,14 +272,11 @@ func (e *Engine) ListReferences(ctx context.Context, ref RepoRef) ([]string, err
 // including the ones that never attached a document. The cost is that a lost
 // overlay is silent (the agent simply interviews as if nothing were attached),
 // which is why it is logged at WARN rather than swallowed.
-func (e *Engine) overlayReferences(ctx context.Context, ref RepoRef, staging string) {
+func (e *Engine) overlayReferences(ctx context.Context, ref RepoRef, sha, staging string) {
 	names, err := e.ListReferences(ctx, ref)
 	if err != nil {
 		slog.WarnContext(ctx, "gitfs: references unlistable; snapshot published without them",
 			"org", ref.OrgID, "project", ref.ProjectID, "error", err)
-		return
-	}
-	if len(names) == 0 {
 		return
 	}
 	src, err := ReferenceStoreDir(e.root, ref)
@@ -279,10 +284,30 @@ func (e *Engine) overlayReferences(ctx context.Context, ref RepoRef, staging str
 		return
 	}
 	dst := filepath.Join(staging, filepath.FromSlash(ReferenceOverlayDir))
+	prev := readOverlayManifest(dst)
+	// Nothing stored and nothing previously written: leave the snapshot exactly
+	// as `git archive` produced it — no directory, no manifest.
+	if len(names) == 0 && len(prev) == 0 {
+		return
+	}
 	if err := os.MkdirAll(dst, 0o755); err != nil {
 		slog.WarnContext(ctx, "gitfs: reference overlay dir; snapshot published without them",
 			"org", ref.OrgID, "project", ref.ProjectID, "error", err)
 		return
+	}
+
+	current := make(map[string]bool, len(names))
+	for _, n := range names {
+		current[n] = true
+	}
+	for _, old := range prev {
+		if current[old] {
+			continue
+		}
+		if err := e.retireOverlayFile(ctx, ref, sha, dst, old); err != nil {
+			slog.WarnContext(ctx, "gitfs: stale reference not retired",
+				"org", ref.OrgID, "project", ref.ProjectID, "name", old, "error", err)
+		}
 	}
 	for _, name := range names {
 		from, to := filepath.Join(src, name), filepath.Join(dst, name)
@@ -300,6 +325,92 @@ func (e *Engine) overlayReferences(ctx context.Context, ref RepoRef, staging str
 				"org", ref.OrgID, "project", ref.ProjectID, "name", name, "error", err)
 		}
 	}
+	if err := writeOverlayManifest(dst, names); err != nil {
+		slog.WarnContext(ctx, "gitfs: overlay manifest not written; a later drop may not retire",
+			"org", ref.OrgID, "project", ref.ProjectID, "error", err)
+	}
+}
+
+// overlayManifestName records which names THIS overlay wrote, so a later
+// reconcile can retire exactly those and never a committed file. Dot-led: the
+// snapshot walk skips dot segments at any depth, so it is invisible to turns.
+const overlayManifestName = ".aep-references.json"
+
+type overlayManifest struct {
+	Written []string `json:"written"`
+}
+
+func readOverlayManifest(dir string) []string {
+	raw, err := os.ReadFile(filepath.Join(dir, overlayManifestName))
+	if err != nil {
+		return nil // absent (or unreadable) → nothing is known to be ours
+	}
+	var m overlayManifest
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return nil
+	}
+	return m.Written
+}
+
+func writeOverlayManifest(dir string, names []string) error {
+	raw, err := json.Marshal(overlayManifest{Written: names})
+	if err != nil {
+		return err
+	}
+	staged, err := os.CreateTemp(dir, ".manifest-*")
+	if err != nil {
+		return err
+	}
+	if _, err := staged.Write(raw); err != nil {
+		staged.Close()
+		os.Remove(staged.Name())
+		return err
+	}
+	if err := staged.Close(); err != nil {
+		os.Remove(staged.Name())
+		return err
+	}
+	return os.Rename(staged.Name(), filepath.Join(dir, overlayManifestName))
+}
+
+// retireOverlayFile drops a name this overlay wrote and the store no longer
+// lists. If the same path exists in the commit's tree, the overlay had been
+// MASKING committed content — restore the git blob instead of deleting, so a
+// dropped transient document cannot take a v1 project's committed one with it.
+func (e *Engine) retireOverlayFile(ctx context.Context, ref RepoRef, sha, dst, name string) error {
+	target := filepath.Join(dst, name)
+	p, err := e.pathsFor(ref)
+	if err != nil {
+		return err
+	}
+	committed, err := e.git(ctx, execOpts{},
+		"--git-dir", p.gitDir, "show", sha+":"+ReferenceOverlayDir+"/"+name)
+	if err != nil {
+		// Not in the tree at this sha — purely ours, so remove it.
+		if rmErr := os.Remove(target); rmErr != nil && !os.IsNotExist(rmErr) {
+			return rmErr
+		}
+		return nil
+	}
+	staged, err := os.CreateTemp(dst, ".restore-*")
+	if err != nil {
+		return err
+	}
+	if _, err := staged.Write(committed); err != nil {
+		staged.Close()
+		os.Remove(staged.Name())
+		return err
+	}
+	if err := staged.Chmod(0o644); err != nil {
+		staged.Close()
+		os.Remove(staged.Name())
+		return err
+	}
+	if err := staged.Close(); err != nil {
+		os.Remove(staged.Name())
+		return err
+	}
+	return os.Rename(staged.Name(), target)
 }
 
 // differs reports whether the destination needs rewriting: absent, a different

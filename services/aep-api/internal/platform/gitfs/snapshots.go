@@ -49,7 +49,7 @@ func (e *Engine) Ensure(ctx context.Context, ref RepoRef, sha string) (err error
 		// independently of it, so "the snapshot exists" does not mean "the
 		// snapshot is current". Reconcile them before handing it to a turn; see
 		// overlayReferences for the create-flow ordering this exists to fix.
-		e.overlayReferences(ctx, ref, dest)
+		e.overlayReferences(ctx, ref, sha, dest)
 		return nil
 	}
 	if pct := e.DiskUsagePct(); pct >= DiskAdmissionRefusePct {
@@ -104,7 +104,7 @@ func (e *Engine) Ensure(ctx context.Context, ref RepoRef, sha string) (err error
 	// they are never committed (references.go) — so they are laid over the
 	// extracted staging dir here, while it is still private. Best-effort: a
 	// missing overlay must not fail a snapshot that every turn depends on.
-	e.overlayReferences(ctx, ref, staging)
+	e.overlayReferences(ctx, ref, sha, staging)
 
 	// os.MkdirTemp created the staging root as 0700; widen it to 0755 so a
 	// cross-service reader (the agents pod runs as a different UID over the RO

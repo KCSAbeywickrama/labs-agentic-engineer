@@ -210,6 +210,85 @@ func TestEnsure_RefreshesAReplacedReferenceInAnExistingSnapshot(t *testing.T) {
 	}
 }
 
+// A replacement upload that DROPS a name must retire the old file. This is not
+// cosmetic: keepInTurnSnapshot admits every text file under the references
+// directory into the turn's file map, so a lingering document reaches the model
+// whether or not the turn's reference list still names it.
+func TestEnsure_RetiresAReferenceDroppedByAReplacementUpload(t *testing.T) {
+	r := newFilesRig(t, map[string]string{"specs/requirements/prd.md": "x"})
+	ref := r.workspaceRef()
+	sha := r.remote.HeadSHA(t)
+
+	if rec := r.putReferences(t, map[string][]byte{"old.md": []byte("superseded")}); rec.Code != http.StatusNoContent {
+		t.Fatalf("first upload code %d", rec.Code)
+	}
+	if err := r.engine.Ensure(t.Context(), ref, sha); err != nil {
+		t.Fatalf("first ensure: %v", err)
+	}
+	// A different NAME, so the old one is dropped rather than overwritten.
+	if rec := r.putReferences(t, map[string][]byte{"new.md": []byte("current")}); rec.Code != http.StatusNoContent {
+		t.Fatalf("second upload code %d", rec.Code)
+	}
+	if err := r.engine.Ensure(t.Context(), ref, sha); err != nil {
+		t.Fatalf("second ensure: %v", err)
+	}
+
+	dir, err := gitfs.SnapshotDir(r.engine.Root(), ref, sha)
+	if err != nil {
+		t.Fatalf("snapshot dir: %v", err)
+	}
+	refDir := filepath.Join(dir, filepath.FromSlash(gitfs.ReferenceOverlayDir))
+	if _, err := os.Stat(filepath.Join(refDir, "old.md")); !os.IsNotExist(err) {
+		t.Errorf("dropped reference still in the snapshot (stat err = %v) — it would reach the model", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(refDir, "new.md")); err != nil || string(got) != "current" {
+		t.Errorf("new.md = %q, err %v; want the replacement content", got, err)
+	}
+}
+
+// Retirement must never take a COMMITTED file with it. When an overlay masked a
+// v1 project's committed reference of the same name, dropping the transient one
+// restores the git blob rather than deleting the path.
+func TestEnsure_RestoresACommittedReferenceTheOverlayHadMasked(t *testing.T) {
+	r := newFilesRig(t, map[string]string{
+		"specs/requirements/prd.md":              "x",
+		"specs/requirements/references/brief.md": "# Committed under v1",
+	})
+	ref := r.workspaceRef()
+	sha := r.remote.HeadSHA(t)
+
+	// Mask the committed file with a transient one of the same name.
+	if rec := r.putReferences(t, map[string][]byte{"brief.md": []byte("transient override")}); rec.Code != http.StatusNoContent {
+		t.Fatalf("mask upload code %d", rec.Code)
+	}
+	if err := r.engine.Ensure(t.Context(), ref, sha); err != nil {
+		t.Fatalf("first ensure: %v", err)
+	}
+	dir, err := gitfs.SnapshotDir(r.engine.Root(), ref, sha)
+	if err != nil {
+		t.Fatalf("snapshot dir: %v", err)
+	}
+	masked := filepath.Join(dir, filepath.FromSlash(gitfs.ReferenceOverlayDir), "brief.md")
+	if got, _ := os.ReadFile(masked); string(got) != "transient override" {
+		t.Fatalf("overlay did not mask the committed file: %q", got)
+	}
+
+	// Now drop it from the store — the committed content must come back.
+	if rec := r.putReferences(t, map[string][]byte{"other.md": []byte("something else")}); rec.Code != http.StatusNoContent {
+		t.Fatalf("replacement upload code %d", rec.Code)
+	}
+	if err := r.engine.Ensure(t.Context(), ref, sha); err != nil {
+		t.Fatalf("second ensure: %v", err)
+	}
+	got, err := os.ReadFile(masked)
+	if err != nil {
+		t.Fatalf("committed reference was DELETED rather than restored: %v", err)
+	}
+	if string(got) != "# Committed under v1" {
+		t.Errorf("restored content = %q, want the committed blob", got)
+	}
+}
+
 // A project created under the feature's v1 has real COMMITTED references, which
 // arrive through `git archive` like any other git content. The reconcile adds
 // and updates but never removes, so an empty store must not delete them.
