@@ -31,9 +31,13 @@ Task JWT to the public RestApi: jwt-auth v1 only has key manager
 `client_id` / `client_secret` from the IdP profile SecretReference (ESO
 fields, not the triplet property name `publisher`) and sets plain env
 `PUBLISHER_TOKEN_URL` from `PLATFORM_IDP_JWKS_URL` (`/oauth2/jwks` → `/oauth2/token`). The runner mints a
-client_credentials token at callback time. Local `http://` platform URLs
-do not mount `PUBLISHER_*`; Task JWT remains the credential. MCP stays
-on a different audience and is unchanged.
+client_credentials token at callback time. HTTPS Jobs use the minted publisher token for **both** `credentials/refresh`
+and `POST /internal/v1/mcp` (gateway jwt-auth requires `iss=platform-idp`).
+`AgentsScopedVerifier` dual-accepts that Thunder JWT (`aud=aep-publisher-{org}`)
+and the BFF MCP token (`aud=aep-api-mcp`). Local `http://` platform URLs do
+not mount `PUBLISHER_*`; MCP keeps `AEP_MCP_TOKEN`. The designing agent never
+hits this gateway: it calls ClusterIP `AEP_API_INTERNAL_BASE_URL` with the
+BFF MCP token (`mcpForTurn`).
 
 ## The type is per-org, and it is the billing key
 

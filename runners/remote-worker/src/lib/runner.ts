@@ -194,10 +194,11 @@ export interface McpQueryOptions {
 
 // buildMcpOptions is a pure seam so the env-presence guard is unit-testable
 // without constructing a full query(). Both mcpUrl and mcpToken must be
-// present — the BFF's coding-agent Job template stamps AEP_MCP_URL
-// unconditionally but only stamps AEP_MCP_TOKEN when minting succeeded
-// (see coding_agent_component_type.go env stamping), so a URL-without-token dispatch must still omit
-// the server rather than register it unauthenticated.
+// present — the BFF stamps AEP_MCP_URL unconditionally; mcpToken is the BFF MCP
+// token on local http Jobs or the minted publisher CC token on https Jobs
+// (see preferPublisherMcpToken and coding_agent_component_type.go env stamping).
+// A URL-without-token dispatch must still omit the server rather than register
+// it unauthenticated.
 export function buildMcpOptions(mcpUrl: string | undefined, mcpToken: string | undefined): McpQueryOptions {
   if (!mcpUrl || !mcpToken) {
     return { allowedTools: BASE_ALLOWED_TOOLS };
@@ -395,9 +396,10 @@ export function runClaudeQuery(
   const workflowBodies = requireWorkflowBodies(layout.workspace, alwaysOnSkills(req.taskKind));
 
   // Endpoint Spec Discovery (B2) — register the BFF's MCP server in-process
-  // when the dispatch carries both AEP_MCP_URL and AEP_MCP_TOKEN. Older
-  // dispatches (or a failed token mint) omit one or both, in which case the
-  // runner falls back to the base tool set unchanged.
+  // when req carries both mcpUrl and mcpToken (https Jobs prefer the minted
+  // publisher CC token over AEP_MCP_TOKEN). Older dispatches (or a failed token
+  // mint) omit one or both, in which case the runner falls back to the base
+  // tool set unchanged.
   const { mcpServers, allowedTools } = buildMcpOptions(req.mcpUrl, req.mcpToken);
 
   // D9 secure search (Task 12) — DLP gate for the server-side WebSearch

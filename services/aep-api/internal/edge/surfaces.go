@@ -51,11 +51,12 @@ import (
 //
 //	discovery: /healthz (liveness), /readyz (workspace readiness), /auth/external/jwks.json — public, no auth.
 //
-// The reusable identity primitive underneath both S2S directions: the BFF is the
-// single issuer of org-bearing RS256 tokens (internal/platform/auth.TaskTokenManager
-// — Issue inbound, IssueServiceToken outbound), all verified against the one
-// JWKS at /auth/external/jwks.json. Org always travels in a verified claim,
-// never a trusted header.
+// The reusable identity primitive underneath S2S: the BFF issues org-bearing
+// RS256 Task-JWTs and MCP tokens (internal/platform/auth.TaskTokenManager —
+// Issue inbound, IssueServiceToken outbound), verified against the one JWKS at
+// /auth/external/jwks.json. Thunder publisher CC tokens (iss platform-idp) are
+// also accepted on internal mounts that wire PublisherTokenVerifier. Org always
+// travels in a verified claim, never a trusted header.
 //
 // "Where do I change X?" → credential verify/mint: internal/platform/auth ·
 // who-may-touch-what gates: tenant_gate.go (public) + internal.go runnerAuthGate (internal) ·
@@ -154,8 +155,8 @@ func mountSurfaces(params AppParams) *http.ServeMux {
 	// from ocOrgId or PublisherClaims.OrgHandle, never from the request.
 	// Mounted only when the token manager exists (same conditional posture as
 	// the internal S2S mount): without it nothing could verify a caller, so the
-	// path 404s instead of 503-ing forever. A nil PublisherTokens keeps MCP
-	// BFF-only. A nil MCPExternalResources/OrgEndpoints/ResourceTypes degrades
+	// path 404s instead of 503-ing forever. Without PublisherTokens wired, only
+	// BFF-signed MCP tokens are accepted. A nil MCPExternalResources/OrgEndpoints/ResourceTypes degrades
 	// the corresponding tool to an empty result (see dependencies.NewMCPHandler).
 	if params.Deps.TaskTokens != nil {
 		mcpVerifier := auth.NewAgentsScopedVerifier(params.Deps.TaskTokens, params.Deps.PublisherTokens)
