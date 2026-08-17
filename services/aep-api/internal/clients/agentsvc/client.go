@@ -90,9 +90,12 @@ type TurnSpec struct {
 	// snapshot, so ONLY the BFF can supply it.
 	Idea string `json:"idea,omitempty"`
 	// References are the reference documents attached at project create, listed
-	// (paths only) from specs/requirements/references/ at the turn's base commit
-	// so a start turn can point the agent at them. Omitted when the folder is
-	// absent or empty, which keeps a docless project's turn byte-identical.
+	// (paths only) so a turn can point the agent at them. They are NOT git
+	// content and there is no base commit to read them from — the platform
+	// stores them off-git and overlays them into the turn's snapshot at
+	// specs/requirements/references/ (console ADR-0017), which is the path
+	// listed here. Omitted when nothing is stored, which keeps a docless
+	// project's turn byte-identical.
 	References []string `json:"references,omitempty"`
 	// Scope is the milestone a plan turn covers, and which of its stories
 	// already have Tasks.

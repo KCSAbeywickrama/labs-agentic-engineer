@@ -64,6 +64,7 @@ func readReferenceParts(body *multipart.Reader) ([]gitfs.ReferenceDoc, error) {
 		return nil, apierr.BadRequest("missing '" + referencesField + "' field")
 	}
 	var docs []gitfs.ReferenceDoc
+	byStoredName := map[string]string{}
 	for {
 		part, err := body.NextPart()
 		if errors.Is(err, io.EOF) {
@@ -85,7 +86,18 @@ func readReferenceParts(body *multipart.Reader) ([]gitfs.ReferenceDoc, error) {
 		if err != nil {
 			return nil, apierr.BadRequest("read upload: " + err.Error())
 		}
+		// Sanitizing can map two DIFFERENT uploads onto one stored name
+		// ("My Notes.md" and "my-notes.md"). The engine rejects the batch for
+		// the duplicate, so surface the collision here where both original
+		// names are still known — "duplicate name" alone leaves the caller
+		// guessing which two of their files collided. The console screens for
+		// this before uploading; this is the API's own guard.
 		name := sanitizeReferenceName(part.FileName())
+		if prior, ok := byStoredName[name]; ok {
+			return nil, apierr.BadRequest(fmt.Sprintf(
+				"%q and %q both become %q — rename one", prior, part.FileName(), name))
+		}
+		byStoredName[name] = part.FileName()
 		if len(content) > gitfs.MaxReferenceBytes {
 			return nil, apierr.BadRequest(fmt.Sprintf(
 				"%q exceeds the %d MiB per-document limit", name, gitfs.MaxReferenceBytes>>20))

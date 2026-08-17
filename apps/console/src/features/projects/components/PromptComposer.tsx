@@ -270,7 +270,10 @@ export function PromptComposer({
             setRejected((prev) => prev.filter((_, i) => i !== index))
           }
         >
-          <strong>{name}</strong> was not attached: {reason.toLowerCase()}.
+          {/* The reason renders verbatim: lower-casing it turned "Larger than
+              5 MB" into "5 mb" and mangled the casing of the user's own file
+              name in the collision reason. */}
+          <strong>{name}</strong> was not attached — {reason}.
         </Alert>
       ))}
     </Stack>

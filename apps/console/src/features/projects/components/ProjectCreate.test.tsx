@@ -117,6 +117,27 @@ describe("ProjectCreate reference documents (#383)", () => {
     expect(navigate).toHaveBeenCalled();
   });
 
+  // The success path was unproven: the double never invoked onSuccess, so
+  // nothing showed that a completed upload actually reaches the project.
+  it("navigates to the project once the upload succeeds", () => {
+    uploadReferences.mutate.mockImplementationOnce(
+      (
+        _vars: { projectName: string; files: File[] },
+        opts?: { onSuccess?: () => void },
+      ) => opts?.onSuccess?.(),
+    );
+    render(<ProjectCreate />);
+    attach("prd.md");
+    typePrompt();
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+
+    expect(uploadReferences.mutate).toHaveBeenCalledTimes(1);
+    expect(navigate).toHaveBeenCalledWith(
+      expect.objectContaining({ to: "/projects/$projectName" }),
+    );
+  });
+
   it("uploads after create and, on failure, offers Retry and Continue", () => {
     // The double records the call but never succeeds; the component re-renders
     // reading isError once the flow has marked the project created.

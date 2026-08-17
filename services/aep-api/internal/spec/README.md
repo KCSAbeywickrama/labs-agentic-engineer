@@ -107,21 +107,19 @@ the genai turn engine (runner/broker/sweeper), and the files / design / skills s
   runs through this domain's gitfs Workspace engine; no other domain writes spec content.
 - **A `/start` turn carries what the agent cannot read for itself, and nothing more.** Two channels,
   both best-effort and both silent when empty: the captured idea (from the dot-led descriptor, which
-  every turn snapshot strips) and the reference documents attached at create (paths only, listed from
-  `specs/requirements/references/` at the turn's base commit — the files themselves are ordinary spec
-  content already in the agent's snapshot, so listing them points rather than pastes). Neither may
-  fail a kickoff: an unreadable descriptor or an unlistable repo degrades to "no steer". When both are
-  empty the turn is byte-identical to one from before either channel existed — which is the path every
-  pre-existing project takes.
-- **`encoding` dies at the edge, in both directions.** The files handler decodes a write's content
-  (`base64` → raw bytes; `utf8`, and an omitted field, are already raw) before the request reaches
-  `FilesService`, so everything below — path/size validation, soft-validation warnings, the commit —
-  only ever sees the file's real bytes. The 5 MiB cap therefore measures the decoded file, not its
-  ~33%-larger base64 text. Undecodable base64 is a 400, and so is an encoding outside the enum —
-  never a commit of garbage. Reads mirror it: a binary file (invalid UTF-8, or any NUL) answers base64
-  with `FileContent.encoding` set — raw bytes in a JSON string would be silently corrupted
-  (json.Marshal swaps invalid UTF-8 for U+FFFD); text answers exactly today's wire shape, encoding
-  omitted.
+  every turn snapshot strips) and the reference documents attached at create (paths only). References
+  are NOT git content and there is no base commit to read them from — they are stored off-git and
+  overlaid into the turn's snapshot at `specs/requirements/references/` (console ADR-0017), which is
+  the path listed. Text references land in the turn's text map; binary ones (PDF, images) never do —
+  they reach the agents service as native file attachments instead, which is what keeps a PDF's bytes
+  out of the text channel. Neither steer may fail a kickoff: an unreadable descriptor or an unlistable
+  store degrades to "no steer". When both are empty the turn is byte-identical to one from before
+  either channel existed — which is the path every pre-existing project takes.
+- **The Files API is text-only.** `WriteOp.encoding` and `FileContent.encoding` are gone with the
+  reference-document reversal (ADR-0017): the one binary this platform had to carry now travels the
+  references endpoint, off git, so nothing binary reaches `files/apply` or `read-file` at all. The
+  5 MiB cap measures the bytes as sent. A future binary-in-git need must argue for an encoding field
+  on its own merits rather than inheriting one.
 - **One authority for which wiring edges are HARD** (`wiring_edges.go`). A hard edge is an address the
   platform must have before a component can serve its first useful byte — today a web app's sibling
   *services*, whose cluster Service URLs are injected as pod env for nginx (`<DEP>_URL`). `projects`

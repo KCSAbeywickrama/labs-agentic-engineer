@@ -95,6 +95,33 @@ describe("PromptComposer attachment cards (#383)", () => {
     expect(screen.getByText("TXT")).toBeInTheDocument();
   });
 
+  // Notices are keyed and dismissed BY POSITION, because one selection can
+  // reject two files under the same name; name identity would collapse them
+  // into one notice and then close both at once.
+  it("raises one notice per rejected file and dismisses them independently", () => {
+    render(<Host />);
+    attach(["spec.docx", "spec.docx", "prd.md"]);
+
+    // The supported file still lands.
+    expect(screen.getByText("prd.md")).toBeInTheDocument();
+    expect(screen.getAllByText(/was not attached/i)).toHaveLength(2);
+
+    fireEvent.click(screen.getAllByRole("button", { name: /close/i })[0]!);
+    expect(screen.getAllByText(/was not attached/i)).toHaveLength(1);
+  });
+
+  // Lower-casing the reason turned "Larger than 5 MB" into "5 mb" and mangled
+  // the user's own file-name casing in the collision reason.
+  it("renders the rejection reason verbatim, units and casing intact", () => {
+    render(<Host />);
+    const input = document.querySelector<HTMLInputElement>("input[type=file]")!;
+    const oversized = new File(["x"], "huge.pdf");
+    Object.defineProperty(oversized, "size", { value: 6 * 1024 * 1024 });
+    fireEvent.change(input, { target: { files: [oversized] } });
+
+    expect(screen.getByText(/Larger than 5 MB/)).toBeInTheDocument();
+  });
+
   it("keeps Start disabled until the prompt is more than whitespace", () => {
     render(<Host />);
     const start = screen.getByRole("button", { name: "Start" });

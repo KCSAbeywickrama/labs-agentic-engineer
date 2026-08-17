@@ -49,14 +49,21 @@ const START_INSTRUCTION = "Load the start skill and follow it.";
 const IDEA_PREFIX = "\n\nThe user's idea for this project:\n\n";
 
 /**
- * The documents the user attached at project create, appended to a `start`
- * turn as PATHS. They are ordinary spec content, already in the agent's
- * snapshot, so this points rather than pastes — and says what they are FOR,
+ * The documents the user attached at project create, appended as PATHS. They
+ * are NOT spec content — nothing commits them (console ADR-0017); the platform
+ * overlays them into the turn's snapshot, so they are already in front of the
+ * agent and this points rather than pastes. It also says what they are FOR,
  * because "some files exist" is not an instruction.
+ *
+ * Worded for start AND flow turns, which both carry references: "read them
+ * before interviewing" is meaningless on a `/design` turn, which interviews
+ * nobody. The shared line states their standing; each turn's own skill says
+ * what to do with them.
  */
 const REFERENCES_PREFIX =
-  "\n\nThe user attached reference documents for this project. Read them before " +
-  "interviewing — they are the primary brief, and the idea above is the anchor:\n\n";
+  "\n\nThe user attached reference documents for this project. They are the " +
+  "primary brief for what is being built, and the idea above is the anchor. " +
+  "Read them before you plan or ask anything they already answer:\n\n";
 
 /**
  * The ONE surviving content steer for spec turns (#373): flow behaviour lives

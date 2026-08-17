@@ -251,18 +251,24 @@ export function SpecView({ projectName }: { projectName: string }) {
   // always wins over this default.
   const firstRequirements = files.find((f) => f.group === "requirements");
   // A fresh project may hold no requirements file yet; fall back to whatever
-  // the spec view does list. (References can never appear here — `toSpecEntry`
-  // drops them, which is what keeps a v1 project's committed PDF out of the
-  // editor pane.)
-  const firstEditable = files[0];
+  // the spec view does list. Named for what it IS — any listed entry, which may
+  // be a structured path (`openapi.yaml`, a component `design.json`,
+  // `validation-criteria.json`) that renders as a read-only structured view
+  // rather than in the editor. That is the right fallback: showing the one
+  // artifact a bare project has beats showing an empty pane, and every path
+  // reaching here has a renderer.
+  //
+  // What must never reach it is a REFERENCE — `toSpecEntry` drops those, which
+  // is what keeps a v1 project's committed PDF out of the editor pane.
+  const firstListed = files[0];
   const effectiveSelection: SpecSelection =
     selection ??
     (agentInRoom && hasDesignCell
       ? { kind: "cell-diagram" }
       : firstRequirements
         ? { kind: "file", path: firstRequirements.path }
-        : firstEditable
-          ? { kind: "file", path: firstEditable.path }
+        : firstListed
+          ? { kind: "file", path: firstListed.path }
           : { kind: "file", path: "" });
 
   // The concrete file entry when the selection is a file (else null: the

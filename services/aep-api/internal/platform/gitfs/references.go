@@ -27,6 +27,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"syscall"
 )
 
 // Reference documents (console #383 / ADR-0017) are the files a user attaches
@@ -209,7 +210,14 @@ func (e *Engine) ListReferences(ctx context.Context, ref RepoRef) ([]string, err
 	}
 	var names []string
 	for _, entry := range entries {
-		if entry.IsDir() {
+		// Regular files only. `IsDir()` alone is not that check: a SYMLINK is
+		// neither a dir nor a regular file, so it survives an IsDir filter, and
+		// the copy below would then follow it — `os.Open` resolves the link and
+		// the mode check lands on the TARGET. A link planted in the store would
+		// copy arbitrary readable content into the agent's workspace. Only
+		// aep-api writes here, so this is defense in depth against a poisoned
+		// mount — the same posture the rest of this package takes.
+		if !entry.Type().IsRegular() {
 			continue
 		}
 		// Re-validated on the way out: the store is a directory on a shared
@@ -224,9 +232,32 @@ func (e *Engine) ListReferences(ctx context.Context, ref RepoRef) ([]string, err
 	return names, nil
 }
 
-// overlayReferences copies the stored set into a freshly extracted snapshot at
-// ReferenceOverlayDir, before it is published. This is what makes a non-git
-// document readable by a turn.
+// overlayReferences brings a snapshot's ReferenceOverlayDir up to date with the
+// project's stored set. This is what makes a non-git document readable by a
+// turn.
+//
+// It runs on EVERY Ensure, not only on first materialization, and that is the
+// whole point. A snapshot is immutable with respect to the git SHA, but
+// references are a SECOND input keyed to that same SHA and mutable
+// independently of it — so addressing by SHA alone cannot express "same tree,
+// different documents". Overlaying only at materialization loses the create
+// flow outright: `POST /projects` commits the descriptor and moves HEAD to a
+// sha, anything that materializes that sha before the upload lands (a status
+// poll, the spec view's file list) publishes a snapshot with no references, and
+// the `/start` turn then reuses it — the agent gets a steer naming documents
+// that are not in its workspace. A re-upload (the confirm step's Retry) has the
+// same shape with stale content instead of missing content.
+//
+// ADD AND UPDATE ONLY — never remove. A project created under the feature's v1
+// has real committed references in this directory, arriving through
+// `git archive` like any other git content; a reconcile that deleted what the
+// store does not list would delete those. A superseded document can therefore
+// linger beside the current set, which is harmless: the turn's reference list
+// comes from the store, so nothing points the agent at it.
+//
+// Each file is written temp-then-rename inside the destination directory, so a
+// turn reading concurrently sees the old bytes or the new bytes, never a torn
+// file.
 //
 // Best-effort by design, matching the steer it feeds: a failure here must not
 // fail the snapshot, because that would take down every turn on the project —
@@ -254,18 +285,58 @@ func (e *Engine) overlayReferences(ctx context.Context, ref RepoRef, staging str
 		return
 	}
 	for _, name := range names {
-		if err := copyFile(filepath.Join(src, name), filepath.Join(dst, name)); err != nil {
+		from, to := filepath.Join(src, name), filepath.Join(dst, name)
+		stale, err := differs(from, to)
+		if err != nil {
+			slog.WarnContext(ctx, "gitfs: reference not compared; recopying",
+				"org", ref.OrgID, "project", ref.ProjectID, "name", name, "error", err)
+			stale = true
+		}
+		if !stale {
+			continue
+		}
+		if err := copyFileAtomic(from, to); err != nil {
 			slog.WarnContext(ctx, "gitfs: reference not overlaid",
 				"org", ref.OrgID, "project", ref.ProjectID, "name", name, "error", err)
 		}
 	}
 }
 
-// copyFile copies one regular file, 0644 — the same mode extractTar gives a
-// snapshot blob, so an overlaid document is indistinguishable from a committed
-// one to everything downstream.
-func copyFile(src, dst string) error {
-	in, err := os.Open(src)
+// differs reports whether the destination needs rewriting: absent, a different
+// size, or older than the source. Size-plus-mtime rather than a content hash —
+// this runs on every Ensure, and hashing up to 50 MB per turn to detect a
+// change that only happens on an explicit re-upload is not a trade worth
+// making. A rewrite that turns out to be unnecessary is harmless.
+func differs(src, dst string) (bool, error) {
+	di, err := os.Stat(dst)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return true, nil
+		}
+		return true, err
+	}
+	si, err := os.Stat(src)
+	if err != nil {
+		return true, err
+	}
+	return si.Size() != di.Size() || di.ModTime().Before(si.ModTime()), nil
+}
+
+// copyFileAtomic copies one regular file into place, 0644 — the same mode
+// extractTar gives a snapshot blob, so an overlaid document is
+// indistinguishable from a committed one to everything downstream.
+//
+// Staged beside the destination and renamed onto it, because a published
+// snapshot can be read by a turn while this runs: rename is atomic within a
+// directory, so a concurrent reader gets the old file or the new one and never
+// a half-written one.
+//
+// The source is opened with O_NOFOLLOW: the mode check has to happen on the
+// file this actually reads, and checking after a plain Open would already have
+// resolved a symlink. ListReferences filters links out too — both, because
+// either one alone leaves a window.
+func copyFileAtomic(src, dst string) (err error) {
+	in, err := os.OpenFile(src, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
 	if err != nil {
 		return err
 	}
@@ -277,13 +348,26 @@ func copyFile(src, dst string) error {
 	if !info.Mode().IsRegular() {
 		return fmt.Errorf("gitfs: %q is not a regular file", src)
 	}
-	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+
+	staged, err := os.CreateTemp(filepath.Dir(dst), ".reference-*")
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(out, in); err != nil {
-		out.Close()
+	defer func() {
+		if err != nil {
+			os.Remove(staged.Name())
+		}
+	}()
+	if _, err = io.Copy(staged, in); err != nil {
+		staged.Close()
 		return err
 	}
-	return out.Close()
+	if err = staged.Chmod(0o644); err != nil {
+		staged.Close()
+		return err
+	}
+	if err = staged.Close(); err != nil {
+		return err
+	}
+	return os.Rename(staged.Name(), dst)
 }

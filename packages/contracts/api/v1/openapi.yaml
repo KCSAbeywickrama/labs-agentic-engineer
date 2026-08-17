@@ -1788,11 +1788,18 @@ paths:
             schema:
               properties:
                 files:
-                  description: Reference documents — `.md`, `.txt`, `.pdf`, `.png`, `.jpg`,
-                    `.jpeg`; at most 10, each at most 5 MiB
+                  description: >
+                    Reference documents. Two groups, both readable by the models:
+                    binary read natively as file parts (`.pdf`, `.png`, `.jpg`,
+                    `.jpeg`, `.gif`, `.webp`), and text read as workspace files
+                    (`.md`, `.txt`, `.csv`, `.tsv`, `.json`, `.yaml`, `.yml`,
+                    `.xml`, `.html`, `.rst`). At most 10 documents, each at most
+                    5 MiB measured on the raw bytes. Office formats are not
+                    accepted — the models do not read them natively.
                   items:
                     format: binary
                     type: string
+                  maxItems: 10
                   type: array
               required:
               - files
@@ -1801,6 +1808,14 @@ paths:
       responses:
         '204':
           description: References stored
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Rejected — unsupported type, a document over 5 MiB, more than 10
+            documents, an unusable name, or two names that reduce to one stored name.
+            Nothing is stored; the previous set is left intact.
         default:
           content:
             application/json:

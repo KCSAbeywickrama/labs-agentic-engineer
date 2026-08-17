@@ -136,6 +136,108 @@ func TestPutReferences_StoredOffGitAndOverlaidIntoTheSnapshot(t *testing.T) {
 	}
 }
 
+// The regression this exists for. Overlaying only at first materialization
+// loses the create flow outright: `POST /projects` commits the descriptor and
+// moves HEAD, anything that materializes that sha before the upload lands (a
+// status poll, the spec view's file list) publishes a snapshot with no
+// references, and the turn then reuses it — the agent gets a steer naming
+// documents that are not in its workspace.
+func TestEnsure_OverlaysReferencesUploadedAfterTheSnapshotExists(t *testing.T) {
+	r := newFilesRig(t, map[string]string{"specs/requirements/prd.md": "x"})
+	ref := r.workspaceRef()
+	sha := r.remote.HeadSHA(t)
+
+	// Materialize FIRST, with nothing stored — the create flow's real order.
+	if err := r.engine.Ensure(t.Context(), ref, sha); err != nil {
+		t.Fatalf("first ensure: %v", err)
+	}
+	dir, err := gitfs.SnapshotDir(r.engine.Root(), ref, sha)
+	if err != nil {
+		t.Fatalf("snapshot dir: %v", err)
+	}
+	refPath := filepath.Join(dir, filepath.FromSlash(gitfs.ReferenceOverlayDir), "brief.md")
+	if _, err := os.Stat(refPath); !os.IsNotExist(err) {
+		t.Fatalf("nothing was uploaded yet, but the snapshot already holds a reference (stat err = %v)", err)
+	}
+
+	// Now upload, and run the turn's Ensure against the same sha.
+	if rec := r.putReferences(t, map[string][]byte{"brief.md": []byte("# Brief")}); rec.Code != http.StatusNoContent {
+		t.Fatalf("upload code %d: %s", rec.Code, rec.Body.String())
+	}
+	if err := r.engine.Ensure(t.Context(), ref, sha); err != nil {
+		t.Fatalf("second ensure: %v", err)
+	}
+
+	got, err := os.ReadFile(refPath)
+	if err != nil {
+		t.Fatalf("reference missing from an already-materialized snapshot: %v", err)
+	}
+	if string(got) != "# Brief" {
+		t.Fatalf("overlaid %q, want the uploaded bytes", got)
+	}
+}
+
+// The Retry-upload path: a re-upload must not leave the turn reading the
+// superseded bytes out of a snapshot that already exists.
+func TestEnsure_RefreshesAReplacedReferenceInAnExistingSnapshot(t *testing.T) {
+	r := newFilesRig(t, map[string]string{"specs/requirements/prd.md": "x"})
+	ref := r.workspaceRef()
+	sha := r.remote.HeadSHA(t)
+
+	if rec := r.putReferences(t, map[string][]byte{"brief.md": []byte("old")}); rec.Code != http.StatusNoContent {
+		t.Fatalf("first upload code %d", rec.Code)
+	}
+	if err := r.engine.Ensure(t.Context(), ref, sha); err != nil {
+		t.Fatalf("first ensure: %v", err)
+	}
+	if rec := r.putReferences(t, map[string][]byte{"brief.md": []byte("corrected and longer")}); rec.Code != http.StatusNoContent {
+		t.Fatalf("second upload code %d", rec.Code)
+	}
+	if err := r.engine.Ensure(t.Context(), ref, sha); err != nil {
+		t.Fatalf("second ensure: %v", err)
+	}
+
+	dir, err := gitfs.SnapshotDir(r.engine.Root(), ref, sha)
+	if err != nil {
+		t.Fatalf("snapshot dir: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(gitfs.ReferenceOverlayDir), "brief.md"))
+	if err != nil {
+		t.Fatalf("read reference: %v", err)
+	}
+	if string(got) != "corrected and longer" {
+		t.Fatalf("snapshot still holds %q — the re-upload did not reach the turn", got)
+	}
+}
+
+// A project created under the feature's v1 has real COMMITTED references, which
+// arrive through `git archive` like any other git content. The reconcile adds
+// and updates but never removes, so an empty store must not delete them.
+func TestEnsure_DoesNotDeleteCommittedV1References(t *testing.T) {
+	r := newFilesRig(t, map[string]string{
+		"specs/requirements/prd.md":                  "x",
+		"specs/requirements/references/legacy-v1.md": "# Committed under v1",
+	})
+	ref := r.workspaceRef()
+	sha := r.remote.HeadSHA(t)
+
+	// Nothing in the store — the only references are the committed ones.
+	if err := r.engine.Ensure(t.Context(), ref, sha); err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+	dir, err := gitfs.SnapshotDir(r.engine.Root(), ref, sha)
+	if err != nil {
+		t.Fatalf("snapshot dir: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(gitfs.ReferenceOverlayDir), "legacy-v1.md"))
+	if err != nil {
+		t.Fatalf("a committed v1 reference was removed from the snapshot: %v", err)
+	}
+	if string(got) != "# Committed under v1" {
+		t.Fatalf("committed reference = %q, want it untouched", got)
+	}
+}
+
 // A second upload REPLACES the set rather than merging into it, so a retry
 // after a partial failure converges instead of accumulating documents the user
 // can no longer see (the console lists references nowhere after create).

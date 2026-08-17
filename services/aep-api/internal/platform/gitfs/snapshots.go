@@ -44,6 +44,12 @@ func (e *Engine) Ensure(ctx context.Context, ref RepoRef, sha string) (err error
 		return err
 	}
 	if dirExists(dest) {
+		// The git tree at this sha is already materialized and immutable — but
+		// references are a SECOND input keyed to the same sha and mutable
+		// independently of it, so "the snapshot exists" does not mean "the
+		// snapshot is current". Reconcile them before handing it to a turn; see
+		// overlayReferences for the create-flow ordering this exists to fix.
+		e.overlayReferences(ctx, ref, dest)
 		return nil
 	}
 	if pct := e.DiskUsagePct(); pct >= DiskAdmissionRefusePct {
