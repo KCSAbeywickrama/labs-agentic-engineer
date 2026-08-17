@@ -23,6 +23,18 @@ that Workload/ReleaseBinding (locally the OC org, e.g. `default`); the vault
 path stays `user-app-secrets/<org-base-ns>/<name>` and is a different
 namespace from the CR.
 
+## Callback auth on the public gateway
+
+When `AGENT_PLATFORM_URL` is `https://` (cloud), the Job cannot present a
+Task JWT to the public RestApi: jwt-auth v1 only has key manager
+`iss: platform-idp`. Dispatch therefore mounts the org Thunder publisher
+`client_id` / `client_secret` from the IdP profile SecretReference (ESO
+fields, not the triplet property name `publisher`) and sets plain env
+`PUBLISHER_TOKEN_URL` from `PLATFORM_IDP_JWKS_URL` (`/oauth2/jwks` → `/oauth2/token`). The runner mints a
+client_credentials token at callback time. Local `http://` platform URLs
+do not mount `PUBLISHER_*`; Task JWT remains the credential. MCP stays
+on a different audience and is unchanged.
+
 ## The type is per-org, and it is the billing key
 
 The Component's type is a **namespaced `coding-agent` ComponentType**

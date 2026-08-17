@@ -44,8 +44,10 @@ type OrganizationIDPProfile struct {
 	PublisherClientSecret string `gorm:"column:publisher_client_secret" json:"-"`
 	PublisherSecretRef    string `gorm:"column:publisher_secret_ref" json:"publisherSecretRef,omitempty"`
 	// Secret-ref triplet — populated by SecretRefWriter.WritePublisher after
-	// EnsureOrgPublisher provisions the Thunder cc app. The dispatcher
-	// short-circuits the per-run runner-auth ExternalSecret when missing.
+	// EnsureOrgPublisher provisions the Thunder cc app. On https
+	// AGENT_PLATFORM_URL, dispatch fails loud when this triplet is missing
+	// after EnsureOrgPublisher; it mounts client_id and client_secret from
+	// the SecretReference, never publisher_client_secret from this row.
 	SecretRefName      *string    `gorm:"type:text;column:secret_ref_name" json:"-"`
 	SecretRefKVPath    *string    `gorm:"type:text;column:secret_ref_kv_path" json:"-"`
 	SecretRefProperty  *string    `gorm:"type:text;column:secret_ref_property" json:"-"`

@@ -289,8 +289,10 @@ func (w *SecretRefWriter) DeleteAnthropic(ctx context.Context, ocOrgID string, r
 // PublisherSecretFieldClientID and PublisherSecretFieldClientSecret are the
 // JSON field names inside the SM-API "publisher" secret. The dispatcher
 // materialises both into the per-run Job as PUBLISHER_CLIENT_ID and
-// PUBLISHER_CLIENT_SECRET via a single 2-entry ExternalSecret. Token
-// URL is non-secret and rides as a plain Job env from BFF config.
+// PUBLISHER_CLIENT_SECRET via two Workload secretEnv entries on the same
+// SecretReference (PUBLISHER_CLIENT_ID ← client_id, PUBLISHER_CLIENT_SECRET ←
+// client_secret). Token URL is non-secret plain Job env derived from
+// PLATFORM_IDP_JWKS_URL (/oauth2/jwks → /oauth2/token).
 const (
 	PublisherSecretFieldClientID     = "client_id"
 	PublisherSecretFieldClientSecret = "client_secret"
@@ -300,8 +302,8 @@ const (
 // SM-API as a single 2-field secret and stamps the triplet onto
 // `organization_idp_profiles`. Called from idp_service.EnsureOrgPublisher
 // (on create) and RegenerateClientSecret (on rotation). The triplet is
-// read at dispatch time to mint the per-run ExternalSecret that hands
-// the runner pod its cc credentials.
+// read at dispatch time on https AGENT_PLATFORM_URL to mount the two
+// Workload secretEnv entries that hand the runner pod its cc credentials.
 //
 // Same semantics as WriteAnthropic: best-effort, errors returned, ctx
 // must carry the user JWT.
