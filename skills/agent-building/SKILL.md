@@ -90,7 +90,7 @@ platform then carries.
 
 | Route | Behaviour |
 |---|---|
-| `POST /chat` | `{ messages: ModelMessage[] }` in; **`{ text, toolCalls, messages: ModelMessage[] }` out** |
+| `POST /chat` | `{ messages }` in — either AI SDK message shape, normalised at the door; **`{ text, toolCalls, messages: ModelMessage[] }` out** |
 | `GET /healthz` | `200 {ok:true}`, or `503 {ok:false, missing:[…]}` when unconfigured |
 
 The response shape is fixed, not yours to choose: `text` is what a chat UI
@@ -98,42 +98,50 @@ renders, `toolCalls` is what a test asserts on, and `messages` is the turn's
 trail the caller appends to its history. A response carrying only `messages`
 makes every consumer dig the reply out of an array.
 
-**The wire type is `ModelMessage`, in BOTH directions.** The AI SDK has two
-message types and they are not interchangeable:
+**Normalise the history at the door — accept either message shape.** The AI SDK
+has two, and a caller cannot be relied on to know which one you want:
 
 ```ts
-// ModelMessage — what generateText accepts. THIS is the wire type.
+// ModelMessage — what generateText accepts, and what you always return.
 { role: "user", content: "hi" }
 
-// UIMessage — what useChat keeps for rendering. NOT the wire type.
+// UIMessage — what a chat UI naturally holds.
 { id: "…", role: "user", parts: [{ type: "text", text: "hi" }] }
 ```
 
-Send a `UIMessage` and the SDK rejects the turn before it ever calls the model —
-`Invalid prompt: The messages do not match the ModelMessage[] schema` — which
-surfaces to the user as a 500 on the very first message.
+Hand a `UIMessage` to `generateText` and the SDK rejects the turn before it ever
+reaches the model — `Invalid prompt: The messages do not match the
+ModelMessage[] schema` — surfacing as a 500 on the caller's very first message.
 
-`ModelMessage` both ways is not a coin toss, it is the only self-consistent
-choice: this endpoint RETURNS `ModelMessage[]` (the `result.steps.flatMap`
-trail below), and the caller echoes that array back on the next turn. Accept
-`UIMessage` on the way in and turn two hands you back the `ModelMessage`s you
-just returned — the mismatch moves one turn later instead of going away. If a
-caller holds UI messages, it converts with the SDK's `convertToModelMessages()`
-before sending; that is the caller's job, because only the caller knows whether
-its history came from a UI.
-
-**Validate the shape, do not just check it is an array.** `Array.isArray` lets a
-wrong-typed history through to the SDK, which throws, which becomes a 500 — a
-server error for what is a bad request. Check each entry has a `role` and a
-`content`, and answer **400** naming the expected shape:
+**You convert, not the caller.** You are the side that owns the model, so you
+are the side that knows what it needs; a SPA holding UI messages should not have
+to learn your model's input type to say hello. Detect and convert:
 
 ```ts
-const ok = Array.isArray(messages) && messages.every(
+import { convertToModelMessages, type ModelMessage } from "ai";
+
+// A `parts` array is the UI shape; `content` is already a ModelMessage.
+const history: ModelMessage[] = messages.some((m) => "parts" in m)
+  ? convertToModelMessages(messages)
+  : (messages as ModelMessage[]);
+```
+
+Accepting BOTH is what makes the round trip work, and accepting only one is what
+breaks it. You always RETURN `ModelMessage[]` (the `result.steps.flatMap` trail
+below) and the caller echoes that array back next turn — so a UI-message-only
+door fails on turn two with the very messages you just handed out. Normalising
+costs three lines and ends the argument for every caller you will ever have.
+
+**Then validate, and answer 400.** After normalising, a history that is still
+not `{role, content}` entries is a bad REQUEST, not a server error —
+`Array.isArray` alone lets it through to the SDK, which throws, which becomes a
+500 and reads as the agent being broken:
+
+```ts
+const ok = Array.isArray(history) && history.every(
   (m) => m && typeof m.role === "string" && m.content !== undefined,
 );
-if (!ok) return sendJson(res, 400, {
-  error: "expected { messages: [{ role, content }] } (ModelMessage[]); UI messages with `parts` must be converted first",
-});
+if (!ok) return sendJson(res, 400, { error: "expected { messages: [...] } of AI SDK messages" });
 ```
 
 ## Constraints
@@ -289,7 +297,7 @@ const { authorization } = callContext.getStore() ?? {};
 | Container exits at startup, `ERR_MODULE_NOT_FOUND` | Relative import missing the `.js` extension under `nodenext` | `import { x } from "./tools.js"` — even though the file is `.ts` |
 | Agent performs an operation the design excluded | Generated tools for the whole OpenAPI document | Only allow-listed operations become tools |
 | Anyone who can reach the URL can chat, burning the org's model budget | The handler forwarded `Authorization` downstream but never gated on the caller | 401 when `X-User-Id` is absent — the APIs behind you protect data, not spend |
-| Every chat 500s on the FIRST message with `messages do not match the ModelMessage[] schema` | The caller sent `UIMessage` (`id` + `parts`); the SDK wants `ModelMessage` (`role` + `content`) | Wire type is `ModelMessage` both ways; callers convert with `convertToModelMessages()`, and the handler 400s on the wrong shape rather than letting the SDK throw |
+| Every chat 500s on the FIRST message with `messages do not match the ModelMessage[] schema` | The handler passed the caller's history straight to `generateText`; a chat UI sends `UIMessage` (`id` + `parts`), the model takes `ModelMessage` (`role` + `content`) | Normalise at the door with `convertToModelMessages()` — accept either shape, always return `ModelMessage[]` |
 | One user reads or edits another's data | Ownership "enforced" in the prompt; the provider was called with the agent's own credential | Forward the caller's credential; let the provider return 403 |
 | A normal `409`/`404` ends the turn with an error | Tool threw on a non-2xx response | Return `{ ok: false, status, error }` to the model |
 | Model fills the wrong field, or asks which part of the URL a value belongs to | Tool schema exposed path/query/body structure | One flat object; re-split when building the request |

@@ -42,13 +42,7 @@ catalog names, e.g. a Ballerina API service →
 `"api-management"` to any service that sits behind the gateway, and
 `"thunder-authentication"` to **both** sides of sign-in — the SPA *and* every
 protected backend it calls, since that skill owns how each resolves the caller's
-role. Pin `"agent-building"` on **both** sides of an agent call too — the
-`ai-agent` itself *and* every component that declares a `component` dependency
-on one. An agent has no `openapi.yaml`, so its caller cannot generate a client
-and must hand-write one; without that skill it is guessing the request shape,
-and it guesses wrong (a chat UI naturally holds the AI SDK's `UIMessage`, while
-the endpoint takes `ModelMessage` — the mismatch 500s on the caller's very
-first message). It is a JSON key on the component's design object, so include it when you
+role. It is a JSON key on the component's design object, so include it when you
 write that `design.json` (addFile/editFile) — do NOT put `skillsPinned` in
 `design.md` frontmatter. Each component carries only the skills its own build
 needs.
