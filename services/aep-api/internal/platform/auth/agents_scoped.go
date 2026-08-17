@@ -32,6 +32,7 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -124,6 +125,7 @@ func (v *AgentsScopedVerifier) resolveOrg(authHeader string) (string, error) {
 			}
 			return pub.OrgHandle, nil
 		}
+		return "", errors.Join(err, perr)
 	}
 	return "", err
 }

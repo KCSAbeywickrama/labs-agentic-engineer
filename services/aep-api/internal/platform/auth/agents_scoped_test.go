@@ -19,6 +19,7 @@ package auth
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -250,5 +251,32 @@ func TestAgentsScoped_PublisherToken401WhenPublisherNil(t *testing.T) {
 	w := serveWith(v, req)
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d (body %q)", w.Code, w.Body.String())
+	}
+}
+
+// Both BFF and publisher verify fail: joined error for the log, HTTP still 401
+// with a generic body.
+func TestAgentsScoped_BothVerifyFailStill401(t *testing.T) {
+	mgr := mcpTestManager(t)
+	pub, _ := newPublisherVerifier(t)
+	v := NewAgentsScopedVerifier(mgr, pub)
+
+	_, err := v.resolveOrg("Bearer not-a-jwt")
+	if err == nil {
+		t.Fatal("expected resolveOrg error")
+	}
+	joined, ok := err.(interface{ Unwrap() []error })
+	if !ok || len(joined.Unwrap()) != 2 {
+		t.Fatalf("want errors.Join of 2, got %T %v", err, err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/internal/v1/mcp", nil)
+	req.Header.Set("Authorization", "Bearer not-a-jwt")
+	w := serveWith(v, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d (body %q)", w.Code, w.Body.String())
+	}
+	if got := strings.TrimSpace(w.Body.String()); got != "unauthorized" {
+		t.Fatalf("body = %q, want unauthorized", got)
 	}
 }

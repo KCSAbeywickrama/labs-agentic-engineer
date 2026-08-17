@@ -184,12 +184,16 @@ async function main(): Promise<number> {
   // (an org may bill its coding agent to a Claude Code OAuth token instead of
   // an API key), and priming only the one that happens to be unset would leave
   // the other unredacted in the progress feed. Unset entries are skipped.
+  // After CC overwrite, req.mcpToken is the publisher token; AEP_MCP_TOKEN is
+  // the BFF snapshot that preferPublisherMcpToken replaced and must still be
+  // scrubbed.
   primeScrubber([
     process.env.ANTHROPIC_API_KEY,
     process.env.CLAUDE_CODE_OAUTH_TOKEN,
     req.bearer,
     publisherClientSecret,
     req.mcpToken,
+    process.env.AEP_MCP_TOKEN,
   ]);
 
   emit({

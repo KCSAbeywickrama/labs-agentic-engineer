@@ -33,9 +33,10 @@ fields, not the triplet property name `publisher`) and sets plain env
 `PUBLISHER_TOKEN_URL` from `PLATFORM_IDP_JWKS_URL` (`/oauth2/jwks` → `/oauth2/token`). The runner mints a
 client_credentials token at callback time. HTTPS Jobs use the minted publisher token for **both** `credentials/refresh`
 and `POST /internal/v1/mcp` (gateway jwt-auth requires `iss=platform-idp`).
+On https, MCP Authorization is the publisher token minted at pod start and is not refreshed, unlike credhelper.
 `AgentsScopedVerifier` dual-accepts that Thunder JWT (`aud=aep-publisher-{org}`)
 and the BFF MCP token (`aud=aep-api-mcp`). Local `http://` platform URLs do
-not mount `PUBLISHER_*`; MCP keeps `AEP_MCP_TOKEN`. The designing agent never
+not mount `PUBLISHER_*`; Task JWT remains the callback credential; MCP keeps `AEP_MCP_TOKEN`. The designing agent never
 hits this gateway: it calls ClusterIP `AEP_API_INTERNAL_BASE_URL` with the
 BFF MCP token (`mcpForTurn`).
 
