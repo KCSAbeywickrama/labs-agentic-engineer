@@ -42,15 +42,18 @@ vi.mock("../../builds/components/RunFeed", () => ({
     runId,
     cycleKinds,
     expandNewest,
+    runNumber,
   }: {
     runId: string;
     cycleKinds?: readonly string[];
     expandNewest?: boolean;
+    runNumber?: number;
   }) => (
     <div
       data-testid="run-feed"
       data-run-id={runId}
       data-expand-newest={String(expandNewest)}
+      data-run-number={String(runNumber)}
     >
       {(cycleKinds ?? []).join(",")}
     </div>
@@ -445,6 +448,40 @@ describe("ValidationPage across a milestone's runs", () => {
     expect(
       screen.getAllByTestId("run-feed").map((f) => f.getAttribute("data-expand-newest")),
     ).toEqual(["true", "false"]);
+  });
+
+  // Counted from the OLDEST validating run, so the newest carries the HIGHEST number
+  // and the run count descends the page alongside each feed's cycle count. Counted over
+  // the runs this page SHOWS: a run that never validated has no box here, so numbering
+  // the milestone's whole list would leave gaps.
+  it("numbers the validating runs from the oldest", () => {
+    mockValidation = "running";
+    mockRun = run({ cycles: [validationCycle] });
+    mockNewerRuns = [
+      {
+        ...run({ cycles: [validationCycle] }),
+        id: "run-revalidate",
+        origin: "revalidate",
+      },
+    ];
+
+    renderPage(undefined);
+
+    expect(
+      screen.getAllByTestId("run-feed").map((f) => f.getAttribute("data-run-number")),
+    ).toEqual(["2", "1"]);
+  });
+
+  // Unconditional, unlike the caption: a prefix that appeared only once a second run
+  // existed would RENAME a box mid-session when a revalidation starts, and this page
+  // polls while a version is live.
+  it("numbers the run even when one run validated the version", () => {
+    mockValidation = "running";
+    mockRun = run({ cycles: [validationCycle] });
+
+    renderPage(undefined);
+
+    expect(screen.getByTestId("run-feed")).toHaveAttribute("data-run-number", "1");
   });
 
   // The ordinary case: one run validated the version, so there is no history to

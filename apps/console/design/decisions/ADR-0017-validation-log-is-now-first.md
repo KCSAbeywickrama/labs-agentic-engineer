@@ -70,13 +70,39 @@ Validation attempts are the first kind, rendered as the second.
    the same feed, so `RunFeed` would have to place a caption whose need it cannot see;
    drawing at the run boundary keeps the line on a boundary the page already owns.
 
-6. **What a section is CALLED is deliberately still open.** Labels remain `Cycle N`.
-   "Attempt N" is the obvious candidate and was not taken, because the word already means
-   something else in the same row — `cycle.attempts` is a per-cycle re-dispatch count,
-   rendered as "2 attempts" — and because a run-scoped alternative would need a run number
-   the app does not have: `RunHistoryList` names runs by origin and timestamp, never by
-   ordinal. Decision 2 makes the ordinal independent of position, so settling the wording
-   later is a copy change and nothing more.
+6. **A section is `Run N · Cycle M`, and both numbers count only what this page shows.**
+   `M` counts the run's **validation** cycles, not its cycles — which is the house
+   convention, not a local fiction: `BUILD_CYCLE_KINDS = ["coding", "fix", "conflict"]`
+   (`runView.ts:41`) excludes validation, and `buildSessionLabel` numbers over that
+   filtered array, so the Builds page's "Build session 2" is not the run's cycle 2 either.
+   `N` counts the **validating** runs, oldest first. `·` is the separator every compound
+   label in the app already uses (`EarlierSessions.tsx:88`, `BuildsPage.tsx:122`,
+   `RunHistoryList.tsx:173`).
+
+   The run number is what makes a section self-describing: each feed numbers its own
+   cycles from 1, so a revalidated version otherwise shows two boxes both reading
+   "Cycle 1" in one flat stack, separated only by which side of decision 5's caption they
+   fall on. Unlike that caption, the prefix is **unconditional** — one that appeared only
+   once a second run existed would rename a box mid-session, and this page polls while a
+   version is live.
+
+   *Rejected: "Attempt N."* The word already means something else in the same row —
+   `cycle.attempts` is a per-cycle re-dispatch count, rendered as "2 attempts".
+
+   *Rejected: the run's absolute cycle position*, which `openapi.yaml:4776`'s `cycleIndex`
+   supplies ("1-based position of that cycle in the run"). It is the truthful absolute
+   number and that is precisely the problem: it would make validation the only surface
+   using absolute positions, printing `Cycle 4` beside a Builds page that calls the same
+   run's work `Build session 2`. Two schemes disagreeing about one run is worse than one
+   scheme scoped per phase on both.
+
+   *Rejected: numbering runs over the milestone's whole run list.* It would make `N`
+   cross-referenceable in principle, but a run that never validated has no box here, so
+   `[spec-build, incident-adoption, revalidate]` would print `Run 3` and `Run 1` with no
+   `Run 2` anywhere. There is nothing to cross-reference against anyway: no other surface
+   numbers runs — `RunHistoryList` and `RunStory` identify one by origin chip and
+   timestamp, and `runView.ts:277-281` states that "the origin is the only thing that
+   tells them apart".
 
 ## Consequences
 

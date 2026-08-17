@@ -125,6 +125,43 @@ describe("RunFeed", () => {
     }
   });
 
+  // Each feed numbers its own cycles from 1, so the run is what tells two "Cycle 1"s
+  // apart when a version was validated by more than one run.
+  it("prefixes the run when it is given one", () => {
+    mockCycles = [
+      section("c1", "validation", ["main"]),
+      section("c2", "validation", ["main"]),
+    ];
+    render(<RunFeed projectName="acme" runId="run-1" runNumber={2} />);
+    expect(
+      screen.getAllByText(/^Run \d+ · Cycle \d+$/).map((el) => el.textContent),
+    ).toEqual(["Run 2 · Cycle 2", "Run 2 · Cycle 1"]);
+  });
+
+  // The single-feed case: there is nothing to disambiguate, so nothing is prefixed and
+  // the heading is exactly what it was before the prop existed.
+  it("says nothing about a run when it is given no number", () => {
+    mockCycles = [section("c1", "validation", ["main"])];
+    render(<RunFeed projectName="acme" runId="run-1" />);
+    expect(screen.getByText("Cycle 1")).toBeInTheDocument();
+    expect(screen.queryByText(/Run \d/)).toBeNull();
+  });
+
+  // Two runs' chips open DIFFERENT pull requests, so they have to be tellable apart by
+  // name alone — "Cycle 1 pull request" would name both of them.
+  it("carries the run into the pull request's accessible name", () => {
+    mockCycles = [
+      section("c1", "validation", ["main"], {
+        number: 41,
+        url: "https://github.com/acme/demo/pull/41",
+      }),
+    ];
+    render(<RunFeed projectName="acme" runId="run-1" runNumber={2} />);
+    expect(
+      screen.getByRole("link", { name: "Run 2 · Cycle 1 pull request #41" }),
+    ).toHaveAttribute("href", "https://github.com/acme/demo/pull/41");
+  });
+
   // The stream keeps moving which cycle is newest, but a reader reading an earlier
   // one must not have it yanked shut underneath them.
   it("lets the reader open an earlier cycle instead of the newest", () => {

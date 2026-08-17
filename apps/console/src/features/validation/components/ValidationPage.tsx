@@ -535,6 +535,13 @@ export function ValidationPage({
             projectName={projectName}
             runId={r.id}
             cycleKinds={VALIDATION_CYCLE}
+            // Counted from the OLDEST validating run, like the cycle ordinal inside
+            // the feed, so both numbers descend together down the page. Counted over
+            // the runs this PAGE shows rather than the milestone's whole run list: a
+            // run that never validated has no box here, so numbering the full list
+            // would print "Run 3" and "Run 1" with no Run 2 anywhere. Nothing can
+            // disagree with it either — no other surface numbers runs at all.
+            runNumber={feedRuns.length - i}
             // Only the newest run may open a box, so exactly one log is open on the
             // page rather than one per feed — and it is the one still being written.
             expandNewest={i === 0}
