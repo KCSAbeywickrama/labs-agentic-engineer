@@ -18,11 +18,7 @@ package files
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
-	"fmt"
-	"strings"
-	"unicode/utf8"
 
 	"github.com/wso2/aep/aep-api/internal/gen"
 	"github.com/wso2/aep/aep-api/internal/platform/apierr"
@@ -81,17 +77,12 @@ func (h *Handler) ReadFile(ctx context.Context, request gen.ReadFileRequestObjec
 	return gen.ReadFile200JSONResponse(fileContentToWire(fc)), nil
 }
 
-// fileContentToWire is the read half of decodeContent: a binary file rides
-// base64 with the encoding flag set, because a JSON string cannot carry its
-// bytes (json.Marshal swaps invalid UTF-8 for U+FFFD — silent corruption).
-// Text keeps today's wire shape exactly, encoding omitted.
+// fileContentToWire converts a read into its wire shape. The Files API is
+// text-only: reference documents — the one binary this platform ever had to
+// serve — are transient turn inputs now, stored off-git and never readable
+// here (console ADR-0017), so there is no base64 half to pair with.
 func fileContentToWire(fc *spec.FileContent) gen.FileContent {
-	out := gen.FileContent{Path: fc.Path, Content: fc.Content, Sha: fc.SHA}
-	if !utf8.ValidString(fc.Content) || strings.ContainsRune(fc.Content, 0) {
-		out.Content = base64.StdEncoding.EncodeToString([]byte(fc.Content))
-		out.Encoding = gen.FileContentEncodingBase64
-	}
-	return out
+	return gen.FileContent{Path: fc.Path, Content: fc.Content, Sha: fc.SHA}
 }
 
 // ReadFileBundle serves the whole-prefix read. It is registered under the
@@ -120,10 +111,7 @@ func (h *Handler) ApplyFiles(ctx context.Context, request gen.ApplyFilesRequestO
 	if request.Body == nil {
 		return nil, apierr.BadRequest("request body required")
 	}
-	applyReq, err := applyRequestFromWire(*request.Body)
-	if err != nil {
-		return nil, err
-	}
+	applyReq := applyRequestFromWire(*request.Body)
 	res, conflicts, err := h.files.Apply(ctx, org, request.ProjectName, applyReq)
 	if err != nil {
 		if errors.Is(err, spec.ErrApplyConflict) {
@@ -167,45 +155,18 @@ func appliedPaths(body gen.ApplyRequest, res *spec.ApplyResult) []string {
 	return paths
 }
 
-// applyRequestFromWire converts the generated body into the service's shape,
-// decoding each write's content to the file's real bytes. `encoding` is the
-// wire's concern only: everything below this line — validation, size limits,
-// the commit itself — sees raw content, so a base64 write of a PDF lands as
-// the PDF, not as its base64 text.
-func applyRequestFromWire(in gen.ApplyRequest) (spec.ApplyRequest, error) {
+// applyRequestFromWire converts the generated body into the service's shape.
+// Writes carry text and nothing else — see fileContentToWire for why the
+// binary half is gone.
+func applyRequestFromWire(in gen.ApplyRequest) spec.ApplyRequest {
 	out := spec.ApplyRequest{Message: in.Message}
 	for _, w := range in.Writes {
-		content, err := decodeContent(w.Content, w.Encoding)
-		if err != nil {
-			return spec.ApplyRequest{}, err
-		}
-		out.Writes = append(out.Writes, spec.WriteOp{Path: w.Path, Content: content, BaseSHA: w.BaseSha})
+		out.Writes = append(out.Writes, spec.WriteOp{Path: w.Path, Content: w.Content, BaseSHA: w.BaseSha})
 	}
 	for _, d := range in.Deletes {
 		out.Deletes = append(out.Deletes, spec.DeleteOp{Path: d.Path, BaseSHA: d.BaseSha})
 	}
-	return out, nil
-}
-
-// decodeContent turns a write's wire content into the bytes to commit. utf8 —
-// the contract's default, and what an omitted field means — is already those
-// bytes. Undecodable base64 is the caller's error, so it is a 400: committing
-// it would silently corrupt the file. So is an encoding outside the contract's
-// enum: nothing here can know what those bytes are, and falling through to utf8
-// would commit the caller's mistake as the file.
-func decodeContent(content string, encoding gen.WriteOpEncoding) (string, error) {
-	switch encoding {
-	case "", gen.WriteOpEncodingUTF8:
-		return content, nil
-	case gen.WriteOpEncodingBase64:
-		raw, err := base64.StdEncoding.DecodeString(content)
-		if err != nil {
-			return "", apierr.BadRequest("content is not valid base64")
-		}
-		return string(raw), nil
-	default:
-		return "", apierr.BadRequest(fmt.Sprintf("unsupported content encoding %q; want utf8 or base64", encoding))
-	}
+	return out
 }
 
 // applyResultToWire converts the service result into the contract schema.

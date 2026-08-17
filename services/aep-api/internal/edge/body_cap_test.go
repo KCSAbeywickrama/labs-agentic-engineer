@@ -19,16 +19,16 @@ package edge
 import "testing"
 
 // The edge body ceiling exists to bound abuse, not to undercut a documented
-// feature. The largest legitimate request is the reference-document batch
-// (#383/#384): 10 files × 5 MiB, base64-encoded on the wire (4·⌈n/3⌉), plus
-// JSON structure. A ceiling below that turns a valid upload into a 413 —
-// which is precisely the regression this test exists to catch (the cap sat at
-// 10 MiB while the contract allowed ~67 MiB).
-func TestMaxBodyBytes_AdmitsTheFullReferenceBatch(t *testing.T) {
-	const decoded = 10 * (5 << 20)  // ≤10 files × ≤5 MiB, the FE contract
-	wire := 4 * ((decoded + 2) / 3) // base64 length
-	wire += 64 << 10                // JSON keys, paths, message — generous slack
+// feature. The largest legitimate request is the reference-document upload
+// (#383): 10 files × 5 MiB as multipart/form-data — raw bytes now, not base64
+// (ADR-0017 moved them off the Files API), plus per-part headers. A ceiling
+// below that turns a valid upload into a 413, which is precisely the
+// regression this test exists to catch: the cap once sat at 10 MiB while the
+// contract allowed far more.
+func TestMaxBodyBytes_AdmitsTheFullReferenceUpload(t *testing.T) {
+	const raw = 10 * (5 << 20) // ≤10 files × ≤5 MiB, the contract
+	wire := raw + 64<<10       // part boundaries, headers, file names — generous slack
 	if maxBodyBytes < wire {
-		t.Fatalf("maxBodyBytes = %d, but a full reference batch needs %d on the wire — valid uploads would 413", maxBodyBytes, wire)
+		t.Fatalf("maxBodyBytes = %d, but a full reference upload needs %d on the wire — valid uploads would 413", maxBodyBytes, wire)
 	}
 }

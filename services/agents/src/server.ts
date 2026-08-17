@@ -373,7 +373,8 @@ export function createApp(deps: CreateAppDeps): Express {
           token: collab.token,
         });
         // The room excludes reference documents by design — text references
-        // ride in from the git snapshot instead (git is their authority).
+        // ride in from the turn's snapshot instead, which is their authority
+        // (aep-api overlays the off-git store into it).
         files = overlayReferenceTexts(roomPeer.files(), files);
       } catch (err) {
         res.status(502).json({

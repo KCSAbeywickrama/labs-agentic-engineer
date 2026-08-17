@@ -362,24 +362,30 @@ export function readReferenceAttachments(snapshotDir: string, references: string
   return parts;
 }
 
-/** Where the console commits uploaded reference documents (#383/#384). */
+/**
+ * Where reference documents appear inside a turn's snapshot (#383). NOT a repo
+ * path: nothing is committed there any more — aep-api stores the documents off
+ * git and overlays them into the extracted snapshot at this prefix (console
+ * ADR-0017), which is exactly why nothing in this file had to change.
+ */
 export const REFERENCES_PREFIX = "specs/requirements/references/";
 
 /**
- * Overlay the GIT snapshot's reference-document texts onto a room-scoped
- * turn's files. The collab room deliberately excludes reference documents
- * (they are inputs, not collaboratively-edited spec), so a turn whose CURRENT
- * STATE comes from the room would silently lose the user's text references —
- * a live /start did exactly that: the steer listed claim.md, the snapshot
- * held it, and the prompt never saw it. Git is the authority for references,
- * so a stale room copy (seeded before the exclusion existed) is overwritten,
- * and the room stays the authority for everything else.
+ * Overlay the SNAPSHOT's reference-document texts onto a room-scoped turn's
+ * files. The collab room deliberately excludes reference documents (they are
+ * inputs, not collaboratively-edited spec), so a turn whose CURRENT STATE comes
+ * from the room would silently lose the user's text references — a live /start
+ * did exactly that: the steer listed claim.md, the snapshot held it, and the
+ * prompt never saw it. The snapshot is the authority for references, so a stale
+ * room copy (seeded before the exclusion existed, or from a project created
+ * under the feature's v1) is overwritten, and the room stays the authority for
+ * everything else.
  */
 export function overlayReferenceTexts(
   roomFiles: Record<string, string>,
-  gitFiles: Record<string, string>,
+  snapshotFiles: Record<string, string>,
 ): Record<string, string> {
-  const refs = Object.entries(gitFiles).filter(([path]) => path.startsWith(REFERENCES_PREFIX));
+  const refs = Object.entries(snapshotFiles).filter(([path]) => path.startsWith(REFERENCES_PREFIX));
   if (refs.length === 0) return roomFiles;
   const out = { ...roomFiles };
   for (const [path, content] of refs) out[path] = content;

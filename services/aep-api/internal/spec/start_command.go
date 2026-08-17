@@ -47,6 +47,7 @@ import (
 	"strings"
 
 	"github.com/wso2/aep/aep-api/internal/clients/agentsvc"
+	"github.com/wso2/aep/aep-api/internal/platform/gitfs"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 )
 
@@ -86,7 +87,7 @@ func (s *Service) turnSpecFor(ctx context.Context, ref sourcecontrol.RepoRef, at
 		return agentsvc.TurnSpec{
 			Kind:       agentsvc.TurnKindStart,
 			Idea:       strings.TrimSpace(idea),
-			References: s.listReferenceDocs(ctx, ref, at),
+			References: s.listReferenceDocs(ctx, ref),
 		}, token
 	}
 
@@ -99,37 +100,43 @@ func (s *Service) turnSpecFor(ctx context.Context, ref sourcecontrol.RepoRef, at
 		Kind:       agentsvc.TurnKindFlow,
 		Skill:      token,
 		Text:       rest,
-		References: s.listReferenceDocs(ctx, ref, at),
+		References: s.listReferenceDocs(ctx, ref),
 	}, token
 }
 
-// ReferencesDir is where the console commits the documents attached at project
-// create (#383). It is ordinary versioned spec content — the agent can read it
-// from its own snapshot — so the turn carries only the PATHS, as a pointer.
-const ReferencesDir = "specs/requirements/references/"
+// ReferencesDir is where a reference document sits INSIDE a turn's snapshot.
+// It is not a repo path: nothing commits there (console ADR-0017). The engine
+// stores the documents beside the mirror and overlays them into each extracted
+// snapshot at this prefix, so the turn can keep carrying only the PATHS and the
+// agent reads them from its own workspace exactly as before.
+const ReferencesDir = gitfs.ReferenceOverlayDir + "/"
 
-// listReferenceDocs lists the reference documents at `at`, sorted. Nothing
-// there (the ordinary case — most projects attach none) returns nil, so the
-// field drops out of the turn JSON entirely and the turn is byte-identical to
-// one from before this channel existed.
+// listReferenceDocs lists the project's stored reference documents, sorted, as
+// the paths they will occupy in the turn's snapshot. Nothing stored (the
+// ordinary case — most projects attach none) returns nil, so the field drops
+// out of the turn JSON entirely and the turn is byte-identical to one from
+// before this channel existed.
 //
-// Best-effort, exactly like the captured idea: a repo we cannot list is not a
+// Sourced from the STORE, not the git tree: that is what makes this independent
+// of `at`, and it is why a project created under the feature's v1 — whose
+// documents really are committed — stops steering (decision 9: no migration).
+//
+// Best-effort, exactly like the captured idea: a store we cannot list is not a
 // reason to fail someone's kickoff. Worst case the agent interviews without
-// knowing the documents are there, which is what it did before #384.
-func (s *Service) listReferenceDocs(ctx context.Context, ref sourcecontrol.RepoRef, at string) []string {
-	entries, _, err := s.git.Workspace().List(ctx, ref, at)
+// knowing the documents are there.
+func (s *Service) listReferenceDocs(ctx context.Context, ref sourcecontrol.RepoRef) []string {
+	names, err := s.git.Workspace().ListReferences(ctx, ref)
 	if err != nil {
 		slog.WarnContext(ctx, "references unlistable; turn continues without them",
 			"dir", ReferencesDir, "error", err)
 		return nil
 	}
-	var out []string
-	for _, e := range entries {
-		// HasPrefix on the trailing-slash dir also excludes the folder entry
-		// itself, and any sibling that merely starts with the same name.
-		if strings.HasPrefix(e.Path, ReferencesDir) {
-			out = append(out, e.Path)
-		}
+	out := make([]string, 0, len(names))
+	for _, name := range names {
+		out = append(out, ReferencesDir+name)
+	}
+	if len(out) == 0 {
+		return nil
 	}
 	slices.Sort(out)
 	return out

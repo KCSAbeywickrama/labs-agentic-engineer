@@ -21,24 +21,28 @@ import (
 	"testing"
 
 	"github.com/wso2/aep/aep-api/internal/clients/agentsvc"
+	"github.com/wso2/aep/aep-api/internal/platform/gitfs"
 	"github.com/wso2/aep/aep-api/internal/spec"
 )
 
-// The reference-documents channel (#384), sibling to the captured idea: the
-// console commits what the user attached at create into
-// specs/requirements/references/, and `/start` tells the agent they are there.
-// These tests assert the FACTS the BFF puts on the turn — the wording that
-// renders them belongs to the agents service.
+// The reference-documents channel (#383/#384), sibling to the captured idea:
+// the console uploads what the user attached at create, the platform stores it
+// OFF GIT (console ADR-0017) and overlays it into each turn's snapshot, and
+// `/start` tells the agent the documents are there. These tests assert the
+// FACTS the BFF puts on the turn — the wording that renders them belongs to the
+// agents service. The paths on the turn are snapshot paths, not repo paths:
+// nothing is committed at them.
 
 // References attached at create ride the `/start` turn, sorted so the same
 // folder always produces the same turn.
 func TestStartCommand_CarriesReferenceDocuments(t *testing.T) {
-	got := startTurnSpec(t, map[string]string{
-		spec.DescriptorPath:                            descriptorTOML(t, testIdea),
-		"specs/requirements/references/rfp.pdf":        "%PDF-1.4\n",
-		"specs/requirements/references/glossary.md":    "# Terms\n",
-		"specs/requirements/references/interviews.txt": "notes\n",
-	}, "/start")
+	got := startTurnSpecWithReferences(t,
+		map[string]string{spec.DescriptorPath: descriptorTOML(t, testIdea)},
+		[]gitfs.ReferenceDoc{
+			{Name: "rfp.pdf", Content: []byte("%PDF-1.4\n")},
+			{Name: "glossary.md", Content: []byte("# Terms\n")},
+			{Name: "interviews.txt", Content: []byte("notes\n")},
+		}, "/start")
 
 	want := []string{
 		"specs/requirements/references/glossary.md",
@@ -54,7 +58,7 @@ func TestStartCommand_CarriesReferenceDocuments(t *testing.T) {
 	}
 }
 
-// No references folder → nothing is added, so a docless project's turn stays
+// No stored references → nothing is added, so a docless project's turn stays
 // exactly what it is today. This is the no-regression guarantee: every existing
 // project takes this path.
 func TestStartCommand_NoReferencesFolderAddsNothing(t *testing.T) {
@@ -67,27 +71,30 @@ func TestStartCommand_NoReferencesFolderAddsNothing(t *testing.T) {
 	}
 }
 
-// Only the references folder rides. The rest of specs/ is already the agent's
-// to read from its snapshot; re-listing it here would drown the real brief.
-func TestStartCommand_OnlyReferenceFolderFilesRide(t *testing.T) {
-	got := startTurnSpec(t, map[string]string{
+// Only stored references ride. The rest of specs/ is already the agent's to
+// read from its snapshot; re-listing it here would drown the real brief. Under
+// v1 this test guarded a path-prefix trap (a sibling `references-old/` folder
+// leaking in); the store cannot express that at all, so what it now pins is the
+// stronger property — committed spec files never enter this channel, whatever
+// they are called.
+func TestStartCommand_OnlyStoredReferencesRide(t *testing.T) {
+	got := startTurnSpecWithReferences(t, map[string]string{
 		spec.DescriptorPath: descriptorTOML(t, testIdea),
-		// Siblings that must NOT ride: one beside the references folder, one in
-		// another specs/ subtree, one outside specs/ entirely. (prd.md is left
-		// out deliberately — the shared rig writes it as the turn's own output.)
-		"specs/requirements/scope.md": "# Scope\n",
-		"specs/design/design.md":      "# Design\n",
-		"README.md":                   "hi\n",
-		// The name-prefix trap: this folder SHARES a prefix with the real one
-		// and must not ride. Drop the trailing slash from ReferencesDir and
-		// this file starts leaking into every kickoff.
+		// Committed siblings that must NOT ride — including files under the
+		// overlay path itself, which is what a project created under the
+		// feature's v1 actually looks like (decision 9: no migration, they
+		// simply stop steering). (prd.md is left out deliberately — the shared
+		// rig writes it as the turn's own output.)
+		"specs/requirements/scope.md":                     "# Scope\n",
+		"specs/design/design.md":                          "# Design\n",
+		"README.md":                                       "hi\n",
 		"specs/requirements/references-old/superseded.md": "# Old\n",
-		"specs/requirements/references/brief.md":          "# Brief\n",
-	}, "/start")
+		"specs/requirements/references/legacy-v1.md":      "# Committed under v1\n",
+	}, []gitfs.ReferenceDoc{{Name: "brief.md", Content: []byte("# Brief\n")}}, "/start")
 
 	want := []string{"specs/requirements/references/brief.md"}
 	if !slices.Equal(got.References, want) {
-		t.Fatalf("references = %v, want only the references folder's own file %v", got.References, want)
+		t.Fatalf("references = %v, want only the stored document %v", got.References, want)
 	}
 }
 
@@ -96,10 +103,9 @@ func TestStartCommand_OnlyReferenceFolderFilesRide(t *testing.T) {
 // exactly what those wireframes must follow. Same channel, same sorting,
 // same best-effort posture as the start turn.
 func TestFlowCommand_CarriesReferenceDocuments(t *testing.T) {
-	got := startTurnSpec(t, map[string]string{
-		spec.DescriptorPath:                        descriptorTOML(t, testIdea),
-		"specs/requirements/references/sketch.png": "\x89PNG\r\n",
-	}, "/design")
+	got := startTurnSpecWithReferences(t,
+		map[string]string{spec.DescriptorPath: descriptorTOML(t, testIdea)},
+		[]gitfs.ReferenceDoc{{Name: "sketch.png", Content: []byte("\x89PNG\r\n")}}, "/design")
 
 	if got.Kind != agentsvc.TurnKindFlow || got.Skill != "design" {
 		t.Fatalf("/design was not recognised as a flow turn: %+v", got)
