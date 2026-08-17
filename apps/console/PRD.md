@@ -101,9 +101,12 @@ that's a stalled feature — investigate, don't ignore.
   [#348](https://github.com/wso2/labs-agentic-engineer/issues/348)
 - Project create — reference document upload on the "What do you want to
   build?" view: `.md`/`.txt`/`.pdf`/`.png`/`.jpg`/`.jpeg` (≤10 files, ≤5 MB
-  each) committed post-create to `specs/requirements/references/` via one atomic
-  `files/apply` (base64 for every binary kind — PDF and images alike), surfaced
-  to the `/start` kickoff through the idea-steer channel —
+  each) attached in a chat-style composer and uploaded post-create over
+  multipart to `POST /projects/{name}/references`. References are **transient
+  turn inputs, never committed** (ADR-0017): bytes live on the shared
+  `/workspaces` volume for the project's life and are overlaid into each turn's
+  snapshot at `specs/requirements/references/`, surfaced to the `/start` kickoff
+  through the idea-steer channel. No console surface after create —
   [#383](https://github.com/wso2/labs-agentic-engineer/issues/383)
   (BE handshake: [#384](https://github.com/wso2/labs-agentic-engineer/issues/384))
 - Agent chat — structured question cards: `ask_question` (single) +
