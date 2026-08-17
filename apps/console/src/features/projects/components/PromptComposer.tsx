@@ -194,8 +194,16 @@ export function PromptComposer({
               // Scroll rather than wrap: the composer must not grow taller as
               // documents are added, or the Start button walks down the page.
               overflowX: "auto",
-              pt: 0.5,
-              pl: 0.5,
+              // Room for the remove button, which is translated OUTSIDE each
+              // card's top-left corner. `overflow-x: auto` makes this a scroll
+              // container, and a scroll container clips on BOTH axes — setting
+              // one axis to a non-visible value computes the other to `auto`
+              // rather than leaving it `visible`. So the button was cut off
+              // against this box's top and left edges. The padding has to
+              // exceed the button's translated overhang (~10px at size
+              // "small"), not merely be non-zero.
+              pt: 1.5,
+              pl: 1.5,
             }}
           >
             {files.map((file) => (
@@ -228,10 +236,15 @@ export function PromptComposer({
             title={
               /* The hint the old drop zone spelled out in a paragraph. It has
                  to stay reachable somewhere, and the attach control is where
-                 someone with reference material looks first. */
-              `Attach reference documents — a PRD, notes, an API spec. Agents read them when deriving your requirements. ${REFERENCE_ACCEPT.split(
-                ",",
-              ).join(", ")}, up to ${MAX_REFERENCE_FILES} files, 5 MB each.`
+                 someone with reference material looks first.
+
+                 No extension list: it is 16 entries now, which turned a hint
+                 into a wall of text nobody reads. The file picker already
+                 filters by `accept`, and picking an unsupported file answers
+                 with a rejection notice naming the accepted set — so the list
+                 is available exactly where it matters, at the point of
+                 failure, rather than in front of everyone every time. */
+              `Attach reference documents — a PRD, notes, an API spec. Agents read them when deriving your requirements. Up to ${MAX_REFERENCE_FILES} files, 5 MB each.`
             }
           >
             <IconButton component="label" size="small" aria-label="Attach reference documents">
