@@ -154,7 +154,7 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 		}
 		_, _ = fmt.Fprintln(os.Stdout, "Existing secrets verified — skipping provisioning.")
 	} else {
-		anthropicKey := os.Getenv("ANTHROPIC_API_KEY")
+		anthropicKey := strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY"))
 		if anthropicKey == "" {
 			var err error
 			anthropicKey, err = readMaskedInput("Anthropic API key")
@@ -176,7 +176,7 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 			}
 		}
 
-		thunderSecret := os.Getenv("AEP_THUNDER_ADMIN_CLIENT_SECRET")
+		thunderSecret := strings.TrimSpace(os.Getenv("AEP_THUNDER_ADMIN_CLIENT_SECRET"))
 		if thunderSecret == "" {
 			var err error
 			thunderSecret, err = readMaskedInput("Thunder admin client secret")
