@@ -99,6 +99,14 @@ that's a stalled feature — investigate, don't ignore.
   route. `@aep/excalidraw-dsl`'s `tryDslToPrototype` compiles per-screen
   scenes client-side (no BE handshake, no contract change; ADR-0008) —
   [#348](https://github.com/wso2/labs-agentic-engineer/issues/348)
+- Spec view — prototype user flows: `wireframes.dsl` declares named
+  `flow "<name>"` blocks (optional `role`/`description` lines) listing each
+  persona's screens in walkthrough order; the prototype toolbar leads with a
+  **User flow** picker that scopes the screen picker to the chosen flow, the
+  canvas marks each screen's membership (`Approval queue · Screen 2`,
+  `Common · Screen 1`), and `?flow=<Name>` joins `?screen=` on the full-screen
+  route. Same client-side derivation, no contract change —
+  [#491](https://github.com/wso2/labs-agentic-engineer/issues/491)
 - Agent chat — structured question cards: `ask_question` (single) +
   `ask_questions` (batch form) tool-calls rendered as native Oxygen UI cards
   in the activity stream (answer returns as the next turn's plain text);
