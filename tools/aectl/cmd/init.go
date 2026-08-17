@@ -154,12 +154,16 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 		}
 		_, _ = fmt.Fprintln(os.Stdout, "Existing secrets verified — skipping provisioning.")
 	} else {
-		anthropicKey, err := readMaskedInput("Anthropic API key")
-		if err != nil {
-			return fmt.Errorf("read Anthropic API key: %w", err)
-		}
+		anthropicKey := strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY"))
 		if anthropicKey == "" {
-			return fmt.Errorf("an Anthropic API key is required")
+			var err error
+			anthropicKey, err = readMaskedInput("Anthropic API key")
+			if err != nil {
+				return fmt.Errorf("read Anthropic API key: %w", err)
+			}
+			if anthropicKey == "" {
+				return fmt.Errorf("an Anthropic API key is required")
+			}
 		}
 
 		if openBaoDirect && os.Getenv("AEP_OPENBAO_TOKEN") == "" {
@@ -172,15 +176,18 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 			}
 		}
 
-		if os.Getenv("AEP_THUNDER_ADMIN_CLIENT_SECRET") == "" {
-			thunderSecret, err := readMaskedInput("Thunder admin client secret (Enter = use value from config)")
+		thunderSecret := strings.TrimSpace(os.Getenv("AEP_THUNDER_ADMIN_CLIENT_SECRET"))
+		if thunderSecret == "" {
+			var err error
+			thunderSecret, err = readMaskedInput("Thunder admin client secret")
 			if err != nil {
 				return fmt.Errorf("read Thunder admin client secret: %w", err)
 			}
-			if thunderSecret != "" {
-				viper.Set("thunder.admin_client_secret", thunderSecret)
+			if thunderSecret == "" {
+				return fmt.Errorf("a Thunder admin client secret is required")
 			}
 		}
+		viper.Set("thunder.admin_client_secret", thunderSecret)
 
 		adminClientID := viper.GetString("thunder.admin_client_id")
 		adminClientSecret := viper.GetString("thunder.admin_client_secret")
