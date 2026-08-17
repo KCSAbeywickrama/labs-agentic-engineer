@@ -25,6 +25,7 @@ import {
   InputLabel,
   MenuItem,
   Select,
+  Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
 import { ArrowLeft } from "@wso2/oxygen-ui-icons-react";
@@ -265,9 +266,14 @@ export function PrototypeView({
           </Select>
         </FormControl>
         {screen.description && (
-          <Typography variant="body2" color="text.secondary" noWrap sx={{ minWidth: 0 }}>
-            {screen.description}
-          </Typography>
+          // Two pickers now sit left of it, so a long description truncates;
+          // the tooltip carries the full text. Harmlessly redundant when the
+          // description fits.
+          <Tooltip title={screen.description}>
+            <Typography variant="body2" color="text.secondary" noWrap sx={{ minWidth: 0 }}>
+              {screen.description}
+            </Typography>
+          </Tooltip>
         )}
         {trailingSlot && <Box sx={{ ml: "auto", flexShrink: 0 }}>{trailingSlot}</Box>}
       </Box>
