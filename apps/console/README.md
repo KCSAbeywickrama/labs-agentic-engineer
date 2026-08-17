@@ -26,7 +26,7 @@ freestyle a feature — start every one with the `/console-feature` skill,
 which drives that cycle and pauses at each stage. Pass it an idea, or the
 number of an issue that already exists:
 
-```
+```bash
 /console-feature I want the project list to show each project's environments
 /console-feature 42
 ```

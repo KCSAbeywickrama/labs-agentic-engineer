@@ -27,10 +27,10 @@
   frontend and produces the contract proposal (flow step 5); the local setup
   proves the two halves agree (flow step 7). Neither substitutes for the
   other.
-- **The feature PR closes both issues.** Its body carries `Closes` for the
-  feature issue *and* the handshake issue, because GitHub fires closing
-  keywords only when a PR merges into the default branch — the backend's PR
-  into the feature branch cannot close its own issue.
+- **The feature PR closes every issue the feature opened** — the feature
+  issue always, and the handshake issue whenever there was one. GitHub fires
+  closing keywords only when a PR merges into the default branch, so the
+  backend's PR into the feature branch cannot close its own issue.
 
 ## Consequences
 

@@ -15,7 +15,7 @@ Issues live in the **upstream** repo — pass
 `--repo wso2/labs-agentic-engineer` to every `gh issue` command (working
 clones may have a fork as `origin`).
 
-```
+```text
        ┌─ an idea ───▶ /console-feature <idea>   ──▶ grill ──▶ feature issue,
        │                                                       Decisions in the body
 PRD.md ┤ (context)                                                 │
@@ -41,7 +41,7 @@ PRD.md ┤ (context)                                                 │
                                              the local setup (real API)
                                                            │
                                                            ▼
-              merge branch ──▶ main: feature shipped, both issues closed
+              merge branch ──▶ main: feature shipped, its issues closed
 ```
 
 ## Steps
@@ -132,11 +132,12 @@ PRD.md ┤ (context)                                                 │
 
    **Merging the feature branch to `main` ships the feature**, so the merge
    comes last and nothing follows it: the PRD entry is already in the PR.
-   Put `Closes #<feature-issue>` **and** `Closes #<handshake-issue>` in that
-   PR's body — closing keywords only fire when a PR merges into the default
-   branch, so the backend's own PR into the feature branch can't close its
-   issue. A **merged PR is frozen**: anything discovered afterwards is a new
-   issue referencing the original.
+   Put `Closes #<feature-issue>` in that PR's body — plus
+   `Closes #<handshake-issue>` whenever the feature raised one, because
+   closing keywords fire only when a PR merges into the default branch, so
+   the backend's own PR into the feature branch can't close its issue. A
+   **merged PR is frozen**: anything discovered afterward is a new issue
+   referencing the original.
 
 ## Rules
 

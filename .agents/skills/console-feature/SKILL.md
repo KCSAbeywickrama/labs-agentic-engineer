@@ -124,6 +124,6 @@ criterion, and the commands. Keep the issue body current with
 4. **Ship** (**halt** to enter; entry condition: backend changes are on the
    feature branch, or the feature changed no contract). The user's
    confirmation from the local-setup test is what unlocks the merge. Before
-   merging, check that the PR carries the PRD entry and closes **both**
-   issues. The merge is the last act — anything found afterwards is a new
-   issue.
+   merging, check that the PR carries the PRD entry and closes the feature
+   issue — plus the handshake issue, if stage 3 opened one. The merge is the
+   last act: anything found afterward is a new issue.
