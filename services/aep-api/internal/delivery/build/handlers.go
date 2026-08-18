@@ -41,6 +41,18 @@ type Handler struct {
 	svc       *Service
 	preflight *PreflightService
 	activity  SpecPublishedRecorder
+	publisher PublisherProvisioner
+}
+
+// PublisherProvisioner ensures the org's Thunder publisher client_credentials
+// SecretReference exists before an https-dispatch build starts. https-only:
+// wired on Handler (never on Service) because POST /projects/{name}/build is
+// the sole request path that still carries the console JWT
+// ProvisionPublisherForHTTPSBuild needs — Temporal dispatch and the
+// StartProjectBuild auto-kick trigger run with no such JWT and must stay
+// read-only with respect to publisher credentials.
+type PublisherProvisioner interface {
+	ProvisionPublisherForHTTPSBuild(ctx context.Context, orgID string) error
 }
 
 // SpecPublishedRecorder appends the spec_published activity line (issue #239)
@@ -58,8 +70,21 @@ func NewHandler(svc *Service, preflight *PreflightService, activity SpecPublishe
 	return &Handler{svc: svc, preflight: preflight, activity: activity}
 }
 
+// WithPublisherProvisioner wires the https-only publisher provisioner.
+// Optional: nil (the default) skips provisioning entirely, which is correct
+// on a local http AGENT_PLATFORM_URL.
+func (h *Handler) WithPublisherProvisioner(p PublisherProvisioner) *Handler {
+	h.publisher = p
+	return h
+}
+
 func (h *Handler) BuildProject(ctx context.Context, request gen.BuildProjectRequestObject) (gen.BuildProjectResponseObject, error) {
 	org := tenant.BoundOrgFromContext(ctx)
+	if h.publisher != nil {
+		if err := h.publisher.ProvisionPublisherForHTTPSBuild(ctx, org); err != nil {
+			return nil, apierr.ServiceUnavailable("publisher credentials: " + err.Error())
+		}
+	}
 	var inputs []BuildInputItem
 	if request.Body != nil {
 		inputs = toBuildInputItems(request.Body.Inputs)

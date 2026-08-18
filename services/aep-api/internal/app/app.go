@@ -1025,7 +1025,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	runCycleBuilds := runread.NewCycleBuilds(milestoneRunRepo, runCycleRepo,
 		runreadProjectBuilds{oc: componentClient})
 
-	deliveryHandlers, err := deliveryhttpapi.New(deliveryhttpapi.Deps{
+	deliveryDeps := deliveryhttpapi.Deps{
 		BuildSvc:      buildSvc,
 		PreflightSvc:  preflightSvc,
 		BuildActivity: buildActivityRecorder{svc: activitySvc},
@@ -1040,7 +1040,14 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		RunCommands: runread.NewCommands(milestoneRunRepo, runSupervisor, eventcoreRevalidator{events: eventPlane}).
 			WithCycleReaper(codingagent.NewCycleReaper(componentClient, runCycleRepo)),
 		RunCycleBuilds: runCycleBuilds,
-	})
+	}
+	// https deploys pair this with a SM-API SecretsProvider so
+	// WritePublisher can stamp secret_ref_name onto the org's IDP profile;
+	// ProvisionPublisherForHTTPSBuild is a no-op without one.
+	if codingagent.RequiresGatewayPublisher(cfg.AgentPlatformURL) {
+		deliveryDeps.PublisherProvisioner = idpService
+	}
+	deliveryHandlers, err := deliveryhttpapi.New(deliveryDeps)
 	if err != nil {
 		return nil, fmt.Errorf("assemble delivery domain: %w", err)
 	}

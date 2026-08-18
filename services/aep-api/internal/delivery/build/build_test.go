@@ -203,6 +203,25 @@ func mustDelivery(h *deliveryhttpapi.Handlers, err error) *deliveryhttpapi.Handl
 	return h
 }
 
+type provisionSpy struct {
+	orgs []string
+	err  error
+}
+
+func (p *provisionSpy) ProvisionPublisherForHTTPSBuild(_ context.Context, orgID string) error {
+	p.orgs = append(p.orgs, orgID)
+	return p.err
+}
+
+func newHarnessWithPublisher(t *testing.T, svc *build.Service, p build.PublisherProvisioner) *componenttest.Harness {
+	t.Helper()
+	return componenttest.New(t, componenttest.Options{Deps: edge.Deps{
+		Delivery: mustDelivery(deliveryhttpapi.New(deliveryhttpapi.Deps{
+			BuildSvc: svc, PublisherProvisioner: p,
+		})),
+	}})
+}
+
 func postBuild(t *testing.T, svc *build.Service, project string) (int, string) {
 	t.Helper()
 	resp := newHarness(t, svc).AsOrg("acme").Post("/api/v1/projects/"+project+"/build", `{}`)
@@ -383,6 +402,42 @@ func TestBuild_NoClaims401(t *testing.T) {
 	}
 }
 
+// ----- POST /build publisher provisioning (https-only) ------------------------
+
+// The https-only publisher provisioner runs before Run cuts the tag — the
+// handler, not the service, calls it, since only the handler still has the
+// console JWT that ProvisionPublisherForHTTPSBuild needs.
+func TestBuild_PublisherProvisionerRunsBeforeTag(t *testing.T) {
+	tagger := &fakeTagger{res: &spec.SpecSaveResult{Tag: "v1", Status: "approved"}}
+	svc := newSvc(fakeRepos{}, tagger)
+	spy := &provisionSpy{}
+	resp := newHarnessWithPublisher(t, svc, spy).AsOrg("acme").Post("/api/v1/projects/shop/build", `{}`)
+	if resp.Code != 200 {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	if len(spy.orgs) != 1 || spy.orgs[0] != "acme" {
+		t.Fatalf("provisioner orgs=%v", spy.orgs)
+	}
+	if tagger.called != 1 {
+		t.Fatalf("Run must still tag after provision, called=%d", tagger.called)
+	}
+}
+
+// A provision failure (e.g. no JWT on ctx, SM-API down) answers 503 and never
+// reaches Run — no tag is cut on unprovisioned publisher credentials.
+func TestBuild_PublisherProvisionErrorDoesNotTag(t *testing.T) {
+	tagger := &fakeTagger{res: &spec.SpecSaveResult{Tag: "v1", Status: "approved"}}
+	svc := newSvc(fakeRepos{}, tagger)
+	spy := &provisionSpy{err: errors.New("sm-api: no JWT in context")}
+	resp := newHarnessWithPublisher(t, svc, spy).AsOrg("acme").Post("/api/v1/projects/shop/build", `{}`)
+	if resp.Code != 503 {
+		t.Fatalf("status=%d want 503 body=%s", resp.Code, resp.Body.String())
+	}
+	if tagger.called != 0 {
+		t.Fatalf("failed provision must not cut a tag, called=%d", tagger.called)
+	}
+}
+
 // ----- StartProjectBuild (non-HTTP provider-build trigger) --------------------
 
 func TestStartProjectBuild_HappyPath_ClaimsTheVersion(t *testing.T) {
@@ -400,6 +455,20 @@ func TestStartProjectBuild_HappyPath_ClaimsTheVersion(t *testing.T) {
 		t.Errorf("admitted %d run rows, want 1", len(spy.admittedRuns()))
 	}
 	spy.awaitStart(t)
+}
+
+// StartProjectBuild is the non-HTTP auto-kick trigger, which never has a
+// console JWT — it must not see the handler's publisher provisioner, and
+// must keep going through Run exactly as before.
+func TestStartProjectBuild_DoesNotUseHandlerProvisioner(t *testing.T) {
+	tagger := &fakeTagger{res: &spec.SpecSaveResult{Tag: "v1", Status: "approved"}}
+	svc := newSvc(fakeRepos{}, tagger)
+	if err := svc.StartProjectBuild(context.Background(), "acme", "shop"); err != nil {
+		t.Fatalf("StartProjectBuild: %v", err)
+	}
+	if tagger.called != 1 {
+		t.Fatalf("auto-kick still uses Run, called=%d", tagger.called)
+	}
 }
 
 // ----- GET /builds (the version ledger) ---------------------------------------
