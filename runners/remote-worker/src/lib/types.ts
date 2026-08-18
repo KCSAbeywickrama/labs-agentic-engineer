@@ -50,8 +50,7 @@ export interface DispatchRequest {
    * Endpoint Spec Discovery (B1/B2) — the BFF's in-process MCP endpoint
    * (`<platform>/internal/v1/mcp`), stamped unconditionally by the BFF's
    * coding-agent Job template as AEP_MCP_URL. Paired with `mcpToken`; the
-   * runner only registers the MCP server when BOTH are present, since older
-   * dispatches (or a failed token mint) may render the URL without a token.
+   * runner only registers the MCP server when BOTH are present.
    */
   mcpUrl?: string;
   /**

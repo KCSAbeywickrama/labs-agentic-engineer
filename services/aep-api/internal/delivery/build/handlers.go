@@ -19,6 +19,7 @@ package build
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/wso2/aep/aep-api/internal/gen"
@@ -80,7 +81,8 @@ func (h *Handler) BuildProject(ctx context.Context, request gen.BuildProjectRequ
 	org := tenant.BoundOrgFromContext(ctx)
 	if h.publisher != nil {
 		if err := h.publisher.ProvisionPublisherForBuild(ctx, org); err != nil {
-			return nil, apierr.ServiceUnavailable("publisher credentials: " + err.Error())
+			slog.ErrorContext(ctx, "publisher provision for build failed", "error", err)
+			return nil, apierr.ServiceUnavailable("publisher credentials unavailable")
 		}
 	}
 	var inputs []BuildInputItem

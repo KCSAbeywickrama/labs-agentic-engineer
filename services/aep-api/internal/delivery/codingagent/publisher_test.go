@@ -62,25 +62,25 @@ func (f fakeIDPRepo) CreateAuditEvent(context.Context, *organization.IDPAuditEve
 	return nil
 }
 
-func TestIDPPublisherResolver_EnsureReady_ReadsSecretRefNameWithoutEnsure(t *testing.T) {
+func TestIDPPublisherResolver_SecretRefName_ReadsWithoutEnsure(t *testing.T) {
 	t.Parallel()
 	name := "acme-publisher-secrets"
 	r := NewIDPPublisherResolver(fakeIDPRepo{profile: &organization.OrganizationIDPProfile{
 		SecretRefName: &name,
 	}})
-	got, err := r.EnsureReady(context.Background(), "acme")
+	got, err := r.SecretRefName(context.Background(), "acme")
 	if err != nil {
-		t.Fatalf("EnsureReady: %v", err)
+		t.Fatalf("SecretRefName: %v", err)
 	}
 	if got != name {
 		t.Errorf("secret ref = %q, want %q", got, name)
 	}
 }
 
-func TestIDPPublisherResolver_EnsureReady_NilProfile(t *testing.T) {
+func TestIDPPublisherResolver_SecretRefName_NilProfile(t *testing.T) {
 	t.Parallel()
 	r := NewIDPPublisherResolver(fakeIDPRepo{profile: nil})
-	_, err := r.EnsureReady(context.Background(), "acme")
+	_, err := r.SecretRefName(context.Background(), "acme")
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -89,10 +89,10 @@ func TestIDPPublisherResolver_EnsureReady_NilProfile(t *testing.T) {
 	}
 }
 
-func TestIDPPublisherResolver_EnsureReady_EmptySecretRefReturnsEmpty(t *testing.T) {
+func TestIDPPublisherResolver_SecretRefName_EmptySecretRefReturnsEmpty(t *testing.T) {
 	t.Parallel()
 	r := NewIDPPublisherResolver(fakeIDPRepo{profile: &organization.OrganizationIDPProfile{}})
-	got, err := r.EnsureReady(context.Background(), "acme")
+	got, err := r.SecretRefName(context.Background(), "acme")
 	if err != nil {
 		t.Fatalf("empty ref is dispatch's fail-loud, not resolver error: %v", err)
 	}

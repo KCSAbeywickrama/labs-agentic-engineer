@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/wso2/aep/aep-api/internal/delivery"
 	"github.com/wso2/aep/aep-api/internal/organization"
 )
 
@@ -33,7 +34,7 @@ const (
 // PublisherCredentialResolver loads the org's Thunder publisher
 // client_credentials SecretReference name (never the secret value).
 type PublisherCredentialResolver interface {
-	EnsureReady(ctx context.Context, orgID string) (secretRefName string, err error)
+	SecretRefName(ctx context.Context, orgID string) (secretRefName string, err error)
 }
 
 func PublisherTokenURLFromJWKS(jwksURL string) string {
@@ -61,7 +62,7 @@ func NewIDPPublisherResolver(profiles organization.IDPRepository) PublisherCrede
 	return &idpPublisherResolver{profiles: profiles}
 }
 
-func (r *idpPublisherResolver) EnsureReady(ctx context.Context, orgID string) (string, error) {
+func (r *idpPublisherResolver) SecretRefName(ctx context.Context, orgID string) (string, error) {
 	if r == nil || r.profiles == nil {
 		return "", fmt.Errorf("publisher resolver not wired")
 	}
@@ -72,7 +73,7 @@ func (r *idpPublisherResolver) EnsureReady(ctx context.Context, orgID string) (s
 	if row == nil {
 		return "", fmt.Errorf("publisher profile missing")
 	}
-	if row.SecretRefName == nil {
+	if !organization.HasPublisherSecretRef(row) {
 		return "", nil
 	}
 	return strings.TrimSpace(*row.SecretRefName), nil
@@ -86,13 +87,13 @@ func (e *CodingExecutor) publisherSecretEnv(ctx context.Context, orgID string) (
 	if e.publisher == nil {
 		return nil, "", fmt.Errorf("publisher credentials required")
 	}
-	refName, err := e.publisher.EnsureReady(ctx, orgID)
+	refName, err := e.publisher.SecretRefName(ctx, orgID)
 	if err != nil {
 		return nil, "", fmt.Errorf("publisher credentials: %w", err)
 	}
 	refName = strings.TrimSpace(refName)
 	if refName == "" {
-		return nil, "", fmt.Errorf("publisher SecretReference missing; POST /projects/{projectName}/build provisions it")
+		return nil, "", fmt.Errorf("%w: coding-agent publisher SecretReference is not stamped", delivery.ErrPublisherCredentialsMissing)
 	}
 	return []SecretEnvRef{
 		{Key: envPublisherClientID, SecretName: refName, SecretKey: organization.PublisherSecretFieldClientID},

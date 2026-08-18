@@ -38,7 +38,7 @@ import (
 )
 
 // newRunnerTaskManager builds a TaskTokenManager backed by a freshly generated
-// RSA key so tests can mint real BFF Task-JWTs.
+// RSA key so tests can mint real BFF-signed identity JWTs.
 func newRunnerTaskManager(t *testing.T) *TaskTokenManager {
 	t.Helper()
 	priv, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -79,9 +79,9 @@ func TestRunnerAuthorizer_TaskJWTRejected(t *testing.T) {
 		return "", nil
 	})
 
-	tok, err := mgr.Issue("task-1", "org-a", "proj-1")
+	tok, err := mgr.IssueServiceToken("git-service", "org-a", time.Hour)
 	if err != nil {
-		t.Fatalf("Issue: %v", err)
+		t.Fatalf("IssueServiceToken: %v", err)
 	}
 	_, err = a.Authorize(context.Background(), "Bearer "+tok, "task-1")
 	if got := statusOf(err); got != 401 {
@@ -98,7 +98,6 @@ func TestRunnerAuthorizer_BadBearer(t *testing.T) {
 		"absent":       "",
 		"wrong scheme": "Token abc.def.ghi",
 		"too short":    "Bearer",
-		"garbage jwt":  "Bearer not-a-real-token",
 	}
 	for name, header := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -107,6 +106,18 @@ func TestRunnerAuthorizer_BadBearer(t *testing.T) {
 				t.Fatalf("status = %d, want 401 (err=%v)", got, err)
 			}
 		})
+	}
+}
+
+func TestRunnerAuthorizer_GarbageJWT(t *testing.T) {
+	verifier, _ := newPublisherVerifier(t)
+	a := NewRunnerAuthorizer(verifier, func(context.Context, string) (string, error) {
+		t.Fatal("cycle lookup must not run for garbage jwt")
+		return "", nil
+	})
+	_, err := a.Authorize(context.Background(), "Bearer not-a-real-token", "task-1")
+	if got := statusOf(err); got != 401 {
+		t.Fatalf("status = %d, want 401 (err=%v)", got, err)
 	}
 }
 
@@ -155,9 +166,9 @@ func newPublisherVerifier(t *testing.T) (*PublisherTokenVerifier, func(org, ouHa
 	return v, mint
 }
 
-// Publisher-cc fallback: no BFF Task-JWT, so the org-bound publisher token is
-// tried second. The token's org MUST match the task's owning org (runner.go's
-// cross-org fence) — org-A's token cannot refresh an org-B task it names.
+// Publisher CC is the only runner-callback credential. The token's org MUST
+// match the cycle's owning org (runner.go's cross-org fence) — org-A's token
+// cannot refresh an org-B cycle it names.
 func TestRunnerAuthorizer_PublisherCC(t *testing.T) {
 	verifier, mint := newPublisherVerifier(t)
 

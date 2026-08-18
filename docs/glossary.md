@@ -227,16 +227,18 @@ sourced from Vault on cloud; a literal env var locally.
 ### `Publisher client`
 The organization's Thunder confidential OAuth app (`aep-publisher-{org}`).
 The coding-agent Job authenticates to aep-api as this client
-(`client_credentials`) for platform callbacks and MCP — local and cloud, no
-Task JWT fallback. Distinct from other M2M clients and from the design
+(`client_credentials`) for platform callbacks and MCP — local and cloud.
+Distinct from other M2M clients and from the design
 agent's BFF MCP token.
 
 ### `Task JWT`
-The short-lived RS256 bearer the BFF can mint with the cycle id as subject.
-It is **not** the coding-agent Job's callback credential (that is the
-publisher client). Verifiers fetch the BFF's public key from
-`/auth/external/jwks.json`. Distinct from Thunder user/M2M tokens and from
-the retired `AEP_BFF_TO_REMOTE_WORKER` client.
+Retired as the coding-agent Job's callback credential (that is the
+publisher client). The BFF still mints short-lived RS256 identity JWTs
+(`IssueServiceToken` / `IssueMCPToken`) for design-agent MCP and outbound
+S2S; they carry org in `ocOrgId` and do not use the cycle id as subject.
+Verifiers fetch the BFF's public key from `/auth/external/jwks.json`.
+Distinct from Thunder user/M2M tokens and from the retired
+`AEP_BFF_TO_REMOTE_WORKER` client.
 
 ---
 

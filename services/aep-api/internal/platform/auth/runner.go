@@ -68,7 +68,7 @@ func (e *HTTPError) Error() string { return e.Message }
 const cycleUnavailable = "cycle not found"
 
 // NewRunnerAuthorizer builds the authorizer. publisher may be nil — then every
-// runner callback 401s (fail closed; no Task-JWT fallback).
+// runner callback 401s (fail closed).
 func NewRunnerAuthorizer(publisher *PublisherTokenVerifier, cycleOrg CycleOrgLookup) *RunnerAuthorizer {
 	return &RunnerAuthorizer{publisher: publisher, cycleOrg: cycleOrg}
 }

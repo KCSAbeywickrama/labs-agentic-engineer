@@ -27,9 +27,9 @@ namespace from the CR.
 
 The coding-agent Job authenticates to aep-api as the org's **publisher
 client** (Thunder confidential app `aep-publisher-{org}`). Local k3d and
-cloud use this path. The Job does not receive a Task JWT (`AEP_BEARER`) or a
-BFF MCP token (`AEP_MCP_TOKEN`). Runner callbacks accept publisher
-`client_credentials` tokens only.
+cloud use this path. The Job's only platform credential is publisher CC
+(`PUBLISHER_*`). Runner callbacks accept publisher `client_credentials`
+tokens only.
 
 `POST /projects/{projectName}/build` provisions the Thunder app and stamps
 the SecretReference (`ProvisionPublisherForBuild`, actor `build-provision`)
@@ -38,9 +38,9 @@ JWT, so it cannot write SM-API. Rotate once if the Thunder app already
 exists without `secret_ref_name`. Fail closed (503) if the secret write
 fails or secrets delivery is off. Coding dispatch then reads
 `secret_ref_name` only and mounts `PUBLISHER_CLIENT_ID` /
-`PUBLISHER_CLIENT_SECRET`. An empty name fail-louds naming
-`POST /projects/{projectName}/build` and does not create the OpenChoreo
-Component. `PUBLISHER_TOKEN_URL` is plain env, derived from
+`PUBLISHER_CLIENT_SECRET`. An empty name does not create the OpenChoreo
+Component; the run settles blocked (`publisher-credentials-missing`) instead
+of spending the re-dispatch budget. `PUBLISHER_TOKEN_URL` is plain env, derived from
 `PLATFORM_IDP_JWKS_URL` (`/oauth2/jwks` → `/oauth2/token`).
 
 ```mermaid
@@ -72,9 +72,9 @@ proxy attaches a live bearer (SDK headers are static): `getToken()` uses the
 remint failure exits the Job.
 
 Cloud traffic still crosses the public gateway, whose jwt-auth only accepts
-`iss=platform-idp`. That is why the Job cannot present a BFF-signed Task JWT
-(`iss=aep-bff`). Local compose has no such gateway; it still uses the same
-publisher token so the two environments do not diverge.
+`iss=platform-idp`. That is why the Job presents a Thunder publisher token
+(`iss=platform-idp`), not a BFF-signed identity JWT (`iss=aep-bff`). Local
+compose has no such gateway; it still uses the publisher token.
 
 ```mermaid
 flowchart LR

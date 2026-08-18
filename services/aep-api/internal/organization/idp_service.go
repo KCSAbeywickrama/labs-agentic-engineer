@@ -347,7 +347,7 @@ func (s *idpService) ProvisionPublisherForBuild(ctx context.Context, orgID strin
 	if err != nil {
 		return err
 	}
-	if row != nil && row.SecretRefName != nil && strings.TrimSpace(*row.SecretRefName) != "" {
+	if HasPublisherSecretRef(row) {
 		return nil
 	}
 	if strings.TrimSpace(clientSecret) != "" {
@@ -367,7 +367,7 @@ func (s *idpService) ProvisionPublisherForBuild(ctx context.Context, orgID strin
 		if aerr != nil {
 			return aerr
 		}
-		if after == nil || after.SecretRefName == nil || strings.TrimSpace(*after.SecretRefName) == "" {
+		if !HasPublisherSecretRef(after) {
 			return fmt.Errorf("publisher SecretReference still missing after rotate")
 		}
 		return nil
@@ -466,6 +466,14 @@ func (s *idpService) RegenerateClientSecret(ctx context.Context, orgID, actor st
 	if s.secretRefWriter != nil && s.secretRefWriter.Enabled() {
 		if _, smerr := s.secretRefWriter.WritePublisher(ctx, orgID, profile.PublisherClientID, newSecret); smerr != nil {
 			s.audit(ctx, orgID, IDPAuditRegenerateSecret, actor, beforeJSON, nil, smerr)
+			// Thunder and the DB row already hold the new secret; the vault
+			// still holds the old one. A non-empty secret_ref_name would look
+			// healthy to ProvisionPublisherForBuild. Clear it so the next
+			// Build re-provisions instead of mounting invalidated credentials.
+			if cerr := s.repo.UpdateProfileColumns(ctx, profile, orgID, clearSecretRefTripletWithWrittenAt()); cerr != nil {
+				slog.ErrorContext(ctx, "idp_service: clear secret_ref after failed SM-API rewrite",
+					"orgID", orgID, "error", cerr)
+			}
 			return "", fmt.Errorf("idp_service: SM-API publisher rewrite: %w", smerr)
 		}
 	}

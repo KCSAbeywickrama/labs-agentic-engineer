@@ -22,8 +22,7 @@
 // token minted at query() construction time cannot rotate. This proxy is the
 // SDK's MCP URL; it attaches a live bearer (ClientCredentialsTokenProvider
 // or a snapshot) and runs fetchWith401Retry. Local and cloud use the same
-// proxy — canRefresh is true iff publisher CC creds were mounted, not iff
-// the platform URL is https.
+// proxy; canRefresh is true when the Job can remint via publisher CC.
 
 import http from "node:http";
 import type { AddressInfo } from "node:net";
@@ -43,6 +42,17 @@ export interface StartMcpAuthProxyOpts {
 }
 
 const HOP = new Set(["host", "connection", "transfer-encoding", "keep-alive", "authorization", "content-length"]);
+
+// fetch() already decompresses the body. Forwarding content-encoding /
+// content-length from the upstream reply would label plaintext as gzip with
+// the compressed length — Envoy on the cloud gateway compresses.
+const RESP_HOP = new Set([
+  "transfer-encoding",
+  "content-encoding",
+  "content-length",
+  "connection",
+  "keep-alive",
+]);
 
 export async function startMcpAuthProxy(opts: StartMcpAuthProxyOpts): Promise<McpAuthProxy> {
   const server = http.createServer((req, res) => {
@@ -89,7 +99,7 @@ async function handle(
     );
     const outHeaders: Record<string, string> = {};
     upstream.headers.forEach((value, key) => {
-      if (key.toLowerCase() === "transfer-encoding") return;
+      if (RESP_HOP.has(key.toLowerCase())) return;
       outHeaders[key] = value;
     });
     res.writeHead(upstream.status, outHeaders);

@@ -55,7 +55,19 @@ function requireEnv(name: string): string {
   return v;
 }
 
-function readDispatchFromEnv(): DispatchRequest {
+type PublisherCreds = { clientId: string; clientSecret: string; tokenUrl: string };
+
+function requirePublisherCreds(): PublisherCreds {
+  const clientId = process.env.PUBLISHER_CLIENT_ID ?? "";
+  const clientSecret = process.env.PUBLISHER_CLIENT_SECRET ?? "";
+  const tokenUrl = process.env.PUBLISHER_TOKEN_URL ?? "";
+  if (clientId === "" || clientSecret === "" || tokenUrl === "") {
+    throw new Error("PUBLISHER_CLIENT_ID/SECRET/TOKEN_URL required — runner has no platform credential");
+  }
+  return { clientId, clientSecret, tokenUrl };
+}
+
+function readDispatchFromEnv(): { req: DispatchRequest; publisher: PublisherCreds } {
   const taskId = requireEnv("AEP_TASK_ID");
   const orgId = requireEnv("AEP_ORG_ID");
   const projectId = requireEnv("AEP_PROJECT_ID");
@@ -78,12 +90,7 @@ function readDispatchFromEnv(): DispatchRequest {
     throw new Error(`AEP_TASK_KIND must be "implementation" or "validation": ${taskKind}`);
   }
 
-  const publisherClientId = process.env.PUBLISHER_CLIENT_ID ?? "";
-  const publisherClientSecret = process.env.PUBLISHER_CLIENT_SECRET ?? "";
-  const publisherTokenUrl = process.env.PUBLISHER_TOKEN_URL ?? "";
-  if (publisherClientId === "" || publisherClientSecret === "" || publisherTokenUrl === "") {
-    throw new Error("PUBLISHER_CLIENT_ID/SECRET/TOKEN_URL required — runner has no platform credential");
-  }
+  const publisher = requirePublisherCreds();
 
   if (!isUUID(taskId)) throw new Error(`AEP_TASK_ID is not a valid UUID: ${taskId}`);
   if (!isSlug(orgId)) throw new Error(`AEP_ORG_ID is not a valid slug: ${orgId}`);
@@ -93,25 +100,28 @@ function readDispatchFromEnv(): DispatchRequest {
   }
 
   return {
-    taskId,
-    orgId,
-    projectId,
-    componentName,
-    repoUrl,
-    bearer: "",
-    identity: { name: identityName, email: identityEmail, login: identityLogin || undefined },
-    gitServiceUrl,
-    prompt,
-    correlationId,
-    mcpUrl: mcpUrl || undefined,
-    mcpToken: undefined,
-    taskKind,
-    // OFF unless a human opts this pod in. The sinks are files in a workspace
-    // nothing collects, so in the cluster they are write-only — and the debug
-    // log holds prompt text. The opt-in exists because a stall that only
-    // reproduces here would otherwise be undiagnosable: set AEP_RUNNER_DEBUG=1
-    // on the Job and read the files off the pod before it exits.
-    debug: process.env.AEP_RUNNER_DEBUG === "1",
+    req: {
+      taskId,
+      orgId,
+      projectId,
+      componentName,
+      repoUrl,
+      bearer: "",
+      identity: { name: identityName, email: identityEmail, login: identityLogin || undefined },
+      gitServiceUrl,
+      prompt,
+      correlationId,
+      mcpUrl: mcpUrl || undefined,
+      mcpToken: undefined,
+      taskKind,
+      // OFF unless a human opts this pod in. The sinks are files in a workspace
+      // nothing collects, so in the cluster they are write-only — and the debug
+      // log holds prompt text. The opt-in exists because a stall that only
+      // reproduces here would otherwise be undiagnosable: set AEP_RUNNER_DEBUG=1
+      // on the Job and read the files off the pod before it exits.
+      debug: process.env.AEP_RUNNER_DEBUG === "1",
+    },
+    publisher,
   };
 }
 
@@ -121,8 +131,9 @@ async function main(): Promise<number> {
   installConsoleScrubber();
 
   let req: DispatchRequest;
+  let publisher: PublisherCreds;
   try {
-    req = readDispatchFromEnv();
+    ({ req, publisher } = readDispatchFromEnv());
   } catch (err) {
     // Nothing is enrolled as a literal yet (the bearer hasn't been read), so
     // this line is covered only by the scrubber's token-shape patterns.
@@ -130,15 +141,11 @@ async function main(): Promise<number> {
     return 2;
   }
 
-  const publisherClientId = process.env.PUBLISHER_CLIENT_ID ?? "";
-  const publisherClientSecret = process.env.PUBLISHER_CLIENT_SECRET ?? "";
-  const publisherTokenUrl = process.env.PUBLISHER_TOKEN_URL ?? "";
   const ccProvider = new ClientCredentialsTokenProvider({
-    tokenUrl: publisherTokenUrl,
-    clientId: publisherClientId,
-    clientSecret: publisherClientSecret,
+    tokenUrl: publisher.tokenUrl,
+    clientId: publisher.clientId,
+    clientSecret: publisher.clientSecret,
   });
-  console.log("[oneshot] publisher cc creds present — using client_credentials for runner callbacks");
 
   const platformURL = process.env.AEP_PLATFORM_URL ?? "";
   if (platformURL) {
@@ -165,7 +172,7 @@ async function main(): Promise<number> {
     process.env.ANTHROPIC_API_KEY,
     process.env.CLAUDE_CODE_OAUTH_TOKEN,
     req.bearer,
-    publisherClientSecret,
+    publisher.clientSecret,
     req.mcpToken,
   ]);
 

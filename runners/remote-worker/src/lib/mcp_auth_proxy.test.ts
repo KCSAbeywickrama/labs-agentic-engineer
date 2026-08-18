@@ -111,3 +111,39 @@ test("mcp auth proxy: second 401 calls onFatal and returns 401", async () => {
     await upstream.close();
   }
 });
+
+test("mcp auth proxy: gzipped upstream is forwarded as decoded body", async () => {
+  const zlib = await import("node:zlib");
+  const payload = Buffer.from(`{"ok":true}`, "utf8");
+  const gz = zlib.gzipSync(payload);
+  const upstream = await listen((_req, res) => {
+    res.writeHead(200, {
+      "content-type": "application/json",
+      "content-encoding": "gzip",
+      "content-length": String(gz.length),
+    });
+    res.end(gz);
+  });
+  const proxy = await startMcpAuthProxy({
+    upstreamUrl: upstream.url,
+    source: {
+      getToken: async () => "tok",
+      invalidate: () => {
+        /* unused */
+      },
+    },
+    canRefresh: true,
+    onFatal: () => {
+      throw new Error("onFatal must not run");
+    },
+  });
+  try {
+    const res = await fetch(proxy.url, { method: "POST", body: "{}" });
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get("content-encoding"), null);
+    assert.equal(await res.text(), `{"ok":true}`);
+  } finally {
+    await proxy.close();
+    await upstream.close();
+  }
+});

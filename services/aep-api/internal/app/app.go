@@ -303,7 +303,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		taskTokens = mgr
 		slog.Info("Task token manager", "kid", mgr.KeyID(), "issuer", cfg.TaskTokenIssuer, "audience", cfg.TaskTokenAudience)
 	} else {
-		slog.Warn("BFF_TASK_SIGNING_KEY not set — task dispatch will fail")
+		slog.Warn("BFF_TASK_SIGNING_KEY not set — MCP identity tokens and JWKS will be unavailable")
 	}
 
 	// Secret-ref mirror writer wired into both credential services. nil-safe via

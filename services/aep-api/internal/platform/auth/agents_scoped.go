@@ -86,6 +86,8 @@ func NewAgentsScopedVerifier(tokens *TaskTokenManager, publisher *PublisherToken
 func (v *AgentsScopedVerifier) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if v == nil || v.tokens == nil {
+			// Publisher-only MCP is unreachable: BFF MCP tokens need this
+			// manager. A nil publisher still accepts BFF-signed MCP tokens.
 			http.Error(w, "mcp auth not configured", http.StatusServiceUnavailable)
 			return
 		}

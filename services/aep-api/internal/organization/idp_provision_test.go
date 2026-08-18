@@ -317,8 +317,8 @@ func TestProvisionPublisherForBuild_DisabledWriterFailsClosed(t *testing.T) {
 	thunder := &fakeThunder{ensureFn: func(context.Context, string, string) (string, string, bool, error) {
 		return "aep-publisher-acme", "secret-once", true, nil
 	}}
-	// No WithSecretRefWriter call: secretRefWriter stays nil, mirroring an
-	// https deployment with no SecretsProvider wired.
+	// No WithSecretRefWriter call: secretRefWriter stays nil, matching a
+	// process with no SecretsProvider wired.
 	svc := NewIDPService(repo, stubOrgRepo{}, thunder, PlatformIDPConfig{})
 	ctx := jwtassertion.ContextWithTokenClaims(context.Background(), &jwtassertion.TokenClaims{OuId: "ou-acme-uuid"})
 	err := svc.ProvisionPublisherForBuild(ctx, "acme")
@@ -406,8 +406,9 @@ func TestProvisionPublisherForBuild_EmptyOrgID(t *testing.T) {
 func TestRegenerateClientSecret_WritePublisherErrorReturned(t *testing.T) {
 	t.Parallel()
 	repo := newMemIDPRepo()
+	stale := "acme-publisher-secrets"
 	_ = repo.CreateProfile(context.Background(), &OrganizationIDPProfile{
-		OrgID: "acme", PublisherClientID: "aep-publisher-acme",
+		OrgID: "acme", PublisherClientID: "aep-publisher-acme", SecretRefName: &stale,
 	})
 	thunder := &fakeThunder{regenFn: func(context.Context, string) (string, error) { return "rotated", nil }}
 	sm := &provFakeSM{err: errors.New("sm-api down")}
@@ -417,5 +418,9 @@ func TestRegenerateClientSecret_WritePublisherErrorReturned(t *testing.T) {
 	_, err := svc.RegenerateClientSecret(ctx, "acme", "ada@x.io")
 	if err == nil {
 		t.Fatal("RegenerateClientSecret must return WritePublisher errors")
+	}
+	row, _ := repo.GetProfileByOrgID(context.Background(), "acme")
+	if HasPublisherSecretRef(row) {
+		t.Fatalf("failed rewrite must clear secret_ref_name, got %+v", row.SecretRefName)
 	}
 }

@@ -108,11 +108,7 @@ export class ClientCredentialsTokenProvider {
           });
           res.on("end", () => {
             if ((res.statusCode ?? 0) < 200 || (res.statusCode ?? 0) >= 300) {
-              return reject(
-                new Error(
-                  `cc token endpoint returned ${res.statusCode}: ${chunks.slice(0, 200)}`,
-                ),
-              );
+              return reject(new Error(`cc token endpoint returned ${res.statusCode}`));
             }
             try {
               const parsed = JSON.parse(chunks);

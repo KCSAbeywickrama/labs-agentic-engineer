@@ -87,8 +87,7 @@ export function credHelperScript(params: CredHelperParams): string {
 # Authenticates to the platform with the org publisher client_credentials token
 # (POST /internal/v1/executions/{executionId}/credentials/refresh). When
 # PUBLISHER_CLIENT_ID/SECRET/TOKEN_URL are set, mint a Thunder access token.
-# If that mint fails, read the CC snapshot oneshot wrote to \$AEP_BEARER_FILE
-# (not a Task JWT).
+# If that mint fails, read the CC snapshot oneshot wrote to \$AEP_BEARER_FILE.
 #
 # Diagnostics go to stderr deliberately. An earlier version stayed silent on
 # every failure "so git's own error message reaches the user"; git's message for
@@ -261,11 +260,11 @@ export function ghWrapperScript(realGhPath: string): string {
 # between gh calls.
 #
 # The token comes from credhelper.sh through its own \`get\` contract rather than
-# from a second copy of the exchange. One script owns the refresh, so both auth
-# modes and the anti-misroute tripwire apply to
-# \`gh\` without being reimplemented. The duplicate this replaces read
-# \$AEP_BEARER_FILE only, so on a cc-only run it served whatever token was minted
-# at pod start and degraded silently once that expired, while \`git\` kept working.
+# from a second copy of the exchange. One script owns the refresh, so git and
+# \`gh\` share the anti-misroute tripwire without it being reimplemented. The
+# duplicate this replaces read \$AEP_BEARER_FILE only, so it served whatever
+# token was minted at pod start and degraded silently once that expired, while
+# \`git\` kept working.
 #
 # A refresh failure is not fatal: hosts.yml from an earlier call may still be
 # valid, so we warn and let gh report its own auth error if it isn't.

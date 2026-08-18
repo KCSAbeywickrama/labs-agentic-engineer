@@ -42,10 +42,15 @@ export function staticTokenSource(token: string): AccessTokenSource {
   };
 }
 
-async function authorizedFetch(url: string, init: RequestInit, token: string): Promise<Response> {
+async function authorizedFetch(
+  url: string,
+  init: RequestInit,
+  token: string,
+  fetchImpl: typeof fetch,
+): Promise<Response> {
   const headers = new Headers(init.headers);
   headers.set("Authorization", `Bearer ${token}`);
-  return fetch(url, { ...init, headers });
+  return fetchImpl(url, { ...init, headers });
 }
 
 export async function fetchWith401Retry(
@@ -55,11 +60,13 @@ export async function fetchWith401Retry(
     source: AccessTokenSource;
     canRefresh: boolean;
     onToken?: (token: string) => void | Promise<void>;
+    fetchImpl?: typeof fetch;
   },
 ): Promise<Response> {
+  const doFetch = opts.fetchImpl ?? fetch;
   const first = await opts.source.getToken();
   await opts.onToken?.(first);
-  const res = await authorizedFetch(url, init, first);
+  const res = await authorizedFetch(url, init, first, doFetch);
   if (res.status !== 401) {
     return res;
   }
@@ -75,7 +82,7 @@ export async function fetchWith401Retry(
     throw new FatalAuthError(`unauthorized; token refresh failed: ${msg}`);
   }
   await opts.onToken?.(second);
-  const retry = await authorizedFetch(url, init, second);
+  const retry = await authorizedFetch(url, init, second, doFetch);
   if (retry.status === 401) {
     throw new FatalAuthError("unauthorized after token refresh");
   }

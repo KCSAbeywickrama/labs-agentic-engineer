@@ -22,6 +22,7 @@ import { query, type McpServerConfig, type Query } from "@anthropic-ai/claude-ag
 import { openDebugSinks, type DebugSinks, type TaskLog } from "./logger.js";
 import type { DispatchRequest } from "./types.js";
 import type { WorkspaceLayout } from "./workspace.js";
+import { writeBearerFile } from "./workspace.js";
 import { emit, primeScrubber } from "./progress/emitter.js";
 import { createSdkTranslator } from "./progress/from-sdk.js";
 import { createRunWatchdog } from "./progress/watchdog.js";
@@ -400,12 +401,13 @@ export async function runClaudeQuery(
   if (mcpUrl && mcpToken) {
     const source = mcpAuth?.source ?? staticTokenSource(mcpToken);
     const canRefresh = mcpAuth?.canRefresh ?? false;
+    let lastBearer = mcpToken;
     mcpProxy = await startMcpAuthProxy({
       upstreamUrl: mcpUrl,
       source,
       canRefresh,
       onToken: async (token) => {
-        await fs.promises.writeFile(layout.bearerFile, token, { mode: 0o600 });
+        lastBearer = await writeBearerFile(layout.bearerFile, token, lastBearer);
         primeScrubber([token]);
       },
       onFatal: (err) => {

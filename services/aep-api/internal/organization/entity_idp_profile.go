@@ -17,6 +17,7 @@
 package organization
 
 import (
+	"strings"
 	"time"
 )
 
@@ -48,7 +49,7 @@ type OrganizationIDPProfile struct {
 	// (POST /build, actor build-provision) provisions the Thunder cc app.
 	// Dispatch fails loud when secret_ref_name is empty; it mounts client_id
 	// and client_secret from the SecretReference, never publisher_client_secret
-	// from this row. Empty-ref operators: POST /projects/{projectName}/build.
+	// from this row.
 	SecretRefName      *string    `gorm:"type:text;column:secret_ref_name" json:"-"`
 	SecretRefKVPath    *string    `gorm:"type:text;column:secret_ref_kv_path" json:"-"`
 	SecretRefProperty  *string    `gorm:"type:text;column:secret_ref_property" json:"-"`
@@ -61,6 +62,12 @@ type OrganizationIDPProfile struct {
 // produce `organization_idp_profiles` already, but we make it explicit
 // to survive any future model package reshuffles).
 func (OrganizationIDPProfile) TableName() string { return "organization_idp_profiles" }
+
+// HasPublisherSecretRef is true when the profile carries a non-empty
+// SecretReference name the coding Job can mount.
+func HasPublisherSecretRef(row *OrganizationIDPProfile) bool {
+	return row != nil && row.SecretRefName != nil && strings.TrimSpace(*row.SecretRefName) != ""
+}
 
 // IDPAuditEvent is one row in the append-only audit log of
 // publisher-lifecycle operations. Used by the console "Audit" view

@@ -35,9 +35,9 @@ import (
 //	───────────────────────────────────────────────────────────────────────────────────────────────────
 //	public         /api/v1              Thunder user JWT + org gate                handlers_*.go · tenant_gate.go
 //	               (jwt → orgensure)    (org from the verified token, never input)  ← packages/contracts/api/v1 (source of truth)
-//	internal S2S   /internal/v1/validation/, BFF Task-JWT or publisher-cc          internal.go · runnerAuthGate
-//	               /internal/v1/executions/  (dual-token verify + INT-6 fence,      ← packages/contracts/api/internal/v1 (non-public)
-//	               (deny-by-default gate)     both keyed to the run CYCLE id)
+//	internal S2S   /internal/v1/validation/, publisher-cc (iss platform-idp)        internal.go · runnerAuthGate
+//	               /internal/v1/executions/  (INT-6 fence keyed to the run CYCLE     ← packages/contracts/api/internal/v1 (non-public)
+//	               (deny-by-default gate)     id)
 //	internal MCP   /internal/v1/mcp     BFF JWT aud=aep-api-mcp or Thunder          dependencies/mcp_server.go ·
 //	               (POST, JSON-RPC)     publisher CC (org from ocOrgId or           auth.AgentsScopedVerifier (no spec — JSON-RPC)
 //	                                    PublisherClaims.OrgHandle, never request)
@@ -82,7 +82,7 @@ func mountSurfaces(params AppParams) *http.ServeMux {
 	})
 
 	// Task-JWT public key set (JWKS) — unauthenticated discovery, fetched by
-	// every verifier before any auth. A plain handler (not a contract op) so it
+	// MCP/S2S verifiers before any auth. A plain handler (not a contract op) so it
 	// stays off the /api/v1 server base path: the public contract is base-pathed
 	// at /api/v1, and this endpoint deliberately lives outside that subtree.
 	mux.HandleFunc("GET /auth/external/jwks.json", func(w http.ResponseWriter, _ *http.Request) {
@@ -131,7 +131,7 @@ func mountSurfaces(params AppParams) *http.ServeMux {
 	// Served contract-first from packages/contracts/api/internal/v1 (strict
 	// server in internal/igen), NOT wrapped by the /api/ user-JWT
 	// middleware. Every operation passes the deny-by-default runnerAuthGate
-	// (BFF Task-JWT or publisher-cc verified against the path id) and is never
+	// (publisher-cc verified against the path id) and is never
 	// gateway-advertised. Every runner callback is keyed to the run CYCLE the
 	// platform dispatched the pod for — the id it carries as AEP_TASK_ID.
 	//

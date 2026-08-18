@@ -436,6 +436,9 @@ func TestBuild_PublisherProvisionErrorDoesNotTag(t *testing.T) {
 	if tagger.called != 0 {
 		t.Fatalf("failed provision must not cut a tag, called=%d", tagger.called)
 	}
+	if strings.Contains(resp.Body.String(), "sm-api") || strings.Contains(resp.Body.String(), "JWT") {
+		t.Fatalf("client body must not echo the provisioner error, got %s", resp.Body.String())
+	}
 }
 
 // ----- StartProjectBuild (non-HTTP provider-build trigger) --------------------

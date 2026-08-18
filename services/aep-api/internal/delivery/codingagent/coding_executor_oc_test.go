@@ -316,7 +316,7 @@ type fakePublisher struct {
 	err  error
 }
 
-func (f fakePublisher) EnsureReady(context.Context, string) (string, error) {
+func (f fakePublisher) SecretRefName(context.Context, string) (string, error) {
 	return f.name, f.err
 }
 
@@ -331,7 +331,7 @@ func secretEnvByKey(t *testing.T, in openchoreo.WorkloadInput, key string) openc
 	return openchoreo.WorkflowEnvVarRef{}
 }
 
-func TestDispatch_HTTPS_MountsPublisherSecretEnvAndTokenURL(t *testing.T) {
+func TestDispatch_MountsPublisherSecretEnvAndTokenURL(t *testing.T) {
 	rec := &chainRecorder{}
 	anthropic, github := fullSecretRefs()
 	e := newCodingDispatchExecutor(anthropic, github)
@@ -371,7 +371,7 @@ func TestDispatch_HTTPS_MountsPublisherSecretEnvAndTokenURL(t *testing.T) {
 	}
 }
 
-func TestDispatch_HTTPS_MissingPublisher_ErrorsNoCreate(t *testing.T) {
+func TestDispatch_MissingPublisher_ErrorsNoCreate(t *testing.T) {
 	rec := &chainRecorder{}
 	anthropic, github := fullSecretRefs()
 	e := newCodingDispatchExecutor(anthropic, github)
@@ -380,7 +380,7 @@ func TestDispatch_HTTPS_MissingPublisher_ErrorsNoCreate(t *testing.T) {
 
 	_, err := e.Dispatch(context.Background(), codingMilestoneDispatch())
 	if err == nil {
-		t.Fatal("expected error when https platform URL has no publisher credentials")
+		t.Fatal("expected error when publisher credentials are not wired")
 	}
 	if !strings.Contains(err.Error(), "publisher") {
 		t.Fatalf("error must name publisher, got: %v", err)
@@ -390,7 +390,7 @@ func TestDispatch_HTTPS_MissingPublisher_ErrorsNoCreate(t *testing.T) {
 	}
 }
 
-func TestDispatch_HTTPS_EmptyTokenURL_ErrorsNoCreate(t *testing.T) {
+func TestDispatch_EmptyTokenURL_ErrorsNoCreate(t *testing.T) {
 	rec := &chainRecorder{}
 	anthropic, github := fullSecretRefs()
 	e := newCodingDispatchExecutor(anthropic, github)
@@ -410,7 +410,7 @@ func TestDispatch_HTTPS_EmptyTokenURL_ErrorsNoCreate(t *testing.T) {
 	}
 }
 
-func TestDispatch_HTTPS_ProfileLoadError_ErrorsNoCreate(t *testing.T) {
+func TestDispatch_ProfileLoadError_ErrorsNoCreate(t *testing.T) {
 	rec := &chainRecorder{}
 	anthropic, github := fullSecretRefs()
 	e := newCodingDispatchExecutor(anthropic, github)
@@ -430,7 +430,7 @@ func TestDispatch_HTTPS_ProfileLoadError_ErrorsNoCreate(t *testing.T) {
 	}
 }
 
-func TestDispatch_HTTPS_EmptySecretRef_ErrorsNoCreate(t *testing.T) {
+func TestDispatch_EmptySecretRef_ErrorsNoCreate(t *testing.T) {
 	rec := &chainRecorder{}
 	anthropic, github := fullSecretRefs()
 	e := newCodingDispatchExecutor(anthropic, github)
@@ -448,15 +448,15 @@ func TestDispatch_HTTPS_EmptySecretRef_ErrorsNoCreate(t *testing.T) {
 	if strings.Contains(err.Error(), "RegenerateClientSecret") {
 		t.Fatalf("dispatch must not tell operators to rotate, got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "POST /projects/") {
-		t.Fatalf("empty SecretReference must name POST /build, got: %v", err)
+	if !strings.Contains(err.Error(), "SecretReference is not stamped") {
+		t.Fatalf("empty SecretReference must name the missing stamp, got: %v", err)
 	}
 	if len(rec.calls) != 0 {
 		t.Errorf("nothing may be created, saw %v", rec.calls)
 	}
 }
 
-func TestDispatch_HTTP_MountsPublisher(t *testing.T) {
+func TestDispatch_HTTPPlatformURL_MountsPublisher(t *testing.T) {
 	rec := &chainRecorder{}
 	anthropic, github := fullSecretRefs()
 	e := newCodingDispatchExecutor(anthropic, github)
