@@ -679,7 +679,7 @@ const settledRun: BuildRunList = {
       endedAt: "2026-07-10T10:41:00Z",
       validation: {
         verdict: "partial",
-        issue: 12,
+        issue: 30,
         reportPath: "tests/validation/report.json",
       },
       cycles: [
@@ -704,7 +704,7 @@ const settledRun: BuildRunList = {
           prUrl: `${REPO_URL}/pull/4`,
           mergeSha: "5c0de1a77b3f2049",
           validationVerdict: "failed",
-          validationIssue: 12,
+          validationIssue: 30,
           createdAt: "2026-07-10T09:45:00Z",
           endedAt: "2026-07-10T10:02:00Z",
         },
@@ -731,7 +731,7 @@ const settledRun: BuildRunList = {
           prUrl: `${REPO_URL}/pull/6`,
           mergeSha: "7ab41c90ee31d5f0",
           validationVerdict: "partial",
-          validationIssue: 12,
+          validationIssue: 30,
           createdAt: "2026-07-10T10:24:00Z",
           endedAt: "2026-07-10T10:40:00Z",
         },
