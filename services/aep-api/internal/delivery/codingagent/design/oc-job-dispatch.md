@@ -27,9 +27,7 @@ namespace from the CR.
 
 When `AGENT_PLATFORM_URL` is `https://` (cloud), the Job cannot present a
 Task JWT to the public RestApi: jwt-auth v1 only has key manager
-`iss: platform-idp`. Dispatch therefore mounts the org Thunder publisher
-`client_id` / `client_secret` from the IdP profile SecretReference (ESO
-fields, not the triplet property name `publisher`) and sets plain env
+`iss: platform-idp`. When `AGENT_PLATFORM_URL` is `https://`, `POST /projects/{projectName}/build` provisions the org Thunder publisher SecretReference (`ProvisionPublisherForHTTPSBuild`, actor `build-provision`) while the user JWT is on ctx. Coding dispatch reads `secret_ref_name` only and mounts `PUBLISHER_CLIENT_ID` / `PUBLISHER_CLIENT_SECRET` from that SecretReference. An empty name fail-louds and does not create the OpenChoreo Component. Local `http://` platform URLs do not wire the Build provisioner and do not mount `PUBLISHER_*`. Dispatch sets plain env
 `PUBLISHER_TOKEN_URL` from `PLATFORM_IDP_JWKS_URL` (`/oauth2/jwks` → `/oauth2/token`). The runner mints a
 client_credentials token at callback time. HTTPS Jobs use the minted publisher token for **both** `credentials/refresh`
 and `POST /internal/v1/mcp` (gateway jwt-auth requires `iss=platform-idp`).
@@ -38,8 +36,7 @@ uses the 5-minute CC renewal buffer, and an HTTP 401 remints once. A second
 401 or a remint failure exits the Job. The same proxy runs locally when
 `PUBLISHER_*` are mounted; without them the first 401 is already fatal
 (there is nothing to remint). `AgentsScopedVerifier` dual-accepts that Thunder JWT (`aud=aep-publisher-{org}`)
-and the BFF MCP token (`aud=aep-api-mcp`). Local `http://` platform URLs do
-not mount `PUBLISHER_*`; Task JWT remains the callback credential; MCP keeps `AEP_MCP_TOKEN`. The designing agent never
+and the BFF MCP token (`aud=aep-api-mcp`). Task JWT remains the callback credential on local `http://` platform URLs; MCP keeps `AEP_MCP_TOKEN`. The designing agent never
 hits this gateway: it calls ClusterIP `AEP_API_INTERNAL_BASE_URL` with the
 BFF MCP token (`mcpForTurn`).
 

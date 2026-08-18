@@ -518,9 +518,11 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		slog.Info("org OU validation wired — JWT ouId is validated against Thunder before the org→OU mapping is (over)written")
 	}
 	// WithSecretRefWriter mirrors per-org publisher client_secret to SM-API on
-	// EnsureOrgPublisher / RegenerateClientSecret. Coding dispatch mounts
-	// PUBLISHER_CLIENT_ID and PUBLISHER_CLIENT_SECRET from that SecretReference
-	// when AGENT_PLATFORM_URL is https.
+	// EnsureOrgPublisher / RegenerateClientSecret and on
+	// ProvisionPublisherForHTTPSBuild (POST /build, actor build-provision).
+	// Coding dispatch reads secret_ref_name only and mounts PUBLISHER_CLIENT_ID
+	// and PUBLISHER_CLIENT_SECRET from that SecretReference when
+	// AGENT_PLATFORM_URL is https.
 	idpService := organization.NewIDPService(idpRepo, orgRepo, thunderAdminClient, organization.PlatformIDPConfig{
 		Issuer:  cfg.PlatformIDP.Issuer,
 		JWKSURL: cfg.PlatformIDP.JWKSURL,
@@ -569,6 +571,9 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		taskTokens, executionRepo,
 		cfg.AgentPlatformURL, cfg.AgentPlatformURL,
 		orgRepo, anthropicCredService, orgCredRepo, idpRepo)
+	// https dispatch reads secret_ref_name only — it does not call
+	// EnsureOrgPublisher. POST /build provisions the SecretReference while the
+	// console JWT is still on ctx.
 	codingExecutor.WithPublisherCredentials(
 		codingagent.NewIDPPublisherResolver(idpRepo),
 		codingagent.PublisherTokenURLFromJWKS(cfg.PlatformIDP.JWKSURL),

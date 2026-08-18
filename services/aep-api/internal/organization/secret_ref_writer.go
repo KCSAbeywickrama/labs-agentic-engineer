@@ -84,8 +84,8 @@ func (w *SecretRefWriter) Enabled() bool {
 
 // WriteAnthropic uploads one role's per-org Anthropic API key to SM-API and
 // stamps the triplet onto that role's `org_anthropic_credentials` row. ctx must
-// carry the inbound user JWT (the SM-API provider reads it via the
-// jwtassertion middleware context helper).
+// carry the inbound user JWT — Connect and POST /build run on that ctx (the
+// SM-API provider reads it via the jwtassertion middleware context helper).
 //
 // The role picks the SM-API EntityName, so the default and coding keys occupy
 // separate vault paths and a rotation of one can never clobber the other.
@@ -244,7 +244,7 @@ func orgUUIDForSecretLocation(ctx context.Context) (string, error) {
 // derives the NS from the JWT it just authenticated, so the BFF must
 // use the same source-of-truth to compute a matching path. The BFF's
 // local `organizations.uuid` is a random local PK and would diverge.
-// Connect always runs in a request context with a verified user JWT.
+// Connect and POST /build always run in a request context with a verified user JWT.
 func (w *SecretRefWriter) resolveVaultKey(ctx context.Context, secretRefName string) (string, error) {
 	orgUUID, err := orgUUIDForSecretLocation(ctx)
 	if err != nil {
@@ -301,12 +301,13 @@ const (
 // WritePublisher uploads the per-org Thunder publisher cc credentials to
 // SM-API as a single 2-field secret and stamps the triplet onto
 // `organization_idp_profiles`. Called from idp_service.EnsureOrgPublisher
-// (on create) and RegenerateClientSecret (on rotation). The triplet is
-// read at dispatch time on https AGENT_PLATFORM_URL to mount the two
+// (on create), RegenerateClientSecret (on rotation), and
+// ProvisionPublisherForHTTPSBuild (POST /build). Coding dispatch reads
+// secret_ref_name only on https AGENT_PLATFORM_URL to mount the two
 // Workload secretEnv entries that hand the runner pod its cc credentials.
 //
 // Same semantics as WriteAnthropic: best-effort, errors returned, ctx
-// must carry the user JWT.
+// must carry the user JWT (Connect and POST /build).
 func (w *SecretRefWriter) WritePublisher(ctx context.Context, ocOrgID, clientID, clientSecret string) (string, error) {
 	if !w.Enabled() {
 		return "", nil
