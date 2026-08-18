@@ -128,12 +128,17 @@ violations:
   "exposure": "internet",             // "internet" (public) | "intranet" (internal only)
   "dependencies": [ /* see below — every arrow in Interactions appears here */ ],
   "description": "One paragraph: single responsibility, port/entrypoint expectations, and what it explicitly does NOT do.",
+  "stories": [1, 2, 4],               // PRD story numbers THIS component serves — the build gate refuses the tag while any story is claimed by nobody
+  "skillsPinned": ["openapi-conventions", "ballerina"], // the skills this component's build needs — see the field above
   "endpoint": { "name": "http" } // optional; see below
 }
 ```
 
 `name`, `type`, `version`, `language`, `buildpack`, `appPath`, `entrypoint`,
-`exposure`, `description`, and `dependencies` are required. To CHANGE a
+`exposure`, `description`, `dependencies`, `stories` and `skillsPinned` are
+required — `stories` and `skillsPinned` are as required as the rest, and a
+component missing either fails the build gate, so emit them in the SAME write
+rather than as a follow-up edit. To CHANGE a
 design.json, re-emit the whole corrected file (removeFile + addFile) — never
 patch JSON with anchored edits. On INVALID_JSON or SCHEMA_VIOLATION, fix what
 the message lists and re-emit.
