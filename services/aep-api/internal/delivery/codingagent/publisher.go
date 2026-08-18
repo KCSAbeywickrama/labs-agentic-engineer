@@ -82,7 +82,7 @@ func (r *idpPublisherResolver) EnsureReady(ctx context.Context, orgID string) (s
 		return "", fmt.Errorf("load publisher profile: %w", err)
 	}
 	if row == nil {
-		return "", fmt.Errorf("publisher profile missing after ensure")
+		return "", fmt.Errorf("publisher profile missing")
 	}
 	if row.SecretRefName == nil {
 		return "", nil

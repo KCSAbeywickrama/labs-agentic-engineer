@@ -1048,7 +1048,8 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	}
 	// https deploys pair this with a SM-API SecretsProvider so
 	// WritePublisher can stamp secret_ref_name onto the org's IDP profile;
-	// ProvisionPublisherForHTTPSBuild is a no-op without one.
+	// without one, ProvisionPublisherForHTTPSBuild fails closed and every
+	// https POST /build 503s until a SecretsProvider is injected.
 	if codingagent.RequiresGatewayPublisher(cfg.AgentPlatformURL) {
 		deliveryDeps.PublisherProvisioner = idpService
 	}

@@ -331,6 +331,14 @@ func (s *idpService) ProvisionPublisherForHTTPSBuild(ctx context.Context, orgID 
 	if orgID == "" {
 		return fmt.Errorf("orgID required")
 	}
+	// Fail closed BEFORE touching Thunder: a disabled writer can never stamp
+	// secret_ref_name, so letting EnsureOrgPublisher/RegenerateClientSecret
+	// run anyway would rotate the Thunder client secret on every single
+	// Build (each call retries the same never-stamped ref) and report
+	// success in the exact state this method exists to prevent.
+	if s.secretRefWriter == nil || !s.secretRefWriter.Enabled() {
+		return fmt.Errorf("publisher SecretReference requires a SecretsProvider (secrets delivery is off)")
+	}
 	clientID, clientSecret, _, err := s.EnsureOrgPublisher(ctx, orgID, PublisherBuildActor)
 	if err != nil {
 		return err
@@ -342,7 +350,7 @@ func (s *idpService) ProvisionPublisherForHTTPSBuild(ctx context.Context, orgID 
 	if row != nil && row.SecretRefName != nil && strings.TrimSpace(*row.SecretRefName) != "" {
 		return nil
 	}
-	if strings.TrimSpace(clientSecret) != "" && s.secretRefWriter != nil && s.secretRefWriter.Enabled() {
+	if strings.TrimSpace(clientSecret) != "" {
 		if _, werr := s.secretRefWriter.WritePublisher(ctx, orgID, clientID, clientSecret); werr != nil {
 			return fmt.Errorf("idp_service: SM-API publisher write: %w", werr)
 		}
@@ -351,6 +359,16 @@ func (s *idpService) ProvisionPublisherForHTTPSBuild(ctx context.Context, orgID 
 	if row != nil && strings.TrimSpace(row.PublisherClientID) != "" {
 		if _, rerr := s.RegenerateClientSecret(ctx, orgID, PublisherBuildActor); rerr != nil {
 			return rerr
+		}
+		// spec P1 step 4: rotate is a one-shot recovery, not a retry loop —
+		// require the rotated secret actually landed a SecretReference
+		// rather than reporting success while the ref stays null.
+		after, aerr := s.GetProfile(ctx, orgID)
+		if aerr != nil {
+			return aerr
+		}
+		if after == nil || after.SecretRefName == nil || strings.TrimSpace(*after.SecretRefName) == "" {
+			return fmt.Errorf("publisher SecretReference still missing after rotate")
 		}
 		return nil
 	}

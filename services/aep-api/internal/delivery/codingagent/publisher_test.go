@@ -98,21 +98,6 @@ func TestIDPPublisherResolver_EnsureReady_ReadsSecretRefNameWithoutEnsure(t *tes
 	}
 }
 
-func TestIDPPublisherResolver_EnsureReady_NilEnsureStillReads(t *testing.T) {
-	t.Parallel()
-	name := "acme-publisher-secrets"
-	r := NewIDPPublisherResolver(fakeIDPRepo{profile: &organization.OrganizationIDPProfile{
-		SecretRefName: &name,
-	}})
-	got, err := r.EnsureReady(context.Background(), "acme")
-	if err != nil {
-		t.Fatalf("EnsureReady: %v", err)
-	}
-	if got != name {
-		t.Errorf("secret ref = %q, want %q", got, name)
-	}
-}
-
 func TestIDPPublisherResolver_EnsureReady_NilProfile(t *testing.T) {
 	t.Parallel()
 	r := NewIDPPublisherResolver(fakeIDPRepo{profile: nil})

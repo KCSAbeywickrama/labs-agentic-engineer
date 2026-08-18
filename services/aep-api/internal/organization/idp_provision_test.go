@@ -311,6 +311,96 @@ func TestProvisionPublisherForHTTPSBuild_WritePublisherErrorFails(t *testing.T) 
 	}
 }
 
+func TestProvisionPublisherForHTTPSBuild_DisabledWriterFailsClosed(t *testing.T) {
+	t.Parallel()
+	repo := newMemIDPRepo()
+	thunder := &fakeThunder{ensureFn: func(context.Context, string, string) (string, string, bool, error) {
+		return "aep-publisher-acme", "secret-once", true, nil
+	}}
+	// No WithSecretRefWriter call: secretRefWriter stays nil, mirroring an
+	// https deployment with no SecretsProvider wired.
+	svc := NewIDPService(repo, stubOrgRepo{}, thunder, PlatformIDPConfig{})
+	ctx := jwtassertion.ContextWithTokenClaims(context.Background(), &jwtassertion.TokenClaims{OuId: "ou-acme-uuid"})
+	err := svc.ProvisionPublisherForHTTPSBuild(ctx, "acme")
+	if err == nil {
+		t.Fatal("expected error when SecretRefWriter is disabled")
+	}
+	if !strings.Contains(err.Error(), "SecretsProvider") && !strings.Contains(err.Error(), "secrets delivery") {
+		t.Fatalf("error must mention SecretsProvider/secrets delivery, got %v", err)
+	}
+	if len(thunder.ensureCalls) != 0 {
+		t.Fatalf("disabled writer must not touch Thunder (Ensure), got %d calls", len(thunder.ensureCalls))
+	}
+	if len(thunder.regenCalls) != 0 {
+		t.Fatalf("disabled writer must not rotate, regenCalls=%v", thunder.regenCalls)
+	}
+}
+
+func TestProvisionPublisherForHTTPSBuild_DisabledWriterViaNewSecretRefWriter(t *testing.T) {
+	t.Parallel()
+	repo := newMemIDPRepo()
+	thunder := &fakeThunder{ensureFn: func(context.Context, string, string) (string, string, bool, error) {
+		return "aep-publisher-acme", "secret-once", true, nil
+	}}
+	// NewSecretRefWriter(nil, nil, nil, repo) is Enabled()==false (no
+	// SecretManagementClient) — same fail-closed contract as a nil writer.
+	svc := NewIDPService(repo, stubOrgRepo{}, thunder, PlatformIDPConfig{}).
+		WithSecretRefWriter(NewSecretRefWriter(nil, nil, nil, repo))
+	ctx := jwtassertion.ContextWithTokenClaims(context.Background(), &jwtassertion.TokenClaims{OuId: "ou-acme-uuid"})
+	err := svc.ProvisionPublisherForHTTPSBuild(ctx, "acme")
+	if err == nil {
+		t.Fatal("expected error when SecretRefWriter is disabled")
+	}
+	if !strings.Contains(err.Error(), "SecretsProvider") && !strings.Contains(err.Error(), "secrets delivery") {
+		t.Fatalf("error must mention SecretsProvider/secrets delivery, got %v", err)
+	}
+	if len(thunder.regenCalls) != 0 {
+		t.Fatalf("disabled writer must not rotate, regenCalls=%v", thunder.regenCalls)
+	}
+}
+
+func TestProvisionPublisherForHTTPSBuild_EnsureErrorPropagates(t *testing.T) {
+	t.Parallel()
+	repo := newMemIDPRepo()
+	ensureErr := errors.New("thunder: connection refused")
+	thunder := &fakeThunder{ensureFn: func(context.Context, string, string) (string, string, bool, error) {
+		return "", "", false, ensureErr
+	}}
+	sm := &provFakeSM{}
+	svc := NewIDPService(repo, stubOrgRepo{}, thunder, PlatformIDPConfig{}).
+		WithSecretRefWriter(NewSecretRefWriter(sm, nil, nil, repo))
+	ctx := jwtassertion.ContextWithTokenClaims(context.Background(), &jwtassertion.TokenClaims{OuId: "ou-acme-uuid"})
+	err := svc.ProvisionPublisherForHTTPSBuild(ctx, "acme")
+	if err == nil {
+		t.Fatal("expected EnsureOrgPublisher error to propagate")
+	}
+	if !strings.Contains(err.Error(), "thunder: connection refused") {
+		t.Fatalf("error must propagate the Thunder failure untouched, got %v", err)
+	}
+	if len(sm.createCalls) != 0 {
+		t.Fatalf("must not write to SM-API when Ensure fails, got %d calls", len(sm.createCalls))
+	}
+}
+
+func TestProvisionPublisherForHTTPSBuild_EmptyOrgID(t *testing.T) {
+	t.Parallel()
+	repo := newMemIDPRepo()
+	thunder := &fakeThunder{}
+	sm := &provFakeSM{}
+	svc := NewIDPService(repo, stubOrgRepo{}, thunder, PlatformIDPConfig{}).
+		WithSecretRefWriter(NewSecretRefWriter(sm, nil, nil, repo))
+	err := svc.ProvisionPublisherForHTTPSBuild(context.Background(), "")
+	if err == nil {
+		t.Fatal("expected error for empty orgID")
+	}
+	if !strings.Contains(err.Error(), "orgID") {
+		t.Fatalf("error must name orgID, got %v", err)
+	}
+	if len(thunder.ensureCalls) != 0 {
+		t.Fatalf("empty orgID must short-circuit before touching Thunder, got %d calls", len(thunder.ensureCalls))
+	}
+}
+
 // --- RegenerateClientSecret fail-closed SM-API write -------------------------
 
 func TestRegenerateClientSecret_WritePublisherErrorReturned(t *testing.T) {
