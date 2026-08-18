@@ -114,6 +114,75 @@ raises "do I need to know git?" at the worst moment), **milestone** (platform bo
 changes nothing about this decision — it stays discoverable on the Builds page), **stories in
 scope** ("in scope" is the jargon; the list is right).
 
+## The project overview
+
+### Where project status lives
+
+**One chip, in the global header beside the project switcher** — plus one on each card in the
+projects listing. **Not** on the overview page header, the Issues page or the Deployments page.
+
+The chip was never redundant, it was standing in the wrong place. Beside the project name on the
+overview it restated the stage cards six inches below it — `specChip`'s own comment admits this
+("the same three states the spec stage card renders"), and `deliveryChip` only picks the loudest
+of `build.status` / `deploy.status` by priority, synthesising nothing. Meanwhile the **projects
+listing carried no status at all**, which is the one place a one-line summary genuinely earns its
+slot: many projects, no cards on screen.
+
+In the global header it is visible from every page in the project, always in the same position.
+Accepted trade: on the overview the chip and the cards are both on screen. Consistency of
+location beats zero redundancy.
+
+Its words come from the state table below — no chip-specific vocabulary:
+
+| condition | chip |
+|---|---|
+| no spec yet | **Writing requirements** |
+| spec, no version | **not built yet** |
+| spec versioned, edited since | **`v1 · edited`** |
+| spec versioned, clean | **`v1`** |
+
+### Card grammar
+
+Every stage card says the same things in the same slots, so the pattern is learned once:
+
+- **which stage** — the title
+- **where it stands** — one line, always the user's situation, never the system's dependency
+- **what you can do** — a CTA, present *only* when there is something to do (per
+  [#522](https://github.com/wso2/labs-agentic-engineer/issues/522), when the flow stopped there)
+- **version** — only when one exists. No em-dash placeholder; blank says "not yet" better
+- **progress** — only while something is running
+
+| state | line | version | CTA |
+|---|---|---|---|
+| not reached | *Nothing built yet* | — | none |
+| running | *Building 3 of 7 tasks* | yes | none |
+| settled | *Built* | yes | view |
+| failed | *Build failed* | yes | fix |
+
+The running / settled / failed rows for Build and Deploy are filled in when the post-Build
+journey is worked; the grammar is fixed now.
+
+**Ghost cards stay clickable.** Their destination teaches what the section is for
+([#533](https://github.com/wso2/labs-agentic-engineer/issues/533)), so the click is a lesson, not
+a dead end.
+
+| was | is |
+|---|---|
+| `waiting on spec` | **Nothing built yet** |
+| `nothing deployed` | **Nothing deployed yet** |
+
+`waiting on spec` named the system's dependency; naming rule 6 requires the user's situation.
+
+### Repository preparation is loading, not status
+
+Cloning is async and the user cannot influence it, so a progress label is noise with extra words.
+It folds into the **overview's own loading state** and is never labelled.
+
+Only failure surfaces, and not as a chip: an **alert** reading *"Unable to clone the
+repository"*, carrying `repoErrorMessage` and a **Retry**. A failed repo means nothing in the
+project can work — no spec commits, no build runs — which is more than a pill can carry, and
+today's `Repository error` chip discards the message the contract already provides.
+
 ## State
 
 | Situation | Says |
