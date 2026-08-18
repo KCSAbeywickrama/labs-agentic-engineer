@@ -69,6 +69,13 @@ import { VerdictTile } from "./VerdictTile";
 // loop is the Builds page's story.
 const VALIDATION_CYCLE = ["validation"] as const;
 
+// The two LIFECYCLE values in the validation vocabulary — the states that mean a run
+// is live BECAUSE OF validation. `running` is a validation cycle in flight;
+// `awaiting-fix` is the coding cycle repairing what one found, which is still the
+// validation loop and still the unbounded wait cancel exists to expire. Every other
+// value in the enum is a verdict, and a verdict is something the run already reached.
+const VALIDATION_LIFECYCLE_STATES = new Set(["running", "awaiting-fix"]);
+
 // Hoisted rather than written inline: an sx literal is a new object every render,
 // which emotion has to re-serialize each time.
 const CAPTION_SX = {
@@ -298,11 +305,30 @@ export function ValidationPage({
   );
   const tally = useTally(criteria.data?.content, report.data?.content);
 
-  // The run this page can still cancel. Taken from the whole list rather than
-  // from `run` above, because only ONE run on a milestone can be live and it is
-  // not necessarily the one answering for the version — a revalidation in flight
-  // is live while the spec build that owns the current verdict is long settled.
-  const liveRun = runList.find((r) => !isTerminalRun(r.state));
+  // The run this page can still cancel: one that is live, AND live because of
+  // validation.
+  //
+  // Liveness alone was the bug. Every run is live through its coding cycles, so a
+  // first delivery still writing code offered "Cancel run" over a body reading "No
+  // validation has run yet" — a button to kill a build on the one page that never
+  // mentions it. The status read made exactly this mistake before it learned to
+  // consult the run's latest cycle: "a live run whose current cycle is coding, fixing
+  // or resolving a conflict has nothing to say about validation yet"
+  // (status_stages.go). A live run with no verdict is not a validating run.
+  //
+  // Gated on the RENDERED STATE rather than on the live run's own cycles, because
+  // `awaiting-fix` is not a fact any run row carries — it is the join of the lifecycle
+  // with a verdict the loop repairs, and re-deriving it here is how this button and the
+  // chip above it would come to disagree. The consequence is the rule worth keeping:
+  // cancel is offered exactly while the header chip says the run is still in the loop.
+  //
+  // Taken from the whole list rather than from `run` above, because only ONE run on a
+  // milestone can be live and it is not necessarily the one answering for the version —
+  // a revalidation in flight is live while the spec build that owns the current verdict
+  // is long settled.
+  const liveRun = VALIDATION_LIFECYCLE_STATES.has(state)
+    ? runList.find((r) => !isTerminalRun(r.state))
+    : undefined;
   const cancel = useCancelRun(projectName, version || undefined);
   // Cancel is ACCEPTED, not performed: the endpoint answers 202 the moment the
   // signal is queued, and the run turns cancelled only once the supervisor acts
@@ -354,9 +380,10 @@ export function ValidationPage({
         <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
           {/* A validating run has the same escape hatch the Builds rail gives a
               coding one — same endpoint, same hook, same wording, because it is
-              the same act on the same run. Absent once the run is terminal: the
-              whole point of cancel is that the unbounded wait has no other
-              expiry, and a settled run has nothing left to expire. */}
+              the same act on the same run. Absent unless validation is what keeps
+              the run alive: the whole point of cancel is that the unbounded wait
+              has no other expiry, and a run that has answered — or has not reached
+              the question yet — has nothing here left to expire. */}
           {liveRun && (
             <Button
               size="small"

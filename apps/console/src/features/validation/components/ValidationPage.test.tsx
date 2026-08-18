@@ -295,7 +295,7 @@ afterEach(() => {
 // reachable only from the Builds rail — so a validation, which can hold an agent
 // for up to two hours, had no stop button on the page that owns it.
 describe("ValidationPage cancel", () => {
-  it("offers cancel while a run is live", () => {
+  it("offers cancel while a validation cycle is in flight", () => {
     mockValidation = "running";
     mockRun = run({ cycles: [validationCycle] });
     mockNewerRuns = [
@@ -308,6 +308,49 @@ describe("ValidationPage cancel", () => {
     // The LIVE run, not the one answering for the version: only one run on a
     // milestone can be live, and it need not be the one holding the verdict.
     expect(mockCancelMutate).toHaveBeenCalledWith("run-live");
+  });
+
+  // The repair loop is validation's, even though the cycle in flight is coding: the
+  // run is only still alive because a criterion failed, and each repair is followed by
+  // another attempt. That is the unbounded wait cancel exists for, and this is the page
+  // that explains it — so the button belongs here rather than only on the Builds rail.
+  it("offers cancel while the run repairs a failed validation", () => {
+    mockValidation = "awaiting-fix";
+    mockRun = {
+      ...run({ validation: { verdict: "failed" }, cycles: [validationCycle] }),
+      state: "running",
+    };
+
+    renderPage(undefined);
+    fireEvent.click(screen.getByRole("button", { name: /Cancel run/ }));
+
+    expect(mockCancelMutate).toHaveBeenCalledWith("run-1");
+  });
+
+  // The regression: liveness alone gated this button, and every run is live through
+  // its coding cycles. A first delivery still writing code therefore offered to cancel
+  // it from underneath "No validation has run yet" — on the one page that has nothing
+  // to say about the work being cancelled.
+  it("hides cancel while the live run is still coding", () => {
+    mockValidation = "none";
+    mockRun = {
+      ...run({
+        cycles: [
+          {
+            id: "cycle-1",
+            kind: "coding",
+            attempts: 1,
+            createdAt: "2026-07-10T09:14:00Z",
+          },
+        ],
+      }),
+      state: "running",
+    };
+
+    renderPage(undefined);
+
+    expect(screen.getByText(/No validation has run yet/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Cancel run/ })).not.toBeInTheDocument();
   });
 
   it("hides cancel once every run has settled", () => {
