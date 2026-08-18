@@ -570,7 +570,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		cfg.AgentPlatformURL, cfg.AgentPlatformURL,
 		orgRepo, anthropicCredService, orgCredRepo, idpRepo)
 	codingExecutor.WithPublisherCredentials(
-		codingagent.NewIDPPublisherResolver(idpService, idpRepo),
+		codingagent.NewIDPPublisherResolver(idpRepo),
 		codingagent.PublisherTokenURLFromJWKS(cfg.PlatformIDP.JWKSURL),
 	)
 	// The OpenChoreo Component dispatch path (phase 08): one Component per run

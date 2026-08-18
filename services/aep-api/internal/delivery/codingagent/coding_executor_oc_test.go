@@ -407,19 +407,19 @@ func TestDispatch_HTTPS_EmptyTokenURL_ErrorsNoCreate(t *testing.T) {
 	}
 }
 
-func TestDispatch_HTTPS_EnsureError_ErrorsNoCreate(t *testing.T) {
+func TestDispatch_HTTPS_ProfileLoadError_ErrorsNoCreate(t *testing.T) {
 	rec := &chainRecorder{}
 	anthropic, github := fullSecretRefs()
 	e := newCodingDispatchExecutor(anthropic, github)
 	e.platformURL = "https://gateway.example/app-factory-api"
-	e.WithPublisherCredentials(fakePublisher{err: errors.New("thunder down")}, "https://idp.example/oauth2/token")
+	e.WithPublisherCredentials(fakePublisher{err: errors.New("db down")}, "https://idp.example/oauth2/token")
 	e.WithOCDispatch(NewOCDispatcher(rec.client()).WithImage("ghcr.io/wso2/aep/remote-worker:latest"))
 
 	_, err := e.Dispatch(context.Background(), codingMilestoneDispatch())
 	if err == nil {
-		t.Fatal("expected error when EnsureReady fails")
+		t.Fatal("expected error when profile load fails")
 	}
-	if !strings.Contains(err.Error(), "thunder down") {
+	if !strings.Contains(err.Error(), "db down") {
 		t.Fatalf("error must wrap the resolver diagnosis, got: %v", err)
 	}
 	if len(rec.calls) != 0 {
@@ -442,8 +442,11 @@ func TestDispatch_HTTPS_EmptySecretRef_ErrorsNoCreate(t *testing.T) {
 	if !strings.Contains(strings.ToLower(err.Error()), "secret") {
 		t.Fatalf("error must name SecretReference, got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "RegenerateClientSecret") {
-		t.Fatalf("empty SM-API triplet must tell operators to rotate, got: %v", err)
+	if strings.Contains(err.Error(), "RegenerateClientSecret") {
+		t.Fatalf("dispatch must not tell operators to rotate, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "POST /projects/") {
+		t.Fatalf("empty SecretReference must name POST /build, got: %v", err)
 	}
 	if len(rec.calls) != 0 {
 		t.Errorf("nothing may be created, saw %v", rec.calls)

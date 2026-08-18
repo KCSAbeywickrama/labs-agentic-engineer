@@ -28,12 +28,11 @@ const (
 	envPublisherClientID     = "PUBLISHER_CLIENT_ID"
 	envPublisherClientSecret = "PUBLISHER_CLIENT_SECRET"
 	envPublisherTokenURL     = "PUBLISHER_TOKEN_URL"
-	publisherDispatchActor   = "coding-dispatch"
 )
 
-// PublisherCredentialResolver ensures the org's Thunder publisher
-// client_credentials SecretReference is ready and returns its name only
-// (never the secret value). Nil is allowed on http platform URLs.
+// PublisherCredentialResolver loads the org's Thunder publisher
+// client_credentials SecretReference name (never the secret value). Nil is
+// allowed on http platform URLs.
 type PublisherCredentialResolver interface {
 	EnsureReady(ctx context.Context, orgID string) (secretRefName string, err error)
 }
@@ -41,6 +40,12 @@ type PublisherCredentialResolver interface {
 func requiresGatewayPublisher(platformURL string) bool {
 	u := strings.TrimSpace(platformURL)
 	return strings.HasPrefix(strings.ToLower(u), "https://")
+}
+
+// RequiresGatewayPublisher reports whether dispatch must mount publisher
+// credentials for the given platform URL.
+func RequiresGatewayPublisher(platformURL string) bool {
+	return requiresGatewayPublisher(platformURL)
 }
 
 func PublisherTokenURLFromJWKS(jwksURL string) string {
@@ -60,25 +65,17 @@ func (e *CodingExecutor) WithPublisherCredentials(r PublisherCredentialResolver,
 	return e
 }
 
-type publisherEnsurer interface {
-	EnsureOrgPublisher(ctx context.Context, orgID, actor string) (clientID, clientSecret string, created bool, err error)
-}
-
 type idpPublisherResolver struct {
-	ensure   publisherEnsurer
 	profiles organization.IDPRepository
 }
 
-func NewIDPPublisherResolver(ensure publisherEnsurer, profiles organization.IDPRepository) PublisherCredentialResolver {
-	return &idpPublisherResolver{ensure: ensure, profiles: profiles}
+func NewIDPPublisherResolver(profiles organization.IDPRepository) PublisherCredentialResolver {
+	return &idpPublisherResolver{profiles: profiles}
 }
 
 func (r *idpPublisherResolver) EnsureReady(ctx context.Context, orgID string) (string, error) {
-	if r == nil || r.ensure == nil || r.profiles == nil {
+	if r == nil || r.profiles == nil {
 		return "", fmt.Errorf("publisher resolver not wired")
-	}
-	if _, _, _, err := r.ensure.EnsureOrgPublisher(ctx, orgID, publisherDispatchActor); err != nil {
-		return "", fmt.Errorf("ensure org publisher: %w", err)
 	}
 	row, err := r.profiles.GetProfileByOrgID(ctx, orgID)
 	if err != nil {
@@ -87,11 +84,10 @@ func (r *idpPublisherResolver) EnsureReady(ctx context.Context, orgID string) (s
 	if row == nil {
 		return "", fmt.Errorf("publisher profile missing after ensure")
 	}
-	name := row.SecretRefName
-	if name == nil {
+	if row.SecretRefName == nil {
 		return "", nil
 	}
-	return strings.TrimSpace(*name), nil
+	return strings.TrimSpace(*row.SecretRefName), nil
 }
 
 func (e *CodingExecutor) publisherSecretEnv(ctx context.Context, orgID string) ([]SecretEnvRef, string, error) {
@@ -108,7 +104,7 @@ func (e *CodingExecutor) publisherSecretEnv(ctx context.Context, orgID string) (
 	}
 	refName = strings.TrimSpace(refName)
 	if refName == "" {
-		return nil, "", fmt.Errorf("publisher SecretReference missing after ensure; rotate with RegenerateClientSecret")
+		return nil, "", fmt.Errorf("publisher SecretReference missing; POST /projects/{projectName}/build provisions it")
 	}
 	return []SecretEnvRef{
 		{Key: envPublisherClientID, SecretName: refName, SecretKey: organization.PublisherSecretFieldClientID},
