@@ -170,7 +170,7 @@ automatically. Keep each comment `text` SHORT (a phrase, not a sentence).
 Line-oriented, nested by 2-space indentation. **No coordinates anywhere** —
 position comes from structure:
 
-```
+```text
 screen <Name> ["what this view is for"]   // one per view; description renders as a subtitle
   navbar "App | Nav1 -> Screen | Nav2"    // top bar; first item is the brand; bell+avatar automatic
   sidebar "Item1 -> Screen | Item2"       // left rail; same items on every screen a role sees
@@ -233,18 +233,19 @@ screen should be reachable by clicking — or be a landing screen whose
 description says which role it serves. Not every control needs an arrow; what
 matters is that no view is stranded.
 
-### Flows — one per role
+### Flows — one per role or journey
 
 The screens say what exists; a **flow** says who walks which ones, in what
 order. The prototype's top-level control is the flow picker, so a wireframe set
 without flows offers the reviewer no way to ask for the admin's journey.
 
-Declare one `flow` block per role or journey named in `design.md`, listing that
+Declare one `flow` block per role or journey named in `design.md` (or in
+`specs/requirements/` when the design doc is absent), listing that
 role's screens in walkthrough order, **entry screen first**. Name the flow for
 its **task** ("Approval queue", "Log a risk"), and carry the persona on a
 `role` line — not in the name:
 
-```
+```text
 flow "Approval queue"
   role "Admin"
   description "An admin reviews queued items and audits the outcome"
@@ -348,7 +349,7 @@ stack in reading order; `row` groups things side by side; the primary action
 is the one `primary` button per screen; status is carried by `badge`s, not
 prose. No coordinates anywhere — the compiler computes every position.
 
-```
+```text
 // Risk register — two roles, five screens, desktop
 
 screen RiskQueue "Manager monitors open risk across registers and acts on what's overdue"

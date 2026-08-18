@@ -552,6 +552,8 @@ function buildWireframes(
   // resolved AFTER the parse — a flow may list a screen declared further down.
   let currentFlow: WireframeNamedFlow | null = null;
   const flowRefs: Array<{ flow: WireframeNamedFlow; raw: string; line: number }> = [];
+  // Header line per named flow, so an empty flow can be rejected at ITS line.
+  const namedFlowLines: Array<{ flow: WireframeNamedFlow; line: number }> = [];
 
   const lines = dsl.split(/\r?\n/);
   for (let no = 1; no <= lines.length; no++) {
@@ -592,6 +594,7 @@ function buildWireframes(
           } else {
             currentFlow = { name, screens: [] };
             ast.namedFlows.push(currentFlow);
+            namedFlowLines.push({ flow: currentFlow, line: no });
           }
         }
         continue;
@@ -752,6 +755,15 @@ function buildWireframes(
       continue;
     }
     if (!ref.flow.screens.includes(canonical)) ref.flow.screens.push(canonical);
+  }
+  // A flow with no screen references cannot start anywhere — the picker would
+  // offer a journey with no entry. Always an authoring bug (a role/description
+  // shell, or legacy `A -> B` edge lines that a named flow does not read), so
+  // it is rejected at the flow's own header line.
+  for (const { flow: f, line } of namedFlowLines) {
+    if (f.screens.length === 0) {
+      err(line, `flow ${JSON.stringify(f.name)} lists no screens — list at least one screen reference`);
+    }
   }
 
   return { ast, legacy };

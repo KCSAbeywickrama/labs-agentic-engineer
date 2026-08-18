@@ -303,3 +303,35 @@ flow "First"
   assert.deepEqual(m.flows[0]!.screens, ["role", "A"]);
   assert.equal(m.flows[0]!.role, undefined);
 });
+
+test("a named flow listing no screens is rejected with the header's line number", () => {
+  const errs = validateWireframeSyntax(`screen A "a"
+
+flow "Ghost"
+  role "Nobody"
+`);
+  assert.equal(errs.length, 1);
+  assert.match(errs[0]!, /^line 3: /);
+  assert.match(errs[0]!, /lists no screens/);
+});
+
+test("a named flow holding only legacy edge lines is rejected as empty", () => {
+  const errs = validateWireframeSyntax(`screen A "a"
+screen B "b"
+
+flow "Edges only"
+  A -> B
+`);
+  assert.equal(errs.length, 1);
+  assert.match(errs[0]!, /^line 4: /);
+  assert.match(errs[0]!, /lists no screens/);
+});
+
+test("the tolerant compile keeps an empty flow rather than failing the model", () => {
+  const m = model(`screen A "a"
+
+flow "Ghost"
+  role "Nobody"
+`);
+  assert.deepEqual(m.flows[0]!.screens, []);
+});
