@@ -25,24 +25,85 @@ namespace from the CR.
 
 ## Callback auth
 
-`POST /projects/{projectName}/build` provisions the org Thunder publisher
-SecretReference (`ProvisionPublisherForBuild`, actor `build-provision`) while
-the user JWT is on ctx. Coding dispatch reads `secret_ref_name` only and
-mounts `PUBLISHER_CLIENT_ID` / `PUBLISHER_CLIENT_SECRET` from that
-SecretReference. An empty name fail-louds and does not create the OpenChoreo
-Component. Dispatch sets plain env `PUBLISHER_TOKEN_URL` from
-`PLATFORM_IDP_JWKS_URL` (`/oauth2/jwks` → `/oauth2/token`). The runner mints a
-client_credentials token at callback time and presents it for **both**
-`credentials/refresh` and `POST /internal/v1/mcp`. The Job does not receive
-`AEP_BEARER` or `AEP_MCP_TOKEN`. Runner callbacks accept publisher CC only.
+The coding-agent Job authenticates to aep-api as the org's **publisher
+client** (Thunder confidential app `aep-publisher-{org}`). Local k3d and
+cloud use this path. The Job does not receive a Task JWT (`AEP_BEARER`) or a
+BFF MCP token (`AEP_MCP_TOKEN`). Runner callbacks accept publisher
+`client_credentials` tokens only.
 
-The runner presents that token through a loopback MCP proxy: `getToken()`
-uses the 5-minute CC renewal buffer, and an HTTP 401 remints once. A second
-401 or a remint failure exits the Job. `AgentsScopedVerifier` dual-accepts
-that Thunder JWT (`aud=aep-publisher-{org}`) and the BFF MCP token
-(`aud=aep-api-mcp`) because the **designing agent** is a different caller: it
-hits ClusterIP `AEP_API_INTERNAL_BASE_URL` with the BFF MCP token
-(`mcpForTurn`), never this Job path.
+`POST /projects/{projectName}/build` provisions the Thunder app and stamps
+the SecretReference (`ProvisionPublisherForBuild`, actor `build-provision`)
+while the console user JWT is still on ctx — Temporal dispatch has no user
+JWT, so it cannot write SM-API. Rotate once if the Thunder app already
+exists without `secret_ref_name`. Fail closed (503) if the secret write
+fails or secrets delivery is off. Coding dispatch then reads
+`secret_ref_name` only and mounts `PUBLISHER_CLIENT_ID` /
+`PUBLISHER_CLIENT_SECRET`. An empty name fail-louds naming
+`POST /projects/{projectName}/build` and does not create the OpenChoreo
+Component. `PUBLISHER_TOKEN_URL` is plain env, derived from
+`PLATFORM_IDP_JWKS_URL` (`/oauth2/jwks` → `/oauth2/token`).
+
+```mermaid
+sequenceDiagram
+  actor User
+  participant Build as POST /projects/{name}/build
+  participant Thunder
+  participant Store as Secret store
+  participant Dispatch as Coding dispatch
+  participant Job as coding-agent Job
+  participant API as aep-api /internal/v1
+
+  User->>Build: console JWT
+  Build->>Thunder: ensure publisher app
+  Build->>Store: stamp SecretReference
+  Note over Dispatch: later, no user JWT on ctx
+  Dispatch->>Dispatch: read secret_ref_name only
+  Dispatch->>Job: mount PUBLISHER_*
+  Job->>Thunder: client_credentials
+  Thunder-->>Job: access token
+  Job->>API: credentials/refresh
+  Job->>API: POST /internal/v1/mcp
+```
+
+The runner mints at callback time and presents the same token for
+**both** `credentials/refresh` and `POST /internal/v1/mcp`. A loopback MCP
+proxy attaches a live bearer (SDK headers are static): `getToken()` uses the
+5-minute CC renewal buffer, an HTTP 401 remints once, and a second 401 or a
+remint failure exits the Job.
+
+Cloud traffic still crosses the public gateway, whose jwt-auth only accepts
+`iss=platform-idp`. That is why the Job cannot present a BFF-signed Task JWT
+(`iss=aep-bff`). Local compose has no such gateway; it still uses the same
+publisher token so the two environments do not diverge.
+
+```mermaid
+flowchart LR
+  J[coding-agent Job] -->|client_credentials| T[Thunder]
+  T -->|publisher JWT| J
+  J -->|cloud| GW[Public gateway jwt-auth]
+  GW --> API[aep-api /internal/v1]
+  J -->|local HTTP| API
+```
+
+The **design agent** is a different caller, not a second environment:
+ClusterIP `AEP_API_INTERNAL_BASE_URL` with a BFF MCP token (`mcpForTurn`,
+`aud=aep-api-mcp`). `AgentsScopedVerifier` dual-accepts that token **or** a
+publisher JWT because those are two actors.
+
+```mermaid
+flowchart TB
+  subgraph job [Coding-agent Job]
+    J[runner] -->|publisher JWT| R["/internal/v1 refresh + MCP"]
+  end
+  subgraph design [Design agent]
+    D[agents service] -->|BFF MCP token| C["ClusterIP /internal/v1/mcp"]
+  end
+```
+
+`EnsureOrgPublisher` on first protected deploy (`actor "deployment"`) still
+swallows SM-API write errors: that path must not fail a deploy. Admin
+**Rotate IDP client secret** is fail-closed: Thunder has already rotated, so
+a failed mirror is an error.
 
 ## The type is per-org, and it is the billing key
 
