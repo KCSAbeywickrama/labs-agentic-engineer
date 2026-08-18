@@ -1,0 +1,112 @@
+# Console lexicon — the words the product says to a user
+
+The console's user-facing vocabulary. Decided in
+[#523](https://github.com/wso2/labs-agentic-engineer/issues/523).
+
+**This is not `CONTEXT.md`.** The repo keeps two vocabularies and they are allowed to differ:
+
+| | audience | governs |
+|---|---|---|
+| `CONTEXT.md`, `docs/glossary.md` | engineers | what terms *mean* in the domain — *spec bundle*, *milestone run*, *stage aggregate*, *committed truth* |
+| **this file** | the product's users | what the console *says* — the words a newcomer reads |
+
+The domain model already concedes the split: `CONTEXT.md`'s **Milestone run** entry warns
+*"build (the console's 'build' is the click that starts a run, not the run)"*. This file is
+where that difference gets written down instead of rediscovered.
+
+**The rule, same as `design-system.md`:** a feature draws its words from here. Introducing a
+user-facing term means amending this file in the same PR. A term absent from this file is not
+yet a product word.
+
+## Naming rules
+
+1. **A section names the class; an artifact names the document.** An artifact label adds
+   information, never echoes its header — `ACCEPTANCE CRITERIA › Acceptance criteria` fails
+   this.
+2. **Filenames are never labels.** The user reads a document tree, not a repo.
+3. **Plural for things that accumulate over time, singular for the one a project has.**
+   Builds, Deployments, Issues, Validations — Overview, Spec.
+4. **No acronyms** the user has to expand.
+5. **Don't name the system's behaviour** — name the user's situation. "Build refused" is the
+   system describing itself; "Not ready to build yet" describes them.
+
+## The spec workspace
+
+`Spec` stays as the umbrella — the route, the nav item, the workspace title. It is the right
+concept for *the agreed description of what we're building*.
+
+| Section | Artifacts | Repo |
+|---|---|---|
+| `REQUIREMENTS` | **Product requirements** | `specs/requirements/prd.md` |
+| `DESIGN` (not `DESIGNS` — one design, several files) | **Architecture** · **Design overview** · **Security** · then per-component | `specs/design/` |
+| `VALIDATION` | **Acceptance criteria** | `specs/validation/validation-criteria.json` |
+
+The repo paths **do not change**. They are the internal language, consumed by the agents, the
+runner's validation cycle and aep-api; renaming them buys nothing a user can see and costs a
+migration for every existing project. This table *is* the mapping — keep it, so nobody later
+"fixes" the inconsistency in the wrong direction. It holds only while the user never sees a
+path, which requires the agent to stop quoting them
+([#530](https://github.com/wso2/labs-agentic-engineer/issues/530)).
+
+Placeholder for an artifact class with nothing in it: **"Not created yet"**. Active wording is
+reserved for when an agent is genuinely working — the old *"Being derived…"* claimed work that
+was not happening.
+
+## Starting a build
+
+| | |
+|---|---|
+| Title | **Build v1** |
+| Body | *This freezes your requirements and design as v1 and hands them to the coding agents. You can keep editing afterwards — it won't change what's being built.* |
+| Scope list | **What gets built:** … |
+| Confirm | **Start build** |
+| Header button | **Build** |
+| Its tooltip | *Freeze this design as v1 and start building* |
+
+**Version** stays — an ordinary word, and the platform genuinely versions the spec.
+
+Deliberately absent: **cut** (release-engineering argot), **git tag** (storage mechanism;
+raises "do I need to know git?" at the worst moment), **milestone** (platform bookkeeping that
+changes nothing about this decision — it stays discoverable on the Builds page), **stories in
+scope** ("in scope" is the jargon; the list is right).
+
+## State
+
+| Situation | Says |
+|---|---|
+| Spec versioned, unchanged since | **`v1`** |
+| Spec changed since its version | **`v1 · edited`** |
+| No version yet | **`not built yet`** |
+| Agent writing requirements | **Writing requirements** |
+| Agent deriving design | **Designing…** |
+| Collab server unreachable | **offline** |
+| Build gate not satisfied | **Not ready to build yet** |
+
+**published**, **draft** and the `v1+` diff suffix are retired — all three imply a
+review-and-release model AEP does not have, and `+` is a convention the user was never taught.
+`solo session` becomes `offline`: shorter, and it does not read like a focus feature.
+
+## Questions
+
+The word had two referents. It now has one.
+
+- **Open questions** — recorded gaps in the PRD: numbered entries under `## Open Questions`
+  not marked *deferred*. Keeps its name; it is accurate, standard, and the gate reads it. Now
+  defined in `CONTEXT.md`.
+- **Questions for you** — the agent's live request for input. Renamed away from the collision:
+  the chat bubble says **"The agent needs your input (5)"**, the form is headed **"Questions
+  for you"**. Nothing parses these, so they were the cheap side to move.
+
+**defer** appears in a gate tooltip as something the user can do, but deferring means getting
+the word "deferred" into a PRD entry and no affordance exists for that. Left to
+[#527](https://github.com/wso2/labs-agentic-engineer/issues/527); do not invent one here.
+
+## Navigation
+
+All six sections stay visible and enabled from project creation
+([#522](https://github.com/wso2/labs-agentic-engineer/issues/522)). `Validation` → **`Validations`**,
+per the plural rule.
+
+`Validations` (the runs) and `Acceptance criteria` (what they check) no longer share a word, so
+the link between them is made explicit in the section's empty state
+([#533](https://github.com/wso2/labs-agentic-engineer/issues/533)).
