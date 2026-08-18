@@ -27,7 +27,10 @@ yet a product word.
 3. **Plural for things that accumulate over time, singular for the one a project has.**
    Builds, Deployments, Issues, Validations — Overview, Spec.
 4. **No acronyms** the user has to expand.
-5. **Don't name the system's behaviour** — name the user's situation. "Build refused" is the
+5. **The product is "Agentic Engineer", never "AEP".** The acronym is an internal
+   convenience; the app brands itself Agentic Engineer in its header, page title and
+   onboarding, so every user-facing string does too.
+6. **Don't name the system's behaviour** — name the user's situation. "Build refused" is the
    system describing itself; "Not ready to build yet" describes them.
 
 ## The spec workspace
@@ -51,6 +54,47 @@ path, which requires the agent to stop quoting them
 Placeholder for an artifact class with nothing in it: **"Not created yet"**. Active wording is
 reserved for when an agent is genuinely working — the old *"Being derived…"* claimed work that
 was not happening.
+
+## Starting a project
+
+| | |
+|---|---|
+| Heading | **What do you want to build?** |
+| Subtitle | *Describe it in your own words — rough is fine, or upload a product requirements document.* |
+| Repository field helper | *Agentic Engineer creates this repository in your organization. Your specs and source code live here, and it stays yours.* |
+| Name already taken | *That repository name already exists in `<org>` — pick another.* |
+| While creating | **Creating your project…** |
+
+The subtitle answers the only question a blank box raises — *how much detail?* — and stops
+there. Narrating the rest of the journey up front is overwhelming, and the journey explains
+itself as it happens. The upload clause depends on document upload shipping; drop it until then.
+
+**"Creates this repository"** is deliberate on the field helper and deliberate *not* on the wait
+label. Under the Repository name field the repo is the subject and the user needs to know one is
+being made in their organization — the previous copy said it "holds" the specs, implying it
+already existed. During the wait the user's object is the project, not its storage.
+
+**One honest label, not a phase sequence.** `POST /projects` is a single call with no
+phase signal in the contract, so changing text mid-wait would be fabricated progress. The
+second phase has a better home: after [#522](https://github.com/wso2/labs-agentic-engineer/issues/522)
+the user lands on the overview with the spec card reading *Writing requirements*, which is the
+same information shown where it is actually true.
+
+**Not disclosed:** the org's shared skills repo, provisioned on first project creation. It is
+org-level, async and best-effort, and on a hosted deployment the platform team owns it — the
+developer cannot act on it, so telling them is noise.
+
+### Example prompts
+
+Three, one click each. They are the fastest answer to "what does enough detail look like", so
+they carry the persona: internal enterprise work, not consumer apps.
+
+- **Expense approval** — *Employees submit expense claims, managers approve them, and finance exports approved claims to payroll.*
+- **Employee onboarding** — *Track each new hire's onboarding tasks across IT, HR and facilities, with reminders for overdue items.*
+- **Support triage agent** — *A support triage agent that reads incoming tickets, classifies them by urgency, and drafts replies for a human to approve.*
+
+The third is deliberate: Agentic Engineer builds agents too, and the examples are where that
+gets advertised.
 
 ## Starting a build
 
