@@ -84,17 +84,11 @@ export function credHelperScript(params: CredHelperParams): string {
 # with \`git -c credential.<origin>.helper=…\`, and the workspace's .git/config
 # carries it for every operation the agent performs afterwards.
 #
-# Two ways to authenticate to the platform (WS2.6 — both call the path-scoped
-# endpoint POST /internal/v1/executions/{executionId}/credentials/refresh, which
-# accepts either token; the bound id below is the execution id, §9.2):
-#   (a) publisher cc — when PUBLISHER_CLIENT_ID/SECRET/TOKEN_URL are set,
-#       mint a Thunder access token via client_credentials.
-#   (b) legacy TaskJWT — read the per-task bearer from \$AEP_BEARER_FILE.
-#
-# \$AEP_BEARER_FILE is supplied by whoever invokes git, which is what lets the
-# same bytes serve both phases of a run: the provisioning clone points it at a
-# staged bearer (the workspace does not exist yet), and the agent's environment
-# points it at .aep/bearer. The script is never rewritten between the two.
+# Authenticates to the platform with the org publisher client_credentials token
+# (POST /internal/v1/executions/{executionId}/credentials/refresh). When
+# PUBLISHER_CLIENT_ID/SECRET/TOKEN_URL are set, mint a Thunder access token.
+# If that mint fails, read the CC snapshot oneshot wrote to \$AEP_BEARER_FILE
+# (not a Task JWT).
 #
 # Diagnostics go to stderr deliberately. An earlier version stayed silent on
 # every failure "so git's own error message reaches the user"; git's message for
@@ -161,14 +155,14 @@ if [ -n "\$PUBLISHER_CLIENT_ID" ] && [ -n "\$PUBLISHER_CLIENT_SECRET" ] && [ -n 
     fi
   fi
   if [ -z "\$bearer" ]; then
-    echo "credhelper: publisher client_credentials mint failed; falling back to \\\$AEP_BEARER_FILE" >&2
+    echo "credhelper: publisher client_credentials mint failed; trying \\\$AEP_BEARER_FILE (CC snapshot)" >&2
   fi
 fi
 if [ -z "\$bearer" ]; then
   bearer="\$(cat "\$AEP_BEARER_FILE" 2>/dev/null || true)"
 fi
 if [ -z "\$bearer" ]; then
-  echo "credhelper: no platform credential — PUBLISHER_* unset or mint failed, and \\\$AEP_BEARER_FILE (\$AEP_BEARER_FILE) is missing or empty" >&2
+  echo "credhelper: no platform credential — PUBLISHER_* mint failed and \\\$AEP_BEARER_FILE is missing or empty" >&2
   exit 1
 fi
 
@@ -268,7 +262,7 @@ export function ghWrapperScript(realGhPath: string): string {
 #
 # The token comes from credhelper.sh through its own \`get\` contract rather than
 # from a second copy of the exchange. One script owns the refresh, so both auth
-# modes (publisher cc and legacy TaskJWT) and the anti-misroute tripwire apply to
+# modes and the anti-misroute tripwire apply to
 # \`gh\` without being reimplemented. The duplicate this replaces read
 # \$AEP_BEARER_FILE only, so on a cc-only run it served whatever token was minted
 # at pod start and degraded silently once that expired, while \`git\` kept working.

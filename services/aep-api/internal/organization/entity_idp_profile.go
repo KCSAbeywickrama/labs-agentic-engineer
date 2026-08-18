@@ -44,12 +44,11 @@ type OrganizationIDPProfile struct {
 	PublisherClientSecret string `gorm:"column:publisher_client_secret" json:"-"`
 	PublisherSecretRef    string `gorm:"column:publisher_secret_ref" json:"publisherSecretRef,omitempty"`
 	// Secret-ref triplet — populated by SecretRefWriter.WritePublisher after
-	// EnsureOrgPublisher, RegenerateClientSecret, or ProvisionPublisherForHTTPSBuild
-	// (POST /build, actor build-provision) provisions the Thunder cc app. On https
-	// AGENT_PLATFORM_URL, dispatch fails loud when secret_ref_name is empty; it
-	// mounts client_id and client_secret from the SecretReference, never
-	// publisher_client_secret from this row. Empty-ref operators: POST
-	// /projects/{projectName}/build.
+	// EnsureOrgPublisher, RegenerateClientSecret, or ProvisionPublisherForBuild
+	// (POST /build, actor build-provision) provisions the Thunder cc app.
+	// Dispatch fails loud when secret_ref_name is empty; it mounts client_id
+	// and client_secret from the SecretReference, never publisher_client_secret
+	// from this row. Empty-ref operators: POST /projects/{projectName}/build.
 	SecretRefName      *string    `gorm:"type:text;column:secret_ref_name" json:"-"`
 	SecretRefKVPath    *string    `gorm:"type:text;column:secret_ref_kv_path" json:"-"`
 	SecretRefProperty  *string    `gorm:"type:text;column:secret_ref_property" json:"-"`

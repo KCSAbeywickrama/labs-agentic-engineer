@@ -51,12 +51,11 @@ import (
 //
 //	discovery: /healthz (liveness), /readyz (workspace readiness), /auth/external/jwks.json — public, no auth.
 //
-// The reusable identity primitive underneath S2S: the BFF issues org-bearing
-// RS256 Task-JWTs and MCP tokens (internal/platform/auth.TaskTokenManager —
-// Issue inbound, IssueServiceToken outbound), verified against the one JWKS at
-// /auth/external/jwks.json. Thunder publisher CC tokens (iss platform-idp) are
-// also accepted on internal mounts that wire PublisherTokenVerifier. Org always
-// travels in a verified claim, never a trusted header.
+// The reusable identity primitive underneath S2S: the BFF issues MCP tokens
+// (internal/platform/auth.TaskTokenManager.IssueServiceToken), verified against
+// the one JWKS at /auth/external/jwks.json. Runner callbacks accept Thunder
+// publisher CC tokens (iss platform-idp) only. Org always travels in a
+// verified claim, never a trusted header.
 //
 // "Where do I change X?" → credential verify/mint: internal/platform/auth ·
 // who-may-touch-what gates: tenant_gate.go (public) + internal.go runnerAuthGate (internal) ·

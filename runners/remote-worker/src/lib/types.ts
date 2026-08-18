@@ -43,8 +43,7 @@ export interface DispatchRequest {
    * WS2.6 — full URL for the credentials/refresh endpoint used during
    * workspace bootstrap. oneshot.ts sets it to the path-scoped
    * `${platformUrl}/internal/v1/executions/{executionId}/credentials/refresh`
-   * (taskId carries the execution id, §9.2), which accepts both publisher-cc
-   * and legacy Task-JWT bearers.
+   * (taskId carries the execution id, §9.2). Accepts the publisher CC token.
    */
   refreshUrl?: string;
   /**
@@ -56,9 +55,8 @@ export interface DispatchRequest {
    */
   mcpUrl?: string;
   /**
-   * Token presented to the BFF MCP endpoint. On https Jobs this is the minted
-   * Thunder publisher access token (iss=platform-idp). On http Jobs it remains
-   * AEP_MCP_TOKEN (`aud=aep-api-mcp`). Absent when neither is available.
+   * Token presented to the BFF MCP endpoint: the minted Thunder publisher
+   * access token. Absent when mint failed.
    */
   mcpToken?: string;
   /**

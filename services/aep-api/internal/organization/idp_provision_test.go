@@ -16,7 +16,7 @@
 
 package organization
 
-// ProvisionPublisherForHTTPSBuild + the fail-closed RegenerateClientSecret
+// ProvisionPublisherForBuild + the fail-closed RegenerateClientSecret
 // SM-API write. package organization (not organization_test) because these
 // tests reuse the unexported fakeThunder from idp_service_test.go. The
 // in-memory IDPRepository below lets WritePublisher's real stamp path
@@ -215,9 +215,9 @@ func (f *provFakeSM) GetSecretWithValue(context.Context, string) (map[string]str
 	panic("provFakeSM: GetSecretWithValue is not part of the provision feature")
 }
 
-// --- ProvisionPublisherForHTTPSBuild -----------------------------------------
+// --- ProvisionPublisherForBuild -----------------------------------------
 
-func TestProvisionPublisherForHTTPSBuild_FreshCreateWritesSecretRef(t *testing.T) {
+func TestProvisionPublisherForBuild_FreshCreateWritesSecretRef(t *testing.T) {
 	t.Parallel()
 	repo := newMemIDPRepo()
 	sm := &provFakeSM{ref: "cred-publisher-acme"}
@@ -227,7 +227,7 @@ func TestProvisionPublisherForHTTPSBuild_FreshCreateWritesSecretRef(t *testing.T
 	svc := NewIDPService(repo, stubOrgRepo{}, thunder, PlatformIDPConfig{}).
 		WithSecretRefWriter(NewSecretRefWriter(sm, nil, nil, repo))
 	ctx := jwtassertion.ContextWithTokenClaims(context.Background(), &jwtassertion.TokenClaims{OuId: "ou-acme-uuid"})
-	if err := svc.ProvisionPublisherForHTTPSBuild(ctx, "acme"); err != nil {
+	if err := svc.ProvisionPublisherForBuild(ctx, "acme"); err != nil {
 		t.Fatalf("provision: %v", err)
 	}
 	row, _ := svc.GetProfile(ctx, "acme")
@@ -242,7 +242,7 @@ func TestProvisionPublisherForHTTPSBuild_FreshCreateWritesSecretRef(t *testing.T
 	}
 }
 
-func TestProvisionPublisherForHTTPSBuild_ExistingRefDoesNotRotate(t *testing.T) {
+func TestProvisionPublisherForBuild_ExistingRefDoesNotRotate(t *testing.T) {
 	t.Parallel()
 	name := "already-there"
 	repo := newMemIDPRepo()
@@ -256,7 +256,7 @@ func TestProvisionPublisherForHTTPSBuild_ExistingRefDoesNotRotate(t *testing.T) 
 	svc := NewIDPService(repo, stubOrgRepo{}, thunder, PlatformIDPConfig{}).
 		WithSecretRefWriter(NewSecretRefWriter(sm, nil, nil, repo))
 	ctx := jwtassertion.ContextWithTokenClaims(context.Background(), &jwtassertion.TokenClaims{OuId: "ou-acme-uuid"})
-	if err := svc.ProvisionPublisherForHTTPSBuild(ctx, "acme"); err != nil {
+	if err := svc.ProvisionPublisherForBuild(ctx, "acme"); err != nil {
 		t.Fatalf("provision: %v", err)
 	}
 	if len(thunder.regenCalls) != 0 {
@@ -267,7 +267,7 @@ func TestProvisionPublisherForHTTPSBuild_ExistingRefDoesNotRotate(t *testing.T) 
 	}
 }
 
-func TestProvisionPublisherForHTTPSBuild_CreatedFalseEmptyRefRotatesOnce(t *testing.T) {
+func TestProvisionPublisherForBuild_CreatedFalseEmptyRefRotatesOnce(t *testing.T) {
 	t.Parallel()
 	repo := newMemIDPRepo()
 	thunder := &fakeThunder{
@@ -280,7 +280,7 @@ func TestProvisionPublisherForHTTPSBuild_CreatedFalseEmptyRefRotatesOnce(t *test
 	svc := NewIDPService(repo, stubOrgRepo{}, thunder, PlatformIDPConfig{}).
 		WithSecretRefWriter(NewSecretRefWriter(sm, nil, nil, repo))
 	ctx := jwtassertion.ContextWithTokenClaims(context.Background(), &jwtassertion.TokenClaims{OuId: "ou-acme-uuid"})
-	if err := svc.ProvisionPublisherForHTTPSBuild(ctx, "acme"); err != nil {
+	if err := svc.ProvisionPublisherForBuild(ctx, "acme"); err != nil {
 		t.Fatalf("provision: %v", err)
 	}
 	if len(thunder.regenCalls) != 1 {
@@ -292,7 +292,7 @@ func TestProvisionPublisherForHTTPSBuild_CreatedFalseEmptyRefRotatesOnce(t *test
 	}
 }
 
-func TestProvisionPublisherForHTTPSBuild_WritePublisherErrorFails(t *testing.T) {
+func TestProvisionPublisherForBuild_WritePublisherErrorFails(t *testing.T) {
 	t.Parallel()
 	repo := newMemIDPRepo()
 	thunder := &fakeThunder{ensureFn: func(context.Context, string, string) (string, string, bool, error) {
@@ -302,7 +302,7 @@ func TestProvisionPublisherForHTTPSBuild_WritePublisherErrorFails(t *testing.T) 
 	svc := NewIDPService(repo, stubOrgRepo{}, thunder, PlatformIDPConfig{}).
 		WithSecretRefWriter(NewSecretRefWriter(sm, nil, nil, repo))
 	ctx := jwtassertion.ContextWithTokenClaims(context.Background(), &jwtassertion.TokenClaims{OuId: "ou-acme-uuid"})
-	err := svc.ProvisionPublisherForHTTPSBuild(ctx, "acme")
+	err := svc.ProvisionPublisherForBuild(ctx, "acme")
 	if err == nil {
 		t.Fatal("SM-API write must fail the provisioner")
 	}
@@ -311,7 +311,7 @@ func TestProvisionPublisherForHTTPSBuild_WritePublisherErrorFails(t *testing.T) 
 	}
 }
 
-func TestProvisionPublisherForHTTPSBuild_DisabledWriterFailsClosed(t *testing.T) {
+func TestProvisionPublisherForBuild_DisabledWriterFailsClosed(t *testing.T) {
 	t.Parallel()
 	repo := newMemIDPRepo()
 	thunder := &fakeThunder{ensureFn: func(context.Context, string, string) (string, string, bool, error) {
@@ -321,7 +321,7 @@ func TestProvisionPublisherForHTTPSBuild_DisabledWriterFailsClosed(t *testing.T)
 	// https deployment with no SecretsProvider wired.
 	svc := NewIDPService(repo, stubOrgRepo{}, thunder, PlatformIDPConfig{})
 	ctx := jwtassertion.ContextWithTokenClaims(context.Background(), &jwtassertion.TokenClaims{OuId: "ou-acme-uuid"})
-	err := svc.ProvisionPublisherForHTTPSBuild(ctx, "acme")
+	err := svc.ProvisionPublisherForBuild(ctx, "acme")
 	if err == nil {
 		t.Fatal("expected error when SecretRefWriter is disabled")
 	}
@@ -336,7 +336,7 @@ func TestProvisionPublisherForHTTPSBuild_DisabledWriterFailsClosed(t *testing.T)
 	}
 }
 
-func TestProvisionPublisherForHTTPSBuild_DisabledWriterViaNewSecretRefWriter(t *testing.T) {
+func TestProvisionPublisherForBuild_DisabledWriterViaNewSecretRefWriter(t *testing.T) {
 	t.Parallel()
 	repo := newMemIDPRepo()
 	thunder := &fakeThunder{ensureFn: func(context.Context, string, string) (string, string, bool, error) {
@@ -347,7 +347,7 @@ func TestProvisionPublisherForHTTPSBuild_DisabledWriterViaNewSecretRefWriter(t *
 	svc := NewIDPService(repo, stubOrgRepo{}, thunder, PlatformIDPConfig{}).
 		WithSecretRefWriter(NewSecretRefWriter(nil, nil, nil, repo))
 	ctx := jwtassertion.ContextWithTokenClaims(context.Background(), &jwtassertion.TokenClaims{OuId: "ou-acme-uuid"})
-	err := svc.ProvisionPublisherForHTTPSBuild(ctx, "acme")
+	err := svc.ProvisionPublisherForBuild(ctx, "acme")
 	if err == nil {
 		t.Fatal("expected error when SecretRefWriter is disabled")
 	}
@@ -359,7 +359,7 @@ func TestProvisionPublisherForHTTPSBuild_DisabledWriterViaNewSecretRefWriter(t *
 	}
 }
 
-func TestProvisionPublisherForHTTPSBuild_EnsureErrorPropagates(t *testing.T) {
+func TestProvisionPublisherForBuild_EnsureErrorPropagates(t *testing.T) {
 	t.Parallel()
 	repo := newMemIDPRepo()
 	ensureErr := errors.New("thunder: connection refused")
@@ -370,7 +370,7 @@ func TestProvisionPublisherForHTTPSBuild_EnsureErrorPropagates(t *testing.T) {
 	svc := NewIDPService(repo, stubOrgRepo{}, thunder, PlatformIDPConfig{}).
 		WithSecretRefWriter(NewSecretRefWriter(sm, nil, nil, repo))
 	ctx := jwtassertion.ContextWithTokenClaims(context.Background(), &jwtassertion.TokenClaims{OuId: "ou-acme-uuid"})
-	err := svc.ProvisionPublisherForHTTPSBuild(ctx, "acme")
+	err := svc.ProvisionPublisherForBuild(ctx, "acme")
 	if err == nil {
 		t.Fatal("expected EnsureOrgPublisher error to propagate")
 	}
@@ -382,14 +382,14 @@ func TestProvisionPublisherForHTTPSBuild_EnsureErrorPropagates(t *testing.T) {
 	}
 }
 
-func TestProvisionPublisherForHTTPSBuild_EmptyOrgID(t *testing.T) {
+func TestProvisionPublisherForBuild_EmptyOrgID(t *testing.T) {
 	t.Parallel()
 	repo := newMemIDPRepo()
 	thunder := &fakeThunder{}
 	sm := &provFakeSM{}
 	svc := NewIDPService(repo, stubOrgRepo{}, thunder, PlatformIDPConfig{}).
 		WithSecretRefWriter(NewSecretRefWriter(sm, nil, nil, repo))
-	err := svc.ProvisionPublisherForHTTPSBuild(context.Background(), "")
+	err := svc.ProvisionPublisherForBuild(context.Background(), "")
 	if err == nil {
 		t.Fatal("expected error for empty orgID")
 	}

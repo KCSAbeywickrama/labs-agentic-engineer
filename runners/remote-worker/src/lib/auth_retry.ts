@@ -19,11 +19,7 @@
 // One retry on HTTP 401: invalidate the access-token cache, remint, retry
 // once. A second 401 or a remint failure is fatal — the coding agent must
 // stop rather than loop. Used by the MCP loopback proxy and other runner
-// callbacks that present the same Thunder (or BFF) bearer.
-//
-// canRefresh is false when the Job has only a snapshot token (local http
-// AEP_MCP_TOKEN / Task JWT with no PUBLISHER_*). There is nothing to remint
-// from the Job, so the first 401 is already fatal.
+// callbacks that present the publisher CC token.
 
 export class FatalAuthError extends Error {
   constructor(message: string) {

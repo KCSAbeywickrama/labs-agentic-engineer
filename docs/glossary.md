@@ -224,13 +224,19 @@ service auth (e.g. `AEP_BFF_TO_PLATFORM_API`,
 `aep-bff-to-remote-worker-client-secret`). Stored as a SecretReference
 sourced from Vault on cloud; a literal env var locally.
 
+### `Publisher client`
+The organization's Thunder confidential OAuth app (`aep-publisher-{org}`).
+The coding-agent Job authenticates to aep-api as this client
+(`client_credentials`) for platform callbacks and MCP — local and cloud, no
+Task JWT fallback. Distinct from other M2M clients and from the design
+agent's BFF MCP token.
+
 ### `Task JWT`
-The short-lived RS256 bearer the BFF mints once per cycle at dispatch, with
-the cycle id as subject. Injected as `AEP_BEARER` on the ephemeral
-`coding-agent` job Component; the runner pod presents it back to aep-api for
-platform callbacks (credential refresh, MCP). Verifiers fetch the BFF's public
-key from `/auth/external/jwks.json`. Distinct from Thunder user/M2M tokens and
-from the retired `AEP_BFF_TO_REMOTE_WORKER` client.
+The short-lived RS256 bearer the BFF can mint with the cycle id as subject.
+It is **not** the coding-agent Job's callback credential (that is the
+publisher client). Verifiers fetch the BFF's public key from
+`/auth/external/jwks.json`. Distinct from Thunder user/M2M tokens and from
+the retired `AEP_BFF_TO_REMOTE_WORKER` client.
 
 ---
 

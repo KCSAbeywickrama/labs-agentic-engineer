@@ -24,11 +24,9 @@ import { fileURLToPath } from "node:url";
 
 const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "oneshot.ts"), "utf8");
 
-// After preferPublisherMcpToken, req.mcpToken is the publisher CC token. The
-// BFF snapshot in AEP_MCP_TOKEN must still be primed; unset entries are skipped.
-test("oneshot primes AEP_MCP_TOKEN after CC overwrite", () => {
-  const later = src.slice(src.lastIndexOf("primeScrubber(["));
-  assert.match(later, /process\.env\.AEP_MCP_TOKEN/);
-  assert.match(later, /req\.mcpToken/);
-  assert.match(src, /primeScrubber\(\[ccToken\]\)/);
+test("oneshot requires publisher CC and does not inject a BFF MCP token", () => {
+  assert.match(src, /PUBLISHER_CLIENT_ID\/SECRET\/TOKEN_URL required/);
+  assert.doesNotMatch(src, /preferPublisherMcpToken/);
+  assert.doesNotMatch(src, /process\.env\.AEP_MCP_TOKEN/);
+  assert.doesNotMatch(src, /process\.env\.AEP_BEARER/);
 });

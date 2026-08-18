@@ -44,9 +44,8 @@ type Deps struct {
 	RunCommands    *runread.Commands
 	RunCycleBuilds *runread.CycleBuilds
 
-	// PublisherProvisioner is https-only: nil on local http platform URLs
-	// and in tests that do not care. Wired on Handler via
-	// WithPublisherProvisioner so StartProjectBuild cannot see it.
+	// PublisherProvisioner is nil in tests that do not care. Wired on
+	// Handler via WithPublisherProvisioner so StartProjectBuild cannot see it.
 	PublisherProvisioner build.PublisherProvisioner
 }
 

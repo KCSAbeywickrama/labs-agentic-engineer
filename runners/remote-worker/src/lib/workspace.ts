@@ -84,8 +84,7 @@ export interface ProvisionRequest {
   correlationId?: string;
   // WS2.6 — full refresh URL, set by oneshot.ts to the path-scoped
   // `${platformUrl}/internal/v1/executions/{executionId}/credentials/refresh`
-  // (accepts both publisher-cc and legacy Task-JWT; taskId carries the
-  // execution id, §9.2). Falls back to a path-scoped URL built from
+  // (publisher CC; taskId carries the execution id, §9.2). Falls back to a path-scoped URL built from
   // gitServiceUrl below when unset. Only used when GITHUB_TOKEN/GH_TOKEN is unset.
   refreshUrl?: string;
 }

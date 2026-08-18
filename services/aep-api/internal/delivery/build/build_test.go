@@ -208,7 +208,7 @@ type provisionSpy struct {
 	err  error
 }
 
-func (p *provisionSpy) ProvisionPublisherForHTTPSBuild(_ context.Context, orgID string) error {
+func (p *provisionSpy) ProvisionPublisherForBuild(_ context.Context, orgID string) error {
 	p.orgs = append(p.orgs, orgID)
 	return p.err
 }
@@ -402,11 +402,11 @@ func TestBuild_NoClaims401(t *testing.T) {
 	}
 }
 
-// ----- POST /build publisher provisioning (https-only) ------------------------
+// ----- POST /build publisher provisioning ------------------------------------
 
-// The https-only publisher provisioner runs before Run cuts the tag — the
+// The publisher provisioner runs before Run cuts the tag — the
 // handler, not the service, calls it, since only the handler still has the
-// console JWT that ProvisionPublisherForHTTPSBuild needs.
+// console JWT that ProvisionPublisherForBuild needs.
 func TestBuild_PublisherProvisionerRunsBeforeTag(t *testing.T) {
 	tagger := &fakeTagger{res: &spec.SpecSaveResult{Tag: "v1", Status: "approved"}}
 	svc := newSvc(fakeRepos{}, tagger)

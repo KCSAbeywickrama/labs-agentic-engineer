@@ -31,21 +31,9 @@ const (
 )
 
 // PublisherCredentialResolver loads the org's Thunder publisher
-// client_credentials SecretReference name (never the secret value). Nil is
-// allowed on http platform URLs.
+// client_credentials SecretReference name (never the secret value).
 type PublisherCredentialResolver interface {
 	EnsureReady(ctx context.Context, orgID string) (secretRefName string, err error)
-}
-
-func requiresGatewayPublisher(platformURL string) bool {
-	u := strings.TrimSpace(platformURL)
-	return strings.HasPrefix(strings.ToLower(u), "https://")
-}
-
-// RequiresGatewayPublisher reports whether dispatch must mount publisher
-// credentials for the given platform URL.
-func RequiresGatewayPublisher(platformURL string) bool {
-	return requiresGatewayPublisher(platformURL)
 }
 
 func PublisherTokenURLFromJWKS(jwksURL string) string {
@@ -58,7 +46,7 @@ func PublisherTokenURLFromJWKS(jwksURL string) string {
 }
 
 // WithPublisherCredentials wires the Thunder publisher SecretReference
-// resolver and the already-derived token URL used on https dispatch.
+// resolver and the already-derived token URL used on every dispatch.
 func (e *CodingExecutor) WithPublisherCredentials(r PublisherCredentialResolver, tokenURL string) *CodingExecutor {
 	e.publisher = r
 	e.publisherTokenURL = tokenURL
@@ -93,10 +81,10 @@ func (r *idpPublisherResolver) EnsureReady(ctx context.Context, orgID string) (s
 func (e *CodingExecutor) publisherSecretEnv(ctx context.Context, orgID string) ([]SecretEnvRef, string, error) {
 	tokenURL := strings.TrimSpace(e.publisherTokenURL)
 	if tokenURL == "" {
-		return nil, "", fmt.Errorf("https AGENT_PLATFORM_URL requires PLATFORM_IDP_JWKS_URL ending in /oauth2/jwks (publisher token URL)")
+		return nil, "", fmt.Errorf("publisher credentials require PLATFORM_IDP_JWKS_URL ending in /oauth2/jwks (publisher token URL)")
 	}
 	if e.publisher == nil {
-		return nil, "", fmt.Errorf("https AGENT_PLATFORM_URL requires publisher credentials")
+		return nil, "", fmt.Errorf("publisher credentials required")
 	}
 	refName, err := e.publisher.EnsureReady(ctx, orgID)
 	if err != nil {

@@ -302,9 +302,9 @@ const (
 // SM-API as a single 2-field secret and stamps the triplet onto
 // `organization_idp_profiles`. Called from idp_service.EnsureOrgPublisher
 // (on create), RegenerateClientSecret (on rotation), and
-// ProvisionPublisherForHTTPSBuild (POST /build). Coding dispatch reads
-// secret_ref_name only on https AGENT_PLATFORM_URL to mount the two
-// Workload secretEnv entries that hand the runner pod its cc credentials.
+// ProvisionPublisherForBuild (POST /build). Coding dispatch reads
+// secret_ref_name to mount the two Workload secretEnv entries that hand the
+// runner pod its cc credentials.
 //
 // Same semantics as WriteAnthropic: best-effort, errors returned, ctx
 // must carry the user JWT (Connect and POST /build).

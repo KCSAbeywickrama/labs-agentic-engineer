@@ -28,7 +28,6 @@ import {
   buildMcpOptions,
   contractReferencePath,
   debugQueryOptions,
-  preferPublisherMcpToken,
   promptWithProjectRoot,
 } from "./runner.js";
 import { MissingWorkflowSkillError, requireWorkflowBodies } from "./skills_presence.js";
@@ -293,21 +292,4 @@ test("debugQueryOptions: a debug run wires all three at the sinks it was given",
   // gets it scrubbed on the way to disk.
   opts.stderr?.("boom");
   assert.deepEqual(written, ["boom"]);
-});
-
-test("preferPublisherMcpToken: publisher access token wins over AEP_MCP_TOKEN", () => {
-  assert.equal(
-    preferPublisherMcpToken("mcp-token-xyz", "publisher-cc-token"),
-    "publisher-cc-token",
-  );
-});
-
-test("preferPublisherMcpToken: keeps AEP_MCP_TOKEN when publisher token is absent", () => {
-  assert.equal(preferPublisherMcpToken("mcp-token-xyz", undefined), "mcp-token-xyz");
-  assert.equal(preferPublisherMcpToken("mcp-token-xyz", ""), "mcp-token-xyz");
-});
-
-test("preferPublisherMcpToken: undefined when both absent", () => {
-  assert.equal(preferPublisherMcpToken(undefined, undefined), undefined);
-  assert.equal(preferPublisherMcpToken("", ""), undefined);
 });

@@ -24,27 +24,6 @@ import (
 	"github.com/wso2/aep/aep-api/internal/organization"
 )
 
-func TestRequiresGatewayPublisher(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		in   string
-		want bool
-	}{
-		{"https://development-wso2cloud.gateway.dev.cloud.wso2.com/app-factory-api-app-factory-api-endpoint", true},
-		{"HTTPS://example.com", true},
-		{"  https://example.com/path  ", true},
-		{"http://platform", false},
-		{"http://localhost:8080", false},
-		{"", false},
-		{"  ", false},
-	}
-	for _, tc := range cases {
-		if got := requiresGatewayPublisher(tc.in); got != tc.want {
-			t.Errorf("requiresGatewayPublisher(%q) = %v, want %v", tc.in, got, tc.want)
-		}
-	}
-}
-
 func TestPublisherTokenURLFromJWKS(t *testing.T) {
 	t.Parallel()
 	cases := []struct {

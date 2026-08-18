@@ -45,14 +45,13 @@ type Handler struct {
 }
 
 // PublisherProvisioner ensures the org's Thunder publisher client_credentials
-// SecretReference exists before an https-dispatch build starts. https-only:
-// wired on Handler (never on Service) because POST /projects/{name}/build is
-// the sole request path that still carries the console JWT
-// ProvisionPublisherForHTTPSBuild needs — Temporal dispatch and the
-// StartProjectBuild auto-kick trigger run with no such JWT and must stay
-// read-only with respect to publisher credentials.
+// SecretReference exists before a coding-agent build starts. Wired on Handler
+// (never on Service) because POST /projects/{name}/build is the sole request
+// path that still carries the console JWT ProvisionPublisherForBuild needs —
+// Temporal dispatch and the StartProjectBuild auto-kick trigger run with no
+// such JWT and must stay read-only with respect to publisher credentials.
 type PublisherProvisioner interface {
-	ProvisionPublisherForHTTPSBuild(ctx context.Context, orgID string) error
+	ProvisionPublisherForBuild(ctx context.Context, orgID string) error
 }
 
 // SpecPublishedRecorder appends the spec_published activity line (issue #239)
@@ -70,9 +69,8 @@ func NewHandler(svc *Service, preflight *PreflightService, activity SpecPublishe
 	return &Handler{svc: svc, preflight: preflight, activity: activity}
 }
 
-// WithPublisherProvisioner wires the https-only publisher provisioner.
-// Optional: nil (the default) skips provisioning entirely, which is correct
-// on a local http AGENT_PLATFORM_URL.
+// WithPublisherProvisioner wires the publisher provisioner. Optional: nil
+// skips provisioning (tests that do not care).
 func (h *Handler) WithPublisherProvisioner(p PublisherProvisioner) *Handler {
 	h.publisher = p
 	return h
@@ -81,7 +79,7 @@ func (h *Handler) WithPublisherProvisioner(p PublisherProvisioner) *Handler {
 func (h *Handler) BuildProject(ctx context.Context, request gen.BuildProjectRequestObject) (gen.BuildProjectResponseObject, error) {
 	org := tenant.BoundOrgFromContext(ctx)
 	if h.publisher != nil {
-		if err := h.publisher.ProvisionPublisherForHTTPSBuild(ctx, org); err != nil {
+		if err := h.publisher.ProvisionPublisherForBuild(ctx, org); err != nil {
 			return nil, apierr.ServiceUnavailable("publisher credentials: " + err.Error())
 		}
 	}

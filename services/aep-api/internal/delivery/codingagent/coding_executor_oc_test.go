@@ -108,7 +108,6 @@ func newCodingDispatchExecutor(anthropic fakeCodingKey, github *organization.Org
 		nil,
 		fakeRepos{repo: &sourcecontrol.GitRepository{RepoURL: "https://github.com/acme/widgets", RepoSlug: "acme-widgets"}},
 		fakeIdentities{},
-		fakeTokens{},
 		newFakeExecRepo(),
 		"http://git",
 		"http://platform",
@@ -132,6 +131,7 @@ func codingMilestoneDispatch() delivery.MilestoneDispatch {
 func newOCDispatchExecutor(rec *chainRecorder) *CodingExecutor {
 	anthropic, github := fullSecretRefs()
 	e := newCodingDispatchExecutor(anthropic, github)
+	e.WithPublisherCredentials(fakePublisher{name: "acme-publisher-secrets"}, "http://thunder.example/oauth2/token")
 	e.WithOCDispatch(NewOCDispatcher(rec.client()).WithImage("ghcr.io/wso2/aep/remote-worker:latest"))
 	return e
 }
@@ -179,6 +179,7 @@ func TestDispatch_AnthropicAPIKey_MountsAsAnthropicAPIKeyEnvVar(t *testing.T) {
 	anthropic, github := fullSecretRefs()
 	anthropic.ref.EnvVar = "ANTHROPIC_API_KEY"
 	e := newCodingDispatchExecutor(anthropic, github)
+	e.WithPublisherCredentials(fakePublisher{name: "acme-publisher-secrets"}, "http://thunder.example/oauth2/token")
 	e.WithOCDispatch(NewOCDispatcher(rec.client()).WithImage("ghcr.io/wso2/aep/remote-worker:latest"))
 
 	if _, err := e.Dispatch(context.Background(), codingMilestoneDispatch()); err != nil {
@@ -200,6 +201,7 @@ func TestDispatch_AnthropicOAuthToken_MountsAsClaudeCodeOAuthTokenEnvVar(t *test
 	anthropic, github := fullSecretRefs()
 	anthropic.ref.EnvVar = "CLAUDE_CODE_OAUTH_TOKEN"
 	e := newCodingDispatchExecutor(anthropic, github)
+	e.WithPublisherCredentials(fakePublisher{name: "acme-publisher-secrets"}, "http://thunder.example/oauth2/token")
 	e.WithOCDispatch(NewOCDispatcher(rec.client()).WithImage("ghcr.io/wso2/aep/remote-worker:latest"))
 
 	if _, err := e.Dispatch(context.Background(), codingMilestoneDispatch()); err != nil {
@@ -226,6 +228,7 @@ func TestDispatch_UnresolvableAnthropicKey_ErrorsNoFallback(t *testing.T) {
 	anthropic := fakeCodingKey{err: errors.New(
 		"coding-agent Anthropic key for org \"acme\" is configured but secret_ref_kv_path is not populated")}
 	e := newCodingDispatchExecutor(anthropic, github)
+	e.WithPublisherCredentials(fakePublisher{name: "acme-publisher-secrets"}, "http://thunder.example/oauth2/token")
 	e.WithOCDispatch(NewOCDispatcher(rec.client()).WithImage("ghcr.io/wso2/aep/remote-worker:latest"))
 
 	_, err := e.Dispatch(context.Background(), codingMilestoneDispatch())
@@ -453,17 +456,28 @@ func TestDispatch_HTTPS_EmptySecretRef_ErrorsNoCreate(t *testing.T) {
 	}
 }
 
-func TestDispatch_HTTP_DoesNotMountPublisher(t *testing.T) {
+func TestDispatch_HTTP_MountsPublisher(t *testing.T) {
 	rec := &chainRecorder{}
-	e := newOCDispatchExecutor(rec)
-	e.WithPublisherCredentials(fakePublisher{name: "should-not-mount"}, "https://idp.example/oauth2/token")
+	anthropic, github := fullSecretRefs()
+	e := newCodingDispatchExecutor(anthropic, github)
+	e.platformURL = "http://host.k3d.internal:9090"
+	e.WithPublisherCredentials(fakePublisher{name: "acme-publisher-secrets"}, "http://thunder-service.thunder.svc.cluster.local:8090/oauth2/token")
+	e.WithOCDispatch(NewOCDispatcher(rec.client()).WithImage("ghcr.io/wso2/aep/remote-worker:latest"))
 
 	if _, err := e.Dispatch(context.Background(), codingMilestoneDispatch()); err != nil {
-		t.Fatalf("http dispatch must still succeed: %v", err)
+		t.Fatalf("Dispatch: %v", err)
+	}
+	id := secretEnvByKey(t, rec.load, "PUBLISHER_CLIENT_ID")
+	if id.ValueFrom == nil || id.ValueFrom.SecretKeyRef == nil || id.ValueFrom.SecretKeyRef.Name != "acme-publisher-secrets" {
+		t.Fatalf("http dispatch must mount PUBLISHER_CLIENT_ID from the SecretReference, got %+v", id)
+	}
+	tok := secretEnvByKey(t, rec.load, "PUBLISHER_TOKEN_URL")
+	if tok.Value != "http://thunder-service.thunder.svc.cluster.local:8090/oauth2/token" {
+		t.Errorf("PUBLISHER_TOKEN_URL = %q", tok.Value)
 	}
 	for _, ev := range rec.load.Env {
-		if ev.Key == "PUBLISHER_CLIENT_ID" || ev.Key == "PUBLISHER_CLIENT_SECRET" || ev.Key == "PUBLISHER_TOKEN_URL" {
-			t.Errorf("http platform URL must not mount %s", ev.Key)
+		if ev.Key == "AEP_BEARER" || ev.Key == "AEP_MCP_TOKEN" {
+			t.Errorf("coding-agent Job must not inject %s", ev.Key)
 		}
 	}
 }

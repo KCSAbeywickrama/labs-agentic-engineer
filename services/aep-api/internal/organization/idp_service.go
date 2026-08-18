@@ -29,7 +29,7 @@ import (
 )
 
 // PublisherBuildActor is the audit actor for
-// IDPService.ProvisionPublisherForHTTPSBuild — the POST /build request path,
+// IDPService.ProvisionPublisherForBuild — the POST /build request path,
 // distinct from the "deployment" actor EnsureOrgPublisher otherwise uses.
 const PublisherBuildActor = "build-provision"
 
@@ -67,11 +67,11 @@ type IDPService interface {
 	// to rotate if it was lost).
 	EnsureOrgPublisher(ctx context.Context, orgID, actor string) (clientID, clientSecret string, created bool, err error)
 
-	// ProvisionPublisherForHTTPSBuild is the POST /build provisioner: ensure
+	// ProvisionPublisherForBuild is the POST /build provisioner: ensure
 	// Thunder publisher exists and secret_ref_name is stamped. Actor is
 	// PublisherBuildActor. Rotates once if the app exists without a
 	// SecretReference. WritePublisher errors fail the call.
-	ProvisionPublisherForHTTPSBuild(ctx context.Context, orgID string) error
+	ProvisionPublisherForBuild(ctx context.Context, orgID string) error
 
 	// RevokeOrgPublisher deletes the Thunder publisher app + clears
 	// the profile row's publisher_* columns. Idempotent.
@@ -318,7 +318,7 @@ func (s *idpService) EnsureOrgPublisher(ctx context.Context, orgID, actor string
 	return clientID, clientSecret, created, nil
 }
 
-// ProvisionPublisherForHTTPSBuild is the fail-closed counterpart to
+// ProvisionPublisherForBuild is the fail-closed counterpart to
 // EnsureOrgPublisher's best-effort SM-API mirror, called from the
 // POST /projects/{projectName}/build handler (user JWT in ctx, so
 // WritePublisher can resolve the SM-API vault key). EnsureOrgPublisher
@@ -327,7 +327,7 @@ func (s *idpService) EnsureOrgPublisher(ctx context.Context, orgID, actor string
 // either because Ensure's write failed/was skipped, or because the app
 // already existed without ever having been mirrored (rotate once to
 // recover a usable triplet). Every failure path here fails the Build.
-func (s *idpService) ProvisionPublisherForHTTPSBuild(ctx context.Context, orgID string) error {
+func (s *idpService) ProvisionPublisherForBuild(ctx context.Context, orgID string) error {
 	if orgID == "" {
 		return fmt.Errorf("orgID required")
 	}

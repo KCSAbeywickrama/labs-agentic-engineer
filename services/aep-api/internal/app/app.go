@@ -285,11 +285,10 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	credService.WithBuildSecretCleaner(buildCredService)
 	anthropicCredService := organization.NewAnthropicCredentialService(orgAnthropicRepo, credStore)
 
-	// Task JWT manager — RS256, 24h TTL. The public key is published on the
-	// JWKS endpoint (/auth/external/jwks.json) and verified by both the runner
-	// callbacks (inbound S2S) and agents-service (outbound S2S). Constructed
-	// here, before the agents client, because that client uses it to mint the
-	// per-call outbound identity token.
+	// Task JWT manager — RS256. The public key is published on
+	// /auth/external/jwks.json. Used to mint BFF MCP tokens
+	// (IssueServiceToken) for the design agent and playground. Runner
+	// callbacks do not verify Task JWTs.
 	var taskTokens *authn.TaskTokenManager
 	if cfg.TaskTokenSigningKey != "" {
 		mgr, err := authn.NewTaskTokenManager(authn.TaskTokenConfig{
@@ -519,10 +518,9 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	}
 	// WithSecretRefWriter mirrors per-org publisher client_secret to SM-API on
 	// EnsureOrgPublisher / RegenerateClientSecret and on
-	// ProvisionPublisherForHTTPSBuild (POST /build, actor build-provision).
+	// ProvisionPublisherForBuild (POST /build, actor build-provision).
 	// Coding dispatch reads secret_ref_name only and mounts PUBLISHER_CLIENT_ID
-	// and PUBLISHER_CLIENT_SECRET from that SecretReference when
-	// AGENT_PLATFORM_URL is https.
+	// and PUBLISHER_CLIENT_SECRET from that SecretReference.
 	idpService := organization.NewIDPService(idpRepo, orgRepo, thunderAdminClient, organization.PlatformIDPConfig{
 		Issuer:  cfg.PlatformIDP.Issuer,
 		JWKSURL: cfg.PlatformIDP.JWKSURL,
@@ -568,10 +566,10 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// re-try the exec watcher asks for.
 	codingExecutor := codingagent.NewCodingExecutor(
 		componentClient, repoService, identities{cred: credService},
-		taskTokens, executionRepo,
+		executionRepo,
 		cfg.AgentPlatformURL, cfg.AgentPlatformURL,
 		orgRepo, anthropicCredService, orgCredRepo, idpRepo)
-	// https dispatch reads secret_ref_name only — it does not call
+	// Dispatch reads secret_ref_name only — it does not call
 	// EnsureOrgPublisher. POST /build provisions the SecretReference while the
 	// console JWT is still on ctx.
 	codingExecutor.WithPublisherCredentials(
@@ -715,7 +713,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// system is launched by the milestone supervisor, so a cycle id is the only
 	// runner identity there is; an execution id named in a path fails closed.
 	publisherVerifier := authn.NewPublisherTokenVerifier(thunderJWKS, cfg.PlatformIDP.Issuer, "aep-publisher-")
-	runnerAuth := authn.NewRunnerAuthorizer(taskTokens, publisherVerifier, cycleOrgLookup(db))
+	runnerAuth := authn.NewRunnerAuthorizer(publisherVerifier, cycleOrgLookup(db))
 
 	// Validation-context runner callback: resolves the run's deployed endpoint
 	// URLs so they never enter the public issue.
@@ -1046,13 +1044,10 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 			WithCycleReaper(codingagent.NewCycleReaper(componentClient, runCycleRepo)),
 		RunCycleBuilds: runCycleBuilds,
 	}
-	// https deploys pair this with a SM-API SecretsProvider so
-	// WritePublisher can stamp secret_ref_name onto the org's IDP profile;
-	// without one, ProvisionPublisherForHTTPSBuild fails closed and every
-	// https POST /build 503s until a SecretsProvider is injected.
-	if codingagent.RequiresGatewayPublisher(cfg.AgentPlatformURL) {
-		deliveryDeps.PublisherProvisioner = idpService
-	}
+	// WritePublisher stamps secret_ref_name onto the org's IDP profile;
+	// without a SecretsProvider, ProvisionPublisherForBuild fails closed and
+	// every POST /build 503s until a SecretsProvider is injected.
+	deliveryDeps.PublisherProvisioner = idpService
 	deliveryHandlers, err := deliveryhttpapi.New(deliveryDeps)
 	if err != nil {
 		return nil, fmt.Errorf("assemble delivery domain: %w", err)

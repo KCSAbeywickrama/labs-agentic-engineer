@@ -95,8 +95,17 @@ inside a skill's body, not the agent).
 
 **Coding agent**:
 The agent that implements a component — it builds, verifies, and opens the pull
-request. It reads skills as guidance for construction.
+request. It reads skills as guidance for construction. When it calls the
+platform, it is the organization's **publisher client**, not a per-cycle token
+and not the design agent.
 _Avoid_: builder, implementer agent, runner (the runner is the pod it executes in).
+
+**Publisher client**:
+The organization's confidential Thunder OAuth application. The coding agent is
+this client when it calls the platform. One per organization, reused across
+cycles.
+_Avoid_: Task JWT (a per-cycle bearer, not this identity), M2M client (other
+service-to-service apps), design-agent token.
 
 ## LLM credentials (`services/aep-api`)
 

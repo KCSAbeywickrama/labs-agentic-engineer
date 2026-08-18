@@ -33,8 +33,7 @@
 
 import { randomUUID } from "node:crypto";
 import { provisionWorkspace } from "./lib/workspace.js";
-import { preferPublisherMcpToken, runClaudeQuery, type McpAuthOpts } from "./lib/runner.js";
-import { staticTokenSource } from "./lib/auth_retry.js";
+import { runClaudeQuery, type McpAuthOpts } from "./lib/runner.js";
 import { openTaskLog } from "./lib/logger.js";
 import { isUUID, isSlug } from "./lib/uuid.js";
 import type { DispatchRequest } from "./lib/types.js";
@@ -62,9 +61,7 @@ function readDispatchFromEnv(): DispatchRequest {
   const projectId = requireEnv("AEP_PROJECT_ID");
   const componentName = requireEnv("AEP_COMPONENT_NAME");
   const repoUrl = requireEnv("AEP_REPO_URL");
-  // WS2.4 — Bearer is optional when publisher cc creds are present;
-  // required otherwise. Validated below after we peek at publisher envs.
-  const bearer = process.env.AEP_BEARER ?? "";
+  // Publisher CC is the Job's only platform credential (local and cloud).
   const gitServiceUrl = requireEnv("AEP_GIT_SERVICE_URL");
   const prompt = requireEnv("AEP_PROMPT");
   const identityName = requireEnv("AEP_IDENTITY_NAME");
@@ -72,13 +69,9 @@ function readDispatchFromEnv(): DispatchRequest {
   const identityLogin = process.env.AEP_IDENTITY_LOGIN || "";
   const correlationId = process.env.AEP_CORRELATION_ID || randomUUID();
   // Endpoint Spec Discovery (B1/B2) — BFF MCP server coordinates. The BFF
-  // stamps AEP_MCP_URL unconditionally but only stamps AEP_MCP_TOKEN when
-  // minting succeeded, so both are optional here; runner.ts guards on BOTH
-  // being present before registering the in-process mcpServers entry.
-  // AEP_MCP_TOKEN is the local/BFF default (aud=aep-api-mcp). On https Jobs,
-  // publisher CC overwrites req.mcpToken after mint (preferPublisherMcpToken).
+  // stamps AEP_MCP_URL; the runner presents the publisher CC token (minted
+  // below), not a BFF MCP token. Design agent MCP stays a different caller.
   const mcpUrl = process.env.AEP_MCP_URL || "";
-  const mcpToken = process.env.AEP_MCP_TOKEN || "";
 
   const taskKind = process.env.AEP_TASK_KIND || "implementation";
   if (taskKind !== "implementation" && taskKind !== "validation") {
@@ -88,12 +81,8 @@ function readDispatchFromEnv(): DispatchRequest {
   const publisherClientId = process.env.PUBLISHER_CLIENT_ID ?? "";
   const publisherClientSecret = process.env.PUBLISHER_CLIENT_SECRET ?? "";
   const publisherTokenUrl = process.env.PUBLISHER_TOKEN_URL ?? "";
-  const hasPublisher =
-    publisherClientId !== "" && publisherClientSecret !== "" && publisherTokenUrl !== "";
-  if (!hasPublisher && bearer === "") {
-    throw new Error(
-      "neither AEP_BEARER nor PUBLISHER_CLIENT_ID/SECRET/TOKEN_URL set — runner has no auth material",
-    );
+  if (publisherClientId === "" || publisherClientSecret === "" || publisherTokenUrl === "") {
+    throw new Error("PUBLISHER_CLIENT_ID/SECRET/TOKEN_URL required — runner has no platform credential");
   }
 
   if (!isUUID(taskId)) throw new Error(`AEP_TASK_ID is not a valid UUID: ${taskId}`);
@@ -109,13 +98,13 @@ function readDispatchFromEnv(): DispatchRequest {
     projectId,
     componentName,
     repoUrl,
-    bearer,
+    bearer: "",
     identity: { name: identityName, email: identityEmail, login: identityLogin || undefined },
     gitServiceUrl,
     prompt,
     correlationId,
     mcpUrl: mcpUrl || undefined,
-    mcpToken: mcpToken || undefined,
+    mcpToken: undefined,
     taskKind,
     // OFF unless a human opts this pod in. The sinks are files in a workspace
     // nothing collects, so in the cluster they are write-only — and the debug
@@ -141,60 +130,43 @@ async function main(): Promise<number> {
     return 2;
   }
 
-  // WS2.4 — when publisher cc envs are set, mint a token via the cc helper
-  // and prefer it for runner→BFF callbacks. Falls back to AEP_BEARER
-  // (legacy TaskJWT) when cc envs are absent.
   const publisherClientId = process.env.PUBLISHER_CLIENT_ID ?? "";
   const publisherClientSecret = process.env.PUBLISHER_CLIENT_SECRET ?? "";
   const publisherTokenUrl = process.env.PUBLISHER_TOKEN_URL ?? "";
-  let ccProvider: ClientCredentialsTokenProvider | undefined;
-  if (publisherClientId !== "" && publisherClientSecret !== "" && publisherTokenUrl !== "") {
-    ccProvider = new ClientCredentialsTokenProvider({
-      tokenUrl: publisherTokenUrl,
-      clientId: publisherClientId,
-      clientSecret: publisherClientSecret,
-    });
-    console.log("[oneshot] publisher cc creds present — using client_credentials for runner callbacks");
-  }
+  const ccProvider = new ClientCredentialsTokenProvider({
+    tokenUrl: publisherTokenUrl,
+    clientId: publisherClientId,
+    clientSecret: publisherClientSecret,
+  });
+  console.log("[oneshot] publisher cc creds present — using client_credentials for runner callbacks");
 
-  // WS2.6 — always target the path-scoped refresh endpoint. It accepts BOTH
-  // the publisher-cc token AND the legacy AEP_BEARER Task-JWT (verified first),
-  // so the unscoped /internal/v1/credentials/refresh route is retired.
   const platformURL = process.env.AEP_PLATFORM_URL ?? "";
   if (platformURL) {
     const base = platformURL.endsWith("/") ? platformURL.slice(0, -1) : platformURL;
     req.refreshUrl = `${base}/internal/v1/executions/${encodeURIComponent(req.taskId)}/credentials/refresh`;
   }
 
-  // When publisher cc is in play, pre-mint a token and stuff it into req.bearer.
-  // provisionWorkspace doesn't otherwise need to know which auth mode is active.
-  if (ccProvider) {
-    try {
-      const ccToken = await ccProvider.getToken();
-      req.bearer = ccToken;
-      req.mcpToken = preferPublisherMcpToken(req.mcpToken, ccToken);
-      primeScrubber([ccToken]);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error("[oneshot] cc token mint failed:", msg);
-      return 2;
-    }
+  try {
+    const ccToken = await ccProvider.getToken();
+    req.bearer = ccToken;
+    req.mcpToken = ccToken;
+    primeScrubber([ccToken]);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[oneshot] cc token mint failed:", msg);
+    return 2;
   }
 
   // BOTH credential variables: a run authenticates with exactly one of them
   // (an org may bill its coding agent to a Claude Code OAuth token instead of
   // an API key), and priming only the one that happens to be unset would leave
   // the other unredacted in the progress feed. Unset entries are skipped.
-  // After CC overwrite, req.mcpToken is the publisher token; AEP_MCP_TOKEN is
-  // the BFF snapshot that preferPublisherMcpToken replaced and must still be
-  // scrubbed.
   primeScrubber([
     process.env.ANTHROPIC_API_KEY,
     process.env.CLAUDE_CODE_OAUTH_TOKEN,
     req.bearer,
     publisherClientSecret,
     req.mcpToken,
-    process.env.AEP_MCP_TOKEN,
   ]);
 
   emit({
@@ -243,8 +215,8 @@ async function main(): Promise<number> {
         platformUrl: platformURL,
         cycleId: req.taskId,
         bearer: req.bearer,
-        source: ccProvider ?? (req.bearer ? staticTokenSource(req.bearer) : undefined),
-        canRefresh: Boolean(ccProvider),
+        source: ccProvider,
+        canRefresh: true,
       });
       console.log(
         `[oneshot] validation context: ${ctx.endpoints.length} deployed endpoint(s) → ${VALIDATION_CONTEXT_FILE}`,
@@ -282,8 +254,8 @@ async function main(): Promise<number> {
   const mcpAuth: McpAuthOpts | undefined =
     req.mcpUrl && req.mcpToken
       ? {
-          source: ccProvider ?? staticTokenSource(req.mcpToken),
-          canRefresh: Boolean(ccProvider),
+          source: ccProvider,
+          canRefresh: true,
         }
       : undefined;
   let completion: Promise<{ exitCode: number }>;

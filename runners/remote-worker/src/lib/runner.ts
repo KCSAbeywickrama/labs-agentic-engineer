@@ -197,9 +197,7 @@ export interface McpQueryOptions {
 
 // buildMcpOptions is a pure seam so the env-presence guard is unit-testable
 // without constructing a full query(). Both mcpUrl and mcpToken must be
-// present — the BFF stamps AEP_MCP_URL unconditionally; mcpToken is the BFF MCP
-// token on local http Jobs or the minted publisher CC token on https Jobs
-// (see preferPublisherMcpToken and coding_agent_component_type.go env stamping).
+// present — AEP_MCP_URL plus the publisher CC token the runner minted.
 // A URL-without-token dispatch must still omit the server rather than register
 // it unauthenticated.
 export function buildMcpOptions(mcpUrl: string | undefined, mcpToken: string | undefined): McpQueryOptions {
@@ -216,23 +214,6 @@ export function buildMcpOptions(mcpUrl: string | undefined, mcpToken: string | u
     },
     allowedTools: [...BASE_ALLOWED_TOOLS, ...MCP_TOOL_NAMES],
   };
-}
-
-// When the Job minted a Thunder publisher CC token (C1), MCP must present
-// that same iss=platform-idp JWT to the public gateway. AEP_MCP_TOKEN is
-// BFF-signed (aud aep-api-mcp) and jwt-auth rejects it. Local http Jobs
-// have no publisher token, so the BFF MCP token remains.
-export function preferPublisherMcpToken(
-  mcpToken: string | undefined,
-  publisherAccessToken: string | undefined,
-): string | undefined {
-  if (publisherAccessToken) {
-    return publisherAccessToken;
-  }
-  if (mcpToken) {
-    return mcpToken;
-  }
-  return undefined;
 }
 
 /**
