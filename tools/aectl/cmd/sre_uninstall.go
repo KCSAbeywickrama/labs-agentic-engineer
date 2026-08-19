@@ -83,12 +83,15 @@ func runSreUninstall(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("build applier: %w", err)
 	}
 
+	warnings := 0
+
 	// 1. Helm uninstall — logs-opensearch first (depends on opensearch).
 	for _, release := range []string{"observability-logs-opensearch", "observability-plane"} {
 		ui.Step(fmt.Sprintf("helm uninstall %s -n %s", release, sreUninstallObsNamespace))
 		out, err := exec.CommandContext(ctx, "helm", "uninstall", release, "-n", sreUninstallObsNamespace).CombinedOutput()
 		if err != nil {
 			ui.Warn(fmt.Sprintf("helm uninstall %s: %v — %s", release, err, strings.TrimSpace(string(out))))
+			warnings++
 		} else {
 			ui.Success(fmt.Sprintf("helm uninstall %s: done", release))
 		}
@@ -107,6 +110,7 @@ func runSreUninstall(cmd *cobra.Command, args []string) error {
 	} {
 		if err := applier.Delete(ctx, cr.apiVersion, cr.kind, "", cr.name); err != nil {
 			ui.Warn(fmt.Sprintf("delete %s/%s: %v", cr.kind, cr.name, err))
+			warnings++
 		} else {
 			ui.Detail(fmt.Sprintf("deleted %s/%s", cr.kind, cr.name))
 		}
@@ -119,11 +123,16 @@ func runSreUninstall(cmd *cobra.Command, args []string) error {
 	ui.Step(fmt.Sprintf("Deleting namespace %s", sreUninstallObsNamespace))
 	if err := client.CoreV1().Namespaces().Delete(ctx, sreUninstallObsNamespace, metav1.DeleteOptions{}); err != nil {
 		ui.Warn(fmt.Sprintf("delete namespace %s: %v", sreUninstallObsNamespace, err))
+		warnings++
 	} else {
 		ui.Success(fmt.Sprintf("namespace %s deleted", sreUninstallObsNamespace))
 	}
 
-	ui.Success("SRE observability plane removed")
+	if warnings > 0 {
+		ui.Warn(fmt.Sprintf("SRE observability plane removed with %d warning(s) — manual cleanup may be required", warnings))
+	} else {
+		ui.Success("SRE observability plane removed")
+	}
 	ui.Detail("AEP platform, OpenBao, and the ESO controller are still running.")
 	return nil
 }
