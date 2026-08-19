@@ -36,6 +36,7 @@ import (
 	"github.com/wso2/aep/aectl/internal/addons"
 	"github.com/wso2/aep/aectl/internal/bootstrap"
 	"github.com/wso2/aep/aectl/internal/config"
+	aectlhelm "github.com/wso2/aep/aectl/internal/helm"
 	k8s "github.com/wso2/aep/aectl/internal/kubernetes"
 	"github.com/wso2/aep/aectl/internal/openbao"
 	"github.com/wso2/aep/aectl/internal/ui"
@@ -313,11 +314,14 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 }
 
 // installAddons presents the optional addon selector and applies chosen addons.
+// It installs any required operators first, prompting for confirmation, then
+// applies addon manifests. Addons whose operator failed are skipped.
 func installAddons(ctx context.Context, _ *kubernetes.Clientset) error {
 	if len(addons.Available) == 0 {
 		return nil
 	}
 
+	// Phase 0: addon selection
 	items := make([]ui.SelectItem, len(addons.Available))
 	for i, a := range addons.Available {
 		items[i] = ui.SelectItem{Label: a.Label, Description: a.Description}
@@ -328,14 +332,74 @@ func installAddons(ctx context.Context, _ *kubernetes.Clientset) error {
 		return nil
 	}
 
+	var chosen []addons.Addon
+	for i, a := range addons.Available {
+		if selected[i] {
+			chosen = append(chosen, a)
+		}
+	}
+	if len(chosen) == 0 {
+		return nil
+	}
+
+	// Phase 1: operator installation
+	operatorFailed := map[string]error{}
+
+	var withOp []addons.Addon
+	for _, a := range chosen {
+		if a.Operator.ReleaseName != "" {
+			withOp = append(withOp, a)
+		}
+	}
+
+	if len(withOp) > 0 {
+		fmt.Println()
+		fmt.Printf("  %s\n", ui.Gray("The following operators will be installed:"))
+		for _, a := range withOp {
+			ui.Detail(fmt.Sprintf("%-28s (for %s)", a.Operator.DisplayName, a.Label))
+		}
+		fmt.Println()
+
+		if !ui.Confirm("Install these operators?") {
+			ui.Warn("Operator installation skipped — addons will not be applied")
+			fmt.Println()
+			return nil
+		}
+
+		for _, a := range withOp {
+			sp := ui.NewSpinner(fmt.Sprintf("Installing %s...", a.Operator.DisplayName))
+			sp.Start()
+			if err := aectlhelm.InstallOperator(ctx, kubeconfig, a.Operator); err != nil {
+				sp.Fail(fmt.Sprintf("%s install failed", a.Operator.DisplayName))
+				operatorFailed[a.Operator.ReleaseName] = err
+			} else {
+				sp.Success(fmt.Sprintf("%s installed", a.Operator.DisplayName))
+			}
+		}
+
+		if len(operatorFailed) > 0 {
+			fmt.Println()
+			for _, a := range withOp {
+				label := fmt.Sprintf("%-24s", a.Operator.ReleaseName+":")
+				if operatorFailed[a.Operator.ReleaseName] != nil {
+					ui.Fail(label + " failed — skipping " + a.Label)
+				} else {
+					ui.Success(label + " installed")
+				}
+			}
+			fmt.Println()
+		}
+	}
+
+	// Phase 2: manifest application (skips addons whose operator failed)
 	applier, err := k8s.NewApplier(kubeconfig)
 	if err != nil {
 		return fmt.Errorf("build applier: %w", err)
 	}
 
 	any := false
-	for i, a := range addons.Available {
-		if !selected[i] {
+	for _, a := range chosen {
+		if a.Operator.ReleaseName != "" && operatorFailed[a.Operator.ReleaseName] != nil {
 			continue
 		}
 		any = true
@@ -347,7 +411,6 @@ func installAddons(ctx context.Context, _ *kubernetes.Clientset) error {
 				return fmt.Errorf("apply addon %s: %w", a.ID, err)
 			}
 		}
-		// Verify each key resource actually exists in the cluster.
 		for _, v := range a.VerifyResources {
 			ok, err := applier.Exists(ctx, v.APIVersion, v.Kind, v.Namespace, v.Name)
 			if err != nil {
