@@ -108,13 +108,13 @@ func New(ctx context.Context, baseURL, adminClientID, adminClientSecret string) 
 
 	resp, err := hc.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("Thunder token request: %w", err)
+		return nil, fmt.Errorf("thunder token request: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("Thunder token request returned %d: %s", resp.StatusCode, body)
+		return nil, fmt.Errorf("thunder token request returned %d: %s", resp.StatusCode, body)
 	}
 
 	var tok struct {

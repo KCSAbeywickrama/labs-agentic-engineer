@@ -111,7 +111,7 @@ func doThunderSetup(
 	localURL := "http://localhost:" + pf.Port
 	if err := thunder.WaitForReachable(ctx, localURL, 2*time.Minute, pf); err != nil {
 		sp.Fail("Thunder unreachable")
-		return fmt.Errorf("Thunder not reachable via port-forward: %w", err)
+		return fmt.Errorf("thunder not reachable via port-forward: %w", err)
 	}
 	sp.Success("Connected to Thunder")
 
@@ -217,10 +217,3 @@ func waitForThunderSecrets(ctx context.Context, k8sClient *kubernetes.Clientset,
 	}
 }
 
-// kubectlArgs prepends --kubeconfig if a non-default kubeconfig is configured.
-func kubectlArgs(args ...string) []string {
-	if kubeconfig != "" {
-		return append([]string{"--kubeconfig", kubeconfig}, args...)
-	}
-	return args
-}
