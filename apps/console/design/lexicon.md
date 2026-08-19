@@ -203,10 +203,9 @@ review-and-release model AEP does not have, and `+` is a convention the user was
 
 The word had two referents. It now has one.
 
-- **Open questions** — recorded gaps in the PRD: numbered entries under `## Open Questions`
-  not marked *deferred*. Keeps its name; it is accurate and standard. Now defined in
-  `CONTEXT.md`. (The gate that read it is being removed — see
-  [#539](https://github.com/wso2/labs-agentic-engineer/issues/539); the *term* is unaffected.)
+- **Open questions** — recorded gaps in the PRD: numbered entries under `## Open Questions`.
+  Keeps its name; it is accurate and standard. Defined in `CONTEXT.md`. They **block nothing** —
+  not design, not Build ([#539](https://github.com/wso2/labs-agentic-engineer/issues/539)).
 - **Questions for you** — the agent's live request for input. Renamed away from the collision:
   the chat bubble says **"The agent needs your input (5)"**, the form is headed **"Questions
   for you"**. Nothing parses these, so they were the cheap side to move.
@@ -319,6 +318,18 @@ The PRD carries both, they look similar, and they are not the same thing. Decide
 | clicking it | challenges a decision that already has an answer | answers it for the first time |
 | blocks design? | no | no |
 
+**Neither blocks anything.** Not design, not Build
+([#539](https://github.com/wso2/labs-agentic-engineer/issues/539)). What replaces the old
+design gate is the agent simply **asking** at the moment a question matters — the interview cap is
+gone, so an unknown that genuinely stops the work becomes a question rather than a refusal. An
+unanswered question that truly prevents implementation surfaces as a **dependency**, and those do
+block Build.
+
+**`deferred` survives, with a better job than it had.** Its only function used to be releasing the
+design gate. With the cap removed the agent may raise the same question round after round, so
+deferral is now the user's way to say *"I know — stop asking."* It is an outcome of the `/settle`
+conversation, never a separate control.
+
 The test is **what kind of thing the answer is**. A judgment the agent can make is assumed and
 flagged; a fact only the user holds can never be invented, because an invented API URL does not
 fail at review, it fails at build.
@@ -385,6 +396,7 @@ renaming; it needed to stop being visible.
 | add an actor | `/actor <who>` | code lens on Actors |
 | go deeper on a feature | `/expand <feature>` | code lens on the feature |
 | settle an assumption or an open question | `/settle <the point>` | clicking the flagged line itself |
+| take up the open questions | `/settle` over the section | code lens on **Open Questions** |
 
 **A command names the user's intent, never the document operation.** `/feature` says what they
 came to do; `/amend Add a feature` said what the system does to a file.
