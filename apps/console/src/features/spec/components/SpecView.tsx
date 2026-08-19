@@ -74,8 +74,10 @@ import { OpenApiView } from "@aep/ui-openapi-view";
 import { DesignView } from "@aep/ui-design-view";
 import type { DependencyStatusInfo } from "@aep/ui-design-view";
 import { ValidationView } from "@aep/ui-validation-view";
+import { AgentView } from "@aep/ui-agent-view";
+import type { AgentToolStatusInfo } from "@aep/ui-agent-view";
 import type { SpecSelection } from "../api/designTree";
-import { DESIGN_CELL_PATH, componentOf } from "../api/designTree";
+import { DESIGN_CELL_PATH, componentOf, fileLabel } from "../api/designTree";
 import { useSession } from "../../../auth/SessionContext";
 
 type PreflightItem = components["schemas"]["PreflightItem"];
@@ -297,6 +299,25 @@ export function SpecView({ projectName }: { projectName: string }) {
       ),
     [componentDependencies],
   );
+  // Keyed "<providerComponent>:<operationId>" for AgentView's optional
+  // toolStatus prop. `operations` is populated server-side only on the
+  // dependency an ai-agent's `x-aep.tools.openapi[]` entry targets, and
+  // status/reason are computed there (spec.ComputeAgentToolStatus) on every
+  // read — the agent-view package deliberately does not derive them from
+  // agent.afm.md, exactly as DesignView doesn't derive dependency status from
+  // design.json. Empty for every non-agent component, which renders no chips.
+  const agentToolStatus = useMemo<Record<string, AgentToolStatusInfo>>(
+    () =>
+      Object.fromEntries(
+        componentDependencies.flatMap((d) =>
+          (d.operations ?? []).map((op) => [
+            `${d.name}:${op.operation}`,
+            { status: op.status, reason: op.reason },
+          ]),
+        ),
+      ),
+    [componentDependencies],
+  );
   // #252 Task 15: cross-component "Used by" for the selected component's own
   // cards — computed across EVERY component's dependencies (dependencies.data
   // spans the whole project; componentDependencies above is only the
@@ -379,10 +400,21 @@ export function SpecView({ projectName }: { projectName: string }) {
     /^specs\/validation\/validation-criteria\.json$/.test(
       selectedFile?.path ?? "",
     );
+  // An ai-agent's agent.afm.md renders as a read-only structured Agent spec —
+  // like design.json, it never goes through the collab text editor. It was
+  // already excluded from the PROSE markdown editor (@aep/collab-doc's
+  // NON_PROSE_MARKDOWN set: the ProseMirror round-trip corrupts YAML front
+  // matter), so before this it fell through to the raw collab textarea.
+  const isAgentAfmFile = /^specs\/design\/components\/[^/]+\/agent\.afm\.md$/.test(
+    selectedFile?.path ?? "",
+  );
   // The structured files share the read-only render path (no collab editor,
   // sourced from the live doc or the committed fetch).
   const isStructuredFile =
-    isOpenApiFile || isComponentDesignFile || isValidationCriteriaFile;
+    isOpenApiFile ||
+    isComponentDesignFile ||
+    isValidationCriteriaFile ||
+    isAgentAfmFile;
   // Canvas-based views (cell diagram, Excalidraw) need a flex-column,
   // overflow-hidden ancestor so their own `flex: 1` roots get a real
   // measured height to stretch into — a plain overflow:auto block (used for
@@ -964,6 +996,8 @@ export function SpecView({ projectName }: { projectName: string }) {
                       <OpenApiView spec={structuredLive} />
                     ) : isValidationCriteriaFile ? (
                       <ValidationView criteria={structuredLive} />
+                    ) : isAgentAfmFile ? (
+                      <AgentView spec={structuredLive} toolStatus={agentToolStatus} />
                     ) : (
                       <DesignView
                         design={structuredLive}
@@ -982,6 +1016,12 @@ export function SpecView({ projectName }: { projectName: string }) {
                       <ValidationView
                         key={content.data.sha}
                         criteria={content.data.content}
+                      />
+                    ) : isAgentAfmFile ? (
+                      <AgentView
+                        key={content.data.sha}
+                        spec={content.data.content}
+                        toolStatus={agentToolStatus}
                       />
                     ) : (
                       <DesignView
@@ -1005,7 +1045,7 @@ export function SpecView({ projectName }: { projectName: string }) {
                       }}
                     >
                       <Typography variant="body2" color="text.secondary">
-                        Waiting for the agent to write {selectedFile.path.split("/").at(-1)}…
+                        Waiting for the agent to write {fileLabel(selectedFile.path)}…
                       </Typography>
                     </Box>
                   ) : content.isError ? (

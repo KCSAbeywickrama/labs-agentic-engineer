@@ -40,22 +40,14 @@ import {
 import type { SpecFileEntry } from "../api/mapping";
 import {
   buildDesignSection,
+  fileLabel,
   selectionKey,
   type SpecSelection,
 } from "../api/designTree";
 
+/** Overview entries are named by their file, having no established name. */
 function basename(path: string): string {
   return path.split("/").at(-1) ?? path;
-}
-
-const OPENAPI_RE = /\/openapi\.ya?ml$/;
-const COMPONENT_DESIGN_RE = /^specs\/design\/components\/[^/]+\/design\.json$/;
-const VALIDATION_CRITERIA_RE = /^specs\/validation\/validation-criteria\.json$/;
-function fileLabel(path: string): string {
-  if (OPENAPI_RE.test(path)) return "API Spec";
-  if (COMPONENT_DESIGN_RE.test(path)) return "Design Overview";
-  if (VALIDATION_CRITERIA_RE.test(path)) return "Validation Criteria";
-  return basename(path);
 }
 
 function fileSel(path: string): SpecSelection {

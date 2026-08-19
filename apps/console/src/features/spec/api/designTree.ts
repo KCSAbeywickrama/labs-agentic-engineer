@@ -50,6 +50,32 @@ export const DESIGN_CELL_PATH = "specs/design/design.cell";
 const COMPONENT_RE = /^specs\/design\/components\/([^/]+)\//;
 
 /** Component name for a `specs/design/components/<name>/…` path, else null. */
+function basename(path: string): string {
+  return path.split("/").at(-1) ?? path;
+}
+
+const OPENAPI_RE = /\/openapi\.ya?ml$/;
+const COMPONENT_DESIGN_RE = /^specs\/design\/components\/[^/]+\/design\.json$/;
+const VALIDATION_CRITERIA_RE = /^specs\/validation\/validation-criteria\.json$/;
+const AGENT_AFM_RE = /^specs\/design\/components\/[^/]+\/agent\.afm\.md$/;
+
+/**
+ * The name a reader is looking for, not the file it happens to live in — the
+ * spec view names artifacts by what they ARE ("API Spec"), so a bare file name
+ * is the fallback for anything without an established name. Shared by the
+ * sidebar (SpecFileList) and the content pane's waiting state (SpecView) so a
+ * file is never called two different things in the same screen.
+ */
+export function fileLabel(path: string): string {
+  if (OPENAPI_RE.test(path)) return "API Spec";
+  if (COMPONENT_DESIGN_RE.test(path)) return "Design Overview";
+  if (VALIDATION_CRITERIA_RE.test(path)) return "Validation Criteria";
+  // An ai-agent's behaviour contract. "agent.afm.md" names the format, not the
+  // thing.
+  if (AGENT_AFM_RE.test(path)) return "Agent Spec";
+  return basename(path);
+}
+
 export function componentOf(path: string): string | null {
   return COMPONENT_RE.exec(path)?.[1] ?? null;
 }
