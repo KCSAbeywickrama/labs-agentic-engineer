@@ -94,6 +94,35 @@ moment it changes. Commit `src/generated/` — the per-component Docker build's
 context is this app's own folder alone, so unlike a monorepo-wide `gen` step
 there is no later stage that can reach the sibling spec to regenerate it.
 
+**An `ai-agent` dependency has no OpenAPI contract — it has one fixed chat
+contract.** Its address arrives the same way (`<AGENT>_URL`, e.g. `booking-agent`
+→ `BOOKING_AGENT_URL`) and it is called with the same bearer token as any
+sibling service, but there is nothing to generate from; hand-write this one
+small client against the shape every platform agent speaks:
+
+```ts
+// POST <AGENT>_URL/chat
+// in:  { messages: ChatMessage[] }         — the history you hold, echoed back
+// out: { text: string; toolCalls: unknown[]; messages: ChatMessage[] }
+```
+
+Two fields matter to you, and they have different jobs — **do not confuse them**:
+
+- **Render `text`.** It is the reply. Show it as the assistant's turn.
+- **Store `messages`.** It is the complete conversation after this turn — your
+  history plus everything the agent did — and it is what you send back next
+  time. `setHistory(response.messages)` (replace, not append: the agent already
+  included what you sent). It is *state*, not display: an assistant entry's
+  `content` may be an array of parts, a tool entry's always is, and there may
+  be tool calls and results in between. **Never render `messages`**, never
+  filter it by shape, never `JSON.stringify` it into a bubble.
+
+So the transcript you display is your own list of `{ role, text }` turns — the
+user's text when they send, `response.text` when the agent replies — and
+`messages` is a separate opaque array you only ever pass through. A UI that
+derives its bubbles from `messages` shows an empty screen the moment the agent
+uses a tool.
+
 ## Layout
 
 ```

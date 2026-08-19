@@ -93,10 +93,30 @@ platform then carries.
 | `POST /chat` | `{ messages }` in — either AI SDK message shape, normalised at the door; **`{ text, toolCalls, messages: ModelMessage[] }` out** |
 | `GET /healthz` | `200 {ok:true}`, or `503 {ok:false, missing:[…]}` when unconfigured |
 
-The response shape is fixed, not yours to choose: `text` is what a chat UI
-renders, `toolCalls` is what a test asserts on, and `messages` is the turn's
-trail the caller appends to its history. A response carrying only `messages`
-makes every consumer dig the reply out of an array.
+The response shape is fixed, not yours to choose, and each field has one job:
+
+- **`text`** — the reply, as a plain string. **This is what a UI renders.** It is
+  the ONLY field a caller needs to display an answer.
+- **`toolCalls`** — what a test asserts on.
+- **`messages`** — the **complete conversation** after this turn: the history
+  the caller sent (normalised) followed by everything the turn produced. The
+  caller **replaces** its history with this array and echoes it back next
+  request. It is state, not display — a caller must never try to render it.
+
+**Return the full conversation, not the turn's delta.** The document declares
+`memory.type: client`: the caller stores what you hand back, and only that. Hand
+back only the new messages and the caller's next request arrives without its own
+prior turns — memory that forgets the user's side of every exchange. So
+`messages` is `[...history, ...result.steps.flatMap(s => s.response.messages)]`,
+never the trail alone.
+
+**`messages` is not renderable, by construction.** An assistant `ModelMessage`'s
+`content` is `string | Array<TextPart | ToolCallPart | …>` and a tool message's
+is always an array — the SDK's own types. A caller that filters for string
+`content` renders an empty screen after a tool call, and a caller that
+stringifies parts shows the user JSON. That is why `text` exists: display comes
+from `text`, state round-trips through `messages`, and no caller ever has to
+understand the SDK's message shape to show a reply.
 
 **Normalise the history at the door — accept either message shape.** The AI SDK
 has two, and a caller cannot be relied on to know which one you want:
@@ -194,9 +214,11 @@ everything its tools told it, and will re-look-up or invent identifiers it
 already had.
 
 ```ts
-messages: result.steps.flatMap((step) => step.response.messages),
-// NOT result.response.messages — that is the LAST step only, and silently
-// drops every tool call and result.
+// The full conversation: what came in, then everything this turn produced.
+messages: [...history, ...result.steps.flatMap((step) => step.response.messages)],
+// steps.flatMap, NOT result.response.messages — that is the LAST step only,
+// and silently drops every tool call and result.
+// [...history, ...] NOT the trail alone — client memory stores what you return.
 ```
 
 **Return tool errors to the model; do not throw.** A `409 cutoff has passed` is
@@ -298,6 +320,8 @@ const { authorization } = callContext.getStore() ?? {};
 | Agent performs an operation the design excluded | Generated tools for the whole OpenAPI document | Only allow-listed operations become tools |
 | Anyone who can reach the URL can chat, burning the org's model budget | The handler forwarded `Authorization` downstream but never gated on the caller | 401 when `X-User-Id` is absent — the APIs behind you protect data, not spend |
 | Every chat 500s on the FIRST message with `messages do not match the ModelMessage[] schema` | The handler passed the caller's history straight to `generateText`; a chat UI sends `UIMessage` (`id` + `parts`), the model takes `ModelMessage` (`role` + `content`) | Normalise at the door with `convertToModelMessages()` — accept either shape, always return `ModelMessage[]` |
+| The agent answers, then on the NEXT turn has forgotten what the user said | `messages` returned only the turn's new messages; the client stored that as its whole history | Return `[...history, ...trail]` — the full conversation, since client memory keeps only what you return |
+| A turn returns 200 but the UI shows nothing — the user's own message vanishes too | The caller rendered from `messages` (assistant `content` is a parts array, filtered out as non-string) and replaced its history with a delta | Callers render `text` and store `messages`; you return the full conversation so replacing is correct |
 | One user reads or edits another's data | Ownership "enforced" in the prompt; the provider was called with the agent's own credential | Forward the caller's credential; let the provider return 403 |
 | A normal `409`/`404` ends the turn with an error | Tool threw on a non-2xx response | Return `{ ok: false, status, error }` to the model |
 | Model fills the wrong field, or asks which part of the URL a value belongs to | Tool schema exposed path/query/body structure | One flat object; re-split when building the request |
