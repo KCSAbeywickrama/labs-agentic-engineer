@@ -317,18 +317,20 @@ a reader must know to change the design rather than the code.
 "dependencies": {
   "ai": "^7.0.2",
   "@ai-sdk/anthropic": "^4.0.0",
-  "zod": "^4.3.6"
+  "zod": "^4.3.6",
+  "pg": "^8.13.0"
 },
 "devDependencies": {
   "@types/node": "^25.5.0",
-  "typescript": "^6.0.2"
+  "typescript": "^6.0.2",
+  "@types/pg": "^8.11.0"
 }
 ```
 
 **Do not "check the latest" and choose for yourself.** The AI SDK's major
 versions are not compatible, and a run that resolves its own version lands one
-behind and writes code against the wrong API. These majors are what the platform
-runs (`services/agents`).
+behind and writes code against the wrong API. `pg` is pinned for the same
+reason. These majors are what the platform runs (`services/agents`).
 
 **The model provider comes from the document's `model.provider`.** Map it to its
 package: `anthropic` → `@ai-sdk/anthropic` (`createAnthropic`), `openai` →
