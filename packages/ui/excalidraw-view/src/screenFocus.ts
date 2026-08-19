@@ -17,7 +17,7 @@
  */
 
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+import type { ExcalidrawElement } from "@aep/excalidraw-dsl";
 
 /**
  * Per-screen grouping over a compiled grid scene. The DSL compiler stamps
@@ -28,22 +28,34 @@
  */
 
 /**
+ * The part of a compiled element this module reads. Every function here is
+ * generic over it, so callers keep their own element type end-to-end (the
+ * viewer passes `ExcalidrawElement`s straight through to `scrollToContent`)
+ * while tests can pass a minimal stand-in.
+ */
+export type FocusableElement = Pick<ExcalidrawElement, "id" | "y" | "customData"> &
+  Partial<Pick<ExcalidrawElement, "height">>;
+
+/**
  * Whether two versions of the same element render identically. Compiler
  * output is plain JSON built field-by-field in a fixed order, so serialising
  * is a stable way to catch every rendered difference — geometry, colours,
  * text — without enumerating fields that would drift as the compiler grows.
  */
-function sameContent(a: any, b: any): boolean {
+function sameContent(a: unknown, b: unknown): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
-function screenOf(el: any): string | null {
+function screenOf(el: FocusableElement): string | null {
   const s = el?.customData?.screen;
   return typeof s === "string" && s.length > 0 ? s : null;
 }
 
 /** The elements belonging to any of `names`, in scene order. */
-export function elementsOfScreens(elements: any[], names: readonly string[]): any[] {
+export function elementsOfScreens<T extends FocusableElement>(
+  elements: readonly T[],
+  names: readonly string[],
+): T[] {
   if (names.length === 0) return [];
   const want = new Set(names);
   return elements.filter((el) => {
@@ -56,7 +68,7 @@ export function elementsOfScreens(elements: any[], names: readonly string[]): an
  * The screen highest on the canvas — screens stack in one column, so this is
  * the first one the author declared. Null when nothing is tagged.
  */
-export function firstScreenName(elements: any[]): string | null {
+export function firstScreenName(elements: readonly FocusableElement[]): string | null {
   let best: { name: string; y: number } | null = null;
   for (const el of elements) {
     const s = screenOf(el);
@@ -80,15 +92,18 @@ export function firstScreenName(elements: any[]): string | null {
  * no change and strand the reader on another screen. Both sides are
  * deterministic compiler output, so a structural comparison is stable.
  */
-export function changedScreenNames(prev: any[] | null, next: any[]): string[] {
+export function changedScreenNames(
+  prev: readonly FocusableElement[] | null,
+  next: readonly FocusableElement[],
+): string[] {
   if (!prev) return [];
-  const prevById = new Map<string, any>();
+  const prevById = new Map<string, FocusableElement>();
   for (const el of prev) prevById.set(el.id, el);
-  const nextById = new Map<string, any>();
+  const nextById = new Map<string, FocusableElement>();
   for (const el of next) nextById.set(el.id, el);
 
   const changed = new Map<string, number>(); // name → topmost y, for ordering
-  const mark = (el: any) => {
+  const mark = (el: FocusableElement) => {
     const s = screenOf(el);
     if (s === null) return;
     const y = typeof el.y === "number" ? el.y : Number.POSITIVE_INFINITY;
@@ -116,7 +131,7 @@ export function changedScreenNames(prev: any[] | null, next: any[]): string[] {
  * the target box on purpose. Falls back to the first screen when there is no
  * second, and to nothing when the scene carries no screen tags.
  */
-export function openingFocusElements(elements: any[]): any[] {
+export function openingFocusElements<T extends FocusableElement>(elements: readonly T[]): T[] {
   const first = firstScreenName(elements);
   if (!first) return [];
   const firstEls = elementsOfScreens(elements, [first]);

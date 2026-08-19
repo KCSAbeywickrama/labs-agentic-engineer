@@ -235,7 +235,7 @@ interface ArrowElement extends ExcalidrawElementBase {
   endIsSpecial?: null;
 }
 
-type ExcalidrawElement = RectElement | TextElement | ArrowElement;
+export type ExcalidrawElement = RectElement | TextElement | ArrowElement;
 
 // ---------- Public API ----------
 

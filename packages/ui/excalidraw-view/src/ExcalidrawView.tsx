@@ -16,13 +16,12 @@
  * under the License.
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-// The Excalidraw API and its scene elements are untyped here on purpose: the
-// library is lazy-loaded (see lazyExcalidraw.ts), so its types are not in the
-// build graph. Same convention as scene.ts / screenFocus.ts / PrototypeView.tsx.
-
 import { Suspense, useEffect, useMemo, useRef } from "react";
 import { Box, CircularProgress } from "@wso2/oxygen-ui";
+// Type-only: erased at compile time, so the lazy runtime import in
+// lazyExcalidraw.ts is unaffected and the bundle still splits.
+import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
+import type { ExcalidrawElement } from "@aep/excalidraw-dsl";
 import { ExcalidrawComponent } from "./lazyExcalidraw.js";
 import { parseScene, fitContentToViewport, focusElements } from "./scene.js";
 import { elementsOfScreens, openingFocusElements, changedScreenNames } from "./screenFocus.js";
@@ -39,7 +38,7 @@ export interface ExcalidrawViewProps {
 // the fitted box, not left to the panel's aspect ratio. A scene with no
 // screen tags (older compiles, non-wireframe scenes) falls back to fitting
 // everything.
-function focusInitial(api: any, elements: any[] | undefined) {
+function focusInitial(api: ExcalidrawImperativeAPI, elements: ExcalidrawElement[] | undefined) {
   if (!elements?.length) return;
   const target = openingFocusElements(elements);
   if (target.length) focusElements(api, target, false);
@@ -54,11 +53,11 @@ function ExcalidrawViewImpl({ scene, fillHeight }: ExcalidrawViewProps) {
   // compiler emits stable element ids/seeds, so successive scenes diff
   // cleanly: existing elements keep their identity, new ones appear.
   const initialData = useMemo(() => parseScene(scene), [scene]);
-  const apiRef = useRef<any>(null);
+  const apiRef = useRef<ExcalidrawImperativeAPI | null>(null);
   const mountedScene = useRef(scene);
   // The elements currently on the canvas, kept so a streamed update can be
   // diffed against them and the viewport moved to what actually changed.
-  const shownElements = useRef<any[] | null>(initialData?.elements ?? null);
+  const shownElements = useRef<ExcalidrawElement[] | null>(initialData?.elements ?? null);
 
   useEffect(() => {
     if (scene === mountedScene.current) return; // initial mount already has it
@@ -100,9 +99,12 @@ function ExcalidrawViewImpl({ scene, fillHeight }: ExcalidrawViewProps) {
     >
       <Box sx={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}>
         <ExcalidrawComponent
+          // parseScene returns a loose shape (scene.ts); aligning it with
+          // Excalidraw's ExcalidrawInitialDataState is its own change.
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           initialData={initialData as any}
           viewModeEnabled
-          excalidrawAPI={(api: any) => {
+          excalidrawAPI={(api: ExcalidrawImperativeAPI) => {
             apiRef.current = api;
             focusInitial(api, initialData?.elements);
           }}
