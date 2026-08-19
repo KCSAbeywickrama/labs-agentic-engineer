@@ -313,10 +313,38 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// manifestApplier is the subset of kubernetes.Applier used by the addon flow.
+type manifestApplier interface {
+	ApplyYAML(ctx context.Context, fieldManager, defaultNamespace, manifests string) error
+	Exists(ctx context.Context, apiVersion, kind, namespace, name string) (bool, error)
+}
+
+// addonDeps holds the external calls that installAddons depends on, allowing
+// them to be replaced in tests without modifying any shared package state.
+type addonDeps struct {
+	multiSelect     func(string, []ui.SelectItem) ([]bool, bool)
+	confirm         func(string) bool
+	installOperator func(context.Context, string, addons.OperatorSpec) error
+	newApplier      func(string) (manifestApplier, error)
+}
+
+var defaultAddonDeps = addonDeps{
+	multiSelect:     ui.MultiSelect,
+	confirm:         ui.Confirm,
+	installOperator: aectlhelm.InstallOperator,
+	newApplier: func(kc string) (manifestApplier, error) {
+		return k8s.NewApplier(kc)
+	},
+}
+
 // installAddons presents the optional addon selector and applies chosen addons.
 // It installs any required operators first, prompting for confirmation, then
 // applies addon manifests. Addons whose operator failed are skipped.
 func installAddons(ctx context.Context, _ *kubernetes.Clientset) error {
+	return runAddonInstall(ctx, defaultAddonDeps)
+}
+
+func runAddonInstall(ctx context.Context, deps addonDeps) error {
 	if len(addons.Available) == 0 {
 		return nil
 	}
@@ -327,7 +355,7 @@ func installAddons(ctx context.Context, _ *kubernetes.Clientset) error {
 		items[i] = ui.SelectItem{Label: a.Label, Description: a.Description}
 	}
 
-	selected, confirmed := ui.MultiSelect("Optional platform resources", items)
+	selected, confirmed := deps.multiSelect("Optional platform resources", items)
 	if !confirmed {
 		return nil
 	}
@@ -360,7 +388,7 @@ func installAddons(ctx context.Context, _ *kubernetes.Clientset) error {
 		}
 		fmt.Println()
 
-		if !ui.Confirm("Install these operators?") {
+		if !deps.confirm("Install these operators?") {
 			ui.Warn("Operator installation skipped — addons will not be applied")
 			fmt.Println()
 			return nil
@@ -369,7 +397,7 @@ func installAddons(ctx context.Context, _ *kubernetes.Clientset) error {
 		for _, a := range withOp {
 			sp := ui.NewSpinner(fmt.Sprintf("Installing %s...", a.Operator.DisplayName))
 			sp.Start()
-			if err := aectlhelm.InstallOperator(ctx, kubeconfig, a.Operator); err != nil {
+			if err := deps.installOperator(ctx, kubeconfig, a.Operator); err != nil {
 				sp.Fail(fmt.Sprintf("%s install failed", a.Operator.DisplayName))
 				operatorFailed[a.Operator.ReleaseName] = err
 			} else {
@@ -391,16 +419,21 @@ func installAddons(ctx context.Context, _ *kubernetes.Clientset) error {
 		}
 	}
 
-	// Phase 2: manifest application (skips addons whose operator failed)
-	applier, err := k8s.NewApplier(kubeconfig)
-	if err != nil {
-		return fmt.Errorf("build applier: %w", err)
-	}
-
+	// Phase 2: manifest application (skips addons whose operator failed).
+	// The applier is built lazily so a fully-failed operator run avoids a
+	// kubeconfig read entirely.
+	var applier manifestApplier
 	any := false
 	for _, a := range chosen {
 		if a.Operator.ReleaseName != "" && operatorFailed[a.Operator.ReleaseName] != nil {
 			continue
+		}
+		if applier == nil {
+			ap, err := deps.newApplier(kubeconfig)
+			if err != nil {
+				return fmt.Errorf("build applier: %w", err)
+			}
+			applier = ap
 		}
 		any = true
 		sp := ui.NewSpinner(fmt.Sprintf("Applying %s", a.Label))
