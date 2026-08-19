@@ -33,6 +33,7 @@ func InstallOperator(ctx context.Context, kubeconfig string, op addons.OperatorS
 	args := []string{
 		"upgrade", "--install", op.ReleaseName, op.Chart,
 		"-n", op.Namespace, "--create-namespace",
+		"--wait", "--timeout", "5m",
 	}
 	if op.Version != "" {
 		args = append(args, "--version", op.Version)
