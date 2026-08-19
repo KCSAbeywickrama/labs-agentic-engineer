@@ -152,14 +152,12 @@ without confirming it is.
 ## Memory
 
 `server` unless the requirements say otherwise: the agent keeps the
-conversation in its own store, and the caller holds only a `conversationId` —
-`agent-building` owns that `/chat` contract (`{ conversationId?, message }` in,
-`{ conversationId, text, toolCalls }` out); history never crosses the wire.
-Declare it and nothing else — where the store lives is the design.json's
-`postgres-cnpg` platform-resource dependency (the `architecture` skill), and
-how it is used is fixed by `agent-building`. `client` remains valid for an
-agent whose caller genuinely owns the transcript (rare; say why in the
-description).
+conversation in its own store, and the caller holds only a conversation
+identifier — history never crosses the wire. Declare it and nothing else —
+where the store lives is the design.json's `postgres-cnpg` platform-resource
+dependency (the `architecture` skill), and how it is used, including the wire
+shape, is fixed by `agent-building`. `client` remains valid for an agent whose
+caller genuinely owns the transcript (rare; say why in the description).
 
 ## Pitfalls
 
