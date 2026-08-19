@@ -101,7 +101,7 @@ func WaitForReachable(ctx context.Context, baseURL string, timeout time.Duration
 			return nil
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("Thunder at %s not reachable after %s: %w", baseURL, timeout, err)
+			return fmt.Errorf("thunder at %s not reachable after %s: %w", baseURL, timeout, err)
 		}
 		select {
 		case <-ctx.Done():

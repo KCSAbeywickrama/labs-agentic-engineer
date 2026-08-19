@@ -226,7 +226,7 @@ func (c *AdminClient) fetchDefaultOU(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("parse OU response: %w", err)
 	}
 	if ou.ID == "" {
-		return "", fmt.Errorf("Thunder default OU has no id")
+		return "", fmt.Errorf("thunder default OU has no id")
 	}
 	return ou.ID, nil
 }
