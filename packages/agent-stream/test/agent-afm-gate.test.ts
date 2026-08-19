@@ -109,3 +109,14 @@ test("rejects skills with a reason", () => {
   const problem = checkAgentAfm(VALID.replace("x-aep:", "skills:\n  - type: local\n    path: ./s\nx-aep:"), "lunch-agent");
   assert.match(problem!.message, /agent skills are not supported/);
 });
+
+test("accepts x-aep.memory.type server", () => {
+  const content = VALID.replace("x-aep:\n", 'x-aep:\n  memory:\n    type: "server"\n');
+  assert.equal(checkAgentAfm(content, "lunch-agent"), null);
+});
+
+test("rejects an unknown memory type", () => {
+  const content = VALID.replace("x-aep:\n", 'x-aep:\n  memory:\n    type: "shared"\n');
+  const problem = checkAgentAfm(content, "lunch-agent");
+  assert.ok(problem, "expected a problem for memory.type shared");
+});

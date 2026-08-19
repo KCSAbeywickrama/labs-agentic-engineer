@@ -155,7 +155,10 @@
           "properties": {
             "type": {
               "type": "string",
-              "const": "client"
+              "enum": [
+                "client",
+                "server"
+              ]
             }
           },
           "required": [

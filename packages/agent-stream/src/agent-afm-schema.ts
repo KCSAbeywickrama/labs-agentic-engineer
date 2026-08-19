@@ -76,7 +76,7 @@ const frontMatterSchema = z.strictObject({
   "x-aep": z
     .strictObject({
       tools: z.strictObject({ openapi: z.array(openApiToolSchema).min(1) }).optional(),
-      memory: z.strictObject({ type: z.literal("client") }).optional(),
+      memory: z.strictObject({ type: z.enum(["client", "server"]) }).optional(),
       identity: z.strictObject({ mode: z.enum(["on-behalf-of", "agent"]) }).optional(),
     })
     .optional(),
