@@ -99,6 +99,23 @@ test("a restyled element is changed even when its id and version are identical",
   assert.deepEqual(changedScreenNames(SCENE, next), ["Login"]);
 });
 
+test("a screen that only shifted down is NOT changed", () => {
+  // Screens stack in one column, so growing an earlier screen pushes every
+  // later one down. Those screens are untouched — reporting them would make
+  // the focus target the whole board and zoom the canvas out to nothing,
+  // which is the failure this guards.
+  const next: El[] = [
+    el("h1", "Home", 0),
+    el("h2", "Home", 40),
+    el("h3", "Home", 80), // Home grew by one element…
+    // …so Login and Detail shift down by 270, unchanged in themselves.
+    el("l1", "Login", 900 + 270),
+    el("l2", "Login", 940 + 270),
+    el("d1", "Detail", 1800 + 270),
+  ];
+  assert.deepEqual(changedScreenNames(SCENE, next), ["Home"]);
+});
+
 test("identical scenes report no change", () => {
   assert.deepEqual(changedScreenNames(SCENE, SCENE.map((e) => ({ ...e }))), []);
 });

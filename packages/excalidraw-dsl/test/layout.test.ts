@@ -321,6 +321,24 @@ screen Three
   assert.ok(frames[2]!.y >= frames[1]!.y + frames[1]!.height, "third below second");
 });
 
+test("a screen's element ids survive an earlier screen growing taller", () => {
+  // Screens stack in one column, so growing an earlier screen moves every
+  // later one down the canvas. Identity is screen-relative precisely so that
+  // move does not re-id untouched elements — a viewer diffing two scenes
+  // would otherwise read every screen below the edit as wholly replaced.
+  const filler = Array.from({ length: 20 }, (_, i) => `  text "line ${i}"`).join("\n");
+  const idsOfTwo = (dsl: string) =>
+    compile(dsl)
+      .filter((e) => (e as { customData?: { screen?: string } }).customData?.screen === "Two")
+      .map((e) => e.id)
+      .sort();
+
+  const before = idsOfTwo(`screen One\n  heading "A"\nscreen Two\n  heading "B"\n`);
+  const after = idsOfTwo(`screen One\n  heading "A"\n${filler}\nscreen Two\n  heading "B"\n`);
+  assert.ok(before.length > 0);
+  assert.deepEqual(after, before, "screen Two's ids must not change when screen One grows");
+});
+
 test("every element carries customData.screen naming the screen it belongs to", () => {
   const els = compile(`screen Login "Sign in"
   button "Go" primary

@@ -34,16 +34,45 @@ import type { ExcalidrawElement } from "@aep/excalidraw-dsl";
  * while tests can pass a minimal stand-in.
  */
 export type FocusableElement = Pick<ExcalidrawElement, "id" | "y" | "customData"> &
-  Partial<Pick<ExcalidrawElement, "height">>;
+  Partial<Pick<ExcalidrawElement, "x" | "height">>;
 
 /**
- * Whether two versions of the same element render identically. Compiler
- * output is plain JSON built field-by-field in a fixed order, so serialising
- * is a stable way to catch every rendered difference — geometry, colours,
- * text — without enumerating fields that would drift as the compiler grows.
+ * A screen's contents as one comparable string, with element positions taken
+ * RELATIVE to the screen's own top-left corner.
+ *
+ * The relativity is the whole point. Screens stack in a single column, so
+ * growing one screen pushes every screen below it down the canvas: their
+ * absolute coordinates all change while their content is untouched. Comparing
+ * absolute positions would report every one of them as edited, making the
+ * focus target the whole board and zooming the canvas out to nothing.
+ *
+ * Everything else is compared verbatim — compiler output is plain JSON built
+ * field-by-field in a fixed order, so serialising catches every rendered
+ * difference (colours, text, size) without enumerating fields that would
+ * drift as the compiler grows.
  */
-function sameContent(a: unknown, b: unknown): boolean {
-  return JSON.stringify(a) === JSON.stringify(b);
+function screenFingerprint(elements: readonly FocusableElement[]): string {
+  const originX = Math.min(...elements.map((e) => e.x ?? 0));
+  const originY = Math.min(...elements.map((e) => e.y ?? 0));
+  return elements
+    .map((e) => JSON.stringify({ ...e, x: (e.x ?? 0) - originX, y: (e.y ?? 0) - originY }))
+    .sort()
+    .join("\n");
+}
+
+/** Tagged elements bucketed by their screen, in scene order. */
+function groupByScreen(
+  elements: readonly FocusableElement[],
+): Map<string, FocusableElement[]> {
+  const byScreen = new Map<string, FocusableElement[]>();
+  for (const el of elements) {
+    const s = screenOf(el);
+    if (s === null) continue;
+    const bucket = byScreen.get(s);
+    if (bucket) bucket.push(el);
+    else byScreen.set(s, [el]);
+  }
+  return byScreen;
 }
 
 function screenOf(el: FocusableElement): string | null {
@@ -97,29 +126,23 @@ export function changedScreenNames(
   next: readonly FocusableElement[],
 ): string[] {
   if (!prev) return [];
-  const prevById = new Map<string, FocusableElement>();
-  for (const el of prev) prevById.set(el.id, el);
-  const nextById = new Map<string, FocusableElement>();
-  for (const el of next) nextById.set(el.id, el);
+  const before = groupByScreen(prev);
+  const after = groupByScreen(next);
 
-  const changed = new Map<string, number>(); // name → topmost y, for ordering
-  const mark = (el: FocusableElement) => {
-    const s = screenOf(el);
-    if (s === null) return;
-    const y = typeof el.y === "number" ? el.y : Number.POSITIVE_INFINITY;
-    const cur = changed.get(s);
-    if (cur === undefined || y < cur) changed.set(s, y);
-  };
-
-  for (const el of next) {
-    const before = prevById.get(el.id);
-    if (!before || !sameContent(before, el)) mark(el);
+  const changed: Array<{ name: string; top: number }> = [];
+  for (const [name, els] of after) {
+    const wasThere = before.get(name);
+    if (!wasThere || screenFingerprint(wasThere) !== screenFingerprint(els)) {
+      changed.push({ name, top: Math.min(...els.map((e) => e.y ?? 0)) });
+    }
   }
-  for (const el of prev) {
-    if (!nextById.has(el.id)) mark(el);
+  // A screen that disappeared has nothing left to focus, but the gap it left
+  // is worth showing, so it is ordered by where it used to sit.
+  for (const [name, els] of before) {
+    if (!after.has(name)) changed.push({ name, top: Math.min(...els.map((e) => e.y ?? 0)) });
   }
 
-  return [...changed.entries()].sort((a, b) => a[1] - b[1]).map(([name]) => name);
+  return changed.sort((a, b) => a.top - b.top).map((c) => c.name);
 }
 
 /**

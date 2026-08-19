@@ -1316,7 +1316,13 @@ function renderWireframes(ast: WireframeAst, opts?: WireframeRenderOpts): Excali
       // treatment table cells get — so nothing renders outside the screen.
       const clipText = (label: string, fontSize: number): string =>
         truncateLabel(label, fitChars(sx + screen.width - 16 - ex, fontSize));
-      const eid = stableId(`el:${screen.name}:${el.kind}:${el.label}:${ex}:${ey}`);
+      // Identity is SCREEN-relative (el.x/el.y), never the canvas position
+      // (ex/ey). Screens stack in one column, so growing one screen shifts
+      // every screen below it; keying identity on canvas coordinates gave
+      // every one of those elements a new id, which made a viewer diff read
+      // an untouched screen as wholly replaced. The screen name still keeps
+      // ids unique across screens.
+      const eid = stableId(`el:${screen.name}:${el.kind}:${el.label}:${el.x}:${el.y}`);
       // A `-> ScreenName` on this element draws a navigation marker right
       // beside it, so the reader sees exactly which control goes where.
       if (!opts?.prototype && el.navTo) {
