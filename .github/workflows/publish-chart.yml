@@ -38,6 +38,8 @@ jobs:
               --username ${{ github.actor }} \
               --password-stdin
 
-      - name: Push chart
+      - name: Push charts
         run: |
-          helm push /tmp/chart-output/*.tgz oci://${{ env.REGISTRY }}/${{ env.OWNER }}
+          for chart in /tmp/chart-output/*.tgz; do
+            helm push "$chart" oci://${{ env.REGISTRY }}/${{ env.OWNER }}
+          done
