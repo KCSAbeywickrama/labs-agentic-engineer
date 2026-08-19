@@ -327,6 +327,50 @@ An assumption says *"I decided this, correct me."* An open question says *"nobod
 this yet."* Both are one click from a grilling session, which is what makes assuming a
 **deferral with a handle** rather than a loss.
 
+## How the agent talks
+
+The agent's prose is product surface — the user reads it in the console — so this file governs it,
+same as any label. But the agent runs in more than one place, and **the right vocabulary belongs to
+the surface, not to the skill**: in an agentic coding tool the user is standing in the repo, so
+`design.cell` is exactly the right word. In the console it is not.
+
+**A console skill carries the difference.** The caller supplies an agent's skills, so the console
+includes it and a local run omits it — the shared flow skills (`start`, `design`, `amend`, …) stay
+identical in both. It is **standing policy inlined into every turn's system prompt**, not a
+catalog skill loaded on demand, following the `organization` skill's precedent: *"An agent that has
+to remember to load it asks questions the org already answered."* An agent that has to remember its
+narration rules will forget one and quote a path.
+
+It **outranks per-flow narration.** The system prompt today says *"A LOADED skill may define the
+narration for its own flow"*, and three skills used that freedom to mandate the very output this
+removes. Standing policy wins.
+
+### The rules it carries
+
+1. **Name things the way the UI names them.** *Architecture*, not `design.cell`. *Acceptance
+   criteria*, not `specs/validation/validation-criteria.json`. The mapping is the table under
+   [The spec workspace](#the-spec-workspace) — this file is its source, and the console skill is
+   how it reaches the agent.
+2. **Never quote a repo path** to the user.
+3. **Never tell the user to type a command the UI offers as a control.** The walkthrough's *"Next
+   step: review the PRD, then run `/design`"* was said while a **Generate design** button sat on
+   screen.
+4. **Describe the work, not the file operations.** What the user got, not which files moved.
+
+### What changes in the shared skills
+
+Nothing is deleted from the trunk — a path pointer is genuinely useful in a local run, where the
+user can open it. These mandates simply stop being unconditional, and the console skill overrides
+them:
+
+| skill | today |
+|---|---|
+| `design` | *"Close with three parts and nothing more: … a one-line pointer to `specs/design/`"* |
+| `architecture` | *"…and a one-line pointer to `specs/design/`"* |
+| `start` | *"point the user at the next step: review `specs/requirements/prd.md`, then run `/design`"* |
+
+The agent was obeying instructions, not improvising.
+
 ## Commands
 
 What the user types or the UI fires on their behalf. These appear in the transcript, so they are
