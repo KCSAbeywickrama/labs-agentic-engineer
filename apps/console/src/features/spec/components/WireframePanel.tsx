@@ -78,11 +78,14 @@ export function WireframePanel({
     const compiled = deriveLiveWireframe(dslPath, liveSource, previous);
     if (compiled) {
       lastGoodLive.current = { path: dslPath, result: compiled };
-      return { scene: compiled.json, focusScreens: focusTargets(compiled, previous) };
+      return {
+        scene: compiled.json,
+        focusScreens: focusTargets(compiled, previous),
+        screenOrder: compiled.screenOrder,
+      };
     }
-    return lastGoodLive.current?.path === dslPath
-      ? { scene: lastGoodLive.current.result.json, focusScreens: [] as string[] }
-      : null;
+    const held = lastGoodLive.current?.path === dslPath ? lastGoodLive.current.result : null;
+    return held ? { scene: held.json, focusScreens: [] as string[], screenOrder: held.screenOrder } : null;
   }, [dslPath, liveSource]);
   const liveScene = live?.scene ?? null;
 
@@ -95,6 +98,30 @@ export function WireframePanel({
   // used to keep the view switch permanently hidden (#348).
   const hasLiveContent = liveScene != null;
   const agentBusy = collab.peers.some((p) => p.kind === "agent");
+
+  // A turn that begins with NO renderable screens is a generation; one that
+  // begins with screens is an edit. Decided at the moment the agent arrives,
+  // because by the time it leaves the doc is full either way.
+  const turnStartedEmpty = useRef<boolean | null>(null);
+  // Starts false, not `agentBusy`: a panel that MOUNTS mid-turn must still
+  // see that turn as having started, or a generation opened mid-draw would
+  // never return to its first screen.
+  const wasBusy = useRef(false);
+  if (agentBusy && !wasBusy.current) turnStartedEmpty.current = !hasLiveContent;
+  // Generation draws top to bottom and the camera follows each new screen, so
+  // it ends on the LAST one — an accident of arrival order. Completing a
+  // generation should read like opening the wireframe: return to the first
+  // screen. An edit turn does NOT: follow-the-edit already put the camera
+  // where the change is, and snapping back would undo that.
+  const generationJustEnded = wasBusy.current && !agentBusy && turnStartedEmpty.current === true;
+  wasBusy.current = agentBusy;
+  const focusScreens = useMemo(() => {
+    if (generationJustEnded && live) {
+      const first = live.screenOrder[0];
+      return first ? [first] : [];
+    }
+    return live?.focusScreens ?? [];
+  }, [generationJustEnded, live]);
 
   // Committed fetch: the collab-less base path only (mirrors `usesCollab`
   // disabling the content query for markdown) — passing "" disables it. An
@@ -254,7 +281,7 @@ export function WireframePanel({
           </Typography>
         )
       ) : hasLiveContent ? (
-        <ExcalidrawView scene={liveScene!} focusScreens={live!.focusScreens} fillHeight />
+        <ExcalidrawView scene={liveScene!} focusScreens={focusScreens} fillHeight />
       ) : (
         <ExcalidrawView key={sha} scene={scene!} fillHeight />
       )}

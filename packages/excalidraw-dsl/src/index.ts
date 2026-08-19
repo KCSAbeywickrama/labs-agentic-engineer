@@ -276,6 +276,8 @@ export type WireframeCompile =
       changedScreens: string[];
       /** Per-screen fingerprints, carried so the NEXT compile can compare. */
       fingerprints: Record<string, string>;
+      /** Screen names in canvas order (topmost first); `[0]` is where a reader starts. */
+      screenOrder: string[];
     }
   | { ok: false; error: string };
 
@@ -348,7 +350,8 @@ export function compileWireframes(dsl: string, previous: WireframeCompile | null
     changedScreens.sort((a, b) => (topOf.get(a) ?? Number.POSITIVE_INFINITY) - (topOf.get(b) ?? Number.POSITIVE_INFINITY));
   }
 
-  return { ok: true, json: base.json, changedScreens, fingerprints };
+  const screenOrder = [...topOf.entries()].sort((a, b) => a[1] - b[1]).map(([name]) => name);
+  return { ok: true, json: base.json, changedScreens, fingerprints, screenOrder };
 }
 
 export function tryDslToExcalidraw(

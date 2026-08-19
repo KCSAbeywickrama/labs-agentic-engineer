@@ -26,10 +26,11 @@ import type { CollabSpec } from "../collab/useCollabSpec";
 
 // The heavy lazy canvas is irrelevant here — record what scene/model it receives.
 vi.mock("@aep/ui-excalidraw-view", () => ({
-  ExcalidrawView: ({ scene }: { scene: string }) => (
+  ExcalidrawView: ({ scene, focusScreens }: { scene: string; focusScreens?: readonly string[] }) => (
     <div
       data-testid="excalidraw"
       data-elements={String(JSON.parse(scene).elements?.length ?? 0)}
+      data-focus={(focusScreens ?? []).join(",")}
     />
   ),
   PrototypeView: (p: { model: { screens: unknown[] }; trailingSlot?: unknown }) => (
@@ -94,6 +95,39 @@ describe("WireframePanel streaming", () => {
     });
     const grown = Number(screen.getByTestId("excalidraw").dataset.elements);
     expect(grown).toBeGreaterThan(first);
+  });
+
+  it("returns to the first screen when a GENERATION turn ends", () => {
+    // A fresh wireframe is drawn top to bottom; the camera follows each new
+    // screen and would be left on the last one. Completing a generation should
+    // read like opening the wireframe: start at the first screen.
+    mockDerived.mockReturnValue({ scene: null, isPending: false, isError: true });
+    const doc = new Y.Doc();
+    const ytext = doc.getText(DSL_PATH);
+    const { rerender } = renderPanel(makeCollab(ytext, true));
+    act(() => {
+      ytext.insert(0, 'screen First "a"\n  heading "A"\nscreen Second "b"\n  heading "B"\n');
+    });
+    // Agent leaves the room: the turn is over.
+    rerender(<WireframePanel projectName="p" dslPath={DSL_PATH} files={[]} collab={makeCollab(ytext, false)} />);
+    expect(screen.getByTestId("excalidraw").dataset.focus).toBe("First");
+  });
+
+  it("does NOT return to the first screen when an EDIT turn ends", () => {
+    // The reader was somewhere; follow-the-edit already put the camera where
+    // the change is. Snapping back to the first screen would undo that.
+    mockDerived.mockReturnValue({ scene: null, isPending: false, isError: true });
+    const doc = new Y.Doc();
+    const ytext = doc.getText(DSL_PATH);
+    // Screens exist BEFORE the agent arrives — this is an edit, not a generation.
+    ytext.insert(0, 'screen First "a"\n  heading "A"\nscreen Second "b"\n  heading "B"\n');
+    const { rerender } = renderPanel(makeCollab(ytext, false));
+    rerender(<WireframePanel projectName="p" dslPath={DSL_PATH} files={[]} collab={makeCollab(ytext, true)} />);
+    act(() => {
+      ytext.insert(ytext.length, '  button "Go"\n');
+    });
+    rerender(<WireframePanel projectName="p" dslPath={DSL_PATH} files={[]} collab={makeCollab(ytext, false)} />);
+    expect(screen.getByTestId("excalidraw").dataset.focus).not.toBe("First");
   });
 
   it("holds the last good scene when an intermediate compile fails", () => {

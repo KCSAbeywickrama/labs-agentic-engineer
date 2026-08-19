@@ -83,7 +83,9 @@ export function deriveLiveWireframe(
 ): LiveCompile | null {
   if (kindFor(path) !== "wireframes") {
     const res = tryDslToExcalidraw("domain-model", dsl);
-    return res.ok ? { ok: true, json: res.json, changedScreens: [], fingerprints: {} } : null;
+    return res.ok
+      ? { ok: true, json: res.json, changedScreens: [], fingerprints: {}, screenOrder: [] }
+      : null;
   }
   const res = compileWireframes(dsl, previous);
   return res.ok ? res : null;
