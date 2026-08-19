@@ -28,7 +28,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { ExcalidrawView, PrototypeView } from "@aep/ui-excalidraw-view";
 import { useDerivedPrototype, useDerivedWireframe } from "../api/useDerivedDesign";
-import { deriveWireframeScene } from "../derive/deriveWireframe";
+import { deriveLiveWireframe, focusTargets, type LiveCompile } from "../derive/deriveWireframe";
 import { derivePrototypeModel } from "../derive/derivePrototype";
 import type { SpecFileEntry } from "../api/mapping";
 import type { CollabSpec } from "../collab/useCollabSpec";
@@ -65,13 +65,26 @@ export function WireframePanel({
   // from: SpecView renders this panel unkeyed, so the ref survives a move to
   // another component, and untagged it would let component A's last good render
   // stand in for component B's uncompilable source.
-  const lastGoodLive = useRef<{ path: string; scene: string } | null>(null);
-  const liveScene = useMemo(() => {
+  //
+  // The held compile is also the PREVIOUS compile the next one is measured
+  // against: `deriveLiveWireframe` reports which screens changed since it, and
+  // that report is what steers the canvas to the agent's edit (#552). A
+  // failed mid-stream compile leaves the held one in place AND reports no
+  // change, so a half-written frame never moves the viewport.
+  const lastGoodLive = useRef<{ path: string; result: LiveCompile } | null>(null);
+  const live = useMemo(() => {
     if (typeof liveSource !== "string" || liveSource.trim().length === 0) return null;
-    const compiled = deriveWireframeScene(dslPath, liveSource);
-    if (compiled) lastGoodLive.current = { path: dslPath, scene: compiled };
-    return lastGoodLive.current?.path === dslPath ? lastGoodLive.current.scene : null;
+    const previous = lastGoodLive.current?.path === dslPath ? lastGoodLive.current.result : null;
+    const compiled = deriveLiveWireframe(dslPath, liveSource, previous);
+    if (compiled) {
+      lastGoodLive.current = { path: dslPath, result: compiled };
+      return { scene: compiled.json, focusScreens: focusTargets(compiled, previous) };
+    }
+    return lastGoodLive.current?.path === dslPath
+      ? { scene: lastGoodLive.current.result.json, focusScreens: [] as string[] }
+      : null;
   }, [dslPath, liveSource]);
+  const liveScene = live?.scene ?? null;
 
   // Two independent facts, deliberately NOT one flag:
   //   hasLiveContent — the doc has something renderable, so the doc is the
@@ -241,7 +254,7 @@ export function WireframePanel({
           </Typography>
         )
       ) : hasLiveContent ? (
-        <ExcalidrawView scene={liveScene!} fillHeight />
+        <ExcalidrawView scene={liveScene!} focusScreens={live!.focusScreens} fillHeight />
       ) : (
         <ExcalidrawView key={sha} scene={scene!} fillHeight />
       )}

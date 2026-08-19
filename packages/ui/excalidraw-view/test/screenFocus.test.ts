@@ -19,13 +19,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import {
-  elementsOfScreens,
-  firstScreenName,
-  changedScreenNames,
-  openingFocusElements,
-  focusTargetScreens,
-} from "../src/screenFocus.js";
+import { elementsOfScreens, firstScreenName, openingFocusElements } from "../src/screenFocus.js";
 
 type El = { id: string; y: number; version: number; customData?: { screen: string } };
 const el = (id: string, screen: string, y: number, version = 1): El => ({
@@ -67,82 +61,6 @@ test("firstScreenName is the screen whose topmost element is highest on the canv
 test("firstScreenName is null for an empty or untagged scene", () => {
   assert.equal(firstScreenName([]), null);
   assert.equal(firstScreenName([{ id: "x", y: 0, version: 1 } as El]), null);
-});
-
-test("an edited element names its screen as changed", () => {
-  const next = SCENE.map((e) => (e.id === "l2" ? { ...e, version: 2 } : e));
-  assert.deepEqual(changedScreenNames(SCENE, next), ["Login"]);
-});
-
-test("edits across several screens name them all, in canvas order", () => {
-  const next = SCENE.map((e) => (e.id === "d1" || e.id === "h1" ? { ...e, version: 2 } : e));
-  assert.deepEqual(changedScreenNames(SCENE, next), ["Home", "Detail"]);
-});
-
-test("a screen that gained an element is changed", () => {
-  const next = [...SCENE, el("l3", "Login", 980)];
-  assert.deepEqual(changedScreenNames(SCENE, next), ["Login"]);
-});
-
-test("a screen that lost an element is changed", () => {
-  const next = SCENE.filter((e) => e.id !== "d1");
-  assert.deepEqual(changedScreenNames(SCENE, next), ["Detail"]);
-});
-
-test("a brand-new screen is changed", () => {
-  const next = [...SCENE, el("s1", "Settings", 2700)];
-  assert.deepEqual(changedScreenNames(SCENE, next), ["Settings"]);
-});
-
-test("a restyled element is changed even when its id and version are identical", () => {
-  // The compiler stamps `version: 1` on every element and builds ids from
-  // kind + label + position, so a variant-only edit (button → primary) keeps
-  // BOTH stable while the rendered colours change. Comparing version alone
-  // would report no change and strand the reader on another screen.
-  const next = SCENE.map((e) =>
-    e.id === "l1" ? { ...e, backgroundColor: "#fa7b3f" } : e,
-  ) as El[];
-  assert.deepEqual(changedScreenNames(SCENE, next), ["Login"]);
-});
-
-test("a screen that only shifted down is NOT changed", () => {
-  // Screens stack in one column, so growing an earlier screen pushes every
-  // later one down. Those screens are untouched — reporting them would make
-  // the focus target the whole board and zoom the canvas out to nothing,
-  // which is the failure this guards.
-  const next: El[] = [
-    el("h1", "Home", 0),
-    el("h2", "Home", 40),
-    el("h3", "Home", 80), // Home grew by one element…
-    // …so Login and Detail shift down by 270, unchanged in themselves.
-    el("l1", "Login", 900 + 270),
-    el("l2", "Login", 940 + 270),
-    el("d1", "Detail", 1800 + 270),
-  ];
-  assert.deepEqual(changedScreenNames(SCENE, next), ["Home"]);
-});
-
-test("a change spanning most of the wireframe is not a focus target", () => {
-  // Mid-stream the document is transiently incomplete — screens disappear and
-  // come back as the agent rewrites the file — so across those frames every
-  // screen looks edited. Focusing their union is the whole board, i.e. the
-  // zoomed-out-to-nothing state this feature exists to prevent. A change that
-  // broad is a rewrite, not an edit: leave the viewport alone.
-  const wiped: El[] = [el("h1", "Home", 0)]; // Login and Detail momentarily gone
-  assert.deepEqual(focusTargetScreens(SCENE, wiped), []);
-});
-
-test("an edit touching a minority of screens is still a focus target", () => {
-  const next = SCENE.map((e) => (e.id === "l2" ? { ...e, backgroundColor: "#fa7b3f" } : e)) as El[];
-  assert.deepEqual(focusTargetScreens(SCENE, next), ["Login"]);
-});
-
-test("identical scenes report no change", () => {
-  assert.deepEqual(changedScreenNames(SCENE, SCENE.map((e) => ({ ...e }))), []);
-});
-
-test("with no previous scene nothing is reported as changed", () => {
-  assert.deepEqual(changedScreenNames(null, SCENE), []);
 });
 
 test("the opening focus is the first screen plus a peek band of the second", () => {

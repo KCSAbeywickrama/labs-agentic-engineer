@@ -23,8 +23,12 @@ import type { ExcalidrawElement } from "@aep/excalidraw-dsl";
  * Per-screen grouping over a compiled grid scene. The DSL compiler stamps
  * every element with `customData.screen`, which is what makes these questions
  * answerable without geometry guesswork: which elements are the first
- * screen's (focus it on open), and which screens did the last edit touch
- * (follow the agent's work).
+ * screen's (focus it on open), and which elements belong to the screens the
+ * compiler reported as changed (follow the agent's work).
+ *
+ * Deciding WHICH screens changed is not done here. The compiler knows the
+ * screen structure and reports it (`compileWireframes` → `changedScreens`);
+ * this module only maps names to elements and frames them.
  */
 
 /**
@@ -34,46 +38,7 @@ import type { ExcalidrawElement } from "@aep/excalidraw-dsl";
  * while tests can pass a minimal stand-in.
  */
 export type FocusableElement = Pick<ExcalidrawElement, "id" | "y" | "customData"> &
-  Partial<Pick<ExcalidrawElement, "x" | "height">>;
-
-/**
- * A screen's contents as one comparable string, with element positions taken
- * RELATIVE to the screen's own top-left corner.
- *
- * The relativity is the whole point. Screens stack in a single column, so
- * growing one screen pushes every screen below it down the canvas: their
- * absolute coordinates all change while their content is untouched. Comparing
- * absolute positions would report every one of them as edited, making the
- * focus target the whole board and zooming the canvas out to nothing.
- *
- * Everything else is compared verbatim — compiler output is plain JSON built
- * field-by-field in a fixed order, so serialising catches every rendered
- * difference (colours, text, size) without enumerating fields that would
- * drift as the compiler grows.
- */
-function screenFingerprint(elements: readonly FocusableElement[]): string {
-  const originX = Math.min(...elements.map((e) => e.x ?? 0));
-  const originY = Math.min(...elements.map((e) => e.y ?? 0));
-  return elements
-    .map((e) => JSON.stringify({ ...e, x: (e.x ?? 0) - originX, y: (e.y ?? 0) - originY }))
-    .sort()
-    .join("\n");
-}
-
-/** Tagged elements bucketed by their screen, in scene order. */
-function groupByScreen(
-  elements: readonly FocusableElement[],
-): Map<string, FocusableElement[]> {
-  const byScreen = new Map<string, FocusableElement[]>();
-  for (const el of elements) {
-    const s = screenOf(el);
-    if (s === null) continue;
-    const bucket = byScreen.get(s);
-    if (bucket) bucket.push(el);
-    else byScreen.set(s, [el]);
-  }
-  return byScreen;
-}
+  Partial<Pick<ExcalidrawElement, "height">>;
 
 function screenOf(el: FocusableElement): string | null {
   const s = el?.customData?.screen;
@@ -106,65 +71,6 @@ export function firstScreenName(elements: readonly FocusableElement[]): string |
     if (best === null || y < best.y) best = { name: s, y };
   }
   return best?.name ?? null;
-}
-
-/**
- * Screens whose element set differs between two scenes — an element added,
- * removed, or re-versioned — in canvas order (topmost first). Empty when
- * nothing changed or there is no previous scene to compare against; the
- * caller treats "empty" as "leave the viewport alone".
- *
- * Matched ids are compared by CONTENT, not by `version`: the compiler stamps
- * `version: 1` on every element and builds ids from kind + label + position,
- * so a restyle (a button gaining `primary`, say) keeps both the id and the
- * version while the rendered colours change — comparing versions would report
- * no change and strand the reader on another screen. Both sides are
- * deterministic compiler output, so a structural comparison is stable.
- */
-export function changedScreenNames(
-  prev: readonly FocusableElement[] | null,
-  next: readonly FocusableElement[],
-): string[] {
-  if (!prev) return [];
-  const before = groupByScreen(prev);
-  const after = groupByScreen(next);
-
-  const changed: Array<{ name: string; top: number }> = [];
-  for (const [name, els] of after) {
-    const wasThere = before.get(name);
-    if (!wasThere || screenFingerprint(wasThere) !== screenFingerprint(els)) {
-      changed.push({ name, top: Math.min(...els.map((e) => e.y ?? 0)) });
-    }
-  }
-  // A screen that disappeared has nothing left to focus, but the gap it left
-  // is worth showing, so it is ordered by where it used to sit.
-  for (const [name, els] of before) {
-    if (!after.has(name)) changed.push({ name, top: Math.min(...els.map((e) => e.y ?? 0)) });
-  }
-
-  return changed.sort((a, b) => a.top - b.top).map((c) => c.name);
-}
-
-/**
- * Which screens the viewport should actually chase after an update — the
- * changed screens, unless the change is too broad to be a target.
- *
- * A wireframe is rewritten in flushes while an agent works, and mid-write the
- * document is transiently incomplete: screens disappear and come back, so
- * across those frames nearly every screen reads as edited. Focusing that union
- * means fitting the whole board — the zoomed-out, unreadable state this whole
- * feature exists to prevent. So a change touching MOST of the wireframe is
- * treated as a rewrite rather than an edit, and the viewport holds still until
- * the document settles into something narrower.
- */
-export function focusTargetScreens(
-  prev: readonly FocusableElement[] | null,
-  next: readonly FocusableElement[],
-): string[] {
-  const changed = changedScreenNames(prev, next);
-  if (changed.length === 0) return [];
-  const total = Math.max(groupByScreen(next).size, groupByScreen(prev ?? []).size);
-  return changed.length * 2 > total ? [] : changed;
 }
 
 /**

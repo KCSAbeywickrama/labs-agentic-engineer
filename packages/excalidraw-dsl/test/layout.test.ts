@@ -25,6 +25,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  compileWireframes,
   dslToExcalidraw,
   validateWireframeLayout,
   validateWireframeSyntax,
@@ -354,4 +355,75 @@ screen Home "Landing"
   assert.ok((byScreen.get("Login") ?? 0) > 0);
   assert.ok((byScreen.get("Home") ?? 0) > 0);
   assert.equal(byScreen.size, 2);
+});
+
+
+// ---------- compileWireframes: the compiler reports which screens changed ----------
+
+const SHOP = `screen One
+  heading "A"
+screen Two
+  button "Go"
+screen Three
+  heading "C"
+`;
+
+test("compileWireframes with no previous result reports no changed screens", () => {
+  const r = compileWireframes(SHOP, null);
+  assert.ok(r.ok);
+  assert.deepEqual(r.changedScreens, []);
+  assert.ok(JSON.parse(r.json).elements.length > 0);
+});
+
+test("compileWireframes reports only the screen whose content changed", () => {
+  const first = compileWireframes(SHOP, null);
+  assert.ok(first.ok);
+  const second = compileWireframes(SHOP.replace('button "Go"', 'button "Go" primary'), first);
+  assert.ok(second.ok);
+  assert.deepEqual(second.changedScreens, ["Two"]);
+});
+
+test("compileWireframes does not report screens that merely moved down", () => {
+  const first = compileWireframes(SHOP, null);
+  assert.ok(first.ok);
+  const filler = Array.from({ length: 20 }, (_, i) => `  text "line ${i}"`).join("\n");
+  const grown = SHOP.replace('  heading "A"', `  heading "A"\n${filler}`);
+  const second = compileWireframes(grown, first);
+  assert.ok(second.ok);
+  assert.deepEqual(second.changedScreens, ["One"], "Two and Three shifted but did not change");
+});
+
+test("compileWireframes reports an added screen and a removed screen", () => {
+  const first = compileWireframes(SHOP, null);
+  assert.ok(first.ok);
+  const added = compileWireframes(SHOP + 'screen Four\n  heading "D"\n', first);
+  assert.ok(added.ok);
+  assert.deepEqual(added.changedScreens, ["Four"]);
+  const removed = compileWireframes(SHOP.replace('screen Three\n  heading "C"\n', ""), first);
+  assert.ok(removed.ok);
+  assert.deepEqual(removed.changedScreens, ["Three"]);
+});
+
+test("compileWireframes reports nothing when the source is unchanged", () => {
+  const first = compileWireframes(SHOP, null);
+  assert.ok(first.ok);
+  const again = compileWireframes(SHOP, first);
+  assert.ok(again.ok);
+  assert.deepEqual(again.changedScreens, []);
+});
+
+test("compileWireframes reports changed screens in canvas order", () => {
+  const first = compileWireframes(SHOP, null);
+  assert.ok(first.ok);
+  const both = compileWireframes(
+    SHOP.replace('heading "C"', 'heading "C2"').replace('heading "A"', 'heading "A2"'),
+    first,
+  );
+  assert.ok(both.ok);
+  assert.deepEqual(both.changedScreens, ["One", "Three"]);
+});
+
+test("compileWireframes fails like tryDslToExcalidraw on an empty source", () => {
+  const r = compileWireframes("", null);
+  assert.equal(r.ok, false);
 });

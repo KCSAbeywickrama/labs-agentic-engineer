@@ -24,18 +24,20 @@ import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 import type { ExcalidrawElement } from "@aep/excalidraw-dsl";
 import { ExcalidrawComponent } from "./lazyExcalidraw.js";
 import { parseScene, fitContentToViewport, focusElements } from "./scene.js";
-import { elementsOfScreens, openingFocusElements, focusTargetScreens } from "./screenFocus.js";
-
-// How long the scene must stop changing before the viewport commits to a
-// focus. Long enough to sit out an agent's flush cadence, short enough that a
-// finished edit does not feel ignored.
-const SETTLE_MS = 600;
+import { elementsOfScreens, openingFocusElements } from "./screenFocus.js";
 
 export interface ExcalidrawViewProps {
   /** Serialised Excalidraw scene JSON. */
   scene: string;
   /** Fill the parent's height (else fixed 600px). */
   fillHeight?: boolean;
+  /**
+   * Screens the viewport should move to once this `scene` is applied — the
+   * compiler's own report of what the last edit touched (`compileWireframes`
+   * → `changedScreens`). Empty or absent means "leave the viewport where the
+   * reader put it": the view never guesses what changed.
+   */
+  focusScreens?: readonly string[];
 }
 
 // On open, land on the FIRST screen at a readable size, with the top of the
@@ -50,7 +52,7 @@ function focusInitial(api: ExcalidrawImperativeAPI, elements: ExcalidrawElement[
   else fitContentToViewport(api, elements);
 }
 
-function ExcalidrawViewImpl({ scene, fillHeight }: ExcalidrawViewProps) {
+function ExcalidrawViewImpl({ scene, fillHeight, focusScreens }: ExcalidrawViewProps) {
   // Committed scenes remount via `key` upstream (uncontrolled + simple). A
   // STREAMED scene instead keeps one mounted canvas and pushes each new
   // compile through `updateScene` — remounting this (lazy, canvas-heavy)
@@ -60,11 +62,11 @@ function ExcalidrawViewImpl({ scene, fillHeight }: ExcalidrawViewProps) {
   const initialData = useMemo(() => parseScene(scene), [scene]);
   const apiRef = useRef<ExcalidrawImperativeAPI | null>(null);
   const mountedScene = useRef(scene);
-  // The last SETTLED scene — the baseline a finished edit is diffed against.
-  // Deliberately not updated per flush: comparing against the previous flush
-  // would measure the churn, not the edit.
-  const settledElements = useRef<ExcalidrawElement[] | null>(initialData?.elements ?? null);
-  const focusTimer = useRef<number | null>(null);
+  // Read inside the scene effect without being a dependency of it: a focus
+  // rides the scene it was reported for, and a later prop change alone must
+  // not re-pan a canvas the reader has since moved.
+  const focusRef = useRef(focusScreens);
+  focusRef.current = focusScreens;
 
   useEffect(() => {
     if (scene === mountedScene.current) return; // initial mount already has it
@@ -74,33 +76,15 @@ function ExcalidrawViewImpl({ scene, fillHeight }: ExcalidrawViewProps) {
     if (!api || !next?.elements) return; // unparseable → keep the last frame
     try {
       api.updateScene({ elements: next.elements });
+      // Follow the agent's work: the compiler says which screens this scene
+      // changed, so pan there. Nothing reported → the viewport stays exactly
+      // where the reader put it — never a refit of the whole board.
+      const target = focusRef.current ?? [];
+      if (target.length > 0) focusElements(api, elementsOfScreens(next.elements, target), true);
     } catch {
-      return; // api torn down
+      /* api torn down */
     }
-    const elements = next.elements;
-    // Draw every flush, but decide where to LOOK only once the writing pauses.
-    // A wireframe arrives in many flushes while an agent edits, and the
-    // in-between states are half-written — chasing each one would pan on every
-    // keystroke and, worse, mid-write frames read as "everything changed".
-    // Comparing against the last SETTLED scene is what makes the target the
-    // edit itself rather than the churn.
-    if (focusTimer.current !== null) window.clearTimeout(focusTimer.current);
-    focusTimer.current = window.setTimeout(() => {
-      focusTimer.current = null;
-      const live = apiRef.current;
-      if (!live) return;
-      const target = focusTargetScreens(settledElements.current, elements);
-      if (target.length > 0) focusElements(live, elementsOfScreens(elements, target), true);
-      settledElements.current = elements;
-    }, SETTLE_MS);
   }, [scene]);
-
-  useEffect(
-    () => () => {
-      if (focusTimer.current !== null) window.clearTimeout(focusTimer.current);
-    },
-    [],
-  );
 
   return (
     <Box

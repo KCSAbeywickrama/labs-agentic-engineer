@@ -255,6 +255,102 @@ export function dslToExcalidraw(kind: DslKind, dsl: string): string {
   return JSON.stringify(scene, null, 2);
 }
 
+// ---------- Wireframe compile that reports what changed ----------
+
+/**
+ * A wireframe compile plus the compiler's own account of which screens
+ * changed since `previous`. Hold the result and pass it back on the next
+ * compile; the compiler remembers nothing between calls.
+ */
+export type WireframeCompile =
+  | {
+      ok: true;
+      json: string;
+      /**
+       * Screens whose rendered content differs from `previous`, in canvas
+       * order (topmost first). Empty when nothing changed or when there was
+       * no `previous` to compare against. A screen that merely moved because
+       * one above it grew is NOT listed — comparison is relative to each
+       * screen's own origin.
+       */
+      changedScreens: string[];
+      /** Per-screen fingerprints, carried so the NEXT compile can compare. */
+      fingerprints: Record<string, string>;
+    }
+  | { ok: false; error: string };
+
+/**
+ * A screen's rendered content as one comparable string, positions taken
+ * relative to the screen's own top-left. Screens stack in one column, so a
+ * taller screen above shifts everything below it; comparing absolute
+ * coordinates would call every shifted screen "changed". Element ids are
+ * already screen-relative, and everything else is compared verbatim.
+ */
+function screenFingerprint(elements: readonly ExcalidrawElement[]): string {
+  let ox = Number.POSITIVE_INFINITY;
+  let oy = Number.POSITIVE_INFINITY;
+  for (const e of elements) {
+    if (e.x < ox) ox = e.x;
+    if (e.y < oy) oy = e.y;
+  }
+  return elements
+    .map((e) => JSON.stringify({ ...e, x: e.x - ox, y: e.y - oy }))
+    .sort()
+    .join('\n');
+}
+
+/**
+ * Compile a wireframes DSL and report which screens changed versus the
+ * previous compile. This is what lets a viewer follow an edit without
+ * guessing: the compiler KNOWS the screen structure, so it — not a diff over
+ * a flat scene — says what moved. `previous` is the prior result from this
+ * function (or null on first compile / a different file); the caller keeps
+ * it, the compiler stays pure.
+ *
+ * A source that does not compile returns `ok: false` exactly like
+ * `tryDslToExcalidraw`, and reports no change — so a half-written stream
+ * frame never produces a focus signal.
+ */
+export function compileWireframes(dsl: string, previous: WireframeCompile | null): WireframeCompile {
+  const base = tryDslToExcalidraw('wireframes', dsl);
+  if (!base.ok) return base;
+  const elements = (JSON.parse(base.json) as ExcalidrawScene).elements;
+
+  // Bucket by the screen tag every element carries, remembering each screen's
+  // topmost y so the report can be ordered the way the canvas is.
+  const byScreen = new Map<string, ExcalidrawElement[]>();
+  const topOf = new Map<string, number>();
+  for (const e of elements) {
+    const name = e.customData?.screen;
+    if (!name) continue;
+    const bucket = byScreen.get(name);
+    if (bucket) bucket.push(e);
+    else byScreen.set(name, [e]);
+    const t = topOf.get(name);
+    if (t === undefined || e.y < t) topOf.set(name, e.y);
+  }
+
+  const fingerprints: Record<string, string> = {};
+  for (const [name, els] of byScreen) fingerprints[name] = screenFingerprint(els);
+
+  const prior = previous?.ok ? previous.fingerprints : null;
+  const changedScreens: string[] = [];
+  if (prior) {
+    for (const name of Object.keys(fingerprints)) {
+      if (prior[name] !== fingerprints[name]) changedScreens.push(name);
+    }
+    // A removed screen has nothing left to show, but the gap it left is worth
+    // reporting; it is ordered by where it used to sit — which only the
+    // previous compile knows, so we rank it by its old neighbours' top.
+    for (const name of Object.keys(prior)) {
+      if (!(name in fingerprints)) changedScreens.push(name);
+    }
+    changedScreens.sort((a, b) => (topOf.get(a) ?? Number.POSITIVE_INFINITY) - (topOf.get(b) ?? Number.POSITIVE_INFINITY));
+  }
+
+  return { ok: true, json: base.json, changedScreens, fingerprints };
+}
+
 export function tryDslToExcalidraw(
   kind: DslKind,
   dsl: string,
