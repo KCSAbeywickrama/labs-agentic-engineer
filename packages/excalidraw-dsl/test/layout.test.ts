@@ -302,3 +302,38 @@ test("row-in-card passes the syntax gate and the layout oracle", () => {
   assert.deepEqual(validateWireframeSyntax(dsl), []);
   assert.deepEqual(validateWireframeLayout(dsl), []);
 });
+
+
+test("screens stack vertically: every screen frame shares x=0 and each starts below the previous", () => {
+  const els = compile(`screen One
+  heading "First"
+screen Two
+  heading "Second"
+screen Three
+  heading "Third"
+`);
+  const frames = els
+    .filter((e) => e.type === "rectangle" && e.width === 1280)
+    .sort((a, b) => a.y - b.y);
+  assert.equal(frames.length, 3);
+  assert.ok(frames.every((f) => f.x === 0), "all frames at x=0");
+  assert.ok(frames[1]!.y >= frames[0]!.y + frames[0]!.height, "second below first");
+  assert.ok(frames[2]!.y >= frames[1]!.y + frames[1]!.height, "third below second");
+});
+
+test("every element carries customData.screen naming the screen it belongs to", () => {
+  const els = compile(`screen Login "Sign in"
+  button "Go" primary
+screen Home "Landing"
+  heading "Welcome"
+`);
+  const byScreen = new Map<string, number>();
+  for (const e of els) {
+    const s = (e as { customData?: { screen?: string } }).customData?.screen;
+    assert.ok(s, `element ${e.id} lacks customData.screen`);
+    byScreen.set(s!, (byScreen.get(s!) ?? 0) + 1);
+  }
+  assert.ok((byScreen.get("Login") ?? 0) > 0);
+  assert.ok((byScreen.get("Home") ?? 0) > 0);
+  assert.equal(byScreen.size, 2);
+});

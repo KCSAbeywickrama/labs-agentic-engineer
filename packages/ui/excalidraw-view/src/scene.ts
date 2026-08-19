@@ -51,3 +51,19 @@ export function fitContentToViewport(api: any, elements: any) {
     }
   });
 }
+
+/**
+ * Bring a subset of the scene into view — one screen, or the screens an edit
+ * touched. A slightly tighter zoom factor than the whole-board fit, so a single
+ * screen fills the viewport with a small margin rather than floating in space.
+ */
+export function focusElements(api: any, elements: any[], animate: boolean) {
+  if (!elements.length) return;
+  requestAnimationFrame(() => {
+    try {
+      api.scrollToContent(elements, { fitToContent: true, viewportZoomFactor: 0.85, animate });
+    } catch {
+      /* api torn down */
+    }
+  });
+}

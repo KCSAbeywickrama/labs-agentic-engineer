@@ -189,6 +189,8 @@ interface ExcalidrawElementBase {
   updated: number;
   link: null;
   locked: boolean;
+  /** Which `screen` emitted this element; set on every element of the grid scene. */
+  customData?: { screen: string };
 }
 
 interface RectElement extends ExcalidrawElementBase {
@@ -1068,7 +1070,11 @@ const DEFAULT_SCREEN_W = 1280; // desktop webapp frame (override: `screen Name W
 const DEFAULT_SCREEN_H = 800;
 const SCREEN_GAP_X = 120;
 const SCREEN_GAP_Y = 120;
-const COLUMNS = 2;
+// Screens stack in one column: side-by-side rows shrank every screen to an
+// illegible size once the viewer fitted the whole board, and a single column
+// is what lets the viewer land on the FIRST screen with the next one's top
+// edge peeking below as the cue that there is more.
+const COLUMNS = 1;
 const TITLE_H = 32; // screen-name row drawn ABOVE the outline
 const DESC_H = 22; // extra headroom for a screen description subtitle
 const NAVBAR_H = 56;
@@ -1213,6 +1219,7 @@ function renderWireframes(ast: WireframeAst, opts?: WireframeRenderOpts): Excali
   let curY = 0;
   let rowMaxH = 0;
   ast.screens.forEach((screen, idx) => {
+    const firstEl = out.length;
     const number = idx + 1;
     if (idx > 0 && idx % COLUMNS === 0) {
       curX = 0;
@@ -1755,6 +1762,13 @@ function renderWireframes(ast: WireframeAst, opts?: WireframeRenderOpts): Excali
           break;
         }
       }
+    }
+    // Every element a screen emitted — frame, title block, chrome, body — is
+    // tagged with the screen it belongs to. Excalidraw preserves `customData`
+    // and never renders it; it is what lets a viewer group elements per screen
+    // (focus the first, follow the changed one) without geometry guesswork.
+    for (let i = firstEl; i < out.length; i++) {
+      out[i] = { ...out[i]!, customData: { screen: screen.name } };
     }
   });
 

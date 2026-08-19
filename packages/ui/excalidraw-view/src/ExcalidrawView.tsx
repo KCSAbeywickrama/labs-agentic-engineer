@@ -19,13 +19,26 @@
 import { Suspense, useEffect, useMemo, useRef } from "react";
 import { Box, CircularProgress } from "@wso2/oxygen-ui";
 import { ExcalidrawComponent } from "./lazyExcalidraw.js";
-import { parseScene, fitContentToViewport } from "./scene.js";
+import { parseScene, fitContentToViewport, focusElements } from "./scene.js";
+import { elementsOfScreens, openingFocusElements, changedScreenNames } from "./screenFocus.js";
 
 export interface ExcalidrawViewProps {
   /** Serialised Excalidraw scene JSON. */
   scene: string;
   /** Fill the parent's height (else fixed 600px). */
   fillHeight?: boolean;
+}
+
+// On open, land on the FIRST screen at a readable size, with the top of the
+// second peeking below as the cue that there is more — the peek is part of
+// the fitted box, not left to the panel's aspect ratio. A scene with no
+// screen tags (older compiles, non-wireframe scenes) falls back to fitting
+// everything.
+function focusInitial(api: any, elements: any[] | undefined) {
+  if (!elements?.length) return;
+  const target = openingFocusElements(elements);
+  if (target.length) focusElements(api, target, false);
+  else fitContentToViewport(api, elements);
 }
 
 function ExcalidrawViewImpl({ scene, fillHeight }: ExcalidrawViewProps) {
@@ -38,6 +51,9 @@ function ExcalidrawViewImpl({ scene, fillHeight }: ExcalidrawViewProps) {
   const initialData = useMemo(() => parseScene(scene), [scene]);
   const apiRef = useRef<any>(null);
   const mountedScene = useRef(scene);
+  // The elements currently on the canvas, kept so a streamed update can be
+  // diffed against them and the viewport moved to what actually changed.
+  const shownElements = useRef<any[] | null>(initialData?.elements ?? null);
 
   useEffect(() => {
     if (scene === mountedScene.current) return; // initial mount already has it
@@ -47,7 +63,13 @@ function ExcalidrawViewImpl({ scene, fillHeight }: ExcalidrawViewProps) {
     if (!api || !next?.elements) return; // unparseable → keep the last frame
     try {
       api.updateScene({ elements: next.elements });
-      fitContentToViewport(api, next.elements);
+      // Follow the agent's work: pan to whichever screen(s) this update
+      // touched. When nothing is detectable, leave the viewport where the
+      // reader put it — never refit the whole board, which is what shrank
+      // every screen to an illegible size on each keystroke.
+      const changed = changedScreenNames(shownElements.current, next.elements);
+      if (changed.length > 0) focusElements(api, elementsOfScreens(next.elements, changed), true);
+      shownElements.current = next.elements;
     } catch {
       /* api torn down */
     }
@@ -77,7 +99,7 @@ function ExcalidrawViewImpl({ scene, fillHeight }: ExcalidrawViewProps) {
           viewModeEnabled
           excalidrawAPI={(api: any) => {
             apiRef.current = api;
-            if (initialData?.elements?.length) fitContentToViewport(api, initialData.elements);
+            focusInitial(api, initialData?.elements);
           }}
         />
       </Box>
