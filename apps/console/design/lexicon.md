@@ -305,6 +305,41 @@ The chat panel is the spine and **never collapses itself**; only the user closes
 pointing at a form that already owns the screen, and its composer stays live during a form — the
 agent is waiting on the user, not working, and the user may want to talk instead of fill.
 
+## Empty states
+
+**An empty state teaches *what*, never *how*.** It says what lives here and why it is empty. It
+does **not** narrate the steps to fill it — the artifact rail is the flow
+([#527](https://github.com/wso2/labs-agentic-engineer/issues/527)), and a second copy of the
+sequence in six places is a second copy to keep true.
+
+This is why the empty states were the console's largest concentration of retired vocabulary: an
+empty state that explains how to fill itself is a copy of the flow, so it rots every time the flow
+moves. Teaching *what* does not rot.
+
+| surface | says |
+|---|---|
+| Builds | **No builds yet.** A build hands your design to coding agents, which write your components and open pull requests. |
+| Deployments | **Nothing deployed yet.** Your components run here once they are built — each environment shows what is live and where to reach it. |
+| Validations | **Nothing validated yet.** After a build, your software is checked against the **acceptance criteria** in your spec; results appear here. |
+| Components *(overview)* | **No components yet.** Components are the services and apps your design is made of — they appear as agents build them. |
+| Recent activity *(overview)* | **No activity yet.** Agents report what they are doing here as they work. |
+
+The **Validations** wording is load-bearing: renaming the artifact to *Acceptance criteria* while
+the section stayed *Validations* broke the link between the criteria and the runs against them, and
+this sentence is where it is restored.
+
+**Retired from these strings**: *published* / *publish the plan* / *the published design* (there is
+no publish step — Build is the act), *plan* (not a term in this file), *AEP*.
+
+**Not an empty state:** *"Issues is on its way"* — a feature that does not exist yet is a different
+thing from a surface with nothing in it, and reads differently on purpose.
+
+Ghost card lines on the overview (*Nothing built yet*, *Nothing deployed yet*) are the same voice at
+card size — see **The project overview**.
+
+The shared `EmptyState` primitive already carries the shape (icon, title, description, optional
+action, `compact`, `bordered`); nothing new is needed structurally.
+
 ## Two kinds of unsettled
 
 The PRD carries both, they look similar, and they are not the same thing. Decided in
