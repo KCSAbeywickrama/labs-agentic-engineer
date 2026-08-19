@@ -41,6 +41,21 @@ import (
 // unroutable placeholder and replace it on the next reconcile.
 const placeholderRedirectURI = "https://pending.invalid/callback"
 
+// apiErrSummary extracts Thunder's structured error fields (code + message)
+// from a response body and returns them as a short string. If the body is not
+// a Thunder error object (e.g. it's the full application payload, which may
+// contain client secrets), only the byte length is reported.
+func apiErrSummary(body []byte) string {
+	var apiErr struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	}
+	if json.Unmarshal(body, &apiErr) == nil && (apiErr.Code != "" || apiErr.Message != "") {
+		return fmt.Sprintf("code=%s message=%s", apiErr.Code, apiErr.Message)
+	}
+	return fmt.Sprintf("(%d bytes)", len(body))
+}
+
 // tokenValiditySeconds is the access/id token lifetime pinned to 24h,
 // matching the seeded Console app bootstrap value.
 const tokenValiditySeconds = 86400
@@ -135,31 +150,16 @@ func (c *AdminClient) EnsureApplication(ctx context.Context, app DesiredApp) err
 	return c.createApp(ctx, app)
 }
 
-// AssignAdminRole grants clientID the Thunder "system" permission by creating
-// a dedicated "aep-system" role with the app assigned inline. This is the
-// only reliable path on Thunder 0.34: POST /roles/{id}/assignments/add 500s
-// for app targets, and POST /role-assignments returns 404. Idempotent — skips
-// if the aep-system role already exists.
+// AssignAdminRole grants clientID the Thunder "system" permission via a
+// dedicated "aep-system" role. It is fully idempotent: if the role exists and
+// clientID is already assigned it returns immediately; if the role exists but
+// the assignment is missing it adds it via PUT; if the role is absent it
+// creates it with the assignment inline (the only reliable path on Thunder
+// 0.34 — POST /roles/{id}/assignments/add 500s for app targets and
+// POST /role-assignments returns 404).
 func (c *AdminClient) AssignAdminRole(ctx context.Context, clientID string) error {
-	// Skip if the aep-system role already exists.
-	exists, err := c.roleExists(ctx, "aep-system")
-	if err != nil {
-		return fmt.Errorf("check aep-system role: %w", err)
-	}
-	if exists {
-		return nil
-	}
-
-	// Resolve the "system" resource server ID.
-	sysRsID, err := c.findSystemResourceServerID(ctx)
-	if err != nil {
-		return fmt.Errorf("find system resource server: %w", err)
-	}
-	if sysRsID == "" {
-		return fmt.Errorf("system resource server not found in Thunder")
-	}
-
-	// Resolve the app's internal ID.
+	// Resolve the app's internal ID first — needed on both the create and
+	// update paths.
 	appID, err := c.findAppByClientID(ctx, clientID)
 	if err != nil {
 		return fmt.Errorf("find app %q: %w", clientID, err)
@@ -168,7 +168,26 @@ func (c *AdminClient) AssignAdminRole(ctx context.Context, clientID string) erro
 		return fmt.Errorf("app %q not found — cannot assign system role", clientID)
 	}
 
-	// Create the role with the app assigned inline.
+	// Check whether the aep-system role already exists.
+	roleID, err := c.findRoleByName(ctx, "aep-system")
+	if err != nil {
+		return fmt.Errorf("check aep-system role: %w", err)
+	}
+	if roleID != "" {
+		// Role exists — verify clientID is in its assignments; add it if not.
+		return c.ensureAppInRole(ctx, roleID, appID)
+	}
+
+	// Role is absent — resolve the system resource server and create the role
+	// with the app assigned inline.
+	sysRsID, err := c.findSystemResourceServerID(ctx)
+	if err != nil {
+		return fmt.Errorf("find system resource server: %w", err)
+	}
+	if sysRsID == "" {
+		return fmt.Errorf("system resource server not found in Thunder")
+	}
+
 	payload, _ := json.Marshal(map[string]any{
 		"name":        "aep-system",
 		"description": "Grants aep-system-client the Thunder system permission.",
@@ -185,7 +204,7 @@ func (c *AdminClient) AssignAdminRole(ctx context.Context, clientID string) erro
 		return fmt.Errorf("create aep-system role: %w", err)
 	}
 	if status != http.StatusOK && status != http.StatusCreated {
-		return fmt.Errorf("assign admin role to %q returned %d: %s", clientID, status, respBody)
+		return fmt.Errorf("assign admin role to %q returned %d: %s", clientID, status, apiErrSummary(respBody))
 	}
 	return nil
 }
@@ -275,7 +294,7 @@ func (c *AdminClient) createApp(ctx context.Context, app DesiredApp) error {
 		return fmt.Errorf("create app %q: %w", app.ClientID, err)
 	}
 	if status != http.StatusOK && status != http.StatusCreated {
-		return fmt.Errorf("create app %q returned %d: %s", app.ClientID, status, body)
+		return fmt.Errorf("create app %q returned %d: %s", app.ClientID, status, apiErrSummary(body))
 	}
 	return nil
 }
@@ -287,7 +306,7 @@ func (c *AdminClient) updateApp(ctx context.Context, internalID string, app Desi
 		return fmt.Errorf("get app %q for update: %w", app.ClientID, err)
 	}
 	if status != http.StatusOK {
-		return fmt.Errorf("get app %q returned %d: %s", app.ClientID, status, body)
+		return fmt.Errorf("get app %q returned %d: %s", app.ClientID, status, apiErrSummary(body))
 	}
 
 	var full map[string]any
@@ -321,7 +340,7 @@ func (c *AdminClient) updateApp(ctx context.Context, internalID string, app Desi
 		return fmt.Errorf("update app %q: %w", app.ClientID, err)
 	}
 	if status != http.StatusOK && status != http.StatusNoContent {
-		return fmt.Errorf("update app %q returned %d: %s", app.ClientID, status, respBody)
+		return fmt.Errorf("update app %q returned %d: %s", app.ClientID, status, apiErrSummary(respBody))
 	}
 	return nil
 }
@@ -369,18 +388,19 @@ func (c *AdminClient) buildCreatePayload(app DesiredApp) map[string]any {
 	return base
 }
 
-// roleExists returns true if a role with the given name already exists.
-func (c *AdminClient) roleExists(ctx context.Context, name string) (bool, error) {
+// findRoleByName returns the internal ID of the role with the given name, or
+// "" if no such role exists.
+func (c *AdminClient) findRoleByName(ctx context.Context, name string) (string, error) {
 	body, status, err := c.doRequest(ctx, http.MethodGet, "/roles", nil)
 	if err != nil {
-		return false, fmt.Errorf("list roles: %w", err)
+		return "", fmt.Errorf("list roles: %w", err)
 	}
 	if status != http.StatusOK {
-		return false, fmt.Errorf("list roles returned %d: %s", status, body)
+		return "", fmt.Errorf("list roles returned %d: %s", status, body)
 	}
 	var raw any
 	if err := json.Unmarshal(body, &raw); err != nil {
-		return false, fmt.Errorf("parse roles response: %w", err)
+		return "", fmt.Errorf("parse roles response: %w", err)
 	}
 	for _, item := range toSlice(raw) {
 		m, ok := item.(map[string]any)
@@ -388,10 +408,54 @@ func (c *AdminClient) roleExists(ctx context.Context, name string) (bool, error)
 			continue
 		}
 		if m["name"] == name {
-			return true, nil
+			id, _ := m["id"].(string)
+			return id, nil
 		}
 	}
-	return false, nil
+	return "", nil
+}
+
+// ensureAppInRole fetches the role at roleID and, if appID is not already in
+// its assignments, adds it via PUT /roles/{id}.
+func (c *AdminClient) ensureAppInRole(ctx context.Context, roleID, appID string) error {
+	body, status, err := c.doRequest(ctx, http.MethodGet, "/roles/"+roleID, nil)
+	if err != nil {
+		return fmt.Errorf("get role %q: %w", roleID, err)
+	}
+	if status != http.StatusOK {
+		return fmt.Errorf("get role %q returned %d: %s", roleID, status, apiErrSummary(body))
+	}
+	var full map[string]any
+	if err := json.Unmarshal(body, &full); err != nil {
+		return fmt.Errorf("parse role %q: %w", roleID, err)
+	}
+
+	// Check whether the app is already in the assignments list.
+	for _, item := range toSlice(full["assignments"]) {
+		m, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		if m["id"] == appID {
+			return nil
+		}
+	}
+
+	// App not assigned — append it and PUT the role back.
+	existing := toSlice(full["assignments"])
+	full["assignments"] = append(existing, map[string]any{"id": appID, "type": "app"})
+	data, err := json.Marshal(full)
+	if err != nil {
+		return fmt.Errorf("marshal updated role %q: %w", roleID, err)
+	}
+	respBody, status, err := c.doRequest(ctx, http.MethodPut, "/roles/"+roleID, data)
+	if err != nil {
+		return fmt.Errorf("update role %q: %w", roleID, err)
+	}
+	if status != http.StatusOK && status != http.StatusNoContent {
+		return fmt.Errorf("update role %q returned %d: %s", roleID, status, apiErrSummary(respBody))
+	}
+	return nil
 }
 
 // findSystemResourceServerID returns the internal ID of the resource server

@@ -50,9 +50,9 @@ func registerThunderFlags(cmd *cobra.Command) {
 
 // thunderClientDef describes a Thunder OAuth client to provision.
 type thunderClientDef struct {
-	clientID   string
-	clientType string // "confidential" or "public"
-	secretKey  string // key in aep-thunder-secrets (confidential only)
+	clientID     string
+	clientType   string   // "confidential" or "public"
+	secretKey    string   // key in aep-thunder-secrets (confidential only)
 	redirectURIs []string // public only
 }
 
@@ -101,15 +101,15 @@ func doThunderSetup(
 	// 2. Port-forward to Thunder.
 	sp = ui.NewSpinner("Connecting to Thunder")
 	sp.Start()
-	pfCmd, err := thunder.PortForward(ctx, thunderNamespace, kubeconfig)
+	pf, err := thunder.PortForward(ctx, thunderNamespace, kubeconfig)
 	if err != nil {
 		sp.Fail("Port-forward failed")
 		return fmt.Errorf("port-forward to Thunder: %w", err)
 	}
-	defer func() { _ = pfCmd.Process.Kill() }()
+	defer pf.Stop()
 
-	localURL := "http://localhost:" + thunder.LocalPort
-	if err := thunder.WaitForReachable(ctx, localURL, 2*time.Minute); err != nil {
+	localURL := "http://localhost:" + pf.Port
+	if err := thunder.WaitForReachable(ctx, localURL, 2*time.Minute, pf); err != nil {
 		sp.Fail("Thunder unreachable")
 		return fmt.Errorf("Thunder not reachable via port-forward: %w", err)
 	}
@@ -149,6 +149,10 @@ func doThunderSetup(
 			if len(def.redirectURIs) > 0 {
 				app.RedirectURIs = def.redirectURIs
 			} else {
+				if consoleURL == "" {
+					sp.Fail(fmt.Sprintf("Cannot register %s: console URL is required for public clients with no redirect URIs", def.clientID))
+					return fmt.Errorf("register Thunder client %q: console URL must be set to derive the redirect URI", def.clientID)
+				}
 				// aep-console-client: redirect URI is the console's /callback endpoint.
 				app.RedirectURIs = []string{consoleURL + "/callback"}
 			}
@@ -162,8 +166,8 @@ func doThunderSetup(
 	}
 	sp.Success(fmt.Sprintf("%d OAuth clients registered", len(aepThunderClients)))
 
-	// 5. Assign the system client to the Administrator role so it can manage resources.
-	sp = ui.NewSpinner("Assigning system client to Administrator role")
+	// 5. Ensure the system client is assigned to the aep-system role so it can manage resources.
+	sp = ui.NewSpinner("Assigning system client to aep-system role")
 	sp.Start()
 	if err := client.AssignAdminRole(ctx, thunderSystemClient); err != nil {
 		sp.Fail("Role assignment failed")
