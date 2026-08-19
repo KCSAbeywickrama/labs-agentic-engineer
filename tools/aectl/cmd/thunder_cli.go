@@ -19,6 +19,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -152,6 +153,11 @@ func doThunderSetup(
 				if consoleURL == "" {
 					sp.Fail(fmt.Sprintf("Cannot register %s: console URL is required for public clients with no redirect URIs", def.clientID))
 					return fmt.Errorf("register Thunder client %q: console URL must be set to derive the redirect URI", def.clientID)
+				}
+				parsed, parseErr := url.Parse(consoleURL)
+				if parseErr != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+					sp.Fail(fmt.Sprintf("Cannot register %s: console URL %q is not a valid absolute http/https URL", def.clientID, consoleURL))
+					return fmt.Errorf("register Thunder client %q: console URL %q must be an absolute http or https URL", def.clientID, consoleURL)
 				}
 				// aep-console-client: redirect URI is the console's /callback endpoint.
 				app.RedirectURIs = []string{consoleURL + "/callback"}
