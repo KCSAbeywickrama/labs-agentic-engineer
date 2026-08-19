@@ -336,7 +336,7 @@ renaming; it needed to stop being visible.
 
 | the user's intent | command | where it is offered |
 |---|---|---|
-| start from an idea | `/start with <idea>` | fired at project creation ([#522](https://github.com/wso2/labs-agentic-engineer/issues/522)) |
+| start from an idea | `/start with <idea>` | fired at project creation ([#522](https://github.com/wso2/labs-agentic-engineer/issues/522)); the idea rides along, cropped, so the user can see the agent is working from **their** words rather than a bare command ([#528](https://github.com/wso2/labs-agentic-engineer/issues/528)) |
 | add a feature | `/feature <idea>` | code lens on the story list |
 | add an actor | `/actor <who>` | code lens on Actors |
 | go deeper on a feature | `/expand <feature>` | code lens on the feature |
