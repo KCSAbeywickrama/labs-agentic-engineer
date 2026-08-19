@@ -683,12 +683,19 @@ func versionAtLeast(version, minimum string) (bool, error) {
 }
 
 func splitVersion(v string) ([3]int, error) {
+	// Drop pre-release ("1.2.0-rc.1" → "1.2.0") and build metadata
+	// ("1.2.0+build.5" → "1.2.0") before parsing so that OC deployments
+	// with non-stable version labels are not incorrectly rejected.
+	if i := strings.IndexAny(v, "-+"); i >= 0 {
+		v = v[:i]
+	}
 	parts := strings.SplitN(v, ".", 3)
-	if len(parts) != 3 {
-		return [3]int{}, fmt.Errorf("expected major.minor.patch, got %q", v)
+	// Normalise shorthand ("1.2" → "1.2.0").
+	for len(parts) < 3 {
+		parts = append(parts, "0")
 	}
 	var out [3]int
-	for i, p := range parts {
+	for i, p := range parts[:3] {
 		n, err := strconv.Atoi(p)
 		if err != nil || n < 0 {
 			return [3]int{}, fmt.Errorf("non-numeric segment %q", p)
