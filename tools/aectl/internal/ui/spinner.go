@@ -45,14 +45,18 @@ func (s *Spinner) Start() {
 		fmt.Printf("  %s %s\n", colorize(ansiOrange, "◆"), s.msg)
 		return
 	}
+	s.mu.Lock()
 	s.quit = make(chan struct{})
 	s.done = make(chan struct{})
+	quit := s.quit
+	done := s.done
+	s.mu.Unlock()
 	go func() {
-		defer close(s.done)
+		defer close(done)
 		i := 0
 		for {
 			select {
-			case <-s.quit:
+			case <-quit:
 				return
 			case <-time.After(80 * time.Millisecond):
 			}
@@ -96,12 +100,20 @@ func (s *Spinner) Stop() {
 }
 
 func (s *Spinner) clearLine() {
-	if !isTTY || s.quit == nil {
+	if !isTTY {
 		return
 	}
-	close(s.quit)
-	<-s.done
+	s.mu.Lock()
+	if s.quit == nil {
+		s.mu.Unlock()
+		return
+	}
+	quit := s.quit
+	done := s.done
 	s.quit = nil
+	s.mu.Unlock()
+	close(quit)
+	<-done
 	// Overwrite the spinner line with spaces then return to column 0.
 	fmt.Printf("\r%-80s\r", "")
 }

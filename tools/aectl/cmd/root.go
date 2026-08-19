@@ -38,6 +38,10 @@ var rootCmd = &cobra.Command{
 		return cmd.Help()
 	},
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		if cmd.Parent() == nil {
+			// Bare `aectl` just shows help — skip cluster initialisation.
+			return nil
+		}
 		ctx := context.Background()
 		client, err := k8s.NewClient(kubeconfig)
 		if err != nil {

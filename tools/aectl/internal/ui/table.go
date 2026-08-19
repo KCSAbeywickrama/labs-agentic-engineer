@@ -20,13 +20,14 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 )
 
 var ansiStripper = regexp.MustCompile(`\033\[[0-9;]*m`)
 
-// visibleLen returns the display width of s, ignoring ANSI escape codes.
+// visibleLen returns the display width of s in runes, ignoring ANSI escape codes.
 func visibleLen(s string) int {
-	return len(ansiStripper.ReplaceAllString(s, ""))
+	return utf8.RuneCountInString(ansiStripper.ReplaceAllString(s, ""))
 }
 
 // padRight pads s on the right with spaces until its visible width equals width.
@@ -51,7 +52,7 @@ type Table struct {
 func NewTable(headers ...string) *Table {
 	widths := make([]int, len(headers))
 	for i, h := range headers {
-		widths[i] = len(h)
+		widths[i] = utf8.RuneCountInString(h)
 	}
 	return &Table{headers: headers, widths: widths}
 }

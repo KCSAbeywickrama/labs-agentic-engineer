@@ -142,6 +142,9 @@ func (a *Applier) Exists(ctx context.Context, apiVersion, kind, namespace, name 
 	}
 	var ri dynamic.ResourceInterface
 	if mapping.Scope.Name() == meta.RESTScopeNameNamespace {
+		if namespace == "" {
+			return false, fmt.Errorf("namespace is required for namespaced kind %s", gvk.String())
+		}
 		ri = a.dyn.Resource(mapping.Resource).Namespace(namespace)
 	} else {
 		ri = a.dyn.Resource(mapping.Resource)

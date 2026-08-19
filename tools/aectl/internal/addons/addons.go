@@ -48,7 +48,7 @@ var Available = []Addon{
 	{
 		ID:          "postgres-cnpg",
 		Label:       "postgres-cnpg",
-		Description: "PostgreSQL via CloudNativePG (ClusterResourceType + RBAC)",
+		Description: "PostgreSQL via CloudNativePG (ClusterResourceType + RBAC) — requires the CloudNativePG operator to be pre-installed",
 		Manifests: []string{postgresCNPGResourceType, postgresCNPGRBAC},
 		VerifyResources: []VerifySpec{
 			{APIVersion: "openchoreo.dev/v1alpha1", Kind: "ClusterResourceType", Name: "postgres-cnpg"},

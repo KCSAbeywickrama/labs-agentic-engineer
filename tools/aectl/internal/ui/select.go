@@ -93,7 +93,7 @@ func MultiSelect(title string, items []SelectItem) (selected []bool, confirmed b
 		if err != nil {
 			restore()
 			fmt.Println()
-			return selected, true
+			return selected, false
 		}
 
 		switch b {
@@ -125,10 +125,10 @@ func MultiSelect(title string, items []SelectItem) (selected []bool, confirmed b
 			restore()
 			fmt.Println()
 			return selected, true
-		case 3: // Ctrl+C
+		case 3: // Ctrl+C — treat as cancel, let the caller decide how to exit
 			restore()
 			fmt.Println()
-			os.Exit(1)
+			return selected, false
 		}
 
 		render(false)
@@ -142,17 +142,22 @@ func multiSelectFallback(title string, items []SelectItem, selected []bool) ([]b
 	}
 	fmt.Printf("\n  %s\n", "· Custom resource types can also be applied later with kubectl apply")
 	fmt.Print("\n  Enter numbers to install (e.g. 1,2) or blank to skip: ")
+	sc := bufio.NewScanner(os.Stdin)
 	var line string
-	fmt.Scanln(&line) //nolint:errcheck
-	line = strings.TrimSpace(line)
+	if sc.Scan() {
+		line = strings.TrimSpace(sc.Text())
+	}
 	if line == "" {
 		return selected, false
 	}
 	for _, part := range strings.Split(line, ",") {
-		n, err := strconv.Atoi(strings.TrimSpace(part))
-		if err == nil && n >= 1 && n <= len(items) {
-			selected[n-1] = true
+		part = strings.TrimSpace(part)
+		n, err := strconv.Atoi(part)
+		if err != nil || n < 1 || n > len(items) {
+			fmt.Printf("  ignoring invalid entry %q\n", part)
+			continue
 		}
+		selected[n-1] = true
 	}
 	return selected, true
 }

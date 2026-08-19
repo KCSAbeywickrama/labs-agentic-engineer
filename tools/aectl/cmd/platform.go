@@ -311,8 +311,11 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 	}
 	ui.Success("Thunder configured")
 
+	if err := installAddons(ctx, k8sClient); err != nil {
+		return err
+	}
 	ui.Ready(initConsoleURL)
-	return installAddons(ctx, k8sClient)
+	return nil
 }
 
 // installAddons presents the optional addon selector and applies chosen addons.

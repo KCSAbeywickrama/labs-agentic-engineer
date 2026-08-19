@@ -106,6 +106,7 @@ func runUninstall(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		ui.Warn(fmt.Sprintf("list PVCs in %s: %v", uninstallNamespace, err))
 	} else {
+		deleted := 0
 		for _, pvc := range pvcs.Items {
 			if err := client.CoreV1().PersistentVolumeClaims(uninstallNamespace).Delete(
 				ctx, pvc.Name, metav1.DeleteOptions{},
@@ -113,12 +114,13 @@ func runUninstall(cmd *cobra.Command, args []string) error {
 				ui.Warn(fmt.Sprintf("delete PVC %s: %v", pvc.Name, err))
 			} else {
 				ui.Detail(fmt.Sprintf("deleted PVC %s", pvc.Name))
+				deleted++
 			}
 		}
 		if len(pvcs.Items) == 0 {
 			ui.Detail("no PVCs found")
 		} else {
-			ui.Success(fmt.Sprintf("Deleted %d PVC(s)", len(pvcs.Items)))
+			ui.Success(fmt.Sprintf("Deleted %d/%d PVC(s)", deleted, len(pvcs.Items)))
 		}
 	}
 

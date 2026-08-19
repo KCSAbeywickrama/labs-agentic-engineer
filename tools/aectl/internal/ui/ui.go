@@ -20,12 +20,19 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"unicode/utf8"
 
 	"golang.org/x/term"
 )
 
-// isTTY is true when stdout is an interactive terminal and NO_COLOR is unset.
-var isTTY = term.IsTerminal(int(os.Stdout.Fd())) && os.Getenv("NO_COLOR") == ""
+// isTTY is true when stdout is an interactive terminal.
+// Used to gate cursor-based rendering (spinners, multi-select).
+var isTTY = term.IsTerminal(int(os.Stdout.Fd()))
+
+// useColor is true when the terminal supports color AND the user has not
+// opted out via NO_COLOR. Kept separate from isTTY so that NO_COLOR only
+// strips styling, not interactive UI like keyboard navigation.
+var useColor = isTTY && os.Getenv("NO_COLOR") == ""
 
 const (
 	ansiReset  = "\033[0m"
@@ -39,7 +46,7 @@ const (
 )
 
 func colorize(code, s string) string {
-	if !isTTY {
+	if !useColor {
 		return s
 	}
 	return code + s + ansiReset
@@ -125,7 +132,7 @@ func Panel(title string, rows [][2]string) {
 	}
 	// innerWidth = left-pad(2) + key + gap(2) + val + right-pad(2)
 	innerWidth := 2 + maxKey + 2 + maxVal + 2
-	titleVis := len(title) // title has no ANSI codes
+	titleVis := utf8.RuneCountInString(title) // title has no ANSI codes
 	if innerWidth < titleVis+4 {
 		innerWidth = titleVis + 4
 	}
