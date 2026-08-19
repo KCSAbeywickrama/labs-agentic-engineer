@@ -148,7 +148,10 @@ import type { ModelMessage } from "ai";
 import { config } from "./config.js";
 
 // Built from the five injected parts — postgres-cnpg exposes no single URL
-// output. Never log this object: it carries the password.
+// output. Never log this object: it carries the password. The field names
+// below match a dependency named `memory-db`; under the shared `project-db`
+// form, use that dependency's own prefix (`config.projectDbHost`, etc.) —
+// whatever your config.ts actually reads.
 const pool = new pg.Pool({
   host: config.memoryDbHost,
   port: Number(config.memoryDbPort),
@@ -164,8 +167,23 @@ const INIT = `CREATE TABLE IF NOT EXISTS conversations (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 )`;
-export async function initStore(): Promise<void> {
+
+// Never await initStore() before listen() — see "Never await initStore()"
+// below for why. initStore() fires the schema init and returns immediately;
+// ensureStore() is what every turn awaits, retrying until it succeeds.
+let ready = false;
+export function isStoreReady(): boolean {
+  return ready;
+}
+export async function ensureStore(): Promise<void> {
+  if (ready) return;
   await pool.query(INIT);
+  ready = true;
+}
+export function initStore(): void {
+  ensureStore().catch((err) => {
+    console.error("store not ready yet:", err);
+  });
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -181,19 +199,19 @@ export async function loadConversation(
   return r.rowCount ? (r.rows[0].messages as ModelMessage[]) : null;
 }
 
-export async function createConversation(userId: string): Promise<string> {
-  const r = await pool.query(
-    "INSERT INTO conversations (user_id, messages) VALUES ($1, '[]'::jsonb) RETURNING id",
-    [userId],
-  );
-  return r.rows[0].id as string;
-}
-
+// One idempotent statement covers both create and update: generate the id in
+// the app (crypto.randomUUID()), then upsert. A turn that fails after the id
+// is minted but before the save leaves nothing behind — there is no separate
+// "create the row" step to half-complete.
 export async function saveConversation(
   id: string, userId: string, messages: ModelMessage[],
 ): Promise<void> {
   await pool.query(
-    "UPDATE conversations SET messages = $3::jsonb, updated_at = now() WHERE id = $1 AND user_id = $2",
+    `INSERT INTO conversations (id, user_id, messages)
+     VALUES ($1, $2, $3::jsonb)
+     ON CONFLICT (id) DO UPDATE
+       SET messages = $3::jsonb, updated_at = now()
+       WHERE conversations.user_id = $2`,
     [id, userId, JSON.stringify(messages)],
   );
 }
@@ -208,17 +226,30 @@ The handler flow, exactly:
 ```ts
 // 1. gate: 401 without x-user-id (unchanged)
 // 2. parse { conversationId?, message }; message must be a non-empty string → else 400
-// 3. conversationId present → loadConversation(id, userId); null → 404 { error: "conversation not found" }
-//    absent → createConversation(userId), history = []
+// 3. await ensureStore() — 500 while the DB isn't ready yet; then:
+//    conversationId present → loadConversation(id, userId); null → 404 { error: "conversation not found" }
+//    absent → id = crypto.randomUUID(), history = [] (no row yet — the first save creates it)
 // 4. const full = [...history, { role: "user", content: message }]
 // 5. const result = await runTurn(full)   // generateText, unchanged
 // 6. await saveConversation(id, userId, [...full, ...result.steps.flatMap(s => s.response.messages)])
+//    — this INSERT..ON CONFLICT is the only place a row is created, so a turn
+//    that throws in step 5 leaves nothing in the store to orphan
 // 7. sendJson(res, 200, { conversationId: id, text: result.text, toolCalls: result.toolCalls })
 ```
 
-Call `initStore()` at startup, before `listen` — `CREATE TABLE IF NOT EXISTS`
-is idempotent. History is APPEND-ONLY: no turn rewrites a prior message (a
-stable prefix is what keeps the model provider's prompt cache effective).
+**Never await `initStore()` before `listen`.** The DB may not be reachable yet
+— `postgres-cnpg` provisions asynchronously, and `MEMORY_DB_*` may be unset on
+an otherwise-unconfigured start. An awaited rejection there is an unhandled
+promise before the server ever binds its port: the process exits and the pod
+crash-loops, and `/healthz` never gets the chance to report it. That is why
+`store.ts` above splits init in two: call `initStore()` once at startup,
+fire-and-forget, before `listen` — and have step 3 of the handler flow
+`await ensureStore()` first, on every request. Until the schema init
+succeeds, `ensureStore()` keeps retrying and every turn 500s, which is what
+the rest of this section already assumes; `/healthz` reports the not-ready
+condition via `isStoreReady()` instead of the pod crash-looping. History is
+APPEND-ONLY: no turn rewrites a prior message (a stable prefix is what keeps
+the model provider's prompt cache effective).
 
 ## Constraints
 
@@ -389,3 +420,5 @@ const { authorization } = callContext.getStore() ?? {};
 | Code written against an API the installed SDK does not have | Resolved a dependency version instead of using the pinned majors | Use the pinned `dependencies` block verbatim |
 | Builds and starts, then every turn fails on a real key | Provider guessed from `model.url`/`model.name` | Take it from `model.provider`; default Anthropic |
 | A provider error returns 502 instead of an explained answer | `JSON.parse` threw on a non-JSON error body | Parse defensively inside `call()` |
+| Two tabs on one conversation: one reply silently vanishes | No version check — two in-flight turns both load, then both save; the second `UPDATE`/upsert overwrites the first turn with no error | Not solved server-side in the first cut (no locking, by design); the caller disables send while a turn is pending so one conversation never has two turns in flight |
+| A long-lived conversation eventually fails every turn, or the model truncates context | `messages` grows unbounded — nothing trims or summarises it | Out of scope for the first cut (retention/summarisation lands with the platform store); do not add ad-hoc trimming here |
