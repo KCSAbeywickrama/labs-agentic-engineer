@@ -24,7 +24,12 @@ import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 import type { ExcalidrawElement } from "@aep/excalidraw-dsl";
 import { ExcalidrawComponent } from "./lazyExcalidraw.js";
 import { parseScene, fitContentToViewport, focusElements } from "./scene.js";
-import { elementsOfScreens, openingFocusElements } from "./screenFocus.js";
+import {
+  elementsOfScreens,
+  openingFocusElements,
+  screenAtViewportCenter,
+  screensToFollow,
+} from "./screenFocus.js";
 
 export interface ExcalidrawViewProps {
   /** Serialised Excalidraw scene JSON. */
@@ -67,6 +72,10 @@ function ExcalidrawViewImpl({ scene, fillHeight, focusScreens }: ExcalidrawViewP
   // not re-pan a canvas the reader has since moved.
   const focusRef = useRef(focusScreens);
   focusRef.current = focusScreens;
+  // What the previous scene changed — one flush of memory, enough to tell a
+  // sweep (a different single screen each flush) from an edit being written.
+  const previouslyChanged = useRef<readonly string[] | null>(null);
+  const hostRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (scene === mountedScene.current) return; // initial mount already has it
@@ -77,10 +86,21 @@ function ExcalidrawViewImpl({ scene, fillHeight, focusScreens }: ExcalidrawViewP
     try {
       api.updateScene({ elements: next.elements });
       // Follow the agent's work: the compiler says which screens this scene
-      // changed, so pan there. Nothing reported → the viewport stays exactly
-      // where the reader put it — never a refit of the whole board.
-      const target = focusRef.current ?? [];
+      // changed. Nothing reported → the viewport stays exactly where the
+      // reader put it — never a refit of the whole board. And even a reported
+      // change does not always move the camera: not if the reader is already
+      // on that screen, and not once the flushes reveal a sweep across screens.
+      const changed = focusRef.current ?? [];
+      const host = hostRef.current;
+      const looking = host
+        ? screenAtViewportCenter(next.elements, api.getAppState(), host.clientWidth, host.clientHeight)
+        : null;
+      const target = screensToFollow(changed, looking, previouslyChanged.current);
       if (target.length > 0) focusElements(api, elementsOfScreens(next.elements, target), true);
+      // A frame that changed nothing is a natural boundary: clearing the
+      // memory there means a sweep's aftermath cannot make the NEXT unrelated
+      // single-screen edit look like a continuation of it.
+      previouslyChanged.current = changed.length > 0 ? changed : null;
     } catch {
       /* api torn down */
     }
@@ -104,7 +124,7 @@ function ExcalidrawViewImpl({ scene, fillHeight, focusScreens }: ExcalidrawViewP
         "& .App-menu_top__left": { display: "none !important" },
       }}
     >
-      <Box sx={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}>
+      <Box ref={hostRef} sx={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}>
         <ExcalidrawComponent
           // parseScene returns a loose shape (scene.ts); aligning it with
           // Excalidraw's ExcalidrawInitialDataState is its own change.

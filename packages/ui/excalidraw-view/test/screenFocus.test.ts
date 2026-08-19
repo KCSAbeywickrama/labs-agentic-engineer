@@ -19,7 +19,13 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { elementsOfScreens, firstScreenName, openingFocusElements } from "../src/screenFocus.js";
+import {
+  elementsOfScreens,
+  firstScreenName,
+  openingFocusElements,
+  screenAtViewportCenter,
+  screensToFollow,
+} from "../src/screenFocus.js";
 
 type El = { id: string; y: number; version: number; customData?: { screen: string } };
 const el = (id: string, screen: string, y: number, version = 1): El => ({
@@ -94,4 +100,79 @@ test("the opening focus falls back to the first screen alone when there is no se
 
 test("the opening focus is empty for an untagged scene", () => {
   assert.deepEqual(openingFocusElements([{ id: "x", y: 0, height: 10, version: 1 }]), []);
+});
+
+// ---------- which screen is the reader looking at, and should the camera move ----------
+
+// Three screens stacked: Home 0..800, Login 1000..1800, Detail 2000..2800.
+const STACK = [
+  { id: "h", x: 0, y: 0, width: 1280, height: 800, version: 1, customData: { screen: "Home" } },
+  { id: "l", x: 0, y: 1000, width: 1280, height: 800, version: 1, customData: { screen: "Login" } },
+  { id: "d", x: 0, y: 2000, width: 1280, height: 800, version: 1, customData: { screen: "Detail" } },
+];
+
+test("screenAtViewportCenter names the screen under the middle of the viewport", () => {
+  // zoom 1, no scroll, 1280x800 viewport → centre at scene (640, 400) → Home
+  assert.equal(
+    screenAtViewportCenter(STACK, { scrollX: 0, scrollY: 0, zoom: { value: 1 } }, 1280, 800),
+    "Home",
+  );
+  // scrolled so that scene y=1400 is the centre → Login
+  assert.equal(
+    screenAtViewportCenter(STACK, { scrollX: 0, scrollY: -1000, zoom: { value: 1 } }, 1280, 800),
+    "Login",
+  );
+});
+
+test("screenAtViewportCenter accounts for zoom", () => {
+  // zoom 0.5: viewport 1280x800 spans 2560x1600 scene units; centre is scene (1280, 800)
+  // with scroll 0 — between Home's bottom (800) and Login's top (1000) → nearest is Home.
+  assert.equal(
+    screenAtViewportCenter(STACK, { scrollX: 0, scrollY: 0, zoom: { value: 0.5 } }, 1280, 800),
+    "Home",
+  );
+});
+
+test("screenAtViewportCenter falls back to the nearest screen when the centre is in a gap", () => {
+  // centre at y=1950: gap between Login (ends 1800) and Detail (starts 2000); Detail is nearer
+  assert.equal(
+    screenAtViewportCenter(STACK, { scrollX: 0, scrollY: -1550, zoom: { value: 1 } }, 1280, 800),
+    "Detail",
+  );
+});
+
+test("screenAtViewportCenter is null for an untagged scene", () => {
+  assert.equal(screenAtViewportCenter([], { scrollX: 0, scrollY: 0, zoom: { value: 1 } }, 1280, 800), null);
+});
+
+test("screensToFollow holds still when the reader's screen is among the changed", () => {
+  // The edit is under the reader's nose — moving would only twitch the camera.
+  assert.deepEqual(screensToFollow(["Login"], "Login", null), []);
+  assert.deepEqual(screensToFollow(["Home", "Login"], "Login", null), []);
+});
+
+test("screensToFollow moves to a single edit made entirely elsewhere", () => {
+  assert.deepEqual(screensToFollow(["Home"], "Login", null), ["Home"]);
+  assert.deepEqual(screensToFollow(["Home", "Detail"], "Login", null), ["Home", "Detail"]);
+});
+
+test("screensToFollow recognises a sweep and stops touring", () => {
+  // A sweep edit (the same header on every screen) lands one flush per
+  // screen: Home, then Login, then Detail. At the FIRST flush it is
+  // indistinguishable from a single edit to Home, so the camera goes there.
+  // But the SECOND flush changing a DIFFERENT single screen is the sweep's
+  // signature — from then on the camera holds, rather than touring every
+  // screen and stranding the reader on the last one.
+  assert.deepEqual(screensToFollow(["Home"], "Detail", null), ["Home"]); // flush 1: looks like an edit
+  assert.deepEqual(screensToFollow(["Login"], "Detail", ["Home"]), []); // flush 2: a sweep — hold
+  assert.deepEqual(screensToFollow(["Detail"], "Detail", ["Login"]), []); // flush 3: on it anyway
+});
+
+test("screensToFollow does not mistake a repeated edit to one screen for a sweep", () => {
+  // Several flushes all changing Home is one edit being written — keep following it.
+  assert.deepEqual(screensToFollow(["Home"], "Detail", ["Home"]), ["Home"]);
+});
+
+test("screensToFollow follows everything when the reader's screen is unknown", () => {
+  assert.deepEqual(screensToFollow(["Home"], null, null), ["Home"]);
 });
