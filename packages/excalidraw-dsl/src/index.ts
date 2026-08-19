@@ -1428,14 +1428,39 @@ function renderWireframes(ast: WireframeAst, opts?: WireframeRenderOpts): Excali
         const num = screenNumber.get(el.navTo.toLowerCase());
         if (num !== undefined) {
           const label = `→ Screen ${num} · ${el.navTo}`;
+          const markerW = Math.max(120, label.length * 8);
+          const markerH = 16;
+          // Beside the control when there is room; below it when there is not.
+          // "Room" means the marker would neither cross the screen's right edge
+          // nor land on a sibling laid out to the right on the same row — the
+          // common case being two buttons side by side, where a marker drawn
+          // across the neighbour made BOTH unreadable.
+          const besideX = ex + el.width + 10;
+          const besideY = ey + Math.max(0, (el.height - markerH) / 2);
+          const screenRight = sx + screen.width - 16;
+          const crossesEdge = besideX + markerW > screenRight;
+          const hitsSibling = screen.elements.some((other) => {
+            if (other === el) return false;
+            const ox = sx + other.x;
+            const oy = frameY + other.y;
+            return (
+              ox < besideX + markerW &&
+              ox + other.width > besideX &&
+              oy < besideY + markerH &&
+              oy + other.height > besideY
+            );
+          });
+          const below = crossesEdge || hitsSibling;
+          const mx = below ? Math.min(ex, screenRight - markerW) : besideX;
+          const my = below ? ey + el.height + 4 : besideY;
           out.push(
             withColor(
               makeText(
-                stableId(`nav:${screen.name}:${el.label}:${el.navTo}:${ex}:${ey}`),
-                ex + el.width + 10,
-                ey + Math.max(0, (el.height - 16) / 2),
-                Math.max(120, label.length * 8),
-                16,
+                stableId(`nav:${screen.name}:${el.label}:${el.navTo}:${el.x}:${el.y}`),
+                mx,
+                my,
+                markerW,
+                markerH,
                 label,
                 13,
                 'left',
