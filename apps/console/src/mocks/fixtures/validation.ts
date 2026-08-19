@@ -402,7 +402,11 @@ function validationCycle(
     prUrl: `${REPO_URL}/pull/${String(n + 2)}`,
     mergeSha: n === 2 ? "5c0de1a77b3f2049" : "7ab41c90ee31d5f0",
     validationVerdict: verdict,
-    validationIssue: 12,
+    // `validationTask` in project.ts — the one issue list-tasks hides and get-task
+    // still answers for. Every validation cycle carries the SAME number because the
+    // platform reopens the version's issue for a repeat attempt rather than minting
+    // a second one, so a per-cycle number here would misdescribe the real thing.
+    validationIssue: 30,
     createdAt: "2026-07-10T09:45:00Z",
     endedAt: "2026-07-10T10:02:00Z",
     ...over,
@@ -452,7 +456,7 @@ function run(over: Partial<MilestoneRunView>): MilestoneRunView {
 // A run that answered on its first attempt.
 function firstAttemptRun(verdict: RunVerdict): MilestoneRunView {
   return run({
-    validation: { verdict, issue: 12, reportPath: REPORT_PATH },
+    validation: { verdict, issue: 30, reportPath: REPORT_PATH },
     cycles: [CODING_1, validationCycle(2, verdict)],
   });
 }
@@ -471,7 +475,7 @@ function exhaustedRun(
     terminalReason,
     validation: {
       verdict,
-      issue: 12,
+      issue: 30,
       // The server omits the path for `unreported`: advertising one would send the
       // client to a 404 to rediscover what the verdict already said.
       ...(reportPath ? { reportPath: REPORT_PATH } : {}),
@@ -509,7 +513,7 @@ const RUNS: Record<ValidationScenario, MilestoneRunView> = {
   "awaiting-fix": run({
     state: "running",
     endedAt: null,
-    validation: { verdict: "failed", issue: 12, reportPath: REPORT_PATH },
+    validation: { verdict: "failed", issue: 30, reportPath: REPORT_PATH },
     cycles: [CODING_1, validationCycle(2, "failed"), CODING_IN_FLIGHT],
   }),
   // The run is live and has not reached validation at all — the state every run
@@ -544,7 +548,7 @@ export const VALIDATION_ATTEMPTS: ValidationAttempt[] = ["first", "repeat"];
 const RUNNING_REPEAT: MilestoneRunView = run({
   state: "running",
   endedAt: null,
-  validation: { verdict: "failed", issue: 12, reportPath: REPORT_PATH },
+  validation: { verdict: "failed", issue: 30, reportPath: REPORT_PATH },
   cycles: [
     CODING_1,
     validationCycle(2, "failed"),

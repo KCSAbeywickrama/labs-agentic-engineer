@@ -679,7 +679,7 @@ const settledRun: BuildRunList = {
       endedAt: "2026-07-10T10:41:00Z",
       validation: {
         verdict: "partial",
-        issue: 12,
+        issue: 30,
         reportPath: "tests/validation/report.json",
       },
       cycles: [
@@ -704,7 +704,7 @@ const settledRun: BuildRunList = {
           prUrl: `${REPO_URL}/pull/4`,
           mergeSha: "5c0de1a77b3f2049",
           validationVerdict: "failed",
-          validationIssue: 12,
+          validationIssue: 30,
           createdAt: "2026-07-10T09:45:00Z",
           endedAt: "2026-07-10T10:02:00Z",
         },
@@ -731,7 +731,7 @@ const settledRun: BuildRunList = {
           prUrl: `${REPO_URL}/pull/6`,
           mergeSha: "7ab41c90ee31d5f0",
           validationVerdict: "partial",
-          validationIssue: 12,
+          validationIssue: 30,
           createdAt: "2026-07-10T10:24:00Z",
           endedAt: "2026-07-10T10:40:00Z",
         },
@@ -974,6 +974,22 @@ screen Orders "Shopper tracks past orders and their status"
     row "#10432 | Jul 8, 2026 | 3 | $302.00 | Shipped"
     row "#10391 | Jun 27, 2026 | 1 | $89.00 | Delivered"
     row "#10355 | Jun 15, 2026 | 2 | $168.00 | Delivered"
+
+// Two journeys over the same three screens, so mock mode exercises every
+// flow case the prototype has to render: a screen in one flow (Cart, Orders),
+// a screen both flows reach (Catalog → "Common" on the canvas), and a flow
+// picker with more than one entry.
+flow "Browse & buy"
+  role "Shopper"
+  description "A shopper finds products and checks out"
+  Catalog
+  Cart
+
+flow "Order tracking"
+  role "Shopper"
+  description "A signed-in shopper checks where a placed order is"
+  Catalog
+  Orders
 `;
 
 const catalogApiDesignJson = `{
