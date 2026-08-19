@@ -616,6 +616,11 @@ func deleteOrphanedResources(ctx context.Context) error {
 			args = append([]string{"--kubeconfig", kubeconfig}, args...)
 		}
 		if out, err := exec.CommandContext(ctx, "kubectl", args...).CombinedOutput(); err != nil {
+			// If the CRD itself is not registered the resource type is unknown;
+			// that means the legacy resource was never created, so skip it.
+			if strings.Contains(string(out), "the server doesn't have a resource type") {
+				continue
+			}
 			return fmt.Errorf("delete %s/%s: %w: %s", r.kind, r.name, err, out)
 		}
 	}
