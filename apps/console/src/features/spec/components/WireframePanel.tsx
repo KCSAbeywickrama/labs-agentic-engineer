@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Box,
@@ -114,7 +114,17 @@ export function WireframePanel({
   // screen. An edit turn does NOT: follow-the-edit already put the camera
   // where the change is, and snapping back would undo that.
   const generationJustEnded = wasBusy.current && !agentBusy && turnStartedEmpty.current === true;
+  // A turn beginning while the reader is in the prototype takes them to the
+  // canvas — the editing view, and the only one where every kind of change
+  // (content, a new screen, a reshaped flow) is visible and followed. It is a
+  // real mode change, not a render guard: when the turn ends the reader STAYS
+  // on canvas and returns to the prototype by choice. Returning for them is
+  // what used to bounce a mid-review reader back to screen 1.
+  const turnJustStarted = agentBusy && !wasBusy.current;
   wasBusy.current = agentBusy;
+  useEffect(() => {
+    if (turnJustStarted) setMode("canvas");
+  }, [turnJustStarted]);
   const focusScreens = useMemo(() => {
     if (generationJustEnded && live) {
       const first = live.screenOrder[0];

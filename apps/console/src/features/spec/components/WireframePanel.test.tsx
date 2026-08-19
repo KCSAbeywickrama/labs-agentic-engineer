@@ -288,6 +288,36 @@ describe("WireframePanel prototype toggle", () => {
     });
   });
 
+  it("an agent turn switches a prototype reader to canvas, and leaves them there afterwards", () => {
+    // The canvas is the editing view: it is the only place every kind of change
+    // — content, a new screen, a reshaped flow — is visible, and it follows the
+    // edit. So a turn starting while the reader is in the prototype takes them
+    // to canvas. And it STAYS there when the turn ends: returning to the
+    // prototype by itself is what bounced readers back to screen 1 mid-review.
+    mockDerived.mockReturnValue({ scene: null, isPending: true, isError: false });
+    mockDerivedPrototype.mockReturnValue({ model: null, isPending: true, isError: false });
+    const doc = new Y.Doc();
+    const ytext = doc.getText(DSL_PATH);
+    ytext.insert(0, 'screen Catalog "Seeded"\n  heading "Browse"\n');
+    const { rerender } = renderPanel(makeCollab(ytext, false));
+
+    fireEvent.click(screen.getByRole("button", { name: /prototype/i }));
+    expect(screen.getByTestId("prototype")).toBeInTheDocument();
+
+    // Agent arrives: a turn begins.
+    rerender(<WireframePanel projectName="p" dslPath={DSL_PATH} files={[]} collab={makeCollab(ytext, true)} />);
+    expect(screen.queryByTestId("prototype")).not.toBeInTheDocument();
+    expect(screen.getByTestId("excalidraw")).toBeInTheDocument();
+
+    // Agent leaves: the turn is over. Still canvas — no silent return.
+    rerender(<WireframePanel projectName="p" dslPath={DSL_PATH} files={[]} collab={makeCollab(ytext, false)} />);
+    expect(screen.queryByTestId("prototype")).not.toBeInTheDocument();
+    expect(screen.getByTestId("excalidraw")).toBeInTheDocument();
+    // …and the reader can go back by choice.
+    fireEvent.click(screen.getByRole("button", { name: /prototype/i }));
+    expect(screen.getByTestId("prototype")).toBeInTheDocument();
+  });
+
   it("hides the toggle while the agent is drawing", () => {
     mockDerived.mockReturnValue({ scene: null, isPending: false, isError: true });
     const doc = new Y.Doc();
