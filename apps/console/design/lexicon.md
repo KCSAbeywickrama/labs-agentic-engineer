@@ -307,22 +307,28 @@ agent is waiting on the user, not working, and the user may want to talk instead
 
 ## Empty states
 
-**An empty state teaches *what*, never *how*.** It says what lives here and why it is empty. It
-does **not** narrate the steps to fill it — the artifact rail is the flow
-([#527](https://github.com/wso2/labs-agentic-engineer/issues/527)), and a second copy of the
-sequence in six places is a second copy to keep true.
+**An empty state teaches *what*, offers the action, and does not narrate the *how*.**
 
-This is why the empty states were the console's largest concentration of retired vocabulary: an
-empty state that explains how to fill itself is a copy of the flow, so it rots every time the flow
-moves. Teaching *what* does not rot.
+The distinction is between prose and affordance. *"Publish your spec and click Build in the spec
+view to…"* restates a sequence that lives elsewhere, in words that go stale — which is why these
+strings became the console's largest concentration of retired vocabulary. A **button** is a
+destination, not a description: it survives a flow change, and it is the only thing standing
+between a user on an empty page and the rest of the product.
 
-| surface | says |
-|---|---|
-| Builds | **No builds yet.** A build hands your design to coding agents, which write your components and open pull requests. |
-| Deployments | **Nothing deployed yet.** Your components run here once they are built — each environment shows what is live and where to reach it. |
-| Validations | **Nothing validated yet.** After a build, your software is checked against the **acceptance criteria** in your spec; results appear here. |
-| Components *(overview)* | **No components yet.** Components are the services and apps your design is made of — they appear as agents build them. |
-| Recent activity *(overview)* | **No activity yet.** Agents report what they are doing here as they work. |
+The artifact rail is the flow ([#527](https://github.com/wso2/labs-agentic-engineer/issues/527)),
+but **it only exists on the spec view** — a user on Builds cannot see it. So an empty state may not
+duplicate the sequence, and must not strand the user either.
+
+**A false CTA is worse than none.** Offer one only where the user can genuinely act; four of these
+five surfaces fill themselves.
+
+| surface | says | action |
+|---|---|---|
+| Builds | **No builds yet.** A build hands your design to coding agents, which write your components and open pull requests. | **Go to the spec** |
+| Deployments | **Nothing deployed yet.** Your components run here once they are built — each environment shows what is live and where to reach it. | — |
+| Validations | **Nothing validated yet.** After a build, your software is checked against the **acceptance criteria** in your spec; results appear here. | — |
+| Components *(overview)* | **No components yet.** Components are the services and apps your design is made of — they appear as agents build them. | — |
+| Recent activity *(overview)* | **No activity yet.** Agents report what they are doing here as they work. | — |
 
 The **Validations** wording is load-bearing: renaming the artifact to *Acceptance criteria* while
 the section stayed *Validations* broke the link between the criteria and the runs against them, and
@@ -337,8 +343,9 @@ thing from a surface with nothing in it, and reads differently on purpose.
 Ghost card lines on the overview (*Nothing built yet*, *Nothing deployed yet*) are the same voice at
 card size — see **The project overview**.
 
-The shared `EmptyState` primitive already carries the shape (icon, title, description, optional
-action, `compact`, `bordered`); nothing new is needed structurally.
+The shared `EmptyState` primitive already carries the shape — including the `action` prop this
+rule depends on (icon, title, description, optional action, `compact`, `bordered`). Nothing new is
+needed structurally.
 
 ## Two kinds of unsettled
 
