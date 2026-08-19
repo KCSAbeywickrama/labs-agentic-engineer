@@ -46,10 +46,13 @@ func (s *Spinner) Start() {
 		return
 	}
 	s.mu.Lock()
-	s.quit = make(chan struct{})
-	s.done = make(chan struct{})
-	quit := s.quit
-	done := s.done
+	if s.quit != nil { // already running
+		s.mu.Unlock()
+		return
+	}
+	quit := make(chan struct{})
+	done := make(chan struct{})
+	s.quit, s.done = quit, done
 	s.mu.Unlock()
 	go func() {
 		defer close(done)
@@ -108,9 +111,8 @@ func (s *Spinner) clearLine() {
 		s.mu.Unlock()
 		return
 	}
-	quit := s.quit
-	done := s.done
-	s.quit = nil
+	quit, done := s.quit, s.done
+	s.quit, s.done = nil, nil
 	s.mu.Unlock()
 	close(quit)
 	<-done
