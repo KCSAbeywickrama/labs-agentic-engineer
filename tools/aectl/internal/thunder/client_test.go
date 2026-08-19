@@ -350,3 +350,176 @@ func TestFindAppByClientID_TerminatesOnShortPage(t *testing.T) {
 		t.Errorf("expected 1 request (short page terminates), got %d", requestCount)
 	}
 }
+
+// TestAssignAdminRole_AlreadyAssigned verifies that AssignAdminRole returns nil
+// without issuing a PUT when the app is already in the role's assignments.
+func TestAssignAdminRole_AlreadyAssigned(t *testing.T) {
+	const (
+		appID    = "app-id-sys"
+		roleID   = "role-id-sys"
+		clientID = "aep-system-client"
+	)
+
+	appList, _ := json.Marshal([]appSummary{{ID: appID, Name: clientID, ClientID: clientID}})
+	roleList, _ := json.Marshal([]map[string]any{{"id": roleID, "name": "aep-system"}})
+	roleDetail, _ := json.Marshal(map[string]any{
+		"id":   roleID,
+		"name": "aep-system",
+		"assignments": []any{
+			map[string]any{"id": appID, "type": "app"},
+		},
+	})
+
+	var putCalled bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/applications":
+			_, _ = w.Write(appList)
+		case r.Method == http.MethodGet && r.URL.Path == "/roles":
+			_, _ = w.Write(roleList)
+		case r.Method == http.MethodGet && r.URL.Path == "/roles/"+roleID:
+			_, _ = w.Write(roleDetail)
+		case r.Method == http.MethodPut && r.URL.Path == "/roles/"+roleID:
+			putCalled = true
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	if err := c.AssignAdminRole(context.Background(), clientID); err != nil {
+		t.Fatalf("AssignAdminRole: %v", err)
+	}
+	if putCalled {
+		t.Error("PUT /roles should not be called when app is already assigned")
+	}
+}
+
+// TestAssignAdminRole_RoleExistsMissingApp verifies that AssignAdminRole issues
+// PUT /roles/{id} to add the app when the role exists but doesn't include it,
+// and that the PUT body contains the new assignment.
+func TestAssignAdminRole_RoleExistsMissingApp(t *testing.T) {
+	const (
+		appID    = "app-id-sys"
+		roleID   = "role-id-sys"
+		clientID = "aep-system-client"
+	)
+
+	appList, _ := json.Marshal([]appSummary{{ID: appID, Name: clientID, ClientID: clientID}})
+	roleList, _ := json.Marshal([]map[string]any{{"id": roleID, "name": "aep-system"}})
+	roleDetail, _ := json.Marshal(map[string]any{
+		"id":          roleID,
+		"name":        "aep-system",
+		"assignments": []any{},
+	})
+
+	var putCalled bool
+	var putAssignments []any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/applications":
+			_, _ = w.Write(appList)
+		case r.Method == http.MethodGet && r.URL.Path == "/roles":
+			_, _ = w.Write(roleList)
+		case r.Method == http.MethodGet && r.URL.Path == "/roles/"+roleID:
+			_, _ = w.Write(roleDetail)
+		case r.Method == http.MethodPut && r.URL.Path == "/roles/"+roleID:
+			putCalled = true
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			putAssignments = toSlice(body["assignments"])
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	if err := c.AssignAdminRole(context.Background(), clientID); err != nil {
+		t.Fatalf("AssignAdminRole: %v", err)
+	}
+	if !putCalled {
+		t.Fatal("expected PUT /roles/{id} to add the missing app assignment")
+	}
+	found := false
+	for _, item := range putAssignments {
+		m, _ := item.(map[string]any)
+		if m["id"] == appID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("PUT body assignments should contain app %q, got %v", appID, putAssignments)
+	}
+}
+
+// TestAssignAdminRole_RoleMissing verifies that AssignAdminRole creates the
+// aep-system role via POST /roles with the app assignment inline when no such
+// role exists yet.
+func TestAssignAdminRole_RoleMissing(t *testing.T) {
+	const (
+		appID    = "app-id-sys"
+		rsID     = "rs-system-id"
+		clientID = "aep-system-client"
+	)
+
+	appList, _ := json.Marshal([]appSummary{{ID: appID, Name: clientID, ClientID: clientID}})
+	roleList, _ := json.Marshal([]map[string]any{})
+	rsList, _ := json.Marshal([]map[string]any{{"id": rsID, "identifier": "system"}})
+
+	var postCalled bool
+	var postAssignments []any
+	var postName string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/applications":
+			_, _ = w.Write(appList)
+		case r.Method == http.MethodGet && r.URL.Path == "/roles":
+			_, _ = w.Write(roleList)
+		case r.Method == http.MethodGet && r.URL.Path == "/resource-servers":
+			_, _ = w.Write(rsList)
+		case r.Method == http.MethodPost && r.URL.Path == "/roles":
+			postCalled = true
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			postName, _ = body["name"].(string)
+			postAssignments = toSlice(body["assignments"])
+			w.WriteHeader(http.StatusCreated)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	if err := c.AssignAdminRole(context.Background(), clientID); err != nil {
+		t.Fatalf("AssignAdminRole: %v", err)
+	}
+	if !postCalled {
+		t.Fatal("expected POST /roles to create the missing aep-system role")
+	}
+	if postName != "aep-system" {
+		t.Errorf("expected role name %q, got %q", "aep-system", postName)
+	}
+	found := false
+	for _, item := range postAssignments {
+		m, _ := item.(map[string]any)
+		if m["id"] == appID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("POST body assignments should contain app %q, got %v", appID, postAssignments)
+	}
+}
