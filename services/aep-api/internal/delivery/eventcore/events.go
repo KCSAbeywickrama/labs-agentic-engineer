@@ -362,7 +362,20 @@ func (e *Events) OnIssues(ctx context.Context, _, action string, payload []byte)
 		return nil
 	}
 
-	if action == "labeled" && strings.EqualFold(p.Label.Name, delivery.LabelAdopt) {
+	// The ARMING SWITCH is the adoption trigger: a human adding `aep` to an issue
+	// hands it to the agent. Platform-written labels never reach here — the echo
+	// suppression above drops any delivery this platform's own sender caused —
+	// so every arming that arrives is a human's act, which is what makes "who
+	// adopted this" answerable from the issue timeline alone.
+	//
+	// Adoption does NOT short-circuit the predicate below, and that matters: the
+	// two jobs answer different states of the same milestone. Adoption starts a
+	// run where there is none and is a deliberate no-op where one is already
+	// live — but a live run PARKED IN WAITING has no next cycle boundary at
+	// which to notice, so the arming that just made its milestone workable is
+	// exactly the event that has to wake it. Returning here would leave a run
+	// asleep on work a human had just handed it.
+	if action == "labeled" && strings.EqualFold(p.Label.Name, delivery.LabelAgentWork) {
 		target := AdoptTarget{Number: p.Issue.Number}
 		if ms, ok := p.milestone(); ok {
 			target.MilestoneNumber, target.MilestoneTitle = ms.Number, ms.Title
@@ -373,8 +386,8 @@ func (e *Events) OnIssues(ctx context.Context, _, action string, payload []byte)
 			// make GitHub redeliver a label that is already applied.
 			slog.WarnContext(ctx, "eventcore: adoption declined", "repo", p.Repository.FullName,
 				"issue", p.Issue.Number, "error", aerr)
+			return nil
 		}
-		return nil
 	}
 
 	ms, ok := p.milestone()

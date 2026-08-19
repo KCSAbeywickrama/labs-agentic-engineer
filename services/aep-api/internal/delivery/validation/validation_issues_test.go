@@ -158,10 +158,11 @@ func newSvc(iss *fakeIssues, crit fakeCriteria) *Service {
 	return NewService(Deps{Issues: iss, Writer: iss.writer(), Criteria: crit})
 }
 
-// validationIssue is an open aep:validation issue as the host would report it.
+// validationIssue is the open validation task as the host would report it:
+// armed, and of kind `validation`.
 func validationIssue(number int) sourcecontrol.IssueInfo {
 	return sourcecontrol.IssueInfo{
-		Number: number, State: "open", Labels: []string{delivery.LabelValidationWork},
+		Number: number, State: "open", Labels: []string{delivery.LabelAgentWork, delivery.KindValidation},
 	}
 }
 
@@ -182,7 +183,7 @@ func TestEnsureValidationIssue_CreatesFormattedIssue(t *testing.T) {
 	// ONE label, and deliberately not the `aep` working-set one: the validation
 	// cycle is dispatched at this issue by number, and working-set membership
 	// would hold the run's settle predicate open forever.
-	wantLabels := []string{delivery.LabelValidationWork}
+	wantLabels := []string{delivery.LabelAgentWork, delivery.KindValidation}
 	if !reflect.DeepEqual(got.Labels, wantLabels) {
 		t.Errorf("labels = %v; want %v", got.Labels, wantLabels)
 	}
@@ -290,7 +291,7 @@ func TestEnsureValidationIssue_ReusesTheVersionsOwnOpenIssue(t *testing.T) {
 		t.Fatalf("want 1 milestone read, got %d", len(iss.filters))
 	}
 	want := sourcecontrol.MilestoneIssuesFilter{
-		Number: thisMilestone, State: "all", Labels: []string{delivery.LabelValidationWork},
+		Number: thisMilestone, State: "all", Labels: []string{delivery.LabelAgentWork, delivery.KindValidation},
 	}
 	if !reflect.DeepEqual(iss.filters[0], want) {
 		t.Errorf("filter = %+v; want %+v", iss.filters[0], want)

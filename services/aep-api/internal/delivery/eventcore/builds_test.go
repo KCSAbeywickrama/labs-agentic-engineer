@@ -177,9 +177,19 @@ func TestBuildTerminal_RedMainOutsideARunMintsAnIncident(t *testing.T) {
 	if ms := h.issues.created[0].Milestone; ms == nil || *ms != 5 {
 		t.Fatalf("the incident belongs to the deployed version's milestone, got %v", ms)
 	}
-	if len(h.issues.created[0].Labels) != 0 {
-		t.Fatalf("a red-main incident carries NO agent-work label — it is never auto-dispatched, got %v",
+	// CLASSIFIED but NOT ARMED. The kind and its source are how a human reading
+	// the milestone knows what this is; the missing arming label is why nothing
+	// is dispatched at it until that human decides. Classification is not
+	// permission — arming an issue is the only thing that grants it.
+	if delivery.HasLabel(h.issues.created[0].Labels, delivery.LabelAgentWork) {
+		t.Fatalf("a red-main incident must not be armed — it is never auto-dispatched, got %v",
 			h.issues.created[0].Labels)
+	}
+	if got := delivery.KindOf(h.issues.created[0].Labels); got != delivery.KindBug {
+		t.Fatalf("a red-main incident is a bug, got kind %q from %v", got, h.issues.created[0].Labels)
+	}
+	if got := delivery.SourceOf(h.issues.created[0].Labels); got != delivery.SrcIncident {
+		t.Fatalf("a red-main incident is sourced from an incident, got %q", got)
 	}
 	if got, want := h.issues.created[0].DedupeKey,
 		delivery.DedupeKeyRedMain("web", delivery.ShortSHA(ev.CommitSHA)); got != want {

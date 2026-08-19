@@ -253,7 +253,7 @@ func TestList_WireShape(t *testing.T) {
 }
 
 func TestGet_IncludesHistory(t *testing.T) {
-	iss := newIssues(taskIssue(5, "orders-db", "open", delivery.LabelProvisionGate))
+	iss := newIssues(taskIssue(5, "orders-db", "open", delivery.KindProvision))
 	execs := fakeExecs{
 		latest:  map[int]map[string]*delivery.Execution{5: {string(taskmeta.KindProvision): row("b", taskmeta.KindProvision, taskmeta.ExecSucceeded, "", 0)}},
 		history: map[int][]delivery.Execution{5: {*row("a", taskmeta.KindProvision, taskmeta.ExecFailed, "", -1), *row("b", taskmeta.KindProvision, taskmeta.ExecSucceeded, "", 0)}},

@@ -162,13 +162,14 @@ func TestPullRequestOpened_MergesWhenItResolvesMilestoneWork(t *testing.T) {
 }
 
 // The validation cycle's pull request must merge too, and this asserts it through
-// the REAL fetch rather than against a hand-built issue list. decideAutoMerge
-// accepting `aep:validation` is not enough on its own: the fetch used to narrow
-// on `aep`, so the validation issue never reached the policy and every validation
-// pull request was declined with "no resolved issue is this run's work" — a green
-// agent, a report in the branch, and a run that sat at its landing deadline until
-// a human merged by hand. The policy_test cases cannot see that, because they
-// call the pure function with the population already in hand.
+// the REAL fetch rather than against a hand-built issue list. A policy that
+// accepts the validation task is not enough on its own: the fetch used to narrow
+// on a label the task did not carry, so it never reached the policy and every
+// validation pull request was declined with "no resolved issue is this run's
+// work" — a green agent, a report in the branch, and a run that sat at its
+// landing deadline until a human merged by hand. The policy_test cases cannot
+// see that, because they call the pure function with the population already in
+// hand.
 func TestPullRequestOpened_MergesTheValidationCyclesPullRequest(t *testing.T) {
 	h := newHarness(t, aRun("run-1", 7, delivery.RunStateRunning))
 	h.cycles.latest = aCycle("cycle-1", "run-1")
@@ -629,7 +630,7 @@ func TestAdoption_BareIssueJoinsTheDeployedVersionAndStartsAnIncidentRun(t *test
 	deployed := aRun("run-old", 5, delivery.RunStateSucceeded)
 	h := newHarness(t, deployed)
 
-	if err := h.deliver(t, "issues", issueBody("labeled", 31, 0, delivery.LabelAdopt, "human", false)); err != nil {
+	if err := h.deliver(t, "issues", issueBody("labeled", 31, 0, delivery.LabelAgentWork, "human", false)); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
 	if len(h.issues.assigned) != 1 || h.issues.assigned[0] != "31->5" {
@@ -644,7 +645,7 @@ func TestAdoption_BareIssueJoinsTheDeployedVersionAndStartsAnIncidentRun(t *test
 func TestAdoption_ExistingMilestoneIsRespected(t *testing.T) {
 	h := newHarness(t, aRun("run-old", 5, delivery.RunStateSucceeded))
 
-	if err := h.deliver(t, "issues", issueBody("labeled", 31, 9, delivery.LabelAdopt, "human", false)); err != nil {
+	if err := h.deliver(t, "issues", issueBody("labeled", 31, 9, delivery.LabelAgentWork, "human", false)); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
 	if len(h.issues.assigned) != 0 {
@@ -658,7 +659,7 @@ func TestAdoption_ExistingMilestoneIsRespected(t *testing.T) {
 func TestAdoption_IntoALiveRunIsANoOp(t *testing.T) {
 	h := newHarness(t, aRun("run-1", 7, delivery.RunStateRunning))
 
-	if err := h.deliver(t, "issues", issueBody("labeled", 31, 7, delivery.LabelAdopt, "human", false)); err != nil {
+	if err := h.deliver(t, "issues", issueBody("labeled", 31, 7, delivery.LabelAgentWork, "human", false)); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
 	if len(h.sup.started) != 0 {
@@ -756,15 +757,17 @@ func TestRevalidate_RefusesWhileWorkIsOpen(t *testing.T) {
 }
 
 // TestRevalidate_GateOrValidationIssueIsNotOpenWork guards the WORKING-SET
-// reading of that refusal. A dispatch gate and the version's own validation
-// issue are both open issues in the milestone and neither is work a coding cycle
-// would pick up — counting them would make a version permanently unrevalidatable,
-// since the validation issue is reopened by every attempt.
+// reading of that refusal. A dispatch gate and the version's own validation task
+// are both open issues in the milestone and neither is work a coding cycle would
+// pick up — counting them would make a version permanently unrevalidatable, since
+// the validation task is reopened by every attempt. Note the task IS armed now,
+// so only the KIND test keeps it out; a predicate reading the arming label alone
+// would refuse every revalidation.
 func TestRevalidate_GateOrValidationIssueIsNotOpenWork(t *testing.T) {
 	h := newHarness(t, aRun("run-old", 5, delivery.RunStateSucceeded))
 	h.issues.withOpenIssues(5,
-		[]string{delivery.LabelProvisionGate},
-		[]string{delivery.LabelValidationWork})
+		[]string{delivery.KindProvision},
+		[]string{delivery.LabelAgentWork, delivery.KindValidation})
 
 	if _, err := h.events.Revalidate(context.Background(), testOrg, testProject,
 		MilestoneRef{Number: 5, Title: "v3"}, 1, 0); err != nil {
@@ -811,7 +814,7 @@ func TestNoRunRow_EveryHandlerIsInert(t *testing.T) {
 		{"pull_request", prBody("closed", "aep/m7-c1", "Resolves #12", 42, false, true, "abc123")},
 		{"issues", issueBody("closed", 12, 7, "aep", "human", false)},
 		{"issues", issueBody("milestoned", 12, 7, "aep", "human", true)},
-		{"issues", issueBody("labeled", 12, 0, delivery.LabelAdopt, "human", false)},
+		{"issues", issueBody("labeled", 12, 0, delivery.LabelAgentWork, "human", false)},
 	}
 	for _, d := range deliveries {
 		if err := h.deliver(t, d.event, d.payload); err != nil {

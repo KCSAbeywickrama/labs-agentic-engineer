@@ -41,25 +41,34 @@ type mergeDecision struct {
 
 // decideAutoMerge IS the merge policy: a pull request whose Resolves list
 // references at least one issue THIS RUN IS WORKING in its milestone
-// squash-merges. That is the milestone's agent work (`aep`) plus its validation
-// issue (`aep:validation`), which is the validation cycle's whole output.
+// squash-merges. That is every ARMED issue in the milestone — the coding
+// cycles' working set and the validation task alike, since the validation
+// task's pull request (tests and report) is the validation cycle's whole
+// output.
 //
-// The validation issue has to be named explicitly precisely BECAUSE it carries
-// no `aep` label: that omission keeps it out of the working set so it cannot hold
-// the settle predicate open, and reading it as "not this run's work" here would
-// leave the validation cycle's pull request — tests, report and all — sitting
-// unmerged until its landing deadline, so the run could never read a verdict.
-// One label decision, two opposite consequences; this is the second one.
+// It is one test on the arming switch, and it stays one because the validation
+// task now carries `aep` like any other agent work. It used to be named a second
+// time here, explicitly, because it carried no arming label at all: the omission
+// was what kept it out of the working set, and reading it as "not this run's
+// work" here would have left every validation pull request unmerged until its
+// landing deadline, so the run could never read a verdict. One label decision,
+// two opposite consequences — both now expressed as the KIND test they always
+// were, so neither can be changed without the other.
 //
-// Merging it is safe for the same reason it was excluded: OpenNonGateWork
-// subtracts the validation issue either way, so closing it moves no predicate.
-// It also has to close — an open validation issue left in a settled milestone is
-// what the reconcile sweep sees as unworked.
+// Merging it is safe for the same reason it is excluded from the working set:
+// the exclusion is by KIND (MilestoneIssueCounts.OpenDevWork subtracts the
+// validation population), so closing the task moves no predicate. It also has to
+// close — an open validation task left in a settled milestone is what the
+// reconcile sweep sees as unworked.
+//
+// A dispatch GATE is not admitted, because it carries no arming label: nothing
+// opens a pull request against a gate, and a pull request claiming one would be
+// claiming work the platform owns.
 //
 // There is deliberately no verification BEFORE the merge. The verification is
 // the POST-MERGE build: the merge is what triggers it, so gating the merge on a
 // build would gate it on the thing it exists to cause. A red build is not a
-// dead end either — it mints a fix issue into the same milestone, the run works
+// dead end either — it mints a bug issue into the same milestone, the run works
 // it in the next cycle, and the loop converges. The agent's own compile-level
 // checks (go build / tsc, lockfile resolution) run before it opens the pull
 // request and catch the cheap failures; the cluster catches the rest.
@@ -75,8 +84,7 @@ func decideAutoMerge(resolves []int, milestoneIssues []sourcecontrol.IssueInfo) 
 	}
 	work := make(map[int]bool, len(milestoneIssues))
 	for _, iss := range milestoneIssues {
-		if delivery.HasLabel(iss.Labels, delivery.LabelAgentWork) ||
-			delivery.HasLabel(iss.Labels, delivery.LabelValidationWork) {
+		if delivery.HasLabel(iss.Labels, delivery.LabelAgentWork) {
 			work[iss.Number] = true
 		}
 	}
@@ -105,15 +113,34 @@ func decideAutoMerge(resolves []int, milestoneIssues []sourcecontrol.IssueInfo) 
 // finished run "workable" for as long as one of its PRs stayed open.
 //
 // The second clause is the WORKING SET, not "some issue is open": a milestone
-// holding only ledger issues (human-filed, unadopted, no "aep" label) has
-// nothing to work, and declaring it workable would wake a run whose first act
-// is to find an empty working set. The exclusions live on the counts type so
-// this predicate and any settle check agree on what work is.
+// holding only ledger issues (human-filed, unarmed) has nothing to work, and
+// declaring it workable would wake a run whose first act is to find an empty
+// working set. The arithmetic lives on the counts type so this predicate and any
+// settle check agree on what work is.
+//
+// It is the DEV working set, which is the wider of the two — it includes the
+// milestone's planned work. This is the predicate that wakes a waiting run, and
+// waking a run that then finds nothing to do costs a cycle boundary, where
+// failing to wake one leaves a version stalled with nobody looking at it.
+//
+// It must agree, issue for issue, with delivery.InDevWorkingSet — the same rule
+// read off an issue's own labels rather than counted host-side. Where the two
+// disagree the loop learns two different things about the same milestone from
+// two different reads, which is how a run settles a version nobody built.
+//
+// The decision ITSELF is delivery.MilestoneWork.Dispatchable, shared with the
+// supervisor's own boundary check (run.Dispatchable) because a run woken by a
+// predicate its boundary then rejects is a wasted cycle, and the reverse is a
+// version nobody wakes. This function is only the adapter from host counts to
+// that rule — nil-tolerant, because an unknown milestone is not dispatchable.
 func dispatchable(counts *sourcecontrol.MilestoneIssueCounts) bool {
 	if counts == nil {
 		return false
 	}
-	return counts.OpenProvision == 0 && counts.OpenNonGateWork() > 0
+	return delivery.MilestoneWork{
+		Gates: counts.OpenProvision,
+		Work:  counts.OpenDevWork(),
+	}.Dispatchable()
 }
 
 // attemptsFor counts how many of a component's WorkflowRuns belong to one

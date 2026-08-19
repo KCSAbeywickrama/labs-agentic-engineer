@@ -30,10 +30,12 @@ milestone until it settles.**
   over its life.
 - **Nothing platform-side parses an issue body.** Bodies are prose the platform
   writes *for the agent*: what to build, its App Path, and "Depends on #N" lines
-  the **agent** honours. Every routable fact is a LABEL (`aep` = agent work,
-  `aep:provision` = a dispatch gate, `aep:validation`, `aep:codingagent` =
-  adoption). Re-plan dedupes on the title slug against the milestone's own
-  issues, which makes reconcile additive-only.
+  the **agent** honours. Every routable fact is a LABEL, on two axes: `aep`
+  **arms** an issue (and is the adoption trigger), and one KIND says what it is
+  — `development`, `bug`, `conflict`, `validation`, `provision`. Every routing
+  predicate is then a positive membership test on the kind rather than a
+  subtraction of exclusions. Re-plan dedupes on the title slug against the
+  milestone's own issues, which makes reconcile additive-only.
 - **One agent per cycle, not per issue.** The dispatch prompt is a milestone
   reference; the runner discovers its own working set, orders it, fans out to
   Task subagents where the work is genuinely independent, and ships **one

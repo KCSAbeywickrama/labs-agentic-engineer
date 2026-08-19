@@ -216,7 +216,7 @@ func (e *Events) mintUnwiredResourceIssue(ctx context.Context, run *delivery.Mil
 	number, _, err := e.p.Writer.Mint(ctx, run.OrgID, run.ProjectID, delivery.IssueSpec{
 		Title:     fmt.Sprintf("Wire the declared resources for %s", component),
 		Body:      body,
-		Labels:    []string{delivery.LabelAgentWork},
+		Labels:    []string{delivery.LabelAgentWork, delivery.KindBug, delivery.SrcBuild},
 		Milestone: run.MilestoneNumber,
 		DedupeKey: delivery.DedupeKeyUnwiredResources(component, missing),
 	})
@@ -233,8 +233,9 @@ func (e *Events) mintUnwiredResourceIssue(ctx context.Context, run *delivery.Mil
 // Ready=False with the connection unresolved — is named explicitly so the agent can
 // confirm the defect rather than re-diagnose it.
 //
-// Same policy as the resource half: agent-work label so the next cycle picks it up,
-// dedupe on (component, targets) so a redelivered webhook files nothing new.
+// Same policy as the resource half: an armed `bug` sourced `src/build` so the next
+// cycle picks it up, dedupe on (component, targets) so a redelivered webhook files
+// nothing new.
 func (e *Events) mintUnwiredEndpointIssue(ctx context.Context, run *delivery.MilestoneRun,
 	component, path string, missing []string) (int, error) {
 	list := "`" + strings.Join(missing, "`, `") + "`"
@@ -250,7 +251,7 @@ func (e *Events) mintUnwiredEndpointIssue(ctx context.Context, run *delivery.Mil
 	number, _, err := e.p.Writer.Mint(ctx, run.OrgID, run.ProjectID, delivery.IssueSpec{
 		Title:     fmt.Sprintf("Wire the declared sibling endpoints for %s", component),
 		Body:      body,
-		Labels:    []string{delivery.LabelAgentWork},
+		Labels:    []string{delivery.LabelAgentWork, delivery.KindBug, delivery.SrcBuild},
 		Milestone: run.MilestoneNumber,
 		DedupeKey: delivery.DedupeKeyUnwiredEndpoints(component, missing),
 	})

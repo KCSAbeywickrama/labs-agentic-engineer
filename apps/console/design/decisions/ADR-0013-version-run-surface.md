@@ -84,7 +84,7 @@ is no ledger list in between.
    acting on it, and listed in the issue register as part of the version's
    record. A resolved gate no longer disappears: it is how the version came to
    exist.)* While any
-   `aep:provision` issue in the milestone is open the run dispatches nothing, so
+   `provision` gate issue in the milestone is open the run dispatches nothing, so
    the gate is the *reason nothing is moving*, not one item among many — which
    makes it the run card's business (decision 4b), not the issue list's. The
    notice names each held dependency and deep-links the spec view's connection

@@ -349,21 +349,40 @@ supervisor dispatches on returns counts), and `mergeVerdict` +`mergeReason` when
 something decided against merging (`declined` by the policy, `refused` by the
 host).
 
+### Arming label
+`aep`, and it says one thing: something may work this issue. It carries no
+meaning about WHAT the work is — that is the kind — and it is also the
+GitHub-side **adoption** trigger, so a human stamping it hands an issue to the
+agent. Platform-written labels come back as webhook echoes and are dropped by
+sender, which is what keeps arming a human act.
+
+### Kind
+Exactly one per issue, and the axis every routing predicate tests **positively**:
+`development` (planned work from the spec), `bug` (a defect, from anywhere),
+`conflict` (a pull request that will not merge), `validation` (judge the deployed
+system), `provision` (a dispatch gate). A `bug` also carries a **source** —
+`src/user`, `src/incident`, `src/validation`, `src/build`, `src/deploy`, absence
+reading as `src/user` — which says who found it.
+
 ### Working set
-Open, `aep`-labelled issues in the milestone, excluding `aep:provision` gates
-and the `aep:validation` issue. A run settles when it is empty and validation
-has a verdict.
+Open, armed issues in the milestone whose kind the loop works: `development`,
+`bug` or `conflict` for a build run; `bug` or `conflict` alone for a bug-fix run,
+which works the deployed version and must never pick up the work of the version
+being built. A run settles when its own working set is empty and validation has
+a verdict.
 
 ### Dispatch gate
-An `aep:provision` issue. Never agent work — a **dispatch hold**: while one is
-open the run dispatches nothing, and a hand-filed one mid-run is a deliberate
-human brake. Gates are minted and resolved by `dependencies/provisioning`, and
-carry no `aep` label so they cannot hold the settle predicate open.
+A `provision` issue. Never agent work — a **dispatch hold**: while one is open
+the run dispatches nothing, and a hand-filed one mid-run is a deliberate human
+brake. Gates are minted and resolved by `dependencies/provisioning`, and carry no
+arming label, which is both why nothing works them and why they are counted on
+their own rather than subtracted from the work waiting behind them.
 
 ### Ledger issue
-A bare human issue that joined a milestone carrying none of the platform's
-labels. Part of the version's record; never worked, never stalling settle.
-Labelling one `aep:codingagent` **adopts** it into the next cycle.
+An issue in a milestone that is **not armed**. Part of the version's record;
+never worked, never stalling settle. It may still be classified — a red-main
+incident is filed as a `bug` so a human can see what it is — because
+classification is not permission. Adding `aep` **adopts** it into the next cycle.
 
 ### Terminal reason
 Why a non-succeeded run stopped. Each value names exactly ONE failure class —

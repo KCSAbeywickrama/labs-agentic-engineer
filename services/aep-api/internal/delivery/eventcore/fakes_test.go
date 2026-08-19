@@ -256,31 +256,36 @@ func newFakeIssues() *fakeIssues {
 	}
 }
 
-// withWork puts open agent-work issues in a milestone.
+// withWork puts open planned-work issues in a milestone: armed, kind
+// `development`, which is what the planner files.
 func (f *fakeIssues) withWork(milestone int, numbers ...int) *fakeIssues {
 	for _, n := range numbers {
 		f.byMilestone[milestone] = append(f.byMilestone[milestone], sourcecontrol.IssueInfo{
-			Number: n, State: "open", Labels: []string{delivery.LabelAgentWork},
+			Number: n, State: "open", Labels: []string{delivery.LabelAgentWork, delivery.KindDevelopment},
 		})
 	}
 	return f
 }
 
-// withValidationIssue puts the milestone's open VALIDATION issue in it, labelled
-// the way the minter files it: `aep:validation` and nothing else. The absent
-// `aep` label is the point — it keeps the issue out of the dispatch working set,
-// and any read that narrows on `aep` cannot see this issue at all.
+// withValidationIssue puts the milestone's open VALIDATION task in it, labelled
+// the way the minter files it: ARMED, and of kind `validation`.
+//
+// The arming label is the point. It is real agent work — an agent is dispatched
+// at it and the platform must auto-merge its pull request — while the KIND is
+// what keeps it out of every working set. Those two facts used to pull against
+// each other through one label, and the auto-merge policy had to name the issue
+// a second time by hand to compensate.
 func (f *fakeIssues) withValidationIssue(milestone, number int) *fakeIssues {
 	f.byMilestone[milestone] = append(f.byMilestone[milestone], sourcecontrol.IssueInfo{
-		Number: number, State: "open", Labels: []string{delivery.LabelValidationWork},
+		Number: number, State: "open", Labels: []string{delivery.LabelAgentWork, delivery.KindValidation},
 	})
 	return f
 }
 
 // withCounts gives a milestone its open-issue populations: gates, working set
-// ("aep", non-gate, non-validation) and grand total. work and total are stated
-// separately on purpose — the gap between them is the ledger, the population
-// the dispatch predicate must ignore.
+// (armed planned work) and grand total. work and total are stated separately on
+// purpose — the gap between them is the ledger, the population the dispatch
+// predicate must ignore.
 //
 // The numbers are a DESCRIPTION of the milestone, not the counts themselves:
 // they are turned into labelled issues and then counted the way the host counts
@@ -294,13 +299,13 @@ func (f *fakeIssues) withCounts(milestone, provision, work, total int) *fakeIssu
 	}
 	labels := make([][]string, 0, total)
 	for range provision {
-		labels = append(labels, []string{delivery.LabelProvisionGate})
+		labels = append(labels, []string{delivery.KindProvision}) // a gate is NOT armed
 	}
 	for range work {
-		labels = append(labels, []string{delivery.LabelAgentWork})
+		labels = append(labels, []string{delivery.LabelAgentWork, delivery.KindDevelopment})
 	}
 	for range ledger {
-		labels = append(labels, nil) // human-filed: no "aep", never worked
+		labels = append(labels, nil) // human-filed: unarmed, never worked
 	}
 	f.counts[milestone] = hostCounts(labels...)
 	return f
@@ -316,27 +321,29 @@ func (f *fakeIssues) withCounts(milestone, provision, work, total int) *fakeIssu
 // precisely why a working set computed by inclusion-exclusion over label
 // overlaps passed its tests and then read every real milestone as empty.
 //
+// Each field counts ONE label, because each alias in the real query filters on
+// one. That is what removed the union's teeth rather than merely working around
+// them: with a single label per population the two semantics coincide, so the
+// query no longer depends on which of them GitHub implements.
+//
 // Anything that wants a milestone's counts in this package goes through here,
 // so no test can state a population the host could not produce.
 func hostCounts(issues ...[]string) *sourcecontrol.MilestoneIssueCounts {
-	anyOf := func(want ...string) int {
+	carrying := func(want string) int {
 		n := 0
 		for _, have := range issues {
-			for _, w := range want {
-				if delivery.HasLabel(have, w) {
-					n++
-					break
-				}
+			if delivery.HasLabel(have, want) {
+				n++
 			}
 		}
 		return n
 	}
 	return &sourcecontrol.MilestoneIssueCounts{
-		OpenProvision: anyOf(delivery.LabelProvisionGate),
-		OpenWorkOrExcluded: anyOf(delivery.LabelAgentWork,
-			delivery.LabelProvisionGate, delivery.LabelValidationWork),
-		OpenExcluded: anyOf(delivery.LabelProvisionGate, delivery.LabelValidationWork),
-		OpenTotal:    len(issues),
+		OpenProvision:   carrying(delivery.KindProvision),
+		OpenAgentWork:   carrying(delivery.LabelAgentWork),
+		OpenDevelopment: carrying(delivery.KindDevelopment),
+		OpenValidation:  carrying(delivery.KindValidation),
+		OpenTotal:       len(issues),
 	}
 }
 
@@ -363,7 +370,9 @@ func (f *fakeIssues) CreateIssue(_ context.Context, _, _ string, req sourcecontr
 //
 // Note the ASYMMETRY with MilestoneIssueCounts below, whose GraphQL `labels:`
 // argument over the same resource is a UNION. Two APIs, two rules; carrying one
-// across to the other is the bug this fake pair exists to keep honest.
+// across to the other is the bug this fake pair exists to keep honest. The
+// asymmetry is still live even though the counts query now lists one label per
+// alias: the next person to add a label to either call site meets it again.
 func (f *fakeIssues) ListMilestoneIssues(_ context.Context, _, _ string, filter sourcecontrol.MilestoneIssuesFilter) ([]sourcecontrol.IssueInfo, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

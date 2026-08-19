@@ -31,9 +31,10 @@ import (
 // populations the predicate is computed over, plus the total that says whether
 // the version still holds anything at all.
 //
-// Work is the WORKING SET — open, `aep`-labelled, not a gate, not the
-// validation issue — which is deliberately narrower than "some issue is open":
-// a milestone holding only ledger issues has nothing to work.
+// Work is the WORKING SET — open, ARMED, and of a kind this loop works
+// (delivery.InDevWorkingSet). It is deliberately narrower than "some issue is
+// open": a milestone holding only ledger issues has nothing to work, and its
+// gates and validation task are worked by something other than a coding cycle.
 type MilestoneSnapshot struct {
 	Work  int `json:"work"`
 	Gates int `json:"gates"`
@@ -48,8 +49,15 @@ type MilestoneSnapshot struct {
 // settle, because settle is reached through the empty-working-set branch that
 // runs before this one: gates hold dispatch, and with nothing to dispatch they
 // hold nothing.
+//
+// The rule is delivery.MilestoneWork.Dispatchable, and this is the supervisor's
+// adapter onto it. The event plane asks the same question of the same milestone
+// (eventcore.dispatchable) to decide whether a webhook is worth waking a waiting
+// run for, and it may not import this package — so the rule lives at the domain
+// root both can reach. A run woken by a predicate its own boundary then rejects
+// is a wasted cycle; the reverse is a version nobody wakes.
 func Dispatchable(s MilestoneSnapshot) bool {
-	return s.Gates == 0 && s.Work > 0
+	return delivery.MilestoneWork{Gates: s.Gates, Work: s.Work}.Dispatchable()
 }
 
 // nextCycleKind picks what the next cycle is for, from what the previous one

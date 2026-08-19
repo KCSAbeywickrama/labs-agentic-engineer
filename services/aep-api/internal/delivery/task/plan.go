@@ -312,12 +312,11 @@ func (s *PlanService) assembleMilestoneTasks(ctx context.Context, orgID, project
 		if slug := titleSlug(issue.Title); slug != "" {
 			slugs[slug] = true
 		}
-		// Gates and the validation issue are not the planner's to touch, and a
-		// ledger-only human issue is not a Task — none of them belong in the
-		// context set an updateTask ref is fenced to.
-		if delivery.HasLabel(issue.Labels, delivery.LabelProvisionGate) ||
-			delivery.HasLabel(issue.Labels, delivery.LabelValidationWork) ||
-			!delivery.HasLabel(issue.Labels, delivery.LabelAgentWork) {
+		// The planner's context set is the DEV working set and nothing else: a
+		// gate is the platform's, the validation task is the validation loop's,
+		// and a ledger-only human issue is not a Task at all — none of them
+		// belong in the set an updateTask ref is fenced to.
+		if !delivery.InDevWorkingSet(issue.Labels) {
 			continue
 		}
 		if !strings.EqualFold(issue.State, "open") {

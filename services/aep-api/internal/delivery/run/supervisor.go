@@ -65,7 +65,7 @@ func NewSupervisor(rt *delivery.Runtime, runs RunStore, dispatcher delivery.Mile
 // supervisor over its milestone.
 //
 // Idempotent by construction, because its callers re-offer the same milestone:
-// adoption fires on every `aep:codingagent` label, and the reconcile sweep
+// adoption fires on every `aep` label a human adds, and the reconcile sweep
 // re-offers every pass. A milestone that already has a live run reuses its row,
 // and a workflow that is already running answers AlreadyStarted, which is
 // success.

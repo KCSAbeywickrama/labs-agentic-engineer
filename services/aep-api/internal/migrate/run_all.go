@@ -127,7 +127,7 @@ func Steps(db *gorm.DB, deploymentTier string, credKey []byte) []database.Step {
 		dbStep("tasks_github_native", RunTasksGitHubNative),
 		// dependency-management (§3.6): the external-resource catalog +
 		// cross-project access-request tables. Two idempotent CREATE TABLEs only —
-		// no component_tasks ALTER (dependency gating lives on aep:provision GitHub
+		// no component_tasks ALTER (dependency gating lives on `provision` GitHub
 		// issues + the funnel depsGate, not DB columns).
 		ctxStep("phase9_dependency_mgmt", RunPhase9DependencyMgmt),
 		// workflow_runs: the retired devflow lookup index. Its model is gone and

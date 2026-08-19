@@ -253,12 +253,12 @@ func previousSpecMilestone(rows []delivery.MilestoneRun, milestoneTitle string) 
 func gatesLast(issues []sourcecontrol.IssueInfo) []sourcecontrol.IssueInfo {
 	out := make([]sourcecontrol.IssueInfo, 0, len(issues))
 	for _, i := range issues {
-		if !delivery.HasLabel(i.Labels, delivery.LabelProvisionGate) {
+		if !delivery.IsDispatchGate(i.Labels) {
 			out = append(out, i)
 		}
 	}
 	for _, i := range issues {
-		if delivery.HasLabel(i.Labels, delivery.LabelProvisionGate) {
+		if delivery.IsDispatchGate(i.Labels) {
 			out = append(out, i)
 		}
 	}

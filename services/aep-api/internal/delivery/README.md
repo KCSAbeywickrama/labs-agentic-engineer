@@ -201,20 +201,29 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   the gates that were holding it — and then the milestone. The previous milestone is located by the NUMBER
   recorded on a run row, never by matching titles against GitHub (titles are renamable, and title filters
   are case-insensitive while create-uniqueness is not). This is what keeps the reconcile sweep sound: a
-  superseded milestone holds no open `aep` issue, so the sweep's trigger never fires on it.
+  superseded milestone holds no open armed issue, so the sweep's trigger never fires on it.
 - **Every issue body is prose; nothing platform-side parses one.** That holds for planned Tasks, for
-  dispatch gates and for the validation issue alike: the milestone is the version pin, LABELS carry every
+  dispatch gates and for the validation task alike: the milestone is the version pin, LABELS carry every
   routable fact, and ordering is the "Depends on #N" lines the AGENT honours. Dedupe on re-plan is the
   title slug against the milestone's own issues, which makes reconcile additive-only and a crash re-run a
-  no-op. Gates (`aep:provision` + `aep:dep/<slug>`, minted by `dependencies/provisioning`) and the
-  validation issue (`aep:validation`) deliberately do NOT carry `aep` — a gate is a dispatch hold and the
-  validation issue is a phase of the run, and neither may hold the settle predicate open.
-  The corollary, and the trap: a read that NARROWS on `aep` cannot see either of them. So a decision that
-  must weigh them (the auto-merge policy, which merges the validation cycle's pull request) reads the
+  no-op.
+- **Two label axes: an issue is ARMED or not, and has exactly one KIND** (`labels.go`). `aep` arms it —
+  something may work it — and is also the human's adoption trigger; the kind (`development`, `bug`,
+  `conflict`, `validation`, `provision`) says which loop, and a `bug` carries a `src/*` source saying who
+  found it. Every routing predicate is then a POSITIVE membership test on the kind, which is what removed
+  the old model's subtraction of exclusions — a rule stated as what it is not, where a single mis-stated
+  exclusion emptied a live working set. A **gate** (`provision` + `aep:dep/<slug>`, minted by
+  `dependencies/provisioning`) is deliberately NOT armed: a dispatch hold is nobody's work, and its absence
+  from the armed population is what lets it be counted on its own rather than subtracted from the work
+  waiting behind it. The **validation task** IS armed and excluded by its kind instead — it is real agent
+  work whose pull request the platform must auto-merge, while no working set may include it or settle would
+  never come.
+- **A read that narrows on a label cannot see what does not carry it.** So a decision that must weigh
+  several populations — the auto-merge policy, which merges the validation cycle's pull request — reads the
   milestone's open issues UNFILTERED and decides on the labels itself. `?labels=` on the REST issues
-  endpoint is AND, so there is no filter that returns both populations anyway — and a label predicate split
-  across the fetch and the decision is one rule in two places, which is how the validation cycle's pull
-  request once ended up declined as "not this run's work".
+  endpoint is AND, so a filter naming two labels demands an issue carrying both and returns nothing; and a
+  label predicate split across the fetch and the decision is one rule in two places, which is how the
+  validation cycle's pull request once ended up declined as "not this run's work".
 - **Milestone assignment rides issue creation.** A plan costs `1+N` content-generating requests against
   GitHub's 80-per-minute ceiling: one milestone create plus one issue create per Task. Never
   create-then-PATCH, and never a label pre-create per issue (`sourcecontrol` memoises the ensure).

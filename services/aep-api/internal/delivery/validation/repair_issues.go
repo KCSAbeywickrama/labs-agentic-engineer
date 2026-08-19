@@ -86,7 +86,7 @@ func (s *Service) MintRepairIssues(ctx context.Context, orgID, projectID string,
 		number, _, err := s.writer.Mint(ctx, orgID, projectID, delivery.IssueSpec{
 			Title:     fmt.Sprintf("Fix the failing acceptance criterion %s", c.ID),
 			Body:      repairIssueBody(c, must),
-			Labels:    []string{delivery.LabelAgentWork},
+			Labels:    []string{delivery.LabelAgentWork, delivery.KindBug, delivery.SrcValidation},
 			Milestone: milestoneNumber,
 			DedupeKey: delivery.DedupeKeyValidationFix(c.ID, cycleID),
 		})

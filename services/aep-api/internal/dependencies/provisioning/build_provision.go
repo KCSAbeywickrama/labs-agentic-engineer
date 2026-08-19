@@ -61,7 +61,7 @@ type ProvisionFailure struct {
 }
 
 // ProvisionForBuild authors the project's dependencies from the build drawer
-// inputs the dev workflow carries (issue #164). It mints the aep:provision gate
+// inputs the dev workflow carries (issue #164). It mints the `provision` gate
 // issues ONCE, then authors each input BY KIND:
 //   - external-config: the SaveValues-style synchronous flow using the already
 //     staged secret reference (AuthorWithSecretRef — no SM-API write), closing
@@ -84,7 +84,7 @@ func (s *Service) ProvisionForBuild(ctx context.Context, orgID, ocOrgID, project
 	// gate — and a pure re-build must not churn a fresh gate for every already-ready
 	// dep. Existing gates are still reconciled by settleReadyGates below, so an
 	// orphaned gate self-heals on ANY later build, drawer or not (issue #164).
-	// gateByDep carries the aep:provision gate issue number the mint step KNOWS for
+	// gateByDep carries the `provision` gate issue number the mint step KNOWS for
 	// each dep — captured from the CreateIssue result, not re-looked-up via GitHub's
 	// eventually-consistent label list (which lags a just-created gate and strands
 	// the provision run — issue #164). Empty when no inputs were carried; a missing

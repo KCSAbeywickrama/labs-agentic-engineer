@@ -29,7 +29,7 @@ import (
 // imports neither.
 
 // IssueClient is the GitHub issue READ surface this package needs: one
-// MILESTONE's issues, which is how the version's own aep:validation issue is
+// MILESTONE's issues, which is how the version's own validation task is
 // found. sourcecontrol.IssueService satisfies it.
 //
 // The read is milestone-scoped rather than project-wide because the milestone is

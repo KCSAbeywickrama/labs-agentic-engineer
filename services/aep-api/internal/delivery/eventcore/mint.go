@@ -46,9 +46,13 @@ import (
 // files nothing. (The key never reaches GitHub — the service strips it and
 // encodes it as a label.)
 
-// mintFixIssue files the fix issue for a component whose build stayed red
+// mintFixIssue files the bug issue for a component whose build stayed red
 // through its automatic re-trigger. It carries the three facts a coding agent
 // needs to start: which component, which commit, and what the build said.
+//
+// It is a `bug` sourced `src/build`, which is what puts it in both working sets:
+// a red build is worth fixing whether the version is still being built or is
+// already deployed.
 func (e *Events) mintFixIssue(ctx context.Context, run *delivery.MilestoneRun, ev delivery.BuildTerminal) (int, error) {
 	body := fmt.Sprintf(
 		"The build for component **%s** failed at merge commit `%s`, and failed again on an automatic re-trigger at the same commit. It is not a flake — the code needs a fix.\n\n"+
@@ -63,7 +67,7 @@ func (e *Events) mintFixIssue(ctx context.Context, run *delivery.MilestoneRun, e
 	number, _, err := e.p.Writer.Mint(ctx, run.OrgID, run.ProjectID, delivery.IssueSpec{
 		Title:     fmt.Sprintf("Fix the failing build for %s", ev.Component),
 		Body:      body,
-		Labels:    []string{delivery.LabelAgentWork},
+		Labels:    []string{delivery.LabelAgentWork, delivery.KindBug, delivery.SrcBuild},
 		Milestone: run.MilestoneNumber,
 		DedupeKey: delivery.DedupeKeyFix(ev.Component, delivery.ShortSHA(ev.CommitSHA)),
 	})
@@ -107,7 +111,7 @@ func (e *Events) MintDeployFixIssues(ctx context.Context, orgID, projectID strin
 		number, _, err := e.p.Writer.Mint(ctx, orgID, projectID, delivery.IssueSpec{
 			Title:     fmt.Sprintf("Fix the failed deployment for %s", component),
 			Body:      body,
-			Labels:    []string{delivery.LabelAgentWork},
+			Labels:    []string{delivery.LabelAgentWork, delivery.KindBug, delivery.SrcDeploy},
 			Milestone: milestoneNumber,
 			DedupeKey: delivery.DedupeKeyDeploy(component, delivery.ShortSHA(commitSHA)),
 		})
@@ -143,7 +147,7 @@ func (e *Events) mintConflictIssue(ctx context.Context, orgID, projectID string,
 	number, _, err := e.p.Writer.Mint(ctx, orgID, projectID, delivery.IssueSpec{
 		Title:     fmt.Sprintf("Resolve the merge conflict on pull request #%d", prNumber),
 		Body:      body,
-		Labels:    []string{delivery.LabelAgentWork},
+		Labels:    []string{delivery.LabelAgentWork, delivery.KindConflict},
 		Milestone: run.MilestoneNumber,
 		DedupeKey: delivery.DedupeKeyConflict(prNumber),
 	})
@@ -154,9 +158,11 @@ func (e *Events) mintConflictIssue(ctx context.Context, orgID, projectID string,
 // red on main outside any run — the deployed version regressing.
 //
 // It is filed into the DEPLOYED version's milestone (that is the version that
-// broke) and, alone among platform-minted issues, carries NO agent-work label:
-// a red main is a human's call. Nobody is dispatched for it until somebody
-// adopts it.
+// broke) and, alone among platform-minted issues, carries NO ARMING LABEL: a red
+// main is a human's call. It is classified — a `bug` sourced `src/incident`, so
+// the console and a triaging human see what it is — but classification is not
+// permission, and nothing is dispatched for it until somebody arms it with the
+// agent-work label.
 //
 // Resolving the deployed version through run rows is also what keeps this path
 // inert until the platform has actually shipped a version.
@@ -181,12 +187,13 @@ func (e *Events) mintRedMainIssue(ctx context.Context, ev delivery.BuildTerminal
 			"Failure output:\n\n```\n%s\n```\n\n"+
 			"This issue is a ledger entry: no agent is dispatched for it. Add the `%s` label to hand it to the coding agent.",
 		ev.Component, orNone(deployed.SpecTag()), ev.Component, ev.CommitSHA, orNone(ev.RunName),
-		orNone(ev.Reason), delivery.LabelAdopt)
+		orNone(ev.Reason), delivery.LabelAgentWork)
 
 	_, _, err = e.p.Writer.Mint(ctx, deployed.OrgID, deployed.ProjectID, delivery.IssueSpec{
 		Title: fmt.Sprintf("Red main: %s", ev.Component),
 		Body:  body,
-		// No agent-work label, deliberately: never auto-dispatched.
+		// Classified but NOT armed, deliberately: never auto-dispatched.
+		Labels:    []string{delivery.KindBug, delivery.SrcIncident},
 		Milestone: deployed.MilestoneNumber,
 		DedupeKey: delivery.DedupeKeyRedMain(ev.Component, delivery.ShortSHA(ev.CommitSHA)),
 	})

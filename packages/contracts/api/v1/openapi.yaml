@@ -1986,10 +1986,12 @@ paths:
       - userJWT: []
       summary: List a project's issues (live from GitHub), optionally scoped to one spec/build version
         tag by milestone membership. Every row carries the label-derived `executorClass` the console
-        sections on — agent work, a dispatch gate, or a bare human ledger issue. The aep:validation
-        issue is excluded (it is a phase of the run, surfaced with the run's verdict on the deployment
-        surface); get-task still serves it by number. Ledger issues have no label to query by, so they
-        are only discoverable through milestone membership and appear only on a `tag`-scoped read.
+        sections on — agent work, a dispatch gate, or a bare human ledger issue — plus the finer
+        `kind` (development | bug | conflict | validation | provision) for the row's own chip. The
+        validation task is excluded (it is a phase of the run, surfaced with the run's verdict on the
+        deployment surface); get-task still serves it by number. Ledger issues carry no label to query
+        by, so they are only discoverable through milestone membership and appear only on a
+        `tag`-scoped read.
       tags:
       - Tasks
   /projects/{projectName}/tasks/{issueNumber}:
@@ -5195,18 +5197,31 @@ components:
           type: object
         executorClass:
           description: >-
-            Label-derived kind of the issue, and the only classification the
-            platform makes of one: `coding` for agent work (the `aep` label),
-            `provision` for a dispatch gate (`aep:provision`), `validation` for
-            the run's validation issue, `ledger` for a bare human issue that
-            joined the milestone carrying none of them. Nothing here is parsed
-            out of the body — issue bodies are prose the platform writes for
-            the agent and never reads back.
+            WHO works this issue, derived from its labels: `coding` for anything
+            a coding agent is dispatched at (planned work, a bug, a merge
+            conflict — all armed with the `aep` label), `provision` for a
+            dispatch gate the platform resolves, `validation` for the version's
+            validation task, `ledger` for a bare human issue that joined the
+            milestone unarmed. Deliberately coarser than `kind`: the three
+            coding kinds are dispatched identically, so they are one class here
+            and are told apart by `kind`. Nothing here is parsed out of the body
+            — issue bodies are prose the platform writes for the agent and never
+            reads back.
           enum:
           - coding
           - provision
           - validation
           - ledger
+          type: string
+        kind:
+          description: >-
+            The issue's raw label kind: `development` for planned work minted
+            from the spec, `bug` for a defect, `conflict` for a pull request
+            that will not merge, `validation` for the version's validation
+            task, `provision` for a dispatch gate. Absent when the issue carries
+            no kind label (a ledger issue, or one a human armed without
+            classifying); a consumer that does not recognise a kind should render
+            the row untagged rather than guess.
           type: string
         hold:
           type: boolean
@@ -5300,18 +5315,31 @@ components:
           type: object
         executorClass:
           description: >-
-            Label-derived kind of the issue, and the only classification the
-            platform makes of one: `coding` for agent work (the `aep` label),
-            `provision` for a dispatch gate (`aep:provision`), `validation` for
-            the run's validation issue, `ledger` for a bare human issue that
-            joined the milestone carrying none of them. Nothing here is parsed
-            out of the body — issue bodies are prose the platform writes for
-            the agent and never reads back.
+            WHO works this issue, derived from its labels: `coding` for anything
+            a coding agent is dispatched at (planned work, a bug, a merge
+            conflict — all armed with the `aep` label), `provision` for a
+            dispatch gate the platform resolves, `validation` for the version's
+            validation task, `ledger` for a bare human issue that joined the
+            milestone unarmed. Deliberately coarser than `kind`: the three
+            coding kinds are dispatched identically, so they are one class here
+            and are told apart by `kind`. Nothing here is parsed out of the body
+            — issue bodies are prose the platform writes for the agent and never
+            reads back.
           enum:
           - coding
           - provision
           - validation
           - ledger
+          type: string
+        kind:
+          description: >-
+            The issue's raw label kind: `development` for planned work minted
+            from the spec, `bug` for a defect, `conflict` for a pull request
+            that will not merge, `validation` for the version's validation
+            task, `provision` for a dispatch gate. Absent when the issue carries
+            no kind label (a ledger issue, or one a human armed without
+            classifying); a consumer that does not recognise a kind should render
+            the row untagged rather than guess.
           type: string
         hold:
           type: boolean

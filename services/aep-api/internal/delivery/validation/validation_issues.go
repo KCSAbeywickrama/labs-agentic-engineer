@@ -58,7 +58,7 @@ func NewService(d Deps) *Service {
 	return &Service{issues: d.Issues, writer: d.Writer, criteria: d.Criteria}
 }
 
-// EnsureValidationIssue mints ONE aep:validation issue per version — filed into
+// EnsureValidationIssue mints ONE validation task per version — filed into
 // that version's milestone — and returns its number. 0 means there is nothing to
 // validate, which settles the run `skipped`; a missing or malformed criteria file
 // is that clean no-op.
@@ -86,9 +86,14 @@ func NewService(d Deps) *Service {
 // validation issue" for an issue this call had just filed, and the run reported
 // `skipped` over an oracle it was holding in its hand.
 //
-// The issue is PROSE with ONE label. It deliberately does NOT carry the `aep`
-// working-set label: the validation cycle is dispatched at it by number, and
-// working-set membership would hold the run's settle predicate open forever.
+// The issue is PROSE with two labels: ARMED (`aep`) and of kind `validation`.
+// Armed because it is real agent work — an agent is dispatched at it and opens a
+// pull request the platform must auto-merge — and of a kind no working set
+// includes, which is what keeps it from holding a run's settle predicate open
+// forever. Those two facts used to be one label decision pulling in opposite
+// directions: the issue carried NO arming label so it would stay out of the
+// working set, and the auto-merge policy then had to name it a second time by
+// hand or its pull request never landed. Both now read the kind.
 func (s *Service) EnsureValidationIssue(ctx context.Context, orgID, projectID string, milestoneNumber int) (int, error) {
 	if milestoneNumber <= 0 {
 		// A validation issue with no version is the state this refuses to create:
@@ -134,7 +139,7 @@ func (s *Service) EnsureValidationIssue(ctx context.Context, orgID, projectID st
 	number, _, cerr := s.writer.Mint(ctx, orgID, projectID, delivery.IssueSpec{
 		Title:  validationTitle,
 		Body:   rationale(doc.summarize()) + "\n\n" + renderScope(doc),
-		Labels: []string{delivery.LabelValidationWork},
+		Labels: []string{delivery.LabelAgentWork, delivery.KindValidation},
 		// The version pin RIDES the create — one call, so the issue is never
 		// versionless, not even for the beat a follow-up patch would take.
 		Milestone: milestoneNumber,
@@ -154,10 +159,15 @@ func (s *Service) EnsureValidationIssue(ctx context.Context, orgID, projectID st
 	return number, nil
 }
 
-// findValidationIssue returns the number of the milestone's aep:validation issue
+// findValidationIssue returns the number of the milestone's validation task
 // and whether it is currently open, or (0, false) when that version has none. The
-// milestone and the LABEL are the whole query — nothing parses a body, and nothing
-// looks outside the version.
+// milestone and the LABELS are the whole query — nothing parses a body, and
+// nothing looks outside the version.
+//
+// Both labels are listed because this filter is the REST one, whose `?labels=a,b`
+// is AND: it demands an armed issue of kind `validation`, which is exactly the
+// validation task and nothing else. (The GraphQL argument spelled the same way
+// is a UNION and would have matched every armed issue in the version.)
 //
 // State is `all` rather than `open` on purpose: a closed validation issue is the
 // NORMAL state between attempts, because every attempt's pull request closes it.
@@ -167,7 +177,7 @@ func (s *Service) findValidationIssue(ctx context.Context, orgID, projectID stri
 	issues, err := s.issues.ListMilestoneIssues(ctx, orgID, projectID, sourcecontrol.MilestoneIssuesFilter{
 		Number: milestoneNumber,
 		State:  "all",
-		Labels: []string{delivery.LabelValidationWork},
+		Labels: []string{delivery.LabelAgentWork, delivery.KindValidation},
 	})
 	if err != nil {
 		return 0, false, fmt.Errorf("validation: list milestone issues: %w", err)

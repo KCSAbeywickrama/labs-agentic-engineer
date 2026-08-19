@@ -232,10 +232,10 @@ func TestIssueWriter_WritesReachTheHost(t *testing.T) {
 	if err := w.Comment(ctx, "org", "proj", 5, "note"); err != nil {
 		t.Fatalf("Comment: %v", err)
 	}
-	if err := w.Label(ctx, "org", "proj", 6, LabelAgentWork, LabelAdopt); err != nil {
+	if err := w.Label(ctx, "org", "proj", 6, LabelAgentWork, KindBug); err != nil {
 		t.Fatalf("Label: %v", err)
 	}
-	if err := w.Unlabel(ctx, "org", "proj", 7, LabelAdopt); err != nil {
+	if err := w.Unlabel(ctx, "org", "proj", 7, LabelCancelled); err != nil {
 		t.Fatalf("Unlabel: %v", err)
 	}
 
@@ -246,11 +246,11 @@ func TestIssueWriter_WritesReachTheHost(t *testing.T) {
 	if ops.closed[0] != 3 || ops.reopened[0] != 4 {
 		t.Errorf("close/reopen hit issues %v/%v; want 3/4", ops.closed, ops.reopened)
 	}
-	if got := ops.added[0]; !reflect.DeepEqual(got, []string{LabelAgentWork, LabelAdopt}) {
+	if got := ops.added[0]; !reflect.DeepEqual(got, []string{LabelAgentWork, KindBug}) {
 		t.Errorf("added labels = %v; want the caller's set in order", got)
 	}
-	if ops.removed[0] != LabelAdopt {
-		t.Errorf("removed label = %q; want %q", ops.removed[0], LabelAdopt)
+	if ops.removed[0] != LabelCancelled {
+		t.Errorf("removed label = %q; want %q", ops.removed[0], LabelCancelled)
 	}
 }
 

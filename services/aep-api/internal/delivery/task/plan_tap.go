@@ -327,10 +327,12 @@ func (t *planTap) handlePlan(out *taskplan.PlanTaskOk) {
 		// The Serves-stories stamp is platform-authored from the design's
 		// citations (#369) — the planner has zero discretion over it.
 		Body: delivery.StampServesStories(composeTaskBody(planned, t.issueForComponent), t.storiesFor(out.Component)),
-		// The working-set marker, and nothing else: a Task is agent work. Gates
-		// (aep:provision) and the validation Task (aep:validation) are minted
-		// elsewhere and are deliberately not this population.
-		Labels:    []string{delivery.LabelAgentWork},
+		// Armed, and PLANNED work: a Task is what the spec asked for. The kind is
+		// what keeps a bug-fix run off it — that loop works the deployed version
+		// and must never pick up planned work for a version still being built.
+		// Gates and the validation task are minted elsewhere and are deliberately
+		// not this population.
+		Labels:    []string{delivery.LabelAgentWork, delivery.KindDevelopment},
 		Milestone: t.milestone,
 	})
 	if err != nil || number == 0 {

@@ -316,7 +316,7 @@ func (a *Activities) PollMilestone(ctx context.Context, in MilestoneRef) (Milest
 		return MilestoneSnapshot{}, nil
 	}
 	return MilestoneSnapshot{
-		Work:  counts.OpenNonGateWork(),
+		Work:  counts.OpenDevWork(),
 		Gates: counts.OpenProvision,
 		Total: counts.OpenTotal,
 	}, nil

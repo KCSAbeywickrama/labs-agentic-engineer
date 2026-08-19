@@ -298,24 +298,35 @@ func (c *Client) ListMilestoneIssues(ctx context.Context, owner, repo string, cr
 // populations out into a query per label would multiply the rate-limit cost of
 // the loop's hottest read.
 //
-// The labels: argument is a UNION filter — an issue matches when it carries ANY
-// of the listed labels. It cannot express an intersection, so the aliases here
-// are unions and the working set is their DIFFERENCE:
+// EVERY ALIAS FILTERS ON ONE LABEL. The labels: argument is a UNION filter — an
+// issue matches when it carries ANY of the listed labels — so a multi-label
+// alias counts a WIDER population than its name suggests, and an intersection
+// cannot be expressed here at all. With one label per alias there is no
+// inclusion-exclusion subtlety left to get wrong, and the working sets are plain
+// subtraction in Go (sourcecontrol.MilestoneIssueCounts, which owns the
+// arithmetic):
 //
-//	|"aep" ∪ exclusions| - |exclusions| = the "aep" issues carrying neither
+//	dev working set  = aep - validation
+//	task working set = aep - validation - development
 //
-// which is exact without an intersection term, and stays one round trip. Do not
-// "fix" an alias by listing several labels expecting an AND — that widens the
-// population and silently empties the working set. The label literals mirror
+// Both are exact because every workable kind carries "aep", so each subtracted
+// kind is a strict SUBSET of the aep population. Gates are the deliberate
+// exception: they carry no "aep", so they are counted on their own alias and
+// subtracted from nothing — a gate holds the next dispatch, it must never erase
+// the work behind it.
+//
+// Do not "fix" an alias by listing several labels expecting an AND; that widens
+// the population and silently empties a working set. The label literals mirror
 // internal/delivery's vocabulary; they are spelled here because the host adapter
 // may not import a domain.
 const milestoneIssueCountsQuery = `query($owner: String!, $repo: String!, $m: Int!) {
   repository(owner: $owner, name: $repo) {
     milestone(number: $m) {
-      provision:      issues(states: [OPEN], labels: ["aep:provision"], first: 1) { totalCount }
-      allOpen:        issues(states: [OPEN], first: 1) { totalCount }
-      workOrExcluded: issues(states: [OPEN], labels: ["aep", "aep:provision", "aep:validation"], first: 1) { totalCount }
-      excluded:       issues(states: [OPEN], labels: ["aep:provision", "aep:validation"], first: 1) { totalCount }
+      provision:   issues(states: [OPEN], labels: ["provision"], first: 1) { totalCount }
+      allOpen:     issues(states: [OPEN], first: 1) { totalCount }
+      agentWork:   issues(states: [OPEN], labels: ["aep"], first: 1) { totalCount }
+      development: issues(states: [OPEN], labels: ["development"], first: 1) { totalCount }
+      validation:  issues(states: [OPEN], labels: ["validation"], first: 1) { totalCount }
     }
   }
 }`
@@ -332,10 +343,11 @@ func (c *Client) MilestoneIssueCounts(ctx context.Context, owner, repo string, c
 	var data struct {
 		Repository *struct {
 			Milestone *struct {
-				Provision      countAlias `json:"provision"`
-				AllOpen        countAlias `json:"allOpen"`
-				WorkOrExcluded countAlias `json:"workOrExcluded"`
-				Excluded       countAlias `json:"excluded"`
+				Provision   countAlias `json:"provision"`
+				AllOpen     countAlias `json:"allOpen"`
+				AgentWork   countAlias `json:"agentWork"`
+				Development countAlias `json:"development"`
+				Validation  countAlias `json:"validation"`
 			} `json:"milestone"`
 		} `json:"repository"`
 	}
@@ -348,9 +360,10 @@ func (c *Client) MilestoneIssueCounts(ctx context.Context, owner, repo string, c
 	}
 	ms := data.Repository.Milestone
 	return &sourcecontrol.MilestoneIssueCounts{
-		OpenProvision:      ms.Provision.TotalCount,
-		OpenTotal:          ms.AllOpen.TotalCount,
-		OpenWorkOrExcluded: ms.WorkOrExcluded.TotalCount,
-		OpenExcluded:       ms.Excluded.TotalCount,
+		OpenProvision:   ms.Provision.TotalCount,
+		OpenTotal:       ms.AllOpen.TotalCount,
+		OpenAgentWork:   ms.AgentWork.TotalCount,
+		OpenDevelopment: ms.Development.TotalCount,
+		OpenValidation:  ms.Validation.TotalCount,
 	}, nil
 }

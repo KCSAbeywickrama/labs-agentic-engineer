@@ -136,7 +136,7 @@ type SpecPlanner interface {
 	PlanIntoMilestone(ctx context.Context, orgID, projectID string, milestoneNumber int) error
 }
 
-// GateResolver authors the version's dependencies and mints the aep:provision
+// GateResolver authors the version's dependencies and mints the `provision`
 // gate issues into its milestone. Gates are never agent work: they hold the
 // next dispatch until the platform (drawer submission, readiness watcher)
 // resolves them. Satisfied by an app-root adapter over the provisioning

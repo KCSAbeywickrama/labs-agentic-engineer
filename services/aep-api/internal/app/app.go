@@ -793,7 +793,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// ResourceTypes, Task 3 — no longer the external_resources table) and the
 	// org published endpoints + platform resource types (OC Resource-model
 	// client). The provisioning surface (value/param collection + the
-	// aep:provision issue funnel) is wired in the Phase-6 block further below.
+	// `provision` gate issue funnel) is wired in the Phase-6 block further below.
 	resourceClient := openchoreo.NewResourceClient(ocConfig)
 	// The resolver collaborators (repo locator + design reader) let the endpoint
 	// catalog discover each org-service's real OpenAPI contract + repo coords
@@ -948,7 +948,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	artifactStore.SetOrgServiceResolver(orgEndpointCatalog)
 
 	// Dependency provisioning (dependency-management Phase 6): the value/param
-	// collection surface + the aep:provision gate funnel. The provisioner cores
+	// collection surface + the `provision` gate funnel. The provisioner cores
 	// author the OC Resource model; the service drives gate issues + provision
 	// Executions (Kind=provision) and closes each issue with a no-secrets
 	// reference; the readiness watcher observes platform-resource bindings'
@@ -1048,7 +1048,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		return nil, fmt.Errorf("assemble delivery domain: %w", err)
 	}
 	params.Deps.Delivery = deliveryHandlers
-	// The project's single aep:validation issue. The RUN mints it, at
+	// The project's single validation task. The RUN mints it, at
 	// deployed-green: minting it at plan time would put an issue in the working
 	// set that nothing can work until every component is deployed.
 	validationSvc := validation.NewService(validation.Deps{

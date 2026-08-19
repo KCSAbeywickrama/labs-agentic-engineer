@@ -340,11 +340,12 @@ func agentIssue(number int, title, body string) sourcecontrol.IssueInfo {
 		Body:   body,
 		State:  "open",
 		URL:    fmt.Sprintf("https://github.com/o/r/issues/%d", number),
-		Labels: []string{delivery.LabelAgentWork},
+		Labels: []string{delivery.LabelAgentWork, delivery.KindDevelopment},
 	}
 }
 
-// gateIssue builds a seeded dispatch gate: the aep:provision label, no `aep`.
+// gateIssue builds a seeded dispatch gate: kind `provision`, and deliberately
+// NOT armed — nothing may work a gate.
 func gateIssue(number int, depName string) sourcecontrol.IssueInfo {
 	return sourcecontrol.IssueInfo{
 		Number: number,
@@ -352,12 +353,12 @@ func gateIssue(number int, depName string) sourcecontrol.IssueInfo {
 		Body:   "Provide this dependency's configuration values in the architecture drawer.",
 		State:  "open",
 		URL:    fmt.Sprintf("https://github.com/o/r/issues/%d", number),
-		Labels: []string{delivery.LabelProvisionGate},
+		Labels: []string{delivery.KindProvision},
 	}
 }
 
-// validationIssue builds the project's seeded validation issue: one label, and
-// deliberately NOT the `aep` working-set one.
+// validationIssue builds the project's seeded validation task: ARMED like any
+// other agent work, and of a kind no working set includes.
 func validationIssue(number int) sourcecontrol.IssueInfo {
 	return sourcecontrol.IssueInfo{
 		Number: number,
@@ -365,7 +366,21 @@ func validationIssue(number int) sourcecontrol.IssueInfo {
 		Body:   "Author e2e tests and run them against the deployed system.",
 		State:  "open",
 		URL:    fmt.Sprintf("https://github.com/o/r/issues/%d", number),
-		Labels: []string{delivery.LabelValidationWork},
+		Labels: []string{delivery.LabelAgentWork, delivery.KindValidation},
+	}
+}
+
+// bugIssue builds a platform-minted defect: armed, kind `bug`, sourced from the
+// build that found it. It is `coding` to the console like planned work, and
+// tells itself apart from it only by its kind.
+func bugIssue(number int, title string) sourcecontrol.IssueInfo {
+	return sourcecontrol.IssueInfo{
+		Number: number,
+		Title:  title,
+		Body:   "The build failed and failed again on a re-trigger.",
+		State:  "open",
+		URL:    fmt.Sprintf("https://github.com/o/r/issues/%d", number),
+		Labels: []string{delivery.LabelAgentWork, delivery.KindBug, delivery.SrcBuild},
 	}
 }
 

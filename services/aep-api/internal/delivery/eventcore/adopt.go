@@ -42,9 +42,9 @@ type AdoptTarget struct {
 }
 
 // AdoptIssue hands one issue to the coding agent, from either of the two
-// adoption routes: the `aep:codingagent` label arriving by webhook, and the
-// console's dispatch button (which calls this directly, because a label the
-// platform stamps itself comes back as an echo and is dropped).
+// adoption routes: the `aep` arming label arriving by webhook, and the console's
+// dispatch button (which calls this directly, because a label the platform
+// stamps itself comes back as an echo and is dropped).
 //
 // The rules, in order:
 //
@@ -58,10 +58,15 @@ type AdoptTarget struct {
 //     one branch.
 //   - Otherwise an incident run starts over that milestone.
 //
-// Adoption does NOT stamp the agent-work label. The working set is read from
-// the milestone, and the labelling is the human's act of adoption — inventing
-// a second, platform-authored path to the same state would make "who adopted
-// this" unanswerable.
+// Adoption does NOT stamp the arming label. The working set is read from the
+// milestone, and arming IS the human's act of adoption — inventing a second,
+// platform-authored path to the same state would make "who adopted this"
+// unanswerable.
+//
+// Nor does it stamp a KIND. An armed issue carrying none reads as a bug to every
+// working-set predicate (delivery.InDevWorkingSet), which is what a human
+// handing over an unclassified issue means, and it is the same answer the host's
+// counts give — the two must not disagree about one issue.
 func (e *Events) AdoptIssue(ctx context.Context, orgID, projectID string, target AdoptTarget) error {
 	if target.Number == 0 || e.p.Runs == nil {
 		return nil
@@ -171,9 +176,9 @@ func (e *Events) Revalidate(ctx context.Context, orgID, projectID string, milest
 		return "", err
 	}
 	// The WORKING SET, not every open issue: a stray gate or the version's own
-	// validation issue must not read as unfinished work, and neither is something
+	// validation task must not read as unfinished work, and neither is something
 	// a coding cycle would pick up.
-	if counts != nil && counts.OpenNonGateWork() > 0 {
+	if counts != nil && counts.OpenDevWork() > 0 {
 		return "", delivery.ErrMilestoneHasOpenWork
 	}
 	hasCriteria, cerr := e.p.Criteria.HasValidationCriteria(ctx, orgID, projectID)

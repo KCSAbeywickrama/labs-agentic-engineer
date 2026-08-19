@@ -224,7 +224,7 @@ type Deployer interface {
 	PlanDeploymentWaves(ctx context.Context, orgID, projectID string, components []string) ([][]string, error)
 }
 
-// Gates authors the version's dependencies and mints its `aep:provision` gate
+// Gates authors the version's dependencies and mints its `provision` gate
 // issues into the milestone. Satisfied by an app-root adapter over the
 // provisioning service — `run` names no sibling, exactly as `build` reaches the
 // same capability through its own GateResolver port.

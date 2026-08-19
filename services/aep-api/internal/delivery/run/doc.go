@@ -32,7 +32,7 @@
 //	 │  red after the one automatic re-trigger ─► FIX issue ─► next cycle    │
 //	 │  merge conflict ─────────────────────────► CONFLICT issue ─► next     │
 //	 │  deployed-green + empty working set + validating origin ─► VALIDATION │
-//	 └─ settle: zero open non-gate `aep` issues + terminal validation
+//	 └─ settle: empty working set (armed, kind ∈ dev/bug/conflict) + verdict
 //	            └─► close the milestone · run row → succeeded
 //	    budgets exhausted / no progress / cancel ─► failed | cancelled
 //

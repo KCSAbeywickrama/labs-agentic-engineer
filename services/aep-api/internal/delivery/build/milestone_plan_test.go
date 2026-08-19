@@ -345,7 +345,7 @@ func TestSupersede_ClosesOpenWorkThenGatesThenTheMilestone(t *testing.T) {
 	}
 	h.stub.OnFunc(http.MethodGet, "/repos/acme/widgets/issues", jsonPage(`[
 		{"number":31,"title":"Implement orders","state":"open","labels":[{"name":"aep"}]},
-		{"number":32,"title":"Provision orders-db","state":"open","labels":[{"name":"aep:provision"}]},
+		{"number":32,"title":"Provision orders-db","state":"open","labels":[{"name":"provision"}]},
 		{"number":33,"title":"Flaky checkout","state":"open","labels":[]}
 	]`))
 	for _, n := range []int{31, 32, 33} {
