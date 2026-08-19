@@ -27,6 +27,16 @@
  * (follow the agent's work).
  */
 
+/**
+ * Whether two versions of the same element render identically. Compiler
+ * output is plain JSON built field-by-field in a fixed order, so serialising
+ * is a stable way to catch every rendered difference — geometry, colours,
+ * text — without enumerating fields that would drift as the compiler grows.
+ */
+function sameContent(a: any, b: any): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
 function screenOf(el: any): string | null {
   const s = el?.customData?.screen;
   return typeof s === "string" && s.length > 0 ? s : null;
@@ -63,8 +73,12 @@ export function firstScreenName(elements: any[]): string | null {
  * nothing changed or there is no previous scene to compare against; the
  * caller treats "empty" as "leave the viewport alone".
  *
- * Diffing by id + `version` matches how the compiler emits scenes: ids are
- * stable across recompiles and Excalidraw bumps `version` on any mutation.
+ * Matched ids are compared by CONTENT, not by `version`: the compiler stamps
+ * `version: 1` on every element and builds ids from kind + label + position,
+ * so a restyle (a button gaining `primary`, say) keeps both the id and the
+ * version while the rendered colours change — comparing versions would report
+ * no change and strand the reader on another screen. Both sides are
+ * deterministic compiler output, so a structural comparison is stable.
  */
 export function changedScreenNames(prev: any[] | null, next: any[]): string[] {
   if (!prev) return [];
@@ -84,7 +98,7 @@ export function changedScreenNames(prev: any[] | null, next: any[]): string[] {
 
   for (const el of next) {
     const before = prevById.get(el.id);
-    if (!before || before.version !== el.version) mark(el);
+    if (!before || !sameContent(before, el)) mark(el);
   }
   for (const el of prev) {
     if (!nextById.has(el.id)) mark(el);

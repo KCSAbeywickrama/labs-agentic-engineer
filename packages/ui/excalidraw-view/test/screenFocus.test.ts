@@ -88,6 +88,17 @@ test("a brand-new screen is changed", () => {
   assert.deepEqual(changedScreenNames(SCENE, next), ["Settings"]);
 });
 
+test("a restyled element is changed even when its id and version are identical", () => {
+  // The compiler stamps `version: 1` on every element and builds ids from
+  // kind + label + position, so a variant-only edit (button → primary) keeps
+  // BOTH stable while the rendered colours change. Comparing version alone
+  // would report no change and strand the reader on another screen.
+  const next = SCENE.map((e) =>
+    e.id === "l1" ? { ...e, backgroundColor: "#fa7b3f" } : e,
+  ) as El[];
+  assert.deepEqual(changedScreenNames(SCENE, next), ["Login"]);
+});
+
 test("identical scenes report no change", () => {
   assert.deepEqual(changedScreenNames(SCENE, SCENE.map((e) => ({ ...e }))), []);
 });

@@ -16,6 +16,11 @@
  * under the License.
  */
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// The Excalidraw API and its scene elements are untyped here on purpose: the
+// library is lazy-loaded (see lazyExcalidraw.ts), so its types are not in the
+// build graph. Same convention as scene.ts / screenFocus.ts / PrototypeView.tsx.
+
 import { Suspense, useEffect, useMemo, useRef } from "react";
 import { Box, CircularProgress } from "@wso2/oxygen-ui";
 import { ExcalidrawComponent } from "./lazyExcalidraw.js";
