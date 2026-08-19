@@ -278,6 +278,12 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	gitOpsService := sourcecontrol.NewGitOpsService(credResolver, workspaceEngine)
 	artifactSvcGit := spec.NewArtifactService(repoRepo, gitOpsService)
 	issueService := sourcecontrol.NewIssueService(repoRepo, gitHost, credResolver)
+	// THE delivery-side issue-write surface: every issue the delivery domain
+	// mints, closes, reopens or labels goes through this one writer, so the
+	// label vocabulary and the dedupe contract are decided once rather than once
+	// per sub-package. Its slices (eventcore, task, validation, build) each hold
+	// it; nothing else in delivery writes an issue.
+	deliveryIssues := delivery.NewIssueWriter(issueService)
 	webhookRegService := sourcecontrol.NewWebhookService(repoRepo, gitHost, repoService, issueService, cfg.WebhookDeliveryURL, cfg.WebhookHMACSecret)
 	credRefreshService := organization.NewCredentialsRefreshService(credResolver)
 	credService := organization.NewCredentialService(orgCredRepo, credStore, minter, cfg.WebhookHMACSecret, cfg.GitHubAppClientID, appClientSecret, gitHost)
@@ -429,7 +435,8 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// satisfy the task consumer ports directly.
 	taskReads := task.NewReads(issueService, repoService, executionRepo, milestoneRunRepo)
 	taskPlan := task.NewPlanService(repoService, artifactSvcGit, gitOpsService,
-		anthropicKeyForGenAI, agentsvcClient, issueService, workspaceEngine, task.SkillsRepoResolver(skillsRepoForTurns))
+		anthropicKeyForGenAI, agentsvcClient, issueService, deliveryIssues, workspaceEngine,
+		task.SkillsRepoResolver(skillsRepoForTurns))
 
 	// Eagerly provision each org's skills repo on project creation.
 	projectService.SetSkillsProvisioner(skillSvc)
@@ -625,6 +632,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		Runs:   eventcoreRuns{runs: milestoneRunRepo},
 		Cycles: eventcoreCycles{cycles: runCycleRepo},
 		Issues: issueService,
+		Writer: deliveryIssues,
 		PRs:    issueService,
 		Merger: issueService,
 		Repos:  repoLocator{db: db},
@@ -1045,6 +1053,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// set that nothing can work until every component is deployed.
 	validationSvc := validation.NewService(validation.Deps{
 		Issues:   issueService,
+		Writer:   deliveryIssues,
 		Criteria: validationCriteria{files: filesSvc},
 	})
 	// A planned Task's prose body names the App Path the agent works in — the
@@ -1073,6 +1082,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// resolver is provisioningSvc, which is constructed after buildSvc.
 	buildSvc.SetPlanPath(build.PlanPathDeps{
 		Milestones: issueService,
+		Issues:     deliveryIssues,
 		Runs:       milestoneRunRepo,
 		Planner:    taskPlan,
 		Gates:      buildGateResolver{prov: provisioningSvc},

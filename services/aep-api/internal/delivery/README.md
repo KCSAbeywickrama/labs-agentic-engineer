@@ -19,6 +19,7 @@ flowchart LR
       K2["milestone model — labels · run signals · StartRunRequest · RunStatus · workflow id"]
       K3["read DTOs — TaskView · ExecutionView · Lineage · TaskDetail"]
       K4["merge→builds contract — DiffComponents · BuildRunName · BuildTerminalObserver · MilestoneDispatcher"]
+      K5["IssueWriter — the ONE issue-write surface: mint · close · reopen · comment · label + dedupe keys"]
     end
     BUILD["build (buildpipe)"] --> ROOT
     TASK["task (taskflow)"] --> ROOT
@@ -64,6 +65,17 @@ that lives in the ROOT; the feature logic that uses it lives in a sub-package im
 `task` and `run` are then peer sub-packages that never import each other (`TestTaskRunSplit` re-asserts
 it), and every former feature→feature edge becomes a legal slice→root type reference.
 
+The root holds one piece of BEHAVIOUR beside those types: **`IssueWriter` (`issue_writer.go`), the one
+surface every issue this domain writes passes through** — mint, close, reopen, comment, label — together
+with the dedupe-key vocabulary it mints against. Four sub-packages file issues (`eventcore` detects and
+mints, `task` mints a planned Task, `validation` mints the version's validation issue and its repair
+issues, `build` closes a superseded version's leftovers) and none of them may import another, so the
+choice is the root or four copies of the label and dedupe policy. It is legal here for the same reason
+the labels are, and it is deliberately decision-free: it holds no rule about WHEN an issue is filed, and
+never invents or rewrites a caller's labels or key. In particular it does **not** pre-check for a
+duplicate — the host's create holds a per-repo lock that makes check-then-create atomic, and a check
+outside that lock is the duplicate-issue race the lock exists to close.
+
 | Sub-package | Owns | Reaches the root for |
 |---|---|---|
 | `build` (buildpipe) | the whole-spec gate + `v<N>` tag cut, **the milestone plan path** (supersede the previous version, mint `v<N>`'s milestone, admit the run row, then plan its Tasks and mint its gates), the version ledger, dep-drawer preflight | `MilestoneRun`/`StartRunRequest`, and the planner via `SpecPlanner` |
@@ -99,12 +111,13 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
 | `DeployIssueMinter` | needs | `run` → the event plane. The ONE recovery issue the plane cannot mint on its own initiative: every other one has a webhook behind it, and a ReleaseBinding that never becomes Ready delivers nothing. The supervisor observes it and asks; the plane still owns the write, the labels and the dedupe key |
 | `RunSignaler` · `RunStarter` | needs | `eventcore` and `build` → the run supervisor. Signal a run, start one. Interfaces, which is what keeps both the event plane and the build click free of a workflow engine; both are declared over the root `StartRunRequest`, and `*run.Supervisor` satisfies both |
 | `RunStore` · `CycleStore` · `MilestoneReader` · `PRReader` · `DesignReader` · `BuildReader` · `ValidationCoordinator` | needs | `run` → the root repositories, `sourcecontrol`, the design reader, `clients/openchoreo` and `delivery/validation`. Every I/O the loop performs, named once; `BuildReader` is read-ONLY because the supervisor never triggers a build |
-| `MilestoneClient` (mint · list a milestone's issues · close issue · close milestone) | needs | `build` → `sourcecontrol`. The plan path's whole GitHub surface: create `v<N>` idempotently, and supersede `v<N-1>` |
+| `MilestoneClient` (mint a milestone · list a milestone's issues · close milestone) | needs | `build` → `sourcecontrol`. The plan path's MILESTONE surface: create `v<N>` idempotently, and read `v<N-1>`'s leftovers. Closing those leftovers is an issue write, so it goes through the root `IssueWriter` instead |
 | `MilestoneRunStore` (active-run read · admit · settle · list) | needs | `build` → the root run repository. The 409 pre-check and the admission that arms the spec-run mutex |
 | `SpecPlanner` (`PlanIntoMilestone`) | needs | `build` → `task`. The planning turn, reached through the root exactly as `TaskReader` is, so `build` names no sibling |
 | `GateResolver` (author dependencies + mint gates into a milestone) | needs | `build` → `dependencies/provisioning`. Gates are dispatch holds, never agent work |
 | `BuildTrigger` (stage the org clone credential · trigger at commit · list a component's runs) | needs | `clients/openchoreo` — the fan-out, and the run list the re-trigger budget is derived from. Staging is its own verb because the credential is per-ORG while a trigger is per-component: a caller building N components stages once and reuses the reference |
-| `IssueClient` (mint · milestone membership · milestone counts · assign) · `PRReader` · `PRMerger` | needs | `sourcecontrol` — every GitHub write the event plane makes, on the org's own credential |
+| `IssueClient` (milestone membership · milestone counts · assign) · `PRReader` · `PRMerger` | needs | `sourcecontrol` — the event plane's issue READS and its pull-request surface, on the org's own credential. Minting is absent by design: it goes through the root `IssueWriter`, which is what stops a second dedupe convention appearing here |
+| `IssueOps` (create · close · reopen · comment · add/remove label) | needs | the root `IssueWriter` → `sourcecontrol`. The complete list of what delivery is allowed to do to an issue; anything absent is a write this domain does not make |
 | `ValidationContext` · `ValidationCredentials` | offers | the S2S runner callbacks (`/internal/v1/validation/{cycleId}/…`, via the internalServer — not the public edge). Keyed by the CYCLE the pod was dispatched for, which is the only identity a runner has |
 
 ## Owns
@@ -115,7 +128,12 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   root ports.
 - The **event plane** (`eventcore`): the platform's whole reaction to a pull request, a milestone-matched
   issue and a build terminal. It merges, mints and signals — the supervisor decides. Its three GitHub
-  effects are a squash-merge, an issue in a milestone, and a build pinned to a merge SHA.
+  effects are a squash-merge, an issue in a milestone, and a build pinned to a merge SHA. It owns the
+  DETECTION and the prose of the issues it files; the write itself is the root's `IssueWriter`.
+- **Every issue write the domain makes** (`IssueWriter`, root): the label vocabulary, the milestone
+  assignment that rides each create, the dedupe-key vocabulary and the mint logging, decided once for
+  four sub-packages. A key is frozen against its literal by `TestIssueDedupeKeysAreFrozen`, because a
+  changed key does not fail — it silently re-files issues instead of deduping onto the open one.
 - The **milestone run** store: a run row per (org, project, milestone) — origin, small state, terminal
   reason, budget counters, validation verdict — and one **cycle record per dispatch** under it (kind,
   attempts, Job ref, branch, the pull request's number AND its page on the host, merge SHA). The pull
@@ -273,8 +291,10 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   reasons do not already name.
 - **The supervisor mints exactly one kind of issue, and only because nothing else can.** A deployment
   produces no webhook, so the event plane never learns that one failed. `MintDeployFixIssues` is
-  therefore reached through a port INTO the event plane rather than written by the supervisor, which
-  keeps every issue this platform files under one dedupe convention and one label vocabulary.
+  therefore reached through a port INTO the event plane rather than written by the supervisor: the plane
+  owns the detection story and the prose, and — like every other minter in the domain — writes it through
+  the root's `IssueWriter`, which is what keeps every issue this platform files under one dedupe
+  convention and one label vocabulary.
 - **Settle closes the milestone; nothing branches on that.** Milestone state is display only, closed
   milestones still accept new issues, and a failed or cancelled increment leaves its milestone OPEN
   because the way forward from it is more work in the same version. A stray gate never blocks settle:

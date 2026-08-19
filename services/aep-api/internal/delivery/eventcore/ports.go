@@ -90,15 +90,16 @@ type CycleStore interface {
 	FinishCycle(ctx context.Context, cycleID, mergeSHA string) error
 }
 
-// IssueClient is the GitHub issue + milestone surface the event plane needs:
-// mint platform issues into a milestone, read a milestone's membership for the
-// auto-merge predicate, count it for the dispatch predicate, and move an
-// adopted issue into the deployed version's milestone.
-// sourcecontrol.IssueService satisfies it.
+// IssueClient is the GitHub issue + milestone READ surface the event plane
+// needs: read a milestone's membership for the auto-merge predicate, count it
+// for the dispatch predicate, and move an adopted issue into the deployed
+// version's milestone. sourcecontrol.IssueService satisfies it.
+//
+// Minting is deliberately absent. Every issue this package files goes through
+// delivery.IssueWriter (Ports.Writer), the domain's one issue-write surface, so
+// a label-vocabulary or dedupe change is one edit rather than eight — and this
+// port cannot be used to route around it.
 type IssueClient interface {
-	// CreateIssue mints an issue. Every call from this package passes a
-	// DedupeKey — that is what makes minting redelivery-safe.
-	CreateIssue(ctx context.Context, orgID, projectID string, req sourcecontrol.CreateIssueRequest) (*sourcecontrol.IssueResult, error)
 	// ListMilestoneIssues reads a milestone's issues, filtered by state and
 	// label. Pull requests are excluded by the host.
 	ListMilestoneIssues(ctx context.Context, orgID, projectID string, filter sourcecontrol.MilestoneIssuesFilter) ([]sourcecontrol.IssueInfo, error)

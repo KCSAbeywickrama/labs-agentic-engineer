@@ -57,10 +57,13 @@ import (
 // obviously unwired (nil) rather than a Service with half its fields empty.
 type planPath struct {
 	milestones MilestoneClient
-	runs       MilestoneRunStore
-	planner    SpecPlanner
-	gates      GateResolver
-	starter    RunStarter
+	// issues is the domain's issue-write surface, used here for exactly one
+	// write: closing the previous version's leftovers as superseded.
+	issues  *delivery.IssueWriter
+	runs    MilestoneRunStore
+	planner SpecPlanner
+	gates   GateResolver
+	starter RunStarter
 }
 
 // PlanPathDeps wires the milestone plan path. It is set separately from
@@ -69,8 +72,11 @@ type planPath struct {
 // same ordering knot SetProviderBuildTrigger unties in the other direction.
 type PlanPathDeps struct {
 	Milestones MilestoneClient
-	Runs       MilestoneRunStore
-	Planner    SpecPlanner
+	// Issues closes the superseded version's still-open work. The domain's one
+	// issue-write surface, so a supersede comment and a mint share a vocabulary.
+	Issues  *delivery.IssueWriter
+	Runs    MilestoneRunStore
+	Planner SpecPlanner
 	// Gates is optional: a project with no drawer inputs and no design
 	// dependencies mints no gate, and an unwired resolver simply mints none.
 	Gates GateResolver
@@ -86,6 +92,7 @@ type PlanPathDeps struct {
 func (s *Service) SetPlanPath(d PlanPathDeps) {
 	s.plan = &planPath{
 		milestones: d.Milestones,
+		issues:     d.Issues,
 		runs:       d.Runs,
 		planner:    d.Planner,
 		gates:      d.Gates,
@@ -202,7 +209,7 @@ func (s *Service) supersedePreviousMilestone(ctx context.Context, orgID, project
 	}
 	closed := 0
 	for _, issue := range gatesLast(issues) {
-		if cerr := p.milestones.CloseIssue(ctx, orgID, projectID, issue.Number, comment); cerr != nil {
+		if cerr := p.issues.Close(ctx, orgID, projectID, issue.Number, comment); cerr != nil {
 			slog.WarnContext(ctx, "build: close superseded issue failed",
 				"project", projectID, "issue", issue.Number, "error", cerr)
 			continue

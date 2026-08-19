@@ -92,6 +92,10 @@ type planSpy struct {
 	admitted []delivery.MilestoneRun
 	planned  chan int
 	started  []delivery.StartRunRequest
+	// mintedIssues records anything the plan path files. It must stay empty:
+	// the click mints a MILESTONE, and the version's issues are the planning
+	// turn's and the gate resolver's to file.
+	mintedIssues []string
 }
 
 func newPlanSpy() *planSpy {
@@ -110,7 +114,23 @@ func (p *planSpy) CloseMilestone(context.Context, string, string, int) error { r
 func (p *planSpy) ListMilestoneIssues(context.Context, string, string, sourcecontrol.MilestoneIssuesFilter) ([]sourcecontrol.IssueInfo, error) {
 	return nil, nil
 }
+
+// The issue-write surface. Only CloseIssue is on the plan path (supersede); the
+// rest complete delivery.IssueOps so the spy can wear the domain's writer, and
+// a plan path that started minting would show up here rather than compiling.
 func (p *planSpy) CloseIssue(context.Context, string, string, int, string) error { return nil }
+func (p *planSpy) ReopenIssue(context.Context, string, string, int) error        { return nil }
+func (p *planSpy) CommentIssue(context.Context, string, string, int, string) error {
+	return nil
+}
+func (p *planSpy) AddLabels(context.Context, string, string, int, []string) error { return nil }
+func (p *planSpy) RemoveLabel(context.Context, string, string, int, string) error { return nil }
+func (p *planSpy) CreateIssue(_ context.Context, _, _ string, req sourcecontrol.CreateIssueRequest) (*sourcecontrol.IssueResult, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.mintedIssues = append(p.mintedIssues, req.Title)
+	return &sourcecontrol.IssueResult{Number: 1}, nil
+}
 
 func (p *planSpy) ActiveSpecRunByProject(context.Context, string, string) (*delivery.MilestoneRun, error) {
 	return p.activeRun, nil
@@ -177,7 +197,8 @@ func (p *planSpy) admittedRuns() []delivery.MilestoneRun {
 // withPlanPath wires the spy as the service's plan path.
 func withPlanPath(svc *build.Service, spy *planSpy) *build.Service {
 	svc.SetPlanPath(build.PlanPathDeps{
-		Milestones: spy, Runs: spy, Planner: spy, Gates: spy, Starter: spy,
+		Milestones: spy, Issues: delivery.NewIssueWriter(spy),
+		Runs: spy, Planner: spy, Gates: spy, Starter: spy,
 	})
 	return svc
 }

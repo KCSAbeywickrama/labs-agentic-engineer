@@ -32,6 +32,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/wso2/aep/aep-api/internal/delivery"
 	"github.com/wso2/aep/aep-api/internal/platform/gittest"
 	"github.com/wso2/aep/aep-api/internal/platform/secrets"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
@@ -92,7 +93,7 @@ func TestPlanTap_AgainstRealIssueService_CostsOneCallPerTask(t *testing.T) {
 
 	issues := sourcecontrol.NewIssueService(stubRepoRepo{},
 		githubclient.NewClient(githubclient.WithAPIBase(stub.URL)), stubResolver{})
-	tap := newPlanTap(context.Background(), "org1", "proj1", issues)
+	tap := newPlanTap(context.Background(), "org1", "proj1", issues, delivery.NewIssueWriter(issues))
 	tap.milestone = 9
 	tap.appPaths = map[string]string{"user-service": "src/user", "order-service": "src/order"}
 

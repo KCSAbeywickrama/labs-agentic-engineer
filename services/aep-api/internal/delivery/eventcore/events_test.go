@@ -76,6 +76,7 @@ func newHarness(t *testing.T, rows ...delivery.MilestoneRun) *harness {
 		Runs:           h.runs,
 		Cycles:         h.cycles,
 		Issues:         h.issues,
+		Writer:         h.issues.writer(),
 		PRs:            h.prs,
 		Merger:         h.merger,
 		Repos:          fakeRepoLookup{},

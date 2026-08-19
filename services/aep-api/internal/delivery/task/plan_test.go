@@ -18,8 +18,8 @@ package task
 
 import (
 	"context"
-	"fmt"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"slices"
@@ -121,6 +121,7 @@ func newPlanRig(t *testing.T, seed map[string]string, specTag string) *planRig {
 		func(context.Context, string) (string, error) { return "sk-test", nil },
 		turn,
 		issues,
+		issues.writer(),
 		fx.Engine,
 		func(context.Context, string) (*sourcecontrol.GitRepository, error) { return skillsRow, nil },
 	)
@@ -146,7 +147,7 @@ func TestPlanIntoMilestone_DispatchesWorkspaceShape(t *testing.T) {
 	r := newPlanRig(t, map[string]string{
 		"specs/design/design.md":                              "# design",
 		"specs/design/components/hello-world-api/design.json": `{"name":"hello-world-api"}`,
-		"specs/requirements/prd.md":                  "# reqs",
+		"specs/requirements/prd.md":                           "# reqs",
 	}, "v1")
 	req := r.start(t)
 
@@ -202,7 +203,7 @@ func TestPlanIntoMilestone_SkillsRepoGone_TypedError(t *testing.T) {
 	fx := workspacetest.New(t, map[string]string{
 		"specs/design/design.md":                              "# design",
 		"specs/design/components/hello-world-api/design.json": `{"name":"hello-world-api"}`,
-		"specs/requirements/prd.md":                  "# reqs",
+		"specs/requirements/prd.md":                           "# reqs",
 	})
 	repoRow := &sourcecontrol.GitRepository{OrgID: "org1", ProjectID: "proj1", RepoURL: fx.Origin.URL(),
 		DefaultBranch: "main", RepoSlug: workspacetest.DefaultSlug, Status: "ready"}
@@ -210,13 +211,15 @@ func TestPlanIntoMilestone_SkillsRepoGone_TypedError(t *testing.T) {
 		RepoURL: "file:///nonexistent/skills-repo-gone.git", DefaultBranch: "main", RepoSlug: "org-skills", Status: "ready"}
 
 	turn := &capturingTurn{}
+	planIssues := newFakeIssues()
 	svc := NewPlanService(
 		fakeRepos{repo: repoRow},
 		planVersions{specTag: "v1"},
 		sourcecontrol.NewGitOpsService(nilResolver{}, fx.Engine),
 		func(context.Context, string) (string, error) { return "sk-test", nil },
 		turn,
-		newFakeIssues(),
+		planIssues,
+		planIssues.writer(),
 		fx.Engine,
 		func(context.Context, string) (*sourcecontrol.GitRepository, error) { return staleSkills, nil },
 	)

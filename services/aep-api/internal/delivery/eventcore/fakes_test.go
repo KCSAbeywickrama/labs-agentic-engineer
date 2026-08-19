@@ -197,6 +197,55 @@ type fakeIssues struct {
 	created     []sourcecontrol.CreateIssueRequest
 	assigned    []string
 	next        int
+	// closed/reopened/commented/labelled record the writes the event plane never
+	// makes. They exist because the fake wears delivery.IssueOps — the domain's
+	// WHOLE issue-write surface — and a test asserting "this handler mints and
+	// nothing else" needs somewhere for an unexpected write to land.
+	closed    []int
+	reopened  []int
+	commented []int
+	labelled  []string
+}
+
+// writer is the fake wearing the domain's issue-write surface, which is what
+// every mint in this package goes through.
+func (f *fakeIssues) writer() *delivery.IssueWriter { return delivery.NewIssueWriter(f) }
+
+func (f *fakeIssues) CloseIssue(_ context.Context, _, _ string, number int, _ string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.closed = append(f.closed, number)
+	return nil
+}
+
+func (f *fakeIssues) ReopenIssue(_ context.Context, _, _ string, number int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.reopened = append(f.reopened, number)
+	return nil
+}
+
+func (f *fakeIssues) CommentIssue(_ context.Context, _, _ string, number int, _ string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.commented = append(f.commented, number)
+	return nil
+}
+
+func (f *fakeIssues) AddLabels(_ context.Context, _, _ string, number int, labels []string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, l := range labels {
+		f.labelled = append(f.labelled, fmt.Sprintf("%d+%s", number, l))
+	}
+	return nil
+}
+
+func (f *fakeIssues) RemoveLabel(_ context.Context, _, _ string, number int, label string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.labelled = append(f.labelled, fmt.Sprintf("%d-%s", number, label))
+	return nil
 }
 
 func newFakeIssues() *fakeIssues {

@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"strconv"
 	"strings"
 
 	"github.com/wso2/aep/aep-api/internal/delivery"
@@ -40,18 +39,23 @@ const validationTitle = "Validate the deployed system against its acceptance cri
 // ports; concrete providers are wired at the composition root.
 type Service struct {
 	issues   IssueClient
+	writer   *delivery.IssueWriter
 	criteria CriteriaReader
 }
 
 // Deps is the validation service's collaborator set.
 type Deps struct {
-	Issues   IssueClient
+	Issues IssueClient
+	// Writer is the domain's issue-write surface: the validation issue, its
+	// reopen across attempts, and a failed attempt's repair issues all go
+	// through it rather than being written here.
+	Writer   *delivery.IssueWriter
 	Criteria CriteriaReader
 }
 
 // NewService wires the validation service from its collaborator set.
 func NewService(d Deps) *Service {
-	return &Service{issues: d.Issues, criteria: d.Criteria}
+	return &Service{issues: d.Issues, writer: d.Writer, criteria: d.Criteria}
 }
 
 // EnsureValidationIssue mints ONE aep:validation issue per version — filed into
@@ -118,7 +122,7 @@ func (s *Service) EnsureValidationIssue(ctx context.Context, orgID, projectID st
 	if existing > 0 {
 		if !open {
 			// A repeat attempt: the previous attempt's pull request closed it.
-			if rerr := s.issues.ReopenIssue(ctx, orgID, projectID, existing); rerr != nil {
+			if rerr := s.writer.Reopen(ctx, orgID, projectID, existing); rerr != nil {
 				return 0, fmt.Errorf("validation: reopen issue #%d: %w", existing, rerr)
 			}
 			slog.InfoContext(ctx, "validation: reopened validation issue for a repeat attempt",
@@ -127,30 +131,27 @@ func (s *Service) EnsureValidationIssue(ctx context.Context, orgID, projectID st
 		return existing, nil
 	}
 
-	req := sourcecontrol.CreateIssueRequest{
+	number, _, cerr := s.writer.Mint(ctx, orgID, projectID, delivery.IssueSpec{
 		Title:  validationTitle,
 		Body:   rationale(doc.summarize()) + "\n\n" + renderScope(doc),
 		Labels: []string{delivery.LabelValidationWork},
 		// The version pin RIDES the create — one call, so the issue is never
 		// versionless, not even for the beat a follow-up patch would take.
-		Milestone: &milestoneNumber,
+		Milestone: milestoneNumber,
 		// Version-scoped so a later version's mint is never deduped against this
 		// one. Mirrors the provision gate's gate:<project>:<tag>:<dep>.
-		DedupeKey: "validation:" + projectID + ":" + strconv.Itoa(milestoneNumber),
-	}
-	res, cerr := s.issues.CreateIssue(ctx, orgID, projectID, req)
+		DedupeKey: delivery.DedupeKeyValidationIssue(projectID, milestoneNumber),
+	})
 	if cerr != nil {
 		return 0, fmt.Errorf("validation: create issue: %w", cerr)
 	}
-	if res == nil || res.Number == 0 {
+	if number == 0 {
 		// An issue exists somewhere and we cannot name it. Returning 0 here would
 		// read as "no oracle" and settle the run `skipped`; an error retries the
 		// activity, and the retry finds the open issue above.
 		return 0, fmt.Errorf("validation: created the validation issue but got no number back")
 	}
-	slog.InfoContext(ctx, "validation: minted validation issue",
-		"project", projectID, "milestone", milestoneNumber, "issue", res.Number)
-	return res.Number, nil
+	return number, nil
 }
 
 // findValidationIssue returns the number of the milestone's aep:validation issue

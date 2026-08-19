@@ -40,7 +40,14 @@ type fakeIssues struct {
 	// milestoneOf records the milestone each seeded issue belongs to, so
 	// ListMilestoneIssues can answer the plan turn's membership read.
 	milestoneOf map[int]int
+	// closed/reopened record the two writes the plan path must never make.
+	closed   []int
+	reopened []int
 }
+
+// writer is the fake wearing the domain's issue-write surface, which is how the
+// plan tap mints through it.
+func (f *fakeIssues) writer() *delivery.IssueWriter { return delivery.NewIssueWriter(f) }
 
 func newFakeIssues() *fakeIssues {
 	return &fakeIssues{byNumber: map[int]*sourcecontrol.IssueInfo{}, nextNum: 100, comments: map[int][]string{}, milestoneOf: map[int]int{}}
@@ -175,6 +182,33 @@ func (f *fakeIssues) RemoveLabel(_ context.Context, _, _ string, number int, lab
 		}
 	}
 	i.Labels = kept
+	return nil
+}
+
+// CloseIssue and ReopenIssue exist so the fake satisfies delivery.IssueOps —
+// the writer's port is the domain's WHOLE issue-write surface, while the plan
+// tap only ever mints and edits. Both record their calls so a test can assert
+// the planner never closes or reopens anything.
+func (f *fakeIssues) CloseIssue(_ context.Context, _, _ string, number int, comment string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.closed = append(f.closed, number)
+	if comment != "" {
+		f.comments[number] = append(f.comments[number], comment)
+	}
+	if i := f.byNumber[number]; i != nil {
+		i.State = "closed"
+	}
+	return nil
+}
+
+func (f *fakeIssues) ReopenIssue(_ context.Context, _, _ string, number int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.reopened = append(f.reopened, number)
+	if i := f.byNumber[number]; i != nil {
+		i.State = "open"
+	}
 	return nil
 }
 

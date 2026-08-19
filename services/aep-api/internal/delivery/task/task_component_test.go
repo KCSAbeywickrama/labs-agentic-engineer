@@ -114,6 +114,15 @@ func (f *fakeIssues) AddLabels(_ context.Context, _, _ string, n int, labels []s
 }
 func (f *fakeIssues) RemoveLabel(context.Context, string, string, int, string) error { return nil }
 
+// CloseIssue and ReopenIssue complete delivery.IssueOps — the writer's port is
+// the domain's whole issue-write surface, and the plan path uses neither.
+func (f *fakeIssues) CloseIssue(context.Context, string, string, int, string) error { return nil }
+func (f *fakeIssues) ReopenIssue(context.Context, string, string, int) error        { return nil }
+
+// writer wears the domain's issue-write surface over the fake, which is how the
+// plan tap mints.
+func (f *fakeIssues) writer() *delivery.IssueWriter { return delivery.NewIssueWriter(f) }
+
 type fakeRepos struct{}
 
 func (fakeRepos) GetRepo(context.Context, string, string) (*sourcecontrol.GitRepository, error) {
@@ -290,7 +299,7 @@ func TestPlan_InProgress_409(t *testing.T) {
 	git := sourcecontrol.NewGitOpsService(nilCredResolver{}, fx.Engine)
 	plan := task.NewPlanService(fixedRepos{repo: repoRow},
 		fakeVersions{spec: []spec.RequirementsVersionInfo{{Tag: "v1"}}}, git,
-		func(context.Context, string) (string, error) { return "sk-key", nil }, bt, iss, fx.Engine,
+		func(context.Context, string) (string, error) { return "sk-key", nil }, bt, iss, iss.writer(), fx.Engine,
 		func(context.Context, string) (*sourcecontrol.GitRepository, error) { return skillsRow, nil })
 
 	firstErr := make(chan error, 1)

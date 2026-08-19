@@ -30,8 +30,8 @@ import (
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 )
 
-func newTestTap(issues IssueClient) *planTap {
-	tap := newPlanTap(context.Background(), "org1", "proj1", issues)
+func newTestTap(issues *fakeIssues) *planTap {
+	tap := newPlanTap(context.Background(), "org1", "proj1", issues, issues.writer())
 	// Every plan turn the build click drives plans INTO a milestone; 5 is this
 	// version's.
 	tap.milestone = 5

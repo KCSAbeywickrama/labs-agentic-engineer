@@ -102,6 +102,7 @@ func newServiceHarness(t *testing.T, rows ...delivery.MilestoneRun) *serviceHarn
 		Runs:           h.runs,
 		Cycles:         h.cycles,
 		Issues:         svc,
+		Writer:         delivery.NewIssueWriter(svc),
 		PRs:            svc,
 		Merger:         svc,
 		Repos:          fakeRepoLookup{},

@@ -214,13 +214,18 @@ func newPlanHarness(t *testing.T) *planHarness {
 		gates:   &fakeGates{},
 		starter: &fakeStarter{},
 	}
+	host := newIssueSvcOnStub(t, stub)
 	h.svc = NewService(Deps{})
 	h.svc.SetPlanPath(PlanPathDeps{
-		Milestones: newIssueSvcOnStub(t, stub),
-		Runs:       h.runs,
-		Planner:    h.planner,
-		Gates:      h.gates,
-		Starter:    h.starter,
+		Milestones: host,
+		// The same host, seen through the domain's issue-write surface: the
+		// supersede path closes issues through the writer and milestones through
+		// the milestone client, and both land on this one stub.
+		Issues:  delivery.NewIssueWriter(host),
+		Runs:    h.runs,
+		Planner: h.planner,
+		Gates:   h.gates,
+		Starter: h.starter,
 	})
 	return h
 }
@@ -494,8 +499,10 @@ func TestStartRun_OtherFailure_SettlesTheRunAnd502s(t *testing.T) {
 // event plane's own no-op starter leaves an adopted milestone waiting.
 func TestStartRun_NoSupervisor_LeavesTheRunWaiting(t *testing.T) {
 	h := newPlanHarness(t)
+	host := newIssueSvcOnStub(t, h.stub)
 	h.svc.SetPlanPath(PlanPathDeps{
-		Milestones: newIssueSvcOnStub(t, h.stub),
+		Milestones: host,
+		Issues:     delivery.NewIssueWriter(host),
 		Runs:       h.runs,
 		Planner:    h.planner,
 	})

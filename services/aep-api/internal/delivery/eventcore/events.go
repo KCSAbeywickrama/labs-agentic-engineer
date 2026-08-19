@@ -42,6 +42,12 @@ type Ports struct {
 	Runs   RunStore
 	Cycles CycleStore
 	Issues IssueClient
+	// Writer is the domain's issue-WRITE surface — every fix, deploy-fix,
+	// conflict, red-main and wiring-conformance issue this package files. Nil is
+	// tolerated (the writer degrades to filing nothing) for the same reason the
+	// Issues port is checked before use: a partially wired root must not panic
+	// on a webhook.
+	Writer *delivery.IssueWriter
 	PRs    PRReader
 	Merger PRMerger
 	Repos  RepoLookup

@@ -83,10 +83,14 @@ type SpecTagger interface {
 // `dependencies/provisioning`), the domain root's repository, and the run
 // supervisor that does not exist yet.
 
-// MilestoneClient is the GitHub milestone + issue-close surface the plan path
-// drives: mint the version's milestone (idempotently), read the PREVIOUS
-// version's open issues, close them with a superseded comment, and close the
-// milestone itself. sourcecontrol.IssueService satisfies it.
+// MilestoneClient is the GitHub MILESTONE surface the plan path drives: mint
+// the version's milestone (idempotently), read the PREVIOUS version's open
+// issues, and close the milestone itself. sourcecontrol.IssueService satisfies
+// it.
+//
+// Closing those issues is not here: an issue write is a write like any other
+// and goes through delivery.IssueWriter. A milestone is not an issue, which is
+// why the milestone verbs stay.
 type MilestoneClient interface {
 	// CreateMilestone mints the version's milestone and returns its NUMBER — the
 	// platform key. It is idempotent: a title that already exists (case-
@@ -99,8 +103,6 @@ type MilestoneClient interface {
 	// ListMilestoneIssues reads a milestone's issues by state and label; pull
 	// requests are excluded by the host.
 	ListMilestoneIssues(ctx context.Context, orgID, projectID string, filter sourcecontrol.MilestoneIssuesFilter) ([]sourcecontrol.IssueInfo, error)
-	// CloseIssue closes an issue, posting comment first when non-empty.
-	CloseIssue(ctx context.Context, orgID, projectID string, number int, comment string) error
 }
 
 // MilestoneRunStore is the run-row surface the plan path needs: the pre-check

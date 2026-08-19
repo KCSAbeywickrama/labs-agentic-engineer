@@ -22,6 +22,10 @@
 // outputs are exactly three kinds: a squash-merge, an issue minted into a
 // milestone, and a signal to the run supervisor.
 //
+// It DETECTS the issues it files but does not write them: every mint goes
+// through delivery.IssueWriter (Ports.Writer), the domain's one issue-write
+// surface, so this package holds no private opinion about labels or dedupe.
+//
 // # No Temporal
 //
 // This package imports no workflow engine, deliberately. The dependency
@@ -56,8 +60,10 @@
 //
 //   - merging re-reads the live pull request first, so a second delivery of a
 //     merged PR merges nothing;
-//   - minting passes a DedupeKey, which resolves to an existing OPEN issue
-//     carrying the derived dedupe label instead of filing a second one;
+//   - minting passes a DedupeKey — composed from the domain's frozen key
+//     vocabulary and written through delivery.IssueWriter — which resolves to
+//     an existing OPEN issue carrying the derived dedupe label instead of
+//     filing a second one;
 //   - triggering a build counts the WorkflowRuns OpenChoreo already holds for
 //     (component, commit) and refuses to exceed the allowance — which is the
 //     SAME mechanism as the automatic re-trigger budget, so idempotency and

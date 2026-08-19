@@ -18,6 +18,7 @@ package validation
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -52,6 +53,34 @@ type fakeIssues struct {
 	// number — the one create outcome the minter must not read as "nothing to
 	// validate".
 	numberless bool
+	// closed and labelled record the writes this package never makes. The fake
+	// wears delivery.IssueOps — the domain's WHOLE issue-write surface — so an
+	// unexpected write has somewhere to land instead of failing to compile.
+	closed   []int
+	labelled []string
+}
+
+// writer is the fake wearing the domain's issue-write surface, which is what
+// the validation and repair mints go through.
+func (f *fakeIssues) writer() *delivery.IssueWriter { return delivery.NewIssueWriter(f) }
+
+func (f *fakeIssues) CloseIssue(_ context.Context, _, _ string, number int, _ string) error {
+	f.closed = append(f.closed, number)
+	return nil
+}
+
+func (f *fakeIssues) CommentIssue(context.Context, string, string, int, string) error { return nil }
+
+func (f *fakeIssues) AddLabels(_ context.Context, _, _ string, number int, labels []string) error {
+	for _, l := range labels {
+		f.labelled = append(f.labelled, fmt.Sprintf("%d+%s", number, l))
+	}
+	return nil
+}
+
+func (f *fakeIssues) RemoveLabel(_ context.Context, _, _ string, number int, label string) error {
+	f.labelled = append(f.labelled, fmt.Sprintf("%d-%s", number, label))
+	return nil
 }
 
 func (f *fakeIssues) ListMilestoneIssues(_ context.Context, _, _ string, filter sourcecontrol.MilestoneIssuesFilter) ([]sourcecontrol.IssueInfo, error) {
@@ -126,7 +155,7 @@ const sampleCriteria = `{
 }`
 
 func newSvc(iss *fakeIssues, crit fakeCriteria) *Service {
-	return NewService(Deps{Issues: iss, Criteria: crit})
+	return NewService(Deps{Issues: iss, Writer: iss.writer(), Criteria: crit})
 }
 
 // validationIssue is an open aep:validation issue as the host would report it.

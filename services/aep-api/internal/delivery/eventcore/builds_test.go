@@ -139,6 +139,12 @@ func TestBuildTerminal_SecondRedMintsTheFixIssueOnce(t *testing.T) {
 	if !delivery.HasLabel(h.issues.created[0].Labels, delivery.LabelAgentWork) {
 		t.Fatalf("the fix issue must be agent work so it joins the next cycle, got %v", h.issues.created[0].Labels)
 	}
+	// The key is the domain's, not this package's: an inlined spelling here
+	// would drift from the frozen vocabulary without failing anything.
+	if got, want := h.issues.created[0].DedupeKey,
+		delivery.DedupeKeyFix("order-service", delivery.ShortSHA(testMergeSHA)); got != want {
+		t.Fatalf("fix dedupe key = %q; want the domain's %q", got, want)
+	}
 	sigs := h.sup.named(delivery.SigRunBuildTerminal)
 	if len(sigs) != 2 || sigs[0].Succeeded {
 		t.Fatalf("each terminal report must reach the supervisor as red, got %+v", sigs)
@@ -174,6 +180,10 @@ func TestBuildTerminal_RedMainOutsideARunMintsAnIncident(t *testing.T) {
 	if len(h.issues.created[0].Labels) != 0 {
 		t.Fatalf("a red-main incident carries NO agent-work label — it is never auto-dispatched, got %v",
 			h.issues.created[0].Labels)
+	}
+	if got, want := h.issues.created[0].DedupeKey,
+		delivery.DedupeKeyRedMain("web", delivery.ShortSHA(ev.CommitSHA)); got != want {
+		t.Fatalf("red-main dedupe key = %q; want the domain's %q", got, want)
 	}
 	if len(h.builds.triggered) != 0 {
 		t.Fatalf("a red main outside a run is not re-triggered, got %v", h.builds.triggered)
