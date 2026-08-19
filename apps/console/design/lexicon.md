@@ -305,6 +305,58 @@ The chat panel is the spine and **never collapses itself**; only the user closes
 pointing at a form that already owns the screen, and its composer stays live during a form — the
 agent is waiting on the user, not working, and the user may want to talk instead of fill.
 
+## What a change invalidates
+
+**Numbered decisions, precise where the link was recorded, coarse where it was not.**
+
+### Product Decisions get numbers
+
+They are unnumbered prose bullets today, so nothing can cite them — which matters because
+**assumptions *are* Product Decisions** (`prd-contract`: *"skip-valve entries carry the `*assumed*`
+tag"*), and [#532](https://github.com/wso2/labs-agentic-engineer/issues/532) made those flagged,
+clickable and expected to be reversed routinely. The most-reversed thing was the untraceable one.
+
+They are numbered **in the PRD, exactly where stories already live** — no new file, no new store.
+The number is the join key, permanent and append-only, same rule as story numbers. `design.json`
+gains a sibling field:
+
+```ts
+stories:   z.array(z.number().int().positive()).optional(),
+decisions: z.array(z.number().int().positive()).optional(),   // new
+```
+
+Validation criteria trace to **stories** — behaviour — and need no decision citations.
+
+### What goes outdated
+
+| what changed | marked outdated |
+|---|---|
+| a **story** | exactly the components and criteria citing it |
+| a **cited decision** | exactly the components citing it |
+| an **uncited decision**, the problem statement, out-of-scope, anything else | the whole **Design** section |
+
+**Never a guess.** An uncited decision is ambiguous — genuinely design-irrelevant, or the agent
+did not record the link — so it falls back to coarse rather than inferring from wording.
+
+### Why coarse is the safe fallback
+
+The two failures are not symmetric. **Over-marking** costs one delta pass: the user clicks *Update
+the design*, `/design` finds what is still consistent and leaves it alone. **Under-marking** leaves
+a stale design unflagged, so Build is not blocked and coding agents implement something the user
+already rejected.
+
+This is also why stories can be precise and decisions cannot always be: the build gate **enforces**
+story coverage, so those citations are complete by construction. No equivalent enforcement is
+possible for decisions — plenty have no design consequence at all — so their citations are
+best-effort, and best-effort links may only ever *add* precision, never withhold a warning.
+
+### Display and detection are separate
+
+The rail's **outdated** section state is the display
+([#527](https://github.com/wso2/labs-agentic-engineer/issues/527)); this is what feeds it. The
+`/design` delta pass is what acts on it. **`dirty` is unaffected** — whole-spec and boolean, it
+answers *"has anything moved since we built?"*, which is a different question.
+
 ## Notifications
 
 **One bell, for both.** The global `NotificationBell` already sits in the header on every page and
