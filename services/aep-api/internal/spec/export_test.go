@@ -116,6 +116,7 @@ func EmbeddedLibraryCount(t *testing.T, kind string) int {
 	}
 	return n
 }
+
 // DriftOrg rewrites an org-kind skill's SKILL.md directly on the org's ORIGIN
 // (advancing main), so a subsequent read/UpdatesAvailable sees a repo copy
 // whose content differs from the embedded copy — the state that drives the "updates available"

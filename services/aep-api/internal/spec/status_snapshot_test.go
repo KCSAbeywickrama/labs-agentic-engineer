@@ -147,7 +147,7 @@ func TestStatusSnapshot_ServesMirrorWithoutFetch(t *testing.T) {
 func TestComponentCountAtTag(t *testing.T) {
 	t.Parallel()
 	r := newRig(t, map[string]string{
-		"specs/requirements/prd.md":      "# req\n",
+		"specs/requirements/prd.md":               "# req\n",
 		"specs/design/design.md":                  "# design\n",
 		"specs/design/components/api/design.json": `{"type":"service"}`,
 		"specs/design/components/web/design.json": `{"type":"webapp"}`,

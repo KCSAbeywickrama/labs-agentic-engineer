@@ -56,27 +56,11 @@ func ResolveAPISecurityEnabled(comp DesignComponent) bool {
 // whoever finds it, so "the API behind it authorises anyway" is not a
 // sufficient defence the way it is for a plain proxy.
 //
-// Keyed on the type rather than open-coded at each call site because the two
-// gates that consume it — `deriveEndUserAuth` (stamp the design) and
-// `SyncProjectAPITraits` (emit the trait) — must never disagree: a stamped
-// component with no trait is a design that claims protection it does not have.
+// Keyed on the type rather than open-coded at its call site so the question
+// has one answer. `deriveEndUserAuth` is that call site: it stamps
+// `exposesAPI.auth` on the design, and the deployment projection
+// (DesiredDeploymentFor) reads only that stamp — so a protectable type and a
+// component that actually gets the trait can never drift apart.
 func IsGatewayProtectableType(componentType string) bool {
 	return componentType == ComponentTypeService || componentType == ComponentTypeAIAgent
-}
-
-// ResolveAPISecurityCallerKind returns the auth flavor for sibling-CORS
-// gating. Only `end-user-required` APIs should advertise SPA origins in
-// their CORS allowlist (service-to-service APIs have no browser caller).
-// Returns "" when API security is not enabled.
-func ResolveAPISecurityCallerKind(comp DesignComponent) string {
-	if comp.ExposesAPI == nil {
-		return ""
-	}
-	switch strings.ToLower(strings.TrimSpace(comp.ExposesAPI.Auth)) {
-	case "end-user-required":
-		return "end-user"
-	case "service-required":
-		return "service"
-	}
-	return ""
 }

@@ -106,9 +106,26 @@ interface WireframeFlow {
   to: string;
 }
 
+/**
+ * A named `flow "…"` block: one persona's walkthrough, REFERENCING screen
+ * names rather than defining screens — so a screen shared by two personas
+ * (Login, a sign-out landing) is listed by each flow and still compiled once.
+ * `screens` holds canonical names, entry point first.
+ */
+interface WireframeNamedFlow {
+  name: string;
+  /** Optional `role "…"` keyword line: the persona who walks this flow. */
+  role?: string;
+  /** Optional `description "…"` keyword line, mirroring a screen's subtitle. */
+  description?: string;
+  screens: string[];
+}
+
 interface WireframeAst {
   screens: WireframeScreen[];
+  /** Legacy unnamed `flow` block edges — parsed, never rendered. */
   flows: WireframeFlow[];
+  namedFlows: WireframeNamedFlow[];
 }
 
 // ---------- Domain Model DSL ----------
@@ -279,8 +296,24 @@ export interface PrototypeScreen {
   hotspots: PrototypeHotspot[];
 }
 
+/**
+ * One persona's walkthrough. `screens` are canonical `PrototypeScreen` names,
+ * entry point first — membership lives on the flow, not the screen, so one
+ * screen can belong to several flows without being compiled twice.
+ */
+export interface PrototypeFlow {
+  name: string;
+  /** The persona who walks this flow, from the `role "…"` keyword line. */
+  role?: string;
+  /** What the journey is, from the `description "…"` keyword line. */
+  description?: string;
+  screens: string[];
+}
+
 export interface PrototypeModel {
   screens: PrototypeScreen[];
+  /** Empty when the DSL declares no `flow "…"` blocks. */
+  flows: PrototypeFlow[];
 }
 
 export function tryDslToPrototype(
@@ -296,7 +329,7 @@ export function tryDslToPrototype(
     const screens: PrototypeScreen[] = ast.screens.map((screen) => {
       const chromeHotspots: PrototypeHotspot[] = [];
       const elements = renderWireframes(
-        { screens: [screen], flows: [] },
+        { screens: [screen], flows: [], namedFlows: [] },
         { prototype: { validTargets, chromeHotspots } },
       );
       const scene: ExcalidrawScene = {
@@ -336,7 +369,13 @@ export function tryDslToPrototype(
       if (screen.description) out.description = screen.description;
       return out;
     });
-    return { ok: true, model: { screens } };
+    const flows: PrototypeFlow[] = ast.namedFlows.map((f) => ({
+      name: f.name,
+      ...(f.role !== undefined ? { role: f.role } : {}),
+      ...(f.description !== undefined ? { description: f.description } : {}),
+      screens: [...f.screens],
+    }));
+    return { ok: true, model: { screens, flows } };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
@@ -502,12 +541,19 @@ function buildWireframes(
   dsl: string,
   errors: string[] | null,
 ): { ast: WireframeAst; legacy: boolean } {
-  const ast: WireframeAst = { screens: [], flows: [] };
+  const ast: WireframeAst = { screens: [], flows: [], namedFlows: [] };
   let screen: FlowScreen | null = null;
   let stack: Ctx[] = [];
   let inFlow = false;
   let legacy = false;
   const err = (no: number, msg: string) => errors?.push(`line ${no}: ${msg}`);
+  // The named `flow "…"` block currently open (null inside a legacy unnamed
+  // block). Screen references are collected with their line numbers and
+  // resolved AFTER the parse — a flow may list a screen declared further down.
+  let currentFlow: WireframeNamedFlow | null = null;
+  const flowRefs: Array<{ flow: WireframeNamedFlow; raw: string; line: number }> = [];
+  // Header line per named flow, so an empty flow can be rejected at ITS line.
+  const namedFlowLines: Array<{ flow: WireframeNamedFlow; line: number }> = [];
 
   const lines = dsl.split(/\r?\n/);
   for (let no = 1; no <= lines.length; no++) {
@@ -533,11 +579,24 @@ function buildWireframes(
         ast.screens.push(screen);
         stack = [{ level: 0, kind: 'root', nodes: screen.tree }];
         inFlow = false;
+        currentFlow = null;
         continue;
       }
-      if (/^flow\b/i.test(trimmed)) {
+      const flowHead = /^flow(?:\s+"((?:[^"\\]|\\.)*)")?\s*$/i.exec(trimmed);
+      if (flowHead) {
         screen = null;
         inFlow = true;
+        currentFlow = null;
+        if (flowHead[1] !== undefined) {
+          const name = unescapeQuoted(flowHead[1]);
+          if (ast.namedFlows.some((f) => f.name === name)) {
+            err(no, `duplicate flow ${JSON.stringify(name)} — declare each flow once`);
+          } else {
+            currentFlow = { name, screens: [] };
+            ast.namedFlows.push(currentFlow);
+            namedFlowLines.push({ flow: currentFlow, line: no });
+          }
+        }
         continue;
       }
       screen = null;
@@ -547,8 +606,33 @@ function buildWireframes(
     }
 
     if (inFlow) {
-      const flowMatch = /^([\w-]+)\s*->\s*([\w-]+)$/.exec(trimmed);
-      if (flowMatch) ast.flows.push({ from: flowMatch[1]!, to: flowMatch[2]! });
+      const edge = /^([\w-]+)\s*->\s*([\w-]+)$/.exec(trimmed);
+      if (edge) {
+        ast.flows.push({ from: edge[1]!, to: edge[2]! });
+        continue;
+      }
+      if (currentFlow) {
+        // Keyword metadata (`role "…"`, `description "…"`) is grammar-distinct
+        // from a screen reference: a reference is a BARE name, so a screen
+        // literally named `role` still resolves — only keyword + quoted string
+        // reads as metadata.
+        const kw = /^(role|description)\s+"((?:[^"\\]|\\.)*)"$/i.exec(trimmed);
+        if (kw) {
+          const key = kw[1]!.toLowerCase() as 'role' | 'description';
+          if (currentFlow[key] !== undefined) {
+            err(no, `duplicate ${key} for flow ${JSON.stringify(currentFlow.name)} — declare it once`);
+          } else {
+            currentFlow[key] = unescapeQuoted(kw[2]!);
+          }
+          continue;
+        }
+        const ref = /^([\w-]+)$/.exec(trimmed);
+        if (ref) {
+          flowRefs.push({ flow: currentFlow, raw: ref[1]!, line: no });
+          continue;
+        }
+        err(no, `unknown flow line ${JSON.stringify(trimmed.slice(0, 40))} — expected a screen name`);
+      }
       continue;
     }
     if (!screen) continue;
@@ -657,6 +741,31 @@ function buildWireframes(
   }
 
   for (const s of ast.screens) layoutScreen(s as FlowScreen);
+
+  // Resolved here, not inline, because a flow may list a screen declared
+  // further down the file. An unknown name is always an authoring bug, so it
+  // is reported with its line; a repeat within one flow is the author drawing
+  // a return trip (sign out → Login) that the `-> Target` arrows already
+  // carry, so the first position wins and the duplicate is dropped.
+  const canonicalByLower = new Map(ast.screens.map((s) => [s.name.toLowerCase(), s.name]));
+  for (const ref of flowRefs) {
+    const canonical = canonicalByLower.get(ref.raw.toLowerCase());
+    if (!canonical) {
+      err(ref.line, `flow references unknown screen ${JSON.stringify(ref.raw)}`);
+      continue;
+    }
+    if (!ref.flow.screens.includes(canonical)) ref.flow.screens.push(canonical);
+  }
+  // A flow with no screen references cannot start anywhere — the picker would
+  // offer a journey with no entry. Always an authoring bug (a role/description
+  // shell, or legacy `A -> B` edge lines that a named flow does not read), so
+  // it is rejected at the flow's own header line.
+  for (const { flow: f, line } of namedFlowLines) {
+    if (f.screens.length === 0) {
+      err(line, `flow ${JSON.stringify(f.name)} lists no screens — list at least one screen reference`);
+    }
+  }
+
   return { ast, legacy };
 }
 
@@ -1087,6 +1196,17 @@ function renderWireframes(ast: WireframeAst, opts?: WireframeRenderOpts): Excali
   const screenNameByLower = new Map<string, string>();
   ast.screens.forEach((s) => screenNameByLower.set(s.name.toLowerCase(), s.name));
 
+  // Flow membership, shown on the canvas so the grid answers "whose screen is
+  // this?" without entering the prototype. A screen listed by several flows
+  // reads "Common" rather than a list — the names are the personas' walkthrough
+  // labels, and stacking them makes the marker unreadable at grid zoom.
+  const flowLabelByLower = new Map<string, string>();
+  for (const s of ast.screens) {
+    const owning = ast.namedFlows.filter((f) => f.screens.includes(s.name));
+    if (owning.length === 1) flowLabelByLower.set(s.name.toLowerCase(), owning[0]!.name);
+    else if (owning.length > 1) flowLabelByLower.set(s.name.toLowerCase(), 'Common');
+  }
+
   // Variable-size screens flow left-to-right, COLUMNS per row; each row is as
   // tall as its tallest screen.
   let curX = 0;
@@ -1124,15 +1244,21 @@ function renderWireframes(ast: WireframeAst, opts?: WireframeRenderOpts): Excali
           'left',
         ),
       );
+      // Right-aligned, so widening the box for the flow label moves nothing:
+      // the text still ends at the screen's right edge and the title block
+      // keeps its height.
+      const flowLabel = flowLabelByLower.get(screen.name.toLowerCase());
+      const marker = flowLabel ? `${flowLabel} · Screen ${number}` : `Screen ${number}`;
+      const markerW = 300;
       out.push(
         withColor(
           makeText(
             stableId(`screen-num:${screen.name}:${idx}`),
-            sx + screen.width - 120,
+            sx + screen.width - (markerW + 12),
             sy,
-            108,
+            markerW,
             18,
-            `Screen ${number}`,
+            marker,
             14,
             'right',
           ),

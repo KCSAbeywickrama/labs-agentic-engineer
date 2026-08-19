@@ -34,7 +34,7 @@ func TestListDesignFiles_AtHead(t *testing.T) {
 		"specs/design/components/svc/design.md":    "svc\n",
 		"specs/design/components/svc/openapi.yaml": "openapi: 3.0.0\n",
 		"specs/design/components/svc/design.json":  validComponentDesignJSON("svc"),
-		"specs/requirements/prd.md":       "wrong subtree\n",
+		"specs/requirements/prd.md":                "wrong subtree\n",
 	})
 	got, err := r.svc.ListDesignFiles(context.Background(), r.org, r.proj)
 	if err != nil {

@@ -21,12 +21,10 @@ import (
 	"testing"
 
 	"github.com/wso2/aep/aep-api/internal/gen"
-	"github.com/wso2/aep/aep-api/internal/organization"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	ocmocks "github.com/wso2/aep/aep-api/internal/clients/openchoreo/mocks"
-	"github.com/wso2/aep/aep-api/internal/clients/secretmanagersvc"
 	"github.com/wso2/aep/aep-api/internal/spec"
 	"github.com/wso2/aep/aep-api/internal/spec/artifactstest"
 )
@@ -56,10 +54,15 @@ func (ensureRepoSvc) DeleteRepo(context.Context, string, string) error {
 
 func TestEnsureComponent_ProvisionsOCComponentFromDesign(t *testing.T) {
 	var captured *openchoreo.CreateComponentRequest
+	var capturedSpec *openchoreo.ComponentSpecDesired
 	oc := &ocmocks.ComponentClientMock{
 		CreateComponentFunc: func(_ context.Context, _, _ string, req *openchoreo.CreateComponentRequest) (*gen.Component, error) {
 			captured = req
 			return &gen.Component{Name: req.Name}, nil
+		},
+		ApplyComponentSpecFunc: func(_ context.Context, _, _, _ string, d openchoreo.ComponentSpecDesired) error {
+			capturedSpec = &d
+			return nil
 		},
 	}
 	// A design with one service component named "order-service".
@@ -92,9 +95,21 @@ func TestEnsureComponent_ProvisionsOCComponentFromDesign(t *testing.T) {
 	if captured.Type != "deployment/service" {
 		t.Errorf("component type = %q, want deployment/service", captured.Type)
 	}
-	// AutoBuild=false (builds are BFF-driven at the merge SHA), AutoDeploy=true.
-	if captured.AutoBuild || !captured.AutoDeploy {
-		t.Errorf("autoBuild/autoDeploy = %v/%v, want false/true", captured.AutoBuild, captured.AutoDeploy)
+	// Both false: builds are BFF-driven at the merge SHA, and deploys are
+	// BFF-driven at the deploy stage. An autoDeploy=true component would have
+	// OpenChoreo promoting releases underneath the supervisor.
+	if captured.AutoBuild || captured.AutoDeploy {
+		t.Errorf("autoBuild/autoDeploy = %v/%v, want false/false", captured.AutoBuild, captured.AutoDeploy)
+	}
+	// The desired spec is re-asserted on EVERY ensure, not only at create: the
+	// trait shape is frozen into the next release, so a design edit that has not
+	// reached the CR before the build is an edit the release silently drops.
+	if capturedSpec == nil {
+		t.Fatal("EnsureComponent must re-assert the component spec")
+	}
+	if capturedSpec.AutoBuild || capturedSpec.AutoDeploy {
+		t.Errorf("re-asserted autoBuild/autoDeploy = %v/%v, want false/false",
+			capturedSpec.AutoBuild, capturedSpec.AutoDeploy)
 	}
 	wf := captured.Workflow
 	if wf == nil || wf.Name != "dockerfile-builder" || wf.Kind != "ClusterWorkflow" {
@@ -124,6 +139,9 @@ func TestEnsureComponent_WebAppKind_UsesWebApplicationEntrypoint(t *testing.T) {
 		CreateComponentFunc: func(_ context.Context, _, _ string, req *openchoreo.CreateComponentRequest) (*gen.Component, error) {
 			captured = req
 			return &gen.Component{Name: req.Name}, nil
+		},
+		ApplyComponentSpecFunc: func(context.Context, string, string, string, openchoreo.ComponentSpecDesired) error {
+			return nil
 		},
 	}
 	files := map[string]string{
@@ -190,181 +208,5 @@ func TestEnsureComponent_NoStoreOrRepo_Errors(t *testing.T) {
 	if err := NewComponentService(oc, nil, store, nil, nil, nil, nil).
 		EnsureComponent(context.Background(), "a", "p", "c"); err == nil {
 		t.Error("nil repo service must error")
-	}
-}
-
-// TestEnsureComponent_ModelAccessWiring covers wireModelAccess
-// (ai_agent_model_access.go) through the real EnsureComponent path: an
-// ai-agent component must get MODEL_ENDPOINT/MODEL_NAME/MODEL_API_KEY and a
-// model-access SecretReference; any other component type must trigger
-// neither (spec.resourceTypesForDerivation's "nothing declared, nothing to
-// do" discipline); an org with no connected Anthropic key must skip the
-// wiring without EnsureComponent itself erroring (a component that cannot
-// be created is a worse failure than one that starts unconfigured).
-func TestEnsureComponent_ModelAccessWiring(t *testing.T) {
-	designFiles := func(componentType string) map[string]string {
-		return map[string]string{
-			spec.DesignRootFile: "# Overview\n",
-			"components/agent-a/design.json": "{\n" +
-				"  \"name\": \"agent-a\",\n" +
-				"  \"type\": \"" + componentType + "\",\n" +
-				"  \"description\": \"body\",\n" +
-				"  \"dependencies\": []\n" +
-				"}\n",
-		}
-	}
-	repo := &sourcecontrol.GitRepository{RepoURL: "https://github.com/acme/widgets", DefaultBranch: "main"}
-	activeTriplet := organization.SecretRefTriplet{
-		Name: "anthropic-default", KVPath: "user-app-secrets/acme/anthropic", Property: "api-key", EnvVar: "ANTHROPIC_API_KEY",
-	}
-
-	tests := []struct {
-		name           string
-		componentType  string
-		resolverFunc   func(context.Context, string) (organization.SecretRefTriplet, error)
-		wantSecretUp   bool // SecretReference create-or-update expected
-		wantEnvVarsSet bool // UpdateComponentWorkflowEnvVars expected, with all 3 entries
-	}{
-		{
-			name:          "ai-agent component wires MODEL_* and upserts the SecretReference",
-			componentType: "ai-agent",
-			resolverFunc: func(context.Context, string) (organization.SecretRefTriplet, error) {
-				return activeTriplet, nil
-			},
-			wantSecretUp:   true,
-			wantEnvVarsSet: true,
-		},
-		{
-			name:          "service component does neither",
-			componentType: "service",
-			resolverFunc: func(context.Context, string) (organization.SecretRefTriplet, error) {
-				t.Fatal("a non-ai-agent component must never resolve the org's Anthropic key")
-				return organization.SecretRefTriplet{}, nil
-			},
-			wantSecretUp:   false,
-			wantEnvVarsSet: false,
-		},
-		{
-			name:          "org with no connected key skips wiring without erroring",
-			componentType: "ai-agent",
-			resolverFunc: func(context.Context, string) (organization.SecretRefTriplet, error) {
-				return organization.SecretRefTriplet{}, &organization.NotFoundError{What: "org_anthropic_credentials.acme.default"}
-			},
-			wantSecretUp:   false,
-			wantEnvVarsSet: false,
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			var gotEnvVars []openchoreo.WorkflowEnvVarRef
-			envVarsCalled := false
-			oc := &ocmocks.ComponentClientMock{
-				CreateComponentFunc: func(_ context.Context, _, _ string, req *openchoreo.CreateComponentRequest) (*gen.Component, error) {
-					return &gen.Component{Name: req.Name}, nil
-				},
-				UpdateComponentWorkflowEnvVarsFunc: func(_ context.Context, _, _, _ string, envVars []openchoreo.WorkflowEnvVarRef) error {
-					envVarsCalled = true
-					gotEnvVars = envVars
-					return nil
-				},
-			}
-			secretUpCalled := false
-			secretRefClient := &stubSecretReferenceClient{
-				GetSecretReferenceFunc: func(context.Context, string, string) (*secretmanagersvc.SecretReference, error) {
-					return nil, secretmanagersvc.ErrNotFound
-				},
-				CreateSecretReferenceFunc: func(_ context.Context, orgNS string, req secretmanagersvc.CreateSecretReferenceRequest) (*secretmanagersvc.SecretReference, error) {
-					secretUpCalled = true
-					if req.Name != modelAccessSecretRefName {
-						t.Errorf("SecretReference name = %q, want %q", req.Name, modelAccessSecretRefName)
-					}
-					if req.KVPath != activeTriplet.KVPath {
-						t.Errorf("SecretReference KVPath = %q, want %q", req.KVPath, activeTriplet.KVPath)
-					}
-					if len(req.SecretKeys) != 1 || req.SecretKeys[0] != activeTriplet.Property {
-						t.Errorf("SecretReference SecretKeys = %v, want [%q]", req.SecretKeys, activeTriplet.Property)
-					}
-					return &secretmanagersvc.SecretReference{Name: req.Name, Namespace: orgNS}, nil
-				},
-			}
-			store := spec.NewArtifactStore(&artifactstest.FakeArtifactService{
-				ListDesignFilesFunc: func(context.Context, string, string) (map[string]string, error) {
-					return designFiles(tc.componentType), nil
-				},
-			})
-			resolver := &stubAnthropicKeyResolver{DefaultKeyRefFunc: tc.resolverFunc}
-			svc := NewComponentService(oc, nil, store, ensureRepoSvc{repo: repo}, nil, resolver, secretRefClient)
-
-			if err := svc.EnsureComponent(context.Background(), "acme", "widgets", "agent-a"); err != nil {
-				t.Fatalf("EnsureComponent must not fail on model-access wiring: %v", err)
-			}
-
-			if secretUpCalled != tc.wantSecretUp {
-				t.Errorf("SecretReference upsert called = %v, want %v", secretUpCalled, tc.wantSecretUp)
-			}
-			if envVarsCalled != tc.wantEnvVarsSet {
-				t.Fatalf("UpdateComponentWorkflowEnvVars called = %v, want %v", envVarsCalled, tc.wantEnvVarsSet)
-			}
-			if !tc.wantEnvVarsSet {
-				return
-			}
-			if len(gotEnvVars) != 3 {
-				t.Fatalf("env vars = %d, want 3: %+v", len(gotEnvVars), gotEnvVars)
-			}
-			byKey := map[string]openchoreo.WorkflowEnvVarRef{}
-			for _, ev := range gotEnvVars {
-				byKey[ev.Key] = ev
-			}
-			if got := byKey[modelEndpointEnvVar]; got.Value != modelEndpointDefault || got.ValueFrom != nil {
-				t.Errorf("%s = %+v, want literal %q", modelEndpointEnvVar, got, modelEndpointDefault)
-			}
-			if got := byKey[modelNameEnvVar]; got.Value != modelNameDefault || got.ValueFrom != nil {
-				t.Errorf("%s = %+v, want literal %q", modelNameEnvVar, got, modelNameDefault)
-			}
-			apiKey := byKey[modelAPIKeyEnvVar]
-			if apiKey.ValueFrom == nil || apiKey.ValueFrom.SecretKeyRef == nil ||
-				apiKey.ValueFrom.SecretKeyRef.Name != modelAccessSecretRefName ||
-				apiKey.ValueFrom.SecretKeyRef.Key != activeTriplet.Property {
-				t.Errorf("%s wrong: %+v, want SecretKeyRef{Name: %q, Key: %q}",
-					modelAPIKeyEnvVar, apiKey, modelAccessSecretRefName, activeTriplet.Property)
-			}
-		})
-	}
-}
-
-// TestEnsureComponent_ModelAccessWiring_NotConfigured proves EnsureComponent
-// never fails when the model-access ports simply aren't wired (nil
-// resolver/secretRefClient) — the same "not configured" degraded mode
-// buildCredSvc/repoSvc already support elsewhere in this file.
-func TestEnsureComponent_ModelAccessWiring_NotConfigured(t *testing.T) {
-	oc := &ocmocks.ComponentClientMock{
-		CreateComponentFunc: func(_ context.Context, _, _ string, req *openchoreo.CreateComponentRequest) (*gen.Component, error) {
-			return &gen.Component{Name: req.Name}, nil
-		},
-		UpdateComponentWorkflowEnvVarsFunc: func(context.Context, string, string, string, []openchoreo.WorkflowEnvVarRef) error {
-			t.Fatal("UpdateComponentWorkflowEnvVars must not be called when model access is unconfigured")
-			return nil
-		},
-	}
-	files := map[string]string{
-		spec.DesignRootFile: "# Overview\n",
-		"components/agent-a/design.json": "{\n" +
-			"  \"name\": \"agent-a\",\n" +
-			"  \"type\": \"ai-agent\",\n" +
-			"  \"description\": \"body\",\n" +
-			"  \"dependencies\": []\n" +
-			"}\n",
-	}
-	store := spec.NewArtifactStore(&artifactstest.FakeArtifactService{
-		ListDesignFilesFunc: func(context.Context, string, string) (map[string]string, error) {
-			return files, nil
-		},
-	})
-	repo := &sourcecontrol.GitRepository{RepoURL: "https://github.com/acme/widgets", DefaultBranch: "main"}
-	svc := NewComponentService(oc, nil, store, ensureRepoSvc{repo: repo}, nil, nil, nil)
-
-	if err := svc.EnsureComponent(context.Background(), "acme", "widgets", "agent-a"); err != nil {
-		t.Fatalf("EnsureComponent must not fail when model access is unconfigured: %v", err)
 	}
 }

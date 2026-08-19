@@ -30,8 +30,8 @@ import (
 func seedSpec() map[string]string {
 	return map[string]string{
 		"specs/requirements/prd.md": "# Reqs\n",
-		"specs/design/design.md":             "# Design\n",
-		"src/main.go":                        "package main\n",
+		"specs/design/design.md":    "# Design\n",
+		"src/main.go":               "package main\n",
 	}
 }
 

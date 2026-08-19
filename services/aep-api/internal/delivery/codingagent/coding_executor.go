@@ -184,6 +184,10 @@ type agentLaunch struct {
 	// secrets into the runner. It is always empty today: a cycle spans the whole
 	// milestone rather than one component, so there is no single component whose
 	// secrets to mount.
+	//
+	//nolint:unused // a deliberate seam, kept per the repo's retain-with-a-marker
+	// rule for unwired infra: it records WHY per-component secret mounting is not
+	// wired, which is the question anyone adding it would ask first.
 	secretComponent string
 
 	// repo, when non-nil, is a repository row the caller already resolved (the
@@ -374,9 +378,9 @@ func (e *CodingExecutor) resolveRunnerSecretRefs(ctx context.Context, orgID stri
 		return SecretRef{}, SecretRef{}, fmt.Errorf("coding dispatch: github secret reference missing for org %q: org_credentials row not found", orgID)
 	}
 	githubSR := SecretRef{
-		SecretRefName: derefStr(githubRow.ResolvedSecretRefName()),
-		KVPath:        derefStr(githubRow.ResolvedSecretRefKVPath()),
-		Property:      derefStr(githubRow.ResolvedSecretRefProperty()),
+		SecretRefName: derefStr(githubRow.SecretRefName),
+		KVPath:        derefStr(githubRow.SecretRefKVPath),
+		Property:      derefStr(githubRow.SecretRefProperty),
 	}
 	if err := validateSecretRefTriplet("github", orgID, githubSR); err != nil {
 		return SecretRef{}, SecretRef{}, fmt.Errorf("coding dispatch: %w", err)

@@ -65,85 +65,83 @@ func agentDesignJSON(name string) string {
 		"\",\n  \"description\": \"Agent.\",\n  \"dependencies\": []\n}\n"
 }
 
-// THE REGRESSION. The write target is the ReleaseBinding, which does not exist
-// until a build has produced a workload — so the pre-build EnsureComponent pass
-// reaches nothing on a first deploy and the agent comes up with no MODEL_* at
-// all. This sweep runs at builds-green, when the binding exists. If it stops
-// writing MODEL_*, every agent's first deploy 500s on every chat request again.
-func TestSyncProjectModelAccess_WritesModelEnvForEveryAIAgent(t *testing.T) {
-	var wrote []openchoreo.WorkflowEnvVarRef
-	var wroteFor []string
-	oc := &ocmocks.ComponentClientMock{
-		UpdateComponentWorkflowEnvVarsFunc: func(_ context.Context, _, _, componentName string, envVars []openchoreo.WorkflowEnvVarRef) error {
-			wroteFor = append(wroteFor, componentName)
-			wrote = append(wrote, envVars...)
-			return nil
-		},
-	}
-	files := map[string]string{
-		spec.DesignRootFile:                  "# Overview\n",
-		"components/hotel-agent/design.json": agentDesignJSON("hotel-agent"),
-		"components/hotel-api/design.json":   "{\n  \"name\": \"hotel-api\",\n  \"type\": \"service\",\n  \"description\": \"API.\",\n  \"dependencies\": []\n}\n",
-	}
-	svc := NewComponentService(oc, nil, modelAccessStore(files), nil, nil,
+// THE REGRESSION, restated for the deployment path. Model access is granted by
+// component TYPE rather than declared as a dependency (ADR-0016), so OpenChoreo
+// never resolves it while rendering a release — the platform must compose it
+// into the binding write itself. These values ride the deploy stage's single
+// ApplyReleaseBinding call (DeploymentService.envVarsWithModelAccess), which is
+// the only moment a binding is guaranteed to exist. An earlier design wrote them
+// from the pre-build EnsureComponent pass and every agent's FIRST deploy came up
+// with no MODEL_* at all, 503ing on /healthz and 500ing on every chat.
+func TestModelAccessEnvVars_ReturnsTheThreeModelVars(t *testing.T) {
+	svc := NewComponentService(
+		&ocmocks.ComponentClientMock{}, nil, modelAccessStore(nil), nil, nil,
 		fakeKeyResolver{triplet: organization.SecretRefTriplet{
-			KVPath:   "user-app-secrets/wc-abc123/anthropic-secrets",
-			Property: "apiKey",
-		}}, fakeSecretRefClient{})
+			Name: "anthropic-default", KVPath: "user-app-secrets/acme/anthropic", Property: "api-key",
+		}},
+		fakeSecretRefClient{},
+	).(*componentService)
 
-	if err := svc.SyncProjectModelAccess(context.Background(), "acme", "hotels"); err != nil {
-		t.Fatalf("SyncProjectModelAccess: %v", err)
+	got, err := svc.ModelAccessEnvVars(context.Background(), "acme")
+	if err != nil {
+		t.Fatalf("ModelAccessEnvVars: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("env var count = %d, want 3: %+v", len(got), got)
 	}
 
-	// Only the ai-agent — a service has no model access to grant.
-	if len(wroteFor) != 1 || wroteFor[0] != "hotel-agent" {
-		t.Fatalf("wrote env for %v, want exactly [hotel-agent]", wroteFor)
+	byKey := map[string]openchoreo.WorkflowEnvVarRef{}
+	for _, v := range got {
+		byKey[v.Key] = v
 	}
-	got := map[string]bool{}
-	for _, e := range wrote {
-		got[e.Key] = true
+	if v := byKey[modelEndpointEnvVar]; v.Value != modelEndpointDefault {
+		t.Errorf("%s = %q, want %q", modelEndpointEnvVar, v.Value, modelEndpointDefault)
 	}
-	for _, want := range []string{modelEndpointEnvVar, modelNameEnvVar, modelAPIKeyEnvVar} {
-		if !got[want] {
-			t.Errorf("missing %s — the agent starts with 'missing config' and 500s on every request", want)
-		}
+	if v := byKey[modelNameEnvVar]; v.Value != modelNameDefault {
+		t.Errorf("%s = %q, want %q", modelNameEnvVar, v.Value, modelNameDefault)
 	}
-	// MODEL_API_KEY must be a secret reference, never a literal.
-	for _, e := range wrote {
-		if e.Key != modelAPIKeyEnvVar {
-			continue
-		}
-		if e.Value != "" {
-			t.Errorf("MODEL_API_KEY carried a literal value — it must ride a SecretKeyRef")
-		}
-		if e.ValueFrom == nil || e.ValueFrom.SecretKeyRef == nil || e.ValueFrom.SecretKeyRef.Key != "apiKey" {
-			t.Errorf("MODEL_API_KEY secretKeyRef wrong: %+v", e.ValueFrom)
-		}
+	// The key itself is never a literal: it is a SecretKeyRef naming the
+	// org-scoped SecretReference, which ESO materialises into the consuming
+	// namespace. A literal here would put the org's Anthropic key in a CR.
+	key := byKey[modelAPIKeyEnvVar]
+	if key.Value != "" {
+		t.Errorf("%s carries a literal value %q — it must be a SecretKeyRef", modelAPIKeyEnvVar, key.Value)
+	}
+	if key.ValueFrom == nil || key.ValueFrom.SecretKeyRef == nil {
+		t.Fatalf("%s has no SecretKeyRef: %+v", modelAPIKeyEnvVar, key)
+	}
+	if got, want := key.ValueFrom.SecretKeyRef.Name, modelAccessSecretRefName; got != want {
+		t.Errorf("SecretKeyRef.Name = %q, want %q", got, want)
+	}
+	if got, want := key.ValueFrom.SecretKeyRef.Key, "api-key"; got != want {
+		t.Errorf("SecretKeyRef.Key = %q, want %q (the triplet's property)", got, want)
 	}
 }
 
-// A project with no ai-agent costs no OpenChoreo round trip at all.
-func TestSyncProjectModelAccess_NoAgentIsANoOp(t *testing.T) {
-	calls := 0
-	oc := &ocmocks.ComponentClientMock{
-		UpdateComponentWorkflowEnvVarsFunc: func(context.Context, string, string, string, []openchoreo.WorkflowEnvVarRef) error {
-			calls++
-			return nil
-		},
-	}
-	files := map[string]string{
-		spec.DesignRootFile:                "# Overview\n",
-		"components/hotel-api/design.json": "{\n  \"name\": \"hotel-api\",\n  \"type\": \"service\",\n  \"description\": \"API.\",\n  \"dependencies\": []\n}\n",
-	}
-	svc := NewComponentService(oc, nil, modelAccessStore(files), nil, nil,
-		fakeKeyResolver{}, fakeSecretRefClient{})
+// An org with no connected Anthropic key is expected, not exceptional: a
+// brand-new org before its first Settings visit. Yielding (nil, nil) lets the
+// agent deploy and report 503 from /healthz — a state an operator can see and
+// fix — where an error would fail the whole deploy and leave no agent at all.
+func TestModelAccessEnvVars_NoConnectedKeyIsNotAnError(t *testing.T) {
+	svc := NewComponentService(
+		&ocmocks.ComponentClientMock{}, nil, modelAccessStore(nil), nil, nil,
+		noKeyResolver{}, fakeSecretRefClient{},
+	).(*componentService)
 
-	if err := svc.SyncProjectModelAccess(context.Background(), "acme", "hotels"); err != nil {
-		t.Fatalf("SyncProjectModelAccess: %v", err)
+	got, err := svc.ModelAccessEnvVars(context.Background(), "acme")
+	if err != nil {
+		t.Fatalf("an org with no key must not error, got: %v", err)
 	}
-	if calls != 0 {
-		t.Errorf("a design with no ai-agent must make no env write, got %d", calls)
+	if got != nil {
+		t.Errorf("env vars = %+v, want nil", got)
 	}
+}
+
+// noKeyResolver reports the org has no connected default key.
+type noKeyResolver struct{}
+
+func (noKeyResolver) DefaultKeyRef(context.Context, string) (organization.SecretRefTriplet, error) {
+	return organization.SecretRefTriplet{}, &organization.NotFoundError{}
 }
 
 // The SecretReference must be authored in the ReleaseBinding's namespace —
@@ -161,16 +159,11 @@ func TestSyncProjectModelAccess_NoAgentIsANoOp(t *testing.T) {
 func TestUpsertModelAccessSecretReference_UsesTheReleaseBindingNamespace(t *testing.T) {
 	var gotNS []string
 	sr := &namespaceCapturingSecretRefClient{seen: &gotNS}
-	oc := &ocmocks.ComponentClientMock{
-		UpdateComponentWorkflowEnvVarsFunc: func(context.Context, string, string, string, []openchoreo.WorkflowEnvVarRef) error {
-			return nil
-		},
-	}
 	files := map[string]string{
 		spec.DesignRootFile:                  "# Overview\n",
 		"components/hotel-agent/design.json": agentDesignJSON("hotel-agent"),
 	}
-	svc := NewComponentService(oc, nil, modelAccessStore(files), nil, nil,
+	svc := NewComponentService(&ocmocks.ComponentClientMock{}, nil, modelAccessStore(files), nil, nil,
 		fakeKeyResolver{triplet: organization.SecretRefTriplet{
 			// The vault path's org segment is DELIBERATELY different from the
 			// control-plane namespace here — that difference is the bug.
@@ -178,8 +171,8 @@ func TestUpsertModelAccessSecretReference_UsesTheReleaseBindingNamespace(t *test
 			Property: "api-key",
 		}}, sr)
 
-	if err := svc.SyncProjectModelAccess(context.Background(), "default", "hotels"); err != nil {
-		t.Fatalf("SyncProjectModelAccess: %v", err)
+	if _, err := svc.(*componentService).ModelAccessEnvVars(context.Background(), "default"); err != nil {
+		t.Fatalf("ModelAccessEnvVars: %v", err)
 	}
 	for _, ns := range gotNS {
 		if ns != "default" {

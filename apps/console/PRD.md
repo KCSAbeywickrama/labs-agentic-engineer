@@ -3,15 +3,15 @@
 > **What this is:** the stable product picture of the console — who it's for,
 > how it's organized, and what it does. Purpose, loop, personas, IA, and
 > non-goals describe the **target product** (baseline set 2026-07-02, before
-> any feature shipped); the **feature inventory** is what's actually shipped,
-> and **In flight** lists features currently being built.
+> any feature shipped); the **feature inventory** is what's actually shipped.
 >
-> **Update rules:** a feature entering build adds one line to *In flight*
-> (flow step 6); shipping a feature moves that line into the feature
-> inventory and amends any affected sections (flow step 8) — both are
-> required steps, not courtesies. Keep entries to one line/paragraph + a
-> link; detail lives in the feature's GitHub issue (see
-> `design/development-flow.md`, ADR-0001).
+> **Update rules:** the feature's own PR adds its inventory entry and amends
+> any section the feature changes — part of the PR, not a follow-up, since
+> merging the PR is what ships it (flow step 6). Keep entries to one
+> line/paragraph + a link; detail lives in the feature's GitHub issue (see
+> `design/development-flow.md`, ADR-0001). Work **in progress** isn't
+> tracked here — the open issues are: `gh issue list --repo
+> wso2/labs-agentic-engineer --label console --label feature`.
 
 ## Purpose
 
@@ -77,11 +77,12 @@ Approved at section level; per-section detail is defined feature-by-feature.
     (placeholder until its feature lands).
 - **Admin** — agent customization (instructions, skills). Architect/SRE only.
 
-## In flight
+## Feature inventory
 
-Features currently being built. One line each; **must be emptied on ship**
-(the line moves to the inventory below). If a line sits here for weeks,
-that's a stalled feature — investigate, don't ignore.
+One entry per **shipped** feature — a feature is shipped when its PR merges,
+which is also what closes its issue. Newest first; links go to the feature's
+GitHub issue plus any ADRs it produced. Features still being built aren't
+here: they're the open `console` + `feature` issues.
 
 - Deployments page — one-story rail + environment panel: Development /
   Validation / Production as one numbered rail (Builds-spine vocabulary,
@@ -99,6 +100,14 @@ that's a stalled feature — investigate, don't ignore.
   route. `@aep/excalidraw-dsl`'s `tryDslToPrototype` compiles per-screen
   scenes client-side (no BE handshake, no contract change; ADR-0008) —
   [#348](https://github.com/wso2/labs-agentic-engineer/issues/348)
+- Spec view — prototype user flows: `wireframes.dsl` declares named
+  `flow "<name>"` blocks (optional `role`/`description` lines) listing each
+  persona's screens in walkthrough order; the prototype toolbar leads with a
+  **User flow** picker that scopes the screen picker to the chosen flow, the
+  canvas marks each screen's membership (`Approval queue · Screen 2`,
+  `Common · Screen 1`), and `?flow=<Name>` joins `?screen=` on the full-screen
+  route. Same client-side derivation, no contract change —
+  [#491](https://github.com/wso2/labs-agentic-engineer/issues/491)
 - Agent chat — structured question cards: `ask_question` (single) +
   `ask_questions` (batch form) tool-calls rendered as native Oxygen UI cards
   in the activity stream (answer returns as the next turn's plain text);
@@ -224,10 +233,10 @@ that's a stalled feature — investigate, don't ignore.
   [#107](https://github.com/wso2/labs-agentic-engineer/issues/107) (BE
   handshake: [#108](https://github.com/wso2/labs-agentic-engineer/issues/108))
 
-## Feature inventory
+### Earlier features, with ship dates
 
-One row per **shipped** feature. Newest first. Links go to the feature's
-GitHub issue plus any ADRs it produced.
+Recorded in table form before the inventory settled on the entry format
+above. Same meaning: one row per shipped feature.
 
 | Feature | Shipped | Summary | Links |
 |---|---|---|---|

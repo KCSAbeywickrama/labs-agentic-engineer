@@ -40,70 +40,46 @@ import (
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/clients/secretmanagersvc"
 	"github.com/wso2/aep/aep-api/internal/organization"
-	"github.com/wso2/aep/aep-api/internal/platform/k8sname"
-	"github.com/wso2/aep/aep-api/internal/spec"
 )
 
-// wireModelAccess gives an ai-agent component MODEL_ENDPOINT / MODEL_NAME /
-// MODEL_API_KEY. A component of any other type does none of this — no
-// SecretReference upsert, no extra OC call — the same "nothing declared,
-// nothing to do" discipline spec.resourceTypesForDerivation uses for a
-// design with no ai-agent component.
+// ModelAccessEnvVars returns the MODEL_ENDPOINT / MODEL_NAME / MODEL_API_KEY
+// an ai-agent component needs, after making sure the SecretReference the
+// MODEL_API_KEY entry names exists in the org's control-plane namespace.
 //
-// This is the EARLY, best-effort pass, and it is not what makes MODEL_* land:
-// at EnsureComponent time the component has no ReleaseBinding yet, so the env
-// write has nothing to write to. Its value is the SecretReference upsert, which
-// is worth doing before the build. SyncProjectModelAccess, at builds-green, is
-// what actually wires the pod.
+// It is called while COMPOSING a deployment, so the values ride the one
+// ReleaseBinding write the deploy stage already makes (DesiredDeploymentFor →
+// ApplyReleaseBinding) instead of a second pass that patches the binding after
+// the fact. That ordering is not a preference: model access is granted by
+// component TYPE rather than declared as a dependency (ADR-0016), so
+// OpenChoreo never resolves it while rendering the release the way it resolves
+// a declared one — the platform has to put it there, and the only moment a
+// binding is guaranteed to exist is the write that creates it.
 //
-// A failure here therefore logs rather than propagating: a component that
-// cannot be created is a worse failure than one that starts and reports what it
-// is missing, and the builds-green sweep re-attempts everything anyway.
-// agent-building's own contract is a 503 from /healthz until MODEL_* resolve,
-// not a failed deploy — see
-// docs/decisions/ADR-0016-coding-agent-key-is-an-override-not-a-peer.md.
-func (s *componentService) wireModelAccess(ctx context.Context, ocOrgID, projectName, componentName, componentType string) {
-	if componentType != spec.ComponentTypeAIAgent {
-		return
-	}
-	if err := s.ensureModelAccess(ctx, ocOrgID, projectName, componentName); err != nil {
-		slog.WarnContext(ctx, "ensure component: model access not wired at component-ensure time; the builds-green sweep is what makes it land",
-			"org", ocOrgID, "project", projectName, "component", componentName, "error", err)
-	}
-}
-
-// ensureModelAccess is the write itself, with its failures RETURNED rather than
-// logged away, so the builds-green sweep (SyncProjectModelAccess) can surface
-// them to Temporal and have the activity retried. wireModelAccess is the
-// log-and-continue wrapper the pre-build EnsureComponent path uses, where a
-// failure must not block component creation.
-//
-// The caller has already established that this component is an ai-agent.
-func (s *componentService) ensureModelAccess(ctx context.Context, ocOrgID, projectName, componentName string) error {
+// An org with no connected Anthropic key yields (nil, nil): a brand-new org
+// before its first Settings visit is expected, not exceptional, and retrying
+// cannot conjure a key. The agent then starts unconfigured and agent-building's
+// contract is a 503 from /healthz until one is connected.
+func (s *componentService) ModelAccessEnvVars(ctx context.Context, ocOrgID string) ([]openchoreo.WorkflowEnvVarRef, error) {
 	if s.modelKeyResolver == nil || s.secretRefClient == nil {
-		return fmt.Errorf("model access not configured at the composition root")
+		return nil, fmt.Errorf("model access not configured at the composition root")
 	}
 
 	triplet, err := s.modelKeyResolver.DefaultKeyRef(ctx, ocOrgID)
 	if err != nil {
 		var notFound *organization.NotFoundError
 		if errors.As(err, &notFound) {
-			// An org with no connected key is expected, not exceptional (a
-			// brand-new org before its first Settings visit). Not an error:
-			// retrying cannot conjure a key, and agent-building's contract is a
-			// 503 from /healthz until one is connected.
-			slog.InfoContext(ctx, "model access: org has no connected Anthropic key yet — ai-agent component starts unconfigured (agent-building reports 503 from /healthz until one is connected)",
-				"org", ocOrgID, "project", projectName, "component", componentName)
-			return nil
+			slog.InfoContext(ctx, "model access: org has no connected Anthropic key yet — ai-agent components start unconfigured (agent-building reports 503 from /healthz until one is connected)",
+				"org", ocOrgID)
+			return nil, nil
 		}
-		return fmt.Errorf("resolve org's default Anthropic key: %w", err)
+		return nil, fmt.Errorf("resolve org's default Anthropic key: %w", err)
 	}
 
 	if err := s.upsertModelAccessSecretReference(ctx, ocOrgID, triplet); err != nil {
-		return fmt.Errorf("upsert model-access SecretReference: %w", err)
+		return nil, fmt.Errorf("upsert model-access SecretReference: %w", err)
 	}
 
-	envVars := []openchoreo.WorkflowEnvVarRef{
+	return []openchoreo.WorkflowEnvVarRef{
 		{Key: modelEndpointEnvVar, Value: modelEndpointDefault},
 		{Key: modelNameEnvVar, Value: modelNameDefault},
 		{
@@ -115,73 +91,7 @@ func (s *componentService) ensureModelAccess(ctx context.Context, ocOrgID, proje
 				},
 			},
 		},
-	}
-	if err := s.client.UpdateComponentWorkflowEnvVars(ctx, ocOrgID, projectName, componentName, envVars); err != nil {
-		return fmt.Errorf("write MODEL_* env vars: %w", err)
-	}
-	// NOTE: UpdateComponentWorkflowEnvVars returns nil both when it wrote to
-	// N ReleaseBindings AND when the component has none yet (soft no-op —
-	// its own doc comment says so), so this call site cannot tell "wired" from
-	// "wrote to nothing" without a second OC round-trip.
-	//
-	// That ambiguity is WHY this must run at builds-green and not only before
-	// the build. An earlier version ran solely from EnsureComponent and claimed
-	// the miss was covered because EnsureComponent re-runs before every build
-	// attempt. It is not: EnsureComponent runs BEFORE the build, the build's
-	// last step is what generates the workload OpenChoreo creates the
-	// ReleaseBinding from, so on a FIRST build there is never a binding to
-	// write to — and a first build gets no second attempt. Every agent's first
-	// deploy came up with no MODEL_* and 503'd (observed: the write ran 2m21s
-	// before the ReleaseBinding existed). SyncProjectModelAccess is the fix;
-	// this path stays because the SecretReference upsert above is worth doing
-	// early and every step here is idempotent.
-	slog.InfoContext(ctx, "model access: requested MODEL_* wiring for ai-agent component (a no-op when no ReleaseBinding exists yet — the builds-green sweep is what makes it land)",
-		"org", ocOrgID, "project", projectName, "component", componentName)
-	return nil
-}
-
-// SyncProjectModelAccess wires MODEL_* into every ai-agent component in the
-// project. Called once per cycle at builds-green — the earliest point where the
-// write target exists, since OpenChoreo creates the ReleaseBinding out of the
-// workload the build's last step generates. Mirrors SyncProjectAPITraits, which
-// exists at the same point in the run for exactly the same reason.
-//
-// Per-component failures are joined and RETURNED rather than swallowed: the
-// caller is a Temporal activity, and returning is what makes it retry. A
-// component that fails does not stop the rest of the project from converging.
-//
-// A design with no ai-agent component does nothing and costs no OC round trip —
-// the same "nothing declared, nothing to do" discipline wireModelAccess uses.
-func (s *componentService) SyncProjectModelAccess(ctx context.Context, orgID, projectID string) error {
-	if s == nil {
-		return nil
-	}
-	if orgID == "" || projectID == "" {
-		return fmt.Errorf("model access sync: empty orgID/projectID")
-	}
-	design, err := s.artifactStore.ReadDesign(ctx, orgID, projectID)
-	if err != nil {
-		if spec.IsNotFound(err) {
-			return nil
-		}
-		return fmt.Errorf("model access sync: read design: %w", err)
-	}
-	if design == nil {
-		return nil
-	}
-
-	var failures []error
-	for _, c := range design.Components {
-		if c.ComponentType != spec.ComponentTypeAIAgent {
-			continue
-		}
-		if err := s.ensureModelAccess(ctx, orgID, projectID, k8sname.ToK8sName(c.Name)); err != nil {
-			slog.WarnContext(ctx, "model access sync: component failed; continuing",
-				"org", orgID, "project", projectID, "component", c.Name, "error", err)
-			failures = append(failures, fmt.Errorf("component %q: %w", c.Name, err))
-		}
-	}
-	return errors.Join(failures...)
+	}, nil
 }
 
 // upsertModelAccessSecretReference points modelAccessSecretRefName — one per

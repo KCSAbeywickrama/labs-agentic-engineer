@@ -53,12 +53,6 @@ type ComponentService interface {
 	// must exist by merge/build time or the build fails "Component not found".
 	// Idempotent — CreateComponent is 409-safe, so re-dispatch is a no-op.
 	EnsureComponent(ctx context.Context, orgName, projectName, componentName string) error
-	// SyncProjectModelAccess wires MODEL_* into every ai-agent component in the
-	// project. Runs at builds-green, the earliest point where the write target
-	// (the ReleaseBinding) exists — EnsureComponent runs before the build and so
-	// has nothing to write to on a first deploy. See ai_agent_model_access.go.
-	SyncProjectModelAccess(ctx context.Context, orgID, projectID string) error
-	UpdateWorkflowEnvVars(ctx context.Context, orgName, projectName, componentName string, envVars []openchoreo.WorkflowEnvVarRef) error
 
 	// Deploy (read-only — autoDeploy on the Component drives the chain)
 	ListDeployments(ctx context.Context, orgName, projectName, componentName string) (*gen.DeploymentList, error)
@@ -94,7 +88,7 @@ type BuildSecretStager interface {
 // Declared consumer-side (same pattern as OrgPublisher in trait_sync.go) so
 // this package takes only the one method it needs, not the concrete
 // service. Returns an *organization.NotFoundError when the org has no
-// active default key — see wireModelAccess.
+// active default key — see ModelAccessEnvVars.
 type AnthropicKeyResolver interface {
 	DefaultKeyRef(ctx context.Context, ocOrgID string) (organization.SecretRefTriplet, error)
 }
@@ -134,12 +128,11 @@ type componentService struct {
 	// (tests / unit-only flows).
 	repoSvc      sourcecontrol.RepoService
 	buildCredSvc BuildSecretStager
-	// modelKeyResolver + secretRefClient wire MODEL_* into every ai-agent
-	// component at EnsureComponent time (see ai_agent_model_access.go).
-	// Optional — nil means "not configured" (tests / unit-only flows, or a
-	// deployment that hasn't wired the composition root yet), and
-	// wireModelAccess logs and continues rather than failing component
-	// creation over it — same discipline as an org with no connected key.
+	// modelKeyResolver + secretRefClient back ModelAccessEnvVars, which the
+	// deploy stage calls while composing an ai-agent's ReleaseBinding (see
+	// ai_agent_model_access.go). Optional — nil means "not configured" (tests /
+	// unit-only flows, or a deployment that hasn't wired the composition root
+	// yet).
 	modelKeyResolver AnthropicKeyResolver
 	secretRefClient  secretmanagersvc.OpenChoreoSecretReferenceClient
 }
@@ -186,15 +179,24 @@ func (s *componentService) CreateComponent(ctx context.Context, orgName, project
 }
 
 // EnsureComponent provisions the OpenChoreo Component CR (one per design
-// component) needed for the build to fire when the merge push arrives. Ported
-// from the legacy dispatch service's ensureOCComponent pre-flight (the piece the
-// tasks-github-native rebuild dropped): AutoBuild=false (every build is driven by
-// the BFF pinning a WorkflowRun to the merge SHA), AutoDeploy=true (OC's
-// controller creates the ReleaseBinding into the first pipeline environment once
-// the build posts a Workload). Idempotent — the OC client refetches on 409, so a
-// re-dispatch of the same component is a no-op. Reads the design facts (app path,
-// component type, api-security) via the artifact store and the repo row via
-// repoSvc; both are the existing feature ports.
+// component) needed for the build to fire when the merge push arrives.
+// AutoBuild=false (every build is driven by the BFF pinning a WorkflowRun to the
+// merge SHA) and AutoDeploy=false (every deploy is driven by the run
+// supervisor's deploy stage pinning a ReleaseBinding).
+//
+// It is an UPSERT, not a create-if-absent. Two things depend on that:
+//
+//   - The trait SHAPE is frozen into the ComponentRelease cut from the build's
+//     Workload, so a design edit that toggles `exposesAPI.auth` has to reach the
+//     CR BEFORE the build. Asserting only at create meant the first component
+//     ever built carried the right traits and every later edit silently did not.
+//   - A component created while the platform still relied on AutoDeploy carries
+//     autoDeploy=true. Left alone, OC's controller would keep promoting releases
+//     underneath the deploy stage.
+//
+// Reads the design facts (app path, component type, api-security) via the
+// artifact store and the repo row via repoSvc; both are the existing feature
+// ports.
 func (s *componentService) EnsureComponent(ctx context.Context, orgName, projectName, componentName string) error {
 	if s.artifactStore == nil {
 		return fmt.Errorf("ensure component: artifact store not configured")
@@ -225,10 +227,14 @@ func (s *componentService) EnsureComponent(ctx context.Context, orgName, project
 	if branch == "" {
 		branch = "main"
 	}
-	// api-configuration trait derived from design.md's exposesAPI.auth (none →
-	// no trait). Set at create time; per-env reconcile is the trait_sync path's job.
-	apiSecurityEnabled := spec.ResolveAPISecurityEnabled(*comp)
-	traits, _ := DesiredAPIConfigurationTrait(k8sName, comp.EndpointName(), apiSecurityEnabled)
+	// The trait SHAPE only — the per-environment config half of the same
+	// projection lands on the ReleaseBinding at deploy, because it needs a
+	// release to bind to. One function computes both so they cannot disagree.
+	desiredSpec := openchoreo.ComponentSpecDesired{
+		Traits:     DesiredDeploymentFor(DeploymentInputs{Component: *comp, ComponentName: k8sName}).Traits,
+		AutoBuild:  false,
+		AutoDeploy: false,
+	}
 
 	// repository.secretRef stays empty: build credentials are pre-staged per
 	// WorkflowRun (build-credential-injection.md), so the Component's workflow
@@ -238,8 +244,8 @@ func (s *componentService) EnsureComponent(ctx context.Context, orgName, project
 		DisplayName: comp.Name,
 		Description: comp.Name,
 		Type:        ocEntrypoint(comp.ComponentType),
-		AutoBuild:   false,
-		AutoDeploy:  true,
+		AutoBuild:   desiredSpec.AutoBuild,
+		AutoDeploy:  desiredSpec.AutoDeploy,
 		Workflow: &openchoreo.ComponentWorkflowSpec{
 			Kind: "ClusterWorkflow",
 			Name: "dockerfile-builder",
@@ -253,9 +259,15 @@ func (s *componentService) EnsureComponent(ctx context.Context, orgName, project
 				Docker: &openchoreo.DockerParameters{Context: dockerContext, FilePath: dockerFilePath},
 			},
 		},
-		Traits: traits,
+		Traits: desiredSpec.Traits,
 	}); err != nil {
 		return fmt.Errorf("ensure component: create OC component %q: %w", k8sName, err)
+	}
+	// The create above is a no-op on an existing component (the client refetches
+	// on 409), so the desired spec is re-asserted unconditionally rather than
+	// only on the create path — see the upsert note above.
+	if err := s.client.ApplyComponentSpec(ctx, orgName, projectName, k8sName, desiredSpec); err != nil {
+		return fmt.Errorf("ensure component: apply spec for %q: %w", k8sName, err)
 	}
 	slog.InfoContext(ctx, "ensure component: OC Component ensured", "org", orgName, "project", projectName, "component", k8sName)
 
@@ -264,7 +276,6 @@ func (s *componentService) EnsureComponent(ctx context.Context, orgName, project
 	// dependency (ADR-0016). No-op for every other component type; see
 	// ai_agent_model_access.go. Best-effort: never fails EnsureComponent, so
 	// a model-access hiccup cannot block component creation or a build.
-	s.wireModelAccess(ctx, orgName, projectName, k8sName, comp.ComponentType)
 	return nil
 }
 
@@ -282,20 +293,6 @@ func ocEntrypoint(componentType string) string {
 	default:
 		return "deployment/service"
 	}
-}
-
-// UpdateWorkflowEnvVars writes per-component env vars onto each of the
-// component's ReleaseBindings (one per environment) at
-// `spec.workloadOverrides.container.env`. OC's controller picks them up
-// on the next reconcile — no rebuild required. When no ReleaseBindings
-// exist yet (the user is editing env vars before first deploy) the
-// underlying client returns nil and the caller is expected to retry
-// after the first build has produced a binding.
-func (s *componentService) UpdateWorkflowEnvVars(ctx context.Context, orgName, projectName, componentName string, envVars []openchoreo.WorkflowEnvVarRef) error {
-	if err := s.client.UpdateComponentWorkflowEnvVars(ctx, orgName, projectName, componentName, envVars); err != nil {
-		return err
-	}
-	return nil
 }
 
 // GetComponentOpenAPI reads the `specs/design/` tree via the ArtifactStore
