@@ -16,43 +16,24 @@
  * under the License.
  */
 
-// The `/chat` contract every platform ai-agent speaks (skills/agent-building)
-// and every calling web app relies on (skills/react-webapp), pinned against
-// the real AI SDK rather than described in prose. Two claims the skills make
-// that a caller silently breaks on if false:
-//
-//   1. `messages` must be the FULL conversation — history in, then the trail —
-//      because `memory.type: client` stores only what the agent returns.
-//   2. `messages` is not renderable: after a tool step the assistant's
-//      `content` is a parts array, and the tool message's always is. So the
-//      reply must come from `text`.
-//
-// This drives one real generateText turn through a mock model that makes a
-// tool call, then asserts the exact shape a compliant agent returns. If an SDK
-// upgrade changes the ModelMessage layout, this fails before a generated agent
-// does.
+// Pins the /chat contract every platform ai-agent speaks under server memory
+// (skills/agent-building) against the real AI SDK. The store is a Map standing
+// in for the skill's prescribed SQL — same keying: (conversationId, userId).
+// Three claims generated agents and their callers rely on:
+//   1. A turn without a conversationId creates one and returns it; the caller
+//      stores ONLY the id.
+//   2. The agent persists the FULL conversation (history + user turn + trail,
+//      tool results included) — the next turn remembers without the caller
+//      resending anything.
+//   3. Conversations are fenced by user: another user's id is as good as
+//      nonexistent (404 semantics, never 403).
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { generateText, stepCountIs, tool, type ModelMessage } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { z } from "zod";
-
-/** The exact return statement skills/agent-building prescribes. */
-function agentResponse(
-  history: ModelMessage[],
-  result: {
-    text: string;
-    toolCalls: readonly unknown[];
-    steps: ReadonlyArray<{ response: { messages: ModelMessage[] } }>;
-  },
-) {
-  return {
-    text: result.text,
-    toolCalls: result.toolCalls,
-    messages: [...history, ...result.steps.flatMap((s) => s.response.messages)],
-  };
-}
 
 type Generated = Awaited<ReturnType<MockLanguageModelV3["doGenerate"]>>;
 
@@ -61,6 +42,7 @@ const usage: Generated["usage"] = {
   outputTokens: { total: 1, text: 1, reasoning: undefined },
 };
 
+/** First call makes a tool call; every later call answers in text. */
 function toolCallingModel() {
   let call = 0;
   return new MockLanguageModelV3({
@@ -70,33 +52,62 @@ function toolCallingModel() {
         return {
           finishReason: { unified: "tool-calls", raw: undefined },
           usage,
-          content: [
-            {
-              type: "tool-call",
-              toolCallId: "call-1",
-              toolName: "listHotels",
-              input: JSON.stringify({ city: "Paris" }),
-            },
-          ],
+          content: [{
+            type: "tool-call", toolCallId: "call-1",
+            toolName: "listHotels", input: JSON.stringify({ city: "Paris" }),
+          }],
           warnings: [],
         };
       }
       return {
         finishReason: { unified: "stop", raw: undefined },
         usage,
-        content: [{ type: "text", text: "I found the Ritz in Paris." }],
+        content: [{ type: "text", text: `answer ${call}` }],
         warnings: [],
       };
     },
   });
 }
 
-test("chat contract: messages is the full conversation, and the reply lives in text", async () => {
-  const history: ModelMessage[] = [{ role: "user", content: "find me a hotel in Paris" }];
+// --- the prescribed store + turn flow (skills/agent-building), Map-backed ---
 
+type Row = { userId: string; messages: ModelMessage[] };
+const store = new Map<string, Row>();
+
+function loadConversation(id: string, userId: string): ModelMessage[] | null {
+  const row = store.get(id);
+  return row && row.userId === userId ? row.messages : null; // WHERE user_id = $2
+}
+function createConversation(userId: string): string {
+  const id = randomUUID();
+  store.set(id, { userId, messages: [] });
+  return id;
+}
+function saveConversation(id: string, userId: string, messages: ModelMessage[]): void {
+  const row = store.get(id);
+  if (row && row.userId === userId) store.set(id, { userId, messages });
+}
+
+/** The exact handler flow skills/agent-building prescribes. */
+async function chatTurn(userId: string, body: { conversationId?: string; message: string }) {
+  // A fresh mock model per turn: each real request gets its own model call
+  // sequence, so the mock's call counter must not leak state across turns.
+  const model = toolCallingModel();
+  let history: ModelMessage[];
+  let conversationId: string;
+  if (body.conversationId !== undefined) {
+    const loaded = loadConversation(body.conversationId, userId);
+    if (loaded === null) return { status: 404 as const };
+    history = loaded;
+    conversationId = body.conversationId;
+  } else {
+    conversationId = createConversation(userId);
+    history = [];
+  }
+  const full: ModelMessage[] = [...history, { role: "user", content: body.message }];
   const result = await generateText({
-    model: toolCallingModel(),
-    messages: history,
+    model,
+    messages: full,
     tools: {
       listHotels: tool({
         inputSchema: z.object({ city: z.string() }),
@@ -105,54 +116,49 @@ test("chat contract: messages is the full conversation, and the reply lives in t
     },
     stopWhen: stepCountIs(5),
   });
+  saveConversation(conversationId, userId, [
+    ...full,
+    ...result.steps.flatMap((s) => s.response.messages),
+  ]);
+  return {
+    status: 200 as const,
+    body: { conversationId, text: result.text, toolCalls: result.toolCalls as unknown[] },
+  };
+}
 
-  const res = agentResponse(history, result);
-
-  // Claim 1 — the caller can replace its history with `messages` and lose nothing.
-  assert.equal(res.messages[0], history[0], "the caller's own turn is first");
-  assert.equal(res.messages.at(-1)?.role, "assistant", "the reply is last");
-  assert.ok(
-    res.messages.some((m) => m.role === "tool"),
-    "the tool result is in the trail — an agent given only its prose re-looks-up",
-  );
-
-  // Claim 2 — `messages` is state, not display.
-  const assistantAfterTool = res.messages.find(
-    (m) => m.role === "assistant" && Array.isArray(m.content),
-  );
-  assert.ok(assistantAfterTool, "an assistant entry carries a parts array, not a string");
-  const toolMsg = res.messages.find((m) => m.role === "tool");
-  assert.ok(Array.isArray(toolMsg?.content), "a tool entry's content is always an array");
-
-  // ...which is exactly why the reply must be read from `text`.
-  assert.equal(res.text, "I found the Ritz in Paris.");
-  assert.equal(res.toolCalls.length, 1);
-  assert.equal((res.toolCalls[0] as { toolName: string }).toolName, "listHotels");
+test("first turn creates a conversation and the reply lives in text", async () => {
+  const res = await chatTurn("user-a", { message: "find me a hotel in Paris" });
+  assert.equal(res.status, 200);
+  assert.ok(res.body!.conversationId, "an id is issued");
+  assert.equal(res.body!.text, "answer 2");
+  assert.equal(res.body!.toolCalls.length, 1);
+  // the wire carries NO messages array
+  assert.ok(!("messages" in res.body!));
 });
 
-test("chat contract: a caller that renders only string content from messages shows nothing", async () => {
-  // The bug that shipped: filter `messages` for string `content` and render.
-  const history: ModelMessage[] = [{ role: "user", content: "find me a hotel in Paris" }];
-  const result = await generateText({
-    model: toolCallingModel(),
-    messages: history,
-    tools: {
-      listHotels: tool({
-        inputSchema: z.object({ city: z.string() }),
-        execute: async () => [{ id: "h1", name: "Ritz" }],
-      }),
-    },
-    stopWhen: stepCountIs(5),
-  });
-  const trailOnly = result.steps.flatMap((s) => s.response.messages);
+test("second turn remembers: full conversation, tool trail included, persisted server-side", async () => {
+  const first = await chatTurn("user-b", { message: "find me a hotel in Paris" });
+  const id = first.body!.conversationId;
+  const afterFirst = store.get(id)!.messages;
+  assert.equal(afterFirst[0]!.role, "user", "caller's own turn persisted first");
+  assert.ok(afterFirst.some((m) => m.role === "tool"), "tool result in the stored trail");
 
-  const rendered = trailOnly.filter(
-    (m) => m.role === "assistant" && typeof m.content === "string",
-  );
+  const second = await chatTurn("user-b", { conversationId: id, message: "book the first one" });
+  assert.equal(second.status, 200);
+  const afterSecond = store.get(id)!.messages;
+  assert.ok(afterSecond.length > afterFirst.length, "history grew — append-only");
+  assert.equal(afterSecond[afterFirst.length]!.role, "user", "second user turn appended after the first turn's trail");
+});
 
-  // Every assistant/tool entry produced by a tool-using turn is a parts array,
-  // so the "render messages" strategy shows an empty transcript — and, having
-  // replaced its history with the trail alone, it has dropped the user's own
-  // message too. This is the failure the skills now forbid.
-  assert.equal(rendered.length, 0);
+test("another user's conversation id is a 404, and nothing about it leaks", async () => {
+  const first = await chatTurn("user-c", { message: "hello" });
+  const id = first.body!.conversationId;
+  const stolen = await chatTurn("user-d", { conversationId: id, message: "what did user-c say?" });
+  assert.equal(stolen.status, 404);
+  assert.equal(store.get(id)!.userId, "user-c", "row untouched");
+});
+
+test("an unknown conversation id is a 404, indistinguishable from foreign", async () => {
+  const res = await chatTurn("user-e", { conversationId: randomUUID(), message: "hi" });
+  assert.equal(res.status, 404);
 });
