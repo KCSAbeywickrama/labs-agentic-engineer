@@ -19,7 +19,13 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { elementsOfScreens, firstScreenName, changedScreenNames, openingFocusElements } from "../src/screenFocus.js";
+import {
+  elementsOfScreens,
+  firstScreenName,
+  changedScreenNames,
+  openingFocusElements,
+  focusTargetScreens,
+} from "../src/screenFocus.js";
 
 type El = { id: string; y: number; version: number; customData?: { screen: string } };
 const el = (id: string, screen: string, y: number, version = 1): El => ({
@@ -114,6 +120,21 @@ test("a screen that only shifted down is NOT changed", () => {
     el("d1", "Detail", 1800 + 270),
   ];
   assert.deepEqual(changedScreenNames(SCENE, next), ["Home"]);
+});
+
+test("a change spanning most of the wireframe is not a focus target", () => {
+  // Mid-stream the document is transiently incomplete — screens disappear and
+  // come back as the agent rewrites the file — so across those frames every
+  // screen looks edited. Focusing their union is the whole board, i.e. the
+  // zoomed-out-to-nothing state this feature exists to prevent. A change that
+  // broad is a rewrite, not an edit: leave the viewport alone.
+  const wiped: El[] = [el("h1", "Home", 0)]; // Login and Detail momentarily gone
+  assert.deepEqual(focusTargetScreens(SCENE, wiped), []);
+});
+
+test("an edit touching a minority of screens is still a focus target", () => {
+  const next = SCENE.map((e) => (e.id === "l2" ? { ...e, backgroundColor: "#fa7b3f" } : e)) as El[];
+  assert.deepEqual(focusTargetScreens(SCENE, next), ["Login"]);
 });
 
 test("identical scenes report no change", () => {

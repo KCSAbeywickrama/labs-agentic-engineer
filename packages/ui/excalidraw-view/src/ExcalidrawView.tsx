@@ -24,7 +24,12 @@ import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 import type { ExcalidrawElement } from "@aep/excalidraw-dsl";
 import { ExcalidrawComponent } from "./lazyExcalidraw.js";
 import { parseScene, fitContentToViewport, focusElements } from "./scene.js";
-import { elementsOfScreens, openingFocusElements, changedScreenNames } from "./screenFocus.js";
+import { elementsOfScreens, openingFocusElements, focusTargetScreens } from "./screenFocus.js";
+
+// How long the scene must stop changing before the viewport commits to a
+// focus. Long enough to sit out an agent's flush cadence, short enough that a
+// finished edit does not feel ignored.
+const SETTLE_MS = 600;
 
 export interface ExcalidrawViewProps {
   /** Serialised Excalidraw scene JSON. */
@@ -55,9 +60,11 @@ function ExcalidrawViewImpl({ scene, fillHeight }: ExcalidrawViewProps) {
   const initialData = useMemo(() => parseScene(scene), [scene]);
   const apiRef = useRef<ExcalidrawImperativeAPI | null>(null);
   const mountedScene = useRef(scene);
-  // The elements currently on the canvas, kept so a streamed update can be
-  // diffed against them and the viewport moved to what actually changed.
-  const shownElements = useRef<ExcalidrawElement[] | null>(initialData?.elements ?? null);
+  // The last SETTLED scene — the baseline a finished edit is diffed against.
+  // Deliberately not updated per flush: comparing against the previous flush
+  // would measure the churn, not the edit.
+  const settledElements = useRef<ExcalidrawElement[] | null>(initialData?.elements ?? null);
+  const focusTimer = useRef<number | null>(null);
 
   useEffect(() => {
     if (scene === mountedScene.current) return; // initial mount already has it
@@ -67,17 +74,33 @@ function ExcalidrawViewImpl({ scene, fillHeight }: ExcalidrawViewProps) {
     if (!api || !next?.elements) return; // unparseable → keep the last frame
     try {
       api.updateScene({ elements: next.elements });
-      // Follow the agent's work: pan to whichever screen(s) this update
-      // touched. When nothing is detectable, leave the viewport where the
-      // reader put it — never refit the whole board, which is what shrank
-      // every screen to an illegible size on each keystroke.
-      const changed = changedScreenNames(shownElements.current, next.elements);
-      if (changed.length > 0) focusElements(api, elementsOfScreens(next.elements, changed), true);
-      shownElements.current = next.elements;
     } catch {
-      /* api torn down */
+      return; // api torn down
     }
+    const elements = next.elements;
+    // Draw every flush, but decide where to LOOK only once the writing pauses.
+    // A wireframe arrives in many flushes while an agent edits, and the
+    // in-between states are half-written — chasing each one would pan on every
+    // keystroke and, worse, mid-write frames read as "everything changed".
+    // Comparing against the last SETTLED scene is what makes the target the
+    // edit itself rather than the churn.
+    if (focusTimer.current !== null) window.clearTimeout(focusTimer.current);
+    focusTimer.current = window.setTimeout(() => {
+      focusTimer.current = null;
+      const live = apiRef.current;
+      if (!live) return;
+      const target = focusTargetScreens(settledElements.current, elements);
+      if (target.length > 0) focusElements(live, elementsOfScreens(elements, target), true);
+      settledElements.current = elements;
+    }, SETTLE_MS);
   }, [scene]);
+
+  useEffect(
+    () => () => {
+      if (focusTimer.current !== null) window.clearTimeout(focusTimer.current);
+    },
+    [],
+  );
 
   return (
     <Box

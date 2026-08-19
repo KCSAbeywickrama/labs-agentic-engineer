@@ -146,6 +146,28 @@ export function changedScreenNames(
 }
 
 /**
+ * Which screens the viewport should actually chase after an update — the
+ * changed screens, unless the change is too broad to be a target.
+ *
+ * A wireframe is rewritten in flushes while an agent works, and mid-write the
+ * document is transiently incomplete: screens disappear and come back, so
+ * across those frames nearly every screen reads as edited. Focusing that union
+ * means fitting the whole board — the zoomed-out, unreadable state this whole
+ * feature exists to prevent. So a change touching MOST of the wireframe is
+ * treated as a rewrite rather than an edit, and the viewport holds still until
+ * the document settles into something narrower.
+ */
+export function focusTargetScreens(
+  prev: readonly FocusableElement[] | null,
+  next: readonly FocusableElement[],
+): string[] {
+  const changed = changedScreenNames(prev, next);
+  if (changed.length === 0) return [];
+  const total = Math.max(groupByScreen(next).size, groupByScreen(prev ?? []).size);
+  return changed.length * 2 > total ? [] : changed;
+}
+
+/**
  * What to bring into view when a wireframe opens: the whole first screen,
  * plus the top slice of the second so its title (and a sliver of frame) shows
  * beneath as the cue that there is more below. Fitting the first screen ALONE
