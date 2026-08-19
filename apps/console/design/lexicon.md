@@ -279,6 +279,14 @@ unknowns is fine" rule, because the design is not *unknown* — it is known to b
 **"An agent is working" is no longer stated as a gate.** The rail shows live per-artifact state,
 larger and more usefully than a disabled button with a hover explanation could.
 
+**Reading the design is optional.** A user may go through every artifact before building, or click
+Build without opening one — both are correct use
+([#529](https://github.com/wso2/labs-agentic-engineer/issues/529)). Nothing is acknowledged,
+certified or "passed". The only two things that ever hold Build back are the design being
+**incomplete** (undeclared dependencies) or **wrong** (outdated) — never whether a human looked at
+it. So no confirm step, no review checklist, no approve-then-build two-step: ADR-0007 stands, and
+Build remains the approval.
+
 ### Recovery is `/design`, not a per-file retry
 
 An errored artifact and a stale design resolve the same way: re-run design as a **delta pass**,
