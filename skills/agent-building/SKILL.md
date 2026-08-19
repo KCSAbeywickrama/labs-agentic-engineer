@@ -90,79 +90,135 @@ platform then carries.
 
 | Route | Behaviour |
 |---|---|
-| `POST /chat` | `{ messages }` in — either AI SDK message shape, normalised at the door; **`{ text, toolCalls, messages: ModelMessage[] }` out** |
+| `POST /chat` | `{ conversationId?, message }` in; **`{ conversationId, text, toolCalls }` out**. History lives in the agent's conversation store, never on the wire |
 | `GET /healthz` | `200 {ok:true}`, or `503 {ok:false, missing:[…]}` when unconfigured |
 
-The response shape is fixed, not yours to choose, and each field has one job:
+The response shape is fixed, not yours to choose:
 
-- **`text`** — the reply, as a plain string. **This is what a UI renders.** It is
-  the ONLY field a caller needs to display an answer.
+- **`conversationId`** — the caller's only piece of state. Absent or unknown on
+  the way in means "new conversation": create one and return its id. A caller
+  never sends history and never receives it.
+- **`text`** — the reply, as a plain string. This is what a UI renders.
 - **`toolCalls`** — what a test asserts on.
-- **`messages`** — the **complete conversation** after this turn: the history
-  the caller sent (normalised) followed by everything the turn produced. The
-  caller **replaces** its history with this array and echoes it back next
-  request. It is state, not display — a caller must never try to render it.
 
-**Return the full conversation, not the turn's delta.** The document declares
-`memory.type: client`: the caller stores what you hand back, and only that. Hand
-back only the new messages and the caller's next request arrives without its own
-prior turns — memory that forgets the user's side of every exchange. So
-`messages` is `[...history, ...result.steps.flatMap(s => s.response.messages)]`,
-never the trail alone.
+**History is yours, not the caller's.** The document declares
+`memory.type: server`: you load the conversation from your store, append the
+caller's message, run the turn, append the FULL trail
+(`result.steps.flatMap(s => s.response.messages)` — tool calls and results
+included), and save. The caller replays nothing; a page refresh with the same
+id continues the same conversation.
 
-**`messages` is not renderable, by construction.** An assistant `ModelMessage`'s
-`content` is `string | Array<TextPart | ToolCallPart | …>` and a tool message's
-is always an array — the SDK's own types. A caller that filters for string
-`content` renders an empty screen after a tool call, and a caller that
-stringifies parts shows the user JSON. That is why `text` exists: display comes
-from `text`, state round-trips through `messages`, and no caller ever has to
-understand the SDK's message shape to show a reply.
+**A conversation belongs to one user.** Key every row by the gateway-injected
+`x-user-id` and scope EVERY read and write with it. A request for a
+conversation that does not exist under this user answers **404** — the same
+404 whether the id is foreign or simply wrong, so an id leaks nothing.
 
-**Normalise the history at the door — accept either message shape.** The AI SDK
-has two, and a caller cannot be relied on to know which one you want:
+**Message shapes never cross the wire.** `message` arrives as a plain string;
+`ModelMessage[]` lives only between your store and `generateText`. There is
+nothing for a caller to normalise and nothing for it to mis-render.
 
-```ts
-// ModelMessage — what generateText accepts, and what you always return.
-{ role: "user", content: "hi" }
-
-// UIMessage — what a chat UI naturally holds.
-{ id: "…", role: "user", parts: [{ type: "text", text: "hi" }] }
-```
-
-Hand a `UIMessage` to `generateText` and the SDK rejects the turn before it ever
-reaches the model — `Invalid prompt: The messages do not match the
-ModelMessage[] schema` — surfacing as a 500 on the caller's very first message.
-
-**You convert, not the caller.** You are the side that owns the model, so you
-are the side that knows what it needs; a SPA holding UI messages should not have
-to learn your model's input type to say hello. Detect and convert:
+**Then validate, and answer 400.** A `message` that is missing, not a string,
+or empty is a bad REQUEST, not a server error — letting it through to
+`generateText` throws, which becomes a 500 and reads as the agent being
+broken:
 
 ```ts
-import { convertToModelMessages, type ModelMessage } from "ai";
-
-// A `parts` array is the UI shape; `content` is already a ModelMessage.
-const history: ModelMessage[] = messages.some((m) => "parts" in m)
-  ? convertToModelMessages(messages)
-  : (messages as ModelMessage[]);
+if (typeof body.message !== "string" || body.message.trim() === "") {
+  return sendJson(res, 400, { error: "expected { message: string }" });
+}
 ```
 
-Accepting BOTH is what makes the round trip work, and accepting only one is what
-breaks it. You always RETURN `ModelMessage[]` (the `result.steps.flatMap` trail
-below) and the caller echoes that array back next turn — so a UI-message-only
-door fails on turn two with the very messages you just handed out. Normalising
-costs three lines and ends the argument for every caller you will ever have.
+## Conversation store
 
-**Then validate, and answer 400.** After normalising, a history that is still
-not `{role, content}` entries is a bad REQUEST, not a server error —
-`Array.isArray` alone lets it through to the SDK, which throws, which becomes a
-500 and reads as the agent being broken:
+The design gives this component a `postgres-cnpg` platform-resource
+dependency. Its connection details arrive as five env vars named
+`<DEP_NAME>_<OUTPUT>`, uppercased — for a dependency named `memory-db`:
+`MEMORY_DB_HOST`, `MEMORY_DB_PORT`, `MEMORY_DB_DBNAME`, `MEMORY_DB_USER`,
+`MEMORY_DB_PASSWORD` (a shared `project-db` yields `PROJECT_DB_*`). Read them
+in config like every other injected value, and report any that are unset from
+`/healthz`'s `missing` list. Dependency: `pg`.
+
+**Copy this schema and these queries — do not redesign them.** One table, the
+whole conversation as one JSONB value, loaded and saved as a unit:
 
 ```ts
-const ok = Array.isArray(history) && history.every(
-  (m) => m && typeof m.role === "string" && m.content !== undefined,
-);
-if (!ok) return sendJson(res, 400, { error: "expected { messages: [...] } of AI SDK messages" });
+// store.ts
+import pg from "pg";
+import type { ModelMessage } from "ai";
+import { config } from "./config.js";
+
+// Built from the five injected parts — postgres-cnpg exposes no single URL
+// output. Never log this object: it carries the password.
+const pool = new pg.Pool({
+  host: config.memoryDbHost,
+  port: Number(config.memoryDbPort),
+  database: config.memoryDbName,
+  user: config.memoryDbUser,
+  password: config.memoryDbPassword,
+});
+
+const INIT = `CREATE TABLE IF NOT EXISTS conversations (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id text NOT NULL,
+  messages jsonb NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+)`;
+export async function initStore(): Promise<void> {
+  await pool.query(INIT);
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export async function loadConversation(
+  id: string, userId: string,
+): Promise<ModelMessage[] | null> {
+  if (!UUID_RE.test(id)) return null; // malformed = not found, no pg error
+  const r = await pool.query(
+    "SELECT messages FROM conversations WHERE id = $1 AND user_id = $2",
+    [id, userId],
+  );
+  return r.rowCount ? (r.rows[0].messages as ModelMessage[]) : null;
+}
+
+export async function createConversation(userId: string): Promise<string> {
+  const r = await pool.query(
+    "INSERT INTO conversations (user_id, messages) VALUES ($1, '[]'::jsonb) RETURNING id",
+    [userId],
+  );
+  return r.rows[0].id as string;
+}
+
+export async function saveConversation(
+  id: string, userId: string, messages: ModelMessage[],
+): Promise<void> {
+  await pool.query(
+    "UPDATE conversations SET messages = $3::jsonb, updated_at = now() WHERE id = $1 AND user_id = $2",
+    [id, userId, JSON.stringify(messages)],
+  );
+}
 ```
+
+**The `AND user_id = $2` on every statement IS the security boundary.** The
+store, not the prompt and not the caller, is what keeps one traveler out of
+another's conversation. Never write a query on `conversations` without it.
+
+The handler flow, exactly:
+
+```ts
+// 1. gate: 401 without x-user-id (unchanged)
+// 2. parse { conversationId?, message }; message must be a non-empty string → else 400
+// 3. conversationId present → loadConversation(id, userId); null → 404 { error: "conversation not found" }
+//    absent → createConversation(userId), history = []
+// 4. const full = [...history, { role: "user", content: message }]
+// 5. const result = await runTurn(full)   // generateText, unchanged
+// 6. await saveConversation(id, userId, [...full, ...result.steps.flatMap(s => s.response.messages)])
+// 7. sendJson(res, 200, { conversationId: id, text: result.text, toolCalls: result.toolCalls })
+```
+
+Call `initStore()` at startup, before `listen` — `CREATE TABLE IF NOT EXISTS`
+is idempotent. History is APPEND-ONLY: no turn rewrites a prior message (a
+stable prefix is what keeps the model provider's prompt cache effective).
 
 ## Constraints
 
@@ -196,7 +252,7 @@ value the tools consume:
 
 ```ts
 if (!req.headers["x-user-id"]) return res.status(401).end();
-await callContext.run({ authorization: req.headers.authorization }, () => reply(messages));
+await callContext.run({ authorization: req.headers.authorization }, () => reply(body));
 ```
 
 The gate matters even when every API behind the agent authorises its own
@@ -204,28 +260,27 @@ callers. They protect the *data*; nothing else protects the *spend*. An
 unauthenticated agent endpoint is a bill anyone who finds it can run up on the
 organisation's model key.
 
-**Conversation history is untrusted input.** The client sends it, so the client
-can forge it — including inventing assistant turns that claim an authorisation.
-Authority comes from the credential on the request, never from the transcript.
+**A conversation's stored history is not a source of authorization.** The
+`message` a caller sends is untrusted input, even once it is persisted into
+the store — a caller cannot manufacture a fake assistant turn or tool result
+by typing one, only the model produces those, but nothing in the transcript
+should ever be read as granting authority. Authority comes from the
+credential on the request, never from the transcript.
 
-**History must carry tool calls and their results.** Return the whole turn to the
-caller and take it back next request. An agent given only its own prose has lost
-everything its tools told it, and will re-look-up or invent identifiers it
-already had.
-
-```ts
-// The full conversation: what came in, then everything this turn produced.
-messages: [...history, ...result.steps.flatMap((step) => step.response.messages)],
-// steps.flatMap, NOT result.response.messages — that is the LAST step only,
-// and silently drops every tool call and result.
-// [...history, ...] NOT the trail alone — client memory stores what you return.
-```
+**History must carry tool calls and their results.** Save the whole turn, not
+just the reply, and load it back next request. An agent given only its own
+prose has lost everything its tools told it, and will re-look-up or invent
+identifiers it already had. The save in step 6 of the handler flow above is
+where this lives — `steps.flatMap`, NOT `result.response.messages`, which is
+the LAST step only and silently drops every tool call and result.
 
 **Return tool errors to the model; do not throw.** A `409 cutoff has passed` is
 something the agent should explain, not a failed turn.
 
-**Stateless.** History arrives with each request and is never stored. The agent
-must run correctly on any number of replicas.
+**Stateless process, stateful store.** No conversation lives in process
+memory — every turn loads from and saves to Postgres, so replicas and
+restarts of the process itself are safe. `postgres-cnpg` is PVC-backed, so a
+database pod restart does not lose conversations either.
 
 **Bound the loop** with `stopWhen: stepCountIs(max_iterations)`. An unbounded
 agent spends money until something else stops it.
@@ -305,7 +360,7 @@ Per-request credential, reachable from a tool without the model seeing it:
 export const callContext = new AsyncLocalStorage<{ authorization?: string }>();
 
 // request handler:
-await callContext.run({ authorization: req.headers.authorization }, () => reply(messages));
+await callContext.run({ authorization: req.headers.authorization }, () => reply(body));
 
 // inside call():
 const { authorization } = callContext.getStore() ?? {};
@@ -319,14 +374,15 @@ const { authorization } = callContext.getStore() ?? {};
 | Container exits at startup, `ERR_MODULE_NOT_FOUND` | Relative import missing the `.js` extension under `nodenext` | `import { x } from "./tools.js"` — even though the file is `.ts` |
 | Agent performs an operation the design excluded | Generated tools for the whole OpenAPI document | Only allow-listed operations become tools |
 | Anyone who can reach the URL can chat, burning the org's model budget | The handler forwarded `Authorization` downstream but never gated on the caller | 401 when `X-User-Id` is absent — the APIs behind you protect data, not spend |
-| Every chat 500s on the FIRST message with `messages do not match the ModelMessage[] schema` | The handler passed the caller's history straight to `generateText`; a chat UI sends `UIMessage` (`id` + `parts`), the model takes `ModelMessage` (`role` + `content`) | Normalise at the door with `convertToModelMessages()` — accept either shape, always return `ModelMessage[]` |
-| The agent answers, then on the NEXT turn has forgotten what the user said | `messages` returned only the turn's new messages; the client stored that as its whole history | Return `[...history, ...trail]` — the full conversation, since client memory keeps only what you return |
-| A turn returns 200 but the UI shows nothing — the user's own message vanishes too | The caller rendered from `messages` (assistant `content` is a parts array, filtered out as non-string) and replaced its history with a delta | Callers render `text` and store `messages`; you return the full conversation so replacing is correct |
 | One user reads or edits another's data | Ownership "enforced" in the prompt; the provider was called with the agent's own credential | Forward the caller's credential; let the provider return 403 |
+| The agent forgets everything on the SECOND message | Handler created a new conversation because it ignored the caller's `conversationId` | Load by (`conversationId`, `x-user-id`); only create when the id is absent |
+| One user sees another's conversation | A query on `conversations` without `AND user_id = $2` | Every statement carries the user scope — copy the store verbatim |
+| Foreign and unknown ids answer differently | 403 on foreign, 404 on unknown confirms which ids exist | 404 for both — an id must leak nothing |
+| Chat 500s with an invalid uuid syntax error | Malformed id reached Postgres' uuid cast | The store's `UUID_RE` guard: malformed = not found |
 | A normal `409`/`404` ends the turn with an error | Tool threw on a non-2xx response | Return `{ ok: false, status, error }` to the model |
 | Model fills the wrong field, or asks which part of the URL a value belongs to | Tool schema exposed path/query/body structure | One flat object; re-split when building the request |
 | Behaviour drifts from what the design says | Prompt edited in `src/prompt.ts` | Edit the AFM document and regenerate |
-| Conversation works for one user, breaks under load | Conversation state kept in process | Stateless — history arrives per request |
+| Conversation works for one user, breaks under load | Conversation state kept in process instead of the store | Stateless process — every turn loads from and saves to Postgres |
 | Spend climbs with no traffic increase | No iteration bound | `stopWhen: stepCountIs(max_iterations)` |
 | Code written against an API the installed SDK does not have | Resolved a dependency version instead of using the pinned majors | Use the pinned `dependencies` block verbatim |
 | Builds and starts, then every turn fails on a real key | Provider guessed from `model.url`/`model.name` | Take it from `model.provider`; default Anthropic |
