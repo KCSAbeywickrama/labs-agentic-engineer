@@ -35,6 +35,13 @@ import (
 // its own budgets deterministically and writes them outwards for the read
 // model — reading them back would make the loop's control flow depend on a
 // database round trip that a replay cannot reproduce.
+//
+// CancelRequested is the deliberate exception, and it is not the same kind of
+// read. A budget is the workflow's OWN arithmetic, so reading it back would let
+// a database disagree with a replay. A cancellation is somebody ELSE's fact
+// about the run, which is exactly the shape of every other thing the loop polls
+// — the milestone's issues, the cycle's merge — and it goes through an activity
+// like all of them, so history records the answer and a replay reproduces it.
 type RunStore interface {
 	// TryAdmit inserts the run row unless the spec-run mutex refuses it. Used
 	// only by the adoption/sweep start path, which must admit and supervise
@@ -61,6 +68,18 @@ type RunStore interface {
 	// together with the validation issue that produced it so a settled run stays
 	// navigable to its criteria. An issue of 0 leaves the stored one untouched.
 	SetValidationVerdict(ctx context.Context, id, verdict string, issue int) error
+	// CancelRequested reports whether a person has asked this run to stop.
+	//
+	// The DURABLE half of cancel. The cancel signal is the fast path — it stops
+	// the loop at its next safe point rather than at its next poll — and this is
+	// the evidence: a signal whose delivery failed, or one that arrived while the
+	// workflow was mid-activity and got drained by a wait the loop has since left,
+	// is still recoverable from here. Without it a pod the cancel REAPED is
+	// indistinguishable from an agent that died on its own, so the loop spends a
+	// re-dispatch and opens a fresh cycle over a run the user just stopped.
+	//
+	// A run that no longer exists answers false: there is nothing left to cancel.
+	CancelRequested(ctx context.Context, orgID, runID string) (bool, error)
 }
 
 // CycleStore is the cycle-record surface: one row per dispatch. Satisfied by an

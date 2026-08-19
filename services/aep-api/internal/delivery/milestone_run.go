@@ -326,6 +326,22 @@ type MilestoneRun struct {
 	// Zero until the validation cycle mints it, and on incident runs.
 	ValidationIssue int `gorm:"not null;default:0" json:"validationIssue,omitempty"`
 
+	// CancelRequestedAt is when a human asked for this run to stop — the DURABLE
+	// half of cancel, written by the cancel surface before it signals.
+	//
+	// Cancel is the one fact the loop cannot re-derive from the world: a pod the
+	// cancel reaped and a pod that died on its own look identical from inside the
+	// workflow, so a loop that knew only "the agent is gone" would spend a
+	// re-dispatch and open a fresh cycle over a run the user just stopped. Every
+	// other fact the loop acts on is a wake-up it re-reads ground truth for, and
+	// this column is what lets cancel work the same way: the signal becomes the
+	// fast path, and this becomes the evidence.
+	//
+	// Set once — the FIRST request stands, so a second click cannot move the
+	// stamp — and never cleared: a run is cancelled or it is not, and the row is
+	// terminal soon after. Nil on every run nobody cancelled.
+	CancelRequestedAt *time.Time `json:"cancelRequestedAt,omitempty"`
+
 	CreatedAt time.Time  `json:"createdAt"`
 	UpdatedAt time.Time  `json:"updatedAt"`
 	StartedAt *time.Time `json:"startedAt,omitempty"`

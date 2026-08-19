@@ -85,6 +85,9 @@ func pollEnv(t *testing.T, script ...error) (*testsuite.TestWorkflowEnvironment,
 	// A run that plans nothing now SETTLES rather than parking, and settling
 	// stamps a `skipped` verdict on the way out.
 	env.OnActivity(acts.SetValidationVerdict, mock.Anything, mock.Anything).Return(nil)
+	// The boundary asks whether the run was cancelled before it polls. Nobody
+	// cancelled these runs; what is being measured is the poll's retry shape.
+	env.OnActivity(acts.ReadCycleFacts, mock.Anything, mock.Anything).Return(CycleFacts{}, nil)
 	return env, port
 }
 
@@ -207,6 +210,7 @@ func planEnv(t *testing.T, script ...error) (*testsuite.TestWorkflowEnvironment,
 	env.OnActivity(acts.SetRunState, mock.Anything, mock.Anything).Return(nil)
 	env.OnActivity(acts.SettleRun, mock.Anything, mock.Anything).Return(nil)
 	env.OnActivity(acts.SetValidationVerdict, mock.Anything, mock.Anything).Return(nil)
+	env.OnActivity(acts.ReadCycleFacts, mock.Anything, mock.Anything).Return(CycleFacts{}, nil)
 	return env, planner
 }
 

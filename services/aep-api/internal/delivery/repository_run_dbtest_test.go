@@ -531,3 +531,57 @@ func TestMilestoneRunRepository_ReadsAndTagResolution(t *testing.T) {
 		t.Fatalf("MilestoneNumberForTag after purge found = %v, want false", found)
 	}
 }
+
+// TestMilestoneRunRepository_RequestCancel pins the durable half of cancel: the
+// stamp lands, the FIRST request is the one that stands, and a settled run
+// refuses it the way every other guarded mutator does.
+//
+// The first-request-wins rule is what makes a double-click harmless. The
+// terminal fence is what keeps cancel from rewriting a run that already
+// recorded its outcome — a cancel arriving after the run finished changed
+// nothing, and (nil, nil) is how this repository says so.
+func TestMilestoneRunRepository_RequestCancel(t *testing.T) {
+	t.Parallel()
+	db := dbtest.New(t)
+	repo := delivery.NewMilestoneRunRepository(db)
+	ctx := context.Background()
+
+	_, run, err := repo.TryAdmit(ctx, specRun("orgcancel", "proj", 1, "v1"))
+	if err != nil || run == nil {
+		t.Fatalf("TryAdmit: (%+v, %v)", run, err)
+	}
+	if run.CancelRequestedAt != nil {
+		t.Fatalf("a fresh run carries a cancellation stamp: %v", run.CancelRequestedAt)
+	}
+
+	stamped, err := repo.RequestCancel(ctx, run.ID)
+	if err != nil || stamped == nil {
+		t.Fatalf("RequestCancel = (%+v, %v)", stamped, err)
+	}
+	if stamped.CancelRequestedAt == nil {
+		t.Fatalf("RequestCancel did not stamp cancel_requested_at: %+v", stamped)
+	}
+	first := *stamped.CancelRequestedAt
+
+	// A second click must not move the stamp: the column records when a person
+	// FIRST asked, which is the fact a timeline renders.
+	again, err := repo.RequestCancel(ctx, run.ID)
+	if err != nil || again == nil {
+		t.Fatalf("RequestCancel (second) = (%+v, %v)", again, err)
+	}
+	if again.CancelRequestedAt == nil || !again.CancelRequestedAt.Equal(first) {
+		t.Fatalf("a second cancel moved the stamp: %v, want %v", again.CancelRequestedAt, first)
+	}
+
+	// The run settles — and from here the request is frozen with everything else.
+	if _, err := repo.Settle(ctx, run.ID, delivery.RunStateCancelled, ""); err != nil {
+		t.Fatalf("Settle: %v", err)
+	}
+	settled, err := repo.RequestCancel(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("RequestCancel on a settled run errored: %v", err)
+	}
+	if settled != nil {
+		t.Fatalf("RequestCancel changed a settled run: %+v", settled)
+	}
+}

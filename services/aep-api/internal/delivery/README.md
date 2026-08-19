@@ -290,13 +290,21 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
 - **One task queue, one worker.** `run.WorkerWatcher` owns it: a task queue must be served by ONE worker
   that knows every workflow on it, and the run supervisor is the only workflow left. Two workers polling
   one queue with disjoint registrations would fail whichever tasks each picked up by accident.
-- **Cancel is a signal, not a Temporal cancellation.** A cancelled context could not run the activities
-  that record the outcome, so the run settles its own row and closes its own cycle on the ordinary path.
-  Stopping the agent is the HTTP cancel surface's job: `runread.Commands.Cancel` signals the supervisor
-  and then best-effort reaps the cycle's OpenChoreo Component via `CycleReaper` (immediate
-  `DeleteComponent`, no retention — phase-08 Cancel B1). A failed reap does not fail the cancel; a BFF
-  crash mid-cancel can leave the pod until the retention sweep. Natural finishes are NOT reaped on that
-  path — retention/LRU owns those.
+- **Cancel is DURABLE first and a signal second.** `runread.Commands.Cancel` writes the request to the
+  run row (`cancel_requested_at`, first request wins), THEN signals the supervisor, THEN best-effort
+  reaps the cycle's OpenChoreo Component via `CycleReaper` (immediate `DeleteComponent`, no retention).
+  The order is the design: signal delivery is deliberately best-effort — the supervisor swallows a failed
+  `SignalWorkflow` so a dead engine cannot wedge the console — and the reap kills the agent's pod, which
+  from inside the workflow is indistinguishable from the agent dying on its own. A cancel that lived only
+  in a lost signal therefore read as agent death, spent a re-dispatch, and opened a fresh cycle over a run
+  the user had just stopped. The row is now the evidence and the signal is only the wake-up, so the loop
+  re-derives cancel exactly as it re-derives every other fact: at the cycle boundary, and again in the
+  landing wait, both off `ReadCycleFacts` — the ground-truth read those waits already perform. A lost
+  signal costs latency, not correctness. It stays a signal and not a Temporal cancellation because a
+  cancelled context could not run the activities that record the outcome, so the run settles its own row
+  and closes its own cycle on the ordinary path. A failed reap does not fail the cancel; a BFF crash
+  mid-cancel can leave the pod until the retention sweep. Natural finishes are NOT reaped on that path —
+  retention/LRU owns those.
 - **Echo suppression is `issues.*`-only.** Every label, comment and milestone assignment the platform
   writes fires an `issues.*` delivery straight back, so those handlers drop self-sender deliveries. It is
   deliberately NOT applied to `pull_request.*`: in App mode the coding runner opens its PR as the same

@@ -240,6 +240,20 @@ const convergeNoPromotion = ""
 // dispatchActivityCtx.)
 func (l *loop) dispatchUntilLanded(ctx workflow.Context, kind string, anchorIssue int, cycleID string) (bool, cycleResult, error) {
 	for l.st.CycleAttempt < delivery.RunMaxRedispatchPerCycle {
+		// Re-derive cancel from the run row before SPENDING an attempt. Reached
+		// on the second pass and after, when the first attempt ended in the
+		// landing deadline — which is precisely the shape a reaped pod leaves
+		// behind. Without it a cancel whose signal was lost buys the re-dispatch
+		// it was meant to stop.
+		if l.st.CycleAttempt > 0 {
+			facts, ferr := l.cycleFacts(ctx)
+			if ferr != nil {
+				return false, cycleNone, ferr
+			}
+			if facts.CancelRequested {
+				return false, cycleCancelled, nil
+			}
+		}
 		l.st.CycleAttempt++
 		jobRef, derr := l.dispatch(ctx, kind, anchorIssue, cycleID)
 		if derr != nil {
@@ -277,6 +291,13 @@ func (l *loop) dispatchUntilLanded(ctx workflow.Context, kind string, anchorIssu
 			if ferr != nil {
 				stopDeadline()
 				return false, cycleNone, ferr
+			}
+			// Cancel before landing: a merge that raced the cancel still belongs
+			// to a run the user stopped, and carrying on into the build stage
+			// would be the loop doing work nobody asked for.
+			if facts.CancelRequested {
+				stopDeadline()
+				return false, cycleCancelled, nil
 			}
 			if facts.MergeSHA != "" {
 				l.mergeSHA, l.prNumber = facts.MergeSHA, facts.PRNumber

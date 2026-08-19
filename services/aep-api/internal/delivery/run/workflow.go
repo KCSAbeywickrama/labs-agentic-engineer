@@ -217,7 +217,11 @@ func (l *loop) run(ctx workflow.Context) (RunResult, error) {
 		return res, err
 	}
 	for {
-		if l.cancelRequested() {
+		cancelled, cerr := l.cancelled(ctx)
+		if cerr != nil {
+			return l.result(), cerr
+		}
+		if cancelled {
 			return l.settle(ctx, delivery.RunStateCancelled, "")
 		}
 
@@ -724,10 +728,29 @@ func (l *loop) await(ctx workflow.Context) (cancelled bool) {
 	return cancelled
 }
 
-// cancelRequested drains a pending cancel without blocking. Checked at every
-// boundary so a cancel that arrived mid-cycle is honoured at the first safe
-// point rather than after another dispatch.
+// cancelRequested drains a pending cancel signal without blocking. The FAST
+// path: a cancel that arrived mid-cycle is honoured at the first safe point
+// rather than after another dispatch.
 func (l *loop) cancelRequested() bool { return l.cancel.ReceiveAsync(nil) }
+
+// cancelled is the boundary's cancel question, asked both ways.
+//
+// The signal first, because it costs nothing and answers immediately. Then the
+// run row, because the signal is not evidence: the cancel surface swallows a
+// failed delivery so a dead engine cannot wedge the console, and a run parked in
+// the unbounded wait would otherwise sit there forever on a signal that never
+// arrived. Reading the row is what turns that from a wedge into ten minutes of
+// latency.
+func (l *loop) cancelled(ctx workflow.Context) (bool, error) {
+	if l.cancelRequested() {
+		return true, nil
+	}
+	facts, err := l.cycleFacts(ctx)
+	if err != nil {
+		return false, err
+	}
+	return facts.CancelRequested, nil
+}
 
 // ---- activity calls --------------------------------------------------------
 

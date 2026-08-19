@@ -235,8 +235,14 @@ type CycleFactsInput struct {
 	RunID string `json:"runId"`
 }
 
-// CycleFacts is what the EVENT PLANE learned about the cycle from webhooks —
-// the supervisor's ground truth for "did this cycle land?".
+// CycleFacts is the loop's GROUND TRUTH about a wait it is currently in: what
+// the event plane learned about the cycle from webhooks, plus whether a person
+// has asked the run to stop.
+//
+// The two travel together because they answer the same question at the same
+// moment — "should this wait carry on?" — and because reading them in one
+// activity is what lets cancel be honoured with no round trip the loop was not
+// already making.
 type CycleFacts struct {
 	CycleID  string `json:"cycleId"`
 	Attempts int    `json:"attempts"`
@@ -244,30 +250,43 @@ type CycleFacts struct {
 	PRNumber int    `json:"prNumber,omitempty"`
 	MergeSHA string `json:"mergeSha,omitempty"`
 	Ended    bool   `json:"ended"`
+	// CancelRequested is the run row's cancellation stamp, not the signal. The
+	// signal is a wake-up; this is the evidence — which is what stops a reaped
+	// agent pod from reading as agent death and buying a re-dispatch.
+	CancelRequested bool `json:"cancelRequested,omitempty"`
 }
 
-// ReadCycleFacts reads the cycle record back.
+// ReadCycleFacts reads the cycle record and the run's cancel stamp back.
 //
 // This is the poll behind "never trust the signal payload alone": a merge
 // signal wakes the loop, and THIS is what tells it a merge really happened —
 // which is also how a cycle whose merge webhook was lost still finishes, off
-// the deadline path.
+// the deadline path. Cancel rides it for the same reason and gains the same
+// property: a cancel whose signal never arrived costs latency, not correctness.
+//
+// The cancel read comes FIRST and is independent of the cycle row, because the
+// boundary consults this before a run has dispatched anything — a milestone run
+// with no cycle yet must still be able to notice it was cancelled.
 func (a *Activities) ReadCycleFacts(ctx context.Context, in CycleFactsInput) (CycleFacts, error) {
-	if a.cycles == nil {
+	if a.cycles == nil || a.runs == nil {
 		return CycleFacts{}, errNotConfigured
 	}
-	row, err := a.cycles.Latest(ctx, in.OrgID, in.RunID)
-	if err != nil || row == nil {
+	cancelled, err := a.runs.CancelRequested(ctx, in.OrgID, in.RunID)
+	if err != nil {
 		return CycleFacts{}, err
 	}
-	return CycleFacts{
-		CycleID:  row.ID,
-		Attempts: row.Attempts,
-		Branch:   row.Branch,
-		PRNumber: row.PRNumber,
-		MergeSHA: row.MergeSHA,
-		Ended:    row.EndedAt != nil,
-	}, nil
+	facts := CycleFacts{CancelRequested: cancelled}
+	row, err := a.cycles.Latest(ctx, in.OrgID, in.RunID)
+	if err != nil || row == nil {
+		return facts, err
+	}
+	facts.CycleID = row.ID
+	facts.Attempts = row.Attempts
+	facts.Branch = row.Branch
+	facts.PRNumber = row.PRNumber
+	facts.MergeSHA = row.MergeSHA
+	facts.Ended = row.EndedAt != nil
+	return facts, nil
 }
 
 // ---- milestone -------------------------------------------------------------

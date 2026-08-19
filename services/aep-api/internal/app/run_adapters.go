@@ -95,6 +95,17 @@ func (a runRuns) SetValidationVerdict(ctx context.Context, id, verdict string, i
 	return err
 }
 
+// CancelRequested reads the cancel stamp back. Org-scoped like every other read
+// this surface makes, and a row that is gone answers false — a run whose project
+// was deleted has nothing left to cancel.
+func (a runRuns) CancelRequested(ctx context.Context, orgID, runID string) (bool, error) {
+	row, err := a.runs.GetByIDScoped(ctx, orgID, runID)
+	if err != nil || row == nil {
+		return false, err
+	}
+	return row.CancelRequestedAt != nil, nil
+}
+
 // runCycles projects the cycle repository onto the supervisor's CycleStore.
 type runCycles struct{ cycles delivery.RunCycleRepository }
 

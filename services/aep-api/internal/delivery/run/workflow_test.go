@@ -323,6 +323,22 @@ func (h *harness) mergesAt(sha string) {
 	h.env.OnActivity(h.acts.ReadCycleFacts, mock.Anything, mock.Anything).Return(facts, nil)
 }
 
+// factsAre queues the loop's GROUND-TRUTH reads, in order; the last repeats.
+//
+// The ordered form exists because cancel and a landing are read from the same
+// activity: a test that wants a run cancelled MID-CYCLE has to answer the
+// boundary's question ("was this cancelled?") differently from the one the
+// landing wait asks a moment later.
+func (h *harness) factsAre(facts ...CycleFacts) {
+	h.set["facts"] = true
+	for i, f := range facts {
+		call := h.env.OnActivity(h.acts.ReadCycleFacts, mock.Anything, mock.Anything).Return(f, nil)
+		if i < len(facts)-1 {
+			call.Once()
+		}
+	}
+}
+
 // validationIs pins the acceptance oracle's issue number (0 = no criteria) and
 // the verdict the runner's report yields, for every attempt.
 //
@@ -1781,4 +1797,66 @@ func dedupeStates(states []string) []string {
 		}
 	}
 	return out
+}
+
+// ---- cancel is durable ------------------------------------------------------
+
+// TestCancel_RecordedOnTheRunRowStopsTheRedispatch is what making cancel durable
+// buys. The cancel surface reaps the agent's Component, and from inside the loop
+// a reaped pod and a dead agent are indistinguishable: the landing deadline
+// expires with nothing merged. Without the stamp the loop calls that agent
+// death, spends a re-dispatch, and opens a fresh cycle over a run the user just
+// stopped — which is the bug.
+//
+// NO signal is sent here, deliberately. Signal delivery is best-effort by
+// construction, so this is also the proof that losing one now costs latency
+// rather than a cycle.
+func TestCancel_RecordedOnTheRunRowStopsTheRedispatch(t *testing.T) {
+	h := newHarness(t)
+	h.milestoneIs(MilestoneSnapshot{Work: 1, Total: 1})
+	h.factsAre(
+		// The boundary asks first, before anything is dispatched.
+		CycleFacts{CycleID: testCycleID},
+		// Then the landing wait, after the pod was reaped and the deadline blew.
+		CycleFacts{CycleID: testCycleID, CancelRequested: true},
+	)
+
+	h.run(delivery.RunOriginSpecBuild, 0)
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateCancelled, "")
+	require.Equal(t, 1, h.dispatchCount(), "a cancelled cycle must not buy a re-dispatch")
+}
+
+// TestCancel_RecordedBeforeTheFirstDispatchNeverDispatches: a run parked in the
+// unbounded wait has no cycle record at all, so the cancel read has to be
+// independent of one. Without that, a cancel on a parked run would be invisible
+// until it dispatched — which is precisely what it must never do.
+func TestCancel_RecordedBeforeTheFirstDispatchNeverDispatches(t *testing.T) {
+	h := newHarness(t)
+	h.milestoneIs(MilestoneSnapshot{Work: 1, Total: 1})
+	h.factsAre(CycleFacts{CancelRequested: true})
+
+	h.run(delivery.RunOriginSpecBuild, 0)
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateCancelled, "")
+	require.Equal(t, 0, h.dispatchCount(), "a run cancelled before its first cycle never dispatches")
+}
+
+// TestAgentDeath_WithNoCancelRecordedStillSpendsTheRedispatch is the other half,
+// and the one that would catch an over-eager fix. Making cancel durable must not
+// turn every unlanded cycle into a cancellation: an agent that genuinely died
+// still costs its re-dispatch budget and still settles on redispatch-budget.
+func TestAgentDeath_WithNoCancelRecordedStillSpendsTheRedispatch(t *testing.T) {
+	h := newHarness(t)
+	h.milestoneIs(MilestoneSnapshot{Work: 1, Total: 1})
+	h.factsAre(CycleFacts{CycleID: testCycleID}) // never lands, never cancelled
+
+	h.run(delivery.RunOriginSpecBuild, 0)
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonRedispatchBudget)
+	require.Equal(t, delivery.RunMaxRedispatchPerCycle, h.dispatchCount(),
+		"genuine agent death must still spend the whole re-dispatch budget")
 }

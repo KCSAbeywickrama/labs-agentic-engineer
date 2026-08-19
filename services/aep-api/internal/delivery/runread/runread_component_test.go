@@ -121,9 +121,14 @@ type fakeCanceller struct {
 	err     error
 	calls   []string
 	cancels int
+	// order, when set, records this step's position among record/signal/reap.
+	order *[]string
 }
 
 func (f *fakeCanceller) CancelRun(_ context.Context, row *delivery.MilestoneRun) error {
+	if f.order != nil {
+		*f.order = append(*f.order, "signal")
+	}
 	f.cancels++
 	f.calls = append(f.calls, row.ID)
 	return f.err
@@ -201,7 +206,7 @@ func newHarnessWithBuilds(t *testing.T, rows []delivery.MilestoneRun, cycles map
 	handlers, err := deliveryhttpapi.New(deliveryhttpapi.Deps{
 		RunReads:       runread.NewReads(runs, cyc),
 		RunProgress:    runread.NewProgressService(runs, cyc, logReader),
-		RunCommands:    runread.NewCommands(runs, canceller, nil),
+		RunCommands:    runread.NewCommands(runs, &fakeRecorder{}, canceller, nil),
 		RunCycleBuilds: runread.NewCycleBuilds(runs, cyc, builds),
 	})
 	if err != nil {

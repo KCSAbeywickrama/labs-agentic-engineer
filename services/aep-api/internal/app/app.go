@@ -1032,7 +1032,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		// Cancel signals the supervisor AND deletes the cycle's agent
 		// Component, which is what actually stops the pod and frees the org's
 		// billing concurrency slot. Revalidate is the event plane's.
-		RunCommands: runread.NewCommands(milestoneRunRepo, runSupervisor, eventcoreRevalidator{events: eventPlane}).
+		RunCommands: runread.NewCommands(milestoneRunRepo, milestoneRunRepo, runSupervisor, eventcoreRevalidator{events: eventPlane}).
 			WithCycleReaper(codingagent.NewCycleReaper(componentClient, runCycleRepo)),
 		RunCycleBuilds: runCycleBuilds,
 	})

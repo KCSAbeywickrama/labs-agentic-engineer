@@ -41,10 +41,16 @@ const (
 	// conflict issue naming it was minted into the milestone.
 	SigRunConflict = "run-conflict"
 	// SigRunCancel — a human abandoned the increment. It is the ONLY expiry the
-	// unbounded wait state has, and the only signal in this set that is an
-	// instruction rather than a fact: everything else the supervisor re-derives
-	// from ground truth, but "a person changed their mind" has no ground truth
-	// to poll.
+	// unbounded wait state has, and like every other signal here it is a WAKE-UP
+	// rather than evidence: the cancel surface stamps the request on the run row
+	// FIRST (MilestoneRun.CancelRequestedAt) and this makes the loop notice at
+	// its next safe point instead of at its next poll.
+	//
+	// That ordering is what stops a cancel from buying a cycle. The surface also
+	// reaps the agent's pod, and from inside the workflow a reaped pod and an
+	// agent that died on its own are indistinguishable — so a cancel that lived
+	// only in a signal, and whose delivery failed, read as agent death and spent
+	// a re-dispatch on a run the user had just stopped.
 	//
 	// Cancel is delivered as a SIGNAL rather than a Temporal workflow
 	// cancellation so the run settles its own row and closes its own cycle on

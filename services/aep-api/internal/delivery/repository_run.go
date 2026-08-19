@@ -105,6 +105,17 @@ type MilestoneRunRepository interface {
 	// matching Run* limit to decide whether the budget is now exhausted.
 	BumpBudget(ctx context.Context, id string, counter RunBudget) (*MilestoneRun, error)
 
+	// RequestCancel stamps a human's cancellation request on the run, guarded on
+	// the run being non-terminal, and returns (nil, nil) when it has already
+	// settled — a cancel arriving after the run finished changed nothing, and is
+	// not an error.
+	//
+	// This is the DURABLE half of cancel. The signal that follows it is the fast
+	// path; this row is the evidence the loop re-derives from, which is what
+	// stops a reaped agent pod from reading as agent death and buying a
+	// re-dispatch. The FIRST request wins: a second click cannot move the stamp.
+	RequestCancel(ctx context.Context, id string) (*MilestoneRun, error)
+
 	// SetValidationVerdict records the validation cycle's outcome on the run
 	// (the verdict is a run property, not a per-issue one) together with the
 	// validation issue that produced it, guarded on the run being non-terminal so
@@ -225,6 +236,14 @@ func (r *milestoneRunRepository) BumpBudget(ctx context.Context, id string, coun
 	// The column comes from the whitelist above, never from the caller's string.
 	return r.updateNonTerminal(ctx, id, map[string]any{
 		string(counter): gorm.Expr(string(counter) + " + 1"),
+	})
+}
+
+func (r *milestoneRunRepository) RequestCancel(ctx context.Context, id string) (*MilestoneRun, error) {
+	// COALESCE for the same reason SetState uses it on started_at: the column
+	// records WHEN a person first asked, and a second click must not move it.
+	return r.updateNonTerminal(ctx, id, map[string]any{
+		"cancel_requested_at": gorm.Expr("COALESCE(cancel_requested_at, ?)", time.Now().UTC()),
 	})
 }
 
