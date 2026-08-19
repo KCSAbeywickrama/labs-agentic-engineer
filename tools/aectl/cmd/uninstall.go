@@ -119,8 +119,10 @@ func runUninstall(cmd *cobra.Command, args []string) error {
 		}
 		if len(pvcs.Items) == 0 {
 			ui.Detail("no PVCs found")
+		} else if deleted < len(pvcs.Items) {
+			ui.Warn(fmt.Sprintf("Deleted %d/%d PVC(s) — %d failed, manual cleanup may be required", deleted, len(pvcs.Items), len(pvcs.Items)-deleted))
 		} else {
-			ui.Success(fmt.Sprintf("Deleted %d/%d PVC(s)", deleted, len(pvcs.Items)))
+			ui.Success(fmt.Sprintf("Deleted %d PVC(s)", deleted))
 		}
 	}
 
