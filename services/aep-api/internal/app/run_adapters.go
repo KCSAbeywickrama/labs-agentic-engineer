@@ -60,7 +60,7 @@ func (a runRuns) LiveRunForMilestone(ctx context.Context, orgID, projectID strin
 }
 
 // MilestoneSpecTag reads the version off the milestone's newest run that has
-// one. Rows arrive newest-first, so a milestone whose spec build was followed
+// one. Rows arrive newest-first, so a milestone whose dev run was followed
 // by tagless incident runs still answers with the version it was built for.
 func (a runRuns) MilestoneSpecTag(ctx context.Context, orgID, projectID string, milestoneNumber int) (string, error) {
 	rows, err := a.runs.ListByMilestone(ctx, orgID, projectID, milestoneNumber)

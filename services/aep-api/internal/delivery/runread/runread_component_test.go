@@ -141,7 +141,7 @@ func specRun(id, state string) delivery.MilestoneRun {
 	row := delivery.MilestoneRun{
 		ID: id, OrgID: "acme", ProjectID: "widgets",
 		MilestoneNumber: 4, MilestoneTitle: "v3",
-		Origin: delivery.RunOriginSpecBuild, State: state,
+		Kind: delivery.RunKindDev, Origin: delivery.RunOriginSpecBuild, State: state,
 		CyclesTotal: 2, CycleCeiling: delivery.RunDefaultCycleCeiling, FixCycles: 1,
 		CreatedAt: started, StartedAt: &started,
 	}

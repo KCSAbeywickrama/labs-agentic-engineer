@@ -75,7 +75,7 @@ func NewSupervisor(rt *delivery.Runtime, runs RunStore, dispatcher delivery.Mile
 // that the run workflow owns planning: a caller that returns success without
 // starting anything leaves the row non-terminal with nothing behind it, and a
 // non-terminal row answers LiveRunForMilestone forever, so the sweep skips it
-// and the spec mutex never releases. Callers that re-offer on a timer swallow
+// and the build mutex never releases. Callers that re-offer on a timer swallow
 // the sentinel; the build click, which has no timer, settles the row on it.
 func (s *Supervisor) StartRun(ctx context.Context, req delivery.StartRunRequest) error {
 	if s == nil {
@@ -83,7 +83,7 @@ func (s *Supervisor) StartRun(ctx context.Context, req delivery.StartRunRequest)
 	}
 	if s.dispatcher == nil {
 		slog.WarnContext(ctx, "run: no agent dispatcher wired — the run row waits",
-			"project", req.ProjectID, "milestone", req.MilestoneNumber, "origin", req.Origin)
+			"project", req.ProjectID, "milestone", req.MilestoneNumber, "kind", req.Kind)
 		return delivery.ErrRunNotStarted
 	}
 	if s.rt == nil || !s.rt.Available() {
@@ -109,7 +109,7 @@ func (s *Supervisor) StartRun(ctx context.Context, req delivery.StartRunRequest)
 		TaskQueue: s.rt.TaskQueue(),
 		// A milestone sees SEQUENTIAL runs across its life, so the id is reused
 		// once the previous run is terminal. Concurrency is prevented by the run
-		// row (the spec mutex) and by AlreadyStarted below, not by the id.
+		// row (the build mutex) and by AlreadyStarted below, not by the id.
 		WorkflowIDReusePolicy: enumspb.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE,
 	}, delivery.MilestoneRunWorkflowName, RunInput{
 		RunID:           row.ID,
@@ -117,6 +117,7 @@ func (s *Supervisor) StartRun(ctx context.Context, req delivery.StartRunRequest)
 		ProjectID:       row.ProjectID,
 		MilestoneNumber: row.MilestoneNumber,
 		MilestoneTitle:  row.MilestoneTitle,
+		Kind:            row.Kind,
 		Origin:          row.Origin,
 		// Planning inputs come off the REQUEST, never the row — the inverse of the
 		// budgets below, and for the mirror-image reason. The row says which run
@@ -140,13 +141,14 @@ func (s *Supervisor) StartRun(ctx context.Context, req delivery.StartRunRequest)
 		return err
 	}
 	slog.InfoContext(ctx, "run: supervising a milestone",
-		"run", row.ID, "project", row.ProjectID, "milestone", row.MilestoneNumber, "origin", row.Origin)
+		"run", row.ID, "project", row.ProjectID, "milestone", row.MilestoneNumber, "kind", row.Kind)
 	return nil
 }
 
 // admit resolves the run row this request supervises: the caller's own (the
-// plan path admits before planning, so the spec mutex is armed across the
-// planning turn), the milestone's existing live run, or a fresh incident row.
+// plan path admits before planning, so the build mutex is armed across the
+// planning turn), the milestone's existing live run, or a fresh row of the
+// request's kind.
 //
 // It returns (nil, nil) when the mutex refused a new row — somebody else won,
 // and they are the one being supervised.
@@ -162,6 +164,7 @@ func (s *Supervisor) admit(ctx context.Context, req delivery.StartRunRequest) (*
 			ProjectID:          req.ProjectID,
 			MilestoneNumber:    req.MilestoneNumber,
 			MilestoneTitle:     req.MilestoneTitle,
+			Kind:               req.Kind,
 			Origin:             req.Origin,
 			CycleCeiling:       ceiling,
 			ValidationAttempts: req.ValidationAttempts,
@@ -180,11 +183,11 @@ func (s *Supervisor) admit(ctx context.Context, req delivery.StartRunRequest) (*
 		// which is precisely the reconcile sweep's job.
 		return live, nil
 	}
-	// The incident row inherits the milestone's version. Best-effort: a read
-	// failure costs the ledger this run's version label, never the run.
+	// The new row inherits the milestone's version. Best-effort: a read failure
+	// costs the ledger this run's version label, never the run.
 	tag, err := s.runs.MilestoneSpecTag(ctx, req.OrgID, req.ProjectID, req.MilestoneNumber)
 	if err != nil {
-		slog.WarnContext(ctx, "run: milestone version read failed — admitting the incident run untagged",
+		slog.WarnContext(ctx, "run: milestone version read failed — admitting the run untagged",
 			"project", req.ProjectID, "milestone", req.MilestoneNumber, "error", err)
 	}
 	admitted, row, err := s.runs.TryAdmit(ctx, &delivery.MilestoneRun{
@@ -193,6 +196,7 @@ func (s *Supervisor) admit(ctx context.Context, req delivery.StartRunRequest) (*
 		MilestoneNumber:    req.MilestoneNumber,
 		MilestoneTitle:     req.MilestoneTitle,
 		Tag:                tag,
+		Kind:               req.Kind,
 		Origin:             req.Origin,
 		State:              delivery.RunStateWaiting,
 		CycleCeiling:       req.CycleCeiling,

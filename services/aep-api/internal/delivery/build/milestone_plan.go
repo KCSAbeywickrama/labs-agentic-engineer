@@ -46,7 +46,7 @@ import (
 // ports, the same way the build already reaches the task reads.
 //
 // WHERE THE SEQUENCE SPLITS, and why: the run row is admitted BEFORE planning,
-// not after. The row IS the spec-run mutex (§5's 409 in DB form); a planning
+// not after. The row IS the build mutex (§5's 409 in DB form); a planning
 // turn is minutes of LLM time, so admitting afterwards would leave the mutex
 // unarmed for exactly the window a double-click lands in. Planning then runs
 // detached from the request — the POST answers with its tag as soon as the
@@ -100,17 +100,17 @@ func (s *Service) SetPlanPath(d PlanPathDeps) {
 	}
 }
 
-// activeSpecRun is the endpoint's 409 pre-check: one live spec run per project.
+// activeDevRun is the endpoint's 409 pre-check: one live dev run per project.
 // The DB's partial unique index is the authority (TryAdmit's ON CONFLICT DO
 // NOTHING is the race backstop); this read exists so a user who clicks build
 // twice gets a conflict that names itself instead of a bare insert failure.
-func (s *Service) activeSpecRun(ctx context.Context, orgID, projectID string) error {
+func (s *Service) activeDevRun(ctx context.Context, orgID, projectID string) error {
 	if s.plan == nil || s.plan.runs == nil {
 		return nil
 	}
-	run, err := s.plan.runs.ActiveSpecRunByProject(ctx, orgID, projectID)
+	run, err := s.plan.runs.ActiveDevRunByProject(ctx, orgID, projectID)
 	if err != nil {
-		return &EdgeError{Status: 500, Message: "lookup active spec run"}
+		return &EdgeError{Status: 500, Message: "lookup active dev run"}
 	}
 	if run != nil {
 		return ErrBuildAlreadyRunning
@@ -149,6 +149,7 @@ func (s *Service) claimVersion(ctx context.Context, orgID, projectID string, sco
 		MilestoneNumber: res.Number,
 		MilestoneTitle:  milestoneTitle,
 		Tag:             tag,
+		Kind:            delivery.RunKindDev,
 		Origin:          delivery.RunOriginSpecBuild,
 		// PLANNING, not waiting: the run has not filled its milestone yet, so for the next
 		// minutes this row is a version being written, not a run parked on
@@ -188,7 +189,7 @@ func (s *Service) supersedePreviousMilestone(ctx context.Context, orgID, project
 			"project", projectID, "error", err)
 		return
 	}
-	prev, ok := previousSpecMilestone(rows, milestoneTitle)
+	prev, ok := previousDevMilestone(rows, milestoneTitle)
 	if !ok {
 		return // first version of this project: nothing to supersede
 	}
@@ -225,17 +226,21 @@ func (s *Service) supersedePreviousMilestone(ctx context.Context, orgID, project
 		"issuesClosed", closed, "supersededBy", milestoneTitle)
 }
 
-// previousSpecMilestone picks the newest spec-build milestone whose title is
-// not the one being claimed. rows arrive newest-first from the repository.
+// previousDevMilestone picks the newest DEV run's milestone whose title is not
+// the one being claimed. rows arrive newest-first from the repository.
+//
+// Dev runs only, because only a dev run delivers a version: task and validation
+// runs work an EXISTING milestone that may be any version's, so superseding on
+// the newest row outright would close a milestone the project is still on.
 //
 // Comparing on TITLE here is not a GitHub title match: it compares the
 // platform-recorded milestone title against the title being claimed, both
 // platform-side values. A claim that resolves to a milestone this project
 // already has matches and is skipped — a milestone must never supersede itself.
-func previousSpecMilestone(rows []delivery.MilestoneRun, milestoneTitle string) (delivery.MilestoneRun, bool) {
+func previousDevMilestone(rows []delivery.MilestoneRun, milestoneTitle string) (delivery.MilestoneRun, bool) {
 	for i := range rows {
-		if rows[i].Origin != delivery.RunOriginSpecBuild {
-			continue // incident runs work their own (older) milestones
+		if rows[i].Kind != delivery.RunKindDev {
+			continue // task and validation runs work their own (older) milestones
 		}
 		if rows[i].MilestoneTitle == milestoneTitle {
 			continue
@@ -289,6 +294,7 @@ func (s *Service) startRun(ctx context.Context, orgID, projectID, tag string,
 		ProjectID:       projectID,
 		MilestoneNumber: run.MilestoneNumber,
 		MilestoneTitle:  run.MilestoneTitle,
+		Kind:            delivery.RunKindDev,
 		Origin:          delivery.RunOriginSpecBuild,
 		RunID:           run.ID,
 		Tag:             tag,
@@ -316,7 +322,7 @@ func (s *Service) startRun(ctx context.Context, orgID, projectID, tag string,
 // own context, and a user who navigates away — or a proxy that times out — while
 // StartRun is in flight would otherwise cancel the one write that makes the row
 // terminal. The row would stay `planning`, which is non-terminal, and the
-// project's spec mutex would stay held: no later build could be admitted, and
+// project's build mutex would stay held: no later build could be admitted, and
 // the reconcile sweep counts `planning` as live so nothing would heal it. A
 // cancelled client must not be able to wedge a project.
 func (s *Service) failRun(ctx context.Context, run *delivery.MilestoneRun, cause error) {
@@ -324,7 +330,7 @@ func (s *Service) failRun(ctx context.Context, run *delivery.MilestoneRun, cause
 		"project", run.ProjectID, "run", run.ID, "milestone", run.MilestoneNumber, "error", cause)
 	settleCtx := context.WithoutCancel(ctx)
 	if _, err := s.plan.runs.Settle(settleCtx, run.ID, delivery.RunStateFailed, delivery.RunReasonPlanFailed); err != nil {
-		slog.ErrorContext(ctx, "build: settling the failed run ALSO failed — the project's spec mutex is held",
+		slog.ErrorContext(ctx, "build: settling the failed run ALSO failed — the project's build mutex is held",
 			"project", run.ProjectID, "run", run.ID, "error", err)
 	}
 }

@@ -23,7 +23,7 @@ import (
 )
 
 // TestIsTerminalRunState pins the settled/unsettled split every guarded run
-// transition and the spec-run mutex are written against. The two must agree: a
+// transition and the build mutex are written against. The two must agree: a
 // state the helper calls terminal is a state the mutex index must NOT count and
 // no mutator may write through.
 func TestIsTerminalRunState(t *testing.T) {

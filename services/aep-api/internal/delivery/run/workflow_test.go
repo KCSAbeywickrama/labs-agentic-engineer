@@ -436,8 +436,8 @@ func (h *harness) merges(n int) {
 	}
 }
 
-func (h *harness) run(origin string, ceiling int) {
-	h.runWith(RunInput{Origin: origin, CycleCeiling: ceiling})
+func (h *harness) run(kind string, ceiling int) {
+	h.runWith(RunInput{Kind: kind, CycleCeiling: ceiling})
 }
 
 // runWith starts the workflow with the caller's budgets, filling in the identity
@@ -519,7 +519,7 @@ func TestHappyPath_OneCycleDeliversTheVersion(t *testing.T) {
 	h.milestoneIs(MilestoneSnapshot{Work: 2, Total: 2}, MilestoneSnapshot{})
 	h.merges(1)
 
-	h.run(delivery.RunOriginSpecBuild, 0)
+	h.run(delivery.RunKindDev, 0)
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
@@ -551,7 +551,7 @@ func TestFixCycle_RedBuildBecomesTheNextCyclesWork(t *testing.T) {
 	)
 	h.merges(2)
 
-	h.run(delivery.RunOriginIncidentAdoption, 0)
+	h.run(delivery.RunKindTask, 0)
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
@@ -567,7 +567,7 @@ func TestBuildsGreen_DeploysBeforeSettling(t *testing.T) {
 	h.milestoneIs(MilestoneSnapshot{Work: 1, Total: 1}, MilestoneSnapshot{})
 	h.merges(1)
 
-	h.run(delivery.RunOriginSpecBuild, 0)
+	h.run(delivery.RunKindDev, 0)
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
@@ -595,7 +595,7 @@ func TestRedBuild_DoesNotDeploy(t *testing.T) {
 	)
 	h.merges(2)
 
-	h.run(delivery.RunOriginSpecBuild, 0)
+	h.run(delivery.RunKindDev, 0)
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
@@ -622,7 +622,7 @@ func TestDeploy_PromotesWaveByWaveThenConverges(t *testing.T) {
 	h.buildsAre(CycleBuildState{Expected: 2, Settled: 2, Components: []string{"todo-api", "todo-webapp"}})
 	h.merges(1)
 
-	h.run(delivery.RunOriginSpecBuild, 0)
+	h.run(delivery.RunKindDev, 0)
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
@@ -654,7 +654,7 @@ func TestDeploy_FailedWaveRunsNoFurtherWaveOrConverge(t *testing.T) {
 	h.deployMintsAre(nil)
 	h.merges(1)
 
-	h.run(delivery.RunOriginSpecBuild, 0)
+	h.run(delivery.RunKindDev, 0)
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonDeployBudget)
@@ -683,7 +683,7 @@ func TestDeployOrderUnsatisfiable_SettlesAsADeployFailure(t *testing.T) {
 	h.deployMintsAre(nil)
 	h.merges(1)
 
-	h.run(delivery.RunOriginSpecBuild, 0)
+	h.run(delivery.RunKindDev, 0)
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonDeployBudget)
@@ -704,7 +704,7 @@ func TestDeployOrderUnreadable_IsRetriedNotSettled(t *testing.T) {
 	h.wavesAre(nil, errors.New("oc: design read timed out"))
 	h.merges(1)
 
-	h.run(delivery.RunOriginSpecBuild, 0)
+	h.run(delivery.RunKindDev, 0)
 
 	require.True(t, h.env.IsWorkflowCompleted())
 	require.Error(t, h.env.GetWorkflowError(), "a transient planning failure must not settle the run")
@@ -720,7 +720,7 @@ func TestDeploy_FailedWaveRunsNoConverge(t *testing.T) {
 	h.deployMintsAre(nil)
 	h.merges(1)
 
-	h.run(delivery.RunOriginSpecBuild, 0)
+	h.run(delivery.RunKindDev, 0)
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonDeployBudget)
@@ -744,7 +744,7 @@ func TestDeployFailed_BecomesTheNextCyclesWork(t *testing.T) {
 	)
 	h.merges(2)
 
-	h.run(delivery.RunOriginSpecBuild, 0)
+	h.run(delivery.RunKindDev, 0)
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
@@ -770,7 +770,7 @@ func TestDeployFailed_WithNoRecovery_SettlesOnTheDeployBudget(t *testing.T) {
 	h.deployMintsAre(nil)
 	h.merges(1)
 
-	h.run(delivery.RunOriginSpecBuild, 0)
+	h.run(delivery.RunKindDev, 0)
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonDeployBudget)
@@ -792,7 +792,7 @@ func TestValidationCycle_TouchesNoComponent_SkipsDeploy(t *testing.T) {
 	h.validationIs(77, delivery.ValidationVerdictPassed)
 	h.merges(2)
 
-	h.run(delivery.RunOriginSpecBuild, 0)
+	h.run(delivery.RunKindDev, 0)
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
@@ -820,7 +820,7 @@ func TestDeployNeverReady_ExpiresIntoADeployFailure(t *testing.T) {
 	h.deployMintsAre(nil)
 	h.merges(1)
 
-	h.run(delivery.RunOriginSpecBuild, 0)
+	h.run(delivery.RunKindDev, 0)
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonDeployBudget)
@@ -851,7 +851,7 @@ func TestDeployDeadline_IsTheStagesNotEachWaves(t *testing.T) {
 	h.merges(1)
 
 	start := h.env.Now()
-	h.run(delivery.RunOriginSpecBuild, 0)
+	h.run(delivery.RunKindDev, 0)
 	res := h.result(t)
 	elapsed := h.env.Now().Sub(start)
 
@@ -874,7 +874,7 @@ func TestConflictCycle_AnUnmergeablePRBecomesTheNextCyclesWork(t *testing.T) {
 	h.signal(delivery.SigRunConflict, time.Second)
 	h.signal(delivery.SigRunPRMerged, 2*time.Second)
 
-	h.run(delivery.RunOriginIncidentAdoption, 0)
+	h.run(delivery.RunKindTask, 0)
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
@@ -896,7 +896,7 @@ func TestValidationCycle_Passes(t *testing.T) {
 	h.validationIs(77, delivery.ValidationVerdictPassed)
 	h.merges(2)
 
-	h.run(delivery.RunOriginSpecBuild, 0)
+	h.run(delivery.RunKindDev, 0)
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
@@ -937,7 +937,7 @@ func TestValidationCycle_RepairsAFailureAndRevalidates(t *testing.T) {
 	)
 	h.merges(4)
 
-	h.run(delivery.RunOriginSpecBuild, 0)
+	h.run(delivery.RunKindDev, 0)
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
@@ -984,7 +984,7 @@ func TestValidationCycle_UnreportedRedispatchesValidation(t *testing.T) {
 	)
 	h.merges(3)
 
-	h.run(delivery.RunOriginSpecBuild, 0)
+	h.run(delivery.RunKindDev, 0)
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
@@ -1015,7 +1015,7 @@ func TestValidationCycle_FailsAfterEveryAttempt(t *testing.T) {
 	)
 	h.merges(4)
 
-	h.run(delivery.RunOriginSpecBuild, 0)
+	h.run(delivery.RunKindDev, 0)
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonValidationFailed)
@@ -1040,7 +1040,7 @@ func TestValidationCycle_UnreportedTwiceStillFails(t *testing.T) {
 	h.validationIs(77, delivery.ValidationVerdictUnreported)
 	h.merges(3)
 
-	h.run(delivery.RunOriginSpecBuild, 0)
+	h.run(delivery.RunKindDev, 0)
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonValidationUnreported)
@@ -1071,7 +1071,7 @@ func TestValidationCycle_IdenticalReportStopsEarly(t *testing.T) {
 	)
 	h.merges(4)
 
-	h.run(delivery.RunOriginSpecBuild, 0)
+	h.run(delivery.RunKindDev, 0)
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonValidationFailed)
@@ -1090,7 +1090,7 @@ func TestValidationCycle_FailedWithNothingToRepairSettles(t *testing.T) {
 	h.repairMintsAre(nil)
 	h.merges(2)
 
-	h.run(delivery.RunOriginSpecBuild, 0)
+	h.run(delivery.RunKindDev, 0)
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonValidationFailed)
@@ -1123,7 +1123,7 @@ func TestValidationCycle_IncompleteEvidenceStillSucceeds(t *testing.T) {
 			h.validationIs(77, verdict)
 			h.merges(2)
 
-			h.run(delivery.RunOriginSpecBuild, 0)
+			h.run(delivery.RunKindDev, 0)
 			res := h.result(t)
 
 			h.assertSettled(t, res, delivery.RunStateSucceeded, "")
@@ -1147,7 +1147,7 @@ func TestValidationCycle_PersistsTheIssueWithTheVerdict(t *testing.T) {
 	h.validationIs(77, delivery.ValidationVerdictPassed)
 	h.merges(2)
 
-	h.run(delivery.RunOriginSpecBuild, 0)
+	h.run(delivery.RunKindDev, 0)
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
@@ -1181,7 +1181,7 @@ func TestValidationCycle_EachAttemptRecordsAgainstItsOwnCycle(t *testing.T) {
 	)
 	h.merges(4)
 
-	h.run(delivery.RunOriginSpecBuild, 0)
+	h.run(delivery.RunKindDev, 0)
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
@@ -1205,19 +1205,19 @@ func TestValidationCycle_EachAttemptRecordsAgainstItsOwnCycle(t *testing.T) {
 // empty on every other kind) and CycleView, which publishes the field as a
 // validation-cycle property.
 func TestSkippedVerdict_BelongsToNoCycle(t *testing.T) {
-	for name, origin := range map[string]string{
+	for name, kind := range map[string]string{
 		// Decided before a validation cycle opens: the project has no oracle.
-		"no acceptance oracle": delivery.RunOriginSpecBuild,
-		// Decided in settle: an incident run never reaches validation at all, so it
+		"no acceptance oracle": delivery.RunKindDev,
+		// Decided in settle: a task run never reaches validation at all, so it
 		// arrives at the end with an empty verdict.
-		"validation never reached": delivery.RunOriginIncidentAdoption,
+		"validation never reached": delivery.RunKindTask,
 	} {
 		t.Run(name, func(t *testing.T) {
 			h := newHarness(t)
 			h.milestoneIs(MilestoneSnapshot{Work: 1, Total: 1}, MilestoneSnapshot{})
 			h.merges(1)
 
-			h.run(origin, 0)
+			h.run(kind, 0)
 			res := h.result(t)
 
 			h.assertSettled(t, res, delivery.RunStateSucceeded, "")
@@ -1231,7 +1231,46 @@ func TestSkippedVerdict_BelongsToNoCycle(t *testing.T) {
 	}
 }
 
-// TestIncidentRun_GetsNoValidationCycle pins the origin split: an incident fixes
+// TestRunInput_WithoutAKindFallsBackToItsOrigin is the REPLAY case, and the one
+// that cannot be backfilled.
+//
+// A workflow input lives in Temporal history: an execution started before the
+// kind field existed replays with the empty string, forever. A loop that read
+// that as "not dev" would take every non-dev branch on a live spec build — it
+// would skip validation entirely and settle the version succeeded without ever
+// asking its acceptance criteria. Origin is the only surviving evidence of what
+// such a run is, which is the whole reason it is still carried.
+func TestRunInput_WithoutAKindFallsBackToItsOrigin(t *testing.T) {
+	for origin, wantsValidation := range map[string]bool{
+		delivery.RunOriginSpecBuild:        true,
+		delivery.RunOriginRevalidate:       true,
+		delivery.RunOriginIncidentAdoption: false,
+	} {
+		t.Run(origin, func(t *testing.T) {
+			h := newHarness(t)
+			h.milestoneIs(
+				MilestoneSnapshot{Work: 1, Total: 1},
+				MilestoneSnapshot{}, // deployed-green, nothing left → validation
+				MilestoneSnapshot{}, // after validation → settle
+			)
+			h.validationIs(77, delivery.ValidationVerdictPassed)
+			h.merges(2)
+
+			h.runWith(RunInput{Origin: origin}) // no Kind — an in-flight execution
+			res := h.result(t)
+
+			h.assertSettled(t, res, delivery.RunStateSucceeded, "")
+			if wantsValidation {
+				require.Contains(t, h.dispatchKinds(), delivery.CycleKindValidation,
+					"a run that validates replayed as one that does not")
+			} else {
+				require.NotContains(t, h.dispatchKinds(), delivery.CycleKindValidation)
+			}
+		})
+	}
+}
+
+// TestIncidentRun_GetsNoValidationCycle pins the kind split: a task run fixes
 // one thing in an already-validated version, and re-validating the whole system
 // for it would price every incident like a release.
 func TestIncidentRun_GetsNoValidationCycle(t *testing.T) {
@@ -1239,7 +1278,7 @@ func TestIncidentRun_GetsNoValidationCycle(t *testing.T) {
 	h.milestoneIs(MilestoneSnapshot{Work: 1, Total: 1}, MilestoneSnapshot{})
 	h.merges(1)
 
-	h.run(delivery.RunOriginIncidentAdoption, 0)
+	h.run(delivery.RunKindTask, 0)
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
@@ -1247,7 +1286,7 @@ func TestIncidentRun_GetsNoValidationCycle(t *testing.T) {
 	h.env.AssertNotCalled(t, "EnsureValidationIssue", mock.Anything, mock.Anything)
 }
 
-// TestRevalidateRun_EntersAtValidation is the origin's whole point: the milestone
+// TestRevalidateRun_EntersAtValidation is the kind's whole point: the milestone
 // is a version that already shipped, so the very first poll returns an empty
 // working set — the shape that parks every other run forever, because with no
 // cycles behind it an empty milestone is indistinguishable from one mid-plan.
@@ -1263,7 +1302,7 @@ func TestRevalidateRun_EntersAtValidation(t *testing.T) {
 	h.validationIs(77, delivery.ValidationVerdictPassed)
 	h.merges(1)
 
-	h.run(delivery.RunOriginRevalidate, 0)
+	h.run(delivery.RunKindValidation, 0)
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
@@ -1289,7 +1328,7 @@ func TestRevalidateRun_OneAttemptFilesNoRepairWork(t *testing.T) {
 	h.validationIs(77, delivery.ValidationVerdictFailed)
 	h.merges(1)
 
-	h.runWith(RunInput{Origin: delivery.RunOriginRevalidate, ValidationAttempts: 1})
+	h.runWith(RunInput{Kind: delivery.RunKindValidation, ValidationAttempts: 1})
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonValidationFailed)
@@ -1304,7 +1343,7 @@ func TestRevalidateRun_OneAttemptFilesNoRepairWork(t *testing.T) {
 		"one attempt is spent by the first fatal verdict, so the mint is never reached")
 }
 
-// TestRevalidateRun_DefaultAttemptsRepairAndRebuild is the same origin taking the
+// TestRevalidateRun_DefaultAttemptsRepairAndRebuild is the same kind taking the
 // other route — the one that exists to fix what it finds on an already-deployed
 // system.
 //
@@ -1327,7 +1366,7 @@ func TestRevalidateRun_DefaultAttemptsRepairAndRebuild(t *testing.T) {
 	)
 	h.merges(3)
 
-	h.run(delivery.RunOriginRevalidate, 0)
+	h.run(delivery.RunKindValidation, 0)
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
@@ -1363,7 +1402,7 @@ func TestRevalidateRun_ZeroAttemptsMeansTheDefault(t *testing.T) {
 	)
 	h.merges(3)
 
-	h.runWith(RunInput{Origin: delivery.RunOriginRevalidate, ValidationAttempts: 0})
+	h.runWith(RunInput{Kind: delivery.RunKindValidation, ValidationAttempts: 0})
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
@@ -1380,7 +1419,7 @@ func TestRedispatchBudget_AgentDeathEndsTheRun(t *testing.T) {
 	h.milestoneIs(MilestoneSnapshot{Work: 1, Total: 1})
 	h.mergesAt("") // the cycle record never learns a merge
 
-	h.run(delivery.RunOriginSpecBuild, 0)
+	h.run(delivery.RunKindDev, 0)
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonRedispatchBudget)
@@ -1400,7 +1439,7 @@ func TestAgentQuotaBlocked_SettlesBlockedWithoutSpendingTheBudget(t *testing.T) 
 	h.dispatchIs("", temporal.NewNonRetryableApplicationError(
 		delivery.AgentQuotaBlockedMessage, delivery.ErrTypeAgentQuotaBlocked, delivery.ErrAgentQuotaExceeded))
 
-	h.run(delivery.RunOriginSpecBuild, 0)
+	h.run(delivery.RunKindDev, 0)
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateBlocked, delivery.RunReasonAgentQuotaBlocked)
@@ -1408,7 +1447,7 @@ func TestAgentQuotaBlocked_SettlesBlockedWithoutSpendingTheBudget(t *testing.T) 
 		"a quota refusal must not be re-attempted — the answer cannot change without a human")
 	require.Equal(t, 0, h.closed, "a blocked increment keeps its milestone open")
 	require.True(t, delivery.IsTerminalRunState(delivery.RunStateBlocked),
-		"blocked must be terminal, or the spec-run mutex stays armed forever")
+		"blocked must be terminal, or the build mutex stays armed forever")
 }
 
 // TestBuildRetriggerBudget_RedWithNothingToFix is the exit for a build that
@@ -1420,7 +1459,7 @@ func TestBuildRetriggerBudget_RedWithNothingToFix(t *testing.T) {
 	h.buildsAre(CycleBuildState{Expected: 1, Settled: 1, Red: []string{"order-service"}})
 	h.merges(1)
 
-	h.run(delivery.RunOriginSpecBuild, 0)
+	h.run(delivery.RunKindDev, 0)
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonBuildRetriggerBudget)
@@ -1434,7 +1473,7 @@ func TestFixChainBudget_TwoFixCyclesIsTheLimit(t *testing.T) {
 	h.buildsAre(CycleBuildState{Expected: 1, Settled: 1, Red: []string{"order-service"}})
 	h.merges(3)
 
-	h.run(delivery.RunOriginSpecBuild, 0)
+	h.run(delivery.RunKindDev, 0)
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonFixChainBudget)
@@ -1453,7 +1492,7 @@ func TestConflictBudget_TwoConflictCyclesIsTheLimit(t *testing.T) {
 		h.signal(delivery.SigRunConflict, time.Duration(i)*time.Second)
 	}
 
-	h.run(delivery.RunOriginSpecBuild, 0)
+	h.run(delivery.RunKindDev, 0)
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonConflictBudget)
@@ -1470,7 +1509,7 @@ func TestNoProgress_AGreenCycleThatChangedNothing(t *testing.T) {
 	h.milestoneIs(MilestoneSnapshot{Work: 2, Total: 2})
 	h.merges(1)
 
-	h.run(delivery.RunOriginSpecBuild, 0)
+	h.run(delivery.RunKindDev, 0)
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonNoProgress)
@@ -1489,7 +1528,7 @@ func TestCycleCeiling_StopsARunThatIsStillMakingProgress(t *testing.T) {
 	)
 	h.merges(2)
 
-	h.run(delivery.RunOriginSpecBuild, 2)
+	h.run(delivery.RunKindDev, 2)
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonCycleCeiling)
@@ -1503,7 +1542,7 @@ func TestCancel_FromWaiting(t *testing.T) {
 	h.milestoneIs(MilestoneSnapshot{Work: 1, Gates: 1, Total: 2})
 	h.signal(delivery.SigRunCancel, time.Second)
 
-	h.run(delivery.RunOriginSpecBuild, 0)
+	h.run(delivery.RunKindDev, 0)
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateCancelled, "")
@@ -1519,7 +1558,7 @@ func TestCancel_FromRunning(t *testing.T) {
 	h.milestoneIs(MilestoneSnapshot{Work: 1, Total: 1})
 	h.signal(delivery.SigRunCancel, time.Second)
 
-	h.run(delivery.RunOriginSpecBuild, 0)
+	h.run(delivery.RunKindDev, 0)
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateCancelled, "")
@@ -1548,7 +1587,7 @@ func TestMidRunGate_HoldsTheNextDispatch(t *testing.T) {
 	}, 2*time.Second)
 	h.signal(delivery.SigRunPRMerged, 3*time.Second)
 
-	h.run(delivery.RunOriginIncidentAdoption, 0)
+	h.run(delivery.RunKindTask, 0)
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
@@ -1567,7 +1606,7 @@ func TestSettle_WithAStrayGateStillOpen(t *testing.T) {
 	)
 	h.merges(1)
 
-	h.run(delivery.RunOriginIncidentAdoption, 0)
+	h.run(delivery.RunKindTask, 0)
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
@@ -1586,7 +1625,7 @@ func TestMergeSignalIsNotEvidence(t *testing.T) {
 	h.mergesAt("") // ground truth: this cycle landed nothing
 	h.merges(3)    // three merge signals arrive anyway
 
-	h.run(delivery.RunOriginSpecBuild, 0)
+	h.run(delivery.RunKindDev, 0)
 	res := h.result(t)
 
 	// The run ends on the re-dispatch budget, not on a phantom green cycle.
@@ -1606,7 +1645,7 @@ func TestBuildTerminalSignalWakesTheBuildWait(t *testing.T) {
 	h.merges(1)
 	h.signal(delivery.SigRunBuildTerminal, 2*time.Second)
 
-	h.run(delivery.RunOriginIncidentAdoption, 0)
+	h.run(delivery.RunKindTask, 0)
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
@@ -1627,7 +1666,7 @@ func TestQueryRunStatus(t *testing.T) {
 		h.env.SignalWorkflow(delivery.SigRunPRMerged, delivery.RunSignal{Signal: delivery.SigRunPRMerged})
 	}, time.Second)
 
-	h.run(delivery.RunOriginSpecBuild, 0)
+	h.run(delivery.RunKindDev, 0)
 	res := h.result(t)
 
 	require.Equal(t, delivery.RunStateRunning, midRun.State)
@@ -1667,7 +1706,7 @@ func TestPlanningPhase_MintsGatesThenPlansBeforeWorking(t *testing.T) {
 	h.milestoneIs(MilestoneSnapshot{Work: 1, Total: 1}, MilestoneSnapshot{})
 	h.merges(1)
 
-	h.runWith(RunInput{Origin: delivery.RunOriginSpecBuild, Tag: "v3"})
+	h.runWith(RunInput{Kind: delivery.RunKindDev, Tag: "v3"})
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
@@ -1680,18 +1719,18 @@ func TestPlanningPhase_MintsGatesThenPlansBeforeWorking(t *testing.T) {
 	require.Equal(t, []string{delivery.CycleKindCoding}, h.dispatchKinds())
 }
 
-// Only a run that owns a version plans one. Every other origin adopts a
+// Only a run that owns a version plans one. Every other kind adopts a
 // milestone somebody already filled, and is recognised by carrying no Tag —
 // re-planning there would re-derive a version from a run that was only meant to
 // resume.
 func TestPlanningPhase_SkippedWhenTheRunOwnsNoVersion(t *testing.T) {
-	for _, origin := range []string{delivery.RunOriginIncidentAdoption, delivery.RunOriginRevalidate} {
-		t.Run(origin, func(t *testing.T) {
+	for _, kind := range []string{delivery.RunKindTask, delivery.RunKindValidation} {
+		t.Run(kind, func(t *testing.T) {
 			h := newHarness(t)
 			h.milestoneIs(MilestoneSnapshot{Work: 1, Total: 1}, MilestoneSnapshot{})
 			h.merges(1)
 
-			h.runWith(RunInput{Origin: origin}) // no Tag
+			h.runWith(RunInput{Kind: kind}) // no Tag
 			h.result(t)
 
 			gates, plans := h.planCounts()
@@ -1722,7 +1761,7 @@ func TestZeroCycleAdoption_ParksForTheLaggingIndexInsteadOfSettling(t *testing.T
 	// The webhook that wakes the park once the issue is indexed.
 	h.signal(delivery.SigRunWorkable, 2*time.Second)
 
-	h.runWith(RunInput{Origin: delivery.RunOriginIncidentAdoption}) // no Tag
+	h.runWith(RunInput{Kind: delivery.RunKindTask}) // no Tag
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
@@ -1735,7 +1774,7 @@ func TestZeroCycleAdoption_ParksForTheLaggingIndexInsteadOfSettling(t *testing.T
 func TestZeroCycleSpecBuild_SettlesImmediately(t *testing.T) {
 	h := newHarness(t)
 	h.milestoneIs(MilestoneSnapshot{}) // planning minted nothing to work
-	h.runWith(RunInput{Origin: delivery.RunOriginSpecBuild, Tag: "v3"})
+	h.runWith(RunInput{Kind: delivery.RunKindDev, Tag: "v3"})
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
@@ -1758,7 +1797,7 @@ func TestPlanningPhase_PermanentFailureSettlesPlanFailed(t *testing.T) {
 			h.milestoneIs(MilestoneSnapshot{Work: 1, Total: 1})
 			h.planIs(tc.gatesErr, tc.planEr)
 
-			h.runWith(RunInput{Origin: delivery.RunOriginSpecBuild, Tag: "v3"})
+			h.runWith(RunInput{Kind: delivery.RunKindDev, Tag: "v3"})
 			res := h.result(t)
 
 			h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonPlanFailed)
@@ -1779,7 +1818,7 @@ func TestPlanningPhase_EmptyPlanSettlesDelivered(t *testing.T) {
 	h := newHarness(t)
 	h.milestoneIs(MilestoneSnapshot{}) // planning minted nothing
 
-	h.runWith(RunInput{Origin: delivery.RunOriginSpecBuild, Tag: "v3"})
+	h.runWith(RunInput{Kind: delivery.RunKindDev, Tag: "v3"})
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
@@ -1821,7 +1860,7 @@ func TestCancel_RecordedOnTheRunRowStopsTheRedispatch(t *testing.T) {
 		CycleFacts{CycleID: testCycleID, CancelRequested: true},
 	)
 
-	h.run(delivery.RunOriginSpecBuild, 0)
+	h.run(delivery.RunKindDev, 0)
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateCancelled, "")
@@ -1837,7 +1876,7 @@ func TestCancel_RecordedBeforeTheFirstDispatchNeverDispatches(t *testing.T) {
 	h.milestoneIs(MilestoneSnapshot{Work: 1, Total: 1})
 	h.factsAre(CycleFacts{CancelRequested: true})
 
-	h.run(delivery.RunOriginSpecBuild, 0)
+	h.run(delivery.RunKindDev, 0)
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateCancelled, "")
@@ -1853,7 +1892,7 @@ func TestAgentDeath_WithNoCancelRecordedStillSpendsTheRedispatch(t *testing.T) {
 	h.milestoneIs(MilestoneSnapshot{Work: 1, Total: 1})
 	h.factsAre(CycleFacts{CycleID: testCycleID}) // never lands, never cancelled
 
-	h.run(delivery.RunOriginSpecBuild, 0)
+	h.run(delivery.RunKindDev, 0)
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonRedispatchBudget)

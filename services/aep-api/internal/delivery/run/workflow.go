@@ -76,8 +76,17 @@ type RunInput struct {
 	ProjectID       string `json:"projectId"`
 	MilestoneNumber int    `json:"milestoneNumber"`
 	MilestoneTitle  string `json:"milestoneTitle"`
-	Origin          string `json:"origin"`
-	CycleCeiling    int    `json:"cycleCeiling,omitempty"`
+	// Kind is what this run does (dev | task | validation) — every branch the
+	// loop takes on the run's species reads it.
+	//
+	// Read through loop.kind() and never directly, because an execution started
+	// before this field existed replays with the empty string: the same
+	// replay-safety rule as ValidationAttempts below, and the one with the
+	// sharpest failure — an in-flight dev run reading "not dev" would skip its
+	// validation phase and settle succeeded without asking the version's criteria.
+	Kind         string `json:"kind,omitempty"`
+	Origin       string `json:"origin"`
+	CycleCeiling int    `json:"cycleCeiling,omitempty"`
 	// ValidationAttempts pins how many times this run may validate. Zero means the
 	// platform default, and it MUST: a workflow input lives in Temporal history,
 	// so an execution started before this field existed replays with the zero
@@ -201,6 +210,7 @@ func newLoop(ctx workflow.Context, in RunInput) *loop {
 		st: delivery.RunStatus{
 			RunID:           in.RunID,
 			MilestoneNumber: in.MilestoneNumber,
+			Kind:            runKind(in),
 			Origin:          in.Origin,
 			State:           delivery.RunStateWaiting,
 			Phase:           delivery.RunPhaseWaiting,
@@ -396,18 +406,18 @@ func (l *loop) onEmptyWorkingSet(ctx workflow.Context) (settled bool, res RunRes
 		res, err = l.settle(ctx, delivery.RunStateSucceeded, "")
 		return true, res, err
 	}
-	if l.st.CyclesTotal == 0 && l.in.Origin != delivery.RunOriginRevalidate {
+	if l.st.CyclesTotal == 0 && l.kind() != delivery.RunKindValidation {
 		// Zero cycles behind an empty working set, on a run that did NOT plan this
-		// milestone: the emptiness is not evidence. An incident adoption fires on a
-		// label write and GitHub's issue index lags a write, so the very first poll
-		// can legitimately precede the issue it was started for. PARK and let the
+		// milestone: the emptiness is not evidence. A task run fires on a label
+		// write and GitHub's issue index lags a write, so the very first poll can
+		// legitimately precede the issue it was started for. PARK and let the
 		// `issues` webhook wake it — signal channels buffer, so the wake cannot be
 		// missed. Settling here would close the milestone over work nothing had
 		// dispatched.
 		//
-		// A revalidation is the exception and always was: an empty working set is
-		// its expected STARTING state, and going straight to validation is the whole
-		// reason it exists.
+		// A validation run is the exception and always was: it has no working set
+		// at all, an empty milestone is its expected STARTING state, and going
+		// straight to validation is the whole reason it exists.
 		cancelled, perr := l.park(ctx)
 		if perr != nil {
 			return true, l.result(), perr
@@ -439,9 +449,9 @@ func (l *loop) onEmptyWorkingSet(ctx workflow.Context) (settled bool, res RunRes
 		return true, res, err
 	}
 
-	// Which origins validate is delivery's to say (RunValidates): the spec build
-	// that delivers a version, and the revalidation that exists to ask its criteria
-	// again. An incident run fixes one thing in an already-validated version, and
+	// Which kinds validate is delivery's to say (RunValidates): the dev run that
+	// delivers a version, and the validation run that exists to ask its criteria
+	// again. A task run fixes one thing in an already-validated version, and
 	// re-validating the whole system for it would price every incident like a
 	// release.
 	//
@@ -449,7 +459,7 @@ func (l *loop) onEmptyWorkingSet(ctx workflow.Context) (settled bool, res RunRes
 	// after every repair cycle, and validation runs again while the run has attempts
 	// left. Spending them is not settled here — runValidation settles on the verdict
 	// it is already holding, so the reason names the failure rather than the budget.
-	if !delivery.RunValidates(l.in.Origin) {
+	if !delivery.RunValidates(l.kind()) {
 		res, err = l.settle(ctx, delivery.RunStateSucceeded, "")
 		return true, res, err
 	}
@@ -674,13 +684,31 @@ func (l *loop) settle(ctx workflow.Context, state, reason string) (RunResult, er
 // and therefore whether it fills the milestone itself and may read an empty
 // working set as "delivered".
 //
-// Recognised by carrying a Tag, which only the build click supplies. Every other
-// origin adopts a milestone somebody else filled: an incident adoption works one
-// issue in a shipped version, a revalidation exists precisely because the working
-// set is empty. Neither planned anything, so for neither is an empty working set
-// evidence of anything at all.
+// Two INDEPENDENT clauses, and both are needed. Only a dev run plans at all. And
+// only the build CLICK supplies a Tag: a run the reconcile sweep or an adoption
+// re-offers carries none, which is what stops a re-offer from re-planning a
+// version somebody already filled. The tag rides the REQUEST, not the row, for
+// exactly that reason — the row cannot tell "start me" from "fill me".
+//
+// Every other kind adopts a milestone somebody else filled: a task run works one
+// issue in a shipped version, a validation run exists precisely because the
+// working set is empty. Neither planned anything, so for neither is an empty
+// working set evidence of anything at all.
 func (l *loop) plansItsOwnMilestone() bool {
-	return l.in.Tag != "" && l.in.Origin != delivery.RunOriginRevalidate
+	return l.kind() == delivery.RunKindDev && l.in.Tag != ""
+}
+
+// kind is the run's species, replay-safe. See RunInput.Kind.
+func (l *loop) kind() string { return runKind(l.in) }
+
+// runKind resolves a RunInput's kind, falling back to the origin it was started
+// with when the input predates the field. Deterministic — a pure function of the
+// input — so it is safe on the workflow's replay path.
+func runKind(in RunInput) string {
+	if in.Kind != "" {
+		return in.Kind
+	}
+	return delivery.RunKindForOrigin(in.Origin)
 }
 
 func (l *loop) result() RunResult {

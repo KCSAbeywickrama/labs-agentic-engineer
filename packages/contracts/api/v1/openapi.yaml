@@ -4016,6 +4016,18 @@ components:
           x-go-type: '*time.Time'
         id:
           type: string
+        kind:
+          description: What this run DOES, and the value every platform predicate is written on.
+            `dev` delivers a version — it plans its own milestone, and is the only kind that takes
+            the one-active-build-per-project mutex. `task` works a defect inside a version already
+            delivered; task runs execute concurrently on their own milestones. `validation` asks a
+            shipped version's acceptance criteria again — it has no working set, builds nothing, and
+            is outside the mutex so it never holds up the next build.
+          enum:
+          - dev
+          - task
+          - validation
+          type: string
         milestoneNumber:
           format: int64
           type: integer
@@ -4024,10 +4036,8 @@ components:
             key, and the version this run builds is the list's tag.
           type: string
         origin:
-          description: Why this run was started. `revalidate` asks a version's criteria again against
-            the already-deployed system; it enters the loop at validation rather than at the working
-            set, and is deliberately outside the one-active-spec-run mutex so it never holds up the
-            next build.
+          description: Where this run was started from. A label on the trigger — the behaviour is
+            the run's kind.
           enum:
           - spec-build
           - incident-adoption
@@ -4062,6 +4072,7 @@ components:
           $ref: '#/components/schemas/RunValidation'
       required:
       - id
+      - kind
       - milestoneNumber
       - milestoneTitle
       - origin

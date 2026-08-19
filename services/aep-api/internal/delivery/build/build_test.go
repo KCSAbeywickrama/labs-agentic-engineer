@@ -132,7 +132,7 @@ func (p *planSpy) CreateIssue(_ context.Context, _, _ string, req sourcecontrol.
 	return &sourcecontrol.IssueResult{Number: 1}, nil
 }
 
-func (p *planSpy) ActiveSpecRunByProject(context.Context, string, string) (*delivery.MilestoneRun, error) {
+func (p *planSpy) ActiveDevRunByProject(context.Context, string, string) (*delivery.MilestoneRun, error) {
 	return p.activeRun, nil
 }
 func (p *planSpy) TryAdmit(_ context.Context, run *delivery.MilestoneRun) (bool, *delivery.MilestoneRun, error) {
@@ -299,7 +299,7 @@ func TestBuild_UnchangedSpec_ReturnsExistingTagAndStillStartsTheRun(t *testing.T
 	spy.awaitStart(t)
 }
 
-// The spec-run mutex: a second click while a spec run is live is a 409, and it
+// The build mutex: a second click while a dev run is live is a 409, and it
 // never reaches the tagger — a rejected build claims no version.
 func TestBuild_SpecRunAlreadyLive_409_TaggerUntouched(t *testing.T) {
 	spy := newPlanSpy()
@@ -434,11 +434,11 @@ func TestListBuilds_NewestFirstOneEntryPerVersion(t *testing.T) {
 	ended := t0.Add(90 * time.Minute)
 	spy := newPlanSpy()
 	spy.rows = []delivery.MilestoneRun{
-		{MilestoneNumber: 12, MilestoneTitle: "v2", Origin: delivery.RunOriginSpecBuild,
+		{MilestoneNumber: 12, MilestoneTitle: "v2", Kind: delivery.RunKindDev, Origin: delivery.RunOriginSpecBuild,
 			State: delivery.RunStateRunning, CreatedAt: t0.Add(2 * time.Hour)},
-		{MilestoneNumber: 11, MilestoneTitle: "v1", Origin: delivery.RunOriginIncidentAdoption,
+		{MilestoneNumber: 11, MilestoneTitle: "v1", Kind: delivery.RunKindTask, Origin: delivery.RunOriginIncidentAdoption,
 			State: delivery.RunStateSucceeded, CreatedAt: t0.Add(time.Hour), EndedAt: &ended},
-		{MilestoneNumber: 11, MilestoneTitle: "v1", Origin: delivery.RunOriginSpecBuild,
+		{MilestoneNumber: 11, MilestoneTitle: "v1", Kind: delivery.RunKindDev, Origin: delivery.RunOriginSpecBuild,
 			State: delivery.RunStateFailed, TerminalReason: delivery.RunReasonCycleCeiling, CreatedAt: t0},
 	}
 	svc := withPlanPath(newSvc(fakeRepos{}, &fakeTagger{}), spy)
@@ -475,7 +475,7 @@ func TestListBuilds_NewestFirstOneEntryPerVersion(t *testing.T) {
 func TestListBuilds_FailedVersionCarriesItsTerminalReason(t *testing.T) {
 	spy := newPlanSpy()
 	spy.rows = []delivery.MilestoneRun{{
-		MilestoneNumber: 3, MilestoneTitle: "v1", Origin: delivery.RunOriginSpecBuild,
+		MilestoneNumber: 3, MilestoneTitle: "v1", Kind: delivery.RunKindDev, Origin: delivery.RunOriginSpecBuild,
 		State: delivery.RunStateFailed, TerminalReason: delivery.RunReasonNoProgress,
 	}}
 	svc := withPlanPath(newSvc(fakeRepos{}, &fakeTagger{}), spy)

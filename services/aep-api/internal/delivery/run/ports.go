@@ -43,7 +43,7 @@ import (
 // — the milestone's issues, the cycle's merge — and it goes through an activity
 // like all of them, so history records the answer and a replay reproduces it.
 type RunStore interface {
-	// TryAdmit inserts the run row unless the spec-run mutex refuses it. Used
+	// TryAdmit inserts the run row unless the build mutex refuses it. Used
 	// only by the adoption/sweep start path, which must admit and supervise
 	// together; the plan path admits its own row before planning.
 	TryAdmit(ctx context.Context, row *delivery.MilestoneRun) (admitted bool, out *delivery.MilestoneRun, err error)

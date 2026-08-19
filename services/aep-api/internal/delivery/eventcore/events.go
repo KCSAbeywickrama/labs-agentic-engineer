@@ -301,9 +301,11 @@ type prOwner struct {
 //
 // The branch is the first key: the agent works `aep/m<milestone#>-c<k>`, so
 // the milestone travels in every payload for free. A branch that names no
-// milestone falls back to the project's live SPEC run — that is what makes the
+// milestone falls back to the project's live DEV run — that is what makes the
 // merge path generic over a human's pull request, which lands in the same
-// increment even though it followed none of the agent's conventions.
+// increment even though it followed none of the agent's conventions. The dev run
+// is the only honest fallback: it is the one working the version the project is
+// currently on, while a task or validation run works some older milestone.
 func (e *Events) resolvePRRun(ctx context.Context, repoFullName, headRef string) (prOwner, error) {
 	if e.p.Repos == nil || e.p.Runs == nil {
 		return prOwner{}, nil
@@ -327,7 +329,7 @@ func (e *Events) resolvePRRun(ctx context.Context, repoFullName, headRef string)
 		return owner, rerr
 	}
 	for i := range live {
-		if live[i].Origin == delivery.RunOriginSpecBuild {
+		if live[i].Kind == delivery.RunKindDev {
 			owner.run = &live[i]
 			return owner, nil
 		}

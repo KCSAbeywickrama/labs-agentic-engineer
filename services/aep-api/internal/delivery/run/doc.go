@@ -17,9 +17,9 @@
 // Package run is the MILESTONE RUN SUPERVISOR: one Temporal workflow that
 // works the open issues in one milestone until the milestone settles.
 //
-// There is exactly ONE run species. A spec build, an incident adoption and a
-// revalidation are the same loop over the same milestone model, differing only
-// in origin — in whether the run validates, and in where it ENTERS the loop.
+// There is exactly ONE run species. A dev run, a task run and a validation run
+// are the same loop over the same milestone model, differing only in KIND — in
+// whether the run validates, and in where it ENTERS the loop.
 // The workflow is therefore keyed by the milestone
 // (`run-<org>-<project>-<milestoneNumber>`) and its id is REUSED after a
 // terminal run, because a milestone sees sequential runs across its life.
@@ -31,12 +31,12 @@
 //	 │  all green, open issues remain ─────────────► next cycle (re-WAIT)    │
 //	 │  red after the one automatic re-trigger ─► FIX issue ─► next cycle    │
 //	 │  merge conflict ─────────────────────────► CONFLICT issue ─► next     │
-//	 │  deployed-green + empty working set + validating origin ─► VALIDATION │
+//	 │  deployed-green + empty working set + validating kind ───► VALIDATION │
 //	 └─ settle: empty working set (armed, kind ∈ dev/bug/conflict) + verdict
 //	            └─► close the milestone · run row → succeeded
 //	    budgets exhausted / no progress / cancel ─► failed | cancelled
 //
-// A REVALIDATION enters that diagram at the validation cycle rather than at the
+// A VALIDATION RUN enters that diagram at the validation cycle rather than at the
 // wait: its milestone is a version that already shipped, so the first poll finds
 // an empty working set. Everything after the verdict is the loop as drawn, and
 // which of the two shapes it takes is one number — the run's validation-attempt

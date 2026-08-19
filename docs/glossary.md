@@ -305,7 +305,10 @@ resolves number-through-run-rows and never matches a title.
 
 ### Milestone run
 One supervised pass over one milestone — the platform's single dispatch door.
-Origin is `spec-build` or `incident-adoption`; state is
+Kind is `dev` (delivers a version), `task` (a defect inside a delivered version)
+or `validation` (re-judges a shipped one) — every platform predicate is written on
+it, and only `dev` takes the one-build-per-project mutex. Origin (`spec-build`,
+`incident-adoption`, `revalidate`) records where the run came from. State is
 `planning | waiting | running | succeeded | failed | cancelled | blocked`.
 `planning` is the fill window — the row is admitted (arming the mutex) before its
 milestone is written, so it names work the platform is doing; `waiting` is the

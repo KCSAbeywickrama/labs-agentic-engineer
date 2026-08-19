@@ -636,7 +636,7 @@ func TestAdoption_BareIssueJoinsTheDeployedVersionAndStartsAnIncidentRun(t *test
 	if len(h.issues.assigned) != 1 || h.issues.assigned[0] != "31->5" {
 		t.Fatalf("a bare adopted issue must join the deployed version's milestone, got %v", h.issues.assigned)
 	}
-	if len(h.sup.started) != 1 || h.sup.started[0].Origin != delivery.RunOriginIncidentAdoption ||
+	if len(h.sup.started) != 1 || h.sup.started[0].Kind != delivery.RunKindTask ||
 		h.sup.started[0].MilestoneNumber != 5 {
 		t.Fatalf("an incident run must start over the deployed milestone, got %+v", h.sup.started)
 	}
@@ -684,7 +684,7 @@ func TestAdoption_NeverDeployedProjectRefusesClearly(t *testing.T) {
 // TestRevalidate_StartsARunOverTheVersionsMilestone is the happy path, and the
 // assertion that matters is the ORIGIN: it is what carries the run past the
 // boundary's park guard and into validation, and what keeps it out of the
-// spec-run mutex so a re-check never holds up the next build.
+// build mutex so a re-check never holds up the next build.
 func TestRevalidate_StartsARunOverTheVersionsMilestone(t *testing.T) {
 	h := newHarness(t, aRun("run-old", 5, delivery.RunStateSucceeded))
 
@@ -697,7 +697,7 @@ func TestRevalidate_StartsARunOverTheVersionsMilestone(t *testing.T) {
 		t.Fatalf("exactly one run must start, got %+v", h.sup.started)
 	}
 	got := h.sup.started[0]
-	if got.Origin != delivery.RunOriginRevalidate || got.MilestoneNumber != 5 {
+	if got.Kind != delivery.RunKindValidation || got.MilestoneNumber != 5 {
 		t.Fatalf("a revalidate run must start over the version's own milestone, got %+v", got)
 	}
 	if got.ValidationAttempts != 1 || got.CycleCeiling != 4 {

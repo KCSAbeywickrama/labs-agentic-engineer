@@ -112,7 +112,7 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
 | `RunSignaler` · `RunStarter` | needs | `eventcore` and `build` → the run supervisor. Signal a run, start one. Interfaces, which is what keeps both the event plane and the build click free of a workflow engine; both are declared over the root `StartRunRequest`, and `*run.Supervisor` satisfies both |
 | `RunStore` · `CycleStore` · `MilestoneReader` · `PRReader` · `DesignReader` · `BuildReader` · `ValidationCoordinator` | needs | `run` → the root repositories, `sourcecontrol`, the design reader, `clients/openchoreo` and `delivery/validation`. Every I/O the loop performs, named once; `BuildReader` is read-ONLY because the supervisor never triggers a build |
 | `MilestoneClient` (mint a milestone · list a milestone's issues · close milestone) | needs | `build` → `sourcecontrol`. The plan path's MILESTONE surface: create `v<N>` idempotently, and read `v<N-1>`'s leftovers. Closing those leftovers is an issue write, so it goes through the root `IssueWriter` instead |
-| `MilestoneRunStore` (active-run read · admit · settle · list) | needs | `build` → the root run repository. The 409 pre-check and the admission that arms the spec-run mutex |
+| `MilestoneRunStore` (active-run read · admit · settle · list) | needs | `build` → the root run repository. The 409 pre-check and the admission that arms the build mutex |
 | `SpecPlanner` (`PlanIntoMilestone`) | needs | `build` → `task`. The planning turn, reached through the root exactly as `TaskReader` is, so `build` names no sibling |
 | `GateResolver` (author dependencies + mint gates into a milestone) | needs | `build` → `dependencies/provisioning`. Gates are dispatch holds, never agent work |
 | `BuildTrigger` (stage the org clone credential · trigger at commit · list a component's runs) | needs | `clients/openchoreo` — the fan-out, and the run list the re-trigger budget is derived from. Staging is its own verb because the credential is per-ORG while a trigger is per-component: a caller building N components stages once and reuses the reference |
@@ -134,7 +134,7 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   assignment that rides each create, the dedupe-key vocabulary and the mint logging, decided once for
   four sub-packages. A key is frozen against its literal by `TestIssueDedupeKeysAreFrozen`, because a
   changed key does not fail — it silently re-files issues instead of deduping onto the open one.
-- The **milestone run** store: a run row per (org, project, milestone) — origin, small state, terminal
+- The **milestone run** store: a run row per (org, project, milestone) — kind, origin, small state, terminal
   reason, budget counters, validation verdict — and one **cycle record per dispatch** under it (kind,
   attempts, Job ref, branch, the pull request's number AND its page on the host, merge SHA). The pull
   request URL is stored as the webhook reported it, never composed from the repo row and the number:
@@ -175,13 +175,22 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   import each other, in either direction. Dispatch has exactly ONE door — a run works a milestone — so a
   `task` that could reach the supervisor would be a second door with the run's budgets bypassed.
   `TestTaskRunSplit` + `slice ⊥ sibling` both enforce it.
-- **One active spec run per project.** At most one non-terminal (`planning`/`waiting`/`running`) `spec-build`
-  milestone run exists per (org, project) — a partial unique index (`ux_milestone_runs_spec_active_v2`, created
-  by the `milestone_runs` migration; AutoMigrate cannot express one) that admission hits with
+- **A run's KIND is what the platform decides on.** Three kinds — `dev` (delivers a version: plans its own
+  milestone, works it, judges it), `task` (works a defect inside a version already delivered) and
+  `validation` (re-judges a shipped version; no working set, builds nothing). Every predicate is written on
+  the kind: which run takes the build mutex, which one is the project's version, which fills its own
+  milestone, which reads an empty working set as evidence, and which validates. `origin` (`spec-build` /
+  `incident-adoption` / `revalidate`) records where a run came from and nothing branches on it.
+- **One active dev run per project.** At most one non-terminal (`planning`/`waiting`/`running`) `dev`
+  milestone run exists per (org, project) — a partial unique index (`ux_milestone_runs_dev_active_v3`, created
+  by the `milestone_run_kind` migration; AutoMigrate cannot express one) that admission hits with
   `INSERT … ON CONFLICT DO NOTHING`, so the invariant holds under concurrency and not merely under the
-  endpoint's pre-check. Both answers are the same 409. `incident-adoption` runs sit deliberately outside
-  the index and execute concurrently on their own milestones.
-- **The version is claimed before it is planned, and the RUN does the planning.** The run row IS the spec
+  endpoint's pre-check. Both answers are the same 409. `task` and `validation` runs sit deliberately outside
+  the index and execute concurrently on their own milestones; what bounds them is the other partial index,
+  `ux_milestone_runs_active_per_milestone_v1` — one live run per milestone, of any kind. A kind is a literal
+  inside a partial predicate, so admission validates it (`IsRunKind`): a typo'd kind would not fail the
+  insert, it would silently escape the mutex.
+- **The version is claimed before it is planned, and the RUN does the planning.** The run row IS the build
   mutex, so the build click admits it synchronously — supersede, mint the milestone, admit — before
   anything slow happens. Admitting after planning would leave the mutex unarmed for the minutes an LLM
   turn takes, which is exactly the window a double-click lands in.
@@ -407,8 +416,8 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   the body embeds the criteria as they stood at mint time, so adopting an older version's issue would
   hand this version's agent the wrong oracle, and re-filing it would erase it from the ledger of the
   version it actually validated. The version's own open issue is looked up by milestone, and only there.
-- **A version can be judged more than once, and the NEWEST run owns its verdict.** `revalidate` is the
-  third run origin (`POST .../builds/{tag}/revalidate`): a fresh run over an already-shipped version's
+- **A version can be judged more than once, and the NEWEST run owns its verdict.** A `validation` run
+  (`POST .../builds/{tag}/revalidate`) is a fresh run over an already-shipped version's
   milestone that ENTERS THE LOOP AT VALIDATION, because its working set is already empty. Nothing is
   rebuilt to ask the question. What follows the verdict is the loop's ordinary behaviour, selected by ONE
   number — the run's validation-attempt allowance: at 1 the allowance is spent by the first fatal verdict,
@@ -416,14 +425,14 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   at the default the full chain runs (issue per failed criterion → coding cycle → builds → validate
   again). There is deliberately no separate "should it repair" flag — that ordering is the switch.
   Three guards refuse it up front, each beside the collaborator that can answer it: a live run on the
-  milestone (409 — unlike adoption there is nothing to hand off to it, and the revalidate origin sits
-  outside the spec-run mutex so nothing in the database would refuse a second row), open work in the
+  milestone (409 — unlike adoption there is nothing to hand off to it, and a validation run sits
+  outside the build mutex so nothing in the database would refuse a second row), open work in the
   working set (409 — the loop would build it, not re-check it), and no acceptance oracle (422 — a run
   with nothing to validate concludes `skipped`, which would overwrite a real verdict).
-- **The overview's build stage reads the newest SPEC BUILD; its validation chip reads the newest run on
-  THAT milestone.** Only a spec build advances the project's version, and the other two origins work an
-  existing milestone that may be any version's — so picking the newest row outright let a revalidation
-  (or an incident adoption) on an older version walk the reported version backwards. Both are in-memory
+- **The overview's build stage reads the newest DEV RUN; its validation chip reads the newest run on
+  THAT milestone.** Only a dev run advances the project's version, and the other two kinds work an
+  existing milestone that may be any version's — so picking the newest row outright let a validation run
+  (or a task run) on an older version walk the reported version backwards. Both are in-memory
   scans of the run list the status poll already holds, so neither costs a query.
 - **The list read returns three populations, and hides one** (`task/reads.go` `ListByTag`, the read-model
   boundary). Every row carries the label-derived `executorClass` the console sections on: `coding` (agent

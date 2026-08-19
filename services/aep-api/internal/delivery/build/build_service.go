@@ -51,7 +51,7 @@ type EdgeError struct {
 
 func (e *EdgeError) Error() string { return e.Message }
 
-// ErrBuildAlreadyRunning is the "a spec run is already live for this project"
+// ErrBuildAlreadyRunning is the "a dev run is already live for this project"
 // sentinel the core build sequence returns. The HTTP edge maps it to a 409; the
 // non-HTTP StartProjectBuild entry point treats it as success (idempotent
 // trigger).
@@ -206,11 +206,11 @@ func (s *Service) StartProjectBuild(ctx context.Context, orgID, projectID string
 // inputs are applied but before the tag is cut — see the inline comment at
 // its call site for why that ordering matters.
 func (s *Service) Run(ctx context.Context, orgID, projectID string, inputs []BuildInputItem) (string, []InputFailure, error) {
-	// One live SPEC RUN per project — the milestone model's mutex (§5). The
+	// One live DEV RUN per project — the milestone model's mutex (§5). The
 	// partial unique index behind TryAdmit is the authority; this read is what
 	// turns the race into a conflict that names itself, and it runs BEFORE the
 	// tag is cut so a rejected second click claims no version.
-	if err := s.activeSpecRun(ctx, orgID, projectID); err != nil {
+	if err := s.activeDevRun(ctx, orgID, projectID); err != nil {
 		return "", nil, err
 	}
 	// The repo must exist and be resolvable before a version is claimed — every
@@ -267,7 +267,7 @@ func (s *Service) Run(ctx context.Context, orgID, projectID string, inputs []Bui
 
 	// The milestone plan path (§5). Its synchronous half claims the version —
 	// supersede the previous milestone, mint `v<N>`, admit the run row that IS
-	// the spec-run mutex — and its detached half plans the Tasks into it.
+	// the build mutex — and its detached half plans the Tasks into it.
 	if s.plan != nil {
 		// The tag's story scope (#369) decides the milestone's identity: one
 		// milestone per version. A scope read

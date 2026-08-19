@@ -27,11 +27,11 @@ import (
 	"github.com/wso2/aep/aep-api/internal/platform/modelcost"
 )
 
-// admitRun inserts a spec-build run and returns it, failing the test if the
+// admitRun inserts a dev run and returns it, failing the test if the
 // mutex rejects it.
 func admitRun(t *testing.T, repo delivery.MilestoneRunRepository, org, project string, n int, title string) *delivery.MilestoneRun {
 	t.Helper()
-	ok, row, err := repo.TryAdmit(context.Background(), specRun(org, project, n, title))
+	ok, row, err := repo.TryAdmit(context.Background(), devRun(org, project, n, title))
 	if err != nil || !ok || row == nil {
 		t.Fatalf("TryAdmit(%s/%s) = (%v, %v)", org, project, ok, err)
 	}

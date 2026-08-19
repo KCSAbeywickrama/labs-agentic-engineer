@@ -98,6 +98,7 @@ func executePoll(env *testsuite.TestWorkflowEnvironment) {
 		ProjectID:       testProject,
 		MilestoneNumber: testMilepost,
 		MilestoneTitle:  "v3",
+		Kind:            delivery.RunKindDev,
 		Origin:          delivery.RunOriginSpecBuild,
 		// A spec build always carries the tag it claimed — it is what tells the loop
 		// this run OWNS the version and therefore plans its own milestone. Omitting
@@ -221,6 +222,7 @@ func executePlan(env *testsuite.TestWorkflowEnvironment) {
 		ProjectID:       testProject,
 		MilestoneNumber: testMilepost,
 		MilestoneTitle:  "v3",
+		Kind:            delivery.RunKindDev,
 		Origin:          delivery.RunOriginSpecBuild,
 		Tag:             "v3",
 	})

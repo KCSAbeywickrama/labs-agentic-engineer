@@ -49,7 +49,11 @@ func MilestoneRunWorkflowID(orgID, projectID string, milestoneNumber int) string
 type RunStatus struct {
 	RunID           string `json:"runId"`
 	MilestoneNumber int    `json:"milestoneNumber"`
-	Origin          string `json:"origin"`
+	// Kind is what the run does (dev | task | validation) — the thing every
+	// branch below was taken on. Origin is where it came from, carried so a live
+	// status reads the same as the row.
+	Kind   string `json:"kind"`
+	Origin string `json:"origin"`
 
 	// State is one of the RunState* values; TerminalReason is a RunReason* and
 	// is empty until the run settles into a non-success terminal state.

@@ -109,10 +109,10 @@ type MilestoneClient interface {
 // behind the endpoint's 409, and the admission that arms the DB-level mutex.
 // delivery.MilestoneRunRepository satisfies it.
 type MilestoneRunStore interface {
-	// ActiveSpecRunByProject returns the project's live spec-build run, or
-	// (nil, nil) when it is free. This is the read behind a clean 409; the
-	// partial unique index TryAdmit hits is the authority under concurrency.
-	ActiveSpecRunByProject(ctx context.Context, orgID, projectID string) (*delivery.MilestoneRun, error)
+	// ActiveDevRunByProject returns the project's live dev run, or (nil, nil)
+	// when it is free. This is the read behind a clean 409; the partial unique
+	// index TryAdmit hits is the authority under concurrency.
+	ActiveDevRunByProject(ctx context.Context, orgID, projectID string) (*delivery.MilestoneRun, error)
 	// TryAdmit inserts the run unless the mutex says another one is live.
 	TryAdmit(ctx context.Context, run *delivery.MilestoneRun) (admitted bool, row *delivery.MilestoneRun, err error)
 	// Settle ends a run — the plan path's own error handler, so a planning turn

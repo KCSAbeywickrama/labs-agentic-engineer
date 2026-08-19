@@ -89,7 +89,7 @@ func TestStartRunRefusesWithoutADispatcher(t *testing.T) {
 	s := NewSupervisor(delivery.NewRuntime(configWithNoTemporal()), runs, nil)
 	err := s.StartRun(context.Background(), delivery.StartRunRequest{
 		OrgID: testOrg, ProjectID: testProject, MilestoneNumber: testMilepost,
-		Origin: delivery.RunOriginIncidentAdoption,
+		Kind: delivery.RunKindTask, Origin: delivery.RunOriginIncidentAdoption,
 	})
 	if !errors.Is(err, delivery.ErrRunNotStarted) {
 		t.Fatalf("StartRun = %v, want ErrRunNotStarted", err)
@@ -107,7 +107,7 @@ func TestStartRunWaitsForTemporal(t *testing.T) {
 	s := NewSupervisor(delivery.NewRuntime(configWithNoTemporal()), runs, fakeDispatcher{})
 	err := s.StartRun(context.Background(), delivery.StartRunRequest{
 		OrgID: testOrg, ProjectID: testProject, MilestoneNumber: testMilepost,
-		Origin: delivery.RunOriginIncidentAdoption,
+		Kind: delivery.RunKindTask, Origin: delivery.RunOriginIncidentAdoption,
 	})
 	if !errors.Is(err, delivery.ErrRunNotStarted) {
 		t.Fatalf("StartRun = %v, want ErrRunNotStarted", err)
@@ -169,7 +169,7 @@ func TestAdmitInheritsTheMilestonesVersion(t *testing.T) {
 	s := NewSupervisor(delivery.NewRuntime(configWithNoTemporal()), runs, fakeDispatcher{})
 	row, err := s.admit(context.Background(), delivery.StartRunRequest{
 		OrgID: testOrg, ProjectID: testProject, MilestoneNumber: testMilepost,
-		MilestoneTitle: "Phase 1", Origin: delivery.RunOriginIncidentAdoption,
+		MilestoneTitle: "Phase 1", Kind: delivery.RunKindTask, Origin: delivery.RunOriginIncidentAdoption,
 	})
 	if err != nil {
 		t.Fatalf("admit: %v", err)
@@ -186,7 +186,7 @@ func TestAdmitSurvivesAVersionReadFailure(t *testing.T) {
 	s := NewSupervisor(delivery.NewRuntime(configWithNoTemporal()), runs, fakeDispatcher{})
 	row, err := s.admit(context.Background(), delivery.StartRunRequest{
 		OrgID: testOrg, ProjectID: testProject, MilestoneNumber: testMilepost,
-		MilestoneTitle: "Phase 1", Origin: delivery.RunOriginIncidentAdoption,
+		MilestoneTitle: "Phase 1", Kind: delivery.RunKindTask, Origin: delivery.RunOriginIncidentAdoption,
 	})
 	if err != nil || row == nil {
 		t.Fatalf("admit = (%+v, %v), want the run admitted anyway", row, err)

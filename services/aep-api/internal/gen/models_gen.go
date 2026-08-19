@@ -103,6 +103,27 @@ func (e DeployStageValidation) Valid() bool {
 	}
 }
 
+// Defines values for MilestoneRunViewKind.
+const (
+	MilestoneRunViewKindDev        MilestoneRunViewKind = "dev"
+	MilestoneRunViewKindTask       MilestoneRunViewKind = "task"
+	MilestoneRunViewKindValidation MilestoneRunViewKind = "validation"
+)
+
+// Valid indicates whether the value is a known member of the MilestoneRunViewKind enum.
+func (e MilestoneRunViewKind) Valid() bool {
+	switch e {
+	case MilestoneRunViewKindDev:
+		return true
+	case MilestoneRunViewKindTask:
+		return true
+	case MilestoneRunViewKindValidation:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for MilestoneRunViewOrigin.
 const (
 	IncidentAdoption MilestoneRunViewOrigin = "incident-adoption"
@@ -348,19 +369,19 @@ func (e RunValidationVerdict) Valid() bool {
 
 // Defines values for SkillUpdateState.
 const (
-	SkillUpdateStateConflict   SkillUpdateState = "conflict"
-	SkillUpdateStateOverridden SkillUpdateState = "overridden"
-	SkillUpdateStateUpdate     SkillUpdateState = "update"
+	Conflict   SkillUpdateState = "conflict"
+	Overridden SkillUpdateState = "overridden"
+	Update     SkillUpdateState = "update"
 )
 
 // Valid indicates whether the value is a known member of the SkillUpdateState enum.
 func (e SkillUpdateState) Valid() bool {
 	switch e {
-	case SkillUpdateStateConflict:
+	case Conflict:
 		return true
-	case SkillUpdateStateOverridden:
+	case Overridden:
 		return true
-	case SkillUpdateStateUpdate:
+	case Update:
 		return true
 	default:
 		return false
@@ -1033,15 +1054,18 @@ type MilestoneRunView struct {
 	CreatedAt time.Time  `json:"createdAt"`
 
 	// Cycles Oldest first — one record per dispatch.
-	Cycles          []RunCycleView `json:"cycles"`
-	EndedAt         *time.Time     `json:"endedAt,omitempty"`
-	ID              string         `json:"id"`
-	MilestoneNumber int64          `json:"milestoneNumber"`
+	Cycles  []RunCycleView `json:"cycles"`
+	EndedAt *time.Time     `json:"endedAt,omitempty"`
+	ID      string         `json:"id"`
+
+	// Kind What this run DOES, and the value every platform predicate is written on. `dev` delivers a version — it plans its own milestone, and is the only kind that takes the one-active-build-per-project mutex. `task` works a defect inside a version already delivered; task runs execute concurrently on their own milestones. `validation` asks a shipped version's acceptance criteria again — it has no working set, builds nothing, and is outside the mutex so it never holds up the next build.
+	Kind            MilestoneRunViewKind `json:"kind"`
+	MilestoneNumber int64                `json:"milestoneNumber"`
 
 	// MilestoneTitle The milestone's GitHub title at creation. Display only — the number is the key, and the version this run builds is the list's tag.
 	MilestoneTitle string `json:"milestoneTitle"`
 
-	// Origin Why this run was started. `revalidate` asks a version's criteria again against the already-deployed system; it enters the loop at validation rather than at the working set, and is deliberately outside the one-active-spec-run mutex so it never holds up the next build.
+	// Origin Where this run was started from. A label on the trigger — the behaviour is the run's kind.
 	Origin    MilestoneRunViewOrigin `json:"origin"`
 	StartedAt *time.Time             `json:"startedAt,omitempty"`
 
@@ -1055,7 +1079,10 @@ type MilestoneRunView struct {
 	Validation RunValidation `json:"validation"`
 }
 
-// MilestoneRunViewOrigin Why this run was started. `revalidate` asks a version's criteria again against the already-deployed system; it enters the loop at validation rather than at the working set, and is deliberately outside the one-active-spec-run mutex so it never holds up the next build.
+// MilestoneRunViewKind What this run DOES, and the value every platform predicate is written on. `dev` delivers a version — it plans its own milestone, and is the only kind that takes the one-active-build-per-project mutex. `task` works a defect inside a version already delivered; task runs execute concurrently on their own milestones. `validation` asks a shipped version's acceptance criteria again — it has no working set, builds nothing, and is outside the mutex so it never holds up the next build.
+type MilestoneRunViewKind string
+
+// MilestoneRunViewOrigin Where this run was started from. A label on the trigger — the behaviour is the run's kind.
 type MilestoneRunViewOrigin string
 
 // MilestoneRunViewState planning is the fill window — the version's milestone is still being written (gates minted, then issues planned in). waiting is the unbounded wait between cycles, where something outside the platform is needed. blocked is terminal and is NOT a failure — the org has no agent concurrency slot left, so the cycle was never launched (see terminalReason agent-quota-blocked).

@@ -135,7 +135,7 @@ type fakeRunStore struct {
 	nextID   int
 }
 
-func (f *fakeRunStore) ActiveSpecRunByProject(context.Context, string, string) (*delivery.MilestoneRun, error) {
+func (f *fakeRunStore) ActiveDevRunByProject(context.Context, string, string) (*delivery.MilestoneRun, error) {
 	return f.active, nil
 }
 
@@ -248,7 +248,7 @@ func TestClaimVersion_MintsTheMilestoneAndAdmitsTheRun(t *testing.T) {
 	// must not claim to be parked on a human while the platform is writing the
 	// milestone.
 	if run.Origin != delivery.RunOriginSpecBuild || run.State != delivery.RunStatePlanning {
-		t.Errorf("run = %+v, want a planning spec-build run", run)
+		t.Errorf("run = %+v, want a planning dev run", run)
 	}
 	if len(h.runs.admitted) != 1 {
 		t.Fatalf("admitted %d runs, want 1", len(h.runs.admitted))
@@ -340,8 +340,8 @@ func TestSupersede_ClosesOpenWorkThenGatesThenTheMilestone(t *testing.T) {
 	h.runs.rows = []delivery.MilestoneRun{
 		// Newest first, as the repository returns them. An incident run on an
 		// even older milestone must not be mistaken for the previous version.
-		{MilestoneNumber: 6, MilestoneTitle: "v2", Origin: delivery.RunOriginSpecBuild, State: delivery.RunStateFailed},
-		{MilestoneNumber: 2, MilestoneTitle: "v1", Origin: delivery.RunOriginIncidentAdoption, State: delivery.RunStateSucceeded},
+		{MilestoneNumber: 6, MilestoneTitle: "v2", Kind: delivery.RunKindDev, Origin: delivery.RunOriginSpecBuild, State: delivery.RunStateFailed},
+		{MilestoneNumber: 2, MilestoneTitle: "v1", Kind: delivery.RunKindTask, Origin: delivery.RunOriginIncidentAdoption, State: delivery.RunStateSucceeded},
 	}
 	h.stub.OnFunc(http.MethodGet, "/repos/acme/widgets/issues", jsonPage(`[
 		{"number":31,"title":"Implement orders","state":"open","labels":[{"name":"aep"}]},
@@ -403,15 +403,15 @@ func TestSupersede_ClosesOpenWorkThenGatesThenTheMilestone(t *testing.T) {
 // the recorded title, which is a platform-side value, not a GitHub read.
 func TestSupersede_NeverSupersedesTheVersionBeingCut(t *testing.T) {
 	rows := []delivery.MilestoneRun{
-		{MilestoneNumber: 9, MilestoneTitle: "v3", Origin: delivery.RunOriginSpecBuild, State: delivery.RunStateSucceeded},
+		{MilestoneNumber: 9, MilestoneTitle: "v3", Kind: delivery.RunKindDev, Origin: delivery.RunOriginSpecBuild, State: delivery.RunStateSucceeded},
 	}
-	if _, ok := previousSpecMilestone(rows, "v3"); ok {
+	if _, ok := previousDevMilestone(rows, "v3"); ok {
 		t.Fatal("a re-build of the same tag must supersede nothing")
 	}
 	rows = append([]delivery.MilestoneRun{
-		{MilestoneNumber: 12, MilestoneTitle: "v4", Origin: delivery.RunOriginSpecBuild, State: delivery.RunStateWaiting},
+		{MilestoneNumber: 12, MilestoneTitle: "v4", Kind: delivery.RunKindDev, Origin: delivery.RunOriginSpecBuild, State: delivery.RunStateWaiting},
 	}, rows...)
-	prev, ok := previousSpecMilestone(rows, "v5")
+	prev, ok := previousDevMilestone(rows, "v5")
 	if !ok || prev.MilestoneNumber != 12 {
 		t.Fatalf("previous = %+v (%v), want the newest spec milestone 12", prev, ok)
 	}
@@ -539,7 +539,7 @@ func TestClaimVersion_MilestoneIsTitledAfterTheVersion(t *testing.T) {
 	// v3 is its own version and supersedes v2's milestone.
 	h.runs.rows = []delivery.MilestoneRun{{
 		OrgID: "acme", ProjectID: "shop", MilestoneNumber: 2,
-		MilestoneTitle: "v2", Tag: "v2", Origin: delivery.RunOriginSpecBuild,
+		MilestoneTitle: "v2", Tag: "v2", Kind: delivery.RunKindDev, Origin: delivery.RunOriginSpecBuild,
 	}}
 
 	run, err := h.svc.claimVersion(context.Background(), "acme", "shop", spec.BuildScope{Tag: "v3"})

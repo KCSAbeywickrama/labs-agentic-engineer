@@ -39,7 +39,7 @@ func TestSweep_StartsARunForUnworkedOpenIssues(t *testing.T) {
 		t.Fatalf("sweep: %v", err)
 	}
 	if len(h.sup.started) != 1 || h.sup.started[0].MilestoneNumber != 7 ||
-		h.sup.started[0].Origin != delivery.RunOriginIncidentAdoption {
+		h.sup.started[0].Kind != delivery.RunKindTask {
 		t.Fatalf("the sweep must start a run over the unworked milestone, got %+v", h.sup.started)
 	}
 }

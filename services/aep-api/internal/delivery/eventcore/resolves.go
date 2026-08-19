@@ -70,8 +70,8 @@ var branchMilestoneRE = regexp.MustCompile(`^aep/m(\d+)(?:-|$)`)
 
 // milestoneFromBranch returns the milestone number an agent branch names, or
 // (0, false) for any other branch — a human's `feature/x` included, which is
-// why the pull-request handlers fall back to the project's live spec run
-// rather than treating an unparseable branch as "not ours".
+// why the pull-request handlers fall back to the project's live DEV run rather
+// than treating an unparseable branch as "not ours".
 func milestoneFromBranch(ref string) (int, bool) {
 	m := branchMilestoneRE.FindStringSubmatch(strings.TrimSpace(ref))
 	if m == nil {

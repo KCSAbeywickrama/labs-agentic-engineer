@@ -102,10 +102,10 @@ func (e *Events) AdoptIssue(ctx context.Context, orgID, projectID string, target
 	return e.startRun(ctx, orgID, projectID, milestone)
 }
 
-// startRun asks the supervisor for an incident run over a milestone. Every run
-// this package starts BY DETECTION is an incident adoption — the spec-build
-// origin belongs to the plan path alone, where the version mutex lives, and the
-// revalidate origin is only ever asked for by a human (Revalidate below).
+// startRun asks the supervisor for a TASK run over a milestone. Every run this
+// package starts BY DETECTION is one: a dev run belongs to the plan path alone,
+// where the version mutex lives, and a validation run is only ever asked for by
+// a human (Revalidate below).
 func (e *Events) startRun(ctx context.Context, orgID, projectID string, milestone MilestoneRef) error {
 	if e.p.Starter == nil {
 		slog.DebugContext(ctx, "eventcore: no run starter wired — nothing to start",
@@ -117,6 +117,7 @@ func (e *Events) startRun(ctx context.Context, orgID, projectID string, mileston
 		ProjectID:       projectID,
 		MilestoneNumber: milestone.Number,
 		MilestoneTitle:  milestone.Title,
+		Kind:            delivery.RunKindTask,
 		Origin:          delivery.RunOriginIncidentAdoption,
 	})
 	if errors.Is(err, delivery.ErrRunNotStarted) {
@@ -197,6 +198,7 @@ func (e *Events) Revalidate(ctx context.Context, orgID, projectID string, milest
 		ProjectID:          projectID,
 		MilestoneNumber:    milestone.Number,
 		MilestoneTitle:     milestone.Title,
+		Kind:               delivery.RunKindValidation,
 		Origin:             delivery.RunOriginRevalidate,
 		ValidationAttempts: attempts,
 		CycleCeiling:       ceiling,

@@ -39,14 +39,14 @@ type RunStore interface {
 	// handler returns without a single write.
 	LiveRunForMilestone(ctx context.Context, orgID, projectID string, milestoneNumber int) (*delivery.MilestoneRun, error)
 	// LiveRunsForProject returns every non-terminal run of the project, newest
-	// first — at most one spec build (the mutex) plus any concurrent incident
-	// adoptions. The event plane narrows them itself: by origin for a pull
+	// first — at most one dev run (the mutex) plus any concurrent task and
+	// validation runs. The event plane narrows them itself: by KIND for a pull
 	// request whose branch names no milestone, by cycle merge SHA for a build
 	// terminal. Keeping the narrowing here rather than in the adapter is what
 	// makes it testable without a database.
 	LiveRunsForProject(ctx context.Context, orgID, projectID string) ([]delivery.MilestoneRun, error)
-	// DeployedMilestoneRun returns the run of the project's most recently
-	// SUCCEEDED spec build — the deployed version, whose milestone is where
+	// DeployedMilestoneRun returns the project's most recently SUCCEEDED DEV
+	// run — the deployed version, whose milestone is where
 	// incidents and adopted bare issues belong. Nil when the project has never
 	// completed a version, which is what makes "no milestone for the deployed
 	// version — trigger a build" an honest error rather than a guess.
@@ -290,9 +290,9 @@ type ValidationOracle interface {
 
 // RunStarter starts a run over a milestone that has work and no live run: the
 // adoption path and the reconcile sweep's backstop. Everything this package
-// starts BY DETECTION carries delivery.RunOriginIncidentAdoption — the spec-build
-// origin belongs to the plan path alone, and the revalidate origin only ever
-// comes from a human asking (Revalidate).
+// starts BY DETECTION is a delivery.RunKindTask run — a dev run belongs to the
+// plan path alone, and a validation run only ever comes from a human asking
+// (Revalidate).
 //
 // Admission (the run row) and supervision (the workflow) must happen together
 // or a run row exists that nobody is driving, so both live behind this one

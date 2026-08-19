@@ -56,12 +56,12 @@ type fakeRuns struct {
 
 func newFakeRuns(rows ...delivery.MilestoneRun) *fakeRuns { return &fakeRuns{rows: rows} }
 
-// aRun builds a live spec run over a milestone.
+// aRun builds a live dev run over a milestone.
 func aRun(id string, milestone int, state string) delivery.MilestoneRun {
 	return delivery.MilestoneRun{
 		ID: id, OrgID: testOrg, ProjectID: testProject,
 		MilestoneNumber: milestone, MilestoneTitle: fmt.Sprintf("v%d", milestone),
-		Origin: delivery.RunOriginSpecBuild, State: state,
+		Kind: delivery.RunKindDev, Origin: delivery.RunOriginSpecBuild, State: state,
 		CycleCeiling: delivery.RunDefaultCycleCeiling,
 	}
 }
@@ -99,7 +99,7 @@ func (f *fakeRuns) DeployedMilestoneRun(context.Context, string, string) (*deliv
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	for i := range f.rows {
-		if f.rows[i].Origin == delivery.RunOriginSpecBuild && f.rows[i].State == delivery.RunStateSucceeded {
+		if f.rows[i].Kind == delivery.RunKindDev && f.rows[i].State == delivery.RunStateSucceeded {
 			return &f.rows[i], nil
 		}
 	}
@@ -641,7 +641,7 @@ func (f *fakeSupervisor) StartRun(_ context.Context, req delivery.StartRunReques
 	f.admits.rows = append(f.admits.rows, delivery.MilestoneRun{
 		ID: fmt.Sprintf("run-started-%d", len(f.admits.rows)+1), OrgID: testOrg, ProjectID: testProject,
 		MilestoneNumber: req.MilestoneNumber, MilestoneTitle: req.MilestoneTitle,
-		Origin: req.Origin, State: delivery.RunStateWaiting,
+		Kind: req.Kind, Origin: req.Origin, State: delivery.RunStateWaiting,
 		// The budgets are SNAPSHOTTED onto the row in production, and the workflow
 		// reads them from there rather than from the request — so a fake that
 		// dropped them would let a test pass while the values never reached the run.

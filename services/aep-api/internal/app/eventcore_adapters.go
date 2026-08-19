@@ -71,16 +71,17 @@ func (a eventcoreRuns) LiveRunsForProject(ctx context.Context, orgID, projectID 
 	return live, nil
 }
 
-// DeployedMilestoneRun is the project's most recent SUCCEEDED spec build — the
+// DeployedMilestoneRun is the project's most recent SUCCEEDED DEV run — the
 // version that is live, and therefore the milestone an incident belongs to.
-// ListByProject is newest-first, so the first match is the answer.
+// Only a dev run delivers a version; ListByProject is newest-first, so the first
+// match is the answer.
 func (a eventcoreRuns) DeployedMilestoneRun(ctx context.Context, orgID, projectID string) (*delivery.MilestoneRun, error) {
 	rows, err := a.runs.ListByProject(ctx, orgID, projectID)
 	if err != nil {
 		return nil, err
 	}
 	for i := range rows {
-		if rows[i].Origin == delivery.RunOriginSpecBuild && rows[i].State == delivery.RunStateSucceeded {
+		if rows[i].Kind == delivery.RunKindDev && rows[i].State == delivery.RunStateSucceeded {
 			return &rows[i], nil
 		}
 	}
