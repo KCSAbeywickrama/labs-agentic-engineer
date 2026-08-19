@@ -210,10 +210,93 @@ The word had two referents. It now has one.
 - **Questions for you** — the agent's live request for input. Renamed away from the collision:
   the chat bubble says **"The agent needs your input (5)"**, the form is headed **"Questions
   for you"**. Nothing parses these, so they were the cheap side to move.
+- The form's exit is **"Use recommended answers"**, not *"Skip questions"*. It skips nothing — it
+  makes the agent decide, and those decisions land in the document. Safe to click now that each
+  one lands flagged and one click from being revisited
+  ([#532](https://github.com/wso2/labs-agentic-engineer/issues/532)), so the label can be plain
+  rather than cautionary.
 
 **defer** appears in a gate tooltip as something the user can do, but deferring means getting
 the word "deferred" into a PRD entry and no affordance exists for that. Left to
 [#527](https://github.com/wso2/labs-agentic-engineer/issues/527); do not invent one here.
+
+## The spec view's artifact rail
+
+**The rail is the flow.** It is already ordered — Requirements, Design, Validation — already where
+the user reads, and now carries state at both levels plus **Build as its terminal step**. One
+surface answers *what exists*, *what is happening* and *what comes next*, so the journey needs no
+step bar and no second progress indicator competing with the overview's cards. Decided in
+[#527](https://github.com/wso2/labs-agentic-engineer/issues/527);
+[drawn here](https://claude.ai/code/artifact/fe3fc0c0-6ecd-49ed-9f75-ed65c2220cb1).
+
+### Section state
+
+| state | shown as |
+|---|---|
+| ready | green tick |
+| active | **pulse**, section name in primary |
+| outdated | amber warning, section name amber |
+| not started | dim, no ornament |
+
+**Outdated is the load-bearing one.** Edit requirements after a design exists and Requirements
+goes *active* while Design and Validation go *outdated* — the same rail that reported progress
+reports staleness, with no second mechanism to learn.
+
+### Artifact state
+
+| state | shown as |
+|---|---|
+| planned | ghosted placeholder, declared **this turn** |
+| writing / modifying | active; the stream already distinguishes `add` from `edit` |
+| done | normal, clickable |
+| error | flagged, clickable to recover |
+
+**Planned means about to be written now.** The plan is turn-scoped, never project-scoped —
+pre-creating design placeholders during a requirements turn would recreate the `Being derived…`
+defect this file already removed.
+
+**The plan arrives in stages.** The design agent writes the cell first; only then does the
+component set exist, and the per-component files join the list. A count (*2 of 6*) is what answers
+"how long do I wait", and it is honest precisely because it grows.
+
+### The pulse
+
+Work in progress is the app's existing `agentChatWorkingPulse` — an 8px `primary.main` dot,
+opacity .3→1, scale .85→1, 1.2s ease-in-out, from `WorkingIndicator.tsx`. Not a spinner, and not a
+second animation: "working" looks the same everywhere it appears.
+
+### Build, at the foot of the rail
+
+| situation | Build says |
+|---|---|
+| design not written yet | *after the design is written* |
+| design outdated | **blocked** — *The design is behind your requirements.* + **Update the design** |
+
+**An outdated design blocks Build.** Building it would implement something the user has already
+changed their mind about. This is the one gate that survives the map's general "progress with
+unknowns is fine" rule, because the design is not *unknown* — it is known to be wrong.
+
+**"An agent is working" is no longer stated as a gate.** The rail shows live per-artifact state,
+larger and more usefully than a disabled button with a hover explanation could.
+
+### Recovery is `/design`, not a per-file retry
+
+An errored artifact and a stale design resolve the same way: re-run design as a **delta pass**,
+which sees what is missing or behind and updates it, grilling first when a change is significant.
+Not a scoped per-file regeneration — artifacts are derived from each other, and the cell fixes
+the component set everything else hangs off.
+
+### Three surfaces, three jobs
+
+| surface | job |
+|---|---|
+| chat | **narration** — why, and what the agent is thinking |
+| artifact rail | **structure** — what, and how far |
+| editor | **the artifact** — content, streaming |
+
+The chat panel is the spine and **never collapses itself**; only the user closes it. But it stops
+pointing at a form that already owns the screen, and its composer stays live during a form — the
+agent is waiting on the user, not working, and the user may want to talk instead of fill.
 
 ## Two kinds of unsettled
 
