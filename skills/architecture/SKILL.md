@@ -112,8 +112,23 @@ key, so an unauthenticated agent endpoint is a billing hole rather than a
 tolerable one.
 **Declare no dependency for model access** — every `ai-agent` gets it from its
 component type, on the organisation's own key, so there is nothing to choose.
-It owns no storage — an agent that needs to remember something calls a service
-that does.
+**An `ai-agent` with server memory needs a Postgres for its conversation
+store.** Give it a `platform-resource` dependency with `resourceType:
+"postgres-cnpg"` — the PVC-backed type, so a conversation survives a pod
+restart; the older ephemeral `postgres` type is not installed and referencing
+it fails provisioning. Dedicated is the default — `{ "kind":
+"platform-resource", "name": "memory-db", "resourceType": "postgres-cnpg" }`,
+injected as `MEMORY_DB_HOST` / `MEMORY_DB_PORT` / `MEMORY_DB_DBNAME` /
+`MEMORY_DB_USER` / `MEMORY_DB_PASSWORD` (`postgres-cnpg` has no `url` output;
+the generic platform-resource wiring injects each of its five outputs as
+`<DEP_NAME>_<OUTPUT>`, uppercased). When the project already carries a
+Postgres and the user prefers one instance, declare the SAME dependency name
+the sibling service uses — same-name resolution to one shared instance is the
+`thunder-app` sharing rule, and it applies here too. Either way the agent owns
+its `conversations` table exclusively: no other component touches it, and the
+agent touches nothing else in a shared instance. Business data is still not
+the agent's to hold — anything beyond its own conversation belongs behind a
+service that owns it.
 
 **Component `type` is a fixed vocabulary — use the EXACT string.** A backend is
 `"service"`; a browser app is `"web-application"` (OpenChoreo's own term). Write

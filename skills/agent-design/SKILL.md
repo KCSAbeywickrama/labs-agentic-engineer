@@ -52,7 +52,7 @@ x-aep:                             # everything AFM does not define
         baseUrl: "${env:LUNCH_API_URL}"
         allow: [listRounds, getRound, listItems, addItem]
   memory:
-    type: "client"
+    type: "server"
   identity:
     mode: "on-behalf-of"
 ---
@@ -148,6 +148,18 @@ user* about it, not what it should check.
 calls, which is the only interface the platform carries today. `webhook` and
 `platformchat` are defined by AFM but not yet supported here; do not declare one
 without confirming it is.
+
+## Memory
+
+`server` unless the requirements say otherwise: the agent keeps the
+conversation in its own store, and the caller holds only a `conversationId` —
+`agent-building` owns that `/chat` contract (`{ conversationId?, message }` in,
+`{ conversationId, text, toolCalls }` out); history never crosses the wire.
+Declare it and nothing else — where the store lives is the design.json's
+`postgres-cnpg` platform-resource dependency (the `architecture` skill), and
+how it is used is fixed by `agent-building`. `client` remains valid for an
+agent whose caller genuinely owns the transcript (rare; say why in the
+description).
 
 ## Pitfalls
 
