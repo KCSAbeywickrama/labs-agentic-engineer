@@ -118,6 +118,12 @@ func TestValidateAgentAfm(t *testing.T) {
 		{"no role section", func(s string) string {
 			return strings.Replace(s, "# Role", "# Purpose", 1)
 		}, "lunch-agent", "# Role"},
+		{"memory type server is accepted", func(s string) string {
+			return strings.Replace(s, "        allow: [addItem]\n", "        allow: [addItem]\n  memory:\n    type: \"server\"\n", 1)
+		}, "lunch-agent", ""},
+		{"memory type shared is rejected", func(s string) string {
+			return strings.Replace(s, "        allow: [addItem]\n", "        allow: [addItem]\n  memory:\n    type: \"shared\"\n", 1)
+		}, "lunch-agent", "x-aep.memory.type"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

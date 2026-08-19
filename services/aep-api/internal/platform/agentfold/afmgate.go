@@ -286,7 +286,7 @@ func validateAfmInterfaces(raw any) *designProblem {
 
 // validateAfmXAep mirrors the optional `x-aep` strictObject: tools (optional
 // {openapi: array(openApiToolSchema).min(1)}), memory (optional {type:
-// "client"}), identity (optional {mode: enum}).
+// "client"|"server"}), identity (optional {mode: enum}).
 func validateAfmXAep(raw any) *designProblem {
 	xaep, ok := raw.(map[string]any)
 	if !ok {
@@ -354,8 +354,8 @@ func validateAfmXAep(raw any) *designProblem {
 				return &designProblem{code: ErrSchemaViolation, message: "x-aep.memory: unknown property " + k}
 			}
 		}
-		if t, ok := mem["type"].(string); !ok || t != "client" {
-			return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("x-aep.memory.type: %v is not an allowed value — only \"client\" is supported", mem["type"])}
+		if t, ok := mem["type"].(string); !ok || (t != "client" && t != "server") {
+			return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("x-aep.memory.type: %v is not an allowed value — must be \"client\" or \"server\"", mem["type"])}
 		}
 	}
 	if identity, present := xaep["identity"]; present {
