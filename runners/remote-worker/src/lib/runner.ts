@@ -32,6 +32,7 @@ import { createWorkspaceWriteGuard } from "./workspace_guard.js";
 import { createWebFetchGuardHook } from "./webfetch_guard.js";
 import { checkPreload, preloadWarning } from "./skills_preload_check.js";
 import { SKILLS_MIRROR_DIR, requireWorkflowBodies } from "./skills_presence.js";
+import { curlConfigHome } from "./endpoint_access.js";
 
 /**
  * The mirror the BFF wrote into the project clone, as an absolute path.
@@ -346,6 +347,12 @@ export function runClaudeQuery(
     AEP_PLATFORM_URL: process.env.AEP_PLATFORM_URL ?? "",
     AEP_GIT_SERVICE_URL: req.gitServiceUrl,
     AEP_CORRELATION_ID: req.correlationId ?? "",
+    // Where curl looks for `.curlrc`. Named explicitly rather than left to the
+    // inherited HOME: a validation run writes `resolve` overrides there for its
+    // deployed endpoints (endpoint_access.ts), and a config curl was never told
+    // to look for is indistinguishable from no config at all. Harmless on a
+    // coding run, which writes no such file.
+    CURL_HOME: curlConfigHome(),
   };
 
   // NO plugins. Every skill this session reads is a directory in the project's
