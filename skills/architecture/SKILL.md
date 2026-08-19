@@ -97,7 +97,9 @@ words rather than filling in a form. Its behaviour is authored as
 it pins `["agent-building"]`. It is a normal deployable that calls other
 components over HTTP: give it a `component` dependency for every API it uses.
 **An agent a signed-in user reaches is a protected backend** — if a
-web-application calls it, give it the project's shared `thunder-app`
+web-application calls it, set `"exposure": "internet"` (the browser cannot
+reach an intranet address, so an intranet agent gives the SPA nothing to talk
+to) AND give it the project's shared `thunder-app`
 dependency, under the same dependency NAME the SPA and the sibling APIs use,
 exactly as you would for a service. It is the same sign-in and the same OAuth
 app, not a second one. Do this even when the agent stores nothing and every API
