@@ -305,6 +305,37 @@ The chat panel is the spine and **never collapses itself**; only the user closes
 pointing at a form that already owns the screen, and its composer stays live during a form — the
 agent is waiting on the user, not working, and the user may want to talk instead of fill.
 
+## Notifications
+
+**One bell, for both.** The global `NotificationBell` already sits in the header on every page and
+already carries the SRE agent's RCA reports. It also carries **the agent asking for input** —
+design-time questions, dependency declarations, anything blocked on the user. Two bells would be
+worse than one mixed list, and this is the only surface visible from outside the spec view.
+
+**Outstanding, not unread.** Alerts track unread client-side, which is right for a report you have
+seen. It is wrong here: glancing at a request does not answer it. A request for input is
+**outstanding until the thing is done** — an unanswered question form, an undeclared dependency —
+which the platform can derive. It clears when the user acts, never when they look.
+
+**Typed and actionable.** *"expense-api needs a SendGrid key"* and *"production is returning 500s"*
+must not read alike, and a request must take the user to the thing. Alerts are read-only today;
+these are not.
+
+**The bell and the Alerts page are deliberately different scopes.** The bell is the notification
+centre — incidents *and* requests. The **Alerts** page stays the SRE agent's incident list across
+projects. Recorded so the divergence reads as a decision rather than drift.
+
+**The status chip does not carry this.** Two words cannot say *which* question, cannot carry an
+action, and would displace the state the chip exists to show. It stays a state display
+([#544](https://github.com/wso2/labs-agentic-engineer/issues/544)); this is an alert's job.
+
+**In-context markers still stand** and are not replaced by the bell: the artifact rail's section
+state, Build's reason at the foot of the rail, flagged lines in the PRD. The bell is for when the
+user is *not* looking at any of them.
+
+**Nothing auto-navigates.** The notification is how the user finds out; clicking it is how they go
+([#522](https://github.com/wso2/labs-agentic-engineer/issues/522)).
+
 ## Empty states
 
 **An empty state teaches *what*, offers the action, and does not narrate the *how*.**
