@@ -243,12 +243,6 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 		"--set", "thunder.adminURL=" + thunderURL,
 		"--set", "thunder.jwksURL=" + thunderURL + "/oauth2/jwks",
 		"--set", "platformAPI.baseURL=" + viper.GetString("oc.api_url"),
-		// thunder-app-operator subchart: forward the same Thunder admin URL so the
-		// operator talks to the same endpoint as the rest of the platform.
-		// Credentials come from the ESO-synced Secret (written to OpenBao by
-		// provisionOpenBao above — never passed via --set).
-		"--set", "thunder-app-operator.thunder.adminURL=" + thunderURL,
-		"--set", "thunder-app-operator.thunder.existingSecret=" + config.ThunderOperatorCredsSecret,
 	}
 	// Chart source: local path takes precedence, otherwise OCI registry.
 	// Must be inserted at index 3: after "upgrade", "--install", <release>.
@@ -578,25 +572,6 @@ func provisionOpenBao(ctx context.Context, anthropicKey, thunderAdminClientID, t
 // by legacy setup scripts (setup-aep.sh) without Helm ownership labels. Helm
 // refuses to adopt them on install, so we delete and let the chart recreate.
 func deleteOrphanedResources(ctx context.Context) error {
-	// If setup-aep.sh or setup-local.sh installed the thunder-app-operator as a
-	// standalone Helm release, its ClusterRole/ClusterRoleBinding are owned by
-	// that release and block the platform chart from installing the subchart.
-	// Uninstall it first — the subchart takes over ownership in wso2-aep.
-	helmStatusArgs := []string{"status", "thunder-app-operator", "-n", "thunder-app-operator-system"}
-	if kubeconfig != "" {
-		helmStatusArgs = append(helmStatusArgs, "--kubeconfig", kubeconfig)
-	}
-	if out := exec.CommandContext(ctx, "helm", helmStatusArgs...).Run(); out == nil {
-		ui.Detail("Removing standalone thunder-app-operator (replacing with platform subchart)")
-		helmUninstallArgs := []string{"uninstall", "thunder-app-operator", "-n", "thunder-app-operator-system"}
-		if kubeconfig != "" {
-			helmUninstallArgs = append(helmUninstallArgs, "--kubeconfig", kubeconfig)
-		}
-		if out, err := exec.CommandContext(ctx, "helm", helmUninstallArgs...).CombinedOutput(); err != nil {
-			return fmt.Errorf("uninstall standalone thunder-app-operator: %w\n%s", err, out)
-		}
-	}
-
 	// cluster-scoped: clusterauthzrolebinding, clustertrait
 	// namespaced:     secretstore (lives in initPlatformNamespace)
 	resources := []struct {
