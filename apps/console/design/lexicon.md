@@ -61,6 +61,7 @@ was not happening.
 |---|---|
 | Heading | **What do you want to build?** |
 | Subtitle | *Describe it in your own words — rough is fine, or upload a product requirements document.* |
+| Idea echoed on the name step | **Prompt:** *&lt;the idea&gt;* — **one line, ellipsised** |
 | Repository field helper | *Agentic Engineer creates this repository in your organization. Your specs and source code live here, and it stays yours.* |
 | Name already taken | *That repository name already exists in `<org>` — pick another.* |
 | While creating | **Creating your project…** |
@@ -68,6 +69,14 @@ was not happening.
 The subtitle answers the only question a blank box raises — *how much detail?* — and stops
 there. Narrating the rest of the journey up front is overwhelming, and the journey explains
 itself as it happens. The upload clause depends on document upload shipping; drop it until then.
+
+**The echoed idea is labelled `Prompt:`, and kept to one line.** The label says what the platform
+*does* with what the user wrote — it is the agent's brief, not a description filed against the
+project — which a bare quoted sentence never conveyed. It is a transparency device, the same role
+the cropped idea plays beside `/start`, not a display of the document: the textarea has no length
+limit, so unclamped this is the only element on the page that can grow without bound and push
+**Create project** off the fold. The full text stays on the `title` attribute, and **Back** returns
+to the textarea holding it.
 
 **"Creates this repository"** is deliberate on the field helper and deliberate *not* on the wait
 label. Under the Repository name field the repo is the subject and the user needs to know one is
