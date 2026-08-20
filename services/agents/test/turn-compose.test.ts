@@ -63,6 +63,43 @@ test("start appends the captured idea, and appends NOTHING when there is none", 
   assert.doesNotMatch(bare, /The user's idea/);
 });
 
+test("start lists the reference documents, and lists NOTHING when there are none", () => {
+  const withRefs = composeInstruction({
+    kind: "start",
+    idea: "an expense tracker",
+    references: ["specs/requirements/references/rfp.pdf", "specs/requirements/references/glossary.md"],
+  });
+  // Every path is named, and the agent is told to read them as the brief.
+  assert.match(withRefs, /specs\/requirements\/references\/rfp\.pdf/);
+  assert.match(withRefs, /specs\/requirements\/references\/glossary\.md/);
+  assert.match(withRefs, /reference document/i);
+  // The idea still rides alongside them — the two channels are independent.
+  assert.match(withRefs, /The user's idea for this project:\n\nan expense tracker/);
+
+  // Absent and empty are the same thing, and both are byte-identical to a turn
+  // from before this channel existed — a docless project sees no change at all.
+  const bare = composeInstruction({ kind: "start", idea: "an expense tracker" });
+  assert.equal(bare, composeInstruction({ kind: "start", idea: "an expense tracker", references: [] }));
+  assert.doesNotMatch(bare, /reference document/i);
+});
+
+
+test("flow lists the reference documents, and lists NOTHING when there are none", () => {
+  const withRefs = composeInstruction({
+    kind: "flow",
+    skill: "design",
+    references: ["specs/requirements/references/sketch.png"],
+  });
+  assert.match(withRefs, /^Load the design skill and follow it\./);
+  assert.match(withRefs, /specs\/requirements\/references\/sketch\.png/);
+  assert.match(withRefs, /reference document/i);
+
+  // Absent/empty → byte-identical to a plain flow turn.
+  const bare = composeInstruction({ kind: "flow", skill: "design" });
+  assert.equal(bare, composeInstruction({ kind: "flow", skill: "design", references: [] }));
+  assert.doesNotMatch(bare, /reference document/i);
+});
+
 test("target is rendered by the service, never formatted by the caller", () => {
   const out = composeInstruction({ kind: "chat", text: "tighten the spec" }, { target: "specs/requirements/prd.md" });
   assert.ok(out.endsWith("(target: specs/requirements/prd.md)"));

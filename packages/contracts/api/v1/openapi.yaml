@@ -1759,6 +1759,74 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
           description: Error
+  /projects/{projectName}/references:
+    post:
+      description: Store the reference documents attached on the create view. References are
+        TRANSIENT TURN INPUTS, not spec artifacts (console ADR-0017) — they are never committed
+        and never reach GitHub. Bytes live in a per-project directory on the shared workspace
+        volume for the project's lifetime and are overlaid into each turn's snapshot at
+        `specs/requirements/references/`, which is also scaffolded into the repo's `.gitignore`.
+        Deliberately outside the `specs/`-scoped Files API — `files/apply` means "commit to the
+        repo", and this is the opposite. multipart carries raw bytes, so the per-file limit is
+        checked on real bytes with no base64 inflation. Replaces the whole upload for the
+        project — a second call overwrites the stored set.
+      operationId: put-project-references
+      parameters:
+      - description: Project name (DNS-label slug)
+        in: path
+        name: projectName
+        required: true
+        schema:
+          description: Project name (DNS-label slug)
+          type: string
+      requestBody:
+        content:
+          multipart/form-data:
+            encoding:
+              files:
+                contentType: application/octet-stream
+            schema:
+              properties:
+                files:
+                  description: >
+                    Reference documents. Two groups, both readable by the models:
+                    binary read natively as file parts (`.pdf`, `.png`, `.jpg`,
+                    `.jpeg`, `.gif`, `.webp`), and text read as workspace files
+                    (`.md`, `.txt`, `.csv`, `.tsv`, `.json`, `.yaml`, `.yml`,
+                    `.xml`, `.html`, `.rst`). At most 10 documents, each at most
+                    5 MiB measured on the raw bytes. Office formats are not
+                    accepted — the models do not read them natively.
+                  items:
+                    format: binary
+                    type: string
+                  maxItems: 10
+                  type: array
+              required:
+              - files
+              type: object
+        required: true
+      responses:
+        '204':
+          description: References stored
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Rejected — unsupported type, a document over 5 MiB, more than 10
+            documents, an unusable name, or two names that reduce to one stored name.
+            Nothing is stored; the previous set is left intact.
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Error
+      security:
+      - userJWT: []
+      summary: Store a project's reference documents
+      tags:
+      - Projects
   /projects/{projectName}/runs/{runId}/cancel:
     post:
       description: Abandon an increment. Cancel is the only expiry the run's unbounded wait state has.
