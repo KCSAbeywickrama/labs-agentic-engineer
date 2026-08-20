@@ -220,7 +220,7 @@ export function PromptComposer({
         <InputBase
           value={prompt}
           onChange={(e) => onPromptChange(e.target.value)}
-          placeholder="e.g. A booking system for a small hair salon with staff calendars and SMS reminders"
+          placeholder="e.g. A service desk where employees raise IT requests and the team tracks them through to resolution"
           multiline
           minRows={3}
           autoFocus

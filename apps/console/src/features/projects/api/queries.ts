@@ -30,7 +30,7 @@ import { useConfig } from "../../settings/api/queries";
 import { firstEndpointUrl } from "../lib/deploymentUrl";
 import { deploymentsAreMoving } from "../lib/deploymentRows";
 import { projectKeys } from "./keys";
-import { apiErrorMessage } from "../../../api/errors";
+import { ApiRequestError, apiErrorMessage } from "../../../api/errors";
 
 type CreateProjectRequest = components["schemas"]["CreateProjectRequest"];
 type BuildRequest = components["schemas"]["BuildRequest"];
@@ -302,9 +302,10 @@ export function useCreateProject() {
     mutationFn: async (body: CreateProjectRequest) => {
       const { data, error } = await client.POST("/projects", { body });
       if (error) {
-        throw new Error(
-          apiErrorMessage(error, "Failed to create project"),
-        );
+        // ApiRequestError, not Error: the create flow reacts to a repo-name
+        // conflict specifically (#561), and the envelope's `code` is the only
+        // stable way to tell it apart from any other failure.
+        throw new ApiRequestError(error, "Failed to create project");
       }
       return data;
     },
