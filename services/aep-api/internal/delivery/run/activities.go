@@ -606,11 +606,10 @@ func (a *Activities) MintValidationRepairIssues(ctx context.Context, in MintVali
 
 // DispatchAgent launches the cycle's agent run and returns the Job reference.
 //
-// Two non-retryable failure classes are stamped here (Temporal must not retry
-// either): agent death — a launch that did not happen, answered by the cycle's
-// re-dispatch budget — and quota blocked — entitlement refused, not death.
-// Letting Temporal retry agent death would spend that budget invisibly; quota
-// blocked cannot be cleared by retry.
+// Three non-retryable failure classes are stamped here (Temporal must not
+// retry any): agent death — a launch that did not happen, answered by the
+// cycle's re-dispatch budget; quota blocked — entitlement refused, not death;
+// publisher credentials missing — Job create cannot stamp the SecretReference.
 func (a *Activities) DispatchAgent(ctx context.Context, in delivery.MilestoneDispatch) (string, error) {
 	if a.dispatcher == nil {
 		return "", errNotConfigured
@@ -623,6 +622,10 @@ func (a *Activities) DispatchAgent(ctx context.Context, in delivery.MilestoneDis
 		// Non-retryable because no retry can free a billing slot.
 		return "", temporal.NewNonRetryableApplicationError(
 			err.Error(), delivery.ErrTypeAgentQuotaBlocked, err)
+	}
+	if errors.Is(err, delivery.ErrPublisherCredentialsMissing) {
+		return "", temporal.NewNonRetryableApplicationError(
+			delivery.PublisherCredentialsMissingMessage, delivery.ErrTypePublisherCredentialsMissing, err)
 	}
 	return jobRef, err
 }

@@ -128,11 +128,10 @@ func doThunderSetup(
 	}
 	sp.Success("Authenticated")
 
-	// 4. Register all OAuth clients.
-	sp = ui.NewSpinner(fmt.Sprintf("Registering %d OAuth clients", len(aepThunderClients)))
-	sp.Start()
+	// 4. Register all OAuth clients — one spinner per client so each resolves to ✓.
 	for i, def := range aepThunderClients {
-		sp.Update(fmt.Sprintf("Registering OAuth clients (%d/%d) — %s", i+1, len(aepThunderClients), def.clientID))
+		clientSp := ui.NewSpinner(fmt.Sprintf("Registering OAuth clients (%d/%d) — %s", i+1, len(aepThunderClients), def.clientID))
+		clientSp.Start()
 
 		app := thunder.DesiredApp{
 			ClientID:   def.clientID,
@@ -141,7 +140,7 @@ func doThunderSetup(
 		if def.clientType == "confidential" {
 			secret, ok := clientSecrets[def.secretKey]
 			if !ok || secret == "" {
-				sp.Fail(fmt.Sprintf("Secret key %q missing from %s", def.secretKey, thunderSecretsName))
+				clientSp.Fail(fmt.Sprintf("Secret key %q missing from %s", def.secretKey, thunderSecretsName))
 				return fmt.Errorf("secret key %q missing from %s/%s", def.secretKey, platformNamespace, thunderSecretsName)
 			}
 			app.ClientSecret = secret
@@ -151,7 +150,7 @@ func doThunderSetup(
 				app.RedirectURIs = def.redirectURIs
 			} else {
 				if consoleURL == "" {
-					sp.Fail(fmt.Sprintf("Cannot register %s: console URL is required for public clients with no redirect URIs", def.clientID))
+					clientSp.Fail(fmt.Sprintf("Cannot register %s: console URL is required for public clients with no redirect URIs", def.clientID))
 					return fmt.Errorf("register Thunder client %q: console URL must be set to derive the redirect URI", def.clientID)
 				}
 				parsed, parseErr := url.Parse(consoleURL)
@@ -165,12 +164,11 @@ func doThunderSetup(
 		}
 
 		if err := client.EnsureApplication(ctx, app); err != nil {
-			sp.Fail(fmt.Sprintf("Failed to register %s", def.clientID))
+			clientSp.Fail(fmt.Sprintf("Failed to register %s", def.clientID))
 			return fmt.Errorf("register Thunder client %q: %w", def.clientID, err)
 		}
-		ui.Detail(def.clientID)
+		clientSp.Success(def.clientID)
 	}
-	sp.Success(fmt.Sprintf("%d OAuth clients registered", len(aepThunderClients)))
 
 	// 5. Ensure the system client is assigned to the aep-system role so it can manage resources.
 	sp = ui.NewSpinner("Assigning system client to aep-system role")

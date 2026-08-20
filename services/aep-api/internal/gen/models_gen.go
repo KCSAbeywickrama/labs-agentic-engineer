@@ -103,6 +103,27 @@ func (e DeployStageValidation) Valid() bool {
 	}
 }
 
+// Defines values for ExternalDependencyValueState.
+const (
+	Configured     ExternalDependencyValueState = "configured"
+	NotProvisioned ExternalDependencyValueState = "not-provisioned"
+	Unset          ExternalDependencyValueState = "unset"
+)
+
+// Valid indicates whether the value is a known member of the ExternalDependencyValueState enum.
+func (e ExternalDependencyValueState) Valid() bool {
+	switch e {
+	case Configured:
+		return true
+	case NotProvisioned:
+		return true
+	case Unset:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for MilestoneRunViewOrigin.
 const (
 	IncidentAdoption MilestoneRunViewOrigin = "incident-adoption"
@@ -850,9 +871,10 @@ type DependencyCandidate = contracts.DependencyCandidate
 
 // DependencyStatus defines model for DependencyStatus.
 type DependencyStatus struct {
-	Outputs []string `json:"outputs"`
-	Ready   bool     `json:"ready"`
-	Status  string   `json:"status"`
+	Outputs    []string                     `json:"outputs"`
+	Ready      bool                         `json:"ready"`
+	Status     string                       `json:"status"`
+	ValueState ExternalDependencyValueState `json:"valueState,omitempty"`
 }
 
 // DeployStage Deploy-stage aggregate on ProjectStatus (#184) — what's live in dev and rollout progress.
@@ -947,6 +969,16 @@ type ExecutionView struct {
 	StartedAt *time.Time `json:"startedAt,omitempty"`
 	Status    string     `json:"status"`
 }
+
+// ExternalDependencyReadiness defines model for ExternalDependencyReadiness.
+type ExternalDependencyReadiness struct {
+	MissingKeys []string                     `json:"missingKeys"`
+	Name        string                       `json:"name"`
+	State       ExternalDependencyValueState `json:"state"`
+}
+
+// ExternalDependencyValueState defines model for ExternalDependencyValueState.
+type ExternalDependencyValueState string
 
 // ExternalResourceDTO defines model for ExternalResourceDTO.
 type ExternalResourceDTO struct {
@@ -1195,6 +1227,12 @@ type ProjectConversationView struct {
 	CreatedAt      time.Time `json:"createdAt"`
 	CreatedBy      string    `json:"createdBy,omitempty"`
 	Current        bool      `json:"current"`
+}
+
+// ProjectDependencyReadiness defines model for ProjectDependencyReadiness.
+type ProjectDependencyReadiness struct {
+	Configured   bool                          `json:"configured"`
+	Dependencies []ExternalDependencyReadiness `json:"dependencies"`
 }
 
 // ProjectList defines model for ProjectList.
@@ -1919,6 +1957,12 @@ type GetDependencyStatusParams struct {
 	Environment string `form:"environment,omitempty" json:"environment,omitempty"`
 }
 
+// GetProjectDependencyReadinessParams defines parameters for GetProjectDependencyReadiness.
+type GetProjectDependencyReadinessParams struct {
+	// Environment Environment (default: development)
+	Environment string `form:"environment,omitempty" json:"environment,omitempty"`
+}
+
 // ListFilesParams defines parameters for ListFiles.
 type ListFilesParams struct {
 	// Prefix Only list paths under this prefix (e.g. specs/design/)
@@ -1949,6 +1993,12 @@ type ListIssuesParams struct {
 
 	// Q Keyword search over issue title/body, ranked by distinct-term overlap (title weighted double), capped at 25. Recall-biased — used to surface related issues before filing a new one.
 	Q string `form:"q,omitempty" json:"q,omitempty"`
+}
+
+// PutProjectReferencesMultipartBody defines parameters for PutProjectReferences.
+type PutProjectReferencesMultipartBody struct {
+	// Files Reference documents. Two groups, both readable by the models: binary read natively as file parts (`.pdf`, `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`), and text read as workspace files (`.md`, `.txt`, `.csv`, `.tsv`, `.json`, `.yaml`, `.yml`, `.xml`, `.html`, `.rst`). At most 10 documents, each at most 5 MiB measured on the raw bytes. Office formats are not accepted — the models do not read them natively.
+	Files []openapi_types.File `json:"files"`
 }
 
 // GetSpecCollabSessionParams defines parameters for GetSpecCollabSession.
@@ -2030,6 +2080,9 @@ type ApplyFilesJSONRequestBody = ApplyRequest
 
 // CreateIssueJSONRequestBody defines body for CreateIssue for application/json ContentType.
 type CreateIssueJSONRequestBody = CreateIssueRequest
+
+// PutProjectReferencesMultipartRequestBody defines body for PutProjectReferences for multipart/form-data ContentType.
+type PutProjectReferencesMultipartRequestBody PutProjectReferencesMultipartBody
 
 // PromoteTaskFromIssueJSONRequestBody defines body for PromoteTaskFromIssue for application/json ContentType.
 type PromoteTaskFromIssueJSONRequestBody = PromoteFromIssueRequest

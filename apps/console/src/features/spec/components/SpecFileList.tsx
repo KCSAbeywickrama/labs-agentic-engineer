@@ -33,7 +33,8 @@ import {
   ChevronDown,
   ChevronRight,
   FileText,
-  Plus, RefreshCw,
+  Plus,
+  RefreshCw,
   Network,
   LayoutDashboard,
 } from "@wso2/oxygen-ui-icons-react";
@@ -292,6 +293,7 @@ export function SpecFileList({
       </Box>
 
       {flatGroup("Validation", validation)}
+
     </Box>
   );
 }

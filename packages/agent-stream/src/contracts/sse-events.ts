@@ -397,19 +397,26 @@ export interface WorkspaceRef {
  *
  *  - `chat`  — an ordinary user message, sent verbatim.
  *  - `flow`  — a `/<skill>` command: load that skill and follow it, with the
- *              user's trailing text (if any) riding along.
+ *              user's trailing text (if any) riding along. `references` names
+ *              the attached reference documents exactly as on `start` — a flow
+ *              generates artifacts (wireframes above all) that must be
+ *              grounded in an attached sketch or spec.
  *  - `start` — the project kickoff. `idea` is what the user asked for, read by
  *              the BFF from `specs/.agentic-engineer.toml` — a dot-led path
  *              stripped from every turn snapshot, so the agent cannot read it
  *              itself. Absent/blank → the start skill asks the user instead.
+ *              `references` names the documents attached at project create
+ *              (paths under `specs/requirements/references/`, listed by the
+ *              BFF). Paths only: they are ordinary spec content the agent
+ *              reads from its own snapshot. Absent/empty → nothing is said.
  *  - `plan`  — Task planning. `scope` is the milestone's story coverage and
  *              `taskContext` the existing-Task renders; both are platform
  *              state, not repository files, so they cannot ride the snapshot.
  */
 export type TurnSpec =
   | { kind: "chat"; text: string }
-  | { kind: "flow"; skill: string; text?: string }
-  | { kind: "start"; idea?: string }
+  | { kind: "flow"; skill: string; text?: string; references?: string[] }
+  | { kind: "start"; idea?: string; references?: string[] }
   | { kind: "plan"; scope?: PlanScope; taskContext?: PlanContextFile[] };
 
 /** The turn kinds a `TurnSpec` may declare (the server's pre-stream 400 check). */
@@ -543,13 +550,14 @@ export function isTurnSpec(v: unknown): v is TurnSpec {
   const t = v as Record<string, unknown>;
   const str = (x: unknown): boolean => typeof x === "string";
   const optStr = (x: unknown): boolean => x === undefined || typeof x === "string";
+  const optStrArr = (x: unknown): boolean => x === undefined || (Array.isArray(x) && x.every(str));
   switch (t.kind) {
     case "chat":
       return str(t.text) && (t.text as string).trim() !== "";
     case "flow":
-      return str(t.skill) && (t.skill as string).trim() !== "" && optStr(t.text);
+      return str(t.skill) && (t.skill as string).trim() !== "" && optStr(t.text) && optStrArr(t.references);
     case "start":
-      return optStr(t.idea);
+      return optStr(t.idea) && optStrArr(t.references);
     case "plan":
       return isPlanScopeOrAbsent(t.scope) && isPlanContextOrAbsent(t.taskContext);
     default:
