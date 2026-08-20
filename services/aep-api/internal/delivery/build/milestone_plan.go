@@ -307,6 +307,75 @@ func (s *Service) supersedePreviousMilestone(ctx context.Context, orgID, project
 		"issuesClosed", closed, "bugsCarriedForward", moved, "supersededBy", milestoneTitle)
 }
 
+// reopenIncrement puts the version's milestone — and exactly the issues a CANCEL
+// closed inside it — back into the state the cancel found them in, so the run
+// admitted over it has a working set to work.
+//
+// It runs on the SAME-TAG branch of the build click and only there. The spec-save
+// status is the whole decision: an unchanged spec resolves to the version already
+// on disk, so this build is that version being worked AGAIN rather than a new one
+// being cut. There is no "was it cancelled" question anywhere — the marker on the
+// issues answers it, and a version nobody cancelled simply has none.
+//
+// `aep:cancelled` is the handle, and the reason it exists rather than "reopen
+// everything in the milestone": only issues that were OPEN when the cancel landed
+// carry it, so work a cycle genuinely FINISHED stays closed. Reopening wholesale
+// would resurrect every Task the build had already delivered and dispatch an agent
+// at work that is already merged and serving.
+//
+// The label is CLEARED as it is reopened. It is a record of one abandoned attempt,
+// not a property of the issue: leaving it on would make the NEXT cancel's marked
+// set the union of two attempts, and this reopen would then restore work the
+// second cancel had deliberately left closed.
+//
+// Reopen FIRST, then unlabel. An issue that ended up open with the mark still on
+// is reopened again by the next rebuild (a no-op) and is otherwise ordinary work;
+// an issue unlabelled but still closed is invisible to every future rebuild and
+// its work is silently lost.
+//
+// Best-effort per issue and per step, like supersede, and for the same reason: one
+// issue left behind is a human's one click, where failing the click would strand
+// the whole rebuild. The milestone reopen is unconditional on this branch — a
+// version being worked whose milestone reads closed is a lie the console renders,
+// whether it was a cancel or a delivered run that closed it.
+func (s *Service) reopenIncrement(ctx context.Context, orgID, projectID string, milestoneNumber int) {
+	p := s.plan
+	if rerr := p.milestones.ReopenMilestone(ctx, orgID, projectID, milestoneNumber); rerr != nil {
+		slog.WarnContext(ctx, "build: reopening the rebuilt version's milestone failed",
+			"project", projectID, "milestone", milestoneNumber, "error", rerr)
+	}
+	// The milestone's CLOSED issues, unfiltered by label: which of them this
+	// rebuild owns is decided here, from the labels, exactly as supersede decides
+	// what it carries forward.
+	issues, err := p.milestones.ListMilestoneIssues(ctx, orgID, projectID, sourcecontrol.MilestoneIssuesFilter{
+		Number: milestoneNumber,
+		State:  "closed",
+	})
+	if err != nil {
+		slog.WarnContext(ctx, "build: list the rebuilt milestone's closed issues failed — nothing reopened",
+			"project", projectID, "milestone", milestoneNumber, "error", err)
+		return
+	}
+	reopened := 0
+	for _, issue := range issues {
+		if !delivery.HasLabel(issue.Labels, delivery.LabelCancelled) {
+			continue
+		}
+		if rerr := p.issues.Reopen(ctx, orgID, projectID, issue.Number); rerr != nil {
+			slog.WarnContext(ctx, "build: reopening a cancelled issue failed",
+				"project", projectID, "issue", issue.Number, "error", rerr)
+			continue
+		}
+		if uerr := p.issues.Unlabel(ctx, orgID, projectID, issue.Number, delivery.LabelCancelled); uerr != nil {
+			slog.WarnContext(ctx, "build: clearing the cancel mark on a reopened issue failed",
+				"project", projectID, "issue", issue.Number, "error", uerr)
+		}
+		reopened++
+	}
+	slog.InfoContext(ctx, "build: rebuilding an unchanged version — reopened what the cancel closed",
+		"project", projectID, "milestone", milestoneNumber, "issuesReopened", reopened)
+}
+
 // previousDevMilestone picks the newest DEV run's milestone whose title is not
 // the one being claimed. rows arrive newest-first from the repository.
 //
@@ -359,11 +428,15 @@ func gatesLast(issues []sourcecontrol.IssueInfo) []sourcecontrol.IssueInfo {
 // resumed; the sweep and the adoption paths leave both empty and the workflow
 // skips planning. See delivery.StartRunRequest.
 //
+// `rebuild` rides the same request for the same reason, and narrows the planning
+// phase to its gates: only the click knows the milestone was already filled and
+// that it has just reopened it.
+//
 // A supervisor that cannot start is the one failure this path still settles
 // itself. Everything the run does after this point is the workflow's to fail,
 // with Temporal's retries behind it.
 func (s *Service) startRun(ctx context.Context, orgID, projectID, tag string,
-	run *delivery.MilestoneRun, inputs []delivery.ProvisionInput) error {
+	run *delivery.MilestoneRun, inputs []delivery.ProvisionInput, rebuild bool) error {
 	p := s.plan
 	if p.starter == nil {
 		slog.InfoContext(ctx, "build: no run supervisor wired — run row waits",
@@ -380,6 +453,7 @@ func (s *Service) startRun(ctx context.Context, orgID, projectID, tag string,
 		RunID:           run.ID,
 		Tag:             tag,
 		ProvisionInputs: inputs,
+		Rebuild:         rebuild,
 	})
 	if err == nil {
 		return nil

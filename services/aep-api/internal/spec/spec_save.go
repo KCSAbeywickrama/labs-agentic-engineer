@@ -60,9 +60,25 @@ func (e *SpecValidationError) Error() string {
 	return "spec validation failed: " + strings.Join(parts, "; ")
 }
 
+// The two answers SaveSpec can give, named because a CALLER branches on them.
+//
+// The build click is that caller, and the branch it takes is the whole of "what
+// does pressing Build after a cancel do": SpecSaveApproved means a new version
+// was cut and is planned fresh, SpecSaveUnchanged means the SAME version is
+// worked again — its milestone reopened, the issues the cancel closed reopened,
+// and the planning turn skipped. The spec-save status is the only question asked;
+// there is no separate "was it cancelled" read anywhere.
+const (
+	// SpecSaveApproved: the specs/ tree moved, so a new `v<N>` tag was cut.
+	SpecSaveApproved = "approved"
+	// SpecSaveUnchanged: the specs/ tree matches the latest tag, so no tag was
+	// cut and Tag names the EXISTING version.
+	SpecSaveUnchanged = "unchanged"
+)
+
 // SpecSaveResult is the outcome of SaveSpec.
 type SpecSaveResult struct {
-	Status     string `json:"status"` // "approved" | "unchanged"
+	Status     string `json:"status"` // SpecSaveApproved | SpecSaveUnchanged
 	Tag        string `json:"tag"`    // e.g. "v3"
 	Version    int    `json:"version"`
 	CommitHash string `json:"commitHash,omitempty"`
@@ -117,7 +133,7 @@ func (s *artifactService) SaveSpec(ctx context.Context, orgID, projectID string,
 		if same {
 			slog.InfoContext(ctx, "spec save: unchanged — specs/ matches latest tag",
 				"project", projectID, "tag", latest.Name, "commit", commit)
-			return &SpecSaveResult{Status: "unchanged", Tag: latest.Name, Version: n}, nil
+			return &SpecSaveResult{Status: SpecSaveUnchanged, Tag: latest.Name, Version: n}, nil
 		}
 	}
 
@@ -132,7 +148,7 @@ func (s *artifactService) SaveSpec(ctx context.Context, orgID, projectID string,
 
 	slog.InfoContext(ctx, "spec tagged", "project", projectID, "tag", tagName, "commit", commit)
 	return &SpecSaveResult{
-		Status:     "approved",
+		Status:     SpecSaveApproved,
 		Tag:        tagName,
 		Version:    nextN,
 		CommitHash: commit,

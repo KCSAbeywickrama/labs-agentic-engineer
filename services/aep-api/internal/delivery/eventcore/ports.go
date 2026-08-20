@@ -51,6 +51,19 @@ type RunStore interface {
 	// completed a version, which is what makes "no milestone for the deployed
 	// version — trigger a build" an honest error rather than a guess.
 	DeployedMilestoneRun(ctx context.Context, orgID, projectID string) (*delivery.MilestoneRun, error)
+	// NewestRunForMilestone returns the milestone's most recent run of ANY kind
+	// and any state, or (nil, nil) for a milestone with none.
+	//
+	// The reconcile sweep asks it one question: did the newest run settle
+	// `cancelled`? A cancelled increment is abandoned, but a closed milestone
+	// still accepts issues, so an issue reopened inside one would otherwise start
+	// a task run that builds and deploys against a version nobody is shipping.
+	//
+	// NEWEST, of any kind, is what makes the rule self-clearing: a rebuild admits
+	// a fresh row on the SAME milestone, so the answer stops being "cancelled" the
+	// moment somebody decides to work the version again — no flag to set, and
+	// nothing to clear.
+	NewestRunForMilestone(ctx context.Context, orgID, projectID string, milestoneNumber int) (*delivery.MilestoneRun, error)
 	// KnownMilestones returns every milestone the platform has ever run for this
 	// project, newest first. The reconcile sweep walks these rather than
 	// enumerating GitHub's milestones: a milestone the platform never ran is not

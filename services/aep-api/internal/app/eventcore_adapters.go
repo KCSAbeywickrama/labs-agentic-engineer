@@ -88,6 +88,19 @@ func (a eventcoreRuns) DeployedMilestoneRun(ctx context.Context, orgID, projectI
 	return nil, nil
 }
 
+// NewestRunForMilestone is the milestone's most recent row of any kind.
+// ListByMilestone is newest-first, so the first row is the answer.
+func (a eventcoreRuns) NewestRunForMilestone(ctx context.Context, orgID, projectID string, milestoneNumber int) (*delivery.MilestoneRun, error) {
+	rows, err := a.runs.ListByMilestone(ctx, orgID, projectID, milestoneNumber)
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	return &rows[0], nil
+}
+
 // KnownMilestones is the distinct set of milestones this project has ever run,
 // newest first — the reconcile sweep's walk.
 func (a eventcoreRuns) KnownMilestones(ctx context.Context, orgID, projectID string) ([]eventcore.MilestoneRef, error) {

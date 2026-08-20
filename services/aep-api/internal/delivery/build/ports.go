@@ -100,6 +100,12 @@ type MilestoneClient interface {
 	// and it still accepts new ones, which is why superseding closes the issues
 	// explicitly rather than relying on this.
 	CloseMilestone(ctx context.Context, orgID, projectID string, number int) error
+	// ReopenMilestone reopens the milestone this claim resolved onto. A rebuild of
+	// an UNCHANGED spec works the same version again, and the milestone it works
+	// may have been closed — by a cancel that abandoned the increment, or by the
+	// delivered run before it. A version being worked under a heading that says
+	// "closed" is a lie the console renders, so the claim re-opens it.
+	ReopenMilestone(ctx context.Context, orgID, projectID string, number int) error
 	// ListMilestoneIssues reads a milestone's issues by state and label; pull
 	// requests are excluded by the host.
 	ListMilestoneIssues(ctx context.Context, orgID, projectID string, filter sourcecontrol.MilestoneIssuesFilter) ([]sourcecontrol.IssueInfo, error)

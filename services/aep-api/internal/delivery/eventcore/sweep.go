@@ -52,7 +52,8 @@ const defaultSweepInterval = 60 * time.Second
 // Sweep is the reconcile backstop AND the trigger router, and it has TWO
 // trigger conditions:
 //
-//	a milestone with open issues and no live run gets a run OF THE RIGHT KIND, and
+//	a milestone with open issues, no live run and no cancelled increment gets a
+//	run OF THE RIGHT KIND, and
 //	a live run row past its planning phase is re-offered to the supervisor.
 //
 // The first heals both failure modes the event plane can have. A delivery
@@ -82,8 +83,13 @@ const defaultSweepInterval = 60 * time.Second
 //     it. A move that failed leaves one bug behind and a task run picks it up —
 //     which is the right outcome for a defect, and the same best-effort posture a
 //     failed close has always had.
-//   - CANCEL is final. The increment is abandoned and the only way forward is the
-//     next build.
+//   - CANCEL is final, and it is enforced TWICE over. The cancelled run closes
+//     every issue it had in flight (cancel.go), and this rule skips the milestone
+//     outright while its newest run reads `cancelled` — because a closed milestone
+//     still accepts issues, so a reopened or newly filed one inside an abandoned
+//     increment would otherwise start a run that builds and deploys a version
+//     nobody is shipping. The skip clears itself: a rebuild admits a new row on
+//     the same milestone, so the newest run is no longer the cancelled one.
 //   - HALT marks what a FAILED run could not finish (`aep:halted`, see halt.go).
 //     Without it this rule is a budget defeater: a run settles `failed` with its
 //     working set still open, so the sweep starts a fresh run on the same issues
@@ -183,6 +189,28 @@ func (s *Sweep) reconcileRepo(ctx context.Context, repo RepoRef) error {
 			}
 			continue
 		}
+		// A CANCELLED increment is abandoned, and the milestone is skipped whole —
+		// before the issue fetch, because there is no decision left for the issues
+		// to inform and this saves the round trip.
+		//
+		// It has to be a decision about the MILESTONE rather than about the issues,
+		// which is the difference from the halt: a closed milestone still accepts
+		// new ones, so an issue reopened (or freshly filed) inside a cancelled
+		// version carries no mark and would otherwise start a task run that builds
+		// and deploys against a version nobody is shipping.
+		//
+		// The rule clears itself: a rebuild admits a new row on the same milestone,
+		// so the newest run stops being the cancelled one the moment somebody
+		// decides to work the version again. That is why it reads the NEWEST run of
+		// any kind rather than looking for a cancel anywhere in the history.
+		cancelled, cerr := e.milestoneCancelled(ctx, repo.OrgID, repo.ProjectID, milestone.Number)
+		if cerr != nil {
+			errs = append(errs, cerr)
+			continue
+		}
+		if cancelled {
+			continue
+		}
 		issues, ierr := e.p.Issues.ListMilestoneIssues(ctx, repo.OrgID, repo.ProjectID,
 			milestoneOpenIssuesFilter(milestone.Number))
 		if ierr != nil {
@@ -194,6 +222,33 @@ func (s *Sweep) reconcileRepo(ctx context.Context, repo RepoRef) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// milestoneCancelled reports whether this milestone's NEWEST run settled
+// `cancelled` — that is, whether its increment stands abandoned.
+//
+// Newest-of-any-kind, and nothing older, is the whole of the rule. A cancel
+// somewhere in a milestone's history says nothing about now: the version may have
+// been rebuilt and delivered since, and a run that is live is caught by the
+// caller's own live-run branch before this is ever asked.
+//
+// A milestone with no rows at all answers false. The sweep only walks milestones
+// the platform has run, so that is a concurrent purge rather than a state, and
+// "not cancelled" is the answer that heals rather than the one that hides work.
+func (e *Events) milestoneCancelled(ctx context.Context, orgID, projectID string, milestoneNumber int) (bool, error) {
+	newest, err := e.p.Runs.NewestRunForMilestone(ctx, orgID, projectID, milestoneNumber)
+	if err != nil {
+		return false, err
+	}
+	if newest == nil {
+		return false, nil
+	}
+	if newest.State != delivery.RunStateCancelled {
+		return false, nil
+	}
+	slog.DebugContext(ctx, "eventcore: reconcile sweep skipping a cancelled increment",
+		"project", projectID, "milestone", milestoneNumber, "run", newest.ID)
+	return true, nil
 }
 
 // offerRun routes ONE unworked milestone: a validation run when the version's

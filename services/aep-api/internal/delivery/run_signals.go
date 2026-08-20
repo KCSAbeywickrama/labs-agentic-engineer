@@ -58,6 +58,14 @@ const (
 	// cannot run the activities that record the outcome. Stopping the agent pod
 	// is the HTTP cancel surface's job (runread.CycleReaper → DeleteComponent),
 	// best-effort and immediate — not a Temporal activity.
+	//
+	// The run's OWN settle is what makes the cancel stick, and it is the second
+	// reason this cannot be a workflow cancellation. A cancelled settle CLOSES the
+	// issues the run had in flight and stamps `aep:cancelled` on them — a dev run's
+	// whole milestone, a task run's bugs and conflicts — because the reconcile
+	// sweep starts a run for any open workable kind on a milestone with no live
+	// run, so issues left open would have it restart the very run the person
+	// stopped, within a tick. A Temporal cancellation could not run those writes.
 	SigRunCancel = "run-cancel"
 )
 

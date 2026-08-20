@@ -383,6 +383,22 @@ indistinguishable from work nobody started, so the run that gave up would be
 replaced within a tick by one with fresh budgets. Cleared by a rebuild, or by a
 person removing the label.
 
+### Cancelled issue
+Work a CANCELLED run had in flight, closed with a comment and stamped
+`aep:cancelled`. Closing it is what makes the cancel stick: the reconcile sweep
+starts a run for any open workable kind on a milestone with no live run, so an
+issue left open would have the run restarted within a tick. What a cancel reaches
+is per run species — a **build**'s takes every open issue in the milestone, gates
+and ledger notes included, and closes the milestone with them, because the
+increment is abandoned; a **bug-fix** run's takes only its bugs and conflicts and
+leaves the version standing. A build's one exception is the version's
+**validation task**: cancel reverts nothing, so that task is a handle on software
+still deployed and closing it would discard a pending judgement of it. Only issues that were OPEN at cancel time are marked,
+which is what the marker is for: a build of an UNCHANGED spec reopens exactly them
+and clears the label, while work a cycle genuinely finished stays closed. Nothing
+is reverted — merged commits stay on `main` and promoted components keep serving.
+Compare a **halted issue**, which stays open because that run may be retried.
+
 ### Dispatch gate
 A `provision` issue. Never agent work — a **dispatch hold**: while one is open
 the run dispatches nothing, and a hand-filed one mid-run is a deliberate human

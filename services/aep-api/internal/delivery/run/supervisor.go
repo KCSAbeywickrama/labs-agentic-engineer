@@ -140,6 +140,7 @@ func (s *Supervisor) StartRun(ctx context.Context, req delivery.StartRunRequest)
 		// adoption). Reading a tag off the row would make every re-offer re-plan.
 		Tag:             req.Tag,
 		ProvisionInputs: req.ProvisionInputs,
+		Rebuild:         req.Rebuild,
 		// Budgets come off the ROW, never the request: a run the sweep re-offers is
 		// an existing row, and reading the re-offer's (default) values would quietly
 		// widen a run that was admitted narrower.

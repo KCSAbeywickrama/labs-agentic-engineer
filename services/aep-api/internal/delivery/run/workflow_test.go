@@ -103,8 +103,14 @@ type harness struct {
 	// budget's assertion surface: the reconcile sweep restarts open work of a
 	// kind on a milestone with no live run, so a failed settle that halted
 	// nothing is a budget the platform no longer enforces.
-	halts  []HaltWorkInput
-	closed int
+	halts []HaltWorkInput
+	// cancels records every close of a cancelled run's in-flight work. It is the
+	// cancel's assertion surface for the same reason halts is the halt's: the
+	// reconcile sweep restarts open work of a kind on a milestone with no live run,
+	// so a cancelled settle that closed nothing is a cancel button that stops the
+	// run and then pays for its replacement a minute later.
+	cancels []CloseCancelledWorkInput
+	closed  int
 }
 
 // newHarness registers the activities whose behaviour never varies — the
@@ -141,6 +147,7 @@ func newHarness(t *testing.T) *harness {
 	h.env.RegisterActivity(acts.PollCycleDeployments)
 	h.env.RegisterActivity(acts.MintDeployFixIssues)
 	h.env.RegisterActivity(acts.HaltUnfinishedWork)
+	h.env.RegisterActivity(acts.CloseCancelledWork)
 
 	h.env.OnActivity(acts.SetRunState, mock.Anything, mock.Anything).
 		Run(func(args mock.Arguments) {
@@ -186,6 +193,15 @@ func newHarness(t *testing.T) *harness {
 			h.mu.Lock()
 			defer h.mu.Unlock()
 			h.halts = append(h.halts, args.Get(1).(HaltWorkInput))
+		}).Return([]int{}, nil)
+	// Neither does the cancel's close: every CANCELLED settle closes the work the
+	// run had in flight, so a test asserts on WHAT was closed rather than on
+	// whether the activity was pinned.
+	h.env.OnActivity(acts.CloseCancelledWork, mock.Anything, mock.Anything).
+		Run(func(args mock.Arguments) {
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			h.cancels = append(h.cancels, args.Get(1).(CloseCancelledWorkInput))
 		}).Return([]int{}, nil)
 	// The validation task's close never varies — it is the platform's write, made
 	// on every ending — so it is a constructor default like the other writers.
@@ -448,6 +464,13 @@ func (h *harness) haltedWork() []HaltWorkInput {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return append([]HaltWorkInput(nil), h.halts...)
+}
+
+// cancelledWork is what the run closed as work it had in flight, read safely.
+func (h *harness) cancelledWork() []CloseCancelledWorkInput {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]CloseCancelledWorkInput(nil), h.cancels...)
 }
 
 // taskCloseCount is the validation-task close tally, read safely.
@@ -1237,9 +1260,10 @@ func TestSucceededSettle_HaltsNothing(t *testing.T) {
 }
 
 // A CANCELLED run halts nothing either, and the reason is a different one: cancel
-// has its own vocabulary (`aep:cancelled`, applied by the cancel surface) and its
-// own way forward, which is a rebuild that REOPENS exactly what was in flight.
-// Stamping `aep:halted` over it would make that rebuild's handle ambiguous.
+// has its own vocabulary and its own way forward. It CLOSES the work it had in
+// flight and stamps `aep:cancelled` on it, which is the rebuild's handle on what
+// was in flight; stamping `aep:halted` over that would say the sweep must leave
+// alone what the rebuild is about to reopen.
 func TestCancelledSettle_HaltsNothing(t *testing.T) {
 	h := newHarness(t)
 	h.milestoneIs(workable(1, 1))
@@ -1866,7 +1890,9 @@ func TestCancel_FromWaiting(t *testing.T) {
 
 	h.assertSettled(t, res, delivery.RunStateCancelled, "")
 	require.Equal(t, 0, h.dispatchCount(), "a cancelled wait never dispatched")
-	require.Equal(t, 0, h.closed, "an abandoned increment keeps its milestone open")
+	// The increment is abandoned, so the milestone is closed behind it — and its
+	// gates go with the rest of the work (see TestCancel_DevClosesTheWholeMilestone).
+	require.Equal(t, 1, h.closed, "a cancelled build abandons the increment and closes its milestone")
 }
 
 // TestCancel_FromRunning: cancel mid-cycle settles the run and closes the cycle
@@ -1883,6 +1909,84 @@ func TestCancel_FromRunning(t *testing.T) {
 	h.assertSettled(t, res, delivery.RunStateCancelled, "")
 	require.Equal(t, 1, h.dispatchCount())
 	require.Equal(t, []FinishCycleInput{{CycleID: testCycleID}}, h.finishes)
+}
+
+// ---- what a cancel COSTS, per species ---------------------------------------
+//
+// Closing the issues is what makes a cancel STICK. The reconcile sweep starts a
+// run for any open workable kind on a milestone with no live run, so a cancel that
+// only recorded itself would be undone within a tick — the cancel button would
+// stop the run and pay for its replacement a minute later. These three pin what
+// each species abandons, because the answer differs and the differences are the
+// design.
+
+// A cancelled BUILD abandons the whole increment: every open issue in its
+// milestone is closed and stamped, gates included, and the milestone is closed
+// behind them.
+//
+// The gates going is the deliberate asymmetry with the halt. A halted run may be
+// retried in the same version, so its gates still name dependencies somebody has
+// to resolve; a cancelled one will not be, and the way forward is the spec and
+// another build.
+func TestCancel_DevAbandonsTheIncrementAndClosesItsMilestone(t *testing.T) {
+	h := newHarness(t)
+	h.milestoneIs(workable(1, 1))
+	h.signal(delivery.SigRunCancel, time.Second)
+
+	h.runWith(RunInput{Kind: delivery.RunKindDev, Tag: "v3"})
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateCancelled, "")
+	cancels := h.cancelledWork()
+	require.Len(t, cancels, 1, "a cancelled settle closes the work it had in flight, exactly once")
+	require.Equal(t, delivery.RunKindDev, cancels[0].Kind,
+		"the kind selects the population, and a build's is the whole milestone")
+	require.Equal(t, testMilepost, cancels[0].MilestoneNumber)
+	require.Equal(t, 1, h.closedCount(), "the increment is abandoned, so its milestone closes")
+	require.Empty(t, h.haltedWork(), "cancel has its own vocabulary; `aep:halted` would contradict it")
+}
+
+// A cancelled TASK run abandons only itself. The version it works is the DEPLOYED
+// one — it is not being withdrawn — so its milestone stays OPEN and the way
+// forward is to reopen the bugs or file new ones.
+func TestCancel_TaskLeavesTheDeployedVersionStanding(t *testing.T) {
+	h := newHarness(t)
+	h.milestoneIs(workable(1, 1))
+	h.signal(delivery.SigRunCancel, time.Second)
+
+	h.run(delivery.RunKindTask, 0)
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateCancelled, "")
+	cancels := h.cancelledWork()
+	require.Len(t, cancels, 1)
+	require.Equal(t, delivery.RunKindTask, cancels[0].Kind,
+		"a bug-fix run's cancel reaches its own defects and nothing of the version's")
+	require.Equal(t, 0, h.closedCount(),
+		"a cancelled bug-fix run withdraws no release, so the milestone stays open")
+}
+
+// A cancelled VALIDATION run closes ONE thing — the task it adopted — through the
+// close every ending performs, and it reaches the milestone not at all.
+//
+// That narrowing is what keeps TestValidationRun_CancelBeforeAdoptionLeavesTheTaskOpen
+// true: the close is scoped to what this run adopted, so a cancel before the first
+// read leaves the version's task for the next trigger. Reaching the milestone would
+// close it anyway and turn "validate again" into "file the task again".
+func TestCancel_ValidationClosesOnlyTheTaskItAdopted(t *testing.T) {
+	h := newHarness(t)
+	h.validationIs(77, delivery.ValidationVerdictPassed)
+	h.factsAre(CycleFacts{}, CycleFacts{CycleID: testCycleID, CancelRequested: true})
+	h.signal(delivery.SigRunPRMerged, time.Second)
+
+	h.run(delivery.RunKindValidation, 0)
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateCancelled, "")
+	require.Equal(t, 1, h.taskCloseCount(), "the adopted task is closed, as on every ending")
+	require.Empty(t, h.cancelledWork(),
+		"a validation run's cancel must not reach the milestone — the repair work there is a task run's")
+	require.Equal(t, 0, h.closedCount(), "the version stands, merely unjudged")
 }
 
 // TestMidRunGate_HoldsTheNextDispatch is the human brake: a gate filed while the
@@ -2057,6 +2161,34 @@ func TestPlanningPhase_SkippedWhenTheRunOwnsNoVersion(t *testing.T) {
 			require.Equal(t, 0, plans)
 		})
 	}
+}
+
+// A REBUILD of an UNCHANGED spec mints the gates and does NOT plan.
+//
+// This is the subtle one. Plan dedupe is the title slug against the milestone's
+// issues in ANY state, which is what makes re-planning additive-only and a crash
+// re-run a no-op — and the cancel this rebuild is recovering from CLOSED every
+// open issue. So a re-plan would recognise every slug, mint NOTHING, and the loop
+// would then read the empty working set as "delivered" and settle a version it
+// never built. Reopening the marked issues is what restores the working set
+// instead, and the click has already done it by the time this run starts.
+//
+// The GATES still run, and must: they dedupe onto the reopened gate issues, so a
+// dependency resolved since the cancel is re-read rather than assumed.
+func TestPlanningPhase_ARebuildMintsGatesButDoesNotPlan(t *testing.T) {
+	h := newHarness(t)
+	h.milestoneIs(workable(1, 1), MilestoneSnapshot{})
+	h.merges(1)
+
+	h.runWith(RunInput{Kind: delivery.RunKindDev, Tag: "v3", Rebuild: true})
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
+	gates, plans := h.planCounts()
+	require.Equal(t, 1, gates, "the version's gates are re-derived and dedupe onto the reopened ones")
+	require.Equal(t, 0, plans, "a re-plan over reopened work would mint nothing and settle an unbuilt version")
+	// The reopened work was still worked: skipping the plan is not skipping the run.
+	require.Equal(t, []string{delivery.CycleKindCoding}, h.dispatchKinds())
 }
 
 // A run that did NOT plan may not read an empty working set as "delivered".

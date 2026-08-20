@@ -118,6 +118,26 @@ type RunInput struct {
 	// secret value (see its doc), so it is safe in workflow history.
 	Tag             string                    `json:"tag,omitempty"`
 	ProvisionInputs []delivery.ProvisionInput `json:"provisionInputs,omitempty"`
+
+	// Rebuild narrows the planning phase to its GATES: this run owns the version
+	// (it carries a Tag) but its milestone is ALREADY FILLED, because the click
+	// reopened it. It rides the request beside Tag, for the same reason and with
+	// the same replay rule — false is the pre-existing behaviour, so an execution
+	// started before the field existed replays as an ordinary planning run.
+	//
+	// Skipping the plan is not an optimisation, it is the only correct answer.
+	// Plan dedupe is the title slug against the milestone's issues in ANY state,
+	// which is what makes re-planning additive-only and a crash re-run a no-op —
+	// and a cancel CLOSED every open issue, so a re-plan would recognise every
+	// slug, mint NOTHING, and the run would then read the empty working set as
+	// "delivered" and settle a version it never built. Reopening the issues is
+	// what restores the working set without breaking that dedupe rule, and it is
+	// also cheaper: no LLM turn.
+	//
+	// The gates still run, and must: they are idempotent by dedupe key and land
+	// on the reopened gate issues, so a dependency resolved since the cancel is
+	// re-read rather than assumed.
+	Rebuild bool `json:"rebuild,omitempty"`
 }
 
 // RunResult is the run's outcome, mirroring what was written to the run row.
@@ -477,9 +497,22 @@ func (l *loop) runCycle(ctx workflow.Context, kind string, anchorIssue int) (cyc
 	return l.deployCycle(ctx, components)
 }
 
-// settle ends the run. The milestone close is display only and happens on
-// success alone: a failed or cancelled increment stays open, because the way
-// forward from it is more work in the same version.
+// settle ends the run, and each terminal state carries its own consequence for
+// the milestone's issues — because each says something different about whether
+// the work is still somebody's.
+//
+//	succeeded  the milestone is CLOSED. Display only; nothing branches on it.
+//	failed     the work stays OPEN and is HALTED, because the way forward from a
+//	           failed increment is more work in the same version.
+//	cancelled  the in-flight work is CLOSED and stamped `aep:cancelled`, and a
+//	           DEV run's milestone is closed with it: the increment is abandoned.
+//	blocked    nothing. A quota block is a wait somebody else clears.
+//
+// Both issue consequences run BEFORE the row is settled. That order is what makes
+// them mandatory rather than best-effort at the loop's level: a write that fails
+// stalls under Temporal's retries with the run still non-terminal, where settling
+// first and then writing would leave a terminal row whose issues never got the
+// treatment — and nothing afterwards would notice.
 func (l *loop) settle(ctx workflow.Context, state, reason string) (RunResult, error) {
 	l.st.Phase = delivery.RunPhaseSettling
 	// Cancel stops the agent at the HTTP surface (runread.CycleReaper →
@@ -493,6 +526,19 @@ func (l *loop) settle(ctx workflow.Context, state, reason string) (RunResult, er
 	if state == delivery.RunStateFailed {
 		if err := l.haltUnfinishedWork(ctx, reason); err != nil {
 			return l.result(), err
+		}
+	}
+	if state == delivery.RunStateCancelled {
+		if err := l.closeCancelledWork(ctx); err != nil {
+			return l.result(), err
+		}
+		// The ISSUES first, then the container — the same order supersede uses, and
+		// for the same reason: a milestone closing before the work inside it reads
+		// as a resolution rather than an abandonment.
+		if delivery.CancelClosesTheMilestone(l.kind()) {
+			if err := l.closeMilestone(ctx); err != nil {
+				return l.result(), err
+			}
 		}
 	}
 	if err := l.settleRun(ctx, state, reason); err != nil {
@@ -715,6 +761,67 @@ func (l *loop) haltUnfinishedWork(ctx workflow.Context, reason string) error {
 	if len(halted) > 0 {
 		workflow.GetLogger(ctx).Info("run failed; halted the work it could not finish",
 			"milestone", l.in.MilestoneNumber, "reason", reason, "issues", halted)
+	}
+	return nil
+}
+
+// closeCancelledWork closes the issues THIS run had in flight when a person
+// abandoned it, stamping `aep:cancelled` on each.
+//
+// It is the halt's sibling and it defeats the same mechanism from the other
+// ending. A cancelled run leaves its issues OPEN, and the sweep's rule is "open
+// work of this kind, no live run, start one" — so without this the run the user
+// just cancelled is restarted within a tick, dispatches an agent, and the cancel
+// button reads as having done nothing but cost money. Closing the issues is the
+// suppression; the label is the way back.
+//
+// WHAT it closes is per KIND (delivery.InCancelledWork), and the dev case is
+// deliberately wider than any working set: a cancelled BUILD abandons the whole
+// increment, so every open issue in the milestone goes — the working set, the
+// dispatch GATES, the version's validation task and the ledger-only notes alike —
+// and the milestone is closed behind it. That is the asymmetry with the halt: a
+// halted run may be retried in the same version, so its gates still name
+// dependencies somebody has to resolve, and closing them would erase the record
+// of what the version was waiting on.
+//
+// A task run's cancel reaches only the bugs and conflicts it was working. The
+// version it works is the DEPLOYED one and is not being abandoned, so its plan,
+// its validation task and its milestone are untouched, and the way forward is to
+// reopen the bugs or file new ones.
+//
+// A VALIDATION run closes nothing here, and that is a decision rather than an
+// omission. Its consequence is the version's validation task, and settleJudged
+// already closes that on EVERY ending — scoped to the task this run ADOPTED,
+// which is the narrowing that matters: a run cancelled before its first read
+// adopted nothing, and the task stays open for the next trigger. Reaching the
+// milestone from here would close it anyway and turn "validate again" into
+// "file the task again".
+//
+// Nothing is REVERTED. Commits a cycle merged stay on `main` and components it
+// promoted keep serving, so closing the milestone says the increment was
+// abandoned — never that the release was withdrawn.
+//
+// Best-effort in spirit but NOT in error handling, exactly like the halt: an
+// activity failure propagates, because a cancel that silently left the sweep
+// armed is the bug this exists to prevent, and a visible stall is preferable.
+func (l *loop) closeCancelledWork(ctx workflow.Context) error {
+	if l.kind() == delivery.RunKindValidation {
+		return nil
+	}
+	var closed []int
+	err := workflow.ExecuteActivity(activityCtx(ctx), (*Activities).CloseCancelledWork,
+		CloseCancelledWorkInput{
+			OrgID:           l.in.OrgID,
+			ProjectID:       l.in.ProjectID,
+			MilestoneNumber: l.in.MilestoneNumber,
+			Kind:            l.kind(),
+		}).Get(ctx, &closed)
+	if err != nil {
+		return err
+	}
+	if len(closed) > 0 {
+		workflow.GetLogger(ctx).Info("run cancelled; closed the work it had in flight",
+			"milestone", l.in.MilestoneNumber, "kind", l.kind(), "issues", closed)
 	}
 	return nil
 }

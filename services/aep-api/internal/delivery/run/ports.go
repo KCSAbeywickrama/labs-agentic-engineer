@@ -305,6 +305,24 @@ type WorkHalter interface {
 		runKind, reason string) (halted []int, err error)
 }
 
+// WorkCanceller closes the issues a CANCELLED run had in flight, so the reconcile
+// sweep does not restart the very run the user just abandoned. Satisfied by the
+// event plane, reached through this port for the same reason WorkHalter is: the
+// supervisor observes, the plane owns every issue write, its labels and its prose.
+//
+// It is the sibling of the halt and takes the same shape — the RUN's kind, because
+// what a cancel abandons is per species: a build's cancel abandons the whole
+// increment, a bug-fix run's abandons only the defects it was working, and a
+// validation run's own consequence (closing the task it adopted) is already
+// performed by the workflow that adopted it.
+//
+// Returns the issues it closed. The supervisor logs them and nothing else: the
+// closes are a fact about the milestone, not about the run row.
+type WorkCanceller interface {
+	CloseCancelledWork(ctx context.Context, orgID, projectID string, milestoneNumber int,
+		runKind string) (closed []int, err error)
+}
+
 // DeployIssueMinter files the fix work for components whose deployment did not
 // come up. Satisfied by the event plane, reached through this port so the
 // supervisor still writes no issue of its own.

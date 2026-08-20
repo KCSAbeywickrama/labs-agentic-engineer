@@ -106,6 +106,23 @@ func (f *fakeRuns) DeployedMilestoneRun(context.Context, string, string) (*deliv
 	return nil, nil
 }
 
+// NewestRunForMilestone answers with the FIRST matching row, which mirrors the
+// repository's newest-first ordering: a test that wants a rebuild after a cancel
+// therefore lists the rebuild's row before the cancelled one.
+func (f *fakeRuns) NewestRunForMilestone(_ context.Context, _, _ string, milestone int) (*delivery.MilestoneRun, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := range f.rows {
+		if f.rows[i].MilestoneNumber == milestone {
+			return &f.rows[i], nil
+		}
+	}
+	return nil, nil
+}
+
 func (f *fakeRuns) KnownMilestones(context.Context, string, string) ([]MilestoneRef, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -205,16 +222,27 @@ type fakeIssues struct {
 	reopened  []int
 	commented []int
 	labelled  []string
+	// closeComments is the comment each close carried, by issue. A close whose
+	// comment is dropped leaves a human staring at a closed issue with no
+	// explanation, which is a real failure and not a cosmetic one.
+	closeComments map[int]string
+	// labelErr fails every AddLabels. It exists to prove ORDER where two writes
+	// are recorded in separate slices: a cancel labels an issue BEFORE closing it,
+	// so with the label failing nothing may be closed.
+	labelErr error
 }
 
 // writer is the fake wearing the domain's issue-write surface, which is what
 // every mint in this package goes through.
 func (f *fakeIssues) writer() *delivery.IssueWriter { return delivery.NewIssueWriter(f) }
 
-func (f *fakeIssues) CloseIssue(_ context.Context, _, _ string, number int, _ string) error {
+func (f *fakeIssues) CloseIssue(_ context.Context, _, _ string, number int, comment string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.closed = append(f.closed, number)
+	if comment != "" {
+		f.closeComments[number] = comment
+	}
 	return nil
 }
 
@@ -235,6 +263,9 @@ func (f *fakeIssues) CommentIssue(_ context.Context, _, _ string, number int, _ 
 func (f *fakeIssues) AddLabels(_ context.Context, _, _ string, number int, labels []string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.labelErr != nil {
+		return f.labelErr
+	}
 	for _, l := range labels {
 		f.labelled = append(f.labelled, fmt.Sprintf("%d+%s", number, l))
 	}
@@ -250,9 +281,10 @@ func (f *fakeIssues) RemoveLabel(_ context.Context, _, _ string, number int, lab
 
 func newFakeIssues() *fakeIssues {
 	return &fakeIssues{
-		byMilestone: map[int][]sourcecontrol.IssueInfo{},
-		counts:      map[int]*sourcecontrol.MilestoneIssueCounts{},
-		next:        100,
+		byMilestone:   map[int][]sourcecontrol.IssueInfo{},
+		counts:        map[int]*sourcecontrol.MilestoneIssueCounts{},
+		closeComments: map[int]string{},
+		next:          100,
 	}
 }
 
@@ -451,6 +483,27 @@ func (f *fakeIssues) withIssue(milestone, number int, labels ...string) *fakeIss
 	})
 	sets := make([][]string, 0, len(f.byMilestone[milestone]))
 	for _, issue := range f.byMilestone[milestone] {
+		sets = append(sets, issue.Labels)
+	}
+	f.counts[milestone] = hostCounts(sets...)
+	return f
+}
+
+// withClosedIssue puts one CLOSED issue in the milestone. Counts are re-derived
+// from the OPEN ones only, the way the host counts them.
+//
+// It exists for the properties that are about what is NOT touched: work a cycle
+// genuinely finished is closed, and a cancel must leave it closed and unmarked so
+// a rebuild cannot resurrect it.
+func (f *fakeIssues) withClosedIssue(milestone, number int, labels ...string) *fakeIssues {
+	f.byMilestone[milestone] = append(f.byMilestone[milestone], sourcecontrol.IssueInfo{
+		Number: number, State: "closed", Labels: labels,
+	})
+	sets := make([][]string, 0, len(f.byMilestone[milestone]))
+	for _, issue := range f.byMilestone[milestone] {
+		if issue.State != "open" {
+			continue
+		}
 		sets = append(sets, issue.Labels)
 	}
 	f.counts[milestone] = hostCounts(sets...)

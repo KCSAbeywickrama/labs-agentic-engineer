@@ -288,6 +288,64 @@ func TestInWorkingSet(t *testing.T) {
 	}
 }
 
+// TestInCancelledWork pins what a CANCEL abandons per species, and the asymmetry
+// with the halt above is the whole point of having two predicates.
+//
+// A halt says "this run gave up; another attempt at the same version may be worth
+// making" — so the gates survive, because a retry still needs its dependencies
+// resolved and closing them would erase the record of what the version was waiting
+// on. A cancel says "this increment is abandoned" — so a BUILD's cancel takes the
+// gates, the validation task and the human's ledger note with the working set, and
+// the milestone closes behind them.
+func TestInCancelledWork(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name   string
+		kind   string
+		labels []string
+		want   bool
+	}{
+		// A cancelled build abandons EVERYTHING open in its milestone.
+		{"a cancelled build closes its planned work", RunKindDev, planned, true},
+		{"a cancelled build closes its bugs", RunKindDev, bug, true},
+		{"a cancelled build closes its conflicts", RunKindDev, conflict, true},
+		// The one thing a cancelled build spares. The task is a handle on software
+		// that is already DEPLOYED — cancel reverts nothing — so closing it would
+		// discard a pending judgement of what is still running.
+		{"a cancelled build leaves the version's validation task open", RunKindDev, valid, false},
+		// The difference from a halt, which leaves both of these alone.
+		{"a cancelled build closes the dispatch gates too", RunKindDev, gate, true},
+		{"a cancelled build closes the ledger notes too", RunKindDev, ledger, true},
+		// A bug-fix run works the DEPLOYED version, which is not being withdrawn:
+		// its plan, its gates and its verdict handle are untouched.
+		{"a cancelled bug-fix run closes its bugs", RunKindTask, bug, true},
+		{"a cancelled bug-fix run closes its conflicts", RunKindTask, conflict, true},
+		{"a cancelled bug-fix run leaves planned work alone", RunKindTask, planned, false},
+		{"a cancelled bug-fix run leaves the gates alone", RunKindTask, gate, false},
+		{"a cancelled bug-fix run leaves the validation task alone", RunKindTask, valid, false},
+		// A validation run's own consequence is the task it ADOPTED, closed by the
+		// workflow on every ending. Reaching the milestone from here would close a
+		// task a run cancelled before its first read never adopted.
+		{"a cancelled validation closes nothing here", RunKindValidation, valid, false},
+		{"a cancelled validation leaves the repair work alone", RunKindValidation, repair, false},
+		{"an unknown kind closes nothing", "sideways", bug, false},
+	}
+	for _, c := range cases {
+		if got := InCancelledWork(c.kind, c.labels); got != c.want {
+			t.Errorf("InCancelledWork(%s) = %v, want %v", c.name, got, c.want)
+		}
+	}
+	// The milestone rule, per kind: only an abandoned INCREMENT closes one.
+	if !CancelClosesTheMilestone(RunKindDev) {
+		t.Error("a cancelled build abandons the increment, so its milestone closes")
+	}
+	for _, kind := range []string{RunKindTask, RunKindValidation} {
+		if CancelClosesTheMilestone(kind) {
+			t.Errorf("a cancelled %s run withdraws no release — the milestone stays open", kind)
+		}
+	}
+}
+
 // TestDispatchable pins the ONE dispatch rule both halves of the loop read: the
 // event plane, deciding whether a webhook is worth waking a waiting run for, and
 // the supervisor, at every cycle boundary. They reach it from different shapes,

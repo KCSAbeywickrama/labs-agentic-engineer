@@ -80,11 +80,12 @@ func (f *fakeTagger) TagSpec(context.Context, string, string) (*spec.SpecSaveRes
 type planSpy struct {
 	mu sync.Mutex
 
-	createdMilestones []string
-	nextNumber        int
-	activeRun         *delivery.MilestoneRun
-	judgingRun        *delivery.MilestoneRun
-	refuseAdmit       bool
+	createdMilestones  []string
+	reopenedMilestones []int
+	nextNumber         int
+	activeRun          *delivery.MilestoneRun
+	judgingRun         *delivery.MilestoneRun
+	refuseAdmit        bool
 	// rows is what ListByProject answers — the version ledger the list read is
 	// built from, and the supersede lookup's input.
 	rows    []delivery.MilestoneRun
@@ -112,6 +113,12 @@ func (p *planSpy) CreateMilestone(_ context.Context, _, _ string, req sourcecont
 	return &sourcecontrol.MilestoneResult{Number: n, Created: true}, nil
 }
 func (p *planSpy) CloseMilestone(context.Context, string, string, int) error { return nil }
+func (p *planSpy) ReopenMilestone(_ context.Context, _, _ string, number int) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.reopenedMilestones = append(p.reopenedMilestones, number)
+	return nil
+}
 func (p *planSpy) ListMilestoneIssues(context.Context, string, string, sourcecontrol.MilestoneIssuesFilter) ([]sourcecontrol.IssueInfo, error) {
 	return nil, nil
 }
@@ -187,6 +194,20 @@ func (p *planSpy) awaitStart(t *testing.T) int {
 		t.Fatalf("started %d runs, want exactly 1", len(p.started))
 	}
 	return p.started[0].MilestoneNumber
+}
+
+// reopened is the milestones the click put back, read safely.
+func (p *planSpy) reopened() []int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]int(nil), p.reopenedMilestones...)
+}
+
+// startedRuns is what the click handed the supervisor, read safely.
+func (p *planSpy) startedRuns() []delivery.StartRunRequest {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]delivery.StartRunRequest(nil), p.started...)
 }
 
 func (p *planSpy) milestones() []string {
@@ -289,9 +310,19 @@ func TestBuild_CutsTheTagAndClaimsTheVersion(t *testing.T) {
 	}
 }
 
-func TestBuild_UnchangedSpec_ReturnsExistingTagAndStillStartsTheRun(t *testing.T) {
+// THE SPEC-SAVE STATUS IS THE WHOLE BRANCH, and this is the pair that pins it.
+// There is no second question asked anywhere — in particular not "was the last run
+// cancelled" — so what the click does after a cancel is decided by whether the
+// person edited the spec, and by nothing else.
+//
+// `unchanged` is the SAME tag, so the same milestone: reopen it and exactly the
+// issues a cancel closed inside it, and tell the run NOT to plan. The run must be
+// told, because a re-plan over a milestone whose issues were all closed would
+// recognise every title slug, mint nothing, and hand the loop an empty working set
+// to read as "delivered".
+func TestBuild_UnchangedSpec_ReopensTheIncrementAndDoesNotReplan(t *testing.T) {
 	spy := newPlanSpy()
-	tagger := &fakeTagger{res: &spec.SpecSaveResult{Status: "unchanged", Tag: "v2", Version: 2}}
+	tagger := &fakeTagger{res: &spec.SpecSaveResult{Status: spec.SpecSaveUnchanged, Tag: "v2", Version: 2}}
 	svc := withPlanPath(newSvc(fakeRepos{}, tagger), spy)
 
 	code, body := postBuild(t, svc, "shop")
@@ -301,9 +332,36 @@ func TestBuild_UnchangedSpec_ReturnsExistingTagAndStillStartsTheRun(t *testing.T
 	if out := decodeBody[gen.BuildResponse](t, body); out.Tag != "v2" {
 		t.Errorf("tag = %q, want the existing v2", out.Tag)
 	}
-	// CreateMilestone is idempotent, so a re-build of an unchanged spec adopts
-	// the same milestone and re-plans into it (dedupe makes that additive-only).
+	// CreateMilestone is idempotent, so an unchanged spec adopts the same
+	// milestone — and the click puts it, and what the cancel closed in it, back.
 	spy.awaitStart(t)
+	if got := spy.reopened(); len(got) != 1 || got[0] != 9 {
+		t.Errorf("reopened milestones = %v, want the claimed one (9) reopened exactly once", got)
+	}
+	if req := spy.startedRuns()[0]; !req.Rebuild {
+		t.Errorf("started %+v, want Rebuild set so the run mints its gates and skips the planning turn", req)
+	}
+}
+
+// `approved` is a NEW tag: the ordinary build path with nothing special about it.
+// It plans fresh, and it must not carry the rebuild flag — a version that was
+// never filled has to be.
+func TestBuild_ChangedSpec_PlansTheNewVersionFresh(t *testing.T) {
+	spy := newPlanSpy()
+	tagger := &fakeTagger{res: &spec.SpecSaveResult{Status: spec.SpecSaveApproved, Tag: "v3", Version: 3}}
+	svc := withPlanPath(newSvc(fakeRepos{}, tagger), spy)
+
+	code, body := postBuild(t, svc, "shop")
+	if code != 200 {
+		t.Fatalf("build: got %d body=%s", code, body)
+	}
+	spy.awaitStart(t)
+	if got := spy.reopened(); len(got) != 0 {
+		t.Errorf("a new version reopens nothing, got %v", got)
+	}
+	if req := spy.startedRuns()[0]; req.Rebuild {
+		t.Errorf("started %+v, want Rebuild clear — a new version has to be planned", req)
+	}
 }
 
 // The build mutex: a second click while a dev run is live is a 409, and it

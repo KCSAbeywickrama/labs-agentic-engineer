@@ -1250,6 +1250,10 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 			// does not restart them with fresh budgets. Same plane, same reason —
 			// the supervisor decides, the plane writes the issue.
 			Halter: eventPlane,
+			// The cancel's other half: a cancelled run's in-flight issues are closed
+			// and stamped so the sweep does not restart the run the user just
+			// stopped, and so a rebuild of the same spec knows what to reopen.
+			Canceller: eventPlane,
 			// The planning phase. These are the same two collaborators the build
 			// click used to drive in a detached goroutine; behind an activity they
 			// are durable across a restart and retried on a blip.

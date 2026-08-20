@@ -287,6 +287,78 @@ func InWorkingSet(runKind string, labels []string) bool {
 	}
 }
 
+// InCancelledWork reports whether a CANCEL of a run of this KIND closes the
+// issue — the one place the mapping from a run species to the population its
+// cancel suppresses is written, exactly as InWorkingSet is for the halt.
+//
+// It is a WIDER population than the working set for a dev run and a narrower one
+// for the others, and the asymmetry is the whole statement cancel makes:
+//
+//	dev         EVERYTHING open in the milestone — the working set, the dispatch
+//	            gates, the version's validation task and the ledger-only notes
+//	            alike. A cancelled build ABANDONS the increment, so the milestone
+//	            is closed behind it and nothing in it is anybody's work any more.
+//	            The gates go too, which is the difference from a halt: a halted
+//	            run may be retried in the same version, so its gates still name
+//	            dependencies somebody must resolve.
+//	task        the bugs and conflicts it was working. The version is NOT being
+//	            abandoned — it is still the deployed one — so its milestone, its
+//	            plan and its validation task are untouched.
+//	validation  NOTHING. Its consequence is the version's validation task, and
+//	            that close already happens on every ending (settleJudged), scoped
+//	            to the task the run ADOPTED. Doing it from here would close a task
+//	            a run cancelled before its first read never adopted, which is
+//	            exactly the "leave it for the next trigger" case.
+//
+// Closing the issues is what makes a cancel STICK rather than merely record
+// itself. The reconcile sweep starts a run for any open workable kind on a
+// milestone with no live run, so an open issue left behind by a cancel is
+// indistinguishable from work nobody started and the run is restarted within a
+// tick. Suppression, not bookkeeping.
+//
+// The dev arm ignores the labels, and that is deliberate rather than a signature
+// left over from the others: "every open issue" is the rule, and writing it as a
+// predicate keeps the per-kind mapping in ONE readable place instead of splitting
+// it between a predicate and an `if kind == dev` at the call site.
+func InCancelledWork(runKind string, labels []string) bool {
+	switch runKind {
+	case RunKindDev:
+		// Everything the increment was carrying — the working set and the
+		// `provision` gates alike, and a bare ledger note with it, because the
+		// milestone is being closed and leaving an open issue inside it is what
+		// the sweep reads as unworked.
+		//
+		// EXCEPT the version's validation task. That is a handle on something
+		// already DEPLOYED, and cancel reverts nothing: commits a cycle merged
+		// stay on `main` and components it promoted keep serving. Closing it
+		// would discard a pending judgement of software that is still running,
+		// and the task is not this run's to abandon — a dev run mints one at
+		// deployed-green and settles, so it only ever has one OPEN here when a
+		// delivered-but-unjudged version was rebuilt and then cancelled.
+		// Leaving it costs nothing: the sweep skips a cancelled increment, and a
+		// later rebuild's dev run adopts the open task rather than filing a
+		// second one.
+		return !IsValidationWork(labels)
+	case RunKindTask:
+		return InTaskWorkingSet(labels)
+	default:
+		return false
+	}
+}
+
+// CancelClosesTheMilestone reports whether a cancel of a run of this KIND
+// abandons the INCREMENT — and therefore closes the version's milestone.
+//
+// Only a dev run's does. A build that was cancelled leaves a version nobody is
+// shipping, and the way forward is the spec and another build; a task or
+// validation run cancelled leaves the version exactly as deployed as it was, and
+// closing its milestone would say the release had been withdrawn.
+//
+// It is a statement about the INCREMENT, never about what is running. Nothing is
+// reverted by a cancel: commits a cycle merged stay on `main` and components it
+// already promoted keep serving.
+func CancelClosesTheMilestone(runKind string) bool { return runKind == RunKindDev }
+
 // IsDispatchGate reports whether an issue is a dispatch hold. Note it does NOT
 // test the arming switch: a gate carries none by construction, and reading a
 // gate through `aep` is what would make it invisible to the predicate that

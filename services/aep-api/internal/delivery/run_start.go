@@ -92,6 +92,19 @@ type StartRunRequest struct {
 	Tag             string
 	ProvisionInputs []ProvisionInput
 
+	// Rebuild says the version's milestone is ALREADY FILLED: the click resolved
+	// to the SAME tag (the spec did not change), reopened the milestone, and
+	// reopened exactly the issues a cancel had closed. The run mints its gates and
+	// skips the planning TURN.
+	//
+	// Only the build click sets it, and only on that branch. Re-planning a
+	// reopened milestone would mint NOTHING — plan dedupe is the title slug
+	// against the milestone's issues in any state — and the run would then read
+	// the empty working set as "delivered" and settle a version it never built.
+	// It rides the request beside Tag for the same reason: the row cannot tell
+	// "fill me" from "resume me", let alone "I refilled it for you".
+	Rebuild bool
+
 	// CycleCeiling and ValidationAttempts pin this run's budgets, overriding the
 	// platform defaults. Zero on both means "use the default", which is what every
 	// caller but the revalidate trigger passes — and what the sweep and adoption

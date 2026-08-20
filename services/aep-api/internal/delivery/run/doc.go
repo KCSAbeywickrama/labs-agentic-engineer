@@ -93,6 +93,41 @@
 // task it closes on every ending, and the repair and conflict issues it leaves
 // behind are deliberately a task run's work.
 //
+// # A cancelled run closes the work it had in flight
+//
+// The same mechanism, reached from the other ending. A CANCELLED settle comments
+// on, stamps `aep:cancelled` on and CLOSES the issues it abandons — because the
+// sweep's trigger is that same "open work of this kind, no live run, start one",
+// so a cancel that only recorded itself would be undone within a tick: the button
+// would stop the run and pay for its replacement a minute later.
+//
+// What it abandons is per species, and the differences are the design:
+//
+//	dev         EVERY open issue in the milestone — working set, dispatch gates,
+//	            the validation task and the ledger notes alike — and the milestone
+//	            CLOSES. The increment is abandoned. (The halt leaves the gates
+//	            alone, because a failed run may be retried in the same version.)
+//	task        its bugs and conflicts only; the milestone stays OPEN, because the
+//	            version it works is the DEPLOYED one and is not being withdrawn.
+//	validation  nothing here — its consequence is the task it ADOPTED, closed on
+//	            every ending, which is what leaves a cancel before the first read
+//	            with the version's task still open for the next trigger.
+//
+// Nothing is reverted: merged commits stay on `main` and promoted components keep
+// serving, so closing the milestone says the INCREMENT was abandoned rather than
+// that the release was withdrawn.
+//
+// Only issues OPEN at cancel time are marked, which is the whole reason the marker
+// exists: work a cycle genuinely finished stays closed and unmarked, so the way
+// back cannot resurrect it. That way back is a rebuild, decided by the SPEC-SAVE
+// STATUS alone — a changed spec cuts a new tag and plans it fresh, an unchanged one
+// reuses the same milestone, reopens exactly the marked set, clears the label and
+// starts a run with `Rebuild` set. Such a run mints its gates and SKIPS the
+// planning turn (see RunInput.Rebuild): plan dedupe is the title slug against the
+// milestone's issues in ANY state, so a re-plan over a cancel that closed
+// everything would mint nothing and the loop would settle an unbuilt version as
+// delivered.
+//
 // A dev run therefore **settles at deployed-green having minted the validation
 // task, and never validates**. Its verdict column stays EMPTY, which is the
 // honest reading of "delivered, not yet judged" — the exception is a project with
@@ -152,7 +187,8 @@
 //	stage_build.go           await the merge's fan-out
 //	stage_deploy.go          plan waves · promote · await Ready · converge
 //	stage_boundary.go        the shared loop · poll · dispatchable? · budgets · park
-//	workflow_dev.go          gates + plan + boundary loop + mint the validation task
+//	workflow_dev.go          gates + plan (skipped on a rebuild) + boundary loop +
+//	                         mint the validation task
 //	workflow_task.go         boundary loop + reopen the validation task
 //	workflow_validation.go   one agent stage + verdict + repair issues + close
 //	register.go              RegisterWorkflow per workflow, one RegisterActivity

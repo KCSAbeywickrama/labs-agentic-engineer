@@ -30,8 +30,8 @@ package githubhost
 //     issues, so nothing here reads it. Issue counts come from GraphQL, where
 //     milestone.issues is a pure-issue connection.
 //   - Milestone state has no side effects: closing one leaves its issues
-//     untouched, and a closed milestone still accepts new ones. Close is
-//     display only.
+//     untouched, and a closed milestone still accepts new ones. Close and reopen
+//     are display only.
 
 import (
 	"bytes"
@@ -184,6 +184,20 @@ func (c *Client) CloseMilestone(ctx context.Context, owner, repo string, cred se
 	url := fmt.Sprintf(c.apiBase+"/repos/%s/%s/milestones/%d", owner, repo, number)
 	return c.doJSON(ctx, http.MethodPatch, url, "milestone close", cred,
 		map[string]string{"state": "closed"}, nil, http.StatusOK)
+}
+
+// ReopenMilestone sets a milestone's state back to open, the same PATCH as the
+// close. Display only in the same way: a closed milestone never stopped
+// accepting issues, so this changes nothing but what a reader sees.
+//
+// It exists because a milestone OUTLIVES the run that closed it. A build of an
+// unchanged spec works the same version again — the same milestone a cancel
+// closed — and leaving it closed would show a version being actively worked
+// under a heading that says it is finished.
+func (c *Client) ReopenMilestone(ctx context.Context, owner, repo string, cred secrets.Credential, number int) error {
+	url := fmt.Sprintf(c.apiBase+"/repos/%s/%s/milestones/%d", owner, repo, number)
+	return c.doJSON(ctx, http.MethodPatch, url, "milestone reopen", cred,
+		map[string]string{"state": "open"}, nil, http.StatusOK)
 }
 
 // ListMilestones returns every milestone on the repo in the given state

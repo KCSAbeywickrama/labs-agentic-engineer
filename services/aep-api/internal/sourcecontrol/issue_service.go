@@ -81,6 +81,9 @@ type IssueService interface {
 	CreateMilestone(ctx context.Context, orgID, projectID string, req CreateMilestoneRequest) (*MilestoneResult, error)
 	// CloseMilestone closes a milestone at settle. Display only.
 	CloseMilestone(ctx context.Context, orgID, projectID string, number int) error
+	// ReopenMilestone reopens a closed milestone — what a rebuild of an unchanged
+	// spec does to the version it is working again. Display only, like the close.
+	ReopenMilestone(ctx context.Context, orgID, projectID string, number int) error
 	// ListMilestones returns the project's milestones in the given state
 	// ("open" | "closed" | "all"; empty ⇒ "all").
 	ListMilestones(ctx context.Context, orgID, projectID, state string) ([]Milestone, error)

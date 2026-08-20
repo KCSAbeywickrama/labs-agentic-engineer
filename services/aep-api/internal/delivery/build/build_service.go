@@ -285,6 +285,22 @@ func (s *Service) Run(ctx context.Context, orgID, projectID string, inputs []Bui
 	if err != nil {
 		return "", nil, mapTagError(err)
 	}
+	// THE SPEC-SAVE STATUS IS THE WHOLE BRANCH, and there is no second question
+	// asked anywhere — in particular not "was the last run cancelled".
+	//
+	//	approved  → a new tag. The ordinary path: supersede the predecessor, mint
+	//	            this version's milestone, plan it fresh.
+	//	unchanged → the SAME tag, so the same milestone. Reopen it and exactly the
+	//	            issues a cancel closed inside it, and DO NOT re-plan — plan
+	//	            dedupe is the title slug against the milestone's issues in any
+	//	            state, so a re-plan over a milestone whose issues were all
+	//	            closed would mint nothing and the run would settle an unbuilt
+	//	            version as delivered.
+	//
+	// A version nobody cancelled takes the same branch and reopens nothing, which
+	// is correct: rebuilding a delivered version re-derives no plan either way,
+	// and this spares it the LLM turn that used to mint nothing.
+	rebuild := res.Status == spec.SpecSaveUnchanged
 
 	// The milestone plan path (§5). Its synchronous half claims the version —
 	// supersede the previous milestone, mint `v<N>`, admit the run row that IS
@@ -305,6 +321,12 @@ func (s *Service) Run(ctx context.Context, orgID, projectID string, inputs []Bui
 		if cerr != nil {
 			return "", nil, cerr
 		}
+		// AFTER the admission, so a click the mutex refused reopens nothing: the
+		// winner is the run that will work this milestone, and two entrants both
+		// reopening it would race one another's writes.
+		if rebuild {
+			s.reopenIncrement(ctx, orgID, projectID, run.MilestoneNumber)
+		}
 		// Synchronous, and fast: this hands the version to the supervisor, which
 		// then fills the milestone as its own first phase. The click used to run
 		// the planning turn itself, in a detached goroutine, because an LLM turn
@@ -315,13 +337,13 @@ func (s *Service) Run(ctx context.Context, orgID, projectID string, inputs []Bui
 		// mutex; leaving it non-terminal with no workflow behind it would refuse
 		// every later build on this project, and nothing would ever heal it (the
 		// reconcile sweep reads such a row as live).
-		if serr := s.startRun(ctx, orgID, projectID, res.Tag, run, provInputs); serr != nil {
+		if serr := s.startRun(ctx, orgID, projectID, res.Tag, run, provInputs, rebuild); serr != nil {
 			return "", nil, serr
 		}
 	}
 
 	slog.InfoContext(ctx, "build started",
-		"org", orgID, "project", projectID, "tag", res.Tag, "specStatus", res.Status)
+		"org", orgID, "project", projectID, "tag", res.Tag, "specStatus", res.Status, "rebuild", rebuild)
 	return res.Tag, nil, nil
 }
 

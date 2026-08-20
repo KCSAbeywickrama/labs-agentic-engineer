@@ -98,7 +98,10 @@ func TestSweep_NeverReOffersARunStillPlanning(t *testing.T) {
 // issues before the next milestone is minted, so an abandoned milestone has no
 // open work for the sweep to find.
 func TestSweep_NeverResurrectsASupersededMilestone(t *testing.T) {
-	h := newHarness(t, aRun("run-old", 6, delivery.RunStateCancelled))
+	// FAILED rather than cancelled on purpose: a cancelled increment is skipped by
+	// its own rule (see below), which would let this one pass even if supersede
+	// stopped emptying the milestone.
+	h := newHarness(t, aRun("run-old", 6, delivery.RunStateFailed))
 	h.issues.withCounts(6, 0, 0, 0) // superseded: everything closed
 
 	if err := sweepOver(h).Once(t.Context()); err != nil {
@@ -289,5 +292,79 @@ func TestSweep_AHaltedValidationTaskIsNotJudged(t *testing.T) {
 	}
 	if len(h.sup.started) != 0 {
 		t.Fatalf("a halted issue is invisible to the trigger router, got %+v", h.sup.started)
+	}
+}
+
+// ---- the cancelled increment -------------------------------------------------
+
+// A cancelled increment is ABANDONED, and the milestone is skipped whole.
+//
+// The issues being closed is not enough on its own, which is what this pins. A
+// closed milestone still accepts issues, so a person reopening one — or filing a
+// new bug into the version they just cancelled — would otherwise start a task run
+// that builds and deploys against a version nobody is shipping.
+func TestSweep_SkipsAMilestoneWhoseIncrementWasCancelled(t *testing.T) {
+	h := newHarness(t, aRun("run-cancelled", 7, delivery.RunStateCancelled))
+	// Open work, deliberately: the point is that the milestone's STATE decides,
+	// not its issues.
+	h.issues.withCounts(7, 0, 2, 2)
+
+	if err := sweepOver(h).Once(t.Context()); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if len(h.sup.started) != 0 {
+		t.Fatalf("a cancelled increment must stay abandoned, got %+v", h.sup.started)
+	}
+}
+
+// TestSweep_ACancelledMilestoneSurvivesRepeatedTicks is the SUPPRESSION PROOF, and
+// the reason the cancel closes its issues at all.
+//
+// The sweep runs every 60s forever. If a cancelled run's leftovers were merely
+// recorded rather than suppressed, the very next tick would start a fresh run over
+// them — dispatching an agent, merging, promoting — and the cancel button would
+// read as having stopped nothing while paying for its own replacement a minute
+// later. Two passes is what makes it a claim about the steady state rather than
+// about one pass.
+func TestSweep_ACancelledMilestoneSurvivesRepeatedTicks(t *testing.T) {
+	h := newHarness(t, aRun("run-cancelled", 7, delivery.RunStateCancelled))
+	// The state the cancel leaves behind: every issue closed, and — because a fake
+	// close does not un-list an issue and reality is not always tidier — an open
+	// leftover the platform failed to close.
+	h.issues.
+		withClosedIssue(7, 21, delivery.LabelAgentWork, delivery.KindDevelopment, delivery.LabelCancelled).
+		withIssue(7, 22, delivery.LabelAgentWork, delivery.KindBug, delivery.LabelCancelled)
+
+	sweep := sweepOver(h)
+	for tick := 1; tick <= 2; tick++ {
+		if err := sweep.Once(t.Context()); err != nil {
+			t.Fatalf("sweep tick %d: %v", tick, err)
+		}
+		if len(h.sup.started) != 0 {
+			t.Fatalf("tick %d restarted the run the user cancelled: %+v", tick, h.sup.started)
+		}
+	}
+}
+
+// The skip CLEARS ITSELF, and nothing has to clear it. A rebuild admits a new row
+// on the SAME milestone, so the newest run is no longer the cancelled one — which
+// is why the rule reads the newest run of any kind rather than looking for a cancel
+// anywhere in the history.
+//
+// Here that rebuild's run has since settled, leaving work still open: exactly the
+// footprint the sweep exists to heal, and it must heal it.
+func TestSweep_ARebuildEndsTheCancelSkip(t *testing.T) {
+	h := newHarness(t,
+		// Newest first, as the repository returns them.
+		aRun("run-rebuild", 7, delivery.RunStateFailed),
+		aRun("run-cancelled", 7, delivery.RunStateCancelled),
+	)
+	h.issues.withCounts(7, 0, 1, 1)
+
+	if err := sweepOver(h).Once(t.Context()); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if len(h.sup.started) != 1 || h.sup.started[0].MilestoneNumber != 7 {
+		t.Fatalf("a rebuilt milestone is ordinary again and must be healed, got %+v", h.sup.started)
 	}
 }

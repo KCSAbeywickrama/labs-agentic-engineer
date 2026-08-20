@@ -48,6 +48,7 @@ type Activities struct {
 	deployRead DeploymentReader
 	deployMint DeployIssueMinter
 	halter     WorkHalter
+	canceller  WorkCanceller
 	gates      Gates
 	planner    Planner
 }
@@ -67,6 +68,7 @@ type Deps struct {
 	Deployments  DeploymentReader
 	DeployIssues DeployIssueMinter
 	Halter       WorkHalter
+	Canceller    WorkCanceller
 	Gates        Gates
 	Planner      Planner
 }
@@ -86,6 +88,7 @@ func NewActivities(d Deps) *Activities {
 		deployRead: d.Deployments,
 		deployMint: d.DeployIssues,
 		halter:     d.Halter,
+		canceller:  d.Canceller,
 		gates:      d.Gates,
 		planner:    d.Planner,
 	}
@@ -596,6 +599,45 @@ func (a *Activities) HaltUnfinishedWork(ctx context.Context, in HaltWorkInput) (
 	}
 	halted, err := a.halter.HaltUnfinishedWork(ctx, in.OrgID, in.ProjectID, in.MilestoneNumber, in.Kind, in.Reason)
 	return halted, sourceControlErr(err)
+}
+
+// CloseCancelledWorkInput names the milestone whose in-flight work a cancelled
+// run is closing.
+//
+// No reason field, unlike HaltWorkInput: a cancel has exactly one cause — a
+// person asked for it — so there is no failure class to quote onto the issues.
+type CloseCancelledWorkInput struct {
+	OrgID           string `json:"orgId"`
+	ProjectID       string `json:"projectId"`
+	MilestoneNumber int    `json:"milestoneNumber"`
+	// Kind is the RUN's kind, which selects what the cancel abandons: a dev run's
+	// whole milestone, a task run's bugs and conflicts, and nothing at all for a
+	// validation run (whose own task close is the workflow's).
+	Kind string `json:"kind"`
+}
+
+// CloseCancelledWork comments on, stamps `aep:cancelled` on, and closes every open
+// issue a cancel abandons, and returns their numbers.
+//
+// It is what makes a cancel STICK. The reconcile sweep's trigger is "open work of
+// this kind on a milestone with no live run starts a workflow", so leaving the
+// issues open would have the sweep restart, within a tick, exactly the run the
+// person just stopped — the same mechanism the halt exists to defeat, reached from
+// the other ending.
+//
+// The write goes through the event plane like HaltUnfinishedWork and
+// MintDeployFixIssues, for the same reason: the supervisor writes no issue of its
+// own, and the plane owns the label vocabulary and the prose.
+//
+// Unwired is a NO-OP rather than an error — the same posture as every optional
+// collaborator — and the cost is the restart loop above, so it is not optional in
+// a real deployment.
+func (a *Activities) CloseCancelledWork(ctx context.Context, in CloseCancelledWorkInput) ([]int, error) {
+	if a.canceller == nil {
+		return nil, nil
+	}
+	closed, err := a.canceller.CloseCancelledWork(ctx, in.OrgID, in.ProjectID, in.MilestoneNumber, in.Kind)
+	return closed, sourceControlErr(err)
 }
 
 // ---- validation ------------------------------------------------------------

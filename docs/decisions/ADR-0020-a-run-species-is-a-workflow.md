@@ -188,6 +188,61 @@ planned work it was never allowed to touch. A validation run halts nothing at al
 task it closes on every ending, and the repair and conflict issues it leaves behind are deliberately a task
 run's work, so halting them would break the repair chain rather than protect a budget.
 
+### A cancel has per-species consequences, and one way back
+
+Cancel is durable first and a signal second (the run row's `cancel_requested_at` is the evidence; the
+signal is only the wake-up). What the split adds is what a cancel COSTS, and it is decided by kind for
+the same reason the working set is.
+
+**Closing the issues is the cancel, not bookkeeping for it.** The sweep starts a run for any open
+workable kind on a milestone with no live run, so a cancel that merely recorded itself would be undone
+within a tick — the button would stop the run and then pay for its replacement a minute later. So a
+cancelled settle comments, stamps `aep:cancelled` and CLOSES, through the event plane's
+`CloseCancelledWork`: the same shape as the halt, reached from the other ending, so the supervisor still
+writes no issue of its own.
+
+| cancelling | closes | milestone | way forward |
+|---|---|---|---|
+| dev (a build) | every open issue in the milestone — working set AND gates AND ledger notes, but NOT the version's validation task | CLOSED | edit the spec, or build again |
+| task (a bug fix) | the `bug` and `conflict` issues it was working | left OPEN | reopen the bugs, or file new ones |
+| validation | the task it ADOPTED (already done on every ending) | left OPEN | trigger validation again |
+
+**A dev cancel takes the gates; a halt does not, and the difference is the whole point of having two
+markers.** A halted run may be retried in the same version, so its gates still name dependencies
+somebody must resolve — closing them would erase the record of what the version was waiting on. A
+cancelled build will not be retried in that increment at all.
+
+**Nothing is reverted.** Merged commits stay on `main` and components a cycle already promoted keep
+serving. Closing the milestone is a statement about the INCREMENT, never about what is deployed.
+
+**Only issues OPEN at cancel time are marked**, which is the whole reason the marker exists rather than
+"a rebuild reopens the milestone's issues". Work a cycle genuinely finished is already closed and stays
+unmarked, so a rebuild cannot resurrect it and dispatch an agent at code that is merged and serving.
+
+**A closed milestone still accepts issues, so the sweep also skips the milestone whole** while its
+NEWEST run reads `cancelled`. Without it, one issue reopened inside an abandoned increment starts a task
+run that builds and deploys a version nobody is shipping. The rule clears itself: a rebuild admits a new
+row on the same milestone, so the newest run stops being the cancelled one — no flag to set and nothing
+to clear, which is why it reads the newest run of any kind rather than hunting the history for a cancel.
+
+**The way back is decided by the spec-save status alone.** There is no second "was it cancelled"
+question anywhere:
+
+- `approved` → a new tag. The ordinary build path: supersede the predecessor (which finds nothing to do,
+  because the cancel already emptied and closed that milestone), mint the new milestone, plan it fresh.
+- `unchanged` → the SAME tag, so the same milestone. Reopen it, reopen exactly the issues carrying
+  `aep:cancelled` and CLEAR the label (it records one abandoned attempt, not a property of the issue),
+  admit a run row, and start it with `Rebuild` set. Gates still run and dedupe onto the reopened ones;
+  **`planTasks` is SKIPPED.**
+
+Skipping the plan is not an optimisation. Plan dedupe is the title slug against the milestone's issues
+in ANY state — which is what makes re-planning additive-only and a crash re-run a no-op — so a re-plan
+after a cancel that closed everything would recognise every slug, mint NOTHING, and the loop would then
+read the empty working set as "delivered" and settle a version it never built. Reopening is the only
+path that restores the working set without breaking additive-only dedupe, and it costs no LLM turn.
+`Rebuild` rides the REQUEST beside `Tag`, under the same replay rule: the zero value is the pre-existing
+behaviour, so a re-offer from the sweep can never claim a milestone was refilled for it.
+
 ### A build is refused while validation is live
 
 409, alongside the build mutex's own refusal. A delivery run merging and promoting while validation
@@ -205,6 +260,9 @@ cancel the validation, which is one click.
   repair. That is the task run's own bookend, and the one conditional in the platform where a `src/*` source
   routes anything. `src/incident` and `src/user` leave the standing verdict alone: an incident is not priced
   like a release, and a verdict is a statement about a VERSION rather than a commit.
+- **The cancel button is honest at every tick, not just the first.** A cancelled increment's issues are
+  closed and its milestone is skipped, so nothing restarts it — where before the split the sweep's own
+  trigger would have.
 - **Terminal reasons stay honest per species.** `redispatch-budget` on a dev run means the delivery
   agent died; on a validation run it means the judge did, and the version is still delivered. The list
   of reasons is unchanged — the split needed no new failure class.

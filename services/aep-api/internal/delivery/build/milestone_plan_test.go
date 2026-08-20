@@ -550,7 +550,7 @@ func TestStartRun_CarriesThePlanningInputsToTheSupervisor(t *testing.T) {
 	run := &delivery.MilestoneRun{ID: "run-1", ProjectID: "shop", MilestoneNumber: 9, MilestoneTitle: "v3"}
 	inputs := []delivery.ProvisionInput{{Component: "api", Dependency: "db", Kind: "platform-resource"}}
 
-	if err := h.svc.startRun(context.Background(), "acme", "shop", "v3", run, inputs); err != nil {
+	if err := h.svc.startRun(context.Background(), "acme", "shop", "v3", run, inputs, false); err != nil {
 		t.Fatalf("startRun: %v", err)
 	}
 
@@ -588,7 +588,7 @@ func TestStartRun_NotStarted_SettlesTheRunAnd503s(t *testing.T) {
 	h.starter.err = delivery.ErrRunNotStarted
 	run := &delivery.MilestoneRun{ID: "run-1", ProjectID: "shop", MilestoneNumber: 9, MilestoneTitle: "v3"}
 
-	err := h.svc.startRun(context.Background(), "acme", "shop", "v3", run, nil)
+	err := h.svc.startRun(context.Background(), "acme", "shop", "v3", run, nil, false)
 
 	var edge *EdgeError
 	if !errors.As(err, &edge) || edge.Status != 503 {
@@ -607,7 +607,7 @@ func TestStartRun_OtherFailure_SettlesTheRunAnd502s(t *testing.T) {
 	h.starter.err = fmt.Errorf("temporal refused")
 	run := &delivery.MilestoneRun{ID: "run-1", ProjectID: "shop", MilestoneNumber: 9, MilestoneTitle: "v3"}
 
-	err := h.svc.startRun(context.Background(), "acme", "shop", "v3", run, nil)
+	err := h.svc.startRun(context.Background(), "acme", "shop", "v3", run, nil, false)
 
 	var edge *EdgeError
 	if !errors.As(err, &edge) || edge.Status != 502 {
@@ -631,7 +631,7 @@ func TestStartRun_NoSupervisor_LeavesTheRunWaiting(t *testing.T) {
 	})
 	run := &delivery.MilestoneRun{ID: "run-1", ProjectID: "shop", MilestoneNumber: 9, MilestoneTitle: "v3"}
 
-	if err := h.svc.startRun(context.Background(), "acme", "shop", "v3", run, nil); err != nil {
+	if err := h.svc.startRun(context.Background(), "acme", "shop", "v3", run, nil, false); err != nil {
 		t.Fatalf("an unwired supervisor is not an error: %v", err)
 	}
 	if len(h.runs.settled) != 0 {
@@ -674,5 +674,94 @@ func TestClaimVersion_MilestoneIsTitledAfterTheVersion(t *testing.T) {
 	}
 	if n := countRequests(t, h.stub, http.MethodPatch, "/repos/acme/widgets/milestones/2"); n != 1 {
 		t.Errorf("the previous version's milestone must be closed, got %d PATCHes", n)
+	}
+}
+
+// ---- the same-tag rebuild -----------------------------------------------------
+
+// TestReopenIncrement_ReopensExactlyTheMarkedSetAndClearsTheMark is the way back
+// from a cancelled build.
+//
+// The click reached this because the spec-save status was `unchanged`: the same
+// tag, so the same milestone, so this build is that version being worked AGAIN.
+// `aep:cancelled` is the handle on what was in flight, and it is the whole reason
+// the marker exists rather than "reopen everything in the milestone" — work a
+// cycle GENUINELY FINISHED is closed and unmarked, and reopening it would dispatch
+// an agent at code that is already merged and serving.
+//
+// The mark is CLEARED as each issue is reopened. It records ONE abandoned attempt,
+// so leaving it on would make the next cancel's marked set the union of two
+// attempts and this reopen would restore work that cancel deliberately left closed.
+func TestReopenIncrement_ReopensExactlyTheMarkedSetAndClearsTheMark(t *testing.T) {
+	h := newPlanHarness(t)
+	h.stub.OnFunc(http.MethodGet, "/repos/acme/widgets/issues", jsonPage(`[
+		{"number":31,"title":"Implement orders","state":"closed","labels":[{"name":"aep"},{"name":"development"},{"name":"aep:cancelled"}]},
+		{"number":32,"title":"Provision orders-db","state":"closed","labels":[{"name":"provision"},{"name":"aep:cancelled"}]},
+		{"number":33,"title":"Implement checkout","state":"closed","labels":[{"name":"aep"},{"name":"development"}]}
+	]`))
+	for _, n := range []int{31, 32} {
+		h.stub.On(http.MethodPatch, fmt.Sprintf("/repos/acme/widgets/issues/%d", n), http.StatusOK, `{}`)
+		h.stub.On(http.MethodDelete, fmt.Sprintf("/repos/acme/widgets/issues/%d/labels/aep:cancelled", n),
+			http.StatusOK, `[]`)
+	}
+	h.stub.On(http.MethodPatch, "/repos/acme/widgets/milestones/9", http.StatusOK, `{"number":9,"state":"open"}`)
+
+	h.svc.reopenIncrement(context.Background(), "acme", "shop", 9)
+
+	// The milestone itself comes back: a version being worked whose milestone reads
+	// closed is a lie the console renders.
+	reopens := requestsTo(h.stub, http.MethodPatch, "/repos/acme/widgets/milestones/9")
+	if len(reopens) != 1 || !strings.Contains(reopens[0].Body, `"state":"open"`) {
+		t.Fatalf("milestone reopens = %+v, want exactly one state:open", reopens)
+	}
+	// The read is CLOSED issues, unfiltered by label: which of them this rebuild
+	// owns is decided from the labels, exactly as supersede decides what it carries.
+	var listed bool
+	for _, r := range h.stub.Requests() {
+		if r.Method == http.MethodGet && r.Path == "/repos/acme/widgets/issues" && strings.Contains(r.Query, "milestone=9") {
+			listed = true
+			if !strings.Contains(r.Query, "state=closed") {
+				t.Errorf("the rebuild listed %s, want state=closed", r.Query)
+			}
+			if strings.Contains(r.Query, "labels=") {
+				t.Errorf("the rebuild narrowed its fetch by label (%s) — the decision belongs in Go", r.Query)
+			}
+		}
+	}
+	if !listed {
+		t.Fatal("the rebuild never listed milestone 9's closed issues")
+	}
+	// The marked set — the planned Task AND the gate the cancel closed with it.
+	for _, n := range []int{31, 32} {
+		patches := requestsTo(h.stub, http.MethodPatch, fmt.Sprintf("/repos/acme/widgets/issues/%d", n))
+		if len(patches) != 1 || !strings.Contains(patches[0].Body, `"state":"open"`) {
+			t.Errorf("issue %d: patches = %+v, want one reopen", n, patches)
+		}
+		cleared := countRequests(t, h.stub, http.MethodDelete,
+			fmt.Sprintf("/repos/acme/widgets/issues/%d/labels/aep:cancelled", n))
+		if cleared != 1 {
+			t.Errorf("issue %d: the cancel mark was cleared %d times, want exactly 1", n, cleared)
+		}
+	}
+	// And the Task the build had already DELIVERED stays closed and unmarked.
+	if n := countRequests(t, h.stub, http.MethodPatch, "/repos/acme/widgets/issues/33"); n != 0 {
+		t.Errorf("issue 33 was finished before the cancel and must not be reopened (%d patches)", n)
+	}
+}
+
+// A version nobody cancelled takes the same branch and reopens nothing. The
+// spec-save status is the only question asked — there is no "was it cancelled"
+// read anywhere — and the marker being absent is what answers it.
+func TestReopenIncrement_AVersionNobodyCancelledReopensNothing(t *testing.T) {
+	h := newPlanHarness(t)
+	h.stub.OnFunc(http.MethodGet, "/repos/acme/widgets/issues", jsonPage(`[
+		{"number":31,"title":"Implement orders","state":"closed","labels":[{"name":"aep"},{"name":"development"}]}
+	]`))
+	h.stub.On(http.MethodPatch, "/repos/acme/widgets/milestones/9", http.StatusOK, `{"number":9,"state":"open"}`)
+
+	h.svc.reopenIncrement(context.Background(), "acme", "shop", 9)
+
+	if n := countRequests(t, h.stub, http.MethodPatch, "/repos/acme/widgets/issues/31"); n != 0 {
+		t.Errorf("an unmarked issue must stay closed (%d patches)", n)
 	}
 }

@@ -81,7 +81,7 @@ outside that lock is the duplicate-issue race the lock exists to close.
 | `build` (buildpipe) | the whole-spec gate + `v<N>` tag cut, **the milestone plan path** (mint `v<N>`'s milestone, supersede the previous version into it, admit the run row, then plan its Tasks and mint its gates), the version ledger, dep-drawer preflight | `MilestoneRun`/`StartRunRequest`, and the planner via `SpecPlanner` |
 | `task` (taskflow) | the GitHub-native Task READ surface (list/get, scoped to a version by milestone membership) + the plan turn, which mints one **prose** issue per Task **into the version's milestone**, assigned at creation; plus the SRE/RCA handoff's adoption leg | the read DTOs, the milestone label vocabulary, and the run rows (via `MilestoneResolver`) |
 | `execution` | the executions READ surface: the per-Task progress endpoint, the task-log SSE stream, `OpsExecutionReader`. It writes nothing and dispatches nothing — the only execution rows left are the provisioning gates' | `TaskStreamHub`, the executions kernel |
-| `eventcore` | the event plane of the milestone-run loop: the auto-merge policy seam, the merged-PR path-diff build fan-out + per-`(component, SHA)` re-trigger budget, fix/conflict/red-main issue minting, the halt of a failed run's unfinished work, milestone-matched predicate re-evaluation, adoption, the reconcile sweep (trigger router, halted-aware), and the build sweep that observes those builds reaching terminal | the milestone model (labels, `MilestoneRun`/`RunCycle`, run signals), `DiffComponents`/`BuildRunName` and `BuildTerminalObserver`; **no Temporal** — it reaches the supervisor only through the `RunSignaler`/`RunStarter` ports |
+| `eventcore` | the event plane of the milestone-run loop: the auto-merge policy seam, the merged-PR path-diff build fan-out + per-`(component, SHA)` re-trigger budget, fix/conflict/red-main issue minting, the halt of a failed run's unfinished work and the close of a cancelled run's in-flight work, milestone-matched predicate re-evaluation, adoption, the reconcile sweep (trigger router; halted-aware, and blind to cancelled increments), and the build sweep that observes those builds reaching terminal | the milestone model (labels, `MilestoneRun`/`RunCycle`, run signals), `DiffComponents`/`BuildRunName` and `BuildTerminalObserver`; **no Temporal** — it reaches the supervisor only through the `RunSignaler`/`RunStarter` ports |
 | `run` | the milestone run SUPERVISOR — three workflows over one shared loop: the wait state + dispatch predicate, the cycle loop, the four budgets + no-progress + ceiling, the version's judgement, settle, and cancel. Plus the `Supervisor` handle the event plane and the build click signal and start runs through | `Runtime`, the milestone model, `RunStatus`/`MilestoneRunWorkflowID`, `MilestoneDispatch`, `DiffComponents`/`BuildRunNamePrefix`; **no GitHub client, no gorm** |
 | `runread` | the run READ surface: a version's runs + their cycles, TWO SSE streams over the per-cycle agent logs (one per run, one per version), and the two writes beside them — cancel, and revalidate. Owns no state and decides nothing: both writes resolve their target through the org-scoped read, then hand off | the run/cycle entities and `IsTerminalRunState`; reaches the pod log through `CycleLogReader` (OC API while the Component lives, observer archive while retained), the supervisor through `RunCanceller` and the event plane through `Revalidator`, so it drags in neither a cluster client, a workflow engine nor GitHub |
 | `codingagent` | the CodingExecutor (ONE dispatch entry point: dispatch a run cycle as an ephemeral OpenChoreo `coding-agent` job Component), the build-auth retry, the pod-truth watcher, retention/LRU and the cancel-time delete. Design: [`codingagent/design/oc-job-dispatch.md`](codingagent/design/oc-job-dispatch.md) | `MilestoneDispatch`/`MilestoneDispatcher`, `TaskStreamHub`, `BuildTerminalObserver` |
@@ -222,7 +222,9 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   case-insensitive while create-uniqueness is not). Every step is best-effort and logged: a failed close or
   move leaves one stale issue behind, where failing the build would strand the whole next version.
   This is half of what keeps the reconcile sweep sound — a superseded milestone holds nothing workable,
-  because the plan is closed and the bugs have LEFT.
+  because the plan is closed and the bugs have LEFT. A build that resolves to the SAME title supersedes
+  nothing (the title guard skips it) and takes the rebuild path below instead: the same milestone,
+  reopened.
 - **Every issue body is prose; nothing platform-side parses one.** That holds for planned Tasks, for
   dispatch gates and for the validation task alike: the milestone is the version pin, LABELS carry every
   routable fact, and ordering is the "Depends on #N" lines the AGENT honours. Dedupe on re-plan is the
@@ -293,10 +295,17 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   `AbandonRun` (project delete) therefore terminates ALL THREE ids: the rows are purged in the same
   teardown, so there is nothing left to ask which ever existed, and a kind missed leaves a supervisor
   retrying forever against a repository that is gone.
-- **The reconcile sweep is the TRIGGER ROUTER, it reads ISSUES, and it skips HALTED work.** For a known
-  milestone with no live run: an open `validation`-kind issue starts a validation run; otherwise open work
-  starts an ordinary one — and an issue carrying `aep:halted` is dropped before either decision, so a
-  milestone holding nothing but halted work is quiet. It fetches the milestone's OPEN issues (REST, NO
+- **The reconcile sweep is the TRIGGER ROUTER, it reads ISSUES, and it skips HALTED work and CANCELLED
+  increments.** For a known milestone with no live run: a milestone whose NEWEST run settled `cancelled`
+  is skipped whole, before its issues are even fetched; otherwise an open `validation`-kind issue starts
+  a validation run and any other open work starts an ordinary one — and an issue carrying `aep:halted` is
+  dropped before either decision, so a milestone holding nothing but halted work is quiet. The cancelled
+  skip is a decision about the MILESTONE rather than about its issues, and that is forced: a closed
+  milestone still accepts issues, so one reopened or freshly filed inside an abandoned increment carries
+  no mark and would otherwise start a run that builds and deploys a version nobody is shipping. It
+  clears itself — a rebuild admits a new row on the same milestone, so the newest run stops being the
+  cancelled one — which is why it reads the newest run of ANY kind rather than hunting for a cancel
+  anywhere in the history. It fetches the milestone's OPEN issues (REST, NO
   label filter) and decides in Go, because both of those are intersections GraphQL's union-valued
   `labels:` argument cannot count ("armed AND of kind X", "armed AND halted") and the complement of the
   second is a negative label query the host cannot express at all — the same shape, and the same reason,
@@ -390,10 +399,14 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   owns the detection story and the prose, and — like every other minter in the domain — writes it through
   the root's `IssueWriter`, which is what keeps every issue this platform files under one dedupe
   convention and one label vocabulary.
-- **Settle closes the milestone; nothing branches on that.** Milestone state is display only, closed
-  milestones still accept new issues, and a failed or cancelled increment leaves its milestone OPEN
-  because the way forward from it is more work in the same version. A stray gate never blocks settle:
-  gates hold dispatch, and with an empty working set they hold nothing.
+- **Settle closes the milestone; nothing branches on that.** Milestone state is display only and closed
+  milestones still accept new issues. A FAILED increment leaves its milestone open, because the way
+  forward from it is more work in the same version; a CANCELLED one closes it when the run was a DEV
+  run, because that increment is abandoned outright. A stray gate never blocks settle: gates hold
+  dispatch, and with an empty working set they hold nothing. Each terminal state's issue consequence
+  (`closeMilestone` · `haltUnfinishedWork` · `closeCancelledWork`) runs BEFORE the row is settled, so a
+  write that fails stalls a non-terminal run under Temporal's retries rather than leaving a terminal row
+  whose issues nobody treated.
 - **A run that planned nothing settles DELIVERED, and files no validation task.** An empty working set
   with zero cycles behind it used to park in the unbounded wait, because the click admitted the row
   before its planning turn and a poll could legitimately land mid-plan — "not planned yet" and "nothing
@@ -428,6 +441,42 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   and closes its own cycle on the ordinary path. A failed reap does not fail the cancel; a BFF crash
   mid-cancel can leave the pod until the retention sweep. Natural finishes are NOT reaped on that path —
   retention/LRU owns those.
+- **A CANCEL CLOSES the work it had in flight, or it does not stick.** The sweep starts a run for any
+  open workable kind on a milestone with no live run, so a cancel that only recorded itself would be
+  undone within a tick: the button would stop the run and pay for its replacement a minute later. So a
+  cancelled settle comments on, stamps `aep:cancelled` on and CLOSES the issues it abandons — the same
+  shape as the halt, reached from the other ending, and written by the event plane through the same
+  ports so the supervisor still files no issue of its own. What it abandons is per SPECIES
+  (`delivery.InCancelledWork`): a DEV run's cancel takes EVERY open issue in the milestone — the working
+  set, the dispatch gates, the validation task and the ledger-only notes alike — and closes the
+  milestone behind them, because the increment is abandoned. That is the asymmetry with the halt, which
+  leaves the gates alone precisely because a failed run may be retried in the same version and its gates
+  still name dependencies somebody must resolve. A TASK run's cancel reaches only the bugs and conflicts
+  it was working and leaves the milestone open: the version it works is the DEPLOYED one and is not
+  being withdrawn. A VALIDATION run closes nothing through this path — its own consequence is the task
+  it ADOPTED, closed on every ending by `settleJudged`, and that scoping is what keeps a cancel arriving
+  before the first read from closing a task the run never adopted. Nothing is REVERTED by any of it:
+  merged commits stay on `main` and promoted components keep serving, so closing the milestone is a
+  statement about the INCREMENT, never about what is deployed.
+- **Only issues OPEN at cancel time are marked, and that is what the marker is for.** Work a cycle
+  genuinely FINISHED is already closed, so it is neither touched nor stamped — and a rebuild therefore
+  cannot resurrect it. Reopening a cancelled milestone's issues wholesale would dispatch an agent at code
+  that is already merged and serving, which is why the way back is a marked SET rather than a milestone.
+- **The way back from a cancelled build is decided by the SPEC-SAVE STATUS alone.** There is no
+  "was it cancelled" read anywhere. `spec.SpecSaveApproved` means a new tag: the ordinary build path,
+  which supersedes the predecessor (finding nothing to do — the cancel already emptied and closed that
+  milestone) and plans the new version fresh. `spec.SpecSaveUnchanged` means the SAME tag, so the same
+  milestone: the click REOPENS it and exactly the issues carrying `aep:cancelled`, CLEARS the label as it
+  goes (it records one abandoned attempt, not a property of the issue), and sets `Rebuild` on the start
+  request. The run then mints its gates — they dedupe onto the reopened ones, so a dependency resolved
+  since the cancel is re-read rather than assumed — and **SKIPS `planTasks`**. It must: plan dedupe is
+  the title slug against the milestone's issues in ANY state, which is what makes re-planning
+  additive-only and a crash re-run a no-op, so a re-plan after a cancel that closed everything would
+  recognise every slug, mint NOTHING, and the loop would read the empty working set as "delivered" and
+  settle a version it never built. Reopening is the only path that restores the working set without
+  breaking additive-only dedupe, and it is cheaper: no LLM turn. `Rebuild` rides the REQUEST beside
+  `Tag`, for the same reason and under the same replay rule — the zero value is the pre-existing
+  behaviour, so a re-offer from the sweep can never claim a milestone was refilled for it.
 - **Echo suppression is `issues.*`-only.** Every label, comment and milestone assignment the platform
   writes fires an `issues.*` delivery straight back, so those handlers drop self-sender deliveries. It is
   deliberately NOT applied to `pull_request.*`: in App mode the coding runner opens its PR as the same

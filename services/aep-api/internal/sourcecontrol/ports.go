@@ -120,6 +120,11 @@ type IssueOps interface {
 	// CloseMilestone closes a milestone. Display only — member issues are
 	// untouched, and a closed milestone still accepts new ones.
 	CloseMilestone(ctx context.Context, owner, repo string, cred secrets.Credential, number int) error
+	// ReopenMilestone reopens a closed milestone — the inverse of the above and
+	// display only in the same way. A rebuild of an unchanged spec works the SAME
+	// milestone a cancel closed, and a version being worked whose milestone reads
+	// closed is a lie the console renders.
+	ReopenMilestone(ctx context.Context, owner, repo string, cred secrets.Credential, number int) error
 	// ListMilestones returns every milestone in the given state
 	// ("open" | "closed" | "all"; empty ⇒ "all"). The list must be complete,
 	// not a first page — CreateMilestone's uniqueness pre-check reads it.

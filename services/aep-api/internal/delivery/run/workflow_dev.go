@@ -65,6 +65,13 @@ func DevRunWorkflow(ctx workflow.Context, in RunInput) (RunResult, error) {
 // re-offers carries no Tag, and re-planning a milestone somebody already filled
 // is what plansItsOwnMilestone exists to refuse.
 //
+// A REBUILD of an unchanged spec owns its version and still mints its gates, but
+// its milestone was refilled by the click reopening what the cancel closed — so
+// the planning TURN is skipped. It has to be: plan dedupe is the title slug
+// against the milestone's issues in ANY state, so a re-plan over reopened work
+// would recognise every slug, mint nothing, and hand the loop an empty working
+// set to read as "delivered".
+//
 // A permanent failure settles the row `plan-failed` — the same terminal reason
 // the click used to write, so the read model is unchanged.
 //
@@ -94,6 +101,15 @@ func (l *loop) fillMilestone(ctx workflow.Context) (settled bool, res RunResult,
 		}
 		workflow.GetLogger(ctx).Error("provisioning the version's gates failed", "error", gerr)
 		return true, res, nil
+	}
+	if l.in.Rebuild {
+		// The milestone is already filled — the click reopened exactly the issues
+		// the cancel closed, marker and all. Re-planning here would mint nothing
+		// (every title slug is already in the milestone) and the run would then
+		// settle an unbuilt version as delivered. See RunInput.Rebuild.
+		workflow.GetLogger(ctx).Info("rebuilding an unchanged version — its milestone is already filled, not re-planning",
+			"milestone", l.in.MilestoneNumber, "tag", l.in.Tag)
+		return false, RunResult{}, nil
 	}
 	if perr := workflow.ExecuteActivity(activityCtx(ctx), (*Activities).PlanMilestone, in).Get(ctx, nil); perr != nil {
 		res, err = l.settle(ctx, delivery.RunStateFailed, delivery.RunReasonPlanFailed)
