@@ -55,6 +55,7 @@ vi.mock("../api/queries", () => ({
   useUploadReferences: () => uploadReferences,
 }));
 
+import { ApiRequestError } from "../../../api/errors";
 import { ProjectCreate } from "./ProjectCreate";
 
 function attachAll(names: string[], content = "content"): void {
@@ -70,10 +71,11 @@ function attach(name: string, content = "content"): void {
 }
 
 function typePrompt(): void {
-  fireEvent.change(
-    screen.getByPlaceholderText(/booking system/i),
-    { target: { value: "A todo app" } },
-  );
+  // By role, not by placeholder: the placeholder is copy (#561 changed it) and
+  // a behavior test should not break when the wording does.
+  fireEvent.change(screen.getByRole("textbox"), {
+    target: { value: "A todo app" },
+  });
 }
 
 beforeEach(() => {
@@ -165,5 +167,97 @@ describe("ProjectCreate reference documents (#383)", () => {
       screen.getByRole("button", { name: "Continue without documents" }),
     );
     expect(navigate).toHaveBeenCalled();
+  });
+});
+
+
+// The create flow's copy and its one field-level failure (#561). Shares the
+// mutation doubles above — `createProject.mutate` resolves instantly, so
+// reaching the name step is a single click on an example.
+describe("ProjectCreate copy (#561)", () => {
+  beforeEach(() => {
+    createProject.isPending = false;
+    createProject.isError = false;
+    createProject.error = null;
+  });
+
+  /** Walk the prompt step so the name/repo step is on screen. */
+  function reachNameStep() {
+    render(<ProjectCreate />);
+    fireEvent.click(screen.getByRole("button", { name: /Expense approval/ }));
+  }
+
+  it("asks for the idea without promising what happens next", () => {
+    render(<ProjectCreate />);
+    expect(
+      screen.getByText(/Describe it in your own words — rough is fine/),
+    ).toBeInTheDocument();
+    // The journey explains itself as it happens (#522); the create page does
+    // not narrate it, and never claims design starts first.
+    expect(screen.queryByText(/deriving its design/)).not.toBeInTheDocument();
+  });
+
+  it("offers examples for the persona, not consumer apps", () => {
+    render(<ProjectCreate />);
+    expect(screen.getByText("Expense approval")).toBeInTheDocument();
+    expect(screen.getByText("Employee onboarding")).toBeInTheDocument();
+    expect(screen.getByText("Triage agent")).toBeInTheDocument();
+    // The placeholder is an example too — it carried a hair-salon booking
+    // system, which models the product as a consumer app generator.
+    expect(screen.getByPlaceholderText(/service desk/)).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText(/hair salon/)).not.toBeInTheDocument();
+  });
+
+  it("labels the idea as the prompt, on one line however long it is", () => {
+    reachNameStep();
+    const echo = screen.getByText(/^Prompt:/);
+    expect(echo).toHaveTextContent(/^Prompt: Employees submit expense claims/);
+    const css = getComputedStyle(echo);
+    expect(css.whiteSpace).toBe("nowrap");
+    expect(css.textOverflow).toBe("ellipsis");
+    expect(css.overflow).toBe("hidden");
+    expect(echo.getAttribute("title")).toContain("payroll");
+  });
+
+  it("says the repository is created, rather than implying it exists", () => {
+    reachNameStep();
+    expect(
+      screen.getByText(/Agentic Engineer creates this repository in your organization/),
+    ).toBeInTheDocument();
+  });
+
+  it("names what is being made while it waits", () => {
+    createProject.isPending = true;
+    render(<ProjectCreate />);
+    fireEvent.click(screen.getByRole("button", { name: /Expense approval/ }));
+    expect(
+      screen.getByRole("button", { name: /Creating your project/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("puts a taken repository name on the field, naming the org", () => {
+    createProject.isError = true;
+    createProject.error = new ApiRequestError(
+      { code: "conflict", message: "server wording" },
+      "fallback",
+    );
+    reachNameStep();
+    expect(
+      screen.getByText("That repository name already exists in acme — pick another."),
+    ).toBeInTheDocument();
+    // A field failure is not a page failure: the Alert stays away, and the
+    // BFF's own wording is not shown twice.
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByText("server wording")).not.toBeInTheDocument();
+  });
+
+  it("still shows an Alert for a failure the user cannot fix in the form", () => {
+    createProject.isError = true;
+    createProject.error = new ApiRequestError(
+      { code: "internal_error", message: "boom" },
+      "fallback",
+    );
+    reachNameStep();
+    expect(screen.getByRole("alert")).toHaveTextContent("boom");
   });
 });

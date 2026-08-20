@@ -60,6 +60,7 @@ type fakeTagger struct {
 	res    *spec.SpecSaveResult
 	err    error
 	called int
+	seq    *[]string
 }
 
 func (f *fakeTagger) BuildScopeAtTag(ctx context.Context, orgID, projectID, tag string) (spec.BuildScope, error) {
@@ -68,6 +69,9 @@ func (f *fakeTagger) BuildScopeAtTag(ctx context.Context, orgID, projectID, tag 
 
 func (f *fakeTagger) TagSpec(context.Context, string, string) (*spec.SpecSaveResult, error) {
 	f.called++
+	if f.seq != nil {
+		*f.seq = append(*f.seq, "tag")
+	}
 	return f.res, f.err
 }
 
@@ -250,6 +254,29 @@ func mustDelivery(h *deliveryhttpapi.Handlers, err error) *deliveryhttpapi.Handl
 		panic(err)
 	}
 	return h
+}
+
+type provisionSpy struct {
+	orgs []string
+	err  error
+	seq  *[]string
+}
+
+func (p *provisionSpy) ProvisionPublisherForBuild(_ context.Context, orgID string) error {
+	if p.seq != nil {
+		*p.seq = append(*p.seq, "provision")
+	}
+	p.orgs = append(p.orgs, orgID)
+	return p.err
+}
+
+func newHarnessWithPublisher(t *testing.T, svc *build.Service, p build.PublisherProvisioner) *componenttest.Harness {
+	t.Helper()
+	return componenttest.New(t, componenttest.Options{Deps: edge.Deps{
+		Delivery: mustDelivery(deliveryhttpapi.New(deliveryhttpapi.Deps{
+			BuildSvc: svc, PublisherProvisioner: p,
+		})),
+	}})
 }
 
 func postBuild(t *testing.T, svc *build.Service, project string) (int, string) {
@@ -526,6 +553,49 @@ func TestBuild_NoClaims401(t *testing.T) {
 	}
 }
 
+// ----- POST /build publisher provisioning ------------------------------------
+
+// The publisher provisioner runs before Run cuts the tag — the
+// handler, not the service, calls it, since only the handler still has the
+// console JWT that ProvisionPublisherForBuild needs.
+func TestBuild_PublisherProvisionerRunsBeforeTag(t *testing.T) {
+	var seq []string
+	tagger := &fakeTagger{res: &spec.SpecSaveResult{Tag: "v1", Status: "approved"}, seq: &seq}
+	svc := newSvc(fakeRepos{}, tagger)
+	spy := &provisionSpy{seq: &seq}
+	resp := newHarnessWithPublisher(t, svc, spy).AsOrg("acme").Post("/api/v1/projects/shop/build", `{}`)
+	if resp.Code != 200 {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	if len(spy.orgs) != 1 || spy.orgs[0] != "acme" {
+		t.Fatalf("provisioner orgs=%v", spy.orgs)
+	}
+	if tagger.called != 1 {
+		t.Fatalf("Run must still tag after provision, called=%d", tagger.called)
+	}
+	if len(seq) != 2 || seq[0] != "provision" || seq[1] != "tag" {
+		t.Fatalf("order=%v want provision then tag", seq)
+	}
+}
+
+// A provision failure (e.g. no JWT on ctx, SM-API down) answers 503 and never
+// reaches Run — no tag is cut on unprovisioned publisher credentials.
+func TestBuild_PublisherProvisionErrorDoesNotTag(t *testing.T) {
+	tagger := &fakeTagger{res: &spec.SpecSaveResult{Tag: "v1", Status: "approved"}}
+	svc := newSvc(fakeRepos{}, tagger)
+	spy := &provisionSpy{err: errors.New("sm-api: no JWT in context")}
+	resp := newHarnessWithPublisher(t, svc, spy).AsOrg("acme").Post("/api/v1/projects/shop/build", `{}`)
+	if resp.Code != 503 {
+		t.Fatalf("status=%d want 503 body=%s", resp.Code, resp.Body.String())
+	}
+	if tagger.called != 0 {
+		t.Fatalf("failed provision must not cut a tag, called=%d", tagger.called)
+	}
+	if strings.Contains(resp.Body.String(), "sm-api") || strings.Contains(resp.Body.String(), "JWT") {
+		t.Fatalf("client body must not echo the provisioner error, got %s", resp.Body.String())
+	}
+}
+
 // ----- StartProjectBuild (non-HTTP provider-build trigger) --------------------
 
 func TestStartProjectBuild_HappyPath_ClaimsTheVersion(t *testing.T) {
@@ -543,6 +613,20 @@ func TestStartProjectBuild_HappyPath_ClaimsTheVersion(t *testing.T) {
 		t.Errorf("admitted %d run rows, want 1", len(spy.admittedRuns()))
 	}
 	spy.awaitStart(t)
+}
+
+// StartProjectBuild is the non-HTTP auto-kick trigger, which never has a
+// console JWT — it must not see the handler's publisher provisioner, and
+// must keep going through Run exactly as before.
+func TestStartProjectBuild_DoesNotUseHandlerProvisioner(t *testing.T) {
+	tagger := &fakeTagger{res: &spec.SpecSaveResult{Tag: "v1", Status: "approved"}}
+	svc := newSvc(fakeRepos{}, tagger)
+	if err := svc.StartProjectBuild(context.Background(), "acme", "shop"); err != nil {
+		t.Fatalf("StartProjectBuild: %v", err)
+	}
+	if tagger.called != 1 {
+		t.Fatalf("auto-kick still uses Run, called=%d", tagger.called)
+	}
 }
 
 // ----- GET /builds (the version ledger) ---------------------------------------
@@ -716,12 +800,6 @@ type noopAuth struct{}
 
 func (noopAuth) DerivePlatformResourceFactsAtHead(context.Context, string, string) error { return nil }
 
-type noopStager struct{}
-
-func (noopStager) StageExternalSecrets(context.Context, string, string, string, string, map[string]map[string]string) (map[string]string, error) {
-	return nil, nil
-}
-
 // A doctored client (no inputs at all) cannot skip the drawer: an ambiguous
 // external dependency blocks with a failure, no tag is cut, and no workflow
 // starts.
@@ -860,7 +938,7 @@ func TestBuild_DependencyGate_NeedsSpec_ResolvedByThisRequestsDrawerInput_Procee
 		}}}}
 	spy := newPlanSpy()
 	tagger := &fakeTagger{res: &spec.SpecSaveResult{Tag: "v1"}}
-	coord := build.NewInputsCoordinator(&resolvingSpec{design: design}, noopAuth{}, noopStager{}, design)
+	coord := build.NewInputsCoordinator(&resolvingSpec{design: design}, noopAuth{}, design)
 	svc := withPlanPath(build.NewService(build.Deps{
 		Repos: fakeRepos{}, Tagger: tagger, Coord: coord, Design: design,
 	}), spy)

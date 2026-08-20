@@ -381,6 +381,8 @@ func (l *loop) work(ctx workflow.Context, ends bookends) (RunResult, error) {
 			return l.settle(ctx, delivery.RunStateFailed, delivery.RunReasonRedispatchBudget)
 		case cycleQuotaBlocked:
 			return l.settle(ctx, delivery.RunStateBlocked, delivery.RunReasonAgentQuotaBlocked)
+		case cyclePublisherCredentials:
+			return l.settle(ctx, delivery.RunStateBlocked, delivery.RunReasonPublisherCredentials)
 		case cycleDeployFailed:
 			// File the work before looping. Unlike a red build or a conflict —
 			// where the event plane has already minted the issue by the time the

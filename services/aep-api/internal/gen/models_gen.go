@@ -160,6 +160,27 @@ func (e DeployStageValidation) Valid() bool {
 	}
 }
 
+// Defines values for ExternalDependencyValueState.
+const (
+	Configured     ExternalDependencyValueState = "configured"
+	NotProvisioned ExternalDependencyValueState = "not-provisioned"
+	Unset          ExternalDependencyValueState = "unset"
+)
+
+// Valid indicates whether the value is a known member of the ExternalDependencyValueState enum.
+func (e ExternalDependencyValueState) Valid() bool {
+	switch e {
+	case Configured:
+		return true
+	case NotProvisioned:
+		return true
+	case Unset:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for MilestoneRunViewKind.
 const (
 	MilestoneRunViewKindDev        MilestoneRunViewKind = "dev"
@@ -965,9 +986,10 @@ type DependencyCandidate = contracts.DependencyCandidate
 
 // DependencyStatus defines model for DependencyStatus.
 type DependencyStatus struct {
-	Outputs []string `json:"outputs"`
-	Ready   bool     `json:"ready"`
-	Status  string   `json:"status"`
+	Outputs    []string                     `json:"outputs"`
+	Ready      bool                         `json:"ready"`
+	Status     string                       `json:"status"`
+	ValueState ExternalDependencyValueState `json:"valueState,omitempty"`
 }
 
 // DeployStage Deploy-stage aggregate on ProjectStatus (#184) — what's live in dev and rollout progress.
@@ -1062,6 +1084,16 @@ type ExecutionView struct {
 	StartedAt *time.Time `json:"startedAt,omitempty"`
 	Status    string     `json:"status"`
 }
+
+// ExternalDependencyReadiness defines model for ExternalDependencyReadiness.
+type ExternalDependencyReadiness struct {
+	MissingKeys []string                     `json:"missingKeys"`
+	Name        string                       `json:"name"`
+	State       ExternalDependencyValueState `json:"state"`
+}
+
+// ExternalDependencyValueState defines model for ExternalDependencyValueState.
+type ExternalDependencyValueState string
 
 // ExternalResourceDTO defines model for ExternalResourceDTO.
 type ExternalResourceDTO struct {
@@ -1316,6 +1348,12 @@ type ProjectConversationView struct {
 	CreatedAt      time.Time `json:"createdAt"`
 	CreatedBy      string    `json:"createdBy,omitempty"`
 	Current        bool      `json:"current"`
+}
+
+// ProjectDependencyReadiness defines model for ProjectDependencyReadiness.
+type ProjectDependencyReadiness struct {
+	Configured   bool                          `json:"configured"`
+	Dependencies []ExternalDependencyReadiness `json:"dependencies"`
 }
 
 // ProjectList defines model for ProjectList.
@@ -2042,6 +2080,12 @@ type GetBuildLogsParams struct {
 
 // GetDependencyStatusParams defines parameters for GetDependencyStatus.
 type GetDependencyStatusParams struct {
+	// Environment Environment (default: development)
+	Environment string `form:"environment,omitempty" json:"environment,omitempty"`
+}
+
+// GetProjectDependencyReadinessParams defines parameters for GetProjectDependencyReadiness.
+type GetProjectDependencyReadinessParams struct {
 	// Environment Environment (default: development)
 	Environment string `form:"environment,omitempty" json:"environment,omitempty"`
 }

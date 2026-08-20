@@ -54,6 +54,9 @@ const (
 	cycleAgentDead
 	// cycleCancelled — a human abandoned the increment mid-cycle.
 	cycleCancelled
+	// cyclePublisherCredentials — dispatch cannot mount publisher CC. Not
+	// agent death: repeating the Job create cannot stamp the SecretReference.
+	cyclePublisherCredentials
 	// cycleDeployFailed — merged and built, but a component's ReleaseBinding
 	// never came up. Distinct from cycleRed because the failure is a different
 	// class with a different terminal reason: the code compiled, the platform
@@ -178,6 +181,12 @@ func (l *loop) dispatchUntilLanded(ctx workflow.Context, kind string, anchorIssu
 			// instead of burning the rest of the budget on the same answer.
 			if isAgentQuotaBlocked(derr) {
 				return false, cycleQuotaBlocked, nil
+			}
+			// Same shape as the quota refusal and for the same reason: the Job
+			// could not be created at all, and re-attempting cannot stamp the
+			// SecretReference it is missing.
+			if isPublisherCredentialsMissing(derr) {
+				return false, cyclePublisherCredentials, nil
 			}
 			continue
 		}
@@ -315,6 +324,17 @@ func isAgentQuotaBlocked(err error) bool {
 	var appErr *temporal.ApplicationError
 	if errors.As(err, &appErr) {
 		return appErr.Type() == delivery.ErrTypeAgentQuotaBlocked
+	}
+	return false
+}
+
+// isPublisherCredentialsMissing reports whether a dispatch failed because the
+// publisher client credentials could not be mounted. Matched on the
+// ApplicationError TYPE for the same reason as the quota refusal above.
+func isPublisherCredentialsMissing(err error) bool {
+	var appErr *temporal.ApplicationError
+	if errors.As(err, &appErr) {
+		return appErr.Type() == delivery.ErrTypePublisherCredentialsMissing
 	}
 	return false
 }

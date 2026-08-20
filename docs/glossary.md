@@ -181,9 +181,10 @@ Pre-provisioned Thunder OAuth2 M2M client (client_credentials grant) in
 cloud's platform-idp, secret in Vault as
 `aep-bff-to-remote-worker-client-secret`. **Provisioned for the
 now-removed long-lived `remote-worker` service component**; not used by the OC
-job-Component dispatch that replaced it — a cycle pod authenticates to aep-api
-with a per-cycle bearer subject, and app-factory calls no proxy. Kept in the
-deployment configs as historical bookkeeping; consider for cleanup later.
+job-Component dispatch that replaced it. A cycle pod authenticates to aep-api
+with the org's publisher `client_credentials` token (MCP and internal
+callbacks); app-factory calls no proxy. Kept in the deployment configs as
+historical bookkeeping; consider for cleanup later.
 
 ---
 
@@ -224,13 +225,21 @@ service auth (e.g. `AEP_BFF_TO_PLATFORM_API`,
 `aep-bff-to-remote-worker-client-secret`). Stored as a SecretReference
 sourced from Vault on cloud; a literal env var locally.
 
+### `Publisher client`
+The organization's Thunder confidential OAuth app (`aep-publisher-{org}`).
+The coding-agent Job authenticates to aep-api as this client
+(`client_credentials`) for platform callbacks and MCP — local and cloud.
+Distinct from other M2M clients and from the design
+agent's BFF MCP token.
+
 ### `Task JWT`
-The short-lived RS256 bearer the BFF mints once per cycle at dispatch, with
-the cycle id as subject. Injected as `AEP_BEARER` on the ephemeral
-`coding-agent` job Component; the runner pod presents it back to aep-api for
-platform callbacks (credential refresh, MCP). Verifiers fetch the BFF's public
-key from `/auth/external/jwks.json`. Distinct from Thunder user/M2M tokens and
-from the retired `AEP_BFF_TO_REMOTE_WORKER` client.
+Retired as the coding-agent Job's callback credential (that is the
+publisher client). The BFF still mints short-lived RS256 identity JWTs
+(`IssueServiceToken` / `IssueMCPToken`) for design-agent MCP and outbound
+S2S; they carry org in `ocOrgId` and do not use the cycle id as subject.
+Verifiers fetch the BFF's public key from `/auth/external/jwks.json`.
+Distinct from Thunder user/M2M tokens and from the retired
+`AEP_BFF_TO_REMOTE_WORKER` client.
 
 ---
 
@@ -283,6 +292,16 @@ design agent discovers them via MCP (`list_external_resources`) and reuses the
 exact registered name. Values are per-project, per-environment; secret values
 live in OpenBao via SM-API (`extres-<name>-<env>` entities) and reach pods
 through ResourceReleaseBinding → ExternalSecret → env.
+
+### Unset
+A declared external dependency config key authored on its binding with an empty
+value. Nothing stands in for the value, so do not call it a placeholder. For a
+secret key, the corresponding empty value is the binding's `secretStorePath`.
+
+### Configured
+Every config key the design currently declares for an external dependency has a
+non-empty value. This is distinct from OpenChoreo binding **Ready**, which remains
+true while values are unset; use `configured` for the AEP value state.
 
 ### Proceed-gate
 `design/save` refuses (409) while any dependency is unresolved, naming the

@@ -135,6 +135,10 @@ const (
 	// refused the cycle's component create (HTTP 402). The actionable text the
 	// console shows is AgentQuotaBlockedMessage (agent_quota.go).
 	RunReasonAgentQuotaBlocked = "agent-quota-blocked"
+	// RunReasonPublisherCredentials explains RunStateBlocked: coding dispatch
+	// had no publisher SecretReference to mount. Retrying the Job cannot stamp
+	// it. The console text is PublisherCredentialsMissingMessage.
+	RunReasonPublisherCredentials = "publisher-credentials-missing"
 
 	// Validation verdicts — what the run learned about the deployed system. Empty
 	// until the validation cycle settles.

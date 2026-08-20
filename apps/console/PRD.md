@@ -67,12 +67,13 @@ Approved at section level; per-section detail is defined feature-by-feature.
 - **Project view** — inside a project the sidebar nav swaps to its sections
   (ADR-0010; no back-item, home is the header brand / project switcher):
   - **Overview** — component map + status, deployment state, recent activity.
-  - **Specs & Design** — the requirement, derived design + validation files;
-    the blocking design review lives here.
+  - **Spec** — the requirement, derived design + acceptance criteria.
   - **Builds** — per-version build history: the selected build's summary +
     its tag-scoped coding-agent task list (Version autocomplete for older
     tags), per-task console log; PRs and issues link out to GitHub.
   - **Deployments** — dev environment state and URLs.
+  - **Validations** — the runs checking a build against the spec's acceptance
+    criteria.
   - **Issues** — issues the SRE agent raises against the running project
     (placeholder until its feature lands).
 - **Admin** — agent customization (instructions, skills). Architect/SRE only.
@@ -84,6 +85,16 @@ which is also what closes its issue. Newest first; links go to the feature's
 GitHub issue plus any ADRs it produced. Features still being built aren't
 here: they're the open `console` + `feature` issues.
 
+- Create flow — says what's about to happen: the subtitle answers only *how
+  much detail?* (*"Describe it in your own words — rough is fine."*), the
+  repository field states that Agentic Engineer **creates** it in the user's
+  organization, a taken repository name resolves to a field-level error naming
+  the org rather than a raw alert, the wait reads **Creating your project…**,
+  and the examples carry the enterprise persona (expense approval, employee
+  onboarding, a support triage agent). Retires **AEP** from user-facing copy in
+  favour of **Agentic Engineer**. First feature to draw on the console lexicon
+  (ADR-0019) —
+  [#561](https://github.com/wso2/labs-agentic-engineer/issues/561)
 - Deployments page — one-story rail + environment panel: Development /
   Validation / Production as one numbered rail (Builds-spine vocabulary,
   ADR-0014) with a side panel (version, rollout, endpoints, production

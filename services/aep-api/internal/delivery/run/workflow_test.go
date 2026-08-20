@@ -1813,6 +1813,21 @@ func TestAgentQuotaBlocked_SettlesBlockedWithoutSpendingTheBudget(t *testing.T) 
 		"blocked must be terminal, or the build mutex stays armed forever")
 }
 
+func TestPublisherCredentialsMissing_SettlesBlockedWithoutSpendingTheBudget(t *testing.T) {
+	h := newHarness(t)
+	h.milestoneIs(workable(1, 1))
+	h.dispatchIs("", temporal.NewNonRetryableApplicationError(
+		delivery.PublisherCredentialsMissingMessage, delivery.ErrTypePublisherCredentialsMissing, delivery.ErrPublisherCredentialsMissing))
+
+	h.run(delivery.RunOriginSpecBuild, 0)
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateBlocked, delivery.RunReasonPublisherCredentials)
+	require.Equal(t, 1, h.dispatchCount(),
+		"a missing publisher SecretReference must not be re-attempted — Job create cannot stamp it")
+	require.Equal(t, 0, h.closed, "a blocked increment keeps its milestone open")
+}
+
 // TestBuildRetriggerBudget_RedWithNothingToFix is the exit for a build that
 // stayed red through its one automatic re-trigger and produced no fix issue:
 // the allowance is spent and nothing came back that could make it green.

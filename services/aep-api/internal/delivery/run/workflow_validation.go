@@ -185,6 +185,8 @@ func stateForUnlandedValidation(res cycleResult) (state, reason string) {
 		return delivery.RunStateCancelled, ""
 	case cycleQuotaBlocked:
 		return delivery.RunStateBlocked, delivery.RunReasonAgentQuotaBlocked
+	case cyclePublisherCredentials:
+		return delivery.RunStateBlocked, delivery.RunReasonPublisherCredentials
 	case cycleConflict:
 		return delivery.RunStateFailed, delivery.RunReasonConflictBudget
 	default:

@@ -95,8 +95,17 @@ inside a skill's body, not the agent).
 
 **Coding agent**:
 The agent that implements a component — it builds, verifies, and opens the pull
-request. It reads skills as guidance for construction.
+request. It reads skills as guidance for construction. When it calls the
+platform, it is the organization's **publisher client**, not a per-cycle token
+and not the design agent.
 _Avoid_: builder, implementer agent, runner (the runner is the pod it executes in).
+
+**Publisher client**:
+The organization's confidential Thunder OAuth application. The coding agent is
+this client when it calls the platform. One per organization, reused across
+cycles.
+_Avoid_: Task JWT (a per-cycle bearer, not this identity), M2M client (other
+service-to-service apps), design-agent token.
 
 ## LLM credentials (`services/aep-api`)
 
@@ -288,6 +297,15 @@ The `v<N>` tag: a snapshot of a validated requirements+design pair, cut at the
 moment a build starts. Implementation lands *after* the version is cut; the
 version names what the build implements, not the resulting code state.
 _Avoid_: release, build number.
+
+**Open question**:
+A numbered entry under `## Open Questions` in the PRD — a recorded gap in the spec, and
+specifically one the agent may not close by assuming: a fact only the user holds. Deliberately
+a property of the *document*, not of any conversation. It **gates nothing** — design and build
+both proceed with open questions outstanding. An entry marked *deferred* is one the user has
+declined for now, which tells the agent to stop raising it rather than releasing any gate.
+_Avoid_: interview question (the agent's live request for the user's input, which is a
+mechanism for closing an open question, not the thing itself); blocker (it blocks nothing).
 
 **Dirty (spec)**:
 The spec content has moved past the latest spec version in committed truth.
