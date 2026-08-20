@@ -100,10 +100,15 @@ they carry the persona: internal enterprise work, not consumer apps.
 
 - **Expense approval** — *Employees submit expense claims, managers approve them, and finance exports approved claims to payroll.*
 - **Employee onboarding** — *Track each new hire's onboarding tasks across IT, HR and facilities, with reminders for overdue items.*
-- **Support triage agent** — *A support triage agent that reads incoming tickets, classifies them by urgency, and drafts replies for a human to approve.*
+- **Triage agent** — *A support triage agent that reads incoming tickets, classifies them by urgency, and drafts replies for a human to approve.*
 
 The third is deliberate: Agentic Engineer builds agents too, and the examples are where that
 gets advertised.
+
+**Card titles are two short words**, so each fits one line in a third-width card. A wrapped title
+starts its card's body text at a different height from its neighbours', and the row reads ragged.
+The label may be shorter than the prompt it stands for — *Triage agent* fronts *a support triage
+agent that reads incoming tickets…* — since the prompt carries the detail.
 
 ## Starting a build
 
