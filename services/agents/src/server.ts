@@ -308,12 +308,17 @@ export function createApp(deps: CreateAppDeps): Express {
       });
       return;
     }
+    let chatAttachmentNames: string[] = [];
     if (body.attachments && body.attachments.length > 0) {
       const spent = referenceAttachments.reduce(
         (n, part) => n + (typeof part.data === "string" ? part.data.length : 0),
         0,
       );
-      referenceAttachments = [...referenceAttachments, ...toAttachmentParts(body.attachments, spent)];
+      const parts = toAttachmentParts(body.attachments, spent);
+      referenceAttachments = [...referenceAttachments, ...parts];
+      // Only what actually became a part: naming one that was skipped for the
+      // budget would tell the model to read a document it cannot see.
+      chatAttachmentNames = parts.flatMap((p) => (p.filename ? [p.filename] : []));
     }
 
     // journal (#463): the turn's display record — raw client-sent text + acting
@@ -438,6 +443,7 @@ export function createApp(deps: CreateAppDeps): Express {
         filesChangedExternally: body.filesChangedExternally === true,
         skillSource,
         ...(referenceAttachments.length ? { referenceAttachments } : {}),
+        ...(chatAttachmentNames.length ? { chatAttachmentNames } : {}),
         ...(toolset ? { toolset } : {}),
         ...(mcp ? { mcp } : {}),
         ...(journal ? { journal: { ...journal, turnId } } : {}),

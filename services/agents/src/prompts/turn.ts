@@ -273,6 +273,38 @@ function instructedSkill(turn: TurnSpec): string | undefined {
  * name that resolves to nothing is skipped silently — `loadSkill` then reports it
  * missing exactly as before.
  */
+/**
+ * The files the user attached to THIS message (#428), named so the model can
+ * resolve a pronoun to one.
+ *
+ * The attachment already rides the same user message as a document block, so the
+ * model can read it without being told. What it cannot do reliably is work out
+ * that "add this as a separate form" REFERS to the document — a bare `this` with
+ * no antecedent in the text reads as ambiguous, and the honest response to an
+ * ambiguous instruction is to ask, which is exactly what a live turn did.
+ * Naming the files supplies the antecedent.
+ *
+ * Deliberately separate from the reference-document paragraph: a reference was
+ * attached at project CREATE and is standing context, an attachment belongs to
+ * one message. Saying "attached for this project" about a screenshot the user
+ * just dropped would misdescribe it.
+ *
+ * Paths are not used here — an attachment has none, because nothing stores it
+ * (console ADR-0019).
+ */
+export function attachmentsNote(names: string[] | undefined): string {
+  const listed = (names ?? []).map((n) => n.trim()).filter((n) => n !== "");
+  if (listed.length === 0) return "";
+  return (
+    `The user attached ${listed.length === 1 ? "this file" : "these files"} to this message` +
+    `, and ${listed.length === 1 ? "it is" : "they are"} included above as document content — ` +
+    `read ${listed.length === 1 ? "it" : "them"} before asking about anything ` +
+    `${listed.length === 1 ? "it" : "they"} already answers:\n` +
+    listed.map((n) => `- ${n}`).join("\n") +
+    "\n\n"
+  );
+}
+
 export function eagerSkillsFor(turn: TurnSpec): string[] {
   const instructed = instructedSkill(turn);
   if (instructed === undefined) return [];

@@ -48,6 +48,7 @@ import { TaskPlan } from "../agents/main/task-plan-accumulator.js";
 import { buildInstructions, buildTaskPlanInstructions, buildPrompt, buildEagerSkillsBlock } from "../agents/main/prompt.js";
 import type { SkillSource } from "../agents/main/skill-source.js";
 import { buildManifestPart, toTurnUsage } from "./manifest.js";
+import { attachmentsNote } from "../prompts/turn.js";
 import { config } from "../shared/config.js";
 import {
   isAnthropicModel,
@@ -137,6 +138,16 @@ export interface RunConversationTurnInput {
    * → the message stays a plain string, byte-identical to a turn without it.
    */
   referenceAttachments?: FilePart[];
+  /**
+   * Names of the files the user attached to THIS message (#428), for the prompt
+   * line that gives a bare "this" an antecedent.
+   *
+   * Separate from `referenceAttachments` even though the PARTS are merged into
+   * it: the two channels get identical mechanical treatment but different
+   * wording, because a reference is standing project context and an attachment
+   * belongs to one message. Merged parts alone cannot tell them apart.
+   */
+  chatAttachmentNames?: string[];
   /**
    * Skill names to inline into THIS turn's prompt up front (#335 latency):
    * bodies resolve through `skillSource` and ride the user prompt — never the
@@ -315,7 +326,11 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
     const res = await runTurn({
       model: input.model,
       instructions,
-      prompt: note + eagerBlock + buildPrompt(input.files, input.instruction),
+      prompt:
+        note +
+        attachmentsNote(input.chatAttachmentNames) +
+        eagerBlock +
+        buildPrompt(input.files, input.instruction),
       messages: conv.messages, // appended in place by runTurn
       ...(freshAttachments.length ? { fileParts: freshAttachments } : {}),
       tools,

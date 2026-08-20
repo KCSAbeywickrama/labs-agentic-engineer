@@ -24,6 +24,7 @@ import {
   toAttachmentParts,
 } from "../src/conversation/load-workspace.js";
 import { projectDisplayHistory } from "../src/conversation/display-history.js";
+import { attachmentsNote } from "../src/prompts/turn.js";
 import type { Conversation } from "../src/store/conversation-store.js";
 
 /** An attachment whose base64 payload is `encodedBytes` long. */
@@ -179,4 +180,30 @@ test("projectDisplayHistory omits the field for a turn that carried none", () =>
     [{ role: "user", content: "composed" }],
   );
   assert.deepEqual(projectDisplayHistory(conv), [{ role: "user", content: "hello" }]);
+});
+
+// --- the prompt line ---------------------------------------------------------
+
+test("attachmentsNote names the files so a bare \"this\" has an antecedent", () => {
+  // The failure it fixes: the model CAN read the attached document, but "add
+  // this as a separate form" gives `this` no antecedent in the text, so asking
+  // for clarification is the honest response to an ambiguous instruction.
+  const note = attachmentsNote(["2025-Motor Claim Form.pdf"]);
+  assert.match(note, /attached this file to this message/);
+  assert.match(note, /- 2025-Motor Claim Form\.pdf/);
+  assert.match(note, /read it before asking about anything it already answers/);
+});
+
+test("attachmentsNote agrees in number for several files", () => {
+  const note = attachmentsNote(["a.pdf", "b.csv"]);
+  assert.match(note, /attached these files to this message/);
+  assert.match(note, /read them before asking/);
+  assert.match(note, /- a\.pdf\n- b\.csv/);
+});
+
+test("attachmentsNote is empty for none, so a turn without attachments is unchanged", () => {
+  // Byte-identical prompts matter here: the prefix is the prompt cache key.
+  assert.equal(attachmentsNote(undefined), "");
+  assert.equal(attachmentsNote([]), "");
+  assert.equal(attachmentsNote(["  ", ""]), "");
 });
