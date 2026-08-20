@@ -111,6 +111,19 @@ describe("screenChatAttachments", () => {
     expect(rejected[0]?.reason).toContain("1 MB of room left");
   });
 
+  it("never overstates the remaining room", () => {
+    // Rounding made the notice contradict itself: with 4.998 MB left, refusing a
+    // 5 MB file read "5 MB of room left" — telling the user it should have fitted.
+    const five = MAX_ATTACHMENT_FILE_BYTES;
+    const { rejected } = screenChatAttachments(
+      [fileOf("a.pdf", five), fileOf("b.pdf", five), fileOf("small.md", 2048)],
+      [fileOf("c.pdf", five)],
+    );
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0]?.reason).toContain("4.9 MB of room left");
+    expect(rejected[0]?.reason).not.toContain("5 MB of room left");
+  });
+
   it("is exactly the model's encoded budget: 15 MiB raw base64s to 20 MiB", () => {
     // The derivation the cap exists to restate — 4 bytes out per 3 in.
     const encoded = Math.ceil(MAX_CHAT_ATTACHMENT_TOTAL_BYTES / 3) * 4;

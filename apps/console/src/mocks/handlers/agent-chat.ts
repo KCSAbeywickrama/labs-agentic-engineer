@@ -56,13 +56,43 @@ const instanceId = Math.random().toString(36).slice(2, 8);
 const turnInstruction = new Map<string, string>();
 
 /**
- * Messages sent in THIS page session, per conversation — the mock stand-in for
- * the server's turn journal (#428/#463). It exists so the rehydrate GET can
- * echo a sent message back with its attachment NAMES, which is the only way to
- * verify in mock mode that chips survive a reload. Names only, never bytes:
- * that is exactly the journal's contract (ADR-0019).
+ * Messages sent in this browser, per conversation — the mock stand-in for the
+ * server's turn journal (#428/#463). It exists so the rehydrate GET can echo a
+ * sent message back with its attachment NAMES. Names only, never bytes: that is
+ * exactly the journal's contract (ADR-0019).
+ *
+ * PERSISTED to localStorage, for the same reason handlers/settings.ts persists
+ * the org connection: the worker's memory dies with a reload, and the one thing
+ * this map exists to demonstrate is that attachment chips SURVIVE a reload. An
+ * in-memory map makes the feature look broken in mock mode while it is correct
+ * in production — the worst possible mock.
  */
-const sentMessages = new Map<string, { role: string; content: string; attachments?: string[] }[]>();
+interface JournalMessage {
+  role: string;
+  content: string;
+  attachments?: string[];
+}
+
+const JOURNAL_KEY = "aep:mock:chat-journal";
+
+function readJournal(): Record<string, JournalMessage[]> {
+  try {
+    const raw = localStorage.getItem(JOURNAL_KEY);
+    return raw ? (JSON.parse(raw) as Record<string, JournalMessage[]>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function appendToJournal(conversationId: string, message: JournalMessage): void {
+  const journal = readJournal();
+  journal[conversationId] = [...(journal[conversationId] ?? []), message];
+  try {
+    localStorage.setItem(JOURNAL_KEY, JSON.stringify(journal));
+  } catch {
+    /* quota — non-fatal in mock mode */
+  }
+}
 
 /**
  * The server's attachment guard, mirrored for mock mode. Returns the rejection
@@ -117,17 +147,40 @@ function sse(frames: unknown[]): Response {
 
 // Project-scoped threads (#430): the console resolves the current thread
 // before it can send or rehydrate ANYTHING, so without these two handlers the
-// whole mock-mode chat surface is dead (composer disabled forever). One
-// stable id per project per page instance; rotation mints a fresh one.
-const currentThread = new Map<string, string>();
+// whole mock-mode chat surface is dead (composer disabled forever).
+//
+// One stable id per project, PERSISTED — rotation mints a fresh one. Persisted
+// because the real BFF owns thread existence in `project_conversations`, so a
+// reload lands on the SAME thread; an id minted per page instance meant the
+// rehydrate path could not be exercised in mock mode AT ALL, since every reload
+// addressed a thread nothing had ever been sent to. (`instanceId` still varies
+// per instance for TURN ids, which is deliberate — see its comment above.)
+const THREADS_KEY = "aep:mock:chat-threads";
+
+function readThreads(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem(THREADS_KEY);
+    return raw ? (JSON.parse(raw) as Record<string, string>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeThread(projectName: string, id: string): void {
+  try {
+    localStorage.setItem(THREADS_KEY, JSON.stringify({ ...readThreads(), [projectName]: id }));
+  } catch {
+    /* quota — non-fatal in mock mode */
+  }
+}
+
 let threadCounter = 0;
 function threadFor(projectName: string): string {
-  let id = currentThread.get(projectName);
-  if (!id) {
-    threadCounter += 1;
-    id = `mock-thread-${instanceId}-${threadCounter}`;
-    currentThread.set(projectName, id);
-  }
+  const existing = readThreads()[projectName];
+  if (existing) return existing;
+  threadCounter += 1;
+  const id = `mock-thread-${instanceId}-${threadCounter}`;
+  writeThread(projectName, id);
   return id;
 }
 function threadView(id: string) {
@@ -150,7 +203,11 @@ export const agentChatHandlers = [
     const projectName = params.projectName as string;
     threadCounter += 1;
     const fresh = `mock-thread-${instanceId}-${threadCounter}`;
-    currentThread.set(projectName, fresh);
+    // Persisted like the initial mint, so the rotation survives a reload the way
+    // a server-side rotation does. The journal is keyed by conversation id, so
+    // the fresh thread starts empty with no separate clear — which is also the
+    // real guarantee: attachments are conversation-scoped (ADR-0019).
+    writeThread(projectName, fresh);
     return HttpResponse.json(threadView(fresh), { status: 201 });
   }),
 
@@ -181,14 +238,11 @@ export const agentChatHandlers = [
     const turnId = `mock-turn-${instanceId}-${turnCounter}`;
     turnInstruction.set(turnId, instruction);
     // Record it the way the journal would, so a reload shows the chips again.
-    const conversationId = params.conversationId as string;
-    const log = sentMessages.get(conversationId) ?? [];
-    log.push({
+    appendToJournal(params.conversationId as string, {
       role: "user",
       content: instruction,
       ...(attachments.length > 0 ? { attachments } : {}),
     });
-    sentMessages.set(conversationId, log);
     return HttpResponse.json({ turnId }, { status: 202 });
   }),
 
@@ -205,7 +259,7 @@ export const agentChatHandlers = [
     // the pre-#428 behaviour unchanged.
     return HttpResponse.json({
       status: "done",
-      messages: sentMessages.get(params.conversationId as string) ?? [],
+      messages: readJournal()[params.conversationId as string] ?? [],
     });
   }),
 

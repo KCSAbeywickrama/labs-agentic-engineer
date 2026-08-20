@@ -23,6 +23,7 @@ import {
   Chip,
   Divider,
   IconButton,
+  InputAdornment,
   Stack,
   TextField,
   Tooltip,
@@ -147,39 +148,6 @@ export function ChatInput({
             onRemove={(name) => onFilesChange(files.filter((f) => f.name !== name))}
           />
           <Stack direction="row" spacing={1} sx={{ alignItems: "flex-end" }}>
-            <Tooltip
-              title={
-                /* No extension list: it is 16 entries, which turns a hint into a
-                   wall of text nobody reads. The picker already filters by
-                   `accept`, and picking an unsupported file answers with a
-                   rejection naming the accepted set — available exactly where it
-                   matters, at the point of failure. */
-                `Attach files to this message — a screenshot, a PDF, a data sample. ` +
-                `They stay in this conversation and are never committed. ` +
-                `Up to ${MAX_ATTACHMENT_FILES} files, 5 MB each, 15 MB total.`
-              }
-            >
-              <IconButton
-                component="label"
-                size="small"
-                aria-label="Attach files to this message"
-                disabled={disabled}
-              >
-                <Paperclip size={18} />
-                <input
-                  type="file"
-                  accept={ATTACHMENT_ACCEPT}
-                  multiple
-                  hidden
-                  disabled={disabled}
-                  onChange={(e) => {
-                    addFiles(e.target.files);
-                    // Same file re-selected after a remove must re-fire onChange.
-                    e.target.value = "";
-                  }}
-                />
-              </IconButton>
-            </Tooltip>
             <TextField
               fullWidth
               multiline
@@ -194,6 +162,69 @@ export function ChatInput({
                   e.preventDefault();
                   onSubmit();
                 }
+              }}
+              slotProps={{
+                input: {
+                  // The paperclip lives INSIDE the field, as a start adornment,
+                  // so the composer reads as one control rather than a row of
+                  // three. On a multiline field the adornment would otherwise
+                  // centre itself against a grown box, so it is pinned to the
+                  // bottom — level with the first line of text when the field is
+                  // one row tall, and staying put as it grows.
+                  startAdornment: (
+                    <InputAdornment
+                      position="start"
+                      // Flush to the field's left edge: the adornment's own
+                      // default start-margin is removed and the field's left
+                      // padding is collapsed below (`sx` on the input root), so
+                      // the icon sits at the border rather than indented.
+                      sx={{ alignSelf: "flex-end", mb: 0.25, ml: 0, mr: 0.5 }}
+                    >
+                      <Tooltip
+                        title={
+                          /* No extension list: it is 16 entries, which turns a
+                             hint into a wall of text nobody reads. The picker
+                             already filters by `accept`, and picking an
+                             unsupported file answers with a rejection naming the
+                             accepted set — available exactly where it matters, at
+                             the point of failure. */
+                          `Attach files to this message — a screenshot, a PDF, a data sample. ` +
+                          `They stay in this conversation and are never committed. ` +
+                          `Up to ${MAX_ATTACHMENT_FILES} files, 5 MB each, 15 MB total.`
+                        }
+                      >
+                        <IconButton
+                          component="label"
+                          size="small"
+                          aria-label="Attach files to this message"
+                          disabled={disabled}
+                          // Tighter than a standalone IconButton: it sits within
+                          // the field's own padding, so the default 8px hit area
+                          // pushes the text cursor visibly off-centre.
+                          sx={{ p: 0.125 }}
+                        >
+                          <Paperclip size={13} />
+                          <input
+                            type="file"
+                            accept={ATTACHMENT_ACCEPT}
+                            multiple
+                            hidden
+                            disabled={disabled}
+                            onChange={(e) => {
+                              addFiles(e.target.files);
+                              // Same file re-selected after a remove must re-fire onChange.
+                              e.target.value = "";
+                            }}
+                          />
+                        </IconButton>
+                      </Tooltip>
+                    </InputAdornment>
+                  ),
+                  // Collapse the field's own left padding so the adornment above
+                  // can reach the border. The textarea keeps its own inset, so
+                  // the typed text does not end up flush against the icon.
+                  sx: { pl: 0.25 },
+                },
               }}
             />
             <IconButton

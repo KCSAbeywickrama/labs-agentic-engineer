@@ -123,8 +123,17 @@ export function screenChatAttachments(
   return { accepted, rejected };
 }
 
-/** Megabytes to one decimal, trimmed ("2.0 MB" → "2 MB"). */
+/**
+ * Megabytes to one decimal, trimmed ("2.0 MB" → "2 MB").
+ *
+ * FLOORED, not rounded. Rounding let the notice overstate the room and
+ * contradict itself: with 4.998 MB left, refusing a 5 MB file read "Over the
+ * 15 MB total — 5 MB of room left", which tells the user their file should have
+ * fitted. Flooring reports 4.9 MB, so the number is always something a file of
+ * that size would actually fit into.
+ */
 function formatMb(bytes: number): string {
   const mb = Math.max(0, bytes) / (1024 * 1024);
-  return `${mb.toFixed(1).replace(/\.0$/, "")} MB`;
+  const floored = Math.floor(mb * 10) / 10;
+  return `${String(floored).replace(/\.0$/, "")} MB`;
 }
