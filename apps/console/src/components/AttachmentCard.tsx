@@ -21,9 +21,14 @@ import { X } from "@wso2/oxygen-ui-icons-react";
 import { attachmentTypeLabel } from "../lib/attachments";
 
 /**
- * One attached file, as a card inside a composer. Shared by the create view's
- * PromptComposer (#383) and the agent chat's ChatInput (#428) so an attachment
- * looks the same wherever it was attached.
+ * One attached file, as a card inside the CREATE VIEW's composer (#383).
+ *
+ * Sole consumer: `PromptComposer`. The chat composer deliberately does NOT use
+ * this — see `AttachmentPreview`, which is a 30px row instead. The two diverge
+ * because their composers do: the create view's composer IS the page, so a
+ * 132x108 tile is affordable and the documents are the point of the screen,
+ * while the chat's is a strip at the bottom of a side panel and its attachments
+ * are an aside to a sentence.
  *
  * The name is the whole card — no size, because an oversized file never becomes
  * a card (it becomes a rejection notice), so the only thing left worth saying is
