@@ -204,25 +204,20 @@ export function ProjectCreate() {
               <Typography variant="h4" gutterBottom>
                 Name your project
               </Typography>
-              {/* The idea is echoed to confirm "this is what you asked for",
-                  not to display it — the same transparency-device role it has
-                  beside /start (#528). Unclamped, a pasted multi-paragraph
-                  idea becomes a wall of text above the fields and pushes
-                  Create project below the fold. Nothing is lost: Back returns
-                  to the textarea holding the full text. Clamp matches the
-                  project-card description in ProjectsList. */}
-              <Typography
-                variant="body2"
-                color="text.secondary"
-                title={prompt}
-                sx={{
-                  display: "-webkit-box",
-                  WebkitLineClamp: 2,
-                  WebkitBoxOrient: "vertical",
-                  overflow: "hidden",
-                }}
-              >
-                “{prompt}”
+              {/* Labelled "Prompt:" so the user can see what we do with what
+                  they wrote — it is the agent's brief, not just a description
+                  we filed. Bare quotes never said that.
+
+                  One line, always: this echo confirms "this is what you asked
+                  for" (the same transparency-device role the cropped idea has
+                  beside /start, #528) rather than displaying the document. The
+                  textarea is multiline with no maxLength, so unclamped it is
+                  the one element on this page that can grow without bound and
+                  push Create project off the fold. Nothing is lost — the full
+                  text is on the title attribute, and Back returns to the
+                  textarea still holding it. */}
+              <Typography variant="body2" color="text.secondary" noWrap title={prompt}>
+                Prompt: {prompt}
               </Typography>
             </Box>
             <TextField

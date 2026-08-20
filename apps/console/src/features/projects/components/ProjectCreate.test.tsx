@@ -65,17 +65,20 @@ describe("ProjectCreate", () => {
     expect(screen.getByText("Support triage agent")).toBeInTheDocument();
   });
 
-  it("clamps the echoed idea so a long one cannot push the form off-screen", () => {
+  it("labels the idea as the prompt, on one line however long it is", () => {
     reachNameStep();
-    const echo = screen.getByText(/Employees submit expense claims/);
-    // The clamp mechanism, as the project cards use it. Asserted through
-    // computed style because `sx` emits a class, not inline styles.
+    const echo = screen.getByText(/^Prompt:/);
+    // Labelled, so the user can see we treat what they wrote as the brief.
+    expect(echo).toHaveTextContent(/^Prompt: Employees submit expense claims/);
+    // One line, always — the textarea has no maxLength, so this is the only
+    // element on the page that could otherwise grow without bound. Asserted
+    // through computed style because MUI emits a class, not inline styles.
     const css = getComputedStyle(echo);
+    expect(css.whiteSpace).toBe("nowrap");
+    expect(css.textOverflow).toBe("ellipsis");
     expect(css.overflow).toBe("hidden");
-    expect(css.display).toBe("-webkit-box");
-    expect(css.getPropertyValue("-webkit-line-clamp")).toBe("2");
     // Nothing is lost — the full idea stays reachable without leaving the step.
-    expect(echo).toHaveAttribute("title", expect.stringContaining("payroll") as unknown as string);
+    expect(echo.getAttribute("title")).toContain("payroll");
   });
 
   it("says the repository is created, rather than implying it exists", () => {
