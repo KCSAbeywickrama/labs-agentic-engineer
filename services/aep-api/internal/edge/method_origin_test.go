@@ -99,6 +99,7 @@ var opOwner = map[string]string{
 	"GetTask":                       embedDelivery,
 	"GetTurn":                       embedSpec,
 	"ImportSkill":                   embedSpec,
+	"InvokeComponent":               embedProjects,
 	"ListAccessRequests":            embedDependencies,
 	"ListActivity":                  embedProjects,
 	"ListBuilds":                    embedProjects,
