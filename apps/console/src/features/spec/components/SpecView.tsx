@@ -53,7 +53,6 @@ import { toSpecEntry } from "../api/mapping";
 import { computeDependencyUsedBy } from "../lib/dependencyUsedBy";
 import { useCollabSpec } from "../collab/useCollabSpec";
 import { SpecQuestionForm } from "./SpecQuestionForm";
-import { countBlockingOpenQuestions } from "../lib/openQuestions";
 import { nextVersionLabel, parsePrdStories } from "../lib/buildScope";
 import { useRoomQuestion } from "../../agent-chat/useRoomQuestion";
 import { CollabTextArea } from "../collab/CollabTextArea";
@@ -79,6 +78,9 @@ import { useSession } from "../../../auth/SessionContext";
 
 type PreflightItem = components["schemas"]["PreflightItem"];
 type BuildInputItem = components["schemas"]["BuildInputItem"];
+
+/** The one file that carries the code lenses (#579). */
+const PRD_PATH = "specs/requirements/prd.md";
 
 // Full-screen spec workspace (#80), per the oxygen-ui sample's
 // LoginEditorView pattern: fullWidth/noPadding page, own header bar,
@@ -452,16 +454,14 @@ export function SpecView({ projectName }: { projectName: string }) {
   const failed = specStatus === "failed";
   // The design gate: Build arms once design files are generated (#80).
   const hasDesignFiles = files.some((f) => f.group === "designs");
-  // The PRD's Open Questions gate (#365/#372): undeferred questions block
-  // Generate design, and the header says why instead of a mystery-grey button.
-  const prdEntry = files.find((f) => f.path === "specs/requirements/prd.md") ?? null;
+  // The committed PRD, read for the Build drawer's story preview. It used to
+  // also feed an Open Questions gate on Generate design (#365/#372); open
+  // questions gate nothing now (#539), and the launchers that answered them
+  // live on the document itself (#579).
+  const prdEntry = files.find((f) => f.path === PRD_PATH) ?? null;
   const prdContent = useSpecFileContent(
     projectName,
     prdEntry ? { path: prdEntry.path, sha: prdEntry.sha } : null,
-  );
-  const openQuestions = useMemo(
-    () => (prdContent.data ? countBlockingOpenQuestions(prdContent.data.content) : 0),
-    [prdContent.data],
   );
   const cutPreview = useMemo(() => {
     const stories = prdContent.data ? parsePrdStories(prdContent.data.content) : [];
@@ -493,6 +493,15 @@ export function SpecView({ projectName }: { projectName: string }) {
   // reachable mid-interview — and firing one supersedes the live questions,
   // handing the agent's own assumptions back as the user's answers.
   const awaitingAnswers = Boolean(roomQuestion && roomDoc);
+  // A lens fired while the agent already holds the turn would be refused by the
+  // composer anyway, and firing one mid-interview supersedes the live question
+  // form for the whole room — so the lenses go inert for the same two reasons
+  // the header's launchers do, and say which one.
+  const lensBusyReason = agentBusy
+    ? "An agent is still working — this is available once it finishes"
+    : awaitingAnswers
+      ? "The agent is waiting on your answers — finish the questions below first"
+      : "";
 
   // Build (#162, #164): commit the room's live edits FIRST (POST /build tags
   // HEAD), then check preflight — a project with unresolved dependencies
@@ -740,22 +749,13 @@ export function SpecView({ projectName }: { projectName: string }) {
             </>
           ) : (
             <>
-            {/* Hand-picked flow launchers (#372): only the two that matter at
-                this gate ride the header; the full set lives in the chat's
-                Actions menu. Both seed the scoped /amend flow. */}
+            {/* The one launcher that is not on the document (#579): every
+                other command is offered by the PRD section it changes, but
+                "add a feature" has to be reachable while another artifact is
+                open, so it keeps its place beside the primary CTA. */}
             {hasRequirementsFiles && !awaitingAnswers && (
-              <Button size="small" variant="outlined" onClick={() => seedChat("/amend Add a feature")}>
+              <Button size="small" variant="outlined" onClick={() => seedChat("/feature")}>
                 + Feature
-              </Button>
-            )}
-            {openQuestions > 0 && !awaitingAnswers && (
-              <Button
-                size="small"
-                variant="outlined"
-                color="warning"
-                onClick={() => seedChat("/amend Resolve the open questions")}
-              >
-                Resolve open questions ({openQuestions})
               </Button>
             )}
             <Tooltip
@@ -764,11 +764,9 @@ export function SpecView({ projectName }: { projectName: string }) {
                   ? "An agent is still working — Generate design is available once it finishes"
                   : awaitingAnswers
                     ? "The agent is waiting on your answers — finish the questions below first"
-                    : openQuestions > 0
-                      ? `${openQuestions} open question${openQuestions === 1 ? "" : "s"} block design — answer or defer them first`
-                      : hasRequirementsFiles
-                        ? "Derive the component design from your requirements"
-                        : "Generate requirements first"
+                    : hasRequirementsFiles
+                      ? "Derive the component design from your requirements"
+                      : "Generate requirements first"
               }
             >
               {/* span so the tooltip works while the button is disabled */}
@@ -776,7 +774,7 @@ export function SpecView({ projectName }: { projectName: string }) {
                 <Button
                   variant="contained"
                   startIcon={<Sparkles size={18} />}
-                  disabled={!hasRequirementsFiles || agentBusy || awaitingAnswers || openQuestions > 0}
+                  disabled={!hasRequirementsFiles || agentBusy || awaitingAnswers}
                   onClick={generateDesign}
                 >
                   Generate design
@@ -1047,6 +1045,11 @@ export function SpecView({ projectName }: { projectName: string }) {
                     provider={collab.provider}
                     self={collab.self}
                     agentStreaming={agentBusy}
+                    lenses={
+                      selectedFile.path === PRD_PATH
+                        ? { run: seedChat, busyReason: lensBusyReason }
+                        : undefined
+                    }
                   />
                 ) : ytext ? (
                   <CollabTextArea

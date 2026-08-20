@@ -54,6 +54,74 @@ test("flow points at the skill, with the user's trailing text after a blank line
   );
 });
 
+/**
+ * A command names the user's intent (`/feature`), a skill names an
+ * engineer-facing playbook (`amend`). The three scoped edits are branches of
+ * one playbook, so the command resolves to that skill AND says which branch —
+ * carrying whatever the user clicked as the branch's subject, which is what
+ * makes a lens on the PRD a complete instruction rather than a menu item the
+ * user has to finish from memory (#579).
+ */
+test("a command that names a branch resolves to the skill and says which branch", () => {
+  const feature = composeInstruction({ kind: "flow", skill: "feature", text: "receipt scanning" });
+  assert.ok(feature.startsWith("Load the amend skill and follow it.\n\nAdd a feature: receipt scanning"));
+
+  const actor = composeInstruction({ kind: "flow", skill: "actor", text: "Finance reviewer" });
+  assert.ok(actor.startsWith("Load the amend skill and follow it.\n\nAdd an actor: Finance reviewer"));
+
+  const expand = composeInstruction({
+    kind: "flow",
+    skill: "expand",
+    text: "As an Employee, I want to submit an expense.",
+  });
+  assert.ok(
+    expand.startsWith(
+      "Load the amend skill and follow it.\n\nGo deeper on this feature: As an Employee, I want to submit an expense.",
+    ),
+  );
+
+  // Fired bare (the header's "+ Feature", where there is no line to carry) the
+  // branch still arrives; the skill interviews for the subject.
+  const bare = composeInstruction({ kind: "flow", skill: "feature" });
+  assert.ok(bare.startsWith("Load the amend skill and follow it.\n\nAdd a feature."));
+});
+
+test("a branch command inlines the skill it resolves to, not its own token", () => {
+  for (const token of ["feature", "actor", "expand"]) {
+    assert.deepEqual(eagerSkillsFor({ kind: "flow", skill: token }), [
+      "amend",
+      "grilling",
+      "prd-contract",
+    ]);
+  }
+  // `/settle` is its own skill, so nothing is remapped — but it revises the
+  // same document and carries the same two supporting skills.
+  assert.deepEqual(eagerSkillsFor({ kind: "flow", skill: "settle" }), [
+    "settle",
+    "grilling",
+    "prd-contract",
+  ]);
+});
+
+/**
+ * Both skill maps are keyed by a name the caller supplies, so a name that
+ * happens to live on `Object.prototype` must MISS them rather than inherit.
+ * Indexed directly, `constructor` finds a function whose `.scope` is not one
+ * (a thrown turn) and `toString` finds something `...` cannot spread — where
+ * the user should simply be told the skill does not exist.
+ *
+ * `/constructor` is typable: the grammar admits any `[a-z0-9-]+`. `toString`
+ * is not, but `skill` is an ordinary wire field and nothing downstream of the
+ * parsers re-checks it.
+ */
+test("a skill named after an Object.prototype member is an ordinary unknown skill", () => {
+  for (const token of ["constructor", "toString"]) {
+    const out = composeInstruction({ kind: "flow", skill: token, text: "go" });
+    assert.ok(out.startsWith(`Load the ${token} skill and follow it.\n\ngo`));
+    assert.deepEqual(eagerSkillsFor({ kind: "flow", skill: token }), [token]);
+  }
+});
+
 test("start appends the captured idea, and appends NOTHING when there is none", () => {
   const withIdea = composeInstruction({ kind: "start", idea: "an expense tracker" });
   assert.match(withIdea, /^Load the start skill and follow it\.\n\nThe user's idea for this project:\n\nan expense tracker/);
@@ -234,7 +302,12 @@ test("every eager skill name exists in the platform skill library", () => {
     { kind: "start" } as const,
     { kind: "plan" } as const,
     { kind: "flow", skill: "amend" } as const,
+    { kind: "flow", skill: "settle" } as const,
     { kind: "flow", skill: "design" } as const,
+    // The branch commands resolve to a platform skill, so they are checked too.
+    { kind: "flow", skill: "feature" } as const,
+    { kind: "flow", skill: "actor" } as const,
+    { kind: "flow", skill: "expand" } as const,
   ];
   for (const turn of turns) {
     for (const name of eagerSkillsFor(turn)) {

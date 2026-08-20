@@ -44,10 +44,12 @@ tag.>
 <what this project deliberately does not do>
 
 ## Open Questions
-<numbered; each is something nobody could answer yet — marked, never guessed.
-An open question is resolved (answered, and its answer moved to the right
-section) or explicitly deferred ("deferred — does not block design") before
-/design proceeds.>
+<numbered; each is a fact only the user holds — marked, never guessed. It is
+resolved when its answer moves to the section it belongs in and the entry
+leaves this list. An entry the user has declined for now is marked
+"deferred — the user will decide later", which tells you to stop raising it.
+Open questions gate nothing: the document is readable, designable and
+buildable with them outstanding.>
 
 ## Further Notes
 <anything real that fits nowhere above; omit the section when empty>

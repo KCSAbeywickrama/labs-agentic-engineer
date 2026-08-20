@@ -26,11 +26,11 @@ cluster, `pnpm play` for the playground), so **a skill edit needs no rebuild**.
 An absent kind means `org`, which is a real decision, not a default to lean on:
 
 - **`platform`** — AE-owned, read-only in the console. The design-flow skills
-  (`start`, `amend`, `grilling`, `prd-contract`, `design`, `cell-design`,
-  `architecture`, `security-design`, `openapi-conventions`, `wireframes`,
-  `validation-criteria`, `task-planning`), the `console` narration policy, and
-  the coding run's own workflow skills (`aep`, `aep-validation`,
-  `playwright-cli`).
+  (`start`, `amend`, `settle`, `grilling`, `prd-contract`, `design`,
+  `cell-design`, `architecture`, `security-design`, `openapi-conventions`,
+  `wireframes`, `validation-criteria`, `task-planning`), the `console`
+  narration policy, and the coding run's own workflow skills (`aep`,
+  `aep-validation`, `playwright-cli`).
 - **`org`** — the org-visible stack skills (`go`, `ballerina`, `react-webapp`,
   `api-management`, `thunder-authentication`). Editable and deletable by an org.
 
@@ -102,7 +102,7 @@ one was `go`'s, and it was invisible for as long as `go` was preloaded regardles
 - **A mechanics library is not an entry point.** `grilling` owns the question
   tools and `prd-contract` owns the PRD's shape; neither writes a document, so
   neither is a flow a user can usefully fire — a flow skill (`start`, `amend`,
-  `design`) owns the artifact and loads them for the mechanics. Nothing enforces
+  `settle`, `design`) owns the artifact and loads them for the mechanics. Nothing enforces
   that: the catalog offers every name, so a skill with no artifact contract says
   so in its own body and names the flow to fire instead.
 - **Instructions are as short as they can be and stay unambiguous.** State the

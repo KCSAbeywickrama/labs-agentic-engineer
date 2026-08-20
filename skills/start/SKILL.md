@@ -149,6 +149,7 @@ their own skills and gates. It does **not** end at the first PRD — that is the
 middle of the flow, not the end of it. Close when the interview has converged
 (above), never merely because the file now exists.
 
-Closing is a one-paragraph summary of the decisions taken (calling out every
-`*assumed*` one), then what stands between the user and the design: open
-questions must be answered or explicitly deferred before design can proceed.
+Closing is a one-paragraph summary of the decisions taken, calling out every
+`*assumed*` one and every open question still standing. Both are ordinary
+states for a PRD to be in — neither holds the design up — so say what is
+unsettled, not what it blocks.

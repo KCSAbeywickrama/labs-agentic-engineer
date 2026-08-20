@@ -28,6 +28,7 @@ import {
   Avatar,
   AvatarGroup,
   Box,
+  Button,
   Chip,
   Dialog,
   DialogActions,
@@ -61,7 +62,6 @@ import { buildFeed, participantsOf, type FeedBlock } from "../feed";
 import { answerableQuestionIds } from "../questionCards";
 import { MessageList } from "./MessageList";
 import { ChatInput } from "./ChatInput";
-import { Button, Menu, MenuItem } from "@wso2/oxygen-ui";
 import {
   DESIGN_COMMAND,
   START_COMMAND,
@@ -163,13 +163,6 @@ export function AgentChatPanel({
   // delivered user message. One O(n) pass per log change.
   const answerableIds = useMemo(() => answerableQuestionIds(messages), [messages]);
 
-  // The Actions menu (#372): the complete scoped-flow set behind one button.
-  const [actionsAnchor, setActionsAnchor] = useState<HTMLElement | null>(null);
-  const runAction = (instruction: string | null, prefill?: string) => {
-    setActionsAnchor(null);
-    if (instruction) send(instruction);
-    else if (prefill) setDraft(prefill);
-  };
   const awaiting = !isSending && answerableIds.size > 0;
 
   // A teammate's running turn locks the composer (a concurrent send 409s
@@ -185,15 +178,6 @@ export function AgentChatPanel({
   // `!conversationReady` covers the brief window before the project's shared
   // thread id resolves (#430) — a send then would have nowhere to go.
   const inputDisabled = isSending || Boolean(teammateRunning) || !conversationReady;
-  // The Actions menu launches SCOPED FLOWS, not answers — and any delivered
-  // user message supersedes a live question form for the whole room
-  // (`answerableQuestionIds` → `closeStaleRoomQuestions`). A composer reply
-  // superseding is deliberate: prose is an equally valid answer path
-  // (ADR-0012). "+ Feature" is not an answer, so firing one mid-interview
-  // closes the form on every member and leaves the agent to assume what the
-  // user was halfway through deciding. `SpecView` gates its own launchers on
-  // exactly this; the menu holds the same flows and needs the same gate.
-  const flowsDisabled = inputDisabled || awaiting;
   // The resolve-failed hint says WHY the composer is disabled — without it a
   // failed thread resolve reads as a dead panel. Recovery is automatic (the
   // query refetches on window focus), so the wording promises the retry.
@@ -534,10 +518,11 @@ export function AgentChatPanel({
         </Box>
       </Box>
 
-      {/* Composer — the Actions menu (#372) leads the context row, so every
-          scoped launcher sits with the input it feeds. Direct-send items start
-          their interview immediately; prefill items need the user's subject
-          first. */}
+      {/* Composer. The scoped launchers used to sit here behind an `Actions ▾`
+          menu of raw slash commands (#372); each one changes a specific place
+          in the PRD, so each is now offered AT that place as a code lens
+          (#579) — where the subject comes from the line the user clicked
+          rather than from their memory. */}
       <ChatInput
         value={draft}
         onChange={setDraft}
@@ -545,45 +530,6 @@ export function AgentChatPanel({
         disabled={inputDisabled}
         contextLabel={displayName ?? projectName}
         hint={hint}
-        actions={
-          <>
-            <Tooltip
-              title={
-                awaiting
-                  ? "The agent is waiting on your answers — finish the questions on the spec view first, or reply here"
-                  : ""
-              }
-            >
-              {/* span so the tooltip still works while the button is disabled */}
-              <span>
-                <Button
-                  size="small"
-                  variant="outlined"
-                  onClick={(e: React.MouseEvent<HTMLElement>) => setActionsAnchor(e.currentTarget)}
-                  disabled={flowsDisabled}
-                  sx={{ flexShrink: 0 }}
-                >
-                  Actions ▾
-                </Button>
-              </span>
-            </Tooltip>
-            <Menu
-              anchorEl={actionsAnchor}
-              open={actionsAnchor !== null}
-              onClose={() => setActionsAnchor(null)}
-            >
-              <MenuItem onClick={() => runAction("/amend Add a feature")}>+ Feature</MenuItem>
-              <MenuItem onClick={() => runAction("/amend Add an actor")}>+ Actor</MenuItem>
-              <MenuItem onClick={() => runAction(null, "/amend Go deeper on ")}>Go deeper on…</MenuItem>
-              <MenuItem onClick={() => runAction("/amend Resolve the open questions")}>
-                Resolve open questions
-              </MenuItem>
-              <MenuItem onClick={() => runAction("/design Start the next phase — delta pass, protect shipped components")}>
-                Start next phase
-              </MenuItem>
-            </Menu>
-          </>
-        }
       />
       <Dialog open={confirmNewOpen} onClose={() => setConfirmNewOpen(false)} maxWidth="xs" fullWidth>
         <DialogTitle>Start a new conversation?</DialogTitle>

@@ -28,9 +28,11 @@ deferred to a review that never happens. `grilling` carries the mechanics and
 the pacing. The PRD's own answers are settled: asking one back reads as the
 document being ignored.
 
-**Open questions gate:** any PRD Open Question neither answered nor marked
-"deferred" blocks design — stop and point the user at the amend flow's
-resolve-open-questions branch. Deferred questions never block.
+**Open questions never block design.** They are recorded gaps, not corruption:
+design what the PRD does say, and where one genuinely decides a call you are
+about to make, ask it as an ordinary question — the same way you ask anything
+else at design altitude. An entry marked "deferred" is one the user has already
+declined for now; leave it alone.
 
 ## Reference documents ground the design
 

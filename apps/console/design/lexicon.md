@@ -226,9 +226,9 @@ The word had two referents. It now has one.
   ([#532](https://github.com/wso2/labs-agentic-engineer/issues/532)), so the label can be plain
   rather than cautionary.
 
-**defer** appears in a gate tooltip as something the user can do, but deferring means getting
-the word "deferred" into a PRD entry and no affordance exists for that. Left to
-[#527](https://github.com/wso2/labs-agentic-engineer/issues/527); do not invent one here.
+**defer** had been a gate tooltip's advice with no affordance behind it. The gate is gone
+([#539](https://github.com/wso2/labs-agentic-engineer/issues/539)) and deferring is now an outcome
+of the `/settle` conversation — see **Two kinds of unsettled**.
 
 ## The spec view's artifact rail
 
@@ -543,16 +543,37 @@ renaming; it needed to stop being visible.
 | start from an idea | `/start with <idea>` | fired at project creation ([#522](https://github.com/wso2/labs-agentic-engineer/issues/522)); the idea rides along, cropped, so the user can see the agent is working from **their** words rather than a bare command ([#528](https://github.com/wso2/labs-agentic-engineer/issues/528)) |
 | add a feature | `/feature <idea>` | code lens on the story list |
 | add an actor | `/actor <who>` | code lens on Actors |
-| go deeper on a feature | `/expand <feature>` | code lens on the feature |
-| settle an assumption or an open question | `/settle <the point>` | clicking the flagged line itself |
+| go deeper on a feature | `/expand <story>` | code lens on the story, which carries itself as the subject |
+| settle an assumption or an open question | `/settle <the point>` | code lens on the flagged line |
 | take up the open questions | `/settle` over the section | code lens on **Open Questions** |
 
 **A command names the user's intent, never the document operation.** `/feature` says what they
 came to do; `/amend Add a feature` said what the system does to a file.
 
-Offering them **where the thing they change lives** — a lens on the section, a click on the
-flagged line — is what retires the `Actions ▾` menu as the way in. Their exact rendering in the
-transcript is [#530](https://github.com/wso2/labs-agentic-engineer/issues/530)'s call.
+Offering them **where the thing they change lives** — a lens on the section, a lens on the flagged
+line — is what retires the `Actions ▾` menu as the way in. Their exact rendering in the transcript
+is [#530](https://github.com/wso2/labs-agentic-engineer/issues/530)'s call.
+
+**A section lens is always on show; a line lens appears on its entry's hover.** The section lens is
+how a command is discovered at all, so it cannot hide; a twenty-story list with a lens on every
+line would be twenty controls competing with the prose they annotate. The flag itself never hides —
+an `*assumed*` run and an open question read as unsettled at rest, and only the control that acts
+on them waits for the pointer.
+
+That hover is what settled **`/expand` per story rather than one lens on the list**: a feature has
+no block of its own in the PRD — the contract keeps depth in feature files — so the nearest thing
+to "a feature" is the story line, and per-story is the only placement where the subject comes from
+the document instead of the user's memory. Decided against the rendered document, where the cost
+of per-line is a control that is only there while the pointer is.
+
+**The lens is a control beside the line, not the line made clickable.** The PRD is a collaborative
+editor: a line that fires a command on click is a line the user can no longer put a caret in.
+
+**A lens goes inert, saying which, while an agent holds the turn** — the same two conditions that
+gate the header's launchers, since firing a command mid-interview supersedes the live question form
+for the whole room.
+
+Shipped in [#579](https://github.com/wso2/labs-agentic-engineer/issues/579).
 
 ## Navigation
 

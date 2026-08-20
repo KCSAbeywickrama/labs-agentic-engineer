@@ -396,9 +396,12 @@ export interface WorkspaceRef {
  * prompt wording — that is the whole point of this type.
  *
  *  - `chat`  — an ordinary user message, sent verbatim.
- *  - `flow`  — a `/<skill>` command: load that skill and follow it, with the
- *              user's trailing text (if any) riding along. `references` names
- *              the attached reference documents exactly as on `start` — a flow
+ *  - `flow`  — a `/<command>`: load a skill and follow it, with the user's
+ *              trailing text (if any) riding along. `skill` carries the
+ *              command's TOKEN as typed; most tokens are the skill name, and
+ *              the few that name a branch of one instead resolve in the agents
+ *              service, which is where wording lives. `references` names the
+ *              attached reference documents exactly as on `start` — a flow
  *              generates artifacts (wireframes above all) that must be
  *              grounded in an attached sketch or spec.
  *  - `start` — the project kickoff. `idea` is what the user asked for, read by
