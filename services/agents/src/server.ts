@@ -50,6 +50,7 @@ import {
   SSE_DONE,
   isTurnSpec,
   isCollabConfig,
+  isTurnAttachmentsOrAbsent,
   type CollabConfig,
   type McpConfig,
   type StreamPart,
@@ -63,7 +64,13 @@ import { runConversationTurn, TurnGuard, ConcurrentTurnError } from "./conversat
 import { projectDisplayHistory } from "./conversation/display-history.js";
 import { joinRoom, type RoomPeer } from "./collab/room-peer.js";
 import type { SkillSource } from "./agents/main/skill-source.js";
-import { readSnapshot, loadSkillsFromSnapshot, readReferenceAttachments, overlayReferenceTexts } from "./conversation/load-workspace.js";
+import {
+  readSnapshot,
+  loadSkillsFromSnapshot,
+  readReferenceAttachments,
+  overlayReferenceTexts,
+  toAttachmentParts,
+} from "./conversation/load-workspace.js";
 import { conversationOrgId, resolveWorkspace, WorkspaceRefError } from "./shared/snapshot-path.js";
 import { createAuthMiddleware, type AgentsAuthConfig } from "./shared/auth.js";
 import { startKeepAlive } from "./shared/keepalive.js";
@@ -99,6 +106,14 @@ function isJournal(v: unknown): v is TurnJournal {
   if (typeof v !== "object" || v === null) return false;
   const j = v as Record<string, unknown>;
   if (typeof j.text !== "string" || j.text.trim() === "") return false;
+  // Attachment NAMES (#428) — never bytes. Checked for type when present, so a
+  // malformed list is a clean 400 rather than a blank chip in someone's thread.
+  if (
+    j.attachments !== undefined &&
+    !(Array.isArray(j.attachments) && j.attachments.every((n) => typeof n === "string"))
+  ) {
+    return false;
+  }
   if (j.author === undefined) return true;
   if (typeof j.author !== "object" || j.author === null) return false;
   const a = j.author as Record<string, unknown>;
@@ -117,8 +132,16 @@ function startSSE(res: Response): void {
 export function createApp(deps: CreateAppDeps): Express {
   const app = express();
   const guard = new TurnGuard(); // one in-flight guard per app (serializes turns per id)
-  // A workspace turn body is a few hundred bytes of IDs + shas; 256kb is generous headroom.
-  const jsonParser = express.json({ limit: "256kb" });
+  // A workspace turn body used to be a few hundred bytes of IDs + shas. Chat
+  // attachments (#428) now ride it INLINE as base64, so the ceiling has to admit
+  // them — and the number is derived, not chosen: the per-turn attachment budget
+  // is 20 MiB ENCODED (MAX_REFERENCE_ATTACHMENT_ENCODED_BYTES), so 24 MiB leaves
+  // 4 MiB for the prompt, the refs and the JSON framing around them.
+  //
+  // Raising an authenticated internal endpoint's ceiling ~94x is not free, which
+  // is why it is pinned to that budget: any future request to widen it further
+  // has to widen the budget first.
+  const jsonParser = express.json({ limit: "24mb" });
   const requireAuth = createAuthMiddleware(deps.auth);
   const keepAliveMs = deps.keepAliveMs ?? config.keepAliveMs;
 
@@ -158,6 +181,7 @@ export function createApp(deps: CreateAppDeps): Express {
       toolset?: unknown;
       mcp?: unknown;
       journal?: unknown;
+      attachments?: unknown;
       collab?: unknown;
       webSearch?: unknown;
       eagerSkills?: unknown;
@@ -273,6 +297,25 @@ export function createApp(deps: CreateAppDeps): Express {
       mcp = body.mcp;
     }
 
+    // Chat attachments (#428): bytes INLINE on the body, because nothing stores
+    // them (console ADR-0019). Converted to native file parts and appended to the
+    // reference parts — the per-turn encoded budget is SHARED between the two
+    // channels rather than doubled, since the ceiling belongs to the model
+    // request, not to either channel.
+    if (!isTurnAttachmentsOrAbsent(body.attachments)) {
+      res.status(400).json({
+        error: "attachments must be an array of { name: string, mediaType: string, data: string }",
+      });
+      return;
+    }
+    if (body.attachments && body.attachments.length > 0) {
+      const spent = referenceAttachments.reduce(
+        (n, part) => n + (typeof part.data === "string" ? part.data.length : 0),
+        0,
+      );
+      referenceAttachments = [...referenceAttachments, ...toAttachmentParts(body.attachments, spent)];
+    }
+
     // journal (#463): the turn's display record — raw client-sent text + acting
     // user. Optional (older callers/evals journal nothing); malformed → clean
     // 400. Rebuilt field-by-field: the body object is untrusted, and a spread
@@ -287,6 +330,9 @@ export function createApp(deps: CreateAppDeps): Express {
         text: body.journal.text,
         ...(body.journal.author
           ? { author: { id: body.journal.author.id, displayName: body.journal.author.displayName } }
+          : {}),
+        ...(body.journal.attachments && body.journal.attachments.length > 0
+          ? { attachments: [...body.journal.attachments] }
           : {}),
       };
     }

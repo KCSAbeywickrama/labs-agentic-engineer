@@ -52,6 +52,7 @@ export type {
   PlanScope,
   PlanContextFile,
   TurnJournal,
+  TurnAttachment,
   WorkspaceRef,
   McpConfig,
   CollabConfig,
@@ -73,6 +74,8 @@ export {
   buildAnswersInstruction,
   isToolset,
   isTurnSpec,
+  isTurnAttachment,
+  isTurnAttachmentsOrAbsent,
   isCollabConfig,
 } from "./contracts/sse-events.js";
 export type {

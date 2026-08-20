@@ -67,14 +67,19 @@ type turnJob struct {
 	turn             agentsvc.TurnSpec // what this turn is FOR (the agents service composes the text)
 	target           string            // spec-bundle path this turn should write to, when pinned
 	summary          string            // raw user instruction (feed line subject + journal display, #463)
+	// attachments are this message's chat attachments (#428), captured at POST
+	// time like everything else here (D20). They live ONLY in this struct
+	// between the POST and the dispatch — nothing writes them to disk (ADR-0019)
+	// — which is why the turn is the only thing that can carry them.
+	attachments []agentsvc.TurnAttachment
 	// author is the acting user for the journal (#463), nil when the bearer
 	// carries no human identity — an M2M token journals no author rather than
 	// a bare subject claim.
-	author *agentsvc.JournalAuthor
-	repoRef          sourcecontrol.RepoRef
-	baseRef          string
-	skillsRef        string
-	anthropicKey     string
+	author       *agentsvc.JournalAuthor
+	repoRef      sourcecontrol.RepoRef
+	baseRef      string
+	skillsRef    string
+	anthropicKey string
 	// Room-scoped turn (#86 phase 4): non-empty collabRoomID makes the agents
 	// service a live peer of this room (joining with collabToken, the
 	// prompting user's bearer). The doc is the write surface — the runner
@@ -145,7 +150,28 @@ func journalFor(job turnJob) *agentsvc.JournalBlock {
 	if strings.TrimSpace(job.summary) == "" {
 		return nil
 	}
-	return &agentsvc.JournalBlock{Text: job.summary, Author: job.author}
+	return &agentsvc.JournalBlock{
+		Text:        job.summary,
+		Author:      job.author,
+		Attachments: attachmentNames(job.attachments),
+	}
+}
+
+// attachmentNames lists an attachment set's names for the journal — names only,
+// never bytes (ADR-0019). Nil for an empty set, so a message without attachments
+// journals exactly the shape it did before this feature.
+//
+// Local to this package rather than shared with the handler that parses them:
+// genaiturns imports spec, so spec cannot import genaiturns back.
+func attachmentNames(as []agentsvc.TurnAttachment) []string {
+	if len(as) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(as))
+	for _, a := range as {
+		names = append(names, a.Name)
+	}
+	return names
 }
 
 // journalAuthorFrom projects the request bearer onto the journal's author
