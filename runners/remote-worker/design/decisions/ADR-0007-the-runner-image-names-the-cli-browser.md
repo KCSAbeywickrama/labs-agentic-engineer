@@ -59,7 +59,7 @@ sandbox branch that works unprivileged — both blockers, one value.
   locator or aria snapshot captured while exploring is asserted in a different
   chromium than it was observed in, so a version-sensitive difference would
   surface as a brittle spec rather than as a version error. Closing the gap is a
-  `PLAYWRIGHT_VERSION`/`PLAYWRIGHT_CLI_VERSION` alignment, tracked separately.
+  `PLAYWRIGHT_VERSION`/`PLAYWRIGHT_CLI_VERSION` alignment, outside this ADR.
 - Explicit overrides still fail, and now fail honestly. `--browser=chrome`/
   `msedge` are absent by this decision; `--browser=firefox`/`webkit` are absent
   because `playwright-cli install-browser` is given `chromium` explicitly. With
