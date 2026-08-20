@@ -47,9 +47,9 @@ import { useRunProgress, type RunProgressCycle } from "../hooks/useRunProgress";
 /**
  * One cycle's accordion box. Exported because the VERSION feed renders the same
  * box under a run heading (BuildFeed) — one cycle must read identically whether
- * it is reached through its own run or through the version's whole timeline.
+ * it is reached through its own run.
  */
-export function CycleSection({
+function CycleSection({
   section,
   ordinal,
   runNumber,
