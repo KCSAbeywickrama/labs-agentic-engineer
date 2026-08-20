@@ -64,7 +64,7 @@ const EXAMPLE_PROMPTS = [
   },
   {
     icon: <Bot size={24} />,
-    title: "Support triage agent",
+    title: "Triage agent",
     prompt:
       "A support triage agent that reads incoming tickets, classifies them by urgency, and drafts replies for a human to approve",
   },
@@ -78,11 +78,30 @@ function ExampleCard({
 }: (typeof EXAMPLE_PROMPTS)[number] & { onPick: (prompt: string) => void }) {
   return (
     <Card variant="outlined" sx={{ height: "100%" }}>
-      <CardActionArea sx={{ height: "100%" }} onClick={() => onPick(prompt)}>
+      {/* An explicit flex column, top-aligned. The cards are equal height, but
+          a shorter prompt leaves its CardContent shorter than the card and it
+          ends up vertically centred — so the card with the longest prompt sat
+          9px higher than its neighbours and the three titles never lined up.
+          `alignItems` alone does nothing here: CardActionArea is display:block. */}
+      <CardActionArea
+        sx={{
+          height: "100%",
+          display: "flex",
+          flexDirection: "column",
+          justifyContent: "flex-start",
+          alignItems: "stretch",
+        }}
+        onClick={() => onPick(prompt)}
+      >
         <CardContent>
+          {/* subtitle2, and titles kept to two short words: at subtitle1 a
+              third-width card wrapped "Employee onboarding" onto two lines, so
+              the three cards' body text started at different heights. */}
           <Stack direction="row" spacing={1.5} sx={{ alignItems: "center", mb: 1 }}>
             {icon}
-            <Typography variant="subtitle1">{title}</Typography>
+            <Typography variant="subtitle2" noWrap>
+              {title}
+            </Typography>
           </Stack>
           <Typography variant="body2" color="text.secondary">
             {prompt}

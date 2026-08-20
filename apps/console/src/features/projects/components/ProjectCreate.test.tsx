@@ -62,7 +62,7 @@ describe("ProjectCreate", () => {
     expect(screen.queryByPlaceholderText(/hair salon/)).not.toBeInTheDocument();
     expect(screen.getByText("Expense approval")).toBeInTheDocument();
     expect(screen.getByText("Employee onboarding")).toBeInTheDocument();
-    expect(screen.getByText("Support triage agent")).toBeInTheDocument();
+    expect(screen.getByText("Triage agent")).toBeInTheDocument();
   });
 
   it("labels the idea as the prompt, on one line however long it is", () => {
