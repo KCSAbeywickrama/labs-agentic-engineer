@@ -18,13 +18,10 @@ designs, criteria, and tasks cite them).
 The PRD's shape is defined by the `prd-contract` skill — follow it when writing.
 The `grilling` skill owns the question mechanics for every branch below.
 
-**Interview as long as the scope needs.** No cap on forms or rounds, the same
-rule the cold start runs under — and it costs less here, because the condition
-that makes unlimited rounds safe is already met: a PRD exists, so every question
-can point at the line it would change and the user can see what each answer did.
-Write the amendment as soon as an answer settles something rather than banking
-the answers to the end, and keep the scope narrow: rounds are cheap, a widened
-edit is not.
+**The document is already there to ask against**, so amend starts where `start`
+has to arrive: every question can name the line it would change. Write each
+answer in as it settles rather than banking them to the end, and keep the edit
+inside the scope — rounds are cheap, a widened edit is not.
 
 ## Add a feature
 

@@ -88,61 +88,39 @@ Then split what the walk noted in two:
 
 ## Ask, write, then keep asking
 
-The `grilling` skill owns the question mechanics and the rules on how many
-rounds an interview may run. There is no cap here: what follows is the order.
+`grilling` owns the question mechanics and the pacing. What follows is the
+order this flow runs them in.
 
 1. **Ask the spine.** One `ask_questions` form carrying the spine questions the
    walk noted — usually two or three. Anything the walk noted that is not spine
    waits; it is a better question once the document exists.
 2. **Write the PRD the moment those answers land.** The whole document, every
-   section, per the contract below — not a stub and not a draft. The questions
-   still unasked are filled with your recommended answer, tagged `*assumed*`
-   where each lands; a fact only the user holds goes to Open Questions instead.
-   The next thing the user sees after answering is their document, which is the
-   whole point of this ordering.
+   section, per the contract below — not a stub and not a draft. Questions you
+   have not asked yet are filled with your recommended answer, tagged
+   `*assumed*` where each lands; a fact only the user holds goes to Open
+   Questions instead.
 3. **Ask the next round in the same turn as the write.** The decisions you just
    flagged `*assumed*` are that round's agenda: take up every one a user could
    plausibly answer differently, say where it landed, and ask. Widest blast
-   radius first — an assumption that touches something the user already told
-   you, or that decides scope, outranks an edge case you raised yourself.
-   Writing is not
-   converging — do not end a turn on a document whose assumptions nobody has
-   seen. The write is already committed when the question ends the turn, so the
-   user reads the PRD and the question together.
+   radius first — an assumption touching something the user already told you,
+   or deciding scope, outranks an edge case you raised yourself. The turn that
+   writes the PRD also asks about it, so the user reads document and question
+   together — writing is not converging, and a turn never ends on a document
+   whose assumptions nobody has seen.
 4. **Keep going until you converge.** Each round amends the PRD in place — it
    is the running record, never a draft you rewrite at the end, and story
    numbers are permanent from the first write on. Later rounds take up what the
    document exposed: a section the walk left thin, a story whose actor is
-   undefined, something the user's own answers opened. Converge when the flags
-   still standing are ones you would not rewrite the document over — never
-   because the document exists.
-
-Two rules carry the ordering:
-
-- **Point at the document.** From the second round on, every question names
-  what in the PRD it is about — the decision it would change, the story it
-  would add. A question that could have been asked before the PRD existed
-  belonged in step 1.
-- **The bar, not the budget.** Ask only what changes the PRD. Three questions
-  is a good form; padding one out to fill a form is an interrogation, and
-  unlimited rounds make that worse, not better.
+   undefined, something the user's own answers opened. Converge when every flag
+   still standing would change nothing but its own line if the user overturned
+   it — the same blast-radius test, run to decide you are done.
 
 Depth is opt-in: the user can go deeper in chat on any feature at any point.
 
-## The recommended-answers exit
+## An unanswered form stays live
 
-At any point the user may say "just generate" / "skip", or take the question
-form's own exit. Stop asking, fill every remaining decision with your
-recommended answer, and tag each one `*assumed*` where it lands in the PRD. An
-assumption the user can see is a decision they can overturn; a silent one is an
-invention.
-
-It ends the round, not the conversation. The PRD keeps its flags, the user can
-challenge any of them, and a later round may take them up again.
-
-The exit answers an **ask** — the user's own words, whichever ones they choose.
-An unanswered form keeps its questions live: when anything else arrives while
-one stands, re-present that form and wait for the answer it is owed.
+A form the user walked away from keeps its questions owed: when anything else
+arrives while one stands, re-present that form and wait for the answer.
 
 ## Write the PRD
 

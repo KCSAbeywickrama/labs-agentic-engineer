@@ -1,6 +1,6 @@
 ---
 name: grilling
-description: The question mechanics (ask_question / ask_questions) a flow skill loads while it interviews — how to write a question, how many to ask, and how an interview ends. Never a flow of its own; it writes no document.
+description: Use when a flow skill sends you to interview the user — how to write a structured question, how many rounds an interview may run, and how it ends.
 metadata:
   aep:
     kind: platform
@@ -13,16 +13,16 @@ Interview mechanics. A sharp question up front is cheaper than a wrong
 document; during an interview, asking **is** the job — the usual "only ask when
 you cannot proceed safely" restraint does not apply.
 
-## Never an entry point
+## A flow skill always owns the document
 
-This skill owns the question tools and nothing else. It has **no artifact
+This skill owns the question tools and nothing else — it has **no artifact
 contract**, so fired on its own it produces well-formed questions with nowhere
-to put the answers. The document always belongs to a flow skill — `start` for
+to put the answers. The document belongs to a flow skill: `start` for
 requirements from an idea, `amend` for a scoped change to them, `design` for
-the design — and that skill loads this one for the mechanics.
+the design. Each loads this one for the mechanics.
 
-So when this skill is what the user reached for directly, ask nothing: name the
-flow that covers what they want and let them fire it.
+Reached directly, hand it back: name the flow that covers what the user wants,
+and let them fire it.
 
 ## The tools
 
@@ -68,14 +68,12 @@ What keeps that from being an interrogation is the **order**, not a budget:
 - **Every round after the first reacts to something concrete** — a line the
   document now carries, an answer that opened a new choice, two statements that
   contradict. A question that could have been asked before the document existed
-  belongs in the first round, not a later one. Without that, more rounds are
-  strictly worse than the single form they replace.
-- **The bar, not the budget**: only what changes the artifact. That bar is the
-  brake, and with the cap gone it is doing the work alone — a padded form is an
-  interrogation whether or not another round is allowed.
-- **No denominator.** Never number a question "3 of 5" and never promise a last
-  round: a convergence-based interview has no total, so the count would be a
-  fiction. The honest frame is *here is what I have — what is wrong with it?*
+  belongs in the first round. Without that, more rounds are strictly worse than
+  the single form they replace.
+- **No denominator.** State where the work stands by what the document says —
+  *here is what I have; what is wrong with it?* A convergence-based interview
+  has no total, so any count you offer ("question 3 of 5", "one last round") is
+  a fiction.
 
 ## Ending the interview
 
