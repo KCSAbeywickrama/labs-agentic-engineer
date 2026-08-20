@@ -92,8 +92,17 @@ ENV PATH="/usr/lib/ballerina/bin:${PATH}"
 # the browsers baked here always match the version the specs run with.
 ARG PLAYWRIGHT_VERSION=1.61.1
 ARG PLAYWRIGHT_CLI_VERSION=0.1.15
+# PLAYWRIGHT_MCP_BROWSER names the browser TYPE for playwright-cli, whose own
+# default is the pair (chromium, channel `chrome`) — one branch sets both, so
+# the default engine cannot be had without Google's branded build at the system
+# path /opt/google/chrome/chrome, which this image neither carries (Chrome is a
+# vendor install, not a Playwright download) nor may redistribute. Naming the
+# type selects the chromium baked below, and with it the sandbox default that
+# can start as the non-root `aep` user. A `--browser=` flag still wins, so this
+# is the default rather than a lid.
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
-    AEP_PLAYWRIGHT_VERSION=${PLAYWRIGHT_VERSION}
+    AEP_PLAYWRIGHT_VERSION=${PLAYWRIGHT_VERSION} \
+    PLAYWRIGHT_MCP_BROWSER=chromium
 RUN npm install -g "@playwright/test@${PLAYWRIGHT_VERSION}" "@playwright/cli@${PLAYWRIGHT_CLI_VERSION}" \
     && playwright install --with-deps chromium \
     # playwright-cli may bundle a different playwright build; bake its
