@@ -26,6 +26,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/wso2/aep/aep-api/internal/platform/k8sname"
 	"github.com/wso2/aep/aep-api/internal/spec"
@@ -291,6 +293,24 @@ func validateInvokePath(p string) error {
 			break
 		}
 		decoded = next
+	}
+
+	// Percent-decoding understands %XX and nothing more, so an overlong UTF-8
+	// encoding of "." (%c0%ae) or "/" (%c0%af) survives it as raw bytes and
+	// rides the wire unchanged — a gateway lenient enough to fold overlong
+	// forms back to ASCII would then see a traversal this relay never did.
+	// Control characters are the same problem from the other end: net/http
+	// refuses to put them in a request line, which is safe but surfaces as an
+	// opaque build failure rather than a bad path. Rejecting both here closes
+	// the encoding class rather than its two known instances, and costs
+	// nothing: a legitimate path is valid UTF-8 and free of control bytes.
+	if !utf8.ValidString(decoded) {
+		return ErrBadPath
+	}
+	for _, r := range decoded {
+		if unicode.IsControl(r) {
+			return ErrBadPath
+		}
 	}
 
 	if strings.Contains(decoded, "://") {

@@ -420,6 +420,11 @@ func TestInvoke_LookalikeSafePaths_StillAccepted(t *testing.T) {
 		"/api/v1/items/",
 		"/search?q=a/../b",
 		"/report..v2.json",
+		// Valid multi-byte UTF-8, both raw and percent-encoded. The overlong
+		// guard rejects MALFORMED encodings, not non-ASCII ones — a path with
+		// a real accented character is ordinary and must still relay.
+		"/search?q=caf%c3%a9",
+		"/caf\u00e9/menu",
 	}
 	for _, p := range ok {
 		if _, err := svc.Invoke(context.Background(), "acme", "web", "chat-agent", InvokeCall{Method: "GET", Path: p}, ""); err != nil {
@@ -457,5 +462,40 @@ func TestInvoke_TimeoutDuringBodyRead_ErrUpstreamTimeout(t *testing.T) {
 	_, err := svc.Invoke(context.Background(), "acme", "web", "chat-agent", InvokeCall{Method: "GET", Path: "/x"}, "")
 	if !errors.Is(err, ErrUpstreamTimeout) {
 		t.Fatalf("want ErrUpstreamTimeout for a deadline hit during body read, got %v", err)
+	}
+}
+
+// 15. Percent-decoding only understands %XX. An overlong UTF-8 encoding of
+// "." (%c0%ae) or "/" (%c0%af) survives PathUnescape as raw bytes and rides
+// the wire unchanged, so a gateway lenient enough to fold overlong forms back
+// to ASCII would see traversal this relay never did. Control characters are
+// the same shape of problem from the other end: net/http rejects them when
+// building the request, which is safe but surfaces as an opaque build error
+// rather than a bad path. Requiring the decoded path to be valid UTF-8 and
+// free of control characters closes the class rather than the instances.
+func TestInvoke_OverlongUTF8AndControlChars_RejectedWithoutTouchingUpstream(t *testing.T) {
+	t.Parallel()
+	for _, bad := range []string{
+		"/%c0%ae%c0%ae/other",     // overlong ".."
+		"/a/%c0%af..%c0%afb",      // overlong "/"
+		"/%e0%80%ae%e0%80%ae/x",   // 3-byte overlong "."
+		"/a\nHost: evil\r\n",      // literal control characters
+		"/a\x00b",                 // NUL
+	} {
+		var hits int32
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			atomic.AddInt32(&hits, 1)
+			w.WriteHeader(http.StatusOK)
+		}))
+		svc := invokeTestSvc(t, designFiles("chat-agent", "ai-agent", ""), upstream.URL, 0)
+		_, err := svc.Invoke(context.Background(), "acme", "web", "chat-agent",
+			InvokeCall{Method: "GET", Path: bad}, "")
+		upstream.Close()
+		if !errors.Is(err, ErrBadPath) {
+			t.Fatalf("path %q: want ErrBadPath, got %v", bad, err)
+		}
+		if got := atomic.LoadInt32(&hits); got != 0 {
+			t.Fatalf("path %q reached upstream %d time(s)", bad, got)
+		}
 	}
 }
