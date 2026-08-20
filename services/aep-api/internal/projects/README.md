@@ -146,4 +146,24 @@ delivery's kernel: shared behaviour belongs in the root the slices import.
   caller gets the gateway's own 401 rather than our access. **Gateway-only is the point:** the URL comes
   from the component's deployment endpoint, and it is that gateway which validates the bearer and injects
   the `x-user-id` the agent gates on. A relay pointed at a pod address would bypass the identity hop.
+- **KNOWN LIMITATION — the relayed bearer is the caller's PLATFORM token, and it
+  travels further than this domain.** `invoke-component` forwards the caller's
+  Thunder token to the component, and a generated ai-agent then forwards
+  `Authorization` unchanged to every tool provider its design lists
+  (`skills/agent-building`: "Authorization belongs to the provider"). That is
+  the on-behalf-of model working as designed — it is how a provider enforces
+  the CALLER'S permissions rather than the agent's. The exposure is that the
+  component gateway policy for these components is `issuers: [], audiences: []`
+  (signature only), so a token is not bound to the component it was sent to: a
+  tool provider that receives one can replay it anywhere else that trusts the
+  same signer. A design naming a tool base URL the platform does not control
+  therefore receives a usable platform credential on every turn.
+  ACCEPTED for now, deliberately: the Test tab is the first thing that makes
+  this reachable with a real user's token from the console, but it did not
+  create it, and the fix is not local to this domain. The fix is to give an
+  agent **its own identity** rather than borrowing the user's — an
+  audience-scoped token minted for one component, plus `audiences` set on the
+  gateway policy — which is a Thunder-side change. Until then, treat a tool's
+  base URL in a design as security-relevant input.
+
 - Platform-wide rules (tenant gate, secrets fence, feature-free domains) → [../../README.md](../../README.md).
