@@ -421,6 +421,46 @@ export function useBuildProject(projectName: string) {
 // section), so this rides the settings feature's shared useConfig query
 // instead of a second, independent fetch of the same endpoint. gitProvider
 // is nullable (not connected yet), hence the optional chaining.
+// The create view's reference documents (#383), uploaded right after POST
+// /projects succeeds. They are transient turn inputs, never committed
+// (ADR-0017) — the server stores them off-git and overlays them into each
+// turn's snapshot. Deliberately NOT part of useCreateProject: a failed upload
+// must leave the created project intact so the confirm step can offer
+// Retry / Continue without documents.
+export function useUploadReferences() {
+  return useMutation({
+    mutationFn: async ({
+      projectName,
+      files,
+    }: {
+      projectName: string;
+      files: File[];
+    }) => {
+      // multipart, not base64-in-JSON: references are no longer spec files
+      // (ADR-0017), so they do not go through the specs-scoped Files API, and
+      // raw bytes keep the server's 5 MiB cap honest — a base64 body would
+      // inflate ~33% and silently shave the effective limit.
+      const formData = new FormData();
+      for (const file of files) formData.append("files", file);
+      // Same cast as useImportSkill: openapi-fetch passes FormData through its
+      // default bodySerializer untouched (browser sets the boundary), but the
+      // generated request type describes the JSON Schema shape, not the wire.
+      const { error } = await client.POST(
+        "/projects/{projectName}/references",
+        {
+          params: { path: { projectName } },
+          body: formData as unknown as { files: string[] },
+        },
+      );
+      if (error) {
+        throw new Error(
+          apiErrorMessage(error, "Failed to upload the reference documents"),
+        );
+      }
+    },
+  });
+}
+
 export function useGithubOrg() {
   const { data } = useConfig();
   return {

@@ -278,8 +278,9 @@ func workflowRunToModel(run ocgen.WorkflowRun) gen.WorkflowRun {
 	}
 }
 
-// deploymentFromReleaseBinding pulls the first HTTP external URL from the
-// binding's resolved endpoints via the typed `ExternalURLs.Http *EndpointURL`.
+// deploymentFromReleaseBinding pulls the first public URL from the binding's
+// resolved endpoints. Cloud gateways populate `externalURLs.https` only;
+// local/HTTP listeners populate `http`. Prefer https when both exist.
 func deploymentFromReleaseBinding(rb ocgen.ReleaseBinding) gen.Deployment {
 	var projectName, componentName, environment, releaseName string
 	if rb.Spec != nil {
@@ -292,8 +293,8 @@ func deploymentFromReleaseBinding(rb ocgen.ReleaseBinding) gen.Deployment {
 	var endpointURL string
 	if rb.Status != nil && rb.Status.Endpoints != nil {
 		for _, ep := range *rb.Status.Endpoints {
-			if ep.ExternalURLs != nil && ep.ExternalURLs.Http != nil {
-				endpointURL = formatEndpointURL(ep.ExternalURLs.Http)
+			if u := publicEndpointURL(ep.ExternalURLs); u != "" {
+				endpointURL = u
 				break
 			}
 		}
@@ -313,6 +314,21 @@ func deploymentFromReleaseBinding(rb ocgen.ReleaseBinding) gen.Deployment {
 		CreatedAt:     derefTimeRFC3339(rb.Metadata.CreationTimestamp),
 		Status:        status,
 	}
+}
+
+// publicEndpointURL prefers the HTTPS gateway URL when OpenChoreo resolved
+// one, else HTTP. Empty when the binding has no external URL at all.
+func publicEndpointURL(urls *ocgen.EndpointGatewayURLs) string {
+	if urls == nil {
+		return ""
+	}
+	if urls.Https != nil {
+		return formatEndpointURL(urls.Https)
+	}
+	if urls.Http != nil {
+		return formatEndpointURL(urls.Http)
+	}
+	return ""
 }
 
 // formatEndpointURL renders ocgen.EndpointURL as scheme://host:port/path. Path
