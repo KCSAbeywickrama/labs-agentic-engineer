@@ -379,3 +379,55 @@ describe("AgentChatPanel — generation CTAs", () => {
     expect(mockSend).toHaveBeenCalledTimes(1);
   });
 });
+
+// The Actions menu launches SCOPED FLOWS, and any delivered user message
+// supersedes a live question form for the WHOLE room. A composer reply doing so
+// is deliberate (prose is a valid answer path, ADR-0012); "+ Feature" is not an
+// answer, so firing one mid-interview closes everyone's form and leaves the
+// agent to assume what the user was halfway through deciding. `SpecView` gates
+// its copies of these launchers on exactly this condition.
+describe("AgentChatPanel — the Actions menu is gated on a live question form", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    consumePendingSeed(KEY);
+    replaceMessages(KEY, []);
+    mockMessages = [];
+    mockConversationReady = true;
+  });
+
+  const actionsButton = () => screen.getByRole("button", { name: /Actions/ });
+  const QUESTIONS: AskQuestionInput[] = [
+    { question: "Who signs in?", options: [{ label: "Anyone" }] },
+  ];
+
+  it("opens the flow launchers when no question is waiting", () => {
+    renderPanel();
+    expect(actionsButton()).not.toBeDisabled();
+
+    fireEvent.click(actionsButton());
+    fireEvent.click(screen.getByText("+ Feature"));
+    expect(mockSend).toHaveBeenCalledWith("/amend Add a feature");
+  });
+
+  it("closes the launchers while the agent is waiting on answers", () => {
+    mockMessages = [
+      { id: "q1", role: "question", turnId: "t1", toolCallId: "tc1", questions: QUESTIONS },
+    ];
+    renderPanel();
+
+    expect(actionsButton()).toBeDisabled();
+    // The composer stays open: a typed reply IS an answer, and superseding the
+    // form with one is the intended path.
+    expect(screen.getByRole("textbox")).not.toBeDisabled();
+  });
+
+  it("reopens them once the questions are superseded", () => {
+    mockMessages = [
+      { id: "q1", role: "question", turnId: "t1", toolCallId: "tc1", questions: QUESTIONS },
+      { id: "u1", role: "user", content: "answered in prose", turnId: "t2", status: "completed" },
+    ];
+    renderPanel();
+
+    expect(actionsButton()).not.toBeDisabled();
+  });
+});

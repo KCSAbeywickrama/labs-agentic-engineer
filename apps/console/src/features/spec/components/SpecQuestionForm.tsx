@@ -267,11 +267,37 @@ export function SpecQuestionForm({
   // defers THESE questions rather than ending the conversation. What it asks
   // for is the flag — an assumption the user can see in the document is a
   // decision they can overturn; a silent one is an invention.
+  //
+  // It hands back only what is still UNANSWERED. The caption invites partial
+  // use — answer the ones you have opinions about, let the agent take the rest
+  // — and a room can have co-authored several answers already; sending them all
+  // back would overwrite real decisions with guesses and flag them `*assumed*`,
+  // which reads as the agent's invention rather than the user's overwritten
+  // answer. The `grilling` skill sets the same bound: "apply your recommended
+  // answer to every REMAINING decision".
   const useRecommended = () => {
-    setPendingSeed(
-      chatKeyFor(org, projectName),
-      "Use your recommended answers for these questions — decide them yourself and flag each one as assumed where it lands in the document, so I can change it later.",
-    );
+    const answered = entry.questions.filter((q, i) => isQuestionAnswered(q, answers[i]));
+    const remaining = entry.questions.filter((q, i) => !isQuestionAnswered(q, answers[i]));
+    const ask =
+      remaining.length === entry.questions.length
+        ? "Use your recommended answers for these questions — decide them yourself and flag each one as assumed where it lands in the document, so I can change it later."
+        : `Decide the rest yourself using your recommended answers, and flag each one as assumed where it lands in the document, so I can change it later:\n` +
+          remaining.map((q) => `- "${q.question}"`).join("\n");
+    // The answered half rides first, serialized exactly as Continue would send
+    // it, so the agent reads one message carrying both decisions and deferrals.
+    const decided = answered.length
+      ? serializeQuestionAnswer(
+          answered,
+          entry.questions
+            .map((q, i) => ({ q, a: answers[i] }))
+            .filter(({ q, a }) => isQuestionAnswered(q, a))
+            .map(({ a }) => ({
+              selected: a?.selected ?? [],
+              ...(a?.freeText?.trim() ? { freeText: a.freeText.trim() } : {}),
+            })),
+        ) + "\n\n"
+      : "";
+    setPendingSeed(chatKeyFor(org, projectName), decided + ask);
     closeRoomQuestion(doc, entry.toolCallId);
   };
 

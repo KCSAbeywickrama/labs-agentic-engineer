@@ -105,6 +105,40 @@ describe("SpecQuestionForm", () => {
       expect(seed).not.toMatch(/stop interviewing/i);
       expect(readRoomQuestions(doc)[0]!.submitted).toBe(true);
     });
+
+    // The caption invites partial use — answer the ones you have opinions
+    // about, let the agent take the rest. Handing every question back would
+    // overwrite real decisions with guesses and flag them `*assumed*`, which
+    // reads as the agent's invention rather than the user's lost answer. The
+    // `grilling` skill draws the same line: "every REMAINING decision".
+    it("keeps the answers the room already made, and defers only the rest", () => {
+      const { doc, entry } = room();
+      const { rerender } = renderForm(doc, entry);
+
+      fireEvent.click(screen.getByRole("radio", { name: /submitter's own manager/i }));
+      rerender(<SpecQuestionForm doc={doc} entry={readRoomQuestions(doc)[0]!} org={ORG} projectName={PROJECT} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Use recommended answers" }));
+
+      const seed = consumePendingSeed(KEY) ?? "";
+      // The decision survives, serialized exactly as Continue would send it.
+      expect(seed).toContain("The submitter's own manager");
+      // Only the unanswered question is handed back.
+      expect(seed).toMatch(/Decide the rest yourself/i);
+      expect(seed).toContain("What is the approval limit?");
+      expect(seed).toMatch(/assumed/i);
+    });
+
+    it("hands back every question when the room answered none", () => {
+      const { doc, entry } = room();
+      renderForm(doc, entry);
+
+      fireEvent.click(screen.getByRole("button", { name: "Use recommended answers" }));
+
+      const seed = consumePendingSeed(KEY) ?? "";
+      expect(seed).toMatch(/^Use your recommended answers for these questions/);
+      expect(seed).not.toMatch(/Decide the rest yourself/i);
+    });
   });
 
   it("gates both exits while the batch is still streaming", () => {

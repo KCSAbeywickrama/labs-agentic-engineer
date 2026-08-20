@@ -185,6 +185,15 @@ export function AgentChatPanel({
   // `!conversationReady` covers the brief window before the project's shared
   // thread id resolves (#430) — a send then would have nowhere to go.
   const inputDisabled = isSending || Boolean(teammateRunning) || !conversationReady;
+  // The Actions menu launches SCOPED FLOWS, not answers — and any delivered
+  // user message supersedes a live question form for the whole room
+  // (`answerableQuestionIds` → `closeStaleRoomQuestions`). A composer reply
+  // superseding is deliberate: prose is an equally valid answer path
+  // (ADR-0012). "+ Feature" is not an answer, so firing one mid-interview
+  // closes the form on every member and leaves the agent to assume what the
+  // user was halfway through deciding. `SpecView` gates its own launchers on
+  // exactly this; the menu holds the same flows and needs the same gate.
+  const flowsDisabled = inputDisabled || awaiting;
   // The resolve-failed hint says WHY the composer is disabled — without it a
   // failed thread resolve reads as a dead panel. Recovery is automatic (the
   // query refetches on window focus), so the wording promises the retry.
@@ -538,15 +547,26 @@ export function AgentChatPanel({
         hint={hint}
         actions={
           <>
-            <Button
-              size="small"
-              variant="outlined"
-              onClick={(e: React.MouseEvent<HTMLElement>) => setActionsAnchor(e.currentTarget)}
-              disabled={inputDisabled}
-              sx={{ flexShrink: 0 }}
+            <Tooltip
+              title={
+                awaiting
+                  ? "The agent is waiting on your answers — finish the questions on the spec view first, or reply here"
+                  : ""
+              }
             >
-              Actions ▾
-            </Button>
+              {/* span so the tooltip still works while the button is disabled */}
+              <span>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  onClick={(e: React.MouseEvent<HTMLElement>) => setActionsAnchor(e.currentTarget)}
+                  disabled={flowsDisabled}
+                  sx={{ flexShrink: 0 }}
+                >
+                  Actions ▾
+                </Button>
+              </span>
+            </Tooltip>
             <Menu
               anchorEl={actionsAnchor}
               open={actionsAnchor !== null}
