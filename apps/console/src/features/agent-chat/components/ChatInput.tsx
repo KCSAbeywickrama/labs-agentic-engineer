@@ -50,6 +50,36 @@ import {
 //
 // Attachments are conversation-scoped model content: nothing is stored
 // server-side and nothing is committed (ADR-0019).
+
+/**
+ * The text's line box, in px, declared rather than inherited — it is the datum
+ * the flanking controls align to, so it has to be a number this file owns.
+ */
+const LINE_HEIGHT = 20;
+
+/**
+ * A slot that centres its control on the text's line box.
+ *
+ * The controls flanking the text — the paperclip and send — must look optically
+ * centred ON THE LINE, and bottom-aligning their boxes does not achieve that: a
+ * control is taller than a line of text (it needs ~24px to stay a comfortable
+ * target), so aligning box-bottoms leaves its centre sitting high, by half the
+ * difference. Correcting that with a negative margin per control means a magic
+ * number per icon size, and it silently goes wrong the moment an icon changes
+ * size — which is exactly what happened here.
+ *
+ * So the slot is the line's height and the control centres INSIDE it,
+ * overhanging symmetrically. The arithmetic then holds for any icon size and any
+ * padding, and because the row is still `flex-end`, the controls stay level with
+ * the LAST line as the field grows to its 5-row cap.
+ */
+const CONTROL_SLOT = {
+  height: `${LINE_HEIGHT}px`,
+  display: "flex",
+  alignItems: "center",
+  flexShrink: 0,
+} as const;
+
 export function ChatInput({
   value,
   onChange,
@@ -154,42 +184,42 @@ export function ChatInput({
             onRemove={(name) => onFilesChange(files.filter((f) => f.name !== name))}
           />
           <Stack direction="row" spacing={0.25} sx={{ alignItems: "flex-end" }}>
-            <Tooltip
-              title={
-                /* No extension list: it is 16 entries, which turns a hint into a
-                   wall of text nobody reads. The picker already filters by
-                   `accept`, and picking an unsupported file answers with a
-                   rejection naming the accepted set — available exactly where it
-                   matters, at the point of failure. */
-                `Attach files to this message — a screenshot, a PDF, a data sample. ` +
-                `They stay in this conversation and are never committed. ` +
-                `Up to ${MAX_ATTACHMENT_FILES} files, 5 MB each, 15 MB total.`
-              }
-            >
-              <IconButton
-                component="label"
-                size="small"
-                aria-label="Attach files to this message"
-                disabled={disabled}
-                // Tight, and pinned to the bottom of the row so it stays level
-                // with the last line as the field grows to its 5-row cap.
-                sx={{ p: 0.375, flexShrink: 0 }}
+            <Box sx={CONTROL_SLOT}>
+              <Tooltip
+                title={
+                  /* No extension list: it is 16 entries, which turns a hint into
+                     a wall of text nobody reads. The picker already filters by
+                     `accept`, and picking an unsupported file answers with a
+                     rejection naming the accepted set — available exactly where
+                     it matters, at the point of failure. */
+                  `Attach files to this message — a screenshot, a PDF, a data sample. ` +
+                  `They stay in this conversation and are never committed. ` +
+                  `Up to ${MAX_ATTACHMENT_FILES} files, 5 MB each, 15 MB total.`
+                }
               >
-                <Paperclip size={14} />
-                <input
-                  type="file"
-                  accept={ATTACHMENT_ACCEPT}
-                  multiple
-                  hidden
+                <IconButton
+                  component="label"
+                  size="small"
+                  aria-label="Attach files to this message"
                   disabled={disabled}
-                  onChange={(e) => {
-                    addFiles(e.target.files);
-                    // Same file re-selected after a remove must re-fire onChange.
-                    e.target.value = "";
-                  }}
-                />
-              </IconButton>
-            </Tooltip>
+                  sx={{ p: 0.5 }}
+                >
+                  <Paperclip size={14} />
+                  <input
+                    type="file"
+                    accept={ATTACHMENT_ACCEPT}
+                    multiple
+                    hidden
+                    disabled={disabled}
+                    onChange={(e) => {
+                      addFiles(e.target.files);
+                      // Same file re-selected after a remove must re-fire onChange.
+                      e.target.value = "";
+                    }}
+                  />
+                </IconButton>
+              </Tooltip>
+            </Box>
             <InputBase
               fullWidth
               multiline
@@ -204,20 +234,31 @@ export function ChatInput({
                   onSubmit();
                 }
               }}
-              sx={{ fontSize: "0.875rem", px: 0.5, alignItems: "flex-start" }}
+              sx={{
+                fontSize: "0.875rem",
+                px: 0.5,
+                py: 0,
+                // Vertical padding zeroed so the text's box bottom IS the last
+                // line's bottom, and the line box pinned to the number the
+                // control slots align to. The breathing room lives on the
+                // composer box instead.
+                "& textarea": { lineHeight: `${LINE_HEIGHT}px` },
+              }}
             />
-            <IconButton
-              color="primary"
-              aria-label="Send message"
-              // Text is required even with files attached: the shared TurnSpec
-              // validator rejects an empty chat turn, and a bare screenshot with
-              // no question is a turn the agent has to guess at.
-              disabled={disabled || !value.trim()}
-              onClick={onSubmit}
-              sx={{ p: 0.5, flexShrink: 0 }}
-            >
-              <Send size={16} />
-            </IconButton>
+            <Box sx={CONTROL_SLOT}>
+              <IconButton
+                color="primary"
+                aria-label="Send message"
+                // Text is required even with files attached: the shared TurnSpec
+                // validator rejects an empty chat turn, and a bare screenshot
+                // with no question is a turn the agent has to guess at.
+                disabled={disabled || !value.trim()}
+                onClick={onSubmit}
+                sx={{ p: 0.5 }}
+              >
+                <Send size={16} />
+              </IconButton>
+            </Box>
           </Stack>
         </Box>
         {/* Keyed and dismissed by position, not by name: one selection can
