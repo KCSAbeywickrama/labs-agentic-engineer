@@ -254,6 +254,7 @@ func (s *PlanService) startPlanLocked(ctx context.Context, orgID, projectID stri
 			Ref:            baseRef,
 			SkillsRef:      skillsRef,
 		},
+		Surface: agentsvc.SurfaceConsole,
 	})
 	if err != nil {
 		return nil, err // typed *agentsvc.UpstreamError (409 → plan_in_progress passthrough)

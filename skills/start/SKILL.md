@@ -150,6 +150,5 @@ middle of the flow, not the end of it. Close when the interview has converged
 (above), never merely because the file now exists.
 
 Closing is a one-paragraph summary of the decisions taken (calling out every
-`*assumed*` one), then the next step: review `specs/requirements/prd.md`, then
-run `/design` — open questions must be answered or explicitly deferred before
-design can proceed.
+`*assumed*` one), then what stands between the user and the design: open
+questions must be answered or explicitly deferred before design can proceed.

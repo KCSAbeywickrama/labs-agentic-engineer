@@ -28,6 +28,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { SURFACES } from "@aep/agent-stream";
 import { composeInstruction, eagerSkillsFor, toolsetFor } from "../src/prompts/turn.js";
 
 /** The platform skill library this monorepo publishes to every org. */
@@ -260,4 +261,20 @@ test("the tool set is derived from the kind", () => {
   assert.equal(toolsetFor({ kind: "chat", text: "x" }), "files");
   assert.equal(toolsetFor({ kind: "start" }), "files");
   assert.equal(toolsetFor({ kind: "flow", skill: "design" }), "files");
+});
+
+/**
+ * A surface names its own narration skill, and `buildNarrationBlock` skips a
+ * name that resolves to nothing — so renaming the directory would silently
+ * take the console's narration rules off every turn rather than fail anything.
+ * This is that drift guard.
+ */
+test("every surface has a narration skill in the library, and it is design-side", () => {
+  for (const surface of SURFACES) {
+    const body = fs.readFileSync(path.join(SKILLS_DIR, surface, "SKILL.md"), "utf8");
+    assert.match(body, new RegExp(`^name: ${surface}$`, "m"), "frontmatter name must match the directory");
+    assert.match(body, /audience: \[design\]/, "narration is the design agent's — never mirrored to a coding run");
+    // The composer supplies `# Narration policy`; a title in the file renders twice.
+    assert.doesNotMatch(body.replace(/^---[\s\S]*?^---/m, ""), /^# /m);
+  }
 });

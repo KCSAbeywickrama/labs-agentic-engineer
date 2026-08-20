@@ -423,6 +423,16 @@ five surfaces fill themselves.
 | Validations | **Nothing validated yet.** After a build, your software is checked against the **acceptance criteria** in your spec; results appear here. | — |
 | Components *(overview)* | **No components yet.** Components are the services and apps your design is made of — they appear as agents build them. | — |
 | Recent activity *(overview)* | **No activity yet.** Agents report what they are doing here as they work. | — |
+| Chat | **Hi! I'm your Agent.** This is where we talk through what you're building. Ask about a decision, change what's in scope, or take up anything I marked as assumed. | the composer, plus three suggestions |
+
+**Chat's empty state is the one a user reaches last, not first.** Since
+[#522](https://github.com/wso2/labs-agentic-engineer/issues/522) fires the kickoff at project
+creation, the first transcript is never empty; this appears only after **New conversation**, on a
+project that already has a spec. The old string — *"Ask me to edit this project's spec — I join the
+shared workspace and you can watch the files change live"* — invited the user to start something
+that had already started, and narrated the *how* (a shared workspace, files changing) that nothing
+on screen calls by those names. Its suggestions offered to draft requirements that exist. Both now
+open a conversation **about** the spec.
 
 The **Validations** wording is load-bearing: renaming the artifact to *Acceptance criteria* while
 the section stayed *Validations* broke the link between the criteria and the runs against them, and
@@ -481,16 +491,20 @@ same as any label. But the agent runs in more than one place, and **the right vo
 the surface, not to the skill**: in an agentic coding tool the user is standing in the repo, so
 `design.cell` is exactly the right word. In the console it is not.
 
-**A console skill carries the difference.** The caller supplies an agent's skills, so the console
-includes it and a local run omits it — the shared flow skills (`start`, `design`, `amend`, …) stay
-identical in both. It is **standing policy inlined into every turn's system prompt**, not a
-catalog skill loaded on demand, following the `organization` skill's precedent: *"An agent that has
-to remember to load it asks questions the org already answered."* An agent that has to remember its
-narration rules will forget one and quote a path.
+**A console skill carries the difference** — `skills/console/`. Every caller names the **surface**
+its turn will be read on, so the BFF sends `surface: "console"` and a local playground run sends
+nothing; the shared flow skills (`start`, `design`, `amend`, …) stay identical in both. It is
+**standing policy inlined into every console turn's system prompt** under `# Narration policy`, not
+a catalog skill loaded on demand, following the `organization` skill's precedent: *"An agent that
+has to remember to load it asks questions the org already answered."* An agent that has to remember
+its narration rules will forget one and quote a path.
 
-It **outranks per-flow narration.** The system prompt today says *"A LOADED skill may define the
-narration for its own flow"*, and three skills used that freedom to mandate the very output this
-removes. Standing policy wins.
+It **outranks per-flow narration.** The system prompt used to say *"A LOADED skill may define the
+narration for its own flow"* flat; it now says *"unless a standing narration policy in this prompt
+overrides it"*, and the policy block is composed last, so it is the system prompt's final word.
+Three skills had used that freedom to mandate the very output this removes — and since their bodies
+are inlined into the *turn* rather than the standing instructions, the override is repeated there
+too, in the same message as the text it overrides.
 
 ### The rules it carries
 
@@ -506,17 +520,16 @@ removes. Standing policy wins.
 
 ### What changes in the shared skills
 
-Nothing is deleted from the trunk — a path pointer is genuinely useful in a local run, where the
-user can open it. These mandates simply stop being unconditional, and the console skill overrides
+The agent was obeying instructions, not improvising — so the instructions are what changed. A path
+pointer is genuinely useful in a local run, where the user can open it, so these mandates were not
+deleted from the trunk; they simply stopped being unconditional, and the console skill overrides
 them:
 
-| skill | today |
+| skill | the mandate |
 |---|---|
-| `design` | *"Close with three parts and nothing more: … a one-line pointer to `specs/design/`"* |
-| `architecture` | *"…and a one-line pointer to `specs/design/`"* |
-| `start` | *"point the user at the next step: review `specs/requirements/prd.md`, then run `/design`"* |
-
-The agent was obeying instructions, not improvising.
+| `design` | *"Close with three parts and nothing more: … a one-line pointer to `specs/design/`"* — kept, overridden on the console |
+| `architecture` | *"…and a one-line pointer to `specs/design/`"* — kept, overridden on the console |
+| `start` | *"review `specs/requirements/prd.md`, then run `/design`"* — **removed**: it named a command the console offers as a button, which is wrong on every surface once the button exists |
 
 ## Commands
 

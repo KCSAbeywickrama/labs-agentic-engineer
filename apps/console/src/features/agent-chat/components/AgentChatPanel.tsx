@@ -77,10 +77,17 @@ const WIDTH_KEY = "aep.chat.panelWidth";
 
 // Empty-state starter prompts — one click prefills the composer (mirrors
 // ProjectCreate's example-prompt pattern, scaled to a chip).
+/**
+ * The empty state is reachable only after **New conversation** (#522 fires the
+ * kickoff at project creation, so the first transcript is never empty), which
+ * means the project already HAS a spec by the time anyone reads this. The
+ * suggestions therefore open a conversation ABOUT that spec rather than offer
+ * to draft one.
+ */
 const SUGGESTIONS = [
-  "Draft the requirements for this project",
-  "Add acceptance criteria to the spec",
-  "Add a returns-policy section",
+  "What's still assumed in this spec?",
+  "Add a feature to this project",
+  "Walk me through the design",
 ] as const;
 
 const clampWidth = (n: number): number =>
@@ -484,8 +491,9 @@ export function AgentChatPanel({
               </Avatar>
               <Typography variant="subtitle2">Hi! I&apos;m your Agent.</Typography>
               <Typography variant="body2" color="text.secondary">
-                Ask me to edit this project&apos;s spec — I join the shared
-                workspace and you can watch the files change live.
+                This is where we talk through what you&apos;re building. Ask
+                about a decision, change what&apos;s in scope, or take up
+                anything I marked as assumed.
               </Typography>
               <Stack
                 direction="row"
