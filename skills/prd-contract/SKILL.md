@@ -36,8 +36,9 @@ Every actor cited by a story is defined here first.>
 <policy choices at product altitude: sign-in approach, notification channels,
 which external services the product depends on (by capability, e.g.
 "transactional email" — binding to a concrete provider happens at design).
-Decisions taken from org defaults or the skip valve are ordinary entries;
-skip-valve entries carry the *assumed* tag.>
+Decisions taken from an org default are ordinary entries; a decision the agent
+made itself, because the user has not answered it yet, carries the *assumed*
+tag.>
 
 ## Out of Scope
 <what this project deliberately does not do>

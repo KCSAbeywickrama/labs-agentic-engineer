@@ -12,8 +12,12 @@ metadata:
 A user arrives with one sentence and leaves with a PRD the rest of the flow can
 build on. The interview is a **coverage walk**: the PRD's own sections are the
 plan, you visit every one, and nothing lands in the document that was neither
-asked about nor visibly assumed. You visit them all before you ask anything —
-**`/start` asks exactly once**.
+asked about nor visibly assumed.
+
+**The document arrives early and is refined in place.** Ask what the PRD cannot
+be written without, write it, then keep asking against what it now says. The
+job is not to extract a document in one pass — it is to guide the user to their
+own requirements, and nobody can react to a document that does not exist yet.
 
 ## The idea comes to you
 
@@ -22,7 +26,7 @@ Read it as the brief — it is what the user actually asked for, in their words.
 It is not a file: it is attached or it is absent. When absent, open with one
 `ask_question`: "What are you building?" — a few concrete example options,
 free text welcome. The answer is the brief. Getting the brief is not the
-interview: it is the only thing that may precede the one form below.
+interview: it is what the interview starts from.
 
 ## Reference documents outrank the idea
 
@@ -73,29 +77,70 @@ user sees a single question. For each section:
 - **Note the questions whose answers would change the document**, and only
   those. Skip what the brief already answers.
 
-## Ask once
+Then split what the walk noted in two:
 
-Then ask **ONE `ask_questions` form** — the `grilling` skill owns the question
-mechanics — carrying the questions the walk noted, and write the PRD from the
-answers. There is no second form: the next thing the user sees after answering
-is their document.
+- **The spine** — what the PRD cannot be written without: who the actors are,
+  and the shape of the journey they take. Stories, decisions and scope all hang
+  off these, so a wrong answer here rewrites the document.
+- **Everything else** — a policy choice, an edge case, the depth of one
+  feature. Real questions, all of them, but the PRD can exist and be read
+  without their answers.
 
+## Ask, write, then keep asking
+
+The `grilling` skill owns the question mechanics and the rules on how many
+rounds an interview may run. There is no cap here: what follows is the order.
+
+1. **Ask the spine.** One `ask_questions` form carrying the spine questions the
+   walk noted — usually two or three. Anything the walk noted that is not spine
+   waits; it is a better question once the document exists.
+2. **Write the PRD the moment those answers land.** The whole document, every
+   section, per the contract below — not a stub and not a draft. The questions
+   still unasked are filled with your recommended answer, tagged `*assumed*`
+   where each lands; a fact only the user holds goes to Open Questions instead.
+   The next thing the user sees after answering is their document, which is the
+   whole point of this ordering.
+3. **Ask the next round in the same turn as the write.** The decisions you just
+   flagged `*assumed*` are that round's agenda: take up every one a user could
+   plausibly answer differently, say where it landed, and ask. Widest blast
+   radius first — an assumption that touches something the user already told
+   you, or that decides scope, outranks an edge case you raised yourself.
+   Writing is not
+   converging — do not end a turn on a document whose assumptions nobody has
+   seen. The write is already committed when the question ends the turn, so the
+   user reads the PRD and the question together.
+4. **Keep going until you converge.** Each round amends the PRD in place — it
+   is the running record, never a draft you rewrite at the end, and story
+   numbers are permanent from the first write on. Later rounds take up what the
+   document exposed: a section the walk left thin, a story whose actor is
+   undefined, something the user's own answers opened. Converge when the flags
+   still standing are ones you would not rewrite the document over — never
+   because the document exists.
+
+Two rules carry the ordering:
+
+- **Point at the document.** From the second round on, every question names
+  what in the PRD it is about — the decision it would change, the story it
+  would add. A question that could have been asked before the PRD existed
+  belonged in step 1.
 - **The bar, not the budget.** Ask only what changes the PRD. Three questions
-  is a good form; padding one out to the cap is an interrogation.
-- **More questions than a form holds** → ask those whose answers change the
-  document most, and send every one left behind through the skip valve.
+  is a good form; padding one out to fill a form is an interrogation, and
+  unlimited rounds make that worse, not better.
 
-Depth is opt-in: after generating, the user can go deeper in chat on any
-feature.
+Depth is opt-in: the user can go deeper in chat on any feature at any point.
 
-## The skip valve
+## The recommended-answers exit
 
-At any point the user may say "just generate" / "skip". Stop asking
-immediately: fill every remaining decision with your recommended answer and tag
-each one `*assumed*` where it lands in the PRD. An assumption the user can see
-is a decision they can overturn; a silent one is an invention.
+At any point the user may say "just generate" / "skip", or take the question
+form's own exit. Stop asking, fill every remaining decision with your
+recommended answer, and tag each one `*assumed*` where it lands in the PRD. An
+assumption the user can see is a decision they can overturn; a silent one is an
+invention.
 
-The valve answers an **ask** — the user's own words, whichever ones they choose.
+It ends the round, not the conversation. The PRD keeps its flags, the user can
+challenge any of them, and a later round may take them up again.
+
+The exit answers an **ask** — the user's own words, whichever ones they choose.
 An unanswered form keeps its questions live: when anything else arrives while
 one stands, re-present that form and wait for the answer it is owed.
 
@@ -115,13 +160,18 @@ guess it.
 rewrite: append new stories with fresh numbers (story numbers are permanent),
 update only the sections the change touches, and leave the user's hand-edits
 alone. Regenerate from scratch only when the user explicitly asks, and confirm
-before overwriting. One form here too — a scoped change earns fewer questions
-than a cold start, never more.
+before overwriting. A scoped change earns fewer questions than a cold start —
+the document is already there to ask against, so ask narrowly and often rather
+than broadly and once.
 
 ## Where this stops
 
-`/start` ends at the PRD. Design, components, and tasks are later steps with
-their own skills and gates. Close with a one-paragraph summary of the decisions
-taken (calling out every `*assumed*` one), then point the user at the next
-step: review `specs/requirements/prd.md`, then run `/design` — open questions
-must be answered or explicitly deferred before design can proceed.
+`/start` ends at the PRD: design, components, and tasks are later steps with
+their own skills and gates. It does **not** end at the first PRD — that is the
+middle of the flow, not the end of it. Close when the interview has converged
+(above), never merely because the file now exists.
+
+Closing is a one-paragraph summary of the decisions taken (calling out every
+`*assumed*` one), then the next step: review `specs/requirements/prd.md`, then
+run `/design` — open questions must be answered or explicitly deferred before
+design can proceed.

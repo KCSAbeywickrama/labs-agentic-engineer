@@ -98,6 +98,12 @@ one was `go`'s, and it was invisible for as long as `go` was preloaded regardles
   long (the branch-identity procedure is there for this reason alone).
   `workflow_skill.test.ts` fails on platform mechanics in a reference, so this is
   caught at CI, not in a local run.
+- **A mechanics library is not an entry point.** `grilling` owns the question
+  tools and `prd-contract` owns the PRD's shape; neither writes a document, so
+  neither is a flow a user can usefully fire — a flow skill (`start`, `amend`,
+  `design`) owns the artifact and loads them for the mechanics. Nothing enforces
+  that: the catalog offers every name, so a skill with no artifact contract says
+  so in its own body and names the flow to fire instead.
 - **Instructions are as short as they can be and stay unambiguous.** State the
   rule and the failure it prevents; the maintainer's history behind it goes in
   this file or an ADR, not into every run's context.

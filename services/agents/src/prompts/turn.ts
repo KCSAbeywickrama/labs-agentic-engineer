@@ -120,10 +120,13 @@ const FLOW_SUPPORTING_SKILLS: Record<string, string[]> = {
   // document they both write. `prd-contract` is a sibling skill rather than a
   // `start` reference so an amend turn can hold the contract without also
   // inlining the cold-start interview playbook, whose frame ("the idea comes to
-  // you", "asks exactly once") is wrong for a scoped edit.
+  // you", the coverage walk over an empty document) is wrong for a scoped edit.
   start: ["grilling", "prd-contract"],
   amend: ["grilling", "prd-contract"],
-  // The rest of the design lineup, in the order the `design` skill walks it.
+  // `grilling` first: the design flow interviews too (#578 removed the
+  // "do not interview the user again" clause), and the question mechanics are
+  // no more optional here than on a start turn. Then the rest of the design
+  // lineup, in the order the `design` skill walks it.
   // `design` names every one, so the model's first act was always to batch-load
   // the set: one model step, and ~70KB arriving as a tool RESULT — landing AFTER
   // the turn prompt's cache breakpoint, where it is re-prefilled per step rather
@@ -135,7 +138,7 @@ const FLOW_SUPPORTING_SKILLS: Record<string, string[]> = {
   // turn — there is nothing to condition on when the prompt is composed, and a
   // cached read costs a tenth of a re-prefill. Org-authored design skills stay
   // lazy: this map is flow wording and cannot know a given org's catalog.
-  design: ["cell-design", "architecture", "security-design", "openapi-conventions", "wireframes", "validation-criteria"],
+  design: ["grilling", "cell-design", "architecture", "security-design", "openapi-conventions", "wireframes", "validation-criteria"],
 };
 
 // --- Composition -------------------------------------------------------------

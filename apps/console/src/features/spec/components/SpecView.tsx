@@ -486,6 +486,13 @@ export function SpecView({ projectName }: { projectName: string }) {
   // renders them with kind:"agent"). Building a half-written design is wrong,
   // so Build is disabled — with a tooltip — while one is working (#162).
   const agentBusy = collab.peers.some((p) => p.kind === "agent");
+  // A standing question form owns the turn: the agent's turn ended ON the
+  // question, so `agentBusy` is false while the work is very much unfinished.
+  // Since the interview is uncapped (#578) the PRD now exists from the first
+  // round on, which is what makes the header's requirements-gated launchers
+  // reachable mid-interview — and firing one supersedes the live questions,
+  // handing the agent's own assumptions back as the user's answers.
+  const awaitingAnswers = Boolean(roomQuestion && roomDoc);
 
   // Build (#162, #164): commit the room's live edits FIRST (POST /build tags
   // HEAD), then check preflight — a project with unresolved dependencies
@@ -736,12 +743,12 @@ export function SpecView({ projectName }: { projectName: string }) {
             {/* Hand-picked flow launchers (#372): only the two that matter at
                 this gate ride the header; the full set lives in the chat's
                 Actions menu. Both seed the scoped /amend flow. */}
-            {hasRequirementsFiles && (
+            {hasRequirementsFiles && !awaitingAnswers && (
               <Button size="small" variant="outlined" onClick={() => seedChat("/amend Add a feature")}>
                 + Feature
               </Button>
             )}
-            {openQuestions > 0 && (
+            {openQuestions > 0 && !awaitingAnswers && (
               <Button
                 size="small"
                 variant="outlined"
@@ -755,11 +762,13 @@ export function SpecView({ projectName }: { projectName: string }) {
               title={
                 agentBusy
                   ? "An agent is still working — Generate design is available once it finishes"
-                  : openQuestions > 0
-                    ? `${openQuestions} open question${openQuestions === 1 ? "" : "s"} block design — answer or defer them first`
-                    : hasRequirementsFiles
-                      ? "Derive the component design from your requirements"
-                      : "Generate requirements first"
+                  : awaitingAnswers
+                    ? "The agent is waiting on your answers — finish the questions below first"
+                    : openQuestions > 0
+                      ? `${openQuestions} open question${openQuestions === 1 ? "" : "s"} block design — answer or defer them first`
+                      : hasRequirementsFiles
+                        ? "Derive the component design from your requirements"
+                        : "Generate requirements first"
               }
             >
               {/* span so the tooltip works while the button is disabled */}
@@ -767,7 +776,7 @@ export function SpecView({ projectName }: { projectName: string }) {
                 <Button
                   variant="contained"
                   startIcon={<Sparkles size={18} />}
-                  disabled={!hasRequirementsFiles || agentBusy || openQuestions > 0}
+                  disabled={!hasRequirementsFiles || agentBusy || awaitingAnswers || openQuestions > 0}
                   onClick={generateDesign}
                 >
                   Generate design
@@ -897,8 +906,8 @@ export function SpecView({ projectName }: { projectName: string }) {
           </Box>
         ) : roomQuestion && roomDoc ? (
           /* Collab question form (spike): a LIST of agent questions takes over
-             the body — every room participant sees it and co-authors; only the
-             user who asked can submit. */
+             the body — every room participant sees it and co-authors, and any
+             of them submits (#430 D5). */
           <SpecQuestionForm
             doc={roomDoc}
             entry={roomQuestion}

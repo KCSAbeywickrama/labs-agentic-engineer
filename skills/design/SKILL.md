@@ -17,9 +17,17 @@ way to a clean Build is to follow the order below.
 
 ## The PRD is the brief
 
-Design FROM `specs/requirements/prd.md`. Do not interview the user again and
-do not widen or narrow the scope: what the PRD says is what gets designed. A
-missing or empty PRD means the user needs `/start` first — stop and say so.
+Design FROM `specs/requirements/prd.md`, and do not widen or narrow the scope:
+what the PRD says is what gets designed. A missing or empty PRD means the user
+needs `/start` first — stop and say so.
+
+**Ask at design altitude; never re-run the requirements interview.** A call
+this step has to make and only the user can settle — which provider, which of
+two shapes the PRD deliberately left open — is an ordinary question, asked when
+it arises rather than assumed silently or deferred to a review that never
+happens. The `grilling` skill carries the mechanics and the pacing; there is no
+cap on rounds. What is never a question is something the PRD already answers:
+asking it back reads as the document being ignored.
 
 **Open questions gate:** any PRD Open Question neither answered nor marked
 "deferred" blocks design — stop and point the user at the amend flow's

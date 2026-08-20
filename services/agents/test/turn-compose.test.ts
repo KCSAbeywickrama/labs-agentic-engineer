@@ -207,6 +207,9 @@ test("both PRD-writing flows carry the contract as a skill, not a reference", ()
 test("the design flow inlines its whole lineup, in lineup order", () => {
   assert.deepEqual(eagerSkillsFor({ kind: "flow", skill: "design" }), [
     "design",
+    // The design flow interviews at design altitude (#578), so the question
+    // mechanics are inlined here exactly as they are on start and amend.
+    "grilling",
     "cell-design",
     "architecture",
     "security-design",
