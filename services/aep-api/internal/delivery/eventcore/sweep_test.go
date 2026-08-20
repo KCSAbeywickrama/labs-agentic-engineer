@@ -234,3 +234,60 @@ func TestSweep_AGateAloneStartsAnOrdinaryRun(t *testing.T) {
 		t.Fatalf("a gated milestone still needs a run to wait on it, got %+v", h.sup.started)
 	}
 }
+
+// TestSweep_SkipsWorkAFailedRunHalted is what makes a budget mean something.
+//
+// A run that exhausts one settles `failed` and leaves its working set OPEN,
+// because the milestone stays open too — the way forward from a failed increment
+// is more work in the same version. To this pass those leftovers look exactly
+// like work nobody started, so without the halted marker it would start a fresh
+// run on them, with fresh budgets, which would exhaust them and be replaced
+// again. Every budget in the platform defeated at once, and the symptom is a
+// cloud bill rather than a failing test.
+func TestSweep_SkipsWorkAFailedRunHalted(t *testing.T) {
+	h := newHarness(t, aRun("run-old", 7, delivery.RunStateFailed))
+	h.issues.withIssue(7, 21, delivery.LabelAgentWork, delivery.KindBug, delivery.LabelHalted)
+
+	if err := sweepOver(h).Once(t.Context()); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if len(h.sup.started) != 0 {
+		t.Fatalf("halted work must not be restarted with a fresh budget, got %+v", h.sup.started)
+	}
+}
+
+// The mark is on the ISSUES a run gave up on, never on the milestone. So work
+// filed afterwards — by a human, by an incident, by the next validation attempt —
+// is ordinary unworked work and starts a run, and the halted issue beside it is
+// simply not part of what that run may pick up (the working-set predicates are
+// what enforce the second half; this pass only decides whether to start at all).
+func TestSweep_ANewIssueBesideHaltedWorkStillStartsARun(t *testing.T) {
+	h := newHarness(t, aRun("run-old", 7, delivery.RunStateFailed))
+	h.issues.
+		withIssue(7, 21, delivery.LabelAgentWork, delivery.KindBug, delivery.LabelHalted).
+		withIssue(7, 22, delivery.LabelAgentWork, delivery.KindBug, delivery.SrcUser)
+
+	if err := sweepOver(h).Once(t.Context()); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if len(h.sup.started) != 1 || h.sup.started[0].Kind != delivery.RunKindTask {
+		t.Fatalf("a freshly filed issue is unworked work and must start a run, got %+v", h.sup.started)
+	}
+}
+
+// A HALTED validation task would still be judged. It is not a state the platform
+// produces — a validation run closes its task on every ending, and a halt only
+// ever reaches a working set the run polled — but the routing must not depend on
+// that: the marker is read before the kind, so an issue somebody hand-stamped
+// stays out of the trigger whatever its kind.
+func TestSweep_AHaltedValidationTaskIsNotJudged(t *testing.T) {
+	h := newHarness(t, aRun("run-dev", 7, delivery.RunStateSucceeded))
+	h.issues.withIssue(7, 55, delivery.LabelAgentWork, delivery.KindValidation, delivery.LabelHalted)
+
+	if err := sweepOver(h).Once(t.Context()); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if len(h.sup.started) != 0 {
+		t.Fatalf("a halted issue is invisible to the trigger router, got %+v", h.sup.started)
+	}
+}

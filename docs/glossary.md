@@ -371,8 +371,17 @@ reading as `src/user` — which says who found it.
 Open, armed issues in the milestone whose kind the loop works: `development`,
 `bug` or `conflict` for a build run; `bug` or `conflict` alone for a bug-fix run,
 which works the deployed version and must never pick up the work of the version
-being built. A run settles when its own working set is empty and validation has
-a verdict.
+being built — a build that gave up leaves its plan open, and only another build
+may continue it. A **validation** run has none at all. A run settles when its own
+working set is empty; the verdict is a separate run's answer about the version.
+
+### Halted issue
+Work a FAILED run could not finish, stamped `aep:halted` with a comment naming
+the terminal reason. The reconcile sweep skips it, which is what makes a budget
+mean something: open work on a milestone with no live run is otherwise
+indistinguishable from work nobody started, so the run that gave up would be
+replaced within a tick by one with fresh budgets. Cleared by a rebuild, or by a
+person removing the label.
 
 ### Dispatch gate
 A `provision` issue. Never agent work — a **dispatch hold**: while one is open
@@ -395,10 +404,16 @@ reason is an explanation rather than a label. A run that settles for anything
 outside this list is a bug in the loop, not a new state.
 
 ### Supersede
-What the next build does to the previous version: close `v<N>`'s still-open
-issues with a `Superseded by v<N+1>` comment, then the milestone, then plan
-`v<N+1>` fresh from the new spec. It is also what keeps the reconcile sweep
-sound — a superseded milestone holds no open `aep` issue.
+What the next build does to the previous version. A **plan** is replaced by a
+plan: `v<N>`'s open `development` and `provision` issues are closed with a
+`Superseded by v<N+1>` comment, and so is a `conflict`, which names a branch of
+the version being superseded. A **defect** is not superseded by anything: open
+`bug` issues are MOVED into `v<N+1>`'s milestone, because they are still broken
+and the new version is what will ship the fix. Then the old milestone is closed
+and `v<N+1>` is planned fresh from the new spec. Moving is not arming — an
+unadopted bug arrives still ledger-only. It is also half of what keeps the
+reconcile sweep sound: a superseded milestone holds nothing workable, because its
+plan is closed and its bugs have left.
 
 ## aep-api platform concepts
 

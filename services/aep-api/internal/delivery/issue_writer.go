@@ -96,6 +96,7 @@ type IssueOps interface {
 	CommentIssue(ctx context.Context, orgID, projectID string, number int, body string) error
 	AddLabels(ctx context.Context, orgID, projectID string, number int, labels []string) error
 	RemoveLabel(ctx context.Context, orgID, projectID string, number int, label string) error
+	SetIssueMilestone(ctx context.Context, orgID, projectID string, number, milestoneNumber int) error
 }
 
 // Compile-time proof the host satisfies the port. The composition root wires
@@ -204,6 +205,28 @@ func (w *IssueWriter) Unlabel(ctx context.Context, orgID, projectID string, numb
 		return nil
 	}
 	return w.ops.RemoveLabel(ctx, orgID, projectID, number, label)
+}
+
+// SetMilestone moves an existing issue into a milestone — the only write here
+// that changes which VERSION an issue belongs to.
+//
+// It exists for exactly one rule: a defect is not superseded by anything. When a
+// build cuts the next version, the previous milestone's planned work is closed
+// (a plan is replaced by a plan) but its open bugs are MOVED, because they are
+// still broken and the new version is what will ship the fix. A conflict issue is
+// closed rather than moved: it names a branch of the version being superseded.
+//
+// Moving is NOT arming. An unarmed bug — a red-main incident nobody adopted —
+// arrives in the new milestone still unarmed and still ledger-only, so carrying a
+// human's defect forward can never turn it into agent work nobody asked for.
+//
+// The destination milestone must already exist, which is why the plan path mints
+// the new version's milestone BEFORE it supersedes the old one.
+func (w *IssueWriter) SetMilestone(ctx context.Context, orgID, projectID string, number, milestoneNumber int) error {
+	if w == nil || w.ops == nil {
+		return nil
+	}
+	return w.ops.SetIssueMilestone(ctx, orgID, projectID, number, milestoneNumber)
 }
 
 // ---- the dedupe-key vocabulary --------------------------------------------

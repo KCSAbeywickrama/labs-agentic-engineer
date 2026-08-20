@@ -36,6 +36,7 @@ type recordingOps struct {
 	reopened []int
 	added    [][]string
 	removed  []string
+	moved    map[int]int
 
 	result *sourcecontrol.IssueResult
 	err    error
@@ -75,6 +76,15 @@ func (r *recordingOps) AddLabels(_ context.Context, _, _ string, _ int, labels [
 func (r *recordingOps) RemoveLabel(_ context.Context, _, _ string, _ int, label string) error {
 	r.calls = append(r.calls, "removeLabel")
 	r.removed = append(r.removed, label)
+	return r.err
+}
+
+func (r *recordingOps) SetIssueMilestone(_ context.Context, _, _ string, number, milestoneNumber int) error {
+	r.calls = append(r.calls, "setMilestone")
+	if r.moved == nil {
+		r.moved = map[int]int{}
+	}
+	r.moved[number] = milestoneNumber
 	return r.err
 }
 

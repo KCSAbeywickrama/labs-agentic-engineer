@@ -28,17 +28,21 @@ import (
 
 // Why the sweep reads ISSUES where the cycle-boundary poll reads COUNTS.
 //
-// It must ROUTE by kind, which a count cannot express: the host's GraphQL label
-// argument is a UNION, so "carries `aep` AND is of kind `validation`" is an
-// intersection it cannot ask for. The same read is what a later halted-issue
-// exclusion needs — "carries `aep` AND `aep:halted`" is the identical shape — so
-// the decision is made in Go over an UNFILTERED fetch, exactly as the auto-merge
-// policy does and for the same stated reason: the fetch stays wide and the policy
-// is the only place labels are read.
+// It makes two decisions a count cannot express, and both are intersections the
+// host's union-valued GraphQL `labels:` argument cannot ask for. It must ROUTE by
+// kind ("carries `aep` AND is of kind `validation`"), and it must SKIP the work a
+// failed run gave up on ("carries `aep` AND `aep:halted`"). Both are therefore
+// decided in Go over an UNFILTERED fetch, exactly as the auto-merge policy does
+// and for the same stated reason: the fetch stays wide and the policy is the only
+// place labels are read. Neither costs a round trip, and neither reintroduces a
+// negative label query.
 //
 // It costs one REST call per known milestone per pass, replacing one GraphQL
 // call. The boundary poll keeps its counts — that read runs at every cycle
-// boundary and is the loop's hottest.
+// boundary and is the loop's hottest, and `aep:halted` deliberately does not
+// reach it: a halted issue inside a LIVE run's milestone is a contradiction (the
+// run that halted them is terminal by construction), so the hot poll is not
+// complicated for a state it cannot see.
 
 // defaultSweepInterval is the reconcile cadence. A backstop, not a driver:
 // everything it heals is something a webhook should have done, so it is slow
@@ -67,11 +71,23 @@ const defaultSweepInterval = 60 * time.Second
 // AlreadyStarted and the row is reused, not re-admitted — so the healthy case
 // costs one Temporal call and changes nothing.
 //
-// The rule is safe because supersede makes it so: the plan path closes the
-// previous version's open issues before minting the next milestone, so an
-// abandoned milestone holds no open work and this sweep can never resurrect
-// one. Cancel is likewise final — the increment is abandoned, and the only way
-// forward is the next build.
+// Three things keep the first rule from resurrecting work nobody wants, and all
+// three are somebody else's write:
+//
+//   - SUPERSEDE empties the previous version's milestone. It closes the planned
+//     work and the gates (a plan is replaced by a plan) and MOVES the open bugs
+//     into the new version's milestone (a defect is not superseded — it is still
+//     broken, and the new version is what ships the fix). Either way the
+//     superseded milestone holds no workable issue, so the trigger never fires on
+//     it. A move that failed leaves one bug behind and a task run picks it up —
+//     which is the right outcome for a defect, and the same best-effort posture a
+//     failed close has always had.
+//   - CANCEL is final. The increment is abandoned and the only way forward is the
+//     next build.
+//   - HALT marks what a FAILED run could not finish (`aep:halted`, see halt.go).
+//     Without it this rule is a budget defeater: a run settles `failed` with its
+//     working set still open, so the sweep starts a fresh run on the same issues
+//     with fresh budgets, forever.
 //
 // It walks the milestones the PLATFORM knows (from its own run rows), not
 // GitHub's milestone list: a milestone the platform never ran is not a missed
@@ -190,8 +206,16 @@ func (s *Sweep) reconcileRepo(ctx context.Context, repo RepoRef) error {
 // the task has been closed. The two coexist only when a human files work into a
 // version awaiting its verdict, and judging first is the safe order there — the
 // verdict is about what is deployed, which the new work has not changed yet.
+//
+// HALTED issues are dropped before either decision, and dropped rather than
+// merely ignored: a milestone holding nothing but halted work is QUIET, and
+// starting a run on it would park a supervisor on a milestone whose work nobody
+// intends to finish. A newly filed issue in the same milestone is untouched by
+// the filter and starts a run normally — halting marks the issues a run gave up
+// on, never the milestone.
 func (e *Events) offerRun(ctx context.Context, orgID, projectID string, milestone MilestoneRef,
 	issues []sourcecontrol.IssueInfo) error {
+	issues = notHalted(issues)
 	if len(issues) == 0 {
 		return nil
 	}
@@ -205,4 +229,22 @@ func (e *Events) offerRun(ctx context.Context, orgID, projectID string, mileston
 	slog.InfoContext(ctx, "eventcore: reconcile sweep found unworked open issues — starting a run",
 		"project", projectID, "milestone", milestone.Number, "openIssues", len(issues))
 	return e.startRun(ctx, orgID, projectID, milestone)
+}
+
+// notHalted drops the issues a failed run marked `aep:halted`.
+//
+// It is a DECISION over issues the sweep already fetched, never a query filter,
+// and that is the whole reason the fetch is unfiltered: "carries `aep` AND
+// `aep:halted`" is an intersection the host cannot count, and its complement is a
+// negative label query the host cannot express at all. Deciding here costs
+// nothing and keeps every label rule in Go.
+func notHalted(issues []sourcecontrol.IssueInfo) []sourcecontrol.IssueInfo {
+	out := make([]sourcecontrol.IssueInfo, 0, len(issues))
+	for _, iss := range issues {
+		if delivery.HasLabel(iss.Labels, delivery.LabelHalted) {
+			continue
+		}
+		out = append(out, iss)
+	}
+	return out
 }

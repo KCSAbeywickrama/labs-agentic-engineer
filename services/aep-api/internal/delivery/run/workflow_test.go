@@ -99,7 +99,12 @@ type harness struct {
 	// validation run BECAUSE that task is open, so an ending that leaves it open is
 	// an ending that repeats forever.
 	taskCloses []CloseValidationIssueInput
-	closed     int
+	// halts records every halt of a failed run's unfinished work. It is the
+	// budget's assertion surface: the reconcile sweep restarts open work of a
+	// kind on a milestone with no live run, so a failed settle that halted
+	// nothing is a budget the platform no longer enforces.
+	halts  []HaltWorkInput
+	closed int
 }
 
 // newHarness registers the activities whose behaviour never varies — the
@@ -135,6 +140,7 @@ func newHarness(t *testing.T) *harness {
 	h.env.RegisterActivity(acts.DeployCycle)
 	h.env.RegisterActivity(acts.PollCycleDeployments)
 	h.env.RegisterActivity(acts.MintDeployFixIssues)
+	h.env.RegisterActivity(acts.HaltUnfinishedWork)
 
 	h.env.OnActivity(acts.SetRunState, mock.Anything, mock.Anything).
 		Run(func(args mock.Arguments) {
@@ -172,6 +178,15 @@ func newHarness(t *testing.T) *harness {
 			defer h.mu.Unlock()
 			h.closed++
 		}).Return(nil)
+	// The halt never varies either: every FAILED settle marks the work it could
+	// not finish, so a test asserts on WHAT was halted rather than on whether the
+	// activity was pinned.
+	h.env.OnActivity(acts.HaltUnfinishedWork, mock.Anything, mock.Anything).
+		Run(func(args mock.Arguments) {
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			h.halts = append(h.halts, args.Get(1).(HaltWorkInput))
+		}).Return([]int{}, nil)
 	// The validation task's close never varies — it is the platform's write, made
 	// on every ending — so it is a constructor default like the other writers.
 	h.env.OnActivity(acts.CloseValidationIssue, mock.Anything, mock.Anything).
@@ -303,6 +318,35 @@ func (h *harness) deployMintCount() int {
 	return len(h.deployMints)
 }
 
+// workable is a milestone holding n workable issues out of total open ones, with
+// no gate — and it counts them in BOTH working sets.
+//
+// Both, because most of what these tests exercise is the LOOP, which is one
+// implementation shared by the dev and task species: a case that only counted
+// the dev set would silently become a park when driven as a task run, and the
+// test would time out rather than fail with a reason. The cases that are ABOUT
+// the difference between the two populations spell the fields out (see
+// TestTaskRun_NeverPicksUpAFailedDevRunsPlannedWork).
+func workable(n, total int) MilestoneSnapshot {
+	return MilestoneSnapshot{DevWork: n, TaskWork: n, Total: total}
+}
+
+// gated is workable with gates open — the dispatch hold.
+func gated(n, gates, total int) MilestoneSnapshot {
+	s := workable(n, total)
+	s.Gates = gates
+	return s
+}
+
+// repairing is workable whose defects came from a FAILED VERDICT: n open issues
+// carrying `src/validation`. It is what makes a task run's bookend reopen the
+// version's validation task.
+func repairing(n, total int) MilestoneSnapshot {
+	s := workable(n, total)
+	s.ValidationRepairs = n
+	return s
+}
+
 // milestoneIs queues the cycle-boundary polls, in order. The last one repeats
 // for as long as the run keeps asking.
 func (h *harness) milestoneIs(snaps ...MilestoneSnapshot) {
@@ -397,6 +441,13 @@ func (h *harness) repairMintCount() int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return len(h.repairMints)
+}
+
+// haltedWork is what the run marked as work it could not finish, read safely.
+func (h *harness) haltedWork() []HaltWorkInput {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]HaltWorkInput(nil), h.halts...)
 }
 
 // taskCloseCount is the validation-task close tally, read safely.
@@ -571,7 +622,7 @@ func (h *harness) assertSettled(t *testing.T, res RunResult, state, reason strin
 // left, close the milestone.
 func TestHappyPath_OneCycleDeliversTheVersion(t *testing.T) {
 	h := newHarness(t)
-	h.milestoneIs(MilestoneSnapshot{Work: 2, Total: 2}, MilestoneSnapshot{})
+	h.milestoneIs(workable(2, 2), MilestoneSnapshot{})
 	h.merges(1)
 
 	h.run(delivery.RunKindDev, 0)
@@ -596,9 +647,9 @@ func TestHappyPath_OneCycleDeliversTheVersion(t *testing.T) {
 func TestFixCycle_RedBuildBecomesTheNextCyclesWork(t *testing.T) {
 	h := newHarness(t)
 	h.milestoneIs(
-		MilestoneSnapshot{Work: 2, Total: 2}, // dispatch
-		MilestoneSnapshot{Work: 1, Total: 1}, // the fix issue eventcore minted
-		MilestoneSnapshot{},                  // delivered
+		workable(2, 2),      // dispatch
+		workable(1, 1),      // the fix issue eventcore minted
+		MilestoneSnapshot{}, // delivered
 	)
 	h.buildsAre(
 		CycleBuildState{Expected: 1, Settled: 1, Red: []string{"order-service"}},
@@ -619,7 +670,7 @@ func TestFixCycle_RedBuildBecomesTheNextCyclesWork(t *testing.T) {
 // for the binding to be Ready before the boundary can settle the run.
 func TestBuildsGreen_DeploysBeforeSettling(t *testing.T) {
 	h := newHarness(t)
-	h.milestoneIs(MilestoneSnapshot{Work: 1, Total: 1}, MilestoneSnapshot{})
+	h.milestoneIs(workable(1, 1), MilestoneSnapshot{})
 	h.merges(1)
 
 	h.run(delivery.RunKindDev, 0)
@@ -640,8 +691,8 @@ func TestBuildsGreen_DeploysBeforeSettling(t *testing.T) {
 func TestRedBuild_DoesNotDeploy(t *testing.T) {
 	h := newHarness(t)
 	h.milestoneIs(
-		MilestoneSnapshot{Work: 1, Total: 1},
-		MilestoneSnapshot{Work: 1, Total: 1},
+		workable(1, 1),
+		workable(1, 1),
 		MilestoneSnapshot{},
 	)
 	h.buildsAre(
@@ -672,7 +723,7 @@ func TestRedBuild_DoesNotDeploy(t *testing.T) {
 // with a bare 500 and Temporal then retries forever.
 func TestDeploy_PromotesWaveByWaveThenConverges(t *testing.T) {
 	h := newHarness(t)
-	h.milestoneIs(MilestoneSnapshot{Work: 1, Total: 1}, MilestoneSnapshot{})
+	h.milestoneIs(workable(1, 1), MilestoneSnapshot{})
 	h.wavesAre([][]string{{"todo-api"}, {"todo-webapp"}}, nil)
 	h.buildsAre(CycleBuildState{Expected: 2, Settled: 2, Components: []string{"todo-api", "todo-webapp"}})
 	h.merges(1)
@@ -702,7 +753,7 @@ func TestDeploy_PromotesWaveByWaveThenConverges(t *testing.T) {
 // nothing can use.
 func TestDeploy_FailedWaveRunsNoFurtherWaveOrConverge(t *testing.T) {
 	h := newHarness(t)
-	h.milestoneIs(MilestoneSnapshot{Work: 1, Total: 1}, MilestoneSnapshot{})
+	h.milestoneIs(workable(1, 1), MilestoneSnapshot{})
 	h.wavesAre([][]string{{"todo-api"}, {"todo-webapp"}}, nil)
 	h.buildsAre(CycleBuildState{Expected: 2, Settled: 2, Components: []string{"todo-api", "todo-webapp"}})
 	h.deploymentsAre(CycleDeployState{Expected: 1, Failed: []string{"todo-api"}})
@@ -728,8 +779,8 @@ func TestDeploy_FailedWaveRunsNoFurtherWaveOrConverge(t *testing.T) {
 func TestDeployOrderUnsatisfiable_SettlesAsADeployFailure(t *testing.T) {
 	h := newHarness(t)
 	h.milestoneIs(
-		MilestoneSnapshot{Work: 1, Total: 1}, // dispatch
-		MilestoneSnapshot{},                  // nothing came back to fix it
+		workable(1, 1),      // dispatch
+		MilestoneSnapshot{}, // nothing came back to fix it
 	)
 	h.buildsAre(CycleBuildState{Expected: 2, Settled: 2, Components: []string{"web-a", "web-b"}})
 	h.wavesAre(nil, temporal.NewNonRetryableApplicationError(
@@ -754,7 +805,7 @@ func TestDeployOrderUnsatisfiable_SettlesAsADeployFailure(t *testing.T) {
 // unbounded retry that is right for it — the opposite of the case above.
 func TestDeployOrderUnreadable_IsRetriedNotSettled(t *testing.T) {
 	h := newHarness(t)
-	h.milestoneIs(MilestoneSnapshot{Work: 1, Total: 1}, MilestoneSnapshot{})
+	h.milestoneIs(workable(1, 1), MilestoneSnapshot{})
 	h.buildsAre(CycleBuildState{Expected: 1, Settled: 1, Components: []string{"order-service"}})
 	h.wavesAre(nil, errors.New("oc: design read timed out"))
 	h.merges(1)
@@ -770,7 +821,7 @@ func TestDeployOrderUnreadable_IsRetriedNotSettled(t *testing.T) {
 // to converge onto, and the failure is already the cycle's answer.
 func TestDeploy_FailedWaveRunsNoConverge(t *testing.T) {
 	h := newHarness(t)
-	h.milestoneIs(MilestoneSnapshot{Work: 1, Total: 1}, MilestoneSnapshot{})
+	h.milestoneIs(workable(1, 1), MilestoneSnapshot{})
 	h.deploymentsAre(CycleDeployState{Expected: 1, Failed: []string{"order-service"}})
 	h.deployMintsAre(nil)
 	h.merges(1)
@@ -789,9 +840,9 @@ func TestDeploy_FailedWaveRunsNoConverge(t *testing.T) {
 func TestDeployFailed_BecomesTheNextCyclesWork(t *testing.T) {
 	h := newHarness(t)
 	h.milestoneIs(
-		MilestoneSnapshot{Work: 1, Total: 1}, // dispatch
-		MilestoneSnapshot{Work: 1, Total: 1}, // the deploy-fix issue
-		MilestoneSnapshot{},                  // delivered
+		workable(1, 1),      // dispatch
+		workable(1, 1),      // the deploy-fix issue
+		MilestoneSnapshot{}, // delivered
 	)
 	h.deploymentsAre(
 		CycleDeployState{Expected: 1, Failed: []string{"order-service"}, Reasons: map[string]string{"order-service": "RenderingFailed"}},
@@ -818,8 +869,8 @@ func TestDeployFailed_BecomesTheNextCyclesWork(t *testing.T) {
 func TestDeployFailed_WithNoRecovery_SettlesOnTheDeployBudget(t *testing.T) {
 	h := newHarness(t)
 	h.milestoneIs(
-		MilestoneSnapshot{Work: 1, Total: 1}, // dispatch
-		MilestoneSnapshot{},                  // nothing came back to fix it
+		workable(1, 1),      // dispatch
+		MilestoneSnapshot{}, // nothing came back to fix it
 	)
 	h.deploymentsAre(CycleDeployState{Expected: 1, Failed: []string{"order-service"}})
 	h.deployMintsAre(nil)
@@ -865,8 +916,8 @@ func TestValidationRun_BuildsAndDeploysNothing(t *testing.T) {
 func TestDeployNeverReady_ExpiresIntoADeployFailure(t *testing.T) {
 	h := newHarness(t)
 	h.milestoneIs(
-		MilestoneSnapshot{Work: 1, Total: 1}, // dispatch
-		MilestoneSnapshot{},                  // nothing recovered it
+		workable(1, 1),      // dispatch
+		MilestoneSnapshot{}, // nothing recovered it
 	)
 	// Neither Ready nor Failed, ever: the rollout that never lands. Only the
 	// deadline can end this — which is the whole point of having one here.
@@ -894,7 +945,7 @@ func TestDeployNeverReady_ExpiresIntoADeployFailure(t *testing.T) {
 func TestDeployDeadline_IsTheStagesNotEachWaves(t *testing.T) {
 	h := newHarness(t)
 	h.milestoneIs(
-		MilestoneSnapshot{Work: 1, Total: 1},
+		workable(1, 1),
 		MilestoneSnapshot{},
 	)
 	h.buildsAre(CycleBuildState{Expected: 2, Settled: 2, Components: []string{"api", "web"}})
@@ -921,8 +972,8 @@ func TestDeployDeadline_IsTheStagesNotEachWaves(t *testing.T) {
 func TestConflictCycle_AnUnmergeablePRBecomesTheNextCyclesWork(t *testing.T) {
 	h := newHarness(t)
 	h.milestoneIs(
-		MilestoneSnapshot{Work: 2, Total: 2},
-		MilestoneSnapshot{Work: 1, Total: 1}, // the conflict issue
+		workable(2, 2),
+		workable(1, 1), // the conflict issue
 		MilestoneSnapshot{},
 	)
 	h.signal(delivery.SigRunConflict, time.Second)
@@ -949,7 +1000,7 @@ func TestConflictCycle_AnUnmergeablePRBecomesTheNextCyclesWork(t *testing.T) {
 // exactly that reason.
 func TestDevRun_MintsTheValidationTaskAtDeployedGreen(t *testing.T) {
 	h := newHarness(t)
-	h.milestoneIs(MilestoneSnapshot{Work: 1, Total: 1}, MilestoneSnapshot{})
+	h.milestoneIs(workable(1, 1), MilestoneSnapshot{})
 	h.validationIs(77, delivery.ValidationVerdictPassed) // the verdict is never read
 	h.merges(1)
 
@@ -972,7 +1023,7 @@ func TestDevRun_MintsTheValidationTaskAtDeployedGreen(t *testing.T) {
 // forever. `skipped` says what is true, and it belongs to no cycle.
 func TestDevRun_NoAcceptanceOracleRecordsSkipped(t *testing.T) {
 	h := newHarness(t)
-	h.milestoneIs(MilestoneSnapshot{Work: 1, Total: 1}, MilestoneSnapshot{})
+	h.milestoneIs(workable(1, 1), MilestoneSnapshot{})
 	h.validationIs(0, delivery.ValidationVerdictSkipped) // EnsureValidationIssue answers 0
 	h.merges(1)
 
@@ -994,7 +1045,7 @@ func TestDevRun_NoAcceptanceOracleRecordsSkipped(t *testing.T) {
 // issue made a genuinely passed version read as unvalidated.
 func TestTaskRun_JudgesNothingAndRecordsNoVerdict(t *testing.T) {
 	h := newHarness(t)
-	h.milestoneIs(MilestoneSnapshot{Work: 1, Total: 1}, MilestoneSnapshot{})
+	h.milestoneIs(workable(1, 1), MilestoneSnapshot{})
 	h.merges(1)
 
 	h.run(delivery.RunKindTask, 0)
@@ -1007,6 +1058,217 @@ func TestTaskRun_JudgesNothingAndRecordsNoVerdict(t *testing.T) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	require.Empty(t, h.verdictWrites, "a task run writes no verdict at all")
+}
+
+// ---- the task run closes the chain -----------------------------------------
+
+// TestTaskRun_AVerdictSourcedFixReopensTheValidationTask is the edge that closes
+// the repair chain.
+//
+// Before it, a failed validation filed one bug per failed criterion, closed the
+// task and stopped: the bugs were fixed, built and deployed, and the version's
+// verdict stayed at the failure until a human clicked revalidate. Now the fix run
+// reopens the task, the reconcile sweep starts a validation run off that open
+// task, and the SAME oracle judges the repair.
+func TestTaskRun_AVerdictSourcedFixReopensTheValidationTask(t *testing.T) {
+	h := newHarness(t)
+	// One open bug carrying `src/validation` — a failed verdict's repair work —
+	// then a milestone drained by working it.
+	h.milestoneIs(repairing(1, 1), MilestoneSnapshot{})
+	h.validationIs(77, delivery.ValidationVerdictFailed) // the verdict is never read here
+	h.merges(1)
+
+	h.run(delivery.RunKindTask, 0)
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
+	h.env.AssertCalled(t, "EnsureValidationIssue", mock.Anything, mock.Anything)
+	// The reopen is not a judgement. The task run reaches no verdict, so its row
+	// records none — the validation run that works the reopened task owns the
+	// version's answer.
+	require.Empty(t, res.ValidationVerdict)
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	require.Empty(t, h.verdictWrites, "a task run writes no verdict, not even when it reopens the task")
+}
+
+// An INCIDENT fix does not reopen it, and neither does a user's bug fix. An
+// incident is not priced like a release: re-judging the whole system for one
+// defect would spend a validation agent per bug fix, and the standing verdict is
+// a statement about a VERSION rather than about a commit — so `v3 passed` may
+// describe code that shipped after the verdict was recorded.
+//
+// This is also the only conditional in the platform where a `src/*` label routes
+// anything. Everywhere else a source is provenance.
+func TestTaskRun_AnIncidentFixLeavesTheVerdictStanding(t *testing.T) {
+	h := newHarness(t)
+	h.milestoneIs(workable(1, 1), MilestoneSnapshot{}) // no src/validation work
+	h.validationIs(77, delivery.ValidationVerdictFailed)
+	h.merges(1)
+
+	h.run(delivery.RunKindTask, 0)
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
+	h.env.AssertNotCalled(t, "EnsureValidationIssue", mock.Anything, mock.Anything)
+}
+
+// The attribution LATCHES, and it has to. By the time the working set is empty
+// the repair issues are closed, so the poll that finds the milestone drained can
+// no longer see what the run just fixed — a settle-time read would always answer
+// "no verdict work here" and the chain would never close.
+//
+// (The alternative, asking whether a CLOSED `src/validation` issue exists, is
+// true forever after the first repair: it would reopen the task after every later
+// run, which validation then closes, without end.)
+func TestTaskRun_TheVerdictSourceIsRememberedFromTheDispatchingPoll(t *testing.T) {
+	h := newHarness(t)
+	h.milestoneIs(
+		// A repair bug and an ordinary one. Only the first poll can see that either
+		// of them came from a verdict.
+		MilestoneSnapshot{DevWork: 2, TaskWork: 2, Total: 2, ValidationRepairs: 1},
+		// The repair is fixed and closed; the ordinary bug is still there.
+		MilestoneSnapshot{DevWork: 1, TaskWork: 1, Total: 1},
+		MilestoneSnapshot{}, // drained: nothing left to see
+	)
+	h.validationIs(77, delivery.ValidationVerdictFailed)
+	h.merges(2)
+
+	h.run(delivery.RunKindTask, 0)
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
+	h.env.AssertCalled(t, "EnsureValidationIssue", mock.Anything, mock.Anything)
+}
+
+// TestTaskRun_NeverPicksUpAFailedDevRunsPlannedWork is the working-set narrowing,
+// stated as the failure it prevents.
+//
+// A dev run that exhausts a budget settles `failed` with its planned work still
+// OPEN. Planned work is dev-workflow's alone: the dev run owns the version and
+// holds the project's build mutex, so those issues must wait for another build —
+// never be continued by a run that never planned them, works the DEPLOYED version
+// instead of the one being built, and carries different budgets.
+func TestTaskRun_NeverPicksUpAFailedDevRunsPlannedWork(t *testing.T) {
+	// The milestone a dev run left behind when it gave up: planned work still
+	// open, counted in the dev working set and in no task run's.
+	leftover := MilestoneSnapshot{DevWork: 2, TaskWork: 0, Total: 2}
+
+	t.Run("a task run dispatches nothing at it", func(t *testing.T) {
+		h := newHarness(t)
+		h.milestoneIs(leftover)
+		// Its working set is empty and it planned no milestone, so it parks — and
+		// cancel is the unbounded wait's only expiry.
+		h.signal(delivery.SigRunCancel, 2*time.Second)
+
+		h.run(delivery.RunKindTask, 0)
+		res := h.result(t)
+
+		h.assertSettled(t, res, delivery.RunStateCancelled, "")
+		require.Equal(t, 0, h.dispatchCount(),
+			"planned work belongs to the build that planned it; a bug-fix run must not spend a dispatch on it")
+	})
+
+	t.Run("the build that planned it does", func(t *testing.T) {
+		h := newHarness(t)
+		h.milestoneIs(leftover, MilestoneSnapshot{})
+		h.merges(1)
+
+		h.run(delivery.RunKindDev, 0)
+		res := h.result(t)
+
+		h.assertSettled(t, res, delivery.RunStateSucceeded, "")
+		require.Equal(t, 1, h.dispatchCount(), "the same milestone IS a dev run's work")
+	})
+}
+
+// ---- halting what a failed run could not finish ----------------------------
+
+// TestFailedSettle_HaltsTheWorkItCouldNotFinish is what keeps every budget in the
+// platform meaning something.
+//
+// A failed run leaves its working set OPEN — the milestone stays open too,
+// because the way forward is more work in the same version — and the reconcile
+// sweep's trigger is "open work of this kind on a milestone with no live run". So
+// without the halt the run that just exhausted its deploy budget is replaced
+// within a tick by a fresh run with a fresh budget, on the same issues, forever.
+// The symptom is an unexplained cloud bill rather than a failing test.
+//
+// The halt names the run's KIND, because the working set is per species and the
+// mark must not reach outside the population this run was responsible for.
+func TestFailedSettle_HaltsTheWorkItCouldNotFinish(t *testing.T) {
+	h := newHarness(t)
+	h.milestoneIs(
+		workable(1, 1),      // dispatch
+		MilestoneSnapshot{}, // the deploy failed and nothing came back to fix it
+	)
+	h.deploymentsAre(CycleDeployState{Expected: 1, Failed: []string{"order-service"}})
+	h.merges(1)
+
+	h.runWith(RunInput{Kind: delivery.RunKindDev, Tag: "v3"})
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonDeployBudget)
+	halts := h.haltedWork()
+	require.Len(t, halts, 1, "a failed settle halts the work it could not finish, exactly once")
+	require.Equal(t, delivery.RunKindDev, halts[0].Kind)
+	require.Equal(t, delivery.RunReasonDeployBudget, halts[0].Reason,
+		"the terminal reason is quoted onto the issues, so a human reads why without opening the run")
+	require.Equal(t, testMilepost, halts[0].MilestoneNumber)
+	// The deploy-fix issue this very run filed is inside that milestone's working
+	// set, which is the point: it is the newest thing there and therefore the first
+	// thing a restarted run would pick up.
+	require.Equal(t, 1, h.deployMintCount())
+}
+
+// A SUCCEEDED run halts nothing. There is nothing left to halt — an empty working
+// set is what settled it — and marking anything here would put `aep:halted` on
+// work somebody filed in the instant the version was delivered.
+func TestSucceededSettle_HaltsNothing(t *testing.T) {
+	h := newHarness(t)
+	h.milestoneIs(workable(1, 1), MilestoneSnapshot{})
+	h.merges(1)
+
+	h.runWith(RunInput{Kind: delivery.RunKindDev, Tag: "v3"})
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
+	require.Empty(t, h.haltedWork())
+}
+
+// A CANCELLED run halts nothing either, and the reason is a different one: cancel
+// has its own vocabulary (`aep:cancelled`, applied by the cancel surface) and its
+// own way forward, which is a rebuild that REOPENS exactly what was in flight.
+// Stamping `aep:halted` over it would make that rebuild's handle ambiguous.
+func TestCancelledSettle_HaltsNothing(t *testing.T) {
+	h := newHarness(t)
+	h.milestoneIs(workable(1, 1))
+	h.signal(delivery.SigRunCancel, time.Second)
+
+	h.run(delivery.RunKindDev, 0)
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateCancelled, "")
+	require.Empty(t, h.haltedWork())
+}
+
+// A VALIDATION run's failure halts nothing, and that is a decision. Its own work
+// is the version's validation task, which it closes on EVERY ending; the repair
+// issues it files and the conflict issue a stuck validation pull request produces
+// are deliberately an ordinary task run's work. Halting those would break the
+// repair chain rather than protect a budget.
+func TestValidationRun_FailureHaltsNoWork(t *testing.T) {
+	h := newHarness(t)
+	h.validationIs(77, delivery.ValidationVerdictFailed)
+	h.validationHistoryIs(1, "")
+	h.merges(1)
+
+	h.runWith(RunInput{Kind: delivery.RunKindValidation, ValidationAttempts: 2})
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonValidationFailed)
+	require.Equal(t, 1, h.repairMintCount(), "the failure became work for an ordinary run")
+	require.Empty(t, h.haltedWork(), "and that work must not be halted the moment it is filed")
 }
 
 // ---- the validation run ----------------------------------------------------
@@ -1473,7 +1735,7 @@ func TestRunInput_WithoutAKindFallsBackToItsOrigin(t *testing.T) {
 // fast-forwards both deadlines.
 func TestRedispatchBudget_AgentDeathEndsTheRun(t *testing.T) {
 	h := newHarness(t)
-	h.milestoneIs(MilestoneSnapshot{Work: 1, Total: 1})
+	h.milestoneIs(workable(1, 1))
 	h.mergesAt("") // the cycle record never learns a merge
 
 	h.run(delivery.RunKindDev, 0)
@@ -1492,7 +1754,7 @@ func TestRedispatchBudget_AgentDeathEndsTheRun(t *testing.T) {
 // would only delay the message the user needs.
 func TestAgentQuotaBlocked_SettlesBlockedWithoutSpendingTheBudget(t *testing.T) {
 	h := newHarness(t)
-	h.milestoneIs(MilestoneSnapshot{Work: 1, Total: 1})
+	h.milestoneIs(workable(1, 1))
 	h.dispatchIs("", temporal.NewNonRetryableApplicationError(
 		delivery.AgentQuotaBlockedMessage, delivery.ErrTypeAgentQuotaBlocked, delivery.ErrAgentQuotaExceeded))
 
@@ -1512,7 +1774,7 @@ func TestAgentQuotaBlocked_SettlesBlockedWithoutSpendingTheBudget(t *testing.T) 
 // the allowance is spent and nothing came back that could make it green.
 func TestBuildRetriggerBudget_RedWithNothingToFix(t *testing.T) {
 	h := newHarness(t)
-	h.milestoneIs(MilestoneSnapshot{Work: 1, Total: 1}, MilestoneSnapshot{})
+	h.milestoneIs(workable(1, 1), MilestoneSnapshot{})
 	h.buildsAre(CycleBuildState{Expected: 1, Settled: 1, Red: []string{"order-service"}})
 	h.merges(1)
 
@@ -1526,7 +1788,7 @@ func TestBuildRetriggerBudget_RedWithNothingToFix(t *testing.T) {
 // TestFixChainBudget_TwoFixCyclesIsTheLimit walks the fix chain to exhaustion.
 func TestFixChainBudget_TwoFixCyclesIsTheLimit(t *testing.T) {
 	h := newHarness(t)
-	h.milestoneIs(MilestoneSnapshot{Work: 1, Total: 1})
+	h.milestoneIs(workable(1, 1))
 	h.buildsAre(CycleBuildState{Expected: 1, Settled: 1, Red: []string{"order-service"}})
 	h.merges(3)
 
@@ -1544,7 +1806,7 @@ func TestFixChainBudget_TwoFixCyclesIsTheLimit(t *testing.T) {
 // never reported as a run that could not build.
 func TestConflictBudget_TwoConflictCyclesIsTheLimit(t *testing.T) {
 	h := newHarness(t)
-	h.milestoneIs(MilestoneSnapshot{Work: 1, Total: 1})
+	h.milestoneIs(workable(1, 1))
 	for i := 1; i <= 3; i++ {
 		h.signal(delivery.SigRunConflict, time.Duration(i)*time.Second)
 	}
@@ -1563,7 +1825,7 @@ func TestConflictBudget_TwoConflictCyclesIsTheLimit(t *testing.T) {
 // same dispatch against the same working set.
 func TestNoProgress_AGreenCycleThatChangedNothing(t *testing.T) {
 	h := newHarness(t)
-	h.milestoneIs(MilestoneSnapshot{Work: 2, Total: 2})
+	h.milestoneIs(workable(2, 2))
 	h.merges(1)
 
 	h.run(delivery.RunKindDev, 0)
@@ -1579,9 +1841,9 @@ func TestNoProgress_AGreenCycleThatChangedNothing(t *testing.T) {
 func TestCycleCeiling_StopsARunThatIsStillMakingProgress(t *testing.T) {
 	h := newHarness(t)
 	h.milestoneIs(
-		MilestoneSnapshot{Work: 3, Total: 3},
-		MilestoneSnapshot{Work: 2, Total: 2},
-		MilestoneSnapshot{Work: 1, Total: 1},
+		workable(3, 3),
+		workable(2, 2),
+		workable(1, 1),
 	)
 	h.merges(2)
 
@@ -1596,7 +1858,7 @@ func TestCycleCeiling_StopsARunThatIsStillMakingProgress(t *testing.T) {
 // The run is parked behind a gate and never dispatches.
 func TestCancel_FromWaiting(t *testing.T) {
 	h := newHarness(t)
-	h.milestoneIs(MilestoneSnapshot{Work: 1, Gates: 1, Total: 2})
+	h.milestoneIs(gated(1, 1, 2))
 	h.signal(delivery.SigRunCancel, time.Second)
 
 	h.run(delivery.RunKindDev, 0)
@@ -1612,7 +1874,7 @@ func TestCancel_FromWaiting(t *testing.T) {
 // one still in flight.
 func TestCancel_FromRunning(t *testing.T) {
 	h := newHarness(t)
-	h.milestoneIs(MilestoneSnapshot{Work: 1, Total: 1})
+	h.milestoneIs(workable(1, 1))
 	h.signal(delivery.SigRunCancel, time.Second)
 
 	h.run(delivery.RunKindDev, 0)
@@ -1630,10 +1892,10 @@ func TestCancel_FromRunning(t *testing.T) {
 func TestMidRunGate_HoldsTheNextDispatch(t *testing.T) {
 	h := newHarness(t)
 	h.milestoneIs(
-		MilestoneSnapshot{Work: 2, Total: 2},           // cycle 1 dispatches
-		MilestoneSnapshot{Work: 1, Gates: 1, Total: 2}, // a gate appears → hold
-		MilestoneSnapshot{Work: 1, Total: 1},           // the gate closed → cycle 2
-		MilestoneSnapshot{},                            // delivered
+		workable(2, 2),      // cycle 1 dispatches
+		gated(1, 1, 2),      // a gate appears → hold
+		workable(1, 1),      // the gate closed → cycle 2
+		MilestoneSnapshot{}, // delivered
 	)
 	h.merges(1)
 
@@ -1658,8 +1920,8 @@ func TestMidRunGate_HoldsTheNextDispatch(t *testing.T) {
 func TestSettle_WithAStrayGateStillOpen(t *testing.T) {
 	h := newHarness(t)
 	h.milestoneIs(
-		MilestoneSnapshot{Work: 1, Total: 1},
-		MilestoneSnapshot{Work: 0, Gates: 1, Total: 1},
+		workable(1, 1),
+		gated(0, 1, 1),
 	)
 	h.merges(1)
 
@@ -1678,7 +1940,7 @@ func TestSettle_WithAStrayGateStillOpen(t *testing.T) {
 // the agent's cycle.
 func TestMergeSignalIsNotEvidence(t *testing.T) {
 	h := newHarness(t)
-	h.milestoneIs(MilestoneSnapshot{Work: 1, Total: 1})
+	h.milestoneIs(workable(1, 1))
 	h.mergesAt("") // ground truth: this cycle landed nothing
 	h.merges(3)    // three merge signals arrive anyway
 
@@ -1694,7 +1956,7 @@ func TestMergeSignalIsNotEvidence(t *testing.T) {
 // the re-poll settles it.
 func TestBuildTerminalSignalWakesTheBuildWait(t *testing.T) {
 	h := newHarness(t)
-	h.milestoneIs(MilestoneSnapshot{Work: 1, Total: 1}, MilestoneSnapshot{})
+	h.milestoneIs(workable(1, 1), MilestoneSnapshot{})
 	h.buildsAre(
 		CycleBuildState{Expected: 2, Settled: 1},
 		CycleBuildState{Expected: 2, Settled: 2},
@@ -1713,7 +1975,7 @@ func TestBuildTerminalSignalWakesTheBuildWait(t *testing.T) {
 // and a stored phase enum would lie mid-loop.
 func TestQueryRunStatus(t *testing.T) {
 	h := newHarness(t)
-	h.milestoneIs(MilestoneSnapshot{Work: 2, Total: 2}, MilestoneSnapshot{})
+	h.milestoneIs(workable(2, 2), MilestoneSnapshot{})
 
 	var midRun delivery.RunStatus
 	h.env.RegisterDelayedCallback(func() {
@@ -1760,7 +2022,7 @@ func errPermanentForTest() error {
 // moment the first Task lands.
 func TestPlanningPhase_MintsGatesThenPlansBeforeWorking(t *testing.T) {
 	h := newHarness(t)
-	h.milestoneIs(MilestoneSnapshot{Work: 1, Total: 1}, MilestoneSnapshot{})
+	h.milestoneIs(workable(1, 1), MilestoneSnapshot{})
 	h.merges(1)
 
 	h.runWith(RunInput{Kind: delivery.RunKindDev, Tag: "v3"})
@@ -1784,7 +2046,7 @@ func TestPlanningPhase_SkippedWhenTheRunOwnsNoVersion(t *testing.T) {
 	for _, kind := range []string{delivery.RunKindTask, delivery.RunKindValidation} {
 		t.Run(kind, func(t *testing.T) {
 			h := newHarness(t)
-			h.milestoneIs(MilestoneSnapshot{Work: 1, Total: 1}, MilestoneSnapshot{})
+			h.milestoneIs(workable(1, 1), MilestoneSnapshot{})
 			h.merges(1)
 
 			h.runWith(RunInput{Kind: kind}) // no Tag
@@ -1810,9 +2072,9 @@ func TestPlanningPhase_SkippedWhenTheRunOwnsNoVersion(t *testing.T) {
 func TestZeroCycleAdoption_ParksForTheLaggingIndexInsteadOfSettling(t *testing.T) {
 	h := newHarness(t)
 	h.milestoneIs(
-		MilestoneSnapshot{},                  // the index has not caught up yet
-		MilestoneSnapshot{Work: 1, Total: 1}, // the labelled issue appears
-		MilestoneSnapshot{},                  // worked, and now genuinely empty
+		MilestoneSnapshot{}, // the index has not caught up yet
+		workable(1, 1),      // the labelled issue appears
+		MilestoneSnapshot{}, // worked, and now genuinely empty
 	)
 	h.merges(1)
 	// The webhook that wakes the park once the issue is indexed.
@@ -1851,7 +2113,7 @@ func TestPlanningPhase_PermanentFailureSettlesPlanFailed(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newHarness(t)
-			h.milestoneIs(MilestoneSnapshot{Work: 1, Total: 1})
+			h.milestoneIs(workable(1, 1))
 			h.planIs(tc.gatesErr, tc.planEr)
 
 			h.runWith(RunInput{Kind: delivery.RunKindDev, Tag: "v3"})
@@ -1909,7 +2171,7 @@ func dedupeStates(states []string) []string {
 // rather than a cycle.
 func TestCancel_RecordedOnTheRunRowStopsTheRedispatch(t *testing.T) {
 	h := newHarness(t)
-	h.milestoneIs(MilestoneSnapshot{Work: 1, Total: 1})
+	h.milestoneIs(workable(1, 1))
 	h.factsAre(
 		// The boundary asks first, before anything is dispatched.
 		CycleFacts{CycleID: testCycleID},
@@ -1930,7 +2192,7 @@ func TestCancel_RecordedOnTheRunRowStopsTheRedispatch(t *testing.T) {
 // until it dispatched — which is precisely what it must never do.
 func TestCancel_RecordedBeforeTheFirstDispatchNeverDispatches(t *testing.T) {
 	h := newHarness(t)
-	h.milestoneIs(MilestoneSnapshot{Work: 1, Total: 1})
+	h.milestoneIs(workable(1, 1))
 	h.factsAre(CycleFacts{CancelRequested: true})
 
 	h.run(delivery.RunKindDev, 0)
@@ -1946,7 +2208,7 @@ func TestCancel_RecordedBeforeTheFirstDispatchNeverDispatches(t *testing.T) {
 // still costs its re-dispatch budget and still settles on redispatch-budget.
 func TestAgentDeath_WithNoCancelRecordedStillSpendsTheRedispatch(t *testing.T) {
 	h := newHarness(t)
-	h.milestoneIs(MilestoneSnapshot{Work: 1, Total: 1})
+	h.milestoneIs(workable(1, 1))
 	h.factsAre(CycleFacts{CycleID: testCycleID}) // never lands, never cancelled
 
 	h.run(delivery.RunKindDev, 0)

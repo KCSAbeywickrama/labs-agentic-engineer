@@ -1246,6 +1246,10 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 			Deploy:       deploymentService,
 			Deployments:  deploymentService,
 			DeployIssues: eventPlane,
+			// The halt: a failed run's leftovers are marked so the reconcile sweep
+			// does not restart them with fresh budgets. Same plane, same reason —
+			// the supervisor decides, the plane writes the issue.
+			Halter: eventPlane,
 			// The planning phase. These are the same two collaborators the build
 			// click used to drive in a detached goroutine; behind an activity they
 			// are durable across a restart and retried on a blip.

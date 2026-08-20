@@ -166,6 +166,18 @@ type MilestoneIssueCounts struct {
 	// OpenAgentWork: the validation task IS armed, it is simply worked by the
 	// validation loop rather than by a coding cycle.
 	OpenValidation int
+	// OpenValidationRepairs is every open issue carrying the `src/validation`
+	// SOURCE — the repair work a failed verdict filed, one issue per failed
+	// criterion.
+	//
+	// It is the only source counted here, and it is a SIGNAL rather than a
+	// population: nothing subtracts it, and it overlaps the working sets freely
+	// (a repair issue is an ordinary armed bug and is counted as one above).
+	// It exists because a bug-fix run has to know whether the defects it worked
+	// came from a verdict — that is what decides whether the version's validation
+	// task is reopened when the run drains its working set — and answering it
+	// from the counts is what keeps the cycle-boundary poll ONE round trip.
+	OpenValidationRepairs int
 }
 
 // OpenDevWork is the size of a DEV run's working set: armed issues that are not
@@ -188,9 +200,9 @@ func (c *MilestoneIssueCounts) OpenDevWork() int {
 // A bug-fix run works the DEPLOYED version, so planned work for the version
 // currently being built is deliberately not its business — subtracting it here
 // is what keeps two live runs on one repository from picking up each other's
-// issues.
-//
-//deadcode:keep not yet wired — the task loop is its consumer. It rides the same round trip as OpenDevWork and belongs beside it, because two working-set rules written apart are two rules that drift.
+// issues. It is also what makes a budget mean something: a dev run that gave up
+// leaves its planned work OPEN, and a task run that could continue it would be
+// the same work restarted with fresh budgets by a run that never planned it.
 func (c *MilestoneIssueCounts) OpenTaskWork() int {
 	if c == nil {
 		return 0

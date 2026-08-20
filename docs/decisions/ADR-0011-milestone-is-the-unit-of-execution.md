@@ -83,10 +83,13 @@ platform is written on the run's `kind`.
   dev run's empty verdict means "not judged yet" rather than "judged and fine".
   Why the two cannot share one workflow — different lifetimes, different failure
   classes — is [ADR-0020][adr20].
-- **Re-planning is supersede-on-next-build.** The next build closes the previous
-  version's still-open issues with a `Superseded by v<N+1>` comment and then the
-  milestone itself, and plans `v<N+1>` fresh from the new spec. Cancel abandons
-  an increment; the only way forward is the next build.
+- **Re-planning is supersede-on-next-build.** The next build empties the previous
+  version's milestone and then closes it, and plans `v<N+1>` fresh from the new
+  spec. A plan is replaced by a plan, so its `development` issues and its gates are
+  closed with a `Superseded by v<N+1>` comment; a DEFECT is not superseded by
+  anything, so its open `bug` issues are moved into the new milestone, which is why
+  that milestone is minted first. Cancel abandons an increment; the only way
+  forward is the next build.
 
 The mechanism — package shape, ports, and the full invariant list — is
 documented where it is enforced: [`internal/delivery/README.md`][delivery] (L2)

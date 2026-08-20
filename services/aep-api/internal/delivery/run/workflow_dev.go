@@ -45,6 +45,7 @@ func DevRunWorkflow(ctx workflow.Context, in RunInput) (RunResult, error) {
 		return RunResult{}, err
 	}
 	return l.work(ctx, bookends{
+		work:    devWorkingSet,
 		before:  l.fillMilestone,
 		onEmpty: l.deliverVersion,
 	})

@@ -38,6 +38,15 @@ var (
 	armed    = []string{LabelAgentWork} // a human armed it and classified nothing
 	incident = []string{KindBug, SrcIncident}
 	ledger   = []string(nil)
+	// repair is a failed verdict's work: an ordinary armed bug whose SOURCE says
+	// where it came from. Nothing routes on the source except one conditional —
+	// whether draining a bug-fix run's working set reopens the version's
+	// validation task.
+	repair = []string{LabelAgentWork, KindBug, SrcValidation}
+	// halted is work a failed run gave up on. Still armed and still of a workable
+	// kind, because the marker is the reconcile SWEEP's to read: a live run's
+	// cycle boundary never sees one (the run that halted them is terminal).
+	halted = []string{LabelAgentWork, KindBug, LabelHalted}
 )
 
 func TestKindOf(t *testing.T) {
@@ -162,11 +171,12 @@ func hostCounts(issues ...[]string) *sourcecontrol.MilestoneIssueCounts {
 		return n
 	}
 	return &sourcecontrol.MilestoneIssueCounts{
-		OpenProvision:   carrying(KindProvision),
-		OpenAgentWork:   carrying(LabelAgentWork),
-		OpenDevelopment: carrying(KindDevelopment),
-		OpenValidation:  carrying(KindValidation),
-		OpenTotal:       len(issues),
+		OpenProvision:         carrying(KindProvision),
+		OpenAgentWork:         carrying(LabelAgentWork),
+		OpenDevelopment:       carrying(KindDevelopment),
+		OpenValidation:        carrying(KindValidation),
+		OpenValidationRepairs: carrying(SrcValidation),
+		OpenTotal:             len(issues),
 	}
 }
 
@@ -192,11 +202,22 @@ func TestWorkingSetsAgreeWithTheHostCounts(t *testing.T) {
 		{armed, planned, bug},
 		{valid},
 		{gate, gate},
+		// The populations this phase added. A repair bug is an ORDINARY armed bug
+		// in both working sets — its source is provenance, counted on its own
+		// alias and subtracted from nothing — and a halted issue is still in the
+		// working set of a live run, because the mark is the reconcile sweep's to
+		// read and never the cycle boundary's.
+		{repair, planned},
+		{repair, repair, valid},
+		{halted, planned, bug},
+		// The milestone a dev run leaves when it gives up: planned work open, and
+		// nothing at all for a task run.
+		{planned, planned},
 		{},
 	}
 	for _, milestone := range milestones {
 		counts := hostCounts(milestone...)
-		var dev, task, gates int
+		var dev, task, gates, repairs int
 		for _, labels := range milestone {
 			if InDevWorkingSet(labels) {
 				dev++
@@ -207,6 +228,15 @@ func TestWorkingSetsAgreeWithTheHostCounts(t *testing.T) {
 			if IsDispatchGate(labels) {
 				gates++
 			}
+			if HasLabel(labels, SrcValidation) {
+				repairs++
+			}
+			// The narrowing that makes a budget mean something, asserted per issue
+			// rather than only in the totals: a dev run that gave up leaves its
+			// planned work open, and no task run may continue it.
+			if KindOf(labels) == KindDevelopment && InTaskWorkingSet(labels) {
+				t.Errorf("planned work is in a task run's working set (%v)", labels)
+			}
 		}
 		if got := counts.OpenDevWork(); got != dev {
 			t.Errorf("dev working set: counts say %d, labels say %d (milestone %v)", got, dev, milestone)
@@ -216,6 +246,44 @@ func TestWorkingSetsAgreeWithTheHostCounts(t *testing.T) {
 		}
 		if counts.OpenProvision != gates {
 			t.Errorf("gates: counts say %d, labels say %d (milestone %v)", counts.OpenProvision, gates, milestone)
+		}
+		if counts.OpenValidationRepairs != repairs {
+			t.Errorf("verdict-sourced repairs: counts say %d, labels say %d (milestone %v)",
+				counts.OpenValidationRepairs, repairs, milestone)
+		}
+	}
+}
+
+// TestInWorkingSet is the mapping from a run SPECIES to the population it works,
+// which is what the halt reads to decide whose leftovers it may mark.
+func TestInWorkingSet(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name   string
+		kind   string
+		labels []string
+		want   bool
+	}{
+		{"a build works planned work", RunKindDev, planned, true},
+		{"a build works its bugs", RunKindDev, bug, true},
+		// The narrowing this phase turned on. A dev run that gave up leaves planned
+		// work open; a bug-fix run works the DEPLOYED version and must never
+		// continue it with different budgets.
+		{"a bug-fix run never works planned work", RunKindTask, planned, false},
+		{"a bug-fix run works bugs", RunKindTask, bug, true},
+		{"a bug-fix run works conflicts", RunKindTask, conflict, true},
+		// Not a gap: a validation run polls no working set, and the repair issues a
+		// failed verdict files are deliberately an ordinary run's work. Halting them
+		// would break the repair chain.
+		{"a validation run works no issue at all", RunKindValidation, bug, false},
+		{"a validation run does not even work its own task", RunKindValidation, valid, false},
+		// A kind nobody recognises answers the empty set, because the consumer marks
+		// issues as abandoned: a wrong "yes" halts work nobody gave up on.
+		{"an unknown kind works nothing", "sideways", bug, false},
+	}
+	for _, c := range cases {
+		if got := InWorkingSet(c.kind, c.labels); got != c.want {
+			t.Errorf("InWorkingSet(%s) = %v, want %v", c.name, got, c.want)
 		}
 	}
 }

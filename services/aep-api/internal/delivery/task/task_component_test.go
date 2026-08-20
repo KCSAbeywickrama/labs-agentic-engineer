@@ -114,10 +114,14 @@ func (f *fakeIssues) AddLabels(_ context.Context, _, _ string, n int, labels []s
 }
 func (f *fakeIssues) RemoveLabel(context.Context, string, string, int, string) error { return nil }
 
-// CloseIssue and ReopenIssue complete delivery.IssueOps — the writer's port is
-// the domain's whole issue-write surface, and the plan path uses neither.
+// CloseIssue, ReopenIssue and SetIssueMilestone complete delivery.IssueOps — the
+// writer's port is the domain's whole issue-write surface, and the plan path uses
+// none of the three.
 func (f *fakeIssues) CloseIssue(context.Context, string, string, int, string) error { return nil }
 func (f *fakeIssues) ReopenIssue(context.Context, string, string, int) error        { return nil }
+func (f *fakeIssues) SetIssueMilestone(context.Context, string, string, int, int) error {
+	return nil
+}
 
 // writer wears the domain's issue-write surface over the fake, which is how the
 // plan tap mints.

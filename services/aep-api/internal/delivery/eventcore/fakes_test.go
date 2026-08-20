@@ -360,11 +360,12 @@ func hostCounts(issues ...[]string) *sourcecontrol.MilestoneIssueCounts {
 		return n
 	}
 	return &sourcecontrol.MilestoneIssueCounts{
-		OpenProvision:   carrying(delivery.KindProvision),
-		OpenAgentWork:   carrying(delivery.LabelAgentWork),
-		OpenDevelopment: carrying(delivery.KindDevelopment),
-		OpenValidation:  carrying(delivery.KindValidation),
-		OpenTotal:       len(issues),
+		OpenProvision:         carrying(delivery.KindProvision),
+		OpenAgentWork:         carrying(delivery.LabelAgentWork),
+		OpenDevelopment:       carrying(delivery.KindDevelopment),
+		OpenValidation:        carrying(delivery.KindValidation),
+		OpenValidationRepairs: carrying(delivery.SrcValidation),
+		OpenTotal:             len(issues),
 	}
 }
 
@@ -436,6 +437,23 @@ func (f *fakeIssues) MilestoneIssueCounts(_ context.Context, _, _ string, number
 func (f *fakeIssues) withOpenIssues(milestone int, issues ...[]string) *fakeIssues {
 	f.counts[milestone] = hostCounts(issues...)
 	f.seedOpenIssues(milestone, issues...)
+	return f
+}
+
+// withIssue puts ONE open issue with an explicit number and label set into the
+// milestone, and re-derives the milestone's counts from everything now in it.
+//
+// The explicit number is why it exists: a test that asserts WHICH issues were
+// commented on or labelled cannot use a seeder that allocates numbers itself.
+func (f *fakeIssues) withIssue(milestone, number int, labels ...string) *fakeIssues {
+	f.byMilestone[milestone] = append(f.byMilestone[milestone], sourcecontrol.IssueInfo{
+		Number: number, State: "open", Labels: labels,
+	})
+	sets := make([][]string, 0, len(f.byMilestone[milestone]))
+	for _, issue := range f.byMilestone[milestone] {
+		sets = append(sets, issue.Labels)
+	}
+	f.counts[milestone] = hostCounts(sets...)
 	return f
 }
 

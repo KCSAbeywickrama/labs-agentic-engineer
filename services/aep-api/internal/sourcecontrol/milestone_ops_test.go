@@ -281,7 +281,8 @@ func TestMilestoneIssueCounts_SendsAliasedQueryAndParsesCounts(t *testing.T) {
 			"allOpen":{"totalCount":9},
 			"agentWork":{"totalCount":5},
 			"development":{"totalCount":2},
-			"validation":{"totalCount":1}
+			"validation":{"totalCount":1},
+			"srcValidation":{"totalCount":1}
 		}}}}`)
 	svc := newIssueSvcOnStub(t, stub)
 
@@ -292,6 +293,7 @@ func TestMilestoneIssueCounts_SendsAliasedQueryAndParsesCounts(t *testing.T) {
 	want := sourcecontrol.MilestoneIssueCounts{
 		OpenProvision: 1, OpenTotal: 9,
 		OpenAgentWork: 5, OpenDevelopment: 2, OpenValidation: 1,
+		OpenValidationRepairs: 1,
 	}
 	if *counts != want {
 		t.Fatalf("counts = %+v, want %+v", *counts, want)
@@ -319,11 +321,12 @@ func TestMilestoneIssueCounts_SendsAliasedQueryAndParsesCounts(t *testing.T) {
 		t.Fatalf("variables = %+v, want {acme widgets 9}", payload.Variables)
 	}
 	for _, want := range []string{
-		`provision:   issues(states: [OPEN], labels: ["provision"], first: 1)`,
-		`allOpen:     issues(states: [OPEN], first: 1)`,
-		`agentWork:   issues(states: [OPEN], labels: ["aep"], first: 1)`,
-		`development: issues(states: [OPEN], labels: ["development"], first: 1)`,
-		`validation:  issues(states: [OPEN], labels: ["validation"], first: 1)`,
+		`provision:     issues(states: [OPEN], labels: ["provision"], first: 1)`,
+		`allOpen:       issues(states: [OPEN], first: 1)`,
+		`agentWork:     issues(states: [OPEN], labels: ["aep"], first: 1)`,
+		`development:   issues(states: [OPEN], labels: ["development"], first: 1)`,
+		`validation:    issues(states: [OPEN], labels: ["validation"], first: 1)`,
+		`srcValidation: issues(states: [OPEN], labels: ["src/validation"], first: 1)`,
 		"milestone(number: $m)",
 	} {
 		if !strings.Contains(payload.Query, want) {
@@ -333,12 +336,12 @@ func TestMilestoneIssueCounts_SendsAliasedQueryAndParsesCounts(t *testing.T) {
 	if strings.Contains(payload.Query, "open_issues") || strings.Contains(payload.Query, "openIssueCount") {
 		t.Fatalf("query reads a PR-contaminated count:\n%s", payload.Query)
 	}
-	// Exactly five aliased populations, one label each. A sixth would mean
+	// Exactly six aliased populations, ONE LABEL EACH. A seventh would mean
 	// somebody re-added a COMPOSITE alias — the union the old inclusion-exclusion
 	// arithmetic needed. Any alias listing more than one label is a wider union
 	// than its name claims, and it silently empties a working set.
-	if got := strings.Count(payload.Query, "issues(states: [OPEN]"); got != 5 {
-		t.Fatalf("query has %d aliased populations, want exactly 5:\n%s", got, payload.Query)
+	if got := strings.Count(payload.Query, "issues(states: [OPEN]"); got != 6 {
+		t.Fatalf("query has %d aliased populations, want exactly 6:\n%s", got, payload.Query)
 	}
 	if got := strings.Count(payload.Query, `", "`); got != 0 {
 		t.Fatalf("an alias lists more than one label (%d multi-label alias separators):\n%s", got, payload.Query)
@@ -357,6 +360,11 @@ const (
 	labelBug   = "bug"
 	labelGate  = "provision"
 	labelValid = "validation"
+	// srcValidation is the SOURCE a failed verdict stamps on the repair work it
+	// files. It is counted like a kind and subtracted like nothing: the bug-fix
+	// loop reads it to decide whether draining its working set reopens the
+	// version's validation task, and no working set is defined by it.
+	labelSrcValid = "src/validation"
 )
 
 // hostCounts answers the populations the REAL host would report for a milestone
@@ -384,11 +392,12 @@ func hostCounts(issues ...[]string) *sourcecontrol.MilestoneIssueCounts {
 		return n
 	}
 	return &sourcecontrol.MilestoneIssueCounts{
-		OpenProvision:   carrying(labelGate),
-		OpenAgentWork:   carrying(labelWork),
-		OpenDevelopment: carrying(labelDev),
-		OpenValidation:  carrying(labelValid),
-		OpenTotal:       len(issues),
+		OpenProvision:         carrying(labelGate),
+		OpenAgentWork:         carrying(labelWork),
+		OpenDevelopment:       carrying(labelDev),
+		OpenValidation:        carrying(labelValid),
+		OpenValidationRepairs: carrying(labelSrcValid),
+		OpenTotal:             len(issues),
 	}
 }
 
@@ -407,6 +416,9 @@ func TestMilestoneIssueCounts_WorkingSetArithmetic(t *testing.T) {
 		valid   = []string{labelWork, labelValid}
 		armed   = []string{labelWork} // armed by a human, not yet classified
 		ledger  = []string(nil)
+		// A failed verdict's repair work: an ordinary armed bug whose SOURCE
+		// records where it came from.
+		repair = []string{labelWork, labelBug, labelSrcValid}
 	)
 	cases := []struct {
 		name     string
@@ -453,6 +465,13 @@ func TestMilestoneIssueCounts_WorkingSetArithmetic(t *testing.T) {
 			"an inconsistent host cannot produce negative work",
 			&sourcecontrol.MilestoneIssueCounts{OpenAgentWork: 0, OpenValidation: 2, OpenDevelopment: 1},
 			0, 0,
+		},
+		{
+			// A source is not a kind and NOTHING subtracts it: a repair bug is an
+			// ordinary bug in both working sets, counted once. Reading the source as
+			// an exclusion would empty the very working set the repair created.
+			"verdict-sourced repair work is ordinary work",
+			hostCounts(repair, repair, planned), 3, 2,
 		},
 		{"an unknown milestone has no work", nil, 0, 0},
 	}

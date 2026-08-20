@@ -289,6 +289,22 @@ type DeploymentReader interface {
 	DeploymentState(ctx context.Context, orgID, projectID string, components []string) ([]delivery.ComponentDeploy, error)
 }
 
+// WorkHalter marks the working-set issues a FAILED run could not finish, so the
+// reconcile sweep does not restart them. Satisfied by the event plane, reached
+// through this port for the same reason DeployIssueMinter is: the supervisor
+// observes, the plane owns every issue write, its labels and its prose.
+//
+// It takes the RUN's kind because the working set is per species, and the halt
+// must never reach outside the population this run was responsible for — a dev
+// run halting a bug a concurrent task run is working would abandon live work.
+//
+// Returns the issues it marked. The supervisor logs them and nothing else: the
+// halt is a fact about the milestone, not about the run row.
+type WorkHalter interface {
+	HaltUnfinishedWork(ctx context.Context, orgID, projectID string, milestoneNumber int,
+		runKind, reason string) (halted []int, err error)
+}
+
 // DeployIssueMinter files the fix work for components whose deployment did not
 // come up. Satisfied by the event plane, reached through this port so the
 // supervisor still writes no issue of its own.

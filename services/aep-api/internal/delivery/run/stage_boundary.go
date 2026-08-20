@@ -183,6 +183,26 @@ type loop struct {
 	// chain stops instead of spending the rest of the allowance on the same
 	// answer.
 	lastReportDigest string
+
+	// workedValidationRepair records that some boundary poll saw open
+	// `src/validation` work in this milestone. It LATCHES: set on the first poll
+	// that sees any, never cleared.
+	//
+	// It is how a task run knows, at the moment its working set empties, that
+	// what it just finished came from a failed verdict — and therefore that the
+	// version's validation task must be reopened so the same oracle judges the
+	// repair. Everything else about a `src/*` source is provenance; this is the
+	// one place one routes anything.
+	//
+	// Latching is not laziness, it is the only form that can work. By the time the
+	// working set is empty the repair issues are CLOSED, so a poll taken then can
+	// no longer see them; and asking GitHub "does a closed src/validation issue
+	// exist" instead would be true forever after the first repair, which reopens
+	// the task after every later run — validation closes it, the next task run
+	// reopens it, without end. A flag over the polls this run actually took is
+	// deterministic workflow state, replays identically, and costs no round trip
+	// because the count rides the poll that was already happening.
+	workedValidationRepair bool
 }
 
 func newLoop(ctx workflow.Context, in RunInput) *loop {
@@ -231,6 +251,16 @@ func newLoop(ctx workflow.Context, in RunInput) *loop {
 // A nil before is "start working immediately". onEmpty is required: a loop with
 // nothing to do at an empty working set could only spin.
 type bookends struct {
+	// work selects WHICH working set this run polls out of the snapshot, and it is
+	// the most consequential of the three: it decides what a dispatch is spent on
+	// and what an empty milestone means. A dev run takes DevWork, a task run takes
+	// TaskWork — which excludes planned work, because a build that gave up leaves
+	// its plan open and a bug-fix run must not continue it with different budgets.
+	//
+	// Nil reads as the DEV working set, which is the wider of the two: a run that
+	// sees work it need not do stalls visibly, where a run blind to work settles a
+	// version nobody built.
+	work func(MilestoneSnapshot) int
 	// before runs once, before the first boundary poll. settled=true means it
 	// ended the run itself and res is the outcome.
 	before func(ctx workflow.Context) (settled bool, res RunResult, err error)
@@ -244,6 +274,9 @@ type bookends struct {
 // the milestone itself — and every decision below is made from that poll and
 // the workflow's own counters. No branch here trusts a signal's payload.
 func (l *loop) work(ctx workflow.Context, ends bookends) (RunResult, error) {
+	if ends.work == nil {
+		ends.work = devWorkingSet
+	}
 	if ends.before != nil {
 		if settled, res, err := ends.before(ctx); settled || err != nil {
 			return res, err
@@ -262,11 +295,18 @@ func (l *loop) work(ctx workflow.Context, ends bookends) (RunResult, error) {
 		if err != nil {
 			return l.result(), err
 		}
+		// Latch BEFORE the settle branch: the poll that finds the working set
+		// empty is by definition the one that can no longer see the repair issues
+		// this run closed.
+		if snap.ValidationRepairs > 0 {
+			l.workedValidationRepair = true
+		}
+		work := ends.work(snap)
 
 		// SETTLE comes first, before the gate check: a stray gate holds dispatch,
 		// and with an empty working set there is nothing to dispatch, so it holds
 		// nothing.
-		if snap.Work == 0 {
+		if work == 0 {
 			settled, res, err := l.onEmptyWorkingSet(ctx, ends)
 			if settled || err != nil {
 				return res, err
@@ -274,11 +314,11 @@ func (l *loop) work(ctx workflow.Context, ends bookends) (RunResult, error) {
 			continue
 		}
 
-		if noProgress(l.lastResult, l.workBefore, snap.Work) {
+		if noProgress(l.lastResult, l.workBefore, work) {
 			return l.settle(ctx, delivery.RunStateFailed, delivery.RunReasonNoProgress)
 		}
 
-		if !Dispatchable(snap) {
+		if !Dispatchable(snap, work) {
 			// An open gate is a deliberate human brake. Park in the unbounded wait
 			// — cancel is its only expiry — and re-derive when anything happens.
 			cancelled, perr := l.park(ctx)
@@ -296,7 +336,7 @@ func (l *loop) work(ctx workflow.Context, ends bookends) (RunResult, error) {
 			return l.settle(ctx, delivery.RunStateFailed, reason)
 		}
 
-		l.workBefore = snap.Work
+		l.workBefore = work
 		res, err := l.runCycle(ctx, kind, noAnchorIssue)
 		if err != nil {
 			return l.result(), err
@@ -447,6 +487,11 @@ func (l *loop) settle(ctx workflow.Context, state, reason string) (RunResult, er
 	// dropped in favour of that best-effort reap.
 	if state == delivery.RunStateSucceeded {
 		if err := l.closeMilestone(ctx); err != nil {
+			return l.result(), err
+		}
+	}
+	if state == delivery.RunStateFailed {
+		if err := l.haltUnfinishedWork(ctx, reason); err != nil {
 			return l.result(), err
 		}
 	}
@@ -620,6 +665,58 @@ func (l *loop) bump(ctx workflow.Context, counter delivery.RunBudget) error {
 
 func (l *loop) closeMilestone(ctx workflow.Context) error {
 	return workflow.ExecuteActivity(activityCtx(ctx), (*Activities).CloseMilestone, l.milestoneRef()).Get(ctx, nil)
+}
+
+// haltUnfinishedWork marks the issues THIS run was working and could not finish,
+// so the reconcile sweep does not immediately restart them.
+//
+// It runs on every FAILED settle, in every workflow, and it is what makes a
+// budget mean anything at all. A failed run leaves its working set OPEN — the
+// milestone stays open too, because the way forward is more work in the same
+// version — and the sweep's rule is "open work of this kind, no live run, start
+// one". So without this the run that just exhausted `fix-chain-budget` is
+// replaced within a tick by a fresh run with a fresh budget, on the same issues,
+// forever. Every budget in the system is defeated at once, and the symptom is an
+// unexplained cloud bill rather than a test failure.
+//
+// It covers the recovery issues the run filed ITSELF — a deploy fix minted at the
+// last boundary is in the working set like any other — for the same reason: those
+// are precisely the issues a restarted run would pick up first.
+//
+// A VALIDATION run halts nothing, and that is a decision rather than an omission
+// (delivery.InWorkingSet answers the empty set for its kind). It polls no working
+// set: its own work is the version's validation task, which it closes on every
+// ending, and the repair issues a failed verdict files are deliberately somebody
+// else's work — an ordinary task run's — as is the conflict issue the event plane
+// mints for a validation pull request that will not rebase. Halting those would
+// break the repair chain this phase exists to close, so the activity is skipped
+// outright rather than called and asked to do nothing.
+//
+// Best-effort in spirit but NOT in error handling: an activity failure here
+// propagates, because the halt is under the same unbounded retry policy as every
+// other write and a stall is preferable to a settle that silently re-arms the
+// sweep. The label is cleared by a rebuild, or by a person removing it.
+func (l *loop) haltUnfinishedWork(ctx workflow.Context, reason string) error {
+	if l.kind() == delivery.RunKindValidation {
+		return nil
+	}
+	var halted []int
+	err := workflow.ExecuteActivity(activityCtx(ctx), (*Activities).HaltUnfinishedWork,
+		HaltWorkInput{
+			OrgID:           l.in.OrgID,
+			ProjectID:       l.in.ProjectID,
+			MilestoneNumber: l.in.MilestoneNumber,
+			Kind:            l.kind(),
+			Reason:          reason,
+		}).Get(ctx, &halted)
+	if err != nil {
+		return err
+	}
+	if len(halted) > 0 {
+		workflow.GetLogger(ctx).Info("run failed; halted the work it could not finish",
+			"milestone", l.in.MilestoneNumber, "reason", reason, "issues", halted)
+	}
+	return nil
 }
 
 // mintDeployFixIssues files one issue per component that did not come up, so the

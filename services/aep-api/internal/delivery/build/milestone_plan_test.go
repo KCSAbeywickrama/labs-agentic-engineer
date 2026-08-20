@@ -403,6 +403,124 @@ func TestSupersede_ClosesOpenWorkThenGatesThenTheMilestone(t *testing.T) {
 	}
 }
 
+// TestSupersede_CarriesOpenBugsForwardAndClosesThePlan is the rule a version
+// change does NOT get to override: a plan is replaced by a plan, but a defect is
+// not superseded by anything. It is still broken, and the new version is what
+// will ship the fix.
+//
+// A conflict issue is closed rather than moved even though it is recovery work,
+// because it names a BRANCH of the version being superseded — a branch that is
+// about to be irrelevant, and that nothing in the new version will rebase.
+//
+// Moving is not ARMING: the unadopted incident below arrives in the new milestone
+// still unarmed and still ledger-only, so carrying a human's defect forward can
+// never turn it into agent work nobody asked for.
+func TestSupersede_CarriesOpenBugsForwardAndClosesThePlan(t *testing.T) {
+	h := newPlanHarness(t)
+	h.runs.rows = []delivery.MilestoneRun{
+		{MilestoneNumber: 6, MilestoneTitle: "v3", Kind: delivery.RunKindDev, Origin: delivery.RunOriginSpecBuild, State: delivery.RunStateFailed},
+	}
+	h.stub.OnFunc(http.MethodGet, "/repos/acme/widgets/issues", jsonPage(`[
+		{"number":41,"title":"Implement orders","state":"open","labels":[{"name":"aep"},{"name":"development"}]},
+		{"number":42,"title":"Fix the failing build for orders","state":"open","labels":[{"name":"aep"},{"name":"bug"},{"name":"src/build"}]},
+		{"number":43,"title":"Rebase aep/m6-1","state":"open","labels":[{"name":"aep"},{"name":"conflict"}]},
+		{"number":44,"title":"Provision orders-db","state":"open","labels":[{"name":"provision"}]},
+		{"number":45,"title":"Main went red","state":"open","labels":[{"name":"bug"},{"name":"src/incident"}]},
+		{"number":46,"title":"Fix checkout","state":"open","labels":[{"name":"aep"},{"name":"bug"},{"name":"aep:halted"}]}
+	]`))
+	for _, n := range []int{41, 42, 43, 44, 45, 46} {
+		h.stub.On(http.MethodPost, fmt.Sprintf("/repos/acme/widgets/issues/%d/comments", n), http.StatusCreated, `{}`)
+		h.stub.On(http.MethodPatch, fmt.Sprintf("/repos/acme/widgets/issues/%d", n), http.StatusOK, `{}`)
+	}
+	h.stub.On(http.MethodDelete, "/repos/acme/widgets/issues/46/labels/aep:halted", http.StatusOK, `[]`)
+	h.stub.On(http.MethodPatch, "/repos/acme/widgets/milestones/6", http.StatusOK, `{"number":6,"state":"closed"}`)
+	h.stub.OnFunc(http.MethodGet, "/repos/acme/widgets/milestones", jsonPage(`[]`))
+	h.stub.On(http.MethodPost, "/repos/acme/widgets/milestones", http.StatusCreated, `{"number":9,"title":"v4"}`)
+
+	if _, err := h.svc.claimVersion(context.Background(), "acme", "shop", spec.BuildScope{Tag: "v4"}); err != nil {
+		t.Fatalf("claimVersion: %v", err)
+	}
+
+	// The bugs — armed or not, halted or not — are MOVED into v4's milestone, and
+	// never closed.
+	for _, n := range []int{42, 45, 46} {
+		writes := requestsTo(h.stub, http.MethodPatch, fmt.Sprintf("/repos/acme/widgets/issues/%d", n))
+		if len(writes) != 1 {
+			t.Fatalf("issue %d: %d PATCHes, want exactly the move", n, len(writes))
+		}
+		if !strings.Contains(writes[0].Body, `"milestone":9`) {
+			t.Errorf("issue %d PATCH = %s, want a move into milestone 9", n, writes[0].Body)
+		}
+		if strings.Contains(writes[0].Body, `"state":"closed"`) {
+			t.Errorf("issue %d was closed; a defect is not superseded by a new plan", n)
+		}
+	}
+	// The plan, its gate and the conflict are CLOSED.
+	for _, n := range []int{41, 43, 44} {
+		writes := requestsTo(h.stub, http.MethodPatch, fmt.Sprintf("/repos/acme/widgets/issues/%d", n))
+		if len(writes) != 1 || !strings.Contains(writes[0].Body, `"state":"closed"`) {
+			t.Errorf("issue %d: PATCHes = %+v, want exactly one close", n, writes)
+		}
+		if strings.Contains(writes[0].Body, `"milestone"`) {
+			t.Errorf("issue %d was carried forward; only a bug is", n)
+		}
+	}
+	// A rebuild is what CLEARS the halt: `aep:halted` says a run gave up and the
+	// reconcile sweep must not restart it, so carrying it into the new version
+	// would hide the bug from the sweep for the rest of the project's life.
+	if n := countRequests(t, h.stub, http.MethodDelete, "/repos/acme/widgets/issues/46/labels/aep:halted"); n != 1 {
+		t.Errorf("the halt on the carried-forward bug was cleared %d times, want 1", n)
+	}
+	// And it is not spent on the bugs that never carried it.
+	for _, n := range []int{42, 45} {
+		if len(requestsTo(h.stub, http.MethodDelete, fmt.Sprintf("/repos/acme/widgets/issues/%d/labels/aep:halted", n))) != 0 {
+			t.Errorf("issue %d was never halted; clearing it costs a request for nothing", n)
+		}
+	}
+	// The new milestone exists BEFORE the move — that ordering is the whole reason
+	// claimVersion mints it first — and supersede never touches it.
+	if n := countRequests(t, h.stub, http.MethodPatch, "/repos/acme/widgets/milestones/9"); n != 0 {
+		t.Errorf("supersede wrote to the milestone being cut (%d PATCHes)", n)
+	}
+	if n := countRequests(t, h.stub, http.MethodPatch, "/repos/acme/widgets/milestones/6"); n != 1 {
+		t.Errorf("PATCH /milestones/6 ×%d, want exactly 1 (the close)", n)
+	}
+}
+
+// This is what keeps the reconcile sweep sound. The sweep starts a run for any
+// known milestone holding open work and no live run, so a superseded milestone
+// must hold none — and after the carry-forward it holds none for a DIFFERENT
+// reason than before: the plan is closed and the bugs have LEFT.
+func TestSupersede_LeavesTheOldMilestoneWithNothingToRestart(t *testing.T) {
+	h := newPlanHarness(t)
+	h.runs.rows = []delivery.MilestoneRun{
+		{MilestoneNumber: 6, MilestoneTitle: "v3", Kind: delivery.RunKindDev, Origin: delivery.RunOriginSpecBuild, State: delivery.RunStateFailed},
+	}
+	h.stub.OnFunc(http.MethodGet, "/repos/acme/widgets/issues", jsonPage(`[
+		{"number":41,"title":"Implement orders","state":"open","labels":[{"name":"aep"},{"name":"development"}]},
+		{"number":42,"title":"Fix orders","state":"open","labels":[{"name":"aep"},{"name":"bug"},{"name":"src/build"}]}
+	]`))
+	for _, n := range []int{41, 42} {
+		h.stub.On(http.MethodPost, fmt.Sprintf("/repos/acme/widgets/issues/%d/comments", n), http.StatusCreated, `{}`)
+		h.stub.On(http.MethodPatch, fmt.Sprintf("/repos/acme/widgets/issues/%d", n), http.StatusOK, `{}`)
+	}
+	h.stub.On(http.MethodPatch, "/repos/acme/widgets/milestones/6", http.StatusOK, `{}`)
+	h.stub.OnFunc(http.MethodGet, "/repos/acme/widgets/milestones", jsonPage(`[]`))
+	h.stub.On(http.MethodPost, "/repos/acme/widgets/milestones", http.StatusCreated, `{"number":9,"title":"v4"}`)
+
+	if _, err := h.svc.claimVersion(context.Background(), "acme", "shop", spec.BuildScope{Tag: "v4"}); err != nil {
+		t.Fatalf("claimVersion: %v", err)
+	}
+
+	// Every open issue was either closed or moved out. Nothing was left behind for
+	// the sweep to find.
+	for _, n := range []int{41, 42} {
+		if len(requestsTo(h.stub, http.MethodPatch, fmt.Sprintf("/repos/acme/widgets/issues/%d", n))) != 1 {
+			t.Errorf("issue %d was neither closed nor carried forward", n)
+		}
+	}
+}
+
 // An unchanged spec re-build returns the SAME tag. Superseding then would close
 // the version being rebuilt — the run rows are keyed by number but the guard is
 // the recorded title, which is a platform-side value, not a GitHub read.

@@ -26,6 +26,13 @@
 // through delivery.IssueWriter (Ports.Writer), the domain's one issue-write
 // surface, so this package holds no private opinion about labels or dedupe.
 //
+// Two writes here are triggered from OUTSIDE — by the supervisor, through a port,
+// because only the run knows the fact behind them — while the prose, the labels
+// and the dedupe stay this package's: the deploy-fix mint (a ReleaseBinding that
+// never became Ready delivers no webhook) and the HALT of a failed run's
+// unfinished work (halt.go), without which the reconcile sweep restarts what a
+// run just gave up on, with fresh budgets, forever.
+//
 // # No Temporal
 //
 // This package imports no workflow engine, deliberately. The dependency

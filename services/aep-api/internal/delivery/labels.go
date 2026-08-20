@@ -111,11 +111,20 @@ const (
 	// LabelHalted ("aep:halted") marks an issue a failed settle could not
 	// finish, alongside a comment naming the terminal reason. The reconcile
 	// sweep skips halted issues so a run that already gave up is not restarted
-	// on the same work forever.
+	// on the same work forever, with fresh budgets, which is what would defeat
+	// every budget in the platform at once.
 	//
 	// The sweep applies it as a DECISION over issues it already fetched, never
 	// as a query filter: "carries aep AND halted" is an intersection, and the
-	// host's GraphQL label argument is a union that cannot express one.
+	// host's GraphQL label argument is a union that cannot express one. It
+	// deliberately does not reach the cycle-boundary counts: a halted issue in a
+	// LIVE run's milestone is a contradiction, because the run that halted them
+	// is terminal by construction.
+	//
+	// Two things clear it, and both are somebody DECIDING the work is worth
+	// another attempt — which is the decision the sweep must not make on its own:
+	// a person removing the label, and the next build, which strips it from the
+	// bugs it carries forward into the new version's milestone.
 	LabelHalted = "aep:halted"
 )
 
@@ -164,7 +173,14 @@ func KindOf(labels []string) string {
 // bug that reached the milestone without one came from a human — which is
 // exactly what SrcUser says.
 //
-//deadcode:keep not yet wired — the validation task's reopen rule is its consumer; the source vocabulary is read in one place or not at all.
+// Nothing ROUTES on the answer. A source is provenance: it tells a human, and a
+// coding agent reading the issue, who found the defect. The one place a source
+// changes a platform decision is the task run's reopen rule, and that one reads
+// the milestone's `src/validation` COUNT at the cycle boundary rather than each
+// issue's labels — the boundary poll is the loop's hottest read and stays one
+// round trip. So this is the vocabulary's single reader for everything else.
+//
+//deadcode:keep not yet called — the source vocabulary is read in one place or not at all, and this is that place; the routing rule that needs it reads a count instead.
 func SourceOf(labels []string) string {
 	for _, src := range []string{SrcIncident, SrcValidation, SrcBuild, SrcDeploy, SrcUser} {
 		if HasLabel(labels, src) {
@@ -219,10 +235,20 @@ func InDevWorkingSet(labels []string) bool {
 }
 
 // InTaskWorkingSet reports whether an issue belongs to a TASK run's working set:
-// armed, and a defect or a conflict. NEVER planned work — a bug-fix run works
-// the deployed version, and planned work belongs to the version being built.
+// armed, and a defect or a conflict. NEVER planned work.
 //
-//deadcode:keep not yet wired — the task loop is its consumer. It sits beside InDevWorkingSet because two working-set rules written apart are two rules that drift.
+// The exclusion of `development` is the whole point of the predicate, and it is
+// not tidiness. Planned work is DEV-workflow's alone: a dev run owns the version
+// and holds the project's build mutex, so leftover planned issues from a build
+// that gave up must wait for another build rather than be continued by a run
+// that never planned them and carries different budgets. A bug-fix run works the
+// version already DEPLOYED; the planned work in front of it belongs to the
+// version still being built.
+//
+// It sits beside InDevWorkingSet because two working-set rules written apart are
+// two rules that drift, and it is checked against
+// sourcecontrol.MilestoneIssueCounts.OpenTaskWork — the same rule as a COUNT —
+// by TestWorkingSetsAgreeWithTheHostCounts.
 func InTaskWorkingSet(labels []string) bool {
 	if !HasLabel(labels, LabelAgentWork) {
 		return false
@@ -230,6 +256,32 @@ func InTaskWorkingSet(labels []string) bool {
 	switch workKindOf(labels) {
 	case KindBug, KindConflict:
 		return true
+	default:
+		return false
+	}
+}
+
+// InWorkingSet reports whether an issue is in the working set of a run of this
+// KIND — the one place the mapping from a run species to the population it works
+// is written.
+//
+// A `validation` run answers false for everything, and that is a statement
+// rather than a gap: it polls no working set at all (its work is the version's
+// validation task, which it closes on every ending), and the repair issues a
+// failed verdict files are deliberately somebody else's work — an ordinary task
+// run's — so nothing a validation run leaves behind is unfinished work OF ITS
+// OWN. The halt that stamps `aep:halted` on a failed run's leftovers reads this,
+// which is why the distinction has to be stated here and not inferred.
+//
+// An unrecognised kind also answers false. The safe direction for THIS predicate
+// is the empty set: its consumer marks issues as abandoned, so a wrong "yes"
+// halts work nobody gave up on.
+func InWorkingSet(runKind string, labels []string) bool {
+	switch runKind {
+	case RunKindDev:
+		return InDevWorkingSet(labels)
+	case RunKindTask:
+		return InTaskWorkingSet(labels)
 	default:
 		return false
 	}

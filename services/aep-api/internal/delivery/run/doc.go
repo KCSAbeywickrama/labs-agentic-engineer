@@ -39,17 +39,59 @@
 //	 │  all green, open issues remain ─────────────► next cycle (re-WAIT)    │
 //	 │  red after the one automatic re-trigger ─► FIX issue ─► next cycle    │
 //	 │  merge conflict ─────────────────────────► CONFLICT issue ─► next     │
-//	 └─ working set empty (armed, kind ∈ development/bug/conflict) ──► the run's
-//	    own BOOKEND ──► settle
+//	 └─ working set empty ──► the run's own BOOKEND ──► settle
 //	    budgets exhausted / no progress / cancel ─► failed | blocked | cancelled
 //
 // They are the SAME loop with different bookends — one `bookends` value, never
 // two cycle loops that drift apart:
 //
-//	dev   before:  provisionGates → planTasks (it owns the version it is filling)
+//	dev   work:    DevWork  — armed, kind ∈ development/bug/conflict
+//	      before:  provisionGates → planTasks (it owns the version it is filling)
 //	      onEmpty: mint the version's validation task → settle succeeded
-//	task  before:  nothing (the milestone was filled by the build that shipped it)
-//	      onEmpty: settle succeeded
+//	task  work:    TaskWork — armed, kind ∈ bug/conflict, NEVER development
+//	      before:  nothing (the milestone was filled by the build that shipped it)
+//	      onEmpty: reopen the validation task IFF it worked a `src/validation`
+//	               bug → settle succeeded
+//
+// The WORKING SET is the third bookend and the most consequential: it decides
+// what a dispatch is spent on and what an empty milestone means. Planned work is
+// dev-workflow's alone, because a dev run owns the version and holds the build
+// mutex — so planned issues a build gave up on must wait for another build rather
+// than be continued by a run that never planned them and carries different
+// budgets. Both counts ride ONE boundary poll (the host returns them in one
+// GraphQL call), so answering both costs nothing.
+//
+// # The repair chain closes
+//
+// A failed verdict files one bug per failed criterion, `bug` + `src/validation`.
+// An ordinary task run works them, and when its working set drains it REOPENS the
+// version's validation task — so the reconcile sweep starts another validation
+// run and the SAME oracle judges the repair. Bounded by the version's attempt
+// allowance and by the identical-digest rule, both of which live in the validation
+// workflow.
+//
+// That single conditional is the ONLY place a `src/*` source routes anything;
+// everywhere else a source is provenance. An incident or user fix deploys and the
+// standing verdict holds: an incident is not priced like a release. The
+// attribution is a LATCHED flag over the run's own polls, never a settle-time
+// read — by then the repair issues are closed, and asking "does a CLOSED
+// src/validation issue exist" is true forever after the first repair, which would
+// reopen the task after every later run without end.
+//
+// # A failed run halts the work it could not finish
+//
+// Every FAILED settle stamps `aep:halted` and a comment naming the terminal
+// reason on each working-set issue the run could not finish — the recovery bugs it
+// filed itself included. The reconcile sweep skips halted issues.
+//
+// Without it every budget in the platform is defeated: a failed run leaves its
+// working set OPEN (the milestone stays open, because the way forward is more work
+// in the same version), and the sweep's trigger is "open work of this kind, no
+// live run, start one" — so the run that just gave up is replaced within a tick by
+// a fresh one with fresh budgets, forever. The mark is cleared by a rebuild or by
+// a person removing the label. A VALIDATION run halts nothing: its own work is the
+// task it closes on every ending, and the repair and conflict issues it leaves
+// behind are deliberately a task run's work.
 //
 // A dev run therefore **settles at deployed-green having minted the validation
 // task, and never validates**. Its verdict column stays EMPTY, which is the
@@ -111,7 +153,7 @@
 //	stage_deploy.go          plan waves · promote · await Ready · converge
 //	stage_boundary.go        the shared loop · poll · dispatchable? · budgets · park
 //	workflow_dev.go          gates + plan + boundary loop + mint the validation task
-//	workflow_task.go         boundary loop with empty bookends
+//	workflow_task.go         boundary loop + reopen the validation task
 //	workflow_validation.go   one agent stage + verdict + repair issues + close
 //	register.go              RegisterWorkflow per workflow, one RegisterActivity
 //	worker.go                one task queue, one worker

@@ -92,9 +92,17 @@ Sub-packages were considered and rejected: `internal/arch` gives siblings a blan
 layer concept, and second-level packages are unchecked in both directions — so sub-packages would be
 *less* protected than files.
 
-**Dev and task are the same loop with different bookends** — one `bookends{before, onEmpty}` value, not
-two cycle loops that drift apart. Every rule that makes the loop safe is therefore one implementation:
+**Dev and task are the same loop with different bookends** — one `bookends{work, before, onEmpty}` value,
+not two cycle loops that drift apart. Every rule that makes the loop safe is therefore one implementation:
 a fix applied to a defect run cannot silently miss a release.
+
+The `work` bookend is the WORKING SET, and it is the most consequential of the three because it decides
+what a dispatch is spent on and what an empty milestone means. A dev run works `development` + `bug` +
+`conflict`; a task run works `bug` + `conflict` and **never planned work**. A dev run owns the version and
+holds the project's build mutex, so planned issues left open by a build that gave up must wait for another
+build — not be continued by a run that never planned them, works the DEPLOYED version instead of the one
+being built, and carries different budgets. Both counts ride ONE boundary poll, because the host returns
+every population in the same GraphQL response.
 
 ### The validation workflow does not share the cycle loop at all
 
@@ -155,6 +163,31 @@ argument cannot count — the same shape, and the same reason, as the auto-merge
 per known milestone per pass replaces one GraphQL call; the cycle-boundary poll keeps its counts,
 because that read runs at every boundary and is the loop's hottest.
 
+### A failed run must halt its own leftovers
+
+The sweep's trigger is "open work of this kind on a milestone with no live run", and a run that exhausts a
+budget settles `failed` leaving that work OPEN — the milestone stays open too, because the way forward from
+a failed increment is more work in the same version. The sweep cannot tell "given up on" from "not
+started", so it would start a fresh run with a fresh budget on the same issues, within a tick, forever.
+Every budget in the platform defeated at once, with a cloud bill for a symptom rather than a failing test.
+
+So **every failed settle stamps `aep:halted`** and a comment naming the terminal reason on each working-set
+issue the run could not finish — the recovery bugs it filed itself included, since those are the newest
+things in the milestone and therefore the first a restarted run would pick up — and **the sweep skips
+halted issues**. Two things clear the mark, and both are somebody deciding the work is worth another
+attempt: a person removing the label, and the next build, which strips it from the bugs it carries forward.
+That exclusion is a decision over issues the sweep ALREADY FETCHES, never a query filter:
+"armed AND halted" is the same intersection the kind routing is, and its complement is a negative label
+query the host cannot express at all. It therefore costs no round trip. The cycle-boundary poll is left
+alone, because a halted issue inside a live run's milestone is a contradiction — the run that halted them
+is terminal by construction.
+
+The reach is the RUN's working set and nothing beside it, which is the second reason the working set is
+per species: a dev run must not halt a bug a concurrent task run is working, and a task run must not halt
+planned work it was never allowed to touch. A validation run halts nothing at all — its own work is the
+task it closes on every ending, and the repair and conflict issues it leaves behind are deliberately a task
+run's work, so halting them would break the repair chain rather than protect a budget.
+
 ### A build is refused while validation is live
 
 409, alongside the build mutex's own refusal. A delivery run merging and promoting while validation
@@ -166,6 +199,12 @@ cancel the validation, which is one click.
 
 ## Consequences
 
+- **The repair chain closes without a human.** A failed verdict files one `src/validation` bug per failed
+  criterion and closes the task; an ordinary task run works them and, when its working set drains, REOPENS
+  the version's validation task — so the sweep starts another validation run and the same oracle judges the
+  repair. That is the task run's own bookend, and the one conditional in the platform where a `src/*` source
+  routes anything. `src/incident` and `src/user` leave the standing verdict alone: an incident is not priced
+  like a release, and a verdict is a statement about a VERSION rather than a commit.
 - **Terminal reasons stay honest per species.** `redispatch-budget` on a dev run means the delivery
   agent died; on a validation run it means the judge did, and the version is still delivered. The list
   of reasons is unchanged — the split needed no new failure class.
@@ -193,11 +232,6 @@ settles the run under `conflict-budget`; the conflict issue the event plane mint
 the milestone for a task run to pick up, but nothing in this workflow can rebase a branch, so there is
 no second attempt to make. Fixing it properly means the conflict recovery chain becoming reachable from
 the validation workflow, which is the cycle loop it deliberately does not share.
-
-**Nothing re-judges a version automatically after a repair.** A failed attempt files one bug per failed
-criterion and closes the task, so the repair is worked by an ordinary run and the version's verdict
-stays at the failure until a human asks again. Reopening the task off a merged `src/validation` fix is
-the missing edge, and it belongs to the task run's own bookend.
 
 The mechanism — the file split, the shared `loop`, and the full invariant list — is documented where it
 is enforced: [`internal/delivery/README.md`][delivery] (L2) under the README ladder

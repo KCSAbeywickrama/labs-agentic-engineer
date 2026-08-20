@@ -47,6 +47,7 @@ type Activities struct {
 	deployer   Deployer
 	deployRead DeploymentReader
 	deployMint DeployIssueMinter
+	halter     WorkHalter
 	gates      Gates
 	planner    Planner
 }
@@ -65,6 +66,7 @@ type Deps struct {
 	Deploy       Deployer
 	Deployments  DeploymentReader
 	DeployIssues DeployIssueMinter
+	Halter       WorkHalter
 	Gates        Gates
 	Planner      Planner
 }
@@ -83,6 +85,7 @@ func NewActivities(d Deps) *Activities {
 		deployer:   d.Deploy,
 		deployRead: d.Deployments,
 		deployMint: d.DeployIssues,
+		halter:     d.Halter,
 		gates:      d.Gates,
 		planner:    d.Planner,
 	}
@@ -306,11 +309,18 @@ type MilestoneRef struct {
 }
 
 // PollMilestone is the cycle-boundary read of ground truth — ONE GraphQL round
-// trip returning the gate count, the working set and the total.
+// trip returning the gate count, BOTH working sets, the total, and how much
+// verdict-sourced repair work is open.
 //
 // Every boundary decision is made from this and nothing else: whether to
-// dispatch, whether a gate is holding, whether the version is finished, and
-// whether the last cycle made progress.
+// dispatch, whether a gate is holding, whether the version is finished, whether
+// the last cycle made progress, and — for a task run — whether draining the
+// milestone should reopen the version's validation task.
+//
+// Both working sets ride one answer rather than the caller's own. The counts all
+// arrive in the same GraphQL response, so computing only one of them would save
+// nothing and would put the choice of population in the activity, which is the
+// workflow's to make (see bookends).
 func (a *Activities) PollMilestone(ctx context.Context, in MilestoneRef) (MilestoneSnapshot, error) {
 	if a.milestones == nil {
 		return MilestoneSnapshot{}, errNotConfigured
@@ -323,9 +333,11 @@ func (a *Activities) PollMilestone(ctx context.Context, in MilestoneRef) (Milest
 		return MilestoneSnapshot{}, nil
 	}
 	return MilestoneSnapshot{
-		Work:  counts.OpenDevWork(),
-		Gates: counts.OpenProvision,
-		Total: counts.OpenTotal,
+		DevWork:           counts.OpenDevWork(),
+		TaskWork:          counts.OpenTaskWork(),
+		Gates:             counts.OpenProvision,
+		Total:             counts.OpenTotal,
+		ValidationRepairs: counts.OpenValidationRepairs,
 	}, nil
 }
 
@@ -543,6 +555,47 @@ func (a *Activities) MintDeployFixIssues(ctx context.Context, in MintDeployFixIs
 	filed, err := a.deployMint.MintDeployFixIssues(ctx, in.OrgID, in.ProjectID, in.MilestoneNumber,
 		in.Components, in.Reasons, in.CommitSHA)
 	return filed, sourceControlErr(err)
+}
+
+// HaltWorkInput names the milestone whose unfinished work a failed run is giving
+// up on, and why.
+type HaltWorkInput struct {
+	OrgID           string `json:"orgId"`
+	ProjectID       string `json:"projectId"`
+	MilestoneNumber int    `json:"milestoneNumber"`
+	// Kind is the RUN's kind, which selects the working set — the population this
+	// run was responsible for and no other. A dev run's halt must not reach a bug
+	// a concurrent task run is working, and a task run's must not reach the
+	// planned work it was never allowed to touch.
+	Kind string `json:"kind"`
+	// Reason is the run's terminal reason, quoted verbatim into each comment so a
+	// human reading the issue learns which budget ran out without opening the run.
+	Reason string `json:"reason"`
+}
+
+// HaltUnfinishedWork stamps `aep:halted` and a comment on every working-set issue
+// a FAILED run could not finish, and returns their numbers.
+//
+// It is what keeps a budget meaning something. A run that exhausts one settles
+// `failed` with its issues still OPEN, and the reconcile sweep's rule is "open
+// work of this kind on a milestone with no live run starts a workflow" — so
+// without this the sweep restarts, within a tick, exactly the work the run just
+// gave up on, with fresh budgets, forever. The symptom is a cloud bill rather
+// than a failing test, which is why the halt is not left to a later pass.
+//
+// The write goes through the event plane like MintDeployFixIssues, for the same
+// reason: the supervisor still writes no issue of its own, and the plane owns the
+// label vocabulary and the prose.
+//
+// Unwired is a NO-OP rather than an error — the same posture as every optional
+// collaborator — and the cost is the same restart loop described above, so it is
+// not optional in a real deployment.
+func (a *Activities) HaltUnfinishedWork(ctx context.Context, in HaltWorkInput) ([]int, error) {
+	if a.halter == nil {
+		return nil, nil
+	}
+	halted, err := a.halter.HaltUnfinishedWork(ctx, in.OrgID, in.ProjectID, in.MilestoneNumber, in.Kind, in.Reason)
+	return halted, sourceControlErr(err)
 }
 
 // ---- validation ------------------------------------------------------------

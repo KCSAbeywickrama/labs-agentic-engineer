@@ -40,9 +40,10 @@ type fakeIssues struct {
 	// milestoneOf records the milestone each seeded issue belongs to, so
 	// ListMilestoneIssues can answer the plan turn's membership read.
 	milestoneOf map[int]int
-	// closed/reopened record the two writes the plan path must never make.
+	// closed/reopened/moved record the three writes the plan path must never make.
 	closed   []int
 	reopened []int
+	moved    []string
 }
 
 // writer is the fake wearing the domain's issue-write surface, which is how the
@@ -182,6 +183,16 @@ func (f *fakeIssues) RemoveLabel(_ context.Context, _, _ string, number int, lab
 		}
 	}
 	i.Labels = kept
+	return nil
+}
+
+// SetIssueMilestone exists so the fake satisfies delivery.IssueOps. The plan tap
+// assigns a milestone by RIDING the create, never by a follow-up move, so a
+// planner that called this would be spending a second GitHub request per Task.
+func (f *fakeIssues) SetIssueMilestone(_ context.Context, _, _ string, number, milestoneNumber int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.moved = append(f.moved, fmt.Sprintf("%d>m%d", number, milestoneNumber))
 	return nil
 }
 

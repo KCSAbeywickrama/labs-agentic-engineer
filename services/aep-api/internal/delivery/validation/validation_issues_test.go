@@ -104,6 +104,14 @@ func (f *fakeIssues) RemoveLabel(_ context.Context, _, _ string, number int, lab
 	return nil
 }
 
+// SetIssueMilestone exists only so the fake satisfies delivery.IssueOps: the
+// writer's port is the domain's WHOLE issue-write surface, and moving an issue
+// between versions belongs to the build's supersede, never to this minter.
+func (f *fakeIssues) SetIssueMilestone(_ context.Context, _, _ string, number, milestoneNumber int) error {
+	f.labelled = append(f.labelled, fmt.Sprintf("%d>m%d", number, milestoneNumber))
+	return nil
+}
+
 func (f *fakeIssues) ListMilestoneIssues(_ context.Context, _, _ string, filter sourcecontrol.MilestoneIssuesFilter) ([]sourcecontrol.IssueInfo, error) {
 	f.filters = append(f.filters, filter)
 	var out []sourcecontrol.IssueInfo

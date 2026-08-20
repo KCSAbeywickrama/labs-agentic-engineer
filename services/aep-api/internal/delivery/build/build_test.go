@@ -126,6 +126,9 @@ func (p *planSpy) CommentIssue(context.Context, string, string, int, string) err
 }
 func (p *planSpy) AddLabels(context.Context, string, string, int, []string) error { return nil }
 func (p *planSpy) RemoveLabel(context.Context, string, string, int, string) error { return nil }
+func (p *planSpy) SetIssueMilestone(context.Context, string, string, int, int) error {
+	return nil
+}
 func (p *planSpy) CreateIssue(_ context.Context, _, _ string, req sourcecontrol.CreateIssueRequest) (*sourcecontrol.IssueResult, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()

@@ -315,6 +315,13 @@ func (c *Client) ListMilestoneIssues(ctx context.Context, owner, repo string, cr
 // subtracted from nothing — a gate holds the next dispatch, it must never erase
 // the work behind it.
 //
+// The `src/validation` alias is not a population at all and nothing subtracts
+// it: it answers ONE question a bug-fix run asks at its boundary — did any of
+// the defects in this milestone come from a verdict — because that is what
+// decides whether draining the working set reopens the version's validation
+// task. It rides this query rather than a second call for the same reason
+// everything else here does: this is the loop's hottest read.
+//
 // Do not "fix" an alias by listing several labels expecting an AND; that widens
 // the population and silently empties a working set. The label literals mirror
 // internal/delivery's vocabulary; they are spelled here because the host adapter
@@ -322,11 +329,12 @@ func (c *Client) ListMilestoneIssues(ctx context.Context, owner, repo string, cr
 const milestoneIssueCountsQuery = `query($owner: String!, $repo: String!, $m: Int!) {
   repository(owner: $owner, name: $repo) {
     milestone(number: $m) {
-      provision:   issues(states: [OPEN], labels: ["provision"], first: 1) { totalCount }
-      allOpen:     issues(states: [OPEN], first: 1) { totalCount }
-      agentWork:   issues(states: [OPEN], labels: ["aep"], first: 1) { totalCount }
-      development: issues(states: [OPEN], labels: ["development"], first: 1) { totalCount }
-      validation:  issues(states: [OPEN], labels: ["validation"], first: 1) { totalCount }
+      provision:     issues(states: [OPEN], labels: ["provision"], first: 1) { totalCount }
+      allOpen:       issues(states: [OPEN], first: 1) { totalCount }
+      agentWork:     issues(states: [OPEN], labels: ["aep"], first: 1) { totalCount }
+      development:   issues(states: [OPEN], labels: ["development"], first: 1) { totalCount }
+      validation:    issues(states: [OPEN], labels: ["validation"], first: 1) { totalCount }
+      srcValidation: issues(states: [OPEN], labels: ["src/validation"], first: 1) { totalCount }
     }
   }
 }`
@@ -343,11 +351,12 @@ func (c *Client) MilestoneIssueCounts(ctx context.Context, owner, repo string, c
 	var data struct {
 		Repository *struct {
 			Milestone *struct {
-				Provision   countAlias `json:"provision"`
-				AllOpen     countAlias `json:"allOpen"`
-				AgentWork   countAlias `json:"agentWork"`
-				Development countAlias `json:"development"`
-				Validation  countAlias `json:"validation"`
+				Provision     countAlias `json:"provision"`
+				AllOpen       countAlias `json:"allOpen"`
+				AgentWork     countAlias `json:"agentWork"`
+				Development   countAlias `json:"development"`
+				Validation    countAlias `json:"validation"`
+				SrcValidation countAlias `json:"srcValidation"`
 			} `json:"milestone"`
 		} `json:"repository"`
 	}
@@ -360,10 +369,11 @@ func (c *Client) MilestoneIssueCounts(ctx context.Context, owner, repo string, c
 	}
 	ms := data.Repository.Milestone
 	return &sourcecontrol.MilestoneIssueCounts{
-		OpenProvision:   ms.Provision.TotalCount,
-		OpenTotal:       ms.AllOpen.TotalCount,
-		OpenAgentWork:   ms.AgentWork.TotalCount,
-		OpenDevelopment: ms.Development.TotalCount,
-		OpenValidation:  ms.Validation.TotalCount,
+		OpenProvision:         ms.Provision.TotalCount,
+		OpenTotal:             ms.AllOpen.TotalCount,
+		OpenAgentWork:         ms.AgentWork.TotalCount,
+		OpenDevelopment:       ms.Development.TotalCount,
+		OpenValidation:        ms.Validation.TotalCount,
+		OpenValidationRepairs: ms.SrcValidation.TotalCount,
 	}, nil
 }
