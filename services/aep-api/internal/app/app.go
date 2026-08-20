@@ -285,11 +285,10 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	credService.WithBuildSecretCleaner(buildCredService)
 	anthropicCredService := organization.NewAnthropicCredentialService(orgAnthropicRepo, credStore)
 
-	// Task JWT manager — RS256, 24h TTL. The public key is published on the
-	// JWKS endpoint (/auth/external/jwks.json) and verified by both the runner
-	// callbacks (inbound S2S) and agents-service (outbound S2S). Constructed
-	// here, before the agents client, because that client uses it to mint the
-	// per-call outbound identity token.
+	// Task JWT manager — RS256. The public key is published on
+	// /auth/external/jwks.json. Used to mint BFF MCP tokens
+	// (IssueServiceToken) for the design agent and playground. Runner
+	// callbacks do not verify Task JWTs.
 	var taskTokens *authn.TaskTokenManager
 	if cfg.TaskTokenSigningKey != "" {
 		mgr, err := authn.NewTaskTokenManager(authn.TaskTokenConfig{
@@ -304,7 +303,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		taskTokens = mgr
 		slog.Info("Task token manager", "kid", mgr.KeyID(), "issuer", cfg.TaskTokenIssuer, "audience", cfg.TaskTokenAudience)
 	} else {
-		slog.Warn("BFF_TASK_SIGNING_KEY not set — task dispatch will fail")
+		slog.Warn("BFF_TASK_SIGNING_KEY not set — MCP identity tokens and JWKS will be unavailable")
 	}
 
 	// Secret-ref mirror writer wired into both credential services. nil-safe via
@@ -518,9 +517,10 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		slog.Info("org OU validation wired — JWT ouId is validated against Thunder before the org→OU mapping is (over)written")
 	}
 	// WithSecretRefWriter mirrors per-org publisher client_secret to SM-API on
-	// EnsureOrgPublisher / RegenerateClientSecret so the dispatcher's
-	// PUBLISHER_CLIENT_SECRET ExternalSecret can materialise it into runner
-	// pods without the BFF holding the plaintext.
+	// EnsureOrgPublisher / RegenerateClientSecret and on
+	// ProvisionPublisherForBuild (POST /build, actor build-provision).
+	// Coding dispatch reads secret_ref_name only and mounts PUBLISHER_CLIENT_ID
+	// and PUBLISHER_CLIENT_SECRET from that SecretReference.
 	idpService := organization.NewIDPService(idpRepo, orgRepo, thunderAdminClient, organization.PlatformIDPConfig{
 		Issuer:  cfg.PlatformIDP.Issuer,
 		JWKSURL: cfg.PlatformIDP.JWKSURL,
@@ -566,9 +566,16 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// re-try the exec watcher asks for.
 	codingExecutor := codingagent.NewCodingExecutor(
 		componentClient, repoService, identities{cred: credService},
-		taskTokens, executionRepo,
+		executionRepo,
 		cfg.AgentPlatformURL, cfg.AgentPlatformURL,
 		orgRepo, anthropicCredService, orgCredRepo, idpRepo)
+	// Dispatch reads secret_ref_name only — it does not call
+	// EnsureOrgPublisher. POST /build provisions the SecretReference while the
+	// console JWT is still on ctx.
+	codingExecutor.WithPublisherCredentials(
+		codingagent.NewIDPPublisherResolver(idpRepo),
+		codingagent.PublisherTokenURLFromJWKS(cfg.PlatformIDP.JWKSURL),
+	)
 	// The OpenChoreo Component dispatch path (phase 08): one Component per run
 	// cycle in the milestone's own project, rendered by OC into the project's
 	// dataplane namespace. It needs only the OC client and the runner image —
@@ -706,7 +713,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// system is launched by the milestone supervisor, so a cycle id is the only
 	// runner identity there is; an execution id named in a path fails closed.
 	publisherVerifier := authn.NewPublisherTokenVerifier(thunderJWKS, cfg.PlatformIDP.Issuer, "aep-publisher-")
-	runnerAuth := authn.NewRunnerAuthorizer(taskTokens, publisherVerifier, cycleOrgLookup(db))
+	runnerAuth := authn.NewRunnerAuthorizer(publisherVerifier, cycleOrgLookup(db))
 
 	// Validation-context runner callback: resolves the run's deployed endpoint
 	// URLs so they never enter the public issue.
@@ -764,7 +771,8 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// Strict-handler feature dependencies — everything the contract-first
 	// /api/v1 edge serves (internal/api/handlers_*.go).
 	params.Deps = edge.Deps{
-		TaskTokens: taskTokens,
+		TaskTokens:      taskTokens,
+		PublisherTokens: publisherVerifier,
 		// DesignSvc backs the edge's own GET /projects/{name}/design/dependencies
 		// handler (the one op served directly on the composite, not a domain
 		// embed). *spec.designService satisfies the narrow reader port.
@@ -1020,7 +1028,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	runCycleBuilds := runread.NewCycleBuilds(milestoneRunRepo, runCycleRepo,
 		runreadProjectBuilds{oc: componentClient})
 
-	deliveryHandlers, err := deliveryhttpapi.New(deliveryhttpapi.Deps{
+	deliveryDeps := deliveryhttpapi.Deps{
 		BuildSvc:      buildSvc,
 		PreflightSvc:  preflightSvc,
 		BuildActivity: buildActivityRecorder{svc: activitySvc},
@@ -1035,7 +1043,12 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		RunCommands: runread.NewCommands(milestoneRunRepo, runSupervisor, eventcoreRevalidator{events: eventPlane}).
 			WithCycleReaper(codingagent.NewCycleReaper(componentClient, runCycleRepo)),
 		RunCycleBuilds: runCycleBuilds,
-	})
+	}
+	// WritePublisher stamps secret_ref_name onto the org's IDP profile;
+	// without a SecretsProvider, ProvisionPublisherForBuild fails closed and
+	// every POST /build 503s until a SecretsProvider is injected.
+	deliveryDeps.PublisherProvisioner = idpService
+	deliveryHandlers, err := deliveryhttpapi.New(deliveryDeps)
 	if err != nil {
 		return nil, fmt.Errorf("assemble delivery domain: %w", err)
 	}

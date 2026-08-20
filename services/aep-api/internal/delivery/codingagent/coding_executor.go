@@ -21,14 +21,12 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"time"
 
 	"github.com/wso2/aep/aep-api/internal/organization"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/delivery"
-	"github.com/wso2/aep/aep-api/internal/platform/auth"
 )
 
 // CodingExecutor launches the coding agent. Its one dispatch entry point is
@@ -47,7 +45,6 @@ type CodingExecutor struct {
 	oc            openchoreo.ComponentClient
 	repos         ProjectRepos
 	identities    Identities
-	tokens        TokenIssuer
 	execRows      delivery.ExecutionRepository
 	gitServiceURL string
 	platformURL   string
@@ -66,6 +63,11 @@ type CodingExecutor struct {
 	anthropicKey CodingKeyResolver
 	githubCreds  organization.OrgCredentialRepository
 	idpProfiles  organization.IDPRepository
+
+	// publisher is the Thunder publisher SecretReference resolver. Every
+	// dispatch mounts PUBLISHER_* from it (local and cloud). Nil fail-louds.
+	publisher         PublisherCredentialResolver
+	publisherTokenURL string
 
 	// Build-secret staging (nil → unauthenticated clone, correct for public
 	// repos). buildSecrets pre-stages the org's build git credential so a build's
@@ -90,7 +92,6 @@ func NewCodingExecutor(
 	oc openchoreo.ComponentClient,
 	repos ProjectRepos,
 	identities Identities,
-	tokens TokenIssuer,
 	execRows delivery.ExecutionRepository,
 	gitServiceURL, platformURL string,
 	orgs organization.OrganizationRepository,
@@ -100,7 +101,7 @@ func NewCodingExecutor(
 ) *CodingExecutor {
 	return &CodingExecutor{
 		oc: oc, repos: repos, identities: identities,
-		tokens: tokens, execRows: execRows, gitServiceURL: gitServiceURL, platformURL: platformURL,
+		execRows: execRows, gitServiceURL: gitServiceURL, platformURL: platformURL,
 		orgs: orgs, anthropicKey: anthropicKey, githubCreds: githubCreds, idpProfiles: idpProfiles,
 	}
 }
@@ -212,39 +213,27 @@ func (e *CodingExecutor) launchAgent(ctx context.Context, in agentLaunch) (strin
 	if err != nil {
 		return "", fmt.Errorf("resolve git identity: %w", err)
 	}
-	bearer, err := e.tokens.Issue(in.correlationID, in.orgID, in.projectID)
-	if err != nil {
-		return "", fmt.Errorf("mint runner bearer: %w", err)
-	}
-	// Dedicated MCP identity token (aud aep-api-mcp): the runner bearer above
-	// (aud git-service) is pinned-rejected by the MCP verifier, so the pod needs
-	// a separate token to call the BFF's internal MCP surface (list endpoints /
-	// read remote file / search remote code). One token stamped at dispatch,
-	// TTL matching the runner bearer's 24h Job lifetime — no refresh route.
-	mcpToken, err := e.tokens.IssueServiceToken(auth.AudienceMCP, in.orgID, 24*time.Hour)
-	if err != nil {
-		return "", fmt.Errorf("mint MCP token: %w", err)
-	}
 	// OpenChoreo Component dispatch: the only agent path. One Component per run
 	// cycle in the milestone's own project.
 	if e.ocJobs == nil {
 		return "", fmt.Errorf("no coding-agent dispatch path configured: set AGENT_RUNNER_IMAGE")
 	}
-	return e.dispatchViaOC(ctx, in, repo, name, email, login, bearer, mcpToken)
+	return e.dispatchViaOC(ctx, in, repo, name, email, login)
 }
 
 // dispatchViaOC launches one cycle through the OpenChoreo Component chain.
 //
 // The executor's job here is credential and identity resolution — the org's
-// refs-only secret triplets, the runner bearer, the MCP token — and the
+// refs-only secret triplets and the publisher SecretReference — and the
 // dispatcher's job is the OC chain. The run name is derived from the CYCLE id,
 // deterministically within a dispatch attempt, so a crashed dispatch resumes
 // over the same Component instead of orphaning it.
 //
 // Credentials reach the pod through the ComponentType's ExternalSecret /
-// Workload secretEnv (refs only).
+// Workload secretEnv (refs only). Publisher client_credentials are the Job's
+// only platform credential (local and cloud).
 func (e *CodingExecutor) dispatchViaOC(ctx context.Context, in agentLaunch, repo *sourcecontrol.GitRepository,
-	name, email, login, bearer, mcpToken string) (string, error) {
+	name, email, login string) (string, error) {
 	anthropicSR, githubSR, err := e.resolveRunnerSecretRefs(ctx, in.orgID)
 	if err != nil {
 		return "", err
@@ -268,12 +257,16 @@ func (e *CodingExecutor) dispatchViaOC(ctx context.Context, in agentLaunch, repo
 		"AEP_TASK_KIND":       taskKindOrDefault(disp.taskKind),
 		"WORKSPACE_BASE_PATH": codingAgentWorkspacePath,
 	}
-	if bearer != "" {
-		env["AEP_BEARER"] = bearer
+	secretEnv := []SecretEnvRef{
+		{Key: anthropicEnvVarOrDefault(anthropicSR.EnvVar), SecretName: anthropicSR.SecretRefName, SecretKey: anthropicSR.Property},
+		{Key: envGitHubToken, SecretName: githubSR.SecretRefName, SecretKey: githubSR.Property},
 	}
-	if mcpToken != "" {
-		env["AEP_MCP_TOKEN"] = mcpToken
+	pub, tokenURL, err := e.publisherSecretEnv(ctx, in.orgID)
+	if err != nil {
+		return "", err
 	}
+	env[envPublisherTokenURL] = tokenURL
+	secretEnv = append(secretEnv, pub...)
 	return e.ocJobs.Dispatch(ctx, OCDispatchInputs{
 		OrgID:                 in.orgID,
 		ProjectID:             in.projectID,
@@ -285,10 +278,7 @@ func (e *CodingExecutor) dispatchViaOC(ctx context.Context, in agentLaunch, repo
 		RunName:               codingAgentRunNameFor(in.projectID, in.correlationID),
 		ActiveDeadlineSeconds: int(disp.deadline),
 		Env:                   env,
-		SecretEnv: []SecretEnvRef{
-			{Key: anthropicEnvVarOrDefault(anthropicSR.EnvVar), SecretName: anthropicSR.SecretRefName, SecretKey: anthropicSR.Property},
-			{Key: envGitHubToken, SecretName: githubSR.SecretRefName, SecretKey: githubSR.Property},
-		},
+		SecretEnv:             secretEnv,
 	})
 }
 

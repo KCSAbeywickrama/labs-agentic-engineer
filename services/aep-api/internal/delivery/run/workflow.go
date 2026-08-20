@@ -271,6 +271,8 @@ func (l *loop) run(ctx workflow.Context) (RunResult, error) {
 			return l.settle(ctx, delivery.RunStateFailed, delivery.RunReasonRedispatchBudget)
 		case cycleQuotaBlocked:
 			return l.settle(ctx, delivery.RunStateBlocked, delivery.RunReasonAgentQuotaBlocked)
+		case cyclePublisherCredentials:
+			return l.settle(ctx, delivery.RunStateBlocked, delivery.RunReasonPublisherCredentials)
 		case cycleDeployFailed:
 			// File the work before looping. Unlike a red build or a conflict —
 			// where the event plane has already minted the issue by the time the
@@ -539,6 +541,9 @@ func (l *loop) runValidation(ctx workflow.Context) (settled bool, res RunResult,
 		return true, res, err
 	case cycleQuotaBlocked:
 		res, err = l.settle(ctx, delivery.RunStateBlocked, delivery.RunReasonAgentQuotaBlocked)
+		return true, res, err
+	case cyclePublisherCredentials:
+		res, err = l.settle(ctx, delivery.RunStateBlocked, delivery.RunReasonPublisherCredentials)
 		return true, res, err
 	case cycleDeployFailed:
 		// A validation cycle touches no component, so its deploy stage is a
