@@ -102,7 +102,15 @@ export const projectsHandlers = [
 
   http.post("*/api/v1/projects", async ({ request }) => {
     const body = (await request.json()) as CreateProjectRequest;
-    if (currentProjects().some((p) => p.name === body.name)) {
+    // The BFF conflicts on the GITHUB REPO name, not the project name
+    // (`IsRepoNameConflict` -> 409), so mock both: `repoName` when the user
+    // edited it, else the project name it follows. Without the repoName arm
+    // the create flow's field-level conflict state (#561) is unreachable in
+    // mock mode.
+    const takenRepo = body.repoName ?? body.name;
+    if (
+      currentProjects().some((p) => p.name === body.name || p.name === takenRepo)
+    ) {
       return HttpResponse.json(duplicateProjectError, {
         status: 409,
       });

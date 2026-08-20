@@ -32,35 +32,41 @@ import {
 } from "@wso2/oxygen-ui";
 import {
   ArrowLeft,
+  Bot,
+  ClipboardCheck,
   GitHub,
-  ShoppingCart,
-  Dumbbell,
   ReceiptText,
 } from "@wso2/oxygen-ui-icons-react";
 import { useNavigate } from "@tanstack/react-router";
+import { ApiRequestError } from "../../../api/errors";
 import { useCreateProject, useGithubOrg } from "../api/queries";
 import { isValidProjectName, suggestProjectName } from "../lib/projectName";
 
 // Issue #71 decision: clicking an example acts as prompt + Start in one
 // click — it jumps straight to the name/repo confirmation step.
+//
+// The examples are the fastest answer a newcomer gets to "what does enough
+// detail look like", so they carry the persona (#561): internal enterprise
+// work, not consumer apps. The third builds an agent on purpose — Agentic
+// Engineer does that too, and this is where it gets advertised.
 const EXAMPLE_PROMPTS = [
   {
-    icon: <ShoppingCart size={24} />,
-    title: "Online store",
-    prompt:
-      "An online store for handmade ceramics with a product catalog, cart, and checkout",
-  },
-  {
-    icon: <Dumbbell size={24} />,
-    title: "Workout tracker",
-    prompt:
-      "A gym workout tracker where I can log exercises, sets, and weights and see progress over time",
-  },
-  {
     icon: <ReceiptText size={24} />,
-    title: "Invoicing tool",
+    title: "Expense approval",
     prompt:
-      "An invoicing tool for freelancers that creates invoices, tracks payments, and exports PDFs",
+      "Employees submit expense claims, managers approve them, and finance exports approved claims to payroll",
+  },
+  {
+    icon: <ClipboardCheck size={24} />,
+    title: "Employee onboarding",
+    prompt:
+      "Track each new hire's onboarding tasks across IT, HR and facilities, with reminders for overdue items",
+  },
+  {
+    icon: <Bot size={24} />,
+    title: "Support triage agent",
+    prompt:
+      "A support triage agent that reads incoming tickets, classifies them by urgency, and drafts replies for a human to approve",
   },
 ] as const;
 
@@ -121,6 +127,18 @@ export function ProjectCreate() {
   const repoError =
     repoName && !isValidProjectName(repoName) ? invalidNameMessage : null;
 
+  // A taken repository name is the one create failure the user can fix in
+  // place, and it is not recoverable by retrying — the BFF compensates the
+  // OpenChoreo project away and fails, so they must pick another name. It
+  // belongs on the field, not in a page-level Alert; every other failure keeps
+  // the Alert. Branching on the envelope's `code` rather than the message,
+  // which the BFF owns and may reword.
+  const repoConflict =
+    createProject.error instanceof ApiRequestError &&
+    createProject.error.code === "conflict"
+      ? `That repository name already exists in ${githubOrg ?? "your organization"} — pick another.`
+      : null;
+
   const accept = () => {
     createProject.mutate(
       { name, prompt, ...(repoName !== name && { repoName }) },
@@ -149,15 +167,14 @@ export function ProjectCreate() {
                 What do you want to build?
               </Typography>
               <Typography variant="body1" color="text.secondary">
-                Describe it in your own words — AEP turns your requirement
-                into a project and starts deriving its design.
+                Describe it in your own words — rough is fine.
               </Typography>
             </Box>
             <Stack spacing={2}>
               <TextField
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
-                placeholder="e.g. A booking system for a small hair salon with staff calendars and SMS reminders"
+                placeholder="e.g. A service desk where employees raise IT requests and the team tracks them through to resolution"
                 multiline
                 minRows={3}
                 autoFocus
@@ -208,10 +225,11 @@ export function ProjectCreate() {
                 setRepoTouched(true);
                 setRepoName(e.target.value);
               }}
-              error={Boolean(repoError)}
+              error={Boolean(repoError) || Boolean(repoConflict)}
               helperText={
                 repoError ??
-                "Holds the project's specs and source; the organization is fixed."
+                repoConflict ??
+                "Agentic Engineer creates this repository in your organization. Your specs and source code live here, and it stays yours."
               }
               fullWidth
               slotProps={{
@@ -231,7 +249,7 @@ export function ProjectCreate() {
                 },
               }}
             />
-            {createProject.isError && (
+            {createProject.isError && !repoConflict && (
               <Alert severity="error">
                 {createProject.error instanceof Error
                   ? createProject.error.message
@@ -252,7 +270,7 @@ export function ProjectCreate() {
                 disabled={!name || Boolean(nameError) || createProject.isPending}
                 loading={createProject.isPending}
               >
-                Create project
+                {createProject.isPending ? "Creating your project…" : "Create project"}
               </Button>
             </Stack>
           </Stack>

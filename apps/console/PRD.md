@@ -84,6 +84,16 @@ which is also what closes its issue. Newest first; links go to the feature's
 GitHub issue plus any ADRs it produced. Features still being built aren't
 here: they're the open `console` + `feature` issues.
 
+- Create flow — says what's about to happen: the subtitle answers only *how
+  much detail?* (*"Describe it in your own words — rough is fine."*), the
+  repository field states that Agentic Engineer **creates** it in the user's
+  organization, a taken repository name resolves to a field-level error naming
+  the org rather than a raw alert, the wait reads **Creating your project…**,
+  and the examples carry the enterprise persona (expense approval, employee
+  onboarding, a support triage agent). Retires **AEP** from user-facing copy in
+  favour of **Agentic Engineer**. First feature to draw on the console lexicon
+  (ADR-0019) —
+  [#561](https://github.com/wso2/labs-agentic-engineer/issues/561)
 - Deployments page — one-story rail + environment panel: Development /
   Validation / Production as one numbered rail (Builds-spine vocabulary,
   ADR-0014) with a side panel (version, rollout, endpoints, production
