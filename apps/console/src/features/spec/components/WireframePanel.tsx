@@ -246,7 +246,12 @@ export function WireframePanel({
   // (fillHeight) sets `flex: 1` on its own root inside the flex column.
   return (
     <Box sx={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-      {agentBusy && hasLiveContent && (
+      {(showOwnHeader || (agentBusy && hasLiveContent)) && (
+        // ONE header row for both states, at a constant height. The drawing
+        // chip (~24px) and the view switch (~32px) used to live in separate
+        // rows with only their content setting the height, so entering and
+        // leaving a turn resized the header by ~8px and the whole canvas
+        // jumped with it. minHeight pins the row; only the content swaps.
         // The chip means "actively being generated", not "rendered from the
         // live doc" — the doc is ALWAYS the source while collab is up (rooms
         // are seeded), so it MUST key on the peer, not on the live text.
@@ -254,28 +259,19 @@ export function WireframePanel({
           sx={{
             px: 1.5,
             py: 1,
+            minHeight: 48,
             display: "flex",
             alignItems: "center",
+            justifyContent: agentBusy ? "flex-start" : "flex-end",
             borderBottom: 1,
             borderColor: "divider",
           }}
         >
-          <Chip size="small" color="primary" variant="outlined" label="Drawing…" />
-        </Box>
-      )}
-      {showOwnHeader && (
-        <Box
-          sx={{
-            px: 1.5,
-            py: 1,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "flex-end",
-            borderBottom: 1,
-            borderColor: "divider",
-          }}
-        >
-          {viewSwitch}
+          {agentBusy && hasLiveContent ? (
+            <Chip size="small" color="primary" variant="outlined" label="Drawing…" />
+          ) : (
+            viewSwitch
+          )}
         </Box>
       )}
       {mode === "prototype" && showToggle ? (
