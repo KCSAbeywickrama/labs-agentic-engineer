@@ -20,11 +20,32 @@
 // append an entry to Available and embed its manifest(s) as string literals.
 package addons
 
+// OperatorSpec describes a Helm-installed operator that must be present before
+// the addon's manifests can be applied. A zero-value OperatorSpec (ReleaseName == "")
+// means the addon has no operator dependency and the pre-install phase is skipped.
+type OperatorSpec struct {
+	// ReleaseName is the Helm release name (e.g. "cnpg", "thunder-app-operator").
+	ReleaseName string
+	// Chart is the OCI or local chart reference.
+	Chart string
+	// Version is the chart version string; empty omits --version (uses registry default).
+	Version string
+	// Namespace is the target namespace for the operator deployment.
+	Namespace string
+	// DisplayName is the human-readable label shown in the confirmation list and summary.
+	DisplayName string
+	// Sets is optional key=value pairs passed as --set flags to Helm.
+	Sets []string
+}
+
 // Addon describes an optional platform resource type.
 type Addon struct {
 	ID          string
 	Label       string
 	Description string
+	// Operator, when non-zero (ReleaseName != ""), is installed via Helm before
+	// the addon manifests are applied.
+	Operator OperatorSpec
 	// Manifests is a list of YAML strings applied in order via server-side apply.
 	// Each string may contain multiple documents separated by ---.
 	Manifests []string
@@ -46,9 +67,33 @@ type VerifySpec struct {
 // selector.
 var Available = []Addon{
 	{
+		ID:          "thunder-app",
+		Label:       "thunder-app",
+		Description: "ThunderApplication ClusterResourceType + RBAC",
+		Operator: OperatorSpec{
+			ReleaseName: "thunder-app-operator",
+			Chart:       "oci://ghcr.io/wso2/thunder-app-operator",
+			Namespace:   "thunder-app-operator-system",
+			DisplayName: "thunder-app-operator",
+		},
+		Manifests: []string{thunderAppResourceType, thunderAppRBAC},
+		VerifyResources: []VerifySpec{
+			{APIVersion: "openchoreo.dev/v1alpha1", Kind: "ClusterResourceType", Name: "thunder-app"},
+			{APIVersion: "rbac.authorization.k8s.io/v1", Kind: "ClusterRole", Name: "openchoreo-dataplane-thunder-app"},
+			{APIVersion: "rbac.authorization.k8s.io/v1", Kind: "ClusterRoleBinding", Name: "openchoreo-dataplane-thunder-app"},
+		},
+	},
+	{
 		ID:          "postgres-cnpg",
 		Label:       "postgres-cnpg",
-		Description: "PostgreSQL via CloudNativePG (ClusterResourceType + RBAC) — requires the CloudNativePG operator to be pre-installed",
+		Description: "PostgreSQL via CloudNativePG (ClusterResourceType + RBAC)",
+		Operator: OperatorSpec{
+			ReleaseName: "cnpg",
+			Chart:       "oci://ghcr.io/cloudnative-pg/charts/cloudnative-pg",
+			Version:     "0.29.0", // keep in sync with deployments/scripts/env.sh CNPG_VERSION
+			Namespace:   "cnpg-system",
+			DisplayName: "CloudNativePG v0.29.0",
+		},
 		Manifests: []string{postgresCNPGResourceType, postgresCNPGRBAC},
 		VerifyResources: []VerifySpec{
 			{APIVersion: "openchoreo.dev/v1alpha1", Kind: "ClusterResourceType", Name: "postgres-cnpg"},
@@ -57,6 +102,98 @@ var Available = []Addon{
 		},
 	},
 }
+
+// thunderAppResourceType is the ClusterResourceType that makes the thunder-app
+// OAuth provisioning available as a platform-resource dependency type in AEP.
+// Source: deployments/single-cluster/resource-types/thunder-app/resourcetype.yaml
+const thunderAppResourceType = `
+apiVersion: openchoreo.dev/v1alpha1
+kind: ClusterResourceType
+metadata:
+  name: thunder-app
+  labels:
+    aep.wso2.com/role: end-user-auth
+  annotations:
+    aep.wso2.com/description: >-
+      End-user sign-in for this project's apps: provisions an OAuth (PKCE)
+      client on the platform IdP. Declare on both the web app that signs
+      users in and the service whose API it protects.
+    aep.wso2.com/consumer-url-env-config: redirectUris
+    aep.wso2.com/skill: thunder-authentication
+spec:
+  retainPolicy: Delete
+  parameters:
+    openAPIV3Schema:
+      type: object
+      properties:
+        displayName:
+          type: string
+          default: ""
+        scopes:
+          type: string
+          default: "openid profile email group ou"
+  environmentConfigs:
+    openAPIV3Schema:
+      type: object
+      properties:
+        redirectUris:
+          type: string
+          default: ""
+  resources:
+    - id: app
+      readyWhen: '${true}'
+      template:
+        apiVersion: aep.wso2.com/v1alpha1
+        kind: ThunderApplication
+        metadata:
+          name: ${metadata.name}
+          namespace: ${metadata.namespace}
+          labels: ${metadata.labels}
+        spec:
+          displayName: ${parameters.displayName}
+          scopes: ${parameters.scopes}
+          redirectUris: ${environmentConfigs.redirectUris}
+  outputs:
+    - name: client_id
+      value: aep-${metadata.namespace}-${metadata.name}
+    - name: issuer
+      value: http://thunder.openchoreo.localhost:8080
+    - name: jwks_url
+      value: http://thunder.openchoreo.localhost:8080/oauth2/jwks
+    - name: scopes
+      value: ${parameters.scopes}
+`
+
+// thunderAppRBAC grants the OpenChoreo data-plane agent permission to manage
+// ThunderApplication objects in project namespaces.
+// Source: deployments/single-cluster/resource-types/thunder-app/rbac.yaml
+const thunderAppRBAC = `
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: openchoreo-dataplane-thunder-app
+  labels:
+    app.kubernetes.io/part-of: wso2-agentic-engineer
+rules:
+  - apiGroups: ["aep.wso2.com"]
+    resources: ["thunderapplications"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: openchoreo-dataplane-thunder-app
+  labels:
+    app.kubernetes.io/part-of: wso2-agentic-engineer
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: openchoreo-dataplane-thunder-app
+subjects:
+  - kind: ServiceAccount
+    name: cluster-agent-dataplane
+    namespace: openchoreo-data-plane
+`
 
 // postgresCNPGResourceType is the ClusterResourceType that makes postgres-cnpg
 // available as a platform-resource dependency type in the AEP console.
