@@ -32,6 +32,7 @@ import {
 } from "../src/index.js";
 
 type El = {
+  id: string;
   type: string;
   x: number;
   y: number;
@@ -402,6 +403,21 @@ test("compileWireframes reports an added screen and a removed screen", () => {
   const removed = compileWireframes(SHOP.replace('screen Three\n  heading "C"\n', ""), first);
   assert.ok(removed.ok);
   assert.deepEqual(removed.changedScreens, ["Three"]);
+});
+
+test("compileWireframes ranks a removed screen by where it USED to sit", () => {
+  // Remove Two and edit Three in one step. Two is gone from the new compile, so
+  // its position is only knowable from the previous one — without that it sorts
+  // last and the report claims Three changed before Two, contradicting the
+  // canvas the reader was looking at.
+  const first = compileWireframes(SHOP, null);
+  assert.ok(first.ok);
+  const next = compileWireframes(
+    SHOP.replace('screen Two\n  button "Go"\n', "").replace('heading "C"', 'heading "C2"'),
+    first,
+  );
+  assert.ok(next.ok);
+  assert.deepEqual(next.changedScreens, ["Two", "Three"]);
 });
 
 test("compileWireframes reports nothing when the source is unchanged", () => {

@@ -127,7 +127,9 @@ describe("WireframePanel streaming", () => {
       ytext.insert(ytext.length, '  button "Go"\n');
     });
     rerender(<WireframePanel projectName="p" dslPath={DSL_PATH} files={[]} collab={makeCollab(ytext, false)} />);
-    expect(screen.getByTestId("excalidraw").dataset.focus).not.toBe("First");
+    // Exactly the edited screen — "not First" would also pass on an empty
+    // focus, which would mean the camera moved nowhere at all.
+    expect(screen.getByTestId("excalidraw").dataset.focus).toBe("Second");
   });
 
   it("holds the last good scene when an intermediate compile fails", () => {

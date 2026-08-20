@@ -342,12 +342,25 @@ export function compileWireframes(dsl: string, previous: WireframeCompile | null
       if (prior[name] !== fingerprints[name]) changedScreens.push(name);
     }
     // A removed screen has nothing left to show, but the gap it left is worth
-    // reporting; it is ordered by where it used to sit — which only the
-    // previous compile knows, so we rank it by its old neighbours' top.
+    // reporting; it is ordered by where it USED to sit, which only the previous
+    // compile knows.
     for (const name of Object.keys(prior)) {
       if (!(name in fingerprints)) changedScreens.push(name);
     }
-    changedScreens.sort((a, b) => (topOf.get(a) ?? Number.POSITIVE_INFINITY) - (topOf.get(b) ?? Number.POSITIVE_INFINITY));
+    // Rank on the previous canvas — the one the reader was actually looking at
+    // — placing each screen by its old index and falling back to the new
+    // ordering for screens that did not exist before. Ranking a removed screen
+    // by the CURRENT canvas is impossible (it has no position there), and
+    // defaulting it to last claimed the screen below it changed first.
+    const priorRank = new Map(
+      (previous?.ok ? previous.screenOrder : []).map((name, i) => [name, i] as const),
+    );
+    const currentRank = new Map(
+      [...topOf.entries()].sort((a, b) => a[1] - b[1]).map(([name], i) => [name, i] as const),
+    );
+    const rankOf = (name: string): number =>
+      priorRank.get(name) ?? (currentRank.get(name) ?? 0) + priorRank.size;
+    changedScreens.sort((a, b) => rankOf(a) - rankOf(b));
   }
 
   const screenOrder = [...topOf.entries()].sort((a, b) => a[1] - b[1]).map(([name]) => name);
@@ -677,6 +690,14 @@ function buildWireframes(
           tree: [],
         };
         if (screenMatch[2]) screen.description = unescapeQuoted(screenMatch[2]);
+        // Screen names are identity: element ids are screen-relative, the
+        // per-screen fingerprints that drive the viewer's focus are keyed by
+        // name, and `-> Target` resolves by name (case-insensitively). Two
+        // screens sharing one name merge into a single fingerprint and emit
+        // colliding element ids, so it is always an authoring bug.
+        if (ast.screens.some((s) => s.name.toLowerCase() === screen!.name.toLowerCase())) {
+          err(no, `duplicate screen ${JSON.stringify(screen.name)} — declare each screen once`);
+        }
         ast.screens.push(screen);
         stack = [{ level: 0, kind: 'root', nodes: screen.tree }];
         inFlow = false;
