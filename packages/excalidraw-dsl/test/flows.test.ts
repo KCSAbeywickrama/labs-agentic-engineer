@@ -43,6 +43,31 @@ function model(dsl: string) {
   return res.model;
 }
 
+test("a duplicate screen name is rejected with the second declaration's line number", () => {
+  // Two screens with one name merge into one fingerprint and one screenOrder
+  // entry, and their screen-relative element ids collide — Excalidraw scenes
+  // must not carry duplicate ids. Always an authoring bug; reject like a
+  // duplicate flow name.
+  const errs = validateWireframeSyntax(`screen One
+  heading "A"
+screen One
+  heading "B"
+`);
+  assert.equal(errs.length, 1);
+  assert.match(errs[0]!, /^line 3: /);
+  assert.match(errs[0]!, /duplicate screen "One"/);
+});
+
+test("duplicate screen detection is case-insensitive, matching screen-name resolution", () => {
+  const errs = validateWireframeSyntax(`screen Login
+  heading "A"
+screen LOGIN
+  heading "B"
+`);
+  assert.equal(errs.length, 1);
+  assert.match(errs[0]!, /^line 3: /);
+});
+
 test("a valid DSL with named flows passes the write gate", () => {
   assert.deepEqual(validateWireframeSyntax(TWO_FLOWS), []);
 });

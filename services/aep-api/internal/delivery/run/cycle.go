@@ -56,6 +56,9 @@ const (
 	// never launched. Not a failure and not a spent budget: the run settles
 	// blocked with an actionable message.
 	cycleQuotaBlocked
+	// cyclePublisherCredentials — dispatch cannot mount publisher CC. Not
+	// agent death: repeating the Job create cannot stamp the SecretReference.
+	cyclePublisherCredentials
 )
 
 // landing is how one dispatch attempt ended.
@@ -248,6 +251,9 @@ func (l *loop) dispatchUntilLanded(ctx workflow.Context, kind string, anchorIssu
 			// instead of burning the rest of the budget on the same answer.
 			if isAgentQuotaBlocked(derr) {
 				return false, cycleQuotaBlocked, nil
+			}
+			if isPublisherCredentialsMissing(derr) {
+				return false, cyclePublisherCredentials, nil
 			}
 			continue
 		}
@@ -527,6 +533,14 @@ func isAgentQuotaBlocked(err error) bool {
 	var appErr *temporal.ApplicationError
 	if errors.As(err, &appErr) {
 		return appErr.Type() == delivery.ErrTypeAgentQuotaBlocked
+	}
+	return false
+}
+
+func isPublisherCredentialsMissing(err error) bool {
+	var appErr *temporal.ApplicationError
+	if errors.As(err, &appErr) {
+		return appErr.Type() == delivery.ErrTypePublisherCredentialsMissing
 	}
 	return false
 }
