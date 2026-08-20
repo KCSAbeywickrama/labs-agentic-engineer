@@ -29,7 +29,16 @@ export default defineConfig({
     include: ["src/**/*.test.{ts,tsx}"],
     // Real-browser tests (`*.browser.test.tsx`) run under vitest.browser.config.ts
     // in headless Chromium — they can't run in this node/jsdom project.
-    exclude: [...configDefaults.exclude, "**/*.browser.test.{ts,tsx}"],
+    // A route file is named after its URL segment, so the Test tab's route
+    // (`projects.$projectName.test.tsx`) collides with the test-file glob.
+    // Route TESTS carry the `-` prefix that TanStack Router ignores
+    // (`-projects.…test.tsx`), so everything else matching `*.test.tsx` under
+    // `src/routes/` is a route, not a suite.
+    exclude: [
+      ...configDefaults.exclude,
+      "**/*.browser.test.{ts,tsx}",
+      "src/routes/[!-]*.test.{ts,tsx}",
+    ],
     environment: "node",
     globals: true,
     setupFiles: ["src/test-setup.ts"],

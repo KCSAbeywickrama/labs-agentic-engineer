@@ -1,6 +1,8 @@
 import type { components } from "../../generated/aep-api";
 
 type ApiError = components["schemas"]["Error"];
+type InvokeRequest = components["schemas"]["InvokeRequest"];
+type InvokeResponse = components["schemas"]["InvokeResponse"];
 import { http, HttpResponse, type JsonBodyType } from "msw";
 import {
   componentDeployments,
@@ -41,6 +43,34 @@ import {
   type ValidationAttempt,
   type ValidationScenario,
 } from "../fixtures/validation";
+
+// The agent's own /chat contract (ADR-0020): memory is server-held, so the
+// mock mints an id on the first turn and honours whatever id comes back. A
+// message that asks for a hotel demos the tool-call disclosure, which is what
+// the tester exists to show.
+function agentChatReply(requestBody: string): {
+  conversationId: string;
+  text: string;
+  toolCalls: unknown[];
+} {
+  let turn: { conversationId?: string; message?: string } = {};
+  try {
+    turn = JSON.parse(requestBody) as typeof turn;
+  } catch {
+    turn = {};
+  }
+  const message = turn.message ?? "";
+  const wantsHotel = /hotel/i.test(message);
+  return {
+    conversationId: turn.conversationId ?? "mock-agent-conv",
+    text: wantsHotel
+      ? "I found 2 hotels in Paris: Hotel Lumiere and Hotel Rivoli."
+      : `You said: ${message}`,
+    toolCalls: wantsHotel
+      ? [{ toolName: "listHotels", input: { city: "Paris" } }]
+      : [],
+  };
+}
 
 function scenario(): ProjectScenario {
   const chosen = localStorage.getItem("aep:mock:project") as ProjectScenario | null;
@@ -141,6 +171,35 @@ export const projectHandlers = [
     "*/api/v1/projects/:projectName/components/:componentName/deployments",
     ({ params }) =>
       respond((s) => componentDeployments(s, String(params.componentName))),
+  ),
+  // The component-invoke relay (Test tab). aep-api answers 200 whenever the
+  // relay HAPPENED — the component's own status rides inside the body — so the
+  // only non-200 modelled here is the 409 for a component with no gateway URL.
+  http.post(
+    "*/api/v1/projects/:projectName/components/:componentName/invoke",
+    async ({ params, request }) => {
+      const s = scenario();
+      if (s === "error") {
+        return HttpResponse.json(projectSectionError, { status: 500 });
+      }
+      const componentName = String(params.componentName);
+      const reachable = componentDeployments(s, componentName).items?.some(
+        (d) => d.status === "Ready" && d.endpointUrl,
+      );
+      if (!reachable) {
+        return HttpResponse.json(
+          { code: "conflict", message: "not-reachable" } satisfies ApiError,
+          { status: 409 },
+        );
+      }
+      const call = (await request.json()) as InvokeRequest;
+      return HttpResponse.json({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(agentChatReply(call.body ?? "{}")),
+        truncated: false,
+      } satisfies InvokeResponse);
+    },
   ),
   http.get("*/api/v1/projects/:projectName/tasks", ({ request }) => {
     // ?tag=vN scopes to one build's lineage, mirroring the aep:spec/<tag>

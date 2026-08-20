@@ -235,6 +235,15 @@ const builtComponents: ComponentList = {
       type: "service",
       status: "active",
     },
+    // The one component type with a tester today (Test tab, first cut) —
+    // without an ai-agent here the tab can only demo its empty state.
+    {
+      name: "booking-agent",
+      displayName: "Booking Agent",
+      description: "Books hotels on the customer's behalf",
+      type: "ai-agent",
+      status: "active",
+    },
   ],
 };
 
@@ -309,6 +318,17 @@ const deploymentsByScenario: Partial<
         releaseName: "demo-shop-catalog-api-d4e5f6",
         endpointUrl: "https://catalog-api.dev.acme-aep.io",
         createdAt: "2026-07-12T04:58:00Z",
+      },
+    ],
+    "booking-agent": [
+      {
+        name: "demo-shop-booking-agent-development",
+        componentName: "booking-agent",
+        environment: "development",
+        status: "Ready",
+        releaseName: "demo-shop-booking-agent-j0k1l2",
+        endpointUrl: "https://booking-agent.dev.acme-aep.io",
+        createdAt: "2026-07-12T05:02:00Z",
       },
     ],
     // Settled but intentionally undeployed — the "deployed" scenario stays
