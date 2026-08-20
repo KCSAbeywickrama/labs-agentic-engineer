@@ -25,12 +25,15 @@ package spec_test
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
@@ -539,12 +542,12 @@ func newGenaiRig(t *testing.T, seed map[string]string, opts ...rigOption) *genai
 		skillsRepo = cfg.skillsRepo
 	}
 	svc := spec.NewService(spec.ServiceDeps{
-		Repos:      stubRepoResolver{rec: rec},
-		Git:        sourcecontrol.NewGitOpsService(stubResolver{}, fx.Engine),
-		Keys:       func(context.Context, string) (string, error) { return rig.key, nil },
-		Client:     client,
-		Turns:      turns,
-		Broker:     broker,
+		Repos:         stubRepoResolver{rec: rec},
+		Git:           sourcecontrol.NewGitOpsService(stubResolver{}, fx.Engine),
+		Keys:          func(context.Context, string) (string, error) { return rig.key, nil },
+		Client:        client,
+		Turns:         turns,
+		Broker:        broker,
 		Snapshots:     fx.Engine,
 		SkillsRepo:    skillsRepo,
 		Conversations: cfg.conversations,
@@ -1411,5 +1414,87 @@ func TestSlowFirstEvent_StillHeartbeats(t *testing.T) {
 	release()
 	if st := r.waitTerminal(t, turnID); st.Status != "completed" {
 		t.Fatalf("turn = %+v, want completed once the first event arrives", st)
+	}
+}
+
+// The bug this pins: attachments parsed fine, the journal carried their names,
+// the POST answered 202 and the console rendered chips — and the agents service
+// received NOTHING, because the dispatch never set TurnRequest.Attachments. The
+// turn looked entirely successful while the agent truthfully reported seeing no
+// file. Parsing tests could not catch it; only asserting the DISPATCHED body can.
+func TestStartTurnDispatchesChatAttachments(t *testing.T) {
+	r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"})
+	convUUID := "11111111-2222-3333-4444-555555555555"
+
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	_ = w.WriteField("instruction", "Add this as a separate form")
+	_ = w.WriteField("collab", "true")
+	part, err := w.CreateFormFile("files", "2025-Motor Claim Form.pdf")
+	if err != nil {
+		t.Fatalf("create form file: %v", err)
+	}
+	_, _ = part.Write([]byte("%PDF-1.7 fake"))
+	if err := w.Close(); err != nil {
+		t.Fatalf("close writer: %v", err)
+	}
+
+	rec := r.h.AsOrg(testOrg).PostRaw(turnsPath(convUUID), w.FormDataContentType(), buf.Bytes())
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("multipart POST: code %d, want 202 (%s)", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		TurnID string `json:"turnId"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || out.TurnID == "" {
+		t.Fatalf("202 body = %s (err %v)", rec.Body.String(), err)
+	}
+	r.waitTerminal(t, out.TurnID)
+
+	sent := r.fake.sentTurn(t, 0)
+	if len(sent.req.Attachments) != 1 {
+		t.Fatalf("dispatched attachments = %+v, want exactly one", sent.req.Attachments)
+	}
+	got := sent.req.Attachments[0]
+	// The name is sanitized to a bare base name but otherwise preserved — it is
+	// the dedupe key the agents service matches against history.
+	if got.Name != "2025-Motor Claim Form.pdf" {
+		t.Errorf("name = %q", got.Name)
+	}
+	// A PDF is read natively as a document block, so its real media type rides.
+	if got.MediaType != "application/pdf" {
+		t.Errorf("mediaType = %q, want application/pdf", got.MediaType)
+	}
+	raw, err := base64.StdEncoding.DecodeString(got.Data)
+	if err != nil {
+		t.Fatalf("data is not base64: %v", err)
+	}
+	if string(raw) != "%PDF-1.7 fake" {
+		t.Errorf("decoded bytes = %q", raw)
+	}
+	// The journal carries NAMES for the chips — a separate concern from the
+	// bytes above, and having one without the other is exactly the failure.
+	if sent.req.Journal == nil || len(sent.req.Journal.Attachments) != 1 ||
+		sent.req.Journal.Attachments[0] != "2025-Motor Claim Form.pdf" {
+		t.Errorf("journal attachments = %+v", sent.req.Journal)
+	}
+	if sent.req.Turn.Kind != agentsvc.TurnKindChat || sent.req.Turn.Text != "Add this as a separate form" {
+		t.Errorf("turn = %+v", sent.req.Turn)
+	}
+}
+
+// A JSON send must stay byte-identical to before the multipart arm existed.
+func TestStartTurnJSONCarriesNoAttachments(t *testing.T) {
+	r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"})
+	convUUID := "11111111-2222-3333-4444-666666666666"
+	turnID := r.startTurn(t, convUUID, "", "tidy the requirements")
+	r.waitTerminal(t, turnID)
+
+	sent := r.fake.sentTurn(t, 0)
+	if sent.req.Attachments != nil {
+		t.Errorf("attachments = %+v, want nil for a JSON send", sent.req.Attachments)
+	}
+	if sent.req.Journal == nil || sent.req.Journal.Attachments != nil {
+		t.Errorf("journal attachments = %+v, want nil", sent.req.Journal)
 	}
 }
