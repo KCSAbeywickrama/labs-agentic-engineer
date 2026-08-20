@@ -182,6 +182,10 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		AuthProvider:           seam.AuthProvider,
 		RequestAuthStrategy:    seam.RequestAuthStrategy,
 		ImpersonateOrgResolver: seam.ImpersonateOrgResolver,
+		// A plane whose gateway does not terminate TLS serves only plain http,
+		// while OpenChoreo advertises an https URL beside it regardless. See
+		// Config.PreferPlainHTTPEndpoints.
+		PreferPlainHTTPEndpoints: !cfg.PlatformAPI.DataPlaneGatewayTLS,
 	}
 	projectClient := openchoreo.NewProjectClient(ocConfig)
 	namespaceClient := openchoreo.NewNamespaceClient(ocConfig)
