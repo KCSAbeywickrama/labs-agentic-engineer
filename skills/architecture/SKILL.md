@@ -88,10 +88,16 @@ Do NOT split by:
   owning service starts, not a component of its own. Only a genuinely different
   runtime or scaling profile (above) justifies splitting one off.
 
-When nothing above forces a split, a small system naturally lands at one
-service + one web-application — that is an outcome of the rule, not a target. Name
-components in kebab-case after their responsibility (`expense-api`,
-`expense-webapp`, `report-worker`).
+**Never invent a user-facing surface the requirements did not ask for.** A
+system whose requirements describe a browser app lands at one service + one
+web-application; a system whose only surface is an agent lands at one service +
+one ai-agent and NO web-application. An agent is a complete surface on its own —
+the console's Test tab talks to a deployed agent directly — so "there must be
+something for the user to open" is not a reason to add a SPA. Adding an
+unrequested web-application is the same failure as splitting by domain concept:
+a shape imposed on the requirements instead of read from them. Name components
+in kebab-case after their responsibility (`expense-api`, `expense-webapp`,
+`report-worker`, `packing-agent`).
 
 **An AI agent is `"ai-agent"`.** Reach for it when the requirements call for a
 conversational or autonomous surface — a user talking to the system in their own
@@ -99,10 +105,11 @@ words rather than filling in a form. Its behaviour is authored as
 `agent.afm.md` (the `agent-design` skill), it is implemented in TypeScript, and
 it pins `["agent-building"]`. It is a normal deployable that calls other
 components over HTTP: give it a `component` dependency for every API it uses.
-**An agent a signed-in user reaches is a protected backend** — if a
-web-application calls it, set `"exposure": "internet"` (the browser cannot
-reach an intranet address, so an intranet agent gives the SPA nothing to talk
-to) AND give it the project's shared `thunder-app`
+**An agent a signed-in user reaches is a protected backend** — whether the
+caller is a sibling web-application or the console's Test tab, set
+`"exposure": "internet"` (a browser cannot reach an intranet address, so an
+intranet agent has nothing that can talk to it) AND give it the project's
+shared `thunder-app`
 dependency, under the same dependency NAME the SPA and the sibling APIs use,
 exactly as you would for a service. It is the same sign-in and the same OAuth
 app, not a second one. Do this even when the agent stores nothing and every API
