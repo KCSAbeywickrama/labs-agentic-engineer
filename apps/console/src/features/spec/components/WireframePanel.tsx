@@ -215,7 +215,13 @@ export function WireframePanel({
           border: 0,
           borderRadius: 999,
           px: 1.5,
-          minHeight: 28,
+          py: 0,
+          // Exact, not a floor: the small ToggleButton's own padding makes its
+          // natural height ~37px, which pushed the settled header to ~57px
+          // while the Drawing-chip header pinned at 48px — an ~8px canvas jump
+          // at every turn boundary. 28px + the pill's 4px + row padding = 48px
+          // in BOTH states.
+          height: 28,
           textTransform: "none",
           fontSize: "0.8125rem",
           color: "text.secondary",
