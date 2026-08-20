@@ -32,7 +32,7 @@ services (`Service`, `ComponentService`, `ConfigService`, `DeploymentService`) l
 |---|---|---|
 | `projectcrud` | list / create / get / delete project + get-project-status (the Stage aggregate) | `*Service` |
 | `componentread` | list-components / get-component | `ComponentService` |
-| `componentbuild` | trigger-build / list-builds / build-logs / list-deployments / component-openapi | `ComponentService` |
+| `componentbuild` | trigger-build / list-builds / build-logs / list-deployments / component-openapi / invoke-component | `ComponentService` |
 | `componentconfig` | get / update component env-config | `ConfigService` |
 | `projectusage` | list-project-usage (org-wide per-project usage cards, #291) | `*UsageService` — folds spec-turn + coding-execution per-project usage, labels by live projects, orders by stamped cost |
 
@@ -56,7 +56,7 @@ delivery's kernel: shared behaviour belongs in the root the slices import.
 | `ComponentEnvVarReader` · `RuntimeFileProvider` | needs | the config slice and `dependencies/runtimeconfig` — the two projections whose values ride the binding's workload overrides. Both are declared consumer-side and both distinguish "no values" from "cannot compute yet": an unready projection leaves its field UNMANAGED rather than writing an empty one over the user's values |
 | `OrgPublisher` | needs | `organization` — per-org Thunder publisher provisioning + the IDP profile a protected API's JWT validation is pinned to. Best-effort: a failure composes an unpinned trait rather than failing a version's deploy |
 | `ProjectLister` | needs | `sourcecontrol`, at the root — every project the platform tracks, for the converge sweep. The git-repository index rather than the executions table, because the run loop mints no execution rows and a sweep reading those saw nothing on that rail |
-| `Service` · `ComponentService` · `ConfigService` | offers | the edge (the 14 public ops) |
+| `Service` · `ComponentService` · `ConfigService` | offers | the edge — every op this domain serves. The authoritative list is `edge/method_origin_test.go`'s `opOwner` ledger (a reflection gate fails if an op is served by an embed the ledger does not name), so it is not restated here to go stale |
 
 ## Owns
 - The OC `Project`/`Component` aggregate roots (OC is the store) and `ReleaseBinding` write-authority; the
@@ -131,4 +131,19 @@ delivery's kernel: shared behaviour belongs in the root the slices import.
   always designed to show. A slug deleted and recreated therefore renders TWO cards — the live project
   billed only for its own work, and the incarnation that spent the rest — because a slug is not an
   identity. Spec-turn spend carries no lifetime marker and sits whole on whichever card is current.
+- **The invoke relay is scoped egress, not a proxy.** `invoke-component` makes ONE call to a component's
+  own gateway URL, as the caller, because the console's Test tab runs in a browser that cannot call that
+  gateway directly — the CORS allowlist names the project's web app, not the console. Every guardrail on it
+  is load-bearing, and each one is the fix for a specific way the route becomes SSRF: the component must
+  appear in the CALLER'S OWN project design (404 before any egress); the path is validated
+  (`validateInvokePath`) against absolute URLs, `..` traversal, and scheme-relative `//`, after repeated
+  percent-decoding and a valid-UTF-8/no-control-character check, because a single-pass substring test sees
+  through neither `%2e%2e` nor an overlong `%c0%ae`; redirects are RELAYED, never followed, since a 3xx is
+  the component's answer and following one would send the caller's bearer to an address nothing validated;
+  only Content-Type/Accept/Authorization are ever sent upstream, so the request is built from scratch rather
+  than forwarded; and request/response caps plus a timeout keep it from becoming an amplifier. The caller's
+  bearer is forwarded exactly as given — the relay never mints or upgrades a credential, so an unauthorised
+  caller gets the gateway's own 401 rather than our access. **Gateway-only is the point:** the URL comes
+  from the component's deployment endpoint, and it is that gateway which validates the bearer and injects
+  the `x-user-id` the agent gates on. A relay pointed at a pod address would bypass the identity hop.
 - Platform-wide rules (tenant gate, secrets fence, feature-free domains) → [../../README.md](../../README.md).

@@ -1,6 +1,7 @@
 # Component Test tab — design
 
-**Status:** approved in conversation, 2026-08-18. Supersedes nothing.
+**Status:** first cut shipped — the console carries a Test tab that chats with a
+deployed ai-agent through the BFF's `invoke-component` relay. Supersedes nothing.
 **Scope of this spec:** the Test tab, its aep-api proxy, and the first tester
 (agent chat). The API tester is designed for but explicitly a second cut.
 

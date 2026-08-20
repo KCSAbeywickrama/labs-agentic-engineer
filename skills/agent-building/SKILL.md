@@ -138,6 +138,19 @@ dependency. Its connection details arrive as five env vars named
 in config like every other injected value, and report any that are unset from
 `/healthz`'s `missing` list. Dependency: `pg`.
 
+Map them exactly as below. The database name is the one to get right: the
+resource's output is `dbname`, so the variable is `MEMORY_DB_DBNAME` — not
+`MEMORY_DB_NAME`, which does not exist and which the field name below
+otherwise invites.
+
+```ts
+memoryDbHost:     process.env.MEMORY_DB_HOST,
+memoryDbPort:     process.env.MEMORY_DB_PORT,
+memoryDbName:     process.env.MEMORY_DB_DBNAME,
+memoryDbUser:     process.env.MEMORY_DB_USER,
+memoryDbPassword: process.env.MEMORY_DB_PASSWORD,
+```
+
 **Copy this schema and these queries — do not redesign them.** One table, the
 whole conversation as one JSONB value, loaded and saved as a unit:
 
