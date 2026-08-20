@@ -43,6 +43,17 @@ export type ChatMessage =
        * and logs from before this field simply render without a time.
        */
       createdAt?: number;
+      /**
+       * File NAMES attached to this message (#428) — never bytes. The bytes are
+       * conversation-scoped model content the platform never stores (ADR-0019),
+       * so there is nothing here to re-send or re-render from; these names exist
+       * only to say what went with the message.
+       *
+       * Optional and absent for every message without attachments, so logs
+       * persisted before this field still parse. On rehydrate they come from the
+       * turn journal, which is why chips survive a reload.
+       */
+      attachments?: string[];
     }
   | { id: string; role: "assistant"; turnId: string; content: string }
   | {

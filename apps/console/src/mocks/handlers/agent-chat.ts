@@ -26,10 +26,20 @@
 //   "teammate-turn"  — same history, plus a running turn a teammate started
 //                      (its triggering message is in the history; the reply
 //                      streams from the same scripted SSE builder below).
-//   unset            — unchanged: empty rehydrate, no active turn.
+//   unset            — unchanged: empty rehydrate, no active turn, EXCEPT that
+//                      messages sent in this session are echoed back on
+//                      rehydrate so chat attachments (#428) can be verified
+//                      surviving a reload — the real journal does this
+//                      server-side.
 
 import { http, HttpResponse } from "msw";
 import { ANSWER_PREFIX, ANSWERS_PREFIX } from "@aep/agent-stream";
+import {
+  MAX_ATTACHMENT_FILES,
+  MAX_ATTACHMENT_FILE_BYTES,
+  MAX_CHAT_ATTACHMENT_TOTAL_BYTES,
+} from "../../features/agent-chat/lib/chatAttachments";
+import { isAcceptedAttachment } from "../../lib/attachments";
 import {
   activeTeammateTurn,
   multiuserHistory,
@@ -44,6 +54,41 @@ let turnCounter = 0;
 // shared Yjs map (and a closed one would suppress a fresh ask).
 const instanceId = Math.random().toString(36).slice(2, 8);
 const turnInstruction = new Map<string, string>();
+
+/**
+ * Messages sent in THIS page session, per conversation — the mock stand-in for
+ * the server's turn journal (#428/#463). It exists so the rehydrate GET can
+ * echo a sent message back with its attachment NAMES, which is the only way to
+ * verify in mock mode that chips survive a reload. Names only, never bytes:
+ * that is exactly the journal's contract (ADR-0019).
+ */
+const sentMessages = new Map<string, { role: string; content: string; attachments?: string[] }[]>();
+
+/**
+ * The server's attachment guard, mirrored for mock mode. Returns the rejection
+ * message, or null when the set is admissible. Order matches the real handler:
+ * count, then per-file type and size, then the whole message's total.
+ */
+function rejectAttachments(files: File[]): string | null {
+  if (files.length === 0) return "no files in the multipart request";
+  if (files.length > MAX_ATTACHMENT_FILES) {
+    return `at most ${MAX_ATTACHMENT_FILES} files per message`;
+  }
+  let total = 0;
+  for (const file of files) {
+    if (!isAcceptedAttachment(file.name)) {
+      return `${file.name}: unsupported type`;
+    }
+    if (file.size > MAX_ATTACHMENT_FILE_BYTES) {
+      return `${file.name} exceeds the 5 MiB per-file limit`;
+    }
+    total += file.size;
+  }
+  if (total > MAX_CHAT_ATTACHMENT_TOTAL_BYTES) {
+    return `attachments total ${total} bytes, over the 15 MiB per-message limit`;
+  }
+  return null;
+}
 
 function chatScenario(): ChatScenario | null {
   return localStorage.getItem("aep:mock:chat") as ChatScenario | null;
@@ -109,15 +154,45 @@ export const agentChatHandlers = [
     return HttpResponse.json(threadView(fresh), { status: 201 });
   }),
 
-  http.post("*/api/v1/projects/:projectName/agents/:conversationId/messages", async ({ request }) => {
-    const body = (await request.json()) as { instruction?: string };
+  http.post("*/api/v1/projects/:projectName/agents/:conversationId/messages", async ({ request, params }) => {
+    // Two content types (#428): JSON as before, multipart when the message
+    // carries attachments. Reading `request.json()` unconditionally would throw
+    // on the multipart body, so the branch is on the header, not a try/catch.
+    const isMultipart = (request.headers.get("content-type") ?? "").includes("multipart/form-data");
+    let instruction = "";
+    let attachments: string[] = [];
+    if (isMultipart) {
+      const form = await request.formData();
+      instruction = String(form.get("instruction") ?? "");
+      const files = form.getAll("files").filter((f): f is File => f instanceof File);
+      // The server's own guard, mirrored: the console screens first, so a
+      // rejection reaching here means a hostile or buggy client. Modelled so the
+      // 400 path is exercisable in mock mode rather than only in production.
+      const rejection = rejectAttachments(files);
+      if (rejection) {
+        return HttpResponse.json({ code: "invalid_request", message: rejection }, { status: 400 });
+      }
+      attachments = files.map((f) => f.name);
+    } else {
+      const body = (await request.json()) as { instruction?: string };
+      instruction = body.instruction ?? "";
+    }
     turnCounter += 1;
     const turnId = `mock-turn-${instanceId}-${turnCounter}`;
-    turnInstruction.set(turnId, body.instruction ?? "");
+    turnInstruction.set(turnId, instruction);
+    // Record it the way the journal would, so a reload shows the chips again.
+    const conversationId = params.conversationId as string;
+    const log = sentMessages.get(conversationId) ?? [];
+    log.push({
+      role: "user",
+      content: instruction,
+      ...(attachments.length > 0 ? { attachments } : {}),
+    });
+    sentMessages.set(conversationId, log);
     return HttpResponse.json({ turnId }, { status: 202 });
   }),
 
-  http.get("*/api/v1/projects/:projectName/agents/:conversationId/messages", () => {
+  http.get("*/api/v1/projects/:projectName/agents/:conversationId/messages", ({ params }) => {
     const scenario = chatScenario();
     if (scenario === "multiuser") {
       return HttpResponse.json({ status: "done", messages: multiuserHistory });
@@ -125,7 +200,13 @@ export const agentChatHandlers = [
     if (scenario === "teammate-turn") {
       return HttpResponse.json({ status: "done", messages: teammateTurnHistory });
     }
-    return HttpResponse.json({ status: "done", messages: [] });
+    // Echo this session's own sends, attachment names included — the journal's
+    // job in production. Empty for a conversation nothing was sent to, which is
+    // the pre-#428 behaviour unchanged.
+    return HttpResponse.json({
+      status: "done",
+      messages: sentMessages.get(params.conversationId as string) ?? [],
+    });
   }),
 
   http.get("*/api/v1/projects/:projectName/turns/active", () => {

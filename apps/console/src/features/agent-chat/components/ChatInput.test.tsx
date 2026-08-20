@@ -26,6 +26,7 @@ import { ChatInput } from "./ChatInput";
 function renderInput(props: Partial<Parameters<typeof ChatInput>[0]> = {}) {
   const onSubmit = vi.fn();
   const onChange = vi.fn();
+  const onFilesChange = vi.fn();
   render(
     <OxygenUIThemeProvider theme={OxygenTheme}>
       <ChatInput
@@ -34,11 +35,13 @@ function renderInput(props: Partial<Parameters<typeof ChatInput>[0]> = {}) {
         onSubmit={onSubmit}
         disabled={false}
         contextLabel="shop"
+        files={[]}
+        onFilesChange={onFilesChange}
         {...props}
       />
     </OxygenUIThemeProvider>,
   );
-  return { onSubmit, onChange };
+  return { onSubmit, onChange, onFilesChange };
 }
 
 afterEach(cleanup);
@@ -77,5 +80,123 @@ describe("ChatInput", () => {
   it("disables send when the draft is empty", () => {
     renderInput({ value: "   " });
     expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
+  });
+});
+
+// --- Chat attachments (#428) -------------------------------------------------
+
+/** A File of a given size without allocating the bytes. */
+function fileOf(name: string, size = 16): File {
+  const file = new File(["x"], name);
+  Object.defineProperty(file, "size", { value: size });
+  return file;
+}
+
+function picker(): HTMLInputElement {
+  // The hidden input inside the paperclip's `component="label"` IconButton.
+  const input = document.querySelector('input[type="file"]');
+  if (!input) throw new Error("file input not rendered");
+  return input as HTMLInputElement;
+}
+
+describe("ChatInput attachments", () => {
+  it("offers an attach control that accepts every readable type", () => {
+    renderInput();
+    expect(
+      screen.getByRole("button", { name: "Attach files to this message" }),
+    ).toBeInTheDocument();
+    const accept = picker().getAttribute("accept") ?? "";
+    for (const ext of [".pdf", ".png", ".gif", ".webp", ".csv", ".yaml", ".rst"]) {
+      expect(accept, ext).toContain(ext);
+    }
+    expect(accept).not.toContain(".docx");
+  });
+
+  it("hands accepted files to the caller", () => {
+    const { onFilesChange } = renderInput();
+    fireEvent.change(picker(), { target: { files: [fileOf("mockup.pdf")] } });
+    expect(onFilesChange).toHaveBeenCalledOnce();
+    expect(onFilesChange.mock.calls[0]?.[0].map((f: File) => f.name)).toEqual(["mockup.pdf"]);
+  });
+
+  it("renders a card per attached file, with its type badge", () => {
+    renderInput({ files: [fileOf("mockup.pdf"), fileOf("rows.csv")] });
+    expect(screen.getByText("mockup.pdf")).toBeInTheDocument();
+    expect(screen.getByText("rows.csv")).toBeInTheDocument();
+    expect(screen.getByText("PDF")).toBeInTheDocument();
+    expect(screen.getByText("CSV")).toBeInTheDocument();
+  });
+
+  it("keeps the remove control in the tab order for keyboard users", () => {
+    // Mounted, not hover-mounted: opacity-toggled so `:focus-within` can bring
+    // it back for users who never hover.
+    renderInput({ files: [fileOf("mockup.pdf")] });
+    expect(screen.getByRole("button", { name: "Remove mockup.pdf" })).toBeInTheDocument();
+  });
+
+  it("removes by name, leaving the rest attached", () => {
+    const { onFilesChange } = renderInput({ files: [fileOf("a.md"), fileOf("b.md")] });
+    fireEvent.click(screen.getByRole("button", { name: "Remove a.md" }));
+    expect(onFilesChange.mock.calls[0]?.[0].map((f: File) => f.name)).toEqual(["b.md"]);
+  });
+
+  it("surfaces one notice per rejected file and attaches nothing", () => {
+    const { onFilesChange } = renderInput();
+    fireEvent.change(picker(), {
+      target: { files: [fileOf("spec.docx"), fileOf("notes.pages")] },
+    });
+    expect(onFilesChange).not.toHaveBeenCalled();
+    expect(screen.getByText("spec.docx")).toBeInTheDocument();
+    expect(screen.getByText("notes.pages")).toBeInTheDocument();
+  });
+
+  it("renders the rejection reason verbatim, not lower-cased", () => {
+    renderInput();
+    fireEvent.change(picker(), {
+      target: { files: [fileOf("huge.pdf", 6 * 1024 * 1024)] },
+    });
+    // "5 mb" would be wrong, and so would mangling the user's own file name.
+    expect(screen.getByText(/Larger than 5 MB/)).toBeInTheDocument();
+  });
+
+  it("still requires text — an attachment alone cannot send", () => {
+    // The shared TurnSpec validator rejects an empty chat turn, so the button
+    // must not become enabled just because a file is attached.
+    renderInput({ value: "", files: [fileOf("mockup.pdf")] });
+    expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
+  });
+
+  it("enables send once there is text alongside the attachment", () => {
+    renderInput({ value: "what is wrong here?", files: [fileOf("shot.png")] });
+    expect(screen.getByRole("button", { name: "Send message" })).toBeEnabled();
+  });
+
+  it("locks the attach control while a turn runs", () => {
+    renderInput({ disabled: true, files: [fileOf("mockup.pdf")] });
+    // The paperclip is an IconButton with `component="label"`, and a <label> has
+    // no native `disabled` — MUI marks it aria-disabled. What actually stops the
+    // picker from opening is the hidden input's own `disabled`, so BOTH are
+    // asserted: the announced state for assistive tech, and the real guard.
+    expect(
+      screen.getByRole("button", { name: "Attach files to this message" }),
+    ).toHaveAttribute("aria-disabled", "true");
+    expect(picker()).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Remove mockup.pdf" })).toBeDisabled();
+  });
+
+  it("refuses a drop while a turn runs, rather than discarding it silently", () => {
+    const { onFilesChange } = renderInput({ disabled: true });
+    fireEvent.drop(screen.getByTestId("chat-composer-dropzone"), {
+      dataTransfer: { files: [fileOf("mockup.pdf")] },
+    });
+    expect(onFilesChange).not.toHaveBeenCalled();
+  });
+
+  it("accepts a drop on the composer when it is free", () => {
+    const { onFilesChange } = renderInput();
+    fireEvent.drop(screen.getByTestId("chat-composer-dropzone"), {
+      dataTransfer: { files: [fileOf("sketch.png")] },
+    });
+    expect(onFilesChange.mock.calls[0]?.[0].map((f: File) => f.name)).toEqual(["sketch.png"]);
   });
 });

@@ -101,8 +101,10 @@ here: they're the open `console` + `feature` issues.
   scenes client-side (no BE handshake, no contract change; ADR-0008) —
   [#348](https://github.com/wso2/labs-agentic-engineer/issues/348)
 - Project create — reference document upload on the "What do you want to
-  build?" view: `.md`/`.txt`/`.pdf`/`.png`/`.jpg`/`.jpeg` (≤10 files, ≤5 MB
-  each) attached in a chat-style composer and uploaded post-create over
+  build?" view. Two groups, both readable by the models: `.pdf`/`.png`/`.jpg`/
+  `.jpeg`/`.gif`/`.webp` read natively as file parts, and `.md`/`.txt`/`.csv`/
+  `.tsv`/`.json`/`.yaml`/`.yml`/`.xml`/`.html`/`.rst` read as text (≤10 files,
+  ≤5 MB each) — attached in a chat-style composer and uploaded post-create over
   multipart to `POST /projects/{name}/references`. References are **transient
   turn inputs, never committed** (ADR-0017): bytes live on the shared
   `/workspaces` volume for the project's life and are overlaid into each turn's
@@ -110,6 +112,19 @@ here: they're the open `console` + `feature` issues.
   through the idea-steer channel. No console surface after create —
   [#383](https://github.com/wso2/labs-agentic-engineer/issues/383)
   (BE handshake: [#384](https://github.com/wso2/labs-agentic-engineer/issues/384))
+- Agent chat — attach files to a message: the composer takes a paperclip and a
+  drop target, the same cards and accepted set as the create view, and chips on
+  the sent message that survive a reload. Attachments are **conversation-scoped
+  model content** (ADR-0019): nothing is stored server-side and nothing is
+  committed — the bytes ride one multipart `POST
+  /projects/{p}/agents/{conversationId}/messages` into the turn and are durable
+  only as parts of the conversation's history, which is what makes re-sending
+  one free (the agents service dedupes by file name). Caps all restate the
+  model's own 20 MiB encoded per-turn budget: ≤10 files, ≤5 MB each, ≤15 MB raw
+  in total. Any turn started from the composer carries them — chat, flow and
+  `/start` alike — and the create view stays the only door to the project
+  reference store —
+  [#428](https://github.com/wso2/labs-agentic-engineer/issues/428)
 - Spec view — prototype user flows: `wireframes.dsl` declares named
   `flow "<name>"` blocks (optional `role`/`description` lines) listing each
   persona's screens in walkthrough order; the prototype toolbar leads with a
