@@ -430,3 +430,36 @@ func TestDispatchable_AGateHoldsWorkItDoesNotEraseIt(t *testing.T) {
 		t.Fatal("the closed gate must release the task the milestone was holding")
 	}
 }
+
+// TestAdoptableByATaskRun is the guard that has to hold WITHOUT echo
+// suppression. An install with no GitHub App writes through a human PAT, so
+// every label the platform stamps returns as a human-sender delivery that
+// suppression cannot tell from a real human's — and with `aep` as the arming
+// trigger, the platform minting its own validation task adopted it as a bug-fix
+// run. That run then parked on an empty working set and held the per-milestone
+// live-run index, so the validation run could never be admitted and the version
+// was never judged. Routing by kind is sender-independent.
+func TestAdoptableByATaskRun(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		labels []string
+		want   bool
+	}{
+		// The live failure, exactly as it stood: the platform's own validation task.
+		{"the version's validation task is not a bug-fix run's work",
+			[]string{LabelAgentWork, KindValidation}, false},
+		{"a dispatch gate is nobody's work", []string{KindProvision}, false},
+		{"planned work belongs to the run holding the build mutex",
+			[]string{LabelAgentWork, KindDevelopment}, false},
+		{"a defect is adoptable", []string{LabelAgentWork, KindBug}, true},
+		{"a conflict is adoptable", []string{LabelAgentWork, KindConflict}, true},
+		// The ordinary human path: arming a bare issue, and the console's dispatch
+		// button handing over one that carries nothing at all.
+		{"an armed issue with no kind is adoptable", []string{LabelAgentWork}, true},
+		{"an unlabelled issue is adoptable", nil, true},
+	} {
+		if got := AdoptableByATaskRun(c.labels); got != c.want {
+			t.Errorf("AdoptableByATaskRun(%s) = %v, want %v", c.name, got, c.want)
+		}
+	}
+}

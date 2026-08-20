@@ -129,11 +129,33 @@ func issueBody(action string, issue, milestone int, label, sender string, topLev
 	return []byte(fmt.Sprintf(`{
 	  "action": %q,
 	  %s
-	  "issue": {"number": %d, "state": "open", "title": "a task", "milestone": %s},
+	  "issue": {"number": %d, "state": "open", "title": "a task", "milestone": %s, "labels": [{"name": %q}]},
 	  "label": {"name": %q},
 	  "repository": {"full_name": %q},
 	  "sender": {"login": %q}
-	}`, action, top, issue, ms, label, testRepo, sender))
+	}`, action, top, issue, ms, label, label, testRepo, sender))
+}
+
+// issueBodyWithLabels is issueBody where the issue's WHOLE label set differs
+// from the one label that fired the delivery. That gap is the whole subject of
+// the adoption-routing tests: arming an issue that is ALREADY classified sends
+// `aep` as the fired label while the kind sits in the issue's own set.
+func issueBodyWithLabels(action string, issue, milestone int, fired string, labels []string, sender string) []byte {
+	ms := "null"
+	if milestone > 0 {
+		ms = fmt.Sprintf(`{"number": %d, "title": "v%d"}`, milestone, milestone)
+	}
+	quoted := make([]string, 0, len(labels))
+	for _, l := range labels {
+		quoted = append(quoted, fmt.Sprintf(`{"name": %q}`, l))
+	}
+	return []byte(fmt.Sprintf(`{
+	  "action": %q,
+	  "issue": {"number": %d, "state": "open", "title": "a task", "milestone": %s, "labels": [%s]},
+	  "label": {"name": %q},
+	  "repository": {"full_name": %q},
+	  "sender": {"login": %q}
+	}`, action, issue, ms, strings.Join(quoted, ","), fired, testRepo, sender))
 }
 
 // ---- §8 row 1: auto-merge policy seam -------------------------------------
@@ -848,5 +870,65 @@ func TestNoRunRow_EveryHandlerIsInert(t *testing.T) {
 	}
 	if len(h.cycles.notedPR) != 0 || len(h.cycles.closed) != 0 {
 		t.Errorf("no run row must mean no cycle write, got %v / %v", h.cycles.notedPR, h.cycles.closed)
+	}
+}
+
+// TestAdoption_NeverAdoptsThePlatformsOwnValidationTask is the live failure this
+// guard exists for, and it is a webhook-level test on purpose: the defect was
+// invisible at the unit level because it depended on WHO GitHub said the sender
+// was.
+//
+// The platform mints the version's validation task with `aep` + `validation`.
+// On an install with a GitHub App that create returns as a self-sender delivery
+// and echo suppression drops it — but an install with no App writes through a
+// human PAT, so the same delivery arrives indistinguishable from a human arming
+// an issue. Adoption then started a bug-fix run over the milestone, that run
+// parked on an empty working set, and because it was non-terminal it held the
+// per-milestone live-run index — so the validation run could never be admitted
+// and the version was never judged.
+//
+// The sender here is a HUMAN precisely so suppression cannot be what saves it.
+func TestAdoption_NeverAdoptsThePlatformsOwnValidationTask(t *testing.T) {
+	h := newHarness(t, aRun("run-old", 5, delivery.RunStateSucceeded))
+
+	body := issueBodyWithLabels("labeled", 6, 5, delivery.LabelAgentWork,
+		[]string{delivery.LabelAgentWork, delivery.KindValidation}, "a-human-pat")
+	if err := h.deliver(t, "issues", body); err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	if len(h.sup.started) != 0 {
+		t.Fatalf("the platform's own validation task started a run: %+v — it is the "+
+			"reconcile sweep's to route, as a validation run", h.sup.started)
+	}
+}
+
+// TestAdoption_NeverAdoptsPlannedWork: a dev run owns the version's planned work
+// and holds its build mutex. A task run picking it up would work it with
+// different budgets, and the two would be on one branch.
+func TestAdoption_NeverAdoptsPlannedWork(t *testing.T) {
+	h := newHarness(t, aRun("run-old", 5, delivery.RunStateSucceeded))
+
+	body := issueBodyWithLabels("labeled", 9, 5, delivery.LabelAgentWork,
+		[]string{delivery.LabelAgentWork, delivery.KindDevelopment}, "a-human-pat")
+	if err := h.deliver(t, "issues", body); err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	if len(h.sup.started) != 0 {
+		t.Fatalf("planned work started a bug-fix run: %+v", h.sup.started)
+	}
+}
+
+// TestAdoption_StillAdoptsARealDefect is the other half — the guard must not
+// have closed the door on the path adoption exists for.
+func TestAdoption_StillAdoptsARealDefect(t *testing.T) {
+	h := newHarness(t, aRun("run-old", 5, delivery.RunStateSucceeded))
+
+	body := issueBodyWithLabels("labeled", 12, 0, delivery.LabelAgentWork,
+		[]string{delivery.LabelAgentWork, delivery.KindBug, delivery.SrcIncident}, "a-human-pat")
+	if err := h.deliver(t, "issues", body); err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	if len(h.sup.started) != 1 || h.sup.started[0].Kind != delivery.RunKindTask {
+		t.Fatalf("a real defect must still start a task run, got %+v", h.sup.started)
 	}
 }

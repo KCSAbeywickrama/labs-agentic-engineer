@@ -250,6 +250,19 @@ func (e *Events) milestoneCancelled(ctx context.Context, orgID, projectID string
 	if newest.State != delivery.RunStateCancelled {
 		return false, nil
 	}
+	// Only a cancelled run that ABANDONS THE INCREMENT suppresses the milestone,
+	// which is the dev species alone — the same predicate that decides whether the
+	// cancel closes the milestone at all.
+	//
+	// A cancelled task or validation run leaves the version exactly as deployed as
+	// it was and its milestone open, so the work still in it is still somebody's.
+	// Treating those as an abandoned increment is what stranded a version: cancel a
+	// bug-fix run and the open validation task beside it became invisible to the
+	// sweep, so nothing ever judged the version and no report was ever produced.
+	kind, _ := delivery.RoutableRunKind(newest.Kind, newest.Origin)
+	if !delivery.CancelClosesTheMilestone(kind) {
+		return false, nil
+	}
 	slog.DebugContext(ctx, "eventcore: reconcile sweep skipping a cancelled increment",
 		"project", projectID, "milestone", milestoneNumber, "run", newest.ID)
 	return true, nil

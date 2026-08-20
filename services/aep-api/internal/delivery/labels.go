@@ -369,6 +369,37 @@ func InCancelledWork(runKind string, labels []string) bool {
 // already promoted keep serving.
 func CancelClosesTheMilestone(runKind string) bool { return runKind == RunKindDev }
 
+// AdoptableByATaskRun reports whether an issue may be handed to a BUG-FIX run.
+//
+// Adoption starts a task run, so the only issues it may fire for are the ones a
+// task run works. The three kinds it refuses each belong to a different
+// workflow, and handing any of them to a task run puts the wrong species on the
+// work: `validation` is the version's judgement and is started by the reconcile
+// sweep, `provision` is a dispatch hold nobody works, and `development` is
+// planned work that belongs to the dev run holding the version's build mutex.
+//
+// An issue with NO kind is adoptable, and that is the point: a human arming a
+// bare issue is the ordinary adoption path, and every working-set rule reads such
+// an issue as a bug (WorkKindOf).
+//
+// This is the guard that has to hold WITHOUT the echo suppression, not with it.
+// Suppression drops deliveries whose sender is the platform's own App login, but
+// an install with no GitHub App writes through a human PAT — so on those installs
+// every label the platform stamps returns as a human-sender delivery that cannot
+// be told apart from a real human's. With `aep` as the arming trigger, the
+// platform minting its own validation task therefore adopted it as a bug-fix run,
+// which then parked on an empty working set and held the per-milestone live-run
+// index so the validation run could never be admitted. Routing by KIND is
+// sender-independent, and so it fixes the case suppression cannot reach.
+func AdoptableByATaskRun(labels []string) bool {
+	switch KindOf(labels) {
+	case KindValidation, KindProvision, KindDevelopment:
+		return false
+	default:
+		return true
+	}
+}
+
 // IsDispatchGate reports whether an issue is a dispatch hold. Note it does NOT
 // test the arming switch: a gate carries none by construction, and reading a
 // gate through `aep` is what would make it invisible to the predicate that

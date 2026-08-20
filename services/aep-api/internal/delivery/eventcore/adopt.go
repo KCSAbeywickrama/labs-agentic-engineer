@@ -39,6 +39,14 @@ type AdoptTarget struct {
 	Number          int
 	MilestoneNumber int
 	MilestoneTitle  string
+	// Labels is the issue's label set, when the caller has it. Adoption starts a
+	// TASK run, so it routes on the KIND these carry and refuses an issue that
+	// belongs to another species (delivery.AdoptableByATaskRun).
+	//
+	// Empty means "unclassified", which adopts — the console's dispatch button
+	// hands over a bare issue a human has not labelled at all, and that is the
+	// ordinary path rather than a missing check.
+	Labels []string
 }
 
 // AdoptIssue hands one issue to the coding agent, from either of the two
@@ -69,6 +77,14 @@ type AdoptTarget struct {
 // counts give — the two must not disagree about one issue.
 func (e *Events) AdoptIssue(ctx context.Context, orgID, projectID string, target AdoptTarget) error {
 	if target.Number == 0 || e.p.Runs == nil {
+		return nil
+	}
+	// Route on the kind BEFORE anything is written. An issue that belongs to
+	// another species must not be pulled into a bug-fix run, and it must not be
+	// moved into the deployed version's milestone on the way there either.
+	if !delivery.AdoptableByATaskRun(target.Labels) {
+		slog.DebugContext(ctx, "eventcore: not adopting — this issue is another run species' work",
+			"issue", target.Number, "kind", delivery.KindOf(target.Labels))
 		return nil
 	}
 	milestone := MilestoneRef{Number: target.MilestoneNumber, Title: target.MilestoneTitle}

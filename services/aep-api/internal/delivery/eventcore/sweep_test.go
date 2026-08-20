@@ -352,6 +352,32 @@ func TestSweep_SkipsAMilestoneWhoseIncrementWasCancelled(t *testing.T) {
 	}
 }
 
+// TestSweep_ACancelledBUGFIXRunDoesNotAbandonTheVersion is the other side of the
+// rule, and it is the live failure this scoping exists for.
+//
+// Only a cancelled DEV run abandons an increment — the same predicate that
+// decides whether the cancel closes the milestone. A cancelled task or validation
+// run leaves the version exactly as deployed as it was, and its milestone open,
+// so the work still in it is still somebody's.
+//
+// Skipping on ANY cancelled run stranded a delivered version: a bug-fix run was
+// cancelled, and the open validation task beside it went invisible to the sweep,
+// so nothing ever judged the version and no report was ever produced.
+func TestSweep_ACancelledBUGFIXRunDoesNotAbandonTheVersion(t *testing.T) {
+	cancelledTask := aRun("run-task-cancelled", 7, delivery.RunStateCancelled)
+	cancelledTask.Kind, cancelledTask.Origin = delivery.RunKindTask, delivery.RunOriginIncidentAdoption
+	h := newHarness(t, cancelledTask)
+	h.issues.withValidationIssue(7, 6)
+
+	if err := sweepOver(h).Once(t.Context()); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if len(h.sup.started) != 1 || h.sup.started[0].Kind != delivery.RunKindValidation {
+		t.Fatalf("an open validation task beside a cancelled BUG-FIX run must still be "+
+			"judged, got %+v", h.sup.started)
+	}
+}
+
 // TestSweep_ACancelledMilestoneSurvivesRepeatedTicks is the SUPPRESSION PROOF, and
 // the reason the cancel closes its issues at all.
 //
