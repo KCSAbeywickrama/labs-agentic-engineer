@@ -16,10 +16,22 @@
  * under the License.
  */
 
-// Pins the /chat contract every platform ai-agent speaks under server memory
-// (skills/agent-building) against the real AI SDK. The store is a Map standing
-// in for the skill's prescribed SQL — same keying: (conversationId, userId).
-// Three claims generated agents and their callers rely on:
+// Exercises the /chat contract every platform ai-agent speaks under server
+// memory (skills/agent-building) against the REAL AI SDK.
+//
+// READ THIS BEFORE TRUSTING IT. Nothing here imports from this repo: the store
+// and the handler below are written in this file, and the skill's prescribed
+// SQL is never executed. So this file CANNOT catch the skill drifting — delete
+// the user fence from its SELECT and every test here still passes. The gate
+// that catches that is agent-building-skill-gate.test.ts, which asserts on the
+// markdown itself; the two are meant to be read together.
+//
+// What this file genuinely proves is one thing a repo change could not
+// silently invalidate: that the AI SDK's generateText + stepCountIs returns
+// `steps[].response.messages` in an order which, appended to the caller's own
+// turn, reconstitutes a usable history INCLUDING the tool trail. Everything
+// below is that fact, dressed in the contract's shape so the shape stays
+// legible. The claims it demonstrates (not proves-in-production):
 //   1. A turn without a conversationId creates one and returns it; the caller
 //      stores ONLY the id.
 //   2. The agent persists the FULL conversation (history + user turn + trail,
@@ -78,14 +90,18 @@ function loadConversation(id: string, userId: string): ModelMessage[] | null {
   const row = store.get(id);
   return row && row.userId === userId ? row.messages : null; // WHERE user_id = $2
 }
-function createConversation(userId: string): string {
-  const id = randomUUID();
-  store.set(id, { userId, messages: [] });
-  return id;
+// Mirrors the skill's INSERT .. ON CONFLICT upsert: there is NO separate
+// "create the row" step. A new id is minted in memory only, and the row comes
+// into existence on the first successful save — so a turn that throws before
+// saving leaves nothing behind to orphan. The earlier shape here (insert an
+// empty row up front, update-only save) is one the skill explicitly forbids.
+function newConversationId(): string {
+  return randomUUID();
 }
 function saveConversation(id: string, userId: string, messages: ModelMessage[]): void {
   const row = store.get(id);
-  if (row && row.userId === userId) store.set(id, { userId, messages });
+  if (row && row.userId !== userId) return; // WHERE conversations.user_id = $2
+  store.set(id, { userId, messages });
 }
 
 /** The exact handler flow skills/agent-building prescribes. */
@@ -101,7 +117,7 @@ async function chatTurn(userId: string, body: { conversationId?: string; message
     history = loaded;
     conversationId = body.conversationId;
   } else {
-    conversationId = createConversation(userId);
+    conversationId = newConversationId();
     history = [];
   }
   const full: ModelMessage[] = [...history, { role: "user", content: body.message }];

@@ -195,3 +195,19 @@ describe("parseAgentAfm — errors", () => {
     expect(isParseError(result)).toBe(true);
   });
 });
+
+describe("parseAgentAfm — fenced code in the prompt body", () => {
+  test("does not read a '#' inside a code fence as a section heading", () => {
+    const spec = parsed(
+      BOOKING_AGENT.replace(
+        "Short, friendly, and practical.",
+        "Run it like this:\n\n```bash\n# install first\nnpm i\n```\n\nThen reply.",
+      ),
+    );
+
+    const style = spec.prompt.find((s) => s.heading === "Style");
+    expect(spec.prompt.map((s) => s.heading)).toEqual(["Role", "Instructions", "Style"]);
+    expect(style?.body).toContain("# install first");
+    expect(style?.body).toContain("Then reply.");
+  });
+});

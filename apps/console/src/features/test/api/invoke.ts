@@ -79,7 +79,12 @@ export async function sendChat(
     };
   }
 
-  if (data.status === 404) return { kind: "conversation-expired" };
+  // A 404 only means "your conversation is gone" if we actually asked about a
+  // conversation. On a turn that carried no id there is nothing to expire, so
+  // the 404 is the gateway or the route answering — most often /chat not wired
+  // yet. Reporting that as "conversation expired" hid a routing failure behind
+  // a message that could never come true.
+  if (data.status === 404 && turn.conversationId) return { kind: "conversation-expired" };
   if (data.status === 401) return { kind: "session-expired" };
   if (data.status !== 200) {
     return {

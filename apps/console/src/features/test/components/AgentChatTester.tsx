@@ -79,6 +79,11 @@ export function AgentChatTester({
     setEntries([]);
     setConversationId(undefined);
     setInvokeError(null);
+    // `notReachable` is a memory of one 409, not a live fact — a deploy that
+    // has since finished does not retract it. Leaving it set kept the input
+    // disabled forever, and this button, the one thing offering a way out,
+    // was the only reset that did not clear it.
+    setNotReachable(false);
   }, []);
 
   const send = useCallback(async () => {
@@ -136,6 +141,13 @@ export function AgentChatTester({
           setEntries(markLastUndelivered);
           break;
       }
+    } catch (err) {
+      // The client rethrows a transport failure (dropped Wi-Fi, DNS, CORS)
+      // rather than returning it, and `send` is invoked as `void send()`, so
+      // without this the rejection escapes to the window: the user would see
+      // no banner at all and the turn would still read as delivered.
+      setInvokeError(err instanceof Error ? err.message : "Failed to reach the agent");
+      setEntries(markLastUndelivered);
     } finally {
       setSending(false);
     }

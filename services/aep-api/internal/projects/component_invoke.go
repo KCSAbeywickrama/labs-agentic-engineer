@@ -51,8 +51,10 @@ const (
 )
 
 // InvokeCall is one HTTP call to relay to a deployed component's own gateway
-// URL, as the caller. It is the domain shape of the contract's InvokeRequest —
-// Body is already decoded from wire (base64/string) to raw bytes by the edge.
+// URL, as the caller. It is the domain shape of the contract's InvokeRequest.
+// Body is the request body as raw bytes; the contract carries it as a plain
+// JSON string, so it is UTF-8 text on the wire and a binary body is not
+// representable today.
 type InvokeCall struct {
 	Method      string
 	Path        string
@@ -157,14 +159,12 @@ func (s *componentService) Invoke(ctx context.Context, orgName, projectName, com
 	// an in-cluster service, and the relay fetches it and hands back the body.
 	// ErrUseLastResponse stops at the 3xx and relays it verbatim, which is
 	// also what "the upstream's answer, relayed" already means everywhere
-	// else here. The client is copied rather than mutated so an injected test
-	// client cannot opt out of this.
-	client := http.Client{}
-	if s.invokeHTTP != nil {
-		client = *s.invokeHTTP
-	}
-	client.CheckRedirect = func(*http.Request, []*http.Request) error {
-		return http.ErrUseLastResponse
+	// else here. The client is built here rather than shared so nothing can
+	// hand this call a client that opts out of the policy.
+	client := http.Client{
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
 	}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -192,6 +192,16 @@ func (s *componentService) Invoke(ctx context.Context, orgName, projectName, com
 	if len(body) > invokeMaxResponseBody {
 		body = body[:invokeMaxResponseBody]
 		truncated = true
+		// The cut lands on a byte boundary, but Body leaves here as a Go
+		// string in a JSON field, and encoding/json replaces an invalid byte
+		// with U+FFFD. A multi-byte rune straddling the cap would therefore
+		// be corrupted rather than dropped — and at a 1 MiB cap on UTF-8 text
+		// that is the common case, not the rare one. Back up to the last
+		// complete rune so the body we hand back is exactly a prefix of what
+		// the component sent.
+		for len(body) > 0 && !utf8.Valid(body[max(0, len(body)-utf8.UTFMax):]) {
+			body = body[:len(body)-1]
+		}
 	}
 
 	return InvokeResult{
@@ -248,9 +258,10 @@ func (s *componentService) firstDeploymentEndpoint(ctx context.Context, orgName,
 
 // invokePathDecodeMaxPasses bounds the repeated percent-decoding in
 // validateInvokePath. Two passes is enough to unwrap double-encoding
-// (%252e%252e -> %2e%2e -> ..); a third is headroom, not a promise to
-// unwrap deeper nesting — anything still encoded after that is rejected by
-// construction (a legitimate path never needs 3 layers of encoding).
+// (%252e%252e -> %2e%2e -> ..); a third is headroom. Anything STILL encoded
+// after the budget is rejected explicitly below — the budget is not itself a
+// proof of exhaustion, which an earlier version of this comment wrongly
+// claimed while `/%2525252e%2525252e/admin` sailed through.
 const invokePathDecodeMaxPasses = 3
 
 // validateInvokePath is the guardrail that keeps this route a scoped relay
@@ -258,24 +269,46 @@ const invokePathDecodeMaxPasses = 3
 // joined onto the component's OWN gateway base URL, never a way to redirect
 // the call elsewhere.
 //
-// It only ever looks at the PATH portion — everything before the first '?'
-// or '#' — so a legitimate query value (?redirect=http://x, ?q=a/../b) is
-// never mistaken for a path escape; traversal or a scheme embedded in the
-// query cannot reach the upstream host or path, only the query string the
-// upstream itself interprets.
+// Two different checks with two different scopes, and the split is the whole
+// subtlety:
+//
+//   - WHOLE-STRING checks (valid UTF-8, no control character, no raw space)
+//     run over the query too, because `in.Path` is concatenated onto the base
+//     URL verbatim and therefore lands in the REQUEST LINE. A raw space is
+//     enough: `/chat?x=1 HTTP/1.1` put `POST /agent/chat?x=1 HTTP/1.1
+//     HTTP/1.1` on the wire, handing the caller control of the request line.
+//     Restricting these to the path let the query smuggle it past.
+//   - PATH-ONLY checks (traversal, scheme, scheme-relative) stop at the first
+//     '?' or '#', so a legitimate query value (?redirect=http://x, ?q=a/../b)
+//     is never mistaken for a path escape. Traversal inside a query reaches
+//     only the query string the upstream itself interprets.
 //
 // The path is percent-decoded before the traversal check, repeatedly
-// (bounded), because Go's net/http sends RawPath on the wire unchanged and a
-// receiving gateway may normalise %2e%2e (or even %252e%252e) before route
-// matching — a literal strings.Contains(p, "..") substring check does not
-// see through that. Decoding failure is itself rejected rather than passed
-// through: an invalid escape is not a path this relay can reason about.
+// (bounded), because Go sends the path on the wire unchanged and a receiving
+// gateway may normalise %2e%2e (or %252e%252e) before route matching — a
+// literal strings.Contains(p, "..") does not see through that. A decode
+// FAILURE is rejected rather than passed through, and so is anything still
+// encoded once the budget runs out: both are paths this relay cannot reason
+// about, and relaying what we cannot reason about is the whole bug class.
 func validateInvokePath(p string) error {
+	// Whole-string, query included — see the doc comment.
+	if !utf8.ValidString(p) {
+		return ErrBadPath
+	}
+	for _, r := range p {
+		if unicode.IsControl(r) || r == ' ' {
+			return ErrBadPath
+		}
+	}
+
 	path := p
 	if i := strings.IndexAny(path, "?#"); i >= 0 {
 		path = path[:i]
 	}
 
+	// A path that does not start with '/' is not a path: the caller-supplied
+	// string is concatenated onto the base URL, so "evil.com/x" would produce
+	// "https://gateway.exampleevil.com/x" — a host an attacker can register.
 	if !strings.HasPrefix(path, "/") {
 		return ErrBadPath
 	}
@@ -294,16 +327,15 @@ func validateInvokePath(p string) error {
 		}
 		decoded = next
 	}
+	// Still encoded after the budget: we do not know what a gateway will make
+	// of it, so we refuse rather than guess.
+	if again, err := url.PathUnescape(decoded); err != nil || again != decoded {
+		return ErrBadPath
+	}
 
-	// Percent-decoding understands %XX and nothing more, so an overlong UTF-8
-	// encoding of "." (%c0%ae) or "/" (%c0%af) survives it as raw bytes and
-	// rides the wire unchanged — a gateway lenient enough to fold overlong
-	// forms back to ASCII would then see a traversal this relay never did.
-	// Control characters are the same problem from the other end: net/http
-	// refuses to put them in a request line, which is safe but surfaces as an
-	// opaque build failure rather than a bad path. Rejecting both here closes
-	// the encoding class rather than its two known instances, and costs
-	// nothing: a legitimate path is valid UTF-8 and free of control bytes.
+	// Decoding can synthesise bytes the raw form never showed: %c0%ae is an
+	// overlong "." and %2f an encoded "/". Re-run the byte checks and the
+	// prefix checks on the DECODED form, or they only ever saw the disguise.
 	if !utf8.ValidString(decoded) {
 		return ErrBadPath
 	}
@@ -312,12 +344,15 @@ func validateInvokePath(p string) error {
 			return ErrBadPath
 		}
 	}
-
-	if strings.Contains(decoded, "://") {
+	if strings.HasPrefix(decoded, "//") || strings.Contains(decoded, "://") {
 		return ErrBadPath
 	}
+
 	for _, seg := range strings.Split(decoded, "/") {
-		if seg == ".." {
+		// A path parameter (";" and after) is not part of the segment name:
+		// some servers route "..;" as "..", so compare on the name alone.
+		name, _, hasParam := strings.Cut(seg, ";")
+		if seg == ".." || (hasParam && name == "..") {
 			return ErrBadPath
 		}
 	}

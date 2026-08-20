@@ -84,7 +84,7 @@ export interface AgentSpec {
   model?: AgentModel | undefined;
   interfaces: AgentInterface[];
   tools: AgentToolGroup[];
-  /** `x-aep.memory.type` — "client" today. */
+  /** `x-aep.memory.type` — "server" (the default) or "client". */
   memory?: string | undefined;
   /** `x-aep.identity.mode` — "on-behalf-of" | "agent". */
   identity?: string | undefined;
@@ -166,8 +166,17 @@ function readPrompt(body: string): PromptSection[] {
     lines = [];
   };
 
+  let inFence = false;
   for (const line of trimmed.split("\n")) {
-    const match = /^#\s+(.*)$/.exec(line);
+    // Track fences first: inside one, a leading "# " is code (a comment, a
+    // shell prompt), never a heading, and treating it as one both invents a
+    // section and truncates the real one it interrupts.
+    if (/^\s*(```|~~~)/.test(line)) {
+      inFence = !inFence;
+      lines.push(line);
+      continue;
+    }
+    const match = inFence ? null : /^#\s+(.*)$/.exec(line);
     if (match) {
       flush();
       heading = match[1]!.trim();

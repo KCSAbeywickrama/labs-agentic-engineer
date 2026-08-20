@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"time"
 
 	"github.com/wso2/aep/aep-api/internal/gen"
@@ -145,13 +144,13 @@ type componentService struct {
 	modelKeyResolver AnthropicKeyResolver
 	secretRefClient  secretmanagersvc.OpenChoreoSecretReferenceClient
 
-	// invokeHTTP + invokeTimeout back Invoke (component_invoke.go). Both are
-	// zero-value-defaulted lazily (nil client -> http.DefaultClient, timeout
-	// <= 0 -> invokeDefaultTimeout) rather than params on NewComponentService,
-	// so the six existing call sites (production + tests) are untouched.
-	// Tests that need a short timeout or a specific *http.Client construct
-	// componentService directly (whitebox, same package).
-	invokeHTTP    *http.Client
+	// invokeTimeout backs Invoke (component_invoke.go). Defaulted lazily
+	// (<= 0 -> invokeDefaultTimeout) rather than a param on
+	// NewComponentService, so the existing call sites stay untouched; tests
+	// that need a short timeout construct componentService directly
+	// (whitebox, same package). Invoke builds its own *http.Client instead of
+	// taking one here, so the no-follow-redirects policy cannot be swapped
+	// out by a caller.
 	invokeTimeout time.Duration
 }
 

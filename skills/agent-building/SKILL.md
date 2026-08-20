@@ -91,13 +91,15 @@ platform then carries.
 | Route | Behaviour |
 |---|---|
 | `POST /chat` | `{ conversationId?, message }` in; **`{ conversationId, text, toolCalls }` out**. History lives in the agent's conversation store, never on the wire |
-| `GET /healthz` | `200 {ok:true}`, or `503 {ok:false, missing:[…]}` when unconfigured |
+| `GET /healthz` | `200 {ok:true}`, or `503 {ok:false, missing:[…], store:"initialising"}` — `missing` lists UNSET env-var names, `store` is `"ready"` or `"initialising"`. They are separate: a fully-configured agent whose database is still provisioning has an EMPTY `missing` and `store:"initialising"` |
 
 The response shape is fixed, not yours to choose:
 
-- **`conversationId`** — the caller's only piece of state. Absent or unknown on
-  the way in means "new conversation": create one and return its id. A caller
-  never sends history and never receives it.
+- **`conversationId`** — the caller's only piece of state. ABSENT means "new
+  conversation": create one and return its id. An id that is present but does
+  not resolve for this user is **404, never a new conversation** — adopting a
+  caller-chosen id lets one caller pick another's id and write under it. A
+  caller never sends history and never receives it.
 - **`text`** — the reply, as a plain string. This is what a UI renders.
 - **`toolCalls`** — what a test asserts on.
 
@@ -250,6 +252,29 @@ The handler flow, exactly:
 // 7. sendJson(res, 200, { conversationId: id, text: result.text, toolCalls: result.toolCalls })
 ```
 
+**Wrap the whole of that in `try`/`catch`, and never let a rejection escape.**
+Steps 3, 5 and 6 all reach the network — the database, then the model provider
+— so every one of them throws in normal operation: a database still
+provisioning, an unset or rejected `MODEL_API_KEY`, a provider timeout. An
+async handler that throws inside `node:http` produces an UNHANDLED REJECTION,
+and Node's default is to terminate the process. The pod then crash-loops on
+the first user message, which is the exact failure the rest of this section
+promises it will not have. A caught error is one 500 and a live agent; an
+uncaught one takes the agent down for everybody.
+
+```ts
+server.on("request", (req, res) => {
+  void handle(req, res).catch((err) => {          // the last line of defence:
+    console.error("chat turn failed:", err);      // `void handle(...)` alone
+    if (!res.headersSent) sendJson(res, 500, { error: "internal error" });
+    else res.destroy();                           // already streaming: cut it
+  });
+});
+```
+
+Log the error, never the request body or the `Authorization` header — a chat
+turn carries the user's own words and their bearer.
+
 **Never await `initStore()` before `listen`.** The DB may not be reachable yet
 — `postgres-cnpg` provisions asynchronously, and `MEMORY_DB_*` may be unset on
 an otherwise-unconfigured start. An awaited rejection there is an unhandled
@@ -295,7 +320,15 @@ Both, together, in the request handler — the header check is a gate, not a
 value the tools consume:
 
 ```ts
-if (!req.headers["x-user-id"]) return res.status(401).end();
+// `node:http`, not Express: set the code, then end. And a header Node saw
+// TWICE arrives as string[] — accepting it would key rows by a joined
+// "victim, attacker" value, so a non-string is refused rather than coerced.
+const userId = req.headers["x-user-id"];
+if (typeof userId !== "string" || userId === "") {
+  res.statusCode = 401;
+  res.end();
+  return;
+}
 await callContext.run({ authorization: req.headers.authorization }, () => reply(body));
 ```
 

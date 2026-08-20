@@ -416,3 +416,91 @@ describe("TestPage — the chat tester", () => {
     ).toBeInTheDocument();
   });
 });
+
+describe("TestPage — failures that used to be reported as something else", () => {
+  // A 404 on a turn that carried NO conversationId cannot be an expired
+  // conversation — there was none. It is the gateway or an unwired /chat
+  // route, and calling it "expired" hid a routing failure behind a message
+  // that could never come true.
+  it("does not blame the conversation for a 404 on the first turn", async () => {
+    mockPOST.mockResolvedValueOnce(relayed(404, { error: "not found" }));
+    render(<TestPage projectName="acme" />);
+
+    await send("hi");
+
+    expect(screen.queryByText(/conversation expired/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/404/)).toBeInTheDocument();
+  });
+
+  // ...but a 404 on a turn that DID carry an id still means exactly that.
+  it("still reports an expired conversation once an id is in play", async () => {
+    mockPOST.mockResolvedValueOnce(chat("hello", "c1"));
+    render(<TestPage projectName="acme" />);
+    await send("hi");
+
+    mockPOST.mockResolvedValueOnce(relayed(404, { error: "not found" }));
+    await send("again");
+
+    expect(screen.getByText(/conversation expired/i)).toBeInTheDocument();
+  });
+
+  // The typed client RETHROWS a transport failure rather than returning it,
+  // and `send` is fired as `void send()`. Without a catch the rejection
+  // escapes to the window: no banner, and the turn still reads as delivered.
+  it("banners a transport failure instead of letting the rejection escape", async () => {
+    mockPOST.mockRejectedValueOnce(new Error("Failed to fetch"));
+    render(<TestPage projectName="acme" />);
+
+    await send("hi");
+
+    expect(screen.getByText("Failed to fetch")).toBeInTheDocument();
+    expect(screen.getByText("You · not delivered")).toBeInTheDocument();
+  });
+
+  // `notReachable` is a memory of one 409, not a live fact. A deploy that has
+  // since finished does not retract it, so the one control offering a way out
+  // has to clear it — otherwise the input is disabled for good.
+  it("lets a new conversation recover from a not-reachable agent", async () => {
+    mockPOST.mockResolvedValueOnce(refused(409, "no deployed gateway URL"));
+    render(<TestPage projectName="acme" />);
+    await send("hi");
+    expect(screen.getByLabelText("Message")).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "New conversation" }));
+
+    expect(screen.getByLabelText("Message")).not.toBeDisabled();
+  });
+});
+
+describe("TestPage — switching agents", () => {
+  // Two agents, because the reset only fires on a componentName CHANGE and a
+  // single-agent fixture can never drive it. The old id belongs to the old
+  // agent's store and would 404 against the new one.
+  it("starts a fresh conversation when the user picks a different agent", async () => {
+    mockComponents = [
+      ...DEFAULT_COMPONENTS,
+      { name: "support-agent", displayName: "Support Agent", type: "ai-agent" },
+    ];
+    mockDeployments = [
+      ...DEFAULT_DEPLOYMENTS,
+      {
+        componentName: "support-agent",
+        environment: "development",
+        status: "Ready",
+        endpointUrl: "https://support-agent.dev.example.com",
+      },
+    ];
+    mockPOST.mockResolvedValueOnce(chat("hello", "c1"));
+    render(<TestPage projectName="acme" />);
+    await send("hi");
+    expect(invokeCall(0).payload).not.toHaveProperty("conversationId");
+
+    fireEvent.click(screen.getByText("Support Agent"));
+    expect(screen.queryByText("hello")).not.toBeInTheDocument();
+
+    mockPOST.mockResolvedValueOnce(chat("different agent", "c2"));
+    await send("hi again");
+
+    expect(invokeCall(1).payload).not.toHaveProperty("conversationId");
+  });
+});

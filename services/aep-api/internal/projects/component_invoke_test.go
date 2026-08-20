@@ -34,6 +34,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/wso2/aep/aep-api/internal/gen"
 
@@ -476,11 +477,11 @@ func TestInvoke_TimeoutDuringBodyRead_ErrUpstreamTimeout(t *testing.T) {
 func TestInvoke_OverlongUTF8AndControlChars_RejectedWithoutTouchingUpstream(t *testing.T) {
 	t.Parallel()
 	for _, bad := range []string{
-		"/%c0%ae%c0%ae/other",     // overlong ".."
-		"/a/%c0%af..%c0%afb",      // overlong "/"
-		"/%e0%80%ae%e0%80%ae/x",   // 3-byte overlong "."
-		"/a\nHost: evil\r\n",      // literal control characters
-		"/a\x00b",                 // NUL
+		"/%c0%ae%c0%ae/other",   // overlong ".."
+		"/a/%c0%af..%c0%afb",    // overlong "/"
+		"/%e0%80%ae%e0%80%ae/x", // 3-byte overlong "."
+		"/a\nHost: evil\r\n",    // literal control characters
+		"/a\x00b",               // NUL
 	} {
 		var hits int32
 		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -497,5 +498,115 @@ func TestInvoke_OverlongUTF8AndControlChars_RejectedWithoutTouchingUpstream(t *t
 		if got := atomic.LoadInt32(&hits); got != 0 {
 			t.Fatalf("path %q reached upstream %d time(s)", bad, got)
 		}
+	}
+}
+
+// 16. Three guards that a mutation review found undefended. Each line below
+// exists because deleting the code that rejects it left the whole suite green:
+//
+//   - No leading slash. `upstreamURL` is `base + in.Path`, so "evil.com/x"
+//     builds "https://gateway.exampleevil.com/x" — a host an attacker can
+//     register. This is the highest-value case in the file.
+//   - A decode FAILURE must reject, not fall through. "%zz" is not a valid
+//     escape; relaying it lets a gateway that normalises differently see a
+//     path this relay never validated.
+//   - Still encoded after the decode budget. "/%2525252e%2525252e/admin"
+//     needs four passes and the budget is three, so the old code checked a
+//     value it knew was not finished decoding.
+//
+// A raw space is here for a different reason: the path is concatenated into
+// the REQUEST LINE, so "/chat?x=1 HTTP/1.1" put
+// `POST /agent/chat?x=1 HTTP/1.1 HTTP/1.1` on the wire. It is the one case
+// that proves the whole-string checks must span the query, not just the path.
+func TestInvoke_UndefendedPathGuards_RejectedWithoutTouchingUpstream(t *testing.T) {
+	t.Parallel()
+	for _, bad := range []string{
+		"chat",                      // no leading slash
+		"evil.com/x",                // no leading slash: host smuggling
+		"",                          // no leading slash: empty
+		"/%zz",                      // undecodable escape
+		"/%2e%2e%zz/x",              // undecodable escape hiding traversal
+		"/%2525252e%2525252e/admin", // still encoded after the budget
+		"/chat?x=1 HTTP/1.1",        // raw space: request-line injection
+		"/a/http://evil.com",        // scheme mid-path
+		"/%2fevil.com/x",            // decodes to a scheme-relative path
+		"/..;/x",                    // path-parameter traversal
+	} {
+		var hits int32
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			atomic.AddInt32(&hits, 1)
+			w.WriteHeader(http.StatusOK)
+		}))
+		svc := invokeTestSvc(t, designFiles("chat-agent", "ai-agent", ""), upstream.URL, 0)
+		_, err := svc.Invoke(context.Background(), "acme", "web", "chat-agent",
+			InvokeCall{Method: "GET", Path: bad}, "")
+		upstream.Close()
+		if !errors.Is(err, ErrBadPath) {
+			t.Fatalf("path %q: want ErrBadPath, got %v", bad, err)
+		}
+		if got := atomic.LoadInt32(&hits); got != 0 {
+			t.Fatalf("path %q reached upstream %d time(s)", bad, got)
+		}
+	}
+}
+
+// 17. The whole-string checks must not over-reject. A query is allowed to
+// carry things that would be refused in a path — that asymmetry is the point
+// of splitting the two scopes, and without this the fix for test 16 would be
+// indistinguishable from "reject anything interesting".
+func TestInvoke_QueryMayCarryWhatAPathMayNot(t *testing.T) {
+	t.Parallel()
+	var gotPaths []string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPaths = append(gotPaths, r.URL.RequestURI())
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	svc := invokeTestSvc(t, designFiles("chat-agent", "ai-agent", ""), upstream.URL, 0)
+	ok := []string{
+		"/chat?redirect=http://example.com",
+		"/chat?q=a/../b",
+		"/chat?next=//example.com",
+		"/chat?a=1&b=2",
+	}
+	for _, p := range ok {
+		if _, err := svc.Invoke(context.Background(), "acme", "web", "chat-agent",
+			InvokeCall{Method: "GET", Path: p}, ""); err != nil {
+			t.Fatalf("path %q: want it accepted, got %v", p, err)
+		}
+	}
+	if len(gotPaths) != len(ok) {
+		t.Fatalf("want upstream dialed once per accepted path, got %d for %d", len(gotPaths), len(ok))
+	}
+}
+
+// 18. A body cut at the cap must stay valid UTF-8. Body leaves this package as
+// a Go string in a JSON field, and encoding/json rewrites an invalid byte to
+// U+FFFD — so a multi-byte rune straddling the cap came back CORRUPTED rather
+// than merely cut. At a 1 MiB cap on UTF-8 text that is the common case.
+func TestInvoke_TruncationDoesNotCutARuneInHalf(t *testing.T) {
+	t.Parallel()
+	// "é" is two bytes, so a run of them crosses the cap mid-rune.
+	huge := strings.Repeat("é", invokeMaxResponseBody)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, huge)
+	}))
+	defer upstream.Close()
+
+	svc := invokeTestSvc(t, designFiles("chat-agent", "ai-agent", ""), upstream.URL, 0)
+	got, err := svc.Invoke(context.Background(), "acme", "web", "chat-agent",
+		InvokeCall{Method: "GET", Path: "/chat"}, "")
+	if err != nil {
+		t.Fatalf("invoke: %v", err)
+	}
+	if !got.Truncated {
+		t.Fatal("want the response reported as truncated")
+	}
+	if !utf8.Valid(got.Body) {
+		t.Fatal("truncated body is not valid UTF-8: a rune was cut in half")
+	}
+	if !strings.HasPrefix(huge, string(got.Body)) {
+		t.Fatal("truncated body is not a prefix of what the component sent")
 	}
 }
