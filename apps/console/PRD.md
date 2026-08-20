@@ -100,6 +100,24 @@ here: they're the open `console` + `feature` issues.
   route. `@aep/excalidraw-dsl`'s `tryDslToPrototype` compiles per-screen
   scenes client-side (no BE handshake, no contract change; ADR-0008) —
   [#348](https://github.com/wso2/labs-agentic-engineer/issues/348)
+- Spec view — readable wireframe canvas: screens compile into a single column
+  instead of a two-across grid, and the canvas opens focused on the first
+  screen at a legible size with the top of the second peeking below; while an
+  agent edits, the viewport pans to the screen being changed instead of
+  refitting the whole board, and stays put when nothing identifiable changed.
+  `@aep/excalidraw-dsl` stamps each element with its screen so the viewer can
+  group per screen; no contract change —
+  [#552](https://github.com/wso2/labs-agentic-engineer/issues/552)
+- Project create — reference document upload on the "What do you want to
+  build?" view: `.md`/`.txt`/`.pdf`/`.png`/`.jpg`/`.jpeg` (≤10 files, ≤5 MB
+  each) attached in a chat-style composer and uploaded post-create over
+  multipart to `POST /projects/{name}/references`. References are **transient
+  turn inputs, never committed** (ADR-0017): bytes live on the shared
+  `/workspaces` volume for the project's life and are overlaid into each turn's
+  snapshot at `specs/requirements/references/`, surfaced to the `/start` kickoff
+  through the idea-steer channel. No console surface after create —
+  [#383](https://github.com/wso2/labs-agentic-engineer/issues/383)
+  (BE handshake: [#384](https://github.com/wso2/labs-agentic-engineer/issues/384))
 - Spec view — prototype user flows: `wireframes.dsl` declares named
   `flow "<name>"` blocks (optional `role`/`description` lines) listing each
   persona's screens in walkthrough order; the prototype toolbar leads with a

@@ -2078,6 +2078,12 @@ type ListIssuesParams struct {
 	Q string `form:"q,omitempty" json:"q,omitempty"`
 }
 
+// PutProjectReferencesMultipartBody defines parameters for PutProjectReferences.
+type PutProjectReferencesMultipartBody struct {
+	// Files Reference documents. Two groups, both readable by the models: binary read natively as file parts (`.pdf`, `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`), and text read as workspace files (`.md`, `.txt`, `.csv`, `.tsv`, `.json`, `.yaml`, `.yml`, `.xml`, `.html`, `.rst`). At most 10 documents, each at most 5 MiB measured on the raw bytes. Office formats are not accepted — the models do not read them natively.
+	Files []openapi_types.File `json:"files"`
+}
+
 // GetSpecCollabSessionParams defines parameters for GetSpecCollabSession.
 type GetSpecCollabSessionParams struct {
 	// Authorization Bearer token; the display identity is decoded from it
@@ -2157,6 +2163,9 @@ type ApplyFilesJSONRequestBody = ApplyRequest
 
 // CreateIssueJSONRequestBody defines body for CreateIssue for application/json ContentType.
 type CreateIssueJSONRequestBody = CreateIssueRequest
+
+// PutProjectReferencesMultipartRequestBody defines body for PutProjectReferences for multipart/form-data ContentType.
+type PutProjectReferencesMultipartRequestBody PutProjectReferencesMultipartBody
 
 // PromoteTaskFromIssueJSONRequestBody defines body for PromoteTaskFromIssue for application/json ContentType.
 type PromoteTaskFromIssueJSONRequestBody = PromoteFromIssueRequest
