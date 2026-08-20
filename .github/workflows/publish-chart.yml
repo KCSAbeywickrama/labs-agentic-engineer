@@ -12,6 +12,8 @@ env:
   REGISTRY: ghcr.io
   OWNER: ${{ github.repository_owner }}
   CHART_DIR: deployments/helm-charts/platform
+  # Must match the OCI path hardcoded in aectl platform install (platform.go).
+  CHART_NAMESPACE: oci://ghcr.io/wso2/aep/charts
 
 jobs:
   publish:
@@ -38,8 +40,8 @@ jobs:
               --username ${{ github.actor }} \
               --password-stdin
 
-      - name: Push charts
-        run: |
-          for chart in /tmp/chart-output/*.tgz; do
-            helm push "$chart" oci://${{ env.REGISTRY }}/${{ env.OWNER }}
-          done
+      - name: Push aep-platform chart
+        run: helm push /tmp/chart-output/aep-platform-*.tgz ${{ env.CHART_NAMESPACE }}
+
+      - name: Push thunder-app-operator chart
+        run: helm push /tmp/chart-output/thunder-app-operator-*.tgz oci://${{ env.REGISTRY }}/${{ env.OWNER }}
