@@ -17,7 +17,6 @@
  */
 
 import path from "node:path";
-import fs from "node:fs";
 import { query, type McpServerConfig, type Query } from "@anthropic-ai/claude-agent-sdk";
 import { openDebugSinks, type DebugSinks, type TaskLog } from "./logger.js";
 import type { DispatchRequest } from "./types.js";
@@ -426,8 +425,6 @@ export async function runClaudeQuery(
     mcpToken = "loopback";
   }
   const { mcpServers, allowedTools } = buildMcpOptions(mcpUrl, mcpToken);
-
-  // D9 secure search (Task 12) — DLP gate for the server-side WebSearch
   // tool. Secret candidates are read from childEnv, the SAME env record
   // injected into this run (see websearch_dlp.ts's stagedSecretValues doc
   // comment): staged dependency secrets (Tasks 9-11's per-run K8s Secrets,
@@ -478,7 +475,9 @@ export async function runClaudeQuery(
   // prompt-bearing debug log out of the cluster — see DispatchRequest.debug.
   const debugSinks = req.debug ? openDebugSinks(log.dir, (line) => scrubber.scrub(line)) : undefined;
 
-  const q = query({
+  let q: Query;
+  try {
+    q = query({
     prompt: promptWithProjectRoot(req.prompt, layout.workspace, contractReferencePath(layout.workspace)),
     options: {
       cwd: layout.workspace,
@@ -536,7 +535,11 @@ export async function runClaudeQuery(
         ],
       },
     },
-  });
+    });
+  } catch (err) {
+    await mcpProxy?.close();
+    throw err;
+  }
 
   // One translator per run — it carries this run's subagent labels and
   // in-flight tool calls (see createSdkTranslator).

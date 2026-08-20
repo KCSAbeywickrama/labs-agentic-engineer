@@ -81,10 +81,12 @@ func mountSurfaces(params AppParams) *http.ServeMux {
 		w.Write([]byte(`{"status":"ok"}`)) //nolint:errcheck
 	})
 
-	// Task-JWT public key set (JWKS) — unauthenticated discovery, fetched by
-	// MCP/S2S verifiers before any auth. A plain handler (not a contract op) so it
-	// stays off the /api/v1 server base path: the public contract is base-pathed
-	// at /api/v1, and this endpoint deliberately lives outside that subtree.
+	// Task-JWT public key set (JWKS) — unauthenticated discovery for BFF-signed
+	// tokens (design-agent MCP / IssueServiceToken). Publisher CC tokens verify
+	// against platform-idp JWKS, not this endpoint. A plain handler (not a
+	// contract op) so it stays off the /api/v1 server base path: the public
+	// contract is base-pathed at /api/v1, and this endpoint deliberately lives
+	// outside that subtree.
 	mux.HandleFunc("GET /auth/external/jwks.json", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if tt := params.Deps.TaskTokens; tt != nil {

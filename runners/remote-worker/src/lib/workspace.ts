@@ -48,6 +48,7 @@
 // The agent runs with cwd=<workspace> and PATH prefixed with <workspace>/.aep
 // so `gh ...` resolves to the wrapper.
 
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import { exec } from "node:child_process";
 import path from "node:path";
@@ -97,9 +98,13 @@ export async function writeBearerFile(file: string, token: string, previous?: st
   if (previous !== undefined && token === previous) {
     return token;
   }
-  const tmp = `${file}.tmp`;
-  await fs.promises.writeFile(tmp, token, { mode: 0o600 });
-  await fs.promises.rename(tmp, file);
+  const tmp = `${file}.${randomUUID()}.tmp`;
+  try {
+    await fs.promises.writeFile(tmp, token, { mode: 0o600 });
+    await fs.promises.rename(tmp, file);
+  } finally {
+    await fs.promises.unlink(tmp).catch(() => undefined);
+  }
   return token;
 }
 

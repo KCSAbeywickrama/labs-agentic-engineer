@@ -157,6 +157,24 @@ test("fetchWith401Retry: remint failure is fatal", async () => {
   }
 });
 
+test("fetchWith401Retry: first getToken failure is fatal", async () => {
+  const source = {
+    getToken: async () => {
+      throw new Error("thunder down");
+    },
+    invalidate: () => {
+      throw new Error("invalidate must not run");
+    },
+  };
+  await assert.rejects(
+    () =>
+      fetchWith401Retry("http://127.0.0.1:1/", { method: "GET" }, { source, canRefresh: true, fetchImpl: async () => {
+        throw new Error("fetch must not run");
+      } }),
+    (err: unknown) => err instanceof FatalAuthError && /token mint failed: thunder down/.test(err.message),
+  );
+});
+
 test("ClientCredentialsTokenProvider: invalidate forces a remint", async () => {
   let n = 0;
   const idp = await listen((_req, res) => {

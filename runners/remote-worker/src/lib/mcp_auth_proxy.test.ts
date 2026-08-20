@@ -147,3 +147,63 @@ test("mcp auth proxy: gzipped upstream is forwarded as decoded body", async () =
     await upstream.close();
   }
 });
+
+test("mcp auth proxy: first mint failure calls onFatal and returns 401", async () => {
+  const upstream = await listen((_req, res) => {
+    res.writeHead(200).end("ok");
+  });
+  const fatals: string[] = [];
+  const proxy = await startMcpAuthProxy({
+    upstreamUrl: upstream.url,
+    source: {
+      getToken: async () => {
+        throw new Error("thunder down");
+      },
+      invalidate: () => {
+        throw new Error("invalidate must not run");
+      },
+    },
+    canRefresh: true,
+    onFatal: (err) => {
+      fatals.push(err.message);
+    },
+  });
+  try {
+    const res = await fetch(proxy.url, { method: "POST", body: "{}" });
+    assert.equal(res.status, 401);
+    assert.equal(fatals.length, 1);
+    assert.match(fatals[0]!, /token mint failed: thunder down/);
+  } finally {
+    await proxy.close();
+    await upstream.close();
+  }
+});
+
+test("mcp auth proxy: oversized body is 413 and never reaches upstream", async () => {
+  let hits = 0;
+  const upstream = await listen((_req, res) => {
+    hits++;
+    res.writeHead(200).end("ok");
+  });
+  const proxy = await startMcpAuthProxy({
+    upstreamUrl: upstream.url,
+    source: {
+      getToken: async () => "tok",
+      invalidate: () => {
+        throw new Error("invalidate must not run");
+      },
+    },
+    canRefresh: true,
+    onFatal: () => {
+      throw new Error("onFatal must not run");
+    },
+  });
+  try {
+    const res = await fetch(proxy.url, { method: "POST", body: "x".repeat(1024 * 1024 + 1) });
+    assert.equal(res.status, 413);
+    assert.equal(hits, 0);
+  } finally {
+    await proxy.close();
+    await upstream.close();
+  }
+});
