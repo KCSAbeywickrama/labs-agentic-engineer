@@ -34,12 +34,12 @@ func withStdin(t *testing.T, input string, fn func()) {
 	os.Stdin = r
 	t.Cleanup(func() {
 		os.Stdin = old
-		r.Close()
+		_ = r.Close()
 	})
 	if _, err := w.WriteString(input); err != nil {
 		t.Fatalf("write to stdin pipe: %v", err)
 	}
-	w.Close()
+	_ = w.Close()
 	fn()
 }
 
@@ -73,10 +73,10 @@ func TestConfirm_EOF(t *testing.T) {
 	if err != nil {
 		t.Fatalf("os.Pipe: %v", err)
 	}
-	w.Close() // EOF on first read
+	_ = w.Close() // EOF on first read
 	old := os.Stdin
 	os.Stdin = r
-	t.Cleanup(func() { os.Stdin = old; r.Close() })
+	t.Cleanup(func() { os.Stdin = old; _ = r.Close() })
 	if Confirm("proceed?") {
 		t.Error("Confirm on EOF = true, want false")
 	}
