@@ -292,6 +292,16 @@ exact registered name. Values are per-project, per-environment; secret values
 live in OpenBao via SM-API (`extres-<name>-<env>` entities) and reach pods
 through ResourceReleaseBinding → ExternalSecret → env.
 
+### Unset
+A declared external dependency config key authored on its binding with an empty
+value. Nothing stands in for the value, so do not call it a placeholder. For a
+secret key, the corresponding empty value is the binding's `secretStorePath`.
+
+### Configured
+Every config key the design currently declares for an external dependency has a
+non-empty value. This is distinct from OpenChoreo binding **Ready**, which remains
+true while values are unset; use `configured` for the AEP value state.
+
 ### Proceed-gate
 `design/save` refuses (409) while any dependency is unresolved, naming the
 component, dependency, and reason.

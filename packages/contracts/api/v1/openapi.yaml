@@ -1413,6 +1413,39 @@ paths:
       summary: List a consumer project's access requests
       tags:
       - Dependencies
+  /projects/{projectName}/dependencies/readiness:
+    get:
+      operationId: get-project-dependency-readiness
+      parameters:
+      - description: Project name (DNS-label slug)
+        in: path
+        name: projectName
+        required: true
+        schema:
+          type: string
+      - description: 'Environment (default: development)'
+        in: query
+        name: environment
+        schema:
+          type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectDependencyReadiness'
+          description: Aggregate external dependency value state
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Error
+      security:
+      - userJWT: []
+      summary: Get project external-dependency configuration readiness
+      tags:
+      - Dependencies
   /projects/{projectName}/dependencies/external-resources/{name}/values:
     post:
       operationId: collect-external-resource-values
@@ -3559,10 +3592,47 @@ components:
           type: boolean
         status:
           type: string
+        valueState:
+          $ref: '#/components/schemas/ExternalDependencyValueState'
       required:
       - status
       - ready
       - outputs
+      type: object
+    ExternalDependencyReadiness:
+      additionalProperties: false
+      properties:
+        missingKeys:
+          items:
+            type: string
+          type: array
+        name:
+          type: string
+        state:
+          $ref: '#/components/schemas/ExternalDependencyValueState'
+      required:
+      - name
+      - state
+      - missingKeys
+      type: object
+    ExternalDependencyValueState:
+      enum:
+      - not-provisioned
+      - unset
+      - configured
+      type: string
+    ProjectDependencyReadiness:
+      additionalProperties: false
+      properties:
+        configured:
+          type: boolean
+        dependencies:
+          items:
+            $ref: '#/components/schemas/ExternalDependencyReadiness'
+          type: array
+      required:
+      - configured
+      - dependencies
       type: object
     DeployStage:
       additionalProperties: false

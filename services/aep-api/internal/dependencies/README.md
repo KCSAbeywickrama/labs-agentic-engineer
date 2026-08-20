@@ -43,7 +43,7 @@ three services are sub-package slices that import only that root.
 
 | Slice | Ops / role | Reaches |
 |---|---|---|
-| `provisioning` | 7 HTTP ops: list/delete/collect-values external resources, provision-platform, dependency-status, request/list org-service access + the aep:provision gate lifecycle, watcher, teardown | root cores; delivery (provision execution rows); sourcecontrol (gate issues) |
+| `provisioning` | 8 HTTP ops: list/delete/collect-values external resources, project readiness, provision-platform, dependency-status, request/list org-service access + the aep:provision gate lifecycle, watcher, teardown | root cores; delivery (provision execution rows); sourcecontrol (gate issues) |
 | `mcpdiscovery` | the MCP discovery server + `ListPlatformResourceTypes` HTTP read | root `ResourceTypeLister` / endpoint catalog |
 | `runtimeconfig` | the SPA `env-config.js` convergence service + its watcher (no HTTP op) | root naming/markers; spec (design at HEAD); repositories (execution enumerate) |
 
@@ -91,6 +91,10 @@ slices.
   drawer's resolve are LABEL queries, never a body read (bodies are prose a human may rewrite) and never a
   title match. A gate deliberately does not carry `aep` — it is a hold on the next dispatch, never agent
   work — and it holds only DISPATCH: an open gate never blocks a run from settling.
+- **External values are authored unset and never mint a provision gate.** Build derives every external
+  dependency from the design's union schema, seeds plain defaults, authors other plain values plus
+  `secretStorePath` empty, and preserves non-empty values already saved on a rebuild. Project readiness
+  iterates that same design schema; stale binding keys cannot make a dependency configured.
 - **A gate's provisioning run keeps an execution row.** It is the one execution kind the milestone model
   still writes: admitted when the drawer submits, finished by the readiness watcher, and its terminal state
   is what closes the gate issue.

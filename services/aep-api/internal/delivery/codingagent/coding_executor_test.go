@@ -112,6 +112,10 @@ func TestBuildPrompt_IsAMilestoneReferenceOnly(t *testing.T) {
 	if !strings.Contains(got, "`aep` skill") {
 		t.Errorf("prompt must defer the procedure to the aep skill, got %q", got)
 	}
+	lowerPrompt := strings.ToLower(got)
+	if !strings.Contains(lowerPrompt, "external credentials may not yet be configured") || !strings.Contains(lowerPrompt, "live calls may not succeed") {
+		t.Errorf("prompt must warn about unset external credentials, got %q", got)
+	}
 	for _, banned := range []string{"issue:", "issues/", "Closes #", "Resolves #", "git checkout", "gh pr create"} {
 		if strings.Contains(got, banned) {
 			t.Errorf("prompt must carry no procedure/issue anchor, but contains %q: %q", banned, got)

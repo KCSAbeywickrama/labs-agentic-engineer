@@ -781,8 +781,8 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		// assembled below (params.Deps.Projects).
 		// The delivery domain (build + task reads/promote + task-log stream) is
 		// assembled below (params.Deps.Delivery), after the external-resource
-		// provisioner exists — the build service's InputsCoordinator stages the
-		// drawer's external-config secrets through that provisioner's SM-API write,
+		// provisioner exists — build authors external bindings unset and SaveValues
+		// writes supplied external-config secrets through the provisioner's SM-API path,
 		// and its PreflightService reads the provisioning tri-state.
 	}
 
@@ -958,17 +958,15 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// classifies secret-vs-plain config keys from the project's committed
 	// design.json, never the org catalog (parity with the build path).
 	externalProvisioner := dependencies.NewExternalResourceProvisioner(designComponents{store: artifactStore}, resourceClient, secretRefWriter)
-	// The public build surface: its InputsCoordinator runs the drawer inputs'
-	// pre-tag work (collect external specs, derive end-user auth) and stages
-	// external-config secrets to SM-API through externalProvisioner before the
-	// tag-cut, carrying the resulting provision payload into the dev workflow.
+	// The public build surface: its InputsCoordinator runs pre-tag work (collect
+	// external specs, derive end-user auth), derives unset external authoring from
+	// the design, and carries the provision payload into the dev workflow.
 	buildSvc := build.NewService(build.Deps{
 		Repos:  repoFullNameLookup{repos: repoRepo},
 		Tagger: buildSpecTagger{art: artifactSvcGit},
 		Coord: build.NewInputsCoordinator(
 			designService,                          // SpecCollector (CollectSpec)
 			buildDesignDeriver{svc: designService}, // DesignFactDeriver (sentinel translation)
-			buildSecretStager{prov: externalProvisioner},
 			designComponents{store: artifactStore},
 		).WithSkillMirror(skillSvc), // refresh .claude/skills onto HEAD before the tag-cut
 		// The build-time dependency hard gate's fresh read (dependencyGateFailures) —
