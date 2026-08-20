@@ -103,6 +103,33 @@ func (e DeployStageValidation) Valid() bool {
 	}
 }
 
+// Defines values for InvokeRequestMethod.
+const (
+	DELETE InvokeRequestMethod = "DELETE"
+	GET    InvokeRequestMethod = "GET"
+	PATCH  InvokeRequestMethod = "PATCH"
+	POST   InvokeRequestMethod = "POST"
+	PUT    InvokeRequestMethod = "PUT"
+)
+
+// Valid indicates whether the value is a known member of the InvokeRequestMethod enum.
+func (e InvokeRequestMethod) Valid() bool {
+	switch e {
+	case DELETE:
+		return true
+	case GET:
+		return true
+	case PATCH:
+		return true
+	case POST:
+		return true
+	case PUT:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for MilestoneRunViewOrigin.
 const (
 	IncidentAdoption MilestoneRunViewOrigin = "incident-adoption"
@@ -1000,6 +1027,34 @@ type InputFailure struct {
 	Dependency string `json:"dependency"`
 	Kind       string `json:"kind,omitempty"`
 	Reason     string `json:"reason"`
+}
+
+// InvokeRequest One HTTP call to relay to a deployed component's gateway URL. The caller's own bearer is forwarded; a body-supplied Authorization is never accepted.
+type InvokeRequest struct {
+	// Body Raw request body, passed through verbatim.
+	Body string `json:"body,omitempty"`
+
+	// ContentType Content-Type for the upstream request body, when body is set.
+	ContentType string `json:"contentType,omitempty"`
+
+	// Method HTTP method for the upstream call.
+	Method InvokeRequestMethod `json:"method"`
+
+	// Path Path joined onto the component's gateway URL (e.g. /chat). Normalised; `..` and absolute URLs are rejected.
+	Path string `json:"path"`
+}
+
+// InvokeRequestMethod HTTP method for the upstream call.
+type InvokeRequestMethod string
+
+// InvokeResponse The upstream component's raw response, relayed. status is the UPSTREAM status — the invoke call itself returns 200 whenever the relay happened.
+type InvokeResponse struct {
+	Body        string `json:"body"`
+	ContentType string `json:"contentType,omitempty"`
+	Status      int    `json:"status"`
+
+	// Truncated True when the upstream body exceeded the relay's 1 MiB cap and was cut.
+	Truncated bool `json:"truncated"`
 }
 
 // IssueInfo One issue from list/search. Field names are CAPITALIZED on the wire (historical shape the deployed aep-mcp-server parses — do not "fix" without a coordinated MCP-server release).
@@ -2024,6 +2079,9 @@ type UpdateComponentConfigJSONRequestBody = UpdateConfigBody
 
 // ProvisionPlatformResourceJSONRequestBody defines body for ProvisionPlatformResource for application/json ContentType.
 type ProvisionPlatformResourceJSONRequestBody = ProvisionBody
+
+// InvokeComponentJSONRequestBody defines body for InvokeComponent for application/json ContentType.
+type InvokeComponentJSONRequestBody = InvokeRequest
 
 // CollectExternalResourceValuesJSONRequestBody defines body for CollectExternalResourceValues for application/json ContentType.
 type CollectExternalResourceValuesJSONRequestBody = SaveValuesBody
