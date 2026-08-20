@@ -30,6 +30,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -321,5 +323,46 @@ func TestInvoke_UpstreamTimeout_ErrUpstreamTimeout(t *testing.T) {
 	_, err := svc.Invoke(context.Background(), "acme", "web", "chat-agent", InvokeCall{Method: "GET", Path: "/x"}, "")
 	if !errors.Is(err, ErrUpstreamTimeout) {
 		t.Fatalf("want ErrUpstreamTimeout, got %v", err)
+	}
+}
+
+// 11. A redirect is the component's ANSWER, never an instruction this relay
+// obeys. validateInvokePath runs once, before the request — a followed 3xx
+// would take the next hop to an address nothing ever checked, with the
+// caller's bearer attached. That is SSRF with our own credentials: a
+// component (or anything that can shape its response) points Location at
+// 169.254.169.254 or an in-cluster service, and the relay fetches it and
+// hands the body back. So the 3xx is relayed verbatim and the secondary
+// server must never be touched.
+func TestInvoke_RedirectIsRelayedNotFollowed(t *testing.T) {
+	t.Parallel()
+	var secondaryHits int32
+	secondary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&secondaryHits, 1)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("SECRET-INTERNAL-DATA"))
+	}))
+	defer secondary.Close()
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Location", secondary.URL+"/latest/meta-data/")
+		w.WriteHeader(http.StatusFound)
+	}))
+	defer upstream.Close()
+
+	svc := invokeTestSvc(t, designFiles("chat-agent", "ai-agent", ""), upstream.URL, 0)
+	result, err := svc.Invoke(context.Background(), "acme", "web", "chat-agent",
+		InvokeCall{Method: "GET", Path: "/x"}, "Bearer caller-token")
+	if err != nil {
+		t.Fatalf("a 3xx is a relayable answer, not a relay failure: %v", err)
+	}
+	if got := atomic.LoadInt32(&secondaryHits); got != 0 {
+		t.Fatalf("relay followed the redirect and fetched the secondary server %d time(s) — SSRF", got)
+	}
+	if result.Status != http.StatusFound {
+		t.Fatalf("want the 302 relayed verbatim, got %d", result.Status)
+	}
+	if strings.Contains(string(result.Body), "SECRET-INTERNAL-DATA") {
+		t.Fatal("relay returned the redirect target's body — it followed the redirect")
 	}
 }

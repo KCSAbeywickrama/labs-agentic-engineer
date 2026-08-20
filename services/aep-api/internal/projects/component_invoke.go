@@ -145,9 +145,23 @@ func (s *componentService) Invoke(ctx context.Context, orgName, projectName, com
 		req.Header.Set("Authorization", bearer)
 	}
 
-	client := s.invokeHTTP
-	if client == nil {
-		client = http.DefaultClient
+	// A 3xx is the component's ANSWER, never an instruction this relay obeys.
+	// validateInvokePath runs once, above, against the path the caller asked
+	// for; following a redirect would send the next hop to an address nothing
+	// ever checked — with the caller's bearer still attached on a same-host
+	// hop. That is SSRF using our own credentials: anything that can shape a
+	// component's response points Location at the cloud metadata endpoint or
+	// an in-cluster service, and the relay fetches it and hands back the body.
+	// ErrUseLastResponse stops at the 3xx and relays it verbatim, which is
+	// also what "the upstream's answer, relayed" already means everywhere
+	// else here. The client is copied rather than mutated so an injected test
+	// client cannot opt out of this.
+	client := http.Client{}
+	if s.invokeHTTP != nil {
+		client = *s.invokeHTTP
+	}
+	client.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
 	}
 	resp, err := client.Do(req)
 	if err != nil {
