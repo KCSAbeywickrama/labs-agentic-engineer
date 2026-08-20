@@ -46,6 +46,13 @@ import {
   fetchValidationContext,
   VALIDATION_CONTEXT_FILE,
 } from "./lib/validation_context.js";
+import type { ComponentEndpoint } from "./lib/validation_context.js";
+import {
+  curlConfigHome,
+  curlResolveEntries,
+  probeEndpoints,
+  writeCurlResolveConfig,
+} from "./lib/endpoint_access.js";
 
 function requireEnv(name: string): string {
   const v = process.env[name];
@@ -217,25 +224,33 @@ async function main(): Promise<number> {
   // Scope: an implementation run is a MILESTONE cycle — one branch, one PR,
   // any component in the milestone — so it takes the union of every component's
   // skillsPinned. Its AEP_COMPONENT_NAME is the `aep-milestone` sentinel and
-  // must not be used to pick a design file. A validation run applies no design
-  // skills at all: it is black-box verification driven by the `aep-validation`
-  // skill (AEP_TASK_KIND), and builds nothing.
-  // A validation run applies no DESIGN skills: nothing is pinned and nothing
-  // is pinned, so the allowlist below leaves the design skills out entirely.
+  // must not be used to pick a design file.
+  //
+  // A validation run (AEP_TASK_KIND) applies no DESIGN skills at all — it is
+  // black-box verification and builds nothing — so both values below stay empty
+  // for it: nothing is pinned, and the Skill allowlist is left empty on purpose.
+  // `aep-validation` reaches the run a different way: alwaysOnSkills() names it
+  // as this run's workflow and requireWorkflowBodies() injects its whole SKILL.md
+  // into the system prompt, so it is in context from the first token rather than
+  // invocable through the Skill tool.
   let availableSkillNames: string[] = [];
   let pinnedBodies = "";
   if (req.taskKind === "validation") {
-    console.log("[oneshot] validation run — no design skills apply; using the aep-validation skill only");
+    console.log(
+      "[oneshot] validation run — no design skills apply; aep-validation is injected as this run's workflow",
+    );
     // PREFLIGHT: where the deployed system is, fetched by the platform before the
     // agent starts. Fatal on purpose — an agent that cannot learn its targets has
     // no honest way forward, and when this was the skill's own `curl` a 404 sent
     // it scanning the pod network for half an hour instead of stopping.
+    let endpoints: ComponentEndpoint[];
     try {
       const ctx = await fetchValidationContext({
         platformUrl: platformURL,
         cycleId: req.taskId,
         bearer: req.bearer,
       });
+      endpoints = ctx.endpoints;
       console.log(
         `[oneshot] validation context: ${ctx.endpoints.length} deployed endpoint(s) → ${VALIDATION_CONTEXT_FILE}`,
       );
@@ -245,6 +260,44 @@ async function main(): Promise<number> {
       console.error(`[oneshot] validation context unavailable — not starting the agent: ${msg}`);
       return 2;
     }
+
+    // Make those URLs work for curl before the agent can reach for it. Fatal for
+    // the same reason the fetch above is: without the override a plain `curl`
+    // against a `.localhost` endpoint is refused by loopback (RFC 6761 — see
+    // endpoint_access.ts), and the skill no longer carries the ~20 lines that used
+    // to explain that away. An agent handed a URL it cannot dial and no
+    // explanation is exactly the state that sent the last one hunting.
+    try {
+      const entries = await curlResolveEntries(endpoints, undefined, (l) => console.log(l));
+      const written = await writeCurlResolveConfig(curlConfigHome(), entries);
+      if (written === undefined) {
+        // No `.localhost` endpoints — a cloud plane resolves them normally and
+        // there is nothing to pin. Logged so the absence is a decision on the
+        // record rather than a step that looks like it did not run.
+        console.log("[oneshot] endpoints need no curl resolve override");
+      } else {
+        console.log(`[oneshot] pinned ${entries.length} endpoint host(s) for curl → ${written}`);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      emit({ kind: "result", status: "failure", error: `endpoint_access: ${msg}` });
+      console.error(`[oneshot] cannot make the endpoints reachable — not starting the agent: ${msg}`);
+      return 2;
+    }
+
+    // PREFLIGHT: does the deployed system actually answer? Also a platform fact,
+    // and one the agent used to be told to establish itself — which it got wrong
+    // in the one way that matters, reading a resolver quirk as a dead deployment.
+    // Proving it here means an unreachable endpoint costs no agent tokens and is
+    // reported as a platform fault instead of a validation verdict.
+    const unreachable = await probeEndpoints(endpoints);
+    if (unreachable.length > 0) {
+      const detail = unreachable.map((u) => `${u.component} (${u.url}): ${u.reason}`).join("; ");
+      emit({ kind: "result", status: "failure", error: `endpoint_unreachable: ${detail}` });
+      console.error(`[oneshot] deployed endpoint(s) did not answer — not starting the agent: ${detail}`);
+      return 2;
+    }
+    console.log(`[oneshot] ${endpoints.length} deployed endpoint(s) answered`);
   } else {
     const pinned = await resolveTaskSkills({
       workspace: layout.workspace,
