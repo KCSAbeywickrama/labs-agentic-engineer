@@ -34,9 +34,11 @@ sandbox branch that works unprivileged — both blockers, one value.
   An explicit `--browser=` still wins, so this is a default, not a lid.
 - **Chromium, not Chrome.** The generated specs already run on it
   (`playwright.config.template.ts` sets no `browserName`, so `playwright test`
-  takes Playwright's default), the pinned `AEP_PLAYWRIGHT_VERSION` ships only
-  chromium, and exploration must use the build the assertions will execute
-  against. Chrome would additionally need root plus Google's apt repo,
+  takes Playwright's default), and the pinned `AEP_PLAYWRIGHT_VERSION` ships only
+  chromium. It is the closest launchable match to what runs the specs — the same
+  family of Playwright-built chromium, where Chrome is a separate distribution
+  with its own flags, codecs and update channel. Not the *same* build, though;
+  see Consequences. Chrome would additionally need root plus Google's apt repo,
   auto-version independently of the "pinned as a pair" contract, and — as a
   proprietary browser in an image the platform redistributes — raise a licensing
   question that needs legal review rather than a Dockerfile edit.
@@ -46,10 +48,18 @@ sandbox branch that works unprivileged — both blockers, one value.
 
 ## Consequences
 
-- Exploration and the test run can no longer diverge on browser build: both
-  resolve to `/ms-playwright/chromium-<rev>/chrome-linux/chrome`.
-  `@playwright/test` is untouched — it never forces a channel and does not read
+- `@playwright/test` is untouched — it never forces a channel and does not read
   this variable.
+- **Exploration and the test run are still two different chromium builds, and
+  this ADR does not change that.** playwright-cli pins its own playwright-core
+  (1.62.0-alpha → revision 1229, Chromium 150.0.7871.0); the specs run under
+  `AEP_PLAYWRIGHT_VERSION` (1.61.1 → revision 1228, Chromium 149.0.7827.0).
+  Each client/browser pair is internally consistent, which is what Playwright's
+  revision pinning protects and why the two installs cannot be collapsed — but a
+  locator or aria snapshot captured while exploring is asserted in a different
+  chromium than it was observed in, so a version-sensitive difference would
+  surface as a brittle spec rather than as a version error. Closing the gap is a
+  `PLAYWRIGHT_VERSION`/`PLAYWRIGHT_CLI_VERSION` alignment, tracked separately.
 - Explicit overrides still fail, and now fail honestly. `--browser=chrome`/
   `msedge` are absent by this decision; `--browser=firefox`/`webkit` are absent
   because `playwright-cli install-browser` is given `chromium` explicitly. With
