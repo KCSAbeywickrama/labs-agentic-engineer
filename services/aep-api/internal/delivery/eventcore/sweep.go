@@ -26,21 +26,38 @@ import (
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 )
 
+// Why the sweep reads ISSUES where the cycle-boundary poll reads COUNTS.
+//
+// It must ROUTE by kind, which a count cannot express: the host's GraphQL label
+// argument is a UNION, so "carries `aep` AND is of kind `validation`" is an
+// intersection it cannot ask for. The same read is what a later halted-issue
+// exclusion needs — "carries `aep` AND `aep:halted`" is the identical shape — so
+// the decision is made in Go over an UNFILTERED fetch, exactly as the auto-merge
+// policy does and for the same stated reason: the fetch stays wide and the policy
+// is the only place labels are read.
+//
+// It costs one REST call per known milestone per pass, replacing one GraphQL
+// call. The boundary poll keeps its counts — that read runs at every cycle
+// boundary and is the loop's hottest.
+
 // defaultSweepInterval is the reconcile cadence. A backstop, not a driver:
 // everything it heals is something a webhook should have done, so it is slow
 // on purpose.
 const defaultSweepInterval = 60 * time.Second
 
-// Sweep is the reconcile backstop, and it has TWO trigger conditions:
+// Sweep is the reconcile backstop AND the trigger router, and it has TWO
+// trigger conditions:
 //
-//	a milestone with open work and no live run gets one, and
+//	a milestone with open issues and no live run gets a run OF THE RIGHT KIND, and
 //	a live run row past its planning phase is re-offered to the supervisor.
 //
 // The first heals both failure modes the event plane can have. A delivery
 // GitHub never made (or that failed past its retries) leaves a milestone with
 // work and nobody working it. And the adoption-versus-settle race — an issue
 // joining a milestone in the instant the supervisor decided it was empty —
-// leaves exactly the same footprint.
+// leaves exactly the same footprint. It is also the ONLY thing that starts a
+// validation run without a human asking: a dev run settles having filed the
+// version's validation task, and this is what picks that task up.
 //
 // The second heals a failure mode the row model has: a live ROW is not a live
 // WORKFLOW. Nothing else notices a row whose execution is gone, and because a
@@ -150,28 +167,42 @@ func (s *Sweep) reconcileRepo(ctx context.Context, repo RepoRef) error {
 			}
 			continue
 		}
-		counts, cerr := e.p.Issues.MilestoneIssueCounts(ctx, repo.OrgID, repo.ProjectID, milestone.Number)
-		if cerr != nil {
-			errs = append(errs, cerr)
+		issues, ierr := e.p.Issues.ListMilestoneIssues(ctx, repo.OrgID, repo.ProjectID,
+			milestoneOpenIssuesFilter(milestone.Number))
+		if ierr != nil {
+			errs = append(errs, ierr)
 			continue
 		}
-		if !hasOpenWork(counts) {
-			continue
-		}
-		slog.InfoContext(ctx, "eventcore: reconcile sweep found unworked open issues — starting a run",
-			"project", repo.ProjectID, "milestone", milestone.Number, "openIssues", counts.OpenTotal)
-		if serr := e.startRun(ctx, repo.OrgID, repo.ProjectID, milestone); serr != nil {
+		if serr := e.offerRun(ctx, repo.OrgID, repo.ProjectID, milestone, issues); serr != nil {
 			errs = append(errs, serr)
 		}
 	}
 	return errors.Join(errs...)
 }
 
-// hasOpenWork is the sweep's trigger condition, and it is deliberately WEAKER
-// than the dispatch predicate: an open gate must not stop a run from being
-// started, only from dispatching. A run whose milestone has a gate open starts
-// and waits — which is precisely the state a missed delivery should be healed
-// into.
-func hasOpenWork(counts *sourcecontrol.MilestoneIssueCounts) bool {
-	return counts != nil && counts.OpenTotal > 0
+// offerRun routes ONE unworked milestone: a validation run when the version's
+// validation task is open, otherwise an ordinary task run when anything at all is
+// open, and nothing when the milestone is quiet.
+//
+// Validation wins when both are open, and that ordering costs nothing in
+// practice: a dev run files the validation task only at deployed-green, with the
+// working set already empty, and a failed attempt's repair issues are filed after
+// the task has been closed. The two coexist only when a human files work into a
+// version awaiting its verdict, and judging first is the safe order there — the
+// verdict is about what is deployed, which the new work has not changed yet.
+func (e *Events) offerRun(ctx context.Context, orgID, projectID string, milestone MilestoneRef,
+	issues []sourcecontrol.IssueInfo) error {
+	if len(issues) == 0 {
+		return nil
+	}
+	for _, iss := range issues {
+		if delivery.HasLabel(iss.Labels, delivery.LabelAgentWork) && delivery.IsValidationWork(iss.Labels) {
+			slog.InfoContext(ctx, "eventcore: reconcile sweep found an open validation task — judging the version",
+				"project", projectID, "milestone", milestone.Number, "validationIssue", iss.Number)
+			return e.startValidationRun(ctx, orgID, projectID, milestone)
+		}
+	}
+	slog.InfoContext(ctx, "eventcore: reconcile sweep found unworked open issues — starting a run",
+		"project", projectID, "milestone", milestone.Number, "openIssues", len(issues))
+	return e.startRun(ctx, orgID, projectID, milestone)
 }

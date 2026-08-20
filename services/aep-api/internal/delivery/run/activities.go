@@ -138,21 +138,28 @@ func (a *Activities) BumpRunBudget(ctx context.Context, in BumpRunBudgetInput) e
 	return a.runs.BumpBudget(ctx, in.RunID, delivery.RunBudget(in.Counter))
 }
 
-// SetValidationVerdictInput records one validation ATTEMPT's outcome and the issue
-// it came from. Issue is 0 when there is no validation issue to name (an incident
-// run, or a skip decided before minting). CycleID is empty for a verdict that
-// belongs to no cycle — `skipped`, decided before any validation cycle opens.
+// SetValidationVerdictInput records one validation ATTEMPT's outcome, the issue
+// it came from, and the digest of the evidence behind it. Issue is 0 when there is
+// no validation issue to name (a skip decided before minting). CycleID is empty
+// for a verdict that belongs to no cycle — `skipped`, decided before any
+// validation cycle opens.
 type SetValidationVerdictInput struct {
 	RunID   string `json:"runId"`
 	CycleID string `json:"cycleId,omitempty"`
 	Verdict string `json:"verdict"`
 	Issue   int    `json:"issue,omitempty"`
+	// Digest fingerprints what the attempt CONCLUDED, and is what the NEXT
+	// attempt compares against to tell a repair that moved something from one
+	// that did not. It rides this input rather than a write of its own because
+	// the cycle write is fenced write-once on an empty verdict: a digest written
+	// afterwards could never land on the cycle it belongs to.
+	Digest string `json:"digest,omitempty"`
 }
 
 // SetValidationVerdict records the attempt's verdict in the two places that need
 // it, in one activity so they cannot drift: the CYCLE row, which keeps this
-// attempt's own answer for good, and the RUN row, which carries the latest
-// attempt's answer because that is what the deployment surface reads.
+// attempt's own answer and its digest for good, and the RUN row, which carries
+// the latest attempt's answer because that is what the deployment surface reads.
 //
 // The cycle write comes first. If only one of the two lands, the run row lagging
 // its cycle ledger is the recoverable direction — the workflow retries and the
@@ -166,7 +173,7 @@ func (a *Activities) SetValidationVerdict(ctx context.Context, in SetValidationV
 		if a.cycles == nil {
 			return errNotConfigured
 		}
-		if err := a.cycles.SetValidationVerdict(ctx, in.CycleID, in.Verdict, in.Issue); err != nil {
+		if err := a.cycles.SetValidationVerdict(ctx, in.CycleID, in.Verdict, in.Issue, in.Digest); err != nil {
 			return err
 		}
 	}
@@ -593,6 +600,102 @@ func (a *Activities) ReadValidationVerdict(ctx context.Context, in ValidationRep
 		return ValidationOutcome{}, sourceControlErr(err)
 	}
 	return ValidationOutcome{Verdict: verdict, Digest: digest}, nil
+}
+
+// ValidationHistoryInput asks what this milestone's earlier validation runs
+// concluded. RunID is the run ASKING, excluded from the digest read so an attempt
+// never compares itself against itself.
+type ValidationHistoryInput struct {
+	OrgID           string `json:"orgId"`
+	ProjectID       string `json:"projectId"`
+	MilestoneNumber int    `json:"milestoneNumber"`
+	RunID           string `json:"runId"`
+}
+
+// ValidationHistory is how many times this version has been judged and what the
+// previous judgement concluded — the two facts that SPAN validation runs.
+type ValidationHistory struct {
+	// Attempts counts the milestone's `validation` runs INCLUDING the one asking,
+	// which is why the asking run compares `>=` against its allowance: it is the
+	// attempt being spent.
+	Attempts int `json:"attempts"`
+	// Digest is the newest digest recorded by an EARLIER attempt, or "" for a
+	// first one. Two consecutive identical digests prove the repair moved nothing.
+	Digest string `json:"digest,omitempty"`
+}
+
+// ReadValidationHistory derives the version's attempt count and its previous
+// report digest from the ledger.
+//
+// Derived rather than carried, because there is nothing to carry them IN: each
+// attempt is its own run and its own workflow execution, so the previous
+// attempt's state is gone by the time this one starts, and a value threaded
+// through the run row would have to be written by a run that is ending and read
+// by one that does not exist yet. The rows already say both things.
+//
+// An unwired store answers a first attempt with no history — the same reading a
+// genuinely first attempt gets, which is the safe direction: it spends an attempt
+// and files repair work, where a wrongly-large count would refuse to repair
+// anything.
+func (a *Activities) ReadValidationHistory(ctx context.Context, in ValidationHistoryInput) (ValidationHistory, error) {
+	if a.runs == nil || a.cycles == nil {
+		return ValidationHistory{Attempts: 1}, nil
+	}
+	rows, err := a.runs.ListByMilestone(ctx, in.OrgID, in.ProjectID, in.MilestoneNumber)
+	if err != nil {
+		return ValidationHistory{}, err
+	}
+	out := ValidationHistory{}
+	priors := make([]string, 0, len(rows))
+	for i := range rows {
+		if rows[i].Kind != delivery.RunKindValidation {
+			continue
+		}
+		out.Attempts++
+		if rows[i].ID != in.RunID {
+			priors = append(priors, rows[i].ID)
+		}
+	}
+	if out.Attempts == 0 {
+		// The asking run's own row was not in the list — it can only have been
+		// deleted underneath a live workflow. Count this attempt anyway: the
+		// alternative is an allowance that never depletes.
+		out.Attempts = 1
+	}
+	digest, err := a.cycles.LatestValidationDigest(ctx, in.OrgID, priors)
+	if err != nil {
+		return ValidationHistory{}, err
+	}
+	out.Digest = digest
+	return out, nil
+}
+
+// CloseValidationIssueInput closes the version's validation task. Verdict is
+// carried only for the comment the close leaves behind.
+type CloseValidationIssueInput struct {
+	OrgID     string `json:"orgId"`
+	ProjectID string `json:"projectId"`
+	Issue     int    `json:"issue"`
+	Verdict   string `json:"verdict,omitempty"`
+}
+
+// CloseValidationIssue closes the validation task the run adopted.
+//
+// The PLATFORM owns this close, which is why it is an activity at all: the
+// validation pull request references its issue with `Validates #N` — not a GitHub
+// closing keyword — so merging leaves the issue open and this is the only thing
+// that shuts it. Two owners would race on every attempt, and the loser's reopen
+// would be indistinguishable from a human's.
+//
+// An unwired coordinator is a no-op, like the other optional collaborators. Note
+// what that costs: with nothing closing the task, the reconcile sweep sees an
+// open `validation` issue and starts another validation run every pass. Wiring it
+// is not optional in any real deployment.
+func (a *Activities) CloseValidationIssue(ctx context.Context, in CloseValidationIssueInput) error {
+	if a.validation == nil || in.Issue == 0 {
+		return nil
+	}
+	return sourceControlErr(a.validation.CloseValidationIssue(ctx, in.OrgID, in.ProjectID, in.Issue, in.Verdict))
 }
 
 // MintValidationRepairIssuesInput names the attempt whose failures become work.

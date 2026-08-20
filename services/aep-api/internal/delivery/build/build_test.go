@@ -83,6 +83,7 @@ type planSpy struct {
 	createdMilestones []string
 	nextNumber        int
 	activeRun         *delivery.MilestoneRun
+	judgingRun        *delivery.MilestoneRun
 	refuseAdmit       bool
 	// rows is what ListByProject answers — the version ledger the list read is
 	// built from, and the supersede lookup's input.
@@ -134,6 +135,9 @@ func (p *planSpy) CreateIssue(_ context.Context, _, _ string, req sourcecontrol.
 
 func (p *planSpy) ActiveDevRunByProject(context.Context, string, string) (*delivery.MilestoneRun, error) {
 	return p.activeRun, nil
+}
+func (p *planSpy) ActiveValidationRunByProject(context.Context, string, string) (*delivery.MilestoneRun, error) {
+	return p.judgingRun, nil
 }
 func (p *planSpy) TryAdmit(_ context.Context, run *delivery.MilestoneRun) (bool, *delivery.MilestoneRun, error) {
 	p.mu.Lock()
@@ -320,6 +324,63 @@ func TestBuild_SpecRunAlreadyLive_409_TaggerUntouched(t *testing.T) {
 	if len(spy.milestones()) != 0 {
 		t.Errorf("a rejected click minted a milestone: %v", spy.milestones())
 	}
+}
+
+// The build's OTHER refusal: this project's deployed version is being judged.
+//
+// A delivery run merging and promoting while validation asserts against the
+// deployment would be judging a moving target — the verdict would name criteria
+// that were true of neither the old release nor the new one. A validation run
+// deliberately sits outside the build mutex (it re-judges a version that already
+// shipped, so no database index refuses this), which is why the guard is an
+// explicit read and this test is the only thing enforcing it.
+//
+// Refused rather than queued, and the way past it is one click: cancel the
+// validation.
+func TestBuild_ValidationRunLive_409_TaggerUntouched(t *testing.T) {
+	spy := newPlanSpy()
+	spy.judgingRun = &delivery.MilestoneRun{
+		ID: "run-v", MilestoneNumber: 9, Kind: delivery.RunKindValidation,
+		State: delivery.RunStateRunning,
+	}
+	tagger := &fakeTagger{res: &spec.SpecSaveResult{Tag: "v2"}}
+	svc := withPlanPath(newSvc(fakeRepos{}, tagger), spy)
+
+	code, body := postBuild(t, svc, "shop")
+	if code != 409 {
+		t.Fatalf("status = %d, want 409 (body=%s)", code, body)
+	}
+	e := componenttest.DecodeEnvelope(t, body)
+	if e.Code != "conflict" {
+		t.Fatalf("409 envelope = %+v", e)
+	}
+	// Its own message: "wait for a build" and "cancel the validation" send a user
+	// to different places.
+	if !strings.Contains(e.Message, "validated") {
+		t.Errorf("409 message = %q, want it to name the validation run", e.Message)
+	}
+	// Checked BEFORE the tag is cut, so a refused build claims no version.
+	if tagger.called != 0 {
+		t.Errorf("tagger called %d times behind the validation guard, want 0", tagger.called)
+	}
+	if len(spy.milestones()) != 0 {
+		t.Errorf("a rejected click minted a milestone: %v", spy.milestones())
+	}
+}
+
+// And it is only a refusal while the validation is LIVE: a settled one holds
+// nothing, so the next build proceeds normally.
+func TestBuild_NoLiveValidationRun_Proceeds(t *testing.T) {
+	spy := newPlanSpy()
+	spy.judgingRun = nil // the validation settled
+	tagger := &fakeTagger{res: &spec.SpecSaveResult{Status: "changed", Tag: "v3", Version: 3}}
+	svc := withPlanPath(newSvc(fakeRepos{}, tagger), spy)
+
+	code, body := postBuild(t, svc, "shop")
+	if code != 200 {
+		t.Fatalf("status = %d, want 200 (body=%s)", code, body)
+	}
+	spy.awaitStart(t)
 }
 
 // The DB index is the mutex's authority. When the pre-check passes but the

@@ -57,6 +57,18 @@ type RunStore interface {
 	// own — without inheriting one it would surface in the version ledger under
 	// the milestone's GitHub name instead of a version.
 	MilestoneSpecTag(ctx context.Context, orgID, projectID string, milestoneNumber int) (string, error)
+	// ListByMilestone returns the milestone's runs, newest first. It is how a
+	// validation run learns how many times this VERSION has already been judged:
+	// the allowance is per version and each attempt is its own run, so the count
+	// lives in the ledger and nowhere else.
+	//
+	// It is not a read of the loop's own arithmetic — the thing this port
+	// deliberately does not offer. A budget the workflow counts itself must never
+	// be read back, because a replay has to reproduce the same decisions without a
+	// database; how many runs a milestone has had is somebody ELSE's fact, the
+	// same shape as the milestone poll, and it goes through an activity like all
+	// of them so history records the answer.
+	ListByMilestone(ctx context.Context, orgID, projectID string, milestoneNumber int) ([]delivery.MilestoneRun, error)
 	// SetState moves the run between waiting and running.
 	SetState(ctx context.Context, id, state string) error
 	// Settle writes the terminal state and its reason, once.
@@ -94,10 +106,19 @@ type CycleStore interface {
 	NoteDispatch(ctx context.Context, cycleID, jobRef string) error
 	Finish(ctx context.Context, cycleID, mergeSHA string) error
 	// SetValidationVerdict records one validation ATTEMPT's outcome on its own cycle
-	// row, so a run that validated more than once keeps every attempt's answer
-	// rather than only the last. Written after Finish — the verdict comes from the
+	// row — the verdict, the issue it was dispatched at, and the DIGEST of the
+	// evidence — so a version judged more than once keeps every attempt's answer
+	// rather than only the last. Written after Finish: the verdict comes from the
 	// report at the cycle's merge commit, which does not exist until it has one.
-	SetValidationVerdict(ctx context.Context, cycleID, verdict string, issue int) error
+	//
+	// The digest rides this call because the underlying write is fenced write-once
+	// on an empty verdict, so nothing recorded afterwards could ever land.
+	SetValidationVerdict(ctx context.Context, cycleID, verdict string, issue int, digest string) error
+	// LatestValidationDigest returns the newest digest recorded by any of these
+	// runs' validation cycles, or "" when none did. This is how one attempt reads
+	// what the PREVIOUS attempt concluded — the comparison spans runs, so it
+	// cannot live in workflow state.
+	LatestValidationDigest(ctx context.Context, orgID string, runIDs []string) (string, error)
 	Latest(ctx context.Context, orgID, runID string) (*delivery.RunCycle, error)
 }
 
@@ -187,6 +208,18 @@ type ValidationCoordinator interface {
 	// is the attempt's identity and becomes the issues' dedupe key, so a retry
 	// within one attempt files nothing new while the next attempt files fresh work.
 	MintRepairIssues(ctx context.Context, orgID, projectID string, milestoneNumber int, at, cycleID string) ([]int, error)
+
+	// CloseValidationIssue closes the version's validation task, leaving a comment
+	// that names the verdict (or its absence).
+	//
+	// The PLATFORM owns this close. The validation pull request references its
+	// issue with `Validates #N`, which is deliberately NOT one of GitHub's closing
+	// keywords, so merging does not close it and this call is the only thing that
+	// does. That single ownership is what lets the run close the task on endings
+	// where no verdict was reached at all — an agent that died through its whole
+	// re-dispatch budget — which is the loop's only termination guarantee: the
+	// sweep starts a validation run because the task is OPEN.
+	CloseValidationIssue(ctx context.Context, orgID, projectID string, issue int, verdict string) error
 }
 
 // Dispatcher launches one agent run over the milestone. It is the locally

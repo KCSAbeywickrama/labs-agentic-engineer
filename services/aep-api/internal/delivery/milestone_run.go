@@ -56,16 +56,17 @@ const (
 	// RunOriginIncidentAdoption is a run started by adopting an issue into an
 	// already-deployed version's milestone. Kind task.
 	RunOriginIncidentAdoption = "incident-adoption"
-	// RunOriginRevalidate is a run started by a human asking a version's
-	// acceptance criteria again, against the system already deployed. Kind
-	// validation.
+	// RunOriginRevalidate is a run that asks a version's acceptance criteria again,
+	// against the system already deployed. Kind validation. Both triggers wear it:
+	// a human clicking revalidate, and the reconcile sweep finding the version's
+	// validation task open — an origin is a label on the trigger, and what the run
+	// DOES is its kind.
 	//
-	// What it does after the verdict is the loop's ordinary behaviour, chosen by
-	// the run's ValidationAttempts. One attempt reports and settles — the
-	// allowance is spent before the loop reaches the point where it would file
-	// repair work, so nothing is rebuilt. The default attempts give the full
-	// repair chain: issues per failed criterion, a coding cycle, builds, and a
-	// second validation.
+	// What follows the verdict is chosen by the version's attempt allowance. One
+	// attempt reports and settles — the allowance is spent before the run reaches
+	// the point where it would file repair work, so nothing is rebuilt. The default
+	// gives the repair chain: one issue per failed criterion, which an ordinary run
+	// then works.
 	RunOriginRevalidate = "revalidate"
 
 	// RunStatePlanning is the FILL WINDOW: the row has been admitted (so the
@@ -198,12 +199,11 @@ func IsValidationTerminalReason(reason string) bool {
 // increment — telling "the oracle had nothing automatable" apart from "the agent
 // ran nothing" is deferred to internal-agent-error handling.
 //
-// "Fatal" is now about the END of the loop, not the first occurrence. The two
-// fatal verdicts are exactly the two the run REPAIRS: `failed` mints an issue per
-// failed criterion and re-validates, `unreported` re-dispatches validation. This
-// only settles a run once RunMaxValidationAttempts is spent — which is also why
-// the same predicate tells the read model when a live run should read
-// `awaiting-fix` instead of its verdict.
+// "Fatal" is about the END of the chain, not the first occurrence. The two fatal
+// verdicts are exactly the two that get another go: `failed` mints an issue per
+// failed criterion for an ordinary run to work, and `unreported` re-dispatches
+// inside the validation workflow. Which is also why the same predicate tells the
+// read model when a live run should read `awaiting-fix` instead of its verdict.
 func ValidationVerdictFailsRun(verdict string) (reason string, fatal bool) {
 	switch verdict {
 	case ValidationVerdictFailed:
@@ -230,20 +230,26 @@ const (
 	// RunMaxFixCycles / RunMaxConflictCycles bound the two recovery chains.
 	RunMaxFixCycles      = 2
 	RunMaxConflictCycles = 2
-	// RunMaxValidationAttempts bounds the repair-and-re-validate loop: how many
-	// times ONE run may validate before it accepts the answer it keeps getting.
+	// RunMaxValidationAttempts bounds the repair-and-re-judge chain: how many times
+	// a VERSION may be judged before the answer it keeps giving is accepted.
 	//
-	// It counts validation ATTEMPTS rather than the coding cycles between them,
-	// because attempts are the thing being repeated — the repair cycles are
-	// ordinary work and are already bounded by the cycle ceiling. Alone among the
-	// budgets it names no failure class: spending it settles the run on the verdict
-	// the last attempt produced (see ValidationVerdictFailsRun), which is why
-	// `validation-failed` now means "still failing after every attempt".
+	// Per version and not per run, because each attempt IS its own validation run:
+	// the count is how many `kind = validation` runs the milestone has, read from
+	// the ledger. Nothing carries it — the previous attempt's execution has ended —
+	// and a per-run counter would let a version buy unlimited attempts by being
+	// re-triggered.
+	//
+	// It counts ATTEMPTS rather than the coding cycles between them, because
+	// attempts are the thing being repeated — the repair work is ordinary work and
+	// is already bounded by the cycle ceiling. Alone among the budgets it names no
+	// failure class: spending it settles the run on the verdict the attempt already
+	// produced (see ValidationVerdictFailsRun), which is why `validation-failed`
+	// means "still failing after every attempt".
 	//
 	// This is the DEFAULT. A run may pin its own (MilestoneRun.ValidationAttempts),
 	// and one attempt is what turns a revalidation into a pure re-check: the
 	// allowance is exhausted at the first fatal verdict, which settles the run
-	// before the loop reaches the mint, so no repair work is filed and nothing is
+	// before it reaches the repair mint, so no work is filed and nothing is
 	// rebuilt.
 	RunMaxValidationAttempts = 2
 	// RunDefaultCycleCeiling is the total-cycle ceiling a run starts with when
@@ -325,9 +331,11 @@ type MilestoneRun struct {
 	FixCycles       int `gorm:"not null;default:0" json:"fixCycles"`
 	ConflictCycles  int `gorm:"not null;default:0" json:"conflictCycles"`
 	BuildRetriggers int `gorm:"not null;default:0" json:"buildRetriggers"`
-	// ValidationCycles is the number of validation ATTEMPTS this run has opened,
-	// bounded by RunMaxValidationAttempts. More than one means the run repaired a
-	// failed validation and tried again.
+	// ValidationCycles is the number of validation cycles this run has opened.
+	// A validation run normally opens exactly one; more than one means its agent
+	// merged without committing a report and was re-dispatched. The VERSION's
+	// attempt allowance is counted from the milestone's validation runs, not from
+	// this column.
 	ValidationCycles int `gorm:"not null;default:0" json:"validationCycles"`
 	// CycleCeiling is the run's total-cycle ceiling, snapshotted at start so a
 	// config change cannot retroactively fail (or rescue) a live run.
@@ -347,17 +355,19 @@ type MilestoneRun struct {
 	// ValidationVerdict is a run property, not a per-issue one: the LATEST
 	// validation attempt's outcome. Empty until the first attempt settles.
 	//
-	// A run may validate more than once (see RunMaxValidationAttempts), and each
-	// attempt records its own verdict on its RunCycle. This column is the run's
-	// answer — the last thing validation concluded — so a self-healed run reads
-	// `passed` here while its cycle ledger still shows the attempt that failed.
+	// Only a VALIDATION run sets it. A settled dev run leaves it empty, which reads
+	// as "delivered, not yet judged" — the exception being a version with no
+	// acceptance oracle, where nothing will ever judge it and `skipped` says so.
+	// Readers take the newest VALIDATING run on a milestone (RunValidates), so a
+	// task run's silence here cannot make a passed version read as unvalidated.
 	ValidationVerdict string `gorm:"type:text" json:"validationVerdict,omitempty"`
-	// ValidationIssue is the validation issue this run minted, persisted so a
-	// SETTLED run stays navigable to its criteria. It is otherwise only in live
-	// workflow state, which means that once Temporal retention lapses the platform
-	// can no longer say which issue produced a run's verdict — leaving a verdict
-	// with no way to reach the criteria, the PR, or the runner's own summary.
-	// Zero until the validation cycle mints it, and on incident runs.
+	// ValidationIssue is the version's validation task, persisted alongside the
+	// verdict so a SETTLED run stays navigable to its criteria. It is otherwise only
+	// in live workflow state, which means that once Temporal retention lapses the
+	// platform can no longer say which issue produced a run's verdict — leaving a
+	// verdict with no way to reach the criteria, the PR, or the runner's own summary.
+	// Written by the run that JUDGED, so it is zero on a dev run (which files the
+	// task but records no judgement) and on a task run.
 	ValidationIssue int `gorm:"not null;default:0" json:"validationIssue,omitempty"`
 
 	// CancelRequestedAt is when a human asked for this run to stop — the DURABLE
@@ -400,6 +410,13 @@ func (r MilestoneRun) SpecTag() string {
 	}
 	return r.MilestoneTitle
 }
+
+// RunKinds is the closed set of run kinds, in no significant order. It exists
+// for the callers that must act on ALL of them rather than on one: a project
+// delete has to terminate every workflow id a milestone could have, and a kind
+// missing from that sweep leaves a supervisor retrying forever against a
+// repository that is gone.
+var RunKinds = []string{RunKindDev, RunKindTask, RunKindValidation}
 
 // IsRunKind reports whether a string is one of the three run kinds. It is the
 // admission guard's predicate, kept beside the constants because the reason
@@ -456,19 +473,46 @@ func RunKindForOrigin(origin string) string {
 	}
 }
 
-// RunValidates reports whether a run of this kind asks the version's acceptance
-// criteria at all.
+// RunKindOf resolves a run row's kind, falling back to the kind its origin
+// implies and finally to dev.
 //
-// A dev run validates the version it delivered, and a validation run exists to
-// ask again. A task run fixes one thing in an already-judged version, and
-// re-validating the whole system for it would price every incident like a
-// release.
+// It exists for facts recorded before the kind column did — a row backfilled
+// from a deployment that predates it, or one whose origin is all a caller has —
+// and it is the ONE place that fallback chain is written, because the callers are
+// the two that must not get it wrong: the workflow id a signal is aimed at, and
+// the workflow type a start executes. Both would fail silently, not loudly.
 //
-// It lives here rather than inline in the loop so the supervisor and anything
-// that later needs to explain a `skipped` verdict cannot disagree about which
-// runs were ever going to produce one.
+// The final fallback is dev because dev is the only kind a row could have carried
+// before the column existed, and it is the id a pre-split execution already
+// answers to.
+func RunKindOf(kind, origin string) string {
+	if IsRunKind(kind) {
+		return kind
+	}
+	if implied := RunKindForOrigin(origin); implied != "" {
+		return implied
+	}
+	return RunKindDev
+}
+
+// RunValidates reports whether a run of this kind produces a VERDICT about the
+// deployed system.
+//
+// Exactly one kind does. A validation run is the judgement — it is the whole
+// reason the kind exists. A dev run delivers a version and MINTS the validation
+// task at deployed-green, but it never asks the criteria itself: judging inside
+// the delivery loop meant one workflow owned both "is the increment built" and
+// "does it hold", and the two answers have different lifetimes (a version is
+// re-judged long after it shipped) and different failure classes. A task run
+// fixes one thing in an already-judged version, and re-validating the whole
+// system for it would price every incident like a release.
+//
+// It lives here rather than inline in a read model so nothing has to re-derive
+// which rows can carry a verdict: the newest VALIDATING run on a milestone owns
+// that version's answer, and a dev run's empty verdict means "not judged yet",
+// never "judged and fine".
 func RunValidates(kind string) bool {
-	return kind == RunKindDev || kind == RunKindValidation
+	return kind == RunKindValidation
 }
 
 // IsTerminalRunState reports whether a run state is settled. Terminal rows are

@@ -63,12 +63,17 @@ func NewService(d Deps) *Service {
 // validate, which settles the run `skipped`; a missing or malformed criteria file
 // is that clean no-op.
 //
-// It is idempotent ACROSS ATTEMPTS, which is stronger than it sounds. A run may
-// validate more than once (RunMaxValidationAttempts), and every attempt's pull
-// request carries `Closes #<N>`, so by the time a repeat attempt asks, the
-// version's validation issue is CLOSED. This therefore looks for the issue in any
-// state and reopens a closed one rather than filing a second — the previous filter
-// was `state: open`, which was only ever right for a run that validated once.
+// It is idempotent ACROSS ATTEMPTS, which is stronger than it sounds. A version
+// may be judged more than once (RunMaxValidationAttempts), and the PLATFORM closes
+// the task at the end of every attempt (CloseValidationIssue), so by the time a
+// repeat attempt asks, the version's validation issue is CLOSED. This therefore
+// looks for the issue in any state and reopens a closed one rather than filing a
+// second — the previous filter was `state: open`, which was only ever right for a
+// version judged once.
+//
+// An issue found already OPEN is ADOPTED as this attempt's, not re-filed: the task
+// is the version's persistent handle, and a second one would split the thread the
+// attempts comment on and double what the reconcile sweep sees as unworked.
 //
 // The body is NOT rewritten on reopen. It embeds the oracle as rendered at first
 // mint, which is the question this version is being asked; each attempt's own
@@ -157,6 +162,52 @@ func (s *Service) EnsureValidationIssue(ctx context.Context, orgID, projectID st
 		return 0, fmt.Errorf("validation: created the validation issue but got no number back")
 	}
 	return number, nil
+}
+
+// CloseValidationIssue closes the version's validation task, leaving a comment
+// that names the verdict the attempt reached — or its absence.
+//
+// The platform owns this close, and that ownership is the whole reason the method
+// exists. The validation pull request references its issue with `Validates #N`,
+// which is deliberately not one of GitHub's closing keywords, so merging links the
+// two without ending the task. Letting the merge close it instead put the
+// lifecycle in two hands: the platform reopens the task for the next attempt, and
+// a reopen racing GitHub's own close is indistinguishable from a human reopening
+// it.
+//
+// Single ownership is also what lets a run close the task on an ending where NO
+// pull request ever merged — an agent that died through its whole re-dispatch
+// budget. That matters more than tidiness: the reconcile sweep starts a validation
+// run BECAUSE this issue is open, so a task left open after a dead dispatch would
+// be picked up again within a tick, forever, with nothing outside the workflow
+// able to repair it.
+//
+// The comment is prose and nothing parses it. It exists so a human opening the
+// closed task can see which attempt closed it and why, without reading the run
+// timeline.
+func (s *Service) CloseValidationIssue(ctx context.Context, orgID, projectID string, issue int, verdict string) error {
+	if issue <= 0 {
+		return nil
+	}
+	if err := s.writer.Close(ctx, orgID, projectID, issue, closeComment(verdict)); err != nil {
+		return fmt.Errorf("validation: close issue #%d: %w", issue, err)
+	}
+	slog.InfoContext(ctx, "validation: closed the version's validation task",
+		"project", projectID, "issue", issue, "verdict", verdict)
+	return nil
+}
+
+// closeComment is what the platform says when it closes the task. An empty
+// verdict is its own sentence rather than a blank: the attempt ended without one,
+// which is a different thing from a verdict of `inconclusive` and the reader has
+// to be able to tell them apart.
+func closeComment(verdict string) string {
+	if verdict == "" {
+		return "Closing this validation task: the attempt ended without reaching a verdict. " +
+			"The version is deployed and unjudged — trigger validation again to ask its criteria."
+	}
+	return fmt.Sprintf("Closing this validation task: the attempt concluded `%s`. "+
+		"Reopened automatically if the version is judged again.", verdict)
 }
 
 // findValidationIssue returns the number of the milestone's validation task
@@ -254,7 +305,7 @@ func renderScope(doc *criteriaDoc) string {
 		"- Post a summary comment on this issue when done.",
 		"",
 		"---",
-		"Open one PR whose body includes `Closes #<this issue's number>` so the platform links it back. One PR; tests and report only.",
+		"Open one PR whose body includes `Validates #<this issue's number>` so the platform links it back. `Validates` is deliberately NOT one of GitHub's closing keywords: the platform owns this task's close, so that merging the PR links it without ending the task. One PR; tests and report only.",
 	)
 
 	return strings.TrimRight(b.String(), "\n")

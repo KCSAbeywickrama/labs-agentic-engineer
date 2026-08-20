@@ -86,33 +86,91 @@ func TestDecideAutoMerge(t *testing.T) {
 		{Number: 17, State: "open", Labels: []string{delivery.KindBug, delivery.SrcIncident}},
 	}
 	cases := []struct {
-		name     string
-		resolves []int
-		want     bool
-		matched  []int
+		name string
+		// resolves is what a CLOSING keyword claimed; validates is what the
+		// non-closing `Validates #N` claimed. They are separate arguments because
+		// they are separate lists all the way through the policy — see
+		// decideAutoMerge.
+		resolves  []int
+		validates []int
+		want      bool
+		matched   []int
+		validated []int
 	}{
-		{"one armed issue is enough", []int{12}, true, []int{12}},
-		{"several", []int{12, 13}, true, []int{12, 13}},
-		{"a claim outside the milestone decides nothing", []int{99}, false, nil},
-		{"a ledger issue is not agent work", []int{14}, false, nil},
-		{"partial match still merges", []int{99, 12}, true, []int{12}},
-		{"claiming nothing never merges", nil, false, nil},
-		// The validation cycle's pull request IS this run's work, and it is
-		// admitted by the ARMING label alone now — the policy no longer names the
-		// validation issue a second time. Declining it strands the tests and the
-		// report unmerged, so the run can never read a verdict from them.
-		{"the validation task is this run's work", []int{15}, true, []int{15}},
-		{"a dispatch gate is not claimable", []int{16}, false, nil},
-		{"an unarmed bug is not this run's work", []int{17}, false, nil},
+		{"one armed issue is enough", []int{12}, nil, true, []int{12}, nil},
+		{"several", []int{12, 13}, nil, true, []int{12, 13}, nil},
+		{"a claim outside the milestone decides nothing", []int{99}, nil, false, nil, nil},
+		{"a ledger issue is not agent work", []int{14}, nil, false, nil, nil},
+		{"partial match still merges", []int{99, 12}, nil, true, []int{12}, nil},
+		{"claiming nothing never merges", nil, nil, false, nil, nil},
+		// The validation cycle's pull request IS this run's work. It reaches the
+		// policy through the NON-closing reference, because the platform owns the
+		// task's close — and declining it strands the tests and the report
+		// unmerged, so no run could ever read a verdict from them.
+		{"a validation PR carrying only Validates #N merges", nil, []int{15}, true, nil, []int{15}},
+		// The scope is what stops `Validates` becoming a general-purpose way to get
+		// a pull request merged while closing nothing: the working set would never
+		// empty, because the issues it claimed would still be open.
+		{"a coding PR carrying only Validates #N is declined", nil, []int{12}, false, nil, nil},
+		{"Validates on a ledger issue is declined", nil, []int{14}, false, nil, nil},
+		{"Validates on a gate is declined", nil, []int{16}, false, nil, nil},
+		// A closing keyword aimed at the validation task still merges — the arming
+		// label admits it — but the platform's close is what actually ends the task.
+		{"the validation task is still claimable by a closing keyword", []int{15}, nil, true, []int{15}, nil},
+		{"a dispatch gate is not claimable", []int{16}, nil, false, nil, nil},
+		{"an unarmed bug is not this run's work", []int{17}, nil, false, nil, nil},
+		// Both lists populated: each is matched against its own population, and
+		// neither is folded into the other.
+		{"both references are kept apart", []int{12}, []int{15}, true, []int{12}, []int{15}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := decideAutoMerge(c.resolves, work)
+			got := decideAutoMerge(c.resolves, c.validates, work)
 			if got.Merge != c.want {
 				t.Fatalf("Merge = %v (%s), want %v", got.Merge, got.Reason, c.want)
 			}
 			if !reflect.DeepEqual(got.Matched, c.matched) {
 				t.Fatalf("Matched = %v, want %v", got.Matched, c.matched)
+			}
+			if !reflect.DeepEqual(got.Validated, c.validated) {
+				t.Fatalf("Validated = %v, want %v", got.Validated, c.validated)
+			}
+		})
+	}
+}
+
+// TestParseValidatesRefs pins the non-closing reference the validation cycle
+// carries, and — the half that matters — that it stays OUT of the Resolves list.
+//
+// The two parses must never merge: a coding pull request's Resolves list is the
+// durable record of what that cycle finished (RunCycle.Resolves), so folding a
+// reference nothing closed into it would claim work that is still open.
+func TestParseValidatesRefs(t *testing.T) {
+	cases := []struct {
+		name      string
+		body      string
+		validates []int
+		resolves  []int
+	}{
+		{"the canonical form", "Validates #15", []int{15}, nil},
+		{"present tense", "validate #15", []int{15}, nil},
+		{"past tense", "Validated #15", []int{15}, nil},
+		{"colon form", "Validates: #15", []int{15}, nil},
+		{"deduplicated, first-seen order", "Validates #15\nValidates #9\nValidates #15", []int{15, 9}, nil},
+		{"a cross-repo reference is not a milestone member", "Validates owner/repo#15", nil, nil},
+		{"no reference at all", "just some prose", nil, nil},
+		// The load-bearing separation, both ways.
+		{"Validates never enters the Resolves list", "Validates #15", []int{15}, nil},
+		{"Closes never enters the Validates list", "Closes #15", nil, []int{15}},
+		{"a body carrying both keeps them apart", "Closes #12\nValidates #15", []int{15}, []int{12}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := parseValidatesRefs(c.body); !reflect.DeepEqual(got, c.validates) {
+				t.Errorf("parseValidatesRefs = %v, want %v", got, c.validates)
+			}
+			if got := parseResolvesRefs(c.body); !reflect.DeepEqual(got, c.resolves) {
+				t.Errorf("parseResolvesRefs = %v, want %v", got, c.resolves)
 			}
 		})
 	}

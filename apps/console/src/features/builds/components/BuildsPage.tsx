@@ -42,6 +42,7 @@ import { EarlierSessions } from "./EarlierSessions";
 import { MilestonePanel } from "./MilestonePanel";
 import { RunHistoryList } from "./RunHistoryList";
 import { RunStory } from "./RunStory";
+import { VersionTimeline } from "./VersionTimeline";
 
 /**
  * The Builds page is ONE VERSION'S STORY, latest by default.
@@ -285,6 +286,15 @@ export function BuildsPage({
                 card rather than inside it. */}
             <EarlierSessions cycles={earlierSessions} />
             <RunHistoryList runs={earlier} tag={selected.tag} />
+            {/* The version as ONE narrative, spanning every run on its
+                milestone — the read the run card cannot give, because a run is
+                one execution and a version is now several. Behind a disclosure
+                so the page holds one SSE connection per reader, not two. */}
+            <VersionTimeline
+              projectName={projectName}
+              tag={selected.tag}
+              runIds={runList.map((r) => r.id)}
+            />
           </Stack>
 
           {/* Every view ships loading and error states (api-guidelines #2):

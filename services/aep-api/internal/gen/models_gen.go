@@ -40,6 +40,63 @@ func (e BuildInputItemKind) Valid() bool {
 	}
 }
 
+// Defines values for BuildProgressEventReason.
+const (
+	BuildProgressEventReasonNoLiveRun BuildProgressEventReason = "no_live_run"
+)
+
+// Valid indicates whether the value is a known member of the BuildProgressEventReason enum.
+func (e BuildProgressEventReason) Valid() bool {
+	switch e {
+	case BuildProgressEventReasonNoLiveRun:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for BuildProgressEventType.
+const (
+	BuildProgressEventTypeCycle BuildProgressEventType = "cycle"
+	BuildProgressEventTypeDone  BuildProgressEventType = "done"
+	BuildProgressEventTypeLine  BuildProgressEventType = "line"
+)
+
+// Valid indicates whether the value is a known member of the BuildProgressEventType enum.
+func (e BuildProgressEventType) Valid() bool {
+	switch e {
+	case BuildProgressEventTypeCycle:
+		return true
+	case BuildProgressEventTypeDone:
+		return true
+	case BuildProgressEventTypeLine:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for BuildProgressRunKind.
+const (
+	BuildProgressRunKindDev        BuildProgressRunKind = "dev"
+	BuildProgressRunKindTask       BuildProgressRunKind = "task"
+	BuildProgressRunKindValidation BuildProgressRunKind = "validation"
+)
+
+// Valid indicates whether the value is a known member of the BuildProgressRunKind enum.
+func (e BuildProgressRunKind) Valid() bool {
+	switch e {
+	case BuildProgressRunKindDev:
+		return true
+	case BuildProgressRunKindTask:
+		return true
+	case BuildProgressRunKindValidation:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for BuildSummaryStatus.
 const (
 	BuildSummaryStatusCompleted  BuildSummaryStatus = "completed"
@@ -369,19 +426,19 @@ func (e RunValidationVerdict) Valid() bool {
 
 // Defines values for SkillUpdateState.
 const (
-	Conflict   SkillUpdateState = "conflict"
-	Overridden SkillUpdateState = "overridden"
-	Update     SkillUpdateState = "update"
+	SkillUpdateStateConflict   SkillUpdateState = "conflict"
+	SkillUpdateStateOverridden SkillUpdateState = "overridden"
+	SkillUpdateStateUpdate     SkillUpdateState = "update"
 )
 
 // Valid indicates whether the value is a known member of the SkillUpdateState enum.
 func (e SkillUpdateState) Valid() bool {
 	switch e {
-	case Conflict:
+	case SkillUpdateStateConflict:
 		return true
-	case Overridden:
+	case SkillUpdateStateOverridden:
 		return true
-	case Update:
+	case SkillUpdateStateUpdate:
 		return true
 	default:
 		return false
@@ -635,6 +692,43 @@ type BuildPreflight struct {
 	Items      []PreflightItem `json:"items"`
 	NeedsInput bool            `json:"needsInput"`
 }
+
+// BuildProgressEvent One SSE frame on the VERSION progress stream, which spans every run that has worked the version. `type` discriminates the payload: `cycle` carries a RunCycleView (client upserts by id), `line` one RunProgressLine, and `done` says why the stream ended (the server then closes it). `cycle` and `line` frames also carry `run` — a version's story spans several executions, so a cycle is only identified once you know which run opened it.
+type BuildProgressEvent struct {
+	// Cycle One dispatch within a run. Branch, pull request (number and URL) and merge SHA are LEARNED FROM WEBHOOKS — the agent derives its own branch identity — so they stay empty on a cycle whose agent died before opening a pull request.
+	Cycle RunCycleView `json:"cycle,omitempty"`
+
+	// Line One line of a cycle's agent log: the runner's progress envelope (phase | tool_use | git_commit | git_push | gh_action | log | result) plus the attribution the console groups on — which cycle produced it, and whether the main agent or one of its Task subagents did.
+	Line RunProgressLine `json:"line,omitempty"`
+
+	// Reason Why the stream ended — present only on the `done` frame, and deliberately NOT a run state. `no_live_run` means no run on the version's milestone is currently live, so there is nothing further to report RIGHT NOW. It is not a verdict on the version: a later validation or task run may be admitted on the same milestone, and the console reopens the stream when its run-list poll shows one.
+	Reason BuildProgressEventReason `json:"reason,omitempty"`
+
+	// Run Which run a frame's cycle belongs to. The version's narrative spans several runs, so the run is the SECTION and the cycle is a step inside it — `RunProgressLine.cycleIndex` stays run-relative and is only unique when paired with `run.id`.
+	Run  BuildProgressRun       `json:"run,omitempty"`
+	Type BuildProgressEventType `json:"type"`
+}
+
+// BuildProgressEventReason Why the stream ended — present only on the `done` frame, and deliberately NOT a run state. `no_live_run` means no run on the version's milestone is currently live, so there is nothing further to report RIGHT NOW. It is not a verdict on the version: a later validation or task run may be admitted on the same milestone, and the console reopens the stream when its run-list poll shows one.
+type BuildProgressEventReason string
+
+// BuildProgressEventType defines model for BuildProgressEvent.Type.
+type BuildProgressEventType string
+
+// BuildProgressRun Which run a frame's cycle belongs to. The version's narrative spans several runs, so the run is the SECTION and the cycle is a step inside it — `RunProgressLine.cycleIndex` stays run-relative and is only unique when paired with `run.id`.
+type BuildProgressRun struct {
+	// ID Milestone run id — the same id list-build-runs reports and cancel-run takes.
+	ID string `json:"id"`
+
+	// Index 1-based chronological position of this run among the version's runs, so the console can label a section without holding the whole run list — the same reason `cycleIndex` exists, one level up. Two runs of one kind are ordinary (a version can be repaired more than once), so the kind alone does not name a section.
+	Index int64 `json:"index"`
+
+	// Kind What the run DOES, and the section marker the console renders — `dev` delivered the version, `task` worked a defect inside it, `validation` re-judged it. Same vocabulary as MilestoneRunView.kind.
+	Kind BuildProgressRunKind `json:"kind"`
+}
+
+// BuildProgressRunKind What the run DOES, and the section marker the console renders — `dev` delivered the version, `task` worked a defect inside it, `validation` re-judged it. Same vocabulary as MilestoneRunView.kind.
+type BuildProgressRunKind string
 
 // BuildRequest defines model for BuildRequest.
 type BuildRequest struct {

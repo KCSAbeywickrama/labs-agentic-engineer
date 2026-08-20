@@ -14,36 +14,74 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Package run is the MILESTONE RUN SUPERVISOR: one Temporal workflow that
-// works the open issues in one milestone until the milestone settles.
+// Package run is the MILESTONE RUN SUPERVISOR: the Temporal workflows that work
+// one milestone until it settles.
 //
-// There is exactly ONE run species. A dev run, a task run and a validation run
-// are the same loop over the same milestone model, differing only in KIND — in
-// whether the run validates, and in where it ENTERS the loop.
-// The workflow is therefore keyed by the milestone
-// (`run-<org>-<project>-<milestoneNumber>`) and its id is REUSED after a
-// terminal run, because a milestone sees sequential runs across its life.
+// There are THREE run species, and each is its own top-level workflow — a
+// species is a workflow, not a branch (ADR-0020):
 //
-// The loop, and the whole of this package:
+//	dev-<org>-<project>-<milestone>          DevRunWorkflow
+//	task-<org>-<project>-<milestone>          TaskRunWorkflow
+//	validation-<org>-<project>-<milestone>    ValidationRunWorkflow
+//
+// The id is keyed by the MILESTONE and prefixed by the KIND. A milestone sees
+// sequential runs of one kind across its life, so the id is reused after a
+// terminal run; the prefix is what keeps the three apart, because ids are reused
+// under ALLOW_DUPLICATE and a stale signal aimed at a settled dev run would
+// otherwise land on the validation run that claimed the id afterwards. The run
+// ROW is the routing table: the event plane resolves a row before it signals
+// anything, and the row's kind gives both the prefix and the workflow type.
+//
+// # dev and task: the cycle loop
 //
 //	WAIT ──► dispatch the coding agent ──► PR opened ──► auto-merge ──► builds + deploy
 //	 ▲        (prompt = milestone reference only)                            │
 //	 │  all green, open issues remain ─────────────► next cycle (re-WAIT)    │
 //	 │  red after the one automatic re-trigger ─► FIX issue ─► next cycle    │
 //	 │  merge conflict ─────────────────────────► CONFLICT issue ─► next     │
-//	 │  deployed-green + empty working set + validating kind ───► VALIDATION │
-//	 └─ settle: empty working set (armed, kind ∈ dev/bug/conflict) + verdict
-//	            └─► close the milestone · run row → succeeded
-//	    budgets exhausted / no progress / cancel ─► failed | cancelled
+//	 └─ working set empty (armed, kind ∈ development/bug/conflict) ──► the run's
+//	    own BOOKEND ──► settle
+//	    budgets exhausted / no progress / cancel ─► failed | blocked | cancelled
 //
-// A VALIDATION RUN enters that diagram at the validation cycle rather than at the
-// wait: its milestone is a version that already shipped, so the first poll finds
-// an empty working set. Everything after the verdict is the loop as drawn, and
-// which of the two shapes it takes is one number — the run's validation-attempt
-// allowance. One attempt is spent by the first fatal verdict, which settles the
-// run before it reaches the repair mint, so nothing is filed and nothing is
-// rebuilt. The default allowance gives the full chain: issues per failed
-// criterion, an ordinary coding cycle, builds, and a second validation.
+// They are the SAME loop with different bookends — one `bookends` value, never
+// two cycle loops that drift apart:
+//
+//	dev   before:  provisionGates → planTasks (it owns the version it is filling)
+//	      onEmpty: mint the version's validation task → settle succeeded
+//	task  before:  nothing (the milestone was filled by the build that shipped it)
+//	      onEmpty: settle succeeded
+//
+// A dev run therefore **settles at deployed-green having minted the validation
+// task, and never validates**. Its verdict column stays EMPTY, which is the
+// honest reading of "delivered, not yet judged" — the exception is a project with
+// no acceptance oracle, where no task is filed, nothing will ever judge the
+// version, and `skipped` says so.
+//
+// # validation: its own shape, and no working set
+//
+//	adopt-or-mint the validation task (it is the VERSION's persistent handle)
+//	  └─► one agent stage, anchored at that issue, AEP_TASK_KIND=validation
+//	        └─► read the verdict at the cycle's OWN merge SHA
+//	              ├─ not fatal ──────────────► close the task · succeeded
+//	              ├─ unreported, budget left ► re-dispatch inside this workflow
+//	              └─ failed ────────────────► one repair issue per failed criterion
+//	                                          · close the task · failed
+//
+// It does not share the cycle loop at all: it polls no working set, and it BUILDS
+// AND DEPLOYS NOTHING — its pull request touches only `tests/`, so the merge's
+// path diff yields no components and both later stages were already silent
+// no-ops for it. Skipping them outright is the honest form of that.
+//
+// It is started by the reconcile sweep, because an open `validation`-kind issue
+// exists, or by a human asking a shipped version's criteria again. The task is
+// closed on EVERY ending, verdict or not: the sweep's trigger IS that open issue,
+// so a run that gave up and left it open would be restarted within a tick,
+// forever, with nothing outside the workflow able to repair a dead dispatch.
+//
+// Two facts span validation runs — the version's attempt allowance and the
+// previous report's digest — and both are DERIVED from the milestone's own
+// validation runs rather than carried, because each attempt is its own execution
+// and the previous one's state is gone.
 //
 // # Division of labour
 //
@@ -58,6 +96,31 @@
 // vocabulary (labels, run signals, the run and cycle rows, the build-fan-out
 // naming) through the delivery ROOT, and they reach each other only through
 // ports: `eventcore.RunSignaler`/`RunStarter` inbound, and nothing outbound.
+//
+// # Internal shape
+//
+// Separated by FILE, one package, over one shared `loop` struct — it owns the
+// signal channels, the budgets and the cycle state, and every workflow wants all
+// three. Sub-packages would be LESS protected: `internal/arch` gives siblings a
+// blanket import ban with no layer concept, and second-level packages are
+// unchecked in both directions.
+//
+//	activities.go            the single Activities struct — ONE RegisterActivity
+//	stage_agent.go           append cycle · dispatch · await landing · re-dispatch
+//	stage_build.go           await the merge's fan-out
+//	stage_deploy.go          plan waves · promote · await Ready · converge
+//	stage_boundary.go        the shared loop · poll · dispatchable? · budgets · park
+//	workflow_dev.go          gates + plan + boundary loop + mint the validation task
+//	workflow_task.go         boundary loop with empty bookends
+//	workflow_validation.go   one agent stage + verdict + repair issues + close
+//	register.go              RegisterWorkflow per workflow, one RegisterActivity
+//	worker.go                one task queue, one worker
+//
+// ONE `Activities` struct is not a style choice. Temporal registers an activity
+// by its reflected METHOD NAME, so two activity structs sharing any method name
+// panic the worker at Start — and three structs carved out of one loop would
+// share a great many. Three workflows taking method expressions off one struct is
+// the only shape that cannot break that way.
 //
 // # What this package does not hold
 //

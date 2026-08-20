@@ -94,7 +94,12 @@ type harness struct {
 	// asked for, so a test can assert the loop turned the failure into work rather
 	// than merely that it did not settle.
 	repairMints []MintValidationRepairIssuesInput
-	closed      int
+	// taskCloses records every close of the version's validation task. It is the
+	// infinite-loop guard's assertion surface: the reconcile sweep starts a
+	// validation run BECAUSE that task is open, so an ending that leaves it open is
+	// an ending that repeats forever.
+	taskCloses []CloseValidationIssueInput
+	closed     int
 }
 
 // newHarness registers the activities whose behaviour never varies — the
@@ -121,6 +126,8 @@ func newHarness(t *testing.T) *harness {
 	h.env.RegisterActivity(acts.EnsureValidationIssue)
 	h.env.RegisterActivity(acts.ReadValidationVerdict)
 	h.env.RegisterActivity(acts.MintValidationRepairIssues)
+	h.env.RegisterActivity(acts.ReadValidationHistory)
+	h.env.RegisterActivity(acts.CloseValidationIssue)
 	h.env.RegisterActivity(acts.DispatchAgent)
 	h.env.RegisterActivity(acts.ProvisionGates)
 	h.env.RegisterActivity(acts.PlanMilestone)
@@ -164,6 +171,14 @@ func newHarness(t *testing.T) *harness {
 			h.mu.Lock()
 			defer h.mu.Unlock()
 			h.closed++
+		}).Return(nil)
+	// The validation task's close never varies — it is the platform's write, made
+	// on every ending — so it is a constructor default like the other writers.
+	h.env.OnActivity(acts.CloseValidationIssue, mock.Anything, mock.Anything).
+		Run(func(args mock.Arguments) {
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			h.taskCloses = append(h.taskCloses, args.Get(1).(CloseValidationIssueInput))
 		}).Return(nil)
 	return h
 }
@@ -384,6 +399,25 @@ func (h *harness) repairMintCount() int {
 	return len(h.repairMints)
 }
 
+// taskCloseCount is the validation-task close tally, read safely.
+func (h *harness) taskCloseCount() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return len(h.taskCloses)
+}
+
+// validationHistoryIs pins what the LEDGER says about this version's earlier
+// judgements: how many `validation` runs it has (including the one under test),
+// and what the previous one concluded.
+//
+// Both span runs, which is why they are read rather than carried, and why a test
+// that wants a SECOND attempt pins attempts=2 rather than driving two workflows.
+func (h *harness) validationHistoryIs(attempts int, digest string) {
+	h.set["history"] = true
+	h.env.OnActivity(h.acts.ReadValidationHistory, mock.Anything, mock.Anything).
+		Return(ValidationHistory{Attempts: attempts, Digest: digest}, nil)
+}
+
 // applyDefaults fills in the facts a test did not pin: every cycle lands, every
 // build is green, and the project has no acceptance oracle.
 func (h *harness) applyDefaults() {
@@ -398,6 +432,10 @@ func (h *harness) applyDefaults() {
 	}
 	if !h.set["validation"] {
 		h.validationIs(0, delivery.ValidationVerdictSkipped)
+	}
+	if !h.set["history"] {
+		// A version's FIRST judgement: this attempt, and nothing to compare it to.
+		h.validationHistoryIs(1, "")
 	}
 	if !h.set["repair"] {
 		h.repairMintsAre([]int{testRepairIssue})
@@ -450,7 +488,24 @@ func (h *harness) runWith(in RunInput) {
 	in.ProjectID = testProject
 	in.MilestoneNumber = testMilepost
 	in.MilestoneTitle = "v3"
-	h.env.ExecuteWorkflow(MilestoneRunWorkflow, in)
+	h.env.ExecuteWorkflow(workflowFor(in), in)
+}
+
+// workflowFor picks the entry point a run of this input's kind executes — the
+// same routing Supervisor.StartRun performs off the run ROW.
+//
+// It is written here rather than passed per test so a test that changes a kind
+// cannot keep driving the wrong loop: the kind IS the workflow now, not a branch
+// inside one.
+func workflowFor(in RunInput) any {
+	switch runKind(in) {
+	case delivery.RunKindValidation:
+		return ValidationRunWorkflow
+	case delivery.RunKindTask:
+		return TaskRunWorkflow
+	default:
+		return DevRunWorkflow
+	}
 }
 
 func (h *harness) result(t *testing.T) RunResult {
@@ -776,28 +831,27 @@ func TestDeployFailed_WithNoRecovery_SettlesOnTheDeployBudget(t *testing.T) {
 	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonDeployBudget)
 }
 
-// TestValidationCycle_TouchesNoComponent_SkipsDeploy: a validation cycle's pull
-// request carries tests and a report, so there is nothing to promote. The stage
-// must be a no-op rather than waiting for a binding that will never change.
-func TestValidationCycle_TouchesNoComponent_SkipsDeploy(t *testing.T) {
+// TestValidationRun_BuildsAndDeploysNothing: a validation run's pull request
+// carries tests and a report, so the path diff yields no components. Both later
+// stages were already silent no-ops for it, and the workflow now SKIPS them
+// outright — which is the honest form of what was already true, and removes two
+// stages' worth of failure modes from a run that could never reach them.
+func TestValidationRun_BuildsAndDeploysNothing(t *testing.T) {
 	h := newHarness(t)
-	h.milestoneIs(
-		MilestoneSnapshot{Work: 1, Total: 1}, // the coding cycle
-		MilestoneSnapshot{},                  // deployed-green: validation follows
-	)
-	h.buildsAre(
-		CycleBuildState{Expected: 1, Settled: 1, Components: []string{"order-service"}},
-		CycleBuildState{}, // the validation cycle's merge touched nothing
-	)
 	h.validationIs(77, delivery.ValidationVerdictPassed)
-	h.merges(2)
+	h.merges(1)
 
-	h.run(delivery.RunKindDev, 0)
+	h.run(delivery.RunKindValidation, 0)
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
-	require.Equal(t, 2, h.deployCount(),
-		"only the coding cycle deploys (its wave plus its converge); the validation cycle has nothing to promote")
+	require.Equal(t, 0, h.deployCount(), "a validation run promotes nothing")
+	h.env.AssertNotCalled(t, "PollCycleBuilds", mock.Anything, mock.Anything)
+	h.env.AssertNotCalled(t, "PlanDeployWaves", mock.Anything, mock.Anything)
+	h.env.AssertNotCalled(t, "PollCycleDeployments", mock.Anything, mock.Anything)
+	// And it never polls a working set: it has none, which is why it does not
+	// share the cycle-boundary loop at all.
+	h.env.AssertNotCalled(t, "PollMilestone", mock.Anything, mock.Anything)
 }
 
 // TestDeployNeverReady_ExpiresIntoAFixIssue pins the loop's SECOND deadline and
@@ -883,397 +937,62 @@ func TestConflictCycle_AnUnmergeablePRBecomesTheNextCyclesWork(t *testing.T) {
 	require.Equal(t, testMergeSHA, h.finishes[1].MergeSHA)
 }
 
-// TestValidationCycle_Passes covers §7's validation arm: at deployed-green with
-// an empty working set, a SPEC run mints the validation issue and works it with
-// a fresh dispatch anchored to that issue alone.
-func TestValidationCycle_Passes(t *testing.T) {
-	h := newHarness(t)
-	h.milestoneIs(
-		MilestoneSnapshot{Work: 1, Total: 1},
-		MilestoneSnapshot{}, // deployed-green, nothing left → validation
-		MilestoneSnapshot{}, // after validation → settle
-	)
-	h.validationIs(77, delivery.ValidationVerdictPassed)
-	h.merges(2)
+// ---- the dev run's hand-off ------------------------------------------------
 
-	h.run(delivery.RunKindDev, 0)
-	res := h.result(t)
-
-	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
-	require.Equal(t, []string{delivery.CycleKindCoding, delivery.CycleKindValidation}, h.dispatchKinds())
-	require.Equal(t, delivery.ValidationVerdictPassed, res.ValidationVerdict)
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	require.Equal(t, []string{delivery.ValidationVerdictPassed}, h.verdicts,
-		"the verdict is written once, as a run property")
-	require.Equal(t, 77, h.dispatches[1].IssueNumber, "the validation dispatch is anchored to one issue")
-	require.Equal(t, 0, h.dispatches[0].IssueNumber, "a coding dispatch is a milestone reference only")
-}
-
-// TestValidationCycle_RepairsAFailureAndRevalidates is the self-healing loop.
+// TestDevRun_MintsTheValidationTaskAtDeployedGreen is the split's whole point on
+// the dev side: the version is delivered, the validation TASK is filed, and the
+// run settles without ever asking the criteria.
 //
-// A `failed` attempt is a DEFECT, and the platform already knows what to do with a
-// detected defect: file it as an issue, let it join the working set, and let the
-// next cycle work it like any other. So the run does not settle — it files one
-// issue per failed criterion, the boundary dispatches an ordinary CODING cycle, and
-// validation runs again against the repaired system.
-//
-// Note the dispatch sequence: coding, validation, coding, validation. Nothing in
-// the middle is a special "repair" kind, because a repair is ordinary work.
-func TestValidationCycle_RepairsAFailureAndRevalidates(t *testing.T) {
-	h := newHarness(t)
-	h.milestoneIs(
-		MilestoneSnapshot{Work: 1, Total: 1}, // coding cycle
-		MilestoneSnapshot{},                  // deployed-green → validation attempt 1
-		MilestoneSnapshot{Work: 1, Total: 1}, // the repair issue → coding cycle
-		MilestoneSnapshot{},                  // green again → validation attempt 2
-		MilestoneSnapshot{},                  // passed → settle
-	)
-	// Different digests: the repair changed the answer, which is what stops the
-	// identical-report rule from cutting the loop short.
-	h.validationAttemptsAre(77,
-		ValidationOutcome{Verdict: delivery.ValidationVerdictFailed, Digest: "red-1"},
-		ValidationOutcome{Verdict: delivery.ValidationVerdictPassed, Digest: "green"},
-	)
-	h.merges(4)
-
-	h.run(delivery.RunKindDev, 0)
-	res := h.result(t)
-
-	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
-	require.Equal(t, []string{
-		delivery.CycleKindCoding, delivery.CycleKindValidation,
-		delivery.CycleKindCoding, delivery.CycleKindValidation,
-	}, h.dispatchKinds())
-	require.Equal(t, delivery.ValidationVerdictPassed, res.ValidationVerdict,
-		"the run's verdict is its LATEST attempt's")
-	require.Equal(t, 1, h.closed, "a self-healed increment is still a delivered increment")
-
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	require.Equal(t, []string{delivery.ValidationVerdictFailed, delivery.ValidationVerdictPassed},
-		h.verdicts, "both attempts recorded their own verdict")
-	require.Len(t, h.repairMints, 1, "the failed attempt filed repair work exactly once")
-	require.Equal(t, testMergeSHA, h.repairMints[0].At,
-		"repair issues come from the report at the attempt's OWN merge commit")
-	require.Equal(t, testCycleID, h.repairMints[0].CycleID,
-		"the attempt's cycle id is the issues' dedupe key")
-	// The repair dispatch is an ordinary milestone reference — the loop does not
-	// anchor it to the repair issue, because the runner re-lists the working set.
-	require.Equal(t, 0, h.dispatches[2].IssueNumber)
-}
-
-// TestValidationCycle_UnreportedRedispatchesValidation covers the other
-// recoverable verdict, and it takes a different route to the same boundary.
-//
-// An agent that merged a pull request and committed no report has not broken the
-// SOFTWARE, so there is nothing to repair: the run mints nothing, the working set
-// stays empty, and the boundary bounces straight back into validation. Two
-// validation cycles in a row, with no coding cycle between them, is the proof.
-func TestValidationCycle_UnreportedRedispatchesValidation(t *testing.T) {
-	h := newHarness(t)
-	h.milestoneIs(
-		MilestoneSnapshot{Work: 1, Total: 1}, // coding cycle
-		MilestoneSnapshot{},                  // → validation attempt 1
-		MilestoneSnapshot{},                  // still empty → validation attempt 2
-		MilestoneSnapshot{},                  // passed → settle
-	)
-	h.validationAttemptsAre(77,
-		ValidationOutcome{Verdict: delivery.ValidationVerdictUnreported},
-		ValidationOutcome{Verdict: delivery.ValidationVerdictPassed, Digest: "green"},
-	)
-	h.merges(3)
-
-	h.run(delivery.RunKindDev, 0)
-	res := h.result(t)
-
-	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
-	require.Equal(t, []string{
-		delivery.CycleKindCoding, delivery.CycleKindValidation, delivery.CycleKindValidation,
-	}, h.dispatchKinds())
-	require.Equal(t, 0, h.repairMintCount(),
-		"nothing is wrong with the software, so nothing is filed")
-}
-
-// TestValidationCycle_FailsAfterEveryAttempt proves the loop is bounded, and that
-// exhausting it needs no vocabulary of its own: the run settles on the verdict it
-// keeps getting, so `validation-failed` now means "still failing after every
-// attempt".
-func TestValidationCycle_FailsAfterEveryAttempt(t *testing.T) {
-	h := newHarness(t)
-	h.milestoneIs(
-		MilestoneSnapshot{Work: 1, Total: 1}, // coding cycle
-		MilestoneSnapshot{},                  // → validation attempt 1
-		MilestoneSnapshot{Work: 1, Total: 1}, // repair issue → coding cycle
-		MilestoneSnapshot{},                  // → validation attempt 2 (the last)
-	)
-	// Distinct digests, so it is the ATTEMPT BUDGET that ends this run and not the
-	// identical-report short-circuit.
-	h.validationAttemptsAre(77,
-		ValidationOutcome{Verdict: delivery.ValidationVerdictFailed, Digest: "red-1"},
-		ValidationOutcome{Verdict: delivery.ValidationVerdictFailed, Digest: "red-2"},
-	)
-	h.merges(4)
-
-	h.run(delivery.RunKindDev, 0)
-	res := h.result(t)
-
-	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonValidationFailed)
-	require.Equal(t, delivery.ValidationVerdictFailed, res.ValidationVerdict)
-	require.Equal(t, 0, h.closed, "a failed increment keeps its milestone open")
-	require.Equal(t, 2, delivery.RunMaxValidationAttempts,
-		"this test's shape assumes the allowance it is proving")
-	require.Equal(t, 1, h.repairMintCount(),
-		"the LAST attempt files nothing — there is no attempt left to work it")
-}
-
-// TestValidationCycle_UnreportedTwiceStillFails pins the same bound for the other
-// recoverable verdict, under its own reason. "The suite went red" and "nothing was
-// reported" are different explanations, and a terminal reason exists to explain.
-func TestValidationCycle_UnreportedTwiceStillFails(t *testing.T) {
-	h := newHarness(t)
-	h.milestoneIs(
-		MilestoneSnapshot{Work: 1, Total: 1},
-		MilestoneSnapshot{},
-		MilestoneSnapshot{},
-	)
-	h.validationIs(77, delivery.ValidationVerdictUnreported)
-	h.merges(3)
-
-	h.run(delivery.RunKindDev, 0)
-	res := h.result(t)
-
-	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonValidationUnreported)
-	require.Equal(t, delivery.ValidationVerdictUnreported, res.ValidationVerdict)
-	require.Equal(t, 0, h.closed, "a run that reported nothing keeps its milestone open")
-}
-
-// TestValidationCycle_IdenticalReportStopsEarly is the identical-report rule, and
-// the reason it needs its own test is that it is the ONLY thing standing between a
-// repeat attempt and a deployment that never picked up the repair.
-//
-// Two attempts whose reports agree on every criterion, every status and every
-// failure message learned the same nothing. Another attempt could only produce that
-// report a third time, so the run stops rather than spending the rest of its
-// allowance — even though the allowance is not spent.
-func TestValidationCycle_IdenticalReportStopsEarly(t *testing.T) {
-	h := newHarness(t)
-	h.milestoneIs(
-		MilestoneSnapshot{Work: 1, Total: 1},
-		MilestoneSnapshot{},
-		MilestoneSnapshot{Work: 1, Total: 1},
-		MilestoneSnapshot{},
-	)
-	// The SAME digest twice: the repair did not move the system.
-	h.validationAttemptsAre(77,
-		ValidationOutcome{Verdict: delivery.ValidationVerdictFailed, Digest: "unchanged"},
-		ValidationOutcome{Verdict: delivery.ValidationVerdictFailed, Digest: "unchanged"},
-	)
-	h.merges(4)
-
-	h.run(delivery.RunKindDev, 0)
-	res := h.result(t)
-
-	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonValidationFailed)
-	require.Equal(t, 1, h.repairMintCount(),
-		"the second attempt learned nothing, so it files no further repair work")
-}
-
-// A `failed` attempt whose report names failures the minter cannot turn into work
-// leaves the run with nothing to dispatch. Repeating would be the same validation
-// cycle against the same code, so the run settles honestly rather than looping on
-// an empty working set.
-func TestValidationCycle_FailedWithNothingToRepairSettles(t *testing.T) {
+// The verdict it leaves is EMPTY, and that is deliberate — "delivered, not yet
+// judged". The validation run the sweep starts off this task owns the version's
+// answer, and the read model reads the newest VALIDATING run on the milestone for
+// exactly that reason.
+func TestDevRun_MintsTheValidationTaskAtDeployedGreen(t *testing.T) {
 	h := newHarness(t)
 	h.milestoneIs(MilestoneSnapshot{Work: 1, Total: 1}, MilestoneSnapshot{})
-	h.validationIs(77, delivery.ValidationVerdictFailed)
-	h.repairMintsAre(nil)
-	h.merges(2)
-
-	h.run(delivery.RunKindDev, 0)
-	res := h.result(t)
-
-	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonValidationFailed)
-	require.Equal(t, 1, h.repairMintCount(), "it tried")
-}
-
-// TestValidationCycle_IncompleteEvidenceStillSucceeds pins the pair that must NOT
-// fail a run. Both are honest reports about the test harness rather than evidence
-// the increment is broken:
-//
-//   - partial: something passed, nothing failed, and some criteria were never
-//     covered — which is why it is not reported as `passed`;
-//   - inconclusive: no test results at all.
-//
-// Telling "the oracle had nothing automatable" apart from "the agent ran nothing"
-// is deferred with the rest of internal-agent-error handling, so inconclusive
-// succeeds for now.
-func TestValidationCycle_IncompleteEvidenceStillSucceeds(t *testing.T) {
-	for _, verdict := range []string{
-		delivery.ValidationVerdictPartial,
-		delivery.ValidationVerdictInconclusive,
-	} {
-		t.Run(verdict, func(t *testing.T) {
-			h := newHarness(t)
-			h.milestoneIs(
-				MilestoneSnapshot{Work: 1, Total: 1},
-				MilestoneSnapshot{}, // deployed-green → validation
-				MilestoneSnapshot{}, // after validation → settle
-			)
-			h.validationIs(77, verdict)
-			h.merges(2)
-
-			h.run(delivery.RunKindDev, 0)
-			res := h.result(t)
-
-			h.assertSettled(t, res, delivery.RunStateSucceeded, "")
-			require.Equal(t, verdict, res.ValidationVerdict)
-			require.Equal(t, 1, h.closed,
-				"a delivered increment closes its milestone even with incomplete evidence")
-		})
-	}
-}
-
-// The validation issue is persisted WITH the verdict: it otherwise lives only in
-// workflow state, so a settled run would carry a verdict with no way back to the
-// criteria that produced it once Temporal retention lapses.
-func TestValidationCycle_PersistsTheIssueWithTheVerdict(t *testing.T) {
-	h := newHarness(t)
-	h.milestoneIs(
-		MilestoneSnapshot{Work: 1, Total: 1},
-		MilestoneSnapshot{},
-		MilestoneSnapshot{},
-	)
-	h.validationIs(77, delivery.ValidationVerdictPassed)
-	h.merges(2)
+	h.validationIs(77, delivery.ValidationVerdictPassed) // the verdict is never read
+	h.merges(1)
 
 	h.run(delivery.RunKindDev, 0)
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	require.Len(t, h.verdictWrites, 1, "the verdict is written once")
-	require.Equal(t, 77, h.verdictWrites[0].Issue,
-		"the issue is persisted alongside the verdict, not left in workflow state")
-	// The CYCLE is named too, so the attempt keeps its own answer. Without it the run
-	// row's single column would be the only record, and a run that validated twice
-	// would remember nothing but the last attempt.
-	require.Equal(t, testCycleID, h.verdictWrites[0].CycleID,
-		"the verdict is written against the attempt's own cycle, not just the run")
+	require.Equal(t, []string{delivery.CycleKindCoding}, h.dispatchKinds(),
+		"a dev run never dispatches a validation cycle")
+	require.Equal(t, 1, h.closed, "a delivered increment closes its milestone")
+	require.Empty(t, res.ValidationVerdict,
+		"an empty verdict is 'awaiting judgement'; the validation run records the answer")
+	h.env.AssertNotCalled(t, "ReadValidationVerdict", mock.Anything, mock.Anything)
+	require.Equal(t, 0, h.taskCloseCount(),
+		"the dev run FILES the task; closing it belongs to the run that works it")
 }
 
-// Each ATTEMPT names its own cycle when it records its verdict. That is what lets a
-// self-healed run show attempt 1's failure beside attempt 2's pass: the run row can
-// only hold the latest.
-func TestValidationCycle_EachAttemptRecordsAgainstItsOwnCycle(t *testing.T) {
+// A project with no acceptance oracle gets no validation task, so nothing will
+// ever judge that version — and an empty verdict would read as "any moment now"
+// forever. `skipped` says what is true, and it belongs to no cycle.
+func TestDevRun_NoAcceptanceOracleRecordsSkipped(t *testing.T) {
 	h := newHarness(t)
-	h.milestoneIs(
-		MilestoneSnapshot{Work: 1, Total: 1},
-		MilestoneSnapshot{},
-		MilestoneSnapshot{Work: 1, Total: 1},
-		MilestoneSnapshot{},
-		MilestoneSnapshot{},
-	)
-	h.validationAttemptsAre(77,
-		ValidationOutcome{Verdict: delivery.ValidationVerdictFailed, Digest: "red"},
-		ValidationOutcome{Verdict: delivery.ValidationVerdictPassed, Digest: "green"},
-	)
-	h.merges(4)
+	h.milestoneIs(MilestoneSnapshot{Work: 1, Total: 1}, MilestoneSnapshot{})
+	h.validationIs(0, delivery.ValidationVerdictSkipped) // EnsureValidationIssue answers 0
+	h.merges(1)
 
 	h.run(delivery.RunKindDev, 0)
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
+	require.Equal(t, delivery.ValidationVerdictSkipped, res.ValidationVerdict)
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	require.Len(t, h.verdictWrites, 2, "one write per attempt")
-	for i, w := range h.verdictWrites {
-		require.NotEmpty(t, w.CycleID, "attempt %d wrote no cycle id", i+1)
-		require.Equal(t, 77, w.Issue, "every attempt shares the version's one validation issue")
-	}
-	require.Equal(t, delivery.ValidationVerdictFailed, h.verdictWrites[0].Verdict)
-	require.Equal(t, delivery.ValidationVerdictPassed, h.verdictWrites[1].Verdict)
+	require.Len(t, h.verdictWrites, 1)
+	require.Empty(t, h.verdictWrites[0].CycleID,
+		"skipped belongs to no cycle — none was opened, and the cycle write is write-once")
 }
 
-// A `skipped` verdict belongs to NO cycle, and both places that write it are
-// reached with l.cycleID still holding the last CODING cycle's id — there is no
-// validation cycle to name, because none was opened.
-//
-// The cycle write is write-once, so an id sent here would put a validation verdict
-// on a coding row permanently, contradicting RunCycle.ValidationVerdict (documented
-// empty on every other kind) and CycleView, which publishes the field as a
-// validation-cycle property.
-func TestSkippedVerdict_BelongsToNoCycle(t *testing.T) {
-	for name, kind := range map[string]string{
-		// Decided before a validation cycle opens: the project has no oracle.
-		"no acceptance oracle": delivery.RunKindDev,
-		// Decided in settle: a task run never reaches validation at all, so it
-		// arrives at the end with an empty verdict.
-		"validation never reached": delivery.RunKindTask,
-	} {
-		t.Run(name, func(t *testing.T) {
-			h := newHarness(t)
-			h.milestoneIs(MilestoneSnapshot{Work: 1, Total: 1}, MilestoneSnapshot{})
-			h.merges(1)
-
-			h.run(kind, 0)
-			res := h.result(t)
-
-			h.assertSettled(t, res, delivery.RunStateSucceeded, "")
-			require.Equal(t, delivery.ValidationVerdictSkipped, res.ValidationVerdict)
-			h.mu.Lock()
-			defer h.mu.Unlock()
-			require.Len(t, h.verdictWrites, 1, "the verdict is written once")
-			require.Empty(t, h.verdictWrites[0].CycleID,
-				"skipped was stamped onto the last coding cycle's row")
-		})
-	}
-}
-
-// TestRunInput_WithoutAKindFallsBackToItsOrigin is the REPLAY case, and the one
-// that cannot be backfilled.
-//
-// A workflow input lives in Temporal history: an execution started before the
-// kind field existed replays with the empty string, forever. A loop that read
-// that as "not dev" would take every non-dev branch on a live spec build — it
-// would skip validation entirely and settle the version succeeded without ever
-// asking its acceptance criteria. Origin is the only surviving evidence of what
-// such a run is, which is the whole reason it is still carried.
-func TestRunInput_WithoutAKindFallsBackToItsOrigin(t *testing.T) {
-	for origin, wantsValidation := range map[string]bool{
-		delivery.RunOriginSpecBuild:        true,
-		delivery.RunOriginRevalidate:       true,
-		delivery.RunOriginIncidentAdoption: false,
-	} {
-		t.Run(origin, func(t *testing.T) {
-			h := newHarness(t)
-			h.milestoneIs(
-				MilestoneSnapshot{Work: 1, Total: 1},
-				MilestoneSnapshot{}, // deployed-green, nothing left → validation
-				MilestoneSnapshot{}, // after validation → settle
-			)
-			h.validationIs(77, delivery.ValidationVerdictPassed)
-			h.merges(2)
-
-			h.runWith(RunInput{Origin: origin}) // no Kind — an in-flight execution
-			res := h.result(t)
-
-			h.assertSettled(t, res, delivery.RunStateSucceeded, "")
-			if wantsValidation {
-				require.Contains(t, h.dispatchKinds(), delivery.CycleKindValidation,
-					"a run that validates replayed as one that does not")
-			} else {
-				require.NotContains(t, h.dispatchKinds(), delivery.CycleKindValidation)
-			}
-		})
-	}
-}
-
-// TestIncidentRun_GetsNoValidationCycle pins the kind split: a task run fixes
-// one thing in an already-validated version, and re-validating the whole system
-// for it would price every incident like a release.
-func TestIncidentRun_GetsNoValidationCycle(t *testing.T) {
+// A TASK run judges nothing and claims nothing. It must not stamp a verdict on
+// its own row either: the read model picks the newest VALIDATING run on the
+// milestone, and a task run writing `skipped` used to be why a single adopted
+// issue made a genuinely passed version read as unvalidated.
+func TestTaskRun_JudgesNothingAndRecordsNoVerdict(t *testing.T) {
 	h := newHarness(t)
 	h.milestoneIs(MilestoneSnapshot{Work: 1, Total: 1}, MilestoneSnapshot{})
 	h.merges(1)
@@ -1283,22 +1002,20 @@ func TestIncidentRun_GetsNoValidationCycle(t *testing.T) {
 
 	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
 	require.Equal(t, []string{delivery.CycleKindCoding}, h.dispatchKinds())
+	require.Empty(t, res.ValidationVerdict)
 	h.env.AssertNotCalled(t, "EnsureValidationIssue", mock.Anything, mock.Anything)
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	require.Empty(t, h.verdictWrites, "a task run writes no verdict at all")
 }
 
-// TestRevalidateRun_EntersAtValidation is the kind's whole point: the milestone
-// is a version that already shipped, so the very first poll returns an empty
-// working set — the shape that parks every other run forever, because with no
-// cycles behind it an empty milestone is indistinguishable from one mid-plan.
-//
-// A revalidation is the case where that ambiguity does not exist, and the proof is
-// the dispatch list: one validation cycle, no coding cycle, nothing built.
-func TestRevalidateRun_EntersAtValidation(t *testing.T) {
+// ---- the validation run ----------------------------------------------------
+
+// TestValidationRun_Passes is the workflow's happy path: adopt the version's
+// task, dispatch one agent stage anchored at it, read the verdict at that cycle's
+// own merge commit, close the task, settle.
+func TestValidationRun_Passes(t *testing.T) {
 	h := newHarness(t)
-	h.milestoneIs(
-		MilestoneSnapshot{}, // already delivered → straight to validation
-		MilestoneSnapshot{}, // passed → settle
-	)
 	h.validationIs(77, delivery.ValidationVerdictPassed)
 	h.merges(1)
 
@@ -1306,108 +1023,448 @@ func TestRevalidateRun_EntersAtValidation(t *testing.T) {
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
-	require.Equal(t, []string{delivery.CycleKindValidation}, h.dispatchKinds(),
-		"a revalidation validates and does nothing else")
-	require.Equal(t, delivery.ValidationVerdictPassed, res.ValidationVerdict)
-	require.Equal(t, 77, h.dispatches[0].IssueNumber,
-		"the version's existing validation issue is reopened, not re-minted")
-}
-
-// TestRevalidateRun_OneAttemptFilesNoRepairWork is the dev-loop shape, and it
-// rests on an ORDERING rather than on a flag: runValidation settles on an
-// exhausted attempt allowance BEFORE it reaches the mint, so an allowance of one
-// makes repair work unreachable.
-//
-// That is why the endpoint needs no separate "should it fix things" switch. The
-// contrast with TestValidationCycle_RepairsAFailureAndRevalidates is the whole
-// test: same verdict, same harness, one fewer attempt — and no repair issues, no
-// coding cycle, nothing rebuilt.
-func TestRevalidateRun_OneAttemptFilesNoRepairWork(t *testing.T) {
-	h := newHarness(t)
-	h.milestoneIs(MilestoneSnapshot{})
-	h.validationIs(77, delivery.ValidationVerdictFailed)
-	h.merges(1)
-
-	h.runWith(RunInput{Kind: delivery.RunKindValidation, ValidationAttempts: 1})
-	res := h.result(t)
-
-	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonValidationFailed)
 	require.Equal(t, []string{delivery.CycleKindValidation}, h.dispatchKinds())
-	require.Equal(t, delivery.ValidationVerdictFailed, res.ValidationVerdict,
-		"the answer is recorded even though nothing was repaired")
-	require.Equal(t, 0, h.closed, "a failed version keeps its milestone open")
+	require.Equal(t, delivery.ValidationVerdictPassed, res.ValidationVerdict)
 
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	require.Empty(t, h.repairMints,
-		"one attempt is spent by the first fatal verdict, so the mint is never reached")
+	require.Equal(t, 77, h.dispatches[0].IssueNumber,
+		"the validation dispatch is anchored to one issue, not to a working set")
+	require.Equal(t, delivery.CycleKindValidation, h.dispatches[0].Kind,
+		"AEP_TASK_KIND=validation rides the dispatch kind")
+	require.Len(t, h.taskCloses, 1, "the platform closes the task it adopted")
+	require.Equal(t, 77, h.taskCloses[0].Issue)
+	require.Equal(t, delivery.ValidationVerdictPassed, h.taskCloses[0].Verdict)
 }
 
-// TestRevalidateRun_DefaultAttemptsRepairAndRebuild is the same kind taking the
-// other route — the one that exists to fix what it finds on an already-deployed
-// system.
+// TestValidationRun_FailedFilesOneIssuePerCriterion is the repair hand-off. The
+// failure becomes ORDINARY WORK in the milestone — one issue per failed criterion
+// — and the run then settles on the verdict it reached.
 //
-// Left at the default allowance, a revalidation is an ordinary run that happened
-// to start at validation: the failure becomes issues, the boundary dispatches a
-// CODING cycle which merges and builds, and validation runs again. The dispatch
-// sequence is the assertion — validation, coding, validation — and it is the
-// repair loop the spec build already had, reached from a different door.
-func TestRevalidateRun_DefaultAttemptsRepairAndRebuild(t *testing.T) {
+// One per criterion and never one omnibus issue: the no-progress rule compares
+// working-set SIZES, so repairing two of three failures has to read as progress.
+func TestValidationRun_FailedFilesOneIssuePerCriterion(t *testing.T) {
 	h := newHarness(t)
-	h.milestoneIs(
-		MilestoneSnapshot{},                  // deployed → validation attempt 1
-		MilestoneSnapshot{Work: 1, Total: 1}, // the repair issue → coding cycle
-		MilestoneSnapshot{},                  // green again → validation attempt 2
-		MilestoneSnapshot{},                  // passed → settle
-	)
+	h.validationIs(77, delivery.ValidationVerdictFailed)
+	h.repairMintsAre([]int{testRepairIssue, testRepairIssue + 1})
+	h.merges(1)
+
+	h.run(delivery.RunKindValidation, 0)
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonValidationFailed)
+	require.Equal(t, delivery.ValidationVerdictFailed, res.ValidationVerdict)
+	require.Equal(t, 0, h.closed, "a version that failed its criteria keeps its milestone open")
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	require.Len(t, h.repairMints, 1, "the mint is asked once")
+	require.Equal(t, testMergeSHA, h.repairMints[0].At,
+		"repair issues come from the report at the attempt's OWN merge commit")
+	require.Equal(t, testCycleID, h.repairMints[0].CycleID,
+		"THIS attempt's cycle id is the issues' dedupe key, so the next attempt files fresh work")
+	require.Len(t, h.taskCloses, 1, "the task closes even on a failing verdict")
+}
+
+// TestValidationRun_UnreportedRedispatchesInsideTheWorkflow covers the one
+// failure this workflow can remedy itself.
+//
+// An agent that merged a pull request and committed no report has not broken the
+// software: no criterion asserted, nothing was deployed, and no issue anybody
+// could file would change the answer. Another dispatch is the WHOLE remedy, so it
+// happens inside this workflow — settling and hoping something restarts the run
+// would be hoping for the sweep, which cannot see a closed task.
+func TestValidationRun_UnreportedRedispatchesInsideTheWorkflow(t *testing.T) {
+	h := newHarness(t)
 	h.validationAttemptsAre(77,
-		ValidationOutcome{Verdict: delivery.ValidationVerdictFailed, Digest: "red-1"},
+		ValidationOutcome{Verdict: delivery.ValidationVerdictUnreported},
 		ValidationOutcome{Verdict: delivery.ValidationVerdictPassed, Digest: "green"},
 	)
-	h.merges(3)
+	h.merges(2)
 
 	h.run(delivery.RunKindValidation, 0)
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
-	require.Equal(t, []string{
-		delivery.CycleKindValidation, delivery.CycleKindCoding, delivery.CycleKindValidation,
-	}, h.dispatchKinds(), "it repairs on the ordinary path — the repair is not a special kind")
-	require.Equal(t, delivery.ValidationVerdictPassed, res.ValidationVerdict)
-
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	require.Len(t, h.repairMints, 1, "the failed attempt filed repair work")
+	require.Equal(t, []string{delivery.CycleKindValidation, delivery.CycleKindValidation},
+		h.dispatchKinds(), "two validation cycles inside ONE run")
+	require.Equal(t, 0, h.repairMintCount(),
+		"nothing is wrong with the software, so nothing is filed")
+	require.Equal(t, 1, h.taskCloseCount(), "one run, one close")
 }
 
-// TestRevalidateRun_ZeroAttemptsMeansTheDefault is the replay guard, written as a
-// behaviour rather than as a unit test of newLoop.
-//
-// A workflow input lives in Temporal history, so an execution started before the
-// field existed replays with the zero value. Zero therefore has to mean the
-// platform default — if it meant "no attempts", every run in flight across the
-// deploy would settle without validating. The proof is that a zero-attempt input
-// still repairs and re-validates, which only the default allowance permits.
-func TestRevalidateRun_ZeroAttemptsMeansTheDefault(t *testing.T) {
+// The same remedy, bounded. An agent that ignored the report contract through the
+// whole allowance will ignore it again, and every dispatch is a paid agent run.
+// The reason is its own class: "the suite went red" and "nothing was reported"
+// are different explanations, and a terminal reason exists to explain.
+func TestValidationRun_UnreportedThroughTheBudgetFails(t *testing.T) {
 	h := newHarness(t)
-	h.milestoneIs(
-		MilestoneSnapshot{},
-		MilestoneSnapshot{Work: 1, Total: 1},
-		MilestoneSnapshot{},
-		MilestoneSnapshot{},
-	)
-	h.validationAttemptsAre(77,
-		ValidationOutcome{Verdict: delivery.ValidationVerdictFailed, Digest: "red-1"},
-		ValidationOutcome{Verdict: delivery.ValidationVerdictPassed, Digest: "green"},
-	)
-	h.merges(3)
+	h.validationIs(77, delivery.ValidationVerdictUnreported)
+	h.merges(maxUnreportedDispatches)
 
-	h.runWith(RunInput{Kind: delivery.RunKindValidation, ValidationAttempts: 0})
+	h.run(delivery.RunKindValidation, 0)
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonValidationUnreported)
+	require.Equal(t, maxUnreportedDispatches, h.dispatchCount(),
+		"the re-dispatch allowance is spent, and not exceeded")
+	require.Equal(t, 0, h.repairMintCount())
+	require.Equal(t, 1, h.taskCloseCount())
+}
+
+// TestValidationRun_LastAttemptFilesNoRepairWork: the allowance is per VERSION and
+// is spent by the milestone's validation runs, so an attempt that is the last one
+// settles BEFORE the mint.
+//
+// That ordering is what makes a one-attempt allowance a pure re-check, and why the
+// revalidate endpoint needs no separate "should it fix things" switch.
+func TestValidationRun_LastAttemptFilesNoRepairWork(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		attempts int
+		allow    int
+	}{
+		{"a one-attempt allowance is spent by the first fatal verdict", 1, 1},
+		{"the version's default allowance, already spent", delivery.RunMaxValidationAttempts, 0},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.validationIs(77, delivery.ValidationVerdictFailed)
+			h.validationHistoryIs(c.attempts, "")
+			h.merges(1)
+
+			h.runWith(RunInput{Kind: delivery.RunKindValidation, ValidationAttempts: c.allow})
+			res := h.result(t)
+
+			h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonValidationFailed)
+			require.Equal(t, delivery.ValidationVerdictFailed, res.ValidationVerdict,
+				"the answer is recorded even though nothing was repaired")
+			require.Equal(t, 0, h.repairMintCount(),
+				"the allowance is spent, so the mint is never reached")
+			require.Equal(t, 1, h.taskCloseCount())
+		})
+	}
+}
+
+// An attempt with allowance LEFT files the repair work. The contrast with the
+// test above is the whole point: same verdict, same harness, one fewer attempt
+// already spent.
+func TestValidationRun_AttemptsRemainingFileRepairWork(t *testing.T) {
+	h := newHarness(t)
+	h.validationIs(77, delivery.ValidationVerdictFailed)
+	h.validationHistoryIs(1, "") // first of the default two
+	h.merges(1)
+
+	h.run(delivery.RunKindValidation, 0)
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonValidationFailed)
+	require.Equal(t, 1, h.repairMintCount(), "attempts remain, so the failure becomes work")
+	require.Equal(t, 2, delivery.RunMaxValidationAttempts,
+		"this test's shape assumes the allowance it is proving")
+}
+
+// TestValidationRun_IdenticalDigestStopsTheChain is the digest guard, and it needs
+// its own test because it is the ONLY thing between a repeat attempt and a
+// deployment that never picked up the repair.
+//
+// Two consecutive reports that agree on every criterion, every status and every
+// failure message learned the same nothing: the repair did not move the system, so
+// another round could only produce that report a third time. The chain stops even
+// though the allowance is NOT spent — which is what makes it a guard rather than a
+// budget.
+//
+// The comparison spans runs (each attempt is its own run), which is why the
+// previous digest is READ from the ledger rather than carried.
+func TestValidationRun_IdenticalDigestStopsTheChain(t *testing.T) {
+	h := newHarness(t)
+	h.validationAttemptsAre(77, ValidationOutcome{
+		Verdict: delivery.ValidationVerdictFailed, Digest: "unchanged",
+	})
+	// Attempt 2 of a default allowance of 2 would file repair work on its own
+	// merits — the digest is the only thing stopping it. Pin attempt 1 of a wider
+	// allowance so the guard is unambiguously what fired.
+	h.validationHistoryIs(1, "unchanged")
+	h.merges(1)
+
+	h.runWith(RunInput{Kind: delivery.RunKindValidation, ValidationAttempts: 5})
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonValidationFailed)
+	require.Equal(t, 0, h.repairMintCount(),
+		"the repair moved nothing, so no further work is filed")
+	require.Equal(t, 1, h.taskCloseCount())
+}
+
+// The other half of the guard: a digest that MOVED is a repair that changed
+// something, so the chain carries on and files the next round of work. Without
+// this the guard could be satisfied by never firing at all.
+func TestValidationRun_MovedDigestKeepsTheChainGoing(t *testing.T) {
+	h := newHarness(t)
+	h.validationAttemptsAre(77, ValidationOutcome{
+		Verdict: delivery.ValidationVerdictFailed, Digest: "red-2",
+	})
+	h.validationHistoryIs(1, "red-1")
+	h.merges(1)
+
+	h.runWith(RunInput{Kind: delivery.RunKindValidation, ValidationAttempts: 5})
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonValidationFailed)
+	require.Equal(t, 1, h.repairMintCount(), "the answer changed, so the chain files more work")
+}
+
+// A `failed` attempt whose report names failures the minter cannot turn into work
+// still settles on its verdict — the mint is asked, and an empty answer changes
+// nothing about what the version was judged to be.
+func TestValidationRun_FailedWithNothingToRepairStillSettles(t *testing.T) {
+	h := newHarness(t)
+	h.validationIs(77, delivery.ValidationVerdictFailed)
+	h.repairMintsAre(nil)
+	h.validationHistoryIs(1, "")
+	h.merges(1)
+
+	h.run(delivery.RunKindValidation, 0)
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonValidationFailed)
+	require.Equal(t, 1, h.repairMintCount(), "it tried")
+	require.Equal(t, 1, h.taskCloseCount())
+}
+
+// TestValidationRun_IncompleteEvidenceStillSucceeds pins the pair that must NOT
+// fail a run. Both are honest reports about the test harness rather than evidence
+// the increment is broken:
+//
+//   - partial: something passed, nothing failed, and some criteria were never
+//     covered — which is why it is not reported as `passed`;
+//   - inconclusive: no test results at all.
+func TestValidationRun_IncompleteEvidenceStillSucceeds(t *testing.T) {
+	for _, verdict := range []string{
+		delivery.ValidationVerdictPartial,
+		delivery.ValidationVerdictInconclusive,
+	} {
+		t.Run(verdict, func(t *testing.T) {
+			h := newHarness(t)
+			h.validationIs(77, verdict)
+			h.merges(1)
+
+			h.run(delivery.RunKindValidation, 0)
+			res := h.result(t)
+
+			h.assertSettled(t, res, delivery.RunStateSucceeded, "")
+			require.Equal(t, verdict, res.ValidationVerdict)
+			require.Equal(t, 1, h.taskCloseCount())
+		})
+	}
+}
+
+// The verdict, its DIGEST and the issue that produced it are ONE write, against
+// the attempt's own cycle.
+//
+// The digest has to ride that write and not a later one: the cycle write is fenced
+// write-once on an empty verdict, so a digest recorded afterwards could never land
+// on the cycle it belongs to — and the next attempt would have nothing to compare
+// against, silently disabling the guard above.
+func TestValidationRun_WritesVerdictDigestAndIssueTogether(t *testing.T) {
+	h := newHarness(t)
+	h.validationAttemptsAre(77, ValidationOutcome{
+		Verdict: delivery.ValidationVerdictPassed, Digest: "green-1",
+	})
+	h.merges(1)
+
+	h.run(delivery.RunKindValidation, 0)
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
-	require.Len(t, h.dispatchKinds(), 3,
-		"zero fell back to the default allowance, so the run got its second attempt")
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	require.Len(t, h.verdictWrites, 1, "the verdict is written once")
+	w := h.verdictWrites[0]
+	require.Equal(t, delivery.ValidationVerdictPassed, w.Verdict)
+	require.Equal(t, "green-1", w.Digest, "the digest rides the verdict's own write")
+	require.Equal(t, 77, w.Issue, "the issue is persisted, not left in workflow state")
+	require.Equal(t, testCycleID, w.CycleID,
+		"the verdict is written against the attempt's own cycle, not just the run")
+}
+
+// TestValidationRun_NoAcceptanceOracleSettlesSkipped: EnsureValidationIssue
+// answers 0, so there is nothing to judge. That is itself a verdict, it belongs
+// to no cycle, and there is no task to close — a run that adopted nothing leaves
+// the version exactly as it found it.
+func TestValidationRun_NoAcceptanceOracleSettlesSkipped(t *testing.T) {
+	h := newHarness(t)
+	h.validationIs(0, delivery.ValidationVerdictSkipped)
+
+	h.run(delivery.RunKindValidation, 0)
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
+	require.Equal(t, delivery.ValidationVerdictSkipped, res.ValidationVerdict)
+	require.Equal(t, 0, h.dispatchCount(), "nothing was dispatched")
+	require.Equal(t, 0, h.taskCloseCount(), "there was no task to close")
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	require.Empty(t, h.verdictWrites[0].CycleID, "skipped belongs to no cycle")
+}
+
+// TestValidationRun_AgentDeathStillClosesTheTask is THE INFINITE-LOOP GUARD, and
+// the reason the close is unconditional.
+//
+// The reconcile sweep starts a validation run BECAUSE an open `validation`-kind
+// issue exists. An agent that dies through the whole re-dispatch budget produces
+// no verdict and nothing outside the workflow can repair it — so a run that gave
+// up and left the task open would be restarted within a tick, give up again, and
+// keep doing that forever, paying for two agent dispatches each time.
+//
+// Closing it leaves the version deployed and UNJUDGED, which is honest: no verdict
+// was reached and none is claimed, and a person re-triggers.
+func TestValidationRun_AgentDeathStillClosesTheTask(t *testing.T) {
+	h := newHarness(t)
+	h.validationIs(77, delivery.ValidationVerdictPassed) // never read — nothing lands
+	h.mergesAt("")                                       // the cycle record never learns a merge
+
+	h.run(delivery.RunKindValidation, 0)
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonRedispatchBudget)
+	require.Equal(t, delivery.RunMaxRedispatchPerCycle, h.dispatchCount())
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	require.Len(t, h.taskCloses, 1,
+		"the task must close on an ending with no verdict, or the sweep restarts this run forever")
+	require.Empty(t, h.taskCloses[0].Verdict,
+		"the close says no verdict was reached rather than inventing one")
+	require.Empty(t, h.verdictWrites, "no verdict is claimed for an attempt that produced none")
+}
+
+// TestValidationRun_ClosesTheTaskOnEveryEnding generalises the guard above across
+// every way this workflow can end after adopting the task. Any ending that leaves
+// it open is an ending the sweep repeats.
+func TestValidationRun_ClosesTheTaskOnEveryEnding(t *testing.T) {
+	cases := []struct {
+		name    string
+		arrange func(h *harness)
+		state   string
+		reason  string
+	}{
+		{
+			name:    "a verdict was reached",
+			arrange: func(h *harness) { h.validationIs(77, delivery.ValidationVerdictPassed); h.merges(1) },
+			state:   delivery.RunStateSucceeded,
+		},
+		{
+			name: "the agent died through its whole budget",
+			arrange: func(h *harness) {
+				h.validationIs(77, delivery.ValidationVerdictPassed)
+				h.mergesAt("")
+			},
+			state:  delivery.RunStateFailed,
+			reason: delivery.RunReasonRedispatchBudget,
+		},
+		{
+			name: "the org has no agent slot",
+			arrange: func(h *harness) {
+				h.validationIs(77, delivery.ValidationVerdictPassed)
+				h.dispatchIs("", temporal.NewNonRetryableApplicationError(
+					delivery.AgentQuotaBlockedMessage, delivery.ErrTypeAgentQuotaBlocked,
+					delivery.ErrAgentQuotaExceeded))
+			},
+			state:  delivery.RunStateBlocked,
+			reason: delivery.RunReasonAgentQuotaBlocked,
+		},
+		{
+			name: "the pull request would not merge",
+			arrange: func(h *harness) {
+				h.validationIs(77, delivery.ValidationVerdictPassed)
+				h.signal(delivery.SigRunConflict, time.Second)
+			},
+			state:  delivery.RunStateFailed,
+			reason: delivery.RunReasonConflictBudget,
+		},
+		{
+			name: "a human cancelled it mid-cycle",
+			arrange: func(h *harness) {
+				h.validationIs(77, delivery.ValidationVerdictPassed)
+				h.factsAre(CycleFacts{}, CycleFacts{CycleID: testCycleID, CancelRequested: true})
+				h.signal(delivery.SigRunPRMerged, time.Second)
+			},
+			state: delivery.RunStateCancelled,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHarness(t)
+			c.arrange(h)
+			h.run(delivery.RunKindValidation, 0)
+			res := h.result(t)
+
+			h.assertSettled(t, res, c.state, c.reason)
+			require.Equal(t, 1, h.taskCloseCount(),
+				"every ending after adopting the task must close it")
+		})
+	}
+}
+
+// A cancel that arrives BEFORE the task is adopted leaves it open, and that is the
+// one exception the design wants: cancelling a validation leaves the task for the
+// next trigger, because the way forward from a cancelled validation is to validate
+// again.
+func TestValidationRun_CancelBeforeAdoptionLeavesTheTaskOpen(t *testing.T) {
+	h := newHarness(t)
+	h.validationIs(77, delivery.ValidationVerdictPassed)
+	h.factsAre(CycleFacts{CancelRequested: true})
+
+	h.run(delivery.RunKindValidation, 0)
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateCancelled, "")
+	require.Equal(t, 0, h.dispatchCount())
+	require.Equal(t, 0, h.taskCloseCount(), "nothing had been adopted, so nothing is closed")
+	h.env.AssertNotCalled(t, "EnsureValidationIssue", mock.Anything, mock.Anything)
+}
+
+// TestValidationRun_AnchorsAtTheAdoptedIssue: an issue already OPEN is ADOPTED as
+// this attempt's, never re-filed. The task is the version's persistent handle —
+// its body embeds the oracle as it stood at mint time — so a second one would
+// split the thread the attempts comment on and double what the sweep sees as
+// unworked.
+func TestValidationRun_AnchorsAtTheAdoptedIssue(t *testing.T) {
+	h := newHarness(t)
+	h.validationIs(77, delivery.ValidationVerdictPassed)
+	h.merges(1)
+
+	h.run(delivery.RunKindValidation, 0)
+	_ = h.result(t)
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	require.Equal(t, 77, h.dispatches[0].IssueNumber)
+	require.Equal(t, 77, h.taskCloses[0].Issue,
+		"the run closes the issue it adopted, not one it invented")
+}
+
+// TestRunInput_WithoutAKindFallsBackToItsOrigin is the REPLAY case, and the one
+// that cannot be backfilled.
+//
+// A workflow input lives in Temporal history: an execution started before the
+// kind field existed replays with the empty string, forever. Kind now selects the
+// workflow TYPE, so the fallback's remaining job is inside the loop — above all
+// plansItsOwnMilestone, which decides whether the run fills its own milestone and
+// whether it may read an empty working set as "delivered". A dev run replaying as
+// "not dev" would skip planning and then park forever waiting for work nobody was
+// going to file.
+func TestRunInput_WithoutAKindFallsBackToItsOrigin(t *testing.T) {
+	h := newHarness(t)
+	h.milestoneIs(MilestoneSnapshot{}) // planning mints nothing → delivered
+
+	h.runWith(RunInput{Origin: delivery.RunOriginSpecBuild, Tag: "v3"}) // no Kind
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
+	gates, plans := h.planCounts()
+	require.Equal(t, 1, gates, "a replayed spec build must still fill its own milestone")
+	require.Equal(t, 1, plans)
 }
 
 // TestRedispatchBudget_AgentDeathEndsTheRun: the dispatch never lands a pull

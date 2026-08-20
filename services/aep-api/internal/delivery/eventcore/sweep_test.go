@@ -137,3 +137,100 @@ func TestSweep_IsInertWithoutRunRows(t *testing.T) {
 		t.Fatalf("a milestone the platform never ran is somebody else's, got %+v", h.sup.started)
 	}
 }
+
+// TestSweep_StartsAValidationRunForAnOpenValidationTask is the trigger the split
+// created, and the only thing that turns a filed validation task into a verdict.
+//
+// A dev run settles at deployed-green having minted that task and never judges
+// the version itself. Nothing else is watching: the task produces no webhook the
+// platform reacts to, so if this pass did not route by KIND the version would sit
+// deployed and unjudged forever with an open issue in its milestone.
+func TestSweep_StartsAValidationRunForAnOpenValidationTask(t *testing.T) {
+	h := newHarness(t, aRun("run-dev", 7, delivery.RunStateSucceeded))
+	h.issues.withValidationIssue(7, 55)
+
+	if err := sweepOver(h).Once(t.Context()); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if len(h.sup.started) != 1 {
+		t.Fatalf("want one run started, got %+v", h.sup.started)
+	}
+	got := h.sup.started[0]
+	if got.Kind != delivery.RunKindValidation {
+		t.Fatalf("kind = %q, want %q — an open validation task is judged, not worked",
+			got.Kind, delivery.RunKindValidation)
+	}
+	if got.MilestoneNumber != 7 {
+		t.Fatalf("milestone = %d, want 7", got.MilestoneNumber)
+	}
+	// No attempt allowance rides the trigger: the per-version allowance is counted
+	// from the ledger, so a sweep-started attempt cannot widen what a version is
+	// allowed.
+	if got.ValidationAttempts != 0 {
+		t.Errorf("ValidationAttempts = %d, want 0 (the platform default)", got.ValidationAttempts)
+	}
+}
+
+// The routing is by KIND, not by "something is open". Ordinary work still gets an
+// ordinary run — the two must not collapse into one another, because a validation
+// run has no working set and would judge a version whose work is unfinished.
+func TestSweep_RoutesOrdinaryWorkToATaskRun(t *testing.T) {
+	h := newHarness(t, aRun("run-old", 7, delivery.RunStateSucceeded))
+	h.issues.withWork(7, 21, 22)
+
+	if err := sweepOver(h).Once(t.Context()); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if len(h.sup.started) != 1 || h.sup.started[0].Kind != delivery.RunKindTask {
+		t.Fatalf("open work must start a task run, got %+v", h.sup.started)
+	}
+}
+
+// Validation wins when both populations are open, and the cost is nothing in
+// practice: a dev run files the task only at deployed-green with the working set
+// already empty, and a failed attempt's repair issues are filed after the task has
+// been closed. They coexist only when a human files work into a version awaiting
+// its verdict, and judging first is the safe order there — the verdict is about
+// what is DEPLOYED, which the new work has not changed yet.
+func TestSweep_ValidationTaskWinsOverOrdinaryWork(t *testing.T) {
+	h := newHarness(t, aRun("run-old", 7, delivery.RunStateSucceeded))
+	h.issues.withWork(7, 21).withValidationIssue(7, 55)
+
+	if err := sweepOver(h).Once(t.Context()); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if len(h.sup.started) != 1 || h.sup.started[0].Kind != delivery.RunKindValidation {
+		t.Fatalf("an open validation task must be judged first, got %+v", h.sup.started)
+	}
+}
+
+// An UNARMED issue of kind `validation` is not a validation task — the arming
+// switch is what says a loop may work it at all. Routing on the kind alone would
+// let a human's stray label start a paid agent run.
+func TestSweep_AnUnarmedValidationLabelIsNotATask(t *testing.T) {
+	h := newHarness(t, aRun("run-old", 7, delivery.RunStateSucceeded))
+	h.issues.withOpenIssues(7, []string{delivery.KindValidation})
+
+	if err := sweepOver(h).Once(t.Context()); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	// It is still an open issue, so a run is offered — as an ordinary one.
+	if len(h.sup.started) != 1 || h.sup.started[0].Kind != delivery.RunKindTask {
+		t.Fatalf("an unarmed validation label must not trigger a judgement, got %+v", h.sup.started)
+	}
+}
+
+// A dispatch GATE is an open issue, so the sweep still starts a run for it: a gate
+// holds DISPATCH, not the run, and healing into "started and waiting" is the
+// correct repair. It must NOT be mistaken for a validation task.
+func TestSweep_AGateAloneStartsAnOrdinaryRun(t *testing.T) {
+	h := newHarness(t, aRun("run-old", 7, delivery.RunStateFailed))
+	h.issues.withOpenIssues(7, []string{delivery.KindProvision})
+
+	if err := sweepOver(h).Once(t.Context()); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if len(h.sup.started) != 1 || h.sup.started[0].Kind != delivery.RunKindTask {
+		t.Fatalf("a gated milestone still needs a run to wait on it, got %+v", h.sup.started)
+	}
+}

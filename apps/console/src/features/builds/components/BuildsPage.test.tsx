@@ -128,6 +128,17 @@ vi.mock("../api/queries", () => ({
   useCycleBuilds: () => ({ data: mockCycleBuilds, isPending: false }),
 }));
 
+// The version's whole timeline streams only once the reader opens it, so the
+// hook behind it is stubbed rather than exercised — what this file owns is the
+// disclosure, not the feed (BuildFeed.test.tsx).
+vi.mock("../hooks/useBuildProgress", () => ({
+  useBuildProgress: () => ({
+    runs: [],
+    settledReason: undefined,
+    phase: "connecting",
+  }),
+}));
+
 import { BuildsPage } from "./BuildsPage";
 
 function build(tag: string, status: BuildSummary["status"]): BuildSummary {
@@ -921,5 +932,33 @@ describe("BuildsPage — a revalidation is not a build story", () => {
     ).not.toBeInTheDocument();
     // And it is chipped as what it is — the kind label, not a raw enum value.
     expect(screen.getByText(/Revalidation/i)).toBeInTheDocument();
+  });
+});
+
+describe("BuildsPage — the version's whole timeline", () => {
+  // A version's story now spans several runs, and the run card is one of them.
+  // The page offers the stitched narrative as a disclosure: BuildFeed is
+  // UNMOUNTED until it is opened, which is what keeps the page to one SSE
+  // connection per reader instead of two showing the same newest cycle.
+  it("offers every run of the version, and renders no feed until asked", () => {
+    mockBuilds = [build("v2", "in_progress")];
+    mockRuns = [run(), run({ id: "run-0", kind: "task", state: "succeeded" })];
+    renderPage();
+
+    expect(screen.queryByText(/No agent output yet/)).not.toBeInTheDocument();
+    const open = screen.getByRole("button", {
+      name: /Show all 2 runs of this version, in order/,
+    });
+    fireEvent.click(open);
+    expect(screen.getByText(/No agent output yet/)).toBeInTheDocument();
+  });
+
+  it("says nothing about a timeline for a version with no run rows", () => {
+    mockBuilds = [build("v2", "in_progress")];
+    mockRuns = [];
+    renderPage();
+    expect(
+      screen.queryByText("THIS VERSION'S WHOLE TIMELINE"),
+    ).not.toBeInTheDocument();
   });
 });

@@ -75,6 +75,14 @@ func (a runRuns) MilestoneSpecTag(ctx context.Context, orgID, projectID string, 
 	return "", nil
 }
 
+// ListByMilestone hands the milestone's runs straight through, newest-first. The
+// supervisor's own use is narrow — a validation run counting how many times this
+// version has been judged — but the filtering belongs on that side: which kinds
+// count is a loop decision, and this adapter holds none.
+func (a runRuns) ListByMilestone(ctx context.Context, orgID, projectID string, milestoneNumber int) ([]delivery.MilestoneRun, error) {
+	return a.runs.ListByMilestone(ctx, orgID, projectID, milestoneNumber)
+}
+
 func (a runRuns) SetState(ctx context.Context, id, state string) error {
 	_, err := a.runs.SetState(ctx, id, state)
 	return err
@@ -126,9 +134,13 @@ func (a runCycles) Finish(ctx context.Context, cycleID, mergeSHA string) error {
 	return err
 }
 
-func (a runCycles) SetValidationVerdict(ctx context.Context, cycleID, verdict string, issue int) error {
-	_, err := a.cycles.SetValidationVerdict(ctx, cycleID, verdict, issue)
+func (a runCycles) SetValidationVerdict(ctx context.Context, cycleID, verdict string, issue int, digest string) error {
+	_, err := a.cycles.SetValidationVerdict(ctx, cycleID, verdict, issue, digest)
 	return err
+}
+
+func (a runCycles) LatestValidationDigest(ctx context.Context, orgID string, runIDs []string) (string, error) {
+	return a.cycles.LatestValidationDigest(ctx, orgID, runIDs)
 }
 
 func (a runCycles) Latest(ctx context.Context, orgID, runID string) (*delivery.RunCycle, error) {
@@ -186,6 +198,10 @@ func (a runValidation) Verdict(ctx context.Context, orgID, projectID, at string)
 	// Both derived from the same bytes, in one read: the verdict the run stores, and
 	// the digest that tells a later attempt whether anything changed.
 	return validation.VerdictFromReport(raw), validation.ReportDigest(raw), nil
+}
+
+func (a runValidation) CloseValidationIssue(ctx context.Context, orgID, projectID string, issue int, verdict string) error {
+	return a.svc.CloseValidationIssue(ctx, orgID, projectID, issue, verdict)
 }
 
 func (a runValidation) MintRepairIssues(ctx context.Context, orgID, projectID string, milestoneNumber int, at, cycleID string) ([]int, error) {

@@ -57,6 +57,21 @@ func (e *EdgeError) Error() string { return e.Message }
 // trigger).
 var ErrBuildAlreadyRunning = errors.New("a build is already running for this project")
 
+// ErrValidationRunLive is the "this project's deployed version is being judged"
+// sentinel, and the second thing that refuses a build.
+//
+// It is a REFUSAL rather than a queue because the two activities contradict each
+// other: a validation run asserts against what is deployed, and a delivery run
+// merging and promoting underneath it would be judging a moving target — the
+// verdict would name criteria that were true of neither the old release nor the
+// new one. A validation run deliberately sits outside the build mutex (it
+// re-judges a version that already shipped, so no index refuses this), which is
+// why the guard is explicit here.
+//
+// The way past it is to cancel the validation, which is one click and already
+// supported. Treated as a conflict at the edge, exactly like the sentinel above.
+var ErrValidationRunLive = errors.New("this project's deployed version is being validated — cancel the validation run first")
+
 // Service backs the build endpoints (strict entry points in strict.go).
 type Service struct {
 	repos  RepoLookup
@@ -211,6 +226,12 @@ func (s *Service) Run(ctx context.Context, orgID, projectID string, inputs []Bui
 	// turns the race into a conflict that names itself, and it runs BEFORE the
 	// tag is cut so a rejected second click claims no version.
 	if err := s.activeDevRun(ctx, orgID, projectID); err != nil {
+		return "", nil, err
+	}
+	// And no live VALIDATION run anywhere in the project: a merge and promote
+	// under an in-flight verdict judges a moving target. Checked here, beside the
+	// mutex and before the tag is cut, so a refused build claims no version.
+	if err := s.activeValidationRun(ctx, orgID, projectID); err != nil {
 		return "", nil, err
 	}
 	// The repo must exist and be resolvable before a version is claimed — every

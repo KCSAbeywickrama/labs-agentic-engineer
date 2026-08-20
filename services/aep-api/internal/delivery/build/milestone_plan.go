@@ -118,6 +118,29 @@ func (s *Service) activeDevRun(ctx context.Context, orgID, projectID string) err
 	return nil
 }
 
+// activeValidationRun is the endpoint's other 409 pre-check: no live validation
+// run anywhere in the project.
+//
+// Unlike activeDevRun there is no index behind this one — a validation run sits
+// outside the build mutex on purpose — so this read IS the rule and not merely a
+// nicer error for it. Two concurrent clicks can both pass it, and that is
+// accepted: the loss is a build that starts while a verdict is being reached,
+// which the per-milestone index still keeps from putting two agents on one
+// branch.
+func (s *Service) activeValidationRun(ctx context.Context, orgID, projectID string) error {
+	if s.plan == nil || s.plan.runs == nil {
+		return nil
+	}
+	run, err := s.plan.runs.ActiveValidationRunByProject(ctx, orgID, projectID)
+	if err != nil {
+		return &EdgeError{Status: 500, Message: "lookup active validation run"}
+	}
+	if run != nil {
+		return ErrValidationRunLive
+	}
+	return nil
+}
+
 // claimVersion is the synchronous half of the plan path: supersede the previous
 // milestone, mint this version's, and admit the run row that arms the mutex. It
 // returns the admitted run, or ErrBuildAlreadyRunning when another entrant won

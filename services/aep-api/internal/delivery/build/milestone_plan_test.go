@@ -128,7 +128,8 @@ type fakeRunStore struct {
 	mu       sync.Mutex
 	rows     []delivery.MilestoneRun
 	active   *delivery.MilestoneRun
-	refuse   bool // TryAdmit loses the admission race
+	judging  *delivery.MilestoneRun // a live validation run refuses the build
+	refuse   bool                   // TryAdmit loses the admission race
 	admitted []delivery.MilestoneRun
 	settled  []string
 	listErr  error
@@ -137,6 +138,10 @@ type fakeRunStore struct {
 
 func (f *fakeRunStore) ActiveDevRunByProject(context.Context, string, string) (*delivery.MilestoneRun, error) {
 	return f.active, nil
+}
+
+func (f *fakeRunStore) ActiveValidationRunByProject(context.Context, string, string) (*delivery.MilestoneRun, error) {
+	return f.judging, nil
 }
 
 func (f *fakeRunStore) TryAdmit(_ context.Context, run *delivery.MilestoneRun) (bool, *delivery.MilestoneRun, error) {

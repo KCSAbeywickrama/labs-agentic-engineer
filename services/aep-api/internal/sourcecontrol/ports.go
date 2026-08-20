@@ -70,9 +70,9 @@ type IssueOps interface {
 	EnsureLabel(ctx context.Context, owner, repo string, cred secrets.Credential, name, color string) error
 	// CloseIssue sets the issue state to closed with reason "completed".
 	CloseIssue(ctx context.Context, owner, repo string, cred secrets.Credential, number int) error
-	// ReopenIssue sets the issue state back to open. Used by the validation issue,
-	// which every attempt's pull request closes with `Closes #<N>` and which a
-	// repeated validation must find again rather than re-file.
+	// ReopenIssue sets the issue state back to open. Used by the validation task,
+	// which the PLATFORM closes at the end of every attempt and which a repeated
+	// validation must find again rather than re-file.
 	ReopenIssue(ctx context.Context, owner, repo string, cred secrets.Credential, number int) error
 	// CommentIssue posts a comment on the issue.
 	CommentIssue(ctx context.Context, owner, repo string, cred secrets.Credential, number int, body string) error

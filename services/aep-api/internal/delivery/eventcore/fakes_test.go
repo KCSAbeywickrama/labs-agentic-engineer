@@ -308,7 +308,28 @@ func (f *fakeIssues) withCounts(milestone, provision, work, total int) *fakeIssu
 		labels = append(labels, nil) // human-filed: unarmed, never worked
 	}
 	f.counts[milestone] = hostCounts(labels...)
+	f.seedOpenIssues(milestone, labels...)
 	return f
+}
+
+// seedOpenIssues puts one open issue per label set into the milestone's index, so
+// a milestone DESCRIBED for the counts query is also visible to the REST issues
+// read.
+//
+// Both reads matter now and they answer different callers: the cycle-boundary
+// poll takes the counts (one GraphQL round trip, the loop's hottest read) while
+// the reconcile sweep and the auto-merge policy read the ISSUES, because routing
+// by kind and skipping a marker are intersections a count cannot express. A fake
+// that fed only one of them would let a milestone read as full to one caller and
+// empty to the other — which is the exact disagreement that settles a version
+// nobody built.
+func (f *fakeIssues) seedOpenIssues(milestone int, labelSets ...[]string) {
+	for _, labels := range labelSets {
+		f.byMilestone[milestone] = append(f.byMilestone[milestone], sourcecontrol.IssueInfo{
+			Number: f.next, State: "open", Labels: labels,
+		})
+		f.next++
+	}
 }
 
 // hostCounts answers a milestone's open-issue populations the way the REAL host
@@ -414,6 +435,7 @@ func (f *fakeIssues) MilestoneIssueCounts(_ context.Context, _, _ string, number
 // (it takes gates, work and a total, and the validation issue is neither).
 func (f *fakeIssues) withOpenIssues(milestone int, issues ...[]string) *fakeIssues {
 	f.counts[milestone] = hostCounts(issues...)
+	f.seedOpenIssues(milestone, issues...)
 	return f
 }
 

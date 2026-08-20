@@ -104,14 +104,28 @@ func (s *Supervisor) StartRun(ctx context.Context, req delivery.StartRunRequest)
 	if err != nil {
 		return nil // raced with a client teardown — best-effort, the sweep re-offers
 	}
+	// The ROW is the routing table: its kind selects both the workflow type and
+	// the id prefix, so the three species cannot be confused for one another by
+	// anything that later signals or cancels this run.
+	kind := delivery.RunKindOf(row.Kind, row.Origin)
+	workflowType := delivery.RunWorkflowName(kind)
+	if workflowType == "" {
+		// An unroutable row is refused rather than guessed at: silently starting a
+		// dev workflow over it would take the project's build mutex on behalf of a
+		// run nobody asked for.
+		slog.ErrorContext(ctx, "run: run row has no routable kind — not started",
+			"run", row.ID, "kind", row.Kind, "origin", row.Origin)
+		return delivery.ErrRunNotStarted
+	}
 	_, err = c.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
-		ID:        delivery.MilestoneRunWorkflowID(row.OrgID, row.ProjectID, row.MilestoneNumber),
+		ID:        delivery.MilestoneRunWorkflowID(kind, row.OrgID, row.ProjectID, row.MilestoneNumber),
 		TaskQueue: s.rt.TaskQueue(),
-		// A milestone sees SEQUENTIAL runs across its life, so the id is reused
-		// once the previous run is terminal. Concurrency is prevented by the run
-		// row (the build mutex) and by AlreadyStarted below, not by the id.
+		// A milestone sees SEQUENTIAL runs OF ONE KIND across its life, so the id is
+		// reused once the previous run is terminal. Concurrency is prevented by the
+		// run row (the build mutex, and the per-milestone index) and by
+		// AlreadyStarted below, not by the id.
 		WorkflowIDReusePolicy: enumspb.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE,
-	}, delivery.MilestoneRunWorkflowName, RunInput{
+	}, workflowType, RunInput{
 		RunID:           row.ID,
 		OrgID:           row.OrgID,
 		ProjectID:       row.ProjectID,
@@ -218,7 +232,7 @@ func (s *Supervisor) SignalRun(ctx context.Context, row *delivery.MilestoneRun, 
 	if s == nil || row == nil || s.rt == nil || !s.rt.Available() {
 		return nil
 	}
-	return s.signal(ctx, row.OrgID, row.ProjectID, row.MilestoneNumber, name, payload)
+	return s.signal(ctx, row, name, payload)
 }
 
 // CancelRun abandons an increment. It is the write behind the console's cancel,
@@ -234,7 +248,7 @@ func (s *Supervisor) CancelRun(ctx context.Context, row *delivery.MilestoneRun) 
 	if s.rt == nil || !s.rt.Available() {
 		return delivery.ErrTemporalUnavailable
 	}
-	return s.signal(ctx, row.OrgID, row.ProjectID, row.MilestoneNumber, delivery.SigRunCancel, delivery.RunSignal{
+	return s.signal(ctx, row, delivery.SigRunCancel, delivery.RunSignal{
 		Signal:          delivery.SigRunCancel,
 		MilestoneNumber: row.MilestoneNumber,
 	})
@@ -274,19 +288,48 @@ func (s *Supervisor) AbandonRun(ctx context.Context, orgID, projectID string, mi
 	if err != nil {
 		return nil // raced with a client teardown
 	}
-	workflowID := delivery.MilestoneRunWorkflowID(orgID, projectID, milestoneNumber)
 	ctx, cancel := context.WithTimeout(ctx, signalTimeout)
 	defer cancel()
-	if terr := c.TerminateWorkflow(ctx, workflowID, "", abandonReason); terr != nil {
+	// EVERY kind, not the one that happens to be live. A milestone can be worked
+	// by three workflow ids across its life and there is no row left to ask which
+	// ones ever existed — the rows are purged in the same teardown. A kind missed
+	// here leaves a supervisor retrying its milestone poll forever (Temporal's
+	// default policy is unbounded) against a repository that is gone, and holding
+	// an id any later same-named project's first run would be refused as
+	// AlreadyStarted on.
+	var errs []error
+	for _, workflowID := range abandonWorkflowIDs(orgID, projectID, milestoneNumber) {
+		terr := c.TerminateWorkflow(ctx, workflowID, "", abandonReason)
 		var notFound *serviceerror.NotFound
-		if errors.As(terr, &notFound) {
-			return nil
+		if terr == nil {
+			slog.InfoContext(ctx, "run: abandoned a supervisor whose project was deleted",
+				"workflowId", workflowID, "project", projectID, "milestone", milestoneNumber)
+			continue
 		}
-		return terr
+		if errors.As(terr, &notFound) {
+			// The id may never have been started, and terminating a settled
+			// execution is the same no-op. Temporal reports both as NotFound.
+			continue
+		}
+		errs = append(errs, terr)
 	}
-	slog.InfoContext(ctx, "run: abandoned a supervisor whose project was deleted",
-		"workflowId", workflowID, "project", projectID, "milestone", milestoneNumber)
-	return nil
+	return errors.Join(errs...)
+}
+
+// abandonWorkflowIDs is every workflow id a milestone could be supervised under.
+//
+// It is a named function rather than a loop inline in AbandonRun because WHICH
+// ids get terminated is the thing that can silently go wrong, and it is the only
+// part of the abandon path testable without a Temporal server. A kind missing
+// from this list leaves a supervisor retrying its milestone poll forever against
+// a repository that is gone, and holding an id that any later same-named
+// project's first run is then refused as AlreadyStarted on.
+func abandonWorkflowIDs(orgID, projectID string, milestoneNumber int) []string {
+	out := make([]string, 0, len(delivery.RunKinds))
+	for _, kind := range delivery.RunKinds {
+		out = append(out, delivery.MilestoneRunWorkflowID(kind, orgID, projectID, milestoneNumber))
+	}
+	return out
 }
 
 // abandonReason is what a terminated run's history records. It is a sentence
@@ -294,12 +337,21 @@ func (s *Supervisor) AbandonRun(ctx context.Context, orgID, projectID string, mi
 // workflow stopped.
 const abandonReason = "the project was deleted — its run rows are purged and its repository is gone"
 
-func (s *Supervisor) signal(ctx context.Context, orgID, projectID string, milestoneNumber int, name string, payload delivery.RunSignal) error {
+// signal addresses a run by its ROW, which is the routing table: the row's kind
+// gives the workflow id's prefix.
+//
+// Resolving the prefix from the row rather than from the milestone alone is what
+// makes a stale signal harmless. Ids are reused, so one grammar for all three
+// kinds would let a merge signal aimed at a settled dev run land on the
+// validation run that claimed the same id afterwards — and that run would read
+// the cycle facts of a merge that was never its own.
+func (s *Supervisor) signal(ctx context.Context, row *delivery.MilestoneRun, name string, payload delivery.RunSignal) error {
 	c, err := s.rt.Client()
 	if err != nil {
 		return nil
 	}
-	workflowID := delivery.MilestoneRunWorkflowID(orgID, projectID, milestoneNumber)
+	workflowID := delivery.MilestoneRunWorkflowID(
+		delivery.RunKindOf(row.Kind, row.Origin), row.OrgID, row.ProjectID, row.MilestoneNumber)
 	ctx, cancel := context.WithTimeout(ctx, signalTimeout)
 	defer cancel()
 	if serr := c.SignalWorkflow(ctx, workflowID, "", name, payload); serr != nil {

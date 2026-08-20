@@ -21,6 +21,9 @@ import (
 	"errors"
 	"testing"
 
+	"go.temporal.io/sdk/client"
+	"go.temporal.io/sdk/worker"
+
 	"github.com/wso2/aep/aep-api/internal/config"
 	"github.com/wso2/aep/aep-api/internal/delivery"
 )
@@ -196,10 +199,169 @@ func TestAdmitSurvivesAVersionReadFailure(t *testing.T) {
 	}
 }
 
-// TestMilestoneRunWorkflowID pins the identity §7 names, which is also the id
-// the event plane's signals and the console's cancel both address.
+// TestMilestoneRunWorkflowID pins the id the event plane's signals and the
+// console's cancel both address — and, above all, that a run's KIND is part of
+// it.
+//
+// The prefix is not decoration. Ids are reused
+// (WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE), so one grammar for all three kinds
+// would let a milestone's dev run, its validation run and its task run claim the
+// same id in turn: a stale merge signal aimed at a settled dev run would land on
+// whichever run claimed the id afterwards, and that run would act on a merge that
+// was never its own.
 func TestMilestoneRunWorkflowID(t *testing.T) {
-	if got := delivery.MilestoneRunWorkflowID("acme", "shop", 7); got != "run-acme-shop-7" {
-		t.Fatalf("MilestoneRunWorkflowID = %q, want run-acme-shop-7", got)
+	cases := []struct{ kind, want string }{
+		{delivery.RunKindDev, "dev-acme-shop-7"},
+		{delivery.RunKindValidation, "validation-acme-shop-7"},
+		{delivery.RunKindTask, "task-acme-shop-7"},
+		// A row written before the kind column existed can only have been a dev
+		// run, and dev is the id a pre-split execution already answers to.
+		{"", "dev-acme-shop-7"},
 	}
+	seen := map[string]bool{}
+	for _, c := range cases {
+		got := delivery.MilestoneRunWorkflowID(c.kind, "acme", "shop", 7)
+		if got != c.want {
+			t.Fatalf("MilestoneRunWorkflowID(%q) = %q, want %q", c.kind, got, c.want)
+		}
+		seen[got] = true
+	}
+	// Three DISTINCT ids for one milestone. If two of them ever collapsed, a
+	// signal for one species would be delivered to another.
+	if len(seen) != 3 {
+		t.Fatalf("the three kinds produced %d distinct ids, want 3: %v", len(seen), seen)
+	}
+}
+
+// TestRunWorkflowName pins the workflow TYPE a run of each kind executes, and
+// that an unroutable kind yields nothing rather than a guess: silently starting a
+// dev workflow over an unclassified row would take the project's build mutex on
+// behalf of a run nobody asked for.
+func TestRunWorkflowName(t *testing.T) {
+	cases := []struct{ kind, want string }{
+		{delivery.RunKindDev, delivery.DevRunWorkflowName},
+		{delivery.RunKindValidation, delivery.ValidationRunWorkflowName},
+		{delivery.RunKindTask, delivery.TaskRunWorkflowName},
+		{"", ""},
+		{"nonsense", ""},
+	}
+	for _, c := range cases {
+		if got := delivery.RunWorkflowName(c.kind); got != c.want {
+			t.Fatalf("RunWorkflowName(%q) = %q, want %q", c.kind, got, c.want)
+		}
+	}
+	// And the three names are distinct, for the reason the ids are: one task
+	// queue serves all three, and two kinds sharing a type would execute the
+	// wrong loop.
+	if delivery.DevRunWorkflowName == delivery.ValidationRunWorkflowName ||
+		delivery.DevRunWorkflowName == delivery.TaskRunWorkflowName ||
+		delivery.ValidationRunWorkflowName == delivery.TaskRunWorkflowName {
+		t.Fatal("two run kinds share a workflow type")
+	}
+}
+
+// TestRunKindOf pins the fallback chain the two silent call sites depend on — the
+// id a signal is aimed at, and the type a start executes. Both fail quietly when
+// they are wrong, which is why the chain is written once.
+func TestRunKindOf(t *testing.T) {
+	cases := []struct{ kind, origin, want string }{
+		{delivery.RunKindValidation, delivery.RunOriginSpecBuild, delivery.RunKindValidation},
+		{"", delivery.RunOriginRevalidate, delivery.RunKindValidation},
+		{"", delivery.RunOriginIncidentAdoption, delivery.RunKindTask},
+		{"", delivery.RunOriginSpecBuild, delivery.RunKindDev},
+		{"", "", delivery.RunKindDev},
+		{"typo", "", delivery.RunKindDev},
+	}
+	for _, c := range cases {
+		if got := delivery.RunKindOf(c.kind, c.origin); got != c.want {
+			t.Fatalf("RunKindOf(%q, %q) = %q, want %q", c.kind, c.origin, got, c.want)
+		}
+	}
+}
+
+// TestAbandonRunTerminatesEveryKindsWorkflow: a project delete has to end the
+// supervisor over every id a milestone could be running under, not the one that
+// happens to be live.
+//
+// There is no row left to ask. The run rows are purged in the same teardown, so
+// by the time abandon runs the platform cannot tell whether that milestone ever
+// had a validation run or a task run — only that it could have. A kind missed
+// here leaves a workflow retrying its milestone poll forever (Temporal's default
+// policy is unbounded) against a repository that is gone, and squatting on an id
+// that any later same-named project's first run is refused as AlreadyStarted on.
+func TestAbandonRunTerminatesEveryKindsWorkflow(t *testing.T) {
+	got := abandonWorkflowIDs(testOrg, testProject, testMilepost)
+	want := []string{
+		"dev-" + testOrg + "-" + testProject + "-7",
+		"task-" + testOrg + "-" + testProject + "-7",
+		"validation-" + testOrg + "-" + testProject + "-7",
+	}
+	if len(got) != len(delivery.RunKinds) {
+		t.Fatalf("abandonWorkflowIDs = %v (%d ids), want one per run kind (%d)",
+			got, len(got), len(delivery.RunKinds))
+	}
+	seen := map[string]bool{}
+	for _, id := range got {
+		seen[id] = true
+	}
+	for _, id := range want {
+		if !seen[id] {
+			t.Fatalf("abandonWorkflowIDs = %v, missing %q — that supervisor outlives its project", got, id)
+		}
+	}
+}
+
+// TestRegisterPutsEveryWorkflowOnOneQueueWithoutColliding is the worker-boot
+// guard.
+//
+// Temporal registers an activity by its reflected METHOD NAME, so two activity
+// structs sharing any method name panic the worker — and three structs carved out
+// of one loop would share a great many. The panic is raised at registration,
+// which the watcher performs immediately before worker.Start, so it surfaces as a
+// boot-time crash whose stack names neither workflow. ONE Activities struct with
+// three workflows taking method expressions off it is the only shape that cannot
+// break that way.
+//
+// The second half is what stops this passing vacuously: a deliberately colliding
+// second struct MUST panic, which is the failure the first half proves is absent.
+func TestRegisterPutsEveryWorkflowOnOneQueueWithoutColliding(t *testing.T) {
+	// A lazy client never dials, so no Temporal server is involved. The worker is
+	// real, which is the point — the registry doing the rejecting is the real one.
+	c, err := client.NewLazyClient(client.Options{HostPort: "127.0.0.1:1", Namespace: "default"})
+	if err != nil {
+		t.Fatalf("NewLazyClient: %v", err)
+	}
+	defer c.Close()
+	wk := worker.New(c, "aep-delivery", worker.Options{})
+
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Fatalf("Register panicked — the three workflows and the one Activities "+
+					"struct must coexist on one queue: %v", r)
+			}
+		}()
+		Register(wk, NewActivities(Deps{}))
+	}()
+
+	// Now prove the guard is real: a second struct carrying ANY of the same method
+	// names is rejected. This is the crash the one-struct shape exists to avoid.
+	func() {
+		defer func() {
+			if r := recover(); r == nil {
+				t.Fatal("registering a second activity struct with a colliding method name " +
+					"was accepted; this test can no longer detect the duplicate-name panic")
+			}
+		}()
+		wk.RegisterActivity(&collidingActivities{})
+	}()
+}
+
+// collidingActivities exists only to be rejected: PollMilestone is already
+// registered by the real Activities struct, and Temporal keys activities by
+// method name.
+type collidingActivities struct{}
+
+func (*collidingActivities) PollMilestone(context.Context, MilestoneRef) (MilestoneSnapshot, error) {
+	return MilestoneSnapshot{}, nil
 }

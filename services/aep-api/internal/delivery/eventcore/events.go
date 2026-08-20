@@ -232,12 +232,16 @@ func (e *Events) OnPullRequest(ctx context.Context, _, _ string, payload []byte)
 		return nil
 	}
 
+	// Two parses, kept apart all the way into the policy: closing keywords are
+	// what a coding cycle finishes, `Validates #N` is what a validation cycle
+	// judges without ending. See decideAutoMerge.
 	refs := parseResolvesRefs(p.PullRequest.Body)
+	validates := parseValidatesRefs(p.PullRequest.Body)
 	work, err := e.p.Issues.ListMilestoneIssues(ctx, owner.orgID, owner.projectID, milestoneOpenIssuesFilter(owner.run.MilestoneNumber))
 	if err != nil {
 		return err
 	}
-	decision := decideAutoMerge(refs, work)
+	decision := decideAutoMerge(refs, validates, work)
 	// The verdict is recorded for the AGENT's pull request whichever way it went:
 	// a declined merge is the loudest silence this loop has — the cycle sits at
 	// its landing deadline with a green agent log and nothing else to say.

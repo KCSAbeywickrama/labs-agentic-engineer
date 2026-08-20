@@ -43,11 +43,11 @@ const (
 	// RunBudgetBuildRetriggers tallies automatic build re-triggers
 	// (RunReasonBuildRetriggerBudget).
 	RunBudgetBuildRetriggers RunBudget = "build_retriggers"
-	// RunBudgetValidationCycles counts VALIDATION ATTEMPTS, bounding the
-	// repair-and-re-validate loop (RunMaxValidationAttempts). Unlike the other
-	// three it names no terminal reason of its own: exhausting it settles the run
-	// on the verdict the last attempt already produced, so `validation-failed`
-	// means "still failing after every attempt".
+	// RunBudgetValidationCycles counts the validation cycles a run opened — one on
+	// the ordinary path, more when an agent merged without committing a report and
+	// was re-dispatched. Read-model bookkeeping only: the VERSION's attempt
+	// allowance (RunMaxValidationAttempts) is counted from the milestone's
+	// validation runs, not from this column.
 	RunBudgetValidationCycles RunBudget = "validation_cycles"
 )
 
@@ -94,6 +94,20 @@ type MilestoneRunRepository interface {
 	// then reject.
 	ActiveDevRunByProject(ctx context.Context, orgID, projectID string) (*MilestoneRun, error)
 
+	// ActiveValidationRunByProject returns a live VALIDATION run anywhere in the
+	// project, or (nil, nil) when there is none. It is the second half of the
+	// build endpoint's 409.
+	//
+	// It is a project-wide read where the mutex index is per-project-and-dev,
+	// because there is no index to lean on here: a validation run deliberately
+	// sits outside the build mutex (it re-judges a version that already shipped,
+	// so holding up the next build for its duration would be wrong). What must not
+	// happen is a delivery run merging and promoting WHILE validation asserts
+	// against the deployment — that judges a moving target. The refusal is
+	// therefore a read, and the way past it is to cancel the validation, which is
+	// one click.
+	ActiveValidationRunByProject(ctx context.Context, orgID, projectID string) (*MilestoneRun, error)
+
 	// SetState moves a non-terminal run between waiting and running (the loop
 	// oscillates across cycle boundaries) and stamps started_at on the first
 	// transition to running. It refuses a terminal state — that is Settle's job
@@ -122,10 +136,11 @@ type MilestoneRunRepository interface {
 	// re-dispatch. The FIRST request wins: a second click cannot move the stamp.
 	RequestCancel(ctx context.Context, id string) (*MilestoneRun, error)
 
-	// SetValidationVerdict records the validation cycle's outcome on the run
-	// (the verdict is a run property, not a per-issue one) together with the
-	// validation issue that produced it, guarded on the run being non-terminal so
-	// a settled run's verdict is frozen. An issue of 0 leaves the column as-is.
+	// SetValidationVerdict records the judgement on the run (the verdict is a run
+	// property, not a per-issue one) together with the validation task that produced
+	// it, guarded on the run being non-terminal so a settled run's verdict is
+	// frozen. An issue of 0 leaves the column as-is. Written by a validation run,
+	// and by a dev run only to record `skipped` for a version with no oracle.
 	SetValidationVerdict(ctx context.Context, id, verdict string, issue int) (*MilestoneRun, error)
 
 	// GetByIDScoped returns the run only when it belongs to orgID — the store
@@ -200,10 +215,22 @@ func (r *milestoneRunRepository) TryAdmit(ctx context.Context, run *MilestoneRun
 }
 
 func (r *milestoneRunRepository) ActiveDevRunByProject(ctx context.Context, orgID, projectID string) (*MilestoneRun, error) {
+	return r.activeRunByKind(ctx, orgID, projectID, RunKindDev)
+}
+
+func (r *milestoneRunRepository) ActiveValidationRunByProject(ctx context.Context, orgID, projectID string) (*MilestoneRun, error) {
+	return r.activeRunByKind(ctx, orgID, projectID, RunKindValidation)
+}
+
+// activeRunByKind is the one query behind both project-wide "is a run of this
+// kind live?" reads. Written once because the two differ only in the kind
+// literal, and a second spelling of the predicate is a second chance to narrow
+// it differently from the index it mirrors.
+func (r *milestoneRunRepository) activeRunByKind(ctx context.Context, orgID, projectID, kind string) (*MilestoneRun, error) {
 	var row MilestoneRun
 	err := r.db.WithContext(ctx).
 		Where("org_id = ? AND project_id = ? AND kind = ? AND state IN ?",
-			orgID, projectID, RunKindDev, nonTerminalRunStates).
+			orgID, projectID, kind, nonTerminalRunStates).
 		Order("created_at DESC").
 		First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {

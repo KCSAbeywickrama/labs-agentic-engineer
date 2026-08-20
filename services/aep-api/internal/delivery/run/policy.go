@@ -100,6 +100,21 @@ func budgetRefusal(kind string, cyclesTotal, fixCycles, conflictCycles, ceiling 
 	return ""
 }
 
+// maxUnreportedDispatches bounds how many validation CYCLES one validation run
+// opens after an agent merged its pull request without committing a report.
+//
+// It is a separate budget from the cycle's re-dispatch allowance
+// (RunMaxRedispatchPerCycle) because it answers a different failure: that one is
+// an agent that never landed a pull request at all, this one is an agent that
+// landed one and broke the report half of the runner contract. The remedy is the
+// same — dispatch again — but nothing else can supply it: no criterion asserted,
+// so there is no repair issue to file, and nothing was deployed, so there is
+// nothing outside the workflow to fix.
+//
+// Two, because an agent that ignored the contract twice will ignore it a third
+// time, and every dispatch is a paid agent run.
+const maxUnreportedDispatches = 2
+
 // noProgress is the rule that stops a run looping forever on work it cannot
 // finish: a GREEN cycle that closed no issue and minted no platform issue has
 // left the milestone exactly as it found it, and the next cycle would be the
