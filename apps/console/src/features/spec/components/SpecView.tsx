@@ -193,6 +193,10 @@ export function SpecView({ projectName }: { projectName: string }) {
       .filter((e): e is NonNullable<typeof e> => e !== null)
       .sort((a, b) => a.path.localeCompare(b.path));
   }, [spec.data, collab.docPaths]);
+  // Which references resolve is decided against this list. `files` is rebuilt
+  // on every render (`collab.docPaths` is derived, not memoized), so the editor
+  // compares it BY VALUE rather than by identity — see `knownPaths` there.
+  const specPaths = useMemo(() => files.map((f) => f.path), [files]);
   // A live design turn is signalled by `?generate=design` (the Generate-design
   // CTA) and, more durably, by an agent peer streaming design.cell into the
   // room. In either case the Architecture (cell-diagram) tab is where the user
@@ -1047,6 +1051,11 @@ export function SpecView({ projectName }: { projectName: string }) {
                         ? { run: seedChat, busyReason: lensBusyReason }
                         : undefined
                     }
+                    links={{
+                      path: selectedFile.path,
+                      knownPaths: specPaths,
+                      open: (path) => setSelection({ kind: "file", path }),
+                    }}
                   />
                 ) : ytext ? (
                   <CollabTextArea

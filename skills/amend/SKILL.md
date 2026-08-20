@@ -33,8 +33,9 @@ Interview for what the feature does, for whom, and any policy it implies —
 skipping what the instruction already says. Then:
 
 - append the feature's stories with fresh numbers,
-- write or extend `specs/requirements/features/<slug>.md` with the depth —
-  a feature that should not ship yet is an Out of Scope line instead,
+- write or extend `specs/requirements/features/<slug>.md` with the depth, and
+  link it from the story per the contract — a feature that should not ship yet
+  is an Out of Scope line instead,
 - record any new product decisions (org defaults answer silently, as ever).
 
 Done when every new story has a number and an actor the Actors section
@@ -58,7 +59,8 @@ Two entrances reach this branch, and the second is the common one:
 
 Expand `specs/requirements/features/<slug>.md` — interview for the missing
 depth, then write it there. The PRD body gains at most new story lines the
-depth surfaced; everything else lands in the feature file.
+depth surfaced, plus the contract's link to the file if the story does not
+carry one yet; everything else lands in the feature file.
 
 ## Close
 

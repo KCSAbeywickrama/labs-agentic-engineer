@@ -239,6 +239,15 @@ step bar and no second progress indicator competing with the overview's cards. D
 [#527](https://github.com/wso2/labs-agentic-engineer/issues/527);
 [drawn here](https://claude.ai/code/artifact/fe3fc0c0-6ecd-49ed-9f75-ed65c2220cb1).
 
+**A reference between spec documents is a link, and it opens in place.** The PRD names its feature
+docs — depth lives in `features/<slug>.md` and the body stays lean — so the document is full of
+pointers to files sitting two rows away in the same rail. The shared schema parses a markdown link
+as an EXTERNAL one, which is wrong twice: a plain click inside the editor only places a caret, and
+a click that did follow the href would leave the console for a path it does not serve. A reference
+that resolves to a file the project HAS is styled as a link and selects that file; one naming a
+document nobody has written yet stays plain text, because a control that selects nothing is worse
+than prose. The link's text is the feature's **name** — the path is the href, never the label.
+
 **The PRD leads Requirements.** Everything else in that group elaborates it — a feature file is
 depth on a story the PRD defines — so the document the whole flow is written against cannot sit
 below its own footnotes. Path order alone puts `features/…` above `prd.md`, which

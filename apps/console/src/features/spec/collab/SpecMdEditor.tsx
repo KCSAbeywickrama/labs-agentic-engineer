@@ -40,6 +40,7 @@ import {
 } from "./agentReview";
 import { SpecMdToolbar } from "./SpecMdToolbar";
 import { PrdLenses, refreshPrdLenses, type PrdLensBinding } from "./prdLensPlugin";
+import { SpecLinks, refreshSpecLinks, type SpecLinkBinding } from "./specLinkPlugin";
 
 // Collaborative WYSIWYG editor for markdown spec files (#86 phase 6).
 // The shared source of truth is the file's Y.XmlFragment (seeded server-side
@@ -54,6 +55,7 @@ export function SpecMdEditor({
   self,
   agentStreaming,
   lenses,
+  links,
 }: {
   fragment: Y.XmlFragment;
   provider: HocuspocusProvider;
@@ -63,13 +65,17 @@ export function SpecMdEditor({
   agentStreaming: boolean;
   /** The PRD's code lenses (#579) — passed for that file only, absent elsewhere. */
   lenses?: PrdLensBinding | undefined;
+  /** Cross-references to sibling spec documents; every markdown file carries them. */
+  links?: SpecLinkBinding | undefined;
 }) {
   // The extension list is built once per (fragment, provider) — a file swap
   // remounts this component under a new key — so the plugin reaches the CURRENT
   // binding through a ref rather than the closure it was configured with.
   const lensRef = useRef(lenses);
+  const linkRef = useRef(links);
   useEffect(() => {
     lensRef.current = lenses;
+    linkRef.current = links;
   });
   const editor = useEditor(
     {
@@ -82,6 +88,7 @@ export function SpecMdEditor({
         AgentInsertion,
         Collaboration.configure({ fragment }),
         CollaborationCaret.configure({ provider, user: self }),
+        SpecLinks.configure({ binding: () => linkRef.current }),
         ...(lenses
           ? [
               PrdLenses.configure({
@@ -104,6 +111,15 @@ export function SpecMdEditor({
   useEffect(() => {
     if (editor && lensRef.current) refreshPrdLenses(editor.view);
   }, [editor, busyReason]);
+
+  // Same for the project's file list: which references resolve is console
+  // state, and a feature doc the agent just wrote makes one more of them live.
+  // Compared by value — the caller rebuilds the array on every render, and a
+  // rebuild per keystroke would be a decoration sweep for nothing.
+  const knownPaths = (links?.knownPaths ?? []).join("\n");
+  useEffect(() => {
+    if (editor && linkRef.current) refreshSpecLinks(editor.view);
+  }, [editor, knownPaths]);
 
   // Pending-review count, refreshed on every document change.
   const [pending, setPending] = useState(0);
@@ -292,6 +308,14 @@ export function SpecMdEditor({
           "& .prd-lens--line": { opacity: 0 },
           "& .tiptap li:hover .prd-lens--line, & .tiptap p:hover .prd-lens--line, & .prd-lens--line:focus-visible":
             { opacity: 1 },
+          // A reference to a sibling spec document reads as a link and acts
+          // like one; an ordinary external link keeps the editor's default.
+          "& .spec-link": {
+            cursor: "pointer",
+            color: "primary.main",
+            textDecoration: "underline",
+            textUnderlineOffset: "2px",
+          },
           // The two kinds of unsettled read differently because they ARE
           // different: an assumption is one word of an otherwise-settled
           // decision, an open question is a whole entry nobody has answered.
