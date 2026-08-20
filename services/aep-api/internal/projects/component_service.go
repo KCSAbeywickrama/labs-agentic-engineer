@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"time"
 
 	"github.com/wso2/aep/aep-api/internal/gen"
@@ -62,6 +63,14 @@ type ComponentService interface {
 	// swagger-ui invokes the deployed endpoint directly; CORS is enabled
 	// on the service ClusterComponentType's HTTPRoute.
 	GetComponentOpenAPI(ctx context.Context, orgName, projectName, componentName string) (*gen.ComponentOpenAPI, error)
+
+	// Invoke relays one HTTP call to componentName's deployed gateway URL, as
+	// the caller (bearer). See component_invoke.go for the guardrails — this
+	// is a scoped relay for testing your OWN project's components, not a
+	// general egress proxy. Any component type may be invoked (unlike
+	// GetComponentOpenAPI, which is service-only): an ai-agent today, a
+	// service later for the API tester.
+	Invoke(ctx context.Context, orgName, projectName, componentName string, in InvokeCall, bearer string) (InvokeResult, error)
 
 	// Build (workflow runs)
 	TriggerBuild(ctx context.Context, orgName, projectName, componentName string) (*gen.WorkflowRun, error)
@@ -135,6 +144,15 @@ type componentService struct {
 	// yet).
 	modelKeyResolver AnthropicKeyResolver
 	secretRefClient  secretmanagersvc.OpenChoreoSecretReferenceClient
+
+	// invokeHTTP + invokeTimeout back Invoke (component_invoke.go). Both are
+	// zero-value-defaulted lazily (nil client -> http.DefaultClient, timeout
+	// <= 0 -> invokeDefaultTimeout) rather than params on NewComponentService,
+	// so the six existing call sites (production + tests) are untouched.
+	// Tests that need a short timeout or a specific *http.Client construct
+	// componentService directly (whitebox, same package).
+	invokeHTTP    *http.Client
+	invokeTimeout time.Duration
 }
 
 // NewComponentService builds the component service. repoSvc, buildCredSvc,

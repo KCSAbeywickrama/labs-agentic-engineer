@@ -22,4 +22,11 @@ var (
 	ErrComponentNotFound   = errors.New("component not found")
 	ErrComponentNotService = errors.New("component is not a service")
 	ErrLogsUnavailable     = errors.New("observability service not configured")
+
+	// Invoke (component_invoke.go) guardrail sentinels — each maps to a fixed
+	// HTTP status at the edge (componentbuild.Handler.InvokeComponent).
+	ErrNotReachable    = errors.New("component not reachable: no deployment with a gateway URL")
+	ErrBadPath         = errors.New("invalid path: must be absolute and cannot escape the component's gateway")
+	ErrBodyTooLarge    = errors.New("request body exceeds the invoke relay's size cap")
+	ErrUpstreamTimeout = errors.New("upstream component did not respond within the invoke timeout")
 )

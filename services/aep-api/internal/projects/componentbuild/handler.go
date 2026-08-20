@@ -19,9 +19,11 @@ package componentbuild
 import (
 	"context"
 	"errors"
+	"net/http"
 
 	"github.com/wso2/aep/aep-api/internal/gen"
 	"github.com/wso2/aep/aep-api/internal/platform/apierr"
+	"github.com/wso2/aep/aep-api/internal/platform/auth"
 	"github.com/wso2/aep/aep-api/internal/platform/tenant"
 	"github.com/wso2/aep/aep-api/internal/projects"
 )
@@ -126,4 +128,69 @@ func (h *Handler) GetComponentOpenapi(ctx context.Context, request gen.GetCompon
 		return nil, projects.MapComponentError(err, "failed to get OpenAPI spec")
 	}
 	return gen.GetComponentOpenapi200JSONResponse(*spec), nil
+}
+
+// --- Invoke (drives the Test tab's "call the running component" action) -----
+// Relays one HTTP call to componentName's deployed gateway URL, as the
+// caller — see projects.componentService.Invoke for the guardrails (project
+// scoping, path validation, header hygiene, size/timeout caps). This handler's
+// only jobs are: recover the caller's raw bearer from the context carrier
+// ExtractAuthToken stashed it under (the contract does NOT declare an
+// Authorization header param on this operation, so oapi-codegen's strict
+// request object carries no Params.Authorization the way GetSpecCollabSession's
+// does — auth.GetAuthToken(ctx) is the established repo mechanism for exactly
+// this: the raw bearer, stripped of "Bearer ", read back out of the context
+// the global ExtractAuthToken middleware always populates), translate the wire
+// request/response, and map the domain sentinels to their HTTP statuses.
+func (h *Handler) InvokeComponent(ctx context.Context, request gen.InvokeComponentRequestObject) (gen.InvokeComponentResponseObject, error) {
+	org := tenant.BoundOrgFromContext(ctx)
+	if err := projects.RequireComponentSlugs(request.ProjectName, request.ComponentName); err != nil {
+		return nil, err
+	}
+	if request.Body == nil {
+		return nil, apierr.BadRequest("request body required")
+	}
+
+	// The context carrier holds the token with "Bearer " already stripped
+	// (see auth.ExtractAuthToken); re-attach it here so componentService.Invoke
+	// sets the upstream Authorization header verbatim, exactly as the caller's
+	// own browser would have sent it.
+	bearer := ""
+	if token := auth.GetAuthToken(ctx); token != "" {
+		bearer = "Bearer " + token
+	}
+
+	result, err := h.comp.Invoke(ctx, org, request.ProjectName, request.ComponentName, projects.InvokeCall{
+		Method:      string(request.Body.Method),
+		Path:        request.Body.Path,
+		ContentType: request.Body.ContentType,
+		Body:        []byte(request.Body.Body),
+	}, bearer)
+	if err != nil {
+		switch {
+		case errors.Is(err, projects.ErrComponentNotFound):
+			return nil, apierr.NotFound("component not found")
+		case errors.Is(err, projects.ErrNotReachable):
+			// The contract's Error schema is {code, message, details} — it has
+			// no `reason` field, so this cannot literally carry
+			// {reason:"not-reachable"} as sketched in the design. "not-reachable"
+			// rides as the message instead, which is the closest honest shape
+			// the contract allows; see the task report for the flagged
+			// divergence.
+			return nil, apierr.New(http.StatusConflict, apierr.CodeConflict, "not-reachable", nil)
+		case errors.Is(err, projects.ErrBadPath):
+			return nil, apierr.BadRequest("invalid path")
+		case errors.Is(err, projects.ErrBodyTooLarge):
+			return nil, apierr.New(http.StatusRequestEntityTooLarge, apierr.CodeBadRequest, "request body too large", nil)
+		case errors.Is(err, projects.ErrUpstreamTimeout):
+			return nil, apierr.New(http.StatusGatewayTimeout, apierr.CodeBadGateway, "upstream component timed out", nil)
+		}
+		return nil, projects.MapComponentError(err, "failed to invoke component")
+	}
+	return gen.InvokeComponent200JSONResponse(gen.InvokeResponse{
+		Status:      result.Status,
+		ContentType: result.ContentType,
+		Body:        string(result.Body),
+		Truncated:   result.Truncated,
+	}), nil
 }
