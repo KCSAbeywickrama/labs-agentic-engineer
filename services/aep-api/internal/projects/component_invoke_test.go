@@ -366,3 +366,96 @@ func TestInvoke_RedirectIsRelayedNotFollowed(t *testing.T) {
 		t.Fatal("relay returned the redirect target's body — it followed the redirect")
 	}
 }
+
+// 12. Percent-encoded (and double-percent-encoded) traversal, protocol-relative
+// paths, and encoded-slash traversal must all be rejected the same as literal
+// "..": validateInvokePath decodes before checking, repeatedly (bounded), so
+// %2e%2e / %2E%2E / %252e%252e / a%2f..%2fb style bypasses cannot slip past a
+// naive strings.Contains(p, "..") substring check. Assert the upstream fake
+// is NEVER dialed for any of these.
+func TestInvoke_EncodedTraversalAndProtocolRelative_RejectedWithoutTouchingUpstream(t *testing.T) {
+	t.Parallel()
+	hit := false
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hit = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	svc := invokeTestSvc(t, designFiles("chat-agent", "ai-agent", ""), upstream.URL, 0)
+	bad := []string{
+		"/%2e%2e/other",
+		"/%2E%2E/other",
+		"/%252e%252e/other",
+		"/a/../../b",
+		"//evil.com/x",
+		"/a/..%2fb",
+	}
+	for _, p := range bad {
+		if _, err := svc.Invoke(context.Background(), "acme", "web", "chat-agent", InvokeCall{Method: "GET", Path: p}, ""); !errors.Is(err, ErrBadPath) {
+			t.Fatalf("path %q: want ErrBadPath, got %v", p, err)
+		}
+	}
+	if hit {
+		t.Fatalf("upstream must never be dialed for a rejected path")
+	}
+}
+
+// 13. Paths that merely LOOK suspicious to a naive check must still be
+// accepted: a legitimate query string containing "/../" is not a path
+// escape (traversal only in the query), and a filename with literal dots
+// ("report..v2.json") is not a traversal segment.
+func TestInvoke_LookalikeSafePaths_StillAccepted(t *testing.T) {
+	t.Parallel()
+	var gotPaths []string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPaths = append(gotPaths, r.URL.RequestURI())
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	svc := invokeTestSvc(t, designFiles("chat-agent", "ai-agent", ""), upstream.URL, 0)
+	ok := []string{
+		"/chat",
+		"/api/v1/items/",
+		"/search?q=a/../b",
+		"/report..v2.json",
+	}
+	for _, p := range ok {
+		if _, err := svc.Invoke(context.Background(), "acme", "web", "chat-agent", InvokeCall{Method: "GET", Path: p}, ""); err != nil {
+			t.Fatalf("path %q: want it accepted, got %v", p, err)
+		}
+	}
+	if len(gotPaths) != len(ok) {
+		t.Fatalf("want upstream dialed once per accepted path, got %d hits for %d paths", len(gotPaths), len(ok))
+	}
+}
+
+// 14. A timeout that happens DURING the body read (headers already sent,
+// partial body flushed, then the upstream blocks past the deadline) must
+// still map to ErrUpstreamTimeout, not a generic wrapped error — the
+// deadline is shared between client.Do and the following io.ReadAll, and
+// the body-read error branch must check for it too.
+func TestInvoke_TimeoutDuringBodyRead_ErrUpstreamTimeout(t *testing.T) {
+	t.Parallel()
+	block := make(chan struct{})
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"partial":`))
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		<-block
+	}))
+	t.Cleanup(func() {
+		close(block)
+		upstream.Close()
+	})
+
+	svc := invokeTestSvc(t, designFiles("chat-agent", "ai-agent", ""), upstream.URL, 50*time.Millisecond)
+	_, err := svc.Invoke(context.Background(), "acme", "web", "chat-agent", InvokeCall{Method: "GET", Path: "/x"}, "")
+	if !errors.Is(err, ErrUpstreamTimeout) {
+		t.Fatalf("want ErrUpstreamTimeout for a deadline hit during body read, got %v", err)
+	}
+}

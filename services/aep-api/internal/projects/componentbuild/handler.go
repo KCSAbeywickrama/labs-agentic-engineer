@@ -183,7 +183,7 @@ func (h *Handler) InvokeComponent(ctx context.Context, request gen.InvokeCompone
 		case errors.Is(err, projects.ErrBodyTooLarge):
 			return nil, apierr.New(http.StatusRequestEntityTooLarge, apierr.CodeBadRequest, "request body too large", nil)
 		case errors.Is(err, projects.ErrUpstreamTimeout):
-			return nil, apierr.New(http.StatusGatewayTimeout, apierr.CodeBadGateway, "upstream component timed out", nil)
+			return nil, apierr.New(http.StatusGatewayTimeout, apierr.CodeGatewayTimeout, "upstream component timed out", nil)
 		}
 		return nil, projects.MapComponentError(err, "failed to invoke component")
 	}

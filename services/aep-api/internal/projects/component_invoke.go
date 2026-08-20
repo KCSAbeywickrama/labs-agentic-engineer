@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -176,6 +177,13 @@ func (s *componentService) Invoke(ctx context.Context, orgName, projectName, com
 	// mistaken for truncated.
 	body, err := io.ReadAll(io.LimitReader(resp.Body, invokeMaxResponseBody+1))
 	if err != nil {
+		// The body read shares reqCtx's deadline with client.Do above: a slow
+		// upstream that sends headers, flushes a partial body, then stalls
+		// hits the SAME deadline here, just later. Map it to the same
+		// ErrUpstreamTimeout rather than falling through to a generic 500.
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(reqCtx.Err(), context.DeadlineExceeded) {
+			return InvokeResult{}, ErrUpstreamTimeout
+		}
 		return InvokeResult{}, fmt.Errorf("invoke: read upstream body: %w", err)
 	}
 	truncated := false
@@ -236,22 +244,62 @@ func (s *componentService) firstDeploymentEndpoint(ctx context.Context, orgName,
 	return "", ErrNotReachable
 }
 
+// invokePathDecodeMaxPasses bounds the repeated percent-decoding in
+// validateInvokePath. Two passes is enough to unwrap double-encoding
+// (%252e%252e -> %2e%2e -> ..); a third is headroom, not a promise to
+// unwrap deeper nesting — anything still encoded after that is rejected by
+// construction (a legitimate path never needs 3 layers of encoding).
+const invokePathDecodeMaxPasses = 3
+
 // validateInvokePath is the guardrail that keeps this route a scoped relay
 // instead of a general egress proxy: path must be a plain absolute path
 // joined onto the component's OWN gateway base URL, never a way to redirect
 // the call elsewhere.
+//
+// It only ever looks at the PATH portion — everything before the first '?'
+// or '#' — so a legitimate query value (?redirect=http://x, ?q=a/../b) is
+// never mistaken for a path escape; traversal or a scheme embedded in the
+// query cannot reach the upstream host or path, only the query string the
+// upstream itself interprets.
+//
+// The path is percent-decoded before the traversal check, repeatedly
+// (bounded), because Go's net/http sends RawPath on the wire unchanged and a
+// receiving gateway may normalise %2e%2e (or even %252e%252e) before route
+// matching — a literal strings.Contains(p, "..") substring check does not
+// see through that. Decoding failure is itself rejected rather than passed
+// through: an invalid escape is not a path this relay can reason about.
 func validateInvokePath(p string) error {
-	if !strings.HasPrefix(p, "/") {
+	path := p
+	if i := strings.IndexAny(path, "?#"); i >= 0 {
+		path = path[:i]
+	}
+
+	if !strings.HasPrefix(path, "/") {
 		return ErrBadPath
 	}
-	if strings.HasPrefix(p, "//") {
+	if strings.HasPrefix(path, "//") {
 		return ErrBadPath
 	}
-	if strings.Contains(p, "..") {
+
+	decoded := path
+	for i := 0; i < invokePathDecodeMaxPasses; i++ {
+		next, err := url.PathUnescape(decoded)
+		if err != nil {
+			return ErrBadPath
+		}
+		if next == decoded {
+			break
+		}
+		decoded = next
+	}
+
+	if strings.Contains(decoded, "://") {
 		return ErrBadPath
 	}
-	if strings.Contains(p, "://") {
-		return ErrBadPath
+	for _, seg := range strings.Split(decoded, "/") {
+		if seg == ".." {
+			return ErrBadPath
+		}
 	}
 	return nil
 }
