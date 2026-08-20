@@ -32,7 +32,7 @@ package runread
 // httptest recorder can capture the whole of it.
 //
 // This is the read for ONE EXECUTION and stays that. A VERSION's story spans
-// several runs under the split delivery loop, and that read is
+// several runs, and that read is
 // build_progress.go — which shares this file's frame walk (frames.go) and
 // settles on a different rule, because a terminal run says nothing about whether
 // the version is done.

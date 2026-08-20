@@ -1076,9 +1076,9 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	provisioningSvc.SetProviderBuildTrigger(providerBuildTrigger{build: buildSvc})
 	// The milestone plan path (issue-driven execution §5): once the build's
 	// whole-spec gate cuts `v<N>`, the click supersedes the previous milestone,
-	// mints this version's, admits the run row that IS the one-spec-run-per-
-	// project mutex, then (detached) plans the version's Tasks into the milestone
-	// and mints its gates. Set here rather than in build.Deps because its gate
+	// mints this version's and admits the run row that IS the project's build
+	// mutex; the run then fills the milestone (gates, then the planning turn) as
+	// its own first phase. Set here rather than in build.Deps because its gate
 	// resolver is provisioningSvc, which is constructed after buildSvc.
 	buildSvc.SetPlanPath(build.PlanPathDeps{
 		Milestones: issueService,

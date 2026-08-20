@@ -29,7 +29,7 @@ import (
 //
 // This is the sibling of halt.go and exists for the same mechanical reason.
 // Closing the issues is what makes a cancel STICK: the reconcile sweep starts a
-// run for any open workable kind on a milestone with no live run, so an issue
+// run over a milestone's open WORK when no run is live on it, so an issue
 // left open by a cancel is indistinguishable from work nobody has started, and
 // the run the user just abandoned is restarted within a tick. Suppression, not
 // bookkeeping.
@@ -39,9 +39,12 @@ import (
 // another attempt at the same version may be worth making" — so the work stays
 // open, the milestone stays open, and the gates are untouched because a retry
 // still needs its dependencies resolved. A cancel says "this increment is
-// abandoned" — so a dev run's cancel closes EVERYTHING open in the milestone,
-// gates included, and closes the milestone behind it (delivery.InCancelledWork
-// and CancelClosesTheMilestone hold the per-kind rules).
+// abandoned" — so a dev run's cancel closes everything the increment was
+// carrying, its gates included, and closes the milestone behind it
+// (delivery.InCancelledWork and CancelClosesTheMilestone hold the per-kind
+// rules). It stops at two populations even so: the version's validation task,
+// which judges software still deployed, and the LEDGER, which is nobody's work
+// and never the platform's to write to.
 //
 // Nothing is reverted. Commits a cycle already merged stay on `main` and
 // components it already promoted keep serving, which is why closing the milestone
@@ -87,9 +90,11 @@ func (e *Events) CloseCancelledWork(ctx context.Context, orgID, projectID string
 		return nil, nil
 	}
 	// The milestone's OPEN issues, UNFILTERED — the same fetch shape the halt, the
-	// merge policy and the reconcile sweep use. Here the lack of a label filter is
-	// not even a policy choice: a dev run's cancel reaches every population in the
-	// milestone, and only the STATE narrows it.
+	// merge policy and the reconcile sweep use, and for the same reason: a dev
+	// run's cancel spans several populations (its working set AND the gates, which
+	// carry no arming label at all), and no label filter can express a union of
+	// those and then exclude two more. The STATE is the only narrowing the host
+	// does; delivery.InCancelledWork is the rest.
 	issues, err := e.p.Issues.ListMilestoneIssues(ctx, orgID, projectID, milestoneOpenIssuesFilter(milestoneNumber))
 	if err != nil {
 		return nil, err

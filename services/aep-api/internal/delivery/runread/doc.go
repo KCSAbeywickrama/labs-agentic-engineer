@@ -18,10 +18,10 @@
 // their cycles, two SSE streams over those cycles' agent logs — one per RUN and
 // one per VERSION — and the cancel write behind them.
 //
-// Two streams because there are two questions, and the split delivery loop made
-// them different: a run is one execution, and a version is now several (a dev run
-// delivers it, a task run repairs a defect in it, a validation run re-judges it).
-// They share their frame walk and differ in when they end.
+// Two streams because there are two DIFFERENT questions: a run is one execution,
+// and a version is several of them (a dev run delivers it, a task run repairs a
+// defect in it, a validation run re-judges it). They share their frame walk and
+// differ in when they end.
 //
 // It is a read model, so it owns no state and decides nothing. Everything it
 // serves is either a row the supervisor and the event plane already wrote, or a

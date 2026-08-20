@@ -57,13 +57,14 @@ func TaskRunWorkflow(ctx workflow.Context, in RunInput) (RunResult, error) {
 // and their components are serving, so if any of them came from a VERDICT, ask
 // the version's oracle again.
 //
-// This is the edge that closes the repair chain. Before it, a failed validation
-// filed one bug per failed criterion, closed the task and stopped — the bugs were
-// fixed and deployed, and the version's verdict stayed at the failure until a
-// human clicked revalidate. Now the fix run reopens the task, the reconcile sweep
-// starts a validation run off that open task, and the SAME oracle judges the
-// repair. The chain is bounded by the version's attempt allowance and by the
-// identical-digest rule, both of which live in the validation workflow.
+// This is the edge that CLOSES THE REPAIR CHAIN, and without it the chain is a
+// dead end: a failed verdict files one bug per failed criterion and closes the
+// task, so the bugs get fixed and deployed while the version's verdict stands at
+// the failure until a human clicks revalidate. The reopen is what turns the fix
+// into the next question — the reconcile sweep starts a validation run off the
+// reopened task, and the SAME oracle judges the repair. The chain is bounded by
+// the version's attempt allowance and by the identical-digest rule, both of which
+// live in the validation workflow.
 //
 // It reopens ONLY for `src/validation` work, and that condition is the single
 // place in the platform where a source label routes anything — everywhere else a

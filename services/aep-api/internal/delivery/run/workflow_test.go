@@ -654,7 +654,8 @@ func TestHappyPath_OneCycleDeliversTheVersion(t *testing.T) {
 	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
 	require.Equal(t, []string{delivery.CycleKindCoding}, h.dispatchKinds())
 	require.Equal(t, 1, res.Cycles)
-	require.Equal(t, 1, h.closed, "a settled version closes its milestone")
+	require.Equal(t, 1, h.closed,
+		"no acceptance oracle, so no validation task: nothing is coming and the milestone closes")
 	require.Equal(t, []FinishCycleInput{{CycleID: testCycleID, MergeSHA: testMergeSHA}}, h.finishes)
 	// The run row never says "waiting" here: it parks only when something
 	// actually holds it, and a boundary the loop passes straight through is not
@@ -1021,6 +1022,12 @@ func TestConflictCycle_AnUnmergeablePRBecomesTheNextCyclesWork(t *testing.T) {
 // judged". The validation run the sweep starts off this task owns the version's
 // answer, and the read model reads the newest VALIDATING run on the milestone for
 // exactly that reason.
+//
+// And the MILESTONE STAYS OPEN. That is the hand-off, not bookkeeping: the
+// validation agent finds its work with `gh issue list --milestone`, which
+// resolves by title and sees only OPEN milestones, so a dev run that closed the
+// milestone over the task it had just minted would leave that task undiscoverable
+// by the only agent meant to work it.
 func TestDevRun_MintsTheValidationTaskAtDeployedGreen(t *testing.T) {
 	h := newHarness(t)
 	h.milestoneIs(workable(1, 1), MilestoneSnapshot{})
@@ -1033,7 +1040,8 @@ func TestDevRun_MintsTheValidationTaskAtDeployedGreen(t *testing.T) {
 	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
 	require.Equal(t, []string{delivery.CycleKindCoding}, h.dispatchKinds(),
 		"a dev run never dispatches a validation cycle")
-	require.Equal(t, 1, h.closed, "a delivered increment closes its milestone")
+	require.Equal(t, 0, h.closed,
+		"the version is deployed and UNJUDGED — closing its milestone hides the validation task from the agent that must work it")
 	require.Empty(t, res.ValidationVerdict,
 		"an empty verdict is 'awaiting judgement'; the validation run records the answer")
 	h.env.AssertNotCalled(t, "ReadValidationVerdict", mock.Anything, mock.Anything)
@@ -1044,6 +1052,11 @@ func TestDevRun_MintsTheValidationTaskAtDeployedGreen(t *testing.T) {
 // A project with no acceptance oracle gets no validation task, so nothing will
 // ever judge that version — and an empty verdict would read as "any moment now"
 // forever. `skipped` says what is true, and it belongs to no cycle.
+//
+// This is also the ONE dev ending that closes the milestone, and for the reason
+// the hand-off case does not: with no task filed, nothing is coming. Leaving the
+// milestone open would strand the version between "unfinished" and "unjudged"
+// with nothing able to move it either way.
 func TestDevRun_NoAcceptanceOracleRecordsSkipped(t *testing.T) {
 	h := newHarness(t)
 	h.milestoneIs(workable(1, 1), MilestoneSnapshot{})
@@ -1055,6 +1068,8 @@ func TestDevRun_NoAcceptanceOracleRecordsSkipped(t *testing.T) {
 
 	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
 	require.Equal(t, delivery.ValidationVerdictSkipped, res.ValidationVerdict)
+	require.Equal(t, 1, h.closed,
+		"nothing will ever judge this version, so the milestone has nothing left to wait for")
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	require.Len(t, h.verdictWrites, 1)
@@ -1088,11 +1103,11 @@ func TestTaskRun_JudgesNothingAndRecordsNoVerdict(t *testing.T) {
 // TestTaskRun_AVerdictSourcedFixReopensTheValidationTask is the edge that closes
 // the repair chain.
 //
-// Before it, a failed validation filed one bug per failed criterion, closed the
-// task and stopped: the bugs were fixed, built and deployed, and the version's
-// verdict stayed at the failure until a human clicked revalidate. Now the fix run
-// reopens the task, the reconcile sweep starts a validation run off that open
-// task, and the SAME oracle judges the repair.
+// Without it the chain is a dead end: a failed validation files one bug per
+// failed criterion and closes the task, so the bugs get fixed, built and deployed
+// while the version's verdict stands at the failure until a human clicks
+// revalidate. The fix run reopens the task, the reconcile sweep starts a
+// validation run off it, and the SAME oracle judges the repair.
 func TestTaskRun_AVerdictSourcedFixReopensTheValidationTask(t *testing.T) {
 	h := newHarness(t)
 	// One open bug carrying `src/validation` — a failed verdict's repair work —
@@ -1212,7 +1227,7 @@ func TestTaskRun_NeverPicksUpAFailedDevRunsPlannedWork(t *testing.T) {
 //
 // A failed run leaves its working set OPEN — the milestone stays open too,
 // because the way forward is more work in the same version — and the reconcile
-// sweep's trigger is "open work of this kind on a milestone with no live run". So
+// sweep's trigger is "open work of a species on a milestone with no live run". So
 // without the halt the run that just exhausted its deploy budget is replaced
 // within a tick by a fresh run with a fresh budget, on the same issues, forever.
 // The symptom is an unexplained cloud bill rather than a failing test.
@@ -1321,6 +1336,11 @@ func TestValidationRun_Passes(t *testing.T) {
 	require.Len(t, h.taskCloses, 1, "the platform closes the task it adopted")
 	require.Equal(t, 77, h.taskCloses[0].Issue)
 	require.Equal(t, delivery.ValidationVerdictPassed, h.taskCloses[0].Verdict)
+	// The GREEN ENDING is where the version's milestone closes — zero open
+	// working-set issues and a terminal verdict on the newest validation run. A
+	// succeeded validation run is a green ending by construction: every fatal
+	// verdict settles the run `failed`.
+	require.Equal(t, 1, h.closed, "a judged version is finished, so its milestone closes")
 }
 
 // TestValidationRun_FailedFilesOneIssuePerCriterion is the repair hand-off. The
@@ -1914,7 +1934,7 @@ func TestCancel_FromRunning(t *testing.T) {
 // ---- what a cancel COSTS, per species ---------------------------------------
 //
 // Closing the issues is what makes a cancel STICK. The reconcile sweep starts a
-// run for any open workable kind on a milestone with no live run, so a cancel that
+// run over a milestone's open WORK when no run is live on it, so a cancel that
 // only recorded itself would be undone within a tick — the cancel button would
 // stop the run and pay for its replacement a minute later. These three pin what
 // each species abandons, because the answer differs and the differences are the
@@ -2033,7 +2053,8 @@ func TestSettle_WithAStrayGateStillOpen(t *testing.T) {
 	res := h.result(t)
 
 	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
-	require.Equal(t, 1, h.closed)
+	require.Equal(t, 0, h.closed,
+		"a task run fixes one defect inside a version somebody else delivered — it finishes no version")
 }
 
 // ---- ground truth and liveness --------------------------------------------
@@ -2274,7 +2295,8 @@ func TestPlanningPhase_EmptyPlanSettlesDelivered(t *testing.T) {
 
 	h.assertSettled(t, res, delivery.RunStateSucceeded, "")
 	require.Equal(t, 0, h.dispatchCount())
-	require.Equal(t, 1, h.closed, "a delivered version closes its milestone")
+	require.Equal(t, 1, h.closed,
+		"a version nothing will ever judge — no task was filed — has nothing left to wait for")
 }
 
 // dedupeStates collapses repeated run-state writes so a test can assert the

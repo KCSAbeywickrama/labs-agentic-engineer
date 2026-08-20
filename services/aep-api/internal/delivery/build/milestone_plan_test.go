@@ -348,8 +348,12 @@ func TestSupersede_ClosesOpenWorkThenGatesThenTheMilestone(t *testing.T) {
 		{MilestoneNumber: 6, MilestoneTitle: "v2", Kind: delivery.RunKindDev, Origin: delivery.RunOriginSpecBuild, State: delivery.RunStateFailed},
 		{MilestoneNumber: 2, MilestoneTitle: "v1", Kind: delivery.RunKindTask, Origin: delivery.RunOriginIncidentAdoption, State: delivery.RunStateSucceeded},
 	}
+	// Planned work states its KIND, which is what makes it closeable here: an
+	// armed issue carrying no kind is read as a DEFECT by the working set and by
+	// supersede alike (delivery.WorkKindOf), so it would be carried forward
+	// instead — see TestSupersede_CarriesOpenBugsForwardAndClosesThePlan.
 	h.stub.OnFunc(http.MethodGet, "/repos/acme/widgets/issues", jsonPage(`[
-		{"number":31,"title":"Implement orders","state":"open","labels":[{"name":"aep"}]},
+		{"number":31,"title":"Implement orders","state":"open","labels":[{"name":"aep"},{"name":"development"}]},
 		{"number":32,"title":"Provision orders-db","state":"open","labels":[{"name":"provision"}]},
 		{"number":33,"title":"Flaky checkout","state":"open","labels":[]}
 	]`))
@@ -415,6 +419,13 @@ func TestSupersede_ClosesOpenWorkThenGatesThenTheMilestone(t *testing.T) {
 // Moving is not ARMING: the unadopted incident below arrives in the new milestone
 // still unarmed and still ledger-only, so carrying a human's defect forward can
 // never turn it into agent work nobody asked for.
+//
+// Issue #47 is the case that reads as a bug WITHOUT saying so: armed, no kind at
+// all. It is the common human hand-over — adoption stamps the arming switch and
+// deliberately no kind — and every working-set predicate in the loop works it as a
+// bug (delivery.WorkKindOf). So supersede must read the same kind they do, or the
+// next version cut silently CLOSES a defect somebody had adopted, with the issue's
+// own labels saying it was work.
 func TestSupersede_CarriesOpenBugsForwardAndClosesThePlan(t *testing.T) {
 	h := newPlanHarness(t)
 	h.runs.rows = []delivery.MilestoneRun{
@@ -426,9 +437,10 @@ func TestSupersede_CarriesOpenBugsForwardAndClosesThePlan(t *testing.T) {
 		{"number":43,"title":"Rebase aep/m6-1","state":"open","labels":[{"name":"aep"},{"name":"conflict"}]},
 		{"number":44,"title":"Provision orders-db","state":"open","labels":[{"name":"provision"}]},
 		{"number":45,"title":"Main went red","state":"open","labels":[{"name":"bug"},{"name":"src/incident"}]},
-		{"number":46,"title":"Fix checkout","state":"open","labels":[{"name":"aep"},{"name":"bug"},{"name":"aep:halted"}]}
+		{"number":46,"title":"Fix checkout","state":"open","labels":[{"name":"aep"},{"name":"bug"},{"name":"aep:halted"}]},
+		{"number":47,"title":"Checkout drops the cart","state":"open","labels":[{"name":"aep"}]}
 	]`))
-	for _, n := range []int{41, 42, 43, 44, 45, 46} {
+	for _, n := range []int{41, 42, 43, 44, 45, 46, 47} {
 		h.stub.On(http.MethodPost, fmt.Sprintf("/repos/acme/widgets/issues/%d/comments", n), http.StatusCreated, `{}`)
 		h.stub.On(http.MethodPatch, fmt.Sprintf("/repos/acme/widgets/issues/%d", n), http.StatusOK, `{}`)
 	}
@@ -443,7 +455,7 @@ func TestSupersede_CarriesOpenBugsForwardAndClosesThePlan(t *testing.T) {
 
 	// The bugs — armed or not, halted or not — are MOVED into v4's milestone, and
 	// never closed.
-	for _, n := range []int{42, 45, 46} {
+	for _, n := range []int{42, 45, 46, 47} {
 		writes := requestsTo(h.stub, http.MethodPatch, fmt.Sprintf("/repos/acme/widgets/issues/%d", n))
 		if len(writes) != 1 {
 			t.Fatalf("issue %d: %d PATCHes, want exactly the move", n, len(writes))

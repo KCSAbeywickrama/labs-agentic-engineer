@@ -400,15 +400,17 @@ func (l *loop) work(ctx workflow.Context, ends bookends) (RunResult, error) {
 // against what a run LANDED. This one landed nothing, so there is nothing to
 // judge and `skipped` is the honest verdict. It is also the right answer for a
 // re-build of a version whose Tasks all already exist and are closed, where
-// planning legitimately mints nothing.
+// planning legitimately mints nothing. With no task filed, nothing will ever
+// judge this version — which is exactly the dev ending that DOES close the
+// milestone (delivery.SettleClosesTheMilestone).
 //
 // Case 2 is why case 1 is gated on plansItsOwnMilestone rather than on the cycle
 // count alone. A task run fires on a label write, and GitHub's issue index lags a
 // write (see validation_issues.go, which records a read-back that answered "no
 // validation issue" for one this platform had just filed); a run that polled
 // before the labelled issue was indexed would read an empty working set with no
-// cycles behind it, settle SUCCEEDED, and close the milestone over work nothing
-// had dispatched.
+// cycles behind it, settle SUCCEEDED, and — filing no validation task on the way
+// — close the milestone over work nothing had dispatched.
 //
 // It returns settled=false only for that park, after which the boundary is
 // re-entered.
@@ -501,28 +503,36 @@ func (l *loop) runCycle(ctx workflow.Context, kind string, anchorIssue int) (cyc
 // the milestone's issues — because each says something different about whether
 // the work is still somebody's.
 //
-//	succeeded  the milestone is CLOSED. Display only; nothing branches on it.
+//	succeeded  the work is done. Whether the VERSION is finished with it is a
+//	           separate question, and delivery.SettleClosesTheMilestone answers it.
 //	failed     the work stays OPEN and is HALTED, because the way forward from a
 //	           failed increment is more work in the same version.
 //	cancelled  the in-flight work is CLOSED and stamped `aep:cancelled`, and a
 //	           DEV run's milestone is closed with it: the increment is abandoned.
 //	blocked    nothing. A quota block is a wait somebody else clears.
 //
-// Both issue consequences run BEFORE the row is settled. That order is what makes
-// them mandatory rather than best-effort at the loop's level: a write that fails
-// stalls under Temporal's retries with the run still non-terminal, where settling
-// first and then writing would leave a terminal row whose issues never got the
-// treatment — and nothing afterwards would notice.
+// The MILESTONE close is decided in delivery, not here, and deliberately: this
+// function is shared by all three workflows, so a plain `state == succeeded`
+// closed the milestone at a dev run's hand-off — over the validation task it had
+// just minted, which the validation agent then could not find (it discovers its
+// work through `gh issue list --milestone`, which resolves by title and sees only
+// OPEN milestones). One predicate, reading the run's KIND and whether a verdict
+// is still owed, is what keeps that rule impossible to state differently in three
+// places.
+//
+// The ISSUE consequences run BEFORE the row is settled, and before the milestone
+// close. That order is what makes them mandatory rather than best-effort at the
+// loop's level: a write that fails stalls under Temporal's retries with the run
+// still non-terminal, where settling first and then writing would leave a
+// terminal row whose issues never got the treatment — and nothing afterwards
+// would notice. The container closes last for the same reason supersede closes it
+// last: a milestone closing before the work inside it reads as a resolution
+// rather than an abandonment.
 func (l *loop) settle(ctx workflow.Context, state, reason string) (RunResult, error) {
 	l.st.Phase = delivery.RunPhaseSettling
 	// Cancel stops the agent at the HTTP surface (runread.CycleReaper →
 	// DeleteComponent), not here: a Temporal-durable stop was tried on main and
 	// dropped in favour of that best-effort reap.
-	if state == delivery.RunStateSucceeded {
-		if err := l.closeMilestone(ctx); err != nil {
-			return l.result(), err
-		}
-	}
 	if state == delivery.RunStateFailed {
 		if err := l.haltUnfinishedWork(ctx, reason); err != nil {
 			return l.result(), err
@@ -532,13 +542,14 @@ func (l *loop) settle(ctx workflow.Context, state, reason string) (RunResult, er
 		if err := l.closeCancelledWork(ctx); err != nil {
 			return l.result(), err
 		}
-		// The ISSUES first, then the container — the same order supersede uses, and
-		// for the same reason: a milestone closing before the work inside it reads
-		// as a resolution rather than an abandonment.
-		if delivery.CancelClosesTheMilestone(l.kind()) {
-			if err := l.closeMilestone(ctx); err != nil {
-				return l.result(), err
-			}
+	}
+	// A validation task standing open over this version is what says the version
+	// is deployed and UNJUDGED. A dev run reaches this having just filed one; a
+	// task run that reopened one has too.
+	awaitingVerdict := l.st.ValidationIssue != 0
+	if delivery.SettleClosesTheMilestone(l.kind(), state, awaitingVerdict) {
+		if err := l.closeMilestone(ctx); err != nil {
+			return l.result(), err
 		}
 	}
 	if err := l.settleRun(ctx, state, reason); err != nil {
@@ -719,7 +730,7 @@ func (l *loop) closeMilestone(ctx workflow.Context) error {
 // It runs on every FAILED settle, in every workflow, and it is what makes a
 // budget mean anything at all. A failed run leaves its working set OPEN — the
 // milestone stays open too, because the way forward is more work in the same
-// version — and the sweep's rule is "open work of this kind, no live run, start
+// version — and the sweep's rule is "open work of a species, no live run, start
 // one". So without this the run that just exhausted `fix-chain-budget` is
 // replaced within a tick by a fresh run with a fresh budget, on the same issues,
 // forever. Every budget in the system is defeated at once, and the symptom is an
@@ -735,7 +746,7 @@ func (l *loop) closeMilestone(ctx workflow.Context) error {
 // ending, and the repair issues a failed verdict files are deliberately somebody
 // else's work — an ordinary task run's — as is the conflict issue the event plane
 // mints for a validation pull request that will not rebase. Halting those would
-// break the repair chain this phase exists to close, so the activity is skipped
+// break the repair chain rather than protect a budget, so the activity is skipped
 // outright rather than called and asked to do nothing.
 //
 // Best-effort in spirit but NOT in error handling: an activity failure here
@@ -770,19 +781,23 @@ func (l *loop) haltUnfinishedWork(ctx workflow.Context, reason string) error {
 //
 // It is the halt's sibling and it defeats the same mechanism from the other
 // ending. A cancelled run leaves its issues OPEN, and the sweep's rule is "open
-// work of this kind, no live run, start one" — so without this the run the user
+// work of a species, no live run, start one" — so without this the run the user
 // just cancelled is restarted within a tick, dispatches an agent, and the cancel
 // button reads as having done nothing but cost money. Closing the issues is the
 // suppression; the label is the way back.
 //
 // WHAT it closes is per KIND (delivery.InCancelledWork), and the dev case is
 // deliberately wider than any working set: a cancelled BUILD abandons the whole
-// increment, so every open issue in the milestone goes — the working set, the
-// dispatch GATES, the version's validation task and the ledger-only notes alike —
-// and the milestone is closed behind it. That is the asymmetry with the halt: a
-// halted run may be retried in the same version, so its gates still name
-// dependencies somebody has to resolve, and closing them would erase the record
-// of what the version was waiting on.
+// increment, so the dispatch GATES go with the working set and the milestone is
+// closed behind them. That is the asymmetry with the halt: a halted run may be
+// retried in the same version, so its gates still name dependencies somebody has
+// to resolve, and closing them would erase the record of what the version was
+// waiting on.
+//
+// Two populations survive even a build's cancel. The version's VALIDATION TASK,
+// because it is a handle on software still deployed. And the LEDGER — a human's
+// unarmed note is not the platform's to close, and closing it would put a machine
+// comment on somebody's own record.
 //
 // A task run's cancel reaches only the bugs and conflicts it was working. The
 // version it works is the DEPLOYED one and is not being abandoned, so its plan,

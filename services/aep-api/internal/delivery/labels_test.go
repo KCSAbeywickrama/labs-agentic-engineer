@@ -79,33 +79,56 @@ func TestKindOf(t *testing.T) {
 	}
 }
 
-func TestSourceOf(t *testing.T) {
+// TestWorkingSets pins what each loop may pick up. Every predicate is a POSITIVE
+// membership test on a kind, which is the whole point of the vocabulary: the old
+// model defined work by what it was NOT, and one mis-stated exclusion was enough
+// to empty a live milestone.
+// TestWorkKindOf pins the kind the PLATFORM works an issue as, which is KindOf
+// with one substitution and one guard.
+//
+// The substitution — armed, no kind, read as a BUG — is the common human
+// hand-over rather than an edge case: adoption stamps the arming switch and
+// deliberately no kind. The guard is the arming switch itself, which is what
+// makes this readable outside a working-set predicate: an UNARMED kindless issue
+// is a ledger note and has no kind at all.
+//
+// Both halves are load-bearing at the same call site. Supersede decides which of
+// a superseded version's issues are carried forward, and it must read the same
+// kind the working set does — reading plain KindOf closed every human-adopted
+// defect the moment the next version was cut, while defaulting a ledger note to
+// `bug` would carry a human's note into a version it was never about.
+func TestWorkKindOf(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name   string
 		labels []string
 		want   string
 	}{
-		{"a red build", bug, SrcBuild},
-		{"a failed deploy", []string{LabelAgentWork, KindBug, SrcDeploy}, SrcDeploy},
-		{"a failed criterion", []string{LabelAgentWork, KindBug, SrcValidation}, SrcValidation},
-		{"a red main", incident, SrcIncident},
-		// The default is not a guess: every platform minter stamps its own source,
-		// so a bug that arrived without one came from a human.
-		{"an unsourced bug is a human's", []string{LabelAgentWork, KindBug}, SrcUser},
-		{"an explicit user source", []string{LabelAgentWork, KindBug, SrcUser}, SrcUser},
+		{"planned work", planned, KindDevelopment},
+		{"a bug", bug, KindBug},
+		{"a conflict", conflict, KindConflict},
+		{"the validation task", valid, KindValidation},
+		{"a gate", gate, KindProvision},
+		// The substitution.
+		{"armed but unclassified is a defect", armed, KindBug},
+		// The guard: unarmed is not the platform's, whatever else it carries.
+		{"a bare ledger note has no kind", ledger, ""},
+		{"an unarmed incident keeps the kind it states", incident, KindBug},
 	}
 	for _, c := range cases {
-		if got := SourceOf(c.labels); got != c.want {
-			t.Errorf("SourceOf(%s) = %q, want %q", c.name, got, c.want)
+		if got := WorkKindOf(c.labels); got != c.want {
+			t.Errorf("WorkKindOf(%s) = %q, want %q", c.name, got, c.want)
+		}
+	}
+	// The property the working sets rest on: for anything ARMED, this and the
+	// predicates cannot disagree about whether an issue is work.
+	for _, labels := range [][]string{planned, bug, conflict, armed, repair, halted} {
+		if WorkKindOf(labels) == "" {
+			t.Errorf("armed work resolved to no kind at all (%v)", labels)
 		}
 	}
 }
 
-// TestWorkingSets pins what each loop may pick up. Every predicate is a POSITIVE
-// membership test on a kind, which is the whole point of the vocabulary: the old
-// model defined work by what it was NOT, and one mis-stated exclusion was enough
-// to empty a live milestone.
 func TestWorkingSets(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -202,7 +225,7 @@ func TestWorkingSetsAgreeWithTheHostCounts(t *testing.T) {
 		{armed, planned, bug},
 		{valid},
 		{gate, gate},
-		// The populations this phase added. A repair bug is an ORDINARY armed bug
+		// A repair bug is an ORDINARY armed bug
 		// in both working sets — its source is provenance, counted on its own
 		// alias and subtracted from nothing — and a halted issue is still in the
 		// working set of a live run, because the mark is the reconcile sweep's to
@@ -266,7 +289,7 @@ func TestInWorkingSet(t *testing.T) {
 	}{
 		{"a build works planned work", RunKindDev, planned, true},
 		{"a build works its bugs", RunKindDev, bug, true},
-		// The narrowing this phase turned on. A dev run that gave up leaves planned
+		// The narrowing that makes the two sets different. A dev run that gave up leaves planned
 		// work open; a bug-fix run works the DEPLOYED version and must never
 		// continue it with different budgets.
 		{"a bug-fix run never works planned work", RunKindTask, planned, false},
@@ -295,8 +318,11 @@ func TestInWorkingSet(t *testing.T) {
 // making" — so the gates survive, because a retry still needs its dependencies
 // resolved and closing them would erase the record of what the version was waiting
 // on. A cancel says "this increment is abandoned" — so a BUILD's cancel takes the
-// gates, the validation task and the human's ledger note with the working set, and
-// the milestone closes behind them.
+// gates as well as the working set, and the milestone closes behind them.
+//
+// Two populations survive a build's cancel, and each is a POSITIVE statement
+// rather than an oversight: the version's validation task (a handle on software
+// still deployed) and the LEDGER (never the platform's to touch).
 func TestInCancelledWork(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -313,9 +339,19 @@ func TestInCancelledWork(t *testing.T) {
 		// that is already DEPLOYED — cancel reverts nothing — so closing it would
 		// discard a pending judgement of what is still running.
 		{"a cancelled build leaves the version's validation task open", RunKindDev, valid, false},
-		// The difference from a halt, which leaves both of these alone.
+		// The difference from a halt, which leaves these alone: a halted run may be
+		// retried in the same version, so its gates still name dependencies
+		// somebody must resolve.
 		{"a cancelled build closes the dispatch gates too", RunKindDev, gate, true},
-		{"a cancelled build closes the ledger notes too", RunKindDev, ledger, true},
+		// An armed issue carrying no kind is the human hand-over, and it is in
+		// flight like any other defect.
+		{"a cancelled build closes an armed unclassified issue", RunKindDev, armed, true},
+		// The LEDGER is never touched, by any cancel. Not armed, so not the
+		// platform's: closing a human's note would put a machine comment on
+		// somebody's own record, and the suppression never needed it — the sweep
+		// skips a cancelled increment whole, and a note is not work to it anyway.
+		{"a cancelled build leaves the ledger alone", RunKindDev, ledger, false},
+		{"a cancelled build leaves an unarmed incident note alone", RunKindDev, incident, false},
 		// A bug-fix run works the DEPLOYED version, which is not being withdrawn:
 		// its plan, its gates and its verdict handle are untouched.
 		{"a cancelled bug-fix run closes its bugs", RunKindTask, bug, true},

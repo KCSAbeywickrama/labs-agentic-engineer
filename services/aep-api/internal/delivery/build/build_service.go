@@ -17,11 +17,11 @@
 // Package build is the public build surface (contract: build-project /
 // list-project-builds / get-build-preflight). POST validates the whole spec,
 // cuts the single `v<N>` version tag, claims the version (supersede the
-// previous milestone, mint this one, admit the run row that is the spec-run
-// mutex) and returns the tag, then plans the version's Tasks into its milestone
-// detached from the request — the one button that turns an approved spec into a
-// delivery increment. The list read is the version ledger, straight from the
-// run rows.
+// previous milestone, mint this one, admit the run row that is the build
+// mutex) and returns the tag — the one button that turns an approved spec into a
+// delivery increment. Filling the milestone (gates, then the planning turn) is
+// the run workflow's own first phase, not the click's. The list read is the
+// version ledger, straight from the run rows.
 package build
 
 import (
@@ -333,7 +333,7 @@ func (s *Service) Run(ctx context.Context, orgID, projectID string, inputs []Bui
 		// must not hold a request open — and paid for it with a step that could
 		// not survive a restart, could not retry a blip, and left no history.
 		//
-		// A start that did not happen is settled HERE. The row is the spec-run
+		// A start that did not happen is settled HERE. The row is the build
 		// mutex; leaving it non-terminal with no workflow behind it would refuse
 		// every later build on this project, and nothing would ever heal it (the
 		// reconcile sweep reads such a row as live).

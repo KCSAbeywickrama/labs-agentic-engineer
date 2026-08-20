@@ -314,6 +314,24 @@ func (f *fakeIssues) withValidationIssue(milestone, number int) *fakeIssues {
 	return f
 }
 
+// withDefects puts open armed BUG issues in a milestone — the population a task
+// run works, and therefore the one the reconcile sweep's trigger routes on.
+//
+// It exists beside withWork because the two are different populations and the
+// difference decides whether anything starts at all: `development` is planned
+// work, dev-workflow's alone, and a sweep that offered a task run for it started
+// a paid agent on a working set that excludes it.
+func (f *fakeIssues) withDefects(milestone int, numbers ...int) *fakeIssues {
+	for _, n := range numbers {
+		f.byMilestone[milestone] = append(f.byMilestone[milestone], sourcecontrol.IssueInfo{
+			Number: n, State: "open",
+			Labels: []string{delivery.LabelAgentWork, delivery.KindBug, delivery.SrcUser},
+		})
+	}
+	f.counts[milestone] = hostCountsOf(f.byMilestone[milestone])
+	return f
+}
+
 // withCounts gives a milestone its open-issue populations: gates, working set
 // (armed planned work) and grand total. work and total are stated separately on
 // purpose — the gap between them is the ledger, the population the dispatch
@@ -487,6 +505,19 @@ func (f *fakeIssues) withIssue(milestone, number int, labels ...string) *fakeIss
 	}
 	f.counts[milestone] = hostCounts(sets...)
 	return f
+}
+
+// hostCountsOf re-derives a milestone's counts from the OPEN issues now in it,
+// the way the host counts them.
+func hostCountsOf(issues []sourcecontrol.IssueInfo) *sourcecontrol.MilestoneIssueCounts {
+	sets := make([][]string, 0, len(issues))
+	for _, issue := range issues {
+		if !strings.EqualFold(issue.State, "open") {
+			continue
+		}
+		sets = append(sets, issue.Labels)
+	}
+	return hostCounts(sets...)
 }
 
 // withClosedIssue puts one CLOSED issue in the milestone. Counts are re-derived

@@ -47,7 +47,8 @@
 //
 //	dev   work:    DevWork  — armed, kind ∈ development/bug/conflict
 //	      before:  provisionGates → planTasks (it owns the version it is filling)
-//	      onEmpty: mint the version's validation task → settle succeeded
+//	      onEmpty: mint the version's validation task → settle succeeded, and
+//	               LEAVE THE MILESTONE OPEN: the version is deployed and unjudged
 //	task  work:    TaskWork — armed, kind ∈ bug/conflict, NEVER development
 //	      before:  nothing (the milestone was filled by the build that shipped it)
 //	      onEmpty: reopen the validation task IFF it worked a `src/validation`
@@ -86,27 +87,56 @@
 //
 // Without it every budget in the platform is defeated: a failed run leaves its
 // working set OPEN (the milestone stays open, because the way forward is more work
-// in the same version), and the sweep's trigger is "open work of this kind, no
+// in the same version), and the sweep's trigger is "open work of a species, no
 // live run, start one" — so the run that just gave up is replaced within a tick by
 // a fresh one with fresh budgets, forever. The mark is cleared by a rebuild or by
 // a person removing the label. A VALIDATION run halts nothing: its own work is the
 // task it closes on every ending, and the repair and conflict issues it leaves
 // behind are deliberately a task run's work.
 //
+// # A milestone closes on a GREEN ENDING, not on a settle
+//
+// Every terminal state is a statement about the RUN. Only some of them are a
+// statement about the VERSION, and delivery.SettleClosesTheMilestone is the one
+// place that mapping lives:
+//
+//	dev succeeded         the milestone STAYS OPEN. The version is deployed and
+//	                      unjudged, and the validation task the run just filed is
+//	                      what will judge it. The exception is a run that filed
+//	                      none — no acceptance oracle, or a plan that minted
+//	                      nothing — where nothing is coming and the milestone has
+//	                      nothing left to wait for.
+//	validation succeeded  the milestone CLOSES. The version has its verdict, and a
+//	                      succeeded validation run is a green ending by
+//	                      construction: every fatal verdict settles it `failed`.
+//	task succeeded        never. A defect fixed inside a version somebody else
+//	                      delivered says nothing about that version.
+//	failed                never, of any kind: the way forward from a failed
+//	                      increment is more work in the same version.
+//	cancelled             a DEV run's, because that increment is abandoned.
+//	blocked               never. A quota block is a wait somebody else clears.
+//
+// Closing at the dev run's hand-off is not merely early, it BREAKS the hand-off:
+// the validation agent discovers its work with `gh issue list --milestone`, which
+// resolves the milestone by title and sees only OPEN ones, so the task would be
+// undiscoverable by the only agent meant to work it.
+//
 // # A cancelled run closes the work it had in flight
 //
 // The same mechanism, reached from the other ending. A CANCELLED settle comments
 // on, stamps `aep:cancelled` on and CLOSES the issues it abandons — because the
-// sweep's trigger is that same "open work of this kind, no live run, start one",
+// sweep's trigger is that same "open work of a species, no live run, start one",
 // so a cancel that only recorded itself would be undone within a tick: the button
 // would stop the run and pay for its replacement a minute later.
 //
 // What it abandons is per species, and the differences are the design:
 //
-//	dev         EVERY open issue in the milestone — working set, dispatch gates,
-//	            the validation task and the ledger notes alike — and the milestone
-//	            CLOSES. The increment is abandoned. (The halt leaves the gates
-//	            alone, because a failed run may be retried in the same version.)
+//	dev         everything the INCREMENT was carrying — the working set and the
+//	            dispatch gates — and the milestone CLOSES, because the increment is
+//	            abandoned. (The halt leaves the gates alone, because a failed run
+//	            may be retried in the same version.) NOT the version's validation
+//	            task, a handle on software still deployed, and NOT the LEDGER: a
+//	            human's unarmed note is never the platform's to close.
 //	task        its bugs and conflicts only; the milestone stays OPEN, because the
 //	            version it works is the DEPLOYED one and is not being withdrawn.
 //	validation  nothing here — its consequence is the task it ADOPTED, closed on
@@ -149,8 +179,8 @@
 // path diff yields no components and both later stages were already silent
 // no-ops for it. Skipping them outright is the honest form of that.
 //
-// It is started by the reconcile sweep, because an open `validation`-kind issue
-// exists, or by a human asking a shipped version's criteria again. The task is
+// It is started by the reconcile sweep, because an open ARMED `validation`-kind
+// issue exists, or by a human asking a shipped version's criteria again. The task is
 // closed on EVERY ending, verdict or not: the sweep's trigger IS that open issue,
 // so a run that gave up and left it open would be restarted within a tick,
 // forever, with nothing outside the workflow able to repair a dead dispatch.

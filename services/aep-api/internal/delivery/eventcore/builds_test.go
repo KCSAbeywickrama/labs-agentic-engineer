@@ -188,8 +188,9 @@ func TestBuildTerminal_RedMainOutsideARunMintsAnIncident(t *testing.T) {
 	if got := delivery.KindOf(h.issues.created[0].Labels); got != delivery.KindBug {
 		t.Fatalf("a red-main incident is a bug, got kind %q from %v", got, h.issues.created[0].Labels)
 	}
-	if got := delivery.SourceOf(h.issues.created[0].Labels); got != delivery.SrcIncident {
-		t.Fatalf("a red-main incident is sourced from an incident, got %q", got)
+	if !delivery.HasLabel(h.issues.created[0].Labels, delivery.SrcIncident) {
+		t.Fatalf("a red-main incident is sourced from an incident, got %v",
+			h.issues.created[0].Labels)
 	}
 	if got, want := h.issues.created[0].DedupeKey,
 		delivery.DedupeKeyRedMain("web", delivery.ShortSHA(ev.CommitSHA)); got != want {

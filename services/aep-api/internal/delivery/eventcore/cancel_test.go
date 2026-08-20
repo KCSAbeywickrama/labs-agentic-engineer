@@ -27,26 +27,34 @@ import (
 )
 
 // Closing the issues is what makes a cancel STICK — the sweep starts a run for
-// any open workable kind on a milestone with no live run — so what these tests
+// a milestone's open WORK when no run is live on it — so what these tests
 // pin is the REACH per run species, and the one property the rebuild depends on:
 // only what was open at cancel time is marked.
 
-// TestCloseCancelledWork_ADevCancelClosesTheWholeMilestone walks a cancelled
-// build's milestone as it really looks: planned work, a bug a cycle threw up, a
-// conflict, the version's validation task, an open dependency gate and a human's
-// ledger note.
+// TestCloseCancelledWork_ADevCancelClosesTheIncrement walks a cancelled build's
+// milestone as it really looks: planned work, a bug a cycle threw up, a conflict,
+// the version's validation task, an open dependency gate and a human's ledger
+// note.
 //
-// Almost all of it goes. A cancelled build abandons the INCREMENT, so nothing
-// left in the milestone is anybody's work any more — and the gates going is the
-// deliberate asymmetry with the halt, where the run may be retried in the same
-// version and its gates still name dependencies somebody must resolve.
+// Everything the INCREMENT was carrying goes. A cancelled build abandons it, so
+// none of that is anybody's work any more — and the gates going is the deliberate
+// asymmetry with the halt, where the run may be retried in the same version and
+// its gates still name dependencies somebody must resolve.
 //
-// The ONE exception is the version's validation task. Cancel reverts nothing:
-// commits a cycle merged stay on `main` and components it promoted keep serving,
-// so that task is a handle on software still running and closing it would discard
-// a pending judgement of it. Leaving it open is free — the sweep skips a
-// cancelled increment, and a later rebuild's dev run adopts it.
-func TestCloseCancelledWork_ADevCancelClosesTheWholeMilestone(t *testing.T) {
+// TWO populations survive, for two different reasons.
+//
+// The version's VALIDATION TASK, because cancel reverts nothing: commits a cycle
+// merged stay on `main` and components it promoted keep serving, so that task is a
+// handle on software still running and closing it would discard a pending
+// judgement of it. Leaving it open is free — the sweep skips a cancelled
+// increment, and a later rebuild's dev run adopts it.
+//
+// The human's LEDGER NOTE, because the ledger is the one population the platform
+// never touches. It is not armed, so it is not the platform's to close, and
+// closing it would put a machine comment on somebody's own record. Nor is it
+// needed for suppression: the sweep skips a cancelled increment whole, and an
+// unarmed note is not work to it in any case.
+func TestCloseCancelledWork_ADevCancelClosesTheIncrement(t *testing.T) {
 	h := newHarness(t)
 	h.issues.
 		withIssue(7, 21, delivery.LabelAgentWork, delivery.KindDevelopment).
@@ -60,12 +68,18 @@ func TestCloseCancelledWork_ADevCancelClosesTheWholeMilestone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CloseCancelledWork: %v", err)
 	}
-	want := []int{21, 22, 23, 60, 61}
+	want := []int{21, 22, 23, 60}
 	if !slices.Equal(closed, want) {
-		t.Fatalf("closed = %v, want %v — every open issue but the validation task, gates and ledger included", closed, want)
+		t.Fatalf("closed = %v, want %v — the working set and the gates, and nothing else", closed, want)
 	}
 	if slices.Contains(h.issues.closed, 55) {
 		t.Error("a cancelled build closed the version's validation task — it judges what is still deployed")
+	}
+	if slices.Contains(h.issues.closed, 61) {
+		t.Error("a cancelled build closed a human's ledger note — the ledger is never the platform's to touch")
+	}
+	if slices.Contains(h.issues.labelled, fmt.Sprintf("61+%s", delivery.LabelCancelled)) {
+		t.Error("a human's ledger note must not even be MARKED — it was never in flight")
 	}
 	for _, n := range want {
 		if !slices.Contains(h.issues.labelled, fmt.Sprintf("%d+%s", n, delivery.LabelCancelled)) {

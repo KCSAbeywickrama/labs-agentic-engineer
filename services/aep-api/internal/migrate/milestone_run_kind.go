@@ -68,9 +68,14 @@ func RunMilestoneRunKind(ctx context.Context, db *gorm.DB) error {
 	if !hasTable(db, "milestone_runs") {
 		return nil
 	}
-	// BACKFILL FIRST. The CASE mirrors delivery.RunKindForOrigin; an origin
-	// neither knows is left alone rather than guessed into 'dev', because 'dev'
-	// is the value that takes the project mutex.
+	// BACKFILL FIRST. The CASE mirrors delivery.RunKindForOrigin, and the ELSE
+	// preserves whatever the column already holds — which for a row older than
+	// the column is the AutoMigrate default, `dev` (see MilestoneRun.Kind, where
+	// that default exists only so the ADD COLUMN can be NOT NULL). So an origin
+	// this mapping does not know keeps `dev`, and that is sound rather than a
+	// guess: origin is a NOT NULL closed enum validated at admission, so no
+	// writer can produce one, and the only rows that could carry an unknown
+	// origin predate both columns — when `dev` was the only kind a run could be.
 	if err := db.WithContext(ctx).Exec(`
 		UPDATE milestone_runs
 		SET kind = CASE origin

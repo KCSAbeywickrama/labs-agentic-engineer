@@ -62,7 +62,8 @@ them.
 
 Independence costs nothing in routing because **the run ROW is the routing table.** The event plane
 already resolves a run row before it signals anything, and the row's `kind` gives both the workflow
-type and the workflow id's prefix (`delivery.RunKindOf` → `RunWorkflowName` / `MilestoneRunWorkflowID`).
+type and the workflow id's prefix (`delivery.RoutableRunKind` → `RunWorkflowName` /
+`MilestoneRunWorkflowID`).
 There is no lookup table to keep, and no parent to ask.
 
 ### The kind prefix on the workflow id is load-bearing
@@ -71,8 +72,13 @@ Ids are reused under `WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE`, because a miles
 runs of one kind across its life. Three species sharing one grammar would therefore claim the SAME id
 in turn — and a stale `pull_request` signal aimed at a settled dev run would be delivered to the
 validation run that claimed the id afterwards, which would then read the cycle facts of a merge that
-was never its own. The grammar is `<kind>-<org>-<project>-<milestone>`; a row with no kind reads as
-`dev`, which is the only kind a row could have carried before the column existed.
+was never its own. The grammar is `<kind>-<org>-<project>-<milestone>`; a row whose kind is empty is
+addressed by the kind its ORIGIN implies, which is the only history that can produce one, and `dev` is
+what a row carried before the column existed. A row that is neither — a valid kind, nor an empty kind
+beside a known origin — is REFUSED by the start and by the signal alike, because its only available
+reading is `dev`: the kind that takes the build mutex and plans a version, so guessing it starts a build
+nobody asked for. Refusing to signal such a row loses nothing, since the same predicate means no
+execution was ever started for it.
 
 `AbandonRun` (project delete) consequently terminates **all three** ids. There is no row left to ask
 which ever existed — the rows are purged in the same teardown — so a kind missed there leaves a
@@ -156,16 +162,22 @@ claim work that is still open.
 
 ### The sweep becomes the trigger router, and reads issues
 
-For each known milestone with no live run: an open `validation`-kind issue starts a validation run;
-otherwise open work starts a run as before. It reads the milestone's OPEN ISSUES (REST, no label
-filter) and decides in Go, because routing by kind is an intersection GraphQL's union-valued `labels:`
-argument cannot count — the same shape, and the same reason, as the auto-merge policy. One REST call
+For each known milestone with no live run it routes on the TRIGGER PREDICATES themselves: an open armed
+`validation`-kind issue starts a validation run, open task working-set work (`aep` + `bug`/`conflict`)
+starts a task run, and anything else starts NOTHING. "Anything else" is a real population — a ledger
+note, a `provision` gate, planned work a build gave up on — and offering a run for it dispatches an agent
+whose working set is empty by construction, which parks and is re-offered every pass. A gate holds the
+next DISPATCH, so with nothing behind it there is nothing to hold; `development` is dev-workflow's alone,
+and only the build click may start a dev run because it carries the version mutex and the tag. It reads
+the milestone's OPEN ISSUES (REST, no label filter) and decides in Go, because routing by kind is an
+intersection GraphQL's union-valued `labels:` argument cannot count — the same shape, and the same
+reason, as the auto-merge policy. One REST call
 per known milestone per pass replaces one GraphQL call; the cycle-boundary poll keeps its counts,
 because that read runs at every boundary and is the loop's hottest.
 
 ### A failed run must halt its own leftovers
 
-The sweep's trigger is "open work of this kind on a milestone with no live run", and a run that exhausts a
+The sweep's trigger is "open work of a species on a milestone with no live run", and a run that exhausts a
 budget settles `failed` leaving that work OPEN — the milestone stays open too, because the way forward from
 a failed increment is more work in the same version. The sweep cannot tell "given up on" from "not
 started", so it would start a fresh run with a fresh budget on the same issues, within a tick, forever.
@@ -194,8 +206,8 @@ Cancel is durable first and a signal second (the run row's `cancel_requested_at`
 signal is only the wake-up). What the split adds is what a cancel COSTS, and it is decided by kind for
 the same reason the working set is.
 
-**Closing the issues is the cancel, not bookkeeping for it.** The sweep starts a run for any open
-workable kind on a milestone with no live run, so a cancel that merely recorded itself would be undone
+**Closing the issues is the cancel, not bookkeeping for it.** The sweep starts a run over a milestone's
+open WORK when no run is live on it, so a cancel that merely recorded itself would be undone
 within a tick — the button would stop the run and then pay for its replacement a minute later. So a
 cancelled settle comments, stamps `aep:cancelled` and CLOSES, through the event plane's
 `CloseCancelledWork`: the same shape as the halt, reached from the other ending, so the supervisor still
@@ -203,7 +215,7 @@ writes no issue of its own.
 
 | cancelling | closes | milestone | way forward |
 |---|---|---|---|
-| dev (a build) | every open issue in the milestone — working set AND gates AND ledger notes, but NOT the version's validation task | CLOSED | edit the spec, or build again |
+| dev (a build) | everything the increment carried — working set AND gates — but NOT the version's validation task (a handle on software still deployed) and NOT the ledger (never the platform's to touch) | CLOSED | edit the spec, or build again |
 | task (a bug fix) | the `bug` and `conflict` issues it was working | left OPEN | reopen the bugs, or file new ones |
 | validation | the task it ADOPTED (already done on every ending) | left OPEN | trigger validation again |
 
@@ -214,6 +226,24 @@ cancelled build will not be retried in that increment at all.
 
 **Nothing is reverted.** Merged commits stay on `main` and components a cycle already promoted keep
 serving. Closing the milestone is a statement about the INCREMENT, never about what is deployed.
+
+### The milestone closes on a green ending
+
+One predicate for all three workflows (`delivery.SettleClosesTheMilestone`), because one `settle`
+function serves all three and "succeeded closes it" is wrong for two of them.
+
+| settling | milestone | why |
+|---|---|---|
+| dev, having filed the validation task | left OPEN | the version is deployed and UNJUDGED; the task it just filed is what judges it |
+| dev, having filed none | CLOSED | no oracle, or a plan that minted nothing — nothing is coming |
+| validation, succeeded | CLOSED | the version has its verdict, and every fatal verdict settles the run `failed` instead |
+| task, succeeded | left OPEN | a defect fixed inside somebody else's version says nothing about that version |
+| any kind, failed | left OPEN | the way forward is more work in the same version |
+| dev, cancelled | CLOSED | the increment is abandoned (see the cancel table above) |
+
+Closing at the dev run's HAND-OFF is not merely early — it breaks the hand-off. The validation agent
+discovers its work with `gh issue list --milestone`, which resolves the milestone by title and sees only
+OPEN milestones, so the task would be undiscoverable by the only agent meant to work it.
 
 **Only issues OPEN at cancel time are marked**, which is the whole reason the marker exists rather than
 "a rebuild reopens the milestone's issues". Work a cycle genuinely finished is already closed and stays
@@ -261,8 +291,7 @@ cancel the validation, which is one click.
   routes anything. `src/incident` and `src/user` leave the standing verdict alone: an incident is not priced
   like a release, and a verdict is a statement about a VERSION rather than a commit.
 - **The cancel button is honest at every tick, not just the first.** A cancelled increment's issues are
-  closed and its milestone is skipped, so nothing restarts it — where before the split the sweep's own
-  trigger would have.
+  closed and its milestone is skipped whole, so no later pass restarts what the button stopped.
 - **Terminal reasons stay honest per species.** `redispatch-budget` on a dev run means the delivery
   agent died; on a validation run it means the judge did, and the version is still delivered. The list
   of reasons is unchanged — the split needed no new failure class.

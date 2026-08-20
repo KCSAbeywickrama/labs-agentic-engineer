@@ -113,9 +113,10 @@ being classified is not being handed to you. A human adopts it by adding `aep`,
 and it joins the working set on your next re-list.
 
 > ⚠ `--milestone` resolves **by title** and only sees **OPEN** milestones, so once
-> the platform closes it at settle `gh` fails with "no milestone found". That
-> means the milestone is finished: treat the working set as empty and go to
-> Finish — never fall back to the search API, never guess issue numbers.
+> the platform closes it `gh` fails with "no milestone found". That means the
+> version is finished — it closes on a green ending, never while work or a verdict
+> is still owed: treat the working set as empty and go to Finish. Never fall back
+> to the search API, never guess issue numbers.
 
 **The bodies.** Fetch your whole working set's bodies up front with
 `gh issue view <number> --json number,title,body,labels` — you need them to plan

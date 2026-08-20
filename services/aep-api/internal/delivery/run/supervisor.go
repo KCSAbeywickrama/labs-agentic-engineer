@@ -107,16 +107,20 @@ func (s *Supervisor) StartRun(ctx context.Context, req delivery.StartRunRequest)
 	// The ROW is the routing table: its kind selects both the workflow type and
 	// the id prefix, so the three species cannot be confused for one another by
 	// anything that later signals or cancels this run.
-	kind := delivery.RunKindOf(row.Kind, row.Origin)
-	workflowType := delivery.RunWorkflowName(kind)
-	if workflowType == "" {
-		// An unroutable row is refused rather than guessed at: silently starting a
-		// dev workflow over it would take the project's build mutex on behalf of a
-		// run nobody asked for.
+	//
+	// An unroutable row is REFUSED rather than guessed at, and the guard is real
+	// rather than defensive: a row is routable only when its kind is valid, or its
+	// kind is empty and its origin implies one (see delivery.RoutableRunKind).
+	// Anything else — garbage in both — would have to be read as `dev`, and
+	// starting a dev workflow over it would take the project's build mutex on
+	// behalf of a run nobody asked for, then hold every later build behind it.
+	kind, routable := delivery.RoutableRunKind(row.Kind, row.Origin)
+	if !routable {
 		slog.ErrorContext(ctx, "run: run row has no routable kind — not started",
 			"run", row.ID, "kind", row.Kind, "origin", row.Origin)
 		return delivery.ErrRunNotStarted
 	}
+	workflowType := delivery.RunWorkflowName(kind)
 	_, err = c.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
 		ID:        delivery.MilestoneRunWorkflowID(kind, row.OrgID, row.ProjectID, row.MilestoneNumber),
 		TaskQueue: s.rt.TaskQueue(),
@@ -346,13 +350,27 @@ const abandonReason = "the project was deleted — its run rows are purged and i
 // kinds would let a merge signal aimed at a settled dev run land on the
 // validation run that claimed the same id afterwards — and that run would read
 // the cycle facts of a merge that was never its own.
+//
+// A row that is not routable is not signalled AT ALL, and that is exactly right
+// rather than a gap: StartRun refuses the same rows on the same predicate, so an
+// unroutable row has no execution under any id — there is nothing to wake. Naming
+// an id anyway would mean guessing a species, and the guess would deliver this
+// row's signal to whichever OTHER run holds that id on the milestone. Cancel
+// rides this path too and loses nothing: the request is already durable on the
+// row, so a run that does exist honours it at its next boundary either way.
 func (s *Supervisor) signal(ctx context.Context, row *delivery.MilestoneRun, name string, payload delivery.RunSignal) error {
 	c, err := s.rt.Client()
 	if err != nil {
 		return nil
 	}
+	kind, routable := delivery.RoutableRunKind(row.Kind, row.Origin)
+	if !routable {
+		slog.ErrorContext(ctx, "run: run row has no routable kind — not signalled",
+			"run", row.ID, "kind", row.Kind, "origin", row.Origin, "signal", name)
+		return nil
+	}
 	workflowID := delivery.MilestoneRunWorkflowID(
-		delivery.RunKindOf(row.Kind, row.Origin), row.OrgID, row.ProjectID, row.MilestoneNumber)
+		kind, row.OrgID, row.ProjectID, row.MilestoneNumber)
 	ctx, cancel := context.WithTimeout(ctx, signalTimeout)
 	defer cancel()
 	if serr := c.SignalWorkflow(ctx, workflowID, "", name, payload); serr != nil {

@@ -214,7 +214,10 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   the validation task and any ledger-only note. `conflict` is CLOSED too, not carried: it names a branch of
   the version being superseded, which is about to be irrelevant. But every open `bug` is MOVED into the new
   milestone, because a defect is not superseded by anything — it is still broken, and the new version is
-  what will ship the fix. Moving is not ARMING: an unadopted incident arrives still unarmed and still
+  what will ship the fix. "Bug" here is `delivery.WorkKindOf`, the same reader the WORKING SETS use, which
+  reads an ARMED issue carrying no kind as a defect: that is the common human hand-over (adoption stamps
+  the arming switch and deliberately no kind), so reading plain `KindOf` instead silently closed every
+  adopted defect the moment the next version was cut. Moving is not ARMING: an unadopted incident arrives still unarmed and still
   ledger-only. The new milestone is therefore minted BEFORE the supersede runs, since the move needs a
   destination; the guard that a milestone never supersedes ITSELF is a comparison of platform-recorded
   titles and holds whatever the order. The previous milestone is located by the NUMBER recorded on a run
@@ -291,14 +294,25 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   a stale merge signal aimed at a settled dev run would be delivered to the validation run that claimed
   it afterwards, which would act on a merge that was never its own. The event plane already resolves a
   run row before it signals anything, and the row's kind gives both the prefix and the workflow type
-  (`RunKindOf` → `RunWorkflowName` / `MilestoneRunWorkflowID`), so independence costs no lookup table.
+  (`RoutableRunKind` → `RunWorkflowName` / `MilestoneRunWorkflowID`), so independence costs no lookup
+  table. A row is routable when its kind is VALID, or when its kind is empty and its origin implies one —
+  the pre-column case. Anything else is refused, by the start and by the signal alike: the only reading
+  available to a corrupt row is `dev`, and that is the kind which takes the build mutex and plans a
+  version, so guessing it would start a build nobody asked for and hold every later one behind it. A row
+  the start refuses has no execution under any id, which is why refusing to signal it loses nothing.
   `AbandonRun` (project delete) therefore terminates ALL THREE ids: the rows are purged in the same
   teardown, so there is nothing left to ask which ever existed, and a kind missed leaves a supervisor
   retrying forever against a repository that is gone.
 - **The reconcile sweep is the TRIGGER ROUTER, it reads ISSUES, and it skips HALTED work and CANCELLED
   increments.** For a known milestone with no live run: a milestone whose NEWEST run settled `cancelled`
-  is skipped whole, before its issues are even fetched; otherwise an open `validation`-kind issue starts
-  a validation run and any other open work starts an ordinary one — and an issue carrying `aep:halted` is
+  is skipped whole, before its issues are even fetched; otherwise it routes on the TRIGGER PREDICATES
+  themselves — an open armed `validation`-kind issue starts a validation run, open task working-set work
+  (`aep` + `bug`/`conflict`) starts a task run, and anything else starts NOTHING. That last clause is a
+  real population and the reason the routing is not "something is open": a milestone holding only a
+  ledger note, only a `provision` gate, or only planned work a build gave up on would otherwise start a
+  paid agent run whose working set is empty by construction, which parks and is re-offered every pass. A
+  gate holds the next DISPATCH, so with no work behind it there is nothing to hold; `development` is
+  dev-workflow's alone and only the build click may start a dev run. An issue carrying `aep:halted` is
   dropped before either decision, so a milestone holding nothing but halted work is quiet. The cancelled
   skip is a decision about the MILESTONE rather than about its issues, and that is forced: a closed
   milestone still accepts issues, so one reopened or freshly filed inside an abandoned increment carries
@@ -399,14 +413,26 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   owns the detection story and the prose, and — like every other minter in the domain — writes it through
   the root's `IssueWriter`, which is what keeps every issue this platform files under one dedupe
   convention and one label vocabulary.
-- **Settle closes the milestone; nothing branches on that.** Milestone state is display only and closed
-  milestones still accept new issues. A FAILED increment leaves its milestone open, because the way
-  forward from it is more work in the same version; a CANCELLED one closes it when the run was a DEV
-  run, because that increment is abandoned outright. A stray gate never blocks settle: gates hold
-  dispatch, and with an empty working set they hold nothing. Each terminal state's issue consequence
-  (`closeMilestone` · `haltUnfinishedWork` · `closeCancelledWork`) runs BEFORE the row is settled, so a
-  write that fails stalls a non-terminal run under Temporal's retries rather than leaving a terminal row
-  whose issues nobody treated.
+- **A milestone closes on a GREEN ENDING, never merely on a settle** (`delivery.SettleClosesTheMilestone`,
+  one predicate for all three workflows). A **dev** run settling succeeded leaves it OPEN: the version is
+  deployed and UNJUDGED, and the validation task the run just filed is what will judge it — unless it
+  filed none (no acceptance oracle, or a plan that minted nothing), where nothing is coming and the
+  milestone has nothing left to wait for. A **validation** run settling succeeded CLOSES it: the version
+  has its verdict, and a succeeded validation run is a green ending by construction, since every fatal
+  verdict settles the run `failed`. A **task** run never closes one — a defect fixed inside a version
+  somebody else delivered says nothing about that version. FAILED never closes it, of any kind, because
+  the way forward from a failed increment is more work in the same version; CANCELLED closes it for a DEV
+  run alone, because that increment is abandoned outright; BLOCKED is a wait somebody else clears.
+  Closing at the dev run's HAND-OFF does not merely read wrong, it breaks the hand-off: the validation
+  agent finds its work with `gh issue list --milestone`, which resolves by title and sees only OPEN
+  milestones, so the task would be undiscoverable by the only agent meant to work it. (Otherwise
+  milestone state is display only, and closed milestones still accept new issues.)
+  A stray gate never blocks settle: gates hold dispatch, and with an empty working set they hold nothing.
+  Each terminal state's issue consequence (`haltUnfinishedWork` · `closeCancelledWork`) runs BEFORE the
+  row is settled and before the milestone close, so a write that fails stalls a non-terminal run under
+  Temporal's retries rather than leaving a terminal row whose issues nobody treated — and the container
+  closes last, for the reason supersede closes it last: a milestone closing ahead of the work inside it
+  reads as a resolution rather than an abandonment.
 - **A run that planned nothing settles DELIVERED, and files no validation task.** An empty working set
   with zero cycles behind it used to park in the unbounded wait, because the click admitted the row
   before its planning turn and a poll could legitimately land mid-plan — "not planned yet" and "nothing
@@ -415,7 +441,8 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   also the right answer for a re-build of a version whose Tasks all already exist and are closed, where
   planning legitimately mints nothing. It files NO validation task: a judgement asserts against what a
   run landed, and this one landed nothing — so it records `skipped`, because nothing will ever judge it
-  and an empty verdict would read as "any moment now" forever. A run that adopted somebody else's
+  and an empty verdict would read as "any moment now" forever. Filing none is also what makes this one of
+  the two dev endings that CLOSE the milestone: with no verdict owed, there is nothing left to wait for. A run that adopted somebody else's
   milestone reads an empty working set as evidence of nothing at all and PARKS instead
   (`plansItsOwnMilestone` is the one predicate both sides of that are written on).
 - **One task queue, one worker, one `Activities` struct.** `run.WorkerWatcher` owns the queue: it must be
@@ -447,15 +474,18 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   cancelled settle comments on, stamps `aep:cancelled` on and CLOSES the issues it abandons — the same
   shape as the halt, reached from the other ending, and written by the event plane through the same
   ports so the supervisor still files no issue of its own. What it abandons is per SPECIES
-  (`delivery.InCancelledWork`): a DEV run's cancel takes EVERY open issue in the milestone — the working
-  set, the dispatch gates, the validation task and the ledger-only notes alike — and closes the
-  milestone behind them, because the increment is abandoned. That is the asymmetry with the halt, which
-  leaves the gates alone precisely because a failed run may be retried in the same version and its gates
-  still name dependencies somebody must resolve. A TASK run's cancel reaches only the bugs and conflicts
-  it was working and leaves the milestone open: the version it works is the DEPLOYED one and is not
-  being withdrawn. A VALIDATION run closes nothing through this path — its own consequence is the task
-  it ADOPTED, closed on every ending by `settleJudged`, and that scoping is what keeps a cancel arriving
-  before the first read from closing a task the run never adopted. Nothing is REVERTED by any of it:
+  (`delivery.InCancelledWork`): a DEV run's cancel takes everything the INCREMENT was carrying — the
+  working set and the dispatch gates — and closes the milestone behind them, because the increment is
+  abandoned. That is the asymmetry with the halt, which leaves the gates alone precisely because a failed
+  run may be retried in the same version and its gates still name dependencies somebody must resolve. Two
+  populations survive even a build's cancel: the version's VALIDATION TASK, a handle on software still
+  deployed, and the LEDGER — a human's unarmed note is never the platform's to close, and a machine
+  comment on somebody's own record is not suppression of anything (the sweep skips a cancelled increment
+  whole, and a note is not work to it in any case). A TASK run's cancel reaches only the bugs and
+  conflicts it was working and leaves the milestone open: the version it works is the DEPLOYED one and is
+  not being withdrawn. A VALIDATION run closes nothing through this path — its own consequence is the
+  task it ADOPTED, closed on every ending by `settleJudged`, and that scoping is what keeps a cancel
+  arriving before the first read from closing a task the run never adopted. Nothing is REVERTED by any of it:
   merged commits stay on `main` and promoted components keep serving, so closing the milestone is a
   statement about the INCREMENT, never about what is deployed.
 - **Only issues OPEN at cancel time are marked, and that is what the marker is for.** Work a cycle
@@ -522,7 +552,7 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   stable. `cycleIndex` stays RUN-relative — the same cycle carries the same number on both streams, and
   the collision across runs is resolved by the key becoming `(run.id, cycleIndex)`, never by renumbering.
   **"The version is finished" is not a fact either stream can state**: the newest run going terminal does
-  not mean no further run will be admitted on that milestone, which under the split is the ordinary case
+  not mean no further run will be admitted on that milestone, and that is the ordinary case
   (a dev run settles; a validation run starts when a validation issue opens, possibly much later,
   possibly never). So it holds while ANY run on the milestone is non-terminal and settles with
   `done { reason: "no_live_run" }` + `[DONE]` when none is — `reason`, never `state`, which is

@@ -473,26 +473,104 @@ func RunKindForOrigin(origin string) string {
 	}
 }
 
-// RunKindOf resolves a run row's kind, falling back to the kind its origin
-// implies and finally to dev.
+// RoutableRunKind resolves the kind a run row is ADDRESSED by — the workflow
+// type a start executes, and the workflow id a signal is aimed at — and reports
+// whether the row can be addressed at all.
 //
-// It exists for facts recorded before the kind column did — a row backfilled
-// from a deployment that predates it, or one whose origin is all a caller has —
-// and it is the ONE place that fallback chain is written, because the callers are
-// the two that must not get it wrong: the workflow id a signal is aimed at, and
-// the workflow type a start executes. Both would fail silently, not loudly.
+// It is the ONE place that resolution is written, because its two callers are the
+// two that fail SILENTLY rather than loudly: a start with the wrong type runs the
+// wrong loop, and a signal with the wrong id is swallowed as NotFound.
 //
-// The final fallback is dev because dev is the only kind a row could have carried
-// before the column existed, and it is the id a pre-split execution already
-// answers to.
-func RunKindOf(kind, origin string) string {
+// Two rows are routable, and only two:
+//
+//	a VALID kind        the ordinary case; the kind is what the row says it is.
+//	an EMPTY kind whose ORIGIN implies one. That is the pre-column history and
+//	                    nothing else: origin has always been NOT NULL and every
+//	                    writer sets both from one decision, so an empty kind
+//	                    beside a known origin is a fact recorded before the column
+//	                    existed — a backfilled row, or a Temporal input replaying
+//	                    out of history with only the fields that existed when the
+//	                    execution started.
+//
+// Everything else is REFUSED, and the refusal is the point. A non-empty kind this
+// package does not recognise is not history, it is corruption — admission
+// validates against IsRunKind, so no writer can produce one — and neither can an
+// empty kind beside an unknown origin. Reading either as `dev` is what the guard
+// exists to stop: dev is the kind that takes the project's build mutex and plans
+// a version, so guessing it starts a build nobody asked for and blocks every
+// later one behind it. Refusing costs a visible error and a run that never
+// starts, which is the direction a corrupt row must fail in.
+func RoutableRunKind(kind, origin string) (string, bool) {
 	if IsRunKind(kind) {
-		return kind
+		return kind, true
 	}
-	if implied := RunKindForOrigin(origin); implied != "" {
-		return implied
+	if kind == "" {
+		if implied := RunKindForOrigin(origin); implied != "" {
+			return implied, true
+		}
 	}
-	return RunKindDev
+	return "", false
+}
+
+// SettleClosesTheMilestone reports whether a run of this KIND settling into this
+// STATE finishes the VERSION — and therefore closes its milestone.
+//
+// It is the whole of the rule, in one place, because the two halves of it are
+// each other's failure mode: closing too late leaves a finished version's
+// milestone open forever, and closing too EARLY breaks the hand-off the three
+// workflows exist to create.
+//
+//	validation  succeeded → CLOSES. The version has its verdict, and a green
+//	            ending is what a succeeded validation run IS: every fatal verdict
+//	            settles the run `failed` (ValidationVerdictFailsRun), so there is
+//	            no succeeded validation run over a version that did not stand.
+//	dev         succeeded → closes ONLY if it filed no validation task. Filing one
+//	            means the version is DEPLOYED AND UNJUDGED and the milestone is not
+//	            finished; filing none (no acceptance oracle, or a plan that minted
+//	            nothing) means nothing will ever judge it, and leaving the milestone
+//	            open would strand the version in "any moment now" forever.
+//	task        never. It fixes one defect inside a version somebody else
+//	            delivered; finishing that says nothing about the version.
+//	failed      never, of any kind. The way forward from a failed increment is
+//	            more work in the same version.
+//	cancelled   per CancelClosesTheMilestone — a dev run's cancel abandons the
+//	            increment, and nothing else's does.
+//	blocked     never. A quota block is a wait somebody else clears.
+//
+// Why a dev run must NOT close on the hand-off is concrete rather than tidy. The
+// validation agent discovers its own work with `gh issue list --milestone`, which
+// resolves the milestone BY TITLE and only sees OPEN milestones (skills/aep says
+// so in as many words). A dev run that closed the milestone over the validation
+// task it had just minted would leave that task unfindable by the only agent
+// meant to work it — the version deployed, the task open, and the run that could
+// judge it unable to see the milestone it lives in.
+//
+// Milestone state is display only and nothing branches on it, which is what makes
+// getting it right a documentation problem rather than a correctness one — except
+// through that one agent-side read, which is why the rule is stated here instead
+// of being left to each settle site.
+//
+// awaitingVerdict says a validation task now stands open over this version,
+// waiting for somebody to judge it. Only the dev arm reads it: a validation run
+// closes the task on every ending, and a task run's reopen is the thing that
+// hands the version BACK to validation, so for both of them the answer is already
+// decided by the kind.
+func SettleClosesTheMilestone(runKind, state string, awaitingVerdict bool) bool {
+	switch state {
+	case RunStateSucceeded:
+		switch runKind {
+		case RunKindValidation:
+			return true
+		case RunKindDev:
+			return !awaitingVerdict
+		default:
+			return false
+		}
+	case RunStateCancelled:
+		return CancelClosesTheMilestone(runKind)
+	default:
+		return false
+	}
 }
 
 // RunValidates reports whether a run of this kind produces a VERDICT about the

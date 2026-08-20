@@ -383,17 +383,32 @@ indistinguishable from work nobody started, so the run that gave up would be
 replaced within a tick by one with fresh budgets. Cleared by a rebuild, or by a
 person removing the label.
 
+### Green ending
+The only thing that CLOSES a milestone: zero open working-set issues **and** a
+terminal verdict on the version's newest validation run. A **build** settling at
+deployed-green therefore leaves the milestone OPEN — the version is deployed and
+unjudged, and the validation task it just filed is what judges it; the exception is
+a version with no acceptance oracle, where no task is filed, nothing is coming, and
+the milestone closes. A **validation** run settling succeeded closes it. A **bug-fix**
+run never does, and no FAILED run of any kind does, because the way forward from a
+failure is more work in the same version. Milestone state is display only —
+nothing branches on it — except through one agent-side read: the validation agent
+finds its work with `gh issue list --milestone`, which resolves by title and sees
+only OPEN milestones, so a milestone closed at the hand-off hides the very task it
+was closed over.
+
 ### Cancelled issue
 Work a CANCELLED run had in flight, closed with a comment and stamped
 `aep:cancelled`. Closing it is what makes the cancel stick: the reconcile sweep
-starts a run for any open workable kind on a milestone with no live run, so an
-issue left open would have the run restarted within a tick. What a cancel reaches
-is per run species — a **build**'s takes every open issue in the milestone, gates
-and ledger notes included, and closes the milestone with them, because the
-increment is abandoned; a **bug-fix** run's takes only its bugs and conflicts and
-leaves the version standing. A build's one exception is the version's
-**validation task**: cancel reverts nothing, so that task is a handle on software
-still deployed and closing it would discard a pending judgement of it. Only issues that were OPEN at cancel time are marked,
+starts a run over a milestone's open WORK when no run is live on it, so an issue
+left open would have the run restarted within a tick. What a cancel reaches is per
+run species — a **build**'s takes everything the increment was carrying, its
+dispatch gates included, and closes the milestone with them, because the increment
+is abandoned; a **bug-fix** run's takes only its bugs and conflicts and leaves the
+version standing. Two populations survive even a build's cancel: the version's
+**validation task**, because cancel reverts nothing and that task is a handle on
+software still deployed, and the **ledger**, which the platform never touches at
+all. Only issues that were OPEN at cancel time are marked,
 which is what the marker is for: a build of an UNCHANGED spec reopens exactly them
 and clears the label, while work a cycle genuinely finished stays closed. Nothing
 is reverted — merged commits stay on `main` and promoted components keep serving.
@@ -408,7 +423,9 @@ their own rather than subtracted from the work waiting behind them.
 
 ### Ledger issue
 An issue in a milestone that is **not armed**. Part of the version's record;
-never worked, never stalling settle. It may still be classified — a red-main
+never worked, never stalling settle, and never written to — a cancel does not
+close it and the sweep does not start a run for it, because it is nobody's work
+until a human arms it. It may still be classified — a red-main
 incident is filed as a `bug` so a human can see what it is — because
 classification is not permission. Adding `aep` **adopts** it into the next cycle.
 
@@ -425,7 +442,8 @@ plan: `v<N>`'s open `development` and `provision` issues are closed with a
 `Superseded by v<N+1>` comment, and so is a `conflict`, which names a branch of
 the version being superseded. A **defect** is not superseded by anything: open
 `bug` issues are MOVED into `v<N+1>`'s milestone, because they are still broken
-and the new version is what will ship the fix. Then the old milestone is closed
+and the new version is what will ship the fix — "bug" read the way the working
+sets read it, so an ARMED issue carrying no kind (the human hand-over) moves too. Then the old milestone is closed
 and `v<N+1>` is planned fresh from the new spec. Moving is not arming — an
 unadopted bug arrives still ledger-only. It is also half of what keeps the
 reconcile sweep sound: a superseded milestone holds nothing workable, because its

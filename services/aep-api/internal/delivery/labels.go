@@ -84,14 +84,19 @@ const (
 	KindProvision = "provision"
 )
 
-// The SOURCES. Only a KindBug issue carries one, and its absence reads as
-// SrcUser: a bug with no source label is a human's, because every platform
-// minter stamps its own.
+// The SOURCES. Only a KindBug issue carries one, and an ABSENT source reads as
+// SrcUser: a bug with no source label is a human's, because every platform minter
+// stamps its own. Nothing substitutes the value — the reading is what a person or
+// an agent takes from the missing label, which is why `src/user` is also stamped
+// explicitly wherever the platform knows a human filed the issue.
 //
-// The source is not a routing fact today — every bug is worked the same way —
-// but it is what lets a run say WHY a version was re-opened, and it is the fact
-// a validation task's reopen turns on (only a `src/validation` fix invalidates
-// a recorded verdict).
+// A source is PROVENANCE — it tells a human, and the coding agent reading the
+// issue, who found the defect — with exactly one routing consumer: a task run
+// reopens the version's validation task only for `src/validation` work, because
+// only a verdict-sourced repair invalidates a recorded verdict. That rule reads
+// the milestone's `src/validation` COUNT at the cycle boundary rather than each
+// issue's labels, since the boundary poll is the loop's hottest read and stays
+// one round trip. Nothing else in the platform branches on a source.
 const (
 	SrcUser       = "src/user"
 	SrcIncident   = "src/incident"
@@ -157,7 +162,7 @@ var kindPrecedence = []string{KindProvision, KindValidation, KindConflict, KindB
 // "" is an honest answer and is reported as such — a ledger issue with no
 // platform labels has no kind, and inventing one for it would put a kind chip on
 // a human's note. The working-set predicates below are where the ARMED-but-
-// kindless case is given a reading; see workKindOf.
+// kindless case is given a reading; see WorkKindOf.
 func KindOf(labels []string) string {
 	for _, kind := range kindPrecedence {
 		if HasLabel(labels, kind) {
@@ -167,36 +172,15 @@ func KindOf(labels []string) string {
 	return ""
 }
 
-// SourceOf returns the `src/*` source of a bug, defaulting to SrcUser.
+// WorkKindOf is the kind the PLATFORM works an issue as: KindOf, with an ARMED
+// kindless issue read as KindBug.
 //
-// The default is not a guess: every platform minter stamps its own source, so a
-// bug that reached the milestone without one came from a human — which is
-// exactly what SrcUser says.
-//
-// Nothing ROUTES on the answer. A source is provenance: it tells a human, and a
-// coding agent reading the issue, who found the defect. The one place a source
-// changes a platform decision is the task run's reopen rule, and that one reads
-// the milestone's `src/validation` COUNT at the cycle boundary rather than each
-// issue's labels — the boundary poll is the loop's hottest read and stays one
-// round trip. So this is the vocabulary's single reader for everything else.
-//
-//deadcode:keep not yet called — the source vocabulary is read in one place or not at all, and this is that place; the routing rule that needs it reads a count instead.
-func SourceOf(labels []string) string {
-	for _, src := range []string{SrcIncident, SrcValidation, SrcBuild, SrcDeploy, SrcUser} {
-		if HasLabel(labels, src) {
-			return src
-		}
-	}
-	return SrcUser
-}
-
-// workKindOf is the kind a WORKING-SET predicate reads: KindOf, with a kindless
-// issue read as KindBug.
-//
-// The default matters for exactly one state — armed with `aep`, carrying no kind
-// — which is what a human produces by stamping `aep` on a bare issue to adopt
-// it, and what the platform's own history holds from before kinds existed. Two
-// reasons it reads as a bug rather than as nothing:
+// The default matters for exactly one state — carrying `aep`, carrying no kind —
+// and that state is the common human path rather than an edge: adoption
+// deliberately stamps no kind (eventcore.AdoptIssue), because arming IS the act
+// of handing an unclassified issue over, and the platform's own history holds the
+// same shape from before kinds existed. Two reasons it reads as a bug rather than
+// as nothing:
 //
 //   - It is what the host's counts already say. The dev count is `aep` minus
 //     `validation` and the task count subtracts `development` as well, so a
@@ -206,11 +190,28 @@ func SourceOf(labels []string) string {
 //   - It is the safe direction. An issue wrongly counted as work stalls a run
 //     visibly; an issue wrongly dropped from the working set closes a version
 //     silently.
-func workKindOf(labels []string) string {
+//
+// The default is gated on the ARMING SWITCH, which is what makes this readable
+// outside a working-set predicate (the predicates below test `aep` before they
+// ask, so the gate changes nothing for them). An UNARMED kindless issue is a
+// ledger note, has no kind, and answers "" — reading it as a bug would make the
+// platform act on a human's note.
+//
+// EXPORTED because supersede must read the same kind the working set does. It
+// decides which of a superseded version's issues are carried forward, and "a
+// defect is not superseded by anything" has to mean the same population there as
+// it does at a cycle boundary: reading plain KindOf instead closed every
+// human-adopted defect — armed, kindless, a bug to every predicate in the loop —
+// the moment the next version was cut, silently and with the issue's own labels
+// saying it was work.
+func WorkKindOf(labels []string) string {
 	if kind := KindOf(labels); kind != "" {
 		return kind
 	}
-	return KindBug
+	if HasLabel(labels, LabelAgentWork) {
+		return KindBug
+	}
+	return ""
 }
 
 // InDevWorkingSet reports whether an issue belongs to a DEV run's working set:
@@ -226,7 +227,7 @@ func InDevWorkingSet(labels []string) bool {
 	if !HasLabel(labels, LabelAgentWork) {
 		return false
 	}
-	switch workKindOf(labels) {
+	switch WorkKindOf(labels) {
 	case KindDevelopment, KindBug, KindConflict:
 		return true
 	default:
@@ -253,7 +254,7 @@ func InTaskWorkingSet(labels []string) bool {
 	if !HasLabel(labels, LabelAgentWork) {
 		return false
 	}
-	switch workKindOf(labels) {
+	switch WorkKindOf(labels) {
 	case KindBug, KindConflict:
 		return true
 	default:
@@ -294,13 +295,13 @@ func InWorkingSet(runKind string, labels []string) bool {
 // It is a WIDER population than the working set for a dev run and a narrower one
 // for the others, and the asymmetry is the whole statement cancel makes:
 //
-//	dev         EVERYTHING open in the milestone — the working set, the dispatch
-//	            gates, the version's validation task and the ledger-only notes
-//	            alike. A cancelled build ABANDONS the increment, so the milestone
-//	            is closed behind it and nothing in it is anybody's work any more.
-//	            The gates go too, which is the difference from a halt: a halted
-//	            run may be retried in the same version, so its gates still name
-//	            dependencies somebody must resolve.
+//	dev         everything the INCREMENT was carrying — the working set and the
+//	            dispatch gates. A cancelled build abandons the increment, so the
+//	            milestone is closed behind it and none of that is anybody's work
+//	            any more. The gates go too, which is the difference from a halt: a
+//	            halted run may be retried in the same version, so its gates still
+//	            name dependencies somebody must resolve. NOT the version's
+//	            validation task, and NOT the ledger.
 //	task        the bugs and conflicts it was working. The version is NOT being
 //	            abandoned — it is still the deployed one — so its milestone, its
 //	            plan and its validation task are untouched.
@@ -311,22 +312,31 @@ func InWorkingSet(runKind string, labels []string) bool {
 //	            exactly the "leave it for the next trigger" case.
 //
 // Closing the issues is what makes a cancel STICK rather than merely record
-// itself. The reconcile sweep starts a run for any open workable kind on a
-// milestone with no live run, so an open issue left behind by a cancel is
-// indistinguishable from work nobody started and the run is restarted within a
-// tick. Suppression, not bookkeeping.
+// itself. The reconcile sweep starts a run over a milestone's open WORK, so an
+// issue left behind by a cancel is indistinguishable from work nobody started and
+// the run is restarted within a tick. Suppression, not bookkeeping.
 //
-// The dev arm ignores the labels, and that is deliberate rather than a signature
-// left over from the others: "every open issue" is the rule, and writing it as a
-// predicate keeps the per-kind mapping in ONE readable place instead of splitting
-// it between a predicate and an `if kind == dev` at the call site.
+// Each arm is a POSITIVE statement about a population, including the dev one:
+// "every open issue" was the older reading and it reached the LEDGER, which is
+// the one population the platform never touches — a human's note is theirs, and
+// closing it with a machine comment is the platform editing somebody's record.
+// Suppression never needed it either: the sweep skips a cancelled increment
+// whole, and a ledger note is not work to it in the first place.
 func InCancelledWork(runKind string, labels []string) bool {
 	switch runKind {
 	case RunKindDev:
-		// Everything the increment was carrying — the working set and the
-		// `provision` gates alike, and a bare ledger note with it, because the
-		// milestone is being closed and leaving an open issue inside it is what
-		// the sweep reads as unworked.
+		// The gates first, because they carry no arming switch by construction and
+		// the armed test below would drop them. A cancelled build abandons the
+		// dependencies it was waiting on with the rest of the increment.
+		if IsDispatchGate(labels) {
+			return true
+		}
+		// The LEDGER is never touched. Not armed, so not the platform's.
+		if !HasLabel(labels, LabelAgentWork) {
+			return false
+		}
+		// Everything else the increment was carrying — planned work, the defects
+		// and conflicts a cycle threw up, an adopted issue of no stated kind.
 		//
 		// EXCEPT the version's validation task. That is a handle on something
 		// already DEPLOYED, and cancel reverts nothing: commits a cycle merged

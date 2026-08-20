@@ -52,9 +52,13 @@ const defaultSweepInterval = 60 * time.Second
 // Sweep is the reconcile backstop AND the trigger router, and it has TWO
 // trigger conditions:
 //
-//	a milestone with open issues, no live run and no cancelled increment gets a
+//	a milestone with open WORK, no live run and no cancelled increment gets a
 //	run OF THE RIGHT KIND, and
 //	a live run row past its planning phase is re-offered to the supervisor.
+//
+// Open WORK, never "an open issue": what starts a run is the trigger predicate of
+// a species (offerRun), so a milestone holding only a ledger note, only a gate or
+// only planned work starts nothing at all.
 //
 // The first heals both failure modes the event plane can have. A delivery
 // GitHub never made (or that failed past its retries) leaves a milestone with
@@ -251,16 +255,36 @@ func (e *Events) milestoneCancelled(ctx context.Context, orgID, projectID string
 	return true, nil
 }
 
-// offerRun routes ONE unworked milestone: a validation run when the version's
-// validation task is open, otherwise an ordinary task run when anything at all is
-// open, and nothing when the milestone is quiet.
+// offerRun routes ONE unworked milestone by the TRIGGER PREDICATES themselves: a
+// validation run when the version's validation task is open, a task run when the
+// milestone holds task working-set work, and NOTHING otherwise.
 //
-// Validation wins when both are open, and that ordering costs nothing in
-// practice: a dev run files the validation task only at deployed-green, with the
-// working set already empty, and a failed attempt's repair issues are filed after
-// the task has been closed. The two coexist only when a human files work into a
-// version awaiting its verdict, and judging first is the safe order there — the
-// verdict is about what is deployed, which the new work has not changed yet.
+// "Otherwise" is a real population and it is why the routing is written on the
+// predicates rather than on "something is open". A milestone can sit with only a
+// human's ledger note in it, or only an open `provision` gate, or only planned
+// work a build gave up on — and each of those started a paid agent run that then
+// had nothing in its working set and parked, on a milestone nobody was building,
+// every 60 seconds forever. What each of those states actually needs:
+//
+//	a ledger note   nothing. Unarmed is the whole meaning of ledger: the platform
+//	                does not work it until a human arms it, and arming raises the
+//	                adoption path directly.
+//	a gate alone    nothing. A gate holds the next DISPATCH; with no work behind
+//	                it there is nothing to hold, and a run started to wait on it
+//	                would wait on an empty milestone.
+//	`development`   nothing this pass can offer. Planned work is dev-workflow's
+//	                alone (InTaskWorkingSet excludes it deliberately), and only
+//	                the build click may start a dev run — it carries the version
+//	                mutex and the tag. Left open by a build that gave up, planned
+//	                work is normally `aep:halted` anyway, and the way forward is
+//	                another build.
+//
+// Validation wins when both populations are open, and that ordering costs nothing
+// in practice: a dev run files the validation task only at deployed-green, with
+// the working set already empty, and a failed attempt's repair issues are filed
+// after the task has been closed. The two coexist only when a human files work
+// into a version awaiting its verdict, and judging first is the safe order there
+// — the verdict is about what is deployed, which the new work has not changed yet.
 //
 // HALTED issues are dropped before either decision, and dropped rather than
 // merely ignored: a milestone holding nothing but halted work is QUIET, and
@@ -271,9 +295,6 @@ func (e *Events) milestoneCancelled(ctx context.Context, orgID, projectID string
 func (e *Events) offerRun(ctx context.Context, orgID, projectID string, milestone MilestoneRef,
 	issues []sourcecontrol.IssueInfo) error {
 	issues = notHalted(issues)
-	if len(issues) == 0 {
-		return nil
-	}
 	for _, iss := range issues {
 		if delivery.HasLabel(iss.Labels, delivery.LabelAgentWork) && delivery.IsValidationWork(iss.Labels) {
 			slog.InfoContext(ctx, "eventcore: reconcile sweep found an open validation task — judging the version",
@@ -281,9 +302,14 @@ func (e *Events) offerRun(ctx context.Context, orgID, projectID string, mileston
 			return e.startValidationRun(ctx, orgID, projectID, milestone)
 		}
 	}
-	slog.InfoContext(ctx, "eventcore: reconcile sweep found unworked open issues — starting a run",
-		"project", projectID, "milestone", milestone.Number, "openIssues", len(issues))
-	return e.startRun(ctx, orgID, projectID, milestone)
+	for _, iss := range issues {
+		if delivery.InTaskWorkingSet(iss.Labels) {
+			slog.InfoContext(ctx, "eventcore: reconcile sweep found unworked defects — starting a run",
+				"project", projectID, "milestone", milestone.Number, "issue", iss.Number)
+			return e.startRun(ctx, orgID, projectID, milestone)
+		}
+	}
+	return nil
 }
 
 // notHalted drops the issues a failed run marked `aep:halted`.

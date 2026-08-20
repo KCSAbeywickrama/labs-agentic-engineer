@@ -59,6 +59,7 @@ import { execFileSync } from "node:child_process";
 const ARM = "aep";
 const KIND_DEVELOPMENT = "development";
 const KIND_BUG = "bug";
+const KIND_CONFLICT = "conflict";
 const KIND_VALIDATION = "validation";
 const KIND_PROVISION = "provision";
 const SRC_USER = "src/user";
@@ -67,10 +68,13 @@ const RETIRED_GATE = "aep:provision";
 const RETIRED_VALIDATION = "aep:validation";
 const RETIRED_ADOPT = "aep:codingagent";
 
-// Every kind, for the "does this issue already have one" test. An issue that
-// already carries a kind is left alone whatever else it carries — a second kind
-// is a corruption, and this script must never be the thing that creates one.
-const KINDS = [KIND_DEVELOPMENT, KIND_BUG, KIND_VALIDATION, KIND_PROVISION];
+// EVERY kind in labels.go, for the "does this issue already have one" test. An
+// issue that already carries a kind is left alone whatever else it carries — a
+// second kind is a corruption, and this script must never be the thing that
+// creates one. A kind missing from this list is exactly how it would: the armed
+// issue would read as kindless and the last branch would stamp `development`
+// beside the kind it already had.
+const KINDS = [KIND_DEVELOPMENT, KIND_BUG, KIND_CONFLICT, KIND_VALIDATION, KIND_PROVISION];
 
 function usage(message) {
   console.error(`migrate-issue-labels: ${message}`);

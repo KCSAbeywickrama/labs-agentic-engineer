@@ -30,7 +30,7 @@ import (
 // A run that exhausts a budget settles `failed` and leaves its working set OPEN,
 // because the milestone stays open too — the way forward from a failed increment
 // is more work in the same version. But the reconcile sweep's trigger is exactly
-// "open work of this kind on a milestone with no live run", so those leftovers
+// "open work of a species on a milestone with no live run", so those leftovers
 // are indistinguishable from work nobody has started, and the sweep starts a
 // fresh run on them within a tick. With a fresh budget. Which it exhausts. And
 // so on: every budget in the platform is defeated at once, and the symptom is an

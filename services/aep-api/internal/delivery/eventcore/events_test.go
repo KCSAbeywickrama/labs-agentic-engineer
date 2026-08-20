@@ -721,7 +721,7 @@ func TestRevalidate_StartsARunOverTheVersionsMilestone(t *testing.T) {
 // nothing to hand off, so a silent success would answer nothing.
 //
 // The guard also has to run BEFORE admission: the revalidate origin is outside
-// the spec-run partial index, so nothing in the database would refuse a second
+// the per-project build mutex, so nothing in the database would refuse a second
 // row — the supervisor would admit one, find the workflow id taken, and return
 // successfully, leaving a row nobody drives.
 func TestRevalidate_RefusesWhileARunIsLive(t *testing.T) {

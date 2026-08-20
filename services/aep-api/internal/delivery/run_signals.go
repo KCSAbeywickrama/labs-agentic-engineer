@@ -63,9 +63,9 @@ const (
 	// reason this cannot be a workflow cancellation. A cancelled settle CLOSES the
 	// issues the run had in flight and stamps `aep:cancelled` on them — a dev run's
 	// whole milestone, a task run's bugs and conflicts — because the reconcile
-	// sweep starts a run for any open workable kind on a milestone with no live
-	// run, so issues left open would have it restart the very run the person
-	// stopped, within a tick. A Temporal cancellation could not run those writes.
+	// sweep starts a run over a milestone's open WORK when no run is live on it,
+	// so issues left open would have it restart the very run the person stopped,
+	// within a tick. A Temporal cancellation could not run those writes.
 	SigRunCancel = "run-cancel"
 )
 

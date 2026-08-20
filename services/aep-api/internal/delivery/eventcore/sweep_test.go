@@ -33,7 +33,7 @@ func sweepOver(h *harness) *Sweep {
 // made and the adoption-versus-settle race, which leave the same footprint.
 func TestSweep_StartsARunForUnworkedOpenIssues(t *testing.T) {
 	h := newHarness(t, aRun("run-old", 7, delivery.RunStateSucceeded))
-	h.issues.withCounts(7, 0, 2, 2)
+	h.issues.withDefects(7, 21, 22)
 
 	if err := sweepOver(h).Once(t.Context()); err != nil {
 		t.Fatalf("sweep: %v", err)
@@ -116,7 +116,7 @@ func TestSweep_NeverResurrectsASupersededMilestone(t *testing.T) {
 // the run. Healing into "started and waiting" is the correct repair.
 func TestSweep_AnOpenGateDoesNotStopARunFromStarting(t *testing.T) {
 	h := newHarness(t, aRun("run-old", 7, delivery.RunStateFailed))
-	h.issues.withCounts(7, 1, 1, 2)
+	h.issues.withDefects(7, 21).withIssue(7, 60, delivery.KindProvision)
 
 	if err := sweepOver(h).Once(t.Context()); err != nil {
 		t.Fatalf("sweep: %v", err)
@@ -179,7 +179,7 @@ func TestSweep_StartsAValidationRunForAnOpenValidationTask(t *testing.T) {
 // run has no working set and would judge a version whose work is unfinished.
 func TestSweep_RoutesOrdinaryWorkToATaskRun(t *testing.T) {
 	h := newHarness(t, aRun("run-old", 7, delivery.RunStateSucceeded))
-	h.issues.withWork(7, 21, 22)
+	h.issues.withDefects(7, 21, 22)
 
 	if err := sweepOver(h).Once(t.Context()); err != nil {
 		t.Fatalf("sweep: %v", err)
@@ -197,7 +197,7 @@ func TestSweep_RoutesOrdinaryWorkToATaskRun(t *testing.T) {
 // what is DEPLOYED, which the new work has not changed yet.
 func TestSweep_ValidationTaskWinsOverOrdinaryWork(t *testing.T) {
 	h := newHarness(t, aRun("run-old", 7, delivery.RunStateSucceeded))
-	h.issues.withWork(7, 21).withValidationIssue(7, 55)
+	h.issues.withDefects(7, 21).withValidationIssue(7, 55)
 
 	if err := sweepOver(h).Once(t.Context()); err != nil {
 		t.Fatalf("sweep: %v", err)
@@ -210,31 +210,66 @@ func TestSweep_ValidationTaskWinsOverOrdinaryWork(t *testing.T) {
 // An UNARMED issue of kind `validation` is not a validation task — the arming
 // switch is what says a loop may work it at all. Routing on the kind alone would
 // let a human's stray label start a paid agent run.
-func TestSweep_AnUnarmedValidationLabelIsNotATask(t *testing.T) {
+//
+// Nor is it work for anything else. It is in no working set, so nothing starts:
+// "an issue is open" was never a reason to spend an agent.
+func TestSweep_AnUnarmedValidationLabelStartsNothing(t *testing.T) {
 	h := newHarness(t, aRun("run-old", 7, delivery.RunStateSucceeded))
 	h.issues.withOpenIssues(7, []string{delivery.KindValidation})
 
 	if err := sweepOver(h).Once(t.Context()); err != nil {
 		t.Fatalf("sweep: %v", err)
 	}
-	// It is still an open issue, so a run is offered — as an ordinary one.
-	if len(h.sup.started) != 1 || h.sup.started[0].Kind != delivery.RunKindTask {
-		t.Fatalf("an unarmed validation label must not trigger a judgement, got %+v", h.sup.started)
+	if len(h.sup.started) != 0 {
+		t.Fatalf("an unarmed label is nobody's work — nothing may start, got %+v", h.sup.started)
 	}
 }
 
-// A dispatch GATE is an open issue, so the sweep still starts a run for it: a gate
-// holds DISPATCH, not the run, and healing into "started and waiting" is the
-// correct repair. It must NOT be mistaken for a validation task.
-func TestSweep_AGateAloneStartsAnOrdinaryRun(t *testing.T) {
+// A dispatch GATE alone starts NOTHING. A gate holds the next DISPATCH, so with
+// no work behind it there is nothing for it to hold — and a run started to "wait
+// on it" would park on an empty working set, on a milestone nobody is building,
+// and be offered again on every 60-second pass.
+func TestSweep_AGateAloneStartsNothing(t *testing.T) {
 	h := newHarness(t, aRun("run-old", 7, delivery.RunStateFailed))
 	h.issues.withOpenIssues(7, []string{delivery.KindProvision})
 
 	if err := sweepOver(h).Once(t.Context()); err != nil {
 		t.Fatalf("sweep: %v", err)
 	}
-	if len(h.sup.started) != 1 || h.sup.started[0].Kind != delivery.RunKindTask {
-		t.Fatalf("a gated milestone still needs a run to wait on it, got %+v", h.sup.started)
+	if len(h.sup.started) != 0 {
+		t.Fatalf("a gate is a hold, not work — nothing may start, got %+v", h.sup.started)
+	}
+}
+
+// A human's LEDGER NOTE starts nothing. Unarmed is the whole meaning of ledger:
+// the platform does not work it until somebody arms it, and arming raises the
+// adoption path directly rather than through this pass.
+func TestSweep_ALedgerNoteAloneStartsNothing(t *testing.T) {
+	h := newHarness(t, aRun("run-old", 7, delivery.RunStateSucceeded))
+	h.issues.withIssue(7, 61) // no labels at all: a note in the version's record
+
+	if err := sweepOver(h).Once(t.Context()); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if len(h.sup.started) != 0 {
+		t.Fatalf("a human's note is not work — nothing may start, got %+v", h.sup.started)
+	}
+}
+
+// PLANNED WORK left open starts nothing either, and this is the population the
+// routing must be most careful about. `development` is dev-workflow's alone — a
+// task run's working set excludes it deliberately — and only the build click may
+// start a dev run, because it carries the version mutex and the tag. Offering a
+// task run here dispatched an agent whose working set was empty by construction.
+func TestSweep_PlannedWorkAloneStartsNothing(t *testing.T) {
+	h := newHarness(t, aRun("run-old", 7, delivery.RunStateFailed))
+	h.issues.withWork(7, 21, 22) // armed `development`, left open by a build that gave up
+
+	if err := sweepOver(h).Once(t.Context()); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if len(h.sup.started) != 0 {
+		t.Fatalf("planned work waits for another BUILD, not for a task run, got %+v", h.sup.started)
 	}
 }
 
@@ -307,7 +342,7 @@ func TestSweep_SkipsAMilestoneWhoseIncrementWasCancelled(t *testing.T) {
 	h := newHarness(t, aRun("run-cancelled", 7, delivery.RunStateCancelled))
 	// Open work, deliberately: the point is that the milestone's STATE decides,
 	// not its issues.
-	h.issues.withCounts(7, 0, 2, 2)
+	h.issues.withDefects(7, 21, 22)
 
 	if err := sweepOver(h).Once(t.Context()); err != nil {
 		t.Fatalf("sweep: %v", err)
@@ -359,7 +394,7 @@ func TestSweep_ARebuildEndsTheCancelSkip(t *testing.T) {
 		aRun("run-rebuild", 7, delivery.RunStateFailed),
 		aRun("run-cancelled", 7, delivery.RunStateCancelled),
 	)
-	h.issues.withCounts(7, 0, 1, 1)
+	h.issues.withDefects(7, 21)
 
 	if err := sweepOver(h).Once(t.Context()); err != nil {
 		t.Fatalf("sweep: %v", err)

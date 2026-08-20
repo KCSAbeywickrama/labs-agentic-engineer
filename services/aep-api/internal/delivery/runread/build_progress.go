@@ -65,9 +65,9 @@ import (
 //
 // "The version is finished" is not a fact this stream can state. Across runs it
 // is not IsTerminalRunState of anything: the newest run going terminal does not
-// mean no further run will be admitted on the milestone — under the split that
-// is the NORMAL case, because a dev run settles and a validation run starts
-// later, when a validation issue opens, possibly much later and possibly never.
+// mean no further run will be admitted on the milestone, and that is the NORMAL
+// case: a dev run settles and a validation run starts later, when a validation
+// issue opens — possibly much later, and possibly never.
 // So the honest statement is the weaker one this names: no run on the milestone
 // is live RIGHT NOW.
 //

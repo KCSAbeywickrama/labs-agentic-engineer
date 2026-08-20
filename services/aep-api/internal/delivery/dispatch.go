@@ -22,9 +22,9 @@ package delivery
 // It lives at the domain root for the same reason labels.go does. BOTH halves of
 // the loop ask the dispatch question — the event plane, deciding whether a
 // webhook is worth waking a waiting run for, and the supervisor, at every cycle
-// boundary — and neither may import the other. Before this type they each held
-// their own copy of the expression, and a copy of a rule is a rule that will
-// eventually be changed in one place.
+// boundary — and neither may import the other. Neither holds its own copy of the
+// expression, because a copy of a rule is a rule that will eventually be changed
+// in one place only.
 //
 // The two callers reach it from different shapes (host counts on one side, an
 // activity's snapshot on the other), so what they share is the RULE, not the

@@ -264,7 +264,13 @@ func (s *Service) supersedePreviousMilestone(ctx context.Context, orgID, project
 	}
 	closed, moved := 0, 0
 	for _, issue := range gatesLast(issues) {
-		if delivery.KindOf(issue.Labels) == delivery.KindBug {
+		// delivery.WorkKindOf, never KindOf: the kind a carry-forward decision reads
+		// has to be the kind the WORKING SET reads, or the two disagree about what a
+		// defect is. An ARMED issue carrying no kind is the common human hand-over —
+		// adoption stamps no kind on purpose — and every predicate in the loop works
+		// it as a bug, so KindOf's honest "" put it in the CLOSE arm and the next
+		// version cut silently closed a defect somebody had adopted.
+		if delivery.WorkKindOf(issue.Labels) == delivery.KindBug {
 			// The move FIRST, then the note. A note on an issue that stayed behind
 			// would claim a carry-forward that did not happen.
 			if merr := p.issues.SetMilestone(ctx, orgID, projectID, issue.Number, into); merr != nil {

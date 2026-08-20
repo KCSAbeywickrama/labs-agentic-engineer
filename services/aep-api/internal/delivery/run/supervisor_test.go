@@ -260,21 +260,45 @@ func TestRunWorkflowName(t *testing.T) {
 	}
 }
 
-// TestRunKindOf pins the fallback chain the two silent call sites depend on — the
-// id a signal is aimed at, and the type a start executes. Both fail quietly when
-// they are wrong, which is why the chain is written once.
-func TestRunKindOf(t *testing.T) {
-	cases := []struct{ kind, origin, want string }{
-		{delivery.RunKindValidation, delivery.RunOriginSpecBuild, delivery.RunKindValidation},
-		{"", delivery.RunOriginRevalidate, delivery.RunKindValidation},
-		{"", delivery.RunOriginIncidentAdoption, delivery.RunKindTask},
-		{"", delivery.RunOriginSpecBuild, delivery.RunKindDev},
-		{"", "", delivery.RunKindDev},
-		{"typo", "", delivery.RunKindDev},
+// TestRoutableRunKind pins the resolution the two SILENT call sites depend on —
+// the id a signal is aimed at, and the type a start executes — including the
+// rows it must refuse.
+//
+// The refusal is the half that matters. Every unroutable row has exactly one
+// reading available to it, `dev`, and that is the kind which takes the project's
+// build mutex and plans a version: guessing it starts a build nobody asked for
+// and blocks every later one behind it. A corrupt row must fail visibly instead.
+func TestRoutableRunKind(t *testing.T) {
+	cases := []struct {
+		kind, origin string
+		want         string
+		routable     bool
+	}{
+		// The ordinary case: the kind is what the row says it is, whatever the
+		// origin beside it.
+		{delivery.RunKindValidation, delivery.RunOriginSpecBuild, delivery.RunKindValidation, true},
+		{delivery.RunKindDev, delivery.RunOriginSpecBuild, delivery.RunKindDev, true},
+		{delivery.RunKindTask, delivery.RunOriginIncidentAdoption, delivery.RunKindTask, true},
+		// The pre-column case, and the only reason a fallback exists at all: a row
+		// backfilled from a deployment older than the column, or a Temporal input
+		// replaying out of history without the field.
+		{"", delivery.RunOriginRevalidate, delivery.RunKindValidation, true},
+		{"", delivery.RunOriginIncidentAdoption, delivery.RunKindTask, true},
+		{"", delivery.RunOriginSpecBuild, delivery.RunKindDev, true},
+		// Nothing to route on: neither column says anything this package knows.
+		{"", "", "", false},
+		{"", "made-up-origin", "", false},
+		// A non-empty kind nobody recognises is CORRUPTION, not history —
+		// admission validates against IsRunKind, so no writer can produce one —
+		// and re-reading it through the origin would be the guess this refuses.
+		{"typo", "", "", false},
+		{"typo", delivery.RunOriginSpecBuild, "", false},
 	}
 	for _, c := range cases {
-		if got := delivery.RunKindOf(c.kind, c.origin); got != c.want {
-			t.Fatalf("RunKindOf(%q, %q) = %q, want %q", c.kind, c.origin, got, c.want)
+		got, routable := delivery.RoutableRunKind(c.kind, c.origin)
+		if got != c.want || routable != c.routable {
+			t.Fatalf("RoutableRunKind(%q, %q) = (%q, %v), want (%q, %v)",
+				c.kind, c.origin, got, routable, c.want, c.routable)
 		}
 	}
 }

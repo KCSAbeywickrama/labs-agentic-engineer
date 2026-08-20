@@ -81,9 +81,8 @@ async function openBuildStream(
  * and the frame's `run` object is what keys it.
  *
  * ENDED IS NOT FINISHED. The server settles the stream when no run on the
- * milestone is live, which under the split delivery loop is an ordinary resting
- * state rather than an outcome: a dev run settles and a validation run may start
- * much later, or never. So the reopen trigger is `reopenKey` — a value derived
+ * milestone is live, which is an ordinary resting state rather than an outcome:
+ * a dev run settles and a validation run may start much later, or never. So the reopen trigger is `reopenKey` — a value derived
  * from the caller's run-list poll (which it already makes every 5s). When it
  * changes after the stream has ended, the hook reattaches; while the stream is
  * still open it does nothing, because the server picks a new run up on its own
