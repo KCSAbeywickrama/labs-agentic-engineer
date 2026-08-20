@@ -60,6 +60,7 @@ type fakeTagger struct {
 	res    *spec.SpecSaveResult
 	err    error
 	called int
+	seq    *[]string
 }
 
 func (f *fakeTagger) BuildScopeAtTag(ctx context.Context, orgID, projectID, tag string) (spec.BuildScope, error) {
@@ -68,6 +69,9 @@ func (f *fakeTagger) BuildScopeAtTag(ctx context.Context, orgID, projectID, tag 
 
 func (f *fakeTagger) TagSpec(context.Context, string, string) (*spec.SpecSaveResult, error) {
 	f.called++
+	if f.seq != nil {
+		*f.seq = append(*f.seq, "tag")
+	}
 	return f.res, f.err
 }
 
@@ -206,9 +210,13 @@ func mustDelivery(h *deliveryhttpapi.Handlers, err error) *deliveryhttpapi.Handl
 type provisionSpy struct {
 	orgs []string
 	err  error
+	seq  *[]string
 }
 
 func (p *provisionSpy) ProvisionPublisherForBuild(_ context.Context, orgID string) error {
+	if p.seq != nil {
+		*p.seq = append(*p.seq, "provision")
+	}
 	p.orgs = append(p.orgs, orgID)
 	return p.err
 }
@@ -408,9 +416,10 @@ func TestBuild_NoClaims401(t *testing.T) {
 // handler, not the service, calls it, since only the handler still has the
 // console JWT that ProvisionPublisherForBuild needs.
 func TestBuild_PublisherProvisionerRunsBeforeTag(t *testing.T) {
-	tagger := &fakeTagger{res: &spec.SpecSaveResult{Tag: "v1", Status: "approved"}}
+	var seq []string
+	tagger := &fakeTagger{res: &spec.SpecSaveResult{Tag: "v1", Status: "approved"}, seq: &seq}
 	svc := newSvc(fakeRepos{}, tagger)
-	spy := &provisionSpy{}
+	spy := &provisionSpy{seq: &seq}
 	resp := newHarnessWithPublisher(t, svc, spy).AsOrg("acme").Post("/api/v1/projects/shop/build", `{}`)
 	if resp.Code != 200 {
 		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
@@ -420,6 +429,9 @@ func TestBuild_PublisherProvisionerRunsBeforeTag(t *testing.T) {
 	}
 	if tagger.called != 1 {
 		t.Fatalf("Run must still tag after provision, called=%d", tagger.called)
+	}
+	if len(seq) != 2 || seq[0] != "provision" || seq[1] != "tag" {
+		t.Fatalf("order=%v want provision then tag", seq)
 	}
 }
 

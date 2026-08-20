@@ -181,9 +181,10 @@ Pre-provisioned Thunder OAuth2 M2M client (client_credentials grant) in
 cloud's platform-idp, secret in Vault as
 `aep-bff-to-remote-worker-client-secret`. **Provisioned for the
 now-removed long-lived `remote-worker` service component**; not used by the OC
-job-Component dispatch that replaced it — a cycle pod authenticates to aep-api
-with a per-cycle bearer subject, and app-factory calls no proxy. Kept in the
-deployment configs as historical bookkeeping; consider for cleanup later.
+job-Component dispatch that replaced it. A cycle pod authenticates to aep-api
+with the org's publisher `client_credentials` token (MCP and internal
+callbacks); app-factory calls no proxy. Kept in the deployment configs as
+historical bookkeeping; consider for cleanup later.
 
 ---
 

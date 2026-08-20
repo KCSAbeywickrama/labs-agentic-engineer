@@ -77,17 +77,13 @@ async function handle(
   res: http.ServerResponse,
   opts: StartMcpAuthProxyOpts,
 ): Promise<void> {
-  const chunks: Buffer[] = [];
-  for await (const c of req) {
-    chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c));
-  }
-  const body = Buffer.concat(chunks);
-  const headers: Record<string, string> = {};
-  for (const [k, v] of Object.entries(req.headers)) {
-    if (v === undefined || HOP.has(k.toLowerCase())) continue;
-    headers[k] = Array.isArray(v) ? v.join(", ") : v;
-  }
   try {
+    const body = await readRequestBody(req);
+    const headers: Record<string, string> = {};
+    for (const [k, v] of Object.entries(req.headers)) {
+      if (v === undefined || HOP.has(k.toLowerCase())) continue;
+      headers[k] = Array.isArray(v) ? v.join(", ") : v;
+    }
     const upstream = await fetchWith401Retry(
       opts.upstreamUrl,
       {
@@ -105,6 +101,15 @@ async function handle(
     res.writeHead(upstream.status, outHeaders);
     res.end(Buffer.from(await upstream.arrayBuffer()));
   } catch (err) {
+    if (res.headersSent) {
+      res.destroy();
+      return;
+    }
+    if (err instanceof PayloadTooLargeError) {
+      res.writeHead(413, { "content-type": "text/plain" });
+      res.end("payload too large");
+      return;
+    }
     if (err instanceof FatalAuthError) {
       opts.onFatal(err);
       res.writeHead(401, { "content-type": "text/plain" });
@@ -115,4 +120,35 @@ async function handle(
     res.writeHead(502, { "content-type": "text/plain" });
     res.end(msg);
   }
+}
+
+// MCP JSON-RPC is small (initialize / tools/list / tools/call). Cap the
+// inbound buffer so a stuck or hostile client cannot grow the Job RSS.
+const MAX_MCP_PROXY_BODY = 1024 * 1024;
+
+class PayloadTooLargeError extends Error {
+  constructor() {
+    super("payload too large");
+    this.name = "PayloadTooLargeError";
+  }
+}
+
+async function readRequestBody(req: http.IncomingMessage): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  let n = 0;
+  try {
+    for await (const c of req) {
+      const b = Buffer.isBuffer(c) ? c : Buffer.from(c);
+      n += b.length;
+      if (n > MAX_MCP_PROXY_BODY) {
+        throw new PayloadTooLargeError();
+      }
+      chunks.push(b);
+    }
+  } catch (err) {
+    if (err instanceof PayloadTooLargeError) throw err;
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`mcp proxy request body: ${msg}`);
+  }
+  return Buffer.concat(chunks);
 }

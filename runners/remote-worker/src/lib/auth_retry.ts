@@ -64,7 +64,13 @@ export async function fetchWith401Retry(
   },
 ): Promise<Response> {
   const doFetch = opts.fetchImpl ?? fetch;
-  const first = await opts.source.getToken();
+  let first: string;
+  try {
+    first = await opts.source.getToken();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new FatalAuthError(`token mint failed: ${msg}`);
+  }
   await opts.onToken?.(first);
   const res = await authorizedFetch(url, init, first, doFetch);
   if (res.status !== 401) {
