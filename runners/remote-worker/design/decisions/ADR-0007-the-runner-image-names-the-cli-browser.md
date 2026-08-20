@@ -12,7 +12,7 @@ authors anything, then runs the specs it wrote with `npx playwright test`. The
 In the runner image that command could not work. The p26-bare-minimum-hello run
 of 2026-08-18 hit it as its first browser action and got:
 
-```
+```text
 Error: Daemon pid=296: Daemon process exited with code 1
 ```
 
@@ -20,7 +20,7 @@ That is a wrapper: playwright-cli launches the browser in a detached daemon and
 surfaces only its exit code, never its stderr. Reproduced against
 `aep-runner:dev`, the daemon's actual error is:
 
-```
+```text
 PlaywrightError: Chromium distribution 'chrome' is not found at /opt/google/chrome/chrome
 ```
 
@@ -45,8 +45,9 @@ if (!browserName) {
 Both assignments live in one `if (!browserName)` branch, so the default engine
 cannot be had without the `chrome` distribution. That distribution is a **vendor
 install**, not a Playwright download — `playwright install --dry-run chrome`
-reports `Install location: <system>` and prints no download URL — and
-`Dockerfile:98` bakes only Playwright's chromium. It was never going to be there.
+reports `Install location: <system>` and prints no download URL — and the
+Dockerfile's `playwright install --with-deps chromium` bakes only Playwright's
+chromium. It was never going to be there.
 
 **A second blocker sits behind the first.** Channel `chrome` also leaves the
 sandbox on (`:71057-71059`):
@@ -101,7 +102,7 @@ An ENV rather than a flag or a config file, because:
 - *Chrome cannot be used, only added.* Root plus Google's apt repo, a few hundred
   megabytes, and a browser that auto-versions independently of
   `AEP_PLAYWRIGHT_VERSION` — which breaks the "pinned as a pair" contract stated
-  at `Dockerfile:90-92`.
+  in the Dockerfile's Playwright-toolchain comment.
 
 There is also a licensing question, and this ADR deliberately does not answer it.
 Chromium is open source; Chrome and Edge are proprietary, and the runner image is
@@ -129,11 +130,11 @@ document a trap the image no longer has.
 - **Explicit overrides still fail, by design and by omission.**
   `--browser=chrome` and `--browser=msedge` fail — absent, per this decision.
   `--browser=firefox` and `--browser=webkit` also fail, for an unrelated reason:
-  `playwright-cli install-browser` (`Dockerfile:102`) downloads those binaries
-  but `Dockerfile:98` installs system dependencies for chromium only, so they
-  report *"Host system is missing dependencies to run browsers"*. The image
-  therefore carries browser bytes it cannot launch. Left as-is here; removing
-  them is a separate change.
+  the Dockerfile's `playwright-cli install-browser` downloads those binaries, but
+  its `playwright install --with-deps chromium` installs system dependencies for
+  chromium only, so they report *"Host system is missing dependencies to run
+  browsers"*. The image therefore carries browser bytes it cannot launch. Left
+  as-is here; removing them is a separate change.
 - The upstream `--browser` help string and env-table both read *"possible values:
   chrome, firefox, webkit, msedge"*, omitting `chromium`, while the README's
   config schema documents `browserName?: 'chromium' | 'firefox' | 'webkit'`.
