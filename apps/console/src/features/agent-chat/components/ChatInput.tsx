@@ -52,33 +52,15 @@ import {
 // server-side and nothing is committed (ADR-0019).
 
 /**
- * The text's line box, in px, declared rather than inherited — it is the datum
- * the flanking controls align to, so it has to be a number this file owns.
- */
-const LINE_HEIGHT = 20;
-
-/**
- * A slot that centres its control on the text's line box.
+ * The paperclip's slot: leading, and vertically centred against the input.
  *
- * The controls flanking the text — the paperclip and send — must look optically
- * centred ON THE LINE, and bottom-aligning their boxes does not achieve that: a
- * control is taller than a line of text (it needs ~24px to stay a comfortable
- * target), so aligning box-bottoms leaves its centre sitting high, by half the
- * difference. Correcting that with a negative margin per control means a magic
- * number per icon size, and it silently goes wrong the moment an icon changes
- * size — which is exactly what happened here.
- *
- * So the slot is the line's height and the control centres INSIDE it,
- * overhanging symmetrically. The arithmetic then holds for any icon size and any
- * padding, and because the row is still `flex-end`, the controls stay level with
- * the LAST line as the field grows to its 5-row cap.
+ * `alignSelf` rather than the row's `alignItems`, so this positions ONLY the
+ * paperclip — send keeps the bottom alignment it has always had. Centring is
+ * measured against the input's own box, which this deliberately does not touch:
+ * an earlier attempt aligned to the text LINE instead by zeroing the input's
+ * padding and pinning its line-height, which moved the input itself.
  */
-const CONTROL_SLOT = {
-  height: `${LINE_HEIGHT}px`,
-  display: "flex",
-  alignItems: "center",
-  flexShrink: 0,
-} as const;
+const PAPERCLIP = { p: 0.5, alignSelf: "center", flexShrink: 0 } as const;
 
 export function ChatInput({
   value,
@@ -183,9 +165,8 @@ export function ChatInput({
             disabled={disabled}
             onRemove={(name) => onFilesChange(files.filter((f) => f.name !== name))}
           />
-          <Stack direction="row" spacing={0.25} sx={{ alignItems: "flex-end" }}>
-            <Box sx={CONTROL_SLOT}>
-              <Tooltip
+          <Stack direction="row" spacing={1} sx={{ alignItems: "flex-end" }}>
+            <Tooltip
                 title={
                   /* No extension list: it is 16 entries, which turns a hint into
                      a wall of text nobody reads. The picker already filters by
@@ -202,9 +183,9 @@ export function ChatInput({
                   size="small"
                   aria-label="Attach files to this message"
                   disabled={disabled}
-                  sx={{ p: 0.5 }}
-                >
-                  <Paperclip size={14} />
+                sx={PAPERCLIP}
+              >
+                <Paperclip size={14} />
                   <input
                     type="file"
                     accept={ATTACHMENT_ACCEPT}
@@ -217,9 +198,8 @@ export function ChatInput({
                       e.target.value = "";
                     }}
                   />
-                </IconButton>
-              </Tooltip>
-            </Box>
+              </IconButton>
+            </Tooltip>
             <InputBase
               fullWidth
               multiline
@@ -234,31 +214,20 @@ export function ChatInput({
                   onSubmit();
                 }
               }}
-              sx={{
-                fontSize: "0.875rem",
-                px: 0.5,
-                py: 0,
-                // Vertical padding zeroed so the text's box bottom IS the last
-                // line's bottom, and the line box pinned to the number the
-                // control slots align to. The breathing room lives on the
-                // composer box instead.
-                "& textarea": { lineHeight: `${LINE_HEIGHT}px` },
-              }}
+              sx={{ fontSize: "0.875rem", px: 0.5, alignItems: "flex-start" }}
             />
-            <Box sx={CONTROL_SLOT}>
-              <IconButton
-                color="primary"
-                aria-label="Send message"
-                // Text is required even with files attached: the shared TurnSpec
-                // validator rejects an empty chat turn, and a bare screenshot
-                // with no question is a turn the agent has to guess at.
-                disabled={disabled || !value.trim()}
-                onClick={onSubmit}
-                sx={{ p: 0.5 }}
-              >
-                <Send size={16} />
-              </IconButton>
-            </Box>
+            {/* Untouched by #428: same size, same padding, same alignment it has
+                always had. Text is still required even with files attached — the
+                shared TurnSpec validator rejects an empty chat turn, and a bare
+                screenshot with no question is a turn the agent has to guess. */}
+            <IconButton
+              color="primary"
+              aria-label="Send message"
+              disabled={disabled || !value.trim()}
+              onClick={onSubmit}
+            >
+              <Send size={18} />
+            </IconButton>
           </Stack>
         </Box>
         {/* Keyed and dismissed by position, not by name: one selection can
