@@ -65,6 +65,19 @@ describe("ProjectCreate", () => {
     expect(screen.getByText("Support triage agent")).toBeInTheDocument();
   });
 
+  it("clamps the echoed idea so a long one cannot push the form off-screen", () => {
+    reachNameStep();
+    const echo = screen.getByText(/Employees submit expense claims/);
+    // The clamp mechanism, as the project cards use it. Asserted through
+    // computed style because `sx` emits a class, not inline styles.
+    const css = getComputedStyle(echo);
+    expect(css.overflow).toBe("hidden");
+    expect(css.display).toBe("-webkit-box");
+    expect(css.getPropertyValue("-webkit-line-clamp")).toBe("2");
+    // Nothing is lost — the full idea stays reachable without leaving the step.
+    expect(echo).toHaveAttribute("title", expect.stringContaining("payroll") as unknown as string);
+  });
+
   it("says the repository is created, rather than implying it exists", () => {
     reachNameStep();
     expect(

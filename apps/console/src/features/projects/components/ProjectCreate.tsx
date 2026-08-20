@@ -204,7 +204,24 @@ export function ProjectCreate() {
               <Typography variant="h4" gutterBottom>
                 Name your project
               </Typography>
-              <Typography variant="body2" color="text.secondary">
+              {/* The idea is echoed to confirm "this is what you asked for",
+                  not to display it — the same transparency-device role it has
+                  beside /start (#528). Unclamped, a pasted multi-paragraph
+                  idea becomes a wall of text above the fields and pushes
+                  Create project below the fold. Nothing is lost: Back returns
+                  to the textarea holding the full text. Clamp matches the
+                  project-card description in ProjectsList. */}
+              <Typography
+                variant="body2"
+                color="text.secondary"
+                title={prompt}
+                sx={{
+                  display: "-webkit-box",
+                  WebkitLineClamp: 2,
+                  WebkitBoxOrient: "vertical",
+                  overflow: "hidden",
+                }}
+              >
                 “{prompt}”
               </Typography>
             </Box>
