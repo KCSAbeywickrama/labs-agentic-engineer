@@ -41,15 +41,38 @@ func (f *fakeApplier) Exists(_ context.Context, _, kind, _, name string) (bool, 
 	return f.existing[kind+"/"+name], nil
 }
 
-// selectFirst returns deps.multiSelect that selects the first addon only.
-func selectFirst(available []addons.Addon) func(string, []ui.SelectItem) ([]bool, bool) {
+// selectByID returns a multiSelect func that selects the addon with the given
+// ID. It fails the test immediately if no such addon exists in addons.Available.
+func selectByID(t *testing.T, id string) func(string, []ui.SelectItem) ([]bool, bool) {
+	t.Helper()
+	idx := -1
+	for i, a := range addons.Available {
+		if a.ID == id {
+			idx = i
+			break
+		}
+	}
+	if idx == -1 {
+		t.Fatalf("addon %q not found in addons.Available", id)
+	}
 	return func(_ string, items []ui.SelectItem) ([]bool, bool) {
 		sel := make([]bool, len(items))
-		if len(sel) > 0 {
-			sel[0] = true
-		}
+		sel[idx] = true
 		return sel, true
 	}
+}
+
+// addonByID returns the Addon with the given ID from addons.Available.
+// It fails the test immediately if the addon is absent.
+func addonByID(t *testing.T, id string) addons.Addon {
+	t.Helper()
+	for _, a := range addons.Available {
+		if a.ID == id {
+			return a
+		}
+	}
+	t.Fatalf("addon %q not found in addons.Available", id)
+	return addons.Addon{}
 }
 
 // existingForAddon pre-populates the fakeApplier with all VerifyResources of a.
@@ -67,7 +90,7 @@ func existingForAddon(a addons.Addon) map[string]bool {
 func TestRunAddonInstall_DeclinedConfirmation(t *testing.T) {
 	newApplierCalled := false
 	deps := addonDeps{
-		multiSelect: selectFirst(addons.Available),
+		multiSelect: selectByID(t, "thunder-app"),
 		confirm:     func(string) bool { return false },
 		installOperator: func(context.Context, string, addons.OperatorSpec) error {
 			t.Error("installOperator must not be called when confirmation is declined")
@@ -91,13 +114,13 @@ func TestRunAddonInstall_DeclinedConfirmation(t *testing.T) {
 // install fails, its dependent addon is skipped and the function returns nil
 // (other addons that succeed would still be applied; here only one is selected).
 func TestRunAddonInstall_OperatorFailureSkipsAddon(t *testing.T) {
-	first := addons.Available[0] // thunder-app — has an operator dependency
+	first := addonByID(t, "thunder-app")
 
 	fa := &fakeApplier{existing: existingForAddon(first)}
 	installCalled := false
 	newApplierCalls := 0
 	deps := addonDeps{
-		multiSelect: selectFirst(addons.Available),
+		multiSelect: selectByID(t, "thunder-app"),
 		confirm:     func(string) bool { return true },
 		installOperator: func(_ context.Context, _ string, op addons.OperatorSpec) error {
 			installCalled = true
@@ -126,13 +149,15 @@ func TestRunAddonInstall_OperatorFailureSkipsAddon(t *testing.T) {
 // TestRunAddonInstall_SuccessAppliesManifests verifies that when the operator
 // installs successfully, all manifests for the selected addon are applied.
 func TestRunAddonInstall_SuccessAppliesManifests(t *testing.T) {
-	first := addons.Available[0] // thunder-app
+	first := addonByID(t, "thunder-app")
 
 	fa := &fakeApplier{existing: existingForAddon(first)}
+	installCalled := false
 	deps := addonDeps{
-		multiSelect: selectFirst(addons.Available),
+		multiSelect: selectByID(t, "thunder-app"),
 		confirm:     func(string) bool { return true },
 		installOperator: func(context.Context, string, addons.OperatorSpec) error {
+			installCalled = true
 			return nil
 		},
 		newApplier: func(string) (manifestApplier, error) {
@@ -142,6 +167,9 @@ func TestRunAddonInstall_SuccessAppliesManifests(t *testing.T) {
 
 	if err := runAddonInstall(context.Background(), deps); err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if !installCalled {
+		t.Error("installOperator must be called on the success path")
 	}
 	if got, want := len(fa.applied), len(first.Manifests); got != want {
 		t.Errorf("applied %d manifests, want %d", got, want)
