@@ -239,6 +239,12 @@ step bar and no second progress indicator competing with the overview's cards. D
 [#527](https://github.com/wso2/labs-agentic-engineer/issues/527);
 [drawn here](https://claude.ai/code/artifact/fe3fc0c0-6ecd-49ed-9f75-ed65c2220cb1).
 
+**The PRD leads Requirements.** Everything else in that group elaborates it — a feature file is
+depth on a story the PRD defines — so the document the whole flow is written against cannot sit
+below its own footnotes. Path order alone puts `features/…` above `prd.md`, which
+[#579](https://github.com/wso2/labs-agentic-engineer/issues/579) made routine by giving `/expand` a
+lens on every story; the list pins the PRD instead, and everything behind it keeps path order.
+
 ### Section state
 
 | state | shown as |

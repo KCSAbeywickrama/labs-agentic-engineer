@@ -49,7 +49,7 @@ import {
   useProjectTags,
 } from "../../projects/api/queries";
 import { useDesignDependencies, useSpecFileContent, useSpecFiles } from "../api/queries";
-import { toSpecEntry } from "../api/mapping";
+import { PRD_PATH, toSpecEntry } from "../api/mapping";
 import { computeDependencyUsedBy } from "../lib/dependencyUsedBy";
 import { useCollabSpec } from "../collab/useCollabSpec";
 import { SpecQuestionForm } from "./SpecQuestionForm";
@@ -78,9 +78,6 @@ import { useSession } from "../../../auth/SessionContext";
 
 type PreflightItem = components["schemas"]["PreflightItem"];
 type BuildInputItem = components["schemas"]["BuildInputItem"];
-
-/** The one file that carries the code lenses (#579). */
-const PRD_PATH = "specs/requirements/prd.md";
 
 // Full-screen spec workspace (#80), per the oxygen-ui sample's
 // LoginEditorView pattern: fullWidth/noPadding page, own header bar,
