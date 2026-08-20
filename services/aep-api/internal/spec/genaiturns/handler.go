@@ -64,23 +64,35 @@ const createTurnMaxInstructionBytes = 64 << 10
 const genaiStreamKeepAliveEvery = 15 * time.Second
 
 func (h *Handler) CreateTurn(ctx context.Context, request gen.CreateTurnRequestObject) (gen.CreateTurnResponseObject, error) {
+	// `JSONBody`, not `Body`: create-turn now declares a second content type
+	// (multipart, for chat attachments — console #428), and the generated request
+	// object names one field per content type once there is more than one.
+	//
+	// The multipart arm is NOT implemented here yet. It is the backend half of
+	// #428 and lands through its own handshake, so a multipart send is refused
+	// explicitly rather than falling through to "request body is required",
+	// which would send the caller looking for a body it did in fact send.
+	if request.MultipartBody != nil {
+		return nil, apierr.BadRequest(
+			"multipart create-turn (chat attachments) is not implemented on this server yet")
+	}
 	// The retired edge capped this body at 64 KiB (it carries no file content —
 	// useCase + instruction + target); the edge-wide 10 MiB cap alone would be
 	// a 160x loosening on a payload that is buffered whole and forwarded to
 	// the agents service.
-	if request.Body != nil && len(request.Body.Instruction) > createTurnMaxInstructionBytes {
+	if request.JSONBody != nil && len(request.JSONBody.Instruction) > createTurnMaxInstructionBytes {
 		return nil, apierr.New(http.StatusRequestEntityTooLarge, "request_too_large",
 			"instruction exceeds the size limit", nil)
 	}
 	org := tenant.BoundOrgFromContext(ctx)
-	if request.Body == nil {
+	if request.JSONBody == nil {
 		return nil, apierr.BadRequest("request body is required")
 	}
 	turnID, err := h.genai.StartTurn(ctx, org, request.ProjectName, spec.TurnInput{
 		ConversationID: request.ConversationID,
-		Instruction:    request.Body.Instruction,
-		Target:         request.Body.Target,
-		Collab:         request.Body.Collab,
+		Instruction:    request.JSONBody.Instruction,
+		Target:         request.JSONBody.Target,
+		Collab:         request.JSONBody.Collab,
 	})
 	if err != nil {
 		if conflict, ok := turnConflictOf(err); ok {
