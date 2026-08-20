@@ -1,6 +1,8 @@
 # ADR-0006 — The runner proves endpoint reachability, and pins the endpoints for curl
 
-**Status:** Accepted · shipped 2026-08-19
+**Status:** Accepted · not yet shipped — awaiting a runner image rebuild
+(`make build-runner FORCE=1`, which is what carries the `SKILL.md` edit into a
+run) and a live validation cycle. Record the shipped date once both are done.
 
 ## Context
 
@@ -109,3 +111,27 @@ used as given.
   affect the run's other HTTP traffic (the test-credentials callback, `gh`, git).
 - The `.curlrc` lives in the runner's home directory, outside the git work tree,
   so unlike `.aep/` there is no path by which it could be committed.
+
+## How the curl half is verified
+
+The unit tests own what this repo can assert: the `resolve = host:port:address`
+syntax, the `0600` mode, the path, and the `.localhost`-only filter. That curl
+*loads* `$CURL_HOME/.curlrc` and applies `resolve` is third-party behaviour, and
+CI has no Docker step and never builds `aep-runner:dev` — so it is checked by
+hand against the image, and re-checked whenever the writer changes:
+
+```sh
+# 1. The mechanism, in the runner image (curl 7.88.1):
+docker run --rm --entrypoint sh aep-runner:dev -c '
+  mkdir -p /tmp/h
+  printf "resolve = probe.openchoreoapis.localhost:80:10.99.99.99\n" > /tmp/h/.curlrc
+  CURL_HOME=/tmp/h curl -sv -m 2 -o /dev/null http://probe.openchoreoapis.localhost/ 2>&1 |
+    grep -iE "added|trying"'
+# expect: "Added …:80:10.99.99.99 to DNS cache" then "Trying 10.99.99.99:80"
+# (without the config: "Trying 127.0.0.1:80" — RFC 6761)
+
+# 2. End to end, from a pod, against a real deployed endpoint:
+#      without a .curlrc  → curl exits 7
+#      with one pinning the gateway ClusterIP → HTTP 200
+```
+
