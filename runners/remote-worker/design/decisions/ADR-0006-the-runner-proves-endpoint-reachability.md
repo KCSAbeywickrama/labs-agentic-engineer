@@ -1,8 +1,6 @@
 # ADR-0006 — The runner proves endpoint reachability, and pins the endpoints for curl
 
-**Status:** Accepted · not yet shipped — awaiting a runner image rebuild
-(`make build-runner FORCE=1`, which is what carries the `SKILL.md` edit into a
-run) and a live validation cycle. Record the shipped date once both are done.
+**Status:** Accepted
 
 ## Context
 
