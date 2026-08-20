@@ -119,12 +119,59 @@ describe("ChatInput attachments", () => {
     expect(onFilesChange.mock.calls[0]?.[0].map((f: File) => f.name)).toEqual(["mockup.pdf"]);
   });
 
-  it("renders a card per attached file, with its type badge", () => {
-    renderInput({ files: [fileOf("mockup.pdf"), fileOf("rows.csv")] });
-    expect(screen.getByText("mockup.pdf")).toBeInTheDocument();
+  it("shows an image as a thumbnail and never draws its name", () => {
+    // A thumbnail answers "did I attach the right screenshot?"; the file name
+    // ("Screenshot 2026-08-20 at 11.42.13.png") answers nothing and costs the
+    // width of the whole strip.
+    renderInput({ files: [fileOf("Screenshot 2026-08-20 at 11.42.13.png")] });
+    expect(screen.getByTestId("attachment-preview-image")).toBeInTheDocument();
+    expect(screen.queryByTestId("attachment-preview-named")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Screenshot 2026-08-20 at 11.42.13.png"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps the image's name reachable as alt text, not as visible text", () => {
+    // Not drawn is not the same as lost: a thumbnail with no accessible name is
+    // invisible to a screen reader.
+    renderInput({ files: [fileOf("checkout-error.png")] });
+    expect(screen.getByAltText("checkout-error.png")).toBeInTheDocument();
+  });
+
+  it("shows the NAME for anything a browser cannot draw", () => {
+    renderInput({ files: [fileOf("revised-spec.pdf"), fileOf("rows.csv")] });
+    expect(screen.getByText("revised-spec.pdf")).toBeInTheDocument();
     expect(screen.getByText("rows.csv")).toBeInTheDocument();
-    expect(screen.getByText("PDF")).toBeInTheDocument();
-    expect(screen.getByText("CSV")).toBeInTheDocument();
+    expect(screen.queryByTestId("attachment-preview-image")).not.toBeInTheDocument();
+  });
+
+  it("treats a PDF as un-previewable even though the model reads it natively", () => {
+    // "Native to the model" and "drawable by an <img>" are different questions
+    // and coincide only for the four image types.
+    renderInput({ files: [fileOf("mockups.pdf")] });
+    expect(screen.getByTestId("attachment-preview-named")).toBeInTheDocument();
+    expect(screen.getByText("mockups.pdf")).toBeInTheDocument();
+  });
+
+  it("mixes both kinds in one strip", () => {
+    renderInput({ files: [fileOf("shot.png"), fileOf("notes.md")] });
+    expect(screen.getByTestId("attachment-preview-image")).toBeInTheDocument();
+    expect(screen.getByTestId("attachment-preview-named")).toBeInTheDocument();
+    expect(screen.getByText("notes.md")).toBeInTheDocument();
+    expect(screen.queryByText("shot.png")).not.toBeInTheDocument();
+  });
+
+  it("renders the attachment strip inside the composer, not beside it", () => {
+    renderInput({ files: [fileOf("shot.png")] });
+    const composer = screen.getByTestId("chat-composer-dropzone");
+    expect(composer).toContainElement(screen.getByTestId("attachment-strip"));
+    // The attach control and send live in the same box, so the whole thing reads
+    // as one input rather than a row of three controls.
+    expect(composer).toContainElement(
+      screen.getByRole("button", { name: "Attach files to this message" }),
+    );
+    expect(composer).toContainElement(screen.getByRole("button", { name: "Send message" }));
+    expect(composer).toContainElement(screen.getByRole("textbox"));
   });
 
   it("keeps the remove control in the tab order for keyboard users", () => {

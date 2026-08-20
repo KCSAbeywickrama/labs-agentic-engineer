@@ -23,14 +23,13 @@ import {
   Chip,
   Divider,
   IconButton,
-  InputAdornment,
+  InputBase,
   Stack,
-  TextField,
   Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
 import { FolderOpen, Paperclip, Send } from "@wso2/oxygen-ui-icons-react";
-import { AttachmentCardStrip } from "../../../components/AttachmentCard";
+import { AttachmentPreviewStrip } from "../../../components/AttachmentPreview";
 import {
   ATTACHMENT_ACCEPT,
   MAX_ATTACHMENT_FILES,
@@ -39,13 +38,18 @@ import {
 } from "../lib/chatAttachments";
 
 // The composer (task 3): context chip, textarea, send. Disabled while a turn
-// runs; when the running turn is a TEAMMATE's, `hint` explains why so the
-// input reads as intentionally locked, not broken.
+// runs; when the running turn is a TEAMMATE's, `hint` explains why so the input
+// reads as intentionally locked, not broken.
 //
-// Attachments (#428): the paperclip and the drop target sit here, and the whole
-// composer is the drop zone — same treatment as the create view's
-// PromptComposer, and the same card. Attachments are conversation-scoped model
-// content: nothing is stored server-side and nothing is committed (ADR-0019).
+// Attachments (#428) live INSIDE the composer. That is why this is a bordered
+// Box around a bare `InputBase` rather than an outlined `TextField`: the
+// attachments, the attach control and send all sit within one border, and MUI's
+// adornment slots lay out horizontally BESIDE the textarea, so they cannot put a
+// row of thumbnails above it. Same construction as the create view's
+// PromptComposer, for the same reason.
+//
+// Attachments are conversation-scoped model content: nothing is stored
+// server-side and nothing is committed (ADR-0019).
 export function ChatInput({
   value,
   onChange,
@@ -122,9 +126,9 @@ export function ChatInput({
             {hint}
           </Typography>
         )}
-        {/* The drop target is the input row plus its cards — not the context row
-            above, whose Actions menu and session chip have nothing to do with
-            files. */}
+        {/* The composer IS the drop target — the whole box, so there is no second
+            affordance to find. The context row above is deliberately outside it:
+            its Actions menu and session chip have nothing to do with files. */}
         <Box
           data-testid="chat-composer-dropzone"
           onDragOver={(e: DragEvent) => {
@@ -134,25 +138,62 @@ export function ChatInput({
           onDragLeave={() => setDragOver(false)}
           onDrop={drop}
           sx={{
-            p: 1,
+            px: 0.75,
+            py: 0.5,
             borderRadius: 2,
             border: "1px solid",
-            borderColor: dragOver ? "primary.main" : "transparent",
-            bgcolor: dragOver ? "action.hover" : "transparent",
+            borderColor: dragOver ? "primary.main" : "divider",
+            bgcolor: dragOver ? "action.hover" : "background.paper",
             transition: "border-color 120ms, background-color 120ms",
+            "&:focus-within": { borderColor: "primary.main" },
           }}
         >
-          <AttachmentCardStrip
-            names={files.map((f) => f.name)}
+          <AttachmentPreviewStrip
+            files={files}
             disabled={disabled}
             onRemove={(name) => onFilesChange(files.filter((f) => f.name !== name))}
           />
-          <Stack direction="row" spacing={1} sx={{ alignItems: "flex-end" }}>
-            <TextField
+          <Stack direction="row" spacing={0.25} sx={{ alignItems: "flex-end" }}>
+            <Tooltip
+              title={
+                /* No extension list: it is 16 entries, which turns a hint into a
+                   wall of text nobody reads. The picker already filters by
+                   `accept`, and picking an unsupported file answers with a
+                   rejection naming the accepted set — available exactly where it
+                   matters, at the point of failure. */
+                `Attach files to this message — a screenshot, a PDF, a data sample. ` +
+                `They stay in this conversation and are never committed. ` +
+                `Up to ${MAX_ATTACHMENT_FILES} files, 5 MB each, 15 MB total.`
+              }
+            >
+              <IconButton
+                component="label"
+                size="small"
+                aria-label="Attach files to this message"
+                disabled={disabled}
+                // Tight, and pinned to the bottom of the row so it stays level
+                // with the last line as the field grows to its 5-row cap.
+                sx={{ p: 0.375, flexShrink: 0 }}
+              >
+                <Paperclip size={14} />
+                <input
+                  type="file"
+                  accept={ATTACHMENT_ACCEPT}
+                  multiple
+                  hidden
+                  disabled={disabled}
+                  onChange={(e) => {
+                    addFiles(e.target.files);
+                    // Same file re-selected after a remove must re-fire onChange.
+                    e.target.value = "";
+                  }}
+                />
+              </IconButton>
+            </Tooltip>
+            <InputBase
               fullWidth
               multiline
               maxRows={5}
-              size="small"
               placeholder={hint ? "Waiting for the current turn…" : "Ask the agent to edit the spec…"}
               value={value}
               disabled={disabled}
@@ -163,69 +204,7 @@ export function ChatInput({
                   onSubmit();
                 }
               }}
-              slotProps={{
-                input: {
-                  // The paperclip lives INSIDE the field, as a start adornment,
-                  // so the composer reads as one control rather than a row of
-                  // three. On a multiline field the adornment would otherwise
-                  // centre itself against a grown box, so it is pinned to the
-                  // bottom — level with the first line of text when the field is
-                  // one row tall, and staying put as it grows.
-                  startAdornment: (
-                    <InputAdornment
-                      position="start"
-                      // Flush to the field's left edge: the adornment's own
-                      // default start-margin is removed and the field's left
-                      // padding is collapsed below (`sx` on the input root), so
-                      // the icon sits at the border rather than indented.
-                      sx={{ alignSelf: "flex-end", mb: 0.25, ml: 0, mr: 0.5 }}
-                    >
-                      <Tooltip
-                        title={
-                          /* No extension list: it is 16 entries, which turns a
-                             hint into a wall of text nobody reads. The picker
-                             already filters by `accept`, and picking an
-                             unsupported file answers with a rejection naming the
-                             accepted set — available exactly where it matters, at
-                             the point of failure. */
-                          `Attach files to this message — a screenshot, a PDF, a data sample. ` +
-                          `They stay in this conversation and are never committed. ` +
-                          `Up to ${MAX_ATTACHMENT_FILES} files, 5 MB each, 15 MB total.`
-                        }
-                      >
-                        <IconButton
-                          component="label"
-                          size="small"
-                          aria-label="Attach files to this message"
-                          disabled={disabled}
-                          // Tighter than a standalone IconButton: it sits within
-                          // the field's own padding, so the default 8px hit area
-                          // pushes the text cursor visibly off-centre.
-                          sx={{ p: 0.125 }}
-                        >
-                          <Paperclip size={13} />
-                          <input
-                            type="file"
-                            accept={ATTACHMENT_ACCEPT}
-                            multiple
-                            hidden
-                            disabled={disabled}
-                            onChange={(e) => {
-                              addFiles(e.target.files);
-                              // Same file re-selected after a remove must re-fire onChange.
-                              e.target.value = "";
-                            }}
-                          />
-                        </IconButton>
-                      </Tooltip>
-                    </InputAdornment>
-                  ),
-                  // Collapse the field's own left padding so the adornment above
-                  // can reach the border. The textarea keeps its own inset, so
-                  // the typed text does not end up flush against the icon.
-                  sx: { pl: 0.25 },
-                },
-              }}
+              sx={{ fontSize: "0.875rem", px: 0.5, alignItems: "flex-start" }}
             />
             <IconButton
               color="primary"
@@ -235,8 +214,9 @@ export function ChatInput({
               // no question is a turn the agent has to guess at.
               disabled={disabled || !value.trim()}
               onClick={onSubmit}
+              sx={{ p: 0.5, flexShrink: 0 }}
             >
-              <Send size={18} />
+              <Send size={16} />
             </IconButton>
           </Stack>
         </Box>

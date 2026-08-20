@@ -97,6 +97,21 @@ export function isAcceptedAttachment(name: string): boolean {
 }
 
 /**
+ * The extensions a browser can render as a picture, so an attachment can show
+ * ITSELF instead of its name.
+ *
+ * Deliberately NOT the same set as `NATIVE_ATTACHMENT_EXTENSIONS`: `.pdf` is
+ * read natively by the model but an `<img>` cannot display it, so a PDF falls
+ * back to its name. "Native to the model" and "previewable in the composer" are
+ * different questions and only coincide for the four image types.
+ */
+const PREVIEWABLE_EXTENSIONS = new Set<string>(["png", "jpg", "jpeg", "gif", "webp"]);
+
+export function isImageAttachment(name: string): boolean {
+  return PREVIEWABLE_EXTENSIONS.has(extensionOf(name));
+}
+
+/**
  * The badge on an attachment card — the extension, upper-cased (PDF, MD, PNG).
  * Not the file's size: an oversized file never becomes a card, it becomes a
  * rejection notice, so size has nothing left to tell the user here.

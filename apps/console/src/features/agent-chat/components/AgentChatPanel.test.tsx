@@ -380,13 +380,15 @@ describe("AgentChatPanel — /<skill> composer shortcut", () => {
   it("clears text and cards once the turn is accepted", async () => {
     renderPanel();
     attach(["error.png"]);
-    expect(screen.getByText("error.png")).toBeInTheDocument();
+    // An image attachment draws no name, so its identity in the DOM is the alt
+    // text on the thumbnail.
+    expect(screen.getByAltText("error.png")).toBeInTheDocument();
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "look" } });
     await act(async () => {
       fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" });
     });
     expect(screen.getByRole("textbox")).toHaveValue("");
-    expect(screen.queryByText("error.png")).not.toBeInTheDocument();
+    expect(screen.queryByAltText("error.png")).not.toBeInTheDocument();
   });
 
   it("KEEPS text and cards when the send is refused", async () => {
@@ -400,7 +402,7 @@ describe("AgentChatPanel — /<skill> composer shortcut", () => {
       fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" });
     });
     expect(screen.getByRole("textbox")).toHaveValue("look");
-    expect(screen.getByText("error.png")).toBeInTheDocument();
+    expect(screen.getByAltText("error.png")).toBeInTheDocument();
   });
 
   // `/start` is the ONE command the server expands: only it can append the idea
