@@ -95,6 +95,7 @@ func TestRunAddonInstall_OperatorFailureSkipsAddon(t *testing.T) {
 
 	fa := &fakeApplier{existing: existingForAddon(first)}
 	installCalled := false
+	newApplierCalls := 0
 	deps := addonDeps{
 		multiSelect: selectFirst(addons.Available),
 		confirm:     func(string) bool { return true },
@@ -103,6 +104,7 @@ func TestRunAddonInstall_OperatorFailureSkipsAddon(t *testing.T) {
 			return errors.New("simulated operator install failure")
 		},
 		newApplier: func(string) (manifestApplier, error) {
+			newApplierCalls++
 			return fa, nil
 		},
 	}
@@ -112,6 +114,9 @@ func TestRunAddonInstall_OperatorFailureSkipsAddon(t *testing.T) {
 	}
 	if !installCalled {
 		t.Error("installOperator must be called")
+	}
+	if newApplierCalls != 0 {
+		t.Errorf("newApplier called %d time(s), want 0 — applier must not be built when all operators fail", newApplierCalls)
 	}
 	if len(fa.applied) != 0 {
 		t.Errorf("expected no manifests applied after operator failure, got %d", len(fa.applied))
