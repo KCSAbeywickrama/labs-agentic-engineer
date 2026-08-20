@@ -44,6 +44,14 @@ import (
 // generate-workload-cr step is the only writer of the Workload CR. The
 // BFF reads ReleaseBindings via ListDeployments.
 type ComponentService interface {
+	// ModelAccessEnvVars yields the MODEL_* env vars an ai-agent needs, from
+	// the org's connected key. On the interface rather than the concrete type
+	// so DeploymentService's wiring is checked by the COMPILER: the previous
+	// shape left it reachable only by type assertion, app.go never wired it,
+	// and every ai-agent deployed with no model key and 500'd on its first
+	// turn. Nothing failed at deploy time, which is what made it expensive.
+	ModelAccessEnvVars(ctx context.Context, ocOrgID string) ([]openchoreo.WorkflowEnvVarRef, error)
+
 	ListComponents(ctx context.Context, orgName, projectName string, limit int, cursor string) (*gen.ComponentList, error)
 	GetComponent(ctx context.Context, orgName, projectName, componentName string) (*gen.Component, error)
 	CreateComponent(ctx context.Context, orgName, projectName string, req *openchoreo.CreateComponentRequest) (*gen.Component, error)

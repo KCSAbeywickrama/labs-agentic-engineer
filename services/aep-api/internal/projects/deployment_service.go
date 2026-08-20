@@ -102,6 +102,15 @@ func (s *DeploymentService) SetIDPService(idp OrgPublisher) {
 	}
 }
 
+// SetModelAccess wires an ai-agent's model access. Optional like the others,
+// but its absence is invisible at deploy time and only shows up as a 500 on
+// the agent's first turn — which is how it shipped once, unwired.
+func (s *DeploymentService) SetModelAccess(m ModelAccessProvider) {
+	if s != nil {
+		s.modelAccess = m
+	}
+}
+
 // SetConfigSources wires the two projections whose values ride the binding's
 // workload overrides.
 func (s *DeploymentService) SetConfigSources(envVars ComponentEnvVarReader, files RuntimeFileProvider) {

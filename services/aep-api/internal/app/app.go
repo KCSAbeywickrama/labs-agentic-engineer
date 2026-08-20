@@ -1137,6 +1137,11 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// The deployment service's two config inputs, wired here because both are
 	// built after it.
 	deploymentService.SetConfigSources(configService, runtimeConfigSvc)
+	// An ai-agent's model access. Without this the deploy still succeeds and
+	// the agent still starts — it simply comes up with no MODEL_* and fails
+	// its first turn with an upstream 401 ("x-api-key header is required"),
+	// which is a long way from the missing wire that caused it.
+	deploymentService.SetModelAccess(componentService)
 	configService.SetConverger(deploymentService)
 	// The cross-project access grant is the only deploy observer left. The two
 	// that rode beside it — the env-config.js re-emit and the api-configuration

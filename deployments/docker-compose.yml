@@ -268,6 +268,16 @@ services:
       - "api.openchoreo.localhost:host-gateway"
       - "thunder.openchoreo.localhost:host-gateway"
       - "observer.openchoreo.localhost:host-gateway"
+      # The DATA-plane gateway, where deployed components serve. The Test tab's
+      # invoke relay calls a component at its own EndpointURL, and that URL is
+      # minted for the BROWSER (`<env>-<org>.openchoreoapis.localhost:19080`).
+      # A `.localhost` name resolves to 127.0.0.1 INSIDE this container, where
+      # nothing listens on 19080 — the k3d serverlb publishes it on the docker
+      # HOST — so every relayed call failed with connection refused while the
+      # same URL worked fine from the browser. Only local dev needs this: in a
+      # real deployment the gateway host resolves through DNS.
+      # One entry per <environment>-<org>; add another if you run more.
+      - "development-default.openchoreoapis.localhost:host-gateway"
 
   # ---------------------------------------------------------------------------
   # agents — file-mutation agents service (services/agents). Serves the
