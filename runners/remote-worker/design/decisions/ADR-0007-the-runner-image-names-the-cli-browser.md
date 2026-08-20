@@ -50,11 +50,12 @@ sandbox branch that works unprivileged — both blockers, one value.
   resolve to `/ms-playwright/chromium-<rev>/chrome-linux/chrome`.
   `@playwright/test` is untouched — it never forces a channel and does not read
   this variable.
-- Explicit overrides still fail. `--browser=chrome`/`msedge` are absent by this
-  decision; `--browser=firefox`/`webkit` fail for an unrelated reason — the
-  Dockerfile's `playwright-cli install-browser` downloads those binaries but
-  system dependencies are installed for chromium only, so the image carries
-  browser bytes it cannot launch. Separate cleanup.
+- Explicit overrides still fail, and now fail honestly. `--browser=chrome`/
+  `msedge` are absent by this decision; `--browser=firefox`/`webkit` are absent
+  because `playwright-cli install-browser` is given `chromium` explicitly. With
+  no argument it also fetched firefox and webkit — ~546MB the chromium-only
+  `--with-deps` line never gave system libraries, so they were downloadable but
+  unlaunchable.
 - CI has no Docker step and never builds `aep-runner:dev`, so a
   `PLAYWRIGHT_CLI_VERSION` bump has to be re-checked by hand: `playwright-cli
   open <url>` in the built image should print ``Browser `default` opened with pid

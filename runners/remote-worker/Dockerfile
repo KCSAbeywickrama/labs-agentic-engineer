@@ -105,10 +105,15 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     PLAYWRIGHT_MCP_BROWSER=chromium
 RUN npm install -g "@playwright/test@${PLAYWRIGHT_VERSION}" "@playwright/cli@${PLAYWRIGHT_CLI_VERSION}" \
     && playwright install --with-deps chromium \
-    # playwright-cli may bundle a different playwright build; bake its
-    # browser too so first use at task time stays offline. Non-fatal:
+    # playwright-cli bundles a different playwright build, and browser
+    # revisions are pinned per build (it wants chromium 1229 where
+    # @playwright/test above wants 1228), so this second install is not
+    # redundant — it is what keeps the CLI's first use at task time offline.
+    # Named explicitly: with no argument it also fetches firefox and webkit,
+    # ~546MB whose system dependencies the chromium-only line above never
+    # installs, so they could be downloaded but never launched. Non-fatal:
     # worst case it downloads at runtime.
-    && (playwright-cli install-browser || true) \
+    && (playwright-cli install-browser chromium || true) \
     && chmod -R a+rX /ms-playwright
 
 RUN groupadd -r aep \
