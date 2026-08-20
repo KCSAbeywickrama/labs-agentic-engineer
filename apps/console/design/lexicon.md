@@ -30,7 +30,7 @@ yet a product word.
 5. **The product is "Agentic Engineer", never "AEP".** The acronym is an internal
    convenience; the app brands itself Agentic Engineer in its header, page title and
    onboarding, so every user-facing string does too.
-6. **Don't name the system's behaviour** — name the user's situation. "Build refused" is the
+6. **Don't name the system's behavior** — name the user's situation. "Build refused" is the
    system describing itself; "Not ready to build yet" describes them.
 
 ## The spec workspace
@@ -61,7 +61,7 @@ was not happening.
 |---|---|
 | Heading | **What do you want to build?** |
 | Subtitle | *Describe it in your own words — rough is fine, or upload a product requirements document.* |
-| Idea echoed on the name step | **Prompt:** *&lt;the idea&gt;* — **one line, ellipsised** |
+| Idea echoed on the name step | **Prompt:** *&lt;the idea&gt;* — **one line, ellipsized** |
 | Repository field helper | *Agentic Engineer creates this repository in your organization. Your specs and source code live here, and it stays yours.* |
 | Name already taken | *That repository name already exists in `<org>` — pick another.* |
 | While creating | **Creating your project…** |
@@ -172,9 +172,6 @@ Every stage card says the same things in the same slots, so the pattern is learn
 | running | *Building 3 of 7 tasks* | yes | none |
 | settled | *Built* | yes | view |
 | failed | *Build failed* | yes | fix |
-
-The running / settled / failed rows for Build and Deploy are filled in when the post-Build
-journey is worked; the grammar is fixed now.
 
 **Ghost cards stay clickable.** Their destination teaches what the section is for
 ([#533](https://github.com/wso2/labs-agentic-engineer/issues/533)), so the click is a lesson, not
@@ -339,7 +336,7 @@ stories:   z.array(z.number().int().positive()).optional(),
 decisions: z.array(z.number().int().positive()).optional(),   // new
 ```
 
-Validation criteria trace to **stories** — behaviour — and need no decision citations.
+Validation criteria trace to **stories** — behavior — and need no decision citations.
 
 ### What goes outdated
 
@@ -388,7 +385,7 @@ must not read alike, and a request must take the user to the thing. Alerts are r
 these are not.
 
 **The bell and the Alerts page are deliberately different scopes.** The bell is the notification
-centre — incidents *and* requests. The **Alerts** page stays the SRE agent's incident list across
+center — incidents *and* requests. The **Alerts** page stays the SRE agent's incident list across
 projects. Recorded so the divergence reads as a decision rather than drift.
 
 **The status chip does not carry this.** Two words cannot say *which* question, cannot carry an
@@ -546,9 +543,17 @@ transcript is [#530](https://github.com/wso2/labs-agentic-engineer/issues/530)'s
 
 ## Navigation
 
-All six sections stay visible and enabled from project creation
-([#522](https://github.com/wso2/labs-agentic-engineer/issues/522)). `Validation` → **`Validations`**,
-per the plural rule.
+The project sidebar is, in order: **Overview · Spec · Builds · Deployments · Validations ·
+Issues**. All six stay visible and enabled from project creation
+([#522](https://github.com/wso2/labs-agentic-engineer/issues/522)). `Validation` →
+**`Validations`** is the only rename, per the plural rule.
+
+> Two older documents disagree with that list and with each other, both predating this file.
+> **ADR-0010** enumerates five and calls Builds *Tasks*; **`PRD.md`** enumerates five and calls
+> Spec *Specs & Design*. Neither mentions Validation, which ships. `PRD.md` is corrected alongside
+> this file; ADR-0010's decision (the sidebar swaps wholesale to project sections) still holds and
+> only its illustrative list is stale, so it is left for an explicit supersede rather than edited
+> in place.
 
 `Validations` (the runs) and `Acceptance criteria` (what they check) no longer share a word, so
 the link between them is made explicit in the section's empty state

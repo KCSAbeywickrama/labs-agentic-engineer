@@ -290,12 +290,13 @@ version names what the build implements, not the resulting code state.
 _Avoid_: release, build number.
 
 **Open question**:
-A numbered entry under `## Open Questions` in the PRD that is not marked *deferred* — a
-recorded gap in the spec. Blocks design generation until it is answered or deferred, making
-it the only spec-content gate in the product. Deliberately a property of the *document*, not
-of any conversation.
+A numbered entry under `## Open Questions` in the PRD — a recorded gap in the spec, and
+specifically one the agent may not close by assuming: a fact only the user holds. Deliberately
+a property of the *document*, not of any conversation. It **gates nothing** — design and build
+both proceed with open questions outstanding. An entry marked *deferred* is one the user has
+declined for now, which tells the agent to stop raising it rather than releasing any gate.
 _Avoid_: interview question (the agent's live request for the user's input, which is a
-mechanism for closing an open question, not the thing itself); blocker.
+mechanism for closing an open question, not the thing itself); blocker (it blocks nothing).
 
 **Dirty (spec)**:
 The spec content has moved past the latest spec version in committed truth.
