@@ -43,7 +43,7 @@ export type ChatResult =
   | ({ kind: "reply" } & ChatWireReply)
   | { kind: "conversation-expired" }
   | { kind: "session-expired" }
-  | { kind: "upstream-error"; status: number; body: string }
+  | { kind: "upstream-error"; status: number; body: string; truncated: boolean }
   | { kind: "not-reachable" }
   | { kind: "invoke-error"; message: string };
 
@@ -82,15 +82,27 @@ export async function sendChat(
   if (data.status === 404) return { kind: "conversation-expired" };
   if (data.status === 401) return { kind: "session-expired" };
   if (data.status !== 200) {
-    return { kind: "upstream-error", status: data.status, body: data.body };
+    return {
+      kind: "upstream-error",
+      status: data.status,
+      body: data.body,
+      truncated: data.truncated,
+    };
   }
 
   const reply = parseReply(data.body);
+  // A 200 the tester cannot read is still evidence — show it raw rather than
+  // swallowing it into a generic failure. `truncated` rides along because a
+  // body cut at the relay's cap can never parse, and the cut is the whole
+  // explanation for why this 200 is unreadable.
   return reply
     ? { kind: "reply", ...reply }
-    : // A 200 the tester cannot read is still evidence — show it raw rather
-      // than swallowing it into a generic failure.
-      { kind: "upstream-error", status: 200, body: data.body };
+    : {
+        kind: "upstream-error",
+        status: 200,
+        body: data.body,
+        truncated: data.truncated,
+      };
 }
 
 function parseReply(body: string): ChatWireReply | null {

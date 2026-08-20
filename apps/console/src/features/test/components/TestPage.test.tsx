@@ -59,6 +59,9 @@ const DEFAULT_DEPLOYMENTS = [
 ];
 let mockComponents: Array<Record<string, unknown>> = DEFAULT_COMPONENTS;
 let mockDeployments: Array<Record<string, unknown>> = DEFAULT_DEPLOYMENTS;
+// The poller's own in-flight flag. The stub is synchronous, so a test has to
+// say so explicitly to exercise the first paint, before any deployment is known.
+let mockDeploymentsPending = false;
 
 vi.mock("../../projects/api/queries", () => ({
   useProjectComponents: () => ({
@@ -69,8 +72,8 @@ vi.mock("../../projects/api/queries", () => ({
     refetch: vi.fn(),
   }),
   useComponentsDeployments: () => ({
-    isPending: false,
-    deployments: mockDeployments,
+    isPending: mockDeploymentsPending,
+    deployments: mockDeploymentsPending ? [] : mockDeployments,
     failedCount: 0,
   }),
 }));
@@ -104,13 +107,13 @@ function invokeCall(n: number) {
 }
 
 /** An invoke that relayed successfully, carrying an upstream response. */
-function relayed(status: number, body: unknown) {
+function relayed(status: number, body: unknown, truncated = false) {
   return {
     data: {
       status,
       contentType: "application/json",
       body: typeof body === "string" ? body : JSON.stringify(body),
-      truncated: false,
+      truncated,
     },
     error: undefined,
     response: { status: 200 } as Response,
@@ -143,6 +146,7 @@ async function send(message: string) {
 beforeEach(() => {
   mockComponents = DEFAULT_COMPONENTS;
   mockDeployments = DEFAULT_DEPLOYMENTS;
+  mockDeploymentsPending = false;
   mockPOST.mockReset();
 });
 
@@ -162,6 +166,21 @@ describe("TestPage — the agent list", () => {
     render(<TestPage projectName="acme" />);
 
     expect(screen.getByText("No agents in this project.")).toBeInTheDocument();
+  });
+
+  // Regression: `readyNames` is empty until the poller answers, so reading
+  // "no ready deployment" as "unreachable" libelled every deployed agent on
+  // first paint — and disabled its input — until the first poll returned.
+  it("does not call an agent unreachable while the deployments read is still in flight", () => {
+    mockDeploymentsPending = true;
+
+    render(<TestPage projectName="acme" />);
+
+    expect(screen.queryByText("Not reachable yet")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("This agent is not reachable yet — it has no deployed gateway URL."),
+    ).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Message")).not.toBeDisabled();
   });
 
   // Deploy state comes from the same poller the Deployments board reads; an
@@ -335,6 +354,58 @@ describe("TestPage — the chat tester", () => {
     await send("hi again");
 
     expect(invokeCall(1).payload).toEqual({ message: "hi again" });
+  });
+
+  // The button is shielded by `disabled`, so it can never prove the guard
+  // inside `send()`. Enter is the path with no shield — and that guard is the
+  // whole lost-update mitigation, so it needs a test that fails without it.
+  it("refuses an Enter-key send while a turn is in flight", async () => {
+    let settle: (value: unknown) => void = () => {};
+    mockPOST.mockReturnValue(
+      new Promise((resolve) => {
+        settle = resolve;
+      }),
+    );
+
+    render(<TestPage projectName="acme" />);
+    const input = screen.getByLabelText("Message");
+    fireEvent.change(input, { target: { value: "hi" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(mockPOST).toHaveBeenCalledTimes(1));
+
+    fireEvent.change(input, { target: { value: "and again" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(mockPOST).toHaveBeenCalledTimes(1);
+
+    settle(chat("hello there", "conv-1"));
+    await waitFor(() => expect(screen.getByText("hello there")).toBeInTheDocument());
+    expect(mockPOST).toHaveBeenCalledTimes(1);
+  });
+
+  // A body cut at the relay's cap can never parse, so without saying why it
+  // surfaces as an unreadable 200 — misleading exactly when the reason matters.
+  it("says when the relay cut the body short", async () => {
+    mockPOST.mockResolvedValue(relayed(200, '{"text":"a very long ans', true));
+
+    render(<TestPage projectName="acme" />);
+    await send("hi");
+
+    expect(screen.getByText("The agent answered 200.")).toBeInTheDocument();
+    expect(
+      screen.getByText("The relay cut this body short at its 1 MiB cap."),
+    ).toBeInTheDocument();
+  });
+
+  // Without a mark, a retry appends a second "You" line and the transcript
+  // reads as two delivered turns.
+  it("marks the turn that never got an answer", async () => {
+    mockPOST.mockResolvedValue(refused(500, "relay exploded"));
+
+    render(<TestPage projectName="acme" />);
+    await send("hi");
+
+    expect(screen.getByText("You · not delivered")).toBeInTheDocument();
   });
 
   it("says out loud that a turn spends real money", () => {

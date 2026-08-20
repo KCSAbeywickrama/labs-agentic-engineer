@@ -33,12 +33,18 @@ import {
   useComponentsDeployments,
   useProjectComponents,
 } from "../../projects/api/queries";
-import { AgentChatTester } from "./AgentChatTester";
+import { AgentChatTester, type DeployKnowledge } from "./AgentChatTester";
 
 // First cut (spec D5): the only component type with a tester is the ai-agent.
 // The API tester lands on the same route and the same proxy later, so the
 // picker is written as "components with a tester", not "agents".
 const TESTABLE_TYPE = "ai-agent";
+
+const DEPLOY_LABEL: Record<DeployKnowledge, string> = {
+  unknown: "Checking deployment…",
+  ready: "Deployed",
+  unreachable: "Not reachable yet",
+};
 
 export function TestPage({ projectName }: { projectName: string }) {
   const components = useProjectComponents(projectName);
@@ -48,7 +54,7 @@ export function TestPage({ projectName }: { projectName: string }) {
   );
   // The Deployments board's poller, reused: an agent is reachable only once a
   // deployment of it is Ready, and that is the same read the board renders.
-  const { deployments } = useComponentsDeployments(
+  const { deployments, isPending: deploymentsPending } = useComponentsDeployments(
     projectName,
     agents.map((a) => a.name),
   );
@@ -61,6 +67,16 @@ export function TestPage({ projectName }: { projectName: string }) {
       ),
     [deployments],
   );
+  // While the read is in flight NOTHING is known: an empty `readyNames` is the
+  // absence of an answer, not the answer "no". Collapsing the two would call
+  // every deployed agent unreachable on first paint and disable its input,
+  // then flip once the poll returned.
+  const deployKnowledge = (componentName: string): DeployKnowledge =>
+    deploymentsPending
+      ? "unknown"
+      : readyNames.has(componentName)
+        ? "ready"
+        : "unreachable";
 
   const [selected, setSelected] = useState<string | null>(null);
   const active = selected && agents.some((a) => a.name === selected)
@@ -125,7 +141,7 @@ export function TestPage({ projectName }: { projectName: string }) {
                       {agent.displayName || agent.name}
                     </Typography>
                     <Typography variant="caption" color="text.secondary">
-                      {readyNames.has(agent.name) ? "Deployed" : "Not reachable yet"}
+                      {DEPLOY_LABEL[deployKnowledge(agent.name)]}
                     </Typography>
                   </CardContent>
                 </Card>
@@ -138,7 +154,7 @@ export function TestPage({ projectName }: { projectName: string }) {
             <AgentChatTester
               projectName={projectName}
               componentName={active}
-              reachable={readyNames.has(active)}
+              deployKnowledge={deployKnowledge(active)}
             />
           )}
         </Box>

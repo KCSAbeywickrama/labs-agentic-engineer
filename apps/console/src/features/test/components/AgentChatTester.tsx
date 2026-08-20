@@ -33,19 +33,31 @@ import { sendChat } from "../api/invoke";
 // assembled here, and nothing is persisted — the console's tester is
 // deliberately ephemeral; persistence guidance belongs to the generated web app.
 type Entry =
-  | { kind: "user"; text: string }
+  // `delivered: false` marks a turn that produced no answer at all (the relay
+  // refused, or the network died). The message is left in the transcript
+  // rather than removed — the user typed it and may retype it — but it must
+  // not read as a completed turn, or a retry looks like two delivered sends.
+  | { kind: "user"; text: string; delivered: boolean }
   | { kind: "assistant"; text: string; toolCalls: unknown[] }
   | { kind: "notice"; text: string }
-  | { kind: "upstream"; status: number; body: string };
+  | { kind: "upstream"; status: number; body: string; truncated: boolean };
+
+/**
+ * What the deployments read knows about this agent. "unknown" is the read
+ * still in flight — it must not be collapsed into "unreachable", or every
+ * deployed agent is libelled (and its input disabled) until the first poll
+ * returns.
+ */
+export type DeployKnowledge = "unknown" | "ready" | "unreachable";
 
 export function AgentChatTester({
   projectName,
   componentName,
-  reachable,
+  deployKnowledge,
 }: {
   projectName: string;
   componentName: string;
-  reachable: boolean;
+  deployKnowledge: DeployKnowledge;
 }) {
   const [entries, setEntries] = useState<Entry[]>([]);
   const [conversationId, setConversationId] = useState<string | undefined>();
@@ -74,7 +86,7 @@ export function AgentChatTester({
     if (!message || sending) return;
     setDraft("");
     setInvokeError(null);
-    setEntries((prev) => [...prev, { kind: "user", text: message }]);
+    setEntries((prev) => [...prev, { kind: "user", text: message, delivered: true }]);
     setSending(true);
     try {
       const result = await sendChat(projectName, componentName, {
@@ -107,14 +119,21 @@ export function AgentChatTester({
         case "upstream-error":
           setEntries((prev) => [
             ...prev,
-            { kind: "upstream", status: result.status, body: result.body },
+            {
+              kind: "upstream",
+              status: result.status,
+              body: result.body,
+              truncated: result.truncated,
+            },
           ]);
           break;
         case "not-reachable":
           setNotReachable(true);
+          setEntries(markLastUndelivered);
           break;
         case "invoke-error":
           setInvokeError(result.message);
+          setEntries(markLastUndelivered);
           break;
       }
     } finally {
@@ -122,7 +141,7 @@ export function AgentChatTester({
     }
   }, [componentName, conversationId, draft, projectName, sending]);
 
-  const blocked = notReachable || !reachable;
+  const blocked = notReachable || deployKnowledge === "unreachable";
 
   return (
     <Stack spacing={2} sx={{ height: "100%" }}>
@@ -196,6 +215,11 @@ function TranscriptEntry({ entry }: { entry: Entry }) {
       <Alert severity="error">
         <Box component="details">
           <Box component="summary">The agent answered {entry.status}.</Box>
+          {entry.truncated && (
+            <Typography variant="caption" display="block" sx={{ mt: 1 }}>
+              The relay cut this body short at its 1 MiB cap.
+            </Typography>
+          )}
           <Box component="pre" sx={{ whiteSpace: "pre-wrap", m: 0, mt: 1 }}>
             {entry.body}
           </Box>
@@ -206,7 +230,11 @@ function TranscriptEntry({ entry }: { entry: Entry }) {
   return (
     <Box>
       <Typography variant="caption" color="text.secondary">
-        {entry.kind === "user" ? "You" : "Agent"}
+        {entry.kind === "user"
+          ? entry.delivered
+            ? "You"
+            : "You · not delivered"
+          : "Agent"}
       </Typography>
       <Typography variant="body2" sx={{ whiteSpace: "pre-wrap" }}>
         {entry.text}
@@ -226,4 +254,13 @@ function TranscriptEntry({ entry }: { entry: Entry }) {
       )}
     </Box>
   );
+}
+
+// The turn just attempted is the last user entry; nothing else can be the one
+// that failed, because Send is serialised for the whole turn.
+function markLastUndelivered(entries: Entry[]): Entry[] {
+  const last = entries.length - 1;
+  const entry = entries[last];
+  if (!entry || entry.kind !== "user") return entries;
+  return [...entries.slice(0, last), { ...entry, delivered: false }];
 }
