@@ -50,6 +50,9 @@ validation phase.
 
 ## Budget
 
+These run from `tests/e2e`, where step 7's `cd` left your shell — the
+Bash tool keeps one shell for the whole run.
+
 - Max **2 heal attempts per criterion**; each followed by a focused
   re-run: `npx playwright test specs/<AC-ID>.spec.ts`.
 - Max **2 focused re-run waves** after the initial full run.

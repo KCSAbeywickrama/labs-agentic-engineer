@@ -448,6 +448,31 @@ test("no library skill hardcodes a runner path", () => {
   }
 });
 
+// The Bash tool keeps ONE shell for a whole run, so a bare relative `cd` is
+// correct exactly once. #49: the RUN block was re-entered after a heal wave and
+// `cd tests/e2e` landed in `tests/e2e/tests/e2e`. Every other path the
+// validation workflow names is repo-root relative, so the one command that
+// moves the shell has to be self-locating. Scoped to aep-validation on purpose:
+// `cd <project-name>` in the ballerina skill is a placeholder after `bal new`,
+// not a fixed path.
+test("the validation workflow never cds to a bare relative path", () => {
+  for (const rel of ["SKILL.md", "references/authoring.md", "references/healing.md"]) {
+    const body = fs.readFileSync(path.join(LIBRARY, "aep-validation", rel), "utf8");
+    for (const line of body.split("\n")) {
+      // The whole argument, not the first token: `cd "$(git rev-parse …)/x"`
+      // contains spaces, and splitting on them would read as a bare path.
+      const target = /^\s*cd\s+(.+)$/.exec(line)?.[1]?.trim();
+      if (!target) continue;
+      assert.ok(
+        target.replace(/^["']/, "").startsWith("/") ||
+          target.includes("$(git rev-parse --show-toplevel)"),
+        `aep-validation/${rel}: \`${line.trim()}\` — the shell persists across calls, so a ` +
+          `cd must be self-locating (absolute, or rooted at $(git rev-parse --show-toplevel))`,
+      );
+    }
+  }
+});
+
 test("re-mirroring the same workspace replaces the previous mode's body", async () => {
   await inTempDir(async (dir) => {
     const workspace = path.join(dir, "ws");

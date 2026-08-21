@@ -214,7 +214,9 @@ The suite outlives the Bash tool's DEFAULT timeout (120s), so ask for the
 time up front — `timeout` is a parameter on the Bash call, max `600000`:
 
 ```bash
-cd tests/e2e
+# One shell serves the whole run and step 8 sends you back here, so this
+# `cd` has to be right the second time too.
+cd "$(git rev-parse --show-toplevel)/tests/e2e"
 rm -f test-results/results.json          # never read a previous run's verdict
 npx playwright test                      # Bash timeout: 600000
 ```
