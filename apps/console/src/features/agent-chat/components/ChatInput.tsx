@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import { useState, type DragEvent, type ReactNode } from "react";
+import { useState, type DragEvent } from "react";
 import {
   Alert,
   Box,
@@ -69,7 +69,6 @@ export function ChatInput({
   disabled,
   contextLabel,
   hint,
-  actions,
   files,
   onFilesChange,
 }: {
@@ -80,8 +79,6 @@ export function ChatInput({
   contextLabel: string;
   /** Why the input is locked (teammate turn), or null when free. */
   hint?: string | null;
-  /** Launcher slot, rendered on the context row ahead of the session chip. */
-  actions?: ReactNode;
   /** Files attached to the message being composed. */
   files: File[];
   onFilesChange: (files: File[]) => void;
@@ -112,7 +109,6 @@ export function ChatInput({
       <Divider />
       <Box sx={{ p: 1.5 }}>
         <Stack direction="row" spacing={1} sx={{ mb: 1, alignItems: "center" }}>
-          {actions}
           <Chip
             size="small"
             variant="outlined"

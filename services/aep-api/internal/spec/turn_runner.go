@@ -289,6 +289,7 @@ func (s *Service) executeTurn(ctx context.Context, job turnJob) TurnTerminal {
 		WebSearch:              designOrCollabTurn(job),
 		Collab:                 collab,
 		Journal:                journalFor(job),
+		Surface:                agentsvc.SurfaceConsole,
 		// The attachments themselves, not just their names on the journal. Both
 		// are needed and they are NOT the same thing: the journal drives the
 		// chips a reader sees, this is what the MODEL reads. Omitting it made a
