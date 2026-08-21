@@ -2,7 +2,12 @@
 
 image:
   repository: ghcr.io/wso2/aep/thunder-app-operator
-  tag: latest
+  # Empty by default so the deployment falls back to the chart's appVersion — an
+  # immutable, version-pinned tag rather than a mutable `latest` (which pairs
+  # badly with IfNotPresent: a cached `latest` node image is never refreshed).
+  # The release workflow overrides this with the concrete release version at
+  # package time; local/source installs get the appVersion (0.0.0-dev).
+  tag: ""
   pullPolicy: IfNotPresent
 
 # Number of manager replicas. Keep at 1 — the manager runs with leader election

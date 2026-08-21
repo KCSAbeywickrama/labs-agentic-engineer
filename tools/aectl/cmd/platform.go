@@ -309,7 +309,14 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 
 	platformVersion := initPlatformVersion
 	if platformVersion == "latest" {
-		platformVersion = resolvedPlatformVersion(ctx, initPlatformNamespace, initPlatformRelease)
+		// Resolve the concrete chart version of the platform release just
+		// installed, so addon operators are pinned to a matching --version.
+		// A failure here must abort: silently installing operators without a
+		// version pin would pull whatever the registry defaults to.
+		platformVersion, err = resolvedPlatformVersion(ctx, initPlatformNamespace, initPlatformRelease)
+		if err != nil {
+			return fmt.Errorf("resolve platform version for addon operators: %w", err)
+		}
 	}
 	if err := installAddons(ctx, k8sClient, platformVersion); err != nil {
 		return err
@@ -481,23 +488,43 @@ func runAddonInstall(ctx context.Context, platformVersion string, deps addonDeps
 // version that was actually deployed. Used when --platform-version is "latest"
 // so that add-on operators released on the same cadence can use the same version.
 // Returns an empty string on any failure — the caller falls back gracefully.
-func resolvedPlatformVersion(ctx context.Context, namespace, release string) string {
-	args := []string{"list", "-n", namespace, "-f", release, "-o", "json"}
+// resolvedPlatformVersion returns the concrete chart version of the named Helm
+// release. It uses `helm get metadata`, which targets an exact release (unlike
+// `helm list -f`, whose regex filter can match several releases) and reports the
+// chart version directly (rather than parsing it out of a "<name>-<version>"
+// string, which breaks when the chart name differs from the release name). Helm
+// and parse errors are propagated; an empty or mismatched result is an error.
+func resolvedPlatformVersion(ctx context.Context, namespace, release string) (string, error) {
+	args := []string{"get", "metadata", release, "-n", namespace, "-o", "json"}
 	if kubeconfig != "" {
 		args = append(args, "--kubeconfig", kubeconfig)
 	}
 	out, err := exec.CommandContext(ctx, "helm", args...).Output()
 	if err != nil {
-		return ""
+		return "", fmt.Errorf("helm get metadata %s: %w", release, err)
 	}
-	var releases []struct {
-		Chart string `json:"chart"`
+	return parsePlatformVersion(out, release)
+}
+
+// parsePlatformVersion extracts and validates the chart version from the JSON
+// output of `helm get metadata -o json`. It is separated from the exec call so
+// the parsing and validation rules can be unit-tested against fixtures.
+func parsePlatformVersion(out []byte, release string) (string, error) {
+	var meta struct {
+		Name    string `json:"name"`
+		Version string `json:"version"`
 	}
-	if json.Unmarshal(out, &releases) != nil || len(releases) == 0 {
-		return ""
+	if err := json.Unmarshal(out, &meta); err != nil {
+		return "", fmt.Errorf("parse helm metadata for %s: %w", release, err)
 	}
-	// chart field is "<release-name>-<version>", e.g. "aep-platform-0.6.0-rc.17".
-	return strings.TrimPrefix(releases[0].Chart, release+"-")
+	// Guard against querying (or helm returning) a different release than asked.
+	if meta.Name != release {
+		return "", fmt.Errorf("helm metadata returned release %q, expected %q", meta.Name, release)
+	}
+	if meta.Version == "" {
+		return "", fmt.Errorf("helm metadata for %s reported an empty chart version", release)
+	}
+	return meta.Version, nil
 }
 
 // shortToolVersion returns the first line of a tool's version output.
