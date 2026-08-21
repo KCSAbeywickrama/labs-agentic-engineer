@@ -308,17 +308,17 @@ export function createApp(deps: CreateAppDeps): Express {
       });
       return;
     }
-    let chatAttachmentNames: string[] = [];
+    // Kept SEPARATE from referenceAttachments, not merged: chat attachments must
+    // not be deduped against history (see run-conversation-turn). The encoded
+    // budget is still shared — that ceiling belongs to the model request, not to
+    // either channel — which is why the reference parts' cost is passed in.
+    let chatAttachments: FilePart[] = [];
     if (body.attachments && body.attachments.length > 0) {
       const spent = referenceAttachments.reduce(
         (n, part) => n + (typeof part.data === "string" ? part.data.length : 0),
         0,
       );
-      const parts = toAttachmentParts(body.attachments, spent);
-      referenceAttachments = [...referenceAttachments, ...parts];
-      // Only what actually became a part: naming one that was skipped for the
-      // budget would tell the model to read a document it cannot see.
-      chatAttachmentNames = parts.flatMap((p) => (p.filename ? [p.filename] : []));
+      chatAttachments = toAttachmentParts(body.attachments, spent);
     }
 
     // journal (#463): the turn's display record — raw client-sent text + acting
@@ -443,7 +443,7 @@ export function createApp(deps: CreateAppDeps): Express {
         filesChangedExternally: body.filesChangedExternally === true,
         skillSource,
         ...(referenceAttachments.length ? { referenceAttachments } : {}),
-        ...(chatAttachmentNames.length ? { chatAttachmentNames } : {}),
+        ...(chatAttachments.length ? { chatAttachments } : {}),
         ...(toolset ? { toolset } : {}),
         ...(mcp ? { mcp } : {}),
         ...(journal ? { journal: { ...journal, turnId } } : {}),

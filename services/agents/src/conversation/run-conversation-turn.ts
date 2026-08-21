@@ -139,15 +139,17 @@ export interface RunConversationTurnInput {
    */
   referenceAttachments?: FilePart[];
   /**
-   * Names of the files the user attached to THIS message (#428), for the prompt
-   * line that gives a bare "this" an antecedent.
+   * Native file parts for the files the user attached to THIS message (#428).
    *
-   * Separate from `referenceAttachments` even though the PARTS are merged into
-   * it: the two channels get identical mechanical treatment but different
-   * wording, because a reference is standing project context and an attachment
-   * belongs to one message. Merged parts alone cannot tell them apart.
+   * Separate from `referenceAttachments` — NOT merely for wording, but because
+   * they must NOT be deduped against history. That dedupe exists for
+   * references, which a flow re-lists automatically with unchanged content, so
+   * re-sending them is pure waste. A chat attachment is the opposite: a
+   * deliberate per-message act. Someone who revises a PDF, keeps its name and
+   * re-attaches it means the new bytes — filtering those out would silently
+   * serve the model the stale copy from history.
    */
-  chatAttachmentNames?: string[];
+  chatAttachments?: FilePart[];
   /**
    * Skill names to inline into THIS turn's prompt up front (#335 latency):
    * bodies resolve through `skillSource` and ride the user prompt — never the
@@ -305,10 +307,13 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
     // Stamps this turn's steps with the conversation they belong to, so two
     // projects generating at once are attributable in the trace UI.
     const telemetry = turnTelemetry(conv.id);
-    // Attachments dedupe against history by filename: a flow naming the same
-    // document a kickoff already attached must not re-enter it — one copy of a
-    // 5MB PDF per conversation, not one per flow invocation. The model reads
-    // the history copy either way.
+    // REFERENCE attachments dedupe against history by filename: a flow naming
+    // the same document a kickoff already attached must not re-enter it — one
+    // copy of a 5MB PDF per conversation, not one per flow invocation. The model
+    // reads the history copy either way, because a reference's content is
+    // whatever the store holds and re-listing it says nothing new.
+    //
+    // Chat attachments (#428) are deliberately EXEMPT — see `chatAttachments`.
     const attachedAlready = new Set(
       conv.messages.flatMap((m) =>
         Array.isArray(m.content)
@@ -319,16 +324,19 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
           : [],
       ),
     );
-    const freshAttachments = (input.referenceAttachments ?? []).filter(
+    const freshReferences = (input.referenceAttachments ?? []).filter(
       (part) => !part.filename || !attachedAlready.has(part.filename),
     );
+    // Attachments last so a re-attached file is the LATER copy in the message,
+    // which is the one the model reads as current.
+    const freshAttachments = [...freshReferences, ...(input.chatAttachments ?? [])];
     const startLen = conv.messages.length;
     const res = await runTurn({
       model: input.model,
       instructions,
       prompt:
         note +
-        attachmentsNote(input.chatAttachmentNames) +
+        attachmentsNote((input.chatAttachments ?? []).flatMap((p) => (p.filename ? [p.filename] : []))) +
         eagerBlock +
         buildPrompt(input.files, input.instruction),
       messages: conv.messages, // appended in place by runTurn

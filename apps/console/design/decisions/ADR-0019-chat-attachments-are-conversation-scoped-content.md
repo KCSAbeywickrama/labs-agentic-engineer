@@ -2,8 +2,8 @@
 
 Status: Accepted. Amends one forward-looking consequence of **ADR-0017**, which
 predicted that the next attach-a-file feature would "inherit this shape: store,
-overlay, no surface, no commit". The first three words do not survive contact
-with a mid-conversation attachment; the last two do.
+overlay, no surface, no commit". The first three do not survive contact with a
+mid-conversation attachment; only "no commit" does.
 
 ## Context
 
@@ -71,8 +71,17 @@ exactly this shape of upload.
   only as history. A future feature must pick a channel by **lifetime** —
   "does this need to survive the request?" — not by file type or size.
 - ADR-0017's "the next feature inherits store + overlay" consequence is
-  **amended, not reversed**: "no surface beyond the composer" and "never
-  committed" both carry over intact, and are decisions 1 and 3 restated.
+  **amended, not reversed**: "never committed" carries over intact. "No surface"
+  does NOT: a sent message shows its attachments as chips, and they survive a
+  reload. That is a deliberate difference — a reference is superseded by the
+  requirements it seeds, while an attachment is part of what someone SAID, and a
+  thread that hides it shows the agent discussing a document that appears nowhere.
+- **"Nothing is stored" is about BYTES, and only bytes.** File NAMES are
+  retained, in the conversation's turn journal, for the life of the conversation
+  — that is what the chips are read from. So the honest statement of the
+  privacy property is: the platform never writes attachment CONTENT to disk and
+  never commits it; it does retain the names as message metadata. Any feature
+  quoting decision 1 should quote it that way.
 - **Chat attachments cannot be re-sent by the server.** A failed send means the
   browser still holds the only copy, which is why the composer must retain its
   cards on failure rather than clearing. This is a UI obligation created by this
@@ -89,6 +98,14 @@ exactly this shape of upload.
 - The journal carries attachment **names only**. `projectDisplayHistory` replaces
   each user row with the journal's text, so without names a reload would show the
   agent discussing a document that appears nowhere in the transcript.
+- **Chat attachments are EXEMPT from the history dedupe that references obey.**
+  Both channels produce native file parts, so it is tempting to treat them
+  alike — and doing so is a correctness bug. A reference is re-listed
+  automatically by a flow with content the store decides, so re-sending its bytes
+  says nothing new and costs a 5 MB round trip. An attachment is a deliberate
+  per-message act: someone who revises a PDF, keeps its name and re-attaches it
+  MEANS the new bytes, and filtering by name would silently serve the model the
+  stale copy from history. Sameness of mechanism is not sameness of intent.
 
 ## Rejected
 
@@ -104,10 +121,10 @@ exactly this shape of upload.
   bytes would leak into later turns of the same sha.
 - **Keeping #428's 10 × 5 MiB and raising the agents parser to ~72 MB.** Widens a
   DoS guard by 280× in order to advertise a ceiling that stays unreachable.
-- **Text attachments fenced into the prompt** (#428's wording). Fenced text
-  carries no `filename`, so the dedupe `run-conversation-turn.ts` already
-  performs cannot see it and a re-attached file duplicates in history every turn;
-  and a multi-MB CSV buries the user's own message inside its own bubble.
+- **Text attachments fenced into the prompt** (#428's wording). A multi-MB CSV
+  buries the user's own message inside its own bubble, and fenced text carries no
+  `filename` — so it is invisible to every mechanism that reasons about
+  attachments by name, from the chips to the budget accounting.
 - **Routing `/start` attachments into the reference store.** Tidy-looking, and it
   re-opens merge-vs-replace (decision 3).
 - **The issue-assets bridge** (#428 design item 5): committing a conversation's

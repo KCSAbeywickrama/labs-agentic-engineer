@@ -234,6 +234,16 @@ export const agentChatHandlers = [
       const body = (await request.json()) as { instruction?: string };
       instruction = body.instruction ?? "";
     }
+    // The real server refuses a blank instruction BEFORE the turn row exists
+    // (the shared TurnSpec validator rejects an empty chat turn), so mock mode
+    // must too — otherwise an attachment-only send looks supported here and
+    // 400s in production.
+    if (instruction.trim() === "") {
+      return HttpResponse.json(
+        { code: "invalid_request", message: "instruction is required" },
+        { status: 400 },
+      );
+    }
     turnCounter += 1;
     const turnId = `mock-turn-${instanceId}-${turnCounter}`;
     turnInstruction.set(turnId, instruction);

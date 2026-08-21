@@ -207,3 +207,19 @@ test("attachmentsNote is empty for none, so a turn without attachments is unchan
   assert.equal(attachmentsNote([]), "");
   assert.equal(attachmentsNote(["  ", ""]), "");
 });
+
+test("attachmentsNote is driven by the surviving PARTS, so a skipped file is never named", () => {
+  // Naming a file the budget dropped would tell the model to read a document it
+  // cannot see. The names come from the parts that survived, not from the request
+  // — which is why run-conversation-turn derives them rather than taking a
+  // parallel names field.
+  const parts = quietly(() =>
+    toAttachmentParts([
+      attachment("kept.pdf", "application/pdf", 16),
+      attachment("dropped.pdf", "application/pdf", MAX_REFERENCE_ATTACHMENT_ENCODED_BYTES + 1),
+    ]),
+  );
+  const note = attachmentsNote(parts.flatMap((p) => (p.filename ? [p.filename] : [])));
+  assert.match(note, /- kept\.pdf/);
+  assert.doesNotMatch(note, /dropped\.pdf/);
+});

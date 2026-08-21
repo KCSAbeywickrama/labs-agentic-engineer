@@ -134,8 +134,9 @@ here: they're the open `console` + `feature` issues.
 - Agent chat — attach files to a message: the composer takes a paperclip and a
   drop target, the same cards and accepted set as the create view, and chips on
   the sent message that survive a reload. Attachments are **conversation-scoped
-  model content** (ADR-0019): nothing is stored server-side and nothing is
-  committed — the bytes ride one multipart `POST
+  model content** (ADR-0019): attachment BYTES are never written to disk and
+  never committed, and the file names are retained as message metadata so the
+  chips survive a reload — the bytes ride one multipart `POST
   /projects/{p}/agents/{conversationId}/messages` into the turn and are durable
   only as parts of the conversation's history, which is what makes re-sending
   one free (the agents service dedupes by file name). The agent reads them

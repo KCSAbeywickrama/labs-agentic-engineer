@@ -32,8 +32,13 @@ configure({ asyncUtilTimeout: 5_000 });
 // throws on render without these. Stubbed globally rather than guarded in the
 // component: the browser always has them, and a guard would mean shipping a
 // branch that only ever runs in tests.
+// Guarded independently: a partial implementation (one present, one missing)
+// would skip a combined check and leave AttachmentPreview's cleanup calling
+// undefined.
+let objectUrlCounter = 0;
 if (typeof URL.createObjectURL !== "function") {
-  let n = 0;
-  URL.createObjectURL = () => `blob:jsdom/${++n}`;
+  URL.createObjectURL = () => `blob:jsdom/${++objectUrlCounter}`;
+}
+if (typeof URL.revokeObjectURL !== "function") {
   URL.revokeObjectURL = () => {};
 }
