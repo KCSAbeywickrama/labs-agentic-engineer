@@ -40,7 +40,7 @@ import type { DispatchRequest } from "./lib/types.js";
 import { emit, primeScrubber } from "./lib/progress/emitter.js";
 import { installConsoleScrubber } from "./lib/progress/console_scrub.js";
 import { resolveTaskSkills } from "./lib/skills_resolver.js";
-import { listMirroredSkills, readSkillBodies, resolvePinnedSkills } from "./lib/skills_presence.js";
+import { listMirroredSkills, readSkillBodies, resolveSkillPresence } from "./lib/skills_presence.js";
 import { ClientCredentialsTokenProvider } from "./lib/oauth.js";
 import {
   fetchValidationContext,
@@ -320,12 +320,12 @@ async function main(): Promise<number> {
     // absent, and this defect already survived weeks of green runs on silence.
     // A miss is named now, with the path it looked for, instead of arriving as a
     // rejected Skill call mid-run.
-    const { preload } = await resolvePinnedSkills(
+    const { present } = await resolveSkillPresence(
       layout.workspace,
       onDemandSkills(req.taskKind),
       (l) => console.log(l),
     );
-    availableSkillNames = preload;
+    availableSkillNames = present;
     console.log(
       `[oneshot] ${availableSkillNames.length} skill(s) loadable on demand: ${availableSkillNames.join(", ") || "none"}`,
     );
@@ -335,7 +335,7 @@ async function main(): Promise<number> {
       scope: { kind: "project" },
       log: (l) => console.log(l),
     });
-    const { preload, dangling } = await resolvePinnedSkills(layout.workspace, pinned, (l) => console.log(l));
+    const { present, dangling } = await resolveSkillPresence(layout.workspace, pinned, (l) => console.log(l));
     if (dangling.length > 0) {
       console.warn(
         `[oneshot] ⚠️  ${dangling.length} pinned skill(s) missing from .claude/skills/ — proceeding without them: ${dangling.join(", ")}`,
@@ -346,9 +346,9 @@ async function main(): Promise<number> {
     // goes into the system prompt, which is the only thing that actually
     // preloads guidance.
     availableSkillNames = await listMirroredSkills(layout.workspace);
-    pinnedBodies = await readSkillBodies(layout.workspace, preload);
+    pinnedBodies = await readSkillBodies(layout.workspace, present);
     console.log(
-      `[oneshot] ${availableSkillNames.length} skill(s) available, ${preload.length} pinned into context`,
+      `[oneshot] ${availableSkillNames.length} skill(s) available, ${present.length} pinned into context`,
     );
   }
 
