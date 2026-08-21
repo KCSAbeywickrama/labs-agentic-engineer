@@ -116,7 +116,12 @@ export function TestPage({ projectName }: { projectName: string }) {
   return (
     <>
       {header}
+      {/* The picker earns its width only when there is a choice to make. With a
+          single agent it was a lone card in a 280px column of whitespace, and
+          the agent's identity is already in the chat header — so the chat gets
+          the full width instead. */}
       <Stack direction={{ xs: "column", md: "row" }} spacing={2} alignItems="stretch">
+        {agents.length !== 1 && (
         <Box sx={{ width: { xs: "100%", md: 280 }, flexShrink: 0 }}>
           {agents.length === 0 ? (
             <EmptyState compact bordered description="No agents in this project." />
@@ -149,7 +154,23 @@ export function TestPage({ projectName }: { projectName: string }) {
             </Stack>
           )}
         </Box>
-        <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+        )}
+        {/* A bordered surface with a fixed height: the transcript scrolls
+            INSIDE it, so the composer stays put instead of being pushed down
+            the page as the conversation grows. */}
+        <Box
+          sx={{
+            flexGrow: 1,
+            minWidth: 0,
+            height: { xs: "auto", md: "calc(100vh - 220px)" },
+            minHeight: 420,
+            border: 1,
+            borderColor: "divider",
+            borderRadius: 1,
+            bgcolor: "background.paper",
+            overflow: "hidden",
+          }}
+        >
           {active && (
             <AgentChatTester
               projectName={projectName}

@@ -16,16 +16,21 @@
  * under the License.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Alert,
+  alpha,
+  Avatar,
   Box,
   Button,
   CircularProgress,
+  Divider,
   Stack,
   TextField,
   Typography,
 } from "@wso2/oxygen-ui";
+import { Bot, User, Wrench } from "@wso2/oxygen-ui-icons-react";
+import { MarkdownView } from "../../../components/MarkdownView";
 import { sendChat } from "../api/invoke";
 
 // What the tester holds, and all it holds (ADR-0020 / the Test tab spec): the
@@ -63,6 +68,14 @@ export function AgentChatTester({
   const [conversationId, setConversationId] = useState<string | undefined>();
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  // Pin to the newest turn. A reply can be many lines long, so without this the
+  // answer you just asked for lands below the fold and the thread looks stuck.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [entries, sending]);
   const [notReachable, setNotReachable] = useState(false);
   const [invokeError, setInvokeError] = useState<string | null>(null);
 
@@ -156,34 +169,69 @@ export function AgentChatTester({
   const blocked = notReachable || deployKnowledge === "unreachable";
 
   return (
-    <Stack spacing={2} sx={{ height: "100%" }}>
-      <Stack direction="row" spacing={2} alignItems="center">
-        <Typography variant="subtitle1" sx={{ flexGrow: 1 }}>
-          {componentName}
-        </Typography>
+    <Stack sx={{ height: "100%", minHeight: 0 }}>
+      {/* One surface holding who you are talking to and the only control that
+          resets the thread, so the chrome reads as a header rather than three
+          things floating above the transcript. */}
+      <Stack
+        direction="row"
+        spacing={1.5}
+        alignItems="center"
+        sx={{ px: 2, py: 1.5, flexShrink: 0 }}
+      >
+        <Avatar sx={{ width: 28, height: 28, bgcolor: "primary.main" }}>
+          <Bot size={16} />
+        </Avatar>
+        <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+          <Typography variant="subtitle1" sx={{ fontWeight: 600, lineHeight: 1.2 }}>
+            {componentName}
+          </Typography>
+          <Typography variant="caption" color="text.secondary">
+            Talks to the live agent, on the organisation&apos;s model key
+          </Typography>
+        </Box>
         <Button size="small" onClick={newConversation}>
           New conversation
         </Button>
       </Stack>
+      <Divider />
 
-      <Typography variant="body2" color="text.secondary">
-        This talks to the live agent on the organisation&apos;s model key.
-      </Typography>
+      <Box sx={{ px: 2, pt: blocked || invokeError ? 2 : 0 }}>
+        {blocked && (
+          <Alert severity="info">
+            This agent is not reachable yet — it has no deployed gateway URL.
+          </Alert>
+        )}
+        {invokeError && <Alert severity="error">{invokeError}</Alert>}
+      </Box>
 
-      {blocked && (
-        <Alert severity="info">
-          This agent is not reachable yet — it has no deployed gateway URL.
-        </Alert>
-      )}
-      {invokeError && <Alert severity="error">{invokeError}</Alert>}
-
-      <Stack spacing={1.5} sx={{ flexGrow: 1, overflowY: "auto" }}>
-        {entries.map((entry, index) => (
-          <TranscriptEntry key={index} entry={entry} />
-        ))}
+      {/* minHeight:0 is what actually makes this scroll: without it a flex
+          child refuses to shrink below its content and the whole page scrolls
+          instead, carrying the composer off-screen as the thread grows. */}
+      <Stack
+        spacing={2.5}
+        ref={scrollRef}
+        sx={{ flexGrow: 1, minHeight: 0, overflowY: "auto", px: 2, py: 2.5 }}
+      >
+        {entries.length === 0 && !blocked ? (
+          <Stack spacing={1} alignItems="center" sx={{ my: "auto", textAlign: "center" }}>
+            <Avatar sx={{ width: 40, height: 40, bgcolor: "action.hover", color: "text.secondary" }}>
+              <Bot size={20} />
+            </Avatar>
+            <Typography variant="body2" color="text.secondary">
+              Send a message to try this agent.
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              Each turn runs the real agent and its tools.
+            </Typography>
+          </Stack>
+        ) : (
+          entries.map((entry, index) => <TranscriptEntry key={index} entry={entry} />)
+        )}
       </Stack>
 
-      <Stack direction="row" spacing={1} alignItems="center">
+      <Divider />
+      <Stack direction="row" spacing={1} alignItems="center" sx={{ p: 2, flexShrink: 0 }}>
         <TextField
           label="Message"
           size="small"
@@ -239,33 +287,124 @@ function TranscriptEntry({ entry }: { entry: Entry }) {
       </Alert>
     );
   }
+  const isUser = entry.kind === "user";
+  const failed = isUser && !entry.delivered;
+
+  // Matches the console's own chat (features/agent-chat/MessageList): a human
+  // turn gets a tinted bubble on the right, the agent stays flat on the left as
+  // an activity stream. Keeping the two consistent is the point — a second chat
+  // that invents its own conventions reads as a different product.
   return (
-    <Box>
-      <Typography variant="caption" color="text.secondary">
-        {entry.kind === "user"
-          ? entry.delivered
-            ? "You"
-            : "You · not delivered"
-          : "Agent"}
-      </Typography>
-      <Typography variant="body2" sx={{ whiteSpace: "pre-wrap" }}>
-        {entry.text}
-      </Typography>
-      {entry.kind === "assistant" && entry.toolCalls.length > 0 && (
-        <Box component="details" sx={{ mt: 0.5 }}>
-          <Box component="summary" sx={{ cursor: "pointer", fontSize: "0.75rem" }}>
-            {entry.toolCalls.length === 1 ? "1 tool call" : `${entry.toolCalls.length} tool calls`}
-          </Box>
-          <Box
-            component="pre"
-            sx={{ whiteSpace: "pre-wrap", fontSize: "0.75rem", m: 0, mt: 0.5 }}
-          >
-            {JSON.stringify(entry.toolCalls, null, 2)}
-          </Box>
+    <Box sx={{ display: "flex", flexDirection: "column", alignItems: isUser ? "flex-end" : "flex-start" }}>
+      <Stack
+        direction={isUser ? "row-reverse" : "row"}
+        spacing={1}
+        sx={{ alignItems: "center", mb: 0.5 }}
+      >
+        <Avatar
+          sx={{
+            width: 22,
+            height: 22,
+            bgcolor: isUser ? "primary.main" : "info.main",
+          }}
+        >
+          {isUser ? <User size={12} /> : <Bot size={12} />}
+        </Avatar>
+        <Typography variant="caption" sx={{ fontWeight: 600 }}>
+          {isUser ? "You" : "Agent"}
+        </Typography>
+        {failed && (
+          <Typography variant="caption" color="error">
+            not delivered
+          </Typography>
+        )}
+      </Stack>
+
+      {isUser ? (
+        <Box
+          sx={{
+            maxWidth: "85%",
+            px: 1.5,
+            py: 1,
+            borderRadius: 2,
+            bgcolor: (theme) => alpha(theme.palette.primary.main, 0.08),
+            opacity: failed ? 0.6 : 1,
+          }}
+        >
+          <Typography sx={{ whiteSpace: "pre-wrap", fontSize: "0.875rem" }}>
+            {entry.text}
+          </Typography>
         </Box>
+      ) : (
+        // Agents reply in markdown — bold, lists, numbered options. Rendering
+        // it as plain text put literal ** around every emphasis on screen.
+        <Box sx={{ maxWidth: "85%" }}>
+          <MarkdownView>{entry.text}</MarkdownView>
+        </Box>
+      )}
+
+      {entry.kind === "assistant" && entry.toolCalls.length > 0 && (
+        <ToolCalls calls={entry.toolCalls} />
       )}
     </Box>
   );
+}
+
+/**
+ * The tool trail, on an indented rail like the spec chat's activity steps.
+ * This is what the tester exists to show: proof the agent actually reached for
+ * its API instead of answering from the model's own memory. Each call names the
+ * tool up front, with the raw arguments a click away — the name is the fact you
+ * scan for, the payload is the evidence you check.
+ */
+function ToolCalls({ calls }: { calls: unknown[] }) {
+  return (
+    <Box sx={{ borderLeft: 2, borderColor: "divider", ml: 1, pl: 2, mt: 1, maxWidth: "85%" }}>
+      <Stack spacing={0.5}>
+        {calls.map((call, index) => {
+          const name = toolNameOf(call);
+          return (
+            <Box key={index} component="details">
+              <Stack
+                component="summary"
+                direction="row"
+                spacing={0.75}
+                sx={{ cursor: "pointer", alignItems: "center", color: "text.secondary" }}
+              >
+                <Wrench size={12} />
+                <Typography variant="caption">
+                  {name ? `called ${name}` : "tool call"}
+                </Typography>
+              </Stack>
+              <Box
+                component="pre"
+                sx={{
+                  whiteSpace: "pre-wrap",
+                  fontSize: "0.75rem",
+                  fontFamily: "monospace",
+                  bgcolor: "action.hover",
+                  borderRadius: 1,
+                  p: 1,
+                  m: 0,
+                  mt: 0.5,
+                  overflowX: "auto",
+                }}
+              >
+                {JSON.stringify(call, null, 2)}
+              </Box>
+            </Box>
+          );
+        })}
+      </Stack>
+    </Box>
+  );
+}
+
+/** `toolName` if the call carries one — read defensively; it is the agent's shape, not ours. */
+function toolNameOf(call: unknown): string | null {
+  if (typeof call !== "object" || call === null) return null;
+  const name = (call as { toolName?: unknown }).toolName;
+  return typeof name === "string" && name !== "" ? name : null;
 }
 
 // The turn just attempted is the last user entry; nothing else can be the one

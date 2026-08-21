@@ -19,7 +19,7 @@
 // @vitest-environment jsdom
 
 import type { ElementType, ReactNode } from "react";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Router replaced so PageHeader's back-link renders as a plain anchor — no
@@ -154,9 +154,17 @@ describe("TestPage — the agent list", () => {
   // The first cut's tester is the agent chat, so a component with no tester
   // has no business in the picker (a web app row would be a dead end).
   it("lists only ai-agent components", () => {
+    // Two agents, because the picker is only rendered when there is a choice
+    // to make — with one agent its identity lives in the chat header instead.
+    mockComponents = [
+      ...DEFAULT_COMPONENTS,
+      { name: "support-agent", displayName: "Support Agent", type: "ai-agent" },
+    ];
+
     render(<TestPage projectName="acme" />);
 
     expect(screen.getByRole("button", { name: /Booking Agent/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Support Agent/ })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Storefront/ })).not.toBeInTheDocument();
   });
 
@@ -190,11 +198,10 @@ describe("TestPage — the agent list", () => {
 
     render(<TestPage projectName="acme" />);
 
-    expect(
-      within(screen.getByRole("button", { name: /Booking Agent/ })).getByText(
-        "Not reachable yet",
-      ),
-    ).toBeInTheDocument();
+    // The lone agent has no picker card, so the tester itself is where an
+    // unreachable agent has to say so — and it must also stop taking input.
+    expect(screen.getByText(/not reachable yet/i)).toBeInTheDocument();
+    expect(screen.getByLabelText("Message")).toBeDisabled();
   });
 });
 
@@ -287,7 +294,8 @@ describe("TestPage — the chat tester", () => {
     render(<TestPage projectName="acme" />);
     await send("find me a hotel in Paris");
 
-    expect(screen.getByText("2 tool calls")).toBeInTheDocument();
+    expect(screen.getByText("called listHotels")).toBeInTheDocument();
+    expect(screen.getByText("called bookHotel")).toBeInTheDocument();
   });
 
   it("refuses to send a second message while a turn is in flight", async () => {
@@ -405,14 +413,14 @@ describe("TestPage — the chat tester", () => {
     render(<TestPage projectName="acme" />);
     await send("hi");
 
-    expect(screen.getByText("You · not delivered")).toBeInTheDocument();
+    expect(screen.getByText("not delivered")).toBeInTheDocument();
   });
 
   it("says out loud that a turn spends real money", () => {
     render(<TestPage projectName="acme" />);
 
     expect(
-      screen.getByText("This talks to the live agent on the organisation's model key."),
+      screen.getByText("Talks to the live agent, on the organisation's model key"),
     ).toBeInTheDocument();
   });
 });
@@ -454,7 +462,7 @@ describe("TestPage — failures that used to be reported as something else", () 
     await send("hi");
 
     expect(screen.getByText("Failed to fetch")).toBeInTheDocument();
-    expect(screen.getByText("You · not delivered")).toBeInTheDocument();
+    expect(screen.getByText("not delivered")).toBeInTheDocument();
   });
 
   // `notReachable` is a memory of one 409, not a live fact. A deploy that has
