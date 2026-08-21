@@ -147,7 +147,13 @@ func readMultipartTurn(body *multipart.Reader) (multipartTurn, error) {
 			continue
 		case attachmentsField:
 		default:
-			// Forward compatibility, as everywhere else on this body.
+			// Unknown parts are IGNORED, and this is a deliberate divergence
+			// from the JSON arm, which is strict (`additionalProperties: false`
+			// on TurnInputBody). Under strict parsing a rolling deploy in which
+			// the console ships a new field before the server knows it would 400
+			// every send; ignoring degrades gracefully instead. Relaxing the
+			// multipart schema to match is a contract decision, so it is left to
+			// be made explicitly rather than inferred from this handler.
 			continue
 		}
 
