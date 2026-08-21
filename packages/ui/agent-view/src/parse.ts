@@ -89,6 +89,14 @@ export interface AgentSpec {
   /** `x-aep.identity.mode` — "on-behalf-of" | "agent". */
   identity?: string | undefined;
   prompt: PromptSection[];
+  /**
+   * The prompt body VERBATIM, exactly as it sits after the front matter.
+   * `prompt` above is a reading of it; this is the thing itself, and it is
+   * what an editor must write back — a body rebuilt from the sections would
+   * silently normalise spacing and drop anything the section reader does not
+   * recognise as a heading.
+   */
+  body: string;
 }
 
 export interface ParseError {
@@ -231,5 +239,6 @@ export function parseAgentAfm(raw: string): ParseResult {
     memory: str(record(aep?.memory)?.type),
     identity: str(record(aep?.identity)?.mode),
     prompt: readPrompt(split.body),
+    body: split.body,
   };
 }

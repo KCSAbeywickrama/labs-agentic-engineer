@@ -16,8 +16,8 @@
  * under the License.
  */
 
-import { useMemo } from "react";
-import { Alert, Box, Chip, Typography } from "@wso2/oxygen-ui";
+import { useMemo, useState } from "react";
+import { Alert, Box, Button, Chip, Stack, TextField, Typography } from "@wso2/oxygen-ui";
 
 import {
   isParseError,
@@ -46,6 +46,21 @@ export interface AgentToolStatusInfo {
 export interface AgentViewProps {
   /** Raw `agent.afm.md` text. */
   spec: string;
+  /**
+   * Persist an edited prompt body. Given, the Behaviour section becomes
+   * editable; omitted, the whole view stays read-only.
+   *
+   * ONLY the body is ever editable. The front matter is platform-wiring —
+   * `${env:}` values the deploy fills in — and `x-aep.tools.openapi[].allow`
+   * is the security boundary: an operation not listed is never generated as a
+   * tool, so a text box over it would be a way to grant one. The prose is the
+   * part a person tunes, and the only part that cannot break the wiring.
+   *
+   * Receives the body ALONE. Reassembling the document is the caller's job,
+   * because only the caller can read the front matter that is live at save
+   * time — see SpecView, which keeps the agent's own front-matter edits.
+   */
+  onSaveBehaviour?: ((body: string) => Promise<void>) | undefined;
   /**
    * OPTIONAL per-operation resolution status, keyed `"<component>:<operation>"`,
    * from the design read model's `Dependency.operations`. Optional and keyed
@@ -203,12 +218,116 @@ function ToolGroup({
   );
 }
 
+/**
+ * The prompt, read-only until a caller supplies a way to save it.
+ *
+ * Editing works on the RAW body rather than the parsed sections: the sections
+ * are a reading of the document, and writing one back would normalise spacing
+ * and quietly drop anything the reader did not recognise as a heading. One box
+ * over the whole body keeps the author's text exactly as they wrote it.
+ */
+function Behaviour({
+  spec,
+  onSaveBehaviour,
+}: {
+  spec: AgentSpec;
+  onSaveBehaviour?: ((body: string) => Promise<void>) | undefined;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  const editing = draft !== null;
+
+  const save = async () => {
+    if (draft === null || !onSaveBehaviour) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await onSaveBehaviour(draft.trim());
+      setDraft(null);
+      setSaved(true);
+    } catch (err) {
+      // The draft stays open on failure — a write that did not land must not
+      // also cost the author what they typed.
+      setError(err instanceof Error ? err.message : "Could not save the prompt");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <>
+      <Box sx={{ display: "flex", alignItems: "center", gap: 1, mt: 3, mb: 1 }}>
+        <SectionHeading>Behaviour</SectionHeading>
+        <Box sx={{ flexGrow: 1 }} />
+        {onSaveBehaviour && !editing && (
+          <Button size="small" onClick={() => setDraft(spec.body)}>
+            Edit
+          </Button>
+        )}
+      </Box>
+
+      {saved && !editing && (
+        // An edited prompt is compiled into the agent's code at build time, so
+        // the deployed agent answers exactly as before until it is rebuilt.
+        // Without saying so, a correct save looks like a broken feature.
+        <Alert severity="info" sx={{ mb: 2 }}>
+          Saved to the design. Rebuild and redeploy the agent for this to change
+          how it answers.
+        </Alert>
+      )}
+
+      {editing ? (
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+          {error && <Alert severity="error">{error}</Alert>}
+          <TextField
+            label="Behaviour"
+            multiline
+            minRows={12}
+            fullWidth
+            value={draft}
+            disabled={saving}
+            onChange={(event) => setDraft(event.target.value)}
+            slotProps={{ input: { sx: { fontFamily: "monospace", fontSize: "0.875rem" } } }}
+          />
+          <Stack direction="row" spacing={1}>
+            <Button variant="contained" size="small" onClick={() => void save()} disabled={saving}>
+              Save
+            </Button>
+            <Button size="small" onClick={() => setDraft(null)} disabled={saving}>
+              Cancel
+            </Button>
+          </Stack>
+        </Box>
+      ) : (
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 2.5 }}>
+          {spec.prompt.map((section, index) => (
+            <Box key={`${section.heading}-${index}`}>
+              {section.heading ? (
+                <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 0.5 }}>
+                  {section.heading}
+                </Typography>
+              ) : null}
+              <Typography variant="body2" sx={{ whiteSpace: "pre-wrap" }}>
+                {section.body}
+              </Typography>
+            </Box>
+          ))}
+        </Box>
+      )}
+    </>
+  );
+}
+
 function AgentSpecBody({
   spec,
   toolStatus,
+  onSaveBehaviour,
 }: {
   spec: AgentSpec;
   toolStatus?: Record<string, AgentToolStatusInfo> | undefined;
+  onSaveBehaviour?: ((body: string) => Promise<void>) | undefined;
 }) {
   const modelName = modelFact(spec.model?.name);
   const modelEndpoint = modelFact(spec.model?.url);
@@ -294,31 +413,15 @@ function AgentSpecBody({
           </>
         )}
 
-        {spec.prompt.length > 0 ? (
-          <>
-            <SectionHeading>Behaviour</SectionHeading>
-            <Box sx={{ display: "flex", flexDirection: "column", gap: 2.5 }}>
-              {spec.prompt.map((section, index) => (
-                <Box key={`${section.heading}-${index}`}>
-                  {section.heading ? (
-                    <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 0.5 }}>
-                      {section.heading}
-                    </Typography>
-                  ) : null}
-                  <Typography variant="body2" sx={{ whiteSpace: "pre-wrap" }}>
-                    {section.body}
-                  </Typography>
-                </Box>
-              ))}
-            </Box>
-          </>
+        {spec.prompt.length > 0 || onSaveBehaviour ? (
+          <Behaviour spec={spec} onSaveBehaviour={onSaveBehaviour} />
         ) : null}
       </Box>
     </Box>
   );
 }
 
-export function AgentView({ spec, toolStatus }: AgentViewProps) {
+export function AgentView({ spec, toolStatus, onSaveBehaviour }: AgentViewProps) {
   const attempt = useMemo(() => parseAgentAfm(spec), [spec]);
 
   if (isParseError(attempt)) {
@@ -329,5 +432,7 @@ export function AgentView({ spec, toolStatus }: AgentViewProps) {
     );
   }
 
-  return <AgentSpecBody spec={attempt} toolStatus={toolStatus} />;
+  return (
+    <AgentSpecBody spec={attempt} toolStatus={toolStatus} onSaveBehaviour={onSaveBehaviour} />
+  );
 }

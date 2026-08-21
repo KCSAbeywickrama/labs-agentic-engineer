@@ -18,8 +18,8 @@
 
 // @vitest-environment jsdom
 
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 
 import { AgentView } from "./AgentView.js";
 
@@ -147,5 +147,82 @@ describe("AgentView", () => {
     render(<AgentView spec={"# Role\nno front matter here\n"} />);
 
     expect(screen.getByRole("alert")).toBeInTheDocument();
+  });
+});
+
+describe("AgentView — editing the behaviour prompt", () => {
+  it("stays read-only when no save handler is given", () => {
+    render(<AgentView spec={AFM} />);
+
+    expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
+  });
+
+  it("edits the body verbatim, not a rebuild of the parsed sections", async () => {
+    const onSaveBehaviour = vi.fn().mockResolvedValue(undefined);
+    render(<AgentView spec={AFM} onSaveBehaviour={onSaveBehaviour} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+
+    // The textarea opens on the RAW body — headings and all — because that is
+    // what gets written back. A box seeded from the section reader would drop
+    // anything it did not recognise.
+    const box = screen.getByLabelText("Behaviour") as HTMLTextAreaElement;
+    expect(box.value).toContain("# Role");
+    expect(box.value).toContain("# Style");
+    // Front matter never reaches the box: it is wiring, not prose.
+    expect(box.value).not.toContain("spec_version");
+    expect(box.value).not.toContain("listHotels");
+  });
+
+  it("hands the edited body to the caller on save", async () => {
+    const onSaveBehaviour = vi.fn().mockResolvedValue(undefined);
+    render(<AgentView spec={AFM} onSaveBehaviour={onSaveBehaviour} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByLabelText("Behaviour"), {
+      target: { value: "# Role\nYou book trains, not hotels.\n" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(onSaveBehaviour).toHaveBeenCalledWith("# Role\nYou book trains, not hotels."),
+    );
+  });
+
+  it("discards the draft on cancel and writes nothing", () => {
+    const onSaveBehaviour = vi.fn();
+    render(<AgentView spec={AFM} onSaveBehaviour={onSaveBehaviour} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByLabelText("Behaviour"), { target: { value: "throw away" } });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(onSaveBehaviour).not.toHaveBeenCalled();
+    expect(screen.getByText("You help a traveler book a hotel.")).toBeInTheDocument();
+  });
+
+  // An edited prompt is baked into generated code at build time, so the running
+  // agent keeps its old behaviour until it is rebuilt. Saying so is the whole
+  // difference between a useful edit box and one that looks broken.
+  it("says the change needs a rebuild before it reaches the running agent", async () => {
+    const onSaveBehaviour = vi.fn().mockResolvedValue(undefined);
+    render(<AgentView spec={AFM} onSaveBehaviour={onSaveBehaviour} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByText(/rebuild/i)).toBeInTheDocument();
+  });
+
+  it("surfaces a failed save instead of pretending it worked", async () => {
+    const onSaveBehaviour = vi.fn().mockRejectedValue(new Error("collab is offline"));
+    render(<AgentView spec={AFM} onSaveBehaviour={onSaveBehaviour} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByText("collab is offline")).toBeInTheDocument();
+    // Still editing, so the draft is not lost to a failed write.
+    expect(screen.getByLabelText("Behaviour")).toBeInTheDocument();
   });
 });

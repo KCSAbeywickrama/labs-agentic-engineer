@@ -211,3 +211,28 @@ describe("parseAgentAfm — fenced code in the prompt body", () => {
     expect(style?.body).toContain("Then reply.");
   });
 });
+
+describe("parseAgentAfm — the raw body", () => {
+  // The editor writes back what the author typed, so it needs the body
+  // VERBATIM — not the section split, which drops the exact spacing and any
+  // content the section reader does not recognise.
+  test("carries the prompt body through unchanged", () => {
+    const spec = parsed(BOOKING_AGENT);
+
+    expect(spec.body).toContain("# Role");
+    expect(spec.body).toContain("You help a signed-in traveler find and book a hotel.");
+    expect(spec.body).toContain("# Style");
+    expect(spec.body).not.toContain("spec_version");
+  });
+
+  // `splitAfm` trims the body, so a saved document is the ORIGINAL front matter
+  // (byte for byte — never re-serialised from parsed YAML, which would reformat
+  // it) plus the trimmed body. That is the exact shape a save reconstructs.
+  test("is the document's own text, so front matter + body reassembles it", () => {
+    const spec = parsed(BOOKING_AGENT);
+    const frontMatter = BOOKING_AGENT.slice(0, BOOKING_AGENT.indexOf(spec.body));
+
+    expect(`${frontMatter}${spec.body}\n`).toBe(BOOKING_AGENT);
+    expect(spec.body).toBe(spec.body.trim());
+  });
+});

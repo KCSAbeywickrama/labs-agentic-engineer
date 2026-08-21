@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   AlertTitle,
@@ -57,6 +57,7 @@ import { SpecQuestionForm } from "./SpecQuestionForm";
 import { countBlockingOpenQuestions } from "../lib/openQuestions";
 import { nextVersionLabel, parsePrdStories } from "../lib/buildScope";
 import { useRoomQuestion } from "../../agent-chat/useRoomQuestion";
+import { hasFrontMatter, reassembleAfm } from "../collab/afmBody";
 import { CollabTextArea } from "../collab/CollabTextArea";
 import { SpecMdEditor } from "../collab/SpecMdEditor";
 import { useYTextString } from "../collab/useYTextString";
@@ -441,6 +442,32 @@ export function SpecView({ projectName }: { projectName: string }) {
   // document area scrolls inside — #206 rework), so its pane must be the
   // same flex-column/overflow-hidden shape the canvas views need.
   const isMdEditorView = Boolean(fragment && collab.provider);
+
+  // Saving an edited prompt: the caller (AgentView) hands back the BODY only,
+  // and this reassembles the document.
+  //
+  // The front matter is taken from the doc as it stands AT SAVE TIME, byte for
+  // byte, never re-serialised from parsed YAML — so an agent that rewired tools
+  // or memory while the prompt was being edited keeps its change, and the
+  // formatting of a block nobody touched is not quietly rewritten. Only the
+  // prose the author actually edited is replaced.
+  const afmText = isAgentAfmFile && selectedFile ? collab.getFileText(selectedFile.path) : null;
+  const handleSaveBehaviour = useCallback(
+    async (body: string) => {
+      if (!afmText) throw new Error("The design is offline — reconnect before saving.");
+      const raw = afmText.toString();
+      if (!hasFrontMatter(raw)) {
+        throw new Error("This document has no front matter to preserve.");
+      }
+      const next = reassembleAfm(raw, body);
+      if (next === raw) return;
+      afmText.doc?.transact(() => {
+        afmText.delete(0, afmText.length);
+        afmText.insert(0, next);
+      });
+    },
+    [afmText],
+  );
   // The collab doc is the SOURCE for the structured views while collab is up
   // (the design.md rule): rooms are seeded with every committed specs/ file
   // (non-md as Y.Text) and the agents service mirrors each applied write, so
@@ -991,7 +1018,11 @@ export function SpecView({ projectName }: { projectName: string }) {
                     ) : isValidationCriteriaFile ? (
                       <ValidationView criteria={structuredLive} />
                     ) : isAgentAfmFile ? (
-                      <AgentView spec={structuredLive} toolStatus={agentToolStatus} />
+                      <AgentView
+                        spec={structuredLive}
+                        toolStatus={agentToolStatus}
+                        {...(afmText ? { onSaveBehaviour: handleSaveBehaviour } : {})}
+                      />
                     ) : (
                       <DesignView
                         design={structuredLive}
@@ -1016,6 +1047,7 @@ export function SpecView({ projectName }: { projectName: string }) {
                         key={content.data.sha}
                         spec={content.data.content}
                         toolStatus={agentToolStatus}
+                        {...(afmText ? { onSaveBehaviour: handleSaveBehaviour } : {})}
                       />
                     ) : (
                       <DesignView
