@@ -129,6 +129,28 @@ describe("SpecQuestionForm", () => {
       expect(seed).toMatch(/assumed/i);
     });
 
+    it("defers nothing when the room answered everything", () => {
+      // The button stays live once every question has an answer, and asking the
+      // agent to decide "the rest" of an empty set invites it to invent
+      // decisions and flag them `*assumed*`. It behaves as Continue instead.
+      const { doc, entry } = room();
+      const { rerender } = renderForm(doc, entry);
+
+      fireEvent.click(screen.getByRole("radio", { name: /submitter's own manager/i }));
+      rerender(<SpecQuestionForm doc={doc} entry={readRoomQuestions(doc)[0]!} org={ORG} projectName={PROJECT} />);
+      fireEvent.change(screen.getByLabelText("Your answer"), { target: { value: "5000" } });
+      rerender(<SpecQuestionForm doc={doc} entry={readRoomQuestions(doc)[0]!} org={ORG} projectName={PROJECT} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Use recommended answers" }));
+
+      const seed = consumePendingSeed(KEY) ?? "";
+      expect(seed).toContain("The submitter's own manager");
+      expect(seed).toContain("5000");
+      expect(seed).not.toMatch(/Decide the rest yourself/i);
+      expect(seed).not.toMatch(/assumed/i);
+      expect(seed).toBe(seed.trimEnd());
+    });
+
     it("hands back every question when the room answered none", () => {
       const { doc, entry } = room();
       renderForm(doc, entry);

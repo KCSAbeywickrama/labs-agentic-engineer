@@ -33,6 +33,19 @@
 /** A link target that is not a document reference at all. */
 const EXTERNAL = /^(?:[a-z][a-z0-9+.-]*:|\/\/|#)/i;
 
+/**
+ * Whether an href addresses somewhere other than this repository — a scheme, a
+ * protocol-relative host, or an in-page anchor.
+ *
+ * The click handler needs the distinction that `resolveSpecHref` erases: it
+ * answers null both for `https://wso2.com` and for a repo path nobody has
+ * written yet, and those two deserve opposite treatment on a click.
+ */
+export function isExternalHref(href: string): boolean {
+  const target = href.trim();
+  return target === "" || EXTERNAL.test(target);
+}
+
 /** Normalise `a/./b`, `a/../b` and repeated slashes to a plain repo path. */
 function normalize(path: string): string {
   const out: string[] = [];

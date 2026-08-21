@@ -102,6 +102,20 @@ const SECTION_LENSES: Record<string, Omit<PrdLens, "at" | "placement">> = {
   stories: { command: "/feature", label: "+ Feature", title: "Add a feature to this PRD" },
 };
 
+/**
+ * The lens a heading earns, or undefined.
+ *
+ * Guarded rather than indexed: `section` is normalised heading text the agent
+ * wrote, so a bare lookup reaches `Object.prototype` for a heading reading
+ * "Constructor" or "toString" and yields a function, which then spreads into a
+ * lens carrying no command — a pill labelled `undefined` that sends
+ * `undefined` when clicked. `COMMAND_FLOWS` in the agents service guards the
+ * analogous lookup for the same reason.
+ */
+function sectionLens(section: string): Omit<PrdLens, "at" | "placement"> | undefined {
+  return Object.hasOwn(SECTION_LENSES, section) ? SECTION_LENSES[section] : undefined;
+}
+
 /** The heading whose entries are the open questions. */
 const OPEN_QUESTIONS = "open questions";
 
@@ -131,7 +145,7 @@ export function prdAffordances(blocks: PrdBlock[]): PrdAffordances {
   for (const b of blocks) {
     if (b.kind === "heading") {
       section = norm(b.text);
-      const lens = SECTION_LENSES[section];
+      const lens = sectionLens(section);
       if (lens) lenses.push({ ...lens, at: b.contentEnd, placement: "section" });
       openQuestionsHeading = section === OPEN_QUESTIONS ? b : null;
       continue;
@@ -178,7 +192,7 @@ export function prdAffordances(blocks: PrdBlock[]): PrdAffordances {
       continue;
     }
 
-    if (SECTION_LENSES[section]?.command === "/feature" && b.kind === "listItem") {
+    if (sectionLens(section)?.command === "/feature" && b.kind === "listItem") {
       lenses.push({
         command: `/expand ${subject}`,
         label: "Go deeper",

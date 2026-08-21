@@ -32,7 +32,7 @@ import { Extension } from "@tiptap/core";
 import type { Mark, Node as PmNode } from "@tiptap/pm/model";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
-import { resolveSpecHref } from "../lib/specLinks";
+import { isExternalHref, resolveSpecHref } from "../lib/specLinks";
 
 /** What the console hands the editor so a reference can be followed. */
 export interface SpecLinkBinding {
@@ -85,6 +85,14 @@ export function refreshSpecLinks(view: EditorView): void {
 export const SpecLinks = Extension.create<{ binding: () => SpecLinkBinding | undefined }>({
   name: "specLinks",
 
+  // Above StarterKit's Link (1000), which registers a `handleClick` of its own
+  // and opens `openOnClick` targets in a new tab. ProseMirror gives the first
+  // plugin that returns true the click, and plugin order follows priority, so
+  // anything less than this loses every spec reference to a new browser tab at
+  // a path the console does not serve. Ordering lives here rather than in each
+  // editor's StarterKit options so a second editor cannot forget it.
+  priority: 1001,
+
   addOptions() {
     return { binding: () => undefined };
   },
@@ -114,16 +122,36 @@ export const SpecLinks = Extension.create<{ binding: () => SpecLinkBinding | und
           // a plain click anyway — ProseMirror places a caret instead — so the
           // handler is what makes a reference followable at all, and returning
           // true keeps the caret out of the way when it fires.
+          //
+          // The anchor under the pointer is the subject, NOT the marks at the
+          // clicked position: the Link mark is inclusive, so a position at the
+          // end of a story line still reports the link that line ends with, and
+          // `prd-contract` puts the feature reference exactly there. Clicking
+          // the blank space right of a story would otherwise navigate away.
           handleClick(view, pos, event) {
             const binding = read();
             if (!binding) return false;
-            const mark = linkMark(view.state.doc.resolve(pos).marks());
-            if (!mark) return false;
-            const target = resolveSpecHref(hrefOf(mark), binding.path, binding.knownPaths);
-            if (!target) return false;
-            event.preventDefault();
-            binding.open(target);
-            return true;
+            if (event.button !== 0) return false;
+            const from = event.target;
+            const anchor = from instanceof Element ? from.closest("a") : null;
+            if (!anchor || !view.dom.contains(anchor)) return false;
+
+            const href = anchor.getAttribute("href") ?? "";
+            const target = resolveSpecHref(href, binding.path, binding.knownPaths);
+            if (target) {
+              event.preventDefault();
+              binding.open(target);
+              return true;
+            }
+            // A reference to a document nobody has written yet is inert — it
+            // reads as plain text, and a click on it must not become a new tab
+            // at a repo path no server answers. A genuine external link is the
+            // one case that keeps the editor's own default.
+            if (!isExternalHref(href)) {
+              event.preventDefault();
+              return true;
+            }
+            return false;
           },
         },
       }),

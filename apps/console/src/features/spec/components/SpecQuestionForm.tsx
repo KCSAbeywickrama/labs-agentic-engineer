@@ -278,11 +278,16 @@ export function SpecQuestionForm({
   const useRecommended = () => {
     const answered = entry.questions.filter((q, i) => isQuestionAnswered(q, answers[i]));
     const remaining = entry.questions.filter((q, i) => !isQuestionAnswered(q, answers[i]));
+    // Nothing left to hand back is the Continue case exactly: asking the agent
+    // to "decide the rest" of an empty set invites it to invent decisions and
+    // flag them `*assumed*`, which is the one thing this exit must never cause.
     const ask =
-      remaining.length === entry.questions.length
-        ? "Use your recommended answers for these questions — decide them yourself and flag each one as assumed where it lands in the document, so I can change it later."
-        : `Decide the rest yourself using your recommended answers, and flag each one as assumed where it lands in the document, so I can change it later:\n` +
-          remaining.map((q) => `- "${q.question}"`).join("\n");
+      remaining.length === 0
+        ? ""
+        : remaining.length === entry.questions.length
+          ? "Use your recommended answers for these questions — decide them yourself and flag each one as assumed where it lands in the document, so I can change it later."
+          : `Decide the rest yourself using your recommended answers, and flag each one as assumed where it lands in the document, so I can change it later:\n` +
+            remaining.map((q) => `- "${q.question}"`).join("\n");
     // The answered half rides first, serialized exactly as Continue would send
     // it, so the agent reads one message carrying both decisions and deferrals.
     const decided = answered.length
@@ -297,7 +302,7 @@ export function SpecQuestionForm({
             })),
         ) + "\n\n"
       : "";
-    setPendingSeed(chatKeyFor(org, projectName), decided + ask);
+    setPendingSeed(chatKeyFor(org, projectName), (decided + ask).trimEnd());
     closeRoomQuestion(doc, entry.toolCallId);
   };
 
