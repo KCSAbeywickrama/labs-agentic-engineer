@@ -1,8 +1,8 @@
 # Eval review — requirements-section / lunch-coordinator
 
 - Run: 2026-08-20T13:11:06.060Z
-- Transcript: /home/jo/workspace/labs-agentic-engineer/playground/.projects/spec-agent-evals/req-lunch-coordinator.transcript.md
-- Raw trace: /home/jo/workspace/labs-agentic-engineer/playground/.projects/spec-agent-evals/req-lunch-coordinator.trace.json
+- Transcript: playground/.projects/spec-agent-evals/req-lunch-coordinator.transcript.md
+- Raw trace: playground/.projects/spec-agent-evals/req-lunch-coordinator.trace.json
 
 ## requirements — REVIEW (69)
 

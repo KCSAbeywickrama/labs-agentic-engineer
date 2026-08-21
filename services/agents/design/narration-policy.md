@@ -68,13 +68,14 @@ Everything else about a turn is derived here: the tool set from `TurnSpec.kind`,
 the eager skills from the flow, the spec-paths rule from the kind. Two ways to
 say something is two ways to disagree.
 
-Surface is the exception because it is not a property of the request at all — it
-is who is asking. The playground and the BFF resolve skills from the same
-library, so "the source differs per caller" was not available: the same `console`
-skill sits in both snapshots, and only the caller knows whether anyone will read
-its rules. An unknown value is therefore a pre-stream 400, never a silent
-fallback — the wrong answer narrates repo paths at someone who cannot see a file
-tree.
+Surface is the exception because nothing in `TurnSpec` implies it — it is who is
+asking, not what is being asked for, so it rides as caller context in
+`TurnRequest.surface` rather than being derived alongside the rest. The
+playground and the BFF resolve skills from the same library, so "the source
+differs per caller" was not available: the same `console` skill sits in both
+snapshots, and only the caller knows whether anyone will read its rules. An
+unknown value is therefore a pre-stream 400, never a silent fallback — the wrong
+answer narrates repo paths at someone who cannot see a file tree.
 
 Ordering, precedence and the four rules are settled under **How the agent talks**
 in `apps/console/design/lexicon.md`, which stays the source for the artifact

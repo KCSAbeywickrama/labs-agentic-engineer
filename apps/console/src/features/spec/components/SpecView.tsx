@@ -753,11 +753,33 @@ export function SpecView({ projectName }: { projectName: string }) {
             {/* The one launcher that is not on the document (#579): every
                 other command is offered by the PRD section it changes, but
                 "add a feature" has to be reachable while another artifact is
-                open, so it keeps its place beside the primary CTA. */}
+                open, so it keeps its place beside the primary CTA.
+
+                Gated on `agentBusy` like its neighbour: `seedChat` writes into
+                the pending-seed slot, and `AgentChatPanel` sends a seed the
+                moment the conversation is ready WITHOUT the composer's
+                `inputDisabled` guard — so an ungated click delivers `/feature`
+                mid-turn, which the composer itself would have refused. */}
             {hasRequirementsFiles && !awaitingAnswers && (
-              <Button size="small" variant="outlined" onClick={() => seedChat("/feature")}>
-                + Feature
-              </Button>
+              <Tooltip
+                title={
+                  agentBusy
+                    ? "An agent is still working — add a feature once it finishes"
+                    : "Describe a feature to add to the requirements"
+                }
+              >
+                {/* span so the tooltip works while the button is disabled */}
+                <span>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    disabled={agentBusy}
+                    onClick={() => seedChat("/feature")}
+                  >
+                    + Feature
+                  </Button>
+                </span>
+              </Tooltip>
             )}
             <Tooltip
               title={
