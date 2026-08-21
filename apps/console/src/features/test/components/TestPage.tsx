@@ -90,8 +90,8 @@ export function TestPage({ projectName }: { projectName: string }) {
   // not need to build a web app to find out whether an agent works.
   const header = (
     <PageHeader
-      title="Test"
-      subtitle="Chat with a deployed agent to see how it behaves — no web app needed."
+      title="Try it"
+      subtitle="Chat with a deployed agent to see how it behaves."
       backTo={{
         link: <Link to="/projects/$projectName" params={{ projectName }} />,
         label: "Back to Overview",
@@ -168,8 +168,12 @@ export function TestPage({ projectName }: { projectName: string }) {
           sx={{
             flexGrow: 1,
             minWidth: 0,
-            height: { xs: "auto", md: "calc(100vh - 220px)" },
-            minHeight: 420,
+            // Capped so the composer is always on screen. The offset covers
+            // the app bar, the page header and the page's own padding; the
+            // min keeps it usable on a short window, and the max stops a very
+            // tall screen from stretching the thread into empty space.
+            height: { xs: "auto", md: "min(640px, calc(100vh - 300px))" },
+            minHeight: 380,
             border: 1,
             borderColor: "divider",
             borderRadius: 1,

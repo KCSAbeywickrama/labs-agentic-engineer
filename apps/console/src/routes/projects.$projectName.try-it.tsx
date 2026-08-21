@@ -19,11 +19,11 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { TestPage } from "../features/test/components/TestPage";
 
-export const Route = createFileRoute("/projects/$projectName/test")({
-  component: TestRoute,
+export const Route = createFileRoute("/projects/$projectName/try-it")({
+  component: TryItRoute,
 });
 
-function TestRoute() {
+function TryItRoute() {
   const { projectName } = Route.useParams();
   return <TestPage projectName={projectName} />;
 }
