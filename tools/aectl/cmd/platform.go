@@ -19,6 +19,7 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -306,7 +307,11 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 	}
 	ui.Success("Thunder configured")
 
-	if err := installAddons(ctx, k8sClient); err != nil {
+	platformVersion := initPlatformVersion
+	if platformVersion == "latest" {
+		platformVersion = resolvedPlatformVersion(ctx, initPlatformNamespace, initPlatformRelease)
+	}
+	if err := installAddons(ctx, k8sClient, platformVersion); err != nil {
 		return err
 	}
 	ui.Ready(initConsoleURL)
@@ -340,11 +345,12 @@ var defaultAddonDeps = addonDeps{
 // installAddons presents the optional addon selector and applies chosen addons.
 // It installs any required operators first, prompting for confirmation, then
 // applies addon manifests. Addons whose operator failed are skipped.
-func installAddons(ctx context.Context, _ *kubernetes.Clientset) error {
-	return runAddonInstall(ctx, defaultAddonDeps)
+// platformVersion is used as the Helm --version for operators whose OperatorSpec.Version is empty.
+func installAddons(ctx context.Context, _ *kubernetes.Clientset, platformVersion string) error {
+	return runAddonInstall(ctx, platformVersion, defaultAddonDeps)
 }
 
-func runAddonInstall(ctx context.Context, deps addonDeps) error {
+func runAddonInstall(ctx context.Context, platformVersion string, deps addonDeps) error {
 	if len(addons.Available) == 0 {
 		return nil
 	}
@@ -395,13 +401,17 @@ func runAddonInstall(ctx context.Context, deps addonDeps) error {
 		}
 
 		for _, a := range withOp {
-			sp := ui.NewSpinner(fmt.Sprintf("Installing %s...", a.Operator.DisplayName))
+			op := a.Operator
+			if op.Version == "" && platformVersion != "" {
+				op.Version = platformVersion
+			}
+			sp := ui.NewSpinner(fmt.Sprintf("Installing %s...", op.DisplayName))
 			sp.Start()
-			if err := deps.installOperator(ctx, kubeconfig, a.Operator); err != nil {
-				sp.Fail(fmt.Sprintf("%s install failed", a.Operator.DisplayName))
+			if err := deps.installOperator(ctx, kubeconfig, op); err != nil {
+				sp.Fail(fmt.Sprintf("%s install failed", op.DisplayName))
 				operatorFailed[a.Operator.ReleaseName] = err
 			} else {
-				sp.Success(fmt.Sprintf("%s installed", a.Operator.DisplayName))
+				sp.Success(fmt.Sprintf("%s installed", op.DisplayName))
 			}
 		}
 
@@ -465,6 +475,29 @@ func runAddonInstall(ctx context.Context, deps addonDeps) error {
 		fmt.Println()
 	}
 	return nil
+}
+
+// resolvedPlatformVersion queries the installed Helm release to find the chart
+// version that was actually deployed. Used when --platform-version is "latest"
+// so that add-on operators released on the same cadence can use the same version.
+// Returns an empty string on any failure — the caller falls back gracefully.
+func resolvedPlatformVersion(ctx context.Context, namespace, release string) string {
+	args := []string{"list", "-n", namespace, "-f", release, "-o", "json"}
+	if kubeconfig != "" {
+		args = append(args, "--kubeconfig", kubeconfig)
+	}
+	out, err := exec.CommandContext(ctx, "helm", args...).Output()
+	if err != nil {
+		return ""
+	}
+	var releases []struct {
+		Chart string `json:"chart"`
+	}
+	if json.Unmarshal(out, &releases) != nil || len(releases) == 0 {
+		return ""
+	}
+	// chart field is "<release-name>-<version>", e.g. "aep-platform-0.6.0-rc.17".
+	return strings.TrimPrefix(releases[0].Chart, release+"-")
 }
 
 // shortToolVersion returns the first line of a tool's version output.

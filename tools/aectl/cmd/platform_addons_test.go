@@ -102,7 +102,7 @@ func TestRunAddonInstall_DeclinedConfirmation(t *testing.T) {
 		},
 	}
 
-	if err := runAddonInstall(context.Background(), deps); err != nil {
+	if err := runAddonInstall(context.Background(), "", deps); err != nil {
 		t.Fatalf("expected nil, got %v", err)
 	}
 	if newApplierCalled {
@@ -132,7 +132,7 @@ func TestRunAddonInstall_OperatorFailureSkipsAddon(t *testing.T) {
 		},
 	}
 
-	if err := runAddonInstall(context.Background(), deps); err != nil {
+	if err := runAddonInstall(context.Background(), "", deps); err != nil {
 		t.Fatalf("expected nil (failed operator is not a fatal error), got %v", err)
 	}
 	if !installCalled {
@@ -165,7 +165,7 @@ func TestRunAddonInstall_SuccessAppliesManifests(t *testing.T) {
 		},
 	}
 
-	if err := runAddonInstall(context.Background(), deps); err != nil {
+	if err := runAddonInstall(context.Background(), "", deps); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !installCalled {
