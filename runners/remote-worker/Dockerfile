@@ -90,9 +90,15 @@ ENV PATH="/usr/lib/ballerina/bin:${PATH}"
 # Playwright toolchain, pinned as a pair: AEP_PLAYWRIGHT_VERSION is the
 # contract the aep-validation skill pins tests/e2e/package.json to, so
 # the browsers baked here always match the version the specs run with.
-ARG PLAYWRIGHT_VERSION=1.61.1
-ARG PLAYWRIGHT_CLI_VERSION=0.1.15
-# PLAYWRIGHT_MCP_BROWSER names the browser TYPE for playwright-cli, whose own
+#
+# 1.62.1 is a floor, not just a bump: it is the first release where `cli` is a
+# PUBLIC command. Through 1.61.x it was `command("cli", { hidden: true })` and a
+# maintainer called it "an internal command meant for testing"
+# (playwright#41279, closed not_planned), so the arrangement below would have
+# rested on an internal API. 1.62.1 lists it in `playwright --help` and ships
+# `mcp` and `init-skills` beside it. Do not lower this pin.
+ARG PLAYWRIGHT_VERSION=1.62.1
+# PLAYWRIGHT_MCP_BROWSER names the browser TYPE for the browser CLI, whose own
 # default is the pair (chromium, channel `chrome`) — one branch sets both, so
 # the default engine cannot be had without Google's branded build at the system
 # path /opt/google/chrome/chrome, which this image neither carries (Chrome is a
@@ -103,17 +109,26 @@ ARG PLAYWRIGHT_CLI_VERSION=0.1.15
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     AEP_PLAYWRIGHT_VERSION=${PLAYWRIGHT_VERSION} \
     PLAYWRIGHT_MCP_BROWSER=chromium
-RUN npm install -g "@playwright/test@${PLAYWRIGHT_VERSION}" "@playwright/cli@${PLAYWRIGHT_CLI_VERSION}" \
+RUN npm install -g "@playwright/test@${PLAYWRIGHT_VERSION}" \
     && playwright install --with-deps chromium \
-    # playwright-cli bundles a different playwright build, and browser
-    # revisions are pinned per build (it wants chromium 1229 where
-    # @playwright/test above wants 1228), so this second install is not
-    # redundant — it is what keeps the CLI's first use at task time offline.
-    # Named explicitly: with no argument it also fetches firefox and webkit,
-    # ~546MB whose system dependencies the chromium-only line above never
-    # installs, so they could be downloaded but never launched. Non-fatal:
-    # worst case it downloads at runtime.
-    && (playwright-cli install-browser chromium || true) \
+    # The browser CLI is `playwright cli`, a documented subcommand of the STABLE
+    # package above — deliberately not the `@playwright/cli` package. Every one
+    # of that package's 26 releases pins a PRERELEASE playwright-core, the
+    # latest to an alpha of an unreleased 1.63, so it resolves its own chromium
+    # revision: a second ~974MB browser, and a run authoring specs in one
+    # chromium that `playwright test` then asserts in another. It cannot be
+    # fixed by upgrading — it tracks the alpha train by construction
+    # (playwright-cli#411, playwright#41546). Upstream's own answer was to make
+    # the stable package self-sufficient, which 1.62.1 is. Both spellings
+    # execute the same playwright-core `cli-client/program`; the package only
+    # adds an npm-registry update check whose banner would land in every
+    # agent's tool output.
+    #
+    # Keep the `playwright-cli` spelling working: the CLI's own skill is
+    # vendored upstream text we do not edit and it uses that name throughout,
+    # so a shim is what stops a run meeting command-not-found.
+    && printf '%s\n' '#!/bin/sh' 'exec playwright cli "$@"' > /usr/local/bin/playwright-cli \
+    && chmod 0755 /usr/local/bin/playwright-cli \
     && chmod -R a+rX /ms-playwright
 
 RUN groupadd -r aep \
