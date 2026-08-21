@@ -26,8 +26,17 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const post = vi.fn(async () => ({ data: { turnId: "t-1" }, error: undefined, response: { status: 202 } }));
-vi.mock("../../../api/client", () => ({ client: { POST: (...args: unknown[]) => post(...args) } }));
+// The signature is explicit so the spread below has a rest parameter to land in
+// (TS2556 otherwise) — and so `post.mock.calls` is typed rather than an empty
+// tuple, which is what the assertions read.
+const post = vi.fn<(path: string, init: Record<string, unknown>) => Promise<unknown>>(async () => ({
+  data: { turnId: "t-1" },
+  error: undefined,
+  response: { status: 202 },
+}));
+vi.mock("../../../api/client", () => ({
+  client: { POST: (path: string, init: Record<string, unknown>) => post(path, init) },
+}));
 
 const { startCollabTurn } = await import("./turns");
 
@@ -38,7 +47,7 @@ function fileOf(name: string, body = "x"): File {
 /** The single POST recorded, as (path, init). */
 function sent(): { path: string; init: Record<string, unknown> } {
   expect(post).toHaveBeenCalledOnce();
-  const [path, init] = post.mock.calls[0] as unknown as [string, Record<string, unknown>];
+  const [path, init] = post.mock.calls[0]!;
   return { path, init };
 }
 
