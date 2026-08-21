@@ -189,6 +189,8 @@ interface ExcalidrawElementBase {
   updated: number;
   link: null;
   locked: boolean;
+  /** Which `screen` emitted this element; set on every element of the grid scene. */
+  customData?: { screen: string };
 }
 
 interface RectElement extends ExcalidrawElementBase {
@@ -233,7 +235,7 @@ interface ArrowElement extends ExcalidrawElementBase {
   endIsSpecial?: null;
 }
 
-type ExcalidrawElement = RectElement | TextElement | ArrowElement;
+export type ExcalidrawElement = RectElement | TextElement | ArrowElement;
 
 // ---------- Public API ----------
 
@@ -251,6 +253,118 @@ export function dslToExcalidraw(kind: DslKind, dsl: string): string {
     files: {},
   };
   return JSON.stringify(scene, null, 2);
+}
+
+// ---------- Wireframe compile that reports what changed ----------
+
+/**
+ * A wireframe compile plus the compiler's own account of which screens
+ * changed since `previous`. Hold the result and pass it back on the next
+ * compile; the compiler remembers nothing between calls.
+ */
+export type WireframeCompile =
+  | {
+      ok: true;
+      json: string;
+      /**
+       * Screens whose rendered content differs from `previous`, in canvas
+       * order (topmost first). Empty when nothing changed or when there was
+       * no `previous` to compare against. A screen that merely moved because
+       * one above it grew is NOT listed — comparison is relative to each
+       * screen's own origin.
+       */
+      changedScreens: string[];
+      /** Per-screen fingerprints, carried so the NEXT compile can compare. */
+      fingerprints: Record<string, string>;
+      /** Screen names in canvas order (topmost first); `[0]` is where a reader starts. */
+      screenOrder: string[];
+    }
+  | { ok: false; error: string };
+
+/**
+ * A screen's rendered content as one comparable string, positions taken
+ * relative to the screen's own top-left. Screens stack in one column, so a
+ * taller screen above shifts everything below it; comparing absolute
+ * coordinates would call every shifted screen "changed". Element ids are
+ * already screen-relative, and everything else is compared verbatim.
+ */
+function screenFingerprint(elements: readonly ExcalidrawElement[]): string {
+  let ox = Number.POSITIVE_INFINITY;
+  let oy = Number.POSITIVE_INFINITY;
+  for (const e of elements) {
+    if (e.x < ox) ox = e.x;
+    if (e.y < oy) oy = e.y;
+  }
+  return elements
+    .map((e) => JSON.stringify({ ...e, x: e.x - ox, y: e.y - oy }))
+    .sort()
+    .join('\n');
+}
+
+/**
+ * Compile a wireframes DSL and report which screens changed versus the
+ * previous compile. This is what lets a viewer follow an edit without
+ * guessing: the compiler KNOWS the screen structure, so it — not a diff over
+ * a flat scene — says what moved. `previous` is the prior result from this
+ * function (or null on first compile / a different file); the caller keeps
+ * it, the compiler stays pure.
+ *
+ * A source that does not compile returns `ok: false` exactly like
+ * `tryDslToExcalidraw`, and reports no change — so a half-written stream
+ * frame never produces a focus signal.
+ */
+export function compileWireframes(dsl: string, previous: WireframeCompile | null): WireframeCompile {
+  const base = tryDslToExcalidraw('wireframes', dsl);
+  if (!base.ok) return base;
+  const elements = (JSON.parse(base.json) as ExcalidrawScene).elements;
+
+  // Bucket by the screen tag every element carries, remembering each screen's
+  // topmost y so the report can be ordered the way the canvas is.
+  const byScreen = new Map<string, ExcalidrawElement[]>();
+  const topOf = new Map<string, number>();
+  for (const e of elements) {
+    const name = e.customData?.screen;
+    if (!name) continue;
+    const bucket = byScreen.get(name);
+    if (bucket) bucket.push(e);
+    else byScreen.set(name, [e]);
+    const t = topOf.get(name);
+    if (t === undefined || e.y < t) topOf.set(name, e.y);
+  }
+
+  const fingerprints: Record<string, string> = {};
+  for (const [name, els] of byScreen) fingerprints[name] = screenFingerprint(els);
+
+  const prior = previous?.ok ? previous.fingerprints : null;
+  const changedScreens: string[] = [];
+  if (prior) {
+    for (const name of Object.keys(fingerprints)) {
+      if (prior[name] !== fingerprints[name]) changedScreens.push(name);
+    }
+    // A removed screen has nothing left to show, but the gap it left is worth
+    // reporting; it is ordered by where it USED to sit, which only the previous
+    // compile knows.
+    for (const name of Object.keys(prior)) {
+      if (!(name in fingerprints)) changedScreens.push(name);
+    }
+    // Rank on the previous canvas — the one the reader was actually looking at
+    // — placing each screen by its old index and falling back to the new
+    // ordering for screens that did not exist before. Ranking a removed screen
+    // by the CURRENT canvas is impossible (it has no position there), and
+    // defaulting it to last claimed the screen below it changed first.
+    const priorRank = new Map(
+      (previous?.ok ? previous.screenOrder : []).map((name, i) => [name, i] as const),
+    );
+    const currentRank = new Map(
+      [...topOf.entries()].sort((a, b) => a[1] - b[1]).map(([name], i) => [name, i] as const),
+    );
+    const rankOf = (name: string): number =>
+      priorRank.get(name) ?? (currentRank.get(name) ?? 0) + priorRank.size;
+    changedScreens.sort((a, b) => rankOf(a) - rankOf(b));
+  }
+
+  const screenOrder = [...topOf.entries()].sort((a, b) => a[1] - b[1]).map(([name]) => name);
+  return { ok: true, json: base.json, changedScreens, fingerprints, screenOrder };
 }
 
 export function tryDslToExcalidraw(
@@ -576,6 +690,14 @@ function buildWireframes(
           tree: [],
         };
         if (screenMatch[2]) screen.description = unescapeQuoted(screenMatch[2]);
+        // Screen names are identity: element ids are screen-relative, the
+        // per-screen fingerprints that drive the viewer's focus are keyed by
+        // name, and `-> Target` resolves by name (case-insensitively). Two
+        // screens sharing one name merge into a single fingerprint and emit
+        // colliding element ids, so it is always an authoring bug.
+        if (ast.screens.some((s) => s.name.toLowerCase() === screen!.name.toLowerCase())) {
+          err(no, `duplicate screen ${JSON.stringify(screen.name)} — declare each screen once`);
+        }
         ast.screens.push(screen);
         stack = [{ level: 0, kind: 'root', nodes: screen.tree }];
         inFlow = false;
@@ -1068,7 +1190,11 @@ const DEFAULT_SCREEN_W = 1280; // desktop webapp frame (override: `screen Name W
 const DEFAULT_SCREEN_H = 800;
 const SCREEN_GAP_X = 120;
 const SCREEN_GAP_Y = 120;
-const COLUMNS = 2;
+// Screens stack in one column: side-by-side rows shrank every screen to an
+// illegible size once the viewer fitted the whole board, and a single column
+// is what lets the viewer land on the FIRST screen with the next one's top
+// edge peeking below as the cue that there is more.
+const COLUMNS = 1;
 const TITLE_H = 32; // screen-name row drawn ABOVE the outline
 const DESC_H = 22; // extra headroom for a screen description subtitle
 const NAVBAR_H = 56;
@@ -1213,6 +1339,7 @@ function renderWireframes(ast: WireframeAst, opts?: WireframeRenderOpts): Excali
   let curY = 0;
   let rowMaxH = 0;
   ast.screens.forEach((screen, idx) => {
+    const firstEl = out.length;
     const number = idx + 1;
     if (idx > 0 && idx % COLUMNS === 0) {
       curX = 0;
@@ -1309,21 +1436,52 @@ function renderWireframes(ast: WireframeAst, opts?: WireframeRenderOpts): Excali
       // treatment table cells get — so nothing renders outside the screen.
       const clipText = (label: string, fontSize: number): string =>
         truncateLabel(label, fitChars(sx + screen.width - 16 - ex, fontSize));
-      const eid = stableId(`el:${screen.name}:${el.kind}:${el.label}:${ex}:${ey}`);
+      // Identity is SCREEN-relative (el.x/el.y), never the canvas position
+      // (ex/ey). Screens stack in one column, so growing one screen shifts
+      // every screen below it; keying identity on canvas coordinates gave
+      // every one of those elements a new id, which made a viewer diff read
+      // an untouched screen as wholly replaced. The screen name still keeps
+      // ids unique across screens.
+      const eid = stableId(`el:${screen.name}:${el.kind}:${el.label}:${el.x}:${el.y}`);
       // A `-> ScreenName` on this element draws a navigation marker right
       // beside it, so the reader sees exactly which control goes where.
       if (!opts?.prototype && el.navTo) {
         const num = screenNumber.get(el.navTo.toLowerCase());
         if (num !== undefined) {
           const label = `→ Screen ${num} · ${el.navTo}`;
+          const markerW = Math.max(120, label.length * 8);
+          const markerH = 16;
+          // Beside the control when there is room; below it when there is not.
+          // "Room" means the marker would neither cross the screen's right edge
+          // nor land on a sibling laid out to the right on the same row — the
+          // common case being two buttons side by side, where a marker drawn
+          // across the neighbour made BOTH unreadable.
+          const besideX = ex + el.width + 10;
+          const besideY = ey + Math.max(0, (el.height - markerH) / 2);
+          const screenRight = sx + screen.width - 16;
+          const crossesEdge = besideX + markerW > screenRight;
+          const hitsSibling = screen.elements.some((other) => {
+            if (other === el) return false;
+            const ox = sx + other.x;
+            const oy = frameY + other.y;
+            return (
+              ox < besideX + markerW &&
+              ox + other.width > besideX &&
+              oy < besideY + markerH &&
+              oy + other.height > besideY
+            );
+          });
+          const below = crossesEdge || hitsSibling;
+          const mx = below ? Math.min(ex, screenRight - markerW) : besideX;
+          const my = below ? ey + el.height + 4 : besideY;
           out.push(
             withColor(
               makeText(
-                stableId(`nav:${screen.name}:${el.label}:${el.navTo}:${ex}:${ey}`),
-                ex + el.width + 10,
-                ey + Math.max(0, (el.height - 16) / 2),
-                Math.max(120, label.length * 8),
-                16,
+                stableId(`nav:${screen.name}:${el.label}:${el.navTo}:${el.x}:${el.y}`),
+                mx,
+                my,
+                markerW,
+                markerH,
                 label,
                 13,
                 'left',
@@ -1755,6 +1913,13 @@ function renderWireframes(ast: WireframeAst, opts?: WireframeRenderOpts): Excali
           break;
         }
       }
+    }
+    // Every element a screen emitted — frame, title block, chrome, body — is
+    // tagged with the screen it belongs to. Excalidraw preserves `customData`
+    // and never renders it; it is what lets a viewer group elements per screen
+    // (focus the first, follow the changed one) without geometry guesswork.
+    for (let i = firstEl; i < out.length; i++) {
+      out[i] = { ...out[i]!, customData: { screen: screen.name } };
     }
   });
 

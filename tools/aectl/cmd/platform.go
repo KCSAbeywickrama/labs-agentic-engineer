@@ -19,6 +19,7 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -36,6 +37,7 @@ import (
 	"github.com/wso2/aep/aectl/internal/addons"
 	"github.com/wso2/aep/aectl/internal/bootstrap"
 	"github.com/wso2/aep/aectl/internal/config"
+	aectlhelm "github.com/wso2/aep/aectl/internal/helm"
 	k8s "github.com/wso2/aep/aectl/internal/kubernetes"
 	"github.com/wso2/aep/aectl/internal/openbao"
 	"github.com/wso2/aep/aectl/internal/ui"
@@ -243,12 +245,6 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 		"--set", "thunder.adminURL=" + thunderURL,
 		"--set", "thunder.jwksURL=" + thunderURL + "/oauth2/jwks",
 		"--set", "platformAPI.baseURL=" + viper.GetString("oc.api_url"),
-		// thunder-app-operator subchart: forward the same Thunder admin URL so the
-		// operator talks to the same endpoint as the rest of the platform.
-		// Credentials come from the ESO-synced Secret (written to OpenBao by
-		// provisionOpenBao above — never passed via --set).
-		"--set", "thunder-app-operator.thunder.adminURL=" + thunderURL,
-		"--set", "thunder-app-operator.thunder.existingSecret=" + config.ThunderOperatorCredsSecret,
 	}
 	// Chart source: local path takes precedence, otherwise OCI registry.
 	// Must be inserted at index 3: after "upgrade", "--install", <release>.
@@ -311,38 +307,150 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 	}
 	ui.Success("Thunder configured")
 
-	if err := installAddons(ctx, k8sClient); err != nil {
+	platformVersion := initPlatformVersion
+	if platformVersion == "latest" {
+		// Resolve the concrete chart version of the platform release just
+		// installed, so addon operators are pinned to a matching --version.
+		// A failure here must abort: silently installing operators without a
+		// version pin would pull whatever the registry defaults to.
+		platformVersion, err = resolvedPlatformVersion(ctx, initPlatformNamespace, initPlatformRelease)
+		if err != nil {
+			return fmt.Errorf("resolve platform version for addon operators: %w", err)
+		}
+	}
+	if err := installAddons(ctx, k8sClient, platformVersion); err != nil {
 		return err
 	}
 	ui.Ready(initConsoleURL)
 	return nil
 }
 
+// manifestApplier is the subset of kubernetes.Applier used by the addon flow.
+type manifestApplier interface {
+	ApplyYAML(ctx context.Context, fieldManager, defaultNamespace, manifests string) error
+	Exists(ctx context.Context, apiVersion, kind, namespace, name string) (bool, error)
+}
+
+// addonDeps holds the external calls that installAddons depends on, allowing
+// them to be replaced in tests without modifying any shared package state.
+type addonDeps struct {
+	multiSelect     func(string, []ui.SelectItem) ([]bool, bool)
+	confirm         func(string) bool
+	installOperator func(context.Context, string, addons.OperatorSpec) error
+	newApplier      func(string) (manifestApplier, error)
+}
+
+var defaultAddonDeps = addonDeps{
+	multiSelect:     ui.MultiSelect,
+	confirm:         ui.Confirm,
+	installOperator: aectlhelm.InstallOperator,
+	newApplier: func(kc string) (manifestApplier, error) {
+		return k8s.NewApplier(kc)
+	},
+}
+
 // installAddons presents the optional addon selector and applies chosen addons.
-func installAddons(ctx context.Context, _ *kubernetes.Clientset) error {
+// It installs any required operators first, prompting for confirmation, then
+// applies addon manifests. Addons whose operator failed are skipped.
+// platformVersion is used as the Helm --version for operators whose OperatorSpec.Version is empty.
+func installAddons(ctx context.Context, _ *kubernetes.Clientset, platformVersion string) error {
+	return runAddonInstall(ctx, platformVersion, defaultAddonDeps)
+}
+
+func runAddonInstall(ctx context.Context, platformVersion string, deps addonDeps) error {
 	if len(addons.Available) == 0 {
 		return nil
 	}
 
+	// Phase 0: addon selection
 	items := make([]ui.SelectItem, len(addons.Available))
 	for i, a := range addons.Available {
 		items[i] = ui.SelectItem{Label: a.Label, Description: a.Description}
 	}
 
-	selected, confirmed := ui.MultiSelect("Optional platform resources", items)
+	selected, confirmed := deps.multiSelect("Optional platform resources", items)
 	if !confirmed {
 		return nil
 	}
 
-	applier, err := k8s.NewApplier(kubeconfig)
-	if err != nil {
-		return fmt.Errorf("build applier: %w", err)
+	var chosen []addons.Addon
+	for i, a := range addons.Available {
+		if selected[i] {
+			chosen = append(chosen, a)
+		}
+	}
+	if len(chosen) == 0 {
+		return nil
 	}
 
+	// Phase 1: operator installation
+	operatorFailed := map[string]error{}
+
+	var withOp []addons.Addon
+	for _, a := range chosen {
+		if a.Operator.ReleaseName != "" {
+			withOp = append(withOp, a)
+		}
+	}
+
+	if len(withOp) > 0 {
+		fmt.Println()
+		fmt.Printf("  %s\n", ui.Gray("The following operators will be installed:"))
+		for _, a := range withOp {
+			ui.Detail(fmt.Sprintf("%-28s (for %s)", a.Operator.DisplayName, a.Label))
+		}
+		fmt.Println()
+
+		if !deps.confirm("Install these operators?") {
+			ui.Warn("Operator installation skipped — addons will not be applied")
+			fmt.Println()
+			return nil
+		}
+
+		for _, a := range withOp {
+			op := a.Operator
+			if op.Version == "" && platformVersion != "" {
+				op.Version = platformVersion
+			}
+			sp := ui.NewSpinner(fmt.Sprintf("Installing %s...", op.DisplayName))
+			sp.Start()
+			if err := deps.installOperator(ctx, kubeconfig, op); err != nil {
+				sp.Fail(fmt.Sprintf("%s install failed", op.DisplayName))
+				operatorFailed[a.Operator.ReleaseName] = err
+			} else {
+				sp.Success(fmt.Sprintf("%s installed", op.DisplayName))
+			}
+		}
+
+		if len(operatorFailed) > 0 {
+			fmt.Println()
+			for _, a := range withOp {
+				label := fmt.Sprintf("%-24s", a.Operator.ReleaseName+":")
+				if operatorFailed[a.Operator.ReleaseName] != nil {
+					ui.Fail(label + " failed — skipping " + a.Label)
+				} else {
+					ui.Success(label + " installed")
+				}
+			}
+			fmt.Println()
+		}
+	}
+
+	// Phase 2: manifest application (skips addons whose operator failed).
+	// The applier is built lazily so a fully-failed operator run avoids a
+	// kubeconfig read entirely.
+	var applier manifestApplier
 	any := false
-	for i, a := range addons.Available {
-		if !selected[i] {
+	for _, a := range chosen {
+		if a.Operator.ReleaseName != "" && operatorFailed[a.Operator.ReleaseName] != nil {
 			continue
+		}
+		if applier == nil {
+			ap, err := deps.newApplier(kubeconfig)
+			if err != nil {
+				return fmt.Errorf("build applier: %w", err)
+			}
+			applier = ap
 		}
 		any = true
 		sp := ui.NewSpinner(fmt.Sprintf("Applying %s", a.Label))
@@ -353,7 +461,6 @@ func installAddons(ctx context.Context, _ *kubernetes.Clientset) error {
 				return fmt.Errorf("apply addon %s: %w", a.ID, err)
 			}
 		}
-		// Verify each key resource actually exists in the cluster.
 		for _, v := range a.VerifyResources {
 			ok, err := applier.Exists(ctx, v.APIVersion, v.Kind, v.Namespace, v.Name)
 			if err != nil {
@@ -375,6 +482,49 @@ func installAddons(ctx context.Context, _ *kubernetes.Clientset) error {
 		fmt.Println()
 	}
 	return nil
+}
+
+// resolvedPlatformVersion queries the installed Helm release to find the chart
+// version that was actually deployed. Used when --platform-version is "latest"
+// so that add-on operators released on the same cadence can use the same version.
+// Returns an empty string on any failure — the caller falls back gracefully.
+// resolvedPlatformVersion returns the concrete chart version of the named Helm
+// release. It uses `helm get metadata`, which targets an exact release (unlike
+// `helm list -f`, whose regex filter can match several releases) and reports the
+// chart version directly (rather than parsing it out of a "<name>-<version>"
+// string, which breaks when the chart name differs from the release name). Helm
+// and parse errors are propagated; an empty or mismatched result is an error.
+func resolvedPlatformVersion(ctx context.Context, namespace, release string) (string, error) {
+	args := []string{"get", "metadata", release, "-n", namespace, "-o", "json"}
+	if kubeconfig != "" {
+		args = append(args, "--kubeconfig", kubeconfig)
+	}
+	out, err := exec.CommandContext(ctx, "helm", args...).Output()
+	if err != nil {
+		return "", fmt.Errorf("helm get metadata %s: %w", release, err)
+	}
+	return parsePlatformVersion(out, release)
+}
+
+// parsePlatformVersion extracts and validates the chart version from the JSON
+// output of `helm get metadata -o json`. It is separated from the exec call so
+// the parsing and validation rules can be unit-tested against fixtures.
+func parsePlatformVersion(out []byte, release string) (string, error) {
+	var meta struct {
+		Name    string `json:"name"`
+		Version string `json:"version"`
+	}
+	if err := json.Unmarshal(out, &meta); err != nil {
+		return "", fmt.Errorf("parse helm metadata for %s: %w", release, err)
+	}
+	// Guard against querying (or helm returning) a different release than asked.
+	if meta.Name != release {
+		return "", fmt.Errorf("helm metadata returned release %q, expected %q", meta.Name, release)
+	}
+	if meta.Version == "" {
+		return "", fmt.Errorf("helm metadata for %s reported an empty chart version", release)
+	}
+	return meta.Version, nil
 }
 
 // shortToolVersion returns the first line of a tool's version output.
@@ -578,25 +728,6 @@ func provisionOpenBao(ctx context.Context, anthropicKey, thunderAdminClientID, t
 // by legacy setup scripts (setup-aep.sh) without Helm ownership labels. Helm
 // refuses to adopt them on install, so we delete and let the chart recreate.
 func deleteOrphanedResources(ctx context.Context) error {
-	// If setup-aep.sh or setup-local.sh installed the thunder-app-operator as a
-	// standalone Helm release, its ClusterRole/ClusterRoleBinding are owned by
-	// that release and block the platform chart from installing the subchart.
-	// Uninstall it first — the subchart takes over ownership in wso2-aep.
-	helmStatusArgs := []string{"status", "thunder-app-operator", "-n", "thunder-app-operator-system"}
-	if kubeconfig != "" {
-		helmStatusArgs = append(helmStatusArgs, "--kubeconfig", kubeconfig)
-	}
-	if out := exec.CommandContext(ctx, "helm", helmStatusArgs...).Run(); out == nil {
-		ui.Detail("Removing standalone thunder-app-operator (replacing with platform subchart)")
-		helmUninstallArgs := []string{"uninstall", "thunder-app-operator", "-n", "thunder-app-operator-system"}
-		if kubeconfig != "" {
-			helmUninstallArgs = append(helmUninstallArgs, "--kubeconfig", kubeconfig)
-		}
-		if out, err := exec.CommandContext(ctx, "helm", helmUninstallArgs...).CombinedOutput(); err != nil {
-			return fmt.Errorf("uninstall standalone thunder-app-operator: %w\n%s", err, out)
-		}
-	}
-
 	// cluster-scoped: clusterauthzrolebinding, clustertrait
 	// namespaced:     secretstore (lives in initPlatformNamespace)
 	resources := []struct {

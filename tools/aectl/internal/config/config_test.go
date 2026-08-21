@@ -41,7 +41,7 @@ func TestLoadThunderSecretFromCluster_NotFound(t *testing.T) {
 
 func TestLoadThunderSecretFromCluster_KeyMissing(t *testing.T) {
 	sec := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: ThunderOperatorCredsSecret, Namespace: "aep"},
+		ObjectMeta: metav1.ObjectMeta{Name: ThunderAdminCredsSecret, Namespace: "aep"},
 		Data:       map[string][]byte{"some-other-key": []byte("value")},
 	}
 	client := fake.NewSimpleClientset(sec)
@@ -51,15 +51,15 @@ func TestLoadThunderSecretFromCluster_KeyMissing(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when key is absent, got nil")
 	}
-	if !strings.Contains(err.Error(), ThunderOperatorCredsSecretKey) {
-		t.Errorf("error should mention the missing key %q, got: %v", ThunderOperatorCredsSecretKey, err)
+	if !strings.Contains(err.Error(), ThunderAdminCredsSecretKey) {
+		t.Errorf("error should mention the missing key %q, got: %v", ThunderAdminCredsSecretKey, err)
 	}
 }
 
 func TestLoadThunderSecretFromCluster_KeyEmpty(t *testing.T) {
 	sec := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: ThunderOperatorCredsSecret, Namespace: "aep"},
-		Data:       map[string][]byte{ThunderOperatorCredsSecretKey: {}},
+		ObjectMeta: metav1.ObjectMeta{Name: ThunderAdminCredsSecret, Namespace: "aep"},
+		Data:       map[string][]byte{ThunderAdminCredsSecretKey: {}},
 	}
 	client := fake.NewSimpleClientset(sec)
 	viper.Reset()
@@ -68,15 +68,15 @@ func TestLoadThunderSecretFromCluster_KeyEmpty(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when key is empty, got nil")
 	}
-	if !strings.Contains(err.Error(), ThunderOperatorCredsSecretKey) {
-		t.Errorf("error should mention the empty key %q, got: %v", ThunderOperatorCredsSecretKey, err)
+	if !strings.Contains(err.Error(), ThunderAdminCredsSecretKey) {
+		t.Errorf("error should mention the empty key %q, got: %v", ThunderAdminCredsSecretKey, err)
 	}
 }
 
 func TestLoadThunderSecretFromCluster_SetsDefault(t *testing.T) {
 	sec := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: ThunderOperatorCredsSecret, Namespace: "aep"},
-		Data:       map[string][]byte{ThunderOperatorCredsSecretKey: []byte("my-secret")},
+		ObjectMeta: metav1.ObjectMeta{Name: ThunderAdminCredsSecret, Namespace: "aep"},
+		Data:       map[string][]byte{ThunderAdminCredsSecretKey: []byte("my-secret")},
 	}
 	client := fake.NewSimpleClientset(sec)
 	viper.Reset()
@@ -91,8 +91,8 @@ func TestLoadThunderSecretFromCluster_SetsDefault(t *testing.T) {
 
 func TestLoadThunderSecretFromCluster_EnvOverridesDefault(t *testing.T) {
 	sec := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: ThunderOperatorCredsSecret, Namespace: "aep"},
-		Data:       map[string][]byte{ThunderOperatorCredsSecretKey: []byte("cluster-secret")},
+		ObjectMeta: metav1.ObjectMeta{Name: ThunderAdminCredsSecret, Namespace: "aep"},
+		Data:       map[string][]byte{ThunderAdminCredsSecretKey: []byte("cluster-secret")},
 	}
 	client := fake.NewSimpleClientset(sec)
 	viper.Reset()

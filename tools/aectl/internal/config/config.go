@@ -33,13 +33,13 @@ import (
 // all subsequent commands. It lives in the AEP platform namespace (wso2-aep).
 const ConfigMapName = "aep-cli-config"
 
-// ThunderOperatorCredsSecret is the ESO-synced Secret that holds the Thunder
-// system client credentials used by the thunder-app-operator.
-const ThunderOperatorCredsSecret = "aep-thunder-operator-creds"
+// ThunderAdminCredsSecret is the ESO-synced Secret that holds the Thunder
+// admin client credentials used by aectl to register OAuth clients.
+const ThunderAdminCredsSecret = "aep-thunder-admin-creds"
 
-// ThunderOperatorCredsSecretKey is the key within ThunderOperatorCredsSecret
-// that holds the OAuth client secret.
-const ThunderOperatorCredsSecretKey = "client-secret"
+// ThunderAdminCredsSecretKey is the key within ThunderAdminCredsSecret
+// that holds the admin OAuth client secret.
+const ThunderAdminCredsSecretKey = "client-secret"
 
 // ConfigMapKeys is the canonical list of non-sensitive viper keys stored in
 // ConfigMapName. thunder.admin_client_secret is intentionally absent — it is
@@ -184,21 +184,21 @@ func LoadFromCluster(ctx context.Context, client kubernetes.Interface, namespace
 }
 
 // LoadThunderSecretFromCluster reads the Thunder admin client secret from the
-// ESO-synced ThunderOperatorCredsSecret and sets it via viper.SetDefault so
+// ESO-synced ThunderAdminCredsSecret and sets it via viper.SetDefault so
 // that AEP_THUNDER_ADMIN_CLIENT_SECRET env and the interactive prompt still
 // take precedence. The secret is never stored in the ConfigMap.
 // Returns nil if the Secret does not yet exist (first install).
 func LoadThunderSecretFromCluster(ctx context.Context, client kubernetes.Interface, namespace string) error {
-	sec, err := client.CoreV1().Secrets(namespace).Get(ctx, ThunderOperatorCredsSecret, metav1.GetOptions{})
+	sec, err := client.CoreV1().Secrets(namespace).Get(ctx, ThunderAdminCredsSecret, metav1.GetOptions{})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			return nil
 		}
-		return fmt.Errorf("read %s: %w", ThunderOperatorCredsSecret, err)
+		return fmt.Errorf("read %s: %w", ThunderAdminCredsSecret, err)
 	}
-	v, ok := sec.Data[ThunderOperatorCredsSecretKey]
+	v, ok := sec.Data[ThunderAdminCredsSecretKey]
 	if !ok || len(v) == 0 {
-		return fmt.Errorf("%s is missing non-empty key %q — ESO sync may be incomplete", ThunderOperatorCredsSecret, ThunderOperatorCredsSecretKey)
+		return fmt.Errorf("%s is missing non-empty key %q — ESO sync may be incomplete", ThunderAdminCredsSecret, ThunderAdminCredsSecretKey)
 	}
 	viper.SetDefault("thunder.admin_client_secret", string(v))
 	return nil
