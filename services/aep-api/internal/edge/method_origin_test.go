@@ -132,6 +132,7 @@ var opOwner = map[string]string{
 	"SetSkillEnabled":               embedSpec,
 	"StartGitProviderConnect":       embedOrganization,
 	"StreamActivity":                embedProjects,
+	"StreamBuildProgress":           embedDelivery,
 	"StreamRunProgress":             embedDelivery,
 	"StreamTaskLog":                 embedDelivery,
 	"StreamTurn":                    embedSpec,
