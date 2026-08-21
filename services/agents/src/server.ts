@@ -336,8 +336,14 @@ export function createApp(deps: CreateAppDeps): Express {
         ...(body.journal.author
           ? { author: { id: body.journal.author.id, displayName: body.journal.author.displayName } }
           : {}),
-        ...(body.journal.attachments && body.journal.attachments.length > 0
-          ? { attachments: [...body.journal.attachments] }
+        // NAMES OF WHAT SURVIVED, not what the caller sent. The two differ
+        // whenever reference parts exhaust the shared encoded budget and a chat
+        // attachment is skipped: persisting the caller's list would put a chip
+        // on a file the model never received — the exact confusion the chips
+        // exist to prevent, inverted. Derived from the parts for the same reason
+        // the prompt's file list is.
+        ...(chatAttachments.length > 0
+          ? { attachments: chatAttachments.flatMap((p) => (p.filename ? [p.filename] : [])) }
           : {}),
       };
     }
