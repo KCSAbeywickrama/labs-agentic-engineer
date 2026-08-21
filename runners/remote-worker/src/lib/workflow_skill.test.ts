@@ -473,6 +473,36 @@ test("the validation workflow never cds to a bare relative path", () => {
   }
 });
 
+// #137/#140: the validation deny-list summarised the rules as a flat "no
+// force-push" while step 10 needed one, and the agent resolved the
+// contradiction by ignoring its own skill. A validation branch name repeats
+// every cycle, so the push must force — but never the form that ignores what
+// the remote says.
+test("no skill licenses a force-push without the lease", () => {
+  for (const rel of fs.readdirSync(LIBRARY, { recursive: true, encoding: "utf8" })) {
+    if (!rel.endsWith(".md")) continue;
+    const full = path.join(LIBRARY, rel);
+    if (!fs.statSync(full).isFile()) continue;
+    for (const line of fs.readFileSync(full, "utf8").split("\n")) {
+      if (!line.includes("push") || !line.includes("--force")) continue;
+      assert.ok(
+        line.includes("--force-with-lease"),
+        `${rel}: \`${line.trim()}\` — a force-push must carry --force-with-lease`,
+      );
+    }
+  }
+});
+
+// The half a reader misses: the deny-list can go on governing a force-push
+// after the step that needed one has lost it.
+test("aep-validation still names the force-push its push step needs", () => {
+  const body = fs.readFileSync(path.join(LIBRARY, "aep-validation", "SKILL.md"), "utf8");
+  assert.ok(
+    body.includes("git push --force-with-lease"),
+    "step 10 lost its lease form while the deny-list still governs one",
+  );
+});
+
 test("re-mirroring the same workspace replaces the previous mode's body", async () => {
   await inTempDir(async (dir) => {
     const workspace = path.join(dir, "ws");

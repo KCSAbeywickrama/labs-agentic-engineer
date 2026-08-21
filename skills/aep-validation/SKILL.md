@@ -307,6 +307,10 @@ belongs in the report, and you still open the PR (step 10).
 ### 10. PR
 
 ```bash
+# always the lease: this branch name repeats every cycle, so a re-validation
+# diverges from what the last one left on it
+git push --force-with-lease -u origin "aep/m${MILESTONE}-validation"
+
 gh pr create \
   --title "Validation: <pass>/<total> e2e criteria passing (issue #<N>)" \
   --body $'Closes #<N>\n\n<summary table: pass/fail/not_run + manual/scenario counts>\n\nReport: tests/validation/report.md'
@@ -331,5 +335,6 @@ counts and the PR link.
   request (exported in-session as `AEP_E2E_USERNAME` / `AEP_E2E_PASSWORD`,
   never written to a file); if the request errors and a criterion needs
   login, mark it blocked in an issue comment and let it land `not_run`.
-- Everything in the `aep` skill's deny-list (no default-branch pushes,
-  no force-push, one PR, no merging, no repo-settings changes).
+- Everything in the `aep` skill's deny-list (no default-branch pushes, one
+  PR, no merging, no repo-settings changes). Its force-push exception is
+  yours: `--force-with-lease` on your own branch, per step 10.
