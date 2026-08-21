@@ -83,9 +83,15 @@ export function TestPage({ projectName }: { projectName: string }) {
     ? selected
     : (agents[0]?.name ?? null);
 
+  // Keeps the console's page convention (Builds and Deployments head themselves
+  // the same way, and the back link is the only route out), but a bare "Test"
+  // repeated the nav item and told a first-time visitor nothing. The subtitle is
+  // what the page is FOR — the reason this tab exists at all is that you should
+  // not need to build a web app to find out whether an agent works.
   const header = (
     <PageHeader
       title="Test"
+      subtitle="Chat with a deployed agent to see how it behaves — no web app needed."
       backTo={{
         link: <Link to="/projects/$projectName" params={{ projectName }} />,
         label: "Back to Overview",
