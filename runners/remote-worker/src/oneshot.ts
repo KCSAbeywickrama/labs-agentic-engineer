@@ -33,7 +33,7 @@
 
 import { randomUUID } from "node:crypto";
 import { provisionWorkspace } from "./lib/workspace.js";
-import { runClaudeQuery } from "./lib/runner.js";
+import { onDemandSkills, runClaudeQuery } from "./lib/runner.js";
 import { openTaskLog } from "./lib/logger.js";
 import { isUUID, isSlug } from "./lib/uuid.js";
 import type { DispatchRequest } from "./lib/types.js";
@@ -229,12 +229,16 @@ async function main(): Promise<number> {
   // must not be used to pick a design file.
   //
   // A validation run (AEP_TASK_KIND) applies no DESIGN skills at all — it is
-  // black-box verification and builds nothing — so both values below stay empty
-  // for it: nothing is pinned, and the Skill allowlist is left empty on purpose.
-  // `aep-validation` reaches the run a different way: alwaysOnSkills() names it
-  // as this run's workflow and requireWorkflowBodies() injects its whole SKILL.md
-  // into the system prompt, so it is in context from the first token rather than
-  // invocable through the Skill tool.
+  // black-box verification and builds nothing — so `pinnedBodies` stays empty
+  // for it. Its workflow arrives another way: alwaysOnSkills() names
+  // `aep-validation` and requireWorkflowBodies() injects the whole SKILL.md into
+  // the system prompt, in context from the first token rather than invocable.
+  //
+  // The ALLOWLIST is not empty though, and that distinction cost a release.
+  // Pinning nothing is not the same as allowing nothing: `skills:` gates the
+  // Skill tool, so an empty array made the `playwright-cli` load that
+  // `aep-validation` instructs impossible, and the agent read the mirror's files
+  // by hand instead. onDemandSkills() names what the phase may load.
   let availableSkillNames: string[] = [];
   let pinnedBodies = "";
   if (req.taskKind === "validation") {
@@ -310,6 +314,21 @@ async function main(): Promise<number> {
       return 2;
     }
     console.log(`[oneshot] ${endpoints.length} deployed endpoint(s) answered`);
+
+    // Resolved against the mirror rather than passed straight through: the BFF
+    // copies a skill only when the org has it enabled, so a name here can be
+    // absent, and this defect already survived weeks of green runs on silence.
+    // A miss is named now, with the path it looked for, instead of arriving as a
+    // rejected Skill call mid-run.
+    const { preload } = await resolvePinnedSkills(
+      layout.workspace,
+      onDemandSkills(req.taskKind),
+      (l) => console.log(l),
+    );
+    availableSkillNames = preload;
+    console.log(
+      `[oneshot] ${availableSkillNames.length} skill(s) loadable on demand: ${availableSkillNames.join(", ") || "none"}`,
+    );
   } else {
     const pinned = await resolveTaskSkills({
       workspace: layout.workspace,

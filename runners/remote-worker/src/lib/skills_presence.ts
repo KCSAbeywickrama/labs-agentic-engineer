@@ -43,18 +43,24 @@ import fs from "node:fs";
 import path from "node:path";
 
 export interface PinnedSkillsResolution {
-  /** Bare skill names with a readable .claude/skills/<name>/SKILL.md — preload these, kind-agnostic. */
+  /** Bare skill names with a readable .claude/skills/<name>/SKILL.md — kind-agnostic. */
   preload: string[];
-  /** Pinned names with no matching copy on disk. */
+  /** Requested names with no matching copy on disk. */
   dangling: string[];
 }
 
 export const SKILLS_MIRROR_DIR = path.join(".claude", "skills");
 
 /**
- * Partition `names` into present (preload) vs dangling, checked against
+ * Partition `names` into present vs dangling, checked against
  * `<workspace>/.claude/skills/<name>/SKILL.md`. Never throws — an absent
  * `.claude/skills/` directory simply means every name is dangling.
+ *
+ * Caller-agnostic on purpose. Two callers ask the same question of different
+ * lists: a coding run checks the pins it will inject as bodies, a validation run
+ * checks the skills it will allow the Skill tool to load. So the warning names
+ * the mirror and the path, not the reason the caller wanted the name — the
+ * mechanism is "is this in the mirror", and only the label differed.
  */
 export async function resolvePinnedSkills(
   workspace: string,
@@ -72,7 +78,7 @@ export async function resolvePinnedSkills(
     } catch {
       dangling.push(name);
       log(
-        `[skills-presence] ⚠️  pinned skill ${JSON.stringify(name)} not found at ` +
+        `[skills-presence] ⚠️  skill ${JSON.stringify(name)} is not in the mirror — no ` +
           `.claude/skills/${name}/SKILL.md — skipping (guidance degraded, build continues)`,
       );
     }

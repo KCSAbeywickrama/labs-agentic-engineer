@@ -192,7 +192,7 @@ memory:
 - **Read `references/authoring.md` now and follow it as the binding
   authoring discipline** (plan format, collect-generated-code loop,
   assertion rules, criterion↔spec contract).
-- Load `aep:playwright-cli` with the Skill tool — the CLI's own skill
+- Load `playwright-cli` with the Skill tool — the CLI's own skill
   (commands, refs, eval, storage state; vendored from @playwright/cli).
 
 Then: write the test plan, author one spec per uncovered e2e criterion
