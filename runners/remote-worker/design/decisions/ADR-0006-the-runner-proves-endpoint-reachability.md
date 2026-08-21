@@ -78,7 +78,9 @@ the project's own repo. That left playwright-cli — the browser the agent
 *explores* with, before any spec exists — reading neither, and still dialling
 loopback. So the runner also writes `--host-resolver-rules` into a
 playwright-cli config and names it in `$PLAYWRIGHT_MCP_CONFIG`
-(`endpoint_access.ts`). Two details are load-bearing: the file carries
+(`endpoint_access.ts`) — covering the endpoints this run resolved and the IdP a
+login redirect leaves for, on which see Consequences. Two details are
+load-bearing: the file carries
 `launchOptions.args` and nothing else, because naming `browser.browserName`
 there leaves `channel` undefined and re-enables the Chromium sandbox that cannot
 start unprivileged (ADR-0007); and the variable is set from the file's
@@ -122,13 +124,23 @@ used as given.
   still applies `--host-resolver-rules`, resolving the gateway through `getent`.
   It is the project's file and stays the project's business; the runner supplies
   the same override only for the exploration browser, which owns no such config.
-- **Only the app endpoints are mapped for exploration.** The template also maps
-  `*.openchoreo.localhost` to the CONTROL-plane gateway for the IdP, an address
-  DNS cannot answer with (the CoreDNS rewrite points every such name at the
-  data plane), so it is not derivable from the endpoints this preflight resolves.
-  A criterion whose exploration has to pass through login therefore still meets
-  an unresolvable host in playwright-cli. Not closed here because nothing in the
-  endpoint list names the IdP; it needs its own source of that address.
+- **The IdP is mapped too, and it is the one wildcard.** A login redirect leaves
+  the app's name family entirely, and the runner never learns the IdP's hostname
+  — the validation context carries the app's endpoints and nothing else — so
+  `MAP *.openchoreo.localhost` is the only handle available. Every other rule
+  names a host this run actually resolved.
+- **That rule cannot follow DNS, which is wrong here.** The CoreDNS rewrite maps
+  `(openchoreo|openchoreoapis).localhost` alike onto the DATA-plane gateway,
+  while `*.openchoreo.localhost` is served by the CONTROL-plane one. Measured
+  from a pod: `thunder.openchoreo.localhost` resolves to the data-plane gateway
+  and dials to a transport failure (curl exit 7), where the k3d bridge —
+  `host.k3d.internal`, which publishes the control-plane gateway — answers 401.
+  So the rule points at the bridge, resolved by name per run for the same reason
+  the endpoint addresses are: a baked-in IP passes once and then goes stale.
+- **An unresolvable bridge degrades rather than fails.** A cloud plane has no
+  bridge to resolve, and an exploration hop the agent may never take is not
+  worth failing a run over — the endpoint rules, which this preflight has
+  actually proved, are written either way.
 - A `.curlrc` write failure is fatal. Proceeding would start an agent holding a
   URL it cannot dial and no explanation of why — the state this ADR removes.
 - `resolve` entries are scoped per `host:port`, so pinning endpoint hosts does not

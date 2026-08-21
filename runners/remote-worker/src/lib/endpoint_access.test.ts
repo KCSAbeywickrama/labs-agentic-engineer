@@ -22,11 +22,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
+  AUTH_BRIDGE_HOST,
   CURL_CONFIG_FILE,
   PLAYWRIGHT_CLI_CONFIG_FILE,
   curlResolveEntries,
   hostResolverRules,
   probeEndpoints,
+  resolveAuthGatewayAddress,
   writeCurlResolveConfig,
   writePlaywrightCliConfig,
 } from "./endpoint_access.js";
@@ -197,6 +199,35 @@ test("hostResolverRules maps each resolved host once, without a port", () => {
 
 test("hostResolverRules returns nothing when there is nothing to map", () => {
   assert.deepEqual(hostResolverRules([]), []);
+  // …and an auth address alone is not something to map: with no endpoint there
+  // is no local plane to be on.
+  assert.deepEqual(hostResolverRules([], "172.18.0.1"), []);
+});
+
+// The IdP is the one wildcard, because the validation context names the app's
+// endpoints and never the IdP — a pattern is the only handle. Appended last so a
+// reader sees the specific rules first.
+test("hostResolverRules appends the IdP pattern when an auth address is known", () => {
+  const args = hostResolverRules([{ host: "a.localhost", port: 19080, address: GATEWAY }], "172.18.0.1");
+  assert.deepEqual(args, [
+    `--host-resolver-rules=MAP a.localhost ${GATEWAY},MAP *.openchoreo.localhost 172.18.0.1`,
+  ]);
+});
+
+// DNS is measurably wrong for the IdP (the rewrite sends *.openchoreo.localhost
+// to the DATA plane, which does not serve it), so the bridge is looked up by
+// name — and an unresolvable bridge must not cost the app endpoints their rules.
+test("resolveAuthGatewayAddress resolves the bridge, and swallows a failure", async () => {
+  const ok = await resolveAuthGatewayAddress(async (host) => {
+    assert.equal(host, AUTH_BRIDGE_HOST);
+    return { address: "172.18.0.1" };
+  });
+  assert.equal(ok, "172.18.0.1");
+
+  const missing = await resolveAuthGatewayAddress(async () => {
+    throw new Error("ENOTFOUND");
+  });
+  assert.equal(missing, undefined);
 });
 
 // launchOptions.args ONLY. Naming browser.browserName here would leave `channel`
@@ -204,18 +235,44 @@ test("hostResolverRules returns nothing when there is nothing to map", () => {
 // the pod's non-root user (ADR-0007). This assertion is the guard on that.
 test("writePlaywrightCliConfig writes only launch args, 0600", async () => {
   const dir = await tmpDir();
-  const written = await writePlaywrightCliConfig(dir, [
-    { host: "a.localhost", port: 19080, address: GATEWAY },
-  ]);
+  const written = await writePlaywrightCliConfig(
+    dir,
+    [{ host: "a.localhost", port: 19080, address: GATEWAY }],
+    async () => ({ address: "172.18.0.1" }),
+  );
   assert.equal(written, path.join(dir, PLAYWRIGHT_CLI_CONFIG_FILE));
 
   const body = await fs.promises.readFile(written as string, "utf8");
   assert.doesNotMatch(body, /browserName/);
   assert.deepEqual(JSON.parse(body), {
-    browser: { launchOptions: { args: [`--host-resolver-rules=MAP a.localhost ${GATEWAY}`] } },
+    browser: {
+      launchOptions: {
+        args: [
+          `--host-resolver-rules=MAP a.localhost ${GATEWAY},MAP *.openchoreo.localhost 172.18.0.1`,
+        ],
+      },
+    },
   });
   assert.equal((await fs.promises.stat(written as string)).mode & 0o777, 0o600);
   assert.deepEqual(await fs.promises.readdir(dir), [PLAYWRIGHT_CLI_CONFIG_FILE]);
+});
+
+// An unresolvable bridge is not a reason to lose the endpoint rules: those are
+// what the preflight already proved reachable, and the IdP hop may never be
+// taken. It degrades to exactly the coverage this file had before the IdP rule.
+test("writePlaywrightCliConfig still maps the endpoints when the bridge will not resolve", async () => {
+  const dir = await tmpDir();
+  const written = await writePlaywrightCliConfig(
+    dir,
+    [{ host: "a.localhost", port: 19080, address: GATEWAY }],
+    async () => {
+      throw new Error("ENOTFOUND");
+    },
+  );
+  const cfg = JSON.parse(await fs.promises.readFile(written as string, "utf8"));
+  assert.deepEqual(cfg.browser.launchOptions.args, [
+    `--host-resolver-rules=MAP a.localhost ${GATEWAY}`,
+  ]);
 });
 
 // $PLAYWRIGHT_MCP_CONFIG is fatal when it points at a missing file, so the env
@@ -226,7 +283,9 @@ test("writePlaywrightCliConfig removes a stale config when nothing needs mapping
   const dir = await tmpDir();
   const stale = path.join(dir, PLAYWRIGHT_CLI_CONFIG_FILE);
   await fs.promises.writeFile(stale, "stale\n");
-  const written = await writePlaywrightCliConfig(dir, []);
+  // A resolvable bridge must not be enough on its own — no endpoint means no
+  // local plane to map, and the file has to go.
+  const written = await writePlaywrightCliConfig(dir, [], async () => ({ address: "172.18.0.1" }));
   assert.equal(written, undefined);
   assert.equal(fs.existsSync(stale), false);
   assert.deepEqual(await fs.promises.readdir(dir), []);
