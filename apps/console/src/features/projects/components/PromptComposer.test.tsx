@@ -87,7 +87,7 @@ describe("PromptComposer attachment cards (#383)", () => {
     // Dropped ON THE TEXTAREA — the deepest thing a user is likely to aim at,
     // and the point of folding the old dashed zone into the box: the handler
     // is on the container, so the event only lands because it bubbles.
-    fireEvent.drop(screen.getByPlaceholderText(/booking system/i), {
+    fireEvent.drop(screen.getByRole("textbox"), {
       dataTransfer: { files: [new File(["x"], "notes.txt")] },
     });
 
@@ -127,12 +127,12 @@ describe("PromptComposer attachment cards (#383)", () => {
     const start = screen.getByRole("button", { name: "Start" });
     expect(start).toBeDisabled();
 
-    fireEvent.change(screen.getByPlaceholderText(/booking system/i), {
+    fireEvent.change(screen.getByRole("textbox"), {
       target: { value: "   " },
     });
     expect(start).toBeDisabled();
 
-    fireEvent.change(screen.getByPlaceholderText(/booking system/i), {
+    fireEvent.change(screen.getByRole("textbox"), {
       target: { value: "A todo app" },
     });
     expect(start).toBeEnabled();

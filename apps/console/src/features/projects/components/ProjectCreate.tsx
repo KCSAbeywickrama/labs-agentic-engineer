@@ -33,12 +33,13 @@ import {
 } from "@wso2/oxygen-ui";
 import {
   ArrowLeft,
+  Bot,
+  ClipboardCheck,
   GitHub,
-  ShoppingCart,
-  Dumbbell,
   ReceiptText,
 } from "@wso2/oxygen-ui-icons-react";
 import { useNavigate } from "@tanstack/react-router";
+import { ApiRequestError } from "../../../api/errors";
 import {
   useCreateProject,
   useGithubOrg,
@@ -50,24 +51,29 @@ import { PromptComposer } from "./PromptComposer";
 
 // Issue #71 decision: clicking an example acts as prompt + Start in one
 // click — it jumps straight to the name/repo confirmation step.
+//
+// The examples are the fastest answer a newcomer gets to "what does enough
+// detail look like", so they carry the persona (#561): internal enterprise
+// work, not consumer apps. The third builds an agent on purpose — Agentic
+// Engineer does that too, and this is where it gets advertised.
 const EXAMPLE_PROMPTS = [
   {
-    icon: <ShoppingCart size={24} />,
-    title: "Online store",
-    prompt:
-      "An online store for handmade ceramics with a product catalog, cart, and checkout",
-  },
-  {
-    icon: <Dumbbell size={24} />,
-    title: "Workout tracker",
-    prompt:
-      "A gym workout tracker where I can log exercises, sets, and weights and see progress over time",
-  },
-  {
     icon: <ReceiptText size={24} />,
-    title: "Invoicing tool",
+    title: "Expense approval",
     prompt:
-      "An invoicing tool for freelancers that creates invoices, tracks payments, and exports PDFs",
+      "Employees submit expense claims, managers approve them, and finance exports approved claims to payroll",
+  },
+  {
+    icon: <ClipboardCheck size={24} />,
+    title: "Employee onboarding",
+    prompt:
+      "Track each new hire's onboarding tasks across IT, HR and facilities, with reminders for overdue items",
+  },
+  {
+    icon: <Bot size={24} />,
+    title: "Triage agent",
+    prompt:
+      "A support triage agent that reads incoming tickets, classifies them by urgency, and drafts replies for a human to approve",
   },
 ] as const;
 
@@ -79,11 +85,30 @@ function ExampleCard({
 }: (typeof EXAMPLE_PROMPTS)[number] & { onPick: (prompt: string) => void }) {
   return (
     <Card variant="outlined" sx={{ height: "100%" }}>
-      <CardActionArea sx={{ height: "100%" }} onClick={() => onPick(prompt)}>
+      {/* An explicit flex column, top-aligned. The cards are equal height, but
+          a shorter prompt leaves its CardContent shorter than the card and it
+          ends up vertically centred — so the card with the longest prompt sat
+          9px higher than its neighbours and the three titles never lined up.
+          `alignItems` alone does nothing here: CardActionArea is display:block. */}
+      <CardActionArea
+        sx={{
+          height: "100%",
+          display: "flex",
+          flexDirection: "column",
+          justifyContent: "flex-start",
+          alignItems: "stretch",
+        }}
+        onClick={() => onPick(prompt)}
+      >
         <CardContent>
+          {/* subtitle2, and titles kept to two short words: at subtitle1 a
+              third-width card wrapped "Employee onboarding" onto two lines, so
+              the three cards' body text started at different heights. */}
           <Stack direction="row" spacing={1.5} sx={{ alignItems: "center", mb: 1 }}>
             {icon}
-            <Typography variant="subtitle1">{title}</Typography>
+            <Typography variant="subtitle2" noWrap>
+              {title}
+            </Typography>
           </Stack>
           <Typography variant="body2" color="text.secondary">
             {prompt}
@@ -133,6 +158,18 @@ export function ProjectCreate() {
     name && !isValidProjectName(name) ? invalidNameMessage : null;
   const repoError =
     repoName && !isValidProjectName(repoName) ? invalidNameMessage : null;
+
+  // A taken repository name is the one create failure the user can fix in
+  // place, and it is not recoverable by retrying — the BFF compensates the
+  // OpenChoreo project away and fails, so they must pick another name. It
+  // belongs on the field, not in a page-level Alert; every other failure keeps
+  // the Alert. Branching on the envelope's `code` rather than the message,
+  // which the BFF owns and may reword.
+  const repoConflict =
+    createProject.error instanceof ApiRequestError &&
+    createProject.error.code === "conflict"
+      ? `That repository name already exists in ${githubOrg ?? "your organization"} — pick another.`
+      : null;
 
   const goToProject = (projectName: string) => {
     void navigate({
@@ -188,8 +225,8 @@ export function ProjectCreate() {
                 What do you want to build?
               </Typography>
               <Typography variant="body1" color="text.secondary">
-                Describe it in your own words — AEP turns your requirement
-                into a project and starts deriving its design.
+                Describe it in your own words — rough is fine, or upload a
+                product requirements document.
               </Typography>
             </Box>
             <PromptComposer
@@ -213,8 +250,20 @@ export function ProjectCreate() {
               <Typography variant="h4" gutterBottom>
                 Name your project
               </Typography>
-              <Typography variant="body2" color="text.secondary">
-                “{prompt}”
+              {/* Labelled "Prompt:" so the user can see what we do with what
+                  they wrote — it is the agent's brief, not just a description
+                  we filed. Bare quotes never said that.
+
+                  One line, always: this echo confirms "this is what you asked
+                  for" (the same transparency-device role the cropped idea has
+                  beside /start, #528) rather than displaying the document. The
+                  textarea is multiline with no maxLength, so unclamped it is
+                  the one element on this page that can grow without bound and
+                  push Create project off the fold. Nothing is lost — the full
+                  text is on the title attribute, and Back returns to the
+                  textarea still holding it. */}
+              <Typography variant="body2" color="text.secondary" noWrap title={prompt}>
+                Prompt: {prompt}
               </Typography>
             </Box>
             <TextField
@@ -234,10 +283,11 @@ export function ProjectCreate() {
                 setRepoTouched(true);
                 setRepoName(e.target.value);
               }}
-              error={Boolean(repoError)}
+              error={Boolean(repoError) || Boolean(repoConflict)}
               helperText={
                 repoError ??
-                "Holds the project's specs and source; the organization is fixed."
+                repoConflict ??
+                "Agentic Engineer creates this repository in your organization. Your specs and source code live here, and it stays yours."
               }
               fullWidth
               slotProps={{
@@ -277,7 +327,7 @@ export function ProjectCreate() {
                 </Box>
               </Box>
             )}
-            {createProject.isError && (
+            {createProject.isError && !repoConflict && (
               <Alert severity="error">
                 {createProject.error instanceof Error
                   ? createProject.error.message
@@ -315,7 +365,14 @@ export function ProjectCreate() {
                 disabled={!name || Boolean(nameError) || pending}
                 loading={pending}
               >
-                {createdName ? "Retry upload" : "Create project"}
+                {/* Three states, most specific first: the project exists and
+                    only the reference upload failed (#383), the create is in
+                    flight (#561), or nothing has happened yet. */}
+                {createdName
+                  ? "Retry upload"
+                  : pending
+                    ? "Creating your project…"
+                    : "Create project"}
               </Button>
             </Stack>
           </Stack>
