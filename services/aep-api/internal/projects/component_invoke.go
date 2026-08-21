@@ -29,6 +29,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/platform/k8sname"
 	"github.com/wso2/aep/aep-api/internal/spec"
 )
@@ -118,7 +119,7 @@ func (s *componentService) Invoke(ctx context.Context, orgName, projectName, com
 		return InvokeResult{}, err
 	}
 
-	baseURL, err := s.firstDeploymentEndpoint(ctx, orgName, projectName, componentName)
+	baseURL, err := s.deploymentEndpointIn(ctx, orgName, projectName, componentName, openchoreo.DevEnvironmentName)
 	if err != nil {
 		return InvokeResult{}, err
 	}
@@ -236,23 +237,33 @@ func (s *componentService) invokeComponentInDesign(ctx context.Context, orgName,
 	return ErrComponentNotFound
 }
 
-// firstDeploymentEndpoint is the URL source: the first non-empty
-// EndpointURL among the component's deployments. None found (no deployment,
-// or every deployment lacks a gateway route — e.g. an intranet-only service)
-// is reported as ErrNotReachable, not an error: it is an honest "this
-// component has no gateway to invoke right now," not a platform failure.
-func (s *componentService) firstDeploymentEndpoint(ctx context.Context, orgName, projectName, componentName string) (string, error) {
+// deploymentEndpointIn is the URL source: the gateway URL of the component's
+// deployment IN THE NAMED ENVIRONMENT. ListDeployments returns one entry per
+// environment, so the environment is what makes the answer deterministic —
+// taking whichever entry happened to be listed first made "which agent am I
+// talking to" a function of upstream ordering, which is not a contract.
+//
+// Not found (no deployment there, or it lacks a gateway route — e.g. an
+// intranet-only service) is reported as ErrNotReachable, not an error: an
+// honest "this component has no gateway to invoke right now", which the Test
+// tab renders as a plain note rather than a failure.
+func (s *componentService) deploymentEndpointIn(ctx context.Context, orgName, projectName, componentName, environment string) (string, error) {
 	list, err := s.client.ListDeployments(ctx, orgName, projectName, componentName)
 	if err != nil {
 		return "", fmt.Errorf("invoke: list deployments: %w", err)
 	}
 	if list != nil {
 		for _, d := range list.Items {
-			if d.EndpointURL != "" {
+			if d.Environment == environment && d.EndpointURL != "" {
 				return d.EndpointURL, nil
 			}
 		}
 	}
+	// Deliberately NOT a fallback to another environment. A component with no
+	// gateway URL in the environment the caller asked about is honestly "not
+	// reachable"; answering from a different one would relay the caller's
+	// bearer to a deployment they never asked for, and the tester would
+	// present production's answer as development's.
 	return "", ErrNotReachable
 }
 

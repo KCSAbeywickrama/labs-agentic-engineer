@@ -38,6 +38,7 @@ import (
 
 	"github.com/wso2/aep/aep-api/internal/gen"
 
+	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	ocmocks "github.com/wso2/aep/aep-api/internal/clients/openchoreo/mocks"
 	"github.com/wso2/aep/aep-api/internal/spec"
 	"github.com/wso2/aep/aep-api/internal/spec/artifactstest"
@@ -58,7 +59,13 @@ func invokeTestSvc(t *testing.T, files map[string]string, endpointURL string, ti
 		ListDeploymentsFunc: func(context.Context, string, string, string) (*gen.DeploymentList, error) {
 			var items []gen.Deployment
 			if endpointURL != "" {
-				items = append(items, gen.Deployment{EndpointURL: endpointURL})
+				// Carries the environment a real binding would: endpoint
+				// resolution is environment-scoped, so a deployment with no
+				// environment is not a deployment any caller can reach.
+				items = append(items, gen.Deployment{
+					Environment: openchoreo.DevEnvironmentName,
+					EndpointURL: endpointURL,
+				})
 			}
 			return &gen.DeploymentList{Items: items}, nil
 		},
@@ -608,5 +615,78 @@ func TestInvoke_TruncationDoesNotCutARuneInHalf(t *testing.T) {
 	}
 	if !strings.HasPrefix(huge, string(got.Body)) {
 		t.Fatal("truncated body is not a prefix of what the component sent")
+	}
+}
+
+// 19. A component is deployed to MANY environments and ListDeployments returns
+// one entry per environment. Picking "the first with a URL" makes which agent
+// you talk to a function of list ordering — so the Test tab could chat with
+// PRODUCTION while the user believes they are testing development, and the
+// request carries their real bearer. Ordering is not a contract, so this is not
+// a hypothetical: it is one upstream reordering away from happening silently.
+// Local dev hides it completely, because only `development` exists.
+func TestInvoke_PicksTheNamedEnvironmentNotTheFirstListed(t *testing.T) {
+	t.Parallel()
+	var hit string
+	prod := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hit = "production"
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer prod.Close()
+	dev := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hit = "development"
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer dev.Close()
+
+	svc := invokeTestSvc(t, designFiles("chat-agent", "ai-agent", ""), "", 0)
+	// Production first, deliberately: the old code would take it.
+	svc.client = &ocmocks.ComponentClientMock{
+		ListDeploymentsFunc: func(context.Context, string, string, string) (*gen.DeploymentList, error) {
+			return &gen.DeploymentList{Items: []gen.Deployment{
+				{Environment: "production", EndpointURL: prod.URL},
+				{Environment: openchoreo.DevEnvironmentName, EndpointURL: dev.URL},
+			}}, nil
+		},
+	}
+
+	if _, err := svc.Invoke(context.Background(), "acme", "web", "chat-agent",
+		InvokeCall{Method: "GET", Path: "/chat"}, ""); err != nil {
+		t.Fatalf("invoke: %v", err)
+	}
+	if hit != "development" {
+		t.Fatalf("want the development deployment, reached %q", hit)
+	}
+}
+
+// 20. An environment that exists but has no gateway URL is NOT a reason to fall
+// through to a different environment. Silently answering from production would
+// be worse than the honest 409 the tester already renders.
+func TestInvoke_NoEndpointInTheNamedEnvironmentIsNotReachable(t *testing.T) {
+	t.Parallel()
+	var hits int32
+	prod := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer prod.Close()
+
+	svc := invokeTestSvc(t, designFiles("chat-agent", "ai-agent", ""), "", 0)
+	svc.client = &ocmocks.ComponentClientMock{
+		ListDeploymentsFunc: func(context.Context, string, string, string) (*gen.DeploymentList, error) {
+			return &gen.DeploymentList{Items: []gen.Deployment{
+				{Environment: "production", EndpointURL: prod.URL},
+				{Environment: openchoreo.DevEnvironmentName, EndpointURL: ""},
+			}}, nil
+		},
+	}
+
+	_, err := svc.Invoke(context.Background(), "acme", "web", "chat-agent",
+		InvokeCall{Method: "GET", Path: "/chat"}, "")
+	if !errors.Is(err, ErrNotReachable) {
+		t.Fatalf("want ErrNotReachable, got %v", err)
+	}
+	if got := atomic.LoadInt32(&hits); got != 0 {
+		t.Fatalf("fell through to production %d time(s)", got)
 	}
 }

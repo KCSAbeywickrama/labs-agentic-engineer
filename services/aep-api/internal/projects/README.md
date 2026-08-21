@@ -146,6 +146,11 @@ delivery's kernel: shared behaviour belongs in the root the slices import.
   caller gets the gateway's own 401 rather than our access. **Gateway-only is the point:** the URL comes
   from the component's deployment endpoint, and it is that gateway which validates the bearer and injects
   the `x-user-id` the agent gates on. A relay pointed at a pod address would bypass the identity hop.
+  **Resolution is environment-SCOPED**: `ListDeployments` returns one entry per environment, so the
+  endpoint is chosen by NAME (`development`), never by list order, and an environment with no gateway
+  URL is `ErrNotReachable` rather than a fallback to another one. Ordering is not a contract: picking
+  the first listed made which deployment a caller reached depend on upstream ordering, and a tester
+  could relay a real bearer to production while presenting the answer as development's.
 - **KNOWN LIMITATION — the relayed bearer is the caller's PLATFORM token, and it
   travels further than this domain.** `invoke-component` forwards the caller's
   Thunder token to the component, and a generated ai-agent then forwards
