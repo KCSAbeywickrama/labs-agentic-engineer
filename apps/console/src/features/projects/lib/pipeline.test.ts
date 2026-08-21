@@ -42,7 +42,7 @@ function status(over: {
     hasTasks: false,
     specStatus: "",
     designStatus: "",
-    spec: { exists: true, version: "", dirty: false, design: false, ...over.spec },
+    spec: { exists: true, version: "", dirty: false, design: false, agent: "", ...over.spec },
     build: { version: "", status: "idle", ...over.build },
     deploy: {
       version: "",
@@ -55,8 +55,35 @@ function status(over: {
 }
 
 describe("specStageView — derived, no stored status", () => {
-  it("no spec at all → the Generate CTA", () => {
-    expect(specStageView(status({ spec: { exists: false } })).cta).toBe(true);
+  it("no spec at all → the cold-start CTA", () => {
+    expect(specStageView(status({ spec: { exists: false } })).action).toBe("start");
+  });
+
+  // #562: the platform fires `/start` at project creation, so the overview's
+  // first paint lands on a project where nothing is committed yet and an agent
+  // is already working. exists/version/dirty are blind to it.
+  it("a kickoff in flight → Writing requirements, with the way in", () => {
+    const v = specStageView(status({ spec: { exists: false, agent: "working" } }));
+    expect(v.line).toBe("Writing requirements");
+    expect(v.tone).toBe("info");
+    expect(v.action).toBe("open");
+  });
+
+  // The flow stopped here, so the card resumes it rather than pretending
+  // nothing was ever attempted.
+  it("a kickoff that died with nothing written → the retry CTA", () => {
+    const v = specStageView(status({ spec: { exists: false, agent: "failed" } }));
+    expect(v.line).toBe("Couldn't start writing requirements");
+    expect(v.tone).toBe("error");
+    expect(v.action).toBe("retry");
+  });
+
+  // Once requirements exist the committed fields describe the spec, and a
+  // second vocabulary over the same fact could only disagree with them.
+  it("a working agent over an existing spec keeps the spec's own status", () => {
+    const v = specStageView(status({ spec: { exists: true, agent: "working" } }));
+    expect(v.line).toContain("draft");
+    expect(v.action).toBeUndefined();
   });
   it("exists but never published → draft", () => {
     const v = specStageView(status({}));

@@ -171,10 +171,16 @@ export function ProjectCreate() {
       ? `That repository name already exists in ${githubOrg ?? "your organization"} — pick another.`
       : null;
 
+  // The journey is already underway by the time this runs: the platform fired
+  // `/start` server-side (#562), so the user lands on the overview with the
+  // agent chat open and the transcript showing their own idea going in. The
+  // param raises the panel and is stripped on arrival — it describes THIS
+  // arrival, not the URL, so a refresh later does not reopen it.
   const goToProject = (projectName: string) => {
     void navigate({
       to: "/projects/$projectName",
       params: { projectName },
+      search: { chat: "open" as const },
     });
   };
 
@@ -193,7 +199,16 @@ export function ProjectCreate() {
       return;
     }
     createProject.mutate(
-      { name, prompt, ...(repoName !== name && { repoName }) },
+      {
+        name,
+        prompt,
+        ...(repoName !== name && { repoName }),
+        // Tell the platform documents are coming so it HOLDS the kickoff until
+        // the upload lands (#562). They are the primary brief, and an interview
+        // started before they arrive is conducted blind — so the second call
+        // fires it instead.
+        ...(files.length > 0 && { referencesPending: true }),
+      },
       {
         onSuccess: (project) => {
           // No client-side copy of the prompt: the BE persists it into the

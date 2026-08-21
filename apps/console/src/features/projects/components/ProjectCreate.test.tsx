@@ -170,6 +170,54 @@ describe("ProjectCreate reference documents (#383)", () => {
   });
 });
 
+// The journey starts itself (#562): the platform fires `/start` server-side,
+// and this page's job is only to say whether to wait for the documents, then
+// land the user where they can watch it happen.
+describe("ProjectCreate — handing the journey over (#562)", () => {
+  it("lands on the overview with the agent chat open", () => {
+    render(<ProjectCreate />);
+    typePrompt();
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+
+    expect(navigate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: "/projects/$projectName",
+        search: { chat: "open" },
+      }),
+    );
+  });
+
+  // Documents are the primary brief, so the create call has to say they are
+  // coming — otherwise the kickoff interviews before they land.
+  it("declares pending references so the platform holds the kickoff", () => {
+    render(<ProjectCreate />);
+    attach("prd.md");
+    typePrompt();
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+
+    expect(createProject.mutate).toHaveBeenCalledWith(
+      expect.objectContaining({ referencesPending: true }),
+      expect.anything(),
+    );
+  });
+
+  // Nothing to wait for: the kickoff fires from the create call itself, and a
+  // field claiming otherwise would hold it forever.
+  it("declares nothing when no documents are attached", () => {
+    render(<ProjectCreate />);
+    typePrompt();
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+
+    expect(createProject.mutate).toHaveBeenCalledWith(
+      expect.not.objectContaining({ referencesPending: expect.anything() }),
+      expect.anything(),
+    );
+  });
+});
+
 
 // The create flow's copy and its one field-level failure (#561). Shares the
 // mutation doubles above — `createProject.mutate` resolves instantly, so

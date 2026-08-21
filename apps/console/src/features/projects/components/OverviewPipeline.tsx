@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import type { ReactNode } from "react";
+import { useCallback, type ReactNode } from "react";
 import {
   Box,
   Button,
@@ -38,6 +38,8 @@ import { useNavigate } from "@tanstack/react-router";
 import type { components } from "../../../generated/aep-api";
 import { useSession } from "../../../auth/SessionContext";
 import { useAgentEngaged } from "../../agent-chat/useAgentEngaged";
+import { chatKeyFor, setPendingSeed } from "../../agent-chat/chatStore";
+import { START_COMMAND } from "@aep/contracts/commands";
 import {
   buildStageView,
   CHIP_COLOR,
@@ -114,32 +116,55 @@ function StageCard({
   );
 }
 
-// The spec stage as a call-to-action: when no spec exists yet (#150 behavior
-// preserved) Generate spec opens the Spec view and auto-sends the first
-// requirements turn, and when the agent is mid-exchange the same stage offers
-// the way back into it.
+// What the spec stage's button says and does, most authoritative signal first.
 //
-// "Continue spec" NEVER carries `?generate`. Injecting a second `/start` into
-// an open exchange is the whole bug: landing on an unanswered question form, it
-// reads to the start skill as the user's skip valve, so the interview is
-// silently replaced by the agent's own answers (see `agentEngaged`). Dropping
-// the param also keeps AppLayout from auto-opening the chat panel, so the
-// pending question form owns the spec body on arrival — which is the thing the
-// user actually came back for.
+// The SERVER's `agent` (#562) outranks the local `engaged` read because they
+// know different things: `engaged` is derived from the chat log, which only
+// exists once the panel has mounted, so a user who lands on the overview and
+// never opens the chat sees a turn the console has no local record of. That
+// gap is the whole reason `spec.agent` was added to the contract.
 //
-// One button, two labels, one destination: "Edit spec" would be the wrong third
-// word, since a spec the user could edit is exactly what an open exchange has
-// not produced yet.
+// A send is offered ONLY when nothing is running and nothing is waiting on the
+// user. Injecting `/start` into an open exchange is the bug `agentEngaged`
+// documents: landing on an unanswered question form it reads to the start skill
+// as the user's skip valve, so the interview is silently replaced by the
+// agent's own answers.
+function specActionFor(
+  view: StageView,
+  engaged: boolean,
+): { label: string; send: boolean } {
+  if (view.action === "open") return { label: "Open spec", send: false };
+  if (engaged) return { label: "Continue spec", send: false };
+  if (view.action === "retry") return { label: "Try again", send: true };
+  return { label: "Generate spec", send: true };
+}
+
+// The spec stage as a call-to-action: a resumption affordance (#522). Status
+// while the stage is live, a CTA when the flow stopped there — the agent
+// advances the journey, and this is how a user picks it back up.
+//
+// The kickoff fires at project creation now, so the common reading of this card
+// is "generation is already underway" and the button only has to be the way IN:
+// *Open spec*, not *Generate spec*. It navigates and nothing more.
+//
+// A CTA that does send fires `/start` through the chat's seed slot rather than
+// a `?generate=` query param (which is retired, #562). The panel opens itself
+// on the seed and the user stays where they are, watching this card turn over
+// to *Writing requirements* — the chat is the spine, and nothing navigates the
+// user without a click of their own.
 function SpecActionStage({
   projectName,
   view,
   engaged,
+  onStart,
 }: {
   projectName: string;
   view: StageView;
   engaged: boolean;
+  onStart: () => void;
 }) {
   const navigate = useNavigate();
+  const action = specActionFor(view, engaged);
   return (
     <Card
       variant="outlined"
@@ -179,19 +204,26 @@ function SpecActionStage({
             {view.line}
           </Typography>
         )}
+        {/* The sparkle means "this asks an agent for something". A button that
+            only navigates is not that, and reusing the icon there would make the
+            one promise this card has to keep — that Open spec does nothing but
+            open the spec — read like another generation. */}
         <Button
           variant="contained"
           size="small"
-          startIcon={<Sparkles size={16} />}
-          onClick={() =>
+          startIcon={action.send ? <Sparkles size={16} /> : <ChevronRight size={16} />}
+          onClick={() => {
+            if (action.send) {
+              onStart();
+              return;
+            }
             void navigate({
               to: "/projects/$projectName/spec",
               params: { projectName },
-              ...(engaged ? {} : { search: { generate: "requirements" as const } }),
-            })
-          }
+            });
+          }}
         >
-          {engaged ? "Continue spec" : "Generate spec"}
+          {action.label}
         </Button>
       </CardContent>
     </Card>
@@ -214,8 +246,21 @@ export function OverviewPipeline({
   // spec exists: `/start` on an existing PRD is an amendment interview, which
   // asks questions the same way and is skipped by a stray start the same way —
   // and the overview otherwise gives no sign one is open.
-  const { orgHandle } = useSession();
-  const engaged = useAgentEngaged(orgHandle ?? "default", projectName);
+  const org = useSession().orgHandle ?? "default";
+  const engaged = useAgentEngaged(org, projectName);
+  // Firing `/start` is a SEND, so it goes where every other send goes: the
+  // chat's one-shot seed slot. AppLayout opens the panel the moment a seed
+  // appears and the panel consumes it exactly once — the same path "Resolve
+  // via chat" takes, and the reason this card needs no query param and no
+  // navigation of its own.
+  const startSpec = useCallback(() => {
+    // GUARDED: this is an injected command, not the user's words. This card
+    // decides from the local chat log, which is empty until the panel mounts —
+    // so a teammate in a fresh browser can reach this button while the server
+    // thread holds an unanswered question. The panel re-decides after it has
+    // rehydrated, which is the first moment the answer is knowable.
+    setPendingSeed(chatKeyFor(org, projectName), START_COMMAND, true);
+  }, [org, projectName]);
 
   return (
     <Stack
@@ -223,8 +268,13 @@ export function OverviewPipeline({
       spacing={1}
       sx={{ alignItems: { xs: "stretch", md: "center" } }}
     >
-      {spec.cta || engaged ? (
-        <SpecActionStage projectName={projectName} view={spec} engaged={engaged} />
+      {spec.action || engaged ? (
+        <SpecActionStage
+          projectName={projectName}
+          view={spec}
+          engaged={engaged}
+          onStart={startSpec}
+        />
       ) : (
         <StageCard
           icon={<FileText size={18} />}

@@ -55,6 +55,17 @@ Placeholder for an artifact class with nothing in it: **"Not created yet"**. Act
 reserved for when an agent is genuinely working — the old *"Being derived…"* claimed work that
 was not happening.
 
+**"Genuinely working" is `spec.agent`, not "the spec has no version".** The old signal was the flat
+`specStatus`, which the platform only ever sets to *draft* or *approved* — so every unversioned project
+on screen was described as being worked on, and the one moment work really is in flight, the kickoff,
+had no files at all and read as idle. It is now read from the turn record
+([#562](https://github.com/wso2/labs-agentic-engineer/issues/562)).
+
+A user who opens the spec **before the interview has asked anything** — reachable from the moment the
+project exists, since the kickoff fires at creation — meets *"Agent is working on the requirements
+document"*, not a file picker over an empty list. It names what is happening rather than asking the user
+to choose from nothing.
+
 ## Starting a project
 
 | | |
@@ -172,6 +183,36 @@ Every stage card says the same things in the same slots, so the pattern is learn
 | running | *Building 3 of 7 tasks* | yes | none |
 | settled | *Built* | yes | view |
 | failed | *Build failed* | yes | fix |
+
+#### The spec card while the journey starts itself
+
+The kickoff fires at project creation ([#562](https://github.com/wso2/labs-agentic-engineer/issues/562)),
+so the overview's first paint lands on a project where an agent is already working and **nothing is
+committed yet**. The card's other facts — version, draft, edited — all read committed git, so all three
+are blank at exactly the moment there is most to say.
+
+| the project's situation | line | CTA |
+|---|---|---|
+| the kickoff is running | **Writing requirements** | **Open spec** |
+| the kickoff died with nothing written | **Couldn't start writing requirements** | **Try again** |
+| nothing ever started | — | **Generate spec** |
+| an exchange is open over an existing spec | the spec's own status | **Continue spec** |
+
+**The CTA is *Open spec*, not *Generate spec*, while the kickoff runs.** Generation is already
+underway, so there is nothing left to ask for and the button is only the way in.
+
+**A CTA that starts an interview does not navigate.** It puts `/start` in the chat, the panel opens
+itself, and the user stays on the overview watching this card turn over — the chat is the spine
+([#522](https://github.com/wso2/labs-agentic-engineer/issues/522)), and nothing moves the user's
+viewport without a click of their own.
+
+**The card can be a step behind, and briefly is.** The kickoff dispatches after `POST /projects` returns,
+so for a second or two a freshly created project has no turn record and the card reads *Generate spec*
+for work already starting. The overview polls at its active interval throughout, and a click landing in
+that window cannot do damage — the platform admits one turn per project, so whichever `/start` arrives
+first runs and the other is refused with *"an agent turn is already running"*. What is deliberately not
+done is inventing a *starting* state for it: nothing durable distinguishes "dispatching" from "never
+attempted", and a card that guessed would be wrong for every project created before the kickoff existed.
 
 **Ghost cards stay clickable.** Their destination teaches what the section is for
 ([#533](https://github.com/wso2/labs-agentic-engineer/issues/533)), so the click is a lesson, not
@@ -564,6 +605,22 @@ renaming; it needed to stop being visible.
 
 **A command names the user's intent, never the document operation.** `/feature` says what they
 came to do; `/amend Add a feature` said what the system does to a file.
+
+**The transcript line is `/start <idea>`, and the console adds nothing to it** — not even a joining
+word. The command is set apart (monospace, and the idea in secondary text), which does the work a
+connective would; the map's `/start with <idea>` is its own shorthand, not a string. The same shape also
+renders a `/start <idea>` a user really typed, and the console cannot tell the two apart, so an added
+word would appear inside a message attributed to them that they never wrote.
+
+The idea is attached **server-side**: the kickoff dispatches a bare `/start`, and the platform — the only
+party that can read the project descriptor — records the resolved idea on the turn's display record. So
+the line is true of what the agent received without a client having composed it.
+
+It is a **transparency device, not a store**
+([#528](https://github.com/wso2/labs-agentic-engineer/issues/528)): the user never typed it, and its
+whole job is to show the agent working from what they wrote. Two lines of the idea show, and the crop is
+CSS — a clamped element keeps the full text for selection, copy and screen readers, and re-measures when
+the user drags the panel wider, none of which a truncated string does.
 
 Offering them **where the thing they change lives** — a lens on the section, a lens on the flagged
 line — is what retires the `Actions ▾` menu as the way in. Their exact rendering in the transcript

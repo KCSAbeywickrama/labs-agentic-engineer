@@ -213,10 +213,10 @@ describe("pendingSeed", () => {
     expect(consumePendingSeed(key)).toBeNull();
 
     setPendingSeed(key, "resolve dependency A");
-    expect(peekPendingSeed(key)).toBe("resolve dependency A");
-    expect(peekPendingSeed(key)).toBe("resolve dependency A"); // peek doesn't clear
+    expect(peekPendingSeed(key)?.message).toBe("resolve dependency A");
+    expect(peekPendingSeed(key)?.message).toBe("resolve dependency A"); // peek doesn't clear
 
-    expect(consumePendingSeed(key)).toBe("resolve dependency A");
+    expect(consumePendingSeed(key)?.message).toBe("resolve dependency A");
     expect(peekPendingSeed(key)).toBeNull();
     expect(consumePendingSeed(key)).toBeNull(); // already consumed
   });
@@ -226,7 +226,7 @@ describe("pendingSeed", () => {
     const key2 = freshKey();
     setPendingSeed(key1, "for project 1");
     expect(peekPendingSeed(key2)).toBeNull();
-    expect(consumePendingSeed(key1)).toBe("for project 1");
+    expect(consumePendingSeed(key1)?.message).toBe("for project 1");
   });
 
   it("notifies seed subscribers on set, and stops after unsubscribe", () => {

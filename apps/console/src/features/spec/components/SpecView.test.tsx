@@ -79,6 +79,7 @@ vi.mock("../collab/useCollabSpec", () => ({
 
 beforeEach(() => {
   mockCollab = soloCollab();
+  mockSpecAgent = "";
 });
 
 // --- CellDiagramPanel: its own behavior is covered by
@@ -160,9 +161,15 @@ vi.mock("@aep/ui-design-view", () => ({
 // QueryClientProvider nor MSW — only the Build routing under test is real. -
 const mockMutateAsync = vi.fn();
 const mockPreflightRefetch = vi.fn();
+let mockSpecAgent = "";
 vi.mock("../../projects/api/queries", () => ({
   useProject: () => ({ data: { displayName: "Test Project" } }),
-  useProjectStatus: () => ({ data: { specStatus: "approved" } }),
+  // `spec.agent` (#562) is what tells the workspace whether an agent is working
+  // right now. Mutable so the kickoff block below can drive it; the global
+  // beforeEach resets it to idle, which is what every other test wants.
+  useProjectStatus: () => ({
+    data: { specStatus: "approved", spec: { agent: mockSpecAgent } },
+  }),
   useProjectTags: () => ({ data: { latest: "v1", specDirty: false } }),
   useBuildProject: () => ({ mutateAsync: mockMutateAsync }),
   useBuildPreflight: () => ({ refetch: mockPreflightRefetch }),
@@ -277,6 +284,80 @@ beforeEach(() => {
     isPending: false,
     isError: false,
     error: null,
+  });
+});
+
+// Opening the spec before the interview has asked anything (#562). The kickoff
+// fires at project creation, so this is a real arrival — the user clicks
+// through from the overview while the agent is still writing.
+describe("SpecView while the kickoff is still writing", () => {
+  const withFiles = (data: { path: string; sha: string; group: string }[]) =>
+    mockUseSpecFiles.mockReturnValue({
+      data,
+      isPending: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+  // Nothing written yet — the state a kickoff occupies for its whole first turn.
+  const empty = () => withFiles([]);
+  // A project past its kickoff: the PRD exists, so nothing here is about
+  // requirements any more.
+  const published = () =>
+    withFiles([{ path: "specs/requirements/prd.md", sha: "abc", group: "requirements" }]);
+
+  it("says what is happening instead of offering an empty picker", () => {
+    mockSpecAgent = "working";
+    empty();
+    render(<SpecView projectName="proj1" />);
+
+    expect(
+      screen.getByText("Agent is working on the requirements document"),
+    ).toBeInTheDocument();
+  });
+
+  // `spec.agent` is PROJECT-wide — the newest turn of any flow. A design pass
+  // on a project whose PRD shipped months ago is an agent working, but not on
+  // the requirements, and not on anything this workspace should re-explain.
+  it("does not claim requirements work while a later flow runs", () => {
+    mockSpecAgent = "working";
+    published();
+    render(<SpecView projectName="proj1" />);
+
+    expect(
+      screen.queryByText("Agent is working on the requirements document"),
+    ).not.toBeInTheDocument();
+  });
+
+  // The failure banner was unreachable before #562 wired a real signal into it.
+  // Unscoped it would pin a red alert across a healthy published spec after any
+  // turn failed; a kickoff that died is the one failure leaving nothing behind.
+  it("banners a failed kickoff, and only a failed kickoff", () => {
+    mockSpecAgent = "failed";
+    empty();
+    const { unmount } = render(<SpecView projectName="proj1" />);
+    expect(screen.getByText("The agent's last turn failed")).toBeInTheDocument();
+    unmount();
+
+    mockSpecAgent = "failed";
+    published();
+    render(<SpecView projectName="proj1" />);
+    expect(
+      screen.queryByText("The agent's last turn failed"),
+    ).not.toBeInTheDocument();
+  });
+
+  // The old signal was the flat `specStatus`, which the BFF only ever sets to
+  // ""/draft/approved — so this said an agent was shaping the spec for every
+  // unversioned project on screen, and said nothing during the kickoff.
+  it("falls back to the file picker when nothing is running", () => {
+    empty();
+    render(<SpecView projectName="proj1" />);
+
+    expect(
+      screen.queryByText("Agent is working on the requirements document"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("Select a file to view its content.")).toBeInTheDocument();
   });
 });
 

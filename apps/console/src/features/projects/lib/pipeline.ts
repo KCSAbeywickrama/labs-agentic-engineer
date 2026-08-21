@@ -22,7 +22,8 @@ type ProjectStatus = components["schemas"]["ProjectStatus"];
 
 // One rendered stage of the overview pipeline (#183). Views are pure
 // derivations of the ProjectStatus stage aggregates — the spec stage in
-// particular has no stored status: exists/version/dirty decide everything.
+// particular has no stored status: exists/version/dirty describe the committed
+// artifact, and `agent` (#562) describes whoever is currently changing it.
 export type StageTone = "ghost" | "neutral" | "info" | "warning" | "success" | "error";
 
 // StageTone → Oxygen/MUI Chip colour. Lives beside the tone union so every
@@ -39,19 +40,51 @@ export const CHIP_COLOR: Record<
   error: "error",
 };
 
+/**
+ * What the spec stage offers, when it offers anything. Spec-stage only — the
+ * build and deploy cards are read-outs.
+ *
+ * `start` and `retry` differ only in what the user is looking at: both fire the
+ * same `/start`, but one follows a journey that never began and the other one
+ * that died, and a card offering "Generate spec" over a visible failure would
+ * pretend the failure did not happen.
+ */
+export type SpecAction = "open" | "start" | "retry";
+
 export interface StageView {
   /** Version chip text ("v1", "v1+"); "" renders an em-dash. */
   version: string;
   /** One-line state under the chip. */
   line: string;
   tone: StageTone;
-  /** Spec stage only: render the Generate-spec CTA instead of a state. */
-  cta?: boolean;
+  /** Spec stage only: which action the card offers, if any. */
+  action?: SpecAction;
 }
 
 export function specStageView(status: ProjectStatus): StageView {
-  const { exists, version, dirty } = status.spec;
-  if (!exists) return { version: "", line: "", tone: "neutral", cta: true };
+  const { exists, version, dirty, agent } = status.spec;
+  // The kickoff, mid-flight (#562). The platform fires `/start` at project
+  // creation, so the busiest moment in the journey is one where NOTHING has
+  // been committed yet — exists/version/dirty are all empty and the card would
+  // otherwise sit inert offering to start work already underway. `agent` is
+  // the only field that can see it.
+  //
+  // Safe to name the work: with no requirements file in the project there is
+  // nothing for an agent to be doing but writing them.
+  if (agent === "working" && !exists) {
+    return { version: "", line: "Writing requirements", tone: "info", action: "open" };
+  }
+  // It died leaving nothing behind. The flow stopped here, so the card carries
+  // the CTA that resumes it — the same command, fired again.
+  if (agent === "failed" && !exists) {
+    return {
+      version: "",
+      line: "Couldn't start writing requirements",
+      tone: "error",
+      action: "retry",
+    };
+  }
+  if (!exists) return { version: "", line: "", tone: "neutral", action: "start" };
   if (!version) return { version: "", line: "draft · not published", tone: "info" };
   if (dirty) return { version: `${version}+`, line: "draft changes", tone: "warning" };
   return { version, line: "published", tone: "success" };

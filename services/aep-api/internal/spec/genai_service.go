@@ -335,6 +335,13 @@ func (s *Service) StartTurn(ctx context.Context, orgID, projectID string, in Tur
 	// every turn snapshot; an idea typed inline wins). Best-effort — no
 	// descriptor, no idea, and the start skill asks the user instead.
 	turnSpec, flow := s.turnSpecFor(ctx, ref, baseRef, in.Instruction)
+	// What the transcript will SHOW for this turn. Ordinarily the instruction
+	// verbatim — but a bare `/start` says nothing about what it is starting,
+	// and the idea it carries is exactly the reassurance the user needs on the
+	// journey's first screen: the agent is working from THEIR words (#528).
+	// Only `/start` is rewritten, and only to append an idea the server just
+	// resolved for the same turn, so the line still describes what was sent.
+	summary := startTurnSummary(in.Instruction, turnSpec)
 
 	// Skills resolve failures are typed: both arms mean the org's _skills repo
 	// is unusable right now (row missing/unprovisionable, or the backing repo
@@ -383,7 +390,7 @@ func (s *Service) StartTurn(ctx context.Context, orgID, projectID string, in Tur
 		nsConversationID: namespacedID(repo, useCaseGeneral, in.ConversationID),
 		turn:             turnSpec,
 		target:           in.Target,
-		summary:          in.Instruction,
+		summary:          summary,
 		// Captured before the detached goroutine: the identity reads the
 		// request's bearer, and the journal (#463) attributes the turn.
 		author: journalAuthorFrom(ctx),

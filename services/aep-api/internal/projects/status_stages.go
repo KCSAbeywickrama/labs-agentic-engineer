@@ -85,6 +85,22 @@ type bindingsReader interface {
 	ListProjectReleaseBindings(ctx context.Context, orgName, projectName string) ([]openchoreo.ReleaseBindingSummary, error)
 }
 
+// specTurnRows is the narrow status-read port over the agent_turns index: one
+// indexed row read answering "is an agent working on this project's spec right
+// now" (#562). spec.TurnRepository satisfies it.
+//
+// It is a FOURTH poll source, admitted against the #184 budget because it is a
+// single-row read off a covering index (ix_agent_turns_project_newest) on a
+// database the poll already talks to — the same cost class as the milestone-run
+// read beside it, and an order cheaper than the OpenChoreo call. Nothing else
+// can answer the question: exists,
+// version and dirty all read committed git, and a kickoff writes nothing until
+// it lands, so the busiest moment in the journey is precisely the one git has
+// no record of.
+type specTurnRows interface {
+	Newest(ctx context.Context, orgID, projectID string) (*spec.AgentTurn, error)
+}
+
 // SetStageSources wires the build/deploy stage inputs at the composition
 // root. On a ready repo GetProjectStatus fails when either is missing — the
 // stages are contract-required and never silently fabricated (D7).
@@ -93,10 +109,47 @@ func (s *Service) SetStageSources(runs milestoneRunRows, bindings bindingsReader
 	s.bindingsReader = bindings
 }
 
+// SetSpecTurnSource wires the spec stage's agent-activity read (#562).
+// Separate from SetStageSources because it is optional in a way those are not:
+// a service without it serves spec.agent as "" — the same value a project with
+// no turns gets — so the overview degrades to its pre-#562 reading rather than
+// failing the poll.
+func (s *Service) SetSpecTurnSource(turns specTurnRows) { s.specTurns = turns }
+
+// Spec-stage agent activity (the spec.agent contract enum).
+const (
+	specAgentIdle    = ""
+	specAgentWorking = "working"
+	specAgentFailed  = "failed"
+)
+
+// specAgentState folds the project's newest turn row into the contract enum.
+//
+// A COMPLETED turn reads as idle, not as "done": whatever it produced is in
+// git, so exists/version/dirty already describe it, and a second vocabulary
+// for the same fact would let the two disagree. Only the two states git cannot
+// see survive — a turn in flight, and a turn that died leaving nothing behind.
+func specAgentState(newest *spec.AgentTurn) string {
+	if newest == nil {
+		return specAgentIdle
+	}
+	switch newest.Status {
+	case spec.TurnStatusRunning:
+		return specAgentWorking
+	case spec.TurnStatusFailed:
+		return specAgentFailed
+	default:
+		return specAgentIdle
+	}
+}
+
 // populateStages fills the three nested aggregates plus the flat artifact
-// fields from three concurrently-read sources — strict join: any source
+// fields from four concurrently-read sources — strict join: any source
 // failing fails the whole read (the console's poller keeps last-good data
-// and retries; the endpoint never fabricates emptiness).
+// and retries; the endpoint never fabricates emptiness). The fourth, the
+// newest agent turn, is skipped entirely when unwired rather than failing:
+// its absence reads as "no agent working", which is what a project with no
+// turns reports anyway.
 func (s *Service) populateStages(ctx context.Context, orgName, projectName string, status *gen.ProjectStatus) error {
 	if s.artifactSvc == nil || s.runReader == nil || s.bindingsReader == nil {
 		return fmt.Errorf("project status: stage sources not wired")
@@ -106,10 +159,20 @@ func (s *Service) populateStages(ctx context.Context, orgName, projectName strin
 		snap        *spec.StatusSnapshot
 		runs        []delivery.MilestoneRun
 		bindings    []openchoreo.ReleaseBindingSummary
+		newestTurn  *spec.AgentTurn
 		deployVer   string
 		deployTotal int64
 	)
 	g, gctx := errgroup.WithContext(ctx)
+	if s.specTurns != nil {
+		g.Go(func() error {
+			var err error
+			if newestTurn, err = s.specTurns.Newest(gctx, orgName, projectName); err != nil {
+				return fmt.Errorf("newest agent turn: %w", err)
+			}
+			return nil
+		})
+	}
 	g.Go(func() error {
 		var err error
 		if snap, err = s.artifactSvc.StatusSnapshot(gctx, orgName, projectName); err != nil {
@@ -172,6 +235,7 @@ func (s *Service) populateStages(ctx context.Context, orgName, projectName strin
 		Version: snap.SpecVersion,
 		Dirty:   snap.SpecDirty,
 		Design:  snap.HasDesign,
+		Agent:   specAgentState(newestTurn),
 	}
 	applyFlatArtifactFields(status, snap)
 

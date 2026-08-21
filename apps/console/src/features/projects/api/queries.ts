@@ -92,6 +92,19 @@ type Deployment = components["schemas"]["Deployment"];
 
 function statusIsMoving(status: ProjectStatus): boolean {
   return (
+    // An agent writing the spec is the FIRST thing that moves on a new project
+    // and the longest stretch a first-timer watches (#562): the kickoff fires
+    // at creation, so the overview's opening minutes are exactly this state.
+    // Without it the spec card would sit on the idle interval through the whole
+    // interview and take up to 30s to notice it had finished.
+    status.spec.agent === "working" ||
+    // The gap BEFORE the kickoff's turn row exists reads as idle while being
+    // the opposite: `POST /projects` has returned, the dispatch is in flight,
+    // and the row lands a moment later. On the idle interval the card would
+    // spend up to 30s offering to start work already starting. A project with
+    // no spec and no failed attempt is either in that gap or one click from
+    // leaving it; neither is settled, and neither lasts.
+    (!status.spec.exists && status.spec.agent === "") ||
     status.build.status === "running" ||
     status.deploy.status === "deploying" ||
     status.repoStatus === "pending" ||

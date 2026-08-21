@@ -44,6 +44,8 @@ the genai turn engine (runner/broker/sweeper), and the files / design / skills s
 | `ArtifactService` · `ArtifactStore` · `SplitFrontmatter` | offers | `delivery` / `projects` / `dependencies` — design reads, spec-save, status snapshots |
 | `HardConfigEdges` | offers | `projects` (deploy order) — which sibling addresses a component cannot start without |
 | `DescriptorWriter` | offers | `projects` — stamps `specs/.agentic-engineer.toml` into a repo at project create |
+| `Kickoff` | offers | `projects` (create) · `spec/files` (references upload) — fires the project's opening `/start` turn |
+| `TurnRepository.Newest` | offers | `projects` — the status poll's `spec.agent`: is an agent working on the spec right now |
 | `CredentialsRefreshService`-adjacent turn/tag reads | offers | delivery/build (SpecTagger, validation criteria) |
 
 ## Owns
@@ -94,6 +96,12 @@ the genai turn engine (runner/broker/sweeper), and the files / design / skills s
   the instruction and derives the flow's eager skills from the spec, so a console CTA, a typed command and
   a playground run produce identical turns (services/agents/design/ADR-0003). This domain holds NO prompt
   text; the flow token is kept here because it also gates web search and MCP minting for design turns.
+- **The kickoff** (`kickoff.go`) — the project's opening `/start`, fired server-side at creation so the
+  journey starts itself instead of waiting on a Generate-spec click. Room-scoped like every console turn,
+  carrying the creating user's bearer (which is what lets the agent join the spec room), on the project's
+  current thread. Idempotent on "has this project ever run a turn", because it has two triggers: project
+  create, and the references upload a create with `referencesPending` held it for. Fire-and-forget — a
+  kickoff that cannot start never fails the creation, and the console offers it as a CTA instead.
 - **Persistence**: the `agent_turns` gorm lives in this domain (`repository_turn.go` over the
   `agent_turn.go` entity), single write-authority — as does `project_conversations`
   (`repository_conversation.go`): the project's CURRENT chat thread pointer (#430), server-minted,

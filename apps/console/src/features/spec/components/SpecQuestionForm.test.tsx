@@ -70,7 +70,7 @@ describe("SpecQuestionForm", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
 
-    const seed = consumePendingSeed(KEY) ?? "";
+    const seed = consumePendingSeed(KEY)?.message ?? "";
     expect(seed).toContain("Any manager");
     expect(seed).toContain("5000 USD");
     expect(readRoomQuestions(doc)[0]!.submitted).toBe(true);
@@ -99,7 +99,7 @@ describe("SpecQuestionForm", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "Use recommended answers" }));
 
-      const seed = consumePendingSeed(KEY) ?? "";
+      const seed = consumePendingSeed(KEY)?.message ?? "";
       expect(seed).toMatch(/recommended answer/i);
       expect(seed).toMatch(/assumed/i);
       expect(seed).not.toMatch(/stop interviewing/i);
@@ -120,7 +120,7 @@ describe("SpecQuestionForm", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "Use recommended answers" }));
 
-      const seed = consumePendingSeed(KEY) ?? "";
+      const seed = consumePendingSeed(KEY)?.message ?? "";
       // The decision survives, serialized exactly as Continue would send it.
       expect(seed).toContain("The submitter's own manager");
       // Only the unanswered question is handed back.
@@ -143,7 +143,7 @@ describe("SpecQuestionForm", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "Use recommended answers" }));
 
-      const seed = consumePendingSeed(KEY) ?? "";
+      const seed = consumePendingSeed(KEY)?.message ?? "";
       expect(seed).toContain("The submitter's own manager");
       expect(seed).toContain("5000");
       expect(seed).not.toMatch(/Decide the rest yourself/i);
@@ -157,7 +157,7 @@ describe("SpecQuestionForm", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "Use recommended answers" }));
 
-      const seed = consumePendingSeed(KEY) ?? "";
+      const seed = consumePendingSeed(KEY)?.message ?? "";
       expect(seed).toMatch(/^Use your recommended answers for these questions/);
       expect(seed).not.toMatch(/Decide the rest yourself/i);
     });

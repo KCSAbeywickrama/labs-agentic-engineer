@@ -85,6 +85,21 @@ which is also what closes its issue. Newest first; links go to the feature's
 GitHub issue plus any ADRs it produced. Features still being built aren't
 here: they're the open `console` + `feature` issues.
 
+- The journey starts itself — creating a project **fires `/start` server-side**,
+  so the user lands on the overview with the agent chat already open, the
+  transcript showing `/start` beside their own idea (cropped), and the Spec card
+  reading **Writing requirements** with **Open spec** as its CTA: generation is
+  already underway, so there is nothing left to ask for. A create that attached
+  reference documents declares `referencesPending` and the platform holds the
+  kickoff until the upload lands — they are the primary brief. The spec view,
+  opened before the interview has asked anything, says *"Agent is working on the
+  requirements document"*. **Nothing auto-navigates**, and the `?generate=`
+  handshake between the overview CTA and the spec view is retired: the CTA that
+  still starts an interview seeds the chat from wherever the user is. Its
+  remaining forms are resumption affordances — **Try again** over a kickoff that
+  died, **Generate spec** on a project nothing ever started —
+  [#562](https://github.com/wso2/labs-agentic-engineer/issues/562)
+  (contract: `SpecStage.agent`, `CreateProjectRequest.referencesPending`)
 - Spec view — the PRD is the interface: each PRD section carries a **code
   lens** firing the command that belongs there — `/actor` on Actors,
   `/feature` on the story list, `/expand` on each story, `/settle` over Open
@@ -222,7 +237,11 @@ here: they're the open `console` + `feature` issues.
   to generate requirements (create does not auto-derive) —
   [#150](https://github.com/wso2/labs-agentic-engineer/issues/150)
   (no contract change; duplicate-generation guard deferred to
-  [#151](https://github.com/wso2/labs-agentic-engineer/issues/151))
+  [#151](https://github.com/wso2/labs-agentic-engineer/issues/151)).
+  *Superseded twice: the localStorage prompt copy by the project descriptor, and
+  the CTA-as-the-way-in by
+  [#562](https://github.com/wso2/labs-agentic-engineer/issues/562), which fires
+  the kickoff at creation and leaves the CTA as a resumption affordance.*
 - Onboarding — first-time credentials wizard for the default org (hard gate on
   incomplete `GET /config`): GitHub PAT + Anthropic key, then auto skills-repo
   bootstrap via extended `/skills/sync` —

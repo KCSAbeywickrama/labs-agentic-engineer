@@ -18,17 +18,29 @@
 
 // @vitest-environment jsdom
 
-// The spec stage's two actions. The stage is derived from GIT, which cannot see
-// an interview: no requirements file exists until the agent writes one, so the
-// old card invited "Generate spec" for the entire duration of the interview it
-// had already started — and a second click injected a `/start` that the start
-// skill read as the user's skip valve.
+// The spec stage's actions. The stage is derived from GIT, which cannot see an
+// interview: no requirements file exists until the agent writes one, so the old
+// card invited "Generate spec" for the entire duration of the interview it had
+// already started — and a second click injected a `/start` that the start skill
+// read as the user's skip valve.
+//
+// Two signals now cover that blindness, and they know different things. The
+// local chat log (`engaged`) only exists once the panel has mounted; the
+// server's `spec.agent` (#562) is what a user who never opened the chat sees —
+// which, since the platform fires the kickoff itself, is the ordinary case.
 
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AskQuestionInput } from "@aep/agent-stream";
+import { START_COMMAND } from "@aep/contracts/commands";
 import type { components } from "../../../generated/aep-api";
-import { addMessage, chatKeyFor, replaceMessages } from "../../agent-chat/chatStore";
+import {
+  addMessage,
+  chatKeyFor,
+  consumePendingSeed,
+  peekPendingSeed,
+  replaceMessages,
+} from "../../agent-chat/chatStore";
 import { OverviewPipeline } from "./OverviewPipeline";
 
 type ProjectStatus = components["schemas"]["ProjectStatus"];
@@ -60,7 +72,7 @@ function status(spec: Partial<ProjectStatus["spec"]>): ProjectStatus {
     hasTasks: false,
     specStatus: "",
     designStatus: "",
-    spec: { exists: false, version: "", dirty: false, design: false, ...spec },
+    spec: { exists: false, version: "", dirty: false, design: false, agent: "", ...spec },
     build: { version: "", status: "idle" },
     deploy: {
       version: "",
@@ -79,17 +91,50 @@ describe("OverviewPipeline — the spec stage's action", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     replaceMessages(KEY, []);
+    consumePendingSeed(KEY);
   });
 
-  it("offers Generate spec, carrying the generate signal, on an untouched project", () => {
+  // A project the kickoff never reached — an abandoned reference upload, an org
+  // with no Anthropic key, or a project created before #562. The CTA fires
+  // `/start` through the chat's seed slot: no query param, and no navigation,
+  // so the user stays put and watches this card turn over.
+  it("offers Generate spec, seeding /start, on an untouched project", () => {
     renderPipeline();
 
     fireEvent.click(screen.getByRole("button", { name: /Generate spec/ }));
+    expect(peekPendingSeed(KEY)?.message).toBe(START_COMMAND);
+    expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
+  // The busiest moment in the journey, and the one git has no record of:
+  // generation is already underway, so there is nothing left to ask for and the
+  // button is only the way in.
+  it("says Writing requirements and offers Open spec while the kickoff runs", () => {
+    renderPipeline({ agent: "working" });
+
+    expect(screen.getByText("Writing requirements")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Open spec/ }));
+    expect(peekPendingSeed(KEY)).toBeNull();
     expect(mockNavigate).toHaveBeenCalledWith({
       to: "/projects/$projectName/spec",
       params: { projectName: PROJECT },
-      search: { generate: "requirements" },
     });
+  });
+
+  // The server's word beats the local log's silence: a user who lands on the
+  // overview and never opens the chat has no messages to derive `engaged` from.
+  it("trusts the server over an empty local chat log", () => {
+    renderPipeline({ agent: "working" });
+
+    expect(screen.queryByRole("button", { name: /Generate spec/ })).not.toBeInTheDocument();
+  });
+
+  it("offers Try again when the kickoff died with nothing written", () => {
+    renderPipeline({ agent: "failed" });
+
+    expect(screen.getByText("Couldn't start writing requirements")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Try again/ }));
+    expect(peekPendingSeed(KEY)?.message).toBe(START_COMMAND);
   });
 
   it("offers Continue spec, with NO generate signal, while a question waits", () => {
@@ -139,6 +184,7 @@ describe("OverviewPipeline — the spec stage's action", () => {
     addMessage(KEY, { role: "user", content: "/start", turnId: "t1", status: "failed" });
     renderPipeline();
 
-    expect(screen.getByRole("button", { name: /Generate spec/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Generate spec/ }));
+    expect(peekPendingSeed(KEY)?.message).toBe(START_COMMAND);
   });
 });

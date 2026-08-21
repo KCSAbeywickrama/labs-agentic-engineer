@@ -921,6 +921,9 @@ type CreateProjectRequest struct {
 	// Prompt The user's initial requirement — what they want built. Persisted as the project's requirement and kicks off spec derivation for the new project (issue #72). Projects created without a prompt keep today's behavior.
 	Prompt string `json:"prompt,omitempty"`
 
+	// ReferencesPending The caller will POST reference documents for this project next (`put-project-references`), so the platform must hold the `/start` kickoff (#562) until they land — they are the primary brief, and a kickoff dispatched before the upload interviews the user about a document the agent never saw. The kickoff then fires from the references call instead. Omitted/false fires it from this call. Nothing else waits on it: an abandoned upload simply leaves the project un-started, which the overview's spec card offers as a CTA.
+	ReferencesPending bool `json:"referencesPending,omitempty"`
+
 	// RepoName Repository name for the project's GitHub repo; defaults to the project name, the organization is fixed server-side (issue #71).
 	RepoName string `json:"repoName,omitempty"`
 }
@@ -1729,6 +1732,9 @@ type SkillUpdateList struct {
 
 // SpecStage Spec-stage aggregate on ProjectStatus (#184). Approved/draft is derived, not stored — version set and not dirty = approved (vN); dirty = draft changes (vN+); no version = unpublished draft; exists false = no spec yet.
 type SpecStage struct {
+	// Agent Whether an agent is working on this project's spec right now, and how the last attempt ended (#562). `""` — nothing has run, or the newest turn completed; `working` — a turn is in flight; `failed` — the newest turn ended in failure and none has run since. Derived from the newest `agent_turns` row for the project, which is what `exists`/`version`/`dirty` cannot say: all three read committed git, and a kickoff writes nothing until it lands. The overview's spec card needs it to say *Writing requirements* while the platform-fired `/start` runs, and the spec view needs it to explain an empty workspace instead of offering a file picker.
+	Agent string `json:"agent"`
+
 	// Design Design files exist for the spec (gates the Spec view's design button).
 	Design bool `json:"design"`
 

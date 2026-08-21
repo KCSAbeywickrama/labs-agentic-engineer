@@ -298,18 +298,43 @@ export function replaceMessages(key: string, messages: ChatMessage[]): void {
 // the message-log's own Map+listeners+subscribe shape above. The panel
 // consumes it exactly once (get-and-clear) so a re-render never re-sends it.
 
-const pendingSeeds = new Map<string, string>();
+/**
+ * A seed, plus whether the panel may refuse it.
+ *
+ * Most seeds are the user SPEAKING — submitted interview answers, a dependency
+ * they want discussed — and refusing one would destroy the only copy of what
+ * they said. `guarded` marks the exception: an INJECTED flow command, which
+ * nobody typed and which is destructive to send into an open exchange. Landing
+ * on an unanswered question form, a `/start` reads to the start skill as the
+ * user's skip valve, so the interview is silently replaced by the agent's own
+ * answers (see `agentEngaged`).
+ *
+ * The flag rather than a check on the text: "may this be refused" is a property
+ * of WHY the seed was written, and the caller is the only party that knows it.
+ */
+export interface PendingSeed {
+  message: string;
+  /** The panel may drop this rather than send it into an open exchange. */
+  guarded: boolean;
+}
+
+const pendingSeeds = new Map<string, PendingSeed>();
 const seedListeners = new Map<string, Set<() => void>>();
 
-/** Set the one-shot seed message the panel will auto-send next time it looks. */
-export function setPendingSeed(key: string, message: string): void {
-  pendingSeeds.set(key, message);
+/**
+ * Set the one-shot seed message the panel will auto-send next time it looks.
+ *
+ * `guarded` defaults to false — the safe default for a seed carrying the user's
+ * own words, which is every caller but the spec card's start CTA.
+ */
+export function setPendingSeed(key: string, message: string, guarded = false): void {
+  pendingSeeds.set(key, { message, guarded });
   for (const fn of seedListeners.get(key) ?? []) fn();
 }
 
 /** Non-destructive read — for callers (e.g. "should the panel open?") that
  *  only need to know a seed is waiting, without consuming it. */
-export function peekPendingSeed(key: string): string | null {
+export function peekPendingSeed(key: string): PendingSeed | null {
   return pendingSeeds.get(key) ?? null;
 }
 
@@ -318,12 +343,12 @@ export function peekPendingSeed(key: string): string | null {
  *  `useSyncExternalStore` snapshot flips from true back to false only when
  *  a listener fires; without this, it would stay stuck `true` after the
  *  panel consumes the seed. */
-export function consumePendingSeed(key: string): string | null {
-  const msg = pendingSeeds.get(key);
-  if (msg === undefined) return null;
+export function consumePendingSeed(key: string): PendingSeed | null {
+  const seed = pendingSeeds.get(key);
+  if (seed === undefined) return null;
   pendingSeeds.delete(key);
   for (const fn of seedListeners.get(key) ?? []) fn();
-  return msg;
+  return seed;
 }
 
 export function subscribeSeed(key: string, fn: () => void): () => void {
