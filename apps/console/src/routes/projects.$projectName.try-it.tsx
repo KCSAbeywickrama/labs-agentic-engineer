@@ -20,10 +20,17 @@ import { createFileRoute } from "@tanstack/react-router";
 import { TestPage } from "../features/test/components/TestPage";
 
 export const Route = createFileRoute("/projects/$projectName/try-it")({
+  // `?component=` is how a Deployments "Chat" link says which agent it meant.
+  // Optional: the tab is reachable on its own and picks the first agent then.
+  validateSearch: (search: Record<string, unknown>): { component?: string } => {
+    const component = search["component"];
+    return typeof component === "string" && component !== "" ? { component } : {};
+  },
   component: TryItRoute,
 });
 
 function TryItRoute() {
   const { projectName } = Route.useParams();
-  return <TestPage projectName={projectName} />;
+  const { component } = Route.useSearch();
+  return <TestPage projectName={projectName} {...(component ? { component } : {})} />;
 }

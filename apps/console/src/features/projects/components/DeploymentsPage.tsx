@@ -33,7 +33,7 @@ import {
   Stack,
   Typography,
 } from "@wso2/oxygen-ui";
-import { ArrowRight, ExternalLink } from "@wso2/oxygen-ui-icons-react";
+import { ArrowRight, ExternalLink, MessageSquare } from "@wso2/oxygen-ui-icons-react";
 import { createLink, Link } from "@tanstack/react-router";
 import { EmptyState } from "../../../components/EmptyState";
 import { PageHeader } from "../../../components/PageHeader";
@@ -73,6 +73,9 @@ import { ConnectionValuesDialog } from "./ConnectionValuesDialog";
 import { PromoteDialog } from "./PromoteDialog";
 
 const LinkButton = createLink(Button);
+// Routed twin of MuiLink, so an in-app destination looks the same as the
+// external endpoint link sitting beside it in the row.
+const RouterTextLink = createLink(MuiLink);
 const RouterLink = createLink(MuiLink);
 
 // Deployments as ONE STORY with a status panel beside it (Deployments UX,
@@ -120,16 +123,16 @@ function formatWhen(iso: string): string | null {
  *  Deliberately UNIFORM — every row carries the same controls (#401 review:
  *  no per-row optional actions; connection configuration lives on the side
  *  panel's Connections section). */
-function ComponentRow({ card }: { card: DeploymentCard }) {
+function ComponentRow({ card, projectName }: { card: DeploymentCard; projectName: string }) {
   const chip = cardChip(card);
   const d = card.deployment;
-  // An ai-agent's dev endpoint serves /chat, not / (agents also serve
-  // /healthz, but that's not a link a person follows) — everything else
-  // about the link (icon, styling, the endpointUrl guard) stays uniform
-  // across component kinds (#401 review).
+  // An agent's endpoint is NOT a link a person can follow: /chat is POST-only
+  // JSON, so pointing a browser at it returned an error page rather than a
+  // conversation. "Chat" now goes to the Try it tab, which is the thing that
+  // can actually hold a conversation, and the raw URL keeps its own link for
+  // anyone who wants to curl it.
   const isAgent = card.componentType === "ai-agent";
-  const linkHref = d?.endpointUrl && (isAgent ? `${d.endpointUrl}/chat` : d.endpointUrl);
-  const linkLabel = isAgent ? "Chat" : "Open";
+  const openHref = d?.endpointUrl;
   return (
     <Stack
       direction="row"
@@ -179,18 +182,32 @@ function ComponentRow({ card }: { card: DeploymentCard }) {
         tone={chip.tone}
         {...(chip.outlined && { variant: "outlined" as const })}
       />
-      {linkHref && (
+      {isAgent && openHref && (
+        <RouterTextLink
+          to="/projects/$projectName/try-it"
+          params={{ projectName }}
+          search={{ component: card.componentName }}
+          variant="body2"
+          // The accessible name carries the component so a screen reader
+          // hears which agent it opens (#401 review).
+          aria-label={`Chat with ${card.displayName}`}
+          sx={{ display: "inline-flex", alignItems: "center", gap: 0.5, flexShrink: 0 }}
+        >
+          Chat <MessageSquare size={14} />
+        </RouterTextLink>
+      )}
+      {openHref && (
         <MuiLink
-          href={linkHref}
+          href={openHref}
           target="_blank"
           rel="noreferrer"
           variant="body2"
-          // The accessible name carries the component so a screen reader
-          // hears which app it opens (#401 review).
-          aria-label={`${linkLabel} ${card.displayName}`}
+          // For an agent this is the address to curl, not a page to read —
+          // named "Endpoint" so nobody expects a UI behind it.
+          aria-label={`${isAgent ? "Endpoint of" : "Open"} ${card.displayName}`}
           sx={{ display: "inline-flex", alignItems: "center", gap: 0.5, flexShrink: 0 }}
         >
-          {linkLabel} <ExternalLink size={14} />
+          {isAgent ? "Endpoint" : "Open"} <ExternalLink size={14} />
         </MuiLink>
       )}
     </Stack>
@@ -542,6 +559,7 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
                     <ComponentRow
                       key={`${card.componentName}/${card.deployment?.environment ?? ""}`}
                       card={card}
+                      projectName={projectName}
                     />
                   ))}
                 </Stack>
@@ -567,6 +585,7 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
                     <ComponentRow
                       key={`${card.componentName}/${card.deployment?.environment ?? ""}`}
                       card={card}
+                      projectName={projectName}
                     />
                   ))}
                 </Stack>

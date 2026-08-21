@@ -512,3 +512,35 @@ describe("TestPage — switching agents", () => {
     expect(invokeCall(1).payload).not.toHaveProperty("conversationId");
   });
 });
+
+describe("TestPage — arriving from a Deployments link", () => {
+  it("opens on the agent the link named", () => {
+    mockComponents = [
+      ...DEFAULT_COMPONENTS,
+      { name: "support-agent", displayName: "Support Agent", type: "ai-agent" },
+    ];
+    mockDeployments = [
+      ...DEFAULT_DEPLOYMENTS,
+      {
+        componentName: "support-agent",
+        environment: "development",
+        status: "Ready",
+        endpointUrl: "https://support-agent.dev.example.com",
+      },
+    ];
+
+    render(<TestPage projectName="acme" component="support-agent" />);
+
+    // The tester's own header names the agent it is talking to, so it is the
+    // honest place to assert which conversation you landed in.
+    expect(screen.getByText("support-agent")).toBeInTheDocument();
+  });
+
+  // A stale link (the component was renamed or removed) must not leave the page
+  // blank or, worse, silently chat with a different agent than the URL named.
+  it("falls back to the first agent when the named one is gone", () => {
+    render(<TestPage projectName="acme" component="deleted-agent" />);
+
+    expect(screen.getByText("booking-agent")).toBeInTheDocument();
+  });
+});

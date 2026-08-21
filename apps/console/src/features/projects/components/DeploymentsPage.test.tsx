@@ -31,16 +31,24 @@ vi.mock("@tanstack/react-router", () => ({
     function MockLink({
       to,
       params,
+      search,
       ...rest
     }: {
       to: string;
       params?: Record<string, unknown>;
+      search?: Record<string, unknown>;
     } & Record<string, unknown>) {
       let href = to;
       for (const [key, value] of Object.entries(params ?? {})) {
         href = href.replace(`$${key}`, String(value));
       }
-      return <Component component="a" href={href} {...rest} />;
+      // `search` is modelled, not dropped: a deep link that loses its query
+      // reaches the right PAGE with the wrong agent, and a mock that silently
+      // discarded it would let that ship green.
+      const query = new URLSearchParams(
+        Object.entries(search ?? {}).map(([k, v]) => [k, String(v)]),
+      ).toString();
+      return <Component component="a" href={query ? `${href}?${query}` : href} {...rest} />;
     },
   Link: ({ children }: { children?: React.ReactNode }) => <a>{children}</a>,
 }));
@@ -376,7 +384,7 @@ describe("DeploymentsPage — story rail", () => {
 });
 
 describe("DeploymentsPage — component links", () => {
-  it("links an ai-agent card to its chat endpoint, not the plain service link a service card gets", () => {
+  it("sends an agent's Chat link to the tester, and offers its endpoint separately", () => {
     mockDeploy = {
       version: "v1",
       status: "deployed",
@@ -404,12 +412,19 @@ describe("DeploymentsPage — component links", () => {
 
     render(<DeploymentsPage projectName="acme" />);
 
-    // The agent's link reads "Chat" and appends the chat path.
-    const chatLink = screen.getByRole("link", { name: /Chat Leave Agent/ });
+    // "Chat" goes to the Try it tab, naming the agent. It used to point at the
+    // gateway's /chat, which is POST-only JSON — a browser following it got an
+    // error page, never a conversation.
+    const chatLink = screen.getByRole("link", { name: /Chat with Leave Agent/ });
     expect(chatLink).toHaveAttribute(
       "href",
-      "https://leave-agent.dev.example.com/chat",
+      "/projects/acme/try-it?component=leave-agent",
     );
+
+    // The raw URL is still one click away, for anyone who wants to curl it —
+    // labelled "Endpoint" so nobody expects a page behind it.
+    const endpointLink = screen.getByRole("link", { name: /Endpoint of Leave Agent/ });
+    expect(endpointLink).toHaveAttribute("href", "https://leave-agent.dev.example.com");
 
     // The service (web-application) card keeps the plain "Open" link, at
     // the bare endpoint URL — no /chat suffix.

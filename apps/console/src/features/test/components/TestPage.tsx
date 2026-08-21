@@ -46,7 +46,20 @@ const DEPLOY_LABEL: Record<DeployKnowledge, string> = {
   unreachable: "Not reachable yet",
 };
 
-export function TestPage({ projectName }: { projectName: string }) {
+export function TestPage({
+  projectName,
+  component,
+}: {
+  projectName: string;
+  /**
+   * The agent a Deployments "Chat" link named. Treated as a HINT, not a
+   * command: a stale link (renamed or deleted component) falls through to the
+   * first agent rather than leaving the page blank, and never silently chats
+   * with an agent the URL did not name — `active` re-checks the choice against
+   * the live component list either way.
+   */
+  component?: string | undefined;
+}) {
   const components = useProjectComponents(projectName);
   const agents = useMemo(
     () => (components.data?.items ?? []).filter((c) => c.type === TESTABLE_TYPE),
@@ -78,7 +91,7 @@ export function TestPage({ projectName }: { projectName: string }) {
         ? "ready"
         : "unreachable";
 
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(component ?? null);
   const active = selected && agents.some((a) => a.name === selected)
     ? selected
     : (agents[0]?.name ?? null);
