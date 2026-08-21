@@ -21,6 +21,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { projectKeys } from "../projects/api/keys.js";
 import {
   addMessage,
+  clearFailedSends,
   chatKeyFor,
   dropTurnOutput,
   getMessages,
@@ -146,8 +147,9 @@ export function useAgentChat(org: string, projectName: string): AgentChat {
     // LOCAL-ONLY rows survive the replace: a failed send's user row (the
     // typed text) and its error row exist nowhere server-side, and washing
     // them out on the next refocus would silently destroy the one copy of a
-    // message the user still needs to retry. They persist until the next
-    // rotation clears the log.
+    // message the user still needs to retry. They are cleared by the next
+    // SUCCESSFUL send (clearFailedSends) or by a rotation — without that bound
+    // a failure stayed pinned below newer turns forever, reading as a retry.
     const rehydrate = async () => {
       if (attachedRef.current) return;
       const history = await getConversationMessages(projectName, conversationId);
@@ -281,6 +283,11 @@ export function useAgentChat(org: string, projectName: string): AgentChat {
         return false;
       }
       setActiveTurnId(turnId);
+      // The send worked, so any earlier failure in this thread is history. Those
+      // rows are local-only and the rehydrate re-appends them AFTER the server
+      // history on every refocus, so leaving them would keep a stale failure
+      // pinned below newer turns — looking like a retry that never happened.
+      clearFailedSends(chatKey);
       addMessage(chatKey, {
         role: "user",
         content: text,
