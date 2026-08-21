@@ -50,8 +50,10 @@ import type { ComponentEndpoint } from "./lib/validation_context.js";
 import {
   curlConfigHome,
   curlResolveEntries,
+  playwrightCliConfigHome,
   probeEndpoints,
   writeCurlResolveConfig,
+  writePlaywrightCliConfig,
 } from "./lib/endpoint_access.js";
 
 function requireEnv(name: string): string {
@@ -270,6 +272,11 @@ async function main(): Promise<number> {
     try {
       const entries = await curlResolveEntries(endpoints, undefined, (l) => console.log(l));
       const written = await writeCurlResolveConfig(curlConfigHome(), entries);
+      // The same override for the exploration browser. Separate file because
+      // `.curlrc` is a curl mechanism and reaches no browser, and separate from
+      // the project's playwright.config.ts because playwright-cli does not read
+      // that either — it was the one client still dialling loopback.
+      const browserConfig = await writePlaywrightCliConfig(playwrightCliConfigHome(), entries);
       if (written === undefined) {
         // No `.localhost` endpoints — a cloud plane resolves them normally and
         // there is nothing to pin. Logged so the absence is a decision on the
@@ -277,6 +284,11 @@ async function main(): Promise<number> {
         console.log("[oneshot] endpoints need no curl resolve override");
       } else {
         console.log(`[oneshot] pinned ${entries.length} endpoint host(s) for curl → ${written}`);
+      }
+      if (browserConfig !== undefined) {
+        console.log(
+          `[oneshot] pinned ${entries.length} endpoint host(s) for playwright-cli → ${browserConfig}`,
+        );
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

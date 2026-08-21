@@ -71,7 +71,8 @@ sandbox branch that works unprivileged — both blockers, one value.
   open <url>` in the built image should print ``Browser `default` opened with pid
   …``.
 
-Related: ADR-0006 pins endpoint *resolution* for curl and leaves the browser to
-`playwright.config.template.ts`; this ADR is about which binary launches, and the
-two compose. #570 carries the diagnosis and the code references; PR #571 carries
+Related: ADR-0006 pins endpoint *resolution* — for curl, and for playwright-cli
+via `$PLAYWRIGHT_MCP_CONFIG`; this ADR is about which binary launches, and the
+two compose. They have to: that config may carry `launchOptions.args` only,
+since a `browserName` there would undo this decision's sandbox branch. #570 carries the diagnosis and the code references; PR #571 carries
 the before/after evidence.

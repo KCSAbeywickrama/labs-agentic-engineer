@@ -71,6 +71,24 @@ real Host header. The address comes from DNS per run — the CoreDNS rewrite is 
 discovery channel — never from configuration, because a baked-in IP passes once
 and then silently points at nothing after a cluster rebuild.
 
+The override is written **once per client**, because no single mechanism reaches
+them all. `.curlrc` is a curl file and no browser reads it; the browser
+`playwright test` launches is configured by `playwright.config.template.ts` in
+the project's own repo. That left playwright-cli — the browser the agent
+*explores* with, before any spec exists — reading neither, and still dialling
+loopback. So the runner also writes `--host-resolver-rules` into a
+playwright-cli config and names it in `$PLAYWRIGHT_MCP_CONFIG`
+(`endpoint_access.ts`). Two details are load-bearing: the file carries
+`launchOptions.args` and nothing else, because naming `browser.browserName`
+there leaves `channel` undefined and re-enables the Chromium sandbox that cannot
+start unprivileged (ADR-0007); and the variable is set from the file's
+existence, because playwright-cli's daemon exits on a config path that does not
+resolve — so a coding run, and a cloud validation run, must not see it at all.
+An absolute path in the env rather than the CLI's own default
+`.playwright/cli.config.json`, which resolves against the CWD: an exploring
+agent moves between the repo root and `tests/e2e`, and a CWD-relative config
+would apply to some of its commands and not the rest.
+
 Rewriting the URL in the validation context was the alternative, and is worse in
 two distinct ways. An IP in the URL sends `Host: <ip>`, matches no HTTPRoute, and
 turns every criterion into a 404 that is not the app's fault. A Service-DNS URL
@@ -100,9 +118,17 @@ used as given.
 
 - A validation agent never probes endpoints and never sees exit 7. Its own ad-hoc
   `curl` calls during authoring and healing work unmodified.
-- Chromium is unchanged: `playwright.config.template.ts` still applies
-  `--host-resolver-rules`, resolving the gateway through `getent`, which works.
-  `.curlrc` is a curl mechanism and does not reach the browser.
+- The browser the specs run in is unchanged: `playwright.config.template.ts`
+  still applies `--host-resolver-rules`, resolving the gateway through `getent`.
+  It is the project's file and stays the project's business; the runner supplies
+  the same override only for the exploration browser, which owns no such config.
+- **Only the app endpoints are mapped for exploration.** The template also maps
+  `*.openchoreo.localhost` to the CONTROL-plane gateway for the IdP, an address
+  DNS cannot answer with (the CoreDNS rewrite points every such name at the
+  data plane), so it is not derivable from the endpoints this preflight resolves.
+  A criterion whose exploration has to pass through login therefore still meets
+  an unresolvable host in playwright-cli. Not closed here because nothing in the
+  endpoint list names the IdP; it needs its own source of that address.
 - A `.curlrc` write failure is fatal. Proceeding would start an agent holding a
   URL it cannot dial and no explanation of why — the state this ADR removes.
 - `resolve` entries are scoped per `host:port`, so pinning endpoint hosts does not
