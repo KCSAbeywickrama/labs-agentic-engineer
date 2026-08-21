@@ -128,7 +128,11 @@ here: they're the open `console` + `feature` issues.
   committed — the bytes ride one multipart `POST
   /projects/{p}/agents/{conversationId}/messages` into the turn and are durable
   only as parts of the conversation's history, which is what makes re-sending
-  one free (the agents service dedupes by file name). Caps all restate the
+  one free (the agents service dedupes by file name). The agent reads them
+  natively — a PDF as a document, an image as an image, every text format as
+  text — and the turn prompt NAMES them, so "add this as a separate form"
+  resolves to the file the user just attached rather than drawing a clarifying
+  question. Caps all restate the
   model's own 20 MiB encoded per-turn budget: ≤10 files, ≤5 MB each, ≤15 MB raw
   in total. Any turn started from the composer carries them — chat, flow and
   `/start` alike — and the create view stays the only door to the project
