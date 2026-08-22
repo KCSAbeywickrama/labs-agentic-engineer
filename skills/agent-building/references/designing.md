@@ -151,18 +151,7 @@ without confirming it is.
 conversation in its own store, and the caller holds only a conversation
 identifier — history never crosses the wire. Declare it and nothing else —
 where the store lives is the design.json's `postgres-cnpg` platform-resource
-dependency (the `architecture` skill), and how it is used, including the wire
-shape, is fixed by `agent-building`. `client` remains valid for an agent whose
-caller genuinely owns the transcript (rare; say why in the description).
-
-## Pitfalls
-
-| Symptom | Cause | Fix |
-|---|---|---|
-| The agent does something the design forbade | The prohibition was prose only | Remove the operation from `allow` |
-| Build guesses the wrong SDK; every turn fails on a real key | `model.provider` omitted | State it — `anthropic` unless told otherwise |
-| A credential or address is committed to git | A literal in the front matter | `${env:NAME}`, injected from the dependency |
-| The agent invents values the user never gave | No instruction for the unknown case | Say what to do when a field is missing |
-| The agent claims success after a failed call | No honesty instruction | *"Never claim it worked when it did not"* |
-| Behaviour and the design disagree after a change | The prompt was edited in the component's code | The document is the contract; edit here and regenerate |
-| Instructions read like documentation | Written for a human reviewer | Every line must change what the model does |
+dependency (the `architecture` skill), the wire shape is in the skill body, and
+how the store is used is `references/building.md`. `client` remains valid for an
+agent whose caller genuinely owns the transcript (rare; say why in the
+description).

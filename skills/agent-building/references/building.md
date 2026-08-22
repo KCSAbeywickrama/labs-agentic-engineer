@@ -447,7 +447,6 @@ const { authorization } = callContext.getStore() ?? {};
 |---|---|---|
 | Agent re-looks-up data it was already given, or invents an id from its own prose | History carried only the assistant's text | `result.steps.flatMap(s => s.response.messages)` |
 | Container exits at startup, `ERR_MODULE_NOT_FOUND` | Relative import missing the `.js` extension under `nodenext` | `import { x } from "./tools.js"` — even though the file is `.ts` |
-| Agent performs an operation the design excluded | Generated tools for the whole OpenAPI document | Only allow-listed operations become tools |
 | Anyone who can reach the URL can chat, burning the org's model budget | The handler forwarded `Authorization` downstream but never gated on the caller | 401 when `X-User-Id` is absent — the APIs behind you protect data, not spend |
 | One user reads or edits another's data | Ownership "enforced" in the prompt; the provider was called with the agent's own credential | Forward the caller's credential; let the provider return 403 |
 | The agent forgets everything on the SECOND message | Handler created a new conversation because it ignored the caller's `conversationId` | Load by (`conversationId`, `x-user-id`); only create when the id is absent |
