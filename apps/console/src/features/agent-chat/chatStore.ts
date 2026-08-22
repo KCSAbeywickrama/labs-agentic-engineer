@@ -160,10 +160,49 @@ function nextId(): string {
 
 // Omit must distribute over the message union (a plain Omit collapses it to
 // the common fields).
-type WithoutId<T> = T extends unknown ? Omit<T, "id"> : never;
+export type WithoutId<T> = T extends unknown ? Omit<T, "id"> : never;
 
-export function addMessage(key: string, msg: WithoutId<ChatMessage>): void {
-  persist(key, [...load(key), { ...msg, id: nextId() } as ChatMessage]);
+/** The shape `ensureUserMessage` takes: a user row that names its turn. */
+export type StartingUserMessage = WithoutId<Extract<ChatMessage, { role: "user" }>> & {
+  turnId: string;
+};
+
+/** Append a message; returns its generated id, for callers that must update
+ *  the row later (an optimistic send waiting on its turn id). */
+export function addMessage(key: string, msg: WithoutId<ChatMessage>): string {
+  const id = nextId();
+  persist(key, [...load(key), { ...msg, id } as ChatMessage]);
+  return id;
+}
+
+/**
+ * Settle an optimistic user row once the dispatch answers.
+ *
+ * A send paints its row BEFORE the POST — that request resolves the repo, the
+ * workspace ref, the Anthropic key, two git heads and two snapshot extracts
+ * before it returns a turn id, and the user watching their own message not
+ * appear for all of that has no way to tell a slow platform from a dropped
+ * one. So the row goes up first and is settled here: stamped with the turn it
+ * became, or marked failed if there wasn't one.
+ *
+ * Addressed by MESSAGE id rather than turn id, which is the whole point —
+ * until this runs the row has no turn id to be addressed by.
+ */
+export function settleUserMessage(
+  key: string,
+  messageId: string,
+  settled: { turnId: string } | { failed: true },
+): void {
+  persist(
+    key,
+    load(key).map((m) =>
+      m.role === "user" && m.id === messageId
+        ? "turnId" in settled
+          ? { ...m, turnId: settled.turnId }
+          : { ...m, status: "failed" as const }
+        : m,
+    ),
+  );
 }
 
 /**
@@ -256,6 +295,30 @@ export function setTurnStatus(
       m.role === "user" && m.turnId === turnId ? { ...m, status } : m,
     ),
   );
+}
+
+/**
+ * Append the user row that STARTED a turn, unless the log already has one.
+ *
+ * For a turn this browser did not send — a teammate's, or the platform's own
+ * kickoff at project creation — there is no optimistic row and the server's
+ * transcript will not carry one until the turn ENDS, because the conversation
+ * store persists a turn's history only then. Without this the panel renders
+ * the agent narrating under a blank space for the whole turn, which on a fresh
+ * project is the user's entire first impression of the product.
+ *
+ * Idempotent on turnId, because every path that can call it runs more than
+ * once: mount, the foreign-turn poll, and a re-attach after a dropped stream.
+ * The sender's own row already carries the turnId, so their send no-ops here.
+ *
+ * The row is TRANSIENT. When the turn lands, the rehydrate replaces the log
+ * with the server's history — which by then does carry the real message — and
+ * this row goes with it. That is the intended handoff, not a leak.
+ */
+export function ensureUserMessage(key: string, msg: StartingUserMessage): void {
+  const messages = load(key);
+  if (messages.some((m) => m.role === "user" && m.turnId === msg.turnId)) return;
+  persist(key, [...messages, { ...msg, id: nextId() } as ChatMessage]);
 }
 
 /** Remove a turn's streamed output before a replay-from-0 re-attach. */

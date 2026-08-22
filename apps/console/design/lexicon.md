@@ -166,6 +166,18 @@ Its words come from the state table below — no chip-specific vocabulary:
 | spec versioned, edited since | **`v1 · edited`** |
 | spec versioned, clean | **`v1`** |
 
+### What the chat shows while an agent works
+
+**Your own message appears the moment you send it**, not when the platform accepts it. Dispatch
+resolves a repository, a workspace ref, an API key, two git heads and two snapshot extracts before it
+answers, and a message that has not appeared yet is indistinguishable from one that was dropped.
+
+**A turn you did not send still shows who started it and what they said.** That covers the kickoff —
+which no browser sent — and a teammate's turn, which used to render under a blank space and be
+attributed to *you*. The turn itself carries the line
+([#562](https://github.com/wso2/labs-agentic-engineer/issues/562)); the transcript store cannot,
+because it only records a turn once the turn has finished.
+
 ### Card grammar
 
 Every stage card says the same things in the same slots, so the pattern is learned once:
@@ -454,6 +466,13 @@ user is *not* looking at any of them.
 
 **Nothing auto-navigates.** The notification is how the user finds out; clicking it is how they go
 ([#522](https://github.com/wso2/labs-agentic-engineer/issues/522)).
+
+**That holds for a question arriving, too.** The chat says one has — *"The agent has N questions ·
+Answer them →"* — and the **click** is what opens the form. It used to move the user the moment an
+unanswered question appeared, which was tolerable when reaching a question meant having asked for
+one; since the kickoff fires at project creation every project produces one in its first minute, so
+it threw every new user off the page they had just landed on, before they had read a word of what the
+agent was doing.
 
 ## Empty states
 

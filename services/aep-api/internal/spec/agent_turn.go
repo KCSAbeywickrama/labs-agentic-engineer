@@ -65,6 +65,23 @@ type AgentTurn struct {
 	// requirements tag (vN) at gate time. BaseRef covers the baseSha half.
 	SpecTag string `gorm:"type:text" json:"specTag,omitempty"`
 
+	// The turn's DISPLAY record (#562): the transcript line for the message
+	// that started it, and who sent it. The same facts the journal carries to
+	// the agents service — held here as well because that store persists a
+	// turn's transcript only when the turn ENDS, so between dispatch and
+	// landing there is nowhere else to read them from. That window is the
+	// whole of a kickoff, and the browser that lands on a freshly created
+	// project never sent the turn, so it has no local copy either: without
+	// these it renders the agent narrating under a blank space.
+	//
+	// AuthorID is EMAIL-anchored to match the console's live author identity —
+	// that equality is what lets a rendered row read as "you" rather than a
+	// teammate. Both empty for an unattributable turn (an M2M token) and for
+	// every row written before this existed.
+	Summary           string `gorm:"type:text" json:"-"`
+	AuthorID          string `gorm:"type:text" json:"-"`
+	AuthorDisplayName string `gorm:"type:text" json:"-"`
+
 	// Token usage from the turn's terminal manifest (#249/#291). Tokens + model
 	// are the stored truth; CostUsd is the USD stamped at capture from the
 	// model_rates then in force (amended ADR-0011) — never repriced. All zero

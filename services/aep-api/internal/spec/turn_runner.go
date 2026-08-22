@@ -70,11 +70,11 @@ type turnJob struct {
 	// author is the acting user for the journal (#463), nil when the bearer
 	// carries no human identity — an M2M token journals no author rather than
 	// a bare subject claim.
-	author *agentsvc.JournalAuthor
-	repoRef          sourcecontrol.RepoRef
-	baseRef          string
-	skillsRef        string
-	anthropicKey     string
+	author       *agentsvc.JournalAuthor
+	repoRef      sourcecontrol.RepoRef
+	baseRef      string
+	skillsRef    string
+	anthropicKey string
 	// Room-scoped turn (#86 phase 4): non-empty collabRoomID makes the agents
 	// service a live peer of this room (joining with collabToken, the
 	// prompting user's bearer). The doc is the write surface — the runner
@@ -146,6 +146,24 @@ func journalFor(job turnJob) *agentsvc.JournalBlock {
 		return nil
 	}
 	return &agentsvc.JournalBlock{Text: job.summary, Author: job.author}
+}
+
+// authorIDOf / authorNameOf flatten the journal author onto the turn row's two
+// columns. Nil — an M2M or minimal token, which journals no author rather than
+// a bare subject — flattens to two empty strings, the row's "unattributable"
+// state and the same one every pre-#562 row carries.
+func authorIDOf(a *agentsvc.JournalAuthor) string {
+	if a == nil {
+		return ""
+	}
+	return a.ID
+}
+
+func authorNameOf(a *agentsvc.JournalAuthor) string {
+	if a == nil {
+		return ""
+	}
+	return a.DisplayName
 }
 
 // journalAuthorFrom projects the request bearer onto the journal's author

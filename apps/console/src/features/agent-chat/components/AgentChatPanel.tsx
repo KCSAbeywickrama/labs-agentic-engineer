@@ -90,11 +90,6 @@ const SUGGESTIONS = [
 const clampWidth = (n: number): number =>
   Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, Math.round(n)));
 
-// Question ids we've already auto-navigated to the spec form for. Module-level,
-// NOT a ref: this panel unmounts whenever the user collapses it, so a ref would
-// reset and re-navigate on every reopen while a question is still pending.
-const autoOpenedQuestions = new Set<string>();
-
 function initialOf(name: string): string {
   return name.trim().charAt(0).toUpperCase() || "?";
 }
@@ -199,28 +194,19 @@ export function AgentChatPanel({
     });
   }, [navigate, projectName]);
 
-  // Questions are answered on the spec view (the form takes over the body), so
-  // take the user there the moment one arrives — otherwise the agent is blocked
-  // on an answer they can't see from wherever they are. Fires exactly ONCE per
-  // question: after that the user is free to navigate away (and to reopen this
-  // panel) without being yanked back. Keyed by toolCallId, NOT message id —
-  // the D6 rehydrate REPLACES the log and reconstructed rows carry fresh ids,
-  // so an id-keyed dedupe would re-yank on every refocus while a question
-  // stays pending; the toolCallId survives every reconstruction.
-  const pendingQuestionKey = useMemo(() => {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const m = messages[i]!;
-      if (m.role === "question" && m.questions?.length && answerableIds.has(m.id)) {
-        return m.toolCallId;
-      }
-    }
-    return null;
-  }, [messages, answerableIds]);
-  useEffect(() => {
-    if (!pendingQuestionKey || autoOpenedQuestions.has(pendingQuestionKey)) return;
-    autoOpenedQuestions.add(pendingQuestionKey);
-    openSpec();
-  }, [pendingQuestionKey, openSpec]);
+  // A question arriving does NOT move the user (#522/#562): the chat is the
+  // spine, and a blocking question does not earn the right to take the
+  // viewport. The panel says one has arrived — `QuestionsPointer` in TurnBlock,
+  // "The agent has N questions → Answer them" — and the CLICK is what
+  // navigates. Whoever is deep in the Builds page when a teammate's interview
+  // reaches a round keeps their place.
+  //
+  // This replaced an effect that called `openSpec()` the moment an unanswered
+  // question appeared, deduped by toolCallId in a module-level Set. It was
+  // written before the kickoff fired at creation, when the only way to reach a
+  // question was to have asked for one; now every project's first minute
+  // produces one, so it yanked every new user off the page they had just
+  // landed on.
 
   // --- Drag-to-resize (persisted) --------------------------------------
   const [width, setWidth] = useState<number>(() => {

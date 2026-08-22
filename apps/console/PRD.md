@@ -100,6 +100,16 @@ here: they're the open `console` + `feature` issues.
   died, **Generate spec** on a project nothing ever started —
   [#562](https://github.com/wso2/labs-agentic-engineer/issues/562)
   (contract: `SpecStage.agent`, `CreateProjectRequest.referencesPending`)
+- Agent chat — the transcript keeps up with the work: your own message paints
+  the moment you send it rather than when the dispatch answers; a turn this
+  browser did not send (the creation-time kickoff, or a teammate's) shows who
+  started it and what they said, from a display record carried on the turn
+  itself — the conversation store only records a turn once it has finished; a
+  cold panel looks for a running turn every ~2s instead of every 12s; and a
+  question arriving **no longer moves the user** — the pill says the agent is
+  waiting and the click is what opens the form —
+  [#562](https://github.com/wso2/labs-agentic-engineer/issues/562)
+  (contract: `TurnStatus.instruction` / `authorId` / `authorDisplayName`)
 - Spec view — the PRD is the interface: each PRD section carries a **code
   lens** firing the command that belongs there — `/actor` on Actors,
   `/feature` on the story list, `/expand` on each story, `/settle` over Open

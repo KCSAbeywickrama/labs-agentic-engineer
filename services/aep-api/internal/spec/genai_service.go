@@ -95,7 +95,6 @@ func (e *TurnInProgressError) Error() string {
 // never inject the namespace separator and escape its tenant scope.
 var conversationIDPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,200}$`)
 
-
 // ---- ports -----------------------------------------------------------------
 
 // RepoResolver looks up the project's git repo row (its OrgID/ProjectID are the
@@ -153,6 +152,14 @@ type TurnStatus struct {
 	Message        string    `json:"message,omitempty"`
 	CreatedAt      time.Time `json:"createdAt"`
 	UpdatedAt      time.Time `json:"updatedAt"`
+	// The turn's DISPLAY record (#562) — the transcript line for the message
+	// that started it, and who sent it. A client attaching to a turn it did not
+	// send has no other source for these until the turn lands: the conversation
+	// store persists a turn's transcript only at the end. Empty on rows written
+	// before this existed, and on turns with no attributable human behind them.
+	Instruction       string `json:"instruction,omitempty"`
+	AuthorID          string `json:"authorId,omitempty"`
+	AuthorDisplayName string `json:"authorDisplayName,omitempty"`
 }
 
 func turnStatusOf(t *AgentTurn) *TurnStatus {
@@ -168,6 +175,10 @@ func turnStatusOf(t *AgentTurn) *TurnStatus {
 		Message:        t.Message,
 		CreatedAt:      t.CreatedAt,
 		UpdatedAt:      t.UpdatedAt,
+
+		Instruction:       t.Summary,
+		AuthorID:          t.AuthorID,
+		AuthorDisplayName: t.AuthorDisplayName,
 	}
 }
 
@@ -364,14 +375,21 @@ func (s *Service) StartTurn(ctx context.Context, orgID, projectID string, in Tur
 	}
 
 	// D18 guard: one active turn per project, any use case.
+	// The display record rides the row itself: a client attaching to this turn
+	// reads it off the active-turn response and paints the sender's message,
+	// which no other source can give it until the turn lands (see AgentTurn).
+	author := journalAuthorFrom(ctx)
 	row, err := s.turns.TryStart(ctx, &AgentTurn{
-		OrgID:          orgID,
-		ProjectID:      projectID,
-		ConversationID: in.ConversationID,
-		UseCase:        useCaseGeneral,
-		BaseRef:        baseRef,
-		SkillsRef:      skillsRef,
-		Status:         turnStatusRunning,
+		OrgID:             orgID,
+		ProjectID:         projectID,
+		ConversationID:    in.ConversationID,
+		UseCase:           useCaseGeneral,
+		BaseRef:           baseRef,
+		SkillsRef:         skillsRef,
+		Status:            turnStatusRunning,
+		Summary:           summary,
+		AuthorID:          authorIDOf(author),
+		AuthorDisplayName: authorNameOf(author),
 	})
 	if errors.Is(err, ErrTurnActive) {
 		return "", &TurnInProgressError{ActiveTurnID: row.ID}
@@ -393,13 +411,13 @@ func (s *Service) StartTurn(ctx context.Context, orgID, projectID string, in Tur
 		summary:          summary,
 		// Captured before the detached goroutine: the identity reads the
 		// request's bearer, and the journal (#463) attributes the turn.
-		author: journalAuthorFrom(ctx),
-		repoRef:          ref,
-		baseRef:          baseRef,
-		skillsRef:        skillsRef,
-		anthropicKey:     key,
-		collabRoomID:     collabRoomID,
-		collabToken:      collabToken,
+		author:       author,
+		repoRef:      ref,
+		baseRef:      baseRef,
+		skillsRef:    skillsRef,
+		anthropicKey: key,
+		collabRoomID: collabRoomID,
+		collabToken:  collabToken,
 	}
 	// Detached: the turn runs to completion (or a terminal failure) server-
 	// side regardless of the client connection (D16). runTurnSafe is the panic

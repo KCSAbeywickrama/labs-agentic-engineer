@@ -59,8 +59,9 @@ vi.mock("../useAgentChat", () => ({
   }),
 }));
 
-// The panel auto-navigates to the spec view when a question card arrives —
-// with messages staged in tests that would crash outside a RouterProvider.
+// The panel navigates on a CLICK (the header's spec button, the questions
+// pill) — which would crash outside a RouterProvider, so the hook is stubbed.
+// It must not navigate on its own; see the questions describe below.
 const mockPanelNavigate = vi.fn();
 vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => mockPanelNavigate,
@@ -391,6 +392,56 @@ describe("AgentChatPanel — /<skill> composer shortcut", () => {
   });
 });
 
+// #562 decision 6: "Nothing ever navigates the user automatically — not on
+// question arrival, not on turn completion. Blocking questions do not earn the
+// right to move the viewport."
+//
+// This replaced an effect that called `openSpec()` the moment an unanswered
+// question appeared. It predates the kickoff firing at project creation, when
+// reaching a question meant having asked for one; now every project's first
+// minute produces one, so it threw every new user off the page they had just
+// landed on — before they had read a word of what the agent was doing.
+describe("AgentChatPanel — a question does not move the user", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    consumePendingSeed(KEY);
+    replaceMessages(KEY, []);
+  });
+
+  const QUESTION: AskQuestionInput[] = [
+    { question: "Who signs in?", options: [{ label: "Anyone" }] },
+  ];
+
+  it("stays put when an unanswered question arrives", () => {
+    addMessage(KEY, { role: "question", turnId: "t1", toolCallId: "tc1", questions: QUESTION });
+    renderPanel();
+
+    expect(mockPanelNavigate).not.toHaveBeenCalled();
+  });
+
+  it("stays put when a second question arrives later", () => {
+    renderPanel();
+    act(() =>
+      addMessage(KEY, { role: "question", turnId: "t1", toolCallId: "tc1", questions: QUESTION }),
+    );
+
+    expect(mockPanelNavigate).not.toHaveBeenCalled();
+  });
+
+  // The pill is what takes them there, and it is the whole point of not
+  // moving them: they arrive because they chose to.
+  it("navigates when the questions pill is clicked", () => {
+    addMessage(KEY, { role: "question", turnId: "t1", toolCallId: "tc1", questions: QUESTION });
+    renderPanel();
+
+    fireEvent.click(screen.getByTestId("questions-pointer"));
+
+    expect(mockPanelNavigate).toHaveBeenCalledWith(
+      expect.objectContaining({ to: "/projects/$projectName/spec" }),
+    );
+  });
+});
+
 // The one remaining generation CTA (#159 design). The requirements half is
 // gone: the platform fires `/start` at project creation (#562), so no signal is
 // handed across a navigation for it any more — the spec card's start CTA seeds
@@ -399,6 +450,9 @@ describe("AgentChatPanel — the design CTA", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     consumePendingSeed(KEY);
+    // The log is a module-level store: an unanswered question left by another
+    // block reads as an open exchange here and suppresses the send.
+    replaceMessages(KEY, []);
   });
 
   it("auto-sends /design verbatim for the design signal", () => {

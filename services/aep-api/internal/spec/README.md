@@ -102,6 +102,13 @@ the genai turn engine (runner/broker/sweeper), and the files / design / skills s
   current thread. Idempotent on "has this project ever run a turn", because it has two triggers: project
   create, and the references upload a create with `referencesPending` held it for. Fire-and-forget — a
   kickoff that cannot start never fails the creation, and the console offers it as a CTA instead.
+- **A running turn carries its own display record** (#562). `agent_turns` stores the transcript
+  line the turn started from plus its author, and `TurnStatus` serves them. Not redundant with the
+  journal that rides to the agents service: that store persists a turn's transcript only when the
+  turn ENDS, so between dispatch and landing there is nowhere else to read them from — and that
+  window is the whole of a kickoff, which no browser sent and none has a local copy of. Empty for
+  an unattributable turn (an M2M token) and for every row written before the record existed, which
+  the console renders as "paint nothing" rather than an empty bubble.
 - **Persistence**: the `agent_turns` gorm lives in this domain (`repository_turn.go` over the
   `agent_turn.go` entity), single write-authority — as does `project_conversations`
   (`repository_conversation.go`): the project's CURRENT chat thread pointer (#430), server-minted,

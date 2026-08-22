@@ -101,6 +101,38 @@ func TestKickoff_TranscriptLineCarriesTheIdea(t *testing.T) {
 	}
 }
 
+// The turn row carries its own DISPLAY record (#562), because nothing else can
+// supply it while the turn runs: the agents service persists a turn's
+// transcript only when the turn ENDS, and the browser that lands on a freshly
+// created project never sent the turn, so it has no local copy either. Without
+// this the panel renders the agent narrating under a blank space for the whole
+// kickoff — the user's first impression of the product.
+func TestKickoff_TurnCarriesItsDisplayRecord(t *testing.T) {
+	r := newGenaiRig(t, map[string]string{
+		spec.DescriptorPath: descriptorTOML(t, testIdea),
+	}, withConversations(&memConversationRepo{}))
+	r.fake.parts = []string{addFilePart("specs/requirements/prd.md", "# Reqs\n")}
+	m := manifestPart(map[string]string{"specs/requirements/prd.md": "# Reqs\n"}, nil)
+	r.fake.manifest = &m
+
+	ctx := auth.WithAuthToken(t.Context(), "bearer-from-the-create-request")
+	turnID, err := r.svc.StartKickoff(ctx, testOrg, testProj)
+	if err != nil {
+		t.Fatalf("StartKickoff: %v", err)
+	}
+	st := r.waitTerminal(t, turnID)
+
+	if st.Instruction != "/start "+testIdea {
+		t.Fatalf("turn instruction = %q, want %q", st.Instruction, "/start "+testIdea)
+	}
+	// The harness's token carries no email, so there is no attributable human
+	// behind this turn — the row says so rather than inventing a subject.
+	if st.AuthorID != "" || st.AuthorDisplayName != "" {
+		t.Fatalf("author = (%q,%q), want empty for an unattributable token",
+			st.AuthorID, st.AuthorDisplayName)
+	}
+}
+
 // Idempotent on "has this project ever run a turn": both triggers may fire
 // (a create, then the references upload it held for), and neither may start a
 // second interview over the first.

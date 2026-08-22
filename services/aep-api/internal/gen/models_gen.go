@@ -1945,13 +1945,21 @@ type TurnOutputBody struct {
 
 // TurnStatus One turn's lifecycle view (create-turn 202 → poll/attach).
 type TurnStatus struct {
+	// AuthorDisplayName The acting user's display name, paired with authorId.
+	AuthorDisplayName string `json:"authorDisplayName,omitempty"`
+
+	// AuthorID Who started this turn — EMAIL-anchored, matching the console's live author identity, which is what lets a client tell its own turn from a teammate's. Empty when no attributable human sent it (an M2M token, a minimal user token, or a turn dispatched before the display record was stored). Flat rather than a nested object so "absent" is one convention across this schema: the empty string, exactly as `instruction` uses it.
+	AuthorID       string    `json:"authorId,omitempty"`
 	CommitSha      string    `json:"commitSha,omitempty"`
 	ConversationID string    `json:"conversationId"`
 	CreatedAt      time.Time `json:"createdAt"`
-	Message        string    `json:"message,omitempty"`
-	NoChanges      bool      `json:"noChanges,omitempty"`
-	Paths          []string  `json:"paths,omitempty"`
-	Reason         string    `json:"reason,omitempty"`
+
+	// Instruction What this turn's DISPLAY record says — the transcript line for the message that started it. Present so a client attaching to a turn it did not send can render the sender's message immediately, instead of narration under a blank space: the conversation store persists a turn's transcript only when the turn ENDS, so a history read mid-turn cannot supply it. Empty on turns dispatched before this field existed. Not the model's prompt — the agents service composes that from the turn spec and it never crosses this boundary.
+	Instruction string   `json:"instruction,omitempty"`
+	Message     string   `json:"message,omitempty"`
+	NoChanges   bool     `json:"noChanges,omitempty"`
+	Paths       []string `json:"paths,omitempty"`
+	Reason      string   `json:"reason,omitempty"`
 
 	// Status running, completed, failed
 	Status    string    `json:"status"`

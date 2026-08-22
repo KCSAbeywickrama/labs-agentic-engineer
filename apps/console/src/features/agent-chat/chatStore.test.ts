@@ -37,12 +37,14 @@ import {
   chatKeyFor,
   consumePendingSeed,
   dropTurnOutput,
+  ensureUserMessage,
   getMessages,
   hasDeterministicFlush,
   notifyTurnEnd,
   peekPendingSeed,
   registerDeterministicFlush,
   setPendingSeed,
+  settleUserMessage,
   setTurnStatus,
   subscribe,
   subscribeSeed,
@@ -319,5 +321,81 @@ describe("deterministic-flush registration", () => {
     expect(hasDeterministicFlush(key)).toBe(true); // one registration still live
     unregisterB();
     expect(hasDeterministicFlush(key)).toBe(false);
+  });
+});
+
+// #562: the two writes a turn nobody in this browser sent depends on.
+describe("chatStore — an optimistic send, and a turn this browser didn't send", () => {
+  // The send paints BEFORE the dispatch answers, so the row starts with no
+  // turn id and is settled once one comes back.
+  it("settles an optimistic row with the turn it became", () => {
+    const key = freshKey();
+    const id = addMessage(key, { role: "user", content: "tidy the spec", status: "in_flight" });
+
+    settleUserMessage(key, id, { turnId: "t1" });
+
+    const row = getMessages(key)[0];
+    expect(row).toMatchObject({ role: "user", turnId: "t1", status: "in_flight" });
+  });
+
+  // The row the user is already looking at becomes the failed one — a second
+  // copy beside it would read as two sends.
+  it("fails the same row rather than adding another", () => {
+    const key = freshKey();
+    const id = addMessage(key, { role: "user", content: "tidy the spec", status: "in_flight" });
+
+    settleUserMessage(key, id, { failed: true });
+
+    expect(getMessages(key)).toHaveLength(1);
+    expect(getMessages(key)[0]).toMatchObject({ status: "failed" });
+  });
+
+  it("paints the row that started a turn this browser did not send", () => {
+    const key = freshKey();
+    ensureUserMessage(key, {
+      role: "user",
+      content: "/start an expense tracker",
+      turnId: "t1",
+      status: "in_flight",
+      author: { id: "them@x.com", displayName: "Them" },
+    });
+
+    expect(getMessages(key)[0]).toMatchObject({
+      content: "/start an expense tracker",
+      author: { id: "them@x.com", displayName: "Them" },
+    });
+  });
+
+  // Every path that reaches it runs more than once — mount, the poll, and a
+  // re-attach after a dropped stream.
+  it("is idempotent on the turn id", () => {
+    const key = freshKey();
+    const row = {
+      role: "user" as const,
+      content: "/start an expense tracker",
+      turnId: "t1",
+      status: "in_flight" as const,
+    };
+    ensureUserMessage(key, row);
+    ensureUserMessage(key, row);
+
+    expect(getMessages(key)).toHaveLength(1);
+  });
+
+  // The sender's own row already carries the id, so re-attaching to their own
+  // turn must not duplicate what they typed.
+  it("leaves the sender's own row alone", () => {
+    const key = freshKey();
+    const id = addMessage(key, { role: "user", content: "mine", status: "in_flight" });
+    settleUserMessage(key, id, { turnId: "t1" });
+
+    ensureUserMessage(key, {
+      role: "user",
+      content: "mine",
+      turnId: "t1",
+      status: "in_flight",
+    });
+
+    expect(getMessages(key)).toHaveLength(1);
   });
 });
