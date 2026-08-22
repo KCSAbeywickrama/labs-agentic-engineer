@@ -1,13 +1,9 @@
----
-name: agent-design
-description: Use when creating or editing an agent.afm.md for an ai-agent component — writing the agent's role and instructions, choosing which of a dependency's operations it may call, and declaring its model and interface.
-metadata:
-  aep:
-    kind: platform
-    audience: [design]
----
+# Designing an agent — writing `agent.afm.md`
 
-# Agent definitions (AFM)
+Read this when you are AUTHORING an agent's definition. The contract every
+agent obeys — the wire shape, memory, identity, and why the allow-list is the
+security boundary — is in the skill body; this file is only how to write the
+document.
 
 Every `ai-agent` component gets ONE definition at
 `specs/design/components/<name>/agent.afm.md` — YAML front matter plus a

@@ -156,7 +156,7 @@ function readInterfaces(value: unknown): AgentInterface[] {
 
 /**
  * Split the prompt body on its level-1 headings — the `# Role` / `# Instructions`
- * / `# Style` structure agent-design authors. Deeper headings stay inside their
+ * / `# Style` structure agent-building authors. Deeper headings stay inside their
  * section's body so a nested outline survives; a body with no heading at all
  * becomes one unheaded section rather than disappearing.
  */

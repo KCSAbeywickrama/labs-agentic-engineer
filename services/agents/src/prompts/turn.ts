@@ -171,7 +171,7 @@ const FLOW_SUPPORTING_SKILLS: Record<string, string[]> = {
   // turn — there is nothing to condition on when the prompt is composed, and a
   // cached read costs a tenth of a re-prefill. Org-authored design skills stay
   // lazy: this map is flow wording and cannot know a given org's catalog.
-  design: ["grilling", "cell-design", "architecture", "security-design", "openapi-conventions", "wireframes", "agent-design", "validation-criteria"],
+  design: ["grilling", "cell-design", "architecture", "security-design", "openapi-conventions", "wireframes", "agent-building", "validation-criteria"],
 };
 
 /** The branch a command names, or undefined for a token that IS its skill. */

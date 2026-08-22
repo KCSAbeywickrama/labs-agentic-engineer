@@ -102,7 +102,7 @@ in kebab-case after their responsibility (`expense-api`, `expense-webapp`,
 **An AI agent is `"ai-agent"`.** Reach for it when the requirements call for a
 conversational or autonomous surface — a user talking to the system in their own
 words rather than filling in a form. Its behaviour is authored as
-`agent.afm.md` (the `agent-design` skill), it is implemented in TypeScript, and
+`agent.afm.md` (the `agent-building` skill), it is implemented in TypeScript, and
 it pins `["agent-building"]`. It is a normal deployable that calls other
 components over HTTP: give it a `component` dependency for every API it uses.
 **An agent a signed-in user reaches is a protected backend** — whether the

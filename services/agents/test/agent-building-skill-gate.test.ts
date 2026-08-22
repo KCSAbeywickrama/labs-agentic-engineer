@@ -31,7 +31,18 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
 
+// The prescribed code lives in the skill's IMPLEMENTATION reference, not its
+// body: the body is the contract both the design and coding halves share, and
+// pinning puts it in the coding agent's context at startup. The store is what
+// that agent reads on demand — and it is the file whose SQL carries the user
+// fence, so it is the file this gate has to watch.
 const SKILL = readFileSync(
+  fileURLToPath(
+    new URL("../../../skills/agent-building/references/building.md", import.meta.url),
+  ),
+  "utf8",
+);
+const BODY = readFileSync(
   fileURLToPath(new URL("../../../skills/agent-building/SKILL.md", import.meta.url)),
   "utf8",
 );
@@ -63,7 +74,7 @@ describe("agent-building SKILL.md — prescribed store invariants", () => {
 
   it("never tells the agent to adopt a caller-chosen conversation id", () => {
     assert.doesNotMatch(
-      SKILL,
+      BODY,
       /Absent or unknown on\s+the way in means "new conversation"/,
       'the prose that told the agent to treat an UNKNOWN id as a new conversation is back — it invites a caller to pick another user\'s id',
     );

@@ -76,7 +76,7 @@ turn — apply them directly, and load one only if you find you do not have it.
 4. **security.md** (`security-design`) — when the design has sign-in or roles.
 5. **Per-component artifacts** — every `service` gets `openapi.yaml`
    (`openapi-conventions`); every `web-application` gets `wireframes.dsl`
-   (`wireframes`); every `ai-agent` gets `agent.afm.md` (`agent-design`).
+   (`wireframes`); every `ai-agent` gets `agent.afm.md` (`agent-building`).
 6. **Validation criteria** (`validation-criteria`) — mint
    `specs/validation/validation-criteria.json` LAST. A design without its
    acceptance oracle is unfinished — never skip this.
