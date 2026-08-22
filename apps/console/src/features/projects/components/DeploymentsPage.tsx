@@ -128,7 +128,7 @@ function ComponentRow({ card, projectName }: { card: DeploymentCard; projectName
   const d = card.deployment;
   // An agent's endpoint is NOT a link a person can follow: /chat is POST-only
   // JSON, so pointing a browser at it returned an error page rather than a
-  // conversation. "Chat" now goes to the Try it tab, which is the thing that
+  // conversation. "Try it" now goes to the Try it tab, which is the thing that
   // can actually hold a conversation, and the raw URL keeps its own link for
   // anyone who wants to curl it.
   const isAgent = card.componentType === "ai-agent";
@@ -190,10 +190,10 @@ function ComponentRow({ card, projectName }: { card: DeploymentCard; projectName
           variant="body2"
           // The accessible name carries the component so a screen reader
           // hears which agent it opens (#401 review).
-          aria-label={`Chat with ${card.displayName}`}
+          aria-label={`Try ${card.displayName}`}
           sx={{ display: "inline-flex", alignItems: "center", gap: 0.5, flexShrink: 0 }}
         >
-          Chat <MessageSquare size={14} />
+          Try it <MessageSquare size={14} />
         </RouterTextLink>
       )}
       {openHref && (

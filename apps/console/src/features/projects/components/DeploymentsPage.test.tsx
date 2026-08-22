@@ -384,7 +384,7 @@ describe("DeploymentsPage — story rail", () => {
 });
 
 describe("DeploymentsPage — component links", () => {
-  it("sends an agent's Chat link to the tester, and offers its endpoint separately", () => {
+  it("sends an agent's Try it link to the tester, and offers its endpoint separately", () => {
     mockDeploy = {
       version: "v1",
       status: "deployed",
@@ -412,10 +412,10 @@ describe("DeploymentsPage — component links", () => {
 
     render(<DeploymentsPage projectName="acme" />);
 
-    // "Chat" goes to the Try it tab, naming the agent. It used to point at the
+    // "Try it" goes to the Try it tab, naming the agent. It used to point at the
     // gateway's /chat, which is POST-only JSON — a browser following it got an
     // error page, never a conversation.
-    const chatLink = screen.getByRole("link", { name: /Chat with Leave Agent/ });
+    const chatLink = screen.getByRole("link", { name: /Try Leave Agent/ });
     expect(chatLink).toHaveAttribute(
       "href",
       "/projects/acme/try-it?component=leave-agent",
