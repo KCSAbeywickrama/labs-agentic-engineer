@@ -221,10 +221,27 @@ absent and the agent looks idle, and the card fell through to its cold-start wor
 The **version** is a separate slot and survives underneath all of these, so an amendment interview on
 `v2` still reads as `v2`.
 
-**Starting moved off this card.** It lives in the spec view's empty state — *"Nothing written yet.
-Your requirements and design appear here as the agent writes them."* with a **Start** button — which is
-exactly where *Open spec* lands. One surface with nothing in it is the one surface that offers to fill
-it, and the card stays a destination rather than sometimes being a destination and sometimes a send.
+**Nothing on this card starts anything.** It is a destination in every state.
+
+**An empty spec workspace offers nothing either.** *"The workspace looks empty"* is true for a while
+before the agent's first write lands — so a button gated on it appears **during the kickoff**, which is
+precisely the moment the user must not be invited to restart. The only state carrying a way out is the
+one that can be *known* rather than inferred: a turn that started and then died.
+
+| | |
+|---|---|
+| Title | **The agent couldn't write your requirements** |
+| Body | *Nothing was lost — anything already written stays browsable.* |
+| Action | **Retry** |
+
+The previous copy ended *"Ask the agent to continue from where it stopped in the chat panel"*, which
+[#530](https://github.com/wso2/labs-agentic-engineer/issues/530) forbids: a command the UI can offer as
+a control is offered, not described.
+
+**Deliberately uncovered:** a project that never got a turn at all — an org with no Anthropic key, or one
+older than the kickoff. It reads as *nothing has run*, not as *failed*, so it gets no button. A missing
+key is not fixed by clicking retry; it is fixed in settings, and the chat surfaces the real error at the
+first attempt.
 
 **Everything else is the chat's job.** The card says where the project stands in one line; the panel
 carries the conversation, the questions and the agent's work.

@@ -61,7 +61,6 @@ import { useYTextString } from "../collab/useYTextString";
 import { useTurnEndFlush } from "../collab/useTurnEndFlush";
 import { START_COMMAND } from "@aep/contracts/commands";
 import { chatKeyFor, setPendingSeed, subscribeTurnEnd } from "../../agent-chat/chatStore";
-import { EmptyState } from "../../../components/EmptyState";
 import { useResolveDependencyViaChat } from "../../agent-chat/useResolveDependencyViaChat";
 import type { DependencyResolutionIntent } from "../../projects/lib/dependencyResolutionMessage.js";
 import { useDesignCellChangeCount } from "../collab/useDesignCellChange";
@@ -475,15 +474,10 @@ export function SpecView({ projectName }: { projectName: string }) {
   const noRequirementsYet = !files.some((f) => f.group === "requirements");
   const writingRequirements = deriving && noRequirementsYet;
   const failed = specAgent === "failed" && noRequirementsYet;
-  // Nothing in the workspace and nobody working on it — the state that offers
-  // the kickoff. Keyed on the whole file list, not just requirements: a project
-  // holding any spec file at all has been started, whatever happened next.
-  const nothingWritten = files.length === 0 && !deriving;
-  // Starting is a SEND, so it goes where every other send goes: the chat's
-  // one-shot seed slot, GUARDED. This surface decides from a file list, which
-  // cannot see an interview that ended on a question — the panel re-decides
-  // after it has rehydrated, which is the first moment that is knowable.
-  const startSpec = () =>
+  // Retrying is a SEND, so it goes where every other send goes: the chat's
+  // one-shot seed slot, GUARDED — the panel re-decides after it has rehydrated,
+  // which is the first moment "is the agent mid-exchange" is knowable here.
+  const retryStart = () =>
     setPendingSeed(chatKeyFor(orgHandle ?? "default", projectName), START_COMMAND, true);
   // The design gate: Build arms once design files are generated (#80).
   const hasDesignFiles = files.some((f) => f.group === "designs");
@@ -840,11 +834,29 @@ export function SpecView({ projectName }: { projectName: string }) {
           )}
         </Box>
 
+        {/* The one state that needs a way out, and the only one that can be
+            KNOWN rather than inferred (#562 retest). `failed` is a positive
+            fact off the turn record — a turn that started and then died — so
+            unlike "the workspace looks empty" it can never be true for a
+            moment while something is actually working. That is why the action
+            lives here and nowhere else: gated on an absence, it appeared
+            during the kickoff, which is precisely when the user must not be
+            invited to restart it.
+
+            The old copy told the user to go type in the chat, which #530
+            forbids — a command the UI can offer as a control is offered. */}
         {failed && (
-          <Alert severity="error" sx={{ borderRadius: 0 }}>
-            <AlertTitle>The agent's last turn failed</AlertTitle>
-            Your files are safe — everything already written remains browsable.
-            Ask the agent to continue from where it stopped in the chat panel.
+          <Alert
+            severity="error"
+            sx={{ borderRadius: 0 }}
+            action={
+              <Button color="inherit" size="small" onClick={retryStart}>
+                Retry
+              </Button>
+            }
+          >
+            <AlertTitle>The agent couldn't write your requirements</AlertTitle>
+            Nothing was lost — anything already written stays browsable.
           </Alert>
         )}
 
@@ -1170,23 +1182,6 @@ export function SpecView({ projectName }: { projectName: string }) {
                   <Typography variant="body2" color="text.secondary">
                     Agent is working on the requirements document
                   </Typography>
-                ) : nothingWritten ? (
-                  /* The workspace is empty and no agent is working — a project
-                     whose kickoff never ran (the tab closed during creation, an
-                     org with no key, a project older than the kickoff itself)
-                     or whose first turn died. This is where STARTING lives now:
-                     the overview's card is a destination in every state, and it
-                     lands here, so the one place with nothing in it is the one
-                     place that offers to fill it. */
-                  <EmptyState
-                    title="Nothing written yet"
-                    description="Your requirements and design appear here as the agent writes them."
-                    action={
-                      <Button variant="contained" onClick={startSpec}>
-                        Start
-                      </Button>
-                    }
-                  />
               ) : (
                 <Typography variant="body2" color="text.secondary">
                   Select a file to view its content.

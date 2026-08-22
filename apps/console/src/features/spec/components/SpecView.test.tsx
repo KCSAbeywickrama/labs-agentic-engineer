@@ -338,51 +338,44 @@ describe("SpecView while the kickoff is still writing", () => {
   // The failure banner was unreachable before #562 wired a real signal into it.
   // Unscoped it would pin a red alert across a healthy published spec after any
   // turn failed; a kickoff that died is the one failure leaving nothing behind.
-  it("banners a failed kickoff, and only a failed kickoff", () => {
+  // The one state that can be KNOWN rather than inferred: a turn that started
+  // and then died. So it is the only one carrying a way out.
+  it("banners a failed kickoff, and offers Retry there", () => {
     mockSpecAgent = "failed";
     empty();
     const { unmount } = render(<SpecView projectName="proj1" />);
-    expect(screen.getByText("The agent's last turn failed")).toBeInTheDocument();
+    expect(
+      screen.getByText("The agent couldn't write your requirements"),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    // GUARDED: this surface cannot see an interview that ended on a question.
+    // The panel re-decides after it has rehydrated, which is the first moment
+    // that is knowable.
+    expect(consumePendingSeed(chatKeyFor("acme", "proj1"))).toEqual({
+      message: START_COMMAND,
+      guarded: true,
+    });
     unmount();
 
     mockSpecAgent = "failed";
     published();
     render(<SpecView projectName="proj1" />);
     expect(
-      screen.queryByText("The agent's last turn failed"),
+      screen.queryByText("The agent couldn't write your requirements"),
     ).not.toBeInTheDocument();
   });
 
-  // Starting lives HERE now, not on the overview card (#562 retest): that card
-  // is a destination in every state and it lands here, so the one surface with
-  // nothing in it is the one that offers to fill it. Reached by a project whose
-  // kickoff never ran — the tab closed during creation, an org with no key, a
-  // project older than the kickoff itself — or whose first turn died.
-  it("offers the kickoff when the workspace is empty and nobody is working", () => {
+  // An empty workspace offers NOTHING (#562 retest). It used to carry a Start
+  // button, which appeared during the kickoff itself — the moment the user must
+  // not be invited to restart it — because "the workspace looks empty" is true
+  // for a while before the agent's first write lands.
+  it("offers no action while the workspace is merely empty", () => {
     empty();
     render(<SpecView projectName="proj1" />);
 
-    expect(
-      screen.queryByText("Agent is working on the requirements document"),
-    ).not.toBeInTheDocument();
-    expect(screen.getByText("Nothing written yet")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "Start" }));
-    // GUARDED: this surface decides from a file list, which cannot see an
-    // interview that ended on a question. The panel re-decides after it has
-    // rehydrated, which is the first moment that is knowable.
-    expect(consumePendingSeed(chatKeyFor("acme", "proj1"))).toEqual({
-      message: START_COMMAND,
-      guarded: true,
-    });
-  });
-
-  // A project with files has been started, whatever happened next — offering to
-  // start it again would be offering to re-interview over its own spec.
-  it("offers a file picker, not the kickoff, once anything exists", () => {
-    render(<SpecView projectName="proj1" />);
-
-    expect(screen.queryByText("Nothing written yet")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Start" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
   });
 });
 

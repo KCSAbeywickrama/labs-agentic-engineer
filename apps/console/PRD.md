@@ -104,8 +104,9 @@ here: they're the open `console` + `feature` issues.
   in every state instead of three captions walked during a single kickoff with
   no user input, and **one line that always says something** instead of blanking
   the moment the agent asked a question. Starting moves to the spec view's empty
-  state, which is where the button already lands, so the card is a destination
-  and never a send. The kickoff now fires **inline** with `POST /projects`, so
+  failure alert — the only state that can be *known* rather than inferred, so
+  the button can never appear mid-kickoff — as **Retry**; an empty workspace
+  offers nothing at all, and the card is a destination and never a send. The kickoff now fires **inline** with `POST /projects`, so
   the create answers only once the turn exists — which is what makes
   `spec.agent == ""` mean *never started* rather than also *starting right now* —
   [#562](https://github.com/wso2/labs-agentic-engineer/issues/562)
