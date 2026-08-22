@@ -74,5 +74,6 @@ sandbox branch that works unprivileged — both blockers, one value.
 Related: ADR-0006 pins endpoint *resolution* — for curl, and for playwright-cli
 via `$PLAYWRIGHT_MCP_CONFIG`; this ADR is about which binary launches, and the
 two compose. They have to: that config may carry `launchOptions.args` only,
-since a `browserName` there would undo this decision's sandbox branch. #570 carries the diagnosis and the code references; PR #571 carries
-the before/after evidence.
+since a `browserName` there would undo this decision's sandbox branch. #570
+carries the diagnosis and the code references; PR #571 carries the before/after
+evidence.

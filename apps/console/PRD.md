@@ -67,12 +67,13 @@ Approved at section level; per-section detail is defined feature-by-feature.
 - **Project view** — inside a project the sidebar nav swaps to its sections
   (ADR-0010; no back-item, home is the header brand / project switcher):
   - **Overview** — component map + status, deployment state, recent activity.
-  - **Specs & Design** — the requirement, derived design + validation files;
-    the blocking design review lives here.
+  - **Spec** — the requirement, derived design + acceptance criteria.
   - **Builds** — per-version build history: the selected build's summary +
     its tag-scoped coding-agent task list (Version autocomplete for older
     tags), per-task console log; PRs and issues link out to GitHub.
   - **Deployments** — dev environment state and URLs.
+  - **Validations** — the runs checking a build against the spec's acceptance
+    criteria.
   - **Issues** — issues the SRE agent raises against the running project
     (placeholder until its feature lands).
 - **Admin** — agent customization (instructions, skills). Architect/SRE only.
@@ -84,6 +85,33 @@ which is also what closes its issue. Newest first; links go to the feature's
 GitHub issue plus any ADRs it produced. Features still being built aren't
 here: they're the open `console` + `feature` issues.
 
+- Spec view — the PRD is the interface: each PRD section carries a **code
+  lens** firing the command that belongs there — `/actor` on Actors,
+  `/feature` on the story list, `/expand` on each story, `/settle` over Open
+  Questions — and every flagged line (an `*assumed*` decision, an open
+  question) carries its own `/settle`, so the subject comes from what the user
+  clicked instead of their memory. Section lenses show at rest, line lenses on
+  hover, and all of them go inert while an agent holds the turn. Retires the
+  composer's `Actions ▾` menu of raw slash commands. **Open questions no longer
+  block Generate design** on either side — the console disable and the two
+  skill clauses both go — since a recorded gap is information, not corruption
+  (the reasoning that already settled dependencies in
+  [#526](https://github.com/wso2/labs-agentic-engineer/issues/526)); `deferred`
+  survives as the user's *"stop asking"*. A command names the user's intent and
+  resolves to a skill server-side, so `amend` stops being what a user reads and
+  `/settle` arrives as its own skill, because revision propagates. No contract
+  change —
+  [#579](https://github.com/wso2/labs-agentic-engineer/issues/579)
+- Create flow — says what's about to happen: the subtitle answers only *how
+  much detail?* (*"Describe it in your own words — rough is fine."*), the
+  repository field states that Agentic Engineer **creates** it in the user's
+  organization, a taken repository name resolves to a field-level error naming
+  the org rather than a raw alert, the wait reads **Creating your project…**,
+  and the examples carry the enterprise persona (expense approval, employee
+  onboarding, a support triage agent). Retires **AEP** from user-facing copy in
+  favour of **Agentic Engineer**. First feature to draw on the console lexicon
+  (ADR-0019) —
+  [#561](https://github.com/wso2/labs-agentic-engineer/issues/561)
 - Deployments page — one-story rail + environment panel: Development /
   Validation / Production as one numbered rail (Builds-spine vocabulary,
   ADR-0014) with a side panel (version, rollout, endpoints, production
@@ -100,6 +128,32 @@ here: they're the open `console` + `feature` issues.
   route. `@aep/excalidraw-dsl`'s `tryDslToPrototype` compiles per-screen
   scenes client-side (no BE handshake, no contract change; ADR-0008) —
   [#348](https://github.com/wso2/labs-agentic-engineer/issues/348)
+- Spec view — readable wireframe canvas: screens compile into a single column
+  instead of a two-across grid, and the canvas opens focused on the first
+  screen at a legible size with the top of the second peeking below; while an
+  agent edits, the viewport pans to the screen being changed instead of
+  refitting the whole board, and stays put when nothing identifiable changed.
+  `@aep/excalidraw-dsl` stamps each element with its screen so the viewer can
+  group per screen; no contract change —
+  [#552](https://github.com/wso2/labs-agentic-engineer/issues/552)
+- Project create — reference document upload on the "What do you want to
+  build?" view: `.md`/`.txt`/`.pdf`/`.png`/`.jpg`/`.jpeg` (≤10 files, ≤5 MB
+  each) attached in a chat-style composer and uploaded post-create over
+  multipart to `POST /projects/{name}/references`. References are **transient
+  turn inputs, never committed** (ADR-0017): bytes live on the shared
+  `/workspaces` volume for the project's life and are overlaid into each turn's
+  snapshot at `specs/requirements/references/`, surfaced to the `/start` kickoff
+  through the idea-steer channel. No console surface after create —
+  [#383](https://github.com/wso2/labs-agentic-engineer/issues/383)
+  (BE handshake: [#384](https://github.com/wso2/labs-agentic-engineer/issues/384))
+- Spec view — prototype user flows: `wireframes.dsl` declares named
+  `flow "<name>"` blocks (optional `role`/`description` lines) listing each
+  persona's screens in walkthrough order; the prototype toolbar leads with a
+  **User flow** picker that scopes the screen picker to the chosen flow, the
+  canvas marks each screen's membership (`Approval queue · Screen 2`,
+  `Common · Screen 1`), and `?flow=<Name>` joins `?screen=` on the full-screen
+  route. Same client-side derivation, no contract change —
+  [#491](https://github.com/wso2/labs-agentic-engineer/issues/491)
 - Agent chat — structured question cards: `ask_question` (single) +
   `ask_questions` (batch form) tool-calls rendered as native Oxygen UI cards
   in the activity stream (answer returns as the next turn's plain text);

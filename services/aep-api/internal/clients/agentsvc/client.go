@@ -89,6 +89,14 @@ type TurnSpec struct {
 	// specs/.agentic-engineer.toml. A dot-led path is stripped from every turn
 	// snapshot, so ONLY the BFF can supply it.
 	Idea string `json:"idea,omitempty"`
+	// References are the reference documents attached at project create, listed
+	// (paths only) so a turn can point the agent at them. They are NOT git
+	// content and there is no base commit to read them from — the platform
+	// stores them off-git and overlays them into the turn's snapshot at
+	// specs/requirements/references/ (console ADR-0017), which is the path
+	// listed here. Omitted when nothing is stored, which keeps a docless
+	// project's turn byte-identical.
+	References []string `json:"references,omitempty"`
 	// Scope is the milestone a plan turn covers, and which of its stories
 	// already have Tasks.
 	Scope *PlanScope `json:"scope,omitempty"`
@@ -169,7 +177,21 @@ type TurnRequest struct {
 	// depending on the MCP minter being wired. Anthropic-only on the agents
 	// side; false/omitted is byte-identical to a turn without it.
 	WebSearch bool `json:"webSearch,omitempty"`
+	// Surface names where the person reading this turn's prose is sitting
+	// (#580). The agents service inlines that surface's narration skill into
+	// the system prompt as standing policy, so the agent names artifacts the
+	// way the UI names them instead of quoting repo paths. Every turn the BFF
+	// dispatches is read in the console, so every construction site sets
+	// SurfaceConsole; a local playground run omits it and the prompt is
+	// byte-identical to a surface-free turn. Pinned by @aep/agent-stream's
+	// Surface.
+	Surface string `json:"surface,omitempty"`
 }
+
+// SurfaceConsole is the only surface the BFF speaks for: it exists to serve the
+// console, so a turn it dispatches is always read there. Value pinned by
+// @aep/agent-stream's SURFACES.
+const SurfaceConsole = "console"
 
 // CollabBlock names the room and carries the prompting user's bearer,
 // forwarded request-scoped (#86 decision 7) — the collab server's oracle
