@@ -98,6 +98,11 @@ function statusIsMoving(status: ProjectStatus): boolean {
     // Without it the spec card would sit on the idle interval through the whole
     // interview and take up to 30s to notice it had finished.
     status.spec.agent === "working" ||
+    // A project with no spec is mid-journey by definition, and `agent` returns
+    // to "" in every gap BETWEEN turns — so keying only on "working" drops the
+    // whole interview onto the idle cadence, and every surface reading this
+    // status is then up to 30s behind the agent it is describing.
+    !status.spec.exists ||
     status.build.status === "running" ||
     status.deploy.status === "deploying" ||
     status.repoStatus === "pending" ||

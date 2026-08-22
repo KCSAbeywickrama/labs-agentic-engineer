@@ -472,7 +472,6 @@ export function SpecView({ projectName }: { projectName: string }) {
   // — until some later turn happened to succeed. A kickoff that died is the one
   // failure that leaves the user with nothing and no explanation.
   const noRequirementsYet = !files.some((f) => f.group === "requirements");
-  const writingRequirements = deriving && noRequirementsYet;
   const failed = specAgent === "failed" && noRequirementsYet;
   // Retrying is a SEND, so it goes where every other send goes: the chat's
   // one-shot seed slot, GUARDED — the panel re-decides after it has rehydrated,
@@ -1173,16 +1172,39 @@ export function SpecView({ projectName }: { projectName: string }) {
                     />
                   </Box>
                 )
-              ) : writingRequirements ? (
-                  /* Opening the spec before the interview has asked anything
-                     (#562): the kickoff is running and has written nothing yet,
-                     so there is no file to select and no question to answer.
-                     Say what is happening rather than offer a picker over an
-                     empty list. */
-                  <Typography variant="body2" color="text.secondary">
-                    Agent is working on the requirements document
-                  </Typography>
+              ) : files.length === 0 ? (
+                /* An EMPTY workspace — the whole of the kickoff, before the
+                   agent's first write lands. "Select a file to view its
+                   content" is meaningless with no files to select, and that is
+                   what the user met whenever `spec.agent` was momentarily not
+                   "working": the gap between turns, or a status read older
+                   than the turn that started since.
+                   Keyed on the file list rather than on that status, so it
+                   cannot flap: a failure has its own banner above, so an empty
+                   workspace with no banner means the agent's work is pending or
+                   in flight either way. Same centred-spinner shape the
+                   architecture pane uses while a design turn runs. */
+                failed ? null : (
+                  <Box
+                    sx={{
+                      height: "100%",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 2,
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <CircularProgress aria-label="Agent is writing the requirements" />
+                    <Typography variant="body2" color="text.secondary">
+                      Agent is working on the requirements document
+                    </Typography>
+                  </Box>
+                )
               ) : (
+                /* Files exist but the selection names none of them — a stale
+                   manual pick whose file has since gone. The default selection
+                   always lands on a real file, so this is the only way here. */
                 <Typography variant="body2" color="text.secondary">
                   Select a file to view its content.
                 </Typography>

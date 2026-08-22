@@ -320,7 +320,44 @@ describe("SpecView while the kickoff is still writing", () => {
     expect(
       screen.getByText("Agent is working on the requirements document"),
     ).toBeInTheDocument();
+    expect(
+      screen.queryByText("Select a file to view its content."),
+    ).not.toBeInTheDocument();
   });
+
+  // The message is keyed on the FILE LIST, not on the status. `spec.agent`
+  // returns to "" in every gap between turns and a status read can be older
+  // than the turn that started since — and each time it did, the user was
+  // handed "Select a file to view its content." over a workspace with no files
+  // in it to select.
+  it("holds the message when the status goes momentarily quiet", () => {
+    mockSpecAgent = "";
+    empty();
+    render(<SpecView projectName="proj1" />);
+
+    expect(
+      screen.getByText("Agent is working on the requirements document"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("Select a file to view its content."),
+    ).not.toBeInTheDocument();
+  });
+
+  // A failure has its own banner with its own way out; spinning underneath it
+  // would promise work that already stopped.
+  it("stops spinning once the turn has failed", () => {
+    mockSpecAgent = "failed";
+    empty();
+    render(<SpecView projectName="proj1" />);
+
+    expect(
+      screen.queryByText("Agent is working on the requirements document"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText("The agent couldn't write your requirements"),
+    ).toBeInTheDocument();
+  });
+
 
   // `spec.agent` is PROJECT-wide — the newest turn of any flow. A design pass
   // on a project whose PRD shipped months ago is an agent working, but not on

@@ -223,6 +223,13 @@ The **version** is a separate slot and survives underneath all of these, so an a
 
 **Nothing on this card starts anything.** It is a destination in every state.
 
+**An empty spec workspace shows one thing: a centred spinner over *"Agent is working on the
+requirements document"***, the same shape the architecture pane uses while a design turn runs. It is
+keyed on the **file list**, not on the agent's status — `spec.agent` returns to `""` in every gap
+between turns, and each time it did the user was handed *"Select a file to view its content"* over a
+workspace with no files in it to select. A failure has its own banner, so an empty workspace without
+one means the work is pending or in flight either way.
+
 **An empty spec workspace offers nothing either.** *"The workspace looks empty"* is true for a while
 before the agent's first write lands — so a button gated on it appears **during the kickoff**, which is
 precisely the moment the user must not be invited to restart. The only state carrying a way out is the
