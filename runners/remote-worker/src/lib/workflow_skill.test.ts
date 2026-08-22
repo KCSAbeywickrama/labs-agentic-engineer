@@ -455,6 +455,40 @@ test("no library skill hardcodes a runner path", () => {
 // moves the shell has to be self-locating. Scoped to aep-validation on purpose:
 // `cd <project-name>` in the ballerina skill is a placeholder after `bal new`,
 // not a fixed path.
+// From the repo root a bare `npx playwright test` is the QUIET failure: it
+// discovers the specs, passes, and exits 0 without loading the config — so no
+// reporter, no results.json, and none of the launch args the deployed endpoints
+// need. Verified against the pinned 1.61.1. Every invocation therefore goes
+// through the package's own `test` script, which `npm --prefix` runs with the
+// package as its working directory — that is what removed the last `cd` from
+// this workflow.
+test("the validation workflow never runs playwright test bare", () => {
+  const docs = ["SKILL.md", "references/authoring.md", "references/healing.md"].map(
+    (rel) => [rel, fs.readFileSync(path.join(LIBRARY, "aep-validation", rel), "utf8")] as const,
+  );
+  for (const [rel, body] of docs) {
+    for (const line of body.split("\n")) {
+      // Start-of-line only: prose may name the form it is warning against.
+      if (!/^\s*npx\s+playwright\s+test\b/.test(line)) continue;
+      assert.ok(
+        line.includes("--config"),
+        `aep-validation/${rel}: \`${line.trim()}\` — bare from the repo root this ` +
+          `passes and writes no results.json; use \`npm test --prefix tests/e2e\``,
+      );
+    }
+  }
+  const skill = docs[0][1];
+  assert.match(
+    skill,
+    /"scripts":\s*\{\s*"test":\s*"playwright test"\s*\}/,
+    "the scaffolded package.json lost its `test` script — every invocation depends on it",
+  );
+  assert.ok(
+    skill.includes("npm test --prefix tests/e2e"),
+    "SKILL.md no longer runs the suite through the package script",
+  );
+});
+
 test("the validation workflow never cds to a bare relative path", () => {
   for (const rel of ["SKILL.md", "references/authoring.md", "references/healing.md"]) {
     const body = fs.readFileSync(path.join(LIBRARY, "aep-validation", rel), "utf8");
