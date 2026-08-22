@@ -50,8 +50,8 @@ validation phase.
 
 ## Budget
 
-These run from `tests/e2e`, where step 7's `cd` left your shell — the
-Bash tool keeps one shell for the whole run.
+The re-runs below happen in `tests/e2e`; if your shell is elsewhere,
+`cd "$(git rev-parse --show-toplevel)/tests/e2e"` first.
 
 - Max **2 heal attempts per criterion**; each followed by a focused
   re-run: `npx playwright test specs/<AC-ID>.spec.ts`.

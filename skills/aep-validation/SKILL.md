@@ -31,6 +31,14 @@ directory (templates under `assets/`, the report generator under
 must invoke by absolute path is under `$AEP_SKILLS_DIR/aep-validation/` —
 the runner sets it.
 
+**One shell serves this whole run.** Consecutive Bash calls share it, so
+a `cd` persists into every later call — a relative `cd tests/e2e` is
+right once and wrong the second time you run it. Work from the repo root,
+or `cd` with a path that does not depend on where you already are:
+`cd "$(git rev-parse --show-toplevel)/tests/e2e"`. `Read`, `Write` and
+`Edit` do not move with the shell — their relative paths always resolve
+from the repo root.
+
 ## Workflow
 
 ### 1. Read the issue
@@ -177,8 +185,13 @@ tests/e2e/
   validation-context `endpoints`. On a re-validation run, refresh it from
   the context file — a committed `targets.json` may name URLs from an
   earlier deployment.
-- Install with `npm install` on first scaffold (commit the lockfile),
-  `npm ci` on later runs.
+- Install from the package directory, reached the same way every time —
+  your shell may already be somewhere else:
+
+  ```bash
+  cd "$(git rev-parse --show-toplevel)/tests/e2e"
+  npm install   # first scaffold, and commit the lockfile; `npm ci` after
+  ```
 - `scripts/generate-report.mjs` is platform-owned: the REPORT step
   always executes the plugin's copy directly and refreshes this
   committed copy, which exists only so humans can reproduce the report
