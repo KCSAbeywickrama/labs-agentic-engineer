@@ -40,54 +40,64 @@ export const CHIP_COLOR: Record<
   error: "error",
 };
 
-/**
- * What the spec stage offers, when it offers anything. Spec-stage only — the
- * build and deploy cards are read-outs.
- *
- * `start` and `retry` differ only in what the user is looking at: both fire the
- * same `/start`, but one follows a journey that never began and the other one
- * that died, and a card offering "Generate spec" over a visible failure would
- * pretend the failure did not happen.
- */
-export type SpecAction = "open" | "start" | "retry";
-
 export interface StageView {
   /** Version chip text ("v1", "v1+"); "" renders an em-dash. */
   version: string;
   /** One-line state under the chip. */
   line: string;
   tone: StageTone;
-  /** Spec stage only: which action the card offers, if any. */
-  action?: SpecAction;
 }
 
-export function specStageView(status: ProjectStatus): StageView {
-  const { exists, version, dirty, agent } = status.spec;
-  // The kickoff, mid-flight (#562). The platform fires `/start` at project
-  // creation, so the busiest moment in the journey is one where NOTHING has
-  // been committed yet — exists/version/dirty are all empty and the card would
-  // otherwise sit inert offering to start work already underway. `agent` is
-  // the only field that can see it.
-  //
-  // Safe to name the work: with no requirements file in the project there is
-  // nothing for an agent to be doing but writing them.
-  if (agent === "working" && !exists) {
-    return { version: "", line: "Writing requirements", tone: "info", action: "open" };
-  }
-  // It died leaving nothing behind. The flow stopped here, so the card carries
-  // the CTA that resumes it — the same command, fired again.
-  if (agent === "failed" && !exists) {
-    return {
-      version: "",
-      line: "Couldn't start writing requirements",
-      tone: "error",
-      action: "retry",
-    };
-  }
-  if (!exists) return { version: "", line: "", tone: "neutral", action: "start" };
+// The spec card's line — the only part of it that moves.
+//
+// It always says something, and the CTA above it never changes (#562 retest):
+// the card used to walk three captions and blank its line with no input from
+// the user at all, because a turn that ends ON a question has written no PRD,
+// so `exists` is still false and `agent` is back to "" — and the card fell
+// through to its cold-start branch. A caption that rewrites itself while the
+// user reads it teaches nothing; one line that always answers "what is
+// happening, and what can I do" teaches the pattern once.
+const WRITING_REQUIREMENTS = "The agent is writing your requirements.";
+const WORKING_ON_SPEC = "The agent is working on your spec.";
+const QUESTIONS_WAITING = "The agent has questions for you.";
+const COULD_NOT_START = "The agent couldn't start — open the spec to try again.";
+const NOTHING_WRITTEN = "Nothing written yet.";
+
+/** The spec's own settled status: what git says, independent of who is working. */
+function settledSpecView(exists: boolean, version: string, dirty: boolean): StageView {
+  if (!exists) return { version: "", line: NOTHING_WRITTEN, tone: "neutral" };
   if (!version) return { version: "", line: "draft · not published", tone: "info" };
   if (dirty) return { version: `${version}+`, line: "draft changes", tone: "warning" };
   return { version, line: "published", tone: "success" };
+}
+
+/**
+ * The spec stage. `engaged` is the local chat log's answer to "is the agent
+ * waiting on this user" — the server cannot supply it: `spec.agent` folds a
+ * completed turn to "", and the BFF never sees the question tool at all, so a
+ * turn that ended on a question is indistinguishable server-side from one that
+ * ended having done nothing.
+ *
+ * A live state overrides the LINE only. The version chip is a separate fact and
+ * survives underneath, so an amendment interview on v2 still reads as v2.
+ */
+export function specStageView(status: ProjectStatus, engaged: boolean): StageView {
+  const { exists, version, dirty, agent } = status.spec;
+  const settled = settledSpecView(exists, version, dirty);
+  // Naming the work requires knowing what it is. With no requirements file in
+  // the project there is nothing an agent could be writing but them; once one
+  // exists the same turn could be design, validation or an amendment, so the
+  // line says that something is happening without inventing which.
+  if (agent === "working") {
+    return { ...settled, line: exists ? WORKING_ON_SPEC : WRITING_REQUIREMENTS, tone: "info" };
+  }
+  if (engaged) return { ...settled, line: QUESTIONS_WAITING, tone: "info" };
+  // Only when nothing was written: a failed design turn over a published spec
+  // is not a spec that failed to start, and the spec view banners that case.
+  if (agent === "failed" && !exists) {
+    return { ...settled, line: COULD_NOT_START, tone: "error" };
+  }
+  return settled;
 }
 
 // The build stage is COUNT-FREE. A per-version task tally can only come from

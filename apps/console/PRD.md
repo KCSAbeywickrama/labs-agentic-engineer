@@ -100,6 +100,16 @@ here: they're the open `console` + `feature` issues.
   died, **Generate spec** on a project nothing ever started —
   [#562](https://github.com/wso2/labs-agentic-engineer/issues/562)
   (contract: `SpecStage.agent`, `CreateProjectRequest.referencesPending`)
+- Overview — the spec card stops rewriting itself: **one button** (*Open spec*)
+  in every state instead of three captions walked during a single kickoff with
+  no user input, and **one line that always says something** instead of blanking
+  the moment the agent asked a question. Starting moves to the spec view's empty
+  state, which is where the button already lands, so the card is a destination
+  and never a send. The kickoff now fires **inline** with `POST /projects`, so
+  the create answers only once the turn exists — which is what makes
+  `spec.agent == ""` mean *never started* rather than also *starting right now* —
+  [#562](https://github.com/wso2/labs-agentic-engineer/issues/562)
+  (no contract change)
 - Agent chat — the transcript keeps up with the work: your own message paints
   the moment you send it rather than when the dispatch answers; a turn this
   browser did not send (the creation-time kickoff, or a teammate's) shows who

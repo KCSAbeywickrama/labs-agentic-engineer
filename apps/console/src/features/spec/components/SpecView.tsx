@@ -59,7 +59,9 @@ import { CollabTextArea } from "../collab/CollabTextArea";
 import { SpecMdEditor } from "../collab/SpecMdEditor";
 import { useYTextString } from "../collab/useYTextString";
 import { useTurnEndFlush } from "../collab/useTurnEndFlush";
+import { START_COMMAND } from "@aep/contracts/commands";
 import { chatKeyFor, setPendingSeed, subscribeTurnEnd } from "../../agent-chat/chatStore";
+import { EmptyState } from "../../../components/EmptyState";
 import { useResolveDependencyViaChat } from "../../agent-chat/useResolveDependencyViaChat";
 import type { DependencyResolutionIntent } from "../../projects/lib/dependencyResolutionMessage.js";
 import { useDesignCellChangeCount } from "../collab/useDesignCellChange";
@@ -473,6 +475,16 @@ export function SpecView({ projectName }: { projectName: string }) {
   const noRequirementsYet = !files.some((f) => f.group === "requirements");
   const writingRequirements = deriving && noRequirementsYet;
   const failed = specAgent === "failed" && noRequirementsYet;
+  // Nothing in the workspace and nobody working on it — the state that offers
+  // the kickoff. Keyed on the whole file list, not just requirements: a project
+  // holding any spec file at all has been started, whatever happened next.
+  const nothingWritten = files.length === 0 && !deriving;
+  // Starting is a SEND, so it goes where every other send goes: the chat's
+  // one-shot seed slot, GUARDED. This surface decides from a file list, which
+  // cannot see an interview that ended on a question — the panel re-decides
+  // after it has rehydrated, which is the first moment that is knowable.
+  const startSpec = () =>
+    setPendingSeed(chatKeyFor(orgHandle ?? "default", projectName), START_COMMAND, true);
   // The design gate: Build arms once design files are generated (#80).
   const hasDesignFiles = files.some((f) => f.group === "designs");
   // The committed PRD, read for the Build drawer's story preview. It used to
@@ -1149,16 +1161,35 @@ export function SpecView({ projectName }: { projectName: string }) {
                     />
                   </Box>
                 )
+              ) : writingRequirements ? (
+                  /* Opening the spec before the interview has asked anything
+                     (#562): the kickoff is running and has written nothing yet,
+                     so there is no file to select and no question to answer.
+                     Say what is happening rather than offer a picker over an
+                     empty list. */
+                  <Typography variant="body2" color="text.secondary">
+                    Agent is working on the requirements document
+                  </Typography>
+                ) : nothingWritten ? (
+                  /* The workspace is empty and no agent is working — a project
+                     whose kickoff never ran (the tab closed during creation, an
+                     org with no key, a project older than the kickoff itself)
+                     or whose first turn died. This is where STARTING lives now:
+                     the overview's card is a destination in every state, and it
+                     lands here, so the one place with nothing in it is the one
+                     place that offers to fill it. */
+                  <EmptyState
+                    title="Nothing written yet"
+                    description="Your requirements and design appear here as the agent writes them."
+                    action={
+                      <Button variant="contained" onClick={startSpec}>
+                        Start
+                      </Button>
+                    }
+                  />
               ) : (
                 <Typography variant="body2" color="text.secondary">
-                  {/* Opening the spec before the interview has asked anything
-                      (#562): the kickoff is running and has written nothing
-                      yet, so there is no file to select and no question to
-                      answer. Say what is happening rather than offer a picker
-                      over an empty list. */}
-                  {writingRequirements
-                    ? "Agent is working on the requirements document"
-                    : "Select a file to view its content."}
+                  Select a file to view its content.
                 </Typography>
               )}
             </Box>

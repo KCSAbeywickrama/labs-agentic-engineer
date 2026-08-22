@@ -33,14 +33,12 @@
 // the room — and why this runs from the create request rather than from a
 // reconciler: a background sweep has no user to act as.
 //
-// The dispatch is DETACHED, so `POST /projects` returns before the turn row
-// exists and there is a short window where the project reads as un-started.
-// Two things make that safe rather than merely brief. The console polls the
-// status actively through it (`statusIsMoving`), so the window is seconds of
-// stale card rather than a poll interval. And if a user does click Generate
-// spec inside it, the D18 one-active-turn guard settles the race either way:
-// whichever `/start` takes the guard runs, and the loser is refused with a 409
-// the other side already handles. What cannot happen is two interviews.
+// The dispatch is INLINE, so `POST /projects` answers only once the turn row
+// exists. That is what lets the console paint the kickoff on arrival instead of
+// discovering it a poll later — and, more than the latency, it is what makes
+// `spec.agent == \"\"` mean one thing: this project was never started. While the
+// dispatch was detached it meant that OR "starting right now", and no surface
+// could tell which.
 
 package spec
 
@@ -51,14 +49,22 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/wso2/aep/aep-api/internal/platform/async"
 	"github.com/wso2/aep/aep-api/internal/platform/auth"
 )
 
-// kickoffTimeout bounds the DISPATCH, not the turn. StartTurn returns as soon
-// as the agents service has the turn (it runs detached from there), so this
-// only has to cover the git + conversation reads in front of it.
-const kickoffTimeout = 2 * time.Minute
+// kickoffBudget bounds the DISPATCH, not the turn. StartTurn returns as soon as
+// the agents service has the turn (it runs detached from there), so this only
+// has to cover the conversation resolve and the git reads in front of it —
+// measured at ~2s on a warm org.
+//
+// Tight because this now runs INSIDE the create request. The one case that can
+// blow it is an org's very first project, where the shared skills repo has to
+// be provisioned before its head can be read; creation already fires that
+// provisioning eagerly and asynchronously, so the budget is a ceiling on the
+// unlucky case rather than the normal cost. Blowing it leaves the project
+// created and un-started, which the spec view's empty state offers to fix —
+// the same recovery a closed tab gets.
+const kickoffBudget = 20 * time.Second
 
 // ErrKickoffAlreadyRan reports that the project has already had an agent turn,
 // so there is no kickoff left to fire. Not a failure: it is what makes Kickoff
@@ -66,35 +72,37 @@ const kickoffTimeout = 2 * time.Minute
 // upload does not start a second interview.
 var ErrKickoffAlreadyRan = errors.New("project has already run an agent turn")
 
-// Kickoff fires the project's opening `/start` turn in the background,
-// carrying the calling user's identity and bearer.
+// Kickoff fires the project's opening `/start` turn, INLINE, and never returns
+// an error: a kickoff that cannot start must not fail a creation the user has
+// already committed to — the same posture as every other post-create step.
 //
-// Fire-and-forget by design: this hangs off project creation, and a kickoff
-// that cannot start must never fail the creation the user already committed
-// to — the same posture as every other post-create step. The recovery is on
-// screen rather than in a retry loop: a project with no turn and no spec
-// renders the spec card's start CTA, which fires the same command.
+// Inline rather than detached, which it used to be. Detaching returned the
+// create response ~2s before the turn row existed, and in that window the
+// project genuinely could not be told apart from one that was never started:
+// `spec.agent` reads "" for both. So the console landed on a card offering to
+// start work that was already starting, then rewrote it a second later. Paying
+// those 2s inside a create that already takes ~7s buys an arrival that is
+// simply correct — and the user spends them on the "Creating your project…"
+// label they are already watching, rather than on an empty chat.
 //
-// The context is detached from the request but keeps its values, because the
-// bearer is one of them.
+// The context keeps its values but not its cancellation: the caller's request
+// may end (a closed tab) while the dispatch is mid-flight, and a turn that was
+// going to start should still start.
 func (s *Service) Kickoff(ctx context.Context, orgID, projectID string) {
-	detached := context.WithoutCancel(ctx)
-	async.Go(detached, "project kickoff", func(bg context.Context) {
-		bg, cancel := context.WithTimeout(bg, kickoffTimeout)
-		defer cancel()
-		turnID, err := s.StartKickoff(bg, orgID, projectID)
-		switch {
-		case errors.Is(err, ErrKickoffAlreadyRan):
-			slog.InfoContext(bg, "kickoff skipped: the project has already run a turn",
-				"org", orgID, "project", projectID)
-		case err != nil:
-			slog.ErrorContext(bg, "kickoff failed (the project's spec card offers it as a CTA)",
-				"org", orgID, "project", projectID, "error", err)
-		default:
-			slog.InfoContext(bg, "kickoff dispatched",
-				"org", orgID, "project", projectID, "turn", turnID)
-		}
-	})
+	bg, cancel := context.WithTimeout(context.WithoutCancel(ctx), kickoffBudget)
+	defer cancel()
+	turnID, err := s.StartKickoff(bg, orgID, projectID)
+	switch {
+	case errors.Is(err, ErrKickoffAlreadyRan):
+		slog.InfoContext(bg, "kickoff skipped: the project has already run a turn",
+			"org", orgID, "project", projectID)
+	case err != nil:
+		slog.ErrorContext(bg, "kickoff failed (the spec view offers it as a CTA)",
+			"org", orgID, "project", projectID, "error", err)
+	default:
+		slog.InfoContext(bg, "kickoff dispatched",
+			"org", orgID, "project", projectID, "turn", turnID)
+	}
 }
 
 // StartKickoff resolves the project's thread and starts the `/start` turn on

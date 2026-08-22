@@ -116,8 +116,11 @@ type descriptorWriter interface {
 // edge; *spec.Service satisfies it. Wired at the composition root; nil is a
 // documented no-op.
 //
-// Deliberately returns nothing: the kickoff is fire-and-forget and detaches
-// itself, because a project the user already committed to must not fail on it.
+// Deliberately returns nothing. It runs INLINE — the create answers only once
+// the turn exists, so the console can paint the kickoff on arrival and
+// `spec.agent == ""` means one thing rather than two — but it still cannot
+// fail the creation the user already committed to, so it swallows its own
+// errors and bounds its own time.
 type kickoffStarter interface {
 	Kickoff(ctx context.Context, orgID, projectID string)
 }
@@ -300,7 +303,10 @@ func (s *Service) CreateProject(ctx context.Context, orgName string, req *gen.Cr
 			// The journey starts itself (#562): fire `/start` rather than
 			// land the user on a dashboard asking them to press a button for
 			// work the platform can already do. AFTER the descriptor commit
-			// above — that file is where the turn reads the idea from.
+			// above — that file is where the turn reads the idea from — and
+			// BEFORE this call returns, so the client arrives at a project
+			// whose turn already exists rather than one that looks unstarted
+			// for the couple of seconds the dispatch takes.
 			//
 			// HELD when the caller says reference documents are still coming:
 			// they are the primary brief, and a kickoff dispatched before the

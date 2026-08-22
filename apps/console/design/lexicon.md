@@ -196,35 +196,38 @@ Every stage card says the same things in the same slots, so the pattern is learn
 | settled | *Built* | yes | view |
 | failed | *Build failed* | yes | fix |
 
-#### The spec card while the journey starts itself
+#### The spec card: one button, one line
 
-The kickoff fires at project creation ([#562](https://github.com/wso2/labs-agentic-engineer/issues/562)),
-so the overview's first paint lands on a project where an agent is already working and **nothing is
-committed yet**. The card's other facts — version, draft, edited — all read committed git, so all three
-are blank at exactly the moment there is most to say.
+**The button never changes. It says *Open spec*, in every state.**
 
-| the project's situation | line | CTA |
-|---|---|---|
-| the kickoff is running | **Writing requirements** | **Open spec** |
-| the kickoff died with nothing written | **Couldn't start writing requirements** | **Try again** |
-| nothing ever started | — | **Generate spec** |
-| an exchange is open over an existing spec | the spec's own status | **Continue spec** |
+It used to be three buttons — *Generate spec*, then *Open spec*, then *Continue spec* — and it walked
+all three during a single kickoff **with no input from the user at all**, because each state was
+inferred from a signal that moved on its own. A control that renames itself while you are reading it
+cannot be learned, and the destination never actually varied. So the caption stopped varying too.
 
-**The CTA is *Open spec*, not *Generate spec*, while the kickoff runs.** Generation is already
-underway, so there is nothing left to ask for and the button is only the way in.
+**The line is the only part that moves, and it always says something.** It used to blank itself
+mid-kickoff: a turn that ends *on* a question has written no requirements, so the spec still looks
+absent and the agent looks idle, and the card fell through to its cold-start wording.
 
-**A CTA that starts an interview does not navigate.** It puts `/start` in the chat, the panel opens
-itself, and the user stays on the overview watching this card turn over — the chat is the spine
-([#522](https://github.com/wso2/labs-agentic-engineer/issues/522)), and nothing moves the user's
-viewport without a click of their own.
+| the project's situation | line |
+|---|---|
+| the agent is writing the first requirements | *The agent is writing your requirements.* |
+| an agent is working on a spec that already exists | *The agent is working on your spec.* |
+| the agent asked and is waiting | *The agent has questions for you.* |
+| the kickoff died with nothing written | *The agent couldn't start — open the spec to try again.* |
+| nothing ever started | *Nothing written yet.* |
+| otherwise | the spec's own status |
 
-**The card can be a step behind, and briefly is.** The kickoff dispatches after `POST /projects` returns,
-so for a second or two a freshly created project has no turn record and the card reads *Generate spec*
-for work already starting. The overview polls at its active interval throughout, and a click landing in
-that window cannot do damage — the platform admits one turn per project, so whichever `/start` arrives
-first runs and the other is refused with *"an agent turn is already running"*. What is deliberately not
-done is inventing a *starting* state for it: nothing durable distinguishes "dispatching" from "never
-attempted", and a card that guessed would be wrong for every project created before the kickoff existed.
+The **version** is a separate slot and survives underneath all of these, so an amendment interview on
+`v2` still reads as `v2`.
+
+**Starting moved off this card.** It lives in the spec view's empty state — *"Nothing written yet.
+Your requirements and design appear here as the agent writes them."* with a **Start** button — which is
+exactly where *Open spec* lands. One surface with nothing in it is the one surface that offers to fill
+it, and the card stays a destination rather than sometimes being a destination and sometimes a send.
+
+**Everything else is the chat's job.** The card says where the project stands in one line; the panel
+carries the conversation, the questions and the agent's work.
 
 **Ghost cards stay clickable.** Their destination teaches what the section is for
 ([#533](https://github.com/wso2/labs-agentic-engineer/issues/533)), so the click is a lesson, not

@@ -100,8 +100,11 @@ the genai turn engine (runner/broker/sweeper), and the files / design / skills s
   journey starts itself instead of waiting on a Generate-spec click. Room-scoped like every console turn,
   carrying the creating user's bearer (which is what lets the agent join the spec room), on the project's
   current thread. Idempotent on "has this project ever run a turn", because it has two triggers: project
-  create, and the references upload a create with `referencesPending` held it for. Fire-and-forget — a
-  kickoff that cannot start never fails the creation, and the console offers it as a CTA instead.
+  create, and the references upload a create with `referencesPending` held it for. Runs INLINE, so the
+  create answers only once the turn row exists — that is what keeps `spec.agent == ""` meaning
+  "never started" rather than also "starting right now", which no surface could tell apart. Bounded
+  (20s) and error-swallowing: a kickoff that cannot start never fails the creation, and the spec
+  view's empty state offers it instead.
 - **A running turn carries its own display record** (#562). `agent_turns` stores the transcript
   line the turn started from plus its author, and `TurnStatus` serves them. Not redundant with the
   journal that rides to the agents service: that store persists a turn's transcript only when the

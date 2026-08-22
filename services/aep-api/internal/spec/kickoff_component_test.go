@@ -133,6 +133,54 @@ func TestKickoff_TurnCarriesItsDisplayRecord(t *testing.T) {
 	}
 }
 
+// Kickoff runs INLINE: the create answers only once the turn row exists.
+//
+// It used to detach, which returned the response ~2s before the row appeared —
+// and in that window `spec.agent` reads "" for a project that is starting AND
+// for one that was never started, so the console could not tell them apart. It
+// showed a card offering to start work already starting, then rewrote it a
+// second later. This is the assertion that keeps those two states distinct.
+func TestKickoff_ReturnsOnlyOnceTheTurnExists(t *testing.T) {
+	r := newGenaiRig(t, map[string]string{
+		spec.DescriptorPath: descriptorTOML(t, testIdea),
+	}, withConversations(&memConversationRepo{}))
+	r.fake.parts = []string{addFilePart("specs/requirements/prd.md", "# Reqs\n")}
+	m := manifestPart(map[string]string{"specs/requirements/prd.md": "# Reqs\n"}, nil)
+	r.fake.manifest = &m
+
+	ctx := auth.WithAuthToken(t.Context(), "bearer-from-the-create-request")
+	r.svc.Kickoff(ctx, testOrg, testProj)
+
+	// No polling, no waiting: the row is there the instant Kickoff returns.
+	newest, err := r.turns.Newest(t.Context(), testOrg, testProj)
+	if err != nil {
+		t.Fatalf("newest turn: %v", err)
+	}
+	if newest == nil {
+		t.Fatal("Kickoff returned before the turn row existed — the create response would race it")
+	}
+}
+
+// Kickoff never surfaces a failure: a creation the user already committed to
+// must not fail on it. The project is simply left un-started, which the spec
+// view's empty state offers to fix.
+func TestKickoff_SwallowsItsOwnFailure(t *testing.T) {
+	r := newGenaiRig(t, map[string]string{
+		spec.DescriptorPath: descriptorTOML(t, testIdea),
+	}, withConversations(&memConversationRepo{}))
+
+	// No bearer — the agent cannot join the spec room, so the dispatch refuses.
+	r.svc.Kickoff(t.Context(), testOrg, testProj)
+
+	newest, err := r.turns.Newest(t.Context(), testOrg, testProj)
+	if err != nil {
+		t.Fatalf("newest turn: %v", err)
+	}
+	if newest != nil {
+		t.Fatalf("a refused kickoff left a turn row: %+v", newest)
+	}
+}
+
 // Idempotent on "has this project ever run a turn": both triggers may fire
 // (a create, then the references upload it held for), and neither may start a
 // second interview over the first.

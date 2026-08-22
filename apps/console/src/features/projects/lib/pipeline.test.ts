@@ -54,49 +54,70 @@ function status(over: {
   };
 }
 
-describe("specStageView — derived, no stored status", () => {
-  it("no spec at all → the cold-start CTA", () => {
-    expect(specStageView(status({ spec: { exists: false } })).action).toBe("start");
+// The card's line is the only part that moves, and it always says something.
+// It used to blank itself — a turn that ends ON a question has written no PRD,
+// so `exists` stayed false and `agent` went back to "", dropping the card onto
+// its cold-start branch mid-kickoff (#562 retest).
+describe("specStageView — one line, always filled", () => {
+  it("nothing written and nobody working", () => {
+    const v = specStageView(status({ spec: { exists: false } }), false);
+    expect(v.line).toBe("Nothing written yet.");
+    expect(v.version).toBe("");
   });
 
-  // #562: the platform fires `/start` at project creation, so the overview's
-  // first paint lands on a project where nothing is committed yet and an agent
-  // is already working. exists/version/dirty are blind to it.
-  it("a kickoff in flight → Writing requirements, with the way in", () => {
-    const v = specStageView(status({ spec: { exists: false, agent: "working" } }));
-    expect(v.line).toBe("Writing requirements");
+  it("names the work while the kickoff runs", () => {
+    const v = specStageView(status({ spec: { exists: false, agent: "working" } }), false);
+    expect(v.line).toBe("The agent is writing your requirements.");
     expect(v.tone).toBe("info");
-    expect(v.action).toBe("open");
   });
 
-  // The flow stopped here, so the card resumes it rather than pretending
-  // nothing was ever attempted.
-  it("a kickoff that died with nothing written → the retry CTA", () => {
-    const v = specStageView(status({ spec: { exists: false, agent: "failed" } }));
-    expect(v.line).toBe("Couldn't start writing requirements");
+  // Once a spec exists the same turn could be design, validation or an
+  // amendment, so the line stops claiming to know which.
+  it("stops naming the work once a spec exists", () => {
+    const v = specStageView(status({ spec: { exists: true, agent: "working" } }), false);
+    expect(v.line).toBe("The agent is working on your spec.");
+  });
+
+  // The state that used to blank the card. Only the local chat log knows it:
+  // `spec.agent` folds a completed turn to "", and the BFF never sees the
+  // question tool, so server-side it is indistinguishable from doing nothing.
+  it("says the agent is waiting when a question stands", () => {
+    const v = specStageView(status({ spec: { exists: false } }), true);
+    expect(v.line).toBe("The agent has questions for you.");
+    expect(v.tone).toBe("info");
+  });
+
+  it("says it on an amendment too, keeping the version", () => {
+    const v = specStageView(status({ spec: { exists: true, version: "v2" } }), true);
+    expect(v.line).toBe("The agent has questions for you.");
+    expect(v.version).toBe("v2");
+  });
+
+  it("a kickoff that died with nothing written points at the recovery", () => {
+    const v = specStageView(status({ spec: { exists: false, agent: "failed" } }), false);
+    expect(v.line).toBe("The agent couldn't start — open the spec to try again.");
     expect(v.tone).toBe("error");
-    expect(v.action).toBe("retry");
   });
 
-  // Once requirements exist the committed fields describe the spec, and a
-  // second vocabulary over the same fact could only disagree with them.
-  it("a working agent over an existing spec keeps the spec's own status", () => {
-    const v = specStageView(status({ spec: { exists: true, agent: "working" } }));
-    expect(v.line).toContain("draft");
-    expect(v.action).toBeUndefined();
+  // A failed design turn over a published spec is not a spec that failed to
+  // start; the spec view banners that case instead.
+  it("does not call a later failure a failed start", () => {
+    const v = specStageView(status({ spec: { exists: true, version: "v2", agent: "failed" } }), false);
+    expect(v.line).toBe("published");
   });
+
   it("exists but never published → draft", () => {
-    const v = specStageView(status({}));
+    const v = specStageView(status({}), false);
     expect(v.line).toContain("draft");
     expect(v.version).toBe("");
   });
   it("published and clean → vN approved", () => {
-    const v = specStageView(status({ spec: { version: "v2" } }));
+    const v = specStageView(status({ spec: { version: "v2" } }), false);
     expect(v.version).toBe("v2");
     expect(v.tone).toBe("success");
   });
   it("published and dirty → vN+", () => {
-    const v = specStageView(status({ spec: { version: "v2", dirty: true } }));
+    const v = specStageView(status({ spec: { version: "v2", dirty: true } }), false);
     expect(v.version).toBe("v2+");
     expect(v.tone).toBe("warning");
   });

@@ -47,7 +47,7 @@ delivery's kernel: shared behaviour belongs in the root the slices import.
 | repo/workspace bootstrap · repo-name conflict | needs | `sourcecontrol` — on project create/delete |
 | design read · spec-stage snapshot | needs | `spec` — the Stage aggregate's spec column + component OpenAPI source |
 | `descriptorWriter` | needs | `spec` — stamps `specs/.agentic-engineer.toml` on create (best-effort; nil is a no-op) |
-| `kickoffStarter` (`SetKickoffStarter`) | needs | `spec` — fires the new project's opening `/start` turn (#562), after the descriptor commit the turn reads the idea from. Fire-and-forget; nil is a no-op |
+| `kickoffStarter` (`SetKickoffStarter`) | needs | `spec` — fires the new project's opening `/start` turn (#562), after the descriptor commit the turn reads the idea from and before the create returns. Bounded + error-swallowing on its own side; nil is a no-op |
 | `specTurnRows` (`SetSpecTurnSource`) | needs | `spec` — the newest `agent_turns` row (off `ix_agent_turns_project_newest`), folded into the Stage aggregate's `spec.agent`. Nil serves `""`, degrading to the pre-#562 reading rather than failing the poll |
 | build/exec status (`SetStageSources` port) | needs | `delivery` — the build/deploy columns of the Stage aggregate, wired at the root |
 | `runAbandoner` (`SetRunAbandoner`) | needs | `delivery` — ends the supervisors of a deleted project's live runs, wired at the root (nil is a no-op) |

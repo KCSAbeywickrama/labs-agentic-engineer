@@ -22,7 +22,13 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import type { components } from "../../../generated/aep-api";
-import { chatKeyFor, notifyTurnEnd, replaceMessages } from "../../agent-chat/chatStore";
+import { START_COMMAND } from "@aep/contracts/commands";
+import {
+  chatKeyFor,
+  consumePendingSeed,
+  notifyTurnEnd,
+  replaceMessages,
+} from "../../agent-chat/chatStore";
 import { SpecView } from "./SpecView";
 
 type PreflightItem = components["schemas"]["PreflightItem"];
@@ -347,17 +353,36 @@ describe("SpecView while the kickoff is still writing", () => {
     ).not.toBeInTheDocument();
   });
 
-  // The old signal was the flat `specStatus`, which the BFF only ever sets to
-  // ""/draft/approved — so this said an agent was shaping the spec for every
-  // unversioned project on screen, and said nothing during the kickoff.
-  it("falls back to the file picker when nothing is running", () => {
+  // Starting lives HERE now, not on the overview card (#562 retest): that card
+  // is a destination in every state and it lands here, so the one surface with
+  // nothing in it is the one that offers to fill it. Reached by a project whose
+  // kickoff never ran — the tab closed during creation, an org with no key, a
+  // project older than the kickoff itself — or whose first turn died.
+  it("offers the kickoff when the workspace is empty and nobody is working", () => {
     empty();
     render(<SpecView projectName="proj1" />);
 
     expect(
       screen.queryByText("Agent is working on the requirements document"),
     ).not.toBeInTheDocument();
-    expect(screen.getByText("Select a file to view its content.")).toBeInTheDocument();
+    expect(screen.getByText("Nothing written yet")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    // GUARDED: this surface decides from a file list, which cannot see an
+    // interview that ended on a question. The panel re-decides after it has
+    // rehydrated, which is the first moment that is knowable.
+    expect(consumePendingSeed(chatKeyFor("acme", "proj1"))).toEqual({
+      message: START_COMMAND,
+      guarded: true,
+    });
+  });
+
+  // A project with files has been started, whatever happened next — offering to
+  // start it again would be offering to re-interview over its own spec.
+  it("offers a file picker, not the kickoff, once anything exists", () => {
+    render(<SpecView projectName="proj1" />);
+
+    expect(screen.queryByText("Nothing written yet")).not.toBeInTheDocument();
   });
 });
 
