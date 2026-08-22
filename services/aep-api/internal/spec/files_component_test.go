@@ -475,6 +475,35 @@ func TestApply_SizeCap(t *testing.T) {
 	}
 }
 
+// A text file keeps today's wire shape exactly — no encoding key at all, so
+// every existing consumer (the spec editor, the FE viewer) is untouched.
+func TestRead_TextFileKeepsTodaysWireShape(t *testing.T) {
+	r := newFilesRig(t, map[string]string{"specs/requirements/prd.md": "# PRD\nplain text ✅\n"})
+
+	rec := r.get(apiBase + "/specs/requirements/prd.md")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("read code %d: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, `"encoding"`) {
+		t.Fatalf("text read grew an encoding key — the default must stay implicit: %s", firstBytes(body, 200))
+	}
+	var fc spec.FileContent
+	if err := json.Unmarshal(rec.Body.Bytes(), &fc); err != nil {
+		t.Fatalf("decode read: %v", err)
+	}
+	if fc.Content != "# PRD\nplain text ✅\n" {
+		t.Fatalf("content = %q, want it verbatim", fc.Content)
+	}
+}
+
+func firstBytes(s string, n int) string {
+	if len(s) > n {
+		return s[:n]
+	}
+	return s
+}
+
 func TestApply_WarningsNonBlocking(t *testing.T) {
 	r := newFilesRig(t, nil)
 	body := mustJSON(t, spec.ApplyRequest{

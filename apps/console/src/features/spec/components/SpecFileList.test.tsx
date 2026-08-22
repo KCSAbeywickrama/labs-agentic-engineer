@@ -18,29 +18,73 @@
 
 // @vitest-environment jsdom
 
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
-
-import { SpecFileList } from "./SpecFileList";
+import { describe, expect, it } from "vitest";
+import { render, screen, within } from "@testing-library/react";
+import { OxygenTheme, OxygenUIThemeProvider } from "@wso2/oxygen-ui";
 import type { SpecFileEntry } from "../api/mapping";
+import { SpecFileList } from "./SpecFileList";
 
-/** The real paths a generated ai-agent project produces. */
-function designFiles(...paths: string[]): SpecFileEntry[] {
-  return paths.map((path, i) => ({ path, sha: `sha${i}`, group: "designs" }));
+/** The list as `SpecView` hands it over: deduped and sorted by path. */
+function entries(...paths: string[]): SpecFileEntry[] {
+  return paths
+    .map((path) => ({ path, sha: "sha", group: "requirements" as const }))
+    .sort((a, b) => a.path.localeCompare(b.path));
 }
 
 function renderList(files: SpecFileEntry[]) {
   render(
-    <SpecFileList
-      files={files}
-      selection={null}
-      onSelect={vi.fn()}
-      onAddArtifact={vi.fn()}
-      onRegenerateDesign={vi.fn()}
-      deriving={false}
-      failed={false}
-    />,
+    <OxygenUIThemeProvider theme={OxygenTheme}>
+      <SpecFileList
+        files={files}
+        selection={null}
+        onSelect={() => {}}
+        onAddArtifact={() => {}}
+        onRegenerateDesign={() => {}}
+        deriving={false}
+        failed={false}
+      />
+    </OxygenUIThemeProvider>,
   );
+  // The Requirements group's own rows, in render order.
+  const nav = screen.getByRole("navigation", { name: "Spec files" });
+  return within(nav)
+    .getAllByRole("button")
+    .map((b) => b.textContent)
+    .filter((t): t is string => Boolean(t) && t !== "");
+}
+
+describe("SpecFileList — the PRD leads Requirements", () => {
+  it("puts the PRD first even though features/ sorts above it by path", () => {
+    const rows = renderList(
+      entries(
+        "specs/requirements/features/approvals.md",
+        "specs/requirements/prd.md",
+        "specs/requirements/features/receipts.md",
+      ),
+    );
+    expect(rows.slice(0, 3)).toEqual(["prd.md", "approvals.md", "receipts.md"]);
+  });
+
+  it("keeps the rest in path order behind it", () => {
+    const rows = renderList(
+      entries(
+        "specs/requirements/zebra.md",
+        "specs/requirements/prd.md",
+        "specs/requirements/alpha.md",
+      ),
+    );
+    expect(rows.slice(0, 3)).toEqual(["prd.md", "alpha.md", "zebra.md"]);
+  });
+
+  it("is untroubled by a project whose PRD has not been written yet", () => {
+    const rows = renderList(entries("specs/requirements/features/receipts.md"));
+    expect(rows[0]).toBe("receipts.md");
+  });
+});
+
+/** The real paths a generated ai-agent project produces. */
+function designFiles(...paths: string[]): SpecFileEntry[] {
+  return paths.map((path, i) => ({ path, sha: `sha${i}`, group: "designs" }));
 }
 
 describe("SpecFileList — artifact labels", () => {

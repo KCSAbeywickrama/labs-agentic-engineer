@@ -215,6 +215,34 @@ func (s *Service) executeTurn(ctx context.Context, job turnJob) TurnTerminal {
 		previousTurnFailed = last.Status == turnStatusFailed
 	}
 
+	// Heartbeat the row for the WHOLE run, starting BEFORE dispatch (D17).
+	// The agents service opens its SSE stream lazily on the first model event,
+	// so Dispatch blocks until then — and a turn carrying a large PDF or image
+	// can spend well past the 60s stale threshold being read before the model
+	// emits anything. Heartbeating only after Dispatch returned left that
+	// window unguarded, and the sweep failed healthy turns as "replica crashed
+	// or hung".
+	hbEvery := s.heartbeatEvery
+	if hbEvery <= 0 {
+		hbEvery = turnHeartbeatEvery
+	}
+	hbStop := make(chan struct{})
+	defer close(hbStop)
+	go func() {
+		ticker := time.NewTicker(hbEvery)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-hbStop:
+				return
+			case <-ticker.C:
+				if err := s.turns.Heartbeat(ctx, job.turnID); err != nil {
+					slog.WarnContext(ctx, "genai: turn heartbeat failed", "turn", job.turnID, "error", err)
+				}
+			}
+		}
+	}()
+
 	var collab *agentsvc.CollabBlock
 	if job.collabRoomID != "" {
 		collab = &agentsvc.CollabBlock{RoomID: job.collabRoomID, Token: job.collabToken}
@@ -235,30 +263,13 @@ func (s *Service) executeTurn(ctx context.Context, job turnJob) TurnTerminal {
 		WebSearch:              designOrCollabTurn(job),
 		Collab:                 collab,
 		Journal:                journalFor(job),
+		Surface:                agentsvc.SurfaceConsole,
 	})
 	if err != nil {
 		slog.WarnContext(ctx, "genai: turn dispatch failed", "turn", job.turnID, "error", err)
 		return failedTerminal(turnReasonDispatchFailed, "agents dispatch failed: "+err.Error(), nil)
 	}
 	defer body.Close()
-
-	// Heartbeat the row while the stream runs (D17).
-	hbStop := make(chan struct{})
-	defer close(hbStop)
-	go func() {
-		ticker := time.NewTicker(turnHeartbeatEvery)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-hbStop:
-				return
-			case <-ticker.C:
-				if err := s.turns.Heartbeat(ctx, job.turnID); err != nil {
-					slog.WarnContext(ctx, "genai: turn heartbeat failed", "turn", job.turnID, "error", err)
-				}
-			}
-		}
-	}()
 
 	// Idle watchdog (plan_tap precedent): any read pulses activity; silence
 	// past the deadline closes body to unblock the pending read.
