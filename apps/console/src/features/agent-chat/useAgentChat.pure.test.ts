@@ -50,13 +50,22 @@ describe("foreignTurnPollDelay", () => {
   // empty pane for most of a minute at the exact moment the product is trying
   // to show it is working.
   it("looks again quickly while there is nothing on screen", () => {
-    expect(foreignTurnPollDelay([])).toBe(2_000);
+    expect(foreignTurnPollDelay([], 0)).toBe(2_000);
   });
 
   // Once anything is rendering, the poll is a background refresh again and the
   // slow cadence is the right cost.
   it("settles once the log has something in it", () => {
-    expect(foreignTurnPollDelay([SOME_MESSAGE])).toBe(12_000);
+    expect(foreignTurnPollDelay([SOME_MESSAGE], 0)).toBe(12_000);
+  });
+
+  // The fast cadence is for an ARRIVAL — the seconds between a panel opening
+  // and the turn it waits for appearing. "Empty" is also the resting state of a
+  // project nobody has talked to, and unbounded that would poll every 2s for as
+  // long as the panel stayed open.
+  it("settles even on an empty log once the arrival window has passed", () => {
+    expect(foreignTurnPollDelay([], 7)).toBe(2_000);
+    expect(foreignTurnPollDelay([], 8)).toBe(12_000);
   });
 });
 

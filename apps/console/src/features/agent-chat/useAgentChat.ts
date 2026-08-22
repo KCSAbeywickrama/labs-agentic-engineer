@@ -68,17 +68,28 @@ const FOREIGN_TURN_POLL_MS = 12_000;
 // nothing and there is no local row to paint in the meantime.
 const EMPTY_PANEL_POLL_MS = 2_000;
 
+// How many of those fast checks to spend before settling. The fast cadence is
+// for an ARRIVAL — the seconds between a panel opening and the turn it is
+// waiting for appearing — not for a panel that is empty because the project
+// simply has no conversation. Without a bound, a project that never used chat,
+// or one just after a rotation cleared the log, polls every 2s for as long as
+// the panel stays open.
+const EMPTY_PANEL_FAST_POLLS = 8;
+
 /**
  * How long to wait before asking again whether a turn is running.
  *
  * Keyed on "is there anything to look at" rather than on a project's age or an
  * arrival flag: an empty log is precisely the case where a poll interval is
  * indistinguishable from a broken product, and it stops being empty the moment
- * either the turn or its history lands. Exported for its own test — the
- * cadence is the fix, so it is the thing worth pinning.
+ * either the turn or its history lands. Bounded, because "empty" is also the
+ * resting state of a project nobody has talked to. Exported for its own test —
+ * the cadence is the fix, so it is the thing worth pinning.
  */
-export function foreignTurnPollDelay(messages: ChatMessage[]): number {
-  return messages.length === 0 ? EMPTY_PANEL_POLL_MS : FOREIGN_TURN_POLL_MS;
+export function foreignTurnPollDelay(messages: ChatMessage[], pollsSoFar: number): number {
+  return messages.length === 0 && pollsSoFar < EMPTY_PANEL_FAST_POLLS
+    ? EMPTY_PANEL_POLL_MS
+    : FOREIGN_TURN_POLL_MS;
 }
 
 /**
@@ -211,7 +222,13 @@ export function useAgentChat(org: string, projectName: string): AgentChat {
     // message the user still needs to retry. They persist until the next
     // rotation clears the log.
     const rehydrate = async () => {
-      if (attachedRef.current) return;
+      // Not while a local send is mid-dispatch either. The optimistic row has
+      // no turn id yet and the server has no record of it, so it survives
+      // neither the REPLACE nor the `localOnly` filter (which keeps error and
+      // failed rows only) — a tab switch inside the ~2s dispatch would drop
+      // the user's own message, and `settleUserMessage` would then no-op onto
+      // an id that no longer exists.
+      if (attachedRef.current || pendingStartRef.current) return;
       const history = await getConversationMessages(projectName, conversationId);
       if (ac.signal.aborted || attachedRef.current || history === null) return;
       const localOnly = getMessages(chatKey).filter(
@@ -292,9 +309,14 @@ export function useAgentChat(org: string, projectName: string): AgentChat {
     // which at the idle cadence is most of a minute's worth of nothing at the
     // one moment the product is trying to prove it is working.
     let pollTimer: ReturnType<typeof setTimeout> | undefined;
+    let pollsSoFar = 0;
     const scheduleNextPoll = () => {
       if (ac.signal.aborted) return;
-      pollTimer = setTimeout(runPoll, foreignTurnPollDelay(getMessages(chatKey)));
+      pollTimer = setTimeout(
+        runPoll,
+        foreignTurnPollDelay(getMessages(chatKey), pollsSoFar),
+      );
+      pollsSoFar += 1;
     };
     const runPoll = () => {
       if (ac.signal.aborted) return;
@@ -392,10 +414,18 @@ export function useAgentChat(org: string, projectName: string): AgentChat {
         setActiveTurnId(turnId);
         settleUserMessage(chatKey, messageId, { turnId });
         const signal = abortRef.current?.signal ?? new AbortController().signal;
-        // Handover: the poll is held off by `pendingStartRef` until
-        // `attachedRef` takes over, so the window is never open to both.
-        attachedRef.current = true;
+        // Someone else got there first. `pendingStartRef` holds the POLL off,
+        // but the mount's own rehydrate → getActiveTurn runs before it is set
+        // — an auto-sent seed fires the moment `conversationReady` flips,
+        // concurrently with that sequence — so `attach` can already own this
+        // turn. Folding it a second time would replay the whole stream on top
+        // of itself after `dropTurnOutput`.
         pendingStartRef.current = false;
+        if (attachedRef.current) {
+          setIsSending(false);
+          return;
+        }
+        attachedRef.current = true;
         try {
           await attachAndFoldTurn(chatKey, projectName, turnId, signal, onTurnCommitted);
         } catch {

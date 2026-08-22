@@ -296,6 +296,39 @@ describe("useAgentChat — a local send in flight", () => {
     vi.useRealTimers();
   });
 
+  // The optimistic row has no turn id and the server has no record of it, so it
+  // survives neither the rehydrate's REPLACE nor its `localOnly` filter (error
+  // and failed rows only). A tab switch inside the ~2s dispatch would drop the
+  // user's own message, and `settleUserMessage` would then no-op onto an id
+  // that no longer exists — the message simply gone until the turn ended.
+  it("keeps the user's message through a refocus mid-dispatch", async () => {
+    let resolveDispatch: (id: string) => void = () => {};
+    mockStartTurn.mockImplementation(
+      () => new Promise<string>((res) => { resolveDispatch = res; }),
+    );
+
+    const { result } = renderHook(() => useAgentChat(ORG, PROJECT), { wrapper: createWrapper() });
+    await waitFor(() => expect(result.current.conversationReady).toBe(true));
+
+    act(() => result.current.send("tidy the requirements"));
+    await waitFor(() => expect(getMessages(KEY)).toHaveLength(1));
+
+    // The server still has no record of this turn.
+    mockGetHistory.mockResolvedValue([]);
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(
+      getMessages(KEY).filter((m) => m.role === "user" && m.content === "tidy the requirements"),
+    ).toHaveLength(1);
+
+    act(() => resolveDispatch("t1"));
+    await waitFor(() => expect(mockAttach).toHaveBeenCalled());
+  });
+
   it("holds the poll off, and never doubles the user's message", async () => {
     // The dispatch hangs; the turn nonetheless exists server-side.
     let resolveDispatch: (id: string) => void = () => {};

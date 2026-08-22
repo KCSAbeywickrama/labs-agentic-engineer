@@ -62,8 +62,9 @@ import (
 // be provisioned before its head can be read; creation already fires that
 // provisioning eagerly and asynchronously, so the budget is a ceiling on the
 // unlucky case rather than the normal cost. Blowing it leaves the project
-// created and un-started, which the spec view's empty state offers to fix —
-// the same recovery a closed tab gets.
+// created and un-started — which the status reports as `never-started` rather
+// than as idle, so the spec view can offer a way to begin rather than a
+// spinner for work that is not coming.
 const kickoffBudget = 20 * time.Second
 
 // ErrKickoffAlreadyRan reports that the project has already had an agent turn,
@@ -97,7 +98,7 @@ func (s *Service) Kickoff(ctx context.Context, orgID, projectID string) {
 		slog.InfoContext(bg, "kickoff skipped: the project has already run a turn",
 			"org", orgID, "project", projectID)
 	case err != nil:
-		slog.ErrorContext(bg, "kickoff failed (the spec view offers it as a CTA)",
+		slog.ErrorContext(bg, "kickoff failed (the project reports never-started; the spec view offers Retry)",
 			"org", orgID, "project", projectID, "error", err)
 	default:
 		slog.InfoContext(bg, "kickoff dispatched",

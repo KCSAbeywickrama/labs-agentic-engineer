@@ -245,10 +245,14 @@ The previous copy ended *"Ask the agent to continue from where it stopped in the
 [#530](https://github.com/wso2/labs-agentic-engineer/issues/530) forbids: a command the UI can offer as
 a control is offered, not described.
 
-**Deliberately uncovered:** a project that never got a turn at all — an org with no Anthropic key, or one
-older than the kickoff. It reads as *nothing has run*, not as *failed*, so it gets no button. A missing
-key is not fixed by clicking retry; it is fixed in settings, and the chat surfaces the real error at the
-first attempt.
+**A project that never got a turn at all** — a dispatch that never reached the turn guard (no Anthropic
+key, an unreachable skills repo), or an abandoned document upload the create held the kickoff for — is
+its own state, not an absence. It shows the same **Retry**, over *"Nothing written yet."*
+
+That distinction is load-bearing. *Nothing has run* and *between turns* look identical in git, and need
+opposite treatment: one needs a way to begin, the other is mid-interview and must not be offered a
+restart that would supersede it. Collapsed, the first showed a spinner for work that was never coming,
+with nothing to click.
 
 **Everything else is the chat's job.** The card says where the project stands in one line; the panel
 carries the conversation, the questions and the agent's work.

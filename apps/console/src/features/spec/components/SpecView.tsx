@@ -61,6 +61,7 @@ import { useYTextString } from "../collab/useYTextString";
 import { useTurnEndFlush } from "../collab/useTurnEndFlush";
 import { START_COMMAND } from "@aep/contracts/commands";
 import { chatKeyFor, setPendingSeed, subscribeTurnEnd } from "../../agent-chat/chatStore";
+import { EmptyState } from "../../../components/EmptyState";
 import { useResolveDependencyViaChat } from "../../agent-chat/useResolveDependencyViaChat";
 import type { DependencyResolutionIntent } from "../../projects/lib/dependencyResolutionMessage.js";
 import { useDesignCellChangeCount } from "../collab/useDesignCellChange";
@@ -473,6 +474,14 @@ export function SpecView({ projectName }: { projectName: string }) {
   // failure that leaves the user with nothing and no explanation.
   const noRequirementsYet = !files.some((f) => f.group === "requirements");
   const failed = specAgent === "failed" && noRequirementsYet;
+  // No turn has EVER run for this project (#562 review): a dispatch that never
+  // reached the turn guard — no Anthropic key, an unreachable skills repo — or
+  // an abandoned reference upload the create held the kickoff for. Distinct
+  // from "" (a turn ran and finished), and the distinction is the whole point:
+  // without it this state showed a spinner promising work that was never
+  // coming, with nothing to click, because the way out hangs off `failed` and
+  // there is no turn row to have failed.
+  const neverStarted = specAgent === "never-started";
   // Retrying is a SEND, so it goes where every other send goes: the chat's
   // one-shot seed slot, GUARDED — the panel re-decides after it has rehydrated,
   // which is the first moment "is the agent mid-exchange" is knowable here.
@@ -1172,6 +1181,19 @@ export function SpecView({ projectName }: { projectName: string }) {
                     />
                   </Box>
                 )
+              ) : neverStarted ? (
+                /* Nothing has run and nothing will until someone asks. The
+                   same Retry the failure banner offers — one way out, one
+                   word for it. */
+                <EmptyState
+                  title="Nothing written yet"
+                  description="Your requirements and design appear here as the agent writes them."
+                  action={
+                    <Button variant="contained" onClick={retryStart}>
+                      Retry
+                    </Button>
+                  }
+                />
               ) : files.length === 0 ? (
                 /* An EMPTY workspace — the whole of the kickoff, before the
                    agent's first write lands. "Select a file to view its

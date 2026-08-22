@@ -35,9 +35,12 @@ func TestSpecAgentState(t *testing.T) {
 		want   string
 	}{
 		{
+			// Its own state, not more idle: this project needs a way to BEGIN,
+			// while one merely between turns is mid-interview and must not be
+			// offered a restart that would supersede it.
 			name:   "never run",
 			newest: nil,
-			want:   "",
+			want:   "never-started",
 		},
 		{
 			name:   "a turn is in flight",
@@ -65,6 +68,16 @@ func TestSpecAgentState(t *testing.T) {
 				t.Fatalf("specAgentState = %q, want %q", got, c.want)
 			}
 		})
+	}
+}
+
+// An UNWIRED source says nothing rather than claiming never-started: it has no
+// way to know a project's turn history, and the documented degradation is the
+// pre-#562 reading.
+func TestSpecAgentOf_UnwiredSourceClaimsNothing(t *testing.T) {
+	t.Parallel()
+	if got := specAgentOf(nil, nil); got != "" {
+		t.Fatalf("specAgentOf(nil source) = %q, want the empty reading", got)
 	}
 }
 

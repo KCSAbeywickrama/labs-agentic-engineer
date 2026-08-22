@@ -118,20 +118,40 @@ func (s *Service) SetSpecTurnSource(turns specTurnRows) { s.specTurns = turns }
 
 // Spec-stage agent activity (the spec.agent contract enum).
 const (
-	specAgentIdle    = ""
-	specAgentWorking = "working"
-	specAgentFailed  = "failed"
+	specAgentIdle         = ""
+	specAgentWorking      = "working"
+	specAgentFailed       = "failed"
+	specAgentNeverStarted = "never-started"
 )
 
 // specAgentState folds the project's newest turn row into the contract enum.
 //
 // A COMPLETED turn reads as idle, not as "done": whatever it produced is in
 // git, so exists/version/dirty already describe it, and a second vocabulary
-// for the same fact would let the two disagree. Only the two states git cannot
-// see survive — a turn in flight, and a turn that died leaving nothing behind.
+// for the same fact would let the two disagree. Only the states git cannot see
+// survive — a turn in flight, a turn that died leaving nothing behind, and no
+// turn at all.
+//
+// NO ROW is its own state rather than more idle. The two look identical in git
+// and need opposite handling: a project that has never run a turn needs a way
+// to begin, while one merely between turns is mid-interview and must not be
+// offered a restart that would supersede it. Collapsing them left a project
+// whose dispatch never landed showing a spinner for work that was never
+// coming, with nothing to click.
+// specAgentOf guards the fold on the source being WIRED. Without it an
+// unwired service would report `never-started` — a positive claim about turn
+// history it has no way to make — where the documented degradation is the
+// pre-#562 reading: "", meaning "this says nothing".
+func specAgentOf(source specTurnRows, newest *spec.AgentTurn) string {
+	if source == nil {
+		return specAgentIdle
+	}
+	return specAgentState(newest)
+}
+
 func specAgentState(newest *spec.AgentTurn) string {
 	if newest == nil {
-		return specAgentIdle
+		return specAgentNeverStarted
 	}
 	switch newest.Status {
 	case spec.TurnStatusRunning:
@@ -235,7 +255,7 @@ func (s *Service) populateStages(ctx context.Context, orgName, projectName strin
 		Version: snap.SpecVersion,
 		Dirty:   snap.SpecDirty,
 		Design:  snap.HasDesign,
-		Agent:   specAgentState(newestTurn),
+		Agent:   specAgentOf(s.specTurns, newestTurn),
 	}
 	applyFlatArtifactFields(status, snap)
 

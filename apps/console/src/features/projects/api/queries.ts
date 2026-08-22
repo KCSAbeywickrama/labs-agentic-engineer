@@ -98,11 +98,15 @@ function statusIsMoving(status: ProjectStatus): boolean {
     // Without it the spec card would sit on the idle interval through the whole
     // interview and take up to 30s to notice it had finished.
     status.spec.agent === "working" ||
-    // A project with no spec is mid-journey by definition, and `agent` returns
-    // to "" in every gap BETWEEN turns — so keying only on "working" drops the
-    // whole interview onto the idle cadence, and every surface reading this
-    // status is then up to 30s behind the agent it is describing.
-    !status.spec.exists ||
+    // Mid-interview: a turn HAS run (so not "never-started") and written no
+    // spec yet, and `agent` returns to "" in every gap between turns — keying
+    // only on "working" drops the whole interview onto the idle cadence and
+    // leaves every surface up to 30s behind the agent it describes.
+    //
+    // Scoped to a project that actually has turn history, so an abandoned or
+    // never-started one is not parked on the fast cadence forever: this poll
+    // fans out to four backend sources, OpenChoreo included.
+    (status.spec.agent === "" && !status.spec.exists) ||
     status.build.status === "running" ||
     status.deploy.status === "deploying" ||
     status.repoStatus === "pending" ||

@@ -403,6 +403,41 @@ describe("SpecView while the kickoff is still writing", () => {
     ).not.toBeInTheDocument();
   });
 
+  // The dead end this closed (#562 review): a dispatch that never reached the
+  // turn guard — no Anthropic key, an unreachable skills repo — or an abandoned
+  // reference upload the create held the kickoff for. There is no turn row, so
+  // nothing "failed", and the spinner promised work that was never coming with
+  // nothing to click.
+  it("offers a way out when no turn has ever run", () => {
+    mockSpecAgent = "never-started";
+    empty();
+    render(<SpecView projectName="proj1" />);
+
+    expect(
+      screen.queryByText("Agent is working on the requirements document"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("Nothing written yet")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(consumePendingSeed(chatKeyFor("acme", "proj1"))).toEqual({
+      message: START_COMMAND,
+      guarded: true,
+    });
+  });
+
+  // Between turns, not before them: a turn HAS run, so the interview is under
+  // way and offering a restart would supersede it.
+  it("keeps spinning between turns rather than offering a restart", () => {
+    mockSpecAgent = "";
+    empty();
+    render(<SpecView projectName="proj1" />);
+
+    expect(
+      screen.getByText("Agent is working on the requirements document"),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+  });
+
   // An empty workspace offers NOTHING (#562 retest). It used to carry a Start
   // button, which appeared during the kickoff itself — the moment the user must
   // not be invited to restart it — because "the workspace looks empty" is true
