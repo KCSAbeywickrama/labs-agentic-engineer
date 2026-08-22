@@ -285,6 +285,18 @@ condition via `isStoreReady()` instead of the pod crash-looping. History is
 APPEND-ONLY: no turn rewrites a prior message (a stable prefix is what keeps
 the model provider's prompt cache effective).
 
+**Two things this store deliberately does NOT solve.** Both are the platform's
+to fix, not this component's, so do not invent a local answer:
+
+- **Two turns in flight on one conversation overwrite each other.** There is no
+  version check and no locking: both load, both save, and the second write wins
+  silently. The caller is what prevents it — it disables send while a turn is
+  pending, so one conversation never has two turns at once.
+- **`messages` grows without bound.** Nothing trims or summarises it, so a long
+  enough conversation eventually fails every turn or truncates the model's
+  context. Retention and summarisation land with the platform store; do not add
+  ad-hoc trimming here.
+
 ## Constraints
 
 **The allow-list is the security boundary.** An operation the design did not
@@ -440,26 +452,3 @@ await callContext.run({ authorization: req.headers.authorization }, () => reply(
 // inside call():
 const { authorization } = callContext.getStore() ?? {};
 ```
-
-## Pitfalls
-
-| Symptom | Cause | Fix |
-|---|---|---|
-| Agent re-looks-up data it was already given, or invents an id from its own prose | History carried only the assistant's text | `result.steps.flatMap(s => s.response.messages)` |
-| Container exits at startup, `ERR_MODULE_NOT_FOUND` | Relative import missing the `.js` extension under `nodenext` | `import { x } from "./tools.js"` — even though the file is `.ts` |
-| Anyone who can reach the URL can chat, burning the org's model budget | The handler forwarded `Authorization` downstream but never gated on the caller | 401 when `X-User-Id` is absent — the APIs behind you protect data, not spend |
-| One user reads or edits another's data | Ownership "enforced" in the prompt; the provider was called with the agent's own credential | Forward the caller's credential; let the provider return 403 |
-| The agent forgets everything on the SECOND message | Handler created a new conversation because it ignored the caller's `conversationId` | Load by (`conversationId`, `x-user-id`); only create when the id is absent |
-| One user sees another's conversation | A query on `conversations` without `AND user_id = $2` | Every statement carries the user scope — copy the store verbatim |
-| Foreign and unknown ids answer differently | 403 on foreign, 404 on unknown confirms which ids exist | 404 for both — an id must leak nothing |
-| Chat 500s with an invalid uuid syntax error | Malformed id reached Postgres' uuid cast | The store's `UUID_RE` guard: malformed = not found |
-| A normal `409`/`404` ends the turn with an error | Tool threw on a non-2xx response | Return `{ ok: false, status, error }` to the model |
-| Model fills the wrong field, or asks which part of the URL a value belongs to | Tool schema exposed path/query/body structure | One flat object; re-split when building the request |
-| Behaviour drifts from what the design says | Prompt edited in `src/prompt.ts` | Edit the AFM document and regenerate |
-| Conversation works for one user, breaks under load | Conversation state kept in process instead of the store | Stateless process — every turn loads from and saves to Postgres |
-| Spend climbs with no traffic increase | No iteration bound | `stopWhen: stepCountIs(max_iterations)` |
-| Code written against an API the installed SDK does not have | Resolved a dependency version instead of using the pinned majors | Use the pinned `dependencies` block verbatim |
-| Builds and starts, then every turn fails on a real key | Provider guessed from `model.url`/`model.name` | Take it from `model.provider`; default Anthropic |
-| A provider error returns 502 instead of an explained answer | `JSON.parse` threw on a non-JSON error body | Parse defensively inside `call()` |
-| Two tabs on one conversation: one reply silently vanishes | No version check — two in-flight turns both load, then both save; the second `UPDATE`/upsert overwrites the first turn with no error | Not solved server-side in the first cut (no locking, by design); the caller disables send while a turn is pending so one conversation never has two turns in flight |
-| A long-lived conversation eventually fails every turn, or the model truncates context | `messages` grows unbounded — nothing trims or summarises it | Out of scope for the first cut (retention/summarisation lands with the platform store); do not add ad-hoc trimming here |
