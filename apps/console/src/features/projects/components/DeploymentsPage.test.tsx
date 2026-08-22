@@ -384,7 +384,7 @@ describe("DeploymentsPage — story rail", () => {
 });
 
 describe("DeploymentsPage — component links", () => {
-  it("sends an agent's Try it link to the tester, and offers its endpoint separately", () => {
+  it("sends an agent's Try it link to the tester, and gives it no dead endpoint link", () => {
     mockDeploy = {
       version: "v1",
       status: "deployed",
@@ -421,10 +421,10 @@ describe("DeploymentsPage — component links", () => {
       "/projects/acme/try-it?component=leave-agent",
     );
 
-    // The raw URL is still one click away, for anyone who wants to curl it —
-    // labelled "Endpoint" so nobody expects a page behind it.
-    const endpointLink = screen.getByRole("link", { name: /Endpoint of Leave Agent/ });
-    expect(endpointLink).toHaveAttribute("href", "https://leave-agent.dev.example.com");
+    // No raw-URL link for an agent. Its root path serves nothing — /chat is
+    // POST-only and /healthz is not a page — so an "Endpoint" link only ever
+    // opened a 404 and read as a broken deployment.
+    expect(screen.queryByRole("link", { name: /Endpoint/ })).not.toBeInTheDocument();
 
     // The service (web-application) card keeps the plain "Open" link, at
     // the bare endpoint URL — no /chat suffix.

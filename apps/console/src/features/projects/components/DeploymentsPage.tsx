@@ -196,18 +196,21 @@ function ComponentRow({ card, projectName }: { card: DeploymentCard; projectName
           Try it <MessageSquare size={14} />
         </RouterTextLink>
       )}
-      {openHref && (
+      {/* Only a component with something at its root gets an "Open" link. An
+          agent has nothing there — /chat is POST-only and /healthz is not a
+          page — so linking its URL only ever opened a 404, which reads as a
+          broken deployment rather than as "this is not a website". Its address
+          belongs somewhere it can be COPIED; until then, Try it is the way in. */}
+      {!isAgent && openHref && (
         <MuiLink
           href={openHref}
           target="_blank"
           rel="noreferrer"
           variant="body2"
-          // For an agent this is the address to curl, not a page to read —
-          // named "Endpoint" so nobody expects a UI behind it.
-          aria-label={`${isAgent ? "Endpoint of" : "Open"} ${card.displayName}`}
+          aria-label={`Open ${card.displayName}`}
           sx={{ display: "inline-flex", alignItems: "center", gap: 0.5, flexShrink: 0 }}
         >
-          {isAgent ? "Endpoint" : "Open"} <ExternalLink size={14} />
+          Open <ExternalLink size={14} />
         </MuiLink>
       )}
     </Stack>

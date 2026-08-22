@@ -168,12 +168,16 @@ describe("TestPage — the agent list", () => {
     expect(screen.queryByRole("button", { name: /Storefront/ })).not.toBeInTheDocument();
   });
 
-  it("says so when the project has no agents", () => {
+  it("says so when the project has no agents, and shows no empty chat frame", () => {
     mockComponents = [{ name: "storefront", displayName: "Storefront", type: "web-application" }];
 
     render(<TestPage projectName="acme" />);
 
-    expect(screen.getByText("No agents in this project.")).toBeInTheDocument();
+    // Says WHY there is nothing here and what would change it, the way the
+    // Deployments page does — "No agents in this project." was a dead end
+    // beside an empty bordered chat pane that looked like a broken tester.
+    expect(screen.getByText(/no agents to try yet/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText("Message")).not.toBeInTheDocument();
   });
 
   // Regression: `readyNames` is empty until the poller answers, so reading

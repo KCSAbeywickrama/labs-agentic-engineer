@@ -139,12 +139,19 @@ export function TestPage({
           single agent it was a lone card in a 280px column of whitespace, and
           the agent's identity is already in the chat header — so the chat gets
           the full width instead. */}
+      {agents.length === 0 ? (
+        // One explanation across the page, not a "no agents" card beside an
+        // empty bordered chat frame — that read as a tester that had failed to
+        // load. Says what would change it, the way Deployments does.
+        <EmptyState
+          compact
+          description="No agents to try yet — an ai-agent appears here once the published design produces one and it deploys to dev."
+        />
+      ) : (
       <Stack direction={{ xs: "column", md: "row" }} spacing={2} alignItems="stretch">
         {agents.length !== 1 && (
         <Box sx={{ width: { xs: "100%", md: 280 }, flexShrink: 0 }}>
-          {agents.length === 0 ? (
-            <EmptyState compact bordered description="No agents in this project." />
-          ) : (
+          {(
             <Stack spacing={1}>
               {agents.map((agent) => (
                 <Card
@@ -203,6 +210,7 @@ export function TestPage({
           )}
         </Box>
       </Stack>
+      )}
     </>
   );
 }
