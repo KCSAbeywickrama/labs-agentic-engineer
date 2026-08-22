@@ -123,6 +123,7 @@ export function AgentChatPanel({
     activeTurnId,
     conversationReady,
     conversationError,
+    historyReady,
     send,
     newConversation,
   } = useAgentChat(org, projectName);
@@ -306,6 +307,13 @@ export function AgentChatPanel({
     // form has already closed for the whole room by the time the seed is
     // written, so a dropped send here loses them with nothing on screen.
     if (!pendingSeed || !conversationReady) return;
+    // A GUARDED seed additionally waits for the server's history. The backstop
+    // below exists to see an exchange this browser did not take part in, and
+    // until the rehydrate lands the log is empty — so checking it any earlier
+    // asks a question whose answer is always "nothing is happening". A seed
+    // carrying the user's OWN words never waits: theirs is the copy that would
+    // be lost.
+    if (pendingSeed.guarded && !historyReady) return;
     const seed = consumePendingSeed(chatKey);
     if (!seed) return; // already consumed (StrictMode re-invoke, or a race)
     // The backstop on INJECTED commands, and the reason it lives here rather
@@ -321,7 +329,7 @@ export function AgentChatPanel({
     // with no click behind it.
     if (seed.guarded && engagedRef.current) return;
     sendRef.current(seed.message);
-  }, [pendingSeed, conversationReady, chatKey]);
+  }, [pendingSeed, conversationReady, historyReady, chatKey]);
 
   // Turn-end freshness fallback (#252 Task 5) — always on, so it fires even
   // when the chat is used away from the Spec view (SpecView's useTurnEndFlush

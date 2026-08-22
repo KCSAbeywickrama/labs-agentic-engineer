@@ -47,12 +47,14 @@ const mockNewConversation = vi.fn();
 // wording reads them); reset in each describe's beforeEach.
 let mockMessages: unknown[] = [];
 let mockConversationReady = true;
+let mockHistoryReady = true;
 vi.mock("../useAgentChat", () => ({
   useAgentChat: () => ({
     messages: mockMessages,
     isSending: false,
     activeTurnId: undefined,
     conversationReady: mockConversationReady,
+    historyReady: mockHistoryReady,
     conversationError: false,
     send: mockSend,
     newConversation: mockNewConversation,
@@ -226,6 +228,32 @@ describe("AgentChatPanel — the injected generate is gated on an open exchange"
     renderPanel();
 
     expect(mockSend).not.toHaveBeenCalled();
+  });
+
+  // The backstop reads the local log, and until the server's history lands
+  // that log is empty — so checking it any earlier asks a question whose answer
+  // is always "nothing is happening", which is exactly the case an injected
+  // `/start` destroys: a teammate's unanswered question, invisible in a fresh
+  // browser. `conversationReady` only says the thread has an id.
+  it("holds a GUARDED seed until the history has been read", () => {
+    mockHistoryReady = false;
+    setPendingSeed(KEY, START_COMMAND, true);
+    renderPanel();
+
+    expect(mockSend).not.toHaveBeenCalled();
+    // HELD, not consumed — it must still fire once the history lands.
+    expect(consumePendingSeed(KEY)?.message).toBe(START_COMMAND);
+    mockHistoryReady = true;
+  });
+
+  // A seed carrying the user's OWN words is the only copy of what they said.
+  it("never holds an unguarded seed on the history", () => {
+    mockHistoryReady = false;
+    setPendingSeed(KEY, "the submitted interview answers");
+    renderPanel();
+
+    expect(mockSend).toHaveBeenCalledWith("the submitted interview answers");
+    mockHistoryReady = true;
   });
 
   it("sends a GUARDED seed when the exchange is closed", () => {

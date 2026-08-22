@@ -122,6 +122,16 @@ export interface AgentChat {
   /** The resolve failed after retries — the composer is disabled and the
    *  panel should say why (a focus refetch retries automatically). */
   conversationError: boolean;
+  /**
+   * The server's history has been read at least once for this thread.
+   *
+   * `conversationReady` says only that the thread has an id. An INJECTED
+   * command must additionally wait for this: the whole point of the panel's
+   * backstop is that it can see an exchange this browser did not take part in,
+   * and until the rehydrate lands the log is empty and every such exchange is
+   * invisible. A user's own words never wait on it.
+   */
+  historyReady: boolean;
   send: (instruction: string) => void;
   /** Rotate to a fresh PROJECT-WIDE thread (header action, D4). The caller
    *  owns the confirmation — this just performs the rotation. */
@@ -135,11 +145,20 @@ export function useAgentChat(org: string, projectName: string): AgentChat {
     () => getMessages(chatKey),
   );
   const [isSending, setIsSending] = useState(false);
+  const [historyReady, setHistoryReady] = useState(false);
   const [activeTurnId, setActiveTurnId] = useState<string | undefined>(undefined);
   const abortRef = useRef<AbortController | null>(null);
   // Mirrors the attachment state for the poll/refocus triggers: a rehydrate
   // REPLACE must never run mid-fold, or it would clobber streamed partials.
   const attachedRef = useRef(false);
+  // A local send whose dispatch has not answered yet. `attachedRef` cannot
+  // cover this window: the turn row exists server-side the moment StartTurn
+  // returns 202, but this client does not learn its id until the response
+  // lands — so the poll could find that turn, attach it, and fold it, while
+  // `send` was about to fold the very same stream. Two concurrent folds, and
+  // (since the optimistic row has no turn id yet) a second user bubble beside
+  // the one the user is already looking at.
+  const pendingStartRef = useRef(false);
   const author = useCurrentAuthor();
   const queryClient = useQueryClient();
 
@@ -249,6 +268,11 @@ export function useAgentChat(org: string, projectName: string): AgentChat {
     void (async () => {
       await rehydrate();
       if (ac.signal.aborted) return;
+      // Flagged even when the read FAILED. It reports "we have asked", not
+      // "we know" — and holding an injected command forever on a history the
+      // server will not serve would strand the only recovery a stalled project
+      // has. The engaged check still runs on whatever did land.
+      setHistoryReady(true);
       const active = await getActiveTurn(projectName);
       if (ac.signal.aborted || !active || active.status !== "running") return;
       if (active.useCase !== "general") return; // another flow's turn
@@ -274,7 +298,7 @@ export function useAgentChat(org: string, projectName: string): AgentChat {
     };
     const runPoll = () => {
       if (ac.signal.aborted) return;
-      if (attachedRef.current) {
+      if (attachedRef.current || pendingStartRef.current) {
         scheduleNextPoll();
         return;
       }
@@ -313,6 +337,8 @@ export function useAgentChat(org: string, projectName: string): AgentChat {
       if (pollTimer !== undefined) clearTimeout(pollTimer);
       document.removeEventListener("visibilitychange", onVisible);
       attachedRef.current = false;
+      pendingStartRef.current = false;
+      setHistoryReady(false);
       setIsSending(false);
       setActiveTurnId(undefined);
     };
@@ -323,6 +349,7 @@ export function useAgentChat(org: string, projectName: string): AgentChat {
       const text = instruction.trim();
       if (!text || isSending || !conversationId) return;
       setIsSending(true);
+      pendingStartRef.current = true;
       // The row goes up NOW, not after the dispatch answers. `startCollabTurn`
       // resolves the repo, the workspace ref, the org's Anthropic key, two git
       // heads and two snapshot extracts before it returns a turn id — and the
@@ -344,6 +371,7 @@ export function useAgentChat(org: string, projectName: string): AgentChat {
         } catch (err) {
           // The row the user is already looking at becomes the failed one —
           // adding a second copy beside it would read as two sends.
+          pendingStartRef.current = false;
           settleUserMessage(chatKey, messageId, { failed: true });
           addMessage(chatKey, {
             role: "error",
@@ -364,7 +392,10 @@ export function useAgentChat(org: string, projectName: string): AgentChat {
         setActiveTurnId(turnId);
         settleUserMessage(chatKey, messageId, { turnId });
         const signal = abortRef.current?.signal ?? new AbortController().signal;
+        // Handover: the poll is held off by `pendingStartRef` until
+        // `attachedRef` takes over, so the window is never open to both.
         attachedRef.current = true;
+        pendingStartRef.current = false;
         try {
           await attachAndFoldTurn(chatKey, projectName, turnId, signal, onTurnCommitted);
         } catch {
@@ -411,6 +442,7 @@ export function useAgentChat(org: string, projectName: string): AgentChat {
     isSending,
     activeTurnId,
     conversationReady: Boolean(conversationId),
+    historyReady,
     conversationError: conversation.isError,
     send,
     newConversation,

@@ -39,7 +39,10 @@ import {
   ReceiptText,
 } from "@wso2/oxygen-ui-icons-react";
 import { useNavigate } from "@tanstack/react-router";
+import { START_COMMAND } from "@aep/contracts/commands";
 import { ApiRequestError } from "../../../api/errors";
+import { useSession } from "../../../auth/SessionContext";
+import { chatKeyFor, setPendingSeed } from "../../agent-chat/chatStore";
 import {
   useCreateProject,
   useGithubOrg,
@@ -133,6 +136,7 @@ export function ProjectCreate() {
   // Back is closed off and the primary action can only be the reference
   // upload's retry (#383 decision: a failed upload is never a failed create).
   const [createdName, setCreatedName] = useState<string | null>(null);
+  const { orgHandle } = useSession();
   const { data: githubOrg } = useGithubOrg();
   const createProject = useCreateProject();
   const uploadReferences = useUploadReferences();
@@ -189,6 +193,28 @@ export function ProjectCreate() {
       { projectName, files },
       { onSuccess: () => goToProject(projectName) },
     );
+  };
+
+  // Abandoning the documents after an upload failure.
+  //
+  // The create declared `referencesPending`, so the platform HELD the kickoff
+  // for an upload that is now never coming — and nothing else releases it: the
+  // project has no turn, so it reads as "never started" rather than "failed",
+  // and the spec view's Retry hangs off failure. Left alone this is the one
+  // path that reaches a permanently un-started project through ordinary UI.
+  //
+  // Releasing it here rather than adding a server operation to clear the flag:
+  // the flag is not state, it is one branch taken during a single request, and
+  // the chat's seed slot is already how every other surface asks for `/start`.
+  // GUARDED, like all of them; the bare token is enough because the server
+  // attaches the idea from the project descriptor.
+  const continueWithoutDocuments = (projectName: string) => {
+    setPendingSeed(
+      chatKeyFor(orgHandle ?? "default", projectName),
+      START_COMMAND,
+      true,
+    );
+    goToProject(projectName);
   };
 
   const accept = () => {
@@ -368,7 +394,7 @@ export function ProjectCreate() {
               </Button>
               {createdName && uploadReferences.isError && (
                 <Button
-                  onClick={() => goToProject(createdName)}
+                  onClick={() => continueWithoutDocuments(createdName)}
                   disabled={pending}
                 >
                   Continue without documents
