@@ -75,3 +75,24 @@ describe("prdUnsettled — what the rail reports about the requirements", () => 
     expect(prdUnsettled("   ")).toEqual({ assumptions: 0, openQuestions: 0 });
   });
 });
+
+// Regression: the live agent writes `*(assumed)*`, and an exact `assumed`
+// match dropped it — the rail stopped counting the assumption and, worse, the
+// line lost its Settle control, so a judgment the agent had made was neither
+// visible nor challengeable.
+describe("the punctuation agents wrap the tag in", () => {
+  const decision = (tag: string) =>
+    ["## Product Decisions", "", `- Claims use a single, organization-wide currency ${tag}`].join(
+      "\n",
+    );
+
+  it.each(["*assumed*", "*(assumed)*", "*[assumed]*", "*Assumed*"])("counts %s", (tag) => {
+    expect(prdUnsettled(decision(tag)).assumptions).toBe(1);
+  });
+
+  // The whole run, not a substring: this is the agent emphasising its
+  // reasoning, not tagging a judgment.
+  it("leaves emphasised prose that merely contains the word alone", () => {
+    expect(prdUnsettled(decision("*assumed single approver*")).assumptions).toBe(0);
+  });
+});
