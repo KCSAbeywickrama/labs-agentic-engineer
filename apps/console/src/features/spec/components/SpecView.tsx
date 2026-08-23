@@ -139,6 +139,8 @@ export function SpecView({ projectName }: { projectName: string }) {
   // The build gate's 422 refusal, rendered as an actionable checklist (#372)
   // rather than one flattened alert string.
   const [gateRefusal, setGateRefusal] = useState<Array<{ field?: string; message: string }> | null>(null);
+  /** The warning standing between a design run and unsettled requirements. */
+  const [confirmDesign, setConfirmDesign] = useState(false);
   // The "Cut version" ceremony (#369/#372): Build first shows what the click
   // does — the next version, the stories in scope, the milestone —
   // and only a confirm POSTs. The backend cuts the real tag.
@@ -539,9 +541,11 @@ export function SpecView({ projectName }: { projectName: string }) {
     [files, deriving, status.data?.spec.agentFlow, status.data?.spec.designOutdated, unsettled],
   );
   // The rail's own answer to "is an agent writing the requirements", reused so
-  // the workspace body cannot contradict the rail beside it.
-  const requirementsActive =
-    railSections.find((sec) => sec.id === "requirements")?.state === "active";
+  // the workspace body cannot contradict the rail beside it — and its reasons,
+  // reused so the warning before a design run cannot drift from the rail's own
+  // account of what is unsettled.
+  const requirementsSection = railSections.find((sec) => sec.id === "requirements");
+  const requirementsActive = requirementsSection?.state === "active";
   // Written nothing, and nothing on the way.
   const nothingToShow = files.length === 0 && !requirementsActive && !failed;
 
@@ -563,12 +567,28 @@ export function SpecView({ projectName }: { projectName: string }) {
 
   // Generate/Re-generate design (#159): open the agent panel and auto-send the
   // design turn via the shared ?generate=design signal (AppLayout + the panel).
-  const generateDesign = () =>
+  const runDesign = () =>
     void navigate({
       to: "/projects/$projectName/spec",
       params: { projectName },
       search: { generate: "design" },
     });
+
+  // Deriving a design from requirements the agent is still guessing at is
+  // allowed — it is how this product is meant to be used, and gating it was
+  // tried and removed (#539). But it has a cost the user cannot see from the
+  // button: the design is built on those guesses, and overturning one later
+  // means deriving again. So the click WARNS and goes on, rather than asking
+  // for permission. The rail already says the same thing at rest; this is the
+  // moment it becomes consequential.
+  const unsettledReasons = requirementsSection?.reasons ?? [];
+  const generateDesign = () => {
+    if (unsettledReasons.length === 0) {
+      runDesign();
+      return;
+    }
+    setConfirmDesign(true);
+  };
 
   // An agent turn is in flight iff an agent peer is present in the room (#86 d7
   // renders them with kind:"agent"). Building a half-written design is wrong,
@@ -920,6 +940,29 @@ export function SpecView({ projectName }: { projectName: string }) {
             Nothing was lost — anything already written stays browsable.
           </Alert>
         )}
+
+        {/* Deriving a design from requirements that are still full of the
+            agent's own guesses. Same component as the build refusal below, and
+            deliberately NOT the same kind of thing: that one enforces and this
+            one informs, which is the whole reason it carries a way past. */}
+        <ProblemsDialog
+          open={confirmDesign}
+          title="Your requirements aren't settled yet"
+          intro={
+            "The design will be derived from what the requirements say now, " +
+            "including the agent's own judgments. Overturning one later means deriving again."
+          }
+          // No per-row fix here, unlike the build refusal: every one of these is
+          // settled in the same place, and `Resolve issues` already goes there.
+          // A row link beside it would be a second button to the same document.
+          problems={unsettledReasons.map((reason) => ({
+            key: reason.key,
+            label: reason.label,
+          }))}
+          resolve={{ label: "Resolve issues", run: () => onRailReason("document") }}
+          proceed={{ label: "Generate anyway", run: runDesign }}
+          onClose={() => setConfirmDesign(false)}
+        />
 
         {/* The build gate's refusal (#372) now reads the way the rail's amber
             sections do (#575): one dialog listing what is unmet, each with the

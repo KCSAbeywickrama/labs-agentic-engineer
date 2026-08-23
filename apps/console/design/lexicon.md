@@ -382,6 +382,23 @@ overturn, the other a hole only you can fill — and neither GATES anything. Des
 assumptions is deliberate: the requirements arrive early, full of them, and are refined in place. The
 rail reports; Design stays clickable throughout.
 
+**But Generate design warns first when they stand.** The rail says the same thing at rest; the click
+is the moment it becomes consequential, because the design is derived from those guesses and
+overturning one afterwards means deriving again. So the dialog names what is unsettled and offers
+both ways: *Resolve issues* returns to the requirements document, where the settle controls already
+live on the flagged lines, and *Generate anyway* goes on.
+
+This is where the dialog's two moods separate, and the distinction is the point:
+
+| | says | way past |
+|---|---|---|
+| **refusal** — Build | the platform will not do this yet | none; Close |
+| **warning** — Generate design | this will cost you if you are wrong | the primary action |
+
+A warning that cannot be dismissed is a gate wearing a warning's clothes, and gating a design run on
+settled requirements was tried and removed. So the way past is the *primary* button, not a buried
+link — the user is being informed, not asked for permission.
+
 **Active follows the WORK in flight, not which sections happen to be empty.** The running turn's
 flow says what it is for — settling an assumption is requirements work, a design run is design work
 — and that maps straight onto the section that will change. Guessing from emptiness was wrong in

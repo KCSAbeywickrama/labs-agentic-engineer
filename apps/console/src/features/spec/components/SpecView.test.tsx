@@ -1085,3 +1085,91 @@ describe("SpecView while the agent is waiting on answers", () => {
     expect(screen.getByRole("button", { name: /Generate design/ })).toBeDisabled();
   });
 });
+
+// Designing against the agent's own guesses is ordinary use, not a mistake —
+// gating it was tried and removed (#539). But it has a cost the button does not
+// show: the design is derived from those guesses, and overturning one later
+// means deriving again. So the click warns and lets the user go on.
+describe("SpecView warns before designing against unsettled requirements", () => {
+  const REQUIREMENTS_FILES = [
+    { path: "specs/requirements/prd.md", sha: "p1", group: "requirements" },
+  ];
+  const UNSETTLED = [
+    "## User Stories",
+    "",
+    "1. As a manager, I approve claims *assumed* single approver",
+    "",
+    "## Open Questions",
+    "",
+    "- Which payroll vendor?",
+  ].join("\n");
+  const SETTLED = ["## User Stories", "", "1. As a manager, I approve claims"].join("\n");
+
+  function seed(prd: string): void {
+    mockUseSpecFiles.mockReturnValue({
+      data: REQUIREMENTS_FILES,
+      isPending: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    mockUseSpecFileContent.mockReturnValue({
+      data: { sha: "p1", content: prd },
+      isPending: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+  }
+
+  const clickGenerate = () =>
+    fireEvent.click(screen.getByRole("button", { name: /Generate design/ }));
+
+  it("goes straight to the design run when nothing is unsettled", () => {
+    seed(SETTLED);
+    render(<SpecView projectName="proj1" />);
+    clickGenerate();
+
+    expect(mockNavigate).toHaveBeenCalledWith(
+      expect.objectContaining({ search: { generate: "design" } }),
+    );
+  });
+
+  // The count is what the rail already shows, said in the same words — one
+  // account of what is unsettled, not two that can drift apart.
+  it("names what is unsettled instead of designing", () => {
+    seed(UNSETTLED);
+    render(<SpecView projectName="proj1" />);
+    clickGenerate();
+
+    expect(screen.getByText("1 open question")).toBeInTheDocument();
+    expect(screen.getByText("1 assumption to challenge")).toBeInTheDocument();
+    expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
+  // A warning, not a gate: the way past is the primary action.
+  it("designs anyway when the user says so", () => {
+    seed(UNSETTLED);
+    render(<SpecView projectName="proj1" />);
+    clickGenerate();
+    fireEvent.click(screen.getByRole("button", { name: "Generate anyway" }));
+
+    expect(mockNavigate).toHaveBeenCalledWith(
+      expect.objectContaining({ search: { generate: "design" } }),
+    );
+  });
+
+  // The other way out gets out of the user's way — it does not leave them on a
+  // dialog they have already answered, and it starts no design run.
+  it("stands down without designing when the user goes to resolve", async () => {
+    seed(UNSETTLED);
+    render(<SpecView projectName="proj1" />);
+    clickGenerate();
+    fireEvent.click(screen.getByRole("button", { name: "Resolve issues" }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Generate anyway" })).toBeNull(),
+    );
+    expect(mockNavigate).not.toHaveBeenCalled();
+  });
+});

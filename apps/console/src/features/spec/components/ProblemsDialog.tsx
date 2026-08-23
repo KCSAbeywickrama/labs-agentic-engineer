@@ -55,18 +55,47 @@ export interface Problem {
 export function ProblemsDialog({
   open,
   title,
+  intro,
   problems,
+  proceed,
+  resolve,
   onClose,
 }: {
   open: boolean;
   title: string;
+  /** One line of context above the list, when the title alone is not enough. */
+  intro?: string | undefined;
   problems: Problem[];
+  /**
+   * The way past, for a dialog that WARNS rather than refuses.
+   *
+   * Absent means the platform said no and the list is what the user must deal
+   * with first. Present means the user may go on knowing what stands — which
+   * is the difference between the build gate, which enforces, and unsettled
+   * requirements, which are deliberately not a gate: the document arrives full
+   * of the agent's own judgments and is refined in place, so a design run
+   * against some of them is ordinary use, not a mistake.
+   */
+  proceed?: { label: string; run: () => void } | undefined;
+  /**
+   * What declining means, when it is more than dismissing.
+   *
+   * Kept off `onClose` deliberately: Escape and the backdrop close this too,
+   * and dismissing a dialog should dismiss it, not send the user somewhere
+   * they did not ask to go.
+   */
+  resolve?: { label: string; run: () => void } | undefined;
   onClose: () => void;
 }) {
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
       <DialogTitle>{title}</DialogTitle>
       <DialogContent dividers>
+        {intro && (
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+            {intro}
+          </Typography>
+        )}
         <List dense disablePadding>
           {problems.map((problem) => (
             <ListItem
@@ -111,7 +140,27 @@ export function ProblemsDialog({
         </List>
       </DialogContent>
       <DialogActions>
-        <Button onClick={onClose}>Close</Button>
+        {/* A warning keeps the way past on the right, where a confirm lives;
+            a refusal has none, and Close is the only thing to do. */}
+        <Button
+          onClick={() => {
+            onClose();
+            resolve?.run();
+          }}
+        >
+          {resolve?.label ?? "Close"}
+        </Button>
+        {proceed && (
+          <Button
+            variant="contained"
+            onClick={() => {
+              onClose();
+              proceed.run();
+            }}
+          >
+            {proceed.label}
+          </Button>
+        )}
       </DialogActions>
     </Dialog>
   );
