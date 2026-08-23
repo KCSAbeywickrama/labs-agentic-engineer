@@ -137,20 +137,40 @@ describe("SpecFileList — the rail carries state", () => {
     expect(screen.getAllByTestId("working-pulse").length).toBeGreaterThan(0);
   });
 
-  it("explains an amber section in rows, and each row acts", () => {
-    const onReason = renderWith({ assumptions: 2, designOutdated: true });
+  // A count, not just a mark: three assumptions and one would otherwise look
+  // identical, and "how much" is what a glance is for.
+  it("counts what a section has to resolve", () => {
+    renderWith({ assumptions: 2, openQuestions: 1 });
+    expect(
+      screen.getByRole("button", { name: "Requirements: 2 to resolve" }),
+    ).toBeInTheDocument();
+  });
 
-    fireEvent.click(screen.getByText("2 assumptions to challenge"));
+  it("opens the problems in a dialog, and each one carries its fix", () => {
+    const onReason = renderWith({ assumptions: 2, openQuestions: 1 });
+
+    fireEvent.click(screen.getByRole("button", { name: "Requirements: 2 to resolve" }));
+    expect(screen.getByText("1 open question")).toBeInTheDocument();
+    expect(screen.getByText("2 assumptions to challenge")).toBeInTheDocument();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Open the document" })[0]!);
     expect(onReason).toHaveBeenCalledWith("document");
-
-    fireEvent.click(screen.getAllByText("The requirements have changed since")[0]!);
-    expect(onReason).toHaveBeenCalledWith("update-design");
   });
 
   // The acceptance criteria are written against the same stories, so they go
-  // stale with the design and clear with it.
+  // stale with the design and clear with it — two amber sections, one reason
+  // each, one repair.
   it("marks design and validation together", () => {
     renderWith({ designOutdated: true });
-    expect(screen.getAllByText("The requirements have changed since")).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "Design: 1 to resolve" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Validation: 1 to resolve" })).toBeInTheDocument();
+  });
+
+  it("offers the re-derivation from the design's dialog", () => {
+    const onReason = renderWith({ designOutdated: true });
+
+    fireEvent.click(screen.getByRole("button", { name: "Design: 1 to resolve" }));
+    fireEvent.click(screen.getByRole("button", { name: "Update the design" }));
+    expect(onReason).toHaveBeenCalledWith("update-design");
   });
 });

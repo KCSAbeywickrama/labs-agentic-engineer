@@ -31,16 +31,23 @@ export type SectionState = "not-started" | "active" | "attention" | "ready";
 /**
  * Why a section wants attention, and where the user goes to deal with it.
  *
- * Reasons are ROWS in the rail rather than a tooltip on the header, for three
- * reasons: a section can want attention for several unrelated things at once
- * (requirements can hold assumptions AND open questions AND have drifted from
- * the design); each needs a DIFFERENT action, so a single summary would hide
- * which; and this ticket explicitly retires a gate tooltip on the grounds that
- * the rail should show such things "larger and better" — hiding actionable work
- * behind a hover is the same mistake in a new place.
+ * Surfaced as an alert BUTTON on the section header, opening a dialog that
+ * lists them — not as rows beneath the title, which was tried first and cost
+ * the rail up to three extra lines before the user reached the documents, in a
+ * column 280px wide. One button costs one slot however many problems there are,
+ * and unlike a bare tooltip it is discoverable at rest: the hover is a shortcut
+ * on top of an affordance, not a replacement for one.
+ *
+ * ORDERED BY SIGNIFICANCE, most consequential first — the hover shows the head
+ * of the list, so the order is what makes that pick meaningful rather than
+ * arbitrary. Ranked by how badly it hurts to ignore: a design behind its
+ * requirements blocks the build and ships the wrong software if forced; an open
+ * question is a hole only the user can fill, so nothing else can resolve it; an
+ * assumption already HAS an answer in place, which the user may or may not
+ * disagree with.
  */
 export interface SectionReason {
-  /** Stable across renders — the rail keys rows on it. */
+  /** Stable across renders — the dialog keys rows on it. */
   key: string;
   label: string;
   /** `document` opens the requirements document, where the settle controls
@@ -91,13 +98,8 @@ function plural(n: number, one: string, many: string): string {
  */
 function requirementsReasons(input: RailInput): SectionReason[] {
   const reasons: SectionReason[] = [];
-  if (input.assumptions > 0) {
-    reasons.push({
-      key: "assumptions",
-      label: `${plural(input.assumptions, "assumption", "assumptions")} to challenge`,
-      action: "document",
-    });
-  }
+  // Open questions lead: only the user can answer one, so nothing else in the
+  // system can move it along. An assumption already has an answer standing.
   if (input.openQuestions > 0) {
     reasons.push({
       key: "open-questions",
@@ -105,7 +107,25 @@ function requirementsReasons(input: RailInput): SectionReason[] {
       action: "document",
     });
   }
+  if (input.assumptions > 0) {
+    reasons.push({
+      key: "assumptions",
+      label: `${plural(input.assumptions, "assumption", "assumptions")} to challenge`,
+      action: "document",
+    });
+  }
   return reasons;
+}
+
+/**
+ * The one to show when there is only room for one — the hover.
+ *
+ * Simply the head of the list, because the list is built in significance order.
+ * A separate ranking here would be a second definition of "most important", and
+ * the two would disagree the first time either moved.
+ */
+export function mostSignificant(reasons: SectionReason[]): SectionReason | undefined {
+  return reasons[0];
 }
 
 /**

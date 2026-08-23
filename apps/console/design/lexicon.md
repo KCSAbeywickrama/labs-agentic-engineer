@@ -352,15 +352,30 @@ lens on every story; the list pins the PRD instead, and everything behind it kee
 Validation go *outdated* — the same rail that reported progress reports staleness, with no second
 mechanism to learn.
 
-**An amber section explains itself in ROWS**, above its documents — never in a tooltip, which would
-hide that there is anything to do at all. A section can want attention for several unrelated things
-at once and each needs a different action, so a single summary would hide which:
+**An amber section carries a COUNTED alert chip beside its title**, and clicking it opens a dialog
+listing what there is to resolve, each with the way to resolve it. Hovering shows the most
+significant one, so a peek costs no click.
 
-| section | row | goes to |
+Rows beneath the title were tried first and cost the rail up to three extra lines before the user
+reached the documents, in a column 280px wide; one chip costs one slot however many problems there
+are. It is a chip rather than a bare tooltip because it is discoverable at rest — the hover is a
+shortcut on top of an affordance, not a replacement for one. And it carries the **count**, because
+three assumptions and one otherwise look identical and *how much* is what a glance is for.
+
+| section | what the dialog lists | its fix |
 |---|---|---|
-| Requirements | *N assumptions to challenge* | the document, where the settle controls already are |
-| Requirements | *N open questions* | the document |
+| Requirements | *N open questions* | **Open the document**, where the settle controls already are |
+| Requirements | *N assumptions to challenge* | **Open the document** |
 | Design · Validation | *The requirements have changed since* | **Update the design** |
+
+**Ordered by how badly it hurts to ignore**, which is what makes the hover's pick meaningful rather
+than arbitrary: a design behind its requirements blocks the build and ships the wrong software if
+forced; an open question is a hole only the user can fill, so nothing else can resolve it; an
+assumption already *has* an answer standing, which the user may or may not disagree with.
+
+**Build refuses the same way.** Its unmet conditions are the same kind of thing — a list the user can
+act on — so they read identically rather than one being a strip under the header and the other a
+sidebar. Acting from either dialog closes it and goes, so it is never dismissed twice.
 
 Assumptions and open questions are counted **apart** — one is a judgment the agent made and you may
 overturn, the other a hole only you can fill — and neither GATES anything. Designing against
@@ -408,9 +423,10 @@ Build was drawn at the foot of the rail as its terminal step. It stays where it 
 action at the bottom of a scrolling list is not where a user looks for it, and the header button is
 visible from every part of the workspace rather than only once you have reached the end of a list.
 
-**An outdated design still blocks it**, as one more entry in the refusal Build already shows on
-click — *"the requirements have changed since this design was written — update the design before
-building"*. The button stays live and the same click re-checks, exactly as it does for a missing
+**An outdated design still blocks it**, as one more entry in the refusal Build shows on click —
+*"the requirements have changed since this design was written — update the design before building"*.
+The refusal is a **dialog**, headed *"Not ready to build yet"*, the same one the rail's alert chip
+opens. The button stays live and the same click re-checks, exactly as it does for a missing
 dependency. No disabled control and no tooltip.
 
 The refusal is enforced by the **build gate on the server**, not by the console: a block the client

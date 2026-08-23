@@ -67,6 +67,7 @@ import {
 } from "../lib/railSections";
 import { chatKeyFor, setPendingSeed, subscribeTurnEnd } from "../../agent-chat/chatStore";
 import { EmptyState } from "../../../components/EmptyState";
+import { ProblemsDialog } from "./ProblemsDialog";
 import { useResolveDependencyViaChat } from "../../agent-chat/useResolveDependencyViaChat";
 import type { DependencyResolutionIntent } from "../../projects/lib/dependencyResolutionMessage.js";
 import { useDesignCellChangeCount } from "../collab/useDesignCellChange";
@@ -901,39 +902,37 @@ export function SpecView({ projectName }: { projectName: string }) {
           </Alert>
         )}
 
-        {/* The build gate's refusal, as an actionable checklist (#372): each
-            unmet condition with the file it names, and one handoff to the
-            agent. Build stays available — the same click re-checks. */}
-        {gateRefusal && (
-          <Alert
-            severity="warning"
-            sx={{ borderRadius: 0 }}
-            onClose={() => setGateRefusal(null)}
-            action={
-              <Button
-                color="inherit"
-                size="small"
-                onClick={() => {
-                  seedChat(
-                    "/design Fix these build-gate refusals:\n" +
-                      gateRefusal.map((d) => `- ${d.field ? `${d.field}: ` : ""}${d.message}`).join("\n"),
-                  );
-                  setGateRefusal(null);
-                }}
-              >
-                Fix via chat
-              </Button>
-            }
-          >
-            <AlertTitle>Build refused — the design isn&apos;t complete</AlertTitle>
-            {gateRefusal.map((d, i) => (
-              <Typography key={i} variant="body2">
-                • {d.field ? `${d.field}: ` : ""}
-                {d.message}
-              </Typography>
-            ))}
-          </Alert>
-        )}
+        {/* The build gate's refusal (#372) now reads the way the rail's amber
+            sections do (#575): one dialog listing what is unmet, each with the
+            way to fix it. Same kind of thing, same presentation — and these
+            lists run long enough (several components, each missing something)
+            that a header strip pushed the workspace down to hold them.
+            Build stays available; the same click re-checks. */}
+        <ProblemsDialog
+          open={gateRefusal !== null}
+          title="Not ready to build yet"
+          problems={(gateRefusal ?? []).map((d, i) => ({
+            key: `${d.field ?? ""}:${i}`,
+            label: d.field ? `${d.field}: ${d.message}` : d.message,
+            // One handoff for the whole list rather than per row: these
+            // conditions are derived from each other, so the repair is a design
+            // pass over the set, not a fix per line.
+            fix:
+              i === 0
+                ? {
+                    label: "Fix via chat",
+                    run: () =>
+                      seedChat(
+                        "/design Fix these build-gate refusals:\n" +
+                          (gateRefusal ?? [])
+                            .map((r) => `- ${r.field ? `${r.field}: ` : ""}${r.message}`)
+                            .join("\n"),
+                      ),
+                  }
+                : undefined,
+          }))}
+          onClose={() => setGateRefusal(null)}
+        />
 
         {/* The "Cut version" ceremony (#369/#372): what the Build click does,
             before it does it. The version shown is predictive — the BACKEND

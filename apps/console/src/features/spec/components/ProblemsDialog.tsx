@@ -1,0 +1,115 @@
+/**
+ * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+ *
+ * WSO2 LLC. licenses this file to you under the Apache License,
+ * Version 2.0 (the "License"); you may not use this file except
+ * in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+// "What is wrong here, and what do I do about it" — one presentation, wherever
+// it is asked (#575 retest).
+//
+// Two surfaces ask it: the rail's alert button on an amber section, and Build
+// refusing to run. They are the same KIND of thing — a list of unmet conditions
+// the user can act on — so they read the same way rather than one being a strip
+// under the header and the other a set of rows in a sidebar.
+//
+// It is a dialog rather than an inline strip because these lists run long: a
+// build refusal can name several components each missing something, which a
+// 280px column cannot hold and a header strip pushes the workspace down.
+
+import {
+  Button,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  List,
+  ListItem,
+  ListItemIcon,
+  ListItemText,
+  Stack,
+  Typography,
+} from "@wso2/oxygen-ui";
+import { TriangleAlert } from "@wso2/oxygen-ui-icons-react";
+
+/** One thing that is wrong, and optionally the way to fix it. */
+export interface Problem {
+  key: string;
+  /** What is wrong, in the user's terms. */
+  label: string;
+  /** Where the fix is. Absent for a problem the user resolves by editing. */
+  fix?: { label: string; run: () => void } | undefined;
+}
+
+export function ProblemsDialog({
+  open,
+  title,
+  problems,
+  onClose,
+}: {
+  open: boolean;
+  title: string;
+  problems: Problem[];
+  onClose: () => void;
+}) {
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+      <DialogTitle>{title}</DialogTitle>
+      <DialogContent dividers>
+        <List dense disablePadding>
+          {problems.map((problem) => (
+            <ListItem
+              key={problem.key}
+              disableGutters
+              secondaryAction={
+                problem.fix ? (
+                  // Acting CLOSES the dialog and goes — so it never becomes a
+                  // thing the user dismisses twice, once to read and once to
+                  // get past.
+                  <Button
+                    size="small"
+                    onClick={() => {
+                      onClose();
+                      problem.fix?.run();
+                    }}
+                  >
+                    {problem.fix.label}
+                  </Button>
+                ) : undefined
+              }
+            >
+              <ListItemIcon sx={{ minWidth: 32 }}>
+                <TriangleAlert size={16} color="var(--mui-palette-warning-main)" />
+              </ListItemIcon>
+              <ListItemText
+                primary={problem.label}
+                slotProps={{ primary: { variant: "body2" } }}
+              />
+            </ListItem>
+          ))}
+          {problems.length === 0 && (
+            <Stack sx={{ py: 1 }}>
+              <Typography variant="body2" color="text.secondary">
+                Nothing to resolve.
+              </Typography>
+            </Stack>
+          )}
+        </List>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>Close</Button>
+      </DialogActions>
+    </Dialog>
+  );
+}

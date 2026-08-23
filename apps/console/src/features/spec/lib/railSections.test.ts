@@ -17,7 +17,12 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { railSections, type RailInput, type RailSection } from "./railSections";
+import {
+  mostSignificant,
+  railSections,
+  type RailInput,
+  type RailSection,
+} from "./railSections";
 
 function input(over: Partial<RailInput> = {}): RailInput {
   return {
@@ -140,17 +145,20 @@ describe("railSections — the rail is the flow", () => {
     it("counts assumptions and open questions separately", () => {
       const sections = railSections(input({ assumptions: 3, openQuestions: 2 }));
       expect(of(sections, "requirements").state).toBe("attention");
+      // Significance order: only the user can answer an open question, so
+      // nothing else in the system can move it along. An assumption already
+      // has an answer standing.
       expect(of(sections, "requirements").reasons.map((r) => r.label)).toEqual([
-        "3 assumptions to challenge",
         "2 open questions",
+        "3 assumptions to challenge",
       ]);
     });
 
     it("says one thing once", () => {
       const sections = railSections(input({ assumptions: 1, openQuestions: 1 }));
       expect(of(sections, "requirements").reasons.map((r) => r.label)).toEqual([
-        "1 assumption to challenge",
         "1 open question",
+        "1 assumption to challenge",
       ]);
     });
 
@@ -177,5 +185,23 @@ describe("railSections — the rail is the flow", () => {
       const sections = railSections(input({ hasRequirements: false, assumptions: 4 }));
       expect(of(sections, "requirements").reasons).toEqual([]);
     });
+  });
+});
+
+// The hover shows one thing, so which one has to be meaningful rather than
+// arbitrary — it is the head of a list built in significance order.
+describe("mostSignificant", () => {
+  it("prefers the open question to the assumption", () => {
+    const sections = railSections(input({ assumptions: 3, openQuestions: 1 }));
+    expect(mostSignificant(of(sections, "requirements").reasons)?.key).toBe("open-questions");
+  });
+
+  it("falls through to the assumption when that is all there is", () => {
+    const sections = railSections(input({ assumptions: 3 }));
+    expect(mostSignificant(of(sections, "requirements").reasons)?.key).toBe("assumptions");
+  });
+
+  it("has nothing to say about a settled section", () => {
+    expect(mostSignificant(of(railSections(input()), "requirements").reasons)).toBeUndefined();
   });
 });

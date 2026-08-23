@@ -20,6 +20,7 @@ import type React from "react";
 import { useState } from "react";
 import {
   Box,
+  Chip,
   Collapse,
   IconButton,
   List,
@@ -42,7 +43,8 @@ import {
 } from "@wso2/oxygen-ui-icons-react";
 import { WorkingPulse } from "../../agent-chat/components/WorkingIndicator";
 import { PRD_PATH, type SpecFileEntry } from "../api/mapping";
-import type { RailSection, SectionReason } from "../lib/railSections";
+import { mostSignificant, type RailSection, type SectionReason } from "../lib/railSections";
+import { ProblemsDialog } from "./ProblemsDialog";
 import {
   buildDesignSection,
   selectionKey,
@@ -197,35 +199,33 @@ export function SpecFileList({
           {section.title}
         </Typography>
         {ornament(section.state)}
+        {/* The count, not just the mark: three assumptions and one would
+            otherwise look identical, and "how much" is the thing a glance is
+            for. The hover carries the most significant one so a peek costs no
+            click; the click carries all of them. */}
+        {section.reasons.length > 0 && (
+          <Tooltip title={mostSignificant(section.reasons)?.label ?? ""}>
+            <Chip
+              size="small"
+              color="warning"
+              variant="outlined"
+              icon={<TriangleAlert size={12} />}
+              label={section.reasons.length}
+              onClick={() => setProblemsFor(section)}
+              aria-label={`${section.title}: ${section.reasons.length} to resolve`}
+              sx={{ height: 20, cursor: "pointer" }}
+            />
+          </Tooltip>
+        )}
       </Stack>
       {action}
     </Box>
   );
 
-  // Reasons are ROWS, above the documents. A section can want attention for
-  // several unrelated things at once, and each needs a different action — a
-  // single summary would hide which, and a tooltip would hide that there is
-  // anything at all.
-  const reasonRows = (section: RailSection) =>
-    section.reasons.map((reason) => (
-      <ListItemButton
-        key={reason.key}
-        onClick={() => onReason(reason.action)}
-        sx={{ pl: 2, pr: 2, py: 0.25 }}
-      >
-        {/* Same icon slot width as a document row, so a reason lines up with
-            the documents beneath it instead of sitting at its own indent. */}
-        <ListItemIcon sx={{ minWidth: 32 }}>
-          <TriangleAlert size={16} color="var(--mui-palette-warning-main)" />
-        </ListItemIcon>
-        <ListItemText
-          primary={reason.label}
-          slotProps={{
-            primary: { noWrap: true, variant: "body2", color: "warning.main" },
-          }}
-        />
-      </ListItemButton>
-    ));
+  // Which section's problems are open, if any. Local: the dialog is a detail of
+  // reading the rail, and lifting it would make every consumer of this list
+  // carry state it has no other use for.
+  const [problemsFor, setProblemsFor] = useState<RailSection | null>(null);
 
   // `indent` bumps a row one level deeper than the top-level tree (matching
   // the old console's depth-based pl: files inside an expanded component sit
@@ -250,9 +250,8 @@ export function SpecFileList({
   const flatGroup = (section: RailSection, groupFiles: SpecFileEntry[]) => (
     <Box sx={{ mb: 1 }}>
       {sectionHeader(section)}
-      {groupFiles.length > 0 || section.reasons.length > 0 ? (
+      {groupFiles.length > 0 ? (
         <List dense disablePadding>
-          {reasonRows(section)}
           {groupFiles.map((f) =>
             row(fileSel(f.path), fileLabel(f.path), <FileText size={16} />),
           )}
@@ -299,12 +298,8 @@ export function SpecFileList({
             </Tooltip>
           ),
         )}
-        {design.hasComponents ||
-        design.hasCellDsl ||
-        design.overview.length > 0 ||
-        sectionOf("design").reasons.length > 0 ? (
+        {design.hasComponents || design.hasCellDsl || design.overview.length > 0 ? (
           <List dense disablePadding>
-            {reasonRows(sectionOf("design"))}
             {design.hasCellDsl &&
               row({ kind: "cell-diagram" }, "Architecture", <Network size={16} />)}
             {design.overview.map((f) =>
@@ -371,6 +366,19 @@ export function SpecFileList({
 
       {flatGroup(sectionOf("validation"), validation)}
 
+      <ProblemsDialog
+        open={problemsFor !== null}
+        title={problemsFor ? `${problemsFor.title} — to resolve` : ""}
+        problems={(problemsFor?.reasons ?? []).map((reason) => ({
+          key: reason.key,
+          label: reason.label,
+          fix: {
+            label: reason.action === "update-design" ? "Update the design" : "Open the document",
+            run: () => onReason(reason.action),
+          },
+        }))}
+        onClose={() => setProblemsFor(null)}
+      />
     </Box>
   );
 }
