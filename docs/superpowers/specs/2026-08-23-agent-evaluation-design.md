@@ -183,18 +183,38 @@ diff with the reasoning for each revision.
 ### When the prompt changed
 
 `agent.afm.md` is the contract, so a machine changing it must be visible and
-reviewable, never silent.
+reviewable, never silent. It gets its **own PR**, separate from the build's.
 
-- The build's PR includes the AFM change alongside the code, labelled
-  `agent-spec-updated`.
-- The PR body leads with the diff and the evidence: which scenarios failed, what
-  changed, what the score went from and to.
-- The console surfaces it where the spec is read — the Agent Spec view shows
-  that this prompt was revised by evaluation, linking the PR. That view already
-  renders the AFM and, as of this branch, already supports editing its body, so
-  the affordance has a home.
+**The build PR is untouched.** It carries code and merges on its own merits.
+Mixing an AFM change into it would conflate two different reviews — "is this
+implementation right" and "should this agent behave differently" — and force a
+reviewer to accept both or neither.
+
+**The build ships the REVISED prompt.** The code compiled from the winning
+prompt is the code that deploys, so the agent a user first meets is the good
+one. The platform's promise is a working agent, not a mediocre one with an
+attached suggestion.
+
+**A second PR then catches the document up**, labelled `agent-spec-updated`,
+opened as soon as the build's is. It carries the proposed body and the evidence:
+which scenarios failed, what changed, what the score went from and to.
+
+This ordering means the deployed agent briefly runs AHEAD of its document — the
+window between the two merges. That is a real cost and is accepted, with one
+property that bounds it:
+
+**A rejected spec PR is not a no-op.** The AFM generates the code, so the next
+build regenerates the prompt from whatever the document says. Decline the change
+and the next build reverts the behaviour with it. The document stays
+authoritative in the end; the deployment is only ever allowed to lead it
+temporarily, and only in the direction a human has been asked to confirm.
 
 A human merges it. The loop never writes to the default branch.
+
+**Not designed here:** how the console shows that a deployed agent is ahead of
+its spec. During the window the Agent Spec view renders a prompt that is not
+what is running, and that gap is real. Whether the console offers to apply a
+deviation, or asks first, is its own feature — the first cut only opens the PR.
 
 ## Out of scope
 
@@ -204,6 +224,8 @@ A human merges it. The loop never writes to the default branch.
   trade-off.
 - **Tool allow-list changes.** Decision 3.
 - **Agent `skills`.** Unsupported by the platform today.
+- **Showing a spec deviation in the console.** The PR is the first cut's whole
+  surface. Applying or prompting is a separate feature.
 - **Cross-project learning.** If the same failure recurs across projects, that
   is a signal a SKILL is wrong — a human reads the pattern and changes it. No
   loop edits platform skills.
@@ -226,6 +248,13 @@ report should show the score, never just a verdict.
 
 **A worse agent that scores better.** Rubrics reward what they measure. The
 best-scoring-prompt rule bounds the damage; it does not eliminate it.
+
+**The drift window.** Between the build PR merging and the spec PR merging, the
+deployed agent runs a prompt its document does not describe. Anyone reading the
+Agent Spec view in that window is reading something other than what is running.
+Bounded by the fact that the next build regenerates from the document, and by
+opening the spec PR immediately — but a spec PR left unreviewed for a week is a
+week of a lying document, and nothing in this design prevents that.
 
 ## Testing
 
