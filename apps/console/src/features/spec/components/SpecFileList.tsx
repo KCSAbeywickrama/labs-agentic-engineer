@@ -175,16 +175,13 @@ export function SpecFileList({
   // same shade and the rail's states were not distinguishable.
   const ornament = (state: RailSection["state"]) => {
     if (state === "active") return <WorkingPulse />;
-    if (state !== "ready" && state !== "attention") return null;
+    // Nothing for `attention`: that state always carries a chip, and the chip
+    // already leads with a warning triangle. Both together put two identical
+    // marks a few pixels apart, which reads as two problems rather than one.
+    if (state !== "ready") return null;
     return (
-      <Box
-        sx={{
-          display: "flex",
-          flexShrink: 0,
-          color: state === "ready" ? "success.main" : "warning.main",
-        }}
-      >
-        {state === "ready" ? <Check size={14} /> : <TriangleAlert size={14} />}
+      <Box sx={{ display: "flex", flexShrink: 0, color: "success.main" }}>
+        <Check size={14} />
       </Box>
     );
   };
