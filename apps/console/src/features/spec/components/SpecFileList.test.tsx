@@ -143,14 +143,14 @@ describe("SpecFileList — the rail carries state", () => {
   it("counts what a section has to resolve", () => {
     renderWith({ assumptions: 2, openQuestions: 1 });
     expect(
-      screen.getByRole("button", { name: "Requirements: 2 to resolve" }),
+      screen.getByRole("button", { name: "Requirements: 3 to resolve" }),
     ).toBeInTheDocument();
   });
 
   it("opens the problems in a dialog, and each one carries its fix", () => {
     const onReason = renderWith({ assumptions: 2, openQuestions: 1 });
 
-    fireEvent.click(screen.getByRole("button", { name: "Requirements: 2 to resolve" }));
+    fireEvent.click(screen.getByRole("button", { name: "Requirements: 3 to resolve" }));
     expect(screen.getByText("1 open question")).toBeInTheDocument();
     expect(screen.getByText("2 assumptions to challenge")).toBeInTheDocument();
 

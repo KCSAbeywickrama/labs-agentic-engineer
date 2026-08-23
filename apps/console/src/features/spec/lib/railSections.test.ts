@@ -20,6 +20,7 @@ import { describe, expect, it } from "vitest";
 import {
   mostSignificant,
   railSections,
+  reasonCount,
   type RailInput,
   type RailSection,
 } from "./railSections";
@@ -134,6 +135,7 @@ describe("railSections — the rail is the flow", () => {
           {
             key: "requirements-moved",
             label: "The requirements have changed since",
+            count: 1,
             action: "update-design",
           },
         ]);
@@ -222,5 +224,23 @@ describe("mostSignificant", () => {
 
   it("has nothing to say about a settled section", () => {
     expect(mostSignificant(of(railSections(input()), "requirements").reasons)).toBeUndefined();
+  });
+});
+
+// The chip answers "how much is there to resolve", not "how many KINDS of
+// thing" — which is a fact about our vocabulary rather than the user's work.
+describe("reasonCount", () => {
+  it("sums what the reasons stand for", () => {
+    const sections = railSections(input({ assumptions: 3, openQuestions: 2 }));
+    expect(reasonCount(of(sections, "requirements").reasons)).toBe(5);
+  });
+
+  it("counts a single-instance reason once", () => {
+    const sections = railSections(input({ designOutdated: true }));
+    expect(reasonCount(of(sections, "design").reasons)).toBe(1);
+  });
+
+  it("is nothing for a settled section", () => {
+    expect(reasonCount(of(railSections(input()), "requirements").reasons)).toBe(0);
   });
 });

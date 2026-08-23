@@ -50,6 +50,13 @@ export interface SectionReason {
   /** Stable across renders — the dialog keys rows on it. */
   key: string;
   label: string;
+  /**
+   * HOW MANY things this reason stands for — three assumptions is three, not
+   * one. The chip sums these rather than counting reasons, because the user is
+   * being told how much there is to resolve, not how many kinds of thing it
+   * falls into.
+   */
+  count: number;
   /** `document` opens the requirements document, where the settle controls
    *  already live on the flagged lines; `update-design` re-derives. */
   action: "document" | "update-design";
@@ -129,6 +136,7 @@ function requirementsReasons(input: RailInput): SectionReason[] {
     reasons.push({
       key: "open-questions",
       label: plural(input.openQuestions, "open question", "open questions"),
+      count: input.openQuestions,
       action: "document",
     });
   }
@@ -136,6 +144,7 @@ function requirementsReasons(input: RailInput): SectionReason[] {
     reasons.push({
       key: "assumptions",
       label: `${plural(input.assumptions, "assumption", "assumptions")} to challenge`,
+      count: input.assumptions,
       action: "document",
     });
   }
@@ -154,6 +163,18 @@ export function mostSignificant(reasons: SectionReason[]): SectionReason | undef
 }
 
 /**
+ * How much there is to resolve — the number on the chip.
+ *
+ * The SUM of what the reasons stand for, not how many reasons there are. Two
+ * open questions and three assumptions is five things to deal with; showing "2"
+ * would be counting the kinds, which is a fact about our vocabulary rather than
+ * about the user's work.
+ */
+export function reasonCount(reasons: SectionReason[]): number {
+  return reasons.reduce((total, r) => total + r.count, 0);
+}
+
+/**
  * The three sections, in journey order, each carrying its state and reasons.
  *
  * ACTIVE is claimed for at most ONE section — the earliest that has nothing in
@@ -169,7 +190,7 @@ export function mostSignificant(reasons: SectionReason[]): SectionReason | undef
  */
 export function railSections(input: RailInput): RailSection[] {
   const outdatedReason: SectionReason[] = input.designOutdated
-    ? [{ key: "requirements-moved", label: REQUIREMENTS_MOVED, action: "update-design" }]
+    ? [{ key: "requirements-moved", label: REQUIREMENTS_MOVED, count: 1, action: "update-design" }]
     : [];
 
   const requirements = requirementsReasons(input);

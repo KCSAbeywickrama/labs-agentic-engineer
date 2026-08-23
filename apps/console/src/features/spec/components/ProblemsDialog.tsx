@@ -89,8 +89,11 @@ export function ProblemsDialog({
                 ) : undefined
               }
             >
-              <ListItemIcon sx={{ minWidth: 32 }}>
-                <TriangleAlert size={16} color="var(--mui-palette-warning-main)" />
+              {/* Themed through currentColor: this app's theme defines none of
+                  MUI's palette CSS variables, so an icon `color` naming one
+                  resolves to nothing and renders unstyled. */}
+              <ListItemIcon sx={{ minWidth: 32, color: "warning.main" }}>
+                <TriangleAlert size={16} />
               </ListItemIcon>
               <ListItemText
                 primary={problem.label}

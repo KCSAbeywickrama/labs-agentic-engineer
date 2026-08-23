@@ -43,7 +43,12 @@ import {
 } from "@wso2/oxygen-ui-icons-react";
 import { WorkingPulse } from "../../agent-chat/components/WorkingIndicator";
 import { PRD_PATH, type SpecFileEntry } from "../api/mapping";
-import { mostSignificant, type RailSection, type SectionReason } from "../lib/railSections";
+import {
+  mostSignificant,
+  reasonCount,
+  type RailSection,
+  type SectionReason,
+} from "../lib/railSections";
 import { ProblemsDialog } from "./ProblemsDialog";
 import {
   buildDesignSection,
@@ -163,12 +168,25 @@ export function SpecFileList({
   // The section header's ornament. Work in progress is the app's existing
   // pulse — the same 8px dot the chat uses — so "working" looks identical
   // everywhere rather than growing a second animation per surface.
+  // Colour comes from the THEME, through `currentColor` on a wrapper — not from
+  // MUI's palette CSS variables, which this theme does not define at all
+  // (`--mui-palette-success-main` resolves to nothing here). Passing them as an
+  // icon `color` silently produced an unstyled mark, so every state read the
+  // same shade and the rail's states were not distinguishable.
   const ornament = (state: RailSection["state"]) => {
-    if (state === "ready") return <Check size={14} color="var(--mui-palette-success-main)" />;
-    if (state === "attention")
-      return <TriangleAlert size={14} color="var(--mui-palette-warning-main)" />;
     if (state === "active") return <WorkingPulse />;
-    return null;
+    if (state !== "ready" && state !== "attention") return null;
+    return (
+      <Box
+        sx={{
+          display: "flex",
+          flexShrink: 0,
+          color: state === "ready" ? "success.main" : "warning.main",
+        }}
+      >
+        {state === "ready" ? <Check size={14} /> : <TriangleAlert size={14} />}
+      </Box>
+    );
   };
 
   const sectionHeader = (section: RailSection, action?: React.ReactNode) => (
@@ -210,9 +228,9 @@ export function SpecFileList({
               color="warning"
               variant="outlined"
               icon={<TriangleAlert size={12} />}
-              label={section.reasons.length}
+              label={reasonCount(section.reasons)}
               onClick={() => setProblemsFor(section)}
-              aria-label={`${section.title}: ${section.reasons.length} to resolve`}
+              aria-label={`${section.title}: ${reasonCount(section.reasons)} to resolve`}
               sx={{ height: 20, cursor: "pointer" }}
             />
           </Tooltip>

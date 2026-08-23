@@ -86,6 +86,7 @@ vi.mock("../collab/useCollabSpec", () => ({
 beforeEach(() => {
   mockCollab = soloCollab();
   mockSpecAgent = "";
+  mockSpecFlow = "";
 });
 
 // --- CellDiagramPanel: its own behavior is covered by
@@ -168,13 +169,17 @@ vi.mock("@aep/ui-design-view", () => ({
 const mockMutateAsync = vi.fn();
 const mockPreflightRefetch = vi.fn();
 let mockSpecAgent = "";
+let mockSpecFlow = "";
 vi.mock("../../projects/api/queries", () => ({
   useProject: () => ({ data: { displayName: "Test Project" } }),
   // `spec.agent` (#562) is what tells the workspace whether an agent is working
   // right now. Mutable so the kickoff block below can drive it; the global
   // beforeEach resets it to idle, which is what every other test wants.
   useProjectStatus: () => ({
-    data: { specStatus: "approved", spec: { agent: mockSpecAgent } },
+    data: {
+      specStatus: "approved",
+      spec: { agent: mockSpecAgent, agentFlow: mockSpecFlow, designOutdated: false },
+    },
   }),
   useProjectTags: () => ({ data: { latest: "v1", specDirty: false } }),
   useBuildProject: () => ({ mutateAsync: mockMutateAsync }),
@@ -314,6 +319,7 @@ describe("SpecView while the kickoff is still writing", () => {
 
   it("says what is happening instead of offering an empty picker", () => {
     mockSpecAgent = "working";
+    mockSpecFlow = "start";
     empty();
     render(<SpecView projectName="proj1" />);
 
@@ -325,22 +331,20 @@ describe("SpecView while the kickoff is still writing", () => {
     ).not.toBeInTheDocument();
   });
 
-  // The message is keyed on the FILE LIST, not on the status. `spec.agent`
-  // returns to "" in every gap between turns and a status read can be older
-  // than the turn that started since — and each time it did, the user was
-  // handed "Select a file to view its content." over a workspace with no files
-  // in it to select.
-  it("holds the message when the status goes momentarily quiet", () => {
+  // The body says an agent is working ONLY when the rail pulses for the same
+  // reason. It used to claim it whenever the workspace was empty, so between
+  // turns the rail showed Requirements as not started while the body beside it
+  // insisted an agent was writing — the two surfaces contradicting each other.
+  it("does not claim work the rail is not showing", () => {
     mockSpecAgent = "";
+    mockSpecFlow = "";
     empty();
     render(<SpecView projectName="proj1" />);
 
     expect(
-      screen.getByText("Agent is working on the requirements document"),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByText("Select a file to view its content."),
+      screen.queryByText("Agent is working on the requirements document"),
     ).not.toBeInTheDocument();
+    expect(screen.getByText("Nothing written yet")).toBeInTheDocument();
   });
 
   // A failure has its own banner with its own way out; spinning underneath it
@@ -410,6 +414,7 @@ describe("SpecView while the kickoff is still writing", () => {
   // nothing to click.
   it("offers a way out when no turn has ever run", () => {
     mockSpecAgent = "never-started";
+    mockSpecFlow = "";
     empty();
     render(<SpecView projectName="proj1" />);
 
@@ -425,28 +430,29 @@ describe("SpecView while the kickoff is still writing", () => {
     });
   });
 
-  // Between turns, not before them: a turn HAS run, so the interview is under
-  // way and offering a restart would supersede it.
-  it("keeps spinning between turns rather than offering a restart", () => {
-    mockSpecAgent = "";
+  // A design run is not requirements work, so the requirements body says
+  // nothing about it.
+  it("does not claim requirements work during a design run", () => {
+    mockSpecAgent = "working";
+    mockSpecFlow = "design";
     empty();
     render(<SpecView projectName="proj1" />);
 
     expect(
-      screen.getByText("Agent is working on the requirements document"),
-    ).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+      screen.queryByText("Agent is working on the requirements document"),
+    ).not.toBeInTheDocument();
   });
 
   // An empty workspace offers NOTHING (#562 retest). It used to carry a Start
   // button, which appeared during the kickoff itself — the moment the user must
   // not be invited to restart it — because "the workspace looks empty" is true
   // for a while before the agent's first write lands.
-  it("offers no action while the workspace is merely empty", () => {
+  it("offers no action while an agent is actually writing", () => {
+    mockSpecAgent = "working";
+    mockSpecFlow = "start";
     empty();
     render(<SpecView projectName="proj1" />);
 
-    expect(screen.queryByRole("button", { name: "Start" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
   });
 });

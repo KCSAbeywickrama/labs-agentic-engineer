@@ -480,14 +480,6 @@ export function SpecView({ projectName }: { projectName: string }) {
   // failure that leaves the user with nothing and no explanation.
   const noRequirementsYet = !files.some((f) => f.group === "requirements");
   const failed = specAgent === "failed" && noRequirementsYet;
-  // No turn has EVER run for this project (#562 review): a dispatch that never
-  // reached the turn guard — no Anthropic key, an unreachable skills repo — or
-  // an abandoned reference upload the create held the kickoff for. Distinct
-  // from "" (a turn ran and finished), and the distinction is the whole point:
-  // without it this state showed a spinner promising work that was never
-  // coming, with nothing to click, because the way out hangs off `failed` and
-  // there is no turn row to have failed.
-  const neverStarted = specAgent === "never-started";
   // Retrying is a SEND, so it goes where every other send goes: the chat's
   // one-shot seed slot, GUARDED — the panel re-decides after it has rehydrated,
   // which is the first moment "is the agent mid-exchange" is knowable here.
@@ -546,6 +538,13 @@ export function SpecView({ projectName }: { projectName: string }) {
       }),
     [files, deriving, status.data?.spec.agentFlow, status.data?.spec.designOutdated, unsettled],
   );
+  // The rail's own answer to "is an agent writing the requirements", reused so
+  // the workspace body cannot contradict the rail beside it.
+  const requirementsActive =
+    railSections.find((sec) => sec.id === "requirements")?.state === "active";
+  // Written nothing, and nothing on the way.
+  const nothingToShow = files.length === 0 && !requirementsActive && !failed;
+
   // A reason row is a pointer to where the work already happens: the settle
   // controls live on the requirements document's own flagged lines, and a stale
   // design is repaired by the same re-derivation the header offers.
@@ -1232,10 +1231,13 @@ export function SpecView({ projectName }: { projectName: string }) {
                     />
                   </Box>
                 )
-              ) : neverStarted ? (
-                /* Nothing has run and nothing will until someone asks. The
-                   same Retry the failure banner offers — one way out, one
-                   word for it. */
+              ) : nothingToShow ? (
+                /* Nothing written and nothing running — a project whose
+                   kickoff never landed, or one sitting between turns with no
+                   document yet. Either way the workspace will not fill itself,
+                   so it offers the same Retry the failure banner does: one way
+                   out, one word for it. Guarded, so the panel drops it if the
+                   agent turns out to be mid-exchange. */
                 <EmptyState
                   title="Nothing written yet"
                   description="Your requirements and design appear here as the agent writes them."
@@ -1245,17 +1247,13 @@ export function SpecView({ projectName }: { projectName: string }) {
                     </Button>
                   }
                 />
-              ) : files.length === 0 ? (
-                /* An EMPTY workspace — the whole of the kickoff, before the
-                   agent's first write lands. "Select a file to view its
-                   content" is meaningless with no files to select, and that is
-                   what the user met whenever `spec.agent` was momentarily not
-                   "working": the gap between turns, or a status read older
-                   than the turn that started since.
-                   Keyed on the file list rather than on that status, so it
-                   cannot flap: a failure has its own banner above, so an empty
-                   workspace with no banner means the agent's work is pending or
-                   in flight either way. Same centred-spinner shape the
+              ) : requirementsActive ? (
+                /* An agent is writing the requirements right now — the same
+                   fact the rail pulses on, so the two surfaces cannot
+                   disagree. They did: this said "Agent is working on the
+                   requirements document" whenever the workspace was empty,
+                   including between turns when the rail correctly showed the
+                   section as not started. Same centred-spinner shape the
                    architecture pane uses while a design turn runs. */
                 failed ? null : (
                   <Box
@@ -1268,7 +1266,7 @@ export function SpecView({ projectName }: { projectName: string }) {
                       justifyContent: "center",
                     }}
                   >
-                    <CircularProgress aria-label="Agent is writing the requirements" />
+                    <CircularProgress size={28} aria-label="Agent is writing the requirements" />
                     <Typography variant="body2" color="text.secondary">
                       Agent is working on the requirements document
                     </Typography>
