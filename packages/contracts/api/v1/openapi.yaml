@@ -5392,6 +5392,21 @@ components:
             say *Writing requirements* while the platform-fired `/start` runs, and the spec
             view needs it to explain an empty workspace instead of offering a file picker.
           type: string
+        agentFlow:
+          description: >-
+            WHICH work the running turn is doing — the `/<skill>` token it runs under
+            (`start`, `design`, `settle`, `amend`, …); `""` for plain chat or when nothing is
+            running (#575). `agent` says an agent is working; this says on what, which the spec
+            rail needs to pulse the right section.
+
+            Without it the rail could only guess from which sections were still empty, and guessed
+            wrongly in both directions: settling an assumption lit Design (the first empty section,
+            though the work was requirements), and the moment a design run wrote its first file the
+            pulse jumped to Validation while the rest of the design was still being written.
+
+            Reported for the RUNNING turn only. A finished turn's flow says nothing about what is
+            happening now, and the section states are derived from committed files from then on.
+          type: string
         design:
           description: Design files exist for the spec (gates the Spec view's design button).
           type: boolean

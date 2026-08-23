@@ -30,6 +30,7 @@ function input(over: Partial<RailInput> = {}): RailInput {
     hasDesign: true,
     hasValidation: true,
     agentWorking: false,
+    agentFlow: "",
     designOutdated: false,
     assumptions: 0,
     openQuestions: 0,
@@ -68,35 +69,53 @@ describe("railSections — the rail is the flow", () => {
     for (const s of sections) expect(s.state).toBe("not-started");
   });
 
-  // The kickoff: an agent is interviewing about requirements, and design and
-  // acceptance criteria have not begun and cannot until requirements exist.
-  // Pulsing all three claimed the agent was writing documents it had not
-  // started and could not start.
-  it("pulses only the earliest empty section", () => {
+  // The kickoff. Design and acceptance criteria have not begun and cannot until
+  // requirements exist.
+  it("pulses the section the running work targets", () => {
     const sections = railSections(
-      input({ hasRequirements: false, hasDesign: false, hasValidation: false, agentWorking: true }),
+      input({
+        hasRequirements: false,
+        hasDesign: false,
+        hasValidation: false,
+        agentWorking: true,
+        agentFlow: "start",
+      }),
     );
     expect(of(sections, "requirements").state).toBe("active");
     expect(of(sections, "design").state).toBe("not-started");
     expect(of(sections, "validation").state).toBe("not-started");
   });
 
-  it("moves the pulse along as each section fills", () => {
+  // Guessing from emptiness lit Design here, because Design was the first empty
+  // section — though the work was settling an assumption in the requirements.
+  it("stays on requirements while an assumption is being settled", () => {
     const sections = railSections(
-      input({ hasDesign: false, hasValidation: false, agentWorking: true }),
+      input({ hasDesign: false, hasValidation: false, agentWorking: true, agentFlow: "settle" }),
     );
-    expect(of(sections, "requirements").state).toBe("ready");
+    expect(of(sections, "requirements").state).toBe("active");
+    expect(of(sections, "design").state).toBe("not-started");
+  });
+
+  // And it jumped to Validation the moment a design run wrote its first file,
+  // while the rest of the design was still being written.
+  it("keeps pulsing the design after its first file lands", () => {
+    const sections = railSections(
+      input({ hasValidation: false, agentWorking: true, agentFlow: "design" }),
+    );
     expect(of(sections, "design").state).toBe("active");
     expect(of(sections, "validation").state).toBe("not-started");
+  });
+
+  // An agent IS working, but nothing here can say where.
+  it("pulses nothing for work it cannot place", () => {
+    const sections = railSections(input({ agentWorking: true, agentFlow: "" }));
+    for (const s of sections) expect(s.state).not.toBe("active");
   });
 
   // A turn is known project-wide, never per document. While every section
   // holds something there is no honest way to say which is being worked on,
   // and a pulse on the wrong section is worse than a still rail.
-  it("claims nothing active once every section holds something", () => {
-    const sections = railSections(input({ agentWorking: true }));
-    for (const s of sections) expect(s.state).not.toBe("active");
-  });
+
 
   describe("the requirements have moved since the design", () => {
     const sections = railSections(input({ designOutdated: true }));
@@ -123,9 +142,9 @@ describe("railSections — the rail is the flow", () => {
 
     // The agent is already resolving it; warning about the thing being fixed
     // while it is being fixed reads as a fault.
-    it("yields to an agent that is working", () => {
+    it("yields to an agent that is working on it", () => {
       const working = railSections(
-        input({ designOutdated: true, hasDesign: false, agentWorking: true }),
+        input({ designOutdated: true, agentWorking: true, agentFlow: "design" }),
       );
       expect(of(working, "design").state).toBe("active");
     });

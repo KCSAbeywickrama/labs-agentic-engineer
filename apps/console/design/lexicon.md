@@ -382,10 +382,19 @@ overturn, the other a hole only you can fill — and neither GATES anything. Des
 assumptions is deliberate: the requirements arrive early, full of them, and are refined in place. The
 rail reports; Design stays clickable throughout.
 
-**Active is claimed only for a section with nothing in it yet.** A turn is known project-wide, never
-per document, so once every section holds something there is no honest way to say which is being
-worked on and nothing pulses. A pulse on the wrong section is worse than a still rail. What makes
-this precise is agents declaring their plan before they write, which is its own piece of work.
+**Active follows the WORK in flight, not which sections happen to be empty.** The running turn's
+flow says what it is for — settling an assumption is requirements work, a design run is design work
+— and that maps straight onto the section that will change. Guessing from emptiness was wrong in
+both directions: settling an assumption lit Design, because Design was the first empty section; and
+the moment a design run wrote its first file the pulse jumped to Validation, while the rest of the
+design was still being written.
+
+Work the rail cannot place — a plain chat turn, an org's own skill — pulses **nothing**. An agent is
+working, but a pulse on the wrong section is worse than a still rail.
+
+**The counts read the LIVE document, not the committed one.** Deleting an `*assumed*` flag clears
+the alert as you delete it; the committed copy is a collab flush behind, and on the agent's own
+edits that lag was long enough to look broken.
 
 **How staleness is known.** Every commit is a permanent snapshot, and every agent turn records the
 commit it read the project at — so the requirements *as the last design run saw them* are still

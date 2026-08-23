@@ -60,7 +60,9 @@ import { SpecMdEditor } from "../collab/SpecMdEditor";
 import { useYTextString } from "../collab/useYTextString";
 import { useTurnEndFlush } from "../collab/useTurnEndFlush";
 import { START_COMMAND } from "@aep/contracts/commands";
+import { fragmentToMarkdown } from "@aep/collab-doc";
 import { prdUnsettled } from "../lib/prdUnsettled";
+import { useYFragmentVersion } from "../collab/useYFragmentVersion";
 import {
   railSections as buildRailSections,
   type SectionReason,
@@ -512,7 +514,24 @@ export function SpecView({ projectName }: { projectName: string }) {
   // cannot see for itself (whether the requirements have moved since the design
   // was derived, and how much of the document is still unsettled) arrive as
   // plain inputs.
-  const unsettled = useMemo(() => prdUnsettled(prdContent.data?.content), [prdContent.data]);
+  // Read the LIVE document, not the committed copy. The committed one is a
+  // collab flush behind — so deleting an `*assumed*` flag left the alert up
+  // until the server next wrote, and on the agent's own edits that lag was long
+  // enough to look broken. Falls back to the committed content when the room is
+  // offline, which is the only time it is the freshest thing available.
+  const prdFragment = collab.getFileFragment(PRD_PATH);
+  const prdVersion = useYFragmentVersion(prdFragment);
+  const livePrd = useMemo(() => {
+    // The fragment is mutated IN PLACE, so its identity never changes and only
+    // the counter marks that its content did — reading it here is what makes
+    // that a real dependency rather than one the linter can dismiss.
+    void prdVersion;
+    return prdFragment ? fragmentToMarkdown(prdFragment) : null;
+  }, [prdFragment, prdVersion]);
+  const unsettled = useMemo(
+    () => prdUnsettled(livePrd ?? prdContent.data?.content),
+    [livePrd, prdContent.data],
+  );
   const railSections = useMemo(
     () =>
       buildRailSections({
@@ -520,11 +539,12 @@ export function SpecView({ projectName }: { projectName: string }) {
         hasDesign: files.some((f) => f.group === "designs"),
         hasValidation: files.some((f) => f.group === "validation"),
         agentWorking: deriving,
+        agentFlow: status.data?.spec.agentFlow ?? "",
         designOutdated: status.data?.spec.designOutdated ?? false,
         assumptions: unsettled.assumptions,
         openQuestions: unsettled.openQuestions,
       }),
-    [files, deriving, status.data?.spec.designOutdated, unsettled],
+    [files, deriving, status.data?.spec.agentFlow, status.data?.spec.designOutdated, unsettled],
   );
   // A reason row is a pointer to where the work already happens: the settle
   // controls live on the requirements document's own flagged lines, and a stale

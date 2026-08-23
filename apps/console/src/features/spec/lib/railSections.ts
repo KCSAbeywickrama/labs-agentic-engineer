@@ -69,6 +69,9 @@ export interface RailInput {
   hasValidation: boolean;
   /** An agent turn is running somewhere on this project. */
   agentWorking: boolean;
+  /** WHICH work is running — the flow token (`start`, `design`, `settle`, …);
+   *  "" for plain chat or nothing. */
+  agentFlow: string;
   /** The requirements moved since the design was last derived from them. */
   designOutdated: boolean;
   /** Judgments the agent made that the user may want to challenge. */
@@ -78,6 +81,28 @@ export interface RailInput {
 }
 
 const REQUIREMENTS_MOVED = "The requirements have changed since";
+
+/**
+ * Which section a running turn is changing.
+ *
+ * `start` opens the requirements interview; `settle` and `amend` revise that
+ * same document; `design` derives the design — and the acceptance criteria with
+ * it, but Design is the section named because it is where the work visibly
+ * lands and where the user goes to watch it.
+ *
+ * Guarded lookup, never indexed directly: the flow is a token a user can type,
+ * so `/constructor` would otherwise reach `Object.prototype` and yield
+ * something that is not a section id.
+ */
+const SECTION_FOR_FLOW: Record<string, RailSection["id"]> = {
+  start: "requirements",
+  settle: "requirements",
+  amend: "requirements",
+  feature: "requirements",
+  actor: "requirements",
+  expand: "requirements",
+  design: "design",
+};
 
 function plural(n: number, one: string, many: string): string {
   return `${n} ${n === 1 ? one : many}`;
@@ -154,17 +179,23 @@ export function railSections(input: RailInput): RailSection[] {
     validation: input.hasValidation,
   };
 
-  // At most ONE section pulses, and only the earliest empty one.
+  // At most ONE section pulses, and WHICH one comes from the work in flight
+  // rather than from which sections happen to be empty.
   //
-  // A turn is known project-wide — an agent is working — never per document.
-  // Pulsing every empty section on that basis lit all three during the kickoff,
-  // claiming the agent was writing a design and acceptance criteria while it
-  // was still interviewing about requirements. The sections are ordered because
-  // the work is: nothing downstream begins until what it derives from exists,
-  // so the earliest empty one is the only honest candidate.
-  const activeID = input.agentWorking
-    ? (["requirements", "design", "validation"] as const).find((id) => !has[id])
-    : undefined;
+  // Guessing from emptiness was wrong in both directions. Settling an
+  // assumption lit Design, because Design was the first empty section though
+  // the work was requirements. And the moment a design run wrote its first
+  // file the pulse jumped to Validation, because Design had stopped being
+  // empty — while the rest of the design was still being written.
+  //
+  // The flow says what the turn is for, so it maps straight onto the section
+  // that will change. An unrecognised flow (a plain chat turn, an org's own
+  // skill) pulses nothing: an agent IS working, but nothing here can say where,
+  // and a pulse on the wrong section is worse than a still rail.
+  const activeID =
+    input.agentWorking && Object.hasOwn(SECTION_FOR_FLOW, input.agentFlow)
+      ? SECTION_FOR_FLOW[input.agentFlow]
+      : undefined;
 
   const section = (
     id: RailSection["id"],
@@ -173,17 +204,19 @@ export function railSections(input: RailInput): RailSection[] {
   ): RailSection => ({
     id,
     title,
-    // Nothing here yet reads as NOT STARTED unless this is the section being
-    // worked on. Downstream sections stay dim through the whole of the
-    // requirements interview, which is what they are: not begun, and not
-    // beginnable until the thing they derive from exists.
-    state: !has[id]
-      ? id === activeID
+    // ACTIVE outranks everything, and does not require the section to be empty:
+    // a design run keeps pulsing Design after its first file lands, because it
+    // is still writing the rest. Downstream sections stay dim through the whole
+    // of the requirements interview, which is what they are — not begun, and
+    // not beginnable until the thing they derive from exists.
+    state:
+      id === activeID
         ? "active"
-        : "not-started"
-      : reasons.length > 0
-        ? "attention"
-        : "ready",
+        : !has[id]
+          ? "not-started"
+          : reasons.length > 0
+            ? "attention"
+            : "ready",
     reasons: has[id] ? reasons : [],
   });
 

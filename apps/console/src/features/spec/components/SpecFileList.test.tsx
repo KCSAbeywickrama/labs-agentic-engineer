@@ -34,6 +34,7 @@ const RAIL_INPUT: RailInput = {
   hasDesign: true,
   hasValidation: true,
   agentWorking: false,
+  agentFlow: "",
   designOutdated: false,
   assumptions: 0,
   openQuestions: 0,
@@ -133,7 +134,7 @@ describe("SpecFileList — the rail carries state", () => {
 
   // Work in progress is the app's existing pulse, not a second animation.
   it("pulses the section an agent is working on", () => {
-    renderWith({ hasDesign: false, agentWorking: true });
+    renderWith({ hasDesign: false, agentWorking: true, agentFlow: "design" });
     expect(screen.getAllByTestId("working-pulse").length).toBeGreaterThan(0);
   });
 

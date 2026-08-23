@@ -1735,6 +1735,11 @@ type SpecStage struct {
 	// Agent Whether an agent is working on this project's spec right now, and how the last attempt ended (#562). `never-started` — no turn has EVER run for this project; `""` — a turn has run and the newest one completed; `working` — a turn is in flight; `failed` — the newest turn ended in failure and none has run since. `never-started` is distinct from `""` because the two need opposite treatment: one means the journey has not begun and the user needs a way to begin it, the other means it is under way between turns and offering to restart it would supersede a live interview. Derived from the newest `agent_turns` row for the project, which is what `exists`/`version`/`dirty` cannot say: all three read committed git, and a kickoff writes nothing until it lands. The overview's spec card needs it to say *Writing requirements* while the platform-fired `/start` runs, and the spec view needs it to explain an empty workspace instead of offering a file picker.
 	Agent string `json:"agent"`
 
+	// AgentFlow WHICH work the running turn is doing — the `/<skill>` token it runs under (`start`, `design`, `settle`, `amend`, …); `""` for plain chat or when nothing is running (#575). `agent` says an agent is working; this says on what, which the spec rail needs to pulse the right section.
+	// Without it the rail could only guess from which sections were still empty, and guessed wrongly in both directions: settling an assumption lit Design (the first empty section, though the work was requirements), and the moment a design run wrote its first file the pulse jumped to Validation while the rest of the design was still being written.
+	// Reported for the RUNNING turn only. A finished turn's flow says nothing about what is happening now, and the section states are derived from committed files from then on.
+	AgentFlow string `json:"agentFlow,omitempty"`
+
 	// Design Design files exist for the spec (gates the Spec view's design button).
 	Design bool `json:"design"`
 

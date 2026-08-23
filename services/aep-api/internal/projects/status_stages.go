@@ -189,6 +189,19 @@ func specAgentOf(source specTurnRows, newest *spec.AgentTurn) string {
 	return specAgentState(newest)
 }
 
+// runningFlowOf reports WHICH work is in flight, for the spec rail to pulse the
+// right section (#575).
+//
+// Only a RUNNING turn has one. A finished turn's flow says nothing about what is
+// happening now, and reporting it would leave the rail pulsing whatever the last
+// run happened to be long after it ended.
+func runningFlowOf(newest *spec.AgentTurn) string {
+	if newest == nil || newest.Status != spec.TurnStatusRunning {
+		return ""
+	}
+	return newest.Flow
+}
+
 func specAgentState(newest *spec.AgentTurn) string {
 	if newest == nil {
 		return specAgentNeverStarted
@@ -307,6 +320,7 @@ func (s *Service) populateStages(ctx context.Context, orgName, projectName strin
 		Dirty:          snap.SpecDirty,
 		Design:         snap.HasDesign,
 		Agent:          specAgentOf(s.specTurns, newestTurn),
+		AgentFlow:      runningFlowOf(newestTurn),
 		DesignOutdated: outdated,
 	}
 	applyFlatArtifactFields(status, snap)
