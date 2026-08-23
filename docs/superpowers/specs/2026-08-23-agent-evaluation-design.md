@@ -42,7 +42,34 @@ needs:
 - **Drivers** that run the real agent rather than a mock of it.
 
 That framework is for OUR agents, in this repo, run by AEP developers. This
-design reuses its shape for CUSTOMER agents, inside the build.
+design **extracts its portable half and reuses it** for CUSTOMER agents, inside
+the build.
+
+The split is already clean. These files carry no `@aep/*` import and move to a
+shared package: `scenario.ts` (the brief and rubric zod schemas),
+`scoring/judge.ts` (the model-graded rubric judge), `scoring/bands.ts`,
+`scoring/review-sheet.ts`, `eval-kit.ts`, `config.ts`, `project.ts`. The
+AEP-coupled files stay: the DRIVERS (`drivers/*.ts`, six `@aep/*` imports each),
+`runner.ts`, `tracing.ts`, `scoring/structural.ts`.
+
+That the drivers are the coupling is the point — a driver knows how to talk to
+the thing under test. `evals/spec-agents` keeps its driver for our spec agents;
+a customer agent gets a new one that talks to `POST /chat`.
+
+**Extracted rather than written fresh, for one reason above the others: the
+judge.** A new judge would be a second, differently-calibrated answer to "how
+good is this agent" — one scale for AEP's own agents, another for customers'.
+For a platform whose product is agents, that is a bad thing to own two of. The
+same applies to the sim user, which is tuned (fatigue tiers, fact vs
+persona-fallback vs improvised answers) and coupled only by a single type
+import.
+
+**promptfoo was considered and rejected**, having checked its capabilities
+rather than recalled them. It would have given weighted `llm-rubric` scoring,
+grader pinning, config validation and report formatting off the shelf — real
+wins. It was turned down because it brings its OWN judge, and the duplicate
+calibration above costs more than the reporting saves. Worth revisiting if the
+extracted kit ever proves harder to maintain than expected.
 
 ## Decisions
 
