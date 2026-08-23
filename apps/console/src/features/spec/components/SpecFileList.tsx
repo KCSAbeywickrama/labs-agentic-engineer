@@ -35,7 +35,6 @@ import {
   ChevronDown,
   ChevronRight,
   FileText,
-  Plus,
   RefreshCw,
   Network,
   LayoutDashboard,
@@ -99,7 +98,6 @@ export function SpecFileList({
   files,
   selection,
   onSelect,
-  onAddArtifact,
   onRegenerateDesign,
   regenerateDisabled,
   sections,
@@ -108,7 +106,6 @@ export function SpecFileList({
   files: SpecFileEntry[];
   selection: SpecSelection | null;
   onSelect: (sel: SpecSelection) => void;
-  onAddArtifact: () => void;
   /** Re-generate the design (#159) — shown in the Designs header once a design
    *  exists; fires the same design-generation room turn as the header CTA. */
   onRegenerateDesign: () => void;
@@ -216,8 +213,10 @@ export function SpecFileList({
         onClick={() => onReason(reason.action)}
         sx={{ pl: 2, pr: 2, py: 0.25 }}
       >
-        <ListItemIcon sx={{ minWidth: 26 }}>
-          <TriangleAlert size={14} color="var(--mui-palette-warning-main)" />
+        {/* Same icon slot width as a document row, so a reason lines up with
+            the documents beneath it instead of sitting at its own indent. */}
+        <ListItemIcon sx={{ minWidth: 32 }}>
+          <TriangleAlert size={16} color="var(--mui-palette-warning-main)" />
         </ListItemIcon>
         <ListItemText
           primary={reason.label}
@@ -248,26 +247,9 @@ export function SpecFileList({
     </ListItemButton>
   );
 
-  const flatGroup = (
-    section: RailSection,
-    groupFiles: SpecFileEntry[],
-    addBtn?: boolean,
-  ) => (
+  const flatGroup = (section: RailSection, groupFiles: SpecFileEntry[]) => (
     <Box sx={{ mb: 1 }}>
-      {sectionHeader(
-        section,
-        addBtn ? (
-          <Tooltip title="Add requirement artifact">
-            <IconButton
-              size="small"
-              aria-label="Add requirement artifact"
-              onClick={onAddArtifact}
-            >
-              <Plus size={16} />
-            </IconButton>
-          </Tooltip>
-        ) : undefined,
-      )}
+      {sectionHeader(section)}
       {groupFiles.length > 0 || section.reasons.length > 0 ? (
         <List dense disablePadding>
           {reasonRows(section)}
@@ -289,7 +271,7 @@ export function SpecFileList({
 
   return (
     <Box component="nav" aria-label="Spec files" sx={{ py: 1 }}>
-      {flatGroup(sectionOf("requirements"), requirements, true)}
+      {flatGroup(sectionOf("requirements"), requirements)}
 
       {/* Design — grouped by component, with synthetic diagram entries. */}
       <Box sx={{ mb: 1 }}>

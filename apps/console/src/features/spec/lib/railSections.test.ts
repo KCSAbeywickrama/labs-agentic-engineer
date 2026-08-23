@@ -63,11 +63,26 @@ describe("railSections — the rail is the flow", () => {
     for (const s of sections) expect(s.state).toBe("not-started");
   });
 
-  it("an empty section with an agent working is active", () => {
+  // The kickoff: an agent is interviewing about requirements, and design and
+  // acceptance criteria have not begun and cannot until requirements exist.
+  // Pulsing all three claimed the agent was writing documents it had not
+  // started and could not start.
+  it("pulses only the earliest empty section", () => {
     const sections = railSections(
       input({ hasRequirements: false, hasDesign: false, hasValidation: false, agentWorking: true }),
     );
-    for (const s of sections) expect(s.state).toBe("active");
+    expect(of(sections, "requirements").state).toBe("active");
+    expect(of(sections, "design").state).toBe("not-started");
+    expect(of(sections, "validation").state).toBe("not-started");
+  });
+
+  it("moves the pulse along as each section fills", () => {
+    const sections = railSections(
+      input({ hasDesign: false, hasValidation: false, agentWorking: true }),
+    );
+    expect(of(sections, "requirements").state).toBe("ready");
+    expect(of(sections, "design").state).toBe("active");
+    expect(of(sections, "validation").state).toBe("not-started");
   });
 
   // A turn is known project-wide, never per document. While every section
@@ -108,6 +123,13 @@ describe("railSections — the rail is the flow", () => {
         input({ designOutdated: true, hasDesign: false, agentWorking: true }),
       );
       expect(of(working, "design").state).toBe("active");
+    });
+
+    // A section with nothing in it has nothing to be stale.
+    it("says nothing about a section that does not exist yet", () => {
+      const none = railSections(input({ hasDesign: false, designOutdated: true }));
+      expect(of(none, "design").state).toBe("not-started");
+      expect(of(none, "design").reasons).toEqual([]);
     });
   });
 

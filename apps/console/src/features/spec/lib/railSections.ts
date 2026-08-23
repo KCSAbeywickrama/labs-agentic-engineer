@@ -111,12 +111,12 @@ function requirementsReasons(input: RailInput): SectionReason[] {
 /**
  * The three sections, in journey order, each carrying its state and reasons.
  *
- * ACTIVE is claimed only for a section that has nothing in it yet. An agent
- * turn is known project-wide — a turn is running — but not per document, so
- * while every section holds something there is no honest way to say which one
- * is being worked on, and nothing pulses. Guessing would put the pulse on the
- * wrong section, which is worse than a still rail. The per-document work that
- * makes this precise waits on agents declaring their plan before they write.
+ * ACTIVE is claimed for at most ONE section — the earliest that has nothing in
+ * it — and only while an agent is working. Once every section holds something
+ * nothing pulses: a turn is known project-wide, never per document, so there is
+ * no honest way to say which one is being worked on, and a pulse on the wrong
+ * section is worse than a still rail. The per-document work that makes this
+ * precise waits on agents declaring their plan before they write.
  *
  * ATTENTION never outranks ACTIVE: an agent working on a stale design is
  * already resolving it, and a warning about the thing being fixed while it is
@@ -128,49 +128,53 @@ export function railSections(input: RailInput): RailSection[] {
     : [];
 
   const requirements = requirementsReasons(input);
+  const has: Record<RailSection["id"], boolean> = {
+    requirements: input.hasRequirements,
+    design: input.hasDesign,
+    validation: input.hasValidation,
+  };
+
+  // At most ONE section pulses, and only the earliest empty one.
+  //
+  // A turn is known project-wide — an agent is working — never per document.
+  // Pulsing every empty section on that basis lit all three during the kickoff,
+  // claiming the agent was writing a design and acceptance criteria while it
+  // was still interviewing about requirements. The sections are ordered because
+  // the work is: nothing downstream begins until what it derives from exists,
+  // so the earliest empty one is the only honest candidate.
+  const activeID = input.agentWorking
+    ? (["requirements", "design", "validation"] as const).find((id) => !has[id])
+    : undefined;
+
+  const section = (
+    id: RailSection["id"],
+    title: string,
+    reasons: SectionReason[],
+  ): RailSection => ({
+    id,
+    title,
+    // Nothing here yet reads as NOT STARTED unless this is the section being
+    // worked on. Downstream sections stay dim through the whole of the
+    // requirements interview, which is what they are: not begun, and not
+    // beginnable until the thing they derive from exists.
+    state: !has[id]
+      ? id === activeID
+        ? "active"
+        : "not-started"
+      : reasons.length > 0
+        ? "attention"
+        : "ready",
+    reasons: has[id] ? reasons : [],
+  });
 
   return [
-    {
-      id: "requirements",
-      title: "Requirements",
-      state: !input.hasRequirements
-        ? input.agentWorking
-          ? "active"
-          : "not-started"
-        : requirements.length > 0
-          ? "attention"
-          : "ready",
-      reasons: input.hasRequirements ? requirements : [],
-    },
-    {
-      // "Design", not "Designs" — one design, written across several documents.
-      id: "design",
-      title: "Design",
-      state: !input.hasDesign
-        ? input.agentWorking
-          ? "active"
-          : "not-started"
-        : input.designOutdated
-          ? "attention"
-          : "ready",
-      reasons: input.hasDesign ? outdatedReason : [],
-    },
-    {
-      // The acceptance criteria are written against the same stories the design
-      // is, and the same re-derivation rewrites both — so they go stale
-      // together and clear together. Flagging only the design would quietly
-      // assert that criteria written against a story you have since rewritten
-      // are still fine.
-      id: "validation",
-      title: "Validation",
-      state: !input.hasValidation
-        ? input.agentWorking
-          ? "active"
-          : "not-started"
-        : input.designOutdated
-          ? "attention"
-          : "ready",
-      reasons: input.hasValidation ? outdatedReason : [],
-    },
+    section("requirements", "Requirements", requirements),
+    // "Design", not "Designs" — one design, written across several documents.
+    section("design", "Design", outdatedReason),
+    // The acceptance criteria are written against the same stories the design
+    // is, and the same re-derivation rewrites both — so they go stale together
+    // and clear together. Flagging only the design would quietly assert that
+    // criteria written against a story you have since rewritten are still fine.
+    section("validation", "Validation", outdatedReason),
   ];
 }

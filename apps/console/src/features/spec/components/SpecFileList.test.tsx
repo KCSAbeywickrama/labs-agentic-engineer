@@ -53,7 +53,6 @@ function renderList(files: SpecFileEntry[], sections?: RailSection[], onReason =
         files={files}
         selection={null}
         onSelect={() => {}}
-        onAddArtifact={() => {}}
         onRegenerateDesign={() => {}}
         sections={sections ?? railSections(RAIL_INPUT)}
         onReason={onReason}
@@ -108,8 +107,7 @@ describe("SpecFileList — the rail carries state", () => {
           files={files}
           selection={null}
           onSelect={() => {}}
-          onAddArtifact={() => {}}
-          onRegenerateDesign={() => {}}
+            onRegenerateDesign={() => {}}
           sections={railSections({ ...RAIL_INPUT, ...over })}
           onReason={onReason}
         />

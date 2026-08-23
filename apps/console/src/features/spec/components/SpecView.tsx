@@ -70,7 +70,6 @@ import { EmptyState } from "../../../components/EmptyState";
 import { useResolveDependencyViaChat } from "../../agent-chat/useResolveDependencyViaChat";
 import type { DependencyResolutionIntent } from "../../projects/lib/dependencyResolutionMessage.js";
 import { useDesignCellChangeCount } from "../collab/useDesignCellChange";
-import { AddArtifactDialog } from "./AddArtifactDialog";
 import { BuildDependencyDrawer } from "./BuildDependencyDrawer";
 import { SpecFileList } from "./SpecFileList";
 import { CellDiagramPanel } from "./CellDiagramPanel";
@@ -123,7 +122,6 @@ export function SpecView({ projectName }: { projectName: string }) {
     projectName,
   );
   const [selection, setSelection] = useState<SpecSelection | null>(null);
-  const [addArtifactOpen, setAddArtifactOpen] = useState(false);
   // Build (#162): commit-then-build. buildPhase drives the button label /
   // loading; an agent peer in the room means a turn is writing → block Build.
   const build = useBuildProject(projectName);
@@ -1037,7 +1035,6 @@ export function SpecView({ projectName }: { projectName: string }) {
                 files={files}
                 selection={effectiveSelection}
                 onSelect={setSelection}
-                onAddArtifact={() => setAddArtifactOpen(true)}
                 onRegenerateDesign={generateDesign}
                 regenerateDisabled={agentBusy}
                 sections={railSections}
@@ -1271,10 +1268,6 @@ export function SpecView({ projectName }: { projectName: string }) {
         )}
       </Box>
 
-      <AddArtifactDialog
-        open={addArtifactOpen}
-        onClose={() => setAddArtifactOpen(false)}
-      />
 
       <BuildDependencyDrawer
         open={dependencyDrawerOpen}
