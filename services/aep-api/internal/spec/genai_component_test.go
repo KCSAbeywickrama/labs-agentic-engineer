@@ -346,6 +346,22 @@ func (m *memTurnRepo) GetActive(_ context.Context, orgID, projectID string) (*sp
 	return nil, nil
 }
 
+func (m *memTurnRepo) NewestCompletedFlow(_ context.Context, orgID, projectID, flow string) (*spec.AgentTurn, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var newest *spec.AgentTurn
+	for _, r := range m.rows { // insertion order == creation order
+		if r.OrgID == orgID && r.ProjectID == projectID && r.Flow == flow && r.Status == "completed" {
+			newest = r
+		}
+	}
+	if newest == nil {
+		return nil, nil
+	}
+	cp := *newest
+	return &cp, nil
+}
+
 func (m *memTurnRepo) Newest(_ context.Context, orgID, projectID string) (*spec.AgentTurn, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -555,12 +571,12 @@ func newGenaiRig(t *testing.T, seed map[string]string, opts ...rigOption) *genai
 		skillsRepo = cfg.skillsRepo
 	}
 	svc := spec.NewService(spec.ServiceDeps{
-		Repos:      stubRepoResolver{rec: rec},
-		Git:        sourcecontrol.NewGitOpsService(stubResolver{}, fx.Engine),
-		Keys:       func(context.Context, string) (string, error) { return rig.key, nil },
-		Client:     client,
-		Turns:      turns,
-		Broker:     broker,
+		Repos:         stubRepoResolver{rec: rec},
+		Git:           sourcecontrol.NewGitOpsService(stubResolver{}, fx.Engine),
+		Keys:          func(context.Context, string) (string, error) { return rig.key, nil },
+		Client:        client,
+		Turns:         turns,
+		Broker:        broker,
 		Snapshots:     fx.Engine,
 		SkillsRepo:    skillsRepo,
 		Conversations: cfg.conversations,

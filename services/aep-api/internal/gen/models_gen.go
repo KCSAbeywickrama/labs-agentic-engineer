@@ -1738,6 +1738,11 @@ type SpecStage struct {
 	// Design Design files exist for the spec (gates the Spec view's design button).
 	Design bool `json:"design"`
 
+	// DesignOutdated The requirements have changed since the design was last derived from them (#575), so the design may no longer describe what the user asked for. Derived by comparing the requirements as they stand now against the requirements as they stood in the snapshot the newest successful `/design` turn read — no stored fingerprint, so there is nothing to fall out of sync and it answers for projects that predate the field.
+	// Coarse ON PURPOSE: it reports that the requirements moved, never which components are affected. The two failures are not symmetric — over-marking costs one re-derivation the agent mostly no-ops through, while under-marking ships a design the user has already changed their mind about to the coding agents.
+	// False while a project has no design or no successful design turn: there is nothing to be behind.
+	DesignOutdated bool `json:"designOutdated,omitempty"`
+
 	// Dirty specs/ moved on GitHub past the latest tag.
 	Dirty bool `json:"dirty"`
 

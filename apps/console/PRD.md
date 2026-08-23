@@ -100,6 +100,20 @@ here: they're the open `console` + `feature` issues.
   died, **Generate spec** on a project nothing ever started —
   [#562](https://github.com/wso2/labs-agentic-engineer/issues/562)
   (contract: `SpecStage.agent`, `CreateProjectRequest.referencesPending`)
+- Spec view — the rail is the flow: **Requirements · Design · Validation**
+  each carrying state (ready · being worked on · needs attention · not begun),
+  documents named as documents rather than files (*Product requirements*,
+  *Design overview*, *Acceptance criteria*), and the app's existing pulse on a
+  section an agent is writing. An amber section explains itself in **rows** —
+  *N assumptions to challenge*, *N open questions*, *The requirements have
+  changed since* — each going where the work already happens. Staleness is
+  derived by comparing the requirements against the snapshot the last design run
+  read, so nothing is stored and nothing can fall out of sync; **an outdated
+  design is refused by the build gate**, joining the refusal Build already shows
+  on click. Retires *"Being derived…"*, which claimed work over sections nobody
+  had asked for —
+  [#575](https://github.com/wso2/labs-agentic-engineer/issues/575)
+  (contract: `SpecStage.designOutdated`)
 - Overview — the spec card stops rewriting itself: **one button** (*Open spec*)
   in every state instead of three captions walked during a single kickoff with
   no user input, and **one line that always says something** instead of blanking

@@ -60,6 +60,11 @@ import { SpecMdEditor } from "../collab/SpecMdEditor";
 import { useYTextString } from "../collab/useYTextString";
 import { useTurnEndFlush } from "../collab/useTurnEndFlush";
 import { START_COMMAND } from "@aep/contracts/commands";
+import { prdUnsettled } from "../lib/prdUnsettled";
+import {
+  railSections as buildRailSections,
+  type SectionReason,
+} from "../lib/railSections";
 import { chatKeyFor, setPendingSeed, subscribeTurnEnd } from "../../agent-chat/chatStore";
 import { EmptyState } from "../../../components/EmptyState";
 import { useResolveDependencyViaChat } from "../../agent-chat/useResolveDependencyViaChat";
@@ -502,6 +507,36 @@ export function SpecView({ projectName }: { projectName: string }) {
     const stories = prdContent.data ? parsePrdStories(prdContent.data.content) : [];
     return { stories, nextVersion: nextVersionLabel(tags.data?.latest) };
   }, [prdContent.data, tags.data?.latest]);
+
+  // What the rail says (#575). Derived here rather than inside the rail so the
+  // rules stay testable without a workspace — and so the two facts the rail
+  // cannot see for itself (whether the requirements have moved since the design
+  // was derived, and how much of the document is still unsettled) arrive as
+  // plain inputs.
+  const unsettled = useMemo(() => prdUnsettled(prdContent.data?.content), [prdContent.data]);
+  const railSections = useMemo(
+    () =>
+      buildRailSections({
+        hasRequirements: files.some((f) => f.group === "requirements"),
+        hasDesign: files.some((f) => f.group === "designs"),
+        hasValidation: files.some((f) => f.group === "validation"),
+        agentWorking: deriving,
+        designOutdated: status.data?.spec.designOutdated ?? false,
+        assumptions: unsettled.assumptions,
+        openQuestions: unsettled.openQuestions,
+      }),
+    [files, deriving, status.data?.spec.designOutdated, unsettled],
+  );
+  // A reason row is a pointer to where the work already happens: the settle
+  // controls live on the requirements document's own flagged lines, and a stale
+  // design is repaired by the same re-derivation the header offers.
+  const onRailReason = (action: SectionReason["action"]) => {
+    if (action === "update-design") {
+      generateDesign();
+      return;
+    }
+    setSelection({ kind: "file", path: PRD_PATH });
+  };
 
   const seedChat = (message: string) =>
     setPendingSeed(chatKeyFor(orgHandle ?? "default", projectName), message);
@@ -1005,8 +1040,8 @@ export function SpecView({ projectName }: { projectName: string }) {
                 onAddArtifact={() => setAddArtifactOpen(true)}
                 onRegenerateDesign={generateDesign}
                 regenerateDisabled={agentBusy}
-                deriving={deriving}
-                failed={failed}
+                sections={railSections}
+                onReason={onRailReason}
               />
             </Box>
             <Box
