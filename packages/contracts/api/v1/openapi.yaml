@@ -617,6 +617,12 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/TurnInputBody'
+          multipart/form-data:
+            encoding:
+              files:
+                contentType: application/octet-stream
+            schema:
+              $ref: '#/components/schemas/TurnInputMultipart'
         required: true
       responses:
         '202':
@@ -625,6 +631,14 @@ paths:
               schema:
                 $ref: '#/components/schemas/TurnOutputBody'
           description: Accepted
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Rejected multipart send — unsupported type, a file over 5 MiB, more than
+            10 files, or more than 15 MiB of raw bytes in total. NOTHING is sent and no turn is
+            started, so the client may re-send the same selection after the user drops a file.
         '409':
           content:
             application/json:
@@ -5789,6 +5803,59 @@ components:
           type: string
         target:
           description: Optional target (e.g. a doc type)
+          type: string
+      required:
+      - instruction
+      type: object
+    TurnInputMultipart:
+      additionalProperties: false
+      description: >
+        The same turn input as `TurnInputBody`, sent as multipart so it can carry chat
+        attachments (#428). The JSON form stays the canonical one — a message with no
+        attachments MUST use it, and every existing caller is unaffected.
+
+
+        Attachments are CONVERSATION-SCOPED MODEL CONTENT (console ADR-0019): the platform
+        never writes them to disk and never commits them. They ride this request into the
+        turn and are durable only as parts of the conversation's history, which is also
+        what makes re-sending one free — the agents service dedupes by file name.
+
+
+        Deliberately NOT the reference-document channel: `POST /projects/{name}/references`
+        REPLACES a project's whole stored set, and the create view is the only door to it.
+        A file attached here never becomes a project reference, even when the instruction
+        is `/start`.
+      properties:
+        collab:
+          description: As `TurnInputBody.collab`.
+          type: boolean
+        files:
+          description: >
+            Chat attachments, two groups and the split matters downstream. Read NATIVELY as
+            file parts: `.pdf`, and the four image media types the Messages API accepts —
+            `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`. Read AS TEXT (sent as `text/plain`,
+            the only text document type the Anthropic provider maps): `.md`, `.txt`, `.csv`,
+            `.tsv`, `.json`, `.yaml`, `.yml`, `.xml`, `.html`, `.rst`. Office formats are
+            not accepted — the models do not read them natively.
+
+
+            Three caps, and all of them restate ONE number: the agents service already
+            enforces a 20 MiB base64-ENCODED per-turn attachment budget (#384), past which
+            it warns and skips. So at most 10 files, each at most 5 MiB, and at most 15 MiB
+            of raw bytes in TOTAL — 15 MiB raw is 20 MiB encoded. The total is the load-
+            bearing one: a per-file cap alone cannot hold the line, since ten 5 MiB files
+            each pass it and together overrun the budget by 3x.
+          items:
+            format: binary
+            type: string
+          maxItems: 10
+          type: array
+        instruction:
+          description: As `TurnInputBody.instruction`. Required — an attachment alone cannot
+            start a turn, and the shared TurnSpec validator rejects an empty chat text.
+          type: string
+        target:
+          description: As `TurnInputBody.target`.
           type: string
       required:
       - instruction

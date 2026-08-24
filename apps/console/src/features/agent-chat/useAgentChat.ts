@@ -21,6 +21,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { projectKeys } from "../projects/api/keys.js";
 import {
   addMessage,
+  clearFailedSends,
   chatKeyFor,
   dropTurnOutput,
   ensureUserMessage,
@@ -143,7 +144,18 @@ export interface AgentChat {
    * invisible. A user's own words never wait on it.
    */
   historyReady: boolean;
-  send: (instruction: string) => void;
+  /**
+   * Send a message, optionally with chat attachments (#428). Resolves TRUE once
+   * the turn has been accepted by the server, FALSE when the send was refused
+   * (a 409 turn-already-running or rotated thread, a network failure, or a
+   * rejected multipart body).
+   *
+   * The caller needs that answer: attachment bytes live nowhere but the
+   * browser, so clearing the composer on a refused send would cost the user a
+   * re-pick of every file from disk (ADR-0019). It resolves when the turn
+   * STARTS, not when it finishes — the stream is folded in the background.
+   */
+  send: (instruction: string, files?: File[]) => Promise<boolean>;
   /** Rotate to a fresh PROJECT-WIDE thread (header action, D4). The caller
    *  owns the confirmation — this just performs the rotation. */
   newConversation: () => void;
@@ -219,8 +231,9 @@ export function useAgentChat(org: string, projectName: string): AgentChat {
     // LOCAL-ONLY rows survive the replace: a failed send's user row (the
     // typed text) and its error row exist nowhere server-side, and washing
     // them out on the next refocus would silently destroy the one copy of a
-    // message the user still needs to retry. They persist until the next
-    // rotation clears the log.
+    // message the user still needs to retry. They are cleared by the next
+    // SUCCESSFUL send (clearFailedSends) or by a rotation — without that bound
+    // a failure stayed pinned below newer turns forever, reading as a retry.
     const rehydrate = async () => {
       // Not while a local send is mid-dispatch either. The optimistic row has
       // no turn id yet and the server has no record of it, so it survives
@@ -367,11 +380,14 @@ export function useAgentChat(org: string, projectName: string): AgentChat {
   }, [chatKey, org, projectName, conversationId, onTurnCommitted, queryClient]);
 
   const send = useCallback(
-    (instruction: string) => {
+    async (instruction: string, files: File[] = []): Promise<boolean> => {
       const text = instruction.trim();
-      if (!text || isSending || !conversationId) return;
+      if (!text || isSending || !conversationId) return false;
       setIsSending(true);
       pendingStartRef.current = true;
+      // Names only, and only when there are any: a message without attachments
+      // must persist exactly the row shape it did before this feature.
+      const attachments = files.length > 0 ? files.map((f) => f.name) : undefined;
       // The row goes up NOW, not after the dispatch answers. `startCollabTurn`
       // resolves the repo, the workspace ref, the org's Anthropic key, two git
       // heads and two snapshot extracts before it returns a turn id — and the
@@ -385,34 +401,45 @@ export function useAgentChat(org: string, projectName: string): AgentChat {
         status: "in_flight",
         author,
         createdAt: Date.now(),
+        ...(attachments ? { attachments } : {}),
       });
-      void (async () => {
-        let turnId: string;
-        try {
-          turnId = await startCollabTurn(projectName, conversationId, text);
-        } catch (err) {
-          // The row the user is already looking at becomes the failed one —
-          // adding a second copy beside it would read as two sends.
-          pendingStartRef.current = false;
-          settleUserMessage(chatKey, messageId, { failed: true });
-          addMessage(chatKey, {
-            role: "error",
-            content: err instanceof Error ? err.message : "Failed to reach the agent.",
+      let turnId: string;
+      try {
+        turnId = await startCollabTurn(projectName, conversationId, text, files);
+      } catch (err) {
+        // The row the user is already looking at becomes the failed one —
+        // adding a second copy beside it would read as two sends.
+        pendingStartRef.current = false;
+        settleUserMessage(chatKey, messageId, { failed: true });
+        addMessage(chatKey, {
+          role: "error",
+          content: err instanceof Error ? err.message : "Failed to reach the agent.",
+        });
+        // conversation_rotated (#430): the resolved id went stale under us —
+        // a teammate rotated. Re-resolve; the effect re-runs on the new id
+        // and rehydrates the fresh thread (the failed rows above live only
+        // in the local cache and wash out with it, correctly).
+        if (err instanceof ConversationRotatedError) {
+          void queryClient.invalidateQueries({
+            queryKey: conversationKeys.current(projectName),
           });
-          // conversation_rotated (#430): the resolved id went stale under us —
-          // a teammate rotated. Re-resolve; the effect re-runs on the new id
-          // and rehydrates the fresh thread (the failed rows above live only
-          // in the local cache and wash out with it, correctly).
-          if (err instanceof ConversationRotatedError) {
-            void queryClient.invalidateQueries({
-              queryKey: conversationKeys.current(projectName),
-            });
-          }
-          setIsSending(false);
-          return;
         }
-        setActiveTurnId(turnId);
-        settleUserMessage(chatKey, messageId, { turnId });
+        setIsSending(false);
+        return false;
+      }
+      setActiveTurnId(turnId);
+      // The send worked, so any earlier failure in this thread is history. Those
+      // rows are local-only and the rehydrate re-appends them AFTER the server
+      // history on every refocus, so leaving them would keep a stale failure
+      // pinned below newer turns — looking like a retry that never happened.
+      // The row just added is in_flight, not failed, so it survives this.
+      clearFailedSends(chatKey);
+      settleUserMessage(chatKey, messageId, { turnId });
+      // The fold runs DETACHED from here on. The caller is unblocked as soon as
+      // the turn is accepted, which is the only fact it needs to decide whether
+      // to clear the composer — waiting for the terminal would hold the
+      // attachment cards on screen for the whole turn.
+      void (async () => {
         const signal = abortRef.current?.signal ?? new AbortController().signal;
         // Someone else got there first. `pendingStartRef` holds the POLL off,
         // but the mount's own rehydrate → getActiveTurn runs before it is set
@@ -444,6 +471,7 @@ export function useAgentChat(org: string, projectName: string): AgentChat {
           }
         }
       })();
+      return true;
     },
     [chatKey, projectName, conversationId, isSending, author, onTurnCommitted, queryClient],
   );

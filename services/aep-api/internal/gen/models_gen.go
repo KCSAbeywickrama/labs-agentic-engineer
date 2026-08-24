@@ -1937,6 +1937,27 @@ type TurnInputBody struct {
 	Target string `json:"target,omitempty"`
 }
 
+// TurnInputMultipart The same turn input as `TurnInputBody`, sent as multipart so it can carry chat attachments (#428). The JSON form stays the canonical one — a message with no attachments MUST use it, and every existing caller is unaffected.
+//
+// Attachments are CONVERSATION-SCOPED MODEL CONTENT (console ADR-0019): the platform never writes them to disk and never commits them. They ride this request into the turn and are durable only as parts of the conversation's history, which is also what makes re-sending one free — the agents service dedupes by file name.
+//
+// Deliberately NOT the reference-document channel: `POST /projects/{name}/references` REPLACES a project's whole stored set, and the create view is the only door to it. A file attached here never becomes a project reference, even when the instruction is `/start`.
+type TurnInputMultipart struct {
+	// Collab As `TurnInputBody.collab`.
+	Collab bool `json:"collab,omitempty"`
+
+	// Files Chat attachments, two groups and the split matters downstream. Read NATIVELY as file parts: `.pdf`, and the four image media types the Messages API accepts — `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`. Read AS TEXT (sent as `text/plain`, the only text document type the Anthropic provider maps): `.md`, `.txt`, `.csv`, `.tsv`, `.json`, `.yaml`, `.yml`, `.xml`, `.html`, `.rst`. Office formats are not accepted — the models do not read them natively.
+	//
+	// Three caps, and all of them restate ONE number: the agents service already enforces a 20 MiB base64-ENCODED per-turn attachment budget (#384), past which it warns and skips. So at most 10 files, each at most 5 MiB, and at most 15 MiB of raw bytes in TOTAL — 15 MiB raw is 20 MiB encoded. The total is the load- bearing one: a per-file cap alone cannot hold the line, since ten 5 MiB files each pass it and together overrun the budget by 3x.
+	Files []openapi_types.File `json:"files,omitempty"`
+
+	// Instruction As `TurnInputBody.instruction`. Required — an attachment alone cannot start a turn, and the shared TurnSpec validator rejects an empty chat text.
+	Instruction string `json:"instruction"`
+
+	// Target As `TurnInputBody.target`.
+	Target string `json:"target,omitempty"`
+}
+
 // TurnOutputBody defines model for TurnOutputBody.
 type TurnOutputBody struct {
 	// TurnID The started turn's id — poll/attach with it
@@ -2200,6 +2221,9 @@ type CreateProjectJSONRequestBody = CreateProjectRequest
 
 // CreateTurnJSONRequestBody defines body for CreateTurn for application/json ContentType.
 type CreateTurnJSONRequestBody = TurnInputBody
+
+// CreateTurnMultipartRequestBody defines body for CreateTurn for multipart/form-data ContentType.
+type CreateTurnMultipartRequestBody = TurnInputMultipart
 
 // BuildProjectJSONRequestBody defines body for BuildProject for application/json ContentType.
 type BuildProjectJSONRequestBody = BuildRequest

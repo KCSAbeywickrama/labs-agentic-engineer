@@ -131,6 +131,12 @@ export function AgentChatPanel({
   const author = useCurrentAuthor();
   const navigate = useNavigate();
   const [draft, setDraft] = useState("");
+  // Files attached to the message being composed (#428). Held here, beside the
+  // draft, because they share its lifecycle exactly: both clear on an accepted
+  // send and both SURVIVE a refused one. The bytes exist nowhere but this array
+  // (ADR-0019), so dropping them on a routine 409 would cost the user a re-pick
+  // of every file from disk.
+  const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
 
   const feed = useMemo(
     () => buildFeed(messages, { currentUserId: author.id, activeTurnId }),
@@ -344,8 +350,19 @@ export function AgentChatPanel({
     // /start with the captured idea; the agents service owns the wording and
     // the flow's eager skills. Unknown skills surface as the agent's loadSkill
     // not-found (client-side validation is parked, #325).
-    send(draft.trim());
-    setDraft("");
+    //
+    // Attachments ride whatever was typed — the composer does not inspect it, so
+    // a sketch can accompany `/design` (ADR-0019 decision 3). They stay
+    // conversation-scoped in every case, including on `/start`: the create view
+    // remains the only door to the project reference store.
+    void send(draft.trim(), attachedFiles).then((started) => {
+      // Clear ONLY on acceptance. A refused send leaves text and cards exactly
+      // as they were, so retry is one click.
+      if (started) {
+        setDraft("");
+        setAttachedFiles([]);
+      }
+    });
   };
 
   // Rotation is a PROJECT-WIDE act now (#430 D4): it demotes the thread for
@@ -365,6 +382,10 @@ export function AgentChatPanel({
     setConfirmNewOpen(false);
     newConversation();
     setDraft("");
+    // A fresh thread starts clean: attachments are conversation-scoped, so
+    // carrying them into a new one would contradict the only guarantee the
+    // feature makes.
+    setAttachedFiles([]);
   };
 
   return (
@@ -518,6 +539,8 @@ export function AgentChatPanel({
         value={draft}
         onChange={setDraft}
         onSubmit={submit}
+        files={attachedFiles}
+        onFilesChange={setAttachedFiles}
         disabled={inputDisabled}
         contextLabel={displayName ?? projectName}
         hint={hint}
