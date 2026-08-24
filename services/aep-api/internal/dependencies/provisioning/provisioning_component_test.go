@@ -674,3 +674,45 @@ func TestProvisioningComponent_ListWorkloadDependencies_ExternalFallsBackToTypeN
 		t.Fatalf("external without annotation = %+v, want ref/name custom-rt (spec.type.Name)", row)
 	}
 }
+
+func TestProvisioningComponent_ListExternalResources_DTOGrowth(t *testing.T) {
+	t.Parallel()
+	raw := []byte(`[
+	  {
+	    "name": "stripe",
+	    "description": "payments",
+	    "consumptionInstructions": "Use the secret key as Bearer.",
+	    "config": [{"key": "api_key", "secret": true}],
+	    "consumers": [{"projectId": "shop", "componentName": "checkout"}],
+	    "envCells": [
+	      {"environment": "development", "key": "api_key", "status": "configured"},
+	      {"environment": "production", "key": "api_key", "status": "unset"}
+	    ],
+	    "resourceDocs": [{"type": "openapi", "url": "https://example.com/openapi.yaml"}],
+	    "instances": [{"project": "shop", "environment": "development", "status": "Ready"}]
+	  },
+	  {
+	    "name": "github",
+	    "config": [{"key": "token", "secret": true}],
+	    "consumers": []
+	  }
+	]`)
+	var got []gen.ExternalResourceDTO
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got[0].ConsumptionInstructions != "Use the secret key as Bearer." {
+		t.Fatalf("consumptionInstructions = %#v", got[0].ConsumptionInstructions)
+	}
+	if len(got[0].EnvCells) != 2 {
+		t.Fatalf("registered envCells = %#v", got[0].EnvCells)
+	}
+	if len(got[1].EnvCells) != 0 {
+		t.Fatalf("project external envCells must be omitted or empty, got %#v", got[1].EnvCells)
+	}
+	for _, c := range got[0].EnvCells {
+		if c.Value != "" {
+			t.Fatalf("secret cell must not carry value: %+v", c)
+		}
+	}
+}

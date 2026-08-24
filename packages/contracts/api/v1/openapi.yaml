@@ -4078,6 +4078,59 @@ components:
       - status
       - createdAt
       type: object
+    EnvValueCellDTO:
+      additionalProperties: false
+      description: One org-held env cell. Secrets never include value.
+      properties:
+        environment:
+          type: string
+        key:
+          type: string
+        status:
+          enum:
+          - configured
+          - unset
+          type: string
+        value:
+          type: string
+      required:
+      - environment
+      - key
+      - status
+      type: object
+    ResourceDocPointerDTO:
+      additionalProperties: false
+      description: Org resource docs pointer (type + URL or repo path), not file bodies.
+      properties:
+        path:
+          type: string
+        type:
+          enum:
+          - documentation
+          - openapi
+          - graphql
+          - asyncapi
+          - protobuf
+          type: string
+        url:
+          type: string
+      required:
+      - type
+      type: object
+    ResourceInstanceDTO:
+      additionalProperties: false
+      properties:
+        environment:
+          type: string
+        project:
+          type: string
+        status:
+          type: string
+      required:
+      - project
+      - environment
+      - status
+      type: object
     ExternalResourceDTO:
       additionalProperties: false
       properties:
@@ -4091,10 +4144,31 @@ components:
             $ref: '#/components/schemas/ConsumerDTO'
           type: array
           nullable: true
+        consumptionInstructions:
+          type: string
         description:
           type: string
+        envCells:
+          description: >
+            Org value plane. Present with one cell per config key × OpenChoreo
+            Environment on a Registered External resource. Omitted or empty on a
+            Project External resource. Secrets never include value.
+          items:
+            $ref: '#/components/schemas/EnvValueCellDTO'
+          nullable: true
+          type: array
+        instances:
+          items:
+            $ref: '#/components/schemas/ResourceInstanceDTO'
+          nullable: true
+          type: array
         name:
           type: string
+        resourceDocs:
+          items:
+            $ref: '#/components/schemas/ResourceDocPointerDTO'
+          nullable: true
+          type: array
       required:
       - name
       - config

@@ -160,21 +160,39 @@ func (e DeployStageValidation) Valid() bool {
 	}
 }
 
+// Defines values for EnvValueCellDTOStatus.
+const (
+	EnvValueCellDTOStatusConfigured EnvValueCellDTOStatus = "configured"
+	EnvValueCellDTOStatusUnset      EnvValueCellDTOStatus = "unset"
+)
+
+// Valid indicates whether the value is a known member of the EnvValueCellDTOStatus enum.
+func (e EnvValueCellDTOStatus) Valid() bool {
+	switch e {
+	case EnvValueCellDTOStatusConfigured:
+		return true
+	case EnvValueCellDTOStatusUnset:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ExternalDependencyValueState.
 const (
-	Configured     ExternalDependencyValueState = "configured"
-	NotProvisioned ExternalDependencyValueState = "not-provisioned"
-	Unset          ExternalDependencyValueState = "unset"
+	ExternalDependencyValueStateConfigured     ExternalDependencyValueState = "configured"
+	ExternalDependencyValueStateNotProvisioned ExternalDependencyValueState = "not-provisioned"
+	ExternalDependencyValueStateUnset          ExternalDependencyValueState = "unset"
 )
 
 // Valid indicates whether the value is a known member of the ExternalDependencyValueState enum.
 func (e ExternalDependencyValueState) Valid() bool {
 	switch e {
-	case Configured:
+	case ExternalDependencyValueStateConfigured:
 		return true
-	case NotProvisioned:
+	case ExternalDependencyValueStateNotProvisioned:
 		return true
-	case Unset:
+	case ExternalDependencyValueStateUnset:
 		return true
 	default:
 		return false
@@ -328,6 +346,33 @@ func (e ProgressEventEmitter) Valid() bool {
 	case ProgressEventEmitterMain:
 		return true
 	case ProgressEventEmitterSubagent:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ResourceDocPointerDTOType.
+const (
+	Asyncapi      ResourceDocPointerDTOType = "asyncapi"
+	Documentation ResourceDocPointerDTOType = "documentation"
+	Graphql       ResourceDocPointerDTOType = "graphql"
+	Openapi       ResourceDocPointerDTOType = "openapi"
+	Protobuf      ResourceDocPointerDTOType = "protobuf"
+)
+
+// Valid indicates whether the value is a known member of the ResourceDocPointerDTOType enum.
+func (e ResourceDocPointerDTOType) Valid() bool {
+	switch e {
+	case Asyncapi:
+		return true
+	case Documentation:
+		return true
+	case Graphql:
+		return true
+	case Openapi:
+		return true
+	case Protobuf:
 		return true
 	default:
 		return false
@@ -1115,6 +1160,17 @@ type DiscoverOutputBody struct {
 	JwksURL string `json:"jwksUrl"`
 }
 
+// EnvValueCellDTO One org-held env cell. Secrets never include value.
+type EnvValueCellDTO struct {
+	Environment string                `json:"environment"`
+	Key         string                `json:"key"`
+	Status      EnvValueCellDTOStatus `json:"status"`
+	Value       string                `json:"value,omitempty"`
+}
+
+// EnvValueCellDTOStatus defines model for EnvValueCellDTO.Status.
+type EnvValueCellDTOStatus string
+
 // EnvVar defines model for EnvVar.
 type EnvVar struct {
 	Key   string `json:"key"`
@@ -1166,10 +1222,16 @@ type ExternalDependencyValueState string
 
 // ExternalResourceDTO defines model for ExternalResourceDTO.
 type ExternalResourceDTO struct {
-	Config      []ConfigKeyDTO `json:"config"`
-	Consumers   []ConsumerDTO  `json:"consumers"`
-	Description string         `json:"description,omitempty"`
-	Name        string         `json:"name"`
+	Config                  []ConfigKeyDTO `json:"config"`
+	Consumers               []ConsumerDTO  `json:"consumers"`
+	ConsumptionInstructions string         `json:"consumptionInstructions,omitempty"`
+	Description             string         `json:"description,omitempty"`
+
+	// EnvCells Org value plane. Present with one cell per config key × OpenChoreo Environment on a Registered External resource. Omitted or empty on a Project External resource. Secrets never include value.
+	EnvCells     []EnvValueCellDTO       `json:"envCells,omitempty"`
+	Instances    []ResourceInstanceDTO   `json:"instances,omitempty"`
+	Name         string                  `json:"name"`
+	ResourceDocs []ResourceDocPointerDTO `json:"resourceDocs,omitempty"`
 }
 
 // FileBundle A set of files read at ONE commit. commitSha names that commit; every entry's sha is a blob of that same tree.
@@ -1568,6 +1630,23 @@ type RcaAgentReportList struct {
 
 	// NextCursor Cursor for the next page; absent on the last page.
 	NextCursor string `json:"nextCursor,omitempty"`
+}
+
+// ResourceDocPointerDTO Org resource docs pointer (type + URL or repo path), not file bodies.
+type ResourceDocPointerDTO struct {
+	Path string                    `json:"path,omitempty"`
+	Type ResourceDocPointerDTOType `json:"type"`
+	URL  string                    `json:"url,omitempty"`
+}
+
+// ResourceDocPointerDTOType defines model for ResourceDocPointerDTO.Type.
+type ResourceDocPointerDTOType string
+
+// ResourceInstanceDTO defines model for ResourceInstanceDTO.
+type ResourceInstanceDTO struct {
+	Environment string `json:"environment"`
+	Project     string `json:"project"`
+	Status      string `json:"status"`
 }
 
 // RevalidateAccepted The run that will answer the question. Its cycles stream on the ordinary run progress endpoint, and its verdict becomes the version's once it settles.
