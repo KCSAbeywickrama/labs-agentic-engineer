@@ -76,11 +76,10 @@ var Available = []Addon{
 		Label:       "thunder-app",
 		Description: "ThunderApplication ClusterResourceType + RBAC",
 		Operator: OperatorSpec{
-			ReleaseName:  "thunder-app-operator",
-			Chart:        "oci://ghcr.io/wso2/thunder-app-operator",
-			Namespace:    "thunder-app-operator-system",
-			DisplayName:  "thunder-app-operator",
-			PreManifests: []string{thunderAppOperatorCredentials},
+			ReleaseName: "thunder-app-operator",
+			Chart:       "oci://ghcr.io/wso2/thunder-app-operator",
+			Namespace:   "thunder-app-operator-system",
+			DisplayName: "thunder-app-operator",
 		},
 		Manifests: []string{thunderAppResourceType, thunderAppRBAC},
 		VerifyResources: []VerifySpec{
@@ -108,39 +107,6 @@ var Available = []Addon{
 		},
 	},
 }
-
-// thunderAppOperatorCredentials creates the namespace and an ESO ExternalSecret
-// that syncs both the system-client ID and secret from OpenBao into the operator
-// namespace. Applied before the Helm chart so the Secret exists when the operator
-// Pod starts. The chart reads both credentials exclusively from this Secret.
-const thunderAppOperatorCredentials = `
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: thunder-app-operator-system
----
-apiVersion: external-secrets.io/v1
-kind: ExternalSecret
-metadata:
-  name: thunder-app-operator-credentials
-  namespace: thunder-app-operator-system
-spec:
-  refreshInterval: 1h
-  secretStoreRef:
-    name: aep-platform
-    kind: ClusterSecretStore
-  target:
-    name: thunder-app-operator-credentials
-  data:
-    - secretKey: client-id
-      remoteRef:
-        key: aep/thunder-clients/system-client-id
-        property: value
-    - secretKey: client-secret
-      remoteRef:
-        key: aep/thunder-clients/system-client
-        property: value
-`
 
 // thunderAppResourceType is the ClusterResourceType that makes the thunder-app
 // OAuth provisioning available as a platform-resource dependency type in AEP.

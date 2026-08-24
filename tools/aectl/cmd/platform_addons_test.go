@@ -125,7 +125,6 @@ func TestRunAddonInstall_OperatorFailureSkipsAddon(t *testing.T) {
 			installCalled = true
 			return errors.New("simulated operator install failure")
 		},
-		// newApplier IS called for pre-manifests even when the operator itself fails.
 		newApplier: func(string) (manifestApplier, error) {
 			return fa, nil
 		},
@@ -137,7 +136,8 @@ func TestRunAddonInstall_OperatorFailureSkipsAddon(t *testing.T) {
 	if !installCalled {
 		t.Error("installOperator must be called")
 	}
-	// Only pre-manifests are applied; the addon's own manifests are skipped.
+	// When operator fails, only pre-manifests are applied (zero for thunder-app
+	// since credentials are now provisioned by the platform chart, not PreManifests).
 	if got, want := len(fa.applied), len(first.Operator.PreManifests); got != want {
 		t.Errorf("applied %d manifest(s), want %d (pre-manifests only)", got, want)
 	}
