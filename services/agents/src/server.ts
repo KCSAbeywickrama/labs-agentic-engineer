@@ -45,14 +45,17 @@
 
 import express from "express";
 import type { Express, Request, Response, NextFunction } from "express";
-import type { LanguageModel } from "ai";
+import type { FilePart, LanguageModel } from "ai";
 import {
   SSE_DONE,
   isTurnSpec,
   isCollabConfig,
+  isSurface,
+  SURFACES,
   type CollabConfig,
   type McpConfig,
   type StreamPart,
+  type Surface,
   type Toolset,
   type TurnJournal,
   type TurnSpec,
@@ -63,7 +66,7 @@ import { runConversationTurn, TurnGuard, ConcurrentTurnError } from "./conversat
 import { projectDisplayHistory } from "./conversation/display-history.js";
 import { joinRoom, type RoomPeer } from "./collab/room-peer.js";
 import type { SkillSource } from "./agents/main/skill-source.js";
-import { readSnapshot, loadSkillsFromSnapshot } from "./conversation/load-workspace.js";
+import { readSnapshot, loadSkillsFromSnapshot, readReferenceAttachments, overlayReferenceTexts } from "./conversation/load-workspace.js";
 import { conversationOrgId, resolveWorkspace, WorkspaceRefError } from "./shared/snapshot-path.js";
 import { createAuthMiddleware, type AgentsAuthConfig } from "./shared/auth.js";
 import { startKeepAlive } from "./shared/keepalive.js";
@@ -160,6 +163,7 @@ export function createApp(deps: CreateAppDeps): Express {
       journal?: unknown;
       collab?: unknown;
       webSearch?: unknown;
+      surface?: unknown;
       eagerSkills?: unknown;
     };
 
@@ -196,6 +200,19 @@ export function createApp(deps: CreateAppDeps): Express {
       res.status(400).json({ error: "target must be a string" });
       return;
     }
+
+    // The caller's surface (#580): who is reading this turn's prose. The one
+    // turn property that cannot be derived — it is who is asking, not what is
+    // being asked for — so an unknown value is a 400 rather than a silent
+    // fallback that would narrate to the wrong audience.
+    let surface: Surface | undefined;
+    if (body.surface !== undefined) {
+      if (!isSurface(body.surface)) {
+        res.status(400).json({ error: `surface must be one of: ${SURFACES.join(", ")}` });
+        return;
+      }
+      surface = body.surface;
+    }
     const instruction = composeInstruction(turn, {
       target: typeof body.target === "string" ? body.target : undefined,
       previousTurnFailed: body.previousTurnFailed === true,
@@ -221,6 +238,13 @@ export function createApp(deps: CreateAppDeps): Express {
     // read the files and the lazy skill source from the mount.
     let files: Record<string, string>;
     let skillSource: SkillSource;
+    // Reference PDFs (#384): a `start` turn's TurnSpec.references may name
+    // `.pdf` documents. They are never in `files` — the snapshot filter admits
+    // no `.pdf`, whatever the bytes look like — so no document can ride one turn
+    // as both prompt text and a file part. Attached separately as native file
+    // parts (see run-conversation-turn.ts / run-turn.ts); every other kind, and
+    // a start turn with no PDF references, leaves this empty.
+    let referenceAttachments: FilePart[] = [];
     let turnId: string;
     try {
       const ws = resolveWorkspace({
@@ -231,6 +255,12 @@ export function createApp(deps: CreateAppDeps): Express {
       });
       files = readSnapshot(ws.snapshotDir);
       skillSource = loadSkillsFromSnapshot(ws.skillsSnapshotDir);
+      if (turn.kind === "start" || turn.kind === "flow") {
+        // Flows generate artifacts that must be grounded in the attachments
+        // (a sketch is the wireframe brief); run-conversation-turn dedupes
+        // against history, so re-naming a document never re-stores it.
+        referenceAttachments = readReferenceAttachments(ws.snapshotDir, turn.references);
+      }
       turnId = ws.turnId;
     } catch (err) {
       if (err instanceof WorkspaceRefError) {
@@ -359,7 +389,10 @@ export function createApp(deps: CreateAppDeps): Express {
           roomId: collab.roomId,
           token: collab.token,
         });
-        files = roomPeer.files();
+        // The room excludes reference documents by design — text references
+        // ride in from the turn's snapshot instead, which is their authority
+        // (aep-api overlays the off-git store into it).
+        files = overlayReferenceTexts(roomPeer.files(), files);
       } catch (err) {
         res.status(502).json({
           error: err instanceof Error ? err.message : "collab room join failed",
@@ -375,11 +408,13 @@ export function createApp(deps: CreateAppDeps): Express {
         files,
         filesChangedExternally: body.filesChangedExternally === true,
         skillSource,
+        ...(referenceAttachments.length ? { referenceAttachments } : {}),
         ...(toolset ? { toolset } : {}),
         ...(mcp ? { mcp } : {}),
         ...(journal ? { journal: { ...journal, turnId } } : {}),
         ...(eagerSkills ? { eagerSkills } : {}),
         webSearch: body.webSearch === true,
+        ...(surface ? { surface } : {}),
         ...(roomPeer ? { collabPeer: roomPeer } : {}),
         model,
         ...(deps.modelId ? { modelId: deps.modelId } : {}),

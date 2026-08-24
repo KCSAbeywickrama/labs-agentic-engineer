@@ -71,25 +71,16 @@ real Host header. The address comes from DNS per run — the CoreDNS rewrite is 
 discovery channel — never from configuration, because a baked-in IP passes once
 and then silently points at nothing after a cluster rebuild.
 
-The override is written **once per client**, because no single mechanism reaches
-them all. `.curlrc` is a curl file and no browser reads it; the browser
-`playwright test` launches is configured by `playwright.config.template.ts` in
-the project's own repo. That left playwright-cli — the browser the agent
-*explores* with, before any spec exists — reading neither, and still dialling
-loopback. So the runner also writes `--host-resolver-rules` into a
-playwright-cli config and names it in `$PLAYWRIGHT_MCP_CONFIG`
-(`endpoint_access.ts`) — covering the endpoints this run resolved and the IdP a
-login redirect leaves for, on which see Consequences. Two details are
-load-bearing: the file carries
-`launchOptions.args` and nothing else, because naming `browser.browserName`
-there leaves `channel` undefined and re-enables the Chromium sandbox that cannot
-start unprivileged (ADR-0007); and the variable is set from the file's
-existence, because playwright-cli's daemon exits on a config path that does not
-resolve — so a coding run, and a cloud validation run, must not see it at all.
-An absolute path in the env rather than the CLI's own default
-`.playwright/cli.config.json`, which resolves against the CWD: an exploring
-agent moves between the repo root and `tests/e2e`, and a CWD-relative config
-would apply to some of its commands and not the rest.
+The override is written **once per client**, because none reaches them all:
+`.curlrc` is curl's, `playwright.config.template.ts` is the project's, and
+playwright-cli — the browser the agent *explores* with, before any spec exists —
+reads neither. So the runner also writes `--host-resolver-rules` into a
+playwright-cli config named by `$PLAYWRIGHT_MCP_CONFIG` (`endpoint_access.ts`).
+It carries `launchOptions.args` and nothing else, since a `browser.browserName`
+there would re-enable the Chromium sandbox (ADR-0007); the variable is set only
+when the file exists, because the daemon exits on a path that does not resolve;
+and it holds an absolute path, because the CLI's default
+`.playwright/cli.config.json` resolves against a CWD the agent moves between.
 
 Rewriting the URL in the validation context was the alternative, and is worse in
 two distinct ways. An IP in the URL sends `Host: <ip>`, matches no HTTPRoute, and
@@ -120,27 +111,17 @@ used as given.
 
 - A validation agent never probes endpoints and never sees exit 7. Its own ad-hoc
   `curl` calls during authoring and healing work unmodified.
-- The browser the specs run in is unchanged: `playwright.config.template.ts`
-  still applies `--host-resolver-rules`, resolving the gateway through `getent`.
-  It is the project's file and stays the project's business; the runner supplies
-  the same override only for the exploration browser, which owns no such config.
-- **The IdP is mapped too, and it is the one wildcard.** A login redirect leaves
-  the app's name family entirely, and the runner never learns the IdP's hostname
-  — the validation context carries the app's endpoints and nothing else — so
-  `MAP *.openchoreo.localhost` is the only handle available. Every other rule
-  names a host this run actually resolved.
-- **That rule cannot follow DNS, which is wrong here.** The CoreDNS rewrite maps
-  `(openchoreo|openchoreoapis).localhost` alike onto the DATA-plane gateway,
-  while `*.openchoreo.localhost` is served by the CONTROL-plane one. Measured
-  from a pod: `thunder.openchoreo.localhost` resolves to the data-plane gateway
-  and dials to a transport failure (curl exit 7), where the k3d bridge —
-  `host.k3d.internal`, which publishes the control-plane gateway — answers 401.
-  So the rule points at the bridge, resolved by name per run for the same reason
-  the endpoint addresses are: a baked-in IP passes once and then goes stale.
-- **An unresolvable bridge degrades rather than fails.** A cloud plane has no
-  bridge to resolve, and an exploration hop the agent may never take is not
-  worth failing a run over — the endpoint rules, which this preflight has
-  actually proved, are written either way.
+- The browser the specs run in is unchanged: `playwright.config.template.ts` is
+  the project's file and stays the project's business. The runner supplies the
+  override only for the exploration browser, which owns no config of its own.
+- **The IdP is the one wildcard, and it cannot follow DNS.** A login redirect
+  leaves the app's name family and the runner never learns the IdP's hostname, so
+  `MAP *.openchoreo.localhost` is the only handle; every other rule names a host
+  this run resolved. CoreDNS points that name at the DATA-plane gateway while it
+  is served by the CONTROL-plane one, so the rule names the k3d bridge
+  (`host.k3d.internal`) instead, resolved per run. An unresolvable bridge
+  degrades rather than fails — a cloud plane has none, and the proved endpoint
+  rules are written either way.
 - A `.curlrc` write failure is fatal. Proceeding would start an agent holding a
   URL it cannot dial and no explanation of why — the state this ADR removes.
 - `resolve` entries are scoped per `host:port`, so pinning endpoint hosts does not
