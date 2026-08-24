@@ -90,6 +90,32 @@ function isDsl(path: string): boolean {
  * entry (rendered as a diagram, not shown as text). Components and their files
  * are sorted by path for a stable tree.
  */
+/**
+ * Reading order for one component's artifacts, which is NOT path order.
+ *
+ * `design.json` says what the component IS — its type, its dependencies, its
+ * exposure — so it leads whatever else is there. On path alone an ai-agent led
+ * with `agent.afm.md` ("a" sorts above "d") while a service led with
+ * `design.json` only by the accident of "d" before "o", so the same list was
+ * ordered differently per component type for no reason a reader could see.
+ * Ranked explicitly instead; anything unranked keeps path order behind them.
+ */
+const COMPONENT_FILE_RANK: ReadonlyArray<RegExp> = [
+  COMPONENT_DESIGN_RE, // Design Overview
+  AGENT_AFM_RE, // Agent Spec
+  OPENAPI_RE, // API Spec
+];
+
+function rankOf(path: string): number {
+  const i = COMPONENT_FILE_RANK.findIndex((re) => re.test(path));
+  return i === -1 ? COMPONENT_FILE_RANK.length : i;
+}
+
+function compareComponentFiles(a: SpecFileEntry, b: SpecFileEntry): number {
+  const byRank = rankOf(a.path) - rankOf(b.path);
+  return byRank !== 0 ? byRank : a.path.localeCompare(b.path);
+}
+
 export function buildDesignSection(files: SpecFileEntry[]): DesignSection {
   const design = files.filter((f) => f.group === "designs");
   const hasCellDsl = design.some((f) => f.path === DESIGN_CELL_PATH);
@@ -115,7 +141,7 @@ export function buildDesignSection(files: SpecFileEntry[]): DesignSection {
   const components = [...byComponent.values()].sort((a, b) =>
     a.name.localeCompare(b.name),
   );
-  for (const c of components) c.files.sort((a, b) => a.path.localeCompare(b.path));
+  for (const c of components) c.files.sort(compareComponentFiles);
 
   return { overview, hasComponents: components.length > 0, hasCellDsl, components };
 }
