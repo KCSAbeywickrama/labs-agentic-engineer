@@ -53,8 +53,8 @@ function CatalogCard({
   onOpen,
 }: {
   name: string;
-  description?: string;
-  consumers?: unknown[] | null;
+  description?: string | undefined;
+  consumers?: unknown[] | null | undefined;
   platform: boolean;
   onOpen: () => void;
 }) {
