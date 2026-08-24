@@ -16,14 +16,172 @@
  * under the License.
  */
 
-import { PageContent } from "@wso2/oxygen-ui";
+import { useState } from "react";
+import {
+  Alert,
+  Box,
+  Button,
+  Card,
+  CardActionArea,
+  CardContent,
+  Chip,
+  CircularProgress,
+  Grid,
+  PageContent,
+  Stack,
+  Typography,
+} from "@wso2/oxygen-ui";
+import { Boxes } from "@wso2/oxygen-ui-icons-react";
+import { EmptyState } from "../../../components/EmptyState";
 import { PageHeader } from "../../../components/PageHeader";
+import type { components } from "../../../generated/aep-api";
+import { useExternalResources, usePlatformResourceTypes } from "../../settings/api/queries";
+import { CatalogTypeDrawer } from "./CatalogTypeDrawer";
 
-// Shell until the catalog grid lands — Task 5 fills this in.
+type PlatformResourceTypeDTO = components["schemas"]["PlatformResourceTypeDTO"];
+type ExternalResourceDTO = components["schemas"]["ExternalResourceDTO"];
+
+type CatalogSelection =
+  | { kind: "platform"; resource: PlatformResourceTypeDTO }
+  | { kind: "external"; resource: ExternalResourceDTO };
+
+function CatalogCard({
+  name,
+  description,
+  consumers,
+  platform,
+  onOpen,
+}: {
+  name: string;
+  description?: string;
+  consumers?: unknown[] | null;
+  platform: boolean;
+  onOpen: () => void;
+}) {
+  const usedBy = consumers?.length ?? 0;
+  return (
+    <Card variant="outlined" sx={{ height: "100%" }}>
+      <CardActionArea
+        sx={{ height: "100%", alignItems: "stretch" }}
+        onClick={onOpen}
+      >
+        <CardContent sx={{ display: "flex", flexDirection: "column", height: "100%" }}>
+          <Stack direction="row" spacing={1} alignItems="flex-start" sx={{ mb: 1 }}>
+            <Typography variant="h6" sx={{ flexGrow: 1 }}>
+              {name}
+            </Typography>
+            {platform && <Chip size="small" label="Platform" />}
+          </Stack>
+          <Typography
+            variant="body2"
+            color="text.secondary"
+            sx={{
+              flexGrow: 1,
+              display: "-webkit-box",
+              WebkitLineClamp: 2,
+              WebkitBoxOrient: "vertical",
+              overflow: "hidden",
+            }}
+          >
+            {description}
+          </Typography>
+          {usedBy > 0 && (
+            <Typography variant="caption" color="text.secondary" sx={{ mt: 1.5 }}>
+              Used by {usedBy}
+            </Typography>
+          )}
+        </CardContent>
+      </CardActionArea>
+    </Card>
+  );
+}
+
 export function ResourcesCatalog() {
+  const platform = usePlatformResourceTypes();
+  const external = useExternalResources();
+  const [selection, setSelection] = useState<CatalogSelection | null>(null);
+
+  const platformItems = platform.data ?? [];
+  const externalItems = external.data ?? [];
+
+  let body;
+  if (platform.isLoading || external.isLoading) {
+    body = (
+      <Box sx={{ display: "flex", justifyContent: "center", py: 6 }}>
+        <CircularProgress aria-label="Loading resources" />
+      </Box>
+    );
+  } else if (platform.isError || external.isError) {
+    const message =
+      (platform.error instanceof Error && platform.error.message) ||
+      (external.error instanceof Error && external.error.message) ||
+      "Failed to load resources";
+    body = (
+      <Alert
+        severity="error"
+        action={
+          <Button
+            onClick={() => {
+              void platform.refetch();
+              void external.refetch();
+            }}
+          >
+            Retry
+          </Button>
+        }
+      >
+        {message}
+      </Alert>
+    );
+  } else if (platformItems.length === 0 && externalItems.length === 0) {
+    body = (
+      <EmptyState
+        icon={<Boxes size={48} />}
+        title="No resources"
+        description="The catalog is empty. Platform types and third-party resources appear here once they exist."
+      />
+    );
+  } else {
+    body = (
+      <Grid container spacing={3}>
+        {platformItems.map((resource) => (
+          <Grid key={`platform:${resource.name}`} size={{ xs: 12, sm: 6, md: 4, lg: 3 }}>
+            <CatalogCard
+              name={resource.name}
+              description={resource.description}
+              consumers={resource.consumers}
+              platform
+              onOpen={() => setSelection({ kind: "platform", resource })}
+            />
+          </Grid>
+        ))}
+        {externalItems.map((resource) => (
+          <Grid key={`external:${resource.name}`} size={{ xs: 12, sm: 6, md: 4, lg: 3 }}>
+            <CatalogCard
+              name={resource.name}
+              description={resource.description}
+              consumers={resource.consumers}
+              platform={false}
+              onOpen={() => setSelection({ kind: "external", resource })}
+            />
+          </Grid>
+        ))}
+      </Grid>
+    );
+  }
+
   return (
     <PageContent>
-      <PageHeader title="Resources" />
+      <PageHeader
+        title="Resources"
+        subtitle="Platform types and third-party resources in this organization."
+      />
+      {body}
+      <CatalogTypeDrawer
+        {...(selection ?? { kind: null, resource: null })}
+        open={selection !== null}
+        onClose={() => setSelection(null)}
+      />
     </PageContent>
   );
 }
