@@ -1735,8 +1735,18 @@ type SpecStage struct {
 	// Agent Whether an agent is working on this project's spec right now, and how the last attempt ended (#562). `never-started` — no turn has EVER run for this project; `""` — a turn has run and the newest one completed; `working` — a turn is in flight; `failed` — the newest turn ended in failure and none has run since. `never-started` is distinct from `""` because the two need opposite treatment: one means the journey has not begun and the user needs a way to begin it, the other means it is under way between turns and offering to restart it would supersede a live interview. Derived from the newest `agent_turns` row for the project, which is what `exists`/`version`/`dirty` cannot say: all three read committed git, and a kickoff writes nothing until it lands. The overview's spec card needs it to say *Writing requirements* while the platform-fired `/start` runs, and the spec view needs it to explain an empty workspace instead of offering a file picker.
 	Agent string `json:"agent"`
 
+	// AgentFlow WHICH work the running turn is doing — the `/<skill>` token it runs under (`start`, `design`, `settle`, `amend`, …); `""` for plain chat or when nothing is running (#575). `agent` says an agent is working; this says on what, which the spec rail needs to pulse the right section.
+	// Without it the rail could only guess from which sections were still empty, and guessed wrongly in both directions: settling an assumption lit Design (the first empty section, though the work was requirements), and the moment a design run wrote its first file the pulse jumped to Validation while the rest of the design was still being written.
+	// Reported for the RUNNING turn only. A finished turn's flow says nothing about what is happening now, and the section states are derived from committed files from then on.
+	AgentFlow string `json:"agentFlow,omitempty"`
+
 	// Design Design files exist for the spec (gates the Spec view's design button).
 	Design bool `json:"design"`
+
+	// DesignOutdated The requirements have changed since the design was last derived from them (#575), so the design may no longer describe what the user asked for. Derived by comparing the requirements as they stand now against the requirements as they stood in the snapshot the newest successful `/design` turn read — no stored fingerprint, so there is nothing to fall out of sync and it answers for projects that predate the field.
+	// Coarse ON PURPOSE: it reports that the requirements moved, never which components are affected. The two failures are not symmetric — over-marking costs one re-derivation the agent mostly no-ops through, while under-marking ships a design the user has already changed their mind about to the coding agents.
+	// False while a project has no design or no successful design turn: there is nothing to be behind.
+	DesignOutdated bool `json:"designOutdated,omitempty"`
 
 	// Dirty specs/ moved on GitHub past the latest tag.
 	Dirty bool `json:"dirty"`
