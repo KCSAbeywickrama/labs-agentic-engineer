@@ -148,6 +148,19 @@ func (cRepos) ByFullName(context.Context, string) (string, string, error) {
 	return "acme", "shop", nil
 }
 
+type cValuePlane struct {
+	cells     map[string][]provisioning.EnvCell
+	instances map[string][]provisioning.ResourceInstance
+}
+
+func (f *cValuePlane) EnvCells(name string) []provisioning.EnvCell {
+	return f.cells[name]
+}
+
+func (f *cValuePlane) Instances(name string) []provisioning.ResourceInstance {
+	return f.instances[name]
+}
+
 func readyBindingWith(outputs ...string) *openchoreo.ResourceReleaseBinding {
 	st := &openchoreo.ResourceReleaseBindingStatus{
 		Conditions: []openchoreo.OCCondition{{Type: "Ready", Status: "True"}},
@@ -241,17 +254,8 @@ func TestProvisioningComponent_ListExternalResources(t *testing.T) {
 					{Key: "api_key", Secret: true}, {Key: "region"},
 				},
 				ConsumptionInstructions: "Use the secret key as Bearer.",
-				EnvCells: []openchoreo.EnvCell{
-					{Environment: "development", Key: "api_key", Status: "configured", Value: "sk_live"},
-					{Environment: "development", Key: "region", Status: "configured", Value: "us"},
-					{Environment: "production", Key: "api_key", Status: "unset"},
-					{Environment: "production", Key: "region", Status: "unset"},
-				},
 				ResourceDocs: []openchoreo.ResourceDoc{
 					{Type: "openapi", URL: "https://example.com/openapi.yaml"},
-				},
-				Instances: []openchoreo.ResourceInstance{
-					{Project: "shop", Environment: "development", Status: "Ready"},
 				},
 			},
 			{
@@ -261,6 +265,21 @@ func TestProvisioningComponent_ListExternalResources(t *testing.T) {
 				},
 			},
 		}},
+		CatalogValuePlane: &cValuePlane{
+			cells: map[string][]provisioning.EnvCell{
+				"stripe": {
+					{Environment: "development", Key: "api_key", Status: "configured", Value: "sk_live"},
+					{Environment: "development", Key: "region", Status: "configured", Value: "us"},
+					{Environment: "production", Key: "api_key", Status: "unset"},
+					{Environment: "production", Key: "region", Status: "unset"},
+				},
+			},
+			instances: map[string][]provisioning.ResourceInstance{
+				"stripe": {
+					{Project: "shop", Environment: "development", Status: "Ready"},
+				},
+			},
+		},
 		Design:   cDesign{comps: stripeConsumerDesign()},
 		Projects: cProjects{refs: []provisioning.ProjectRef{{OrgID: "acme", ProjectID: "proj"}}},
 	})

@@ -344,29 +344,15 @@ func BuildExternalResourceType(name, description string, keys []ExternalResource
 // RT's definition — the inverse of BuildExternalResourceType.
 //
 // ConsumptionInstructions and ResourceDocs are read from RT annotations when
-// present. EnvCells and Instances are optional catalog fields: production
-// ExternalDefinitionFromRT never invents env cells (no org value plane yet).
-// Tests inject Registered External cells on fake catalog definitions so the
-// list DTO can discriminate Registered vs Project External resources.
+// present. Org value-plane cells and instances are not part of this type:
+// ExternalDefinitionFromRT never invents them (production has no org value
+// store). The provisioning catalog view fills those from CatalogValuePlane.
 type ExternalResourceDefinition struct {
 	Name                    string
 	Description             string
 	Config                  []ExternalResourceConfigKey
 	ConsumptionInstructions string
-	EnvCells                []EnvCell
 	ResourceDocs            []ResourceDoc
-	Instances               []ResourceInstance
-}
-
-// EnvCell is one org-held environment × config-key cell on a Registered
-// External resource. Status is "configured" or "unset". Value is the plain
-// cell value when present; the HTTP mapper never copies it onto the DTO when
-// the matching config key is secret.
-type EnvCell struct {
-	Environment string
-	Key         string
-	Status      string
-	Value       string
 }
 
 // ResourceDoc is an org resource-docs pointer (type + URL or repo path),
@@ -375,15 +361,6 @@ type ResourceDoc struct {
 	Type string `json:"type"`
 	URL  string `json:"url,omitempty"`
 	Path string `json:"path,omitempty"`
-}
-
-// ResourceInstance is one observed instance of a Registered External
-// resource (project × environment × status). Injected on catalog fixtures
-// until the org value plane exists.
-type ResourceInstance struct {
-	Project     string
-	Environment string
-	Status      string
 }
 
 // ExternalDefinitionFromRT recovers the external resource definition an
@@ -398,8 +375,8 @@ type ResourceInstance struct {
 // reconstruct (nil, no external-name annotation, or no spec.parameters
 // properties) — e.g. an RT authored by pre-self-describing code.
 //
-// It does not invent env cells: production has no org value plane yet, so
-// listed Project External rows omit envCells until ticket 04 writes the plane.
+// It does not invent env cells: those live on the provisioning catalog view
+// via CatalogValuePlane, not on this reconstruction type.
 func ExternalDefinitionFromRT(rt *ResourceType) (def ExternalResourceDefinition, ok bool) {
 	if rt == nil {
 		return ExternalResourceDefinition{}, false

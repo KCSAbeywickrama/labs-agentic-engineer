@@ -40,6 +40,7 @@ import { CatalogTypeDrawer } from "./CatalogTypeDrawer";
 
 type PlatformResourceTypeDTO = components["schemas"]["PlatformResourceTypeDTO"];
 type ExternalResourceDTO = components["schemas"]["ExternalResourceDTO"];
+type ConsumerDTO = components["schemas"]["ConsumerDTO"];
 
 type CatalogSelection =
   | { kind: "platform"; resource: PlatformResourceTypeDTO }
@@ -54,7 +55,7 @@ function CatalogCard({
 }: {
   name: string;
   description?: string | undefined;
-  consumers?: unknown[] | null | undefined;
+  consumers?: ConsumerDTO[] | null | undefined;
   platform: boolean;
   onOpen: () => void;
 }) {

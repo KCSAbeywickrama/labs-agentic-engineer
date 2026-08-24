@@ -39,18 +39,19 @@ const defaultEnv = openchoreo.DevEnvironmentName
 // tracks cross-project access requests, and drives each provision Execution
 // through the store while closing the gate issue with a no-secrets reference.
 type Service struct {
-	issues    IssueClient
-	execs     ExecutionStore
-	design    DesignReader
-	repos     RepoLocator
-	rtCatalog ExternalRTCatalog
-	extProv   ExternalProvisioner
-	platProv  PlatformProvisioner
-	bindings  BindingReader
-	workloads WorkloadDepSource
-	projects  ProjectLister
-	access    AccessStore
-	providers ProviderResolver
+	issues            IssueClient
+	execs             ExecutionStore
+	design            DesignReader
+	repos             RepoLocator
+	rtCatalog         ExternalRTCatalog
+	extProv           ExternalProvisioner
+	platProv          PlatformProvisioner
+	bindings          BindingReader
+	workloads         WorkloadDepSource
+	projects          ProjectLister
+	access            AccessStore
+	providers         ProviderResolver
+	catalogValuePlane CatalogValuePlane
 	// orgPublish commits the exposesAPI.orgPublished durability marker on a
 	// provider component when its access request is granted. Wired via a setter
 	// (SetOrgPublishMarker) at the composition root — it points BACK at the
@@ -83,35 +84,37 @@ func (s *Service) SetProviderBuildTrigger(t ProviderBuildTrigger) { s.providerBu
 // providers may be nil (a nil projects skips the cross-project consumer scan;
 // nil access / providers disable the access-request surface).
 type Deps struct {
-	Issues    IssueClient
-	Execs     ExecutionStore
-	Design    DesignReader
-	Repos     RepoLocator
-	RTCatalog ExternalRTCatalog
-	ExtProv   ExternalProvisioner
-	PlatProv  PlatformProvisioner
-	Bindings  BindingReader
-	Workloads WorkloadDepSource
-	Projects  ProjectLister
-	Access    AccessStore
-	Providers ProviderResolver
+	Issues            IssueClient
+	Execs             ExecutionStore
+	Design            DesignReader
+	Repos             RepoLocator
+	RTCatalog         ExternalRTCatalog
+	ExtProv           ExternalProvisioner
+	PlatProv          PlatformProvisioner
+	Bindings          BindingReader
+	Workloads         WorkloadDepSource
+	Projects          ProjectLister
+	Access            AccessStore
+	Providers         ProviderResolver
+	CatalogValuePlane CatalogValuePlane
 }
 
 // NewService wires the provisioning service from its collaborator set.
 func NewService(d Deps) *Service {
 	return &Service{
-		issues:    d.Issues,
-		execs:     d.Execs,
-		design:    d.Design,
-		repos:     d.Repos,
-		rtCatalog: d.RTCatalog,
-		extProv:   d.ExtProv,
-		platProv:  d.PlatProv,
-		bindings:  d.Bindings,
-		workloads: d.Workloads,
-		projects:  d.Projects,
-		access:    d.Access,
-		providers: d.Providers,
+		issues:            d.Issues,
+		execs:             d.Execs,
+		design:            d.Design,
+		repos:             d.Repos,
+		rtCatalog:         d.RTCatalog,
+		extProv:           d.ExtProv,
+		platProv:          d.PlatProv,
+		bindings:          d.Bindings,
+		workloads:         d.Workloads,
+		projects:          d.Projects,
+		access:            d.Access,
+		providers:         d.Providers,
+		catalogValuePlane: d.CatalogValuePlane,
 	}
 }
 

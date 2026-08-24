@@ -19,6 +19,7 @@ package openchoreo
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -287,8 +288,15 @@ func TestExternalDefinitionFromRT_ReadsConsumptionAnnotations(t *testing.T) {
 	if def.ResourceDocs[1].Type != "documentation" || def.ResourceDocs[1].Path != "docs/README.md" {
 		t.Errorf("ResourceDocs[1] = %+v", def.ResourceDocs[1])
 	}
-	if len(def.EnvCells) != 0 {
-		t.Errorf("ExternalDefinitionFromRT must not invent envCells, got %+v", def.EnvCells)
+	want := ExternalResourceDefinition{
+		Name:                    def.Name,
+		Description:             def.Description,
+		Config:                  def.Config,
+		ConsumptionInstructions: def.ConsumptionInstructions,
+		ResourceDocs:            def.ResourceDocs,
+	}
+	if !reflect.DeepEqual(def, want) {
+		t.Errorf("ExternalDefinitionFromRT must not invent envCells, got %+v", def)
 	}
 }
 

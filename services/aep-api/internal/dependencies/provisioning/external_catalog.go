@@ -29,9 +29,10 @@ import (
 // ExternalResourceView is one org external-resource catalog entry with its
 // config schema and current consumers (the in-use delete guard input).
 //
-// Registered External rows may carry env cells (injected on the catalog
-// definition until the org value plane exists); Project External rows omit
-// them. Secret cell values are never copied onto the wire DTO.
+// Registered External rows may carry env cells and instances from
+// CatalogValuePlane when that collaborator is wired (tests); production
+// leaves the plane nil, so every live row stays Project External (empty
+// cells/instances). Secret cell values are never copied onto the wire DTO.
 type ExternalResourceView struct {
 	Name                    string
 	Description             string
@@ -40,7 +41,7 @@ type ExternalResourceView struct {
 	ConsumptionInstructions string
 	EnvCells                []EnvCell
 	ResourceDocs            []openchoreo.ResourceDoc
-	Instances               []openchoreo.ResourceInstance
+	Instances               []ResourceInstance
 }
 
 // EnvCell is one org-held environment × config-key cell on a Registered
@@ -53,6 +54,14 @@ type EnvCell struct {
 	Value       string
 }
 
+// ResourceInstance is one observed instance of a Registered External
+// resource (project × environment × status).
+type ResourceInstance struct {
+	Project     string
+	Environment string
+	Status      string
+}
+
 // ListExternalResources returns the org's external-resource catalog with each
 // entry's consumers (the components across the org whose committed design
 // declares an external dependency of that name — a design scan, since the
@@ -63,6 +72,9 @@ type EnvCell struct {
 // external_resources table (s.catalog is no longer read anywhere in this
 // package; authoring now builds its definition off the design — see
 // build_provision.go / value_service.go).
+//
+// Env cells and instances come from CatalogValuePlane when it is wired;
+// otherwise they stay empty.
 func (s *Service) ListExternalResources(ctx context.Context, orgID string) ([]ExternalResourceView, error) {
 	defs, err := s.rtCatalog.List(ctx, orgID)
 	if err != nil {
@@ -75,33 +87,21 @@ func (s *Service) ListExternalResources(ctx context.Context, orgID string) ([]Ex
 	out := make([]ExternalResourceView, 0, len(defs))
 	for i := range defs {
 		def := &defs[i]
-		out = append(out, ExternalResourceView{
+		view := ExternalResourceView{
 			Name:                    def.Name,
 			Description:             def.Description,
 			Config:                  toConfigKeys(def.Config),
 			Consumers:               consumersByName[strings.ToLower(def.Name)],
 			ConsumptionInstructions: def.ConsumptionInstructions,
-			EnvCells:                toEnvCells(def.EnvCells),
 			ResourceDocs:            def.ResourceDocs,
-			Instances:               def.Instances,
-		})
+		}
+		if s.catalogValuePlane != nil {
+			view.EnvCells = append([]EnvCell(nil), s.catalogValuePlane.EnvCells(def.Name)...)
+			view.Instances = append([]ResourceInstance(nil), s.catalogValuePlane.Instances(def.Name)...)
+		}
+		out = append(out, view)
 	}
 	return out, nil
-}
-
-// toEnvCells copies catalog env cells onto the view. Production
-// ExternalDefinitionFromRT never invents these (no org value plane yet).
-func toEnvCells(cells []openchoreo.EnvCell) []EnvCell {
-	out := make([]EnvCell, 0, len(cells))
-	for _, c := range cells {
-		out = append(out, EnvCell{
-			Environment: c.Environment,
-			Key:         c.Key,
-			Status:      c.Status,
-			Value:       c.Value,
-		})
-	}
-	return out
 }
 
 // toConfigKeys adapts the OC client's leaf-level config-key type (kept

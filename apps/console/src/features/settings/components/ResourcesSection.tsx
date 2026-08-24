@@ -37,6 +37,7 @@ import { ResourceDrawer } from "./ResourceDrawer";
 
 type PlatformResourceTypeDTO = components["schemas"]["PlatformResourceTypeDTO"];
 type ExternalResourceDTO = components["schemas"]["ExternalResourceDTO"];
+type ConsumerDTO = components["schemas"]["ConsumerDTO"];
 
 type ResourceTabValue = "platform" | "external";
 
@@ -70,7 +71,7 @@ function ResourceEmptyState({
 
 // Shared by both tabs — no overflow menu, no delete (that lives in the
 // drawer, Task 4). Clicking anywhere on the card opens it.
-function ResourceCard<T extends { name: string; description?: string; consumers?: unknown[] | null }>({
+function ResourceCard<T extends { name: string; description?: string; consumers?: ConsumerDTO[] | null }>({
   resource,
   onOpen,
 }: {
@@ -112,7 +113,7 @@ function ResourceCard<T extends { name: string; description?: string; consumers?
   );
 }
 
-function ResourceGrid<T extends { name: string; description?: string; consumers?: unknown[] | null }>({
+function ResourceGrid<T extends { name: string; description?: string; consumers?: ConsumerDTO[] | null }>({
   items,
   onOpen,
 }: {

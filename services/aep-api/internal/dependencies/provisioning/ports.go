@@ -93,6 +93,16 @@ type ExternalRTCatalog interface {
 	Delete(ctx context.Context, orgID, name string) error
 }
 
+// CatalogValuePlane is the optional org value plane for Registered External
+// resources. Production leaves it nil (no org value store yet); tests inject
+// Registered cells and instances through this seam. ListExternalResources
+// copies cells/instances from the plane when non-nil; otherwise they stay
+// empty and every live row remains Project External.
+type CatalogValuePlane interface {
+	EnvCells(name string) []EnvCell
+	Instances(name string) []ResourceInstance
+}
+
 // ProjectRef identifies one project (org + project id) for the cross-project
 // design scan (external-resource consumers, teardown).
 type ProjectRef struct {
