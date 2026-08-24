@@ -66,6 +66,13 @@ let externalState: {
 vi.mock("../../settings/api/queries", () => ({
   usePlatformResourceTypes: () => platformState,
   useExternalResources: () => externalState,
+  useDeleteExternalResource: () => ({
+    isPending: false,
+    isError: false,
+    error: null,
+    mutate: vi.fn(),
+    reset: vi.fn(),
+  }),
 }));
 
 function resetState() {
