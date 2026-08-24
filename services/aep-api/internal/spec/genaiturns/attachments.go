@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
+	"net/http"
 	"path"
 	"strings"
 
@@ -210,7 +211,7 @@ func readFormValue(part *multipart.Part) (string, error) {
 		return "", apierr.BadRequest("read form field: " + err.Error())
 	}
 	if len(v) > createTurnMaxInstructionBytes {
-		return "", apierr.New(413, "request_too_large",
+		return "", apierr.New(http.StatusRequestEntityTooLarge, "request_too_large",
 			"instruction exceeds the size limit", nil)
 	}
 	return string(v), nil

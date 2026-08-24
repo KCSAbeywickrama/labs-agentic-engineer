@@ -197,7 +197,7 @@ test("attachmentsNote names the files so a bare \"this\" has an antecedent", () 
 test("attachmentsNote agrees in number for several files", () => {
   const note = attachmentsNote(["a.pdf", "b.csv"]);
   assert.match(note, /attached these files to this message/);
-  assert.match(note, /read them before asking/);
+  assert.match(note, /read them before asking about anything they already answer:/);
   assert.match(note, /- a\.pdf\n- b\.csv/);
 });
 

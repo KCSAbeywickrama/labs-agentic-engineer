@@ -350,7 +350,7 @@ export function attachmentsNote(names: string[] | undefined): string {
     `The user attached ${listed.length === 1 ? "this file" : "these files"} to this message` +
     `, and ${listed.length === 1 ? "it is" : "they are"} included above as document content — ` +
     `read ${listed.length === 1 ? "it" : "them"} before asking about anything ` +
-    `${listed.length === 1 ? "it" : "they"} already answers:\n` +
+    `${listed.length === 1 ? "it already answers" : "they already answer"}:\n` +
     listed.map((n) => `- ${n}`).join("\n") +
     "\n\n"
   );
