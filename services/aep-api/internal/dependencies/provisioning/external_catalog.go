@@ -27,13 +27,30 @@ import (
 )
 
 // ExternalResourceView is one org external-resource catalog entry with its
-// config schema and current consumers (the in-use delete guard input). Values
-// are never included — the catalog holds schema + references only.
+// config schema and current consumers (the in-use delete guard input).
+//
+// Registered External rows may carry env cells (injected on the catalog
+// definition until the org value plane exists); Project External rows omit
+// them. Secret cell values are never copied onto the wire DTO.
 type ExternalResourceView struct {
-	Name        string
-	Description string
-	Config      []spec.ConfigKey
-	Consumers   []dependencies.ExternalResourceConsumer
+	Name                    string
+	Description             string
+	Config                  []spec.ConfigKey
+	Consumers               []dependencies.ExternalResourceConsumer
+	ConsumptionInstructions string
+	EnvCells                []EnvCell
+	ResourceDocs            []openchoreo.ResourceDoc
+	Instances               []openchoreo.ResourceInstance
+}
+
+// EnvCell is one org-held environment × config-key cell on a Registered
+// External resource. Status is "configured" or "unset". Value is never
+// copied to the DTO when the matching config key is secret.
+type EnvCell struct {
+	Environment string
+	Key         string
+	Status      string
+	Value       string
 }
 
 // ListExternalResources returns the org's external-resource catalog with each
@@ -59,13 +76,32 @@ func (s *Service) ListExternalResources(ctx context.Context, orgID string) ([]Ex
 	for i := range defs {
 		def := &defs[i]
 		out = append(out, ExternalResourceView{
-			Name:        def.Name,
-			Description: def.Description,
-			Config:      toConfigKeys(def.Config),
-			Consumers:   consumersByName[strings.ToLower(def.Name)],
+			Name:                    def.Name,
+			Description:             def.Description,
+			Config:                  toConfigKeys(def.Config),
+			Consumers:               consumersByName[strings.ToLower(def.Name)],
+			ConsumptionInstructions: def.ConsumptionInstructions,
+			EnvCells:                toEnvCells(def.EnvCells),
+			ResourceDocs:            def.ResourceDocs,
+			Instances:               def.Instances,
 		})
 	}
 	return out, nil
+}
+
+// toEnvCells copies catalog env cells onto the view. Production
+// ExternalDefinitionFromRT never invents these (no org value plane yet).
+func toEnvCells(cells []openchoreo.EnvCell) []EnvCell {
+	out := make([]EnvCell, 0, len(cells))
+	for _, c := range cells {
+		out = append(out, EnvCell{
+			Environment: c.Environment,
+			Key:         c.Key,
+			Status:      c.Status,
+			Value:       c.Value,
+		})
+	}
+	return out
 }
 
 // toConfigKeys adapts the OC client's leaf-level config-key type (kept

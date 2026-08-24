@@ -52,10 +52,14 @@ const rtTemplateVersionLabel = "aep.wso2.com/rt-template-version"
 // platform's `aep.wso2.com/*` domain (matching markers.go's
 // aep.wso2.com/description and ADR-0007), so the external RT stays symmetric
 // with the platform-resource markers and clear of OC's own `openchoreo.dev`
-// annotations. ExternalDefinitionFromRT reads these back.
+// annotations. ExternalDefinitionFromRT reads these back, plus optional
+// consumption-instructions and resource-docs when present (read-only here;
+// register writes them in ticket 04).
 const (
-	externalNameAnnotation        = "aep.wso2.com/external-name"
-	externalDescriptionAnnotation = "aep.wso2.com/description"
+	externalNameAnnotation            = "aep.wso2.com/external-name"
+	externalDescriptionAnnotation     = "aep.wso2.com/description"
+	consumptionInstructionsAnnotation = "aep.wso2.com/consumption-instructions"
+	resourceDocsAnnotation            = "aep.wso2.com/resource-docs"
 )
 
 // ExternalResourceRTName is the cluster ResourceType name for an external
@@ -338,22 +342,64 @@ func BuildExternalResourceType(name, description string, keys []ExternalResource
 
 // ExternalResourceDefinition is the reconstruction of an authored external
 // RT's definition — the inverse of BuildExternalResourceType.
+//
+// ConsumptionInstructions and ResourceDocs are read from RT annotations when
+// present. EnvCells and Instances are optional catalog fields: production
+// ExternalDefinitionFromRT never invents env cells (no org value plane yet).
+// Tests inject Registered External cells on fake catalog definitions so the
+// list DTO can discriminate Registered vs Project External resources.
 type ExternalResourceDefinition struct {
-	Name        string
-	Description string
-	Config      []ExternalResourceConfigKey
+	Name                    string
+	Description             string
+	Config                  []ExternalResourceConfigKey
+	ConsumptionInstructions string
+	EnvCells                []EnvCell
+	ResourceDocs            []ResourceDoc
+	Instances               []ResourceInstance
+}
+
+// EnvCell is one org-held environment × config-key cell on a Registered
+// External resource. Status is "configured" or "unset". Value is the plain
+// cell value when present; the HTTP mapper never copies it onto the DTO when
+// the matching config key is secret.
+type EnvCell struct {
+	Environment string
+	Key         string
+	Status      string
+	Value       string
+}
+
+// ResourceDoc is an org resource-docs pointer (type + URL or repo path),
+// reconstructed from the aep.wso2.com/resource-docs annotation.
+type ResourceDoc struct {
+	Type string `json:"type"`
+	URL  string `json:"url,omitempty"`
+	Path string `json:"path,omitempty"`
+}
+
+// ResourceInstance is one observed instance of a Registered External
+// resource (project × environment × status). Injected on catalog fixtures
+// until the org value plane exists.
+type ResourceInstance struct {
+	Project     string
+	Environment string
+	Status      string
 }
 
 // ExternalDefinitionFromRT recovers the external resource definition an
 // authored RT carries: the logical name + description off the
 // aep.wso2.com/external-name / aep.wso2.com/description
-// annotations, and each config key's key/description/default off
-// spec.parameters, with secret classification taken from spec.outputs (a key
-// is secret iff its output carries a secretKeyRef, plain iff a
+// annotations, consumption instructions and resource-docs pointers when
+// those annotations are present, and each config key's key/description/default
+// off spec.parameters, with secret classification taken from spec.outputs (a
+// key is secret iff its output carries a secretKeyRef, plain iff a
 // configMapKeyRef). Config is sorted by key for a deterministic result. ok is
 // false when rt does not carry enough self-describing metadata to
 // reconstruct (nil, no external-name annotation, or no spec.parameters
 // properties) — e.g. an RT authored by pre-self-describing code.
+//
+// It does not invent env cells: production has no org value plane yet, so
+// listed Project External rows omit envCells until ticket 04 writes the plane.
 func ExternalDefinitionFromRT(rt *ResourceType) (def ExternalResourceDefinition, ok bool) {
 	if rt == nil {
 		return ExternalResourceDefinition{}, false
@@ -395,10 +441,19 @@ func ExternalDefinitionFromRT(rt *ResourceType) (def ExternalResourceDefinition,
 	}
 	sort.Slice(config, func(i, j int) bool { return config[i].Key < config[j].Key })
 
+	var docs []ResourceDoc
+	if raw := rt.Metadata.Annotations[resourceDocsAnnotation]; raw != "" {
+		if err := json.Unmarshal([]byte(raw), &docs); err != nil {
+			docs = nil
+		}
+	}
+
 	return ExternalResourceDefinition{
-		Name:        name,
-		Description: rt.Metadata.Annotations[externalDescriptionAnnotation],
-		Config:      config,
+		Name:                    name,
+		Description:             rt.Metadata.Annotations[externalDescriptionAnnotation],
+		Config:                  config,
+		ConsumptionInstructions: rt.Metadata.Annotations[consumptionInstructionsAnnotation],
+		ResourceDocs:            docs,
 	}, true
 }
 

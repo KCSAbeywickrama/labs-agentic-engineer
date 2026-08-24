@@ -244,18 +244,52 @@ func toExternalResourceDTOs(views []ExternalResourceView) []gen.ExternalResource
 	out := make([]gen.ExternalResourceDTO, 0, len(views))
 	for _, v := range views {
 		keys := make([]gen.ConfigKeyDTO, 0, len(v.Config))
+		secretByKey := make(map[string]bool, len(v.Config))
 		for _, k := range v.Config {
 			keys = append(keys, gen.ConfigKeyDTO{Key: k.Key, Secret: k.Secret, Description: k.Description, DefaultValue: k.DefaultValue})
+			secretByKey[k.Key] = k.Secret
 		}
 		consumers := make([]gen.ConsumerDTO, 0, len(v.Consumers))
 		for _, c := range v.Consumers {
 			consumers = append(consumers, gen.ConsumerDTO{ProjectID: c.ProjectID, ComponentName: c.ComponentName})
 		}
+		envCells := make([]gen.EnvValueCellDTO, 0, len(v.EnvCells))
+		for _, c := range v.EnvCells {
+			cell := gen.EnvValueCellDTO{
+				Environment: c.Environment,
+				Key:         c.Key,
+				Status:      gen.EnvValueCellDTOStatus(c.Status),
+			}
+			if !secretByKey[c.Key] {
+				cell.Value = c.Value
+			}
+			envCells = append(envCells, cell)
+		}
+		docs := make([]gen.ResourceDocPointerDTO, 0, len(v.ResourceDocs))
+		for _, d := range v.ResourceDocs {
+			docs = append(docs, gen.ResourceDocPointerDTO{
+				Type: gen.ResourceDocPointerDTOType(d.Type),
+				URL:  d.URL,
+				Path: d.Path,
+			})
+		}
+		instances := make([]gen.ResourceInstanceDTO, 0, len(v.Instances))
+		for _, inst := range v.Instances {
+			instances = append(instances, gen.ResourceInstanceDTO{
+				Project:     inst.Project,
+				Environment: inst.Environment,
+				Status:      inst.Status,
+			})
+		}
 		out = append(out, gen.ExternalResourceDTO{
-			Name:        v.Name,
-			Description: v.Description,
-			Config:      keys,
-			Consumers:   consumers,
+			Name:                    v.Name,
+			Description:             v.Description,
+			Config:                  keys,
+			Consumers:               consumers,
+			ConsumptionInstructions: v.ConsumptionInstructions,
+			EnvCells:                envCells,
+			ResourceDocs:            docs,
+			Instances:               instances,
 		})
 	}
 	return out

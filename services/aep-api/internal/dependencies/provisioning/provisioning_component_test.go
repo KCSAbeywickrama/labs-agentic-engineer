@@ -227,15 +227,39 @@ func TestProvisioningComponent_NoClaims401(t *testing.T) {
 	}
 }
 
-// list-external-resources: the catalog entry rides the wire with its config
-// schema (never values) and its design-scanned consumers.
+// list-external-resources: Registered External (stripe) rides org value-plane
+// cells + docs; Project External (github) omits envCells. Config schema and
+// design-scanned consumers still ride the wire. Secret cells never include value.
 func TestProvisioningComponent_ListExternalResources(t *testing.T) {
 	t.Parallel()
 	svc := provisioning.NewService(provisioning.Deps{
 		RTCatalog: &cRTCatalog{defs: []openchoreo.ExternalResourceDefinition{
-			{Name: "stripe", Description: "payments", Config: []openchoreo.ExternalResourceConfigKey{
-				{Key: "api_key", Secret: true}, {Key: "region"},
-			}},
+			{
+				Name:        "stripe",
+				Description: "payments",
+				Config: []openchoreo.ExternalResourceConfigKey{
+					{Key: "api_key", Secret: true}, {Key: "region"},
+				},
+				ConsumptionInstructions: "Use the secret key as Bearer.",
+				EnvCells: []openchoreo.EnvCell{
+					{Environment: "development", Key: "api_key", Status: "configured", Value: "sk_live"},
+					{Environment: "development", Key: "region", Status: "configured", Value: "us"},
+					{Environment: "production", Key: "api_key", Status: "unset"},
+					{Environment: "production", Key: "region", Status: "unset"},
+				},
+				ResourceDocs: []openchoreo.ResourceDoc{
+					{Type: "openapi", URL: "https://example.com/openapi.yaml"},
+				},
+				Instances: []openchoreo.ResourceInstance{
+					{Project: "shop", Environment: "development", Status: "Ready"},
+				},
+			},
+			{
+				Name: "github",
+				Config: []openchoreo.ExternalResourceConfigKey{
+					{Key: "token", Secret: true},
+				},
+			},
 		}},
 		Design:   cDesign{comps: stripeConsumerDesign()},
 		Projects: cProjects{refs: []provisioning.ProjectRef{{OrgID: "acme", ProjectID: "proj"}}},
@@ -250,14 +274,66 @@ func TestProvisioningComponent_ListExternalResources(t *testing.T) {
 	if err := json.Unmarshal(resp.Body.Bytes(), &got); err != nil {
 		t.Fatalf("body: %v\n%s", err, resp.Body.String())
 	}
-	if len(got) != 1 || got[0].Name != "stripe" || got[0].Description != "payments" {
-		t.Fatalf("resources = %+v, want the stripe entry", got)
+	if len(got) != 2 {
+		t.Fatalf("resources = %+v, want stripe and github", got)
 	}
-	if len(got[0].Config) != 2 || got[0].Config[0].Key != "api_key" || !got[0].Config[0].Secret {
-		t.Errorf("config schema = %+v", got[0].Config)
+	byName := make(map[string]gen.ExternalResourceDTO, len(got))
+	for _, r := range got {
+		byName[r.Name] = r
 	}
-	if len(got[0].Consumers) != 1 || got[0].Consumers[0].ProjectID != "proj" || got[0].Consumers[0].ComponentName != "orders" {
-		t.Errorf("consumers = %+v, want the design-scanned orders consumer", got[0].Consumers)
+	stripe, ok := byName["stripe"]
+	if !ok || stripe.Description != "payments" {
+		t.Fatalf("resources = %+v, want the stripe Registered External entry", got)
+	}
+	github, ok := byName["github"]
+	if !ok {
+		t.Fatalf("resources = %+v, want the github Project External entry", got)
+	}
+	if len(stripe.Config) != 2 || stripe.Config[0].Key != "api_key" || !stripe.Config[0].Secret {
+		t.Errorf("config schema = %+v", stripe.Config)
+	}
+	if len(stripe.Consumers) != 1 || stripe.Consumers[0].ProjectID != "proj" || stripe.Consumers[0].ComponentName != "orders" {
+		t.Errorf("consumers = %+v, want the design-scanned orders consumer", stripe.Consumers)
+	}
+
+	if stripe.ConsumptionInstructions != "Use the secret key as Bearer." {
+		t.Fatalf("stripe consumptionInstructions = %#v", stripe.ConsumptionInstructions)
+	}
+	if len(stripe.EnvCells) != 4 {
+		t.Fatalf("Registered External stripe envCells = %#v, want 2 keys × 2 envs", stripe.EnvCells)
+	}
+	secretByKey := make(map[string]bool, len(stripe.Config))
+	for _, k := range stripe.Config {
+		secretByKey[k.Key] = k.Secret
+	}
+	var regionDev *gen.EnvValueCellDTO
+	for i := range stripe.EnvCells {
+		c := &stripe.EnvCells[i]
+		if c.Status != gen.EnvValueCellDTOStatusConfigured && c.Status != gen.EnvValueCellDTOStatusUnset {
+			t.Errorf("cell status = %q, want configured|unset", c.Status)
+		}
+		if secretByKey[c.Key] && c.Value != "" {
+			t.Fatalf("secret cell must not carry value: %+v", c)
+		}
+		if c.Key == "region" && c.Environment == "development" {
+			regionDev = c
+		}
+	}
+	if regionDev == nil || regionDev.Value != "us" {
+		t.Fatalf("plain region development cell = %+v, want value us", regionDev)
+	}
+	if len(stripe.ResourceDocs) != 1 || stripe.ResourceDocs[0].Type != gen.Openapi || stripe.ResourceDocs[0].URL != "https://example.com/openapi.yaml" {
+		t.Errorf("resourceDocs = %+v", stripe.ResourceDocs)
+	}
+	if len(stripe.Instances) != 1 || stripe.Instances[0].Project != "shop" || stripe.Instances[0].Environment != "development" || stripe.Instances[0].Status != "Ready" {
+		t.Errorf("instances = %+v", stripe.Instances)
+	}
+
+	if len(github.EnvCells) != 0 {
+		t.Fatalf("Project External github envCells must be omitted or empty, got %#v", github.EnvCells)
+	}
+	if github.ConsumptionInstructions != "" {
+		t.Errorf("Project External github must omit consumptionInstructions, got %#v", github.ConsumptionInstructions)
 	}
 }
 
