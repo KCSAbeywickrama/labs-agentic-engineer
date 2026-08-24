@@ -2131,6 +2131,21 @@ paths:
           description: Filter to the Tasks of one spec/build version tag (e.g. v3), by milestone
             membership. Empty returns every version.
           type: string
+      - description: Include each issue's newest comments (defaults true). Honoured only on a
+          `tag`-scoped read — the comment fetch is anchored on the milestone, so a read spanning
+          versions has no bounded set to ask for. Pass false to skip the GitHub round trip when
+          the caller does not render them.
+        explode: false
+        in: query
+        name: comments
+        schema:
+          # Keep an explicit pointer under the global prefer-skip-optional-pointer:
+          # the handler must distinguish 'absent' (default true) from an explicit false.
+          x-go-type-skip-optional-pointer: false
+          default: true
+          description: Include each issue's newest comments (defaults true). Honoured only on a
+            `tag`-scoped read.
+          type: boolean
       responses:
         '200':
           content:
@@ -4179,6 +4194,38 @@ components:
       - title
       - body
       type: object
+    IssueComment:
+      additionalProperties: false
+      description: One comment on an issue, exactly as GitHub holds it. The platform stores none of
+        this — it is read live on every request, so GitHub stays the only copy. The platform's OWN
+        machine comments are excluded (a resolved-dependency block, a provisioning note, a closing
+        line — written for the agent, not for a person); what remains is the coding agent's progress
+        notes and whatever a human wrote, which appear alike. They cannot be told apart by author,
+        and are not meant to be — the platform comments through the org's own credential and the
+        coding runner is handed that same credential, so both arrive under one login.
+      properties:
+        author:
+          description: The commenter's GitHub login. Empty when the account is gone — GitHub answers
+            a null author for a deleted user, which is a fact about the comment, not a read failure.
+          type: string
+        body:
+          type: string
+        createdAt:
+          format: date-time
+          type: string
+        id:
+          description: GitHub's own node id — stable across reads, and the list key a consumer
+            should render on.
+          type: string
+        url:
+          type: string
+      required:
+      - id
+      - author
+      - body
+      - createdAt
+      - url
+      type: object
     IssueResult:
       additionalProperties: false
       description: Issue metadata after create. deduped=true means an open issue
@@ -5638,6 +5685,17 @@ components:
           type: array
         body:
           type: string
+        comments:
+          description: The issue's newest comments, OLDEST FIRST, capped per issue, with the
+            platform's own machine comments excluded. Present only on a `tag`-scoped read taken with
+            `comments=true` (the default); a read spanning versions omits it, for the same reason
+            ledger issues are invisible there — the fetch is anchored on one milestone and a
+            cross-version read has no bounded set to ask for. Absence covers every empty case
+            (not asked for, nothing there, nothing left after the machine comments were dropped);
+            the field is never an empty array.
+          items:
+            $ref: '#/components/schemas/IssueComment'
+          type: array
         component:
           type: string
         dependsOn:
