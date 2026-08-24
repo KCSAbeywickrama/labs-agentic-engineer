@@ -23,6 +23,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/spf13/viper"
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/wso2/aep/aectl/internal/ui"
@@ -34,6 +35,9 @@ type gatewayIngressDeps struct {
 	applyConfig     func(ctx context.Context, gwName, gwNamespace, hostname string) error
 	confirm         func(string) bool
 	prompt          func(label, defaultValue string) (string, error)
+	// hostnameOverride, when non-empty, bypasses the interactive hostname prompt
+	// and confirmation — used by the CI path (gateway.hostname in config).
+	hostnameOverride string
 }
 
 var defaultGatewayIngressDeps = gatewayIngressDeps{
@@ -138,7 +142,9 @@ func execKubectl(ctx context.Context, args ...string) ([]byte, error) {
 }
 
 func checkOrConfigureGatewayIngress(ctx context.Context, _ *kubernetes.Clientset) error {
-	return runGatewayIngressCheck(ctx, defaultGatewayIngressDeps)
+	deps := defaultGatewayIngressDeps
+	deps.hostnameOverride = viper.GetString("gateway.hostname")
+	return runGatewayIngressCheck(ctx, deps)
 }
 
 func runGatewayIngressCheck(ctx context.Context, deps gatewayIngressDeps) error {
@@ -156,6 +162,24 @@ func runGatewayIngressCheck(ctx context.Context, deps gatewayIngressDeps) error 
 	}
 	sp.Fail("External gateway ingress not configured")
 
+	// CI path: hostname provided via config — auto-configure without prompting.
+	if deps.hostnameOverride != "" {
+		fmt.Println()
+		gwName, gwNamespace, err := deps.discoverGateway(ctx)
+		if err != nil {
+			return fmt.Errorf("discover data-plane gateway: %w", err)
+		}
+		sp2 := ui.NewSpinner(fmt.Sprintf("Configuring external gateway ingress (%s)", deps.hostnameOverride))
+		sp2.Start()
+		if err := deps.applyConfig(ctx, gwName, gwNamespace, deps.hostnameOverride); err != nil {
+			sp2.Fail("Failed to configure gateway ingress")
+			return err
+		}
+		sp2.Success(fmt.Sprintf("External gateway ingress configured (ClusterDataPlane + Environment/development: %s → %s, port 19080)", deps.hostnameOverride, gwName))
+		return nil
+	}
+
+	// Interactive path.
 	fmt.Println()
 	ui.Warn("Components with external endpoints will fail to render without a configured gateway ingress.")
 	ui.Detail("ComponentType templates use gateway.ingress.external to generate HTTPRoute hostnames.")

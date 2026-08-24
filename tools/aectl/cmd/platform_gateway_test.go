@@ -115,6 +115,34 @@ func TestRunGatewayIngressCheck(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			// CI path: hostnameOverride bypasses prompt and confirm entirely.
+			// prompt and confirm are nil — a call to either would panic.
+			name: "hostname override auto-configures without prompting",
+			deps: gatewayIngressDeps{
+				isConfigured:     func(context.Context) (bool, error) { return false, nil },
+				discoverGateway:  func(context.Context) (string, string, error) { return "gateway-default", "openchoreo-data-plane", nil },
+				hostnameOverride: "myapis.example.com",
+				applyConfig: func(_ context.Context, _, _, hostname string) error {
+					if hostname != "myapis.example.com" {
+						return fmt.Errorf("unexpected hostname: %s", hostname)
+					}
+					return nil
+				},
+			},
+			wantErr: false,
+		},
+		{
+			// CI path: an applyConfig error must propagate even with override set.
+			name: "hostname override propagates apply error",
+			deps: gatewayIngressDeps{
+				isConfigured:     func(context.Context) (bool, error) { return false, nil },
+				discoverGateway:  func(context.Context) (string, string, error) { return "gateway-default", "openchoreo-data-plane", nil },
+				hostnameOverride: "myapis.example.com",
+				applyConfig:      func(context.Context, string, string, string) error { return fmt.Errorf("kubectl error") },
+			},
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {

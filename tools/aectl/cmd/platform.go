@@ -76,6 +76,7 @@ var (
 	initSkipOCVersionCheck  bool
 	initOpenBaoDirect       bool
 	initReuseSecrets        bool
+	initAddons              string
 )
 
 var initCmd = &cobra.Command{
@@ -117,6 +118,7 @@ func init() {
 	initCmd.Flags().String("openbao-addr", "", "In-cluster URL of the OpenBao service (overrides config)")
 	_ = viper.BindPFlag("openbao.addr", initCmd.Flags().Lookup("openbao-addr"))
 	initCmd.Flags().BoolVar(&initReuseSecrets, "reuse-secrets", false, "Skip secret prompts and reuse secrets already seeded in OpenBao (for reinstall or upgrade)")
+	initCmd.Flags().StringVar(&initAddons, "addons", "", `Comma-separated addon IDs to install without prompting (e.g. "thunder-app,postgres-cnpg"). Use "none" to skip addons, "all" to install everything. Omit for interactive selection.`)
 	registerThunderFlags(initCmd)
 }
 
@@ -350,6 +352,10 @@ type addonDeps struct {
 	// context deadline is exceeded. Nil skips the wait (tests that do not
 	// exercise credential synchronization may omit this dep).
 	waitForSecrets func(ctx context.Context, namespace string, names []string) error
+	// addonsFlag, when non-empty, bypasses the interactive multi-select and
+	// operator-install confirmation. Accepted values: "none", "all", or a
+	// comma-separated list of addon IDs (e.g. "thunder-app,postgres-cnpg").
+	addonsFlag string
 }
 
 var defaultAddonDeps = addonDeps{
@@ -367,6 +373,7 @@ var defaultAddonDeps = addonDeps{
 // platformVersion is used as the Helm --version for operators whose OperatorSpec.Version is empty.
 func installAddons(ctx context.Context, client *kubernetes.Clientset, platformVersion string) error {
 	deps := defaultAddonDeps
+	deps.addonsFlag = initAddons
 	deps.waitForSecrets = func(ctx context.Context, namespace string, names []string) error {
 		return waitForSecretsReady(ctx, client, namespace, names, 3*time.Minute)
 	}
@@ -378,23 +385,48 @@ func runAddonInstall(ctx context.Context, platformVersion string, deps addonDeps
 		return nil
 	}
 
-	// Phase 0: addon selection
-	items := make([]ui.SelectItem, len(addons.Available))
-	for i, a := range addons.Available {
-		items[i] = ui.SelectItem{Label: a.Label, Description: a.Description}
-	}
-
-	selected, confirmed := deps.multiSelect("Optional platform resources", items)
-	if !confirmed {
-		return nil
-	}
-
+	// Phase 0: addon selection — CI path or interactive.
 	var chosen []addons.Addon
-	for i, a := range addons.Available {
-		if selected[i] {
-			chosen = append(chosen, a)
+	if deps.addonsFlag != "" {
+		switch deps.addonsFlag {
+		case "none":
+			return nil
+		case "all":
+			chosen = append(chosen, addons.Available...)
+		default:
+			byID := make(map[string]addons.Addon, len(addons.Available))
+			for _, a := range addons.Available {
+				byID[a.ID] = a
+			}
+			for _, id := range strings.Split(deps.addonsFlag, ",") {
+				id = strings.TrimSpace(id)
+				a, ok := byID[id]
+				if !ok {
+					known := make([]string, 0, len(addons.Available))
+					for _, av := range addons.Available {
+						known = append(known, av.ID)
+					}
+					return fmt.Errorf("unknown addon %q — valid IDs: %s", id, strings.Join(known, ", "))
+				}
+				chosen = append(chosen, a)
+			}
+		}
+	} else {
+		items := make([]ui.SelectItem, len(addons.Available))
+		for i, a := range addons.Available {
+			items[i] = ui.SelectItem{Label: a.Label, Description: a.Description}
+		}
+		selected, confirmed := deps.multiSelect("Optional platform resources", items)
+		if !confirmed {
+			return nil
+		}
+		for i, a := range addons.Available {
+			if selected[i] {
+				chosen = append(chosen, a)
+			}
 		}
 	}
+
 	if len(chosen) == 0 {
 		return nil
 	}
@@ -417,7 +449,8 @@ func runAddonInstall(ctx context.Context, platformVersion string, deps addonDeps
 		}
 		fmt.Println()
 
-		if !deps.confirm("Install these operators?") {
+		// When --addons flag is set, auto-confirm operator installs.
+		if deps.addonsFlag == "" && !deps.confirm("Install these operators?") {
 			ui.Warn("Operator installation skipped — addons will not be applied")
 			fmt.Println()
 			return nil

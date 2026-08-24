@@ -19,6 +19,7 @@ package cmd
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/wso2/aep/aectl/internal/addons"
@@ -283,6 +284,115 @@ func TestRunAddonInstall_SecretSyncTimeout(t *testing.T) {
 	// No addon manifests should have been applied either (operator failed → addon skipped).
 	if len(fa.applied) != 0 {
 		t.Errorf("applied %d manifests, want 0 (addon skipped after sync failure)", len(fa.applied))
+	}
+}
+
+// TestRunAddonInstall_AddonsFlag_None verifies that --addons=none returns
+// immediately without calling multiSelect or any other dep.
+func TestRunAddonInstall_AddonsFlag_None(t *testing.T) {
+	deps := addonDeps{
+		addonsFlag: "none",
+		multiSelect: func(string, []ui.SelectItem) ([]bool, bool) {
+			t.Error("multiSelect must not be called when --addons=none")
+			return nil, false
+		},
+		confirm: func(string) bool {
+			t.Error("confirm must not be called when --addons=none")
+			return false
+		},
+	}
+	if err := runAddonInstall(context.Background(), "", deps); err != nil {
+		t.Fatalf("expected nil, got %v", err)
+	}
+}
+
+// TestRunAddonInstall_AddonsFlag_All verifies that --addons=all installs every
+// available addon without calling the multiSelect prompt or the confirm dialog.
+func TestRunAddonInstall_AddonsFlag_All(t *testing.T) {
+	existing := make(map[string]bool)
+	for _, a := range addons.Available {
+		for _, v := range a.VerifyResources {
+			existing[v.Kind+"/"+v.Name] = true
+		}
+	}
+	fa := &fakeApplier{existing: existing}
+
+	deps := addonDeps{
+		addonsFlag: "all",
+		multiSelect: func(string, []ui.SelectItem) ([]bool, bool) {
+			t.Error("multiSelect must not be called when --addons=all")
+			return nil, false
+		},
+		confirm: func(string) bool {
+			t.Error("confirm must not be called when --addons=all")
+			return false
+		},
+		installOperator: func(context.Context, string, addons.OperatorSpec) error { return nil },
+		newApplier:      func(string) (manifestApplier, error) { return fa, nil },
+		waitForSecrets:  func(context.Context, string, []string) error { return nil },
+	}
+
+	if err := runAddonInstall(context.Background(), "", deps); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Every addon's manifests must have been applied.
+	wantApplied := 0
+	for _, a := range addons.Available {
+		wantApplied += len(a.Operator.PreManifests) + len(a.Manifests)
+	}
+	if got := len(fa.applied); got != wantApplied {
+		t.Errorf("applied %d manifests, want %d (all addons)", got, wantApplied)
+	}
+}
+
+// TestRunAddonInstall_AddonsFlag_Specific verifies that a comma-separated list
+// installs exactly those addons without prompting.
+func TestRunAddonInstall_AddonsFlag_Specific(t *testing.T) {
+	target := addonByID(t, "thunder-app")
+	fa := &fakeApplier{existing: existingForAddon(target)}
+	installedOps := []string{}
+
+	deps := addonDeps{
+		addonsFlag: "thunder-app",
+		multiSelect: func(string, []ui.SelectItem) ([]bool, bool) {
+			t.Error("multiSelect must not be called when --addons flag is set")
+			return nil, false
+		},
+		confirm: func(string) bool {
+			t.Error("confirm must not be called when --addons flag is set")
+			return false
+		},
+		installOperator: func(_ context.Context, _ string, op addons.OperatorSpec) error {
+			installedOps = append(installedOps, op.ReleaseName)
+			return nil
+		},
+		newApplier:     func(string) (manifestApplier, error) { return fa, nil },
+		waitForSecrets: func(context.Context, string, []string) error { return nil },
+	}
+
+	if err := runAddonInstall(context.Background(), "", deps); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Only thunder-app's operator should have been installed.
+	if len(installedOps) != 1 || installedOps[0] != target.Operator.ReleaseName {
+		t.Errorf("installed operators = %v, want [%s]", installedOps, target.Operator.ReleaseName)
+	}
+}
+
+// TestRunAddonInstall_AddonsFlag_UnknownID verifies that an unrecognised addon
+// ID is rejected immediately with a descriptive error.
+func TestRunAddonInstall_AddonsFlag_UnknownID(t *testing.T) {
+	deps := addonDeps{
+		addonsFlag: "not-a-real-addon",
+	}
+	err := runAddonInstall(context.Background(), "", deps)
+	if err == nil {
+		t.Fatal("expected an error for unknown addon ID, got nil")
+	}
+	if !strings.Contains(err.Error(), "not-a-real-addon") {
+		t.Errorf("error message should name the unknown ID, got: %v", err)
 	}
 }
 
