@@ -16,9 +16,14 @@
  * under the License.
  */
 
-import { createFileRoute } from "@tanstack/react-router";
-import { ResourcesCatalog } from "../features/marketplace/components/ResourcesCatalog";
+import { PageContent } from "@wso2/oxygen-ui";
+import { PageHeader } from "../../../components/PageHeader";
 
-export const Route = createFileRoute("/resources")({
-  component: ResourcesCatalog,
-});
+// Shell until the catalog grid lands — Task 5 fills this in.
+export function ResourcesCatalog() {
+  return (
+    <PageContent>
+      <PageHeader title="Resources" />
+    </PageContent>
+  );
+}

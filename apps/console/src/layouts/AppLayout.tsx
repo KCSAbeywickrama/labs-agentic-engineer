@@ -70,9 +70,9 @@ const REPO_URL = "https://github.com/wso2/labs-agentic-engineer";
 // (global nav) or per project section (project nav, ADR-0010).
 function activeItemFor(pathname: string, inProject: boolean): string {
   if (pathname.startsWith("/settings")) return "settings";
-  if (pathname.startsWith("/alerts")) return "alerts";
   if (pathname.startsWith("/resources")) return "resources";
   if (pathname.startsWith("/endpoints")) return "endpoints";
+  if (pathname.startsWith("/alerts")) return "alerts";
   if (!inProject) return "projects";
   const section = pathname.split("/")[3];
   switch (section) {
