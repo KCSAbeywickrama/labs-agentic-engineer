@@ -59,6 +59,9 @@ describe("prdUnsettled — what the rail reports about the requirements", () => 
     const md = ["## Open Questions", "", "- Which payroll vendor? *deferred*"].join("\n");
 
     expect(prdUnsettled(md).assumptions).toBe(0);
+    // The assumption count stays zero either way, so without this the case had
+    // no purchase on the thing it exists to check.
+    expect(prdUnsettled(md).openQuestions).toBe(0);
   });
 
   it("a settled document reports nothing", () => {

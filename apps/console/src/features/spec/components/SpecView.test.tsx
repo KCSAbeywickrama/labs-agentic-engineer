@@ -378,6 +378,19 @@ describe("SpecView while the kickoff is still writing", () => {
 
   // The failure banner was unreachable before #562 wired a real signal into it.
   // Unscoped it would pin a red alert across a healthy published spec after any
+  // The alert owns the failed case, so the body must add nothing to it. It used
+  // to fall through to "Select a file to view its content." — `nothingToShow`
+  // excludes `failed`, and an empty workspace has no file to select.
+  it("leaves the body empty under the failure banner", () => {
+    mockSpecAgent = "failed";
+    empty();
+    render(<SpecView projectName="proj1" />);
+
+    expect(screen.getByText("The agent couldn't write your requirements")).toBeInTheDocument();
+    expect(screen.queryByText("Select a file to view its content.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Nothing written yet")).not.toBeInTheDocument();
+  });
+
   // turn failed; a kickoff that died is the one failure leaving nothing behind.
   // The one state that can be KNOWN rather than inferred: a turn that started
   // and then died. So it is the only one carrying a way out.

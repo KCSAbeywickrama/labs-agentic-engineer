@@ -1274,7 +1274,11 @@ export function SpecView({ projectName }: { projectName: string }) {
                     />
                   </Box>
                 )
-              ) : nothingToShow ? (
+              ) : failed ? null : /* The alert above owns this case: it names the
+                   failure and carries the one Retry. A body beneath it would
+                   either repeat that offer or, as it did, invite the user to
+                   "select a file" in a workspace that has none. */
+              nothingToShow ? (
                 /* Nothing written and nothing running — a project whose
                    kickoff never landed, or one sitting between turns with no
                    document yet. Either way the workspace will not fill itself,

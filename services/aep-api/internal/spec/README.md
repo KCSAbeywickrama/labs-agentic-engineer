@@ -101,8 +101,9 @@ the genai turn engine (runner/broker/sweeper), and the files / design / skills s
   carrying the creating user's bearer (which is what lets the agent join the spec room), on the project's
   current thread. Idempotent on "has this project ever run a turn", because it has two triggers: project
   create, and the references upload a create with `referencesPending` held it for. Runs INLINE, so the
-  create answers only once the turn row exists — that is what keeps `spec.agent == ""` meaning
-  "never started" rather than also "starting right now", which no surface could tell apart. Bounded
+  create answers only once the turn row exists — that is what keeps `spec.agent == "never-started"`
+  meaning "no turn has ever run" rather than also "starting right now", which no surface could tell
+  apart. (`""` is a different fact: a turn HAS run and the newest one completed.) Bounded
   (20s) and error-swallowing: a kickoff that cannot start never fails the creation, and the spec
   view's empty state offers it instead.
 - **Design staleness is derived, never stored** (#575). "Have the requirements moved since the

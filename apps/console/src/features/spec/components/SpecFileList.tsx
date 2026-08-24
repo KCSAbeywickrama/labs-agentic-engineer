@@ -218,7 +218,15 @@ export function SpecFileList({
             otherwise look identical, and "how much" is the thing a glance is
             for. The hover carries the most significant one so a peek costs no
             click; the click carries all of them. */}
-        {section.reasons.length > 0 && (
+        {/* Gated on the STATE, not on `reasons.length`. The model keeps a
+            section's reasons while an agent works on it — SpecView reads them
+            for the design warning — but the rail must not show them: an agent
+            re-deriving a stale design is already resolving it, and warning
+            about the thing being fixed while it is being fixed reads as a
+            fault. `attention` is the only state this chip belongs to; the other
+            three carry no reasons or, when active, deliberately do not show
+            them. */}
+        {section.state === "attention" && section.reasons.length > 0 && (
           <Tooltip title={mostSignificant(section.reasons)?.label ?? ""}>
             <Chip
               size="small"

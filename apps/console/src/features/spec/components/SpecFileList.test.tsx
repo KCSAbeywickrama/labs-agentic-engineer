@@ -138,6 +138,25 @@ describe("SpecFileList — the rail carries state", () => {
     expect(screen.getAllByTestId("working-pulse").length).toBeGreaterThan(0);
   });
 
+  // An agent re-deriving a stale design is already resolving it, so warning
+  // about the thing being fixed while it is being fixed reads as a fault. The
+  // model still CARRIES the reasons here — SpecView reads them for the design
+  // warning — so the rail has to gate on the state rather than on their count.
+  it("shows no warning chip on the section an agent is working on", () => {
+    renderWith({ designOutdated: true, agentWorking: true, agentFlow: "design" });
+
+    expect(screen.getAllByTestId("working-pulse").length).toBeGreaterThan(0);
+    expect(screen.queryByLabelText(/Design: \d+ to resolve/)).not.toBeInTheDocument();
+  });
+
+  // The same rule on the other section, reached by a different flow: settling
+  // an assumption must not leave the requirements looking unattended.
+  it("shows no warning chip while the requirements are being settled", () => {
+    renderWith({ assumptions: 3, agentWorking: true, agentFlow: "settle" });
+
+    expect(screen.queryByLabelText(/Requirements: \d+ to resolve/)).not.toBeInTheDocument();
+  });
+
   // A count, not just a mark: three assumptions and one would otherwise look
   // identical, and "how much" is what a glance is for.
   it("counts what a section has to resolve", () => {
