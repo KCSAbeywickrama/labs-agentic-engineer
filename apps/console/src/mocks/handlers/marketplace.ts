@@ -17,18 +17,28 @@
  */
 
 import { http, HttpResponse } from "msw";
+import type { components } from "../../generated/aep-api";
 import {
   emptyOrgEndpoints,
   marketplaceError,
+  marketplaceLoadError,
+  seedExternalResources,
   seedOrgEndpoints,
+  seedPlatformResourceTypes,
   type MarketplaceScenario,
 } from "../fixtures/marketplace";
+
+type ApiError = components["schemas"]["Error"];
 
 function scenario(): MarketplaceScenario {
   return (
     (localStorage.getItem("aep:mock:marketplace") as MarketplaceScenario | null) ??
-    "some"
+    "empty"
   );
+}
+
+function errorJson(body: ApiError, status: number) {
+  return HttpResponse.json(body, { status });
 }
 
 export const marketplaceHandlers = [
@@ -40,5 +50,17 @@ export const marketplaceHandlers = [
       return HttpResponse.json(emptyOrgEndpoints);
     }
     return HttpResponse.json(seedOrgEndpoints);
+  }),
+
+  http.get("*/api/v1/dependencies/platform-resource-types", () => {
+    if (scenario() === "error") return errorJson(marketplaceLoadError, 500);
+    if (scenario() === "empty") return HttpResponse.json([]);
+    return HttpResponse.json(seedPlatformResourceTypes);
+  }),
+
+  http.get("*/api/v1/dependencies/external-resources", () => {
+    if (scenario() === "error") return errorJson(marketplaceLoadError, 500);
+    if (scenario() === "empty") return HttpResponse.json([]);
+    return HttpResponse.json(seedExternalResources);
   }),
 ];
