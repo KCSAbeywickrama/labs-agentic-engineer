@@ -162,6 +162,10 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 	}
 	ui.Success(fmt.Sprintf("Build registry %s/%s", initBuildPlaneNamespace, initRegistryService))
 
+	if err := checkAPIPlatform(ctx, k8sClient); err != nil {
+		return err
+	}
+
 	openBaoDirect := viper.GetBool("codingagent.openbao_direct.enabled")
 
 	if initReuseSecrets {
