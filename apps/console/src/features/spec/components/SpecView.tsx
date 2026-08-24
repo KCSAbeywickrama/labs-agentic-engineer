@@ -59,7 +59,9 @@ import { CollabTextArea } from "../collab/CollabTextArea";
 import { SpecMdEditor } from "../collab/SpecMdEditor";
 import { useYTextString } from "../collab/useYTextString";
 import { useTurnEndFlush } from "../collab/useTurnEndFlush";
+import { START_COMMAND } from "@aep/contracts/commands";
 import { chatKeyFor, setPendingSeed, subscribeTurnEnd } from "../../agent-chat/chatStore";
+import { EmptyState } from "../../../components/EmptyState";
 import { useResolveDependencyViaChat } from "../../agent-chat/useResolveDependencyViaChat";
 import type { DependencyResolutionIntent } from "../../projects/lib/dependencyResolutionMessage.js";
 import { useDesignCellChangeCount } from "../collab/useDesignCellChange";
@@ -202,7 +204,7 @@ export function SpecView({ projectName }: { projectName: string }) {
   // room. In either case the Architecture (cell-diagram) tab is where the user
   // wants to be, so we auto-select it.
   const search = useSearch({ strict: false }) as {
-    generate?: "requirements" | "design";
+    generate?: "design";
     connections?: "open";
   };
   const generate = search.generate;
@@ -447,12 +449,44 @@ export function SpecView({ projectName }: { projectName: string }) {
       : null,
   );
 
-  const specStatus = status.data?.specStatus;
-  const deriving =
-    specStatus === "pending" ||
-    specStatus === "draft" ||
-    specStatus === "in_progress";
-  const failed = specStatus === "failed";
+  // Whether an agent is working on this project's spec RIGHT NOW, and how the
+  // last attempt ended (#562). Read from `spec.agent` — the one status field
+  // that is not derived from committed git, which is what makes it the only one
+  // that can see a turn before it lands.
+  //
+  // It replaces a read of the flat `specStatus`, which never answered this: the
+  // BFF only ever sets that to ""/draft/approved, so `deriving` meant "spec
+  // files exist and none is versioned" and claimed an agent was shaping the
+  // spec for every unversioned project on screen — while the one moment work
+  // really is in flight, the kickoff, has no files at all and read as idle.
+  const specAgent = status.data?.spec.agent;
+  const deriving = specAgent === "working";
+  // `agent` is PROJECT-wide — the newest turn of any flow — so it says an agent
+  // is working, never which document. Only the kickoff can be named: with no
+  // requirements file in the project there is nothing else a turn could be
+  // writing, and it is the state this workspace has to explain (#562).
+  //
+  // The failure banner is scoped the same way, and for a sharper reason: it
+  // was unreachable before this change (the flat `specStatus` only ever carried
+  // ""/draft/approved), so unscoped it would newly pin a red alert across a
+  // healthy published spec after any turn failed — a design pass, a chat reply
+  // — until some later turn happened to succeed. A kickoff that died is the one
+  // failure that leaves the user with nothing and no explanation.
+  const noRequirementsYet = !files.some((f) => f.group === "requirements");
+  const failed = specAgent === "failed" && noRequirementsYet;
+  // No turn has EVER run for this project (#562 review): a dispatch that never
+  // reached the turn guard — no Anthropic key, an unreachable skills repo — or
+  // an abandoned reference upload the create held the kickoff for. Distinct
+  // from "" (a turn ran and finished), and the distinction is the whole point:
+  // without it this state showed a spinner promising work that was never
+  // coming, with nothing to click, because the way out hangs off `failed` and
+  // there is no turn row to have failed.
+  const neverStarted = specAgent === "never-started";
+  // Retrying is a SEND, so it goes where every other send goes: the chat's
+  // one-shot seed slot, GUARDED — the panel re-decides after it has rehydrated,
+  // which is the first moment "is the agent mid-exchange" is knowable here.
+  const retryStart = () =>
+    setPendingSeed(chatKeyFor(orgHandle ?? "default", projectName), START_COMMAND, true);
   // The design gate: Build arms once design files are generated (#80).
   const hasDesignFiles = files.some((f) => f.group === "designs");
   // The committed PRD, read for the Build drawer's story preview. It used to
@@ -808,11 +842,29 @@ export function SpecView({ projectName }: { projectName: string }) {
           )}
         </Box>
 
+        {/* The one state that needs a way out, and the only one that can be
+            KNOWN rather than inferred (#562 retest). `failed` is a positive
+            fact off the turn record — a turn that started and then died — so
+            unlike "the workspace looks empty" it can never be true for a
+            moment while something is actually working. That is why the action
+            lives here and nowhere else: gated on an absence, it appeared
+            during the kickoff, which is precisely when the user must not be
+            invited to restart it.
+
+            The old copy told the user to go type in the chat, which #530
+            forbids — a command the UI can offer as a control is offered. */}
         {failed && (
-          <Alert severity="error" sx={{ borderRadius: 0 }}>
-            <AlertTitle>The agent's last turn failed</AlertTitle>
-            Your files are safe — everything already written remains browsable.
-            Ask the agent to continue from where it stopped in the chat panel.
+          <Alert
+            severity="error"
+            sx={{ borderRadius: 0 }}
+            action={
+              <Button color="inherit" size="small" onClick={retryStart}>
+                Retry
+              </Button>
+            }
+          >
+            <AlertTitle>The agent couldn't write your requirements</AlertTitle>
+            Nothing was lost — anything already written stays browsable.
           </Alert>
         )}
 
@@ -1129,11 +1181,54 @@ export function SpecView({ projectName }: { projectName: string }) {
                     />
                   </Box>
                 )
+              ) : neverStarted ? (
+                /* Nothing has run and nothing will until someone asks. The
+                   same Retry the failure banner offers — one way out, one
+                   word for it. */
+                <EmptyState
+                  title="Nothing written yet"
+                  description="Your requirements and design appear here as the agent writes them."
+                  action={
+                    <Button variant="contained" onClick={retryStart}>
+                      Retry
+                    </Button>
+                  }
+                />
+              ) : files.length === 0 ? (
+                /* An EMPTY workspace — the whole of the kickoff, before the
+                   agent's first write lands. "Select a file to view its
+                   content" is meaningless with no files to select, and that is
+                   what the user met whenever `spec.agent` was momentarily not
+                   "working": the gap between turns, or a status read older
+                   than the turn that started since.
+                   Keyed on the file list rather than on that status, so it
+                   cannot flap: a failure has its own banner above, so an empty
+                   workspace with no banner means the agent's work is pending or
+                   in flight either way. Same centred-spinner shape the
+                   architecture pane uses while a design turn runs. */
+                failed ? null : (
+                  <Box
+                    sx={{
+                      height: "100%",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 2,
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <CircularProgress aria-label="Agent is writing the requirements" />
+                    <Typography variant="body2" color="text.secondary">
+                      Agent is working on the requirements document
+                    </Typography>
+                  </Box>
+                )
               ) : (
+                /* Files exist but the selection names none of them — a stale
+                   manual pick whose file has since gone. The default selection
+                   always lands on a real file, so this is the only way here. */
                 <Typography variant="body2" color="text.secondary">
-                  {deriving
-                    ? "The agents are shaping the spec — files appear here as they land."
-                    : "Select a file to view its content."}
+                  Select a file to view its content.
                 </Typography>
               )}
             </Box>

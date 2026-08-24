@@ -451,6 +451,16 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// the /start flow to generate requirements from.
 	projectService.SetDescriptorWriter(spec.NewDescriptorWriter(filesSvc))
 
+	// The journey starts itself (#562): creation fires `/start` server-side,
+	// so the user lands on a project whose agent is already interviewing them
+	// instead of a dashboard asking them to press a button. Wired after the
+	// descriptor writer above because that is the order the create path runs
+	// them in — the turn reads the idea from the file that write commits.
+	projectService.SetKickoffStarter(genaiSvc)
+	// …and the status poll reports whether it is still running, which is the
+	// one thing the git-derived spec fields cannot say.
+	projectService.SetSpecTurnSource(turnRepo)
+
 	// The Task-keyed log endpoint (issue number → newest execution by default,
 	// executionId query pins one for history browsing). (The runner skills-pull
 	// S2S endpoint is retired — the runner now clones `org-skills` and resolves

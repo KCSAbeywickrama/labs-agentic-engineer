@@ -921,6 +921,9 @@ type CreateProjectRequest struct {
 	// Prompt The user's initial requirement — what they want built. Persisted as the project's requirement and kicks off spec derivation for the new project (issue #72). Projects created without a prompt keep today's behavior.
 	Prompt string `json:"prompt,omitempty"`
 
+	// ReferencesPending The caller will POST reference documents for this project next (`put-project-references`), so the platform must hold the `/start` kickoff (#562) until they land — they are the primary brief, and a kickoff dispatched before the upload interviews the user about a document the agent never saw. The kickoff then fires from the references call instead. Omitted/false fires it from this call. Nothing else waits on it: an abandoned upload simply leaves the project un-started, which the overview's spec card offers as a CTA.
+	ReferencesPending bool `json:"referencesPending,omitempty"`
+
 	// RepoName Repository name for the project's GitHub repo; defaults to the project name, the organization is fixed server-side (issue #71).
 	RepoName string `json:"repoName,omitempty"`
 }
@@ -1729,6 +1732,9 @@ type SkillUpdateList struct {
 
 // SpecStage Spec-stage aggregate on ProjectStatus (#184). Approved/draft is derived, not stored — version set and not dirty = approved (vN); dirty = draft changes (vN+); no version = unpublished draft; exists false = no spec yet.
 type SpecStage struct {
+	// Agent Whether an agent is working on this project's spec right now, and how the last attempt ended (#562). `never-started` — no turn has EVER run for this project; `""` — a turn has run and the newest one completed; `working` — a turn is in flight; `failed` — the newest turn ended in failure and none has run since. `never-started` is distinct from `""` because the two need opposite treatment: one means the journey has not begun and the user needs a way to begin it, the other means it is under way between turns and offering to restart it would supersede a live interview. Derived from the newest `agent_turns` row for the project, which is what `exists`/`version`/`dirty` cannot say: all three read committed git, and a kickoff writes nothing until it lands. The overview's spec card needs it to say *Writing requirements* while the platform-fired `/start` runs, and the spec view needs it to explain an empty workspace instead of offering a file picker.
+	Agent string `json:"agent"`
+
 	// Design Design files exist for the spec (gates the Spec view's design button).
 	Design bool `json:"design"`
 
@@ -1960,13 +1966,21 @@ type TurnOutputBody struct {
 
 // TurnStatus One turn's lifecycle view (create-turn 202 → poll/attach).
 type TurnStatus struct {
+	// AuthorDisplayName The acting user's display name, paired with authorId.
+	AuthorDisplayName string `json:"authorDisplayName,omitempty"`
+
+	// AuthorID Who started this turn — EMAIL-anchored, matching the console's live author identity, which is what lets a client tell its own turn from a teammate's. Empty when no attributable human sent it (an M2M token, a minimal user token, or a turn dispatched before the display record was stored). Flat rather than a nested object so "absent" is one convention across this schema: the empty string, exactly as `instruction` uses it.
+	AuthorID       string    `json:"authorId,omitempty"`
 	CommitSha      string    `json:"commitSha,omitempty"`
 	ConversationID string    `json:"conversationId"`
 	CreatedAt      time.Time `json:"createdAt"`
-	Message        string    `json:"message,omitempty"`
-	NoChanges      bool      `json:"noChanges,omitempty"`
-	Paths          []string  `json:"paths,omitempty"`
-	Reason         string    `json:"reason,omitempty"`
+
+	// Instruction What this turn's DISPLAY record says — the transcript line for the message that started it. Present so a client attaching to a turn it did not send can render the sender's message immediately, instead of narration under a blank space: the conversation store persists a turn's transcript only when the turn ENDS, so a history read mid-turn cannot supply it. Empty on turns dispatched before this field existed. Not the model's prompt — the agents service composes that from the turn spec and it never crosses this boundary.
+	Instruction string   `json:"instruction,omitempty"`
+	Message     string   `json:"message,omitempty"`
+	NoChanges   bool     `json:"noChanges,omitempty"`
+	Paths       []string `json:"paths,omitempty"`
+	Reason      string   `json:"reason,omitempty"`
 
 	// Status running, completed, failed
 	Status    string    `json:"status"`
