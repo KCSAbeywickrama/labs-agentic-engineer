@@ -151,6 +151,29 @@ describe("railSections — the rail is the flow", () => {
       expect(of(working, "design").state).toBe("active");
     });
 
+    // …but the reasons are RETAINED, and that is deliberate. Suppressing the
+    // warning is a rendering rule and lives with the rail (`SpecFileList` gates
+    // its chip on the state). The model stays a complete description because a
+    // second reader depends on it: SpecView derives the Generate-design warning
+    // from these counts, and its "an agent is busy" signal is room presence
+    // while this one is the polled turn row — the two can disagree, so an
+    // emptied list would silently drop the warning in that window and derive a
+    // design against unsettled requirements without saying so.
+    it("keeps the reasons on an active section for readers other than the rail", () => {
+      const working = railSections(
+        input({ designOutdated: true, agentWorking: true, agentFlow: "design" }),
+      );
+      expect(of(working, "design").reasons).toHaveLength(1);
+    });
+
+    it("keeps the requirements' reasons while they are being settled", () => {
+      const working = railSections(
+        input({ assumptions: 3, openQuestions: 1, agentWorking: true, agentFlow: "settle" }),
+      );
+      expect(of(working, "requirements").state).toBe("active");
+      expect(reasonCount(of(working, "requirements").reasons)).toBe(4);
+    });
+
     // A section with nothing in it has nothing to be stale.
     it("says nothing about a section that does not exist yet", () => {
       const none = railSections(input({ hasDesign: false, designOutdated: true }));
