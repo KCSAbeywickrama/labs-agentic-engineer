@@ -123,7 +123,13 @@ func TestRunGatewayIngressCheck(t *testing.T) {
 				isConfigured:     func(context.Context) (bool, error) { return false, nil },
 				discoverGateway:  func(context.Context) (string, string, error) { return "gateway-default", "openchoreo-data-plane", nil },
 				hostnameOverride: "myapis.example.com",
-				applyConfig: func(_ context.Context, _, _, hostname string) error {
+				applyConfig: func(_ context.Context, gwName, gwNamespace, hostname string) error {
+					if gwName != "gateway-default" {
+						return fmt.Errorf("unexpected gwName: %s", gwName)
+					}
+					if gwNamespace != "openchoreo-data-plane" {
+						return fmt.Errorf("unexpected gwNamespace: %s", gwNamespace)
+					}
 					if hostname != "myapis.example.com" {
 						return fmt.Errorf("unexpected hostname: %s", hostname)
 					}
@@ -152,5 +158,40 @@ func TestRunGatewayIngressCheck(t *testing.T) {
 				t.Errorf("runGatewayIngressCheck() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+// TestRunGatewayIngressCheck_HostnameOverride_GatewayForwarding verifies that
+// in the CI override path discoverGateway is actually invoked and that both the
+// gateway name and namespace it returns are forwarded unchanged to applyConfig.
+func TestRunGatewayIngressCheck_HostnameOverride_GatewayForwarding(t *testing.T) {
+	discoverCalled := false
+	var capturedGwName, capturedGwNs string
+
+	deps := gatewayIngressDeps{
+		isConfigured: func(context.Context) (bool, error) { return false, nil },
+		discoverGateway: func(context.Context) (string, string, error) {
+			discoverCalled = true
+			return "gateway-default", "openchoreo-data-plane", nil
+		},
+		hostnameOverride: "myapis.example.com",
+		applyConfig: func(_ context.Context, gwName, gwNamespace, _ string) error {
+			capturedGwName = gwName
+			capturedGwNs = gwNamespace
+			return nil
+		},
+	}
+
+	if err := runGatewayIngressCheck(context.Background(), deps); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !discoverCalled {
+		t.Error("discoverGateway must be called in the CI override path")
+	}
+	if capturedGwName != "gateway-default" {
+		t.Errorf("applyConfig received gwName = %q, want %q", capturedGwName, "gateway-default")
+	}
+	if capturedGwNs != "openchoreo-data-plane" {
+		t.Errorf("applyConfig received gwNamespace = %q, want %q", capturedGwNs, "openchoreo-data-plane")
 	}
 }

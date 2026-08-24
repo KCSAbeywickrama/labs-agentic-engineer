@@ -381,6 +381,61 @@ func TestRunAddonInstall_AddonsFlag_Specific(t *testing.T) {
 	}
 }
 
+// TestRunAddonInstall_AddonsFlag_MultipleIDs verifies that a comma-separated
+// list with more than one ID installs exactly those addons — both operators are
+// invoked, all their manifests are applied, and no interactive callback fires.
+func TestRunAddonInstall_AddonsFlag_MultipleIDs(t *testing.T) {
+	first := addonByID(t, "thunder-app")
+	second := addonByID(t, "postgres-cnpg")
+
+	existing := existingForAddon(first)
+	for k, v := range existingForAddon(second) {
+		existing[k] = v
+	}
+	fa := &fakeApplier{existing: existing}
+	var installedOps []string
+
+	deps := addonDeps{
+		addonsFlag: "thunder-app,postgres-cnpg",
+		multiSelect: func(string, []ui.SelectItem) ([]bool, bool) {
+			t.Error("multiSelect must not be called when --addons flag is set")
+			return nil, false
+		},
+		confirm: func(string) bool {
+			t.Error("confirm must not be called when --addons flag is set")
+			return false
+		},
+		installOperator: func(_ context.Context, _ string, op addons.OperatorSpec) error {
+			installedOps = append(installedOps, op.ReleaseName)
+			return nil
+		},
+		newApplier:     func(string) (manifestApplier, error) { return fa, nil },
+		waitForSecrets: func(context.Context, string, []string) error { return nil },
+	}
+
+	if err := runAddonInstall(context.Background(), "", deps); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Both operators must have been installed.
+	wantOps := []string{first.Operator.ReleaseName, second.Operator.ReleaseName}
+	if len(installedOps) != len(wantOps) {
+		t.Fatalf("installed operators = %v, want %v", installedOps, wantOps)
+	}
+	for i, want := range wantOps {
+		if installedOps[i] != want {
+			t.Errorf("installedOps[%d] = %q, want %q", i, installedOps[i], want)
+		}
+	}
+
+	// All manifests for both addons must have been applied.
+	wantApplied := len(first.Operator.PreManifests) + len(first.Manifests) +
+		len(second.Operator.PreManifests) + len(second.Manifests)
+	if got := len(fa.applied); got != wantApplied {
+		t.Errorf("applied %d manifests, want %d (thunder-app + postgres-cnpg)", got, wantApplied)
+	}
+}
+
 // TestRunAddonInstall_AddonsFlag_UnknownID verifies that an unrecognised addon
 // ID is rejected immediately with a descriptive error.
 func TestRunAddonInstall_AddonsFlag_UnknownID(t *testing.T) {
