@@ -30,10 +30,15 @@ thunder:
   systemClientID: "aep-system-client"
   systemClientSecret: "aep-system-client-secret"
 
-  # existingSecret: when set, the deployment sources THUNDER_SYSTEM_CLIENT_ID /
-  # THUNDER_SYSTEM_CLIENT_SECRET from this pre-existing Secret instead of the
-  # chart-managed one above. Keys must be `client-id` and `client-secret`.
+  # existingSecret: when set, the deployment sources THUNDER_SYSTEM_CLIENT_SECRET
+  # from this pre-existing Secret instead of the chart-managed one above.
+  # THUNDER_SYSTEM_CLIENT_ID is always taken from systemClientID (above).
+  # Use clientSecretKey to name the key within the Secret.
   existingSecret: ""
+
+  # clientSecretKey: the key within existingSecret that holds the client secret.
+  # Ignored when existingSecret is empty (chart-managed Secret always uses "client-secret").
+  clientSecretKey: "client-secret"
 
 resources:
   requests:

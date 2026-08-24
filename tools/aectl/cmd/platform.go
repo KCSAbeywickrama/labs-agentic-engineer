@@ -166,6 +166,10 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	if err := checkOrConfigureGatewayIngress(ctx, k8sClient); err != nil {
+		return err
+	}
+
 	openBaoDirect := viper.GetBool("codingagent.openbao_direct.enabled")
 
 	if initReuseSecrets {
@@ -416,6 +420,30 @@ func runAddonInstall(ctx context.Context, platformVersion string, deps addonDeps
 			if op.Version == "" && platformVersion != "" {
 				op.Version = platformVersion
 			}
+
+			if len(op.PreManifests) > 0 {
+				preSp := ui.NewSpinner(fmt.Sprintf("Preparing %s prerequisites", op.DisplayName))
+				preSp.Start()
+				preApplier, err := deps.newApplier(kubeconfig)
+				if err != nil {
+					preSp.Fail(fmt.Sprintf("Failed to prepare %s prerequisites", op.DisplayName))
+					operatorFailed[a.Operator.ReleaseName] = fmt.Errorf("build applier for %s pre-manifests: %w", op.ReleaseName, err)
+					continue
+				}
+				var preErr error
+				for _, m := range op.PreManifests {
+					if preErr = preApplier.ApplyYAML(ctx, "aectl", "", m); preErr != nil {
+						break
+					}
+				}
+				if preErr != nil {
+					preSp.Fail(fmt.Sprintf("Failed to prepare %s prerequisites", op.DisplayName))
+					operatorFailed[a.Operator.ReleaseName] = fmt.Errorf("apply %s pre-manifests: %w", op.ReleaseName, preErr)
+					continue
+				}
+				preSp.Success(fmt.Sprintf("%s prerequisites applied", op.DisplayName))
+			}
+
 			sp := ui.NewSpinner(fmt.Sprintf("Installing %s...", op.DisplayName))
 			sp.Start()
 			if err := deps.installOperator(ctx, kubeconfig, op); err != nil {
