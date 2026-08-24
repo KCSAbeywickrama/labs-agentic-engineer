@@ -138,8 +138,8 @@ describe("AgentView", () => {
   it("explains what the interface type means", () => {
     render(<AgentView spec={AFM} />);
 
-    expect(screen.getByText("webchat")).toBeInTheDocument();
-    expect(screen.getByText("POST /chat")).toBeInTheDocument();
+    // One row in the Configuration table now — type and path read together.
+    expect(screen.getByText("webchat · POST /chat")).toBeInTheDocument();
     expect(screen.getByText(/an HTTP endpoint a web app calls/i)).toBeInTheDocument();
   });
 
@@ -224,5 +224,67 @@ describe("AgentView — editing the behaviour prompt", () => {
     expect(await screen.findByText("collab is offline")).toBeInTheDocument();
     // Still editing, so the draft is not lost to a failed write.
     expect(screen.getByLabelText("Behaviour")).toBeInTheDocument();
+  });
+});
+
+describe("AgentView — reading order", () => {
+  /** Rendered section headings, in document order. */
+  function headings() {
+    return Array.from(document.querySelectorAll("h1,h2,h3,h4,h5,h6,.MuiTypography-overline"))
+      .map((el) => el.textContent?.trim())
+      .filter((t): t is string => Boolean(t));
+  }
+
+  // The prompt IS the agent — the skills say the body becomes the system prompt
+  // verbatim — so it is what a reviewer came to read. The wiring below it is
+  // mostly `${env:}` placeholders the platform fills in.
+  it("leads with the prompt, not the wiring", () => {
+    render(<AgentView spec={AFM} />);
+
+    const order = headings();
+    expect(order.indexOf("Behaviour")).toBeLessThan(order.indexOf("Configuration"));
+    expect(order.indexOf("Behaviour")).toBeLessThan(order.indexOf("Tools"));
+  });
+
+  // Tools keep their own section between the prompt and the wiring. The
+  // allow-list is the security boundary and carries resolution status, so it
+  // must not read as configuration trivia in a table of env placeholders.
+  it("keeps Tools between the prompt and the configuration table", () => {
+    render(<AgentView spec={AFM} />);
+
+    const order = headings();
+    expect(order.indexOf("Tools")).toBeGreaterThan(order.indexOf("Behaviour"));
+    expect(order.indexOf("Tools")).toBeLessThan(order.indexOf("Configuration"));
+  });
+
+  it("puts the wiring in one labelled table rather than three sections", () => {
+    render(<AgentView spec={AFM} />);
+
+    expect(screen.getByText("Configuration")).toBeInTheDocument();
+    expect(screen.getByText("Model")).toBeInTheDocument();
+    expect(screen.getByText("Interface")).toBeInTheDocument();
+    expect(screen.getByText("Memory")).toBeInTheDocument();
+    // The fixture declares client memory; the point is the value is shown as a
+    // labelled row in the table, not which value it happens to be.
+    expect(screen.getByText("client")).toBeInTheDocument();
+  });
+
+  // The package carries no markdown dependency: the console passes its own
+  // renderer so the PRD, alerts and this all look like one product.
+  it("renders the prompt through a caller-supplied markdown renderer", () => {
+    render(
+      <AgentView
+        spec={AFM}
+        renderMarkdown={(md) => <pre data-testid="md">{md}</pre>}
+      />,
+    );
+
+    expect(screen.getByTestId("md").textContent).toContain("# Role");
+  });
+
+  it("falls back to plain text when no renderer is given", () => {
+    render(<AgentView spec={AFM} />);
+
+    expect(screen.getByText(/You help a traveler book a hotel/)).toBeInTheDocument();
   });
 });

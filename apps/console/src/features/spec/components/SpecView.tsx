@@ -75,6 +75,7 @@ import { DesignView } from "@aep/ui-design-view";
 import type { DependencyStatusInfo } from "@aep/ui-design-view";
 import { ValidationView } from "@aep/ui-validation-view";
 import { AgentView } from "@aep/ui-agent-view";
+import { MarkdownView } from "../../../components/MarkdownView";
 import type { AgentToolStatusInfo } from "@aep/ui-agent-view";
 import type { SpecSelection } from "../api/designTree";
 import { DESIGN_CELL_PATH, componentOf, fileLabel } from "../api/designTree";
@@ -1062,6 +1063,7 @@ export function SpecView({ projectName }: { projectName: string }) {
                       <AgentView
                         spec={structuredLive}
                         toolStatus={agentToolStatus}
+                        renderMarkdown={(md) => <MarkdownView>{md}</MarkdownView>}
                         {...(afmText ? { onSaveBehaviour: handleSaveBehaviour } : {})}
                       />
                     ) : (
@@ -1088,6 +1090,7 @@ export function SpecView({ projectName }: { projectName: string }) {
                         key={content.data.sha}
                         spec={content.data.content}
                         toolStatus={agentToolStatus}
+                        renderMarkdown={(md) => <MarkdownView>{md}</MarkdownView>}
                         {...(afmText ? { onSaveBehaviour: handleSaveBehaviour } : {})}
                       />
                     ) : (

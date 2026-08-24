@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { Alert, Box, Button, Chip, Stack, TextField, Typography } from "@wso2/oxygen-ui";
 
 import {
@@ -61,6 +61,14 @@ export interface AgentViewProps {
    * time — see SpecView, which keeps the agent's own front-matter edits.
    */
   onSaveBehaviour?: ((body: string) => Promise<void>) | undefined;
+  /**
+   * Render the prompt body as markdown. A render prop rather than a dependency:
+   * this package carries no markdown renderer, so the console passes the ONE it
+   * already uses for the PRD and alerts and everything stays a single product.
+   * Without it the body renders as plain pre-wrapped text — which is also
+   * exactly what the model receives.
+   */
+  renderMarkdown?: ((markdown: string) => ReactNode) | undefined;
   /**
    * OPTIONAL per-operation resolution status, keyed `"<component>:<operation>"`,
    * from the design read model's `Dependency.operations`. Optional and keyed
@@ -229,9 +237,11 @@ function ToolGroup({
 function Behaviour({
   spec,
   onSaveBehaviour,
+  renderMarkdown,
 }: {
   spec: AgentSpec;
   onSaveBehaviour?: ((body: string) => Promise<void>) | undefined;
+  renderMarkdown?: ((markdown: string) => ReactNode) | undefined;
 }) {
   const [draft, setDraft] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -300,6 +310,8 @@ function Behaviour({
             </Button>
           </Stack>
         </Box>
+      ) : renderMarkdown ? (
+        renderMarkdown(spec.body)
       ) : (
         <Box sx={{ display: "flex", flexDirection: "column", gap: 2.5 }}>
           {spec.prompt.map((section, index) => (
@@ -324,10 +336,12 @@ function AgentSpecBody({
   spec,
   toolStatus,
   onSaveBehaviour,
+  renderMarkdown,
 }: {
   spec: AgentSpec;
   toolStatus?: Record<string, AgentToolStatusInfo> | undefined;
   onSaveBehaviour?: ((body: string) => Promise<void>) | undefined;
+  renderMarkdown?: ((markdown: string) => ReactNode) | undefined;
 }) {
   const modelName = modelFact(spec.model?.name);
   const modelEndpoint = modelFact(spec.model?.url);
@@ -351,49 +365,12 @@ function AgentSpecBody({
           </>
         ) : null}
 
-        {spec.model ? (
-          <>
-            <SectionHeading>Model</SectionHeading>
-            <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
-              {spec.model.provider ? <Fact label="Provider" value={spec.model.provider} /> : null}
-              {modelName ? <Fact label="Model" value={modelName} /> : null}
-              {modelEndpoint ? <Fact label="Endpoint" value={modelEndpoint} /> : null}
-            </Box>
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-              The agent gets model access from its component type, on the organisation&apos;s own
-              key — nothing to configure here.
-            </Typography>
-          </>
-        ) : null}
-
-        {spec.interfaces.length > 0 ? (
-          <>
-            <SectionHeading>Interfaces</SectionHeading>
-            <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
-              {spec.interfaces.map((iface) => {
-                const gloss = interfaceGloss(iface.type);
-                return (
-                  <Box key={`${iface.type}:${iface.path ?? ""}`}>
-                    <Box sx={{ display: "flex", alignItems: "baseline", gap: 1.5 }}>
-                      <Typography component="span" sx={{ fontWeight: 700 }}>
-                        {iface.type}
-                      </Typography>
-                      {iface.path ? (
-                        <Typography component="span" sx={mono}>
-                          POST {iface.path}
-                        </Typography>
-                      ) : null}
-                    </Box>
-                    {gloss ? (
-                      <Typography variant="body2" color="text.secondary">
-                        {gloss}
-                      </Typography>
-                    ) : null}
-                  </Box>
-                );
-              })}
-            </Box>
-          </>
+        {spec.prompt.length > 0 || onSaveBehaviour ? (
+          <Behaviour
+            spec={spec}
+            onSaveBehaviour={onSaveBehaviour}
+            renderMarkdown={renderMarkdown}
+          />
         ) : null}
 
         <SectionHeading>Tools</SectionHeading>
@@ -413,15 +390,49 @@ function AgentSpecBody({
           </>
         )}
 
-        {spec.prompt.length > 0 || onSaveBehaviour ? (
-          <Behaviour spec={spec} onSaveBehaviour={onSaveBehaviour} />
-        ) : null}
+
+        <SectionHeading>Configuration</SectionHeading>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+          Wiring the platform fills in at deploy. The agent takes model access from its
+          component type, on the organisation&apos;s own key — nothing to set here.
+        </Typography>
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
+          {spec.model?.provider ? <Fact label="Provider" value={spec.model.provider} /> : null}
+          {modelName ? <Fact label="Model" value={modelName} /> : null}
+          {modelEndpoint ? <Fact label="Endpoint" value={modelEndpoint} /> : null}
+          {spec.interfaces.map((iface) => (
+            <Fact
+              key={`${iface.type}:${iface.path ?? ""}`}
+              label="Interface"
+              value={iface.path ? `${iface.type} · POST ${iface.path}` : iface.type}
+            />
+          ))}
+          {spec.memory ? <Fact label="Memory" value={spec.memory} /> : null}
+        </Box>
+        {spec.interfaces.map((iface) => {
+          const gloss = interfaceGloss(iface.type);
+          return gloss ? (
+            <Typography
+              key={`gloss:${iface.type}`}
+              variant="caption"
+              color="text.secondary"
+              sx={{ display: "block", mt: 1 }}
+            >
+              {gloss}
+            </Typography>
+          ) : null;
+        })}
       </Box>
     </Box>
   );
 }
 
-export function AgentView({ spec, toolStatus, onSaveBehaviour }: AgentViewProps) {
+export function AgentView({
+  spec,
+  toolStatus,
+  onSaveBehaviour,
+  renderMarkdown,
+}: AgentViewProps) {
   const attempt = useMemo(() => parseAgentAfm(spec), [spec]);
 
   if (isParseError(attempt)) {
@@ -433,6 +444,11 @@ export function AgentView({ spec, toolStatus, onSaveBehaviour }: AgentViewProps)
   }
 
   return (
-    <AgentSpecBody spec={attempt} toolStatus={toolStatus} onSaveBehaviour={onSaveBehaviour} />
+    <AgentSpecBody
+      spec={attempt}
+      toolStatus={toolStatus}
+      onSaveBehaviour={onSaveBehaviour}
+      renderMarkdown={renderMarkdown}
+    />
   );
 }
