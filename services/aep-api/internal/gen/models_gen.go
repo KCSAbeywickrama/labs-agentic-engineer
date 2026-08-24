@@ -1149,6 +1149,18 @@ type InputFailure struct {
 	Reason     string `json:"reason"`
 }
 
+// IssueComment One comment on an issue, exactly as GitHub holds it. The platform stores none of this — it is read live on every request, so GitHub stays the only copy. The platform's OWN machine comments are excluded (a resolved-dependency block, a provisioning note, a closing line — written for the agent, not for a person); what remains is the coding agent's progress notes and whatever a human wrote, which appear alike. They cannot be told apart by author, and are not meant to be — the platform comments through the org's own credential and the coding runner is handed that same credential, so both arrive under one login.
+type IssueComment struct {
+	// Author The commenter's GitHub login. Empty when the account is gone — GitHub answers a null author for a deleted user, which is a fact about the comment, not a read failure.
+	Author    string    `json:"author"`
+	Body      string    `json:"body"`
+	CreatedAt time.Time `json:"createdAt"`
+
+	// ID GitHub's own node id — stable across reads, and the list key a consumer should render on.
+	ID  string `json:"id"`
+	URL string `json:"url"`
+}
+
 // IssueInfo One issue from list/search. Field names are CAPITALIZED on the wire (historical shape the deployed aep-mcp-server parses — do not "fix" without a coordinated MCP-server release).
 type IssueInfo struct {
 	Body   string   `json:"Body"`
@@ -1837,8 +1849,11 @@ type TaskView struct {
 	Attention []string `json:"attention"`
 
 	// BlockedBy Names of the dependencies this task is waiting on; present when derivedStatus is on_hold.
-	BlockedBy     []string                 `json:"blockedBy,omitempty"`
-	Body          string                   `json:"body,omitempty"`
+	BlockedBy []string `json:"blockedBy,omitempty"`
+	Body      string   `json:"body,omitempty"`
+
+	// Comments The issue's newest comments, OLDEST FIRST, capped per issue, with the platform's own machine comments excluded. Present only on a `tag`-scoped read taken with `comments=true` (the default); a read spanning versions omits it, for the same reason ledger issues are invisible there — the fetch is anchored on one milestone and a cross-version read has no bounded set to ask for. Absence covers every empty case (not asked for, nothing there, nothing left after the machine comments were dropped); the field is never an empty array.
+	Comments      []IssueComment           `json:"comments,omitempty"`
 	Component     string                   `json:"component,omitempty"`
 	DependsOn     []string                 `json:"dependsOn"`
 	DerivedStatus string                   `json:"derivedStatus"`
@@ -2186,6 +2201,9 @@ type ListTasksParams struct {
 
 	// Tag Filter to the Tasks of one spec/build version tag (e.g. v3). The tag is resolved to a milestone number through the platform's run rows and the filter is milestone MEMBERSHIP — never a title match against GitHub. Empty returns every version.
 	Tag string `form:"tag,omitempty" json:"tag,omitempty"`
+
+	// Comments Include each issue's newest comments (defaults true). Honoured only on a `tag`-scoped read — the comment fetch is anchored on the milestone, so a read spanning versions has no bounded set to ask for. Pass false to skip the GitHub round trip when the caller does not render them.
+	Comments *bool `form:"comments,omitempty" json:"comments,omitempty"`
 }
 
 // ListTasksParamsState defines parameters for ListTasks.
