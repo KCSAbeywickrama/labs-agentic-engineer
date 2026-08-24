@@ -30,19 +30,15 @@ spec:
             - name: THUNDER_ADMIN_URL
               value: {{ .Values.thunder.adminURL | quote }}
             - name: THUNDER_SYSTEM_CLIENT_ID
-              {{- if .Values.thunder.existingSecret }}
-              value: {{ .Values.thunder.systemClientID | quote }}
-              {{- else }}
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "thunder-app-operator.credentialsSecret" . }}
+                  name: thunder-app-operator-credentials
                   key: client-id
-              {{- end }}
             - name: THUNDER_SYSTEM_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "thunder-app-operator.credentialsSecret" . }}
-                  key: {{ if .Values.thunder.existingSecret }}{{ .Values.thunder.clientSecretKey }}{{ else }}client-secret{{ end }}
+                  name: thunder-app-operator-credentials
+                  key: client-secret
           livenessProbe:
             httpGet:
               path: /healthz

@@ -80,7 +80,6 @@ var Available = []Addon{
 			Chart:        "oci://ghcr.io/wso2/thunder-app-operator",
 			Namespace:    "thunder-app-operator-system",
 			DisplayName:  "thunder-app-operator",
-			Sets:         []string{"thunder.existingSecret=thunder-app-operator-credentials"},
 			PreManifests: []string{thunderAppOperatorCredentials},
 		},
 		Manifests: []string{thunderAppResourceType, thunderAppRBAC},
@@ -111,10 +110,9 @@ var Available = []Addon{
 }
 
 // thunderAppOperatorCredentials creates the namespace and an ESO ExternalSecret
-// that syncs the system-client secret from OpenBao into the operator namespace.
-// Applied before the Helm chart so the Secret exists when the operator Pod starts.
-// The chart is installed with thunder.existingSecret=thunder-app-operator-credentials
-// so it does not render its own chart-managed Secret.
+// that syncs both the system-client ID and secret from OpenBao into the operator
+// namespace. Applied before the Helm chart so the Secret exists when the operator
+// Pod starts. The chart reads both credentials exclusively from this Secret.
 const thunderAppOperatorCredentials = `
 apiVersion: v1
 kind: Namespace
@@ -134,6 +132,10 @@ spec:
   target:
     name: thunder-app-operator-credentials
   data:
+    - secretKey: client-id
+      remoteRef:
+        key: aep/thunder-clients/system-client-id
+        property: value
     - secretKey: client-secret
       remoteRef:
         key: aep/thunder-clients/system-client

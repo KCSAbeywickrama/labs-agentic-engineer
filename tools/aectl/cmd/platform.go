@@ -734,6 +734,9 @@ func provisionOpenBao(ctx context.Context, anthropicKey, thunderAdminClientID, t
 		{"aep/opensearch-password", openSearchPassword},
 		{"aep/thunder-admin/client-id", thunderAdminClientID},
 		{"aep/thunder-admin/client-secret", thunderAdminClientSecret},
+		// system-client ID is a known constant but stored in OpenBao so the
+		// thunder-app-operator can source both credentials from the same ESO Secret.
+		{"aep/thunder-clients/system-client-id", "aep-system-client"},
 	}
 	for _, name := range thunderClientNames {
 		secrets = append(secrets, struct{ path, value string }{
