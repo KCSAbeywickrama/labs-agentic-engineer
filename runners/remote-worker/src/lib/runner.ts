@@ -16,6 +16,7 @@
  * under the License.
  */
 
+import fs from "node:fs";
 import path from "node:path";
 import { query, type McpServerConfig, type Query } from "@anthropic-ai/claude-agent-sdk";
 import { openDebugSinks, type DebugSinks, type TaskLog } from "./logger.js";
@@ -35,7 +36,7 @@ import { staticTokenSource, type AccessTokenSource } from "./auth_retry.js";
 import { createWebFetchGuardHook } from "./webfetch_guard.js";
 import { checkPreload, preloadWarning } from "./skills_preload_check.js";
 import { SKILLS_MIRROR_DIR, requireWorkflowBodies } from "./skills_presence.js";
-import { curlConfigHome } from "./endpoint_access.js";
+import { curlConfigHome, playwrightCliConfigPath } from "./endpoint_access.js";
 
 /**
  * The mirror the BFF wrote into the project clone, as an absolute path.
@@ -307,6 +308,29 @@ export function alwaysOnSkills(taskKind: DispatchRequest["taskKind"]): string[] 
 }
 
 /**
+ * The skills a run may LOAD on demand — the other half of the sentence above.
+ *
+ * `skills:` is an allowlist, so leaving `playwright-cli` out of the always-on
+ * set is only half a decision: absent from BOTH lists it is not deferred, it is
+ * unreachable, and the Skill tool answers "not in this session's skills
+ * allowlist". That is what shipped — a validation run passed an empty allowlist,
+ * so the load `aep-validation` instructs could never succeed and the agent
+ * grepped the mirror's files by hand instead.
+ *
+ * Named rather than "the whole mirror" as an implementation run gets: that run
+ * may legitimately need any stack skill a `design.json` pinned, while a
+ * validation run builds nothing and has exactly one mechanics skill to reach
+ * for. Listing the mirror would readmit `go`, `ballerina` and every other stack
+ * skill the checkout happens to carry, which is the thing the `skills:` comment
+ * below warns against. Extend this list when a validation run genuinely needs
+ * something else; it is a statement of what the phase uses, not a cap someone
+ * has to work around.
+ */
+export function onDemandSkills(taskKind: DispatchRequest["taskKind"]): string[] {
+  return taskKind === "validation" ? ["playwright-cli"] : [];
+}
+
+/**
  * The SDK options that exist only to be read by a developer afterwards.
  *
  * Split out as a pure function so the boundary is testable: the expensive,
@@ -332,6 +356,20 @@ export function debugQueryOptions(sinks: DebugSinks | undefined): DebugQueryOpti
     debugFile: sinks.debugFilePath,
     stderr: (data: string) => sinks.onStderr(data),
   };
+}
+
+/**
+ * `PLAYWRIGHT_MCP_CONFIG`, but only when there is a config to point at.
+ *
+ * Spread into the child env so the variable is absent rather than empty when the
+ * preflight wrote nothing: playwright-cli reads it eagerly and its daemon dies
+ * on a path that does not resolve, so an unset variable is the only safe way to
+ * say "no override needed". Synchronous on purpose — this runs once, at spawn,
+ * after the preflight that writes the file has already returned.
+ */
+function playwrightCliConfigEnv(): Record<string, string> {
+  const file = playwrightCliConfigPath();
+  return fs.existsSync(file) ? { PLAYWRIGHT_MCP_CONFIG: file } : {};
 }
 
 export async function runClaudeQuery(
@@ -365,6 +403,13 @@ export async function runClaudeQuery(
     // to look for is indistinguishable from no config at all. Harmless on a
     // coding run, which writes no such file.
     CURL_HOME: curlConfigHome(),
+    // And where playwright-cli looks for its own — the browser half of the same
+    // endpoint override (endpoint_access.ts). Set from the file's EXISTENCE, not
+    // unconditionally like CURL_HOME above: curl treats a missing `.curlrc` as
+    // no config, but this variable is fatal when it points at nothing (the
+    // daemon exits on ENOENT), so a coding run and a cloud validation run — both
+    // of which write no such file — must not see it at all.
+    ...playwrightCliConfigEnv(),
   };
 
   // NO plugins. Every skill this session reads is a directory in the project's

@@ -31,6 +31,12 @@ directory (templates under `assets/`, the report generator under
 must invoke by absolute path is under `$AEP_SKILLS_DIR/aep-validation/` —
 the runner sets it.
 
+**Every command below runs from the repo root, and none of them needs a
+`cd`.** One shell serves the whole run, so a `cd` you make persists into
+every later call and a relative one is right only once. `Read`, `Write`
+and `Edit` never move with the shell — their relative paths always
+resolve from the repo root.
+
 ## Workflow
 
 ### 1. Read the issue
@@ -169,16 +175,22 @@ tests/e2e/
   {
     "name": "e2e",
     "private": true,
+    "scripts": { "test": "playwright test" },
     "devDependencies": { "@playwright/test": "<value of $AEP_PLAYWRIGHT_VERSION>" }
   }
   ```
+
+  The `test` script is what lets every command below run from the repo
+  root: `npm --prefix` executes a script with the package as its working
+  directory, so Playwright finds this config without you moving your
+  shell.
 - `targets.json` shape: `{"targets": {"<component>": "<url>", ...},
   "primary": "<the web-facing component>"}`, filled from the step-4
   validation-context `endpoints`. On a re-validation run, refresh it from
   the context file — a committed `targets.json` may name URLs from an
   earlier deployment.
-- Install with `npm install` on first scaffold (commit the lockfile),
-  `npm ci` on later runs.
+- Install with `npm install --prefix tests/e2e` on first scaffold (commit
+  the lockfile), `npm ci --prefix tests/e2e` on later runs.
 - `scripts/generate-report.mjs` is platform-owned: the REPORT step
   always executes the plugin's copy directly and refreshes this
   committed copy, which exists only so humans can reproduce the report
@@ -192,7 +204,7 @@ memory:
 - **Read `references/authoring.md` now and follow it as the binding
   authoring discipline** (plan format, collect-generated-code loop,
   assertion rules, criterion↔spec contract).
-- Load `aep:playwright-cli` with the Skill tool — the CLI's own skill
+- Load `playwright-cli` with the Skill tool — the CLI's own skill
   (commands, refs, eval, storage state; vendored from @playwright/cli).
 
 Then: write the test plan, author one spec per uncovered e2e criterion
@@ -214,10 +226,14 @@ The suite outlives the Bash tool's DEFAULT timeout (120s), so ask for the
 time up front — `timeout` is a parameter on the Bash call, max `600000`:
 
 ```bash
-cd tests/e2e
-rm -f test-results/results.json          # never read a previous run's verdict
-npx playwright test                      # Bash timeout: 600000
+rm -f tests/e2e/test-results/results.json   # never read a previous run's verdict
+npm test --prefix tests/e2e                 # Bash timeout: 600000
 ```
+
+Never `npx playwright test` from the repo root. It finds the specs and
+passes anyway, without loading the config — so no reporter, no
+`results.json`, and none of the launch args the endpoints need. Exit 0,
+nothing written.
 
 Two things about this step will mislead you if you let them:
 
@@ -225,7 +241,7 @@ Two things about this step will mislead you if you let them:
   harness detaches the command and hands back an OK result with no
   output — identical, from where you sit, to a suite that finished. So
   never infer the run completed from the call returning. Confirm
-  `test-results/results.json` exists and is NEWER than the moment you
+  `tests/e2e/test-results/results.json` exists and is NEWER than the moment you
   started the run; if it is missing or stale, the run was severed and
   its results do not exist.
 - **You cannot wait for a detached run.** `sleep` is blocked, and
@@ -237,14 +253,15 @@ If the suite is too big for one window, **shard it** — never let one
 call run past the limit:
 
 ```bash
-npx playwright test specs/AC-001-a.spec.ts specs/AC-001-b.spec.ts   # a batch that fits
+# the `--` is what passes the filter through npm to Playwright
+npm test --prefix tests/e2e -- specs/AC-001-a.spec.ts specs/AC-001-b.spec.ts
 ```
 
 Merge each batch's results yourself and keep the per-criterion verdicts;
 sharding changes how the suite is run, never what the report claims. A
 batch that severs is a batch you re-run smaller, not one you skip.
 
-The config writes `test-results/results.json`. The run includes the
+The config writes `tests/e2e/test-results/results.json`. The run includes the
 regression set — that's free regression coverage, not an accident.
 
 ### 8. HEAL (bounded)
@@ -305,6 +322,10 @@ belongs in the report, and you still open the PR (step 10).
 ### 10. PR
 
 ```bash
+# always the lease: this branch name repeats every cycle, so a re-validation
+# diverges from what the last one left on it
+git push --force-with-lease -u origin "aep/m${MILESTONE}-validation"
+
 gh pr create \
   --title "Validation: <pass>/<total> e2e criteria passing (issue #<N>)" \
   --body $'Validates #<N>\n\n<summary table: pass/fail/not_run + manual/scenario counts>\n\nReport: tests/validation/report.md'
@@ -339,5 +360,6 @@ and the PR link; the platform closes the issue itself.
   request (exported in-session as `AEP_E2E_USERNAME` / `AEP_E2E_PASSWORD`,
   never written to a file); if the request errors and a criterion needs
   login, mark it blocked in an issue comment and let it land `not_run`.
-- Everything in the `aep` skill's deny-list (no default-branch pushes,
-  no force-push, one PR, no merging, no repo-settings changes).
+- Everything in the `aep` skill's deny-list (no default-branch pushes, one
+  PR, no merging, no repo-settings changes). Its force-push exception is
+  yours: `--force-with-lease` on your own branch, per step 10.
