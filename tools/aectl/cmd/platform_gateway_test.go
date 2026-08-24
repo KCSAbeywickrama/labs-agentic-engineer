@@ -90,6 +90,31 @@ func TestRunGatewayIngressCheck(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			// Regression: isGatewayIngressConfigured returns false when only
+			// ClusterDataPlane is configured but Environment/development is not.
+			// The install flow must still call applyConfig to patch both resources.
+			name: "partial config (ClusterDataPlane ok, Environment missing) triggers reconfigure",
+			deps: gatewayIngressDeps{
+				isConfigured:    func(context.Context) (bool, error) { return false, nil },
+				discoverGateway: func(context.Context) (string, string, error) { return "gateway-default", "openchoreo-data-plane", nil },
+				prompt:          func(_, def string) (string, error) { return def, nil },
+				confirm:         func(string) bool { return true },
+				applyConfig:     func(context.Context, string, string, string) error { return nil },
+			},
+			wantErr: false,
+		},
+		{
+			// Regression: a kubectl error from discoverGateway must propagate
+			// rather than silently falling back to "gateway-default".
+			name: "gateway discovery error propagates",
+			deps: gatewayIngressDeps{
+				isConfigured:    func(context.Context) (bool, error) { return false, nil },
+				discoverGateway: func(context.Context) (string, string, error) { return "", "", fmt.Errorf("gateway CRD not registered") },
+				prompt:          func(_, def string) (string, error) { return def, nil },
+			},
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {

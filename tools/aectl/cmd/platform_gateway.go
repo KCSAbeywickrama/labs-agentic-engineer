@@ -45,15 +45,36 @@ var defaultGatewayIngressDeps = gatewayIngressDeps{
 }
 
 func isGatewayIngressConfigured(ctx context.Context) (bool, error) {
-	out, err := execKubectl(ctx, "get", "clusterdataplane", "default", "-o", "json")
+	cdpOK, err := checkGatewayIngress(ctx, "clusterdataplane", "default", "")
+	if err != nil {
+		return false, fmt.Errorf("read ClusterDataPlane: %w", err)
+	}
+	if !cdpOK {
+		return false, nil
+	}
+	envOK, err := checkGatewayIngress(ctx, "environment", "development", "default")
+	if err != nil {
+		return false, fmt.Errorf("read Environment/development: %w", err)
+	}
+	return envOK, nil
+}
+
+// checkGatewayIngress returns true when the named resource has
+// spec.gateway.ingress.external set to a non-empty name. Pass an empty
+// namespace for cluster-scoped resources.
+func checkGatewayIngress(ctx context.Context, kind, name, namespace string) (bool, error) {
+	args := []string{"get", kind, name, "-o", "json"}
+	if namespace != "" {
+		args = append(args, "-n", namespace)
+	}
+	out, err := execKubectl(ctx, args...)
 	if err != nil {
 		s := strings.ToLower(err.Error())
 		if strings.Contains(s, "not found") || strings.Contains(s, "notfound") {
 			return false, nil
 		}
-		return false, fmt.Errorf("read ClusterDataPlane: %w", err)
+		return false, err
 	}
-
 	var obj struct {
 		Spec struct {
 			Gateway struct {
@@ -66,7 +87,7 @@ func isGatewayIngressConfigured(ctx context.Context) (bool, error) {
 		} `json:"spec"`
 	}
 	if err := json.Unmarshal(out, &obj); err != nil {
-		return false, fmt.Errorf("parse ClusterDataPlane: %w", err)
+		return false, fmt.Errorf("parse %s/%s: %w", kind, name, err)
 	}
 	return obj.Spec.Gateway.Ingress.External != nil &&
 		obj.Spec.Gateway.Ingress.External.Name != "", nil
@@ -74,8 +95,11 @@ func isGatewayIngressConfigured(ctx context.Context) (bool, error) {
 
 func discoverDataplaneGateway(ctx context.Context) (string, string, error) {
 	const ns = "openchoreo-data-plane"
-	out, _ := execKubectl(ctx, "get", "gateway", "-n", ns,
+	out, err := execKubectl(ctx, "get", "gateway", "-n", ns,
 		"-o", "jsonpath={.items[0].metadata.name}")
+	if err != nil {
+		return "", "", fmt.Errorf("discover data-plane gateway: %w", err)
+	}
 	name := strings.TrimSpace(string(out))
 	if name == "" {
 		name = "gateway-default"
