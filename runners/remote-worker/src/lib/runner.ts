@@ -16,6 +16,7 @@
  * under the License.
  */
 
+import fs from "node:fs";
 import path from "node:path";
 import { query, type McpServerConfig, type Query } from "@anthropic-ai/claude-agent-sdk";
 import { openDebugSinks, type DebugSinks, type TaskLog } from "./logger.js";
@@ -35,7 +36,7 @@ import { staticTokenSource, type AccessTokenSource } from "./auth_retry.js";
 import { createWebFetchGuardHook } from "./webfetch_guard.js";
 import { checkPreload, preloadWarning } from "./skills_preload_check.js";
 import { SKILLS_MIRROR_DIR, requireWorkflowBodies } from "./skills_presence.js";
-import { curlConfigHome } from "./endpoint_access.js";
+import { curlConfigHome, playwrightCliConfigPath } from "./endpoint_access.js";
 
 /**
  * The mirror the BFF wrote into the project clone, as an absolute path.
@@ -334,6 +335,20 @@ export function debugQueryOptions(sinks: DebugSinks | undefined): DebugQueryOpti
   };
 }
 
+/**
+ * `PLAYWRIGHT_MCP_CONFIG`, but only when there is a config to point at.
+ *
+ * Spread into the child env so the variable is absent rather than empty when the
+ * preflight wrote nothing: playwright-cli reads it eagerly and its daemon dies
+ * on a path that does not resolve, so an unset variable is the only safe way to
+ * say "no override needed". Synchronous on purpose — this runs once, at spawn,
+ * after the preflight that writes the file has already returned.
+ */
+function playwrightCliConfigEnv(): Record<string, string> {
+  const file = playwrightCliConfigPath();
+  return fs.existsSync(file) ? { PLAYWRIGHT_MCP_CONFIG: file } : {};
+}
+
 export async function runClaudeQuery(
   req: DispatchRequest,
   layout: WorkspaceLayout,
@@ -365,6 +380,13 @@ export async function runClaudeQuery(
     // to look for is indistinguishable from no config at all. Harmless on a
     // coding run, which writes no such file.
     CURL_HOME: curlConfigHome(),
+    // And where playwright-cli looks for its own — the browser half of the same
+    // endpoint override (endpoint_access.ts). Set from the file's EXISTENCE, not
+    // unconditionally like CURL_HOME above: curl treats a missing `.curlrc` as
+    // no config, but this variable is fatal when it points at nothing (the
+    // daemon exits on ENOENT), so a coding run and a cloud validation run — both
+    // of which write no such file — must not see it at all.
+    ...playwrightCliConfigEnv(),
   };
 
   // NO plugins. Every skill this session reads is a directory in the project's
