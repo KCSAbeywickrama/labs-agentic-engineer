@@ -105,21 +105,34 @@ export function parseRegisterDraft(input: unknown): RegisterDraft | null {
   return draft;
 }
 
-function urlDocRows(docs: unknown[]): ResourceDocRow[] {
-  const rows: ResourceDocRow[] = [];
-  for (const raw of docs) {
-    const parsed = parseDocEntry(raw);
+function urlDocRow(entry: { type: DocType; url: string }): ResourceDocRow {
+  return {
+    type: entry.type,
+    source: "url",
+    url: entry.url,
+    fileName: "",
+    content: "",
+    path: "",
+  };
+}
+
+/** Upsert URL docs by type; never drop file rows or URL types the draft omitted. */
+function patchUrlDocs(
+  current: ResourceDocRow[],
+  draftDocs: Array<{ type: DocType; url: string }>,
+): ResourceDocRow[] {
+  const files = current.filter((row) => row.source !== "url");
+  const urls = new Map(
+    current
+      .filter((row) => row.source === "url")
+      .map((row) => [row.type, row] as const),
+  );
+  for (const entry of draftDocs) {
+    const parsed = parseDocEntry(entry);
     if (!parsed) continue;
-    rows.push({
-      type: parsed.type,
-      source: "url",
-      url: parsed.url,
-      fileName: "",
-      content: "",
-      path: "",
-    });
+    urls.set(parsed.type, urlDocRow(parsed));
   }
-  return rows;
+  return [...files, ...urls.values()];
 }
 
 function applyKeys(
@@ -161,6 +174,6 @@ export function applyRegisterDraft(
     docs:
       draft.resourceDocs === undefined
         ? current.docs
-        : urlDocRows(draft.resourceDocs),
+        : patchUrlDocs(current.docs, draft.resourceDocs),
   };
 }

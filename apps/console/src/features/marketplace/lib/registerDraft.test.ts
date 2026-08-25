@@ -163,6 +163,53 @@ describe("applyRegisterDraft", () => {
     ]);
   });
 
+  it("keeps existing file rows when a later draft patches URL docs", () => {
+    const fileRow = {
+      type: "documentation" as const,
+      source: "file" as const,
+      url: "",
+      fileName: "readme.md",
+      content: "# hi",
+      path: "docs/readme.md",
+    };
+    const next = applyRegisterDraft(
+      snapshot({
+        docs: [
+          fileRow,
+          {
+            type: "documentation",
+            source: "url",
+            url: "https://example.com/old.md",
+            fileName: "",
+            content: "",
+            path: "",
+          },
+        ],
+      }),
+      { resourceDocs: [{ type: "openapi", url: "https://example.com/openapi.yaml" }] },
+      { freezeName: false, freezeKeys: false },
+    );
+    expect(next.docs).toEqual([
+      fileRow,
+      {
+        type: "documentation",
+        source: "url",
+        url: "https://example.com/old.md",
+        fileName: "",
+        content: "",
+        path: "",
+      },
+      {
+        type: "openapi",
+        source: "url",
+        url: "https://example.com/openapi.yaml",
+        fileName: "",
+        content: "",
+        path: "",
+      },
+    ]);
+  });
+
   it("drops file-row resource-docs from the draft", () => {
     const next = applyRegisterDraft(
       snapshot(),

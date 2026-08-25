@@ -43,5 +43,6 @@ narration. Environment values are form-only.
 
 ## Edit
 
-On edit, **never** change `name`. Identity is frozen; everything else in the
-draft may still be refined.
+On edit, **never** change `name` or config key identities. You may refine
+description, consumption instructions, existing key descriptions, and URL
+resource-docs. Do not add or rename keys.
