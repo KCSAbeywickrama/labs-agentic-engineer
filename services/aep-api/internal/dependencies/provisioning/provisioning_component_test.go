@@ -76,14 +76,30 @@ func (f *cRTCatalog) Ensure(_ context.Context, _ string, rt *openchoreo.Resource
 	if !ok {
 		return nil
 	}
+	for _, existing := range f.defs {
+		if strings.EqualFold(existing.Name, def.Name) {
+			return nil // get-or-create: existing logical name is left in place
+		}
+	}
+	f.defs = append(f.defs, def)
+	return nil
+}
+
+func (f *cRTCatalog) Update(_ context.Context, _ string, rt *openchoreo.ResourceType) error {
+	if rt == nil {
+		return errors.New("cRTCatalog.Update: nil ResourceType")
+	}
+	def, ok := openchoreo.ExternalDefinitionFromRT(rt)
+	if !ok {
+		return errors.New("cRTCatalog.Update: not an external ResourceType")
+	}
 	for i, existing := range f.defs {
 		if strings.EqualFold(existing.Name, def.Name) {
 			f.defs[i] = def
 			return nil
 		}
 	}
-	f.defs = append(f.defs, def)
-	return nil
+	return errors.New("cRTCatalog.Update: " + def.Name + " not found")
 }
 
 func (f *cRTCatalog) Delete(_ context.Context, _, name string) error {
@@ -1239,6 +1255,15 @@ func TestProvisioningComponent_UpdateExternalResource_KeepIfEmptySecret(t *testi
 	listedStripe := views[0]
 	if listedStripe.Description != "Stripe payments (updated)" || listedStripe.ConsumptionInstructions != "Use the secret as Bearer. Rotate quarterly." {
 		t.Fatalf("list metadata = %+v", listedStripe)
+	}
+	if len(listedStripe.Config) != 2 || listedStripe.Config[0].Key != "api_key" || listedStripe.Config[0].Description != "Secret API key (rotated)" {
+		t.Fatalf("list config = %+v, want rotated api_key description", listedStripe.Config)
+	}
+	if listedStripe.Config[1].Key != "region" || listedStripe.Config[1].Description != "Account region (primary)" {
+		t.Fatalf("list region config = %+v", listedStripe.Config)
+	}
+	if len(listedStripe.ResourceDocs) != 1 || listedStripe.ResourceDocs[0].URL != "https://example.com/stripe/openapi-v2.yaml" {
+		t.Fatalf("list resourceDocs = %+v, want updated URL", listedStripe.ResourceDocs)
 	}
 	if findEnvCell(t, listedStripe.EnvCells, "development", "api_key").Value != "" {
 		t.Fatalf("list secret cell leaked value: %+v", listedStripe.EnvCells)

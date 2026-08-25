@@ -83,9 +83,10 @@ type RepoLocator interface {
 // RegisterExternalResource / UpdateExternalResource) reads and writes: List
 // reconstructs each provisioned external's definition off its authored RT
 // (deduped to the newest schema-version RT per name); Ensure get-or-creates
-// the RT (no project Resource instance); Delete removes every RT registered
-// under a logical name (more than one schema-version RT can carry the same
-// name — see openchoreo.ExternalResourceRTName).
+// the RT (no project Resource instance); Update PUTs an existing RT in place
+// so catalog-field edits persist when the hashed name is unchanged; Delete
+// removes every RT registered under a logical name (more than one
+// schema-version RT can carry the same name — see openchoreo.ExternalResourceRTName).
 // *dependencies.ExternalResourceCatalog satisfies it. The provision/value-
 // collection paths build their RT-authoring definition straight off the
 // project's committed design (build_provision.go / value_service.go), never
@@ -93,6 +94,7 @@ type RepoLocator interface {
 type ExternalRTCatalog interface {
 	List(ctx context.Context, orgID string) ([]openchoreo.ExternalResourceDefinition, error)
 	Ensure(ctx context.Context, orgID string, rt *openchoreo.ResourceType) error
+	Update(ctx context.Context, orgID string, rt *openchoreo.ResourceType) error
 	Delete(ctx context.Context, orgID, name string) error
 }
 

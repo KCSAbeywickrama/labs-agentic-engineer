@@ -162,6 +162,18 @@ func (c *ExternalResourceCatalog) Ensure(ctx context.Context, orgID string, rt *
 	return err
 }
 
+// Update replaces an existing namespaced ResourceType via
+// ResourceClient.UpdateResourceType (PUT). Edit uses this so catalog fields
+// persist when key identity — and therefore the hashed RT name — is unchanged.
+// Do not route Update through Ensure (Ensure is get-or-create and will not PUT).
+func (c *ExternalResourceCatalog) Update(ctx context.Context, orgID string, rt *openchoreo.ResourceType) error {
+	if rt == nil {
+		return fmt.Errorf("external resource catalog: nil ResourceType")
+	}
+	_, err := c.rc.UpdateResourceType(ctx, orgID, rt)
+	return err
+}
+
 // newerExternalRT reports whether rt should be preferred over cur as the
 // current-schema ResourceType for one logical external-resource name (used by
 // both List and Get so they can never disagree). The RT with the NEWER

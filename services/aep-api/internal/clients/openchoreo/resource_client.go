@@ -128,6 +128,13 @@ type ResourceClient interface {
 	// aep.wso2.com/external-name annotation (see ExternalResourceRTName).
 	DeleteResourceType(ctx context.Context, namespace, name string) error
 
+	// UpdateResourceType PUTs an existing namespaced ResourceType (same path
+	// shape as GetResourceType / DeleteResourceType). Used to replace catalog
+	// fields (description, consumption instructions, key descriptions,
+	// resource-docs) when key identity — and therefore the hashed RT name —
+	// is unchanged. EnsureResourceType stays get-or-create and never PUTs.
+	UpdateResourceType(ctx context.Context, namespace string, rt *ResourceType) (*ResourceType, error)
+
 	// ListWorkloadEndpoints enumerates every provider-side endpoint declared by
 	// the Workloads in an org's namespace (one row per endpoint, carrying owner +
 	// visibility). This is the dynamic source for the org endpoint catalog: the
@@ -715,6 +722,16 @@ func (c *resourceClient) DeleteResourceType(ctx context.Context, namespace, name
 		return fmt.Errorf("delete resourcetype %q: %w", name, err)
 	}
 	return nil
+}
+
+func (c *resourceClient) UpdateResourceType(ctx context.Context, namespace string, rt *ResourceType) (*ResourceType, error) {
+	rt.APIVersion, rt.Kind = ocResourceAPIVersion, kindResourceType
+	rt.Metadata.Namespace = namespace
+	out := &ResourceType{}
+	if _, err := c.do(ctx, http.MethodPut, nsBase(namespace)+"/resourcetypes/"+rt.Metadata.Name, rt, out); err != nil {
+		return nil, fmt.Errorf("update resourcetype %q: %w", rt.Metadata.Name, err)
+	}
+	return out, nil
 }
 
 // workloadList / workloadItem mirror just the slice of the Workload CR the

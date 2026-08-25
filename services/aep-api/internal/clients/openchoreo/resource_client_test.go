@@ -687,6 +687,33 @@ func TestGetResourceType_NotFound(t *testing.T) {
 	}
 }
 
+func TestUpdateResourceType_IssuesPUT(t *testing.T) {
+	var gotPath, gotMethod string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotMethod = r.URL.Path, r.Method
+		var rt ResourceType
+		_ = json.NewDecoder(r.Body).Decode(&rt)
+		if rt.APIVersion != ocResourceAPIVersion || rt.Kind != kindResourceType {
+			t.Errorf("unexpected apiVersion/kind: %s/%s", rt.APIVersion, rt.Kind)
+		}
+		writeJSON(t, w, http.StatusOK, rt)
+	}))
+	defer srv.Close()
+
+	c := newTestResourceClient(t, srv)
+	in := &ResourceType{Metadata: OCObjectMeta{Name: "stripe-abc123defg-t2"}}
+	got, err := c.UpdateResourceType(context.Background(), "wc-abc", in)
+	if err != nil {
+		t.Fatalf("UpdateResourceType: %v", err)
+	}
+	if gotMethod != http.MethodPut || gotPath != "/api/v1/namespaces/wc-abc/resourcetypes/stripe-abc123defg-t2" {
+		t.Errorf("unexpected request: %s %s", gotMethod, gotPath)
+	}
+	if got.Metadata.Name != "stripe-abc123defg-t2" {
+		t.Errorf("unexpected result: %+v", got)
+	}
+}
+
 // ---- ListWorkloadEndpoints --------------------------------------------------------
 
 func TestListWorkloadEndpoints_Success(t *testing.T) {

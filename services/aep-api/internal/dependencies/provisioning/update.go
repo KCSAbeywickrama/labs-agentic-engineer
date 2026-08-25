@@ -32,7 +32,8 @@ const envCellStatusUnset = "unset"
 // the path name. The request body reuses RegisterExternalResourceRequest; the
 // body's name is ignored. Config key identity (key + secret) is immutable.
 // Empty secret env values keep the current value-plane Value; an empty value
-// on an Unset secret cell is rejected.
+// on an Unset secret cell is rejected. Catalog fields persist via
+// rtCatalog.Update (PUT), not Ensure.
 func (s *Service) UpdateExternalResource(ctx context.Context, orgID, name string, req gen.RegisterExternalResourceRequest) (ExternalResourceView, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -105,8 +106,8 @@ func (s *Service) UpdateExternalResource(ctx context.Context, orgID, name string
 	if s.catalogValuePlane != nil {
 		s.catalogValuePlane.PutEnvCells(orgID, canonical, cells)
 	}
-	if err := s.rtCatalog.Ensure(ctx, orgID, rt); err != nil {
-		return ExternalResourceView{}, fmt.Errorf("provisioning: ensure external resource type %q: %w", canonical, err)
+	if err := s.rtCatalog.Update(ctx, orgID, rt); err != nil {
+		return ExternalResourceView{}, fmt.Errorf("provisioning: update external resource type %q: %w", canonical, err)
 	}
 
 	return ExternalResourceView{
