@@ -61,10 +61,19 @@ func (h *Handler) ListWorkloadDependencies(ctx context.Context, request gen.List
 }
 
 func (h *Handler) ListOrgEnvironments(ctx context.Context, _ gen.ListOrgEnvironmentsRequestObject) (gen.ListOrgEnvironmentsResponseObject, error) {
+	org := tenant.BoundOrgFromContext(ctx)
 	if h.svc == nil {
 		return nil, errProvisioningUnavailable()
 	}
-	return gen.ListOrgEnvironments200JSONResponse(make([]gen.EnvironmentDTO, 0)), nil
+	names, err := h.svc.ListOrgEnvironments(ctx, org)
+	if err != nil {
+		return nil, mapProvisionError(err)
+	}
+	out := make([]gen.EnvironmentDTO, 0, len(names))
+	for _, n := range names {
+		out = append(out, gen.EnvironmentDTO{Name: n})
+	}
+	return gen.ListOrgEnvironments200JSONResponse(out), nil
 }
 
 func (h *Handler) RegisterExternalResource(ctx context.Context, _ gen.RegisterExternalResourceRequestObject) (gen.RegisterExternalResourceResponseObject, error) {

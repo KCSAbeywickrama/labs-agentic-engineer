@@ -103,6 +103,12 @@ type CatalogValuePlane interface {
 	Instances(name string) []ResourceInstance
 }
 
+// EnvironmentLister lists OpenChoreo Environment names for the org namespace.
+// Empty org → empty slice, never nil error-for-empty.
+type EnvironmentLister interface {
+	ListNames(ctx context.Context, orgID string) ([]string, error)
+}
+
 // ProjectRef identifies one project (org + project id) for the cross-project
 // design scan (external-resource consumers, teardown).
 type ProjectRef struct {

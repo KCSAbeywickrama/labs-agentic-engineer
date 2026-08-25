@@ -161,6 +161,16 @@ func (f *cValuePlane) Instances(name string) []provisioning.ResourceInstance {
 	return f.instances[name]
 }
 
+// cEnvs fakes provisioning.EnvironmentLister — ListNames returns the
+// injected names (nil names is an empty list, not an error).
+type cEnvs struct {
+	names []string
+}
+
+func (f *cEnvs) ListNames(context.Context, string) ([]string, error) {
+	return f.names, nil
+}
+
 func readyBindingWith(outputs ...string) *openchoreo.ResourceReleaseBinding {
 	st := &openchoreo.ResourceReleaseBindingStatus{
 		Conditions: []openchoreo.OCCondition{{Type: "Ready", Status: "True"}},
@@ -767,6 +777,57 @@ func TestProvisioningComponent_ListWorkloadDependencies_ExternalFallsBackToTypeN
 	row := got[0]
 	if row.Kind != gen.Resource || row.Tag != gen.External || row.Ref != "custom-rt" || row.Name != "custom-rt" {
 		t.Fatalf("external without annotation = %+v, want ref/name custom-rt (spec.type.Name)", row)
+	}
+}
+
+func TestProvisioningComponent_ListOrgEnvironments_Empty(t *testing.T) {
+	t.Parallel()
+	svc := provisioning.NewService(provisioning.Deps{
+		Environments: &cEnvs{names: nil}, // implement ListNames → nil, nil
+	})
+	h := newProvHarness(t, svc)
+	resp := h.AsOrg("acme").Get("/api/v1/dependencies/environments")
+	if resp.Code != 200 {
+		t.Fatalf("want 200, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	body := strings.TrimSpace(resp.Body.String())
+	if body != "[]" && body != "null" {
+		// Contract: empty is []. Prefer "[]". Fail if the body is a hardcoded three-env list.
+		t.Fatalf("empty environments = %s, want []", body)
+	}
+	var got []gen.EnvironmentDTO
+	if err := json.Unmarshal(resp.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("got %#v, want empty", got)
+	}
+}
+
+func TestProvisioningComponent_ListOrgEnvironments_NamesFromOC(t *testing.T) {
+	t.Parallel()
+	svc := provisioning.NewService(provisioning.Deps{
+		Environments: &cEnvs{names: []string{"development", "staging-local"}},
+	})
+	h := newProvHarness(t, svc)
+	resp := h.AsOrg("acme").Get("/api/v1/dependencies/environments")
+	if resp.Code != 200 {
+		t.Fatalf("want 200, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	var got []gen.EnvironmentDTO
+	if err := json.Unmarshal(resp.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(got) != 2 || got[0].Name != "development" || got[1].Name != "staging-local" {
+		t.Fatalf("got %#v", got)
+	}
+}
+
+func TestProvisioningComponent_ListOrgEnvironments_NoClaims401(t *testing.T) {
+	t.Parallel()
+	h := newProvHarness(t, provisioning.NewService(provisioning.Deps{}))
+	if resp := h.NoAuth().Get("/api/v1/dependencies/environments"); resp.Code != 401 {
+		t.Fatalf("claimless: want 401, got %d body=%s", resp.Code, resp.Body.String())
 	}
 }
 
