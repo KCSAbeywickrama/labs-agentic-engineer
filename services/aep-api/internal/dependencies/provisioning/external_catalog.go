@@ -96,8 +96,8 @@ func (s *Service) ListExternalResources(ctx context.Context, orgID string) ([]Ex
 			ResourceDocs:            def.ResourceDocs,
 		}
 		if s.catalogValuePlane != nil {
-			view.EnvCells = append([]EnvCell(nil), s.catalogValuePlane.EnvCells(def.Name)...)
-			view.Instances = append([]ResourceInstance(nil), s.catalogValuePlane.Instances(def.Name)...)
+			view.EnvCells = append([]EnvCell(nil), s.catalogValuePlane.EnvCells(orgID, def.Name)...)
+			view.Instances = append([]ResourceInstance(nil), s.catalogValuePlane.Instances(orgID, def.Name)...)
 		}
 		out = append(out, view)
 	}

@@ -21,37 +21,48 @@ import "sync"
 // MemoryValuePlane is a process-local CatalogValuePlane. Register writes
 // org env cells here so a subsequent list in the same process shows
 // Registered External rows. Not durable across process restart.
+// Keys are (orgID, logical name) so two orgs registering the same name
+// cannot overwrite or leak each other's non-secret values.
 type MemoryValuePlane struct {
 	mu        sync.RWMutex
-	cells     map[string][]EnvCell
-	instances map[string][]ResourceInstance
+	cells     map[string]map[string][]EnvCell
+	instances map[string]map[string][]ResourceInstance
 }
 
 // NewMemoryValuePlane returns an empty in-memory org value plane.
 func NewMemoryValuePlane() *MemoryValuePlane {
 	return &MemoryValuePlane{
-		cells:     map[string][]EnvCell{},
-		instances: map[string][]ResourceInstance{},
+		cells:     map[string]map[string][]EnvCell{},
+		instances: map[string]map[string][]ResourceInstance{},
 	}
 }
 
-func (p *MemoryValuePlane) EnvCells(name string) []EnvCell {
+func (p *MemoryValuePlane) EnvCells(orgID, name string) []EnvCell {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	return append([]EnvCell(nil), p.cells[name]...)
+	if p.cells == nil {
+		return nil
+	}
+	return append([]EnvCell(nil), p.cells[orgID][name]...)
 }
 
-func (p *MemoryValuePlane) Instances(name string) []ResourceInstance {
+func (p *MemoryValuePlane) Instances(orgID, name string) []ResourceInstance {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	return append([]ResourceInstance(nil), p.instances[name]...)
+	if p.instances == nil {
+		return nil
+	}
+	return append([]ResourceInstance(nil), p.instances[orgID][name]...)
 }
 
-func (p *MemoryValuePlane) PutEnvCells(name string, cells []EnvCell) {
+func (p *MemoryValuePlane) PutEnvCells(orgID, name string, cells []EnvCell) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.cells == nil {
-		p.cells = map[string][]EnvCell{}
+		p.cells = map[string]map[string][]EnvCell{}
 	}
-	p.cells[name] = append([]EnvCell(nil), cells...)
+	if p.cells[orgID] == nil {
+		p.cells[orgID] = map[string][]EnvCell{}
+	}
+	p.cells[orgID][name] = append([]EnvCell(nil), cells...)
 }

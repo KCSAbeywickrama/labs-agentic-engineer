@@ -54,9 +54,6 @@ func (s *Service) RegisterExternalResource(ctx context.Context, orgID string, re
 	if err != nil {
 		return ExternalResourceView{}, apierr.BadRequest(err.Error())
 	}
-	if err := s.rtCatalog.Ensure(ctx, orgID, rt); err != nil {
-		return ExternalResourceView{}, fmt.Errorf("provisioning: ensure external resource type %q: %w", name, err)
-	}
 
 	cells := make([]EnvCell, 0, len(keys)*len(envNames))
 	for _, env := range envNames {
@@ -70,10 +67,6 @@ func (s *Service) RegisterExternalResource(ctx context.Context, orgID string, re
 			cells = append(cells, cell)
 		}
 	}
-	if s.catalogValuePlane != nil {
-		s.catalogValuePlane.PutEnvCells(name, cells)
-	}
-
 	if s.orgSecrets != nil {
 		for _, env := range envNames {
 			secrets := map[string]string{}
@@ -89,6 +82,14 @@ func (s *Service) RegisterExternalResource(ctx context.Context, orgID string, re
 				return ExternalResourceView{}, fmt.Errorf("provisioning: write org-catalog secret %q: %w", name+"-"+env, err)
 			}
 		}
+	}
+	if s.catalogValuePlane != nil {
+		s.catalogValuePlane.PutEnvCells(orgID, name, cells)
+	}
+	// Ensure last: List treats the name as registered only after the RT exists.
+	// A failed Ensure must not 409 a retry solely because cells/secrets already landed.
+	if err := s.rtCatalog.Ensure(ctx, orgID, rt); err != nil {
+		return ExternalResourceView{}, fmt.Errorf("provisioning: ensure external resource type %q: %w", name, err)
 	}
 
 	return ExternalResourceView{

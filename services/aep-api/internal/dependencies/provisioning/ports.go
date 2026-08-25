@@ -102,9 +102,9 @@ type ExternalRTCatalog interface {
 // from the plane when non-nil; otherwise they stay empty and every live row
 // remains Project External.
 type CatalogValuePlane interface {
-	EnvCells(name string) []EnvCell
-	Instances(name string) []ResourceInstance
-	PutEnvCells(name string, cells []EnvCell)
+	EnvCells(orgID, name string) []EnvCell
+	Instances(orgID, name string) []ResourceInstance
+	PutEnvCells(orgID, name string, cells []EnvCell)
 }
 
 // OrgSecretWriter optionally persists Registered External secret bytes through

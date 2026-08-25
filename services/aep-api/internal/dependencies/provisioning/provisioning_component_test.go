@@ -54,8 +54,9 @@ import (
 // org-settings list+delete surface (Task 5) — with RT fixtures in place of DB
 // rows.
 type cRTCatalog struct {
-	defs    []openchoreo.ExternalResourceDefinition
-	deleted []string
+	defs     []openchoreo.ExternalResourceDefinition
+	deleted  []string
+	failOnce error
 }
 
 func (f *cRTCatalog) List(_ context.Context, _ string) ([]openchoreo.ExternalResourceDefinition, error) {
@@ -63,6 +64,11 @@ func (f *cRTCatalog) List(_ context.Context, _ string) ([]openchoreo.ExternalRes
 }
 
 func (f *cRTCatalog) Ensure(_ context.Context, _ string, rt *openchoreo.ResourceType) error {
+	if f.failOnce != nil {
+		err := f.failOnce
+		f.failOnce = nil
+		return err
+	}
 	if rt == nil {
 		return nil
 	}
@@ -168,23 +174,32 @@ func (cRepos) ByFullName(context.Context, string) (string, string, error) {
 }
 
 type cValuePlane struct {
-	cells     map[string][]provisioning.EnvCell
-	instances map[string][]provisioning.ResourceInstance
+	cells     map[string]map[string][]provisioning.EnvCell
+	instances map[string]map[string][]provisioning.ResourceInstance
 }
 
-func (f *cValuePlane) EnvCells(name string) []provisioning.EnvCell {
-	return f.cells[name]
-}
-
-func (f *cValuePlane) Instances(name string) []provisioning.ResourceInstance {
-	return f.instances[name]
-}
-
-func (f *cValuePlane) PutEnvCells(name string, cells []provisioning.EnvCell) {
+func (f *cValuePlane) EnvCells(orgID, name string) []provisioning.EnvCell {
 	if f.cells == nil {
-		f.cells = map[string][]provisioning.EnvCell{}
+		return nil
 	}
-	f.cells[name] = append([]provisioning.EnvCell(nil), cells...)
+	return f.cells[orgID][name]
+}
+
+func (f *cValuePlane) Instances(orgID, name string) []provisioning.ResourceInstance {
+	if f.instances == nil {
+		return nil
+	}
+	return f.instances[orgID][name]
+}
+
+func (f *cValuePlane) PutEnvCells(orgID, name string, cells []provisioning.EnvCell) {
+	if f.cells == nil {
+		f.cells = map[string]map[string][]provisioning.EnvCell{}
+	}
+	if f.cells[orgID] == nil {
+		f.cells[orgID] = map[string][]provisioning.EnvCell{}
+	}
+	f.cells[orgID][name] = append([]provisioning.EnvCell(nil), cells...)
 }
 
 // cEnvs fakes provisioning.EnvironmentLister — ListNames returns the
@@ -302,17 +317,21 @@ func TestProvisioningComponent_ListExternalResources(t *testing.T) {
 			},
 		}},
 		CatalogValuePlane: &cValuePlane{
-			cells: map[string][]provisioning.EnvCell{
-				"stripe": {
-					{Environment: "development", Key: "api_key", Status: "configured", Value: "sk_live"},
-					{Environment: "development", Key: "region", Status: "configured", Value: "us"},
-					{Environment: "production", Key: "api_key", Status: "unset"},
-					{Environment: "production", Key: "region", Status: "unset"},
+			cells: map[string]map[string][]provisioning.EnvCell{
+				"acme": {
+					"stripe": {
+						{Environment: "development", Key: "api_key", Status: "configured", Value: "sk_live"},
+						{Environment: "development", Key: "region", Status: "configured", Value: "us"},
+						{Environment: "production", Key: "api_key", Status: "unset"},
+						{Environment: "production", Key: "region", Status: "unset"},
+					},
 				},
 			},
-			instances: map[string][]provisioning.ResourceInstance{
-				"stripe": {
-					{Project: "shop", Environment: "development", Status: "Ready"},
+			instances: map[string]map[string][]provisioning.ResourceInstance{
+				"acme": {
+					"stripe": {
+						{Project: "shop", Environment: "development", Status: "Ready"},
+					},
 				},
 			},
 		},
@@ -1049,6 +1068,69 @@ func TestProvisioningComponent_RegisterExternalResource_400MissingEnvValue(t *te
 	}
 	if strings.Contains(e.Message, "not implemented") {
 		t.Fatalf("want a validation 400, got stub: %+v", e)
+	}
+}
+
+func TestProvisioningComponent_RegisterExternalResource_EnsureFailRetryNot409(t *testing.T) {
+	t.Parallel()
+	plane := &cValuePlane{}
+	catalog := &cRTCatalog{failOnce: errors.New("ensure: oc unavailable")}
+	h := newRegisterHarness(t, catalog, plane)
+
+	body := mustJSON(t, registerBody())
+	first := h.AsOrg("acme").Post("/api/v1/dependencies/external-resources", body)
+	if first.Code == 201 || first.Code == 409 {
+		t.Fatalf("first register: want Ensure failure (not 201/409), got %d body=%s", first.Code, first.Body.String())
+	}
+	if len(catalog.defs) != 0 {
+		t.Fatalf("failed Ensure must not list the name, got defs=%+v", catalog.defs)
+	}
+	if len(plane.EnvCells("acme", "stripe")) == 0 {
+		t.Fatal("PutEnvCells must run before Ensure so a retry is not missing cells")
+	}
+
+	second := h.AsOrg("acme").Post("/api/v1/dependencies/external-resources", body)
+	if second.Code == 409 {
+		t.Fatalf("retry after failed Ensure must not 409, body=%s", second.Body.String())
+	}
+	if second.Code != 201 {
+		t.Fatalf("retry: want 201, got %d body=%s", second.Code, second.Body.String())
+	}
+}
+
+func TestProvisioningComponent_RegisterExternalResource_CellsAreOrgScoped(t *testing.T) {
+	t.Parallel()
+	plane := &cValuePlane{}
+	h := newRegisterHarness(t, &cRTCatalog{}, plane)
+
+	resp := h.AsOrg("acme").Post("/api/v1/dependencies/external-resources", mustJSON(t, registerBody()))
+	if resp.Code != 201 {
+		t.Fatalf("register: want 201, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	if len(plane.EnvCells("acme", "stripe")) == 0 {
+		t.Fatal("acme stripe cells missing after register")
+	}
+	if len(plane.EnvCells("other", "stripe")) != 0 {
+		t.Fatalf("other org must not see acme stripe cells, got %#v", plane.EnvCells("other", "stripe"))
+	}
+
+	listed := h.AsOrg("other").Get("/api/v1/dependencies/external-resources")
+	if listed.Code != 200 {
+		t.Fatalf("list as other: got %d body=%s", listed.Code, listed.Body.String())
+	}
+	var views []gen.ExternalResourceDTO
+	if err := json.Unmarshal(listed.Body.Bytes(), &views); err != nil {
+		t.Fatalf("list body: %v", err)
+	}
+	for _, v := range views {
+		if v.Name != "stripe" {
+			continue
+		}
+		for _, c := range v.EnvCells {
+			if c.Key == "region" && c.Value == "us" {
+				t.Fatalf("listing as other leaked acme region value: %+v", v.EnvCells)
+			}
+		}
 	}
 }
 
