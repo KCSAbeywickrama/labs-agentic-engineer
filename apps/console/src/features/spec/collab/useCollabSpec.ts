@@ -60,17 +60,9 @@ export interface CollabSpec {
   peers: CollabPeer[];
   /** Y.Text for a non-md path, once synced; null → REST-content fallback. */
   getFileText: (path: string) => Y.Text | null;
-  /**
-   * Y.XmlFragment for an md path, once synced (#86 phase 6 doc model).
-   *
-   * Never creates the fragment (ADR-0020) unless `create` says the caller has
-   * already established that git holds the path — the one case where absence
-   * means "empty file", not "no such document".
-   */
-  getFileFragment: (
-    path: string,
-    opts?: { create?: boolean },
-  ) => Y.XmlFragment | null;
+  /** Y.XmlFragment for an md path, once synced (#86 phase 6 doc model).
+   *  Never creates the fragment — a read is not authorship (ADR-0020). */
+  getFileFragment: (path: string) => Y.XmlFragment | null;
   /** Live file paths in the doc (Y.Map entries + md fragments) — the source
    *  for the reactive spec list; empty until connected. */
   docPaths: string[];
@@ -433,17 +425,13 @@ export function useCollabSpec(
       // committed-git fallback down; and it is what conjured phantom entries
       // into `docPaths`, which the file list unions into the rail.
       //
-      // `create` is for the one caller that already KNOWS the file exists,
-      // because git says so. An empty (or whitespace-only) markdown file seeds
-      // to a zero-length fragment, which generates no update and so never
-      // replicates its key to a joining client — `share.has` is false for a
-      // file the room genuinely owns. Without this the editor could never be
-      // opened on it and nobody could type the first character. Materialising
-      // it is not inventing a document: git already has the path.
-      getFileFragment: (path: string, { create = false } = {}) => {
+      // `share.has` can be trusted as "the room holds this file" because an
+      // empty markdown document seeds as one empty paragraph rather than zero
+      // blocks (`markdownToFragment`) — without that, an emptied file would
+      // generate no update, never replicate its key, and read as absent here.
+      getFileFragment: (path: string) => {
         const doc = docRef.current;
-        if (status !== "connected" || !doc) return null;
-        if (!create && !doc.share.has(path)) return null;
+        if (status !== "connected" || !doc?.share.has(path)) return null;
         return doc.getXmlFragment(path);
       },
       docPaths:

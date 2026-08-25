@@ -207,14 +207,6 @@ export function SpecView({ projectName }: { projectName: string }) {
   // on every render (`collab.docPaths` is derived, not memoized), so the editor
   // compares it BY VALUE rather than by identity — see `knownPaths` there.
   const specPaths = useMemo(() => files.map((f) => f.path), [files]);
-  // Paths GIT holds, as distinct from `files` (which unions in the room's own
-  // doc paths). Only this set may materialise a fragment — see
-  // `getFileFragment`'s `create`. Using `files` here would re-open the door
-  // ADR-0020 closed, since a phantom doc path would vouch for itself.
-  const committedPaths = useMemo(
-    () => new Set((spec.data ?? []).map((f) => f.path)),
-    [spec.data],
-  );
   // A live design turn is signalled by `?generate=design` (the Generate-design
   // CTA) and, more durably, by an agent peer streaming design.cell into the
   // room. In either case the Architecture (cell-diagram) tab is where the user
@@ -425,9 +417,7 @@ export function SpecView({ projectName }: { projectName: string }) {
   const selectedIsMd = selectedFile?.path.endsWith(".md") ?? false;
   const fragment =
     selectedFile && selectedIsMd && !isOpenApiFile
-      ? collab.getFileFragment(selectedFile.path, {
-          create: committedPaths.has(selectedFile.path),
-        })
+      ? collab.getFileFragment(selectedFile.path)
       : null;
   const ytext =
     selectedFile && !selectedIsMd && !isStructuredFile
@@ -523,9 +513,7 @@ export function SpecView({ projectName }: { projectName: string }) {
   // until the server next wrote, and on the agent's own edits that lag was long
   // enough to look broken. Falls back to the committed content when the room is
   // offline, which is the only time it is the freshest thing available.
-  const prdFragment = collab.getFileFragment(PRD_PATH, {
-    create: committedPaths.has(PRD_PATH),
-  });
+  const prdFragment = collab.getFileFragment(PRD_PATH);
   const prdVersion = useYFragmentVersion(prdFragment);
   const livePrd = useMemo(() => {
     // The fragment is mutated IN PLACE, so its identity never changes and only

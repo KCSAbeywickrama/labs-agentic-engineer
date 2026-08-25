@@ -28,6 +28,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
+import { markdownToFragment } from "@aep/collab-doc";
 import { useCollabSpec } from "./useCollabSpec";
 
 const PRD_PATH = "specs/requirements/prd.md";
@@ -239,29 +240,25 @@ describe("useCollabSpec — reading a document never creates one", () => {
     expect(result.current.docPaths).toContain(PRD_PATH);
   });
 
-  // The one file "does the room hold it?" cannot answer. An empty (or
-  // whitespace-only) markdown file seeds to a zero-length fragment, which
-  // generates no update and so never replicates its key to a joining client —
-  // `share.has` is false for a file the room genuinely owns. Gating the editor
-  // on presence alone would leave an empty committed document permanently
-  // read-only, with no way to type the first character into it.
-  it("opens a committed file the room holds but never replicated", () => {
+  // An EMPTY document still opens for editing. `share.has` can only be trusted
+  // as "the room holds this file" because an empty markdown document seeds as
+  // one empty paragraph (`markdownToFragment`) rather than zero blocks — a
+  // fragment with no children generates no update, so its key would never
+  // replicate and the file would read as absent, leaving it permanently
+  // read-only. Emptying a document is a supported action, so this is reachable
+  // by clearing one and reopening it.
+  it("opens an empty document the room holds", () => {
     const { result } = renderCollab();
     act(() => instances[0]!.onSynced());
     const doc = instances[0]!.document;
-    expect(doc.share.has(PRD_PATH)).toBe(false);
+    // How an emptied file arrives over sync: present, with no text in it.
+    act(() => {
+      markdownToFragment("", doc.getXmlFragment(PRD_PATH));
+    });
+    expect(doc.getXmlFragment(PRD_PATH).length).toBe(1);
 
-    expect(result.current.getFileFragment(PRD_PATH, { create: true })).not.toBeNull();
-  });
-
-  // ...and `create` stays the caller's assertion that GIT has the path, not a
-  // way around ADR-0020: the default is still never-create.
-  it("still refuses to create when the caller does not vouch for the path", () => {
-    const { result } = renderCollab();
-    act(() => instances[0]!.onSynced());
-
-    expect(result.current.getFileFragment(PRD_PATH, { create: false })).toBeNull();
-    expect(instances[0]!.document.share.has(PRD_PATH)).toBe(false);
+    expect(result.current.getFileFragment(PRD_PATH)).not.toBeNull();
+    expect(result.current.docPaths).toContain(PRD_PATH);
   });
 });
 

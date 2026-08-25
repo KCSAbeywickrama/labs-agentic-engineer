@@ -14,16 +14,6 @@
 - **Reads of the collab document are non-creating.** `getFileFragment` returns a
   fragment only when `doc.share.has(path)`, matching `getFileText`. No render
   path may bring a node into existence as a side effect of looking at it.
-- **One narrow exception, and it is the caller's assertion, not the getter's
-  guess:** `getFileFragment(path, { create: true })` materialises the fragment
-  for a path **git already holds**. It exists because presence cannot answer for
-  an *empty* file — an empty or whitespace-only markdown file seeds to a
-  zero-length fragment, which generates no update and so never replicates its
-  key to a joining client, leaving `share.has` false for a document the room
-  genuinely owns. Without the exception such a file would open read-only forever
-  and nobody could type its first character. The flag is passed only from the
-  committed file list the Files API returned — never from `docPaths`, which
-  would let a phantom vouch for itself.
 - **A path enters a room from exactly two sources:** the server's seed from git
   (`onLoadDocument`), and peers over sync — agents writing spec files, or
   another client that already holds them. The console authors *edits to nodes
@@ -45,8 +35,20 @@
   requirements entry that suppressed both the empty state and the failed-kickoff
   banner.
 - The rule is checkable in review: a `getXmlFragment` call in console code is a
-  defect unless it is guarded by `share.has` or by a committed-file list that
-  proves git holds the path.
+  defect unless it is guarded by `share.has`. There is no exception to carve
+  out and no flag to pass, which is the point — an exception is a rule every
+  future call site has to remember.
 - Agents keep full authority to introduce files mid-session; nothing about the
   live agent-authoring flow changes, because those nodes arrive over sync with
   their share entry already present.
+- **`share.has` is only trustworthy because an empty document is one empty
+  paragraph.** Parsing `""` used to yield zero blocks, and a fragment with no
+  children generates no Yjs update — so its key never replicated and a file the
+  room really was seeded with read as absent here. Emptying a document is a
+  supported action (the committer writes an emptied fragment back as an empty
+  file, since a top-level fragment cannot be deleted from a Y.Doc), so this was
+  reachable by clearing a document and reopening it after the room unloaded:
+  permanently read-only, with no way to type the first character back.
+  `markdownToFragment` now normalizes the empty document to the shape the
+  editor itself holds, which is what lets this ADR stay a rule with no
+  exceptions.
