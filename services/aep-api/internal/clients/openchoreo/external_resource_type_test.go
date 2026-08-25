@@ -337,7 +337,7 @@ func TestExternalDefinitionFromRT_IgnoresMalformedResourceDocs(t *testing.T) {
 func TestExternalDefinitionFromRT_DropsUnsupportedResourceDocTypes(t *testing.T) {
 	t.Parallel()
 
-	rt, err := BuildExternalResourceType("salesforce", "", []ExternalResourceConfigKey{{Key: "TOKEN", Secret: true}})
+	rt, err := BuildExternalResourceType("salesforce", "", []ExternalResourceConfigKey{{Key: "TOKEN", Secret: true}}, "", nil)
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
