@@ -212,10 +212,11 @@ for (const [file, rules] of Object.entries(REFERENCE_RULES)) {
   });
 }
 
-// Ticket 08: design reuses a Registered External resource; coding researches
-// from its pointers. Each rule lives in one skill — architecture must not
-// paste the coding procedure, and the research file must not restate the
-// design-time name choice.
+// Ticket 08: design reuses a Registered External resource and writes
+// consumption instructions into `description` / org resource docs into
+// `specPath`. Coding reads those fields. Each rule lives in one skill —
+// architecture must not paste the coding procedure, and the research file
+// must not restate the design-time name choice.
 const ARCHITECTURE = path.join(LIBRARY, "architecture", "SKILL.md");
 const RESEARCH = path.join(LIBRARY, "aep", "references", "external-dependency-research.md");
 
@@ -230,9 +231,15 @@ test("architecture prefers a Registered External resource over a new-name Projec
   assert.ok(skill.includes("Registered External resource"), "lost Registered External resource");
   assert.ok(skill.includes("Project External resource"), "lost Project External resource");
   assert.ok(skill.includes("consumption instructions"), "list_external_resources returns consumption instructions");
-  assert.ok(skill.includes("org resource docs"), "list_external_resources returns org resource docs pointers");
+  assert.ok(skill.includes("org resource docs pointers"), "list_external_resources returns org resource docs pointers");
+  assert.ok(
+    skill.includes("Write consumption instructions into the dependency `description`"),
+    "coding reads consumption instructions from description — name that handoff",
+  );
   assert.ok(skill.includes("**new** name"), "a Project External resource uses a new name");
   assert.ok(skill.includes("org values stay on the Registered name"), "org values stay on the Registered name");
+  assert.ok(!skill.includes("{type, url}"), "MCP pointer shape belongs to the list tool, not the skill");
+  assert.ok(!skill.includes("{type, path}"), "MCP pointer shape belongs to the list tool, not the skill");
 });
 
 test("architecture does not paste the coding research procedure", () => {
@@ -241,16 +248,20 @@ test("architecture does not paste the coding research procedure", () => {
   assert.ok(!skill.includes("vendor's own quickstart"), "sdk quickstart is the coding research procedure");
 });
 
-test("external-dependency-research reads Registered consumption instructions and org resource docs", () => {
+test("external-dependency-research reads Registered consumption instructions from description and specPath", () => {
   const research = fs.readFileSync(RESEARCH, "utf8");
   assert.ok(research.includes("Registered External resource"));
   assert.ok(research.includes("consumption instructions"));
-  assert.ok(research.includes("org resource docs"));
+  assert.ok(research.includes("dependency `description`"), "consumption instructions arrive in description");
   assert.ok(
     !research.includes("there is no catalog to read it out of"),
-    "Registered External resources carry consumption instructions and org resource docs",
+    "Registered External resources carry consumption instructions into description and specPath",
   );
   assert.ok(!research.includes("list_external_resources"), "MCP list is design-time; coding does not call it");
+  assert.ok(!research.includes("when present"), "name the checkable fields; do not leave a dangling when-present");
+  assert.ok(!research.includes("that file in org resource docs"), "coding cannot read org resource docs");
+  assert.ok(!research.includes("{type, url}"), "MCP pointer shape belongs to the list tool, not the skill");
+  assert.ok(!research.includes("{type, path}"), "MCP pointer shape belongs to the list tool, not the skill");
   assert.ok(
     !research.includes("org values stay on the Registered name"),
     "the design-time name choice belongs in architecture",

@@ -259,8 +259,9 @@ operations its contract actually exposes:
 
 1. **Reuse first.** Call `list_external_resources`. Prefer a fitting
    **Registered External resource** — take its exact name, config-key schema,
-   consumption instructions, and org resource docs pointers (`{type, url}` or
-   `{type, path}`). That name resolves from the registry regardless of
+   consumption instructions, and org resource docs pointers.
+   Write consumption instructions into the dependency `description`.
+   That name resolves from the registry regardless of
    `style`/`specPath`/`package`. The user may switch to a different Registered
    name, or create a **Project External resource** under a **new** name — a
    separate catalog record; org values stay on the Registered name.
@@ -272,7 +273,7 @@ operations its contract actually exposes:
    the candidate's own docs make it obvious ("REST API reference" vs "install our
    SDK").
 4. **Resolve the contract.** A `rest-api` needs a `specPath`: prefer an OpenAPI
-   org resource docs URL from the Registered row, else a URL you discovered —
+   URL from org resource docs on the Registered row, else a URL you discovered —
    confirm it is a real OpenAPI document with `fetch_openapi_spec`
    (it fetches and validates, stores nothing), then set `specPath` to that URL. If
    the user hands you a spec file, or the API is private/undocumented, `addFile`
@@ -385,9 +386,9 @@ exactly as they were.
 ### Descriptions, and the per-component artifacts
 
 Every dependency carries a one-line `description`: what the target is and how
-this component uses it. Source it per kind — an `external`'s says which
-endpoints/SDK and which auth scheme, from consumption instructions when the
-name is a Registered External resource; an `org-service`'s says the specific
+this component uses it. Source it per kind — an `external`'s is the consumption
+instructions when the name is a Registered External resource; an `org-service`'s
+says the specific
 operations it calls from the discovered contract, or plainly that no contract was
 resolvable, never a guess; a `platform-resource`'s says what it stores. The
 console shows it in the dependency drawer and the coding agent relies on it to
