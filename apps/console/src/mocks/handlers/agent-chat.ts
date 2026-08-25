@@ -34,7 +34,7 @@
 
 import { http, HttpResponse } from "msw";
 import { ANSWER_PREFIX, ANSWERS_PREFIX } from "@aep/agent-stream";
-import { REGISTER_EXTERNAL_RESOURCE_COMMAND } from "@aep/contracts/commands";
+import { registerChatFrames } from "./registerChatFrames";
 import {
   MAX_ATTACHMENT_FILES,
   MAX_ATTACHMENT_FILE_BYTES,
@@ -291,29 +291,13 @@ export const agentChatHandlers = [
         { type: "turn-failed", message: "Mock turn failure (instruction contained 'fail')." },
       ]);
     }
-    if (instruction.trim().startsWith(REGISTER_EXTERNAL_RESOURCE_COMMAND)) {
-      const input = {
-        name: "stripe",
-        description: "Payments API",
-        consumptionInstructions: "Use the secret key as Bearer.",
-        config: [{ key: "API_KEY", description: "Secret API key", secret: true }],
-        resourceDocs: [{ type: "openapi", url: "https://example.com/stripe/openapi.yaml" }],
-      };
-      return sse([
-        {
-          type: "text-delta",
-          delta:
-            "I'll register this as a Registered External resource. If anything is unclear I'll ask — I won't invent a schema or put secret values in the draft.",
-        },
-        { type: "tool-input-start", id: `draft-${turnId}`, toolName: "draftExternalResource" },
-        {
-          type: "tool-call",
-          toolCallId: `draft-${turnId}`,
-          toolName: "draftExternalResource",
-          input,
-        },
-        { type: "turn-committed", noChanges: true },
-      ]);
+    const registerFrames = registerChatFrames(
+      instruction,
+      String(params.projectName),
+      turnId,
+    );
+    if (registerFrames) {
+      return sse(registerFrames);
     }
     // Grilling scenarios (ADR-0012 / #270) — keyed on the /start flow command
     // or a typed trigger, never on a mere mention of "grill" in an edit

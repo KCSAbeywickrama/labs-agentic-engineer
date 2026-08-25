@@ -428,6 +428,56 @@ describe("RegisterFormPage", () => {
       "Patched consumption instructions",
     );
   });
+
+  it("leaves the form empty until a draft arrives when the composer prompt is present", () => {
+    render(<RegisterFormPage prompt="an API" />);
+    expect(screen.getByLabelText(/^Name/)).toHaveValue("");
+    expect(screen.getByLabelText(/^Description/)).toHaveValue("");
+    expect(screen.getByLabelText(/Consumption instructions/i)).toHaveValue("");
+    expect(screen.queryByLabelText(/development ·/)).not.toBeInTheDocument();
+  });
+
+  it("fills non-secret fields from the draft after answers", () => {
+    render(<RegisterFormPage prompt="an API" />);
+    act(() => {
+      publishRegisterDraft(chatKeyFor("acme", MARKETPLACE_CHAT_PROJECT), {
+        name: "stripe",
+        description: "Payments API",
+        consumptionInstructions: "Use the secret key as Bearer.",
+        config: [{ key: "API_KEY", description: "Secret API key", secret: true }],
+        resourceDocs: [{ type: "openapi", url: "https://example.com/stripe/openapi.yaml" }],
+      });
+    });
+    expect(screen.getByLabelText(/^Name/)).toHaveValue("stripe");
+    expect(screen.getAllByLabelText(/^Description/)[0]).toHaveValue("Payments API");
+    expect(screen.getByLabelText(/Consumption instructions/i)).toHaveValue(
+      "Use the secret key as Bearer.",
+    );
+    expect(screen.getByLabelText("development · API_KEY")).toHaveValue("");
+  });
+
+  it("does not change a human-typed env value when a later draft patches description only", () => {
+    render(<RegisterFormPage prompt="an API" />);
+    const chatKey = chatKeyFor("acme", MARKETPLACE_CHAT_PROJECT);
+    act(() => {
+      publishRegisterDraft(chatKey, {
+        name: "stripe",
+        description: "Payments API",
+        consumptionInstructions: "Use the secret key as Bearer.",
+        config: [{ key: "API_KEY", description: "Secret API key", secret: true }],
+      });
+    });
+    fireEvent.change(screen.getByLabelText("development · API_KEY"), {
+      target: { value: "human-secret" },
+    });
+    act(() => {
+      publishRegisterDraft(chatKey, {
+        description: "Patched after answers",
+      });
+    });
+    expect(screen.getByLabelText("development · API_KEY")).toHaveValue("human-secret");
+    expect(screen.getAllByLabelText(/^Description/)[0]).toHaveValue("Patched after answers");
+  });
 });
 
 describe("RegisterFormPage edit mode", () => {
