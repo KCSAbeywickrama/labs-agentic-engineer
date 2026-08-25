@@ -112,11 +112,12 @@ describe("GET /dependencies/environments", () => {
 describe("POST /dependencies/external-resources", () => {
   it("returns 400 when a required field is missing", async () => {
     setScenario("empty");
-    const { name: _omit, ...body } = registerBody();
+    const incomplete: Partial<RegisterExternalResourceRequest> = { ...registerBody() };
+    delete incomplete.name;
     const res = await fetch(EXTERNAL, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify(incomplete),
     });
     expect(res.status).toBe(400);
     const err = (await res.json()) as ApiError;
