@@ -40,6 +40,8 @@ import { PageHeader } from "../../../components/PageHeader";
 import { StatusChip, type StatusTone } from "../../../components/StatusChip";
 import { StageRow } from "../../builds/components/StageRow";
 import { useDesignDependencies } from "../../spec/api/queries";
+import { useExternalResources } from "../../settings/api/queries";
+import { isRegisteredExternal } from "../../marketplace/kind";
 import { useValidationEvidence } from "../../validation/api/counts";
 import {
   verdictSentence,
@@ -347,6 +349,17 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
     () => connectionRows(dependencies.data),
     [dependencies.data],
   );
+  // Org catalog: Registered Externals (non-empty envCells) already hold
+  // values on the org plane — Connections must not offer Configure / the
+  // project values dialog for those names.
+  const externalCatalog = useExternalResources();
+  const registeredNames = useMemo(() => {
+    const names = new Set<string>();
+    for (const resource of externalCatalog.data ?? []) {
+      if (isRegisteredExternal(resource)) names.add(resource.name);
+    }
+    return names;
+  }, [externalCatalog.data]);
   // The rail's Validation stage (#395, decision 3): the Validation page's own
   // criteria/report join, keyed on the BUILD version (the newest run — what
   // deploy.validation describes). The VERDICT comes back with the counts because
@@ -677,11 +690,14 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
                   dotColor="success.main"
                   label={row.detail ? `${row.name} (${row.detail})` : row.name}
                   trailing={
-                    row.kind === "external" && row.config.length > 0 ? (
+                    row.kind === "external" &&
+                    row.config.length > 0 &&
+                    !registeredNames.has(row.name) ? (
                       // The console's tinted-pill recipe, in the app's accent —
                       // an ACTION among readouts must out-rank its neighbours'
                       // quiet captions, and this is the one shape for "a pill you
-                      // can press".
+                      // can press". Project External only — Registered names
+                      // skip Configure (org catalog owns the value plane).
                       <Button
                         size="small"
                         color="inherit"
@@ -720,6 +736,10 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
                       <Typography variant="caption" color="success.main">
                         provisioned
                       </Typography>
+                    ) : row.kind === "external" && registeredNames.has(row.name) ? (
+                      // Registered: org values already collected — no action,
+                      // and do not mislabel as platform-managed.
+                      undefined
                     ) : (
                       // Config-carrying but not user-updatable here (a platform
                       // resource like an identity app): the platform owns its
