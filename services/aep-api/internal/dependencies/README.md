@@ -60,6 +60,7 @@ slices.
 | WorkloadDepSource | needs | `openchoreo` client — deployed Workload consumer refs (resource + endpoint) for Overview `list-workload-dependencies`; GetResource 404s are dangling and omitted |
 | ExecutionStore (admit/finish) | needs | `delivery` — a gate's provisioning run is the last remaining execution row, and this is its write surface |
 | IssueClient (provision gate · endpoint-wiring comment) | needs | `sourcecontrol` — gate issues closed via a no-secrets reference, and the ADR-0004 endpoint comment + its `aep:wired` completeness marker on the working set |
+| OrgResourceDocs | needs | `sourcecontrol` — the first file row on register/update mints the per-org `org-resource-docs` GitHub repo (sentinel project `_resource-docs`) via `EnsureBareRepo` + `Workspace.Mutate`; URL-only and keep-path rows never mint |
 | ProviderResolver (endpoint targets) | needs | root `Catalog` — any-visibility provider lookup for an access request, namespace/project-visible resolves for the wiring block |
 | DesignReader / DesignBundleReader | needs | `spec` — design at HEAD (what to provision) + provider design bundles |
 | the 11 public ops (provisioning 9 + mcpdiscovery `ListPlatformResourceTypes` and `ListOrgEndpoints`) | offers | the edge (`dependenciesHandlers`) |
@@ -70,6 +71,10 @@ slices.
   (via `sourcecontrol`), the **resolved `endpoints:` half** of the consumer-side `dependencies:` block the
   coding agent copies into `workload.yaml` (ADR-0004 — resolved here, never patched onto a Workload CR; the
   `resources:` half is derived in `spec` at design save, ADR-0013), and the resource-type catalog projection.
+- **Org resource-docs file bytes** in the per-org `org-resource-docs` repo (not `org-skills`, not
+  project `PutReferences`). Register/update file rows commit UTF-8 via `OrgResourceDocs`; list/GET
+  surface only `type` + `url`/`path` pointers from the `ResourceType` `aep.wso2.com/resource-docs`
+  annotation — never file bodies.
 - **Persistence**: only `AccessRequest` is persisted (`repository_access_request.go` over
   `access_request.go`), single write-authority. `ExternalResource` is an in-memory definition, not a
   DB row — the org-namespaced OpenChoreo `ResourceType` is the registry (ADR-0009).

@@ -1243,6 +1243,64 @@ func TestProvisioningComponent_RegisterExternalResource_URLOnlyDoesNotMintRepo(t
 	}
 }
 
+func TestProvisioningComponent_RegisterExternalResource_KeepPathDoesNotMint(t *testing.T) {
+	t.Parallel()
+	docs := &recordingDocs{}
+	h := newRegisterHarnessWithDocs(t, &cRTCatalog{}, &cValuePlane{}, docs)
+
+	body := registerBody()
+	body.ResourceDocs = []gen.ResourceDocWriteDTO{
+		{Type: gen.ResourceDocWriteDTOTypeDocumentation, Path: "stripe/README.md"},
+	}
+	resp := h.AsOrg("acme").Post("/api/v1/dependencies/external-resources", mustJSON(t, body))
+	if resp.Code != 201 {
+		t.Fatalf("register keep-path: want 201, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	if len(docs.commits) != 0 {
+		t.Fatalf("keep-path must not call CommitUTF8, got %d commits: %+v", len(docs.commits), docs.commits)
+	}
+	var got gen.ExternalResourceDTO
+	if err := json.Unmarshal(resp.Body.Bytes(), &got); err != nil {
+		t.Fatalf("body: %v\n%s", err, resp.Body.String())
+	}
+	if len(got.ResourceDocs) != 1 || got.ResourceDocs[0].Path != "stripe/README.md" || got.ResourceDocs[0].URL != "" {
+		t.Fatalf("resourceDocs = %+v, want path stripe/README.md and empty URL", got.ResourceDocs)
+	}
+}
+
+func TestProvisioningComponent_UpdateExternalResource_KeepPathDoesNotMint(t *testing.T) {
+	t.Parallel()
+	docs := &recordingDocs{}
+	h := newRegisterHarnessWithDocs(t, &cRTCatalog{}, &cValuePlane{}, docs)
+
+	reg := h.AsOrg("acme").Post("/api/v1/dependencies/external-resources", mustJSON(t, registerBody()))
+	if reg.Code != 201 {
+		t.Fatalf("register: want 201, got %d body=%s", reg.Code, reg.Body.String())
+	}
+	if len(docs.commits) != 0 {
+		t.Fatalf("URL-only register must not mint, got %d commits", len(docs.commits))
+	}
+
+	body := registerBody()
+	body.ResourceDocs = []gen.ResourceDocWriteDTO{
+		{Type: gen.ResourceDocWriteDTOTypeDocumentation, Path: "stripe/README.md"},
+	}
+	resp := h.AsOrg("acme").Put("/api/v1/dependencies/external-resources/stripe", mustJSON(t, body))
+	if resp.Code != 200 {
+		t.Fatalf("update keep-path: want 200, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	if len(docs.commits) != 0 {
+		t.Fatalf("keep-path update must not call CommitUTF8, got %d commits: %+v", len(docs.commits), docs.commits)
+	}
+	var got gen.ExternalResourceDTO
+	if err := json.Unmarshal(resp.Body.Bytes(), &got); err != nil {
+		t.Fatalf("body: %v\n%s", err, resp.Body.String())
+	}
+	if len(got.ResourceDocs) != 1 || got.ResourceDocs[0].Path != "stripe/README.md" || got.ResourceDocs[0].URL != "" {
+		t.Fatalf("resourceDocs = %+v, want path stripe/README.md and empty URL", got.ResourceDocs)
+	}
+}
+
 func TestProvisioningComponent_RegisterExternalResource_BothURLAndContent400(t *testing.T) {
 	t.Parallel()
 	h := newRegisterHarness(t, &cRTCatalog{}, &cValuePlane{})
