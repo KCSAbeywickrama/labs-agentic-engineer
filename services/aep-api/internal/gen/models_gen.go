@@ -1177,6 +1177,11 @@ type EnvVar struct {
 	Value string `json:"value"`
 }
 
+// EnvironmentDTO defines model for EnvironmentDTO.
+type EnvironmentDTO struct {
+	Name string `json:"name"`
+}
+
 // Error Flat error envelope returned by every non-2xx response.
 type Error struct {
 	// Code Machine-readable error code (stable slug).
@@ -1630,6 +1635,20 @@ type RcaAgentReportList struct {
 
 	// NextCursor Cursor for the next page; absent on the last page.
 	NextCursor string `json:"nextCursor,omitempty"`
+}
+
+// RegisterExternalResourceRequest defines model for RegisterExternalResourceRequest.
+type RegisterExternalResourceRequest struct {
+	Config                  []ConfigKeyDTO `json:"config"`
+	ConsumptionInstructions string         `json:"consumptionInstructions"`
+	Description             string         `json:"description"`
+	EnvValues               []struct {
+		Environment string `json:"environment"`
+		Key         string `json:"key"`
+		Value       string `json:"value"`
+	} `json:"envValues"`
+	Name         string                  `json:"name"`
+	ResourceDocs []ResourceDocPointerDTO `json:"resourceDocs,omitempty"`
 }
 
 // ResourceDocPointerDTO Org resource docs pointer (type + URL or repo path), not file bodies.
@@ -2425,6 +2444,9 @@ type UpdateConfigJSONRequestBody = ConfigPatch
 
 // StartGitProviderConnectJSONRequestBody defines body for StartGitProviderConnect for application/json ContentType.
 type StartGitProviderConnectJSONRequestBody = StartConnectInputBody
+
+// RegisterExternalResourceJSONRequestBody defines body for RegisterExternalResource for application/json ContentType.
+type RegisterExternalResourceJSONRequestBody = RegisterExternalResourceRequest
 
 // CreateProjectJSONRequestBody defines body for CreateProject for application/json ContentType.
 type CreateProjectJSONRequestBody = CreateProjectRequest

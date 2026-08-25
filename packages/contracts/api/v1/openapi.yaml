@@ -222,6 +222,44 @@ paths:
       summary: List the org's external-resource catalog
       tags:
       - Dependencies
+    post:
+      operationId: register-external-resource
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterExternalResourceRequest'
+        required: true
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExternalResourceDTO'
+          description: Created Registered External resource (envCells populated; secrets never echoed)
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Missing required field, empty env value, or invalid resource-docs row
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Logical name already exists (Registered or Project External)
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Error
+      security:
+      - userJWT: []
+      summary: Register a Registered External resource
+      tags:
+      - Dependencies
   /dependencies/external-resources/{name}:
     delete:
       operationId: delete-external-resource
@@ -293,6 +331,30 @@ paths:
       security:
       - userJWT: []
       summary: List Marketplace Endpoints (namespace-visible org-service APIs)
+      tags:
+      - Dependencies
+  /dependencies/environments:
+    get:
+      operationId: list-org-environments
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/EnvironmentDTO'
+                type: array
+                nullable: true
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Error
+      security:
+      - userJWT: []
+      summary: List OpenChoreo Environments for Registered External env-value cells
       tags:
       - Dependencies
   /organizations:
@@ -4130,6 +4192,55 @@ components:
       - project
       - environment
       - status
+      type: object
+    EnvironmentDTO:
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+      required:
+      - name
+      type: object
+    RegisterExternalResourceRequest:
+      additionalProperties: false
+      properties:
+        config:
+          items:
+            $ref: '#/components/schemas/ConfigKeyDTO'
+          type: array
+        consumptionInstructions:
+          type: string
+        description:
+          type: string
+        envValues:
+          items:
+            additionalProperties: false
+            properties:
+              environment:
+                type: string
+              key:
+                type: string
+              value:
+                type: string
+            required:
+            - environment
+            - key
+            - value
+            type: object
+          type: array
+        name:
+          type: string
+        resourceDocs:
+          items:
+            $ref: '#/components/schemas/ResourceDocPointerDTO'
+          nullable: true
+          type: array
+      required:
+      - name
+      - description
+      - consumptionInstructions
+      - config
+      - envValues
       type: object
     ExternalResourceDTO:
       additionalProperties: false

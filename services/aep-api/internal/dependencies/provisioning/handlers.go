@@ -60,6 +60,20 @@ func (h *Handler) ListWorkloadDependencies(ctx context.Context, request gen.List
 	return gen.ListWorkloadDependencies200JSONResponse(toWorkloadDependencyDTOs(views)), nil
 }
 
+func (h *Handler) ListOrgEnvironments(ctx context.Context, _ gen.ListOrgEnvironmentsRequestObject) (gen.ListOrgEnvironmentsResponseObject, error) {
+	if h.svc == nil {
+		return nil, errProvisioningUnavailable()
+	}
+	return gen.ListOrgEnvironments200JSONResponse(make([]gen.EnvironmentDTO, 0)), nil
+}
+
+func (h *Handler) RegisterExternalResource(ctx context.Context, _ gen.RegisterExternalResourceRequestObject) (gen.RegisterExternalResourceResponseObject, error) {
+	if h.svc == nil {
+		return nil, errProvisioningUnavailable()
+	}
+	return nil, apierr.BadRequest("register is not implemented")
+}
+
 func (h *Handler) ListExternalResources(ctx context.Context, _ gen.ListExternalResourcesRequestObject) (gen.ListExternalResourcesResponseObject, error) {
 	org := tenant.BoundOrgFromContext(ctx)
 	if h.svc == nil {
