@@ -16,6 +16,9 @@
  * under the License.
  */
 
+export { resourceKeys } from "../../settings/api/keys";
+
 export const marketplaceKeys = {
   endpoints: ["marketplace", "org-endpoints"] as const,
+  environments: ["marketplace", "environments"] as const,
 };
