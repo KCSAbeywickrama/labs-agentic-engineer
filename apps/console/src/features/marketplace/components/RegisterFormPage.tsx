@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
   Alert,
   Box,
@@ -41,6 +41,10 @@ import { EmptyState } from "../../../components/EmptyState";
 import { PageHeader } from "../../../components/PageHeader";
 import type { components } from "../../../generated/aep-api";
 import { chatKeyFor, setPendingSeed } from "../../agent-chat/chatStore";
+import {
+  peekRegisterDraft,
+  subscribeRegisterDraft,
+} from "../../agent-chat/registerDraftStore";
 import { AgentChatPanel } from "../../agent-chat/components/AgentChatPanel";
 import {
   useExternalResources,
@@ -50,6 +54,7 @@ import {
 } from "../api/queries";
 import { MARKETPLACE_CHAT_PROJECT } from "../constants";
 import { isRegisteredExternal } from "../kind";
+import { applyRegisterDraft } from "../lib/registerDraft";
 import {
   rowsFromPointers,
   writesFromRows,
@@ -159,6 +164,42 @@ export function RegisterFormPage({
   const [values, setValues] = useState<Record<string, string>>({});
   const [docs, setDocs] = useState<ResourceDocRow[]>([]);
   const [prefilledName, setPrefilledName] = useState<string | null>(null);
+
+  const chatKey = chatKeyFor(orgHandle ?? "default", MARKETPLACE_CHAT_PROJECT);
+  const draft = useSyncExternalStore(
+    useCallback((fn: () => void) => subscribeRegisterDraft(chatKey, fn), [chatKey]),
+    () => peekRegisterDraft(chatKey),
+  );
+  const formRef = useRef({
+    name,
+    description,
+    consumptionInstructions,
+    keys,
+    values,
+    docs,
+  });
+  formRef.current = {
+    name,
+    description,
+    consumptionInstructions,
+    keys,
+    values,
+    docs,
+  };
+
+  useEffect(() => {
+    if (!draft) return;
+    const next = applyRegisterDraft(formRef.current, draft, {
+      freezeName: isEdit,
+      freezeKeys: isEdit,
+    });
+    setName(next.name);
+    setDescription(next.description);
+    setConsumptionInstructions(next.consumptionInstructions);
+    setKeys(next.keys);
+    setValues(next.values);
+    setDocs(next.docs);
+  }, [draft, isEdit]);
 
   useEffect(() => {
     if (seededRef.current || !seedRegister) return;

@@ -18,7 +18,7 @@
 
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { components } from "../../../generated/aep-api";
 
@@ -89,6 +89,10 @@ import {
   consumePendingSeed,
   peekPendingSeed,
 } from "../../agent-chat/chatStore";
+import {
+  clearRegisterDraft,
+  publishRegisterDraft,
+} from "../../agent-chat/registerDraftStore";
 import { MARKETPLACE_CHAT_PROJECT } from "../constants";
 import { RegisterFormPage } from "./RegisterFormPage";
 
@@ -197,6 +201,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   resetState();
   consumePendingSeed(chatKeyFor("acme", MARKETPLACE_CHAT_PROJECT));
+  clearRegisterDraft(chatKeyFor("acme", MARKETPLACE_CHAT_PROJECT));
 });
 
 describe("RegisterFormPage", () => {
@@ -404,6 +409,24 @@ describe("RegisterFormPage", () => {
     fillRequired();
     fireEvent.click(screen.getByRole("button", { name: "Register" }));
     expect(registerState.mutate).toHaveBeenCalled();
+  });
+
+  it("leaves env value fields unchanged after a chat draft that only patches description and consumption instructions", () => {
+    render(<RegisterFormPage prompt="" />);
+    const env = screen.getByLabelText("development · API_KEY");
+    fireEvent.change(env, { target: { value: "human-secret" } });
+    const chatKey = chatKeyFor("acme", MARKETPLACE_CHAT_PROJECT);
+    act(() => {
+      publishRegisterDraft(chatKey, {
+        description: "Patched description",
+        consumptionInstructions: "Patched consumption instructions",
+      });
+    });
+    expect(screen.getByLabelText("development · API_KEY")).toHaveValue("human-secret");
+    expect(screen.getAllByLabelText(/^Description/)[0]).toHaveValue("Patched description");
+    expect(screen.getByLabelText(/Consumption instructions/i)).toHaveValue(
+      "Patched consumption instructions",
+    );
   });
 });
 

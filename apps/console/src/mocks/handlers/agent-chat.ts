@@ -292,11 +292,25 @@ export const agentChatHandlers = [
       ]);
     }
     if (instruction.trim().startsWith(REGISTER_EXTERNAL_RESOURCE_COMMAND)) {
+      const input = {
+        name: "stripe",
+        description: "Payments API",
+        consumptionInstructions: "Use the secret key as Bearer.",
+        config: [{ key: "API_KEY", description: "Secret API key", secret: true }],
+        resourceDocs: [{ type: "openapi", url: "https://example.com/stripe/openapi.yaml" }],
+      };
       return sse([
         {
           type: "text-delta",
           delta:
             "I'll register this as a Registered External resource. If anything is unclear I'll ask — I won't invent a schema or put secret values in the draft.",
+        },
+        { type: "tool-input-start", id: `draft-${turnId}`, toolName: "draftExternalResource" },
+        {
+          type: "tool-call",
+          toolCallId: `draft-${turnId}`,
+          toolName: "draftExternalResource",
+          input,
         },
         { type: "turn-committed", noChanges: true },
       ]);
