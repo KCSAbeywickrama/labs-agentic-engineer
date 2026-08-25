@@ -32,6 +32,7 @@ package provisioning_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -91,6 +92,43 @@ func (f *cBindings) GetBinding(_ context.Context, _, name string) (*openchoreo.R
 	return f.byName[name], nil
 }
 
+// cWorkloads fakes provisioning.WorkloadDepSource — deployed Workload consumer
+// refs plus GetResource / GetResourceType, in place of live OC.
+type cWorkloads struct {
+	deps      []openchoreo.WorkloadConsumerDep
+	resources map[string]*openchoreo.Resource
+	types     map[string]*openchoreo.ResourceType
+	listErr   error
+}
+
+func (f *cWorkloads) ListWorkloadConsumerDeps(_ context.Context, _, projectName string) ([]openchoreo.WorkloadConsumerDep, error) {
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	// Mirror ResourceClient: org-scoped list, keep spec.owner.projectName == path.
+	out := make([]openchoreo.WorkloadConsumerDep, 0)
+	for _, d := range f.deps {
+		if d.OwnerProject == projectName {
+			out = append(out, d)
+		}
+	}
+	return out, nil
+}
+
+func (f *cWorkloads) GetResource(_ context.Context, _, name string) (*openchoreo.Resource, error) {
+	if r, ok := f.resources[name]; ok {
+		return r, nil
+	}
+	return nil, openchoreo.ErrNotFound
+}
+
+func (f *cWorkloads) GetResourceType(_ context.Context, _, name string) (*openchoreo.ResourceType, error) {
+	if rt, ok := f.types[name]; ok {
+		return rt, nil
+	}
+	return nil, openchoreo.ErrNotFound
+}
+
 type cIssues struct{}
 
 func (cIssues) ListIssues(context.Context, string, string, []string) ([]sourcecontrol.IssueInfo, error) {
@@ -133,6 +171,21 @@ func stripeConsumerDesign() []spec.DesignComponent {
 	}}
 }
 
+// designWithUnconsumedGhost is design.json with a unique unresolved name that
+// no deployed Workload carries. Used to pin that workload-dependencies does
+// not consult DesignReader.
+func designWithUnconsumedGhost() []spec.DesignComponent {
+	return []spec.DesignComponent{{
+		Name: "orders",
+		Dependencies: []spec.Dependency{
+			{Kind: spec.DependencyKindExternal, Name: "stripe", Config: []spec.ConfigKey{
+				{Key: "api_key", Secret: true}, {Key: "region"},
+			}},
+			{Kind: spec.DependencyKindExternal, Name: "ghost"},
+		},
+	}}
+}
+
 func newProvHarness(t *testing.T, svc *provisioning.Service) *componenttest.Harness {
 	t.Helper()
 	deps, err := dephttpapi.New(dephttpapi.Deps{ProvisioningSvc: svc})
@@ -157,6 +210,11 @@ func TestProvisioningComponent_Unconfigured503(t *testing.T) {
 	e := componenttest.DecodeEnvelope(t, resp.Body.String())
 	if e.Code != "service_unavailable" || e.Message != "provisioning is not configured" {
 		t.Fatalf("503 envelope = %+v", e)
+	}
+
+	resp = h.AsOrg("acme").Get("/api/v1/projects/shop/workload-dependencies")
+	if resp.Code != 503 {
+		t.Fatalf("workload-dependencies nil svc: want 503, got %d body=%s", resp.Code, resp.Body.String())
 	}
 }
 
@@ -349,5 +407,270 @@ func TestProvisioningComponent_AccessRequests(t *testing.T) {
 	}
 	if body := strings.TrimSpace(resp.Body.String()); body != "[]" {
 		t.Fatalf("empty list must serialize as [], got %s", body)
+	}
+}
+
+const workloadDepsPath = "/api/v1/projects/shop/workload-dependencies"
+
+func TestProvisioningComponent_ListWorkloadDependencies_NoClaims401(t *testing.T) {
+	t.Parallel()
+	h := newProvHarness(t, provisioning.NewService(provisioning.Deps{}))
+
+	if resp := h.NoAuth().Get(workloadDepsPath); resp.Code != 401 {
+		t.Fatalf("claimless: want the gate's ENFORCE 401, got %d body=%s", resp.Code, resp.Body.String())
+	}
+}
+
+func TestProvisioningComponent_ListWorkloadDependencies_Empty200(t *testing.T) {
+	t.Parallel()
+	// Org has deployed workloads, but none owned by path project "shop".
+	// A nil Workloads port is a lister failure, not 200 []; this fake must
+	// list-and-filter so other projects' rows cannot leak.
+	h := newProvHarness(t, provisioning.NewService(provisioning.Deps{
+		Workloads: otherProjectWorkloadSource(),
+	}))
+
+	resp := h.AsOrg("acme").Get(workloadDepsPath)
+	if resp.Code != 200 {
+		t.Fatalf("no deployed workloads: want 200, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	if body := strings.TrimSpace(resp.Body.String()); body != "[]" {
+		t.Fatalf("empty list must serialize as [], got %s", body)
+	}
+}
+
+func TestProvisioningComponent_ListWorkloadDependencies_UnknownProject200Empty(t *testing.T) {
+	t.Parallel()
+	// Shop workloads exist in the org. GET a name that was never created must
+	// still be 200 []: listing is org-scoped then filtered by path projectName
+	// (sibling policy to components when OC does not 404). Wiring the shop
+	// source pins that the path name is passed through — an unfiltered fake
+	// would return shop rows.
+	h := newProvHarness(t, provisioning.NewService(provisioning.Deps{
+		Workloads: shopWorkloadSource(),
+	}))
+
+	// Listing org workloads filtered by owner.projectName naturally yields []
+	// when the project has no deployed workloads — including a name that was
+	// never created. GET /projects/{name} 404s because it is a point-get;
+	// ListComponents 404s only when OC's project-scoped list 404s. This list
+	// is org-scoped, so unknown project is 200 [].
+	resp := h.AsOrg("acme").Get("/api/v1/projects/does-not-exist-xyz/workload-dependencies")
+	if resp.Code != 200 {
+		t.Fatalf("unknown project: want 200 [], got %d body=%s", resp.Code, resp.Body.String())
+	}
+	if body := strings.TrimSpace(resp.Body.String()); body != "[]" {
+		t.Fatalf("unknown project must serialize as [], got %s", body)
+	}
+}
+
+// otherProjectWorkloadSource is deployed Workloads owned by "other", not "shop".
+// GET /projects/shop must list-and-filter to [] — if the fake ignored
+// projectName these rows would leak (platform postgres + org-service).
+func otherProjectWorkloadSource() *cWorkloads {
+	return &cWorkloads{
+		deps: []openchoreo.WorkloadConsumerDep{
+			{
+				OwnerProject:   "other",
+				OwnerComponent: "api",
+				ResourceRefs:   []string{"other-pg"},
+				Endpoints: []openchoreo.WorkloadConsumerEndpoint{
+					{Project: "inventory", Component: "inventory-api", Name: "http", Visibility: "namespace"},
+				},
+			},
+		},
+		resources: map[string]*openchoreo.Resource{
+			"other-pg": {Spec: openchoreo.ResourceSpec{
+				Type: openchoreo.ResourceTypeRef{Kind: "ClusterResourceType", Name: "postgres-cnpg"},
+			}},
+		},
+	}
+}
+
+func shopWorkloadSource() *cWorkloads {
+	return &cWorkloads{
+		deps: []openchoreo.WorkloadConsumerDep{
+			{
+				OwnerProject:   "shop",
+				OwnerComponent: "orders",
+				ResourceRefs:   []string{"shop-pg", "shop-stripe", "shop-gone"},
+				Endpoints: []openchoreo.WorkloadConsumerEndpoint{
+					{Project: "inventory", Component: "inventory-api", Name: "http", Visibility: "namespace"},
+					{Project: "shop", Component: "web", Name: "http", Visibility: "project"},
+				},
+			},
+			{
+				OwnerProject:   "shop",
+				OwnerComponent: "billing",
+				ResourceRefs:   []string{"shop-pg"},
+				Endpoints: []openchoreo.WorkloadConsumerEndpoint{
+					{Project: "inventory", Component: "inventory-api", Name: "grpc", Visibility: "namespace"},
+				},
+			},
+		},
+		resources: map[string]*openchoreo.Resource{
+			"shop-pg": {Spec: openchoreo.ResourceSpec{
+				Type: openchoreo.ResourceTypeRef{Kind: "ClusterResourceType", Name: "postgres-cnpg"},
+			}},
+			"shop-stripe": {Spec: openchoreo.ResourceSpec{
+				Type: openchoreo.ResourceTypeRef{Kind: "ResourceType", Name: "stripe-rt"},
+			}},
+		},
+		types: map[string]*openchoreo.ResourceType{
+			"stripe-rt": {Metadata: openchoreo.OCObjectMeta{
+				Name:        "stripe-rt",
+				Annotations: map[string]string{"aep.wso2.com/external-name": "stripe"},
+			}},
+		},
+	}
+}
+
+func TestProvisioningComponent_ListWorkloadDependencies_ResourceAndOrgServiceRows(t *testing.T) {
+	t.Parallel()
+	svc := provisioning.NewService(provisioning.Deps{
+		Workloads: shopWorkloadSource(),
+		// Design declares an extra unresolved name ("ghost") that no Workload
+		// consumes — it must not appear (source is deployed Workloads, not
+		// design.json). "stripe" is already a Workload consumer, so it cannot
+		// pin DesignReader absence: a duplicate would collapse under dedup.
+		Design: cDesign{comps: designWithUnconsumedGhost()},
+	})
+	h := newProvHarness(t, svc)
+
+	resp := h.AsOrg("acme").Get(workloadDepsPath)
+	if resp.Code != 200 {
+		t.Fatalf("list: got %d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var got []gen.WorkloadDependencyDTO
+	if err := json.Unmarshal(resp.Body.Bytes(), &got); err != nil {
+		t.Fatalf("body: %v\n%s", err, resp.Body.String())
+	}
+
+	// Not the design-dependencies wrapper (componentName + dependencies[]).
+	var wrapper []map[string]any
+	if err := json.Unmarshal(resp.Body.Bytes(), &wrapper); err != nil {
+		t.Fatalf("body objects: %v", err)
+	}
+	for _, item := range wrapper {
+		if _, ok := item["componentName"]; ok {
+			t.Fatalf("payload must not be design-dependencies shape, got %s", resp.Body.String())
+		}
+		if _, ok := item["dependencies"]; ok {
+			t.Fatalf("payload must not wrap dependencies[], got %s", resp.Body.String())
+		}
+		if _, ok := item["kind"]; !ok {
+			t.Fatalf("items must have kind, got %s", resp.Body.String())
+		}
+	}
+
+	if len(got) != 3 {
+		t.Fatalf("rows = %+v, want 3 (platform + external + org-service, deduped; dangling omitted)", got)
+	}
+
+	var platform, external, orgSvc *gen.WorkloadDependencyDTO
+	for i := range got {
+		row := &got[i]
+		switch {
+		case row.Kind == gen.Resource && row.Tag == gen.Platform:
+			platform = row
+		case row.Kind == gen.Resource && row.Tag == gen.External:
+			external = row
+		case row.Kind == gen.OrgService:
+			orgSvc = row
+		}
+	}
+	if platform == nil || platform.Ref != "postgres-cnpg" || platform.Name != "postgres-cnpg" {
+		t.Fatalf("platform resource row = %+v, want ref/name postgres-cnpg", platform)
+	}
+	if external == nil || external.Ref != "stripe" || external.Name != "stripe" {
+		t.Fatalf("external resource row = %+v, want ref/name stripe (logical catalog name)", external)
+	}
+	if orgSvc == nil || orgSvc.Project != "inventory" || orgSvc.Component != "inventory-api" {
+		t.Fatalf("org-service row = %+v, want provider inventory/inventory-api", orgSvc)
+	}
+	if orgSvc.Name == "" {
+		t.Fatalf("org-service row must carry a name, got %+v", orgSvc)
+	}
+	for _, row := range got {
+		if row.Kind == gen.OrgService && row.Project == "shop" {
+			t.Fatalf("same-project visibility:project endpoint must be omitted, got %+v", row)
+		}
+		if row.Name == "ghost" || row.Ref == "ghost" || row.Name == "orders" && row.Kind != gen.OrgService {
+			t.Fatalf("design-only dep must not appear: %+v", row)
+		}
+	}
+}
+
+func TestProvisioningComponent_ListWorkloadDependencies_ListerFailure500(t *testing.T) {
+	t.Parallel()
+	svc := provisioning.NewService(provisioning.Deps{
+		Workloads: &cWorkloads{listErr: errors.New("oc workloads down")},
+	})
+	h := newProvHarness(t, svc)
+
+	resp := h.AsOrg("acme").Get(workloadDepsPath)
+	if resp.Code != 500 {
+		t.Fatalf("lister failure: want 500, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	e := componenttest.DecodeEnvelope(t, resp.Body.String())
+	if e.Code != "internal_error" {
+		t.Fatalf("500 envelope = %+v, want code internal_error", e)
+	}
+}
+
+func TestProvisioningComponent_ListWorkloadDependencies_NilWorkloadsPort500(t *testing.T) {
+	t.Parallel()
+	// Non-nil service, unwired Workloads port: not "nothing deployed" (200 []).
+	h := newProvHarness(t, provisioning.NewService(provisioning.Deps{}))
+
+	resp := h.AsOrg("acme").Get(workloadDepsPath)
+	if resp.Code != 500 {
+		t.Fatalf("nil Workloads port: want 500, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	e := componenttest.DecodeEnvelope(t, resp.Body.String())
+	if e.Code != "internal_error" {
+		t.Fatalf("500 envelope = %+v, want code internal_error", e)
+	}
+}
+
+func TestProvisioningComponent_ListWorkloadDependencies_ExternalFallsBackToTypeName(t *testing.T) {
+	t.Parallel()
+	svc := provisioning.NewService(provisioning.Deps{
+		Workloads: &cWorkloads{
+			deps: []openchoreo.WorkloadConsumerDep{
+				{
+					OwnerProject:   "shop",
+					OwnerComponent: "orders",
+					ResourceRefs:   []string{"shop-custom", "shop-gone"},
+				},
+			},
+			resources: map[string]*openchoreo.Resource{
+				"shop-custom": {Spec: openchoreo.ResourceSpec{
+					Type: openchoreo.ResourceTypeRef{Kind: "ResourceType", Name: "custom-rt"},
+				}},
+			},
+			types: map[string]*openchoreo.ResourceType{
+				"custom-rt": {Metadata: openchoreo.OCObjectMeta{Name: "custom-rt"}},
+			},
+		},
+	})
+	h := newProvHarness(t, svc)
+
+	resp := h.AsOrg("acme").Get(workloadDepsPath)
+	if resp.Code != 200 {
+		t.Fatalf("list: got %d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var got []gen.WorkloadDependencyDTO
+	if err := json.Unmarshal(resp.Body.Bytes(), &got); err != nil {
+		t.Fatalf("body: %v\n%s", err, resp.Body.String())
+	}
+	if len(got) != 1 {
+		t.Fatalf("rows = %+v, want 1 live ResourceType (dangling GetResource 404 omitted)", got)
+	}
+	row := got[0]
+	if row.Kind != gen.Resource || row.Tag != gen.External || row.Ref != "custom-rt" || row.Name != "custom-rt" {
+		t.Fatalf("external without annotation = %+v, want ref/name custom-rt (spec.type.Name)", row)
 	}
 }
