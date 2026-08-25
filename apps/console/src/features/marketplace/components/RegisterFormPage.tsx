@@ -34,6 +34,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { Plus, Trash2 } from "@wso2/oxygen-ui-icons-react";
 import { Link, useNavigate } from "@tanstack/react-router";
+import { EmptyState } from "../../../components/EmptyState";
 import { PageHeader } from "../../../components/PageHeader";
 import type { components } from "../../../generated/aep-api";
 import { useOrgEnvironments, useRegisterExternalResource } from "../api/queries";
@@ -63,6 +64,10 @@ function pointersFromRows(rows: DocRow[]): ResourceDocPointerDTO[] {
     if (url) minted.push({ type: row.type, url });
   }
   return minted;
+}
+
+function envFieldLabel(environment: string, key: string): string {
+  return `${environment} · ${key.trim() || "(unnamed key)"}`;
 }
 
 export function RegisterFormPage({ prompt }: { prompt: string }) {
@@ -253,6 +258,13 @@ export function RegisterFormPage({ prompt }: { prompt: string }) {
             <Box sx={{ display: "flex", justifyContent: "center", py: 3 }}>
               <CircularProgress aria-label="Loading environments" />
             </Box>
+          ) : environments.isError ? null : envNames.length === 0 ? (
+            <EmptyState
+              compact
+              bordered
+              title="No OpenChoreo Environments"
+              description="This organization has no OpenChoreo Environments, so environment values cannot be filled."
+            />
           ) : (
             <Stack spacing={2} sx={{ pl: 2 }}>
               {keys.map((cfg, index) => (
@@ -268,7 +280,7 @@ export function RegisterFormPage({ prompt }: { prompt: string }) {
                     {envNames.map((environment) => (
                       <TextField
                         key={environment}
-                        label={environment}
+                        label={envFieldLabel(environment, cfg.key)}
                         type={cfg.secret ? "password" : "text"}
                         value={values[cellKey(environment, cfg.key)] ?? ""}
                         onChange={(e) =>

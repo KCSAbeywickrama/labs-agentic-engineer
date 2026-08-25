@@ -88,9 +88,88 @@ describe("RegisterFormPage", () => {
   it("labels env value fields from the environments hook, never a hardcoded Production", () => {
     render(<RegisterFormPage prompt="" />);
 
-    expect(screen.getByLabelText("development")).toBeInTheDocument();
-    expect(screen.getByLabelText("staging-local")).toBeInTheDocument();
-    expect(screen.queryByLabelText("Production")).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/development/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/staging-local/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/Production/)).not.toBeInTheDocument();
+    expect(screen.getByLabelText("development · API_KEY")).toBeInTheDocument();
+    expect(screen.getByLabelText("staging-local · API_KEY")).toBeInTheDocument();
+  });
+
+  it("gives each key × environment field a unique accessible name", () => {
+    render(<RegisterFormPage prompt="" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Add key" }));
+    fireEvent.change(screen.getAllByLabelText(/^Key/)[1]!, {
+      target: { value: "TOKEN" },
+    });
+
+    expect(screen.getByLabelText("development · API_KEY")).toBeInTheDocument();
+    expect(screen.getByLabelText("development · TOKEN")).toBeInTheDocument();
+    expect(screen.getByLabelText("staging-local · API_KEY")).toBeInTheDocument();
+    expect(screen.getByLabelText("staging-local · TOKEN")).toBeInTheDocument();
+  });
+
+  it("shows a loading indicator while environments are pending", () => {
+    environmentsState = {
+      isLoading: true,
+      isError: false,
+      refetch: vi.fn(),
+    };
+
+    render(<RegisterFormPage prompt="" />);
+
+    expect(screen.getByLabelText("Loading environments")).toBeInTheDocument();
+    expect(screen.queryByLabelText(/development/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Register" })).toBeDisabled();
+  });
+
+  it("shows an error Alert and disables Register when environments fail to load", () => {
+    environmentsState = {
+      isLoading: false,
+      isError: true,
+      error: new Error("boom"),
+      refetch: vi.fn(),
+    };
+
+    render(<RegisterFormPage prompt="" />);
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Failed to load environments",
+    );
+    expect(screen.queryByLabelText(/development/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Register" })).toBeDisabled();
+  });
+
+  it("shows an empty state when the organization has no environments", () => {
+    environmentsState = {
+      ...environmentsState,
+      data: [],
+    };
+
+    render(<RegisterFormPage prompt="" />);
+
+    expect(
+      screen.getByRole("heading", { name: "No OpenChoreo Environments" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/environment values cannot be filled/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText(/development/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Register" })).toBeDisabled();
+  });
+
+  it("shows a register-failure Alert without navigating", () => {
+    registerState = {
+      ...registerState,
+      error: new Error("An external resource named twilio already exists"),
+    };
+
+    render(<RegisterFormPage prompt="" />);
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "An external resource named twilio already exists",
+    );
+    expect(navigate).not.toHaveBeenCalled();
   });
 
   it("navigates to /resources after a successful submit", () => {
@@ -105,10 +184,10 @@ describe("RegisterFormPage", () => {
     fireEvent.change(screen.getByLabelText(/Consumption instructions/), {
       target: { value: "Use the auth token as Bearer." },
     });
-    fireEvent.change(screen.getByLabelText("development"), {
+    fireEvent.change(screen.getByLabelText(/development/i), {
       target: { value: "sk_dev" },
     });
-    fireEvent.change(screen.getByLabelText("staging-local"), {
+    fireEvent.change(screen.getByLabelText(/staging-local/i), {
       target: { value: "sk_stg" },
     });
 
