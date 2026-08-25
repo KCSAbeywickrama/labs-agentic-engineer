@@ -1,18 +1,21 @@
 ---
 name: astryx-design-system
-description: Astryx (`@astryxdesign/core`) — the platform's default web-app design system, its Theme + StyleX wiring, and the CLI you confirm every component's props against before writing JSX. Apply to all UI work in a `web-application` component that pins this skill — pages, layouts, forms, tables, dialogs, nav, theming — even when the task never names Astryx.
+description: Astryx (`@astryxdesign/core`) — this organization's web-app design system, covering its Theme + StyleX wiring, the brand-colour question a web app's design must settle, and the CLI you confirm every component's props against before writing JSX. Load at DESIGN time whenever a design gains a `web-application` component, to settle its theming before the design is done. Apply at CODING time to all UI work in a `web-application` that pins it — pages, layouts, forms, tables, dialogs, nav, theming — even when the task never names Astryx.
 metadata:
   aep:
     kind: org
-    audience: [coding]
+    audience: [design, coding]
 ---
 
 # Astryx Design System
 
-You are reading this because the component you are building pinned it, which
-means Astryx (`@astryxdesign/core`) is **this organization's** UI toolkit —
+Astryx (`@astryxdesign/core`) is **this organization's** UI toolkit —
 components, layout, and styling (via StyleX) all come from it. Never raw HTML
 styling, never another component library, never an invented component prop.
+
+Two audiences read this skill. **At design time** only one section is yours:
+Brand colors → At design time. **At coding time** — you are here because the
+component you are building pinned it — the whole skill is yours.
 
 `react-webapp` owns the app: layout, config, verify sequence, Dockerfile, nginx.
 This skill owns what goes **inside** `src/` — the UI. Where the two appear to
@@ -74,6 +77,103 @@ import {neutralTheme} from '@astryxdesign/theme-neutral/built';
 // wrap <App/> in <Theme theme={neutralTheme}> — swap the theme package to change
 // the look, never hand-roll colors instead
 ```
+
+That stock package is the default and the fallback. It is what a project gets
+when nobody chose brand colors — see the next section for when somebody does.
+
+## Brand colors
+
+A web app is themed at its FIRST build, and retrofitting a theme means revisiting
+every screen. So the colors are settled at DESIGN time and compiled at BUILD
+time. Two audiences read this section; do the half that is yours.
+
+### At design time — ask, then record
+
+**When a design includes a `web-application` component, settle its theming
+before the design is done.** The organization has a stock theme, so this is not
+a blocker — but a company with brand colors will not accept a stock-grey app,
+and by the time anyone sees the deployed page the cost of changing it is every
+screen.
+
+Ask ONE question (mechanics are `grilling`'s — this skill only says to ask):
+
+- Frame it as a choice, not an open request for hex values: most users cannot
+  recite their palette, and "what are your brand colors?" strands them. Offer
+  the stock theme as an explicit, recommended option, and make clear they can
+  reply with hex values instead — a typed answer is always a valid one.
+- Ask ONCE PER PROJECT, not per component: a brand is project-wide, so a second
+  web app inherits the answer already recorded rather than asking again.
+- **Headless turns ask nothing** (`grilling`) — record no brand and let the
+  stock theme apply.
+
+Record the answer in `specs/design/design.md` under a `## Brand colors`
+heading, as the two hex values:
+
+```markdown
+## Brand colors
+
+- Accent (buttons, links, focus): #f5c518
+- Neutral (backgrounds, surfaces): #0a0a0a
+```
+
+Write the HEX, never the words the user used. "Black and yellow" is not a
+palette — it does not say WHICH yellow, and the agent that builds the app never
+sees this conversation, only this file. If the user names colors in prose, pick
+the precise hexes, write them down, and say which you chose. Omit the whole
+section when they chose the stock theme: its absence is the answer.
+
+### At build time — compile the theme
+
+Read `specs/design/design.md` before you wire the theme. **No `## Brand colors`
+section → no brand was chosen**: use the stock package above and do not invent
+a palette.
+
+With colors, a brand theme is a **compiled theme of your own** — not hand-written
+colors sprinkled over a stock one. Editing component styles to paint them brand
+colors violates "colors are tokens" and leaves every unstyled surface off-brand.
+Scaffold a stock theme as editable source, retune its color tokens, compile it:
+
+```bash
+# 1. scaffold the closest stock theme as YOUR source (once)
+npx --no astryx theme add neutral src/theme
+# 2. copy it to src/theme/brandTheme.ts, rename the exported symbol +
+#    `name:` + its defineSyntaxTheme `name:`, then edit the color tokens
+# 3. compile — emits brand.css + brand.js + brand.d.ts beside the source
+npx --no astryx theme build src/theme/brandTheme.ts -o src/theme/brand.css
+```
+
+Every color token is a `[light, dark]` pair. Retune this set and leave the rest
+of the scaffold alone — they are what carry a brand:
+
+| Token | Set it to |
+|---|---|
+| `--color-accent`, `--color-text-accent`, `--color-icon-accent` | the accent brand color; the **light** slot usually needs a darkened variant to stay AA on a light background |
+| `--color-on-accent` | the text color that sits ON the accent — check contrast both ways |
+| `--color-accent-muted` | the accent at low alpha (e.g. `#RRGGBB33`) |
+| `--color-background-body`, `--color-background-surface`, `--color-background-card`, `--color-background-popover`, `--color-background-muted` | the neutral brand color, as a ramp — body darkest, surface/card a step lighter, never all the same value |
+
+Then wire the compiled output exactly like a package theme — the import is the
+build's `-o` CSS plus the sibling JS, both from `src/theme/`, never the `.ts`:
+
+```tsx
+// main.tsx
+import '@astryxdesign/core/reset.css';
+import './theme/brand.css';
+import {Theme} from '@astryxdesign/core/theme';
+import {brandTheme} from './theme/brand';
+// wrap <App/> in <Theme theme={brandTheme}>
+```
+
+Commit the generated `brand.css` / `brand.js` / `brand.d.ts` alongside the
+source: the Docker build runs `npm run build`, not the theme compiler, so an
+uncommitted build output ships an unthemed app. Re-run `theme build` after
+every edit to `brandTheme.ts` — editing the source alone changes nothing.
+
+Two colors is the common case, and it does not mean two tokens. Map the neutral
+across the background ramp and the accent across the accent trio; a pure
+`#FFFF00`-class hue almost always needs darkening for its light-mode slot and
+dark text for `--color-on-accent`. Contrast is not negotiable to match a brand:
+keep the hue, move the lightness.
 
 ## Verify
 
@@ -181,6 +281,9 @@ This table is a quick guide, not the catalog — run
 | Page renders blank in dev, every asset 404s | `base` was set in `vite.config.ts` from an Astryx snippet | Remove it — served at host root (`react-webapp`) |
 | A prop doesn't exist, or is the old spelling | Answered from memory instead of the CLI | Run `npx --no astryx component <Name> --dense` — the CLI reflects the installed version, training data doesn't |
 | Every row in a list is wrapped in its own `Card` | Defaulted to a generic "card grid" instead of checking data density | `npx --no astryx docs principles --dense` — dense data is `Table`/`List`+`Item`; `Card` is for widgets/galleries/settings groups |
+| Design names brand colors, deployed app is stock-themed | Colors were read but never compiled into a theme, or `brandTheme.ts` was edited without re-running `theme build` | Re-run `npx --no astryx theme build src/theme/brandTheme.ts -o src/theme/brand.css` and confirm `brand.css`/`brand.js` are COMMITTED — the image build never runs the compiler |
+| The user gave brand colors in chat, the build ignored them | They were answered at design time but never written to `specs/design/design.md` — the coding agent never sees a conversation | Record the decision in the design doc as hex, per Brand colors → At design time; an answer that is not in a file did not happen |
+| Brand accent is unreadable — pale text on a pale button | The brand hex was pasted into both `[light, dark]` slots of `--color-accent` | Darken the light-mode slot and set `--color-on-accent` to a color that contrasts with the accent in each mode |
 
 ## Red flags — stop and use Astryx
 
@@ -191,6 +294,10 @@ This table is a quick guide, not the catalog — run
 - Thinking "it's just a placeholder" or "Astryx isn't set up in this app yet"
 - Using a prop without having confirmed it exists via
   `astryx component <Name> --dense`
+- About to satisfy a brand-color requirement by styling components instead of
+  compiling a theme — or about to ignore one because no stock theme matches
+- (design) About to finish a design containing a `web-application` without having
+  settled its theming
 
 All of these mean: stop, run `astryx search` / `astryx component <Name> --dense`,
 and use what it returns.

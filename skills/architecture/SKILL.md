@@ -48,7 +48,13 @@ a settled organization decision, so pin it on **every** web-application rather
 than leaving it to a description to trigger — and read the name from that
 section every time instead of remembering one, because it differs per
 organization. If that section is absent or empty, pin only the two stack skills.
-Never substitute a design system the organization defaults do not name. Add
+Never substitute a design system the organization defaults do not name.
+
+**Pinning the design system is not the same as consulting it.** A web-application
+in this design also means LOADING that design-system skill yourself, now: it owns
+theming, and a theme is settled at design time because the built app is themed at
+its first build. Load it by name the moment the design gains a web-application,
+and do what its design-time section says before you call the design done. Add
 `"api-management"` to any service that sits behind the gateway, and
 `"thunder-authentication"` to **both** sides of sign-in — the SPA *and* every
 protected backend it calls, since that skill owns how each resolves the caller's
