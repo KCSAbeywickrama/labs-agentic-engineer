@@ -1134,6 +1134,291 @@ func TestProvisioningComponent_RegisterExternalResource_CellsAreOrgScoped(t *tes
 	}
 }
 
+func envValue(env, key, value string) struct {
+	Environment string `json:"environment"`
+	Key         string `json:"key"`
+	Value       string `json:"value"`
+} {
+	return struct {
+		Environment string `json:"environment"`
+		Key         string `json:"key"`
+		Value       string `json:"value"`
+	}{Environment: env, Key: key, Value: value}
+}
+
+func keepIfEmptyUpdateBody() gen.RegisterExternalResourceJSONRequestBody {
+	body := registerBody()
+	body.Description = "Stripe payments (updated)"
+	body.ConsumptionInstructions = "Use the secret as Bearer. Rotate quarterly."
+	body.Config = []gen.ConfigKeyDTO{
+		{Key: "api_key", Description: "Secret API key (rotated)", Secret: true},
+		{Key: "region", Description: "Account region (primary)", Secret: false},
+	}
+	body.EnvValues = []struct {
+		Environment string `json:"environment"`
+		Key         string `json:"key"`
+		Value       string `json:"value"`
+	}{
+		envValue("development", "api_key", ""),
+		envValue("development", "region", "ap-southeast"),
+		envValue("staging-local", "api_key", ""),
+		envValue("staging-local", "region", "eu"),
+	}
+	body.ResourceDocs = []gen.ResourceDocPointerDTO{
+		{Type: gen.Openapi, URL: "https://example.com/stripe/openapi-v2.yaml"},
+	}
+	return body
+}
+
+func findEnvCell(t *testing.T, cells []gen.EnvValueCellDTO, env, key string) gen.EnvValueCellDTO {
+	t.Helper()
+	for _, c := range cells {
+		if c.Environment == env && c.Key == key {
+			return c
+		}
+	}
+	t.Fatalf("no cell environment=%q key=%q in %+v", env, key, cells)
+	return gen.EnvValueCellDTO{}
+}
+
+func TestProvisioningComponent_UpdateExternalResource_KeepIfEmptySecret(t *testing.T) {
+	t.Parallel()
+	h := newRegisterHarness(t, &cRTCatalog{}, &cValuePlane{})
+
+	reg := h.AsOrg("acme").Post("/api/v1/dependencies/external-resources", mustJSON(t, registerBody()))
+	if reg.Code != 201 {
+		t.Fatalf("register: want 201, got %d body=%s", reg.Code, reg.Body.String())
+	}
+
+	body := keepIfEmptyUpdateBody()
+	body.Name = "other-name"
+	resp := h.AsOrg("acme").Put("/api/v1/dependencies/external-resources/stripe", mustJSON(t, body))
+	if resp.Code != 200 {
+		t.Fatalf("update: want 200, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	var got gen.ExternalResourceDTO
+	if err := json.Unmarshal(resp.Body.Bytes(), &got); err != nil {
+		t.Fatalf("body: %v\n%s", err, resp.Body.String())
+	}
+	if got.Name != "stripe" || got.Description != "Stripe payments (updated)" {
+		t.Fatalf("updated resource = %+v", got)
+	}
+	if got.ConsumptionInstructions != "Use the secret as Bearer. Rotate quarterly." {
+		t.Fatalf("consumptionInstructions = %#v", got.ConsumptionInstructions)
+	}
+	if len(got.Config) != 2 || got.Config[0].Key != "api_key" || got.Config[0].Description != "Secret API key (rotated)" {
+		t.Fatalf("config = %+v", got.Config)
+	}
+	if len(got.ResourceDocs) != 1 || got.ResourceDocs[0].URL != "https://example.com/stripe/openapi-v2.yaml" {
+		t.Fatalf("resourceDocs = %+v", got.ResourceDocs)
+	}
+
+	apiKeyDev := findEnvCell(t, got.EnvCells, "development", "api_key")
+	if apiKeyDev.Status != gen.EnvValueCellDTOStatusConfigured {
+		t.Errorf("secret api_key development status = %q, want configured", apiKeyDev.Status)
+	}
+	if apiKeyDev.Value != "" {
+		t.Fatalf("secret api_key cell must not carry value: %+v", apiKeyDev)
+	}
+	regionDev := findEnvCell(t, got.EnvCells, "development", "region")
+	if regionDev.Value != "ap-southeast" {
+		t.Fatalf("plain region development cell = %+v, want value ap-southeast", regionDev)
+	}
+
+	listed := h.AsOrg("acme").Get("/api/v1/dependencies/external-resources")
+	if listed.Code != 200 {
+		t.Fatalf("list after update: got %d body=%s", listed.Code, listed.Body.String())
+	}
+	var views []gen.ExternalResourceDTO
+	if err := json.Unmarshal(listed.Body.Bytes(), &views); err != nil {
+		t.Fatalf("list body: %v", err)
+	}
+	if len(views) != 1 {
+		t.Fatalf("list after update = %+v, want one stripe row", views)
+	}
+	listedStripe := views[0]
+	if listedStripe.Description != "Stripe payments (updated)" || listedStripe.ConsumptionInstructions != "Use the secret as Bearer. Rotate quarterly." {
+		t.Fatalf("list metadata = %+v", listedStripe)
+	}
+	if findEnvCell(t, listedStripe.EnvCells, "development", "api_key").Value != "" {
+		t.Fatalf("list secret cell leaked value: %+v", listedStripe.EnvCells)
+	}
+	if findEnvCell(t, listedStripe.EnvCells, "development", "region").Value != "ap-southeast" {
+		t.Fatalf("list region cell = %+v, want ap-southeast", listedStripe.EnvCells)
+	}
+}
+
+func TestProvisioningComponent_UpdateExternalResource_400KeyMutation(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		mut  func(*gen.RegisterExternalResourceJSONRequestBody)
+	}{
+		{
+			name: "add key",
+			mut: func(body *gen.RegisterExternalResourceJSONRequestBody) {
+				body.Config = append(body.Config, gen.ConfigKeyDTO{Key: "mode", Description: "Charge mode", Secret: false})
+				body.EnvValues = append(body.EnvValues,
+					envValue("development", "mode", "live"),
+					envValue("staging-local", "mode", "test"),
+				)
+			},
+		},
+		{
+			name: "remove key",
+			mut: func(body *gen.RegisterExternalResourceJSONRequestBody) {
+				body.Config = body.Config[:1]
+				body.EnvValues = []struct {
+					Environment string `json:"environment"`
+					Key         string `json:"key"`
+					Value       string `json:"value"`
+				}{
+					envValue("development", "api_key", "sk_live"),
+					envValue("staging-local", "api_key", "sk_test"),
+				}
+			},
+		},
+		{
+			name: "rename key",
+			mut: func(body *gen.RegisterExternalResourceJSONRequestBody) {
+				body.Config[0].Key = "secret_key"
+				body.EnvValues = []struct {
+					Environment string `json:"environment"`
+					Key         string `json:"key"`
+					Value       string `json:"value"`
+				}{
+					envValue("development", "secret_key", "sk_live"),
+					envValue("development", "region", "us"),
+					envValue("staging-local", "secret_key", "sk_test"),
+					envValue("staging-local", "region", "eu"),
+				}
+			},
+		},
+		{
+			name: "flip secret",
+			mut: func(body *gen.RegisterExternalResourceJSONRequestBody) {
+				body.Config[1].Secret = true
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			h := newRegisterHarness(t, &cRTCatalog{}, &cValuePlane{})
+			reg := h.AsOrg("acme").Post("/api/v1/dependencies/external-resources", mustJSON(t, registerBody()))
+			if reg.Code != 201 {
+				t.Fatalf("register: want 201, got %d body=%s", reg.Code, reg.Body.String())
+			}
+			body := registerBody()
+			tc.mut(&body)
+			resp := h.AsOrg("acme").Put("/api/v1/dependencies/external-resources/stripe", mustJSON(t, body))
+			if resp.Code != 400 {
+				t.Fatalf("key mutation %q: want 400, got %d body=%s", tc.name, resp.Code, resp.Body.String())
+			}
+			e := componenttest.DecodeEnvelope(t, resp.Body.String())
+			if e.Code != "bad_request" {
+				t.Fatalf("400 envelope = %+v", e)
+			}
+			if strings.Contains(e.Message, "not implemented") {
+				t.Fatalf("want a key-identity 400, got stub: %+v", e)
+			}
+		})
+	}
+}
+
+func TestProvisioningComponent_UpdateExternalResource_409ProjectExternal(t *testing.T) {
+	t.Parallel()
+	h := newRegisterHarness(t, &cRTCatalog{defs: []openchoreo.ExternalResourceDefinition{
+		{
+			Name: "github",
+			Config: []openchoreo.ExternalResourceConfigKey{
+				{Key: "token", Secret: true},
+			},
+		},
+	}}, &cValuePlane{})
+
+	resp := h.AsOrg("acme").Put("/api/v1/dependencies/external-resources/github", mustJSON(t, registerBody()))
+	if resp.Code != 409 {
+		t.Fatalf("project external update: want 409, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	e := componenttest.DecodeEnvelope(t, resp.Body.String())
+	if e.Code != "conflict" {
+		t.Fatalf("409 envelope = %+v", e)
+	}
+}
+
+func TestProvisioningComponent_UpdateExternalResource_404Unknown(t *testing.T) {
+	t.Parallel()
+	h := newRegisterHarness(t, &cRTCatalog{}, &cValuePlane{})
+
+	resp := h.AsOrg("acme").Put("/api/v1/dependencies/external-resources/no-such", mustJSON(t, registerBody()))
+	if resp.Code != 404 {
+		t.Fatalf("unknown update: want 404, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	e := componenttest.DecodeEnvelope(t, resp.Body.String())
+	if e.Code != "not_found" {
+		t.Fatalf("404 envelope = %+v", e)
+	}
+}
+
+func TestProvisioningComponent_UpdateExternalResource_NonSecretPrefillRoundTrip(t *testing.T) {
+	t.Parallel()
+	h := newRegisterHarness(t, &cRTCatalog{}, &cValuePlane{})
+
+	reg := h.AsOrg("acme").Post("/api/v1/dependencies/external-resources", mustJSON(t, registerBody()))
+	if reg.Code != 201 {
+		t.Fatalf("register: want 201, got %d body=%s", reg.Code, reg.Body.String())
+	}
+
+	listed := h.AsOrg("acme").Get("/api/v1/dependencies/external-resources")
+	if listed.Code != 200 {
+		t.Fatalf("list after register: got %d body=%s", listed.Code, listed.Body.String())
+	}
+	var before []gen.ExternalResourceDTO
+	if err := json.Unmarshal(listed.Body.Bytes(), &before); err != nil {
+		t.Fatalf("list body: %v", err)
+	}
+	if len(before) != 1 {
+		t.Fatalf("list after register = %+v, want stripe", before)
+	}
+	if findEnvCell(t, before[0].EnvCells, "development", "region").Value != "us" {
+		t.Fatalf("prefill region = %+v, want us", before[0].EnvCells)
+	}
+
+	body := registerBody()
+	for i := range body.EnvValues {
+		if body.EnvValues[i].Key == "region" && body.EnvValues[i].Environment == "development" {
+			body.EnvValues[i].Value = "ap"
+		}
+	}
+	resp := h.AsOrg("acme").Put("/api/v1/dependencies/external-resources/stripe", mustJSON(t, body))
+	if resp.Code != 200 {
+		t.Fatalf("update: want 200, got %d body=%s", resp.Code, resp.Body.String())
+	}
+
+	after := h.AsOrg("acme").Get("/api/v1/dependencies/external-resources")
+	if after.Code != 200 {
+		t.Fatalf("list after update: got %d body=%s", after.Code, after.Body.String())
+	}
+	var views []gen.ExternalResourceDTO
+	if err := json.Unmarshal(after.Body.Bytes(), &views); err != nil {
+		t.Fatalf("list body: %v", err)
+	}
+	if len(views) != 1 {
+		t.Fatalf("list after update = %+v, want stripe", views)
+	}
+	if findEnvCell(t, views[0].EnvCells, "development", "region").Value != "ap" {
+		t.Fatalf("round-trip region = %+v, want ap", views[0].EnvCells)
+	}
+	for _, c := range views[0].EnvCells {
+		if c.Key == "api_key" && c.Value != "" {
+			t.Fatalf("secret cell must not carry value: %+v", c)
+		}
+	}
+}
+
 // CollectExternalResourceValues / SaveValues is the project value plane.
 // POST .../values must not populate org catalog envCells.
 func TestProvisioningComponent_CollectValues_DoesNotCreateOrgEnvCells(t *testing.T) {

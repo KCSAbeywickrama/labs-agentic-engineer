@@ -261,6 +261,58 @@ paths:
       tags:
       - Dependencies
   /dependencies/external-resources/{name}:
+    put:
+      operationId: update-external-resource
+      parameters:
+      - description: External resource name
+        in: path
+        name: name
+        required: true
+        schema:
+          description: External resource name
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterExternalResourceRequest'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExternalResourceDTO'
+          description: Updated Registered External resource (envCells populated; secrets never echoed)
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Key mutation, unset secret with empty value, missing required field, empty non-secret env value, or invalid resource-docs URL
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Name is not in the catalog
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Name is a Project External resource (no org value plane)
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Error
+      security:
+      - userJWT: []
+      summary: Update a Registered External resource
+      tags:
+      - Dependencies
     delete:
       operationId: delete-external-resource
       parameters:

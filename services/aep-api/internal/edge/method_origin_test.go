@@ -143,6 +143,7 @@ var opOwner = map[string]string{
 	"SyncSkills":                    embedSpec,
 	"TriggerBuild":                  embedProjects,
 	"UpdateComponentConfig":         embedProjects,
+	"UpdateExternalResource":        embedDependencies,
 	"UpdateConfig":                  embedOrganization,
 	"UpdateSkill":                   embedSpec,
 	"ValidateCollabAccess":          embedSpec,

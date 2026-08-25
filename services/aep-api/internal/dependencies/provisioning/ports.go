@@ -78,13 +78,14 @@ type RepoLocator interface {
 }
 
 // ExternalRTCatalog is the org-namespaced OpenChoreo ResourceType-backed
-// external-resource registry the org-settings list+delete+register surface
-// (ListExternalResources / DeleteExternalResource / RegisterExternalResource)
-// reads and writes: List reconstructs each provisioned external's definition
-// off its authored RT (deduped to the newest schema-version RT per name);
-// Ensure get-or-creates the RT (no project Resource instance); Delete removes
-// every RT registered under a logical name (more than one schema-version RT
-// can carry the same name — see openchoreo.ExternalResourceRTName).
+// external-resource registry the org-settings list+delete+register+update
+// surface (ListExternalResources / DeleteExternalResource /
+// RegisterExternalResource / UpdateExternalResource) reads and writes: List
+// reconstructs each provisioned external's definition off its authored RT
+// (deduped to the newest schema-version RT per name); Ensure get-or-creates
+// the RT (no project Resource instance); Delete removes every RT registered
+// under a logical name (more than one schema-version RT can carry the same
+// name — see openchoreo.ExternalResourceRTName).
 // *dependencies.ExternalResourceCatalog satisfies it. The provision/value-
 // collection paths build their RT-authoring definition straight off the
 // project's committed design (build_provision.go / value_service.go), never
