@@ -56,8 +56,8 @@ function stripeSeedUpdateBody(
     envValues: [
       { environment: "development", key: "api_key", value: "" },
       { environment: "development", key: "region", value: "us" },
-      { environment: "production", key: "api_key", value: "sk_prod" },
-      { environment: "production", key: "region", value: "eu" },
+      { environment: "staging-local", key: "api_key", value: "sk_stg" },
+      { environment: "staging-local", key: "region", value: "eu" },
     ],
     resourceDocs: [
       { type: "openapi", url: "https://example.com/stripe/openapi.yaml" },
@@ -181,8 +181,8 @@ describe("PUT /dependencies/external-resources/{name}", () => {
           envValues: [
             { environment: "development", key: "api_key", value: "" },
             { environment: "development", key: "region", value: "us" },
-            { environment: "production", key: "api_key", value: "" },
-            { environment: "production", key: "region", value: "eu" },
+            { environment: "staging-local", key: "api_key", value: "" },
+            { environment: "staging-local", key: "region", value: "eu" },
           ],
         }),
       ),
@@ -190,6 +190,37 @@ describe("PUT /dependencies/external-resources/{name}", () => {
     expect(res.status).toBe(400);
     const err = (await res.json()) as ApiError;
     expect(err.code).toBe("bad_request");
+  });
+
+  it("emits the org-env matrix and drops production cells when the body only has org rows", async () => {
+    setScenario("some");
+    const res = await fetch(updateUrl("stripe"), {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(
+        stripeSeedUpdateBody({
+          envValues: [
+            { environment: "development", key: "api_key", value: "" },
+            { environment: "development", key: "region", value: "us" },
+            { environment: "staging-local", key: "api_key", value: "sk_stg" },
+            { environment: "staging-local", key: "region", value: "eu" },
+          ],
+        }),
+      ),
+    });
+    expect(res.status).toBe(200);
+    const updated = (await res.json()) as ExternalResourceDTO;
+    const envs = new Set((updated.envCells ?? []).map((c) => c.environment));
+    expect(envs.has("production")).toBe(false);
+    expect(envs.has("staging-local")).toBe(true);
+    expect(findCell(updated.envCells, "development", "api_key")?.status).toBe(
+      "configured",
+    );
+    expect(findCell(updated.envCells, "development", "api_key")?.value).toBeUndefined();
+    expect(findCell(updated.envCells, "staging-local", "api_key")?.status).toBe(
+      "configured",
+    );
+    expect(findCell(updated.envCells, "staging-local", "region")?.value).toBe("eu");
   });
 
   it("replaces a non-secret envCells value from the body", async () => {
@@ -202,8 +233,8 @@ describe("PUT /dependencies/external-resources/{name}", () => {
           envValues: [
             { environment: "development", key: "api_key", value: "" },
             { environment: "development", key: "region", value: "ap" },
-            { environment: "production", key: "api_key", value: "sk_prod" },
-            { environment: "production", key: "region", value: "eu" },
+            { environment: "staging-local", key: "api_key", value: "sk_stg" },
+            { environment: "staging-local", key: "region", value: "eu" },
           ],
         }),
       ),

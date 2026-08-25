@@ -199,55 +199,58 @@ export const marketplaceHandlers = [
       );
     }
 
-    const secretKeys = new Set(
-      body.config.filter((k) => k.secret === true).map((k) => k.key),
-    );
     const submitted = new Map<string, string>();
     for (const row of body.envValues) {
       submitted.set(`${row.environment}:${row.key}`, row.value);
     }
+    const currentByEnvKey = new Map<string, EnvValueCellDTO>();
+    for (const cell of current.envCells) {
+      currentByEnvKey.set(`${cell.environment}:${cell.key}`, cell);
+    }
 
     const envCells: EnvValueCellDTO[] = [];
-    for (const cell of current.envCells) {
-      const id = `${cell.environment}:${cell.key}`;
-      const value = submitted.get(id);
-      const empty = value === undefined || value.trim() === "";
-      const isSecret = secretKeys.has(cell.key);
-      if (isSecret && empty) {
-        if (cell.status !== "configured") {
+    for (const env of seedOrgEnvironments.map((e) => e.name)) {
+      for (const cfg of body.config) {
+        const id = `${env}:${cfg.key}`;
+        const value = submitted.get(id);
+        const empty = value === undefined || value.trim() === "";
+        const currentCell = currentByEnvKey.get(id);
+        if (cfg.secret && empty) {
+          if (currentCell?.status !== "configured") {
+            return errorJson(
+              {
+                code: "bad_request",
+                message: `missing env value for key ${cfg.key} in environment ${env}`,
+              },
+              400,
+            );
+          }
+          envCells.push({
+            environment: env,
+            key: cfg.key,
+            status: "configured",
+          });
+          continue;
+        }
+        if (empty) {
           return errorJson(
             {
               code: "bad_request",
-              message: `missing env value for key ${cell.key} in environment ${cell.environment}`,
+              message: `missing env value for key ${cfg.key} in environment ${env}`,
             },
             400,
           );
         }
-        envCells.push({
-          environment: cell.environment,
-          key: cell.key,
+        const next: EnvValueCellDTO = {
+          environment: env,
+          key: cfg.key,
           status: "configured",
-        });
-        continue;
+        };
+        if (!cfg.secret) {
+          next.value = value;
+        }
+        envCells.push(next);
       }
-      if (empty) {
-        return errorJson(
-          {
-            code: "bad_request",
-            message: `missing env value for key ${cell.key} in environment ${cell.environment}`,
-          },
-          400,
-        );
-      }
-      const next: EnvValueCellDTO = {
-        environment: cell.environment,
-        key: cell.key,
-        status: "configured",
-      };
-      if (!isSecret) {
-        next.value = value;
-      }
-      envCells.push(next);
     }
 
     const updated: ExternalResourceDTO = {
