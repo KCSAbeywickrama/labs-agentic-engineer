@@ -412,7 +412,7 @@ func TestProvisioningComponent_ListExternalResources(t *testing.T) {
 	if regionDev == nil || regionDev.Value != "us" {
 		t.Fatalf("plain region development cell = %+v, want value us", regionDev)
 	}
-	if len(stripe.ResourceDocs) != 1 || stripe.ResourceDocs[0].Type != gen.Openapi || stripe.ResourceDocs[0].URL != "https://example.com/openapi.yaml" {
+	if len(stripe.ResourceDocs) != 1 || stripe.ResourceDocs[0].Type != gen.ResourceDocPointerDTOTypeOpenapi || stripe.ResourceDocs[0].URL != "https://example.com/openapi.yaml" {
 		t.Errorf("resourceDocs = %+v", stripe.ResourceDocs)
 	}
 	if len(stripe.Instances) != 1 || stripe.Instances[0].Project != "shop" || stripe.Instances[0].Environment != "development" || stripe.Instances[0].Status != "Ready" {
@@ -953,8 +953,8 @@ func registerBody() gen.RegisterExternalResourceJSONRequestBody {
 			{Environment: "staging-local", Key: "api_key", Value: "sk_test"},
 			{Environment: "staging-local", Key: "region", Value: "eu"},
 		},
-		ResourceDocs: []gen.ResourceDocPointerDTO{
-			{Type: gen.Openapi, URL: "https://example.com/stripe/openapi.yaml"},
+		ResourceDocs: []gen.ResourceDocWriteDTO{
+			{Type: gen.ResourceDocWriteDTOTypeOpenapi, URL: "https://example.com/stripe/openapi.yaml"},
 		},
 	}
 }
@@ -1030,7 +1030,7 @@ func TestProvisioningComponent_RegisterExternalResource_201(t *testing.T) {
 	if apiKeyDev == nil {
 		t.Fatal("want an api_key development cell")
 	}
-	if len(got.ResourceDocs) != 1 || got.ResourceDocs[0].Type != gen.Openapi || got.ResourceDocs[0].URL != "https://example.com/stripe/openapi.yaml" {
+	if len(got.ResourceDocs) != 1 || got.ResourceDocs[0].Type != gen.ResourceDocPointerDTOTypeOpenapi || got.ResourceDocs[0].URL != "https://example.com/stripe/openapi.yaml" {
 		t.Errorf("resourceDocs = %+v", got.ResourceDocs)
 	}
 
@@ -1180,8 +1180,8 @@ func keepIfEmptyUpdateBody() gen.RegisterExternalResourceJSONRequestBody {
 		envValue("staging-local", "api_key", ""),
 		envValue("staging-local", "region", "eu"),
 	}
-	body.ResourceDocs = []gen.ResourceDocPointerDTO{
-		{Type: gen.Openapi, URL: "https://example.com/stripe/openapi-v2.yaml"},
+	body.ResourceDocs = []gen.ResourceDocWriteDTO{
+		{Type: gen.ResourceDocWriteDTOTypeOpenapi, URL: "https://example.com/stripe/openapi-v2.yaml"},
 	}
 	return body
 }

@@ -169,7 +169,7 @@ func (s *Service) validateRegisterRequest(ctx context.Context, orgID string, req
 	return name, keys, docs, envNames, valueByEnvKey, nil
 }
 
-func validateResourceDocPointers(in []gen.ResourceDocPointerDTO) ([]openchoreo.ResourceDoc, error) {
+func validateResourceDocPointers(in []gen.ResourceDocWriteDTO) ([]openchoreo.ResourceDoc, error) {
 	if len(in) == 0 {
 		return nil, nil
 	}
