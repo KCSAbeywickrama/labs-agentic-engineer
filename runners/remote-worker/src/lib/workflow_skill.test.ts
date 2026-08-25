@@ -185,6 +185,7 @@ const REFERENCE_RULES: Record<string, string[]> = {
     // for the name at all — and the skill forbids inventing one.
     "**An endpoint dependency's env var is always `<DEP_NAME>_URL`**",
     "**a pinned contract wins when there is one**",
+    "external-dependency-research.md",
     "delete anything under the repo-root `specs/`",
   ],
   "workload-and-wiring.md": [
@@ -210,6 +211,51 @@ for (const [file, rules] of Object.entries(REFERENCE_RULES)) {
     }
   });
 }
+
+// Ticket 08: design reuses a Registered External resource; coding researches
+// from its pointers. Each rule lives in one skill — architecture must not
+// paste the coding procedure, and the research file must not restate the
+// design-time name choice.
+const ARCHITECTURE = path.join(LIBRARY, "architecture", "SKILL.md");
+const RESEARCH = path.join(LIBRARY, "aep", "references", "external-dependency-research.md");
+
+test("architecture description still triggers on resolving a dependency", () => {
+  const skill = fs.readFileSync(ARCHITECTURE, "utf8");
+  const frontmatter = skill.slice(0, skill.indexOf("\n---", 4));
+  assert.match(frontmatter, /resolving\/reconsidering any dependency/);
+});
+
+test("architecture prefers a Registered External resource over a new-name Project External", () => {
+  const skill = fs.readFileSync(ARCHITECTURE, "utf8");
+  assert.ok(skill.includes("Registered External resource"), "lost Registered External resource");
+  assert.ok(skill.includes("Project External resource"), "lost Project External resource");
+  assert.ok(skill.includes("consumption instructions"), "list_external_resources returns consumption instructions");
+  assert.ok(skill.includes("org resource docs"), "list_external_resources returns org resource docs pointers");
+  assert.ok(skill.includes("**new** name"), "a Project External resource uses a new name");
+  assert.ok(skill.includes("org values stay on the Registered name"), "org values stay on the Registered name");
+});
+
+test("architecture does not paste the coding research procedure", () => {
+  const skill = fs.readFileSync(ARCHITECTURE, "utf8");
+  assert.ok(!skill.includes("external-dependency-research.md"), "coding procedure belongs in aep references");
+  assert.ok(!skill.includes("vendor's own quickstart"), "sdk quickstart is the coding research procedure");
+});
+
+test("external-dependency-research reads Registered consumption instructions and org resource docs", () => {
+  const research = fs.readFileSync(RESEARCH, "utf8");
+  assert.ok(research.includes("Registered External resource"));
+  assert.ok(research.includes("consumption instructions"));
+  assert.ok(research.includes("org resource docs"));
+  assert.ok(
+    !research.includes("there is no catalog to read it out of"),
+    "Registered External resources carry consumption instructions and org resource docs",
+  );
+  assert.ok(!research.includes("list_external_resources"), "MCP list is design-time; coding does not call it");
+  assert.ok(
+    !research.includes("org values stay on the Registered name"),
+    "the design-time name choice belongs in architecture",
+  );
+});
 
 // A subagent gets its contract from its PROMPT, so the fan-out section is the one
 // place the reference can be introduced. If this pointer goes, every subagent
