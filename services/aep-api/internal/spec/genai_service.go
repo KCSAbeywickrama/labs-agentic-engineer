@@ -330,39 +330,22 @@ func (s *Service) StartTurn(ctx context.Context, orgID, projectID string, in Tur
 	ws := s.git.Workspace()
 
 	// Workspace + skills snapshots. Real projects resolve their git row; the
-	// synthetic Marketplace register project has none — we dual-materialize
-	// the org _skills commit at the agents project snapshot path instead
-	// (controller ruling: no GitHub / git_repositories row for that id).
+	// synthetic Marketplace register project has none — we rewrite a skills
+	// RepoRef onto the agents project snapshot path instead (controller
+	// ruling: no GitHub / git_repositories row for that id). Skills resolve +
+	// dual Ensure are shared below so error/Ensure changes cannot drift.
 	var (
 		ref              sourcecontrol.RepoRef
 		baseRef          string
-		skillsRef        string
 		nsConversationID string
+		skillsCred       secrets.Credential
 	)
 	if isMarketplaceRegisterProject(projectID) {
 		cred, err := s.git.Resolver().Resolve(ctx, orgID)
 		if err != nil {
 			return "", fmt.Errorf("resolve credential: %w", err)
 		}
-		skillsRow, err := s.skillsRepo(ctx, orgID)
-		if err != nil {
-			return "", fmt.Errorf("%w: resolve repo row: %w", ErrSkillsRepoUnavailable, err)
-		}
-		skillsRepoRef := sourcecontrol.WorkspaceRefFor(orgID, skillsRow, cred)
-		skillsRef, err = ws.Head(ctx, skillsRepoRef, "")
-		if err != nil {
-			return "", fmt.Errorf("%w: resolve head: %w", ErrSkillsRepoUnavailable, err)
-		}
-		ref = skillsRepoRef
-		ref.ProjectID = MarketplaceRegisterProjectID
-		ref.RepoSlug = marketplaceRegisterRepoSlug
-		baseRef = skillsRef
-		if err := s.snapshots.Ensure(ctx, ref, baseRef); err != nil {
-			return "", fmt.Errorf("ensure repo snapshot: %w", err)
-		}
-		if err := s.snapshots.Ensure(ctx, skillsRepoRef, skillsRef); err != nil {
-			return "", fmt.Errorf("ensure skills snapshot: %w", err)
-		}
+		skillsCred = cred
 		nsConversationID = agentsvc.ConversationID(orgID, projectID, useCaseGeneral, in.ConversationID)
 	} else {
 		repo, err := s.resolveRepo(ctx, orgID, projectID)
@@ -377,22 +360,30 @@ func (s *Service) StartTurn(ctx context.Context, orgID, projectID string, in Tur
 		if err != nil {
 			return "", fmt.Errorf("resolve base ref: %w", err)
 		}
-		skillsRow, err := s.skillsRepo(ctx, orgID)
-		if err != nil {
-			return "", fmt.Errorf("%w: resolve repo row: %w", ErrSkillsRepoUnavailable, err)
-		}
-		skillsRepoRef := sourcecontrol.WorkspaceRefFor(orgID, skillsRow, ref.Cred)
-		skillsRef, err = ws.Head(ctx, skillsRepoRef, "")
-		if err != nil {
-			return "", fmt.Errorf("%w: resolve head: %w", ErrSkillsRepoUnavailable, err)
-		}
-		if err := s.snapshots.Ensure(ctx, ref, baseRef); err != nil {
-			return "", fmt.Errorf("ensure repo snapshot: %w", err)
-		}
-		if err := s.snapshots.Ensure(ctx, skillsRepoRef, skillsRef); err != nil {
-			return "", fmt.Errorf("ensure skills snapshot: %w", err)
-		}
+		skillsCred = ref.Cred
 		nsConversationID = namespacedID(repo, useCaseGeneral, in.ConversationID)
+	}
+
+	skillsRow, err := s.skillsRepo(ctx, orgID)
+	if err != nil {
+		return "", fmt.Errorf("%w: resolve repo row: %w", ErrSkillsRepoUnavailable, err)
+	}
+	skillsRepoRef := sourcecontrol.WorkspaceRefFor(orgID, skillsRow, skillsCred)
+	skillsRef, err := ws.Head(ctx, skillsRepoRef, "")
+	if err != nil {
+		return "", fmt.Errorf("%w: resolve head: %w", ErrSkillsRepoUnavailable, err)
+	}
+	if isMarketplaceRegisterProject(projectID) {
+		ref = skillsRepoRef
+		ref.ProjectID = MarketplaceRegisterProjectID
+		ref.RepoSlug = marketplaceRegisterRepoSlug
+		baseRef = skillsRef
+	}
+	if err := s.snapshots.Ensure(ctx, ref, baseRef); err != nil {
+		return "", fmt.Errorf("ensure repo snapshot: %w", err)
+	}
+	if err := s.snapshots.Ensure(ctx, skillsRepoRef, skillsRef); err != nil {
+		return "", fmt.Errorf("ensure skills snapshot: %w", err)
 	}
 
 	// Flow recognition (#373): `/<skill>` commands arrive VERBATIM and the

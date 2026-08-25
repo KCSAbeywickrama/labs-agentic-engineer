@@ -143,8 +143,16 @@ func TestMarketplaceRegister_StartTurnWithoutProjectRepo(t *testing.T) {
 	)
 
 	current := listMarketplaceConversations(t, r)[0].ConversationID
+	skillsSHA := r.skillsOrigin.HeadSHA(t)
 
-	m := manifestPart(map[string]string{}, nil)
+	// Non-empty edit frames: on the fold path these would mutate (or fail
+	// against) the dual skills snapshot. roomMode must relay-only — same pin
+	// as TestCollabTurn_RoomScopedDispatchNoCommit.
+	r.fake.parts = []string{
+		textPart("drafting the external resource"),
+		editFilePart("requirements/requirements.md", "# Reqs\n", "# Requirements\n"),
+	}
+	m := manifestPart(map[string]string{"requirements/requirements.md": "# Requirements\n"}, nil)
 	r.fake.manifest = &m
 
 	payload, _ := json.Marshal(map[string]any{
@@ -176,8 +184,14 @@ func TestMarketplaceRegister_StartTurnWithoutProjectRepo(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	if st.Status != "completed" {
-		t.Fatalf("turn status = %q (%s), want completed", st.Status, st.Message)
+	if st.Status != "completed" || !st.NoChanges {
+		t.Fatalf("terminal = %+v, want completed no-changes (relay-only)", st)
+	}
+	if st.CommitSHA != skillsSHA {
+		t.Errorf("commitSha = %s, want skills pin %s", st.CommitSHA, skillsSHA)
+	}
+	if r.skillsOrigin.HeadSHA(t) != skillsSHA {
+		t.Error("synthetic turn must not Mutate — skills origin tip moved")
 	}
 	if n := counter.calledFor(spec.MarketplaceRegisterProjectID); n != 0 {
 		t.Fatalf("GetRepo called %d time(s) for synthetic id during StartTurn", n)
@@ -195,8 +209,8 @@ func TestMarketplaceRegister_StartTurnWithoutProjectRepo(t *testing.T) {
 		t.Errorf("ref=%q skillsRef=%q, want both equal to the skills SHA",
 			sent.req.Workspace.Ref, sent.req.Workspace.SkillsRef)
 	}
-	if sent.req.Workspace.SkillsRef != r.skillsOrigin.HeadSHA(t) {
-		t.Errorf("skillsRef = %s, want skills head %s", sent.req.Workspace.SkillsRef, r.skillsOrigin.HeadSHA(t))
+	if sent.req.Workspace.SkillsRef != skillsSHA {
+		t.Errorf("skillsRef = %s, want skills head %s", sent.req.Workspace.SkillsRef, skillsSHA)
 	}
 
 	// Empty-thread rehydrate on the synthetic id (agents store 404).
