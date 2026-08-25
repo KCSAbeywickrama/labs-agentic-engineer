@@ -96,6 +96,7 @@ export const seedExternalResources: ExternalResourceDTO[] = [
     envCells: stripeEnvCells,
     resourceDocs: [
       { type: "openapi", url: "https://example.com/stripe/openapi.yaml" },
+      { type: "documentation", path: "stripe/README.md" },
     ],
     instances: [
       { project: "demo-shop", environment: "development", status: "Ready" },

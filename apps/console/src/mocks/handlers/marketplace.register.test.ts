@@ -211,4 +211,53 @@ describe("POST /dependencies/external-resources", () => {
     expect(listed.map((r) => r.name)).toEqual(["stripe", "github", "twilio"]);
     expect(seedExternalResources).toHaveLength(seedLen);
   });
+
+  it("POST fileName+content returns a path pointer and never content", async () => {
+    setScenario("empty");
+    const res = await fetch(EXTERNAL, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(
+        registerBody({
+          resourceDocs: [
+            {
+              type: "documentation",
+              fileName: "README.md",
+              content: "# Twilio\n",
+            },
+          ],
+        }),
+      ),
+    });
+    expect(res.status).toBe(201);
+    const raw = await res.text();
+    expect(raw).not.toContain('"content"');
+    expect(raw).not.toContain("# Twilio");
+    const created = JSON.parse(raw) as ExternalResourceDTO;
+    expect(created.resourceDocs).toEqual([
+      { type: "documentation", path: "twilio/README.md" },
+    ]);
+  });
+
+  it("POST both url and content returns 400", async () => {
+    setScenario("empty");
+    const res = await fetch(EXTERNAL, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(
+        registerBody({
+          resourceDocs: [
+            {
+              type: "openapi",
+              url: "https://example.com/openapi.yaml",
+              content: "# nope\n",
+            },
+          ],
+        }),
+      ),
+    });
+    expect(res.status).toBe(400);
+    const err = (await res.json()) as ApiError;
+    expect(err.code).toBe("bad_request");
+  });
 });

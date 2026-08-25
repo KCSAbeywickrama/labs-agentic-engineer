@@ -27,7 +27,6 @@ import {
   Divider,
   FormControlLabel,
   IconButton,
-  MenuItem,
   PageContent,
   Stack,
   TextField,
@@ -45,17 +44,16 @@ import {
   useUpdateExternalResource,
 } from "../api/queries";
 import { isRegisteredExternal } from "../kind";
+import {
+  rowsFromPointers,
+  writesFromRows,
+  ResourceDocsFields,
+  type ResourceDocRow,
+} from "./ResourceDocsFields";
 
 type ConfigKeyDTO = components["schemas"]["ConfigKeyDTO"];
 type EnvValueCellDTO = components["schemas"]["EnvValueCellDTO"];
 type ExternalResourceDTO = components["schemas"]["ExternalResourceDTO"];
-type ResourceDocPointerDTO = components["schemas"]["ResourceDocPointerDTO"];
-type DocType = ResourceDocPointerDTO["type"];
-
-type DocRow = {
-  type: DocType;
-  url: string;
-};
 
 const KEEP_SECRET_HELPER = "Leave blank to keep the current value";
 
@@ -66,15 +64,6 @@ function slugFrom(prompt: string): string {
     .replace(/^-|-$/g, "")
     .slice(0, 32);
   return slug || "resource";
-}
-
-function pointersFromRows(rows: DocRow[]): ResourceDocPointerDTO[] {
-  const minted: ResourceDocPointerDTO[] = [];
-  for (const row of rows) {
-    const url = row.url.trim();
-    if (url) minted.push({ type: row.type, url });
-  }
-  return minted;
 }
 
 function envFieldLabel(environment: string, key: string): string {
@@ -102,7 +91,7 @@ function prefillFrom(record: ExternalResourceDTO): {
   consumptionInstructions: string;
   keys: ConfigKeyDTO[];
   values: Record<string, string>;
-  docs: DocRow[];
+  docs: ResourceDocRow[];
 } {
   const keys = (record.config ?? []).map((k) => ({
     key: k.key,
@@ -116,17 +105,13 @@ function prefillFrom(record: ExternalResourceDTO): {
       ? ""
       : (cell.value ?? "");
   }
-  const docs: DocRow[] = [];
-  for (const doc of record.resourceDocs ?? []) {
-    if (doc.url) docs.push({ type: doc.type, url: doc.url });
-  }
   return {
     name: record.name,
     description: record.description ?? "",
     consumptionInstructions: record.consumptionInstructions ?? "",
     keys,
     values,
-    docs,
+    docs: rowsFromPointers(record.resourceDocs ?? []),
   };
 }
 
@@ -155,7 +140,7 @@ export function RegisterFormPage({
     isEdit ? [] : [{ key: "API_KEY", description: "API secret", secret: true }],
   );
   const [values, setValues] = useState<Record<string, string>>({});
-  const [docs, setDocs] = useState<DocRow[]>([]);
+  const [docs, setDocs] = useState<ResourceDocRow[]>([]);
   const [prefilledName, setPrefilledName] = useState<string | null>(null);
 
   useEffect(() => {
@@ -211,7 +196,7 @@ export function RegisterFormPage({
   const submitPending = isEdit ? update.isPending : register.isPending;
 
   const submit = () => {
-    const resourceDocs = pointersFromRows(docs);
+    const resourceDocs = writesFromRows(docs);
     const body = {
       name: name.trim(),
       description: description.trim(),
@@ -443,87 +428,7 @@ export function RegisterFormPage({
             fullWidth
           />
 
-        <Box>
-          <Stack direction="row" sx={{ justifyContent: "space-between", mb: 0.5 }}>
-            <Typography variant="subtitle1">Resource docs</Typography>
-            <Button
-              size="small"
-              startIcon={<Plus size={14} />}
-              onClick={() =>
-                setDocs((prev) => [
-                  ...prev,
-                  { type: "documentation", url: "" },
-                ])
-              }
-            >
-              Add doc
-            </Button>
-          </Stack>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-            Optional. Each doc is a URL pointer — type plus URL.
-          </Typography>
-          {docs.length === 0 ? (
-            <Typography variant="body2" color="text.secondary">
-              No docs yet. Add a spec or documentation if agents should read one.
-            </Typography>
-          ) : (
-            <Stack spacing={2}>
-              {docs.map((doc, index) => (
-                <Stack
-                  key={index}
-                  direction="row"
-                  spacing={1}
-                  sx={{ alignItems: "center" }}
-                >
-                  <TextField
-                    select
-                    size="small"
-                    label="Type"
-                    value={doc.type}
-                    onChange={(e) =>
-                      setDocs((prev) =>
-                        prev.map((row, i) =>
-                          i === index
-                            ? { ...row, type: e.target.value as DocType }
-                            : row,
-                        ),
-                      )
-                    }
-                    sx={{ width: 168, flexShrink: 0 }}
-                  >
-                    <MenuItem value="documentation">Documentation</MenuItem>
-                    <MenuItem value="openapi">OpenAPI</MenuItem>
-                    <MenuItem value="graphql">GraphQL</MenuItem>
-                    <MenuItem value="asyncapi">AsyncAPI</MenuItem>
-                    <MenuItem value="protobuf">Protobuf</MenuItem>
-                  </TextField>
-                  <TextField
-                    size="small"
-                    label="URL"
-                    value={doc.url}
-                    onChange={(e) =>
-                      setDocs((prev) =>
-                        prev.map((row, i) =>
-                          i === index ? { ...row, url: e.target.value } : row,
-                        ),
-                      )
-                    }
-                    placeholder="https://"
-                    sx={{ flex: 1, minWidth: 0 }}
-                  />
-                  <IconButton
-                    aria-label="Remove doc"
-                    onClick={() =>
-                      setDocs((prev) => prev.filter((_, i) => i !== index))
-                    }
-                  >
-                    <Trash2 size={16} />
-                  </IconButton>
-                </Stack>
-              ))}
-            </Stack>
-          )}
-        </Box>
+        <ResourceDocsFields docs={docs} onChange={setDocs} />
 
         <Stack direction="row" spacing={2} sx={{ justifyContent: "flex-end" }}>
           <Button onClick={() => void navigate({ to: "/resources" })}>
