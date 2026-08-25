@@ -65,6 +65,31 @@ vi.mock("../api/queries", () => ({
   useExternalResources: () => resourcesState,
 }));
 
+vi.mock("../../../auth/SessionContext", () => ({
+  useSession: () => ({
+    user: { name: "Test", email: "t@example.com" },
+    orgHandle: "acme",
+    signOut: vi.fn(),
+  }),
+}));
+
+vi.mock("../../agent-chat/components/AgentChatPanel", () => ({
+  AgentChatPanel: ({ onClose }: { onClose: () => void }) => (
+    <div data-testid="agent-chat-panel">
+      <button type="button" onClick={onClose}>
+        Close agent chat
+      </button>
+    </div>
+  ),
+}));
+
+import { REGISTER_EXTERNAL_RESOURCE_COMMAND } from "@aep/contracts/commands";
+import {
+  chatKeyFor,
+  consumePendingSeed,
+  peekPendingSeed,
+} from "../../agent-chat/chatStore";
+import { MARKETPLACE_CHAT_PROJECT } from "../constants";
 import { RegisterFormPage } from "./RegisterFormPage";
 
 function resetState() {
@@ -171,6 +196,7 @@ function submittedBody(): RegisterExternalResourceRequest {
 beforeEach(() => {
   vi.clearAllMocks();
   resetState();
+  consumePendingSeed(chatKeyFor("acme", MARKETPLACE_CHAT_PROJECT));
 });
 
 describe("RegisterFormPage", () => {
@@ -352,6 +378,33 @@ describe("RegisterFormPage", () => {
       { type: "documentation", fileName: "README.md", content: "# Hello\n" },
     ]);
   });
+
+  it("seeds /register-external-resource with the composer prompt on first open", () => {
+    const prompt = "Register Stripe as a payments API.";
+    render(<RegisterFormPage prompt={prompt} />);
+    const seed = peekPendingSeed(chatKeyFor("acme", MARKETPLACE_CHAT_PROJECT));
+    expect(seed).toEqual({
+      message: `${REGISTER_EXTERNAL_RESOURCE_COMMAND} ${prompt}`,
+      guarded: true,
+    });
+  });
+
+  it("opens agent chat on the register form and allows dismiss then reopen", () => {
+    render(<RegisterFormPage prompt="Register Twilio for SMS." />);
+    expect(screen.getByTestId("agent-chat-panel")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close agent chat" }));
+    expect(screen.queryByTestId("agent-chat-panel")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Open agent chat" }));
+    expect(screen.getByTestId("agent-chat-panel")).toBeInTheDocument();
+  });
+
+  it("Register stays submittable after the chat is closed", () => {
+    render(<RegisterFormPage prompt="" />);
+    fireEvent.click(screen.getByRole("button", { name: "Close agent chat" }));
+    fillRequired();
+    fireEvent.click(screen.getByRole("button", { name: "Register" }));
+    expect(registerState.mutate).toHaveBeenCalled();
+  });
 });
 
 describe("RegisterFormPage edit mode", () => {
@@ -402,5 +455,10 @@ describe("RegisterFormPage edit mode", () => {
     expect(updateState.mutate).toHaveBeenCalledTimes(1);
     expect(registerState.mutate).not.toHaveBeenCalled();
     expect(navigate).toHaveBeenCalledWith({ to: "/resources" });
+  });
+
+  it("does not seed the register command in edit mode", () => {
+    renderEdit();
+    expect(peekPendingSeed(chatKeyFor("acme", MARKETPLACE_CHAT_PROJECT))).toBeNull();
   });
 });

@@ -34,6 +34,7 @@
 
 import { http, HttpResponse } from "msw";
 import { ANSWER_PREFIX, ANSWERS_PREFIX } from "@aep/agent-stream";
+import { REGISTER_EXTERNAL_RESOURCE_COMMAND } from "@aep/contracts/commands";
 import {
   MAX_ATTACHMENT_FILES,
   MAX_ATTACHMENT_FILE_BYTES,
@@ -288,6 +289,16 @@ export const agentChatHandlers = [
       return sse([
         { type: "text-delta", delta: "Let me try that…" },
         { type: "turn-failed", message: "Mock turn failure (instruction contained 'fail')." },
+      ]);
+    }
+    if (instruction.trim().startsWith(REGISTER_EXTERNAL_RESOURCE_COMMAND)) {
+      return sse([
+        {
+          type: "text-delta",
+          delta:
+            "I'll register this as a Registered External resource. If anything is unclear I'll ask — I won't invent a schema or put secret values in the draft.",
+        },
+        { type: "turn-committed", noChanges: true },
       ]);
     }
     // Grilling scenarios (ADR-0012 / #270) — keyed on the /start flow command
