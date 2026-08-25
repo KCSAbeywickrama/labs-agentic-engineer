@@ -309,15 +309,6 @@ func (s *Service) StartTurn(ctx context.Context, orgID, projectID string, in Tur
 	if strings.TrimSpace(in.Instruction) == "" {
 		return "", ErrEmptyInstruction
 	}
-	repo, err := s.resolveRepo(ctx, orgID, projectID)
-	if err != nil {
-		return "", err
-	}
-	ref, err := sourcecontrol.ResolveWorkspaceRef(ctx, s.git.Resolver(), orgID, repo)
-	if err != nil {
-		return "", fmt.Errorf("resolve workspace ref: %w", err)
-	}
-
 	key, err := s.resolveKey(ctx, orgID)
 	if err != nil {
 		return "", err
@@ -337,9 +328,71 @@ func (s *Service) StartTurn(ctx context.Context, orgID, projectID string, in Tur
 	}
 
 	ws := s.git.Workspace()
-	baseRef, err := ws.Head(ctx, ref, "")
-	if err != nil {
-		return "", fmt.Errorf("resolve base ref: %w", err)
+
+	// Workspace + skills snapshots. Real projects resolve their git row; the
+	// synthetic Marketplace register project has none — we dual-materialize
+	// the org _skills commit at the agents project snapshot path instead
+	// (controller ruling: no GitHub / git_repositories row for that id).
+	var (
+		ref              sourcecontrol.RepoRef
+		baseRef          string
+		skillsRef        string
+		nsConversationID string
+	)
+	if isMarketplaceRegisterProject(projectID) {
+		cred, err := s.git.Resolver().Resolve(ctx, orgID)
+		if err != nil {
+			return "", fmt.Errorf("resolve credential: %w", err)
+		}
+		skillsRow, err := s.skillsRepo(ctx, orgID)
+		if err != nil {
+			return "", fmt.Errorf("%w: resolve repo row: %w", ErrSkillsRepoUnavailable, err)
+		}
+		skillsRepoRef := sourcecontrol.WorkspaceRefFor(orgID, skillsRow, cred)
+		skillsRef, err = ws.Head(ctx, skillsRepoRef, "")
+		if err != nil {
+			return "", fmt.Errorf("%w: resolve head: %w", ErrSkillsRepoUnavailable, err)
+		}
+		ref = skillsRepoRef
+		ref.ProjectID = MarketplaceRegisterProjectID
+		ref.RepoSlug = marketplaceRegisterRepoSlug
+		baseRef = skillsRef
+		if err := s.snapshots.Ensure(ctx, ref, baseRef); err != nil {
+			return "", fmt.Errorf("ensure repo snapshot: %w", err)
+		}
+		if err := s.snapshots.Ensure(ctx, skillsRepoRef, skillsRef); err != nil {
+			return "", fmt.Errorf("ensure skills snapshot: %w", err)
+		}
+		nsConversationID = agentsvc.ConversationID(orgID, projectID, useCaseGeneral, in.ConversationID)
+	} else {
+		repo, err := s.resolveRepo(ctx, orgID, projectID)
+		if err != nil {
+			return "", err
+		}
+		ref, err = sourcecontrol.ResolveWorkspaceRef(ctx, s.git.Resolver(), orgID, repo)
+		if err != nil {
+			return "", fmt.Errorf("resolve workspace ref: %w", err)
+		}
+		baseRef, err = ws.Head(ctx, ref, "")
+		if err != nil {
+			return "", fmt.Errorf("resolve base ref: %w", err)
+		}
+		skillsRow, err := s.skillsRepo(ctx, orgID)
+		if err != nil {
+			return "", fmt.Errorf("%w: resolve repo row: %w", ErrSkillsRepoUnavailable, err)
+		}
+		skillsRepoRef := sourcecontrol.WorkspaceRefFor(orgID, skillsRow, ref.Cred)
+		skillsRef, err = ws.Head(ctx, skillsRepoRef, "")
+		if err != nil {
+			return "", fmt.Errorf("%w: resolve head: %w", ErrSkillsRepoUnavailable, err)
+		}
+		if err := s.snapshots.Ensure(ctx, ref, baseRef); err != nil {
+			return "", fmt.Errorf("ensure repo snapshot: %w", err)
+		}
+		if err := s.snapshots.Ensure(ctx, skillsRepoRef, skillsRef); err != nil {
+			return "", fmt.Errorf("ensure skills snapshot: %w", err)
+		}
+		nsConversationID = namespacedID(repo, useCaseGeneral, in.ConversationID)
 	}
 
 	// Flow recognition (#373): `/<skill>` commands arrive VERBATIM and the
@@ -357,26 +410,6 @@ func (s *Service) StartTurn(ctx context.Context, orgID, projectID string, in Tur
 	// Only `/start` is rewritten, and only to append an idea the server just
 	// resolved for the same turn, so the line still describes what was sent.
 	summary := startTurnSummary(in.Instruction, turnSpec)
-
-	// Skills resolve failures are typed: both arms mean the org's _skills repo
-	// is unusable right now (row missing/unprovisionable, or the backing repo
-	// gone/unreachable — e.g. deleted externally under a lingering row). The
-	// edge maps this to a logged 503 rather than the old opaque 500.
-	skillsRow, err := s.skillsRepo(ctx, orgID)
-	if err != nil {
-		return "", fmt.Errorf("%w: resolve repo row: %w", ErrSkillsRepoUnavailable, err)
-	}
-	skillsRepoRef := sourcecontrol.WorkspaceRefFor(orgID, skillsRow, ref.Cred)
-	skillsRef, err := ws.Head(ctx, skillsRepoRef, "")
-	if err != nil {
-		return "", fmt.Errorf("%w: resolve head: %w", ErrSkillsRepoUnavailable, err)
-	}
-	if err := s.snapshots.Ensure(ctx, ref, baseRef); err != nil {
-		return "", fmt.Errorf("ensure repo snapshot: %w", err)
-	}
-	if err := s.snapshots.Ensure(ctx, skillsRepoRef, skillsRef); err != nil {
-		return "", fmt.Errorf("ensure skills snapshot: %w", err)
-	}
 
 	// D18 guard: one active turn per project, any use case.
 	// The display record rides the row itself: a client attaching to this turn
@@ -410,7 +443,7 @@ func (s *Service) StartTurn(ctx context.Context, orgID, projectID string, in Tur
 		projectID:        projectID,
 		flow:             flow,
 		conversationID:   in.ConversationID,
-		nsConversationID: namespacedID(repo, useCaseGeneral, in.ConversationID),
+		nsConversationID: nsConversationID,
 		turn:             turnSpec,
 		target:           in.Target,
 		summary:          summary,
@@ -481,14 +514,21 @@ func (s *Service) Rehydrate(ctx context.Context, orgID, projectID, conversationI
 	if !validConversationID(conversationID) {
 		return nil, ErrInvalidConversationID
 	}
-	repo, err := s.resolveRepo(ctx, orgID, projectID)
-	if err != nil {
-		return nil, err
+	var convID string
+	if isMarketplaceRegisterProject(projectID) {
+		// Synthetic register chat has no git_repositories row — build the
+		// agents tenancy id from the JWT org + path project id directly.
+		convID = agentsvc.ConversationID(orgID, projectID, useCaseGeneral, conversationID)
+	} else {
+		repo, err := s.resolveRepo(ctx, orgID, projectID)
+		if err != nil {
+			return nil, err
+		}
+		// Rehydrate is chat-only (single-turn generate flows never rehydrate). The
+		// console omits "useCase", so its turns are namespaced under useCaseGeneral;
+		// reconstruct the id under the same use case the write path stored it with.
+		convID = namespacedID(repo, useCaseGeneral, conversationID)
 	}
-	// Rehydrate is chat-only (single-turn generate flows never rehydrate). The
-	// console omits "useCase", so its turns are namespaced under useCaseGeneral;
-	// reconstruct the id under the same use case the write path stored it with.
-	convID := namespacedID(repo, useCaseGeneral, conversationID)
 	raw, err := s.client.GetConversation(ctx, convID, orgID)
 	if err != nil {
 		var ue *agentsvc.UpstreamError
