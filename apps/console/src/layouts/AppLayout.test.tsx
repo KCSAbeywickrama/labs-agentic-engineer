@@ -30,7 +30,6 @@ import { OxygenTheme, OxygenUIThemeProvider } from "@wso2/oxygen-ui";
 const PROJECT = "expense-approval";
 
 let mockPathname = `/projects/${PROJECT}`;
-let mockParams: { projectName?: string } = { projectName: PROJECT };
 let mockSearch: Record<string, unknown> = {};
 let mockParams: { projectName?: string } = { projectName: PROJECT };
 const mockNavigate = vi.fn();
@@ -87,7 +86,6 @@ const render = () =>
 beforeEach(() => {
   vi.clearAllMocks();
   mockPathname = `/projects/${PROJECT}`;
-  mockParams = { projectName: PROJECT };
   mockSearch = {};
   mockParams = { projectName: PROJECT };
 });

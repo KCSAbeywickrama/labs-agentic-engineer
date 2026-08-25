@@ -318,6 +318,24 @@ func TestExternalDefinitionFromRT_IgnoresMalformedResourceDocs(t *testing.T) {
 	}
 }
 
+func TestExternalDefinitionFromRT_DropsUnsupportedResourceDocTypes(t *testing.T) {
+	t.Parallel()
+
+	rt, err := BuildExternalResourceType("salesforce", "", []ExternalResourceConfigKey{{Key: "TOKEN", Secret: true}})
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	rt.Metadata.Annotations[resourceDocsAnnotation] = `[{"type":"openapi","url":"https://example.com/openapi.yaml"},{"type":"swagger"},{"type":""}]`
+
+	def, ok := ExternalDefinitionFromRT(rt)
+	if !ok {
+		t.Fatal("want reconstructable RT")
+	}
+	if len(def.ResourceDocs) != 1 || def.ResourceDocs[0].Type != "openapi" || def.ResourceDocs[0].URL != "https://example.com/openapi.yaml" {
+		t.Fatalf("unsupported types must be dropped, got %+v", def.ResourceDocs)
+	}
+}
+
 func TestExternalDefinitionFromRT_NotOkWhenNotSelfDescribing(t *testing.T) {
 	t.Parallel()
 

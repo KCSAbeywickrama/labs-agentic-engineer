@@ -363,6 +363,30 @@ type ResourceDoc struct {
 	Path string `json:"path,omitempty"`
 }
 
+// resourceDocTypes is the OpenAPI ResourceDocPointerDTO.type enum. Unknown
+// annotation values must not reach the list DTO.
+var resourceDocTypes = map[string]struct{}{
+	"documentation": {},
+	"openapi":       {},
+	"graphql":       {},
+	"asyncapi":      {},
+	"protobuf":      {},
+}
+
+func parseResourceDocs(raw string) []ResourceDoc {
+	var docs []ResourceDoc
+	if err := json.Unmarshal([]byte(raw), &docs); err != nil {
+		return nil
+	}
+	out := make([]ResourceDoc, 0, len(docs))
+	for _, d := range docs {
+		if _, ok := resourceDocTypes[d.Type]; ok {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
 // ExternalDefinitionFromRT recovers the external resource definition an
 // authored RT carries: the logical name + description off the
 // aep.wso2.com/external-name / aep.wso2.com/description
@@ -420,9 +444,7 @@ func ExternalDefinitionFromRT(rt *ResourceType) (def ExternalResourceDefinition,
 
 	var docs []ResourceDoc
 	if raw := rt.Metadata.Annotations[resourceDocsAnnotation]; raw != "" {
-		if err := json.Unmarshal([]byte(raw), &docs); err != nil {
-			docs = nil
-		}
+		docs = parseResourceDocs(raw)
 	}
 
 	return ExternalResourceDefinition{
