@@ -246,6 +246,13 @@ func (s *Service) authorExternalPrepared(ctx context.Context, orgID, ocOrgID, pr
 		ConfigKeys:  keys,
 	}
 	byEnv := designPreparedValues(keys)
+	registered := false
+	if s.catalogValuePlane != nil {
+		if cells := s.catalogValuePlane.EnvCells(orgID, in.Dependency); len(cells) > 0 {
+			byEnv = preparedValuesFromOrgCells(keys, cells)
+			registered = true
+		}
+	}
 
 	// External dependencies do not mint config-collection gates. When the caller
 	// supplies an existing gate, reconcile it; never discover or create one here.
@@ -273,6 +280,10 @@ func (s *Service) authorExternalPrepared(ctx context.Context, orgID, ocOrgID, pr
 		return fmt.Errorf("%w: %v", dependencies.ErrProvisionFailed, perr)
 	}
 
+	if registered {
+		recordResourceInstances(s.catalogValuePlane, orgID, projectID, in.Dependency, byEnv)
+	}
+
 	if execID != "" {
 		ref := result.BindingByEnv[defaultEnv]
 		if ref == "" {
@@ -285,6 +296,51 @@ func (s *Service) authorExternalPrepared(ctx context.Context, orgID, ocOrgID, pr
 			fmt.Sprintf("External resource `%s` configured (OC binding `%s`).", in.Dependency, ref))
 	}
 	return nil
+}
+
+// preparedValuesFromOrgCells builds AuthorPreparedValues inputs from Registered
+// org EnvCells: one entry per environment that appears on the plane, Plain
+// filled from non-secret configured cells. SecretStorePath stays empty unless
+// a future plane field stores an org-catalog vault reference (CEL already
+// lives on the ResourceType).
+func preparedValuesFromOrgCells(keys []spec.ConfigKey, cells []EnvCell) map[string]dependencies.PreparedEnvValues {
+	secret := make(map[string]bool, len(keys))
+	for _, k := range keys {
+		if k.Secret {
+			secret[k.Key] = true
+		}
+	}
+	byEnv := map[string]dependencies.PreparedEnvValues{}
+	for _, c := range cells {
+		ev := byEnv[c.Environment]
+		if ev.Plain == nil {
+			ev.Plain = map[string]string{}
+		}
+		if c.Status == "configured" && !secret[c.Key] {
+			ev.Plain[c.Key] = c.Value
+		}
+		byEnv[c.Environment] = ev
+	}
+	return byEnv
+}
+
+// recordResourceInstances merges this project's authored environments into the
+// org value plane's instance list for a Registered External resource.
+func recordResourceInstances(plane CatalogValuePlane, orgID, projectID, name string, byEnv map[string]dependencies.PreparedEnvValues) {
+	existing := plane.Instances(orgID, name)
+	keep := make([]ResourceInstance, 0, len(existing))
+	for _, inst := range existing {
+		if inst.Project == projectID {
+			if _, authored := byEnv[inst.Environment]; authored {
+				continue
+			}
+		}
+		keep = append(keep, inst)
+	}
+	for env := range byEnv {
+		keep = append(keep, ResourceInstance{Project: projectID, Environment: env})
+	}
+	plane.PutInstances(orgID, name, keep)
 }
 
 // designPreparedValues derives the only build-time authoring values the server

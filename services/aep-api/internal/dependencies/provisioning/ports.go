@@ -108,6 +108,7 @@ type CatalogValuePlane interface {
 	EnvCells(orgID, name string) []EnvCell
 	Instances(orgID, name string) []ResourceInstance
 	PutEnvCells(orgID, name string, cells []EnvCell)
+	PutInstances(orgID, name string, instances []ResourceInstance)
 }
 
 // OrgSecretWriter optionally persists Registered External secret bytes through

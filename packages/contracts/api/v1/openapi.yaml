@@ -1678,6 +1678,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/StatusMsg'
           description: OK
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Name is a Registered External resource (values live on the org record)
         default:
           content:
             application/json:

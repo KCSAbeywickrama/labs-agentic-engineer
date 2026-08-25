@@ -389,3 +389,54 @@ func gateNumber(issues *fakeIssues, depName string) int {
 	}
 	return 0
 }
+
+// TestProvisionForBuild_RegisteredExternal_AuthorsFromOrgCells: a Registered
+// External resource (non-empty EnvCells) authors the project's Resource
+// instance from org non-secret cells — not design defaults — and records the
+// instance on the value plane. No project OpenBao Provision.
+func TestProvisionForBuild_RegisteredExternal_AuthorsFromOrgCells(t *testing.T) {
+	plane := NewMemoryValuePlane()
+	plane.PutEnvCells("acme", "stripe", []EnvCell{
+		{Environment: "development", Key: "api_key", Status: "configured"},
+		{Environment: "development", Key: "region", Status: "configured", Value: "us"},
+	})
+	ext := &fakeExtProv{}
+	svc := NewService(Deps{
+		Issues:            newFakeIssues(nil),
+		Execs:             &fakeExecStore{},
+		Design:            fakeDesign{comps: designWithDeps()},
+		Repos:             fakeRepos{},
+		ExtProv:           ext,
+		PlatProv:          &fakePlatProv{},
+		Bindings:          &fakeBindings{},
+		CatalogValuePlane: plane,
+	})
+
+	fails, err := svc.ProvisionForBuild(context.Background(), "acme", "acme", "proj", "v1", 0, []BuildProvisionInput{
+		{Component: "orders", Dependency: "stripe", Kind: "external-config"},
+	})
+	if err != nil {
+		t.Fatalf("ProvisionForBuild: %v", err)
+	}
+	if len(fails) != 0 {
+		t.Fatalf("want no failures, got %+v", fails)
+	}
+	if ext.authorPreparedCalls != 1 {
+		t.Fatalf("Registered build must AuthorPreparedValues once, got %d", ext.authorPreparedCalls)
+	}
+	if ext.calls != 0 {
+		t.Fatalf("Registered build must not Provision (project OpenBao), got %d", ext.calls)
+	}
+	got := ext.authorByEnv["development"]
+	if got.Plain["region"] != "us" {
+		t.Fatalf("Registered author Plain = %+v, want region=us from org cells", got.Plain)
+	}
+	if _, hasSecret := got.Plain["api_key"]; hasSecret {
+		t.Fatalf("secret cell must not appear in Plain: %+v", got.Plain)
+	}
+	inst := plane.Instances("acme", "stripe")
+	if len(inst) != 1 || inst[0].Project != "proj" || inst[0].Environment != "development" {
+		t.Fatalf("instances after Registered author = %+v, want {proj, development}", inst)
+	}
+}
+

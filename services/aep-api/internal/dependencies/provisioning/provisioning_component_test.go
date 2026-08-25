@@ -218,6 +218,16 @@ func (f *cValuePlane) PutEnvCells(orgID, name string, cells []provisioning.EnvCe
 	f.cells[orgID][name] = append([]provisioning.EnvCell(nil), cells...)
 }
 
+func (f *cValuePlane) PutInstances(orgID, name string, instances []provisioning.ResourceInstance) {
+	if f.instances == nil {
+		f.instances = map[string]map[string][]provisioning.ResourceInstance{}
+	}
+	if f.instances[orgID] == nil {
+		f.instances[orgID] = map[string][]provisioning.ResourceInstance{}
+	}
+	f.instances[orgID][name] = append([]provisioning.ResourceInstance(nil), instances...)
+}
+
 // cEnvs fakes provisioning.EnvironmentLister — ListNames returns the
 // injected names (nil names is an empty list, not an error).
 type cEnvs struct {
@@ -1738,7 +1748,7 @@ func TestProvisioningComponent_CollectValues_DoesNotCreateOrgEnvCells(t *testing
 		CatalogValuePlane: plane,
 		Design:            cDesign{comps: stripeConsumerDesign()},
 		Issues:            cIssues{},
-		ExtProv:           cExtProv{},
+		ExtProv:           &cExtProv{},
 	})
 	h := newProvHarness(t, svc)
 
@@ -1766,17 +1776,56 @@ func TestProvisioningComponent_CollectValues_DoesNotCreateOrgEnvCells(t *testing
 	}
 }
 
+func TestProvisioningComponent_CollectValues_RegisteredName_409(t *testing.T) {
+	t.Parallel()
+	plane := &cValuePlane{}
+	plane.PutEnvCells("acme", "stripe", []provisioning.EnvCell{
+		{Environment: "development", Key: "api_key", Status: "configured"},
+		{Environment: "development", Key: "region", Status: "configured", Value: "us"},
+	})
+	prov := &cExtProv{}
+	svc := provisioning.NewService(provisioning.Deps{
+		RTCatalog: &cRTCatalog{defs: []openchoreo.ExternalResourceDefinition{
+			{Name: "stripe", Config: []openchoreo.ExternalResourceConfigKey{
+				{Key: "api_key", Secret: true}, {Key: "region"},
+			}},
+		}},
+		CatalogValuePlane: plane,
+		Design:            cDesign{comps: stripeConsumerDesign()},
+		Issues:            cIssues{},
+		ExtProv:           prov,
+	})
+	h := newProvHarness(t, svc)
+	resp := h.AsOrg("acme").Post(
+		"/api/v1/projects/proj/dependencies/external-resources/stripe/values",
+		`{"environments":{"development":{"api_key":"sk_live","region":"us"}}}`,
+	)
+	if resp.Code != 409 {
+		t.Fatalf("Registered values POST: want 409, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	e := componenttest.DecodeEnvelope(t, resp.Body.String())
+	if e.Code != "conflict" {
+		t.Fatalf("409 envelope = %+v", e)
+	}
+	if prov.provisionCalls != 0 {
+		t.Fatalf("Registered values POST must not provision project OpenBao, calls=%d", prov.provisionCalls)
+	}
+}
+
 // cExtProv is a no-op ExternalProvisioner so SaveValues can succeed in the
 // collect-values guard without writing an org catalog record.
-type cExtProv struct{}
+type cExtProv struct {
+	provisionCalls int
+}
 
-func (cExtProv) Provision(context.Context, string, string, string, *dependencies.ExternalResource, map[string]dependencies.EnvValues) (*dependencies.ProvisionResult, error) {
+func (c *cExtProv) Provision(context.Context, string, string, string, *dependencies.ExternalResource, map[string]dependencies.EnvValues) (*dependencies.ProvisionResult, error) {
+	c.provisionCalls++
 	return &dependencies.ProvisionResult{}, nil
 }
-func (cExtProv) AuthorPreparedValues(context.Context, string, string, *dependencies.ExternalResource, map[string]dependencies.PreparedEnvValues) (*dependencies.ProvisionResult, error) {
+func (c *cExtProv) AuthorPreparedValues(context.Context, string, string, *dependencies.ExternalResource, map[string]dependencies.PreparedEnvValues) (*dependencies.ProvisionResult, error) {
 	return &dependencies.ProvisionResult{}, nil
 }
-func (cExtProv) Deprovision(context.Context, string, string, string, []string) error { return nil }
-func (cExtProv) ResolveRunnerSecrets(context.Context, string, string, string, []string) ([]dependencies.ExternalResourceRunnerSecret, error) {
+func (*cExtProv) Deprovision(context.Context, string, string, string, []string) error { return nil }
+func (*cExtProv) ResolveRunnerSecrets(context.Context, string, string, string, []string) ([]dependencies.ExternalResourceRunnerSecret, error) {
 	return nil, nil
 }
