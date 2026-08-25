@@ -66,7 +66,12 @@ func (s *Service) UpdateExternalResource(ctx context.Context, orgID, name string
 		return ExternalResourceView{}, apierr.Conflict("external resource " + canonical + " is a Project External resource")
 	}
 
-	keys, docs, envNames, valueByEnvKey, err := s.validateUpdateRequest(ctx, orgID, canonical, req, found.Config, currentCells)
+	keys, writes, envNames, valueByEnvKey, err := s.validateUpdateRequest(ctx, orgID, req, found.Config, currentCells)
+	if err != nil {
+		return ExternalResourceView{}, err
+	}
+
+	docs, err := s.commitResourceDocs(ctx, orgID, canonical, writes)
 	if err != nil {
 		return ExternalResourceView{}, err
 	}
@@ -122,13 +127,13 @@ func (s *Service) UpdateExternalResource(ctx context.Context, orgID, name string
 
 func (s *Service) validateUpdateRequest(
 	ctx context.Context,
-	orgID, name string,
+	orgID string,
 	req gen.RegisterExternalResourceRequest,
 	existing []openchoreo.ExternalResourceConfigKey,
 	currentCells []EnvCell,
 ) (
 	keys []openchoreo.ExternalResourceConfigKey,
-	docs []openchoreo.ResourceDoc,
+	writes []resourceDocWrite,
 	envNames []string,
 	valueByEnvKey map[string]string,
 	err error,
@@ -162,7 +167,7 @@ func (s *Service) validateUpdateRequest(
 		return nil, nil, nil, nil, apierr.BadRequest("config key identity cannot be changed")
 	}
 
-	docs, err = s.resolveResourceDocs(ctx, orgID, name, req.ResourceDocs)
+	writes, err = validateResourceDocWrites(req.ResourceDocs)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -202,7 +207,7 @@ func (s *Service) validateUpdateRequest(
 			}
 		}
 	}
-	return keys, docs, envNames, valueByEnvKey, nil
+	return keys, writes, envNames, valueByEnvKey, nil
 }
 
 func sameConfigIdentity(existing, next []openchoreo.ExternalResourceConfigKey) bool {

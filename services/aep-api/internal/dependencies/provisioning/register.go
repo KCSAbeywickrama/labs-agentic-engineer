@@ -31,7 +31,7 @@ import (
 // instance) plus org value-plane cells. Secret bytes are optionally written
 // through OrgSecretWriter with projectName "org-catalog".
 func (s *Service) RegisterExternalResource(ctx context.Context, orgID string, req gen.RegisterExternalResourceRequest) (ExternalResourceView, error) {
-	name, keys, docs, envNames, valueByEnvKey, err := s.validateRegisterRequest(ctx, orgID, req)
+	name, keys, writes, envNames, valueByEnvKey, err := s.validateRegisterRequest(ctx, orgID, req)
 	if err != nil {
 		return ExternalResourceView{}, err
 	}
@@ -47,6 +47,11 @@ func (s *Service) RegisterExternalResource(ctx context.Context, orgID string, re
 		if strings.EqualFold(def.Name, name) {
 			return ExternalResourceView{}, apierr.Conflict("external resource " + name + " is already registered")
 		}
+	}
+
+	docs, err := s.commitResourceDocs(ctx, orgID, name, writes)
+	if err != nil {
+		return ExternalResourceView{}, err
 	}
 
 	rt, err := openchoreo.BuildExternalResourceType(name, strings.TrimSpace(req.Description), keys, strings.TrimSpace(req.ConsumptionInstructions), docs)
@@ -104,7 +109,7 @@ func (s *Service) RegisterExternalResource(ctx context.Context, orgID string, re
 func (s *Service) validateRegisterRequest(ctx context.Context, orgID string, req gen.RegisterExternalResourceRequest) (
 	name string,
 	keys []openchoreo.ExternalResourceConfigKey,
-	docs []openchoreo.ResourceDoc,
+	writes []resourceDocWrite,
 	envNames []string,
 	valueByEnvKey map[string]string,
 	err error,
@@ -139,7 +144,7 @@ func (s *Service) validateRegisterRequest(ctx context.Context, orgID string, req
 		})
 	}
 
-	docs, err = s.resolveResourceDocs(ctx, orgID, name, req.ResourceDocs)
+	writes, err = validateResourceDocWrites(req.ResourceDocs)
 	if err != nil {
 		return "", nil, nil, nil, nil, err
 	}
@@ -165,7 +170,7 @@ func (s *Service) validateRegisterRequest(ctx context.Context, orgID string, req
 			}
 		}
 	}
-	return name, keys, docs, envNames, valueByEnvKey, nil
+	return name, keys, writes, envNames, valueByEnvKey, nil
 }
 
 func envValueKey(env, key string) string {

@@ -1261,6 +1261,81 @@ func TestProvisioningComponent_RegisterExternalResource_BothURLAndContent400(t *
 	}
 }
 
+func TestProvisioningComponent_RegisterExternalResource_DuplicateFileRowDoesNotMint(t *testing.T) {
+	t.Parallel()
+	docs := &recordingDocs{}
+	h := newRegisterHarnessWithDocs(t, &cRTCatalog{defs: []openchoreo.ExternalResourceDefinition{
+		{
+			Name: "stripe",
+			Config: []openchoreo.ExternalResourceConfigKey{
+				{Key: "token", Secret: true},
+			},
+		},
+	}}, &cValuePlane{}, docs)
+
+	body := registerBody()
+	body.ResourceDocs = []gen.ResourceDocWriteDTO{
+		{Type: gen.ResourceDocWriteDTOTypeDocumentation, FileName: "README.md", Content: fileRowBody},
+	}
+	resp := h.AsOrg("acme").Post("/api/v1/dependencies/external-resources", mustJSON(t, body))
+	if resp.Code != 409 {
+		t.Fatalf("duplicate file register: want 409, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	if len(docs.commits) != 0 {
+		t.Fatalf("duplicate file row must not call CommitUTF8, got %d commits: %+v", len(docs.commits), docs.commits)
+	}
+}
+
+func TestProvisioningComponent_RegisterExternalResource_FileRowMissingEnvValueDoesNotMint(t *testing.T) {
+	t.Parallel()
+	docs := &recordingDocs{}
+	h := newRegisterHarnessWithDocs(t, &cRTCatalog{}, &cValuePlane{}, docs)
+	body := registerBody()
+	body.EnvValues = body.EnvValues[:3] // omit staging-local/region
+	body.ResourceDocs = []gen.ResourceDocWriteDTO{
+		{Type: gen.ResourceDocWriteDTOTypeDocumentation, FileName: "README.md", Content: fileRowBody},
+	}
+
+	resp := h.AsOrg("acme").Post("/api/v1/dependencies/external-resources", mustJSON(t, body))
+	if resp.Code != 400 {
+		t.Fatalf("file row missing env value: want 400, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	e := componenttest.DecodeEnvelope(t, resp.Body.String())
+	if e.Code != "bad_request" {
+		t.Fatalf("400 envelope = %+v", e)
+	}
+	if len(docs.commits) != 0 {
+		t.Fatalf("failed file register must not call CommitUTF8, got %d commits: %+v", len(docs.commits), docs.commits)
+	}
+}
+
+func TestProvisioningComponent_UpdateExternalResource_FileRowMissingEnvValueDoesNotMint(t *testing.T) {
+	t.Parallel()
+	docs := &recordingDocs{}
+	h := newRegisterHarnessWithDocs(t, &cRTCatalog{}, &cValuePlane{}, docs)
+
+	reg := h.AsOrg("acme").Post("/api/v1/dependencies/external-resources", mustJSON(t, registerBody()))
+	if reg.Code != 201 {
+		t.Fatalf("register: want 201, got %d body=%s", reg.Code, reg.Body.String())
+	}
+	if len(docs.commits) != 0 {
+		t.Fatalf("URL-only register must not mint, got %d commits", len(docs.commits))
+	}
+
+	body := registerBody()
+	body.EnvValues = body.EnvValues[:3] // omit staging-local/region
+	body.ResourceDocs = []gen.ResourceDocWriteDTO{
+		{Type: gen.ResourceDocWriteDTOTypeDocumentation, FileName: "README.md", Content: fileRowBody},
+	}
+	resp := h.AsOrg("acme").Put("/api/v1/dependencies/external-resources/stripe", mustJSON(t, body))
+	if resp.Code != 400 {
+		t.Fatalf("update file row missing env: want 400, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	if len(docs.commits) != 0 {
+		t.Fatalf("failed file update must not call CommitUTF8, got %d commits: %+v", len(docs.commits), docs.commits)
+	}
+}
+
 func TestProvisioningComponent_UpdateExternalResource_AcceptsFileRow(t *testing.T) {
 	t.Parallel()
 	docs := &recordingDocs{}

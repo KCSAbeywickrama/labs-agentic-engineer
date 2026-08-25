@@ -28,26 +28,37 @@ import (
 	"github.com/wso2/aep/aep-api/internal/platform/apierr"
 )
 
-// resolveResourceDocs validates write rows and returns catalog pointers.
-// File rows call CommitUTF8; URL and keep-path rows never mint the repo.
-func (s *Service) resolveResourceDocs(ctx context.Context, orgID, logicalName string, in []gen.ResourceDocWriteDTO) ([]openchoreo.ResourceDoc, error) {
+// resourceDocWrite is one validated write row. File rows carry FileName+Content
+// and are not committed until commitResourceDocs (after uniqueness / identity
+// and remaining request checks). URL and keep-path rows never mint.
+type resourceDocWrite struct {
+	Type     string
+	URL      string
+	Path     string
+	FileName string
+	Content  string
+}
+
+// validateResourceDocWrites is the pure write-row validator. It never calls
+// CommitUTF8. Every row is checked before any row is eligible to commit.
+func validateResourceDocWrites(in []gen.ResourceDocWriteDTO) ([]resourceDocWrite, error) {
 	if len(in) == 0 {
 		return nil, nil
 	}
-	out := make([]openchoreo.ResourceDoc, 0, len(in))
+	out := make([]resourceDocWrite, 0, len(in))
 	for i, d := range in {
-		doc, err := s.resolveResourceDoc(ctx, orgID, logicalName, i, d)
+		w, err := validateResourceDocWrite(i, d)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, doc)
+		out = append(out, w)
 	}
 	return out, nil
 }
 
-func (s *Service) resolveResourceDoc(ctx context.Context, orgID, logicalName string, i int, d gen.ResourceDocWriteDTO) (openchoreo.ResourceDoc, error) {
+func validateResourceDocWrite(i int, d gen.ResourceDocWriteDTO) (resourceDocWrite, error) {
 	if !d.Type.Valid() {
-		return openchoreo.ResourceDoc{}, apierr.BadRequest(fmt.Sprintf("resourceDocs[%d]: unknown type %q", i, d.Type))
+		return resourceDocWrite{}, apierr.BadRequest(fmt.Sprintf("resourceDocs[%d]: unknown type %q", i, d.Type))
 	}
 
 	u := strings.TrimSpace(d.URL)
@@ -57,7 +68,7 @@ func (s *Service) resolveResourceDoc(ctx context.Context, orgID, logicalName str
 	fileNameSet := fileName != ""
 	contentSet := content != ""
 	if fileNameSet != contentSet {
-		return openchoreo.ResourceDoc{}, apierr.BadRequest(fmt.Sprintf("resourceDocs[%d]: fileName and content must both be provided", i))
+		return resourceDocWrite{}, apierr.BadRequest(fmt.Sprintf("resourceDocs[%d]: fileName and content must both be provided", i))
 	}
 
 	n := 0
@@ -71,35 +82,64 @@ func (s *Service) resolveResourceDoc(ctx context.Context, orgID, logicalName str
 		n++
 	}
 	if n != 1 {
-		return openchoreo.ResourceDoc{}, apierr.BadRequest(fmt.Sprintf("resourceDocs[%d]: exactly one of url, path, or fileName+content is required", i))
+		return resourceDocWrite{}, apierr.BadRequest(fmt.Sprintf("resourceDocs[%d]: exactly one of url, path, or fileName+content is required", i))
 	}
 
 	switch {
 	case u != "":
 		parsed, perr := url.Parse(u)
 		if perr != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
-			return openchoreo.ResourceDoc{}, apierr.BadRequest(fmt.Sprintf("resourceDocs[%d]: url must be a valid http or https URL", i))
+			return resourceDocWrite{}, apierr.BadRequest(fmt.Sprintf("resourceDocs[%d]: url must be a valid http or https URL", i))
 		}
-		return openchoreo.ResourceDoc{Type: string(d.Type), URL: u}, nil
+		return resourceDocWrite{Type: string(d.Type), URL: u}, nil
 	case path != "":
 		if strings.Contains(path, "..") || strings.Contains(path, "\\") {
-			return openchoreo.ResourceDoc{}, apierr.BadRequest(fmt.Sprintf("resourceDocs[%d]: path must not contain .. or backslash", i))
+			return resourceDocWrite{}, apierr.BadRequest(fmt.Sprintf("resourceDocs[%d]: path must not contain .. or backslash", i))
 		}
-		return openchoreo.ResourceDoc{Type: string(d.Type), Path: path}, nil
+		return resourceDocWrite{Type: string(d.Type), Path: path}, nil
 	default:
 		if strings.ContainsAny(fileName, `/\`) || strings.Contains(fileName, "..") {
-			return openchoreo.ResourceDoc{}, apierr.BadRequest(fmt.Sprintf("resourceDocs[%d]: fileName must be a single path segment", i))
+			return resourceDocWrite{}, apierr.BadRequest(fmt.Sprintf("resourceDocs[%d]: fileName must be a single path segment", i))
 		}
 		if !utf8.ValidString(content) {
-			return openchoreo.ResourceDoc{}, apierr.BadRequest(fmt.Sprintf("resourceDocs[%d]: content must be valid UTF-8", i))
+			return resourceDocWrite{}, apierr.BadRequest(fmt.Sprintf("resourceDocs[%d]: content must be valid UTF-8", i))
 		}
-		if s.orgResourceDocs == nil {
-			return openchoreo.ResourceDoc{}, fmt.Errorf("provisioning: org resource docs store is not configured")
-		}
-		committed, err := s.orgResourceDocs.CommitUTF8(ctx, orgID, logicalName, fileName, content)
-		if err != nil {
-			return openchoreo.ResourceDoc{}, fmt.Errorf("provisioning: commit resource doc %q: %w", fileName, err)
-		}
-		return openchoreo.ResourceDoc{Type: string(d.Type), Path: committed}, nil
+		return resourceDocWrite{Type: string(d.Type), FileName: fileName, Content: content}, nil
 	}
+}
+
+// commitResourceDocs writes file rows via CommitUTF8 and returns catalog
+// pointers. URL/path rows do not mint. Called in the same phase as
+// OrgSecretWriter, after request checks succeed and before Ensure/Update.
+func (s *Service) commitResourceDocs(ctx context.Context, orgID, logicalName string, writes []resourceDocWrite) ([]openchoreo.ResourceDoc, error) {
+	if len(writes) == 0 {
+		return nil, nil
+	}
+	hasFile := false
+	for _, w := range writes {
+		if w.FileName != "" {
+			hasFile = true
+			break
+		}
+	}
+	if hasFile && s.orgResourceDocs == nil {
+		return nil, fmt.Errorf("provisioning: org resource docs store is not configured")
+	}
+
+	out := make([]openchoreo.ResourceDoc, 0, len(writes))
+	for _, w := range writes {
+		switch {
+		case w.FileName != "":
+			path, err := s.orgResourceDocs.CommitUTF8(ctx, orgID, logicalName, w.FileName, w.Content)
+			if err != nil {
+				return nil, fmt.Errorf("provisioning: commit resource doc %q: %w", w.FileName, err)
+			}
+			out = append(out, openchoreo.ResourceDoc{Type: w.Type, Path: path})
+		case w.URL != "":
+			out = append(out, openchoreo.ResourceDoc{Type: w.Type, URL: w.URL})
+		default:
+			out = append(out, openchoreo.ResourceDoc{Type: w.Type, Path: w.Path})
+		}
+	}
+	return out, nil
 }
