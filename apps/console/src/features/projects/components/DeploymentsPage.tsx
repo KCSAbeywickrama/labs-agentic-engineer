@@ -352,11 +352,11 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
   // Org catalog: Registered Externals (non-empty envCells) already hold
   // values on the org plane — Connections must not offer Configure / the
   // project values dialog for those names. While the catalog query is
-  // pending, registeredNames is empty, so hide Configure for every
-  // external until the query has settled (a name that might be Registered
-  // must not open the dialog).
+  // pending or failed, registeredNames is empty, so hide Configure for
+  // every external until the query has settled successfully (a name that
+  // might be Registered must not open the dialog).
   const externalCatalog = useExternalResources();
-  const catalogPending = externalCatalog.isPending;
+  const catalogUnknown = externalCatalog.isPending || externalCatalog.isError;
   const registeredNames = useMemo(() => {
     const names = new Set<string>();
     for (const resource of externalCatalog.data ?? []) {
@@ -686,6 +686,23 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
               Component Open links live on the rail rows — this section owns
               what the rail doesn't say. */}
           <PanelOverline>Connections</PanelOverline>
+          {externalCatalog.isError ? (
+            <Alert
+              severity="error"
+              sx={{ mt: 1 }}
+              action={
+                <Button onClick={() => void externalCatalog.refetch()}>
+                  Retry
+                </Button>
+              }
+            >
+              Failed to load org catalog
+              {externalCatalog.error instanceof Error &&
+              externalCatalog.error.message
+                ? `: ${externalCatalog.error.message}`
+                : ""}
+            </Alert>
+          ) : null}
           <Stack spacing={1.25} sx={{ mt: 1 }}>
             {connections.length > 0 ? (
               connections.map((row) => (
@@ -696,7 +713,7 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
                   trailing={
                     row.kind === "external" &&
                     row.config.length > 0 &&
-                    !catalogPending &&
+                    !catalogUnknown &&
                     !registeredNames.has(row.name) ? (
                       // The console's tinted-pill recipe, in the app's accent —
                       // an ACTION among readouts must out-rank its neighbours'
@@ -742,10 +759,10 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
                         provisioned
                       </Typography>
                     ) : row.kind === "external" &&
-                      (catalogPending || registeredNames.has(row.name)) ? (
-                      // Catalog still loading, or Registered: org values already
-                      // collected — no action, and do not mislabel as
-                      // platform-managed.
+                      (catalogUnknown || registeredNames.has(row.name)) ? (
+                      // Catalog still loading or failed, or Registered: do
+                      // not open the project values dialog, and do not
+                      // mislabel as platform-managed.
                       undefined
                     ) : (
                       // Config-carrying but not user-updatable here (a platform

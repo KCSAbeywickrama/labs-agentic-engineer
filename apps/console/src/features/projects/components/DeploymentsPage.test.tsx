@@ -85,6 +85,7 @@ let mockDependencies: ComponentDependencies[] = DEFAULT_DEPENDENCIES;
 // so the fixture `stripe` stays a Project External (re-collect test).
 let mockExternalCatalog: ExternalResourceDTO[] = [];
 let mockExternalCatalogPending = false;
+let mockExternalCatalogError = false;
 
 function status(): ProjectStatus {
   return {
@@ -144,8 +145,9 @@ vi.mock("../../settings/api/queries", () => ({
   useExternalResources: () => ({
     data: mockExternalCatalog,
     isPending: mockExternalCatalogPending,
-    isError: false,
-    error: null,
+    isError: mockExternalCatalogError,
+    error: mockExternalCatalogError ? new Error("catalog down") : null,
+    refetch: vi.fn(),
   }),
 }));
 
@@ -177,6 +179,7 @@ beforeEach(() => {
   mockDependencies = DEFAULT_DEPENDENCIES;
   mockExternalCatalog = [];
   mockExternalCatalogPending = false;
+  mockExternalCatalogError = false;
 });
 
 describe("DeploymentsPage — validation", () => {
@@ -509,6 +512,27 @@ describe("DeploymentsPage — connections", () => {
       screen.queryByRole("button", { name: "Configure stripe" }),
     ).not.toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  // Catalog error leaves registeredNames empty the same way pending does —
+  // fail closed so a Registered name cannot open the project values dialog.
+  it("does not show Configure for an external when the org catalog fails", () => {
+    mockDeploy = {
+      version: "v1",
+      status: "deployed",
+      components: { total: 1, ready: 1 },
+      validation: "passed",
+    };
+    mockExternalCatalogError = true;
+    mockExternalCatalog = [];
+
+    render(<DeploymentsPage projectName="acme" />);
+
+    expect(
+      screen.queryByRole("button", { name: "Configure stripe" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByText(/Failed to load org catalog/i)).toBeInTheDocument();
   });
 
   // Project External under a new name: empty/omitted catalog envCells — still
