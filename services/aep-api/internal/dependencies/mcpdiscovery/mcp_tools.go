@@ -472,7 +472,7 @@ func (h *mcpHandler) validateAndNormalize(raw []byte) validateSpecView {
 // reconstructed from its authored OpenChoreo ResourceType via
 // openchoreo.ExternalDefinitionFromRT — to the agent-facing shape (name,
 // description, config keys with the secret flag, consumptionInstructions, and
-// resourceDocs pointers). Ticket 04 Ensure authors the RT at register, so a
+// resourceDocs pointers). Ensure authors the RT at register, so a
 // zero-consumer Registered row is listable here once these fields are carried.
 func toExternalResourceView(er *openchoreo.ExternalResourceDefinition) externalResourceView {
 	keys := make([]configKeyDTO, 0, len(er.Config))

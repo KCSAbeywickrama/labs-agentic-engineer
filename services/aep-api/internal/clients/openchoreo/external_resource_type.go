@@ -54,7 +54,7 @@ const rtTemplateVersionLabel = "aep.wso2.com/rt-template-version"
 // with the platform-resource markers and clear of OC's own `openchoreo.dev`
 // annotations. ExternalDefinitionFromRT reads these back, plus optional
 // consumption-instructions and resource-docs when present (read-only here;
-// register writes them in ticket 04).
+// register writes them onto the ResourceType).
 const (
 	externalNameAnnotation            = "aep.wso2.com/external-name"
 	externalDescriptionAnnotation     = "aep.wso2.com/description"

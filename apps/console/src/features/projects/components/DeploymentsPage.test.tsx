@@ -84,6 +84,7 @@ let mockDependencies: ComponentDependencies[] = DEFAULT_DEPENDENCIES;
 // Org catalog for Registered vs Project External. Default empty / no envCells
 // so the fixture `stripe` stays a Project External (re-collect test).
 let mockExternalCatalog: ExternalResourceDTO[] = [];
+let mockExternalCatalogPending = false;
 
 function status(): ProjectStatus {
   return {
@@ -142,7 +143,7 @@ vi.mock("../../spec/api/queries", () => ({
 vi.mock("../../settings/api/queries", () => ({
   useExternalResources: () => ({
     data: mockExternalCatalog,
-    isPending: false,
+    isPending: mockExternalCatalogPending,
     isError: false,
     error: null,
   }),
@@ -175,6 +176,7 @@ beforeEach(() => {
   mockMutate.mockClear();
   mockDependencies = DEFAULT_DEPENDENCIES;
   mockExternalCatalog = [];
+  mockExternalCatalogPending = false;
 });
 
 describe("DeploymentsPage — validation", () => {
@@ -479,6 +481,27 @@ describe("DeploymentsPage — connections", () => {
         ],
       },
     ];
+
+    render(<DeploymentsPage projectName="acme" />);
+
+    expect(
+      screen.queryByRole("button", { name: "Configure stripe" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  // While the org catalog is still loading, registeredNames is empty — a
+  // Registered row must not flash Configure (which would open the project
+  // values dialog for a name that might already live on the org plane).
+  it("does not show Configure for an external while the org catalog is loading", () => {
+    mockDeploy = {
+      version: "v1",
+      status: "deployed",
+      components: { total: 1, ready: 1 },
+      validation: "passed",
+    };
+    mockExternalCatalogPending = true;
+    mockExternalCatalog = [];
 
     render(<DeploymentsPage projectName="acme" />);
 

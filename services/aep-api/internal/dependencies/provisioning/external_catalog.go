@@ -52,6 +52,21 @@ type EnvCell struct {
 	Key         string
 	Status      string
 	Value       string
+	// SecretStorePath is the org-catalog vault key for this environment,
+	// persisted when OrgSecretWriter returns one at register/update. It is
+	// never copied onto the wire DTO.
+	SecretStorePath string
+}
+
+// stampSecretStorePath copies each environment's org-catalog vault key onto
+// every cell of that environment. Empty keys are left unset (no writer, or
+// the writer returned nothing).
+func stampSecretStorePath(cells []EnvCell, vaultByEnv map[string]string) {
+	for i := range cells {
+		if p := vaultByEnv[cells[i].Environment]; p != "" {
+			cells[i].SecretStorePath = p
+		}
+	}
 }
 
 // ResourceInstance is one observed instance of a Registered External

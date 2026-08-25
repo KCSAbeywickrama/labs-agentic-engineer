@@ -36,7 +36,7 @@ import (
 // ExternalResourceReader is the read slice of the org external-resource catalog
 // the MCP surface exposes (list every registered external resource, get one by
 // name). Sourced from the org's OpenChoreo ResourceTypes via
-// openchoreo.ExternalDefinitionFromRT. Ticket 04 Ensure authors the RT at
+// openchoreo.ExternalDefinitionFromRT. Ensure authors the RT at
 // register, so a zero-consumer Registered row is already listable here (MCP
 // List is RT-backed; the agent JSON view carries consumptionInstructions and
 // resourceDocs pointers). A design-only `external` dependency that never went

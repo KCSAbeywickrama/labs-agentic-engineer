@@ -351,8 +351,12 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
   );
   // Org catalog: Registered Externals (non-empty envCells) already hold
   // values on the org plane — Connections must not offer Configure / the
-  // project values dialog for those names.
+  // project values dialog for those names. While the catalog query is
+  // pending, registeredNames is empty, so hide Configure for every
+  // external until the query has settled (a name that might be Registered
+  // must not open the dialog).
   const externalCatalog = useExternalResources();
+  const catalogPending = externalCatalog.isPending;
   const registeredNames = useMemo(() => {
     const names = new Set<string>();
     for (const resource of externalCatalog.data ?? []) {
@@ -692,6 +696,7 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
                   trailing={
                     row.kind === "external" &&
                     row.config.length > 0 &&
+                    !catalogPending &&
                     !registeredNames.has(row.name) ? (
                       // The console's tinted-pill recipe, in the app's accent —
                       // an ACTION among readouts must out-rank its neighbours'
@@ -736,9 +741,11 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
                       <Typography variant="caption" color="success.main">
                         provisioned
                       </Typography>
-                    ) : row.kind === "external" && registeredNames.has(row.name) ? (
-                      // Registered: org values already collected — no action,
-                      // and do not mislabel as platform-managed.
+                    ) : row.kind === "external" &&
+                      (catalogPending || registeredNames.has(row.name)) ? (
+                      // Catalog still loading, or Registered: org values already
+                      // collected — no action, and do not mislabel as
+                      // platform-managed.
                       undefined
                     ) : (
                       // Config-carrying but not user-updatable here (a platform

@@ -300,9 +300,8 @@ func (s *Service) authorExternalPrepared(ctx context.Context, orgID, ocOrgID, pr
 
 // preparedValuesFromOrgCells builds AuthorPreparedValues inputs from Registered
 // org EnvCells: one entry per environment that appears on the plane, Plain
-// filled from non-secret configured cells. SecretStorePath stays empty unless
-// a future plane field stores an org-catalog vault reference (CEL already
-// lives on the ResourceType).
+// filled from non-secret configured cells. SecretStorePath is the org-catalog
+// vault key persisted on those cells (empty when no OrgSecretWriter was wired).
 func preparedValuesFromOrgCells(keys []spec.ConfigKey, cells []EnvCell) map[string]dependencies.PreparedEnvValues {
 	secret := make(map[string]bool, len(keys))
 	for _, k := range keys {
@@ -318,6 +317,9 @@ func preparedValuesFromOrgCells(keys []spec.ConfigKey, cells []EnvCell) map[stri
 		}
 		if c.Status == "configured" && !secret[c.Key] {
 			ev.Plain[c.Key] = c.Value
+		}
+		if c.SecretStorePath != "" {
+			ev.SecretStorePath = c.SecretStorePath
 		}
 		byEnv[c.Environment] = ev
 	}

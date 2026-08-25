@@ -212,7 +212,7 @@ for (const [file, rules] of Object.entries(REFERENCE_RULES)) {
   });
 }
 
-// Ticket 08: design reuses a Registered External resource and writes
+// Design reuses a Registered External resource and writes
 // consumption instructions into `description` / org resource docs into
 // `specPath`. Coding reads those fields. Each rule lives in one skill —
 // architecture must not paste the coding procedure, and the research file

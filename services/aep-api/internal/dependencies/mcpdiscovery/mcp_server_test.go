@@ -436,7 +436,7 @@ func TestMCP_ListExternalResources_PortError(t *testing.T) {
 }
 
 // TestMCP_ListExternalResources_RegisteredBeforeConsumers proves a zero-consumer
-// Registered external (RT authored at register via ticket 04 Ensure) surfaces on
+// Registered external (RT authored at register via Ensure) surfaces on
 // list_external_resources with consumptionInstructions and resourceDocs pointers
 // — not secret values or file bodies. MCP view has no consumers field today.
 func TestMCP_ListExternalResources_RegisteredBeforeConsumers(t *testing.T) {

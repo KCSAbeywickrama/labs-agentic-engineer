@@ -36,8 +36,8 @@ import (
 // its own design-sweep in-use check).
 //
 // An authored RT is present for both Project Externals (provisioner — see
-// NewExternalResourceProvisioner) and Registered resources (ticket 04 Ensure
-// authors the RT at register). MCP List is therefore RT-backed: a
+// NewExternalResourceProvisioner) and Registered resources (Ensure authors
+// the RT at register). MCP List is therefore RT-backed: a
 // zero-consumer Registered row is already listable. A design-only `external`
 // dependency that never went through register/Ensure still has no RT and is
 // not discoverable here (deliberate; no design-sweep is added).
