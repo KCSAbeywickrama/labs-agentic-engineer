@@ -39,6 +39,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/gen"
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
+	"github.com/wso2/aep/aep-api/internal/dependencies"
 	dephttpapi "github.com/wso2/aep/aep-api/internal/dependencies/httpapi"
 	"github.com/wso2/aep/aep-api/internal/dependencies/provisioning"
 	"github.com/wso2/aep/aep-api/internal/edge"
@@ -59,6 +60,24 @@ type cRTCatalog struct {
 
 func (f *cRTCatalog) List(_ context.Context, _ string) ([]openchoreo.ExternalResourceDefinition, error) {
 	return f.defs, nil
+}
+
+func (f *cRTCatalog) Ensure(_ context.Context, _ string, rt *openchoreo.ResourceType) error {
+	if rt == nil {
+		return nil
+	}
+	def, ok := openchoreo.ExternalDefinitionFromRT(rt)
+	if !ok {
+		return nil
+	}
+	for i, existing := range f.defs {
+		if strings.EqualFold(existing.Name, def.Name) {
+			f.defs[i] = def
+			return nil
+		}
+	}
+	f.defs = append(f.defs, def)
+	return nil
 }
 
 func (f *cRTCatalog) Delete(_ context.Context, _, name string) error {
@@ -159,6 +178,13 @@ func (f *cValuePlane) EnvCells(name string) []provisioning.EnvCell {
 
 func (f *cValuePlane) Instances(name string) []provisioning.ResourceInstance {
 	return f.instances[name]
+}
+
+func (f *cValuePlane) PutEnvCells(name string, cells []provisioning.EnvCell) {
+	if f.cells == nil {
+		f.cells = map[string][]provisioning.EnvCell{}
+	}
+	f.cells[name] = append([]provisioning.EnvCell(nil), cells...)
 }
 
 // cEnvs fakes provisioning.EnvironmentLister — ListNames returns the
@@ -871,4 +897,217 @@ func TestProvisioningComponent_ListExternalResources_DTOGrowth(t *testing.T) {
 			t.Fatalf("secret cell must not carry value: %+v", c)
 		}
 	}
+}
+
+func registerBody() gen.RegisterExternalResourceJSONRequestBody {
+	return gen.RegisterExternalResourceJSONRequestBody{
+		Name:                    "stripe",
+		Description:             "Stripe payments",
+		ConsumptionInstructions: "Use the secret as Bearer.",
+		Config: []gen.ConfigKeyDTO{
+			{Key: "api_key", Description: "Secret API key", Secret: true},
+			{Key: "region", Description: "Account region", Secret: false},
+		},
+		EnvValues: []struct {
+			Environment string `json:"environment"`
+			Key         string `json:"key"`
+			Value       string `json:"value"`
+		}{
+			{Environment: "development", Key: "api_key", Value: "sk_live"},
+			{Environment: "development", Key: "region", Value: "us"},
+			{Environment: "staging-local", Key: "api_key", Value: "sk_test"},
+			{Environment: "staging-local", Key: "region", Value: "eu"},
+		},
+		ResourceDocs: []gen.ResourceDocPointerDTO{
+			{Type: gen.Openapi, URL: "https://example.com/stripe/openapi.yaml"},
+		},
+	}
+}
+
+func mustJSON(t *testing.T, v any) string {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+func newRegisterHarness(t *testing.T, catalog *cRTCatalog, plane *cValuePlane) *componenttest.Harness {
+	t.Helper()
+	if catalog == nil {
+		catalog = &cRTCatalog{}
+	}
+	if plane == nil {
+		plane = &cValuePlane{}
+	}
+	return newProvHarness(t, provisioning.NewService(provisioning.Deps{
+		RTCatalog:         catalog,
+		CatalogValuePlane: plane,
+		Environments:      &cEnvs{names: []string{"development", "staging-local"}},
+	}))
+}
+
+func TestProvisioningComponent_RegisterExternalResource_201(t *testing.T) {
+	t.Parallel()
+	plane := &cValuePlane{}
+	h := newRegisterHarness(t, &cRTCatalog{}, plane)
+
+	resp := h.AsOrg("acme").Post("/api/v1/dependencies/external-resources", mustJSON(t, registerBody()))
+	if resp.Code != 201 {
+		t.Fatalf("register: want 201, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	var got gen.ExternalResourceDTO
+	if err := json.Unmarshal(resp.Body.Bytes(), &got); err != nil {
+		t.Fatalf("body: %v\n%s", err, resp.Body.String())
+	}
+	if got.Name != "stripe" || got.Description != "Stripe payments" {
+		t.Fatalf("registered resource = %+v", got)
+	}
+	if got.ConsumptionInstructions != "Use the secret as Bearer." {
+		t.Fatalf("consumptionInstructions = %#v", got.ConsumptionInstructions)
+	}
+	if len(got.EnvCells) != 4 {
+		t.Fatalf("envCells = %#v, want 2 keys × 2 envs", got.EnvCells)
+	}
+	var regionDev, apiKeyDev *gen.EnvValueCellDTO
+	for i := range got.EnvCells {
+		c := &got.EnvCells[i]
+		if c.Status != gen.EnvValueCellDTOStatusConfigured {
+			t.Errorf("cell status = %q, want configured", c.Status)
+		}
+		if c.Key == "api_key" && c.Value != "" {
+			t.Fatalf("secret api_key cell must not carry value: %+v", c)
+		}
+		if c.Key == "region" && c.Environment == "development" {
+			regionDev = c
+		}
+		if c.Key == "api_key" && c.Environment == "development" {
+			apiKeyDev = c
+		}
+		if c.Key == "region" && c.Environment == "staging-local" && c.Value != "eu" {
+			t.Errorf("staging-local region cell = %+v, want value eu", c)
+		}
+	}
+	if regionDev == nil || regionDev.Value != "us" {
+		t.Fatalf("plain region development cell = %+v, want value us", regionDev)
+	}
+	if apiKeyDev == nil {
+		t.Fatal("want an api_key development cell")
+	}
+	if len(got.ResourceDocs) != 1 || got.ResourceDocs[0].Type != gen.Openapi || got.ResourceDocs[0].URL != "https://example.com/stripe/openapi.yaml" {
+		t.Errorf("resourceDocs = %+v", got.ResourceDocs)
+	}
+
+	listed := h.AsOrg("acme").Get("/api/v1/dependencies/external-resources")
+	if listed.Code != 200 {
+		t.Fatalf("list after register: got %d body=%s", listed.Code, listed.Body.String())
+	}
+	var views []gen.ExternalResourceDTO
+	if err := json.Unmarshal(listed.Body.Bytes(), &views); err != nil {
+		t.Fatalf("list body: %v", err)
+	}
+	if len(views) != 1 || views[0].Name != "stripe" || len(views[0].EnvCells) != 4 {
+		t.Fatalf("list after register = %+v, want Registered stripe with 4 envCells", views)
+	}
+}
+
+func TestProvisioningComponent_RegisterExternalResource_409Duplicate(t *testing.T) {
+	t.Parallel()
+	h := newRegisterHarness(t, &cRTCatalog{defs: []openchoreo.ExternalResourceDefinition{
+		{
+			Name: "stripe",
+			Config: []openchoreo.ExternalResourceConfigKey{
+				{Key: "token", Secret: true},
+			},
+		},
+	}}, &cValuePlane{})
+
+	resp := h.AsOrg("acme").Post("/api/v1/dependencies/external-resources", mustJSON(t, registerBody()))
+	if resp.Code != 409 {
+		t.Fatalf("duplicate register: want 409, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	e := componenttest.DecodeEnvelope(t, resp.Body.String())
+	if e.Code != "conflict" {
+		t.Fatalf("409 envelope = %+v", e)
+	}
+}
+
+func TestProvisioningComponent_RegisterExternalResource_400MissingEnvValue(t *testing.T) {
+	t.Parallel()
+	h := newRegisterHarness(t, &cRTCatalog{}, &cValuePlane{})
+	body := registerBody()
+	body.EnvValues = body.EnvValues[:3] // omit staging-local/region
+
+	resp := h.AsOrg("acme").Post("/api/v1/dependencies/external-resources", mustJSON(t, body))
+	if resp.Code != 400 {
+		t.Fatalf("missing env value: want 400, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	e := componenttest.DecodeEnvelope(t, resp.Body.String())
+	if e.Code != "bad_request" {
+		t.Fatalf("400 envelope = %+v", e)
+	}
+	if strings.Contains(e.Message, "not implemented") {
+		t.Fatalf("want a validation 400, got stub: %+v", e)
+	}
+}
+
+// CollectExternalResourceValues / SaveValues is the project value plane.
+// POST .../values must not populate org catalog envCells.
+func TestProvisioningComponent_CollectValues_DoesNotCreateOrgEnvCells(t *testing.T) {
+	t.Parallel()
+	plane := &cValuePlane{}
+	svc := provisioning.NewService(provisioning.Deps{
+		RTCatalog: &cRTCatalog{defs: []openchoreo.ExternalResourceDefinition{
+			{
+				Name: "stripe",
+				Config: []openchoreo.ExternalResourceConfigKey{
+					{Key: "api_key", Secret: true}, {Key: "region"},
+				},
+			},
+		}},
+		CatalogValuePlane: plane,
+		Design:            cDesign{comps: stripeConsumerDesign()},
+		Issues:            cIssues{},
+		ExtProv:           cExtProv{},
+	})
+	h := newProvHarness(t, svc)
+
+	resp := h.AsOrg("acme").Post(
+		"/api/v1/projects/proj/dependencies/external-resources/stripe/values",
+		`{"environments":{"development":{"api_key":"sk_live","region":"us"}}}`,
+	)
+	if resp.Code != 200 {
+		t.Fatalf("collect values: want 200, got %d body=%s", resp.Code, resp.Body.String())
+	}
+
+	listed := h.AsOrg("acme").Get("/api/v1/dependencies/external-resources")
+	if listed.Code != 200 {
+		t.Fatalf("list: got %d body=%s", listed.Code, listed.Body.String())
+	}
+	var views []gen.ExternalResourceDTO
+	if err := json.Unmarshal(listed.Body.Bytes(), &views); err != nil {
+		t.Fatalf("list body: %v", err)
+	}
+	if len(views) != 1 || views[0].Name != "stripe" {
+		t.Fatalf("list = %+v, want stripe", views)
+	}
+	if len(views[0].EnvCells) != 0 {
+		t.Fatalf("POST .../values must not create org envCells, got %#v", views[0].EnvCells)
+	}
+}
+
+// cExtProv is a no-op ExternalProvisioner so SaveValues can succeed in the
+// collect-values guard without writing an org catalog record.
+type cExtProv struct{}
+
+func (cExtProv) Provision(context.Context, string, string, string, *dependencies.ExternalResource, map[string]dependencies.EnvValues) (*dependencies.ProvisionResult, error) {
+	return &dependencies.ProvisionResult{}, nil
+}
+func (cExtProv) AuthorPreparedValues(context.Context, string, string, *dependencies.ExternalResource, map[string]dependencies.PreparedEnvValues) (*dependencies.ProvisionResult, error) {
+	return &dependencies.ProvisionResult{}, nil
+}
+func (cExtProv) Deprovision(context.Context, string, string, string, []string) error { return nil }
+func (cExtProv) ResolveRunnerSecrets(context.Context, string, string, string, []string) ([]dependencies.ExternalResourceRunnerSecret, error) {
+	return nil, nil
 }

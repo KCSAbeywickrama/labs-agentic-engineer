@@ -30,9 +30,9 @@ import (
 // config schema and current consumers (the in-use delete guard input).
 //
 // Registered External rows may carry env cells and instances from
-// CatalogValuePlane when that collaborator is wired (tests); production
-// leaves the plane nil, so every live row stays Project External (empty
-// cells/instances). Secret cell values are never copied onto the wire DTO.
+// CatalogValuePlane when that collaborator is wired (MemoryValuePlane in
+// production; tests inject a fake). Secret cell values are never copied
+// onto the wire DTO.
 type ExternalResourceView struct {
 	Name                    string
 	Description             string

@@ -73,7 +73,7 @@ func newExternalCatalogFixture(listErr error, rts ...openchoreo.ResourceType) *e
 // t.Fatalf).
 func mustBuildExternalRT(t *testing.T, name, description string, keys ...openchoreo.ExternalResourceConfigKey) openchoreo.ResourceType {
 	t.Helper()
-	rt, err := openchoreo.BuildExternalResourceType(name, description, keys)
+	rt, err := openchoreo.BuildExternalResourceType(name, description, keys, "", nil)
 	if err != nil {
 		t.Fatalf("build external RT fixture %q: %v", name, err)
 	}

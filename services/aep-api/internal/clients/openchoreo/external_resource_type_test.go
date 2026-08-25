@@ -32,7 +32,7 @@ func TestBuildExternalResourceType_PlainAndSecret(t *testing.T) {
 		{Key: "OPENWEATHER_API_KEY", Secret: true, Description: "API key"},
 	}
 	// OpenWeather shape: a plain base URL + a secret API key.
-	rt, err := BuildExternalResourceType("openweather", "Weather data provider", keys)
+	rt, err := BuildExternalResourceType("openweather", "Weather data provider", keys, "", nil)
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
@@ -134,7 +134,7 @@ func TestBuildExternalResourceType_AllPlain_NoExternalSecret(t *testing.T) {
 
 	rt, err := BuildExternalResourceType("plainsvc", "", []ExternalResourceConfigKey{
 		{Key: "BASE_URL", Secret: false},
-	})
+	}, "", nil)
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
@@ -151,13 +151,13 @@ func TestBuildExternalResourceType_AllPlain_NoExternalSecret(t *testing.T) {
 func TestBuildExternalResourceType_Errors(t *testing.T) {
 	t.Parallel()
 
-	if _, err := BuildExternalResourceType("", "", []ExternalResourceConfigKey{{Key: "X"}}); err == nil {
+	if _, err := BuildExternalResourceType("", "", []ExternalResourceConfigKey{{Key: "X"}}, "", nil); err == nil {
 		t.Error("want error on empty name")
 	}
-	if _, err := BuildExternalResourceType("r", "", nil); err == nil {
+	if _, err := BuildExternalResourceType("r", "", nil, "", nil); err == nil {
 		t.Error("want error on no keys")
 	}
-	if _, err := BuildExternalResourceType("r", "", []ExternalResourceConfigKey{{Key: ""}}); err == nil {
+	if _, err := BuildExternalResourceType("r", "", []ExternalResourceConfigKey{{Key: ""}}, "", nil); err == nil {
 		t.Error("want error on empty config key")
 	}
 }
@@ -224,7 +224,7 @@ func TestExternalDefinitionFromRT_RoundTrips(t *testing.T) {
 		{Key: "SF_REGION", Secret: false, Description: "deployment region", DefaultValue: "us-east-1"},
 		{Key: "SF_TOKEN", Secret: true, Description: "API token"},
 	}
-	rt, err := BuildExternalResourceType("salesforce", "Salesforce CRM", keys)
+	rt, err := BuildExternalResourceType("salesforce", "Salesforce CRM", keys, "", nil)
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
@@ -258,19 +258,35 @@ func TestExternalDefinitionFromRT_ReadsConsumptionAnnotations(t *testing.T) {
 		{Key: "SF_REGION", Secret: false},
 		{Key: "SF_TOKEN", Secret: true},
 	}
-	rt, err := BuildExternalResourceType("salesforce", "Salesforce CRM", keys)
+	docs := []ResourceDoc{
+		{Type: "openapi", URL: "https://example.com/openapi.yaml"},
+		{Type: "documentation", Path: "docs/README.md"},
+	}
+	rt, err := BuildExternalResourceType("salesforce", "Salesforce CRM", keys, "Call REST with the token.", docs)
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
-	if _, ok := rt.Metadata.Annotations[consumptionInstructionsAnnotation]; ok {
-		t.Fatal("BuildExternalResourceType must not write consumption-instructions (register is ticket 04)")
+	if rt.Metadata.Annotations[consumptionInstructionsAnnotation] != "Call REST with the token." {
+		t.Fatalf("consumption-instructions annotation = %q", rt.Metadata.Annotations[consumptionInstructionsAnnotation])
 	}
-	if _, ok := rt.Metadata.Annotations[resourceDocsAnnotation]; ok {
-		t.Fatal("BuildExternalResourceType must not write resource-docs (register is ticket 04)")
+	var gotDocs []ResourceDoc
+	if err := json.Unmarshal([]byte(rt.Metadata.Annotations[resourceDocsAnnotation]), &gotDocs); err != nil {
+		t.Fatalf("resource-docs annotation: %v", err)
+	}
+	if !reflect.DeepEqual(gotDocs, docs) {
+		t.Fatalf("resource-docs pointers = %+v, want %+v (type+url/path only, no spec bodies)", gotDocs, docs)
 	}
 
-	rt.Metadata.Annotations[consumptionInstructionsAnnotation] = "Call REST with the token."
-	rt.Metadata.Annotations[resourceDocsAnnotation] = `[{"type":"openapi","url":"https://example.com/openapi.yaml"},{"type":"documentation","path":"docs/README.md"}]`
+	empty, err := BuildExternalResourceType("salesforce", "Salesforce CRM", keys, "", nil)
+	if err != nil {
+		t.Fatalf("build empty: %v", err)
+	}
+	if _, ok := empty.Metadata.Annotations[consumptionInstructionsAnnotation]; ok {
+		t.Fatal("empty consumptionInstructions must omit the annotation")
+	}
+	if _, ok := empty.Metadata.Annotations[resourceDocsAnnotation]; ok {
+		t.Fatal("empty resourceDocs must omit the annotation")
+	}
 
 	def, ok := ExternalDefinitionFromRT(rt)
 	if !ok {
@@ -303,7 +319,7 @@ func TestExternalDefinitionFromRT_ReadsConsumptionAnnotations(t *testing.T) {
 func TestExternalDefinitionFromRT_IgnoresMalformedResourceDocs(t *testing.T) {
 	t.Parallel()
 
-	rt, err := BuildExternalResourceType("salesforce", "", []ExternalResourceConfigKey{{Key: "TOKEN", Secret: true}})
+	rt, err := BuildExternalResourceType("salesforce", "", []ExternalResourceConfigKey{{Key: "TOKEN", Secret: true}}, "", nil)
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}

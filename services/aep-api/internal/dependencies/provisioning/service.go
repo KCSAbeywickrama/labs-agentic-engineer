@@ -53,6 +53,7 @@ type Service struct {
 	providers         ProviderResolver
 	catalogValuePlane CatalogValuePlane
 	environments      EnvironmentLister
+	orgSecrets        OrgSecretWriter
 	// orgPublish commits the exposesAPI.orgPublished durability marker on a
 	// provider component when its access request is granted. Wired via a setter
 	// (SetOrgPublishMarker) at the composition root — it points BACK at the
@@ -99,6 +100,7 @@ type Deps struct {
 	Providers         ProviderResolver
 	CatalogValuePlane CatalogValuePlane
 	Environments      EnvironmentLister
+	OrgSecrets        OrgSecretWriter
 }
 
 // NewService wires the provisioning service from its collaborator set.
@@ -118,6 +120,7 @@ func NewService(d Deps) *Service {
 		providers:         d.Providers,
 		catalogValuePlane: d.CatalogValuePlane,
 		environments:      d.Environments,
+		orgSecrets:        d.OrgSecrets,
 	}
 }
 

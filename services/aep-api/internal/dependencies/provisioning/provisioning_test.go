@@ -204,6 +204,24 @@ func (f *fakeRTCatalog) List(_ context.Context, _ string) ([]openchoreo.External
 	return f.defs, nil
 }
 
+func (f *fakeRTCatalog) Ensure(_ context.Context, _ string, rt *openchoreo.ResourceType) error {
+	if rt == nil {
+		return nil
+	}
+	def, ok := openchoreo.ExternalDefinitionFromRT(rt)
+	if !ok {
+		return nil
+	}
+	for i, existing := range f.defs {
+		if strings.EqualFold(existing.Name, def.Name) {
+			f.defs[i] = def
+			return nil
+		}
+	}
+	f.defs = append(f.defs, def)
+	return nil
+}
+
 func (f *fakeRTCatalog) Delete(_ context.Context, _, name string) error {
 	if f.delErr != nil {
 		return f.delErr
