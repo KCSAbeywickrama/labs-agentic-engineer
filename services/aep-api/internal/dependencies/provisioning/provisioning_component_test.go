@@ -970,6 +970,20 @@ func mustJSON(t *testing.T, v any) string {
 
 func newRegisterHarness(t *testing.T, catalog *cRTCatalog, plane *cValuePlane) *componenttest.Harness {
 	t.Helper()
+	return newRegisterHarnessWithDocs(t, catalog, plane, nil)
+}
+
+type recordingDocs struct {
+	commits []struct{ orgID, logicalName, fileName, content string }
+}
+
+func (r *recordingDocs) CommitUTF8(_ context.Context, orgID, logicalName, fileName, content string) (string, error) {
+	r.commits = append(r.commits, struct{ orgID, logicalName, fileName, content string }{orgID, logicalName, fileName, content})
+	return logicalName + "/" + fileName, nil
+}
+
+func newRegisterHarnessWithDocs(t *testing.T, catalog *cRTCatalog, plane *cValuePlane, docs provisioning.OrgResourceDocs) *componenttest.Harness {
+	t.Helper()
 	if catalog == nil {
 		catalog = &cRTCatalog{}
 	}
@@ -980,6 +994,7 @@ func newRegisterHarness(t *testing.T, catalog *cRTCatalog, plane *cValuePlane) *
 		RTCatalog:         catalog,
 		CatalogValuePlane: plane,
 		Environments:      &cEnvs{names: []string{"development", "staging-local"}},
+		OrgResourceDocs:   docs,
 	}))
 }
 
@@ -1147,6 +1162,135 @@ func TestProvisioningComponent_RegisterExternalResource_CellsAreOrgScoped(t *tes
 				t.Fatalf("listing as other leaked acme region value: %+v", v.EnvCells)
 			}
 		}
+	}
+}
+
+const fileRowBody = "# Stripe\n"
+
+func TestProvisioningComponent_RegisterExternalResource_FileRowReturnsPathPointer(t *testing.T) {
+	t.Parallel()
+	docs := &recordingDocs{}
+	h := newRegisterHarnessWithDocs(t, &cRTCatalog{}, &cValuePlane{}, docs)
+
+	body := registerBody()
+	body.ResourceDocs = []gen.ResourceDocWriteDTO{
+		{Type: gen.ResourceDocWriteDTOTypeDocumentation, FileName: "README.md", Content: fileRowBody},
+	}
+	resp := h.AsOrg("acme").Post("/api/v1/dependencies/external-resources", mustJSON(t, body))
+	if resp.Code != 201 {
+		t.Fatalf("register file row: want 201, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	raw := resp.Body.String()
+	if strings.Contains(raw, `"content"`) {
+		t.Errorf("response JSON must not include content: %s", raw)
+	}
+	if strings.Contains(raw, fileRowBody) || strings.Contains(raw, strings.TrimSpace(fileRowBody)) {
+		t.Errorf("response JSON must not include file body: %s", raw)
+	}
+	var got gen.ExternalResourceDTO
+	if err := json.Unmarshal(resp.Body.Bytes(), &got); err != nil {
+		t.Fatalf("body: %v\n%s", err, raw)
+	}
+	if len(got.ResourceDocs) != 1 {
+		t.Fatalf("resourceDocs = %+v, want 1 path pointer", got.ResourceDocs)
+	}
+	d := got.ResourceDocs[0]
+	if d.Type != gen.ResourceDocPointerDTOTypeDocumentation || d.Path != "stripe/README.md" || d.URL != "" {
+		t.Errorf("resourceDocs[0] = %+v, want type=documentation path=stripe/README.md empty URL", d)
+	}
+	if len(docs.commits) != 1 {
+		t.Fatalf("CommitUTF8 calls = %d, want 1", len(docs.commits))
+	}
+
+	listed := h.AsOrg("acme").Get("/api/v1/dependencies/external-resources")
+	if listed.Code != 200 {
+		t.Fatalf("list after file register: got %d body=%s", listed.Code, listed.Body.String())
+	}
+	listRaw := listed.Body.String()
+	if strings.Contains(listRaw, `"content"`) {
+		t.Errorf("list JSON must not include content: %s", listRaw)
+	}
+	if strings.Contains(listRaw, fileRowBody) || strings.Contains(listRaw, strings.TrimSpace(fileRowBody)) {
+		t.Errorf("list JSON must not include file body: %s", listRaw)
+	}
+	var views []gen.ExternalResourceDTO
+	if err := json.Unmarshal(listed.Body.Bytes(), &views); err != nil {
+		t.Fatalf("list body: %v", err)
+	}
+	if len(views) != 1 || len(views[0].ResourceDocs) != 1 || views[0].ResourceDocs[0].Path != "stripe/README.md" {
+		t.Fatalf("list resourceDocs = %+v, want path stripe/README.md", views)
+	}
+}
+
+func TestProvisioningComponent_RegisterExternalResource_URLOnlyDoesNotMintRepo(t *testing.T) {
+	t.Parallel()
+	docs := &recordingDocs{}
+	h := newRegisterHarnessWithDocs(t, &cRTCatalog{}, &cValuePlane{}, docs)
+
+	resp := h.AsOrg("acme").Post("/api/v1/dependencies/external-resources", mustJSON(t, registerBody()))
+	if resp.Code != 201 {
+		t.Fatalf("register URL-only: want 201, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	if len(docs.commits) != 0 {
+		t.Fatalf("URL-only must not call CommitUTF8, got %d commits: %+v", len(docs.commits), docs.commits)
+	}
+	var got gen.ExternalResourceDTO
+	if err := json.Unmarshal(resp.Body.Bytes(), &got); err != nil {
+		t.Fatalf("body: %v\n%s", err, resp.Body.String())
+	}
+	if len(got.ResourceDocs) != 1 || got.ResourceDocs[0].URL != "https://example.com/stripe/openapi.yaml" || got.ResourceDocs[0].Path != "" {
+		t.Fatalf("resourceDocs = %+v, want URL set and Path empty", got.ResourceDocs)
+	}
+}
+
+func TestProvisioningComponent_RegisterExternalResource_BothURLAndContent400(t *testing.T) {
+	t.Parallel()
+	h := newRegisterHarness(t, &cRTCatalog{}, &cValuePlane{})
+	body := registerBody()
+	body.ResourceDocs = []gen.ResourceDocWriteDTO{
+		{Type: gen.ResourceDocWriteDTOTypeOpenapi, URL: "https://example.com/stripe/openapi.yaml", Content: fileRowBody},
+	}
+
+	resp := h.AsOrg("acme").Post("/api/v1/dependencies/external-resources", mustJSON(t, body))
+	if resp.Code != 400 {
+		t.Fatalf("url+content: want 400, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	e := componenttest.DecodeEnvelope(t, resp.Body.String())
+	if e.Code != "bad_request" {
+		t.Fatalf("400 envelope = %+v", e)
+	}
+}
+
+func TestProvisioningComponent_UpdateExternalResource_AcceptsFileRow(t *testing.T) {
+	t.Parallel()
+	docs := &recordingDocs{}
+	h := newRegisterHarnessWithDocs(t, &cRTCatalog{}, &cValuePlane{}, docs)
+
+	reg := h.AsOrg("acme").Post("/api/v1/dependencies/external-resources", mustJSON(t, registerBody()))
+	if reg.Code != 201 {
+		t.Fatalf("register: want 201, got %d body=%s", reg.Code, reg.Body.String())
+	}
+	if len(docs.commits) != 0 {
+		t.Fatalf("URL-only register must not mint, got %d commits", len(docs.commits))
+	}
+
+	body := registerBody()
+	body.ResourceDocs = []gen.ResourceDocWriteDTO{
+		{Type: gen.ResourceDocWriteDTOTypeDocumentation, FileName: "README.md", Content: fileRowBody},
+	}
+	resp := h.AsOrg("acme").Put("/api/v1/dependencies/external-resources/stripe", mustJSON(t, body))
+	if resp.Code != 200 {
+		t.Fatalf("update file row: want 200, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	var got gen.ExternalResourceDTO
+	if err := json.Unmarshal(resp.Body.Bytes(), &got); err != nil {
+		t.Fatalf("body: %v\n%s", err, resp.Body.String())
+	}
+	if len(got.ResourceDocs) != 1 || got.ResourceDocs[0].Path != "stripe/README.md" || got.ResourceDocs[0].URL != "" {
+		t.Fatalf("resourceDocs = %+v, want path pointer stripe/README.md", got.ResourceDocs)
+	}
+	if len(docs.commits) != 1 {
+		t.Fatalf("CommitUTF8 calls = %d, want 1", len(docs.commits))
 	}
 }
 

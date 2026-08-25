@@ -66,7 +66,7 @@ func (s *Service) UpdateExternalResource(ctx context.Context, orgID, name string
 		return ExternalResourceView{}, apierr.Conflict("external resource " + canonical + " is a Project External resource")
 	}
 
-	keys, docs, envNames, valueByEnvKey, err := s.validateUpdateRequest(ctx, orgID, req, found.Config, currentCells)
+	keys, docs, envNames, valueByEnvKey, err := s.validateUpdateRequest(ctx, orgID, canonical, req, found.Config, currentCells)
 	if err != nil {
 		return ExternalResourceView{}, err
 	}
@@ -122,7 +122,7 @@ func (s *Service) UpdateExternalResource(ctx context.Context, orgID, name string
 
 func (s *Service) validateUpdateRequest(
 	ctx context.Context,
-	orgID string,
+	orgID, name string,
 	req gen.RegisterExternalResourceRequest,
 	existing []openchoreo.ExternalResourceConfigKey,
 	currentCells []EnvCell,
@@ -162,7 +162,7 @@ func (s *Service) validateUpdateRequest(
 		return nil, nil, nil, nil, apierr.BadRequest("config key identity cannot be changed")
 	}
 
-	docs, err = validateResourceDocPointers(req.ResourceDocs)
+	docs, err = s.resolveResourceDocs(ctx, orgID, name, req.ResourceDocs)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}

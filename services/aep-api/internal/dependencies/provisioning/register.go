@@ -19,7 +19,6 @@ package provisioning
 import (
 	"context"
 	"fmt"
-	"net/url"
 	"strings"
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
@@ -140,7 +139,7 @@ func (s *Service) validateRegisterRequest(ctx context.Context, orgID string, req
 		})
 	}
 
-	docs, err = validateResourceDocPointers(req.ResourceDocs)
+	docs, err = s.resolveResourceDocs(ctx, orgID, name, req.ResourceDocs)
 	if err != nil {
 		return "", nil, nil, nil, nil, err
 	}
@@ -167,32 +166,6 @@ func (s *Service) validateRegisterRequest(ctx context.Context, orgID string, req
 		}
 	}
 	return name, keys, docs, envNames, valueByEnvKey, nil
-}
-
-func validateResourceDocPointers(in []gen.ResourceDocWriteDTO) ([]openchoreo.ResourceDoc, error) {
-	if len(in) == 0 {
-		return nil, nil
-	}
-	out := make([]openchoreo.ResourceDoc, 0, len(in))
-	for i, d := range in {
-		if !d.Type.Valid() {
-			return nil, apierr.BadRequest(fmt.Sprintf("resourceDocs[%d]: unknown type %q", i, d.Type))
-		}
-		path := strings.TrimSpace(d.Path)
-		u := strings.TrimSpace(d.URL)
-		if path != "" {
-			return nil, apierr.BadRequest(fmt.Sprintf("resourceDocs[%d]: path pointers are not supported; provide a url", i))
-		}
-		if u == "" {
-			return nil, apierr.BadRequest(fmt.Sprintf("resourceDocs[%d]: url is required", i))
-		}
-		parsed, perr := url.Parse(u)
-		if perr != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
-			return nil, apierr.BadRequest(fmt.Sprintf("resourceDocs[%d]: url must be a valid http or https URL", i))
-		}
-		out = append(out, openchoreo.ResourceDoc{Type: string(d.Type), URL: u})
-	}
-	return out, nil
 }
 
 func envValueKey(env, key string) string {
