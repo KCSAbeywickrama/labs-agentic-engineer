@@ -220,6 +220,21 @@ export function useCollabSpec(
       const held =
         syncedAtRef.current > 0 &&
         Date.now() - syncedAtRef.current >= REBUILD_RESET_MS;
+      // Spend that credit ONCE. The healthy session earns the next attempt a
+      // fast retry, not every attempt: `syncedAtRef` belongs to a provider that
+      // is being thrown away, and leaving it set means each replacement room —
+      // none of which ever syncs, because the server is refusing them — still
+      // reads as "just came off a healthy session" and restarts the ladder. The
+      // result is the same once-a-second hammer the ladder exists to prevent,
+      // reached from the other side. The next successful sync sets it again.
+      // Spend that credit ONCE. The healthy session earns the next attempt a
+      // fast retry, not every attempt: `syncedAtRef` belongs to a provider that
+      // is being thrown away, and leaving it set means each replacement room —
+      // none of which ever syncs, because the server is refusing them — still
+      // reads as "just came off a healthy session" and restarts the ladder. The
+      // result is the same once-a-second hammer the ladder exists to prevent,
+      // reached from the other side. The next successful sync sets it again.
+      syncedAtRef.current = 0;
       const attempt = held ? 0 : rebuildAttemptsRef.current;
       rebuildAttemptsRef.current = attempt + 1;
       rebuildTimerRef.current = setTimeout(

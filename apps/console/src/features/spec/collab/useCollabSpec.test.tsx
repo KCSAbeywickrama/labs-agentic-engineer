@@ -314,6 +314,40 @@ describe("useCollabSpec — an unreachable upstream retries instead of latching"
     expect(instances).toHaveLength(3);
   });
 
+  // The same flattening, reached from the other side: a session that DID hold
+  // long enough to count as healthy earns the next attempt a fast retry — but
+  // only that one. The timestamp belongs to a provider being thrown away, so
+  // leaving it set makes every refused replacement look like it just came off a
+  // healthy session, and the ladder never climbs.
+  it("spends a healthy session's fast-retry credit only once", async () => {
+    renderCollab();
+    act(() => instances[0]!.onSynced());
+    // Hold the room well past the reset window, then lose the upstream.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+
+    const refuse = async (waitMs: number) => {
+      const room = instances[instances.length - 1]!;
+      act(() => room.onAuthenticationFailed({ reason: "upstream-unavailable" }));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(waitMs);
+      });
+    };
+
+    // The credit: this one retries fast.
+    await refuse(1_000);
+    expect(instances).toHaveLength(2);
+    // The next refusal must climb the ladder, not reset it. Nothing has synced
+    // since, so 1s is not enough.
+    await refuse(1_000);
+    expect(instances).toHaveLength(2);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    expect(instances).toHaveLength(3);
+  });
+
   it("still latches when the bearer itself was refused", async () => {
     const { result } = renderCollab();
     act(() => instances[0]!.onAuthenticationFailed({ reason: "Forbidden" }));

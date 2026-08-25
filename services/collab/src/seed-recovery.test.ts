@@ -190,9 +190,12 @@ test("a room whose spec read failed is refused, and the next attempt recovers it
     const refusedAtSeed = await attemptJoin(port);
     assert.equal(refusedAtSeed.synced, false, "an unseeded room must not sync");
     assert.equal(refusedAtSeed.refusedWith, "upstream-unavailable");
+    // Ask the share map, not `getXmlFragment` — that getter CREATES the key it
+    // is asked about (ADR-0020), so inspecting the doc that way would plant the
+    // very node this line is claiming is absent.
     assert.equal(
-      refusedAtSeed.doc.getXmlFragment(PRD_PATH).length,
-      0,
+      refusedAtSeed.doc.share.has(PRD_PATH),
+      false,
       "the refused client holds nothing to render",
     );
     await leave(refusedAtSeed);
