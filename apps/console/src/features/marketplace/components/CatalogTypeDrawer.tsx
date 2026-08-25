@@ -24,9 +24,11 @@ import {
   IconButton,
   Link,
   Stack,
+  Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
-import { X } from "@wso2/oxygen-ui-icons-react";
+import { Pencil, X } from "@wso2/oxygen-ui-icons-react";
+import { useNavigate } from "@tanstack/react-router";
 import type { components } from "../../../generated/aep-api";
 import {
   CollapsibleSection,
@@ -192,6 +194,10 @@ function PlatformResourceBody({ resource }: { resource: PlatformResourceTypeDTO 
 
 export function CatalogTypeDrawer(props: CatalogTypeDrawerProps) {
   const { resource, open, onClose } = props;
+  const navigate = useNavigate();
+  const showEdit =
+    props.kind === "external" && isRegisteredExternal(props.resource);
+
   return (
     <Drawer
       anchor="right"
@@ -214,6 +220,21 @@ export function CatalogTypeDrawer(props: CatalogTypeDrawerProps) {
           <Typography variant="h6" sx={{ flexGrow: 1 }}>
             {resource?.name}
           </Typography>
+          {showEdit && (
+            <Tooltip title="Edit">
+              <IconButton
+                aria-label="Edit"
+                onClick={() => {
+                  void navigate({
+                    to: "/resources/register/form",
+                    search: { name: props.resource.name },
+                  });
+                }}
+              >
+                <Pencil size={18} />
+              </IconButton>
+            </Tooltip>
+          )}
           <IconButton aria-label="Close" onClick={onClose}>
             <X size={20} />
           </IconButton>

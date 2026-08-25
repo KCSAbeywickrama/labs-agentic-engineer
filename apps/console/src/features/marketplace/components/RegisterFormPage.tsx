@@ -16,12 +16,13 @@
  * under the License.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Alert,
   Box,
   Button,
   Checkbox,
+  Chip,
   CircularProgress,
   Divider,
   FormControlLabel,
@@ -37,9 +38,17 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { EmptyState } from "../../../components/EmptyState";
 import { PageHeader } from "../../../components/PageHeader";
 import type { components } from "../../../generated/aep-api";
-import { useOrgEnvironments, useRegisterExternalResource } from "../api/queries";
+import {
+  useExternalResources,
+  useOrgEnvironments,
+  useRegisterExternalResource,
+  useUpdateExternalResource,
+} from "../api/queries";
+import { isRegisteredExternal } from "../kind";
 
 type ConfigKeyDTO = components["schemas"]["ConfigKeyDTO"];
+type EnvValueCellDTO = components["schemas"]["EnvValueCellDTO"];
+type ExternalResourceDTO = components["schemas"]["ExternalResourceDTO"];
 type ResourceDocPointerDTO = components["schemas"]["ResourceDocPointerDTO"];
 type DocType = ResourceDocPointerDTO["type"];
 
@@ -47,6 +56,8 @@ type DocRow = {
   type: DocType;
   url: string;
 };
+
+const KEEP_SECRET_HELPER = "Leave blank to keep the current value";
 
 function slugFrom(prompt: string): string {
   const slug = prompt
@@ -70,29 +81,113 @@ function envFieldLabel(environment: string, key: string): string {
   return `${environment} · ${key.trim() || "(unnamed key)"}`;
 }
 
-export function RegisterFormPage({ prompt }: { prompt: string }) {
+function cellKey(environment: string, key: string): string {
+  return `${environment}:${key}`;
+}
+
+function cellStatus(
+  cells: EnvValueCellDTO[] | null | undefined,
+  environment: string,
+  key: string,
+): EnvValueCellDTO["status"] {
+  const cell = (cells ?? []).find(
+    (c) => c.environment === environment && c.key === key,
+  );
+  return cell?.status === "configured" ? "configured" : "unset";
+}
+
+function prefillFrom(record: ExternalResourceDTO): {
+  name: string;
+  description: string;
+  consumptionInstructions: string;
+  keys: ConfigKeyDTO[];
+  values: Record<string, string>;
+  docs: DocRow[];
+} {
+  const keys = (record.config ?? []).map((k) => ({
+    key: k.key,
+    description: k.description ?? "",
+    secret: Boolean(k.secret),
+  }));
+  const secretKeys = new Set(keys.filter((k) => k.secret).map((k) => k.key));
+  const values: Record<string, string> = {};
+  for (const cell of record.envCells ?? []) {
+    values[cellKey(cell.environment, cell.key)] = secretKeys.has(cell.key)
+      ? ""
+      : (cell.value ?? "");
+  }
+  const docs: DocRow[] = [];
+  for (const doc of record.resourceDocs ?? []) {
+    if (doc.url) docs.push({ type: doc.type, url: doc.url });
+  }
+  return {
+    name: record.name,
+    description: record.description ?? "",
+    consumptionInstructions: record.consumptionInstructions ?? "",
+    keys,
+    values,
+    docs,
+  };
+}
+
+export function RegisterFormPage({
+  prompt = "",
+  name: editName,
+}: {
+  prompt?: string;
+  name?: string;
+}) {
+  const isEdit = Boolean(editName);
   const navigate = useNavigate();
   const environments = useOrgEnvironments();
   const register = useRegisterExternalResource();
+  const update = useUpdateExternalResource(editName ?? "");
+  const resources = useExternalResources();
 
-  const [name, setName] = useState(slugFrom(prompt));
-  const [description, setDescription] = useState(prompt);
+  const record = (resources.data ?? []).find((r) => r.name === editName);
+  const editing =
+    isEdit && record != null && isRegisteredExternal(record) ? record : undefined;
+
+  const [name, setName] = useState(isEdit ? (editName ?? "") : slugFrom(prompt));
+  const [description, setDescription] = useState(isEdit ? "" : prompt);
   const [consumptionInstructions, setConsumptionInstructions] = useState("");
-  const [keys, setKeys] = useState<ConfigKeyDTO[]>([
-    { key: "API_KEY", description: "API secret", secret: true },
-  ]);
+  const [keys, setKeys] = useState<ConfigKeyDTO[]>(
+    isEdit ? [] : [{ key: "API_KEY", description: "API secret", secret: true }],
+  );
   const [values, setValues] = useState<Record<string, string>>({});
   const [docs, setDocs] = useState<DocRow[]>([]);
+  const [prefilledName, setPrefilledName] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!editing || prefilledName === editing.name) return;
+    const next = prefillFrom(editing);
+    setName(next.name);
+    setDescription(next.description);
+    setConsumptionInstructions(next.consumptionInstructions);
+    setKeys(next.keys);
+    setValues(next.values);
+    setDocs(next.docs);
+    setPrefilledName(editing.name);
+  }, [editing, prefilledName]);
 
   const envNames = (environments.data ?? []).map((e) => e.name);
-  const cellKey = (environment: string, key: string) => `${environment}:${key}`;
+  const envCells = editing?.envCells;
 
   const missingValue =
     envNames.length === 0 ||
     keys.some((cfg) =>
-      envNames.some(
-        (environment) => !(values[cellKey(environment, cfg.key)] ?? "").trim(),
-      ),
+      envNames.some((environment) => {
+        const filled = (values[cellKey(environment, cfg.key)] ?? "").trim();
+        if (filled) return false;
+        if (
+          isEdit &&
+          cfg.secret &&
+          cellStatus(envCells, environment, cfg.key) === "configured"
+        ) {
+          return false;
+        }
+        return true;
+      }),
     );
 
   const canSubmit =
@@ -103,35 +198,43 @@ export function RegisterFormPage({ prompt }: { prompt: string }) {
     keys.every((k) => k.key.trim() && (k.description ?? "").trim()) &&
     !missingValue &&
     !environments.isLoading &&
-    !environments.isError;
+    !environments.isError &&
+    !(isEdit && !editing);
+
+  const submitError = isEdit
+    ? update.error instanceof Error
+      ? update.error.message
+      : null
+    : register.error instanceof Error
+      ? register.error.message
+      : null;
+  const submitPending = isEdit ? update.isPending : register.isPending;
 
   const submit = () => {
     const resourceDocs = pointersFromRows(docs);
-    register.mutate(
-      {
-        name: name.trim(),
-        description: description.trim(),
-        consumptionInstructions: consumptionInstructions.trim(),
-        config: keys,
-        envValues: keys.flatMap((cfg) =>
-          envNames.map((environment) => ({
-            environment,
-            key: cfg.key,
-            value: values[cellKey(environment, cfg.key)] ?? "",
-          })),
-        ),
-        ...(resourceDocs.length > 0 ? { resourceDocs } : {}),
-      },
-      {
-        onSuccess: () => {
-          void navigate({ to: "/resources" });
-        },
-      },
-    );
+    const body = {
+      name: name.trim(),
+      description: description.trim(),
+      consumptionInstructions: consumptionInstructions.trim(),
+      config: keys,
+      envValues: keys.flatMap((cfg) =>
+        envNames.map((environment) => ({
+          environment,
+          key: cfg.key,
+          value: values[cellKey(environment, cfg.key)] ?? "",
+        })),
+      ),
+      ...(resourceDocs.length > 0 ? { resourceDocs } : {}),
+    };
+    const onSuccess = () => {
+      void navigate({ to: "/resources" });
+    };
+    if (isEdit) {
+      update.mutate(body, { onSuccess });
+      return;
+    }
+    register.mutate(body, { onSuccess });
   };
-
-  const registerError =
-    register.error instanceof Error ? register.error.message : null;
 
   return (
     <PageContent>
@@ -148,9 +251,9 @@ export function RegisterFormPage({ prompt }: { prompt: string }) {
           Failed to load environments
         </Alert>
       )}
-      {registerError && (
+      {submitError && (
         <Alert severity="error" sx={{ mb: 2 }}>
-          {registerError}
+          {submitError}
         </Alert>
       )}
       <Stack spacing={3} sx={{ maxWidth: 720 }}>
@@ -159,6 +262,7 @@ export function RegisterFormPage({ prompt }: { prompt: string }) {
           value={name}
           onChange={(e) => setName(e.target.value)}
           required
+          disabled={isEdit}
         />
         <TextField
           label="Description"
@@ -172,18 +276,20 @@ export function RegisterFormPage({ prompt }: { prompt: string }) {
         <Box>
           <Stack direction="row" sx={{ justifyContent: "space-between", mb: 1 }}>
             <Typography variant="subtitle1">Config keys</Typography>
-            <Button
-              size="small"
-              startIcon={<Plus size={14} />}
-              onClick={() =>
-                setKeys((prev) => [
-                  ...prev,
-                  { key: "", description: "", secret: false },
-                ])
-              }
-            >
-              Add key
-            </Button>
+            {!isEdit && (
+              <Button
+                size="small"
+                startIcon={<Plus size={14} />}
+                onClick={() =>
+                  setKeys((prev) => [
+                    ...prev,
+                    { key: "", description: "", secret: false },
+                  ])
+                }
+              >
+                Add key
+              </Button>
+            )}
           </Stack>
           <Stack spacing={2}>
             {keys.map((cfg, index) => (
@@ -204,6 +310,7 @@ export function RegisterFormPage({ prompt }: { prompt: string }) {
                     )
                   }
                   sx={{ flex: 1 }}
+                  disabled={isEdit}
                 />
                 <TextField
                   label="Description"
@@ -223,6 +330,7 @@ export function RegisterFormPage({ prompt }: { prompt: string }) {
                   control={
                     <Checkbox
                       checked={Boolean(cfg.secret)}
+                      disabled={isEdit}
                       onChange={(e) =>
                         setKeys((prev) =>
                           prev.map((row, i) =>
@@ -236,15 +344,17 @@ export function RegisterFormPage({ prompt }: { prompt: string }) {
                   }
                   label="Secret"
                 />
-                <IconButton
-                  aria-label="Remove key"
-                  disabled={keys.length === 1}
-                  onClick={() =>
-                    setKeys((prev) => prev.filter((_, i) => i !== index))
-                  }
-                >
-                  <Trash2 size={16} />
-                </IconButton>
+                {!isEdit && (
+                  <IconButton
+                    aria-label="Remove key"
+                    disabled={keys.length === 1}
+                    onClick={() =>
+                      setKeys((prev) => prev.filter((_, i) => i !== index))
+                    }
+                  >
+                    <Trash2 size={16} />
+                  </IconButton>
+                )}
               </Stack>
             ))}
           </Stack>
@@ -277,20 +387,43 @@ export function RegisterFormPage({ prompt }: { prompt: string }) {
                     {cfg.key || "(unnamed key)"}
                   </Typography>
                   <Stack spacing={1.5}>
-                    {envNames.map((environment) => (
-                      <TextField
-                        key={environment}
-                        label={envFieldLabel(environment, cfg.key)}
-                        type={cfg.secret ? "password" : "text"}
-                        value={values[cellKey(environment, cfg.key)] ?? ""}
-                        onChange={(e) =>
-                          setValues((prev) => ({
-                            ...prev,
-                            [cellKey(environment, cfg.key)]: e.target.value,
-                          }))
-                        }
-                      />
-                    ))}
+                    {envNames.map((environment) => {
+                      const status = cellStatus(envCells, environment, cfg.key);
+                      return (
+                        <Stack
+                          key={environment}
+                          direction="row"
+                          spacing={1}
+                          sx={{ alignItems: "flex-start" }}
+                        >
+                          <TextField
+                            label={envFieldLabel(environment, cfg.key)}
+                            type={cfg.secret ? "password" : "text"}
+                            value={values[cellKey(environment, cfg.key)] ?? ""}
+                            onChange={(e) =>
+                              setValues((prev) => ({
+                                ...prev,
+                                [cellKey(environment, cfg.key)]: e.target.value,
+                              }))
+                            }
+                            sx={{ flex: 1 }}
+                            {...(isEdit && cfg.secret
+                              ? { helperText: KEEP_SECRET_HELPER }
+                              : {})}
+                          />
+                          {isEdit && (
+                            <Chip
+                              size="small"
+                              variant="outlined"
+                              label={
+                                status === "configured" ? "Configured" : "Unset"
+                              }
+                              sx={{ mt: 1 }}
+                            />
+                          )}
+                        </Stack>
+                      );
+                    })}
                   </Stack>
                 </Box>
               ))}
@@ -399,10 +532,10 @@ export function RegisterFormPage({ prompt }: { prompt: string }) {
           <Button
             variant="contained"
             onClick={submit}
-            disabled={!canSubmit || register.isPending}
-            loading={register.isPending}
+            disabled={!canSubmit || submitPending}
+            loading={submitPending}
           >
-            Register
+            {isEdit ? "Save" : "Register"}
           </Button>
         </Stack>
       </Stack>

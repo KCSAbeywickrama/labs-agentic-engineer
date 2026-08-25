@@ -24,9 +24,13 @@ import type { ElementType } from "react";
 import type { components } from "../../../generated/aep-api";
 import { CatalogTypeDrawer } from "./CatalogTypeDrawer";
 
+const navigate = vi.fn();
+
 // Router replaced so the "Used by" ProjectLink renders as a plain anchor
-// (createLink pattern, cf. ResourceDrawer.test).
+// (createLink pattern, cf. ResourceDrawer.test). useNavigate is the Edit
+// seam: registered stripe goes to the register form with ?name=.
 vi.mock("@tanstack/react-router", () => ({
+  useNavigate: () => navigate,
   createLink: (Component: ElementType) =>
     function MockLink({
       to,
@@ -120,6 +124,7 @@ function projectExternal(
 
 describe("CatalogTypeDrawer", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     resetDeleteState();
   });
 
@@ -158,7 +163,25 @@ describe("CatalogTypeDrawer", () => {
     expect(screen.getByText("demo-shop")).toBeInTheDocument();
     expect(screen.getByText("Ready")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Delete resource" })).toBeEnabled();
-    expect(screen.queryByRole("button", { name: /edit/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /edit/i })).toBeInTheDocument();
+  });
+
+  it("registered: Edit navigates to the register form with the logical name", () => {
+    render(
+      <CatalogTypeDrawer
+        kind="external"
+        resource={registeredExternal()}
+        open
+        onClose={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /edit/i }));
+
+    expect(navigate).toHaveBeenCalledWith({
+      to: "/resources/register/form",
+      search: { name: "stripe" },
+    });
   });
 
   it("project external: Connection-values note, no env-cell matrix, unused Delete, no Edit", () => {
