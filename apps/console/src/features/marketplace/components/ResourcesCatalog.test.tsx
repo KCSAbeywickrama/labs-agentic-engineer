@@ -154,9 +154,10 @@ describe("ResourcesCatalog", () => {
     expect(screen.queryByText("No platform resources")).not.toBeInTheDocument();
     expect(screen.queryByText("No external resources")).not.toBeInTheDocument();
     expect(screen.queryByRole("tab")).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: /register/i }),
-    ).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Register" })).toHaveAttribute(
+      "href",
+      "/resources/register",
+    );
   });
 
   it("renders one unified grid; only platform types carry the Platform chip", () => {
@@ -199,9 +200,10 @@ describe("ResourcesCatalog", () => {
     expect(within(githubCard as HTMLElement).queryByText("Platform")).not.toBeInTheDocument();
 
     expect(screen.queryByRole("tab")).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: /register/i }),
-    ).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Register" })).toHaveAttribute(
+      "href",
+      "/resources/register",
+    );
     expect(screen.queryByRole("button", { name: /edit/i })).not.toBeInTheDocument();
   });
 

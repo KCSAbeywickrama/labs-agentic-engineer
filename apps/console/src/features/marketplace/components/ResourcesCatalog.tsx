@@ -31,7 +31,8 @@ import {
   Stack,
   Typography,
 } from "@wso2/oxygen-ui";
-import { Boxes } from "@wso2/oxygen-ui-icons-react";
+import { Boxes, Plus } from "@wso2/oxygen-ui-icons-react";
+import { createLink } from "@tanstack/react-router";
 import { EmptyState } from "../../../components/EmptyState";
 import { PageHeader } from "../../../components/PageHeader";
 import type { components } from "../../../generated/aep-api";
@@ -45,6 +46,8 @@ type ConsumerDTO = components["schemas"]["ConsumerDTO"];
 type CatalogSelection =
   | { kind: "platform"; resource: PlatformResourceTypeDTO }
   | { kind: "external"; resource: ExternalResourceDTO };
+
+const RegisterLink = createLink(Button);
 
 function CatalogCard({
   name,
@@ -176,6 +179,15 @@ export function ResourcesCatalog() {
       <PageHeader
         title="Resources"
         subtitle="Platform types and third-party resources in this organization."
+        actions={
+          <RegisterLink
+            variant="contained"
+            startIcon={<Plus size={20} />}
+            to="/resources/register"
+          >
+            Register
+          </RegisterLink>
+        }
       />
       {body}
       <CatalogTypeDrawer
