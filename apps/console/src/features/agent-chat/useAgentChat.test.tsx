@@ -42,6 +42,8 @@ vi.mock("./api/conversations", async (importOriginal) => {
     ...real,
     fetchCurrentConversationId: (...a: unknown[]) => mockFetchCurrent(...a),
     rotateConversation: (...a: unknown[]) => mockRotate(...a),
+    rotateCurrentConversation: async (_qc: unknown, projectName: string) =>
+      mockRotate(projectName),
   };
 });
 
@@ -151,7 +153,23 @@ describe("useAgentChat — the shared thread (#430)", () => {
     // send, and passed explicitly rather than omitted so the wire shape is one
     // code path.
     await waitFor(() =>
-      expect(mockStartTurn).toHaveBeenCalledWith(PROJECT, "conv-1", "hello", []),
+      expect(mockStartTurn).toHaveBeenCalledWith(PROJECT, "conv-1", "hello", [], true),
+    );
+  });
+
+  it("omits collab when this chat is not a spec workspace", async () => {
+    const { result } = renderHook(() => useAgentChat(ORG, PROJECT, { collab: false }), {
+      wrapper: createWrapper(),
+    });
+    await waitFor(() => expect(result.current.conversationReady).toBe(true));
+
+    mockStartTurn.mockResolvedValue("turn-1");
+    await act(async () => {
+      await result.current.send("hello");
+    });
+
+    await waitFor(() =>
+      expect(mockStartTurn).toHaveBeenCalledWith(PROJECT, "conv-1", "hello", [], false),
     );
   });
 

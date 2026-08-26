@@ -106,6 +106,10 @@ slices.
   OrgSecretWriter (empty when that writer is unwired). Secret cell values are never copied into
   Plain. Project readiness iterates the design schema; stale binding keys cannot make a
   dependency configured.
+- **Consumption instructions on the ResourceType mark Registered** (ADR-0021). The process-local
+  org value plane is a cache: after aep-api restart, `registeredEnvCells` synthesizes configured
+  cells from the RT and `OrgCatalogVaultKey` reconstructs the org-catalog vault path — it does
+  not re-write secrets. Empty consumption instructions keep the row a Project External.
 - **A gate's provisioning run keeps an execution row.** It is the one execution kind the milestone model
   still writes: admitted when the drawer submits, finished by the readiness watcher, and its terminal state
   is what closes the gate issue.

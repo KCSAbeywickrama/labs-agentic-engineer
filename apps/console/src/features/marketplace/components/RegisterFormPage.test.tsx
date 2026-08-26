@@ -18,7 +18,9 @@
 
 // @vitest-environment jsdom
 
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { ReactElement } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { components } from "../../../generated/aep-api";
 
@@ -29,6 +31,17 @@ vi.mock("@tanstack/react-router", () => ({
     <a href={to}>{children}</a>
   ),
 }));
+
+const mockRotate = vi.fn(async (_projectName: string) => "fresh-conversation-id");
+vi.mock("../../agent-chat/api/conversations", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../../agent-chat/api/conversations")>();
+  return {
+    ...real,
+    rotateConversation: (projectName: string) => mockRotate(projectName),
+    rotateCurrentConversation: async (_qc: unknown, projectName: string) =>
+      mockRotate(projectName),
+  };
+});
 
 type EnvironmentDTO = components["schemas"]["EnvironmentDTO"];
 type ExternalResourceDTO = components["schemas"]["ExternalResourceDTO"];
@@ -85,9 +98,12 @@ vi.mock("../../agent-chat/components/AgentChatPanel", () => ({
 
 import { REGISTER_EXTERNAL_RESOURCE_COMMAND } from "@aep/contracts/commands";
 import {
+  addMessage,
   chatKeyFor,
   consumePendingSeed,
+  getMessages,
   peekPendingSeed,
+  replaceMessages,
 } from "../../agent-chat/chatStore";
 import {
   clearRegisterDraft,
@@ -134,6 +150,23 @@ function resetState() {
   };
 }
 
+function renderPage(ui: ReactElement) {
+  const qc = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
+}
+
+function registerChatKey() {
+  return chatKeyFor("acme", MARKETPLACE_CHAT_PROJECT);
+}
+
+async function waitForComposerSeed() {
+  await waitFor(() => {
+    expect(peekPendingSeed(registerChatKey())).not.toBeNull();
+  });
+}
+
 function registeredStripe(): ExternalResourceDTO {
   return {
     name: "stripe",
@@ -172,7 +205,7 @@ function renderEdit() {
     isLoading: false,
     isError: false,
   };
-  return render(<RegisterFormPage prompt="" name="stripe" />);
+  return renderPage(<RegisterFormPage prompt="" name="stripe" />);
 }
 
 function fillRequired() {
@@ -199,20 +232,31 @@ function submittedBody(): RegisterExternalResourceRequest {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockRotate.mockResolvedValue("fresh-conversation-id");
   resetState();
-  consumePendingSeed(chatKeyFor("acme", MARKETPLACE_CHAT_PROJECT));
-  clearRegisterDraft(chatKeyFor("acme", MARKETPLACE_CHAT_PROJECT));
+  consumePendingSeed(registerChatKey());
+  clearRegisterDraft(registerChatKey());
+  replaceMessages(registerChatKey(), []);
 });
 
 describe("RegisterFormPage", () => {
-  it("disables Register when required fields are empty", () => {
-    render(<RegisterFormPage prompt="" />);
+  it("shows field errors on Register instead of disabling the button", () => {
+    renderPage(<RegisterFormPage prompt="" />);
 
-    expect(screen.getByRole("button", { name: "Register" })).toBeDisabled();
+    const submit = screen.getByRole("button", { name: "Register" });
+    expect(submit).toBeEnabled();
+    fireEvent.click(submit);
+
+    expect(registerState.mutate).not.toHaveBeenCalled();
+    expect(screen.getAllByText("This field is required").length).toBeGreaterThan(0);
+    expect(screen.getByLabelText("development · API_KEY")).toHaveAttribute(
+      "aria-invalid",
+      "true",
+    );
   });
 
   it("labels env value fields from the environments hook, never a hardcoded Production", () => {
-    render(<RegisterFormPage prompt="" />);
+    renderPage(<RegisterFormPage prompt="" />);
 
     expect(screen.getByLabelText(/development/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/staging-local/i)).toBeInTheDocument();
@@ -222,7 +266,7 @@ describe("RegisterFormPage", () => {
   });
 
   it("gives each key × environment field a unique accessible name", () => {
-    render(<RegisterFormPage prompt="" />);
+    renderPage(<RegisterFormPage prompt="" />);
 
     fireEvent.click(screen.getByRole("button", { name: "Add key" }));
     fireEvent.change(screen.getAllByLabelText(/^Key/)[1]!, {
@@ -242,7 +286,7 @@ describe("RegisterFormPage", () => {
       refetch: vi.fn(),
     };
 
-    render(<RegisterFormPage prompt="" />);
+    renderPage(<RegisterFormPage prompt="" />);
 
     expect(screen.getByLabelText("Loading environments")).toBeInTheDocument();
     expect(screen.queryByLabelText(/development/i)).not.toBeInTheDocument();
@@ -257,7 +301,7 @@ describe("RegisterFormPage", () => {
       refetch: vi.fn(),
     };
 
-    render(<RegisterFormPage prompt="" />);
+    renderPage(<RegisterFormPage prompt="" />);
 
     expect(screen.getByRole("alert")).toHaveTextContent(
       "Failed to load environments",
@@ -272,7 +316,7 @@ describe("RegisterFormPage", () => {
       data: [],
     };
 
-    render(<RegisterFormPage prompt="" />);
+    renderPage(<RegisterFormPage prompt="" />);
 
     expect(
       screen.getByRole("heading", { name: "No OpenChoreo Environments" }),
@@ -290,7 +334,7 @@ describe("RegisterFormPage", () => {
       error: new Error("An external resource named twilio already exists"),
     };
 
-    render(<RegisterFormPage prompt="" />);
+    renderPage(<RegisterFormPage prompt="" />);
 
     expect(screen.getByRole("alert")).toHaveTextContent(
       "An external resource named twilio already exists",
@@ -299,7 +343,7 @@ describe("RegisterFormPage", () => {
   });
 
   it("navigates to /resources after a successful submit", () => {
-    render(<RegisterFormPage prompt="" />);
+    renderPage(<RegisterFormPage prompt="" />);
 
     fireEvent.change(screen.getByLabelText(/^Name/), {
       target: { value: "twilio" },
@@ -324,7 +368,7 @@ describe("RegisterFormPage", () => {
   });
 
   it("Add doc defaults to Documentation", () => {
-    render(<RegisterFormPage prompt="" />);
+    renderPage(<RegisterFormPage prompt="" />);
 
     fireEvent.click(screen.getByRole("button", { name: "Add doc" }));
 
@@ -334,7 +378,7 @@ describe("RegisterFormPage", () => {
   });
 
   it("toggling File hides the URL textbox", () => {
-    render(<RegisterFormPage prompt="" />);
+    renderPage(<RegisterFormPage prompt="" />);
 
     fireEvent.click(screen.getByRole("button", { name: "Add doc" }));
     expect(screen.getByLabelText("URL")).toBeInTheDocument();
@@ -346,7 +390,7 @@ describe("RegisterFormPage", () => {
   });
 
   it("Register mutate sends a URL write row after adding a documentation URL", () => {
-    render(<RegisterFormPage prompt="" />);
+    renderPage(<RegisterFormPage prompt="" />);
     fillRequired();
 
     fireEvent.click(screen.getByRole("button", { name: "Add doc" }));
@@ -362,7 +406,7 @@ describe("RegisterFormPage", () => {
   });
 
   it("Register mutate sends fileName and content, not url, when a file is chosen", async () => {
-    render(<RegisterFormPage prompt="" />);
+    renderPage(<RegisterFormPage prompt="" />);
     fillRequired();
 
     fireEvent.click(screen.getByRole("button", { name: "Add doc" }));
@@ -384,18 +428,54 @@ describe("RegisterFormPage", () => {
     ]);
   });
 
-  it("seeds /register-external-resource with the composer prompt on first open", () => {
+  it("rotates the register thread then seeds the composer prompt", async () => {
     const prompt = "Register Stripe as a payments API.";
-    render(<RegisterFormPage prompt={prompt} />);
-    const seed = peekPendingSeed(chatKeyFor("acme", MARKETPLACE_CHAT_PROJECT));
-    expect(seed).toEqual({
+    renderPage(<RegisterFormPage prompt={prompt} />);
+    await waitForComposerSeed();
+    expect(mockRotate).toHaveBeenCalledWith(MARKETPLACE_CHAT_PROJECT);
+    expect(peekPendingSeed(registerChatKey())).toEqual({
       message: `${REGISTER_EXTERNAL_RESOURCE_COMMAND} ${prompt}`,
       guarded: true,
     });
+    expect(navigate).toHaveBeenCalledWith({
+      to: "/resources/register/form",
+      replace: true,
+      state: {},
+    });
+  });
+
+  it("rotates and re-seeds even when the local log still has an old user turn", async () => {
+    addMessage(registerChatKey(), {
+      role: "user",
+      content: `${REGISTER_EXTERNAL_RESOURCE_COMMAND} already sent`,
+      status: "completed",
+    });
+    renderPage(<RegisterFormPage prompt="Register Stripe as a payments API." />);
+    await waitForComposerSeed();
+    expect(mockRotate).toHaveBeenCalledWith(MARKETPLACE_CHAT_PROJECT);
+    expect(getMessages(registerChatKey())).toEqual([]);
+  });
+
+  it("does not seed when rotation fails", async () => {
+    mockRotate.mockRejectedValueOnce(new Error("Failed to start a new conversation"));
+    renderPage(<RegisterFormPage prompt="Register Stripe as a payments API." />);
+    await waitFor(() => {
+      expect(
+        getMessages(registerChatKey()).some((m) => m.role === "error"),
+      ).toBe(true);
+    });
+    expect(peekPendingSeed(registerChatKey())).toBeNull();
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("does not rotate or seed without a composer prompt", () => {
+    renderPage(<RegisterFormPage prompt="" />);
+    expect(mockRotate).not.toHaveBeenCalled();
+    expect(peekPendingSeed(registerChatKey())).toBeNull();
   });
 
   it("opens agent chat on the register form and allows dismiss then reopen", () => {
-    render(<RegisterFormPage prompt="Register Twilio for SMS." />);
+    renderPage(<RegisterFormPage prompt="Register Twilio for SMS." />);
     expect(screen.getByTestId("agent-chat-panel")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Close agent chat" }));
     expect(screen.queryByTestId("agent-chat-panel")).not.toBeInTheDocument();
@@ -404,7 +484,7 @@ describe("RegisterFormPage", () => {
   });
 
   it("Register stays submittable after the chat is closed", () => {
-    render(<RegisterFormPage prompt="" />);
+    renderPage(<RegisterFormPage prompt="" />);
     fireEvent.click(screen.getByRole("button", { name: "Close agent chat" }));
     fillRequired();
     fireEvent.click(screen.getByRole("button", { name: "Register" }));
@@ -412,7 +492,7 @@ describe("RegisterFormPage", () => {
   });
 
   it("leaves env value fields unchanged after a chat draft that only patches description and consumption instructions", () => {
-    render(<RegisterFormPage prompt="" />);
+    renderPage(<RegisterFormPage prompt="" />);
     const env = screen.getByLabelText("development · API_KEY");
     fireEvent.change(env, { target: { value: "human-secret" } });
     const chatKey = chatKeyFor("acme", MARKETPLACE_CHAT_PROJECT);
@@ -429,16 +509,15 @@ describe("RegisterFormPage", () => {
     );
   });
 
-  it("leaves the form empty until a draft arrives when the composer prompt is present", () => {
-    render(<RegisterFormPage prompt="an API" />);
-    expect(screen.getByLabelText(/^Name/)).toHaveValue("");
-    expect(screen.getByLabelText(/^Description/)).toHaveValue("");
-    expect(screen.getByLabelText(/Consumption instructions/i)).toHaveValue("");
-    expect(screen.queryByLabelText(/development ·/)).not.toBeInTheDocument();
+  it("shows a spinner instead of empty fields while the agent works on a composer prompt", () => {
+    renderPage(<RegisterFormPage prompt="an API" />);
+    expect(screen.getByLabelText("The agent is working on this resource")).toBeInTheDocument();
+    expect(screen.queryByLabelText(/^Name/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Environment values")).not.toBeInTheDocument();
   });
 
   it("fills non-secret fields from the draft after answers", () => {
-    render(<RegisterFormPage prompt="an API" />);
+    renderPage(<RegisterFormPage prompt="an API" />);
     act(() => {
       publishRegisterDraft(chatKeyFor("acme", MARKETPLACE_CHAT_PROJECT), {
         name: "stripe",
@@ -457,7 +536,7 @@ describe("RegisterFormPage", () => {
   });
 
   it("does not change a human-typed env value when a later draft patches description only", () => {
-    render(<RegisterFormPage prompt="an API" />);
+    renderPage(<RegisterFormPage prompt="an API" />);
     const chatKey = chatKeyFor("acme", MARKETPLACE_CHAT_PROJECT);
     act(() => {
       publishRegisterDraft(chatKey, {
@@ -532,6 +611,66 @@ describe("RegisterFormPage edit mode", () => {
 
   it("does not seed the register command in edit mode", () => {
     renderEdit();
-    expect(peekPendingSeed(chatKeyFor("acme", MARKETPLACE_CHAT_PROJECT))).toBeNull();
+    expect(peekPendingSeed(registerChatKey())).toBeNull();
+    expect(mockRotate).not.toHaveBeenCalled();
+  });
+
+  it("replaces the first-turn spinner with the question form when the agent asks", async () => {
+    renderPage(<RegisterFormPage prompt="github" />);
+    await waitForComposerSeed();
+    expect(screen.getByLabelText("The agent is working on this resource")).toBeInTheDocument();
+
+    act(() => {
+      addMessage(chatKeyFor("acme", MARKETPLACE_CHAT_PROJECT), {
+        role: "question",
+        turnId: "t1",
+        toolCallId: "tc1",
+        questions: [
+          {
+            question: "How should consuming projects authenticate to GitHub?",
+            options: [{ label: "PAT" }, { label: "GitHub App" }],
+          },
+        ],
+      });
+    });
+
+    expect(screen.getByTestId("chat-question-form")).toBeInTheDocument();
+    expect(screen.queryByLabelText(/^Name/)).not.toBeInTheDocument();
+    expect(
+      screen.getByText("How should consuming projects authenticate to GitHub?"),
+    ).toBeInTheDocument();
+    expect(navigate).not.toHaveBeenCalledWith({ to: "/resources" });
+  });
+
+  it("keeps the question pane after Continue until a draft arrives", async () => {
+    const chatKey = registerChatKey();
+    renderPage(<RegisterFormPage prompt="github" />);
+    await waitForComposerSeed();
+    act(() => {
+      addMessage(chatKey, {
+        role: "question",
+        turnId: "t1",
+        toolCallId: "tc1",
+        questions: [
+          {
+            question: "How should consuming projects authenticate to GitHub?",
+            options: [{ label: "PAT" }, { label: "GitHub App" }],
+          },
+        ],
+      });
+    });
+    fireEvent.click(screen.getByText("PAT"));
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    act(() => {
+      addMessage(chatKey, {
+        role: "user",
+        content: 'Answer to "How should consuming projects authenticate to GitHub?": PAT',
+        status: "completed",
+      });
+    });
+
+    expect(screen.getByTestId("chat-question-form")).toBeInTheDocument();
+    expect(screen.getByText("Drafting the catalog form from your answers.")).toBeInTheDocument();
+    expect(screen.queryByLabelText(/^Name/)).not.toBeInTheDocument();
   });
 });

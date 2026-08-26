@@ -17,6 +17,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   Alert,
   Box,
@@ -35,17 +36,31 @@ import {
 } from "@wso2/oxygen-ui";
 import { Plus, Trash2 } from "@wso2/oxygen-ui-icons-react";
 import { Link, useNavigate } from "@tanstack/react-router";
+import type { AskQuestionInput } from "@aep/agent-stream";
 import { REGISTER_EXTERNAL_RESOURCE_COMMAND } from "@aep/contracts/commands";
 import { useSession } from "../../../auth/SessionContext";
 import { EmptyState } from "../../../components/EmptyState";
 import { PageHeader } from "../../../components/PageHeader";
 import type { components } from "../../../generated/aep-api";
-import { chatKeyFor, setPendingSeed } from "../../agent-chat/chatStore";
 import {
+  rotateCurrentConversation,
+} from "../../agent-chat/api/conversations";
+import {
+  addMessage,
+  chatKeyFor,
+  getMessages,
+  replaceMessages,
+  setPendingSeed,
+  subscribe,
+} from "../../agent-chat/chatStore";
+import { pendingAnswerableQuestion } from "../../agent-chat/questionCards";
+import {
+  clearRegisterDraft,
   peekRegisterDraft,
   subscribeRegisterDraft,
 } from "../../agent-chat/registerDraftStore";
 import { AgentChatPanel } from "../../agent-chat/components/AgentChatPanel";
+import { ChatQuestionForm } from "../../spec/components/ChatQuestionForm";
 import {
   useExternalResources,
   useOrgEnvironments,
@@ -55,6 +70,10 @@ import {
 import { MARKETPLACE_CHAT_PROJECT } from "../constants";
 import { isRegisteredExternal } from "../kind";
 import { applyRegisterDraft } from "../lib/registerDraft";
+import {
+  envValueCellKey,
+  validateRegisterForm,
+} from "../lib/registerFormValidation";
 import {
   rowsFromPointers,
   writesFromRows,
@@ -79,10 +98,6 @@ function slugFrom(prompt: string): string {
 
 function envFieldLabel(environment: string, key: string): string {
   return `${environment} · ${key.trim() || "(unnamed key)"}`;
-}
-
-function cellKey(environment: string, key: string): string {
-  return `${environment}:${key}`;
 }
 
 function cellStatus(
@@ -112,7 +127,7 @@ function prefillFrom(record: ExternalResourceDTO): {
   const secretKeys = new Set(keys.filter((k) => k.secret).map((k) => k.key));
   const values: Record<string, string> = {};
   for (const cell of record.envCells ?? []) {
-    values[cellKey(cell.environment, cell.key)] = secretKeys.has(cell.key)
+    values[envValueCellKey(cell.environment, cell.key)] = secretKeys.has(cell.key)
       ? ""
       : (cell.value ?? "");
   }
@@ -126,6 +141,10 @@ function prefillFrom(record: ExternalResourceDTO): {
   };
 }
 
+function fieldErr(message: string | undefined): { error: true; helperText: string } | Record<string, never> {
+  return message ? { error: true, helperText: message } : {};
+}
+
 export function RegisterFormPage({
   prompt = "",
   name: editName,
@@ -137,6 +156,7 @@ export function RegisterFormPage({
   const promptTrimmed = prompt.trim();
   const seedRegister = !isEdit && Boolean(promptTrimmed);
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { orgHandle } = useSession();
   const environments = useOrgEnvironments();
   const register = useRegisterExternalResource();
@@ -144,6 +164,11 @@ export function RegisterFormPage({
   const resources = useExternalResources();
   const [chatOpen, setChatOpen] = useState(true);
   const seededRef = useRef(false);
+  const [awaitingAgent, setAwaitingAgent] = useState(
+    () => !isEdit && Boolean(promptTrimmed),
+  );
+  const [heldQuestions, setHeldQuestions] = useState<AskQuestionInput[] | null>(null);
+  const [attemptedSubmit, setAttemptedSubmit] = useState(false);
 
   const record = (resources.data ?? []).find((r) => r.name === editName);
   const editing =
@@ -166,6 +191,11 @@ export function RegisterFormPage({
   const [prefilledName, setPrefilledName] = useState<string | null>(null);
 
   const chatKey = chatKeyFor(orgHandle ?? "default", MARKETPLACE_CHAT_PROJECT);
+  const messages = useSyncExternalStore(
+    useCallback((fn: () => void) => subscribe(chatKey, fn), [chatKey]),
+    () => getMessages(chatKey),
+  );
+  const pendingQuestion = pendingAnswerableQuestion(messages);
   const draft = useSyncExternalStore(
     useCallback((fn: () => void) => subscribeRegisterDraft(chatKey, fn), [chatKey]),
     () => peekRegisterDraft(chatKey),
@@ -199,17 +229,50 @@ export function RegisterFormPage({
     setKeys(next.keys);
     setValues(next.values);
     setDocs(next.docs);
+    setHeldQuestions(null);
+    setAwaitingAgent(false);
   }, [draft, isEdit]);
+
+  useEffect(() => {
+    if (pendingQuestion) setHeldQuestions(null);
+  }, [pendingQuestion]);
 
   useEffect(() => {
     if (seededRef.current || !seedRegister) return;
     seededRef.current = true;
-    setPendingSeed(
-      chatKeyFor(orgHandle ?? "default", MARKETPLACE_CHAT_PROJECT),
-      `${REGISTER_EXTERNAL_RESOURCE_COMMAND} ${promptTrimmed}`,
-      true,
-    );
-  }, [orgHandle, promptTrimmed, seedRegister]);
+    // Composer Start is a new register: demote the org-wide synthetic thread
+    // first so prior walks cannot accumulate past the model prompt cap.
+    replaceMessages(chatKey, []);
+    clearRegisterDraft(chatKey);
+    const instruction = `${REGISTER_EXTERNAL_RESOURCE_COMMAND} ${promptTrimmed}`;
+    let cancelled = false;
+    void (async () => {
+      try {
+        await rotateCurrentConversation(queryClient, MARKETPLACE_CHAT_PROJECT);
+      } catch (err) {
+        if (cancelled) return;
+        addMessage(chatKey, {
+          role: "error",
+          content:
+            err instanceof Error
+              ? err.message
+              : "Failed to start a new conversation.",
+        });
+        return;
+      }
+      if (cancelled) return;
+      setPendingSeed(chatKey, instruction, true);
+      void navigate({
+        to: "/resources/register/form",
+        replace: true,
+        state: {},
+      });
+    })();
+    return () => {
+      cancelled = true;
+      seededRef.current = false;
+    };
+  }, [chatKey, navigate, promptTrimmed, queryClient, seedRegister]);
 
   useEffect(() => {
     if (!editing || prefilledName === editing.name) return;
@@ -225,34 +288,33 @@ export function RegisterFormPage({
 
   const envNames = (environments.data ?? []).map((e) => e.name);
   const envCells = editing?.envCells;
+  const inFlight = messages.some((m) => m.role === "user" && m.status === "in_flight");
+  const showQuestions = pendingQuestion?.questions ?? heldQuestions;
+  const questionsSubmitting = Boolean(heldQuestions) && !pendingQuestion && !draft;
+  const showFirstTurnSpinner =
+    awaitingAgent &&
+    !showQuestions &&
+    !draft &&
+    (inFlight || messages.length === 0);
 
-  const missingValue =
+  const errors = attemptedSubmit
+    ? validateRegisterForm({
+        name,
+        description,
+        consumptionInstructions,
+        keys,
+        values,
+        envNames,
+        isEdit,
+        ...(envCells ? { envCells } : {}),
+      })
+    : null;
+
+  const submitBlocked =
+    environments.isLoading ||
+    environments.isError ||
     envNames.length === 0 ||
-    keys.some((cfg) =>
-      envNames.some((environment) => {
-        const filled = (values[cellKey(environment, cfg.key)] ?? "").trim();
-        if (filled) return false;
-        if (
-          isEdit &&
-          cfg.secret &&
-          cellStatus(envCells, environment, cfg.key) === "configured"
-        ) {
-          return false;
-        }
-        return true;
-      }),
-    );
-
-  const canSubmit =
-    Boolean(name.trim()) &&
-    Boolean(description.trim()) &&
-    Boolean(consumptionInstructions.trim()) &&
-    keys.length > 0 &&
-    keys.every((k) => k.key.trim() && (k.description ?? "").trim()) &&
-    !missingValue &&
-    !environments.isLoading &&
-    !environments.isError &&
-    !(isEdit && !editing);
+    (isEdit && !editing);
 
   const submitError = isEdit
     ? update.error instanceof Error
@@ -264,6 +326,21 @@ export function RegisterFormPage({
   const submitPending = isEdit ? update.isPending : register.isPending;
 
   const submit = () => {
+    if (submitBlocked || submitPending) return;
+    const invalid = validateRegisterForm({
+      name,
+      description,
+      consumptionInstructions,
+      keys,
+      values,
+      envNames,
+      isEdit,
+      ...(envCells ? { envCells } : {}),
+    });
+    if (invalid) {
+      setAttemptedSubmit(true);
+      return;
+    }
     const resourceDocs = writesFromRows(docs);
     const body = {
       name: name.trim(),
@@ -274,7 +351,7 @@ export function RegisterFormPage({
         envNames.map((environment) => ({
           environment,
           key: cfg.key,
-          value: values[cellKey(environment, cfg.key)] ?? "",
+          value: values[envValueCellKey(environment, cfg.key)] ?? "",
         })),
       ),
       ...(resourceDocs.length > 0 ? { resourceDocs } : {}),
@@ -340,13 +417,40 @@ export function RegisterFormPage({
               {submitError}
             </Alert>
           )}
-          <Stack spacing={3} sx={{ maxWidth: 720 }}>
+          {showQuestions?.length ? (
+            <ChatQuestionForm
+              org={orgHandle ?? "default"}
+              projectName={MARKETPLACE_CHAT_PROJECT}
+              questions={showQuestions}
+              streaming={pendingQuestion?.streaming === true}
+              submitting={questionsSubmitting}
+              onSubmitted={() => setHeldQuestions(showQuestions)}
+            />
+          ) : showFirstTurnSpinner ? (
+            <Box
+              sx={{
+                minHeight: 280,
+                display: "flex",
+                flexDirection: "column",
+                gap: 2,
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <CircularProgress size={28} aria-label="The agent is working on this resource" />
+              <Typography variant="body2" color="text.secondary">
+                The agent is working on this resource
+              </Typography>
+            </Box>
+          ) : (
+          <Stack spacing={3} sx={{ maxWidth: 720 }} component="form" onSubmit={(e) => { e.preventDefault(); submit(); }}>
             <TextField
               label="Name"
               value={name}
               onChange={(e) => setName(e.target.value)}
               required
               disabled={isEdit}
+              {...fieldErr(errors?.name)}
             />
             <TextField
               label="Description"
@@ -355,6 +459,7 @@ export function RegisterFormPage({
               required
               multiline
               minRows={2}
+              {...fieldErr(errors?.description)}
             />
 
             <Box>
@@ -362,6 +467,7 @@ export function RegisterFormPage({
                 <Typography variant="subtitle1">Config keys</Typography>
                 {!isEdit && (
                   <Button
+                    type="button"
                     size="small"
                     startIcon={<Plus size={14} />}
                     onClick={() =>
@@ -375,6 +481,11 @@ export function RegisterFormPage({
                   </Button>
                 )}
               </Stack>
+              {errors?.configKeys ? (
+                <Typography variant="caption" color="error" sx={{ display: "block", mb: 1 }}>
+                  {errors.configKeys}
+                </Typography>
+              ) : null}
               <Stack spacing={2}>
                 {keys.map((cfg, index) => (
                   <Stack
@@ -395,6 +506,7 @@ export function RegisterFormPage({
                       }
                       sx={{ flex: 1 }}
                       disabled={isEdit}
+                      {...fieldErr(errors?.keys[index]?.key)}
                     />
                     <TextField
                       label="Description"
@@ -409,6 +521,7 @@ export function RegisterFormPage({
                         )
                       }
                       sx={{ flex: 2 }}
+                      {...fieldErr(errors?.keys[index]?.description)}
                     />
                     <FormControlLabel
                       control={
@@ -444,6 +557,7 @@ export function RegisterFormPage({
               </Stack>
             </Box>
 
+            {keys.length > 0 ? (
             <Box>
               <Typography variant="subtitle1" gutterBottom>
                 Environment values
@@ -473,6 +587,8 @@ export function RegisterFormPage({
                       <Stack spacing={1.5}>
                         {envNames.map((environment) => {
                           const status = cellStatus(envCells, environment, cfg.key);
+                          const valueErr =
+                            errors?.values[envValueCellKey(environment, cfg.key)];
                           return (
                             <Stack
                               key={environment}
@@ -483,17 +599,19 @@ export function RegisterFormPage({
                               <TextField
                                 label={envFieldLabel(environment, cfg.key)}
                                 type={cfg.secret ? "password" : "text"}
-                                value={values[cellKey(environment, cfg.key)] ?? ""}
+                                value={values[envValueCellKey(environment, cfg.key)] ?? ""}
                                 onChange={(e) =>
                                   setValues((prev) => ({
                                     ...prev,
-                                    [cellKey(environment, cfg.key)]: e.target.value,
+                                    [envValueCellKey(environment, cfg.key)]: e.target.value,
                                   }))
                                 }
                                 sx={{ flex: 1 }}
-                                {...(isEdit && cfg.secret
-                                  ? { helperText: KEEP_SECRET_HELPER }
-                                  : {})}
+                                error={Boolean(valueErr)}
+                                helperText={
+                                  valueErr ??
+                                  (isEdit && cfg.secret ? KEEP_SECRET_HELPER : undefined)
+                                }
                               />
                               {isEdit && (
                                 <Chip
@@ -514,6 +632,7 @@ export function RegisterFormPage({
                 </Stack>
               )}
             </Box>
+            ) : null}
 
             <Divider />
 
@@ -525,24 +644,30 @@ export function RegisterFormPage({
               multiline
               minRows={3}
               fullWidth
+              {...fieldErr(errors?.consumptionInstructions)}
             />
 
             <ResourceDocsFields docs={docs} onChange={setDocs} />
 
             <Stack direction="row" spacing={2} sx={{ justifyContent: "flex-end" }}>
-              <Button onClick={() => void navigate({ to: "/resources" })}>
+              <Button type="button" onClick={() => void navigate({ to: "/resources" })}>
                 Cancel
               </Button>
               <Button
+                type="submit"
                 variant="contained"
-                onClick={submit}
-                disabled={!canSubmit || submitPending}
+                disabled={submitBlocked || submitPending}
                 loading={submitPending}
+                onClick={(e) => {
+                  e.preventDefault();
+                  submit();
+                }}
               >
                 {isEdit ? "Save" : "Register"}
               </Button>
             </Stack>
           </Stack>
+          )}
         </Box>
         {chatOpen ? (
           <Collapse
@@ -561,6 +686,7 @@ export function RegisterFormPage({
             <AgentChatPanel
               org={orgHandle ?? "default"}
               projectName={MARKETPLACE_CHAT_PROJECT}
+              specWorkspace={false}
               onClose={() => setChatOpen(false)}
             />
           </Collapse>

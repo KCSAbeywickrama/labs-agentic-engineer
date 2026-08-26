@@ -973,6 +973,13 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// imports the dependencies feature (the *Catalog satisfies
 	// spec.OrgServiceResolver structurally).
 	artifactStore.SetOrgServiceResolver(orgEndpointCatalog)
+	// Read-time external-resource registry reuse (rule 2): the same
+	// ResourceType-backed catalog that backs MCP list_external_resources marks
+	// each design's `external` dependencies resolved when the name is already
+	// registered. Consumer-side wiring — spec never imports the dependencies
+	// feature (*ExternalResourceCatalog satisfies spec.ExternalResourceResolver
+	// structurally).
+	artifactStore.SetExternalResourceResolver(externalResourceRTCatalog)
 
 	// Dependency provisioning (dependency-management Phase 6): the value/param
 	// collection surface + the `provision` gate funnel. The provisioner cores
@@ -1042,7 +1049,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	preflightSvc := build.NewPreflightService(build.PreflightDeps{
 		Design:  designComponents{store: artifactStore},
 		Status:  buildProvisionStatus{svc: provisioningSvc},
-		Catalog: buildOrgCatalog{plane: catalogValuePlane},
+		Catalog: buildOrgCatalog{svc: provisioningSvc},
 	})
 	// delivery — the Delivery Pipeline domain (P6): the public single-tag build
 	// surface, the task read + promote-dispatch surface, and the task-log SSE

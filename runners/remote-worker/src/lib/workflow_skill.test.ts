@@ -223,6 +223,7 @@ const RESEARCH = path.join(LIBRARY, "aep", "references", "external-dependency-re
 test("architecture description still triggers on resolving a dependency", () => {
   const skill = fs.readFileSync(ARCHITECTURE, "utf8");
   const frontmatter = skill.slice(0, skill.indexOf("\n---", 4));
+  assert.match(frontmatter, /Reuse org catalog resources/);
   assert.match(frontmatter, /resolving\/reconsidering any dependency/);
 });
 
@@ -238,6 +239,9 @@ test("architecture prefers a Registered External resource over a new-name Projec
   );
   assert.ok(skill.includes("**new** name"), "a Project External resource uses a new name");
   assert.ok(skill.includes("org values stay on the Registered name"), "org values stay on the Registered name");
+  assert.ok(skill.includes("org-level one wins"), "org catalog rows outrank a new Project External name");
+  assert.ok(skill.includes("user-asked reconsider"), "leaving a fitting org row requires a reconsider");
+  assert.ok(!skill.includes("unresolved on purpose"), "catalog reuse is the github example, not an invented needs-spec");
   assert.ok(!skill.includes("{type, url}"), "MCP pointer shape belongs to the list tool, not the skill");
   assert.ok(!skill.includes("{type, path}"), "MCP pointer shape belongs to the list tool, not the skill");
 });

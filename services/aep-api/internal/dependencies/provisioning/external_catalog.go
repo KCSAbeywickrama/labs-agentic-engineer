@@ -88,8 +88,9 @@ type ResourceInstance struct {
 // package; authoring now builds its definition off the design — see
 // build_provision.go / value_service.go).
 //
-// Env cells and instances come from CatalogValuePlane when it is wired;
-// otherwise they stay empty.
+// Env cells come from CatalogValuePlane when present; when the plane is empty
+// after restart, Registered rows (non-empty consumption instructions on the
+// RT) get synthesized cells so list and preflight still treat them as org-held.
 func (s *Service) ListExternalResources(ctx context.Context, orgID string) ([]ExternalResourceView, error) {
 	defs, err := s.rtCatalog.List(ctx, orgID)
 	if err != nil {
@@ -111,12 +112,162 @@ func (s *Service) ListExternalResources(ctx context.Context, orgID string) ([]Ex
 			ResourceDocs:            def.ResourceDocs,
 		}
 		if s.catalogValuePlane != nil {
-			view.EnvCells = append([]EnvCell(nil), s.catalogValuePlane.EnvCells(orgID, def.Name)...)
 			view.Instances = append([]ResourceInstance(nil), s.catalogValuePlane.Instances(orgID, def.Name)...)
 		}
+		view.EnvCells = s.registeredEnvCells(ctx, orgID, def.Name)
 		out = append(out, view)
 	}
 	return out, nil
+}
+
+// isRegisteredExternalDef reports whether an RT-backed catalog row is a
+// Registered External (org value plane) rather than a Project External.
+// Register always writes consumption instructions; project provision
+// authors the RT with them empty (see ExternalResourceProvisioner).
+func isRegisteredExternalDef(def openchoreo.ExternalResourceDefinition) bool {
+	return strings.TrimSpace(def.ConsumptionInstructions) != ""
+}
+
+// HasOrgEnvCells reports whether `name` is a Registered External in this org
+// — non-empty process-local cells, or a catalog RT that still carries
+// consumption instructions after the value plane was wiped (aep-api restart).
+func (s *Service) HasOrgEnvCells(ctx context.Context, orgID, name string) bool {
+	if s == nil {
+		return false
+	}
+	if s.catalogValuePlane != nil && len(s.catalogValuePlane.EnvCells(orgID, name)) > 0 {
+		return true
+	}
+	def, ok := s.registeredCatalogDef(ctx, orgID, name)
+	return ok && isRegisteredExternalDef(def)
+}
+
+// registeredCatalogDef looks up the RT-backed catalog row for `name`.
+func (s *Service) registeredCatalogDef(ctx context.Context, orgID, name string) (openchoreo.ExternalResourceDefinition, bool) {
+	if s == nil || s.rtCatalog == nil {
+		return openchoreo.ExternalResourceDefinition{}, false
+	}
+	defs, err := s.rtCatalog.List(ctx, orgID)
+	if err != nil {
+		return openchoreo.ExternalResourceDefinition{}, false
+	}
+	want := strings.ToLower(strings.TrimSpace(name))
+	for i := range defs {
+		if strings.ToLower(defs[i].Name) == want {
+			return defs[i], true
+		}
+	}
+	return openchoreo.ExternalResourceDefinition{}, false
+}
+
+// registeredEnvCells returns org value-plane cells for a Registered External
+// name. Process-local cells win; when they are empty after restart, cells are
+// synthesized from the RT (consumption instructions mark Registered) and
+// warmed back onto the plane.
+func (s *Service) registeredEnvCells(ctx context.Context, orgID, name string) []EnvCell {
+	if s == nil {
+		return nil
+	}
+	if s.catalogValuePlane != nil {
+		if cells := s.catalogValuePlane.EnvCells(orgID, name); len(cells) > 0 {
+			return s.ensureRegisteredVaultPaths(ctx, orgID, name, cells)
+		}
+	}
+	def, ok := s.registeredCatalogDef(ctx, orgID, name)
+	if !ok || !isRegisteredExternalDef(def) {
+		return nil
+	}
+	cells := s.synthesizeRegisteredEnvCells(ctx, orgID, def)
+	if s.catalogValuePlane != nil && len(cells) > 0 {
+		s.catalogValuePlane.PutEnvCells(orgID, name, cells)
+	}
+	return cells
+}
+
+// synthesizeRegisteredEnvCells rebuilds org env cells from the RT schema and
+// the org's environments when the process-local plane is empty. Secret values
+// are never copied — only status, and SecretStorePath when the vault key can
+// be derived from the request JWT.
+func (s *Service) synthesizeRegisteredEnvCells(ctx context.Context, orgID string, def openchoreo.ExternalResourceDefinition) []EnvCell {
+	envs := []string{defaultEnv}
+	if names, err := s.ListOrgEnvironments(ctx, orgID); err == nil && len(names) > 0 {
+		envs = names
+	}
+	keys := toConfigKeys(def.Config)
+	if len(keys) == 0 {
+		return nil
+	}
+	out := make([]EnvCell, 0, len(keys)*len(envs))
+	vaultByEnv := map[string]string{}
+	if r, ok := s.orgSecrets.(orgCatalogVaultKeyResolver); ok {
+		for _, env := range envs {
+			path, err := r.OrgCatalogVaultKey(ctx, orgID, def.Name+"-"+env)
+			if err == nil && path != "" {
+				vaultByEnv[env] = path
+			}
+		}
+	}
+	for _, env := range envs {
+		for _, k := range keys {
+			out = append(out, EnvCell{
+				Environment: env,
+				Key:         k.Key,
+				Status:      "configured",
+			})
+		}
+	}
+	stampSecretStorePath(out, vaultByEnv)
+	return out
+}
+
+// ensureRegisteredVaultPaths fills empty SecretStorePath on already-warmed
+// cells when the org-catalog vault key can be derived from this request.
+// List may have synthesized cells before JWT claims were on the context
+// (preflight uses Background); provision then restamps from the user JWT.
+func (s *Service) ensureRegisteredVaultPaths(ctx context.Context, orgID, name string, cells []EnvCell) []EnvCell {
+	need := false
+	for _, c := range cells {
+		if c.SecretStorePath == "" {
+			need = true
+			break
+		}
+	}
+	if !need {
+		return cells
+	}
+	r, ok := s.orgSecrets.(orgCatalogVaultKeyResolver)
+	if !ok {
+		return cells
+	}
+	vaultByEnv := map[string]string{}
+	seen := map[string]struct{}{}
+	for _, c := range cells {
+		if _, dup := seen[c.Environment]; dup {
+			continue
+		}
+		seen[c.Environment] = struct{}{}
+		path, err := r.OrgCatalogVaultKey(ctx, orgID, name+"-"+c.Environment)
+		if err != nil || path == "" {
+			continue
+		}
+		vaultByEnv[c.Environment] = path
+	}
+	if len(vaultByEnv) == 0 {
+		return cells
+	}
+	out := append([]EnvCell(nil), cells...)
+	stampSecretStorePath(out, vaultByEnv)
+	if s.catalogValuePlane != nil {
+		s.catalogValuePlane.PutEnvCells(orgID, name, out)
+	}
+	return out
+}
+
+// orgCatalogVaultKeyResolver is the optional OrgSecretWriter capability that
+// reconstructs the org-catalog vault path without writing. *organization.SecretRefWriter
+// satisfies it; test fakes typically do not.
+type orgCatalogVaultKeyResolver interface {
+	OrgCatalogVaultKey(ctx context.Context, orgID, entityName string) (string, error)
 }
 
 // toConfigKeys adapts the OC client's leaf-level config-key type (kept

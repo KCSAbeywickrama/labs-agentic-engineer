@@ -16,26 +16,32 @@
  * under the License.
  */
 
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useRouterState } from "@tanstack/react-router";
 import { RegisterFormPage } from "../features/marketplace/components/RegisterFormPage";
 
 export const Route = createFileRoute("/resources_/register_/form")({
-  validateSearch: (
-    search: Record<string, unknown>,
-  ): { prompt?: string; name?: string } => {
-    const next: { prompt?: string; name?: string } = {};
-    if (typeof search.prompt === "string") next.prompt = search.prompt;
+  validateSearch: (search: Record<string, unknown>): { name?: string } => {
+    const next: { name?: string } = {};
     if (typeof search.name === "string") next.name = search.name;
     return next;
   },
   component: RegisterFormRoute,
 });
 
+function registerPromptOf(state: unknown): string {
+  if (typeof state !== "object" || state === null) return "";
+  const prompt = (state as { registerPrompt?: unknown }).registerPrompt;
+  return typeof prompt === "string" ? prompt : "";
+}
+
 function RegisterFormRoute() {
-  const { prompt, name } = Route.useSearch();
+  const { name } = Route.useSearch();
+  const prompt = useRouterState({
+    select: (s) => registerPromptOf(s.location.state),
+  });
   return (
     <RegisterFormPage
-      {...(prompt !== undefined ? { prompt } : {})}
+      {...(prompt ? { prompt } : {})}
       {...(name !== undefined ? { name } : {})}
     />
   );

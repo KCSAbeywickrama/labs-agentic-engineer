@@ -125,7 +125,8 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
 - The **build click's whole sequence** (`build`): mutex → repo → drawer pre-tag work → dependency hard
   gate → whole-spec gate + `v<N>` tag cut → milestone → supersede → run row → plan. The ORDER is the
   domain fact `build` owns; the two halves it does not own (the planning turn, the gate resolvers) are
-  root ports.
+  root ports. Dep-drawer preflight emits no `external-config` collect for a **Registered External
+  resource** the org catalog already holds (ADR-0021).
 - The **event plane** (`eventcore`): the platform's whole reaction to a pull request, a milestone-matched
   issue and a build terminal. It merges, mints and signals — the supervisor decides. Its three GitHub
   effects are a squash-merge, an issue in a milestone, and a build pinned to a merge SHA. It owns the

@@ -1,6 +1,6 @@
 ---
 name: architecture
-description: Use when deriving or enriching a component's design — deciding the component decomposition, filling a scaffolded design.json (language, dependencies, description, pinned skills), or resolving/reconsidering any dependency.
+description: Reuse org catalog resources when deriving or enriching a component's design — deciding the component decomposition, filling a scaffolded design.json (language, dependencies, description, pinned skills), or resolving/reconsidering any dependency.
 metadata:
   aep:
     kind: platform
@@ -183,27 +183,31 @@ schema violation that both the zod write-gate and the Go fold gate reject.
 | `platform-resource` | a backing resource the platform provisions (database, cache, IDP) | **your choice** — it becomes the env-var prefix | `resourceType` (a registered type), `parameters` | `list_platform_resource_types` |
 | `external` | a system OUTSIDE the platform (a SaaS API, a legacy service) | a **Registered External resource**'s exact name, else a **new** name for a **Project External resource** | `style` (`rest-api`\|`sdk`), then `specPath` or `package`; `config`; `candidates` | `list_external_resources` + `get_external_resource_schema`, else `web_search` |
 
-**Discover before you invent.** Call that last column's tool before authoring the
-entry, and take the name and schema from what it returns rather than from the
-requirement's wording — a **Registered External resource** described as
-"transactional email delivery" is the right reuse for an "email" need even when
-its name (`sendgrid`) doesn't echo the requirement. When nothing the catalog
-returns fills the role, leave the dependency unresolved rather than forcing a
-fit: a name that resolves to nothing is worse than an absent one.
+**Reuse.** Call that last column's tool before authoring the entry, and take
+the name and schema from the matching row rather than from the requirement's
+wording — a **Registered External resource** described as "transactional email
+delivery" is the right reuse for an "email" need even when its name (`sendgrid`)
+doesn't echo the requirement. When several rows could fill the role, the
+org-level one wins (a Registered External over a new Project External name; an
+org-service over a sibling you would otherwise add; a listed cluster resource
+type for `resourceType`). This step is done when every `external`,
+`org-service`, and `platform-resource` emitted this turn is taken from this
+turn's matching `list_*` result (exact `name` or `resourceType`), unless this
+turn is a user-asked reconsider. When nothing the catalog returns fills the
+role, leave the dependency unresolved rather than forcing a fit: a name that
+resolves to nothing is worse than an absent one.
 
 ```json
 "dependencies": [
   { "kind": "component", "name": "expense-api" },
   { "kind": "platform-resource", "name": "orders-db", "resourceType": "postgres-cnpg" },
-  { "kind": "external", "name": "stripe", "style": "sdk", "package": "npm:stripe@^14",
-    "config": [ { "key": "STRIPE_API_KEY", "secret": true, "description": "Your Stripe secret API key" } ] },
-  { "kind": "external", "name": "github", "style": "rest-api",
-    "description": "GitHub REST API for issues + PRs." }
+  { "kind": "external", "name": "github",
+    "config": [ { "key": "GITHUB_TOKEN", "secret": true, "description": "GitHub personal access token" } ],
+    "description": "Call GitHub issues + PRs — consumption instructions from the Registered row." }
 ]
 ```
 
-The `github` entry is unresolved on purpose: `style: "rest-api"` with no
-`specPath` computes `unresolved`/`needs-spec` — expected, not an error to fix.
+The `github` entry is authored from the catalog row.
 
 #### Reading a provider's real contract
 
@@ -262,9 +266,9 @@ operations its contract actually exposes:
    consumption instructions, and org resource docs pointers.
    Write consumption instructions into the dependency `description`.
    That name resolves from the registry regardless of
-   `style`/`specPath`/`package`. The user may switch to a different Registered
-   name, or create a **Project External resource** under a **new** name — a
-   separate catalog record; org values stay on the Registered name.
+   `style`/`specPath`/`package`. A user-asked reconsider may switch to a
+   different Registered name, or create a **Project External resource** under
+   a **new** name — a separate catalog record; org values stay on the Registered name.
 2. **`web_search` for candidates** when nothing registered fits. Stop at the
    options actually worth presenting — often 2–3 genuine contenders, sometimes
    one when a real signal already points to it.
@@ -279,8 +283,8 @@ operations its contract actually exposes:
    the user hands you a spec file, or the API is private/undocumented, `addFile`
    it to
    `specs/design/components/<component>/dependencies/<dep-name>.openapi.yaml` and
-   point `specPath` at that repo-relative path. With NO `specPath` the dep stays
-   `needs-spec` and the build gate asks the user for one. Don't hand-author a
+   point `specPath` at that repo-relative path. With NO `specPath` and no catalog
+   hit the dep stays `needs-spec` and the build gate asks the user for one. Don't hand-author a
    whole spec — the coding agent researches the API. An `sdk` needs `package`
    instead: one ecosystem-prefixed identifier (`npm:`, `go:`, `pypi:`), version
    inline but optional.
@@ -375,9 +379,10 @@ snapshot) and act on its current state.
   may name another. Pin the one they name — the same signal rule as discovery, so
   with no signal the choice stays theirs — then remove `candidates` per step 7.
 - **Unresolved.** Apply that kind's row in the table above.
-- **Already resolved — reconsider.** Present fresh alternatives as `candidates`,
-  or repin to the Registered name the user picks, or emit a **Project External
-  resource** under a **new** name.
+- **Already resolved — reconsider.** This is the only branch that may leave a
+  catalog row that still fills the role. Present fresh alternatives as
+  `candidates`, or repin to the Registered name the user picks, or emit a
+  **Project External resource** under a **new** name.
 
 Edit ONLY that one dependency's entry: re-emit the component's whole
 `design.json` (never a patch) with every other field and dependency carried over

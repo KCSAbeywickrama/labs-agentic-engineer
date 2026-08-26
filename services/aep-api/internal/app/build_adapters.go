@@ -95,18 +95,19 @@ func (b buildProvisionStatus) Ready(ctx context.Context, orgID, projectID, depNa
 	return st.Status != "unknown", nil
 }
 
-// buildOrgCatalog adapts CatalogValuePlane onto preflight's OrgCatalogReader:
-// non-empty org env cells means Registered External — the drawer must not
-// collect values. Nil plane is fail-open (HasOrgEnvCells false).
+// buildOrgCatalog adapts provisioning.Service onto preflight's OrgCatalogReader:
+// a Registered External (org env cells, or a catalog RT that still carries
+// consumption instructions after the value plane was wiped) must not collect
+// values. Nil service is fail-open (HasOrgEnvCells false).
 type buildOrgCatalog struct {
-	plane provisioning.CatalogValuePlane
+	svc *provisioning.Service
 }
 
-func (b buildOrgCatalog) HasOrgEnvCells(orgID, name string) bool {
-	if b.plane == nil {
+func (b buildOrgCatalog) HasOrgEnvCells(ctx context.Context, orgID, name string) bool {
+	if b.svc == nil {
 		return false
 	}
-	return len(b.plane.EnvCells(orgID, name)) > 0
+	return b.svc.HasOrgEnvCells(ctx, orgID, name)
 }
 
 // buildGateResolver adapts the provisioning feature onto the build plan path's

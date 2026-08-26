@@ -309,7 +309,7 @@ func TestPreflight_ExternalResolved_FallsThroughToConfigItem(t *testing.T) {
 // Catalog port.
 type fakeCatalog map[string]bool
 
-func (f fakeCatalog) HasOrgEnvCells(_, name string) bool { return f[name] }
+func (f fakeCatalog) HasOrgEnvCells(_ context.Context, _, name string) bool { return f[name] }
 
 // A Registered External already holds values on the org plane. Preflight must
 // not emit external-config (the Build drawer would force typing secrets that

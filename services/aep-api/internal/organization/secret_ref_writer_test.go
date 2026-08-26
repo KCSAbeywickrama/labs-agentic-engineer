@@ -314,6 +314,18 @@ func TestSecretRefWriter_WriteOrgCatalogSecret(t *testing.T) {
 	}
 }
 
+func TestSecretRefWriter_OrgCatalogVaultKey(t *testing.T) {
+	t.Parallel()
+	w := organization.NewSecretRefWriter(&fakeSMClient{}, nil, nil, nil)
+	got, err := w.OrgCatalogVaultKey(claimsCtx("ou-acme-uuid"), "acme", "github-development")
+	if err != nil {
+		t.Fatalf("OrgCatalogVaultKey: %v", err)
+	}
+	if !strings.HasPrefix(got, "user-app-secrets/") || !strings.HasSuffix(got, "/github-development-secrets") {
+		t.Fatalf("OrgCatalogVaultKey = %q, want user-app-secrets/<ns>/github-development-secrets", got)
+	}
+}
+
 // --- WriteGitHubPAT --------------------------------------------------------------
 
 func TestSecretRefWriter_WriteGitHubPAT(t *testing.T) {

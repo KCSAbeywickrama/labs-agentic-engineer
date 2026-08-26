@@ -49,7 +49,7 @@ describe("RegisterComposerPage", () => {
 
     expect(navigate).toHaveBeenCalledWith({
       to: "/resources/register/form",
-      search: { prompt: "Register Acme as an invoicing API." },
+      state: { registerPrompt: "Register Acme as an invoicing API." },
     });
   });
 
@@ -60,7 +60,7 @@ describe("RegisterComposerPage", () => {
 
     expect(navigate).toHaveBeenCalledWith({
       to: "/resources/register/form",
-      search: { prompt: STRIPE_PROMPT },
+      state: { registerPrompt: STRIPE_PROMPT },
     });
   });
 });

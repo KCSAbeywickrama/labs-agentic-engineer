@@ -799,6 +799,10 @@ Issues**. All six stay visible and enabled from project creation
 ([#522](https://github.com/wso2/labs-agentic-engineer/issues/522)). `Validation` →
 **`Validations`** is the only rename, per the plural rule.
 
+The org sidebar (no project in the route) is, in order: **Projects · Resources ·
+Endpoints · Alerts**. **Settings** stays in the footer in both contexts
+(ADR-0010).
+
 > Two older documents disagree with that list and with each other, both predating this file.
 > **ADR-0010** enumerates five and calls Builds *Tasks*; **`PRD.md`** enumerates five and calls
 > Spec *Specs & Design*. Neither mentions Validation, which ships. `PRD.md` is corrected alongside
@@ -809,3 +813,17 @@ Issues**. All six stay visible and enabled from project creation
 `Validations` (the runs) and `Acceptance criteria` (what they check) no longer share a word, so
 the link between them is made explicit in the section's empty state
 ([#533](https://github.com/wso2/labs-agentic-engineer/issues/533)).
+
+## Resources
+
+The org's catalog of **External resources** — integrations registered once so
+projects reuse them. Not a Settings page.
+
+| | |
+|---|---|
+| Nav / heading | **Resources** |
+| Primary action | **Register External resource** |
+| Register chat | the agent asks, then drafts the form; environment values stay on the form, never in chat |
+
+A later project's Build does not ask again for secrets the org already holds on
+that name.

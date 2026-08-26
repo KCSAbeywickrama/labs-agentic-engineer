@@ -62,7 +62,7 @@ export function RegisterComposerPage() {
     if (!trimmed) return;
     void navigate({
       to: "/resources/register/form",
-      search: { prompt: trimmed },
+      state: { registerPrompt: trimmed },
     });
   };
 

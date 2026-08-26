@@ -22,6 +22,7 @@
 // (The pre-#430 id was a per-browser localStorage mint, so a teammate's
 // interview was structurally invisible.)
 
+import type { QueryClient } from "@tanstack/react-query";
 import type { components } from "../../../generated/aep-api";
 import { client } from "../../../api/client";
 import { apiErrorMessage } from "../../../api/errors";
@@ -58,6 +59,16 @@ export async function rotateConversation(projectName: string): Promise<string> {
     throw new Error(apiErrorMessage(error, "Failed to start a new conversation"));
   }
   return data.conversationId;
+}
+
+/** Rotate the project's current thread and stamp the new id into the query cache. */
+export async function rotateCurrentConversation(
+  queryClient: QueryClient,
+  projectName: string,
+): Promise<string> {
+  const fresh = await rotateConversation(projectName);
+  queryClient.setQueryData(conversationKeys.current(projectName), fresh);
+  return fresh;
 }
 
 /** Query keys for the thread (react-query). */

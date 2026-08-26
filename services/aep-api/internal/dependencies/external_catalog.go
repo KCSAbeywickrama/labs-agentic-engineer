@@ -176,6 +176,19 @@ func (c *ExternalResourceCatalog) Update(ctx context.Context, orgID string, rt *
 	return err
 }
 
+// IsRegistered reports whether `name` is in the org's ResourceType-backed
+// catalog — the design-read registry-reuse hit (spec.ExternalResourceResolver).
+func (c *ExternalResourceCatalog) IsRegistered(ctx context.Context, orgID, name string) (bool, error) {
+	if c == nil {
+		return false, nil
+	}
+	def, err := c.Get(ctx, orgID, name)
+	if err != nil {
+		return false, err
+	}
+	return def != nil, nil
+}
+
 // newerExternalRT reports whether rt should be preferred over cur as the
 // current-schema ResourceType for one logical external-resource name (used by
 // both List and Get so they can never disagree). The RT with the NEWER

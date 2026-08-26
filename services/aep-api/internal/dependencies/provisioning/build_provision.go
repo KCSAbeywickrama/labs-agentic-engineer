@@ -247,11 +247,9 @@ func (s *Service) authorExternalPrepared(ctx context.Context, orgID, ocOrgID, pr
 	}
 	byEnv := designPreparedValues(keys)
 	registered := false
-	if s.catalogValuePlane != nil {
-		if cells := s.catalogValuePlane.EnvCells(orgID, in.Dependency); len(cells) > 0 {
-			byEnv = preparedValuesFromOrgCells(keys, cells)
-			registered = true
-		}
+	if cells := s.registeredEnvCells(ctx, orgID, in.Dependency); len(cells) > 0 {
+		byEnv = preparedValuesFromOrgCells(keys, cells)
+		registered = true
 	}
 
 	// External dependencies do not mint config-collection gates. When the caller
