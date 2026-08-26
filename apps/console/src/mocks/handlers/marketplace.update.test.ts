@@ -304,4 +304,124 @@ describe("PUT /dependencies/external-resources/{name}", () => {
       "+1999",
     );
   });
+
+  it("file create returns a path pointer and never content", async () => {
+    setScenario("empty");
+    const createdRes = await fetch(EXTERNAL, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(registerBody()),
+    });
+    expect(createdRes.status).toBe(201);
+
+    const res = await fetch(updateUrl("twilio"), {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(
+        registerBody({
+          envValues: [
+            { environment: "development", key: "auth_token", value: "" },
+            { environment: "development", key: "from_number", value: "+1555" },
+            { environment: "staging-local", key: "auth_token", value: "" },
+            { environment: "staging-local", key: "from_number", value: "+1666" },
+          ],
+          resourceDocs: [
+            {
+              type: "documentation",
+              fileName: "README.md",
+              content: "# Twilio\n",
+            },
+          ],
+        }),
+      ),
+    });
+    expect(res.status).toBe(200);
+    const raw = await res.text();
+    expect(raw).not.toContain("# Twilio");
+    expect(raw).not.toContain('"content"');
+    const updated = JSON.parse(raw) as ExternalResourceDTO;
+    expect(updated.resourceDocs).toEqual([
+      { type: "documentation", path: "twilio/README.md" },
+    ]);
+  });
+
+  it("URL-only write has no path", async () => {
+    setScenario("empty");
+    const createdRes = await fetch(EXTERNAL, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(
+        registerBody({
+          resourceDocs: [
+            { type: "openapi", url: "https://example.com/twilio/openapi.yaml" },
+          ],
+        }),
+      ),
+    });
+    expect(createdRes.status).toBe(201);
+    const created = (await createdRes.json()) as ExternalResourceDTO;
+    expect(created.resourceDocs?.[0]?.url).toBe(
+      "https://example.com/twilio/openapi.yaml",
+    );
+    expect(created.resourceDocs?.[0]?.path).toBeUndefined();
+
+    const res = await fetch(updateUrl("twilio"), {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(
+        registerBody({
+          envValues: [
+            { environment: "development", key: "auth_token", value: "" },
+            { environment: "development", key: "from_number", value: "+1555" },
+            { environment: "staging-local", key: "auth_token", value: "" },
+            { environment: "staging-local", key: "from_number", value: "+1666" },
+          ],
+          resourceDocs: [
+            { type: "openapi", url: "https://example.com/twilio/openapi-v2.yaml" },
+          ],
+        }),
+      ),
+    });
+    expect(res.status).toBe(200);
+    const updated = (await res.json()) as ExternalResourceDTO;
+    expect(updated.resourceDocs?.[0]?.url).toBe(
+      "https://example.com/twilio/openapi-v2.yaml",
+    );
+    expect(updated.resourceDocs?.[0]?.path).toBeUndefined();
+  });
+
+  it("returns 400 when a write row has both url and content", async () => {
+    setScenario("empty");
+    const createdRes = await fetch(EXTERNAL, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(registerBody()),
+    });
+    expect(createdRes.status).toBe(201);
+
+    const res = await fetch(updateUrl("twilio"), {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(
+        registerBody({
+          envValues: [
+            { environment: "development", key: "auth_token", value: "" },
+            { environment: "development", key: "from_number", value: "+1555" },
+            { environment: "staging-local", key: "auth_token", value: "" },
+            { environment: "staging-local", key: "from_number", value: "+1666" },
+          ],
+          resourceDocs: [
+            {
+              type: "openapi",
+              url: "https://example.com/twilio/openapi.yaml",
+              content: "# nope\n",
+            },
+          ],
+        }),
+      ),
+    });
+    expect(res.status).toBe(400);
+    const err = (await res.json()) as ApiError;
+    expect(err.code).toBe("bad_request");
+  });
 });

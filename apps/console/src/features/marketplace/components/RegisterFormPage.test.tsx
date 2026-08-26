@@ -18,7 +18,7 @@
 
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { components } from "../../../generated/aep-api";
 
@@ -31,8 +31,9 @@ vi.mock("@tanstack/react-router", () => ({
 }));
 
 type EnvironmentDTO = components["schemas"]["EnvironmentDTO"];
-
 type ExternalResourceDTO = components["schemas"]["ExternalResourceDTO"];
+type RegisterExternalResourceRequest =
+  components["schemas"]["RegisterExternalResourceRequest"];
 
 let environmentsState: {
   data?: EnvironmentDTO[];
@@ -143,6 +144,28 @@ function renderEdit() {
     isError: false,
   };
   return render(<RegisterFormPage prompt="" name="stripe" />);
+}
+
+function fillRequired() {
+  fireEvent.change(screen.getByLabelText(/^Name/), {
+    target: { value: "twilio" },
+  });
+  fireEvent.change(screen.getAllByLabelText(/^Description/)[0]!, {
+    target: { value: "Twilio SMS" },
+  });
+  fireEvent.change(screen.getByLabelText(/Consumption instructions/), {
+    target: { value: "Use the auth token as Bearer." },
+  });
+  fireEvent.change(screen.getByLabelText(/development/i), {
+    target: { value: "sk_dev" },
+  });
+  fireEvent.change(screen.getByLabelText(/staging-local/i), {
+    target: { value: "sk_stg" },
+  });
+}
+
+function submittedBody(): RegisterExternalResourceRequest {
+  return registerState.mutate.mock.calls[0]?.[0] as RegisterExternalResourceRequest;
 }
 
 beforeEach(() => {
@@ -267,6 +290,67 @@ describe("RegisterFormPage", () => {
 
     expect(registerState.mutate).toHaveBeenCalledTimes(1);
     expect(navigate).toHaveBeenCalledWith({ to: "/resources" });
+  });
+
+  it("Add doc defaults to Documentation", () => {
+    render(<RegisterFormPage prompt="" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Add doc" }));
+
+    expect(screen.getByRole("combobox", { name: "Type" })).toHaveTextContent(
+      "Documentation",
+    );
+  });
+
+  it("toggling File hides the URL textbox", () => {
+    render(<RegisterFormPage prompt="" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Add doc" }));
+    expect(screen.getByLabelText("URL")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "File" }));
+
+    expect(screen.queryByLabelText("URL")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Choose file" })).toBeInTheDocument();
+  });
+
+  it("Register mutate sends a URL write row after adding a documentation URL", () => {
+    render(<RegisterFormPage prompt="" />);
+    fillRequired();
+
+    fireEvent.click(screen.getByRole("button", { name: "Add doc" }));
+    fireEvent.change(screen.getByLabelText("URL"), {
+      target: { value: "https://example.com/docs.md" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Register" }));
+
+    expect(registerState.mutate).toHaveBeenCalledTimes(1);
+    expect(submittedBody().resourceDocs).toEqual([
+      { type: "documentation", url: "https://example.com/docs.md" },
+    ]);
+  });
+
+  it("Register mutate sends fileName and content, not url, when a file is chosen", async () => {
+    render(<RegisterFormPage prompt="" />);
+    fillRequired();
+
+    fireEvent.click(screen.getByRole("button", { name: "Add doc" }));
+    fireEvent.click(screen.getByRole("button", { name: "File" }));
+    const input = document.querySelector<HTMLInputElement>("input[type=file]");
+    expect(input).not.toBeNull();
+    fireEvent.change(input!, {
+      target: { files: [new File(["# Hello\n"], "README.md")] },
+    });
+    await waitFor(() => {
+      expect(screen.getByText("README.md")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Register" }));
+
+    expect(registerState.mutate).toHaveBeenCalledTimes(1);
+    expect(submittedBody().resourceDocs).toEqual([
+      { type: "documentation", fileName: "README.md", content: "# Hello\n" },
+    ]);
   });
 });
 

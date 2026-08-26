@@ -166,6 +166,26 @@ describe("CatalogTypeDrawer", () => {
     expect(screen.getByRole("button", { name: /edit/i })).toBeInTheDocument();
   });
 
+  it("renders a path pointer as text without a file body", () => {
+    render(
+      <CatalogTypeDrawer
+        kind="external"
+        resource={registeredExternal({
+          resourceDocs: [{ type: "documentation", path: "stripe/README.md" }],
+        })}
+        open
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("documentation")).toBeInTheDocument();
+    expect(screen.getByText("stripe/README.md")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: "stripe/README.md" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("# Stripe")).not.toBeInTheDocument();
+  });
+
   it("registered: Edit navigates to the register form with the logical name", () => {
     render(
       <CatalogTypeDrawer

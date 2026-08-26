@@ -354,25 +354,52 @@ func (e ProgressEventEmitter) Valid() bool {
 
 // Defines values for ResourceDocPointerDTOType.
 const (
-	Asyncapi      ResourceDocPointerDTOType = "asyncapi"
-	Documentation ResourceDocPointerDTOType = "documentation"
-	Graphql       ResourceDocPointerDTOType = "graphql"
-	Openapi       ResourceDocPointerDTOType = "openapi"
-	Protobuf      ResourceDocPointerDTOType = "protobuf"
+	ResourceDocPointerDTOTypeAsyncapi      ResourceDocPointerDTOType = "asyncapi"
+	ResourceDocPointerDTOTypeDocumentation ResourceDocPointerDTOType = "documentation"
+	ResourceDocPointerDTOTypeGraphql       ResourceDocPointerDTOType = "graphql"
+	ResourceDocPointerDTOTypeOpenapi       ResourceDocPointerDTOType = "openapi"
+	ResourceDocPointerDTOTypeProtobuf      ResourceDocPointerDTOType = "protobuf"
 )
 
 // Valid indicates whether the value is a known member of the ResourceDocPointerDTOType enum.
 func (e ResourceDocPointerDTOType) Valid() bool {
 	switch e {
-	case Asyncapi:
+	case ResourceDocPointerDTOTypeAsyncapi:
 		return true
-	case Documentation:
+	case ResourceDocPointerDTOTypeDocumentation:
 		return true
-	case Graphql:
+	case ResourceDocPointerDTOTypeGraphql:
 		return true
-	case Openapi:
+	case ResourceDocPointerDTOTypeOpenapi:
 		return true
-	case Protobuf:
+	case ResourceDocPointerDTOTypeProtobuf:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ResourceDocWriteDTOType.
+const (
+	ResourceDocWriteDTOTypeAsyncapi      ResourceDocWriteDTOType = "asyncapi"
+	ResourceDocWriteDTOTypeDocumentation ResourceDocWriteDTOType = "documentation"
+	ResourceDocWriteDTOTypeGraphql       ResourceDocWriteDTOType = "graphql"
+	ResourceDocWriteDTOTypeOpenapi       ResourceDocWriteDTOType = "openapi"
+	ResourceDocWriteDTOTypeProtobuf      ResourceDocWriteDTOType = "protobuf"
+)
+
+// Valid indicates whether the value is a known member of the ResourceDocWriteDTOType enum.
+func (e ResourceDocWriteDTOType) Valid() bool {
+	switch e {
+	case ResourceDocWriteDTOTypeAsyncapi:
+		return true
+	case ResourceDocWriteDTOTypeDocumentation:
+		return true
+	case ResourceDocWriteDTOTypeGraphql:
+		return true
+	case ResourceDocWriteDTOTypeOpenapi:
+		return true
+	case ResourceDocWriteDTOTypeProtobuf:
 		return true
 	default:
 		return false
@@ -1647,8 +1674,8 @@ type RegisterExternalResourceRequest struct {
 		Key         string `json:"key"`
 		Value       string `json:"value"`
 	} `json:"envValues"`
-	Name         string                  `json:"name"`
-	ResourceDocs []ResourceDocPointerDTO `json:"resourceDocs,omitempty"`
+	Name         string                `json:"name"`
+	ResourceDocs []ResourceDocWriteDTO `json:"resourceDocs,omitempty"`
 }
 
 // ResourceDocPointerDTO Org resource docs pointer (type + URL or repo path), not file bodies.
@@ -1660,6 +1687,19 @@ type ResourceDocPointerDTO struct {
 
 // ResourceDocPointerDTOType defines model for ResourceDocPointerDTO.Type.
 type ResourceDocPointerDTOType string
+
+// ResourceDocWriteDTO One resource-docs write row on register/update. Exactly one of {type,url} | {type,path} | {type,fileName,content}. List/GET never use this schema.
+type ResourceDocWriteDTO struct {
+	// Content UTF-8 text of a new or replacement file; never returned on GET.
+	Content  string                  `json:"content,omitempty"`
+	FileName string                  `json:"fileName,omitempty"`
+	Path     string                  `json:"path,omitempty"`
+	Type     ResourceDocWriteDTOType `json:"type"`
+	URL      string                  `json:"url,omitempty"`
+}
+
+// ResourceDocWriteDTOType defines model for ResourceDocWriteDTO.Type.
+type ResourceDocWriteDTOType string
 
 // ResourceInstanceDTO defines model for ResourceInstanceDTO.
 type ResourceInstanceDTO struct {

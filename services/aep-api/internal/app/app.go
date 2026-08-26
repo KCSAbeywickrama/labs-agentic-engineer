@@ -1028,6 +1028,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		Environments:      environmentClient,
 		CatalogValuePlane: catalogValuePlane,
 		OrgSecrets:        secretRefWriter,
+		OrgResourceDocs:   provisioning.NewGitOrgResourceDocs(repoService, gitOpsService),
 	})
 	// Assemble the dependencies domain (P8): the provisioning slice (7 ops over
 	// provisioningSvc) + the resource-type-discovery slice (ListPlatformResourceTypes

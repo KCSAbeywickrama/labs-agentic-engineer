@@ -117,6 +117,14 @@ type OrgSecretWriter interface {
 	WriteOrgCatalogSecret(ctx context.Context, orgID, entityName string, data map[string]string) error
 }
 
+// OrgResourceDocs commits UTF-8 resource-docs files into the per-org
+// org-resource-docs repo. Nil is a documented no-op for URL/path rows —
+// HTTP tests leave it unwired except file-row tests. A file row with a
+// nil store returns a 500-class wrap.
+type OrgResourceDocs interface {
+	CommitUTF8(ctx context.Context, orgID, logicalName, fileName, content string) (path string, err error)
+}
+
 // EnvironmentLister lists OpenChoreo Environment names for the org namespace.
 // Empty org → empty slice, never nil error-for-empty.
 type EnvironmentLister interface {

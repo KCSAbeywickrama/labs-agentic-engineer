@@ -289,7 +289,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
-          description: Key mutation, unset secret with empty value, missing required field, empty non-secret env value, or invalid resource-docs URL
+          description: Key mutation, unset secret with empty value, missing required field, empty non-secret env value, or invalid resource-docs row
         '404':
           content:
             application/json:
@@ -4231,6 +4231,33 @@ components:
       required:
       - type
       type: object
+    ResourceDocWriteDTO:
+      additionalProperties: false
+      description: >
+        One resource-docs write row on register/update. Exactly one of
+        {type,url} | {type,path} | {type,fileName,content}. List/GET never
+        use this schema.
+      properties:
+        type:
+          enum:
+          - documentation
+          - openapi
+          - graphql
+          - asyncapi
+          - protobuf
+          type: string
+        url:
+          type: string
+        path:
+          type: string
+        fileName:
+          type: string
+        content:
+          type: string
+          description: UTF-8 text of a new or replacement file; never returned on GET.
+      required:
+      - type
+      type: object
     ResourceInstanceDTO:
       additionalProperties: false
       properties:
@@ -4284,7 +4311,7 @@ components:
           type: string
         resourceDocs:
           items:
-            $ref: '#/components/schemas/ResourceDocPointerDTO'
+            $ref: '#/components/schemas/ResourceDocWriteDTO'
           nullable: true
           type: array
       required:

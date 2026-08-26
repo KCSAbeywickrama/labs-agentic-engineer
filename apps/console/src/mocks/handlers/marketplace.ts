@@ -34,6 +34,8 @@ type RegisterExternalResourceRequest =
   components["schemas"]["RegisterExternalResourceRequest"];
 type ExternalResourceDTO = components["schemas"]["ExternalResourceDTO"];
 type EnvValueCellDTO = components["schemas"]["EnvValueCellDTO"];
+type ResourceDocWriteDTO = components["schemas"]["ResourceDocWriteDTO"];
+type ResourceDocPointerDTO = components["schemas"]["ResourceDocPointerDTO"];
 
 function scenario(): MarketplaceScenario {
   return (
@@ -86,8 +88,39 @@ function sameConfigIdentity(
   return true;
 }
 
+function pointersFromWrite(
+  resourceName: string,
+  writes: ResourceDocWriteDTO[] | null | undefined,
+): { ok: true; pointers?: ResourceDocPointerDTO[] } | { ok: false } {
+  if (writes == null) return { ok: true };
+  const pointers: ResourceDocPointerDTO[] = [];
+  for (const row of writes) {
+    const url = (row.url ?? "").trim();
+    const path = (row.path ?? "").trim();
+    const fileName = (row.fileName ?? "").trim();
+    const content = row.content ?? "";
+    if (url && content) {
+      return { ok: false };
+    }
+    const file = Boolean(fileName && content);
+    const n = Number(Boolean(url)) + Number(Boolean(path)) + Number(file);
+    if (n !== 1) {
+      return { ok: false };
+    }
+    if (url) {
+      pointers.push({ type: row.type, url });
+    } else if (file) {
+      pointers.push({ type: row.type, path: `${resourceName}/${fileName}` });
+    } else {
+      pointers.push({ type: row.type, path });
+    }
+  }
+  return { ok: true, pointers };
+}
+
 function registeredFromRequest(
   body: RegisterExternalResourceRequest,
+  resourceDocs?: ResourceDocPointerDTO[],
 ): ExternalResourceDTO {
   const secretKeys = new Set(
     body.config.filter((k) => k.secret === true).map((k) => k.key),
@@ -110,7 +143,7 @@ function registeredFromRequest(
     config: body.config,
     consumers: [],
     envCells,
-    ...(body.resourceDocs ? { resourceDocs: body.resourceDocs } : {}),
+    ...(resourceDocs && resourceDocs.length > 0 ? { resourceDocs } : {}),
   };
 }
 
@@ -160,7 +193,14 @@ export const marketplaceHandlers = [
         409,
       );
     }
-    const created = registeredFromRequest(body);
+    const mapped = pointersFromWrite(body.name.trim(), body.resourceDocs);
+    if (!mapped.ok) {
+      return errorJson(
+        { code: "bad_request", message: "invalid resourceDocs write row" },
+        400,
+      );
+    }
+    const created = registeredFromRequest(body, mapped.pointers);
     catalog.push(created);
     return HttpResponse.json(created, { status: 201 });
   }),
@@ -262,7 +302,18 @@ export const marketplaceHandlers = [
       envCells,
     };
     if (body.resourceDocs) {
-      updated.resourceDocs = body.resourceDocs;
+      const mapped = pointersFromWrite(name, body.resourceDocs);
+      if (!mapped.ok) {
+        return errorJson(
+          { code: "bad_request", message: "invalid resourceDocs write row" },
+          400,
+        );
+      }
+      if (mapped.pointers && mapped.pointers.length > 0) {
+        updated.resourceDocs = mapped.pointers;
+      } else {
+        delete updated.resourceDocs;
+      }
     } else {
       delete updated.resourceDocs;
     }
