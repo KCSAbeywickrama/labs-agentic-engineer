@@ -108,13 +108,16 @@ type CatalogValuePlane interface {
 	EnvCells(orgID, name string) []EnvCell
 	Instances(orgID, name string) []ResourceInstance
 	PutEnvCells(orgID, name string, cells []EnvCell)
+	PutInstances(orgID, name string, instances []ResourceInstance)
 }
 
 // OrgSecretWriter optionally persists Registered External secret bytes through
 // the existing SM-API vault layout with projectName "org-catalog" (sentinel,
-// not a real project). Nil is a documented no-op — HTTP tests leave it unwired.
+// not a real project) and returns the vault key the ResourceType CEL reads
+// as secretStorePath. Nil is a documented no-op — HTTP tests leave it unwired
+// and SecretStorePath then stays empty on the value plane.
 type OrgSecretWriter interface {
-	WriteOrgCatalogSecret(ctx context.Context, orgID, entityName string, data map[string]string) error
+	WriteOrgCatalogSecret(ctx context.Context, orgID, entityName string, data map[string]string) (vaultKey string, err error)
 }
 
 // OrgResourceDocs commits UTF-8 resource-docs files into the per-org

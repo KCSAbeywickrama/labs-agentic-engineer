@@ -300,7 +300,7 @@ func TestSecretRefWriter_WriteOrgCatalogSecret(t *testing.T) {
 	t.Parallel()
 	fake := &fakeSMClient{}
 	w := organization.NewSecretRefWriter(fake, nil, nil, nil)
-	if err := w.WriteOrgCatalogSecret(claimsCtx("ou-acme-uuid"), "acme", "stripe-development",
+	if _, err := w.WriteOrgCatalogSecret(claimsCtx("ou-acme-uuid"), "acme", "stripe-development",
 		map[string]string{"api_key": "sk_live"}); err != nil {
 		t.Fatalf("WriteOrgCatalogSecret: %v", err)
 	}

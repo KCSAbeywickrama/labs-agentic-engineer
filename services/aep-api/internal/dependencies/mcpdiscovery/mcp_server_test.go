@@ -435,6 +435,61 @@ func TestMCP_ListExternalResources_PortError(t *testing.T) {
 	}
 }
 
+// TestMCP_ListExternalResources_RegisteredBeforeConsumers proves a zero-consumer
+// Registered external (RT authored at register via Ensure) surfaces on
+// list_external_resources with consumptionInstructions and resourceDocs pointers
+// — not secret values or file bodies. MCP view has no consumers field today.
+func TestMCP_ListExternalResources_RegisteredBeforeConsumers(t *testing.T) {
+	rt, err := openchoreo.BuildExternalResourceType("stripe", "Payments",
+		[]openchoreo.ExternalResourceConfigKey{{Key: "STRIPE_KEY", Secret: true}},
+		"Send the secret as Bearer.",
+		[]openchoreo.ResourceDoc{{Type: "openapi", URL: "https://example.com/stripe/openapi.yaml"}},
+	)
+	if err != nil {
+		t.Fatalf("BuildExternalResourceType: %v", err)
+	}
+	er := newExternalCatalogFixture(nil, *rt)
+	h := NewMCPHandler(er, nil, nil, nil, nil, nil, nil)
+
+	resp := decodeRPC(t, postRPC(t, h, "org-1", callBody("list_external_resources", `{}`)))
+	text := toolText(t, resp, false)
+
+	var payload struct {
+		ExternalResources []struct {
+			Name                    string `json:"name"`
+			ConsumptionInstructions string `json:"consumptionInstructions"`
+			ResourceDocs            []struct {
+				Type string `json:"type"`
+				URL  string `json:"url"`
+				Path string `json:"path"`
+			} `json:"resourceDocs"`
+		} `json:"externalResources"`
+	}
+	if err := json.Unmarshal([]byte(text), &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if len(payload.ExternalResources) != 1 {
+		t.Fatalf("externalResources = %+v, want 1 row", payload.ExternalResources)
+	}
+	got := payload.ExternalResources[0]
+	if got.Name != "stripe" {
+		t.Errorf("name = %q, want stripe", got.Name)
+	}
+	if got.ConsumptionInstructions != "Send the secret as Bearer." {
+		t.Errorf("consumptionInstructions = %q, want Send the secret as Bearer.", got.ConsumptionInstructions)
+	}
+	if len(got.ResourceDocs) != 1 {
+		t.Fatalf("resourceDocs = %+v, want 1 pointer", got.ResourceDocs)
+	}
+	doc := got.ResourceDocs[0]
+	if doc.Type != "openapi" || doc.URL != "https://example.com/stripe/openapi.yaml" {
+		t.Errorf("resourceDocs[0] = %+v, want type=openapi url=https://example.com/stripe/openapi.yaml", doc)
+	}
+	if doc.Path != "" {
+		t.Errorf("resourceDocs[0].path = %q, want empty (URL pointer only)", doc.Path)
+	}
+}
+
 func TestMCP_GetExternalResourceSchema(t *testing.T) {
 	h, _, _ := sampleHandler(t)
 

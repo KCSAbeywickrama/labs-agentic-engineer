@@ -66,3 +66,15 @@ func (p *MemoryValuePlane) PutEnvCells(orgID, name string, cells []EnvCell) {
 	}
 	p.cells[orgID][name] = append([]EnvCell(nil), cells...)
 }
+
+func (p *MemoryValuePlane) PutInstances(orgID, name string, instances []ResourceInstance) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.instances == nil {
+		p.instances = map[string]map[string][]ResourceInstance{}
+	}
+	if p.instances[orgID] == nil {
+		p.instances[orgID] = map[string][]ResourceInstance{}
+	}
+	p.instances[orgID][name] = append([]ResourceInstance(nil), instances...)
+}

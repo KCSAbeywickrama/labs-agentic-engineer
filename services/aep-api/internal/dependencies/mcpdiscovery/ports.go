@@ -35,11 +35,13 @@ import (
 
 // ExternalResourceReader is the read slice of the org external-resource catalog
 // the MCP surface exposes (list every registered external resource, get one by
-// name). Sourced from the org's provisioned OpenChoreo ResourceTypes
-// (openchoreo.ExternalDefinitionFromRT) — ONLY a provisioned `external`
-// dependency has an authored RT, so this reflects provisioned externals only
-// (D2: an unprovisioned/design-only external is not discoverable here). Get
-// returns (nil, nil) when the name is not registered.
+// name). Sourced from the org's OpenChoreo ResourceTypes via
+// openchoreo.ExternalDefinitionFromRT. Ensure authors the RT at
+// register, so a zero-consumer Registered row is already listable here (MCP
+// List is RT-backed; the agent JSON view carries consumptionInstructions and
+// resourceDocs pointers). A design-only `external` dependency that never went
+// through register/Ensure still has no RT and is not discoverable. Get returns
+// (nil, nil) when the name is not registered.
 type ExternalResourceReader interface {
 	List(ctx context.Context, orgID string) ([]openchoreo.ExternalResourceDefinition, error)
 	Get(ctx context.Context, orgID, name string) (*openchoreo.ExternalResourceDefinition, error)

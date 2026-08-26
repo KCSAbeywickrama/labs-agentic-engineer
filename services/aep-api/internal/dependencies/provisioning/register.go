@@ -29,7 +29,8 @@ import (
 // RegisterExternalResource authors a Registered External resource on the org
 // catalog: an OpenChoreo ResourceType (Ensure only — no project Resource
 // instance) plus org value-plane cells. Secret bytes are optionally written
-// through OrgSecretWriter with projectName "org-catalog".
+// through OrgSecretWriter with projectName "org-catalog"; the returned vault
+// key is stored on those cells as SecretStorePath.
 func (s *Service) RegisterExternalResource(ctx context.Context, orgID string, req gen.RegisterExternalResourceRequest) (ExternalResourceView, error) {
 	name, keys, writes, envNames, valueByEnvKey, err := s.validateRegisterRequest(ctx, orgID, req)
 	if err != nil {
@@ -71,6 +72,7 @@ func (s *Service) RegisterExternalResource(ctx context.Context, orgID string, re
 			cells = append(cells, cell)
 		}
 	}
+	vaultByEnv := map[string]string{}
 	if s.orgSecrets != nil {
 		for _, env := range envNames {
 			secrets := map[string]string{}
@@ -82,11 +84,14 @@ func (s *Service) RegisterExternalResource(ctx context.Context, orgID string, re
 			if len(secrets) == 0 {
 				continue
 			}
-			if err := s.orgSecrets.WriteOrgCatalogSecret(ctx, orgID, name+"-"+env, secrets); err != nil {
+			vaultKey, err := s.orgSecrets.WriteOrgCatalogSecret(ctx, orgID, name+"-"+env, secrets)
+			if err != nil {
 				return ExternalResourceView{}, fmt.Errorf("provisioning: write org-catalog secret %q: %w", name+"-"+env, err)
 			}
+			vaultByEnv[env] = vaultKey
 		}
 	}
+	stampSecretStorePath(cells, vaultByEnv)
 	if s.catalogValuePlane != nil {
 		s.catalogValuePlane.PutEnvCells(orgID, name, cells)
 	}

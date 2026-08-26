@@ -92,6 +92,12 @@ func (s *Service) UpdateExternalResource(ctx context.Context, orgID, name string
 			})
 		}
 	}
+	vaultByEnv := map[string]string{}
+	for _, c := range currentCells {
+		if c.SecretStorePath != "" {
+			vaultByEnv[c.Environment] = c.SecretStorePath
+		}
+	}
 	if s.orgSecrets != nil {
 		for _, env := range envNames {
 			secrets := map[string]string{}
@@ -103,11 +109,16 @@ func (s *Service) UpdateExternalResource(ctx context.Context, orgID, name string
 			if len(secrets) == 0 {
 				continue
 			}
-			if err := s.orgSecrets.WriteOrgCatalogSecret(ctx, orgID, canonical+"-"+env, secrets); err != nil {
+			vaultKey, err := s.orgSecrets.WriteOrgCatalogSecret(ctx, orgID, canonical+"-"+env, secrets)
+			if err != nil {
 				return ExternalResourceView{}, fmt.Errorf("provisioning: write org-catalog secret %q: %w", canonical+"-"+env, err)
+			}
+			if vaultKey != "" {
+				vaultByEnv[env] = vaultKey
 			}
 		}
 	}
+	stampSecretStorePath(cells, vaultByEnv)
 	if s.catalogValuePlane != nil {
 		s.catalogValuePlane.PutEnvCells(orgID, canonical, cells)
 	}

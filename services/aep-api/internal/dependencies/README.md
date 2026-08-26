@@ -44,7 +44,7 @@ three services are sub-package slices that import only that root.
 | Slice | Ops / role | Reaches |
 |---|---|---|
 | `provisioning` | 9 HTTP ops: list/delete/collect-values external resources, list-workload-dependencies, project readiness, provision-platform, dependency-status, request/list org-service access + the `provision` gate lifecycle, watcher, teardown | root cores; delivery (provision execution rows); sourcecontrol (gate issues); `WorkloadDepSource` (deployed Workload consumer refs) |
-| `mcpdiscovery` | the MCP discovery server + `ListPlatformResourceTypes` and `ListOrgEndpoints` HTTP reads | root `ResourceTypeLister` / endpoint catalog |
+| `mcpdiscovery` | the MCP discovery server + `ListPlatformResourceTypes` and `ListOrgEndpoints` HTTP reads; `list_external_resources` is RT-backed (Registered at register Ensure and Project Externals with an authored RT), not provisioned-only | root `ResourceTypeLister` / external RT catalog / endpoint catalog |
 | `runtimeconfig` | the SPA `env-config.js` convergence service + its watcher (no HTTP op) | root naming/markers; spec (design at HEAD); repositories (execution enumerate) |
 
 Each slice owns its service AND its HTTP handler (as delivery's `build` slice does); `httpapi` aggregates
@@ -98,10 +98,14 @@ slices.
   drawer's resolve are LABEL queries, never a body read (bodies are prose a human may rewrite) and never a
   title match. A gate deliberately does not carry `aep` — it is a hold on the next dispatch, never agent
   work — and it holds only DISPATCH: an open gate never blocks a run from settling.
-- **External values are authored unset and never mint a provision gate.** Build derives every external
-  dependency from the design's union schema, seeds plain defaults, authors other plain values plus
-  `secretStorePath` empty, and preserves non-empty values already saved on a rebuild. Project readiness
-  iterates that same design schema; stale binding keys cannot make a dependency configured.
+- **External values never mint a provision gate.** A Project External is authored from the design's
+  union schema: plain defaults, `secretStorePath` empty unless a rebuild already saved a non-empty
+  value. A Registered External is authored from the org value plane: non-secret configured cells
+  become binding `environmentConfigs` (the ResourceType CEL input, not a second secret store);
+  `secretStorePath` is the org-catalog vault key persisted when register writes secrets through
+  OrgSecretWriter (empty when that writer is unwired). Secret cell values are never copied into
+  Plain. Project readiness iterates the design schema; stale binding keys cannot make a
+  dependency configured.
 - **A gate's provisioning run keeps an execution row.** It is the one execution kind the milestone model
   still writes: admitted when the drawer submits, finished by the readiness watcher, and its terminal state
   is what closes the gate issue.

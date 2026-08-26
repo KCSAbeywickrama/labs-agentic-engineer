@@ -227,10 +227,11 @@ func (w *SecretRefWriter) WriteExternalResourceSecret(ctx context.Context, ocOrg
 const orgCatalogProjectName = "org-catalog"
 
 // WriteOrgCatalogSecret uploads Registered External secret fields using the
-// existing vault layout with projectName "org-catalog".
-func (w *SecretRefWriter) WriteOrgCatalogSecret(ctx context.Context, ocOrgID, entityName string, data map[string]string) error {
-	_, _, err := w.WriteExternalResourceSecret(ctx, ocOrgID, orgCatalogProjectName, entityName, data)
-	return err
+// existing vault layout with projectName "org-catalog" and returns the vault
+// key the ResourceType CEL reads from the binding (secretStorePath).
+func (w *SecretRefWriter) WriteOrgCatalogSecret(ctx context.Context, ocOrgID, entityName string, data map[string]string) (string, error) {
+	vaultKey, _, err := w.WriteExternalResourceSecret(ctx, ocOrgID, orgCatalogProjectName, entityName, data)
+	return vaultKey, err
 }
 
 // orgUUIDForSecretLocation returns the Thunder ouId that must populate
