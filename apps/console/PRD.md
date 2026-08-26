@@ -63,7 +63,12 @@ moved on GitHub after that tag.
 Approved at section level; per-section detail is defined feature-by-feature.
 
 - **Home — projects list.** Empty state prompts the user to start an app
-  development (give a requirement → project is born).
+  development (give a requirement → project is born). Org-level sidebar (no
+  project in the route): **Projects · Resources · Endpoints · Alerts**;
+  Settings stays in the footer.
+- **Resources** — org catalog of External resources (`/resources`). Register
+  via chat + form; environment values stay on the form. A later project that
+  needs a registered name reuses it — Build does not re-collect those secrets.
 - **Project view** — inside a project the sidebar nav swaps to its sections
   (ADR-0010; no back-item, home is the header brand / project switcher):
   - **Overview** — component map + status, deployment state, recent activity.
@@ -85,6 +90,14 @@ which is also what closes its issue. Newest first; links go to the feature's
 GitHub issue plus any ADRs it produced. Features still being built aren't
 here: they're the open `console` + `feature` issues.
 
+- Resources catalog lives at `/resources` (not Settings). Register an External
+  resource through chat that can question then draft the form (secrets stay on
+  the form). A new project that needs an already-registered API reuses that
+  name; after aep-api restart the catalog still treats it as configured, so
+  Build does not ask for the token again —
+  [#636](https://github.com/wso2/labs-agentic-engineer/pull/636)
+  (ADR-0021; catalog move on
+  [#626](https://github.com/wso2/labs-agentic-engineer/pull/626))
 - The journey starts itself — creating a project **fires `/start` server-side**,
   so the user lands on the overview with the agent chat already open, the
   transcript showing `/start` beside their own idea (cropped), and the Spec card

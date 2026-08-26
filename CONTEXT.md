@@ -157,18 +157,35 @@ opposite side of the wire).
 external` entry in its `design.json` `dependencies[]` (`style: rest-api | sdk`),
 naming the config keys it reads and, for a REST API, an optional `specPath` (a
 URL or a committed spec file) the coding agent starts from (ADR-0010). Resolved
-at read time (ADR-0003), never a stored flag. It **resolves to** an external
-resource (below).
+at read time (ADR-0003), never a stored flag. It **resolves to** an External
+resource: a **Registered External resource**'s exact name when the catalog
+already has a fit, otherwise a new **Project External resource** name.
 _Avoid_: `needsSpec`, `specUrl`, `sources` — retired fields, rejected on parse.
 
 **External resource**:
-**The org-level, shared** record of one such integration once provisioned — its
-name, description, and config-key schema — so many components' external
-dependencies reuse it by name instead of each redefining it (one resource, many
-dependencies). It is what the Settings → Resources view lists and what a card's
-"Used by" counts. Stored as an org-namespaced OpenChoreo `ResourceType`, not a
-database table (ADR-0009).
+The org-level shared record of one third-party integration — name, description,
+config-key schema — so many components reuse it by name instead of each
+redefining it. Listed on **Resources**. Two kinds below. The OpenChoreo
+`ResourceType` *is* the record (ADR-0009).
 _Avoid_: "external_resources table" (removed); connection.
+
+**Registered External resource**:
+An External resource the org registered once, with org-held environment values
+and **consumption instructions**, so a later project that needs the same API
+reuses that name instead of collecting the values again.
+_Avoid_: org API, shared secret (the resource is the integration, not the secret).
+
+**Project External resource**:
+An External resource invented for one project's design when nothing in the
+catalog fits, or the user asks to reconsider. Its environment values are that
+project's.
+_Avoid_: unregistered external, local external.
+
+**Consumption instructions**:
+How a consuming project should use a Registered External resource — distinct
+from what the resource *is* (description), never a restatement of it. Their
+presence on the catalog record is what makes the resource Registered (ADR-0021).
+_Avoid_: usage notes, description (a different field).
 
 **Resource-type marker**:
 A declaration a platform engineer attaches to a resource type in the catalog,
