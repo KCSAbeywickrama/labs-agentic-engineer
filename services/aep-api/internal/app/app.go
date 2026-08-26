@@ -371,16 +371,10 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		}
 		return res.Key, nil
 	}
-	// skillsRepoForTurns ensures the org's _skills repo exists (seeding the
-	// embedded builtin/flow skills on first touch) and hands back its row —
-	// the SkillsRef source for genai + task-plan turns. A closure at the
-	// composition root so neither feature grows a skills edge.
-	skillsRepoForTurns := func(ctx context.Context, orgID string) (*sourcecontrol.GitRepository, error) {
-		if err := skillSvc.EnsureProvisioned(ctx, orgID); err != nil {
-			return nil, err
-		}
-		return repoService.GetRepo(ctx, orgID, spec.SkillsRepoSentinelProjectID)
-	}
+	// SkillsRef source for genai + task-plan turns. Reconcile (not only
+	// EnsureProvisioned) so a platform skill shipped after first provision
+	// lands in org _skills before the turn snapshot; loadSkill reads that dest.
+	skillsRepoForTurns := spec.SkillsRepoForTurns(skillSvc, repoService)
 	turnRepo := spec.NewTurnRepository(db, in.RateStamper)
 	turnBroker := spec.NewTurnBroker()
 	genaiDeps := spec.ServiceDeps{
