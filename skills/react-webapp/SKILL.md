@@ -280,9 +280,12 @@ component contract. Consumer connection to the sibling: `visibility: project`,
 `configurations.env` arrives as a `window._env_` entry.
 
 **Done when:** this app's dependency on the sibling is `visibility: project`
-(never `external`). The sibling *service's* own endpoint lists both
-`project` and `external` — that file is the Go (or other backend) skill's
-to write; do not strip `external` from it because this SPA uses `/api`.
+(never `external`). The sibling *service's* own endpoint lists all three of
+`project`, `internal` and `external` — `internal` is what admits the gateway to
+the service's NetworkPolicy, and without it every `/api` call answers `503`.
+That file is the Go (or other backend) skill's to write: leave all three in
+place rather than stripping `external` because this SPA uses `/api`
+(`workload-and-wiring` covers what each item earns).
 
 ## Pitfalls
 

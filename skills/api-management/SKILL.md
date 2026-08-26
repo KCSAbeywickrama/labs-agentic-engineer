@@ -56,7 +56,9 @@ Two rules are this skill's, because they are the gateway's contract:
   for that header is forwarded. `groups` is the one that matters: a token issued
   without it (a `client_credentials` token, or a user in no groups) leaves
   `X-User-Groups` caller-controlled. Treat a role decision as trustworthy only
-  for a caller whose token actually carries the claim.
+  for a caller whose token actually carries the claim. A service that owns its
+  own people records sidesteps this: its role comes from the record it stored,
+  keyed on `X-User-Id`, which no caller can set (`thunder-authentication`).
 - **An authenticated caller who has no role → 403, never 401.** A 401 tells the
   SPA its token expired, so it restarts sign-in and loops forever. The role
   resolution itself is in `thunder-authentication`.
