@@ -29,7 +29,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { SectionTitle } from "../../../components/SectionTitle";
 import { EmptyState } from "../../../components/EmptyState";
-import { ResourceDrawer } from "../../settings/components/ResourceDrawer";
+import { CatalogTypeDrawer } from "../../marketplace/components/CatalogTypeDrawer";
 import {
   useExternalResources,
   usePlatformResourceTypes,
@@ -163,7 +163,7 @@ export function OverviewDependencies({ projectName }: { projectName: string }) {
           ))}
         </Stack>
       )}
-      <ResourceDrawer
+      <CatalogTypeDrawer
         {...selection}
         open={selection.kind !== null}
         onClose={() => setSelection({ kind: null, resource: null })}

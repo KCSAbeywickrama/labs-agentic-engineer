@@ -27,6 +27,7 @@ import { OverviewDependencies } from "./OverviewDependencies";
 // Router replaced so the drawer's "Used by" ProjectLink renders as a plain
 // anchor (createLink pattern, cf. ResourcesSection.test).
 vi.mock("@tanstack/react-router", () => ({
+  useNavigate: () => vi.fn(),
   createLink: (Component: ElementType) =>
     function MockLink({
       to,
