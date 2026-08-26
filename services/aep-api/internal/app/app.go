@@ -371,9 +371,8 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		}
 		return res.Key, nil
 	}
-	// SkillsRef source for genai + task-plan turns. Reconcile (not only
-	// EnsureProvisioned) so a platform skill shipped after first provision
-	// lands in org _skills before the turn snapshot; loadSkill reads that dest.
+	// SkillsRef source for genai + task-plan turns. Reconcile so platform
+	// skills shipped after first provision land before Head/Ensure.
 	skillsRepoForTurns := spec.SkillsRepoForTurns(skillSvc, repoService)
 	turnRepo := spec.NewTurnRepository(db, in.RateStamper)
 	turnBroker := spec.NewTurnBroker()

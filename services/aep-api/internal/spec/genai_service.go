@@ -117,17 +117,16 @@ type GitReader interface {
 // pre-202 (no platform fallback). Wired from AnthropicCredentialService.
 type AnthropicKeyResolver func(ctx context.Context, orgID string) (string, error)
 
-// SkillsRepoResolver ensures the org's _skills repo is provisioned (seeded
-// with the embedded flow skills) and returns its row — the source of the
-// turn's SkillsRef snapshot. Wired at the composition root from the skills
-// feature so genai holds no skills edge.
+// SkillsRepoResolver returns the org _skills git row used as a turn's
+// SkillsRef snapshot source. Production wires SkillsRepoForTurns so the
+// library is reconciled (not only first-touch provisioned). Genai holds no
+// skills edge.
 type SkillsRepoResolver func(ctx context.Context, orgID string) (*sourcecontrol.GitRepository, error)
 
-// SkillsRepoForTurns is the production SkillsRepoResolver: Reconcile so a
-// platform skill shipped after first provision (register-external-resource)
-// lands in org _skills before Head/Ensure. EnsureProvisioned alone is
-// first-touch only and leaves loadSkill on a stale snapshot.
-func SkillsRepoForTurns(skills *SkillService, repos sourcecontrol.RepoService) SkillsRepoResolver {
+// SkillsRepoForTurns is the production SkillsRepoResolver: reconcile the org
+// _skills library so platform skills shipped after first provision land,
+// then return the row. EnsureProvisioned alone is first-touch seed.
+func SkillsRepoForTurns(skills *SkillService, repos RepoResolver) SkillsRepoResolver {
 	return func(ctx context.Context, orgID string) (*sourcecontrol.GitRepository, error) {
 		if _, err := skills.Reconcile(ctx, orgID); err != nil {
 			return nil, fmt.Errorf("%w: reconcile: %w", ErrSkillsRepoUnavailable, err)

@@ -43,9 +43,10 @@ func archPlusRegisterLibrary() fstest.MapFS {
 // TestSkillsRepoForTurns_SnapshotIncludesNewPlatformSkill is the live
 // register-chat miss: org _skills was first-provisioned before
 // register-external-resource shipped. EnsureProvisioned is a no-op on an
-// existing repo, so loadSkill (repos/<org>/_skills/org-skills/snapshots/<sha>/)
-// never sees the skill. The turn resolver must Reconcile, then Ensure, so
-// both the skills dest and the marketplace-register dual dest list it.
+// existing repo, so the SkillsRef snapshot never sees the skill. The turn
+// resolver must Reconcile; StartTurn then Ensures. Both the loadSkill dest
+// (_skills/org-skills) and the marketplace-register dual dest must list the
+// new skill, and skills already in the library (architecture) must remain.
 func TestSkillsRepoForTurns_SnapshotIncludesNewPlatformSkill(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -76,6 +77,7 @@ func TestSkillsRepoForTurns_SnapshotIncludesNewPlatformSkill(t *testing.T) {
 	}
 
 	wantRel := filepath.Join("skills", "register-external-resource", "SKILL.md")
+	stillRel := filepath.Join("skills", "architecture", "SKILL.md")
 	for _, ref := range []sourcecontrol.RepoRef{skillsRef, marketRef} {
 		dir, err := gitfs.SnapshotDir(host.engine.Root(), ref, sha)
 		if err != nil {
@@ -87,6 +89,13 @@ func TestSkillsRepoForTurns_SnapshotIncludesNewPlatformSkill(t *testing.T) {
 		}
 		if !strings.Contains(string(body), "name: register-external-resource") {
 			t.Errorf("snapshot %s: SKILL.md = %q, want name register-external-resource", dir, body)
+		}
+		arch, err := os.ReadFile(filepath.Join(dir, stillRel))
+		if err != nil {
+			t.Fatalf("existing platform skill missing from %s: %v", dir, err)
+		}
+		if !strings.Contains(string(arch), "name: architecture") {
+			t.Errorf("snapshot %s: architecture clobbered: %q", dir, arch)
 		}
 	}
 }
