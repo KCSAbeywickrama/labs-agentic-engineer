@@ -51,6 +51,10 @@ import {
   subscribeTurnEnd,
   upsertToolMessage,
   clearFailedSends,
+  claimSendInFlight,
+  claimStreamFold,
+  hasLocalTurnActivity,
+  subscribeLocalTurnActivity,
 } from "./chatStore";
 
 let n = 0;
@@ -442,5 +446,64 @@ describe("clearFailedSends", () => {
     clearFailedSends(KEY);
     // Same array identity: a needless persist would remount the whole log.
     expect(getMessages(KEY)).toBe(before);
+  });
+});
+
+// #635: the chain a submitted send rides from form to turn — seed waiting,
+// dispatch in flight, stream being folded. Any stage live means this browser
+// holds evidence of a turn the status endpoint may not report yet.
+describe("local turn activity", () => {
+  it("is live through each stage of a send, and collapses when the last releases", () => {
+    const key = freshKey();
+    expect(hasLocalTurnActivity(key)).toBe(false);
+
+    setPendingSeed(key, "answers");
+    expect(hasLocalTurnActivity(key)).toBe(true);
+
+    // Consumption hands over to the send claim with no dead stage between.
+    const releaseSend = claimSendInFlight(key);
+    consumePendingSeed(key);
+    expect(hasLocalTurnActivity(key)).toBe(true);
+
+    const releaseFold = claimStreamFold(key);
+    releaseSend();
+    expect(hasLocalTurnActivity(key)).toBe(true);
+
+    releaseFold();
+    expect(hasLocalTurnActivity(key)).toBe(false);
+  });
+
+  it("collapses when a send dies before a turn exists", () => {
+    const key = freshKey();
+    const release = claimSendInFlight(key);
+    expect(hasLocalTurnActivity(key)).toBe(true);
+    release();
+    expect(hasLocalTurnActivity(key)).toBe(false);
+  });
+
+  it("notifies on every edge: seed set/consumed, claim taken/released", () => {
+    const key = freshKey();
+    let fired = 0;
+    const unsubscribe = subscribeLocalTurnActivity(key, () => {
+      fired += 1;
+    });
+    setPendingSeed(key, "answers");
+    consumePendingSeed(key);
+    const release = claimSendInFlight(key);
+    release();
+    expect(fired).toBe(4);
+
+    unsubscribe();
+    setPendingSeed(key, "again");
+    expect(fired).toBe(4);
+    consumePendingSeed(key);
+  });
+
+  it("keeps distinct keys apart", () => {
+    const key1 = freshKey();
+    const key2 = freshKey();
+    const release = claimSendInFlight(key1);
+    expect(hasLocalTurnActivity(key2)).toBe(false);
+    release();
   });
 });

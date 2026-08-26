@@ -559,6 +559,7 @@ const inFlightSends = new Map<string, number>();
 
 function claim(counts: Map<string, number>, key: string): () => void {
   counts.set(key, (counts.get(key) ?? 0) + 1);
+  notifyLocalTurnActivity(key);
   let released = false;
   return () => {
     if (released) return; // idempotent: cleanup may run twice (StrictMode)
@@ -566,6 +567,7 @@ function claim(counts: Map<string, number>, key: string): () => void {
     const remaining = (counts.get(key) ?? 1) - 1;
     if (remaining <= 0) counts.delete(key);
     else counts.set(key, remaining);
+    notifyLocalTurnActivity(key);
   };
 }
 
@@ -591,4 +593,54 @@ export function claimSendInFlight(key: string): () => void {
  */
 export function canReplaceLog(key: string): boolean {
   return !attachedFolds.has(key) && !inFlightSends.has(key);
+}
+
+// --- Local turn activity (#635) -------------------------------------------
+//
+// `spec.agent` lags a send by the dispatch round-trip: interview answers leave
+// through the seed slot the instant the question form submits, but the turn
+// carrying them has no `agent_turns` row until StartTurn answers — seconds
+// later, longer under load. In that window the status endpoint reads idle, the
+// question form is gone, and an empty project has no files, so every signal
+// the spec workspace checks said "nothing running" and it offered Retry
+// against an interview mid-flight — #629's hazard surviving as a race.
+//
+// This browser knows better. The seed slot, the send claim and the fold claim
+// chain without a gap from form-submit to the turn's terminal frame (`send()`
+// releases the send claim and takes the fold claim in one synchronous
+// continuation), and every failure path releases its claim — a refused
+// dispatch, a severed stream, a chatKey rotation. So "any of the three is
+// live" is precisely "this browser holds evidence of a turn the status
+// endpoint may not report yet", and it needs no expiry timer: the signal
+// collapses the moment a send is refused or a turn dies, letting Retry
+// surface honestly.
+//
+// Browser-local by nature: a teammate's browser holds no claim for a send
+// made here. Their pane recovers through the status poll as it always did —
+// this only closes the gap for the member who just submitted.
+
+const localTurnActivityListeners = new Map<string, Set<() => void>>();
+
+function notifyLocalTurnActivity(key: string): void {
+  for (const fn of localTurnActivityListeners.get(key) ?? []) fn();
+}
+
+/** True while THIS browser holds live evidence of a turn for `key`: a seed
+ *  waiting to send, a dispatch awaiting its turn id, or a stream being
+ *  folded. */
+export function hasLocalTurnActivity(key: string): boolean {
+  return pendingSeeds.has(key) || inFlightSends.has(key) || attachedFolds.has(key);
+}
+
+/** Fires on every edge of `hasLocalTurnActivity`: seed set or consumed, claim
+ *  taken or released. */
+export function subscribeLocalTurnActivity(key: string, fn: () => void): () => void {
+  const unsubscribeSeed = subscribeSeed(key, fn);
+  const set = localTurnActivityListeners.get(key) ?? new Set();
+  set.add(fn);
+  localTurnActivityListeners.set(key, set);
+  return () => {
+    unsubscribeSeed();
+    set.delete(fn);
+  };
 }

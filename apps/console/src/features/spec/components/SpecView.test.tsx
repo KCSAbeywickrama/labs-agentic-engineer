@@ -25,9 +25,12 @@ import type { components } from "../../../generated/aep-api";
 import { START_COMMAND } from "@aep/contracts/commands";
 import {
   chatKeyFor,
+  claimSendInFlight,
+  claimStreamFold,
   consumePendingSeed,
   notifyTurnEnd,
   replaceMessages,
+  setPendingSeed,
 } from "../../agent-chat/chatStore";
 import { SpecView } from "./SpecView";
 
@@ -502,6 +505,74 @@ describe("SpecView while the kickoff is still writing", () => {
     expect(screen.getByText("Agent is working")).toBeInTheDocument();
     expect(screen.queryByText("Nothing written yet")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+  });
+
+  // #635: the status field cannot see a turn before its row exists. Submitted
+  // interview answers leave through the seed slot the instant the form goes,
+  // but for the dispatch round-trip `spec.agent` still reads idle — and every
+  // other running-work signal is gone too, so the pane fell through to
+  // "Nothing written yet" plus a Retry whose /start would supersede the very
+  // interview it cannot see. The browser that submitted holds the evidence:
+  // seed waiting, dispatch in flight, stream being folded — each stage counts
+  // as agent work until the status catches up.
+  it("keeps the working state while this browser's send is still dispatching", () => {
+    mockSpecAgent = "";
+    mockSpecFlow = "";
+    empty();
+    act(() => setPendingSeed(chatKeyFor("acme", "proj1"), "my interview answers"));
+    render(<SpecView projectName="proj1" />);
+
+    expect(
+      screen.getByText("Agent is working on the requirements document"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Nothing written yet")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+
+    // The seed's consumption hands over to the send claim with no gap — the
+    // pane must not flash Retry between the stages.
+    let releaseSend: () => void;
+    act(() => {
+      releaseSend = claimSendInFlight(chatKeyFor("acme", "proj1"));
+      consumePendingSeed(chatKeyFor("acme", "proj1"));
+    });
+    expect(
+      screen.getByText("Agent is working on the requirements document"),
+    ).toBeInTheDocument();
+
+    // Dispatch answered: the fold claim takes over in the same continuation.
+    let releaseFold: () => void;
+    act(() => {
+      releaseFold = claimStreamFold(chatKeyFor("acme", "proj1"));
+      releaseSend();
+    });
+    expect(
+      screen.getByText("Agent is working on the requirements document"),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+
+    act(() => releaseFold());
+  });
+
+  // The signal collapses with the claims: a refused dispatch releases its
+  // claim (and the seed is already consumed), so the pane returns to the
+  // truthful empty state rather than spinning on evidence that died.
+  it("surfaces Retry again once a send dies without a turn", () => {
+    mockSpecAgent = "";
+    mockSpecFlow = "";
+    empty();
+    let release: () => void;
+    act(() => {
+      release = claimSendInFlight(chatKeyFor("acme", "proj1"));
+    });
+    render(<SpecView projectName="proj1" />);
+    expect(
+      screen.getByText("Agent is working on the requirements document"),
+    ).toBeInTheDocument();
+
+    act(() => release());
+
+    expect(screen.getByText("Nothing written yet")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
   });
 
   // An empty workspace offers NOTHING (#562 retest). It used to carry a Start
