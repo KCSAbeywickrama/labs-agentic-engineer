@@ -1005,14 +1005,68 @@ describe("SpecView header metadata (soft version chips)", () => {
     mockFlush.mockResolvedValue(undefined);
   });
 
+  // #586. Whenever the room is not the source for a document, git is — and it
+  // is READ-ONLY there, because nothing in that state can commit. The pane used
+  // to offer an editable box whose keystrokes went nowhere, or (when the room
+  // had failed to seed) a blank editor over a document that exists in git.
+  it("shows the committed document read-only, and says live editing is unavailable", () => {
+    mockUseSpecFileContent.mockReturnValue({
+      data: { sha: "abc", content: "# Product requirements\n\nThe committed text." },
+      isPending: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    render(<SpecView projectName="proj1" />);
+
+    expect(screen.getByText("The committed text.")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Live editing is unavailable/),
+    ).toBeInTheDocument();
+    // Nothing offers to take an edit: the committed markdown is rendered, not
+    // dropped into a textbox.
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+
+  it("names the document and offers one Retry when there is nothing to show", () => {
+    const refetch = vi.fn();
+    mockUseSpecFiles.mockReturnValue({
+      data: [{ path: "specs/requirements/prd.md", sha: "abc", group: "requirements" }],
+      isPending: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    mockUseSpecFileContent.mockReturnValue({
+      data: undefined,
+      isPending: false,
+      isError: true,
+      error: new Error("Failed to read spec files (500)"),
+      refetch,
+    });
+    render(<SpecView projectName="proj1" />);
+
+    // The document's NAME, never its path (the lexicon's mapping holds only
+    // while the user never sees one).
+    expect(
+      screen.getByText("Product requirements couldn't be loaded"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Failed to read spec files (500)")).toBeInTheDocument();
+    expect(screen.queryByText(/specs\/requirements/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(refetch).toHaveBeenCalled();
+  });
+
   it("renders session/version info as soft status chips (not buttons) and drops 'Approved'", () => {
     render(<SpecView projectName="proj1" />);
 
     // Version + session state render as soft status chips beside the title
     // (consistent with the builds/deployments headers): "v1 · published"
-    // (tags.latest) and "solo session" (offline collab).
+    // (tags.latest) and "offline" (no room). The chip says `offline`, not
+    // `solo session` — the lexicon retired the latter for reading like a focus
+    // feature rather than a degraded state.
     expect(screen.getByText("v1 · published")).toBeInTheDocument();
-    expect(screen.getByText("solo session")).toBeInTheDocument();
+    expect(screen.getByText("offline")).toBeInTheDocument();
 
     // The old "Approved" status chip is gone entirely (specStatus is
     // "approved" in this test's project-status mock).

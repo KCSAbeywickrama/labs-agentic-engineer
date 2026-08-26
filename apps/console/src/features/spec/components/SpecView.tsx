@@ -33,7 +33,6 @@ import {
   IconButton,
   PageContent,
   Stack,
-  TextField,
   Tooltip,
   Typography,
   useAppShell,
@@ -70,6 +69,7 @@ import {
 import { chatKeyFor, setPendingSeed, subscribeTurnEnd } from "../../agent-chat/chatStore";
 import { EmptyState } from "../../../components/EmptyState";
 import { ProblemsDialog } from "./ProblemsDialog";
+import { CommittedFileView } from "./CommittedFileView";
 import { useResolveDependencyViaChat } from "../../agent-chat/useResolveDependencyViaChat";
 import type { DependencyResolutionIntent } from "../../projects/lib/dependencyResolutionMessage.js";
 import { useDesignCellChangeCount } from "../collab/useDesignCellChange";
@@ -787,10 +787,13 @@ export function SpecView({ projectName }: { projectName: string }) {
                   dot
                 />
               )}
+              {/* `offline`, not `solo session` — the lexicon retired the latter
+                  (it reads like a focus feature), and the tooltip names the
+                  user's situation rather than which service is down. */}
               {isOffline && (
-                <Tooltip title="Collaboration server unreachable — editing solo; edits aren't shared or saved.">
+                <Tooltip title="Live editing is unavailable — showing the last committed version. Reconnecting…">
                   <Box sx={{ display: "inline-flex" }}>
-                    <StatusChip label="solo session" tone="neutral" appearance="soft" />
+                    <StatusChip label="offline" tone="neutral" appearance="soft" />
                   </Box>
                 </Tooltip>
               )}
@@ -1231,48 +1234,24 @@ export function SpecView({ projectName }: { projectName: string }) {
                     path={selectedFile.path}
                     isLocalTransaction={collab.isLocalTransaction}
                   />
-                ) : content.data ? (
-                  <TextField
-                    key={`${selectedFile.path}:${content.data.sha}`}
-                    fullWidth
-                    multiline
-                    minRows={20}
-                    defaultValue={content.data.content}
-                    aria-label={`Content of ${selectedFile.path}`}
-                    helperText={`${selectedFile.path} — edits aren't saved yet; editing lands with the file editors.`}
-                    slotProps={{
-                      input: {
-                        sx: { fontFamily: "monospace", fontSize: "0.875rem" },
-                      },
-                    }}
-                  />
-                ) : content.isError ? (
-                  <Alert
-                    severity="error"
-                    action={
-                      <Button onClick={() => void content.refetch()}>
-                        Retry
-                      </Button>
-                    }
-                  >
-                    Failed to load {selectedFile.path}
-                    {content.error instanceof Error && content.error.message
-                      ? `: ${content.error.message}`
-                      : ""}
-                  </Alert>
                 ) : (
-                  <Box
-                    sx={{
-                      height: "100%",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                    }}
-                  >
-                    <CircularProgress
-                      aria-label={`Loading ${selectedFile.path}`}
-                    />
-                  </Box>
+                  /* The room is not the source for this file — it is
+                     unreachable, or it genuinely does not hold the path. Git
+                     is, and it is read-only there (#586). */
+                  <CommittedFileView
+                    key={`${selectedFile.path}:committed`}
+                    path={selectedFile.path}
+                    content={content.data?.content ?? null}
+                    errorMessage={
+                      content.isError
+                        ? content.error instanceof Error && content.error.message
+                          ? content.error.message
+                          : "The workspace could not be reached."
+                        : undefined
+                    }
+                    onRetry={() => void content.refetch()}
+                    offline={isOffline}
+                  />
                 )
               ) : failed ? null : /* The alert above owns this case: it names the
                    failure and carries the one Retry. A body beneath it would
