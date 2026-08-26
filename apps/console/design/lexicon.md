@@ -419,7 +419,10 @@ in that gap every signal above read idle and the empty workspace offered Retry a
 interview it could not see ([#635](https://github.com/wso2/labs-agentic-engineer/issues/635)). The
 browser that submitted holds the missing evidence — a seeded message waiting, a dispatch awaiting
 its turn id, a stream being folded — and that chain counts as agent work until the status catches
-up. It is claim-scoped, not timed: a refused send releases its claim and Retry surfaces at once. A
+up. It is claim-scoped, not timed — a refused send releases its claim and Retry surfaces at once —
+with one backstop: a seeded message whose consumer never opens (the one stage with no failure path
+of its own) lapses from the signal after a generous TTL, so an outage cannot pin a working state
+that hides Retry. A
 teammate's browser holds no claim for a send made elsewhere and waits on the status, as it always
 did.
 

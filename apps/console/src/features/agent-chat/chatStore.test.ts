@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Node test env: the store only touches localStorage — a Map-backed stub
 // keeps the test out of jsdom.
@@ -55,6 +55,7 @@ import {
   claimStreamFold,
   hasLocalTurnActivity,
   subscribeLocalTurnActivity,
+  SEED_ACTIVITY_TTL_MS,
 } from "./chatStore";
 
 let n = 0;
@@ -505,5 +506,55 @@ describe("local turn activity", () => {
     const release = claimSendInFlight(key1);
     expect(hasLocalTurnActivity(key2)).toBe(false);
     release();
+  });
+
+  // The seed is the one stage with no failure path of its own: its consumer
+  // sits behind gates an outage can hold shut, and an unconsumed seed would
+  // pin a working state that HIDES Retry. So only the seed's contribution
+  // expires — and expiry is an edge subscribers hear about, or the pane
+  // would hold the stale state until an unrelated re-render.
+  describe("seed TTL", () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+
+    it("expires a waiting seed from the signal, and notifies the edge", () => {
+      const key = freshKey();
+      let fired = 0;
+      const unsubscribe = subscribeLocalTurnActivity(key, () => {
+        fired += 1;
+      });
+      setPendingSeed(key, "answers");
+      expect(hasLocalTurnActivity(key)).toBe(true);
+      const firedBeforeExpiry = fired;
+
+      vi.advanceTimersByTime(SEED_ACTIVITY_TTL_MS);
+      expect(hasLocalTurnActivity(key)).toBe(false);
+      expect(fired).toBe(firedBeforeExpiry + 1);
+
+      // The seed itself is untouched by the lapse — still there to consume.
+      expect(peekPendingSeed(key)).toEqual({ message: "answers", guarded: false });
+      unsubscribe();
+      consumePendingSeed(key);
+    });
+
+    it("does not expire the claims — their release paths own their end", () => {
+      const key = freshKey();
+      const release = claimSendInFlight(key);
+      vi.advanceTimersByTime(SEED_ACTIVITY_TTL_MS * 2);
+      expect(hasLocalTurnActivity(key)).toBe(true);
+      release();
+    });
+
+    it("a fresh seed restarts the clock", () => {
+      const key = freshKey();
+      setPendingSeed(key, "first");
+      vi.advanceTimersByTime(SEED_ACTIVITY_TTL_MS - 1000);
+      setPendingSeed(key, "second");
+      vi.advanceTimersByTime(2000);
+      expect(hasLocalTurnActivity(key)).toBe(true);
+      vi.advanceTimersByTime(SEED_ACTIVITY_TTL_MS);
+      expect(hasLocalTurnActivity(key)).toBe(false);
+      consumePendingSeed(key);
+    });
   });
 });
