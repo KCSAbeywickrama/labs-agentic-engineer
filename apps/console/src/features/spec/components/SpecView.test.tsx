@@ -472,6 +472,38 @@ describe("SpecView while the kickoff is still writing", () => {
     ).not.toBeInTheDocument();
   });
 
+  // #629: the turn that carries a member's interview answers is plain prose —
+  // no flow token — and it is the very turn that writes the first requirements
+  // document. The empty state, and the Retry it carries, must be unreachable
+  // while that turn runs.
+  it("keeps the working spinner through a flowless answer turn", () => {
+    mockSpecAgent = "working";
+    mockSpecFlow = "";
+    empty();
+    render(<SpecView projectName="proj1" />);
+
+    expect(
+      screen.getByText("Agent is working on the requirements document"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Nothing written yet")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+  });
+
+  // A design run on an empty project is attributed to Design, not Requirements
+  // — but it is still a running turn, so the empty state may not offer a way
+  // out of it (#629). The pane says an agent works without naming a document
+  // it may not be writing.
+  it("offers no Retry during a design run on an empty project", () => {
+    mockSpecAgent = "working";
+    mockSpecFlow = "design";
+    empty();
+    render(<SpecView projectName="proj1" />);
+
+    expect(screen.getByText("Agent is working")).toBeInTheDocument();
+    expect(screen.queryByText("Nothing written yet")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+  });
+
   // An empty workspace offers NOTHING (#562 retest). It used to carry a Start
   // button, which appeared during the kickoff itself — the moment the user must
   // not be invited to restart it — because "the workspace looks empty" is true

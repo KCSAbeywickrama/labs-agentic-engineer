@@ -481,8 +481,12 @@ export function SpecView({ projectName }: { projectName: string }) {
   // healthy published spec after any turn failed — a design pass, a chat reply
   // — until some later turn happened to succeed. A kickoff that died is the one
   // failure that leaves the user with nothing and no explanation.
-  const noRequirementsYet = !files.some((f) => f.group === "requirements");
-  const failed = specAgent === "failed" && noRequirementsYet;
+  // The ONE reading of "this project has requirements" — the failure banner,
+  // the rail input, and the design CTA (#159: design is derived FROM
+  // requirements, so its CTA needs them first) all share it, so they cannot
+  // drift into contradicting each other about the same files.
+  const hasRequirementsFiles = files.some((f) => f.group === "requirements");
+  const failed = specAgent === "failed" && !hasRequirementsFiles;
   // Retrying is a SEND, so it goes where every other send goes: the chat's
   // one-shot seed slot, GUARDED — the panel re-decides after it has rehydrated,
   // which is the first moment "is the agent mid-exchange" is knowable here.
@@ -530,7 +534,7 @@ export function SpecView({ projectName }: { projectName: string }) {
   const railSections = useMemo(
     () =>
       buildRailSections({
-        hasRequirements: files.some((f) => f.group === "requirements"),
+        hasRequirements: hasRequirementsFiles,
         hasDesign: files.some((f) => f.group === "designs"),
         hasValidation: files.some((f) => f.group === "validation"),
         agentWorking: deriving,
@@ -539,7 +543,14 @@ export function SpecView({ projectName }: { projectName: string }) {
         assumptions: unsettled.assumptions,
         openQuestions: unsettled.openQuestions,
       }),
-    [files, deriving, status.data?.spec.agentFlow, status.data?.spec.designOutdated, unsettled],
+    [
+      files,
+      hasRequirementsFiles,
+      deriving,
+      status.data?.spec.agentFlow,
+      status.data?.spec.designOutdated,
+      unsettled,
+    ],
   );
   // The rail's own answer to "is an agent writing the requirements", reused so
   // the workspace body cannot contradict the rail beside it — and its reasons,
@@ -547,8 +558,13 @@ export function SpecView({ projectName }: { projectName: string }) {
   // account of what is unsettled.
   const requirementsSection = railSections.find((sec) => sec.id === "requirements");
   const requirementsActive = requirementsSection?.state === "active";
-  // Written nothing, and nothing on the way.
-  const nothingToShow = files.length === 0 && !requirementsActive && !failed;
+  // Written nothing, and nothing on the way. `!deriving` is not redundant with
+  // `!requirementsActive`: a KNOWN non-requirements flow on an empty project —
+  // `/design` typed into chat before any kickoff landed — marks Design active,
+  // not Requirements, and without this guard the empty state would offer Retry
+  // against that running turn (#629's failure, through the one flow the rail
+  // attributes elsewhere).
+  const nothingToShow = files.length === 0 && !requirementsActive && !deriving && !failed;
 
   // A reason row is a pointer to where the work already happens: the settle
   // controls live on the requirements document's own flagged lines, and a stale
@@ -563,8 +579,6 @@ export function SpecView({ projectName }: { projectName: string }) {
 
   const seedChat = (message: string) =>
     setPendingSeed(chatKeyFor(orgHandle ?? "default", projectName), message);
-  // #159: design is derived FROM requirements, so its CTA needs them first.
-  const hasRequirementsFiles = files.some((f) => f.group === "requirements");
 
   // Generate/Re-generate design (#159): open the agent panel and auto-send the
   // design turn via the shared ?generate=design signal (AppLayout + the panel).
@@ -1306,14 +1320,21 @@ export function SpecView({ projectName }: { projectName: string }) {
                     </Button>
                   }
                 />
-              ) : requirementsActive ? (
+              ) : requirementsActive || (files.length === 0 && deriving) ? (
                 /* An agent is writing the requirements right now — the same
                    fact the rail pulses on, so the two surfaces cannot
                    disagree. They did: this said "Agent is working on the
                    requirements document" whenever the workspace was empty,
                    including between turns when the rail correctly showed the
                    section as not started. Same centred-spinner shape the
-                   architecture pane uses while a design turn runs. */
+                   architecture pane uses while a design turn runs.
+
+                   The requirements are NAMED only when the rail attributes the
+                   turn to them: a turn the rail places elsewhere (a `/design`
+                   run before any kickoff landed) or cannot place still keeps
+                   the empty pane honest with a plain "working", rather than
+                   claiming a document it may not be writing — or, worse,
+                   falling through to the Retry beneath (#629). */
                 failed ? null : (
                   <Box
                     sx={{
@@ -1325,9 +1346,16 @@ export function SpecView({ projectName }: { projectName: string }) {
                       justifyContent: "center",
                     }}
                   >
-                    <CircularProgress size={28} aria-label="Agent is writing the requirements" />
+                    <CircularProgress
+                      size={28}
+                      aria-label={
+                        requirementsActive ? "Agent is writing the requirements" : "Agent is working"
+                      }
+                    />
                     <Typography variant="body2" color="text.secondary">
-                      Agent is working on the requirements document
+                      {requirementsActive
+                        ? "Agent is working on the requirements document"
+                        : "Agent is working"}
                     </Typography>
                   </Box>
                 )

@@ -407,7 +407,11 @@ the moment a design run wrote its first file the pulse jumped to Validation, whi
 design was still being written.
 
 Work the rail cannot place — a plain chat turn, an org's own skill — pulses **nothing**. An agent is
-working, but a pulse on the wrong section is worse than a still rail.
+working, but a pulse on the wrong section is worse than a still rail. One exception, by elimination
+rather than by guess: while the project holds nothing at all, an unplaceable turn pulses
+Requirements — nothing downstream can be written before that document exists, and the turn carrying
+a member's interview answers (plain prose, no flow) is the very one that writes it (#629). The
+moment anything exists, the silence above resumes.
 
 **The counts read the LIVE document, not the committed one.** Deleting an `*assumed*` flag clears
 the alert as you delete it; the committed copy is a collab flush behind, and on the agent's own
