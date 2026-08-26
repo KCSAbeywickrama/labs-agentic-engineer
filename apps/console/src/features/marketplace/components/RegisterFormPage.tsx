@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
   Alert,
   Box,
@@ -24,6 +24,7 @@ import {
   Checkbox,
   Chip,
   CircularProgress,
+  Collapse,
   Divider,
   FormControlLabel,
   IconButton,
@@ -34,16 +35,26 @@ import {
 } from "@wso2/oxygen-ui";
 import { Plus, Trash2 } from "@wso2/oxygen-ui-icons-react";
 import { Link, useNavigate } from "@tanstack/react-router";
+import { REGISTER_EXTERNAL_RESOURCE_COMMAND } from "@aep/contracts/commands";
+import { useSession } from "../../../auth/SessionContext";
 import { EmptyState } from "../../../components/EmptyState";
 import { PageHeader } from "../../../components/PageHeader";
 import type { components } from "../../../generated/aep-api";
+import { chatKeyFor, setPendingSeed } from "../../agent-chat/chatStore";
+import {
+  peekRegisterDraft,
+  subscribeRegisterDraft,
+} from "../../agent-chat/registerDraftStore";
+import { AgentChatPanel } from "../../agent-chat/components/AgentChatPanel";
 import {
   useExternalResources,
   useOrgEnvironments,
   useRegisterExternalResource,
   useUpdateExternalResource,
 } from "../api/queries";
+import { MARKETPLACE_CHAT_PROJECT } from "../constants";
 import { isRegisteredExternal } from "../kind";
+import { applyRegisterDraft } from "../lib/registerDraft";
 import {
   rowsFromPointers,
   writesFromRows,
@@ -123,25 +134,82 @@ export function RegisterFormPage({
   name?: string;
 }) {
   const isEdit = Boolean(editName);
+  const promptTrimmed = prompt.trim();
+  const seedRegister = !isEdit && Boolean(promptTrimmed);
   const navigate = useNavigate();
+  const { orgHandle } = useSession();
   const environments = useOrgEnvironments();
   const register = useRegisterExternalResource();
   const update = useUpdateExternalResource(editName ?? "");
   const resources = useExternalResources();
+  const [chatOpen, setChatOpen] = useState(true);
+  const seededRef = useRef(false);
 
   const record = (resources.data ?? []).find((r) => r.name === editName);
   const editing =
     isEdit && record != null && isRegisteredExternal(record) ? record : undefined;
 
-  const [name, setName] = useState(isEdit ? (editName ?? "") : slugFrom(prompt));
-  const [description, setDescription] = useState(isEdit ? "" : prompt);
+  const [name, setName] = useState(
+    isEdit ? (editName ?? "") : seedRegister ? "" : slugFrom(prompt),
+  );
+  const [description, setDescription] = useState(
+    isEdit || seedRegister ? "" : prompt,
+  );
   const [consumptionInstructions, setConsumptionInstructions] = useState("");
   const [keys, setKeys] = useState<ConfigKeyDTO[]>(
-    isEdit ? [] : [{ key: "API_KEY", description: "API secret", secret: true }],
+    isEdit || seedRegister
+      ? []
+      : [{ key: "API_KEY", description: "API secret", secret: true }],
   );
   const [values, setValues] = useState<Record<string, string>>({});
   const [docs, setDocs] = useState<ResourceDocRow[]>([]);
   const [prefilledName, setPrefilledName] = useState<string | null>(null);
+
+  const chatKey = chatKeyFor(orgHandle ?? "default", MARKETPLACE_CHAT_PROJECT);
+  const draft = useSyncExternalStore(
+    useCallback((fn: () => void) => subscribeRegisterDraft(chatKey, fn), [chatKey]),
+    () => peekRegisterDraft(chatKey),
+  );
+  const formRef = useRef({
+    name,
+    description,
+    consumptionInstructions,
+    keys,
+    values,
+    docs,
+  });
+  formRef.current = {
+    name,
+    description,
+    consumptionInstructions,
+    keys,
+    values,
+    docs,
+  };
+
+  useEffect(() => {
+    if (!draft) return;
+    const next = applyRegisterDraft(formRef.current, draft, {
+      freezeName: isEdit,
+      freezeKeys: isEdit,
+    });
+    setName(next.name);
+    setDescription(next.description);
+    setConsumptionInstructions(next.consumptionInstructions);
+    setKeys(next.keys);
+    setValues(next.values);
+    setDocs(next.docs);
+  }, [draft, isEdit]);
+
+  useEffect(() => {
+    if (seededRef.current || !seedRegister) return;
+    seededRef.current = true;
+    setPendingSeed(
+      chatKeyFor(orgHandle ?? "default", MARKETPLACE_CHAT_PROJECT),
+      `${REGISTER_EXTERNAL_RESOURCE_COMMAND} ${promptTrimmed}`,
+      true,
+    );
+  }, [orgHandle, promptTrimmed, seedRegister]);
 
   useEffect(() => {
     if (!editing || prefilledName === editing.name) return;
@@ -222,228 +290,282 @@ export function RegisterFormPage({
   };
 
   return (
-    <PageContent>
-      <PageHeader
-        title="Register External resource"
-        subtitle="Environment values are form-only."
-        backTo={{
-          link: <Link to="/resources" />,
-          label: "Back to Resources",
+    <PageContent
+      fullWidth
+      noPadding
+      sx={{ height: "100%", display: "flex", flexDirection: "column" }}
+    >
+      <Box
+        sx={{
+          display: "flex",
+          flexGrow: 1,
+          width: "100%",
+          minWidth: 0,
+          height: "100%",
+          minHeight: 0,
         }}
-      />
-      {environments.isError && (
-        <Alert severity="error" sx={{ mb: 2 }}>
-          Failed to load environments
-        </Alert>
-      )}
-      {submitError && (
-        <Alert severity="error" sx={{ mb: 2 }}>
-          {submitError}
-        </Alert>
-      )}
-      <Stack spacing={3} sx={{ maxWidth: 720 }}>
-        <TextField
-          label="Name"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          required
-          disabled={isEdit}
-        />
-        <TextField
-          label="Description"
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          required
-          multiline
-          minRows={2}
-        />
-
-        <Box>
-          <Stack direction="row" sx={{ justifyContent: "space-between", mb: 1 }}>
-            <Typography variant="subtitle1">Config keys</Typography>
-            {!isEdit && (
-              <Button
-                size="small"
-                startIcon={<Plus size={14} />}
-                onClick={() =>
-                  setKeys((prev) => [
-                    ...prev,
-                    { key: "", description: "", secret: false },
-                  ])
+      >
+        <Box
+          sx={{
+            flexGrow: 1,
+            minWidth: 0,
+            minHeight: 0,
+            overflow: "auto",
+            px: 3,
+            py: 2,
+          }}
+        >
+          <PageHeader
+            title="Register External resource"
+            subtitle="Environment values are form-only."
+            backTo={{
+              link: <Link to="/resources" />,
+              label: "Back to Resources",
+            }}
+            {...(!chatOpen
+              ? {
+                  actions: (
+                    <Button onClick={() => setChatOpen(true)}>Open agent chat</Button>
+                  ),
                 }
-              >
-                Add key
-              </Button>
-            )}
-          </Stack>
-          <Stack spacing={2}>
-            {keys.map((cfg, index) => (
-              <Stack
-                key={index}
-                direction="row"
-                spacing={1}
-                sx={{ alignItems: "center" }}
-              >
-                <TextField
-                  label="Key"
-                  value={cfg.key}
-                  onChange={(e) =>
-                    setKeys((prev) =>
-                      prev.map((row, i) =>
-                        i === index ? { ...row, key: e.target.value } : row,
-                      ),
-                    )
-                  }
-                  sx={{ flex: 1 }}
-                  disabled={isEdit}
-                />
-                <TextField
-                  label="Description"
-                  value={cfg.description ?? ""}
-                  onChange={(e) =>
-                    setKeys((prev) =>
-                      prev.map((row, i) =>
-                        i === index
-                          ? { ...row, description: e.target.value }
-                          : row,
-                      ),
-                    )
-                  }
-                  sx={{ flex: 2 }}
-                />
-                <FormControlLabel
-                  control={
-                    <Checkbox
-                      checked={Boolean(cfg.secret)}
+              : {})}
+          />
+          {environments.isError && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              Failed to load environments
+            </Alert>
+          )}
+          {submitError && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {submitError}
+            </Alert>
+          )}
+          <Stack spacing={3} sx={{ maxWidth: 720 }}>
+            <TextField
+              label="Name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              required
+              disabled={isEdit}
+            />
+            <TextField
+              label="Description"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              required
+              multiline
+              minRows={2}
+            />
+
+            <Box>
+              <Stack direction="row" sx={{ justifyContent: "space-between", mb: 1 }}>
+                <Typography variant="subtitle1">Config keys</Typography>
+                {!isEdit && (
+                  <Button
+                    size="small"
+                    startIcon={<Plus size={14} />}
+                    onClick={() =>
+                      setKeys((prev) => [
+                        ...prev,
+                        { key: "", description: "", secret: false },
+                      ])
+                    }
+                  >
+                    Add key
+                  </Button>
+                )}
+              </Stack>
+              <Stack spacing={2}>
+                {keys.map((cfg, index) => (
+                  <Stack
+                    key={index}
+                    direction="row"
+                    spacing={1}
+                    sx={{ alignItems: "center" }}
+                  >
+                    <TextField
+                      label="Key"
+                      value={cfg.key}
+                      onChange={(e) =>
+                        setKeys((prev) =>
+                          prev.map((row, i) =>
+                            i === index ? { ...row, key: e.target.value } : row,
+                          ),
+                        )
+                      }
+                      sx={{ flex: 1 }}
                       disabled={isEdit}
+                    />
+                    <TextField
+                      label="Description"
+                      value={cfg.description ?? ""}
                       onChange={(e) =>
                         setKeys((prev) =>
                           prev.map((row, i) =>
                             i === index
-                              ? { ...row, secret: e.target.checked }
+                              ? { ...row, description: e.target.value }
                               : row,
                           ),
                         )
                       }
+                      sx={{ flex: 2 }}
                     />
-                  }
-                  label="Secret"
-                />
-                {!isEdit && (
-                  <IconButton
-                    aria-label="Remove key"
-                    disabled={keys.length === 1}
-                    onClick={() =>
-                      setKeys((prev) => prev.filter((_, i) => i !== index))
-                    }
-                  >
-                    <Trash2 size={16} />
-                  </IconButton>
-                )}
+                    <FormControlLabel
+                      control={
+                        <Checkbox
+                          checked={Boolean(cfg.secret)}
+                          disabled={isEdit}
+                          onChange={(e) =>
+                            setKeys((prev) =>
+                              prev.map((row, i) =>
+                                i === index
+                                  ? { ...row, secret: e.target.checked }
+                                  : row,
+                              ),
+                            )
+                          }
+                        />
+                      }
+                      label="Secret"
+                    />
+                    {!isEdit && (
+                      <IconButton
+                        aria-label="Remove key"
+                        disabled={keys.length === 1}
+                        onClick={() =>
+                          setKeys((prev) => prev.filter((_, i) => i !== index))
+                        }
+                      >
+                        <Trash2 size={16} />
+                      </IconButton>
+                    )}
+                  </Stack>
+                ))}
               </Stack>
-            ))}
+            </Box>
+
+            <Box>
+              <Typography variant="subtitle1" gutterBottom>
+                Environment values
+              </Typography>
+              {environments.isLoading ? (
+                <Box sx={{ display: "flex", justifyContent: "center", py: 3 }}>
+                  <CircularProgress aria-label="Loading environments" />
+                </Box>
+              ) : environments.isError ? null : envNames.length === 0 ? (
+                <EmptyState
+                  compact
+                  bordered
+                  title="No OpenChoreo Environments"
+                  description="This organization has no OpenChoreo Environments, so environment values cannot be filled."
+                />
+              ) : (
+                <Stack spacing={2} sx={{ pl: 2 }}>
+                  {keys.map((cfg, index) => (
+                    <Box key={cfg.key || `pending-${index}`}>
+                      <Typography
+                        variant="subtitle2"
+                        color="text.secondary"
+                        sx={{ mb: 1 }}
+                      >
+                        {cfg.key || "(unnamed key)"}
+                      </Typography>
+                      <Stack spacing={1.5}>
+                        {envNames.map((environment) => {
+                          const status = cellStatus(envCells, environment, cfg.key);
+                          return (
+                            <Stack
+                              key={environment}
+                              direction="row"
+                              spacing={1}
+                              sx={{ alignItems: "flex-start" }}
+                            >
+                              <TextField
+                                label={envFieldLabel(environment, cfg.key)}
+                                type={cfg.secret ? "password" : "text"}
+                                value={values[cellKey(environment, cfg.key)] ?? ""}
+                                onChange={(e) =>
+                                  setValues((prev) => ({
+                                    ...prev,
+                                    [cellKey(environment, cfg.key)]: e.target.value,
+                                  }))
+                                }
+                                sx={{ flex: 1 }}
+                                {...(isEdit && cfg.secret
+                                  ? { helperText: KEEP_SECRET_HELPER }
+                                  : {})}
+                              />
+                              {isEdit && (
+                                <Chip
+                                  size="small"
+                                  variant="outlined"
+                                  label={
+                                    status === "configured" ? "Configured" : "Unset"
+                                  }
+                                  sx={{ mt: 1 }}
+                                />
+                              )}
+                            </Stack>
+                          );
+                        })}
+                      </Stack>
+                    </Box>
+                  ))}
+                </Stack>
+              )}
+            </Box>
+
+            <Divider />
+
+            <TextField
+              label="Consumption instructions"
+              value={consumptionInstructions}
+              onChange={(e) => setConsumptionInstructions(e.target.value)}
+              required
+              multiline
+              minRows={3}
+              fullWidth
+            />
+
+            <ResourceDocsFields docs={docs} onChange={setDocs} />
+
+            <Stack direction="row" spacing={2} sx={{ justifyContent: "flex-end" }}>
+              <Button onClick={() => void navigate({ to: "/resources" })}>
+                Cancel
+              </Button>
+              <Button
+                variant="contained"
+                onClick={submit}
+                disabled={!canSubmit || submitPending}
+                loading={submitPending}
+              >
+                {isEdit ? "Save" : "Register"}
+              </Button>
+            </Stack>
           </Stack>
         </Box>
-
-        <Box>
-          <Typography variant="subtitle1" gutterBottom>
-            Environment values
-          </Typography>
-          {environments.isLoading ? (
-            <Box sx={{ display: "flex", justifyContent: "center", py: 3 }}>
-              <CircularProgress aria-label="Loading environments" />
-            </Box>
-          ) : environments.isError ? null : envNames.length === 0 ? (
-            <EmptyState
-              compact
-              bordered
-              title="No OpenChoreo Environments"
-              description="This organization has no OpenChoreo Environments, so environment values cannot be filled."
-            />
-          ) : (
-            <Stack spacing={2} sx={{ pl: 2 }}>
-              {keys.map((cfg, index) => (
-                <Box key={cfg.key || `pending-${index}`}>
-                  <Typography
-                    variant="subtitle2"
-                    color="text.secondary"
-                    sx={{ mb: 1 }}
-                  >
-                    {cfg.key || "(unnamed key)"}
-                  </Typography>
-                  <Stack spacing={1.5}>
-                    {envNames.map((environment) => {
-                      const status = cellStatus(envCells, environment, cfg.key);
-                      return (
-                        <Stack
-                          key={environment}
-                          direction="row"
-                          spacing={1}
-                          sx={{ alignItems: "flex-start" }}
-                        >
-                          <TextField
-                            label={envFieldLabel(environment, cfg.key)}
-                            type={cfg.secret ? "password" : "text"}
-                            value={values[cellKey(environment, cfg.key)] ?? ""}
-                            onChange={(e) =>
-                              setValues((prev) => ({
-                                ...prev,
-                                [cellKey(environment, cfg.key)]: e.target.value,
-                              }))
-                            }
-                            sx={{ flex: 1 }}
-                            {...(isEdit && cfg.secret
-                              ? { helperText: KEEP_SECRET_HELPER }
-                              : {})}
-                          />
-                          {isEdit && (
-                            <Chip
-                              size="small"
-                              variant="outlined"
-                              label={
-                                status === "configured" ? "Configured" : "Unset"
-                              }
-                              sx={{ mt: 1 }}
-                            />
-                          )}
-                        </Stack>
-                      );
-                    })}
-                  </Stack>
-                </Box>
-              ))}
-            </Stack>
-          )}
-        </Box>
-
-        <Divider />
-
-        <TextField
-            label="Consumption instructions"
-            value={consumptionInstructions}
-            onChange={(e) => setConsumptionInstructions(e.target.value)}
-            required
-            multiline
-            minRows={3}
-            fullWidth
-          />
-
-        <ResourceDocsFields docs={docs} onChange={setDocs} />
-
-        <Stack direction="row" spacing={2} sx={{ justifyContent: "flex-end" }}>
-          <Button onClick={() => void navigate({ to: "/resources" })}>
-            Cancel
-          </Button>
-          <Button
-            variant="contained"
-            onClick={submit}
-            disabled={!canSubmit || submitPending}
-            loading={submitPending}
+        {chatOpen ? (
+          <Collapse
+            in
+            orientation="horizontal"
+            unmountOnExit
+            sx={{
+              height: "100%",
+              flexShrink: 0,
+              alignSelf: "stretch",
+              "& .MuiCollapse-wrapper, & .MuiCollapse-wrapperInner": {
+                height: "100%",
+              },
+            }}
           >
-            {isEdit ? "Save" : "Register"}
-          </Button>
-        </Stack>
-      </Stack>
+            <AgentChatPanel
+              org={orgHandle ?? "default"}
+              projectName={MARKETPLACE_CHAT_PROJECT}
+              onClose={() => setChatOpen(false)}
+            />
+          </Collapse>
+        ) : null}
+      </Box>
     </PageContent>
   );
 }
