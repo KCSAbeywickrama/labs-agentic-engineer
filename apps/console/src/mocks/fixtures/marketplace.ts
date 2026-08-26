@@ -19,11 +19,15 @@
 import type { components } from "../../generated/aep-api";
 
 type OrgEndpointDTO = components["schemas"]["OrgEndpointDTO"];
+type ExternalResourceDTO = components["schemas"]["ExternalResourceDTO"];
+type PlatformResourceTypeDTO = components["schemas"]["PlatformResourceTypeDTO"];
+type EnvValueCellDTO = components["schemas"]["EnvValueCellDTO"];
 type ApiError = components["schemas"]["Error"];
 
 // Scenario switch (api-guidelines: mocks must produce empty AND error
 // states). Toggle in the browser devtools:
 //   localStorage.setItem('aep:mock:marketplace', 'empty' | 'some' | 'error')
+// Shared by Resources catalog GETs and Marketplace Endpoints GETs.
 export type MarketplaceScenario = "empty" | "some" | "error";
 
 export const emptyOrgEndpoints: OrgEndpointDTO[] = [];
@@ -58,3 +62,54 @@ export const marketplaceError: ApiError = {
   code: "internal_error",
   message: "Mock error scenario for Marketplace Endpoints",
 };
+
+export const marketplaceLoadError: ApiError = {
+  code: "internal_error",
+  message: "Failed to load resource catalog",
+};
+
+// Registered External: org value-plane cells (one per config key × environment).
+// Secret cells omit `value`; plain cells may include it when configured.
+const stripeEnvCells: EnvValueCellDTO[] = [
+  { environment: "development", key: "api_key", status: "configured" },
+  { environment: "development", key: "region", status: "configured", value: "us" },
+  { environment: "production", key: "api_key", status: "unset" },
+  { environment: "production", key: "region", status: "unset" },
+];
+
+export const seedExternalResources: ExternalResourceDTO[] = [
+  {
+    name: "stripe",
+    description: "Stripe payments API",
+    config: [
+      { key: "api_key", secret: true, description: "Secret API key" },
+      { key: "region", secret: false, description: "Stripe account region" },
+    ],
+    consumers: [{ projectId: "demo-shop", componentName: "checkout-api" }],
+    consumptionInstructions: "Use the secret key as Bearer.",
+    envCells: stripeEnvCells,
+    resourceDocs: [
+      { type: "openapi", url: "https://example.com/stripe/openapi.yaml" },
+    ],
+    instances: [
+      { project: "demo-shop", environment: "development", status: "Ready" },
+    ],
+  },
+  {
+    name: "github",
+    description: "GitHub API token for repository access",
+    config: [{ key: "token", secret: true, description: "Personal access token" }],
+    consumers: [],
+    envCells: [],
+  },
+];
+
+export const seedPlatformResourceTypes: PlatformResourceTypeDTO[] = [
+  {
+    name: "postgres-cnpg",
+    description: "Managed Postgres via CloudNativePG",
+    parameters: { size: { type: "string", description: "Storage size" } },
+    outputs: ["host", "port", "database", "connectionUrl"],
+    consumers: [{ projectId: "demo-shop", componentName: "catalog-api" }],
+  },
+];

@@ -16,9 +16,14 @@
  * under the License.
  */
 
-import { createFileRoute } from "@tanstack/react-router";
-import { ResourcesCatalog } from "../features/marketplace/components/ResourcesCatalog";
+import type { components } from "../../generated/aep-api";
 
-export const Route = createFileRoute("/resources")({
-  component: ResourcesCatalog,
-});
+type ExternalResourceDTO = components["schemas"]["ExternalResourceDTO"];
+
+// Registered External resources carry org value-plane cells (one per config
+// key × environment). Project External resources omit the field or leave it
+// empty. The catalog grid does not tag that split — only platform types get
+// a Chip — but the drawer (Task 6) and tests use this discriminator.
+export function isRegisteredExternal(resource: ExternalResourceDTO): boolean {
+  return Array.isArray(resource.envCells) && resource.envCells.length > 0;
+}

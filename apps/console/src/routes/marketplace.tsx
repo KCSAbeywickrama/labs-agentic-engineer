@@ -16,9 +16,10 @@
  * under the License.
  */
 
-import { createFileRoute } from "@tanstack/react-router";
-import { ResourcesCatalog } from "../features/marketplace/components/ResourcesCatalog";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
-export const Route = createFileRoute("/resources")({
-  component: ResourcesCatalog,
+export const Route = createFileRoute("/marketplace")({
+  beforeLoad: () => {
+    throw redirect({ to: "/resources" });
+  },
 });

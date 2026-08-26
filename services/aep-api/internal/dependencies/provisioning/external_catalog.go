@@ -27,13 +27,39 @@ import (
 )
 
 // ExternalResourceView is one org external-resource catalog entry with its
-// config schema and current consumers (the in-use delete guard input). Values
-// are never included — the catalog holds schema + references only.
+// config schema and current consumers (the in-use delete guard input).
+//
+// Registered External rows may carry env cells and instances from
+// CatalogValuePlane when that collaborator is wired (tests); production
+// leaves the plane nil, so every live row stays Project External (empty
+// cells/instances). Secret cell values are never copied onto the wire DTO.
 type ExternalResourceView struct {
-	Name        string
-	Description string
-	Config      []spec.ConfigKey
-	Consumers   []dependencies.ExternalResourceConsumer
+	Name                    string
+	Description             string
+	Config                  []spec.ConfigKey
+	Consumers               []dependencies.ExternalResourceConsumer
+	ConsumptionInstructions string
+	EnvCells                []EnvCell
+	ResourceDocs            []openchoreo.ResourceDoc
+	Instances               []ResourceInstance
+}
+
+// EnvCell is one org-held environment × config-key cell on a Registered
+// External resource. Status is "configured" or "unset". Value is never
+// copied to the DTO when the matching config key is secret.
+type EnvCell struct {
+	Environment string
+	Key         string
+	Status      string
+	Value       string
+}
+
+// ResourceInstance is one observed instance of a Registered External
+// resource (project × environment × status).
+type ResourceInstance struct {
+	Project     string
+	Environment string
+	Status      string
 }
 
 // ListExternalResources returns the org's external-resource catalog with each
@@ -46,6 +72,9 @@ type ExternalResourceView struct {
 // external_resources table (s.catalog is no longer read anywhere in this
 // package; authoring now builds its definition off the design — see
 // build_provision.go / value_service.go).
+//
+// Env cells and instances come from CatalogValuePlane when it is wired;
+// otherwise they stay empty.
 func (s *Service) ListExternalResources(ctx context.Context, orgID string) ([]ExternalResourceView, error) {
 	defs, err := s.rtCatalog.List(ctx, orgID)
 	if err != nil {
@@ -58,12 +87,19 @@ func (s *Service) ListExternalResources(ctx context.Context, orgID string) ([]Ex
 	out := make([]ExternalResourceView, 0, len(defs))
 	for i := range defs {
 		def := &defs[i]
-		out = append(out, ExternalResourceView{
-			Name:        def.Name,
-			Description: def.Description,
-			Config:      toConfigKeys(def.Config),
-			Consumers:   consumersByName[strings.ToLower(def.Name)],
-		})
+		view := ExternalResourceView{
+			Name:                    def.Name,
+			Description:             def.Description,
+			Config:                  toConfigKeys(def.Config),
+			Consumers:               consumersByName[strings.ToLower(def.Name)],
+			ConsumptionInstructions: def.ConsumptionInstructions,
+			ResourceDocs:            def.ResourceDocs,
+		}
+		if s.catalogValuePlane != nil {
+			view.EnvCells = append([]EnvCell(nil), s.catalogValuePlane.EnvCells(def.Name)...)
+			view.Instances = append([]ResourceInstance(nil), s.catalogValuePlane.Instances(def.Name)...)
+		}
+		out = append(out, view)
 	}
 	return out, nil
 }

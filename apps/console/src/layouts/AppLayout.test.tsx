@@ -91,6 +91,62 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
+function sidebarItem(name: string) {
+  return screen.getByRole("button", { name });
+}
+
+describe("AppLayout — org sidebar", () => {
+  beforeEach(() => {
+    mockParams = {};
+  });
+
+  it("lists Projects, Resources, Endpoints, Alerts in that order, with Settings in the footer", () => {
+    mockPathname = "/";
+    render();
+
+    const projects = sidebarItem("Projects");
+    const resources = sidebarItem("Resources");
+    const endpoints = sidebarItem("Endpoints");
+    const alerts = sidebarItem("Alerts");
+    expect(
+      projects.compareDocumentPosition(resources) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      resources.compareDocumentPosition(endpoints) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      endpoints.compareDocumentPosition(alerts) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(sidebarItem("Settings")).toBeInTheDocument();
+  });
+
+  it("selects Resources on /resources", () => {
+    mockPathname = "/resources";
+    render();
+
+    expect(sidebarItem("Resources")).toHaveClass("Mui-selected");
+    expect(sidebarItem("Projects")).not.toHaveClass("Mui-selected");
+  });
+
+  it("selects Endpoints on /endpoints", () => {
+    mockPathname = "/endpoints";
+    render();
+
+    expect(sidebarItem("Endpoints")).toHaveClass("Mui-selected");
+    expect(sidebarItem("Projects")).not.toHaveClass("Mui-selected");
+  });
+
+  it("does not show Resources or Endpoints inside a project", () => {
+    mockPathname = `/projects/${PROJECT}`;
+    mockParams = { projectName: PROJECT };
+    render();
+
+    expect(sidebarItem("Overview")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Resources" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Endpoints" })).not.toBeInTheDocument();
+  });
+});
+
 describe("AppLayout — landing from project creation", () => {
   it("opens the agent chat on arrival, and strips the signal", () => {
     mockSearch = { chat: "open" };
