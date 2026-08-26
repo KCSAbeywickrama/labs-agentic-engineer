@@ -525,3 +525,70 @@ export function registerDeterministicFlush(key: string): () => void {
 export function hasDeterministicFlush(key: string): boolean {
   return (deterministicFlushKeys.get(key) ?? 0) > 0;
 }
+
+// --- Log-write guards (#606) ---------------------------------------------
+//
+// Rehydrating the log from server truth used to belong to `useAgentChat`, so
+// the two conditions that must block a REPLACE lived there as component refs.
+// #606 gives the log THREE writers — the chat panel, the spec workspace and
+// the overview's spec card — because a member arriving without the panel
+// otherwise has no log at all, and every surface that reads one then reads an
+// empty conversation.
+//
+// The guards move here because they describe the LOG, not any one hook: any
+// writer must be able to ask "is it safe to replace this right now", and the
+// answer cannot live inside one of them.
+//
+// Both are per chatKey, and both are FAIL-CLOSED — an unknown key is safe to
+// replace, a marked key is not:
+//
+// - ATTACHED: a turn stream is being folded into this log. A replace would
+//   wash out the streamed partials the fold has appended so far, and (worse)
+//   the streaming question prefix `useRoomQuestion` is mirroring into the room.
+// - SENDING: a local send is mid-dispatch. Its optimistic user row has no turn
+//   id yet and the server has no record of it, so it survives neither the
+//   replace nor the `localOnly` filter that keeps error/failed rows — the
+//   user's own message would vanish between typing and dispatch.
+//
+// Ref-counted rather than boolean, for the same reason `registerDeterministicFlush`
+// is: a remount can overlap two registrations for one key, and the first
+// cleanup must not clear the second's claim.
+
+const attachedFolds = new Map<string, number>();
+const inFlightSends = new Map<string, number>();
+
+function claim(counts: Map<string, number>, key: string): () => void {
+  counts.set(key, (counts.get(key) ?? 0) + 1);
+  let released = false;
+  return () => {
+    if (released) return; // idempotent: cleanup may run twice (StrictMode)
+    released = true;
+    const remaining = (counts.get(key) ?? 1) - 1;
+    if (remaining <= 0) counts.delete(key);
+    else counts.set(key, remaining);
+  };
+}
+
+/** Mark a turn stream as being folded into `key`'s log. Call the returned
+ *  function when the fold ends, however it ends. */
+export function claimStreamFold(key: string): () => void {
+  return claim(attachedFolds, key);
+}
+
+/** Mark a local send as mid-dispatch for `key`. Call the returned function
+ *  once the dispatch resolves, successfully or not. */
+export function claimSendInFlight(key: string): () => void {
+  return claim(inFlightSends, key);
+}
+
+/**
+ * May a caller REPLACE `key`'s log with server truth right now?
+ *
+ * False while a fold or a send owns it. A blocked rehydrate is DROPPED, never
+ * queued: the surfaces that rehydrate all re-ask on their own triggers (mount,
+ * refocus, the agent peer leaving the room), and the fold that blocked this one
+ * is itself appending fresher content than the replace would have written.
+ */
+export function canReplaceLog(key: string): boolean {
+  return !attachedFolds.has(key) && !inFlightSends.has(key);
+}

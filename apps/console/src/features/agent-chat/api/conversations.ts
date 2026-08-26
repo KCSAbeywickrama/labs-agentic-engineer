@@ -60,7 +60,17 @@ export async function rotateConversation(projectName: string): Promise<string> {
   return data.conversationId;
 }
 
-/** Query key for the resolved current-thread id (react-query). */
+/** Query keys for the thread (react-query). */
 export const conversationKeys = {
   current: (projectName: string) => ["agent-conversation", projectName] as const,
+  /**
+   * The thread's server-side history. ONE cache entry shared by every surface
+   * that rehydrates the log (#606) — the chat panel, the spec workspace and the
+   * overview's spec card — so three mounted readers cost one request, not three.
+   *
+   * Keyed on the conversation id as well as the project: a rotation must not
+   * serve the demoted thread's messages under the new thread's key.
+   */
+  messages: (projectName: string, conversationId: string) =>
+    ["agent-conversation", projectName, "messages", conversationId] as const,
 };

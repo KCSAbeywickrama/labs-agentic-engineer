@@ -67,6 +67,7 @@ import {
   type SectionReason,
 } from "../lib/railSections";
 import { chatKeyFor, setPendingSeed, subscribeTurnEnd } from "../../agent-chat/chatStore";
+import { useConversationLog } from "../../agent-chat/useConversationLog";
 import { EmptyState } from "../../../components/EmptyState";
 import { ProblemsDialog } from "./ProblemsDialog";
 import { CommittedFileView } from "./CommittedFileView";
@@ -594,6 +595,38 @@ export function SpecView({ projectName }: { projectName: string }) {
   // renders them with kind:"agent"). Building a half-written design is wrong,
   // so Build is disabled — with a tooltip — while one is working (#162).
   const agentBusy = collab.peers.some((p) => p.kind === "agent");
+
+  // Keep this browser's chat log fed WITHOUT the chat panel (#606).
+  //
+  // The question form is the room's, but the fact that a question is pending
+  // reaches the room via `useRoomQuestion`, which reads the chat log — and the
+  // log used to be filled only while `AgentChatPanel` was mounted. So a member
+  // opening a spec link cold had no log, nothing mirrored, and this workspace
+  // showed "Nothing written yet" plus a Retry while the agent stood waiting on
+  // their answers. Mounting the log here removes the panel from that path.
+  //
+  // Same "default" org fallback as the chatKey above, not the room's "acme".
+  const { resync: resyncConversation } = useConversationLog(
+    orgHandle ?? "default",
+    projectName,
+  );
+  // Turn-end, observed rather than polled. The agent joins the room as a peer
+  // while it works and leaves when the turn ends, so its DEPARTURE is the exact
+  // moment the thread gained something — a question, or the answer to one.
+  // `subscribeTurnEnd` cannot serve this: it fires from the panel's fold, which
+  // is precisely what is absent here. Edge-triggered off a ref rather than a
+  // state flag: this must fire on the falling edge only, never on mount into an
+  // already-idle project, where the query's own mount read has it covered.
+  const agentWasInRoom = useRef(false);
+  useEffect(() => {
+    if (agentBusy) {
+      agentWasInRoom.current = true;
+      return;
+    }
+    if (!agentWasInRoom.current) return;
+    agentWasInRoom.current = false;
+    resyncConversation();
+  }, [agentBusy, resyncConversation]);
   // A standing question form owns the turn: the agent's turn ended ON the
   // question, so `agentBusy` is false while the work is very much unfinished.
   // Since the interview is uncapped (#578) the PRD now exists from the first

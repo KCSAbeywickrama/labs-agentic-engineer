@@ -115,6 +115,22 @@ vi.mock("../collab/useTurnEndFlush", () => ({
   useTurnEndFlush: (...args: unknown[]) => mockUseTurnEndFlush(...args),
 }));
 
+// --- Conversation log (#606): filling this browser's chat log from server
+// truth without the chat panel. Its own behavior is covered by
+// useConversationLog.test.tsx — here it's a stub for the same reason
+// useTurnEndFlush is (no QueryClientProvider in this file), and so SpecView's
+// own wiring can be asserted: the (org, projectName) it mounts the hook with,
+// and that it calls `resync` when the agent peer leaves the room.
+const mockResyncConversation = vi.fn();
+const mockUseConversationLog = vi.fn();
+mockUseConversationLog.mockReturnValue({
+  historyReady: true,
+  resync: mockResyncConversation,
+});
+vi.mock("../../agent-chat/useConversationLog", () => ({
+  useConversationLog: (...args: unknown[]) => mockUseConversationLog(...args),
+}));
+
 // --- "Resolve in chat" (#252 Task 9 seam, Task 5's plumbing): its own
 // behavior is covered by useResolveDependencyViaChat.test.ts — here it's a
 // stub so SpecView's own wiring (which componentName/dep it's called with)
@@ -1238,5 +1254,50 @@ describe("SpecView warns before designing against unsettled requirements", () =>
       expect(screen.queryByRole("button", { name: "Generate anyway" })).toBeNull(),
     );
     expect(mockNavigate).not.toHaveBeenCalled();
+  });
+});
+
+// A project whose agent is WAITING on answers must not look dead here (#606).
+// The question form is the room's, but the fact that a question is pending
+// reaches the room through this browser's chat log — which used to be filled
+// only while AgentChatPanel was mounted. These pin the two halves of removing
+// the panel from that path: the workspace mounts the log itself, and it
+// re-reads the thread when the agent peer leaves the room (turn-end observed,
+// not polled).
+describe("SpecView keeps the chat log fed without the chat panel (#606)", () => {
+  it("mounts the conversation log for this org and project", () => {
+    render(<SpecView projectName="proj1" />);
+    // The SAME org expression the chatKey above uses (`orgHandle ?? "default"`,
+    // matching AppLayout/AgentChatPanel) — this harness signs in under "acme",
+    // so the log it fills is `aep.chat.v1.acme.proj1`, the very key
+    // useTurnEndFlush is wired with. Mounting it under a different org fills a
+    // log nothing reads.
+    expect(mockUseConversationLog).toHaveBeenCalledWith("acme", "proj1");
+  });
+
+  it("re-reads the thread when the agent peer leaves the room", () => {
+    // The agent joins the room while it works and leaves when the turn ends, so
+    // its departure is the moment the thread gained a question — or the answer
+    // to one. Nothing else can tell us with the panel closed.
+    mockCollab = {
+      ...soloCollab(),
+      status: "connected",
+      peers: [{ clientId: 1, name: "Agent", color: "#000000", kind: "agent" }],
+    };
+    const { rerender } = render(<SpecView projectName="proj1" />);
+    expect(mockResyncConversation).not.toHaveBeenCalled();
+
+    mockCollab = { ...soloCollab(), status: "connected", peers: [], version: 1 };
+    rerender(<SpecView projectName="proj1" />);
+
+    expect(mockResyncConversation).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not re-read on mount into an already-idle project", () => {
+    // Falling edge only. The query's own mount read covers arrival; firing here
+    // as well would spend a second request on every visit to a quiet project.
+    mockCollab = { ...soloCollab(), status: "connected", peers: [] };
+    render(<SpecView projectName="proj1" />);
+    expect(mockResyncConversation).not.toHaveBeenCalled();
   });
 });
