@@ -439,6 +439,40 @@ describe("SpecView while the kickoff is still writing", () => {
     ).not.toBeInTheDocument();
   });
 
+  // #635 (review): `spec.agent` keeps reading "failed" until the retry's own
+  // turn has a row, so unguarded the banner sat through the retry's dispatch
+  // offering a SECOND Retry against the send it already fired — while the rail
+  // beside it pulsed working. The click's own seed is the evidence that flips
+  // the pane; if the send dies, the claim releases and the banner returns.
+  it("drops the failure banner the moment Retry is clicked", () => {
+    mockSpecAgent = "failed";
+    empty();
+    render(<SpecView projectName="proj1" />);
+    expect(
+      screen.getByText("The agent couldn't write your requirements"),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+    expect(
+      screen.queryByText("The agent couldn't write your requirements"),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+    expect(
+      screen.getByText("Agent is working on the requirements document"),
+    ).toBeInTheDocument();
+
+    // The send died before a turn existed: the seed's consumption with no
+    // claim taken collapses the evidence, and the banner returns.
+    act(() => {
+      consumePendingSeed(chatKeyFor("acme", "proj1"));
+    });
+    expect(
+      screen.getByText("The agent couldn't write your requirements"),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+  });
+
   // The dead end this closed (#562 review): a dispatch that never reached the
   // turn guard — no Anthropic key, an unreachable skills repo — or an abandoned
   // reference upload the create held the kickoff for. There is no turn row, so
