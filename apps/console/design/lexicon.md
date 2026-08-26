@@ -413,6 +413,19 @@ Requirements — nothing downstream can be written before that document exists, 
 a member's interview answers (plain prose, no flow) is the very one that writes it (#629). The
 moment anything exists, the silence above resumes.
 
+**"In flight" starts at the submit, not at the server.** `spec.agent` cannot see a turn before its
+row exists, and submitted interview answers take the dispatch round-trip — seconds — to become one;
+in that gap every signal above read idle and the empty workspace offered Retry against the very
+interview it could not see ([#635](https://github.com/wso2/labs-agentic-engineer/issues/635)). The
+browser that submitted holds the missing evidence — a seeded message waiting, a dispatch awaiting
+its turn id, a stream being folded — and that chain counts as agent work until the status catches
+up. It is claim-scoped, not timed — a refused send releases its claim and Retry surfaces at once —
+with one backstop: a seeded message whose consumer never opens (the one stage with no failure path
+of its own) lapses from the signal after a generous TTL, so an outage cannot pin a working state
+that hides Retry. A
+teammate's browser holds no claim for a send made elsewhere and waits on the status, as it always
+did.
+
 **The counts read the LIVE document, not the committed one.** Deleting an `*assumed*` flag clears
 the alert as you delete it; the committed copy is a collab flush behind, and on the agent's own
 edits that lag was long enough to look broken.

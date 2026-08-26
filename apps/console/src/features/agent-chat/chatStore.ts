@@ -433,6 +433,7 @@ const seedListeners = new Map<string, Set<() => void>>();
  */
 export function setPendingSeed(key: string, message: string, guarded = false): void {
   pendingSeeds.set(key, { message, guarded });
+  stampSeedForActivity(key);
   for (const fn of seedListeners.get(key) ?? []) fn();
 }
 
@@ -451,6 +452,7 @@ export function consumePendingSeed(key: string): PendingSeed | null {
   const seed = pendingSeeds.get(key);
   if (seed === undefined) return null;
   pendingSeeds.delete(key);
+  clearSeedActivity(key);
   for (const fn of seedListeners.get(key) ?? []) fn();
   return seed;
 }
@@ -559,6 +561,7 @@ const inFlightSends = new Map<string, number>();
 
 function claim(counts: Map<string, number>, key: string): () => void {
   counts.set(key, (counts.get(key) ?? 0) + 1);
+  notifyLocalTurnActivity(key);
   let released = false;
   return () => {
     if (released) return; // idempotent: cleanup may run twice (StrictMode)
@@ -566,6 +569,7 @@ function claim(counts: Map<string, number>, key: string): () => void {
     const remaining = (counts.get(key) ?? 1) - 1;
     if (remaining <= 0) counts.delete(key);
     else counts.set(key, remaining);
+    notifyLocalTurnActivity(key);
   };
 }
 
@@ -590,5 +594,100 @@ export function claimSendInFlight(key: string): () => void {
  * is itself appending fresher content than the replace would have written.
  */
 export function canReplaceLog(key: string): boolean {
-  return !attachedFolds.has(key) && !inFlightSends.has(key);
+  return !hasLiveClaims(key);
+}
+
+/** A dispatch or fold this browser currently owns for `key` — the shared base
+ *  of `canReplaceLog` and `hasLocalTurnActivity`, so a future claim map cannot
+ *  be added to one reading and silently missed by the other. */
+function hasLiveClaims(key: string): boolean {
+  return inFlightSends.has(key) || attachedFolds.has(key);
+}
+
+// --- Local turn activity (#635) -------------------------------------------
+//
+// `spec.agent` lags a send by the dispatch round-trip: interview answers leave
+// through the seed slot the instant the question form submits, but the turn
+// carrying them has no `agent_turns` row until StartTurn answers — seconds
+// later, longer under load. In that window the status endpoint reads idle, the
+// question form is gone, and an empty project has no files, so every signal
+// the spec workspace checks said "nothing running" and it offered Retry
+// against an interview mid-flight — #629's hazard surviving as a race.
+//
+// This browser knows better. The seed slot, the send claim and the fold claim
+// chain without a gap from form-submit to the turn's terminal frame (`send()`
+// releases the send claim and takes the fold claim in one synchronous
+// continuation), and every failure path releases its claim — a refused
+// dispatch, a severed stream, a chatKey rotation. So "any of the three is
+// live" is precisely "this browser holds evidence of a turn the status
+// endpoint may not report yet". The CLAIMS need no expiry timer — the signal
+// collapses the moment a send is refused or a turn dies, letting Retry
+// surface honestly. The SEED is the one stage with no failure path of its
+// own: its sole consumer sits behind gates (the conversation id resolving,
+// the history rehydrate landing) that an outage can hold shut indefinitely,
+// and a seed nobody consumes would otherwise pin a working state that HIDES
+// Retry — strictly worse than the gap being closed. So only the seed's
+// contribution expires, on a TTL generous against a slow panel mount; the
+// seed itself stays consumable, exactly as before.
+//
+// Browser-local by nature: a teammate's browser holds no claim for a send
+// made here. Their pane recovers through the status poll as it always did —
+// this only closes the gap for the member who just submitted.
+
+const localTurnActivityListeners = new Map<string, Set<() => void>>();
+
+function notifyLocalTurnActivity(key: string): void {
+  for (const fn of localTurnActivityListeners.get(key) ?? []) fn();
+}
+
+/** How long a WAITING seed counts as turn activity. Normal consumption is
+ *  near-immediate (the panel is mounted, or mounts on the seed's own signal),
+ *  so this bounds only the pathological stall where the consumer's gates
+ *  never open. */
+export const SEED_ACTIVITY_TTL_MS = 30_000;
+
+const seedActivitySetAt = new Map<string, number>();
+const seedActivityTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function stampSeedForActivity(key: string): void {
+  seedActivitySetAt.set(key, Date.now());
+  clearTimeout(seedActivityTimers.get(key));
+  // The expiry is an EDGE subscribers must hear about — without the wake-up
+  // call, a pane holding "working" on this seed would keep it until some
+  // unrelated re-render happened to re-read the snapshot.
+  seedActivityTimers.set(
+    key,
+    setTimeout(() => {
+      seedActivityTimers.delete(key);
+      notifyLocalTurnActivity(key);
+    }, SEED_ACTIVITY_TTL_MS),
+  );
+}
+
+function clearSeedActivity(key: string): void {
+  seedActivitySetAt.delete(key);
+  clearTimeout(seedActivityTimers.get(key));
+  seedActivityTimers.delete(key);
+}
+
+/** True while THIS browser holds live evidence of a turn for `key`: a seed
+ *  waiting to send (within its TTL), a dispatch awaiting its turn id, or a
+ *  stream being folded. */
+export function hasLocalTurnActivity(key: string): boolean {
+  const setAt = pendingSeeds.has(key) ? seedActivitySetAt.get(key) : undefined;
+  const seedLive = setAt !== undefined && Date.now() - setAt < SEED_ACTIVITY_TTL_MS;
+  return seedLive || hasLiveClaims(key);
+}
+
+/** Fires on every edge of `hasLocalTurnActivity`: seed set or consumed, claim
+ *  taken or released. */
+export function subscribeLocalTurnActivity(key: string, fn: () => void): () => void {
+  const unsubscribeSeed = subscribeSeed(key, fn);
+  const set = localTurnActivityListeners.get(key) ?? new Set();
+  set.add(fn);
+  localTurnActivityListeners.set(key, set);
+  return () => {
+    unsubscribeSeed();
+    set.delete(fn);
+  };
 }

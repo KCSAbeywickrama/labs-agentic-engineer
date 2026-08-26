@@ -68,6 +68,7 @@ import {
 } from "../lib/railSections";
 import { chatKeyFor, setPendingSeed, subscribeTurnEnd } from "../../agent-chat/chatStore";
 import { useConversationLog } from "../../agent-chat/useConversationLog";
+import { useLocalTurnActivity } from "../../agent-chat/useLocalTurnActivity";
 import { EmptyState } from "../../../components/EmptyState";
 import { ProblemsDialog } from "./ProblemsDialog";
 import { CommittedFileView } from "./CommittedFileView";
@@ -486,7 +487,20 @@ export function SpecView({ projectName }: { projectName: string }) {
   // requirements, so its CTA needs them first) all share it, so they cannot
   // drift into contradicting each other about the same files.
   const hasRequirementsFiles = files.some((f) => f.group === "requirements");
-  const failed = specAgent === "failed" && !hasRequirementsFiles;
+  // The status field cannot see a turn before its row exists (#635): submitted
+  // interview answers travel through the chat's seed slot and take the dispatch
+  // round-trip — seconds — to become a turn `spec.agent` reports. This browser
+  // holds that evidence locally (seed waiting, dispatch in flight, stream being
+  // folded), so a send counts as agent work from the moment it leaves the form;
+  // otherwise the pane meets the gap with "Nothing written yet" plus a Retry
+  // whose `/start` would supersede the interview it cannot see.
+  const localTurnActivity = useLocalTurnActivity(orgHandle ?? "default", projectName);
+  // `failed` yields to that same evidence: `spec.agent` keeps reading "failed"
+  // until the retry's own turn has a row, so unguarded the banner would sit
+  // through the retry's dispatch offering a SECOND Retry against the send it
+  // already fired — while the rail beside it pulses working. If the send dies,
+  // its claim releases (or the seed's TTL lapses) and the banner returns.
+  const failed = specAgent === "failed" && !hasRequirementsFiles && !localTurnActivity;
   // Retrying is a SEND, so it goes where every other send goes: the chat's
   // one-shot seed slot, GUARDED — the panel re-decides after it has rehydrated,
   // which is the first moment "is the agent mid-exchange" is knowable here.
@@ -537,7 +551,7 @@ export function SpecView({ projectName }: { projectName: string }) {
         hasRequirements: hasRequirementsFiles,
         hasDesign: files.some((f) => f.group === "designs"),
         hasValidation: files.some((f) => f.group === "validation"),
-        agentWorking: deriving,
+        agentWorking: deriving || localTurnActivity,
         agentFlow: status.data?.spec.agentFlow ?? "",
         designOutdated: status.data?.spec.designOutdated ?? false,
         assumptions: unsettled.assumptions,
@@ -547,6 +561,7 @@ export function SpecView({ projectName }: { projectName: string }) {
       files,
       hasRequirementsFiles,
       deriving,
+      localTurnActivity,
       status.data?.spec.agentFlow,
       status.data?.spec.designOutdated,
       unsettled,
