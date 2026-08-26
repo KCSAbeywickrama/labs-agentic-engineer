@@ -218,6 +218,15 @@ that record's fields:
   of the resolved record — never on `X-User-Id` (opaque) and never on a group
   name.
 
+**With no directory published, the service owns its people records.** Key them
+on `X-User-Id` — the one case where that is right, because the service stored
+the subject itself rather than matching it against ids another system minted —
+and fill display fields from `X-User-Name`. `security-design`'s cold start says
+which role a first-time caller holds; create that record on first sign-in, so a
+new user reaches the app's base experience rather than a 403 nobody can clear.
+A roster in config is a demo fixture, not the mechanism: it goes stale the
+moment somebody new signs in.
+
 Express this in your stack's own idiom — where the resolver lives, its
 signature, and how a handler returns 403 — following the conventions that skill
 already sets. The directory's real endpoint, its username field, and the
@@ -233,6 +242,7 @@ hardcode a roster.
 | Signed-in user loops back to the login page forever | A protected handler answers no-role (or a failed directory lookup keyed on `X-User-Id`) with **401**; the SPA reads 401 as "token expired" and restarts sign-in | Resolve role from `X-User-Groups`; return **403**; never key a directory lookup on `X-User-Id`. |
 | A role-scoped caller signs in but sees no rows | Scope derived the attribute from a group NAME (empty for a generic role group), or matched `X-User-Id` (an opaque subject) against a stored directory id (never equal) | Resolve the caller's directory record via `X-User-Name`, read the attribute from it, filter on that. |
 | Every user shows no role / `groups` is empty | Roles read from the access token or a hand-decoded JWT | SPA: `user.profile.groups`. API: `X-User-Groups`. |
+| Every signed-in user gets 403 and the app is unusable from a fresh deploy | The service requires a people record it has no way to create | Create the caller's record on first sign-in at the least-privileged role — `security-design` owns which role that is. |
 | Sign-in loops at the right path, or the user is sent to login on every visit / new tab | No persistent `WebStorageStateStore` (the in-memory default loses the PKCE verifier across the redirect), session in `sessionStorage`, or the load path calls `signIn()` on a merely-expired token | `WebStorageStateStore({ store: localStorage })` + `automaticSilentRenew`; renew via `signinSilent()` and only `signIn()` when there is no session. |
 | After login, "invalid redirect URI" | `redirect_uri` doesn't match the `<origin>/callback` the platform registered | Compute `window.location.origin + '/callback'`. |
 | Logout button does nothing | `signOut()` calls only `signoutRedirect()`, which rejects (no `end_session_endpoint`), and the handler swallows it | Wrap it in the try/catch fallback to `removeUser()` + reload. |
