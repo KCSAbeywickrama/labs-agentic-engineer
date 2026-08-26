@@ -165,7 +165,12 @@ export interface AgentChat {
   newConversation: () => void;
 }
 
-export function useAgentChat(org: string, projectName: string): AgentChat {
+export function useAgentChat(
+  org: string,
+  projectName: string,
+  options: { collab?: boolean } = {},
+): AgentChat {
+  const collab = options.collab ?? true;
   const chatKey = chatKeyFor(org, projectName);
   const messages = useSyncExternalStore(
     useCallback((fn: () => void) => subscribe(chatKey, fn), [chatKey]),
@@ -458,7 +463,7 @@ export function useAgentChat(org: string, projectName: string): AgentChat {
       });
       let turnId: string;
       try {
-        turnId = await startCollabTurn(projectName, conversationId, text, files);
+        turnId = await startCollabTurn(projectName, conversationId, text, files, collab);
       } catch (err) {
         // The row the user is already looking at becomes the failed one —
         // adding a second copy beside it would read as two sends.
@@ -526,7 +531,7 @@ export function useAgentChat(org: string, projectName: string): AgentChat {
       })();
       return true;
     },
-    [chatKey, projectName, conversationId, isSending, author, onTurnCommitted, queryClient, markAttached, markSending],
+    [chatKey, projectName, conversationId, isSending, author, onTurnCommitted, queryClient, collab, markAttached, markSending],
   );
 
   // Rotation (D4): a PROJECT-WIDE act — the demoted thread stops being current

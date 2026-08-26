@@ -437,6 +437,56 @@ func TestProvisioningComponent_ListExternalResources(t *testing.T) {
 	}
 }
 
+// TestProvisioningComponent_List_RegisteredWithoutPlane_SynthesizesEnvCells:
+// consumption instructions on the RT are the durable Registered marker.
+// After an aep-api restart the process-local value plane is empty; list must
+// still emit envCells so the catalog and Build preflight treat the name as
+// Registered instead of collecting project secrets again.
+func TestProvisioningComponent_List_RegisteredWithoutPlane_SynthesizesEnvCells(t *testing.T) {
+	t.Parallel()
+	svc := provisioning.NewService(provisioning.Deps{
+		RTCatalog: &cRTCatalog{defs: []openchoreo.ExternalResourceDefinition{{
+			Name: "github",
+			Config: []openchoreo.ExternalResourceConfigKey{
+				{Key: "GITHUB_TOKEN", Secret: true},
+			},
+			ConsumptionInstructions: "Call api.github.com with Bearer GITHUB_TOKEN.",
+		}}},
+		Environments: &cEnvs{names: []string{"development"}},
+		Design:       cDesign{},
+		Projects:     cProjects{},
+	})
+	h := newProvHarness(t, svc)
+
+	resp := h.AsOrg("acme").Get("/api/v1/dependencies/external-resources")
+	if resp.Code != 200 {
+		t.Fatalf("list: got %d body=%s", resp.Code, resp.Body.String())
+	}
+	var got []gen.ExternalResourceDTO
+	if err := json.Unmarshal(resp.Body.Bytes(), &got); err != nil {
+		t.Fatalf("body: %v\n%s", err, resp.Body.String())
+	}
+	if len(got) != 1 || got[0].Name != "github" {
+		t.Fatalf("resources = %+v, want github", got)
+	}
+	if len(got[0].EnvCells) != 1 {
+		t.Fatalf("envCells = %#v, want 1 synthesized cell (GITHUB_TOKEN × development)", got[0].EnvCells)
+	}
+	cell := got[0].EnvCells[0]
+	if cell.Key != "GITHUB_TOKEN" || cell.Environment != "development" || cell.Status != gen.EnvValueCellDTOStatusConfigured {
+		t.Fatalf("synthesized cell = %+v", cell)
+	}
+	if cell.Value != "" {
+		t.Fatalf("secret cell must not carry value: %+v", cell)
+	}
+	if !svc.HasOrgEnvCells(context.Background(), "acme", "github") {
+		t.Fatal("HasOrgEnvCells(github) = false, want true from RT consumption instructions")
+	}
+	if svc.HasOrgEnvCells(context.Background(), "acme", "not-registered") {
+		t.Fatal("HasOrgEnvCells(unknown) = true, want false")
+	}
+}
+
 // delete-external-resource: in use → 409 conflict envelope, nothing deleted;
 // unused → 204 and the catalog entry is gone.
 func TestProvisioningComponent_DeleteExternalResource(t *testing.T) {

@@ -76,19 +76,26 @@ function CatalogCard({
             </Typography>
             {platform && <Chip size="small" label="Platform" />}
           </Stack>
-          <Typography
-            variant="body2"
-            color="text.secondary"
-            sx={{
-              flexGrow: 1,
-              display: "-webkit-box",
-              WebkitLineClamp: 2,
-              WebkitBoxOrient: "vertical",
-              overflow: "hidden",
-            }}
-          >
-            {description}
-          </Typography>
+          <Box sx={{ flexGrow: 1, minHeight: 0 }}>
+            {description ? (
+              <Typography
+                variant="body2"
+                color="text.secondary"
+                title={description}
+                sx={{
+                  display: "-webkit-box",
+                  WebkitLineClamp: 2,
+                  WebkitBoxOrient: "vertical",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  overflowWrap: "anywhere",
+                  maxHeight: "2lh",
+                }}
+              >
+                {description}
+              </Typography>
+            ) : null}
+          </Box>
           {usedBy > 0 && (
             <Typography variant="caption" color="text.secondary" sx={{ mt: 1.5 }}>
               Used by {usedBy}

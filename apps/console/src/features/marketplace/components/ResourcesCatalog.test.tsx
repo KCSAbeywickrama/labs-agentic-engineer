@@ -208,6 +208,27 @@ describe("ResourcesCatalog", () => {
     expect(screen.queryByRole("button", { name: /edit/i })).not.toBeInTheDocument();
   });
 
+  it("clamps a long card description to two lines and keeps the full text on title", () => {
+    resetState();
+    const long =
+      "A dedicated PostgreSQL database cluster provisioned inside the platform " +
+      "(CloudNativePG). Declare on the service that owns the data. Extra sentence " +
+      "so the copy is longer than two lines on a catalog card.";
+    platformState = {
+      ...platformState,
+      data: [platformType({ description: long })],
+    };
+
+    render(<ResourcesCatalog />);
+
+    const desc = screen.getByText(long);
+    expect(desc).toHaveAttribute("title", long);
+    const css = getComputedStyle(desc);
+    expect(css.overflow).toBe("hidden");
+    expect(css.webkitLineClamp).toBe("2");
+    expect(css.maxHeight).toBe("2lh");
+  });
+
   it("opens the catalog-type drawer when a card is clicked", async () => {
     resetState();
     externalState = {

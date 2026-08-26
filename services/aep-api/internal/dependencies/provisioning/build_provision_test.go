@@ -451,6 +451,10 @@ func (f *fakeOrgSecrets) WriteOrgCatalogSecret(context.Context, string, string, 
 	return f.key, nil
 }
 
+func (f *fakeOrgSecrets) OrgCatalogVaultKey(context.Context, string, string) (string, error) {
+	return f.key, nil
+}
+
 type fakeEnvs struct {
 	names []string
 }
@@ -529,5 +533,52 @@ func TestProvisionForBuild_RegisteredExternal_AuthorsOrgSecretStorePath(t *testi
 	}
 	if _, hasSecret := got.Plain["api_key"]; hasSecret {
 		t.Fatalf("secret cell must not appear in Plain: %+v", got.Plain)
+	}
+}
+
+// TestProvisionForBuild_RegisteredAfterRestart_AuthorsOrgSecretStorePath:
+// after aep-api restart the value plane is empty. Consumption instructions
+// on the RT still mark the name Registered; synthesize + OrgCatalogVaultKey
+// must pin the org-catalog path so build does not mint a project secret.
+func TestProvisionForBuild_RegisteredAfterRestart_AuthorsOrgSecretStorePath(t *testing.T) {
+	plane := NewMemoryValuePlane()
+	ext := &fakeExtProv{}
+	writer := &fakeOrgSecrets{key: "org-catalog-github-development"}
+	svc := NewService(Deps{
+		Issues: newFakeIssues(nil),
+		Execs:  &fakeExecStore{},
+		Design: fakeDesign{comps: designWithDeps()},
+		Repos:  fakeRepos{},
+		RTCatalog: &fakeRTCatalog{defs: []openchoreo.ExternalResourceDefinition{{
+			Name: "stripe",
+			Config: []openchoreo.ExternalResourceConfigKey{
+				{Key: "api_key", Secret: true},
+				{Key: "region"},
+			},
+			ConsumptionInstructions: "Use the secret as Bearer.",
+		}}},
+		ExtProv:           ext,
+		PlatProv:          &fakePlatProv{},
+		Bindings:          &fakeBindings{},
+		CatalogValuePlane: plane,
+		Environments:      fakeEnvs{names: []string{"development"}},
+		OrgSecrets:        writer,
+	})
+
+	fails, err := svc.ProvisionForBuild(context.Background(), "acme", "acme", "proj", "v1", 0, []BuildProvisionInput{
+		{Component: "orders", Dependency: "stripe", Kind: "external-config"},
+	})
+	if err != nil {
+		t.Fatalf("ProvisionForBuild: %v", err)
+	}
+	if len(fails) != 0 {
+		t.Fatalf("want no failures, got %+v", fails)
+	}
+	got := ext.authorByEnv["development"]
+	if got.SecretStorePath != writer.key {
+		t.Fatalf("SecretStorePath = %q, want reconstructed org-catalog key %q", got.SecretStorePath, writer.key)
+	}
+	if ext.calls != 0 {
+		t.Fatalf("Registered restart build must not Provision (project OpenBao), got %d", ext.calls)
 	}
 }
