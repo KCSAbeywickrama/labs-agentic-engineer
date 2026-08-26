@@ -296,6 +296,24 @@ func TestSecretRefWriter_WriteExternalResourceSecret(t *testing.T) {
 	})
 }
 
+func TestSecretRefWriter_WriteOrgCatalogSecret(t *testing.T) {
+	t.Parallel()
+	fake := &fakeSMClient{}
+	w := organization.NewSecretRefWriter(fake, nil, nil, nil)
+	if err := w.WriteOrgCatalogSecret(claimsCtx("ou-acme-uuid"), "acme", "stripe-development",
+		map[string]string{"api_key": "sk_live"}); err != nil {
+		t.Fatalf("WriteOrgCatalogSecret: %v", err)
+	}
+	if len(fake.createCalls) != 1 {
+		t.Fatalf("want exactly 1 CreateSecret call, got %d", len(fake.createCalls))
+	}
+	call := fake.createCalls[0]
+	wantLoc := secretmanagersvc.SecretLocation{OrgName: "ou-acme-uuid", ControlPlaneNamespace: "acme", ProjectName: "org-catalog", EntityName: "stripe-development"}
+	if call.loc != wantLoc {
+		t.Fatalf("SecretLocation = %+v; want %+v", call.loc, wantLoc)
+	}
+}
+
 // --- WriteGitHubPAT --------------------------------------------------------------
 
 func TestSecretRefWriter_WriteGitHubPAT(t *testing.T) {

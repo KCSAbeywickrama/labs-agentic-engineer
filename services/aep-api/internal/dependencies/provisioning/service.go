@@ -52,6 +52,8 @@ type Service struct {
 	access            AccessStore
 	providers         ProviderResolver
 	catalogValuePlane CatalogValuePlane
+	environments      EnvironmentLister
+	orgSecrets        OrgSecretWriter
 	// orgPublish commits the exposesAPI.orgPublished durability marker on a
 	// provider component when its access request is granted. Wired via a setter
 	// (SetOrgPublishMarker) at the composition root — it points BACK at the
@@ -97,6 +99,8 @@ type Deps struct {
 	Access            AccessStore
 	Providers         ProviderResolver
 	CatalogValuePlane CatalogValuePlane
+	Environments      EnvironmentLister
+	OrgSecrets        OrgSecretWriter
 }
 
 // NewService wires the provisioning service from its collaborator set.
@@ -115,6 +119,8 @@ func NewService(d Deps) *Service {
 		access:            d.Access,
 		providers:         d.Providers,
 		catalogValuePlane: d.CatalogValuePlane,
+		environments:      d.Environments,
+		orgSecrets:        d.OrgSecrets,
 	}
 }
 
@@ -256,6 +262,23 @@ func (s *Service) failProvisionRow(ctx context.Context, orgID, projectID string,
 			slog.WarnContext(ctx, "provisioning: comment gate issue failed", "issue", issueNumber, "error", err)
 		}
 	}
+}
+
+// ListOrgEnvironments returns OpenChoreo Environment names for the org
+// namespace. A nil lister or empty result is an empty slice (never nil),
+// never a 404.
+func (s *Service) ListOrgEnvironments(ctx context.Context, orgID string) ([]string, error) {
+	if s.environments == nil {
+		return []string{}, nil
+	}
+	names, err := s.environments.ListNames(ctx, orgID)
+	if err != nil {
+		return nil, fmt.Errorf("provisioning: list environments: %w", err)
+	}
+	if names == nil {
+		return []string{}, nil
+	}
+	return names, nil
 }
 
 // envList returns the environments to provision, defaulting to [development].

@@ -16,10 +16,14 @@
  * under the License.
  */
 
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { components } from "../../../generated/aep-api";
 import { client } from "../../../api/client";
 import { apiErrorMessage } from "../../../api/errors";
-import { marketplaceKeys } from "./keys";
+import { marketplaceKeys, resourceKeys } from "./keys";
+
+type RegisterExternalResourceRequest =
+  components["schemas"]["RegisterExternalResourceRequest"];
 
 export function useOrgEndpoints() {
   return useQuery({
@@ -32,5 +36,39 @@ export function useOrgEndpoints() {
       return data ?? [];
     },
     staleTime: 30_000,
+  });
+}
+
+export function useOrgEnvironments() {
+  return useQuery({
+    queryKey: marketplaceKeys.environments,
+    queryFn: async () => {
+      const { data, error } = await client.GET("/dependencies/environments");
+      if (error) {
+        throw new Error(apiErrorMessage(error, "Failed to load environments"));
+      }
+      return data ?? [];
+    },
+    staleTime: 30_000,
+  });
+}
+
+export function useRegisterExternalResource() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: RegisterExternalResourceRequest) => {
+      const { data, error } = await client.POST("/dependencies/external-resources", {
+        body,
+      });
+      if (error) {
+        throw new Error(
+          apiErrorMessage(error, "Failed to register the external resource"),
+        );
+      }
+      return data;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: resourceKeys.external });
+    },
   });
 }

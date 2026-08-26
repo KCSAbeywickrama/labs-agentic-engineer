@@ -159,12 +159,16 @@ const retainPolicyDelete = "Delete"
 // `name` is the external resource's logical name (e.g. "salesforce") — it
 // becomes the aep.wso2.com/external-name annotation, and (combined with
 // the schema) the cluster RT name via ExternalResourceRTName. `description`
-// (optional) becomes the aep.wso2.com/description annotation. The RT is
-// self-describing: ExternalDefinitionFromRT reconstructs {name, description,
-// config[]} from an authored RT without a DB round-trip. ResourceTypes are
-// effectively immutable — a changed key/secret schema mints a new RT name
+// (optional) becomes the aep.wso2.com/description annotation.
+// `consumptionInstructions` and `resourceDocs` (URL/path pointers only — no
+// spec bodies) are written to aep.wso2.com/consumption-instructions and
+// aep.wso2.com/resource-docs when non-empty; empty values omit those
+// annotations. The RT is self-describing: ExternalDefinitionFromRT
+// reconstructs {name, description, config[], consumption, docs} from an
+// authored RT without a DB round-trip. ResourceTypes are effectively
+// immutable — a changed key/secret schema mints a new RT name
 // (see ExternalResourceRTName); a description/default-only edit does not.
-func BuildExternalResourceType(name, description string, keys []ExternalResourceConfigKey) (*ResourceType, error) {
+func BuildExternalResourceType(name, description string, keys []ExternalResourceConfigKey, consumptionInstructions string, resourceDocs []ResourceDoc) (*ResourceType, error) {
 	if name == "" {
 		return nil, fmt.Errorf("external resourcetype: empty name")
 	}
@@ -320,6 +324,16 @@ func BuildExternalResourceType(name, description string, keys []ExternalResource
 	annotations := map[string]string{externalNameAnnotation: name}
 	if description != "" {
 		annotations[externalDescriptionAnnotation] = description
+	}
+	if consumptionInstructions != "" {
+		annotations[consumptionInstructionsAnnotation] = consumptionInstructions
+	}
+	if len(resourceDocs) > 0 {
+		raw, jerr := json.Marshal(resourceDocs)
+		if jerr != nil {
+			return nil, fmt.Errorf("external resourcetype %q: marshal resource-docs: %w", name, jerr)
+		}
+		annotations[resourceDocsAnnotation] = string(raw)
 	}
 
 	return &ResourceType{

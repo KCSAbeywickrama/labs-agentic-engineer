@@ -60,6 +60,38 @@ func (h *Handler) ListWorkloadDependencies(ctx context.Context, request gen.List
 	return gen.ListWorkloadDependencies200JSONResponse(toWorkloadDependencyDTOs(views)), nil
 }
 
+func (h *Handler) ListOrgEnvironments(ctx context.Context, _ gen.ListOrgEnvironmentsRequestObject) (gen.ListOrgEnvironmentsResponseObject, error) {
+	org := tenant.BoundOrgFromContext(ctx)
+	if h.svc == nil {
+		return nil, errProvisioningUnavailable()
+	}
+	names, err := h.svc.ListOrgEnvironments(ctx, org)
+	if err != nil {
+		return nil, mapProvisionError(err)
+	}
+	out := make([]gen.EnvironmentDTO, 0, len(names))
+	for _, n := range names {
+		out = append(out, gen.EnvironmentDTO{Name: n})
+	}
+	return gen.ListOrgEnvironments200JSONResponse(out), nil
+}
+
+func (h *Handler) RegisterExternalResource(ctx context.Context, request gen.RegisterExternalResourceRequestObject) (gen.RegisterExternalResourceResponseObject, error) {
+	org := tenant.BoundOrgFromContext(ctx)
+	if h.svc == nil {
+		return nil, errProvisioningUnavailable()
+	}
+	if request.Body == nil {
+		return nil, apierr.BadRequest("request body is required")
+	}
+	view, err := h.svc.RegisterExternalResource(ctx, org, *request.Body)
+	if err != nil {
+		return nil, mapProvisionError(err)
+	}
+	dtos := toExternalResourceDTOs([]ExternalResourceView{view})
+	return gen.RegisterExternalResource201JSONResponse(dtos[0]), nil
+}
+
 func (h *Handler) ListExternalResources(ctx context.Context, _ gen.ListExternalResourcesRequestObject) (gen.ListExternalResourcesResponseObject, error) {
 	org := tenant.BoundOrgFromContext(ctx)
 	if h.svc == nil {
@@ -225,6 +257,10 @@ func accessRequestsToWire(reqs []dependencies.AccessRequest) []gen.AccessRequest
 // sentinels (dependencies.Err*) and this slice's own (ErrOrgServiceNotFound /
 // ErrExternalResourceInUse).
 func mapProvisionError(err error) error {
+	var ae *apierr.Error
+	if errors.As(err, &ae) {
+		return ae
+	}
 	switch {
 	case errors.Is(err, dependencies.ErrDepWrongKind):
 		return apierr.BadRequest(err.Error())

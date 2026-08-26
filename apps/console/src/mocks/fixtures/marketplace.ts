@@ -22,12 +22,18 @@ type OrgEndpointDTO = components["schemas"]["OrgEndpointDTO"];
 type ExternalResourceDTO = components["schemas"]["ExternalResourceDTO"];
 type PlatformResourceTypeDTO = components["schemas"]["PlatformResourceTypeDTO"];
 type EnvValueCellDTO = components["schemas"]["EnvValueCellDTO"];
+type EnvironmentDTO = components["schemas"]["EnvironmentDTO"];
 type ApiError = components["schemas"]["Error"];
 
 // Scenario switch (api-guidelines: mocks must produce empty AND error
 // states). Toggle in the browser devtools:
 //   localStorage.setItem('aep:mock:marketplace', 'empty' | 'some' | 'error')
-// Shared by Resources catalog GETs and Marketplace Endpoints GETs.
+// Shared by Resources catalog GETs, Marketplace Endpoints GETs, and register.
+// "empty": no platform types, external resources, org environments, or endpoints (default).
+// "some": postgres-cnpg, Registered External stripe, Project External github,
+//         org environments development + staging-local, and seed org endpoints.
+// "error": GET list endpoints fail (load-error state). POST register still uses the
+//         in-memory catalog.
 export type MarketplaceScenario = "empty" | "some" | "error";
 
 export const emptyOrgEndpoints: OrgEndpointDTO[] = [];
@@ -113,3 +119,28 @@ export const seedPlatformResourceTypes: PlatformResourceTypeDTO[] = [
     consumers: [{ projectId: "demo-shop", componentName: "catalog-api" }],
   },
 ];
+
+// OpenChoreo Environment names for Registered External env-value columns.
+// Pair is development + staging-local, not a hardcoded Dev/Staging/Production trio.
+export const seedOrgEnvironments: EnvironmentDTO[] = [
+  { name: "development" },
+  { name: "staging-local" },
+];
+
+// In-memory catalog for GET list + POST register. Starts as a slice copy of
+// seed when the scenario is `some`, `[]` when `empty` (or `error`). Mutations
+// survive for the worker process until reset.
+let catalog: ExternalResourceDTO[] | undefined;
+
+export function resetExternalResourceCatalog(): void {
+  catalog = undefined;
+}
+
+export function externalResourceCatalog(
+  scenario: MarketplaceScenario,
+): ExternalResourceDTO[] {
+  if (catalog === undefined) {
+    catalog = scenario === "some" ? seedExternalResources.slice() : [];
+  }
+  return catalog;
+}

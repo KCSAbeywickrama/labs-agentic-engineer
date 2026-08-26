@@ -18,6 +18,7 @@ package dependencies
 
 import (
 	"context"
+	"fmt"
 	"sort"
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
@@ -148,6 +149,17 @@ func (c *ExternalResourceCatalog) Delete(ctx context.Context, orgID, name string
 		}
 	}
 	return nil
+}
+
+// Ensure get-or-creates the named ResourceType in orgID's namespace via
+// ResourceClient.EnsureResourceType. Register uses this to author the org
+// catalog RT without ApplyResource / EnsureBinding (no project instance).
+func (c *ExternalResourceCatalog) Ensure(ctx context.Context, orgID string, rt *openchoreo.ResourceType) error {
+	if rt == nil {
+		return fmt.Errorf("external resource catalog: nil ResourceType")
+	}
+	_, err := c.rc.EnsureResourceType(ctx, orgID, rt)
+	return err
 }
 
 // newerExternalRT reports whether rt should be preferred over cur as the

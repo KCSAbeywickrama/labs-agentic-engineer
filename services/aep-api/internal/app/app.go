@@ -189,6 +189,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	}
 	projectClient := openchoreo.NewProjectClient(ocConfig)
 	namespaceClient := openchoreo.NewNamespaceClient(ocConfig)
+	environmentClient := openchoreo.NewEnvironmentClient(ocConfig)
 	componentClient := openchoreo.NewComponentClient(ocConfig)
 	// GitSecret client lands the per-org build git credential on the workflow
 	// plane (via OC → OpenBao → SecretReference). Used by BuildCredentialsService
@@ -1010,19 +1011,23 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		Design: designComponents{store: artifactStore},
 	})
 	platformProvisioner := dependencies.NewOCNativeProvisioner(resourceClient)
+	catalogValuePlane := provisioning.NewMemoryValuePlane()
 	provisioningSvc := provisioning.NewService(provisioning.Deps{
-		Issues:    issueService,
-		Execs:     executionRepo,
-		Design:    designComponents{store: artifactStore},
-		Repos:     repoNamer{repos: repoRepo, db: db},
-		RTCatalog: externalResourceRTCatalog,
-		ExtProv:   externalProvisioner,
-		PlatProv:  platformProvisioner,
-		Bindings:  resourceClient,
-		Workloads: resourceClient,
-		Projects:  provisionProjects{repos: repoRepo},
-		Access:    dependencies.NewAccessRequestRepository(db),
-		Providers: orgEndpointCatalog,
+		Issues:            issueService,
+		Execs:             executionRepo,
+		Design:            designComponents{store: artifactStore},
+		Repos:             repoNamer{repos: repoRepo, db: db},
+		RTCatalog:         externalResourceRTCatalog,
+		ExtProv:           externalProvisioner,
+		PlatProv:          platformProvisioner,
+		Bindings:          resourceClient,
+		Workloads:         resourceClient,
+		Projects:          provisionProjects{repos: repoRepo},
+		Access:            dependencies.NewAccessRequestRepository(db),
+		Providers:         orgEndpointCatalog,
+		Environments:      environmentClient,
+		CatalogValuePlane: catalogValuePlane,
+		OrgSecrets:        secretRefWriter,
 	})
 	// Assemble the dependencies domain (P8): the provisioning slice (7 ops over
 	// provisioningSvc) + the resource-type-discovery slice (ListPlatformResourceTypes

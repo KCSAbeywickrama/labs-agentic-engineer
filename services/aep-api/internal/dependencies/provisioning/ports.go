@@ -78,29 +78,46 @@ type RepoLocator interface {
 }
 
 // ExternalRTCatalog is the org-namespaced OpenChoreo ResourceType-backed
-// external-resource registry the org-settings list+delete surface
-// (ListExternalResources / DeleteExternalResource) reads: List reconstructs
-// each provisioned external's definition off its authored RT (deduped to the
-// newest schema-version RT per name); Delete removes every RT registered under
-// a logical name (more than one schema-version RT can carry the same name —
-// see openchoreo.ExternalResourceRTName). *dependencies.ExternalResourceCatalog
-// satisfies it. The provision/value-collection paths build their RT-authoring
-// definition straight off the project's committed design (build_provision.go /
-// value_service.go), never a DB catalog — the external_resources table is
-// gone.
+// external-resource registry the org-settings list+delete+register surface
+// (ListExternalResources / DeleteExternalResource / RegisterExternalResource)
+// reads and writes: List reconstructs each provisioned external's definition
+// off its authored RT (deduped to the newest schema-version RT per name);
+// Ensure get-or-creates the RT (no project Resource instance); Delete removes
+// every RT registered under a logical name (more than one schema-version RT
+// can carry the same name — see openchoreo.ExternalResourceRTName).
+// *dependencies.ExternalResourceCatalog satisfies it. The provision/value-
+// collection paths build their RT-authoring definition straight off the
+// project's committed design (build_provision.go / value_service.go), never
+// a DB catalog — the external_resources table is gone.
 type ExternalRTCatalog interface {
 	List(ctx context.Context, orgID string) ([]openchoreo.ExternalResourceDefinition, error)
+	Ensure(ctx context.Context, orgID string, rt *openchoreo.ResourceType) error
 	Delete(ctx context.Context, orgID, name string) error
 }
 
-// CatalogValuePlane is the optional org value plane for Registered External
-// resources. Production leaves it nil (no org value store yet); tests inject
-// Registered cells and instances through this seam. ListExternalResources
-// copies cells/instances from the plane when non-nil; otherwise they stay
-// empty and every live row remains Project External.
+// CatalogValuePlane is the org value plane for Registered External resources.
+// Production wires a process-local MemoryValuePlane so list-after-register
+// shows envCells for the process lifetime. Tests inject Registered cells and
+// instances through this seam. ListExternalResources copies cells/instances
+// from the plane when non-nil; otherwise they stay empty and every live row
+// remains Project External.
 type CatalogValuePlane interface {
-	EnvCells(name string) []EnvCell
-	Instances(name string) []ResourceInstance
+	EnvCells(orgID, name string) []EnvCell
+	Instances(orgID, name string) []ResourceInstance
+	PutEnvCells(orgID, name string, cells []EnvCell)
+}
+
+// OrgSecretWriter optionally persists Registered External secret bytes through
+// the existing SM-API vault layout with projectName "org-catalog" (sentinel,
+// not a real project). Nil is a documented no-op — HTTP tests leave it unwired.
+type OrgSecretWriter interface {
+	WriteOrgCatalogSecret(ctx context.Context, orgID, entityName string, data map[string]string) error
+}
+
+// EnvironmentLister lists OpenChoreo Environment names for the org namespace.
+// Empty org → empty slice, never nil error-for-empty.
+type EnvironmentLister interface {
+	ListNames(ctx context.Context, orgID string) ([]string, error)
 }
 
 // ProjectRef identifies one project (org + project id) for the cross-project

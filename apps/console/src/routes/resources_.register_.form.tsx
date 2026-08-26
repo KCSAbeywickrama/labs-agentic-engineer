@@ -16,9 +16,17 @@
  * under the License.
  */
 
-export { resourceKeys } from "../../settings/api/keys";
+import { createFileRoute } from "@tanstack/react-router";
+import { RegisterFormPage } from "../features/marketplace/components/RegisterFormPage";
 
-export const marketplaceKeys = {
-  endpoints: ["marketplace", "org-endpoints"] as const,
-  environments: ["marketplace", "environments"] as const,
-};
+export const Route = createFileRoute("/resources_/register_/form")({
+  validateSearch: (search: Record<string, unknown>): { prompt: string } => ({
+    prompt: typeof search.prompt === "string" ? search.prompt : "",
+  }),
+  component: RegisterFormRoute,
+});
+
+function RegisterFormRoute() {
+  const { prompt } = Route.useSearch();
+  return <RegisterFormPage prompt={prompt} />;
+}

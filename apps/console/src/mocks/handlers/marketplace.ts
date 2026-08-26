@@ -20,15 +20,20 @@ import { http, HttpResponse } from "msw";
 import type { components } from "../../generated/aep-api";
 import {
   emptyOrgEndpoints,
+  externalResourceCatalog,
   marketplaceError,
   marketplaceLoadError,
-  seedExternalResources,
   seedOrgEndpoints,
+  seedOrgEnvironments,
   seedPlatformResourceTypes,
   type MarketplaceScenario,
 } from "../fixtures/marketplace";
 
 type ApiError = components["schemas"]["Error"];
+type RegisterExternalResourceRequest =
+  components["schemas"]["RegisterExternalResourceRequest"];
+type ExternalResourceDTO = components["schemas"]["ExternalResourceDTO"];
+type EnvValueCellDTO = components["schemas"]["EnvValueCellDTO"];
 
 function scenario(): MarketplaceScenario {
   return (
@@ -39,6 +44,56 @@ function scenario(): MarketplaceScenario {
 
 function errorJson(body: ApiError, status: number) {
   return HttpResponse.json(body, { status });
+}
+
+function missingRequired(body: RegisterExternalResourceRequest): boolean {
+  if (typeof body.name !== "string" || body.name.trim() === "") return true;
+  if (typeof body.description !== "string" || body.description.trim() === "") {
+    return true;
+  }
+  if (
+    typeof body.consumptionInstructions !== "string" ||
+    body.consumptionInstructions.trim() === ""
+  ) {
+    return true;
+  }
+  if (!Array.isArray(body.config) || body.config.length === 0) return true;
+  if (!Array.isArray(body.envValues) || body.envValues.length === 0) return true;
+  return false;
+}
+
+function emptyEnvValue(body: RegisterExternalResourceRequest): boolean {
+  return body.envValues.some(
+    (row) => typeof row.value !== "string" || row.value.trim() === "",
+  );
+}
+
+function registeredFromRequest(
+  body: RegisterExternalResourceRequest,
+): ExternalResourceDTO {
+  const secretKeys = new Set(
+    body.config.filter((k) => k.secret === true).map((k) => k.key),
+  );
+  const envCells: EnvValueCellDTO[] = body.envValues.map((row) => {
+    const cell: EnvValueCellDTO = {
+      environment: row.environment,
+      key: row.key,
+      status: "configured",
+    };
+    if (!secretKeys.has(row.key)) {
+      cell.value = row.value;
+    }
+    return cell;
+  });
+  return {
+    name: body.name.trim(),
+    description: body.description,
+    consumptionInstructions: body.consumptionInstructions,
+    config: body.config,
+    consumers: [],
+    envCells,
+    ...(body.resourceDocs ? { resourceDocs: body.resourceDocs } : {}),
+  };
 }
 
 export const marketplaceHandlers = [
@@ -58,9 +113,37 @@ export const marketplaceHandlers = [
     return HttpResponse.json(seedPlatformResourceTypes);
   }),
 
-  http.get("*/api/v1/dependencies/external-resources", () => {
+  http.get("*/api/v1/dependencies/environments", () => {
     if (scenario() === "error") return errorJson(marketplaceLoadError, 500);
     if (scenario() === "empty") return HttpResponse.json([]);
-    return HttpResponse.json(seedExternalResources);
+    return HttpResponse.json(seedOrgEnvironments);
+  }),
+
+  http.get("*/api/v1/dependencies/external-resources", () => {
+    if (scenario() === "error") return errorJson(marketplaceLoadError, 500);
+    return HttpResponse.json(externalResourceCatalog(scenario()));
+  }),
+
+  http.post("*/api/v1/dependencies/external-resources", async ({ request }) => {
+    const body = (await request.json()) as RegisterExternalResourceRequest | null;
+    if (!body || missingRequired(body) || emptyEnvValue(body)) {
+      return errorJson(
+        { code: "bad_request", message: "Missing required field or empty env value" },
+        400,
+      );
+    }
+    const catalog = externalResourceCatalog(scenario());
+    if (catalog.some((r) => r.name === body.name.trim())) {
+      return errorJson(
+        {
+          code: "conflict",
+          message: `External resource ${body.name.trim()} is already registered`,
+        },
+        409,
+      );
+    }
+    const created = registeredFromRequest(body);
+    catalog.push(created);
+    return HttpResponse.json(created, { status: 201 });
   }),
 ];

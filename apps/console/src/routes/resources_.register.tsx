@@ -16,9 +16,9 @@
  * under the License.
  */
 
-export { resourceKeys } from "../../settings/api/keys";
+import { createFileRoute } from "@tanstack/react-router";
+import { RegisterComposerPage } from "../features/marketplace/components/RegisterComposerPage";
 
-export const marketplaceKeys = {
-  endpoints: ["marketplace", "org-endpoints"] as const,
-  environments: ["marketplace", "environments"] as const,
-};
+export const Route = createFileRoute("/resources_/register")({
+  component: RegisterComposerPage,
+});
