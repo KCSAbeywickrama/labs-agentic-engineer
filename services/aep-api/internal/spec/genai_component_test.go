@@ -481,6 +481,7 @@ type rigConfig struct {
 	recorder      spec.TurnActivityRecorder
 	conversations spec.ConversationRepository
 	repos         spec.RepoResolver
+	snapshots     sourcecontrol.SnapshotProvider
 }
 
 // withConversations wires the #430 thread store so the resolve/rotate endpoints
@@ -494,6 +495,12 @@ func withConversations(repo spec.ConversationRepository) rigOption {
 // the synthetic Marketplace id while still serving testProj).
 func withRepos(r spec.RepoResolver) rigOption {
 	return func(c *rigConfig) { c.repos = r }
+}
+
+// withSnapshots swaps the snapshot engine (e.g. Ensure returns disk admission
+// so StartTurn can be asserted as 503, not opaque 500).
+func withSnapshots(p sourcecontrol.SnapshotProvider) rigOption {
+	return func(c *rigConfig) { c.snapshots = p }
 }
 
 // withRecorder wires an activity recorder so a committed turn's spec_updated
@@ -586,6 +593,10 @@ func newGenaiRig(t *testing.T, seed map[string]string, opts ...rigOption) *genai
 	if cfg.repos != nil {
 		repos = cfg.repos
 	}
+	snapshots := sourcecontrol.SnapshotProvider(fx.Engine)
+	if cfg.snapshots != nil {
+		snapshots = cfg.snapshots
+	}
 	svc := spec.NewService(spec.ServiceDeps{
 		Repos:         repos,
 		Git:           sourcecontrol.NewGitOpsService(stubResolver{}, fx.Engine),
@@ -593,7 +604,7 @@ func newGenaiRig(t *testing.T, seed map[string]string, opts ...rigOption) *genai
 		Client:        client,
 		Turns:         turns,
 		Broker:        broker,
-		Snapshots:     fx.Engine,
+		Snapshots:     snapshots,
 		SkillsRepo:    skillsRepo,
 		Conversations: cfg.conversations,
 		MCPTokens:     cfg.mcpTokens,
