@@ -68,6 +68,24 @@ function emptyEnvValue(body: RegisterExternalResourceRequest): boolean {
   );
 }
 
+function sameConfigIdentity(
+  existing: NonNullable<ExternalResourceDTO["config"]>,
+  next: RegisterExternalResourceRequest["config"],
+): boolean {
+  if (existing.length !== next.length) return false;
+  const got = new Map<string, boolean>();
+  for (const k of next) {
+    if (got.has(k.key)) return false;
+    got.set(k.key, Boolean(k.secret));
+  }
+  if (got.size !== existing.length) return false;
+  for (const k of existing) {
+    const secret = got.get(k.key);
+    if (secret === undefined || secret !== Boolean(k.secret)) return false;
+  }
+  return true;
+}
+
 function registeredFromRequest(
   body: RegisterExternalResourceRequest,
 ): ExternalResourceDTO {
@@ -145,5 +163,110 @@ export const marketplaceHandlers = [
     const created = registeredFromRequest(body);
     catalog.push(created);
     return HttpResponse.json(created, { status: 201 });
+  }),
+
+  http.put("*/api/v1/dependencies/external-resources/:name", async ({ params, request }) => {
+    const name = String(params.name);
+    const body = (await request.json()) as RegisterExternalResourceRequest | null;
+    const catalog = externalResourceCatalog(scenario());
+    const idx = catalog.findIndex((r) => r.name === name);
+    if (idx < 0) {
+      return errorJson(
+        { code: "not_found", message: `External resource ${name} not found` },
+        404,
+      );
+    }
+    const current = catalog[idx]!;
+    if (!Array.isArray(current.envCells) || current.envCells.length === 0) {
+      return errorJson(
+        {
+          code: "conflict",
+          message: `External resource ${name} is a Project External resource`,
+        },
+        409,
+      );
+    }
+    if (!body || missingRequired(body)) {
+      return errorJson(
+        { code: "bad_request", message: "Missing required field" },
+        400,
+      );
+    }
+    if (!sameConfigIdentity(current.config ?? [], body.config)) {
+      return errorJson(
+        { code: "bad_request", message: "config key identity cannot be changed" },
+        400,
+      );
+    }
+
+    const submitted = new Map<string, string>();
+    for (const row of body.envValues) {
+      submitted.set(`${row.environment}:${row.key}`, row.value);
+    }
+    const currentByEnvKey = new Map<string, EnvValueCellDTO>();
+    for (const cell of current.envCells) {
+      currentByEnvKey.set(`${cell.environment}:${cell.key}`, cell);
+    }
+
+    const envCells: EnvValueCellDTO[] = [];
+    for (const env of seedOrgEnvironments.map((e) => e.name)) {
+      for (const cfg of body.config) {
+        const id = `${env}:${cfg.key}`;
+        const value = submitted.get(id);
+        const empty = value === undefined || value.trim() === "";
+        const currentCell = currentByEnvKey.get(id);
+        if (cfg.secret && empty) {
+          if (currentCell?.status !== "configured") {
+            return errorJson(
+              {
+                code: "bad_request",
+                message: `missing env value for key ${cfg.key} in environment ${env}`,
+              },
+              400,
+            );
+          }
+          envCells.push({
+            environment: env,
+            key: cfg.key,
+            status: "configured",
+          });
+          continue;
+        }
+        if (empty) {
+          return errorJson(
+            {
+              code: "bad_request",
+              message: `missing env value for key ${cfg.key} in environment ${env}`,
+            },
+            400,
+          );
+        }
+        const next: EnvValueCellDTO = {
+          environment: env,
+          key: cfg.key,
+          status: "configured",
+        };
+        if (!cfg.secret) {
+          next.value = value;
+        }
+        envCells.push(next);
+      }
+    }
+
+    const updated: ExternalResourceDTO = {
+      ...current,
+      name,
+      description: body.description,
+      consumptionInstructions: body.consumptionInstructions,
+      config: body.config,
+      envCells,
+    };
+    if (body.resourceDocs) {
+      updated.resourceDocs = body.resourceDocs;
+    } else {
+      delete updated.resourceDocs;
+    }
+    catalog[idx] = updated;
+    return HttpResponse.json(updated, { status: 200 });
   }),
 ];

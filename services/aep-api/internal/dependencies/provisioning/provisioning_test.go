@@ -222,6 +222,23 @@ func (f *fakeRTCatalog) Ensure(_ context.Context, _ string, rt *openchoreo.Resou
 	return nil
 }
 
+func (f *fakeRTCatalog) Update(_ context.Context, _ string, rt *openchoreo.ResourceType) error {
+	if rt == nil {
+		return fmt.Errorf("fakeRTCatalog.Update: nil ResourceType")
+	}
+	def, ok := openchoreo.ExternalDefinitionFromRT(rt)
+	if !ok {
+		return fmt.Errorf("fakeRTCatalog.Update: not an external ResourceType")
+	}
+	for i, existing := range f.defs {
+		if strings.EqualFold(existing.Name, def.Name) {
+			f.defs[i] = def
+			return nil
+		}
+	}
+	return fmt.Errorf("fakeRTCatalog.Update: %s not found", def.Name)
+}
+
 func (f *fakeRTCatalog) Delete(_ context.Context, _, name string) error {
 	if f.delErr != nil {
 		return f.delErr

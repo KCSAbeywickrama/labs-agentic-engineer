@@ -62,6 +62,9 @@ var _ openchoreo.ResourceClient = &ResourceClientMock{}
 //			PatchBindingEnvironmentConfigsFunc: func(ctx context.Context, orgID string, bindingName string, configs map[string]string) error {
 //				panic("mock out the PatchBindingEnvironmentConfigs method")
 //			},
+//			UpdateResourceTypeFunc: func(ctx context.Context, namespace string, rt *openchoreo.ResourceType) (*openchoreo.ResourceType, error) {
+//				panic("mock out the UpdateResourceType method")
+//			},
 //		}
 //
 //		// use mockedResourceClient in code that requires openchoreo.ResourceClient
@@ -110,6 +113,9 @@ type ResourceClientMock struct {
 
 	// PatchBindingEnvironmentConfigsFunc mocks the PatchBindingEnvironmentConfigs method.
 	PatchBindingEnvironmentConfigsFunc func(ctx context.Context, orgID string, bindingName string, configs map[string]string) error
+
+	// UpdateResourceTypeFunc mocks the UpdateResourceType method.
+	UpdateResourceTypeFunc func(ctx context.Context, namespace string, rt *openchoreo.ResourceType) (*openchoreo.ResourceType, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -233,6 +239,15 @@ type ResourceClientMock struct {
 			// Configs is the configs argument value.
 			Configs map[string]string
 		}
+		// UpdateResourceType holds details about calls to the UpdateResourceType method.
+		UpdateResourceType []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// Namespace is the namespace argument value.
+			Namespace string
+			// Rt is the rt argument value.
+			Rt *openchoreo.ResourceType
+		}
 	}
 	lockApplyResource                  sync.RWMutex
 	lockDeleteBinding                  sync.RWMutex
@@ -248,6 +263,7 @@ type ResourceClientMock struct {
 	lockListWorkloadConsumerDeps       sync.RWMutex
 	lockListWorkloadEndpoints          sync.RWMutex
 	lockPatchBindingEnvironmentConfigs sync.RWMutex
+	lockUpdateResourceType             sync.RWMutex
 }
 
 // ApplyResource calls ApplyResourceFunc.
@@ -795,5 +811,45 @@ func (mock *ResourceClientMock) PatchBindingEnvironmentConfigsCalls() []struct {
 	mock.lockPatchBindingEnvironmentConfigs.RLock()
 	calls = mock.calls.PatchBindingEnvironmentConfigs
 	mock.lockPatchBindingEnvironmentConfigs.RUnlock()
+	return calls
+}
+
+// UpdateResourceType calls UpdateResourceTypeFunc.
+func (mock *ResourceClientMock) UpdateResourceType(ctx context.Context, namespace string, rt *openchoreo.ResourceType) (*openchoreo.ResourceType, error) {
+	if mock.UpdateResourceTypeFunc == nil {
+		panic("ResourceClientMock.UpdateResourceTypeFunc: method is nil but ResourceClient.UpdateResourceType was just called")
+	}
+	callInfo := struct {
+		Ctx       context.Context
+		Namespace string
+		Rt        *openchoreo.ResourceType
+	}{
+		Ctx:       ctx,
+		Namespace: namespace,
+		Rt:        rt,
+	}
+	mock.lockUpdateResourceType.Lock()
+	mock.calls.UpdateResourceType = append(mock.calls.UpdateResourceType, callInfo)
+	mock.lockUpdateResourceType.Unlock()
+	return mock.UpdateResourceTypeFunc(ctx, namespace, rt)
+}
+
+// UpdateResourceTypeCalls gets all the calls that were made to UpdateResourceType.
+// Check the length with:
+//
+//	len(mockedResourceClient.UpdateResourceTypeCalls())
+func (mock *ResourceClientMock) UpdateResourceTypeCalls() []struct {
+	Ctx       context.Context
+	Namespace string
+	Rt        *openchoreo.ResourceType
+} {
+	var calls []struct {
+		Ctx       context.Context
+		Namespace string
+		Rt        *openchoreo.ResourceType
+	}
+	mock.lockUpdateResourceType.RLock()
+	calls = mock.calls.UpdateResourceType
+	mock.lockUpdateResourceType.RUnlock()
 	return calls
 }

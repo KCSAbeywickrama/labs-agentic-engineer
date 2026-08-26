@@ -32,6 +32,8 @@ vi.mock("@tanstack/react-router", () => ({
 
 type EnvironmentDTO = components["schemas"]["EnvironmentDTO"];
 
+type ExternalResourceDTO = components["schemas"]["ExternalResourceDTO"];
+
 let environmentsState: {
   data?: EnvironmentDTO[];
   isLoading: boolean;
@@ -44,10 +46,22 @@ let registerState: {
   isPending: boolean;
   error: Error | null;
 };
+let updateState: {
+  mutate: ReturnType<typeof vi.fn>;
+  isPending: boolean;
+  error: Error | null;
+};
+let resourcesState: {
+  data?: ExternalResourceDTO[];
+  isLoading: boolean;
+  isError: boolean;
+};
 
 vi.mock("../api/queries", () => ({
   useOrgEnvironments: () => environmentsState,
   useRegisterExternalResource: () => registerState,
+  useUpdateExternalResource: () => updateState,
+  useExternalResources: () => resourcesState,
 }));
 
 import { RegisterFormPage } from "./RegisterFormPage";
@@ -71,6 +85,64 @@ function resetState() {
     isPending: false,
     error: null,
   };
+  updateState = {
+    mutate: vi.fn(
+      (
+        _body: unknown,
+        opts?: { onSuccess?: () => void },
+      ) => {
+        opts?.onSuccess?.();
+      },
+    ),
+    isPending: false,
+    error: null,
+  };
+  resourcesState = {
+    data: [],
+    isLoading: false,
+    isError: false,
+  };
+}
+
+function registeredStripe(): ExternalResourceDTO {
+  return {
+    name: "stripe",
+    description: "Stripe payments API",
+    consumptionInstructions: "Use the secret key as Bearer.",
+    config: [
+      { key: "api_key", secret: true, description: "Secret API key" },
+      { key: "region", secret: false, description: "Stripe account region" },
+    ],
+    consumers: [],
+    envCells: [
+      { environment: "development", key: "api_key", status: "configured" },
+      { environment: "staging-local", key: "api_key", status: "configured" },
+      {
+        environment: "development",
+        key: "region",
+        status: "configured",
+        value: "us",
+      },
+      {
+        environment: "staging-local",
+        key: "region",
+        status: "configured",
+        value: "eu",
+      },
+    ],
+    resourceDocs: [
+      { type: "openapi", url: "https://example.com/stripe/openapi.yaml" },
+    ],
+  };
+}
+
+function renderEdit() {
+  resourcesState = {
+    data: [registeredStripe()],
+    isLoading: false,
+    isError: false,
+  };
+  return render(<RegisterFormPage prompt="" name="stripe" />);
 }
 
 beforeEach(() => {
@@ -194,6 +266,57 @@ describe("RegisterFormPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Register" }));
 
     expect(registerState.mutate).toHaveBeenCalledTimes(1);
+    expect(navigate).toHaveBeenCalledWith({ to: "/resources" });
+  });
+});
+
+describe("RegisterFormPage edit mode", () => {
+  it("freezes name and key identity; key descriptions stay editable", () => {
+    renderEdit();
+
+    expect(screen.getByLabelText(/^Name/)).toBeDisabled();
+    expect(screen.getByLabelText(/^Name/)).toHaveValue("stripe");
+    expect(screen.queryByRole("button", { name: "Add key" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Remove key" })).not.toBeInTheDocument();
+
+    for (const keyField of screen.getAllByLabelText(/^Key/)) {
+      expect(keyField).toBeDisabled();
+    }
+    for (const secret of screen.getAllByRole("checkbox", { name: "Secret" })) {
+      expect(secret).toBeDisabled();
+    }
+    const descriptions = screen.getAllByLabelText(/^Description/);
+    expect(descriptions.length).toBeGreaterThan(1);
+    for (const field of descriptions) {
+      expect(field).toBeEnabled();
+    }
+  });
+
+  it("shows the keep-secret helper and never a fake mask", () => {
+    renderEdit();
+
+    expect(
+      screen.getAllByText("Leave blank to keep the current value").length,
+    ).toBeGreaterThan(0);
+    expect(screen.queryByText(/••••/)).not.toBeInTheDocument();
+  });
+
+  it("prefills non-secret env values from envCells", () => {
+    renderEdit();
+
+    expect(screen.getByLabelText("development · region")).toHaveValue("us");
+    expect(screen.getByLabelText("staging-local · region")).toHaveValue("eu");
+    expect(screen.getByLabelText("development · api_key")).toHaveValue("");
+    expect(screen.getByLabelText("staging-local · api_key")).toHaveValue("");
+  });
+
+  it("Save with empty configured secret calls update, not register, and navigates", () => {
+    renderEdit();
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(updateState.mutate).toHaveBeenCalledTimes(1);
+    expect(registerState.mutate).not.toHaveBeenCalled();
     expect(navigate).toHaveBeenCalledWith({ to: "/resources" });
   });
 });

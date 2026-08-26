@@ -72,3 +72,26 @@ export function useRegisterExternalResource() {
     },
   });
 }
+
+export function useUpdateExternalResource(name: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: RegisterExternalResourceRequest) => {
+      const { data, error } = await client.PUT("/dependencies/external-resources/{name}", {
+        params: { path: { name } },
+        body,
+      });
+      if (error) {
+        throw new Error(
+          apiErrorMessage(error, "Failed to update the external resource"),
+        );
+      }
+      return data;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: resourceKeys.external });
+    },
+  });
+}
+
+export { useExternalResources } from "../../settings/api/queries";

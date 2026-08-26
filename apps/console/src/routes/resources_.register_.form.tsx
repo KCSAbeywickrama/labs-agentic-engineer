@@ -20,13 +20,23 @@ import { createFileRoute } from "@tanstack/react-router";
 import { RegisterFormPage } from "../features/marketplace/components/RegisterFormPage";
 
 export const Route = createFileRoute("/resources_/register_/form")({
-  validateSearch: (search: Record<string, unknown>): { prompt: string } => ({
-    prompt: typeof search.prompt === "string" ? search.prompt : "",
-  }),
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { prompt?: string; name?: string } => {
+    const next: { prompt?: string; name?: string } = {};
+    if (typeof search.prompt === "string") next.prompt = search.prompt;
+    if (typeof search.name === "string") next.name = search.name;
+    return next;
+  },
   component: RegisterFormRoute,
 });
 
 function RegisterFormRoute() {
-  const { prompt } = Route.useSearch();
-  return <RegisterFormPage prompt={prompt} />;
+  const { prompt, name } = Route.useSearch();
+  return (
+    <RegisterFormPage
+      {...(prompt !== undefined ? { prompt } : {})}
+      {...(name !== undefined ? { name } : {})}
+    />
+  );
 }

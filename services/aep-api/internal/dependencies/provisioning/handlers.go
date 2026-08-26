@@ -92,6 +92,22 @@ func (h *Handler) RegisterExternalResource(ctx context.Context, request gen.Regi
 	return gen.RegisterExternalResource201JSONResponse(dtos[0]), nil
 }
 
+func (h *Handler) UpdateExternalResource(ctx context.Context, request gen.UpdateExternalResourceRequestObject) (gen.UpdateExternalResourceResponseObject, error) {
+	org := tenant.BoundOrgFromContext(ctx)
+	if h.svc == nil {
+		return nil, errProvisioningUnavailable()
+	}
+	if request.Body == nil {
+		return nil, apierr.BadRequest("request body is required")
+	}
+	view, err := h.svc.UpdateExternalResource(ctx, org, request.Name, *request.Body)
+	if err != nil {
+		return nil, mapProvisionError(err)
+	}
+	dtos := toExternalResourceDTOs([]ExternalResourceView{view})
+	return gen.UpdateExternalResource200JSONResponse(dtos[0]), nil
+}
+
 func (h *Handler) ListExternalResources(ctx context.Context, _ gen.ListExternalResourcesRequestObject) (gen.ListExternalResourcesResponseObject, error) {
 	org := tenant.BoundOrgFromContext(ctx)
 	if h.svc == nil {

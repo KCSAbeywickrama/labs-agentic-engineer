@@ -2448,6 +2448,9 @@ type StartGitProviderConnectJSONRequestBody = StartConnectInputBody
 // RegisterExternalResourceJSONRequestBody defines body for RegisterExternalResource for application/json ContentType.
 type RegisterExternalResourceJSONRequestBody = RegisterExternalResourceRequest
 
+// UpdateExternalResourceJSONRequestBody defines body for UpdateExternalResource for application/json ContentType.
+type UpdateExternalResourceJSONRequestBody = RegisterExternalResourceRequest
+
 // CreateProjectJSONRequestBody defines body for CreateProject for application/json ContentType.
 type CreateProjectJSONRequestBody = CreateProjectRequest
 

@@ -27,6 +27,7 @@ import { ResourcesCatalog } from "./ResourcesCatalog";
 // Router replaced so a future drawer "Used by" ProjectLink can render as a
 // plain anchor (createLink pattern, cf. ResourcesSection.test).
 vi.mock("@tanstack/react-router", () => ({
+  useNavigate: () => vi.fn(),
   createLink: (Component: ElementType) =>
     function MockLink({
       to,
