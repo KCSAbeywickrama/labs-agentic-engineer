@@ -290,7 +290,11 @@ export function RegisterFormPage({
   };
 
   return (
-    <PageContent>
+    <PageContent
+      fullWidth
+      noPadding
+      sx={{ height: "100%", display: "flex", flexDirection: "column" }}
+    >
       <Box
         sx={{
           display: "flex",
@@ -301,7 +305,16 @@ export function RegisterFormPage({
           minHeight: 0,
         }}
       >
-        <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+        <Box
+          sx={{
+            flexGrow: 1,
+            minWidth: 0,
+            minHeight: 0,
+            overflow: "auto",
+            px: 3,
+            py: 2,
+          }}
+        >
           <PageHeader
             title="Register External resource"
             subtitle="Environment values are form-only."
@@ -536,7 +549,14 @@ export function RegisterFormPage({
             in
             orientation="horizontal"
             unmountOnExit
-            sx={{ height: "100%", flexShrink: 0 }}
+            sx={{
+              height: "100%",
+              flexShrink: 0,
+              alignSelf: "stretch",
+              "& .MuiCollapse-wrapper, & .MuiCollapse-wrapperInner": {
+                height: "100%",
+              },
+            }}
           >
             <AgentChatPanel
               org={orgHandle ?? "default"}
