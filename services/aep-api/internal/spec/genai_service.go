@@ -318,8 +318,10 @@ func (s *Service) StartTurn(ctx context.Context, orgID, projectID string, in Tur
 	// bearer NOW (D20 — the runner has no request context). Access is
 	// request-scoped: the collab server's oracle validates this token exactly
 	// like a browser join; no token → the turn cannot join, fail pre-202.
+	// The synthetic Marketplace register project has no spec room (no git
+	// repo; the id is not a DNS label) — ignore collab:true from the panel.
 	collabRoomID, collabToken := "", ""
-	if in.Collab {
+	if in.Collab && !isMarketplaceRegisterProject(projectID) {
 		collabToken = auth.GetAuthToken(ctx)
 		if collabToken == "" {
 			return "", ErrCollabNoToken

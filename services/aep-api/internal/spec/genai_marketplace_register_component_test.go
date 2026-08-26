@@ -223,6 +223,65 @@ func TestMarketplaceRegister_StartTurnWithoutProjectRepo(t *testing.T) {
 	}
 }
 
+// Console AgentChatPanel always POSTs collab:true. The synthetic id has no
+// spec room (no repo; room name fails DNS-label). StartTurn must drop Collab
+// so agents never join spec-<org>-__marketplace_register__.
+func TestMarketplaceRegister_StartTurnIgnoresCollab(t *testing.T) {
+	counter := &countingRepoResolver{inner: stubRepoResolver{rec: &sourcecontrol.GitRepository{
+		OrgID: testOrg, ProjectID: testProj, Status: "ready",
+	}}}
+	r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"},
+		withConversations(&memConversationRepo{}),
+		withRepos(counter),
+	)
+	current := listMarketplaceConversations(t, r)[0].ConversationID
+	r.fake.parts = []string{textPart("drafting the external resource")}
+	m := manifestPart(nil, nil)
+	r.fake.manifest = &m
+
+	payload, _ := json.Marshal(map[string]any{
+		"instruction": "/register-external-resource i want to connect to github",
+		"collab":      true,
+	})
+	rec := r.h.AsOrg(testOrg).Post(marketplaceTurnsPath(current), string(payload))
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("StartTurn: code %d, want 202 (%s)", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		TurnID string `json:"turnId"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || out.TurnID == "" {
+		t.Fatalf("202 body = %s (err %v)", rec.Body.String(), err)
+	}
+
+	var st spec.TurnStatus
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		grec := r.h.AsOrg(testOrg).Get(marketplaceTurnPath(out.TurnID))
+		if grec.Code != http.StatusOK {
+			t.Fatalf("GET turn: code %d (%s)", grec.Code, grec.Body.String())
+		}
+		if err := json.Unmarshal(grec.Body.Bytes(), &st); err != nil {
+			t.Fatalf("status body: %v (%s)", err, grec.Body.String())
+		}
+		if st.Status != "running" {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if st.Status != "completed" || !st.NoChanges {
+		t.Fatalf("terminal = %+v, want completed no-changes (relay-only)", st)
+	}
+	if n := counter.calledFor(spec.MarketplaceRegisterProjectID); n != 0 {
+		t.Fatalf("GetRepo called %d time(s) for synthetic id during collab StartTurn", n)
+	}
+
+	sent := r.fake.sentTurn(t, 0)
+	if sent.req.Collab != nil {
+		t.Fatalf("synthetic register dispatch carried collab room %q — agents must not join a spec room", sent.req.Collab.RoomID)
+	}
+}
+
 func TestMarketplaceRegister_RealProjectStill404WhenRepoMissing(t *testing.T) {
 	r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"},
 		withConversations(&memConversationRepo{}),
