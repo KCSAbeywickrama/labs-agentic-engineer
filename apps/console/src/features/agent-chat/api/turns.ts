@@ -51,7 +51,7 @@ function turnFormData(instruction: string, files: File[], collab: boolean): Form
 export function startTurnBody(
   instruction: string,
   collab: boolean,
-): { instruction: string; collab?: true } {
+): components["schemas"]["TurnInputBody"] {
   return collab ? { instruction, collab: true } : { instruction };
 }
 

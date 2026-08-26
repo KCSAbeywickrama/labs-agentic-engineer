@@ -44,7 +44,7 @@ import {
 import {
   conversationKeys,
   fetchCurrentConversationId,
-  rotateConversation,
+  rotateCurrentConversation,
 } from "./api/conversations.js";
 import { attachAndFoldTurn } from "./runTurn.js";
 import {
@@ -541,9 +541,8 @@ export function useAgentChat(
   const newConversation = useCallback(() => {
     void (async () => {
       try {
-        const fresh = await rotateConversation(projectName);
+        await rotateCurrentConversation(queryClient, projectName);
         replaceMessages(chatKey, []);
-        queryClient.setQueryData(conversationKeys.current(projectName), fresh);
       } catch (err) {
         addMessage(chatKey, {
           role: "error",

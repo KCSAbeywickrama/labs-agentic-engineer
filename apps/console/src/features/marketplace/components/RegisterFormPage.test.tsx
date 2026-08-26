@@ -38,6 +38,8 @@ vi.mock("../../agent-chat/api/conversations", async (importOriginal) => {
   return {
     ...real,
     rotateConversation: (projectName: string) => mockRotate(projectName),
+    rotateCurrentConversation: async (_qc: unknown, projectName: string) =>
+      mockRotate(projectName),
   };
 });
 
@@ -632,7 +634,7 @@ describe("RegisterFormPage edit mode", () => {
       });
     });
 
-    expect(screen.getByTestId("spec-question-form")).toBeInTheDocument();
+    expect(screen.getByTestId("chat-question-form")).toBeInTheDocument();
     expect(screen.queryByLabelText(/^Name/)).not.toBeInTheDocument();
     expect(
       screen.getByText("How should consuming projects authenticate to GitHub?"),
@@ -667,7 +669,7 @@ describe("RegisterFormPage edit mode", () => {
       });
     });
 
-    expect(screen.getByTestId("spec-question-form")).toBeInTheDocument();
+    expect(screen.getByTestId("chat-question-form")).toBeInTheDocument();
     expect(screen.getByText("Drafting the catalog form from your answers.")).toBeInTheDocument();
     expect(screen.queryByLabelText(/^Name/)).not.toBeInTheDocument();
   });

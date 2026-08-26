@@ -42,6 +42,8 @@ vi.mock("./api/conversations", async (importOriginal) => {
     ...real,
     fetchCurrentConversationId: (...a: unknown[]) => mockFetchCurrent(...a),
     rotateConversation: (...a: unknown[]) => mockRotate(...a),
+    rotateCurrentConversation: async (_qc: unknown, projectName: string) =>
+      mockRotate(projectName),
   };
 });
 

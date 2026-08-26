@@ -103,11 +103,11 @@ type buildOrgCatalog struct {
 	svc *provisioning.Service
 }
 
-func (b buildOrgCatalog) HasOrgEnvCells(orgID, name string) bool {
+func (b buildOrgCatalog) HasOrgEnvCells(ctx context.Context, orgID, name string) bool {
 	if b.svc == nil {
 		return false
 	}
-	return b.svc.HasOrgEnvCells(context.Background(), orgID, name)
+	return b.svc.HasOrgEnvCells(ctx, orgID, name)
 }
 
 // buildGateResolver adapts the provisioning feature onto the build plan path's

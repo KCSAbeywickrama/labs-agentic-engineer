@@ -138,20 +138,26 @@ func (s *Service) HasOrgEnvCells(ctx context.Context, orgID, name string) bool {
 	if s.catalogValuePlane != nil && len(s.catalogValuePlane.EnvCells(orgID, name)) > 0 {
 		return true
 	}
-	if s.rtCatalog == nil {
-		return false
+	def, ok := s.registeredCatalogDef(ctx, orgID, name)
+	return ok && isRegisteredExternalDef(def)
+}
+
+// registeredCatalogDef looks up the RT-backed catalog row for `name`.
+func (s *Service) registeredCatalogDef(ctx context.Context, orgID, name string) (openchoreo.ExternalResourceDefinition, bool) {
+	if s == nil || s.rtCatalog == nil {
+		return openchoreo.ExternalResourceDefinition{}, false
 	}
 	defs, err := s.rtCatalog.List(ctx, orgID)
 	if err != nil {
-		return false
+		return openchoreo.ExternalResourceDefinition{}, false
 	}
 	want := strings.ToLower(strings.TrimSpace(name))
 	for i := range defs {
 		if strings.ToLower(defs[i].Name) == want {
-			return isRegisteredExternalDef(defs[i])
+			return defs[i], true
 		}
 	}
-	return false
+	return openchoreo.ExternalResourceDefinition{}, false
 }
 
 // registeredEnvCells returns org value-plane cells for a Registered External
@@ -167,25 +173,15 @@ func (s *Service) registeredEnvCells(ctx context.Context, orgID, name string) []
 			return s.ensureRegisteredVaultPaths(ctx, orgID, name, cells)
 		}
 	}
-	if s.rtCatalog == nil {
+	def, ok := s.registeredCatalogDef(ctx, orgID, name)
+	if !ok || !isRegisteredExternalDef(def) {
 		return nil
 	}
-	defs, err := s.rtCatalog.List(ctx, orgID)
-	if err != nil {
-		return nil
+	cells := s.synthesizeRegisteredEnvCells(ctx, orgID, def)
+	if s.catalogValuePlane != nil && len(cells) > 0 {
+		s.catalogValuePlane.PutEnvCells(orgID, name, cells)
 	}
-	want := strings.ToLower(strings.TrimSpace(name))
-	for i := range defs {
-		if strings.ToLower(defs[i].Name) != want || !isRegisteredExternalDef(defs[i]) {
-			continue
-		}
-		cells := s.synthesizeRegisteredEnvCells(ctx, orgID, defs[i])
-		if s.catalogValuePlane != nil && len(cells) > 0 {
-			s.catalogValuePlane.PutEnvCells(orgID, name, cells)
-		}
-		return cells
-	}
-	return nil
+	return cells
 }
 
 // synthesizeRegisteredEnvCells rebuilds org env cells from the RT schema and

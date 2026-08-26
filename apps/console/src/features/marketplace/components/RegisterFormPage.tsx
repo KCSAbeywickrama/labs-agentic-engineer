@@ -43,8 +43,7 @@ import { EmptyState } from "../../../components/EmptyState";
 import { PageHeader } from "../../../components/PageHeader";
 import type { components } from "../../../generated/aep-api";
 import {
-  conversationKeys,
-  rotateConversation,
+  rotateCurrentConversation,
 } from "../../agent-chat/api/conversations";
 import {
   addMessage,
@@ -249,12 +248,7 @@ export function RegisterFormPage({
     let cancelled = false;
     void (async () => {
       try {
-        const fresh = await rotateConversation(MARKETPLACE_CHAT_PROJECT);
-        if (cancelled) return;
-        queryClient.setQueryData(
-          conversationKeys.current(MARKETPLACE_CHAT_PROJECT),
-          fresh,
-        );
+        await rotateCurrentConversation(queryClient, MARKETPLACE_CHAT_PROJECT);
       } catch (err) {
         if (cancelled) return;
         addMessage(chatKey, {

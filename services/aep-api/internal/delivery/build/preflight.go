@@ -50,7 +50,7 @@ type ProvisionStatusReader interface {
 // org catalog plane (Registered External — non-empty env cells). Nil means
 // fail-open: treat the name as Project External and still emit external-config.
 type OrgCatalogReader interface {
-	HasOrgEnvCells(orgID, name string) bool
+	HasOrgEnvCells(ctx context.Context, orgID, name string) bool
 }
 
 // --- wire shapes (names drive the generated schema names — keep them exactly
@@ -196,7 +196,7 @@ func (s *PreflightService) externalItems(ctx context.Context, orgID, projectID, 
 			Description: desc,
 		}}, nil
 	}
-	if s.catalog != nil && s.catalog.HasOrgEnvCells(orgID, d.Name) {
+	if s.catalog != nil && s.catalog.HasOrgEnvCells(ctx, orgID, d.Name) {
 		// Org cells already hold values; project Ready is irrelevant until
 		// POST /build authors the instance from those cells.
 		return nil, nil

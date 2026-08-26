@@ -81,7 +81,7 @@ export function ChatQuestionForm({
 
   return (
     <Box
-      data-testid="spec-question-form"
+      data-testid="chat-question-form"
       sx={{ flexGrow: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}
     >
       <Box sx={{ flexGrow: 1, overflowY: "auto", px: 1, py: 1 }}>
