@@ -55,7 +55,13 @@ into the runner pod at `/app/skills` for live skill edits (see
   can ride it into a console build log), and overload is load-dependent so a flag
   would be off during every incident. **A retry must never reach
   `watchdog.observe`** — it is the absence of progress, and resetting the idle
-  clock hides the stall it explains. `debugFile`, `stderr`,
+  clock hides the stall it explains. **A running subagent is known only from
+  `emitterId`** — the translator emits no `tool_use` for a fan-out call, so a
+  watchdog that expects one reports "no tool in flight" for the whole of a
+  subagent's run (it did, through a ten-minute live stall). **A failed fan-out
+  prints its error text as a second, `error`-level line**, because that text is
+  the last copy of the reason: the subagent's transcript is not on the feed and
+  `claude.log` dies with the pod. `debugFile`, `stderr`,
   `includePartialMessages` and the reasoning pair (`thinking` +
   `forwardSubagentText`) are the opposite call: on for every playground run,
   off in a pod unless `AEP_RUNNER_DEBUG=1`, and they land in files beside
@@ -217,6 +223,14 @@ into the runner pod at `/app/skills` for live skill edits (see
   name belong here rather than in the skill directory: nothing but prose then
   reaches an org's editable skills repo. See
   `remote-worker/design/decisions/ADR-0008-the-bal-library-tool-is-built-in-the-image.md`.
+- **The image installs from `remote-worker/package-lock.json`, not from
+  `pnpm-lock.yaml`.** Two lockfiles, one `package.json`: pnpm's covers the
+  workspace (tests, typecheck, the playground), npm's is what `npm ci` in the
+  Dockerfile reads. Bump a dependency and BOTH have to move —
+  `npm install --package-lock-only` in this directory — or the image build fails
+  on an out-of-sync `npm ci`, which is the loud outcome. The quiet one is worse:
+  a range that still resolves leaves the pod running a version the tests never
+  saw.
 - **One image**, `remote-worker/Dockerfile`, serves BOTH task kinds
   (`AEP_TASK_KIND=implementation` and `=validation`). It is Debian-based
   because Playwright's browsers are glibc-linked; do not reintroduce a second,
