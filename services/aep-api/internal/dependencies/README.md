@@ -44,7 +44,7 @@ three services are sub-package slices that import only that root.
 | Slice | Ops / role | Reaches |
 |---|---|---|
 | `provisioning` | 9 HTTP ops: list/delete/collect-values external resources, list-workload-dependencies, project readiness, provision-platform, dependency-status, request/list org-service access + the `provision` gate lifecycle, watcher, teardown | root cores; delivery (provision execution rows); sourcecontrol (gate issues); `WorkloadDepSource` (deployed Workload consumer refs) |
-| `mcpdiscovery` | the MCP discovery server + `ListPlatformResourceTypes` and `ListOrgEndpoints` HTTP reads; `list_external_resources` is RT-backed (Registered at register Ensure and Project Externals with an authored RT), not provisioned-only | root `ResourceTypeLister` / external RT catalog / endpoint catalog |
+| `mcpdiscovery` | the MCP discovery server (including `list_roles`, the design-time role catalog) + `ListPlatformResourceTypes` and `ListOrgEndpoints` HTTP reads; `list_external_resources` is RT-backed (Registered at register Ensure and Project Externals with an authored RT), not provisioned-only | root `ResourceTypeLister` / external RT catalog / endpoint catalog |
 | `runtimeconfig` | the SPA `env-config.js` convergence service + its watcher (no HTTP op) | root naming/markers; spec (design at HEAD); repositories (execution enumerate) |
 
 Each slice owns its service AND its HTTP handler (as delivery's `build` slice does); `httpapi` aggregates
@@ -63,6 +63,8 @@ slices.
 | OrgResourceDocs | needs | `sourcecontrol` — the first file row on register/update mints the per-org `org-resource-docs` GitHub repo (sentinel project `_resource-docs`) via `EnsureBareRepo` + `Workspace.Mutate`; URL-only and keep-path rows never mint |
 | ProviderResolver (endpoint targets) | needs | root `Catalog` — any-visibility provider lookup for an access request, namespace/project-visible resolves for the wiring block |
 | DesignReader / DesignBundleReader | needs | `spec` — design at HEAD (what to provision) + provider design bundles |
+| RolesEnsurer | needs | `identity` — the build-time roles ensure. The roles gate calls it inside `ProvisionForBuild`, driven by the DESIGN at the tag rather than the drawer inputs, so a role added in a later version is still created. Reports a `RolesEnsureOutcome`, never an identity entity. The outcome carries each test account's login, which the gate publishes as its own comment on the ticket before closing it — that comment is where a validation agent reads the credentials it signs in with, and a failure to publish fails the build |
+| RoleCatalogLister | needs | `identity` — the roles already on the platform IdP, behind the `list_roles` MCP tool. Read-only, with no write counterpart on this surface: roles are created at build time, never by a model |
 | the 11 public ops (provisioning 9 + mcpdiscovery `ListPlatformResourceTypes` and `ListOrgEndpoints`) | offers | the edge (`dependenciesHandlers`) |
 
 ## Owns

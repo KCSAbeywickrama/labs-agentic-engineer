@@ -18,7 +18,14 @@
 
 // @vitest-environment jsdom
 
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import type { components } from "../../../generated/aep-api";
@@ -69,7 +76,12 @@ const soloCollab = () => ({
   // No room doc offline — tests that need one (the question-form block below)
   // assign a real Y.Doc over this.
   doc: null as Y.Doc | null,
-  peers: [] as { clientId: number; name: string; color: string; kind: string }[],
+  peers: [] as {
+    clientId: number;
+    name: string;
+    color: string;
+    kind: string;
+  }[],
   getFileText: (() => null) as (path: string) => Y.Text | null,
   getFileFragment: () => null,
   docPaths: [] as string[],
@@ -163,7 +175,10 @@ vi.mock("@aep/ui-design-view", () => ({
     design: string;
     dependencyStatus?: Record<string, { status?: string; reason?: string }>;
     dependencyUsedBy?: Record<string, string[]>;
-    onResolveDependency?: (name: string, intent: "resolve" | "reconsider") => void;
+    onResolveDependency?: (
+      name: string,
+      intent: "resolve" | "reconsider",
+    ) => void;
   }) => (
     <div data-testid="design-view">
       <div data-testid="design-view-content">{design}</div>
@@ -197,7 +212,11 @@ vi.mock("../../projects/api/queries", () => ({
   useProjectStatus: () => ({
     data: {
       specStatus: "approved",
-      spec: { agent: mockSpecAgent, agentFlow: mockSpecFlow, designOutdated: false },
+      spec: {
+        agent: mockSpecAgent,
+        agentFlow: mockSpecFlow,
+        designOutdated: false,
+      },
     },
   }),
   useProjectTags: () => ({ data: { latest: "v1", specDirty: false } }),
@@ -221,12 +240,30 @@ vi.mock("../api/queries", () => ({
     mockUseDesignDependencies(...args),
 }));
 
+// The Security entry's own wiring. Stubbed like every other query here: these
+// tests render SpecView without a QueryClientProvider, and the hook's and the
+// panel's behavior are covered by their own tests.
+vi.mock("../hooks/useSecurityEntry", () => ({
+  useSecurityEntry: () => ({
+    rolesJson: null,
+    live: undefined,
+    onRolesChange: undefined,
+    proseFragment: null,
+    actions: { reveal: vi.fn(), rotate: vi.fn(), remove: vi.fn() },
+  }),
+}));
+
 // --- BuildDependencyDrawer: its own behavior is covered by
 // BuildDependencyDrawer.test.tsx, so here it's a thin stub that exposes
 // Continue/Cancel so tests can drive SpecView's routing without re-deriving
 // real dependency-form state. ------------------------------------------
 const STUB_INPUTS: BuildInputItem[] = [
-  { component: "checkout-api", dependency: "postgres", kind: "platform-resource", approved: true },
+  {
+    component: "checkout-api",
+    dependency: "postgres",
+    kind: "platform-resource",
+    approved: true,
+  },
 ];
 vi.mock("./BuildDependencyDrawer", () => ({
   BuildDependencyDrawer: ({
@@ -255,7 +292,9 @@ vi.mock("./BuildDependencyDrawer", () => ({
           </button>
         ) : null}
         {items[0] ? (
-          <button onClick={() => onResolveDependency?.(items[0]!, "reconsider")}>
+          <button
+            onClick={() => onResolveDependency?.(items[0]!, "reconsider")}
+          >
             Reconsider drawer item
           </button>
         ) : null}
@@ -334,7 +373,9 @@ describe("SpecView while the kickoff is still writing", () => {
   // A project past its kickoff: the PRD exists, so nothing here is about
   // requirements any more.
   const published = () =>
-    withFiles([{ path: "specs/requirements/prd.md", sha: "abc", group: "requirements" }]);
+    withFiles([
+      { path: "specs/requirements/prd.md", sha: "abc", group: "requirements" },
+    ]);
 
   it("says what is happening instead of offering an empty picker", () => {
     mockSpecAgent = "working";
@@ -381,7 +422,6 @@ describe("SpecView while the kickoff is still writing", () => {
     ).toBeInTheDocument();
   });
 
-
   // `spec.agent` is PROJECT-wide — the newest turn of any flow. A design pass
   // on a project whose PRD shipped months ago is an agent working, but not on
   // the requirements, and not on anything this workspace should re-explain.
@@ -405,8 +445,12 @@ describe("SpecView while the kickoff is still writing", () => {
     empty();
     render(<SpecView projectName="proj1" />);
 
-    expect(screen.getByText("The agent couldn't write your requirements")).toBeInTheDocument();
-    expect(screen.queryByText("Select a file to view its content.")).not.toBeInTheDocument();
+    expect(
+      screen.getByText("The agent couldn't write your requirements"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("Select a file to view its content."),
+    ).not.toBeInTheDocument();
     expect(screen.queryByText("Nothing written yet")).not.toBeInTheDocument();
   });
 
@@ -457,7 +501,9 @@ describe("SpecView while the kickoff is still writing", () => {
     expect(
       screen.queryByText("The agent couldn't write your requirements"),
     ).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Retry" }),
+    ).not.toBeInTheDocument();
     expect(
       screen.getByText("Agent is working on the requirements document"),
     ).toBeInTheDocument();
@@ -523,7 +569,9 @@ describe("SpecView while the kickoff is still writing", () => {
       screen.getByText("Agent is working on the requirements document"),
     ).toBeInTheDocument();
     expect(screen.queryByText("Nothing written yet")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Retry" }),
+    ).not.toBeInTheDocument();
   });
 
   // A design run on an empty project is attributed to Design, not Requirements
@@ -538,7 +586,9 @@ describe("SpecView while the kickoff is still writing", () => {
 
     expect(screen.getByText("Agent is working")).toBeInTheDocument();
     expect(screen.queryByText("Nothing written yet")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Retry" }),
+    ).not.toBeInTheDocument();
   });
 
   // #635: the status field cannot see a turn before its row exists. Submitted
@@ -553,14 +603,18 @@ describe("SpecView while the kickoff is still writing", () => {
     mockSpecAgent = "";
     mockSpecFlow = "";
     empty();
-    act(() => setPendingSeed(chatKeyFor("acme", "proj1"), "my interview answers"));
+    act(() =>
+      setPendingSeed(chatKeyFor("acme", "proj1"), "my interview answers"),
+    );
     render(<SpecView projectName="proj1" />);
 
     expect(
       screen.getByText("Agent is working on the requirements document"),
     ).toBeInTheDocument();
     expect(screen.queryByText("Nothing written yet")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Retry" }),
+    ).not.toBeInTheDocument();
 
     // The seed's consumption hands over to the send claim with no gap — the
     // pane must not flash Retry between the stages.
@@ -582,7 +636,9 @@ describe("SpecView while the kickoff is still writing", () => {
     expect(
       screen.getByText("Agent is working on the requirements document"),
     ).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Retry" }),
+    ).not.toBeInTheDocument();
 
     act(() => releaseFold());
   });
@@ -619,7 +675,9 @@ describe("SpecView while the kickoff is still writing", () => {
     empty();
     render(<SpecView projectName="proj1" />);
 
-    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Retry" }),
+    ).not.toBeInTheDocument();
   });
 });
 
@@ -645,9 +703,7 @@ describe("SpecView never opens a reference document (#383)", () => {
     });
     render(<SpecView projectName="proj1" />);
 
-    expect(
-      screen.queryByText("claim-form.pdf"),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText("claim-form.pdf")).not.toBeInTheDocument();
     // The content hook is disabled (empty path) rather than pointed at it.
     const requestedPaths = mockUseSpecFileContent.mock.calls.map(
       (c) => (c[1] as { path: string } | null)?.path ?? null,
@@ -700,7 +756,9 @@ describe("SpecView onBuild routing (#164)", () => {
   });
 
   it("needsInput:false — shows the Cut-version ceremony; confirming builds and navigates (#370/#372)", async () => {
-    mockPreflightRefetch.mockResolvedValue({ data: { needsInput: false, items: [] } });
+    mockPreflightRefetch.mockResolvedValue({
+      data: { needsInput: false, items: [] },
+    });
     mockMutateAsync.mockResolvedValue({ tag: "v1" } satisfies BuildResponse);
 
     render(<SpecView projectName="proj1" />);
@@ -709,7 +767,10 @@ describe("SpecView onBuild routing (#164)", () => {
     // The ceremony intervenes: nothing POSTs until the user confirms — the
     // BACKEND cuts the real tag on confirm.
     const dialog = await screen.findByTestId("cut-version-dialog");
-    const confirm = within(dialog).getByRole("button", { name: /cut v\d+ & build/i, hidden: true });
+    const confirm = within(dialog).getByRole("button", {
+      name: /cut v\d+ & build/i,
+      hidden: true,
+    });
     expect(mockMutateAsync).not.toHaveBeenCalled();
     fireEvent.click(confirm);
 
@@ -815,7 +876,12 @@ const CHECKOUT_DEPS: ComponentDependencies[] = [
   {
     componentName: "checkout-api",
     dependencies: [
-      { kind: "external", name: "stripe", status: "unresolved", reason: "needs-input" },
+      {
+        kind: "external",
+        name: "stripe",
+        status: "unresolved",
+        reason: "needs-input",
+      },
     ],
   },
 ];
@@ -860,7 +926,10 @@ describe("SpecView dependency wiring (#252 Task 9)", () => {
     // useSession's mock above sets orgHandle: "acme" explicitly, so the
     // "default" fallback never actually kicks in here — but the call proves
     // SpecView passes orgHandle through rather than hardcoding a value.
-    expect(mockUseResolveDependencyViaChat).toHaveBeenCalledWith("acme", "proj1");
+    expect(mockUseResolveDependencyViaChat).toHaveBeenCalledWith(
+      "acme",
+      "proj1",
+    );
   });
 
   it("passes the selected component's dependency status map to DesignView, keyed by dependency name", () => {
@@ -903,14 +972,27 @@ describe("SpecView dependency wiring (#252 Task 9)", () => {
       {
         componentName: "checkout-api",
         dependencies: [
-          { kind: "external", name: "stripe", status: "unresolved", reason: "needs-input" },
-          { kind: "platform-resource", name: "thunder-app", resourceType: "auth" },
+          {
+            kind: "external",
+            name: "stripe",
+            status: "unresolved",
+            reason: "needs-input",
+          },
+          {
+            kind: "platform-resource",
+            name: "thunder-app",
+            resourceType: "auth",
+          },
         ],
       },
       {
         componentName: "checkout-web",
         dependencies: [
-          { kind: "platform-resource", name: "thunder-app", resourceType: "auth" },
+          {
+            kind: "platform-resource",
+            name: "thunder-app",
+            resourceType: "auth",
+          },
         ],
       },
     ];
@@ -1164,7 +1246,10 @@ describe("SpecView header metadata (soft version chips)", () => {
   // had failed to seed) a blank editor over a document that exists in git.
   it("shows the committed document read-only, and says live editing is unavailable", () => {
     mockUseSpecFileContent.mockReturnValue({
-      data: { sha: "abc", content: "# Product requirements\n\nThe committed text." },
+      data: {
+        sha: "abc",
+        content: "# Product requirements\n\nThe committed text.",
+      },
       isPending: false,
       isError: false,
       error: null,
@@ -1173,9 +1258,7 @@ describe("SpecView header metadata (soft version chips)", () => {
     render(<SpecView projectName="proj1" />);
 
     expect(screen.getByText("The committed text.")).toBeInTheDocument();
-    expect(
-      screen.getByText(/Live editing is unavailable/),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/Live editing is unavailable/)).toBeInTheDocument();
     // Nothing offers to take an edit: the committed markdown is rendered, not
     // dropped into a textbox.
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
@@ -1184,7 +1267,13 @@ describe("SpecView header metadata (soft version chips)", () => {
   it("names the document and offers one Retry when there is nothing to show", () => {
     const refetch = vi.fn();
     mockUseSpecFiles.mockReturnValue({
-      data: [{ path: "specs/requirements/prd.md", sha: "abc", group: "requirements" }],
+      data: [
+        {
+          path: "specs/requirements/prd.md",
+          sha: "abc",
+          group: "requirements",
+        },
+      ],
       isPending: false,
       isError: false,
       error: null,
@@ -1204,7 +1293,9 @@ describe("SpecView header metadata (soft version chips)", () => {
     expect(
       screen.getByText("Product requirements couldn't be loaded"),
     ).toBeInTheDocument();
-    expect(screen.getByText("Failed to read spec files (500)")).toBeInTheDocument();
+    expect(
+      screen.getByText("Failed to read spec files (500)"),
+    ).toBeInTheDocument();
     expect(screen.queryByText(/specs\/requirements/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(refetch).toHaveBeenCalled();
@@ -1257,7 +1348,9 @@ describe("SpecView while the agent is waiting on answers", () => {
         role: "question",
         turnId: "t1",
         toolCallId: "call-1",
-        questions: [{ question: "Which of these did I get wrong?", options: [] }],
+        questions: [
+          { question: "Which of these did I get wrong?", options: [] },
+        ],
       },
     ]);
   }
@@ -1276,8 +1369,12 @@ describe("SpecView while the agent is waiting on answers", () => {
   it("offers the launchers and Generate design once the questions are answered", () => {
     render(<SpecView projectName="proj1" />);
 
-    expect(screen.getByRole("button", { name: "+ Feature" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Generate design/ })).toBeEnabled();
+    expect(
+      screen.getByRole("button", { name: "+ Feature" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Generate design/ }),
+    ).toBeEnabled();
   });
 
   it("stands them down while a question form is open", () => {
@@ -1286,7 +1383,9 @@ describe("SpecView while the agent is waiting on answers", () => {
 
     expect(screen.getByTestId("spec-question-form")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "+ Feature" })).toBeNull();
-    expect(screen.getByRole("button", { name: /Generate design/ })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: /Generate design/ }),
+    ).toBeDisabled();
   });
 
   // A seeded command does NOT go through the composer: `AgentChatPanel` sends
@@ -1302,7 +1401,9 @@ describe("SpecView while the agent is waiting on answers", () => {
     render(<SpecView projectName="proj1" />);
 
     expect(screen.getByRole("button", { name: "+ Feature" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: /Generate design/ })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: /Generate design/ }),
+    ).toBeDisabled();
   });
 });
 
@@ -1323,7 +1424,11 @@ describe("SpecView warns before designing against unsettled requirements", () =>
     "",
     "- Which payroll vendor?",
   ].join("\n");
-  const SETTLED = ["## User Stories", "", "1. As a manager, I approve claims"].join("\n");
+  const SETTLED = [
+    "## User Stories",
+    "",
+    "1. As a manager, I approve claims",
+  ].join("\n");
 
   function seed(prd: string): void {
     mockUseSpecFiles.mockReturnValue({
@@ -1388,7 +1493,9 @@ describe("SpecView warns before designing against unsettled requirements", () =>
     fireEvent.click(screen.getByRole("button", { name: "Resolve issues" }));
 
     await waitFor(() =>
-      expect(screen.queryByRole("button", { name: "Generate anyway" })).toBeNull(),
+      expect(
+        screen.queryByRole("button", { name: "Generate anyway" }),
+      ).toBeNull(),
     );
     expect(mockNavigate).not.toHaveBeenCalled();
   });
@@ -1424,7 +1531,12 @@ describe("SpecView keeps the chat log fed without the chat panel (#606)", () => 
     const { rerender } = render(<SpecView projectName="proj1" />);
     expect(mockResyncConversation).not.toHaveBeenCalled();
 
-    mockCollab = { ...soloCollab(), status: "connected", peers: [], version: 1 };
+    mockCollab = {
+      ...soloCollab(),
+      status: "connected",
+      peers: [],
+      version: 1,
+    };
     rerender(<SpecView projectName="proj1" />);
 
     expect(mockResyncConversation).toHaveBeenCalledTimes(1);

@@ -255,7 +255,8 @@ operations its contract actually exposes:
   unable to sign in. For `thunder-app` only, proposing the `scopes` parameter is
   allowed (default `openid profile email`); every other resource type keeps the
   no-invented-parameters rule, and `redirectUris` are platform-managed — never
-  propose them. `thunder-authentication` owns the full rule.
+  propose them. `thunder-authentication` owns the full rule, and
+  `security-design` owns which roles sign in through it.
 
 ### Resolving an `external` dependency
 

@@ -67,6 +67,12 @@ type Service struct {
 	// composition root (Task 5) so provisioning never imports build/devflow. Nil
 	// is a documented best-effort no-op (logged).
 	providerBuild ProviderBuildTrigger
+
+	// roles is the build-time roles ensure. Optional: nil (or a disabled one)
+	// skips the roles gate, which is what a stack with no identity provider
+	// wants — the alternative is failing every build for a feature it cannot
+	// use.
+	roles RolesEnsurer
 }
 
 // OrgPublishMarker persists a provider component's deliberate publish decision.
@@ -103,6 +109,8 @@ type Deps struct {
 	Environments      EnvironmentLister
 	OrgSecrets        OrgSecretWriter
 	OrgResourceDocs   OrgResourceDocs
+	// Roles is the build-time roles ensure. Nil skips the roles gate.
+	Roles RolesEnsurer
 }
 
 // NewService wires the provisioning service from its collaborator set.
@@ -122,6 +130,7 @@ func NewService(d Deps) *Service {
 		providers:         d.Providers,
 		catalogValuePlane: d.CatalogValuePlane,
 		environments:      d.Environments,
+		roles:             d.Roles,
 		orgSecrets:        d.OrgSecrets,
 		orgResourceDocs:   d.OrgResourceDocs,
 	}

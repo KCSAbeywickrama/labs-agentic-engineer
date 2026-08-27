@@ -63,6 +63,33 @@ type ResourceTypeLister interface {
 	List(ctx context.Context) ([]dependencies.PlatformResourceType, error)
 }
 
+// RoleCatalogLister reads the roles that already exist on the platform identity
+// provider — the Role catalog the design agent consults before inventing a
+// name. Roles are SHARED across projects, so the catalog is cluster-wide, not
+// org-scoped: that is precisely what makes reuse meaningful, and it is why the
+// rows carry a name and a description and nothing about who uses them.
+//
+// Satisfied by *identity.CatalogService. Read-only with no write counterpart
+// anywhere on this surface — roles are created at BUILD time, deterministically,
+// never by a model.
+type RoleCatalogLister interface {
+	ListRoleCatalog(ctx context.Context) ([]RoleCatalogEntry, error)
+}
+
+// RoleCatalogEntry is one row of the role catalog as the tool renders it. It is
+// mcpdiscovery's own view type — the projection every other tool here goes
+// through — so a field added to the identity domain cannot leak into an LLM
+// prompt by accident.
+type RoleCatalogEntry struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	// PlatformCreated is true when the platform created this role and may
+	// therefore give it test users. False means somebody else made the group;
+	// the platform will leave it alone.
+	PlatformCreated bool `json:"platformCreated"`
+	MemberCount     int  `json:"memberCount"`
+}
+
 // PlatformResourceConsumerLister derives, per installed platform ResourceType,
 // the components across the calling org's projects that declare a
 // platform-resource dependency on it (the "used by" overlay on the resource-type

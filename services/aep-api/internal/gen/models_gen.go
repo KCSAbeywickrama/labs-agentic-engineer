@@ -1555,6 +1555,33 @@ type ProjectList struct {
 	NextCursor string `json:"nextCursor,omitempty"`
 }
 
+// ProjectRoleState One role as it exists on the identity provider right now, joined against the platform's own record. Roles are shared at the provider's scope, so a row here is not owned by the project reading it.
+type ProjectRoleState struct {
+	// Description The group description on the directory. Seeded at create and never rewritten (a shared role may have been described by whoever declared it first).
+	Description string `json:"description,omitempty"`
+
+	// MemberCount How many accounts currently hold the role. Best-effort — a per-role read failure leaves it 0 rather than failing the whole panel.
+	MemberCount int `json:"memberCount,omitempty"`
+
+	// Name The role name verbatim; it is the identity, and it is what reaches an app as a groups claim.
+	Name string `json:"name"`
+
+	// PlatformCreated True when the platform created this role and may therefore enrol test users into it. A hand-made group reads false and the platform leaves it alone.
+	PlatformCreated bool `json:"platformCreated"`
+}
+
+// ProjectRolesView The Security panel's read model.
+type ProjectRolesView struct {
+	// DirectoryAvailable False when the identity provider could not be reached. The store-derived fields are still populated; the console must say "unknown" for the live ones instead of rendering absence as "does not exist".
+	DirectoryAvailable bool `json:"directoryAvailable"`
+
+	// Roles The WHOLE directory catalog, name-ordered — not just this project's roles. Roles are shared, so the panel shows which existing role a design reuses. Empty when directoryAvailable is false.
+	Roles []ProjectRoleState `json:"roles,omitempty"`
+
+	// TestUsers The test accounts THIS project's design references, role-ordered.
+	TestUsers []ProjectTestUserState `json:"testUsers,omitempty"`
+}
+
 // ProjectStatus Computed SDLC phase and artifact states.
 type ProjectStatus struct {
 	// Build Build-stage aggregate on ProjectStatus (#184) — the version the newest milestone run is working, and how that run is doing. Deliberately count-free - the only honest source of a per-version task tally is the version's milestone on GitHub, and this endpoint is polled at 5s. The console renders counts from the list-tasks response it already holds, on the surface that already pays for it.
@@ -1584,6 +1611,34 @@ type ProjectStatus struct {
 
 	// SpecStatus "", draft, approved
 	SpecStatus string `json:"specStatus"`
+}
+
+// ProjectTestUserState One test account this project references. The account itself is shared at the identity provider's scope; only the reference is the project's.
+type ProjectTestUserState struct {
+	// ColdStart True for the account holding this project's cold-start role — the one served when a caller asks for credentials without naming a role.
+	ColdStart bool `json:"coldStart"`
+
+	// Exists True when the account is present on the identity provider. Meaningless when directoryAvailable is false.
+	Exists bool `json:"exists"`
+
+	// Owned True when the platform holds a sealed password for this account and may therefore reveal, rotate or delete it. False means the username belongs to somebody else and every mutation is refused.
+	Owned bool `json:"owned"`
+
+	// ReferencingCount How many projects reference this account IN TOTAL, across every org. A bare count with no names — the minimum disclosure that makes "others may still be using this" a true statement before a delete.
+	ReferencingCount int `json:"referencingCount,omitempty"`
+
+	// ReferencingProjects THIS ORG's projects that reference the account. Never another org's — a project name is one org's data, and the shared directory does not license disclosing it.
+	ReferencingProjects []string `json:"referencingProjects,omitempty"`
+
+	// RoleName The role this account holds.
+	RoleName string `json:"roleName"`
+
+	// RotatedAt When the password was last replaced; null when never.
+	RotatedAt *time.Time `json:"rotatedAt,omitempty"`
+
+	// Supplied True when the design named no test user for the role and the platform generated the username.
+	Supplied bool   `json:"supplied"`
+	Username string `json:"username"`
 }
 
 // ProjectUsageCard One project's lifetime agent usage (#291). Identity comes from the usage rows' stored project slug, so a card survives its project's deletion.
@@ -2099,6 +2154,15 @@ type TaskView struct {
 
 // TaskViewExecutorClass WHO works this issue, derived from its labels: `coding` for anything a coding agent is dispatched at (planned work, a bug, a merge conflict — all armed with the `aep` label), `provision` for a dispatch gate the platform resolves, `validation` for the version's validation task, `ledger` for a bare human issue that joined the milestone unarmed. Deliberately coarser than `kind`: the three coding kinds are dispatched identically, so they are one class here and are told apart by `kind`. Nothing here is parsed out of the body — issue bodies are prose the platform writes for the agent and never reads back.
 type TaskViewExecutorClass string
+
+// TestUserPassword A test account's password, disclosed deliberately by reveal or rotate. It is never returned by any read.
+type TestUserPassword struct {
+	Password string `json:"password"`
+
+	// RotatedAt When the password was last replaced; null when it is the one minted at create.
+	RotatedAt *time.Time `json:"rotatedAt,omitempty"`
+	Username  string     `json:"username"`
+}
 
 // TimelineEvent A unified-timeline entry: today's ProgressEvent (phase | tool_use | git_commit | git_push | gh_action | build_step | log | result) plus its attribution — which execution attempt it came from. This is the per-row shape the console renders; the FE groups rows by executionId/kind.
 type TimelineEvent struct {
