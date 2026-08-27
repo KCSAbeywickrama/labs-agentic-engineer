@@ -97,6 +97,15 @@ func (s *Service) ProvisionForBuild(ctx context.Context, orgID, ocOrgID, project
 	}
 
 	var failures []ProvisionFailure
+
+	// The roles gate is driven by the DESIGN at the tag, not by the drawer
+	// inputs, so it runs on EVERY build that declares roles — including a
+	// rebuild whose dependencies are all already Ready and therefore carry no
+	// input at all. roles_gate.go carries why that matters.
+	if f := s.ensureRolesGate(ctx, orgID, projectID, tag, milestoneNumber); f != nil {
+		failures = append(failures, *f)
+	}
+
 	provisioned := make(map[string]bool, len(inputs))
 	for _, in := range inputs {
 		provisioned[strings.ToLower(in.Dependency)] = true

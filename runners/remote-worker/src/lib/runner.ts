@@ -32,7 +32,7 @@ import { writeBearerFile } from "./workspace.js";
 import { emit, primeScrubber } from "./progress/emitter.js";
 import { createSdkTranslator } from "./progress/from-sdk.js";
 import { createRunWatchdog } from "./progress/watchdog.js";
-import { apiRetryLine, isStreamFrame, readApiRetry } from "./progress/diagnostics.js";
+import { apiRetryLine, isStreamFrame, readApiRetry, readStallSignal } from "./progress/diagnostics.js";
 import { scrubber } from "./progress/scrubber.js";
 import { createWebSearchDlpHook, stagedSecretValues } from "./websearch_dlp.js";
 import { createForegroundFanOutHook } from "./fanout_foreground.js";
@@ -613,6 +613,18 @@ export async function runClaudeQuery(
         if (retry) {
           watchdog.observeRetry(retry);
           emit({ kind: "log", level: "warn", summary: apiRetryLine(retry) });
+          continue;
+        }
+        // The other system messages that explain a silence or an ending — a
+        // compaction, a refusal, a denied tool, a worker going away. Dropped
+        // with every other unrecognised subtype until now, which is how a run
+        // that was compacting and a run that was wedged looked identical.
+        // Deliberately NOT fed to the watchdog: none of them is the agent making
+        // progress, and firing the idle report slightly early is the safe
+        // direction for a diagnostic.
+        const signal = readStallSignal(message);
+        if (signal) {
+          emit({ kind: "log", level: signal.level, summary: signal.summary });
           continue;
         }
         const events = translate(message);

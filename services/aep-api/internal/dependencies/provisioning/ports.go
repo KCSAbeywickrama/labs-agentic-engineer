@@ -225,3 +225,54 @@ type AccessStore interface {
 	UpdateStatus(ctx context.Context, id, status string) error
 	ListByProviderTask(ctx context.Context, providerTaskID string) ([]dependencies.AccessRequest, error)
 }
+
+// RolesEnsureOutcome is what one build-time roles ensure did.
+//
+// It carries no "did this project declare roles" flag: the gate asks
+// DeclaresRoles FIRST and does not reach the ensure otherwise, so a second
+// answer here would only be free to disagree with the one the gate acted on.
+type RolesEnsureOutcome struct {
+	// Summary is the human-readable account of what was created, reused, left
+	// alone or refused — the gate's closing comment.
+	Summary string
+	// Refusals is true when something was left untouched because the platform
+	// does not own it. Not a failure; a thing a human has to look at.
+	Refusals bool
+	// Credentials are the logins for the test accounts this project can sign in
+	// as at this version. They are published in the gate's closing comment,
+	// because that ticket is where the validation agent reads them from.
+	//
+	// This is the one field carrying a secret. It goes into the issue body and
+	// NOWHERE else: never into a log line, never into Summary, never into a
+	// ProvisionFailure reason.
+	Credentials []RolesCredential
+}
+
+// RolesCredential is one published test-account login.
+//
+// An empty Password means the platform holds the account but could not open its
+// seal. The comment says so per row rather than printing a blank, so a reader —
+// human or agent — is never handed an empty string that looks like a password.
+type RolesCredential struct {
+	Username  string
+	Password  string
+	Role      string
+	ColdStart bool
+}
+
+// RolesEnsurer makes the roles and test users a project's design declares real
+// on the platform identity provider, at build time and with NO MODEL IN THE
+// LOOP. Wired to the identity domain at the composition root.
+//
+// Enabled is false when the identity provider is not configured (a local stack
+// without one); the roles gate is then skipped entirely rather than failing
+// every build.
+type RolesEnsurer interface {
+	Enabled() bool
+	// DeclaresRoles reports whether the design at the tag carries a roles
+	// document. It is asked FIRST, so the gate can be minted open before the
+	// work starts — the shape every other provisioning gate has. An error here
+	// is a real failure, never "no roles".
+	DeclaresRoles(ctx context.Context, orgID, projectID, tag string) (bool, error)
+	EnsureRolesForBuild(ctx context.Context, orgID, projectID, tag string) (RolesEnsureOutcome, error)
+}

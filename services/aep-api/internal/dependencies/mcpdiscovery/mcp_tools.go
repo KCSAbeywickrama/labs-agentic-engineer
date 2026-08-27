@@ -200,6 +200,18 @@ func mcpTools() []mcpTool {
 			InputSchema: map[string]any{"type": "object", "properties": map[string]any{}},
 		},
 		{
+			Name: "list_roles",
+			Description: "List the roles that already exist on the platform identity provider. " +
+				"Roles are SHARED across projects, so reuse a matching row's name verbatim instead " +
+				"of inventing a near-duplicate — take the row whose `description` matches the need, " +
+				"not the one whose name echoes the requirement's wording. Each row gives the role " +
+				"`name`, its `description`, `platformCreated` (true when this platform created it — " +
+				"only those can be given test users) and `memberCount`. Read-only: you never author " +
+				"these, and nothing you do creates one. The platform creates the roles your " +
+				"`specs/design/roles.json` declares when the user clicks Build.",
+			InputSchema: map[string]any{"type": "object", "properties": map[string]any{}},
+		},
+		{
 			Name: "get_remote_git_file_contents",
 			Description: "Read a file (or list a directory) from a repository in THIS organization over the " +
 				"GitHub API — no clone. Use this AFTER list_org_component_endpoints reports a provider whose " +
@@ -361,6 +373,17 @@ func handleToolCall(w http.ResponseWriter, r *http.Request, h *mcpHandler, orgHa
 			return
 		}
 		writeToolText(w, req.ID, mustJSON(map[string]any{"resourceTypes": types}))
+	case "list_roles":
+		if h.roles == nil {
+			writeToolText(w, req.ID, mustJSON(map[string]any{"roles": []any{}}))
+			return
+		}
+		roles, err := h.roles.ListRoleCatalog(r.Context())
+		if err != nil {
+			writeToolError(w, req.ID, fmt.Sprintf("list roles: %v", err))
+			return
+		}
+		writeToolText(w, req.ID, mustJSON(map[string]any{"roles": roles}))
 	case "get_remote_git_file_contents":
 		if h.remoteGit == nil {
 			writeToolError(w, req.ID, "remote git reader not configured")

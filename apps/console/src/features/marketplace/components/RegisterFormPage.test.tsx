@@ -32,7 +32,9 @@ vi.mock("@tanstack/react-router", () => ({
   ),
 }));
 
-const mockRotate = vi.fn(async (_projectName: string) => "fresh-conversation-id");
+const mockRotate = vi.fn<(projectName: string) => Promise<string>>(
+  async () => "fresh-conversation-id",
+);
 vi.mock("../../agent-chat/api/conversations", async (importOriginal) => {
   const real = await importOriginal<typeof import("../../agent-chat/api/conversations")>();
   return {
