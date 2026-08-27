@@ -259,9 +259,37 @@ export function useAgentChat(
   // (spec file list included) so views keyed off committed truth — e.g. the
   // Architecture tab's "Designing…" state — settle instead of serving the
   // staleTime-Infinity snapshot until a reload.
+  //
+  // The THREAD is the same kind of stale, and the commit is the same signal.
+  // The fold appends turn rows into `chatStore` live, but the authority that
+  // replaces them is the `staleTime: Infinity` history query — refreshed
+  // only on a cold mount, a refocus, or a poll that finds a RUNNING turn. None
+  // of those is "the turn just finished", so a turn ending while the user sits
+  // still left the cache one turn behind, and the next surface to mount
+  // `useConversationLog` replayed that snapshot over the live rows. On a new
+  // project the snapshot is the EMPTY thread the panel read before the
+  // platform's kickoff dispatched, so the replay emptied the log outright and
+  // the spec workspace fell back to "Nothing written yet" plus a Retry while
+  // the agent stood waiting on the questions it had just asked.
+  //
+  // READ the thread here rather than merely invalidating it. An invalidation
+  // leaves the stale entry in place, and react-query serves that entry to the
+  // next observer synchronously while it refetches behind it — so the spec
+  // workspace would still paint one frame of the pre-turn snapshot, wiping the
+  // question and flashing "Nothing written yet" before the fresh read restored
+  // it. Reading AT the commit means the cache already holds post-turn truth by
+  // the time any surface mounts, and there is no window to paint.
+  //
+  // Through the shared cache entry (#606), so this is the same request every
+  // other surface would have made rather than a second one racing it. Failure
+  // is a no-op: `fetchConversationHistory` answers null and the existing
+  // triggers (refocus, cold mount) remain the recovery path.
   const onTurnCommitted = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: projectKeys.detail(projectName) });
-  }, [queryClient, projectName]);
+    if (conversationId) {
+      void fetchConversationHistory(queryClient, projectName, conversationId);
+    }
+  }, [queryClient, projectName, conversationId]);
 
   useEffect(() => {
     if (!conversationId) return;
