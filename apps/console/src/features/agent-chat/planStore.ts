@@ -29,7 +29,7 @@
 // the error, the remaining ghosts) persists until the next declaring turn
 // replaces it, because the wreckage IS the case for updating the design.
 
-import { ANSWER_PREFIX, ANSWERS_PREFIX, DECLARE_PLAN_TOOL } from "@aep/agent-stream";
+import { DECLARE_PLAN_TOOL } from "@aep/agent-stream";
 
 export type PlanEntryStatus = "planned" | "writing" | "done" | "error";
 
@@ -44,27 +44,6 @@ export const WRITE_TOOLS: ReadonlySet<string> = new Set(["addFile", "editFile"])
 /** The HITL tools whose call ends a turn waiting on the user (ADR-0012). */
 const QUESTION_TOOLS: ReadonlySet<string> = new Set(["ask_question", "ask_questions"]);
 
-/**
- * Is this user message an ANSWER to the agent's question rather than a fresh
- * instruction? Answers travel as plain text carrying the shared markers the
- * wire contract publishes for exactly this purpose.
- */
-function isAnswer(content: unknown): boolean {
-  const text =
-    typeof content === "string"
-      ? content
-      : Array.isArray(content)
-        ? content
-            .map((p) =>
-              typeof p === "object" && p !== null && (p as { type?: string }).type === "text"
-                ? ((p as { text?: string }).text ?? "")
-                : "",
-            )
-            .join("")
-        : "";
-  const head = text.trimStart();
-  return head.startsWith(ANSWER_PREFIX) || head.startsWith(ANSWERS_PREFIX);
-}
 
 export interface PlanEntry {
   /** Full repo-relative spec-bundle path — the reconciliation identity. */
@@ -322,13 +301,20 @@ export function rehydratePlanFromHistory(
   const turns: TurnAcc[] = [newTurn()];
   for (const message of history) {
     if (message.role === "user") {
-      // An ANSWER is not a new piece of work — it is the other half of a
-      // question the agent asked mid-flight, and the writing continues in the
-      // turn it opens. Breaking the accumulation here severed a design run's
-      // declaration from the files written after the pause, leaving permanent
-      // ghosts over documents that exist.
-      if (isAnswer(message.content)) {
-        turns[turns.length - 1]!.awaitingAnswer = false;
+      // A user message while a QUESTION IS OUTSTANDING is the other half of
+      // that question, and the writing carries on in the turn it opens — so it
+      // continues the work rather than starting new work.
+      //
+      // Decided on the STATE, never on what the message says. Reading the
+      // answer markers off the text looked equivalent and was not: ADR-0012
+      // makes free text in the composer an equally valid answer, so a user who
+      // types "just use Stripe" instead of clicking an option carries no
+      // marker — and the plan was severed exactly as it was before. This is
+      // also the rule the live fold already follows, where a paused plan is
+      // adopted by whatever turn comes next.
+      const open = turns[turns.length - 1]!;
+      if (open.awaitingAnswer) {
+        open.awaitingAnswer = false;
         continue;
       }
       turns.push(newTurn());

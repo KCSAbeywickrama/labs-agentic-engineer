@@ -252,8 +252,41 @@ describe("rehydratePlanFromHistory", () => {
     expect(plan?.entries.map((e) => e.status)).toEqual(["done", "planned"]);
   });
 
+  // Answering by TYPING is an equally valid path (ADR-0012), so the
+  // continuation cannot be decided from the message text — this is the case
+  // that killed the answer-marker version of this rule.
+  it("a free-text answer continues the work just as a card answer does", () => {
+    rehydratePlanFromHistory(KEY, [
+      { role: "user", content: "/design" },
+      { role: "assistant", content: [declareCall([CELL, OVERVIEW])] },
+      { role: "assistant", content: [addCall(CELL)] },
+      { role: "assistant", content: [{ type: "tool-call", toolName: "ask_question", input: {} }] },
+      { role: "user", content: "just use Stripe" },
+      { role: "assistant", content: [addCall(OVERVIEW)] },
+    ]);
+    expect(peekPlan(KEY)).toBe(null);
+  });
+
+  // However many rounds it takes — each question re-arms the pause, each reply
+  // clears it.
+  it("survives several question-and-answer rounds in one run", () => {
+    const ask = { type: "tool-call", toolName: "ask_question", input: {} };
+    rehydratePlanFromHistory(KEY, [
+      { role: "user", content: "/design" },
+      { role: "assistant", content: [declareCall([CELL, OVERVIEW, PORTAL])] },
+      { role: "assistant", content: [addCall(CELL)] },
+      { role: "assistant", content: [ask] },
+      { role: "user", content: "postgres" },
+      { role: "assistant", content: [addCall(OVERVIEW)] },
+      { role: "assistant", content: [ask] },
+      { role: "user", content: "one admin role" },
+      { role: "assistant", content: [addCall(PORTAL)] },
+    ]);
+    expect(peekPlan(KEY)).toBe(null);
+  });
+
   // A genuinely new instruction still starts new work.
-  it("a fresh instruction after a plan does start a new turn", () => {
+  it("a fresh instruction with NO question outstanding starts a new turn", () => {
     rehydratePlanFromHistory(KEY, [
       { role: "user", content: "/design" },
       { role: "assistant", content: [declareCall([CELL, OVERVIEW])] },
