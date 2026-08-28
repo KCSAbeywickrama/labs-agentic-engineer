@@ -16,6 +16,8 @@ type MilestoneRunView = components["schemas"]["MilestoneRunView"];
 type CycleBuild = components["schemas"]["CycleBuild"];
 type DeploymentList = components["schemas"]["DeploymentList"];
 type ComponentDependencies = components["schemas"]["ComponentDependencies"];
+type ProjectDependencyReadiness =
+  components["schemas"]["ProjectDependencyReadiness"];
 type FileMeta = components["schemas"]["FileMeta"];
 type FileContent = components["schemas"]["FileContent"];
 type ApiError = components["schemas"]["Error"];
@@ -449,6 +451,44 @@ const designDependencies: ComponentDependencies[] = [
     ],
   },
 ];
+
+// External-dependency VALUE readiness, backing the Builds page's External
+// resources section (ADR-0023). It answers a different question from the
+// dependency list above: that one says what the design declares, this one says
+// whether the platform holds real values for it in an environment.
+//
+// Only `stripe` appears, because only `stripe` is external — a platform
+// resource's credentials are the platform's own to author, so it has no row to
+// collect and no readiness to report here.
+//
+// KEEP THIS IN SYNC WITH `designDependencies`. This response is what decides
+// which rows the section renders: it enumerates the externals the PROJECT can
+// supply (a Registered External, whose values live on the org catalog record,
+// is omitted on purpose — the project-scoped save 409s on it and the deploy
+// gate excludes it). An external the design declares and this list forgets
+// renders nothing, which would mock a bug rather than the feature.
+//
+// It is `unset` in every scenario that has a design: both of stripe's keys are
+// secrets with no default, so the build authors them empty and they stay that
+// way until somebody types them. That is the state the section exists for, and
+// mocking it configured would demo the one case with nothing to do.
+export function projectDependencyReadiness(
+  s: Exclude<ProjectScenario, "error">,
+): ProjectDependencyReadiness {
+  if (s === "fresh" || s === "repo-error") {
+    return { configured: true, dependencies: [] };
+  }
+  return {
+    configured: false,
+    dependencies: [
+      {
+        name: "stripe",
+        state: "unset",
+        missingKeys: ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"],
+      },
+    ],
+  };
+}
 
 export function projectDependencies(
   s: Exclude<ProjectScenario, "error">,

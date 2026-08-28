@@ -283,6 +283,41 @@ export function useComponentOpenApi(
   });
 }
 
+// Whether every external dependency in the design has its values for an
+// environment. The platform answers per dependency (`configured` / `unset` /
+// `not-provisioned`, plus the keys it is still missing) and folds the set into
+// one `configured` flag — the same read the deploy gate consults, so the
+// console and the platform never disagree about what is outstanding.
+//
+// Not polled: the only thing that changes it is a save made from this console,
+// and every save invalidates this key. `staleTime` matches the feature's other
+// design-shaped reads.
+export function useProjectDependencyReadiness(
+  projectName: string,
+  environment: string,
+) {
+  return useQuery({
+    queryKey: projectKeys.dependencyReadiness(projectName, environment),
+    // A project name arrives with the route, but the environment is chosen by
+    // the caller — an empty one would silently read a different environment
+    // than the caller meant.
+    enabled: projectName !== "" && environment !== "",
+    queryFn: async () => {
+      const { data, error } = await client.GET(
+        "/projects/{projectName}/dependencies/readiness",
+        { params: { path: { projectName }, query: { environment } } },
+      );
+      if (error || data === undefined) {
+        throw new Error(
+          apiErrorMessage(error, "Failed to load dependency readiness"),
+        );
+      }
+      return data;
+    },
+    staleTime: 30_000,
+  });
+}
+
 // Re-collect an external connection's values (#395: dummy values at build
 // time, real ones later). POST …/external-resources/{name}/values re-splits
 // plain/secret by the design's schema, rewrites secrets to the secret

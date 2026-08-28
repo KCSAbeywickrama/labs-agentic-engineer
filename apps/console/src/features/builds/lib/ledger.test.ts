@@ -21,6 +21,7 @@ import type { components } from "../../../generated/aep-api";
 import {
   buildDuration,
   countTasks,
+  isAwaitingValues,
   isDeployable,
   isDurationOpen,
   isLedgerLive,
@@ -79,6 +80,14 @@ describe("ledgerStatus", () => {
     });
   });
 
+  it("says a parked version is waiting on the reader, not that an agent is running", () => {
+    // ADR-0023's deploy gate: the run stopped and only a person can end it.
+    // The wording is the build page's own pill, so the two surfaces agree.
+    expect(
+      ledgerStatus(build({ status: "in_progress", waitingReason: "external-values" })),
+    ).toEqual({ label: "Waiting for values", tone: "warning", live: false });
+  });
+
   it("treats `started` as running too", () => {
     expect(ledgerStatus(build({ status: "started" })).live).toBe(true);
   });
@@ -121,7 +130,25 @@ describe("ledgerStatus", () => {
   });
 });
 
+describe("isAwaitingValues", () => {
+  it("separates a parked version from a running one, which share a status", () => {
+    expect(
+      isAwaitingValues(build({ status: "in_progress", waitingReason: "external-values" })),
+    ).toBe(true);
+    expect(isAwaitingValues(build({ status: "in_progress" }))).toBe(false);
+  });
+});
+
 describe("isLedgerLive", () => {
+  it("keeps a parked run in flight — it is still polled and still cancellable", () => {
+    // Deliberately not `LedgerStatus.live`: the row goes quiet because nothing
+    // is moving, but the RUN is unfinished, resumes on its own when the last
+    // value is saved, and Cancel still acts on it.
+    const parked = build({ status: "in_progress", waitingReason: "external-values" });
+    expect(isLedgerLive(parked)).toBe(true);
+    expect(ledgerStatus(parked).live).toBe(false);
+  });
+
   it("is true only for the two running states", () => {
     expect(isLedgerLive(build({ status: "in_progress" }))).toBe(true);
     expect(isLedgerLive(build({ status: "started" }))).toBe(true);

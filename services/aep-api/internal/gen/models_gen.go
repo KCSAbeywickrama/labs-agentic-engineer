@@ -121,6 +121,21 @@ func (e BuildSummaryStatus) Valid() bool {
 	}
 }
 
+// Defines values for BuildSummaryWaitingReason.
+const (
+	BuildSummaryWaitingReasonExternalValues BuildSummaryWaitingReason = "external-values"
+)
+
+// Valid indicates whether the value is a known member of the BuildSummaryWaitingReason enum.
+func (e BuildSummaryWaitingReason) Valid() bool {
+	switch e {
+	case BuildSummaryWaitingReasonExternalValues:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DeployStageValidation.
 const (
 	DeployStageValidationAwaitingFix  DeployStageValidation = "awaiting-fix"
@@ -268,6 +283,21 @@ func (e MilestoneRunViewState) Valid() bool {
 	case MilestoneRunViewStateSucceeded:
 		return true
 	case MilestoneRunViewStateWaiting:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MilestoneRunViewWaitingReason.
+const (
+	MilestoneRunViewWaitingReasonExternalValues MilestoneRunViewWaitingReason = "external-values"
+)
+
+// Valid indicates whether the value is a known member of the MilestoneRunViewWaitingReason enum.
+func (e MilestoneRunViewWaitingReason) Valid() bool {
+	switch e {
+	case MilestoneRunViewWaitingReasonExternalValues:
 		return true
 	default:
 		return false
@@ -848,8 +878,13 @@ type BuildLogs struct {
 
 // BuildPreflight defines model for BuildPreflight.
 type BuildPreflight struct {
-	Items      []PreflightItem `json:"items"`
-	NeedsInput bool            `json:"needsInput"`
+	Items []PreflightItem `json:"items"`
+
+	// NeedsInput Whether preflight emitted any item at all. Kept as the broad "there is something to show" flag; it does NOT gate Build, because an external dependency's values are collected on the Builds page while the coding agent runs and are enforced at the deploy gate instead.
+	NeedsInput bool `json:"needsInput"`
+
+	// NeedsResolution Whether any emitted item blocks the version cut — a dependency the design itself cannot resolve (ambiguous, unresolved, missing spec, or an org service awaiting access). This is the ONLY flag a client may block Build on.
+	NeedsResolution bool `json:"needsResolution"`
 }
 
 // BuildProgressEvent One SSE frame on the VERSION progress stream, which spans every run that has worked the version. `type` discriminates the payload: `cycle` carries a RunCycleView (client upserts by id), `line` one RunProgressLine, and `done` says why the stream ended (the server then closes it). `cycle` and `line` frames also carry `run` — a version's story spans several executions, so a cycle is only identified once you know which run opened it.
@@ -930,10 +965,16 @@ type BuildSummary struct {
 	StartedAt time.Time          `json:"startedAt"`
 	Status    BuildSummaryStatus `json:"status"`
 	Tag       string             `json:"tag"`
+
+	// WaitingReason Why an in-progress version is waiting rather than moving. Empty for the ordinary between-cycles park, which needs no explanation. `external-values` is the deploy gate — the run is built and ready to deploy, and every remaining blocker is a value only a human can supply. It is carried here so a ledger row can say the version is waiting on the reader instead of reading as a run an agent is still working; the dependency NAMES stay on MilestoneRunView, where the run read that has them is already being made.
+	WaitingReason BuildSummaryWaitingReason `json:"waitingReason,omitempty"`
 }
 
 // BuildSummaryStatus defines model for BuildSummary.Status.
 type BuildSummaryStatus string
+
+// BuildSummaryWaitingReason Why an in-progress version is waiting rather than moving. Empty for the ordinary between-cycles park, which needs no explanation. `external-values` is the deploy gate — the run is built and ready to deploy, and every remaining blocker is a value only a human can supply. It is carried here so a ledger row can say the version is waiting on the reader instead of reading as a run an agent is still working; the dependency NAMES stay on MilestoneRunView, where the run read that has them is already being made.
+type BuildSummaryWaitingReason string
 
 // ClientSecretOutputBody defines model for ClientSecretOutputBody.
 type ClientSecretOutputBody struct {
@@ -1350,6 +1391,9 @@ type Lineage struct {
 
 // MilestoneRunView One run of the milestone loop, with the cycle records that make up its timeline. Loop POSITION is deliberately absent — it renders from the latest cycle, because fix and conflict cycles re-enter earlier phases and a stored phase enum would lie mid-loop.
 type MilestoneRunView struct {
+	// BlockingDependencies The external dependency names a `waiting` run is blocked on, so a client can name them and link straight to their configuration. Empty unless waitingReason is set.
+	BlockingDependencies []string `json:"blockingDependencies,omitempty"`
+
 	// Budgets The run's budget counters as the supervisor wrote them out. Read-model bookkeeping — the loop counts its own budgets and never reads these back.
 	Budgets   RunBudgets `json:"budgets"`
 	CreatedAt time.Time  `json:"createdAt"`
@@ -1378,6 +1422,9 @@ type MilestoneRunView struct {
 
 	// Validation The run's validation outcome. The verdict is a RUN property, not a per-issue one, and this is where the deployment surface reads it.
 	Validation RunValidation `json:"validation"`
+
+	// WaitingReason Why a `waiting` run is waiting. Empty for the ordinary between-cycles park, which needs no explanation. `external-values` is the deploy gate — the run is built and ready to deploy, and every remaining blocker is a value only a human can supply. That park is unbounded and only cancellation or the values arriving exits it, so a client that renders `waiting` without this reads a working run as a hung one.
+	WaitingReason MilestoneRunViewWaitingReason `json:"waitingReason,omitempty"`
 }
 
 // MilestoneRunViewKind What this run DOES, and the value every platform predicate is written on. `dev` delivers a version — it plans its own milestone, and is the only kind that takes the one-active-build-per-project mutex. `task` works a defect inside a version already delivered; task runs execute concurrently on their own milestones. `validation` asks a shipped version's acceptance criteria again — it has no working set, builds nothing, and is outside the mutex so it never holds up the next build.
@@ -1388,6 +1435,9 @@ type MilestoneRunViewOrigin string
 
 // MilestoneRunViewState planning is the fill window — the version's milestone is still being written (gates minted, then issues planned in). waiting is the unbounded wait between cycles, where something outside the platform is needed. blocked is terminal and is NOT a failure — the org has no agent concurrency slot left, so the cycle was never launched (see terminalReason agent-quota-blocked).
 type MilestoneRunViewState string
+
+// MilestoneRunViewWaitingReason Why a `waiting` run is waiting. Empty for the ordinary between-cycles park, which needs no explanation. `external-values` is the deploy gate — the run is built and ready to deploy, and every remaining blocker is a value only a human can supply. That park is unbounded and only cancellation or the values arriving exits it, so a client that renders `waiting` without this reads a working run as a hung one.
+type MilestoneRunViewWaitingReason string
 
 // OrgEndpointDTO One Marketplace Endpoint — thin list_org_endpoints item, not the MCP {endpoints:[…]} wrapper.
 type OrgEndpointDTO struct {

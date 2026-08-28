@@ -67,6 +67,12 @@ type Service struct {
 	// composition root (Task 5) so provisioning never imports build/devflow. Nil
 	// is a documented best-effort no-op (logged).
 	providerBuild ProviderBuildTrigger
+	// valuesSaved tells the run supervisor that external values landed, so a run
+	// parked on the deploy gate re-derives readiness instead of waiting out its
+	// poll interval. Wired via SetValuesSavedNotifier at the composition root —
+	// it points at delivery/run, so a setter keeps provisioning from importing
+	// the delivery slice (ADR-0023). Nil is a documented no-op.
+	valuesSaved ValuesSavedNotifier
 
 	// roles is the build-time roles ensure. Optional: nil (or a disabled one)
 	// skips the roles gate, which is what a stack with no identity provider
@@ -88,6 +94,10 @@ func (s *Service) SetOrgPublishMarker(m OrgPublishMarker) { s.orgPublish = m }
 // SetProviderBuildTrigger wires the provider-build kick used by the automated
 // org-service visibility flow. Nil is a documented best-effort no-op (logged).
 func (s *Service) SetProviderBuildTrigger(t ProviderBuildTrigger) { s.providerBuild = t }
+
+// SetValuesSavedNotifier wires the wake-up a run parked on the deploy gate
+// listens for. Nil is a documented no-op — the run's wait-poll still re-derives.
+func (s *Service) SetValuesSavedNotifier(n ValuesSavedNotifier) { s.valuesSaved = n }
 
 // Deps is the provisioning service's collaborator set. projects / access /
 // providers may be nil (a nil projects skips the cross-project consumer scan;

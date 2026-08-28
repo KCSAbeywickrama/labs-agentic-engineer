@@ -42,6 +42,7 @@ import { useBuilds } from "../api/queries";
 import { useTicker } from "../hooks/useTicker";
 import { runStamp } from "../lib/format";
 import {
+  isAwaitingValues,
   isDurationOpen,
   ledgerDuration,
   ledgerStatus,
@@ -63,7 +64,7 @@ type DeployStage = components["schemas"]["DeployStage"];
 
 const STATUS_FILTERS = [
   { value: "all", label: "All statuses" },
-  { value: "running", label: "Running" },
+  { value: "running", label: "In progress" },
   { value: "completed", label: "Completed" },
   { value: "failed", label: "Failed" },
 ] as const;
@@ -87,7 +88,12 @@ function matchesFilter(
   const status = ledgerStatus(build, deploy);
   switch (filter) {
     case "running":
-      return status.live;
+      // A version parked at the deploy gate is not live — its row is quiet on
+      // purpose — but it IS an unfinished version, and it belongs to the filter
+      // for those. Without this clause it would match no filter at all and
+      // vanish from every view but "All statuses", which is the one version the
+      // reader most needs to find.
+      return status.live || isAwaitingValues(build);
     case "failed":
       return status.tone === "error";
     case "completed":
@@ -233,7 +239,7 @@ export function BuildsLedger({ projectName }: { projectName: string }) {
         <EmptyState
           compact
           bordered
-          description={`No ${filter} builds. Clear the filter to see every version.`}
+          description={`No ${(STATUS_FILTERS.find((o) => o.value === filter)?.label ?? filter).toLowerCase()} builds. Clear the filter to see every version.`}
           action={<Button onClick={() => setFilter("all")}>Clear filter</Button>}
         />
       ) : (
