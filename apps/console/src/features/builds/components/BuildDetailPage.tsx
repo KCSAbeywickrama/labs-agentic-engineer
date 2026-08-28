@@ -166,11 +166,10 @@ export function BuildDetailPage({
   }
 
   const status = ledgerStatus(build, projectStatus.data?.deploy);
-  // The deploy gate's park (ADR-0023). `BuildSummary` carries no waiting
-  // reason, so `ledgerStatus` cannot see it and the pill would read "Running ·
-  // Coding agent" on a run that stopped and is waiting on a person. This page
-  // has already read the run, so it can say the true thing without costing the
-  // ledger a request per row.
+  // The deploy gate's park (ADR-0023), read from the RUN. `ledgerStatus`
+  // already knows a parked version is parked — `BuildSummary.waitingReason`
+  // carries it — but only the run names the dependencies the notice below
+  // lists, and this page has already made that read.
   const park = externalValuesPark(current);
 
   return (
@@ -249,7 +248,13 @@ export function BuildDetailPage({
             request, so it reads before them. */}
         <ExternalResources projectName={projectName} />
 
-        <AgentLogSection projectName={projectName} runId={current?.id} live={live} />
+        {/* A parked run has no agent working, so the log is not streaming —
+            `live` comes off the ledger status, which cannot see the park. */}
+        <AgentLogSection
+          projectName={projectName}
+          runId={current?.id}
+          live={live && park === null}
+        />
 
         <BuildLogsSection projectName={projectName} tag={tag} cycleId={current?.cycles?.at(-1)?.id} />
       </Stack>

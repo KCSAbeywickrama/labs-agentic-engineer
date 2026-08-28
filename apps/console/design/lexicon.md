@@ -228,8 +228,14 @@ scoped to one version.
 
 Decided in [ADR-0023](../../../docs/decisions/ADR-0023-external-dependency-values-are-a-deploy-gate.md).
 The values an external dependency needs are no longer asked for in front of the
-Build button; they are supplied on the version's own build page, as a section
-sitting directly under Tasks.
+Build button; they are supplied on a version's build page, as a section sitting
+directly under Tasks.
+
+The PAGE is version-scoped; the VALUES are not. They belong to the project and
+the environment, so every version's page shows the same answer, and a value
+supplied on one releases whichever run is parked on it. Copy here must not imply
+otherwise — "this version's credentials" would promise a per-version answer the
+platform does not have.
 
 | | |
 |---|---|
@@ -265,12 +271,13 @@ and they must agree.
 **"with nothing to restart" is the load-bearing half.** Without it the reader
 goes looking for a Build or Retry button that would start a second run.
 
-**The ledger row says `Running · Coding agent` on a parked version, and that is
-a known gap rather than a choice.** `BuildSummary` carries no waiting reason, and
-the only way to learn one is a run read per row — the exact cost ADR-0021 §6
-exists to avoid. The build page has already made that read, so it is the page
-that corrects the pill. Closing the gap needs a member on `BuildSummary.status`,
-the same shape of change the missing `Queued` needs.
+**The ledger row says `Waiting for values` too, and it is the same words as the
+pill.** `BuildSummary` carries the waiting reason, which is what separates a
+parked version from a running one — both are `in_progress` — and it costs the
+ledger nothing: the run row it is built from already holds it. The row also goes
+QUIET, no tint and no pulse: those mean "the moving thing", and a park is the
+opposite. The dependency NAMES stay on the build page, where the run read that
+carries them is already being made and there is room to list them.
 
 ## The project overview
 

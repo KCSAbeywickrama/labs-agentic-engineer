@@ -226,6 +226,7 @@ func toBuildList(l BuildList) gen.BuildList {
 			Status:          gen.BuildSummaryStatus(b.Status),
 			Reason:          b.Reason,
 			StartedAt:       b.StartedAt,
+			WaitingReason:   gen.BuildSummaryWaitingReason(b.WaitingReason),
 		}
 		s.CompletedAt = b.CompletedAt // nil while running — omitted on the wire
 		builds = append(builds, s)

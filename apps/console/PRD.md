@@ -112,7 +112,8 @@ here: they're the open `console` + `feature` issues.
 - Builds, rebuilt as a version ledger — **one row per version** (milestone,
   status, duration, start), and the now-first run story it
   replaced moves to its own page at `/builds/$tag`: a summary card, then Tasks,
-  the coding-agent log and the build logs as collapsible sections. Provisioning
+  External resources, the coding-agent log and the build logs as collapsible
+  sections. Provisioning
   gates render as **task rows** rather than a separate stage, each with its own
   way out, which is what retires the stage rail. A task row's five states are
   DERIVED — `derivedStatus` is two-valued, so blocked / in-progress / in-review

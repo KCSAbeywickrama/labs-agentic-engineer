@@ -121,6 +121,21 @@ func (e BuildSummaryStatus) Valid() bool {
 	}
 }
 
+// Defines values for BuildSummaryWaitingReason.
+const (
+	BuildSummaryWaitingReasonExternalValues BuildSummaryWaitingReason = "external-values"
+)
+
+// Valid indicates whether the value is a known member of the BuildSummaryWaitingReason enum.
+func (e BuildSummaryWaitingReason) Valid() bool {
+	switch e {
+	case BuildSummaryWaitingReasonExternalValues:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DeployStageValidation.
 const (
 	DeployStageValidationAwaitingFix  DeployStageValidation = "awaiting-fix"
@@ -276,13 +291,13 @@ func (e MilestoneRunViewState) Valid() bool {
 
 // Defines values for MilestoneRunViewWaitingReason.
 const (
-	ExternalValues MilestoneRunViewWaitingReason = "external-values"
+	MilestoneRunViewWaitingReasonExternalValues MilestoneRunViewWaitingReason = "external-values"
 )
 
 // Valid indicates whether the value is a known member of the MilestoneRunViewWaitingReason enum.
 func (e MilestoneRunViewWaitingReason) Valid() bool {
 	switch e {
-	case ExternalValues:
+	case MilestoneRunViewWaitingReasonExternalValues:
 		return true
 	default:
 		return false
@@ -950,10 +965,16 @@ type BuildSummary struct {
 	StartedAt time.Time          `json:"startedAt"`
 	Status    BuildSummaryStatus `json:"status"`
 	Tag       string             `json:"tag"`
+
+	// WaitingReason Why an in-progress version is waiting rather than moving. Empty for the ordinary between-cycles park, which needs no explanation. `external-values` is the deploy gate — the run is built and ready to deploy, and every remaining blocker is a value only a human can supply. It is carried here so a ledger row can say the version is waiting on the reader instead of reading as a run an agent is still working; the dependency NAMES stay on MilestoneRunView, where the run read that has them is already being made.
+	WaitingReason BuildSummaryWaitingReason `json:"waitingReason,omitempty"`
 }
 
 // BuildSummaryStatus defines model for BuildSummary.Status.
 type BuildSummaryStatus string
+
+// BuildSummaryWaitingReason Why an in-progress version is waiting rather than moving. Empty for the ordinary between-cycles park, which needs no explanation. `external-values` is the deploy gate — the run is built and ready to deploy, and every remaining blocker is a value only a human can supply. It is carried here so a ledger row can say the version is waiting on the reader instead of reading as a run an agent is still working; the dependency NAMES stay on MilestoneRunView, where the run read that has them is already being made.
+type BuildSummaryWaitingReason string
 
 // ClientSecretOutputBody defines model for ClientSecretOutputBody.
 type ClientSecretOutputBody struct {

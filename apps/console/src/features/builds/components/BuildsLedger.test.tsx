@@ -150,7 +150,7 @@ describe("BuildsLedger", () => {
     renderLedger();
 
     fireEvent.mouseDown(screen.getByRole("combobox", { name: /status/i }));
-    fireEvent.click(screen.getByRole("option", { name: "Running" }));
+    fireEvent.click(screen.getByRole("option", { name: "In progress" }));
 
     expect(screen.getByText("Deploying to development")).toBeTruthy();
     expect(screen.queryByText("Built")).toBeNull();
@@ -249,6 +249,34 @@ describe("BuildsLedger", () => {
 
     fireEvent.click(screen.getByText("Clear filter"));
     expect(screen.getByText("v2")).toBeTruthy();
+  });
+
+  it("says a parked version waits on the READER, and lets its row go quiet", () => {
+    // ADR-0023's deploy gate. `status` is `in_progress` for a parked run as
+    // much as a running one, so the row used to say "Running · Coding agent"
+    // on a run that had stopped and was waiting on this reader.
+    mockBuilds = [build({ tag: "v2", status: "in_progress", waitingReason: "external-values" })];
+    renderLedger();
+
+    expect(screen.getByText("Waiting for values")).toBeTruthy();
+    expect(screen.queryByText("Running · Coding agent")).toBeNull();
+  });
+
+  it("keeps a parked version under the In progress filter", () => {
+    // It is not live, so it fails the liveness test the filter used to be —
+    // and would then have matched NO filter and vanished from every view but
+    // "All statuses", which is the version the reader most needs to find.
+    mockBuilds = [
+      build({ tag: "v2", status: "in_progress", waitingReason: "external-values" }),
+      build({ tag: "v1" }),
+    ];
+    renderLedger();
+
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: /status/i }));
+    fireEvent.click(screen.getByRole("option", { name: "In progress" }));
+
+    expect(screen.getByText("Waiting for values")).toBeTruthy();
+    expect(screen.queryByText("Built")).toBeNull();
   });
 
   it("teaches what a build is when there are none, and routes to the spec", () => {
