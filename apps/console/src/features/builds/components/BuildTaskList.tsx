@@ -29,7 +29,6 @@ import {
 import {
   ArrowUpRight,
   Box as BoxIcon,
-  ChevronRight,
   CircleAlert,
   CircleCheck,
   CircleDashed,
@@ -259,9 +258,9 @@ export function BuildTaskRow({
               {settledAt ? runStamp(settledAt) : chip.label}
             </Typography>
           )}
-          {state !== "blocked" && (
-            <ChevronRight size={15} aria-hidden style={{ opacity: 0.5 }} />
-          )}
+          {/* No chevron: it promised the whole ROW navigates, and only the
+              title does. An affordance that does nothing is worse than none —
+              the title is the link, and it looks like one. */}
         </Stack>
       </Stack>
 
