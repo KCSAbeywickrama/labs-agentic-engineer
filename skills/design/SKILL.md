@@ -62,9 +62,9 @@ files that step is about to produce, and call it again each time the plan grows
 set, so the list arriving in waves is the real shape of the work, not a failure
 to plan. Restating a path you already declared is harmless.
 
-It does not end your turn: declare, then write. Say in prose what you are doing
-as you go, too — *"drawing the architecture"*, *"writing the design for the
-expense portal"* — so the two surfaces agree about what is happening.
+It does not end your turn: declare, then write. The declaration and the
+artifacts appearing as you write them are what keep the user informed — you do
+not need to narrate your progress alongside them.
 
 ## The lineup
 

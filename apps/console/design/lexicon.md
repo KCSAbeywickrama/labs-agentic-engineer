@@ -614,6 +614,14 @@ the component set everything else hangs off.
 | artifact rail | **structure** — what, and how far |
 | editor | **the artifact** — content, streaming |
 
+**The chat does not echo the rail.** Progress prose — *"drawing the
+architecture"*, *"now the component designs"* — was tried during #576 and
+removed: watching the artifacts appear as they are written already tells the
+user what is happening, so a line announcing each step restates the rail in
+words and reads as filler. The chat speaks when it has something the other two
+surfaces cannot carry — a decision, a question, a failure — and is otherwise
+free to stay quiet while it works.
+
 The chat panel is the spine and **never collapses itself**; only the user closes it. But it stops
 pointing at a form that already owns the screen, and its composer stays live during a form — the
 agent is waiting on the user, not working, and the user may want to talk instead of fill.
