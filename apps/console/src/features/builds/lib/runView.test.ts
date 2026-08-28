@@ -98,6 +98,15 @@ describe("mergedCycle / hasMergedWork", () => {
     expect(mergedCycle([newer, older])?.id).toBe("old-merge");
   });
 
+  it("prefers the NEWER RUN's merge when both runs merged something", () => {
+    // The precedence rule itself. The two cases either side of this one pass
+    // just as happily if the scan runs oldest-first: one has no merge in the
+    // newer run, the other has both merges inside a single run.
+    const newer = run({ id: "newer", cycles: [cycle({ id: "new-merge", mergeSha: "bbb" })] });
+    const older = run({ id: "older", cycles: [cycle({ id: "old-merge", mergeSha: "aaa" })] });
+    expect(mergedCycle([newer, older])?.id).toBe("new-merge");
+  });
+
   it("prefers the newest merge when several cycles merged", () => {
     const r = run({
       cycles: [cycle({ id: "first", mergeSha: "aaa" }), cycle({ id: "second", mergeSha: "bbb" })],

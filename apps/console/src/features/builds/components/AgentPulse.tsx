@@ -29,6 +29,13 @@ import { Stack, Typography } from "@wso2/oxygen-ui";
  * `design-system.md` forbids hex literals. The colour comes from the parent's
  * `info.main`, so it holds in both themes.
  *
+ * The trace is a CSS animation rather than the handoff's SMIL `<animate>`, so
+ * it can be switched off under `prefers-reduced-motion` the way every other
+ * moving thing in the console is (StageRow, RunGlanceStrip). SMIL does not
+ * answer to that query at all — it would have run regardless of the setting.
+ * Reduced motion drops the dash pattern entirely, which draws the complete
+ * line: the indicator still reads as a pulse trace, it just holds still.
+ *
  * A PLAIN `<svg>`, not a `Box component="svg"`: MUI's system consumes `width`
  * and `height` as style props, so on a Box they never reach the element as SVG
  * attributes and the trace rendered at 81x27 instead of the design's 42x14.
@@ -40,7 +47,27 @@ export function AgentPulse({ label = "agent working" }: { label?: string }) {
       spacing={0.875}
       // flexShrink 0 + nowrap: in a crowded header row the label otherwise
       // wraps onto two lines and squeezes the trace against it.
-      sx={{ alignItems: "center", color: "info.main", flexShrink: 0 }}
+      sx={{
+        alignItems: "center",
+        color: "info.main",
+        flexShrink: 0,
+        "@keyframes agentPulseTrace": {
+          from: { strokeDashoffset: 74 },
+          to: { strokeDashoffset: 0 },
+        },
+        "& polyline": {
+          strokeDasharray: "14 60",
+          strokeDashoffset: 74,
+          animation: "agentPulseTrace 1.6s linear infinite",
+        },
+        "@media (prefers-reduced-motion: reduce)": {
+          "& polyline": {
+            animation: "none",
+            strokeDasharray: "none",
+            strokeDashoffset: 0,
+          },
+        },
+      }}
     >
       <svg
         width="42"
@@ -56,16 +83,7 @@ export function AgentPulse({ label = "agent working" }: { label?: string }) {
           strokeWidth="1.6"
           strokeLinecap="round"
           strokeLinejoin="round"
-          strokeDasharray="14 60"
-        >
-          <animate
-            attributeName="stroke-dashoffset"
-            from="74"
-            to="0"
-            dur="1.6s"
-            repeatCount="indefinite"
-          />
-        </polyline>
+        />
       </svg>
       <Typography
         variant="caption"

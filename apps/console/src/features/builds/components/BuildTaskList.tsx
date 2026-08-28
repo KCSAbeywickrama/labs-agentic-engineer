@@ -99,6 +99,12 @@ function StateTile({ state }: { state: TaskRowState }) {
         ...(state === "in_progress" && {
           "@keyframes taskSpin": { to: { transform: "rotate(360deg)" } },
           "& svg": { animation: "taskSpin 1s linear infinite" },
+          // Same guard the rest of the console's motion carries. The icon is
+          // a state tile first and an animation second, so holding it still
+          // costs the reader nothing.
+          "@media (prefers-reduced-motion: reduce)": {
+            "& svg": { animation: "none" },
+          },
         }),
       }}
     >
