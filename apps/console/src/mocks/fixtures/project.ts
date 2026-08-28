@@ -560,16 +560,6 @@ const v3Tasks: TaskView[] = [
         url: `${BOARD_URL}/120#issuecomment-1`,
       },
     ],
-    executions: {
-      coding: {
-        id: "exec-120",
-        kind: "coding",
-        status: "succeeded",
-        createdAt: minutesAgo(46),
-        startedAt: minutesAgo(45),
-        endedAt: minutesAgo(31),
-      },
-    },
   }),
   v3Task(121, "Re-order a past order", "merged", {
     component: "orders-api",
@@ -582,16 +572,6 @@ const v3Tasks: TaskView[] = [
         url: `${BOARD_URL}/121#issuecomment-1`,
       },
     ],
-    executions: {
-      coding: {
-        id: "exec-121",
-        kind: "coding",
-        status: "succeeded",
-        createdAt: minutesAgo(30),
-        startedAt: minutesAgo(29),
-        endedAt: minutesAgo(20),
-      },
-    },
   }),
   v3Task(122, "Returns request with a reason code", "merged", {
     component: "orders-api",
@@ -604,16 +584,6 @@ const v3Tasks: TaskView[] = [
         url: `${BOARD_URL}/122#issuecomment-1`,
       },
     ],
-    executions: {
-      coding: {
-        id: "exec-122",
-        kind: "coding",
-        status: "succeeded",
-        createdAt: minutesAgo(19),
-        startedAt: minutesAgo(19),
-        endedAt: minutesAgo(12),
-      },
-    },
   }),
   // The one the agent is on right now — a running execution and a comment, so
   // the row tints, counts up, and carries its shimmer.
@@ -628,15 +598,6 @@ const v3Tasks: TaskView[] = [
         url: `${BOARD_URL}/123#issuecomment-1`,
       },
     ],
-    executions: {
-      coding: {
-        id: "exec-123",
-        kind: "coding",
-        status: "running",
-        createdAt: minutesAgo(7),
-        startedAt: minutesAgo(6),
-      },
-    },
   }),
   // Finished executing but still open: the pull request is up and waiting on a
   // human. Derived, not a platform state — see taskRow.ts.
@@ -651,16 +612,6 @@ const v3Tasks: TaskView[] = [
         url: `${BOARD_URL}/124#issuecomment-1`,
       },
     ],
-    executions: {
-      coding: {
-        id: "exec-124",
-        kind: "coding",
-        status: "succeeded",
-        createdAt: minutesAgo(15),
-        startedAt: minutesAgo(15),
-        endedAt: minutesAgo(9),
-      },
-    },
   }),
   v3Task(125, "Returns dashboard for support staff", "pending", {
     component: "storefront",
@@ -1024,6 +975,21 @@ export function buildRunsForTag(
         ? failedRun
         : settledRun;
 
+  // The OPEN build session claims this version's first still-open coding task.
+  // Without a claim the console can only PRESUME the session works every open
+  // issue (ADR-0015 §4's weaker strength), which paints the whole list as in
+  // progress — true of the fixture, but not what a real run looks like, and it
+  // would hide a regression in the claim path.
+  const openClaim = (projectTasks[s] ?? [])
+    .filter(
+      (t) =>
+        t.lineage?.specTag === tag &&
+        t.executorClass === "coding" &&
+        t.derivedStatus !== "merged",
+    )
+    .map((t) => t.issueNumber)
+    .slice(0, 1);
+
   return {
     ...story,
     tag,
@@ -1035,6 +1001,11 @@ export function buildRunsForTag(
       id: `run-${tag}-${i + 1}`,
       milestoneNumber: known.milestoneNumber,
       milestoneTitle: tag,
+      cycles: (run.cycles ?? []).map((cycle) =>
+        !cycle.endedAt && openClaim.length > 0
+          ? { ...cycle, resolves: openClaim }
+          : cycle,
+      ),
     })),
   };
 }

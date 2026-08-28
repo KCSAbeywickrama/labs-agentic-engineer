@@ -18,7 +18,7 @@
 
 import type { StatusTone } from "../../../components/StatusChip";
 import type { components } from "../../../generated/aep-api";
-import { taskRowState } from "./taskRow";
+import { taskRowState, type RunClaims } from "./taskRow";
 
 type BuildSummary = components["schemas"]["BuildSummary"];
 type TaskView = components["schemas"]["TaskView"];
@@ -118,7 +118,7 @@ export interface TaskCounts {
  * attributed to versions at all, and the Builds ledger has no Tasks column
  * because of it. This runs on the build page, where the read is tag-scoped.
  */
-export function countTasks(tasks: TaskView[]): TaskCounts {
+export function countTasks(tasks: TaskView[], claims?: RunClaims): TaskCounts {
   const counts: TaskCounts = {
     total: tasks.length,
     done: 0,
@@ -128,7 +128,7 @@ export function countTasks(tasks: TaskView[]): TaskCounts {
     pending: 0,
   };
   for (const task of tasks) {
-    switch (taskRowState(task)) {
+    switch (taskRowState(task, claims)) {
       case "done":
         counts.done += 1;
         break;

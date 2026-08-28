@@ -60,7 +60,7 @@ import {
   milestoneLabel,
   taskBreakdown,
 } from "../lib/ledger";
-import { anyTaskRunning, taskTally } from "../lib/taskRow";
+import { anyTaskRunning, runClaims, taskTally, type RunClaims } from "../lib/taskRow";
 import { isDeliveryRun } from "../lib/runView";
 import { BuildTaskList } from "./BuildTaskList";
 import { CycleBuilds } from "./CycleBuilds";
@@ -104,6 +104,10 @@ export function BuildDetailPage({
   // The deploy aggregate names which version reached an environment; the
   // project layout already polls it, so this is served from cache.
   const projectStatus = useProjectStatus(projectName);
+  // Agent progress lives on the RUN, not on the task: aep-api leaves
+  // `TaskView.executions` empty for agent work ("its pull request lives on the
+  // run's cycle record instead"). Without this every open task read `Pending`.
+  const claims = runClaims(current?.cycles);
 
   const backTo = {
     link: <Link to="/projects/$projectName/builds" params={{ projectName }} />,
@@ -182,13 +186,14 @@ export function BuildDetailPage({
           projectName={projectName}
           build={build}
           tasks={tasks}
+          claims={claims}
           {...(projectStatus.data?.deploy ? { deploy: projectStatus.data.deploy } : {})}
         />
 
         <LogSection
           title="Tasks"
           disablePadding
-          meta={<TasksMeta tasks={tasks} loading={issues.isPending} />}
+          meta={<TasksMeta tasks={tasks} claims={claims} loading={issues.isPending} />}
           actions={
             <LinkButton
               size="small"
@@ -224,7 +229,7 @@ export function BuildDetailPage({
               description="This build has no tasks yet — they appear as the milestone is planned."
             />
           ) : (
-            <BuildTaskList projectName={projectName} tasks={tasks} />
+            <BuildTaskList projectName={projectName} tasks={tasks} claims={claims} />
           )}
         </LogSection>
 
@@ -238,13 +243,15 @@ export function BuildDetailPage({
 
 function TasksMeta({
   tasks,
+  claims,
   loading,
 }: {
   tasks: components["schemas"]["TaskView"][];
+  claims: RunClaims;
   loading: boolean;
 }) {
   if (loading) return null;
-  const tally = taskTally(tasks);
+  const tally = taskTally(tasks, claims);
   const parts = [`${tally.total} in this build`, `${tally.done} done`];
   if (tally.attention > 0) parts.push(`${tally.attention} need your attention`);
   return (
@@ -258,7 +265,7 @@ function TasksMeta({
       </Typography>
       {/* The pulse is keyed on a task actually executing, NOT on the run being
           open — a settled build must not look like it is still working. */}
-      {anyTaskRunning(tasks) && (
+      {anyTaskRunning(tasks, claims) && (
         <StatusChip label="agent working" tone="info" appearance="soft" dot />
       )}
     </Stack>
@@ -269,18 +276,20 @@ function BuildSummaryCard({
   projectName,
   build,
   tasks,
+  claims,
   deploy,
 }: {
   projectName: string;
   build: BuildSummary;
   tasks: components["schemas"]["TaskView"][];
+  claims: RunClaims;
   deploy?: components["schemas"]["DeployStage"] | undefined;
 }) {
   const live = isLedgerLive(build);
   const duration = buildDuration(build.startedAt, build.completedAt);
   // Derived from the tasks this page already holds — the same TAG-SCOPED read
   // the Tasks section below renders.
-  const breakdown = taskBreakdown(countTasks(tasks));
+  const breakdown = taskBreakdown(countTasks(tasks, claims));
 
   const cells: Array<{ label: string; value: React.ReactNode }> = [
     { label: "Milestone", value: milestoneLabel(build) },

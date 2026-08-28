@@ -46,6 +46,7 @@ import {
   taskRowNote,
   taskRowState,
   taskSettledAt,
+  type RunClaims,
   type TaskRowState,
 } from "../lib/taskRow";
 
@@ -123,14 +124,18 @@ function ComponentChip({ task }: { task: TaskView }) {
 export function BuildTaskRow({
   projectName,
   task,
+  claims,
 }: {
   projectName: string;
   task: TaskView;
+  /** What the RUN says about this version's work — the only source of agent
+   *  progress, since `TaskView.executions` is empty for agent work. */
+  claims?: RunClaims | undefined;
 }) {
-  const state = taskRowState(task);
+  const state = taskRowState(task, claims);
   const chip = taskRowChip(state);
   const note = taskRowNote(task);
-  const elapsedFrom = taskElapsedFrom(task);
+  const elapsedFrom = taskElapsedFrom(task, claims);
   const settledAt = taskSettledAt(task);
 
   const tint =
@@ -277,14 +282,21 @@ export function BuildTaskRow({
 export function BuildTaskList({
   projectName,
   tasks,
+  claims,
 }: {
   projectName: string;
   tasks: TaskView[];
+  claims?: RunClaims | undefined;
 }) {
   return (
     <Box>
       {tasks.map((task) => (
-        <BuildTaskRow key={task.issueNumber} projectName={projectName} task={task} />
+        <BuildTaskRow
+          key={task.issueNumber}
+          projectName={projectName}
+          task={task}
+          {...(claims ? { claims } : {})}
+        />
       ))}
     </Box>
   );

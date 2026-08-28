@@ -22,6 +22,49 @@ import type { components } from "../../../generated/aep-api";
 type TaskView = components["schemas"]["TaskView"];
 type ExecutionView = components["schemas"]["ExecutionView"];
 type IssueComment = components["schemas"]["IssueComment"];
+type RunCycleView = components["schemas"]["RunCycleView"];
+
+/**
+ * What the RUN says about the version's work, which is the only place agent
+ * progress lives.
+ *
+ * `TaskView.executions` is empty for agent work by design — aep-api's
+ * `reads.go` states it: *"A dispatch gate's provisioning run still keeps an
+ * execution row; agent work has none — its pull request lives on the run's
+ * cycle record instead."* Deriving a coding task's state from executions
+ * therefore leaves EVERY open one reading `Pending`, however hard the agent is
+ * working. This is that fix.
+ */
+export interface RunClaims {
+  /** Issue numbers the run's still-open build session recorded (`resolves`). */
+  claimed: ReadonlySet<number>;
+  /** A live session with no recorded claims yet — presume it works the open
+   *  issues. Never set once claims exist: a recorded set outranks a guess. */
+  presumeOpenWork: boolean;
+  /** The open session's pull request, when it has opened one. */
+  openCyclePr: number | undefined;
+  /** When the open session started, for the row's elapsed time. */
+  openCycleStartedAt: string | undefined;
+}
+
+/** Read the run's open build session. Mirrors `openCycleClaims` (ADR-0015 §4). */
+export function runClaims(cycles: RunCycleView[] | undefined): RunClaims {
+  const open = (cycles ?? []).find((cycle) => !cycle.endedAt);
+  const claimed = new Set(open?.resolves ?? []);
+  return {
+    claimed,
+    presumeOpenWork: Boolean(open) && claimed.size === 0,
+    openCyclePr: open?.prNumber,
+    openCycleStartedAt: open?.createdAt,
+  };
+}
+
+const NO_CLAIMS: RunClaims = {
+  claimed: new Set<number>(),
+  presumeOpenWork: false,
+  openCyclePr: undefined,
+  openCycleStartedAt: undefined,
+};
 
 /**
  * The state a task row renders in (design arrangement 2b, ADR-0021 §3).
@@ -54,27 +97,34 @@ export function latestExecution(task: TaskView): ExecutionView | undefined {
   );
 }
 
-export function taskRowState(task: TaskView): TaskRowState {
+export function taskRowState(
+  task: TaskView,
+  claims: RunClaims = NO_CLAIMS,
+): TaskRowState {
   // Closed is closed: a merged pull request is what closes a task, so nothing
   // below can override it.
   if (task.derivedStatus === "merged") return "done";
 
-  // A hold is what the reader has to act on, so it outranks whatever the agent
-  // was doing when it hit the dependency.
+  // A hold is what the reader has to act on, so it outranks whatever was
+  // happening when the dependency was hit.
   if (task.hold || (task.blockedBy && task.blockedBy.length > 0)) {
     return "blocked";
   }
 
+  // A GATE keeps an execution row, and it is the honest source for one.
   const execution = latestExecution(task);
   if (execution && !execution.endedAt && RUNNING_EXECUTION.test(execution.status)) {
     return "in_progress";
   }
 
-  // The agent finished and the issue is still open — the pull request is up and
-  // waiting on a human. This is a derivation, not a platform state: there is no
-  // ready-for-review field on the contract, and "the work ended but nothing
-  // merged" is the only honest reading of that pair.
-  if (execution?.endedAt) return "in_review";
+  // AGENT WORK has no execution — the run's open build session is what knows.
+  // A recorded claim is a FACT; the presumption covers the stretch before the
+  // pull request exists (ADR-0015 §4, kept in force by ADR-0021 §3).
+  if (claims.claimed.has(task.issueNumber)) {
+    // Its pull request is open and nothing has merged it: waiting on a human.
+    return claims.openCyclePr ? "in_review" : "in_progress";
+  }
+  if (claims.presumeOpenWork) return "in_progress";
 
   return "pending";
 }
@@ -146,11 +196,20 @@ export function taskRowNote(task: TaskView): string | null {
  * a queued execution has no `endedAt` either, so testing only for that made a
  * row `taskRowState` calls `pending` render a counting-up elapsed time.
  */
-export function taskElapsedFrom(task: TaskView): string | null {
+export function taskElapsedFrom(
+  task: TaskView,
+  claims: RunClaims = NO_CLAIMS,
+): string | null {
   const execution = latestExecution(task);
-  if (!execution || execution.endedAt) return null;
-  if (!RUNNING_EXECUTION.test(execution.status)) return null;
-  return execution.startedAt ?? execution.createdAt;
+  if (execution && !execution.endedAt && RUNNING_EXECUTION.test(execution.status)) {
+    return execution.startedAt ?? execution.createdAt;
+  }
+  // Agent work counts from when its build session started — there is no
+  // per-task start to count from, and the session's is the honest stand-in.
+  if (execution) return null;
+  return taskRowState(task, claims) === "in_progress"
+    ? (claims.openCycleStartedAt ?? null)
+    : null;
 }
 
 /** The stamp a settled row shows on its right — when it finished. */
@@ -170,11 +229,11 @@ export interface TaskTally {
  * attention". Attention is blocked plus in-review — both are waiting on the
  * reader, which is what makes them one number rather than two.
  */
-export function taskTally(tasks: TaskView[]): TaskTally {
+export function taskTally(tasks: TaskView[], claims: RunClaims = NO_CLAIMS): TaskTally {
   let done = 0;
   let attention = 0;
   for (const task of tasks) {
-    const state = taskRowState(task);
+    const state = taskRowState(task, claims);
     if (state === "done") done += 1;
     if (state === "blocked" || state === "in_review") attention += 1;
   }
@@ -182,6 +241,9 @@ export function taskTally(tasks: TaskView[]): TaskTally {
 }
 
 /** Is any task in this build being worked right now? Drives the header pulse. */
-export function anyTaskRunning(tasks: TaskView[]): boolean {
-  return tasks.some((t) => taskRowState(t) === "in_progress");
+export function anyTaskRunning(
+  tasks: TaskView[],
+  claims: RunClaims = NO_CLAIMS,
+): boolean {
+  return tasks.some((t) => taskRowState(t, claims) === "in_progress");
 }

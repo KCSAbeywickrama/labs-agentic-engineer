@@ -21,6 +21,7 @@ import type { components } from "../../../generated/aep-api";
 import {
   anyTaskRunning,
   latestComment,
+  runClaims,
   latestExecution,
   taskElapsedFrom,
   taskRowChip,
@@ -88,12 +89,17 @@ describe("taskRowState", () => {
     }
   });
 
-  it("reads a finished execution on an open issue as awaiting review", () => {
+  it("does not invent review from a finished execution", () => {
+    // An earlier version read "the execution ended and the issue is still open"
+    // as awaiting review. That heuristic existed because agent progress was
+    // being read off executions at all — which it cannot be, since agent work
+    // has none. Review is now the run's own signal: a claimed task whose build
+    // session has opened its pull request.
     expect(
       taskRowState(
         task({ executions: { a: exec({ endedAt: "2026-07-12T05:02:00Z" }) } }),
       ),
-    ).toBe("in_review");
+    ).toBe("pending");
   });
 
   it("is pending when nothing has run", () => {
@@ -104,6 +110,70 @@ describe("taskRowState", () => {
     expect(
       taskRowState(task({ executions: { a: exec({ status: "queued" }) } })),
     ).toBe("pending");
+  });
+});
+
+describe("runClaims — agent progress comes from the RUN, not the task", () => {
+  const cycle = (over: Partial<components["schemas"]["RunCycleView"]> = {}) => ({
+    id: "c1",
+    kind: "coding",
+    attempts: 1,
+    createdAt: "2026-07-12T04:46:00Z",
+    ...over,
+  }) as components["schemas"]["RunCycleView"];
+
+  it("reads the OPEN session's recorded claims", () => {
+    const c = runClaims([cycle({ resolves: [121, 122] })]);
+    expect([...c.claimed]).toEqual([121, 122]);
+    expect(c.presumeOpenWork).toBe(false);
+  });
+
+  it("ignores a CLOSED session — its merge already closed those issues", () => {
+    const c = runClaims([cycle({ resolves: [121], endedAt: "2026-07-12T05:02:00Z" })]);
+    expect(c.claimed.size).toBe(0);
+    expect(c.presumeOpenWork).toBe(false);
+  });
+
+  it("presumes open work only before the session records anything", () => {
+    expect(runClaims([cycle()]).presumeOpenWork).toBe(true);
+    expect(runClaims([cycle({ resolves: [121] })]).presumeOpenWork).toBe(false);
+    expect(runClaims([]).presumeOpenWork).toBe(false);
+    expect(runClaims(undefined).presumeOpenWork).toBe(false);
+  });
+
+  it("puts a CLAIMED task in progress — not Pending", () => {
+    // The bug this fixes: agent work has no execution row, so every open task
+    // fell through to `pending` however hard the agent was working.
+    const claims = runClaims([cycle({ resolves: [121] })]);
+    expect(taskRowState(task({ issueNumber: 121 }), claims)).toBe("in_progress");
+    expect(taskRowState(task({ issueNumber: 121 }))).toBe("pending"); // without the run
+  });
+
+  it("moves a claimed task to review once its pull request is open", () => {
+    const claims = runClaims([cycle({ resolves: [121], prNumber: 7 })]);
+    expect(taskRowState(task({ issueNumber: 121 }), claims)).toBe("in_review");
+  });
+
+  it("presumes the open issues are being worked before any claim", () => {
+    const claims = runClaims([cycle()]);
+    expect(taskRowState(task({ issueNumber: 999 }), claims)).toBe("in_progress");
+  });
+
+  it("never overrides closed or blocked", () => {
+    const claims = runClaims([cycle({ resolves: [121] })]);
+    expect(taskRowState(task({ issueNumber: 121, derivedStatus: "merged" }), claims)).toBe("done");
+    expect(taskRowState(task({ issueNumber: 121, hold: true }), claims)).toBe("blocked");
+  });
+
+  it("counts elapsed time from the session that claimed it", () => {
+    const claims = runClaims([cycle({ resolves: [121] })]);
+    expect(taskElapsedFrom(task({ issueNumber: 121 }), claims)).toBe("2026-07-12T04:46:00Z");
+  });
+
+  it("still prefers a GATE's own execution row, which agent work lacks", () => {
+    const gate = task({ issueNumber: 8, executorClass: "provision", executions: { p: exec() } });
+    expect(taskRowState(gate)).toBe("in_progress");
+    expect(taskElapsedFrom(gate)).toBe("2026-07-12T04:46:00Z");
   });
 });
 
@@ -231,14 +301,28 @@ describe("taskElapsedFrom / taskSettledAt", () => {
 
 describe("taskTally", () => {
   it("counts done, and folds blocked and in-review into one attention number", () => {
-    const tally = taskTally([
-      task({ derivedStatus: "merged" }),
-      task({ derivedStatus: "merged" }),
-      task({ hold: true }),
-      task({ executions: { a: exec({ endedAt: "2026-07-12T05:02:00Z" }) } }),
-      task({ executions: { a: exec() } }),
-      task(),
+    // in-review now comes from the run: a claimed task whose session has a PR.
+    const claims = runClaims([
+      {
+        id: "c1",
+        kind: "coding",
+        attempts: 1,
+        createdAt: "2026-07-12T04:46:00Z",
+        resolves: [55],
+        prNumber: 7,
+      } as components["schemas"]["RunCycleView"],
     ]);
+    const tally = taskTally(
+      [
+        task({ issueNumber: 1, derivedStatus: "merged" }),
+        task({ issueNumber: 2, derivedStatus: "merged" }),
+        task({ issueNumber: 3, hold: true }),
+        task({ issueNumber: 55 }), // claimed + PR open -> in review
+        task({ issueNumber: 4, executorClass: "provision", executions: { a: exec() } }),
+        task({ issueNumber: 5 }),
+      ],
+      claims,
+    );
     expect(tally).toEqual({ total: 6, done: 2, attention: 2 });
   });
 
