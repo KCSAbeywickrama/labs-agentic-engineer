@@ -101,10 +101,11 @@ function settleFromTurnStatus(
   turnId: string,
   status: { status?: string; message?: string } | null | undefined,
   onCommitted?: () => void,
+  askedQuestion = false,
 ): boolean {
   if (status?.status === "completed") {
     setTurnStatus(chatKey, turnId, "completed");
-    planTurnEnded(chatKey, turnId, "completed");
+    planTurnEnded(chatKey, turnId, "completed", askedQuestion);
     notifyTurnEnd(chatKey, "completed");
     onCommitted?.();
     return true;
@@ -138,6 +139,10 @@ export async function attachAndFoldTurn(
   onCommitted?: () => void,
 ): Promise<void> {
   let sawTerminal = false;
+  // Did this turn put a question to the user? A turn that ends on a question
+  // has not finished its work — the answer's turn carries it on — so the plan
+  // is paused rather than dissolved (#576).
+  let askedQuestion = false;
   // Per tool call: accumulate its streamed input args so the path can be read as
   // soon as it closes (path is the first schema property), then show a "Creating
   // <file>" card BEFORE the tool finishes. Keyed by the input-stream id (== the
@@ -305,6 +310,7 @@ export async function attachAndFoldTurn(
         // (individually-validated questions) is finalized as the card; with no
         // prefix, no card (the agent's prose still carries it).
         if (!isQuestionTool(part.toolName)) break;
+        askedQuestion = true;
         const questions = parseQuestionsInput(part.toolName!, part.input);
         if (!questions) {
           finalizeStreamingQuestions();
@@ -350,7 +356,7 @@ export async function attachAndFoldTurn(
       case "turn-committed":
         sawTerminal = true;
         setTurnStatus(chatKey, turnId, "completed");
-        planTurnEnded(chatKey, turnId, "completed");
+        planTurnEnded(chatKey, turnId, "completed", askedQuestion);
         // Turn-end flush (#252 Task 5): the terminal frame is the signal the
         // chat panel's fallback + the spec view's deterministic room flush
         // both react to (see chatStore's turn-end bus + useTurnEndFlush).
@@ -390,7 +396,7 @@ export async function attachAndFoldTurn(
         }
         // Turn may already be terminal on another replica — settle via getTurn.
         const status = await getTurn(projectName, turnId);
-        if (settleFromTurnStatus(chatKey, turnId, status, onCommitted)) {
+        if (settleFromTurnStatus(chatKey, turnId, status, onCommitted, askedQuestion)) {
           return;
         }
         await sleep(attachBackoffMs(attempt), signal);
@@ -414,5 +420,5 @@ export async function attachAndFoldTurn(
   // (and is itself a "terminal frame arrived" for turn-end purposes: the
   // fallback poll IS how this turn's end is observed here).
   const status = await getTurn(projectName, turnId);
-  settleFromTurnStatus(chatKey, turnId, status, onCommitted);
+  settleFromTurnStatus(chatKey, turnId, status, onCommitted, askedQuestion);
 }

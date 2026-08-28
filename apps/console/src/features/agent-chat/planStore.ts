@@ -29,7 +29,7 @@
 // the error, the remaining ghosts) persists until the next declaring turn
 // replaces it, because the wreckage IS the case for updating the design.
 
-import { DECLARE_PLAN_TOOL } from "@aep/agent-stream";
+import { ANSWER_PREFIX, ANSWERS_PREFIX, DECLARE_PLAN_TOOL } from "@aep/agent-stream";
 
 export type PlanEntryStatus = "planned" | "writing" | "done" | "error";
 
@@ -40,6 +40,31 @@ export type PlanEntryStatus = "planned" | "writing" | "done" | "error";
  * green would record a deleted file as written.
  */
 export const WRITE_TOOLS: ReadonlySet<string> = new Set(["addFile", "editFile"]);
+
+/** The HITL tools whose call ends a turn waiting on the user (ADR-0012). */
+const QUESTION_TOOLS: ReadonlySet<string> = new Set(["ask_question", "ask_questions"]);
+
+/**
+ * Is this user message an ANSWER to the agent's question rather than a fresh
+ * instruction? Answers travel as plain text carrying the shared markers the
+ * wire contract publishes for exactly this purpose.
+ */
+function isAnswer(content: unknown): boolean {
+  const text =
+    typeof content === "string"
+      ? content
+      : Array.isArray(content)
+        ? content
+            .map((p) =>
+              typeof p === "object" && p !== null && (p as { type?: string }).type === "text"
+                ? ((p as { text?: string }).text ?? "")
+                : "",
+            )
+            .join("")
+        : "";
+  const head = text.trimStart();
+  return head.startsWith(ANSWER_PREFIX) || head.startsWith(ANSWERS_PREFIX);
+}
 
 export interface PlanEntry {
   /** Full repo-relative spec-bundle path — the reconciliation identity. */
@@ -60,6 +85,13 @@ export interface PlanSnapshot {
   writingPath: string | null;
   /** False once the turn reached a terminal. */
   turnActive: boolean;
+  /**
+   * The turn ended by ASKING, not by finishing: the agent put a question to
+   * the user partway through the work and is waiting on the answer. The plan
+   * survives that gap — the answer's turn carries the same work on — so a
+   * pause is neither a completion nor a failure.
+   */
+  paused: boolean;
   /** The turn died leaving undone entries — the rail keeps the residue. */
   wreckage: boolean;
 }
@@ -81,7 +113,14 @@ function commit(chatKey: string, next: PlanSnapshot): void {
 }
 
 function fresh(turnId: string): PlanSnapshot {
-  return { turnId, entries: [], writingPath: null, turnActive: true, wreckage: false };
+  return {
+    turnId,
+    entries: [],
+    writingPath: null,
+    turnActive: true,
+    paused: false,
+    wreckage: false,
+  };
 }
 
 /**
@@ -92,6 +131,13 @@ function fresh(turnId: string): PlanSnapshot {
 function forTurn(chatKey: string, turnId: string): PlanSnapshot {
   const cur = plans.get(chatKey);
   if (cur && cur.turnId === turnId) return cur;
+  // A PAUSED plan is adopted by the turn that resumes it, rather than thrown
+  // away. A design run that asks a question mid-flight continues in the answer's
+  // turn — same work, new turn id — and starting fresh there would drop the
+  // plan and its progress at the exact moment the user came back to it.
+  if (cur?.paused) {
+    return { ...cur, turnId, turnActive: true, paused: false };
+  }
   return fresh(turnId);
 }
 
@@ -172,10 +218,17 @@ export function planTurnEnded(
   chatKey: string,
   turnId: string,
   status: "completed" | "failed",
+  awaitingAnswer = false,
 ): void {
   const plan = plans.get(chatKey);
   if (!plan || plan.turnId !== turnId) return;
   if (status === "completed") {
+    // Ended by asking, with work still outstanding: hold the plan for the turn
+    // that answers. Not wreckage — nothing failed — so no alarm is raised.
+    if (awaitingAnswer && plan.entries.some((e) => e.status !== "done")) {
+      commit(chatKey, { ...plan, turnActive: false, paused: true, writingPath: null });
+      return;
+    }
     plans.delete(chatKey);
     notify(chatKey);
     return;
@@ -189,7 +242,14 @@ export function planTurnEnded(
     notify(chatKey);
     return;
   }
-  commit(chatKey, { ...plan, entries, writingPath: null, turnActive: false, wreckage });
+  commit(chatKey, {
+    ...plan,
+    entries,
+    writingPath: null,
+    turnActive: false,
+    paused: false,
+    wreckage,
+  });
 }
 
 export function peekPlan(chatKey: string): PlanSnapshot | null {
@@ -248,13 +308,29 @@ export function rehydratePlanFromHistory(
     entries: PlanEntry[];
     known: Set<string>;
     declared: boolean;
+    /** The work put a question to the user and has not been answered since. */
+    awaitingAnswer: boolean;
   }
-  const newTurn = (): TurnAcc => ({ entries: [], known: new Set(), declared: false });
+  const newTurn = (): TurnAcc => ({
+    entries: [],
+    known: new Set(),
+    declared: false,
+    awaitingAnswer: false,
+  });
 
   // One accumulator per turn; a user message opens the next one.
   const turns: TurnAcc[] = [newTurn()];
   for (const message of history) {
     if (message.role === "user") {
+      // An ANSWER is not a new piece of work — it is the other half of a
+      // question the agent asked mid-flight, and the writing continues in the
+      // turn it opens. Breaking the accumulation here severed a design run's
+      // declaration from the files written after the pause, leaving permanent
+      // ghosts over documents that exist.
+      if (isAnswer(message.content)) {
+        turns[turns.length - 1]!.awaitingAnswer = false;
+        continue;
+      }
       turns.push(newTurn());
       continue;
     }
@@ -271,6 +347,8 @@ export function rehydratePlanFromHistory(
           turn.known.add(path);
           turn.entries.push({ path, status: "planned" });
         }
+      } else if (QUESTION_TOOLS.has(part.toolName ?? "")) {
+        turn.awaitingAnswer = true;
       } else if (WRITE_TOOLS.has(part.toolName ?? "")) {
         const path = (part.input as { path?: unknown } | null | undefined)?.path;
         const entry =
@@ -283,8 +361,12 @@ export function rehydratePlanFromHistory(
   }
 
   const record = turns.filter((t) => t.declared).at(-1);
-  const wreckage = record !== undefined && record.entries.some((e) => e.status !== "done");
-  if (!wreckage) {
+  const unfinished = record !== undefined && record.entries.some((e) => e.status !== "done");
+  // Outstanding work with a question still open is PAUSED, not wrecked: the
+  // agent is waiting on the user, and reloading the page must not turn that
+  // into "the design run didn\'t finish".
+  const wreckage = unfinished && !(record?.awaitingAnswer ?? false);
+  if (!unfinished) {
     if (current) {
       plans.delete(chatKey);
       notify(chatKey);
@@ -293,10 +375,11 @@ export function rehydratePlanFromHistory(
   }
   plans.set(chatKey, {
     turnId: "history",
-    entries: record.entries,
+    entries: record!.entries,
     writingPath: null,
     turnActive: false,
-    wreckage: true,
+    paused: !wreckage,
+    wreckage,
   });
   notify(chatKey);
 }

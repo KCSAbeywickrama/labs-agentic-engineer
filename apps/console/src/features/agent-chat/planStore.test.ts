@@ -55,6 +55,37 @@ describe("planDeclared — union, no removal", () => {
   });
 });
 
+describe("a question mid-flight pauses the plan rather than ending it", () => {
+  it("holds the plan for the answering turn, and that turn adopts it", () => {
+    planDeclared(KEY, "t1", [CELL, OVERVIEW]);
+    planFileWriting(KEY, "t1", CELL);
+    planFileDone(KEY, "t1", CELL);
+    // The agent asks; the turn ends without finishing the work.
+    planTurnEnded(KEY, "t1", "completed", true);
+    const paused = peekPlan(KEY);
+    expect(paused?.paused).toBe(true);
+    expect(paused?.wreckage).toBe(false);
+    expect(paused?.entries).toHaveLength(2);
+
+    // The answer's turn carries the same work on — same entries, new turn.
+    planFileWriting(KEY, "t2", OVERVIEW);
+    const resumed = peekPlan(KEY);
+    expect(resumed?.turnId).toBe("t2");
+    expect(resumed?.entries.map((e) => e.status)).toEqual(["done", "writing"]);
+    planFileDone(KEY, "t2", OVERVIEW);
+    planTurnEnded(KEY, "t2", "completed");
+    expect(peekPlan(KEY)).toBe(null);
+  });
+
+  it("a turn that asks with nothing outstanding still dissolves", () => {
+    planDeclared(KEY, "t1", [CELL]);
+    planFileWriting(KEY, "t1", CELL);
+    planFileDone(KEY, "t1", CELL);
+    planTurnEnded(KEY, "t1", "completed", true);
+    expect(peekPlan(KEY)).toBe(null);
+  });
+});
+
 describe("derived lifecycle", () => {
   it("planned → writing → done follows the mutation stream", () => {
     planDeclared(KEY, "t1", [CELL, OVERVIEW]);
@@ -187,6 +218,50 @@ describe("rehydratePlanFromHistory", () => {
     const plan = peekPlan(KEY);
     expect(plan?.wreckage).toBe(true);
     expect(plan?.entries.map((e) => e.status)).toEqual(["planned", "planned"]);
+  });
+
+  // The reported defect (employees-submit-expense-wer): the agent asked a
+  // question partway through the design, the user answered, and the writing
+  // finished in the turn the answer opened. Treating that answer as a turn
+  // boundary severed the declaration from the five files written after it and
+  // left permanent ghosts over documents that exist.
+  it("an answer continues the work — it does not start a new turn", () => {
+    rehydratePlanFromHistory(KEY, [
+      { role: "user", content: "/design" },
+      { role: "assistant", content: [declareCall([CELL, OVERVIEW, PORTAL])] },
+      { role: "assistant", content: [addCall(CELL)] },
+      { role: "assistant", content: [{ type: "tool-call", toolName: "ask_question", input: {} }] },
+      { role: "user", content: 'Answer to "Which provider?": Stripe' },
+      { role: "assistant", content: [addCall(OVERVIEW)] },
+      { role: "assistant", content: [addCall(PORTAL)] },
+    ]);
+    expect(peekPlan(KEY)).toBe(null);
+  });
+
+  // Reloading while the agent waits on an answer must not read as failure.
+  it("outstanding work with a question still open is paused, not wreckage", () => {
+    rehydratePlanFromHistory(KEY, [
+      { role: "user", content: "/design" },
+      { role: "assistant", content: [declareCall([CELL, OVERVIEW])] },
+      { role: "assistant", content: [addCall(CELL)] },
+      { role: "assistant", content: [{ type: "tool-call", toolName: "ask_question", input: {} }] },
+    ]);
+    const plan = peekPlan(KEY);
+    expect(plan?.wreckage).toBe(false);
+    expect(plan?.paused).toBe(true);
+    expect(plan?.entries.map((e) => e.status)).toEqual(["done", "planned"]);
+  });
+
+  // A genuinely new instruction still starts new work.
+  it("a fresh instruction after a plan does start a new turn", () => {
+    rehydratePlanFromHistory(KEY, [
+      { role: "user", content: "/design" },
+      { role: "assistant", content: [declareCall([CELL, OVERVIEW])] },
+      { role: "assistant", content: [addCall(CELL)] },
+      { role: "user", content: "actually, add an audit log" },
+      { role: "assistant", content: [addCall(OVERVIEW)] },
+    ]);
+    expect(peekPlan(KEY)?.wreckage).toBe(true);
   });
 
   // A deletion is not a write — the live fold ignores removeFile for the same
