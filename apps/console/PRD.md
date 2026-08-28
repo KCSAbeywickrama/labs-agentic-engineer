@@ -73,9 +73,9 @@ Approved at section level; per-section detail is defined feature-by-feature.
   (ADR-0010; no back-item, home is the header brand / project switcher):
   - **Overview** — component map + status, deployment state, recent activity.
   - **Spec** — the requirement, derived design + acceptance criteria.
-  - **Builds** — per-version build history: the selected build's summary +
-    its tag-scoped coding-agent task list (Version autocomplete for older
-    tags), per-task console log; PRs and issues link out to GitHub.
+  - **Builds** — the version ledger: one row per version, with its milestone,
+    status, duration and start. A row opens that version's
+    build — summary card, task list, coding-agent log, build logs (ADR-0021).
   - **Deployments** — dev environment state and URLs.
   - **Validations** — the runs checking a build against the spec's acceptance
     criteria.
@@ -90,6 +90,22 @@ which is also what closes its issue. Newest first; links go to the feature's
 GitHub issue plus any ADRs it produced. Features still being built aren't
 here: they're the open `console` + `feature` issues.
 
+- Builds, rebuilt as a version ledger — **one row per version** (milestone,
+  status, duration, start), and the now-first run story it
+  replaced moves to its own page at `/builds/$tag`: a summary card, then Tasks,
+  the coding-agent log and the build logs as collapsible sections. Provisioning
+  gates render as **task rows** rather than a separate stage, each with its own
+  way out, which is what retires the stage rail. A task row's five states are
+  DERIVED — `derivedStatus` is two-valued, so blocked / in-progress / in-review
+  come from `hold`, `blockedBy` and the newest execution — and its second line is
+  the issue's newest comment. `/builds/:issueNumber` and `/tasks/:issueNumber`
+  swap roles so the version can own the `/builds` segment; old links still
+  resolve. **No contract change**: the ledger's remaining cells come from the
+  deploy aggregate the layout already polls. It carries no task counts, because
+  an untagged list-tasks response cannot be attributed to versions and a
+  tag-scoped one would be a GitHub-backed request per row —
+  [#609](https://github.com/wso2/labs-agentic-engineer/issues/609) (ADR-0021,
+  superseding ADR-0015)
 - Resources catalog lives at `/resources` (not Settings). Register an External
   resource through chat that can question then draft the form (secrets stay on
   the form). A new project that needs an already-registered API reuses that

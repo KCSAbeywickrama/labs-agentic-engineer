@@ -157,6 +157,73 @@ raises "do I need to know git?" at the worst moment), **milestone** (platform bo
 changes nothing about this decision — it stays discoverable on the Builds page), **stories in
 scope** ("in scope" is the jargon; the list is right).
 
+## Builds
+
+Decided in [#609](https://github.com/wso2/labs-agentic-engineer/issues/609)
+(ADR-0021). The Builds page is a list now, so its status cells are read side by
+side — which is exactly why each **names the situation, not the state machine**
+(naming rule 6). The qualifier after the middot is the fact the bare state does
+not carry: who is acting, why it failed.
+
+### A version's status, on the Builds ledger
+
+| Situation | Says |
+|---|---|
+| The coding agent is working it | **`Running · Coding agent`** |
+| The run ended badly, and the platform said why | **`Failed · <reason>`** |
+| The run ended badly and left no reason | **`Failed`** |
+| Built, and it is the version running in development | **`Deployed to development`** |
+| Built, and its rollout is under way | **`Deploying to development`** |
+| Built, and its rollout failed | **`Deploy failed`** |
+| Built, everything else | **`Built`** |
+
+**`Built`, never *Completed*.** "Completed" describes the run; the row is about
+the version.
+
+**There is no queued status, and that is a gap rather than a choice.** The
+design drew `Queued · next` for a version waiting its turn, and the platform
+genuinely does run one build at a time — but `BuildSummary.status` has no member
+for it (`started` · `in_progress` · `completed` · `failed`), and a version that
+has not started has no row in the ledger read at all. So a waiting version is
+simply absent until its run begins. Giving it words needs a `queued` member on
+that enum; until then the page says nothing rather than inventing a state.
+
+**Only the deployed version may be described by where it reached.** The platform
+records one deployed version per project, so every other completed version says
+`Built` — saying more would be a guess.
+
+**The Milestone cell reads `Milestone #3`.** The platform records a number, not a
+title. This is the "stays discoverable on the Builds page" the build-confirm
+dialog's copy promises.
+
+### A task's row, on a build
+
+| Situation | Says |
+|---|---|
+| Merged, and the issue closed with it | **`Done`** |
+| Waiting on a dependency someone must configure | **`Blocked`** + **`Configure in Resources`** |
+| The agent is on it now | **`In progress`** + elapsed time |
+| The agent finished, the pull request is waiting on a human | **`Review`** |
+| Nothing has run yet | **`Pending`** |
+
+Counts read **`11 in this build · 5 done · 2 need your attention`**. *Need your
+attention* folds blocked and in-review together deliberately: both are waiting
+on the reader, which is what makes them one number.
+
+The row's second line is the issue's **newest comment by any author**, flattened
+to its first non-empty line. Not "the agent's latest note": the platform's own
+machine comments are already excluded server-side, and what remains — the coding
+agent's progress notes and whatever a human wrote — cannot be told apart by
+author, because the platform comments through the org's own credential and the
+runner is handed that same credential. A task with no comment shows no second
+line at all: eleven rows each reading "No updates yet" is noise, not
+information.
+
+**The ledger has no Tasks column.** A version's task counts cannot be attributed
+from a read that spans versions, and asking per row would be one GitHub-backed
+request each. The breakdown is on the build page, where the read is already
+scoped to one version.
+
 ## The project overview
 
 ### Where project status lives

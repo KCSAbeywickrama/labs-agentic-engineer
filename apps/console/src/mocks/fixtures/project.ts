@@ -36,6 +36,11 @@ export type ProjectScenario =
   | "repo-error"
   | "error";
 
+// The moving version is anchored to NOW, not to a fixed stamp: a live duration
+// counts up against the real clock, so a hardcoded start renders as "1055h 46m"
+// the moment the fixture ages. Dev-only module, so reading the clock is fine.
+const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000).toISOString();
+
 const REPO_URL = "https://github.com/acme-dev/demo-shop";
 const BOARD_URL = "https://github.com/acme-dev/demo-shop/issues";
 
@@ -527,6 +532,158 @@ function task(
   };
 }
 
+// v3's tasks — one per row state the build page can render (ADR-0021 §3, §4),
+// so the design's 2b arrangement is actually demonstrable in mock mode. Scoped
+// to `v3` by lineage, which is what `list-tasks?tag=` filters on.
+function v3Task(
+  issueNumber: number,
+  title: string,
+  derivedStatus: "pending" | "merged",
+  extra: Partial<TaskView> = {},
+): TaskView {
+  return {
+    ...task(issueNumber, title, derivedStatus, "coding"),
+    lineage: { specTag: "v3" },
+    ...extra,
+  };
+}
+
+const v3Tasks: TaskView[] = [
+  v3Task(120, "Order history list for a customer", "merged", {
+    component: "storefront",
+    comments: [
+      {
+        id: "c-120-1",
+        author: "aep-bot",
+        body: "Merged into main · 6 files · 24 tests passing",
+        createdAt: minutesAgo(5),
+        url: `${BOARD_URL}/120#issuecomment-1`,
+      },
+    ],
+    executions: {
+      coding: {
+        id: "exec-120",
+        kind: "coding",
+        status: "succeeded",
+        createdAt: minutesAgo(46),
+        startedAt: minutesAgo(45),
+        endedAt: minutesAgo(31),
+      },
+    },
+  }),
+  v3Task(121, "Re-order a past order", "merged", {
+    component: "orders-api",
+    comments: [
+      {
+        id: "c-121-1",
+        author: "aep-bot",
+        body: "Merged into main · 3 files",
+        createdAt: minutesAgo(5),
+        url: `${BOARD_URL}/121#issuecomment-1`,
+      },
+    ],
+    executions: {
+      coding: {
+        id: "exec-121",
+        kind: "coding",
+        status: "succeeded",
+        createdAt: minutesAgo(30),
+        startedAt: minutesAgo(29),
+        endedAt: minutesAgo(20),
+      },
+    },
+  }),
+  v3Task(122, "Returns request with a reason code", "merged", {
+    component: "orders-api",
+    comments: [
+      {
+        id: "c-122-1",
+        author: "aep-bot",
+        body: "Merged into main · 9 files",
+        createdAt: minutesAgo(5),
+        url: `${BOARD_URL}/122#issuecomment-1`,
+      },
+    ],
+    executions: {
+      coding: {
+        id: "exec-122",
+        kind: "coding",
+        status: "succeeded",
+        createdAt: minutesAgo(19),
+        startedAt: minutesAgo(19),
+        endedAt: minutesAgo(12),
+      },
+    },
+  }),
+  // The one the agent is on right now — a running execution and a comment, so
+  // the row tints, counts up, and carries its shimmer.
+  v3Task(123, "Refund a returned order to the original card", "pending", {
+    component: "orders-api",
+    comments: [
+      {
+        id: "c-123-1",
+        author: "aep-bot",
+        body: "Writing tests for the refund path — added the reversal call in payments.go and regenerated the storefront client after the contract check failed once",
+        createdAt: minutesAgo(5),
+        url: `${BOARD_URL}/123#issuecomment-1`,
+      },
+    ],
+    executions: {
+      coding: {
+        id: "exec-123",
+        kind: "coding",
+        status: "running",
+        createdAt: minutesAgo(7),
+        startedAt: minutesAgo(6),
+      },
+    },
+  }),
+  // Finished executing but still open: the pull request is up and waiting on a
+  // human. Derived, not a platform state — see taskRow.ts.
+  v3Task(124, "Email the customer when a return is approved", "pending", {
+    component: "notifier",
+    comments: [
+      {
+        id: "c-124-1",
+        author: "aep-bot",
+        body: "Ready for review — waiting on your approval before it merges",
+        createdAt: minutesAgo(5),
+        url: `${BOARD_URL}/124#issuecomment-1`,
+      },
+    ],
+    executions: {
+      coding: {
+        id: "exec-124",
+        kind: "coding",
+        status: "succeeded",
+        createdAt: minutesAgo(15),
+        startedAt: minutesAgo(15),
+        endedAt: minutesAgo(9),
+      },
+    },
+  }),
+  v3Task(125, "Returns dashboard for support staff", "pending", {
+    component: "storefront",
+  }),
+  // A gate, rendered as a peer of the work it blocks (ADR-0021 §4).
+  {
+    ...task(126, "Connect returns shipping provider", "pending", "provision"),
+    lineage: { specTag: "v3" },
+    component: "Shippo",
+    hold: true,
+    blockedBy: ["Shippo API key"],
+    comments: [
+      {
+        id: "c-126-1",
+        author: "aep-bot",
+        body: "Blocking task #123 — the agent cannot start until this dependency is configured",
+        createdAt: minutesAgo(5),
+        url: `${BOARD_URL}/126#issuecomment-1`,
+      },
+    ],
+  },
+];
+
 // No validation issue here: list-tasks hides it — it is a phase of the run and
 // surfaces with the run's verdict on the deployment surface.
 const buildingTasks: TaskView[] = [
@@ -601,7 +758,7 @@ export const projectTasks: Record<
   fresh: [],
   spec: [],
   "spec-failed": [],
-  building: buildingTasks,
+  building: [...v3Tasks, ...buildingTasks],
   deploying: doneTasks,
   deployed: doneTasks,
   "deploy-failed": doneTasks,
@@ -612,27 +769,45 @@ export const projectTasks: Record<
 // reads (#185): one entry per built spec version, newest first, each carrying
 // the state of the newest milestone run that has worked it.
 const noBuilds: BuildList = { builds: [] };
-const runningV1Build: BuildList = {
+
+// The version ledger (ADR-0021). THREE versions on purpose — one per row state
+// the page can render (running / failed / built-and-deployed) — because the
+// Builds page renders them side by side and a one-row fixture demos none of the
+// comparison the page exists for. Newest first, as the contract promises.
+//
+// Task counts, the milestone title and the commit are deliberately NOT here:
+// `BuildSummary` carries none of them, and the ledger derives what it shows
+// from the list-tasks and project-status reads it already makes. The v3 tasks
+// above are what fill v3's Tasks column.
+const v1Built = {
+  tag: "v1",
+  milestoneNumber: 1,
+  status: "completed" as const,
+  startedAt: "2026-07-10T09:12:00Z",
+  completedAt: "2026-07-10T10:03:00Z",
+};
+
+const runningLedger: BuildList = {
   builds: [
     {
-      tag: "v1",
-      milestoneNumber: 1,
+      tag: "v3",
+      milestoneNumber: 3,
       status: "in_progress",
-      startedAt: "2026-07-10T09:12:00Z",
+      startedAt: minutesAgo(18),
     },
-  ],
-};
-const completedV1Build: BuildList = {
-  builds: [
     {
-      tag: "v1",
-      milestoneNumber: 1,
-      status: "completed",
-      startedAt: "2026-07-10T09:12:00Z",
-      completedAt: "2026-07-10T10:03:00Z",
+      tag: "v2",
+      milestoneNumber: 2,
+      status: "failed",
+      reason: "Merge conflict",
+      startedAt: "2026-07-11T09:31:00Z",
+      completedAt: "2026-07-11T10:12:12Z",
     },
+    v1Built,
   ],
 };
+
+const completedV1Build: BuildList = { builds: [v1Built] };
 
 // Milestone runs backing list-build-runs — the version's whole story: run rows
 // and their cycle records, DB-only on the server. Branch, PR number and merge
@@ -710,6 +885,20 @@ const waitingRun: BuildRunList = {
 // full coverage, so claiming it here would have the tile say "all criteria passed"
 // over a report showing two nobody checked. Every other verdict is one devtools
 // key away: see fixtures/validation.ts.
+// A version whose run ended badly — the ledger's failed row needs a story that
+// agrees with it.
+const failedRun: BuildRunList = {
+  tag: "v1",
+  milestoneNumber: 1,
+  runs: [
+    milestoneRun({
+      state: "failed",
+      terminalReason: "merge-conflict",
+      endedAt: "2026-07-11T10:12:12Z",
+    }),
+  ],
+};
+
 const settledRun: BuildRunList = {
   tag: "v1",
   milestoneNumber: 1,
@@ -803,6 +992,53 @@ const settledRun: BuildRunList = {
   ],
 };
 
+/**
+ * The run story for the version actually being asked for.
+ *
+ * The run fixtures are authored once and shared across scenarios, so every one
+ * of them says `run-v1-1` / milestone 1. Served unchanged, `/builds/v3/runs`
+ * answered an envelope tagged `v3` carrying a run that belongs to v1 — a fixture
+ * that contradicts its own envelope, and exactly the kind of thing that makes a
+ * mock stop being evidence.
+ *
+ * Restamping identity alone was not enough either: the `building` scenario has
+ * v3 running, v2 failed and v1 completed, and handing all three the same
+ * `waitingRun` showed a run still waiting for versions that had finished. The
+ * story is therefore chosen by the BUILD'S OWN STATUS, so the run page and the
+ * ledger row can never disagree about what happened to a version.
+ *
+ * A tag the scenario never built gets an EMPTY run list, which is what the real
+ * server answers for a version it has no runs for.
+ */
+export function buildRunsForTag(
+  s: Exclude<ProjectScenario, "error">,
+  tag: string,
+): BuildRunList {
+  const known = (projectBuilds[s].builds ?? []).find((b) => b.tag === tag);
+  if (!known) return { runs: [], tag, milestoneNumber: 0 };
+
+  const story =
+    known.status === "in_progress" || known.status === "started"
+      ? projectBuildRuns[s]
+      : known.status === "failed"
+        ? failedRun
+        : settledRun;
+
+  return {
+    ...story,
+    tag,
+    milestoneNumber: known.milestoneNumber,
+    // `${tag}-${i}`, not `${tag}-1`: a settled story carries SEVERAL runs, and
+    // giving them one id collapses distinct history rows onto each other.
+    runs: (story.runs ?? []).map((run, i) => ({
+      ...run,
+      id: `run-${tag}-${i + 1}`,
+      milestoneNumber: known.milestoneNumber,
+      milestoneTitle: tag,
+    })),
+  };
+}
+
 export const projectBuildRuns: Record<
   Exclude<ProjectScenario, "error">,
   BuildRunList
@@ -883,7 +1119,7 @@ export const projectBuilds: Record<
   fresh: noBuilds,
   spec: noBuilds,
   "spec-failed": noBuilds,
-  building: runningV1Build,
+  building: runningLedger,
   deploying: completedV1Build,
   deployed: completedV1Build,
   "deploy-failed": completedV1Build,
