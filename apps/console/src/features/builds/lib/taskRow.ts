@@ -220,7 +220,8 @@ export function latestComment(task: TaskView): IssueComment | undefined {
  *
  * A comment body is markdown over an unbounded textarea, and this is one line of
  * a dense row — so it is flattened to its first non-empty line and the row
- * clamps what is left. The full thread is one click away on the task page.
+ * clamps what is left. The full thread is on the issue, which the row's `#N`
+ * chip links to.
  */
 export function taskRowNote(task: TaskView): string | null {
   const comment = latestComment(task);

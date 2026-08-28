@@ -335,3 +335,42 @@ describe("BuildDetailPage — a task row's state", () => {
     expect(screen.queryByText("Pending")).toBeNull();
   });
 });
+
+describe("BuildDetailPage — the task list's order and its links", () => {
+  it("reads ascending by issue number, the order the milestone was planned in", () => {
+    // `list-tasks` promises no order, and GitHub's newest-first default was
+    // showing through: the gates the platform files first sat at the BOTTOM.
+    mockTasks = [task(4), task(3), task(2), task(1)];
+    mockRuns = [run([cycle({})])];
+    renderPage();
+
+    const titles = screen
+      .getAllByTitle(/^Task \d+$/)
+      .map((el) => el.textContent);
+    expect(titles).toEqual(["Task 1", "Task 2", "Task 3", "Task 4"]);
+  });
+
+  it("does not sort the array the counts are derived from", () => {
+    // The same array backs the tally and the header pulse; sorting in place
+    // would reorder them behind their own backs.
+    const given = [task(4), task(3)];
+    mockTasks = given;
+    mockRuns = [run([cycle({})])];
+    renderPage();
+    expect(given.map((t) => t.issueNumber)).toEqual([4, 3]);
+  });
+
+  it("does not link a task title anywhere — that detail view is not used", () => {
+    mockTasks = [task(1)];
+    mockRuns = [run([cycle({})])];
+    renderPage();
+
+    // The title is text. The issue chip is still the way out, and it goes to
+    // GitHub rather than to a console page.
+    expect(screen.queryByRole("link", { name: "Task 1" })).toBeNull();
+    expect(document.querySelectorAll('a[href*="/tasks/"]')).toHaveLength(0);
+    expect(
+      screen.getByRole("link", { name: "#1" }).getAttribute("href"),
+    ).toBe("https://github.com/acme-dev/demo-shop/issues/1");
+  });
+});

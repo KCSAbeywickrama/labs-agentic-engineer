@@ -220,6 +220,17 @@ Counts read **`11 in this build · 5 done · 2 need your attention`**. *Need you
 attention* folds blocked and PR-sent together deliberately: both are waiting
 on the reader, which is what makes them one number.
 
+**A row's title is text, not a link.** The per-task detail page is not a
+destination this surface sends anyone to — the row already carries what that
+page led with (state, the agent's newest note, elapsed time), and the `#4` chip
+goes to the issue itself, on GitHub. A link to a view nobody uses is a dead end
+that looks like a destination.
+
+**Rows read ascending by issue number** — the order the milestone was planned
+in. The gates the platform files first come first, and the work that depends on
+them follows. `list-tasks` promises no order, so GitHub's newest-first default
+was showing through and the list read backwards.
+
 The row's second line is the issue's **newest comment by any author**, flattened
 to its first non-empty line. Not "the agent's latest note": the platform's own
 machine comments are already excluded server-side, and what remains — the coding

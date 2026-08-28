@@ -16,11 +16,11 @@
  * under the License.
  */
 
+import { useMemo } from "react";
 import {
   Box,
   Button,
   Chip,
-  Link as MuiLink,
   Stack,
   Typography,
   alpha,
@@ -54,7 +54,6 @@ type TaskView = components["schemas"]["TaskView"];
 
 // MUI polymorphism does not carry the router's typed `to`/`params`;
 // createLink is the console's established adapter.
-const RouterLink = createLink(MuiLink);
 const LinkButton = createLink(Button);
 
 /**
@@ -124,11 +123,9 @@ function ComponentChip({ task }: { task: TaskView }) {
 }
 
 export function BuildTaskRow({
-  projectName,
   task,
   claims,
 }: {
-  projectName: string;
   task: TaskView;
   /** What the RUN says about this version's work — the only source of agent
    *  progress, since `TaskView.executions` is empty for agent work. */
@@ -167,13 +164,14 @@ export function BuildTaskRow({
 
         <Box sx={{ flex: 1, minWidth: 0 }}>
           <Stack direction="row" spacing={1.25} sx={{ alignItems: "center", minWidth: 0 }}>
-            {/* The title links to the task's own page — the row's destination,
-                and the one the chevron on the right stands for. */}
-            <RouterLink
-              to="/projects/$projectName/tasks/$issueNumber"
-              params={{ projectName, issueNumber: task.issueNumber }}
-              underline="hover"
-              color="text.primary"
+            {/* Plain text, NOT a link. The title used to open the per-task
+                detail page, which this surface no longer sends anyone to: the
+                row already carries what that page led with — state, the agent's
+                latest note, elapsed time — and the issue itself is one chip
+                away. A link to a view nobody uses is a dead end that looks
+                like a destination. */}
+            <Typography
+              component="span"
               sx={{
                 fontSize: "0.90625rem",
                 fontWeight: 500,
@@ -184,7 +182,7 @@ export function BuildTaskRow({
               title={task.title}
             >
               {task.title}
-            </RouterLink>
+            </Typography>
             {/* Straight to GitHub, deliberately NOT to the task page: ADR-0013
                 §5's one surviving idea is that an issue chip means the issue. */}
             <Chip
@@ -280,20 +278,28 @@ export function BuildTaskRow({
 }
 
 export function BuildTaskList({
-  projectName,
   tasks,
   claims,
 }: {
-  projectName: string;
   tasks: TaskView[];
   claims?: RunClaims | undefined;
 }) {
+  // ASCENDING by issue number — the order the milestone was planned in, which
+  // for a task list is its reading order: the gates the platform files first
+  // come first, and the work that depends on them follows. `list-tasks` makes
+  // no ordering promise, so GitHub's newest-first default showed through and
+  // the list read backwards. Copied, never sorted in place: this same array is
+  // what the counts and the header pulse are derived from.
+  const ordered = useMemo(
+    () => [...tasks].sort((a, b) => a.issueNumber - b.issueNumber),
+    [tasks],
+  );
+
   return (
     <Box>
-      {tasks.map((task) => (
+      {ordered.map((task) => (
         <BuildTaskRow
           key={task.issueNumber}
-          projectName={projectName}
           task={task}
           {...(claims ? { claims } : {})}
         />

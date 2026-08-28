@@ -77,6 +77,14 @@ dropdown, reading it, remembering it, and selecting the next one.
    ([#612](https://github.com/wso2/labs-agentic-engineer/issues/612)), flattened
    to its first non-empty line.
 
+   **The row is not a link, and the list reads ascending.** The title used to
+   open the per-task detail page; that page is not a destination this surface
+   sends anyone to any more, and the row already carries what it led with. The
+   `#N` chip remains, and it goes to the issue on GitHub — which is also why
+   nothing was lost. Order is by issue number ascending, the order the milestone
+   was planned in: `list-tasks` promises none, so GitHub's newest-first default
+   showed through and the gates the platform files first sat at the bottom.
+
 6. **The ledger adds NO contract surface. Every cell comes from a read the
    console already makes.** This is the decision that shapes the whole feature:
 

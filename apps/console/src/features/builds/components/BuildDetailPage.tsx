@@ -220,7 +220,7 @@ export function BuildDetailPage({
               description="This build has no tasks yet — they appear as the milestone is planned."
             />
           ) : (
-            <BuildTaskList projectName={projectName} tasks={tasks} claims={claims} />
+            <BuildTaskList tasks={tasks} claims={claims} />
           )}
         </LogSection>
 
