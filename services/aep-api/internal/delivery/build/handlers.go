@@ -28,7 +28,7 @@ import (
 )
 
 // Handler serves the build feature on the strict interface: build-project /
-// list-project-builds plus the dependency-drawer get-build-preflight. Every
+// list-project-builds plus the dependency get-build-preflight. Every
 // operation is org-scoped — the tenant gate bound
 // the token org before these run, and the handlers pass it to the service
 // explicitly.
@@ -111,7 +111,7 @@ func (h *Handler) ListProjectBuilds(ctx context.Context, request gen.ListProject
 	return gen.ListProjectBuilds200JSONResponse(toBuildList(list)), nil
 }
 
-// GetBuildPreflight computes the build dependency-drawer preflight. A nil
+// GetBuildPreflight computes the build dependency preflight. A nil
 // service answers 503, mirroring the retired RegisterPreflight nil guard (the
 // surface exists with the feature unwired).
 func (h *Handler) GetBuildPreflight(ctx context.Context, request gen.GetBuildPreflightRequestObject) (gen.GetBuildPreflightResponseObject, error) {
@@ -256,5 +256,5 @@ func toBuildPreflight(pf BuildPreflight) gen.BuildPreflight {
 			Parameters:   it.Parameters,
 		})
 	}
-	return gen.BuildPreflight{NeedsInput: pf.NeedsInput, Items: items}
+	return gen.BuildPreflight{NeedsInput: pf.NeedsInput, NeedsResolution: pf.NeedsResolution, Items: items}
 }

@@ -39,6 +39,7 @@ import { useBuildRuns, useBuilds } from "../api/queries";
 import { openCycleClaims } from "../lib/milestoneBuckets";
 import { buildCycles, isDeliveryRun, versionIsLive } from "../lib/runView";
 import { EarlierSessions } from "./EarlierSessions";
+import { ExternalResources } from "./ExternalResources";
 import { MilestonePanel } from "./MilestonePanel";
 import { RunHistoryList } from "./RunHistoryList";
 import { RunStory } from "./RunStory";
@@ -285,6 +286,13 @@ export function BuildsPage({
                 card rather than inside it. */}
             <EarlierSessions cycles={earlierSessions} />
             <RunHistoryList runs={earlier} tag={selected.tag} />
+            {/* The credentials the design's external dependencies need. BELOW
+                the run, deliberately: Build is the page's primary action and
+                this is not on its critical path — the coding agent runs while
+                the values are collected, and it is the DEPLOY that waits for
+                them. It sits outside the version story because a project's
+                external values are the project's, not one version's. */}
+            <ExternalResources projectName={projectName} />
           </Stack>
 
           {/* Every view ships loading and error states (api-guidelines #2):

@@ -30,16 +30,11 @@ import { SpecView } from "../features/spec/components/SpecView";
 // `/start` itself at project creation, so the console no longer has a
 // generate-requirements moment to hand across a navigation; the one CTA that
 // still starts an interview seeds the chat directly, from wherever the user is.
-//
-// `?connections=open`: arriving from the Builds page's gate hold banner — a
-// dispatch gate is holding the run and the connection drawer is where its
-// dependency is supplied, so the drawer opens on arrival.
 export const Route = createFileRoute("/projects/$projectName_/spec")({
   validateSearch: (
     search: Record<string, unknown>,
-  ): { generate?: "design"; connections?: "open" } => ({
+  ): { generate?: "design" } => ({
     ...(search.generate === "design" ? { generate: "design" as const } : {}),
-    ...(search.connections === "open" ? { connections: "open" as const } : {}),
   }),
   component: SpecRoute,
 });

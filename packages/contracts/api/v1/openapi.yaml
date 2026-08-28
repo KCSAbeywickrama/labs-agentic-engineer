@@ -3399,9 +3399,19 @@ components:
           type: array
           nullable: true
         needsInput:
+          description: Whether preflight emitted any item at all. Kept as the broad "there is
+            something to show" flag; it does NOT gate Build, because an external dependency's
+            values are collected on the Builds page while the coding agent runs and are enforced
+            at the deploy gate instead.
+          type: boolean
+        needsResolution:
+          description: Whether any emitted item blocks the version cut — a dependency the design
+            itself cannot resolve (ambiguous, unresolved, missing spec, or an org service awaiting
+            access). This is the ONLY flag a client may block Build on.
           type: boolean
       required:
       - needsInput
+      - needsResolution
       - items
       type: object
     BuildRequest:
@@ -4958,6 +4968,21 @@ components:
             empty while the run is non-terminal and on a succeeded run. agent-quota-blocked
             explains state=blocked.
           type: string
+        waitingReason:
+          description: Why a `waiting` run is waiting. Empty for the ordinary between-cycles park,
+            which needs no explanation. `external-values` is the deploy gate — the run is built and
+            ready to deploy, and every remaining blocker is a value only a human can supply. That
+            park is unbounded and only cancellation or the values arriving exits it, so a client
+            that renders `waiting` without this reads a working run as a hung one.
+          enum:
+          - external-values
+          type: string
+        blockingDependencies:
+          description: The external dependency names a `waiting` run is blocked on, so a client can
+            name them and link straight to their configuration. Empty unless waitingReason is set.
+          items:
+            type: string
+          type: array
         validation:
           $ref: '#/components/schemas/RunValidation'
       required:

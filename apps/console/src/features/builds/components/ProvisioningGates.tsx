@@ -23,6 +23,7 @@ import type { components } from "../../../generated/aep-api";
 import { gateSubject } from "../../tasks/lib/issueRows";
 import { gateRows, gatesNeedAction } from "../lib/provisioning";
 import { stageTone, type StageState } from "../lib/stage";
+import { EXTERNAL_RESOURCES_ANCHOR } from "./ExternalResources";
 
 type TaskView = components["schemas"]["TaskView"];
 
@@ -94,16 +95,26 @@ export function ProvisioningGates({
           </Stack>
         ))}
         {needsAction && (
+          // The way out used to be the SPEC page's connections drawer, which is
+          // gone: values are no longer collected in front of the Build button.
+          // Each gate row above already links to its own issue, which is where
+          // the platform side of a stalled gate is discussed; the one thing a
+          // person can actually SUPPLY from the console now lives in this same
+          // page's External resources section, so this is an in-page jump to it.
+          //
+          // The target is the newest version's page and the link carries no
+          // ?tag, which is correct rather than lossy: an OPEN provision gate
+          // belongs to a live run, and a live run is always the newest version.
           <Box>
             <LinkButton
               size="small"
               variant="outlined"
               color={state === "failed" ? "error" : "warning"}
-              to="/projects/$projectName/spec"
+              to="/projects/$projectName/builds"
               params={{ projectName }}
-              search={{ connections: "open" }}
+              hash={EXTERNAL_RESOURCES_ANCHOR}
             >
-              Resolve connections
+              Supply connection values
             </LinkButton>
           </Box>
         )}

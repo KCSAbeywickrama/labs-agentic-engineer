@@ -85,6 +85,7 @@ import { CommittedFileView } from "./CommittedFileView";
 import { useResolveDependencyViaChat } from "../../agent-chat/useResolveDependencyViaChat";
 import type { DependencyResolutionIntent } from "../../projects/lib/dependencyResolutionMessage.js";
 import { useDesignCellChangeCount } from "../collab/useDesignCellChange";
+import { approvalInputsFor } from "../lib/buildInputs";
 import { BuildDependencyDrawer } from "./BuildDependencyDrawer";
 import { SpecFileList } from "./SpecFileList";
 import { CellDiagramPanel } from "./CellDiagramPanel";
@@ -235,7 +236,6 @@ export function SpecView({ projectName }: { projectName: string }) {
   // wants to be, so we auto-select it.
   const search = useSearch({ strict: false }) as {
     generate?: "design";
-    connections?: "open";
   };
   const generate = search.generate;
   const agentInRoom = collab.peers.some((p) => p.kind === "agent");
@@ -247,24 +247,6 @@ export function SpecView({ projectName }: { projectName: string }) {
   useEffect(() => {
     if (generate === "design") setSelection({ kind: "cell-diagram" });
   }, [generate]);
-
-  // `?connections=open` — the Builds page's gate hold banner deep-links here
-  // because the connection drawer is where a held dependency is supplied. The
-  // drawer needs the preflight items, which are otherwise only fetched by a
-  // Build click, so this arrival fetches them itself before opening.
-  const connectionsParam = search.connections;
-  useEffect(() => {
-    if (connectionsParam !== "open") return;
-    let cancelled = false;
-    void preflightRef.current.refetch().then(({ data }) => {
-      if (cancelled) return;
-      setPreflightItems(data?.items ?? []);
-      setDependencyDrawerOpen(true);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [connectionsParam]);
 
   // An architectural chat change updates design.cell (targeted editFile
   // patches, or a removeFile + streamed addFile for a restructure). Navigate
@@ -722,10 +704,14 @@ export function SpecView({ projectName }: { projectName: string }) {
       : "";
 
   // Build (#162, #164): commit the room's live edits FIRST (POST /build tags
-  // HEAD), then check preflight — a project with unresolved dependencies
-  // routes to the drawer instead of building blind; only once preflight says
-  // the project is ready does this trigger the build and go watch progress
-  // on the overview.
+  // HEAD), then check preflight. Only a RESOLUTION blocker — a dependency
+  // whose identity the design cannot settle — routes to the drawer instead of
+  // building: there is nothing to cut a version against until it is named.
+  // Everything else preflight reports rides along: the platform-resource /
+  // org-service approvals go out with the build request, and an external
+  // dependency's config VALUES are collected on the Builds page while the
+  // coding agent runs, then enforced at the deploy gate. So a project that
+  // only needs values goes straight to the cut-version ceremony.
   const onBuild = () => {
     setBuildError(null);
     setBuildPhase("committing");
@@ -751,8 +737,10 @@ export function SpecView({ projectName }: { projectName: string }) {
           );
           return;
         }
-        if (data.needsInput) {
-          setPreflightItems(data.items ?? []);
+        // Stashed on EVERY path, not just the drawer's: runBuild derives the
+        // build request's approval inputs from these items.
+        setPreflightItems(data.items ?? []);
+        if (data.needsResolution) {
           setDependencyDrawerOpen(true);
           return;
         }
@@ -767,7 +755,9 @@ export function SpecView({ projectName }: { projectName: string }) {
     })();
   };
 
-  // The ceremony's confirm: POST the build; a 422 refusal renders as the
+  // The ceremony's confirm: POST the build, carrying the approvals preflight
+  // raised (the platform resources it will provision) — the drawer used to
+  // submit those and no longer opens for them. A 422 refusal renders as the
   // gate checklist, anything else as the plain build error.
   const runBuild = () => {
     setCutDialogOpen(false);
@@ -776,7 +766,7 @@ export function SpecView({ projectName }: { projectName: string }) {
     setBuildPhase("building");
     void (async () => {
       try {
-        await build.mutateAsync({ inputs: [] });
+        await build.mutateAsync({ inputs: approvalInputsFor(preflightItems) });
         void navigate({
           to: "/projects/$projectName",
           params: { projectName },
@@ -798,8 +788,9 @@ export function SpecView({ projectName }: { projectName: string }) {
     })();
   };
 
-  // Drawer Continue (#164): resubmit the build with the resolved dependency
-  // inputs. A clean response closes the drawer and moves on to the overview;
+  // Drawer Continue (#164): resubmit the build with the resolution the drawer
+  // collected (a pasted external spec) plus the same approvals runBuild
+  // sends. A clean response closes the drawer and moves on to the overview;
   // any inputs the BFF/devflow rejects come back as `failures` — surface the
   // reasons and leave the drawer open so the user can fix them and retry.
   const onContinueBuild = async (inputs: BuildInputItem[]) => {

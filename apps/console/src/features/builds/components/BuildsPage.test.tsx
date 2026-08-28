@@ -39,12 +39,14 @@ vi.mock("@tanstack/react-router", () => ({
       to,
       params,
       search,
+      hash,
       children,
       ...rest
     }: {
       to: string;
       params?: Record<string, string>;
       search?: Record<string, string>;
+      hash?: string;
       children?: React.ReactNode;
     }) => {
       const path = Object.entries(params ?? {}).reduce(
@@ -56,7 +58,7 @@ vi.mock("@tanstack/react-router", () => ({
         <Component
           {...rest}
           component="a"
-          href={query ? `${path}?${query}` : path}
+          href={`${path}${query ? `?${query}` : ""}${hash ? `#${hash}` : ""}`}
         >
           {children}
         </Component>
@@ -89,8 +91,33 @@ vi.mock("../../tasks/api/queries", () => ({
 // rather than issuing a second request.
 // The platform records a CLONE url — it carries a `.git` suffix.
 const mockRepoUrl = "https://github.com/acme/demo.git";
+// The external-resources section's two reads. Both are stubbed here rather
+// than in the section's own mocks because the page mounts it for real — that
+// is the only way this test can prove where it sits on the page.
+let mockReadiness:
+  | components["schemas"]["ProjectDependencyReadiness"]
+  | undefined;
 vi.mock("../../projects/api/queries", () => ({
   useProjectStatus: () => ({ data: { repoUrl: mockRepoUrl } }),
+  useProjectDependencyReadiness: () => ({
+    data: mockReadiness,
+    isPending: false,
+    isError: false,
+    error: null,
+    refetch: vi.fn(),
+  }),
+  useSaveConnectionValues: () => ({
+    mutate: vi.fn(),
+    reset: vi.fn(),
+    isPending: false,
+    isError: false,
+    error: null,
+  }),
+}));
+
+let mockDesignDeps: components["schemas"]["ComponentDependencies"][] = [];
+vi.mock("../../spec/api/queries", () => ({
+  useDesignDependencies: () => ({ data: mockDesignDeps, isPending: false }),
 }));
 
 let mockBuilds: BuildSummary[] = [];
@@ -205,6 +232,8 @@ afterEach(() => {
   mockIssues = [];
   mockIssuesError = false;
   mockCycleBuilds = [];
+  mockDesignDeps = [];
+  mockReadiness = undefined;
   cancelState.isPending = false;
   cancelState.isError = false;
   cancelState.error = null;
@@ -921,5 +950,58 @@ describe("BuildsPage — a revalidation is not a build story", () => {
     ).not.toBeInTheDocument();
     // And it is chipped as what it is — the kind label, not a raw enum value.
     expect(screen.getByText(/Revalidation/i)).toBeInTheDocument();
+  });
+});
+
+// Where a person supplies the credentials the design's external dependencies
+// need. It used to be a drawer in front of the Build button; the build no
+// longer waits for it, so it lives here, on the page the user lands on.
+describe("BuildsPage — external resources", () => {
+  const withExternal = () => {
+    mockBuilds = [build("v2", "in_progress")];
+    mockRuns = [run()];
+    mockDesignDeps = [
+      {
+        componentName: "catalog-api",
+        dependencies: [
+          { kind: "external", name: "stripe", config: [{ key: "api_key" }] },
+        ],
+      },
+    ];
+  };
+
+  it("offers the values below the run, not in front of the build", () => {
+    withExternal();
+    mockReadiness = {
+      configured: false,
+      dependencies: [
+        { name: "stripe", state: "unset", missingKeys: ["api_key"] },
+      ],
+    };
+    renderPage();
+
+    expect(screen.getByText("EXTERNAL RESOURCES")).toBeInTheDocument();
+    expect(screen.getByText("1 of 1 need values")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Configure stripe" }),
+    ).toBeInTheDocument();
+
+    // BELOW the run: the run's own story comes first in the column, because
+    // Build is the page's primary action and this is not on its path.
+    const runCard = screen.getByText(/Build session/);
+    const section = screen.getByText("EXTERNAL RESOURCES");
+    expect(
+      runCard.compareDocumentPosition(section) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("says nothing when the design declares no external dependencies", () => {
+    mockBuilds = [build("v2", "in_progress")];
+    mockRuns = [run()];
+    mockReadiness = { configured: true, dependencies: [] };
+    renderPage();
+
+    expect(screen.queryByText("EXTERNAL RESOURCES")).not.toBeInTheDocument();
   });
 });

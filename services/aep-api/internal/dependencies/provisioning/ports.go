@@ -216,6 +216,24 @@ type ProviderBuildTrigger interface {
 	TriggerBuild(ctx context.Context, orgID, projectID string) error
 }
 
+// ValuesSavedNotifier tells the delivery supervisor that an external
+// dependency's values were saved, so a run parked on the deploy gate (ADR-0023)
+// re-derives readiness now instead of waiting out a poll. It is the only thing
+// that can unpark such a run promptly: a value save produces no webhook, and
+// nothing else in the platform observes it.
+//
+// It carries a FACT, not a command — "values landed", never "deploy now". The
+// consumer re-reads readiness for itself, so a save that leaves another
+// dependency unset parks the run straight back, and this port can never be used
+// to open the gate. Declared here so provisioning never imports delivery/run
+// (that would cycle); the app-root adapter bridges it onto the run repository
+// and the supervisor. Nil is a documented no-op — the parked run's own wait-poll
+// backstop still re-derives, so losing the notification costs latency, not
+// correctness.
+type ValuesSavedNotifier interface {
+	ValuesSaved(ctx context.Context, orgID, projectID string) error
+}
+
 // AccessStore is the cross-project access-request tracking table.
 // *repositories.AccessRequestRepository satisfies it.
 type AccessStore interface {

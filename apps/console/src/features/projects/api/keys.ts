@@ -36,4 +36,8 @@ export const projectKeys = {
     [...projectKeys.detail(name), "build-preflight"] as const,
   workloadDependencies: (name: string) =>
     [...projectKeys.detail(name), "workload-dependencies"] as const,
+  // Keyed by environment: value readiness is answered per environment, and dev
+  // readiness must not be served from a production read's cache (or vice versa).
+  dependencyReadiness: (name: string, environment: string) =>
+    [...projectKeys.detail(name), "dependency-readiness", environment] as const,
 };
