@@ -75,7 +75,8 @@ Approved at section level; per-section detail is defined feature-by-feature.
   - **Spec** — the requirement, derived design + acceptance criteria.
   - **Builds** — the version ledger: one row per version, with its milestone,
     status, duration and start. A row opens that version's
-    build — summary card, task list, coding-agent log, build logs (ADR-0021).
+    build — summary card, task list, External resources, coding-agent log,
+    build logs (ADR-0021, ADR-0023).
   - **Deployments** — dev environment state and URLs.
   - **Validations** — the runs checking a build against the spec's acceptance
     criteria.
@@ -90,10 +91,29 @@ which is also what closes its issue. Newest first; links go to the feature's
 GitHub issue plus any ADRs it produced. Features still being built aren't
 here: they're the open `console` + `feature` issues.
 
+- External dependency values are collected on a version's build page, not in
+  front of the Build button — provisioning authors every declared key EMPTY at
+  build time, so the coding agent gets its env vars defined and Build never
+  blocks on a credential nobody reads for another twenty minutes. The values are
+  supplied in an **External resources** section on `/builds/$tag`, a peer of the
+  Tasks list because outstanding values are work a person must do. The milestone
+  run's deploy stage then parks in `waiting` (`external-values`) until every key
+  holds a value; the build page's summary card names the blocking dependencies
+  and points at the section below it, and the run resumes and deploys on its own
+  once the last value is saved. A Registered External is outside the gate — its
+  values live on the org record, which no project surface can clear —
+  [ADR-0023](../../docs/decisions/ADR-0023-external-dependency-values-are-a-deploy-gate.md)
+- Empty states teach *what*, never narrate the *how* — the five flow-narrating
+  empty states (Builds, Deployments, Validations, Components, Recent activity)
+  now say what lives on the page and why it is empty, retiring *published* /
+  *plan* from all of them; Builds, the one surface a user can act on, gains a
+  **Go to the spec** CTA. Wordings live in the lexicon's **Empty states**
+  section — [#577](https://github.com/wso2/labs-agentic-engineer/issues/577)
 - Builds, rebuilt as a version ledger — **one row per version** (milestone,
   status, duration, start), and the now-first run story it
   replaced moves to its own page at `/builds/$tag`: a summary card, then Tasks,
-  the coding-agent log and the build logs as collapsible sections. Provisioning
+  External resources, the coding-agent log and the build logs as collapsible
+  sections. Provisioning
   gates render as **task rows** rather than a separate stage, each with its own
   way out, which is what retires the stage rail. A task row's five states are
   DERIVED — `derivedStatus` is two-valued, so blocked / in-progress / in-review

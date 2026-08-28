@@ -96,6 +96,13 @@ delivery's kernel: shared behaviour belongs in the root the slices import.
 - **Deploy is DRIVEN, never inferred.** Components carry `autoDeploy: false`, so nothing promotes a release
   except a call to `Deploy`. That is what lets the run supervisor place validation after a version is
   genuinely serving — see [ADR-0017](../../../../docs/decisions/ADR-0017-the-platform-owns-deploy.md).
+- **The deploy stage counts USER components only.** Every coding-agent cycle creates a real
+  dev-environment ReleaseBinding owned by the user's project, and that binding wraps a `batch/v1 Job`
+  for which OpenChoreo registers no health check — it reports `Ready=True` over a Job that is still
+  running or has already failed. So the marked (`aep.wso2.com/internal`) ones are excluded in
+  `ListProjectReleaseBindings`, exactly as `ListComponents` excludes the matching Components. Without
+  that, one finished cycle was enough to report a project "deployed" before anything was deployed, and
+  `none` became unreachable for the rest of the project's life.
 - **A converge never re-pins.** `Converge` re-asserts wiring at whatever release is already serving; a user
   editing env vars must not be able to move which release is live. It also skips components with no binding
   yet — writing one with no release pinned produces an object OpenChoreo cannot render. The deploy stage's
@@ -119,10 +126,10 @@ delivery's kernel: shared behaviour belongs in the root the slices import.
   body for a non-service component; build-logs 503s when the observability client is unwired.
 - **The Stage aggregate is one cheap poll (5s active / 30s idle), strict-join.** get-project-status runs
   four sources concurrently — spec from a fetch-free local-mirror snapshot, build from the newest
-  `milestone_runs` row (a version's delivery IS its run), deploy from the project's `development` release
-  bindings, and the newest `agent_turns` row — with no GitHub API, Temporal query, or origin fetch. Any
-  source failure fails the whole read (the console keeps last-good); the one carve-out: a deploy tag
-  missing from the local mirror degrades to a 0 denominator, not a 500.
+  `milestone_runs` row (a version's delivery IS its run), deploy from the project's `development`
+  USER-COMPONENT release bindings, and the newest `agent_turns` row — with no GitHub API, Temporal
+  query, or origin fetch. Any source failure fails the whole read (the console keeps last-good); the
+  one carve-out: a deploy tag missing from the local mirror degrades to a 0 denominator, not a 500.
 - **`spec.agent` is the one spec field git cannot answer.** exists/version/dirty all read committed truth,
   and a turn writes nothing until it lands — so through the whole kickoff (#562), the busiest moment in a
   project's life, git says the project is untouched. The newest turn row says otherwise, and folds to three

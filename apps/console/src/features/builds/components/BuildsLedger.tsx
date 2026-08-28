@@ -32,7 +32,7 @@ import {
   type Theme,
 } from "@wso2/oxygen-ui";
 import { ListChecks } from "@wso2/oxygen-ui-icons-react";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { Link, createLink, useNavigate } from "@tanstack/react-router";
 import { EmptyState } from "../../../components/EmptyState";
 import { PageHeader } from "../../../components/PageHeader";
 import { StatusChip } from "../../../components/StatusChip";
@@ -41,6 +41,7 @@ import { useProjectStatus } from "../../projects/api/queries";
 import { useBuilds } from "../api/queries";
 import { runStamp } from "../lib/format";
 import {
+  isAwaitingValues,
   ledgerDuration,
   ledgerStatus,
   milestoneLabel,
@@ -61,7 +62,7 @@ type DeployStage = components["schemas"]["DeployStage"];
 
 const STATUS_FILTERS = [
   { value: "all", label: "All statuses" },
-  { value: "running", label: "Running" },
+  { value: "running", label: "In progress" },
   { value: "completed", label: "Completed" },
   { value: "failed", label: "Failed" },
 ] as const;
@@ -85,7 +86,12 @@ function matchesFilter(
   const status = ledgerStatus(build, deploy);
   switch (filter) {
     case "running":
-      return status.live;
+      // A version parked at the deploy gate is not live — its row is quiet on
+      // purpose — but it IS an unfinished version, and it belongs to the filter
+      // for those. Without this clause it would match no filter at all and
+      // vanish from every view but "All statuses", which is the one version the
+      // reader most needs to find.
+      return status.live || isAwaitingValues(build);
     case "failed":
       return status.tone === "error";
     case "completed":
@@ -96,6 +102,8 @@ function matchesFilter(
       return true;
   }
 }
+
+const LinkButton = createLink(Button);
 
 const COLUMNS = [
   { key: "version", label: "Version", width: 104 },
@@ -182,7 +190,16 @@ export function BuildsLedger({ projectName }: { projectName: string }) {
         <EmptyState
           icon={<ListChecks size={48} />}
           title="No builds yet"
-          description="Publish your spec and click Build in the spec view to start the first one."
+          description="A build hands your design to coding agents, which write your components and open pull requests."
+          action={
+            <LinkButton
+              variant="contained"
+              to="/projects/$projectName/spec"
+              params={{ projectName }}
+            >
+              Go to the spec
+            </LinkButton>
+          }
         />
       </>
     );
@@ -216,7 +233,7 @@ export function BuildsLedger({ projectName }: { projectName: string }) {
         <EmptyState
           compact
           bordered
-          description={`No ${filter} builds. Clear the filter to see every version.`}
+          description={`No ${(STATUS_FILTERS.find((o) => o.value === filter)?.label ?? filter).toLowerCase()} builds. Clear the filter to see every version.`}
           action={<Button onClick={() => setFilter("all")}>Clear filter</Button>}
         />
       ) : (

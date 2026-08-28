@@ -1,4 +1,4 @@
-# ADR-0020 — External dependencies are provisioned with env var names, not values; real values are a deploy gate
+# ADR-0023 — External dependencies are provisioned with env var names, not values; real values are a deploy gate
 
 [ADR-0004][adr4] made the coding agent the author of every line of a component's
 `workload.yaml`, and [ADR-0013][adr13] split dependency wiring into what is
@@ -105,13 +105,16 @@ the prior silent dispatch-without-secrets path, but it changes what agent runs
 can do. The agent is told the condition explicitly rather than left to infer it
 from empty strings.
 
-**There is an interim window.** The collection change ships before the gate,
-because the gate depends on the readiness signal the collection change
-introduces. In that window auto-deploy is still on and nothing enforces values,
-so an app can deploy to `development` with empty configuration. This is strictly
-weaker than the behaviour being replaced, which at least guaranteed nothing ran
-unconfigured. It is bounded — one environment, and only projects nobody
-configured — and it is accepted deliberately rather than overlooked.
+**A Registered External is outside the gate.** Its values live on the org
+catalog record, not the project binding, and the project-scoped save refuses one
+outright (`values live on the org record`). Naming it as a blocker would
+therefore park the run on something no project surface can clear — a permanent
+deadlock rather than a delay — so the gate excludes it, exactly as build
+preflight already suppresses its collection item ([ADR-0021][adr21]). The cost
+is real and accepted: an org-registered dependency whose *org* record is short a
+value deploys with an empty credential and the gate does not catch it. That
+failure belongs to the org catalog surface, which is the only place it can be
+seen or fixed.
 
 **An external secret with an empty remote reference errors continuously** in the
 secret operator's status for the whole window between build and configuration.
@@ -130,9 +133,10 @@ restarts, cannot arise.
 **Two OpenChoreo behaviours are now load-bearing and are documented nowhere
 official.** That a present-but-empty value renders, and that a binding reaches
 ready with an unresolvable secret. Both were read out of the controller source at
-a pinned version and recorded, with citations, in a design note under the
-`projects` package. A version bump must re-verify them; if either changes, the
-authoring approach changes with it.
+a pinned version and recorded, with citations, in
+[`openchoreo-resource-binding-behavior.md`][ocnote] under the `projects` package.
+A version bump must re-verify them; if either changes, the authoring approach
+changes with it.
 
 **There is no manual deploy.** Deploy is workflow-owned, so until an endpoint
 exists the only way to deploy is to run a milestone. Because a blocked run parks
@@ -165,3 +169,5 @@ without admitting it, and without the explicit act that makes the state legible.
 [adr11]: ADR-0011-milestone-is-the-unit-of-execution.md
 [adr17]: ADR-0017-the-platform-owns-deploy.md
 [adr13]: ADR-0013-derived-wiring-lives-in-the-design.md
+[adr21]: ADR-0021-registered-external-is-marked-on-the-resourcetype.md
+[ocnote]: ../../services/aep-api/internal/projects/design/openchoreo-resource-binding-behavior.md

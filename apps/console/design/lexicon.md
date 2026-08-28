@@ -224,6 +224,61 @@ from a read that spans versions, and asking per row would be one GitHub-backed
 request each. The breakdown is on the build page, where the read is already
 scoped to one version.
 
+### External resources, on a build
+
+Decided in [ADR-0023](../../../docs/decisions/ADR-0023-external-dependency-values-are-a-deploy-gate.md).
+The values an external dependency needs are no longer asked for in front of the
+Build button; they are supplied on a version's build page, as a section sitting
+directly under Tasks.
+
+The PAGE is version-scoped; the VALUES are not. They belong to the project and
+the environment, so every version's page shows the same answer, and a value
+supplied on one releases whichever run is parked on it. Copy here must not imply
+otherwise — "this version's credentials" would promise a per-version answer the
+platform does not have.
+
+| | |
+|---|---|
+| Section title | **External resources** |
+| Its chip, all supplied | **`3 of 3 configured`** |
+| Its chip, some outstanding | **`2 of 3 need values`** |
+| Body, all supplied | *Every external dependency has its development values.* |
+| Body, some outstanding | *The agent builds while you supply these. The version is not deployed until every one of them has its development values.* |
+| A row that has its values | **`Configured`** + **Update values** |
+| A row that does not | **`Needs values`** + **Configure** |
+| After a save | *Values saved — the deployment no longer waits on this one.* |
+
+**`Needs values`, never *Unconfigured* or *Not ready*.** It names what the reader
+must do, not the state machine's word for the row. And *configured* is
+deliberately not *ready*: OpenChoreo reports these bindings `Ready` while every
+key is still empty, so the two words name different facts and must not merge.
+
+### A version parked at the deploy gate
+
+A run held at the deploy gate is **unbounded, and only a person can end it**, so
+`waiting` on its own reads as a hang. The build page says so in three places,
+and they must agree.
+
+| | |
+|---|---|
+| The page's status pill | **`Waiting for values`** |
+| The summary card's notice, naming what it waits on | **`Waiting for values: stripe, sendgrid`** |
+| The same notice when the run named nothing | **`Waiting for external values`** |
+| Its body | *Everything built. This version is not deployed until every external resource holds its development values — add them under External resources below and the run resumes and deploys on its own, with nothing to restart.* |
+| Its button | **Supply values** |
+| The card's rollout line | ***v2** is built and waiting for its external values.* |
+
+**"with nothing to restart" is the load-bearing half.** Without it the reader
+goes looking for a Build or Retry button that would start a second run.
+
+**The ledger row says `Waiting for values` too, and it is the same words as the
+pill.** `BuildSummary` carries the waiting reason, which is what separates a
+parked version from a running one — both are `in_progress` — and it costs the
+ledger nothing: the run row it is built from already holds it. The row also goes
+QUIET, no tint and no pulse: those mean "the moving thing", and a park is the
+opposite. The dependency NAMES stay on the build page, where the run read that
+carries them is already being made and there is room to list them.
+
 ## The project overview
 
 ### Where project status lives
@@ -737,7 +792,8 @@ five surfaces fill themselves.
 |---|---|---|
 | Builds | **No builds yet.** A build hands your design to coding agents, which write your components and open pull requests. | **Go to the spec** |
 | Deployments | **Nothing deployed yet.** Your components run here once they are built — each environment shows what is live and where to reach it. | — |
-| Validations | **Nothing validated yet.** After a build, your software is checked against the **acceptance criteria** in your spec; results appear here. | — |
+| Validations *(never validated)* | **Nothing validated yet.** After a build, your software is checked against the **acceptance criteria** in your spec; results appear here. | — |
+| Validations *(version skipped)* | **This version was not validated** — it has no validation criteria, or it was an incident run, which gets no validation cycle. | — |
 | Components *(overview)* | **No components yet.** Components are the services and apps your design is made of — they appear as agents build them. | — |
 | Recent activity *(overview)* | **No activity yet.** Agents report what they are doing here as they work. | — |
 | Chat | **Hi! I'm your Agent.** This is where we talk through what you're building. Ask about a decision, change what's in scope, or take up anything I marked as assumed. | the composer, plus three suggestions |
@@ -754,6 +810,12 @@ open a conversation **about** the spec.
 The **Validations** wording is load-bearing: renaming the artifact to *Acceptance criteria* while
 the section stayed *Validations* broke the link between the criteria and the runs against them, and
 this sentence is where it is restored.
+
+**Validations has two empty states, and only one narrates.** The page is version-scoped, so a
+version that was skipped — no criteria, or an incident run — is a different fact from a project
+that has never validated. The *version skipped* sentence explains **why** the page is empty
+without saying how to fill it, so it conforms as written
+([#577](https://github.com/wso2/labs-agentic-engineer/issues/577)).
 
 **Retired from these strings**: *published* / *publish the plan* / *the published design* (there is
 no publish step — Build is the act), *plan* (not a term in this file), *AEP*.

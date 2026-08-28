@@ -341,9 +341,10 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
   // dev ("v1") and the validation verdict; the layout already runs this query.
   const status = useProjectStatus(projectName);
   const deploy = status.data?.deploy;
-  // The design's connections, for promotion readiness. Degrades to [] on
-  // error (the hook's own contract), so a failed read renders the story
-  // without a live-configuration line rather than blocking the page.
+  // The design's connections, for promotion readiness. A failed read surfaces
+  // as `isError` at the hook; this page degrades it here — `connectionRows`
+  // maps an absent payload to [], so the story renders without a
+  // live-configuration line rather than blocking the page.
   const dependencies = useDesignDependencies(projectName);
   const connections = useMemo(
     () => connectionRows(dependencies.data),
@@ -439,7 +440,7 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
         {header}
         <EmptyState
           compact
-          description="Nothing to deploy yet — components appear here once the published design produces them, and agents deploy to dev on merge."
+          description="Nothing deployed yet. Your components run here once they are built — each environment shows what is live and where to reach it."
         />
       </>
     );
