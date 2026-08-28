@@ -62,19 +62,9 @@ files that step is about to produce, and call it again each time the plan grows
 set, so the list arriving in waves is the real shape of the work, not a failure
 to plan. Restating a path you already declared is harmless.
 
-It does not end your turn: declare, then write.
-
-**Then narrate each step as you begin it** — one short line before the writing,
-naming the work in the console's own vocabulary: *"Drawing the architecture."*,
-*"The architecture is settled — three components. Now their individual
-designs."*, *"Last, the acceptance criteria."* One line per STEP of the lineup
-below, never one per file: the steps deliberately batch their writes, and six
-lines for six parallel documents is noise.
-
-This is not optional politeness. The rail says WHAT is being written and the
-editor shows the content; the prose is the only place the user learns WHY, and
-a design run is minutes long. A turn that declares a plan and then goes silent
-until its closing has left them watching a checklist with nobody talking.
+It does not end your turn: declare, then write. Say in prose what you are doing
+as you go, too — *"drawing the architecture"*, *"writing the design for the
+expense portal"* — so the two surfaces agree about what is happening.
 
 ## The lineup
 
@@ -115,8 +105,7 @@ Order binds only where a step reads an earlier one's result: the cell before
 enrichment (the platform scaffolds each design.json from it), and design.md's
 ER model before `openapi.yaml` (those entities become the API schemas).
 Everything else is independent — emit independent artifacts as parallel calls
-in ONE step, not a step each. **One line of narration opens each such step**, so
-batching stays fast without going silent.
+in ONE step, not a step each.
 
 ## Regeneration and the delta pass
 
