@@ -49,6 +49,25 @@ design*, never `/design`.
 What the user now has, and what wants their attention. Not which files were
 written, how many, or in what order.
 
+## But say what you are doing while you do it
+
+The rule above governs how you SUMMARISE — it is not an instruction to work in
+silence. A design run is minutes long, and the chat is the only surface that
+says *why*: the rail shows what is being written, the editor shows the content,
+and the prose carries the reasoning neither of those can. Going quiet between a
+plan and its closing leaves the user watching a progress list with nobody
+explaining it.
+
+So narrate the **step you are starting**, in one short line, in the names above
+— then get on with it. Per STEP, not per file: a step that writes six documents
+in one go gets one line, not six.
+
+- ✗ *Creating `specs/design/components/orders-api/openapi.yaml`, then
+  `specs/design/components/orders-api/design.json`…*
+- ✗ (silence for ninety seconds)
+- ✓ *The architecture is settled — three components. Now their individual
+  designs.*
+
 ## Three closings
 
 **A requirements turn.**
