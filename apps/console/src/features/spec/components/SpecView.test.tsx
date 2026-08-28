@@ -40,7 +40,12 @@ import {
   setPendingSeed,
 } from "../../agent-chat/chatStore";
 import { SpecView } from "./SpecView";
-import { clearPlan, planFileWriting } from "../../agent-chat/planStore";
+import {
+  clearPlan,
+  planDeclared,
+  planFileWriting,
+  planTurnEnded,
+} from "../../agent-chat/planStore";
 
 type PreflightItem = components["schemas"]["PreflightItem"];
 type BuildInputItem = components["schemas"]["BuildInputItem"];
@@ -1200,6 +1205,34 @@ describe("SpecView follows the write (#576, ADR-0023)", () => {
     act(() => planFileWriting(chatKey, "t1", "specs/design/design.md"));
     act(() => planFileWriting(chatKey, "t1", CELL));
     expect(screen.queryByTestId("cell-diagram-panel")).not.toBeInTheDocument();
+  });
+
+  // The window ADR-0023 exists to serve: a write is announced when its tool
+  // input resolves a path, but the body reaches the room later — some bodies
+  // stream in as they are typed, a component design.json arrives whole. Without
+  // this the pane met that moment with "Select a file to view its content."
+  it("says the document is on its way while the room has not delivered it", () => {
+    render(<SpecView projectName="proj1" />);
+    act(() => {
+      planDeclared(chatKey, "t1", ["specs/design/components/portal/design.json"]);
+      planFileWriting(chatKey, "t1", "specs/design/components/portal/design.json");
+    });
+    expect(screen.getByText(/Waiting for the agent to write/)).toBeInTheDocument();
+    expect(
+      screen.queryByText("Select a file to view its content."),
+    ).not.toBeInTheDocument();
+  });
+
+  // Once the turn is over, a file that never arrived is a real absence — the
+  // waiting message would claim work that is not happening.
+  it("stops claiming a document is coming once the turn has ended", () => {
+    render(<SpecView projectName="proj1" />);
+    act(() => {
+      planDeclared(chatKey, "t1", ["specs/design/components/portal/design.json"]);
+      planFileWriting(chatKey, "t1", "specs/design/components/portal/design.json");
+      planTurnEnded(chatKey, "t1", "failed");
+    });
+    expect(screen.queryByText(/Waiting for the agent to write/)).not.toBeInTheDocument();
   });
 
   it("a new turn resets to following", () => {

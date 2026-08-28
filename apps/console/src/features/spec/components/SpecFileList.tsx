@@ -57,6 +57,7 @@ import {
   buildDesignSection,
   selectionKey,
   DESIGN_CELL_PATH,
+  ROLES_JSON_PATH,
   SECURITY_MD_PATH,
   type SpecSelection,
 } from "../api/designTree";
@@ -118,7 +119,12 @@ export function SpecFileList({
       sha: "",
       group: e.section === "design" ? ("designs" as const) : (e.section as "requirements" | "validation"),
     }));
-  const allFiles = [...files, ...ghosts];
+  // Merged in PATH order, not appended: a ghost has to sit where its file will
+  // sit, or the row hops up the list the moment the write lands — the visible
+  // re-arrangement holding a place was supposed to prevent. `files` arrives
+  // path-sorted and the group sorts below are stable, so one sort here is
+  // enough for every group.
+  const allFiles = [...files, ...ghosts].sort((a, b) => a.path.localeCompare(b.path));
 
   // The PRD leads, whatever it sorts as. Everything else under Requirements
   // elaborates it — a feature file is depth on a story the PRD defines — and on
@@ -262,7 +268,15 @@ export function SpecFileList({
   ) => {
     const path = statusPath ?? (sel.kind === "file" ? sel.path : undefined);
     const status = path !== undefined ? planByPath.get(path) : undefined;
-    const ghost = status === "planned" && path !== undefined && !committed.has(path);
+    // A row with no document behind it selects nothing, so it is disabled
+    // whatever the plan says about it — an entry the turn DIED on has no file
+    // any more than one it never reached. `writing` is the exception: its
+    // document is arriving, the editor is already following it, and the pane
+    // says so.
+    const ghost =
+      path !== undefined &&
+      !committed.has(path) &&
+      (status === "planned" || status === "error");
     return (
       <ListItemButton
         key={selectionKey(sel)}
@@ -368,7 +382,11 @@ export function SpecFileList({
                 "Security",
                 <ShieldCheck size={16} />,
                 false,
-                SECURITY_MD_PATH,
+                // ONE entry, two files (the prose and the roles): its status is
+                // whichever of them the plan actually names, or the prose by
+                // default. Keyed off only `security.md`, a plan that declared
+                // `roles.json` alone drew a live row over nothing written yet.
+                planByPath.has(ROLES_JSON_PATH) ? ROLES_JSON_PATH : SECURITY_MD_PATH,
               )}
             {design.components.map((c) => {
               const collapsed = collapsedComponents.has(c.name);

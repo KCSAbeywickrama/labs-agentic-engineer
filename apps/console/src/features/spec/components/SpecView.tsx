@@ -53,6 +53,7 @@ import {
   useSpecFiles,
 } from "../api/queries";
 import { PRD_PATH, specGroupOf, toSpecEntry } from "../api/mapping";
+import { fileLabel } from "../api/labels";
 import { computeDependencyUsedBy } from "../lib/dependencyUsedBy";
 import { useCollabSpec } from "../collab/useCollabSpec";
 import { SpecQuestionForm } from "./SpecQuestionForm";
@@ -620,6 +621,22 @@ export function SpecView({ projectName }: { projectName: string }) {
       }),
     [plan],
   );
+  // The selected path when the plan says a document is coming but the room has
+  // not delivered it yet. Any status EXCEPT a failed one counts while the turn
+  // runs: a body only reaches the doc when its write executes (and some bodies
+  // stream in earlier than others), so `done` can lead the room by a beat. Once
+  // the turn ends, a still-missing file is a real absence and the honest
+  // "Select a file" below takes over.
+  const pendingPlanPath =
+    plan?.turnActive &&
+    effectiveSelection.kind === "file" &&
+    !files.some((f) => f.path === effectiveSelection.path) &&
+    plan.entries.some(
+      (e) => e.path === effectiveSelection.path && e.status !== "error",
+    )
+      ? effectiveSelection.path
+      : null;
+
   const railSections = useMemo(
     () =>
       buildRailSections({
@@ -1528,6 +1545,27 @@ export function SpecView({ projectName }: { projectName: string }) {
                     </Typography>
                   </Box>
                 )
+              ) : pendingPlanPath ? (
+                /* Following the write reached this document before the room
+                   did (#576, ADR-0023). A write is announced when its tool
+                   input resolves a path, but only SOME bodies stream into the
+                   doc as they are typed — a component `design.json` arrives
+                   whole, when the call executes. In that window the file is not
+                   in `files` yet, so the pane fell through to "Select a file",
+                   a dead end at the exact moment this feature exists to serve:
+                   watching a new document land. */
+                <Box
+                  sx={{
+                    height: "100%",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <Typography variant="body2" color="text.secondary">
+                    Waiting for the agent to write {fileLabel(pendingPlanPath)}…
+                  </Typography>
+                </Box>
               ) : (
                 /* Files exist but the selection names none of them — a stale
                    manual pick whose file has since gone. The default selection

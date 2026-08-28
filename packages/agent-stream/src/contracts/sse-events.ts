@@ -245,8 +245,12 @@ export function buildAnswersInstruction(
 export const DECLARE_PLAN_TOOL = "declare_plan" as const;
 
 /**
- * The `declare_plan` tool input. WIRE source of truth; drift-guarded against
- * the agents-service Zod schema.
+ * The `declare_plan` tool input. WIRE source of truth.
+ *
+ * NOT yet drift-guarded: the tool is registered — with the Zod schema and the
+ * `Equal<>` assert every other input here carries — when the agents-service
+ * half lands via the handshake. Until then the console renders this shape from
+ * typed mocks and no producer emits it.
  */
 export interface DeclarePlanInput {
   /**

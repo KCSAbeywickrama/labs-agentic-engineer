@@ -272,8 +272,16 @@ export function railSections(input: RailInput): RailSection[] {
     // The wreckage reason (#576 decision 6): a dead turn's undone entries are
     // the case for re-running the flow, surfaced through the same chip+dialog
     // every other attention reason uses. Leads the list — it blocks the most.
+    //
+    // Scoped to the sections a DECLARING flow actually writes. `/design` is the
+    // only flow that declares (a single-document turn's count answers nothing),
+    // and its recovery is the delta pass this action fires. Naming that repair
+    // on Requirements would be wrong twice: it would call a requirements run a
+    // "design run", and its button would re-derive the design FROM the
+    // requirements the dead turn never finished. Requirements ghosts still show
+    // as rows; what they do not get is an action that makes things worse.
     const wreck: SectionReason[] =
-      input.planWreckage && unfinished > 0
+      input.planWreckage && unfinished > 0 && id !== "requirements"
         ? [
             {
               key: "plan-unfinished",

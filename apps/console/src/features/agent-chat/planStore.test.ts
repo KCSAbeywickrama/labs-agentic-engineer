@@ -146,6 +146,65 @@ describe("rehydratePlanFromHistory", () => {
     expect(plan?.entries.map((e) => e.status)).toEqual(["done", "planned"]);
   });
 
+  // The shape a REAL transcript has: the AI SDK appends one assistant message
+  // per step, so the declaration and the writes it predicted are never in the
+  // same message. Read one message at a time, a clean turn rehydrates as
+  // permanent wreckage over files that exist.
+  it("accumulates across the steps of one turn, not within one message", () => {
+    rehydratePlanFromHistory(KEY, [
+      { role: "user", content: "/design" },
+      { role: "assistant", content: [declareCall([CELL, OVERVIEW])] },
+      { role: "assistant", content: [addCall(CELL)] },
+      { role: "assistant", content: [addCall(OVERVIEW)] },
+    ]);
+    expect(peekPlan(KEY)).toBe(null);
+  });
+
+  // Both waves belong to one turn, so both count — reading only the message
+  // that held the LAST declaration would lose wave one's paths entirely.
+  it("unions every wave of a turn, not just the last message to declare", () => {
+    rehydratePlanFromHistory(KEY, [
+      { role: "user", content: "/design" },
+      { role: "assistant", content: [declareCall([CELL])] },
+      { role: "assistant", content: [addCall(CELL)] },
+      { role: "assistant", content: [declareCall([OVERVIEW, PORTAL])] },
+      { role: "assistant", content: [addCall(OVERVIEW)] },
+    ]);
+    const plan = peekPlan(KEY);
+    expect(plan?.entries.map((e) => e.path)).toEqual([CELL, OVERVIEW, PORTAL]);
+    expect(plan?.entries.map((e) => e.status)).toEqual(["done", "done", "planned"]);
+  });
+
+  // A turn boundary is a user message: an earlier turn's writes must not settle
+  // a later turn's ghosts.
+  it("does not let an earlier turn's writes settle the last turn's plan", () => {
+    rehydratePlanFromHistory(KEY, [
+      { role: "user", content: "/design" },
+      { role: "assistant", content: [declareCall([CELL]), addCall(CELL)] },
+      { role: "user", content: "/design again" },
+      { role: "assistant", content: [declareCall([CELL, OVERVIEW])] },
+    ]);
+    const plan = peekPlan(KEY);
+    expect(plan?.wreckage).toBe(true);
+    expect(plan?.entries.map((e) => e.status)).toEqual(["planned", "planned"]);
+  });
+
+  // A deletion is not a write — the live fold ignores removeFile for the same
+  // reason, and the two must agree on the same transcript.
+  it("a removeFile never settles an entry", () => {
+    rehydratePlanFromHistory(KEY, [
+      { role: "user", content: "/design" },
+      {
+        role: "assistant",
+        content: [
+          declareCall([CELL]),
+          { type: "tool-call", toolName: "removeFile", input: { path: CELL } },
+        ],
+      },
+    ]);
+    expect(peekPlan(KEY)?.entries[0]?.status).toBe("planned");
+  });
+
   it("a completed plan projects to nothing — it dissolved", () => {
     planDeclared(KEY, "t1", [CELL]);
     planTurnEnded(KEY, "t1", "failed"); // stale residue a fresh read clears

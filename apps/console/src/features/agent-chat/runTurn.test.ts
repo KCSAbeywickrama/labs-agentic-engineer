@@ -350,6 +350,24 @@ describe("attachAndFoldTurn — declare_plan folds into the plan store (#576)", 
     expect(plan?.entries.map((e) => e.status)).toEqual(["done", "error", "planned"]);
   });
 
+  // A restructure is removeFile + addFile. Following the removal would send the
+  // editor to a document about to vanish, and settling it would tick a deleted
+  // file green — so a removal moves nothing.
+  it("a removeFile neither follows nor settles", async () => {
+    mockReadToolInputPath.mockImplementation(() => CELL);
+    queuedParts = [
+      { type: "tool-call", toolCallId: "p1", toolName: "declare_plan", input: { paths: [CELL] } },
+      { type: "tool-input-start", id: "r1", toolName: "removeFile" },
+      { type: "tool-input-delta", id: "r1", delta: '{"path":"specs/design/design.cell"}' },
+      { type: "tool-input-end", id: "r1" },
+      { type: "turn-failed", message: "died" },
+    ] as StreamPart[];
+    await attachAndFoldTurn(KEY, "proj1", "t1", new AbortController().signal);
+    const plan = peekPlan(KEY);
+    expect(plan?.entries[0]?.status).toBe("planned");
+    expect(plan?.writingPath).toBe(null);
+  });
+
   it("a committed turn dissolves the plan entirely", async () => {
     queuedParts = [
       { type: "tool-call", toolCallId: "p1", toolName: "declare_plan", input: { paths: [CELL] } },

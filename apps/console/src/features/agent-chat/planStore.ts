@@ -33,6 +33,14 @@ import { DECLARE_PLAN_TOOL } from "@aep/agent-stream";
 
 export type PlanEntryStatus = "planned" | "writing" | "done" | "error";
 
+/**
+ * The mutations that WRITE a document, and so move a plan entry along.
+ * `removeFile` is excluded on purpose: a deletion is not a write, following it
+ * would send the editor to a document about to vanish, and ticking its entry
+ * green would record a deleted file as written.
+ */
+export const WRITE_TOOLS: ReadonlySet<string> = new Set(["addFile", "editFile"]);
+
 export interface PlanEntry {
   /** Full repo-relative spec-bundle path — the reconciliation identity. */
   path: string;
@@ -215,13 +223,19 @@ interface HistoryPart {
  * reload for as long as the conversation log does — the same durability the
  * question cards have.
  *
- * The LAST assistant message carrying a `declare_plan` call is the record of
- * the last declaring turn: its declarations union into the plan, its file
- * mutations mark entries done. A record whose plan completed projects to no
- * snapshot at all (the plan dissolved), so only a turn that died short leaves
- * anything here. Skipped entirely while a live fold owns the store — history
- * REPLACES the log around the very moments a turn is running, and the stream
- * is the fresher truth.
+ * Accumulated PER TURN, across every assistant message in it. The AI SDK
+ * appends one assistant message per STEP (`run-turn.ts` pushes the whole of
+ * `result.responseMessages`), so a turn's `declare_plan` lands in the step that
+ * made it and the writes it predicted land in later ones — reading a single
+ * message would find a declaration with no writes beside it and rehydrate a
+ * clean turn as permanent wreckage. A user message opens the next turn, which
+ * is what bounds the accumulation.
+ *
+ * The last turn that declared anything is the record. If its plan completed,
+ * nothing is projected — the plan dissolved — so only a turn that died short
+ * leaves a snapshot here. Skipped entirely while a live fold owns the store:
+ * history REPLACES the log around the very moments a turn is running, and the
+ * stream is the fresher truth.
  */
 export function rehydratePlanFromHistory(
   chatKey: string,
@@ -230,43 +244,46 @@ export function rehydratePlanFromHistory(
   const current = plans.get(chatKey);
   if (current?.turnActive) return;
 
-  let record: HistoryPart[] | null = null;
+  interface TurnAcc {
+    entries: PlanEntry[];
+    known: Set<string>;
+    declared: boolean;
+  }
+  const newTurn = (): TurnAcc => ({ entries: [], known: new Set(), declared: false });
+
+  // One accumulator per turn; a user message opens the next one.
+  const turns: TurnAcc[] = [newTurn()];
   for (const message of history) {
+    if (message.role === "user") {
+      turns.push(newTurn());
+      continue;
+    }
     if (message.role !== "assistant" || !Array.isArray(message.content)) continue;
-    const parts = message.content.filter(
-      (p): p is HistoryPart => typeof p === "object" && p !== null,
-    );
-    if (parts.some((p) => p.type === "tool-call" && p.toolName === DECLARE_PLAN_TOOL)) {
-      record = parts;
-    }
-  }
-  if (!record) {
-    if (current) {
-      plans.delete(chatKey);
-      notify(chatKey);
-    }
-    return;
-  }
-
-  const entries: PlanEntry[] = [];
-  const known = new Set<string>();
-  for (const part of record) {
-    if (part.type !== "tool-call") continue;
-    if (part.toolName === DECLARE_PLAN_TOOL) {
-      for (const path of parseDeclarePlan(part.input) ?? []) {
-        if (known.has(path)) continue;
-        known.add(path);
-        entries.push({ path, status: "planned" });
+    const turn = turns[turns.length - 1]!;
+    for (const raw of message.content) {
+      if (typeof raw !== "object" || raw === null) continue;
+      const part = raw as HistoryPart;
+      if (part.type !== "tool-call") continue;
+      if (part.toolName === DECLARE_PLAN_TOOL) {
+        turn.declared = true;
+        for (const path of parseDeclarePlan(part.input) ?? []) {
+          if (turn.known.has(path)) continue;
+          turn.known.add(path);
+          turn.entries.push({ path, status: "planned" });
+        }
+      } else if (WRITE_TOOLS.has(part.toolName ?? "")) {
+        const path = (part.input as { path?: unknown } | null | undefined)?.path;
+        const entry =
+          typeof path === "string"
+            ? turn.entries.find((e) => e.path === path)
+            : undefined;
+        if (entry) entry.status = "done";
       }
-    } else if (part.toolName === "addFile" || part.toolName === "editFile") {
-      const path = (part.input as { path?: unknown } | null | undefined)?.path;
-      const entry =
-        typeof path === "string" ? entries.find((e) => e.path === path) : undefined;
-      if (entry) entry.status = "done";
     }
   }
 
-  const wreckage = entries.some((e) => e.status !== "done");
+  const record = turns.filter((t) => t.declared).at(-1);
+  const wreckage = record !== undefined && record.entries.some((e) => e.status !== "done");
   if (!wreckage) {
     if (current) {
       plans.delete(chatKey);
@@ -276,7 +293,7 @@ export function rehydratePlanFromHistory(
   }
   plans.set(chatKey, {
     turnId: "history",
-    entries,
+    entries: record.entries,
     writingPath: null,
     turnActive: false,
     wreckage: true,

@@ -247,4 +247,36 @@ describe("SpecFileList — the declared plan", () => {
     const nav = renderWithPlan();
     expect(within(nav).getByText("0 of 2")).toBeTruthy();
   });
+
+  // The entry a dead turn stopped on has no file behind it any more than one it
+  // never reached, so it must not offer a click that selects nothing.
+  it("disables an errored row that never became a file", () => {
+    const wreck = [
+      {
+        path: "specs/design/components/portal/design.json",
+        status: "error" as const,
+        section: "design" as const,
+      },
+    ];
+    render(
+      <OxygenUIThemeProvider theme={OxygenTheme}>
+        <SpecFileList
+          files={entries("specs/requirements/prd.md")}
+          selection={null}
+          onSelect={() => {}}
+          onRegenerateDesign={() => {}}
+          sections={railSections({ ...RAIL_INPUT, planWreckage: true, planEntries: wreck })}
+          plan={wreck}
+          onReason={() => {}}
+        />
+      </OxygenUIThemeProvider>,
+    );
+    const nav = screen.getByRole("navigation", { name: "Spec files" });
+    const rows = within(nav).getAllByRole("button", { hidden: true });
+    const errored = rows.find((b) => b.textContent?.includes("Design overview"));
+    expect(errored).toBeTruthy();
+    expect(
+      errored!.hasAttribute("disabled") || errored!.getAttribute("aria-disabled") === "true",
+    ).toBe(true);
+  });
 });

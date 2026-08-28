@@ -44,6 +44,7 @@ import {
   planFileWriting,
   planFileDone,
   planTurnEnded,
+  WRITE_TOOLS,
 } from "./planStore.js";
 import { extractStreamingQuestions, isQuestionTool, parseQuestionsInput } from "./questionCards.js";
 import { getTurn, isTurnStreamNotFound, openTurnStream } from "./api/turns.js";
@@ -256,7 +257,10 @@ export async function attachAndFoldTurn(
         if (path) {
           st.carded = true;
           writeFileCard(part.id!, st, path, "streaming");
-          planFileWriting(chatKey, turnId, path);
+          // A REMOVAL is not a write: following it would send the editor to a
+          // document about to vanish, and settling its entry below would tick
+          // a deleted file green.
+          if (WRITE_TOOLS.has(st.toolName)) planFileWriting(chatKey, turnId, path);
         }
         break;
       }
@@ -283,7 +287,7 @@ export async function attachAndFoldTurn(
         const path = readToolInputPath(st.buf);
         if (!path) break;
         writeFileCard(part.id!, st, path, "done");
-        planFileDone(chatKey, turnId, path);
+        if (WRITE_TOOLS.has(st.toolName)) planFileDone(chatKey, turnId, path);
         break;
       }
       case "tool-call": {
