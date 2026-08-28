@@ -439,7 +439,7 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
         {header}
         <EmptyState
           compact
-          description="Nothing to deploy yet — components appear here once the published design produces them, and agents deploy to dev on merge."
+          description="Nothing deployed yet. Your components run here once they are built — each environment shows what is live and where to reach it."
         />
       </>
     );

@@ -32,7 +32,7 @@ import {
   type Theme,
 } from "@wso2/oxygen-ui";
 import { ListChecks } from "@wso2/oxygen-ui-icons-react";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { Link, createLink, useNavigate } from "@tanstack/react-router";
 import { EmptyState } from "../../../components/EmptyState";
 import { PageHeader } from "../../../components/PageHeader";
 import { StatusChip } from "../../../components/StatusChip";
@@ -96,6 +96,8 @@ function matchesFilter(
       return true;
   }
 }
+
+const LinkButton = createLink(Button);
 
 const COLUMNS = [
   { key: "version", label: "Version", width: 104 },
@@ -182,7 +184,16 @@ export function BuildsLedger({ projectName }: { projectName: string }) {
         <EmptyState
           icon={<ListChecks size={48} />}
           title="No builds yet"
-          description="Publish your spec and click Build in the spec view to start the first one."
+          description="A build hands your design to coding agents, which write your components and open pull requests."
+          action={
+            <LinkButton
+              variant="contained"
+              to="/projects/$projectName/spec"
+              params={{ projectName }}
+            >
+              Go to the spec
+            </LinkButton>
+          }
         />
       </>
     );

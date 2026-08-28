@@ -705,7 +705,8 @@ five surfaces fill themselves.
 |---|---|---|
 | Builds | **No builds yet.** A build hands your design to coding agents, which write your components and open pull requests. | **Go to the spec** |
 | Deployments | **Nothing deployed yet.** Your components run here once they are built — each environment shows what is live and where to reach it. | — |
-| Validations | **Nothing validated yet.** After a build, your software is checked against the **acceptance criteria** in your spec; results appear here. | — |
+| Validations *(never validated)* | **Nothing validated yet.** After a build, your software is checked against the **acceptance criteria** in your spec; results appear here. | — |
+| Validations *(version skipped)* | **This version was not validated** — it has no validation criteria, or it was an incident run, which gets no validation cycle. | — |
 | Components *(overview)* | **No components yet.** Components are the services and apps your design is made of — they appear as agents build them. | — |
 | Recent activity *(overview)* | **No activity yet.** Agents report what they are doing here as they work. | — |
 | Chat | **Hi! I'm your Agent.** This is where we talk through what you're building. Ask about a decision, change what's in scope, or take up anything I marked as assumed. | the composer, plus three suggestions |
@@ -722,6 +723,12 @@ open a conversation **about** the spec.
 The **Validations** wording is load-bearing: renaming the artifact to *Acceptance criteria* while
 the section stayed *Validations* broke the link between the criteria and the runs against them, and
 this sentence is where it is restored.
+
+**Validations has two empty states, and only one narrates.** The page is version-scoped, so a
+version that was skipped — no criteria, or an incident run — is a different fact from a project
+that has never validated. The *version skipped* sentence explains **why** the page is empty
+without saying how to fill it, so it conforms as written
+([#577](https://github.com/wso2/labs-agentic-engineer/issues/577)).
 
 **Retired from these strings**: *published* / *publish the plan* / *the published design* (there is
 no publish step — Build is the act), *plan* (not a term in this file), *AEP*.

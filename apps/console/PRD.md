@@ -90,6 +90,12 @@ which is also what closes its issue. Newest first; links go to the feature's
 GitHub issue plus any ADRs it produced. Features still being built aren't
 here: they're the open `console` + `feature` issues.
 
+- Empty states teach *what*, never narrate the *how* — the five flow-narrating
+  empty states (Builds, Deployments, Validations, Components, Recent activity)
+  now say what lives on the page and why it is empty, retiring *published* /
+  *plan* from all of them; Builds, the one surface a user can act on, gains a
+  **Go to the spec** CTA. Wordings live in the lexicon's **Empty states**
+  section — [#577](https://github.com/wso2/labs-agentic-engineer/issues/577)
 - Builds, rebuilt as a version ledger — **one row per version** (milestone,
   status, duration, start), and the now-first run story it
   replaced moves to its own page at `/builds/$tag`: a summary card, then Tasks,
