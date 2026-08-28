@@ -39,7 +39,6 @@ import {
   Ellipsis,
   GitHub,
   RotateCcw,
-  Sparkles,
   X,
 } from "@wso2/oxygen-ui-icons-react";
 import { createLink, Link } from "@tanstack/react-router";
@@ -195,19 +194,6 @@ export function BuildDetailPage({
           title="Tasks"
           disablePadding
           meta={<TasksMeta tasks={tasks} claims={claims} loading={issues.isPending} />}
-          actions={
-            <LinkButton
-              size="small"
-              variant="outlined"
-              color="primary"
-              startIcon={<Sparkles size={14} />}
-              to="/projects/$projectName"
-              params={{ projectName }}
-              sx={{ borderRadius: 999, height: 30 }}
-            >
-              Resolve via chat
-            </LinkButton>
-          }
         >
           {issues.isPending ? (
             <Box sx={{ p: 3, display: "flex", justifyContent: "center" }}>
