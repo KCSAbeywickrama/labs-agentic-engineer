@@ -23,7 +23,6 @@ import type { components } from "../../../generated/aep-api";
 import { gateSubject } from "../../tasks/lib/issueRows";
 import { gateRows, gatesNeedAction } from "../lib/provisioning";
 import { stageTone, type StageState } from "../lib/stage";
-import { EXTERNAL_RESOURCES_ANCHOR } from "./ExternalResources";
 
 type TaskView = components["schemas"]["TaskView"];
 
@@ -95,16 +94,17 @@ export function ProvisioningGates({
           </Stack>
         ))}
         {needsAction && (
-          // The way out used to be the SPEC page's connections drawer, which is
-          // gone: values are no longer collected in front of the Build button.
-          // Each gate row above already links to its own issue, which is where
-          // the platform side of a stalled gate is discussed; the one thing a
-          // person can actually SUPPLY from the console now lives in this same
-          // page's External resources section, so this is an in-page jump to it.
+          // The way out used to be the SPEC page's connection drawer opened by
+          // `?connections=open`. That drawer is gone (ADR-0023): values are no
+          // longer collected in front of the Build button, and the search param
+          // went with it. They are supplied in the External resources section of
+          // a version's build page instead, which is one click down from the
+          // ledger — this component has no tag to link straight to, so it points
+          // at Builds.
           //
-          // The target is the newest version's page and the link carries no
-          // ?tag, which is correct rather than lossy: an OPEN provision gate
-          // belongs to a live run, and a live run is always the newest version.
+          // This component is itself unmounted (ADR-0021 consequences) and is
+          // only edited because the route it linked to no longer accepts that
+          // search param. Nothing here is reachable.
           <Box>
             <LinkButton
               size="small"
@@ -112,9 +112,8 @@ export function ProvisioningGates({
               color={state === "failed" ? "error" : "warning"}
               to="/projects/$projectName/builds"
               params={{ projectName }}
-              hash={EXTERNAL_RESOURCES_ANCHOR}
             >
-              Supply connection values
+              Go to Builds
             </LinkButton>
           </Box>
         )}

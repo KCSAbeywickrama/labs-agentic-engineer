@@ -128,7 +128,7 @@ describe("ExternalResources", () => {
     );
     renderSection();
 
-    expect(screen.getByText("EXTERNAL RESOURCES")).toBeInTheDocument();
+    expect(screen.getByText("External resources")).toBeInTheDocument();
     expect(screen.getByText("1 of 2 need values")).toBeInTheDocument();
     expect(screen.getByText("stripe")).toBeInTheDocument();
     expect(screen.getByText("Payments")).toBeInTheDocument();
@@ -233,7 +233,7 @@ describe("ExternalResources", () => {
     mockReadiness = readiness();
     renderSection();
 
-    expect(screen.queryByText("EXTERNAL RESOURCES")).not.toBeInTheDocument();
+    expect(screen.queryByText("External resources")).not.toBeInTheDocument();
   });
 
   it("waits for both reads rather than flashing an empty section", () => {
@@ -241,7 +241,7 @@ describe("ExternalResources", () => {
     mockReadinessPending = true;
     renderSection();
 
-    expect(screen.getByText("EXTERNAL RESOURCES")).toBeInTheDocument();
+    expect(screen.getByText("External resources")).toBeInTheDocument();
     expect(
       screen.getByLabelText("Loading the external resources"),
     ).toBeInTheDocument();
@@ -341,7 +341,7 @@ describe("ExternalResources", () => {
     mockReadiness = readiness();
     renderSection();
 
-    expect(screen.queryByText("EXTERNAL RESOURCES")).not.toBeInTheDocument();
+    expect(screen.queryByText("External resources")).not.toBeInTheDocument();
   });
 
   // FINDING 8 — the design read used to swallow its errors and resolve to [],
@@ -358,7 +358,7 @@ describe("ExternalResources", () => {
     });
     renderSection();
 
-    expect(screen.getByText("EXTERNAL RESOURCES")).toBeInTheDocument();
+    expect(screen.getByText("External resources")).toBeInTheDocument();
     expect(
       screen.getByText(/Failed to load this project's external dependencies/),
     ).toBeInTheDocument();
@@ -392,6 +392,6 @@ describe("ExternalResources", () => {
     mockReadinessError = true;
     renderSection();
 
-    expect(screen.queryByText("EXTERNAL RESOURCES")).not.toBeInTheDocument();
+    expect(screen.queryByText("External resources")).not.toBeInTheDocument();
   });
 });

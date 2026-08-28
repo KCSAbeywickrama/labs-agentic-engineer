@@ -224,6 +224,54 @@ from a read that spans versions, and asking per row would be one GitHub-backed
 request each. The breakdown is on the build page, where the read is already
 scoped to one version.
 
+### External resources, on a build
+
+Decided in [ADR-0023](../../../docs/decisions/ADR-0023-external-dependency-values-are-a-deploy-gate.md).
+The values an external dependency needs are no longer asked for in front of the
+Build button; they are supplied on the version's own build page, as a section
+sitting directly under Tasks.
+
+| | |
+|---|---|
+| Section title | **External resources** |
+| Its chip, all supplied | **`3 of 3 configured`** |
+| Its chip, some outstanding | **`2 of 3 need values`** |
+| Body, all supplied | *Every external dependency has its development values.* |
+| Body, some outstanding | *The agent builds while you supply these. The version is not deployed until every one of them has its development values.* |
+| A row that has its values | **`Configured`** + **Update values** |
+| A row that does not | **`Needs values`** + **Configure** |
+| After a save | *Values saved — the deployment no longer waits on this one.* |
+
+**`Needs values`, never *Unconfigured* or *Not ready*.** It names what the reader
+must do, not the state machine's word for the row. And *configured* is
+deliberately not *ready*: OpenChoreo reports these bindings `Ready` while every
+key is still empty, so the two words name different facts and must not merge.
+
+### A version parked at the deploy gate
+
+A run held at the deploy gate is **unbounded, and only a person can end it**, so
+`waiting` on its own reads as a hang. The build page says so in three places,
+and they must agree.
+
+| | |
+|---|---|
+| The page's status pill | **`Waiting for values`** |
+| The summary card's notice, naming what it waits on | **`Waiting for values: stripe, sendgrid`** |
+| The same notice when the run named nothing | **`Waiting for external values`** |
+| Its body | *Everything built. This version is not deployed until every external resource holds its development values — add them under External resources below and the run resumes and deploys on its own, with nothing to restart.* |
+| Its button | **Supply values** |
+| The card's rollout line | ***v2** is built and waiting for its external values.* |
+
+**"with nothing to restart" is the load-bearing half.** Without it the reader
+goes looking for a Build or Retry button that would start a second run.
+
+**The ledger row says `Running · Coding agent` on a parked version, and that is
+a known gap rather than a choice.** `BuildSummary` carries no waiting reason, and
+the only way to learn one is a run read per row — the exact cost ADR-0021 §6
+exists to avoid. The build page has already made that read, so it is the page
+that corrects the pill. Closing the gap needs a member on `BuildSummary.status`,
+the same shape of change the missing `Queued` needs.
+
 ## The project overview
 
 ### Where project status lives

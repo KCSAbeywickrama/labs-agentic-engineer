@@ -21,6 +21,7 @@ import type { components } from "../../../generated/aep-api";
 import {
   buildOutcome,
   buildSessionLabel,
+  externalValuesPark,
   gateDrive,
   isDeliveryRun,
   isTerminalRun,
@@ -147,6 +148,53 @@ describe("isDeliveryRun", () => {
   });
 });
 
+describe("externalValuesPark", () => {
+  // ADR-0023: the deploy gate parks the run in `waiting` and names what it is
+  // short of. The build page renders those names, so the helper must return
+  // them rather than a boolean.
+  it("names the dependencies a deploy-gate park is waiting on", () => {
+    expect(
+      externalValuesPark(
+        run({
+          state: "waiting",
+          waitingReason: "external-values",
+          blockingDependencies: ["stripe", "sendgrid"],
+        }),
+      ),
+    ).toEqual(["stripe", "sendgrid"]);
+  });
+
+  // An empty array is a real answer — parked, naming nothing — and must stay
+  // distinguishable from null, or the one run that most needs an explanation
+  // renders none.
+  it("still reports a park that names nothing", () => {
+    expect(
+      externalValuesPark(run({ state: "waiting", waitingReason: "external-values" })),
+    ).toEqual([]);
+  });
+
+  // A reasonless `waiting` is the ordinary between-cycles park. It is bounded
+  // and nobody has to do anything about it, so it must not borrow the gate's
+  // call to action.
+  it("ignores a wait with no reason on it", () => {
+    expect(externalValuesPark(run({ state: "waiting" }))).toBeNull();
+  });
+
+  it("ignores a run that is not waiting", () => {
+    expect(
+      externalValuesPark(
+        run({ state: "running", waitingReason: "external-values" }),
+      ),
+    ).toBeNull();
+  });
+
+  // The build page has no run at all until the runs read answers, and while it
+  // is in flight the page must not claim the version is parked.
+  it("is null when there is no run", () => {
+    expect(externalValuesPark(undefined)).toBeNull();
+  });
+});
+
 describe("runStateChip", () => {
   it("gives waiting its own warning tone — that is when cancel matters", () => {
     expect(runStateChip(run({ state: "waiting" }))).toEqual({
@@ -255,71 +303,6 @@ describe("runHold", () => {
 
   it("does not need the issue plane to explain planning", () => {
     expect(runHold(run({ state: "planning" }), undefined)).not.toBeNull();
-  });
-
-  // The DEPLOY GATE's park (ADR-0023). Nothing failed and nothing is broken —
-  // the run is built and waiting on a person — so it must read as a warning
-  // with a job attached, and it must NAME the dependencies or the reader has to
-  // go hunting for which resource is short a value.
-  it("names the external resources a deploy-gate park is waiting on", () => {
-    const hold = runHold(
-      run({
-        state: "waiting",
-        waitingReason: "external-values",
-        blockingDependencies: ["stripe", "sendgrid"],
-      }),
-      loaded(),
-    );
-    expect(hold?.kind).toBe("external-values");
-    expect(hold?.tone).toBe("warning");
-    expect(hold?.title).toContain("stripe");
-    expect(hold?.title).toContain("sendgrid");
-    expect(hold?.dependencies).toEqual(["stripe", "sendgrid"]);
-    // It must point at where the values are entered, and promise the
-    // resumption — or the reader looks for a restart button that does not exist.
-    expect(hold?.body).toMatch(/External resources section on this page/);
-    expect(hold?.body).toMatch(/resumes and deploys on its own/);
-  });
-
-  // The regression this ranking exists to stop: "Parked between build sessions"
-  // tells the one person who can release the run that there is nothing to do.
-  it("ranks the deploy gate above the generic between-sessions park", () => {
-    const hold = runHold(
-      run({ state: "waiting", waitingReason: "external-values" }),
-      loaded({ openWork: 3 }),
-    );
-    expect(hold?.kind).toBe("external-values");
-  });
-
-  // It is the one hold whose cause is neither a gate nor the working set, so it
-  // must not wait on the issue plane to be explainable — a notice that only
-  // appears once an unrelated list has loaded is a notice that flickers.
-  it("does not need the issue plane to explain a deploy-gate park", () => {
-    const hold = runHold(
-      run({ state: "waiting", waitingReason: "external-values" }),
-      undefined,
-    );
-    expect(hold?.kind).toBe("external-values");
-  });
-
-  // A park with no names still has to be explainable: the run row is the only
-  // source of the list, and an older row (or a lost write) carries none.
-  it("still explains a deploy-gate park that names nothing", () => {
-    const hold = runHold(
-      run({ state: "waiting", waitingReason: "external-values" }),
-      loaded(),
-    );
-    expect(hold?.title).toBe("Waiting for connection values");
-    expect(hold?.dependencies).toEqual([]);
-  });
-
-  // And a park with NO reason is the ordinary between-cycles one, which must
-  // keep its old wording — the deploy gate is the only park with an
-  // explanation, so nothing else may borrow its call to action.
-  it("leaves a reasonless park reading as the between-sessions wait", () => {
-    const hold = runHold(run({ state: "waiting" }), loaded({ openWork: 3 }));
-    expect(hold?.kind).toBe("parked");
-    expect(hold?.dependencies).toBeUndefined();
   });
 
   // The gate story is the PROVISIONING STAGE's now: it sits first on the run's

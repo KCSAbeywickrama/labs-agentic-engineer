@@ -27,6 +27,7 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import { useQueryClient } from "@tanstack/react-query";
+import { LogSection } from "../../../components/LogSection";
 import { StatusChip } from "../../../components/StatusChip";
 import { projectKeys } from "../../projects/api/keys";
 import { useProjectDependencyReadiness } from "../../projects/api/queries";
@@ -50,19 +51,32 @@ import {
  */
 const DEV_ENVIRONMENT = "development";
 
-/** The anchor ProvisioningGates jumps to when a connection is waiting on a
- *  person — the one place on this page where a person can supply anything. */
+/** The anchor the summary card's parked-run notice jumps to — the one place on
+ *  the build page where a person can supply anything. */
 export const EXTERNAL_RESOURCES_ANCHOR = "external-resources";
 
 /**
- * EXTERNAL RESOURCES — where a person hands the platform the credentials their
+ * External resources — where a person hands the platform the credentials their
  * design's external dependencies need.
  *
  * This used to be a drawer in front of the Build button, which made every
- * external dependency block the build. It is here instead, BELOW the run:
- * Build is the page's primary action and this is not on its critical path —
- * the coding agent runs while the values are collected, and the deploy gate
- * (not the build) is what holds the run until they have all arrived.
+ * external dependency block the build (ADR-0023). It lives on the BUILD PAGE
+ * instead, as a `LogSection` peer of Tasks, because ADR-0021 §4 settled what
+ * this surface is: a hold is not a stage of its own, it is a row that needs
+ * you, rendered like every other row that needs you. Outstanding values are
+ * exactly that — work a person must do before this version can go anywhere —
+ * so they sit directly under the task list they are a peer of, and above the
+ * two log sections, which are a record rather than a request.
+ *
+ * The section renders its own `LogSection` rather than being wrapped in one by
+ * the page: it returns null when there is nothing to supply, and a wrapper
+ * would leave an empty titled card behind on every project without an external
+ * dependency.
+ *
+ * `projectName` alone is the whole input, and deliberately so: readiness is
+ * PROJECT + ENVIRONMENT scoped, not per version. The values live on the
+ * project's bindings, so every version's page shows the same answer, and a
+ * value supplied here releases whichever run is parked on it.
  */
 export function ExternalResources({ projectName }: { projectName: string }) {
   const design = useDesignDependencies(projectName);
@@ -109,31 +123,19 @@ export function ExternalResources({ projectName }: { projectName: string }) {
 
   return (
     <Box id={EXTERNAL_RESOURCES_ANCHOR}>
-      <Stack
-        direction="row"
-        spacing={1}
-        sx={{ alignItems: "center", mb: 1, flexWrap: "wrap", rowGap: 0.5 }}
+      <LogSection
+        title="External resources"
+        meta={
+          known ? (
+            <StatusChip
+              label={externalResourceHeadline(rows)}
+              tone={outstanding === 0 ? "success" : "warning"}
+              appearance="soft"
+              dot={outstanding > 0}
+            />
+          ) : undefined
+        }
       >
-        <Typography
-          variant="caption"
-          sx={{
-            fontWeight: 700,
-            letterSpacing: "0.08em",
-            color: "text.secondary",
-          }}
-        >
-          EXTERNAL RESOURCES
-        </Typography>
-        {known && (
-          <StatusChip
-            label={externalResourceHeadline(rows)}
-            tone={outstanding === 0 ? "success" : "warning"}
-            appearance="soft"
-            dot={outstanding > 0}
-          />
-        )}
-      </Stack>
-
       {known && (
         <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
           {outstanding === 0
@@ -221,6 +223,8 @@ export function ExternalResources({ projectName }: { projectName: string }) {
           ))}
         </Stack>
       )}
+
+      </LogSection>
 
       {target && (
         <ConnectionValuesDialog

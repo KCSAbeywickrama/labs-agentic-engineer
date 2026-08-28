@@ -293,24 +293,7 @@ export function RunStory({
               tone={hold.tone}
               title={hold.title}
               body={hold.body}
-            >
-              {/* The deploy gate's park is the ONE hold on this card the reader
-                  can personally release, so it is the one that says where. The
-                  destination is the External resources section on THIS page —
-                  deliberately not a route: two ways into one configuration
-                  surface would be two things to keep in step, and the section
-                  is already a scroll away. */}
-              {hold.kind === "external-values" && (
-                <Typography
-                  variant="body2"
-                  sx={{ mt: 0.75, fontWeight: 600, color: "warning.main" }}
-                >
-                  {hold.dependencies && hold.dependencies.length > 1
-                    ? "Add each one under External resources below."
-                    : "Add its values under External resources below."}
-                </Typography>
-              )}
-            </RunHoldNotice>
+            />
           ))}
 
         {cancel.isError && (

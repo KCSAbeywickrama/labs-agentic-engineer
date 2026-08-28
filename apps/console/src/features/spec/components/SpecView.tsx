@@ -755,6 +755,31 @@ export function SpecView({ projectName }: { projectName: string }) {
     })();
   };
 
+  // Where a started build lands the reader: the version's own page when the
+  // response named a tag, the ledger when it did not (`tag` is optional on
+  // BuildResponse, and a build with no tag has no page to land on).
+  //
+  // The overview used to be the answer and stopped being one twice over. The
+  // version's story moved to its own page (console ADR-0021), and ADR-0023 gave
+  // that page a job: Build no longer collects an external dependency's values,
+  // so the External resources section there is where they are supplied — and
+  // the run parks at the deploy gate until they are. Landing on the overview
+  // would put a navigation between the reader and the one action their run is
+  // waiting on.
+  const goToBuild = (tag: string | undefined) => {
+    if (tag) {
+      void navigate({
+        to: "/projects/$projectName/builds/$tag",
+        params: { projectName, tag },
+      });
+      return;
+    }
+    void navigate({
+      to: "/projects/$projectName/builds",
+      params: { projectName },
+    });
+  };
+
   // The ceremony's confirm: POST the build, carrying the approvals preflight
   // raised (the platform resources it will provision) — the drawer used to
   // submit those and no longer opens for them. A 422 refusal renders as the
@@ -766,11 +791,10 @@ export function SpecView({ projectName }: { projectName: string }) {
     setBuildPhase("building");
     void (async () => {
       try {
-        await build.mutateAsync({ inputs: approvalInputsFor(preflightItems) });
-        void navigate({
-          to: "/projects/$projectName",
-          params: { projectName },
+        const res = await build.mutateAsync({
+          inputs: approvalInputsFor(preflightItems),
         });
+        goToBuild(res.tag);
       } catch (e) {
         const details = (
           e as Error & { details?: Array<{ field?: string; message: string }> }
@@ -790,7 +814,7 @@ export function SpecView({ projectName }: { projectName: string }) {
 
   // Drawer Continue (#164): resubmit the build with the resolution the drawer
   // collected (a pasted external spec) plus the same approvals runBuild
-  // sends. A clean response closes the drawer and moves on to the overview;
+  // sends. A clean response closes the drawer and moves on to the version;
   // any inputs the BFF/devflow rejects come back as `failures` — surface the
   // reasons and leave the drawer open so the user can fix them and retry.
   const onContinueBuild = async (inputs: BuildInputItem[]) => {
@@ -805,10 +829,7 @@ export function SpecView({ projectName }: { projectName: string }) {
         return;
       }
       setDependencyDrawerOpen(false);
-      void navigate({
-        to: "/projects/$projectName",
-        params: { projectName },
-      });
+      goToBuild(res.tag);
     } catch (e) {
       setBuildError(
         e instanceof Error ? e.message : "Failed to start the build.",

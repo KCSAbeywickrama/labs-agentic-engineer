@@ -113,6 +113,28 @@ export function isDeliveryRun(run: MilestoneRunView): boolean {
 }
 
 /**
+ * The external dependencies a run is parked on at the DEPLOY GATE (ADR-0023),
+ * or null when it is not parked there.
+ *
+ * A run that reaches the gate short of a value stops in `waiting` — the state
+ * that already means "something outside the platform is needed" — and only a
+ * person can end it. `waiting` on its own therefore reads as a hang, so the
+ * build page names the park and points at where the values go.
+ *
+ * An empty array is a REAL answer, not an absence: the run is parked and the
+ * row named nothing (an older row, or a lost write). Returning null for that
+ * would silence the notice on the one run that most needs it, which is why
+ * this is `string[] | null` rather than a possibly-empty list.
+ */
+export function externalValuesPark(
+  run: MilestoneRunView | undefined,
+): string[] | null {
+  if (!run || run.state !== "waiting") return null;
+  if (run.waitingReason !== "external-values") return null;
+  return run.blockingDependencies ?? [];
+}
+
+/**
  * Is this version still moving? Only the newest run can be live (a milestone
  * sees SEQUENTIAL runs across its life), so this is the whole page's poll
  * predicate and the gate on every GitHub-backed read.
@@ -205,17 +227,13 @@ export function gateDrive(gate: TaskView): GateDrive {
  * nothing.
  */
 export interface RunHold {
-  kind: "planning" | "no-work" | "parked" | "external-values";
+  kind: "planning" | "no-work" | "parked";
   /** Warning is reserved for a hold only a human can release; error for one
    *  that already went wrong. The platform doing its own bounded work is
    *  information, not an alarm. */
   tone: "info" | "warning" | "error";
   title: string;
   body: string;
-  /** The external dependencies a deploy-gate park is waiting on, so a caller
-   *  can render an affordance per name. Only ever set for kind
-   *  "external-values". */
-  dependencies?: string[];
 }
 
 export function runHold(
@@ -233,32 +251,6 @@ export function runHold(
         "the milestone is written.",
     };
   }
-  // The DEPLOY GATE's park (ADR-0023), checked FIRST and without needing the
-  // issue plane: it is the one hold whose cause is neither a gate nor the
-  // working set, and the one the reader can personally clear. Ranking it below
-  // the milestone-dependent branches would hide it behind "Parked between build
-  // sessions" — a sentence that tells the one person who can release the run
-  // that there is nothing to do.
-  if (run.state === "waiting" && run.waitingReason === "external-values") {
-    const deps = run.blockingDependencies ?? [];
-    return {
-      kind: "external-values",
-      // Warning, not error: nothing failed. The run is built, deployable, and
-      // waiting on a human — which is exactly what warning is reserved for.
-      tone: "warning",
-      title:
-        deps.length > 0
-          ? `Waiting for values: ${deps.join(", ")}`
-          : "Waiting for connection values",
-      body:
-        "Everything built. Deployment is held until every external resource " +
-        "holds real values — add them in the External resources section on " +
-        "this page and the run resumes and deploys on its own, with nothing " +
-        "to restart.",
-      dependencies: deps,
-    };
-  }
-
   if (run.state !== "waiting" || milestone === undefined) return null;
 
   // A gate hold is answered by the PROVISIONING SECTION on the run's rail, not

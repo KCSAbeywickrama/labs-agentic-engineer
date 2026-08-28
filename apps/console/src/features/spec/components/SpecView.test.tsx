@@ -805,10 +805,38 @@ describe("SpecView onBuild routing (#164)", () => {
       expect(mockMutateAsync).toHaveBeenCalledWith({ inputs: [] }),
     );
     expect(mockNavigate).toHaveBeenCalledWith({
-      to: "/projects/$projectName",
-      params: { projectName: "proj1" },
+      to: "/projects/$projectName/builds/$tag",
+      params: { projectName: "proj1", tag: "v1" },
     });
     expect(screen.queryByTestId("dependency-drawer")).not.toBeInTheDocument();
+  });
+
+  // `tag` is optional on BuildResponse, so the version page it names may not
+  // exist. The ledger is the honest fallback — never the overview, which is
+  // where a reader would have to leave to reach either.
+  it("a build that names no tag lands on the ledger, not the overview", async () => {
+    mockPreflightRefetch.mockResolvedValue({
+      data: { needsInput: false, needsResolution: false, items: [] },
+    });
+    mockMutateAsync.mockResolvedValue({} satisfies BuildResponse);
+
+    render(<SpecView projectName="proj1" />);
+    clickBuild();
+
+    const dialog = await screen.findByTestId("cut-version-dialog");
+    fireEvent.click(
+      within(dialog).getByRole("button", {
+        name: /cut v\d+ & build/i,
+        hidden: true,
+      }),
+    );
+
+    await waitFor(() =>
+      expect(mockNavigate).toHaveBeenCalledWith({
+        to: "/projects/$projectName/builds",
+        params: { projectName: "proj1" },
+      }),
+    );
   });
 
   it("preflight refetch errors — surfaces the failure and does not build or navigate", async () => {
@@ -903,8 +931,8 @@ describe("SpecView onBuild routing (#164)", () => {
       expect(mockMutateAsync).toHaveBeenCalledWith({ inputs: STUB_INPUTS }),
     );
     expect(mockNavigate).toHaveBeenCalledWith({
-      to: "/projects/$projectName",
-      params: { projectName: "proj1" },
+      to: "/projects/$projectName/builds/$tag",
+      params: { projectName: "proj1", tag: "v2" },
     });
     expect(screen.queryByTestId("dependency-drawer")).not.toBeInTheDocument();
   });

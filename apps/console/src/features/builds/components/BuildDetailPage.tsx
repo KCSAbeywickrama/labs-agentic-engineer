@@ -61,9 +61,10 @@ import {
   taskBreakdown,
 } from "../lib/ledger";
 import { anyTaskRunning, taskTally } from "../lib/taskRow";
-import { isDeliveryRun } from "../lib/runView";
+import { externalValuesPark, isDeliveryRun } from "../lib/runView";
 import { BuildTaskList } from "./BuildTaskList";
 import { CycleBuilds } from "./CycleBuilds";
+import { EXTERNAL_RESOURCES_ANCHOR, ExternalResources } from "./ExternalResources";
 import { RunFeed } from "./RunFeed";
 import { useCycleBuilds } from "../api/queries";
 
@@ -165,12 +166,22 @@ export function BuildDetailPage({
   }
 
   const status = ledgerStatus(build, projectStatus.data?.deploy);
+  // The deploy gate's park (ADR-0023). `BuildSummary` carries no waiting
+  // reason, so `ledgerStatus` cannot see it and the pill would read "Running ·
+  // Coding agent" on a run that stopped and is waiting on a person. This page
+  // has already read the run, so it can say the true thing without costing the
+  // ledger a request per row.
+  const park = externalValuesPark(current);
 
   return (
     <>
       <PageHeader
         title={`Build ${build.tag}`}
-        status={{ label: status.label, tone: status.tone, variant: "filled" }}
+        status={
+          park
+            ? { label: "Waiting for values", tone: "warning", variant: "filled" }
+            : { label: status.label, tone: status.tone, variant: "filled" }
+        }
         backTo={backTo}
         actions={
           <BuildActions projectName={projectName} tag={tag} runId={current?.id} live={live} />
@@ -182,6 +193,7 @@ export function BuildDetailPage({
           projectName={projectName}
           build={build}
           tasks={tasks}
+          park={park}
           {...(projectStatus.data?.deploy ? { deploy: projectStatus.data.deploy } : {})}
         />
 
@@ -228,6 +240,15 @@ export function BuildDetailPage({
           )}
         </LogSection>
 
+        {/* Directly after Tasks, and before the two log sections. ADR-0021 §4
+            settled the shape of this page: a hold is not a stage of its own, it
+            is a row that needs you, rendered like every other row that needs
+            you. An external dependency short of a value is outstanding work a
+            PERSON must do before this version deploys — a peer of a task, not
+            of a log. The logs below it are a record of what happened; this is a
+            request, so it reads before them. */}
+        <ExternalResources projectName={projectName} />
+
         <AgentLogSection projectName={projectName} runId={current?.id} live={live} />
 
         <BuildLogsSection projectName={projectName} tag={tag} cycleId={current?.cycles?.at(-1)?.id} />
@@ -269,11 +290,15 @@ function BuildSummaryCard({
   projectName,
   build,
   tasks,
+  park,
   deploy,
 }: {
   projectName: string;
   build: BuildSummary;
   tasks: components["schemas"]["TaskView"][];
+  /** The external dependencies this version's run is parked on at the deploy
+   *  gate, or null when it is not parked. Empty means parked, naming nothing. */
+  park: string[] | null;
   deploy?: components["schemas"]["DeployStage"] | undefined;
 }) {
   const live = isLedgerLive(build);
@@ -337,6 +362,39 @@ function BuildSummaryCard({
         ))}
       </Box>
 
+      {/* THE PARK (ADR-0023). A run held at the deploy gate is unbounded and
+          only a person can end it, so `waiting` with nothing beside it reads as
+          a hang. This card is what now says why a version is or is not moving,
+          so the explanation belongs on it — naming the dependencies, because
+          "something is missing" leaves the reader hunting, and pointing at the
+          External resources section on THIS page rather than a route: two ways
+          into one configuration surface would be two things to keep in step. */}
+      {park && (
+        <Alert
+          severity="warning"
+          sx={{ mt: 2 }}
+          action={
+            <Button
+              size="small"
+              color="inherit"
+              href={`#${EXTERNAL_RESOURCES_ANCHOR}`}
+            >
+              Supply values
+            </Button>
+          }
+        >
+          <Typography variant="body2" sx={{ fontWeight: 600 }}>
+            {parkTitle(park)}
+          </Typography>
+          <Typography variant="body2">
+            Everything built. This version is not deployed until every external
+            resource holds its development values — add them under External
+            resources below and the run resumes and deploys on its own, with
+            nothing to restart.
+          </Typography>
+        </Alert>
+      )}
+
       <Divider sx={{ my: 2 }} />
 
       <Stack direction="row" spacing={1.25} sx={{ alignItems: "center", flexWrap: "wrap" }}>
@@ -349,11 +407,24 @@ function BuildSummaryCard({
           Go to Deployments <ArrowRight size={14} />
         </RouterLink>
         <Typography variant="caption" color="text.secondary">
-          {deploymentNote(build.tag, deploy)}
+          {park
+            ? `${build.tag} is built and waiting for its external values.`
+            : deploymentNote(build.tag, deploy)}
         </Typography>
       </Stack>
     </Card>
   );
+}
+
+/**
+ * The park's headline. It NAMES the dependencies when the run row carried them;
+ * an older row (or a lost write) carries none, and that park still has to be
+ * explainable, so the nameless case gets its own sentence rather than an empty
+ * list rendered as punctuation.
+ */
+function parkTitle(dependencies: string[]): string {
+  if (dependencies.length === 0) return "Waiting for external values";
+  return `Waiting for values: ${dependencies.join(", ")}`;
 }
 
 /**
