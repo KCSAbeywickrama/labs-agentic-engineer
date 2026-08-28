@@ -58,6 +58,35 @@ export function buildCycles(cycles: RunCycleView[]): RunCycleView[] {
   );
 }
 
+/**
+ * Has any of this VERSION's work actually merged?
+ *
+ * `mergeSha` is the platform's single record of a merge — the contract is
+ * explicit that there is no "merged" verdict because *"a merge is recorded by
+ * the merge SHA, so a second spelling of it could disagree with the first"*.
+ *
+ * The tempting substitute is the task list: count the tasks whose
+ * `derivedStatus` is `merged`. It is wrong, and a deployed build proved it. That
+ * field is a TWO-VALUE vocabulary — the issue is open, or it is closed — so a
+ * cancelled run whose issues were closed without a pull request ever opening
+ * (`prNumber` 0, `mergeSha` empty) reads as fully "merged" while nothing
+ * whatsoever landed in the repo.
+ *
+ * Every run of the version, not just the newest, and deploying proved that
+ * too: a version whose coding cycle merged pull request #15 was later reworked
+ * by a `task` run that opened no cycle at all. A merge is a permanent fact
+ * about the repository — a later run cannot un-merge it — so asking only the
+ * newest run made merged code look unmerged.
+ *
+ * Validation cycles are excluded by `buildCycles`: a validation cycle's
+ * `mergeSha` is the commit it JUDGED, not one it produced.
+ */
+export function hasMergedWork(runs: MilestoneRunView[] | undefined): boolean {
+  return (runs ?? []).some((run) =>
+    buildCycles(run.cycles ?? []).some((c) => Boolean(c.mergeSha)),
+  );
+}
+
 export function isTerminalRun(state: string): boolean {
   return TERMINAL_RUN_STATES.has(state);
 }

@@ -96,6 +96,45 @@ dropdown, reading it, remembering it, and selecting the next one.
    redirect. Old `/builds/118` links keep working; the redirect now points the
    other way.*
 
+9. **A running duration needs a clock, and the Deployments link needs merged
+   work.** Two things the summary card got wrong, both worth writing down
+   because the obvious implementation of each is the wrong one.
+
+   The Duration counts against `Date.now()` until the build ends — but polling
+   alone never made it move. React-query's structural sharing hands back the
+   *same* `BuildSummary` object when the payload has not changed, and a running
+   build's payload does not change between its own state transitions, so no
+   refetch ever caused a re-render and the number sat frozen at first paint.
+   `useTicker` supplies the second. It is keyed on `isDurationOpen` — the
+   absence of `completedAt` — and NOT on `isLedgerLive`, because the absence of
+   an end stamp is exactly the condition under which the number is being
+   measured against now. A build that has left `in_progress` without an end
+   stamp is still counting, and keying on the status would freeze it. "and
+   counting" follows the same condition, for the same reason.
+
+   **"Go to Deployments" appears only once the version's work has merged.** A
+   version reaches an environment as its work merges, so before that the board
+   has nothing to say about it and the link could only disappoint — it sat one
+   line above a note reading *"v5 deploys as its tasks merge"*, contradicting
+   it. `isDeployable` is a build cycle carrying a `mergeSha`, or the deploy
+   aggregate already naming this version.
+
+   The signal matters more than the gate. The obvious one — count the tasks
+   whose `derivedStatus` is `merged` — is WRONG, and deploying proved it inside
+   a minute: that field is the two-value vocabulary of §5, so a cancelled run
+   whose issues were closed without a pull request ever opening (`prNumber` 0,
+   no merge SHA) read as fully merged while nothing had landed in the repo.
+   `mergeSha` is the platform's only record of a merge, and the contract says
+   why there is no second one: *"a merge is recorded by the merge SHA, so a
+   second spelling of it could disagree with the first"*. Validation cycles are
+   excluded — a validation cycle's SHA names the commit it judged.
+
+   And it asks EVERY run of the version, not the newest one. Deploying caught
+   that too: a version whose coding cycle merged pull request #15 was later
+   reworked by a `task` run that opened no cycle at all, so reading `current`
+   made merged code look unmerged. A merge is a permanent fact about the
+   repository; a later run cannot take it back.
+
 ## What this ADR does NOT cover
 
 The design handoff this came from also drew a two-column **Deployments** board, a

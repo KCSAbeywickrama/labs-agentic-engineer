@@ -54,6 +54,8 @@ import { runStamp } from "../lib/format";
 import {
   buildDuration,
   countTasks,
+  isDeployable,
+  isDurationOpen,
   isLedgerLive,
   ledgerStatus,
   milestoneLabel,
@@ -66,6 +68,7 @@ import { BuildTaskList } from "./BuildTaskList";
 import { CycleBuilds } from "./CycleBuilds";
 import { RunFeed } from "./RunFeed";
 import { useCycleBuilds } from "../api/queries";
+import { useTicker } from "../hooks/useTicker";
 
 type BuildSummary = components["schemas"]["BuildSummary"];
 
@@ -187,6 +190,7 @@ export function BuildDetailPage({
           build={build}
           tasks={tasks}
           claims={claims}
+          runs={runList}
           {...(projectStatus.data?.deploy ? { deploy: projectStatus.data.deploy } : {})}
         />
 
@@ -262,19 +266,26 @@ function BuildSummaryCard({
   build,
   tasks,
   claims,
+  runs,
   deploy,
 }: {
   projectName: string;
   build: BuildSummary;
   tasks: components["schemas"]["TaskView"][];
   claims: RunClaims;
+  runs: components["schemas"]["MilestoneRunView"][];
   deploy?: components["schemas"]["DeployStage"] | undefined;
 }) {
   const live = isLedgerLive(build);
+  // The duration counts against `Date.now()` until the build ends, so this card
+  // has to re-render every second for it to move at all.
+  const counting = isDurationOpen(build);
+  useTicker(counting);
   const duration = buildDuration(build.startedAt, build.completedAt);
   // Derived from the tasks this page already holds — the same TAG-SCOPED read
   // the Tasks section below renders.
   const breakdown = taskBreakdown(countTasks(tasks, claims));
+  const deployable = isDeployable(build, runs, deploy);
 
   const cells: Array<{ label: string; value: React.ReactNode }> = [
     { label: "Milestone", value: milestoneLabel(build) },
@@ -286,7 +297,7 @@ function BuildSummaryCard({
           <Box component="span" sx={{ fontVariantNumeric: "tabular-nums" }}>
             {duration || "—"}
           </Box>
-          {live && (
+          {counting && (
             <Box component="span" sx={{ color: "text.secondary" }}>
               {" "}
               and counting
@@ -334,14 +345,19 @@ function BuildSummaryCard({
       <Divider sx={{ my: 2 }} />
 
       <Stack direction="row" spacing={1.25} sx={{ alignItems: "center", flexWrap: "wrap" }}>
-        <RouterLink
-          to="/projects/$projectName/deployments"
-          params={{ projectName }}
-          underline="hover"
-          sx={{ fontSize: "0.8125rem", fontWeight: 500, display: "inline-flex", alignItems: "center", gap: 0.5 }}
-        >
-          Go to Deployments <ArrowRight size={14} />
-        </RouterLink>
+        {/* Only once the version's work has actually merged — see
+            `isDeployable`. Until then the note below says what has to happen,
+            and a link to a board with nothing on it would contradict it. */}
+        {deployable && (
+          <RouterLink
+            to="/projects/$projectName/deployments"
+            params={{ projectName }}
+            underline="hover"
+            sx={{ fontSize: "0.8125rem", fontWeight: 500, display: "inline-flex", alignItems: "center", gap: 0.5 }}
+          >
+            Go to Deployments <ArrowRight size={14} />
+          </RouterLink>
+        )}
         <Typography variant="caption" color="text.secondary">
           {deploymentNote(build.tag, deploy)}
         </Typography>
