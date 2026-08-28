@@ -139,6 +139,49 @@ describe("externalResourceRows", () => {
     expect(rows.map((r) => r.name)).toEqual(["sendgrid", "stripe"]);
   });
 
+  // Two components declaring the same dependency with DISJOINT keys. Readiness
+  // is computed against the union, so a dialog offering only the first
+  // component's keys could never satisfy it — the row would stay "Needs values"
+  // however many times it was saved, and the deploy gate would never open.
+  it("unions the config keys of a dependency two components declare differently", () => {
+    const rows = externalResourceRows(
+      design(
+        [external("stripe", ["api_key"])],
+        [external("stripe", ["webhook_secret"])],
+      ),
+      readiness({
+        name: "stripe",
+        state: "unset",
+        missingKeys: ["api_key", "webhook_secret"],
+      }),
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.config.map((c) => c.key)).toEqual([
+      "api_key",
+      "webhook_secret",
+    ]);
+  });
+
+  // Secret wins on conflict, mirroring spec.UnionExternalConfigKeys. A key any
+  // component marks secret must never be collected as a plain value.
+  it("keeps a key secret when any component declares it secret", () => {
+    const plain: Dependency = {
+      kind: "external",
+      name: "stripe",
+      config: [{ key: "api_key" }],
+    };
+    const secret: Dependency = {
+      kind: "external",
+      name: "stripe",
+      config: [{ key: "api_key", secret: true }],
+    };
+    const rows = externalResourceRows(
+      design([plain], [secret]),
+      readiness({ name: "stripe", state: "unset", missingKeys: ["api_key"] }),
+    );
+    expect(rows[0]!.config).toEqual([{ key: "api_key", secret: true }]);
+  });
+
   // A dependency with an empty schema has nothing to collect, so a row for it
   // would open a dialog with no fields — even when readiness names it.
   it("skips an external that declares no config keys", () => {

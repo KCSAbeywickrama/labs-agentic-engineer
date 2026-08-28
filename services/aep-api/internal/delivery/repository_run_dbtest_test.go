@@ -770,7 +770,7 @@ func TestMilestoneRunRepository_ParkNamesItsBlockers(t *testing.T) {
 	if err != nil || back == nil {
 		t.Fatalf("GetByIDScoped = (%+v, %v)", back, err)
 	}
-	if got := []string(back.BlockingDependencies); len(got) != 2 || got[0] != "stripe" {
+	if got := []string(back.BlockingDependencies); len(got) != 2 || got[0] != "stripe" || got[1] != "twilio" {
 		t.Fatalf("re-read BlockingDependencies = %v, want [stripe twilio]", got)
 	}
 

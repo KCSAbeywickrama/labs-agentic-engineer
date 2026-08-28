@@ -111,10 +111,22 @@ function key(name: string): string {
 }
 
 /**
- * Every external the DESIGN declares that could be asked of a person, deduped
+ * Every external the DESIGN declares that could be asked of a person, merged
  * across the components that declare it (a shared dependency is declared on
  * every consumer's design.json and its values are supplied once, not once per
  * consumer) and keyed by slug.
+ *
+ * The UNION of each declaration's config keys, not the first one seen. Two
+ * components may declare the same dependency with different keys, and readiness
+ * is computed against the union (`spec.UnionExternalConfigKeys`) — so keeping
+ * only the first schema would render a dialog that cannot submit the keys the
+ * other component declared, and the dependency would stay `unset` however many
+ * times a person saved it. That is a deploy gate nobody can clear from this
+ * page, which is the failure this section exists to prevent.
+ *
+ * The merge mirrors that Go helper deliberately: first-seen spelling wins for
+ * the name, keys dedupe by `key`, and SECRET WINS on conflict — a key any
+ * component marks secret must never be collected as a plain value.
  *
  * Only dependencies that declare config keys are collectable: a row exists to
  * collect values, and one with an empty schema has none to collect.
@@ -126,9 +138,30 @@ function declaredExternals(
   for (const comp of design ?? []) {
     for (const dep of comp.dependencies ?? []) {
       if (dep.kind !== "external") continue;
-      if ((dep.config ?? []).length === 0) continue;
-      if (byName.has(key(dep.name))) continue;
-      byName.set(key(dep.name), dep);
+      const config = dep.config ?? [];
+      if (config.length === 0) continue;
+      const slug = key(dep.name);
+      const seen = byName.get(slug);
+      if (!seen) {
+        byName.set(slug, { ...dep, config: [...config] });
+        continue;
+      }
+      const merged = [...(seen.config ?? [])];
+      for (const k of config) {
+        const at = merged.findIndex((m) => m.key === k.key);
+        if (at === -1) {
+          merged.push(k);
+          continue;
+        }
+        if (k.secret) merged[at] = { ...merged[at]!, secret: true };
+      }
+      byName.set(slug, {
+        ...seen,
+        // A description on any declaration beats none — the first component to
+        // declare the dependency need not be the one that explained it.
+        ...(seen.description ? {} : dep.description ? { description: dep.description } : {}),
+        config: merged,
+      });
     }
   }
   return byName;

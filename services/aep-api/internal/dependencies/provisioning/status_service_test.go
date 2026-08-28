@@ -139,6 +139,40 @@ func TestDeploymentReadiness_SeparatesTheTwoBlockers(t *testing.T) {
 	}
 }
 
+// TestDeploymentReadiness_AnExistingBindingThatIsNotReadyStillBlocks. The gate
+// reports a platform resource under Provisioning when the binding is absent OR
+// present-but-not-Ready, and the two ends of that are already covered above
+// (`cache` has none, `orders-db` is Ready). This is the state in between — and
+// it is the one the run actually polls THROUGH, because a resource the platform
+// is standing up has a binding from the moment it is authored and only reaches
+// Ready minutes later. A gate that read an unready binding as ready would
+// deploy against a database that is not yet serving.
+func TestDeploymentReadiness_AnExistingBindingThatIsNotReadyStillBlocks(t *testing.T) {
+	design := fakeDesign{comps: []spec.DesignComponent{{Name: "api", Dependencies: []spec.Dependency{
+		{Kind: spec.DependencyKindPlatformResource, Name: "orders-db"},
+	}}}}
+	bindings := &fakeBindings{byName: map[string]*openchoreo.ResourceReleaseBinding{
+		// Authored, so it exists — but its Ready condition is still False.
+		ocname.ExternalResourceBindingName("proj", "orders-db", "development"): {
+			Status: &openchoreo.ResourceReleaseBindingStatus{
+				Conditions: []openchoreo.OCCondition{{Type: "Ready", Status: "False"}},
+			},
+		},
+	}}
+	svc := NewService(Deps{Design: design, Bindings: bindings})
+
+	got, err := svc.DeploymentReadiness(context.Background(), "acme", "proj", "development")
+	if err != nil {
+		t.Fatalf("DeploymentReadiness: %v", err)
+	}
+	if !reflect.DeepEqual(got.Provisioning, []string{"orders-db"}) {
+		t.Errorf("Provisioning = %v, want [orders-db] — the binding exists but is not Ready", got.Provisioning)
+	}
+	if len(got.Unconfigured) != 0 {
+		t.Errorf("Unconfigured = %v, want none — a platform resource is never a person's to supply", got.Unconfigured)
+	}
+}
+
 // TestDeploymentReadiness_OpensWhenEverythingIsConfigured: both lists empty is
 // the only answer that deploys, so the fully-configured project has to produce
 // exactly that and not, say, an empty-string entry.

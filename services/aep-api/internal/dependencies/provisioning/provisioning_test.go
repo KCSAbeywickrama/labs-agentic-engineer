@@ -956,6 +956,27 @@ func TestSaveValues_AFailedWakeUpDoesNotFailTheSave(t *testing.T) {
 	}
 }
 
+// TestSaveValues_DoesNotWakeARunWhenProvisioningFails. The wake-up asserts
+// "values landed", so it must not be sent for values that did not: a run woken
+// by a failed save re-reads readiness, finds the dependency still unset, and
+// parks straight back — burning a signal to learn nothing. The ordering is the
+// whole guarantee, and moving the notify above the provision check would still
+// pass the two tests either side of this one.
+func TestSaveValues_DoesNotWakeARunWhenProvisioningFails(t *testing.T) {
+	notifier := &recordingValuesSaved{}
+	svc := newTestService(newFakeIssues(nil), &fakeExecStore{}, fakeDesign{comps: designWithDeps()},
+		&fakeExtProv{err: errors.New("openchoreo unreachable")}, &fakePlatProv{}, &fakeBindings{})
+	svc.SetValuesSavedNotifier(notifier)
+
+	if err := svc.SaveValues(context.Background(), "org", "org", "proj", "stripe",
+		map[string]map[string]string{"development": {"api_key": "sk", "region": "us"}}); err == nil {
+		t.Fatal("SaveValues must fail when the provision fails")
+	}
+	if len(notifier.calls) != 0 {
+		t.Fatalf("wake-ups = %v, want none — the values never landed", notifier.calls)
+	}
+}
+
 func TestSaveValues_WrongKind400(t *testing.T) {
 	// stripe is external; asking to provision it as a platform resource is wrong-kind.
 	svc := newTestService(newFakeIssues(nil), &fakeExecStore{}, fakeDesign{comps: designWithDeps()}, &fakeExtProv{}, &fakePlatProv{}, &fakeBindings{})
