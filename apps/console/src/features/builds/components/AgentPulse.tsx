@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import { Box, Stack, Typography } from "@wso2/oxygen-ui";
+import { Stack, Typography } from "@wso2/oxygen-ui";
 
 /**
  * "agent working" — the design's own pulse line, from the handoff.
@@ -28,21 +28,26 @@ import { Box, Stack, Typography } from "@wso2/oxygen-ui";
  * `stroke="currentColor"` deliberately — the handoff hardcodes `#0097A7`, and
  * `design-system.md` forbids hex literals. The colour comes from the parent's
  * `info.main`, so it holds in both themes.
+ *
+ * A PLAIN `<svg>`, not a `Box component="svg"`: MUI's system consumes `width`
+ * and `height` as style props, so on a Box they never reach the element as SVG
+ * attributes and the trace rendered at 81x27 instead of the design's 42x14.
  */
 export function AgentPulse({ label = "agent working" }: { label?: string }) {
   return (
     <Stack
       direction="row"
       spacing={0.875}
-      sx={{ alignItems: "center", color: "info.main" }}
+      // flexShrink 0 + nowrap: in a crowded header row the label otherwise
+      // wraps onto two lines and squeezes the trace against it.
+      sx={{ alignItems: "center", color: "info.main", flexShrink: 0 }}
     >
-      <Box
-        component="svg"
+      <svg
         width="42"
         height="14"
         viewBox="0 0 42 14"
         aria-hidden
-        sx={{ flexShrink: 0, display: "block" }}
+        style={{ flexShrink: 0, display: "block" }}
       >
         <polyline
           points="0,7 8,7 11,2 15,12 19,7 27,7 30,4 34,10 38,7 42,7"
@@ -61,8 +66,11 @@ export function AgentPulse({ label = "agent working" }: { label?: string }) {
             repeatCount="indefinite"
           />
         </polyline>
-      </Box>
-      <Typography variant="caption" sx={{ color: "inherit" }}>
+      </svg>
+      <Typography
+        variant="caption"
+        sx={{ color: "inherit", whiteSpace: "nowrap" }}
+      >
         {label}
       </Typography>
     </Stack>
