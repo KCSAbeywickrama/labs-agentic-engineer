@@ -49,14 +49,31 @@ dropdown, reading it, remembering it, and selecting the next one.
 5. **A task row's state is DERIVED, and the derivation is the decision.**
    `derivedStatus` is deliberately a two-value vocabulary — the issue is open, or
    it is closed — so the row's five states come from elsewhere, in this
-   precedence: closed → `done`; `hold` or a non-empty `blockedBy` → `blocked`;
-   a newest execution that is running and unfinished → `in_progress`; an
-   execution that **ended** while the issue is still open → `in_review`;
-   otherwise `pending`.
+   precedence: closed **or a recorded merge SHA** → `merged`; `hold` or a
+   non-empty `blockedBy` → `blocked`; a newest execution that is running and
+   unfinished → `in_progress`; a claiming cycle **with a pull request that has
+   not merged** → `pr_sent`; a claiming cycle still open without one →
+   `in_progress`; otherwise `pending`.
 
-   `in_review` is the one worth defending: there is no ready-for-review field on
-   the contract, and *"the agent finished and nothing merged"* is the only honest
-   reading of that pair. The row's second line is the issue's newest comment
+   **A row reports its pull request, not itself.** One build session dispatches
+   ONE pull request claiming a SET of issues (`resolves`), so its state lands on
+   every row in that set — three rows reading `PR sent` at once are three issues
+   on one pull request, which is the platform's actual unit of work.
+
+   Two corrections this took, both from deployed data:
+
+   - **Claims come from EVERY cycle of EVERY run, not from the open cycle.** A
+     cycle ends the moment its pull request settles, so reading only the open one
+     threw the answer away at exactly the moment it became final: a task whose
+     work had merged, or whose pull request was sent and refused, fell back to
+     `Pending` unless GitHub had also closed its issue. And a version is often
+     worked by several runs — a `task` run reworking what a `dev` run delivered —
+     so the newest run alone does not hold its history.
+   - **`merged` reads the SHA as well as the closed issue.** The two can disagree
+     for a moment, in one direction: the merge lands before GitHub's close event
+     does, and for that stretch the row said `PR sent` about merged work.
+
+   The row's second line is the issue's newest comment
    ([#612](https://github.com/wso2/labs-agentic-engineer/issues/612)), flattened
    to its first non-empty line.
 
@@ -134,6 +151,27 @@ dropdown, reading it, remembering it, and selecting the next one.
    reworked by a `task` run that opened no cycle at all, so reading `current`
    made merged code look unmerged. A merge is a permanent fact about the
    repository; a later run cannot take it back.
+
+10. **Two sections were reading the wrong thing about the run, and both said
+    nothing was happening when something was.**
+
+    **The "streaming" chip is the AGENT's state, not the build's.** It read
+    `isLedgerLive`, and a run stays `in_progress` through everything that
+    happens after its agent stops — the merge, the component builds, the
+    deployment — so the chip kept promising a live stream long after there was
+    nothing left to stream. `isAgentStreaming` asks the only question the chip
+    is for: does the newest, non-terminal run have a build cycle still open?
+
+    **Build logs must ask about the cycle that MERGED.** The section was handed
+    `cycles.at(-1)` — the newest cycle of the newest delivery run — and
+    `list-cycle-builds` answers empty for any cycle without a merge SHA ("a
+    cycle whose pull request has not merged has nothing to have built"). The
+    newest cycle is routinely a validation cycle or a retry that never merged,
+    and on the local stack the merge was one run further back still, so the
+    section sat on "No component builds were produced for this version"
+    permanently. `mergedCycle` walks the version's runs newest-first for the
+    newest cycle carrying a SHA — the same scope `isDeployable` needs, and for
+    the same reason.
 
 ## What this ADR does NOT cover
 

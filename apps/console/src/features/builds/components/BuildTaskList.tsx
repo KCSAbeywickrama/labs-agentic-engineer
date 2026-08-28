@@ -32,6 +32,7 @@ import {
   CircleCheck,
   CircleDashed,
   GitHub,
+  GitPullRequest,
   LoaderCircle,
   Plug,
 } from "@wso2/oxygen-ui-icons-react";
@@ -68,10 +69,12 @@ const STATE_ICON: Record<
   TaskRowState,
   { Icon: typeof CircleCheck; palette: "success" | "info" | "warning" | "grey" }
 > = {
-  done: { Icon: CircleCheck, palette: "success" },
+  merged: { Icon: CircleCheck, palette: "success" },
   in_progress: { Icon: LoaderCircle, palette: "info" },
   blocked: { Icon: CircleAlert, palette: "warning" },
-  in_review: { Icon: CircleAlert, palette: "warning" },
+  // A pull request that is sent and not merged is waiting on a human, which is
+  // the same call to action a hold makes — hence the same tone.
+  pr_sent: { Icon: GitPullRequest, palette: "warning" },
   pending: { Icon: CircleDashed, palette: "grey" },
 };
 
@@ -140,7 +143,7 @@ export function BuildTaskRow({
   const tint =
     state === "in_progress"
       ? "info"
-      : state === "blocked" || state === "in_review"
+      : state === "blocked" || state === "pr_sent"
         ? "warning"
         : null;
 
@@ -218,7 +221,7 @@ export function BuildTaskRow({
                   color:
                     state === "in_progress"
                       ? "info.main"
-                      : state === "blocked" || state === "in_review"
+                      : state === "blocked" || state === "pr_sent"
                         ? "warning.main"
                         : "text.secondary",
                   display: "-webkit-box",

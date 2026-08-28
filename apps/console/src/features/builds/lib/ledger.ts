@@ -146,13 +146,13 @@ export function countTasks(tasks: TaskView[], claims?: RunClaims): TaskCounts {
   };
   for (const task of tasks) {
     switch (taskRowState(task, claims)) {
-      case "done":
+      case "merged":
         counts.done += 1;
         break;
       case "in_progress":
         counts.inProgress += 1;
         break;
-      case "in_review":
+      case "pr_sent":
         counts.inReview += 1;
         break;
       case "blocked":

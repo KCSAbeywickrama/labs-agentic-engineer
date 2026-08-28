@@ -797,11 +797,28 @@ function milestoneRun(over: Partial<MilestoneRunView> = {}): MilestoneRunView {
         createdAt: "2026-07-10T09:14:00Z",
         endedAt: "2026-07-10T09:41:00Z",
       },
+      // A pull request that was SENT and never merged — the host refused it as
+      // a conflict, so the session ended with the pull request still open. The
+      // rows it claims must keep reading "PR sent": that is the state the
+      // console used to lose the moment a cycle ended.
       {
         id: "cycle-2",
+        kind: "coding",
+        attempts: 1,
+        branch: "aep/m1-c2",
+        prNumber: 4,
+        prUrl: `${REPO_URL}/pull/4`,
+        resolves: [10],
+        mergeVerdict: "refused",
+        mergeReason: "the pull request does not merge cleanly",
+        createdAt: "2026-07-10T09:44:00Z",
+        endedAt: "2026-07-10T09:52:00Z",
+      },
+      {
+        id: "cycle-3",
         kind: "fix",
         attempts: 2,
-        createdAt: "2026-07-10T09:45:00Z",
+        createdAt: "2026-07-10T09:55:00Z",
       },
     ],
     createdAt: "2026-07-10T09:12:00Z",
@@ -975,20 +992,22 @@ export function buildRunsForTag(
         ? failedRun
         : settledRun;
 
-  // The OPEN build session claims this version's first still-open coding task.
-  // Without a claim the console can only PRESUME the session works every open
-  // issue (ADR-0015 §4's weaker strength), which paints the whole list as in
-  // progress — true of the fixture, but not what a real run looks like, and it
-  // would hide a regression in the claim path.
-  const openClaim = (projectTasks[s] ?? [])
-    .filter(
-      (t) =>
-        t.lineage?.specTag === tag &&
-        t.executorClass === "coding" &&
-        t.derivedStatus !== "merged",
-    )
-    .map((t) => t.issueNumber)
-    .slice(0, 1);
+  // Re-attribute the story's claims to THIS tag's real issue numbers, so every
+  // row state the build page can render is reachable in mock mode:
+  //
+  //   open cycle, no pull request  → In progress
+  //   ended cycle, pull request open → PR sent
+  //   any cycle with a merge SHA   → Merged
+  //
+  // Without a claim the console can only PRESUME the open session works every
+  // open issue (ADR-0015 §4's weaker strength), which paints the whole list as
+  // in progress — true of the fixture, but not what a real run looks like, and
+  // it would hide a regression in the claim path.
+  const coding = (projectTasks[s] ?? []).filter(
+    (t) => t.lineage?.specTag === tag && t.executorClass === "coding",
+  );
+  const merged = coding.filter((t) => t.derivedStatus === "merged").map((t) => t.issueNumber);
+  const open = coding.filter((t) => t.derivedStatus !== "merged").map((t) => t.issueNumber);
 
   return {
     ...story,
@@ -1001,11 +1020,19 @@ export function buildRunsForTag(
       id: `run-${tag}-${i + 1}`,
       milestoneNumber: known.milestoneNumber,
       milestoneTitle: tag,
-      cycles: (run.cycles ?? []).map((cycle) =>
-        !cycle.endedAt && openClaim.length > 0
-          ? { ...cycle, resolves: openClaim }
-          : cycle,
-      ),
+      cycles: (run.cycles ?? []).map((cycle) => {
+        if (cycle.kind === "validation" || cycle.resolves === undefined) {
+          // A validation cycle claims no agent work, and a cycle the story
+          // never gave a claim to is left alone.
+          return !cycle.endedAt && open.length > 0
+            ? { ...cycle, resolves: open.slice(0, 1) }
+            : cycle;
+        }
+        if (cycle.mergeSha) return { ...cycle, resolves: merged };
+        // Sent and unmerged: claim an open issue that is NOT the one the live
+        // session is on, so the two states appear side by side.
+        return { ...cycle, resolves: open.slice(1, 2) };
+      }),
     })),
   };
 }

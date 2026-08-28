@@ -82,9 +82,49 @@ export function buildCycles(cycles: RunCycleView[]): RunCycleView[] {
  * `mergeSha` is the commit it JUDGED, not one it produced.
  */
 export function hasMergedWork(runs: MilestoneRunView[] | undefined): boolean {
-  return (runs ?? []).some((run) =>
-    buildCycles(run.cycles ?? []).some((c) => Boolean(c.mergeSha)),
-  );
+  return mergedCycle(runs) !== undefined;
+}
+
+/**
+ * The newest build session whose pull request MERGED, across the version's runs.
+ *
+ * This is the cycle that built something: `list-cycle-builds` answers empty for
+ * any cycle whose `mergeSha` is empty ("a cycle whose pull request has not
+ * merged has nothing to have built"), and the platform matches component builds
+ * by that SHA. Handing it the newest cycle instead — which is routinely a
+ * validation cycle, or a later coding cycle that never merged — asked the
+ * cluster about a commit that produced nothing, so the Build logs section sat
+ * on "No component builds were produced for this version" forever.
+ *
+ * Runs arrive newest-first and cycles oldest-first, so both are walked
+ * backwards to find the newest merge.
+ */
+export function mergedCycle(
+  runs: MilestoneRunView[] | undefined,
+): RunCycleView | undefined {
+  for (const run of runs ?? []) {
+    const merged = buildCycles(run.cycles ?? [])
+      .reverse()
+      .find((c) => Boolean(c.mergeSha));
+    if (merged) return merged;
+  }
+  return undefined;
+}
+
+/**
+ * Is a build session open right now — is there anything for the agent log to
+ * stream?
+ *
+ * NOT the build's status, which is what the "streaming" chip used to read. A
+ * run stays `in_progress` through everything that happens after its agent
+ * stops: the merge, the component builds, the deployment. The chip therefore
+ * kept claiming a live stream long after the coding agent had finished, which
+ * is exactly when there is nothing left to stream.
+ */
+export function isAgentStreaming(runs: MilestoneRunView[] | undefined): boolean {
+  const newest = (runs ?? [])[0];
+  if (!newest || isTerminalRun(newest.state)) return false;
+  return buildCycles(newest.cycles ?? []).some((c) => !c.endedAt);
 }
 
 export function isTerminalRun(state: string): boolean {

@@ -42,11 +42,16 @@ let mockTasks: TaskView[] = [];
 let mockDeploy: DeployStage | undefined;
 let mockRuns: MilestoneRunView[] = [];
 
+export const cycleBuildsCalls: Array<{ cycleId: string; enabled: boolean }> = [];
+
 vi.mock("../api/queries", () => ({
   useBuilds: () => ({ data: mockBuilds, isPending: false, isError: false, refetch: vi.fn() }),
   useBuildRuns: () => ({ data: { runs: mockRuns }, isPending: false, isError: false }),
   useCancelRun: () => ({ mutate: vi.fn(), isPending: false }),
-  useCycleBuilds: () => ({ data: undefined, isPending: false, isError: false }),
+  useCycleBuilds: (_p: string, _t: string, cycleId: string, enabled: boolean) => {
+    cycleBuildsCalls.push({ cycleId, enabled });
+    return { data: [], isPending: false, isError: false, refetch: vi.fn() };
+  },
 }));
 vi.mock("../../tasks/api/queries", () => ({
   useAllTasks: () => ({ data: mockTasks, isPending: false, isError: false, refetch: vi.fn() }),
@@ -129,6 +134,7 @@ beforeEach(() => {
   mockTasks = [];
   mockDeploy = undefined;
   mockRuns = [];
+  cycleBuildsCalls.length = 0;
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -245,5 +251,87 @@ describe("BuildDetailPage — the Duration cell", () => {
       vi.advanceTimersByTime(2000);
     });
     expect(screen.getByText("19m 58s")).toBeTruthy();
+  });
+});
+
+describe("BuildDetailPage — the coding agent log's 'streaming' chip", () => {
+  it("says streaming while a build session is open", () => {
+    mockRuns = [run([cycle({ endedAt: null })])];
+    renderPage();
+    expect(screen.getByText("streaming")).toBeTruthy();
+  });
+
+  it("stops saying it the moment the agent finishes, though the run is still in progress", () => {
+    // The bug: the chip read the BUILD's status, and a run stays in_progress
+    // through the merge, the component builds and the deployment.
+    mockBuilds = [build({ status: "in_progress", completedAt: null })];
+    mockRuns = [run([cycle({ endedAt: "2026-08-28T09:50:00Z", mergeSha: "abc1234" })])];
+    renderPage();
+    expect(screen.queryByText("streaming")).toBeNull();
+  });
+});
+
+describe("BuildDetailPage — which cycle the build logs ask about", () => {
+  it("asks about the cycle that MERGED, not the newest one", () => {
+    // The reported bug: Build logs never showed anything. The section was handed
+    // `cycles.at(-1)`, and the cluster read answers empty for a cycle with no
+    // merge SHA — so it asked about a commit that had built nothing.
+    mockRuns = [
+      run([
+        cycle({ id: "merged-cycle", prNumber: 9, mergeSha: "118c794" }),
+        cycle({ id: "validation-cycle", kind: "validation" }),
+        cycle({ id: "retry-cycle", prNumber: 0 }),
+      ]),
+    ];
+    renderPage();
+    expect(cycleBuildsCalls.at(-1)).toEqual({ cycleId: "merged-cycle", enabled: true });
+  });
+
+  it("finds the merge in an EARLIER run when the newest one never merged", () => {
+    // based-portal-insurance v2 on the live stack: the merged coding cycle is in
+    // a succeeded run, and the newest run failed with an unmerged cycle.
+    mockRuns = [
+      run([cycle({ id: "failed-cycle", prNumber: 0 })], { id: "newest", state: "failed" }),
+      run([cycle({ id: "the-merge", prNumber: 9, mergeSha: "118c794" })], { id: "older" }),
+    ];
+    renderPage();
+    expect(cycleBuildsCalls.at(-1)?.cycleId).toBe("the-merge");
+  });
+
+  it("asks nothing at all when nothing has merged", () => {
+    mockRuns = [run([cycle({ prNumber: 0 })])];
+    renderPage();
+    expect(cycleBuildsCalls.at(-1)).toEqual({ cycleId: "", enabled: false });
+    expect(
+      screen.getByText(/Build logs appear once a build session's pull request has merged/),
+    ).toBeTruthy();
+  });
+});
+
+describe("BuildDetailPage — a task row's state", () => {
+  it("says the same thing about every issue the one pull request claims", () => {
+    mockTasks = [task(7), task(8)];
+    mockRuns = [run([cycle({ resolves: [7, 8], prNumber: 9 })])];
+    renderPage();
+    expect(screen.getAllByText("PR sent")).toHaveLength(2);
+  });
+
+  it("reads Merged from the recorded SHA, before GitHub closes the issue", () => {
+    mockTasks = [task(7)];
+    mockRuns = [
+      run([cycle({ resolves: [7], prNumber: 9, mergeSha: "abc", endedAt: "2026-08-28T09:50:00Z" })]),
+    ];
+    renderPage();
+    expect(screen.getByText("Merged")).toBeTruthy();
+  });
+
+  it("keeps PR sent after the session ends — it used to fall back to Pending", () => {
+    mockTasks = [task(7)];
+    mockRuns = [
+      run([cycle({ resolves: [7], prNumber: 9, endedAt: "2026-08-28T09:50:00Z" })]),
+    ];
+    renderPage();
+    expect(screen.getByText("PR sent")).toBeTruthy();
+    expect(screen.queryByText("Pending")).toBeNull();
   });
 });

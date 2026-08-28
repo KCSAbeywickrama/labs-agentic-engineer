@@ -18,51 +18,90 @@
 
 import type { StatusTone } from "../../../components/StatusChip";
 import type { components } from "../../../generated/aep-api";
+import { buildCycles } from "./runView";
 
 type TaskView = components["schemas"]["TaskView"];
 type ExecutionView = components["schemas"]["ExecutionView"];
 type IssueComment = components["schemas"]["IssueComment"];
-type RunCycleView = components["schemas"]["RunCycleView"];
+type MilestoneRunView = components["schemas"]["MilestoneRunView"];
 
 /**
- * What the RUN says about the version's work, which is the only place agent
- * progress lives.
+ * What the RUN says about each of this version's tasks.
  *
- * `TaskView.executions` is empty for agent work by design — aep-api's
- * `reads.go` states it: *"A dispatch gate's provisioning run still keeps an
- * execution row; agent work has none — its pull request lives on the run's
- * cycle record instead."* Deriving a coding task's state from executions
- * therefore leaves EVERY open one reading `Pending`, however hard the agent is
- * working. This is that fix.
+ * `TaskView.executions` is empty for agent work — the platform records the
+ * agent's pull request on the run's cycle instead — so a task's progress is
+ * only knowable from here. One cycle dispatches ONE pull request that claims a
+ * SET of issues (`resolves`), so every issue in that set shares the pull
+ * request's fate: that is why one cycle's state lands on several rows.
  */
 export interface RunClaims {
-  /** Issue numbers the run's still-open build session recorded (`resolves`). */
-  claimed: ReadonlySet<number>;
+  /** issue number → the newest cycle that claimed it. */
+  byIssue: ReadonlyMap<number, CycleClaim>;
   /** A live session with no recorded claims yet — presume it works the open
    *  issues. Never set once claims exist: a recorded set outranks a guess. */
   presumeOpenWork: boolean;
-  /** The open session's pull request, when it has opened one. */
-  openCyclePr: number | undefined;
   /** When the open session started, for the row's elapsed time. */
   openCycleStartedAt: string | undefined;
 }
 
-/** Read the run's open build session. Mirrors `openCycleClaims` (ADR-0015 §4). */
-export function runClaims(cycles: RunCycleView[] | undefined): RunClaims {
-  const open = (cycles ?? []).find((cycle) => !cycle.endedAt);
-  const claimed = new Set(open?.resolves ?? []);
+/** One cycle's pull request, as the rows it claims see it. */
+export interface CycleClaim {
+  /** Its pull request, once a webhook has taught the platform about one. */
+  prNumber: number | undefined;
+  /** The merge, recorded by SHA — the platform's only record of one. */
+  merged: boolean;
+  /** Is the session still open? */
+  open: boolean;
+  /** When the session started. */
+  startedAt: string;
+}
+
+/**
+ * Read every cycle of every run of this version.
+ *
+ * Deliberately NOT just the open cycle, and not just the newest run. A cycle
+ * ends the moment its pull request settles, so reading only the open one threw
+ * away the answer at exactly the moment it became final — a task whose work had
+ * merged fell back to `Pending` unless GitHub had also closed its issue. And a
+ * version is often worked by SEVERAL runs (a `task` run reworking what a `dev`
+ * run delivered), so the newest run alone does not hold its history.
+ *
+ * Runs arrive newest-first and cycles oldest-first, so this walks both
+ * backwards: a later claim on the same issue overwrites an earlier one.
+ */
+export function runClaims(runs: MilestoneRunView[] | undefined): RunClaims {
+  const byIssue = new Map<number, CycleClaim>();
+  let openCycleStartedAt: string | undefined;
+  let openClaimed = 0;
+
+  for (const run of [...(runs ?? [])].reverse()) {
+    for (const cycle of buildCycles(run.cycles ?? [])) {
+      const claim: CycleClaim = {
+        prNumber: cycle.prNumber || undefined,
+        merged: Boolean(cycle.mergeSha),
+        open: !cycle.endedAt,
+        startedAt: cycle.createdAt,
+      };
+      if (claim.open) {
+        openCycleStartedAt = cycle.createdAt;
+        openClaimed = cycle.resolves?.length ?? 0;
+      }
+      for (const issue of cycle.resolves ?? []) {
+        byIssue.set(issue, claim);
+      }
+    }
+  }
+
   return {
-    claimed,
-    presumeOpenWork: Boolean(open) && claimed.size === 0,
-    openCyclePr: open?.prNumber,
-    openCycleStartedAt: open?.createdAt,
+    byIssue,
+    presumeOpenWork: openCycleStartedAt !== undefined && openClaimed === 0,
+    openCycleStartedAt,
   };
 }
 
 const NO_CLAIMS: RunClaims = {
-  claimed: new Set<number>(),
+  byIssue: new Map<number, CycleClaim>(),
   presumeOpenWork: false,
-  openCyclePr: undefined,
   openCycleStartedAt: undefined,
 };
 
@@ -78,10 +117,10 @@ const NO_CLAIMS: RunClaims = {
  * and mid-execution, and "blocked" is the one the reader must act on.
  */
 export type TaskRowState =
-  | "done"
+  | "merged"
   | "blocked"
   | "in_progress"
-  | "in_review"
+  | "pr_sent"
   | "pending";
 
 const RUNNING_EXECUTION = /^(running|in_progress|started|active)$/i;
@@ -101,9 +140,13 @@ export function taskRowState(
   task: TaskView,
   claims: RunClaims = NO_CLAIMS,
 ): TaskRowState {
-  // Closed is closed: a merged pull request is what closes a task, so nothing
-  // below can override it.
-  if (task.derivedStatus === "merged") return "done";
+  const claim = claims.byIssue.get(task.issueNumber);
+
+  // Closed is closed, and so is a recorded merge. Either is final, so nothing
+  // below can override it — and the two are checked together because they can
+  // disagree in one direction: a pull request merges before GitHub's close
+  // event lands, and for that moment the issue is still open.
+  if (task.derivedStatus === "merged" || claim?.merged) return "merged";
 
   // A hold is what the reader has to act on, so it outranks whatever was
   // happening when the dependency was hit.
@@ -117,12 +160,16 @@ export function taskRowState(
     return "in_progress";
   }
 
-  // AGENT WORK has no execution — the run's open build session is what knows.
-  // A recorded claim is a FACT; the presumption covers the stretch before the
+  // AGENT WORK has no execution — the run's build sessions are what know. A
+  // recorded claim is a FACT; the presumption covers the stretch before the
   // pull request exists (ADR-0015 §4, kept in force by ADR-0021 §3).
-  if (claims.claimed.has(task.issueNumber)) {
-    // Its pull request is open and nothing has merged it: waiting on a human.
-    return claims.openCyclePr ? "in_review" : "in_progress";
+  if (claim) {
+    // A pull request exists and nothing merged it. That is true whether its
+    // session is still open or has ended — an ended session with an unmerged
+    // pull request is precisely the case that used to fall back to `Pending`,
+    // throwing away the most useful thing the row could say.
+    if (claim.prNumber !== undefined) return "pr_sent";
+    return claim.open ? "in_progress" : "pending";
   }
   if (claims.presumeOpenWork) return "in_progress";
 
@@ -138,14 +185,14 @@ export interface TaskRowChip {
 
 export function taskRowChip(state: TaskRowState): TaskRowChip {
   switch (state) {
-    case "done":
-      return { label: "Done", tone: "success", live: false };
+    case "merged":
+      return { label: "Merged", tone: "success", live: false };
     case "blocked":
       return { label: "Blocked", tone: "warning", live: false };
     case "in_progress":
       return { label: "In progress", tone: "info", live: true };
-    case "in_review":
-      return { label: "Review", tone: "warning", live: false };
+    case "pr_sent":
+      return { label: "PR sent", tone: "warning", live: false };
     default:
       return { label: "Pending", tone: "neutral", live: false };
   }
@@ -208,7 +255,9 @@ export function taskElapsedFrom(
   // per-task start to count from, and the session's is the honest stand-in.
   if (execution) return null;
   return taskRowState(task, claims) === "in_progress"
-    ? (claims.openCycleStartedAt ?? null)
+    ? (claims.byIssue.get(task.issueNumber)?.startedAt ??
+      claims.openCycleStartedAt ??
+      null)
     : null;
 }
 
@@ -234,8 +283,8 @@ export function taskTally(tasks: TaskView[], claims: RunClaims = NO_CLAIMS): Tas
   let attention = 0;
   for (const task of tasks) {
     const state = taskRowState(task, claims);
-    if (state === "done") done += 1;
-    if (state === "blocked" || state === "in_review") attention += 1;
+    if (state === "merged") done += 1;
+    if (state === "blocked" || state === "pr_sent") attention += 1;
   }
   return { total: tasks.length, done, attention };
 }

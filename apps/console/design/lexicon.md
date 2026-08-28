@@ -200,14 +200,24 @@ dialog's copy promises.
 
 | Situation | Says |
 |---|---|
-| Merged, and the issue closed with it | **`Done`** |
+| Its pull request merged | **`Merged`** |
 | Waiting on a dependency someone must configure | **`Blocked`** + **`Configure in Resources`** |
 | The agent is on it now | **`In progress`** + elapsed time |
-| The agent finished, the pull request is waiting on a human | **`Review`** |
+| Its pull request is open and nothing has merged it | **`PR sent`** |
 | Nothing has run yet | **`Pending`** |
 
+**One pull request, several rows.** A build session dispatches ONE pull request
+that claims a SET of issues, so every issue in that set says the same thing —
+the row is reporting the pull request's state, not a state of its own. That is
+why three rows can all read `PR sent` at once.
+
+`PR sent` is the one place the console keeps an acronym (naming rule 4). It sits
+inches from the `#9` chip the row already shows and from the Coding agent log
+that names pull requests by number; the reader here is the engineer whose issue
+it is, and *`Pull request sent`* is a chip twice the width saying nothing more.
+
 Counts read **`11 in this build · 5 done · 2 need your attention`**. *Need your
-attention* folds blocked and in-review together deliberately: both are waiting
+attention* folds blocked and PR-sent together deliberately: both are waiting
 on the reader, which is what makes them one number.
 
 The row's second line is the issue's **newest comment by any author**, flattened

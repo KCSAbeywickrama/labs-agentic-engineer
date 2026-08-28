@@ -62,7 +62,7 @@ import {
   taskBreakdown,
 } from "../lib/ledger";
 import { anyTaskRunning, runClaims, taskTally, type RunClaims } from "../lib/taskRow";
-import { isDeliveryRun } from "../lib/runView";
+import { isAgentStreaming, isDeliveryRun, mergedCycle } from "../lib/runView";
 import { AgentPulse } from "./AgentPulse";
 import { BuildTaskList } from "./BuildTaskList";
 import { CycleBuilds } from "./CycleBuilds";
@@ -110,7 +110,7 @@ export function BuildDetailPage({
   // Agent progress lives on the RUN, not on the task: aep-api leaves
   // `TaskView.executions` empty for agent work ("its pull request lives on the
   // run's cycle record instead"). Without this every open task read `Pending`.
-  const claims = runClaims(current?.cycles);
+  const claims = runClaims(runList);
 
   const backTo = {
     link: <Link to="/projects/$projectName/builds" params={{ projectName }} />,
@@ -224,9 +224,19 @@ export function BuildDetailPage({
           )}
         </LogSection>
 
-        <AgentLogSection projectName={projectName} runId={current?.id} live={live} />
+        {/* `live` is the BUILD's state; streaming is the agent's. A run stays
+            in_progress through the merge, the builds and the deployment, long
+            after its agent has stopped. */}
+        <AgentLogSection
+          projectName={projectName}
+          runId={current?.id}
+          streaming={isAgentStreaming(runList)}
+        />
 
-        <BuildLogsSection projectName={projectName} tag={tag} cycleId={current?.cycles?.at(-1)?.id} />
+        {/* The cycle that MERGED, not the newest one: the cluster read answers
+            empty for a cycle with no merge SHA, and the newest cycle is
+            routinely a validation cycle or a coding cycle that never merged. */}
+        <BuildLogsSection projectName={projectName} tag={tag} cycleId={mergedCycle(runList)?.id} />
       </Stack>
     </>
   );
@@ -475,17 +485,17 @@ function BuildActions({
 function AgentLogSection({
   projectName,
   runId,
-  live,
+  streaming,
 }: {
   projectName: string;
   runId: string | undefined;
-  live: boolean;
+  streaming: boolean;
 }) {
   return (
     <LogSection
       title="Coding agent log"
       meta={
-        live ? (
+        streaming ? (
           <StatusChip label="streaming" tone="info" appearance="soft" dot />
         ) : undefined
       }
@@ -519,7 +529,7 @@ function BuildLogsSection({
       {!cycleId ? (
         <EmptyState
           compact
-          description="Build logs appear once a build session's work has merged and the components rebuild."
+          description="Build logs appear once a build session's pull request has merged and the components rebuild."
         />
       ) : builds.isPending ? (
         // Distinct from the note above: that one states a fact about the
