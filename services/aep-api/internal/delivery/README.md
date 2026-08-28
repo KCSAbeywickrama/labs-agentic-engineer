@@ -78,7 +78,7 @@ outside that lock is the duplicate-issue race the lock exists to close.
 
 | Sub-package | Owns | Reaches the root for |
 |---|---|---|
-| `build` (buildpipe) | the whole-spec gate + `v<N>` tag cut, **the milestone plan path** (mint `v<N>`'s milestone, supersede the previous version into it, admit the run row, then plan its Tasks and mint its gates), the version ledger, dep-drawer preflight | `MilestoneRun`/`StartRunRequest`, and the planner via `SpecPlanner` |
+| `build` (buildpipe) | the whole-spec gate + `v<N>` tag cut, **the milestone plan path** (mint `v<N>`'s milestone, supersede the previous version into it, admit the run row, then plan its Tasks and mint its gates), the version ledger, dependency preflight | `MilestoneRun`/`StartRunRequest`, and the planner via `SpecPlanner` |
 | `task` (taskflow) | the GitHub-native Task READ surface (list/get, scoped to a version by milestone membership) + the plan turn, which mints one **prose** issue per Task **into the version's milestone**, assigned at creation; plus the SRE/RCA handoff's adoption leg | the read DTOs, the milestone label vocabulary, and the run rows (via `MilestoneResolver`) |
 | `execution` | the executions READ surface: the per-Task progress endpoint, the task-log SSE stream, `OpsExecutionReader`. It writes nothing and dispatches nothing — the only execution rows left are the provisioning gates' | `TaskStreamHub`, the executions kernel |
 | `eventcore` | the event plane of the milestone-run loop: the auto-merge policy seam, the merged-PR path-diff build fan-out + per-`(component, SHA)` re-trigger budget, fix/conflict/red-main issue minting, the halt of a failed run's unfinished work and the close of a cancelled run's in-flight work, milestone-matched predicate re-evaluation, adoption, the reconcile sweep (trigger router; halted-aware, and blind to cancelled increments), and the build sweep that observes those builds reaching terminal | the milestone model (labels, `MilestoneRun`/`RunCycle`, run signals), `DiffComponents`/`BuildRunName` and `BuildTerminalObserver`; **no Temporal** — it reaches the supervisor only through the `RunSignaler`/`RunStarter` ports |
@@ -122,11 +122,16 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
 
 ## Owns
 - The **executions** store (now provisioning gates only) and the Temporal `Runtime` + the three workflows on it.
-- The **build click's whole sequence** (`build`): mutex → repo → drawer pre-tag work → dependency hard
+- The **build click's whole sequence** (`build`): mutex → repo → request pre-tag work → dependency hard
   gate → whole-spec gate + `v<N>` tag cut → milestone → supersede → run row → plan. The ORDER is the
   domain fact `build` owns; the two halves it does not own (the planning turn, the gate resolvers) are
-  root ports. Dep-drawer preflight emits no `external-config` collect for a **Registered External
+  root ports. Preflight emits no `external-config` collect for a **Registered External
   resource** the org catalog already holds (ADR-0021).
+- **What preflight gates**: it reports what a version's dependencies still need, and only
+  `needsResolution` — a dependency the design itself cannot name (ambiguous, unresolved, missing spec,
+  or an org service awaiting access) — blocks the version cut. `needsInput` stays the broad "there is
+  something to show" flag: an external dependency's config VALUES are collected while the build runs
+  and enforced at the deploy gate, so they never hold up starting a build.
 - The **event plane** (`eventcore`): the platform's whole reaction to a pull request, a milestone-matched
   issue and a build terminal. It merges, mints and signals — the supervisor decides. Its three GitHub
   effects are a squash-merge, an issue in a milestone, and a build pinned to a merge SHA. It owns the
@@ -402,6 +407,34 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   release. Grading them together is what made the graph look circular: the SPA needs the API's
   address and the API needs the SPA's, and only one of those has to be true before anything serves. A
   cycle among hard edges is `ErrDeployPermanent`, not a wait — nobody can go first. ADR-0019.
+- **The deploy stage GATES on configuration, and the two blockers behave differently** (ADR-0023).
+  Before a wave is ordered or promoted, `awaitDeployable` asks the provisioning service whether every
+  external dependency holds real values and every platform resource is provisioned. An unconfigured
+  external is a HUMAN who has not acted: the run parks in `waiting` carrying the reason and the
+  dependency NAMES, re-asserted on every pass so the list shrinks as values arrive, unbounded and
+  outside `deployReadyTimeout` — charging a person's credential lookup against a binding's serving
+  budget would settle `deploy-budget` on a run behaving exactly as designed. Cancellation is therefore
+  read off the run ROW after each park pass, not only off the signal: the cancel surface swallows a
+  failed delivery, and an unbounded park that believed the signal alone would hold a run the user
+  already stopped. A still-provisioning platform resource is the PLATFORM working, so the stage polls
+  instead — parking would hang the run on something that resolves itself — but that poll IS bounded, by
+  a `deployReadyTimeout` budget started on the first provisioning pass and dropped again whenever the
+  gate parks on values, so a binding that will never go Ready becomes a deploy failure naming the
+  resource instead of a run stuck in `deploying` forever, and a day spent parked on a credential costs
+  the platform's budget nothing. Leaving the park restores `running`, which clears the reason and the
+  names, whichever branch the loop moves to — a run polling the platform must not still be asking for a
+  credential that has arrived. The gate sits after the empty-components return, so a converge or
+  validation cycle is never parked on a credential it will not use, and `CheckDeployReadiness` is the
+  one activity in `run` that FAILS CLOSED when unwired — every other collaborator's worst case is work
+  not happening, this one's is a deploy that publishes an application with empty credentials. Values
+  held on the ORG catalog (a Registered External, ADR-0021) are not counted: the project's values
+  endpoint refuses them, so naming one would park the run forever on a blocker nobody looking at that
+  project can clear. An external that declares NO config keys is skipped for the same reason from the
+  other direction — there is nothing to type, and the console renders no row for it. The project-wide
+  readiness read the builds page renders applies both rules, so the console's section and the gate can
+  never disagree about what is outstanding. A value save emits `SigRunValuesSaved` — a fact, not an instruction: the stage
+  re-reads the gate and parks straight back if another value is still missing, so losing the signal
+  costs one wait-poll interval, not correctness.
 - **The deploy stage has a DEADLINE, and the build stage deliberately does not.** A WorkflowRun always
   terminates, so `awaitBuilds` can wait forever safely. A ReleaseBinding never does — it is a level
   OpenChoreo reconciles continuously, so an image that will never pull and a rollout thirty seconds

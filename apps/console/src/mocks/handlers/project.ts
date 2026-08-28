@@ -17,6 +17,7 @@ import {
   projectBuilds,
   projectComponents,
   projectDependencies,
+  projectDependencyReadiness,
   projectSectionError,
   projectSpecFiles,
   projectStatuses,
@@ -124,6 +125,13 @@ export const projectHandlers = [
   // status chips and the Deployments page's promotion connections.
   http.get("*/api/v1/projects/:projectName/design/dependencies", () =>
     respond((s) => projectDependencies(s)),
+  ),
+  // Whether the platform holds real values for each external dependency in an
+  // environment — the Builds page's External resources section (ADR-0023).
+  // Environment-scoped on the wire; the mock ignores it, since the console only
+  // ever asks about development.
+  http.get("*/api/v1/projects/:projectName/dependencies/readiness", () =>
+    respond((s) => projectDependencyReadiness(s)),
   ),
   // Re-collect an external connection's values (#395 follow-up). Values are
   // write-only on the real platform (secrets go to the secret manager and

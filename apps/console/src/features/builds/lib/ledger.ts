@@ -47,6 +47,18 @@ export interface LedgerStatus {
 }
 
 /**
+ * Is this version parked at the deploy gate, waiting on a person (ADR-0023)?
+ *
+ * `status` cannot answer it: a waiting run and a running one are both
+ * `in_progress`. `waitingReason` is what separates them, and the ledger read
+ * carries it because the run row the summary is built from already holds it —
+ * so saying this costs no request per row, and ADR-0021 §6 is not breached.
+ */
+export function isAwaitingValues(build: BuildSummary): boolean {
+  return build.waitingReason === "external-values";
+}
+
+/**
  * What a version's row says about itself.
  *
  * The label names the reader's SITUATION rather than the state machine's name
@@ -64,6 +76,17 @@ export function ledgerStatus(
   switch (build.status) {
     case "started":
     case "in_progress":
+      // A version parked at the deploy gate is NOT a version an agent is
+      // working. The run stopped, and only this reader (or a cancellation) can
+      // restart it, so the row must say that and must not read as live: the
+      // tint and the pulse mean "the moving thing", and a park is the opposite.
+      // The wording is the build page's own pill, so the two surfaces agree
+      // (lexicon, *A version parked at the deploy gate*). The dependency names
+      // stay on that page — the row has no space for them and the ledger read
+      // does not carry them.
+      if (isAwaitingValues(build)) {
+        return { label: "Waiting for values", tone: "warning", live: false };
+      }
       return { label: "Running · Coding agent", tone: "info", live: true };
     case "failed":
       // The platform's terminal reason, when it left one. Without it the row
@@ -92,7 +115,16 @@ export function ledgerStatus(
   }
 }
 
-/** Is this version moving? Drives the row tint and the ledger's poll. */
+/**
+ * Is this version's RUN still in flight — worth polling, and cancellable?
+ *
+ * Deliberately NOT the same question as `LedgerStatus.live`, which is what
+ * tints and pulses a row. A version parked at the deploy gate is in flight but
+ * not moving: it is still the run the build page polls (it resumes on its own
+ * when the last value is saved) and still the run Cancel acts on, while its
+ * row must go quiet because nothing is happening. Hence one predicate for the
+ * run's flight and another for the row's motion.
+ */
 export function isLedgerLive(build: BuildSummary): boolean {
   return build.status === "started" || build.status === "in_progress";
 }
