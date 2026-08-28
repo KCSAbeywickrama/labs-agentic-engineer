@@ -132,8 +132,17 @@ architecture.
 ## Where this stops
 
 `/design` ends at the design and its validation criteria — no task planning,
-no application code. Close with three parts and nothing more: one line per
-component (name, type, one-clause role); a **"Needs your input"** block
-listing only the dependencies still ambiguous or unresolved; and a one-line
-pointer to `specs/design/`. The dependency narration during the turn (the
-`architecture` skill owns its format) already carried the play-by-play.
+no application code.
+
+**When you changed nothing, say so in ONE line and stop.** A convergence pass
+that finds no drift has no news: *"The design already matches the requirements —
+nothing to change."* Do not inventory what exists to prove you looked. The user
+can see the documents; a list of them is not a result, and reciting one makes a
+no-op read like a delivery.
+
+**When you did produce a design**, close with two parts and nothing more: one
+line per component (name, type, one-clause role), and a **"Needs your input"**
+block listing only the dependencies still ambiguous or unresolved. Nothing else
+— no file list, no directory, no count of what was written. The user is looking
+at the documents; the closing is for what they cannot see. The narration during
+the turn already carried the play-by-play.

@@ -68,7 +68,7 @@ in one go gets one line, not six.
 - ✓ *The architecture is settled — three components. Now their individual
   designs.*
 
-## Three closings
+## Four closings
 
 **A requirements turn.**
 
@@ -79,6 +79,16 @@ in one go gets one line, not six.
 
 - ✗ *Full design is under `specs/design/` (design.cell, design.md, security.md, per-component design.json/openapi.yaml/wireframes.dsl) with validation criteria at `specs/validation/validation-criteria.json`.*
 - ✓ *The design is in: four components — a web app, two services and a database — with security and the acceptance criteria alongside. `orders-api` still needs a payment provider named before it can be built.*
+
+**A turn that changed nothing.** A convergence pass with no drift to fix. The
+temptation is to prove the work happened by listing what was inspected — which
+is both the longest possible answer and the one most likely to name files.
+
+- ✗ *The design already matches the PRD in full — the cell, both components'
+  design.json, design.md, security (roles.json + security.md), the API's
+  openapi.yaml, the webapp's wireframes.dsl and the validation criteria all
+  cover the eight stories with no drift.*
+- ✓ *The design already matches the requirements — nothing to change.*
 
 **A failure.** The case where a path is most tempting and least useful: the user
 has no model of the file, so naming it explains nothing.
