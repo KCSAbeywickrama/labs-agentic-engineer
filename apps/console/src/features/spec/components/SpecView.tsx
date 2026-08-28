@@ -52,7 +52,7 @@ import {
   useSpecFileContent,
   useSpecFiles,
 } from "../api/queries";
-import { PRD_PATH, toSpecEntry } from "../api/mapping";
+import { PRD_PATH, specGroupOf, toSpecEntry } from "../api/mapping";
 import { computeDependencyUsedBy } from "../lib/dependencyUsedBy";
 import { useCollabSpec } from "../collab/useCollabSpec";
 import { SpecQuestionForm } from "./SpecQuestionForm";
@@ -70,6 +70,7 @@ import { prdUnsettled } from "../lib/prdUnsettled";
 import { useYFragmentVersion } from "../collab/useYFragmentVersion";
 import {
   railSections as buildRailSections,
+  type RailPlanEntry,
   type SectionReason,
 } from "../lib/railSections";
 import {
@@ -84,7 +85,7 @@ import { ProblemsDialog } from "./ProblemsDialog";
 import { CommittedFileView } from "./CommittedFileView";
 import { useResolveDependencyViaChat } from "../../agent-chat/useResolveDependencyViaChat";
 import type { DependencyResolutionIntent } from "../../projects/lib/dependencyResolutionMessage.js";
-import { useDesignCellChangeCount } from "../collab/useDesignCellChange";
+import { usePlan } from "../../agent-chat/usePlan";
 import { BuildDependencyDrawer } from "./BuildDependencyDrawer";
 import { SpecFileList } from "./SpecFileList";
 import { CellDiagramPanel } from "./CellDiagramPanel";
@@ -94,7 +95,7 @@ import { DesignView } from "@aep/ui-design-view";
 import type { DependencyStatusInfo } from "@aep/ui-design-view";
 import { ValidationView } from "@aep/ui-validation-view";
 import { SECURITY_MD_PATH, type SpecSelection } from "../api/designTree";
-import { DESIGN_CELL_PATH, componentOf } from "../api/designTree";
+import { DESIGN_CELL_PATH, componentOf, followSelection } from "../api/designTree";
 import { useSession } from "../../../auth/SessionContext";
 
 type PreflightItem = components["schemas"]["PreflightItem"];
@@ -266,19 +267,33 @@ export function SpecView({ projectName }: { projectName: string }) {
     };
   }, [connectionsParam]);
 
-  // An architectural chat change updates design.cell (targeted editFile
-  // patches, or a removeFile + streamed addFile for a restructure). Navigate
-  // to the Architecture tab once per change burst — even over a manual
-  // selection — so the user watches the change land; they can still click
-  // away mid-turn without being yanked back.
-  const designCellLive = useYTextString(collab.getFileText(DESIGN_CELL_PATH));
-  const cellChangeCount = useDesignCellChangeCount(
-    designCellLive,
-    agentInRoom && collab.status === "connected",
-  );
+  // Follow the write (#576, ADR-0023): while a turn runs, the editor selects
+  // each artifact as its write starts, so the passive watcher — the default
+  // posture at turn start — sees the work land in whatever renderer that
+  // artifact already has. The FIRST manual selection is a declaration of
+  // reading intent and ends the following for the rest of the turn; the rail's
+  // pulse on the writing entry stays the one-click way back in. A new turn
+  // resets to following. Supersedes the cell's burst navigation, which yanked
+  // back even over a manual selection.
+  const plan = usePlan(orgHandle ?? "default", projectName);
+  const followingRef = useRef(true);
+  const planTurnId = plan?.turnActive ? plan.turnId : null;
   useEffect(() => {
-    if (cellChangeCount > 0) setSelection({ kind: "cell-diagram" });
-  }, [cellChangeCount]);
+    if (planTurnId) followingRef.current = true;
+  }, [planTurnId]);
+  const writingPath = plan?.turnActive ? plan.writingPath : null;
+  // Keyed on the TURN as well as the path: a delta pass re-writes the same
+  // artifact the failed turn died on, so its first write can carry the exact
+  // path the previous turn left in `writingPath` — same value, new turn, and
+  // the follow must still fire.
+  useEffect(() => {
+    if (!writingPath || !followingRef.current) return;
+    setSelection(followSelection(writingPath));
+  }, [planTurnId, writingPath]);
+  const selectManually = (sel: SpecSelection) => {
+    followingRef.current = false;
+    setSelection(sel);
+  };
 
   // Default selection: while a design turn is actively producing design.cell,
   // default to Architecture (covers a reload mid-turn); otherwise the first
@@ -590,6 +605,21 @@ export function SpecView({ projectName }: { projectName: string }) {
     () => prdUnsettled(livePrd ?? prdContent.data?.content),
     [livePrd, prdContent.data],
   );
+  // The plan's entries sorted into rail sections (#576). `specGroupOf` is the
+  // same folder rule the committed files go through, so a planned path and the
+  // file it becomes can never disagree about where they belong.
+  const planEntries = useMemo<RailPlanEntry[]>(
+    () =>
+      (plan?.entries ?? []).map((e) => {
+        const group = specGroupOf(e.path);
+        return {
+          path: e.path,
+          status: e.status,
+          section: group === "designs" ? "design" : group,
+        };
+      }),
+    [plan],
+  );
   const railSections = useMemo(
     () =>
       buildRailSections({
@@ -601,6 +631,8 @@ export function SpecView({ projectName }: { projectName: string }) {
         designOutdated: status.data?.spec.designOutdated ?? false,
         assumptions: unsettled.assumptions,
         openQuestions: unsettled.openQuestions,
+        planEntries,
+        planWreckage: plan?.wreckage ?? false,
       }),
     [
       files,
@@ -610,6 +642,8 @@ export function SpecView({ projectName }: { projectName: string }) {
       status.data?.spec.agentFlow,
       status.data?.spec.designOutdated,
       unsettled,
+      planEntries,
+      plan?.wreckage,
     ],
   );
   // The rail's own answer to "is an agent writing the requirements", reused so
@@ -637,7 +671,7 @@ export function SpecView({ projectName }: { projectName: string }) {
       generateDesign();
       return;
     }
-    setSelection({ kind: "file", path: PRD_PATH });
+    selectManually({ kind: "file", path: PRD_PATH });
   };
 
   const seedChat = (message: string) =>
@@ -1238,10 +1272,11 @@ export function SpecView({ projectName }: { projectName: string }) {
               <SpecFileList
                 files={files}
                 selection={effectiveSelection}
-                onSelect={setSelection}
+                onSelect={selectManually}
                 onRegenerateDesign={generateDesign}
                 regenerateDisabled={agentBusy}
                 sections={railSections}
+                plan={planEntries}
                 onReason={onRailReason}
               />
             </Box>

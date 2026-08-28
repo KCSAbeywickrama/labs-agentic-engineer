@@ -227,6 +227,37 @@ export function buildAnswersInstruction(
   return `${ANSWERS_PREFIX}\n${lines.join("\n")}`;
 }
 
+// --- declare_plan (fire-and-forget, console ADR-0022 / #576) -----------------
+//
+// The agent declares the spec-bundle paths it is ABOUT to write, so the
+// console's spec rail can render a checklist (planned → writing → done) and an
+// honest count instead of only a log of what already happened. Unlike the HITL
+// tools above, the call does NOT end the turn: `execute` resolves immediately
+// and the agent keeps working (the fire-and-forget class, console ADR-0022).
+//
+// The plan is TURN-scoped and may GROW: the design agent writes the cell
+// first, and only the cell fixes the component set, so later calls add the
+// per-component files. Consumers take the UNION of every call in the turn —
+// first-seen order kept, restated paths ignored — and support no removal: an
+// entry the turn never writes simply dies with the turn.
+
+/** The wire tool NAME — one definition, same rule as the question tools. */
+export const DECLARE_PLAN_TOOL = "declare_plan" as const;
+
+/**
+ * The `declare_plan` tool input. WIRE source of truth; drift-guarded against
+ * the agents-service Zod schema.
+ */
+export interface DeclarePlanInput {
+  /**
+   * Full repo-relative spec-bundle paths (`specs/design/design.md`), in the
+   * order the turn intends to write them. The paths are the identity the
+   * console reconciles file mutations against — no display names ride here;
+   * naming a document is the console's job.
+   */
+  paths: string[];
+}
+
 // --- Skills (progressive disclosure, ADR-0002) ------------------------------
 //
 // Skills are GUIDANCE, not code, and they never travel on the wire: the turn's

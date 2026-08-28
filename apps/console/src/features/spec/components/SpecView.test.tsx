@@ -26,7 +26,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import type { components } from "../../../generated/aep-api";
 import { START_COMMAND } from "@aep/contracts/commands";
@@ -40,6 +40,7 @@ import {
   setPendingSeed,
 } from "../../agent-chat/chatStore";
 import { SpecView } from "./SpecView";
+import { clearPlan, planFileWriting } from "../../agent-chat/planStore";
 
 type PreflightItem = components["schemas"]["PreflightItem"];
 type BuildInputItem = components["schemas"]["BuildInputItem"];
@@ -1164,73 +1165,52 @@ describe("SpecView build dependency drawer (#252 Task 10)", () => {
   });
 });
 
-describe("SpecView architecture-tab navigation on design.cell change", () => {
+describe("SpecView follows the write (#576, ADR-0023)", () => {
+  const chatKey = chatKeyFor("acme", "proj1");
+  const CELL = "specs/design/design.cell";
+
   beforeEach(() => {
     vi.clearAllMocks();
     mockFlush.mockResolvedValue(undefined);
+    clearPlan(chatKey);
   });
 
-  // A connected room whose doc carries design.cell. An agent editFile lands as
-  // an in-place Y.Text patch (useYTextString observes it directly); a
-  // restructure's removeFile deletes the Y.Map entry, whose re-render the real
-  // hook receives via useCollabSpec's version bump — simulated here with a
-  // reassignment + rerender.
-  function connectedRoom(withAgent: boolean) {
-    const doc = new Y.Doc();
-    const files = doc.getMap<Y.Text>("files");
-    const ytext = new Y.Text();
-    files.set("specs/design/design.cell", ytext);
-    ytext.insert(0, "title X\ncomponent api service\n");
-    const collab = {
-      ...soloCollab(),
-      status: "connected",
-      peers: withAgent
-        ? [{ clientId: 1, name: "Agent", color: "#000000", kind: "agent" }]
-        : [],
-      getFileText: (path: string) => files.get(path) ?? null,
-    };
-    return { files, ytext, collab };
-  }
+  afterEach(() => clearPlan(chatKey));
 
-  it("navigates to the Architecture tab when the agent patches design.cell in place", () => {
-    const room = connectedRoom(true);
-    mockCollab = room.collab;
-
+  it("selects each artifact as its write starts — the cell opens as Architecture", () => {
     render(<SpecView projectName="proj1" />);
     expect(screen.queryByTestId("cell-diagram-panel")).not.toBeInTheDocument();
 
-    act(() => {
-      room.ytext.insert(room.ytext.length, "south email-provider service\n");
-    });
+    act(() => planFileWriting(chatKey, "t1", CELL));
 
     expect(screen.getByTestId("cell-diagram-panel")).toBeInTheDocument();
   });
 
-  it("navigates on a restructure (removeFile deletes the doc entry)", () => {
-    const room = connectedRoom(true);
-    mockCollab = room.collab;
+  it("the first manual selection ends following for the rest of the turn", () => {
+    render(<SpecView projectName="proj1" />);
+    act(() => planFileWriting(chatKey, "t1", CELL));
+    expect(screen.getByTestId("cell-diagram-panel")).toBeInTheDocument();
 
-    const { rerender } = render(<SpecView projectName="proj1" />);
+    // The reader clicks a document — a declaration of reading intent.
+    fireEvent.click(screen.getByText("overview"));
     expect(screen.queryByTestId("cell-diagram-panel")).not.toBeInTheDocument();
 
-    room.files.delete("specs/design/design.cell");
-    mockCollab = { ...room.collab, version: 1 };
-    rerender(<SpecView projectName="proj1" />);
-
-    expect(screen.getByTestId("cell-diagram-panel")).toBeInTheDocument();
+    // The turn moves on to other writes and back to the cell; a still-following
+    // editor would jump to Architecture here. It must not.
+    act(() => planFileWriting(chatKey, "t1", "specs/design/design.md"));
+    act(() => planFileWriting(chatKey, "t1", CELL));
+    expect(screen.queryByTestId("cell-diagram-panel")).not.toBeInTheDocument();
   });
 
-  it("does not navigate when no agent peer is in the room", () => {
-    const room = connectedRoom(false);
-    mockCollab = room.collab;
-
+  it("a new turn resets to following", () => {
     render(<SpecView projectName="proj1" />);
-
-    act(() => {
-      room.ytext.insert(room.ytext.length, "south email-provider service\n");
-    });
-
+    act(() => planFileWriting(chatKey, "t1", CELL));
+    fireEvent.click(screen.getByText("overview"));
     expect(screen.queryByTestId("cell-diagram-panel")).not.toBeInTheDocument();
+
+    act(() => planFileWriting(chatKey, "t2", CELL));
+
+    expect(screen.getByTestId("cell-diagram-panel")).toBeInTheDocument();
   });
 });
 

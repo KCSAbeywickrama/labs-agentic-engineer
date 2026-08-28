@@ -523,20 +523,44 @@ no-ops through; under-marking ships a design the user has already changed their 
 
 ### Artifact state
 
+Built as [#576](https://github.com/wso2/labs-agentic-engineer/issues/576): the skill declares what
+it is about to write (`declare_plan`, ADR-0022 — fire-and-forget tool-call-as-UI), and the rail
+renders the declaration.
+
 | state | shown as |
 |---|---|
-| planned | ghosted placeholder, declared **this turn** |
-| writing / modifying | active; the stream already distinguishes `add` from `edit` |
-| done | normal, clickable |
-| error | flagged, clickable to recover |
+| planned | **ghost row** — dim, and disabled: a control that selects nothing is worse than prose |
+| writing / modifying | pulse, name in primary |
+| done | a plain row — the file is simply there |
+| error | warning mark, name in error |
 
 **Planned means about to be written now.** The plan is turn-scoped, never project-scoped —
 pre-creating design placeholders during a requirements turn would recreate the `Being derived…`
 defect this file already removed.
 
-**The plan arrives in stages.** The design agent writes the cell first; only then does the
-component set exist, and the per-component files join the list. A count (*2 of 6*) is what answers
-"how long do I wait", and it is honest precisely because it grows.
+**The plan arrives in stages, and the console takes the union.** The design agent writes the cell
+first; only then does the component set exist, and the per-component files join the list. Repeated
+declarations accumulate — first-seen order kept, restated paths ignored, no removal — the one rule
+robust to an agent restating its whole plan. A count (*2 of 6*) beside the section title is what
+answers "how long do I wait", and it is honest precisely because it grows.
+
+**Every status is derived from the stream, never self-reported**: writing when the file's mutation
+starts, done when it completes, error only for the entry being written when the turn died. A clean
+turn's plan **dissolves** — the files are the record. A dead turn's **wreckage persists** — the
+done ticks, the one error, the remaining ghosts — surfaced through the section's attention chip
+(*The design run didn't finish* → **Update the design**) until the next declaring turn replaces it.
+Recovery is the `/design` delta pass, never a per-file retry.
+
+**The chat records each declaration as an activity step** — *Planned 3 documents*, then *Planned 4
+more documents* as the plan grows. The rail is the plan's real rendering; the chat row keeps the
+activity record complete. `start` declares nothing: a single-file turn's count answers nothing,
+and a skill that declares nothing leaves the rail exactly as it was.
+
+**The editor follows the write** (ADR-0023): each artifact is selected as its write starts, in
+whatever renderer it already has. The first manual selection is a declaration of reading intent
+and ends the following for the rest of the turn — the rail's pulse on the writing entry stays the
+one-click way back in. This supersedes the cell's burst navigation, which yanked back even over a
+manual selection.
 
 ### The pulse
 

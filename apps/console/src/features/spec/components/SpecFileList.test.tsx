@@ -38,6 +38,8 @@ const RAIL_INPUT: RailInput = {
   designOutdated: false,
   assumptions: 0,
   openQuestions: 0,
+  planEntries: [],
+  planWreckage: false,
 };
 
 /** The list as `SpecView` hands it over: deduped and sorted by path. */
@@ -192,5 +194,57 @@ describe("SpecFileList — the rail carries state", () => {
     fireEvent.click(screen.getByRole("button", { name: "Design: 1 to resolve" }));
     fireEvent.click(screen.getByRole("button", { name: "Update the design" }));
     expect(onReason).toHaveBeenCalledWith("update-design");
+  });
+});
+
+// The declared plan (#576): ghosts hold the coming files' places, the header
+// carries the count, and a ghost is disabled — a control that selects nothing
+// is worse than prose.
+describe("SpecFileList — the declared plan", () => {
+  const plan = [
+    { path: "specs/design/design.md", status: "writing" as const, section: "design" as const },
+    {
+      path: "specs/design/components/portal/design.json",
+      status: "planned" as const,
+      section: "design" as const,
+    },
+  ];
+
+  function renderWithPlan() {
+    render(
+      <OxygenUIThemeProvider theme={OxygenTheme}>
+        <SpecFileList
+          files={entries("specs/requirements/prd.md")}
+          selection={null}
+          onSelect={() => {}}
+          onRegenerateDesign={() => {}}
+          sections={railSections({ ...RAIL_INPUT, agentWorking: true, planEntries: plan })}
+          plan={plan}
+          onReason={() => {}}
+        />
+      </OxygenUIThemeProvider>,
+    );
+    return screen.getByRole("navigation", { name: "Spec files" });
+  }
+
+  it("renders a planned-but-unwritten path as a disabled ghost row in its group", () => {
+    const nav = renderWithPlan();
+    const ghost = within(nav)
+      .getAllByRole("button", { hidden: true })
+      .find((b) => b.textContent?.includes("Design overview") && b.textContent !== null);
+    // Both plan paths label as "Design overview" (the component design.json
+    // maps there too) — the DISABLED one is the ghost, the writing one stays live.
+    const rows = within(nav).getAllByRole("button", { hidden: true });
+    expect(
+      rows.some(
+        (b) => b.hasAttribute("disabled") || b.getAttribute("aria-disabled") === "true",
+      ),
+    ).toBe(true);
+    expect(ghost).toBeTruthy();
+  });
+
+  it("shows the section count from the plan", () => {
+    const nav = renderWithPlan();
+    expect(within(nav).getByText("0 of 2")).toBeTruthy();
   });
 });
