@@ -20,7 +20,6 @@ import {
   Box,
   Button,
   Chip,
-  LinearProgress,
   Link as MuiLink,
   Stack,
   Typography,
@@ -269,12 +268,10 @@ export function BuildTaskRow({
         </Stack>
       </Stack>
 
-      {/* The running row's own progress bar. Indeterminate on purpose — the
-          platform reports no percentage for a task, and a determinate bar would
-          be inventing one. */}
-      {state === "in_progress" && (
-        <LinearProgress color="info" sx={{ height: 2 }} />
-      )}
+      {/* No progress bar. It was indeterminate — the platform reports no
+          percentage for a task — so it animated without ever measuring
+          anything. The spinner on the row's status tile already says the agent
+          is on this one. */}
     </Box>
   );
 }

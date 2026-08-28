@@ -62,6 +62,7 @@ import {
 } from "../lib/ledger";
 import { anyTaskRunning, runClaims, taskTally, type RunClaims } from "../lib/taskRow";
 import { isDeliveryRun } from "../lib/runView";
+import { AgentPulse } from "./AgentPulse";
 import { BuildTaskList } from "./BuildTaskList";
 import { CycleBuilds } from "./CycleBuilds";
 import { RunFeed } from "./RunFeed";
@@ -263,11 +264,9 @@ function TasksMeta({
       >
         {parts.join(" · ")}
       </Typography>
-      {/* The pulse is keyed on a task actually executing, NOT on the run being
-          open — a settled build must not look like it is still working. */}
-      {anyTaskRunning(tasks, claims) && (
-        <StatusChip label="agent working" tone="info" appearance="soft" dot />
-      )}
+      {/* Keyed on a task actually executing, NOT on the run being open — a
+          settled build must not look like it is still working. */}
+      {anyTaskRunning(tasks, claims) && <AgentPulse />}
     </Stack>
   );
 }
