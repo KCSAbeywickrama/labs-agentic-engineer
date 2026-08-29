@@ -44,27 +44,15 @@ concept for *the agreed description of what we're building*.
 | `DESIGN` (not `DESIGNS` — one design, several files) | **Architecture** · **Design overview** · **Security** · then per-component | `specs/design/` |
 | `VALIDATION` | **Acceptance criteria** | `specs/validation/validation-criteria.json` |
 
-**Security is one rail entry with two tabs**, because it is one subject held in two
-files and a user does not think of it as two documents:
+**Security** is one rail entry, one page:
 
-| tab | what it holds | repo path |
+| artifact | what it holds | repo path |
 |---|---|---|
-| **Security architecture** | how a caller's role is resolved, and which surfaces are public | `specs/design/security.md` |
-| **Roles & users** | which roles the project uses, what each may do, and its test users | `specs/design/roles.json` |
+| **Security** | which Roles this project uses, what each may do within this project, its Test users, and the Thunder application client | `specs/design/security.json` |
 
-**Security architecture opens first.** The mechanism is the decision; the roster
-is what follows from it, so a reader arriving at Security meets the reasoning
-before a table of accounts. It also matches every other section, where the prose
-artifact leads.
-
-The prose tab keeps a pane to itself rather than sharing a scroll container with
-the roles table: it is a live collaborative editor with its own toolbar, bubble
-menu and streaming autoscroll, and form controls beside it fight all three.
-
-The repo paths **do not change**. They are the internal language, consumed by the agents, the
-runner's validation cycle and aep-api; renaming them buys nothing a user can see and costs a
-migration for every existing project. This table *is* the mapping — keep it, so nobody later
-"fixes" the inconsistency in the wrong direction. It holds only while the user never sees a
+Agents, the runner's validation cycle and aep-api consume that repo path
+internally. This table *is* the mapping — keep it, so nobody later "fixes" the
+inconsistency in the wrong direction. It holds only while the user never sees a
 path, which requires the agent to stop quoting them
 ([#530](https://github.com/wso2/labs-agentic-engineer/issues/530)).
 
