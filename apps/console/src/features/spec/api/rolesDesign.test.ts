@@ -53,7 +53,7 @@ function doc(over: Partial<RolesDesign> = {}): RolesDesign {
   };
 }
 
-/** A document with every field populated, so an edit has something to preserve. */
+/** Fully populated document for parse and planUsers round-trip tests. */
 function richDoc(): RolesDesign {
   return {
     version: 1,
@@ -63,14 +63,6 @@ function richDoc(): RolesDesign {
     testUsers: [{ username: "test-admin", role: "Admin" }],
     thunder: { name: "orders-app", type: "browser" },
   };
-}
-
-/** Parse an edit's output, failing loudly rather than returning a union. */
-function reparse(text: string): RolesDesign {
-  const parsed = parseRolesDesign(text);
-  expect(parsed.kind).toBe("ok");
-  if (parsed.kind !== "ok") throw new Error("unreachable");
-  return parsed.doc;
 }
 
 describe("parseRolesDesign", () => {

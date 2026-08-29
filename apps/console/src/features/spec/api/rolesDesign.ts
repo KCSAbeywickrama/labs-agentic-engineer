@@ -42,9 +42,9 @@ export type ParsedSecurity =
 export type ParsedRoles = ParsedSecurity;
 
 /**
- * Parse the document text. An empty or blank file is `empty`, not an error:
- * a design with no sign-in legitimately has no security document, and the panel
- * says so in words rather than showing a parse failure.
+ * Parse the document text. Missing or blank content is `empty` (a rail concern);
+ * a present but incomplete object (e.g. `{}`) is also `empty`, and the panel
+ * explains that in words rather than showing a parse failure.
  */
 export function parseRolesDesign(
   text: string | null | undefined,

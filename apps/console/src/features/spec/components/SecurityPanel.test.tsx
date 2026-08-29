@@ -135,6 +135,21 @@ describe("SecurityPanel — reading the document", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("explains an empty JSON object with the same info copy", () => {
+    setup({ rolesJson: "{}" });
+
+    expect(
+      screen.getByText(
+        /This Security document is empty or incomplete\. Ask in chat — the design agent can finish it\./,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(
+        /Disposable accounts for agents, not for real people/i,
+      ),
+    ).not.toBeInTheDocument();
+  });
+
   it("shows a malformed document as an error with the Security prefix", () => {
     setup({ rolesJson: '{"version": 1,' });
 
