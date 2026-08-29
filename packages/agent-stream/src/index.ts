@@ -52,6 +52,7 @@ export type {
   PlanScope,
   PlanContextFile,
   TurnJournal,
+  TurnAttachment,
   WorkspaceRef,
   McpConfig,
   CollabConfig,
@@ -76,8 +77,16 @@ export {
   isToolset,
   isSurface,
   isTurnSpec,
+  isTurnAttachment,
+  isTurnAttachmentsOrAbsent,
   isCollabConfig,
 } from "./contracts/sse-events.js";
+export type {
+  RolesDesign,
+  RoleDeclaration,
+  RolePermission,
+  TestUserDeclaration,
+} from "./contracts/roles-design.js";
 export type {
   ComponentDesign,
   Dependency,
@@ -130,8 +139,24 @@ export type { ComponentDesignProblem } from "./component-design-schema.js";
 // --- The agent.afm.md structural write-gate (the ai-agent component kind) ---
 export { checkAgentAfm, splitAfm, type AfmProblem, type AgentAfmFrontMatter } from "./agent-afm-schema.js";
 
+// --- The roles.json write-gate (the structured half of the security design) --
+export {
+  checkRolesDesign,
+  checkRolesReferences,
+  rolesDesignSchema,
+  ROLES_DESIGN_JSON_RE,
+  TEST_USERNAME_RE,
+} from "./roles-design-schema.js";
+export type { RolesDesignProblem } from "./roles-design-schema.js";
+
 // --- JSON Schema publication (the BFF validates the same definitions) --------
-export { componentDesignJsonSchema, planTaskJsonSchema, updateTaskJsonSchema, agentAfmJsonSchema } from "./json-schema.js";
+export {
+  componentDesignJsonSchema,
+  rolesDesignJsonSchema,
+  planTaskJsonSchema,
+  updateTaskJsonSchema,
+  agentAfmJsonSchema,
+} from "./json-schema.js";
 
 // --- The reference SSE reader ------------------------------------------------
 // `streamTurn` = fetch + parse (server-side callers: evals, playground).

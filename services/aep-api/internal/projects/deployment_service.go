@@ -62,6 +62,11 @@ type DeploymentService struct {
 	// deploys agents without MODEL_*, which agent-building answers with a 503
 	// from /healthz rather than a broken turn.
 	modelAccess ModelAccessProvider
+
+	// gatewayHost is host:port of the API gateway runtime, published to a
+	// consumer of a protected sibling as `<DEP>_GATEWAY_URL`. Empty leaves every
+	// consumer on the direct-Service lane (see gateway_address.go).
+	gatewayHost string
 }
 
 // ModelAccessProvider yields the MODEL_* env vars an ai-agent needs, having
@@ -116,6 +121,17 @@ func (s *DeploymentService) SetModelAccess(m ModelAccessProvider) {
 func (s *DeploymentService) SetConfigSources(envVars ComponentEnvVarReader, files RuntimeFileProvider) {
 	if s != nil {
 		s.envVars, s.files = envVars, files
+	}
+}
+
+// SetAPIGatewayHost wires the address a consumer reaches a protected sibling's
+// managed API on. Empty (the zero value) publishes no gateway address at all,
+// which leaves consumers on the unauthenticated direct-Service lane — so the
+// composition root passes projects.DefaultAPIGatewayHost unless the deployment
+// overrides it.
+func (s *DeploymentService) SetAPIGatewayHost(host string) {
+	if s != nil {
+		s.gatewayHost = host
 	}
 }
 
@@ -261,6 +277,11 @@ func (s *DeploymentService) deployOne(ctx context.Context, orgID, projectID, com
 		Issuers:       issuers,
 		EnvVars:       s.envVarsWithModelAccess(ctx, orgID, projectID, componentName, comp.ComponentType),
 		Files:         s.filesFor(ctx, orgID, projectID, componentName),
+		// The org IS the OC namespace components are created in, and that
+		// namespace is a segment of every managed API's gateway context path.
+		ComponentNamespace: orgID,
+		GatewayHost:        s.gatewayHost,
+		ProtectedSiblings:  ProtectedSiblingsOf(design, *comp),
 	})
 	if err := s.components.ApplyReleaseBinding(ctx, orgID, projectID, desired.Binding); err != nil {
 		return outcome, fmt.Errorf("apply release binding: %w", permanentIfMissing(err))

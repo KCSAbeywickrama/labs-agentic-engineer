@@ -27,12 +27,14 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   componentDesignJsonSchema,
+  rolesDesignJsonSchema,
   planTaskJsonSchema,
   updateTaskJsonSchema,
   agentAfmJsonSchema,
 } from "../src/json-schema.js";
 import {
   COMPONENT_DESIGN_SCHEMA_ARTIFACT,
+  ROLES_DESIGN_SCHEMA_ARTIFACT,
   PLAN_TASK_SCHEMA_ARTIFACT,
   UPDATE_TASK_SCHEMA_ARTIFACT,
   AGENT_AFM_SCHEMA_ARTIFACT,
@@ -42,6 +44,7 @@ import {
 // one means the schema changed without `pnpm --filter @aep/agent-stream gen`.
 const artifacts: [string, string, () => Record<string, unknown>][] = [
   ["component-design.schema.json", COMPONENT_DESIGN_SCHEMA_ARTIFACT, componentDesignJsonSchema],
+  ["roles-design.schema.json", ROLES_DESIGN_SCHEMA_ARTIFACT, rolesDesignJsonSchema],
   ["plan-task.schema.json", PLAN_TASK_SCHEMA_ARTIFACT, planTaskJsonSchema],
   ["update-task.schema.json", UPDATE_TASK_SCHEMA_ARTIFACT, updateTaskJsonSchema],
   ["agent-afm.schema.json", AGENT_AFM_SCHEMA_ARTIFACT, agentAfmJsonSchema],

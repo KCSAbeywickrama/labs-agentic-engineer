@@ -22,6 +22,7 @@ import type { SpecFileEntry } from "./mapping";
 export type SpecSelection =
   | { kind: "file"; path: string }
   | { kind: "cell-diagram" }
+  | { kind: "security" }
   | { kind: "wireframe"; component: string; dslPath: string };
 
 export interface DesignComponentNode {
@@ -38,44 +39,38 @@ export interface DesignSection {
   hasComponents: boolean;
   /** Whether a project-level design.cell exists (drives the Architecture tab). */
   hasCellDsl: boolean;
+  /** Whether either half of the security design exists (drives the Security entry). */
+  hasSecurity: boolean;
   components: DesignComponentNode[];
 }
 
 /** The project-level cell-diagram DSL path (rendered via the Architecture tab, never as a file). */
 export const DESIGN_CELL_PATH = "specs/design/design.cell";
 
+/**
+ * The two halves of the security design. They are ONE rail entry with two tabs,
+ * not two documents: a user thinks about security as one subject, and the split
+ * exists because the platform has to parse half of it, which is not their
+ * problem. `lexicon.md` holds the same mapping in words.
+ */
+export const SECURITY_MD_PATH = "specs/design/security.md";
+export const ROLES_JSON_PATH = "specs/design/roles.json";
+
+const SECURITY_PATHS: readonly string[] = [SECURITY_MD_PATH, ROLES_JSON_PATH];
+
 // SpecFileEntry.path is the full repo-relative path (mapping.ts's current
 // scheme — the unprefixed room-key scheme it retired), so this must match
 // the `specs/` prefix too.
 const COMPONENT_RE = /^specs\/design\/components\/([^/]+)\//;
 
-/** Component name for a `specs/design/components/<name>/…` path, else null. */
-function basename(path: string): string {
-  return path.split("/").at(-1) ?? path;
-}
-
+// The three artifacts a component's files are RANKED by (see
+// compareComponentFiles). Naming those documents is labels.ts's job now; these
+// only decide the order they are read in.
 const OPENAPI_RE = /\/openapi\.ya?ml$/;
 const COMPONENT_DESIGN_RE = /^specs\/design\/components\/[^/]+\/design\.json$/;
-const VALIDATION_CRITERIA_RE = /^specs\/validation\/validation-criteria\.json$/;
 const AGENT_AFM_RE = /^specs\/design\/components\/[^/]+\/agent\.afm\.md$/;
 
-/**
- * The name a reader is looking for, not the file it happens to live in — the
- * spec view names artifacts by what they ARE ("API Spec"), so a bare file name
- * is the fallback for anything without an established name. Shared by the
- * sidebar (SpecFileList) and the content pane's waiting state (SpecView) so a
- * file is never called two different things in the same screen.
- */
-export function fileLabel(path: string): string {
-  if (OPENAPI_RE.test(path)) return "API Spec";
-  if (COMPONENT_DESIGN_RE.test(path)) return "Design Overview";
-  if (VALIDATION_CRITERIA_RE.test(path)) return "Validation Criteria";
-  // An ai-agent's behaviour contract. "agent.afm.md" names the format, not the
-  // thing.
-  if (AGENT_AFM_RE.test(path)) return "Agent Spec";
-  return basename(path);
-}
-
+/** Component name for a `specs/design/components/<name>/…` path, else null. */
 export function componentOf(path: string): string | null {
   return COMPONENT_RE.exec(path)?.[1] ?? null;
 }
@@ -84,12 +79,6 @@ function isDsl(path: string): boolean {
   return path.endsWith(".dsl");
 }
 
-/**
- * Group the Designs files into an overview list + per-component nodes. The raw
- * `.dsl` sources are not listed as files; each becomes its component's wireframe
- * entry (rendered as a diagram, not shown as text). Components and their files
- * are sorted by path for a stable tree.
- */
 /**
  * Reading order for one component's artifacts, which is NOT path order.
  *
@@ -119,10 +108,16 @@ function compareComponentFiles(a: SpecFileEntry, b: SpecFileEntry): number {
 export function buildDesignSection(files: SpecFileEntry[]): DesignSection {
   const design = files.filter((f) => f.group === "designs");
   const hasCellDsl = design.some((f) => f.path === DESIGN_CELL_PATH);
+  const hasSecurity = design.some((f) => SECURITY_PATHS.includes(f.path));
   // design.cell is surfaced through the Architecture tab (streaming cell
   // diagram), never as a raw text file — keep it out of the overview list.
   const overview = design
-    .filter((f) => componentOf(f.path) === null && f.path !== DESIGN_CELL_PATH)
+    .filter(
+      (f) =>
+        componentOf(f.path) === null &&
+        f.path !== DESIGN_CELL_PATH &&
+        !SECURITY_PATHS.includes(f.path),
+    )
     .sort((a, b) => a.path.localeCompare(b.path));
 
   const byComponent = new Map<string, DesignComponentNode>();
@@ -143,7 +138,13 @@ export function buildDesignSection(files: SpecFileEntry[]): DesignSection {
   );
   for (const c of components) c.files.sort(compareComponentFiles);
 
-  return { overview, hasComponents: components.length > 0, hasCellDsl, components };
+  return {
+    overview,
+    hasComponents: components.length > 0,
+    hasCellDsl,
+    hasSecurity,
+    components,
+  };
 }
 
 /** Stable string identity for a selection (React keys + selected-state compare). */
@@ -153,6 +154,8 @@ export function selectionKey(sel: SpecSelection): string {
       return `file:${sel.path}`;
     case "cell-diagram":
       return "cell-diagram";
+    case "security":
+      return "security";
     case "wireframe":
       return `wireframe:${sel.component}`;
   }
