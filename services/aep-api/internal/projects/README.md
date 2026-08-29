@@ -147,6 +147,16 @@ delivery's kernel: shared behaviour belongs in the root the slices import.
   exactly one failure class, so no tally or recency heuristic is needed. Every other terminal reason keeps
   the Build card as the catch-all. `deploy.validation` itself is the run row's VERDICT column; the report
   and the per-cycle detail behind it live on the version's run story (list-build-runs).
+- **`deploy.validation = none` means a verdict is EXPECTED; `cancelled` means one is not.** `none` is
+  PENDING — a run is live, or a dev run filed the version's validation task and the reconcile sweep has
+  not started judging it yet — so a consumer must not read it as "there is nothing to wait for". That is
+  what `skipped` and `inconclusive` say, and reading `none` that way is what offered production a version
+  nothing had checked. The one no-verdict state that IS settled is `cancelled`: somebody stopped the
+  judging, so nothing answers until they re-ask. Every other route to no verdict — a failed increment, an
+  agent that died — stays `none`, because refusing an unjudged version is the safe answer when nobody
+  chose otherwise. The derivation is gated on the run's KIND (`delivery.RunValidates`), never its state
+  alone: the selector feeding it falls back to the DEV run, and a cancelled dev run is an ABANDONED
+  INCREMENT, so the ungated form would report an abandoned version as having nothing left to wait for.
 - **A project delete takes its run SUPERVISORS down before its run ROWS.** Purging the rows does not stop
   the workflows that write them: nothing else ends a run workflow, its milestone poll retries unbounded
   against a repository the same delete removes, and its id is keyed on (org, project, milestone) alone —

@@ -139,6 +139,7 @@ func (e BuildSummaryWaitingReason) Valid() bool {
 // Defines values for DeployStageValidation.
 const (
 	DeployStageValidationAwaitingFix  DeployStageValidation = "awaiting-fix"
+	DeployStageValidationCancelled    DeployStageValidation = "cancelled"
 	DeployStageValidationFailed       DeployStageValidation = "failed"
 	DeployStageValidationInconclusive DeployStageValidation = "inconclusive"
 	DeployStageValidationNone         DeployStageValidation = "none"
@@ -153,6 +154,8 @@ const (
 func (e DeployStageValidation) Valid() bool {
 	switch e {
 	case DeployStageValidationAwaitingFix:
+		return true
+	case DeployStageValidationCancelled:
 		return true
 	case DeployStageValidationFailed:
 		return true
@@ -1184,7 +1187,7 @@ type DeployStage struct {
 	Status string `json:"status"`
 
 	// Validation Validation state of the newest milestone run. This MIRRORS the run's verdict rather than folding it, so the chip says what the run concluded: a fold would have to discard `partial`, `inconclusive` and `unreported` at exactly the surface that needs them, and `completed` never said whether anything passed.
-	// Three LIFECYCLE values: none (the run has not reached validation), running (a validation CYCLE is in flight — not merely a live run with no verdict yet) and awaiting-fix (validation failed and the run is repairing it — the work in flight is a CODING cycle, which is why the state names the implementation rather than validation). The rest are the verdict verbatim. They are mutually exclusive in time, so nothing is hidden behind another.
+	// Four LIFECYCLE values. none is PENDING, never settled: a verdict is expected and has not arrived, because a run is live or a dev run filed the version's validation task and nothing has started it yet. A client must not read it as "there is no verdict to wait for" — that is what skipped and inconclusive say. running is a validation CYCLE in flight, not merely a live run with no verdict yet. awaiting-fix is validation having failed with the run repairing it — the work in flight is a CODING cycle, which is why the state names the implementation rather than validation. cancelled is a person STOPPING the judging: a validation run settled cancelled before recording a verdict, so nothing will answer for this version unless somebody re-asks. The rest are the verdict verbatim. They are mutually exclusive in time, so nothing is hidden behind another.
 	// passed (every criterion was automated and passed), partial (some passed, none failed, some were never covered), failed (a criterion asserted and lost), inconclusive (no test results at all), unreported (no usable report at the validation cycle's merge commit), skipped (no acceptance criteria, and incident runs, which get no validation cycle).
 	// failed and unreported fail the run only once its validation attempts are spent: while attempts remain the run repairs and re-validates, and reads awaiting-fix in the meantime.
 	// The report path and per-cycle detail live on the version's run story (list-build-runs).
@@ -1195,7 +1198,7 @@ type DeployStage struct {
 }
 
 // DeployStageValidation Validation state of the newest milestone run. This MIRRORS the run's verdict rather than folding it, so the chip says what the run concluded: a fold would have to discard `partial`, `inconclusive` and `unreported` at exactly the surface that needs them, and `completed` never said whether anything passed.
-// Three LIFECYCLE values: none (the run has not reached validation), running (a validation CYCLE is in flight — not merely a live run with no verdict yet) and awaiting-fix (validation failed and the run is repairing it — the work in flight is a CODING cycle, which is why the state names the implementation rather than validation). The rest are the verdict verbatim. They are mutually exclusive in time, so nothing is hidden behind another.
+// Four LIFECYCLE values. none is PENDING, never settled: a verdict is expected and has not arrived, because a run is live or a dev run filed the version's validation task and nothing has started it yet. A client must not read it as "there is no verdict to wait for" — that is what skipped and inconclusive say. running is a validation CYCLE in flight, not merely a live run with no verdict yet. awaiting-fix is validation having failed with the run repairing it — the work in flight is a CODING cycle, which is why the state names the implementation rather than validation. cancelled is a person STOPPING the judging: a validation run settled cancelled before recording a verdict, so nothing will answer for this version unless somebody re-asks. The rest are the verdict verbatim. They are mutually exclusive in time, so nothing is hidden behind another.
 // passed (every criterion was automated and passed), partial (some passed, none failed, some were never covered), failed (a criterion asserted and lost), inconclusive (no test results at all), unreported (no usable report at the validation cycle's merge commit), skipped (no acceptance criteria, and incident runs, which get no validation cycle).
 // failed and unreported fail the run only once its validation attempts are spent: while attempts remain the run repairs and re-validates, and reads awaiting-fix in the meantime.
 // The report path and per-cycle detail live on the version's run story (list-build-runs).
