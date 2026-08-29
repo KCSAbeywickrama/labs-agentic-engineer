@@ -50,22 +50,17 @@ describe("simAnswer", () => {
     expect(simAnswer(BRIEF, "Here are two options.", 2).toLowerCase()).toMatch(/thanks|that's all/);
   });
 
-  // The brief's own reference implementation returns `brief.goal` verbatim at
-  // turn 0. That passes the test above only because the fixture's goal text
-  // happens not to contain the withheld value. Here the goal text DOES
-  // contain it (a realistic phrasing — travellers say their dates up front),
-  // which is exactly the case the brief's version fails: it would return the
-  // withheld date straight through. Confirmed by temporarily reverting this
-  // file's implementation to the brief's version and watching this test fail.
-  it("redacts a withheld value even when the goal text itself contains it", () => {
-    const leakyBrief = {
-      goal: "Book a hotel in London for the 25th-28th December trip",
-      facts: { city: "London", nights: 3, dates: "25th-28th December" },
-      withholds: ["dates"],
+  // Turn 0 performs no substitution on `goal` at all — a goal that states a
+  // withheld fact is rejected upstream by `parseScenarios`, so `simAnswer`
+  // never has to touch the text. Proven here with a substring that an
+  // earlier redaction step over-matched: "3 people" against a withheld
+  // `nights: 3` must survive completely intact.
+  it("performs no substitution on the goal — an unrelated substring that would have over-matched survives verbatim", () => {
+    const brief = {
+      goal: "Book a hotel for 3 people under $300",
+      facts: { city: "London", nights: 3 },
+      withholds: ["nights"],
     };
-    const said = simAnswer(leakyBrief, "", 0);
-    expect(said).not.toContain("December");
-    // Still volunteered once asked by name — withholding is not refusing.
-    expect(simAnswer(leakyBrief, "Which dates?", 1)).toContain("December");
+    expect(simAnswer(brief, "", 0)).toBe("Book a hotel for 3 people under $300 (city: London)");
   });
 });

@@ -84,6 +84,22 @@ export function parseScenarios(input: unknown): ScenarioFile {
   for (const s of result.data.scenarios) {
     if (seen.has(s.id)) throw new ScenarioError(`duplicate scenario id: ${s.id}`);
     seen.add(s.id);
+
+    // A goal that states a withheld fact was never actually withheld — that
+    // is an authoring mistake, not something the sim user can paper over at
+    // runtime. Catching it once here, where the author can see and fix the
+    // scenario, beats trying to filter the leak out of free text on every
+    // turn of every run.
+    const goal = s.brief.goal.toLowerCase();
+    for (const name of s.brief.withholds) {
+      const value = s.brief.facts[name];
+      if (value === undefined) continue;
+      if (goal.includes(String(value).toLowerCase())) {
+        throw new ScenarioError(
+          `${s.id}: brief.goal states the withheld fact "${name}" (${String(value)})`,
+        );
+      }
+    }
   }
   return result.data;
 }

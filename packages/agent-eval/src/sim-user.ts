@@ -27,19 +27,6 @@ export function withheldValue(brief: Brief, name: string): string | undefined {
   return v === undefined ? undefined : String(v);
 }
 
-// Strips every withheld fact's value out of free text. `goal` is
-// author-written prose and may state a withheld fact in passing (a traveller
-// naturally says their dates up front) — returning it verbatim would leak the
-// fact turn 0 was supposed to hold back, silently defeating `withholds`.
-function redactWithheld(text: string, brief: Brief): string {
-  let out = text;
-  for (const name of brief.withholds) {
-    const v = withheldValue(brief, name);
-    if (v && out.includes(v)) out = out.split(v).join("[withheld]");
-  }
-  return out;
-}
-
 /**
  * What the simulated user says next.
  *
@@ -58,7 +45,13 @@ export function simAnswer(brief: Brief, agentSaid: string, turn: number): string
     const extra = volunteered.length
       ? ` (${volunteered.map(([name, value]) => `${name}: ${String(value)}`).join(", ")})`
       : "";
-    return redactWithheld(brief.goal, brief) + extra;
+    // `goal` is used verbatim: a goal that states a withheld fact is an
+    // authoring error caught by `parseScenarios`, not something to filter
+    // out of free text at runtime. Substring surgery over prose is exactly
+    // what caused the earlier case-folding, mid-word, and non-string-fact
+    // defects — catching the mistake once at authoring time is durable in a
+    // way no amount of hardening a text-mangling function could be.
+    return brief.goal + extra;
   }
 
   const asked = agentSaid.toLowerCase();

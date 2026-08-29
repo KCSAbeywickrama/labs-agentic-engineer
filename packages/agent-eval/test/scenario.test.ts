@@ -60,4 +60,31 @@ describe("parseScenarios", () => {
     expect(() => parseScenarios({ version: 1, component: "x", scenarios: [{ id: "SC-1" }] }))
       .toThrow(/scenarios\[0\]/);
   });
+
+  // A goal that states a withheld fact was never actually withheld — that is
+  // an authoring mistake, and it is cheaper to catch once here than to try
+  // to filter it out of free text on every turn of every run.
+  it("rejects a goal that states a withheld fact, naming the scenario and the fact", () => {
+    const bad = structuredClone(VALID);
+    bad.scenarios[0]!.brief = {
+      goal: "Book three nights in London for the 25th-28th December trip",
+      facts: { city: "London", dates: "25th-28th December" },
+      withholds: ["dates"],
+    };
+    expect(() => parseScenarios(bad)).toThrow(/SC-001/);
+    expect(() => parseScenarios(bad)).toThrow(/dates/);
+  });
+
+  // Case is not a defence — a differently-cased mention states the fact just
+  // as plainly to a reader of the scenario file.
+  it("rejects a withheld fact stated in the goal with different casing", () => {
+    const bad = structuredClone(VALID);
+    bad.scenarios[0]!.brief = {
+      goal: "Trip dates: 25TH-28TH DECEMBER please",
+      facts: { dates: "25th-28th December" },
+      withholds: ["dates"],
+    };
+    expect(() => parseScenarios(bad)).toThrow(/SC-001/);
+    expect(() => parseScenarios(bad)).toThrow(/dates/);
+  });
 });
