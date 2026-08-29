@@ -175,7 +175,7 @@ export function SignInPanel({
   logins: readonly PublishedTestUser[];
   thunderUrl: string;
   revealPassword: (username: string) => Promise<string>;
-}): JSX.Element {
+}) {
   return (
     <Box>
       {logins.length > 0 && (
@@ -211,7 +211,7 @@ export function ProjectSignInPanel({
   projectName,
 }: {
   projectName: string;
-}): JSX.Element {
+}) {
   const live = useProjectRoles(projectName, true);
   const reveal = useRevealTestUserPassword(projectName);
   const logins =
