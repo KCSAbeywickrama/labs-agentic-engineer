@@ -21,6 +21,7 @@ import { describe, expect, it } from "vitest";
 import {
   addTestUser,
   parseRolesDesign,
+  parseSecurityDesign,
   plannedUsersFor,
   planUsers,
   removeTestUser,
@@ -76,15 +77,15 @@ function reparse(text: string): RolesDesign {
 }
 
 describe("parseRolesDesign", () => {
-  // A design with no sign-in legitimately has no roles document. "Absent" is a
+  // A design with no sign-in legitimately has no security document. "Empty" is a
   // state the panel puts into words; "invalid" is an error it shows in red.
   it.each([
     ["null", null],
     ["undefined", undefined],
     ["empty", ""],
     ["whitespace only", "  \n\t  "],
-  ])("reads %s as absent rather than as a failure", (_label, text) => {
-    expect(parseRolesDesign(text)).toEqual({ kind: "absent" });
+  ])("reads %s as empty rather than as a failure", (_label, text) => {
+    expect(parseRolesDesign(text)).toEqual({ kind: "empty" });
   });
 
   it("reports malformed JSON as invalid", () => {
@@ -94,30 +95,51 @@ describe("parseRolesDesign", () => {
     expect(parsed.message).not.toBe("");
   });
 
-  it("names the offending path when the document violates the schema", () => {
+  it.each([
+    ["empty object", "{}"],
+    ["JSON array", "[]"],
+  ])("reads %s as empty rather than as a failure", (_label, text) => {
+    expect(parseRolesDesign(text)).toEqual({ kind: "empty" });
+  });
+
+  it("reads well-formed JSON missing required fields as empty", () => {
     const bad = {
       ...doc(),
       roles: [{ ...role("Admin"), description: undefined }],
     };
-    const parsed = parseRolesDesign(JSON.stringify(bad));
-    expect(parsed.kind).toBe("invalid");
-    if (parsed.kind !== "invalid") throw new Error("unreachable");
-    expect(parsed.message).toContain("roles.0.description");
+    expect(parseRolesDesign(JSON.stringify(bad))).toEqual({ kind: "empty" });
   });
 
-  // The schema is strict, so a stray key (a password, most dangerously) is a
-  // rejection rather than something silently carried through an edit.
-  it("rejects an unknown top-level key", () => {
+  // The schema is strict, but an unknown key means incomplete, not unparseable.
+  it("reads an unknown top-level key as empty", () => {
     const parsed = parseRolesDesign(
       JSON.stringify({ ...doc(), password: "hunter2" }),
     );
-    expect(parsed.kind).toBe("invalid");
+    expect(parsed).toEqual({ kind: "empty" });
   });
 
   it("accepts a well-formed document and hands back the parsed shape", () => {
     const good = richDoc();
     const parsed = parseRolesDesign(serializeRolesDesign(good));
     expect(parsed).toEqual({ kind: "ok", doc: good });
+  });
+
+  it("accepts thunder without scopes", () => {
+    const good = doc({ thunder: { name: "orders-app", type: "browser" } });
+    const parsed = parseRolesDesign(serializeRolesDesign(good));
+    expect(parsed).toEqual({ kind: "ok", doc: good });
+  });
+});
+
+describe("parseSecurityDesign", () => {
+  it("is the same function as parseRolesDesign", () => {
+    expect(parseSecurityDesign).toBe(parseRolesDesign);
+  });
+
+  it("classifies the same as parseRolesDesign on empty and valid input", () => {
+    const good = serializeRolesDesign(richDoc());
+    expect(parseSecurityDesign("{}")).toEqual(parseRolesDesign("{}"));
+    expect(parseSecurityDesign(good)).toEqual(parseRolesDesign(good));
   });
 });
 

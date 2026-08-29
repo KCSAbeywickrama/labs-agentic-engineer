@@ -17,13 +17,15 @@
  */
 
 /**
- * Reading and editing `specs/design/roles.json` from the console.
+ * Reading and editing `specs/design/security.json` from the console.
  *
  * Everything here is a PURE function over the document text — parse, and
  * document-in / document-out edits. The panel does the rendering, the caller
  * does the writing (through the collab room, so the room's committer stays the
  * only writer to committed truth). Keeping the transformations pure is what
  * makes them testable without a Yjs doc or a browser.
+ *
+ * Incomplete JSON objects are empty, not a parse error. JSON is not streamed.
  *
  * The shape is `RolesDesign` from `@aep/agent-stream` — the same definition the
  * design agent's write gate and the BFF's save gate validate against, so the
@@ -34,19 +36,23 @@ import { rolesDesignSchema, type RolesDesign } from "@aep/agent-stream";
 
 export type { RolesDesign };
 
-export type ParsedRoles =
+export type ParsedSecurity =
   | { kind: "ok"; doc: RolesDesign }
-  | { kind: "absent" }
+  | { kind: "empty" }
   | { kind: "invalid"; message: string };
 
+export type ParsedRoles = ParsedSecurity;
+
 /**
- * Parse the document text. An absent or blank file is `absent`, not an error:
- * a design with no sign-in legitimately has no roles document, and the panel
+ * Parse the document text. An empty or blank file is `empty`, not an error:
+ * a design with no sign-in legitimately has no security document, and the panel
  * says so in words rather than showing a parse failure.
  */
-export function parseRolesDesign(text: string | null | undefined): ParsedRoles {
+export function parseRolesDesign(
+  text: string | null | undefined,
+): ParsedRoles {
   if (text === null || text === undefined || text.trim() === "")
-    return { kind: "absent" };
+    return { kind: "empty" };
   let raw: unknown;
   try {
     raw = JSON.parse(text);
@@ -56,18 +62,16 @@ export function parseRolesDesign(text: string | null | undefined): ParsedRoles {
       message: e instanceof Error ? e.message : String(e),
     };
   }
-  const res = rolesDesignSchema.safeParse(raw);
-  if (!res.success) {
-    const first = res.error.issues[0];
-    return {
-      kind: "invalid",
-      message: first
-        ? `${first.path.join(".") || "(root)"}: ${first.message}`
-        : "does not match the schema",
-    };
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    return { kind: "empty" };
   }
+  const res = rolesDesignSchema.safeParse(raw);
+  if (!res.success) return { kind: "empty" };
   return { kind: "ok", doc: res.data };
 }
+
+/** @see parseRolesDesign */
+export const parseSecurityDesign = parseRolesDesign;
 
 /** Serialise a document back to the on-disk form: 2-space indent, trailing newline. */
 export function serializeRolesDesign(doc: RolesDesign): string {
