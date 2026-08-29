@@ -30,20 +30,22 @@ import { useSpecFiles, useSpecFileContent } from "../../spec/api/queries";
 const OpenInSpec = createLink(Button);
 
 /**
- * Read-only: the renderer's pan/zoom/drag and its own control bar belong to the
- * workspace, not to a summary panel.
+ * The renderer's pan/zoom/drag and its own control bar belong to the workspace,
+ * not to a summary panel.
  *
- * `pointer-events: none` alone would leave a zoom control and a "click a
- * component" hint on screen doing nothing, which is worse than either extreme —
- * so the two chrome elements are hidden with it. The diagram still lays itself
- * out and still fits itself to the box; it just stops being a thing you can
- * grab.
+ * This hides the CHROME only — a zoom control and a "click a component" hint
+ * left on screen doing nothing is worse than either extreme. Read-only is NOT
+ * `pointer-events: none`, which is what this used to rely on: React Flow's own
+ * stylesheet sets `pointer-events: all` on `.react-flow__node`, so the nodes
+ * re-enabled themselves and stayed draggable, and pointer events never governed
+ * the keyboard at all — all eleven nodes sat in the tab order with
+ * `tabindex="0"`. The renderer's own `readOnly` does that job; see
+ * `CellDiagramView`.
  */
 const READ_ONLY_SX = {
   flex: 1,
   minWidth: 0,
   display: "flex",
-  pointerEvents: "none",
   "& .zoom-controls, & .canvas-notification": { display: "none" },
 } as const;
 
@@ -223,6 +225,8 @@ function Body({
       // room for controls that are not on screen. `compact` fits the graph to
       // the box instead.
       compact
+      // Not a thing you can grab, and not a thing you can tab into.
+      readOnly
     />
   );
 }

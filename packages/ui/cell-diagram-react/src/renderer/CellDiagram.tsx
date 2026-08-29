@@ -50,6 +50,8 @@ export interface CellDiagramProps {
    * panel), rather than reserving room for controls that are not shown.
    */
   compact?: boolean;
+  /** A diagram to look at, not to operate — see `DiagramCanvasProps.readOnly`. */
+  readOnly?: boolean;
 }
 
 export function CellDiagram({
@@ -62,7 +64,8 @@ export function CellDiagram({
   tolerant,
   customLayout,
   onCustomLayoutChange,
-  compact
+  compact,
+  readOnly
 }: CellDiagramProps) {
   const compiled = useMemo(
     () => (source !== undefined ? compileProject(source, { tolerant }) : null),
@@ -86,6 +89,7 @@ export function CellDiagram({
         customLayout={customLayout}
         onCustomLayoutChange={onCustomLayoutChange}
         compact={compact}
+        readOnly={readOnly}
       />
     </div>
   );

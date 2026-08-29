@@ -421,6 +421,18 @@ export interface DiagramCanvasProps {
    * room reserved for zoom controls and notifications for the diagram itself.
    */
   compact?: boolean;
+  /**
+   * A diagram to look at, not to operate: no dragging, no selection, and no
+   * keyboard focus on the nodes.
+   *
+   * A host cannot achieve this with `pointer-events: none` on a wrapper, which
+   * is what the overview panel tried. React Flow's own stylesheet sets
+   * `pointer-events: all` on `.react-flow__node`, so the nodes re-enable
+   * themselves and stay draggable; and pointer events never governed the
+   * keyboard anyway — every node carries `tabindex="0"`, so a keyboard user
+   * tabbed through eleven of them on a panel that is not supposed to respond.
+   */
+  readOnly?: boolean;
 }
 
 export interface CanvasMessage {
@@ -439,7 +451,8 @@ export function DiagramCanvas({
   onCustomLayoutChange,
   canvasMessage = null,
   theme = "light",
-  compact = false
+  compact = false,
+  readOnly = false
 }: DiagramCanvasProps) {
   const [activeConnectionIds, setActiveConnectionIds] = useState<string[]>([]);
   const [, setMotionVersion] = useState(0);
@@ -448,7 +461,15 @@ export function DiagramCanvas({
     () => (model ? toReactFlow(model) : { nodes: [], edges: [], cellSize: { width: 0, height: 0 } }),
     [model]
   );
-  const positionedNodes = useMemo(() => applyCustomLayout(flow.nodes, customLayout), [customLayout, flow.nodes]);
+  const laidOutNodes = useMemo(() => applyCustomLayout(flow.nodes, customLayout), [customLayout, flow.nodes]);
+  // Per-node `draggable` BEATS the canvas-wide `nodesDraggable`, so a read-only
+  // canvas has to clear the flag `flowLayout` sets on the kinds a user may
+  // normally arrange. Without this the nodes keep their drag handlers and the
+  // "read-only" preview is still something you can rearrange with a mouse.
+  const positionedNodes = useMemo(
+    () => (readOnly ? laidOutNodes.map((n) => ({ ...n, draggable: false })) : laidOutNodes),
+    [laidOutNodes, readOnly],
+  );
   const [dragNodes, setDragNodes] = useState<Node[] | null>(null);
   const liveNodes = dragNodes ?? positionedNodes;
   const motion = classifyDiagramMotion(
@@ -581,9 +602,12 @@ export function DiagramCanvas({
         edgeTypes={edgeTypes}
         minZoom={0.25}
         maxZoom={1.35}
-        nodesDraggable
+        nodesDraggable={!readOnly}
         nodesConnectable={false}
-        elementsSelectable
+        elementsSelectable={!readOnly}
+        nodesFocusable={!readOnly}
+        edgesFocusable={!readOnly}
+        disableKeyboardA11y={readOnly}
         proOptions={{ hideAttribution: true }}
         onNodesChange={handleNodesChange}
         onNodeDragStop={handleNodeDragStop}

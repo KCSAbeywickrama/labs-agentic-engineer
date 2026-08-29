@@ -584,8 +584,12 @@ export function projectDependencyReadiness(
 export function projectDependencies(
   s: Exclude<ProjectScenario, "error">,
 ): ComponentDependencies[] {
-  // No design yet, nothing to declare dependencies.
-  return s === "fresh" || s === "repo-error" ? [] : designDependencies;
+  // No design yet, nothing to declare dependencies. `kickoff-failed` belongs
+  // here for the same reason `fresh` does: its status says `hasDesign: false`,
+  // so a dependency list would be architecture the project never had.
+  return s === "fresh" || s === "repo-error" || s === "kickoff-failed"
+    ? []
+    : designDependencies;
 }
 
 // The OpenAPI contract served by GET .../components/:name/openapi — a
@@ -1477,16 +1481,25 @@ const prdOnlyFiles: MockSpecFile[] = [
   { path: "specs/requirements/prd.md", content: seededPrd },
 ];
 
-const collaborationFiles: MockSpecFile[] = [
-  // The unsettled PRD, not the seeded one: this scenario IS the interview in
-  // progress, which is when assumptions and open questions exist.
-  { path: "specs/requirements/prd.md", content: unsettledPrd },
+// Requirements plus the design prose, with a SETTLED PRD. Everything from
+// `building` onward builds on this: those scenarios have published a version,
+// and a published spec carrying open questions would contradict its own status.
+const settledSpecFiles: MockSpecFile[] = [
+  { path: "specs/requirements/prd.md", content: seededPrd },
   { path: "specs/requirements/user-stories.md", content: userStories },
   { path: "specs/design/architecture.md", content: architectureMd },
 ];
 
+// The same set mid-interview: the unsettled PRD, which is when assumptions and
+// open questions exist. Only the `spec` scenario gets it — that scenario IS the
+// interview in progress.
+const collaborationFiles: MockSpecFile[] = [
+  { path: "specs/requirements/prd.md", content: unsettledPrd },
+  ...settledSpecFiles.slice(1),
+];
+
 const fullFiles: MockSpecFile[] = [
-  ...collaborationFiles,
+  ...settledSpecFiles,
   { path: "specs/design/design.cell", content: designCell },
   {
     path: "specs/design/components/storefront/design.json",

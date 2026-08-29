@@ -48,6 +48,12 @@ export interface CellDiagramViewProps {
    * floating chrome an embed hides anyway.
    */
   compact?: boolean | undefined;
+  /**
+   * A diagram to look at, not to operate. A host that hides the controls with
+   * CSS has NOT achieved this: React Flow re-enables pointer events on its own
+   * nodes, and never took them out of the tab order to begin with.
+   */
+  readOnly?: boolean | undefined;
 }
 
 export const CellDiagramView = memo(function CellDiagramView({
@@ -55,6 +61,7 @@ export const CellDiagramView = memo(function CellDiagramView({
   emptyState,
   layoutKey,
   compact,
+  readOnly,
 }: CellDiagramViewProps) {
   const hasSource = typeof source === "string" && source.trim().length > 0;
   if (!hasSource) {
@@ -89,7 +96,12 @@ export const CellDiagramView = memo(function CellDiagramView({
           </Box>
         }
       >
-        <CellDiagram source={source} layoutKey={layoutKey} compact={compact} />
+        <CellDiagram
+          source={source}
+          layoutKey={layoutKey}
+          compact={compact}
+          readOnly={readOnly}
+        />
       </Suspense>
     </Box>
   );
