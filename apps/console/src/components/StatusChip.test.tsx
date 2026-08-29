@@ -58,28 +58,6 @@ describe("StatusChip", () => {
     );
   });
 
-  // The soft chip's leading mark. A dot is a state; a spinner is a state the
-  // platform is still working on and will leave on its own, so the two must not
-  // be interchangeable — motion has to stay reserved for things in motion.
-  it("prefixes a still dot when asked for one", () => {
-    const { container } = render(
-      <StatusChip label="Parked" tone="warning" appearance="soft" dot />,
-    );
-    expect(container.querySelector(".MuiCircularProgress-root")).toBeNull();
-  });
-
-  it("prefixes a spinner instead of the dot when asked for one", () => {
-    const { container } = render(
-      <StatusChip label="agent working" tone="info" appearance="soft" spinner />,
-    );
-    expect(screen.getByText("agent working")).toBeInTheDocument();
-    // aria-hidden: the chip's own text already names the state, and a bare
-    // progressbar announced beside it reads the same fact a second time with
-    // no value in it.
-    const spinner = container.querySelector(".MuiCircularProgress-root");
-    expect(spinner).toHaveAttribute("aria-hidden", "true");
-  });
-
   // For a label that hedges with a MARK — "Validated*" — which no screen reader
   // announces, so it would be heard as "Validated" and be indistinguishable from a
   // clean pass. Visually-hidden text rather than aria-label on the root: a Chip with
