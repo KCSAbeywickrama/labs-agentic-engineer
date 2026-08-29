@@ -17,13 +17,11 @@
  */
 
 /**
- * Reading and editing `specs/design/security.json` from the console.
+ * Reading `specs/design/security.json` from the console.
  *
- * Everything here is a PURE function over the document text — parse, and
- * document-in / document-out edits. The panel does the rendering, the caller
- * does the writing (through the collab room, so the room's committer stays the
- * only writer to committed truth). Keeping the transformations pure is what
- * makes them testable without a Yjs doc or a browser.
+ * Everything here is a PURE function over the document text — parse and the
+ * planned-user helpers the panel needs to promise usernames. The panel does
+ * the rendering; the design agent writes the document in chat.
  *
  * Incomplete JSON objects are empty, not a parse error. JSON is not streamed.
  *
@@ -168,79 +166,4 @@ export function roleSlug(name: string): string {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
   return s === "" ? "role" : s;
-}
-
-/**
- * Add a test user to a role.
- *
- * When the role had none, its supplied name was only ever a promise — adding
- * one authored user replaces it, which is why nothing needs removing first.
- */
-export function addTestUser(
-  doc: RolesDesign,
-  roleName: string,
-  username: string,
-): string {
-  const role = doc.roles.find(
-    (r) => r.name.toLowerCase() === roleName.toLowerCase(),
-  );
-  const next: RolesDesign = {
-    ...doc,
-    testUsers: [...doc.testUsers, { username, role: role?.name ?? roleName }],
-  };
-  return serializeRolesDesign(next);
-}
-
-/**
- * Rename a test user.
- *
- * A rename of a name the design did not carry — the build's supplied name, shown
- * in the panel before it exists — is an ADD, because that is what the user means
- * by typing over it.
- */
-export function renameTestUser(
-  doc: RolesDesign,
-  from: string,
-  to: string,
-): string {
-  const existing = doc.testUsers.find((u) => u.username === from);
-  if (!existing) {
-    const role = roleOfSuppliedUser(doc, from);
-    return role === null
-      ? serializeRolesDesign(doc)
-      : addTestUser(doc, role, to);
-  }
-  const next: RolesDesign = {
-    ...doc,
-    testUsers: doc.testUsers.map((u) =>
-      u.username === from ? { ...u, username: to } : u,
-    ),
-  };
-  return serializeRolesDesign(next);
-}
-
-/**
- * Remove a test user from the DESIGN. It does not delete the account: directory
- * objects are shared and outlive the projects that name them, so deleting one is
- * a separate, explicit action.
- */
-export function removeTestUser(doc: RolesDesign, username: string): string {
-  const next: RolesDesign = {
-    ...doc,
-    testUsers: doc.testUsers.filter((u) => u.username !== username),
-  };
-  return serializeRolesDesign(next);
-}
-
-/** The role whose supplied (not-yet-authored) username is `username`, or null. */
-function roleOfSuppliedUser(doc: RolesDesign, username: string): string | null {
-  for (const role of doc.roles) {
-    if (suppliedUsernameFor(doc, role.name) === username) {
-      const authored = doc.testUsers.some(
-        (u) => u.role.toLowerCase() === role.name.toLowerCase(),
-      );
-      if (!authored) return role.name;
-    }
-  }
-  return null;
 }

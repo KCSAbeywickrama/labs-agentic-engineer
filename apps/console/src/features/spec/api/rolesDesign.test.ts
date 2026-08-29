@@ -19,13 +19,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  addTestUser,
   parseRolesDesign,
   parseSecurityDesign,
   plannedUsersFor,
   planUsers,
-  removeTestUser,
-  renameTestUser,
   roleSlug,
   serializeRolesDesign,
   suppliedUsernameFor,
@@ -270,105 +267,5 @@ describe("suppliedUsernameFor agrees with the Go build's rolesspec.supplyUsernam
     expect(plannedUsersFor(d, "Admin")).toEqual([
       { username: "alice", role: "Admin", supplied: false },
     ]);
-  });
-});
-
-describe("addTestUser", () => {
-  it("appends the user and leaves every other field byte-for-byte", () => {
-    const d = richDoc();
-    const out = addTestUser(d, "Viewer", "qa-viewer");
-
-    expect(out).toBe(
-      serializeRolesDesign({
-        ...richDoc(),
-        testUsers: [
-          { username: "test-admin", role: "Admin" },
-          { username: "qa-viewer", role: "Viewer" },
-        ],
-      }),
-    );
-    expect(reparse(out)).toBeTruthy();
-    expect(d).toEqual(richDoc());
-  });
-
-  it("stores the role name as the document declares it, not as it was typed", () => {
-    const out = addTestUser(richDoc(), "vIeWeR", "qa-viewer");
-    expect(reparse(out).testUsers).toContainEqual({
-      username: "qa-viewer",
-      role: "Viewer",
-    });
-  });
-
-  it("serialises as 2-space JSON with a trailing newline", () => {
-    const out = addTestUser(doc(), "Admin", "ada");
-    expect(out.endsWith("\n")).toBe(true);
-    expect(out).toContain('\n  "version": 1');
-  });
-});
-
-describe("renameTestUser", () => {
-  it("renames an authored user in place, preserving everything else", () => {
-    const d = richDoc();
-    const out = renameTestUser(d, "test-admin", "ada");
-
-    expect(out).toBe(
-      serializeRolesDesign({
-        ...richDoc(),
-        testUsers: [{ username: "ada", role: "Admin" }],
-      }),
-    );
-    expect(reparse(out).testUsers).toEqual([
-      { username: "ada", role: "Admin" },
-    ]);
-    expect(d).toEqual(richDoc());
-  });
-
-  // Typing over the platform's promised name is the user CHOOSING a name — the
-  // row exists in the panel but not in the document, so the edit has to add it.
-  it("treats renaming a SUPPLIED (not-yet-authored) username as an add", () => {
-    const d = richDoc(); // Viewer has no authored user ⇒ supplied "test-viewer"
-    expect(suppliedUsernameFor(d, "Viewer")).toBe("test-viewer");
-
-    const out = renameTestUser(d, "test-viewer", "qa-viewer");
-
-    expect(reparse(out).testUsers).toEqual([
-      { username: "test-admin", role: "Admin" },
-      { username: "qa-viewer", role: "Viewer" },
-    ]);
-  });
-
-  it("is a no-op for a name the document neither holds nor would supply", () => {
-    const d = richDoc();
-    expect(renameTestUser(d, "nobody", "somebody")).toBe(
-      serializeRolesDesign(richDoc()),
-    );
-  });
-});
-
-describe("removeTestUser", () => {
-  it("drops only the named user and leaves every other field byte-for-byte", () => {
-    const d: RolesDesign = {
-      ...richDoc(),
-      testUsers: [
-        { username: "test-admin", role: "Admin" },
-        { username: "qa-viewer", role: "Viewer" },
-      ],
-    };
-    const out = removeTestUser(d, "qa-viewer");
-
-    expect(out).toBe(
-      serializeRolesDesign({
-        ...richDoc(),
-        testUsers: [{ username: "test-admin", role: "Admin" }],
-      }),
-    );
-    expect(reparse(out).testUsers).toEqual([
-      { username: "test-admin", role: "Admin" },
-    ]);
-  });
-
-  it("still produces a document the parser accepts when the last user goes", () => {
-    const out = removeTestUser(richDoc(), "test-admin");
-    expect(reparse(out).testUsers).toEqual([]);
   });
 });

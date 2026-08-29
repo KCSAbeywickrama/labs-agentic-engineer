@@ -34,7 +34,6 @@
 
 import { setDocFile } from "@aep/collab-doc";
 
-import type { AccountActions } from "../components/SecurityPanel";
 import { ROLES_JSON_PATH, SECURITY_MD_PATH } from "../api/designTree";
 import type { SpecFileEntry } from "../api/mapping";
 import { useSpecFileContent } from "../api/queries";
@@ -47,6 +46,13 @@ import {
 } from "../api/roles";
 import type { CollabSpec } from "../collab/useCollabSpec";
 import { useYTextString } from "../collab/useYTextString";
+
+/** Kept on the hook return for Task 3 cleanup; Spec Security no longer consumes it. */
+interface AccountActions {
+  reveal: (username: string) => Promise<string>;
+  rotate: (username: string) => Promise<string>;
+  remove: (username: string) => Promise<void>;
+}
 
 export interface SecurityEntry {
   /** The roles document — live from the room, else the committed copy. */
