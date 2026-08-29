@@ -28,7 +28,15 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import { Copy, ExternalLink, Eye } from "@wso2/oxygen-ui-icons-react";
-import type { PublishedTestUser } from "../lib/publishedTestUsers";
+import { env } from "../../../config/env";
+import {
+  useProjectRoles,
+  useRevealTestUserPassword,
+} from "../../spec/api/roles";
+import {
+  publishedTestUsers,
+  type PublishedTestUser,
+} from "../lib/publishedTestUsers";
 
 function copyText(value: string) {
   void navigator.clipboard?.writeText(value);
@@ -192,5 +200,33 @@ export function SignInPanel({
       )}
       <ThunderSentence thunderUrl={thunderUrl} />
     </Box>
+  );
+}
+
+/**
+ * Live Deploy wiring for SignInPanel. Mount only when deploy is green so the
+ * roles GET does not run while the panel is hidden.
+ */
+export function ProjectSignInPanel({
+  projectName,
+}: {
+  projectName: string;
+}): JSX.Element {
+  const live = useProjectRoles(projectName, true);
+  const reveal = useRevealTestUserPassword(projectName);
+  const logins =
+    live.isPending || live.isError
+      ? []
+      : publishedTestUsers(live.data?.testUsers ?? []);
+
+  return (
+    <SignInPanel
+      logins={logins}
+      thunderUrl={env.thunderUrl}
+      revealPassword={async (username) => {
+        const data = await reveal.mutateAsync(username);
+        return data.password;
+      }}
+    />
   );
 }
