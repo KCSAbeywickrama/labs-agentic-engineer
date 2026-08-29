@@ -247,9 +247,6 @@ vi.mock("../hooks/useSecurityEntry", () => ({
   useSecurityEntry: () => ({
     rolesJson: null,
     live: undefined,
-    onRolesChange: undefined,
-    proseFragment: null,
-    actions: { reveal: vi.fn(), rotate: vi.fn(), remove: vi.fn() },
   }),
 }));
 

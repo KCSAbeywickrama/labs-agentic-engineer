@@ -289,9 +289,9 @@ export function SpecFileList({
             {design.overview.map((f) =>
               row(fileSel(f.path), fileLabel(f.path), <LayoutDashboard size={16} />),
             )}
-            {/* ONE entry for both halves of the security design — the roles and
-                their test users, and the prose saying how a caller's role is
-                resolved. Two files, one subject; the panel tabs between them. */}
+            {/* ONE rail entry for security.json — present file shows the row;
+                missing file hides it. Leftover security.md / roles.json do not
+                count. */}
             {design.hasSecurity &&
               row({ kind: "security" }, "Security", <ShieldCheck size={16} />)}
             {design.components.map((c) => {
