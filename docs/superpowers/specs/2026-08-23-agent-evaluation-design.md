@@ -41,45 +41,85 @@ needs:
   being graded on.
 - **Drivers** that run the real agent rather than a mock of it.
 
-That framework is for OUR agents, in this repo, run by AEP developers. This
-design **extracts its portable half and reuses it** for CUSTOMER agents, inside
-the build.
+That framework is for OUR agents, in this repo, run by AEP developers. It is
+NOT what customer-agent evaluation will use — see below.
 
-The split is already clean. These files carry no `@aep/*` import and move to a
-shared package: `scenario.ts` (the brief and rubric zod schemas),
-`scoring/judge.ts` (the model-graded rubric judge), `scoring/bands.ts`,
-`scoring/review-sheet.ts`, `eval-kit.ts`, `config.ts`, `project.ts`. The
-AEP-coupled files stay: the DRIVERS (`drivers/*.ts`, six `@aep/*` imports each),
-`runner.ts`, `tracing.ts`, `scoring/structural.ts`.
+## The harness: promptfoo, decided by spike
 
-That the drivers are the coupling is the point — a driver knows how to talk to
-the thing under test. `evals/spec-agents` keeps its driver for our spec agents;
-a customer agent gets a new one that talks to `POST /chat`.
+**promptfoo**, with a custom provider we own. Not the internal eval kit, and not
+a new framework.
 
-**Extracted rather than written fresh, for one reason above the others: the
-judge.** A new judge would be a second, differently-calibrated answer to "how
-good is this agent" — one scale for AEP's own agents, another for customers'.
-For a platform whose product is agents, that is a bad thing to own two of. The
-same applies to the sim user, which is tuned (fatigue tiers, fact vs
-persona-fallback vs improvised answers) and coupled only by a single type
-import.
+The question that decided it: our scenario is a multi-turn CONVERSATION in which
+a simulated user withholds facts to see whether the agent asks for them, while
+promptfoo's unit is a prompt and its output. A spike (throwaway, not kept)
+answered it — a `file://provider.js` runs the whole conversation and returns the
+transcript as `output`, and promptfoo grades that without complaint. Confirmed
+in the spike: the provider is accepted and reported under its own id, the
+transcript reaches assertions, provider metadata survives into the result,
+deterministic and model-graded assertions validate in one suite, and — the part
+the fix loop depends on — a FAILING assertion yields `success: false`, a score,
+and a per-assertion reason naming which line failed.
 
-**promptfoo was considered and rejected**, having checked its capabilities
-rather than recalled them. It would have given weighted `llm-rubric` scoring,
-grader pinning, config validation and report formatting off the shelf — real
-wins. It was turned down because it brings its OWN judge, and the duplicate
-calibration above costs more than the reporting saves. Worth revisiting if the
-extracted kit ever proves harder to maintain than expected.
+What that buys, none of which we then own: weighted rubric scoring, thresholds,
+grader pinning, config validation, JSON output, and report formatting.
+
+What we still write either way, and the only thing we write: the driver — boot
+the agent, stub its tools, run the sim-user conversation.
+
+Two costs, recorded rather than argued away. It is an external tool in every
+customer build, in a repo that pins `ai` and `pg` majors precisely because
+version drift burned it — so the version is pinned, and it prints an
+update-available banner in every log. And promptfoo's `prompts:` field is
+vestigial for us: we satisfy it and drive from the scenario instead.
+
+Not verified in the spike, and worth five minutes when a key is at hand: an
+`llm-rubric` assertion actually scoring. The config validates with weighted
+rubrics and a pinned grader, but no graded assertion was executed — there was no
+model key in the spike environment.
+
+**WSO2 Agent Manager was considered and is the wrong instrument for this phase.**
+Its evaluation is retrospective, over OpenTelemetry traces from a deployed and
+instrumented agent, configured as monitors in the AMP Console, with no
+file-based config, no CI integration and no programmatic output. At build time
+there is no deployment to trace. It IS the right direction for post-deploy
+quality monitoring, and it is blocked on a prerequisite this platform does not
+meet: generated agents emit no traces (no skill mentions OpenTelemetry) and the
+observability plane is logs-only (fluent-bit, OpenSearch, observer). That
+instrumentation is worth doing on its own merits and is not part of this work.
+
+## The model key
+
+The org's connected Anthropic key — the same one the spec agent uses.
+
+There is ONE org key, resolved per request rather than baked into a process:
+`aep-api` reads it and forwards it on every design turn
+(`Turn(ctx, conversationID, orgID, anthropicKey, req)`), which is why the agents
+service carries no `ANTHROPIC_API_KEY` in its environment. The same key becomes
+`MODEL_API_KEY` on a deployed agent. Evaluation is a third consumer of the same
+key, so this is a wiring task, not a missing capability.
+
+Deliberately NOT the coding agent's credential. `CLAUDE_CODE_OAUTH_TOKEN` is
+OAuth-shaped where promptfoo's Anthropic provider expects an API key, and it is
+the PLATFORM's coding budget — evaluation spend belongs to the org whose agent
+is being evaluated. The agent under test also needs a key, and it should be the
+one it will run with in production.
+
+**The spend is a design decision, not a side effect:** three iterations across
+ten scenarios is a real number of model calls on the org's key, for the agent
+under test and for the judge.
 
 ## Decisions
 
 Each of these was settled in conversation; the reasoning is recorded because the
 alternative was live and may look attractive again later.
 
-**1. Behavioural evaluation, not contract checks (first cut).**
-Contract checks are deterministic and belong with the platform's own tests. The
-thing a human cannot verify by reading the AFM is whether the agent *behaves*,
-and that is what this evaluates.
+**1. Behavioural evaluation leads; contract checks ride along.**
+The thing a human cannot verify by reading the AFM is whether the agent
+*behaves*, and that is the point of this work. Contract checks — /chat answers,
+a second turn remembers, an unknown conversationId 404s — were originally
+deferred to a second cut because they needed their own machinery. With
+promptfoo they do not: deterministic assertions sit in the same suite as graded
+ones, cost nothing to run, and need no judge. They are included.
 
 **2. In-process during the build. Real model, stubbed tools.**
 The loop's value is iteration, and iteration is only affordable where a retry
