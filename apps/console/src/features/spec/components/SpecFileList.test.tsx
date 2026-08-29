@@ -229,18 +229,16 @@ describe("SpecFileList — the declared plan", () => {
 
   it("renders a planned-but-unwritten path as a disabled ghost row in its group", () => {
     const nav = renderWithPlan();
-    const ghost = within(nav)
-      .getAllByRole("button", { hidden: true })
-      .find((b) => b.textContent?.includes("Design overview") && b.textContent !== null);
-    // Both plan paths label as "Design overview" (the component design.json
-    // maps there too) — the DISABLED one is the ghost, the writing one stays live.
+    // The ghost is the row under the COMPONENT (portal), which the plan lists
+    // but nothing has written; the design-overview row beside it is being
+    // written and must stay live. Asserting "some row is disabled" passed for
+    // the wrong reasons, so each row is now identified and checked on its own.
     const rows = within(nav).getAllByRole("button", { hidden: true });
-    expect(
-      rows.some(
-        (b) => b.hasAttribute("disabled") || b.getAttribute("aria-disabled") === "true",
-      ),
-    ).toBe(true);
-    expect(ghost).toBeTruthy();
+    const disabled = (b: HTMLElement) =>
+      b.hasAttribute("disabled") || b.getAttribute("aria-disabled") === "true";
+    const ghostRows = rows.filter((b) => disabled(b));
+    expect(ghostRows).toHaveLength(1);
+    expect(ghostRows[0]!.textContent).toContain("Design overview");
   });
 
   it("shows the section count from the plan", () => {

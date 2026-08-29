@@ -42,7 +42,8 @@ import {
   peekPlan,
   planDeclared,
   planFileWriting,
-  planFileDone,
+  planFileStreamed,
+  planFileSettled,
   planTurnEnded,
   WRITE_TOOLS,
 } from "./planStore.js";
@@ -292,7 +293,8 @@ export async function attachAndFoldTurn(
         const path = readToolInputPath(st.buf);
         if (!path) break;
         writeFileCard(part.id!, st, path, "done");
-        if (WRITE_TOOLS.has(st.toolName)) planFileDone(chatKey, turnId, path);
+        // The body is complete; the VERDICT settles the entry below.
+        if (WRITE_TOOLS.has(st.toolName)) planFileStreamed(chatKey, turnId, path);
         break;
       }
       case "tool-call": {
@@ -333,6 +335,9 @@ export async function attachAndFoldTurn(
       case "tool-result": {
         if (!part.toolName || !FILE_TOOLS.has(part.toolName)) break;
         const change = toChange(part);
+        if (WRITE_TOOLS.has(part.toolName)) {
+          planFileSettled(chatKey, turnId, change.path, change.result?.ok !== false);
+        }
         upsertToolMessage(chatKey, {
           role: "tool",
           turnId,

@@ -1347,7 +1347,10 @@ export function SpecView({ projectName }: { projectName: string }) {
                         links={{
                           path: SECURITY_MD_PATH,
                           knownPaths: specPaths,
-                          open: (path) => setSelection({ kind: "file", path }),
+                          // A link inside a document is the reader choosing
+                          // where to go, so it ends follow-the-write like any
+                          // other manual pick (ADR-0023).
+                          open: (path) => selectManually({ kind: "file", path }),
                         }}
                       />
                     ) : (
@@ -1467,7 +1470,7 @@ export function SpecView({ projectName }: { projectName: string }) {
                     links={{
                       path: selectedFile.path,
                       knownPaths: specPaths,
-                      open: (path) => setSelection({ kind: "file", path }),
+                      open: (path) => selectManually({ kind: "file", path }),
                     }}
                   />
                 ) : ytext ? (

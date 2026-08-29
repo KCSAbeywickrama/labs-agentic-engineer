@@ -44,9 +44,11 @@ vi.mock("@aep/agent-stream", () => ({
   parseSseStream: async function* () {
     for (const part of queuedParts) yield part;
   },
-  toChange: (part: { toolCallId?: string; result?: unknown }) => ({
+  // `path` is read off the frame when a test supplies one, so a test can settle
+  // a SPECIFIC file; the fixed default keeps the older card tests unchanged.
+  toChange: (part: { toolCallId?: string; result?: unknown; path?: string }) => ({
     op: "add",
-    path: "specs/design/components/checkout-api/design.json",
+    path: part.path ?? "specs/design/components/checkout-api/design.json",
     result: part.result,
   }),
   opForTool: () => "add",
@@ -340,6 +342,14 @@ describe("attachAndFoldTurn — declare_plan folds into the plan store (#576)", 
       { type: "tool-input-start", id: "f1", toolName: "addFile" },
       { type: "tool-input-delta", id: "f1", delta: '{"path":"specs/design/design.cell"' },
       { type: "tool-input-end", id: "f1" },
+      // The VERDICT is what ticks it — the body being complete is not enough.
+      {
+        type: "tool-result",
+        toolName: "addFile",
+        toolCallId: "f1",
+        path: "specs/design/design.cell",
+        result: { ok: true },
+      },
       { type: "tool-input-start", id: "f2", toolName: "addFile" },
       { type: "tool-input-delta", id: "f2", delta: '{"path":"specs/design/design.md"' },
       { type: "turn-failed", message: "died mid-write" },

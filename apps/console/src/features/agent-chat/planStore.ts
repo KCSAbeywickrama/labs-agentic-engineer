@@ -117,6 +117,14 @@ function forTurn(chatKey: string, turnId: string): PlanSnapshot {
   if (cur?.paused) {
     return { ...cur, turnId, turnActive: true, paused: false };
   }
+  // Wreckage outlives the turn that follows it. Decision 6 says the residue
+  // stands "until the next DECLARING turn replaces it" — so an ordinary turn
+  // in between (a chat edit, a settle) carries it along rather than quietly
+  // clearing the alarm by writing one unrelated file. Its writes still count:
+  // a ghost this turn happens to write is settled like any other entry.
+  if (cur?.wreckage) {
+    return { ...cur, turnId, turnActive: true };
+  }
   return fresh(turnId);
 }
 
@@ -149,20 +157,24 @@ export function parseDeclarePlan(input: unknown): string[] | null {
  * entries were genuinely new (the chat activity row says "N artifacts").
  */
 export function planDeclared(chatKey: string, turnId: string, paths: string[]): number {
-  const plan = forTurn(chatKey, turnId);
+  const cur = plans.get(chatKey);
+  // The declaring turn is the one that replaces a previous run's residue: this
+  // run's plan is what it just declared, not the last run's leftovers.
+  const plan =
+    cur && cur.turnId !== turnId && cur.wreckage ? fresh(turnId) : forTurn(chatKey, turnId);
   const known = new Set(plan.entries.map((e) => e.path));
-  const fresh: PlanEntry[] = [];
+  const added: PlanEntry[] = [];
   for (const path of paths) {
     if (known.has(path)) continue;
     known.add(path);
-    fresh.push({ path, status: "planned" });
+    added.push({ path, status: "planned" });
   }
-  if (fresh.length > 0) {
-    commit(chatKey, { ...plan, entries: [...plan.entries, ...fresh] });
+  if (added.length > 0) {
+    commit(chatKey, { ...plan, entries: [...plan.entries, ...added] });
   } else if (plans.get(chatKey) !== plan) {
     commit(chatKey, plan); // a new turn restated an old plan — still replaces it
   }
-  return fresh.length;
+  return added.length;
 }
 
 /** A file mutation's input stream opened and resolved its path. */
@@ -177,14 +189,43 @@ export function planFileWriting(chatKey: string, turnId: string, path: string): 
   });
 }
 
-/** That mutation's input stream closed — the body is complete. */
-export function planFileDone(chatKey: string, turnId: string, path: string): void {
+/**
+ * That mutation's input stream closed — the body is complete, so nothing more
+ * is being typed. The entry stays `writing`: whether the write was ACCEPTED is
+ * a separate fact that arrives with the tool-result, and the chat card learns
+ * the same lesson one line over — painting success here would tick an entry
+ * the write-gates may still reject.
+ */
+export function planFileStreamed(chatKey: string, turnId: string, path: string): void {
   const plan = plans.get(chatKey);
   if (!plan || plan.turnId !== turnId) return;
+  if (plan.writingPath !== path) return;
+  commit(chatKey, { ...plan, writingPath: null });
+}
+
+/** The bundle ruled on the write: `done`, or `error` when it was rejected. */
+export function planFileSettled(
+  chatKey: string,
+  turnId: string,
+  path: string,
+  ok: boolean,
+): void {
+  const plan = plans.get(chatKey);
+  if (!plan || plan.turnId !== turnId) return;
+  const entries = plan.entries.map((e) =>
+    e.path === path ? { ...e, status: ok ? ("done" as const) : ("error" as const) } : e,
+  );
+  // A retained wreck that has since been written out in full is no longer a
+  // wreck — the alarm goes with the last outstanding entry.
+  if (plan.wreckage && entries.every((e) => e.status === "done")) {
+    plans.delete(chatKey);
+    notify(chatKey);
+    return;
+  }
   commit(chatKey, {
     ...plan,
     writingPath: plan.writingPath === path ? null : plan.writingPath,
-    entries: plan.entries.map((e) => (e.path === path ? { ...e, status: "done" } : e)),
+    entries,
   });
 }
 
@@ -255,6 +296,8 @@ interface HistoryPart {
   type?: string;
   toolName?: string;
   input?: unknown;
+  /** `tool-result` payload: `{ type: "json", value: OpResult }`. */
+  output?: unknown;
 }
 
 /**
@@ -320,11 +363,27 @@ export function rehydratePlanFromHistory(
       turns.push(newTurn());
       continue;
     }
-    if (message.role !== "assistant" || !Array.isArray(message.content)) continue;
+    if (message.role !== "assistant" && message.role !== "tool") continue;
+    if (!Array.isArray(message.content)) continue;
     const turn = turns[turns.length - 1]!;
     for (const raw of message.content) {
       if (typeof raw !== "object" || raw === null) continue;
       const part = raw as HistoryPart;
+      // The VERDICT settles an entry, never the call. A write that the bundle
+      // rejected still leaves a `tool-call` in the transcript, so settling on
+      // the call alone rehydrated a refused write as a green tick — the same
+      // trap the live fold has, one surface over. `removeFile` is absent from
+      // WRITE_TOOLS on purpose: a deletion is not a write.
+      if (part.type === "tool-result" && WRITE_TOOLS.has(part.toolName ?? "")) {
+        const value = (part.output as { value?: unknown } | undefined)?.value as
+          | { ok?: unknown; path?: unknown }
+          | undefined;
+        const path = value?.path;
+        const entry =
+          typeof path === "string" ? turn.entries.find((e) => e.path === path) : undefined;
+        if (entry) entry.status = value?.ok === false ? "error" : "done";
+        continue;
+      }
       if (part.type !== "tool-call") continue;
       if (part.toolName === DECLARE_PLAN_TOOL) {
         turn.declared = true;

@@ -126,6 +126,13 @@ export function SpecFileList({
   // enough for every group.
   const allFiles = [...files, ...ghosts].sort((a, b) => a.path.localeCompare(b.path));
 
+  // Which of the two security files the Security row speaks for: the one being
+  // written wins, then the one the plan names at all, else the prose.
+  const securityStatusPath =
+    [SECURITY_MD_PATH, ROLES_JSON_PATH].find((p) => planByPath.get(p) === "writing") ??
+    [SECURITY_MD_PATH, ROLES_JSON_PATH].find((p) => planByPath.has(p)) ??
+    SECURITY_MD_PATH;
+
   // The PRD leads, whatever it sorts as. Everything else under Requirements
   // elaborates it — a feature file is depth on a story the PRD defines — and on
   // path alone `features/…` sorts ABOVE `prd.md`, burying the document the
@@ -382,11 +389,12 @@ export function SpecFileList({
                 "Security",
                 <ShieldCheck size={16} />,
                 false,
-                // ONE entry, two files (the prose and the roles): its status is
-                // whichever of them the plan actually names, or the prose by
-                // default. Keyed off only `security.md`, a plan that declared
-                // `roles.json` alone drew a live row over nothing written yet.
-                planByPath.has(ROLES_JSON_PATH) ? ROLES_JSON_PATH : SECURITY_MD_PATH,
+                // ONE entry, two files (the prose and the roles), so its status
+                // is the more ADVANCED of the two: a row that reported only
+                // `security.md` sat still while `roles.json` was being written,
+                // and one that picked whichever was merely present could show
+                // "planned" over a file already going down.
+                securityStatusPath,
               )}
             {design.components.map((c) => {
               const collapsed = collapsedComponents.has(c.name);

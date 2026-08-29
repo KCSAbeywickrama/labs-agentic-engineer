@@ -235,11 +235,15 @@ export function buildAnswersInstruction(
 // tools above, the call does NOT end the turn: `execute` resolves immediately
 // and the agent keeps working (the fire-and-forget class, console ADR-0022).
 //
-// The plan is TURN-scoped and may GROW: the design agent writes the cell
-// first, and only the cell fixes the component set, so later calls add the
-// per-component files. Consumers take the UNION of every call in the turn —
-// first-seen order kept, restated paths ignored — and support no removal: an
-// entry the turn never writes simply dies with the turn.
+// The plan may GROW: the design agent writes the cell first, and only the cell
+// fixes the component set, so later calls add the per-component files.
+// Consumers take the UNION of every call — first-seen order kept, restated
+// paths ignored — and support no removal. What becomes of an entry the run
+// never writes depends on how the work ENDED: a clean finish dissolves the
+// plan whole (the documents are the record), while a failure keeps the
+// remainder standing as unfinished work until a later declaring call replaces
+// it. A question mid-flight ends neither — the work resumes in the turn that
+// answers.
 
 /** The wire tool NAME — one definition, same rule as the question tools. */
 export const DECLARE_PLAN_TOOL = "declare_plan" as const;

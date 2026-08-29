@@ -22,13 +22,20 @@ import {
   parseDeclarePlan,
   peekPlan,
   planDeclared,
-  planFileDone,
+  planFileSettled,
+  planFileStreamed,
   planFileWriting,
   planTurnEnded,
   rehydratePlanFromHistory,
 } from "./planStore";
 
 const KEY = "test-key";
+
+/** The two halves of a successful write, as the fold delivers them. */
+function settle(key: string, turnId: string, path: string): void {
+  planFileStreamed(key, turnId, path);
+  planFileSettled(key, turnId, path, true);
+}
 const CELL = "specs/design/design.cell";
 const OVERVIEW = "specs/design/design.md";
 const PORTAL = "specs/design/components/portal/design.json";
@@ -59,7 +66,7 @@ describe("a question mid-flight pauses the plan rather than ending it", () => {
   it("holds the plan for the answering turn, and that turn adopts it", () => {
     planDeclared(KEY, "t1", [CELL, OVERVIEW]);
     planFileWriting(KEY, "t1", CELL);
-    planFileDone(KEY, "t1", CELL);
+    settle(KEY, "t1", CELL);
     // The agent asks; the turn ends without finishing the work.
     planTurnEnded(KEY, "t1", "completed", true);
     const paused = peekPlan(KEY);
@@ -72,7 +79,7 @@ describe("a question mid-flight pauses the plan rather than ending it", () => {
     const resumed = peekPlan(KEY);
     expect(resumed?.turnId).toBe("t2");
     expect(resumed?.entries.map((e) => e.status)).toEqual(["done", "writing"]);
-    planFileDone(KEY, "t2", OVERVIEW);
+    settle(KEY, "t2", OVERVIEW);
     planTurnEnded(KEY, "t2", "completed");
     expect(peekPlan(KEY)).toBe(null);
   });
@@ -80,7 +87,7 @@ describe("a question mid-flight pauses the plan rather than ending it", () => {
   it("a turn that asks with nothing outstanding still dissolves", () => {
     planDeclared(KEY, "t1", [CELL]);
     planFileWriting(KEY, "t1", CELL);
-    planFileDone(KEY, "t1", CELL);
+    settle(KEY, "t1", CELL);
     planTurnEnded(KEY, "t1", "completed", true);
     expect(peekPlan(KEY)).toBe(null);
   });
@@ -92,7 +99,7 @@ describe("derived lifecycle", () => {
     planFileWriting(KEY, "t1", CELL);
     expect(peekPlan(KEY)?.entries[0]?.status).toBe("writing");
     expect(peekPlan(KEY)?.writingPath).toBe(CELL);
-    planFileDone(KEY, "t1", CELL);
+    settle(KEY, "t1", CELL);
     expect(peekPlan(KEY)?.entries[0]?.status).toBe("done");
     expect(peekPlan(KEY)?.writingPath).toBe(null);
   });
@@ -106,7 +113,7 @@ describe("derived lifecycle", () => {
   it("a clean turn's plan dissolves — the files are simply there", () => {
     planDeclared(KEY, "t1", [CELL]);
     planFileWriting(KEY, "t1", CELL);
-    planFileDone(KEY, "t1", CELL);
+    settle(KEY, "t1", CELL);
     planTurnEnded(KEY, "t1", "completed");
     expect(peekPlan(KEY)).toBe(null);
   });
@@ -114,7 +121,7 @@ describe("derived lifecycle", () => {
   it("a dead turn leaves wreckage: writing → error, planned stays a ghost", () => {
     planDeclared(KEY, "t1", [CELL, OVERVIEW, PORTAL]);
     planFileWriting(KEY, "t1", CELL);
-    planFileDone(KEY, "t1", CELL);
+    settle(KEY, "t1", CELL);
     planFileWriting(KEY, "t1", OVERVIEW);
     planTurnEnded(KEY, "t1", "failed");
     const plan = peekPlan(KEY);
@@ -126,7 +133,7 @@ describe("derived lifecycle", () => {
   it("a failed turn whose plan all landed leaves nothing — no residue without loss", () => {
     planDeclared(KEY, "t1", [CELL]);
     planFileWriting(KEY, "t1", CELL);
-    planFileDone(KEY, "t1", CELL);
+    settle(KEY, "t1", CELL);
     planTurnEnded(KEY, "t1", "failed");
     expect(peekPlan(KEY)).toBe(null);
   });
@@ -328,5 +335,87 @@ describe("rehydratePlanFromHistory", () => {
       { role: "assistant", content: [declareCall([PORTAL]), addCall(PORTAL)] },
     ]);
     expect(peekPlan(KEY)?.turnId).toBe("t-live");
+  });
+});
+
+// CodeRabbit findings on this PR.
+describe("a write is settled by its VERDICT, not by its call", () => {
+  it("stays writing until the result lands, then ticks", () => {
+    planDeclared(KEY, "t1", [CELL]);
+    planFileWriting(KEY, "t1", CELL);
+    planFileStreamed(KEY, "t1", CELL);
+    // Body complete, bundle has not ruled — claiming success here would tick a
+    // write the gates may still reject.
+    expect(peekPlan(KEY)?.entries[0]?.status).toBe("writing");
+    expect(peekPlan(KEY)?.writingPath).toBe(null);
+    planFileSettled(KEY, "t1", CELL, true);
+    expect(peekPlan(KEY)?.entries[0]?.status).toBe("done");
+  });
+
+  it("a REJECTED write is an error, not a tick", () => {
+    planDeclared(KEY, "t1", [CELL, OVERVIEW]);
+    planFileWriting(KEY, "t1", CELL);
+    planFileStreamed(KEY, "t1", CELL);
+    planFileSettled(KEY, "t1", CELL, false);
+    expect(peekPlan(KEY)?.entries[0]?.status).toBe("error");
+  });
+});
+
+describe("wreckage stands until a DECLARING turn replaces it", () => {
+  it("an ordinary turn in between carries it along", () => {
+    planDeclared(KEY, "t1", [CELL, OVERVIEW]);
+    planFileWriting(KEY, "t1", CELL);
+    settle(KEY, "t1", CELL);
+    planTurnEnded(KEY, "t1", "failed");
+    expect(peekPlan(KEY)?.wreckage).toBe(true);
+
+    // A later turn writes something unrelated — the alarm must not clear just
+    // because another turn happened.
+    planFileWriting(KEY, "t2", "specs/requirements/prd.md");
+    const carried = peekPlan(KEY);
+    expect(carried?.wreckage).toBe(true);
+    expect(carried?.entries.map((e) => e.path)).toEqual([CELL, OVERVIEW]);
+  });
+
+  it("writing out the remaining entry clears it", () => {
+    planDeclared(KEY, "t1", [CELL, OVERVIEW]);
+    planFileWriting(KEY, "t1", CELL);
+    settle(KEY, "t1", CELL);
+    planTurnEnded(KEY, "t1", "failed");
+    planFileWriting(KEY, "t2", OVERVIEW);
+    settle(KEY, "t2", OVERVIEW);
+    expect(peekPlan(KEY)).toBe(null);
+  });
+
+  it("a new declaration replaces it rather than merging into it", () => {
+    planDeclared(KEY, "t1", [CELL, OVERVIEW]);
+    planTurnEnded(KEY, "t1", "failed");
+    planDeclared(KEY, "t2", [PORTAL]);
+    const plan = peekPlan(KEY);
+    expect(plan?.wreckage).toBe(false);
+    expect(plan?.entries.map((e) => e.path)).toEqual([PORTAL]);
+  });
+});
+
+describe("rehydrate settles from the verdict", () => {
+  const declareCall = (paths: string[]) => ({
+    type: "tool-call",
+    toolName: "declare_plan",
+    input: { paths },
+  });
+  const result = (path: string, ok: boolean) => ({
+    type: "tool-result",
+    toolName: "addFile",
+    output: { type: "json", value: { ok, op: "add", path, status: ok ? "applied" : "rejected" } },
+  });
+
+  it("a rejected write rehydrates as an error, not a tick", () => {
+    rehydratePlanFromHistory(KEY, [
+      { role: "user", content: "/design" },
+      { role: "assistant", content: [declareCall([CELL, OVERVIEW])] },
+      { role: "tool", content: [result(CELL, true)] },
+      { role: "tool", content: [result(OVERVIEW, false)] },
+    ]);
+    expect(peekPlan(KEY)?.entries.map((e) => e.status)).toEqual(["done", "error"]);
   });
 });
