@@ -262,16 +262,3 @@ export function trackView(status: ProjectStatus, engaged: boolean): TrackView {
     summary: trackSummary(status),
   };
 }
-
-/**
- * A project nothing has been written for yet — the only state where the page
- * has no track to explain and no shape to draw, so the whole body is replaced
- * rather than each panel rendering its own little "nothing here".
- *
- * Note this is NOT the normal first run: creating a project fires `/start`
- * server-side (#562), so a new project arrives with the agent already writing.
- * This is the project whose kickoff never ran or died.
- */
-export function isFirstRun(status: ProjectStatus): boolean {
-  return !status.spec.exists && !status.build.version && !status.deploy.version;
-}

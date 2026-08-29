@@ -37,8 +37,6 @@ import { ComponentsList } from "./ComponentsList";
 import { OverviewTrack } from "./OverviewTrack";
 import { OverviewArchitecture } from "./OverviewArchitecture";
 import { OverviewDependencies } from "./OverviewDependencies";
-import { OverviewFirstRun } from "./OverviewFirstRun";
-import { isFirstRun } from "../lib/track";
 
 function SectionError({
   what,
@@ -149,43 +147,45 @@ export function ProjectOverview({ projectName }: { projectName: string }) {
           <OverviewTrack projectName={projectName} status={status.data} />
         )}
 
-        {/* A project with nothing in it has no shape to draw and no components
-            to list — so the whole body swaps for the explainer, rather than
-            three panels each rendering its own little "nothing here yet". */}
-        {status.data && isFirstRun(status.data) ? (
-          <OverviewFirstRun />
-        ) : (
-          /* Index left, architecture right: the lists are the half you click
-             (a component opens its contract, a dependency opens the catalog),
-             and the diagram is the half you read. */
-          <Grid container spacing={4}>
-            <Grid size={{ xs: 12, md: 5 }}>
-              <SectionTitle>Components</SectionTitle>
-              {componentsQuery.isError ? (
-                <SectionError
-                  what="components"
-                  message={
-                    componentsQuery.error instanceof Error
-                      ? componentsQuery.error.message
-                      : undefined
-                  }
-                  onRetry={() => void componentsQuery.refetch()}
-                />
-              ) : componentsQuery.isPending ? (
-                <Skeleton variant="rounded" height={120} />
-              ) : (
-                <ComponentsList
-                  projectName={projectName}
-                  items={componentsQuery.data.items ?? []}
-                />
-              )}
-              <OverviewDependencies projectName={projectName} />
-            </Grid>
-            <Grid size={{ xs: 12, md: 7 }}>
-              <OverviewArchitecture projectName={projectName} />
-            </Grid>
+      {/* Index left, architecture right: the lists are the half you click
+          (a component opens its contract, a dependency opens the catalog),
+          and the diagram is the half you read.
+
+          A project with nothing in it gets this same body, not a substitute.
+          An earlier pass swapped it for an explainer of the three stages, on
+          the theory that three panels each saying "nothing here yet" is worse
+          than one page that teaches. It is not: each panel's empty state
+          already names what belongs there and when it turns up, so the
+          explainer was a fourth surface teaching the same thing in worse
+          words, and it hid the shape of the page from the one reader who has
+          never seen it. */}
+        <Grid container spacing={4}>
+          <Grid size={{ xs: 12, md: 5 }}>
+            <SectionTitle>Components</SectionTitle>
+            {componentsQuery.isError ? (
+              <SectionError
+                what="components"
+                message={
+                  componentsQuery.error instanceof Error
+                    ? componentsQuery.error.message
+                    : undefined
+                }
+                onRetry={() => void componentsQuery.refetch()}
+              />
+            ) : componentsQuery.isPending ? (
+              <Skeleton variant="rounded" height={120} />
+            ) : (
+              <ComponentsList
+                projectName={projectName}
+                items={componentsQuery.data.items ?? []}
+              />
+            )}
+            <OverviewDependencies projectName={projectName} />
           </Grid>
-        )}
+          <Grid size={{ xs: 12, md: 7 }}>
+            <OverviewArchitecture projectName={projectName} />
+          </Grid>
+        </Grid>
       </Stack>
     </>
   );

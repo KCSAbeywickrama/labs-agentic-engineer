@@ -88,12 +88,19 @@ useful one.
    platform will leave on its own — Building, Deploying, Validating — and a
    still dot otherwise, so a settled FAILURE never animates.
 
-9. **A project with nothing in it swaps the whole body** for an explainer of the
-   three stages — no prompt and no button. On a new project the kickoff has
-   already fired server-side (#562), so the agent is writing while this renders;
-   asking for something already underway is worse than saying nothing. On a
-   project whose kickoff died, the way to restart lives in the spec view where
-   #562 put it, and the spec leg links there.
+9. **A project with nothing in it gets the same body as any other**, each panel
+   showing its own empty state. The first pass swapped the whole body for an
+   explainer of the three stages, on the theory that three panels each saying
+   "nothing here yet" is worse than one page that teaches. It is not. Every
+   panel's empty state already names what belongs there and when it turns up
+   (the PRD's rule: *empty states teach what, never narrate the how*), so the
+   explainer was a fourth surface teaching the same thing in worse words — and
+   it hid the shape of the page from the one reader who has never seen it.
+
+   The no-prompt rule survives it: nothing on this page asks the user to start
+   anything. The kickoff has already fired server-side (#562), so the agent is
+   writing while the page renders, and on a project whose kickoff died the way
+   to restart lives in the spec view where #562 put it.
 
 10. **A leg may carry a call to action, and it is still not a button.** The one
     state that earns it is the agent's unanswered questions: the chat panel's

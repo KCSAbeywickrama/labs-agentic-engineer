@@ -18,7 +18,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { components } from "../../../generated/aep-api";
-import { isFirstRun, trackView, type LegState } from "./track";
+import { trackView, type LegState } from "./track";
 
 type ProjectStatus = components["schemas"]["ProjectStatus"];
 
@@ -307,16 +307,5 @@ describe("the summary earns its slot or is absent", () => {
       false,
     );
     expect(view.summary?.tone).toBe("warning");
-  });
-});
-
-describe("isFirstRun", () => {
-  it("is true only when nothing exists anywhere", () => {
-    expect(isFirstRun(status({ spec: { exists: false } }))).toBe(true);
-    expect(isFirstRun(status({ spec: { exists: true } }))).toBe(false);
-    // A spec that was deleted after a build is not a first run.
-    expect(isFirstRun(status({ spec: { exists: false }, build: { version: "v1" } }))).toBe(
-      false,
-    );
   });
 });

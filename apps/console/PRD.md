@@ -104,7 +104,8 @@ here: they're the open `console` + `feature` issues.
   through to the Architecture view. The activity feed is deleted rather than
   relocated, its whole `features/activity` module with it, and the project's
   status chip moves from three page titles to the toolbar beside the project
-  switcher. The overview offers no actions at all: every way of starting work
+  switcher. A project with nothing in it gets the same body, each panel showing
+  its own empty state, rather than a substitute page. The overview offers no actions at all: every way of starting work
   stays on the page that owns it —
   [#662](https://github.com/wso2/labs-agentic-engineer/issues/662)
   ([ADR-0022](design/decisions/ADR-0022-the-overview-is-a-track-of-links.md))
