@@ -50,6 +50,7 @@ function doc(over: Partial<RolesDesign> = {}): RolesDesign {
     publicComponents: [],
     roles: [role("Admin"), role("Viewer")],
     testUsers: [],
+    thunder: { name: "orders-app", type: "browser" },
     ...over,
   };
 }
@@ -62,6 +63,7 @@ function richDoc(): RolesDesign {
     publicComponents: ["storefront-webapp", "docs-site"],
     roles: [role("Admin"), role("Viewer")],
     testUsers: [{ username: "test-admin", role: "Admin" }],
+    thunder: { name: "orders-app", type: "browser" },
   };
 }
 

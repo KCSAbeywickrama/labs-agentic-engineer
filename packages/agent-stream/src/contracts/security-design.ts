@@ -17,13 +17,14 @@
  */
 
 /**
- * RolesDesign — the AUTHORED `specs/design/roles.json`, the STRUCTURED half of
- * a project's security design.
+ * SecurityDesign — the AUTHORED `specs/design/security.json`, the STRUCTURED
+ * half of a project's security design.
  *
  * `security.md` keeps the prose half (role resolution, the policy narrative)
  * and names no role; this file declares which roles the project uses, what each
- * may do WITHIN this project, and its test users. Nothing appears in both, so
- * the two can never contradict each other.
+ * may do WITHIN this project, its test users, and the Thunder OIDC client the
+ * project registers. Nothing appears in both, so the two can never contradict
+ * each other.
  *
  * It is read by two very different consumers:
  *
@@ -41,11 +42,26 @@
  * the project's `v<N>` tag; a test user carries a username and a role and
  * nothing else. The platform generates the password at build and seals it.
  *
- * The Zod validator (`rolesDesignSchema` in `../roles-design-schema.ts`) is
- * drift-guarded against this type.
+ * The Zod validator (`securityDesignSchema` in `../security-design-schema.ts`)
+ * is drift-guarded against this type.
+ *
+ * `RolesDesign` is a deprecated alias of `SecurityDesign` (same shape).
  */
 
-export interface RolesDesign {
+/** The Thunder OIDC client this project registers. */
+export interface ThunderClient {
+  /** Display / client name. 1–100 characters. */
+  name: string;
+  /** Client type — only browser apps are supported. */
+  type: "browser";
+  /**
+   * Optional whitespace-separated OIDC scopes. When present and non-empty, the
+   * tokens must include `group` and `ou`.
+   */
+  scopes?: string | undefined;
+}
+
+export interface SecurityDesign {
   /**
    * Schema version. Pinned to the literal `1`, not widened to `number`: only one
    * version exists, and a `2` appearing here should be a compile error at the
@@ -71,7 +87,12 @@ export interface RolesDesign {
    * needs at least one; the build supplies any the design omits.
    */
   testUsers: TestUserDeclaration[];
+  /** The Thunder OIDC client this project registers. */
+  thunder: ThunderClient;
 }
+
+/** @deprecated Use `SecurityDesign`. */
+export type RolesDesign = SecurityDesign;
 
 /** One role, and what it may do within this project. */
 export interface RoleDeclaration {

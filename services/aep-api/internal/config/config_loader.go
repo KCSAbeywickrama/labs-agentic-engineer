@@ -70,6 +70,7 @@ func Load() (Config, error) {
 			ClientID:     r.readOptionalString("THUNDER_SYSTEM_CLIENT_ID", "aep-system-client"),
 			ClientSecret: r.readOptionalString("THUNDER_SYSTEM_CLIENT_SECRET", "aep-system-client-secret"),
 		},
+		KubeAPI:        r.kubeAPI(),
 		APIGatewayHost: r.readOptionalString("API_GATEWAY_HOST", ""),
 		PlatformIDP: PlatformIDPDefaults{
 			Issuer:  r.readOptionalString("PLATFORM_IDP_ISSUER", "http://thunder.openchoreo.localhost:8080"),
@@ -212,6 +213,34 @@ func (r *configReader) taskSigningKey() string {
 		return ""
 	}
 	return string(b)
+}
+
+const (
+	kubeSATokenPath = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+	kubeSACAPath    = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+)
+
+// kubeAPI resolves the Kubernetes API endpoint for ThunderApplication CR GETs.
+// Empty BaseURL is valid (local compose) — Assemble leaves the thunder reader nil.
+func (r *configReader) kubeAPI() KubeAPIConfig {
+	cfg := KubeAPIConfig{}
+	host := os.Getenv("KUBERNETES_SERVICE_HOST")
+	port := os.Getenv("KUBERNETES_SERVICE_PORT")
+	switch {
+	case host != "" && port != "":
+		cfg.BaseURL = "https://" + host + ":" + port
+	default:
+		cfg.BaseURL = r.readOptionalString("KUBE_API_BASE_URL", "")
+	}
+	if v := os.Getenv("KUBE_API_BEARER"); v != "" {
+		cfg.BearerToken = v
+	} else if b, err := os.ReadFile(kubeSATokenPath); err == nil {
+		cfg.BearerToken = strings.TrimSpace(string(b))
+	}
+	if _, err := os.Stat(kubeSACAPath); err == nil {
+		cfg.CAFile = kubeSACAPath
+	}
+	return cfg
 }
 
 func (r *configReader) readRequiredString(key string) string {

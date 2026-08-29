@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-package rolesspec
+package securityspec
 
 import (
 	"encoding/json"
@@ -46,7 +46,8 @@ const validDoc = `{
       ]
     }
   ],
-  "testUsers": [{"username": "test-viewer", "role": "Viewer"}]
+  "testUsers": [{"username": "test-viewer", "role": "Viewer"}],
+  "thunder": {"name": "Expense Tracker", "type": "browser"}
 }`
 
 func mutate(t *testing.T, edit func(m map[string]any)) []byte {
@@ -117,6 +118,24 @@ func TestParseRejects(t *testing.T) {
 				map[string]any{"username": "test-viewer", "role": "Viewer"},
 			}
 		}), "listed twice"},
+		{"thunder type not browser", mutate(t, func(m map[string]any) {
+			m["thunder"] = map[string]any{"name": "Expense Tracker", "type": "spa"}
+		}), "browser"},
+		{"thunder scopes missing group", mutate(t, func(m map[string]any) {
+			m["thunder"] = map[string]any{"name": "Expense Tracker", "type": "browser", "scopes": "openid ou"}
+		}), `thunder.scopes must include the "group" token when scopes are set.`},
+		{"thunder scopes missing ou", mutate(t, func(m map[string]any) {
+			m["thunder"] = map[string]any{"name": "Expense Tracker", "type": "browser", "scopes": "openid group"}
+		}), `thunder.scopes must include the "ou" token when scopes are set.`},
+		{"thunder extra property", mutate(t, func(m map[string]any) {
+			m["thunder"] = map[string]any{"name": "Expense Tracker", "type": "browser", "password": "x"}
+		}), "unknown property password"},
+		{"thunder name too long", mutate(t, func(m map[string]any) {
+			m["thunder"] = map[string]any{"name": strings.Repeat("a", 101), "type": "browser"}
+		}), "must be at most 100 characters"},
+		{"thunder name with whitespace", mutate(t, func(m map[string]any) {
+			m["thunder"] = map[string]any{"name": " Expense Tracker ", "type": "browser"}
+		}), "leading or trailing whitespace"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -128,6 +147,31 @@ func TestParseRejects(t *testing.T) {
 				t.Fatalf("message %q does not mention %q", err.Error(), tc.want)
 			}
 		})
+	}
+}
+
+func TestParseAcceptsWhenThunderOmitsScopes(t *testing.T) {
+	doc := mustParse(t, []byte(validDoc))
+	if doc.Thunder.Name != "Expense Tracker" {
+		t.Fatalf("thunder.name = %q, want Expense Tracker", doc.Thunder.Name)
+	}
+	if doc.Thunder.Type != "browser" {
+		t.Fatalf("thunder.type = %q, want browser", doc.Thunder.Type)
+	}
+	if doc.Thunder.Scopes != "" {
+		t.Fatalf("thunder.scopes = %q, want omitted empty", doc.Thunder.Scopes)
+	}
+}
+
+func TestParseAcceptsThunderScopesWithGroupAndOU(t *testing.T) {
+	doc := mustParse(t, mutate(t, func(m map[string]any) {
+		m["thunder"] = map[string]any{
+			"name": "Expense Tracker", "type": "browser",
+			"scopes": "openid profile email group ou",
+		}
+	}))
+	if doc.Thunder.Scopes != "openid profile email group ou" {
+		t.Fatalf("thunder.scopes = %q", doc.Thunder.Scopes)
 	}
 }
 

@@ -115,6 +115,11 @@ type Config struct {
 	// still deploy, just without per-org publishers).
 	ThunderAdmin ThunderAdminConfig
 
+	// KubeAPI is the in-cluster (or override) Kubernetes API the Thunder
+	// Application CR GET uses. BaseURL empty ⇒ thunder wait stays unwired
+	// (local compose has no kube API). See KubeAPIConfig.
+	KubeAPI KubeAPIConfig
+
 	// APIGatewayHost is host:port of the API Platform gateway runtime — the hop
 	// that terminates authentication for a managed API. Published to a consumer
 	// of a protected sibling as `<DEP>_GATEWAY_URL` so a SPA's nginx can proxy
@@ -264,6 +269,20 @@ type ThunderAdminConfig struct {
 	BaseURL      string
 	ClientID     string
 	ClientSecret string
+}
+
+// KubeAPIConfig is the Kubernetes API endpoint used to GET ThunderApplication
+// CRs (plain net/http — not controller-runtime). Resolved at Load:
+//
+//	BaseURL — https://$KUBERNETES_SERVICE_HOST:$KUBERNETES_SERVICE_PORT when
+//	both are set (Helm pods); else optional KUBE_API_BASE_URL.
+//	BearerToken — KUBE_API_BEARER override, else the in-cluster service-account
+//	token file when present.
+//	CAFile — in-cluster service-account ca.crt when present.
+type KubeAPIConfig struct {
+	BaseURL     string
+	BearerToken string
+	CAFile      string
 }
 
 // PlatformIDPDefaults are the issuer + JWKS URL of the cluster's

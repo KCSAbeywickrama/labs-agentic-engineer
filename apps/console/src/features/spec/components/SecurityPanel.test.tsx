@@ -54,6 +54,7 @@ function design(over: Partial<RolesDesign> = {}): string {
     publicComponents: [],
     roles: [role("Admin")],
     testUsers: [],
+    thunder: { name: "orders-app", type: "browser" },
     ...over,
   });
 }

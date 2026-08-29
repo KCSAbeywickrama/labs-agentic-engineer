@@ -14,41 +14,42 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Package rolesspec parses and validates `specs/design/roles.json` — the
+// Package securityspec parses and validates `specs/design/security.json` — the
 // STRUCTURED half of a project's security design, and the ONE spec file the
 // platform acts on deterministically at build time.
 //
 // It is the sibling of designspec, and for the same reason: the single schema
-// definition is packages/contracts/schemas/roles-design.schema.json (generated
-// from the Zod `rolesDesignSchema` the agent's FileBundle write-gate uses),
-// vendored here as an embed because go:embed cannot cross the aep-api module
-// boundary. Agent and BFF therefore validate ONE definition.
+// definition is packages/contracts/schemas/security-design.schema.json
+// (generated from the Zod `securityDesignSchema` the agent's FileBundle
+// write-gate uses), vendored here as an embed because go:embed cannot cross the
+// aep-api module boundary. Agent and BFF therefore validate ONE definition.
 //
 // Beyond the schema, this package owns the two things a standalone JSON Schema
 // cannot express and the roles ensure absolutely depends on:
 //
 //   - the referential rules (every test user's role is declared, coldStartRole
-//     is declared or null, names and usernames are unique) — the same list as
-//     the agent's `checkRolesReferences`;
+//     is declared or null, names and usernames are unique, thunder name/scopes)
+//     — the same list as the agent's `checkSecurityReferences`;
 //   - `EnsurePlan`, the deterministic expansion of the document into the exact
 //     set of roles and test users the build must ensure, INCLUDING the
 //     platform-supplied user for a role the design gave none. Making that
 //     expansion a pure function here — rather than a loop inside the ensure —
 //     is what lets "every role has a working login" be a tested property rather
-//     than an integration-test hope.
-package rolesspec
+//     than an integration-test hope. Plan ignores thunder.
+package securityspec
 
 import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/wso2/aep/aep-api/internal/platform/jsonschema"
 )
 
-//go:embed roles-design.schema.json
+//go:embed security-design.schema.json
 var schemaJSON []byte
 
 // Error codes (mirroring the agent's write gate and designspec's vocabulary, so
@@ -58,15 +59,15 @@ const (
 	CodeSchemaViolation = "SCHEMA_VIOLATION"
 )
 
-// Path is where the roles document lives, repo-relative.
-const Path = "specs/design/roles.json"
+// Path is where the security document lives, repo-relative.
+const Path = "specs/design/security.json"
 
 // BundleKey is the same file's key inside the design bundle (paths there are
 // relative to specs/design/).
-const BundleKey = "roles.json"
+const BundleKey = "security.json"
 
-// ValidationError carries a stable code + human message for a rejected roles
-// document.
+// ValidationError carries a stable code + human message for a rejected
+// security document.
 type ValidationError struct {
 	Code    string
 	Message string
@@ -74,20 +75,29 @@ type ValidationError struct {
 
 func (e *ValidationError) Error() string { return e.Code + ": " + e.Message }
 
-var rolesSchema = jsonschema.MustParse(schemaJSON)
+var securitySchema = jsonschema.MustParse(schemaJSON)
 
 // usernameRE mirrors TEST_USERNAME_RE in the TS gate. Lowercase-only so an
 // authored username and a platform-generated `test-<role-slug>` cannot collide
 // by case alone.
 var usernameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 
-// Document is the parsed roles.json.
+// Document is the parsed security.json.
 type Document struct {
-	Version          int      `json:"version"`
-	ColdStartRole    *string  `json:"coldStartRole"`
-	PublicComponents []string `json:"publicComponents"`
-	Roles            []Role   `json:"roles"`
-	TestUsers        []User   `json:"testUsers"`
+	Version          int           `json:"version"`
+	ColdStartRole    *string       `json:"coldStartRole"`
+	PublicComponents []string      `json:"publicComponents"`
+	Roles            []Role        `json:"roles"`
+	TestUsers        []User        `json:"testUsers"`
+	Thunder          ThunderConfig `json:"thunder"`
+}
+
+// ThunderConfig is the project's Thunder OAuth application as authored in
+// security.json. Plan ignores it: ensure expands roles and test users only.
+type ThunderConfig struct {
+	Name   string `json:"name"`
+	Type   string `json:"type"`
+	Scopes string `json:"scopes,omitempty"`
 }
 
 // Role is one declared role and what it may do within this project.
@@ -113,7 +123,7 @@ type User struct {
 	Role     string `json:"role"`
 }
 
-// Parse validates raw roles.json bytes against the embedded schema and the
+// Parse validates raw security.json bytes against the embedded schema and the
 // referential rules, returning the parsed document. Returns a *ValidationError
 // on any failure.
 func Parse(raw []byte) (*Document, error) {
@@ -121,7 +131,7 @@ func Parse(raw []byte) (*Document, error) {
 	if err := json.Unmarshal(raw, &v); err != nil {
 		return nil, &ValidationError{Code: CodeInvalidJSON, Message: "content is not valid JSON: " + err.Error()}
 	}
-	if msgs := jsonschema.Validate(v, rolesSchema); len(msgs) > 0 {
+	if msgs := jsonschema.Validate(v, securitySchema); len(msgs) > 0 {
 		return nil, &ValidationError{Code: CodeSchemaViolation, Message: msgs[0]}
 	}
 	var doc Document
@@ -135,8 +145,8 @@ func Parse(raw []byte) (*Document, error) {
 }
 
 // checkReferences applies the rules the schema cannot express. It is the Go
-// twin of the agent's checkRolesReferences and returns the same first-violation
-// message shape; a document that passes one MUST pass the other.
+// twin of the agent's checkSecurityReferences and returns the same
+// first-violation message shape; a document that passes one MUST pass the other.
 func checkReferences(doc *Document) string {
 	declared := map[string]bool{}
 	for _, role := range doc.Roles {
@@ -170,6 +180,22 @@ func checkReferences(doc *Document) string {
 			return fmt.Sprintf("test user %q holds role %q, which no roles[] entry declares.", user.Username, user.Role)
 		}
 	}
+	thunderName := doc.Thunder.Name
+	if thunderName != strings.TrimSpace(thunderName) {
+		return fmt.Sprintf("thunder.name %q has leading or trailing whitespace.", thunderName)
+	}
+	if len(thunderName) < 1 || len(thunderName) > 100 {
+		return "thunder.name must be 1–100 characters."
+	}
+	if scopes := doc.Thunder.Scopes; scopes != "" {
+		tokens := strings.Fields(scopes)
+		if !slices.Contains(tokens, "group") {
+			return `thunder.scopes must include the "group" token when scopes are set.`
+		}
+		if !slices.Contains(tokens, "ou") {
+			return `thunder.scopes must include the "ou" token when scopes are set.`
+		}
+	}
 	return ""
 }
 
@@ -187,7 +213,7 @@ type PlannedUser struct {
 	ColdStart bool
 }
 
-// EnsurePlan is the deterministic expansion of a roles document into the work
+// EnsurePlan is the deterministic expansion of a security document into the work
 // the build must do. Roles come out in declaration order; users come out
 // grouped by role in the same order, authored users before any supplied one.
 type EnsurePlan struct {

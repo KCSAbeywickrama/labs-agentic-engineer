@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-package rolesspec
+package securityspec
 
 import (
 	"os"
@@ -25,17 +25,17 @@ import (
 
 // TestVendoredSchemaMatchesContracts is the anti-drift guard for the vendored
 // JSON Schema, the twin of designspec's. The single source of truth is
-// packages/contracts/schemas/roles-design.schema.json, generated from the Zod
-// rolesDesignSchema so the agent's write-gate and this Go gate validate ONE
+// packages/contracts/schemas/security-design.schema.json, generated from the Zod
+// securityDesignSchema so the agent's write-gate and this Go gate validate ONE
 // definition. It is go:embed'd here because go:embed cannot cross the aep-api
 // Go module boundary.
 //
 // Re-sync on failure: `pnpm --filter @aep/agent-stream gen`, then copy the
 // contract over this package's copy.
 func TestVendoredSchemaMatchesContracts(t *testing.T) {
-	const vendored = "roles-design.schema.json"
-	// rolesspec → platform → internal → aep-api → services → repo root.
-	const source = "../../../../../packages/contracts/schemas/roles-design.schema.json"
+	const vendored = "security-design.schema.json"
+	// securityspec → platform → internal → aep-api → services → repo root.
+	const source = "../../../../../packages/contracts/schemas/security-design.schema.json"
 
 	got, err := os.ReadFile(vendored)
 	if err != nil {
@@ -46,7 +46,7 @@ func TestVendoredSchemaMatchesContracts(t *testing.T) {
 		t.Fatalf("read contracts schema (%s) — layout drift?: %v", source, err)
 	}
 	if string(got) != string(want) {
-		t.Fatalf("vendored roles-design.schema.json differs from packages/contracts/schemas " +
+		t.Fatalf("vendored security-design.schema.json differs from packages/contracts/schemas " +
 			"— re-sync: regenerate the contract (pnpm --filter @aep/agent-stream gen) and copy it here")
 	}
 }
@@ -58,7 +58,7 @@ func TestVendoredSchemaMatchesContracts(t *testing.T) {
 // then acquire a tag. This fails loudly instead.
 func TestVendoredSchemaUsesOnlySupportedKeywords(t *testing.T) {
 	if unsupported := jsonschema.UnsupportedKeywords(schemaJSON); len(unsupported) > 0 {
-		t.Fatalf("roles-design.schema.json uses keywords the Go interpreter ignores: %v — "+
+		t.Fatalf("security-design.schema.json uses keywords the Go interpreter ignores: %v — "+
 			"implement them in internal/platform/jsonschema, or the Go gate validates less than the agent's",
 			unsupported)
 	}
