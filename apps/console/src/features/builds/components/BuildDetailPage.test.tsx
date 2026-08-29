@@ -63,9 +63,12 @@ vi.mock("./RunFeed", () => ({
   RunFeed: () => <div>run feed</div>,
 }));
 
+const mockTasks = vi.hoisted(() => ({
+  current: [] as components["schemas"]["TaskView"][],
+}));
 vi.mock("../../tasks/api/queries", () => ({
   useAllTasks: () => ({
-    data: [],
+    data: mockTasks.current,
     isPending: false,
     isError: false,
     error: null,
@@ -193,6 +196,7 @@ const withOneExternal = () => {
 afterEach(() => {
   mockBuilds = [];
   mockRuns = [];
+  mockTasks.current = [];
   mockDesignDeps = [];
   mockReadiness = undefined;
   vi.clearAllMocks();
@@ -312,5 +316,57 @@ describe("BuildDetailPage — the deploy gate's park", () => {
 
     expect(screen.queryByText(/Waiting for/)).not.toBeInTheDocument();
     expect(screen.getByText("Running · Coding agent")).toBeInTheDocument();
+  });
+});
+
+// The Tasks section's live state. It used to sit inline after the tally, next
+// to a "Resolve via chat" button that only linked back to the project page —
+// two things competing for the same corner, one of which did nothing this page
+// could not already do. The chip now owns the section's right edge alone.
+describe("BuildDetailPage — the Tasks section's activity chip", () => {
+  const runningTask = () =>
+    ({
+      number: 7,
+      title: "Add the inventory list",
+      derivedStatus: "open",
+      executions: [{ status: "in_progress", startedAt: "2026-08-14T16:21:00Z" }],
+    }) as unknown as components["schemas"]["TaskView"];
+
+  it("puts the chip after the tally, at the section's right edge", () => {
+    mockBuilds = [build()];
+    mockRuns = [run()];
+    mockTasks.current = [runningTask()];
+    renderPage();
+
+    const tally = screen.getByText(/in this build/);
+    const chip = screen.getByText("agent working");
+    expect(
+      tally.compareDocumentPosition(chip) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("turns, rather than sitting still, while a task is executing", () => {
+    mockBuilds = [build()];
+    mockRuns = [run()];
+    mockTasks.current = [runningTask()];
+    const { container } = renderPage();
+    expect(container.querySelector(".MuiCircularProgress-root")).not.toBeNull();
+  });
+
+  // A settled build must not look like it is still working.
+  it("says nothing when no task is executing", () => {
+    mockBuilds = [build()];
+    mockRuns = [run()];
+    renderPage();
+    expect(screen.queryByText("agent working")).toBeNull();
+  });
+
+  // It linked to the project page — a place this page's own breadcrumb and the
+  // switcher already reach — and read as the section's primary action.
+  it("no longer offers a Resolve via chat button", () => {
+    mockBuilds = [build()];
+    mockRuns = [run()];
+    renderPage();
+    expect(screen.queryByText("Resolve via chat")).toBeNull();
   });
 });

@@ -47,9 +47,12 @@ type BuildResponse = components["schemas"]["BuildResponse"];
 
 // --- Router -----------------------------------------------------------
 const mockNavigate = vi.fn();
+const mockSearch = vi.hoisted(() => ({
+  current: {} as { generate?: "design"; view?: "architecture" },
+}));
 vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => mockNavigate,
-  useSearch: () => ({}),
+  useSearch: () => mockSearch.current,
 }));
 
 // --- oxygen-ui: only useAppShell needs a stub (it throws outside an
@@ -102,6 +105,7 @@ beforeEach(() => {
   mockCollab = soloCollab();
   mockSpecAgent = "";
   mockSpecFlow = "";
+  mockSearch.current = {};
 });
 
 // --- CellDiagramPanel: its own behavior is covered by
@@ -1279,6 +1283,21 @@ describe("SpecView architecture-tab navigation on design.cell change", () => {
     };
     return { files, ytext, collab };
   }
+
+  // The overview's architecture panel links here with `?view=architecture`. It
+  // offers that link BECAUSE it is drawing a diagram, so landing the reader on
+  // the workspace's default file would make them hunt the rail for the very
+  // thing they clicked.
+  it("opens the Architecture tab on ?view=architecture", () => {
+    mockSearch.current = { view: "architecture" };
+    render(<SpecView projectName="proj1" />);
+    expect(screen.getByTestId("cell-diagram-panel")).toBeInTheDocument();
+  });
+
+  it("opens the workspace's default file without the param", () => {
+    render(<SpecView projectName="proj1" />);
+    expect(screen.queryByTestId("cell-diagram-panel")).not.toBeInTheDocument();
+  });
 
   it("navigates to the Architecture tab when the agent patches design.cell in place", () => {
     const room = connectedRoom(true);

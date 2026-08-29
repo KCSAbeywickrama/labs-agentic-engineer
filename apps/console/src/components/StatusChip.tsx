@@ -17,7 +17,7 @@
  */
 
 import type { ReactNode } from "react";
-import { Box, Chip, alpha } from "@wso2/oxygen-ui";
+import { Box, Chip, CircularProgress, alpha } from "@wso2/oxygen-ui";
 
 // The standard clip-rect recipe: out of view, still in the accessibility tree.
 // Inlined rather than imported so this component keeps its one Oxygen dependency.
@@ -77,8 +77,10 @@ const TONE_PALETTE: Record<
 // tone's own text colour and no border — for spots where a solid filled chip
 // reads as a button (a status beside a page title, a build's live state).
 // `dot` prefixes a small tone-coloured dot so the pill reads as a live status
-// indicator ("● Running"). Solid stays the default so dense rows are
-// unaffected.
+// indicator ("● Running"). `spinner` is the same mark, turning: reserve it for
+// a state the platform is actively working on and will leave on its own, so
+// motion never appears on something that has settled. Solid stays the default
+// so dense rows are unaffected.
 export function StatusChip({
   label,
   spokenLabel,
@@ -86,6 +88,7 @@ export function StatusChip({
   variant,
   appearance = "solid",
   dot = false,
+  spinner = false,
 }: {
   label: string;
   /**
@@ -99,6 +102,8 @@ export function StatusChip({
   variant?: "filled" | "outlined";
   appearance?: "solid" | "soft";
   dot?: boolean;
+  /** Implies `dot`, and replaces it with a spinner. Soft appearance only. */
+  spinner?: boolean;
 }) {
   // Visually-hidden TEXT, not aria-label on the root. A Chip with no onClick renders
   // a plain div with no role, and an aria-label on a roleless element is ignored by
@@ -117,23 +122,31 @@ export function StatusChip({
     );
   if (appearance === "soft") {
     const isNeutral = tone === "neutral";
-    const labelNode = dot ? (
-      <Box sx={{ display: "inline-flex", alignItems: "center", gap: 0.75 }}>
-        <Box
-          sx={(theme) => ({
-            width: 6,
-            height: 6,
-            borderRadius: "50%",
-            bgcolor: isNeutral
-              ? theme.palette.text.secondary
-              : theme.palette[TONE_PALETTE[tone]].main,
-          })}
-        />
-        <span>{label}</span>
-      </Box>
-    ) : (
-      label
-    );
+    const labelNode =
+      dot || spinner ? (
+        <Box sx={{ display: "inline-flex", alignItems: "center", gap: 0.75 }}>
+          {spinner ? (
+            // aria-hidden: the chip's own text already names the state. A
+            // progressbar announced beside it would be a second, valueless
+            // reading of the same fact.
+            <CircularProgress size={10} thickness={6} color="inherit" aria-hidden />
+          ) : (
+            <Box
+              sx={(theme) => ({
+                width: 6,
+                height: 6,
+                borderRadius: "50%",
+                bgcolor: isNeutral
+                  ? theme.palette.text.secondary
+                  : theme.palette[TONE_PALETTE[tone]].main,
+              })}
+            />
+          )}
+          <span>{label}</span>
+        </Box>
+      ) : (
+        label
+      );
     return (
       <Chip
         size="small"

@@ -42,12 +42,19 @@ export interface CellDiagramViewProps {
    * dragged positions in memory only.
    */
   layoutKey?: string | undefined;
+  /**
+   * Render for a summary panel rather than the full-screen workspace: the
+   * graph is fitted to the box it is given instead of reserving room for the
+   * floating chrome an embed hides anyway.
+   */
+  compact?: boolean | undefined;
 }
 
 export const CellDiagramView = memo(function CellDiagramView({
   source,
   emptyState,
   layoutKey,
+  compact,
 }: CellDiagramViewProps) {
   const hasSource = typeof source === "string" && source.trim().length > 0;
   if (!hasSource) {
@@ -82,7 +89,7 @@ export const CellDiagramView = memo(function CellDiagramView({
           </Box>
         }
       >
-        <CellDiagram source={source} layoutKey={layoutKey} />
+        <CellDiagram source={source} layoutKey={layoutKey} compact={compact} />
       </Suspense>
     </Box>
   );

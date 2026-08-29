@@ -197,7 +197,15 @@ export function SpecFileList({
               label={reasonCount(section.reasons)}
               onClick={() => setProblemsFor(section)}
               aria-label={`${section.title}: ${reasonCount(section.reasons)} to resolve`}
-              sx={{ height: 20, cursor: "pointer" }}
+              sx={{
+                height: 20,
+                cursor: "pointer",
+                // MUI's small chip gives its icon a 4px leading margin and its
+                // label 8px of trailing padding, so the pill was lopsided: the
+                // triangle sat almost against the left border while the count
+                // had twice the room on the right. Even it up.
+                "& .MuiChip-icon": { ml: 0.75, mr: -0.25 },
+              }}
             />
           </Tooltip>
         )}

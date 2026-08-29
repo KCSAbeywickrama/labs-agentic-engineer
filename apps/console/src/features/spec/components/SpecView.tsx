@@ -236,6 +236,7 @@ export function SpecView({ projectName }: { projectName: string }) {
   // wants to be, so we auto-select it.
   const search = useSearch({ strict: false }) as {
     generate?: "design";
+    view?: "architecture";
   };
   const generate = search.generate;
   const agentInRoom = collab.peers.some((p) => p.kind === "agent");
@@ -247,6 +248,13 @@ export function SpecView({ projectName }: { projectName: string }) {
   useEffect(() => {
     if (generate === "design") setSelection({ kind: "cell-diagram" });
   }, [generate]);
+
+  // `?view=architecture` — arriving from the overview's architecture panel,
+  // which links here precisely because it is drawing a diagram. Runs once on
+  // the param, so a rail click afterwards is never undone.
+  useEffect(() => {
+    if (search.view === "architecture") setSelection({ kind: "cell-diagram" });
+  }, [search.view]);
 
   // An architectural chat change updates design.cell (targeted editFile
   // patches, or a removeFile + streamed addFile for a restructure). Navigate
@@ -1014,8 +1022,13 @@ export function SpecView({ projectName }: { projectName: string }) {
                 >
                   {/* span so the tooltip works while the button is disabled */}
                   <span>
+                    {/* Default size, matching "Generate design" beside it.
+                        `size="small"` made it 30px against its neighbour's 36,
+                        so two buttons on one row sat at two different weights
+                        with nothing meaning the difference — this is a
+                        secondary action, and `variant="outlined"` is what
+                        already says so. */}
                     <Button
-                      size="small"
                       variant="outlined"
                       disabled={agentBusy}
                       onClick={() => seedChat("/feature")}

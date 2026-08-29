@@ -25,12 +25,13 @@ type ApiError = components["schemas"]["Error"];
 // Scenario switch for the project overview (#77/#183) and spec view (#80).
 // Toggle in devtools:
 //   localStorage.setItem('aep:mock:project',
-//     'fresh' | 'spec' | 'spec-failed' | 'building' | 'deploying' |
-//     'deployed' | 'deploy-failed' | 'repo-error' | 'error')
+//     'fresh' | 'spec' | 'spec-failed' | 'kickoff-failed' | 'building' |
+//     'deploying' | 'deployed' | 'deploy-failed' | 'repo-error' | 'error')
 export type ProjectScenario =
   | "fresh"
   | "spec"
   | "spec-failed"
+  | "kickoff-failed"
   | "building"
   | "deploying"
   | "deployed"
@@ -74,6 +75,56 @@ const noDeploy: DeployStage = {
 // server hid a real bug: the header chip read "Active" under MSW and "Building"
 // forever against the API. Mirror the server, and let the stage aggregates
 // carry the scenario.
+/**
+ * Track states the project scenarios cannot reach on their own.
+ *
+ * The overview track's hardest states are about the RELATIONSHIP between the
+ * three aggregates — a spec being amended while the last published version
+ * builds, a new version building over an older one still serving dev — and the
+ * scenario list is a ladder, so no rung holds two stages in disagreement.
+ *
+ * These override only `spec`/`build`/`deploy` on top of whatever scenario is
+ * selected, exactly as the validation override does, rather than adding rungs
+ * to a ladder twelve fixture records are keyed on.
+ */
+export const TRACK_SCENARIOS = ["amending", "drifting", "build-failed"] as const;
+
+export type TrackScenario = (typeof TRACK_SCENARIOS)[number];
+
+type TrackAggregates = Pick<ProjectStatus, "spec" | "build" | "deploy">;
+
+export const trackOverrides: Record<TrackScenario, TrackAggregates> = {
+  // Two legs unsettled at once: you are editing v1's spec while the platform
+  // builds v1. The summary is the only thing that can say so.
+  amending: {
+    spec: { exists: true, version: "v1", dirty: true, design: true, agent: "" },
+    build: { version: "v1", status: "running" },
+    deploy: noDeploy,
+  },
+  // Three versions on one bar: v2 published, v2 building, v1 still serving dev.
+  drifting: {
+    spec: { exists: true, version: "v2", dirty: false, design: true, agent: "" },
+    build: { version: "v2", status: "running" },
+    deploy: {
+      version: "v1",
+      status: "deployed",
+      components: { total: 3, ready: 3 },
+      validation: "passed",
+    },
+  },
+  // A red leg that keeps its version.
+  "build-failed": {
+    spec: { exists: true, version: "v2", dirty: false, design: true, agent: "" },
+    build: { version: "v2", status: "failed" },
+    deploy: {
+      version: "v1",
+      status: "deployed",
+      components: { total: 3, ready: 3 },
+      validation: "passed",
+    },
+  },
+};
+
 export const projectStatuses: Record<
   Exclude<ProjectScenario, "error">,
   ProjectStatus
@@ -106,6 +157,23 @@ export const projectStatuses: Record<
     specStatus: "draft",
     designStatus: "in_progress",
     spec: { exists: true, version: "", dirty: false, design: true, agent: "" },
+    build: idleBuild,
+    deploy: noDeploy,
+  },
+  // The kickoff turn died before it wrote anything — distinct from
+  // `spec-failed`, where a seeded PRD survives. The track's spec leg has a
+  // branch of its own for this ("The agent couldn't start / Try again"), and
+  // until this fixture existed nothing in the console could reach it.
+  "kickoff-failed": {
+    phase: "spec",
+    repoStatus: "ready",
+    repoUrl: REPO_URL,
+    hasSpec: false,
+    hasDesign: false,
+    hasTasks: false,
+    specStatus: "failed",
+    designStatus: "",
+    spec: { ...noSpec, agent: "failed" },
     build: idleBuild,
     deploy: noDeploy,
   },
@@ -408,6 +476,29 @@ const sharedAuthDependency = {
   ],
 };
 
+// The project's architecture as the agent authors it (ADR-0008: the console
+// derives the diagram in the browser from this file, and commits nothing).
+// Mirrors `designDependencies` above so the overview's diagram and its
+// dependency list agree — a graph that disagreed with the rows beside it would
+// be worse than no graph.
+const designCell = `title Demo Shop
+version v1
+
+component storefront web-app
+component catalog-api service
+component orders-api service
+
+north Customer -> storefront : HTTPS
+
+storefront -> catalog-api
+storefront -> orders-api
+
+catalog-api -> south shop-db : postgres
+orders-api -> south shop-db : postgres
+storefront -> east shop-auth : sign-in
+orders-api -> east stripe : payments
+`;
+
 const designDependencies: ComponentDependencies[] = [
   {
     componentName: "storefront",
@@ -537,6 +628,7 @@ export const projectComponents: Record<
   fresh: emptyComponents,
   spec: emptyComponents,
   "spec-failed": emptyComponents,
+  "kickoff-failed": emptyComponents,
   building: builtComponents,
   deploying: builtComponents,
   deployed: deployedComponents,
@@ -798,6 +890,7 @@ export const projectTasks: Record<
   fresh: [],
   spec: [],
   "spec-failed": [],
+  "kickoff-failed": [],
   building: [...v3Tasks, ...buildingTasks],
   deploying: doneTasks,
   deployed: doneTasks,
@@ -1086,6 +1179,7 @@ export const projectBuildRuns: Record<
   fresh: noRuns,
   spec: noRuns,
   "spec-failed": noRuns,
+  "kickoff-failed": noRuns,
   // A gate is open in the `building` scenario's issue list, so its run is
   // parked — which is exactly when the hold notice and cancel both matter.
   building: waitingRun,
@@ -1145,6 +1239,7 @@ export const projectCycleBuilds: Record<
   fresh: [],
   spec: [],
   "spec-failed": [],
+  "kickoff-failed": [],
   building: movingFanOut,
   deploying: movingFanOut,
   deployed: greenFanOut,
@@ -1159,6 +1254,7 @@ export const projectBuilds: Record<
   fresh: noBuilds,
   spec: noBuilds,
   "spec-failed": noBuilds,
+  "kickoff-failed": noBuilds,
   building: runningLedger,
   deploying: completedV1Build,
   deployed: completedV1Build,
@@ -1176,6 +1272,7 @@ export const projectTags: Record<Exclude<ProjectScenario, "error">, TagList> = {
   fresh: noTags,
   spec: noTags,
   "spec-failed": noTags,
+  "kickoff-failed": noTags,
   building: v1Tags,
   deploying: v1Tags,
   deployed: { ...v1Tags, specDirty: true },
@@ -1199,6 +1296,31 @@ to a cart, and check out.
 - Cart persists across sessions.
 - Checkout with a mocked payment provider.
 - Order history per customer.
+`;
+
+// The same PRD mid-interview: the agent has made calls it wants challenged and
+// left holes only the user can fill. Without this nothing in the mock could
+// reach the rail's attention state — the ornament, the count chip and the whole
+// problems dialog behind it were unreachable, on a surface that exists to
+// report exactly this.
+const unsettledPrd = `# Demo Shop — PRD
+
+## Goal
+
+A small storefront where customers browse the product catalog, add items
+to a cart, and check out.
+
+## Requirements
+
+- Browse products by category with search.
+- Cart persists across sessions *assumed* for 30 days.
+- Checkout with a mocked payment provider *assumed* card only.
+- Order history per customer *assumed* last 12 months.
+
+## Open Questions
+
+- Which payment provider goes live first?
+- Does checkout need guest orders, or is an account required?
 `;
 
 const userStories = `# Demo Shop — User stories
@@ -1358,13 +1480,16 @@ const prdOnlyFiles: MockSpecFile[] = [
 ];
 
 const collaborationFiles: MockSpecFile[] = [
-  ...prdOnlyFiles,
+  // The unsettled PRD, not the seeded one: this scenario IS the interview in
+  // progress, which is when assumptions and open questions exist.
+  { path: "specs/requirements/prd.md", content: unsettledPrd },
   { path: "specs/requirements/user-stories.md", content: userStories },
   { path: "specs/design/architecture.md", content: architectureMd },
 ];
 
 const fullFiles: MockSpecFile[] = [
   ...collaborationFiles,
+  { path: "specs/design/design.cell", content: designCell },
   {
     path: "specs/design/components/storefront/design.json",
     content: storefrontDesignJson,
@@ -1397,7 +1522,11 @@ export const projectSpecFiles: Record<
   fresh: prdOnlyFiles,
   spec: collaborationFiles,
   "spec-failed": prdOnlyFiles,
-  building: fullFiles,
+  "kickoff-failed": [],
+  // `building` deliberately keeps design.cell OUT: a build can start from a
+  // published spec before the architecture file lands, and that is the state
+  // the overview's diagram empty-state exists for.
+  building: fullFiles.filter((f) => f.path !== "specs/design/design.cell"),
   deploying: fullFiles,
   deployed: fullFiles,
   "deploy-failed": fullFiles,

@@ -39,7 +39,6 @@ import {
   Ellipsis,
   GitHub,
   RotateCcw,
-  Sparkles,
   X,
 } from "@wso2/oxygen-ui-icons-react";
 import { createLink, Link } from "@tanstack/react-router";
@@ -200,19 +199,10 @@ export function BuildDetailPage({
           title="Tasks"
           disablePadding
           meta={<TasksMeta tasks={tasks} loading={issues.isPending} />}
-          actions={
-            <LinkButton
-              size="small"
-              variant="outlined"
-              color="primary"
-              startIcon={<Sparkles size={14} />}
-              to="/projects/$projectName"
-              params={{ projectName }}
-              sx={{ borderRadius: 999, height: 30 }}
-            >
-              Resolve via chat
-            </LinkButton>
-          }
+          // The live state rides the section's right edge, opposite the title
+          // and its tally — the one place on this row where something can
+          // appear and disappear without shifting the text beside it.
+          actions={<TasksActivity tasks={tasks} loading={issues.isPending} />}
         >
           {issues.isPending ? (
             <Box sx={{ p: 3, display: "flex", justifyContent: "center" }}>
@@ -274,21 +264,33 @@ function TasksMeta({
   const parts = [`${tally.total} in this build`, `${tally.done} done`];
   if (tally.attention > 0) parts.push(`${tally.attention} need your attention`);
   return (
-    <Stack direction="row" spacing={1.25} sx={{ alignItems: "center" }}>
-      <Typography
-        variant="caption"
-        color="text.secondary"
-        sx={{ fontVariantNumeric: "tabular-nums" }}
-      >
-        {parts.join(" · ")}
-      </Typography>
-      {/* The pulse is keyed on a task actually executing, NOT on the run being
-          open — a settled build must not look like it is still working. */}
-      {anyTaskRunning(tasks) && (
-        <StatusChip label="agent working" tone="info" appearance="soft" dot />
-      )}
-    </Stack>
+    <Typography
+      variant="caption"
+      color="text.secondary"
+      sx={{ fontVariantNumeric: "tabular-nums" }}
+    >
+      {parts.join(" · ")}
+    </Typography>
   );
+}
+
+/**
+ * Whether an agent is executing a task in this build, right now.
+ *
+ * A spinner rather than a dot: this is the one chip on the page that reports
+ * something in motion, and it leaves on its own when the task finishes. Keyed
+ * on a task actually executing, NOT on the run being open — a settled build
+ * must not look like it is still working.
+ */
+function TasksActivity({
+  tasks,
+  loading,
+}: {
+  tasks: components["schemas"]["TaskView"][];
+  loading: boolean;
+}) {
+  if (loading || !anyTaskRunning(tasks)) return null;
+  return <StatusChip label="agent working" tone="info" appearance="soft" spinner />;
 }
 
 function BuildSummaryCard({
