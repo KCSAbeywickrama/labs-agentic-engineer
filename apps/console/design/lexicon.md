@@ -696,6 +696,51 @@ The chat panel is the spine and **never collapses itself**; only the user closes
 pointing at a form that already owns the screen, and its composer stays live during a form — the
 agent is waiting on the user, not working, and the user may want to talk instead of fill.
 
+## The criteria pane
+
+The read-only pane behind the Validation section's document. A reader meets it
+cold: the rail carries no explanation, a design turn mints the file as its last
+step with no announcement, and the only sentence in the product that said what
+criteria were for lived in the **Validations** empty state, on another page most
+readers never reach.
+
+| | |
+|---|---|
+| Description, under the heading | *Each criterion represents one thing your software must do, based on your requirements. After every deployment they are checked against the running software, and the results appear under Validations. To change one, ask the agent.* |
+| Checked by a test | **`AUTO`**, tooltip *Validated automatically by the agent.* |
+| Checked by a person | **`MANUAL`**, tooltip *Requires manual validation.* |
+
+**`AUTO`, never `E2E`.** The stored value stays `e2e` — the validation runner,
+the report generator and the per-criterion spec path all key on it — so the badge
+carries a **display name** instead, the same split the run-state chips already
+draw. `E2E` was never a copy decision: it was agent-authored JSON rendered
+verbatim, which is how an unexpanded acronym reached the screen past naming rule
+4. The rule now has a place to bite, because the word is finally a string
+somebody wrote.
+
+**Every badge earns a tooltip, and only the two real methods get one.** A third
+value exists in older documents; it renders bare rather than being given an
+invented explanation.
+
+**"Ask the agent", not an edit control.** There is no way to edit a criterion
+here, by design: they are written from the requirements alone and never from the
+design, so they judge the work rather than describe it. The chat panel is on
+screen throughout, so this points at something the reader can use rather than
+narrating a procedure (rule 3).
+
+**The description belongs to the spec view, not to Validations.** Both surfaces
+render the same pane, and Validations suppresses it — a reader there came for run
+results, so a sentence promising that results appear under Validations is
+redundant on the page holding them.
+
+**Unsettled: `deployment` or `build`.** This description says criteria are checked
+*after every deployment*; the **Validations** empty state says *"After a build,
+your software is checked against the acceptance criteria in your spec"*. Both name
+the same event. *Deployment* is the more accurate word, since validation runs
+against the deployed system and needs its resolved endpoints, but that empty state
+was out of scope when this pane was written. Whoever settles it changes both and
+deletes this note.
+
 ## What a change invalidates
 
 **Numbered decisions, precise where the link was recorded, coarse where it was not.**

@@ -1053,3 +1053,62 @@ describe("ValidationPage lifecycle", () => {
     expect(screen.queryByText("Passed")).not.toBeInTheDocument();
   });
 });
+
+// The method badge is the reader's only signal for who checks a criterion, and it
+// used to render the wire value verbatim — `E2E`, an acronym the lexicon forbids
+// and nothing in the product expanded. The wire value cannot change (the runner,
+// the report generator and the tests/e2e/specs/<AC-ID>.spec.ts path all key on
+// it), so the display name is the thing under test here.
+describe("ValidationPage criterion method badges", () => {
+  function renderWithCriteria() {
+    mockValidation = "passed";
+    mockRun = run({
+      validation: { verdict: "passed", reportPath: "tests/validation/report.json" },
+      cycles: [validationCycle],
+    });
+    mockCriteria.data = { content: CRITERIA };
+    mockReport.data = { content: REPORT };
+    renderPage(undefined);
+  }
+
+  it("says auto rather than the e2e wire value", () => {
+    renderWithCriteria();
+
+    // Two e2e criteria in the fixture, plus the summary tally's own badge.
+    expect(screen.getAllByText("auto")).toHaveLength(2);
+    expect(screen.queryByText("e2e")).not.toBeInTheDocument();
+    expect(screen.getByText("auto 2")).toBeInTheDocument();
+  });
+
+  it("leaves the manual badge alone", () => {
+    renderWithCriteria();
+
+    expect(screen.getByText("manual")).toBeInTheDocument();
+    expect(screen.getByText("manual 1")).toBeInTheDocument();
+  });
+
+  it("explains each method on hover", async () => {
+    renderWithCriteria();
+
+    fireEvent.mouseOver(screen.getAllByText("auto")[0]!);
+    expect(
+      await screen.findByText("Validated automatically by the agent."),
+    ).toBeInTheDocument();
+
+    fireEvent.mouseOver(screen.getByText("manual"));
+    expect(
+      await screen.findByText("Requires manual validation."),
+    ).toBeInTheDocument();
+  });
+
+  // The description explaining what criteria ARE belongs to the Spec view, where
+  // a reader meets the document cold. Here they arrived to read run results, so a
+  // sentence telling them results appear under Validations would be redundant on
+  // the page holding them. Gated by `hideDescription`, asserted so the gate cannot
+  // be dropped silently.
+  it("omits the spec view's explanation", () => {
+    renderWithCriteria();
+
+    expect(screen.queryByText(/Each criterion represents/)).not.toBeInTheDocument();
+  });
+});

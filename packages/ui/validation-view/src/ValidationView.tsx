@@ -16,8 +16,8 @@
  * under the License.
  */
 
-import { useMemo } from "react";
-import { Alert, alpha, Box, Chip, Typography } from "@wso2/oxygen-ui";
+import { forwardRef, useMemo, type ComponentPropsWithoutRef } from "react";
+import { Alert, alpha, Box, Chip, Tooltip, Typography } from "@wso2/oxygen-ui";
 import { Check } from "@wso2/oxygen-ui-icons-react";
 import {
   parseValidationCriteria,
@@ -42,6 +42,22 @@ const METHOD_COLOR: Record<string, string> = {
 };
 // Fixed display order for the summary tally; unknown methods sort after these.
 const METHOD_ORDER = ["e2e", "scenario", "manual"];
+// What a method badge SAYS, as against the wire value it is keyed by. `e2e` is
+// the contract shared with the runner, the report generator and the spec-path
+// convention, so it cannot be renamed — but it is an acronym the reader has to
+// expand, which the console lexicon forbids. Same split CRITERION_STATE_LABEL
+// draws for run statuses. A method with no entry here renders verbatim, so
+// `manual` and anything unrecognised are unaffected.
+const METHOD_LABEL: Record<string, string> = {
+  e2e: "auto",
+};
+// One line saying who does the checking, shown on hover. Only the two methods a
+// design turn can author carry one; anything else gets a bare badge rather than
+// an invented explanation.
+const METHOD_TOOLTIP: Record<string, string> = {
+  e2e: "Validated automatically by the agent.",
+  manual: "Requires manual validation.",
+};
 // Requirement ids are structural, so a muted slate keeps them from competing
 // with the colored method badges.
 const REQ_COLOR = "#546e7a";
@@ -72,10 +88,23 @@ const STATE_COLOR: Record<string, ChipColor> = {
   manual: "default",
 };
 
-function SolidBadge({ label, color }: { label: string; color: string }) {
+type SolidBadgeProps = { label: string; color: string } & ComponentPropsWithoutRef<"span">;
+
+// Forwards its ref and any remaining props onto the Box, because Tooltip hands
+// its child both a ref and the hover/focus handlers that open it. The console
+// wraps un-forwarding components in an inline-flex Box instead (see the kind chip
+// in SkillsSection), which works here too — but that comment calls itself out as
+// standing in for a ref the child could not hold, and this badge is local enough
+// to just hold one.
+const SolidBadge = forwardRef<HTMLSpanElement, SolidBadgeProps>(function SolidBadge(
+  { label, color, ...rest },
+  ref,
+) {
   return (
     <Box
       component="span"
+      ref={ref}
+      {...rest}
       sx={(theme) => ({
         display: "inline-flex",
         alignItems: "center",
@@ -96,10 +125,22 @@ function SolidBadge({ label, color }: { label: string; color: string }) {
       {label}
     </Box>
   );
-}
+});
 
-function MethodBadge({ method }: { method: string }) {
-  return <SolidBadge label={method} color={METHOD_COLOR[method] ?? FALLBACK} />;
+// Says who checks a criterion, with a tooltip carrying what the word means —
+// the badge alone cannot, and it is the reader's first encounter with the
+// distinction. `count` is passed only by the summary tally, which shows the same
+// badge with its total appended, so both surfaces stay in step by construction.
+function MethodBadge({ method, count }: { method: string; count?: number }) {
+  const label = METHOD_LABEL[method] ?? method;
+  const badge = (
+    <SolidBadge
+      label={count === undefined ? label : `${label} ${count}`}
+      color={METHOD_COLOR[method] ?? FALLBACK}
+    />
+  );
+  const tooltip = METHOD_TOOLTIP[method];
+  return tooltip ? <Tooltip title={tooltip}>{badge}</Tooltip> : badge;
 }
 
 // The per-criterion run-state chip (only rendered when a report is joined in).
@@ -262,6 +303,7 @@ function ValidationBody({
   statuses,
   noPadding,
   fullWidth,
+  hideDescription,
 }: {
   criteria: ValidationCriteria;
   statuses: ValidationReport | undefined;
@@ -269,6 +311,7 @@ function ValidationBody({
    *  props are defaulted at the boundary rather than forwarded as `undefined`. */
   noPadding: boolean;
   fullWidth: boolean;
+  hideDescription: boolean;
 }) {
   const { requirements } = criteria;
   // Per-method tally for the summary header, kept in a stable order. The
@@ -310,6 +353,18 @@ function ValidationBody({
           Validation Criteria
         </Typography>
 
+        {/* What this document is, where it comes from, and what happens to it.
+            Nothing else in the spec workspace says so, and the reader meets the
+            criteria here before any run has produced a result to learn from. */}
+        {!hideDescription && (
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 1, maxWidth: "72ch" }}>
+            Each criterion represents one thing your software must do, based on your
+            requirements. After every deployment they are checked against the running
+            software, and the results appear under Validations. To change one, ask the
+            agent.
+          </Typography>
+        )}
+
         {/* Summary — totals plus a colored tally per verification method */}
         <Box
           sx={{
@@ -326,11 +381,7 @@ function ValidationBody({
             {total} {total === 1 ? "criterion" : "criteria"}
           </Typography>
           {orderedMethods.map((m) => (
-            <SolidBadge
-              key={m}
-              label={`${m} ${methodCounts.get(m) ?? 0}`}
-              color={METHOD_COLOR[m] ?? FALLBACK}
-            />
+            <MethodBadge key={m} method={m} count={methodCounts.get(m) ?? 0} />
           ))}
         </Box>
 
@@ -376,6 +427,15 @@ export interface ValidationViewProps {
    * govern width. Oxygen's own PageContent draws the same line.
    */
   fullWidth?: boolean;
+  /**
+   * Drop the paragraph explaining what the criteria are. Default off, same reason
+   * as the two above: the Spec view is where a reader first meets this document,
+   * with nothing else on the page to say what it is for. The Validations page is
+   * the opposite — the reader arrived there to read run results, and a sentence
+   * telling them results appear under Validations is redundant on the page that
+   * holds them.
+   */
+  hideDescription?: boolean;
 }
 
 export function ValidationView({
@@ -383,6 +443,7 @@ export function ValidationView({
   report,
   noPadding = false,
   fullWidth = false,
+  hideDescription = false,
 }: ValidationViewProps) {
   const parsed = useMemo(() => parseValidationCriteria(criteria), [criteria]);
   // The report is optional and tolerant: a bad report never blocks the oracle —
@@ -419,6 +480,7 @@ export function ValidationView({
         statuses={statuses}
         noPadding={noPadding}
         fullWidth={fullWidth}
+        hideDescription={hideDescription}
       />
     </>
   );

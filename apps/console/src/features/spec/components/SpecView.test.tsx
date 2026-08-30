@@ -1656,3 +1656,64 @@ describe("SpecView keeps the chat log fed without the chat panel (#606)", () => 
     expect(mockResyncConversation).not.toHaveBeenCalled();
   });
 });
+
+// The criteria pane is where a reader meets the acceptance oracle cold: the rail
+// carries no explanation, the design turn mints the file with no announcement, and
+// the only sentence in the product that said what criteria were for lived on the
+// Validations page's empty state. This is the surface that gap was reported
+// against, so the description's presence here is the change's real coverage.
+describe("SpecView validation criteria explanation", () => {
+  const CRITERIA_JSON = JSON.stringify({
+    requirements: [
+      {
+        id: "REQ-001",
+        statement: "Shoppers can search the catalog.",
+        criteria: [
+          { id: "AC-001-a", must: "Search returns matches", method: "e2e" },
+          { id: "AC-001-b", must: "Payment is encrypted", method: "manual" },
+        ],
+      },
+    ],
+  });
+
+  beforeEach(() => {
+    mockUseSpecFiles.mockReturnValue({
+      data: [
+        {
+          path: "specs/validation/validation-criteria.json",
+          sha: "abc",
+          group: "validation",
+        },
+      ],
+      isPending: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    mockUseSpecFileContent.mockReturnValue({
+      data: { sha: "abc", content: CRITERIA_JSON },
+      isPending: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+  });
+
+  it("explains what the criteria are, where they come from, and how to change one", () => {
+    render(<SpecView projectName="proj1" />);
+
+    expect(
+      screen.getByText(/Each criterion represents one thing your software must do/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/based on your requirements/)).toBeInTheDocument();
+    expect(screen.getByText(/To change one, ask the agent/)).toBeInTheDocument();
+  });
+
+  it("names the methods without the e2e acronym", () => {
+    render(<SpecView projectName="proj1" />);
+
+    expect(screen.getByText("auto")).toBeInTheDocument();
+    expect(screen.getByText("manual")).toBeInTheDocument();
+    expect(screen.queryByText("e2e")).not.toBeInTheDocument();
+  });
+});
