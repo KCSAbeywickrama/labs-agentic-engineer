@@ -74,4 +74,5 @@ A design that declares something the implementation ignores is not a design.
 | the agent owns history | `x-aep.memory.type: "server"` | the conversation store, scoped by user |
 | only these operations | `allow: [...]` | generates a tool per entry, and no others |
 | the caller is whoever signed in | `x-aep.identity.mode: "on-behalf-of"` | gates on `x-user-id`, forwards the caller's token |
+| behaviour is graded before the PR | `specs/validation/agent-scenarios.json`, from the requirements alone | runs the scenarios, may revise only the prompt body, reports the score |
 | no secrets in git | `${env:NAME}` | reads them from config, never hardcodes |

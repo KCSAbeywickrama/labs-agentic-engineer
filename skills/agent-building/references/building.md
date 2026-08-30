@@ -36,7 +36,9 @@ The document's front matter uses AFM's own keys — `model`, `interfaces`,
 2. **Generate** `src/prompt.ts` and `src/tools.ts` from them, per the table above.
 3. **Implement** the loop and the HTTP surface — `src/agent.ts`, `src/main.ts`.
 4. **Verify** — from the app path: `npm install && npm run build`.
-5. **PR** — only once step 4 exits 0.
+5. **Evaluate** — run the agent's scenarios and write the report, per
+   "Evaluate before you open the PR" below.
+6. **PR** — only once step 4 exits 0, carrying the report step 5 wrote.
 
 ## Writing a tool from an OpenAPI operation
 
@@ -83,6 +85,16 @@ return { ok: response.ok, status: response.status, body };
 Two routes on `node:http`, and no more. **Do not add an HTTP framework** —
 Express, Fastify and friends earn nothing at this size and are a dependency the
 platform then carries.
+
+**Listen on `PORT`, and on 9090 when it is unset.** 9090 is the component
+contract's port and stays the default, so a deployed agent is unaffected. The
+variable exists because evaluation boots the agent again and again on one
+machine: it hands the child an ephemeral port, and an agent that ignores it
+binds an address the previous boot still holds and never becomes ready.
+
+```ts
+port: Number(process.env.PORT ?? 9090),
+```
 
 | Route | Behaviour |
 |---|---|
@@ -133,8 +145,13 @@ dependency. Its connection details arrive as five env vars named
 `<DEP_NAME>_<OUTPUT>`, uppercased — for a dependency named `memory-db`:
 `MEMORY_DB_HOST`, `MEMORY_DB_PORT`, `MEMORY_DB_DBNAME`, `MEMORY_DB_USER`,
 `MEMORY_DB_PASSWORD` (a shared `project-db` yields `PROJECT_DB_*`). Read them
-in config like every other injected value, and report any that are unset from
-`/healthz`'s `missing` list. Dependency: `pg`.
+in config like every other injected value. Dependency: `pg`.
+
+**The database configuration is optional, and its absence is not a fault.**
+Never list a `MEMORY_DB_*` variable in `/healthz`'s `missing`: an agent run
+without one is correctly configured for the in-memory backing below, and
+reporting it missing answers 503 forever. `MODEL_API_KEY` is what `missing`
+is for.
 
 Map them exactly as below. The database name is the one to get right: the
 resource's output is `dbname`, so the variable is `MEMORY_DB_DBNAME` — not
@@ -150,7 +167,8 @@ memoryDbPassword: process.env.MEMORY_DB_PASSWORD,
 ```
 
 **Copy this schema and these queries — do not redesign them.** One table, the
-whole conversation as one JSONB value, loaded and saved as a unit:
+whole conversation as one JSONB value, loaded and saved as a unit. Two
+backings implement one interface, and the configuration chooses between them:
 
 ```ts
 // store.ts
@@ -158,18 +176,11 @@ import pg from "pg";
 import type { ModelMessage } from "ai";
 import { config } from "./config.js";
 
-// Built from the five injected parts — postgres-cnpg exposes no single URL
-// output. Never log this object: it carries the password. The field names
-// below match a dependency named `memory-db`; under the shared `project-db`
-// form, use that dependency's own prefix (`config.projectDbHost`, etc.) —
-// whatever your config.ts actually reads.
-const pool = new pg.Pool({
-  host: config.memoryDbHost,
-  port: Number(config.memoryDbPort),
-  database: config.memoryDbName,
-  user: config.memoryDbUser,
-  password: config.memoryDbPassword,
-});
+interface ConversationStore {
+  init(): Promise<void>;
+  load(id: string, userId: string): Promise<ModelMessage[] | null>;
+  save(id: string, userId: string, messages: ModelMessage[]): Promise<void>;
+}
 
 const INIT = `CREATE TABLE IF NOT EXISTS conversations (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -178,6 +189,75 @@ const INIT = `CREATE TABLE IF NOT EXISTS conversations (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 )`;
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function postgresStore(): ConversationStore {
+  // Built from the five injected parts — postgres-cnpg exposes no single URL
+  // output. Never log this object: it carries the password. The field names
+  // below match a dependency named `memory-db`; under the shared `project-db`
+  // form, use that dependency's own prefix (`config.projectDbHost`, etc.) —
+  // whatever your config.ts actually reads. Constructed HERE, not at module
+  // load, so an agent running on the in-memory backing never opens a pool
+  // against an address it was never given.
+  const pool = new pg.Pool({
+    host: config.memoryDbHost,
+    port: Number(config.memoryDbPort),
+    database: config.memoryDbName,
+    user: config.memoryDbUser,
+    password: config.memoryDbPassword,
+  });
+
+  return {
+    init: () => pool.query(INIT).then(() => undefined),
+
+    load: async (id, userId) => {
+      if (!UUID_RE.test(id)) return null; // malformed = not found, no pg error
+      const r = await pool.query(
+        "SELECT messages FROM conversations WHERE id = $1 AND user_id = $2",
+        [id, userId],
+      );
+      return r.rowCount ? (r.rows[0].messages as ModelMessage[]) : null;
+    },
+
+    // One idempotent statement covers both create and update: generate the id
+    // in the app (crypto.randomUUID()), then upsert. A turn that fails after
+    // the id is minted but before the save leaves nothing behind — there is no
+    // separate "create the row" step to half-complete.
+    save: async (id, userId, messages) => {
+      await pool.query(
+        `INSERT INTO conversations (id, user_id, messages)
+         VALUES ($1, $2, $3::jsonb)
+         ON CONFLICT (id) DO UPDATE
+           SET messages = $3::jsonb, updated_at = now()
+           WHERE conversations.user_id = $2`,
+        [id, userId, JSON.stringify(messages)],
+      );
+    },
+  };
+}
+
+// One process, one Map, nothing durable — see "Which backing, and when"
+// below. It carries the SAME user fence as the SQL: a conversation belongs to
+// one user here too, so a behaviour that holds in the cluster is the one an
+// evaluation or a local run observes.
+function memoryStore(): ConversationStore {
+  const rows = new Map<string, { userId: string; messages: ModelMessage[] }>();
+  return {
+    init: async () => {}, // nothing to provision: ready the moment it exists
+    load: async (id, userId) => {
+      const row = rows.get(id);
+      return row !== undefined && row.userId === userId ? row.messages : null;
+    },
+    save: async (id, userId, messages) => {
+      const row = rows.get(id);
+      if (row !== undefined && row.userId !== userId) return; // the upsert's WHERE
+      rows.set(id, { userId, messages });
+    },
+  };
+}
+
+const store: ConversationStore = config.memoryDbHost ? postgresStore() : memoryStore();
 
 // Never await initStore() before listen() — see "Never await initStore()"
 // below for why. initStore() fires the schema init and returns immediately;
@@ -188,7 +268,7 @@ export function isStoreReady(): boolean {
 }
 export async function ensureStore(): Promise<void> {
   if (ready) return;
-  await pool.query(INIT);
+  await store.init();
   ready = true;
 }
 export function initStore(): void {
@@ -197,36 +277,29 @@ export function initStore(): void {
   });
 }
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-export async function loadConversation(
+export function loadConversation(
   id: string, userId: string,
 ): Promise<ModelMessage[] | null> {
-  if (!UUID_RE.test(id)) return null; // malformed = not found, no pg error
-  const r = await pool.query(
-    "SELECT messages FROM conversations WHERE id = $1 AND user_id = $2",
-    [id, userId],
-  );
-  return r.rowCount ? (r.rows[0].messages as ModelMessage[]) : null;
+  return store.load(id, userId);
 }
 
-// One idempotent statement covers both create and update: generate the id in
-// the app (crypto.randomUUID()), then upsert. A turn that fails after the id
-// is minted but before the save leaves nothing behind — there is no separate
-// "create the row" step to half-complete.
-export async function saveConversation(
+export function saveConversation(
   id: string, userId: string, messages: ModelMessage[],
 ): Promise<void> {
-  await pool.query(
-    `INSERT INTO conversations (id, user_id, messages)
-     VALUES ($1, $2, $3::jsonb)
-     ON CONFLICT (id) DO UPDATE
-       SET messages = $3::jsonb, updated_at = now()
-       WHERE conversations.user_id = $2`,
-    [id, userId, JSON.stringify(messages)],
-  );
+  return store.save(id, userId, messages);
 }
 ```
+
+**Which backing, and when.** A DEPLOYED agent has the `postgres-cnpg`
+dependency injected, so `MEMORY_DB_HOST` is set and every turn goes to
+Postgres — durable, shared by every replica, and what the platform promises.
+The in-memory backing is for the two situations where no database exists:
+**build-time evaluation**, which boots the agent with no `MEMORY_DB_*` so a
+scenario can prove the agent remembers a second turn without provisioning a
+database for it, and **running the component locally**. It keeps one process's
+conversations, loses them on restart, and is not shared between replicas.
+Durability is not optional in production; it is supplied by the dependency the
+design already declares.
 
 **The `AND user_id = $2` on every statement IS the security boundary.** The
 store, not the prompt and not the caller, is what keeps one traveler out of
@@ -272,8 +345,8 @@ Log the error, never the request body or the `Authorization` header — a chat
 turn carries the user's own words and their bearer.
 
 **Never await `initStore()` before `listen`.** The DB may not be reachable yet
-— `postgres-cnpg` provisions asynchronously, and `MEMORY_DB_*` may be unset on
-an otherwise-unconfigured start. An awaited rejection there is an unhandled
+— `postgres-cnpg` provisions asynchronously, so the first schema init of a
+freshly deployed agent routinely fails. An awaited rejection there is an unhandled
 promise before the server ever binds its port: the process exits and the pod
 crash-loops, and `/healthz` never gets the chance to report it. That is why
 `store.ts` above splits init in two: call `initStore()` once at startup,
@@ -362,10 +435,13 @@ the LAST step only and silently drops every tool call and result.
 **Return tool errors to the model; do not throw.** A `409 cutoff has passed` is
 something the agent should explain, not a failed turn.
 
-**Stateless process, stateful store.** No conversation lives in process
-memory — every turn loads from and saves to Postgres, so replicas and
+**Stateless process, stateful store.** A deployed agent holds no conversation
+of its own — every turn loads from and saves to Postgres, so replicas and
 restarts of the process itself are safe. `postgres-cnpg` is PVC-backed, so a
-database pod restart does not lose conversations either.
+database pod restart does not lose conversations either. The in-memory backing
+is the deliberate exception, and only where there is no database to reach:
+never reach for process memory as a cache, a fallback, or a place to keep
+anything the store does not already hold.
 
 **Bound the loop** with `stopWhen: stepCountIs(max_iterations)`. An unbounded
 agent spends money until something else stops it.
@@ -452,3 +528,85 @@ await callContext.run({ authorization: req.headers.authorization }, () => reply(
 // inside call():
 const { authorization } = callContext.getStore() ?? {};
 ```
+
+## Evaluate before you open the PR
+
+Once `npm run build` exits 0, and before the PR, run the agent's scenarios
+against the agent you just built. `specs/validation/agent-scenarios.json` was
+written at design time from the requirements — it is the behavioural oracle
+for this component, and `references/designing.md` describes its shape.
+
+The harness is `@aep/agent-eval`, a workspace package of the platform
+monorepo. It is private and never published, so it is invoked from the
+checkout — never `npx`, which would fetch some other package of that name from
+the registry, at an unpinned version:
+
+```bash
+# from the project root — the folder holding specs/.
+# $AEP_ROOT is the platform monorepo checkout: `git rev-parse --show-toplevel`
+# from anywhere inside it.
+corepack pnpm --filter @aep/agent-eval build
+node "$AEP_ROOT/packages/agent-eval/dist/bin/agent-eval.js" \
+  --scenarios specs/validation/agent-scenarios.json \
+  --app <app-path> \
+  --afm specs/design/components/<agent>/agent.afm.md \
+  --out tests/agent-eval
+```
+
+All four flags are required:
+
+| Flag | What it points at |
+|---|---|
+| `--scenarios` | the scenario file the design wrote |
+| `--app` | the component's App Path. The harness runs `dist/main.js` there, which is why it comes after the build |
+| `--afm` | the agent document. Its front matter is the ONLY source of the provider contracts to stub and of the allow-list they are served under; its body is never read |
+| `--out` | where `report.md` lands — `tests/agent-eval`, beside the validation phase's artifacts |
+
+It boots the agent as a child process on an ephemeral port (`PORT`), with no
+`MEMORY_DB_*`, so it runs on the in-memory store and a second turn still has
+to remember. It serves each provider contract from its own examples, and
+answers **403** for an operation the allow-list withholds — a call that lands
+there is reported as tool over-reach, a security finding rather than a rubric
+miss. A simulated user drives the conversation and WITHHOLDS the facts the
+scenario says to withhold — that is what makes "asks for what it needs"
+observable rather than asserted.
+
+The organisation's Anthropic key (`ANTHROPIC_API_KEY`) is the credential, for
+the agent under test and for the judge alike. Never
+`CLAUDE_CODE_OAUTH_TOKEN`, which is the platform's own coding budget. With no
+key the run reports that it could not evaluate, and the build carries on.
+
+### The fix loop
+
+A scenario is satisfied when it earns at least **0.8 of its achievable
+`mustCover` weight** and violates **no `mustNot`** — zero tolerance there,
+because those lines encode harm (inventing a price, claiming a failed write
+succeeded) and a rubric that tolerates one 20% of the time is not a rubric.
+
+**When a scenario falls short, revise the PROMPT and run it again — at most 3
+rounds.** Each round: edit `src/prompt.ts`, `npm run build`, re-run the
+command above. Cite the rubric line that drove each change; `report.md` names
+them, with the judge's own reason. Lines under "Ungraded" are a grading gap,
+not an agent failure — never revise against one.
+
+**Stop early if a round scores worse than the one before it**, and keep the
+earlier prompt. **The best-scoring prompt ships, not the last one tried** — a
+revision can make an agent worse.
+
+**Revise ONLY the markdown body** — `# Role`, `# Instructions`, `# Style`.
+NEVER the front matter. `x-aep.tools.openapi[].allow` is the security
+boundary: a build that widened it to pass a scenario would be granting the
+agent permissions nobody approved. A scenario failing because the agent lacks
+an operation is a finding to report, not a thing to fix here.
+
+### What the PR carries
+
+**A low score never fails the build.** Evaluation reports; it does not gate.
+Open the PR either way, with `tests/agent-eval/report.md` in it.
+
+If the prompt changed, run the final round with `AGENT_EVAL_PROMPT_CHANGED=1`
+so the report says so, say it in the PR body, and open a SECOND PR carrying
+the same body to `agent.afm.md`, labelled `agent-spec-updated`. The build's PR
+ships the revised prompt — the agent a user first meets is the good one — and
+the document catches up under a human's review. Never edit anything under
+`specs/` from the build's own PR.

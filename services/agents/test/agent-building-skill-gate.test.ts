@@ -88,3 +88,148 @@ describe("agent-building SKILL.md — prescribed store invariants", () => {
     );
   });
 });
+
+// The scenarios half of the same skill, and the design skill that emits the
+// scenario file. Both are prose an agent follows at build time, so the same
+// argument applies: nothing else in this repo would notice if a line went.
+const DESIGNING = readFileSync(
+  fileURLToPath(
+    new URL("../../../skills/agent-building/references/designing.md", import.meta.url),
+  ),
+  "utf8",
+);
+const VALIDATION_CRITERIA = readFileSync(
+  fileURLToPath(new URL("../../../skills/validation-criteria/SKILL.md", import.meta.url)),
+  "utf8",
+);
+
+// The command line in the skill is the ONLY thing that runs the harness during
+// a build. A flag that drifts from `packages/agent-eval/src/cli.ts` does not
+// fail anything here or there — it fails inside a build, as a report nobody
+// asked for, so the flags are pinned where a coding agent reads them.
+describe("agent-building — the evaluation step", () => {
+  // The COMMAND, not the file: the flags are also described in a table beside
+  // it, and a table entry is not what a build runs. Matching the whole file
+  // would stay green with a flag missing from the only line that executes.
+  const invocation = /```bash\n([\s\S]*?agent-eval[\s\S]*?)```/.exec(SKILL)?.[1] ?? "";
+
+  it("names the harness and every flag its CLI requires", () => {
+    assert.notEqual(invocation, "", "the build reference no longer carries a runnable eval command");
+    for (const flag of ["--scenarios", "--app", "--afm", "--out"]) {
+      assert.match(
+        invocation,
+        new RegExp(`\\${flag}\\b`),
+        `the command lost ${flag} — the CLI requires all four and reports a failure without them`,
+      );
+    }
+  });
+
+  it("invokes the workspace binary, never a registry fetch", () => {
+    assert.match(invocation, /packages\/agent-eval\/dist\/bin\/agent-eval\.js/);
+    assert.doesNotMatch(
+      SKILL,
+      /npx[^\n]*agent-eval/,
+      "`@aep/agent-eval` is a private workspace package — an npx invocation fetches whatever the registry has under that name",
+    );
+    assert.doesNotMatch(SKILL, /@latest/, "an unpinned tool version makes a score unreproducible");
+  });
+
+  it("bounds the fix loop where the agent can read it", () => {
+    assert.match(SKILL, /at most 3|three rounds/i);
+    assert.match(SKILL, /best-scoring prompt/, "the loop could ship the last prompt instead of the best one");
+  });
+
+  it("states the threshold and the zero tolerance that goes with it", () => {
+    assert.match(SKILL, /0\.8/, "the 0.8 threshold is gone — the loop has no bar to revise against");
+    assert.match(SKILL, /zero tolerance/i, "a mustNot is a harm, and tolerating one is not a rubric");
+  });
+
+  // The one rule whose breach is a privilege escalation, not a bug.
+  it("forbids the loop touching anything but the prompt body", () => {
+    assert.match(SKILL, /only the .*(body|prompt)/i);
+    assert.match(SKILL, /never .*front matter|front matter .*never/i);
+    assert.match(
+      SKILL,
+      /allow[\s\S]{0,80}security\s+boundary/,
+      "the allow-list is no longer named as the boundary a loop may not widen",
+    );
+  });
+
+  it("keeps evaluation reporting rather than gating", () => {
+    assert.match(
+      SKILL,
+      /never fails the build/i,
+      "a build that fails on a probabilistic score gets switched off",
+    );
+  });
+
+  it("spends the org's model key, never the platform's coding token", () => {
+    assert.match(SKILL, /ANTHROPIC_API_KEY/);
+    assert.match(
+      SKILL,
+      /never[\s\S]{0,40}CLAUDE_CODE_OAUTH_TOKEN/i,
+      "the coding token is not the organisation's model credential",
+    );
+  });
+});
+
+// Two properties of the PRESCRIBED agent that only evaluation exercises: it is
+// booted repeatedly on ephemeral ports, and it is booted with no database. An
+// agent generated without either never becomes ready, so every scenario would
+// report a boot failure rather than a score.
+describe("agent-building — an agent the harness can boot", () => {
+  it("takes its port from PORT, keeping 9090 as the default", () => {
+    assert.match(
+      SKILL,
+      /process\.env\.PORT \?\? 9090/,
+      "a fixed port makes the second boot of a fix loop fail on an address the first still holds",
+    );
+  });
+
+  it("falls back to an in-memory store when no database is configured", () => {
+    assert.match(
+      SKILL,
+      /config\.memoryDbHost \? postgresStore\(\) : memoryStore\(\)/,
+      "the store no longer chooses a backing — an evaluated agent has no MEMORY_DB_* and would never become ready",
+    );
+    assert.match(
+      SKILL,
+      /row\.userId === userId/,
+      "the in-memory store lost its user fence, so it no longer behaves like the SQL it stands in for",
+    );
+    assert.match(
+      SKILL,
+      /Never list a `MEMORY_DB_\*` variable/,
+      "an absent database configuration reported as `missing` answers 503 forever",
+    );
+  });
+
+  it("still keeps schema init off the path to listen()", () => {
+    assert.match(SKILL, /export function initStore\(\): void/);
+    assert.match(SKILL, /isStoreReady/);
+  });
+});
+
+// The scenario file is the oracle the fix loop optimises against. Derived from
+// the agent document, it would grade the agent on its own wording and pass
+// whatever the prompt happened to say.
+describe("agent-building — the scenario file", () => {
+  it("is authored from the requirements alone", () => {
+    assert.match(DESIGNING, /specs\/validation\/agent-scenarios\.json/);
+    assert.match(DESIGNING, /specs\/requirements\/[^\n]*ONLY/);
+    assert.match(DESIGNING, /never from the `agent\.afm\.md`/i);
+  });
+
+  it("explains what withholding buys", () => {
+    assert.match(
+      DESIGNING,
+      /withholds/,
+      "without withheld facts, \"asks for what it needs\" is unobservable",
+    );
+  });
+
+  it("is emitted by the design phase, under the same input rule", () => {
+    assert.match(VALIDATION_CRITERIA, /specs\/validation\/agent-scenarios\.json/);
+    assert.match(VALIDATION_CRITERIA, /never the\s+agent document|never[\s\S]{0,40}agent\.afm\.md/i);
+  });
+});

@@ -28,7 +28,7 @@ only on what the PRD says or necessarily implies, and cite each requirement's
 story numbers so coverage is checkable: every story the PRD defines
 appears in some entry's `stories`.
 
-## Output — write exactly one file
+## Output — the criteria file
 
 Create `specs/validation/validation-criteria.json` (use `addFile`; if it already exists, replace its
 contents). The file MUST be valid JSON conforming **exactly** to the schema below — no comments, no
@@ -92,10 +92,27 @@ Every criterion gets exactly one method.
   do NOT guess a criterion to fill the gap. Instead, **list the ambiguities and any assumptions you made
   in your reply to the user** — keep them OUT of the JSON file (the file stays exactly on-schema).
 
+## When the design contains an `ai-agent`
+
+An agent's behaviour cannot be pinned by a criterion alone — "asks for what it needs" is a
+conversation, not an assertion. So a design carrying an `ai-agent` component also gets
+`specs/validation/agent-scenarios.json`: one entry per conversational scenario, each citing the
+`criteria[].id`s it exercises, so the criteria file stays the single acceptance oracle and the
+scenarios add only what a criterion cannot hold — what the user says, what they hold back, and what
+a good answer must and must not contain.
+
+**The requirement-only input rule above stands unchanged, and matters more here.** The build runs
+these scenarios against the agent and may revise its prompt until they pass, so a scenario written
+from `agent.afm.md` would grade the agent against its own wording. Read the requirements; never the
+agent document.
+
+The file's shape and its authoring rules are in the `agent-building` skill
+(`references/designing.md`).
+
 ## Do not
 
 - Do not add fields beyond the schema, comments, or any prose inside the JSON.
 - Do not read `design.md`, `openapi.yaml`, or source code to derive criteria (requirement-only input).
-- Do not generate e2e test files, a validation workflow, or anything else — this skill produces the
-  single `specs/validation/validation-criteria.json` file, whether it runs standalone or as the final
-  step of a design turn.
+- Do not generate e2e test files, a validation workflow, or anything else — this skill produces
+  `specs/validation/validation-criteria.json`, plus `agent-scenarios.json` when the design contains an
+  `ai-agent`, whether it runs standalone or as the final step of a design turn.

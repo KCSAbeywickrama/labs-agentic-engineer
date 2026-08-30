@@ -155,3 +155,81 @@ dependency (the `architecture` skill), the wire shape is in the skill body, and
 how the store is used is `references/building.md`. `client` remains valid for an
 agent whose caller genuinely owns the transcript (rare; say why in the
 description).
+
+## Scenarios — how this agent's behaviour is graded
+
+Every `ai-agent` also gets `specs/validation/agent-scenarios.json`: the
+conversations the build runs the agent through, and what it must and must not
+do in them. `validation-criteria.json` is still the acceptance oracle for the
+system; this file adds only what a criterion cannot hold — what the user says,
+and what a good answer looks like.
+
+**Write it from `specs/requirements/` ONLY** — the PRD's user stories and the
+feature docs. **Never from the `agent.afm.md` you are writing**, and never
+from `design.md` or any contract. The build is allowed to revise the prompt
+until these scenarios pass, so a scenario derived from the prompt would grade
+an agent against its own wording and pass whatever it said. Cite the
+`validation-criteria.json` ids each scenario exercises, so one requirement is
+traceable through both files.
+
+```json
+{
+  "version": 1,
+  "component": "trip-agent",
+  "scenarios": [
+    {
+      "id": "SC-001",
+      "criteria": ["AC-003-a", "AC-003-b"],
+      "brief": {
+        "goal": "Book three nights in London in August for two people.",
+        "facts": { "city": "London", "nights": 3, "guests": 2 },
+        "withholds": ["dates"]
+      },
+      "rubric": {
+        "mustCover": [
+          { "id": "MC-1", "must": "Asks for the missing dates rather than assuming them", "weight": 2 },
+          { "id": "MC-2", "must": "Names real hotels returned by the API, not invented ones" }
+        ],
+        "mustNot": [
+          { "id": "MN-1", "mustNot": "States a price the API did not return" }
+        ]
+      }
+    }
+  ]
+}
+```
+
+| Field | Rule |
+|---|---|
+| `component` | the agent component's name |
+| `id` | `SC-NNN`, unique in the file |
+| `criteria` | the `validation-criteria.json` ids this scenario exercises |
+| `brief.goal` | what the simulated user wants, in their words. It opens the conversation |
+| `brief.facts` | everything the simulated user knows — the agent has to ask for it |
+| `brief.withholds` | the `facts` keys the user will NOT volunteer |
+| `rubric.mustCover` | what a good answer covers. `weight` defaults to 1; use 2 for the line that IS the scenario |
+| `rubric.mustNot` | what a good answer never does |
+
+**`withholds` is what makes a scenario test behaviour rather than
+transcription.** The simulated user knows the dates and answers when asked,
+but never offers them — so "asks for what it needs" becomes observable. A
+`goal` that states a withheld fact has not withheld it, and the harness
+rejects the file rather than grading a scenario that gives the answer away.
+
+**Name each fact the word the agent would use for it.** The simulated user is
+rule-based, not a model — it answers when the agent's turn mentions the fact's
+key by name, so `dates` is answerable and `arrivalWindowSpec` is not. Anything
+it does not recognise ends the conversation.
+
+**`mustNot` is for harm, not for taste.** A scenario is satisfied at 0.8 of
+its `mustCover` weight but at ZERO tolerance on `mustNot` — inventing a price,
+claiming a failed write succeeded. Write there only what must never happen,
+and put everything else in `mustCover`.
+
+**The contracts this agent calls need response examples.** Each allow-listed
+operation is served from its own `200` example during evaluation, so an
+operation without one answers an empty list — and a scenario asking the agent
+to name what the API returned grades an agent that was given nothing.
+
+Give each scenario one job. Two or three scenarios covering the conversations
+the requirements actually describe are worth more than ten paraphrases of one.
