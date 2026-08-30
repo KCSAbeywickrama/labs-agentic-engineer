@@ -88,6 +88,16 @@ function indexOperations(spec: unknown, allow: readonly string[] | undefined): O
         responses?: Record<string, { content?: Record<string, { example?: unknown }> }>;
       };
       const example = op.responses?.["200"]?.content?.["application/json"]?.example ?? [];
+      // `allow === undefined` defaults every operation to allowed — open by
+      // default, not closed. That is safe ONLY because it never happens on
+      // the real path: `agent-doc.ts` (`readToolStubs`) refuses to build a
+      // stub for a contract with an absent or empty `allow` before this
+      // function is ever called. This seam exists so `startStubServer` can
+      // also be driven standalone (e.g. serving a whole contract for a test
+      // of the stub itself) — do not lean on the permissive default for
+      // anything that reaches a real agent under evaluation, and do not
+      // "fix" it to closed-by-default here without also updating the guard
+      // in `agent-doc.ts` that actually carries the security promise.
       const allowed =
         allow === undefined || (op.operationId !== undefined && allow.includes(op.operationId));
       out.push({

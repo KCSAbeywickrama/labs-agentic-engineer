@@ -171,6 +171,19 @@ describe("startStubServer", () => {
       expect(res.status).toBe(404);
     });
 
+    // The case above is 404 for a reason that does not actually exercise the
+    // guard: "/bookings//" has THREE segments against the pattern's two, so
+    // it is rejected on segment COUNT before the empty-segment check ever
+    // runs. This request has the SAME segment count as `/bookings/{id}` (a
+    // trailing slash with nothing after it, i.e. an empty final segment),
+    // so only the `r.length === 0` guard itself can reject it.
+    it("does not let a template segment match an empty segment, at a matching segment count", async () => {
+      const s = await startStubServer(TEMPLATED_SPEC);
+      stop = s.close;
+      const res = await fetch(`${s.url}/bookings/`);
+      expect(res.status).toBe(404);
+    });
+
     // A templated match must be subject to exactly the same allow-list check
     // as a literal one — otherwise `allow` would be a security boundary only
     // for the contracts that happen not to use path parameters.
