@@ -23,16 +23,26 @@ export const THRESHOLD = 0.8;
 /**
  * A scenario file becomes a promptfoo config.
  *
- * `mustCover` lines are weighted rubric assertions and average into the score.
- * `mustNot` lines are NOT: each gets `threshold: 1`, so a violation fails its
- * assertion outright rather than being averaged away by a scenario that did
- * well elsewhere. A rubric that tolerates inventing a price 20% of the time is
- * not a rubric.
+ * `mustCover` lines are weighted rubric assertions and average into the
+ * score. `mustNot` lines are NOT — each gets `weight: 0` so it takes no share
+ * of that mean (leaving it in, even at the default weight, would let a
+ * passing mustNot inflate the score and a failing one deflate it, so "0.8 of
+ * mustCover weight" would stop meaning what it says). A mustNot's veto still
+ * happens, just not through the mean: `threshold: 1` fails its OWN assertion
+ * outright, and the verdict reads that failure straight from
+ * `componentResults` rather than from the blended score. A rubric that
+ * tolerates inventing a price 20% of the time is not a rubric.
  */
 export function buildPromptfooConfig(
   file: ScenarioFile,
   opts: { providerPath: string; graderModel: string },
 ): unknown {
+  // An unpinned or missing grader makes a score meaningless between runs —
+  // this is the whole harness's unit of measure, so refuse to build a config
+  // that would silently grade with "whatever the caller forgot to set".
+  if (opts.graderModel.trim() === "") {
+    throw new Error("buildPromptfooConfig: graderModel must not be blank");
+  }
   return {
     description: `agent evaluation — ${file.component}`,
     providers: [{ id: `file://${opts.providerPath}` }],
@@ -51,6 +61,7 @@ export function buildPromptfooConfig(
         ...s.rubric.mustNot.map((m) => ({
           type: "llm-rubric",
           metric: m.id,
+          weight: 0,
           threshold: 1,
           value: `The agent did NOT do this: ${m.mustNot}\n\nTranscript:\n{{output}}`,
         })),

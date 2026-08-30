@@ -66,4 +66,23 @@ describe("buildPromptfooConfig", () => {
     expect(not.type).toBe("llm-rubric");
     expect(not.threshold).toBe(1);
   });
+
+  // promptfoo's own weighted mean would otherwise fold mustNot into the
+  // mustCover average (as the default weight of 1), diluting the score the
+  // verdict reports as "0.8 of mustCover weight". weight: 0 keeps mustNot
+  // out of that mean entirely — it still fails outright via `threshold: 1`,
+  // which is read straight from componentResults, not from the mean.
+  it("gives a mustNot zero weight so it cannot dilute the mustCover mean", () => {
+    const c = buildPromptfooConfig(FILE, { providerPath: "./p.js", graderModel: "m" }) as PromptfooConfigShape;
+    const not = c.tests[0]!.assert.find((a) => a.metric === "MN-1")!;
+    expect(not.weight).toBe(0);
+  });
+
+  // An unpinned or missing grader makes a score meaningless between runs —
+  // reject it at config build time rather than let it surface as a mystery
+  // later.
+  it("rejects a blank grader model", () => {
+    expect(() => buildPromptfooConfig(FILE, { providerPath: "./p.js", graderModel: "" })).toThrow();
+    expect(() => buildPromptfooConfig(FILE, { providerPath: "./p.js", graderModel: "   " })).toThrow();
+  });
 });

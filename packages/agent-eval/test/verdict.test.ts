@@ -18,56 +18,260 @@
 
 import { describe, expect, it } from "vitest";
 import { readVerdict } from "../src/verdict.js";
+import type { ScenarioFile } from "../src/scenario.js";
 
-const OUT = {
-  results: {
-    results: [
-      {
-        success: false,
-        score: 0.5,
-        metadata: { scenarioId: "SC-001" },
-        gradingResult: {
-          componentResults: [
-            { pass: true, score: 1, assertion: { metric: "MC-1" }, reason: "ok" },
-            { pass: false, score: 0, assertion: { metric: "MN-1" }, reason: "invented a price" },
-          ],
-        },
+// SC-001 exercises the mustNot veto (single mustCover, one mustNot).
+// SC-002 exercises weighted mustCover arithmetic (4 + 1 = 5, so a single
+// item flips the fraction between 0.2, 0.8 and 1.0 — enough to pin the
+// exact-0.8 boundary and a genuine below-threshold case on real weights).
+const FILE: ScenarioFile = {
+  version: 1,
+  component: "trip-agent",
+  scenarios: [
+    {
+      id: "SC-001",
+      criteria: [],
+      brief: { goal: "g", facts: {}, withholds: [] },
+      rubric: {
+        mustCover: [{ id: "MC-1", must: "asks for dates", weight: 2 }],
+        mustNot: [{ id: "MN-1", mustNot: "invents a price" }],
       },
-    ],
-  },
+    },
+    {
+      id: "SC-002",
+      criteria: [],
+      brief: { goal: "g2", facts: {}, withholds: [] },
+      rubric: {
+        mustCover: [
+          { id: "MC-2", must: "confirms the destination", weight: 4 },
+          { id: "MC-3", must: "confirms the budget", weight: 1 },
+        ],
+        mustNot: [],
+      },
+    },
+    {
+      id: "SC-003",
+      criteria: [],
+      brief: { goal: "g3", facts: {}, withholds: [] },
+      rubric: {
+        mustCover: [{ id: "MC-4", must: "confirms the party size", weight: 1 }],
+        mustNot: [{ id: "MN-2", mustNot: "books without confirmation" }],
+      },
+    },
+  ],
 };
+
+function row(overrides: Record<string, unknown>): unknown {
+  return overrides;
+}
 
 describe("readVerdict", () => {
   it("names which rubric lines failed, so a fix can cite them", () => {
-    const v = readVerdict(OUT);
+    const out = {
+      results: {
+        results: [
+          row({
+            metadata: { scenarioId: "SC-001" },
+            gradingResult: {
+              componentResults: [
+                { pass: true, assertion: { metric: "MC-1" }, reason: "ok" },
+                { pass: false, assertion: { metric: "MN-1" }, reason: "invented a price" },
+              ],
+            },
+          }),
+        ],
+      },
+    };
+    const v = readVerdict(out, FILE);
     expect(v.scenarios[0]!.failed).toEqual([{ id: "MN-1", reason: "invented a price" }]);
   });
 
-  it("does not pass a scenario below the 0.8 threshold", () => {
-    expect(readVerdict(OUT).passed).toBe(false);
-  });
-
-  it("passes at exactly 0.8", () => {
-    const at = structuredClone(OUT);
-    at.results.results[0]!.score = 0.8;
-    at.results.results[0]!.success = true;
-    at.results.results[0]!.gradingResult.componentResults[1]!.pass = true;
-    expect(readVerdict(at).passed).toBe(true);
-  });
-
   // A single mustNot violation fails a scenario outright, regardless of its
-  // averaged score — the score alone must never be sufficient for a pass.
-  it("fails a scenario on a mustNot violation even at a high score", () => {
-    const high = structuredClone(OUT);
-    high.results.results[0]!.score = 0.95;
-    expect(readVerdict(high).passed).toBe(false);
+  // mustCover score — the score alone must never be sufficient for a pass.
+  it("fails a scenario on a mustNot violation even at a perfect mustCover score", () => {
+    const out = {
+      results: {
+        results: [
+          row({
+            metadata: { scenarioId: "SC-001" },
+            gradingResult: {
+              componentResults: [
+                { pass: true, assertion: { metric: "MC-1" }, reason: "ok" },
+                { pass: false, assertion: { metric: "MN-1" }, reason: "invented a price" },
+              ],
+            },
+          }),
+        ],
+      },
+    };
+    const v = readVerdict(out, FILE);
+    expect(v.scenarios[0]!.score).toBe(1);
+    expect(v.scenarios[0]!.passed).toBe(false);
   });
 
-  // No scenarios graded means no achievable weight to divide by — the
-  // overall average must not divide by zero (NaN would poison the report).
-  it("does not divide by zero when there are no results", () => {
-    const v = readVerdict({ results: { results: [] } });
+  it("computes score as passed weight over gradeable mustCover weight, and passes at exactly 0.8", () => {
+    const out = {
+      results: {
+        results: [
+          row({
+            metadata: { scenarioId: "SC-002" },
+            gradingResult: {
+              componentResults: [
+                { pass: true, assertion: { metric: "MC-2" }, reason: "ok" },
+                { pass: false, assertion: { metric: "MC-3" }, reason: "budget never confirmed" },
+              ],
+            },
+          }),
+        ],
+      },
+    };
+    const v = readVerdict(out, FILE);
+    expect(v.scenarios[0]!.score).toBe(0.8);
+    expect(v.scenarios[0]!.passed).toBe(true);
+  });
+
+  it("does not pass a scenario below the 0.8 threshold", () => {
+    const out = {
+      results: {
+        results: [
+          row({
+            metadata: { scenarioId: "SC-002" },
+            gradingResult: {
+              componentResults: [
+                { pass: false, assertion: { metric: "MC-2" }, reason: "destination never confirmed" },
+                { pass: true, assertion: { metric: "MC-3" }, reason: "ok" },
+              ],
+            },
+          }),
+        ],
+      },
+    };
+    const v = readVerdict(out, FILE);
+    expect(v.scenarios[0]!.score).toBeCloseTo(0.2);
+    expect(v.scenarios[0]!.passed).toBe(false);
+  });
+
+  // "Achievable" weight excludes items that were never actually graded — a
+  // scenario is not judged complete on the strength of the items that WERE
+  // graded while others silently went missing.
+  it("does not pass when a mustCover item was never gradeable, even if the graded items are perfect", () => {
+    const out = {
+      results: {
+        results: [
+          row({
+            metadata: { scenarioId: "SC-002" },
+            gradingResult: {
+              componentResults: [{ pass: true, assertion: { metric: "MC-2" }, reason: "ok" }],
+              // MC-3 has no componentResult at all.
+            },
+          }),
+        ],
+      },
+    };
+    const v = readVerdict(out, FILE);
+    expect(v.scenarios[0]!.passed).toBe(false);
+  });
+
+  // Zero gradeable weight (no componentResults matched any mustCover item)
+  // must report score 0, not NaN, and must never pass.
+  it("does not divide by zero and does not pass when nothing was gradeable", () => {
+    const out = {
+      results: {
+        results: [
+          row({
+            metadata: { scenarioId: "SC-002" },
+            gradingResult: { componentResults: [] },
+          }),
+        ],
+      },
+    };
+    const v = readVerdict(out, FILE);
+    expect(v.scenarios[0]!.score).toBe(0);
+    expect(Number.isNaN(v.scenarios[0]!.score)).toBe(false);
+    expect(v.scenarios[0]!.passed).toBe(false);
+  });
+
+  // An errored row is not a genuine zero: it never passes, and its error
+  // text becomes a citable failure reason instead of being discarded.
+  it("marks an errored row as failed, carrying the error text as a reason", () => {
+    const out = {
+      results: {
+        results: [
+          row({
+            error: "provider timeout",
+            metadata: { scenarioId: "SC-003" },
+          }),
+        ],
+      },
+    };
+    const v = readVerdict(out, FILE);
+    expect(v.scenarios[0]!.passed).toBe(false);
+    expect(v.scenarios[0]!.failed).toEqual([{ id: "SC-003", reason: "provider timeout" }]);
+  });
+
+  it("never lets an errored row pass, even if a non-zero score is also present", () => {
+    const out = {
+      results: {
+        results: [
+          row({
+            error: "boom",
+            score: 1,
+            success: false,
+            metadata: { scenarioId: "SC-003" },
+            gradingResult: {
+              componentResults: [{ pass: true, assertion: { metric: "MC-4" }, reason: "ok" }],
+            },
+          }),
+        ],
+      },
+    };
+    const v = readVerdict(out, FILE);
+    expect(v.scenarios[0]!.passed).toBe(false);
+  });
+
+  // A missing, empty, or malformed promptfoo result must never read as a
+  // clean pass — that would let the fix loop ship an un-evaluated prompt.
+  it("does not report a vacuous pass when there are no results", () => {
+    const v = readVerdict({ results: { results: [] } }, FILE);
     expect(v.overall).toBe(0);
     expect(v.scenarios).toEqual([]);
+    expect(v.passed).toBe(false);
+  });
+
+  it("does not report a vacuous pass on malformed input", () => {
+    expect(readVerdict(undefined, FILE).passed).toBe(false);
+    expect(readVerdict(null, FILE).passed).toBe(false);
+    expect(readVerdict({}, FILE).passed).toBe(false);
+  });
+
+  // `overall` is what the fix loop compares round-over-round to decide
+  // whether to stop early, so its arithmetic must be pinned exactly, not
+  // merely checked in the trivial empty-array case.
+  it("computes overall as the exact mean of scenario scores", () => {
+    const out = {
+      results: {
+        results: [
+          row({
+            metadata: { scenarioId: "SC-001" },
+            gradingResult: {
+              componentResults: [{ pass: true, assertion: { metric: "MC-1" }, reason: "ok" }],
+            },
+          }),
+          row({
+            metadata: { scenarioId: "SC-002" },
+            gradingResult: {
+              componentResults: [
+                { pass: true, assertion: { metric: "MC-2" }, reason: "ok" },
+                { pass: false, assertion: { metric: "MC-3" }, reason: "no" },
+              ],
+            },
+          }),
+        ],
+      },
+    };
+    const v = readVerdict(out, FILE);
+    // SC-001 scores 1 (MC-1 passed, no mustNot fired); SC-002 scores 0.8
+    // (4 of 5 weight passed). Mean of [1, 0.8] is exactly 0.9.
+    expect(v.overall).toBe(0.9);
   });
 });
