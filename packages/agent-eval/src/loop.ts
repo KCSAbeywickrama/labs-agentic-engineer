@@ -25,52 +25,85 @@ export interface LoopResult {
   history: Verdict[];
 }
 
-const DEFAULT_MAX_ROUNDS = 3;
+// The hard iteration cap from the plan's global constraints: unbounded (or
+// caller-raised) iteration on a probabilistic system spends the org's key
+// with no guarantee of converging. `maxRounds` may only ever LOWER this, so
+// it is a ceiling on the caller's input, never a default that a caller can
+// raise past it.
+const HARD_CAP = 3;
+
+/**
+ * Resolves the round cap and validates it in one place, so every rejection
+ * path — "too high", "not an integer", "not finite", "below 1" — shares one
+ * error shape naming the cap. Silently clamping an over-high request (e.g.
+ * `Math.min(n, HARD_CAP)`) would hide a caller's misunderstanding of the
+ * contract instead of surfacing it, so this throws instead of coercing.
+ */
+function resolveMax(maxRounds: number | undefined): number {
+  if (maxRounds === undefined) return HARD_CAP;
+  if (!Number.isInteger(maxRounds) || maxRounds < 1 || maxRounds > HARD_CAP) {
+    throw new Error(
+      `runFixLoop: maxRounds must be an integer between 1 and ${HARD_CAP} ` +
+        `(the hard iteration cap), got ${maxRounds}`,
+    );
+  }
+  return maxRounds;
+}
 
 /**
  * Evaluate, revise, repeat — within bounds that exist because the system is
  * probabilistic and the model calls are on the org's key.
  *
  * Three rules, each earning its place:
- *  - a CAP, because "iterate until it passes" may never converge;
+ *  - a CAP, because "iterate until it passes" may never converge, and the
+ *    cap is a ceiling the caller can only lower, never raise;
  *  - keep the BEST-scoring body, because a revision can make the agent worse
- *    and the last attempt is not automatically the right one to ship;
+ *    and the last attempt is not automatically the right one to ship. On a
+ *    tie the EARLIEST body wins — an equal score is no evidence a later
+ *    revision helped, so there is no reason to prefer the more expensive one;
  *  - stop early when a round regresses, because a loop that has started going
  *    backwards has no reason to find its way forward by spending more.
+ *
+ * The first round always runs (a validated cap is never below 1), so `best`
+ * is a real `Verdict` from the first call onward — never a null stand-in for
+ * "nothing evaluated yet", which would make a downstream `.overall` read
+ * unsound.
  */
 export async function runFixLoop(opts: {
   evaluate: () => Promise<Verdict>;
+  // Receives the FULL verdict, `ungraded` included, because building the
+  // revision prompt is this callback's job, not the loop's. Whoever
+  // implements `revise` must feed `failed` into the prompt and leave
+  // `ungraded` out of it: a rubric line the grader never returned a verdict
+  // on is not something a prompt fix can address, and citing it as an
+  // instruction would be citing a guess.
   revise: (verdict: Verdict, body: string) => Promise<string>;
   body: string;
   maxRounds?: number;
 }): Promise<LoopResult> {
-  const max = opts.maxRounds ?? DEFAULT_MAX_ROUNDS;
-  // A cap under 1 would mean the loop returns without ever calling
-  // `evaluate` — there would be no real verdict to report as `best`, only a
-  // fabricated stand-in or a lie about having passed. That is a caller
-  // error, and it must fail loudly rather than produce a vacuous result.
-  if (max < 1) throw new Error(`runFixLoop: maxRounds must be at least 1, got ${max}`);
-
+  const max = resolveMax(opts.maxRounds);
   const history: Verdict[] = [];
   let body = opts.body;
   let bestBody = opts.body;
-  let best: Verdict | null = null;
 
-  for (let round = 1; round <= max; round++) {
-    const verdict = await opts.evaluate();
+  let verdict = await opts.evaluate();
+  history.push(verdict);
+  let best = verdict;
+
+  for (let round = 2; round <= max; round++) {
+    if (verdict.passed) break;
+    body = await opts.revise(verdict, body);
+    verdict = await opts.evaluate();
     history.push(verdict);
 
-    if (best === null || verdict.overall > best.overall) {
+    if (verdict.overall > best.overall) {
       best = verdict;
       bestBody = body;
     } else if (verdict.overall < history[history.length - 2]!.overall) {
       // Regressed: keep what was better and stop.
       break;
     }
-
-    if (verdict.passed || round === max) break;
-    body = await opts.revise(verdict, body);
   }
 
-  return { body: bestBody, rounds: history.length, best: best!, history };
+  return { body: bestBody, rounds: history.length, best, history };
 }
