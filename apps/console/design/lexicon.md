@@ -938,8 +938,23 @@ renaming; it needed to stop being visible.
 | add a feature | `/feature <idea>` | code lens on the story list |
 | add an actor | `/actor <who>` | code lens on Actors |
 | go deeper on a feature | `/expand <story>` | code lens on the story, which carries itself as the subject |
-| settle an assumption or an open question | `/settle <the point>` | code lens on the flagged line |
+| answer an open question | `/settle <the point>` | code lens on the question |
 | take up the open questions | `/settle` over the section | code lens on **Open Questions** |
+| talk a line through | *Discuss* — no command; opens the aim box on the line, Enter sends Discuss | code lens on any bullet |
+
+**An `*assumed*` run offers verdicts, not a command**
+([#652](https://github.com/wso2/labs-agentic-engineer/issues/652)). An assumption is a decision
+the agent already made, and the user's response to it is a judgement, not a request — so the line
+carries **Agree · Remove · Reopen · Discuss**. The first three are **direct edits**: no agent turn, no
+model, one undo each, and they stay live while an agent holds the turn, which is exactly when a
+reviewer is reading flagged lines. *Agree* strips the flag and keeps the decision. *Remove* drops the
+whole block — the bullet or the paragraph, never a guessed sentence boundary. *Reopen* moves the
+block, minus the flag, to the end of **Open Questions**: rejecting an assumed decision does not make
+the decision go away, it reopens the question, and Open Questions is the agent's agenda, so it takes
+the entry up and rephrases it on its next round. *Discuss* is the only verdict that talks. The word
+is **Agree**, not *Accept* — *Accept* is what the agent-suggestion review bar says, and this is a
+different act. `/settle` on a flagged line is retired; the marker leaving the document is itself the
+signal the agent reads.
 
 **A command names the user's intent, never the document operation.** `/feature` says what they
 came to do; `/amend Add a feature` said what the system does to a file.
@@ -979,11 +994,13 @@ of per-line is a control that is only there while the pointer is.
 **The lens is a control beside the line, not the line made clickable.** The PRD is a collaborative
 editor: a line that fires a command on click is a line the user can no longer put a caret in.
 
-**A lens goes inert, saying which, while an agent holds the turn** — the same two conditions that
-gate the header's launchers, since firing a command mid-interview supersedes the live question form
-for the whole room.
+**A lens that starts a turn goes inert, saying which, while an agent holds the turn** — the same
+two conditions that gate the header's launchers, since firing a command mid-interview supersedes
+the live question form for the whole room. A verdict (Agree, Remove, Reopen) starts no turn and never
+goes inert: it is the document being edited, and the document is always the user's to edit.
 
-Shipped in [#579](https://github.com/wso2/labs-agentic-engineer/issues/579).
+Shipped in [#579](https://github.com/wso2/labs-agentic-engineer/issues/579); the verdicts in
+[#666](https://github.com/wso2/labs-agentic-engineer/issues/666).
 
 ## Navigation
 

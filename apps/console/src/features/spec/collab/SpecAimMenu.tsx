@@ -61,6 +61,18 @@ export interface SpecAimBinding {
  */
 const BOX_WIDTH = 560;
 
+/**
+ * A request to open the box on a block the user did not drag over — a lens
+ * asked for it (#652's Discuss). `seq` is what makes two requests for the same
+ * block two events.
+ */
+export interface AimRequest {
+  from: number;
+  to: number;
+  intent: "change" | "discuss";
+  seq: number;
+}
+
 interface Placement {
   top: number;
   left: number;
@@ -94,9 +106,12 @@ function placementFor(editor: Editor, host: HTMLElement): Placement | null {
 export function SpecAimMenu({
   editor,
   aim,
+  request,
 }: {
   editor: Editor;
   aim: SpecAimBinding;
+  /** A lens opening the box on its block; null between requests. */
+  request?: AimRequest | null | undefined;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -112,6 +127,10 @@ export function SpecAimMenu({
   // object, and paint again forever. Numbers settle on the second pass.
   const [from, setFrom] = useState(0);
   const [to, setTo] = useState(0);
+  // What Enter sends. Change for a selection; a Discuss lens opens the box
+  // with Enter sending Discuss — a lens called Discuss whose Enter changed the
+  // document would be a lie. Both buttons stay either way.
+  const [enterIntent, setEnterIntent] = useState<"change" | "discuss">("change");
 
   // Re-measured on every transaction, so the surface follows the text it points
   // at while an agent streams into the same document. Positions are held LIVE
@@ -170,9 +189,23 @@ export function SpecAimMenu({
     if (open) inputRef.current?.focus();
   }, [open]);
 
+  // A lens aimed the box for the user. The block becomes the selection — the
+  // same state a drag would have left — so everything downstream (the wash,
+  // the anchor at send) is the one path, not a second one.
+  const seq = request?.seq ?? 0;
+  useEffect(() => {
+    if (!request || seq === 0) return;
+    editor.commands.setTextSelection({ from: request.from + 1, to: request.to - 1 });
+    setEnterIntent(request.intent);
+    setOpen(true);
+    // `request` is read once per seq; the fields never change under a seq.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editor, seq]);
+
   const dismiss = useCallback(() => {
     setOpen(false);
     setText("");
+    setEnterIntent("change");
   }, []);
 
   // Escape: back to the document, caret exactly where it was. Dropping the
@@ -265,7 +298,7 @@ export function SpecAimMenu({
                   }
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
-                    void handleSend("change");
+                    void handleSend(enterIntent);
                   }
                 }}
               />

@@ -41,7 +41,7 @@ import {
 import { SpecMdToolbar } from "./SpecMdToolbar";
 import { PrdLenses, refreshPrdLenses, type PrdLensBinding } from "./prdLensPlugin";
 import { SpecLinks, refreshSpecLinks, type SpecLinkBinding } from "./specLinkPlugin";
-import { SpecAimMenu, type SpecAimBinding } from "./SpecAimMenu";
+import { SpecAimMenu, type AimRequest, type SpecAimBinding } from "./SpecAimMenu";
 import { AimHighlight, AIM_SELECTED_CLASS } from "./aimHighlightPlugin";
 
 // Collaborative WYSIWYG editor for markdown spec files (#86 phase 6).
@@ -82,6 +82,9 @@ export function SpecMdEditor({
   // binding through a ref rather than the closure it was configured with.
   const lensRef = useRef(lenses);
   const linkRef = useRef(links);
+  // A Discuss lens (#652) opens the aim surface on its block. The setter is
+  // stable, so the extension — built once — can hold it directly.
+  const [aimRequest, setAimRequest] = useState<AimRequest | null>(null);
   useEffect(() => {
     lensRef.current = lenses;
     linkRef.current = links;
@@ -105,6 +108,8 @@ export function SpecMdEditor({
                 run: (command: string) => lensRef.current?.run(command),
                 isBusy: () => Boolean(lensRef.current?.busyReason),
                 busyReason: () => lensRef.current?.busyReason ?? "",
+                discuss: (from: number, to: number) =>
+                  setAimRequest((prev) => ({ from, to, intent: "discuss", seq: (prev?.seq ?? 0) + 1 })),
               }),
             ]
           : []),
@@ -409,7 +414,7 @@ export function SpecMdEditor({
       {/* Rendered last so it paints over the document, and OUTSIDE the
           scroller so it is positioned against the frame — the surface follows
           the text by re-measuring, not by scrolling with it. */}
-      {editor && aim && <SpecAimMenu editor={editor} aim={aim} />}
+      {editor && aim && <SpecAimMenu editor={editor} aim={aim} request={aimRequest} />}
     </Box>
   );
 }

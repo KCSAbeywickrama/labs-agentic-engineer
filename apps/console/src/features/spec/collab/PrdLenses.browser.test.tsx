@@ -135,15 +135,82 @@ describe("the PRD's lens surface, on screen", () => {
     doc.destroy();
   });
 
-  it("renders every lens disabled while an agent holds the turn", async () => {
+  it("renders every lens disabled while an agent holds the turn, except the verdicts", async () => {
     const { doc, view } = await mountPrd("An agent is still working");
 
     const lenses = Array.from(view.container.querySelectorAll<HTMLButtonElement>(".prd-lens"));
     expect(lenses.length).toBeGreaterThan(0);
     for (const lens of lenses) {
+      if (lens.classList.contains("prd-lens--edit")) {
+        expect(lens.disabled).toBe(false);
+        continue;
+      }
       expect(lens.disabled).toBe(true);
       expect(lens.title).toBe("An agent is still working");
     }
+
+    doc.destroy();
+  });
+
+  // The Discuss lens (#652) and the selection surface (#666) are one path: the
+  // lens leaves the block selected, exactly as a drag would have, and opens
+  // the same box. What Enter sends is the one difference, and it is asserted
+  // through the binding rather than the keyboard's label.
+  it("Discuss opens the aim box on its line, with Enter sending Discuss", async () => {
+    const sends: Array<{ intent: string; name: string }> = [];
+    const doc = new Y.Doc();
+    setDocFile(doc, PATH, PRD);
+    const view = render(
+      <OxygenUIThemeProvider theme={OxygenTheme}>
+        <div style={{ height: "640px", display: "flex", flexDirection: "column" }}>
+          <SpecMdEditor
+            fragment={doc.getXmlFragment(PATH)}
+            provider={fakeProvider(doc)}
+            self={{ name: "Tester", color: "#64b5f6" }}
+            agentStreaming={false}
+            lenses={{ run: () => {}, busyReason: "" }}
+            aim={{
+              path: PATH,
+              busyReason: "",
+              send: async (_instruction, anchor, intent) => {
+                sends.push({ intent, name: anchor.nodes[0]?.name ?? "" });
+                return true;
+              },
+            }}
+          />
+        </div>
+      </OxygenUIThemeProvider>,
+    );
+    await waitFor(() => {
+      if (!view.container.querySelector(".prd-lens")) throw new Error("lenses not rendered yet");
+    });
+
+    const story = Array.from(view.container.querySelectorAll("li")).find((li) =>
+      li.textContent?.startsWith("As a Manager"),
+    )!;
+    const discuss = Array.from(story.querySelectorAll<HTMLButtonElement>(".prd-lens")).find(
+      (b) => b.textContent === "Discuss",
+    )!;
+    discuss.click();
+
+    const input = await waitFor(() => {
+      const el = view.container.querySelector<HTMLTextAreaElement>('[data-testid="aim-box"] textarea');
+      if (!el) throw new Error("no box yet");
+      return el;
+    });
+    await waitFor(() => expect(document.activeElement).toBe(input));
+    // The wash is on the line the lens sat on — the selection is the block.
+    expect(
+      Array.from(view.container.querySelectorAll(".aim-selected")).some((el) =>
+        el.textContent?.includes("As a Manager"),
+      ),
+    ).toBe(true);
+
+    await userEvent.keyboard("why a day?{Enter}");
+
+    await waitFor(() => expect(sends).toHaveLength(1));
+    expect(sends[0]!.intent).toBe("discuss");
+    expect(sends[0]!.name).toContain("As a Manager, I want to approve or reject an expense.");
 
     doc.destroy();
   });

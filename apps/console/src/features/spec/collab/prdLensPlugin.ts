@@ -34,6 +34,7 @@ import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
 import { prdAffordances, type PrdLens } from "../lib/prdLenses";
 import { docBlocks } from "./docBlocks";
+import { applyPrdEdit, type PrdEditLens } from "./prdEdits";
 
 /**
  * What the console hands the editor to make the PRD's lenses live. Absent
@@ -54,31 +55,84 @@ export interface PrdLensOptions {
   run: (command: string) => void;
   isBusy: () => boolean;
   busyReason: () => string;
+  /** Open the aim box on a block (#652's Discuss) — the editor's own surface. */
+  discuss: (from: number, to: number) => void;
+}
+
+/**
+ * The lens as it stands NOW, for the block the user clicked.
+ *
+ * A widget whose key matches is REUSED by ProseMirror, DOM and click handler
+ * both — so the lens a handler closed over may carry positions from before an
+ * agent streamed a paragraph in above it. Commands do not care (they carry a
+ * string), but an edit acts on positions, and acting on stale ones would edit
+ * the wrong line. The block's text is the identity that survives; positions
+ * are re-read from the live document at click time.
+ */
+function liveLens<L extends Extract<PrdLens, { kind: "edit" | "discuss" }>>(
+  view: EditorView,
+  captured: L,
+): L | undefined {
+  const { lenses } = prdAffordances(docBlocks(view.state.doc));
+  return lenses.find(
+    (l): l is L =>
+      l.kind === captured.kind &&
+      (l.kind !== "edit" || l.edit === (captured as PrdEditLens).edit) &&
+      l.block.text === captured.block.text,
+  );
 }
 
 export const prdLensKey = new PluginKey<DecorationSet>("prdLenses");
 
 function lensButton(
+  view: EditorView,
   lens: PrdLens,
   busyReason: string,
   opts: PrdLensOptions,
 ): HTMLButtonElement {
   const el = document.createElement("button");
   el.type = "button";
-  el.className = `prd-lens prd-lens--${lens.placement}`;
+  el.className = `prd-lens prd-lens--${lens.placement} prd-lens--${lens.kind}`;
   el.textContent = lens.label;
   el.contentEditable = "false";
-  el.disabled = busyReason !== "";
-  el.title = busyReason || lens.title;
+  // A direct edit needs no agent, so it never goes inert: a reviewer reading
+  // flagged lines while the agent works is exactly who these are for.
+  const inert = lens.kind !== "edit" && busyReason !== "";
+  el.disabled = inert;
+  el.title = inert ? busyReason : lens.title;
   // The button lives inside a contenteditable, so the browser would otherwise
   // move the caret into it before the click ever lands.
   el.addEventListener("mousedown", (e) => e.preventDefault());
   el.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
-    if (!opts.isBusy()) opts.run(lens.command);
+    switch (lens.kind) {
+      case "command":
+        if (!opts.isBusy()) opts.run(lens.command);
+        return;
+      case "edit": {
+        const live = liveLens(view, lens);
+        if (live) applyPrdEdit(view, live);
+        return;
+      }
+      case "discuss": {
+        if (opts.isBusy()) return;
+        const live = liveLens(view, lens);
+        if (live) opts.discuss(live.block.from, live.block.to);
+        return;
+      }
+    }
   });
   return el;
+}
+
+/** The identity a lens's DOM survives a rebuild under — never a position. */
+function lensKey(lens: PrdLens, busyReason: string): string {
+  const what =
+    lens.kind === "command"
+      ? lens.command
+      : `${lens.label}:${lens.block.text.replace(/\s+/g, " ").trim()}`;
+  return `${lens.kind}:${what}@${lens.placement}@${busyReason}`;
 }
 
 function build(doc: PmNode, opts: PrdLensOptions): DecorationSet {
@@ -96,7 +150,7 @@ function build(doc: PmNode, opts: PrdLensOptions): DecorationSet {
   }
   for (const lens of lenses) {
     decorations.push(
-      Decoration.widget(lens.at, () => lensButton(lens, busyReason, opts), {
+      Decoration.widget(lens.at, (view) => lensButton(view, lens, busyReason, opts), {
         side: 1,
         // `side: 1` keeps the widget after the text it follows; the key makes
         // an unchanged lens survive a rebuild without its DOM being replaced,
@@ -106,7 +160,7 @@ function build(doc: PmNode, opts: PrdLensOptions): DecorationSet {
         // DOM is REUSED, factory and all — so anything the button renders has
         // to be in the key, or it freezes at whatever the first build said.
         // That is exactly what `refreshPrdLenses` exists to change.
-        key: `${lens.command}@${lens.placement}@${busyReason}`,
+        key: lensKey(lens, busyReason),
         ignoreSelection: true,
       }),
     );
@@ -135,6 +189,7 @@ export const PrdLenses = Extension.create<PrdLensOptions>({
       run: () => {},
       isBusy: () => false,
       busyReason: () => "",
+      discuss: () => {},
     };
   },
 
