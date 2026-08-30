@@ -120,6 +120,20 @@ describe("agent-building — the evaluation step", () => {
   // and could not fail if the rule were deleted.
   const fixLoop = /\n### The fix loop\n([\s\S]*?)\n### /.exec(SKILL)?.[1] ?? "";
 
+  // The credential paragraph, and ONLY it. `ANTHROPIC_API_KEY` and the word
+  // "key" appear all over this file — a rule matched against the whole thing
+  // would be satisfied by the flag table or by the harness description and
+  // could not fail when the rule itself was deleted.
+  // Whitespace collapsed, because the paragraph is hard-wrapped and a sentence
+  // may sit across two lines. Matching the raw text would make this gate fail on
+  // a pure re-wrap and — worse — pass a deletion that happened to leave the
+  // phrase split differently.
+  const credential = (
+    /\nThe organisation's Anthropic key is the credential,([\s\S]*?)\n\n/.exec(SKILL)?.[1] ?? ""
+  )
+    .replace(/\s+/g, " ")
+    .trim();
+
   it("names the harness and every flag its CLI requires", () => {
     assert.notEqual(invocation, "", "the build reference no longer carries a runnable eval command");
     for (const flag of ["--scenarios", "--app", "--afm", "--out"]) {
@@ -172,6 +186,31 @@ describe("agent-building — the evaluation step", () => {
       "the reference no longer names the variable the platform mounts the org's key under",
     );
     assert.match(SKILL, /Never\s+`CLAUDE_CODE_OAUTH_TOKEN`/);
+  });
+
+  // The one instruction standing between a build agent and re-opening by hand
+  // the hole the platform closes for it. In a pod `ANTHROPIC_API_KEY` holds the
+  // organisation's CODING credential, deliberately withheld from evaluation; an
+  // agent that reads "no key" and helpfully copies the key it can see would
+  // grade agents on a budget the org ring-fenced. Ungated, that instruction is a
+  // suggestion — so it is pinned to the paragraph that carries it.
+  it("forbids re-using the pod's coding key as the evaluation key", () => {
+    assert.notEqual(credential, "", "the reference no longer has a credential paragraph at all");
+    assert.match(
+      credential,
+      /do NOT copy the\s+`?ANTHROPIC_API_KEY`?/,
+      "nothing tells the build agent not to copy the key it can see into the evaluation variable",
+    );
+    assert.match(
+      credential,
+      /CODING credential/,
+      "the paragraph no longer says WHAT the pod's ANTHROPIC_API_KEY is, so the prohibition reads as arbitrary",
+    );
+    assert.match(
+      credential,
+      /No evaluation is the correct outcome/,
+      "without this the agent is told not to fix it but not that leaving it unfixed is right",
+    );
   });
 
   it("bounds the fix loop where the agent can read it", () => {
