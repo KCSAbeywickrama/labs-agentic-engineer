@@ -113,6 +113,28 @@
         ],
         "additionalProperties": false
       }
+    },
+    "thunder": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "type": {
+          "type": "string",
+          "const": "browser"
+        },
+        "scopes": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "type"
+      ],
+      "additionalProperties": false
     }
   },
   "required": [
@@ -120,7 +142,8 @@
     "coldStartRole",
     "publicComponents",
     "roles",
-    "testUsers"
+    "testUsers",
+    "thunder"
   ],
   "additionalProperties": false
 }

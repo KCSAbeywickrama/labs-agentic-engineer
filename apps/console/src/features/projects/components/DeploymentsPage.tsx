@@ -72,6 +72,7 @@ import {
 } from "../lib/promotion";
 import { ConnectionValuesDialog } from "./ConnectionValuesDialog";
 import { PromoteDialog } from "./PromoteDialog";
+import { ProjectSignInPanel } from "./SignInPanel";
 
 const LinkButton = createLink(Button);
 const RouterLink = createLink(MuiLink);
@@ -472,6 +473,8 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
   const promotable = Boolean(
     deploy && deploy.version && board.production.length === 0,
   );
+  const deployGreen =
+    deploy?.status === "deployed" && devTotal > 0 && devReady === devTotal;
 
   // The card's header IS the deploy lifecycle chip (review on #401): the
   // status word does the work a "What is running" heading duplicated. Every
@@ -617,11 +620,7 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
           {/* Green only when everything is live and ready — MilestonePanel's
               delivered rule, not a standing accent. */}
           <PanelOverline
-            color={
-              deploy?.status === "deployed" && devTotal > 0 && devReady === devTotal
-                ? "success.main"
-                : "text.secondary"
-            }
+            color={deployGreen ? "success.main" : "text.secondary"}
           >
             Environment · Dev
           </PanelOverline>
@@ -677,6 +676,12 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
               the stage AFTER this one, which the rail already numbers as step 2 and
               names, with the actor, the counts, a sentence and its own link to the
               report. This was a strictly weaker duplicate of that row. */}
+          {deployGreen && (
+            <>
+              <Divider sx={{ my: 2 }} />
+              <ProjectSignInPanel projectName={projectName} />
+            </>
+          )}
           <Divider sx={{ my: 2 }} />
           {/* The design's connections, and the way to hand the platform their
               REAL values after build-time placeholders (#395 follow-up):

@@ -73,11 +73,8 @@ turn — apply them directly, and load one only if you find you do not have it.
    entities, key fields, relations — these become the API schemas), and
    `## Key flows` (one mermaid sequenceDiagram per core workflow). No
    Components or Interactions prose — the cell owns C2.
-4. **Security design** (`security-design`) — when the design has sign-in or
-   roles. TWO files: `specs/design/roles.json` (which roles the project uses,
-   what each may do, and its test users) and `specs/design/security.md` (how a
-   caller's role is resolved). Call `list_roles` first — roles are shared across
-   projects, so reuse an existing one rather than minting a near-duplicate.
+4. **Security design** (`security-design`) — `specs/design/security.json` when
+   the design has sign-in or roles.
 5. **Per-component artifacts** — every `service` gets `openapi.yaml`
    (`openapi-conventions`); every `web-application` gets `wireframes.dsl`
    (`wireframes`).

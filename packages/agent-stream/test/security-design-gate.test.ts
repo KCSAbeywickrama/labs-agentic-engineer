@@ -17,22 +17,23 @@
  */
 
 /**
- * Write-gate behavior for `specs/design/roles.json`. These assert the zod source
- * of truth directly; the Go save-gate (internal/platform/rolesspec) validates
- * the SAME published JSON Schema plus the same referential rules, and has its
- * own parity tests — a document that passes one gate MUST pass the other.
+ * Write-gate behavior for `specs/design/security.json`. These assert the zod
+ * source of truth directly; the Go save-gate (internal/platform/securityspec)
+ * validates the SAME published JSON Schema plus the same referential rules,
+ * and has its own parity tests — a document that passes one gate MUST pass the
+ * other.
  */
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { checkRolesDesign } from "../src/roles-design-schema.ts";
+import { checkSecurityDesign } from "../src/security-design-schema.ts";
 import { FileBundle } from "../src/bundle.ts";
 
-const PATH = "specs/design/roles.json";
+const PATH = "specs/design/security.json";
 
-/** A minimal valid roles document. */
-function roles(overrides: Record<string, unknown> = {}): string {
+/** A minimal valid security document (scopes omitted). */
+function security(overrides: Record<string, unknown> = {}): string {
   return JSON.stringify({
     version: 1,
     coldStartRole: "Viewer",
@@ -47,28 +48,40 @@ function roles(overrides: Record<string, unknown> = {}): string {
       },
     ],
     testUsers: [{ username: "test-viewer", role: "Viewer" }],
+    thunder: { name: "expense-app", type: "browser" },
     ...overrides,
   });
 }
 
-test("a well-formed roles document passes", () => {
-  assert.equal(checkRolesDesign(PATH, roles()), null);
+test("a well-formed document with thunder (scopes omitted) passes", () => {
+  assert.equal(checkSecurityDesign(PATH, security()), null);
 });
 
-test("the gate claims only specs/design/roles.json", () => {
-  assert.equal(checkRolesDesign("specs/design/components/api/roles.json", "not json"), null);
-  assert.equal(checkRolesDesign("roles.json", "not json"), null);
+test("a well-formed document with scopes including group and ou passes", () => {
+  assert.equal(
+    checkSecurityDesign(
+      PATH,
+      security({ thunder: { name: "expense-app", type: "browser", scopes: "openid group ou" } }),
+    ),
+    null,
+  );
+});
+
+test("the gate claims only specs/design/security.json", () => {
+  assert.equal(checkSecurityDesign("specs/design/roles.json", "not json"), null);
+  assert.equal(checkSecurityDesign("roles.json", "not json"), null);
+  assert.equal(checkSecurityDesign("specs/design/components/api/roles.json", "not json"), null);
 });
 
 test("unparseable JSON is INVALID_JSON", () => {
-  const problem = checkRolesDesign(PATH, "{");
+  const problem = checkSecurityDesign(PATH, "{");
   assert.equal(problem?.code, "INVALID_JSON");
 });
 
 test("an unknown property is rejected — no secret can be smuggled in", () => {
-  const problem = checkRolesDesign(
+  const problem = checkSecurityDesign(
     PATH,
-    roles({
+    security({
       testUsers: [{ username: "test-viewer", role: "Viewer", password: "hunter2" }],
     }),
   );
@@ -76,33 +89,64 @@ test("an unknown property is rejected — no secret can be smuggled in", () => {
   assert.match(problem!.message, /password/);
 });
 
+test("thunder.type other than browser is SCHEMA_VIOLATION", () => {
+  const problem = checkSecurityDesign(
+    PATH,
+    security({ thunder: { name: "expense-app", type: "spa" } }),
+  );
+  assert.equal(problem?.code, "SCHEMA_VIOLATION");
+});
+
+test("scopes without group is SCHEMA_VIOLATION", () => {
+  const problem = checkSecurityDesign(
+    PATH,
+    security({ thunder: { name: "expense-app", type: "browser", scopes: "openid ou" } }),
+  );
+  assert.equal(problem?.code, "SCHEMA_VIOLATION");
+});
+
+test("scopes without ou is SCHEMA_VIOLATION", () => {
+  const problem = checkSecurityDesign(
+    PATH,
+    security({ thunder: { name: "expense-app", type: "browser", scopes: "openid group" } }),
+  );
+  assert.equal(problem?.code, "SCHEMA_VIOLATION");
+});
+
+test("omit scopes parses", () => {
+  assert.equal(checkSecurityDesign(PATH, security()), null);
+});
+
 test("a version other than 1 is rejected", () => {
-  assert.equal(checkRolesDesign(PATH, roles({ version: 2 }))?.code, "SCHEMA_VIOLATION");
+  assert.equal(checkSecurityDesign(PATH, security({ version: 2 }))?.code, "SCHEMA_VIOLATION");
 });
 
 test("at least one role is required", () => {
-  assert.equal(checkRolesDesign(PATH, roles({ roles: [], testUsers: [], coldStartRole: null }))?.code, "SCHEMA_VIOLATION");
+  assert.equal(
+    checkSecurityDesign(PATH, security({ roles: [], testUsers: [], coldStartRole: null }))?.code,
+    "SCHEMA_VIOLATION",
+  );
 });
 
 test("a test user naming an undeclared role is rejected", () => {
-  const problem = checkRolesDesign(PATH, roles({ testUsers: [{ username: "test-admin", role: "Admin" }] }));
+  const problem = checkSecurityDesign(PATH, security({ testUsers: [{ username: "test-admin", role: "Admin" }] }));
   assert.equal(problem?.code, "SCHEMA_VIOLATION");
   assert.match(problem!.message, /no roles\[\] entry declares/);
 });
 
 test("a coldStartRole naming an undeclared role is rejected", () => {
-  const problem = checkRolesDesign(PATH, roles({ coldStartRole: "Nobody" }));
+  const problem = checkSecurityDesign(PATH, security({ coldStartRole: "Nobody" }));
   assert.match(problem!.message, /not a declared role/);
 });
 
 test("coldStartRole may be null", () => {
-  assert.equal(checkRolesDesign(PATH, roles({ coldStartRole: null })), null);
+  assert.equal(checkSecurityDesign(PATH, security({ coldStartRole: null })), null);
 });
 
 test("a duplicate role name is rejected, case-insensitively", () => {
-  const problem = checkRolesDesign(
+  const problem = checkSecurityDesign(
     PATH,
-    roles({
+    security({
       roles: [
         {
           name: "Viewer",
@@ -125,9 +169,9 @@ test("a duplicate role name is rejected, case-insensitively", () => {
 });
 
 test("a permission granting neither actions nor screens is rejected", () => {
-  const problem = checkRolesDesign(
+  const problem = checkSecurityDesign(
     PATH,
-    roles({
+    security({
       roles: [
         {
           name: "Viewer",
@@ -143,14 +187,14 @@ test("a permission granting neither actions nor screens is rejected", () => {
 });
 
 test("a username the directory cannot hold is rejected", () => {
-  const problem = checkRolesDesign(PATH, roles({ testUsers: [{ username: "Test Viewer", role: "Viewer" }] }));
+  const problem = checkSecurityDesign(PATH, security({ testUsers: [{ username: "Test Viewer", role: "Viewer" }] }));
   assert.match(problem!.message, /usable directory username/);
 });
 
 test("a duplicate username is rejected", () => {
-  const problem = checkRolesDesign(
+  const problem = checkSecurityDesign(
     PATH,
-    roles({
+    security({
       testUsers: [
         { username: "test-viewer", role: "Viewer" },
         { username: "test-viewer", role: "Viewer" },
@@ -161,13 +205,15 @@ test("a duplicate username is rejected", () => {
 });
 
 test("an empty testUsers list passes the gate — the build supplies the missing users", () => {
-  assert.equal(checkRolesDesign(PATH, roles({ testUsers: [] })), null);
+  assert.equal(checkSecurityDesign(PATH, security({ testUsers: [] })), null);
 });
 
-test("the FileBundle refuses a bad roles.json and stays byte-for-byte unchanged", () => {
-  const bundle = new FileBundle({ [PATH]: roles() });
+test("the FileBundle refuses a bad security.json and stays byte-for-byte unchanged", () => {
+  const bundle = new FileBundle({ [PATH]: security() });
   const before = bundle.snapshot()[PATH];
-  const res = bundle.addFile(PATH, roles({ version: 9 }));
+  const res = bundle.editFile(PATH, '"version":1', '"version":9');
   assert.equal(res.ok, false);
+  if (res.ok) throw new Error("expected rejection");
+  assert.equal(res.code, "SCHEMA_VIOLATION");
   assert.equal(bundle.snapshot()[PATH], before);
 });

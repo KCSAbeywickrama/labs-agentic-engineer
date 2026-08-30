@@ -19,19 +19,16 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  addTestUser,
-  parseRolesDesign,
+  parseSecurityDesign,
   plannedUsersFor,
   planUsers,
-  removeTestUser,
-  renameTestUser,
   roleSlug,
-  serializeRolesDesign,
+  serializeSecurityDesign,
   suppliedUsernameFor,
-  type RolesDesign,
-} from "./rolesDesign";
+  type SecurityDesign,
+} from "./securityDesign";
 
-type Role = RolesDesign["roles"][number];
+type Role = SecurityDesign["roles"][number];
 
 function role(name: string): Role {
   return {
@@ -43,78 +40,81 @@ function role(name: string): Role {
   };
 }
 
-function doc(over: Partial<RolesDesign> = {}): RolesDesign {
+function doc(over: Partial<SecurityDesign> = {}): SecurityDesign {
   return {
     version: 1,
     coldStartRole: null,
     publicComponents: [],
     roles: [role("Admin"), role("Viewer")],
     testUsers: [],
+    thunder: { name: "orders-app", type: "browser" },
     ...over,
   };
 }
 
-/** A document with every field populated, so an edit has something to preserve. */
-function richDoc(): RolesDesign {
+/** Fully populated document for parse and planUsers round-trip tests. */
+function richDoc(): SecurityDesign {
   return {
     version: 1,
     coldStartRole: "Viewer",
     publicComponents: ["storefront-webapp", "docs-site"],
     roles: [role("Admin"), role("Viewer")],
     testUsers: [{ username: "test-admin", role: "Admin" }],
+    thunder: { name: "orders-app", type: "browser" },
   };
 }
 
-/** Parse an edit's output, failing loudly rather than returning a union. */
-function reparse(text: string): RolesDesign {
-  const parsed = parseRolesDesign(text);
-  expect(parsed.kind).toBe("ok");
-  if (parsed.kind !== "ok") throw new Error("unreachable");
-  return parsed.doc;
-}
-
-describe("parseRolesDesign", () => {
-  // A design with no sign-in legitimately has no roles document. "Absent" is a
+describe("parseSecurityDesign", () => {
+  // A design with no sign-in legitimately has no security document. "Empty" is a
   // state the panel puts into words; "invalid" is an error it shows in red.
   it.each([
     ["null", null],
     ["undefined", undefined],
     ["empty", ""],
     ["whitespace only", "  \n\t  "],
-  ])("reads %s as absent rather than as a failure", (_label, text) => {
-    expect(parseRolesDesign(text)).toEqual({ kind: "absent" });
+  ])("reads %s as empty rather than as a failure", (_label, text) => {
+    expect(parseSecurityDesign(text)).toEqual({ kind: "empty" });
   });
 
   it("reports malformed JSON as invalid", () => {
-    const parsed = parseRolesDesign('{"version": 1,');
+    const parsed = parseSecurityDesign('{"version": 1,');
     expect(parsed.kind).toBe("invalid");
     if (parsed.kind !== "invalid") throw new Error("unreachable");
     expect(parsed.message).not.toBe("");
   });
 
-  it("names the offending path when the document violates the schema", () => {
+  it.each([
+    ["empty object", "{}"],
+    ["JSON array", "[]"],
+  ])("reads %s as empty rather than as a failure", (_label, text) => {
+    expect(parseSecurityDesign(text)).toEqual({ kind: "empty" });
+  });
+
+  it("reads well-formed JSON missing required fields as empty", () => {
     const bad = {
       ...doc(),
       roles: [{ ...role("Admin"), description: undefined }],
     };
-    const parsed = parseRolesDesign(JSON.stringify(bad));
-    expect(parsed.kind).toBe("invalid");
-    if (parsed.kind !== "invalid") throw new Error("unreachable");
-    expect(parsed.message).toContain("roles.0.description");
+    expect(parseSecurityDesign(JSON.stringify(bad))).toEqual({ kind: "empty" });
   });
 
-  // The schema is strict, so a stray key (a password, most dangerously) is a
-  // rejection rather than something silently carried through an edit.
-  it("rejects an unknown top-level key", () => {
-    const parsed = parseRolesDesign(
+  // The schema is strict, but an unknown key means incomplete, not unparseable.
+  it("reads an unknown top-level key as empty", () => {
+    const parsed = parseSecurityDesign(
       JSON.stringify({ ...doc(), password: "hunter2" }),
     );
-    expect(parsed.kind).toBe("invalid");
+    expect(parsed).toEqual({ kind: "empty" });
   });
 
   it("accepts a well-formed document and hands back the parsed shape", () => {
     const good = richDoc();
-    const parsed = parseRolesDesign(serializeRolesDesign(good));
+    const parsed = parseSecurityDesign(serializeSecurityDesign(good));
+    expect(parsed).toEqual({ kind: "ok", doc: good });
+  });
+
+  it("accepts thunder without scopes", () => {
+    const good = doc({ thunder: { name: "orders-app", type: "browser" } });
+    const parsed = parseSecurityDesign(serializeSecurityDesign(good));
     expect(parsed).toEqual({ kind: "ok", doc: good });
   });
 });
@@ -188,14 +188,14 @@ describe("suppliedUsernameFor", () => {
 /**
  * The panel promises the user a name before Build runs, and the build has to
  * produce that same name. The generator therefore exists twice — here and as
- * `rolesspec.supplyUsername` in `services/aep-api/internal/platform/rolesspec`
+ * `securityspec.supplyUsername` in `services/aep-api/internal/platform/securityspec`
  * — and the two disagreeing is a real defect, not a cosmetic one: the panel
  * would show a login that never appears.
  *
- * The expectations below are the OBSERVED output of the Go `rolesspec.Plan` for
- * the same documents, transcribed. Change one side and this goes red.
+ * The expectations below are the OBSERVED output of the Go `securityspec.Plan`
+ * for the same documents, transcribed. Change one side and this goes red.
  */
-describe("suppliedUsernameFor agrees with the Go build's rolesspec.supplyUsername", () => {
+describe("suppliedUsernameFor agrees with the Go build's securityspec.supplyUsername", () => {
   // Two DISTINCT role names that slug identically. The schema's uniqueness rule
   // is on the NAME, so this document is legal, and the Go build resolves it by
   // adding each generated name to its taken set as it mints it. A TS generator
@@ -246,105 +246,5 @@ describe("suppliedUsernameFor agrees with the Go build's rolesspec.supplyUsernam
     expect(plannedUsersFor(d, "Admin")).toEqual([
       { username: "alice", role: "Admin", supplied: false },
     ]);
-  });
-});
-
-describe("addTestUser", () => {
-  it("appends the user and leaves every other field byte-for-byte", () => {
-    const d = richDoc();
-    const out = addTestUser(d, "Viewer", "qa-viewer");
-
-    expect(out).toBe(
-      serializeRolesDesign({
-        ...richDoc(),
-        testUsers: [
-          { username: "test-admin", role: "Admin" },
-          { username: "qa-viewer", role: "Viewer" },
-        ],
-      }),
-    );
-    expect(reparse(out)).toBeTruthy();
-    expect(d).toEqual(richDoc());
-  });
-
-  it("stores the role name as the document declares it, not as it was typed", () => {
-    const out = addTestUser(richDoc(), "vIeWeR", "qa-viewer");
-    expect(reparse(out).testUsers).toContainEqual({
-      username: "qa-viewer",
-      role: "Viewer",
-    });
-  });
-
-  it("serialises as 2-space JSON with a trailing newline", () => {
-    const out = addTestUser(doc(), "Admin", "ada");
-    expect(out.endsWith("\n")).toBe(true);
-    expect(out).toContain('\n  "version": 1');
-  });
-});
-
-describe("renameTestUser", () => {
-  it("renames an authored user in place, preserving everything else", () => {
-    const d = richDoc();
-    const out = renameTestUser(d, "test-admin", "ada");
-
-    expect(out).toBe(
-      serializeRolesDesign({
-        ...richDoc(),
-        testUsers: [{ username: "ada", role: "Admin" }],
-      }),
-    );
-    expect(reparse(out).testUsers).toEqual([
-      { username: "ada", role: "Admin" },
-    ]);
-    expect(d).toEqual(richDoc());
-  });
-
-  // Typing over the platform's promised name is the user CHOOSING a name — the
-  // row exists in the panel but not in the document, so the edit has to add it.
-  it("treats renaming a SUPPLIED (not-yet-authored) username as an add", () => {
-    const d = richDoc(); // Viewer has no authored user ⇒ supplied "test-viewer"
-    expect(suppliedUsernameFor(d, "Viewer")).toBe("test-viewer");
-
-    const out = renameTestUser(d, "test-viewer", "qa-viewer");
-
-    expect(reparse(out).testUsers).toEqual([
-      { username: "test-admin", role: "Admin" },
-      { username: "qa-viewer", role: "Viewer" },
-    ]);
-  });
-
-  it("is a no-op for a name the document neither holds nor would supply", () => {
-    const d = richDoc();
-    expect(renameTestUser(d, "nobody", "somebody")).toBe(
-      serializeRolesDesign(richDoc()),
-    );
-  });
-});
-
-describe("removeTestUser", () => {
-  it("drops only the named user and leaves every other field byte-for-byte", () => {
-    const d: RolesDesign = {
-      ...richDoc(),
-      testUsers: [
-        { username: "test-admin", role: "Admin" },
-        { username: "qa-viewer", role: "Viewer" },
-      ],
-    };
-    const out = removeTestUser(d, "qa-viewer");
-
-    expect(out).toBe(
-      serializeRolesDesign({
-        ...richDoc(),
-        testUsers: [{ username: "test-admin", role: "Admin" }],
-      }),
-    );
-    expect(reparse(out).testUsers).toEqual([
-      { username: "test-admin", role: "Admin" },
-    ]);
-  });
-
-  it("still produces a document the parser accepts when the last user goes", () => {
-    const out = removeTestUser(richDoc(), "test-admin");
-    expect(reparse(out).testUsers).toEqual([]);
   });
 });

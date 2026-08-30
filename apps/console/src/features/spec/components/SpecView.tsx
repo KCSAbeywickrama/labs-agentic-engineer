@@ -94,7 +94,7 @@ import { OpenApiView } from "@aep/ui-openapi-view";
 import { DesignView } from "@aep/ui-design-view";
 import type { DependencyStatusInfo } from "@aep/ui-design-view";
 import { ValidationView } from "@aep/ui-validation-view";
-import { SECURITY_MD_PATH, type SpecSelection } from "../api/designTree";
+import { type SpecSelection } from "../api/designTree";
 import { DESIGN_CELL_PATH, componentOf } from "../api/designTree";
 import { useSession } from "../../../auth/SessionContext";
 
@@ -1293,33 +1293,10 @@ export function SpecView({ projectName }: { projectName: string }) {
                 />
               ) : effectiveSelection.kind === "security" ? (
                 <SecurityPanel
-                  rolesJson={security.rolesJson}
-                  onRolesChange={security.onRolesChange}
+                  securityJson={security.securityJson}
                   live={security.live}
-                  actions={security.actions}
-                  prose={
-                    security.proseFragment && collab.provider ? (
-                      <SpecMdEditor
-                        key={`${SECURITY_MD_PATH}:md`}
-                        fragment={security.proseFragment}
-                        provider={collab.provider}
-                        self={collab.self}
-                        agentStreaming={agentBusy}
-                        links={{
-                          path: SECURITY_MD_PATH,
-                          knownPaths: specPaths,
-                          open: (path) => setSelection({ kind: "file", path }),
-                        }}
-                      />
-                    ) : (
-                      <Box sx={{ p: 3 }}>
-                        <Typography variant="body2" color="text.secondary">
-                          The access rules are edited live, and the
-                          collaboration service is not reachable right now.
-                        </Typography>
-                      </Box>
-                    )
-                  }
+                  isPending={security.isPending}
+                  isError={security.isError}
                 />
               ) : effectiveSelection.kind === "wireframe" ? (
                 <WireframePanel

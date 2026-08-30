@@ -17,11 +17,12 @@
  */
 
 /**
- * Runtime validation for the AUTHORED `specs/design/roles.json` (`RolesDesign`
- * in `./contracts/roles-design.ts` — the wire source of truth; the Zod schema
- * below is drift-guarded against it). The FileBundle calls `checkRolesDesign`
- * on every write to that path, so the model gets a one-round-trip
- * self-correction instead of a build gate rejecting the file three steps later.
+ * Runtime validation for the AUTHORED `specs/design/security.json`
+ * (`SecurityDesign` in `./contracts/security-design.ts` — the wire source of
+ * truth; the Zod schema below is drift-guarded against it). The FileBundle
+ * calls `checkSecurityDesign` on every write to that path, so the model gets a
+ * one-round-trip self-correction instead of a build gate rejecting the file
+ * three steps later.
  *
  * The schema is also published as JSON Schema (`./json-schema.ts`) and vendored
  * into the BFF, so the agent's write-gate and the platform's save-gate validate
@@ -29,17 +30,19 @@
  *
  * **Referential rules the JSON Schema cannot express** — every `testUsers[].role`
  * and `coldStartRole` naming a declared role, unique role names, unique
- * usernames — live in `checkRolesReferences` below and are applied by BOTH
- * sides separately, exactly like `checkComponentDesign`'s name==directory rule.
+ * usernames, and thunder scopes tokens — live in `checkSecurityReferences`
+ * below and are applied by BOTH sides separately, exactly like
+ * `checkComponentDesign`'s name==directory rule.
  */
 
 import { z } from "zod";
 import type {
-  RolesDesign,
+  SecurityDesign,
   RoleDeclaration,
   RolePermission,
   TestUserDeclaration,
-} from "./contracts/roles-design.js";
+  ThunderClient,
+} from "./contracts/security-design.js";
 import type { Equal } from "./type-equal.js";
 
 /**
@@ -73,28 +76,37 @@ const testUserSchema = z.strictObject({
   role: z.string().min(1),
 });
 
-export const rolesDesignSchema = z.strictObject({
+const thunderSchema = z.strictObject({
+  name: z.string().min(1).max(100),
+  type: z.literal("browser"),
+  scopes: z.string().optional(),
+});
+
+export const securityDesignSchema = z.strictObject({
   version: z.literal(1),
   coldStartRole: z.string().min(1).nullable(),
   publicComponents: z.array(z.string().min(1)),
   roles: z.array(roleSchema).min(1),
   testUsers: z.array(testUserSchema),
+  thunder: thunderSchema,
 });
 
 // Compile-time drift guards: schema ⇄ contracts wire types.
-const _driftRoles: Equal<z.infer<typeof rolesDesignSchema>, RolesDesign> = true;
+const _driftSecurity: Equal<z.infer<typeof securityDesignSchema>, SecurityDesign> = true;
 const _driftRole: Equal<z.infer<typeof roleSchema>, RoleDeclaration> = true;
 const _driftPermission: Equal<z.infer<typeof rolePermissionSchema>, RolePermission> = true;
 const _driftTestUser: Equal<z.infer<typeof testUserSchema>, TestUserDeclaration> = true;
-void _driftRoles;
+const _driftThunder: Equal<z.infer<typeof thunderSchema>, ThunderClient> = true;
+void _driftSecurity;
 void _driftRole;
 void _driftPermission;
 void _driftTestUser;
+void _driftThunder;
 
-/** Matches the one authored roles document. */
-export const ROLES_DESIGN_JSON_RE = /^specs\/design\/roles\.json$/;
+/** Matches the one authored security document. */
+export const SECURITY_DESIGN_JSON_RE = /^specs\/design\/security\.json$/;
 
-export interface RolesDesignProblem {
+export interface SecurityDesignProblem {
   code: "INVALID_JSON" | "SCHEMA_VIOLATION";
   message: string;
 }
@@ -106,7 +118,7 @@ export interface RolesDesignProblem {
  * Exported because the BFF applies the same list against the same parsed shape
  * — one rule set, two callers, never two hand-kept copies.
  */
-export function checkRolesReferences(doc: RolesDesign): string | null {
+export function checkSecurityReferences(doc: SecurityDesign): string | null {
   const declared = new Set<string>();
   for (const role of doc.roles) {
     const key = role.name.toLowerCase();
@@ -141,16 +153,36 @@ export function checkRolesReferences(doc: RolesDesign): string | null {
       return `test user "${user.username}" holds role "${user.role}", which no roles[] entry declares.`;
     }
   }
+
+  const thunderName = doc.thunder.name;
+  if (thunderName !== thunderName.trim()) {
+    return `thunder.name "${thunderName}" has leading or trailing whitespace.`;
+  }
+  if (thunderName.length < 1 || thunderName.length > 100) {
+    return `thunder.name must be 1–100 characters.`;
+  }
+
+  const scopes = doc.thunder.scopes;
+  if (scopes !== undefined && scopes.length > 0) {
+    const tokens = scopes.split(/\s+/).filter((t) => t.length > 0);
+    if (!tokens.includes("group")) {
+      return `thunder.scopes must include the "group" token when scopes are set.`;
+    }
+    if (!tokens.includes("ou")) {
+      return `thunder.scopes must include the "ou" token when scopes are set.`;
+    }
+  }
+
   return null;
 }
 
 /**
- * Validate a candidate roles.json body for `path`. Returns null when the path is
- * not the roles document or the content is valid; otherwise the problem,
- * phrased for the model's self-correction.
+ * Validate a candidate security.json body for `path`. Returns null when the
+ * path is not the security document or the content is valid; otherwise the
+ * problem, phrased for the model's self-correction.
  */
-export function checkRolesDesign(path: string, content: string): RolesDesignProblem | null {
-  if (!ROLES_DESIGN_JSON_RE.test(path)) return null;
+export function checkSecurityDesign(path: string, content: string): SecurityDesignProblem | null {
+  if (!SECURITY_DESIGN_JSON_RE.test(path)) return null;
 
   let parsed: unknown;
   try {
@@ -162,15 +194,15 @@ export function checkRolesDesign(path: string, content: string): RolesDesignProb
     };
   }
 
-  const res = rolesDesignSchema.safeParse(parsed);
+  const res = securityDesignSchema.safeParse(parsed);
   if (!res.success) {
     const issues = res.error.issues
       .map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`)
       .join("; ");
-    return { code: "SCHEMA_VIOLATION", message: `${path} violates the RolesDesign schema — ${issues}.` };
+    return { code: "SCHEMA_VIOLATION", message: `${path} violates the SecurityDesign schema — ${issues}.` };
   }
 
-  const refProblem = checkRolesReferences(res.data);
+  const refProblem = checkSecurityReferences(res.data);
   if (refProblem) {
     return { code: "SCHEMA_VIOLATION", message: `${path}: ${refProblem}` };
   }
