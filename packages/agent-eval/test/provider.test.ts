@@ -115,6 +115,31 @@ describe("AgentEvalProvider", () => {
   // A 10-scenario, 3-round loop against an agent that never comes up would
   // otherwise pay the full boot bound thirty times over. The diagnosis is
   // the same every time, so it is made ONCE and then reused.
+  // Mutation 3 (task-7c): a `firstBootTimeoutMs` that is only a default,
+  // never actually applied when `everBooted` is false, breaks no test that
+  // merely checks the SECOND call is cached — it still finishes inside the
+  // full `readyTimeoutMs` bound and looks fine. Only timing the FIRST call
+  // against a genuinely SHORTER first-boot bound catches it.
+  it("bounds the FIRST boot by firstBootTimeoutMs, not by the full readyTimeoutMs", async () => {
+    const stuck = mkdtempSync(join(tmpdir(), "agent-eval-first-boot-timing-"));
+    writeFakeAgent(stuck, undefined, "store-initialising");
+    try {
+      const p = provider({
+        appDir: stuck,
+        maxTurns: 1,
+        firstBootTimeoutMs: 2_000,
+        readyTimeoutMs: 20_000,
+      });
+      const started = Date.now();
+      await expect(p.callApi("", { vars: { scenario: SCENARIO } })).rejects.toThrow(/initialising/);
+      // Well under the 20s readyTimeoutMs bound: the first boot must fail on
+      // its own short bound, not on the one reserved for a later, trusted boot.
+      expect(Date.now() - started).toBeLessThan(10_000);
+    } finally {
+      rmSync(stuck, { recursive: true, force: true });
+    }
+  }, 30_000);
+
   it("diagnoses an agent that never boots once, not once per scenario", async () => {
     const stuck = mkdtempSync(join(tmpdir(), "agent-eval-stuck-"));
     writeFakeAgent(stuck, undefined, "store-initialising");

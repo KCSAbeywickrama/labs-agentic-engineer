@@ -27,14 +27,59 @@ export interface StubCall {
 }
 
 interface Op {
+  method: string;
+  /**
+   * The contract path split on `/`, one entry per segment. A `{name}`
+   * segment is a path parameter and matches any single non-empty request
+   * segment; every other segment must match literally.
+   */
+  segments: string[];
   operationId?: string | undefined;
   example: unknown;
   allowed: boolean;
 }
 
-/** Index the contract by `METHOD path` so a request is one lookup. */
-function indexOperations(spec: unknown, allow: readonly string[] | undefined): Map<string, Op> {
-  const out = new Map<string, Op>();
+/**
+ * A path always starts with `/`, so the leading split element is always the
+ * empty string before it — dropped here rather than trimmed off both ends,
+ * because a genuinely empty segment ELSEWHERE in the path (a doubled `/`)
+ * must survive into matching: a `{param}` segment matching it would silently
+ * accept a request no real client sends.
+ */
+function pathSegments(path: string): string[] {
+  return path.replace(/^\//, "").split("/");
+}
+
+function isParamSegment(segment: string): boolean {
+  return segment.startsWith("{") && segment.endsWith("}");
+}
+
+/**
+ * Whether a request's segments satisfy a contract path's segments, and — for
+ * picking the best of several matches — how many of them matched literally.
+ * A literal path always wins over a templated one because it scores higher:
+ * every one of its segments counts, where a template's parameter segments
+ * never do.
+ */
+function matchSegments(pattern: string[], request: string[]): number | undefined {
+  if (pattern.length !== request.length) return undefined;
+  let literalCount = 0;
+  for (let i = 0; i < pattern.length; i++) {
+    const p = pattern[i]!;
+    const r = request[i]!;
+    if (isParamSegment(p)) {
+      if (r.length === 0) return undefined;
+    } else {
+      if (p !== r) return undefined;
+      literalCount++;
+    }
+  }
+  return literalCount;
+}
+
+/** Build the operation list from the contract. Order does not matter — a request is matched by scoring every candidate, not by insertion order. */
+function indexOperations(spec: unknown, allow: readonly string[] | undefined): Op[] {
+  const out: Op[] = [];
   const paths = (spec as { paths?: Record<string, Record<string, unknown>> })?.paths ?? {};
   for (const [path, methods] of Object.entries(paths)) {
     for (const [method, opRaw] of Object.entries(methods)) {
@@ -45,7 +90,13 @@ function indexOperations(spec: unknown, allow: readonly string[] | undefined): M
       const example = op.responses?.["200"]?.content?.["application/json"]?.example ?? [];
       const allowed =
         allow === undefined || (op.operationId !== undefined && allow.includes(op.operationId));
-      out.set(`${method.toUpperCase()} ${path}`, { operationId: op.operationId, example, allowed });
+      out.push({
+        method: method.toUpperCase(),
+        segments: pathSegments(path),
+        operationId: op.operationId,
+        example,
+        allowed,
+      });
     }
   }
   if (allow !== undefined) {
@@ -54,7 +105,7 @@ function indexOperations(spec: unknown, allow: readonly string[] | undefined): M
     // generated without that tool, so it would score badly for a reason no
     // prompt fix can address — say so rather than serving a contract that
     // quietly grants less than the document claims.
-    const defined = new Set([...out.values()].map((op) => op.operationId));
+    const defined = new Set(out.map((op) => op.operationId));
     const unknown = allow.filter((id) => !defined.has(id));
     if (unknown.length > 0) {
       throw new Error(
@@ -63,6 +114,28 @@ function indexOperations(spec: unknown, allow: readonly string[] | undefined): M
     }
   }
   return out;
+}
+
+/**
+ * The one operation a request resolves to, or `undefined` for a path the
+ * contract does not model at all. Ties cannot occur between two DIFFERENT
+ * contract paths — a literal segment fixes an exact string, so at most one
+ * literal path can match a given request — but a literal and a template can
+ * both match, and the literal's strictly higher score always wins.
+ */
+function findOperation(ops: Op[], method: string, path: string): Op | undefined {
+  const request = pathSegments(path);
+  let best: Op | undefined;
+  let bestScore = -1;
+  for (const op of ops) {
+    if (op.method !== method) continue;
+    const score = matchSegments(op.segments, request);
+    if (score !== undefined && score > bestScore) {
+      best = op;
+      bestScore = score;
+    }
+  }
+  return best;
 }
 
 /**
@@ -94,7 +167,7 @@ export async function startStubServer(
 
   const server: Server = createServer((req, res) => {
     const path = (req.url ?? "/").split("?")[0]!;
-    const op = ops.get(`${(req.method ?? "GET").toUpperCase()} ${path}`);
+    const op = findOperation(ops, (req.method ?? "GET").toUpperCase(), path);
     calls.push({
       method: req.method ?? "GET",
       path,

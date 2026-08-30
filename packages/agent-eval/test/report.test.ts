@@ -30,8 +30,27 @@ const V: Verdict = {
       passed: false,
       failed: [{ id: "MC-1", reason: "did not ask for dates" }],
       ungraded: [],
+      toolOverReach: [],
     },
-    { id: "SC-002", score: 1, passed: true, failed: [], ungraded: [] },
+    { id: "SC-002", score: 1, passed: true, failed: [], ungraded: [], toolOverReach: [] },
+  ],
+};
+
+// A denied tool call is a security signal, not a rubric miss — it must read
+// as neither a `failed` line nor an `ungraded` one, and it must reach a
+// human reading `report.md`, not stop at a field only a machine consumes.
+const V_OVERREACH: Verdict = {
+  passed: false,
+  overall: 1,
+  scenarios: [
+    {
+      id: "SC-004",
+      score: 1,
+      passed: true,
+      failed: [],
+      ungraded: [],
+      toolOverReach: ["LUNCH_API_URL: createRound"],
+    },
   ],
 };
 
@@ -48,6 +67,7 @@ const V_UNGRADED: Verdict = {
       passed: false,
       failed: [{ id: "MC-2", reason: "invented a price" }],
       ungraded: [{ id: "MC-3", reason: "grader timeout" }],
+      toolOverReach: [],
     },
   ],
 };
@@ -91,6 +111,24 @@ describe("renderReport", () => {
   it("omits the ungraded section entirely when nothing was ungraded", () => {
     const md = renderReport(V, { component: "trip-agent", promptChanged: false });
     expect(md).not.toContain("## Ungraded");
+  });
+
+  it("names the operation and says the agent is not permitted to call it", () => {
+    const md = renderReport(V_OVERREACH, { component: "lunch-buddy", promptChanged: false });
+    expect(md).toContain("## Tool over-reach");
+    expect(md).toContain("LUNCH_API_URL: createRound");
+    expect(md).toMatch(/not permitted/i);
+  });
+
+  it("keeps a tool over-reach out of both the failed and ungraded sections", () => {
+    const md = renderReport(V_OVERREACH, { component: "lunch-buddy", promptChanged: false });
+    expect(md).not.toContain("## What fell short");
+    expect(md).not.toContain("## Ungraded");
+  });
+
+  it("omits the tool over-reach section entirely when nothing over-reached", () => {
+    const md = renderReport(V, { component: "trip-agent", promptChanged: false });
+    expect(md).not.toContain("## Tool over-reach");
   });
 
   // A 0.00 with an empty table reads as "every scenario failed"; an empty

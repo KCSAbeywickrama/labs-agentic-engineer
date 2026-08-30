@@ -366,6 +366,44 @@ describe("readVerdict", () => {
     expect(v.scenarios[0]!.passed).toBe(false);
   });
 
+  // `metadata.toolOverReach` is what the provider carries out of the run when
+  // the agent called an operation its allow-list withholds — a security
+  // finding, not a rubric miss. The verdict must carry it through, or it
+  // only LOOKS visible: written to `out.json` but never actually read.
+  it("carries toolOverReach through from the row's metadata", () => {
+    const out = {
+      results: {
+        results: [
+          row({
+            metadata: { scenarioId: "SC-003", toolOverReach: ["LUNCH_API_URL: createRound"] },
+            gradingResult: {
+              componentResults: [{ pass: true, assertion: { metric: "MC-4" }, reason: "ok" }],
+            },
+          }),
+        ],
+      },
+    };
+    const v = readVerdict(out, FILE);
+    expect(v.scenarios[0]!.toolOverReach).toEqual(["LUNCH_API_URL: createRound"]);
+  });
+
+  it("reports an empty toolOverReach when the row carries none", () => {
+    const out = {
+      results: {
+        results: [
+          row({
+            metadata: { scenarioId: "SC-003" },
+            gradingResult: {
+              componentResults: [{ pass: true, assertion: { metric: "MC-4" }, reason: "ok" }],
+            },
+          }),
+        ],
+      },
+    };
+    const v = readVerdict(out, FILE);
+    expect(v.scenarios[0]!.toolOverReach).toEqual([]);
+  });
+
   // "not graded" and "genuinely missed" must not share a bucket: a revision
   // prompt built from `failed` would otherwise be told to fix a rubric line
   // the grader simply never returned a verdict on.

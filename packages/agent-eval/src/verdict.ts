@@ -28,6 +28,12 @@ export interface ScenarioVerdict {
   // `failed` on purpose: `failed` feeds the revision prompt verbatim, and a
   // line that was never graded is not something a prompt fix can address.
   ungraded: { id: string; reason: string }[];
+  // Operations the agent called that its allow-list withholds, as
+  // `ENV_VAR: operationId`. Kept apart from BOTH `failed` and `ungraded`: an
+  // over-reach is neither a rubric miss nor a grading gap, it is a security
+  // finding, and folding it into either bucket would ask a reader (or the
+  // fix loop) to treat it as the wrong kind of problem.
+  toolOverReach: string[];
 }
 export interface Verdict { passed: boolean; overall: number; scenarios: ScenarioVerdict[] }
 
@@ -39,7 +45,7 @@ interface ComponentResult {
 }
 interface Row {
   error?: string;
-  metadata?: { scenarioId?: string };
+  metadata?: RowMetadata;
   // promptfoo only attaches OUR metadata when the provider returns
   // normally — a row whose provider call threw (the common shape for an
   // errored scenario) carries none. `vars.scenario.id` is promptfoo's OWN
@@ -47,6 +53,11 @@ interface Row {
   // fallback rather than a second, weaker guess.
   vars?: { scenario?: { id?: string } };
   gradingResult?: { componentResults?: ComponentResult[] };
+}
+
+interface RowMetadata {
+  scenarioId?: string;
+  toolOverReach?: string[];
 }
 
 function findComponent(parts: ComponentResult[], metric: string): ComponentResult | undefined {
@@ -62,12 +73,22 @@ function isGradeable(comp: ComponentResult | undefined): comp is ComponentResult
 
 function scoreScenario(row: Row, file: ScenarioFile): ScenarioVerdict {
   const id = row.metadata?.scenarioId ?? row.vars?.scenario?.id ?? "?";
+  // Present regardless of how this scenario scored — an over-reach is a
+  // security signal independent of whether the rubric was otherwise met.
+  const toolOverReach = row.metadata?.toolOverReach ?? [];
 
   // A row-level error means promptfoo never produced real grading for this
   // scenario at all (provider timeout, crash, ...). That is never a pass,
   // and the error text is the only thing worth citing back to a fix.
   if (row.error !== undefined) {
-    return { id, score: 0, passed: false, failed: [{ id, reason: row.error }], ungraded: [] };
+    return {
+      id,
+      score: 0,
+      passed: false,
+      failed: [{ id, reason: row.error }],
+      ungraded: [],
+      toolOverReach,
+    };
   }
 
   const scenario = file.scenarios.find((s) => s.id === id);
@@ -82,6 +103,7 @@ function scoreScenario(row: Row, file: ScenarioFile): ScenarioVerdict {
       passed: false,
       failed: [{ id, reason: `no matching scenario in file for id "${id}"` }],
       ungraded: [],
+      toolOverReach,
     };
   }
 
@@ -131,7 +153,7 @@ function scoreScenario(row: Row, file: ScenarioFile): ScenarioVerdict {
   // ungraded mustCover or mustNot item, blocks passing even at a perfect
   // partial score.
   const passed = !mustNotViolated && allGradeable && gradeableWeight > 0 && score >= THRESHOLD;
-  return { id, score, passed, failed, ungraded };
+  return { id, score, passed, failed, ungraded, toolOverReach };
 }
 
 /**

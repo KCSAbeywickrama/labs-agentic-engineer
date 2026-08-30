@@ -80,6 +80,29 @@ export function renderReport(
     }
   }
 
+  // A denied tool call is a security finding, not a rubric result — its own
+  // heading, ahead of `failed`/`ungraded`, so a reader cannot mistake it for
+  // either. `metadata.toolOverReach` reaching `out.json` was not enough on
+  // its own: a signal nothing renders is not actually visible to anyone.
+  const overReach = v.scenarios.filter((s) => s.toolOverReach.length > 0);
+  if (overReach.length > 0) {
+    lines.push(
+      "",
+      "## Tool over-reach",
+      "",
+      "The agent called an operation its allow-list does not include. This is " +
+        "a security finding, not a rubric miss.",
+      "",
+    );
+    for (const s of overReach) {
+      lines.push(`**${s.id}**`);
+      for (const entry of s.toolOverReach) {
+        lines.push(`- \`${entry}\` — this agent is not permitted to call this operation.`);
+      }
+      lines.push("");
+    }
+  }
+
   const ungraded = v.scenarios.filter((s) => s.ungraded.length > 0);
   if (ungraded.length > 0) {
     lines.push(

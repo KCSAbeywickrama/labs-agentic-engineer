@@ -39,6 +39,29 @@ const SPEC = {
   },
 };
 
+function operation(operationId: string, body: unknown): Record<string, unknown> {
+  return {
+    operationId,
+    responses: {
+      "200": { content: { "application/json": { example: body } } },
+    },
+  };
+}
+
+// A single-parameter and a multi-parameter path, PLUS a literal that
+// collides with the single-parameter template on the same method — the
+// case that must resolve to the literal, not the template.
+const TEMPLATED_SPEC = {
+  openapi: "3.0.0",
+  paths: {
+    "/bookings/mine": { get: operation("myBookings", { mine: true }) },
+    "/bookings/{id}": { get: operation("getBooking", { id: "b1" }) },
+    "/bookings/{id}/items/{itemId}": {
+      get: operation("getBookingItem", { id: "b1", item: "i1" }),
+    },
+  },
+};
+
 let stop: (() => Promise<void>) | null = null;
 afterEach(async () => {
   await stop?.();
@@ -102,5 +125,62 @@ describe("startStubServer", () => {
 
   it("refuses an allow entry the contract does not define", async () => {
     await expect(startStubServer(SPEC, ["bookHotel"])).rejects.toThrow(/bookHotel/);
+  });
+
+  // Path templating is ordinary OpenAPI: a contract declaring `/bookings/{id}`
+  // must answer a request for `/bookings/123`, or every scenario touching a
+  // path parameter measures the harness's own defect instead of the agent.
+  describe("templated paths", () => {
+    it("matches a single-parameter path against a concrete segment", async () => {
+      const s = await startStubServer(TEMPLATED_SPEC);
+      stop = s.close;
+      const res = await fetch(`${s.url}/bookings/123`);
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ id: "b1" });
+      expect(s.calls[0]!.operationId).toBe("getBooking");
+    });
+
+    it("matches a multi-parameter path", async () => {
+      const s = await startStubServer(TEMPLATED_SPEC);
+      stop = s.close;
+      const res = await fetch(`${s.url}/bookings/123/items/456`);
+      expect(res.status).toBe(200);
+      expect(s.calls[0]!.operationId).toBe("getBookingItem");
+    });
+
+    it("prefers a literal path over a template that also matches", async () => {
+      const s = await startStubServer(TEMPLATED_SPEC);
+      stop = s.close;
+      const res = await fetch(`${s.url}/bookings/mine`);
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ mine: true });
+      expect(s.calls[0]!.operationId).toBe("myBookings");
+    });
+
+    it("does not match when the segment count differs", async () => {
+      const s = await startStubServer(TEMPLATED_SPEC);
+      stop = s.close;
+      const res = await fetch(`${s.url}/bookings/1/extra`);
+      expect(res.status).toBe(404);
+    });
+
+    it("does not let a template segment match an empty segment", async () => {
+      const s = await startStubServer(TEMPLATED_SPEC);
+      stop = s.close;
+      const res = await fetch(`${s.url}/bookings//`);
+      expect(res.status).toBe(404);
+    });
+
+    // A templated match must be subject to exactly the same allow-list check
+    // as a literal one — otherwise `allow` would be a security boundary only
+    // for the contracts that happen not to use path parameters.
+    it("403s a templated operation the allow-list withholds", async () => {
+      const s = await startStubServer(TEMPLATED_SPEC, ["myBookings"]);
+      stop = s.close;
+      const res = await fetch(`${s.url}/bookings/123`);
+      expect(res.status).toBe(403);
+      expect(await res.text()).toContain("getBooking");
+      expect(s.calls[0]!.denied).toBe(true);
+    });
   });
 });
