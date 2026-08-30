@@ -4,13 +4,8 @@
   "private": true,
   "type": "module",
   "description": "Evaluates a generated AI agent's behaviour during its build: the scenario schema (what to test an agent with) and the rubric that scores its responses.",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
-    }
+  "bin": {
+    "agent-eval": "./dist/bin/agent-eval.js"
   },
   "files": [
     "dist"

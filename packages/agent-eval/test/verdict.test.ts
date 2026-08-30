@@ -209,6 +209,29 @@ describe("readVerdict", () => {
     expect(v.scenarios[0]!.failed).toEqual([{ id: "SC-003", reason: "provider timeout" }]);
   });
 
+  // When a provider throws, promptfoo never attaches OUR metadata (it only
+  // does that on a normal return) — but it still records the test's own
+  // vars, which is where the scenario id actually is. Falling back to that
+  // is what keeps a report from citing scenario "?" for exactly the rows a
+  // reader most needs identified.
+  it("falls back to vars.scenario.id when a thrown provider left no metadata", () => {
+    const out = {
+      results: {
+        results: [
+          row({
+            error: "agent-eval: scenario and ask are required vars",
+            vars: { scenario: { id: "SC-003" } },
+          }),
+        ],
+      },
+    };
+    const v = readVerdict(out, FILE);
+    expect(v.scenarios[0]!.id).toBe("SC-003");
+    expect(v.scenarios[0]!.failed).toEqual([
+      { id: "SC-003", reason: "agent-eval: scenario and ask are required vars" },
+    ]);
+  });
+
   it("never lets an errored row pass, even if a non-zero score is also present", () => {
     const out = {
       results: {

@@ -92,6 +92,15 @@ describe("renderReport", () => {
     const md = renderReport(V, { component: "trip-agent", promptChanged: false });
     expect(md).not.toContain("## Ungraded");
   });
+
+  // A 0.00 with an empty table reads as "every scenario failed"; an empty
+  // result set is a materially different situation and must say so plainly.
+  it("says plainly that nothing was graded when the result set is empty", () => {
+    const empty: Verdict = { passed: false, overall: 0, scenarios: [] };
+    const md = renderReport(empty, { component: "trip-agent", promptChanged: false });
+    expect(md).toMatch(/no scenario was graded/i);
+    expect(md).not.toContain("## Scenarios");
+  });
 });
 
 describe("renderRunFailureReport", () => {

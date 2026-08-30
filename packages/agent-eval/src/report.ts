@@ -44,13 +44,25 @@ export function renderReport(
       : "The prompt was not changed — it scored well enough as authored.",
     "",
     "Evaluation is reported, not enforced: a low score does not fail the build.",
+  ];
+
+  // A 0.00 with an empty table reads as "every scenario failed" — it is
+  // actually "nothing was graded at all", a materially different situation
+  // (typically a promptfoo result set that came back empty) that deserves
+  // its own sentence rather than being folded into the normal table.
+  if (v.scenarios.length === 0) {
+    lines.push("", "**No scenario was graded** — the result set was empty.");
+    return lines.join("\n");
+  }
+
+  lines.push(
     "",
     "## Scenarios",
     "",
     "| Scenario | Score | Result |",
     "|---|---|---|",
     ...v.scenarios.map((s) => `| ${s.id} | ${s.score.toFixed(2)} | ${s.passed ? "met" : "below threshold"} |`),
-  ];
+  );
 
   const failures = v.scenarios.filter((s) => s.failed.length > 0);
   if (failures.length > 0) {

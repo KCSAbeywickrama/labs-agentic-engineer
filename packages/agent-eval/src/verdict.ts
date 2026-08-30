@@ -40,6 +40,12 @@ interface ComponentResult {
 interface Row {
   error?: string;
   metadata?: { scenarioId?: string };
+  // promptfoo only attaches OUR metadata when the provider returns
+  // normally — a row whose provider call threw (the common shape for an
+  // errored scenario) carries none. `vars.scenario.id` is promptfoo's OWN
+  // record of the test's input and survives that case, so it is the
+  // fallback rather than a second, weaker guess.
+  vars?: { scenario?: { id?: string } };
   gradingResult?: { componentResults?: ComponentResult[] };
 }
 
@@ -55,7 +61,7 @@ function isGradeable(comp: ComponentResult | undefined): comp is ComponentResult
 }
 
 function scoreScenario(row: Row, file: ScenarioFile): ScenarioVerdict {
-  const id = row.metadata?.scenarioId ?? "?";
+  const id = row.metadata?.scenarioId ?? row.vars?.scenario?.id ?? "?";
 
   // A row-level error means promptfoo never produced real grading for this
   // scenario at all (provider timeout, crash, ...). That is never a pass,
