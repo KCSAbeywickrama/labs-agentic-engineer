@@ -46,7 +46,7 @@ function renderPanel(
         logins={over.logins ?? []}
         thunderUrl={THUNDER_URL}
         revealPassword={revealPassword}
-        loadState={over.loadState}
+        {...(over.loadState !== undefined ? { loadState: over.loadState } : {})}
       />
     </OxygenUIThemeProvider>
   );
