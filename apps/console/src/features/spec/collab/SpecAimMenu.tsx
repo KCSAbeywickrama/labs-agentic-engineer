@@ -93,6 +93,7 @@ export function SpecAimMenu({
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const boxRef = useRef<HTMLDivElement | null>(null);
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
@@ -162,14 +163,35 @@ export function SpecAimMenu({
     if (open) inputRef.current?.focus();
   }, [open]);
 
-  const close = useCallback(() => {
+  const dismiss = useCallback(() => {
     setOpen(false);
     setText("");
-    // The caret stays exactly where it was. Dropping the selection because a
-    // suggestion was waved away would be the editor losing the user's place
-    // (ADR-0023) — and the user may well want to retype over it instead.
+  }, []);
+
+  // Escape: back to the document, caret exactly where it was. Dropping the
+  // selection because a suggestion was waved away would be the editor losing
+  // the user's place (ADR-0023) — and they may well want to retype over it.
+  const close = useCallback(() => {
+    dismiss();
     editor.view.focus();
-  }, [editor]);
+  }, [dismiss, editor]);
+
+  // A click anywhere else dismisses the box — the document, the file rail, the
+  // toolbar. Deliberately NOT followed by refocusing the editor: the click is
+  // about to put focus (and, in the document, the caret) wherever the user
+  // aimed it, and fighting that is exactly the kind of interference ADR-0023
+  // exists to forbid. Found on the local setup: without this the box stayed
+  // open over a caret that had moved on, and the wash followed the caret, so
+  // the box sat there claiming to be about a passage the user never selected.
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (e: PointerEvent) => {
+      if (boxRef.current?.contains(e.target as Node)) return;
+      dismiss();
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () => document.removeEventListener("pointerdown", onPointerDown, true);
+  }, [open, dismiss]);
 
   const handleSend = useCallback(
     async (intent: "change" | "discuss") => {
@@ -197,12 +219,9 @@ export function SpecAimMenu({
       {placement && (hasRange || open) && (
         <Box
           sx={{ position: "absolute", top: placement.top, left: placement.left, pointerEvents: "auto", zIndex: 5 }}
-          // The whole surface sits inside a contenteditable's box: a mousedown
-          // reaching the editor would move the caret before the click landed.
-          onMouseDown={(e) => e.preventDefault()}
         >
           {open ? (
-            <Paper elevation={4} data-testid="aim-box" sx={{ width: 320, p: 1 }}>
+            <Paper ref={boxRef} elevation={4} data-testid="aim-box" sx={{ width: 320, p: 1 }}>
               <TextField
                 inputRef={inputRef}
                 fullWidth
@@ -251,6 +270,12 @@ export function SpecAimMenu({
               icon={<Crosshair size={14} />}
               label="Ask agent  ⌘K"
               size="small"
+              // The chip alone swallows its mousedown, so pressing it does not
+              // blur the editor and lose the native selection before the box
+              // has taken over. Only the chip: on the box this same handler
+              // stopped the textarea taking focus from a click, and keystrokes
+              // went into the document instead — found on the local setup.
+              onMouseDown={(e) => e.preventDefault()}
               onClick={() => setOpen(true)}
               sx={{ boxShadow: 2, bgcolor: "background.paper", cursor: "pointer" }}
             />

@@ -298,3 +298,54 @@ describe("what the selection looks like while the box is open", () => {
     await waitFor(() => expect(washed(view)).toHaveLength(0));
   });
 });
+
+// Both found on the local setup with a real pointer, after every earlier gate
+// passed: eval-driven clicks never move focus the way a mouse does.
+describe("the box and the mouse", () => {
+  it("dismisses when the document is clicked, and the click keeps its caret", async () => {
+    const { view, editable } = await mountEditor();
+    selectParagraph(editable, "Rounds close automatically");
+    (await waitFor(() => {
+      const el = chip(view);
+      if (!el) throw new Error("no chip yet");
+      return el;
+    })).click();
+    await waitFor(() => expect(box(view)).not.toBeNull());
+
+    // The title, ABOVE the selection: the box hangs below it, and Playwright
+    // rightly refuses to click anything the box covers.
+    const elsewhere = editable.querySelector("h1")!;
+    await userEvent.click(elsewhere);
+
+    await waitFor(() => expect(box(view)).toBeNull());
+    // Focus went where the click went — nothing pulled it back.
+    expect(document.activeElement).toBe(editable);
+  });
+
+  it("takes focus from a click on the input even when focus had gone elsewhere", async () => {
+    const { view, editable } = await mountEditor();
+    selectParagraph(editable, "Rounds close automatically");
+    (await waitFor(() => {
+      const el = chip(view);
+      if (!el) throw new Error("no chip yet");
+      return el;
+    })).click();
+    const input = await waitFor(() => {
+      const el = box(view);
+      if (!el) throw new Error("no box yet");
+      return el;
+    });
+
+    // Focus wanders off — a tab switch, a toolbar press — and comes back by
+    // clicking the input, the way anyone would.
+    editable.focus();
+    expect(document.activeElement).toBe(editable);
+    await userEvent.click(input);
+    await userEvent.keyboard("shorter");
+
+    expect(document.activeElement).toBe(input);
+    expect(input.value).toBe("shorter");
+    // And none of it landed in the document.
+    expect(editable.textContent).not.toContain("shorter");
+  });
+});
