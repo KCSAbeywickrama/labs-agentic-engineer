@@ -24,6 +24,7 @@ import {
   runCli,
   resolveGraderModel,
   buildChildEnv,
+  resolveBootTimeouts,
   type SpawnPromptfoo,
   type SpawnResult,
 } from "../src/cli.js";
@@ -123,6 +124,27 @@ describe("resolveGraderModel", () => {
 
   it("uses the env value when genuinely set", () => {
     expect(resolveGraderModel({ AGENT_EVAL_GRADER: "openai:gpt-4o" })).toBe("openai:gpt-4o");
+  });
+});
+
+describe("resolveBootTimeouts", () => {
+  it("defaults to a short diagnosis and a longer settled bound", () => {
+    expect(resolveBootTimeouts({})).toEqual({ firstBootTimeoutMs: 20_000, readyTimeoutMs: 60_000 });
+  });
+
+  it("takes an override, and keeps the settled bound above it", () => {
+    expect(resolveBootTimeouts({ AGENT_EVAL_BOOT_TIMEOUT_MS: "5000" })).toEqual({
+      firstBootTimeoutMs: 5_000,
+      readyTimeoutMs: 60_000,
+    });
+  });
+
+  // A typo must not silently become NaN, which `bootAgent` would treat as an
+  // already-expired deadline and fail every boot instantly.
+  it("ignores a value that is not a positive number", () => {
+    expect(resolveBootTimeouts({ AGENT_EVAL_BOOT_TIMEOUT_MS: "soon" }).firstBootTimeoutMs).toBe(20_000);
+    expect(resolveBootTimeouts({ AGENT_EVAL_BOOT_TIMEOUT_MS: "0" }).firstBootTimeoutMs).toBe(20_000);
+    expect(resolveBootTimeouts({ AGENT_EVAL_BOOT_TIMEOUT_MS: "" }).firstBootTimeoutMs).toBe(20_000);
   });
 });
 
@@ -299,10 +321,17 @@ describe("runCli", () => {
     const provider = (config as { providers: Array<{ config: Record<string, unknown> }> })
       .providers[0]!;
     expect(provider.config.appDir).toBe(join(dir, "app"));
+    // Without a bound the provider cannot set, a misconfigured agent is
+    // diagnosed at the production default on every scenario of every round.
+    expect(provider.config.firstBootTimeoutMs).toBe(20_000);
+    expect(provider.config.readyTimeoutMs).toBe(60_000);
     expect(provider.config.toolStubs).toEqual([
       {
         envVar: "HOTEL_API_URL",
         specPath: join(dir, "specs", "design", "components", "hotel-api", "openapi.yaml"),
+        // The security boundary travels with the contract, or the stub
+        // world is more permissive than the agent it is testing.
+        allow: ["listHotels"],
       },
     ]);
   });

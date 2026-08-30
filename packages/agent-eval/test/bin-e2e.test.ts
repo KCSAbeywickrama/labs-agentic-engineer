@@ -76,7 +76,20 @@ describe("bin/agent-eval.ts (real subprocess, real local promptfoo)", () => {
           "--out", outDir,
           "--afm", afmPath,
         ],
-        { encoding: "utf8", timeout: 60_000 },
+        {
+          encoding: "utf8",
+          timeout: 60_000,
+          // An EXPLICIT environment, so "this test cannot spend the org's
+          // key" is structural rather than a property of the fixture. The
+          // CLI forwards ANTHROPIC_API_KEY to promptfoo by design; inheriting
+          // this developer's environment would hand a real key to a real
+          // promptfoo process and rely on the run erroring early to stay
+          // free. PATH and HOME are what node and tsx need, and no more.
+          env: {
+            PATH: process.env.PATH ?? "",
+            HOME: process.env.HOME ?? "",
+          },
+        },
       );
 
       expect(result.error).toBeUndefined();

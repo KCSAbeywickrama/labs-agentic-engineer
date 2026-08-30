@@ -22,15 +22,18 @@ export interface StubCall {
   method: string;
   path: string;
   operationId?: string | undefined;
+  /** True when the contract defines this operation but `allow` withholds it. */
+  denied?: boolean;
 }
 
 interface Op {
   operationId?: string | undefined;
   example: unknown;
+  allowed: boolean;
 }
 
 /** Index the contract by `METHOD path` so a request is one lookup. */
-function indexOperations(spec: unknown): Map<string, Op> {
+function indexOperations(spec: unknown, allow: readonly string[] | undefined): Map<string, Op> {
   const out = new Map<string, Op>();
   const paths = (spec as { paths?: Record<string, Record<string, unknown>> })?.paths ?? {};
   for (const [path, methods] of Object.entries(paths)) {
@@ -40,7 +43,23 @@ function indexOperations(spec: unknown): Map<string, Op> {
         responses?: Record<string, { content?: Record<string, { example?: unknown }> }>;
       };
       const example = op.responses?.["200"]?.content?.["application/json"]?.example ?? [];
-      out.set(`${method.toUpperCase()} ${path}`, { operationId: op.operationId, example });
+      const allowed =
+        allow === undefined || (op.operationId !== undefined && allow.includes(op.operationId));
+      out.set(`${method.toUpperCase()} ${path}`, { operationId: op.operationId, example, allowed });
+    }
+  }
+  if (allow !== undefined) {
+    // An `allow` entry the contract does not define is a design-time error the
+    // platform already rejects at save. Reaching it here means the agent was
+    // generated without that tool, so it would score badly for a reason no
+    // prompt fix can address — say so rather than serving a contract that
+    // quietly grants less than the document claims.
+    const defined = new Set([...out.values()].map((op) => op.operationId));
+    const unknown = allow.filter((id) => !defined.has(id));
+    if (unknown.length > 0) {
+      throw new Error(
+        `startStubServer: allow names operations this contract does not define: ${unknown.join(", ")}`,
+      );
     }
   }
   return out;
@@ -55,22 +74,49 @@ function indexOperations(spec: unknown): Map<string, Op> {
  * fixture honest — it is what the provider itself documents, not data invented
  * for the test.
  */
-export async function startStubServer(spec: unknown): Promise<{
+export async function startStubServer(
+  spec: unknown,
+  /**
+   * `x-aep.tools.openapi[].allow`, when the caller has one. It is the agent's
+   * security boundary, and the built agent only carries tools for the
+   * operations on it — so a stub answering 200 to anything else could only
+   * ever hide an over-reach, never enable one. Omitted, the whole contract is
+   * served, which is what a caller testing the stub itself wants.
+   */
+  allow?: readonly string[],
+): Promise<{
   url: string;
   calls: StubCall[];
   close: () => Promise<void>;
 }> {
-  const ops = indexOperations(spec);
+  const ops = indexOperations(spec, allow);
   const calls: StubCall[] = [];
 
   const server: Server = createServer((req, res) => {
     const path = (req.url ?? "/").split("?")[0]!;
     const op = ops.get(`${(req.method ?? "GET").toUpperCase()} ${path}`);
-    calls.push({ method: req.method ?? "GET", path, operationId: op?.operationId });
+    calls.push({
+      method: req.method ?? "GET",
+      path,
+      operationId: op?.operationId,
+      ...(op !== undefined && !op.allowed ? { denied: true } : {}),
+    });
     res.setHeader("content-type", "application/json");
     if (!op) {
       res.statusCode = 404;
       res.end(JSON.stringify({ error: "no such operation in the contract" }));
+      return;
+    }
+    if (!op.allowed) {
+      // 403, not 404: the operation is real, the agent simply may not call
+      // it. A 404 would read as a broken contract and send a fix round after
+      // the wrong thing.
+      res.statusCode = 403;
+      res.end(
+        JSON.stringify({
+          error: `${op.operationId ?? "this operation"} is not on this agent's allow-list`,
+        }),
+      );
       return;
     }
     res.end(JSON.stringify(op.example));

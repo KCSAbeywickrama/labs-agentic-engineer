@@ -46,6 +46,10 @@ paths:
       operationId: listRounds
       responses:
         "200": { content: { application/json: { example: [{ id: "r-1" }] } } }
+    post:
+      operationId: createRound
+      responses:
+        "200": { content: { application/json: { example: { id: "r-2" } } } }
 `;
 
 beforeEach(() => {
@@ -108,6 +112,34 @@ describe("AgentEvalProvider", () => {
     expect(result.output).toContain("Agent: what is your budget?");
   });
 
+  // A 10-scenario, 3-round loop against an agent that never comes up would
+  // otherwise pay the full boot bound thirty times over. The diagnosis is
+  // the same every time, so it is made ONCE and then reused.
+  it("diagnoses an agent that never boots once, not once per scenario", async () => {
+    const stuck = mkdtempSync(join(tmpdir(), "agent-eval-stuck-"));
+    writeFakeAgent(stuck, undefined, "store-initialising");
+    try {
+      const p = provider({ appDir: stuck, maxTurns: 1, firstBootTimeoutMs: 4_000 });
+      await expect(p.callApi("", { vars: { scenario: SCENARIO } })).rejects.toThrow(/initialising/);
+
+      const started = Date.now();
+      await expect(p.callApi("", { vars: { scenario: SCENARIO } })).rejects.toThrow(/initialising/);
+      // Instant, and still saying WHY — a cached silence would be worse than
+      // the wait it saves.
+      expect(Date.now() - started).toBeLessThan(1_000);
+    } finally {
+      rmSync(stuck, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  // Once an agent HAS booted, a slow later boot is the machine being busy,
+  // not a misconfiguration, and it gets the longer bound.
+  it("keeps trying after a boot that succeeded", async () => {
+    const p = provider({ appDir: dir, maxTurns: 1, firstBootTimeoutMs: 20_000 });
+    await p.callApi("", { vars: { scenario: SCENARIO } });
+    await expect(p.callApi("", { vars: { scenario: SCENARIO } })).resolves.toBeDefined();
+  }, 30_000);
+
   it("refuses to run with neither an appDir nor an injected ask", async () => {
     await expect(provider({}).callApi("", { vars: { scenario: SCENARIO } })).rejects.toThrow(
       /appDir/,
@@ -147,9 +179,24 @@ describe("AgentEvalProvider", () => {
     const result = await provider({
       appDir: dir,
       maxTurns: 1,
-      toolStubs: [{ envVar: "LUNCH_API_URL", specPath }],
+      toolStubs: [{ envVar: "LUNCH_API_URL", specPath, allow: ["listRounds"] }],
     }).callApi("", { vars: { scenario: SCENARIO } });
     expect(result.output).toContain('tool: [{"id":"r-1"}]');
+    expect(result.metadata.toolOverReach).toBeUndefined();
+  }, 20_000);
+
+  // The allow-list is the security boundary, and the one place an over-reach
+  // is cheap to see is here. It must reach `out.json`, not a log line.
+  it("reports an operation the agent reached for but may not call", async () => {
+    const specPath = join(dir, "openapi.yaml");
+    writeFileSync(specPath, OPENAPI);
+    const result = await provider({
+      appDir: dir,
+      maxTurns: 1,
+      toolStubs: [{ envVar: "LUNCH_API_URL", specPath, allow: ["createRound"] }],
+    }).callApi("", { vars: { scenario: SCENARIO } });
+    // The fake agent always GETs /rounds, which this allow-list withholds.
+    expect(result.metadata.toolOverReach).toEqual(["LUNCH_API_URL: listRounds"]);
   }, 20_000);
 });
 

@@ -24,6 +24,7 @@ import type { ToolStub } from "./agent-doc.js";
 /** What starts one stub. Injectable so a partial start can be tested. */
 export type StartStubServer = (
   spec: unknown,
+  allow?: readonly string[],
 ) => Promise<{ url: string; calls: StubCall[]; close: () => Promise<void> }>;
 
 export interface RunningStubs {
@@ -31,6 +32,13 @@ export interface RunningStubs {
   env: Record<string, string>;
   /** Every request the agent made, per env var, for a test to assert on. */
   calls: Record<string, StubCall[]>;
+  /**
+   * Operations the agent reached for that its allow-list withholds, as
+   * `ENV_VAR: operationId`. Empty is the normal answer; anything else is the
+   * agent trying to leave its security boundary, and it belongs in front of
+   * a human rather than buried in a transcript.
+   */
+  overReach: () => string[];
   close: () => Promise<void>;
 }
 
@@ -62,7 +70,7 @@ export async function startToolStubs(
       // YAML is a superset of JSON, so one parser reads either form of a
       // committed contract.
       const spec: unknown = parse(readFileSync(stub.specPath, "utf8"));
-      const server = await startServer(spec);
+      const server = await startServer(spec, stub.allow);
       started.push({ envVar: stub.envVar, ...server });
     }
   } catch (e) {
@@ -76,5 +84,13 @@ export async function startToolStubs(
     env[s.envVar] = s.url;
     calls[s.envVar] = s.calls;
   }
-  return { env, calls, close: closeAll };
+  // Read at the END of a scenario rather than counted as it goes: the stubs
+  // record, they do not judge.
+  const overReach = (): string[] =>
+    started.flatMap((s) =>
+      s.calls
+        .filter((c) => c.denied === true)
+        .map((c) => `${s.envVar}: ${c.operationId ?? `${c.method} ${c.path}`}`),
+    );
+  return { env, calls, overReach, close: closeAll };
 }

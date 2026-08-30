@@ -78,6 +78,36 @@ export function resolveGraderModel(env: NodeJS.ProcessEnv): string {
   return "anthropic:messages:claude-sonnet-5";
 }
 
+/**
+ * How long a boot of the agent under test may take.
+ *
+ * Two bounds, because the two situations are not the same. The FIRST boot is
+ * a diagnosis: until one has succeeded, an agent that does not come up is
+ * almost certainly misconfigured, and paying a long bound for that answer on
+ * every scenario of every round costs a coding agent its deadline. Once one
+ * boot has succeeded, a slow one is a busy machine and deserves the patience.
+ *
+ * `AGENT_EVAL_BOOT_TIMEOUT_MS` moves the first bound for a genuinely slow
+ * component. A value that is not a positive number is IGNORED rather than
+ * passed on: `Number("soon")` is NaN, which reads as an already-expired
+ * deadline and would fail every boot instantly, blaming the agent for a typo
+ * in an environment variable.
+ */
+const DEFAULT_FIRST_BOOT_TIMEOUT_MS = 20_000;
+const DEFAULT_READY_TIMEOUT_MS = 60_000;
+
+export function resolveBootTimeouts(env: NodeJS.ProcessEnv): {
+  firstBootTimeoutMs: number;
+  readyTimeoutMs: number;
+} {
+  const raw = Number(env.AGENT_EVAL_BOOT_TIMEOUT_MS);
+  const first =
+    env.AGENT_EVAL_BOOT_TIMEOUT_MS !== undefined && Number.isFinite(raw) && raw > 0
+      ? raw
+      : DEFAULT_FIRST_BOOT_TIMEOUT_MS;
+  return { firstBootTimeoutMs: first, readyTimeoutMs: Math.max(first, DEFAULT_READY_TIMEOUT_MS) };
+}
+
 // Only these ever cross into the child. promptfoo does not need the rest of
 // this process's environment, and the rest may hold credentials — the
 // coding agent's own OAuth token among them — that have no business
@@ -183,7 +213,7 @@ export function runCli(opts: RunCliOptions): RunCliResult {
           // loop for the whole run, so a server listening here would never
           // answer a request. The CLI decides WHAT to stub; the provider
           // serves it.
-          providerConfig: { appDir, toolStubs },
+          providerConfig: { appDir, toolStubs, ...resolveBootTimeouts(opts.env) },
         }),
         null,
         2,

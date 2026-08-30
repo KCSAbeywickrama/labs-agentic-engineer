@@ -26,6 +26,8 @@ export interface ToolStub {
   envVar: string;
   /** Absolute path to the provider's committed `openapi.yaml`. */
   specPath: string;
+  /** The operationIds this agent may call — its security boundary. */
+  allow: string[];
 }
 
 const FRONT_MATTER = /^---\r?\n([\s\S]*?)\r?\n---(\r?\n|$)/;
@@ -34,6 +36,7 @@ const ENV_REFERENCE = /^\$\{env:([A-Z0-9_]+)\}$/;
 interface OpenApiTool {
   component?: unknown;
   baseUrl?: unknown;
+  allow?: unknown;
 }
 
 /**
@@ -81,12 +84,22 @@ export function readToolStubs(afmPath: string): ToolStub[] {
           `got "${tool.baseUrl}". A literal address cannot be pointed at a stub.`,
       );
     }
+    // Taken, never widened. The eval world must answer for exactly the tools
+    // the built agent carries: a stub that served the whole contract would
+    // let an over-reach succeed silently, in the one place it is cheap to
+    // see. An entry that grants nothing is a document that says nothing.
+    const allow = tool.allow;
+    if (!Array.isArray(allow) || allow.length === 0 || allow.some((id) => typeof id !== "string")) {
+      throw new Error(
+        `agent-eval: ${afmPath} — ${component} needs a non-empty allow list of operationIds`,
+      );
+    }
     const specPath = join(componentsDir, component, "openapi.yaml");
     if (!existsSync(specPath)) {
       throw new Error(
         `agent-eval: ${afmPath} names the component "${component}", whose contract is not at ${specPath}`,
       );
     }
-    return { envVar, specPath };
+    return { envVar, specPath, allow: allow as string[] };
   });
 }

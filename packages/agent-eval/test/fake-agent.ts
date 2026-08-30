@@ -128,11 +128,21 @@ const server = createServer((req, res) => {
 server.listen(Number(process.env.PORT ?? 9090), "127.0.0.1");
 `;
 
-/** Writes the fake agent where `bootAgent` looks for a built component. */
-export function writeFakeAgent(appDir: string, entry = join("dist", "main.js")): string {
+/**
+ * Writes the fake agent where `bootAgent` looks for a built component.
+ *
+ * `mode` is baked into the file as its default because a caller that boots
+ * through the provider cannot reach the child's environment — the provider
+ * decides what the agent is given, which is the point of it.
+ */
+export function writeFakeAgent(
+  appDir: string,
+  entry = join("dist", "main.js"),
+  mode: FakeAgentMode = "ready",
+): string {
   const target = join(appDir, entry);
   mkdirSync(dirname(target), { recursive: true });
-  writeFileSync(target, SOURCE);
+  writeFileSync(target, SOURCE.replace('?? "ready"', `?? "${mode}"`));
   // A generated component's own package.json declares ESM; without it Node
   // reads a `.js` entry as CommonJS and the fake agent would fail for a
   // reason that has nothing to do with what is being tested.

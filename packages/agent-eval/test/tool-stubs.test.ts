@@ -36,6 +36,13 @@ paths:
           content:
             application/json:
               example: [{ id: "r-1" }]
+    post:
+      operationId: createRound
+      responses:
+        "200":
+          content:
+            application/json:
+              example: { id: "r-2" }
 `;
 
 /** Writes a components tree the way `specs/design/components/` is laid out. */
@@ -69,11 +76,19 @@ afterEach(() => {
 });
 
 describe("readToolStubs", () => {
-  it("reads the env var and the component's contract path from the front matter", () => {
+  it("reads the env var, the contract path, and the allow-list from the front matter", () => {
     const stubs = readToolStubs(writeDesign(WITH_TOOLS));
     expect(stubs).toHaveLength(1);
     expect(stubs[0]!.envVar).toBe("LUNCH_API_URL");
     expect(stubs[0]!.specPath).toMatch(/lunch-api\/openapi\.yaml$/);
+    // The allow-list is the security boundary; a harness that drops it on
+    // the floor cannot hold the agent to it.
+    expect(stubs[0]!.allow).toEqual(["listRounds"]);
+  });
+
+  it("refuses an entry with no allow-list, which grants nothing and says nothing", () => {
+    const noAllow = WITH_TOOLS.replace("        allow: [listRounds]\n", "");
+    expect(() => readToolStubs(writeDesign(noAllow))).toThrow(/allow/);
   });
 
   it("returns nothing for an agent that declares no openapi tools", () => {
@@ -137,6 +152,43 @@ describe("startToolStubs", () => {
     };
     await expect(startToolStubs([good, good], start)).rejects.toThrow(/port refused/);
     expect(closed).toBe(1);
+  });
+
+  // `allow` is the security boundary. The built agent only gets tools for
+  // allow-listed operations, so this cannot widen anything — but a stub that
+  // answers 200 to an operation the agent may not call makes an over-reach
+  // invisible exactly where it would be cheapest to see.
+  it("serves the allow-listed operation and refuses the rest of the contract", async () => {
+    const running = await startToolStubs(readToolStubs(writeDesign(WITH_TOOLS)));
+    try {
+      const url = running.env.LUNCH_API_URL!;
+      expect((await fetch(`${url}/rounds`)).status).toBe(200);
+      const denied = await fetch(`${url}/rounds`, { method: "POST" });
+      expect(denied.status).toBe(403);
+      expect(await denied.text()).toContain("createRound");
+    } finally {
+      await running.close();
+    }
+  });
+
+  it("names the operations that were reached for but not permitted", async () => {
+    const running = await startToolStubs(readToolStubs(writeDesign(WITH_TOOLS)));
+    try {
+      expect(running.overReach()).toEqual([]);
+      await fetch(`${running.env.LUNCH_API_URL!}/rounds`);
+      expect(running.overReach()).toEqual([]);
+      await fetch(`${running.env.LUNCH_API_URL!}/rounds`, { method: "POST" });
+      expect(running.overReach()).toEqual(["LUNCH_API_URL: createRound"]);
+    } finally {
+      await running.close();
+    }
+  });
+
+  // A typo in `allow` gives the agent no tool at all, and it would then score
+  // badly for a reason no prompt fix can reach.
+  it("refuses an allow entry the contract does not define", async () => {
+    const typo = WITH_TOOLS.replace("[listRounds]", "[listRound]");
+    await expect(startToolStubs(readToolStubs(writeDesign(typo)))).rejects.toThrow(/listRound\b/);
   });
 
   it("starts nothing, and closes cleanly, for an agent with no tools", async () => {

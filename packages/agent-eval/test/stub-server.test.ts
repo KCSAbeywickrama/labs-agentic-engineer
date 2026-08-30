@@ -77,4 +77,30 @@ describe("startStubServer", () => {
     stop = s.close;
     expect((await fetch(`${s.url}/nope`)).status).toBe(404);
   });
+
+  // `allow` is the agent's security boundary. Serving the whole contract
+  // regardless would answer 200 to an operation the agent may not call, which
+  // can only hide an over-reach — never enable one, since the built agent
+  // carries no tool for it — in the one place it is cheap to see.
+  it("403s an operation the contract defines but the allow-list withholds", async () => {
+    const s = await startStubServer(SPEC, []);
+    stop = s.close;
+    const res = await fetch(`${s.url}/hotels`);
+    // 403, not 404: the operation is real, so a fix round must not be sent
+    // after a contract that is perfectly fine.
+    expect(res.status).toBe(403);
+    expect(await res.text()).toContain("listHotels");
+    expect(s.calls[0]!.denied).toBe(true);
+  });
+
+  it("still serves an allow-listed operation, and records it as permitted", async () => {
+    const s = await startStubServer(SPEC, ["listHotels"]);
+    stop = s.close;
+    expect((await fetch(`${s.url}/hotels`)).status).toBe(200);
+    expect(s.calls[0]!.denied).toBeUndefined();
+  });
+
+  it("refuses an allow entry the contract does not define", async () => {
+    await expect(startStubServer(SPEC, ["bookHotel"])).rejects.toThrow(/bookHotel/);
+  });
 });
