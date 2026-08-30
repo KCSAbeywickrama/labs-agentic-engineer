@@ -42,6 +42,7 @@ import { SpecMdToolbar } from "./SpecMdToolbar";
 import { PrdLenses, refreshPrdLenses, type PrdLensBinding } from "./prdLensPlugin";
 import { SpecLinks, refreshSpecLinks, type SpecLinkBinding } from "./specLinkPlugin";
 import { SpecAimMenu, type SpecAimBinding } from "./SpecAimMenu";
+import { AimHighlight, AIM_SELECTED_CLASS } from "./aimHighlightPlugin";
 
 // Collaborative WYSIWYG editor for markdown spec files (#86 phase 6).
 // The shared source of truth is the file's Y.XmlFragment (seeded server-side
@@ -97,6 +98,7 @@ export function SpecMdEditor({
         Collaboration.configure({ fragment }),
         CollaborationCaret.configure({ provider, user: self }),
         SpecLinks.configure({ binding: () => linkRef.current }),
+        AimHighlight,
         ...(lenses
           ? [
               PrdLenses.configure({
@@ -290,6 +292,17 @@ export function SpecMdEditor({
           // appears on its entry's hover (or focus, for the keyboard), so a
           // twenty-story list carries three visible controls rather than
           // twenty-three.
+          // The blocks an aimed turn would receive (#666). Softer than the
+          // native selection and painted UNDER it, so while the editor still
+          // has focus both read at once — the exact characters dragged, inside
+          // the whole blocks the agent gets after the snap.
+          [`& .${AIM_SELECTED_CLASS}`]: {
+            backgroundColor: (theme: { palette: { primary: { main: string } } }) =>
+              alpha(theme.palette.primary.main, 0.14),
+            borderRadius: "3px",
+            boxShadow: (theme: { palette: { primary: { main: string } } }) =>
+              `0 0 0 2px ${alpha(theme.palette.primary.main, 0.14)}`,
+          },
           "& .prd-lens": {
             all: "unset",
             cursor: "pointer",

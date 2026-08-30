@@ -22,6 +22,7 @@ import { Crosshair } from "@wso2/oxygen-ui-icons-react";
 import type { Editor } from "@tiptap/react";
 import { docBlocks } from "./docBlocks";
 import { anchorFor, type Anchor } from "../lib/anchor";
+import { setAimHighlight } from "./aimHighlightPlugin";
 
 // Aiming the agent at part of a markdown document (#666).
 //
@@ -58,13 +59,19 @@ interface Placement {
   left: number;
 }
 
-/** Where the floating surface sits: under the selection's start, clamped into
- *  the editor's own box so a selection at the right edge stays reachable. */
+/**
+ * Where the floating surface sits: under the END of the selection, clamped into
+ * the editor's own box so a selection at the right edge stays reachable.
+ *
+ * The end, not the start: anchored at the start the box lands ON the passage it
+ * is about, hiding the text the user is writing an instruction for — which
+ * defeats the wash it sits beside. The end is also where the mouse let go.
+ */
 function placementFor(editor: Editor, host: HTMLElement): Placement | null {
-  const { from } = editor.state.selection;
+  const { to } = editor.state.selection;
   let coords: { top: number; bottom: number; left: number };
   try {
-    coords = editor.view.coordsAtPos(from);
+    coords = editor.view.coordsAtPos(to);
   } catch {
     // The position no longer resolves — an agent rewrote the document out from
     // under a stale selection. Nothing to point at.
@@ -91,6 +98,12 @@ export function SpecAimMenu({
   const [sending, setSending] = useState(false);
   const [placement, setPlacement] = useState<Placement | null>(null);
   const [hasRange, setHasRange] = useState(false);
+  // The aimed range as two NUMBERS, not an object. The wash is painted by
+  // dispatching a transaction, and a transaction re-runs `measure` — so an
+  // effect keyed on a freshly-built object would paint, re-measure, rebuild the
+  // object, and paint again forever. Numbers settle on the second pass.
+  const [from, setFrom] = useState(0);
+  const [to, setTo] = useState(0);
 
   // Re-measured on every transaction, so the surface follows the text it points
   // at while an agent streams into the same document. Positions are held LIVE
@@ -99,7 +112,10 @@ export function SpecAimMenu({
   const measure = useCallback(() => {
     const host = hostRef.current;
     if (!host) return;
-    setHasRange(!editor.state.selection.empty);
+    const selection = editor.state.selection;
+    setHasRange(!selection.empty);
+    setFrom(selection.from);
+    setTo(selection.to);
     setPlacement(placementFor(editor, host));
   }, [editor]);
 
@@ -110,6 +126,14 @@ export function SpecAimMenu({
       editor.off("transaction", measure);
     };
   }, [editor, measure]);
+
+  // The wash follows whatever is aimed at. It has to survive the box taking
+  // focus: the browser stops painting the native selection the moment the
+  // editor loses it, so without this the user is typing an instruction about a
+  // passage they can no longer see.
+  useEffect(() => {
+    setAimHighlight(editor.view, hasRange || open ? { from, to } : null);
+  }, [editor, hasRange, open, from, to]);
 
   // Scrolling moves the text without changing the document, so the transaction
   // hook above never fires for it.

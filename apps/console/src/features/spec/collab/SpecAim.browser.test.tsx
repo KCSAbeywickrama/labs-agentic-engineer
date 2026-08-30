@@ -112,6 +112,9 @@ const chip = (view: { container: HTMLElement }) =>
 const box = (view: { container: HTMLElement }) =>
   view.container.querySelector<HTMLTextAreaElement>('[data-testid="aim-box"] textarea');
 
+const washed = (view: { container: HTMLElement }) =>
+  [...view.container.querySelectorAll(".aim-selected")].map((el) => el.textContent ?? "");
+
 afterEach(() => {
   cleanup();
 });
@@ -212,5 +215,86 @@ describe("aiming the agent at a selection", () => {
     );
     expect(buttons).toHaveLength(2);
     for (const b of buttons) expect(b).toBeDisabled();
+  });
+});
+
+// The gap the local-setup walk exposed. The browser stops painting the native
+// selection the moment the editor loses focus — which is exactly what opening
+// the box does — so without a decoration the user is typing an instruction
+// about a passage they can no longer see.
+describe("what the selection looks like while the box is open", () => {
+  it("washes the blocks the agent would receive, and keeps it there once the box takes focus", async () => {
+    const { view, editable } = await mountEditor();
+    selectParagraph(editable, "Rounds close automatically");
+
+    await waitFor(() => expect(washed(view).some((t) => t.includes("Rounds close"))).toBe(true));
+
+    (await waitFor(() => {
+      const el = chip(view);
+      if (!el) throw new Error("no chip yet");
+      return el;
+    })).click();
+    await waitFor(() => expect(box(view)).not.toBeNull());
+
+    // The native selection is gone by now — the wash is the only thing left
+    // saying what this instruction is about.
+    expect(window.getSelection()?.toString() ?? "").toBe("");
+    expect(washed(view).some((t) => t.includes("Rounds close"))).toBe(true);
+  });
+
+  it("washes every block of a multi-block selection, not just the first", async () => {
+    const { view, editable } = await mountEditor();
+    const first = [...editable.querySelectorAll("p")].find((p) =>
+      (p.textContent ?? "").includes("Rounds close automatically"),
+    )!;
+    const last = [...editable.querySelectorAll("p")].find((p) =>
+      (p.textContent ?? "").includes("Which Slack workspace"),
+    )!;
+    editable.focus();
+    const range = document.createRange();
+    range.setStart(first.firstChild!, 0);
+    range.setEnd(last.firstChild!, 5);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+
+    await waitFor(() => expect(washed(view).length).toBeGreaterThan(1));
+  });
+
+  // Dismissing the box is not dismissing the SELECTION — the caret stays where
+  // it was (ADR-0023), so the chip comes back and the wash stays with it. It
+  // clears when the selection does.
+  it("keeps the wash after the box is dismissed, and drops it when the selection goes", async () => {
+    const { view, editable } = await mountEditor();
+    selectParagraph(editable, "Rounds close automatically");
+    (await waitFor(() => {
+      const el = chip(view);
+      if (!el) throw new Error("no chip yet");
+      return el;
+    })).click();
+    const input = await waitFor(() => {
+      const el = box(view);
+      if (!el) throw new Error("no box yet");
+      return el;
+    });
+
+    await userEvent.click(input);
+    await userEvent.keyboard("{Escape}");
+
+    await waitFor(() => expect(box(view)).toBeNull());
+    expect(chip(view)).not.toBeNull();
+    expect(washed(view).some((t) => t.includes("Rounds close"))).toBe(true);
+
+    // Collapsing the selection is what ends the aim.
+    editable.focus();
+    const collapsed = document.createRange();
+    const target = [...editable.querySelectorAll("p")][0]!;
+    collapsed.setStart(target.firstChild!, 1);
+    collapsed.collapse(true);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(collapsed);
+
+    await waitFor(() => expect(washed(view)).toHaveLength(0));
   });
 });
