@@ -29,6 +29,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { Copy, ExternalLink, Eye } from "@wso2/oxygen-ui-icons-react";
 import { env } from "../../../config/env";
+import { thunderUsersConsoleHref } from "../../../config/thunderConsole";
 import {
   useProjectRoles,
   useRevealTestUserPassword,
@@ -145,7 +146,7 @@ function ThunderSentence({ thunderUrl }: { thunderUrl: string }) {
     >
       Manage user accounts in{" "}
       <MuiLink
-        href={thunderUrl}
+        href={thunderUsersConsoleHref(thunderUrl)}
         target="_blank"
         rel="noreferrer"
         variant="inherit"

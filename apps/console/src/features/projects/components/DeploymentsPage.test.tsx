@@ -54,7 +54,7 @@ type ExternalResourceDTO = components["schemas"]["ExternalResourceDTO"];
 type ProjectTestUserState = components["schemas"]["ProjectTestUserState"];
 
 const MOCK_PASSWORD = "mocknotreal";
-const THUNDER_URL = "http://localhost:8097";
+const THUNDER_CONSOLE_USERS = "http://localhost:8097/console/users";
 
 // Roles hooks — overridable so green-deploy fixtures stay Thunder-only by
 // default, and Test-users cases can inject owned rows / reveal answers.
@@ -744,7 +744,7 @@ describe("DeploymentsPage — Test users", () => {
     const link = screen.getByRole("link", {
       name: "Open Thunder Console to add or remove real accounts",
     });
-    expect(link).toHaveAttribute("href", THUNDER_URL);
+    expect(link).toHaveAttribute("href", THUNDER_CONSOLE_USERS);
     expect(link).toHaveAttribute("target", "_blank");
     expect(
       screen.queryByText("Test users for agents on this environment"),
@@ -812,7 +812,7 @@ describe("DeploymentsPage — Test users", () => {
     const thunder = screen.getByRole("link", {
       name: "Open Thunder Console to add or remove real accounts",
     });
-    expect(thunder).toHaveAttribute("href", THUNDER_URL);
+    expect(thunder).toHaveAttribute("href", THUNDER_CONSOLE_USERS);
     expect(thunder).toHaveAttribute("target", "_blank");
 
     fireEvent.click(

@@ -25,6 +25,7 @@ import type { PublishedTestUser } from "../lib/publishedTestUsers";
 import { SignInPanel } from "./SignInPanel";
 
 const THUNDER_URL = "http://localhost:8097";
+const THUNDER_CONSOLE_USERS = "http://localhost:8097/console/users";
 const MOCK_PASSWORD = "mocknotreal";
 
 function renderPanel(
@@ -69,7 +70,7 @@ describe("SignInPanel", () => {
     const link = screen.getByRole("link", {
       name: "Open Thunder Console to add or remove real accounts",
     });
-    expect(link).toHaveAttribute("href", THUNDER_URL);
+    expect(link).toHaveAttribute("href", THUNDER_CONSOLE_USERS);
     expect(link).toHaveAttribute("target", "_blank");
   });
 
