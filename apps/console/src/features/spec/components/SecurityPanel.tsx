@@ -36,14 +36,14 @@ import {
 
 import type { ProjectRolesLiveState } from "../api/roles";
 import {
-  parseRolesDesign,
+  parseSecurityDesign,
   plannedUsersFor,
-  type RolesDesign,
-} from "../api/rolesDesign";
+  type SecurityDesign,
+} from "../api/securityDesign";
 
 export interface SecurityPanelProps {
   /** Live `security.json` text — from the room, or the committed fallback. */
-  rolesJson: string | null;
+  securityJson: string | null;
   live?: ProjectRolesLiveState | undefined;
   /** Committed-blob read in flight — same spinner as Architecture / Wireframes. */
   isPending?: boolean;
@@ -67,12 +67,12 @@ function Centered({ children }: { children: ReactNode }) {
 }
 
 export function SecurityPanel({
-  rolesJson,
+  securityJson,
   live,
   isPending = false,
   isError = false,
 }: SecurityPanelProps) {
-  const parsed = useMemo(() => parseRolesDesign(rolesJson), [rolesJson]);
+  const parsed = useMemo(() => parseSecurityDesign(securityJson), [securityJson]);
 
   if (isPending) {
     return (
@@ -147,7 +147,7 @@ function DisposableWarning() {
   );
 }
 
-function ThunderBlock({ doc }: { doc: RolesDesign }) {
+function ThunderBlock({ doc }: { doc: SecurityDesign }) {
   const scopes = doc.thunder.scopes?.trim();
   return (
     <Box sx={{ border: 1, borderColor: "divider", borderRadius: 1, p: 2 }}>
@@ -191,8 +191,8 @@ function RoleCard({
   role,
   live,
 }: {
-  doc: RolesDesign;
-  role: RolesDesign["roles"][number];
+  doc: SecurityDesign;
+  role: SecurityDesign["roles"][number];
   live: ProjectRolesLiveState | undefined;
 }) {
   const liveRole = live?.roles.find(
@@ -289,7 +289,7 @@ function RoleCard({
   );
 }
 
-function StandingRules({ doc }: { doc: RolesDesign }) {
+function StandingRules({ doc }: { doc: SecurityDesign }) {
   return (
     <Stack spacing={1}>
       {doc.coldStartRole !== null ? (

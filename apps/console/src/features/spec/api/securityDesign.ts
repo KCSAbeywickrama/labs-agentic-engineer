@@ -25,30 +25,28 @@
  *
  * Incomplete JSON objects are empty, not a parse error. JSON is not streamed.
  *
- * The shape is `RolesDesign` from `@aep/agent-stream` — the same definition the
- * design agent's write gate and the BFF's save gate validate against, so the
- * console cannot invent a fourth idea of what the file looks like.
+ * The shape is `SecurityDesign` from `@aep/agent-stream` — the same definition
+ * the design agent's write gate and the BFF's save gate validate against, so
+ * the console cannot invent a fourth idea of what the file looks like.
  */
 
-import { rolesDesignSchema, type RolesDesign } from "@aep/agent-stream";
+import { securityDesignSchema, type SecurityDesign } from "@aep/agent-stream";
 
-export type { RolesDesign };
+export type { SecurityDesign };
 
 export type ParsedSecurity =
-  | { kind: "ok"; doc: RolesDesign }
+  | { kind: "ok"; doc: SecurityDesign }
   | { kind: "empty" }
   | { kind: "invalid"; message: string };
-
-export type ParsedRoles = ParsedSecurity;
 
 /**
  * Parse the document text. Missing or blank content is `empty` (a rail concern);
  * a present but incomplete object (e.g. `{}`) is also `empty`, and the panel
  * explains that in words rather than showing a parse failure.
  */
-export function parseRolesDesign(
+export function parseSecurityDesign(
   text: string | null | undefined,
-): ParsedRoles {
+): ParsedSecurity {
   if (text === null || text === undefined || text.trim() === "")
     return { kind: "empty" };
   let raw: unknown;
@@ -63,16 +61,13 @@ export function parseRolesDesign(
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
     return { kind: "empty" };
   }
-  const res = rolesDesignSchema.safeParse(raw);
+  const res = securityDesignSchema.safeParse(raw);
   if (!res.success) return { kind: "empty" };
   return { kind: "ok", doc: res.data };
 }
 
-/** @see parseRolesDesign */
-export const parseSecurityDesign = parseRolesDesign;
-
 /** Serialise a document back to the on-disk form: 2-space indent, trailing newline. */
-export function serializeRolesDesign(doc: RolesDesign): string {
+export function serializeSecurityDesign(doc: SecurityDesign): string {
   return `${JSON.stringify(doc, null, 2)}\n`;
 }
 
@@ -88,15 +83,16 @@ export interface PlannedUser {
  * The complete set of test users this design will have after Build — the
  * authored ones, plus one generated name for every role the design gave none.
  *
- * This is a LINE-FOR-LINE mirror of `rolesspec.Plan` in the BFF, and it has to
- * be: the panel promises the user a username, and the build has to create that
- * exact name. It is written as one whole-document pass rather than a per-role
- * lookup for the reason the per-role version got wrong — a generated name has to
- * join the taken set as it is minted, or two roles whose names slug identically
- * (`Ops Support` and `Ops/Support`) are both promised `test-ops-support` while
- * the build actually creates `test-ops-support` and `test-ops-support-2`.
+ * This is a LINE-FOR-LINE mirror of `securityspec.Plan` in the BFF, and it has
+ * to be: the panel promises the user a username, and the build has to create
+ * that exact name. It is written as one whole-document pass rather than a
+ * per-role lookup for the reason the per-role version got wrong — a generated
+ * name has to join the taken set as it is minted, or two roles whose names
+ * slug identically (`Ops Support` and `Ops/Support`) are both promised
+ * `test-ops-support` while the build actually creates `test-ops-support` and
+ * `test-ops-support-2`.
  */
-export function planUsers(doc: RolesDesign): PlannedUser[] {
+export function planUsers(doc: SecurityDesign): PlannedUser[] {
   const taken = new Set(doc.testUsers.map((u) => u.username));
   const byRole = new Map<string, typeof doc.testUsers>();
   for (const u of doc.testUsers) {
@@ -122,7 +118,7 @@ export function planUsers(doc: RolesDesign): PlannedUser[] {
 
 /** The planned users for one role. */
 export function plannedUsersFor(
-  doc: RolesDesign,
+  doc: SecurityDesign,
   roleName: string,
 ): PlannedUser[] {
   return planUsers(doc).filter(
@@ -149,7 +145,7 @@ function supplyUsername(
  * against the whole document so it agrees with what `planUsers` shows.
  */
 export function suppliedUsernameFor(
-  doc: RolesDesign,
+  doc: SecurityDesign,
   roleName: string,
 ): string {
   const planned = planUsers(doc).find(

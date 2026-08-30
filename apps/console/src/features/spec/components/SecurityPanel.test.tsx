@@ -26,12 +26,12 @@ import type {
   ProjectRolesLiveState,
   ProjectTestUserState,
 } from "../api/roles";
-import { serializeRolesDesign, type RolesDesign } from "../api/rolesDesign";
+import { serializeSecurityDesign, type SecurityDesign } from "../api/securityDesign";
 import { SecurityPanel } from "./SecurityPanel";
 
 afterEach(cleanup);
 
-function role(name: string): RolesDesign["roles"][number] {
+function role(name: string): SecurityDesign["roles"][number] {
   return {
     name,
     description: `What ${name} may do`,
@@ -41,8 +41,8 @@ function role(name: string): RolesDesign["roles"][number] {
   };
 }
 
-function design(over: Partial<RolesDesign> = {}): string {
-  return serializeRolesDesign({
+function design(over: Partial<SecurityDesign> = {}): string {
+  return serializeSecurityDesign({
     version: 1,
     coldStartRole: null,
     publicComponents: [],
@@ -83,7 +83,7 @@ function live(
 
 function setup(props: Partial<React.ComponentProps<typeof SecurityPanel>> = {}) {
   render(
-    <SecurityPanel rolesJson={design()} live={undefined} {...props} />,
+    <SecurityPanel securityJson={design()} live={undefined} {...props} />,
   );
 }
 
@@ -102,7 +102,7 @@ describe("SecurityPanel — one read-only page", () => {
 
   it("shows no Reveal / Rotate / Delete / Add / Hide controls", () => {
     setup({
-      rolesJson: design({ testUsers: [{ username: "ada", role: "Admin" }] }),
+      securityJson: design({ testUsers: [{ username: "ada", role: "Admin" }] }),
       live: live({ testUsers: [liveUser("ada")] }),
     });
 
@@ -121,7 +121,7 @@ describe("SecurityPanel — one read-only page", () => {
 
 describe("SecurityPanel — reading the document", () => {
   it("shows a spinner while the committed document is loading, not the empty copy", () => {
-    setup({ rolesJson: null, isPending: true });
+    setup({ securityJson: null, isPending: true });
 
     expect(screen.getByLabelText("Loading security")).toBeInTheDocument();
     expect(
@@ -130,7 +130,7 @@ describe("SecurityPanel — reading the document", () => {
   });
 
   it("surfaces a committed-document read failure", () => {
-    setup({ rolesJson: null, isError: true });
+    setup({ securityJson: null, isError: true });
 
     expect(
       screen.getByText(/Failed to load the Security document/i),
@@ -141,7 +141,7 @@ describe("SecurityPanel — reading the document", () => {
   });
 
   it("explains an empty or null document with the mock info copy", () => {
-    setup({ rolesJson: null });
+    setup({ securityJson: null });
 
     expect(
       screen.getByText(
@@ -156,7 +156,7 @@ describe("SecurityPanel — reading the document", () => {
   });
 
   it("explains an empty JSON object with the same info copy", () => {
-    setup({ rolesJson: "{}" });
+    setup({ securityJson: "{}" });
 
     expect(
       screen.getByText(
@@ -171,7 +171,7 @@ describe("SecurityPanel — reading the document", () => {
   });
 
   it("shows a malformed document as an error with the Security prefix", () => {
-    setup({ rolesJson: '{"version": 1,' });
+    setup({ securityJson: '{"version": 1,' });
 
     expect(
       screen.getByText(/Couldn't read the Security document:/i),
@@ -197,7 +197,7 @@ describe("SecurityPanel — reading the document", () => {
 
   it("renders thunder scopes when the document sets them", () => {
     setup({
-      rolesJson: design({
+      securityJson: design({
         thunder: {
           name: "orders-app",
           type: "browser",
@@ -218,7 +218,7 @@ describe("SecurityPanel — reading the document", () => {
 
   it("renders each role with description, Granted by, permissions, and usernames", () => {
     setup({
-      rolesJson: design({
+      securityJson: design({
         roles: [role("Admin"), role("Viewer")],
         testUsers: [{ username: "ada", role: "Admin" }],
       }),
@@ -308,7 +308,7 @@ describe("SecurityPanel — a role against the shared directory", () => {
 describe("SecurityPanel — disposable accounts warning", () => {
   it("uses the mock Deploy body, once however many roles", () => {
     setup({
-      rolesJson: design({
+      securityJson: design({
         roles: [role("Admin"), role("Viewer"), role("Auditor")],
         testUsers: [
           { username: "ada", role: "Admin" },
@@ -336,7 +336,7 @@ describe("SecurityPanel — disposable accounts warning", () => {
   });
 
   it("says nothing about test users when the design is empty", () => {
-    setup({ rolesJson: null });
+    setup({ securityJson: null });
 
     expect(
       screen.queryByText(
@@ -348,7 +348,7 @@ describe("SecurityPanel — disposable accounts warning", () => {
 
 describe("SecurityPanel — test users", () => {
   it("shows the name the build will supply for a role the design gave none", () => {
-    setup({ rolesJson: design({ roles: [role("Compliance Admin")] }) });
+    setup({ securityJson: design({ roles: [role("Compliance Admin")] }) });
 
     expect(screen.getByText("test-compliance-admin")).toBeInTheDocument();
     expect(screen.getByText("Platform-supplied")).toBeInTheDocument();
@@ -356,7 +356,7 @@ describe("SecurityPanel — test users", () => {
 
   it("does not badge an authored user as platform-supplied", () => {
     setup({
-      rolesJson: design({ testUsers: [{ username: "ada", role: "Admin" }] }),
+      securityJson: design({ testUsers: [{ username: "ada", role: "Admin" }] }),
     });
 
     expect(screen.getByText("ada")).toBeInTheDocument();
@@ -365,7 +365,7 @@ describe("SecurityPanel — test users", () => {
 
   it("does not show Name already taken or Created at Build chips", () => {
     setup({
-      rolesJson: design({ testUsers: [{ username: "ada", role: "Admin" }] }),
+      securityJson: design({ testUsers: [{ username: "ada", role: "Admin" }] }),
       live: live({
         testUsers: [
           liveUser("ada", { owned: false }),
@@ -381,7 +381,7 @@ describe("SecurityPanel — test users", () => {
 
 describe("SecurityPanel — the document's standing rules", () => {
   it("names the role a freshly signed-in person holds", () => {
-    setup({ rolesJson: design({ coldStartRole: "Admin" }) });
+    setup({ securityJson: design({ coldStartRole: "Admin" }) });
 
     expect(
       screen.getByText(/has just signed in and been granted nothing holds/i),
@@ -389,13 +389,13 @@ describe("SecurityPanel — the document's standing rules", () => {
   });
 
   it("says a person with no role reaches nothing when there is no cold-start role", () => {
-    setup({ rolesJson: design({ coldStartRole: null }) });
+    setup({ securityJson: design({ coldStartRole: null }) });
 
     expect(screen.getByText(/reaches nothing/i)).toBeInTheDocument();
   });
 
   it("lists the components open without sign-in", () => {
-    setup({ rolesJson: design({ publicComponents: ["docs-site"] }) });
+    setup({ securityJson: design({ publicComponents: ["docs-site"] }) });
 
     expect(
       screen.getByText(/Open to everyone, no sign-in: docs-site\./i),

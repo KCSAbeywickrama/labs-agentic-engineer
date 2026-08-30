@@ -83,7 +83,6 @@ export {
 } from "./contracts/sse-events.js";
 export type {
   SecurityDesign,
-  RolesDesign,
   ThunderClient,
   RoleDeclaration,
   RolePermission,
@@ -138,29 +137,20 @@ export {
 } from "./component-design-schema.js";
 export type { ComponentDesignProblem } from "./component-design-schema.js";
 
-// --- The security.json write-gate (the structured half of the security design)
+// --- The security.json write-gate ------------------------------------------
 export {
   checkSecurityDesign,
   checkSecurityReferences,
   securityDesignSchema,
   SECURITY_DESIGN_JSON_RE,
   TEST_USERNAME_RE,
-  // Deprecated aliases — claim security.json only; do not re-gate roles.json.
-  checkRolesDesign,
-  checkRolesReferences,
-  rolesDesignSchema,
-  ROLES_DESIGN_JSON_RE,
 } from "./security-design-schema.js";
-export type {
-  SecurityDesignProblem,
-  RolesDesignProblem,
-} from "./security-design-schema.js";
+export type { SecurityDesignProblem } from "./security-design-schema.js";
 
 // --- JSON Schema publication (the BFF validates the same definitions) --------
 export {
   componentDesignJsonSchema,
   securityDesignJsonSchema,
-  rolesDesignJsonSchema,
   planTaskJsonSchema,
   updateTaskJsonSchema,
 } from "./json-schema.js";

@@ -33,10 +33,6 @@
  * usernames, and thunder scopes tokens — live in `checkSecurityReferences`
  * below and are applied by BOTH sides separately, exactly like
  * `checkComponentDesign`'s name==directory rule.
- *
- * Deprecated aliases (`RolesDesign` / `checkRolesDesign` / `rolesDesignSchema`)
- * still exist for callers that have not renamed; the gate claims
- * `security.json` only — it does not re-gate `roles.json`.
  */
 
 import { z } from "zod";
@@ -95,9 +91,6 @@ export const securityDesignSchema = z.strictObject({
   thunder: thunderSchema,
 });
 
-/** @deprecated Use `securityDesignSchema`. */
-export const rolesDesignSchema = securityDesignSchema;
-
 // Compile-time drift guards: schema ⇄ contracts wire types.
 const _driftSecurity: Equal<z.infer<typeof securityDesignSchema>, SecurityDesign> = true;
 const _driftRole: Equal<z.infer<typeof roleSchema>, RoleDeclaration> = true;
@@ -113,20 +106,10 @@ void _driftThunder;
 /** Matches the one authored security document. */
 export const SECURITY_DESIGN_JSON_RE = /^specs\/design\/security\.json$/;
 
-/**
- * @deprecated Prefer `SECURITY_DESIGN_JSON_RE`. Kept as an alias of the new
- * path so deprecated `checkRolesDesign` callers also claim `security.json`
- * only (they do not re-gate `roles.json`).
- */
-export const ROLES_DESIGN_JSON_RE = SECURITY_DESIGN_JSON_RE;
-
 export interface SecurityDesignProblem {
   code: "INVALID_JSON" | "SCHEMA_VIOLATION";
   message: string;
 }
-
-/** @deprecated Use `SecurityDesignProblem`. */
-export type RolesDesignProblem = SecurityDesignProblem;
 
 /**
  * The referential rules a standalone JSON Schema cannot express. Returns the
@@ -193,9 +176,6 @@ export function checkSecurityReferences(doc: SecurityDesign): string | null {
   return null;
 }
 
-/** @deprecated Use `checkSecurityReferences`. */
-export const checkRolesReferences = checkSecurityReferences;
-
 /**
  * Validate a candidate security.json body for `path`. Returns null when the
  * path is not the security document or the content is valid; otherwise the
@@ -228,9 +208,3 @@ export function checkSecurityDesign(path: string, content: string): SecurityDesi
   }
   return null;
 }
-
-/**
- * @deprecated Alias of `checkSecurityDesign` — claims `specs/design/security.json`
- * only (does not gate `roles.json`).
- */
-export const checkRolesDesign = checkSecurityDesign;

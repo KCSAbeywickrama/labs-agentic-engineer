@@ -51,9 +51,6 @@ export function securityDesignJsonSchema(): Record<string, unknown> {
   return z.toJSONSchema(securityDesignSchema, { target: "draft-2020-12" }) as Record<string, unknown>;
 }
 
-/** @deprecated Use `securityDesignJsonSchema`. */
-export const rolesDesignJsonSchema = securityDesignJsonSchema;
-
 /** The `planTask` tool input as JSON Schema (draft 2020-12). */
 export function planTaskJsonSchema(): Record<string, unknown> {
   return z.toJSONSchema(planTaskInputSchema, { target: "draft-2020-12" }) as Record<string, unknown>;

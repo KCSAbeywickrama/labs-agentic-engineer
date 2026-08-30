@@ -1280,7 +1280,7 @@ export function SpecView({ projectName }: { projectName: string }) {
                 />
               ) : effectiveSelection.kind === "security" ? (
                 <SecurityPanel
-                  rolesJson={security.rolesJson}
+                  securityJson={security.securityJson}
                   live={security.live}
                   isPending={security.isPending}
                   isError={security.isError}

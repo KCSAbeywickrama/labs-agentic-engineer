@@ -224,6 +224,8 @@ describe("SpecFileList — Security rail from security.json", () => {
         "specs/design/roles.json",
       ),
     );
-    expect(screen.queryByRole("button", { name: "Security" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Security$/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^security$/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "roles.json" })).toBeInTheDocument();
   });
 });

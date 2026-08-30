@@ -245,7 +245,7 @@ vi.mock("../api/queries", () => ({
 // panel's behavior are covered by their own tests.
 vi.mock("../hooks/useSecurityEntry", () => ({
   useSecurityEntry: () => ({
-    rolesJson: null,
+    securityJson: null,
     live: undefined,
     isPending: false,
     isError: false,

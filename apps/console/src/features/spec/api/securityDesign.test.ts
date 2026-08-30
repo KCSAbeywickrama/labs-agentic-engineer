@@ -19,17 +19,16 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  parseRolesDesign,
   parseSecurityDesign,
   plannedUsersFor,
   planUsers,
   roleSlug,
-  serializeRolesDesign,
+  serializeSecurityDesign,
   suppliedUsernameFor,
-  type RolesDesign,
-} from "./rolesDesign";
+  type SecurityDesign,
+} from "./securityDesign";
 
-type Role = RolesDesign["roles"][number];
+type Role = SecurityDesign["roles"][number];
 
 function role(name: string): Role {
   return {
@@ -41,7 +40,7 @@ function role(name: string): Role {
   };
 }
 
-function doc(over: Partial<RolesDesign> = {}): RolesDesign {
+function doc(over: Partial<SecurityDesign> = {}): SecurityDesign {
   return {
     version: 1,
     coldStartRole: null,
@@ -54,7 +53,7 @@ function doc(over: Partial<RolesDesign> = {}): RolesDesign {
 }
 
 /** Fully populated document for parse and planUsers round-trip tests. */
-function richDoc(): RolesDesign {
+function richDoc(): SecurityDesign {
   return {
     version: 1,
     coldStartRole: "Viewer",
@@ -65,7 +64,7 @@ function richDoc(): RolesDesign {
   };
 }
 
-describe("parseRolesDesign", () => {
+describe("parseSecurityDesign", () => {
   // A design with no sign-in legitimately has no security document. "Empty" is a
   // state the panel puts into words; "invalid" is an error it shows in red.
   it.each([
@@ -74,11 +73,11 @@ describe("parseRolesDesign", () => {
     ["empty", ""],
     ["whitespace only", "  \n\t  "],
   ])("reads %s as empty rather than as a failure", (_label, text) => {
-    expect(parseRolesDesign(text)).toEqual({ kind: "empty" });
+    expect(parseSecurityDesign(text)).toEqual({ kind: "empty" });
   });
 
   it("reports malformed JSON as invalid", () => {
-    const parsed = parseRolesDesign('{"version": 1,');
+    const parsed = parseSecurityDesign('{"version": 1,');
     expect(parsed.kind).toBe("invalid");
     if (parsed.kind !== "invalid") throw new Error("unreachable");
     expect(parsed.message).not.toBe("");
@@ -88,7 +87,7 @@ describe("parseRolesDesign", () => {
     ["empty object", "{}"],
     ["JSON array", "[]"],
   ])("reads %s as empty rather than as a failure", (_label, text) => {
-    expect(parseRolesDesign(text)).toEqual({ kind: "empty" });
+    expect(parseSecurityDesign(text)).toEqual({ kind: "empty" });
   });
 
   it("reads well-formed JSON missing required fields as empty", () => {
@@ -96,12 +95,12 @@ describe("parseRolesDesign", () => {
       ...doc(),
       roles: [{ ...role("Admin"), description: undefined }],
     };
-    expect(parseRolesDesign(JSON.stringify(bad))).toEqual({ kind: "empty" });
+    expect(parseSecurityDesign(JSON.stringify(bad))).toEqual({ kind: "empty" });
   });
 
   // The schema is strict, but an unknown key means incomplete, not unparseable.
   it("reads an unknown top-level key as empty", () => {
-    const parsed = parseRolesDesign(
+    const parsed = parseSecurityDesign(
       JSON.stringify({ ...doc(), password: "hunter2" }),
     );
     expect(parsed).toEqual({ kind: "empty" });
@@ -109,26 +108,14 @@ describe("parseRolesDesign", () => {
 
   it("accepts a well-formed document and hands back the parsed shape", () => {
     const good = richDoc();
-    const parsed = parseRolesDesign(serializeRolesDesign(good));
+    const parsed = parseSecurityDesign(serializeSecurityDesign(good));
     expect(parsed).toEqual({ kind: "ok", doc: good });
   });
 
   it("accepts thunder without scopes", () => {
     const good = doc({ thunder: { name: "orders-app", type: "browser" } });
-    const parsed = parseRolesDesign(serializeRolesDesign(good));
+    const parsed = parseSecurityDesign(serializeSecurityDesign(good));
     expect(parsed).toEqual({ kind: "ok", doc: good });
-  });
-});
-
-describe("parseSecurityDesign", () => {
-  it("is the same function as parseRolesDesign", () => {
-    expect(parseSecurityDesign).toBe(parseRolesDesign);
-  });
-
-  it("classifies the same as parseRolesDesign on empty and valid input", () => {
-    const good = serializeRolesDesign(richDoc());
-    expect(parseSecurityDesign("{}")).toEqual(parseRolesDesign("{}"));
-    expect(parseSecurityDesign(good)).toEqual(parseRolesDesign(good));
   });
 });
 
@@ -201,14 +188,14 @@ describe("suppliedUsernameFor", () => {
 /**
  * The panel promises the user a name before Build runs, and the build has to
  * produce that same name. The generator therefore exists twice — here and as
- * `rolesspec.supplyUsername` in `services/aep-api/internal/platform/rolesspec`
+ * `securityspec.supplyUsername` in `services/aep-api/internal/platform/securityspec`
  * — and the two disagreeing is a real defect, not a cosmetic one: the panel
  * would show a login that never appears.
  *
- * The expectations below are the OBSERVED output of the Go `rolesspec.Plan` for
- * the same documents, transcribed. Change one side and this goes red.
+ * The expectations below are the OBSERVED output of the Go `securityspec.Plan`
+ * for the same documents, transcribed. Change one side and this goes red.
  */
-describe("suppliedUsernameFor agrees with the Go build's rolesspec.supplyUsername", () => {
+describe("suppliedUsernameFor agrees with the Go build's securityspec.supplyUsername", () => {
   // Two DISTINCT role names that slug identically. The schema's uniqueness rule
   // is on the NAME, so this document is legal, and the Go build resolves it by
   // adding each generated name to its taken set as it mints it. A TS generator

@@ -116,7 +116,11 @@ describe("buildDesignSection", () => {
       e("specs/design/roles.json"),
     ]);
     expect(section.hasSecurity).toBe(false);
-    expect(section.overview.map((f) => f.path)).toEqual(["specs/design/design.md"]);
+    expect(section.overview.map((f) => f.path)).toEqual([
+      "specs/design/design.md",
+      "specs/design/roles.json",
+      "specs/design/security.md",
+    ]);
   });
 
   it("keeps security.json out of the overview list", () => {

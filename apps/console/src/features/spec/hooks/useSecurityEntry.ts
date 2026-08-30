@@ -43,7 +43,7 @@ import { useYTextString } from "../collab/useYTextString";
 
 export interface SecurityEntry {
   /** The security document — live from the room, else the committed copy. */
-  rolesJson: string | null;
+  securityJson: string | null;
   /** The live directory state, undefined while it loads. */
   live: ProjectRolesLiveState | undefined;
   /**
@@ -73,24 +73,24 @@ export function useSecurityEntry({
   collab: CollabSpec;
   agentInRoom: boolean;
 }): SecurityEntry {
-  const rolesLiveText = useYTextString(
+  const securityLiveText = useYTextString(
     active ? collab.getFileText(SECURITY_JSON_PATH) : null,
   );
   // The committed copy is the solo fallback only. An agent in the room also
   // suppresses it: the doc WILL deliver the file, and probing git for a
   // not-yet-committed path just sprays 404s.
   const restFallback =
-    active && rolesLiveText === null && !agentInRoom
+    active && securityLiveText === null && !agentInRoom
       ? (files.find((f) => f.path === SECURITY_JSON_PATH) ?? null)
       : null;
-  const rolesCommitted = useSpecFileContent(projectName, restFallback);
+  const securityCommitted = useSpecFileContent(projectName, restFallback);
 
   const live = useProjectRoles(projectName, active);
 
   return {
-    rolesJson: rolesLiveText ?? rolesCommitted.data?.content ?? null,
+    securityJson: securityLiveText ?? securityCommitted.data?.content ?? null,
     live: live.data,
-    isPending: restFallback !== null && rolesCommitted.isPending,
-    isError: restFallback !== null && rolesCommitted.isError,
+    isPending: restFallback !== null && securityCommitted.isPending,
+    isError: restFallback !== null && securityCommitted.isError,
   };
 }

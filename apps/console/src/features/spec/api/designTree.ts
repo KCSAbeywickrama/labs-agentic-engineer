@@ -50,22 +50,8 @@ export const DESIGN_CELL_PATH = "specs/design/design.cell";
 /** The security design document — one file, one rail entry. */
 export const SECURITY_JSON_PATH = "specs/design/security.json";
 
-/** Leftover paths from the old two-file layout; hide from overview, never drive the rail. */
-const LEGACY_SECURITY_PATHS: readonly string[] = [
-  "specs/design/security.md",
-  "specs/design/roles.json",
-];
-
-function isSecurityRailFile(path: string): boolean {
-  return path === SECURITY_JSON_PATH;
-}
-
 function hideFromOverview(path: string): boolean {
-  return (
-    path === DESIGN_CELL_PATH ||
-    isSecurityRailFile(path) ||
-    LEGACY_SECURITY_PATHS.includes(path)
-  );
+  return path === DESIGN_CELL_PATH || path === SECURITY_JSON_PATH;
 }
 
 // SpecFileEntry.path is the full repo-relative path (mapping.ts's current
@@ -91,10 +77,10 @@ function isDsl(path: string): boolean {
 export function buildDesignSection(files: SpecFileEntry[]): DesignSection {
   const design = files.filter((f) => f.group === "designs");
   const hasCellDsl = design.some((f) => f.path === DESIGN_CELL_PATH);
-  const hasSecurity = design.some((f) => isSecurityRailFile(f.path));
+  const hasSecurity = design.some((f) => f.path === SECURITY_JSON_PATH);
   // design.cell is surfaced through the Architecture tab (streaming cell
   // diagram), never as a raw text file. security.json is the Security rail
-  // entry; leftover security.md / roles.json must not appear as labelled rows.
+  // entry, not an overview row.
   const overview = design
     .filter((f) => componentOf(f.path) === null && !hideFromOverview(f.path))
     .sort((a, b) => a.path.localeCompare(b.path));

@@ -33,7 +33,5 @@ const schemasDir = join(here, "..", "..", "contracts", "schemas");
 
 export const COMPONENT_DESIGN_SCHEMA_ARTIFACT = join(schemasDir, "component-design.schema.json");
 export const SECURITY_DESIGN_SCHEMA_ARTIFACT = join(schemasDir, "security-design.schema.json");
-/** @deprecated Use `SECURITY_DESIGN_SCHEMA_ARTIFACT`. */
-export const ROLES_DESIGN_SCHEMA_ARTIFACT = SECURITY_DESIGN_SCHEMA_ARTIFACT;
 export const PLAN_TASK_SCHEMA_ARTIFACT = join(schemasDir, "plan-task.schema.json");
 export const UPDATE_TASK_SCHEMA_ARTIFACT = join(schemasDir, "update-task.schema.json");

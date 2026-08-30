@@ -290,8 +290,7 @@ export function SpecFileList({
               row(fileSel(f.path), fileLabel(f.path), <LayoutDashboard size={16} />),
             )}
             {/* ONE rail entry for security.json — present file shows the row;
-                missing file hides it. Leftover security.md / roles.json do not
-                count. */}
+                missing file hides it. */}
             {design.hasSecurity &&
               row({ kind: "security" }, "Security", <ShieldCheck size={16} />)}
             {design.components.map((c) => {

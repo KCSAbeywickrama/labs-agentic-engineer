@@ -90,7 +90,7 @@ describe("useSecurityEntry — committed fallback loading", () => {
     expect(mockContent).toHaveBeenLastCalledWith("p", FILE);
     expect(entry.isPending).toBe(true);
     expect(entry.isError).toBe(false);
-    expect(entry.rolesJson).toBeNull();
+    expect(entry.securityJson).toBeNull();
   });
 
   it("does not spin when the room already has the document (disabled query may still be pending)", () => {
@@ -104,7 +104,7 @@ describe("useSecurityEntry — committed fallback loading", () => {
     expect(mockContent).toHaveBeenLastCalledWith("p", null);
     expect(entry.isPending).toBe(false);
     expect(entry.isError).toBe(false);
-    expect(entry.rolesJson).toBe('{"version":1}');
+    expect(entry.securityJson).toBe('{"version":1}');
   });
 
   it("does not spin when an agent is in the room and the committed read is suppressed", () => {

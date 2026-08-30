@@ -20,7 +20,7 @@
  * The Security panel's LIVE half: what the platform actually created on the
  * identity provider, as opposed to what the design declares.
  *
- * The design half comes from the collab room (`rolesDesign.ts`), so the two are
+ * The design half comes from the collab room (`securityDesign.ts`), so the two are
  * read from different places on purpose — the room shows an edit the moment it
  * is made, and this shows the world as it was at the last Build. Rendering them
  * side by side is what makes "new at Build" and "already there" legible.

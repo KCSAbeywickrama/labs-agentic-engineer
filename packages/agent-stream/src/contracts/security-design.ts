@@ -17,14 +17,10 @@
  */
 
 /**
- * SecurityDesign — the AUTHORED `specs/design/security.json`, the STRUCTURED
- * half of a project's security design.
- *
- * `security.md` keeps the prose half (role resolution, the policy narrative)
- * and names no role; this file declares which roles the project uses, what each
- * may do WITHIN this project, its test users, and the Thunder OIDC client the
- * project registers. Nothing appears in both, so the two can never contradict
- * each other.
+ * SecurityDesign — the AUTHORED `specs/design/security.json`. There is no
+ * prose companion: this file is the whole security design. It declares which
+ * roles the project uses, what each may do WITHIN this project, its test users,
+ * and the Thunder OIDC client the project registers.
  *
  * It is read by two very different consumers:
  *
@@ -44,8 +40,6 @@
  *
  * The Zod validator (`securityDesignSchema` in `../security-design-schema.ts`)
  * is drift-guarded against this type.
- *
- * `RolesDesign` is a deprecated alias of `SecurityDesign` (same shape).
  */
 
 /** The Thunder OIDC client this project registers. */
@@ -90,9 +84,6 @@ export interface SecurityDesign {
   /** The Thunder OIDC client this project registers. */
   thunder: ThunderClient;
 }
-
-/** @deprecated Use `SecurityDesign`. */
-export type RolesDesign = SecurityDesign;
 
 /** One role, and what it may do within this project. */
 export interface RoleDeclaration {
