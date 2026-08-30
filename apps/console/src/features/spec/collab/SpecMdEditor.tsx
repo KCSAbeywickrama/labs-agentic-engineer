@@ -351,12 +351,26 @@ export function SpecMdEditor({
           // different: an assumption is one word of an otherwise-settled
           // decision, an open question is a whole entry nobody has answered.
           // A deferred one keeps its entry but drops to a resting grey.
+          // The `*assumed*` marker reads as a PILL, not highlighted prose: the
+          // word is a tag the agent put on the decision, not part of the
+          // decision, and a wash over it read as text someone had selected.
+          // Same shape as the lens pill beside it, in the warning colour, so
+          // flag and control sit together as one vocabulary.
           "& .prd-flag--assumed": {
-            borderRadius: "2px",
-            px: 0.25,
-            bgcolor: (theme) => alpha(theme.palette.warning.main, 0.16),
-            borderBottom: "1px dashed",
-            borderBottomColor: "warning.main",
+            display: "inline-block",
+            fontStyle: "normal",
+            fontSize: "0.7rem",
+            fontWeight: 600,
+            lineHeight: 1.6,
+            letterSpacing: "0.02em",
+            px: 0.75,
+            ml: 0.5,
+            verticalAlign: "baseline",
+            borderRadius: "999px",
+            border: "1px solid",
+            borderColor: "warning.main",
+            color: "warning.main",
+            userSelect: "none",
           },
           "& .tiptap .prd-flag--question, & .tiptap .prd-flag--deferred": {
             pl: 1,
