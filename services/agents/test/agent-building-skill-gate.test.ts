@@ -113,6 +113,13 @@ describe("agent-building — the evaluation step", () => {
   // would stay green with a flag missing from the only line that executes.
   const invocation = /```bash\n([\s\S]*?agent-eval[\s\S]*?)```/.exec(SKILL)?.[1] ?? "";
 
+  // The loop's rules, anchored to the subsection that states them. The rest of
+  // the file talks about front matter and about the allow-list as a boundary
+  // for its own reasons — matched against the whole file, an assertion named
+  // for the loop would be satisfied by prose that says nothing about the loop,
+  // and could not fail if the rule were deleted.
+  const fixLoop = /\n### The fix loop\n([\s\S]*?)\n### /.exec(SKILL)?.[1] ?? "";
+
   it("names the harness and every flag its CLI requires", () => {
     assert.notEqual(invocation, "", "the build reference no longer carries a runnable eval command");
     for (const flag of ["--scenarios", "--app", "--afm", "--out"]) {
@@ -135,21 +142,22 @@ describe("agent-building — the evaluation step", () => {
   });
 
   it("bounds the fix loop where the agent can read it", () => {
-    assert.match(SKILL, /at most 3|three rounds/i);
-    assert.match(SKILL, /best-scoring prompt/, "the loop could ship the last prompt instead of the best one");
+    assert.notEqual(fixLoop, "", "the reference no longer describes a bounded fix loop at all");
+    assert.match(fixLoop, /at most 3|three rounds/i);
+    assert.match(fixLoop, /best-scoring prompt/, "the loop could ship the last prompt instead of the best one");
   });
 
   it("states the threshold and the zero tolerance that goes with it", () => {
-    assert.match(SKILL, /0\.8/, "the 0.8 threshold is gone — the loop has no bar to revise against");
-    assert.match(SKILL, /zero tolerance/i, "a mustNot is a harm, and tolerating one is not a rubric");
+    assert.match(fixLoop, /0\.8/, "the 0.8 threshold is gone — the loop has no bar to revise against");
+    assert.match(fixLoop, /zero tolerance/i, "a mustNot is a harm, and tolerating one is not a rubric");
   });
 
   // The one rule whose breach is a privilege escalation, not a bug.
   it("forbids the loop touching anything but the prompt body", () => {
-    assert.match(SKILL, /only the .*(body|prompt)/i);
-    assert.match(SKILL, /never .*front matter|front matter .*never/i);
+    assert.match(fixLoop, /only the .*(body|prompt)/i);
+    assert.match(fixLoop, /never .*front matter|front matter .*never/i);
     assert.match(
-      SKILL,
+      fixLoop,
       /allow[\s\S]{0,80}security\s+boundary/,
       "the allow-list is no longer named as the boundary a loop may not widen",
     );

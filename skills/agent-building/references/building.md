@@ -573,8 +573,11 @@ observable rather than asserted.
 
 The organisation's Anthropic key (`ANTHROPIC_API_KEY`) is the credential, for
 the agent under test and for the judge alike. Never
-`CLAUDE_CODE_OAUTH_TOKEN`, which is the platform's own coding budget. With no
-key the run reports that it could not evaluate, and the build carries on.
+`CLAUDE_CODE_OAUTH_TOKEN`, which is the platform's own coding budget. Without
+the key the agent is booted with no `MODEL_API_KEY`, so its own `/healthz`
+answers 503 and the report says the agent never became ready, quoting the
+`missing` list that names it. Nothing about that fails the build: the run
+exits 0 and the PR carries the report either way.
 
 ### The fix loop
 

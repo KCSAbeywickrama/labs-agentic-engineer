@@ -205,7 +205,7 @@ traceable through both files.
 | `id` | `SC-NNN`, unique in the file |
 | `criteria` | the `validation-criteria.json` ids this scenario exercises |
 | `brief.goal` | what the simulated user wants, in their words. It opens the conversation |
-| `brief.facts` | everything the simulated user knows — the agent has to ask for it |
+| `brief.facts` | everything the simulated user knows. The non-withheld ones are offered up front, alongside the goal; only a withheld fact has to be asked for |
 | `brief.withholds` | the `facts` keys the user will NOT volunteer |
 | `rubric.mustCover` | what a good answer covers. `weight` defaults to 1; use 2 for the line that IS the scenario |
 | `rubric.mustNot` | what a good answer never does |
