@@ -339,27 +339,65 @@ attributed to *you*. The turn itself carries the line
 ([#562](https://github.com/wso2/labs-agentic-engineer/issues/562)); the transcript store cannot,
 because it only records a turn once the turn has finished.
 
-### Card grammar
+### Track grammar
 
-Every stage card says the same things in the same slots, so the pattern is learned once:
+The three stages are **one track**, not three cards: one bar, three legs, each carrying a step
+numeral and separated by an arrowhead at the seam. Three cards with three borders read as three
+features; they are one version moving through three gates.
 
-- **which stage** — the title
+Every leg says the same things in the same slots, so the pattern is learned once:
+
+- **which stage** — a step numeral (`01`/`02`/`03`) and the name. The numerals are not decoration:
+  you cannot build before you publish or deploy before you build, so order is information here
 - **where it stands** — one line, always the user's situation, never the system's dependency
-- **what you can do** — a CTA, present *only* when there is something to do (per
-  [#522](https://github.com/wso2/labs-agentic-engineer/issues/522), when the flow stopped there)
 - **version** — only when one exists. No em-dash placeholder; blank says "not yet" better
-- **progress** — only while something is running
+- **where it goes** — the whole leg is a link to that stage's section
 
-| state | line | version | CTA |
+| state | line | version | lit |
 |---|---|---|---|
-| not reached | *Nothing built yet* | — | none |
-| running | *Building 3 of 7 tasks* | yes | none |
-| settled | *Built* | yes | view |
-| failed | *Build failed* | yes | fix |
+| not reached | *Nothing built yet* | — | no |
+| the platform is working | *Building* | yes | accent, pulsing |
+| waiting on **you** | *Draft changes, not published* | yes | amber, still |
+| settled | *Built* | yes | no |
+| failed | *Build failed* | yes | error, still |
 
-#### The spec card: one button, one line
+**Nothing on the track is a button.** Every way of *starting* work lives on the page that owns it,
+which is where the context to choose it lives too — the spec view offers *generate designs* and
+*start building*, and a `Publish` button on the overview would be the renamed-caption mistake below
+wearing a different verb. This supersedes the earlier rule that a stage carried a CTA "when the flow
+stopped there" ([#522](https://github.com/wso2/labs-agentic-engineer/issues/522)): the card that rule
+was written for was not clickable, and a button inside a link is a broken target.
 
-**The button never changes. It says *Open spec*, in every state.**
+**Lit means unsettled, and the colour says who is holding it.** Accent with a pulse is the platform
+working; amber and still is the platform waiting on the user. A page that animates while it waits
+for you to type is lying about who is busy. A settled leg is quiet — if every visit glows, the glow
+stops meaning anything.
+
+**More than one leg can be lit.** Amending the spec while the platform builds what you last
+published is a legitimate state, not a race, and any rule that forces a single "current" stage has
+to pick one and will pick wrong.
+
+**Validation is a phase of deploying, not a fourth leg.** It only runs once the components are up,
+so it rides the deploy line (*Live in dev · validating*). A fourth gate would be empty in most
+states, and empty gates teach the reader to ignore the bar. A red verdict fails the leg and **keeps
+its version chip** — that version really is what is running in dev.
+
+#### The summary line
+
+One sentence under the track, or nothing. It earns its slot **only** by saying something no single
+leg can — relating two legs to each other:
+
+| situation | sentence |
+|---|---|
+| amending a spec while the last published version builds | *Building v1 — your draft changes are not in it. Publish the spec to build them.* |
+| a newer version building over one still serving dev | *Building v2. v1 stays live in dev until it deploys.* |
+
+Everything else has **no summary**. A sentence that paraphrases the leg above it is the same
+"says it twice" problem the status chip was moved for.
+
+#### The spec leg: no button, one line
+
+**The leg is a link to the spec view, in every state — and it was a button before it was a link.**
 
 It used to be three buttons — *Generate spec*, then *Open spec*, then *Continue spec* — and it walked
 all three during a single kickoff **with no input from the user at all**, because each state was
@@ -382,7 +420,7 @@ absent and the agent looks idle, and the card fell through to its cold-start wor
 The **version** is a separate slot and survives underneath all of these, so an amendment interview on
 `v2` still reads as `v2`.
 
-**Nothing on this card starts anything.** It is a destination in every state.
+**Nothing on this leg starts anything.** It is a destination in every state.
 
 **An empty spec workspace shows one thing: a centred spinner over *"Agent is working on the
 requirements document"***, the same shape the architecture pane uses while a design turn runs. It is
@@ -784,7 +822,7 @@ five surfaces fill themselves.
 | Validations *(never validated)* | **Nothing validated yet.** After a build, your software is checked against the **acceptance criteria** in your spec; results appear here. | — |
 | Validations *(version skipped)* | **This version was not validated** — it has no validation criteria, or it was an incident run, which gets no validation cycle. | — |
 | Components *(overview)* | **No components yet.** Components are the services and apps your design is made of — they appear as agents build them. | — |
-| Recent activity *(overview)* | **No activity yet.** Agents report what they are doing here as they work. | — |
+| Architecture *(overview)* | **No architecture yet.** Once the agent designs your app, its components and the connections between them are drawn here. | — |
 | Chat | **Hi! I'm your Agent.** This is where we talk through what you're building. Ask about a decision, change what's in scope, or take up anything I marked as assumed. | the composer, plus three suggestions |
 
 **Chat's empty state is the one a user reaches last, not first.** Since

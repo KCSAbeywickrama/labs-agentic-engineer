@@ -61,7 +61,6 @@ import {
   productionStage,
   validationStage,
 } from "../lib/deploymentStory";
-import { projectChip } from "../lib/projectChip";
 import { validationView } from "../lib/pipeline";
 import {
   canPromote,
@@ -396,7 +395,6 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
   const header = (
     <PageHeader
       title="Deployments"
-      {...(status.data && { status: projectChip(status.data) })}
       backTo={{
         link: <Link to="/projects/$projectName" params={{ projectName }} />,
         label: "Back to Overview",
