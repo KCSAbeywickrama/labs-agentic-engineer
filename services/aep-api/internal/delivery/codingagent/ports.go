@@ -120,8 +120,17 @@ type SkillMirror interface {
 // handed — so this port deliberately exposes no way to ask "is there an
 // override?", which is what keeps the reuse rule stated in exactly one place
 // (ADR-0016). Wired from organization.AnthropicCredentialService.
+//
+// DefaultKeyRef is a SECOND question, not a way around the first: which key the
+// build's agent-evaluation step bills. That step is an API call — it drives the
+// generated agent's model and an LLM judge — so it cannot run on a Claude Code
+// OAuth token, and the default key is the org's key that is always an API key.
+// Asking for it says nothing about whether a coding override exists, so the rule
+// above stays in its one place. A NotFoundError means the org has connected no
+// key at all; see evaluationKeyRef for why that is not a dispatch failure.
 type CodingKeyResolver interface {
 	ResolveCodingSecretRef(ctx context.Context, ocOrgID string) (organization.SecretRefTriplet, error)
+	DefaultKeyRef(ctx context.Context, ocOrgID string) (organization.SecretRefTriplet, error)
 }
 
 // ProjectRepos resolves a project's git repo row (RepoURL/RepoSlug). Wired from

@@ -149,7 +149,11 @@ async function main(): Promise<number> {
   // (an org may bill its coding agent to a Claude Code OAuth token instead of
   // an API key), and priming only the one that happens to be unset would leave
   // the other unredacted in the progress feed. Unset entries are skipped.
-  primeScrubber([process.env.ANTHROPIC_API_KEY, process.env.CLAUDE_CODE_OAUTH_TOKEN]);
+  primeScrubber([
+    process.env.ANTHROPIC_API_KEY,
+    process.env.CLAUDE_CODE_OAUTH_TOKEN,
+    process.env.AEP_EVAL_ANTHROPIC_API_KEY,
+  ]);
   emit({ kind: "phase", phase: "workspace_provisioning" });
 
   let layout: WorkspaceLayout;

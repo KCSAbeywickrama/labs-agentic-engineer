@@ -141,6 +141,39 @@ describe("agent-building — the evaluation step", () => {
     assert.doesNotMatch(SKILL, /@latest/, "an unpinned tool version makes a score unreproducible");
   });
 
+  // The build pod is the case this command has to get right, and it is the one
+  // nobody runs by hand. `git rev-parse --show-toplevel` answers with the
+  // GENERATED PROJECT there — it is its own git repository — so a command that
+  // resolved the harness that way and only that way would work everywhere it was
+  // tried and nowhere it actually runs.
+  it("resolves the harness in a build pod as well as in the monorepo", () => {
+    assert.match(
+      invocation,
+      /command -v agent-eval/,
+      "the command no longer detects the harness the runner image installs — in a pod there is no monorepo to build from",
+    );
+    assert.match(
+      invocation,
+      /packages\/agent-eval\/dist\/bin\/agent-eval\.js/,
+      "the monorepo fallback is gone — a playground or local run has no `agent-eval` on PATH",
+    );
+  });
+
+  // A key on the command line is a key in a build log.
+  it("leaves the model credential to the harness", () => {
+    assert.doesNotMatch(
+      invocation,
+      /ANTHROPIC_API_KEY=|export [A-Z_]*ANTHROPIC/,
+      "the command sets a credential itself — the harness reads it from the environment the platform mounted",
+    );
+    assert.match(
+      SKILL,
+      /AEP_EVAL_ANTHROPIC_API_KEY/,
+      "the reference no longer names the variable the platform mounts the org's key under",
+    );
+    assert.match(SKILL, /Never\s+`CLAUDE_CODE_OAUTH_TOKEN`/);
+  });
+
   it("bounds the fix loop where the agent can read it", () => {
     assert.notEqual(fixLoop, "", "the reference no longer describes a bounded fix loop at all");
     assert.match(fixLoop, /at most 3|three rounds/i);

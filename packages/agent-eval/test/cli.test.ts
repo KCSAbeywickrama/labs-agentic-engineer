@@ -171,6 +171,39 @@ describe("buildChildEnv", () => {
     expect(env.MODEL_API_KEY).toBe("sk-ant-real");
   });
 
+  // In a build pod the org's key arrives as AEP_EVAL_ANTHROPIC_API_KEY, not as
+  // ANTHROPIC_API_KEY: that name already belongs to Claude Code, which ranks it
+  // above CLAUDE_CODE_OAUTH_TOKEN, so the platform cannot put the evaluation key
+  // there without moving an OAuth-billing org's whole coding session onto it.
+  it("prefers the build's evaluation key over ANTHROPIC_API_KEY", () => {
+    const env = buildChildEnv({
+      AEP_EVAL_ANTHROPIC_API_KEY: "sk-ant-eval",
+      ANTHROPIC_API_KEY: "sk-ant-other",
+      CLAUDE_CODE_OAUTH_TOKEN: "coding-token",
+    });
+    expect(env.ANTHROPIC_API_KEY).toBe("sk-ant-eval");
+    expect(env.MODEL_API_KEY).toBe("sk-ant-eval");
+    expect(env.AEP_EVAL_ANTHROPIC_API_KEY).toBeUndefined();
+    expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+  });
+
+  // Outside a build pod — a developer running the harness in the monorepo —
+  // ANTHROPIC_API_KEY is the only key there is.
+  it("falls back to ANTHROPIC_API_KEY when no evaluation key is set", () => {
+    const env = buildChildEnv({ ANTHROPIC_API_KEY: "sk-ant-local" });
+    expect(env.ANTHROPIC_API_KEY).toBe("sk-ant-local");
+    expect(env.MODEL_API_KEY).toBe("sk-ant-local");
+  });
+
+  // The coding agent's OAuth token is not a model credential and never stands in
+  // for one: it is the platform's own coding budget, and it authenticates none
+  // of the API calls the judge makes.
+  it("never falls back to the coding agent's OAuth token", () => {
+    const env = buildChildEnv({ CLAUDE_CODE_OAUTH_TOKEN: "coding-token" });
+    expect("MODEL_API_KEY" in env).toBe(false);
+    expect("ANTHROPIC_API_KEY" in env).toBe(false);
+  });
+
   it("never invents a MODEL_API_KEY when the org key is unset", () => {
     expect("MODEL_API_KEY" in buildChildEnv({})).toBe(false);
   });

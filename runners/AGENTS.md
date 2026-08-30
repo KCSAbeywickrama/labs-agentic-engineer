@@ -231,6 +231,26 @@ into the runner pod at `/app/skills` for live skill edits (see
   on an out-of-sync `npm ci`, which is the loud outcome. The quiet one is worse:
   a range that still resolves leaves the pod running a version the tests never
   saw.
+- **The agent-evaluation harness ships in the image too**, at
+  `/opt/aep/agent-eval` (`$AEP_AGENT_EVAL_HOME`) with `agent-eval` on `PATH`. A
+  build that generates an ai-agent evaluates it before opening its PR, and a
+  build pod holds no monorepo — so a harness resolved from the checkout would run
+  on a developer's machine and nowhere else, which is the worst kind of step:
+  one that looks wired and silently is not. `packages/agent-eval` arrives as the
+  `agent-eval` named build context, so all three build paths must pass it
+  (`build-runner.sh`, `release.yml`'s matrix row, `local/run-local.sh`);
+  `src/agent_eval_packaging.test.ts` pins all three, because a context passed by
+  one builder and not another differs between local and cloud rather than
+  failing. It installs with `npm ci` from `packages/agent-eval/package-lock.json`
+  — the same two-lockfile rule as `/app` — and runs from source under `tsx`. It
+  is the largest layer in the image (~2.3 GB: promptfoo pulls every provider's
+  SDK), which is why it sits before the runner's sources rather than after them.
+- **`AEP_EVAL_ANTHROPIC_API_KEY` is a THIRD credential on the pod** — the org's
+  default Anthropic key, for the evaluation step's agent and judge. It is not
+  `ANTHROPIC_API_KEY` because that name belongs to Claude Code, which ranks it
+  above `CLAUDE_CODE_OAUTH_TOKEN` (ADR-0016). Both entrypoints prime the
+  scrubber with it: the agent invokes the harness through its Bash tool, whose
+  output is the progress feed.
 - **One image**, `remote-worker/Dockerfile`, serves BOTH task kinds
   (`AEP_TASK_KIND=implementation` and `=validation`). It is Debian-based
   because Playwright's browsers are glibc-linked; do not reintroduce a second,

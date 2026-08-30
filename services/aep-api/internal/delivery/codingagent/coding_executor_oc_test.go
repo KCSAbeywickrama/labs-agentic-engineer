@@ -61,10 +61,21 @@ func (f fakeOrgRepo) SetThunderOrgUUID(context.Context, string, uuid.UUID) error
 type fakeCodingKey struct {
 	ref organization.SecretRefTriplet
 	err error
+
+	// The DEFAULT-role key is a separate answer to a separate question: which
+	// credential the build's EVALUATION step bills. It is not always the same
+	// row as the coding one, which is exactly what the evaluation tests below
+	// exercise.
+	defaultRef organization.SecretRefTriplet
+	defaultErr error
 }
 
 func (f fakeCodingKey) ResolveCodingSecretRef(context.Context, string) (organization.SecretRefTriplet, error) {
 	return f.ref, f.err
+}
+
+func (f fakeCodingKey) DefaultKeyRef(context.Context, string) (organization.SecretRefTriplet, error) {
+	return f.defaultRef, f.defaultErr
 }
 
 type fakeGitHubCreds struct {
@@ -90,12 +101,16 @@ func (f fakeGitHubCreds) Tx(context.Context, func(organization.OrgCredentialTx) 
 }
 
 func fullSecretRefs() (fakeCodingKey, *organization.OrgCredential) {
-	return fakeCodingKey{ref: organization.SecretRefTriplet{
-			Name:     "acme-anthropic-secrets",
-			KVPath:   "user-app-secrets/wc-acme/acme-anthropic-secrets",
-			Property: "api-key",
-			EnvVar:   "ANTHROPIC_API_KEY",
-		}}, &organization.OrgCredential{
+	// Reuse — the org configured no coding override — is the common case, so both
+	// answers name the same row here. Tests that care about the difference set
+	// defaultRef themselves.
+	defaultRef := organization.SecretRefTriplet{
+		Name:     "acme-anthropic-secrets",
+		KVPath:   "user-app-secrets/wc-acme/acme-anthropic-secrets",
+		Property: "api-key",
+		EnvVar:   "ANTHROPIC_API_KEY",
+	}
+	return fakeCodingKey{ref: defaultRef, defaultRef: defaultRef}, &organization.OrgCredential{
 			SecretRefName:     strPtr("acme-github-pat-secrets"),
 			SecretRefKVPath:   strPtr("user-app-secrets/wc-acme/acme-github-pat-secrets"),
 			SecretRefProperty: strPtr("token"),
@@ -479,5 +494,123 @@ func TestDispatch_HTTPPlatformURL_MountsPublisher(t *testing.T) {
 		if ev.Key == "AEP_BEARER" || ev.Key == "AEP_MCP_TOKEN" {
 			t.Errorf("coding-agent Job must not inject %s", ev.Key)
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The evaluation credential (build-time agent evaluation)
+// ---------------------------------------------------------------------------
+
+// hasEnvKey reports whether the dispatched Workload carries an env entry under
+// key, without asserting anything about its value — secret entries are refs, and
+// a test must never handle key material.
+func hasEnvKey(in openchoreo.WorkloadInput, key string) bool {
+	for _, ev := range in.Env {
+		if ev.Key == key {
+			return true
+		}
+	}
+	return false
+}
+
+// TestDispatch_MountsTheOrgDefaultKeyForEvaluation: a build that evaluates the
+// agent it just generated needs a model credential twice over — for the agent
+// under test and for the judge grading it. The org's DEFAULT key is the one that
+// is correct on both counts: it is always an API key (a coding OAuth token
+// authenticates no API call the judge makes), and the spend belongs to the org
+// whose agent is being graded.
+func TestDispatch_MountsTheOrgDefaultKeyForEvaluation(t *testing.T) {
+	rec := &chainRecorder{}
+	anthropic, github := fullSecretRefs()
+	// A DIFFERENT SecretReference from the coding credential, so the assertion
+	// below can only pass if the default key — not the coding one — was mounted.
+	anthropic.defaultRef = organization.SecretRefTriplet{
+		Name:     "acme-anthropic-default-secrets",
+		KVPath:   "user-app-secrets/wc-acme/acme-anthropic-default-secrets",
+		Property: "api-key",
+		EnvVar:   "ANTHROPIC_API_KEY",
+	}
+	e := newCodingDispatchExecutor(anthropic, github)
+	e.WithPublisherCredentials(fakePublisher{name: "acme-publisher-secrets"}, "http://thunder.example/oauth2/token")
+	e.WithOCDispatch(NewOCDispatcher(rec.client()).WithImage("ghcr.io/wso2/aep/remote-worker:latest"))
+
+	if _, err := e.Dispatch(context.Background(), codingMilestoneDispatch()); err != nil {
+		t.Fatalf("Dispatch: %v", err)
+	}
+	ev := secretEnvByKey(t, rec.load, envEvalAnthropicAPIKey)
+	if ev.ValueFrom == nil || ev.ValueFrom.SecretKeyRef == nil {
+		t.Fatalf("%s must be a SecretReference, not an inline value: %+v", envEvalAnthropicAPIKey, ev)
+	}
+	if ev.ValueFrom.SecretKeyRef.Name != anthropic.defaultRef.Name {
+		t.Errorf("%s resolves from %q, want the org's DEFAULT key %q",
+			envEvalAnthropicAPIKey, ev.ValueFrom.SecretKeyRef.Name, anthropic.defaultRef.Name)
+	}
+	if ev.ValueFrom.SecretKeyRef.Key != anthropic.defaultRef.Property {
+		t.Errorf("%s property = %q, want %q", envEvalAnthropicAPIKey,
+			ev.ValueFrom.SecretKeyRef.Key, anthropic.defaultRef.Property)
+	}
+}
+
+// TestDispatch_EvaluationKeyRidesItsOwnVariable: the evaluation credential must
+// never be mounted as ANTHROPIC_API_KEY when the org bills its coding agent to a
+// Claude Code OAuth token. Claude Code ranks ANTHROPIC_API_KEY above
+// CLAUDE_CODE_OAUTH_TOKEN (ADR-0016), so doing so would silently move the whole
+// coding session onto the credential the org moved away from.
+func TestDispatch_EvaluationKeyRidesItsOwnVariable(t *testing.T) {
+	rec := &chainRecorder{}
+	anthropic, github := fullSecretRefs()
+	anthropic.ref.EnvVar = "CLAUDE_CODE_OAUTH_TOKEN"
+	e := newCodingDispatchExecutor(anthropic, github)
+	e.WithPublisherCredentials(fakePublisher{name: "acme-publisher-secrets"}, "http://thunder.example/oauth2/token")
+	e.WithOCDispatch(NewOCDispatcher(rec.client()).WithImage("ghcr.io/wso2/aep/remote-worker:latest"))
+
+	if _, err := e.Dispatch(context.Background(), codingMilestoneDispatch()); err != nil {
+		t.Fatalf("Dispatch: %v", err)
+	}
+	if !hasEnvKey(rec.load, envEvalAnthropicAPIKey) {
+		t.Fatalf("an org billing its coding agent to an OAuth token still needs %s for evaluation", envEvalAnthropicAPIKey)
+	}
+	if hasEnvKey(rec.load, "ANTHROPIC_API_KEY") {
+		t.Error("the evaluation key must not be mounted as ANTHROPIC_API_KEY beside an OAuth token")
+	}
+}
+
+// TestDispatch_NoDefaultKeyConnected_StillDispatches: evaluation reports, it
+// never fails a build. An org with no connected default key dispatches WITHOUT
+// the variable — absent, not present-and-empty, so the harness sees "no key"
+// rather than "a key that does not authenticate".
+func TestDispatch_NoDefaultKeyConnected_StillDispatches(t *testing.T) {
+	rec := &chainRecorder{}
+	anthropic, github := fullSecretRefs()
+	anthropic.defaultErr = &organization.NotFoundError{What: "org_anthropic_credentials.acme.default"}
+	e := newCodingDispatchExecutor(anthropic, github)
+	e.WithPublisherCredentials(fakePublisher{name: "acme-publisher-secrets"}, "http://thunder.example/oauth2/token")
+	e.WithOCDispatch(NewOCDispatcher(rec.client()).WithImage("ghcr.io/wso2/aep/remote-worker:latest"))
+
+	if _, err := e.Dispatch(context.Background(), codingMilestoneDispatch()); err != nil {
+		t.Fatalf("a build must not fail because evaluation cannot run: %v", err)
+	}
+	if hasEnvKey(rec.load, envEvalAnthropicAPIKey) {
+		t.Errorf("an absent key must be absent, not mounted: %+v", rec.load.Env)
+	}
+}
+
+// TestDispatch_IncompleteDefaultKeyRef_IsNotMounted: a half-mirrored row can
+// resolve to a triplet ESO cannot follow. Mounting it would put the variable on
+// the pod pointing at nothing, and the harness would then report the agent as
+// misbehaving rather than as unconfigured — a worse outcome than no evaluation.
+func TestDispatch_IncompleteDefaultKeyRef_IsNotMounted(t *testing.T) {
+	rec := &chainRecorder{}
+	anthropic, github := fullSecretRefs()
+	anthropic.defaultRef = organization.SecretRefTriplet{Name: "acme-anthropic-secrets", EnvVar: "ANTHROPIC_API_KEY"}
+	e := newCodingDispatchExecutor(anthropic, github)
+	e.WithPublisherCredentials(fakePublisher{name: "acme-publisher-secrets"}, "http://thunder.example/oauth2/token")
+	e.WithOCDispatch(NewOCDispatcher(rec.client()).WithImage("ghcr.io/wso2/aep/remote-worker:latest"))
+
+	if _, err := e.Dispatch(context.Background(), codingMilestoneDispatch()); err != nil {
+		t.Fatalf("a build must not fail because evaluation cannot run: %v", err)
+	}
+	if hasEnvKey(rec.load, envEvalAnthropicAPIKey) {
+		t.Errorf("a triplet with no property must not be mounted: %+v", rec.load.Env)
 	}
 }

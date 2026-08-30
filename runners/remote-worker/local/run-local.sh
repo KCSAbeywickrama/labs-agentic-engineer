@@ -129,6 +129,7 @@ fi
 docker build \
   --build-context "skills=$WORKER_DIR/../../skills" \
   --build-context "bal-library-tool=$WORKER_DIR/../../packages/bal-library-tool" \
+  --build-context "agent-eval=$WORKER_DIR/../../packages/agent-eval" \
   --secret "id=packagePAT,env=PACKAGE_PAT" \
   -f "$DOCKERFILE" -t "$IMAGE_TAG" "$WORKER_DIR"
 

@@ -177,9 +177,16 @@ async function main(): Promise<number> {
   // (an org may bill its coding agent to a Claude Code OAuth token instead of
   // an API key), and priming only the one that happens to be unset would leave
   // the other unredacted in the progress feed. Unset entries are skipped.
+  //
+  // The evaluation key is a THIRD credential on the same pod — the org's default
+  // Anthropic key, mounted for the agent-evaluation step a build runs before
+  // opening an ai-agent's PR. The agent invokes that step through its Bash tool,
+  // whose output is streamed into this very feed, so leaving it unprimed is the
+  // most likely of the three to actually leak.
   primeScrubber([
     process.env.ANTHROPIC_API_KEY,
     process.env.CLAUDE_CODE_OAUTH_TOKEN,
+    process.env.AEP_EVAL_ANTHROPIC_API_KEY,
     req.bearer,
     publisher.clientSecret,
     req.mcpToken,

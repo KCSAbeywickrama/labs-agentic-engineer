@@ -111,8 +111,28 @@ export function resolveBootTimeouts(env: NodeJS.ProcessEnv): {
 // Only these ever cross into the child. promptfoo does not need the rest of
 // this process's environment, and the rest may hold credentials — the
 // coding agent's own OAuth token among them — that have no business
-// reaching a large third-party dependency tree.
-const ALLOWED_ENV_KEYS = ["PATH", "HOME", "ANTHROPIC_API_KEY"] as const;
+// reaching a large third-party dependency tree. The model credential is not
+// listed here because it is not forwarded under the name it arrived as; see
+// resolveModelKey.
+const ALLOWED_ENV_KEYS = ["PATH", "HOME"] as const;
+
+/**
+ * The org's Anthropic key, under either of the two names it can arrive as.
+ *
+ * In a build pod the platform mounts it as `AEP_EVAL_ANTHROPIC_API_KEY`. It
+ * cannot use `ANTHROPIC_API_KEY` there: that name already belongs to Claude
+ * Code, which ranks it above `CLAUDE_CODE_OAUTH_TOKEN`, so an org that bills
+ * its coding agent to an OAuth token would have its whole coding session
+ * silently moved onto this key instead (ADR-0016). Outside a pod —
+ * a developer running the harness in the monorepo — `ANTHROPIC_API_KEY` is
+ * the only key there is, so it is the fallback.
+ *
+ * `CLAUDE_CODE_OAUTH_TOKEN` is NEVER a fallback. It is the platform's own
+ * coding budget, and it authenticates none of the API calls the judge makes.
+ */
+function resolveModelKey(env: NodeJS.ProcessEnv): string | undefined {
+  return env.AEP_EVAL_ANTHROPIC_API_KEY ?? env.ANTHROPIC_API_KEY;
+}
 
 export function buildChildEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const out: NodeJS.ProcessEnv = {
@@ -127,9 +147,12 @@ export function buildChildEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   // The agent under test and the judge share ONE credential — the org's
   // Anthropic key — under the two names each expects. It travels as an
   // environment variable and never through the emitted config file, which
-  // is written into the build's output directory. Never the coding agent's
-  // own OAuth token: that is not the organisation's model credential.
-  if (env.ANTHROPIC_API_KEY !== undefined) out.MODEL_API_KEY = env.ANTHROPIC_API_KEY;
+  // is written into the build's output directory.
+  const modelKey = resolveModelKey(env);
+  if (modelKey !== undefined) {
+    out.ANTHROPIC_API_KEY = modelKey;
+    out.MODEL_API_KEY = modelKey;
+  }
   return out;
 }
 

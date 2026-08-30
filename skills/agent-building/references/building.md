@@ -536,17 +536,30 @@ against the agent you just built. `specs/validation/agent-scenarios.json` was
 written at design time from the requirements — it is the behavioural oracle
 for this component, and `references/designing.md` describes its shape.
 
-The harness is `@aep/agent-eval`, a workspace package of the platform
-monorepo. It is private and never published, so it is invoked from the
-checkout — never `npx`, which would fetch some other package of that name from
-the registry, at an unpinned version:
+The harness is `@aep/agent-eval`. It is private and never published, so it is
+never invoked with `npx` — that would fetch some other package of that name
+from the registry, at an unpinned version. It reaches a build two ways, and
+`command -v agent-eval` tells you which one you are in:
+
+- **A build pod.** The runner image ships the harness at
+  `$AEP_AGENT_EVAL_HOME` (`/opt/aep/agent-eval`) with `agent-eval` on `PATH`.
+  Nothing has to be built.
+- **The platform monorepo** — a playground or local run. The harness is the
+  workspace package `packages/agent-eval`, and it has to be compiled once.
 
 ```bash
 # from the project root — the folder holding specs/.
-# $AEP_ROOT is the platform monorepo checkout: `git rev-parse --show-toplevel`
-# from anywhere inside it.
-corepack pnpm --filter @aep/agent-eval build
-node "$AEP_ROOT/packages/agent-eval/dist/bin/agent-eval.js" \
+if command -v agent-eval > /dev/null 2>&1; then
+  run_eval() { agent-eval "$@"; }
+else
+  # `git rev-parse --show-toplevel` finds the PLATFORM monorepo here and only
+  # here. In a build pod the generated project is its own git repository, so
+  # the same expression would answer with the project — which is exactly why
+  # the pod is served by the branch above and never by this one.
+  corepack pnpm --filter @aep/agent-eval build
+  run_eval() { node "$(git rev-parse --show-toplevel)/packages/agent-eval/dist/bin/agent-eval.js" "$@"; }
+fi
+run_eval \
   --scenarios specs/validation/agent-scenarios.json \
   --app <app-path> \
   --afm specs/design/components/<agent>/agent.afm.md \
@@ -571,13 +584,19 @@ miss. A simulated user drives the conversation and WITHHOLDS the facts the
 scenario says to withhold — that is what makes "asks for what it needs"
 observable rather than asserted.
 
-The organisation's Anthropic key (`ANTHROPIC_API_KEY`) is the credential, for
-the agent under test and for the judge alike. Never
-`CLAUDE_CODE_OAUTH_TOKEN`, which is the platform's own coding budget. Without
-the key the agent is booted with no `MODEL_API_KEY`, so its own `/healthz`
-answers 503 and the report says the agent never became ready, quoting the
-`missing` list that names it. Nothing about that fails the build: the run
-exits 0 and the PR carries the report either way.
+The organisation's Anthropic key is the credential, for the agent under test
+and for the judge alike. The harness finds it itself, under either of the two
+names it can arrive as: `AEP_EVAL_ANTHROPIC_API_KEY` in a build pod, where the
+platform mounts the org's default key, and `ANTHROPIC_API_KEY` outside one.
+Never `CLAUDE_CODE_OAUTH_TOKEN`, which is the platform's own coding budget and
+authenticates none of the API calls the judge makes. **Pass no key on the
+command line and set none yourself** — a key you export is a key that ends up
+in a build log.
+
+Without a key the agent is booted with no `MODEL_API_KEY`, so its own
+`/healthz` answers 503 and the report says the agent never became ready,
+quoting the `missing` list that names it. Nothing about that fails the build:
+the run exits 0 and the PR carries the report either way.
 
 ### The fix loop
 
@@ -587,8 +606,9 @@ because those lines encode harm (inventing a price, claiming a failed write
 succeeded) and a rubric that tolerates one 20% of the time is not a rubric.
 
 **When a scenario falls short, revise the PROMPT and run it again — at most 3
-rounds.** Each round: edit `src/prompt.ts`, `npm run build`, re-run the
-command above. Cite the rubric line that drove each change; `report.md` names
+rounds.** Each round: edit `src/prompt.ts`, `npm run build`, re-run the block
+above — the whole block, since `run_eval` is defined inside it and a shell
+function does not survive to your next command. Cite the rubric line that drove each change; `report.md` names
 them, with the judge's own reason. Lines under "Ungraded" are a grading gap,
 not an agent failure — never revise against one.
 

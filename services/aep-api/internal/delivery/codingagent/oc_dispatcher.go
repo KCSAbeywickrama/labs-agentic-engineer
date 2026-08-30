@@ -80,6 +80,19 @@ const codingAgentWorkspacePath = "/home/aep/aep-workspace"
 const (
 	envAnthropicAPIKey = "ANTHROPIC_API_KEY"
 	envGitHubToken     = "GITHUB_TOKEN"
+
+	// envEvalAnthropicAPIKey carries the org's DEFAULT Anthropic key for the
+	// build's agent-evaluation step, which needs a model twice over: for the
+	// generated agent it boots and for the judge that grades it.
+	//
+	// It has its OWN name rather than reusing ANTHROPIC_API_KEY because that
+	// variable already belongs to Claude Code, which ranks it above
+	// CLAUDE_CODE_OAUTH_TOKEN (ADR-0016). Mounting the evaluation key under it
+	// would silently move the coding session of every OAuth-billing org onto the
+	// credential that org deliberately moved away from — the exact mis-bill
+	// ADR-0016 exists to prevent. A distinct name keeps the two budgets apart,
+	// and the harness reads it in preference to ANTHROPIC_API_KEY.
+	envEvalAnthropicAPIKey = "AEP_EVAL_ANTHROPIC_API_KEY"
 )
 
 // OCDispatcher creates the ephemeral coding-agent Component chain:

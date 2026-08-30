@@ -53,13 +53,16 @@ jobs:
           - name: remote-worker
             dockerfile: runners/remote-worker/Dockerfile
             context: runners/remote-worker
-            # Two named contexts, both outside this image's context: the authored
-            # skill library, and the `bal library` tool's SOURCE — the image's
-            # first stage compiles it, so nothing has to be built before this job
-            # and no artifact can be stale (ADR-0008).
+            # Three named contexts, all outside this image's context: the
+            # authored skill library; the `bal library` tool's SOURCE — the
+            # image's first stage compiles it, so nothing has to be built before
+            # this job and no artifact can be stale (ADR-0008); and the
+            # agent-evaluation harness, which a build runs before opening the PR
+            # for an ai-agent and which therefore has to exist in the pod.
             buildContexts: |
               skills=skills
               bal-library-tool=packages/bal-library-tool
+              agent-eval=packages/agent-eval
           - name: console
             dockerfile: apps/console/Dockerfile
             context: .
