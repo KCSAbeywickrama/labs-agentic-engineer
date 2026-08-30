@@ -30,7 +30,11 @@ import {
   type CriterionReport,
   type ValidationReport,
 } from "./report.js";
-import { CRITERION_STATE_LABEL } from "./counts.js";
+import {
+  CRITERION_STATE_LABEL,
+  METHOD_LABEL,
+  tallyCriterionMethods,
+} from "./counts.js";
 
 // Solid background per verification method. Text color is computed for contrast
 // (getContrastText), so labels stay readable in both themes — the same approach
@@ -39,17 +43,6 @@ const METHOD_COLOR: Record<string, string> = {
   e2e: "#1976d2",
   scenario: "#ed6c02",
   manual: "#7b1fa2",
-};
-// Fixed display order for the summary tally; unknown methods sort after these.
-const METHOD_ORDER = ["e2e", "scenario", "manual"];
-// What a method badge SAYS, as against the wire value it is keyed by. `e2e` is
-// the contract shared with the runner, the report generator and the spec-path
-// convention, so it cannot be renamed — but it is an acronym the reader has to
-// expand, which the console lexicon forbids. Same split CRITERION_STATE_LABEL
-// draws for run statuses. A method with no entry here renders verbatim, so
-// `manual` and anything unrecognised are unaffected.
-const METHOD_LABEL: Record<string, string> = {
-  e2e: "auto",
 };
 // One line saying who does the checking, shown on hover. Only the two methods a
 // design turn can author carry one; anything else gets a bare badge rather than
@@ -157,15 +150,36 @@ function StateChip({ status }: { status: string }) {
   );
 }
 
+// What a criterion shows while an attempt is IN FLIGHT and no report exists yet.
+//
+// A `manual` criterion gets its final word rather than "Pending": the run will
+// never answer it — that is what the method means — so a chip promising a result
+// would be a claim the eventual report contradicts. Everything else is genuinely
+// waiting on the run, including the legacy `scenario` method and any method this
+// view does not recognise.
+//
+// "Pending" is local rather than a sixth CRITERION_STATE_LABEL entry: that map is
+// report.json's vocabulary, and a criterion with no report has no status to name.
+function AwaitingChip({ method }: { method: string }) {
+  return method === "manual" ? (
+    <StateChip status="manual" />
+  ) : (
+    <Chip size="small" variant="outlined" label="Pending" sx={{ flexShrink: 0 }} />
+  );
+}
+
 // One acceptance criterion: method badge, its id, the atomic assertion, and —
 // when a run report is joined in — its run-state chip plus healed/flaky markers
-// and (for a failure) the spec path and failure message beneath.
+// and (for a failure) the spec path and failure message beneath. With no report
+// and `awaiting` set, the state chip says what is going to happen to it instead.
 function CriterionRow({
   criterion,
   report,
+  awaiting,
 }: {
   criterion: Criterion;
   report: CriterionReport | undefined;
+  awaiting: boolean;
 }) {
   const failed = report?.status === "fail";
   return (
@@ -189,7 +203,11 @@ function CriterionRow({
         {report?.healed && (
           <Chip size="small" variant="outlined" label="healed" sx={{ flexShrink: 0 }} />
         )}
-        {report && <StateChip status={report.status} />}
+        {report ? (
+          <StateChip status={report.status} />
+        ) : awaiting ? (
+          <AwaitingChip method={criterion.method} />
+        ) : null}
       </Box>
       {/* Failure detail sits full-width beneath the row (indented past the
           method badge) so a long trace never crowds the assertion. */}
@@ -243,9 +261,11 @@ function CriterionRow({
 function RequirementCard({
   requirement,
   statuses,
+  awaiting,
 }: {
   requirement: Requirement;
   statuses: ValidationReport | undefined;
+  awaiting: boolean;
 }) {
   const count = requirement.criteria.length;
   return (
@@ -290,7 +310,12 @@ function RequirementCard({
         // above are their siblings.
         <Box sx={{ "& > *": { borderTop: 1, borderColor: "divider" } }}>
           {requirement.criteria.map((c) => (
-            <CriterionRow key={c.id} criterion={c} report={statuses?.get(c.id)} />
+            <CriterionRow
+              key={c.id}
+              criterion={c}
+              report={statuses?.get(c.id)}
+              awaiting={awaiting}
+            />
           ))}
         </Box>
       )}
@@ -304,6 +329,7 @@ function ValidationBody({
   noPadding,
   fullWidth,
   hideDescription,
+  awaitingReport,
 }: {
   criteria: ValidationCriteria;
   statuses: ValidationReport | undefined;
@@ -312,28 +338,18 @@ function ValidationBody({
   noPadding: boolean;
   fullWidth: boolean;
   hideDescription: boolean;
+  awaitingReport: boolean;
 }) {
   const { requirements } = criteria;
-  // Per-method tally for the summary header, kept in a stable order. The
-  // per-run-state tally is deliberately NOT here: it belongs with the verdict it
-  // explains, which the consumer renders above this view (tallyCriterionStates in
-  // counts.ts), and duplicating it here would put the same numbers on the page
-  // twice.
-  const { total, orderedMethods, methodCounts } = useMemo(() => {
-    const methods = new Map<string, number>();
-    let n = 0;
-    for (const r of requirements) {
-      for (const c of r.criteria) {
-        n += 1;
-        methods.set(c.method, (methods.get(c.method) ?? 0) + 1);
-      }
-    }
-    const orderedM = [
-      ...METHOD_ORDER.filter((m) => methods.has(m)),
-      ...[...methods.keys()].filter((m) => !METHOD_ORDER.includes(m)).sort(),
-    ];
-    return { total: n, orderedMethods: orderedM, methodCounts: methods };
-  }, [requirements]);
+  // Per-method tally for the summary header, from counts.ts so the consumer's own
+  // method line (the console's tile, while an attempt is still running) counts the
+  // same criteria in the same order. The per-run-state tally is deliberately NOT
+  // here: it belongs with the verdict it explains, which the consumer renders above
+  // this view (tallyCriterionStates), and duplicating it here would put the same
+  // numbers on the page twice.
+  const methods = useMemo(() => tallyCriterionMethods(criteria), [criteria]);
+  // Every criterion has exactly one method, so the tally is a partition of them.
+  const total = methods.reduce((n, m) => n + m.count, 0);
 
   const reqCount = requirements.length;
   return (
@@ -380,8 +396,8 @@ function ValidationBody({
             {reqCount} {reqCount === 1 ? "requirement" : "requirements"} ·{" "}
             {total} {total === 1 ? "criterion" : "criteria"}
           </Typography>
-          {orderedMethods.map((m) => (
-            <MethodBadge key={m} method={m} count={methodCounts.get(m) ?? 0} />
+          {methods.map(({ method, count }) => (
+            <MethodBadge key={method} method={method} count={count} />
           ))}
         </Box>
 
@@ -391,7 +407,12 @@ function ValidationBody({
           </Typography>
         ) : (
           requirements.map((r) => (
-            <RequirementCard key={r.id} requirement={r} statuses={statuses} />
+            <RequirementCard
+              key={r.id}
+              requirement={r}
+              statuses={statuses}
+              awaiting={awaitingReport}
+            />
           ))
         )}
       </Box>
@@ -436,6 +457,20 @@ export interface ValidationViewProps {
    * holds them.
    */
   hideDescription?: boolean;
+  /**
+   * Chip every criterion with what is ABOUT to happen to it, for a consumer showing
+   * the oracle while a validation attempt is in flight: "Pending" for the ones an
+   * agent will drive, "Manual" for the ones only a person can judge.
+   *
+   * Off by default, like its neighbours, and ignored for any criterion that
+   * HAS a report — the Spec view's file preview shows the plain oracle with no run
+   * attached to it, and chips there would name a run that does not exist.
+   *
+   * Named for the state rather than `pending`: a boolean prop by that name reads as
+   * react-query's `isPending` — "still loading" — which is the opposite of what this
+   * means. The criteria are loaded; the RESULTS are not.
+   */
+  awaitingReport?: boolean;
 }
 
 export function ValidationView({
@@ -444,6 +479,7 @@ export function ValidationView({
   noPadding = false,
   fullWidth = false,
   hideDescription = false,
+  awaitingReport = false,
 }: ValidationViewProps) {
   const parsed = useMemo(() => parseValidationCriteria(criteria), [criteria]);
   // The report is optional and tolerant: a bad report never blocks the oracle —
@@ -481,6 +517,7 @@ export function ValidationView({
         noPadding={noPadding}
         fullWidth={fullWidth}
         hideDescription={hideDescription}
+        awaitingReport={awaitingReport}
       />
     </>
   );
