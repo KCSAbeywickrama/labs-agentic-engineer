@@ -92,10 +92,30 @@ export default defineConfig({
   forbidOnly: true,
   timeout: 30_000,
   expect: { timeout: 10_000 },
-  reporter: [
-    ["list"],
-    ["json", { outputFile: "test-results/results.json" }],
-  ],
+  // A run that NAMES specs is a PROBE — one spec being checked on its own, which
+  // is how it is verified while authored (it must pass alone, twice
+  // consecutively) and re-checked while healed. A run that names none is the
+  // authoritative pass over the whole suite, and its `results.json` is the only
+  // thing the report generator reads.
+  //
+  // Only the authoritative pass may write that file. Probes used to overwrite it
+  // with a single spec's results, which is invisible until the report claims one
+  // criterion was checked and the rest never ran.
+  //
+  // Inferred from the command rather than switched by a flag or an env var on
+  // purpose: naming a spec is not optional — it is how you run one spec — so
+  // there is nothing here for a caller to remember, and nothing to forget. The
+  // cost is that a SHARDED authoritative run reads as a probe and writes no
+  // report input at all; the generator then exits 2 naming the missing path,
+  // which is why the workflow runs the authoritative pass as one call.
+  //
+  // Playwright loads this config twice — once in the CLI process, which is where
+  // argv carries the filter and where reporters are constructed, and once per
+  // worker, where argv is empty. Only the first decides. Do not "simplify" this
+  // to a module-level constant computed somewhere the CLI process cannot see.
+  reporter: process.argv.slice(2).some((a) => a.includes(".spec."))
+    ? [["line"]]
+    : [["list"], ["json", { outputFile: "test-results/results.json" }]],
   outputDir: "test-results/artifacts",
   use: {
     baseURL,

@@ -146,6 +146,49 @@ function StateChip({ status }: { status: string }) {
   );
 }
 
+/**
+ * What the RUN is doing to a criterion right now, keyed by criterion id.
+ *
+ * Carried as a plain map rather than folded here, because this package renders
+ * and the consumer streams: the console builds it from the run's progress feed
+ * (`progress_item` events), and the Spec view — which shows the same oracle with
+ * no run attached — simply passes nothing.
+ */
+export type LiveStatuses = Readonly<Record<string, string>>;
+
+// The in-flight vocabulary, LOCAL for the same reason "Pending" below is: these
+// words describe work happening, and report.json can only describe work in the
+// past tense, so none of them belongs in CRITERION_STATE_LABEL. Its two terminal
+// words (`pass`/`fail`) DO arrive on the live feed, and deliberately fall through
+// to StateChip — a criterion that has passed reads the same whether the news came
+// from the feed or from the report, because it is the same fact.
+const LIVE_LABEL: Record<string, string> = {
+  planned: "Planned",
+  exploring: "Exploring…",
+  authoring: "Authoring…",
+  running: "Running…",
+  healing: "Healing…",
+};
+
+// Only `healing` is coloured. It is the run saying a criterion that WORKED has
+// stopped working — the one live status that changes what a reader thinks is
+// happening. Colouring ordinary progress would spend attention on the common case
+// and leave nothing to spend on this one.
+const LIVE_COLOR: Record<string, ChipColor> = { healing: "warning" };
+
+// The per-criterion chip while the run is still working on it.
+function LiveChip({ status }: { status: string }) {
+  return (
+    <Chip
+      size="small"
+      variant="outlined"
+      color={LIVE_COLOR[status] ?? "info"}
+      label={LIVE_LABEL[status] ?? status}
+      sx={{ flexShrink: 0 }}
+    />
+  );
+}
+
 // What a criterion shows while an attempt is IN FLIGHT and no report exists yet.
 //
 // A `manual` criterion gets its final word rather than "Pending": the run will
@@ -171,10 +214,12 @@ function AwaitingChip({ method }: { method: string }) {
 function CriterionRow({
   criterion,
   report,
+  live,
   awaiting,
 }: {
   criterion: Criterion;
   report: CriterionReport | undefined;
+  live: string | undefined;
   awaiting: boolean;
 }) {
   const failed = report?.status === "fail";
@@ -199,7 +244,20 @@ function CriterionRow({
         {report?.healed && (
           <Chip size="small" variant="outlined" label="healed" sx={{ flexShrink: 0 }} />
         )}
-        {report ? (
+        {/* Live FIRST, and the ordering is the whole point. A repeat attempt
+            carries the PREVIOUS attempt's report, so ranking the report higher
+            would freeze a criterion on the last run's verdict for the entire
+            two hours the current run spends re-working it. The report wins
+            again the moment the cycle settles, because the consumer stops
+            supplying live statuses once nothing is in flight. */}
+        {live ? (
+          LIVE_LABEL[live] ? (
+            <LiveChip status={live} />
+          ) : (
+            // pass/fail off the feed: report.json's own words, so the same chip.
+            <StateChip status={live} />
+          )
+        ) : report ? (
           <StateChip status={report.status} />
         ) : awaiting ? (
           <AwaitingChip method={criterion.method} />
@@ -257,10 +315,12 @@ function CriterionRow({
 function RequirementCard({
   requirement,
   statuses,
+  live,
   awaiting,
 }: {
   requirement: Requirement;
   statuses: ValidationReport | undefined;
+  live: LiveStatuses | undefined;
   awaiting: boolean;
 }) {
   const count = requirement.criteria.length;
@@ -310,6 +370,7 @@ function RequirementCard({
               key={c.id}
               criterion={c}
               report={statuses?.get(c.id)}
+              live={live?.[c.id]}
               awaiting={awaiting}
             />
           ))}
@@ -322,6 +383,7 @@ function RequirementCard({
 function ValidationBody({
   criteria,
   statuses,
+  live,
   noPadding,
   fullWidth,
   hideDescription,
@@ -329,6 +391,7 @@ function ValidationBody({
 }: {
   criteria: ValidationCriteria;
   statuses: ValidationReport | undefined;
+  live: LiveStatuses | undefined;
   /** Required, not optional: `exactOptionalPropertyTypes` is on, so the public
    *  props are defaulted at the boundary rather than forwarded as `undefined`. */
   noPadding: boolean;
@@ -407,6 +470,7 @@ function ValidationBody({
               key={r.id}
               requirement={r}
               statuses={statuses}
+              live={live}
               awaiting={awaitingReport}
             />
           ))
@@ -467,6 +531,16 @@ export interface ValidationViewProps {
    * means. The criteria are loaded; the RESULTS are not.
    */
   awaitingReport?: boolean;
+
+  /**
+   * What the run is doing to each criterion right now — see LiveStatuses.
+   *
+   * Ranked ABOVE `report`, so a repeat attempt shows what it is re-working
+   * instead of the last attempt's verdict. Supply it only while a cycle is
+   * actually in flight: a stale map would keep overriding a settled report with
+   * statuses nothing is still producing.
+   */
+  live?: LiveStatuses;
 }
 
 export function ValidationView({
@@ -476,6 +550,7 @@ export function ValidationView({
   fullWidth = false,
   hideDescription = false,
   awaitingReport = false,
+  live,
 }: ValidationViewProps) {
   const parsed = useMemo(() => parseValidationCriteria(criteria), [criteria]);
   // The report is optional and tolerant: a bad report never blocks the oracle —
@@ -510,6 +585,7 @@ export function ValidationView({
       <ValidationBody
         criteria={parsed}
         statuses={statuses}
+        live={live}
         noPadding={noPadding}
         fullWidth={fullWidth}
         hideDescription={hideDescription}

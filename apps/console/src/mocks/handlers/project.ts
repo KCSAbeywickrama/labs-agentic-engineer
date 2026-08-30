@@ -243,7 +243,14 @@ export const projectHandlers = [
       if (s === "error") {
         return HttpResponse.json(projectSectionError, { status: 500 });
       }
-      const runs = projectBuildRuns[s].runs;
+      // The same runs list-build-runs answers with. Without this the feed
+      // streamed the PROJECT scenario's runs while the page's rows came from the
+      // validation override — two answers about one run, and the validation
+      // cycle a reader had selected was not the one narrating itself.
+      const v = validationScenario();
+      const runs = v
+        ? validationRuns(v, validationAttempt()).runs
+        : projectBuildRuns[s].runs;
       const run = runs[0];
       const encoder = new TextEncoder();
       let timer: ReturnType<typeof setInterval> | undefined;

@@ -773,6 +773,61 @@ against the deployed system and needs its resolved endpoints, but that empty sta
 was out of scope when this pane was written. Whoever settles it changes both and
 deletes this note.
 
+### What a criterion is doing, while a run is under way
+
+A validation cycle holds an agent for up to two hours. Before this, every row in
+the pane read **`Pending`** for all of it, and a repeat attempt was worse — it
+showed the *previous* attempt's verdict, so the criteria a repair was actively
+re-working sat on **`Failed`** while it fixed them.
+
+The row now says what is happening to it. In the order a reader meets them:
+
+| | |
+|---|---|
+| Nothing has happened to it yet | **`Pending`** |
+| The run has decided how it will check this one | **`Planned`** |
+| Driving the running software to learn how to check it | **`Exploring…`** |
+| Writing its check | **`Authoring…`** |
+| Its check is running | **`Running…`** |
+| It worked, then broke — being repaired | **`Healing…`** |
+| Settled | **`Passed`** / **`Failed`**, unchanged |
+
+Above the rows, one line, and only while they have nothing to say:
+
+| | |
+|---|---|
+| Nothing picked up yet | *Setting up the test harness…* |
+| All settled, no results published | *Writing the validation report…* |
+
+**The trailing `…` means in flight.** Every word that can still change carries
+one; the two settled words do not. It is the only signal separating "this is
+happening now" from "this is the answer", and both sets sit in the same column.
+
+**Only `Healing…` is coloured.** It is the one live word that changes what a
+reader thinks is happening — something that worked has stopped working. Colouring
+ordinary progress would spend attention on the common case and leave none for
+this one.
+
+**Live words are local; settled words are the report's.** `Passed` and `Failed`
+come from the report file the run commits, and the live words never enter that
+vocabulary — a report can only describe work in the past tense, so there is no
+report word for *Authoring…*. The reverse holds too: when the feed says a
+criterion passed, it renders as **`Passed`**, because that is the same fact
+whichever surface delivered it.
+
+**Rule 6, deliberately bent.** *Exploring*, *Authoring*, *Healing* name the
+system's behaviour, which rule 6 forbids. They stay because here the system's
+behaviour **is** the user's situation: the reader has handed work to an agent and
+is watching it, and "what is it doing right now" is the whole question. The rule
+protects against a reader being told about machinery they did not ask about —
+not against answering the one thing they came to find out.
+
+**Unsettled: *test harness* and *validation report*.** Both run-wide lines name
+internal artifacts, which rule 6 has a better claim over — a reader does not have
+a harness, they have criteria waiting to be checked. They are the two windows
+where nothing else moves, so something had to be said; whoever finds better words
+changes them here first.
+
 ## What a change invalidates
 
 **Numbered decisions, precise where the link was recorded, coarse where it was not.**
