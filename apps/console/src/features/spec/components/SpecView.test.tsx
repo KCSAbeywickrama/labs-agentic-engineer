@@ -39,7 +39,7 @@ import {
   replaceMessages,
   setPendingSeed,
 } from "../../agent-chat/chatStore";
-import { SpecView } from "./SpecView";
+import { SpecView, designWarningIntro } from "./SpecView";
 
 type PreflightItem = components["schemas"]["PreflightItem"];
 type BuildInputItem = components["schemas"]["BuildInputItem"];
@@ -1668,5 +1668,32 @@ describe("SpecView keeps the chat log fed without the chat panel (#606)", () => 
     mockCollab = { ...soloCollab(), status: "connected", peers: [] };
     render(<SpecView projectName="proj1" />);
     expect(mockResyncConversation).not.toHaveBeenCalled();
+  });
+});
+
+// The warning's paragraph follows what is actually unsettled. Seen on the local
+// setup: a project with two assumed decisions and no open questions was told the
+// agent had "left some questions for you".
+describe("designWarningIntro", () => {
+  it("does not mention questions when there are none", () => {
+    const intro = designWarningIntro([{ key: "assumptions" }]);
+    expect(intro).toContain("marked assumed");
+    expect(intro).not.toMatch(/question/);
+  });
+
+  it("does not mention assumed decisions when there are none", () => {
+    const intro = designWarningIntro([{ key: "open-questions" }]);
+    expect(intro).toContain("only you can answer");
+    expect(intro).not.toMatch(/assumed/);
+  });
+
+  it("names both when both stand", () => {
+    const intro = designWarningIntro([{ key: "open-questions" }, { key: "assumptions" }]);
+    expect(intro).toContain("marked assumed");
+    expect(intro).toContain("only you can answer");
+  });
+
+  it("always says what being wrong costs", () => {
+    expect(designWarningIntro([{ key: "assumptions" }])).toContain("generated again");
   });
 });

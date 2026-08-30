@@ -106,6 +106,29 @@ type BuildInputItem = components["schemas"]["BuildInputItem"];
 // Full-screen spec workspace (#80), per the oxygen-ui sample's
 // LoginEditorView pattern: fullWidth/noPadding page, own header bar,
 // sidebar collapsed while the view is open.
+/**
+ * The design warning's one paragraph, in the user's words, and only about what
+ * is actually there: a project with assumed decisions and no open questions
+ * must not be told the agent "left some questions for you". What the user
+ * needs at this click is what the agent did, what happens next, and what
+ * being wrong costs.
+ */
+export function designWarningIntro(reasons: ReadonlyArray<{ key: string }>): string {
+  const assumed = reasons.some((r) => r.key === "assumptions");
+  const questions = reasons.some((r) => r.key === "open-questions");
+  const what =
+    assumed && questions
+      ? "The agent has made some decisions on your behalf — they are marked assumed in the document — and left some questions only you can answer."
+      : assumed
+        ? "The agent has made some decisions on your behalf — they are marked assumed in the document."
+        : "The requirements still hold questions only you can answer.";
+  return (
+    what +
+    " The design will be built on the requirements as they stand; change any of these " +
+    "afterwards and the design has to be generated again."
+  );
+}
+
 export function SpecView({ projectName }: { projectName: string }) {
   const navigate = useNavigate();
   const { actions } = useAppShell();
@@ -1118,12 +1141,7 @@ export function SpecView({ projectName }: { projectName: string }) {
           // they need at this click is what the agent did (decided things,
           // marked them), what happens next (the design builds on them), and
           // what it costs to be wrong (generating again).
-          intro={
-            "The agent has made some decisions on your behalf — they are marked " +
-            "assumed in the document — and left some questions for you. The design " +
-            "will be built on the requirements as they stand; change any of these " +
-            "afterwards and the design has to be generated again."
-          }
+          intro={designWarningIntro(unsettledReasons)}
           // No per-row fix here, unlike the build refusal: every one of these is
           // settled in the same place, and `Resolve issues` already goes there.
           // A row link beside it would be a second button to the same document.
