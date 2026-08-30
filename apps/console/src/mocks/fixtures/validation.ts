@@ -21,6 +21,12 @@ type RunVerdict = NonNullable<
 //   localStorage.setItem('aep:mock:validation', 'failed')
 //   localStorage.removeItem('aep:mock:validation')   // back to the project scenario
 //
+// Two companion keys narrow the `running` scenario further — which ATTEMPT is in
+// flight (see ValidationAttempt below) and whether the repo has an oracle at all:
+//   localStorage.setItem('aep:mock:validation-criteria', 'missing')
+// which drops validation-criteria.json from the file list, so the read 404s the way
+// it does for a version whose spec authored none (handlers/project.ts).
+//
 // Setting it alone is enough: with no `aep:mock:project` chosen, the base scenario
 // becomes `deployed` rather than the usual `building`, because a verdict only
 // exists on a version whose run got that far (see handlers/project.ts).

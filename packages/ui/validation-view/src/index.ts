@@ -37,7 +37,15 @@ export type {
 export {
   countOf,
   CRITERION_STATE_LABEL,
+  METHOD_COLOR,
+  METHOD_FALLBACK_COLOR,
+  METHOD_LABEL,
+  tallyCriterionMethods,
   tallyCriterionStates,
   uncoveredCount,
 } from "./counts.js";
-export type { CriterionStateCount, CriterionTally } from "./counts.js";
+export type {
+  CriterionMethodCount,
+  CriterionStateCount,
+  CriterionTally,
+} from "./counts.js";

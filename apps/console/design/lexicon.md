@@ -634,20 +634,44 @@ no-ops through; under-marking ships a design the user has already changed their 
 
 ### Artifact state
 
+Built as [#576](https://github.com/wso2/labs-agentic-engineer/issues/576): the skill declares what
+it is about to write (`declare_plan`, ADR-0025 — fire-and-forget tool-call-as-UI), and the rail
+renders the declaration.
+
 | state | shown as |
 |---|---|
-| planned | ghosted placeholder, declared **this turn** |
-| writing / modifying | active; the stream already distinguishes `add` from `edit` |
-| done | normal, clickable |
-| error | flagged, clickable to recover |
+| planned | **ghost row** — dim, and disabled: a control that selects nothing is worse than prose |
+| writing / modifying | pulse, name in primary |
+| done | a plain row — the file is simply there |
+| error | warning mark, name in error |
 
 **Planned means about to be written now.** The plan is turn-scoped, never project-scoped —
 pre-creating design placeholders during a requirements turn would recreate the `Being derived…`
 defect this file already removed.
 
-**The plan arrives in stages.** The design agent writes the cell first; only then does the
-component set exist, and the per-component files join the list. A count (*2 of 6*) is what answers
-"how long do I wait", and it is honest precisely because it grows.
+**The plan arrives in stages, and the console takes the union.** The design agent writes the cell
+first; only then does the component set exist, and the per-component files join the list. Repeated
+declarations accumulate — first-seen order kept, restated paths ignored, no removal — the one rule
+robust to an agent restating its whole plan. A count (*2 of 6*) beside the section title is what
+answers "how long do I wait", and it is honest precisely because it grows.
+
+**Every status is derived from the stream, never self-reported**: writing when the file's mutation
+starts, done when it completes, error only for the entry being written when the turn died. A clean
+turn's plan **dissolves** — the files are the record. A dead turn's **wreckage persists** — the
+done ticks, the one error, the remaining ghosts — surfaced through the section's attention chip
+(*The design run didn't finish* → **Update the design**) until the next declaring turn replaces it.
+Recovery is the `/design` delta pass, never a per-file retry.
+
+**The chat records each declaration as an activity step** — *Planned 3 documents*, then *Planned 4
+more documents* as the plan grows. The rail is the plan's real rendering; the chat row keeps the
+activity record complete. `start` declares nothing: a single-file turn's count answers nothing,
+and a skill that declares nothing leaves the rail exactly as it was.
+
+**The editor follows the write** (ADR-0026): each artifact is selected as its write starts, in
+whatever renderer it already has. The first manual selection is a declaration of reading intent
+and ends the following for the rest of the turn — the rail's pulse on the writing entry stays the
+one-click way back in. This supersedes the cell's burst navigation, which yanked back even over a
+manual selection.
 
 ### The pulse
 
@@ -701,9 +725,62 @@ the component set everything else hangs off.
 | artifact rail | **structure** — what, and how far |
 | editor | **the artifact** — content, streaming |
 
+**The chat does not echo the rail.** Progress prose — *"drawing the
+architecture"*, *"now the component designs"* — was tried during #576 and
+removed: watching the artifacts appear as they are written already tells the
+user what is happening, so a line announcing each step restates the rail in
+words and reads as filler. The chat speaks when it has something the other two
+surfaces cannot carry — a decision, a question, a failure — and is otherwise
+free to stay quiet while it works.
+
 The chat panel is the spine and **never collapses itself**; only the user closes it. But it stops
 pointing at a form that already owns the screen, and its composer stays live during a form — the
 agent is waiting on the user, not working, and the user may want to talk instead of fill.
+
+## The criteria pane
+
+The read-only pane behind the Validation section's document. A reader meets it
+cold: the rail carries no explanation, a design turn mints the file as its last
+step with no announcement, and the only sentence in the product that said what
+criteria were for lived in the **Validations** empty state, on another page most
+readers never reach.
+
+| | |
+|---|---|
+| Description, under the heading | *Each criterion represents one thing your software must do, based on your requirements. After every deployment they are checked against the running software, and the results appear under Validations. To change one, ask the agent.* |
+| Checked by a test | **`AUTO`**, tooltip *Validated automatically by the agent.* |
+| Checked by a person | **`MANUAL`**, tooltip *Requires manual validation.* |
+
+**`AUTO`, never `E2E`.** The stored value stays `e2e` — the validation runner,
+the report generator and the per-criterion spec path all key on it — so the badge
+carries a **display name** instead, the same split the run-state chips already
+draw. `E2E` was never a copy decision: it was agent-authored JSON rendered
+verbatim, which is how an unexpanded acronym reached the screen past naming rule
+4. The rule now has a place to bite, because the word is finally a string
+somebody wrote.
+
+**Every badge earns a tooltip, and only the two real methods get one.** A third
+value exists in older documents; it renders bare rather than being given an
+invented explanation.
+
+**"Ask the agent", not an edit control.** There is no way to edit a criterion
+here, by design: they are written from the requirements alone and never from the
+design, so they judge the work rather than describe it. The chat panel is on
+screen throughout, so this points at something the reader can use rather than
+narrating a procedure (rule 3).
+
+**The description belongs to the spec view, not to Validations.** Both surfaces
+render the same pane, and Validations suppresses it — a reader there came for run
+results, so a sentence promising that results appear under Validations is
+redundant on the page holding them.
+
+**Unsettled: `deployment` or `build`.** This description says criteria are checked
+*after every deployment*; the **Validations** empty state says *"After a build,
+your software is checked against the acceptance criteria in your spec"*. Both name
+the same event. *Deployment* is the more accurate word, since validation runs
+against the deployed system and needs its resolved endpoints, but that empty state
+was out of scope when this pane was written. Whoever settles it changes both and
+deletes this note.
 
 ## What a change invalidates
 

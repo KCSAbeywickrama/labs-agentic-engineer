@@ -26,7 +26,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import type { components } from "../../../generated/aep-api";
 import { START_COMMAND } from "@aep/contracts/commands";
@@ -40,6 +40,12 @@ import {
   setPendingSeed,
 } from "../../agent-chat/chatStore";
 import { SpecView, designWarningIntro } from "./SpecView";
+import {
+  clearPlan,
+  planDeclared,
+  planFileWriting,
+  planTurnEnded,
+} from "../../agent-chat/planStore";
 
 type PreflightItem = components["schemas"]["PreflightItem"];
 type BuildInputItem = components["schemas"]["BuildInputItem"];
@@ -1269,33 +1275,17 @@ describe("SpecView build dependency drawer (#252 Task 10)", () => {
   });
 });
 
-describe("SpecView architecture-tab navigation on design.cell change", () => {
+describe("SpecView follows the write (#576, ADR-0026)", () => {
+  const chatKey = chatKeyFor("acme", "proj1");
+  const CELL = "specs/design/design.cell";
+
   beforeEach(() => {
     vi.clearAllMocks();
     mockFlush.mockResolvedValue(undefined);
+    clearPlan(chatKey);
   });
 
-  // A connected room whose doc carries design.cell. An agent editFile lands as
-  // an in-place Y.Text patch (useYTextString observes it directly); a
-  // restructure's removeFile deletes the Y.Map entry, whose re-render the real
-  // hook receives via useCollabSpec's version bump — simulated here with a
-  // reassignment + rerender.
-  function connectedRoom(withAgent: boolean) {
-    const doc = new Y.Doc();
-    const files = doc.getMap<Y.Text>("files");
-    const ytext = new Y.Text();
-    files.set("specs/design/design.cell", ytext);
-    ytext.insert(0, "title X\ncomponent api service\n");
-    const collab = {
-      ...soloCollab(),
-      status: "connected",
-      peers: withAgent
-        ? [{ clientId: 1, name: "Agent", color: "#000000", kind: "agent" }]
-        : [],
-      getFileText: (path: string) => files.get(path) ?? null,
-    };
-    return { files, ytext, collab };
-  }
+  afterEach(() => clearPlan(chatKey));
 
   // The overview's architecture panel links here with `?view=architecture`. It
   // offers that link BECAUSE it is drawing a diagram, so landing the reader on
@@ -1312,32 +1302,29 @@ describe("SpecView architecture-tab navigation on design.cell change", () => {
     expect(screen.queryByTestId("cell-diagram-panel")).not.toBeInTheDocument();
   });
 
-  it("navigates to the Architecture tab when the agent patches design.cell in place", () => {
-    const room = connectedRoom(true);
-    mockCollab = room.collab;
-
+  it("selects each artifact as its write starts — the cell opens as Architecture", () => {
     render(<SpecView projectName="proj1" />);
     expect(screen.queryByTestId("cell-diagram-panel")).not.toBeInTheDocument();
 
-    act(() => {
-      room.ytext.insert(room.ytext.length, "south email-provider service\n");
-    });
+    act(() => planFileWriting(chatKey, "t1", CELL));
 
     expect(screen.getByTestId("cell-diagram-panel")).toBeInTheDocument();
   });
 
-  it("navigates on a restructure (removeFile deletes the doc entry)", () => {
-    const room = connectedRoom(true);
-    mockCollab = room.collab;
+  it("the first manual selection ends following for the rest of the turn", () => {
+    render(<SpecView projectName="proj1" />);
+    act(() => planFileWriting(chatKey, "t1", CELL));
+    expect(screen.getByTestId("cell-diagram-panel")).toBeInTheDocument();
 
-    const { rerender } = render(<SpecView projectName="proj1" />);
+    // The reader clicks a document — a declaration of reading intent.
+    fireEvent.click(screen.getByText("overview"));
     expect(screen.queryByTestId("cell-diagram-panel")).not.toBeInTheDocument();
 
-    room.files.delete("specs/design/design.cell");
-    mockCollab = { ...room.collab, version: 1 };
-    rerender(<SpecView projectName="proj1" />);
-
-    expect(screen.getByTestId("cell-diagram-panel")).toBeInTheDocument();
+    // The turn moves on to other writes and back to the cell; a still-following
+    // editor would jump to Architecture here. It must not.
+    act(() => planFileWriting(chatKey, "t1", "specs/design/design.md"));
+    act(() => planFileWriting(chatKey, "t1", CELL));
+    expect(screen.queryByTestId("cell-diagram-panel")).not.toBeInTheDocument();
   });
 
   // The default selection is reactive, and it used to key on an agent being in
@@ -1346,23 +1333,29 @@ describe("SpecView architecture-tab navigation on design.cell change", () => {
   // fresh editor at the top. Reported as "the PRD scrolls when the agent says
   // something" (#666). The default follows the FLOW: design, and only design.
   it("keeps the default file when an agent joins for a turn that is not a design turn", () => {
-    const room = connectedRoom(false);
-    mockCollab = room.collab;
+    mockCollab = { ...soloCollab(), status: "connected", docPaths: [CELL] };
     const { rerender } = render(<SpecView projectName="proj1" />);
     expect(screen.queryByTestId("cell-diagram-panel")).not.toBeInTheDocument();
 
     // A chat turn: the agent joins, the flow is not design.
     mockSpecFlow = "";
-    mockCollab = { ...room.collab, peers: [{ clientId: 1, name: "Agent", color: "#000", kind: "agent" }] };
+    mockCollab = {
+      ...mockCollab,
+      peers: [{ clientId: 1, name: "Agent", color: "#000", kind: "agent" }],
+    };
     rerender(<SpecView projectName="proj1" />);
 
     expect(screen.queryByTestId("cell-diagram-panel")).not.toBeInTheDocument();
   });
 
   it("defaults to Architecture while a design turn is in the room — a reload mid-turn", () => {
-    const room = connectedRoom(true);
     // The rail has to list design.cell for Architecture to be a place to go.
-    mockCollab = { ...room.collab, docPaths: ["specs/design/design.cell"] };
+    mockCollab = {
+      ...soloCollab(),
+      status: "connected",
+      docPaths: [CELL],
+      peers: [{ clientId: 1, name: "Agent", color: "#000", kind: "agent" }],
+    };
     mockSpecFlow = "design";
 
     render(<SpecView projectName="proj1" />);
@@ -1370,17 +1363,43 @@ describe("SpecView architecture-tab navigation on design.cell change", () => {
     expect(screen.getByTestId("cell-diagram-panel")).toBeInTheDocument();
   });
 
-  it("does not navigate when no agent peer is in the room", () => {
-    const room = connectedRoom(false);
-    mockCollab = room.collab;
-
+  // The window ADR-0026 exists to serve: a write is announced when its tool
+  // input resolves a path, but the body reaches the room later — some bodies
+  // stream in as they are typed, a component design.json arrives whole. Without
+  // this the pane met that moment with "Select a file to view its content."
+  it("says the document is on its way while the room has not delivered it", () => {
     render(<SpecView projectName="proj1" />);
-
     act(() => {
-      room.ytext.insert(room.ytext.length, "south email-provider service\n");
+      planDeclared(chatKey, "t1", ["specs/design/components/portal/design.json"]);
+      planFileWriting(chatKey, "t1", "specs/design/components/portal/design.json");
     });
+    expect(screen.getByText(/Waiting for the agent to write/)).toBeInTheDocument();
+    expect(
+      screen.queryByText("Select a file to view its content."),
+    ).not.toBeInTheDocument();
+  });
 
+  // Once the turn is over, a file that never arrived is a real absence — the
+  // waiting message would claim work that is not happening.
+  it("stops claiming a document is coming once the turn has ended", () => {
+    render(<SpecView projectName="proj1" />);
+    act(() => {
+      planDeclared(chatKey, "t1", ["specs/design/components/portal/design.json"]);
+      planFileWriting(chatKey, "t1", "specs/design/components/portal/design.json");
+      planTurnEnded(chatKey, "t1", "failed");
+    });
+    expect(screen.queryByText(/Waiting for the agent to write/)).not.toBeInTheDocument();
+  });
+
+  it("a new turn resets to following", () => {
+    render(<SpecView projectName="proj1" />);
+    act(() => planFileWriting(chatKey, "t1", CELL));
+    fireEvent.click(screen.getByText("overview"));
     expect(screen.queryByTestId("cell-diagram-panel")).not.toBeInTheDocument();
+
+    act(() => planFileWriting(chatKey, "t2", CELL));
+
+    expect(screen.getByTestId("cell-diagram-panel")).toBeInTheDocument();
   });
 });
 
@@ -1719,5 +1738,66 @@ describe("designWarningIntro", () => {
 
   it("always says what being wrong costs", () => {
     expect(designWarningIntro([{ key: "assumptions" }])).toContain("generated again");
+  });
+});
+
+// The criteria pane is where a reader meets the acceptance oracle cold: the rail
+// carries no explanation, the design turn mints the file with no announcement, and
+// the only sentence in the product that said what criteria were for lived on the
+// Validations page's empty state. This is the surface that gap was reported
+// against, so the description's presence here is the change's real coverage.
+describe("SpecView validation criteria explanation", () => {
+  const CRITERIA_JSON = JSON.stringify({
+    requirements: [
+      {
+        id: "REQ-001",
+        statement: "Shoppers can search the catalog.",
+        criteria: [
+          { id: "AC-001-a", must: "Search returns matches", method: "e2e" },
+          { id: "AC-001-b", must: "Payment is encrypted", method: "manual" },
+        ],
+      },
+    ],
+  });
+
+  beforeEach(() => {
+    mockUseSpecFiles.mockReturnValue({
+      data: [
+        {
+          path: "specs/validation/validation-criteria.json",
+          sha: "abc",
+          group: "validation",
+        },
+      ],
+      isPending: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    mockUseSpecFileContent.mockReturnValue({
+      data: { sha: "abc", content: CRITERIA_JSON },
+      isPending: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+  });
+
+  it("explains what the criteria are, where they come from, and how to change one", () => {
+    render(<SpecView projectName="proj1" />);
+
+    expect(
+      screen.getByText(/Each criterion represents one thing your software must do/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/based on your requirements/)).toBeInTheDocument();
+    expect(screen.getByText(/To change one, ask the agent/)).toBeInTheDocument();
+  });
+
+  it("names the methods without the e2e acronym", () => {
+    render(<SpecView projectName="proj1" />);
+
+    expect(screen.getByText("auto")).toBeInTheDocument();
+    expect(screen.getByText("manual")).toBeInTheDocument();
+    expect(screen.queryByText("e2e")).not.toBeInTheDocument();
   });
 });
