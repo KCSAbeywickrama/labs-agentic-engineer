@@ -23,10 +23,12 @@
     "dev": "echo \"@aep/agent-eval: no dev server\""
   },
   "dependencies": {
+    "promptfoo": "0.122.2",
     "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/node": "^22",
+    "tsx": "^4.21.0",
     "vitest": "^4.1.10"
   }
 }
