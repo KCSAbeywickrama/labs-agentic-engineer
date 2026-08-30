@@ -23,7 +23,7 @@
 // place it changes rather than from a menu that makes them supply the subject
 // from memory. This module is the locator — it says what sits where; the
 // ProseMirror plugin (`collab/prdLensPlugin.ts`) walks the live document into
-// `PrdBlock`s and renders the result.
+// `DocBlock`s and renders the result.
 //
 // Deliberately free of ProseMirror types: positions arrive as plain numbers, so
 // the rules that decide what the document offers are testable without an editor.
@@ -33,28 +33,7 @@
 // survives to LOCATE, so the section it used to block on is now the section it
 // offers `/settle` from.
 
-/** An emphasised (`*…*`) run inside a block, at its document positions. */
-export interface EmphasisRun {
-  text: string;
-  from: number;
-  to: number;
-}
-
-/** One textblock of the live document, flattened. */
-export interface PrdBlock {
-  kind: "heading" | "listItem" | "paragraph";
-  /** Heading depth; absent for everything else. */
-  level?: number | undefined;
-  /** The block's plain text. */
-  text: string;
-  emphasis: EmphasisRun[];
-  /** Node start position. */
-  from: number;
-  /** Position just past the node. */
-  to: number;
-  /** Just inside the node's closing token — where a trailing widget anchors. */
-  contentEnd: number;
-}
+import type { DocBlock, EmphasisRun } from "./docBlocks.js";
 
 /**
  * A **section** lens rides its heading and is always on show: it is how the
@@ -147,12 +126,12 @@ const isAssumedFlag = (run: EmphasisRun): boolean =>
  * assumption or an open question is the more urgent thing to take up, so a
  * flagged story offers `/settle` rather than `/expand`.
  */
-export function prdAffordances(blocks: PrdBlock[]): PrdAffordances {
+export function prdAffordances(blocks: DocBlock[]): PrdAffordances {
   const lenses: PrdLens[] = [];
   const flags: PrdFlag[] = [];
   // Filled in as the section's entries arrive, so an empty Open Questions
   // section never grows a "settle them" control over nothing.
-  let openQuestionsHeading: PrdBlock | null = null;
+  let openQuestionsHeading: DocBlock | null = null;
   let section = "";
 
   for (const b of blocks) {

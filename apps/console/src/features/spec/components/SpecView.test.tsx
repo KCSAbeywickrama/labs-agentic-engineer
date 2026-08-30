@@ -146,6 +146,20 @@ mockUseConversationLog.mockReturnValue({
   historyReady: true,
   resync: mockResyncConversation,
 });
+// --- Aiming the agent at a selection (#666): dispatching a turn from the
+// DOCUMENT rather than the chat composer. Stubbed for the same reason as the
+// hooks above — it resolves the project's thread through react-query, and this
+// file renders SpecView without a QueryClientProvider. Its own behavior is
+// covered by useAnchoredTurn.test.tsx; what belongs HERE is that SpecView
+// mounts it for the right (org, project) and hands every markdown file an aim
+// binding, which the test below asserts.
+const mockAnchoredSend = vi.fn().mockResolvedValue(true);
+const mockUseAnchoredTurn = vi.fn();
+mockUseAnchoredTurn.mockReturnValue({ send: mockAnchoredSend, ready: true });
+vi.mock("../../agent-chat/useAnchoredTurn", () => ({
+  useAnchoredTurn: (...args: unknown[]) => mockUseAnchoredTurn(...args),
+}));
+
 vi.mock("../../agent-chat/useConversationLog", () => ({
   useConversationLog: (...args: unknown[]) => mockUseConversationLog(...args),
 }));

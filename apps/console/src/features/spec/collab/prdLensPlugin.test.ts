@@ -31,7 +31,8 @@ import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import { Markdown } from "@tiptap/markdown";
 import { AgentInsertion, markdownToNode } from "@aep/collab-doc";
-import { PrdLenses, prdBlocks, refreshPrdLenses } from "./prdLensPlugin";
+import { PrdLenses, refreshPrdLenses } from "./prdLensPlugin";
+import { docBlocks } from "./docBlocks";
 import { prdAffordances } from "../lib/prdLenses";
 
 const PRD = `# Expenses — PRD
@@ -121,7 +122,7 @@ describe("the PRD's lens surface", () => {
 
   it("carries the line the user clicked as the command's subject", () => {
     const doc = markdownToNode(PRD);
-    expect(prdAffordances(prdBlocks(doc)).lenses.map((l) => l.command)).toEqual([
+    expect(prdAffordances(docBlocks(doc)).lenses.map((l) => l.command)).toEqual([
       "/actor",
       "/feature",
       "/expand As an Employee, I want to submit an expense with a receipt photo.",
@@ -253,6 +254,6 @@ describe("the PRD's lens surface", () => {
 
   it("offers nothing on a document that is not a PRD", () => {
     const doc = markdownToNode("# Notes\n\nJust prose, and a list:\n\n- one\n- two\n");
-    expect(prdAffordances(prdBlocks(doc))).toEqual({ lenses: [], flags: [] });
+    expect(prdAffordances(docBlocks(doc))).toEqual({ lenses: [], flags: [] });
   });
 });

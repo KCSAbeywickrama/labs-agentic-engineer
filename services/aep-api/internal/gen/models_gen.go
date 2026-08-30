@@ -712,6 +712,42 @@ func (e TurnConflictCode) Valid() bool {
 	}
 }
 
+// Defines values for TurnInputBodyIntent.
+const (
+	TurnInputBodyIntentChange  TurnInputBodyIntent = "change"
+	TurnInputBodyIntentDiscuss TurnInputBodyIntent = "discuss"
+)
+
+// Valid indicates whether the value is a known member of the TurnInputBodyIntent enum.
+func (e TurnInputBodyIntent) Valid() bool {
+	switch e {
+	case TurnInputBodyIntentChange:
+		return true
+	case TurnInputBodyIntentDiscuss:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TurnInputMultipartIntent.
+const (
+	TurnInputMultipartIntentChange  TurnInputMultipartIntent = "change"
+	TurnInputMultipartIntentDiscuss TurnInputMultipartIntent = "discuss"
+)
+
+// Valid indicates whether the value is a known member of the TurnInputMultipartIntent enum.
+func (e TurnInputMultipartIntent) Valid() bool {
+	switch e {
+	case TurnInputMultipartIntentChange:
+		return true
+	case TurnInputMultipartIntentDiscuss:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for WorkloadDependencyDTOKind.
 const (
 	OrgService WorkloadDependencyDTOKind = "org-service"
@@ -1085,6 +1121,34 @@ type ConsumerDTO struct {
 	ProjectID     string `json:"projectId"`
 }
 
+// ConversationMessage One rehydrated message from a conversation's server-side history, sourced from the turn journal. The console's local chat log is display state; this is the durable record, and it is what makes a chip survive a reload.
+type ConversationMessage struct {
+	// Anchor What the user pointed at when they aimed this turn at part of a spec document (#666; console ADR-0024). It LOCATES — it never carries the selected content.
+	//
+	// The agent joins the spec collab room as a live peer, so between the selection and the turn starting the user may keep typing and a teammate may edit too: content captured at selection time is a photograph of a document that has since moved. The agent resolves these names against the CURRENT document instead. The same reasoning already reversed an embedded copy once — #252 Task 17 stripped a dependency's full JSON entry back to its name, because the agent reads the live entry in its own turn snapshot.
+	//
+	// Absent for an ordinary chat turn.
+	Anchor TurnAnchor `json:"anchor,omitempty"`
+
+	// Attachments File NAMES that went up with this message (#428) — never bytes, which are conversation-scoped model content the platform does not store (console ADR-0019). Absent for every message without attachments.
+	Attachments []string `json:"attachments,omitempty"`
+
+	// Author Who sent this message (#130 multi-user threads). Absent for the agent, and for history written before attribution existed.
+	Author ConversationMessageAuthor `json:"author,omitempty"`
+
+	// Content The message body as the journal recorded it. Deliberately untyped — a turn's content is model-shaped and varies by role, and this endpoint's job is to replay it, not to interpret it.
+	Content interface{} `json:"content,omitempty"`
+
+	// Role Who the message is from, as the journal recorded it.
+	Role string `json:"role"`
+}
+
+// ConversationMessageAuthor Who sent this message (#130 multi-user threads). Absent for the agent, and for history written before attribution existed.
+type ConversationMessageAuthor struct {
+	DisplayName string `json:"displayName"`
+	ID          string `json:"id"`
+}
+
 // CreateIssueRequest Issue to file on the project's repo. dedupeKey makes creation idempotent per open issue (label-encoded), for concurrent alert handlers.
 type CreateIssueRequest struct {
 	Body      string   `json:"body"`
@@ -1328,6 +1392,11 @@ type FileMeta struct {
 	Path string `json:"path"`
 	Sha  string `json:"sha"`
 	Size int64  `json:"size,omitempty"`
+}
+
+// GetConversationOutputBody A conversation's history, oldest first. An empty list is a real answer — a known thread with no turns yet — never an error.
+type GetConversationOutputBody struct {
+	Messages []ConversationMessage `json:"messages"`
 }
 
 // GitProviderProjection defines model for GitProviderProjection.
@@ -2278,6 +2347,37 @@ type TimelineEvent struct {
 // TimelineEventEmitter Who produced the line — `subagent` for work the main agent fanned out with the Task tool, absent for the main agent itself. Absence is a positive fact, not an unknown.
 type TimelineEventEmitter string
 
+// TurnAnchor What the user pointed at when they aimed this turn at part of a spec document (#666; console ADR-0024). It LOCATES — it never carries the selected content.
+//
+// The agent joins the spec collab room as a live peer, so between the selection and the turn starting the user may keep typing and a teammate may edit too: content captured at selection time is a photograph of a document that has since moved. The agent resolves these names against the CURRENT document instead. The same reasoning already reversed an embedded copy once — #252 Task 17 stripped a dependency's full JSON entry back to its name, because the agent reads the live entry in its own turn snapshot.
+//
+// Absent for an ordinary chat turn.
+type TurnAnchor struct {
+	// File The authored spec file the selection resolves to. Always present — one view renders exactly one file, so a selection never spans two.
+	File string `json:"file"`
+
+	// Nodes The selected nodes, in document order. A list because both surfaces multi-select — a drag across three paragraphs, a shift-click across three operations.
+	Nodes []TurnAnchorNode `json:"nodes"`
+}
+
+// TurnAnchorNode One selected node — the name the agent resolves, and the name the transcript shows back to a user who can no longer see what they clicked.
+type TurnAnchorNode struct {
+	// Context Where the node sits, for a name that cannot stand alone. Markdown — the heading path, root-first (`Solution > Slack integration`). A structured view — the parent (`lunch-api`). Optional; a name that stands alone needs none.
+	Context string `json:"context,omitempty"`
+
+	// Kind The node's vocabulary word. It carries the whole difference between a name authored AS a name and a sentence pressed into service as one, which is what lets prose and structured views share this schema.
+	//
+	// Markdown uses structural terms — `paragraph`, `heading`, `list item` — deliberately NOT document-specific readings like `open question`, so an arbitrary `.md` produces the same shape as the PRD. A structured view uses its own terms (`operation`, `external dependency`). Kept as a raw string rather than a closed enum so a view can name its nodes without a contract change.
+	Kind string `json:"kind"`
+
+	// Name What the agent resolves and the transcript shows. A structured view supplies the node's own name (`POST /rounds`, `slack`). Markdown has none, so it supplies a BOUNDED excerpt of the block's RENDERED text — at most 80 characters, cut at a word boundary.
+	//
+	// The bound is the load-bearing part, not the number: an excerpt that grows with the selection is the carried content this schema exists to avoid. It only has to be unique enough to locate — the model receives the full block regardless, because the agent read it from the file.
+	//
+	// RENDERED, not source: the source carries `**bold**`, `*assumed*`, links and hard wraps the reader never saw, so a source-exact excerpt fails to match for most blocks. The agent matches on prose, tolerantly, and asks when a name is genuinely ambiguous rather than guessing. `maxLength` is the contract's ceiling against carry; the 80-character rule is the markdown client's.
+	Name string `json:"name"`
+}
+
 // TurnConflict create-turn 409 body. turn_in_progress carries the active turn's id; requirements_missing means the design use-case has no requirements to work from; conversation_rotated means the addressed thread is no longer the project's current one — re-resolve via list-conversations and retry.
 type TurnConflict struct {
 	ActiveTurnID string           `json:"activeTurnId,omitempty"`
@@ -2289,15 +2389,32 @@ type TurnConflictCode string
 
 // TurnInputBody defines model for TurnInputBody.
 type TurnInputBody struct {
+	// Anchor What the user pointed at when they aimed this turn at part of a spec document (#666; console ADR-0024). It LOCATES — it never carries the selected content.
+	//
+	// The agent joins the spec collab room as a live peer, so between the selection and the turn starting the user may keep typing and a teammate may edit too: content captured at selection time is a photograph of a document that has since moved. The agent resolves these names against the CURRENT document instead. The same reasoning already reversed an embedded copy once — #252 Task 17 stripped a dependency's full JSON entry back to its name, because the agent reads the live entry in its own turn snapshot.
+	//
+	// Absent for an ordinary chat turn.
+	Anchor TurnAnchor `json:"anchor,omitempty"`
+
 	// Collab Room-scoped turn (#86 phase 4): the agent joins the project's spec collab room as a live peer, reads and edits the shared doc, and commits nothing to git.
 	Collab bool `json:"collab,omitempty"`
 
 	// Instruction User message / generation directive. `/<skill>` flow commands (`/start`, `/design`, …) are sent VERBATIM — the server expands them, attaches the flow's eager skills, and enriches `/start` with the captured project idea.
 	Instruction string `json:"instruction"`
 
+	// Intent What the user wants done with `anchor` — `change` rewrites the selected nodes in place, `discuss` opens the same selection as a grilling. Read by the agents service when it renders the anchor into the prompt; the two differ only in how that preamble is phrased.
+	//
+	// Deliberately a field and NOT a `/command` prefix on `instruction`: a command IS the user's message (the console adds nothing to a line they typed), and an anchored turn carries prose they wrote in their own words, so a prefix would put machinery in their voice. Mirrors the console's own resolve/reconsider intent, whose only job is the same. Absent for a turn with no anchor.
+	Intent TurnInputBodyIntent `json:"intent,omitempty"`
+
 	// Target Optional target (e.g. a doc type)
 	Target string `json:"target,omitempty"`
 }
+
+// TurnInputBodyIntent What the user wants done with `anchor` — `change` rewrites the selected nodes in place, `discuss` opens the same selection as a grilling. Read by the agents service when it renders the anchor into the prompt; the two differ only in how that preamble is phrased.
+//
+// Deliberately a field and NOT a `/command` prefix on `instruction`: a command IS the user's message (the console adds nothing to a line they typed), and an anchored turn carries prose they wrote in their own words, so a prefix would put machinery in their voice. Mirrors the console's own resolve/reconsider intent, whose only job is the same. Absent for a turn with no anchor.
+type TurnInputBodyIntent string
 
 // TurnInputMultipart The same turn input as `TurnInputBody`, sent as multipart so it can carry chat attachments (#428). The JSON form stays the canonical one — a message with no attachments MUST use it, and every existing caller is unaffected.
 //
@@ -2305,6 +2422,13 @@ type TurnInputBody struct {
 //
 // Deliberately NOT the reference-document channel: `POST /projects/{name}/references` REPLACES a project's whole stored set, and the create view is the only door to it. A file attached here never becomes a project reference, even when the instruction is `/start`.
 type TurnInputMultipart struct {
+	// Anchor What the user pointed at when they aimed this turn at part of a spec document (#666; console ADR-0024). It LOCATES — it never carries the selected content.
+	//
+	// The agent joins the spec collab room as a live peer, so between the selection and the turn starting the user may keep typing and a teammate may edit too: content captured at selection time is a photograph of a document that has since moved. The agent resolves these names against the CURRENT document instead. The same reasoning already reversed an embedded copy once — #252 Task 17 stripped a dependency's full JSON entry back to its name, because the agent reads the live entry in its own turn snapshot.
+	//
+	// Absent for an ordinary chat turn.
+	Anchor TurnAnchor `json:"anchor,omitempty"`
+
 	// Collab As `TurnInputBody.collab`.
 	Collab bool `json:"collab,omitempty"`
 
@@ -2316,9 +2440,19 @@ type TurnInputMultipart struct {
 	// Instruction As `TurnInputBody.instruction`. Required — an attachment alone cannot start a turn, and the shared TurnSpec validator rejects an empty chat text.
 	Instruction string `json:"instruction"`
 
+	// Intent As `TurnInputBody.intent`. What the user wants done with `anchor` — `change` rewrites the selected nodes in place, `discuss` opens the same selection as a grilling. Read by the agents service when it renders the anchor into the prompt; the two differ only in how that preamble is phrased.
+	//
+	// Deliberately a field and NOT a `/command` prefix on `instruction`: a command IS the user's message (the console adds nothing to a line they typed), and an anchored turn carries prose they wrote in their own words, so a prefix would put machinery in their voice. Mirrors the console's own resolve/reconsider intent, whose only job is the same. Absent for a turn with no anchor.
+	Intent TurnInputMultipartIntent `json:"intent,omitempty"`
+
 	// Target As `TurnInputBody.target`.
 	Target string `json:"target,omitempty"`
 }
+
+// TurnInputMultipartIntent As `TurnInputBody.intent`. What the user wants done with `anchor` — `change` rewrites the selected nodes in place, `discuss` opens the same selection as a grilling. Read by the agents service when it renders the anchor into the prompt; the two differ only in how that preamble is phrased.
+//
+// Deliberately a field and NOT a `/command` prefix on `instruction`: a command IS the user's message (the console adds nothing to a line they typed), and an anchored turn carries prose they wrote in their own words, so a prefix would put machinery in their voice. Mirrors the console's own resolve/reconsider intent, whose only job is the same. Absent for a turn with no anchor.
+type TurnInputMultipartIntent string
 
 // TurnOutputBody defines model for TurnOutputBody.
 type TurnOutputBody struct {

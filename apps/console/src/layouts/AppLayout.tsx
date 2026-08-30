@@ -62,6 +62,7 @@ import { ProjectStatusBadge } from "./ProjectStatusBadge";
 import { AlertsNotificationPanel, NotificationButton } from "./NotificationBell";
 import { AgentChatPanel } from "../features/agent-chat/components/AgentChatPanel";
 import { useHasPendingSeed } from "../features/agent-chat/useHasPendingSeed";
+import { useChatOpenRequest } from "../features/agent-chat/useChatOpenRequest";
 
 // Footer links (grilled 2026-07-12): the repo is the only real destination
 // today — /tree/HEAD/docs follows the default branch.
@@ -174,6 +175,14 @@ export function AppLayout() {
   useEffect(() => {
     if (hasPendingSeed && projectName) setChatOpen(true);
   }, [hasPendingSeed, projectName]);
+
+  // An anchored Discuss (#666) has already sent its turn, with the anchor
+  // attached — it needs the panel shown, not a message seeded. The count is
+  // monotonic, so a second Discuss re-opens a panel the user closed in between.
+  const chatOpenRequest = useChatOpenRequest(orgHandle ?? "default", projectName);
+  useEffect(() => {
+    if (chatOpenRequest > 0 && projectName) setChatOpen(true);
+  }, [chatOpenRequest, projectName]);
 
   return (
     <AppShell initialCollapsed={false} collapseOnSelectOnMobile>

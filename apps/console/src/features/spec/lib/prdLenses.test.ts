@@ -17,38 +17,39 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { prdAffordances, type PrdBlock } from "./prdLenses";
+import { prdAffordances } from "./prdLenses";
+import type { DocBlock } from "./docBlocks";
 
 // Blocks as the doc walker emits them. Positions are synthetic but ordered and
 // non-overlapping, which is all the locator uses them for.
 let cursor = 0;
 function block(
-  kind: PrdBlock["kind"],
+  kind: DocBlock["kind"],
   text: string,
-  extra: Partial<PrdBlock> = {},
-): PrdBlock {
+  extra: Partial<DocBlock> = {},
+): DocBlock {
   const from = cursor;
   const to = from + text.length + 2;
   cursor = to;
   return { kind, text, emphasis: [], from, to, contentEnd: to - 1, ...extra };
 }
 
-function heading(text: string): PrdBlock {
+function heading(text: string): DocBlock {
   return block("heading", text, { level: 2 });
 }
 
 /** An entry carrying an `*assumed*` run, positioned inside its own block. */
-function assumed(kind: PrdBlock["kind"], text: string): PrdBlock {
+function assumed(kind: DocBlock["kind"], text: string): DocBlock {
   const b = block(kind, `${text} assumed`);
   return { ...b, emphasis: [{ text: "assumed", from: b.to - 9, to: b.to - 1 }] };
 }
 
-function fresh(build: () => PrdBlock[]): PrdBlock[] {
+function fresh(build: () => DocBlock[]): DocBlock[] {
   cursor = 0;
   return build();
 }
 
-const commands = (blocks: PrdBlock[]) =>
+const commands = (blocks: DocBlock[]) =>
   prdAffordances(blocks).lenses.map((l) => l.command);
 
 describe("prdAffordances — the PRD's own launchers", () => {
@@ -123,7 +124,7 @@ describe("prdAffordances — the PRD's own launchers", () => {
 
   it("reads emphasis that is not the assumed flag as ordinary prose", () => {
     const b = fresh(() => [heading("Product Decisions"), block("listItem", "Uses Stripe")])[1]!;
-    const withEmphasis: PrdBlock = {
+    const withEmphasis: DocBlock = {
       ...b,
       emphasis: [{ text: "Stripe", from: b.from + 6, to: b.to - 1 }],
     };

@@ -83,6 +83,8 @@ import { EmptyState } from "../../../components/EmptyState";
 import { ProblemsDialog } from "./ProblemsDialog";
 import { CommittedFileView } from "./CommittedFileView";
 import { useResolveDependencyViaChat } from "../../agent-chat/useResolveDependencyViaChat";
+import { useAnchoredTurn } from "../../agent-chat/useAnchoredTurn";
+import type { Anchor } from "../lib/anchor";
 import type { DependencyResolutionIntent } from "../../projects/lib/dependencyResolutionMessage.js";
 import { useDesignCellChangeCount } from "../collab/useDesignCellChange";
 import { approvalInputsFor } from "../lib/buildInputs";
@@ -705,6 +707,17 @@ export function SpecView({ projectName }: { projectName: string }) {
   // composer anyway, and firing one mid-interview supersedes the live question
   // form for the whole room — so the lenses go inert for the same two reasons
   // the header's launchers do, and say which one.
+  // Aiming the agent at a selection (#666). A turn fired from the DOCUMENT,
+  // which the chat panel cannot dispatch for us: it is mounted `unmountOnExit`,
+  // so while it is closed — the whole point of a quiet Change — the hook that
+  // owns `send` does not exist.
+  const anchoredTurn = useAnchoredTurn(orgHandle ?? "default", projectName);
+  const aimSend = async (
+    instruction: string,
+    anchor: Anchor,
+    intent: "change" | "discuss",
+  ): Promise<boolean> => anchoredTurn.send(instruction, { anchor, intent });
+
   const lensBusyReason = agentBusy
     ? "An agent is still working — this is available once it finishes"
     : awaitingAnswers
@@ -1402,6 +1415,16 @@ export function SpecView({ projectName }: { projectName: string }) {
                         ? { run: seedChat, busyReason: lensBusyReason }
                         : undefined
                     }
+                    // Every markdown file, not just the PRD: a selection is
+                    // something any document has, so aiming cannot be one
+                    // document's privilege the way its lenses are.
+                    aim={{
+                      path: selectedFile.path,
+                      send: aimSend,
+                      busyReason: anchoredTurn.ready
+                        ? lensBusyReason
+                        : "Still opening this project's conversation",
+                    }}
                     links={{
                       path: selectedFile.path,
                       knownPaths: specPaths,

@@ -41,6 +41,7 @@ import {
 import { SpecMdToolbar } from "./SpecMdToolbar";
 import { PrdLenses, refreshPrdLenses, type PrdLensBinding } from "./prdLensPlugin";
 import { SpecLinks, refreshSpecLinks, type SpecLinkBinding } from "./specLinkPlugin";
+import { SpecAimMenu, type SpecAimBinding } from "./SpecAimMenu";
 
 // Collaborative WYSIWYG editor for markdown spec files (#86 phase 6).
 // The shared source of truth is the file's Y.XmlFragment (seeded server-side
@@ -56,6 +57,7 @@ export function SpecMdEditor({
   agentStreaming,
   lenses,
   links,
+  aim,
 }: {
   fragment: Y.XmlFragment;
   provider: HocuspocusProvider;
@@ -67,6 +69,12 @@ export function SpecMdEditor({
   lenses?: PrdLensBinding | undefined;
   /** Cross-references to sibling spec documents; every markdown file carries them. */
   links?: SpecLinkBinding | undefined;
+  /**
+   * Aiming the agent at a selection (#666). Every markdown file carries it —
+   * unlike the lenses, which are the PRD's own: a selection is a thing any
+   * document has, so the affordance cannot be one document's privilege.
+   */
+  aim?: SpecAimBinding | undefined;
 }) {
   // The extension list is built once per (fragment, provider) — a file swap
   // remounts this component under a new key — so the plugin reaches the CURRENT
@@ -162,6 +170,8 @@ export function SpecMdEditor({
         borderColor: "divider",
         borderRadius: 1,
         overflow: "hidden",
+        // The aim chip and its box are positioned against this frame (#666).
+        position: "relative",
         // Plain paper token, same as AgentChatPanel — it re-resolves per
         // color scheme (a JS-resolved gradient froze the light paper into
         // dark mode and rendered gray; #206 D10 revision, 2026-07-12).
@@ -254,6 +264,9 @@ export function SpecMdEditor({
       )}
       <Box
         ref={scrollRef}
+        // Scrolling moves the text without changing the document, so the aim
+        // surface has to re-measure off this element's own scroll events.
+        data-aim-scroll=""
         sx={{
           flexGrow: 1,
           minHeight: 0,
@@ -380,6 +393,10 @@ export function SpecMdEditor({
           </AgentStreamingContext.Provider>
         </Box>
       </Box>
+      {/* Rendered last so it paints over the document, and OUTSIDE the
+          scroller so it is positioned against the frame — the surface follows
+          the text by re-measuring, not by scrolling with it. */}
+      {editor && aim && <SpecAimMenu editor={editor} aim={aim} />}
     </Box>
   );
 }

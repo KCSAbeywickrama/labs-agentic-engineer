@@ -32,7 +32,8 @@ import { Extension } from "@tiptap/core";
 import type { Node as PmNode } from "@tiptap/pm/model";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
-import { prdAffordances, type PrdBlock, type PrdLens } from "../lib/prdLenses";
+import { prdAffordances, type PrdLens } from "../lib/prdLenses";
+import { docBlocks } from "./docBlocks";
 
 /**
  * What the console hands the editor to make the PRD's lenses live. Absent
@@ -56,51 +57,6 @@ export interface PrdLensOptions {
 }
 
 export const prdLensKey = new PluginKey<DecorationSet>("prdLenses");
-
-/**
- * Flatten the document's textblocks. A list entry is the paragraph INSIDE its
- * `listItem` — that is the textblock the marker decorates and the widget
- * anchors to — so the item-ness comes from the parent.
- */
-export function prdBlocks(doc: PmNode): PrdBlock[] {
-  const blocks: PrdBlock[] = [];
-  doc.descendants((node, pos, parent) => {
-    if (!node.isTextblock) return true;
-    const emphasis: PrdBlock["emphasis"] = [];
-    node.forEach((child, offset) => {
-      if (!child.isText || !child.marks.some((m) => m.type.name === "italic")) return;
-      const from = pos + 1 + offset;
-      const to = from + child.nodeSize;
-      // One `*assumed*` can arrive as several text nodes — an agent's streamed
-      // write marks its insertions, and a run split across two marks stays
-      // split. Rejoin the touching ones so the flag is read as the word it is.
-      const previous = emphasis.at(-1);
-      if (previous?.to === from) {
-        previous.text += child.text ?? "";
-        previous.to = to;
-        return;
-      }
-      emphasis.push({ text: child.text ?? "", from, to });
-    });
-    blocks.push({
-      kind:
-        node.type.name === "heading"
-          ? "heading"
-          : parent?.type.name === "listItem"
-            ? "listItem"
-            : "paragraph",
-      level: node.type.name === "heading" ? Number(node.attrs.level) : undefined,
-      text: node.textContent,
-      emphasis,
-      from: pos,
-      to: pos + node.nodeSize,
-      contentEnd: pos + node.nodeSize - 1,
-    });
-    // A textblock's children are text and marks, never further blocks.
-    return false;
-  });
-  return blocks;
-}
 
 function lensButton(
   lens: PrdLens,
@@ -126,7 +82,7 @@ function lensButton(
 }
 
 function build(doc: PmNode, opts: PrdLensOptions): DecorationSet {
-  const { lenses, flags } = prdAffordances(prdBlocks(doc));
+  const { lenses, flags } = prdAffordances(docBlocks(doc));
   const busyReason = opts.isBusy() ? opts.busyReason() : "";
   const decorations: Decoration[] = [];
   for (const flag of flags) {
