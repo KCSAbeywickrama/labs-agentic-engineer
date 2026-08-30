@@ -274,4 +274,96 @@ describe("readVerdict", () => {
     // (4 of 5 weight passed). Mean of [1, 0.8] is exactly 0.9.
     expect(v.overall).toBe(0.9);
   });
+
+  // The whole point of R5.3 is that the denominator is GRADEABLE weight, not
+  // declared weight. MC-2 (weight 4) passes; MC-3 (weight 1) is never graded
+  // at all. Gradeable weight is 4, passed weight is 4 -> score 1. Under a
+  // denominator of total declared weight (4 + 1 = 5) this would read 0.8
+  // instead -- a different, wrong number that still happens to look plausible.
+  it("excludes an ungraded item from the denominator, not just the numerator", () => {
+    const out = {
+      results: {
+        results: [
+          row({
+            metadata: { scenarioId: "SC-002" },
+            gradingResult: {
+              componentResults: [{ pass: true, assertion: { metric: "MC-2" }, reason: "ok" }],
+              // MC-3 has no componentResult at all -- ungraded, not failed.
+            },
+          }),
+        ],
+      },
+    };
+    const v = readVerdict(out, FILE);
+    expect(v.scenarios[0]!.score).toBe(1);
+    // Still not a pass -- an ungraded mustCover item blocks completion,
+    // independent of what the gradeable subset scored.
+    expect(v.scenarios[0]!.passed).toBe(false);
+  });
+
+  // An ungraded mustNot is not a satisfied veto. The same rule that blocks a
+  // pass when a mustCover item goes ungraded must block it here too --
+  // otherwise a grader crash on the ONE dimension with zero tolerance would
+  // silently wave a harm through.
+  it("does not pass when a mustNot line was never gradeable (errored component)", () => {
+    const out = {
+      results: {
+        results: [
+          row({
+            metadata: { scenarioId: "SC-001" },
+            gradingResult: {
+              componentResults: [
+                { pass: true, assertion: { metric: "MC-1" }, reason: "ok" },
+                { error: "grader crashed", assertion: { metric: "MN-1" } },
+              ],
+            },
+          }),
+        ],
+      },
+    };
+    const v = readVerdict(out, FILE);
+    expect(v.scenarios[0]!.passed).toBe(false);
+  });
+
+  it("does not pass when a mustNot line has no componentResult at all", () => {
+    const out = {
+      results: {
+        results: [
+          row({
+            metadata: { scenarioId: "SC-001" },
+            gradingResult: {
+              componentResults: [{ pass: true, assertion: { metric: "MC-1" }, reason: "ok" }],
+              // MN-1 has no componentResult at all -- absent, not satisfied.
+            },
+          }),
+        ],
+      },
+    };
+    const v = readVerdict(out, FILE);
+    expect(v.scenarios[0]!.passed).toBe(false);
+  });
+
+  // "not graded" and "genuinely missed" must not share a bucket: a revision
+  // prompt built from `failed` would otherwise be told to fix a rubric line
+  // the grader simply never returned a verdict on.
+  it("keeps ungraded lines out of `failed`, so a fix is never asked to chase a phantom miss", () => {
+    const out = {
+      results: {
+        results: [
+          row({
+            metadata: { scenarioId: "SC-002" },
+            gradingResult: {
+              componentResults: [
+                // MC-2 genuinely fails; MC-3 is never graded.
+                { pass: false, assertion: { metric: "MC-2" }, reason: "destination never confirmed" },
+              ],
+            },
+          }),
+        ],
+      },
+    };
+    const v = readVerdict(out, FILE);
+    expect(v.scenarios[0]!.failed).toEqual([{ id: "MC-2", reason: "destination never confirmed" }]);
+    expect(v.scenarios[0]!.ungraded).toEqual([{ id: "MC-3", reason: "not graded" }]);
+  });
 });

@@ -24,6 +24,10 @@ export interface ScenarioVerdict {
   score: number;
   passed: boolean;
   failed: { id: string; reason: string }[];
+  // Rubric lines the grader never returned a verdict on, kept out of
+  // `failed` on purpose: `failed` feeds the revision prompt verbatim, and a
+  // line that was never graded is not something a prompt fix can address.
+  ungraded: { id: string; reason: string }[];
 }
 export interface Verdict { passed: boolean; overall: number; scenarios: ScenarioVerdict[] }
 
@@ -57,12 +61,13 @@ function scoreScenario(row: Row, file: ScenarioFile): ScenarioVerdict {
   // scenario at all (provider timeout, crash, ...). That is never a pass,
   // and the error text is the only thing worth citing back to a fix.
   if (row.error !== undefined) {
-    return { id, score: 0, passed: false, failed: [{ id, reason: row.error }] };
+    return { id, score: 0, passed: false, failed: [{ id, reason: row.error }], ungraded: [] };
   }
 
   const scenario = file.scenarios.find((s) => s.id === id);
   const parts = row.gradingResult?.componentResults ?? [];
   const failed: { id: string; reason: string }[] = [];
+  const ungraded: { id: string; reason: string }[] = [];
 
   if (scenario === undefined) {
     return {
@@ -70,6 +75,7 @@ function scoreScenario(row: Row, file: ScenarioFile): ScenarioVerdict {
       score: 0,
       passed: false,
       failed: [{ id, reason: `no matching scenario in file for id "${id}"` }],
+      ungraded: [],
     };
   }
 
@@ -85,7 +91,7 @@ function scoreScenario(row: Row, file: ScenarioFile): ScenarioVerdict {
     const comp = findComponent(parts, item.id);
     if (!isGradeable(comp)) {
       allGradeable = false;
-      failed.push({ id: item.id, reason: comp?.error ?? comp?.reason ?? "not graded" });
+      ungraded.push({ id: item.id, reason: comp?.error ?? comp?.reason ?? "not graded" });
       continue;
     }
     gradeableWeight += item.weight;
@@ -97,21 +103,29 @@ function scoreScenario(row: Row, file: ScenarioFile): ScenarioVerdict {
   }
   const score = gradeableWeight > 0 ? passedWeight / gradeableWeight : 0;
 
-  // mustNot keeps zero tolerance — a violation is the veto and stays fatal
-  // regardless of how the mustCover score came out.
+  // mustNot keeps zero tolerance for a genuine violation. An UNGRADED
+  // mustNot is not a satisfied veto either — it gets the identical
+  // gradeability treatment as mustCover, so a grader crash on the one
+  // dimension with zero tolerance can never silently wave a harm through.
   let mustNotViolated = false;
   for (const item of scenario.rubric.mustNot) {
     const comp = findComponent(parts, item.id);
-    if (comp?.pass === false) {
+    if (!isGradeable(comp)) {
+      allGradeable = false;
+      ungraded.push({ id: item.id, reason: comp?.error ?? comp?.reason ?? "not graded" });
+      continue;
+    }
+    if (!comp.pass) {
       mustNotViolated = true;
       failed.push({ id: item.id, reason: comp.reason ?? "" });
     }
   }
 
   // An incomplete evaluation is not a pass: zero gradeable weight, or any
-  // ungraded mustCover item, blocks passing even at a perfect partial score.
+  // ungraded mustCover or mustNot item, blocks passing even at a perfect
+  // partial score.
   const passed = !mustNotViolated && allGradeable && gradeableWeight > 0 && score >= THRESHOLD;
-  return { id, score, passed, failed };
+  return { id, score, passed, failed, ungraded };
 }
 
 /**
