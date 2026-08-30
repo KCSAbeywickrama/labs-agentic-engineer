@@ -647,12 +647,17 @@ export function SpecView({ projectName }: { projectName: string }) {
   // A reason row is a pointer to where the work already happens: the settle
   // controls live on the requirements document's own flagged lines, and a stale
   // design is repaired by the same re-derivation the header offers.
+  // Going to the document means going to the LINE: the first flagged one,
+  // scrolled into view, so "Review them first" is not "here is a long
+  // document, find them yourself".
+  const [revealUnsettled, setRevealUnsettled] = useState(0);
   const onRailReason = (action: SectionReason["action"]) => {
     if (action === "update-design") {
       generateDesign();
       return;
     }
     setSelection({ kind: "file", path: PRD_PATH });
+    setRevealUnsettled((n) => n + 1);
   };
 
   const seedChat = (message: string) =>
@@ -1443,6 +1448,7 @@ export function SpecView({ projectName }: { projectName: string }) {
                     // Every markdown file, not just the PRD: a selection is
                     // something any document has, so aiming cannot be one
                     // document's privilege the way its lenses are.
+                    revealUnsettled={selectedFile.path === PRD_PATH ? revealUnsettled : 0}
                     aim={{
                       path: selectedFile.path,
                       send: aimSend,

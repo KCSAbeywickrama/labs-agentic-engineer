@@ -59,6 +59,7 @@ export function SpecMdEditor({
   lenses,
   links,
   aim,
+  revealUnsettled = 0,
 }: {
   fragment: Y.XmlFragment;
   provider: HocuspocusProvider;
@@ -76,6 +77,12 @@ export function SpecMdEditor({
    * document has, so the affordance cannot be one document's privilege.
    */
   aim?: SpecAimBinding | undefined;
+  /**
+   * Scroll the first unsettled line into view (#666). A counter, not a flag:
+   * every increment is one request, so "Review them first" pressed twice
+   * scrolls twice. Zero or absent asks for nothing.
+   */
+  revealUnsettled?: number | undefined;
 }) {
   // The extension list is built once per (fragment, provider) — a file swap
   // remounts this component under a new key — so the plugin reaches the CURRENT
@@ -135,6 +142,32 @@ export function SpecMdEditor({
   useEffect(() => {
     if (editor && linkRef.current) refreshSpecLinks(editor.view);
   }, [editor, knownPaths]);
+
+  // "Review them first" lands the user ON the first flagged line, not at the
+  // top of a document they then have to search. The flags are decorations, so
+  // they exist only once the editor has rendered — which, when the click also
+  // switched files, is a few frames after this effect runs. Hence the retry:
+  // a bounded number of frames, then give up quietly rather than scroll late
+  // into something the user has moved on from.
+  useEffect(() => {
+    if (!editor || revealUnsettled === 0) return;
+    let frames = 0;
+    let handle = 0;
+    const attempt = () => {
+      const flag = editor.view.dom.querySelector<HTMLElement>(
+        ".prd-flag--assumed, .prd-flag--question",
+      );
+      if (flag) {
+        flag.scrollIntoView({ block: "center", behavior: "smooth" });
+        flag.classList.add("prd-flag--revealed");
+        window.setTimeout(() => flag.classList.remove("prd-flag--revealed"), 1600);
+        return;
+      }
+      if (frames++ < 30) handle = window.requestAnimationFrame(attempt);
+    };
+    handle = window.requestAnimationFrame(attempt);
+    return () => window.cancelAnimationFrame(handle);
+  }, [editor, revealUnsettled]);
 
   // Pending-review count, refreshed on every document change.
   const [pending, setPending] = useState(0);
@@ -372,6 +405,13 @@ export function SpecMdEditor({
             color: "warning.main",
             userSelect: "none",
           },
+          // The line "Review them first" just landed on, for long enough to
+          // catch the eye and no longer.
+          "@keyframes prd-flag-reveal": {
+            from: { boxShadow: (theme) => `0 0 0 6px ${alpha(theme.palette.warning.main, 0.45)}` },
+            to: { boxShadow: "0 0 0 0 transparent" },
+          },
+          "& .prd-flag--revealed": { animation: "prd-flag-reveal 1.4s ease-out" },
           "& .tiptap .prd-flag--question, & .tiptap .prd-flag--deferred": {
             pl: 1,
             borderLeft: "3px solid",

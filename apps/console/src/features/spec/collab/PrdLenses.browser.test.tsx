@@ -215,3 +215,57 @@ describe("the PRD's lens surface, on screen", () => {
     doc.destroy();
   });
 });
+
+// "Review them first" (#666) has to land ON the first flagged line, and
+// whether an element ended up in the viewport is real layout — the browser
+// lane again.
+describe("revealing the first unsettled line", () => {
+  it("scrolls the first flagged line into view when asked", async () => {
+    // A tall document: many plain stories above the flagged decision, so the
+    // flag starts well below the fold of a 320px editor.
+    const tall =
+      "# Expenses — PRD\n\n## User Stories\n\n" +
+      Array.from({ length: 40 }, (_, i) => `${i + 1}. As an Employee, I want story number ${i + 1}.`).join("\n") +
+      "\n\n## Product Decisions\n\n- Sign-in: the org Google Workspace *assumed*\n";
+    const doc = new Y.Doc();
+    setDocFile(doc, PATH, tall);
+    // Built ONCE: the editor is keyed on (fragment, provider), and a provider
+    // made inside the harness would remount it on every rerender.
+    const fragment = doc.getXmlFragment(PATH);
+    const provider = fakeProvider(doc);
+    const Harness = ({ reveal }: { reveal: number }) => (
+      <OxygenUIThemeProvider theme={OxygenTheme}>
+        <div style={{ height: "320px", display: "flex", flexDirection: "column" }}>
+          <SpecMdEditor
+            fragment={fragment}
+            provider={provider}
+            self={{ name: "Tester", color: "#64b5f6" }}
+            agentStreaming={false}
+            lenses={{ run: () => {}, busyReason: "" }}
+            revealUnsettled={reveal}
+          />
+        </div>
+      </OxygenUIThemeProvider>
+    );
+    const view = render(<Harness reveal={0} />);
+    const flag = await waitFor(() => {
+      const el = view.container.querySelector<HTMLElement>(".prd-flag--assumed");
+      if (!el) throw new Error("no flag yet");
+      return el;
+    });
+    const scroller = flag.closest<HTMLElement>("[data-aim-scroll]")!;
+    // Re-queried every time: the flag is a decoration span, and ProseMirror
+    // re-renders it, so a held reference goes stale mid-scroll.
+    const inView = () => {
+      const f = view.container.querySelector<HTMLElement>(".prd-flag--assumed")!.getBoundingClientRect();
+      const s = scroller.getBoundingClientRect();
+      return f.top >= s.top && f.bottom <= s.bottom;
+    };
+    expect(inView()).toBe(false);
+
+    view.rerender(<Harness reveal={1} />);
+
+    await waitFor(() => expect(inView()).toBe(true), { timeout: 3000 });
+    doc.destroy();
+  });
+});
