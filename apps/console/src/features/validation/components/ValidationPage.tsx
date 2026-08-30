@@ -612,6 +612,7 @@ export function ValidationPage({
       <ValidationView
         noPadding
         fullWidth
+        hideDescription
         criteria={criteria.data.content}
         {...(report.data ? { report: report.data.content } : {})}
       />
