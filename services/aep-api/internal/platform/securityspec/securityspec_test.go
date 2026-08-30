@@ -308,3 +308,17 @@ func TestRoleSlug(t *testing.T) {
 		}
 	}
 }
+
+func TestCheckReferences_ThunderNameCountsRunesNotBytes(t *testing.T) {
+	doc := &Document{
+		Roles:   []Role{{Name: "Viewer"}},
+		Thunder: ThunderConfig{Name: strings.Repeat("é", 100), Type: "browser"},
+	}
+	if msg := checkReferences(doc); msg != "" {
+		t.Fatalf("100-rune name rejected: %s", msg)
+	}
+	doc.Thunder.Name = strings.Repeat("é", 101)
+	if msg := checkReferences(doc); !strings.Contains(msg, "1–100") {
+		t.Fatalf("101-rune name: %q", msg)
+	}
+}

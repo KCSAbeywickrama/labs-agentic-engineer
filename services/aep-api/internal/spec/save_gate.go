@@ -76,9 +76,9 @@ const (
 //   - component design.json: every present design.json validates against the
 //     single published schema + the name==dir rule (designspec — the same
 //     definition the agent's write gate uses);
-//   - security.json, when present: the structured half of the security design
-//     validates against the same published schema and referential rules the
-//     agent's write gate applies;
+//   - security.json, when present: the security design validates against the
+//     same published schema and referential rules the agent's write gate
+//     applies;
 //   - OpenAPI: every present component openapi.yaml/yml must parse.
 //
 // A missing root is ErrArtifactPathInvalid (400). Any other failure aggregates

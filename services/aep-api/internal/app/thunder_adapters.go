@@ -30,11 +30,11 @@ type thunderApplicationReader struct {
 	client *thunderapp.Client
 }
 
-func (r thunderApplicationReader) Get(ctx context.Context, namespace, name string) (*projects.ThunderApplicationView, error) {
+func (r thunderApplicationReader) FindByResource(ctx context.Context, resourceName, environment string) (*projects.ThunderApplicationView, error) {
 	if r.client == nil {
 		return nil, nil
 	}
-	app, err := r.client.Get(ctx, namespace, name)
+	app, err := r.client.FindByResource(ctx, resourceName, environment)
 	if err != nil {
 		return nil, err
 	}

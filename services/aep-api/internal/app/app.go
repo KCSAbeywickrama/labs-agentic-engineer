@@ -1229,12 +1229,17 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	deploymentService.SetResourceCatalog(thunderWaitMarkerCatalog{cat: resourceTypeCatalog})
 	deploymentService.SetResourceClient(resourceClient)
 	if cfg.KubeAPI.BaseURL != "" {
+		thunderClient, err := thunderapp.New(thunderapp.Config{
+			BaseURL:     cfg.KubeAPI.BaseURL,
+			BearerToken: cfg.KubeAPI.BearerToken,
+			TokenFile:   cfg.KubeAPI.TokenFile,
+			CAFile:      cfg.KubeAPI.CAFile,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("thunderapp client: %w", err)
+		}
 		deploymentService.SetThunderApplicationReader(thunderApplicationReader{
-			client: thunderapp.New(thunderapp.Config{
-				BaseURL:     cfg.KubeAPI.BaseURL,
-				BearerToken: cfg.KubeAPI.BearerToken,
-				CAFile:      cfg.KubeAPI.CAFile,
-			}),
+			client: thunderClient,
 		})
 		slog.Info("ThunderApplication CR reader", "baseURL", cfg.KubeAPI.BaseURL)
 	} else {

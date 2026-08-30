@@ -30,7 +30,7 @@ import (
 
 // ThunderApplicationView is the deploy-wait projection of a ThunderApplication
 // CR: the callback URL written on the spec, and whether that generation has
-// been observed ready. This package consumes the view; it does not GET
+// been observed ready. This package consumes the view; it does not talk to
 // Kubernetes.
 type ThunderApplicationView struct {
 	RedirectURIs       string
@@ -39,10 +39,12 @@ type ThunderApplicationView struct {
 	ObservedGeneration int64
 }
 
-// ThunderApplicationReader fetches one ThunderApplication by namespace/name.
-// (nil, nil) means the CR is not in the cluster yet — the wait stays pending.
+// ThunderApplicationReader fetches the ThunderApplication OpenChoreo rendered
+// for a Resource name in an environment. (nil, nil) means the CR is not in
+// the cluster yet — the wait stays pending. Lookup is by OC labels, not the
+// rendered object name (r-<resource>-<env>-<hash8> in the dataplane NS).
 type ThunderApplicationReader interface {
-	Get(ctx context.Context, namespace, name string) (*ThunderApplicationView, error)
+	FindByResource(ctx context.Context, resourceName, environment string) (*ThunderApplicationView, error)
 }
 
 // ConsumerURLMarker is the projects-owned projection of CRT consumer-URL
@@ -167,9 +169,9 @@ func (s *DeploymentService) applyThunderWait(ctx context.Context, orgID, project
 			map[string]string{m.EnvConfig: callback}); perr != nil {
 			return fmt.Errorf("deployment: thunder wait: patch callback for %q: %w", dep.Name, perr)
 		}
-		cr, gerr := s.thunder.Get(ctx, orgID, ocname.ExternalResourceName(projectID, dep.Name))
+		cr, gerr := s.thunder.FindByResource(ctx, ocname.ExternalResourceName(projectID, dep.Name), openchoreo.DevEnvironmentName)
 		if gerr != nil {
-			return fmt.Errorf("deployment: thunder wait: get ThunderApplication %q: %w", dep.Name, gerr)
+			return fmt.Errorf("deployment: thunder wait: find ThunderApplication %q: %w", dep.Name, gerr)
 		}
 		if !thunderCRSatisfies(cr, callback) {
 			matched = false

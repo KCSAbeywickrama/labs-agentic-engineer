@@ -32,6 +32,7 @@ function renderPanel(
   over: {
     logins?: readonly PublishedTestUser[];
     revealPassword?: (username: string) => Promise<string>;
+    loadState?: "ready" | "pending" | "error";
   } = {},
 ): {
   revealPassword: ReturnType<typeof vi.fn<(username: string) => Promise<string>>>;
@@ -45,6 +46,7 @@ function renderPanel(
         logins={over.logins ?? []}
         thunderUrl={THUNDER_URL}
         revealPassword={revealPassword}
+        loadState={over.loadState}
       />
     </OxygenUIThemeProvider>
   );
@@ -235,5 +237,52 @@ describe("SignInPanel", () => {
     const roleTooltip = await screen.findByRole("tooltip");
     expect(roleTooltip).toHaveTextContent("Compliance Admin");
     expect(roleTooltip.textContent).toBe("Compliance Admin");
+  });
+
+  it("pending load shows a caption and still links Thunder Console", () => {
+    renderPanel({ loadState: "pending" });
+    expect(screen.getByText("Loading test users…")).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", {
+        name: "Open Thunder Console to add or remove real accounts",
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("error load shows a caption and still links Thunder Console", () => {
+    renderPanel({ loadState: "error" });
+    expect(screen.getByText("Couldn't load test users.")).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", {
+        name: "Open Thunder Console to add or remove real accounts",
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("shows an error caption when clipboard write rejects", async () => {
+    const writeText = vi.fn().mockRejectedValue(new Error("clipboard denied"));
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    renderPanel({
+      logins: [{ username: "test-viewer", role: "Viewer", coldStart: true }],
+    });
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Reveal the password for test-viewer",
+      }),
+    );
+    await waitFor(() => {
+      expect(screen.getByText(MOCK_PASSWORD)).toBeInTheDocument();
+    });
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Copy the password for test-viewer",
+      }),
+    );
+    await waitFor(() => {
+      expect(screen.getByText("clipboard denied")).toBeInTheDocument();
+    });
   });
 });

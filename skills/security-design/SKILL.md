@@ -9,9 +9,9 @@ metadata:
 
 # Security design
 
-Write `specs/design/security.json` when the design has sign-in. A public-only
-design records that in `publicComponents` if anything is still protected;
-otherwise skip the file.
+Write `specs/design/security.json` when the design has sign-in, permissions,
+or test users. A public-only design records that in `publicComponents` if
+anything is still protected; otherwise skip the file.
 
 The platform provisions from it (Roles gate / ensure: roles and test users;
 thunder-app create: `thunder`). The coding agent matches `roles[].name`,

@@ -59,7 +59,7 @@ const THUNDER_CONSOLE_USERS = "http://localhost:8097/console/users";
 // Roles hooks — overridable so green-deploy fixtures stay Thunder-only by
 // default, and Test-users cases can inject owned rows / reveal answers.
 let mockTestUsers: ProjectTestUserState[] = [];
-let mockReveal = vi.fn(
+const mockReveal = vi.fn(
   async (username: string) => ({
     username,
     password: MOCK_PASSWORD,

@@ -225,8 +225,8 @@ func TestDesignJSONStories(t *testing.T) {
 
 // ---- the roles document ----------------------------------------------------
 //
-// The structured half of the security design is the ONE spec file the platform
-// acts on deterministically at build time: it creates the roles and test users
+// The security design is the ONE spec file the platform acts on
+// deterministically at build time: it creates the roles and test users
 // the file declares. These pin the three things the gate owns about it —
 // presence when the design signs users in, parseability, and that the stories
 // its roles cite are real.

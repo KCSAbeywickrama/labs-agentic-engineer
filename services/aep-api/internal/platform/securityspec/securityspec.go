@@ -15,8 +15,8 @@
 // under the License.
 
 // Package securityspec parses and validates `specs/design/security.json` — the
-// STRUCTURED half of a project's security design, and the ONE spec file the
-// platform acts on deterministically at build time.
+// one spec file the platform acts on deterministically at build time. There
+// is no prose companion.
 //
 // It is the sibling of designspec, and for the same reason: the single schema
 // definition is packages/contracts/schemas/security-design.schema.json
@@ -45,6 +45,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/wso2/aep/aep-api/internal/platform/jsonschema"
 )
@@ -184,7 +185,8 @@ func checkReferences(doc *Document) string {
 	if thunderName != strings.TrimSpace(thunderName) {
 		return fmt.Sprintf("thunder.name %q has leading or trailing whitespace.", thunderName)
 	}
-	if len(thunderName) < 1 || len(thunderName) > 100 {
+	n := utf8.RuneCountInString(thunderName)
+	if n < 1 || n > 100 {
 		return "thunder.name must be 1–100 characters."
 	}
 	if scopes := doc.Thunder.Scopes; scopes != "" {
@@ -284,8 +286,8 @@ var slugUnsafeRE = regexp.MustCompile(`[^a-z0-9]+`)
 
 // RoleSlug lowercases a role name into the username-safe form the platform's
 // generated test-user names are built from ("Compliance Admin" →
-// "compliance-admin"). Exported because the console renders the name the build
-// WILL generate, before the build runs.
+// "compliance-admin"). The console has its own copy of this slug for the
+// pre-build preview; both must stay in lockstep.
 func RoleSlug(name string) string {
 	s := slugUnsafeRE.ReplaceAllString(strings.ToLower(strings.TrimSpace(name)), "-")
 	s = strings.Trim(s, "-")

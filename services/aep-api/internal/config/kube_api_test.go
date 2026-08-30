@@ -49,6 +49,18 @@ func TestKubeAPI_FallbackEnvBaseURL(t *testing.T) {
 	}
 }
 
+func TestKubeAPI_IPv6HostPort(t *testing.T) {
+	t.Setenv("KUBERNETES_SERVICE_HOST", "fd00::1")
+	t.Setenv("KUBERNETES_SERVICE_PORT", "443")
+	t.Setenv("KUBE_API_BEARER", "override-token")
+
+	r := &configReader{}
+	got := r.kubeAPI()
+	if got.BaseURL != "https://[fd00::1]:443" {
+		t.Errorf("BaseURL = %q, want bracketed IPv6 URL", got.BaseURL)
+	}
+}
+
 func TestKubeAPI_EmptyWhenUnresolved(t *testing.T) {
 	t.Setenv("KUBERNETES_SERVICE_HOST", "")
 	t.Setenv("KUBERNETES_SERVICE_PORT", "")

@@ -39,8 +39,11 @@ import {
   type PublishedTestUser,
 } from "../lib/publishedTestUsers";
 
-function copyText(value: string) {
-  void navigator.clipboard?.writeText(value);
+function copyText(value: string): Promise<void> {
+  if (!navigator.clipboard?.writeText) {
+    return Promise.reject(new Error("Clipboard is not available"));
+  }
+  return navigator.clipboard.writeText(value);
 }
 
 function LoginRow({
@@ -121,7 +124,12 @@ function LoginRow({
             <IconButton
               size="small"
               aria-label={`Copy the password for ${login.username}`}
-              onClick={() => copyText(password)}
+              onClick={() => {
+                setError(null);
+                void copyText(password).catch((e) => {
+                  setError(e instanceof Error ? e.message : String(e));
+                });
+              }}
             >
               <Copy size={14} />
             </IconButton>
@@ -172,14 +180,34 @@ export function SignInPanel({
   logins,
   thunderUrl,
   revealPassword,
+  loadState = "ready",
 }: {
   logins: readonly PublishedTestUser[];
   thunderUrl: string;
   revealPassword: (username: string) => Promise<string>;
+  loadState?: "ready" | "pending" | "error";
 }) {
   return (
     <Box>
-      {logins.length > 0 && (
+      {loadState === "pending" && (
+        <Typography
+          variant="caption"
+          color="text.secondary"
+          sx={{ display: "block", mb: 1 }}
+        >
+          Loading test users…
+        </Typography>
+      )}
+      {loadState === "error" && (
+        <Typography
+          variant="caption"
+          color="error"
+          sx={{ display: "block", mb: 1 }}
+        >
+          Couldn&apos;t load test users.
+        </Typography>
+      )}
+      {loadState === "ready" && logins.length > 0 && (
         <>
           <Typography
             variant="caption"
@@ -215,15 +243,19 @@ export function ProjectSignInPanel({
 }) {
   const live = useProjectRoles(projectName, true);
   const reveal = useRevealTestUserPassword(projectName);
+  const loadState = live.isPending
+    ? "pending"
+    : live.isError
+      ? "error"
+      : "ready";
   const logins =
-    live.isPending || live.isError
-      ? []
-      : publishedTestUsers(live.data?.testUsers ?? []);
+    loadState === "ready" ? publishedTestUsers(live.data?.testUsers ?? []) : [];
 
   return (
     <SignInPanel
       logins={logins}
       thunderUrl={env.thunderUrl}
+      loadState={loadState}
       revealPassword={async (username) => {
         const data = await reveal.mutateAsync(username);
         return data.password;

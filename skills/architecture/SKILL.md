@@ -254,8 +254,9 @@ operations its contract actually exposes:
   sign-in to token-carrying API calls. With no such dependency the SPA deploys
   unable to sign in. `thunder-app` takes no `parameters`: `security-design`
   authors the Thunder client on `security.json`, and the platform registers the
-  callback URI. `thunder-authentication` owns the coding-time rule, and
-  `security-design` owns which roles sign in through it.
+  callback URI (`redirectUris` — platform-managed, never proposed here).
+  `thunder-authentication` owns the coding-time rule, and `security-design`
+  owns which roles sign in through it.
 
 ### Resolving an `external` dependency
 

@@ -160,7 +160,7 @@ function ThunderBlock({ doc }: { doc: SecurityDesign }) {
         are not part of this document.
       </Typography>
       <Stack spacing={0.5}>
-        <Typography variant="body2">Type: browser</Typography>
+        <Typography variant="body2">Type: {doc.thunder.type}</Typography>
         <Typography variant="body2">
           {scopes
             ? `Scopes: ${scopes}`

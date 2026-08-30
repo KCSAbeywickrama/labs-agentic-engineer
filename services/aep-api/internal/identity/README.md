@@ -123,4 +123,4 @@ on it, because the token claim and the authz bindings both use the NAME.
 ## See also
 
 - [`ADR-0022`](../../../../docs/decisions/ADR-0022-roles-and-test-users-are-shared-directory-objects.md) — why the BFF writes the directory directly.
-- `skills/security-design/SKILL.md` — the agent-facing half: the two documents and the reuse-first rule.
+- `skills/security-design/SKILL.md` — the agent-facing half: `security.json` and the reuse-first rule.

@@ -36,7 +36,7 @@ function user(
 }
 
 describe("publishedTestUsers", () => {
-  it("includes owned + exists with username, role, and coldStart", () => {
+  it("includes owned users with username, role, and coldStart", () => {
     expect(
       publishedTestUsers([
         user({
@@ -50,6 +50,19 @@ describe("publishedTestUsers", () => {
     ).toEqual([
       { username: "test-viewer", role: "Viewer", coldStart: true },
     ]);
+  });
+
+  it("includes owned: true even when exists is false", () => {
+    expect(
+      publishedTestUsers([
+        user({
+          username: "test-viewer",
+          roleName: "Viewer",
+          owned: true,
+          exists: false,
+        }),
+      ]),
+    ).toEqual([{ username: "test-viewer", role: "Viewer", coldStart: false }]);
   });
 
   it("omits owned: false (taken username / not ours)", () => {

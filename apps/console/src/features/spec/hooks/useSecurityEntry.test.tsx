@@ -107,6 +107,22 @@ describe("useSecurityEntry — committed fallback loading", () => {
     expect(entry.securityJson).toBe('{"version":1}');
   });
 
+  it("uses committed data.content on the solo path", () => {
+    mockContent.mockReturnValue({
+      data: { content: '{"version":1,"thunder":{"name":"orders-app","type":"browser"}}' },
+      isPending: false,
+      isError: false,
+    });
+    const entry = run();
+
+    expect(mockContent).toHaveBeenLastCalledWith("p", FILE);
+    expect(entry.isPending).toBe(false);
+    expect(entry.isError).toBe(false);
+    expect(entry.securityJson).toBe(
+      '{"version":1,"thunder":{"name":"orders-app","type":"browser"}}',
+    );
+  });
+
   it("does not spin when an agent is in the room and the committed read is suppressed", () => {
     mockContent.mockReturnValue({
       data: undefined,

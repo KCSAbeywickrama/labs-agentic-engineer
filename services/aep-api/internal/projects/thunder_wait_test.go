@@ -45,23 +45,25 @@ const (
 	thunderWaitPending  = "https://pending.invalid/callback"
 	// Known-good OC names: ExternalResourceName("proj","idp") /
 	// ExternalResourceBindingName("proj","idp","development").
+	// thunderWaitCRName is the Resource name on openchoreo.dev/resource, not
+	// the rendered object name r-<resource>-development-<hash8>.
 	thunderWaitCRName      = "proj-idp"
 	thunderWaitBindingName = "proj-idp-development"
 )
 
 // fakeThunderReader is a hand double of ThunderApplicationReader.
 type fakeThunderReader struct {
-	view *ThunderApplicationView
-	err  error
-	ns   string
-	name string
-	gets int
+	view     *ThunderApplicationView
+	err      error
+	resource string
+	env      string
+	gets     int
 }
 
-func (f *fakeThunderReader) Get(_ context.Context, namespace, name string) (*ThunderApplicationView, error) {
+func (f *fakeThunderReader) FindByResource(_ context.Context, resourceName, environment string) (*ThunderApplicationView, error) {
 	f.gets++
-	f.ns = namespace
-	f.name = name
+	f.resource = resourceName
+	f.env = environment
 	return f.view, f.err
 }
 
@@ -238,8 +240,8 @@ func TestDeploymentState_WebAppThunderPlaceholderIsNotReady(t *testing.T) {
 		t.Fatal("placeholder mismatch must stay pending, not Failed")
 	}
 	assertRedirectPatch(t, h.rc, thunderWaitCallback, 1)
-	if h.thunder.gets != 1 || h.thunder.ns != thunderWaitOrg || h.thunder.name != thunderWaitCRName {
-		t.Errorf("Thunder GET = %d %s/%s, want 1 %s/%s", h.thunder.gets, h.thunder.ns, h.thunder.name, thunderWaitOrg, thunderWaitCRName)
+	if h.thunder.gets != 1 || h.thunder.resource != thunderWaitCRName || h.thunder.env != openchoreo.DevEnvironmentName {
+		t.Errorf("Thunder FindByResource = %d %s/%s, want 1 %s/%s", h.thunder.gets, h.thunder.resource, h.thunder.env, thunderWaitCRName, openchoreo.DevEnvironmentName)
 	}
 }
 

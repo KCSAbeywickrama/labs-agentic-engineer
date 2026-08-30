@@ -271,17 +271,19 @@ type ThunderAdminConfig struct {
 	ClientSecret string
 }
 
-// KubeAPIConfig is the Kubernetes API endpoint used to GET ThunderApplication
+// KubeAPIConfig is the Kubernetes API endpoint used to LIST ThunderApplication
 // CRs (plain net/http — not controller-runtime). Resolved at Load:
 //
 //	BaseURL — https://$KUBERNETES_SERVICE_HOST:$KUBERNETES_SERVICE_PORT when
 //	both are set (Helm pods); else optional KUBE_API_BASE_URL.
-//	BearerToken — KUBE_API_BEARER override, else the in-cluster service-account
-//	token file when present.
+//	BearerToken — KUBE_API_BEARER static override (not a rotating SA token).
+//	TokenFile — in-cluster service-account token path when no bearer override;
+//	the client reads the file per request so projected rotations are picked up.
 //	CAFile — in-cluster service-account ca.crt when present.
 type KubeAPIConfig struct {
 	BaseURL     string
 	BearerToken string
+	TokenFile   string
 	CAFile      string
 }
 

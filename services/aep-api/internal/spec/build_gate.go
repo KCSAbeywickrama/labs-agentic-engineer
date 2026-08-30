@@ -177,7 +177,7 @@ func validateBuildGate(reqFiles, designFiles map[string]string) []FileValidation
 	return errs
 }
 
-// validateRolesDocument checks the structured half of the security design.
+// validateRolesDocument checks the security design (roles, test users, thunder).
 //
 // Presence is keyed on END-USER SIGN-IN, read off committed truth rather than a
 // live catalog call: design-save already derives `exposesAPI.auth =
