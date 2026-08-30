@@ -550,8 +550,8 @@ three assumptions and one otherwise look identical and *how much* is what a glan
 
 | section | what the dialog lists | its fix |
 |---|---|---|
-| Requirements | *N open questions* | **Open the document**, where the settle controls already are |
-| Requirements | *N assumptions to challenge* | **Open the document** |
+| Requirements | *N questions only you can answer* | **Open the document**, where the settle controls already are |
+| Requirements | *N decisions marked assumed* | **Open the document** |
 | Design · Validation | *The requirements have changed since* | **Update the design** |
 
 **Ordered by how badly it hurts to ignore**, which is what makes the hover's pick meaningful rather
@@ -571,8 +571,17 @@ rail reports; Design stays clickable throughout.
 **But Generate design warns first when they stand.** The rail says the same thing at rest; the click
 is the moment it becomes consequential, because the design is derived from those guesses and
 overturning one afterwards means deriving again. So the dialog names what is unsettled and offers
-both ways: *Resolve issues* returns to the requirements document, where the settle controls already
-live on the flagged lines, and *Generate anyway* goes on.
+both ways: *Review them first* returns to the requirements document, where the controls already live
+on the flagged lines, and *Generate anyway* goes on.
+
+**In the user's words** ([#666](https://github.com/wso2/labs-agentic-engineer/issues/666)): the
+dialog is titled *Some decisions are still yours*, and its one paragraph says what the agent did
+(*made some decisions on your behalf — marked assumed in the document*), what happens next (*the
+design will be built on the requirements as they stand*) and what being wrong costs (*the design has
+to be generated again*). *Settled*, *derived*, *judgment* and *to challenge* were retired from it:
+they are how this file talks about the document, not how a user reads it. The rows say *N decisions
+marked assumed* — pointing at the pill they will find on the line — and *N questions only you can
+answer*, which is the fact that makes an open question different.
 
 This is where the dialog's two moods separate, and the distinction is the point:
 

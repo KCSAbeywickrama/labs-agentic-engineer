@@ -1587,8 +1587,8 @@ describe("SpecView warns before designing against unsettled requirements", () =>
     render(<SpecView projectName="proj1" />);
     clickGenerate();
 
-    expect(screen.getByText("1 open question")).toBeInTheDocument();
-    expect(screen.getByText("1 assumption to challenge")).toBeInTheDocument();
+    expect(screen.getByText("1 question only you can answer")).toBeInTheDocument();
+    expect(screen.getByText("1 decision marked assumed")).toBeInTheDocument();
     expect(mockNavigate).not.toHaveBeenCalled();
   });
 
@@ -1610,7 +1610,7 @@ describe("SpecView warns before designing against unsettled requirements", () =>
     seed(UNSETTLED);
     render(<SpecView projectName="proj1" />);
     clickGenerate();
-    fireEvent.click(screen.getByRole("button", { name: "Resolve issues" }));
+    fireEvent.click(screen.getByRole("button", { name: "Review them first" }));
 
     await waitFor(() =>
       expect(

@@ -1112,10 +1112,17 @@ export function SpecView({ projectName }: { projectName: string }) {
             one informs, which is the whole reason it carries a way past. */}
         <ProblemsDialog
           open={confirmDesign}
-          title="Your requirements aren't settled yet"
+          title="Some decisions are still yours"
+          // In the user's words, not ours: "settled", "derived" and "judgment"
+          // are how we talk about the document, not how they read it. What
+          // they need at this click is what the agent did (decided things,
+          // marked them), what happens next (the design builds on them), and
+          // what it costs to be wrong (generating again).
           intro={
-            "The design will be derived from what the requirements say now, " +
-            "including the agent's own judgments. Overturning one later means deriving again."
+            "The agent has made some decisions on your behalf — they are marked " +
+            "assumed in the document — and left some questions for you. The design " +
+            "will be built on the requirements as they stand; change any of these " +
+            "afterwards and the design has to be generated again."
           }
           // No per-row fix here, unlike the build refusal: every one of these is
           // settled in the same place, and `Resolve issues` already goes there.
@@ -1125,7 +1132,7 @@ export function SpecView({ projectName }: { projectName: string }) {
             label: reason.label,
           }))}
           resolve={{
-            label: "Resolve issues",
+            label: "Review them first",
             run: () => onRailReason("document"),
           }}
           proceed={{ label: "Generate anyway", run: runDesign }}
