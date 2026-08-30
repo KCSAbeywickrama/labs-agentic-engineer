@@ -16,18 +16,50 @@
  * under the License.
  */
 
-import { Alert, AlertTitle, Typography } from "@wso2/oxygen-ui";
-import { METHOD_LABEL, type CriterionMethodCount } from "@aep/ui-validation-view";
+import { Alert, AlertTitle, alpha, Box, Typography } from "@wso2/oxygen-ui";
+import {
+  METHOD_COLOR,
+  METHOD_FALLBACK_COLOR,
+  METHOD_LABEL,
+  type CriterionMethodCount,
+} from "@aep/ui-validation-view";
 import { validationView } from "../../projects/lib/pipeline";
 
-// What the run is doing to the criteria listed below it. Said here because the
-// criteria themselves cannot: a reader meeting a page of "Pending" chips has no way
-// to know which of them an agent is about to answer and which are waiting on them.
-const RUNNING = "Auto criteria are being validated end to end against the deployed system.";
-// Only when there ARE manual criteria. The sentence is an instruction, and an
-// instruction to check criteria that do not exist sends the reader looking for a
-// list that is empty.
-const MANUAL = "Please validate the manual criteria yourself.";
+// A method named inside a sentence: the badge's word, set the way the badge sets it
+// — same monospace, same weight, same tracking, same uppercase — so a reader
+// recognises it as the thing marking every row below.
+//
+// What it does NOT take from the badge is the solid fill and the badge's padding. A
+// filled pill mid-sentence stops the line dead; a wash of the same colour carries the
+// identity while the words keep flowing. `text.primary` over an alpha fill rather
+// than the raw colour as text, so it holds in both themes — the idiom StatusChip's
+// soft tones and ValidationView's failure block both use.
+//
+// Word and colour both come from the shared vocabulary (counts.ts), so renaming a
+// method or recolouring it carries the sentence along with the badges.
+function Method({ method }: { method: string }) {
+  return (
+    <Box
+      component="span"
+      sx={{
+        px: 0.5,
+        py: 0.125,
+        borderRadius: 0.75,
+        fontFamily: "monospace",
+        fontSize: "0.6875rem",
+        fontWeight: 700,
+        letterSpacing: "0.06em",
+        textTransform: "uppercase",
+        whiteSpace: "nowrap",
+        bgcolor: alpha(METHOD_COLOR[method] ?? METHOD_FALLBACK_COLOR, 0.16),
+        color: "text.primary",
+      }}
+    >
+      {METHOD_LABEL[method] ?? method}
+    </Box>
+  );
+}
+
 // The oracle was never authored, which is also why this run will settle as skipped.
 // Said in the tile rather than as a note above the log because the tile is then the
 // whole body — there are no criteria to put under it.
@@ -76,7 +108,26 @@ export function PendingTile({
         {view.label.charAt(0).toUpperCase() + view.label.slice(1)}
       </AlertTitle>
       <Typography variant="body2">
-        {noCriteria ? NO_CRITERIA : manual > 0 ? `${RUNNING} ${MANUAL}` : RUNNING}
+        {noCriteria ? (
+          NO_CRITERIA
+        ) : (
+          <>
+            {/* The two method words are the vocabulary of the badges on every row
+                below, so they are marked as terms rather than left as ordinary
+                prose — otherwise nothing connects the sentence to the list. */}
+            <Method method="e2e" /> criteria are being validated end to end
+            against the deployed system.
+            {/* Only when there ARE manual criteria: this half is an instruction, and
+                an instruction to check criteria that do not exist sends the reader
+                looking for an empty list. */}
+            {manual > 0 && (
+              <>
+                {" "}
+                Please validate the <Method method="manual" /> criteria yourself.
+              </>
+            )}
+          </>
+        )}
       </Typography>
       {!noCriteria && counts && (
         <Typography variant="body2" sx={{ mt: 0.5, fontWeight: 500 }}>

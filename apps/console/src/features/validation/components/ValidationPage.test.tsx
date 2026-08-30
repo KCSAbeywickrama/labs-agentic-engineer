@@ -1152,11 +1152,13 @@ describe("ValidationPage first attempt in flight", () => {
     ).toBeInTheDocument();
     // Chip and tile headline both, as with every other state.
     expect(screen.getAllByText("Validating").length).toBe(2);
-    expect(
-      screen.getByText(
-        "Auto criteria are being validated end to end against the deployed system. Please validate the manual criteria yourself.",
-      ),
-    ).toBeInTheDocument();
+    // Read through the tile's own element rather than by text: the two method names
+    // are marked up as terms, so no single text node holds the whole sentence. Their
+    // text is the vocabulary's lowercase label — the uppercase is CSS, exactly as on
+    // the badges.
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "auto criteria are being validated end to end against the deployed system. Please validate the manual criteria yourself.",
+    );
     // Counted off the ORACLE — there is no report to count — and in the same words
     // the badges below use.
     expect(screen.getByText("2 auto · 1 manual")).toBeInTheDocument();
@@ -1210,11 +1212,10 @@ describe("ValidationPage first attempt in flight", () => {
 
     renderPage(undefined);
 
-    expect(
-      screen.getByText(
-        "Auto criteria are being validated end to end against the deployed system.",
-      ),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "auto criteria are being validated end to end against the deployed system.",
+    );
+    expect(screen.getByRole("alert")).not.toHaveTextContent(/Please validate/);
     expect(screen.getByText("1 auto")).toBeInTheDocument();
   });
 

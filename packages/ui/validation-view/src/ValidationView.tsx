@@ -32,18 +32,15 @@ import {
 } from "./report.js";
 import {
   CRITERION_STATE_LABEL,
+  METHOD_COLOR,
+  METHOD_FALLBACK_COLOR,
   METHOD_LABEL,
   tallyCriterionMethods,
 } from "./counts.js";
 
-// Solid background per verification method. Text color is computed for contrast
-// (getContrastText), so labels stay readable in both themes — the same approach
-// as the DesignView type badges and the OpenAPI viewer's method badges.
-const METHOD_COLOR: Record<string, string> = {
-  e2e: "#1976d2",
-  scenario: "#ed6c02",
-  manual: "#7b1fa2",
-};
+// The method colours are solid behind a badge here. Text color is computed for
+// contrast (getContrastText), so labels stay readable in both themes — the same
+// approach as the DesignView type badges and the OpenAPI viewer's method badges.
 // One line saying who does the checking, shown on hover. Only the two methods a
 // design turn can author carry one; anything else gets a bare badge rather than
 // an invented explanation.
@@ -54,7 +51,6 @@ const METHOD_TOOLTIP: Record<string, string> = {
 // Requirement ids are structural, so a muted slate keeps them from competing
 // with the colored method badges.
 const REQ_COLOR = "#546e7a";
-const FALLBACK = "#616161";
 
 const mono = { fontFamily: "monospace", fontSize: "0.875rem" } as const;
 
@@ -129,7 +125,7 @@ function MethodBadge({ method, count }: { method: string; count?: number }) {
   const badge = (
     <SolidBadge
       label={count === undefined ? label : `${label} ${count}`}
-      color={METHOD_COLOR[method] ?? FALLBACK}
+      color={METHOD_COLOR[method] ?? METHOD_FALLBACK_COLOR}
     />
   );
   const tooltip = METHOD_TOOLTIP[method];

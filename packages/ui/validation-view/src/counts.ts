@@ -57,6 +57,20 @@ export const METHOD_LABEL: Record<string, string> = {
   e2e: "auto",
 };
 
+/**
+ * criterion method → its identifying colour. Solid behind a badge, and a wash
+ * behind the same word said in prose, so a consumer naming a method in a sentence
+ * can mark it with the colour the reader will meet on every row.
+ */
+export const METHOD_COLOR: Record<string, string> = {
+  e2e: "#1976d2",
+  scenario: "#ed6c02",
+  manual: "#7b1fa2",
+};
+
+/** The colour for a method this vocabulary does not know. */
+export const METHOD_FALLBACK_COLOR = "#616161";
+
 /** Display order for the method tally; unknown methods sort after these. */
 export const METHOD_ORDER = ["e2e", "scenario", "manual"];
 
