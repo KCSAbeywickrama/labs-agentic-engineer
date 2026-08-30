@@ -46,6 +46,16 @@ export interface SecurityEntry {
   rolesJson: string | null;
   /** The live directory state, undefined while it loads. */
   live: ProjectRolesLiveState | undefined;
+  /**
+   * True only while the committed `security.json` fallback is in flight.
+   * A disabled query still reports `isPending` in react-query, so this is
+   * gated on the fallback actually being used — same rule as Architecture
+   * and Wireframes. Live directory chips (`GET …/roles`) fill in after paint
+   * and do not block the page.
+   */
+  isPending: boolean;
+  /** True only when that same committed fallback failed. */
+  isError: boolean;
 }
 
 export function useSecurityEntry({
@@ -69,17 +79,18 @@ export function useSecurityEntry({
   // The committed copy is the solo fallback only. An agent in the room also
   // suppresses it: the doc WILL deliver the file, and probing git for a
   // not-yet-committed path just sprays 404s.
-  const rolesCommitted = useSpecFileContent(
-    projectName,
+  const restFallback =
     active && rolesLiveText === null && !agentInRoom
       ? (files.find((f) => f.path === SECURITY_JSON_PATH) ?? null)
-      : null,
-  );
+      : null;
+  const rolesCommitted = useSpecFileContent(projectName, restFallback);
 
   const live = useProjectRoles(projectName, active);
 
   return {
     rolesJson: rolesLiveText ?? rolesCommitted.data?.content ?? null,
     live: live.data,
+    isPending: restFallback !== null && rolesCommitted.isPending,
+    isError: restFallback !== null && rolesCommitted.isError,
   };
 }

@@ -21,12 +21,13 @@
  * and standing rules. Read-only; the design agent writes the document in chat.
  */
 
-import { useMemo } from "react";
+import { useMemo, type ReactNode } from "react";
 import {
   Alert,
   AlertTitle,
   Box,
   Chip,
+  CircularProgress,
   Divider,
   Stack,
   Tooltip,
@@ -44,13 +45,49 @@ export interface SecurityPanelProps {
   /** Live `security.json` text — from the room, or the committed fallback. */
   rolesJson: string | null;
   live?: ProjectRolesLiveState | undefined;
+  /** Committed-blob read in flight — same spinner as Architecture / Wireframes. */
+  isPending?: boolean;
+  /** Committed-blob read failed. */
+  isError?: boolean;
+}
+
+function Centered({ children }: { children: ReactNode }) {
+  return (
+    <Box
+      sx={{
+        height: "100%",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      {children}
+    </Box>
+  );
 }
 
 export function SecurityPanel({
   rolesJson,
   live,
+  isPending = false,
+  isError = false,
 }: SecurityPanelProps) {
   const parsed = useMemo(() => parseRolesDesign(rolesJson), [rolesJson]);
+
+  if (isPending) {
+    return (
+      <Centered>
+        <CircularProgress aria-label="Loading security" />
+      </Centered>
+    );
+  }
+  if (isError) {
+    return (
+      <Box sx={{ p: 3 }}>
+        <Alert severity="error">Failed to load the Security document.</Alert>
+      </Box>
+    );
+  }
 
   if (parsed.kind === "empty") {
     return (

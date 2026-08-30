@@ -1282,6 +1282,8 @@ export function SpecView({ projectName }: { projectName: string }) {
                 <SecurityPanel
                   rolesJson={security.rolesJson}
                   live={security.live}
+                  isPending={security.isPending}
+                  isError={security.isError}
                 />
               ) : effectiveSelection.kind === "wireframe" ? (
                 <WireframePanel

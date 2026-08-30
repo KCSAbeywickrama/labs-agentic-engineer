@@ -247,6 +247,8 @@ vi.mock("../hooks/useSecurityEntry", () => ({
   useSecurityEntry: () => ({
     rolesJson: null,
     live: undefined,
+    isPending: false,
+    isError: false,
   }),
 }));
 

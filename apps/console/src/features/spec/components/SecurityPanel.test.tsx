@@ -120,6 +120,26 @@ describe("SecurityPanel — one read-only page", () => {
 });
 
 describe("SecurityPanel — reading the document", () => {
+  it("shows a spinner while the committed document is loading, not the empty copy", () => {
+    setup({ rolesJson: null, isPending: true });
+
+    expect(screen.getByLabelText("Loading security")).toBeInTheDocument();
+    expect(
+      screen.queryByText(/This Security document is empty or incomplete/i),
+    ).not.toBeInTheDocument();
+  });
+
+  it("surfaces a committed-document read failure", () => {
+    setup({ rolesJson: null, isError: true });
+
+    expect(
+      screen.getByText(/Failed to load the Security document/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/This Security document is empty or incomplete/i),
+    ).not.toBeInTheDocument();
+  });
+
   it("explains an empty or null document with the mock info copy", () => {
     setup({ rolesJson: null });
 
