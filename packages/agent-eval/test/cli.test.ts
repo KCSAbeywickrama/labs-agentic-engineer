@@ -60,7 +60,9 @@ const FAILING_OUT_JSON = {
 
 let dir: string;
 
-function argv(overrides: Partial<{ scenarios: string; app: string; out: string }> = {}): string[] {
+function argv(
+  overrides: Partial<{ scenarios: string; app: string; out: string; afm: string }> = {},
+): string[] {
   const out: string[] = [];
   const push = (flag: string, value: string | undefined) => {
     if (value !== undefined) out.push(`--${flag}`, value);
@@ -68,13 +70,40 @@ function argv(overrides: Partial<{ scenarios: string; app: string; out: string }
   push("scenarios", overrides.scenarios ?? join(dir, "scenarios.json"));
   push("app", overrides.app ?? join(dir, "app"));
   push("out", overrides.out ?? join(dir, "out"));
+  push("afm", overrides.afm ?? afmPath());
   return out;
 }
+
+function afmPath(): string {
+  return join(dir, "specs", "design", "components", "trip-agent", "agent.afm.md");
+}
+
+/** The agent document, laid out where `specs/design/components/` puts it. */
+function writeAgentDoc(frontMatter: string): void {
+  const components = join(dir, "specs", "design", "components");
+  mkdirSync(join(components, "trip-agent"), { recursive: true });
+  mkdirSync(join(components, "hotel-api"), { recursive: true });
+  writeFileSync(
+    join(components, "hotel-api", "openapi.yaml"),
+    'openapi: 3.0.3\ninfo: { title: hotel-api, version: "1.0.0" }\npaths: {}\n',
+  );
+  writeFileSync(afmPath(), `---\n${frontMatter}---\n\n# Role\nBook hotels.\n`);
+}
+
+const AFM = `name: "trip-agent"
+x-aep:
+  tools:
+    openapi:
+      - component: "hotel-api"
+        baseUrl: "\${env:HOTEL_API_URL}"
+        allow: [listHotels]
+`;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "agent-eval-cli-"));
   mkdirSync(join(dir, "app"), { recursive: true });
   writeFileSync(join(dir, "scenarios.json"), JSON.stringify(SCENARIOS));
+  writeAgentDoc(AFM);
 });
 
 afterEach(() => {
@@ -115,6 +144,13 @@ describe("buildChildEnv", () => {
     expect(env.PROMPTFOO_DISABLE_TELEMETRY).toBe("1");
     expect(env.PROMPTFOO_DISABLE_UPDATE).toBe("1");
     expect(env.PROMPTFOO_DISABLE_SHARING).toBe("1");
+    // The agent under test reads the org's key under its own name; the
+    // judge reads it under promptfoo's. One credential, two names.
+    expect(env.MODEL_API_KEY).toBe("sk-ant-real");
+  });
+
+  it("never invents a MODEL_API_KEY when the org key is unset", () => {
+    expect("MODEL_API_KEY" in buildChildEnv({})).toBe(false);
   });
 
   it("omits an allowlisted key that was never set, rather than forwarding undefined", () => {
@@ -186,7 +222,7 @@ describe("runCli", () => {
   it("wraps a missing --app: no throw, a run-failure report written under --out", () => {
     const spawn: SpawnPromptfoo = () => ok();
     const result = runCli({
-      argv: ["--scenarios", join(dir, "scenarios.json"), "--out", join(dir, "out")],
+      argv: ["--scenarios", join(dir, "scenarios.json"), "--out", join(dir, "out"), "--afm", afmPath()],
       env: {},
       cwd: dir,
       spawnPromptfoo: spawn,
@@ -198,7 +234,7 @@ describe("runCli", () => {
   it("wraps a missing --out: no throw, falls back to writing the report under cwd", () => {
     const spawn: SpawnPromptfoo = () => ok();
     const result = runCli({
-      argv: ["--scenarios", join(dir, "scenarios.json"), "--app", join(dir, "app")],
+      argv: ["--scenarios", join(dir, "scenarios.json"), "--app", join(dir, "app"), "--afm", afmPath()],
       env: {},
       cwd: dir,
       spawnPromptfoo: spawn,
@@ -230,7 +266,12 @@ describe("runCli", () => {
       return ok();
     };
     runCli({
-      argv: ["--scenarios", join(dir, "scenarios.json"), "--app", "app", "--out", "out"],
+      argv: [
+        "--scenarios", join(dir, "scenarios.json"),
+        "--app", "app",
+        "--out", "out",
+        "--afm", afmPath(),
+      ],
       env: {},
       cwd: dir,
       spawnPromptfoo: spawn,
@@ -239,6 +280,61 @@ describe("runCli", () => {
     expect(isAbsolute(seenConfigPath)).toBe(true);
     expect(isAbsolute(seenOutPath)).toBe(true);
     expect(seenCwd).toBe(join(dir, "app"));
+  });
+
+  // The provider cannot receive a function through `vars`, so what it gets
+  // instead is the agent it must boot and the contracts it must stub. An
+  // emitted config without them is the vacuous run this task exists to end:
+  // every scenario errors and nothing is actually evaluated.
+  it("puts the app path and the declared tool contracts into the provider config", () => {
+    let config: unknown;
+    const spawn: SpawnPromptfoo = (args) => {
+      const configPath = args[args.indexOf("-c") + 1]!;
+      config = JSON.parse(readFileSync(configPath, "utf8")) as unknown;
+      const outPath = args[args.indexOf("-o") + 1]!;
+      writeFileSync(outPath, JSON.stringify(FAILING_OUT_JSON));
+      return ok();
+    };
+    runCli({ argv: argv(), env: {}, cwd: dir, spawnPromptfoo: spawn });
+    const provider = (config as { providers: Array<{ config: Record<string, unknown> }> })
+      .providers[0]!;
+    expect(provider.config.appDir).toBe(join(dir, "app"));
+    expect(provider.config.toolStubs).toEqual([
+      {
+        envVar: "HOTEL_API_URL",
+        specPath: join(dir, "specs", "design", "components", "hotel-api", "openapi.yaml"),
+      },
+    ]);
+  });
+
+  // The one thing that must never be in that file: it is written into the
+  // build's output directory, which a PR may carry.
+  it("never writes the model credential into the emitted config", () => {
+    let text = "";
+    const spawn: SpawnPromptfoo = (args) => {
+      text = readFileSync(args[args.indexOf("-c") + 1]!, "utf8");
+      writeFileSync(args[args.indexOf("-o") + 1]!, JSON.stringify(FAILING_OUT_JSON));
+      return ok();
+    };
+    runCli({
+      argv: argv(),
+      env: { ANTHROPIC_API_KEY: "sk-ant-secret" },
+      cwd: dir,
+      spawnPromptfoo: spawn,
+    });
+    expect(text).not.toContain("sk-ant-secret");
+  });
+
+  it("reports a missing --afm as a run failure rather than evaluating an agent with no tools wired", () => {
+    const spawn: SpawnPromptfoo = () => ok();
+    const result = runCli({
+      argv: ["--scenarios", join(dir, "scenarios.json"), "--app", join(dir, "app"), "--out", join(dir, "out")],
+      env: {},
+      cwd: dir,
+      spawnPromptfoo: spawn,
+    });
+    expect(result.markdown).toMatch(/run itself failed/i);
+    expect(result.markdown).toContain("--afm");
   });
 
   it("never forwards the parent's full environment to the child (Important 5)", () => {

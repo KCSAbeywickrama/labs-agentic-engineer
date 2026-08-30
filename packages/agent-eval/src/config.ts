@@ -35,7 +35,7 @@ export const THRESHOLD = 0.8;
  */
 export function buildPromptfooConfig(
   file: ScenarioFile,
-  opts: { providerPath: string; graderModel: string },
+  opts: { providerPath: string; graderModel: string; providerConfig?: Record<string, unknown> },
 ): unknown {
   // An unpinned or missing grader makes a score meaningless between runs —
   // this is the whole harness's unit of measure, so refuse to build a config
@@ -45,7 +45,13 @@ export function buildPromptfooConfig(
   }
   return {
     description: `agent evaluation — ${file.component}`,
-    providers: [{ id: `file://${opts.providerPath}` }],
+    // The provider's `config` is how the agent under test reaches this run:
+    // `vars` is JSON, so it can carry a scenario but never the FUNCTION that
+    // talks to an agent. Everything here is serializable and none of it is a
+    // credential — the config file lands in the build's output directory.
+    providers: [
+      { id: `file://${opts.providerPath}`, config: opts.providerConfig ?? {} },
+    ],
     prompts: ["{{scenario.brief.goal}}"],
     defaultTest: { options: { provider: opts.graderModel } },
     tests: file.scenarios.map((s) => ({

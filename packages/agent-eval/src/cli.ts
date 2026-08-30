@@ -29,6 +29,7 @@ import { parseScenarios } from "./scenario.js";
 import { buildPromptfooConfig } from "./config.js";
 import { readVerdict } from "./verdict.js";
 import { renderReport, renderRunFailureReport } from "./report.js";
+import { readToolStubs } from "./agent-doc.js";
 
 export interface SpawnResult {
   status: number | null;
@@ -93,6 +94,12 @@ export function buildChildEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
     const value = env[key];
     if (value !== undefined) out[key] = value;
   }
+  // The agent under test and the judge share ONE credential — the org's
+  // Anthropic key — under the two names each expects. It travels as an
+  // environment variable and never through the emitted config file, which
+  // is written into the build's output directory. Never the coding agent's
+  // own OAuth token: that is not the organisation's model credential.
+  if (env.ANTHROPIC_API_KEY !== undefined) out.MODEL_API_KEY = env.ANTHROPIC_API_KEY;
   return out;
 }
 
@@ -151,6 +158,12 @@ export function runCli(opts: RunCliOptions): RunCliResult {
     outDir = resolve(opts.cwd, arg(opts.argv, "out"));
     mkdirSync(outDir, { recursive: true });
     const appDir = resolve(opts.cwd, arg(opts.argv, "app"));
+    // Required, not optional. The agent document is what says which provider
+    // contracts must be stubbed; without it the agent boots with its tool
+    // addresses unset, and every failure that follows reads as bad behaviour
+    // rather than as a harness that never wired the tools.
+    const afmPath = resolve(opts.cwd, arg(opts.argv, "afm"));
+    const toolStubs = readToolStubs(afmPath);
 
     const file = parseScenarios(JSON.parse(readFileSync(scenariosPath, "utf8")));
     component = file.component;
@@ -165,6 +178,12 @@ export function runCli(opts: RunCliOptions): RunCliResult {
         buildPromptfooConfig(file, {
           providerPath: resolveProviderPath(),
           graderModel: resolveGraderModel(opts.env),
+          // The stubs are STARTED by the provider, inside the promptfoo
+          // child, not here: `spawnPromptfoo` blocks this process's event
+          // loop for the whole run, so a server listening here would never
+          // answer a request. The CLI decides WHAT to stub; the provider
+          // serves it.
+          providerConfig: { appDir, toolStubs },
         }),
         null,
         2,

@@ -23,9 +23,11 @@
 // itself, which no unit test importing `src/cli.ts` can ever execute; only a
 // real run of the actual file can pin its exit code.
 //
-// No network call happens: today's `provider.ts` throws before any model
-// call (it requires an `ask` var the config never supplies), so promptfoo
-// records a per-scenario error and never reaches a grader.
+// No network call happens and no key is spent: the `--app` it points at
+// holds no built agent, so the provider's boot fails before any model call
+// and promptfoo records a per-scenario error rather than reaching a grader.
+// That is also the property this test now pins twice over — a harness
+// failure must still be reported and still exit 0.
 
 import { describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
@@ -59,9 +61,21 @@ describe("bin/agent-eval.ts (real subprocess, real local promptfoo)", () => {
       mkdirSync(appDir, { recursive: true });
       writeFileSync(join(dir, "scenarios.json"), JSON.stringify(SCENARIOS));
 
+      // A real agent document, at the location the convention fixes. This
+      // one declares no tools, so nothing is stubbed and nothing is served.
+      const afmPath = join(dir, "specs", "design", "components", "trip-agent", "agent.afm.md");
+      mkdirSync(join(dir, "specs", "design", "components", "trip-agent"), { recursive: true });
+      writeFileSync(afmPath, '---\nname: "trip-agent"\n---\n\n# Role\nBook hotels.\n');
+
       const result = spawnSync(
         TSX_BIN,
-        [BIN_ENTRY, "--scenarios", join(dir, "scenarios.json"), "--app", appDir, "--out", outDir],
+        [
+          BIN_ENTRY,
+          "--scenarios", join(dir, "scenarios.json"),
+          "--app", appDir,
+          "--out", outDir,
+          "--afm", afmPath,
+        ],
         { encoding: "utf8", timeout: 60_000 },
       );
 
@@ -74,6 +88,12 @@ describe("bin/agent-eval.ts (real subprocess, real local promptfoo)", () => {
       // score that must still exit 0.
       expect(report).toMatch(/Score: 0\.00/);
       expect(report).not.toMatch(/run itself failed/i);
+
+      // And promptfoo really did reach OUR provider, which really did try to
+      // boot the agent named by `--app`. Without this the test would pass
+      // just as happily against a provider that was never wired in at all.
+      const raw = readFileSync(join(outDir, "out.json"), "utf8");
+      expect(raw).toContain("never became ready");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

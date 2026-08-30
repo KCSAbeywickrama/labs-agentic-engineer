@@ -37,3 +37,18 @@ rather than assuming it stays promptfoo-only.
 If a future Trivy scan flags `js-yaml@5.x`, check the advisory's affected
 range against 5.3.0/5.2.3 before touching this — the 5.x line was clean as of
 this writing.
+
+## `yaml@^2.8.4` — reading the design contracts
+
+The harness reads two committed YAML documents at run time: the agent's
+`agent.afm.md` front matter, which names the provider contracts to stub and the
+env var that addresses each, and each provider's `openapi.yaml`, which the stub
+server serves from its own declared examples. Both are inputs the evaluation
+cannot invent.
+
+`yaml` (not `js-yaml`) is what the rest of this monorepo already uses for
+design documents — `@aep/design-projection`, `@aep/agent-stream`, `playground`
+— so a reader moving between packages meets one parser. It also reads JSON
+unchanged, YAML being a superset, so a contract committed in either form needs
+no special case. The `js-yaml` overrides above stay promptfoo's business and
+are untouched by this.
