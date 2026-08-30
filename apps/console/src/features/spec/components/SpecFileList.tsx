@@ -57,8 +57,7 @@ import {
   buildDesignSection,
   selectionKey,
   DESIGN_CELL_PATH,
-  ROLES_JSON_PATH,
-  SECURITY_MD_PATH,
+  SECURITY_JSON_PATH,
   type SpecSelection,
 } from "../api/designTree";
 
@@ -126,12 +125,6 @@ export function SpecFileList({
   // enough for every group.
   const allFiles = [...files, ...ghosts].sort((a, b) => a.path.localeCompare(b.path));
 
-  // Which of the two security files the Security row speaks for: the one being
-  // written wins, then the one the plan names at all, else the prose.
-  const securityStatusPath =
-    [SECURITY_MD_PATH, ROLES_JSON_PATH].find((p) => planByPath.get(p) === "writing") ??
-    [SECURITY_MD_PATH, ROLES_JSON_PATH].find((p) => planByPath.has(p)) ??
-    SECURITY_MD_PATH;
 
   // The PRD leads, whatever it sorts as. Everything else under Requirements
   // elaborates it — a feature file is depth on a story the PRD defines — and on
@@ -247,7 +240,15 @@ export function SpecFileList({
               label={reasonCount(section.reasons)}
               onClick={() => setProblemsFor(section)}
               aria-label={`${section.title}: ${reasonCount(section.reasons)} to resolve`}
-              sx={{ height: 20, cursor: "pointer" }}
+              sx={{
+                height: 20,
+                cursor: "pointer",
+                // MUI's small chip gives its icon a 4px leading margin and its
+                // label 8px of trailing padding, so the pill was lopsided: the
+                // triangle sat almost against the left border while the count
+                // had twice the room on the right. Even it up.
+                "& .MuiChip-icon": { ml: 0.75, mr: -0.25 },
+              }}
             />
           </Tooltip>
         )}
@@ -380,21 +381,15 @@ export function SpecFileList({
             {design.overview.map((f) =>
               row(fileSel(f.path), fileLabel(f.path), <LayoutDashboard size={16} />),
             )}
-            {/* ONE entry for both halves of the security design — the roles and
-                their test users, and the prose saying how a caller's role is
-                resolved. Two files, one subject; the panel tabs between them. */}
+            {/* ONE rail entry for security.json — present file shows the row;
+                missing file hides it. */}
             {design.hasSecurity &&
               row(
                 { kind: "security" },
                 "Security",
                 <ShieldCheck size={16} />,
                 false,
-                // ONE entry, two files (the prose and the roles), so its status
-                // is the more ADVANCED of the two: a row that reported only
-                // `security.md` sat still while `roles.json` was being written,
-                // and one that picked whichever was merely present could show
-                // "planned" over a file already going down.
-                securityStatusPath,
+                SECURITY_JSON_PATH,
               )}
             {design.components.map((c) => {
               const collapsed = collapsedComponents.has(c.name);

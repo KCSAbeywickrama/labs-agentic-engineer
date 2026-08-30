@@ -199,7 +199,7 @@ export async function attachAndFoldTurn(
   };
 
   /**
-   * Fold one declare_plan payload (#576, ADR-0022). Idempotent through the
+   * Fold one declare_plan payload (#576, ADR-0025). Idempotent through the
    * store's union, so the belt-and-braces double publish (input-end, then the
    * complete tool-call — same pattern as the register draft) cannot double
    * anything; the chat row appears only when the call genuinely added entries.

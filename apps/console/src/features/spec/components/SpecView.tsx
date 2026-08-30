@@ -96,7 +96,7 @@ import { OpenApiView } from "@aep/ui-openapi-view";
 import { DesignView } from "@aep/ui-design-view";
 import type { DependencyStatusInfo } from "@aep/ui-design-view";
 import { ValidationView } from "@aep/ui-validation-view";
-import { SECURITY_MD_PATH, type SpecSelection } from "../api/designTree";
+import { type SpecSelection } from "../api/designTree";
 import { DESIGN_CELL_PATH, componentOf, followSelection } from "../api/designTree";
 import { useSession } from "../../../auth/SessionContext";
 
@@ -238,6 +238,7 @@ export function SpecView({ projectName }: { projectName: string }) {
   // wants to be, so we auto-select it.
   const search = useSearch({ strict: false }) as {
     generate?: "design";
+    view?: "architecture";
   };
   const generate = search.generate;
   const agentInRoom = collab.peers.some((p) => p.kind === "agent");
@@ -250,7 +251,14 @@ export function SpecView({ projectName }: { projectName: string }) {
     if (generate === "design") setSelection({ kind: "cell-diagram" });
   }, [generate]);
 
-  // Follow the write (#576, ADR-0023): while a turn runs, the editor selects
+  // `?view=architecture` — arriving from the overview's architecture panel,
+  // which links here precisely because it is drawing a diagram. Runs once on
+  // the param, so a rail click afterwards is never undone.
+  useEffect(() => {
+    if (search.view === "architecture") setSelection({ kind: "cell-diagram" });
+  }, [search.view]);
+
+  // Follow the write (#576, ADR-0026): while a turn runs, the editor selects
   // each artifact as its write starts, so the passive watcher — the default
   // posture at turn start — sees the work land in whatever renderer that
   // artifact already has. The FIRST manual selection is a declaration of
@@ -1065,8 +1073,13 @@ export function SpecView({ projectName }: { projectName: string }) {
                 >
                   {/* span so the tooltip works while the button is disabled */}
                   <span>
+                    {/* Default size, matching "Generate design" beside it.
+                        `size="small"` made it 30px against its neighbour's 36,
+                        so two buttons on one row sat at two different weights
+                        with nothing meaning the difference — this is a
+                        secondary action, and `variant="outlined"` is what
+                        already says so. */}
                     <Button
-                      size="small"
                       variant="outlined"
                       disabled={agentBusy}
                       onClick={() => seedChat("/feature")}
@@ -1332,36 +1345,10 @@ export function SpecView({ projectName }: { projectName: string }) {
                 />
               ) : effectiveSelection.kind === "security" ? (
                 <SecurityPanel
-                  rolesJson={security.rolesJson}
-                  onRolesChange={security.onRolesChange}
+                  securityJson={security.securityJson}
                   live={security.live}
-                  actions={security.actions}
-                  prose={
-                    security.proseFragment && collab.provider ? (
-                      <SpecMdEditor
-                        key={`${SECURITY_MD_PATH}:md`}
-                        fragment={security.proseFragment}
-                        provider={collab.provider}
-                        self={collab.self}
-                        agentStreaming={agentBusy}
-                        links={{
-                          path: SECURITY_MD_PATH,
-                          knownPaths: specPaths,
-                          // A link inside a document is the reader choosing
-                          // where to go, so it ends follow-the-write like any
-                          // other manual pick (ADR-0023).
-                          open: (path) => selectManually({ kind: "file", path }),
-                        }}
-                      />
-                    ) : (
-                      <Box sx={{ p: 3 }}>
-                        <Typography variant="body2" color="text.secondary">
-                          The access rules are edited live, and the
-                          collaboration service is not reachable right now.
-                        </Typography>
-                      </Box>
-                    )
-                  }
+                  isPending={security.isPending}
+                  isError={security.isError}
                 />
               ) : effectiveSelection.kind === "wireframe" ? (
                 <WireframePanel
@@ -1562,7 +1549,7 @@ export function SpecView({ projectName }: { projectName: string }) {
                 )
               ) : pendingPlanPath ? (
                 /* Following the write reached this document before the room
-                   did (#576, ADR-0023). A write is announced when its tool
+                   did (#576, ADR-0026). A write is announced when its tool
                    input resolves a path, but only SOME bodies stream into the
                    doc as they are typed — a component `design.json` arrives
                    whole, when the call executes. In that window the file is not

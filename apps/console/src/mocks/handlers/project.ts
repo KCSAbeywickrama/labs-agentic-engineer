@@ -21,6 +21,9 @@ import {
   projectSectionError,
   projectSpecFiles,
   projectStatuses,
+  TRACK_SCENARIOS,
+  trackOverrides,
+  type TrackScenario,
   projectTags,
   projectTasks,
   recordAppliedFiles,
@@ -58,6 +61,17 @@ function scenario(): ProjectScenario {
   // one devtools key is enough to see it: the base defaults to the deployed story
   // rather than the usual mid-build one.
   return validationScenario() ? "deployed" : "building";
+}
+
+// The track override (aep:mock:track): the spec/build/deploy combinations the
+// scenario ladder cannot express, because each of its rungs has the three
+// stages agreeing with each other. Unknown values are ignored, same as the
+// validation override — a typo should not look like the switch is broken.
+function trackScenario(): TrackScenario | null {
+  const raw = localStorage.getItem("aep:mock:track");
+  return raw && TRACK_SCENARIOS.includes(raw as TrackScenario)
+    ? (raw as TrackScenario)
+    : null;
 }
 
 // The validation override (aep:mock:validation), or null when the project
@@ -112,7 +126,11 @@ export const projectHandlers = [
   http.get("*/api/v1/projects/:projectName/status", () =>
     respond((s) => {
       const v = validationScenario();
-      const base = projectStatuses[s];
+      const track = trackScenario();
+      const scenarioBase = projectStatuses[s];
+      // The track override replaces all three aggregates together — they only
+      // mean anything as a set.
+      const base = track ? { ...scenarioBase, ...trackOverrides[track] } : scenarioBase;
       // Only deploy.validation moves: the rest of the status is the project
       // scenario's, so the override can be read against any of them.
       return v ? { ...base, deploy: { ...base.deploy, validation: v } } : base;

@@ -16,10 +16,10 @@
  * under the License.
  */
 
-// The declared plan (#576, ADR-0022): what the turn said it is ABOUT to write,
+// The declared plan (#576, ADR-0025): what the turn said it is ABOUT to write,
 // reconciled against what it actually writes. runTurn folds `declare_plan`
 // tool-calls and file mutations into this store; the spec rail subscribes for
-// its checklist and count, and SpecView for follow-the-write (ADR-0023).
+// its checklist and count, and SpecView for follow-the-write (ADR-0026).
 // Lives next to chatStore so runTurn does not import the spec feature.
 //
 // Every status is DERIVED from the stream, never self-reported by the agent:
@@ -58,7 +58,7 @@ export interface PlanSnapshot {
   entries: PlanEntry[];
   /**
    * The path an agent write is currently streaming — tracked for EVERY file
-   * mutation, declared or not, because follow-the-write (ADR-0023) steers by
+   * mutation, declared or not, because follow-the-write (ADR-0026) steers by
    * it and a turn without a plan still writes.
    */
   writingPath: string | null;

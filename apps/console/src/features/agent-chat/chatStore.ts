@@ -293,7 +293,7 @@ export function upsertQuestionMessage(
 }
 
 /**
- * Add a plan activity row (#576, ADR-0022) — the declare_plan call surfacing
+ * Add a plan activity row (#576, ADR-0025) — the declare_plan call surfacing
  * in the chat like any other tool step. Keyed by toolCallId so the belt-and-
  * braces double publish (tool-input-end, then tool-call) lands on one row.
  */

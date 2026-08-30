@@ -153,7 +153,7 @@ function StepLine({ msg, showFile }: { msg: ToolMessage; showFile: boolean }) {
 }
 
 /**
- * A declare_plan row (#576, ADR-0022): the agent said what it is ABOUT to
+ * A declare_plan row (#576, ADR-0025): the agent said what it is ABOUT to
  * write. One plain rail row — the plan's real rendering is the spec rail's
  * checklist; this row only keeps the chat's activity record complete, the way
  * every other tool call leaves a step.

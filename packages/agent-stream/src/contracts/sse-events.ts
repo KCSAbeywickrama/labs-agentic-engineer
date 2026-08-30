@@ -227,13 +227,13 @@ export function buildAnswersInstruction(
   return `${ANSWERS_PREFIX}\n${lines.join("\n")}`;
 }
 
-// --- declare_plan (fire-and-forget, console ADR-0022 / #576) -----------------
+// --- declare_plan (fire-and-forget, console ADR-0025 / #576) -----------------
 //
 // The agent declares the spec-bundle paths it is ABOUT to write, so the
 // console's spec rail can render a checklist (planned → writing → done) and an
 // honest count instead of only a log of what already happened. Unlike the HITL
 // tools above, the call does NOT end the turn: `execute` resolves immediately
-// and the agent keeps working (the fire-and-forget class, console ADR-0022).
+// and the agent keeps working (the fire-and-forget class, console ADR-0025).
 //
 // The plan may GROW: the design agent writes the cell first, and only the cell
 // fixes the component set, so later calls add the per-component files.

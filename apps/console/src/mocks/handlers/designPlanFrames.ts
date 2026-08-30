@@ -32,17 +32,39 @@ import { DECLARE_PLAN_TOOL } from "@aep/agent-stream";
 
 const CELL = "specs/design/design.cell";
 const OVERVIEW = "specs/design/design.md";
-const SECURITY = "specs/design/security.md";
+const SECURITY = "specs/design/security.json";
 const PORTAL = "specs/design/components/expense-portal/design.json";
 const API = "specs/design/components/expense-api/design.json";
 const CRITERIA = "specs/validation/validation-criteria.json";
 
+// The document each write delivers, as plain text — `addFile` below is what
+// escapes it for the JSON input stream, so a document may hold quotes and
+// newlines without being hand-escaped here.
 const CONTENT: Record<string, string> = {
   [CELL]:
-    "cell expense-approval {\\n  component expense-portal kind: web-app\\n  component expense-api kind: service\\n}",
+    "cell expense-approval {\n  component expense-portal kind: web-app\n  component expense-api kind: service\n}",
   [OVERVIEW]:
-    "# Design overview\\n\\nTwo components: the portal is the user-facing surface, the API owns the expense record.",
-  [SECURITY]: "# Security\\n\\nEnd-user sign-in via the Platform IdP.",
+    "# Design overview\n\nTwo components: the portal is the user-facing surface, the API owns the expense record.",
+  [SECURITY]: JSON.stringify(
+    {
+      version: 1,
+      coldStartRole: "approver",
+      publicComponents: [],
+      roles: [
+        {
+          name: "approver",
+          description: "Approves submitted expenses.",
+          stories: [1],
+          grantedBy: "Platform IdP",
+          permissions: [{ component: "expense-api", actions: ["approve"] }],
+        },
+      ],
+      testUsers: [{ username: "test-approver", role: "approver" }],
+      thunder: { name: "expense-approval", type: "browser" },
+    },
+    null,
+    2,
+  ),
   [PORTAL]: '{"componentName":"expense-portal","kind":"web-app"}',
   [API]: '{"componentName":"expense-api","kind":"service"}',
   [CRITERIA]: '{"criteria":[{"story":1,"then":"submission is refused without a receipt"}]}',
@@ -55,7 +77,14 @@ function addFile(id: string, path: string): MockFrame[] {
   return [
     { type: "tool-input-start", id, toolName: "addFile" },
     { type: "tool-input-delta", id, delta: `{"path":"${path}","content":"` },
-    { type: "tool-input-delta", id, delta: `${CONTENT[path]}"}` },
+    // JSON.stringify minus its own quotes: the document goes down the wire
+    // escaped for the string it is being spliced into, so a quote or a newline
+    // in the content cannot break the input the fold parses.
+    {
+      type: "tool-input-delta",
+      id,
+      delta: `${JSON.stringify(CONTENT[path] ?? "").slice(1, -1)}"}`,
+    },
     { type: "tool-input-end", id },
     {
       type: "tool-result",
@@ -105,7 +134,7 @@ export function designPlanFrames(turnId: string, failing: boolean): MockFrame[] 
     },
     { type: "text-delta", delta: "Writing the design overview… " },
     ...addFile(`f-overview-${turnId}`, OVERVIEW),
-    { type: "text-delta", delta: "Writing the security notes… " },
+    { type: "text-delta", delta: "Writing the security design… " },
     ...addFile(`f-security-${turnId}`, SECURITY),
     { type: "text-delta", delta: "Writing the design for the expense portal… " },
     ...addFile(`f-portal-${turnId}`, PORTAL),

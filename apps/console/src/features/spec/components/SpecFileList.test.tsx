@@ -49,6 +49,13 @@ function entries(...paths: string[]): SpecFileEntry[] {
     .sort((a, b) => a.path.localeCompare(b.path));
 }
 
+/** Design-group files — the existing `entries` helper marks everything requirements. */
+function designEntries(...paths: string[]): SpecFileEntry[] {
+  return paths
+    .map((path) => ({ path, sha: "sha", group: "designs" as const }))
+    .sort((a, b) => a.path.localeCompare(b.path));
+}
+
 function renderList(files: SpecFileEntry[], sections?: RailSection[], onReason = () => {}) {
   render(
     <OxygenUIThemeProvider theme={OxygenTheme}>
@@ -276,5 +283,33 @@ describe("SpecFileList — the declared plan", () => {
     expect(
       errored!.hasAttribute("disabled") || errored!.getAttribute("aria-disabled") === "true",
     ).toBe(true);
+  });
+});
+
+describe("SpecFileList — Security rail from security.json", () => {
+  it("hides Security when only design.md exists", () => {
+    renderList(designEntries("specs/design/design.md"));
+    expect(screen.queryByRole("button", { name: "Security" })).not.toBeInTheDocument();
+  });
+
+  it("shows a Security button for security.json, not a security.json filename row", () => {
+    renderList(
+      designEntries("specs/design/design.md", "specs/design/security.json"),
+    );
+    expect(screen.getByRole("button", { name: "Security" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "security.json" })).not.toBeInTheDocument();
+  });
+
+  it("does not show Security for leftover security.md and roles.json alone", () => {
+    renderList(
+      designEntries(
+        "specs/design/design.md",
+        "specs/design/security.md",
+        "specs/design/roles.json",
+      ),
+    );
+    expect(screen.queryByRole("button", { name: /^Security$/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^security$/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "roles.json" })).toBeInTheDocument();
   });
 });

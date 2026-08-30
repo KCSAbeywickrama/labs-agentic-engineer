@@ -23,7 +23,7 @@ import { peekPlan, subscribePlan, type PlanSnapshot } from "./planStore.js";
 /**
  * The project's declared plan (#576), or null when no plan is live and no
  * wreckage stands. The spec rail renders its checklist and count from this;
- * SpecView steers follow-the-write (ADR-0023) by its `writingPath`.
+ * SpecView steers follow-the-write (ADR-0026) by its `writingPath`.
  */
 export function usePlan(
   org: string,

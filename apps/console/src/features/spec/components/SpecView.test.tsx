@@ -53,9 +53,12 @@ type BuildResponse = components["schemas"]["BuildResponse"];
 
 // --- Router -----------------------------------------------------------
 const mockNavigate = vi.fn();
+const mockSearch = vi.hoisted(() => ({
+  current: {} as { generate?: "design"; view?: "architecture" },
+}));
 vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => mockNavigate,
-  useSearch: () => ({}),
+  useSearch: () => mockSearch.current,
 }));
 
 // --- oxygen-ui: only useAppShell needs a stub (it throws outside an
@@ -108,6 +111,7 @@ beforeEach(() => {
   mockCollab = soloCollab();
   mockSpecAgent = "";
   mockSpecFlow = "";
+  mockSearch.current = {};
 });
 
 // --- CellDiagramPanel: its own behavior is covered by
@@ -251,11 +255,10 @@ vi.mock("../api/queries", () => ({
 // panel's behavior are covered by their own tests.
 vi.mock("../hooks/useSecurityEntry", () => ({
   useSecurityEntry: () => ({
-    rolesJson: null,
+    securityJson: null,
     live: undefined,
-    onRolesChange: undefined,
-    proseFragment: null,
-    actions: { reveal: vi.fn(), rotate: vi.fn(), remove: vi.fn() },
+    isPending: false,
+    isError: false,
   }),
 }));
 
@@ -1258,7 +1261,7 @@ describe("SpecView build dependency drawer (#252 Task 10)", () => {
   });
 });
 
-describe("SpecView follows the write (#576, ADR-0023)", () => {
+describe("SpecView follows the write (#576, ADR-0026)", () => {
   const chatKey = chatKeyFor("acme", "proj1");
   const CELL = "specs/design/design.cell";
 
@@ -1269,6 +1272,21 @@ describe("SpecView follows the write (#576, ADR-0023)", () => {
   });
 
   afterEach(() => clearPlan(chatKey));
+
+  // The overview's architecture panel links here with `?view=architecture`. It
+  // offers that link BECAUSE it is drawing a diagram, so landing the reader on
+  // the workspace's default file would make them hunt the rail for the very
+  // thing they clicked.
+  it("opens the Architecture tab on ?view=architecture", () => {
+    mockSearch.current = { view: "architecture" };
+    render(<SpecView projectName="proj1" />);
+    expect(screen.getByTestId("cell-diagram-panel")).toBeInTheDocument();
+  });
+
+  it("opens the workspace's default file without the param", () => {
+    render(<SpecView projectName="proj1" />);
+    expect(screen.queryByTestId("cell-diagram-panel")).not.toBeInTheDocument();
+  });
 
   it("selects each artifact as its write starts — the cell opens as Architecture", () => {
     render(<SpecView projectName="proj1" />);
@@ -1295,7 +1313,7 @@ describe("SpecView follows the write (#576, ADR-0023)", () => {
     expect(screen.queryByTestId("cell-diagram-panel")).not.toBeInTheDocument();
   });
 
-  // The window ADR-0023 exists to serve: a write is announced when its tool
+  // The window ADR-0026 exists to serve: a write is announced when its tool
   // input resolves a path, but the body reaches the room later — some bodies
   // stream in as they are typed, a component design.json arrives whole. Without
   // this the pane met that moment with "Select a file to view its content."

@@ -44,27 +44,15 @@ concept for *the agreed description of what we're building*.
 | `DESIGN` (not `DESIGNS` — one design, several files) | **Architecture** · **Design overview** · **Security** · then per-component | `specs/design/` |
 | `VALIDATION` | **Acceptance criteria** | `specs/validation/validation-criteria.json` |
 
-**Security is one rail entry with two tabs**, because it is one subject held in two
-files and a user does not think of it as two documents:
+**Security** is one rail entry, one page:
 
-| tab | what it holds | repo path |
+| artifact | what it holds | repo path |
 |---|---|---|
-| **Security architecture** | how a caller's role is resolved, and which surfaces are public | `specs/design/security.md` |
-| **Roles & users** | which roles the project uses, what each may do, and its test users | `specs/design/roles.json` |
+| **Security** | which Roles this project uses, what each may do within this project, its Test users, and the Thunder application client | `specs/design/security.json` |
 
-**Security architecture opens first.** The mechanism is the decision; the roster
-is what follows from it, so a reader arriving at Security meets the reasoning
-before a table of accounts. It also matches every other section, where the prose
-artifact leads.
-
-The prose tab keeps a pane to itself rather than sharing a scroll container with
-the roles table: it is a live collaborative editor with its own toolbar, bubble
-menu and streaming autoscroll, and form controls beside it fight all three.
-
-The repo paths **do not change**. They are the internal language, consumed by the agents, the
-runner's validation cycle and aep-api; renaming them buys nothing a user can see and costs a
-migration for every existing project. This table *is* the mapping — keep it, so nobody later
-"fixes" the inconsistency in the wrong direction. It holds only while the user never sees a
+Agents, the runner's validation cycle and aep-api consume that repo path
+internally. This table *is* the mapping — keep it, so nobody later "fixes" the
+inconsistency in the wrong direction. It holds only while the user never sees a
 path, which requires the agent to stop quoting them
 ([#530](https://github.com/wso2/labs-agentic-engineer/issues/530)).
 
@@ -200,15 +188,36 @@ dialog's copy promises.
 
 | Situation | Says |
 |---|---|
-| Merged, and the issue closed with it | **`Done`** |
+| Its pull request merged | **`Merged`** |
 | Waiting on a dependency someone must configure | **`Blocked`** + **`Configure in Resources`** |
 | The agent is on it now | **`In progress`** + elapsed time |
-| The agent finished, the pull request is waiting on a human | **`Review`** |
+| Its pull request is open and nothing has merged it | **`PR sent`** |
 | Nothing has run yet | **`Pending`** |
 
+**One pull request, several rows.** A build session dispatches ONE pull request
+that claims a SET of issues, so every issue in that set says the same thing —
+the row is reporting the pull request's state, not a state of its own. That is
+why three rows can all read `PR sent` at once.
+
+`PR sent` is the one place the console keeps an acronym (naming rule 4). It sits
+inches from the `#9` chip the row already shows and from the Coding agent log
+that names pull requests by number; the reader here is the engineer whose issue
+it is, and *`Pull request sent`* is a chip twice the width saying nothing more.
+
 Counts read **`11 in this build · 5 done · 2 need your attention`**. *Need your
-attention* folds blocked and in-review together deliberately: both are waiting
+attention* folds blocked and PR-sent together deliberately: both are waiting
 on the reader, which is what makes them one number.
+
+**A row's title is text, not a link.** The per-task detail page is not a
+destination this surface sends anyone to — the row already carries what that
+page led with (state, the agent's newest note, elapsed time), and the `#4` chip
+goes to the issue itself, on GitHub. A link to a view nobody uses is a dead end
+that looks like a destination.
+
+**Rows read ascending by issue number** — the order the milestone was planned
+in. The gates the platform files first come first, and the work that depends on
+them follows. `list-tasks` promises no order, so GitHub's newest-first default
+was showing through and the list read backwards.
 
 The row's second line is the issue's **newest comment by any author**, flattened
 to its first non-empty line. Not "the agent's latest note": the platform's own
@@ -318,27 +327,65 @@ attributed to *you*. The turn itself carries the line
 ([#562](https://github.com/wso2/labs-agentic-engineer/issues/562)); the transcript store cannot,
 because it only records a turn once the turn has finished.
 
-### Card grammar
+### Track grammar
 
-Every stage card says the same things in the same slots, so the pattern is learned once:
+The three stages are **one track**, not three cards: one bar, three legs, each carrying a step
+numeral and separated by an arrowhead at the seam. Three cards with three borders read as three
+features; they are one version moving through three gates.
 
-- **which stage** — the title
+Every leg says the same things in the same slots, so the pattern is learned once:
+
+- **which stage** — a step numeral (`01`/`02`/`03`) and the name. The numerals are not decoration:
+  you cannot build before you publish or deploy before you build, so order is information here
 - **where it stands** — one line, always the user's situation, never the system's dependency
-- **what you can do** — a CTA, present *only* when there is something to do (per
-  [#522](https://github.com/wso2/labs-agentic-engineer/issues/522), when the flow stopped there)
 - **version** — only when one exists. No em-dash placeholder; blank says "not yet" better
-- **progress** — only while something is running
+- **where it goes** — the whole leg is a link to that stage's section
 
-| state | line | version | CTA |
+| state | line | version | lit |
 |---|---|---|---|
-| not reached | *Nothing built yet* | — | none |
-| running | *Building 3 of 7 tasks* | yes | none |
-| settled | *Built* | yes | view |
-| failed | *Build failed* | yes | fix |
+| not reached | *Nothing built yet* | — | no |
+| the platform is working | *Building* | yes | accent, pulsing |
+| waiting on **you** | *Draft changes, not published* | yes | amber, still |
+| settled | *Built* | yes | no |
+| failed | *Build failed* | yes | error, still |
 
-#### The spec card: one button, one line
+**Nothing on the track is a button.** Every way of *starting* work lives on the page that owns it,
+which is where the context to choose it lives too — the spec view offers *generate designs* and
+*start building*, and a `Publish` button on the overview would be the renamed-caption mistake below
+wearing a different verb. This supersedes the earlier rule that a stage carried a CTA "when the flow
+stopped there" ([#522](https://github.com/wso2/labs-agentic-engineer/issues/522)): the card that rule
+was written for was not clickable, and a button inside a link is a broken target.
 
-**The button never changes. It says *Open spec*, in every state.**
+**Lit means unsettled, and the colour says who is holding it.** Accent with a pulse is the platform
+working; amber and still is the platform waiting on the user. A page that animates while it waits
+for you to type is lying about who is busy. A settled leg is quiet — if every visit glows, the glow
+stops meaning anything.
+
+**More than one leg can be lit.** Amending the spec while the platform builds what you last
+published is a legitimate state, not a race, and any rule that forces a single "current" stage has
+to pick one and will pick wrong.
+
+**Validation is a phase of deploying, not a fourth leg.** It only runs once the components are up,
+so it rides the deploy line (*Live in dev · validating*). A fourth gate would be empty in most
+states, and empty gates teach the reader to ignore the bar. A red verdict fails the leg and **keeps
+its version chip** — that version really is what is running in dev.
+
+#### The summary line
+
+One sentence under the track, or nothing. It earns its slot **only** by saying something no single
+leg can — relating two legs to each other:
+
+| situation | sentence |
+|---|---|
+| amending a spec while the last published version builds | *Building v1 — your draft changes are not in it. Publish the spec to build them.* |
+| a newer version building over one still serving dev | *Building v2. v1 stays live in dev until it deploys.* |
+
+Everything else has **no summary**. A sentence that paraphrases the leg above it is the same
+"says it twice" problem the status chip was moved for.
+
+#### The spec leg: no button, one line
+
+**The leg is a link to the spec view, in every state — and it was a button before it was a link.**
 
 It used to be three buttons — *Generate spec*, then *Open spec*, then *Continue spec* — and it walked
 all three during a single kickoff **with no input from the user at all**, because each state was
@@ -361,7 +408,7 @@ absent and the agent looks idle, and the card fell through to its cold-start wor
 The **version** is a separate slot and survives underneath all of these, so an amendment interview on
 `v2` still reads as `v2`.
 
-**Nothing on this card starts anything.** It is a destination in every state.
+**Nothing on this leg starts anything.** It is a destination in every state.
 
 **An empty spec workspace shows one thing: a centred spinner over *"Agent is working on the
 requirements document"***, the same shape the architecture pane uses while a design turn runs. It is
@@ -579,7 +626,7 @@ no-ops through; under-marking ships a design the user has already changed their 
 ### Artifact state
 
 Built as [#576](https://github.com/wso2/labs-agentic-engineer/issues/576): the skill declares what
-it is about to write (`declare_plan`, ADR-0022 — fire-and-forget tool-call-as-UI), and the rail
+it is about to write (`declare_plan`, ADR-0025 — fire-and-forget tool-call-as-UI), and the rail
 renders the declaration.
 
 | state | shown as |
@@ -611,7 +658,7 @@ more documents* as the plan grows. The rail is the plan's real rendering; the ch
 activity record complete. `start` declares nothing: a single-file turn's count answers nothing,
 and a skill that declares nothing leaves the rail exactly as it was.
 
-**The editor follows the write** (ADR-0023): each artifact is selected as its write starts, in
+**The editor follows the write** (ADR-0026): each artifact is selected as its write starts, in
 whatever renderer it already has. The first manual selection is a declaration of reading intent
 and ends the following for the rest of the turn — the rail's pulse on the writing entry stays the
 one-click way back in. This supersedes the cell's burst navigation, which yanked back even over a
@@ -795,7 +842,7 @@ five surfaces fill themselves.
 | Validations *(never validated)* | **Nothing validated yet.** After a build, your software is checked against the **acceptance criteria** in your spec; results appear here. | — |
 | Validations *(version skipped)* | **This version was not validated** — it has no validation criteria, or it was an incident run, which gets no validation cycle. | — |
 | Components *(overview)* | **No components yet.** Components are the services and apps your design is made of — they appear as agents build them. | — |
-| Recent activity *(overview)* | **No activity yet.** Agents report what they are doing here as they work. | — |
+| Architecture *(overview)* | **No architecture yet.** Once the agent designs your app, its components and the connections between them are drawn here. | — |
 | Chat | **Hi! I'm your Agent.** This is where we talk through what you're building. Ask about a decision, change what's in scope, or take up anything I marked as assumed. | the composer, plus three suggestions |
 
 **Chat's empty state is the one a user reaches last, not first.** Since
