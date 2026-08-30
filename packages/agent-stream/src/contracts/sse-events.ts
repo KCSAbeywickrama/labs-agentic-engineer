@@ -428,6 +428,57 @@ export const TURN_KINDS = ["chat", "flow", "start", "plan"] as const;
 export type TurnKind = (typeof TURN_KINDS)[number];
 
 /**
+ * What the user pointed at when they aimed a turn at part of a spec document
+ * (#666; console ADR-0024).
+ *
+ * It LOCATES; it never carries the selected content. The agent joins the spec
+ * room as a live peer, so between the selection and the turn starting the user
+ * may keep typing and a teammate may edit too — content captured client-side
+ * would be a photograph of a document that has since moved. The agent resolves
+ * these names against the document in its OWN turn snapshot, and says so in its
+ * reply when it cannot find one. That is the designed failure, not an error.
+ */
+export interface TurnAnchor {
+  /** The authored spec file the selection resolves to. One view, one file. */
+  file: string;
+  /** The selected nodes, in document order. */
+  nodes: TurnAnchorNode[];
+}
+
+/** One selected node — the name the agent resolves, and what the transcript shows. */
+export interface TurnAnchorNode {
+  /**
+   * A structured view supplies the node's own name (`POST /rounds`); markdown
+   * has none, so it supplies a bounded excerpt of the block's RENDERED text.
+   * Bounded is the load-bearing part: an excerpt that grows with the selection
+   * is the carried content this shape exists to avoid.
+   */
+  name: string;
+  /** The node's vocabulary word — `paragraph`, `operation`, `external dependency`. */
+  kind: string;
+  /** Where it sits, when the name cannot stand alone: a heading path, a parent. */
+  context?: string;
+}
+
+/**
+ * An anchored turn's aim (#666): what was pointed at, and what for.
+ *
+ * The two travel together or not at all — an intent with nothing to point at
+ * says nothing, and an anchor with no intent leaves the wording undecided.
+ *
+ * `change` rewrites the named nodes in place; `discuss` opens the same
+ * selection as a grilling. They differ ONLY in how the preamble is phrased,
+ * which is why this is a fact on the turn rather than a `/command` the console
+ * prefixes onto the user's own words.
+ */
+export interface TurnAim {
+  anchor: TurnAnchor;
+  intent: TurnAimIntent;
+}
+
+export type TurnAimIntent = "change" | "discuss";
+
+/**
  * A turn's display record (#463): the raw client-sent instruction and the
  * acting user. `author` mirrors the console's live author shape
  * (`{id: email, displayName}`) so a rehydrated row is attributable — and
@@ -444,6 +495,14 @@ export interface TurnJournal {
    * Names only: the journal is a DISPLAY record, and a chip is not a download.
    */
   attachments?: string[];
+  /**
+   * What this message was aimed at (#666). Journaled for the same reason as
+   * attachment names: the console renders it as a tag above the message, and
+   * without the journal a reload would leave "make this shorter" with nothing
+   * saying what "this" was. A record of the words but not the target is not a
+   * record of what happened.
+   */
+  anchor?: TurnAnchor;
 }
 
 /**
@@ -491,6 +550,35 @@ export function isTurnAttachment(v: unknown): v is TurnAttachment {
 /** Runtime guard for an absent-or-valid `attachments` array. */
 export function isTurnAttachmentsOrAbsent(v: unknown): v is TurnAttachment[] | undefined {
   return v === undefined || (Array.isArray(v) && v.every(isTurnAttachment));
+}
+
+/**
+ * Runtime guard for an untrusted `aim` value (#666).
+ *
+ * A malformed anchor is rejected WHOLE rather than partially: an aim naming
+ * fewer nodes than the user selected would send the agent at the wrong scope
+ * quietly, which is worse than a clean 400 the caller can see.
+ */
+export function isTurnAim(v: unknown): v is TurnAim {
+  if (v === null || typeof v !== "object") return false;
+  const a = v as Record<string, unknown>;
+  if (a.intent !== "change" && a.intent !== "discuss") return false;
+  const anchor = a.anchor;
+  if (anchor === null || typeof anchor !== "object") return false;
+  const { file, nodes } = anchor as Record<string, unknown>;
+  if (typeof file !== "string" || file.trim() === "") return false;
+  if (!Array.isArray(nodes) || nodes.length === 0) return false;
+  return nodes.every((n) => {
+    if (n === null || typeof n !== "object") return false;
+    const node = n as Record<string, unknown>;
+    return (
+      typeof node.name === "string" &&
+      node.name.trim() !== "" &&
+      typeof node.kind === "string" &&
+      node.kind.trim() !== "" &&
+      (node.context === undefined || typeof node.context === "string")
+    );
+  });
 }
 
 /** The milestone a plan turn is scoped to, and which of its stories already have Tasks. */
