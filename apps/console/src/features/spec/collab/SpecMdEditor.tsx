@@ -26,7 +26,7 @@ import { AgentStreamingContext, MermaidCodeBlock } from "./MermaidCodeBlock";
 import { Markdown } from "@tiptap/markdown";
 import Collaboration from "@tiptap/extension-collaboration";
 import CollaborationCaret from "@tiptap/extension-collaboration-caret";
-import { useStickToBottom } from "use-stick-to-bottom";
+import type { Transaction } from "@tiptap/pm/state";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
 import type * as Y from "yjs";
 import { AgentInsertion } from "@aep/collab-doc";
@@ -43,6 +43,27 @@ import { PrdLenses, refreshPrdLenses, type PrdLensBinding } from "./prdLensPlugi
 import { SpecLinks, refreshSpecLinks, type SpecLinkBinding } from "./specLinkPlugin";
 import { SpecAimMenu, type AimRequest, type SpecAimBinding } from "./SpecAimMenu";
 import { AimHighlight, AIM_SELECTED_CLASS } from "./aimHighlightPlugin";
+
+/**
+ * Where a transaction's change ends, as a position in the document it
+ * produced. Null for a transaction that changed nothing.
+ *
+ * Found by DIFFING the documents before and after, not by reading the step
+ * map: y-prosemirror applies a remote change by replacing the whole document
+ * content in one step, so its map says every change touched everything — and
+ * "everything" ends at the tail, which is exactly the wrong answer for a
+ * paragraph rewritten in the middle. The diff walks node by node and stops at
+ * the first and last differing child, so it costs nothing on a document this
+ * size.
+ */
+function changeEnd(transaction: Transaction): number | null {
+  const before = transaction.before.content;
+  const after = transaction.doc.content;
+  const start = before.findDiffStart(after);
+  if (start === null) return null;
+  const end = before.findDiffEnd(after);
+  return end ? Math.max(start, end.b) : start;
+}
 
 // Collaborative WYSIWYG editor for markdown spec files (#86 phase 6).
 // The shared source of truth is the file's Y.XmlFragment (seeded server-side
@@ -181,20 +202,82 @@ export function SpecMdEditor({
     };
   }, [editor]);
 
-  // Follow the tail while an agent streams markdown into this doc. The content
-  // grows via Yjs/ProseMirror (outside React's render), so a `useEffect` on
-  // React state can't see it — use-stick-to-bottom drives the scroll from a
-  // ResizeObserver on the content element instead. The content ref is only
-  // attached while `agentStreaming`, so ordinary human editing never triggers
-  // auto-scroll; scrolling up mid-stream breaks the lock (the library tells
-  // user scroll apart from its own animation). `initial: false` keeps an
-  // already-written file scrolled to its top when opened.
-  const { scrollRef, contentRef, scrollToBottom } = useStickToBottom({
-    initial: false,
-  });
+  // Follow the EDIT while an agent writes into this doc — not the tail.
+  //
+  // The tail was the original rule (#206): generation appends, so the bottom
+  // was where the writing was. An anchored Change (#666) rewrites a paragraph
+  // in the middle, and a Discuss writes nothing at all — and both used to
+  // throw the reader to the end of the document the moment the turn began,
+  // away from the very passage they had just pointed at. So the view moves
+  // only on a document change that ARRIVED FROM THE ROOM (a Yjs-origin
+  // transaction — the user's own typing never qualifies), and it moves to
+  // where that change landed. Generation still lands at the tail, and a change
+  // inside the last block scrolls flush to the bottom, so the streaming feel
+  // is unchanged.
+  //
+  // The user scrolling — a wheel or a touch on the scroller — breaks the follow
+  // for the rest of the turn: they went to read something, and the agent
+  // writing elsewhere is not a reason to take them from it. The next turn arms
+  // it again.
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const followRef = useRef(false);
   useEffect(() => {
-    if (agentStreaming) void scrollToBottom();
-  }, [agentStreaming, scrollToBottom]);
+    followRef.current = agentStreaming;
+  }, [agentStreaming]);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const disarm = () => {
+      followRef.current = false;
+    };
+    el.addEventListener("wheel", disarm, { passive: true });
+    el.addEventListener("touchmove", disarm, { passive: true });
+    return () => {
+      el.removeEventListener("wheel", disarm);
+      el.removeEventListener("touchmove", disarm);
+    };
+  }, []);
+  useEffect(() => {
+    if (!editor) return;
+    // y-prosemirror marks a change that arrived from the Y.Doc by setting meta
+    // under its sync plugin's key. That key is read off the editor's OWN plugin
+    // list rather than imported: the Collaboration extension and this file can
+    // resolve two instances of y-prosemirror (Vite pre-bundles the extension's
+    // copy), and a PluginKey from the other instance never matches — the meta
+    // reads as absent and the view never moves.
+    const syncKey = editor.state.plugins
+      .map((plugin) => (plugin as unknown as { key?: unknown }).key)
+      .find((key): key is string => typeof key === "string" && key.startsWith("y-sync$"));
+    const follow = ({ transaction }: { transaction: Transaction }) => {
+      if (!followRef.current || !transaction.docChanged || !syncKey) return;
+      const origin = transaction.getMeta(syncKey) as { isChangeOrigin?: boolean } | undefined;
+      if (origin?.isChangeOrigin !== true) return;
+      const el = scrollRef.current;
+      if (!el) return;
+      const pos = changeEnd(transaction);
+      if (pos === null) return;
+      const doc = editor.state.doc;
+      const last = doc.lastChild;
+      if (last && pos >= doc.content.size - last.nodeSize) {
+        el.scrollTop = el.scrollHeight;
+        return;
+      }
+      let coords: { top: number; bottom: number };
+      try {
+        coords = editor.view.coordsAtPos(Math.min(pos, doc.content.size));
+      } catch {
+        return;
+      }
+      const rect = el.getBoundingClientRect();
+      const margin = 48;
+      if (coords.bottom > rect.bottom - margin) el.scrollTop += coords.bottom - (rect.bottom - margin);
+      else if (coords.top < rect.top + margin) el.scrollTop -= rect.top + margin - coords.top;
+    };
+    editor.on("transaction", follow);
+    return () => {
+      editor.off("transaction", follow);
+    };
+  }, [editor]);
 
   return (
     <Box
@@ -453,11 +536,7 @@ export function SpecMdEditor({
         }}
         onClick={() => editor?.commands.focus()}
       >
-        {/* The content wrapper is what use-stick-to-bottom measures. It is
-            only attached to the ResizeObserver while an agent is streaming, so
-            the tail-follow engages for agent writes and stays out of the way
-            of normal editing. */}
-        <Box ref={agentStreaming ? contentRef : undefined}>
+        <Box>
           {/* Node views render through portals into this tree, so the mermaid
               blocks read the streaming flag from here to hide their control. */}
           <AgentStreamingContext.Provider value={agentStreaming}>
