@@ -54,6 +54,13 @@ export interface SpecAimBinding {
   busyReason: string;
 }
 
+/**
+ * The box's width. Wide enough that a sentence fits on one line and a
+ * paragraph reads as welcome — a narrow box tells the user to keep it short,
+ * and an aimed instruction is exactly where they should not have to.
+ */
+const BOX_WIDTH = 560;
+
 interface Placement {
   top: number;
   left: number;
@@ -80,7 +87,7 @@ function placementFor(editor: Editor, host: HTMLElement): Placement | null {
   const box = host.getBoundingClientRect();
   return {
     top: coords.bottom - box.top + 6,
-    left: Math.min(Math.max(coords.left - box.left, 8), Math.max(box.width - 320, 8)),
+    left: Math.min(Math.max(coords.left - box.left, 8), Math.max(box.width - BOX_WIDTH, 8)),
   };
 }
 
@@ -221,7 +228,27 @@ export function SpecAimMenu({
           sx={{ position: "absolute", top: placement.top, left: placement.left, pointerEvents: "auto", zIndex: 5 }}
         >
           {open ? (
-            <Paper ref={boxRef} elevation={4} data-testid="aim-box" sx={{ width: 320, p: 1 }}>
+            <Paper
+              ref={boxRef}
+              elevation={8}
+              data-testid="aim-box"
+              sx={{
+                width: BOX_WIDTH,
+                maxWidth: "calc(100% - 16px)",
+                p: 1.5,
+                // OPAQUE, on purpose. The theme's `background.paper` is glass
+                // — a translucent black, blurred — and over a page of prose the
+                // text underneath reads as noise behind the words the user is
+                // typing. The box sits ON the document; it should not look like
+                // it is trying to be part of it. `background.default` is the
+                // opaque token; see CatalogTypeDrawer for the same forcing.
+                bgcolor: "background.default",
+                backgroundImage: "none",
+                backdropFilter: "none",
+                border: 1,
+                borderColor: "divider",
+              }}
+            >
               <TextField
                 inputRef={inputRef}
                 fullWidth
@@ -277,7 +304,24 @@ export function SpecAimMenu({
               // went into the document instead — found on the local setup.
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => setOpen(true)}
-              sx={{ boxShadow: 2, bgcolor: "background.paper", cursor: "pointer" }}
+              sx={{
+                cursor: "pointer",
+                // The chip floats over running text, so it has to separate
+                // itself from it: solid paper, a real border, and a shadow
+                // that reads as lift rather than tint. A translucent chip over
+                // a paragraph was invisible — found in use. `background.default`
+                // is the opaque token; `paper` is glass in this theme.
+                bgcolor: "background.default",
+                backgroundImage: "none",
+                backdropFilter: "none",
+                border: 1,
+                borderColor: "primary.main",
+                color: "primary.main",
+                fontWeight: 600,
+                boxShadow: 6,
+                "& .MuiChip-icon": { color: "primary.main" },
+                "&:hover": { bgcolor: "background.default", boxShadow: 8 },
+              }}
             />
           )}
         </Box>
