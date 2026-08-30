@@ -1486,41 +1486,35 @@ describe("SpecView while the agent is waiting on answers", () => {
     });
   });
 
-  it("offers the launchers and Generate design once the questions are answered", () => {
+  // The header carries ONE launcher (#666): "add a feature" moved onto the
+  // document, beside the story list it changes, where every other command
+  // already was. A second copy in the header was two buttons for one act.
+  it("offers Generate design once the questions are answered, and no + Feature", () => {
     render(<SpecView projectName="proj1" />);
 
-    expect(
-      screen.getByRole("button", { name: "+ Feature" }),
-    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "+ Feature" })).toBeNull();
     expect(
       screen.getByRole("button", { name: /Generate design/ }),
     ).toBeEnabled();
   });
 
-  it("stands them down while a question form is open", () => {
+  it("stands Generate design down while a question form is open", () => {
     askQuestion();
     render(<SpecView projectName="proj1" />);
 
     expect(screen.getByTestId("spec-question-form")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "+ Feature" })).toBeNull();
     expect(
       screen.getByRole("button", { name: /Generate design/ }),
     ).toBeDisabled();
   });
 
-  // A seeded command does NOT go through the composer: `AgentChatPanel` sends
-  // a pending seed as soon as the conversation is ready, without the
-  // `inputDisabled` guard that stops a user typing mid-turn. So an ungated
-  // launcher delivers `/feature` into a running turn — the thing the composer
-  // beside it refuses.
-  it("stands + Feature down while an agent holds the turn", () => {
+  it("stands Generate design down while an agent holds the turn", () => {
     mockCollab = {
       ...soloCollab(),
       peers: [{ clientId: 1, name: "Agent", color: "#fff", kind: "agent" }],
     };
     render(<SpecView projectName="proj1" />);
 
-    expect(screen.getByRole("button", { name: "+ Feature" })).toBeDisabled();
     expect(
       screen.getByRole("button", { name: /Generate design/ }),
     ).toBeDisabled();

@@ -1002,7 +1002,7 @@ of per-line is a control that is only there while the pointer is.
 editor: a line that fires a command on click is a line the user can no longer put a caret in.
 
 **A lens that starts a turn goes inert, saying which, while an agent holds the turn** — the same
-two conditions that gate the header's launchers, since firing a command mid-interview supersedes
+two conditions that gate the header's launcher, since firing a command mid-interview supersedes
 the live question form for the whole room. Agree starts no turn and never
 goes inert: it is the document being edited, and the document is always the user's to edit.
 

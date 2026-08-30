@@ -922,10 +922,14 @@ export function SpecView({ projectName }: { projectName: string }) {
           flexDirection: "column",
         }}
       >
-        {/* Header */}
+        {/* Header — the same height as the agent panel's, which sits beside
+            it: one title bar across the top of the workspace, not two. The
+            panel's header is 48px (its small controls plus the padding), so
+            this one pins the same minimum and uses the same small controls. */}
         <Box
           sx={{
-            p: 2,
+            px: 2,
+            minHeight: 48,
             borderBottom: 1,
             borderColor: "divider",
             display: "flex",
@@ -935,6 +939,7 @@ export function SpecView({ projectName }: { projectName: string }) {
           }}
         >
           <IconButton
+            size="small"
             aria-label="Back to project overview"
             onClick={() =>
               void navigate({
@@ -943,7 +948,7 @@ export function SpecView({ projectName }: { projectName: string }) {
               })
             }
           >
-            <ArrowLeft size={20} />
+            <ArrowLeft size={18} />
           </IconButton>
           <Box sx={{ flexGrow: 1, minWidth: 0 }}>
             <Stack direction="row" spacing={1.5} sx={{ alignItems: "center" }}>
@@ -1024,8 +1029,9 @@ export function SpecView({ projectName }: { projectName: string }) {
                 {/* span so the tooltip works while the button is disabled */}
                 <span>
                   <Button
+                    size="small"
                     variant="contained"
-                    startIcon={<Hammer size={18} />}
+                    startIcon={<Hammer size={16} />}
                     disabled={agentBusy || buildPhase !== null}
                     loading={buildPhase !== null}
                     onClick={onBuild}
@@ -1043,42 +1049,6 @@ export function SpecView({ projectName }: { projectName: string }) {
             </>
           ) : (
             <>
-              {/* The one launcher that is not on the document (#579): every
-                other command is offered by the PRD section it changes, but
-                "add a feature" has to be reachable while another artifact is
-                open, so it keeps its place beside the primary CTA.
-
-                Gated on `agentBusy` like its neighbour: `seedChat` writes into
-                the pending-seed slot, and `AgentChatPanel` sends a seed the
-                moment the conversation is ready WITHOUT the composer's
-                `inputDisabled` guard — so an ungated click delivers `/feature`
-                mid-turn, which the composer itself would have refused. */}
-              {hasRequirementsFiles && !awaitingAnswers && (
-                <Tooltip
-                  title={
-                    agentBusy
-                      ? "An agent is still working — add a feature once it finishes"
-                      : "Describe a feature to add to the requirements"
-                  }
-                >
-                  {/* span so the tooltip works while the button is disabled */}
-                  <span>
-                    {/* Default size, matching "Generate design" beside it.
-                        `size="small"` made it 30px against its neighbour's 36,
-                        so two buttons on one row sat at two different weights
-                        with nothing meaning the difference — this is a
-                        secondary action, and `variant="outlined"` is what
-                        already says so. */}
-                    <Button
-                      variant="outlined"
-                      disabled={agentBusy}
-                      onClick={() => seedChat("/feature")}
-                    >
-                      + Feature
-                    </Button>
-                  </span>
-                </Tooltip>
-              )}
               <Tooltip
                 title={
                   agentBusy
@@ -1093,8 +1063,9 @@ export function SpecView({ projectName }: { projectName: string }) {
                 {/* span so the tooltip works while the button is disabled */}
                 <span>
                   <Button
+                    size="small"
                     variant="contained"
-                    startIcon={<Sparkles size={18} />}
+                    startIcon={<Sparkles size={16} />}
                     disabled={
                       !hasRequirementsFiles || agentBusy || awaitingAnswers
                     }
