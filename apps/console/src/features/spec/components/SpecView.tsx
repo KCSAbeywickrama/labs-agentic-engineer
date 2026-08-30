@@ -295,10 +295,20 @@ export function SpecView({ projectName }: { projectName: string }) {
     if (cellChangeCount > 0) setSelection({ kind: "cell-diagram" });
   }, [cellChangeCount]);
 
-  // Default selection: while a design turn is actively producing design.cell,
-  // default to Architecture (covers a reload mid-turn); otherwise the first
+  // Default selection: while a DESIGN turn is producing design.cell, default
+  // to Architecture (covers a reload mid-turn); otherwise the first
   // requirements file (the seeded PRD). A manual click sets `selection` and
   // always wins over this default.
+  //
+  // Keyed on the flow, not on an agent being in the room. This default is
+  // reactive — it is recomputed on every render — so keyed on presence it
+  // swapped the pane the moment ANY agent joined: a reader on the PRD with no
+  // click recorded asked the agent a question, the pane became Architecture
+  // for the length of the reply, and came back as a fresh editor at the top.
+  // Reported as "the PRD scrolls when the agent says something" (#666). The
+  // flow token comes from the project's status, so a reload mid-design-turn
+  // still lands on Architecture; a chat, settle or aimed turn leaves the
+  // reader where they were.
   const firstRequirements = files.find((f) => f.group === "requirements");
   // A fresh project may hold no requirements file yet; fall back to whatever
   // the spec view does list. Named for what it IS — any listed entry, which may
@@ -311,9 +321,10 @@ export function SpecView({ projectName }: { projectName: string }) {
   // What must never reach it is a REFERENCE — `toSpecEntry` drops those, which
   // is what keeps a v1 project's committed PDF out of the editor pane.
   const firstListed = files[0];
+  const designTurnRunning = status.data?.spec.agentFlow === "design" && agentInRoom;
   const effectiveSelection: SpecSelection =
     selection ??
-    (agentInRoom && hasDesignCell
+    (designTurnRunning && hasDesignCell
       ? { kind: "cell-diagram" }
       : firstRequirements
         ? { kind: "file", path: firstRequirements.path }

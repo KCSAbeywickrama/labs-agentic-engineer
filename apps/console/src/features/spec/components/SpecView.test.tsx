@@ -1340,6 +1340,36 @@ describe("SpecView architecture-tab navigation on design.cell change", () => {
     expect(screen.getByTestId("cell-diagram-panel")).toBeInTheDocument();
   });
 
+  // The default selection is reactive, and it used to key on an agent being in
+  // the room: a reader on the PRD with no click recorded asked a question, the
+  // pane became Architecture for the length of the reply, and came back as a
+  // fresh editor at the top. Reported as "the PRD scrolls when the agent says
+  // something" (#666). The default follows the FLOW: design, and only design.
+  it("keeps the default file when an agent joins for a turn that is not a design turn", () => {
+    const room = connectedRoom(false);
+    mockCollab = room.collab;
+    const { rerender } = render(<SpecView projectName="proj1" />);
+    expect(screen.queryByTestId("cell-diagram-panel")).not.toBeInTheDocument();
+
+    // A chat turn: the agent joins, the flow is not design.
+    mockSpecFlow = "";
+    mockCollab = { ...room.collab, peers: [{ clientId: 1, name: "Agent", color: "#000", kind: "agent" }] };
+    rerender(<SpecView projectName="proj1" />);
+
+    expect(screen.queryByTestId("cell-diagram-panel")).not.toBeInTheDocument();
+  });
+
+  it("defaults to Architecture while a design turn is in the room — a reload mid-turn", () => {
+    const room = connectedRoom(true);
+    // The rail has to list design.cell for Architecture to be a place to go.
+    mockCollab = { ...room.collab, docPaths: ["specs/design/design.cell"] };
+    mockSpecFlow = "design";
+
+    render(<SpecView projectName="proj1" />);
+
+    expect(screen.getByTestId("cell-diagram-panel")).toBeInTheDocument();
+  });
+
   it("does not navigate when no agent peer is in the room", () => {
     const room = connectedRoom(false);
     mockCollab = room.collab;
