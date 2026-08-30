@@ -314,12 +314,16 @@ export function SpecAimMenu({
                 bgcolor: "background.default",
                 backgroundImage: "none",
                 backdropFilter: "none",
+                // Ink, not accent: the chip is an offer, not a call to action,
+                // and the accent colour is reserved for the send. `text.primary`
+                // is black on the light theme and white on the dark one — a
+                // literal black would vanish on the opaque black surface.
                 border: 1,
-                borderColor: "primary.main",
-                color: "primary.main",
+                borderColor: "text.primary",
+                color: "text.primary",
                 fontWeight: 600,
                 boxShadow: 6,
-                "& .MuiChip-icon": { color: "primary.main" },
+                "& .MuiChip-icon": { color: "text.primary" },
                 "&:hover": { bgcolor: "background.default", boxShadow: 8 },
               }}
             />
