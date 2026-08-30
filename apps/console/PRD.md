@@ -183,6 +183,20 @@ here: they're the open `console` + `feature` issues.
   had asked for —
   [#575](https://github.com/wso2/labs-agentic-engineer/issues/575)
   (contract: `SpecStage.designOutdated`)
+- Spec view — the turn declares its plan: a skill says what it is **about to
+  write** (`declare_plan`, fire-and-forget tool-call-as-UI — ADR-0025), and the
+  rail renders the checklist — **ghost rows** holding the coming documents'
+  places, a pulse on the one being written, and an honest **count** (*2 of 6*)
+  that grows in waves because the cell fixes the component set mid-run. Every
+  status is derived from the mutation stream, never self-reported. A clean
+  turn's plan dissolves; a dead turn leaves its **wreckage** — done ticks, one
+  error, the remaining ghosts — surfaced through the attention chip until the
+  next declaring turn replaces it. The **editor follows the write** and yields
+  to the reader's first manual click (ADR-0026), superseding the cell's
+  yank-back. The chat records each declaration as an activity step (*Planned 3
+  documents*) —
+  [#576](https://github.com/wso2/labs-agentic-engineer/issues/576)
+  (contract: `declare_plan` in `@aep/agent-stream`; no aep-api change)
 - Overview — the spec card stops rewriting itself: **one button** (*Open spec*)
   in every state instead of three captions walked during a single kickoff with
   no user input, and **one line that always says something** instead of blanking
