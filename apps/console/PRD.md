@@ -108,11 +108,10 @@ here: they're the open `console` + `feature` issues.
   into them, and the transcript shows it as a frozen tag above the message that
   is never re-checked: when the agent cannot find what was named, the agent says
   so in its reply. **The PRD's lens catalogue is re-cut in the same change**
-  (#652): an `*assumed*` run offers **Agree · Remove · Reopen · Discuss** —
-  the first three are direct edits, no agent turn, live while an agent holds
-  one (Agree strips the flag, Remove drops the block, Reopen moves it verbatim
-  to Open Questions for the agent to take up), and every bullet offers
-  **Discuss**, which opens the same aim box with Enter sending Discuss.
+  (#652): an `*assumed*` run offers **Agree · Discuss** — Agree is a direct
+  edit that strips the flag, no agent turn, live while an agent holds one —
+  and every bullet offers **Discuss**, which opens the same aim box with Enter
+  sending Discuss.
   `/settle` on a flagged line is retired; it stays over the Open Questions
   section and on each question —
   [#666](https://github.com/wso2/labs-agentic-engineer/issues/666)
@@ -240,7 +239,7 @@ here: they're the open `console` + `feature` issues.
   hover, and all of them go inert while an agent holds the turn. The lenses stay
   the PRD's own, but the affordance no longer is: every markdown document now
   carries selection-anchored aiming beside them, and the flagged line's
-  `/settle` became four verdicts (#666). Retires the
+  `/settle` became Agree and Discuss (#666). Retires the
   composer's `Actions ▾` menu of raw slash commands. **Open questions no longer
   block Generate design** on either side — the console disable and the two
   skill clauses both go — since a recorded gap is information, not corruption

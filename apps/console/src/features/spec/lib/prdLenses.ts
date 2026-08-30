@@ -51,8 +51,8 @@ interface LensBase {
   placement: LensPlacement;
 }
 
-/** The three verdicts on an `*assumed*` run, each a direct edit (#652). */
-export type PrdEditKind = "agree" | "remove" | "reopen";
+/** The one direct edit (#652): Agree strips the `*assumed*` marker. */
+export type PrdEditKind = "agree";
 
 /**
  * What the document offers at one spot. Three kinds, and the kind is the
@@ -60,10 +60,9 @@ export type PrdEditKind = "agree" | "remove" | "reopen";
  *
  *  - `command` sends a line as the user's next message — an agent turn.
  *  - `edit` changes the document directly, no agent, no model: **Agree**
- *    strips the `*assumed*` marker, **Remove** drops the block, **Reopen**
- *    moves it to Open Questions. Stripping the marker is itself the signal the
- *    agent reads on its next round, which is why none of these need a turn —
- *    and why they stay live while an agent holds one.
+ *    strips the `*assumed*` marker. That is itself the signal the agent reads
+ *    on its next round, which is why it needs no turn — and why it stays live
+ *    while an agent holds one.
  *  - `discuss` opens the aim box on the block, the same box a selection opens,
  *    with Enter sending Discuss.
  */
@@ -149,26 +148,23 @@ const discussLens = (block: DocBlock): PrdLens => ({
 });
 
 /**
- * The verdicts on an `*assumed*` run (#652). Three direct edits and one
- * conversation, in the order a reviewer reads them: keep it, drop it, hand it
- * back as a question, or talk about it.
+ * The verdicts on an `*assumed*` run (#652): keep it, or talk about it. Two,
+ * deliberately — a line with four controls on it stops reading as a line.
+ * Dropping or reopening the decision is a sentence away in Discuss, and the
+ * editor itself deletes a bullet as well as any control could.
  */
 function assumedLenses(block: DocBlock, run: EmphasisRun): PrdLens[] {
-  const at = block.contentEnd;
-  const edit = (edit: PrdEditKind, label: string, title: string): PrdLens => ({
-    kind: "edit",
-    edit,
-    label,
-    title,
-    at,
-    placement: "line",
-    block,
-    run,
-  });
   return [
-    edit("agree", "Agree", "Keep this decision — drop the assumed flag"),
-    edit("remove", "Remove", "Drop this line from the document"),
-    edit("reopen", "Reopen", "Move this to Open Questions for the agent to take up"),
+    {
+      kind: "edit",
+      edit: "agree",
+      label: "Agree",
+      title: "Keep this decision — drop the assumed flag",
+      at: block.contentEnd,
+      placement: "line",
+      block,
+      run,
+    },
     discussLens(block),
   ];
 }

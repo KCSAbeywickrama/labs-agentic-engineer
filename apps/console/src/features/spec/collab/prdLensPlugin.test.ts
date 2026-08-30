@@ -130,8 +130,6 @@ describe("the PRD's lens surface", () => {
       "Go deeper",
       "Discuss",
       "Agree",
-      "Remove",
-      "Reopen",
       "Discuss",
       "Discuss",
       "Discuss",
@@ -166,10 +164,10 @@ describe("the PRD's lens surface", () => {
     expect(run).toHaveBeenCalledWith("/feature");
   });
 
-  // The verdicts on an assumption (#652) are direct edits: no agent turn, and
-  // one transaction each, so each is one undo. What each does to the document
-  // is the whole contract, so each is asserted on the markdown that results.
-  describe("the verdicts on an *assumed* run", () => {
+  // Agree (#652) is a direct edit: no agent turn, one transaction, one undo.
+  // What it does to the document is the whole contract, so it is asserted on
+  // the markdown that results.
+  describe("the verdict on an *assumed* run", () => {
     const decisions = () => {
       const md = editor!.getMarkdown();
       const start = md.indexOf("## Product Decisions");
@@ -188,48 +186,6 @@ describe("the PRD's lens surface", () => {
       expect(run).not.toHaveBeenCalled();
       // And with the flag gone, the line offers what any bullet does.
       expect(lensButtons(el).map((b) => b.textContent)).not.toContain("Agree");
-    });
-
-    it("Remove drops the whole block, bullet and all", () => {
-      const el = mount("");
-      byLabel(el, "Remove").click();
-      expect(decisions()).toBe("## Product Decisions\n\n- Notifications go out by email");
-    });
-
-    it("Reopen moves the line, minus the flag, to the end of Open Questions", () => {
-      const el = mount("");
-      byLabel(el, "Reopen").click();
-      expect(decisions()).toBe("## Product Decisions\n\n- Notifications go out by email");
-      const md = editor!.getMarkdown();
-      expect(md.slice(md.indexOf("## Open Questions")).trim()).toBe(
-        "## Open Questions\n\n1. Which accounting system do we export to?\n2. What is the approval limit? Deferred — the user will decide next quarter.\n3. Sign-in: the org Google Workspace",
-      );
-    });
-
-    it("Reopen creates the section when the PRD has none, before Further Notes", () => {
-      const el = mount("");
-      editor!.commands.setContent(
-        markdownToNode(
-          "# Lunch — PRD\n\n## Product Decisions\n\n- Rounds close thirty minutes early *assumed*\n\n## Further Notes\n\nNothing yet.\n",
-        ).toJSON(),
-      );
-      byLabel(el, "Reopen").click();
-      expect(editor!.getMarkdown().trim()).toBe(
-        // The emptied section keeps its heading — Reopen moves a line, it does
-        // not restructure the document around the move.
-        "# Lunch — PRD\n\n## Product Decisions\n\n## Open Questions\n\n1. Rounds close thirty minutes early\n\n## Further Notes\n\nNothing yet.",
-      );
-    });
-
-    it("Remove takes the list with it when the flagged line was its only entry", () => {
-      const el = mount("");
-      editor!.commands.setContent(
-        markdownToNode("# Lunch — PRD\n\n## Product Decisions\n\n- Only this *assumed*\n\n## Out of Scope\n\n- Nothing\n").toJSON(),
-      );
-      byLabel(el, "Remove").click();
-      expect(editor!.getMarkdown().trim()).toBe(
-        "# Lunch — PRD\n\n## Product Decisions\n\n## Out of Scope\n\n- Nothing",
-      );
     });
 
     // A widget whose key matches is REUSED, click handler and all, so the lens
@@ -274,17 +230,17 @@ describe("the PRD's lens surface", () => {
     );
   });
 
-  it("goes inert, saying why, while the agent holds the turn — except the direct edits", () => {
+  it("goes inert, saying why, while the agent holds the turn — except Agree", () => {
     const run = vi.fn();
     const el = mount("An agent is still working", run);
     const buttons = lensButtons(el);
-    const edits = buttons.filter((b) => ["Agree", "Remove", "Reopen"].includes(b.textContent ?? ""));
+    const edits = buttons.filter((b) => b.textContent === "Agree");
     const rest = buttons.filter((b) => !edits.includes(b));
     expect(rest.every((b) => b.disabled)).toBe(true);
     expect(rest[0]!.title).toBe("An agent is still working");
     // A verdict needs no agent, so it never waits for one: the reviewer
     // reading flagged lines while the agent works is exactly who it is for.
-    expect(edits).toHaveLength(3);
+    expect(edits).toHaveLength(1);
     expect(edits.every((b) => !b.disabled)).toBe(true);
     expect(edits[0]!.title).toBe("Keep this decision — drop the assumed flag");
 
@@ -311,7 +267,7 @@ describe("the PRD's lens surface", () => {
 
     busy.reason = "The agent is waiting on your answers";
     refreshPrdLenses(editor!.view);
-    const inert = lensButtons(el).filter((b) => !["Agree", "Remove", "Reopen"].includes(b.textContent ?? ""));
+    const inert = lensButtons(el).filter((b) => b.textContent !== "Agree");
     expect(inert.every((b) => b.disabled)).toBe(true);
     expect(byLabel(el, "+ Feature").title).toBe("The agent is waiting on your answers");
   });
@@ -376,7 +332,7 @@ describe("the PRD's lens surface", () => {
       .map((n) => n.textContent)
       .join("");
     expect(flagged).toBe("assumed");
-    expect(lensButtons(el).map((b) => b.textContent)).toEqual(["Agree", "Remove", "Reopen", "Discuss"]);
+    expect(lensButtons(el).map((b) => b.textContent)).toEqual(["Agree", "Discuss"]);
   });
 
   it("offers no command on a document that is not a PRD, only a Discuss per bullet", () => {

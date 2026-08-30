@@ -113,10 +113,9 @@ describe("prdAffordances — the PRD's own launchers", () => {
     expect(commands(empty)).toEqual([]);
   });
 
-  // The verdicts (#652): three direct edits and one conversation, in the
-  // order a reviewer reads them — keep it, drop it, hand it back, talk about
-  // it. A plain bullet beside it gets only the conversation.
-  it("flags an *assumed* run wherever it sits, and offers the four verdicts on it", () => {
+  // The verdicts (#652): keep it, or talk about it. A plain bullet beside it
+  // gets only the conversation.
+  it("flags an *assumed* run wherever it sits, and offers Agree and Discuss on it", () => {
     const blocks = fresh(() => [
       heading("Product Decisions"),
       assumed("listItem", "Sign-in via Google —"),
@@ -127,21 +126,13 @@ describe("prdAffordances — the PRD's own launchers", () => {
     // The flag sits on the run, not the whole line — an assumption is one word
     // of a decision that is otherwise settled.
     expect(flags).toEqual([{ kind: "assumed", from: run.from, to: run.to }]);
-    expect(lenses.map(nameOf)).toEqual([
-      "edit:agree",
-      "edit:remove",
-      "edit:reopen",
-      "discuss",
-      "discuss",
-    ]);
-    // Every verdict knows the run it judges and the block it sits in, so the
+    expect(lenses.map(nameOf)).toEqual(["edit:agree", "discuss", "discuss"]);
+    // The verdict knows the run it judges and the block it sits in, so the
     // edit can act without re-reading the document.
     const agree = lenses[0]!;
     expect(agree.kind === "edit" && agree.run).toEqual(run);
     expect(agree.kind === "edit" && agree.block).toBe(blocks[1]);
     expect(lenses.map((l) => l.at)).toEqual([
-      blocks[1]!.contentEnd,
-      blocks[1]!.contentEnd,
       blocks[1]!.contentEnd,
       blocks[1]!.contentEnd,
       blocks[2]!.contentEnd,
@@ -153,7 +144,7 @@ describe("prdAffordances — the PRD's own launchers", () => {
       heading("User Stories"),
       assumed("listItem", "As a Manager, I approve within a day —"),
     ]);
-    expect(commands(blocks)).toEqual(["/feature", "edit:agree", "edit:remove", "edit:reopen", "discuss"]);
+    expect(commands(blocks)).toEqual(["/feature", "edit:agree", "discuss"]);
   });
 
   it("reads emphasis that is not the assumed flag as ordinary prose", () => {
