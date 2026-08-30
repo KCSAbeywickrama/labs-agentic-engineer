@@ -80,7 +80,7 @@ export function validationState(deployValidation: string, verdict: string): stri
 // either mark, so both would collapse onto a neighbouring state's name ("Validated",
 // "Validation") and the distinction the vocabulary exists for would be sighted-only.
 // It is absent everywhere else, so the default stays "the name is the visible label"
-// and a caller that ignores the field is still correct for seven of the nine states.
+// and a caller that ignores the field is still correct for eight of the ten states.
 //
 // It is never the VISIBLE string. A caller with room says the hedge in its own prose
 // (the verdict tile's sentence, the deployments banner's); a caller without room
@@ -151,6 +151,14 @@ export function validationView(
       // Distinct from `none`, which is the run not having got here yet: this one is
       // settled, and its emptiness is a choice the project can revisit.
       return { label: "validation skipped", tone: "neutral" };
+    case "cancelled":
+      // A person stopped the judging before it produced a verdict. SETTLED, like
+      // `skipped` and for the same reason — nothing is coming unless somebody
+      // re-asks — which is why it is `neutral` rather than `info`: an `info` tone
+      // maps to the rail's pulsing `active` dot, and this state would pulse there
+      // forever. Nothing failed either, so an error tone would be a verdict the
+      // run never reached.
+      return { label: "validation cancelled", tone: "neutral" };
 
     default: // "none" | "" | unknown
       return null;

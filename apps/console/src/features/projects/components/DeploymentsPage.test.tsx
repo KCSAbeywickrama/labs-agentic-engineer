@@ -618,6 +618,44 @@ describe("DeploymentsPage — connections", () => {
 });
 
 describe("DeploymentsPage — promotion", () => {
+  // The reported bug. A build finishes, every binding goes Ready, and the deploy
+  // aggregate reports `deployed` — but the validation cycle has not started, so
+  // `validation` is still `none`. For that whole window (the reconcile sweep that
+  // starts the validation run ticks once a minute) this button offered production
+  // a version nothing had checked.
+  it("does not offer promotion while a verdict is still expected", () => {
+    mockDeploy = {
+      version: "v1",
+      status: "deployed",
+      components: { total: 1, ready: 1 },
+      validation: "none",
+    };
+
+    render(<DeploymentsPage projectName="acme" />);
+
+    expect(
+      screen.getByRole("button", { name: /Promote v1 to production/ }),
+    ).toBeDisabled();
+  });
+
+  // The other half, and why `none` could not simply be blocked on its own: a person
+  // who cancelled the judging has already made this call, and with no revalidate
+  // control in the console a permanently dead button would strand the version.
+  it("offers promotion once a person has cancelled the judging", () => {
+    mockDeploy = {
+      version: "v1",
+      status: "deployed",
+      components: { total: 1, ready: 1 },
+      validation: "cancelled",
+    };
+
+    render(<DeploymentsPage projectName="acme" />);
+
+    expect(
+      screen.getByRole("button", { name: /Promote v1 to production/ }),
+    ).toBeEnabled();
+  });
+
   it("opens the promote dialog and gates Promote on required values", () => {
     mockDeploy = {
       version: "v1",
