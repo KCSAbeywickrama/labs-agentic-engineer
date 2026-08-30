@@ -142,7 +142,7 @@ docker run --rm \
   --shm-size=1g \
   -v "$SCRIPT_DIR/workspace:/home/aep/aep-workspace" \
   -v "$WORKER_DIR/../../skills:/app/skills:ro" \
-  -e ANTHROPIC_API_KEY \
+  -e ANTHROPIC_API_KEY -e AEP_EVAL_ANTHROPIC_API_KEY \
   -e AEP_TASK_ID -e AEP_ORG_ID -e AEP_PROJECT_ID -e AEP_COMPONENT_NAME \
   -e AEP_REPO_URL -e AEP_PROMPT -e AEP_BEARER -e AEP_GIT_SERVICE_URL \
   -e AEP_IDENTITY_NAME -e AEP_IDENTITY_EMAIL -e AEP_TASK_KIND -e AEP_PLATFORM_URL \

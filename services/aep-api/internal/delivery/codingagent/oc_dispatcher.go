@@ -93,6 +93,19 @@ const (
 	// ADR-0016 exists to prevent. A distinct name keeps the two budgets apart,
 	// and the harness reads it in preference to ANTHROPIC_API_KEY.
 	envEvalAnthropicAPIKey = "AEP_EVAL_ANTHROPIC_API_KEY"
+
+	// envEvalKeyManaged declares that the PLATFORM owns this pod's evaluation
+	// credential: if envEvalAnthropicAPIKey is not set here, this run has no
+	// evaluation key at all.
+	//
+	// It exists because the pod's ANTHROPIC_API_KEY, when present, is the CODING
+	// credential — possibly an override the org chose to bill coding and nothing
+	// else. Without this declaration the harness cannot tell that pod apart from
+	// a developer's machine, where ANTHROPIC_API_KEY is simply "the key", and it
+	// would quietly grade agents on a budget the org ring-fenced. Set on EVERY
+	// dispatch, including the ones carrying no evaluation key: that is the case
+	// it exists for.
+	envEvalKeyManaged = "AEP_EVAL_KEY_MANAGED"
 )
 
 // OCDispatcher creates the ephemeral coding-agent Component chain:

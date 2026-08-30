@@ -256,6 +256,9 @@ func (e *CodingExecutor) dispatchViaOC(ctx context.Context, in agentLaunch, repo
 		"AEP_CORRELATION_ID":  in.correlationID,
 		"AEP_TASK_KIND":       taskKindOrDefault(disp.taskKind),
 		"WORKSPACE_BASE_PATH": codingAgentWorkspacePath,
+		// Unconditional, and deliberately not tied to whether a key was resolved
+		// below — see envEvalKeyManaged.
+		envEvalKeyManaged: "1",
 	}
 	secretEnv := []SecretEnvRef{
 		{Key: anthropicEnvVarOrDefault(anthropicSR.EnvVar), SecretName: anthropicSR.SecretRefName, SecretKey: anthropicSR.Property},

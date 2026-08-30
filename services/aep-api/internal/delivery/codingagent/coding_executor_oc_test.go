@@ -614,3 +614,40 @@ func TestDispatch_IncompleteDefaultKeyRef_IsNotMounted(t *testing.T) {
 		t.Errorf("a triplet with no property must not be mounted: %+v", rec.load.Env)
 	}
 }
+
+// TestDispatch_DeclaresThePlatformOwnsTheEvaluationKey: the pod's
+// ANTHROPIC_API_KEY, when present, is the CODING credential — an org may bill
+// coding to a key it did not choose for anything else. So the harness must not
+// treat it as an evaluation credential just because no evaluation key was
+// mounted. Every dispatch therefore says so out loud, and says it even when
+// there IS no evaluation key to mount: that is the case the declaration exists
+// for, and a marker that appeared only alongside the key would be useless.
+func TestDispatch_DeclaresThePlatformOwnsTheEvaluationKey(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		defaultErr error
+	}{
+		{name: "with a default key connected"},
+		{name: "with none connected", defaultErr: &organization.NotFoundError{What: "org_anthropic_credentials.acme.default"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := &chainRecorder{}
+			anthropic, github := fullSecretRefs()
+			anthropic.defaultErr = tc.defaultErr
+			e := newCodingDispatchExecutor(anthropic, github)
+			e.WithPublisherCredentials(fakePublisher{name: "acme-publisher-secrets"}, "http://thunder.example/oauth2/token")
+			e.WithOCDispatch(NewOCDispatcher(rec.client()).WithImage("ghcr.io/wso2/aep/remote-worker:latest"))
+
+			if _, err := e.Dispatch(context.Background(), codingMilestoneDispatch()); err != nil {
+				t.Fatalf("Dispatch: %v", err)
+			}
+			ev := secretEnvByKey(t, rec.load, envEvalKeyManaged)
+			if ev.Value != "1" {
+				t.Errorf("%s = %q, want \"1\"", envEvalKeyManaged, ev.Value)
+			}
+			if ev.ValueFrom != nil {
+				t.Errorf("%s is a plain declaration, not a credential: %+v", envEvalKeyManaged, ev)
+			}
+		})
+	}
+}

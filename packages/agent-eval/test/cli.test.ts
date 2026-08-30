@@ -187,6 +187,40 @@ describe("buildChildEnv", () => {
     expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
   });
 
+  // The pod's ANTHROPIC_API_KEY is the CODING credential, which an org may have
+  // ring-fenced for coding and nothing else. An org whose default key is gone
+  // but whose coding override is live dispatches with no evaluation key and a
+  // coding key sitting under the name the fallback reads — so on a pod there is
+  // no fallback at all, and the run reports that it could not evaluate.
+  it("does not fall back to the pod's coding credential", () => {
+    const env = buildChildEnv({
+      AEP_EVAL_KEY_MANAGED: "1",
+      ANTHROPIC_API_KEY: "sk-ant-the-orgs-coding-key",
+    });
+    expect("MODEL_API_KEY" in env).toBe(false);
+    expect("ANTHROPIC_API_KEY" in env).toBe(false);
+  });
+
+  // The declaration says who OWNS the credential, not whether there is one.
+  it("still uses the evaluation key the platform did mount", () => {
+    const env = buildChildEnv({
+      AEP_EVAL_KEY_MANAGED: "1",
+      AEP_EVAL_ANTHROPIC_API_KEY: "sk-ant-eval",
+      ANTHROPIC_API_KEY: "sk-ant-the-orgs-coding-key",
+    });
+    expect(env.MODEL_API_KEY).toBe("sk-ant-eval");
+    expect(env.ANTHROPIC_API_KEY).toBe("sk-ant-eval");
+  });
+
+  // ESO can materialise an empty secret. "" is no key, not a key that fails to
+  // authenticate — the difference decides whether the report reads "never became
+  // ready" or sends the judge at an endpoint with a blank credential.
+  it("treats an empty key as no key", () => {
+    expect("MODEL_API_KEY" in buildChildEnv({ ANTHROPIC_API_KEY: "" })).toBe(false);
+    const env = buildChildEnv({ AEP_EVAL_ANTHROPIC_API_KEY: "", ANTHROPIC_API_KEY: "sk-ant-local" });
+    expect(env.MODEL_API_KEY).toBe("sk-ant-local");
+  });
+
   // Outside a build pod — a developer running the harness in the monorepo —
   // ANTHROPIC_API_KEY is the only key there is.
   it("falls back to ANTHROPIC_API_KEY when no evaluation key is set", () => {

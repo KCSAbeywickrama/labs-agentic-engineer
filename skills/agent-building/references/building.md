@@ -591,7 +591,11 @@ platform mounts the org's default key, and `ANTHROPIC_API_KEY` outside one.
 Never `CLAUDE_CODE_OAUTH_TOKEN`, which is the platform's own coding budget and
 authenticates none of the API calls the judge makes. **Pass no key on the
 command line and set none yourself** — a key you export is a key that ends up
-in a build log.
+in a build log. In particular, if the harness reports no key, do NOT copy the
+`ANTHROPIC_API_KEY` you can see into it: in a pod that one is the
+organisation's CODING credential, which it may bill separately on purpose, and
+the platform withheld it from evaluation deliberately. No evaluation is the
+correct outcome there, and it is report content like any other.
 
 Without a key the agent is booted with no `MODEL_API_KEY`, so its own
 `/healthz` answers 503 and the report says the agent never became ready,
@@ -608,9 +612,9 @@ succeeded) and a rubric that tolerates one 20% of the time is not a rubric.
 **When a scenario falls short, revise the PROMPT and run it again — at most 3
 rounds.** Each round: edit `src/prompt.ts`, `npm run build`, re-run the block
 above — the whole block, since `run_eval` is defined inside it and a shell
-function does not survive to your next command. Cite the rubric line that drove each change; `report.md` names
-them, with the judge's own reason. Lines under "Ungraded" are a grading gap,
-not an agent failure — never revise against one.
+function does not survive to your next command. Cite the rubric line that drove
+each change; `report.md` names them, with the judge's own reason. Lines under
+"Ungraded" are a grading gap, not an agent failure — never revise against one.
 
 **Stop early if a round scores worse than the one before it**, and keep the
 earlier prompt. **The best-scoring prompt ships, not the last one tried** — a

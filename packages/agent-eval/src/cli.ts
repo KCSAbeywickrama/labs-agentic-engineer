@@ -127,11 +127,27 @@ const ALLOWED_ENV_KEYS = ["PATH", "HOME"] as const;
  * a developer running the harness in the monorepo — `ANTHROPIC_API_KEY` is
  * the only key there is, so it is the fallback.
  *
+ * `AEP_EVAL_KEY_MANAGED` is what tells the two apart, and it is why the
+ * fallback is not unconditional. On a pod, `ANTHROPIC_API_KEY` is the
+ * organisation's CODING credential — possibly an override it chose to bill
+ * coding and nothing else — so falling back to it would grade agents on a
+ * budget the org ring-fenced. The platform sets the declaration on every
+ * dispatch, so its presence means: if no evaluation key came with it, this run
+ * has none, and saying so is the documented behaviour.
+ *
  * `CLAUDE_CODE_OAUTH_TOKEN` is NEVER a fallback. It is the platform's own
  * coding budget, and it authenticates none of the API calls the judge makes.
+ *
+ * `||`, not `??`: ESO can materialise an EMPTY secret, and an empty key is no
+ * key rather than a key that fails to authenticate. The difference decides
+ * whether the report says the agent never became ready or the judge is pointed
+ * at an endpoint with a blank credential.
  */
 function resolveModelKey(env: NodeJS.ProcessEnv): string | undefined {
-  return env.AEP_EVAL_ANTHROPIC_API_KEY ?? env.ANTHROPIC_API_KEY;
+  const evaluationKey = env.AEP_EVAL_ANTHROPIC_API_KEY || undefined;
+  if (evaluationKey !== undefined) return evaluationKey;
+  if (env.AEP_EVAL_KEY_MANAGED) return undefined;
+  return env.ANTHROPIC_API_KEY || undefined;
 }
 
 export function buildChildEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
