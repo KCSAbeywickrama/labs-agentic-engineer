@@ -443,7 +443,7 @@ func TestDeployStage_ValidationDerivation(t *testing.T) {
 		{"passed", withVerdict(delivery.RunStateRunning, delivery.ValidationVerdictPassed), nil, "passed"},
 		{"partial", withVerdict(delivery.RunStateRunning, delivery.ValidationVerdictPartial), nil, "partial"},
 		{"inconclusive", withVerdict(delivery.RunStateRunning, delivery.ValidationVerdictInconclusive), nil, "inconclusive"},
-		// skipped is surfaced, not folded into none: "no acceptance criteria" is
+		// skipped is surfaced, not folded into none: "no validation criteria" is
 		// actionable ("author some"), where none means "nothing to say yet".
 		{"skipped", withVerdict(delivery.RunStateRunning, delivery.ValidationVerdictSkipped), nil, "skipped"},
 

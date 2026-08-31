@@ -4,7 +4,7 @@
 
 Take a versioned Spec end-to-end: cut the version, plan its Tasks into a GitHub MILESTONE, and run a
 supervised loop that dispatches the coding agent at that milestone until it settles — merging, building
-and deploying along the way — then judge what was deployed against the version's acceptance criteria.
+and deploying along the way — then judge what was deployed against the version's validation criteria.
 **Single write-authority over the milestone-run store and the three Temporal workflows that drive it.**
 
 ```mermaid

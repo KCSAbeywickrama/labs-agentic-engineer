@@ -113,7 +113,7 @@ const REQUIREMENTS_MOVED = "The requirements have changed since";
  * Which section a running turn is changing.
  *
  * `start` opens the requirements interview; `settle` and `amend` revise that
- * same document; `design` derives the design — and the acceptance criteria with
+ * same document; `design` derives the design — and the validation criteria with
  * it, but Design is the section named because it is where the work visibly
  * lands and where the user goes to watch it.
  *
@@ -323,7 +323,7 @@ export function railSections(input: RailInput): RailSection[] {
     section("requirements", "Requirements", requirements),
     // "Design", not "Designs" — one design, written across several documents.
     section("design", "Design", outdatedReason),
-    // The acceptance criteria are written against the same stories the design
+    // The validation criteria are written against the same stories the design
     // is, and the same re-derivation rewrites both — so they go stale together
     // and clear together. Flagging only the design would quietly assert that
     // criteria written against a story you have since rewritten are still fine.

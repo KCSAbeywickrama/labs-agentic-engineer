@@ -1188,7 +1188,7 @@ type DeployStage struct {
 
 	// Validation Validation state of the newest milestone run. This MIRRORS the run's verdict rather than folding it, so the chip says what the run concluded: a fold would have to discard `partial`, `inconclusive` and `unreported` at exactly the surface that needs them, and `completed` never said whether anything passed.
 	// Four LIFECYCLE values. none is PENDING, never settled: a verdict is expected and has not arrived, because a run is live or a dev run filed the version's validation task and nothing has started it yet. A client must not read it as "there is no verdict to wait for" — that is what skipped and inconclusive say. running is a validation CYCLE in flight, not merely a live run with no verdict yet. awaiting-fix is validation having failed with the run repairing it — the work in flight is a CODING cycle, which is why the state names the implementation rather than validation. cancelled is a person STOPPING the judging: a validation run settled cancelled before recording a verdict, so nothing will answer for this version unless somebody re-asks. The rest are the verdict verbatim. They are mutually exclusive in time, so nothing is hidden behind another.
-	// passed (every criterion was automated and passed), partial (some passed, none failed, some were never covered), failed (a criterion asserted and lost), inconclusive (no test results at all), unreported (no usable report at the validation cycle's merge commit), skipped (no acceptance criteria, and incident runs, which get no validation cycle).
+	// passed (every criterion was automated and passed), partial (some passed, none failed, some were never covered), failed (a criterion asserted and lost), inconclusive (no test results at all), unreported (no usable report at the validation cycle's merge commit), skipped (no validation criteria, and incident runs, which get no validation cycle).
 	// failed and unreported fail the run only once its validation attempts are spent: while attempts remain the run repairs and re-validates, and reads awaiting-fix in the meantime.
 	// The report path and per-cycle detail live on the version's run story (list-build-runs).
 	Validation DeployStageValidation `json:"validation"`
@@ -1199,7 +1199,7 @@ type DeployStage struct {
 
 // DeployStageValidation Validation state of the newest milestone run. This MIRRORS the run's verdict rather than folding it, so the chip says what the run concluded: a fold would have to discard `partial`, `inconclusive` and `unreported` at exactly the surface that needs them, and `completed` never said whether anything passed.
 // Four LIFECYCLE values. none is PENDING, never settled: a verdict is expected and has not arrived, because a run is live or a dev run filed the version's validation task and nothing has started it yet. A client must not read it as "there is no verdict to wait for" — that is what skipped and inconclusive say. running is a validation CYCLE in flight, not merely a live run with no verdict yet. awaiting-fix is validation having failed with the run repairing it — the work in flight is a CODING cycle, which is why the state names the implementation rather than validation. cancelled is a person STOPPING the judging: a validation run settled cancelled before recording a verdict, so nothing will answer for this version unless somebody re-asks. The rest are the verdict verbatim. They are mutually exclusive in time, so nothing is hidden behind another.
-// passed (every criterion was automated and passed), partial (some passed, none failed, some were never covered), failed (a criterion asserted and lost), inconclusive (no test results at all), unreported (no usable report at the validation cycle's merge commit), skipped (no acceptance criteria, and incident runs, which get no validation cycle).
+// passed (every criterion was automated and passed), partial (some passed, none failed, some were never covered), failed (a criterion asserted and lost), inconclusive (no test results at all), unreported (no usable report at the validation cycle's merge commit), skipped (no validation criteria, and incident runs, which get no validation cycle).
 // failed and unreported fail the run only once its validation attempts are spent: while attempts remain the run repairs and re-validates, and reads awaiting-fix in the meantime.
 // The report path and per-cycle detail live on the version's run story (list-build-runs).
 type DeployStageValidation string
@@ -1406,7 +1406,7 @@ type MilestoneRunView struct {
 	EndedAt *time.Time     `json:"endedAt,omitempty"`
 	ID      string         `json:"id"`
 
-	// Kind What this run DOES, and the value every platform predicate is written on. `dev` delivers a version — it plans its own milestone, and is the only kind that takes the one-active-build-per-project mutex. `task` works a defect inside a version already delivered; task runs execute concurrently on their own milestones. `validation` asks a shipped version's acceptance criteria again — it has no working set, builds nothing, and is outside the mutex so it never holds up the next build.
+	// Kind What this run DOES, and the value every platform predicate is written on. `dev` delivers a version — it plans its own milestone, and is the only kind that takes the one-active-build-per-project mutex. `task` works a defect inside a version already delivered; task runs execute concurrently on their own milestones. `validation` asks a shipped version's validation criteria again — it has no working set, builds nothing, and is outside the mutex so it never holds up the next build.
 	Kind            MilestoneRunViewKind `json:"kind"`
 	MilestoneNumber int64                `json:"milestoneNumber"`
 
@@ -1430,7 +1430,7 @@ type MilestoneRunView struct {
 	WaitingReason MilestoneRunViewWaitingReason `json:"waitingReason,omitempty"`
 }
 
-// MilestoneRunViewKind What this run DOES, and the value every platform predicate is written on. `dev` delivers a version — it plans its own milestone, and is the only kind that takes the one-active-build-per-project mutex. `task` works a defect inside a version already delivered; task runs execute concurrently on their own milestones. `validation` asks a shipped version's acceptance criteria again — it has no working set, builds nothing, and is outside the mutex so it never holds up the next build.
+// MilestoneRunViewKind What this run DOES, and the value every platform predicate is written on. `dev` delivers a version — it plans its own milestone, and is the only kind that takes the one-active-build-per-project mutex. `task` works a defect inside a version already delivered; task runs execute concurrently on their own milestones. `validation` asks a shipped version's validation criteria again — it has no working set, builds nothing, and is outside the mutex so it never holds up the next build.
 type MilestoneRunViewKind string
 
 // MilestoneRunViewOrigin Where this run was started from. A label on the trigger — the behaviour is the run's kind.
@@ -1988,13 +1988,13 @@ type RunValidation struct {
 	ReportPath string `json:"reportPath,omitempty"`
 
 	// Verdict What the run learned about the deployed system. Empty until the validation cycle settles.
-	// passed (every criterion was automated and passed), partial (some passed, none failed, and some were never covered — so `passed` would claim a result for criteria nobody checked), failed (a criterion asserted and lost), inconclusive (no test results at all), unreported (no usable report at the cycle's merge commit), skipped (no acceptance criteria, and incident runs, which get no validation cycle at all).
+	// passed (every criterion was automated and passed), partial (some passed, none failed, and some were never covered — so `passed` would claim a result for criteria nobody checked), failed (a criterion asserted and lost), inconclusive (no test results at all), unreported (no usable report at the cycle's merge commit), skipped (no validation criteria, and incident runs, which get no validation cycle at all).
 	// `failed` and `unreported` fail the run ONCE ITS VALIDATION ATTEMPTS ARE SPENT, under terminal reasons validation-failed and validation-unreported respectively; while attempts remain the run repairs and validates again, so this field can hold a fatal verdict on a run that is still live and about to try once more. A client rendering it as the run's answer therefore needs the lifecycle too — that is DeployStage.validation, which reports awaiting-fix for exactly that state. The rest settle succeeded.
 	Verdict RunValidationVerdict `json:"verdict,omitempty"`
 }
 
 // RunValidationVerdict What the run learned about the deployed system. Empty until the validation cycle settles.
-// passed (every criterion was automated and passed), partial (some passed, none failed, and some were never covered — so `passed` would claim a result for criteria nobody checked), failed (a criterion asserted and lost), inconclusive (no test results at all), unreported (no usable report at the cycle's merge commit), skipped (no acceptance criteria, and incident runs, which get no validation cycle at all).
+// passed (every criterion was automated and passed), partial (some passed, none failed, and some were never covered — so `passed` would claim a result for criteria nobody checked), failed (a criterion asserted and lost), inconclusive (no test results at all), unreported (no usable report at the cycle's merge commit), skipped (no validation criteria, and incident runs, which get no validation cycle at all).
 // `failed` and `unreported` fail the run ONCE ITS VALIDATION ATTEMPTS ARE SPENT, under terminal reasons validation-failed and validation-unreported respectively; while attempts remain the run repairs and validates again, so this field can hold a fatal verdict on a run that is still live and about to try once more. A client rendering it as the run's answer therefore needs the lifecycle too — that is DeployStage.validation, which reports awaiting-fix for exactly that state. The rest settle succeeded.
 type RunValidationVerdict string
 
