@@ -874,6 +874,12 @@ func resourceTerminalCondition(r *Resource) *OCCondition {
 	return nil
 }
 
+// ErrReleaseWaitTimeout is a wait-boundary answer: the poll deadline expired
+// without a new ResourceRelease, or the Resource reported a terminal
+// Ready=False (ResourceTypeNotFound). GetResource transport errors and
+// context.Canceled / DeadlineExceeded are not this sentinel.
+var ErrReleaseWaitTimeout = errors.New("release wait timed out")
+
 // WaitForReleaseChange polls GetResource until status.latestRelease.Name is
 // non-empty AND differs from prior, returning the release name the caller pins
 // a ResourceReleaseBinding to. `prior` is the release observed at apply time
@@ -890,6 +896,8 @@ func resourceTerminalCondition(r *Resource) *OCCondition {
 // error quoting the condition message. Other Ready=False reasons are not
 // treated as terminal (a controller may set False transiently).
 //
+// Deadline expiry and ResourceTypeNotFound are wrapped with
+// ErrReleaseWaitTimeout so callers can tell a wait answer from a poll blip.
 // It bounds ONLY the (fast) release-cut — the controller hashing spec.parameters
 // into an immutable ResourceRelease — never the readiness of the backing infra
 // that release eventually provisions (a real database can take minutes; callers
@@ -908,13 +916,13 @@ func WaitForReleaseChange(ctx context.Context, rc ResourceClient, namespace, res
 			if msg == "" {
 				msg = c.Reason
 			}
-			return "", fmt.Errorf("resource %q: %s", resourceName, msg)
+			return "", fmt.Errorf("%w: resource %q: %s", ErrReleaseWaitTimeout, resourceName, msg)
 		}
 		if name := ReleaseName(got); name != "" && name != prior {
 			return name, nil
 		}
 		if time.Now().After(deadline) {
-			return "", fmt.Errorf("resource %q produced no new ResourceRelease within %s", resourceName, timeout)
+			return "", fmt.Errorf("%w: resource %q produced no new ResourceRelease within %s", ErrReleaseWaitTimeout, resourceName, timeout)
 		}
 		select {
 		case <-ctx.Done():

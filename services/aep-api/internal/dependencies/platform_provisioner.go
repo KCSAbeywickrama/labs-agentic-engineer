@@ -233,11 +233,13 @@ func BuildPlatformBinding(project, depName, env, latestRelease string, params ma
 }
 
 // provisionWaitPermanent reports whether a WaitForReleaseChange failure is an
-// answer rather than a blip: the wait expired against a Resource that has
-// never cut a release. A wait that expired while a stale release still sat
-// on the Resource is not classified permanent (reconcile can be slow).
+// answer rather than a blip: the wait expired (or reported ResourceTypeNotFound)
+// against a Resource that has never cut a release. A wait that expired while a
+// stale release still sat on the Resource is not classified permanent
+// (reconcile can be slow). Transport / context errors are not wait answers
+// even when prior is empty.
 func provisionWaitPermanent(prior string, err error) bool {
-	return err != nil && prior == ""
+	return prior == "" && errors.Is(err, openchoreo.ErrReleaseWaitTimeout)
 }
 
 // OCNativeProvisioner is the only registered ResourceProvisioner impl today.

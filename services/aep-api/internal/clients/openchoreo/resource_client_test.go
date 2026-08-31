@@ -385,6 +385,9 @@ func TestWaitForReleaseChange_ReadyFalseResourceTypeNotFoundIsPermanent(t *testi
 	if err == nil {
 		t.Fatal("want permanent error, got nil")
 	}
+	if !errors.Is(err, ErrReleaseWaitTimeout) {
+		t.Fatalf("want ErrReleaseWaitTimeout wait-answer sentinel, got %v", err)
+	}
 	if !strings.Contains(err.Error(), "object-storage") && !strings.Contains(err.Error(), "ResourceTypeNotFound") {
 		t.Fatalf("error must quote the terminal condition, got %v", err)
 	}
@@ -410,6 +413,9 @@ func TestWaitForReleaseChange_ReadyFalseOtherReasonStillWaitsUntilTimeout(t *tes
 	_, err := WaitForReleaseChange(context.Background(), c, "ns", "r1", "", 5*time.Millisecond, 20*time.Millisecond)
 	if err == nil {
 		t.Fatal("want timeout, got nil")
+	}
+	if !errors.Is(err, ErrReleaseWaitTimeout) {
+		t.Fatalf("deadline expiry must wrap ErrReleaseWaitTimeout, got %v", err)
 	}
 	if time.Since(start) < 15*time.Millisecond {
 		t.Fatalf("non-terminal Ready=False must not return immediately: %v after %s", err, time.Since(start))

@@ -225,6 +225,64 @@ func TestPlatformProvision_ReconcileWaitsForNewRelease(t *testing.T) {
 	}
 }
 
+// A GetResource transport/5xx blip on a freshly created Resource (empty prior)
+// is not a wait answer. Classifying every empty-prior wait error as permanent
+// would stamp OC blips as Temporal NonRetryableApplicationError.
+func TestPlatformProvision_GetResourceBlipIsNotPermanent(t *testing.T) {
+	t.Parallel()
+
+	rc := &ocmocks.ResourceClientMock{
+		ApplyResourceFunc: func(_ context.Context, _ string, r *openchoreo.Resource) (*openchoreo.Resource, error) {
+			return r, nil
+		},
+		GetResourceFunc: func(_ context.Context, _, _ string) (*openchoreo.Resource, error) {
+			return nil, errors.New("connection reset")
+		},
+	}
+	p := NewOCNativeProvisioner(rc)
+
+	_, err := p.Provision(context.Background(), "default", "shop", "maindb", "postgres-cnpg", nil, []string{"development"})
+	if err == nil {
+		t.Fatal("want poll error when GetResource fails")
+	}
+	if errors.Is(err, ErrProvisionPermanent) {
+		t.Fatalf("GetResource transport error must stay retryable, got %v", err)
+	}
+}
+
+// ResourceTypeNotFound is a wait-boundary answer on a new Resource (empty
+// prior): the controller will never cut a release. It must wrap the same
+// wait-answer sentinel as a never-cut timeout so provisionWaitPermanent
+// classifies it permanent.
+func TestPlatformProvision_ResourceTypeNotFoundIsPermanent(t *testing.T) {
+	t.Parallel()
+
+	rc := &ocmocks.ResourceClientMock{
+		ApplyResourceFunc: func(_ context.Context, _ string, r *openchoreo.Resource) (*openchoreo.Resource, error) {
+			return r, nil
+		},
+		GetResourceFunc: func(_ context.Context, _, name string) (*openchoreo.Resource, error) {
+			return &openchoreo.Resource{
+				Metadata: openchoreo.OCObjectMeta{Name: name},
+				Status: &openchoreo.ResourceStatus{
+					Conditions: []openchoreo.OCCondition{{
+						Type:    "Ready",
+						Status:  "False",
+						Reason:  "ResourceTypeNotFound",
+						Message: `ClusterResourceType "object-storage" not found`,
+					}},
+				},
+			}, nil
+		},
+	}
+	p := NewOCNativeProvisioner(rc)
+
+	_, err := p.Provision(context.Background(), "default", "shop", "maindb", "object-storage", nil, []string{"development"})
+	if !errors.Is(err, ErrProvisionPermanent) {
+		t.Fatalf("want ErrProvisionPermanent on ResourceTypeNotFound, got %v", err)
+	}
+}
+
 func TestPlatformProvision_NeverCutReleaseIsPermanent(t *testing.T) {
 	t.Parallel()
 
