@@ -27,7 +27,7 @@
 // file's Y.XmlFragment), so the editor renders the same markdown the collab
 // server would hand it.
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { userEvent } from "@vitest/browser/context";
 import { cleanup, render, waitFor } from "@testing-library/react";
 import * as Y from "yjs";
