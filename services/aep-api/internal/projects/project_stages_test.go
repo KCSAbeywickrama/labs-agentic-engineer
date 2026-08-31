@@ -202,7 +202,12 @@ func TestBuildStage_RunStateMapping(t *testing.T) {
 		{name: "no rows → idle", wantStatus: "idle"},
 		{name: "succeeded", runs: []delivery.MilestoneRun{devRun("v3", delivery.RunStateSucceeded)}, wantVer: "v3", wantStatus: "succeeded"},
 		{name: "failed", runs: []delivery.MilestoneRun{devRun("v3", delivery.RunStateFailed)}, wantVer: "v3", wantStatus: "failed"},
-		{name: "cancelled → failed", runs: []delivery.MilestoneRun{devRun("v3", delivery.RunStateCancelled)}, wantVer: "v3", wantStatus: "failed"},
+		// A cancel is its OWN value, not a flavour of failed: a person abandoning an
+		// increment is a different fact from the platform failing to deliver one, and
+		// the badge read "Build failed" over a build somebody had deliberately
+		// stopped. It has to agree with the version ledger's own mapping
+		// (build.statusFromRunState) or the two surfaces contradict each other.
+		{name: "cancelled is its own status", runs: []delivery.MilestoneRun{devRun("v3", delivery.RunStateCancelled)}, wantVer: "v3", wantStatus: "cancelled"},
 		{name: "running", runs: []delivery.MilestoneRun{devRun("v3", delivery.RunStateRunning)}, wantVer: "v3", wantStatus: "running"},
 		{name: "waiting between cycles is still running", runs: []delivery.MilestoneRun{devRun("v3", delivery.RunStateWaiting)}, wantVer: "v3", wantStatus: "running"},
 	}
@@ -263,9 +268,13 @@ func TestBuildStage_ValidationFailureAttribution(t *testing.T) {
 			wantBuild: "failed", wantValidation: "failed",
 		},
 		{
+			// Still never carved out — the carve-out is about a validation cycle's
+			// failure being attributed to validation rather than to the build, and a
+			// cancel has no verdict either way. What changed is only the word: the
+			// build row says `cancelled`, not `failed`.
 			name:      "a cancelled run is never carved out",
 			runs:      []delivery.MilestoneRun{devRun("v1", delivery.RunStateCancelled)},
-			wantBuild: "failed", wantValidation: "none",
+			wantBuild: "cancelled", wantValidation: "none",
 		},
 	}
 	for _, tc := range cases {

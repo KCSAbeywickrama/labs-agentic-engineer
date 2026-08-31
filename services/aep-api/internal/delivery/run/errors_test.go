@@ -312,3 +312,28 @@ func TestProvisionGatesRetriesABlip(t *testing.T) {
 	require.NoError(t, env.GetWorkflowError())
 	require.Equal(t, 2, gates.count(), "a transient provision failure must be asked again")
 }
+
+// The third case, and the one the bounded policy exists for: a fault that is
+// NOT one of the permanent kinds we can name, and that never clears.
+//
+// The two tests above cover the answers we recognise (asked once) and the blips
+// that pass (asked again). Neither would notice the mode that caused the
+// incident: an error the classifier does not know, repeating forever under
+// Temporal's unbounded default while the version never fails. So the cap is
+// asserted over the REAL activity, error classification and all, rather than
+// over a mocked one — that is what makes it evidence about the two guards
+// TOGETHER rather than about the retry policy alone.
+func TestProvisionGatesGivesUpOnABlipThatNeverClears(t *testing.T) {
+	env, gates := gatesEnv(t, errors.New("openchoreo unreachable"))
+
+	executePlan(env)
+
+	require.True(t, env.IsWorkflowCompleted())
+	require.Equal(t, gateActivityAttempts, gates.count(),
+		"an unrecognised fault is retried a bounded number of times and then the version fails")
+	// The workflow itself completes rather than erroring: giving up on the gates
+	// settles the run `plan-failed` on the ordinary path, which is the whole
+	// reason cancel and failure here are signals rather than workflow faults.
+	// That the reason is plan-failed is asserted in workflow_test.go, over the
+	// harness that can read it.
+}
