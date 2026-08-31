@@ -62,16 +62,20 @@ export interface SpecAimBinding {
 const BOX_WIDTH = 560;
 
 /**
- * A request to open the box on a block the user did not drag over — a lens
- * asked for it (#652's Discuss). `seq` is what makes two requests for the same
- * block two events.
+ * A request to open the box the user did not drag for — a lens asked (#652's
+ * Discuss aims it at a block; #666's add-lenses open it to collect a command's
+ * subject). `seq` is what makes two requests for the same spot two events.
  */
-export interface AimRequest {
-  from: number;
-  to: number;
-  intent: "change" | "discuss";
-  seq: number;
-}
+export type AimRequest =
+  | { kind: "block"; from: number; to: number; intent: "change" | "discuss"; seq: number }
+  | {
+      kind: "command";
+      command: string;
+      placeholder: string;
+      cta: string;
+      at: number;
+      seq: number;
+    };
 
 interface Placement {
   top: number;
@@ -107,11 +111,14 @@ export function SpecAimMenu({
   editor,
   aim,
   request,
+  runCommand,
 }: {
   editor: Editor;
   aim: SpecAimBinding;
   /** A lens opening the box on its block; null between requests. */
   request?: AimRequest | null | undefined;
+  /** Sends a composed `/command subject` line the way the lens itself would. */
+  runCommand?: ((line: string) => void) | undefined;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -131,6 +138,9 @@ export function SpecAimMenu({
   // with Enter sending Discuss — a lens called Discuss whose Enter changed the
   // document would be a lie. Both buttons stay either way.
   const [enterIntent, setEnterIntent] = useState<"change" | "discuss">("change");
+  // Command mode (#666): the box is collecting a subject for `/actor` or
+  // `/feature` rather than aiming at a selection. No anchor, no wash, one CTA.
+  const [compose, setCompose] = useState<{ command: string; placeholder: string; cta: string } | null>(null);
 
   // Re-measured on every transaction, so the surface follows the text it points
   // at while an agent streams into the same document. Positions are held LIVE
@@ -159,8 +169,8 @@ export function SpecAimMenu({
   // editor loses it, so without this the user is typing an instruction about a
   // passage they can no longer see.
   useEffect(() => {
-    setAimHighlight(editor.view, hasRange || open ? { from, to } : null);
-  }, [editor, hasRange, open, from, to]);
+    setAimHighlight(editor.view, !compose && (hasRange || open) ? { from, to } : null);
+  }, [editor, hasRange, open, from, to, compose]);
 
   // Scrolling moves the text without changing the document, so the transaction
   // hook above never fires for it.
@@ -195,8 +205,16 @@ export function SpecAimMenu({
   const seq = request?.seq ?? 0;
   useEffect(() => {
     if (!request || seq === 0) return;
-    editor.commands.setTextSelection({ from: request.from + 1, to: request.to - 1 });
-    setEnterIntent(request.intent);
+    if (request.kind === "command") {
+      // Park the caret at the lens so the box opens where the click was; the
+      // command needs no selection, and none is taken.
+      editor.commands.setTextSelection({ from: request.at, to: request.at });
+      setCompose({ command: request.command, placeholder: request.placeholder, cta: request.cta });
+    } else {
+      editor.commands.setTextSelection({ from: request.from + 1, to: request.to - 1 });
+      setEnterIntent(request.intent);
+      setCompose(null);
+    }
     setOpen(true);
     // `request` is read once per seq; the fields never change under a seq.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -206,6 +224,7 @@ export function SpecAimMenu({
     setOpen(false);
     setText("");
     setEnterIntent("change");
+    setCompose(null);
   }, []);
 
   // Escape: back to the document, caret exactly where it was. Dropping the
@@ -251,8 +270,20 @@ export function SpecAimMenu({
     [editor, aim, text, close],
   );
 
+  // A composed command rides the lens's own send path — seedChat, which opens
+  // the panel and speaks as the user: `/feature manager approvals`. The line is
+  // command plus their words, the same shape the per-line lenses compose from
+  // the entry they sit on. An empty send is the bare command, which is exactly
+  // what the lens did before it learned to ask.
+  const handleCompose = useCallback(() => {
+    if (!compose) return;
+    const subject = text.trim();
+    runCommand?.(subject ? `${compose.command} ${subject}` : compose.command);
+    close();
+  }, [compose, text, runCommand, close]);
+
   const busy = aim.busyReason !== "";
-  const disabled = busy || sending || text.trim() === "";
+  const disabled = busy || sending || (!compose && text.trim() === "");
 
   return (
     <Box ref={hostRef} sx={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
@@ -288,7 +319,7 @@ export function SpecAimMenu({
                 multiline
                 maxRows={4}
                 size="small"
-                placeholder="What should change here?"
+                placeholder={compose?.placeholder ?? "What should change here?"}
                 value={text}
                 onChange={(e) => setText(e.target.value)}
                 onKeyDown={(e) => {
@@ -298,10 +329,22 @@ export function SpecAimMenu({
                   }
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
-                    void handleSend(enterIntent);
+                    if (compose) handleCompose();
+                    else void handleSend(enterIntent);
                   }
                 }}
               />
+              {compose ? (
+                <Stack direction="row" spacing={1} sx={{ mt: 1 }} justifyContent="flex-end">
+                  <Tooltip title={busy ? aim.busyReason : compose.command}>
+                    <span>
+                      <Button size="small" variant="contained" disabled={disabled} onClick={handleCompose}>
+                        {compose.cta}
+                      </Button>
+                    </span>
+                  </Tooltip>
+                </Stack>
+              ) : (
               <Stack direction="row" spacing={1} sx={{ mt: 1 }} justifyContent="flex-end">
                 <Tooltip title={busy ? aim.busyReason : "Talk it through before anything changes"}>
                   <span>
@@ -323,6 +366,7 @@ export function SpecAimMenu({
                   </span>
                 </Tooltip>
               </Stack>
+              )}
             </Paper>
           ) : (
             <Chip

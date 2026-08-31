@@ -1021,8 +1021,8 @@ renaming; it needed to stop being visible.
 | the user's intent | command | where it is offered |
 |---|---|---|
 | start from an idea | `/start with <idea>` | fired at project creation ([#522](https://github.com/wso2/labs-agentic-engineer/issues/522)); the idea rides along, cropped, so the user can see the agent is working from **their** words rather than a bare command ([#528](https://github.com/wso2/labs-agentic-engineer/issues/528)) |
-| add a feature | `/feature <idea>` | code lens on the story list |
-| add an actor | `/actor <who>` | code lens on Actors |
+| add a feature | `/feature <idea>` | code lens on the story list — opens the aim box to collect the idea, and sends the command plus their words |
+| add an actor | `/actor <who>` | code lens on Actors — same collecting box |
 | go deeper on a feature | `/expand <story>` | code lens on the story, which carries itself as the subject |
 | answer an open question | `/settle <the point>` | code lens on the question |
 | take up the open questions | `/settle` over the section | code lens on **Open Questions** |
@@ -1039,6 +1039,14 @@ that reason — dropping or reopening a decision is a sentence away in Discuss, 
 bullet as well as any control could. The word is **Agree**, not *Accept* — *Accept* is what the
 agent-suggestion review bar says, and this is a different act. `/settle` on a flagged line is retired;
 the marker leaving the document is itself the signal the agent reads.
+
+**An add-lens asks before it fires** ([#666](https://github.com/wso2/labs-agentic-engineer/issues/666)):
+`+ Actor` and `+ Feature` have a subject the document cannot supply, so the click opens the aim box
+with one question (*Who are they, and what do they do?* / *Describe the feature in your own words…*)
+and one button (*Add actor* / *Add feature*). The send is the command plus the user's words —
+`/feature manager should approve` — which is the same shape the per-line lenses compose from the
+entry they sit on. An empty send is the bare command, exactly what the lens did before it learned to
+ask; the agent then asks in chat instead.
 
 **A command names the user's intent, never the document operation.** `/feature` says what they
 came to do; `/amend Add a feature` said what the system does to a file.

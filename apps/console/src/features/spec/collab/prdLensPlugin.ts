@@ -32,7 +32,7 @@ import { Extension } from "@tiptap/core";
 import type { Node as PmNode } from "@tiptap/pm/model";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
-import { prdAffordances, type PrdLens } from "../lib/prdLenses";
+import { prdAffordances, type CommandPrompt, type PrdLens } from "../lib/prdLenses";
 import { docBlocks } from "./docBlocks";
 import { applyPrdEdit, type PrdEditLens } from "./prdEdits";
 
@@ -57,6 +57,8 @@ export interface PrdLensOptions {
   busyReason: () => string;
   /** Open the aim box on a block (#652's Discuss) — the editor's own surface. */
   discuss: (from: number, to: number) => void;
+  /** Open the aim box to collect a prompted command's subject (#666). */
+  compose: (command: string, prompt: CommandPrompt, at: number) => void;
 }
 
 /**
@@ -108,7 +110,11 @@ function lensButton(
     e.stopPropagation();
     switch (lens.kind) {
       case "command":
-        if (!opts.isBusy()) opts.run(lens.command);
+        if (opts.isBusy()) return;
+        // A lens with a subject to collect opens the box; the rest fire as
+        // they are — their subject is the line they sit on, or nothing.
+        if (lens.prompt) opts.compose(lens.command, lens.prompt, lens.at);
+        else opts.run(lens.command);
         return;
       case "edit": {
         const live = liveLens(view, lens);
@@ -190,6 +196,7 @@ export const PrdLenses = Extension.create<PrdLensOptions>({
       isBusy: () => false,
       busyReason: () => "",
       discuss: () => {},
+      compose: () => {},
     };
   },
 

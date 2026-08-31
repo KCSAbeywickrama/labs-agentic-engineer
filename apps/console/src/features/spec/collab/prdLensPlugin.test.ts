@@ -74,6 +74,9 @@ const busy = { reason: "" };
 /** Every block a Discuss lens handed to the aim surface, as [from, to]. */
 let discussed: Array<[number, number]> = [];
 
+/** Every prompted command the add-lenses asked the box to collect. */
+let composed: Array<{ command: string; cta: string }> = [];
+
 /** Mount the PRD in an editor carrying the lens extension. */
 function mount(busyReason: string, run: (c: string) => void = () => {}): HTMLElement {
   busy.reason = busyReason;
@@ -92,6 +95,7 @@ function mount(busyReason: string, run: (c: string) => void = () => {}): HTMLEle
         isBusy: () => busy.reason !== "",
         busyReason: () => busy.reason,
         discuss: (from, to) => discussed.push([from, to]),
+        compose: (command, prompt) => composed.push({ command, cta: prompt.cta }),
       }),
     ],
     content: markdownToNode(PRD).toJSON(),
@@ -114,6 +118,7 @@ afterEach(() => {
   editor = null;
   busy.reason = "";
   discussed = [];
+  composed = [];
   document.body.innerHTML = "";
 });
 
@@ -160,8 +165,23 @@ describe("the PRD's lens surface", () => {
   it("sends the command when a lens is clicked", () => {
     const run = vi.fn();
     const el = mount("", run);
+    byLabel(el, "Settle").click();
+    expect(run).toHaveBeenCalledWith("/settle");
+  });
+
+  // The add-lenses collect their subject first (#666): a bare `/actor` only
+  // makes the agent ask what the lens could have asked on the spot. The click
+  // opens the box; nothing is sent until the user answers it.
+  it("opens the box to collect a subject for + Actor and + Feature, sending nothing", () => {
+    const run = vi.fn();
+    const el = mount("", run);
+    byLabel(el, "+ Actor").click();
     byLabel(el, "+ Feature").click();
-    expect(run).toHaveBeenCalledWith("/feature");
+    expect(run).not.toHaveBeenCalled();
+    expect(composed).toEqual([
+      { command: "/actor", cta: "Add actor" },
+      { command: "/feature", cta: "Add feature" },
+    ]);
   });
 
   // Agree (#652) is a direct edit: no agent turn, one transaction, one undo.
@@ -262,8 +282,8 @@ describe("the PRD's lens surface", () => {
     const live = lensButtons(el);
     expect(live.every((b) => b.disabled)).toBe(false);
     expect(byLabel(el, "+ Feature").title).toBe("Add a feature to this PRD");
-    byLabel(el, "+ Feature").click();
-    expect(run).toHaveBeenCalledWith("/feature");
+    byLabel(el, "Settle").click();
+    expect(run).toHaveBeenCalledWith("/settle");
 
     busy.reason = "The agent is waiting on your answers";
     refreshPrdLenses(editor!.view);

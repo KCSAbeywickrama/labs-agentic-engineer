@@ -269,3 +269,100 @@ describe("revealing the first unsettled line", () => {
     doc.destroy();
   });
 });
+
+// The add-lenses collect their subject first (#666): + Feature opens the box,
+// the user types the idea, and the send is the command PLUS their words —
+// `/feature manager should approve` — through the same run path the lens
+// always used, so the panel opens and the line reads as theirs.
+describe("the add-lenses ask before they fire", () => {
+  it("+ Feature opens the box and Enter sends the command with the typed subject", async () => {
+    const run = vi.fn();
+    const doc = new Y.Doc();
+    setDocFile(doc, PATH, PRD);
+    const view = render(
+      <OxygenUIThemeProvider theme={OxygenTheme}>
+        <div style={{ height: "640px", display: "flex", flexDirection: "column" }}>
+          <SpecMdEditor
+            fragment={doc.getXmlFragment(PATH)}
+            provider={fakeProvider(doc)}
+            self={{ name: "Tester", color: "#64b5f6" }}
+            agentStreaming={false}
+            lenses={{ run, busyReason: "" }}
+            aim={{ path: PATH, busyReason: "", send: async () => true }}
+          />
+        </div>
+      </OxygenUIThemeProvider>,
+    );
+    const lens = await waitFor(() => {
+      const el = Array.from(view.container.querySelectorAll<HTMLButtonElement>(".prd-lens")).find(
+        (b) => b.textContent === "+ Feature",
+      );
+      if (!el) throw new Error("no + Feature lens yet");
+      return el;
+    });
+
+    lens.click();
+
+    const input = await waitFor(() => {
+      const el = view.container.querySelector<HTMLTextAreaElement>('[data-testid="aim-box"] textarea');
+      if (!el) throw new Error("no box yet");
+      return el;
+    });
+    expect(input.placeholder).toBe("Describe the feature in your own words…");
+    // Nothing was sent by the click itself.
+    expect(run).not.toHaveBeenCalled();
+    // No wash either: the command aims at nothing.
+    expect(view.container.querySelectorAll(".aim-selected")).toHaveLength(0);
+
+    await userEvent.click(input);
+    await userEvent.keyboard("manager should approve{Enter}");
+
+    expect(run).toHaveBeenCalledWith("/feature manager should approve");
+    // The box closed with the send.
+    await waitFor(() =>
+      expect(view.container.querySelector('[data-testid="aim-box"]')).toBeNull(),
+    );
+
+    doc.destroy();
+  });
+
+  it("the CTA sends the bare command when nothing is typed — the pre-prompt behaviour", async () => {
+    const run = vi.fn();
+    const doc = new Y.Doc();
+    setDocFile(doc, PATH, PRD);
+    const view = render(
+      <OxygenUIThemeProvider theme={OxygenTheme}>
+        <div style={{ height: "640px", display: "flex", flexDirection: "column" }}>
+          <SpecMdEditor
+            fragment={doc.getXmlFragment(PATH)}
+            provider={fakeProvider(doc)}
+            self={{ name: "Tester", color: "#64b5f6" }}
+            agentStreaming={false}
+            lenses={{ run, busyReason: "" }}
+            aim={{ path: PATH, busyReason: "", send: async () => true }}
+          />
+        </div>
+      </OxygenUIThemeProvider>,
+    );
+    const lens = await waitFor(() => {
+      const el = Array.from(view.container.querySelectorAll<HTMLButtonElement>(".prd-lens")).find(
+        (b) => b.textContent === "+ Actor",
+      );
+      if (!el) throw new Error("no + Actor lens yet");
+      return el;
+    });
+    lens.click();
+    const cta = await waitFor(() => {
+      const el = Array.from(view.container.querySelectorAll<HTMLButtonElement>("button")).find(
+        (b) => b.textContent?.trim() === "Add actor",
+      );
+      if (!el) throw new Error("no CTA yet");
+      return el;
+    });
+
+    await userEvent.click(cta);
+
+    expect(run).toHaveBeenCalledWith("/actor");
+    doc.destroy();
+  });
+});

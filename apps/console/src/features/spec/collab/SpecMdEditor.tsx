@@ -137,7 +137,21 @@ export function SpecMdEditor({
                 isBusy: () => Boolean(lensRef.current?.busyReason),
                 busyReason: () => lensRef.current?.busyReason ?? "",
                 discuss: (from: number, to: number) =>
-                  setAimRequest((prev) => ({ from, to, intent: "discuss", seq: (prev?.seq ?? 0) + 1 })),
+                  setAimRequest((prev) => ({
+                    kind: "block",
+                    from,
+                    to,
+                    intent: "discuss",
+                    seq: (prev?.seq ?? 0) + 1,
+                  })),
+                compose: (command, prompt, at) =>
+                  setAimRequest((prev) => ({
+                    kind: "command",
+                    command,
+                    ...prompt,
+                    at,
+                    seq: (prev?.seq ?? 0) + 1,
+                  })),
               }),
             ]
           : []),
@@ -547,7 +561,14 @@ export function SpecMdEditor({
       {/* Rendered last so it paints over the document, and OUTSIDE the
           scroller so it is positioned against the frame — the surface follows
           the text by re-measuring, not by scrolling with it. */}
-      {editor && aim && <SpecAimMenu editor={editor} aim={aim} request={aimRequest} />}
+      {editor && aim && (
+        <SpecAimMenu
+          editor={editor}
+          aim={aim}
+          request={aimRequest}
+          runCommand={(line) => lensRef.current?.run(line)}
+        />
+      )}
     </Box>
   );
 }

@@ -67,7 +67,18 @@ export type PrdEditKind = "agree";
  *    with Enter sending Discuss.
  */
 export type PrdLens =
-  | (LensBase & { kind: "command"; /** Sent verbatim as the user's next message. */ command: string })
+  | (LensBase & {
+      kind: "command";
+      /** Sent verbatim as the user's next message. */
+      command: string;
+      /**
+       * When present, the lens does not fire bare: it opens the aim box to
+       * collect the command's subject first (#666), and the send is
+       * `<command> <typed text>`. The add-lenses carry this — `/actor` with no
+       * actor makes the agent ask what the lens could have asked on the spot.
+       */
+      prompt?: CommandPrompt;
+    })
   | (LensBase & { kind: "edit"; edit: PrdEditKind; block: DocBlock; run: EmphasisRun })
   | (LensBase & { kind: "discuss"; block: DocBlock });
 
@@ -92,11 +103,28 @@ export interface PrdAffordances {
 }
 
 /** The PRD sections that carry an add-lens, keyed by their heading text. */
-type SectionLens = { command: string; label: string; title: string };
+/** What the box asks for, and what its one button says. */
+export interface CommandPrompt {
+  placeholder: string;
+  cta: string;
+}
+
+type SectionLens = { command: string; label: string; title: string; prompt?: CommandPrompt };
+const FEATURE_LENS: SectionLens = {
+  command: "/feature",
+  label: "+ Feature",
+  title: "Add a feature to this PRD",
+  prompt: { placeholder: "Describe the feature in your own words…", cta: "Add feature" },
+};
 const SECTION_LENSES: Record<string, SectionLens> = {
-  actors: { command: "/actor", label: "+ Actor", title: "Add an actor to this PRD" },
-  "user stories": { command: "/feature", label: "+ Feature", title: "Add a feature to this PRD" },
-  stories: { command: "/feature", label: "+ Feature", title: "Add a feature to this PRD" },
+  actors: {
+    command: "/actor",
+    label: "+ Actor",
+    title: "Add an actor to this PRD",
+    prompt: { placeholder: "Who are they, and what do they do?", cta: "Add actor" },
+  },
+  "user stories": FEATURE_LENS,
+  stories: FEATURE_LENS,
 };
 
 /**
