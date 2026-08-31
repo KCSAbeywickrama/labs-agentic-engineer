@@ -181,7 +181,7 @@ func (e *Events) start(ctx context.Context, projectID string, req delivery.Start
 	return err
 }
 
-// Revalidate asks a version's acceptance criteria again, against the system
+// Revalidate asks a version's validation criteria again, against the system
 // already deployed.
 //
 // It is AdoptIssue's sibling and deliberately so: both hand a milestone to the

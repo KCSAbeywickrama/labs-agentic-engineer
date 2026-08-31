@@ -187,7 +187,7 @@ function useMethods(
 
 /**
  * The Validation page: a read-only report of the deployed system against its
- * acceptance criteria, plus the validation cycle's live log. No writes.
+ * validation criteria, plus the validation cycle's live log. No writes.
  */
 export function ValidationPage({
   projectName,
