@@ -854,6 +854,45 @@ type noopAuth struct{}
 
 func (noopAuth) DerivePlatformResourceFactsAtHead(context.Context, string, string) error { return nil }
 
+type errAuth struct{ err error }
+
+func (e errAuth) DerivePlatformResourceFactsAtHead(context.Context, string, string) error {
+	return e.err
+}
+
+// An uninstalled resourceType is refused at the click: HTTP 409, no tag, no
+// Temporal run. The design is unsatisfiable on this cluster; retrying provision
+// cannot invent a ClusterResourceType.
+func TestBuild_UnknownResourceType_409_NoTagNoWorkflow(t *testing.T) {
+	spy := newPlanSpy()
+	tagger := &fakeTagger{res: &spec.SpecSaveResult{Tag: "v1"}}
+	coord := build.NewInputsCoordinator(nil, errAuth{err: build.ErrUnknownResourceType}, nil)
+	svc := withPlanPath(build.NewService(build.Deps{
+		Repos: fakeRepos{}, Tagger: tagger, Coord: coord,
+	}), spy)
+
+	code, body := postBuild(t, svc, "shop")
+	if code != 409 {
+		t.Fatalf("status = %d, want 409 (body=%s)", code, body)
+	}
+	e := componenttest.DecodeEnvelope(t, body)
+	if e.Code != "conflict" {
+		t.Fatalf("409 envelope = %+v", e)
+	}
+	if !strings.Contains(e.Message, "resourceType is not installed") {
+		t.Errorf("409 message = %q, want it to name the missing resourceType", e.Message)
+	}
+	if tagger.called != 0 {
+		t.Errorf("tagger called %d times, want 0 — unknown type must block before the tag-cut", tagger.called)
+	}
+	if len(spy.milestones()) != 0 {
+		t.Errorf("a rejected click minted a milestone: %v", spy.milestones())
+	}
+	if len(spy.startedRuns()) != 0 {
+		t.Errorf("a rejected click started a run: %v", spy.startedRuns())
+	}
+}
+
 // A doctored client (no inputs at all) cannot skip the drawer: an ambiguous
 // external dependency blocks with a failure, no tag is cut, and no workflow
 // starts.
