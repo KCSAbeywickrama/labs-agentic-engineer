@@ -125,7 +125,6 @@ export function SpecAimMenu({
   const boxRef = useRef<HTMLDivElement | null>(null);
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
-  const [sending, setSending] = useState(false);
   // Why the last send did not go — shown UNDER the field. Without this a
   // refused send (an agent already holds the turn, a race on the thread) left
   // the box open and mute: the reason landed as an error row in a chat panel
@@ -259,8 +258,8 @@ export function SpecAimMenu({
   }, [open, dismiss]);
 
   const handleSend = useCallback(
-    async (intent: "change" | "discuss") => {
-      if (aim.busyReason !== "" || sending || !text.trim()) return;
+    (intent: "change" | "discuss") => {
+      if (aim.busyReason !== "" || !text.trim()) return;
       const { from, to } = editor.state.selection;
       // Snapshot HERE, not when the selection was made: ProseMirror has been
       // mapping these positions through every concurrent edit, so the excerpt
@@ -270,17 +269,16 @@ export function SpecAimMenu({
         setSendError("The selected passage is no longer in the document — reselect and try again.");
         return;
       }
-      // Remember which send is running, so its button is the one that spins.
-      setEnterIntent(intent);
-      setSending(true);
-      const sent = await aim.send(text.trim(), anchor, intent);
-      setSending(false);
-      // A refused send keeps the words: they are the only copy, and the user
-      // has to be able to try again without retyping.
-      if (sent) close();
-      else setSendError("That didn't send — an agent may already be working. Your words are kept here.");
+      // The box closes NOW. The message row is already in the log the moment
+      // the send starts, so the box has nothing left to say — waiting on the
+      // dispatch made Enter read as dead for the seconds it takes. The rare
+      // refused dispatch surfaces in the log, and the sender opens the panel
+      // onto it so the failure is seen, not filed.
+      const line = text.trim();
+      close();
+      void aim.send(line, anchor, intent);
     },
-    [editor, aim, text, sending, close],
+    [editor, aim, text, close],
   );
 
   // A composed command rides the lens's own send path — seedChat, which opens
@@ -296,7 +294,7 @@ export function SpecAimMenu({
   }, [compose, aim.busyReason, text, runCommand, close]);
 
   const busy = aim.busyReason !== "";
-  const disabled = busy || sending || (!compose && text.trim() === "");
+  const disabled = busy || (!compose && text.trim() === "");
 
   return (
     <Box ref={hostRef} sx={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
@@ -348,7 +346,7 @@ export function SpecAimMenu({
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
                     if (compose) handleCompose();
-                    else void handleSend(enterIntent);
+                    else handleSend(enterIntent);
                   }
                 }}
               />
@@ -366,29 +364,18 @@ export function SpecAimMenu({
               <Stack direction="row" spacing={1} sx={{ mt: 1 }} justifyContent="flex-end">
                 <Tooltip title={busy ? aim.busyReason : "Talk it through before anything changes"}>
                   <span>
-                    <Button
-                      size="small"
-                      disabled={disabled}
-                      loading={sending && enterIntent === "discuss"}
-                      onClick={() => void handleSend("discuss")}
-                    >
+                    <Button size="small" disabled={disabled} onClick={() => handleSend("discuss")}>
                       Discuss
                     </Button>
                   </span>
                 </Tooltip>
                 <Tooltip title={busy ? aim.busyReason : "Rewrite the selection"}>
                   <span>
-                    {/* The dispatch is not instant — it resolves the repo and
-                        two snapshots before answering — and a box that shows
-                        nothing for those seconds reads as Enter having done
-                        nothing at all. The press is acknowledged the moment it
-                        lands; the box closes when the dispatch does. */}
                     <Button
                       size="small"
                       variant="contained"
                       disabled={disabled}
-                      loading={sending && enterIntent === "change"}
-                      onClick={() => void handleSend("change")}
+                      onClick={() => handleSend("change")}
                     >
                       Change
                     </Button>

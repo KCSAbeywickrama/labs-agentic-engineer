@@ -143,6 +143,10 @@ export function useAnchoredTurn(
           role: "error",
           content: err instanceof Error ? err.message : "Failed to reach the agent.",
         });
+        // The box closed the moment they sent (#666), so the log is the only
+        // place this failure exists — open the panel onto it. A failure that
+        // lands somewhere closed is a message that silently vanished.
+        requestChatOpen(chatKey);
         if (err instanceof ConversationRotatedError) {
           void queryClient.invalidateQueries({
             queryKey: conversationKeys.current(projectName),

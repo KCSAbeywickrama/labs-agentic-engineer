@@ -376,45 +376,18 @@ describe("what a send that cannot go looks like", () => {
     expect(input.value).toBe("shorter please");
   });
 
-  it("says why in the box when the dispatch is refused, and keeps the words", async () => {
-    const { view, editable, send } = await mountEditor();
-    send.mockResolvedValue(false);
-    selectParagraph(editable, "Rounds close automatically");
-    (await waitFor(() => {
-      const el = chip(view);
-      if (!el) throw new Error("no chip yet");
-      return el;
-    })).click();
-    const input = await waitFor(() => {
-      const el = box(view);
-      if (!el) throw new Error("no box yet");
-      return el;
-    });
-    await userEvent.click(input);
-    await userEvent.keyboard("shorter please{Enter}");
-
-    await waitFor(() => expect(send).toHaveBeenCalledOnce());
-    expect(box(view)).not.toBeNull();
-    expect(input.value).toBe("shorter please");
-    expect(view.container.textContent).toContain("Your words are kept here");
-
-    // Typing again clears the message — the next attempt starts clean.
-    await userEvent.keyboard("!");
-    expect(view.container.textContent).not.toContain("Your words are kept here");
-  });
 });
 
-// Reported twice from use as "Enter does not close the box": the dispatch is
+// Reported twice from use as "Enter does not close the box". The dispatch is
 // not instant — it resolves the repo and two snapshots before answering — and
-// the box showed NOTHING for those seconds. The press must be acknowledged the
-// moment it lands.
-describe("what a send in flight looks like", () => {
-  it("shows the press on the button while the dispatch runs, then closes", async () => {
+// first the box waited on it mute, then it waited with a spinner. Neither was
+// right: the message row is already in the log the moment the send starts, so
+// the box has nothing left to say. Enter closes it, full stop; the rare
+// refused dispatch surfaces in the log with the panel opened onto it.
+describe("Enter is the end of the box", () => {
+  it("closes immediately, before the dispatch has answered", async () => {
     const { view, editable, send } = await mountEditor();
-    let resolveSend!: (ok: boolean) => void;
-    send.mockImplementation(
-      () => new Promise<boolean>((resolve) => { resolveSend = resolve; }),
-    );
+    send.mockImplementation(() => new Promise<boolean>(() => {}));
     selectParagraph(editable, "Rounds close automatically");
     (await waitFor(() => {
       const el = chip(view);
@@ -429,17 +402,8 @@ describe("what a send in flight looks like", () => {
     await userEvent.click(input);
     await userEvent.keyboard("shorter please{Enter}");
 
-    // Mid-dispatch: the box is still there, and the Change button says so —
-    // a loading MUI button drops its text into a hidden span and spins.
-    await waitFor(() => {
-      const change = Array.from(view.container.querySelectorAll("button")).find(
-        (b) => b.textContent?.includes("Change"),
-      )!;
-      expect(change.querySelector(".MuiCircularProgress-root, [role=progressbar]")).not.toBeNull();
-    });
-    expect(box(view)).not.toBeNull();
-
-    resolveSend(true);
-    await waitFor(() => expect(box(view)).toBeNull());
+    // The dispatch has NOT resolved — and the box is already gone.
+    expect(box(view)).toBeNull();
+    expect(send).toHaveBeenCalledOnce();
   });
 });

@@ -159,6 +159,18 @@ describe("useAnchoredTurn", () => {
     expect(getMessages(KEY).some((m) => m.role === "error")).toBe(true);
   });
 
+  // The box closes the moment the user sends (#666), so the log is the only
+  // place a refused dispatch exists — a failure that lands somewhere closed is
+  // a message that silently vanished.
+  it("opens the panel onto a failed dispatch, even for a quiet Change", async () => {
+    mockStartTurn.mockRejectedValue(new Error("boom"));
+    const before = peekChatOpenRequest(KEY);
+    const { result } = await mountReady();
+    await result.current.send("shorter", { anchor: ANCHOR, intent: "change" });
+
+    expect(peekChatOpenRequest(KEY)).toBeGreaterThan(before);
+  });
+
   // The tag on the user's message blinked: the optimistic row is the only copy
   // until the server journals the turn AT ITS END, and with no claim held for
   // the turn, any rehydrate in that window washed the row out. The fold is
