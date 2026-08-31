@@ -107,6 +107,48 @@ test("discuss and change differ, and only in the wording", () => {
 
 // The guard is what stands between an untrusted body and a preamble that points
 // the agent at the wrong scope quietly. A half-read aim is worse than none.
+// The caps (CodeRabbit on #670): the anchor locates and never carries, so a
+// hand-built request must not smuggle a prompt payload through the locator
+// fields the console keeps short by construction.
+test("an aim past the size ceilings is rejected", () => {
+  const long = (n: number) => "x".repeat(n);
+  assert.ok(!isTurnAim({ ...AIM, anchor: { ...AIM.anchor, file: long(513) } }));
+  assert.ok(
+    !isTurnAim({
+      ...AIM,
+      anchor: { file: "a.md", nodes: [{ name: long(201), kind: "paragraph" }] },
+    }),
+  );
+  assert.ok(
+    !isTurnAim({
+      ...AIM,
+      anchor: { file: "a.md", nodes: [{ name: "n", kind: long(65) }] },
+    }),
+  );
+  assert.ok(
+    !isTurnAim({
+      ...AIM,
+      anchor: { file: "a.md", nodes: [{ name: "n", kind: "paragraph", context: long(513) }] },
+    }),
+  );
+  assert.ok(
+    !isTurnAim({
+      ...AIM,
+      anchor: {
+        file: "a.md",
+        nodes: Array.from({ length: 51 }, () => ({ name: "n", kind: "paragraph" })),
+      },
+    }),
+  );
+  // At the ceiling is fine — the cap is a ceiling, not a headroom rule.
+  assert.ok(
+    isTurnAim({
+      ...AIM,
+      anchor: { file: "a.md", nodes: [{ name: long(200), kind: "paragraph" }] },
+    }),
+  );
+});
+
 test("a malformed aim is rejected whole", () => {
   assert.ok(isTurnAim(AIM));
   assert.ok(!isTurnAim({ ...AIM, intent: "rewrite" }));
