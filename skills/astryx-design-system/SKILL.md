@@ -110,17 +110,21 @@ HEX only, never color words: "black and yellow" does not say WHICH yellow, and
 this file is the whole of what a build sees. The edit reaches every subsequent
 build in the org with no conversation involved.
 
-A per-project override still wins: if the project's `specs/design/design.md`
-carries a `## Brand colors` heading with hex values, use those instead of this
-section. That heading is there for a project whose colors someone stated
-outright — it is not something to solicit.
+A per-project override still wins, **per value, not per section**: a hex under
+the `## Brand colors` heading in the project's `specs/design/design.md`
+overrides the same line here, and a line that heading omits still comes from
+this section. That heading is there for a project whose colors someone stated
+outright — it is not something to solicit, and a half-filled one is not a
+reason to drop the organization's other color.
 
 ### At build time — compile the theme
 
-Resolve the colors before you wire the theme: the `## Brand colors` heading in
-`specs/design/design.md` if the project has one, otherwise The organization's
-colors above. **Neither one set → no brand was chosen**: use the stock package
-above and do not invent a palette.
+Resolve each of the two colors before you wire the theme, independently: the
+project's `## Brand colors` line in `specs/design/design.md` if it has one,
+otherwise the line in The organization's colors above. **A color neither one
+sets is not chosen** — take it from the stock theme's own token and never
+invent one, whether that leaves you with two brand colors, one, or none. One
+brand color plus one stock color is a valid outcome; a guessed hex is not.
 
 With colors, a brand theme is a **compiled theme of your own** — not hand-written
 colors sprinkled over a stock one. Editing component styles to paint them brand
