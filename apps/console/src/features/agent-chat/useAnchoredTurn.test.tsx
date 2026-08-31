@@ -32,6 +32,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   canReplaceLog,
   chatKeyFor,
+  claimStreamFold,
   getMessages,
   peekChatOpenRequest,
   replaceMessages,
@@ -61,6 +62,13 @@ vi.mock("./api/turns", async (importOriginal) => {
   return { ...real, startCollabTurn: (...a: unknown[]) => mockStartTurn(...a) };
 });
 
+// The detached fold (#666): resolved by the test, so "the turn is running" is
+// a state the assertions can hold open.
+const mockFold = vi.fn();
+vi.mock("./runTurn", () => ({
+  attachAndFoldTurn: (...a: unknown[]) => mockFold(...a),
+}));
+
 vi.mock("./currentUser", () => ({
   useCurrentAuthor: () => ({ id: "u-1", displayName: "Ann" }),
 }));
@@ -83,6 +91,7 @@ beforeEach(() => {
   replaceMessages(KEY, []);
   mockFetchCurrent.mockResolvedValue("conv-1");
   mockStartTurn.mockResolvedValue("turn-1");
+  mockFold.mockResolvedValue(undefined);
 });
 
 describe("useAnchoredTurn", () => {
@@ -148,6 +157,37 @@ describe("useAnchoredTurn", () => {
     expect(users).toHaveLength(1);
     expect(users[0]).toMatchObject({ status: "failed" });
     expect(getMessages(KEY).some((m) => m.role === "error")).toBe(true);
+  });
+
+  // The tag on the user's message blinked: the optimistic row is the only copy
+  // until the server journals the turn AT ITS END, and with no claim held for
+  // the turn, any rehydrate in that window washed the row out. The fold is
+  // what holds the log for the whole turn — same as the panel's own send.
+  it("folds the turn, holding the log until the turn ends", async () => {
+    let endTurn!: () => void;
+    mockFold.mockImplementation(
+      () => new Promise<void>((resolve) => { endTurn = () => resolve(); }),
+    );
+    const { result } = await mountReady();
+    await result.current.send("make this shorter", { anchor: ANCHOR, intent: "change" });
+
+    expect(mockFold).toHaveBeenCalledWith(KEY, PROJECT, "turn-1", expect.anything());
+    // The dispatch has resolved, and the log is STILL held — by the fold.
+    expect(canReplaceLog(KEY)).toBe(false);
+
+    endTurn();
+    await waitFor(() => expect(canReplaceLog(KEY)).toBe(true));
+  });
+
+  it("does not fold when a fold is already live — the panel got there first", async () => {
+    const release = claimStreamFold(KEY);
+    try {
+      const { result } = await mountReady();
+      await result.current.send("make this shorter", { anchor: ANCHOR, intent: "change" });
+      expect(mockFold).not.toHaveBeenCalled();
+    } finally {
+      release();
+    }
   });
 
   it("refuses a send with no words and dispatches nothing", async () => {

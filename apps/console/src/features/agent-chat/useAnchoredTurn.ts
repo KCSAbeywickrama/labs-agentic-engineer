@@ -22,10 +22,14 @@ import {
   addMessage,
   chatKeyFor,
   claimSendInFlight,
+  claimStreamFold,
   clearFailedSends,
+  hasStreamFold,
   requestChatOpen,
+  setTurnStatus,
   settleUserMessage,
 } from "./chatStore.js";
+import { attachAndFoldTurn } from "./runTurn.js";
 import { conversationKeys, fetchCurrentConversationId } from "./api/conversations.js";
 import {
   ConversationRotatedError,
@@ -38,14 +42,19 @@ import { useCurrentAuthor } from "./currentUser.js";
 //
 // Why this is not `useAgentChat().send`: the chat panel is mounted with
 // `unmountOnExit` (AppLayout), so when it is closed that hook does not exist —
-// and a Change is specifically the send that does NOT open it. What the panel
-// owns beyond dispatching is the SSE fold, which this deliberately skips: the
-// document is the feedback for an anchored change (the agent streams into the
-// same room the user is reading), and if the panel is opened later it attaches
-// to the running turn on its own.
+// and a Change is specifically the send that does NOT open it.
 //
-// The log still records the message, anchor and all. "Quietly" means the panel
-// does not take over the screen, not that the turn goes unrecorded.
+// It folds its turn's stream, exactly as the panel's send does. The first cut
+// skipped the fold, and the user watched the tag on their message blink: the
+// optimistic row is the only copy of the message until the server journals the
+// turn AT ITS END, and with no fold claim held, any rehydrate in that window —
+// a refocus, the panel opening — replaced the log with server truth that did
+// not hold the row yet, then turn-end brought it back. The fold is what makes
+// the row stable: a live fold blocks the replace for the whole turn, and it
+// writes the agent's narration into the log on the way.
+//
+// "Quietly" means the panel does not take over the screen, not that the turn
+// goes unrecorded.
 
 export interface AnchoredTurn {
   /** False when the send was refused before dispatch — no thread resolved yet,
@@ -109,6 +118,22 @@ export function useAnchoredTurn(
         );
         clearFailedSends(chatKey);
         settleUserMessage(chatKey, messageId, { turnId });
+        // Fold the turn to its terminal, detached — unless a fold is already
+        // live for this log (the panel attached first), because two folds of
+        // one turn would interleave the stream on top of itself. The panel's
+        // own attach paths make the same check in the other direction.
+        if (!hasStreamFold(chatKey)) {
+          const releaseFold = claimStreamFold(chatKey);
+          void attachAndFoldTurn(chatKey, projectName, turnId, new AbortController().signal)
+            .catch(() => {
+              setTurnStatus(chatKey, turnId, "failed");
+              addMessage(chatKey, {
+                role: "error",
+                content: "Lost the agent's stream — open the panel to re-attach.",
+              });
+            })
+            .finally(releaseFold);
+        }
         return true;
       } catch (err) {
         // The row the user can already see becomes the failed one — a second

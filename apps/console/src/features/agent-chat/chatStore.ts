@@ -653,6 +653,16 @@ export function claimStreamFold(key: string): () => void {
   return claim(attachedFolds, key);
 }
 
+/**
+ * Is a fold already live for `key`? The log has more than one folder now — the
+ * panel, and the quiet anchored send (#666) — and two concurrent folds of the
+ * same turn would interleave one stream on top of itself. Whoever would start
+ * a fold asks this first; component-local refs cannot answer it.
+ */
+export function hasStreamFold(key: string): boolean {
+  return (attachedFolds.get(key) ?? 0) > 0;
+}
+
 /** Mark a local send as mid-dispatch for `key`. Call the returned function
  *  once the dispatch resolves, successfully or not. */
 export function claimSendInFlight(key: string): () => void {
