@@ -33,6 +33,7 @@ import (
 var (
 	ErrEndUserAuthConflict        = errors.New("end-user auth conflict")
 	ErrResourceCatalogUnavailable = errors.New("resource-type catalog unavailable")
+	ErrUnknownResourceType        = errors.New("resourceType is not installed on this cluster")
 )
 
 // SpecCollector fetches/accepts an external dependency's OpenAPI contract and

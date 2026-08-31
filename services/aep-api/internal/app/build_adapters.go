@@ -67,6 +67,8 @@ func (d buildDesignDeriver) DerivePlatformResourceFactsAtHead(ctx context.Contex
 		return nil
 	case errors.Is(err, spec.ErrEndUserAuthConflict):
 		return fmt.Errorf("%w: %v", build.ErrEndUserAuthConflict, err)
+	case errors.Is(err, spec.ErrUnknownResourceType):
+		return fmt.Errorf("%w: %v", build.ErrUnknownResourceType, err)
 	case errors.Is(err, spec.ErrResourceCatalogUnavailable):
 		return fmt.Errorf("%w: %v", build.ErrResourceCatalogUnavailable, err)
 	default:
