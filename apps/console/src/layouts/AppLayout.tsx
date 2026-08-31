@@ -103,6 +103,8 @@ function SidebarAutoCollapse({ collapsed }: { collapsed: boolean }) {
 
 // App shell per the oxygen-ui skill's canonical AppLayout: Header + Sidebar +
 // Main(Outlet) + Footer + NotificationPanel (Alerts, #154/#155).
+const CHAT_OPEN_KEY = "aep.chat.panelOpen";
+
 export function AppLayout() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const { user, signOut, orgHandle } = useSession();
@@ -112,7 +114,25 @@ export function AppLayout() {
   // strict:false param read as the header's project switcher.
   const params = useParams({ strict: false }) as { projectName?: string };
   const projectName = params.projectName;
-  const [chatOpen, setChatOpen] = useState(false);
+  // Whether the panel is showing survives a reload — a reader who works with
+  // the chat beside the spec should not have to reopen it every time the page
+  // comes back (#666). Per-browser convenience, never state: localStorage can
+  // be absent or throwing (privacy modes), and then the panel simply starts
+  // closed, which is the pre-persistence behaviour.
+  const [chatOpen, setChatOpen] = useState(() => {
+    try {
+      return localStorage.getItem(CHAT_OPEN_KEY) === "true";
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(CHAT_OPEN_KEY, String(chatOpen));
+    } catch {
+      // memory-only
+    }
+  }, [chatOpen]);
 
   const activeItem = activeItemFor(pathname, Boolean(projectName));
   // The spec workspace is the console's full-screen surface (#80).
