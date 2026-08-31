@@ -68,14 +68,14 @@ describe("foldValidationProgress", () => {
         item("AC-002-a", "planned"),
       ]),
     ]);
-    expect(out).toEqual({ "AC-001-a": "authoring", "AC-002-a": "planned" });
+    expect(out).toEqual({ statuses: { "AC-001-a": "authoring", "AC-002-a": "planned" }, active: true });
   });
 
   it("ignores every other kind of line on the same feed", () => {
     const out = foldValidationProgress([
       cycle("c1", "validation", [other("tool_use"), item("AC-001-a", "running"), other("log")]),
     ]);
-    expect(out).toEqual({ "AC-001-a": "running" });
+    expect(out).toEqual({ statuses: { "AC-001-a": "running" }, active: true });
   });
 
   it("reads only the NEWEST validation cycle", () => {
@@ -87,7 +87,7 @@ describe("foldValidationProgress", () => {
       cycle("c1", "validation", [item("AC-001-a", "pass", "c1")], "2026-08-31T01:00:00Z"),
       cycle("c2", "validation", [item("AC-001-a", "authoring", "c2")]),
     ]);
-    expect(out).toEqual({ "AC-001-a": "authoring" });
+    expect(out).toEqual({ statuses: { "AC-001-a": "authoring" }, active: true });
   });
 
   it("says nothing while the newest validation cycle is closed", () => {
@@ -99,12 +99,25 @@ describe("foldValidationProgress", () => {
       cycle("c1", "validation", [item("AC-001-a", "fail")], "2026-08-31T01:00:00Z"),
       cycle("c2", "coding", []),
     ]);
-    expect(out).toEqual({});
+    expect(out).toEqual({ statuses: {}, active: false });
   });
 
   it("says nothing for a run that has not validated", () => {
-    expect(foldValidationProgress([cycle("c1", "coding", [])])).toEqual({});
-    expect(foldValidationProgress([])).toEqual({});
+    expect(foldValidationProgress([cycle("c1", "coding", [])])).toEqual({
+      statuses: {},
+      active: false,
+    });
+    expect(foldValidationProgress([])).toEqual({ statuses: {}, active: false });
+  });
+
+  it("reports an OPEN cycle that has touched nothing as active", () => {
+    // The distinction the `active` flag exists for: no statuses because the run
+    // is still setting up, versus no statuses because nothing is validating.
+    // Both are empty; only the first has anything to narrate.
+    expect(foldValidationProgress([cycle("c1", "validation", [])])).toEqual({
+      statuses: {},
+      active: true,
+    });
   });
 
   it("skips a line missing either half of its identity", () => {
@@ -117,6 +130,6 @@ describe("foldValidationProgress", () => {
         item("AC-003-a", "running"),
       ] as RunProgressCycle["lines"]),
     ]);
-    expect(out).toEqual({ "AC-003-a": "running" });
+    expect(out).toEqual({ statuses: { "AC-003-a": "running" }, active: true });
   });
 });

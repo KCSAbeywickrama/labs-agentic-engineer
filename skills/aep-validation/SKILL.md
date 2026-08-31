@@ -316,12 +316,15 @@ Two things about this step will mislead you if you let them:
   unrecoverable — there is no way to attach to it or read its output
   later. Getting the timeout right up front is the whole game.
 
-**Never shard this call.** The config decides which run may write
-`results.json` by whether the command NAMES specs: a run that names none is
-this one, and a run that names any is a probe — a spec being checked while
-it is authored (step 6) or healed (step 8), neither of which may overwrite
-the report's input. A sharded run therefore writes nothing, and
-`generate-report.mjs` exits 2 naming the missing file.
+**Never narrow this call** — no spec filter, and none of `--shard`,
+`--grep`, `--last-failed`, `--only-changed`. The config decides which run
+may write `results.json` by whether the command narrows the suite: a
+complete run is this one, and anything narrower is a probe — a spec being
+checked while it is authored (step 6) or healed (step 8), neither of which
+may overwrite the report's input. A narrowed run therefore writes nothing,
+and `generate-report.mjs` exits 2 naming the missing file. That is
+deliberate: a run that loudly writes nothing beats one that quietly writes
+a third of the suite as if it were all of it.
 
 If the suite genuinely cannot finish inside the window, say so in the plan
 and PR notes: that is a finding about the suite, not something to work

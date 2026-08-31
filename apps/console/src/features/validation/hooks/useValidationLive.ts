@@ -33,6 +33,23 @@ import { useRunProgress, type RunProgressCycle } from "../../builds/hooks/useRun
 
 const VALIDATION = "validation";
 
+export interface ValidationLive {
+  /** Per-criterion statuses from the open validation cycle. */
+  statuses: LiveStatuses;
+  /**
+   * Whether a validation cycle is actually in flight on this run.
+   *
+   * Separate from `statuses` being empty, and the distinction is the point: an
+   * open cycle that has not touched a criterion yet is a run still setting up,
+   * while no open cycle at all is a run that has finished validating or is off
+   * doing something else (a repair cycle writing code). Both have no statuses;
+   * only the first has anything to narrate.
+   */
+  active: boolean;
+}
+
+const IDLE: ValidationLive = { statuses: {}, active: false };
+
 /**
  * Fold one run's validation progress into per-criterion statuses.
  *
@@ -43,14 +60,14 @@ const VALIDATION = "validation";
  */
 export function foldValidationProgress(
   cycles: readonly RunProgressCycle[],
-): LiveStatuses {
+): ValidationLive {
   const newest = cycles.filter((c) => c.cycle.kind === VALIDATION).at(-1);
   // A CLOSED cycle has nothing live to say, and saying it anyway is the failure
   // mode this guard exists for: while a repair cycle is coding, the newest
   // validation cycle is the previous attempt's, and folding it would override
   // that attempt's own report with the statuses that produced it — a page
   // insisting a criterion is "Running…" while nothing is running it.
-  if (!newest || newest.cycle.endedAt) return {};
+  if (!newest || newest.cycle.endedAt) return IDLE;
 
   const out: Record<string, string> = {};
   for (const line of newest.lines) {
@@ -62,7 +79,7 @@ export function foldValidationProgress(
     // so the newest status for an item is simply the last one seen.
     out[line.itemId] = line.status;
   }
-  return out;
+  return { statuses: out, active: true };
 }
 
 /**
@@ -77,7 +94,7 @@ export function useValidationLive(
   projectName: string,
   runId: string | undefined,
   enabled: boolean,
-): LiveStatuses {
+): ValidationLive {
   const { cycles } = useRunProgress(projectName, runId, enabled);
   return useMemo(() => foldValidationProgress(cycles), [cycles]);
 }

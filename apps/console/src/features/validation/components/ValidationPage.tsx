@@ -433,7 +433,14 @@ export function ValidationPage({
   // Said above the rows, and only in the two windows where the rows say nothing:
   // before any criterion has been picked up, and after they have all settled but
   // the report has not landed. Derived from the rows so it cannot contradict them.
-  const liveNote = validationLiveLine(oracle, live, report.data !== undefined);
+  // Gated on a validation cycle actually being OPEN, not merely on there being no
+  // statuses. Without that, a settled `unreported` verdict (whose report is never
+  // fetched) and a repair cycle busy writing code both look identical to a run
+  // that has not started, and the tile announced "Setting up the test harness…"
+  // over a run that had finished or was doing something else entirely.
+  const liveNote = live.active
+    ? validationLiveLine(oracle, live.statuses, report.data !== undefined)
+    : "";
 
   // The tile stays visible in BOTH bodies — a verdict does not stop being true
   // because the reader switched to the log, and neither does an attempt still being
@@ -711,7 +718,7 @@ export function ValidationPage({
         awaitingReport={awaitingFirstVerdict}
         criteria={criteria.data.content}
         {...(report.data ? { report: report.data.content } : {})}
-        live={live}
+        live={live.statuses}
       />
     </>
   );

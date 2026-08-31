@@ -8,8 +8,8 @@ A validation cycle is dispatched with a 7200s deadline
 (`coding_executor.go:455`). Until it merges its pull request and the platform
 reads `tests/validation/report.json` at that merge commit, nothing on the
 Validation page can say anything about any individual acceptance criterion —
-#669 put a row per criterion on screen and every one of them read `Pending` for
-up to two hours. The only live surface was the raw agent feed, where the whole
+issue #669 put a row per criterion on screen and every one of them read
+`Pending` for up to two hours. The only live surface was the raw agent feed, where the whole
 authoring phase is Write calls and the whole test run was one `tool_use` line
 with its result arriving up to ten minutes later.
 
@@ -73,19 +73,25 @@ outlives it.
    full pass of the suite on green runs while buying liveness only for
    regression specs, which exist solely on re-validations.
 
-5. **Only an unfiltered run writes `results.json`.** The config chooses its own
-   reporters from whether the command names a spec: a named run is a probe and
-   gets `line`, an unfiltered run gets the JSON reporter the report generator
-   reads. Without this, every per-spec verification in steps 6 and 8 overwrites
-   the whole suite's results with one criterion's — which today only call
-   ordering hides.
+5. **Only a COMPLETE run writes `results.json`.** The config chooses its own
+   reporters from whether the command narrows the suite: a narrowed run is a
+   probe and gets `line`, a complete run gets the JSON reporter the report
+   generator reads. Without this, every per-spec verification in steps 6 and 8
+   overwrites the whole suite's results with one criterion's — which today only
+   call ordering hides.
+
+   Narrowing means a spec filter *or* one of Playwright's own flags — `--shard`,
+   `--grep`, `--last-failed`, `--only-changed`. `--shard` matters most: it looks
+   like the way to fit a big suite inside the command window, and treating it as
+   complete would write a third of the suite's results as if they were all of
+   it, reporting every unrun criterion as never checked.
 
    Inferred from the command rather than switched by a flag or an env var, for
    the same reason as decision 3: naming a spec is not optional, it is *how* you
    run one spec, so there is nothing for the agent to remember. The cost is that
-   a sharded authoritative run reads as a probe and writes nothing; the
-   generator then exits 2 naming the missing file, which is why the skill
-   forbids sharding that one call.
+   a narrowed authoritative run writes nothing; the generator then exits 2 naming
+   the missing file, which is why the skill forbids narrowing that one call —
+   loudly wrong beats a partial report read as a whole one.
 
 6. **The live stream ends at `report.json`'s own words.** `pass` / `fail`, not
    `passed` / `failed`. The console overlays these statuses onto the same rows

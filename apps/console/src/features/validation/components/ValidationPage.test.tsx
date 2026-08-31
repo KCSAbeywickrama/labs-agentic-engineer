@@ -64,8 +64,9 @@ vi.mock("../../builds/components/RunFeed", () => ({
 // settable map so the page's chip PRECEDENCE is assertable without a stream — the
 // fold that builds the map is tested on its own in useValidationLive.test.ts.
 let mockLive: Record<string, string> = {};
+let mockLiveActive = true;
 vi.mock("../hooks/useValidationLive", () => ({
-  useValidationLive: () => mockLive,
+  useValidationLive: () => ({ statuses: mockLive, active: mockLiveActive }),
 }));
 
 // Controllable status + runs + file queries (no QueryClientProvider / MSW).
@@ -299,6 +300,7 @@ afterEach(() => {
   mockReport.isError = false;
   mockReport.data = undefined;
   mockLive = {};
+  mockLiveActive = true;
   mockIssueUrl = "https://github.com/acme/demo/issues/30";
 });
 
@@ -1361,5 +1363,46 @@ describe("ValidationPage live per-criterion progress", () => {
     renderPage(undefined);
 
     expect(screen.getByText("Writing the validation report…")).toBeInTheDocument();
+  });
+});
+
+describe("ValidationPage live note is gated on an open cycle", () => {
+  it("says nothing over a settled verdict whose report was never fetched", () => {
+    // `unreported` settles the run AND skips the report read, so the page has no
+    // statuses and no report — which read identically to a run that had not
+    // started, and announced "Setting up the test harness…" over a finished one.
+    mockValidation = "unreported";
+    mockRun = run({
+      validation: { verdict: "unreported" },
+      cycles: [validationCycle],
+    });
+    mockCriteria.data = { content: CRITERIA };
+    mockLive = {};
+    mockLiveActive = false;
+    renderPage(undefined);
+
+    expect(screen.queryByText("Setting up the test harness…")).not.toBeInTheDocument();
+  });
+
+  it("says nothing while a repair cycle is writing code", () => {
+    // The newest validation cycle is the PREVIOUS attempt's, already closed, so
+    // nothing is validating even though the run is live.
+    mockValidation = "awaiting-fix";
+    mockRun = {
+      ...run({
+        validation: { verdict: "failed", reportPath: "tests/validation/report.json" },
+        cycles: [validationCycle, { ...validationCycle, id: "cycle-3", kind: "coding" }],
+      }),
+      state: "running",
+    };
+    mockCriteria.data = { content: CRITERIA };
+    mockReport.data = { content: REPORT };
+    mockLive = {};
+    mockLiveActive = false;
+    renderPage(undefined);
+
+    expect(screen.queryByText("Setting up the test harness…")).not.toBeInTheDocument();
+    // The previous attempt's evidence still stands.
+    expect(screen.getByText(/category option never appeared/)).toBeInTheDocument();
   });
 });
