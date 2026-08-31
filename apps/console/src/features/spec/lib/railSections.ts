@@ -155,7 +155,10 @@ function requirementsReasons(input: RailInput): SectionReason[] {
   if (input.openQuestions > 0) {
     reasons.push({
       key: "open-questions",
-      label: plural(input.openQuestions, "open question", "open questions"),
+      // What the user can do about it, not our name for it: "open question"
+      // is the document's heading, and the fact the user needs is that only
+      // they can answer these.
+      label: plural(input.openQuestions, "question only you can answer", "questions only you can answer"),
       count: input.openQuestions,
       action: "document",
     });
@@ -163,7 +166,9 @@ function requirementsReasons(input: RailInput): SectionReason[] {
   if (input.assumptions > 0) {
     reasons.push({
       key: "assumptions",
-      label: `${plural(input.assumptions, "assumption", "assumptions")} to challenge`,
+      // "marked assumed" points at the pill the user will find on the line;
+      // "to challenge" said what we hoped they would do, not what they see.
+      label: `${plural(input.assumptions, "decision", "decisions")} marked assumed`,
       count: input.assumptions,
       action: "document",
     });
