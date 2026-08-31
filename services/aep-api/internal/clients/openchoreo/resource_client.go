@@ -310,6 +310,7 @@ type ResourceLatestRelease struct {
 // ResourceStatus is Resource.status.
 type ResourceStatus struct {
 	LatestRelease *ResourceLatestRelease `json:"latestRelease,omitempty"`
+	Conditions    []OCCondition          `json:"conditions,omitempty"`
 }
 
 // Resource is the openchoreo.dev/v1alpha1 Resource CR.
@@ -338,9 +339,10 @@ type ResourceReleaseBindingSpec struct {
 
 // OCCondition mirrors a k8s CR's status.conditions[] entry.
 type OCCondition struct {
-	Type   string `json:"type"`
-	Status string `json:"status"` // "True" | "False" | "Unknown"
-	Reason string `json:"reason,omitempty"`
+	Type    string `json:"type"`
+	Status  string `json:"status"` // "True" | "False" | "Unknown"
+	Reason  string `json:"reason,omitempty"`
+	Message string `json:"message,omitempty"`
 }
 
 // ResolvedOutput is one entry of a binding's status.outputs — a
@@ -854,6 +856,24 @@ func (c *resourceClient) ListWorkloadConsumerDeps(ctx context.Context, orgHandle
 	return deps, nil
 }
 
+const resourceTypeNotFound = "ResourceTypeNotFound"
+
+// resourceTerminalCondition returns the Ready=False condition whose reason is
+// known to be unrecoverable (a missing ClusterResourceType). Other Ready=False
+// reasons are left for the poll loop — a controller may set False transiently.
+func resourceTerminalCondition(r *Resource) *OCCondition {
+	if r == nil || r.Status == nil {
+		return nil
+	}
+	for i := range r.Status.Conditions {
+		c := &r.Status.Conditions[i]
+		if c.Type == "Ready" && c.Status == "False" && c.Reason == resourceTypeNotFound {
+			return c
+		}
+	}
+	return nil
+}
+
 // WaitForReleaseChange polls GetResource until status.latestRelease.Name is
 // non-empty AND differs from prior, returning the release name the caller pins
 // a ResourceReleaseBinding to. `prior` is the release observed at apply time
@@ -864,6 +884,11 @@ func (c *resourceClient) ListWorkloadConsumerDeps(ctx context.Context, orgHandle
 //   - the stale release when an EXISTING Resource was reconciled — the wait then
 //     holds until the OC controller cuts the NEW release for the changed spec,
 //     so a reconcile never pins the binding to the pre-reconcile release.
+//
+// A Ready=False condition with reason ResourceTypeNotFound is terminal: the
+// controller will never cut a release, so the wait returns immediately with an
+// error quoting the condition message. Other Ready=False reasons are not
+// treated as terminal (a controller may set False transiently).
 //
 // It bounds ONLY the (fast) release-cut — the controller hashing spec.parameters
 // into an immutable ResourceRelease — never the readiness of the backing infra
@@ -877,6 +902,13 @@ func WaitForReleaseChange(ctx context.Context, rc ResourceClient, namespace, res
 		got, err := rc.GetResource(ctx, namespace, resourceName)
 		if err != nil {
 			return "", fmt.Errorf("poll resource %q: %w", resourceName, err)
+		}
+		if c := resourceTerminalCondition(got); c != nil {
+			msg := c.Message
+			if msg == "" {
+				msg = c.Reason
+			}
+			return "", fmt.Errorf("resource %q: %s", resourceName, msg)
 		}
 		if name := ReleaseName(got); name != "" && name != prior {
 			return name, nil
