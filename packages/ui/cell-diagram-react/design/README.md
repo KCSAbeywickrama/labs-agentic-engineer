@@ -14,7 +14,7 @@ that also talks to a gateway therefore gets its boundary edge routed straight
 through whatever dagre ranked downstream of it, and the edge disappears under
 those nodes. The shape that hits it is the ordinary one:
 
-```
+```text
 a -> b
 b -> c
 a -> east d

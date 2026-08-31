@@ -712,4 +712,28 @@ a -> east d
     expect(b.y).toBeLessThan(a.y);
     expect(c.y).toBeGreaterThan(a.y);
   });
+
+  it("gives an inbound boundary edge the same corridor as an outbound one", () => {
+    // `west w -> z` arrives at `z`, so the component is the edge's target, not
+    // its source. The run back to the west gateway crosses `x` and `y`, which
+    // dagre ranked on `z`'s line.
+    const project = compileProject(`
+x -> y
+y -> z
+west w -> z
+`).model;
+    expect(project).not.toBeNull();
+
+    const flow = toReactFlow(project!);
+    const at = (id: string) => flow.nodes.find((node) => node.id === id)!.position;
+    const componentSize = 112;
+    const z = at("z");
+
+    ["x", "y"].forEach((id) => {
+      const blocker = at(id);
+      expect(blocker.x).toBeLessThan(z.x);
+      const overlapsBand = blocker.y < z.y + componentSize && z.y < blocker.y + componentSize;
+      expect(overlapsBand).toBe(false);
+    });
+  });
 });

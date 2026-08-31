@@ -75,17 +75,33 @@ describe("clearBoundaryCorridors", () => {
     expect(clearBoundaryCorridors(placed, directions({ a: ["east"] }), options)).toEqual(placed);
   });
 
-  it("clears the corridor perpendicular to the axis for a north edge", () => {
-    const placed: PlacedNode[] = [
-      { id: "a", x: 0, y: 300 },
-      { id: "b", x: 0, y: 100 }
-    ];
+  // One case per direction, because a direction is a row in the module's TRAVEL
+  // table and a wrong axis or sign there is invisible to the east-only cases.
+  // `blocker` sits directly in the corridor; `along` is the axis the edge
+  // travels, which must not move, and the other axis is where the nudge goes.
+  const perDirection = [
+    { direction: "east" as const, source: { x: 0, y: 0 }, blocker: { x: 300, y: 0 }, along: "x" as const },
+    { direction: "west" as const, source: { x: 300, y: 0 }, blocker: { x: 0, y: 0 }, along: "x" as const },
+    { direction: "south" as const, source: { x: 0, y: 0 }, blocker: { x: 0, y: 300 }, along: "y" as const },
+    { direction: "north" as const, source: { x: 0, y: 300 }, blocker: { x: 0, y: 0 }, along: "y" as const }
+  ];
 
-    const [, b] = clearBoundaryCorridors(placed, directions({ a: ["north"] }), options);
+  perDirection.forEach(({ direction, source, blocker, along }) => {
+    it(`clears the corridor perpendicular to the axis for a ${direction} edge`, () => {
+      const placed: PlacedNode[] = [
+        { id: "a", ...source },
+        { id: "b", ...blocker }
+      ];
+      const across = along === "x" ? "y" : "x";
+      const size = along === "x" ? options.height : options.width;
 
-    // North corridor runs vertically, so the blocker moves sideways.
-    expect(b!.y).toBe(100);
-    expect(Math.abs(b!.x)).toBeGreaterThanOrEqual(options.width + options.clearance);
+      const [, moved] = clearBoundaryCorridors(placed, directions({ a: [direction] }), options);
+
+      // The edge's own axis is untouched: dagre's ranking survives.
+      expect(moved![along]).toBe(blocker[along]);
+      // And the blocker has left the band entirely.
+      expect(Math.abs(moved![across] - source[across])).toBeGreaterThanOrEqual(size + options.clearance);
+    });
   });
 
   it("keeps dagre's placement when both sides of the corridor are occupied", () => {
