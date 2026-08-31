@@ -225,6 +225,27 @@ func TestPlatformProvision_ReconcileWaitsForNewRelease(t *testing.T) {
 	}
 }
 
+func TestPlatformProvision_NeverCutReleaseIsPermanent(t *testing.T) {
+	t.Parallel()
+
+	rc := &ocmocks.ResourceClientMock{
+		ApplyResourceFunc: func(_ context.Context, _ string, r *openchoreo.Resource) (*openchoreo.Resource, error) {
+			return r, nil
+		},
+		GetResourceFunc: func(_ context.Context, _, name string) (*openchoreo.Resource, error) {
+			return &openchoreo.Resource{Metadata: openchoreo.OCObjectMeta{Name: name}}, nil
+		},
+	}
+	p := NewOCNativeProvisioner(rc)
+	p.pollInterval = time.Millisecond
+	p.pollTimeout = 20 * time.Millisecond
+
+	_, err := p.Provision(context.Background(), "default", "shop", "maindb", "postgres-cnpg", nil, []string{"development"})
+	if !errors.Is(err, ErrProvisionPermanent) {
+		t.Fatalf("want ErrProvisionPermanent when latestRelease never appears, got %v", err)
+	}
+}
+
 func TestPlatformProvision_RequiresArgs(t *testing.T) {
 	t.Parallel()
 

@@ -29,6 +29,7 @@ package run
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"sync"
 	"testing"
@@ -253,4 +254,61 @@ func TestPlanMilestoneStopsAtTheFirstPermanentFailure(t *testing.T) {
 
 	require.True(t, env.IsWorkflowCompleted())
 	require.Equal(t, 1, planner.count(), "a permanent planning failure must be asked exactly once")
+}
+
+// scriptedGates answers ProvisionForBuild from a queued script — one entry per
+// call, the last repeating — and counts how often it was asked.
+type scriptedGates struct {
+	mu     sync.Mutex
+	script []error
+	calls  int
+}
+
+func (s *scriptedGates) ProvisionForBuild(context.Context, string, string, string, int, []delivery.ProvisionInput) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.calls++
+	return s.script[min(s.calls-1, len(s.script)-1)]
+}
+
+func (s *scriptedGates) count() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.calls
+}
+
+// gatesEnv wires the real ProvisionGates over a scripted port. Planner
+// succeeds so a provision blip-then-nil still completes the workflow; the
+// test measures ProvisionGates attempts, not planning.
+func gatesEnv(t *testing.T, script ...error) (*testsuite.TestWorkflowEnvironment, *scriptedGates) {
+	t.Helper()
+	var ts testsuite.WorkflowTestSuite
+	env := ts.NewTestWorkflowEnvironment()
+	gates := &scriptedGates{script: script}
+	acts := NewActivities(Deps{
+		Milestones: &scriptedMilestones{script: []error{nil}},
+		Gates:      gates,
+		Planner:    &scriptedPlanner{script: []error{nil}},
+	})
+	env.RegisterActivity(acts)
+	env.OnActivity(acts.SetRunState, mock.Anything, mock.Anything).Return(nil)
+	env.OnActivity(acts.SettleRun, mock.Anything, mock.Anything).Return(nil)
+	env.OnActivity(acts.SetValidationVerdict, mock.Anything, mock.Anything).Return(nil)
+	env.OnActivity(acts.ReadCycleFacts, mock.Anything, mock.Anything).Return(CycleFacts{}, nil)
+	return env, gates
+}
+
+func TestProvisionGatesStopsAtTheFirstPermanentFailure(t *testing.T) {
+	env, gates := gatesEnv(t, fmt.Errorf("%w: object-storage missing", delivery.ErrProvisionPermanent))
+	executePlan(env)
+	require.True(t, env.IsWorkflowCompleted())
+	require.Equal(t, 1, gates.count(), "a permanent provision failure must be asked exactly once")
+}
+
+func TestProvisionGatesRetriesABlip(t *testing.T) {
+	env, gates := gatesEnv(t, errors.New("openchoreo unreachable"), nil)
+	executePlan(env)
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+	require.Equal(t, 2, gates.count(), "a transient provision failure must be asked again")
 }

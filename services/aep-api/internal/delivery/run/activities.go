@@ -442,7 +442,7 @@ func (a *Activities) ProvisionGates(ctx context.Context, in PlanMilestoneInput) 
 	if a.gates == nil {
 		return nil
 	}
-	return planErr(a.gates.ProvisionForBuild(ctx, in.OrgID, in.ProjectID, in.Tag, in.MilestoneNumber, in.ProvisionInputs))
+	return provisionErr(a.gates.ProvisionForBuild(ctx, in.OrgID, in.ProjectID, in.Tag, in.MilestoneNumber, in.ProvisionInputs))
 }
 
 // PlanMilestone runs the version's planning turn.

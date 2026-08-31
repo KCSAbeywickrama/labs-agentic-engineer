@@ -127,8 +127,12 @@ func (p *OCNativeProvisioner) Provision(
 	// fast poll for the release NAME, not a readiness wait. A reconcile carries
 	// the stale pre-reconcile release on `applied`, so wait for a CHANGE off it;
 	// a create leaves it empty (wait-for-nonempty).
-	latest, err := openchoreo.WaitForReleaseChange(ctx, p.rc, orgHandle, res.Metadata.Name, openchoreo.ReleaseName(applied), p.pollInterval, p.pollTimeout)
+	prior := openchoreo.ReleaseName(applied)
+	latest, err := openchoreo.WaitForReleaseChange(ctx, p.rc, orgHandle, res.Metadata.Name, prior, p.pollInterval, p.pollTimeout)
 	if err != nil {
+		if provisionWaitPermanent(prior, err) {
+			return nil, fmt.Errorf("%w: resources: %w", ErrProvisionPermanent, err)
+		}
 		return nil, fmt.Errorf("resources: %w", err)
 	}
 
@@ -226,6 +230,14 @@ func BuildPlatformBinding(project, depName, env, latestRelease string, params ma
 		b.Spec.ResourceTypeEnvironmentConfigs = json.RawMessage(raw)
 	}
 	return b, nil
+}
+
+// provisionWaitPermanent reports whether a WaitForReleaseChange failure is an
+// answer rather than a blip: the wait expired against a Resource that has
+// never cut a release. A wait that expired while a stale release still sat
+// on the Resource is not classified permanent (reconcile can be slow).
+func provisionWaitPermanent(prior string, err error) bool {
+	return err != nil && prior == ""
 }
 
 // OCNativeProvisioner is the only registered ResourceProvisioner impl today.
