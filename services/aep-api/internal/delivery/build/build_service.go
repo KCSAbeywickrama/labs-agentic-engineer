@@ -363,10 +363,13 @@ func (s *Service) Run(ctx context.Context, orgID, projectID string, inputs []Bui
 
 // mapPreTagError maps the coordinator's pre-tag failures onto the edge
 // vocabulary: an end-user-auth conflict is a 409 (the design self-contradicts),
-// an unreachable CRT catalog is a retryable 503, anything else a 500.
+// an unknown resourceType is a 409 (unsatisfiable on this cluster), an
+// unreachable CRT catalog is a retryable 503, anything else a 500.
 func mapPreTagError(err error) error {
 	switch {
 	case errors.Is(err, ErrEndUserAuthConflict):
+		return &EdgeError{Status: 409, Message: err.Error()}
+	case errors.Is(err, ErrUnknownResourceType):
 		return &EdgeError{Status: 409, Message: err.Error()}
 	case errors.Is(err, ErrResourceCatalogUnavailable):
 		return &EdgeError{Status: 503, Message: err.Error()}

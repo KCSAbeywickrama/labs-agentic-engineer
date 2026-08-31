@@ -59,12 +59,32 @@ const (
 	// ready ones itself), so the symptom is a milestone filling with duplicate
 	// gates forever rather than a failed build.
 	//
+	// It is the BACKSTOP, not the front line, and that split is deliberate. The
+	// case above is now caught twice before it reaches here: the build click
+	// refuses a design naming a type the cluster does not have, and a permanent
+	// provision fault that does reach the activity comes back non-retryable and
+	// fails on attempt one with the provisioner's own message (provisionErr). Both
+	// only cover the modes we can NAME. This bound covers the rest — including the
+	// next one nobody has met — which is why it stays even though the incident
+	// that motivated it now fails earlier and reads better.
+	//
 	// Three rather than one, because the same call is also how a genuine GitHub or
 	// OpenChoreo blip shows up, and failing a version on the first hiccup would
-	// trade a rare runaway for a common false failure. Three attempts spans
-	// roughly a minute of backoff, which covers a blip and still gives up long
-	// before anyone notices.
+	// trade a rare runaway for a common false failure.
 	gateActivityAttempts = 3
+
+	// gateActivityRetryInterval is the FIRST gap between those attempts, and it is
+	// set explicitly because Temporal's default (1s, doubling) makes the bound
+	// above far tighter than it looks. A fault that fails FAST — connection
+	// refused, DNS, a 4xx — burns all three attempts in about three seconds, so a
+	// blip lasting longer than a blink would fail the version. That is the false
+	// failure the bound was supposed to avoid, arrived at by a different road.
+	//
+	// At 10s doubling, the three attempts span ~30 seconds: long enough to sit out
+	// an ordinary hiccup, short enough that a version nobody can provision still
+	// gives up while its author is watching. The named permanent faults do not
+	// wait for any of this — provisionErr fails them on attempt one.
+	gateActivityRetryInterval = 10 * time.Second
 
 	// planActivityTimeout bounds PlanMilestone, the only activity that waits on
 	// an agent turn rather than a round trip. A healthy plan turn has no upper
@@ -815,7 +835,10 @@ func gateActivityCtx(ctx workflow.Context) workflow.Context {
 	return workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
 		StartToCloseTimeout: gateActivityTimeout,
 		HeartbeatTimeout:    activityHeartbeatTimeout,
-		RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: gateActivityAttempts},
+		RetryPolicy: &temporal.RetryPolicy{
+			MaximumAttempts: gateActivityAttempts,
+			InitialInterval: gateActivityRetryInterval,
+		},
 	})
 }
 

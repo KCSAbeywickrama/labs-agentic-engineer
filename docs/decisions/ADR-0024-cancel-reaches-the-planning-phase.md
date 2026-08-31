@@ -4,7 +4,10 @@
 [ADR-0018](ADR-0018-planning-is-a-run-phase.md) (planning is a run phase — this
 revises two of its statements),
 [ADR-0020](ADR-0020-a-run-species-is-a-workflow.md),
-[ADR-0023](ADR-0023-external-dependency-values-are-a-deploy-gate.md)
+[ADR-0023](ADR-0023-external-dependency-values-are-a-deploy-gate.md) ·
+**Complemented by** PR #681, which refuses an unknown `resourceType` at the build
+click and classifies permanent provision faults — the front line this ADR's
+bounded retry now backstops
 
 ## Context
 
@@ -86,10 +89,25 @@ It is the one activity in the package that does not get the unbounded default,
 and `plan-failed` is the terminal reason the phase already wrote. Three rather
 than one because the same call is how a genuine GitHub or OpenChoreo blip shows
 up, and failing a version on the first hiccup would trade a rare runaway for a
-common false failure. Its `StartToCloseTimeout` rises to 5 minutes: the activity
-is not one round trip but a sequence of per-resource waits, and a
-`StartToClose` expiry would report "timeout" instead of the provisioning failure
-a reader actually needs.
+common false failure. The spacing is set explicitly
+(`gateActivityRetryInterval`, 10s doubling) rather than left to Temporal's 1s
+default: a fault that fails FAST would otherwise burn all three attempts in
+about three seconds, which is the same false failure arrived at from the other
+direction. Its `StartToCloseTimeout` rises to 5 minutes: the activity is not one
+round trip but a sequence of per-resource waits, and a `StartToClose` expiry
+would report "timeout" instead of the provisioning failure a reader actually
+needs.
+
+**It is the LAST guard, not the first, and that changed while this was being
+written.** PR #681 landed the two sharper ones: the build click now refuses a
+design naming a `resourceType` the cluster does not have (409, no tag cut, no
+workflow started), and a permanent provision fault that does reach the activity
+comes back non-retryable (`provisionErr`) and fails on attempt one with the
+provisioner's own message. Both work by NAMING a fault. The bound is what covers
+the rest — the permanent mode nobody has met yet, which under the unbounded
+default is not a failed build but an invisible forever-loop. Layered rather than
+alternative: an answer we recognise is asked once, a blip is asked three times,
+and an answer we do not recognise still stops.
 
 **4. The gate mint dedupes on (version, dependency) in every state.**
 
@@ -213,10 +231,14 @@ rather than filed.
 - A run can now settle `cancelled` from `planning`, a transition the read model
   did not previously see. It needs nothing new: `cancelled` is already terminal
   and already closes the milestone for a dev run.
-- Nothing validates a design's `resourceType` against the cluster's installed
-  `ClusterResourceType`s. The build now fails honestly instead of looping, but it
-  still fails at provisioning time rather than at the spec gate that could have
-  caught it. Separate work, and the higher-value fix.
+- The `resourceType` a design asks for is now validated against the cluster's
+  installed `ClusterResourceType`s, which this ADR had listed as the open gap and
+  the higher-value fix. PR #681 closed it at the click: the build is refused with
+  a 409 naming the unknown type and listing the installed ones, so no version is
+  cut and no run is started. This ADR's fixes are what the version behind that
+  gate falls back on — a fault the catalog check cannot see (it is fail-open when
+  platform resources are disabled) still fails in about half a minute rather than
+  looping.
 
 ## Alternatives rejected
 
@@ -237,11 +259,14 @@ rather than filed.
   for healthy dependencies on every attempt, with no already-Ready short-circuit
   — and that is an optimisation worth making on its own terms, not a correctness
   fix.
-- **Classify `ResourceTypeNotFound` as permanent and keep the retries unbounded.**
-  The better error message, and worth having later, but it only bounds the failure
-  modes we can name — and it requires OpenChoreo to surface the condition through
-  a client that currently flattens it to a timeout. A bound covers every mode
-  including the ones nobody has met.
+- **Classify `ResourceTypeNotFound` as permanent INSTEAD of bounding the retries.**
+  Rejected as a replacement, not as an idea — and it has since shipped as the
+  complement it should be. PR #681 taught the OpenChoreo client to read the
+  Resource's status conditions (it previously flattened the condition to a
+  timeout), so the fault is now named and fails on its first attempt, with a
+  message naming the missing type. What that does not do is cover the modes
+  nobody has named, which is the one thing a bound does; the two are layered in
+  decision 3 above rather than chosen between.
 - **A `planned_at` column to record how far planning got.** ADR-0018 rejected the
   same column for the same reason: schema plus a second writer to a row the
   supervisor owns, for a fact the milestone already holds.

@@ -34,11 +34,11 @@ var (
 	// The loop would dispatch a coding cycle for it before validating, which is a
 	// build resumed rather than a version re-judged.
 	ErrMilestoneHasOpenWork = errors.New("this version still has open work — the run would build it, not just re-check it")
-	// ErrNoAcceptanceCriteria means the version has no oracle to validate against.
+	// ErrNoValidationCriteria means the version has no oracle to validate against.
 	// Refused rather than run: a run with nothing to validate concludes `skipped`,
 	// and because the newest run owns the version's verdict that would replace a
 	// real answer with "not validated".
-	ErrNoAcceptanceCriteria = errors.New("this version has no acceptance criteria to validate against")
+	ErrNoValidationCriteria = errors.New("this version has no validation criteria to validate against")
 	// ErrRunNotStarted means the supervisor reported success but no run row exists
 	// behind it — a degraded boot (no agent dispatcher, no workflow engine) or a
 	// lost admission race. The paths that re-offer on a timer treat those as

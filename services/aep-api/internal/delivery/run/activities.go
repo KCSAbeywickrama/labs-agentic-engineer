@@ -442,11 +442,16 @@ func (a *Activities) ProvisionGates(ctx context.Context, in PlanMilestoneInput) 
 	if a.gates == nil {
 		return nil
 	}
-	// Heartbeat: this activity WAITS — up to a minute per platform resource for
-	// OpenChoreo to cut its release — and a cancel pressed during that wait has to
-	// reach the authoring, not just free the workflow. See heartbeating.
+	// Heartbeat: this activity WAITS — for OpenChoreo to cut a release per platform
+	// resource — and a cancel pressed during that wait has to reach the authoring,
+	// not just free the workflow. See heartbeating.
+	//
+	// provisionErr on the inside is the sharper of the two guards this call has.
+	// It fails a NAMED permanent fault (a missing ClusterResourceType) on the
+	// first attempt with the provisioner's own message; the bounded retry policy
+	// in gateActivityCtx is the backstop for the modes nobody has named yet.
 	return heartbeating(ctx, func(ctx context.Context) error {
-		return planErr(a.gates.ProvisionForBuild(ctx, in.OrgID, in.ProjectID, in.Tag, in.MilestoneNumber, in.ProvisionInputs))
+		return provisionErr(a.gates.ProvisionForBuild(ctx, in.OrgID, in.ProjectID, in.Tag, in.MilestoneNumber, in.ProvisionInputs))
 	})
 }
 
