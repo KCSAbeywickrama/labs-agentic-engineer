@@ -75,6 +75,22 @@ test("the note says to resolve against the current document, and to ask on a mis
   assert.match(note, /never guess/);
 });
 
+// The fence (#654): the selection is the SUBJECT, not a cage. A spec has
+// legitimate ripples, so a change may touch what it makes wrong — and nothing
+// else. When the right fix lies elsewhere, the agent makes it there and says
+// so, because the user asked for a change, not a conversation — Discuss is
+// the asking path.
+test("a change is fenced to its subject, with consistency allowed and tidying forbidden", () => {
+  const note = aimNote(AIM);
+  assert.match(note, /the subject, not a cage/);
+  assert.match(note, /consistency, never improvement/);
+  assert.match(note, /make it there and say so plainly/);
+});
+
+test("a discuss carries no fence — it edits nothing to fence", () => {
+  assert.doesNotMatch(aimNote({ ...AIM, intent: "discuss" }), /not a cage/);
+});
+
 test("discuss and change differ, and only in the wording", () => {
   const change = aimNote(AIM);
   const discuss = aimNote({ ...AIM, intent: "discuss" });

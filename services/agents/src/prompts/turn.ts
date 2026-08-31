@@ -102,6 +102,16 @@ const AIM_DISCUSS =
   "The user has selected part of a document and wants to talk it through BEFORE anything changes. Take up their point about the selection; do not edit the document in this turn unless they ask you to.";
 const AIM_RESOLVE_RULE =
   "Find these in the document as it stands now — the names above are how the selection read when they made it, and the document may have moved on since. If you cannot find one, say so and ask; never guess which part was meant.";
+/**
+ * The fence, decided on #654: the selection is the SUBJECT, not a cage. A hard
+ * fence was rejected — a spec has legitimate ripples (rename an actor and the
+ * stories mention it; settle a decision and its entry leaves Open Questions),
+ * and the product's safety net is visibility, review marks and undo, not a
+ * cage. What the rule forbids is the other failure: unrelated tidying the user
+ * never pointed at. Change turns only — a Discuss edits nothing.
+ */
+const AIM_FENCE_RULE =
+  "The selection is the subject, not a cage: make the requested change at the named place. Touch other parts only where this change makes them wrong — consistency, never improvement — and leave everything else exactly as it is. If the right fix lies somewhere other than the selection, make it there and say so plainly in your reply.";
 
 /** No interview is possible (the playground's headless phases). */
 const HEADLESS_NOTE =
@@ -247,7 +257,8 @@ export function aimNote(aim: TurnAim | undefined): string {
       return `- the ${n.kind} "${n.name}"${where}`;
     })
     .join("\n");
-  return `${lead}\n\nIn ${aim.anchor.file}:\n${rows}\n\n${AIM_RESOLVE_RULE}\n\n`;
+  const fence = aim.intent === "change" ? `${AIM_FENCE_RULE}\n\n` : "";
+  return `${lead}\n\nIn ${aim.anchor.file}:\n${rows}\n\n${AIM_RESOLVE_RULE}\n\n${fence}`;
 }
 
 /** The instruction head for every kind that edits the spec bundle. */
