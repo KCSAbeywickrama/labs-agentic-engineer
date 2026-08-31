@@ -194,8 +194,9 @@ type for `resourceType`). This step is done when every `external`,
 `org-service`, and `platform-resource` emitted this turn is taken from this
 turn's matching `list_*` result (exact `name` or `resourceType`), unless this
 turn is a user-asked reconsider. When nothing the catalog returns fills the
-role, leave the dependency unresolved rather than forcing a fit: a name that
-resolves to nothing is worse than an absent one.
+role, omit the entry and list the gap under **Needs your input** rather than
+coining a name: a `resourceType` that was not in this turn's
+`list_platform_resource_types` result fails Build.
 
 ```json
 "dependencies": [
@@ -229,8 +230,10 @@ operations its contract actually exposes:
   list one "for reference".
 - **A role is not a name.** The requirement says "the organization's directory
   service"; the provider is usually called something else (`employee-service`).
-  Look it up — a name coined from the role words matches no provider and
-  hard-fails the build.
+  The same for a `platform-resource`: the PRD names a capability, `resourceType`
+  is the catalog row's `name` from this turn's `list_platform_resource_types`.
+  Copy that `name`. Look it up — a name coined from the role or capability words
+  matches no provider or type and hard-fails the build.
 - **A `platform-resource`'s `name` becomes the env-var prefix** for every one of
   its outputs (`orders-db` → `ORDERS_DB_HOST`, and for a SPA
   `window._env_.ORDERS_DB_*`), so pick a clear one: renaming it later renames the
@@ -341,11 +344,12 @@ which fields are present, first match wins:
 5. `style: "sdk"` with no `package` → `unresolved`/`needs-input`
 6. otherwise → `resolved`
 
-`component` and `platform-resource` are always `resolved` here. An `org-service`
-resolves on catalog visibility, and is `blocked`/`access-required` when the
-provider exists but this project cannot see it. The old `needsSpec` boolean is
-REMOVED from the schema — a draft carrying it fails the write-gate; migrate
-`needsSpec: true` to `style: "rest-api"`.
+`component` is always `resolved` here. A `platform-resource` is too — once
+emitted — so only emit one whose `resourceType` is a `name` from this turn's
+`list_platform_resource_types`. An `org-service` resolves on catalog visibility,
+and is `blocked`/`access-required` when the provider exists but this project
+cannot see it. The old `needsSpec` boolean is REMOVED from the schema — a draft
+carrying it fails the write-gate; migrate `needsSpec: true` to `style: "rest-api"`.
 
 ### Narrating the design turn
 
