@@ -43,6 +43,7 @@ import { PrdLenses, refreshPrdLenses, type PrdLensBinding } from "./prdLensPlugi
 import { SpecLinks, refreshSpecLinks, type SpecLinkBinding } from "./specLinkPlugin";
 import { SpecAimMenu, type AimRequest, type SpecAimBinding } from "./SpecAimMenu";
 import { AimHighlight, AIM_SELECTED_CLASS } from "./aimHighlightPlugin";
+import { UndoScrollGuard } from "./undoScrollGuard";
 
 /**
  * Where a transaction's change ends, as a position in the document it
@@ -130,6 +131,7 @@ export function SpecMdEditor({
         CollaborationCaret.configure({ provider, user: self }),
         SpecLinks.configure({ binding: () => linkRef.current }),
         AimHighlight,
+        UndoScrollGuard,
         ...(lenses
           ? [
               PrdLenses.configure({
@@ -264,8 +266,13 @@ export function SpecMdEditor({
       .find((key): key is string => typeof key === "string" && key.startsWith("y-sync$"));
     const follow = ({ transaction }: { transaction: Transaction }) => {
       if (!followRef.current || !transaction.docChanged || !syncKey) return;
-      const origin = transaction.getMeta(syncKey) as { isChangeOrigin?: boolean } | undefined;
+      const origin = transaction.getMeta(syncKey) as
+        | { isChangeOrigin?: boolean; isUndoRedoOperation?: boolean }
+        | undefined;
       if (origin?.isChangeOrigin !== true) return;
+      // An undo is the USER's act, not the agent's writing — following it
+      // mid-turn took the reader from the thing they had just put back.
+      if (origin.isUndoRedoOperation === true) return;
       const el = scrollRef.current;
       if (!el) return;
       const pos = changeEnd(transaction);
@@ -466,9 +473,16 @@ export function SpecMdEditor({
             bgcolor: (theme) => alpha(theme.palette.primary.main, 0.08),
           },
           "& .prd-lens:disabled": { cursor: "default", opacity: 0.4 },
-          "& .prd-lens--line": { opacity: 0 },
+          // AFTER the :disabled rule, and carrying its own :disabled variant:
+          // `.prd-lens:disabled`'s 0.4 outweighs a bare `.prd-lens--line`, so
+          // the moment a turn disabled the line lenses it REVEALED all of them
+          // at once — a page of controls nobody hovered. Hidden is hidden,
+          // inert or not; the hover still reveals, dimmed to the inert weight.
+          "& .prd-lens--line, & .prd-lens--line:disabled": { opacity: 0 },
           "& .tiptap li:hover .prd-lens--line, & .tiptap p:hover .prd-lens--line, & .prd-lens--line:focus-visible":
             { opacity: 1 },
+          "& .tiptap li:hover .prd-lens--line:disabled, & .tiptap p:hover .prd-lens--line:disabled":
+            { opacity: 0.4 },
           // A reference to a sibling spec document reads as a link and acts
           // like one; an ordinary external link keeps the editor's default.
           "& .spec-link": {

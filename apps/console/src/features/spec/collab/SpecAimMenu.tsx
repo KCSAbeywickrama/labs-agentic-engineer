@@ -126,6 +126,11 @@ export function SpecAimMenu({
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
+  // Why the last send did not go — shown UNDER the field. Without this a
+  // refused send (an agent already holds the turn, a race on the thread) left
+  // the box open and mute: the reason landed as an error row in a chat panel
+  // that a quiet Change never opens.
+  const [sendError, setSendError] = useState<string | null>(null);
   const [placement, setPlacement] = useState<Placement | null>(null);
   const [hasRange, setHasRange] = useState(false);
   // The aimed range as two NUMBERS, not an object. The wash is painted by
@@ -225,6 +230,7 @@ export function SpecAimMenu({
     setText("");
     setEnterIntent("change");
     setCompose(null);
+    setSendError(null);
   }, []);
 
   // Escape: back to the document, caret exactly where it was. Dropping the
@@ -254,20 +260,25 @@ export function SpecAimMenu({
 
   const handleSend = useCallback(
     async (intent: "change" | "discuss") => {
+      if (aim.busyReason !== "" || sending || !text.trim()) return;
       const { from, to } = editor.state.selection;
       // Snapshot HERE, not when the selection was made: ProseMirror has been
       // mapping these positions through every concurrent edit, so the excerpt
       // describes what the block says at the moment the user actually asks.
       const anchor = anchorFor(aim.path, docBlocks(editor.state.doc), from, to);
-      if (!anchor || !text.trim()) return;
+      if (!anchor) {
+        setSendError("The selected passage is no longer in the document — reselect and try again.");
+        return;
+      }
       setSending(true);
       const sent = await aim.send(text.trim(), anchor, intent);
       setSending(false);
       // A refused send keeps the words: they are the only copy, and the user
       // has to be able to try again without retyping.
       if (sent) close();
+      else setSendError("That didn't send — an agent may already be working. Your words are kept here.");
     },
-    [editor, aim, text, close],
+    [editor, aim, text, sending, close],
   );
 
   // A composed command rides the lens's own send path — seedChat, which opens
@@ -276,11 +287,11 @@ export function SpecAimMenu({
   // the entry they sit on. An empty send is the bare command, which is exactly
   // what the lens did before it learned to ask.
   const handleCompose = useCallback(() => {
-    if (!compose) return;
+    if (!compose || aim.busyReason !== "") return;
     const subject = text.trim();
     runCommand?.(subject ? `${compose.command} ${subject}` : compose.command);
     close();
-  }, [compose, text, runCommand, close]);
+  }, [compose, aim.busyReason, text, runCommand, close]);
 
   const busy = aim.busyReason !== "";
   const disabled = busy || sending || (!compose && text.trim() === "");
@@ -321,7 +332,12 @@ export function SpecAimMenu({
                 size="small"
                 placeholder={compose?.placeholder ?? "What should change here?"}
                 value={text}
-                onChange={(e) => setText(e.target.value)}
+                error={sendError !== null}
+                helperText={sendError}
+                onChange={(e) => {
+                  setText(e.target.value);
+                  setSendError(null);
+                }}
                 onKeyDown={(e) => {
                   if (e.key === "Escape") {
                     e.preventDefault();

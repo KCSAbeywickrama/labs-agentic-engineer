@@ -152,6 +152,23 @@ describe("the PRD's lens surface, on screen", () => {
     doc.destroy();
   });
 
+  // Reported from use: the moment a turn disabled the line lenses, every one of
+  // them appeared at once — `.prd-lens:disabled`'s inert dimming outweighed the
+  // line lens's hidden state. Hidden is hidden, inert or not.
+  it("keeps the line lenses hidden while they are inert", async () => {
+    const { doc, view } = await mountPrd("An agent is still working");
+
+    for (const lens of view.container.querySelectorAll(".prd-lens--line")) {
+      expect(opacityOf(lens)).toBe(0);
+    }
+    // The section lenses stay on show — dimmed is how they say inert.
+    for (const lens of view.container.querySelectorAll(".prd-lens--section")) {
+      expect(opacityOf(lens)).toBeCloseTo(0.4, 5);
+    }
+
+    doc.destroy();
+  });
+
   // The Discuss lens (#652) and the selection surface (#666) are one path: the
   // lens leaves the block selected, exactly as a drag would have, and opens
   // the same box. What Enter sends is the one difference, and it is asserted

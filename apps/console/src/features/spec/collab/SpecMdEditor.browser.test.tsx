@@ -28,6 +28,7 @@
 // editor grows exactly as it does in production — no server, no cluster.
 
 import { afterEach, describe, expect, it } from "vitest";
+import { userEvent } from "@vitest/browser/context";
 import { cleanup, render, waitFor } from "@testing-library/react";
 import * as Y from "yjs";
 import { Awareness } from "y-protocols/awareness";
@@ -243,6 +244,53 @@ describe("SpecMdEditor follows the agent's edit, not the tail", () => {
     await new Promise((r) => setTimeout(r, 400));
     expect(scrollEl.scrollTop).toBe(0);
 
+    doc.destroy();
+  });
+});
+
+// Reported from use: pressing Undo threw the reader to the bottom. Two causes,
+// both pinned here: the toolbar's focus chased a caret that a whole-document
+// undo replace had clamped to the end, and the follow-the-edit treated the
+// undo as the agent writing.
+describe("undo keeps the reader's place", () => {
+  it("does not scroll when the toolbar's Undo undoes an edit at the top", async () => {
+    const doc = new Y.Doc();
+    setDocFileAsAgent(doc, PATH, prd(40), "test-agent", AGENT_META);
+    const { view, scrollEl } = await mountEditor(doc, true);
+    await waitFor(() =>
+      expect(scrollEl.scrollHeight - scrollEl.clientHeight).toBeGreaterThan(400),
+    );
+
+    // A local edit near the top — the kind Agree makes.
+    const editor = (view.container.querySelector(".ProseMirror") as HTMLElement & {
+      editor?: unknown;
+    });
+    const paragraph = Array.from(view.container.querySelectorAll("p")).find((p) =>
+      p.textContent?.includes("Requirement 1:"),
+    )!;
+    paragraph.scrollIntoView({ block: "center" });
+    const before = scrollEl.scrollTop;
+
+    // Type into that paragraph through the real editor surface.
+    const range = document.createRange();
+    range.setStart(paragraph.firstChild!, 0);
+    range.collapse(true);
+    (view.container.querySelector(".ProseMirror") as HTMLElement).focus();
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    await userEvent.keyboard("XX");
+    expect(paragraph.textContent).toContain("XX");
+
+    const undo = Array.from(view.container.querySelectorAll<HTMLButtonElement>("button")).find(
+      (b) => b.getAttribute("aria-label")?.startsWith("Undo") || /undo/i.test(b.title ?? ""),
+    )!;
+    undo.click();
+
+    await waitFor(() => expect(paragraph.textContent).not.toContain("XX"));
+    // The reader stays where they were — nowhere near the bottom.
+    expect(Math.abs(scrollEl.scrollTop - before)).toBeLessThan(120);
+    void editor;
     doc.destroy();
   });
 });

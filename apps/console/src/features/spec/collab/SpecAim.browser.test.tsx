@@ -349,3 +349,57 @@ describe("the box and the mouse", () => {
     expect(editable.textContent).not.toContain("shorter");
   });
 });
+
+// Reported from use, mid-turn: Enter bypassed the disabled buttons, the send
+// was refused, and the box sat open and mute — the reason landed as an error
+// row in a chat panel a quiet Change never opens.
+describe("what a send that cannot go looks like", () => {
+  it("Enter while an agent holds the turn sends nothing and keeps the words", async () => {
+    const reason = "An agent is still working — this is available once it finishes";
+    const { view, editable, send } = await mountEditor(reason);
+    selectParagraph(editable, "Rounds close automatically");
+    (await waitFor(() => {
+      const el = chip(view);
+      if (!el) throw new Error("no chip yet");
+      return el;
+    })).click();
+    const input = await waitFor(() => {
+      const el = box(view);
+      if (!el) throw new Error("no box yet");
+      return el;
+    });
+    await userEvent.click(input);
+    await userEvent.keyboard("shorter please{Enter}");
+
+    expect(send).not.toHaveBeenCalled();
+    expect(box(view)).not.toBeNull();
+    expect(input.value).toBe("shorter please");
+  });
+
+  it("says why in the box when the dispatch is refused, and keeps the words", async () => {
+    const { view, editable, send } = await mountEditor();
+    send.mockResolvedValue(false);
+    selectParagraph(editable, "Rounds close automatically");
+    (await waitFor(() => {
+      const el = chip(view);
+      if (!el) throw new Error("no chip yet");
+      return el;
+    })).click();
+    const input = await waitFor(() => {
+      const el = box(view);
+      if (!el) throw new Error("no box yet");
+      return el;
+    });
+    await userEvent.click(input);
+    await userEvent.keyboard("shorter please{Enter}");
+
+    await waitFor(() => expect(send).toHaveBeenCalledOnce());
+    expect(box(view)).not.toBeNull();
+    expect(input.value).toBe("shorter please");
+    expect(view.container.textContent).toContain("Your words are kept here");
+
+    // Typing again clears the message — the next attempt starts clean.
+    await userEvent.keyboard("!");
+    expect(view.container.textContent).not.toContain("Your words are kept here");
+  });
+});
