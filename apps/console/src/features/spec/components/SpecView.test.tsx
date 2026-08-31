@@ -39,7 +39,7 @@ import {
   replaceMessages,
   setPendingSeed,
 } from "../../agent-chat/chatStore";
-import { SpecView, designWarningIntro } from "./SpecView";
+import { SpecView, designWarningIntro, specTurnGate } from "./SpecView";
 import {
   clearPlan,
   planDeclared,
@@ -1717,6 +1717,25 @@ describe("SpecView keeps the chat log fed without the chat panel (#606)", () => 
 // The warning's paragraph follows what is actually unsettled. Seen on the local
 // setup: a project with two assumed decisions and no open questions was told the
 // agent had "left some questions for you".
+// One gate for the lenses and the aim box, in significance order — and it
+// covers the dispatch window `agentBusy` cannot see (CodeRabbit on #670).
+describe("specTurnGate", () => {
+  it("names the agent first, the in-flight dispatch second, the questions third", () => {
+    expect(
+      specTurnGate({ agentBusy: true, localTurnActivity: true, awaitingAnswers: true }),
+    ).toMatch(/agent is still working/);
+    expect(
+      specTurnGate({ agentBusy: false, localTurnActivity: true, awaitingAnswers: true }),
+    ).toMatch(/on its way/);
+    expect(
+      specTurnGate({ agentBusy: false, localTurnActivity: false, awaitingAnswers: true }),
+    ).toMatch(/waiting on your answers/);
+    expect(
+      specTurnGate({ agentBusy: false, localTurnActivity: false, awaitingAnswers: false }),
+    ).toBe("");
+  });
+});
+
 describe("designWarningIntro", () => {
   it("does not mention questions when there are none", () => {
     const intro = designWarningIntro([{ key: "assumptions" }]);

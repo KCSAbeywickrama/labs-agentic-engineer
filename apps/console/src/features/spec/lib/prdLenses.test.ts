@@ -137,6 +137,12 @@ describe("prdAffordances — the PRD's own launchers", () => {
       blocks[1]!.contentEnd,
       blocks[2]!.contentEnd,
     ]);
+    // Each Discuss carries the block it sits on — the payload the aim surface
+    // is handed when it fires.
+    const discuss = lenses.filter(
+      (lens): lens is Extract<PrdLens, { kind: "discuss" }> => lens.kind === "discuss",
+    );
+    expect(discuss.map((lens) => lens.block)).toEqual([blocks[1], blocks[2]]);
   });
 
   it("outranks a story's /expand with the verdicts when the story is flagged", () => {

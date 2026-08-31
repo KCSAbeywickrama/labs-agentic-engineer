@@ -228,8 +228,17 @@ export const agentChatHandlers = [
       const form = await request.formData();
       instruction = String(form.get("instruction") ?? "");
       const anchorPart = form.get("anchor");
-      if (anchorPart instanceof Blob) anchor = JSON.parse(await anchorPart.text());
-      else if (typeof anchorPart === "string" && anchorPart) anchor = JSON.parse(anchorPart);
+      try {
+        if (anchorPart instanceof Blob) anchor = JSON.parse(await anchorPart.text());
+        else if (typeof anchorPart === "string" && anchorPart) anchor = JSON.parse(anchorPart);
+      } catch {
+        // The real server answers a malformed part with its structured 400; a
+        // mock that throws instead fails the request with no response at all.
+        return HttpResponse.json(
+          { code: "invalid_request", message: "anchor must be valid JSON" },
+          { status: 400 },
+        );
+      }
       const files = form.getAll("files").filter((f): f is File => f instanceof File);
       // The server's own guard, mirrored: the console screens first, so a
       // rejection reaching here means a hostile or buggy client. Modelled so the

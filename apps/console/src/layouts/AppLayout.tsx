@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
 import {
   AppShell,
   Box,
@@ -199,9 +199,23 @@ export function AppLayout() {
   // An anchored Discuss (#666) has already sent its turn, with the anchor
   // attached — it needs the panel shown, not a message seeded. The count is
   // monotonic, so a second Discuss re-opens a panel the user closed in between.
+  //
+  // Only an INCREMENT opens: the store keeps the count for the life of the
+  // page, so reacting to "count > 0" replayed old requests — leave the
+  // project, come back, and the panel opened itself off a Discuss from
+  // minutes ago. The baseline resets per project, since each has its own
+  // count.
   const chatOpenRequest = useChatOpenRequest(orgHandle ?? "default", projectName);
+  const seenChatOpenRef = useRef({ key: projectName, seen: chatOpenRequest });
   useEffect(() => {
-    if (chatOpenRequest > 0 && projectName) setChatOpen(true);
+    if (seenChatOpenRef.current.key !== projectName) {
+      seenChatOpenRef.current = { key: projectName, seen: chatOpenRequest };
+      return;
+    }
+    if (chatOpenRequest > seenChatOpenRef.current.seen) {
+      seenChatOpenRef.current.seen = chatOpenRequest;
+      if (projectName) setChatOpen(true);
+    }
   }, [chatOpenRequest, projectName]);
 
   return (

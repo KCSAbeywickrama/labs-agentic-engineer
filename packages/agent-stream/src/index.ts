@@ -86,6 +86,7 @@ export {
   isTurnAttachment,
   isTurnAttachmentsOrAbsent,
   isTurnAim,
+  TURN_AIM_LIMITS,
   isCollabConfig,
 } from "./contracts/sse-events.js";
 export type {

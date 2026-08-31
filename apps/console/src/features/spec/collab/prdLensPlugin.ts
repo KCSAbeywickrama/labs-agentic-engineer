@@ -71,17 +71,36 @@ export interface PrdLensOptions {
  * the wrong line. The block's text is the identity that survives; positions
  * are re-read from the live document at click time.
  */
+function sameSignature(a: PrdLens, b: PrdLens): boolean {
+  return (
+    a.kind === b.kind &&
+    (a.kind !== "edit" || a.edit === (b as PrdEditLens).edit) &&
+    (a.kind === "command" ? false : a.block.text === (b as Extract<PrdLens, { kind: "edit" | "discuss" }>).block.text)
+  );
+}
+
+/** Which occurrence of its signature this lens is, in document order. Two
+ *  bullets with identical text are told apart by nothing else. */
+function ordinalOf(lenses: PrdLens[], lens: PrdLens): number {
+  let ordinal = 0;
+  for (const other of lenses) {
+    if (other === lens) return ordinal;
+    if (sameSignature(other, lens)) ordinal += 1;
+  }
+  return ordinal;
+}
+
 function liveLens<L extends Extract<PrdLens, { kind: "edit" | "discuss" }>>(
   view: EditorView,
   captured: L,
+  capturedOrdinal: number,
 ): L | undefined {
   const { lenses } = prdAffordances(docBlocks(view.state.doc));
-  return lenses.find(
-    (l): l is L =>
-      l.kind === captured.kind &&
-      (l.kind !== "edit" || l.edit === (captured as PrdEditLens).edit) &&
-      l.block.text === captured.block.text,
-  );
+  // The Nth duplicate stays the Nth duplicate: insertions and edits elsewhere
+  // reorder nothing among blocks with identical text, so the ordinal is the
+  // identity that survives where the text alone is ambiguous.
+  const matches = lenses.filter((l): l is L => sameSignature(l, captured));
+  return matches[capturedOrdinal] ?? matches.at(-1);
 }
 
 export const prdLensKey = new PluginKey<DecorationSet>("prdLenses");
@@ -89,6 +108,7 @@ export const prdLensKey = new PluginKey<DecorationSet>("prdLenses");
 function lensButton(
   view: EditorView,
   lens: PrdLens,
+  ordinal: number,
   busyReason: string,
   opts: PrdLensOptions,
 ): HTMLButtonElement {
@@ -117,13 +137,13 @@ function lensButton(
         else opts.run(lens.command);
         return;
       case "edit": {
-        const live = liveLens(view, lens);
+        const live = liveLens(view, lens, ordinal);
         if (live) applyPrdEdit(view, live);
         return;
       }
       case "discuss": {
         if (opts.isBusy()) return;
-        const live = liveLens(view, lens);
+        const live = liveLens(view, lens, ordinal);
         if (live) opts.discuss(live.block.from, live.block.to);
         return;
       }
@@ -132,13 +152,14 @@ function lensButton(
   return el;
 }
 
-/** The identity a lens's DOM survives a rebuild under — never a position. */
-function lensKey(lens: PrdLens, busyReason: string): string {
+/** The identity a lens's DOM survives a rebuild under — never a position. The
+ *  ordinal keeps two identical bullets from sharing one key (and one DOM). */
+function lensKey(lens: PrdLens, ordinal: number, busyReason: string): string {
   const what =
     lens.kind === "command"
       ? lens.command
       : `${lens.label}:${lens.block.text.replace(/\s+/g, " ").trim()}`;
-  return `${lens.kind}:${what}@${lens.placement}@${busyReason}`;
+  return `${lens.kind}:${what}#${ordinal}@${lens.placement}@${busyReason}`;
 }
 
 function build(doc: PmNode, opts: PrdLensOptions): DecorationSet {
@@ -155,8 +176,9 @@ function build(doc: PmNode, opts: PrdLensOptions): DecorationSet {
     );
   }
   for (const lens of lenses) {
+    const ordinal = ordinalOf(lenses, lens);
     decorations.push(
-      Decoration.widget(lens.at, (view) => lensButton(view, lens, busyReason, opts), {
+      Decoration.widget(lens.at, (view) => lensButton(view, lens, ordinal, busyReason, opts), {
         side: 1,
         // `side: 1` keeps the widget after the text it follows; the key makes
         // an unchanged lens survive a rebuild without its DOM being replaced,
@@ -166,7 +188,7 @@ function build(doc: PmNode, opts: PrdLensOptions): DecorationSet {
         // DOM is REUSED, factory and all — so anything the button renders has
         // to be in the key, or it freezes at whatever the first build said.
         // That is exactly what `refreshPrdLenses` exists to change.
-        key: lensKey(lens, busyReason),
+        key: lensKey(lens, ordinal, busyReason),
         ignoreSelection: true,
       }),
     );

@@ -90,7 +90,9 @@ export function excerpt(text: string, max: number = EXCERPT_MAX): string {
 /** Whether a block overlaps `[from, to]`, a collapsed caret counting as inside. */
 function covers(block: DocBlock, from: number, to: number): boolean {
   return from === to
-    ? block.from <= from && block.to >= from
+    ? // Exclusive at the end: a caret AT `block.to` sits between blocks, and an
+      // inclusive check would hand the anchor both neighbours.
+      block.from <= from && block.to > from
     : // A `to` sitting exactly on the next block's start is the end of THIS
       // block, not the start of that one — a trailing newline in the drag.
       block.from < to && block.to > from;

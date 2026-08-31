@@ -41,6 +41,18 @@ import (
 // stops naming anything the agent can act on.
 const maxAnchorNodes = 50
 
+// Field ceilings, mirroring @aep/agent-stream's TURN_AIM_LIMITS: the anchor
+// locates and never carries (console ADR-0024), so every field is bounded —
+// a locator that grows with the selection is the carried payload the shape
+// exists to avoid, arriving through a hand-built request instead of the
+// console. Name's 200 mirrors the contract's maxLength.
+const (
+	maxAnchorFileLen    = 512
+	maxAnchorNameLen    = 200
+	maxAnchorKindLen    = 64
+	maxAnchorContextLen = 512
+)
+
 // aimFromJSON converts the generated request fields into the agents-service
 // wire block, or nil when the turn carries no aim.
 //
@@ -59,6 +71,9 @@ func aimFromJSON(anchor gen.TurnAnchor, intent string) (*agentsvc.AimBlock, erro
 	if strings.TrimSpace(anchor.File) == "" {
 		return nil, apierr.BadRequest("anchor.file is required")
 	}
+	if len(anchor.File) > maxAnchorFileLen {
+		return nil, apierr.BadRequest("anchor.file exceeds the size limit")
+	}
 	if len(anchor.Nodes) == 0 {
 		return nil, apierr.BadRequest("anchor.nodes must not be empty")
 	}
@@ -72,6 +87,9 @@ func aimFromJSON(anchor gen.TurnAnchor, intent string) (*agentsvc.AimBlock, erro
 	for _, n := range anchor.Nodes {
 		if strings.TrimSpace(n.Name) == "" || strings.TrimSpace(n.Kind) == "" {
 			return nil, apierr.BadRequest("every anchor node needs a name and a kind")
+		}
+		if len(n.Name) > maxAnchorNameLen || len(n.Kind) > maxAnchorKindLen || len(n.Context) > maxAnchorContextLen {
+			return nil, apierr.BadRequest("an anchor node exceeds the size limit")
 		}
 		nodes = append(nodes, agentsvc.AnchorNodeBlock{
 			Name:    n.Name,

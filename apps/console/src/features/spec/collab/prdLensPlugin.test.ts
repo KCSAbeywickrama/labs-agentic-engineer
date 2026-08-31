@@ -225,6 +225,31 @@ describe("the PRD's lens surface", () => {
     });
   });
 
+  // Two bullets can read identically — an agent writes formulaic decisions —
+  // and text was the only identity a clicked lens resolved by, so Agree on the
+  // second stripped the FIRST's flag. The Nth duplicate stays the Nth.
+  it("acts on the second of two identical bullets, not the first", () => {
+    const el = mount("");
+    editor!.commands.setContent(
+      markdownToNode(
+        "# Lunch — PRD\n\n## Product Decisions\n\n- Same words here *assumed*\n- Same words here *assumed*\n",
+      ).toJSON(),
+    );
+    const agrees = lensButtons(el).filter((b) => b.textContent === "Agree");
+    expect(agrees).toHaveLength(2);
+    agrees[1]!.click();
+    expect(editor!.getMarkdown().trim()).toBe(
+      "# Lunch — PRD\n\n## Product Decisions\n\n- Same words here *assumed*\n- Same words here",
+    );
+
+    const discusses = lensButtons(el).filter((b) => b.textContent === "Discuss");
+    discusses[1]!.click();
+    const [from, to] = discussed.at(-1)!;
+    // The block handed to the aim surface is the SECOND one.
+    const second = docBlocks(editor!.state.doc).filter((b) => b.text.startsWith("Same words"))[1]!;
+    expect([from, to]).toEqual([second.from, second.to]);
+  });
+
   it("Discuss opens the aim surface on the block, without sending anything", () => {
     const run = vi.fn();
     const el = mount("", run);

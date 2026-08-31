@@ -129,6 +129,18 @@ describe("selectedBlocks", () => {
     expect(nodes).toEqual([PRD[1]!]);
   });
 
+  it("selects one block, not two, for a caret at a shared boundary", () => {
+    // A synthetic caret exactly at blockA.to === blockB.from — a real editor
+    // never produces one, but this module is deliberately editor-free. Two
+    // PARAGRAPHS, so no heading expansion muddies the count.
+    const pair = build([
+      ["paragraph", "The first paragraph."],
+      ["paragraph", "The second paragraph."],
+    ]);
+    const nodes = selectedBlocks(pair, pair[0]!.to, pair[0]!.to);
+    expect(nodes).toEqual([pair[1]]);
+  });
+
   it("resolves to nothing past the end of the document", () => {
     const end = PRD.at(-1)!.to;
     expect(selectedBlocks(PRD, end + 10, end + 20)).toEqual([]);

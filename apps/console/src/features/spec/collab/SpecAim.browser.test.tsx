@@ -318,8 +318,12 @@ describe("the box and the mouse", () => {
     await userEvent.click(elsewhere);
 
     await waitFor(() => expect(box(view)).toBeNull());
-    // Focus went where the click went — nothing pulled it back.
+    // Focus went where the click went — nothing pulled it back — and the click
+    // kept its caret: collapsed, inside the clicked block.
     expect(document.activeElement).toBe(editable);
+    const selection = window.getSelection();
+    expect(selection?.isCollapsed).toBe(true);
+    expect(elsewhere.contains(selection?.anchorNode ?? null)).toBe(true);
   });
 
   it("takes focus from a click on the input even when focus had gone elsewhere", async () => {

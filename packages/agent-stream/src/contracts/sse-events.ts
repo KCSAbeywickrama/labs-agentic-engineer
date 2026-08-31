@@ -598,6 +598,21 @@ export function isTurnAttachmentsOrAbsent(v: unknown): v is TurnAttachment[] | u
  * fewer nodes than the user selected would send the agent at the wrong scope
  * quietly, which is worse than a clean 400 the caller can see.
  */
+/**
+ * The anchor's size ceilings. An anchor LOCATES and never carries content
+ * (console ADR-0024), so every field is bounded — a locator that grows with
+ * the selection is the carried payload the shape exists to avoid, arriving
+ * through a hand-built request instead of the console. `name`'s 200 mirrors
+ * the contract's maxLength; the rest bound what the contract leaves open.
+ */
+export const TURN_AIM_LIMITS = {
+  nodes: 50,
+  file: 512,
+  name: 200,
+  kind: 64,
+  context: 512,
+} as const;
+
 export function isTurnAim(v: unknown): v is TurnAim {
   if (v === null || typeof v !== "object") return false;
   const a = v as Record<string, unknown>;
@@ -605,17 +620,24 @@ export function isTurnAim(v: unknown): v is TurnAim {
   const anchor = a.anchor;
   if (anchor === null || typeof anchor !== "object") return false;
   const { file, nodes } = anchor as Record<string, unknown>;
-  if (typeof file !== "string" || file.trim() === "") return false;
-  if (!Array.isArray(nodes) || nodes.length === 0) return false;
+  if (typeof file !== "string" || file.trim() === "" || file.length > TURN_AIM_LIMITS.file) {
+    return false;
+  }
+  if (!Array.isArray(nodes) || nodes.length === 0 || nodes.length > TURN_AIM_LIMITS.nodes) {
+    return false;
+  }
   return nodes.every((n) => {
     if (n === null || typeof n !== "object") return false;
     const node = n as Record<string, unknown>;
     return (
       typeof node.name === "string" &&
       node.name.trim() !== "" &&
+      node.name.length <= TURN_AIM_LIMITS.name &&
       typeof node.kind === "string" &&
       node.kind.trim() !== "" &&
-      (node.context === undefined || typeof node.context === "string")
+      node.kind.length <= TURN_AIM_LIMITS.kind &&
+      (node.context === undefined ||
+        (typeof node.context === "string" && node.context.length <= TURN_AIM_LIMITS.context))
     );
   });
 }

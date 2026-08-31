@@ -106,6 +106,35 @@ func TestAimRejectsAnUnboundedSelection(t *testing.T) {
 	}
 }
 
+// The anchor locates and never carries (console ADR-0024): a hand-built
+// request must not smuggle a prompt payload through the locator fields the
+// console keeps short by construction.
+func TestAimRejectsOversizedFields(t *testing.T) {
+	long := func(n int) string {
+		b := make([]byte, n)
+		for i := range b {
+			b[i] = 'x'
+		}
+		return string(b)
+	}
+	oversized := []gen.TurnAnchor{
+		{File: long(513), Nodes: []gen.TurnAnchorNode{{Name: "n", Kind: "paragraph"}}},
+		{File: "a.md", Nodes: []gen.TurnAnchorNode{{Name: long(201), Kind: "paragraph"}}},
+		{File: "a.md", Nodes: []gen.TurnAnchorNode{{Name: "n", Kind: long(65)}}},
+		{File: "a.md", Nodes: []gen.TurnAnchorNode{{Name: "n", Kind: "paragraph", Context: long(513)}}},
+	}
+	for i, anchor := range oversized {
+		if _, err := aimFromJSON(anchor, "change"); err == nil {
+			t.Fatalf("case %d: an oversized anchor field should be rejected", i)
+		}
+	}
+	// At the ceiling is fine — the cap is a ceiling, not a headroom rule.
+	atLimit := gen.TurnAnchor{File: "a.md", Nodes: []gen.TurnAnchorNode{{Name: long(200), Kind: "paragraph"}}}
+	if _, err := aimFromJSON(atLimit, "change"); err != nil {
+		t.Fatalf("an anchor at the ceiling should pass: %v", err)
+	}
+}
+
 // The multipart form declares this part application/json: a nested object has
 // no scalar form, unlike `collab`, which rides as the string "true".
 func TestAnchorFieldDecodesTheJSONPart(t *testing.T) {

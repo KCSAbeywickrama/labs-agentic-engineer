@@ -115,6 +115,27 @@ type BuildInputItem = components["schemas"]["BuildInputItem"];
  * needs at this click is what the agent did, what happens next, and what
  * being wrong costs.
  */
+/**
+ * Why firing a turn from the spec would be refused right now, or "" when it is
+ * live. One computation for the lenses and the aim box, in significance order.
+ *
+ * `localTurnActivity` covers the window `agentBusy` cannot see: a dispatch has
+ * resolved (or a fold is draining) but the agent peer has not joined the room
+ * yet, so a second send in those seconds would be a 409 the user meets as a
+ * mysterious refusal (CodeRabbit on #670).
+ */
+export function specTurnGate(input: {
+  agentBusy: boolean;
+  localTurnActivity: boolean;
+  awaitingAnswers: boolean;
+}): string {
+  if (input.agentBusy) return "An agent is still working — this is available once it finishes";
+  if (input.localTurnActivity) return "Your last message is on its way to the agent — one moment";
+  if (input.awaitingAnswers)
+    return "The agent is waiting on your answers — finish the questions below first";
+  return "";
+}
+
 export function designWarningIntro(reasons: ReadonlyArray<{ key: string }>): string {
   const assumed = reasons.some((r) => r.key === "assumptions");
   const questions = reasons.some((r) => r.key === "open-questions");
@@ -808,11 +829,7 @@ export function SpecView({ projectName }: { projectName: string }) {
     intent: "change" | "discuss",
   ): Promise<boolean> => anchoredTurn.send(instruction, { anchor, intent });
 
-  const lensBusyReason = agentBusy
-    ? "An agent is still working — this is available once it finishes"
-    : awaitingAnswers
-      ? "The agent is waiting on your answers — finish the questions below first"
-      : "";
+  const lensBusyReason = specTurnGate({ agentBusy, localTurnActivity, awaitingAnswers });
 
   // Build (#162, #164): commit the room's live edits FIRST (POST /build tags
   // HEAD), then check preflight. Only a RESOLUTION blocker — a dependency

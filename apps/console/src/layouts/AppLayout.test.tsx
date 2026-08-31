@@ -24,7 +24,8 @@
 // next moment on.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render as rtlRender, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render as rtlRender, screen, act } from "@testing-library/react";
+import { chatKeyFor, requestChatOpen } from "../features/agent-chat/chatStore";
 import { OxygenTheme, OxygenUIThemeProvider } from "@wso2/oxygen-ui";
 
 const PROJECT = "expense-approval";
@@ -218,6 +219,27 @@ describe("AppLayout — the panel remembers whether it was open", () => {
     mockSearch = {};
     render();
     expect(screen.queryByTestId("agent-chat-panel")).not.toBeInTheDocument();
+  });
+});
+
+// A Discuss request count lives in the store for the life of the page, so the
+// layout reacts only to INCREMENTS: leaving a project and coming back must not
+// reopen the panel off a request from minutes ago (CodeRabbit on #670).
+describe("AppLayout — a stale chat-open request does not replay", () => {
+  // The session mock's org — the layout keys the chat by `orgHandle ?? "default"`.
+  const CHAT_KEY = chatKeyFor("acme", PROJECT);
+
+  it("ignores a count that predates the mount", () => {
+    requestChatOpen(CHAT_KEY);
+    render();
+    expect(screen.queryByTestId("agent-chat-panel")).not.toBeInTheDocument();
+  });
+
+  it("opens on a request made after mount", () => {
+    render();
+    expect(screen.queryByTestId("agent-chat-panel")).not.toBeInTheDocument();
+    act(() => requestChatOpen(CHAT_KEY));
+    expect(screen.getByTestId("agent-chat-panel")).toBeInTheDocument();
   });
 });
 
