@@ -875,10 +875,16 @@ func resourceTerminalCondition(r *Resource) *OCCondition {
 }
 
 // ErrReleaseWaitTimeout is a wait-boundary answer: the poll deadline expired
-// without a new ResourceRelease, or the Resource reported a terminal
-// Ready=False (ResourceTypeNotFound). GetResource transport errors and
-// context.Canceled / DeadlineExceeded are not this sentinel.
+// without a new ResourceRelease. GetResource transport errors and
+// context.Canceled / DeadlineExceeded are not this sentinel. A missing
+// ClusterResourceType is ErrResourceTypeNotFound, not a timeout: that answer
+// is terminal even when a prior release already exists.
 var ErrReleaseWaitTimeout = errors.New("release wait timed out")
+
+// ErrResourceTypeNotFound is a wait-boundary answer: the Resource reported
+// Ready=False with reason ResourceTypeNotFound. The controller will never cut
+// a release for a type that is not installed.
+var ErrResourceTypeNotFound = errors.New("cluster resource type not found")
 
 // WaitForReleaseChange polls GetResource until status.latestRelease.Name is
 // non-empty AND differs from prior, returning the release name the caller pins
@@ -896,8 +902,10 @@ var ErrReleaseWaitTimeout = errors.New("release wait timed out")
 // error quoting the condition message. Other Ready=False reasons are not
 // treated as terminal (a controller may set False transiently).
 //
-// Deadline expiry and ResourceTypeNotFound are wrapped with
-// ErrReleaseWaitTimeout so callers can tell a wait answer from a poll blip.
+// Deadline expiry wraps ErrReleaseWaitTimeout; ResourceTypeNotFound wraps
+// ErrResourceTypeNotFound. Callers tell a wait answer from a poll blip via
+// those two sentinels, and tell a missing type from a slow reconcile via
+// which sentinel they got.
 // It bounds ONLY the (fast) release-cut — the controller hashing spec.parameters
 // into an immutable ResourceRelease — never the readiness of the backing infra
 // that release eventually provisions (a real database can take minutes; callers
@@ -916,7 +924,7 @@ func WaitForReleaseChange(ctx context.Context, rc ResourceClient, namespace, res
 			if msg == "" {
 				msg = c.Reason
 			}
-			return "", fmt.Errorf("%w: resource %q: %s", ErrReleaseWaitTimeout, resourceName, msg)
+			return "", fmt.Errorf("%w: resource %q: %s", ErrResourceTypeNotFound, resourceName, msg)
 		}
 		if name := ReleaseName(got); name != "" && name != prior {
 			return name, nil

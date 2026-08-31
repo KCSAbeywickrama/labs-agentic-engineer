@@ -382,7 +382,8 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   source-control error raw is back on unbounded retry; `CloseMilestone` is the one deliberate exception,
   swallowing its error by contract and so never retrying. The same split applies to provision and
   deploy: `provisionErr` / `deployErr` mark `ErrProvisionPermanent` / `ErrDeployPermanent` non-retryable.
-  A provision wait-answer (Resource `Ready=False` / `ResourceTypeNotFound`, or a create that never
+  A provision wait-answer (Resource `Ready=False` / `ResourceTypeNotFound` — even when a
+  prior release exists — or a create that never
   cuts a release) is permanent; a GetResource blip or cancelled wait is not. Do not bound
   `activityCtx` with `MaximumAttempts` — permanence is the activity's to declare.
 - **Every terminal reason names exactly one failure class.** `redispatch-budget` is agent death (including

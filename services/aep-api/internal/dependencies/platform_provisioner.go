@@ -233,12 +233,15 @@ func BuildPlatformBinding(project, depName, env, latestRelease string, params ma
 }
 
 // provisionWaitPermanent reports whether a WaitForReleaseChange failure is an
-// answer rather than a blip: the wait expired (or reported ResourceTypeNotFound)
-// against a Resource that has never cut a release. A wait that expired while a
-// stale release still sat on the Resource is not classified permanent
-// (reconcile can be slow). Transport / context errors are not wait answers
-// even when prior is empty.
+// answer rather than a blip. ResourceTypeNotFound is always permanent — the
+// type is gone, whether or not a prior release exists. A never-cut timeout
+// (prior empty) is also permanent. A wait that expired while a stale release
+// still sat on the Resource is not (reconcile can be slow). Transport /
+// context errors are not wait answers even when prior is empty.
 func provisionWaitPermanent(prior string, err error) bool {
+	if errors.Is(err, openchoreo.ErrResourceTypeNotFound) {
+		return true
+	}
 	return prior == "" && errors.Is(err, openchoreo.ErrReleaseWaitTimeout)
 }
 

@@ -385,8 +385,8 @@ func TestWaitForReleaseChange_ReadyFalseResourceTypeNotFoundIsPermanent(t *testi
 	if err == nil {
 		t.Fatal("want permanent error, got nil")
 	}
-	if !errors.Is(err, ErrReleaseWaitTimeout) {
-		t.Fatalf("want ErrReleaseWaitTimeout wait-answer sentinel, got %v", err)
+	if !errors.Is(err, ErrResourceTypeNotFound) {
+		t.Fatalf("want ErrResourceTypeNotFound wait-answer sentinel, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "object-storage") && !strings.Contains(err.Error(), "ResourceTypeNotFound") {
 		t.Fatalf("error must quote the terminal condition, got %v", err)

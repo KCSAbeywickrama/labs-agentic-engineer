@@ -142,9 +142,10 @@ slices.
   catalog does not 409 every build. Any future entry point that discovers platform
   resource types must honor the same flag.
 - **A provision wait-answer is permanent; a transport blip is not.** `ErrProvisionPermanent`
-  wraps only wait answers — `Ready=False` / `ResourceTypeNotFound` on the Resource, or a
-  create whose `latestRelease` never appears — and survives aggregation with `%w` so
-  `ProvisionGates` can mark it non-retryable. GetResource blips stay retryable. After the
+  wraps wait answers — `Ready=False` / `ResourceTypeNotFound` on the Resource (even when
+  a prior release exists), or a create whose `latestRelease` never appears — and survives
+  aggregation with `%w` so `ProvisionGates` can mark it non-retryable. GetResource blips
+  stay retryable. After the
   first permanent platform fault, remaining **platform-resource** waits in that sequential
   loop are skipped (externals and org-services still run). Delivery's twin sentinel
   (`ErrProvisionPermanent` on `build_fanout.go`) is the Temporal seam, matching
