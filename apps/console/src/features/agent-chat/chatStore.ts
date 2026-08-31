@@ -81,10 +81,10 @@ export type ChatMessage =
        * The tool's STREAM lifecycle: `streaming` while its input is still
        * arriving, `done` once the input stream closed (`tool-input-end`) — for a
        * file tool the input IS the body, so that is the moment the file is fully
-       * written. Deliberately independent of `ok`: one step can carry several
-       * file writes, and the SDK flushes every result only after the LAST call
-       * in that step, so "this file is finished" and "the bundle accepted it"
-       * happen at different times and cannot share a field.
+       * written. Deliberately independent of `ok`: "this file is finished" and
+       * "the bundle accepted it" are two facts arriving on two frames, and a
+       * card that conflated them would tick a write the write-gates can still
+       * reject.
        */
       status: "streaming" | "done";
       op: string;

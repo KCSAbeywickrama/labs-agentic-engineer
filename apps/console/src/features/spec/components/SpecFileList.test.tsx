@@ -186,7 +186,7 @@ describe("SpecFileList — the rail carries state", () => {
     expect(onReason).toHaveBeenCalledWith("document");
   });
 
-  // The acceptance criteria are written against the same stories, so they go
+  // The validation criteria are written against the same stories, so they go
   // stale with the design and clear with it — two amber sections, one reason
   // each, one repair.
   it("marks design and validation together", () => {

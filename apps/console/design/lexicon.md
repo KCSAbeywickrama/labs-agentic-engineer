@@ -21,8 +21,8 @@ yet a product word.
 ## Naming rules
 
 1. **A section names the class; an artifact names the document.** An artifact label adds
-   information, never echoes its header — `ACCEPTANCE CRITERIA › Acceptance criteria` fails
-   this.
+   information, never repeats its header outright — `VALIDATION › Validation` fails this;
+   `REQUIREMENTS › Product requirements` and `VALIDATION › Validation criteria` do not.
 2. **Filenames are never labels.** The user reads a document tree, not a repo.
 3. **Plural for things that accumulate over time, singular for the one a project has.**
    Builds, Deployments, Issues, Validations — Overview, Spec.
@@ -42,7 +42,7 @@ concept for *the agreed description of what we're building*.
 |---|---|---|
 | `REQUIREMENTS` | **Product requirements** | `specs/requirements/prd.md` |
 | `DESIGN` (not `DESIGNS` — one design, several files) | **Architecture** · **Design overview** · **Security** · then per-component | `specs/design/` |
-| `VALIDATION` | **Acceptance criteria** | `specs/validation/validation-criteria.json` |
+| `VALIDATION` | **Validation criteria** | `specs/validation/validation-criteria.json` |
 
 **Security** is one rail entry, one page:
 
@@ -776,11 +776,66 @@ redundant on the page holding them.
 
 **Unsettled: `deployment` or `build`.** This description says criteria are checked
 *after every deployment*; the **Validations** empty state says *"After a build,
-your software is checked against the acceptance criteria in your spec"*. Both name
+your software is checked against the validation criteria in your spec"*. Both name
 the same event. *Deployment* is the more accurate word, since validation runs
 against the deployed system and needs its resolved endpoints, but that empty state
 was out of scope when this pane was written. Whoever settles it changes both and
 deletes this note.
+
+### What a criterion is doing, while a run is under way
+
+A validation cycle holds an agent for up to two hours. Before this, every row in
+the pane read **`Pending`** for all of it, and a repeat attempt was worse — it
+showed the *previous* attempt's verdict, so the criteria a repair was actively
+re-working sat on **`Failed`** while it fixed them.
+
+The row now says what is happening to it. In the order a reader meets them:
+
+| | |
+|---|---|
+| Nothing has happened to it yet | **`Pending`** |
+| The run has decided how it will check this one | **`Planned`** |
+| Driving the running software to learn how to check it | **`Exploring…`** |
+| Writing its check | **`Authoring…`** |
+| Its check is running | **`Running…`** |
+| It worked, then broke — being repaired | **`Healing…`** |
+| Settled | **`Passed`** / **`Failed`**, unchanged |
+
+Above the rows, one line, and only while they have nothing to say:
+
+| | |
+|---|---|
+| Nothing picked up yet | *Setting up the test harness…* |
+| All settled, no results published | *Writing the validation report…* |
+
+**The trailing `…` means in flight.** Every word that can still change carries
+one; the two settled words do not. It is the only signal separating "this is
+happening now" from "this is the answer", and both sets sit in the same column.
+
+**Only `Healing…` is coloured.** It is the one live word that changes what a
+reader thinks is happening — something that worked has stopped working. Colouring
+ordinary progress would spend attention on the common case and leave none for
+this one.
+
+**Live words are local; settled words are the report's.** `Passed` and `Failed`
+come from the report file the run commits, and the live words never enter that
+vocabulary — a report can only describe work in the past tense, so there is no
+report word for *Authoring…*. The reverse holds too: when the feed says a
+criterion passed, it renders as **`Passed`**, because that is the same fact
+whichever surface delivered it.
+
+**Rule 6, deliberately bent.** *Exploring*, *Authoring*, *Healing* name the
+system's behaviour, which rule 6 forbids. They stay because here the system's
+behaviour **is** the user's situation: the reader has handed work to an agent and
+is watching it, and "what is it doing right now" is the whole question. The rule
+protects against a reader being told about machinery they did not ask about —
+not against answering the one thing they came to find out.
+
+**Unsettled: *test harness* and *validation report*.** Both run-wide lines name
+internal artifacts, which rule 6 has a better claim over — a reader does not have
+a harness, they have criteria waiting to be checked. They are the two windows
+where nothing else moves, so something had to be said; whoever finds better words
+changes them here first.
 
 ## What a change invalidates
 
@@ -893,7 +948,7 @@ five surfaces fill themselves.
 |---|---|---|
 | Builds | **No builds yet.** A build hands your design to coding agents, which write your components and open pull requests. | **Go to the spec** |
 | Deployments | **Nothing deployed yet.** Your components run here once they are built — each environment shows what is live and where to reach it. | — |
-| Validations *(never validated)* | **Nothing validated yet.** After a build, your software is checked against the **acceptance criteria** in your spec; results appear here. | — |
+| Validations *(never validated)* | **Nothing validated yet.** After a build, your software is checked against the **validation criteria** in your spec; results appear here. | — |
 | Validations *(version skipped)* | **This version was not validated** — it has no validation criteria, or it was an incident run, which gets no validation cycle. | — |
 | Components *(overview)* | **No components yet.** Components are the services and apps your design is made of — they appear as agents build them. | — |
 | Architecture *(overview)* | **No architecture yet.** Once the agent designs your app, its components and the connections between them are drawn here. | — |
@@ -908,9 +963,11 @@ that had already started, and narrated the *how* (a shared workspace, files chan
 on screen calls by those names. Its suggestions offered to draft requirements that exist. Both now
 open a conversation **about** the spec.
 
-The **Validations** wording is load-bearing: renaming the artifact to *Acceptance criteria* while
-the section stayed *Validations* broke the link between the criteria and the runs against them, and
-this sentence is where it is restored.
+**The document and its rows carry different names, on purpose.** The **Validation criteria** are
+the document; one row inside it is an **acceptance criterion**, which is what its `AC-` id says and
+what the term means everywhere else. Naming the document after one of its rows — the earlier
+*Acceptance criteria* label — cost the link between the criteria and the runs against them, and
+took a sentence of empty-state copy to restore. They share a root again, so nothing has to.
 
 **Validations has two empty states, and only one narrates.** The page is version-scoped, so a
 version that was skipped — no criteria, or an incident run — is a different fact from a project
@@ -988,7 +1045,7 @@ too, in the same message as the text it overrides.
 
 ### The rules it carries
 
-1. **Name things the way the UI names them.** *Architecture*, not `design.cell`. *Acceptance
+1. **Name things the way the UI names them.** *Architecture*, not `design.cell`. *Validation
    criteria*, not `specs/validation/validation-criteria.json`. The mapping is the table under
    [The spec workspace](#the-spec-workspace) — this file is its source, and the console skill is
    how it reaches the agent.
@@ -1111,10 +1168,6 @@ Endpoints · Alerts**. **Settings** stays in the footer in both contexts
 > this file; ADR-0010's decision (the sidebar swaps wholesale to project sections) still holds and
 > only its illustrative list is stale, so it is left for an explicit supersede rather than edited
 > in place.
-
-`Validations` (the runs) and `Acceptance criteria` (what they check) no longer share a word, so
-the link between them is made explicit in the section's empty state
-([#533](https://github.com/wso2/labs-agentic-engineer/issues/533)).
 
 ## Resources
 

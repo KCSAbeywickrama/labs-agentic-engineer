@@ -886,15 +886,21 @@ export const AGENT_SSE_EVENT_TYPES = [
   "text-delta",
   "tool-input-start",
   "tool-input-delta",
-  // The per-call completion signal, and the ONLY one a consumer can use to tell
-  // that one tool's arguments are fully written: a step may issue several calls,
-  // and every `tool-result` for that step flushes only after its LAST call, so
-  // `tool-result` marks the end of the STEP's work, not of this call's. For a
-  // file tool the arguments are the file body, which makes this the moment the
-  // file is complete. The ordering is pinned by
-  // `services/agents/test/frame-order.test.ts` (it needs the real SDK loop).
+  // The per-call completion signal for one tool's ARGUMENTS: a step may issue
+  // several calls, and this is the frame that says this one's are fully written.
+  // For a file tool the arguments are the file body, which makes it the moment
+  // the file is complete.
   "tool-input-end",
   "tool-call",
+  // The call's VERDICT, and it rides that call's own `tool-call` — a file write
+  // is applied and reported at its own `tool-input-end`
+  // (`services/agents/src/agents/main/tools/write-ledger.ts`), not at the tail
+  // of the step. That matters because the SDK underneath does the opposite: it
+  // queues a step's calls and executes them all after the whole assistant
+  // message has streamed, which for a step batching five `addFile`s would leave
+  // file 1's verdict waiting on file 5's body. Exactly ONE result per call
+  // reaches the wire. The ordering is pinned by
+  // `services/agents/test/frame-order.test.ts` (it needs the real SDK loop).
   "tool-result",
   "tool-error",
   "error",

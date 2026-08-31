@@ -991,7 +991,7 @@ paths:
   /projects/{projectName}/builds/{tag}/revalidate:
     post:
       description: >-
-        Ask a version's acceptance criteria again, against the system already deployed. It starts a
+        Ask a version's validation criteria again, against the system already deployed. It starts a
         fresh run over that version's milestone which ENTERS THE LOOP AT VALIDATION rather than at
         the working set — nothing is rebuilt to answer the question.
 
@@ -1007,7 +1007,7 @@ paths:
         the version's answer. 409 when a run is already live on the milestone (nothing to hand off
         to — its verdict may be hours away or may never come) or when the milestone still has open
         work (the loop would work that first, which is a build resume, not a revalidation). 422 when
-        the version has no acceptance criteria, refused rather than run so a `skipped` verdict
+        the version has no validation criteria, refused rather than run so a `skipped` verdict
         cannot overwrite a real one.
       operationId: revalidate-build
       parameters:
@@ -3486,11 +3486,15 @@ components:
         already pays for it.
       properties:
         status:
-          description: idle (never built), running, failed, succeeded
+          description: idle (never built), running, failed, cancelled, succeeded. `cancelled` is its
+            own value for the same reason it is on BuildSummary — a person abandoning an increment is
+            a different fact from the platform failing to deliver one, and the project badge read
+            "Build failed" over a build somebody had deliberately stopped.
           enum:
           - idle
           - running
           - failed
+          - cancelled
           - succeeded
           type: string
           x-go-type: string
@@ -3608,17 +3612,25 @@ components:
           type: integer
         reason:
           description: The run's terminal reason for a failed version (empty otherwise), surfaced
-            beside the Failed badge in the console.
+            beside the Failed badge in the console. A cancelled version carries none — a person
+            abandoning an increment is not a fault with a cause to report.
           type: string
         startedAt:
           format: date-time
           type: string
         status:
+          description: What became of this version. `cancelled` is its own value rather than a
+            flavour of `failed`, because the two are different facts and a reader acts on them
+            differently — a failure is the platform reporting it could not deliver the increment,
+            while a cancel is a person deciding not to. Folding them lost that; a build somebody
+            deliberately stopped rendered as Failed, with no reason beside it to say why, while the
+            same page's run row said Cancelled two lines below.
           enum:
           - started
           - in_progress
           - completed
           - failed
+          - cancelled
           type: string
         tag:
           type: string
@@ -4291,7 +4303,7 @@ components:
             passed, none failed, some were never covered), failed (a criterion
             asserted and lost), inconclusive (no test results at all), unreported
             (no usable report at the validation cycle's merge commit), skipped (no
-            acceptance criteria, and incident runs, which get no validation cycle).
+            validation criteria, and incident runs, which get no validation cycle).
 
             failed and unreported fail the run only once its validation attempts
             are spent: while attempts remain the run repairs and re-validates, and
@@ -4981,7 +4993,7 @@ components:
             `dev` delivers a version — it plans its own milestone, and is the only kind that takes
             the one-active-build-per-project mutex. `task` works a defect inside a version already
             delivered; task runs execute concurrently on their own milestones. `validation` asks a
-            shipped version's acceptance criteria again — it has no working set, builds nothing, and
+            shipped version's validation criteria again — it has no working set, builds nothing, and
             is outside the mutex so it never holds up the next build.
           enum:
           - dev
@@ -5192,6 +5204,14 @@ components:
         files:
           format: int64
           type: integer
+        itemId:
+          description: '`progress_item` only: WHICH named unit of work the line is about — the key a
+            consumer folds on, since many lines describe the same item and a reader wants one row
+            repainted rather than many rows printed. Validation binds items to acceptance criteria
+            ("AC-003-a"), which `cycleKind` already implies, so this never repeats it. The status
+            itself rides on `status`, scoped by `kind`: planned | exploring | authoring | running |
+            healing | pass | fail.'
+          type: string
         kind:
           type: string
         level:
@@ -5856,8 +5876,9 @@ components:
     RunProgressLine:
       additionalProperties: false
       description: 'One line of a cycle''s agent log: the runner''s progress envelope (phase | tool_use
-        | git_commit | git_push | gh_action | log | result) plus the attribution the console groups on —
-        which cycle produced it, and whether the main agent or one of its Task subagents did.'
+        | activity | tool_result | git_commit | git_push | gh_action | log | progress_item | result)
+        plus the attribution the console groups on — which cycle produced it, and whether the main
+        agent or one of its Task subagents did.'
       properties:
         branch:
           type: string
@@ -5909,6 +5930,14 @@ components:
         files:
           format: int64
           type: integer
+        itemId:
+          description: '`progress_item` only: WHICH named unit of work the line is about — the key a
+            consumer folds on, since many lines describe the same item and a reader wants one row
+            repainted rather than many rows printed. Validation binds items to acceptance criteria
+            ("AC-003-a"), which `cycleKind` already implies, so this never repeats it. The status
+            itself rides on `status`, scoped by `kind`: planned | exploring | authoring | running |
+            healing | pass | fail.'
+          type: string
         kind:
           type: string
         level:
@@ -5988,7 +6017,7 @@ components:
             passed (every criterion was automated and passed), partial (some passed, none failed, and
             some were never covered — so `passed` would claim a result for criteria nobody checked),
             failed (a criterion asserted and lost), inconclusive (no test results at all), unreported
-            (no usable report at the cycle's merge commit), skipped (no acceptance criteria, and
+            (no usable report at the cycle's merge commit), skipped (no validation criteria, and
             incident runs, which get no validation cycle at all).
 
             `failed` and `unreported` fail the run ONCE ITS VALIDATION ATTEMPTS ARE SPENT, under
@@ -6543,8 +6572,8 @@ components:
       type: object
     TimelineEvent:
       additionalProperties: false
-      description: 'A unified-timeline entry: today''s ProgressEvent (phase | tool_use | git_commit |
-        git_push | gh_action | build_step | log | result) plus its attribution — which execution attempt
+      description: 'A unified-timeline entry: today''s ProgressEvent (phase | tool_use | activity |
+        tool_result | git_commit | git_push | gh_action | build_step | log | progress_item | result) plus its attribution — which execution attempt
         it came from. This is the per-row shape the console renders; the FE groups rows by executionId/kind.'
       properties:
         branch:
@@ -6591,6 +6620,14 @@ components:
         files:
           format: int64
           type: integer
+        itemId:
+          description: '`progress_item` only: WHICH named unit of work the line is about — the key a
+            consumer folds on, since many lines describe the same item and a reader wants one row
+            repainted rather than many rows printed. Validation binds items to acceptance criteria
+            ("AC-003-a"), which `cycleKind` already implies, so this never repeats it. The status
+            itself rides on `status`, scoped by `kind`: planned | exploring | authoring | running |
+            healing | pass | fail.'
+          type: string
         kind:
           type: string
         level:

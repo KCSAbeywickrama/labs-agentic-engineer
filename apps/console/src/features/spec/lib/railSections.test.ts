@@ -72,7 +72,7 @@ describe("railSections — the rail is the flow", () => {
     for (const s of sections) expect(s.state).toBe("not-started");
   });
 
-  // The kickoff. Design and acceptance criteria have not begun and cannot until
+  // The kickoff. Design and validation criteria have not begun and cannot until
   // requirements exist.
   it("pulses the section the running work targets", () => {
     const sections = railSections(
@@ -206,7 +206,7 @@ describe("railSections — the rail is the flow", () => {
   describe("the requirements have moved since the design", () => {
     const sections = railSections(input({ designOutdated: true }));
 
-    // The acceptance criteria are written against the same stories, and one
+    // The validation criteria are written against the same stories, and one
     // re-derivation rewrites both — so they go stale together.
     it("marks design AND validation, not requirements", () => {
       expect(of(sections, "design").state).toBe("attention");

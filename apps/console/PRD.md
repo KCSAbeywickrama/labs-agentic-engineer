@@ -73,13 +73,13 @@ Approved at section level; per-section detail is defined feature-by-feature.
   (ADR-0010; no back-item, home is the header brand / project switcher):
   - **Overview** — the Spec → Build → Deploy track, the components and
     dependencies index, and the architecture diagram.
-  - **Spec** — the requirement, derived design + acceptance criteria.
+  - **Spec** — the requirement, derived design + validation criteria.
   - **Builds** — the version ledger: one row per version, with its milestone,
     status, duration and start. A row opens that version's
     build — summary card, task list, External resources, coding-agent log,
     build logs (ADR-0021, ADR-0023).
   - **Deployments** — dev environment state and URLs.
-  - **Validations** — the runs checking a build against the spec's acceptance
+  - **Validations** — the runs checking a build against the spec's validation
     criteria.
   - **Issues** — issues the SRE agent raises against the running project
     (placeholder until its feature lands).
@@ -197,7 +197,7 @@ here: they're the open `console` + `feature` issues.
 - Spec view — the rail is the flow: **Requirements · Design · Validation**
   each carrying state (ready · being worked on · needs attention · not begun),
   documents named as documents rather than files (*Product requirements*,
-  *Design overview*, *Acceptance criteria*), and the app's existing pulse on a
+  *Design overview*, *Validation criteria*), and the app's existing pulse on a
   section an agent is writing. An amber section explains itself in **rows** —
   *N assumptions to challenge*, *N open questions*, *The requirements have
   changed since* — each going where the work already happens. Staleness is
