@@ -126,7 +126,10 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   gate → whole-spec gate + `v<N>` tag cut → milestone → supersede → run row → plan. The ORDER is the
   domain fact `build` owns; the two halves it does not own (the planning turn, the gate resolvers) are
   root ports. Preflight emits no `external-config` collect for a **Registered External
-  resource** the org catalog already holds (ADR-0021).
+  resource** the org catalog already holds (ADR-0021). Pre-tag also refuses an unknown
+  `resourceType` (`ErrUnknownResourceType` → 409) the same way it refuses an end-user-auth
+  conflict: the design is unsatisfiable on this cluster, so the click claims no version and
+  starts no workflow.
 - **What preflight gates**: it reports what a version's dependencies still need, and only
   `needsResolution` — a dependency the design itself cannot name (ambiguous, unresolved, missing spec,
   or an org service awaiting access) — blocks the version cut. `needsInput` stays the broad "there is
@@ -377,7 +380,11 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   secondary rate limit wears a 403 and is deliberately NOT one — and `run/errors.go` owns turning them
   into Temporal's vocabulary. The guard is per call site, so an activity added later that returns a
   source-control error raw is back on unbounded retry; `CloseMilestone` is the one deliberate exception,
-  swallowing its error by contract and so never retrying.
+  swallowing its error by contract and so never retrying. The same split applies to provision and
+  deploy: `provisionErr` / `deployErr` mark `ErrProvisionPermanent` / `ErrDeployPermanent` non-retryable.
+  A provision wait-answer (Resource `Ready=False` / `ResourceTypeNotFound`, or a create that never
+  cuts a release) is permanent; a GetResource blip or cancelled wait is not. Do not bound
+  `activityCtx` with `MaximumAttempts` — permanence is the activity's to declare.
 - **Every terminal reason names exactly one failure class.** `redispatch-budget` is agent death (including
   a Job that exited without a pull request); `build-retrigger-budget` is a build that stayed red through
   its one automatic re-trigger with no fix issue to recover it; `deploy-budget` is a component that

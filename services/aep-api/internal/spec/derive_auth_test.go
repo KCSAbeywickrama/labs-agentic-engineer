@@ -373,3 +373,15 @@ func TestDeriveAtHead_EmptyCatalogDoesNotReject(t *testing.T) {
 		t.Fatalf("empty/disabled catalog must not reject: %v", err)
 	}
 }
+
+func TestDeriveAtHead_NilCatalogDoesNotReject(t *testing.T) {
+	t.Parallel()
+	deps := `[{"kind":"platform-resource","name":"orders-db","resourceType":"postgres-cnpg"}]`
+	svc := newService(happySave(designFilesWithDeps(deps)))
+	svc.fileCommitter = &fakeCommitter{}
+	svc.resourceCatalog = &fakeTypeCatalog{types: nil}
+
+	if err := svc.DerivePlatformResourceFactsAtHead(context.Background(), "acme", "web"); err != nil {
+		t.Fatalf("nil/disabled catalog must not reject: %v", err)
+	}
+}
