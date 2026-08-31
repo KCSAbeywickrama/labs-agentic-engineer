@@ -161,7 +161,7 @@ func repairIssueBody(c FailedCriterion, must string) string {
 	b.WriteString("\nFix the implementation so this criterion holds, then include this issue in " +
 		"your pull request's Resolves list.\n\n" +
 		"Do not change the validation criteria or anything under `tests/` — they are the " +
-		"question, not the answer. Validation re-runs the whole oracle as it stands once your " +
+		"question, not the answer. Validation re-runs every criterion as it stands once your " +
 		"fix is built and deployed.\n")
 	return b.String()
 }

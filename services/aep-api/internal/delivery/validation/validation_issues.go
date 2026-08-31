@@ -254,7 +254,7 @@ func rationale(s criteriaSummary) string {
 }
 
 // renderScope builds the human markdown body of the validation issue — the
-// consumer contract the aep-validation skill reads (acceptance oracle + test
+// consumer contract the aep-validation skill reads (validation criteria + test
 // layout + report). Deployed endpoints and test credentials are deliberately
 // absent: the runner fetches endpoints from the secure validation-context
 // endpoint, and the agent reads a test user's login from the roles gate ticket
