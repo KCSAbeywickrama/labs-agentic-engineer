@@ -270,6 +270,8 @@ export function SpecAimMenu({
         setSendError("The selected passage is no longer in the document — reselect and try again.");
         return;
       }
+      // Remember which send is running, so its button is the one that spins.
+      setEnterIntent(intent);
       setSending(true);
       const sent = await aim.send(text.trim(), anchor, intent);
       setSending(false);
@@ -364,17 +366,28 @@ export function SpecAimMenu({
               <Stack direction="row" spacing={1} sx={{ mt: 1 }} justifyContent="flex-end">
                 <Tooltip title={busy ? aim.busyReason : "Talk it through before anything changes"}>
                   <span>
-                    <Button size="small" disabled={disabled} onClick={() => void handleSend("discuss")}>
+                    <Button
+                      size="small"
+                      disabled={disabled}
+                      loading={sending && enterIntent === "discuss"}
+                      onClick={() => void handleSend("discuss")}
+                    >
                       Discuss
                     </Button>
                   </span>
                 </Tooltip>
                 <Tooltip title={busy ? aim.busyReason : "Rewrite the selection"}>
                   <span>
+                    {/* The dispatch is not instant — it resolves the repo and
+                        two snapshots before answering — and a box that shows
+                        nothing for those seconds reads as Enter having done
+                        nothing at all. The press is acknowledged the moment it
+                        lands; the box closes when the dispatch does. */}
                     <Button
                       size="small"
                       variant="contained"
                       disabled={disabled}
+                      loading={sending && enterIntent === "change"}
                       onClick={() => void handleSend("change")}
                     >
                       Change
