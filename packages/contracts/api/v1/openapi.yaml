@@ -3443,11 +3443,15 @@ components:
         already pays for it.
       properties:
         status:
-          description: idle (never built), running, failed, succeeded
+          description: idle (never built), running, failed, cancelled, succeeded. `cancelled` is its
+            own value for the same reason it is on BuildSummary — a person abandoning an increment is
+            a different fact from the platform failing to deliver one, and the project badge read
+            "Build failed" over a build somebody had deliberately stopped.
           enum:
           - idle
           - running
           - failed
+          - cancelled
           - succeeded
           type: string
           x-go-type: string
@@ -3565,17 +3569,25 @@ components:
           type: integer
         reason:
           description: The run's terminal reason for a failed version (empty otherwise), surfaced
-            beside the Failed badge in the console.
+            beside the Failed badge in the console. A cancelled version carries none — a person
+            abandoning an increment is not a fault with a cause to report.
           type: string
         startedAt:
           format: date-time
           type: string
         status:
+          description: What became of this version. `cancelled` is its own value rather than a
+            flavour of `failed`, because the two are different facts and a reader acts on them
+            differently — a failure is the platform reporting it could not deliver the increment,
+            while a cancel is a person deciding not to. Folding them lost that; a build somebody
+            deliberately stopped rendered as Failed, with no reason beside it to say why, while the
+            same page's run row said Cancelled two lines below.
           enum:
           - started
           - in_progress
           - completed
           - failed
+          - cancelled
           type: string
         tag:
           type: string

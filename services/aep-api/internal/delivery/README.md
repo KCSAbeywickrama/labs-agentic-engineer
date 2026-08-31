@@ -209,6 +209,30 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   whole version because nothing told a blip from an answer, and it left no history to diagnose. As
   activities it is durable, retried, and classified by `planErr` exactly as every other I/O the loop does.
   A planning failure still settles `plan-failed` — same terminal reason, now written by the supervisor.
+  **The phase is cancellable and its gate activity gives up** ([ADR-0024][adr24]). Its two activities are
+  raced against the cancel channel (`loop.awaitInterruptibly`) and heartbeat, so a cancel both settles the
+  run and stops the work in flight — without it the phase was blind to cancel for its whole duration, which
+  is what let a version with an unsatisfiable dependency loop for 22 minutes over six unread cancels.
+  `ProvisionGates` is the one activity here with a BOUNDED retry policy (`gateActivityAttempts`), because
+  provisioning has answers repeating cannot change and the unbounded default made one of them a permanent
+  loop. What it looped ON was the gate mint, whose dedupe considered only OPEN gates while the same
+  activity closes the ready ones — so the mint now keys on (version, dependency) in EVERY state, which a
+  version label on the gate is what makes safe (`provisioning.gateVersionLabelPrefix`).
+- **A CANCELLED version says so, in both aggregates that report one** ([ADR-0024][adr24]).
+  `build.statusFromRunState` (the version ledger and the build page header) and
+  `projects.buildStageStatus` (the toolbar's project badge) both folded `cancelled` into `failed`;
+  both now carry their own value, and they move together because a reader sees both at once. `blocked`
+  still reads as failed in both — nobody CHOSE blocked, which is the whole difference. Note the cost:
+  two contract enums gained a value, so the console and the BFF are no longer independently
+  deployable for this change (an old bundle rendered the new value as "Unknown"). Ship the console
+  with, or before, the BFF.
+- **Whether a rebuild skips the planning turn is answered by the MILESTONE, not by the spec status**
+  ([ADR-0024][adr24]). `Rebuild` means "already filled", and an unchanged spec is not evidence of that: a
+  run that died in its planning phase leaves the milestone holding its gates and no work, and a run that
+  skips planning over it reads the empty working set as "planning produced nothing" and settles the version
+  succeeded having built none of it. `build.reopenIncrement` lists the milestone's issues in every state
+  and reports whether any `development` issue is among them; an unreadable milestone answers "not filled",
+  because the wrong "filled" is silent and the wrong "not filled" costs one turn that mints nothing.
 - **The supervisor is the ONLY writer that settles a run row.** The one exception is a start that never
   happened: `StartRun` reports `ErrRunNotStarted` from a degraded boot, and the click settles the row it
   armed rather than leaving a non-terminal row with no workflow behind it. That state is unhealable by
@@ -722,3 +746,5 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   A comment read that fails costs the caller its comments, never its Tasks — this list also drives the
   run card's gate-hold vs. empty-working-set distinction.
 - Platform-wide rules (tenant gate, secrets fence, persistence-in-domain) → [../../README.md](../../README.md).
+
+[adr24]: ../../../../docs/decisions/ADR-0024-cancel-reaches-the-planning-phase.md

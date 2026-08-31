@@ -99,6 +99,7 @@ func (e BuildProgressRunKind) Valid() bool {
 
 // Defines values for BuildSummaryStatus.
 const (
+	BuildSummaryStatusCancelled  BuildSummaryStatus = "cancelled"
 	BuildSummaryStatusCompleted  BuildSummaryStatus = "completed"
 	BuildSummaryStatusFailed     BuildSummaryStatus = "failed"
 	BuildSummaryStatusInProgress BuildSummaryStatus = "in_progress"
@@ -108,6 +109,8 @@ const (
 // Valid indicates whether the value is a known member of the BuildSummaryStatus enum.
 func (e BuildSummaryStatus) Valid() bool {
 	switch e {
+	case BuildSummaryStatusCancelled:
+		return true
 	case BuildSummaryStatusCompleted:
 		return true
 	case BuildSummaryStatusFailed:
@@ -949,7 +952,7 @@ type BuildRunList struct {
 
 // BuildStage Build-stage aggregate on ProjectStatus (#184) — the version the newest milestone run is working, and how that run is doing. Deliberately count-free - the only honest source of a per-version task tally is the version's milestone on GitHub, and this endpoint is polled at 5s. The console renders counts from the list-tasks response it already holds, on the surface that already pays for it.
 type BuildStage struct {
-	// Status idle (never built), running, failed, succeeded
+	// Status idle (never built), running, failed, cancelled, succeeded. `cancelled` is its own value for the same reason it is on BuildSummary — a person abandoning an increment is a different fact from the platform failing to deliver one, and the project badge read "Build failed" over a build somebody had deliberately stopped.
 	Status string `json:"status"`
 
 	// Version Spec tag the current/last build built; "" if never built.
@@ -963,17 +966,19 @@ type BuildSummary struct {
 	// MilestoneNumber The GitHub milestone this version's work lives in — the platform key the tag resolves to, and the handle list-build-runs is read by.
 	MilestoneNumber int64 `json:"milestoneNumber"`
 
-	// Reason The run's terminal reason for a failed version (empty otherwise), surfaced beside the Failed badge in the console.
-	Reason    string             `json:"reason,omitempty"`
-	StartedAt time.Time          `json:"startedAt"`
-	Status    BuildSummaryStatus `json:"status"`
-	Tag       string             `json:"tag"`
+	// Reason The run's terminal reason for a failed version (empty otherwise), surfaced beside the Failed badge in the console. A cancelled version carries none — a person abandoning an increment is not a fault with a cause to report.
+	Reason    string    `json:"reason,omitempty"`
+	StartedAt time.Time `json:"startedAt"`
+
+	// Status What became of this version. `cancelled` is its own value rather than a flavour of `failed`, because the two are different facts and a reader acts on them differently — a failure is the platform reporting it could not deliver the increment, while a cancel is a person deciding not to. Folding them lost that; a build somebody deliberately stopped rendered as Failed, with no reason beside it to say why, while the same page's run row said Cancelled two lines below.
+	Status BuildSummaryStatus `json:"status"`
+	Tag    string             `json:"tag"`
 
 	// WaitingReason Why an in-progress version is waiting rather than moving. Empty for the ordinary between-cycles park, which needs no explanation. `external-values` is the deploy gate — the run is built and ready to deploy, and every remaining blocker is a value only a human can supply. It is carried here so a ledger row can say the version is waiting on the reader instead of reading as a run an agent is still working; the dependency NAMES stay on MilestoneRunView, where the run read that has them is already being made.
 	WaitingReason BuildSummaryWaitingReason `json:"waitingReason,omitempty"`
 }
 
-// BuildSummaryStatus defines model for BuildSummary.Status.
+// BuildSummaryStatus What became of this version. `cancelled` is its own value rather than a flavour of `failed`, because the two are different facts and a reader acts on them differently — a failure is the platform reporting it could not deliver the increment, while a cancel is a person deciding not to. Folding them lost that; a build somebody deliberately stopped rendered as Failed, with no reason beside it to say why, while the same page's run row said Cancelled two lines below.
 type BuildSummaryStatus string
 
 // BuildSummaryWaitingReason Why an in-progress version is waiting rather than moving. Empty for the ordinary between-cycles park, which needs no explanation. `external-values` is the deploy gate — the run is built and ready to deploy, and every remaining blocker is a value only a human can supply. It is carried here so a ledger row can say the version is waiting on the reader instead of reading as a run an agent is still working; the dependency NAMES stay on MilestoneRunView, where the run read that has them is already being made.

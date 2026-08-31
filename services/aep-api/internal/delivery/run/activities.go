@@ -442,7 +442,12 @@ func (a *Activities) ProvisionGates(ctx context.Context, in PlanMilestoneInput) 
 	if a.gates == nil {
 		return nil
 	}
-	return planErr(a.gates.ProvisionForBuild(ctx, in.OrgID, in.ProjectID, in.Tag, in.MilestoneNumber, in.ProvisionInputs))
+	// Heartbeat: this activity WAITS — up to a minute per platform resource for
+	// OpenChoreo to cut its release — and a cancel pressed during that wait has to
+	// reach the authoring, not just free the workflow. See heartbeating.
+	return heartbeating(ctx, func(ctx context.Context) error {
+		return planErr(a.gates.ProvisionForBuild(ctx, in.OrgID, in.ProjectID, in.Tag, in.MilestoneNumber, in.ProvisionInputs))
+	})
 }
 
 // PlanMilestone runs the version's planning turn.
@@ -456,7 +461,12 @@ func (a *Activities) PlanMilestone(ctx context.Context, in PlanMilestoneInput) e
 	if a.planner == nil {
 		return nil
 	}
-	return planErr(a.planner.PlanIntoMilestone(ctx, in.OrgID, in.ProjectID, in.MilestoneNumber))
+	// Heartbeat, for the same reason as ProvisionGates: an agent turn is minutes
+	// long, and a cancel pressed mid-turn should end the turn rather than let it
+	// run on to mint a plan for a version nobody is building.
+	return heartbeating(ctx, func(ctx context.Context) error {
+		return planErr(a.planner.PlanIntoMilestone(ctx, in.OrgID, in.ProjectID, in.MilestoneNumber))
+	})
 }
 
 // ---- deploy -----------------------------------------------------------------
