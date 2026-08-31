@@ -834,7 +834,7 @@ const doneTasks: TaskView[] = buildingTasks.map((t) => ({
 // property and lives on the run rows, which is where the deployment surface
 // reads it.
 export const validationTask: TaskView = {
-  ...task(30, "Validate deployed system against acceptance criteria", "merged"),
+  ...task(30, "Validate the deployed system against its validation criteria", "merged"),
   executorClass: "validation",
 };
 

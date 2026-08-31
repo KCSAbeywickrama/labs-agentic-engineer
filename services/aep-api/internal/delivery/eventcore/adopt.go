@@ -237,7 +237,7 @@ func (e *Events) Revalidate(ctx context.Context, orgID, projectID string, milest
 		return "", cerr
 	}
 	if !hasCriteria {
-		return "", delivery.ErrNoAcceptanceCriteria
+		return "", delivery.ErrNoValidationCriteria
 	}
 
 	slog.InfoContext(ctx, "eventcore: revalidating a deployed version",
