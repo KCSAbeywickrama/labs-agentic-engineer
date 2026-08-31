@@ -50,13 +50,12 @@ section every time instead of remembering one, because it differs per
 organization. If that section is absent or empty, pin only the two stack skills.
 Never substitute a design system the organization defaults do not name.
 
-**Pinning the design system is not the same as consulting it.** A web-application
-in this design also means LOADING that design-system skill yourself, now: it owns
-theming, and a theme is settled at design time because the built app is themed at
-its first build. Load it by name the moment the design gains a web-application,
-and do what its design-time section says before you call the design done. Add
-`"api-management"` to any service that sits behind the gateway, and
-`"thunder-authentication"` to **both** sides of sign-in — the SPA *and* every
+**Pin the design system; do not consult it.** A design system is built against,
+not designed with — it is the coding run's to load, and its theming is a settled
+organization decision that no design-time question reopens. Never ask the user
+about colors, themes, or look and feel. Add `"api-management"` to any service
+that sits behind the gateway, and `"thunder-authentication"` to **both** sides
+of sign-in — the SPA *and* every
 protected backend it calls, since that skill owns how each resolves the caller's
 role. It is a JSON key on the component's design object, so include it when you
 write that `design.json` (addFile/editFile) — do NOT put `skillsPinned` in
