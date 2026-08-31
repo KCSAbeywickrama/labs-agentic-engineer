@@ -16,7 +16,7 @@ writing the first page, and build what it says.
 which screens are yours; the DSL is where their content lives, so it wins
 over the issue text when the two differ.
 
-### Screen for screen
+## Screen for screen
 
 - **One `screen` = one route/page.** Name the route and the page component
   after the screen (`screen RiskQueue` → `/risk-queue`, `RiskQueuePage`),
@@ -33,16 +33,16 @@ over the issue text when the two differ.
   role (`RiskQueue` for the manager, `MyRisks` for the owner), each is its
   own route with its own chrome, showing only the actions and columns its
   screen carries. Do not collapse two role screens into one page that toggles
-  on the viewer. How you
-  factor the code behind those routes is your call: share a component where
-  the views genuinely overlap, as long as each route renders exactly what its
-  screen shows. Read the role in the SPA from the sign-in identity the auth
+  on the viewer. How you factor the code behind those routes is your call:
+  share a component where the views genuinely overlap, as long as each route
+  renders exactly what its screen shows.
+  Read the role in the SPA from the sign-in identity the auth
   dependency provides (`user.profile.groups`; see `thunder-authentication`),
   and treat it as **presentation only** — the backend enforces permission and
   answers 403. A component with no auth dependency has no roles: build the
   screen as drawn.
 
-### Element for element
+## Element for element
 
 Walk each `screen` block top to bottom and make every line a real element,
 in that order, with that literal content:
@@ -68,15 +68,19 @@ wrong for the data the API actually returns, and say so in the PR.
 and when the request fails. A wireframe shows the happy path; the page
 must not break off it.
 
-### Arrow for arrow
+## Arrow for arrow
 
 Every `-> Screen` — on a button, a link, a table, a navbar or sidebar item —
-is **working navigation** to that screen's route. Every `flow` block is a
-journey a role must be able to walk end to end by clicking: entry screen
-first, each screen reachable from the one before. A screen you cannot reach
-from its flow is a broken page, even if it renders.
+is **working navigation** to that screen's route — including the rail item
+pointing at the screen it sits on, which is the active nav link and still a
+link. A chrome item with no target names a section outside this wireframe set:
+render it and leave it inert rather than inventing a destination for it.
 
-### The fidelity checklist
+Every `flow` block is a journey a role must be able to walk end to end by
+clicking: entry screen first, each screen reachable from the one before. A
+screen you cannot reach from its flow is a broken page, even if it renders.
+
+## The fidelity checklist
 
 Before the PR, walk the DSL once more and put this in the PR body — one line
 per screen, then one per `flow` — with any gap named beside it:
@@ -101,4 +105,3 @@ it end to end by clicking, entry screen first — an unwalkable flow strands the
 screens behind it, so the e2e test written against the acceptance criteria
 cannot reach them either. An unticked line with its reason is fine — it tells
 the reviewer exactly where to look.
-

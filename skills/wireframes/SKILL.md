@@ -98,7 +98,10 @@ quote (`"Home | Templates -> Templates"`) — one after the quote attaches to
 nothing and silently does not navigate. The first `navbar` item is the brand
 and takes no target; put arrows on the links after it. The rail repeats on
 each screen, so annotate it each time; an item pointing at the screen it sits
-on is correctly inert.
+on is correctly inert. A rail may also name a section this wireframe set does
+not draw (`Settings`, `Audits`): leave those without a target — they are
+context, and inventing a screen just to receive the arrow is noise. Keep them
+few; a rail where most items go nowhere reads as broken.
 
 **A `primary` button must lead somewhere.** It is the screen's main action and
 the first thing a reviewer clicks, so one with no `-> Screen` is a dead end
@@ -232,4 +235,3 @@ add color only through a trailing **variant**, to carry *status meaning*:
 
 Keep status variants purposeful — a screen dense with red/green/amber badges
 stops communicating.
-

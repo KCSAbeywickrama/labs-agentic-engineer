@@ -159,8 +159,9 @@ automatically. Keep each comment `text` SHORT (a phrase, not a sentence).
 - Comments start with `//`. A whole-line comment is safe anywhere; a trailing
   one is safe on an element line (`button "Escalate" primary  // in place`)
   but NOT inside a `flow` block, where a screen-name line is matched whole and
-  a trailing comment rejects the write. Every screen should be reachable from some
-  control's `-> Screen`.
+  a trailing comment rejects the write. Every screen should be reachable from
+  some control's `-> Screen`, except a flow's entry screen — it is where the
+  prototype opens, so nothing needs to point at it.
 
 ## Worked example — risk register webapp wireframes
 
@@ -227,8 +228,8 @@ screen NewRisk "An owner logs a new risk into a register"
   checkbox "Notify owner on create" active
   row
     right
-    button "Cancel"
-    button "Create risk" primary -> MyRisks
+    button "Cancel" -> MyRisks
+    button "Create risk" primary -> RiskDetail
 
 screen QueueRiskDetail "Manager reviews progress and escalates risks that stall"
   navbar "RiskHub"
@@ -311,10 +312,11 @@ flow "Log a risk"
 
 The two `flow` blocks close the file: each names its task, carries its `role`
 and a one-line `description`, and lists only its own role's screens, entry
-screen first. Each screen is reachable by clicking from somewhere in its own
-flow — `RiskQueue`'s "Review next" CTA and its table both lead to
-`QueueRiskDetail`; `MyRisks`'s button leads to `NewRisk` and its table leads to
-`RiskDetail`. They are what the prototype's flow picker offers the reviewer —
+screen first. Each flow walks in the order it lists — `RiskQueue`'s "Review
+next" CTA and its table both lead to `QueueRiskDetail`; `MyRisks`'s "New risk"
+leads to `NewRisk`, whose "Create risk" lands on the new risk's `RiskDetail`
+(`MyRisks`'s table reaches the same screen for a risk that already exists).
+They are what the prototype's flow picker offers the reviewer —
 the Manager's "Approval queue" walks queue-then-escalate, the Risk owner's
 "Log a risk" walks log-then-remediate — and neither flow references a screen
 the other role can't reach.

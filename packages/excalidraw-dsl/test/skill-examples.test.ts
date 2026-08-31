@@ -42,10 +42,19 @@ import {
 const here = dirname(fileURLToPath(import.meta.url));
 const skillDir = join(here, "..", "..", "..", "skills", "wireframes");
 
-const SKILL_FILES = [
-  "SKILL.md",
-  "references/authoring.md",
-  "references/implementing.md",
+/**
+ * Every skill file that may carry DSL, with how many complete documents it is
+ * expected to hold. The count is asserted, so a fence renamed or an example
+ * deleted fails here instead of silently reducing this suite to a no-op.
+ *
+ * `implementing.md` expects ZERO on purpose: its one fenced block is the PR
+ * fidelity checklist, which is a report format, not DSL. It stays in the list
+ * so that adding a DSL example to it later is caught and checked.
+ */
+const SKILL_FILES: ReadonlyArray<{ file: string; documents: number }> = [
+  { file: "SKILL.md", documents: 1 },
+  { file: "references/authoring.md", documents: 1 },
+  { file: "references/implementing.md", documents: 0 },
 ];
 
 /**
@@ -83,11 +92,16 @@ function dslExamples(markdown: string): string[] {
     .filter((doc) => doc !== "");
 }
 
-for (const file of SKILL_FILES) {
+for (const { file, documents } of SKILL_FILES) {
   const markdown = readFileSync(join(skillDir, file), "utf8");
   const examples = dslExamples(markdown);
 
   test(`${file}: every DSL example is valid`, () => {
+    assert.equal(
+      examples.length,
+      documents,
+      `${file} should yield ${documents} DSL document(s) — update SKILL_FILES when that changes on purpose`,
+    );
     for (const [i, dsl] of examples.entries()) {
       const where = `${file} example #${i + 1}`;
       assert.deepEqual(validateWireframeSyntax(dsl), [], `${where}: syntax`);
@@ -98,11 +112,10 @@ for (const file of SKILL_FILES) {
 }
 
 test("the worked example is actually being checked", () => {
-  // A guard on the extractor: if a refactor renames the fence or moves the
-  // example, the loop above would silently assert over an empty list.
+  // A guard on the extractor: a truncated worked example would still satisfy
+  // the count above, so assert it is the substantial multi-screen document.
   const authoring = readFileSync(join(skillDir, "references", "authoring.md"), "utf8");
   const examples = dslExamples(authoring);
-  assert.ok(examples.length >= 1, "authoring.md should carry a full worked example");
   assert.ok(
     examples.some((e) => e.split("\n").length > 50),
     "the worked example should be a substantial multi-screen document",
