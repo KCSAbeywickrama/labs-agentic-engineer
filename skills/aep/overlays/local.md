@@ -67,7 +67,21 @@ runtime relationship, not a build order — it never holds an issue back.
 <!-- /replace-text -->
 
 <!-- replace-text -->
+   git diff --cached --name-only    # what is ACTUALLY staged — read it
+<!-- with -->
+<!-- /replace-text -->
+
+<!-- replace-text -->
    git push -u origin HEAD          # -u only on the first push
+<!-- with -->
+<!-- /replace-text -->
+
+<!-- replace-text -->
+   **Read that `--name-only` list against what you changed.** `git add` on a
+   directory drops every ignored path inside it **silently, at exit 0**, leaving
+   `git status` clean; the staged list is the only place the omission shows. What
+   is missing there is missing from the build context, and the first sign is a red
+   build minutes later in a component that compiled perfectly on your disk.
 <!-- with -->
 <!-- /replace-text -->
 
