@@ -52,10 +52,13 @@ type ComponentClient interface {
 	GetComponent(ctx context.Context, orgName, projectName, componentName string) (*gen.Component, error)
 	CreateComponent(ctx context.Context, orgName, projectName string, req *CreateComponentRequest) (*gen.Component, error)
 
-	// EnsureComponentType get-or-creates a namespaced ComponentType. Idempotent
-	// on (orgName, metadata.name): HTTP 409 GETs the existing type and succeeds.
-	// body is the raw CR map (e.g. CodingAgentComponentType()) posted via the
-	// gen client's WithBody path — no typed converter.
+	// EnsureComponentType converges a namespaced ComponentType onto body.
+	// Idempotent on (orgName, metadata.name): HTTP 409 re-reads the existing
+	// type and PUTs body only if the stored spec has drifted from it, so an org
+	// seeded by an older platform build stops validating today's dispatches
+	// against yesterday's schema. body is the raw CR map (e.g.
+	// CodingAgentComponentType()) posted via the gen client's WithBody path —
+	// no typed converter.
 	EnsureComponentType(ctx context.Context, orgName string, body map[string]any) error
 
 	// ListInternalComponents returns the project's aep-internal coding-agent
