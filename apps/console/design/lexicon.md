@@ -240,27 +240,40 @@ The values an external dependency needs are no longer asked for in front of the
 Build button; they are supplied on a version's build page, as a section sitting
 directly under Tasks.
 
-The PAGE is version-scoped; the VALUES are not. They belong to the project and
-the environment, so every version's page shows the same answer, and a value
-supplied on one releases whichever run is parked on it. Copy here must not imply
-otherwise — "this version's credentials" would promise a per-version answer the
-platform does not have.
+The PAGE is version-scoped; the CONFIGURATION is not. It belongs to the project
+and the environment, so every version's page shows the same answer, and a
+dependency configured on one releases whichever run is parked on it. Copy here
+must not imply otherwise — "this version's credentials" would promise a
+per-version answer the platform does not have.
 
 | | |
 |---|---|
 | Section title | **External resources** |
 | Its chip, all supplied | **`3 of 3 configured`** |
-| Its chip, some outstanding | **`2 of 3 need values`** |
-| Body, all supplied | *Every external dependency has its development values.* |
-| Body, some outstanding | *The agent builds while you supply these. The version is not deployed until every one of them has its development values.* |
-| A row that has its values | **`Configured`** + **Update values** |
-| A row that does not | **`Needs values`** + **Configure** |
-| After a save | *Values saved — the deployment no longer waits on this one.* |
+| Its chip, some outstanding | **`2 of 3 need configuration`** |
+| Body, all supplied | *Every external dependency has its development configuration.* |
+| Body, some outstanding | *The agent builds while you supply these. The version is not deployed until every one of them has its development configuration.* |
+| A row that is configured | **`Configured`** + **Edit configuration** |
+| A row that is not | **`Needs configuration`** + **Configure now** |
+| A row's second line, no description | *2 settings outstanding* / *2 settings stored* |
+| After a save | *Configuration saved — the deployment no longer waits on this one.* |
 
-**`Needs values`, never *Unconfigured* or *Not ready*.** It names what the reader
-must do, not the state machine's word for the row. And *configured* is
+**`Needs configuration`, never *Unconfigured* or *Not ready*.** It names what the
+reader must do, not the state machine's word for the row. And *configured* is
 deliberately not *ready*: OpenChoreo reports these bindings `Ready` while every
 key is still empty, so the two words name different facts and must not merge.
+
+**One noun: *configuration*, never *values* or *credentials*.** The section used
+to say "values", which is the wire's word for what a binding holds, and the
+drawer before it said "credentials", which is only true of the subset that are
+secrets — a webhook URL is neither. *Configuration* covers every key the dialog
+collects and is the word the buttons already used. The individual keys are
+**settings** when they have to be counted.
+
+**The row's status is plain toned text, not a second pill.** The section header
+already carries a chip; a chip on every row competes with the button it is meant
+to lead the eye to. The outstanding row takes the section's one filled button
+(**Configure now**), a configured row the quiet outlined one.
 
 ### A version parked at the deploy gate
 
@@ -270,23 +283,60 @@ and they must agree.
 
 | | |
 |---|---|
-| The page's status pill | **`Waiting for values`** |
-| The summary card's notice, naming what it waits on | **`Waiting for values: stripe, sendgrid`** |
-| The same notice when the run named nothing | **`Waiting for external values`** |
-| Its body | *Everything built. This version is not deployed until every external resource holds its development values — add them under External resources below and the run resumes and deploys on its own, with nothing to restart.* |
-| Its button | **Supply values** |
-| The card's rollout line | ***v2** is built and waiting for its external values.* |
+| The page's status pill | **`Waiting for configuration`** |
+| The summary card's notice, naming what it waits on | **`Waiting for configuration: stripe, sendgrid`** |
+| The same notice when the run named nothing | **`Waiting for external configuration`** |
+| Its body | *Everything built. This version is not deployed until every external resource holds its development configuration — add it under External resources below and the run resumes and deploys on its own, with nothing to restart.* |
+| Its button | **Add configuration** |
+| The card's rollout line | ***v2** is built and waiting for its external configuration.* |
 
 **"with nothing to restart" is the load-bearing half.** Without it the reader
 goes looking for a Build or Retry button that would start a second run.
 
-**The ledger row says `Waiting for values` too, and it is the same words as the
-pill.** `BuildSummary` carries the waiting reason, which is what separates a
+**The ledger row says `Waiting for configuration` too, and it is the same words
+as the pill.** `BuildSummary` carries the waiting reason, which is what separates a
 parked version from a running one — both are `in_progress` — and it costs the
 ledger nothing: the run row it is built from already holds it. The row also goes
 QUIET, no tint and no pulse: those mean "the moving thing", and a park is the
 opposite. The dependency NAMES stay on the build page, where the run read that
 carries them is already being made and there is room to list them.
+
+### The build page's log sections
+
+Tasks, External resources, Coding agent log and Build logs are peers on one
+page, so they label and empty themselves the same way. Two things had drifted:
+one section's placeholder was a bare left-aligned paragraph beside another's
+centred `EmptyState`, and the agent log carried a status pill where Tasks
+carried plain text.
+
+| | |
+|---|---|
+| Header note, Tasks | *7 in this build · 7 done* |
+| Header note, agent log, streaming | *Streaming* + `AgentPulse` |
+| Header note, agent log, run over | *Run finished successfully* / *Run failed* / *Run cancelled* / *Run blocked* |
+| The same, state unknown or absent | *Run ended — `<state>`* / *Run finished* |
+| Any section with nothing to show | a centred `EmptyState compact` |
+| The agent log's stream health | *Attaching to the run feed…* / *Connection lost — reconnecting…* |
+
+**A header note is secondary caption text, never a pill.** The page header
+already carries the version's toned status chip; a second toned pill a few
+inches below competes with it for the same glance.
+
+**`Run finished successfully`, never `run settled — succeeded`.** *Settled* is
+the stream contract's word for the transition, not something a person watching a
+build says, and the state used to be pasted on raw in its lower-case wire
+spelling. The words match the run status chip's, so one run is not `Succeeded`
+in one place and `settled — succeeded` in another.
+
+**How the run ENDED belongs in the header; how the STREAM is doing belongs in
+the body.** They answer different questions and come from different reads — the
+ending from the run list, which the streaming note beside it already reads, so
+the two halves of one label cannot contradict each other. Stream health is
+right-aligned under the log, away from where its content starts.
+
+**A run that is neither streaming nor terminal is labelled by neither.** A run
+parked at the deploy gate has not ended, and *Run finished* over its log would
+contradict the summary card telling the reader it is waiting on them.
 
 ## The project overview
 
