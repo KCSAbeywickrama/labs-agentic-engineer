@@ -200,20 +200,35 @@ subagent you handed it to, keeps its status line current from start to done
    walks the app it just wrote enters the browser carrying the whole build in
    context and pays for that on every step of the walk. The walk lands before the
    commit, so what it fixes ships with what it checked. An issue that touches no
-   web app skips this. An issue you are closing as **already satisfied** does
-   not: that verdict is a claim about a screen, and a claim about a screen is the
-   one kind reading the code cannot settle.
+   web app skips this, and so does a fix whose diff moved no file the app loads.
+   An issue you are closing as **already satisfied** does not: that verdict is a
+   claim about a screen, and a claim about a screen is the one kind reading the
+   code cannot settle.
 4. **Commit that issue's work on its own, attributed to it:**
    ```bash
    git add <the App Paths that issue touched>
+   git diff --cached --name-only    # what is ACTUALLY staged — read it
    git commit -m "<type>: <short summary> (#<number>)"
    git push -u origin HEAD          # -u only on the first push
    ```
    `(#N)` is what a crash resume reads to know this issue is done — push as you
    go, so a crash never loses more than the issue in flight.
+
+   **Read that `--name-only` list against what you changed.** `git add` on a
+   directory drops every ignored path inside it **silently, at exit 0**, leaving
+   `git status` clean; the staged list is the only place the omission shows. What
+   is missing there is missing from the build context, and the first sign is a red
+   build minutes later in a component that compiled perfectly on your disk.
+
    Keep the repo-root `.gitignore` current in the same commit that introduces
    something it should cover (build output, dependency directories, local env
    files) — one file for the whole project, and never commit what belongs in it.
+   **Anchor every pattern to the path it means**: `/onboarding-api/target/`, not
+   a bare `target/`. One `.gitignore` serves every component of a polyglot repo,
+   so an unanchored directory name reaches into all of them — a `generated/`
+   added for a Ballerina component also swallows a web-app's `src/generated/`,
+   which that stack **requires** committed. Anchor the pattern; never `git add -f`
+   past it.
 5. Re-derive the working set (§1) and pick the next issue.
 
 **Say why before you throw work away.** Before deleting or wholesale-rewriting a
