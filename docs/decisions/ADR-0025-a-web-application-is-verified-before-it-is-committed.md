@@ -22,7 +22,7 @@ Everything downstream of the run assumed those defects would be found later.
 validation criteria — but by then the build's pull request has merged. A defect
 it reports becomes a `bug` issue, a second cycle, a second pull request and a
 second deploy. The feedback loop for "this screen does not work" ran through the
-whole platform when the person best placed to fix it — the agent that had just
+whole platform when the cycle best placed to fix it — the one that had just
 written the file — had finished and gone.
 
 The obstacle was never intent. It was that a coding run has no running system:
@@ -50,19 +50,27 @@ rather than a stage set: an app that reads a sibling's address out of
 this was built against carried that defect, and mock mode reproduced it before a
 cluster ever saw them.
 
-**2. The agent that built the app is the agent that walks it.** Its whole
-procedure is `skills/mock-verification`; it drives the page through
-`agent-browser`. It reports one verdict per story, and the third verdict is not
-a hedge: `[~]` marks a story whose truth lives outside the app — a total the real
+**2. The walk is its own dispatch, and whoever walks is whoever fixes.** Its
+whole procedure is `skills/mock-verification`; it drives the page through
+`agent-browser`. It verifies and repairs in one pass — walk a line, fix the
+moment it fails, walk that same line again, and only then start the next — so a
+defect is repaired at the cheapest moment it will ever have, by the agent
+holding it on screen, and the fix is proven by a click rather than by
+compiling. It reports one verdict per story, and the third verdict is not a
+hedge: `[~]` marks a story whose truth lives outside the app — a total the real
 service computes, a permission the gateway enforces. Marking those honestly is
 what keeps the other two verdicts worth reading.
 
 The walk is therefore not a review of the build but the **last step of it**:
 `references/component-contract.md` defines a `web-application` as green when it
 builds **and** walks, and `react-webapp`'s Development flow numbers the walk as
-a step like any other. A builder holds the whole component open, so a fix is
-better targeted and far cheaper than one briefed to a separate agent through
-pasted verdicts.
+a step like any other. What separates it from the build is the dispatch, not the
+responsibility — the lead sends a fresh subagent once the build reports clean,
+naming the component's App Path and the two skills. The builder's advantage over
+that subagent is only its own build transcript: both read the same filesystem,
+the same `wireframes.dsl` and the same contract, and both edit inside the same
+App Path. A browser walk is dozens of turns long, and a builder pays for that
+transcript on every one of them.
 
 **3. Its scope is the component, not the issue.** The boundary comes from
 `wireframes.dsl` and the product requirements — documents that sit on disk
@@ -76,15 +84,17 @@ because the lead derives its working set from issues that are **not done** and s
 never reads the issue an earlier cycle closed. A scope the lead cannot name is
 not a scope.
 
-**4. Coverage is protected by a phase, not by a second agent.** One agent that
-both walks and fixes has one failure mode: it repairs the defect on screen two
-and never opens screens five through nine. So the checklist is written **before
-the browser opens** — from `wireframes.dsl` and the requirements — and the walk
-completes before any file is edited, with one carve-out for a defect that blocks
-the walk. Then a single fix pass, then a re-walk of what was fixed: a screen is
-cleared by clicking it again, never by the edit compiling. Three walk-and-fix
-passes at most, stopping early on a clean walk or on a pass that ends with the
-failures it started with.
+**4. Coverage is protected by the checklist and a bound, not by a second
+agent.** An agent that both walks and fixes has one failure mode: it repairs the
+defect on screen two and never opens screens five through nine. Two things hold
+it open. The checklist is written **before the browser opens** — from
+`wireframes.dsl` and the requirements — so a screen that was never reached is a
+line carrying no verdict, where a list assembled as the walk goes simply never
+mentions it. And a line gets **three attempts**, after which it is marked `[ ]`
+and the walk moves on: a defect that resists three tries belongs in the report,
+and the screens behind it are still unopened. Repairing on the spot is what
+makes that bound safe — the walk owes nothing to a batch of edits made after it
+ended, because every fix was already cleared by walking its own line again.
 
 Because all of this happens **before** the commit, what a reviewer receives is
 one pull request carrying the build *and* the fixes.
@@ -97,7 +107,7 @@ callback. The loop lives entirely inside the coding session, driven by
 request. The mirror already hands an implementation run every coding-audience
 skill, so a new skill needs no runner code change.
 
-Two platform changes were needed, and only two:
+What the platform did have to change is the envelope the session runs in:
 
 - **The runner image gains `agent-browser`** (`runners/remote-worker/Dockerfile`),
   pointed at the Chromium ADR-0012 already bakes for Playwright via
@@ -107,6 +117,10 @@ Two platform changes were needed, and only two:
   path previously sent no deadline at all and inherited the schema default, so
   `EnsureComponentType` had to learn to converge a stale ComponentType rather
   than return early on a 409.
+- **Its memory reservation follows a measurement**, not the CPU split beside it:
+  a Chromium and a Vite dev server inside the pod peak at 1.22 GiB, above the
+  1Gi that used to be requested, and memory is the limit an overrun kills a
+  cycle for.
 
 ## Alternatives rejected
 
@@ -116,10 +130,18 @@ Two platform changes were needed, and only two:
   do is put the fix in the same pull request as the defect.
 - **A read-only verifier subagent plus a separate fixer subagent.** Shipped
   first, then merged. The separation it bought was mostly nominal — a finding
-  was already re-judged by the *next* round's walk, which the merged shape keeps
-  — while the costs were real: two extra dispatches per round, verdicts
-  hand-copied into a prompt, and a fixer that had to re-derive the cause a
-  verifier was forbidden to diagnose.
+  was re-judged by the walk that followed it either way — while the costs were
+  real: two extra dispatches per round, verdicts hand-copied into a prompt, and
+  a fixer that had to re-derive the cause a verifier was forbidden to diagnose.
+  What survives from it is the property that mattered: one agent walks and
+  fixes.
+- **The builder walks the app it just built**, as the last step of its own
+  dispatch. Also shipped first, then split out. The argument for it was that a
+  builder holds the component open and so targets a fix better, and that turned
+  out to be an advantage it does not have: the walk subagent opens the same
+  files and edits the same App Path. What the builder actually carries into the
+  browser is its build transcript, on every turn of a loop that is dozens of
+  turns long.
 - **Have the platform run the rounds** as workflow activities, for visibility in
   the run history. It would need the runner to report per-round state to an API
   that does not exist, to serve a loop whose whole cost is already inside one
@@ -134,17 +156,20 @@ Two platform changes were needed, and only two:
 
 ## Consequences
 
-- A web-app subagent runs longer than a service one — a build, then up to three
-  walk-and-fix passes driving a browser. This is the reason for the three-hour
-  deadline. It is one dispatch, not the four to seven the two-agent shape cost.
+- A `web-application` costs two dispatches where a service costs one, and the
+  walk is the longer of them: standing the app up, opening every screen it
+  draws, and repairing as it goes. Across a milestone's whole issue set that is
+  the reason for the three-hour deadline. Two is still well under the four to
+  seven the verifier-plus-fixer shape cost.
 - Nothing outside the walker's own skill describes the loop. The lead's part is
-  two lines: name `mock-verification` and `agent-browser` in a web-app
-  subagent's prompt, and carry any still-open `[ ]` line into the run's record.
+  to dispatch the walk once the build reports clean — naming the component's App
+  Path, `mock-verification` and `agent-browser`, and nothing about how to walk —
+  and to carry any still-open `[ ]` line into the run's record.
 - The mock harness is committed with the app. It is dev-only, absent from
   `dist/`, and it doubles as the fixture a human can run locally with
   `npm run dev:mock`.
 - A `[~]` verdict is a deliberate hand-off: stories whose truth lives outside the
   app remain `aep-validation`'s to judge, and the verdict names them so nobody
   assumes they were covered here.
-- A defect the rounds could not clear does not block the cycle. It is carried
-  into the run's record naming the screen and what happens on it.
+- A defect three attempts could not clear does not block the cycle. It is
+  carried into the run's record naming the screen and what happens on it.

@@ -79,12 +79,13 @@ mechanism is
 [`internal/delivery/README.md`](../services/aep-api/internal/delivery/README.md).
 
 **Mock verification** is that browser step, and it sits inside the coding cycle
-rather than after a deployment. The agent that builds a `web-application`
-finishes it by standing the app up in mock mode — MSW answering `/api`, a
-substituted auth module, no cluster and no sibling service — driving it through
-a real browser, recording one verdict per user story, then fixing what failed
-and walking the fixes again; three passes at most. Running it before the commit
-is what makes one pull request carry the build *and* its fixes. It is distinct
+rather than after a deployment. Once a `web-application` builds clean the cycle
+dispatches one more agent for it: it stands the app up in mock mode — MSW
+answering `/api`, a substituted auth module, no cluster and no sibling service —
+walks every screen the component's wireframes name, and repairs each failure the
+moment it finds it, clearing the line by clicking it again rather than by the
+edit compiling. It reports one verdict per user story. Running the walk before
+the commit is what makes one pull request carry the build *and* its fixes. It is distinct
 from validation, which judges a **deployed** version against live infrastructure
 once the run has promoted it. The procedure lives in the skill library
 (`skills/mock-verification`, `skills/react-webapp`) and runs inside the coding
