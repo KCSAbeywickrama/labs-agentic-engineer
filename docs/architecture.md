@@ -66,7 +66,8 @@ behind `gen`, and CI runs `gen` + `git diff --exit-code` to catch staleness. See
 
 A spec version is cut as a `v<N>` tag and executed as **one supervised run over
 one GitHub milestone**: the run mints prose issues into it as its first phase, one coding agent
-works the whole milestone per cycle, its pull request auto-merges, the merge
+works the whole milestone per cycle — verifying every web application it builds
+in a browser before committing it — its pull request auto-merges, the merge
 fans out to a build per changed component, the supervisor then promotes each
 built component and waits for it to serve, and the run settles when the working
 set is empty and validation has a verdict. The decisions and their costs are
@@ -76,3 +77,16 @@ set is empty and validation has a verdict. The decisions and their costs are
 [ADR-0024](decisions/ADR-0024-cancel-reaches-the-planning-phase.md); the
 mechanism is
 [`internal/delivery/README.md`](../services/aep-api/internal/delivery/README.md).
+
+**Mock verification** is that browser step, and it sits inside the coding cycle
+rather than after a deployment. The agent that builds a `web-application`
+finishes it by standing the app up in mock mode — MSW answering `/api`, a
+substituted auth module, no cluster and no sibling service — driving it through
+a real browser, recording one verdict per user story, then fixing what failed
+and walking the fixes again; three passes at most. Running it before the commit
+is what makes one pull request carry the build *and* its fixes. It is distinct
+from validation, which judges a **deployed** version against live infrastructure
+once the run has promoted it. The procedure lives in the skill library
+(`skills/mock-verification`, `skills/react-webapp`) and runs inside the coding
+session; the platform orchestrates none of it —
+[ADR-0025](decisions/ADR-0025-a-web-application-is-verified-before-it-is-committed.md).
