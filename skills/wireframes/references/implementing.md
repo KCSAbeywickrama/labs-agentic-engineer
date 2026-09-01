@@ -98,15 +98,20 @@ Screens
 - [ ] NewRisk → /risks/new — "Register" select not built: no registers endpoint
 
 Flows
-- [x] "Approval queue" (Manager) — RiskQueue → QueueRiskDetail walks by clicking
-- [ ] "Log a risk" (Risk owner) — MyRisks → NewRisk walks; NewRisk → RiskDetail
-      blocked on the missing select
+- [x] "Approval queue" (Manager) — stories 2, 5 — RiskQueue → QueueRiskDetail
+      walks by clicking
+- [ ] "Log a risk" (Risk owner) — stories 1, 3 — MyRisks → NewRisk walks;
+      NewRisk → RiskDetail blocked on the missing select
 ```
+
+Take each flow's name, role and story numbers from the Task's `Flows:` line —
+that is the mapping a reviewer will check you against.
 
 A screen is ticked only when every element in its block was on the page and
 every arrow it carries navigated when clicked. A flow is ticked only when it was
 walked end to end by clicking, entry screen first — an unwalkable flow strands
-the screens behind it, so the e2e test written against the acceptance criteria
-cannot reach them either. An unticked line with its reason is fine — it tells
-the reviewer exactly where to look, and a screen whose story could not be judged
-against a mock says that in the same place.
+the screens behind it, so the stories it carries cannot be exercised and the e2e
+test written against the acceptance criteria cannot reach them either. An
+unticked line with its reason is fine — it tells the reviewer exactly where to
+look and which stories are affected, and a screen whose story could not be
+judged against a mock says that in the same place.

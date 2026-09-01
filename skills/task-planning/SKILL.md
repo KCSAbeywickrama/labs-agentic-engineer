@@ -83,6 +83,25 @@ live in the DSL, and listing them in the issue would go stale the moment the
 wireframe is edited. The coding agent's `wireframes` skill turns the names
 into pages.
 
+**Map the stories to the flows, and check the mapping yourself.** You hold
+both the story list and the wireframe, so you are the one place the two can be
+compared — the designer's coverage pass is not one you inherit on trust. Read
+the `flow` blocks, and add a `Flows:` line under `## Scope` naming each flow,
+its role, and the stories it walks:
+
+```text
+Flows: "Submit an expense" (Employee) — stories 3, 4, 7
+       "Approve a claim" (Manager) — stories 5, 6
+```
+
+An in-scope story no flow walks is a **gap you state**, not one you drop:
+say so on the line (`stories 9, 10 — no flow walks these`) so a human sees it
+before the work starts. A story with no view at all — a backend rule, a
+scheduled job — is fine; name it as that rather than leaving it unaccounted.
+The coding agent ticks each flow off when it is walkable end to end, so this
+line is what lets a failing story be traced back to the journey that was meant
+to exercise it.
+
 ## When a tool rejects you
 
 The result names the fix: UNKNOWN_COMPONENT lists the known components;
