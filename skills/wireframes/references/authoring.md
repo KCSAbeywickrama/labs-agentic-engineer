@@ -34,11 +34,25 @@ only moment anyone can count it, while the requirements are in front of you.
 Do it deliberately, before you write the file:
 
 **Walk the numbered stories in order. For each one, name the flow that walks
-it.** A story every flow misses is a gap: add the screens it needs and put
-them in a flow, or — if it genuinely has no view (a backend rule, a scheduled
-job, an API another service calls) — leave it out knowingly rather than by
-oversight. Each flow will usually serve several stories, and a story may
-appear in more than one flow; what matters is that none is left unserved.
+it.** Each flow will usually serve several stories, and a story may appear in
+more than one flow; what matters is that every story is accounted for — either
+walked, or knowingly set aside.
+
+**Some stories have no screen, and that is correct.** Set a story aside when
+the product genuinely gives it no view:
+
+- **Sign-in and sign-out**, on a component with an auth dependency. "As a user
+  I can sign in" is real, but the platform's SSO owns that page — there is no
+  `Login` screen to draw (see *The DSL* in `SKILL.md`). The story is served by
+  the auth dependency, not by a flow.
+- **Backend rules and jobs** — a nightly export, a retention policy, a
+  validation rule enforced in the API.
+- **Machine-facing stories** — an endpoint another service calls.
+
+Everything else is a gap: add the screens it needs and put them in a flow.
+The distinction to hold onto is *set aside knowingly* versus *missed* — write
+the set-aside list down (it goes in the task issue), so the next reader can
+tell which happened.
 
 Run it the other way too: a flow serving no story is a journey nobody asked
 for, and a screen in no flow is one nobody can reach. Both are noise — cut
@@ -353,9 +367,10 @@ Checklist before finishing a wireframe file:
   order across roles.
 - Each role or journey named in the design's `flows/` files has its own `flow "<name>"` block,
   entry screen first, referencing existing screens by name.
-- **Every numbered user story is walked by at least one flow.** Go through the
-  stories and name the flow for each; a story with no flow is either a missing
-  screen or a deliberate no-view story, and you should know which.
+- **Every numbered user story is accounted for**: walked by at least one flow,
+  or on the set-aside list with its reason (sign-in, a backend rule, a job, a
+  machine-facing endpoint). Go through the stories and say which for each —
+  the one thing that must not happen is a story nobody looked at.
 - **Each role flow opens on that role's own screen, and there is no `Login`
   screen when the component has an auth dependency** — the platform's SSO
   hosts sign-in and returns the user to their home screen, so the app never

@@ -92,15 +92,21 @@ its role, and the stories it walks:
 ```text
 Flows: "Submit an expense" (Employee) — stories 3, 4, 7
        "Approve a claim" (Manager) — stories 5, 6
+       No flow: story 1 (sign-in — platform SSO owns the page), story 9
+       (nightly export job, no view)
 ```
 
-An in-scope story no flow walks is a **gap you state**, not one you drop:
-say so on the line (`stories 9, 10 — no flow walks these`) so a human sees it
-before the work starts. A story with no view at all — a backend rule, a
-scheduled job — is fine; name it as that rather than leaving it unaccounted.
+Every in-scope story lands on one of those lines. A story with no view is
+expected — sign-in and sign-out on a component with an auth dependency, a
+backend rule, a scheduled job, an endpoint another service calls — so put it
+on the `No flow:` line **with the reason**. A story that belongs on a screen
+and has no flow is a real gap: say so in the same place
+(`story 10 — no flow walks this`) rather than dropping it, so a human sees it
+before the work starts.
+
 The coding agent ticks each flow off when it is walkable end to end, so this
 line is what lets a failing story be traced back to the journey that was meant
-to exercise it.
+to exercise it — or to the note saying no journey was ever expected.
 
 ## When a tool rejects you
 
