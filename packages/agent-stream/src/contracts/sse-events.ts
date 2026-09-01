@@ -56,6 +56,8 @@ export type ErrCode =
   | "SCHEMA_VIOLATION"
   | "INVALID_DSL"
   | "INVALID_OPENAPI"
+  | "INVALID_DIAGRAM"
+  | "UNKNOWN_PARTICIPANT"
   | "PROTECTED_PATH";
 
 /** A candidate line echoed back for NOT_UNIQUE / NOT_FOUND re-anchoring. */

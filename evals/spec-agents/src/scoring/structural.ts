@@ -26,7 +26,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { checkComponentDesign } from "@aep/agent-stream";
+import { checkComponentDesign, checkDesignDiagram, DOMAIN_MODEL_PATH } from "@aep/agent-stream";
 import { listComponents, listFlows } from "@aep/playground/src/engine/gates.js";
 import { compileProject } from "@aep/ui-cell-diagram-react/compiler";
 import type { SectionRunResult } from "../drivers/conversational.js";
@@ -70,6 +70,17 @@ export function requirementsChecks(projectDir: string, run: SectionRunResult): S
 export function designChecks(projectDir: string, run: SectionRunResult): StructuralReport {
   const domainModel = readSafe(join(projectDir, "specs/design/domain-model.md"));
   const flowFiles = listFlows(projectDir);
+  // The same judge the write gate runs (ADR-0020's per-file contract): one
+  // diagram of the right kind, in the prescribed subset, participants
+  // resolving against the cell and the PRD on disk.
+  const reader = {
+    read: (p: string) => (existsSync(join(projectDir, p)) ? readFileSync(join(projectDir, p), "utf8") : undefined),
+  };
+  const domainModelProblem = domainModel.trim() ? checkDesignDiagram(DOMAIN_MODEL_PATH, domainModel, reader) : null;
+  const flowProblems = flowFiles
+    .map((f) => checkDesignDiagram(`specs/design/flows/${f}`, readSafe(join(projectDir, "specs/design/flows", f)), reader))
+    .filter((p): p is NonNullable<typeof p> => p !== null)
+    .map((p) => p.message);
   const components = listComponents(projectDir);
 
   const designJsonProblems: string[] = [];
@@ -111,6 +122,8 @@ export function designChecks(projectDir: string, run: SectionRunResult): Structu
   return report([
     check("domain-model.md exists", domainModel.trim().length > 0, "specs/design/domain-model.md missing or empty"),
     check("≥1 key flow", flowFiles.length > 0, "no non-blank .md files under specs/design/flows/"),
+    check("domain model is one valid erDiagram", domainModelProblem === null, domainModelProblem?.message),
+    check("every flow is one valid sequenceDiagram whose participants resolve", flowProblems.length === 0, flowProblems.join(" | ")),
     check("≥1 component designed", components.length > 0, "no dirs under specs/design/components/"),
     check("every design.json valid", components.length > 0 && designJsonProblems.length === 0, designJsonProblems.join("; ")),
     check(

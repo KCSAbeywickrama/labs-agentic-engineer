@@ -43,6 +43,7 @@ import { checkComponentDesign } from "./component-design-schema.js";
 import { checkSecurityDesign } from "./security-design-schema.js";
 import { checkOpenapiSpec } from "./openapi-spec.js";
 import { checkWireframeLayout } from "./wireframe-layout.js";
+import { checkDesignDiagram } from "./design-diagrams.js";
 import type {
   Op,
   ErrCode,
@@ -202,7 +203,7 @@ export class FileBundle {
    * Apply `content` to `path` through the write-gate ladder: YAML reparse, then
    * each artifact-specific gate that claims the path (component `design.json`
    * schema, `security.json` schema, `wireframes.dsl` syntax, `openapi.yaml`
-   * structure). The first
+   * structure, the design diagrams' shape and participants). The first
    * problem aborts with its own code and NO write, leaving the bundle
    * byte-for-byte unchanged — the safe in-memory contract. Every gate is a pure
    * (path, content) => problem | null function, so a new artifact kind is one
@@ -242,6 +243,14 @@ export class FileBundle {
     const specProblem = checkOpenapiSpec(path, content);
     if (specProblem) {
       return err(path, op, specProblem.code, specProblem.message);
+    }
+    // The design's diagram documents are shape-gated on the same terms — one
+    // diagram per file (ADR-0020) — and a flow's participants are resolved
+    // against the cell and the PRD already in this bundle, so an invented
+    // participant is caught while the model can still fix it.
+    const diagramProblem = checkDesignDiagram(path, content, this);
+    if (diagramProblem) {
+      return err(path, op, diagramProblem.code, diagramProblem.message);
     }
     this.files.set(path, content);
     this.touchedPaths.add(path);

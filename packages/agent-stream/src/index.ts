@@ -144,6 +144,8 @@ export {
   COMPONENT_DESIGN_JSON_RE,
 } from "./component-design-schema.js";
 export type { ComponentDesignProblem } from "./component-design-schema.js";
+export { checkDesignDiagram, cellNodeIds, prdActors, DOMAIN_MODEL_PATH } from "./design-diagrams.js";
+export type { DesignDiagramProblem, DiagramBundleReader, CellNodes } from "./design-diagrams.js";
 
 // --- The security.json write-gate ------------------------------------------
 export {
