@@ -27,23 +27,13 @@ import (
 	"github.com/wso2/aep/aep-api/internal/spec"
 )
 
-// Gate kinds. They shape the gate issue's prose (what a human is being asked
-// for) and nothing else — no code branches on a gate's kind after it is minted,
-// because resolving a gate is always the same act: the drawer submits, the
-// platform provisions, the issue closes.
-const (
-	gateConfigCollection     = "config-collection"
-	gateResourceProvisioning = "resource-provisioning"
-)
-
 // provisionDep is one distinct provisioning dependency discovered in a design.
 type provisionDep struct {
 	name         string
-	gateKind     string // config-collection | resource-provisioning
 	resourceType string // platform-resource only
 }
 
-// EnsureProvisionIssues mints one aep:provision gate issue per distinct external
+// EnsureProvisionIssues mints one `provision` gate issue per distinct external
 // / platform-resource dependency in the project's approved design, deduped per
 // project (an open gate issue for a dependency name is never re-created). It is
 // idempotent and safe to call after every plan (dependency-management §3.6 step
@@ -53,10 +43,10 @@ type provisionDep struct {
 //
 // milestoneNumber joins each minted gate to the version's milestone AT CREATION
 // (one call, no follow-up PATCH) so the run's dispatch predicate — "no open
-// aep:provision issue in this milestone" — can see it. Zero leaves gates
+// `provision` issue in this milestone" — can see it. Zero leaves gates
 // unassigned.
 //
-// A gate is PROSE plus two labels (gate_labels.go): the aep:provision marker
+// A gate is PROSE plus two labels (gate_labels.go): the `provision` kind
 // and aep:dep/<slug>. designTag no longer appears anywhere on the issue — the
 // milestone IS the version.
 func (s *Service) EnsureProvisionIssues(ctx context.Context, orgID, projectID, designTag string, milestoneNumber int) (map[string]int, error) {
@@ -69,12 +59,12 @@ func (s *Service) EnsureProvisionIssues(ctx context.Context, orgID, projectID, d
 		return nil, nil
 	}
 
-	existing, err := s.openProvisionDeps(ctx, orgID, projectID)
+	existing, filed, err := s.provisionGatesForVersion(ctx, orgID, projectID, designTag)
 	if err != nil {
 		return nil, err
 	}
 
-	// gateByDep maps a lowercased dep name → its OPEN aep:provision gate issue
+	// gateByDep maps a lowercased dep name → its OPEN `provision` gate issue
 	// number, for both pre-existing gates and the ones minted below. The build path
 	// threads these numbers directly into provisioning (read-your-write from the
 	// CreateIssue result) instead of re-looking them up via GitHub's
@@ -87,7 +77,14 @@ func (s *Service) EnsureProvisionIssues(ctx context.Context, orgID, projectID, d
 
 	var created int
 	for key, dep := range distinct {
-		if existing[key] > 0 {
+		// TWO reasons to skip, and the second is the one that stops a retried
+		// activity filling the milestone with duplicates. `existing` is an OPEN
+		// gate — a live hold, whatever version filed it. `filed` is a gate for
+		// THIS version in any state, including one this same activity minted and
+		// then closed on an earlier attempt (settleReadyGates closes the gate of
+		// every dependency that is already Ready). Only the pair makes the mint
+		// idempotent, which is what its callers have always assumed it was.
+		if existing[key] > 0 || filed[key] {
 			continue
 		}
 		title := provisionIssueTitle(dep)
@@ -99,6 +96,10 @@ func (s *Service) EnsureProvisionIssues(ctx context.Context, orgID, projectID, d
 			// version mints the same key, and the host dedupes on it.
 			DedupeKey: "gate:" + projectID + ":" + designTag + ":" + strings.ToLower(dep.name),
 		}
+		// The version rides a LABEL as well as the dedupe key, because the key is
+		// resolved host-side against OPEN issues only and the label is what lets
+		// the lookup above see a gate this version already closed.
+		req.Labels = withGateVersion(req.Labels, designTag)
 		if milestoneNumber > 0 {
 			n := milestoneNumber
 			req.Milestone = &n
@@ -120,9 +121,8 @@ func (s *Service) EnsureProvisionIssues(ctx context.Context, orgID, projectID, d
 	return gateByDep, nil
 }
 
-// distinctProvisionDeps collects the project's distinct external +
-// platform-resource dependencies (keyed by lowercased name — the same dependency
-// consumed by several components is one gate issue).
+// distinctProvisionDeps collects the project's distinct platform-resource
+// dependencies. External values are no longer a build-time collection gate.
 func distinctProvisionDeps(comps []spec.DesignComponent) map[string]provisionDep {
 	out := map[string]provisionDep{}
 	for i := range comps {
@@ -136,10 +136,8 @@ func distinctProvisionDeps(comps []spec.DesignComponent) map[string]provisionDep
 				continue
 			}
 			switch d.Kind {
-			case spec.DependencyKindExternal:
-				out[key] = provisionDep{name: d.Name, gateKind: gateConfigCollection}
 			case spec.DependencyKindPlatformResource:
-				out[key] = provisionDep{name: d.Name, gateKind: gateResourceProvisioning, resourceType: d.ResourceType}
+				out[key] = provisionDep{name: d.Name, resourceType: d.ResourceType}
 			}
 		}
 	}
@@ -153,46 +151,63 @@ func distinctProvisionDeps(comps []spec.DesignComponent) map[string]provisionDep
 // races GitHub's eventually-consistent list, so the build path captures those
 // numbers from the CreateIssue result instead (issue #164).
 func (s *Service) openProvisionDeps(ctx context.Context, orgID, projectID string) (map[string]int, error) {
-	issues, err := s.issues.ListIssues(ctx, orgID, projectID, []string{delivery.LabelProvisionGate})
+	open, _, err := s.provisionGatesForVersion(ctx, orgID, projectID, "")
+	return open, err
+}
+
+// provisionGatesForVersion reads the project's dependency gates once and answers
+// the mint's two different questions about them.
+//
+//	open   dep slug → the number of an OPEN gate for it, ANY version. A live
+//	       hold, and the number the build path threads into provisioning so a
+//	       provision run is admitted against the gate it will close.
+//	filed  dep slugs that already have a gate for THIS version, in any state.
+//	       Suppresses the mint and nothing else — a closed gate is not a hold, so
+//	       it must never be threaded anywhere as one.
+//
+// The two are separate because a closed gate has to suppress a re-mint while
+// remaining invisible as a hold, and collapsing them would either resurrect
+// duplicate gates or admit a provision run against an issue nothing derives
+// from. An empty tag asks only the first question, which is what
+// openProvisionDeps wants.
+//
+// State is read off the issue rather than filtered server-side: this is one
+// label-filtered list and both answers come out of the same pass.
+func (s *Service) provisionGatesForVersion(ctx context.Context, orgID, projectID, tag string) (
+	open map[string]int, filed map[string]bool, err error) {
+	issues, err := s.issues.ListIssues(ctx, orgID, projectID, []string{delivery.KindProvision})
 	if err != nil {
-		return nil, fmt.Errorf("provisioning: list issues: %w", err)
+		return nil, nil, fmt.Errorf("provisioning: list issues: %w", err)
 	}
-	out := map[string]int{}
+	open, filed = map[string]int{}, map[string]bool{}
 	for _, issue := range issues {
-		if !strings.EqualFold(issue.State, "open") {
+		dep := gateDepFromLabels(issue.Labels)
+		if dep == "" {
 			continue
 		}
-		if dep := gateDepFromLabels(issue.Labels); dep != "" {
-			out[dep] = issue.Number
+		if gateIsForVersion(issue.Labels, tag) {
+			filed[dep] = true
+		}
+		if strings.EqualFold(issue.State, "open") {
+			open[dep] = issue.Number
 		}
 	}
-	return out, nil
+	return open, filed, nil
 }
 
 func provisionIssueTitle(dep provisionDep) string {
-	if dep.gateKind == gateResourceProvisioning {
-		if dep.resourceType != "" {
-			return fmt.Sprintf("Provision resource: %s (%s)", dep.name, dep.resourceType)
-		}
-		return "Provision resource: " + dep.name
+	if dep.resourceType != "" {
+		return fmt.Sprintf("Provision resource: %s (%s)", dep.name, dep.resourceType)
 	}
-	return "Provide configuration: " + dep.name
+	return "Provision resource: " + dep.name
 }
 
-func provisionIssueRationale(dep provisionDep) string {
-	if dep.gateKind == gateResourceProvisioning {
-		return "A platform resource this project depends on must be provisioned before dependent components can deploy."
-	}
-	return "An external dependency this project consumes needs its configuration/secret values before dependent components can deploy."
+func provisionIssueRationale(provisionDep) string {
+	return "A platform resource this project depends on must be provisioned before dependent components can deploy."
 }
 
 func provisionIssueScope(dep provisionDep) string {
-	if dep.gateKind == gateResourceProvisioning {
-		return fmt.Sprintf("## Provision `%s`\n\nConfirm the provisioning parameters for this platform resource in the "+
-			"architecture drawer. The platform provisions it and closes this issue once the resource is ready — "+
-			"no manual action on this issue is needed.", dep.name)
-	}
-	return fmt.Sprintf("## Configure `%s`\n\nProvide this dependency's configuration/secret values in the architecture "+
-		"drawer. Secret values are stored in the secret manager and never appear here. The platform closes this issue "+
-		"once the values are collected.", dep.name)
+	return fmt.Sprintf("## Provision `%s`\n\nConfirm the provisioning parameters for this platform resource in the "+
+		"architecture drawer. The platform provisions it and closes this issue once the resource is ready — "+
+		"no manual action on this issue is needed.", dep.name)
 }

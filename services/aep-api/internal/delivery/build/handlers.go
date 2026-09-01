@@ -19,6 +19,7 @@ package build
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/wso2/aep/aep-api/internal/gen"
@@ -27,7 +28,7 @@ import (
 )
 
 // Handler serves the build feature on the strict interface: build-project /
-// list-project-builds plus the dependency-drawer get-build-preflight. Every
+// list-project-builds plus the dependency get-build-preflight. Every
 // operation is org-scoped — the tenant gate bound
 // the token org before these run, and the handlers pass it to the service
 // explicitly.
@@ -41,6 +42,17 @@ type Handler struct {
 	svc       *Service
 	preflight *PreflightService
 	activity  SpecPublishedRecorder
+	publisher PublisherProvisioner
+}
+
+// PublisherProvisioner ensures the org's Thunder publisher client_credentials
+// SecretReference exists before a coding-agent build starts. Wired on Handler
+// (never on Service) because POST /projects/{name}/build is the sole request
+// path that still carries the console JWT ProvisionPublisherForBuild needs —
+// Temporal dispatch and the StartProjectBuild auto-kick trigger run with no
+// such JWT and must stay read-only with respect to publisher credentials.
+type PublisherProvisioner interface {
+	ProvisionPublisherForBuild(ctx context.Context, orgID string) error
 }
 
 // SpecPublishedRecorder appends the spec_published activity line (issue #239)
@@ -58,8 +70,21 @@ func NewHandler(svc *Service, preflight *PreflightService, activity SpecPublishe
 	return &Handler{svc: svc, preflight: preflight, activity: activity}
 }
 
+// WithPublisherProvisioner wires the publisher provisioner. Optional: nil
+// skips provisioning (tests that do not care).
+func (h *Handler) WithPublisherProvisioner(p PublisherProvisioner) *Handler {
+	h.publisher = p
+	return h
+}
+
 func (h *Handler) BuildProject(ctx context.Context, request gen.BuildProjectRequestObject) (gen.BuildProjectResponseObject, error) {
 	org := tenant.BoundOrgFromContext(ctx)
+	if h.publisher != nil {
+		if err := h.publisher.ProvisionPublisherForBuild(ctx, org); err != nil {
+			slog.ErrorContext(ctx, "publisher provision for build failed", "error", err)
+			return nil, apierr.ServiceUnavailable("publisher credentials unavailable")
+		}
+	}
 	var inputs []BuildInputItem
 	if request.Body != nil {
 		inputs = toBuildInputItems(request.Body.Inputs)
@@ -86,7 +111,7 @@ func (h *Handler) ListProjectBuilds(ctx context.Context, request gen.ListProject
 	return gen.ListProjectBuilds200JSONResponse(toBuildList(list)), nil
 }
 
-// GetBuildPreflight computes the build dependency-drawer preflight. A nil
+// GetBuildPreflight computes the build dependency preflight. A nil
 // service answers 503, mirroring the retired RegisterPreflight nil guard (the
 // surface exists with the feature unwired).
 func (h *Handler) GetBuildPreflight(ctx context.Context, request gen.GetBuildPreflightRequestObject) (gen.GetBuildPreflightResponseObject, error) {
@@ -108,6 +133,12 @@ func (h *Handler) GetBuildPreflight(ctx context.Context, request gen.GetBuildPre
 func mapBuildRunError(err error) error {
 	if errors.Is(err, ErrBuildAlreadyRunning) {
 		return apierr.Conflict("a build is already running for this project")
+	}
+	// The same 409 shape for the other refusal: a live validation run on the
+	// project. Its own message, because the two send a user to different places —
+	// one is "wait", the other is "cancel the validation".
+	if errors.Is(err, ErrValidationRunLive) {
+		return apierr.Conflict(ErrValidationRunLive.Error())
 	}
 	var ee *EdgeError
 	if !errors.As(err, &ee) {
@@ -195,6 +226,7 @@ func toBuildList(l BuildList) gen.BuildList {
 			Status:          gen.BuildSummaryStatus(b.Status),
 			Reason:          b.Reason,
 			StartedAt:       b.StartedAt,
+			WaitingReason:   gen.BuildSummaryWaitingReason(b.WaitingReason),
 		}
 		s.CompletedAt = b.CompletedAt // nil while running — omitted on the wire
 		builds = append(builds, s)
@@ -225,5 +257,5 @@ func toBuildPreflight(pf BuildPreflight) gen.BuildPreflight {
 			Parameters:   it.Parameters,
 		})
 	}
-	return gen.BuildPreflight{NeedsInput: pf.NeedsInput, Items: items}
+	return gen.BuildPreflight{NeedsInput: pf.NeedsInput, NeedsResolution: pf.NeedsResolution, Items: items}
 }

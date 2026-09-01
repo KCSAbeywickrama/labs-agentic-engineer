@@ -17,11 +17,11 @@
 // Package build is the public build surface (contract: build-project /
 // list-project-builds / get-build-preflight). POST validates the whole spec,
 // cuts the single `v<N>` version tag, claims the version (supersede the
-// previous milestone, mint this one, admit the run row that is the spec-run
-// mutex) and returns the tag, then plans the version's Tasks into its milestone
-// detached from the request — the one button that turns an approved spec into a
-// delivery increment. The list read is the version ledger, straight from the
-// run rows.
+// previous milestone, mint this one, admit the run row that is the build
+// mutex) and returns the tag — the one button that turns an approved spec into a
+// delivery increment. Filling the milestone (gates, then the planning turn) is
+// the run workflow's own first phase, not the click's. The list read is the
+// version ledger, straight from the run rows.
 package build
 
 import (
@@ -51,11 +51,26 @@ type EdgeError struct {
 
 func (e *EdgeError) Error() string { return e.Message }
 
-// ErrBuildAlreadyRunning is the "a spec run is already live for this project"
+// ErrBuildAlreadyRunning is the "a dev run is already live for this project"
 // sentinel the core build sequence returns. The HTTP edge maps it to a 409; the
 // non-HTTP StartProjectBuild entry point treats it as success (idempotent
 // trigger).
 var ErrBuildAlreadyRunning = errors.New("a build is already running for this project")
+
+// ErrValidationRunLive is the "this project's deployed version is being judged"
+// sentinel, and the second thing that refuses a build.
+//
+// It is a REFUSAL rather than a queue because the two activities contradict each
+// other: a validation run asserts against what is deployed, and a delivery run
+// merging and promoting underneath it would be judging a moving target — the
+// verdict would name criteria that were true of neither the old release nor the
+// new one. A validation run deliberately sits outside the build mutex (it
+// re-judges a version that already shipped, so no index refuses this), which is
+// why the guard is explicit here.
+//
+// The way past it is to cancel the validation, which is one click and already
+// supported. Treated as a conflict at the edge, exactly like the sentinel above.
+var ErrValidationRunLive = errors.New("this project's deployed version is being validated — cancel the validation run first")
 
 // Service backs the build endpoints (strict entry points in strict.go).
 type Service struct {
@@ -110,9 +125,8 @@ type BuildInputItem struct {
 	Component  string `json:"component" doc:"Owning component name"`
 	Dependency string `json:"dependency" doc:"Dependency name"`
 	Kind       string `json:"kind" enum:"external-config,external-spec,platform-resource,org-service"`
-	// external-config: the collected key/value pairs (secret-vs-nonsecret is
-	// decided server-side from the design's ConfigKey.Secret flags — never sent
-	// by the client, never logged).
+	// external-config request values are ignored. The server derives
+	// unset/defaulted values from the design.
 	Values []ConfigValue `json:"values,omitempty"`
 	// external-spec: the pasted OpenAPI content, or a URL to fetch it from.
 	SpecContent string `json:"specContent,omitempty"`
@@ -123,7 +137,8 @@ type BuildInputItem struct {
 	Approved bool `json:"approved,omitempty"`
 }
 
-// ConfigValue is one external-config key/value pair the drawer collected.
+// ConfigValue is the wire-format shape for an external-config value. Build
+// processing ignores these entries and derives authoring values from design.
 type ConfigValue struct {
 	Key   string `json:"key"`
 	Value string `json:"value"`
@@ -163,6 +178,13 @@ type BuildSummary struct {
 	Reason      string     `json:"reason,omitempty"`
 	StartedAt   time.Time  `json:"startedAt"`
 	CompletedAt *time.Time `json:"completedAt,omitempty"`
+	// WaitingReason says WHY an in-progress version is waiting rather than
+	// moving (ADR-0023's deploy gate is `external-values`). Empty for the
+	// ordinary between-cycles park. The ledger row reads as an agent still
+	// working without it; the run row carrying it is already in hand, so this
+	// costs the ledger no extra read. The dependency NAMES are deliberately not
+	// here — see the contract.
+	WaitingReason string `json:"waitingReason,omitempty" enum:"external-values"`
 }
 
 // BuildList is the list-project-builds response, newest build first.
@@ -199,18 +221,23 @@ func (s *Service) StartProjectBuild(ctx context.Context, orgID, projectID string
 // failures (tag == "", no error — a fail-fast pre-tag result that cut no tag),
 // OR an error. Errors are already edge-mapped *EdgeError values EXCEPT the
 // ErrBuildAlreadyRunning sentinel, which each caller interprets for its own
-// context (409 vs. idempotent success). NOTE: inputs may carry raw secret
-// values — it must never be logged.
+// context (409 vs. idempotent success).
 //
 // The dependency hard gate (dependencyGateFailures) runs after the pre-tag
 // inputs are applied but before the tag is cut — see the inline comment at
 // its call site for why that ordering matters.
 func (s *Service) Run(ctx context.Context, orgID, projectID string, inputs []BuildInputItem) (string, []InputFailure, error) {
-	// One live SPEC RUN per project — the milestone model's mutex (§5). The
+	// One live DEV RUN per project — the milestone model's mutex (§5). The
 	// partial unique index behind TryAdmit is the authority; this read is what
 	// turns the race into a conflict that names itself, and it runs BEFORE the
 	// tag is cut so a rejected second click claims no version.
-	if err := s.activeSpecRun(ctx, orgID, projectID); err != nil {
+	if err := s.activeDevRun(ctx, orgID, projectID); err != nil {
+		return "", nil, err
+	}
+	// And no live VALIDATION run anywhere in the project: a merge and promote
+	// under an in-flight verdict judges a moving target. Checked here, beside the
+	// mutex and before the tag is cut, so a refused build claims no version.
+	if err := s.activeValidationRun(ctx, orgID, projectID); err != nil {
 		return "", nil, err
 	}
 	// The repo must exist and be resolvable before a version is claimed — every
@@ -219,11 +246,11 @@ func (s *Service) Run(ctx context.Context, orgID, projectID string, inputs []Bui
 		return "", nil, &EdgeError{Status: 404, Message: "project repository not found"}
 	}
 
-	// Apply the drawer inputs BEFORE the tag-cut: collect external specs + run the
+	// Apply the relevant drawer inputs BEFORE the tag-cut: collect external specs + run the
 	// design derivations (end-user auth and each resource dependency's wiring —
-	// their commits must land on HEAD so the tag captures them), then stage
-	// external-config secrets to SM-API and assemble the provision payload. A fail-fast pre-tag failure returns {failures} and cuts
-	// NO tag.
+	// their commits must land on HEAD so the tag captures them), then derive
+	// unset/defaulted external authoring and assemble the provision payload. A
+	// fail-fast pre-tag failure returns {failures} and cuts NO tag.
 	var provInputs []delivery.ProvisionInput
 	if s.coord != nil {
 		fails, aerr := s.coord.ApplyPreTag(ctx, orgID, projectID, inputs)
@@ -233,9 +260,9 @@ func (s *Service) Run(ctx context.Context, orgID, projectID string, inputs []Bui
 		if len(fails) > 0 {
 			return "", fails, nil
 		}
-		prov, pfails, perr := s.coord.BuildProvisionInputs(ctx, orgID, orgID, projectID, inputs)
+		prov, pfails, perr := s.coord.BuildProvisionInputs(ctx, orgID, projectID, inputs)
 		if perr != nil {
-			return "", nil, &EdgeError{Status: 502, Message: "stage inputs: " + perr.Error()}
+			return "", nil, &EdgeError{Status: 502, Message: "prepare inputs: " + perr.Error()}
 		}
 		if len(pfails) > 0 {
 			return "", pfails, nil
@@ -264,10 +291,20 @@ func (s *Service) Run(ctx context.Context, orgID, projectID string, inputs []Bui
 	if err != nil {
 		return "", nil, mapTagError(err)
 	}
+	// THE SPEC-SAVE STATUS PICKS THE BRANCH:
+	//
+	//	approved  → a new tag. The ordinary path: supersede the predecessor, mint
+	//	            this version's milestone, plan it fresh.
+	//	unchanged → the SAME tag, so the same milestone. Reopen it and exactly the
+	//	            issues a cancel closed inside it.
+	//
+	// A version nobody cancelled takes the same branch and reopens nothing, which
+	// is correct: rebuilding a delivered version re-derives no plan either way.
+	unchanged := res.Status == spec.SpecSaveUnchanged
 
 	// The milestone plan path (§5). Its synchronous half claims the version —
 	// supersede the previous milestone, mint `v<N>`, admit the run row that IS
-	// the spec-run mutex — and its detached half plans the Tasks into it.
+	// the build mutex — and its detached half plans the Tasks into it.
 	if s.plan != nil {
 		// The tag's story scope (#369) decides the milestone's identity: one
 		// milestone per version. A scope read
@@ -284,32 +321,55 @@ func (s *Service) Run(ctx context.Context, orgID, projectID string, inputs []Bui
 		if cerr != nil {
 			return "", nil, cerr
 		}
+		// AFTER the admission, so a click the mutex refused reopens nothing: the
+		// winner is the run that will work this milestone, and two entrants both
+		// reopening it would race one another's writes.
+		//
+		// WHETHER THE RUN SKIPS PLANNING IS A SECOND QUESTION, and asking it of the
+		// milestone rather than of the spec status is the whole point. `rebuild`
+		// means "this milestone is already filled, so re-planning it would mint
+		// nothing" — and an unchanged spec is NOT evidence of that. A run that died
+		// in its planning phase (`plan-failed`, or a cancel that landed before the
+		// planning turn) leaves the milestone holding its gates and no work at all;
+		// skipping the plan there hands the loop an empty working set, which it
+		// reads as "planning produced nothing to work" and settles the version
+		// SUCCEEDED having built none of it (see run.onEmptyWorkingSet).
+		//
+		// So the milestone answers. reopenIncrement already holds its whole issue
+		// list, and reports whether any planned work is in it.
+		rebuild := false
+		if unchanged {
+			rebuild = s.reopenIncrement(ctx, orgID, projectID, run.MilestoneNumber)
+		}
 		// Synchronous, and fast: this hands the version to the supervisor, which
 		// then fills the milestone as its own first phase. The click used to run
 		// the planning turn itself, in a detached goroutine, because an LLM turn
 		// must not hold a request open — and paid for it with a step that could
 		// not survive a restart, could not retry a blip, and left no history.
 		//
-		// A start that did not happen is settled HERE. The row is the spec-run
+		// A start that did not happen is settled HERE. The row is the build
 		// mutex; leaving it non-terminal with no workflow behind it would refuse
 		// every later build on this project, and nothing would ever heal it (the
 		// reconcile sweep reads such a row as live).
-		if serr := s.startRun(ctx, orgID, projectID, res.Tag, run, provInputs); serr != nil {
+		if serr := s.startRun(ctx, orgID, projectID, res.Tag, run, provInputs, rebuild); serr != nil {
 			return "", nil, serr
 		}
 	}
 
 	slog.InfoContext(ctx, "build started",
-		"org", orgID, "project", projectID, "tag", res.Tag, "specStatus", res.Status)
+		"org", orgID, "project", projectID, "tag", res.Tag, "specStatus", res.Status, "unchanged", unchanged)
 	return res.Tag, nil, nil
 }
 
 // mapPreTagError maps the coordinator's pre-tag failures onto the edge
 // vocabulary: an end-user-auth conflict is a 409 (the design self-contradicts),
-// an unreachable CRT catalog is a retryable 503, anything else a 500.
+// an unknown resourceType is a 409 (unsatisfiable on this cluster), an
+// unreachable CRT catalog is a retryable 503, anything else a 500.
 func mapPreTagError(err error) error {
 	switch {
 	case errors.Is(err, ErrEndUserAuthConflict):
+		return &EdgeError{Status: 409, Message: err.Error()}
+	case errors.Is(err, ErrUnknownResourceType):
 		return &EdgeError{Status: 409, Message: err.Error()}
 	case errors.Is(err, ErrResourceCatalogUnavailable):
 		return &EdgeError{Status: 503, Message: err.Error()}

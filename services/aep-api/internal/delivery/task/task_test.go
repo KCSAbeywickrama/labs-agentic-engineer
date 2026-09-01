@@ -89,7 +89,7 @@ func TestReads_DerivedStatusIsIssueStateAlone(t *testing.T) {
 	issues.seed(open).seed(closed)
 
 	views, err := newReads(issues, newFakeExecReader(), nil).
-		ListByTag(context.Background(), "org1", "proj1", "all", "")
+		ListByTag(context.Background(), "org1", "proj1", "all", "", false)
 	if err != nil {
 		t.Fatalf("ListByTag: %v", err)
 	}
@@ -105,34 +105,51 @@ func TestReads_DerivedStatusIsIssueStateAlone(t *testing.T) {
 	}
 }
 
-// The populations an UNTAGGED list is made of: agent work and dispatch gates.
-// The validation issue is a phase of the run and is hidden. A bare human issue
-// is invisible here by construction — the untagged read is two label queries,
-// and a ledger issue is defined by carrying no label to query on.
+// The populations an UNTAGGED list is made of: armed agent work and dispatch
+// gates. A bare human issue is invisible here by construction — the untagged
+// read is two label queries, and a ledger issue is defined by carrying no label
+// to query on.
+//
+// The validation task is the case that changed. It is ARMED now, so the `aep`
+// query returns it where it used to be invisible to that query entirely; the
+// only thing keeping it off the list is the KIND test in buildView. A read that
+// still tested the arming label would surface a phase of the run as a Task.
+//
+// Every row also carries its raw kind, which is what lets the console tell a
+// defect from planned work — `executorClass` is deliberately `coding` for both.
 func TestReads_ListPopulations(t *testing.T) {
 	issues := newFakeIssues()
 	issues.seed(agentIssue(1, "Implement user-service", "brief"))
 	issues.seed(gateIssue(2, "postgres"))
 	issues.seed(validationIssue(3))
 	issues.seed(ledgerIssue(4, "Login is slow"))
+	issues.seed(bugIssue(5, "Fix the failing build for user-service"))
 
 	views, err := newReads(issues, newFakeExecReader(), nil).
-		ListByTag(context.Background(), "org1", "proj1", "all", "")
+		ListByTag(context.Background(), "org1", "proj1", "all", "", false)
 	if err != nil {
 		t.Fatalf("ListByTag: %v", err)
 	}
+	classes := map[int]string{}
 	kinds := map[int]string{}
 	for _, v := range views {
-		kinds[v.IssueNumber] = v.ExecutorClass
+		classes[v.IssueNumber] = v.ExecutorClass
+		kinds[v.IssueNumber] = v.Kind
 	}
-	if len(views) != 2 {
-		t.Fatalf("want the agent Task and its gate, got %d: %+v", len(views), kinds)
+	if len(views) != 3 {
+		t.Fatalf("want the Task, the bug and the gate, got %d: %+v", len(views), classes)
 	}
-	if kinds[1] != "coding" {
-		t.Errorf("agent work kind = %q, want coding", kinds[1])
+	if classes[1] != "coding" || classes[5] != "coding" {
+		t.Errorf("planned work and a bug are both dispatched the same way; classes = %+v", classes)
 	}
-	if kinds[2] != "provision" {
-		t.Errorf("gate kind = %q, want provision", kinds[2])
+	if classes[2] != "provision" {
+		t.Errorf("gate class = %q, want provision", classes[2])
+	}
+	if _, listed := classes[3]; listed {
+		t.Errorf("the validation task must stay hidden even though it is armed, got %+v", classes)
+	}
+	if kinds[1] != delivery.KindDevelopment || kinds[5] != delivery.KindBug || kinds[2] != delivery.KindProvision {
+		t.Errorf("kinds = %+v, want 1:development 5:bug 2:provision", kinds)
 	}
 }
 
@@ -140,7 +157,9 @@ func TestReads_ListPopulations(t *testing.T) {
 // of the platform's labels. They are never worked and never stall settle, but
 // they belong to the version, so a milestone-scoped read returns them — marked
 // `ledger` so the console can section them apart from agent work rather than
-// mistaking one for a task. The validation issue stays hidden even here.
+// mistaking one for a task. The validation task stays hidden even here — the
+// milestone-scoped read returns every member issue, so the KIND test is the only
+// thing excluding it.
 func TestReads_ListByTag_IncludesTheLedger(t *testing.T) {
 	issues := newFakeIssues()
 	issues.seedInMilestone(agentIssue(1, "Implement user-service", "brief"), 7)
@@ -150,7 +169,7 @@ func TestReads_ListByTag_IncludesTheLedger(t *testing.T) {
 	runs := fakeMilestones{"v3": 7}
 
 	views, err := newReads(issues, newFakeExecReader(), runs).
-		ListByTag(context.Background(), "org1", "proj1", "all", "v3")
+		ListByTag(context.Background(), "org1", "proj1", "all", "v3", false)
 	if err != nil {
 		t.Fatalf("ListByTag(v3): %v", err)
 	}
@@ -180,7 +199,7 @@ func TestReads_ListByTag_IsMilestoneMembership(t *testing.T) {
 	runs := fakeMilestones{"v3": 7, "v2": 6}
 
 	views, err := newReads(issues, newFakeExecReader(), runs).
-		ListByTag(context.Background(), "org1", "proj1", "all", "v3")
+		ListByTag(context.Background(), "org1", "proj1", "all", "v3", false)
 	if err != nil {
 		t.Fatalf("ListByTag(v3): %v", err)
 	}
@@ -194,7 +213,7 @@ func TestReads_ListByTag_IsMilestoneMembership(t *testing.T) {
 	}
 
 	unknown, err := newReads(issues, newFakeExecReader(), runs).
-		ListByTag(context.Background(), "org1", "proj1", "all", "v99")
+		ListByTag(context.Background(), "org1", "proj1", "all", "v99", false)
 	if err != nil {
 		t.Fatalf("ListByTag(v99): %v", err)
 	}
@@ -203,7 +222,7 @@ func TestReads_ListByTag_IsMilestoneMembership(t *testing.T) {
 	}
 
 	all, err := newReads(issues, newFakeExecReader(), runs).
-		ListByTag(context.Background(), "org1", "proj1", "all", "")
+		ListByTag(context.Background(), "org1", "proj1", "all", "", false)
 	if err != nil {
 		t.Fatalf("ListByTag(all): %v", err)
 	}
@@ -218,7 +237,7 @@ func TestReads_CarriesTheProseBody(t *testing.T) {
 	issues.seed(agentIssue(1, "Implement user-service", "## Scope\n\nImplement the login endpoint."))
 
 	views, err := newReads(issues, newFakeExecReader(), nil).
-		ListByTag(context.Background(), "org1", "proj1", "open", "")
+		ListByTag(context.Background(), "org1", "proj1", "open", "", false)
 	if err != nil {
 		t.Fatalf("ListByTag: %v", err)
 	}

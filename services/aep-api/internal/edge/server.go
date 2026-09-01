@@ -22,6 +22,7 @@ import (
 	deliveryhttpapi "github.com/wso2/aep/aep-api/internal/delivery/httpapi"
 	dephttpapi "github.com/wso2/aep/aep-api/internal/dependencies/httpapi"
 	"github.com/wso2/aep/aep-api/internal/gen"
+	identityhttpapi "github.com/wso2/aep/aep-api/internal/identity/httpapi"
 	opshttpapi "github.com/wso2/aep/aep-api/internal/ops/httpapi"
 	orghttpapi "github.com/wso2/aep/aep-api/internal/organization/httpapi"
 	"github.com/wso2/aep/aep-api/internal/platform/httpkit"
@@ -33,7 +34,7 @@ import (
 
 // apiServer implements the generated strict interface (gen.StrictServerInterface)
 // for the public /api/v1 edge by METHOD PROMOTION ONLY — it declares no methods
-// of its own. Every one of the 61 operations is promoted from exactly one domain
+// of its own. Every operation is promoted from exactly one domain
 // embed, all at equal depth (apiServer → <domain>/httpapi.Handlers → <slice>.Handler):
 //
 //	*<domain>/httpapi.Handlers   one embed per domain
@@ -50,6 +51,7 @@ type apiServer struct {
 	*deliveryHandlers      // P6 — delivery (Build, Tasks & Task-log stream)
 	*projectsHandlers      // P7 — projects (Projects, Components, Builds & Config)
 	*dependenciesHandlers  // P8 — dependencies (Provisioning, Resources & Access)
+	*identityHandlers      // identity (the console's Security panel)
 
 	// designSvc backs ListDesignDependencies (handlers_design.go), the single op
 	// the edge serves via a method of its own rather than a domain embed: the
@@ -70,6 +72,7 @@ type (
 	deliveryHandlers      = deliveryhttpapi.Handlers
 	projectsHandlers      = projectshttpapi.Handlers
 	dependenciesHandlers  = dephttpapi.Handlers
+	identityHandlers      = identityhttpapi.Handlers
 )
 
 // Proves the METHOD SET only — never the wiring: it uses a nil pointer, so a
@@ -99,6 +102,7 @@ func newAPIV1Handler(deps Deps) http.Handler {
 			deliveryHandlers:      deps.Delivery,
 			projectsHandlers:      deps.Projects,
 			dependenciesHandlers:  dependenciesOrEmpty(deps.Dependencies),
+			identityHandlers:      identityOrEmpty(deps.Identity),
 			designSvc:             deps.DesignSvc,
 		},
 		[]gen.StrictMiddlewareFunc{tenantGate},
@@ -165,10 +169,31 @@ func dependenciesOrEmpty(h *dependenciesHandlers) *dependenciesHandlers {
 	return empty
 }
 
-// maxBodyBytes is the edge-wide request-body ceiling (413 beyond it). 10 MiB
-// was the largest of the retired per-op caps (the files batch apply);
-// import-skill keeps its own tighter in-handler limit.
-const maxBodyBytes = 10 << 20
+// identityOrEmpty is the same harness-contract guard for the identity domain:
+// its slice is nil-tolerant, so a component test that leaves the domain unwired
+// gets 503 from every Security-panel op rather than a nil-embed panic.
+func identityOrEmpty(h *identityHandlers) *identityHandlers {
+	if h != nil {
+		return h
+	}
+	// NewEmpty, not New with a zero Deps: the domain's New REFUSES a nil panel
+	// (a production wiring defect), and the unwired shape the harness wants is
+	// its own named constructor rather than something a lax validator lets by.
+	return identityhttpapi.NewEmpty()
+}
+
+// maxBodyBytes is the edge-wide request-body ceiling (413 beyond it), sized to
+// the largest legitimate request: the reference-document upload (#383) — 10
+// files × 5 MiB as multipart, so 50 MiB of raw bytes plus part headers. It was
+// ~67 MiB while that upload rode base64 JSON; the ceiling stays at 80 MiB
+// rather than tracking the drop, because shrinking a limit nobody is hitting
+// only buys a future 413. body_cap_test.go pins the arithmetic so it can never
+// quietly sink below the contract again. Per-file limits stay with the handlers
+// (5 MiB in the references handler and the files service; import-skill keeps
+// its own tighter one). The console's nginx proxy carries a matching
+// client_max_body_size — the transport admits what the contract permits, at
+// every hop.
+const maxBodyBytes = 80 << 20
 
 // capRequestBody bounds every request body before the validator (the first
 // reader) touches it; an oversized body surfaces as *http.MaxBytesError and

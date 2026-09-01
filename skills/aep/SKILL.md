@@ -90,20 +90,33 @@ gh issue list --milestone "<milestone title>" --state open \
 index lags by up to a minute, so a fix issue the platform minted seconds ago, the
 very issue this cycle exists to work, is invisible to it.
 
-Your working set is every issue **carrying the `aep` label** and carrying neither
-`aep:provision` (a platform gate — the run does not start while one is open, and
-you never touch them) nor `aep:validation` (a separate validation run works
-those).
+Two labels decide this, and they do different jobs. **`aep` arms an issue** — it
+says something may work it at all. **A kind says what it is**, and there is
+exactly one per issue:
 
-Any open issue in the milestone **without** the `aep` label is a **ledger**
-issue — a human's note. **Never touch one**: don't work it, comment on it, or
-reference it in your PR body. A human adopts it by adding `aep`, and it joins the
-working set on your next re-list.
+| Kind | What it is | Yours? |
+|---|---|---|
+| `development` | planned work from the spec | **yes** |
+| `bug` | a defect — a red build, a failed deploy, a failed criterion, a human's report | **yes** |
+| `conflict` | a pull request of yours that will not merge | **yes** |
+| `validation` | judging the deployed system | no — a separate validation run works it |
+| `provision` | a platform gate | no — never touch one; the run does not start while one is open |
+
+**Your working set is every open issue carrying `aep` whose kind is
+`development`, `bug` or `conflict`.** An armed issue carrying no kind at all is
+yours too — a human handed it over without classifying it.
+
+Any open issue **without** `aep` is a **ledger** issue — a human's note, or an
+incident nobody has picked up. **Never touch one**: don't work it, comment on it,
+or reference it in your PR body. That includes an unarmed issue labelled `bug`:
+being classified is not being handed to you. A human adopts it by adding `aep`,
+and it joins the working set on your next re-list.
 
 > ⚠ `--milestone` resolves **by title** and only sees **OPEN** milestones, so once
-> the platform closes it at settle `gh` fails with "no milestone found". That
-> means the milestone is finished: treat the working set as empty and go to
-> Finish — never fall back to the search API, never guess issue numbers.
+> the platform closes it `gh` fails with "no milestone found". That means the
+> version is finished — it closes on a green ending, never while work or a verdict
+> is still owed: treat the working set as empty and go to Finish. Never fall back
+> to the search API, never guess issue numbers.
 
 **The bodies.** Fetch your whole working set's bodies up front with
 `gh issue view <number> --json number,title,body,labels` — you need them to plan
@@ -172,7 +185,8 @@ For **each** issue in the ordered set:
    plus the `openapi.yaml` of every component it consumes. The issue says what to
    build; the contract fixes the shape.
    Read its comments too (`gh issue view <number> --comments`): a
-   "Platform-resolved dependencies" comment carries dependency wiring you need.
+   "Platform-resolved dependencies" comment carries an `org-service`'s
+   coordinates.
 2. **Make the change it asks for**, holding to
    `references/component-contract.md` and the stack skills of every component it
    touches.
@@ -219,6 +233,19 @@ short prompts are what make one message possible. Do not use `run_in_background`
 it does not add concurrency — it detaches the subagent, so its steps stop reaching
 the progress feed and the person watching sees an empty section where a component
 was built.
+
+**Say on the issue when you hand its work to a subagent.** In the same turn you
+dispatch a wave, comment ONE line on each issue in it naming what was delegated:
+
+```bash
+gh issue comment <number> --body "Started: <what the subagent was asked to build>"
+```
+
+That comment is the only thing a person watching the build sees between dispatch
+and the pull request — the issue is the surface they are reading, and a wave that
+takes twenty minutes is otherwise twenty minutes of silence on it. One line per
+issue, at dispatch. Not a plan, not a status table, and never a second comment
+saying the same thing again.
 
 **A subagent starts from its prompt and nothing else.** It does not have this
 skill. Name **exactly these**, and nothing else:
@@ -328,18 +355,22 @@ is guessable. Both failure modes are silent: an env var you renamed arrives empt
 a `visibility` you omitted leaves a dependent's config unwritten, and nothing
 errors until deploy.
 
-One thing that file cannot give you is a provider's live coordinates. That is
-below.
+One thing that file cannot give you is an `org-service`'s live coordinates. That
+is below.
 
 ### The `endpoints:` half
 
-The platform resolves live addresses and posts them as a **"Platform-resolved
-dependencies"** comment on the open issues of your working set, so it may land
-on a **sibling** issue rather than the one for the component it describes. Read
-the comments on the issues you are working and copy every `## Component <name>`
-block into **that named component's** `workload.yaml` — invent, rename and omit
-nothing. Two blocks for the same component: the **latest** is the complete
-answer.
+A **sibling** (`kind: component`) is already resolved in your own tree: its entry
+is the `wiring.endpoint` object on that dependency in `design.json`, copied
+verbatim. That holds whether or not the comment below exists.
+
+An **`org-service`** belongs to another project, so only the platform can resolve
+it. It posts what it resolved as a **"Platform-resolved dependencies"** comment
+on the open issues of your working set, so it may land on a **sibling** issue
+rather than the one for the component it describes. Read the comments on the
+issues you are working and copy every `## Component <name>` block into **that
+named component's** `workload.yaml` — invent, rename and omit nothing. Two blocks
+for the same component: the **latest** is the complete answer.
 
 ### Finding an `org-service` contract
 
@@ -374,7 +405,7 @@ web search. The rest belongs to the run:
   cannot link it and will not merge it. Or open more than one for this cycle.
 - Run `gh pr merge`, `gh pr close`, `gh repo create`, `gh repo delete`,
   `gh repo fork`, or `gh repo edit`.
-- Touch a ledger issue, an `aep:provision` gate, or an `aep:validation` issue.
+- Touch a ledger issue (no `aep`), a `provision` gate, or a `validation` issue.
 - Delete remote branches (`git push --delete`, `git push origin :branch`).
 - Modify branch protection, secrets, repository settings, collaborators, or
   webhooks.

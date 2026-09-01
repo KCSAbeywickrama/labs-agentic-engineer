@@ -23,21 +23,27 @@ import { SpecView } from "../features/spec/components/SpecView";
 // /projects/$projectName layout: the spec view is a full-screen workspace
 // without the shared project header (#80).
 //
-// `?generate=requirements|design` (#150/#159): arriving from a "Generate spec"
-// or "Generate/Re-generate design" CTA — AppLayout opens the agent panel and
-// auto-sends the matching generation turn.
+// `?generate=design` (#159): arriving from a "Generate/Re-generate design" CTA
+// — AppLayout opens the agent panel and auto-sends the design turn.
 //
-// `?connections=open`: arriving from the Builds page's gate hold banner — a
-// dispatch gate is holding the run and the connection drawer is where its
-// dependency is supplied, so the drawer opens on arrival.
+// The requirements half of that signal is GONE (#562). The platform fires
+// `/start` itself at project creation, so the console no longer has a
+// generate-requirements moment to hand across a navigation; the one CTA that
+// still starts an interview seeds the chat directly, from wherever the user is.
+//
+// `?view=architecture`: land on the Architecture tab instead of the workspace's
+// default file. The overview's architecture panel links here — it offers the
+// link BECAUSE it is showing a diagram, so dropping the reader on the PRD would
+// make them hunt the rail for the thing they just clicked.
+//
+// Unlike `generate`, this is not stripped after use: it names WHICH view, so it
+// stays a shareable deep link. A manual rail click still wins for the session.
 export const Route = createFileRoute("/projects/$projectName_/spec")({
   validateSearch: (
     search: Record<string, unknown>,
-  ): { generate?: "requirements" | "design"; connections?: "open" } => ({
-    ...(search.generate === "requirements" || search.generate === "design"
-      ? { generate: search.generate }
-      : {}),
-    ...(search.connections === "open" ? { connections: "open" as const } : {}),
+  ): { generate?: "design"; view?: "architecture" } => ({
+    ...(search.generate === "design" ? { generate: "design" as const } : {}),
+    ...(search.view === "architecture" ? { view: "architecture" as const } : {}),
   }),
   component: SpecRoute,
 });

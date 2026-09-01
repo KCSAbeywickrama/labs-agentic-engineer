@@ -3,15 +3,15 @@
 > **What this is:** the stable product picture of the console — who it's for,
 > how it's organized, and what it does. Purpose, loop, personas, IA, and
 > non-goals describe the **target product** (baseline set 2026-07-02, before
-> any feature shipped); the **feature inventory** is what's actually shipped,
-> and **In flight** lists features currently being built.
+> any feature shipped); the **feature inventory** is what's actually shipped.
 >
-> **Update rules:** a feature entering build adds one line to *In flight*
-> (flow step 6); shipping a feature moves that line into the feature
-> inventory and amends any affected sections (flow step 8) — both are
-> required steps, not courtesies. Keep entries to one line/paragraph + a
-> link; detail lives in the feature's GitHub issue (see
-> `design/development-flow.md`, ADR-0001).
+> **Update rules:** the feature's own PR adds its inventory entry and amends
+> any section the feature changes — part of the PR, not a follow-up, since
+> merging the PR is what ships it (flow step 6). Keep entries to one
+> line/paragraph + a link; detail lives in the feature's GitHub issue (see
+> `design/development-flow.md`, ADR-0001). Work **in progress** isn't
+> tracked here — the open issues are: `gh issue list --repo
+> wso2/labs-agentic-engineer --label console --label feature`.
 
 ## Purpose
 
@@ -63,26 +63,217 @@ moved on GitHub after that tag.
 Approved at section level; per-section detail is defined feature-by-feature.
 
 - **Home — projects list.** Empty state prompts the user to start an app
-  development (give a requirement → project is born).
+  development (give a requirement → project is born). Org-level sidebar (no
+  project in the route): **Projects · Resources · Endpoints · Alerts**;
+  Settings stays in the footer.
+- **Resources** — org catalog of External resources (`/resources`). Register
+  via chat + form; environment values stay on the form. A later project that
+  needs a registered name reuses it — Build does not re-collect those secrets.
 - **Project view** — inside a project the sidebar nav swaps to its sections
   (ADR-0010; no back-item, home is the header brand / project switcher):
-  - **Overview** — component map + status, deployment state, recent activity.
-  - **Specs & Design** — the requirement, derived design + validation files;
-    the blocking design review lives here.
-  - **Builds** — per-version build history: the selected build's summary +
-    its tag-scoped coding-agent task list (Version autocomplete for older
-    tags), per-task console log; PRs and issues link out to GitHub.
+  - **Overview** — the Spec → Build → Deploy track, the components and
+    dependencies index, and the architecture diagram.
+  - **Spec** — the requirement, derived design + validation criteria.
+  - **Builds** — the version ledger: one row per version, with its milestone,
+    status, duration and start. A row opens that version's
+    build — summary card, task list, External resources, coding-agent log,
+    build logs (ADR-0021, ADR-0023).
   - **Deployments** — dev environment state and URLs.
+  - **Validations** — the runs checking a build against the spec's validation
+    criteria.
   - **Issues** — issues the SRE agent raises against the running project
     (placeholder until its feature lands).
 - **Admin** — agent customization (instructions, skills). Architect/SRE only.
 
-## In flight
+## Feature inventory
 
-Features currently being built. One line each; **must be emptied on ship**
-(the line moves to the inventory below). If a line sits here for weeks,
-that's a stalled feature — investigate, don't ignore.
+One entry per **shipped** feature — a feature is shipped when its PR merges,
+which is also what closes its issue. Newest first; links go to the feature's
+GitHub issue plus any ADRs it produced. Features still being built aren't
+here: they're the open `console` + `feature` issues.
 
+- Point at a passage, say what should change — **any** markdown spec document,
+  not just the PRD's lensed lines. A drag snaps to whole blocks on release
+  (a partial paragraph becomes the paragraph, a heading takes its section) and
+  offers a single chip: **nothing opens, nothing takes the keyboard**, so
+  select-and-retype, copy and delete still mean what they always did. The chip
+  (or ⌘K, or a lens) opens one box with two sends — **Change** rewrites the
+  selection in place and leaves the chat panel shut, because the document is the
+  feedback and a panel would cover the very thing being changed; **Discuss**
+  sends the same selection as a grilling and opens the panel to it. What travels
+  is an **anchor that locates rather than carries** — the file, and a name per
+  selected node (markdown names a block by a bounded excerpt of its rendered
+  text) — so the agent resolves it against the CURRENT document rather than a
+  photograph of one. It rides as metadata beside the user's words, never folded
+  into them, and the transcript shows it as a frozen tag above the message that
+  is never re-checked: when the agent cannot find what was named, the agent says
+  so in its reply. **The PRD's lens catalogue is re-cut in the same change**
+  (#652): an `*assumed*` run offers **Agree · Discuss** — Agree is a direct
+  edit that strips the flag, no agent turn, live while an agent holds one —
+  and every bullet offers **Discuss**, which opens the same aim box with Enter
+  sending Discuss.
+  `/settle` on a flagged line is retired; it stays over the Open Questions
+  section and on each question —
+  [#666](https://github.com/wso2/labs-agentic-engineer/issues/666)
+  (ADR-0023, ADR-0024; contract: `TurnInputBody.anchor` / `.intent`, and
+  `get-conversation`'s response schema typed at last)
+- The project overview is a track of links, not a page of cards — Spec → Build
+  → Deploy is one bar with a step numeral per leg and a chevron in each seam,
+  and every leg links to the section that runs it. Lit means unsettled and more
+  than one leg may be lit (amending a spec while the last version builds lights
+  both, with one summary line relating them); a pulse means the platform is
+  working and amber-and-still means it is waiting on you. Validation rides the
+  deploy leg rather than becoming a fourth gate. Below the track, the components
+  and dependencies index sits beside the project's architecture diagram — the
+  same `design.cell` render as the spec workspace, sharing its layout, linking
+  through to the Architecture view. The activity feed is deleted rather than
+  relocated, its whole `features/activity` module with it, and the project's
+  status chip moves from three page titles to the toolbar beside the project
+  switcher. A project with nothing in it gets the same body, each panel showing
+  its own empty state, rather than a substitute page. The overview offers no actions at all: every way of starting work
+  stays on the page that owns it —
+  [#662](https://github.com/wso2/labs-agentic-engineer/issues/662)
+  ([ADR-0022](design/decisions/ADR-0022-the-overview-is-a-track-of-links.md))
+- External dependency values are collected on a version's build page, not in
+  front of the Build button — provisioning authors every declared key EMPTY at
+  build time, so the coding agent gets its env vars defined and Build never
+  blocks on a credential nobody reads for another twenty minutes. The values are
+  supplied in an **External resources** section on `/builds/$tag`, a peer of the
+  Tasks list because outstanding values are work a person must do. The milestone
+  run's deploy stage then parks in `waiting` (`external-values`) until every key
+  holds a value; the build page's summary card names the blocking dependencies
+  and points at the section below it, and the run resumes and deploys on its own
+  once the last value is saved. A Registered External is outside the gate — its
+  values live on the org record, which no project surface can clear —
+  [ADR-0023](../../docs/decisions/ADR-0023-external-dependency-values-are-a-deploy-gate.md)
+- Empty states teach *what*, never narrate the *how* — the five flow-narrating
+  empty states (Builds, Deployments, Validations, Components, Recent activity —
+  the last retired with the feed itself, #662)
+  now say what lives on the page and why it is empty, retiring *published* /
+  *plan* from all of them; Builds, the one surface a user can act on, gains a
+  **Go to the spec** CTA. Wordings live in the lexicon's **Empty states**
+  section — [#577](https://github.com/wso2/labs-agentic-engineer/issues/577)
+- Builds, rebuilt as a version ledger — **one row per version** (milestone,
+  status, duration, start), and the now-first run story it
+  replaced moves to its own page at `/builds/$tag`: a summary card, then Tasks,
+  External resources, the coding-agent log and the build logs as collapsible
+  sections. Provisioning
+  gates render as **task rows** rather than a separate stage, each with its own
+  way out, which is what retires the stage rail. A task row's five states are
+  DERIVED — `derivedStatus` is two-valued, so blocked / in-progress / in-review
+  come from `hold`, `blockedBy` and the newest execution — and its second line is
+  the issue's newest comment. `/builds/:issueNumber` and `/tasks/:issueNumber`
+  swap roles so the version can own the `/builds` segment; old links still
+  resolve. **No contract change**: the ledger's remaining cells come from the
+  deploy aggregate the layout already polls. It carries no task counts, because
+  an untagged list-tasks response cannot be attributed to versions and a
+  tag-scoped one would be a GitHub-backed request per row —
+  [#609](https://github.com/wso2/labs-agentic-engineer/issues/609) (ADR-0021,
+  superseding ADR-0015)
+- Resources catalog lives at `/resources` (not Settings). Register an External
+  resource through chat that can question then draft the form (secrets stay on
+  the form). A new project that needs an already-registered API reuses that
+  name; after aep-api restart the catalog still treats it as configured, so
+  Build does not ask for the token again —
+  [#636](https://github.com/wso2/labs-agentic-engineer/pull/636)
+  (ADR-0021; catalog move on
+  [#626](https://github.com/wso2/labs-agentic-engineer/pull/626))
+- The journey starts itself — creating a project **fires `/start` server-side**,
+  so the user lands on the overview with the agent chat already open, the
+  transcript showing `/start` beside their own idea (cropped), and the Spec card
+  reading **Writing requirements** with **Open spec** as its CTA: generation is
+  already underway, so there is nothing left to ask for. A project created WITH
+  reference documents declares `referencesPending`, and the platform holds the
+  kickoff until the upload lands — they are the primary brief, and an interview
+  started before they arrive is conducted blind. The spec view,
+  opened before the interview has asked anything, says *"Agent is working on the
+  requirements document"*. **Nothing auto-navigates**, and the `?generate=`
+  handshake between the overview CTA and the spec view is retired: the CTA that
+  still starts an interview seeds the chat from wherever the user is. Its
+  remaining forms are resumption affordances — **Try again** over a kickoff that
+  died, **Generate spec** on a project nothing ever started —
+  [#562](https://github.com/wso2/labs-agentic-engineer/issues/562)
+  (contract: `SpecStage.agent`, `CreateProjectRequest.referencesPending`)
+- Spec view — the rail is the flow: **Requirements · Design · Validation**
+  each carrying state (ready · being worked on · needs attention · not begun),
+  documents named as documents rather than files (*Product requirements*,
+  *Design overview*, *Validation criteria*), and the app's existing pulse on a
+  section an agent is writing. An amber section explains itself in **rows** —
+  *N assumptions to challenge*, *N open questions*, *The requirements have
+  changed since* — each going where the work already happens. Staleness is
+  derived by comparing the requirements against the snapshot the last design run
+  read, so nothing is stored and nothing can fall out of sync; **an outdated
+  design is refused by the build gate**, joining the refusal Build already shows
+  on click. Retires *"Being derived…"*, which claimed work over sections nobody
+  had asked for —
+  [#575](https://github.com/wso2/labs-agentic-engineer/issues/575)
+  (contract: `SpecStage.designOutdated`)
+- Spec view — the turn declares its plan: a skill says what it is **about to
+  write** (`declare_plan`, fire-and-forget tool-call-as-UI — ADR-0025), and the
+  rail renders the checklist — **ghost rows** holding the coming documents'
+  places, a pulse on the one being written, and an honest **count** (*2 of 6*)
+  that grows in waves because the cell fixes the component set mid-run. Every
+  status is derived from the mutation stream, never self-reported. A clean
+  turn's plan dissolves; a dead turn leaves its **wreckage** — done ticks, one
+  error, the remaining ghosts — surfaced through the attention chip until the
+  next declaring turn replaces it. The **editor follows the write** and yields
+  to the reader's first manual click (ADR-0026), superseding the cell's
+  yank-back. The chat records each declaration as an activity step (*Planned 3
+  documents*) —
+  [#576](https://github.com/wso2/labs-agentic-engineer/issues/576)
+  (contract: `declare_plan` in `@aep/agent-stream`; no aep-api change)
+- Overview — the spec card stops rewriting itself: **one button** (*Open spec*)
+  in every state instead of three captions walked during a single kickoff with
+  no user input, and **one line that always says something** instead of blanking
+  the moment the agent asked a question. The card is a destination and never a
+  send — every way of STARTING work moved to the spec view, which offers
+  **Retry** in exactly two states: under the failure alert when a kickoff died
+  (the only state that can be *known* rather than inferred, so the button can
+  never appear mid-kickoff), and on an empty workspace with nothing running. The kickoff now fires **inline** with `POST /projects`, so
+  the create answers only once the turn exists — which is what makes
+  `spec.agent == ""` mean *never started* rather than also *starting right now* —
+  [#562](https://github.com/wso2/labs-agentic-engineer/issues/562)
+  (no contract change)
+- Agent chat — the transcript keeps up with the work: your own message paints
+  the moment you send it rather than when the dispatch answers; a turn this
+  browser did not send (the creation-time kickoff, or a teammate's) shows who
+  started it and what they said, from a display record carried on the turn
+  itself — the conversation store only records a turn once it has finished; a
+  cold panel looks for a running turn every ~2s instead of every 12s; and a
+  question arriving **no longer moves the user** — the pill says the agent is
+  waiting and the click is what opens the form —
+  [#562](https://github.com/wso2/labs-agentic-engineer/issues/562)
+  (contract: `TurnStatus.instruction` / `authorId` / `authorDisplayName`)
+- Spec view — the PRD is the interface: each PRD section carries a **code
+  lens** firing the command that belongs there — `/actor` on Actors,
+  `/feature` on the story list, `/expand` on each story, `/settle` over Open
+  Questions — and every flagged line (an `*assumed*` decision, an open
+  question) carries its own `/settle`, so the subject comes from what the user
+  clicked instead of their memory. Section lenses show at rest, line lenses on
+  hover, and all of them go inert while an agent holds the turn. The lenses stay
+  the PRD's own, but the affordance no longer is: every markdown document now
+  carries selection-anchored aiming beside them, and the flagged line's
+  `/settle` became Agree and Discuss (#666). Retires the
+  composer's `Actions ▾` menu of raw slash commands. **Open questions no longer
+  block Generate design** on either side — the console disable and the two
+  skill clauses both go — since a recorded gap is information, not corruption
+  (the reasoning that already settled dependencies in
+  [#526](https://github.com/wso2/labs-agentic-engineer/issues/526)); `deferred`
+  survives as the user's *"stop asking"*. A command names the user's intent and
+  resolves to a skill server-side, so `amend` stops being what a user reads and
+  `/settle` arrives as its own skill, because revision propagates. No contract
+  change —
+  [#579](https://github.com/wso2/labs-agentic-engineer/issues/579)
+- Create flow — says what's about to happen: the subtitle answers only *how
+  much detail?* (*"Describe it in your own words — rough is fine."*), the
+  repository field states that Agentic Engineer **creates** it in the user's
+  organization, a taken repository name resolves to a field-level error naming
+  the org rather than a raw alert, the wait reads **Creating your project…**,
+  and the examples carry the enterprise persona (expense approval, employee
+  onboarding, a support triage agent). Retires **AEP** from user-facing copy in
+  favour of **Agentic Engineer**. First feature to draw on the console lexicon
+  (ADR-0019) —
+  [#561](https://github.com/wso2/labs-agentic-engineer/issues/561)
 - Deployments page — one-story rail + environment panel: Development /
   Validation / Production as one numbered rail (Builds-spine vocabulary,
   ADR-0014) with a side panel (version, rollout, endpoints, production
@@ -99,6 +290,52 @@ that's a stalled feature — investigate, don't ignore.
   route. `@aep/excalidraw-dsl`'s `tryDslToPrototype` compiles per-screen
   scenes client-side (no BE handshake, no contract change; ADR-0008) —
   [#348](https://github.com/wso2/labs-agentic-engineer/issues/348)
+- Spec view — readable wireframe canvas: screens compile into a single column
+  instead of a two-across grid, and the canvas opens focused on the first
+  screen at a legible size with the top of the second peeking below; while an
+  agent edits, the viewport pans to the screen being changed instead of
+  refitting the whole board, and stays put when nothing identifiable changed.
+  `@aep/excalidraw-dsl` stamps each element with its screen so the viewer can
+  group per screen; no contract change —
+  [#552](https://github.com/wso2/labs-agentic-engineer/issues/552)
+- Project create — reference document upload on the "What do you want to
+  build?" view. Two groups, both readable by the models: `.pdf`/`.png`/`.jpg`/
+  `.jpeg`/`.gif`/`.webp` read natively as file parts, and `.md`/`.txt`/`.csv`/
+  `.tsv`/`.json`/`.yaml`/`.yml`/`.xml`/`.html`/`.rst` read as text (≤10 files,
+  ≤5 MB each) — attached in a chat-style composer and uploaded post-create over
+  multipart to `POST /projects/{name}/references`. References are **transient
+  turn inputs, never committed** (ADR-0017): bytes live on the shared
+  `/workspaces` volume for the project's life and are overlaid into each turn's
+  snapshot at `specs/requirements/references/`, surfaced to the `/start` kickoff
+  through the idea-steer channel. No console surface after create —
+  [#383](https://github.com/wso2/labs-agentic-engineer/issues/383)
+  (BE handshake: [#384](https://github.com/wso2/labs-agentic-engineer/issues/384))
+- Agent chat — attach files to a message: the composer takes a paperclip and a
+  drop target, the same cards and accepted set as the create view, and chips on
+  the sent message that survive a reload. Attachments are **conversation-scoped
+  model content** (ADR-0019): attachment BYTES are never written to disk and
+  never committed, and the file names are retained as message metadata so the
+  chips survive a reload — the bytes ride one multipart `POST
+  /projects/{p}/agents/{conversationId}/messages` into the turn and are durable
+  only as parts of the conversation's history, which is what makes re-sending
+  one free (the agents service dedupes by file name). The agent reads them
+  natively — a PDF as a document, an image as an image, every text format as
+  text — and the turn prompt NAMES them, so "add this as a separate form"
+  resolves to the file the user just attached rather than drawing a clarifying
+  question. Caps all restate the
+  model's own 20 MiB encoded per-turn budget: ≤10 files, ≤5 MB each, ≤15 MB raw
+  in total. Any turn started from the composer carries them — chat, flow and
+  `/start` alike — and the create view stays the only door to the project
+  reference store —
+  [#428](https://github.com/wso2/labs-agentic-engineer/issues/428)
+- Spec view — prototype user flows: `wireframes.dsl` declares named
+  `flow "<name>"` blocks (optional `role`/`description` lines) listing each
+  persona's screens in walkthrough order; the prototype toolbar leads with a
+  **User flow** picker that scopes the screen picker to the chosen flow, the
+  canvas marks each screen's membership (`Approval queue · Screen 2`,
+  `Common · Screen 1`), and `?flow=<Name>` joins `?screen=` on the full-screen
+  route. Same client-side derivation, no contract change —
+  [#491](https://github.com/wso2/labs-agentic-engineer/issues/491)
 - Agent chat — structured question cards: `ask_question` (single) +
   `ask_questions` (batch form) tool-calls rendered as native Oxygen UI cards
   in the activity stream (answer returns as the next turn's plain text);
@@ -167,7 +404,11 @@ that's a stalled feature — investigate, don't ignore.
   to generate requirements (create does not auto-derive) —
   [#150](https://github.com/wso2/labs-agentic-engineer/issues/150)
   (no contract change; duplicate-generation guard deferred to
-  [#151](https://github.com/wso2/labs-agentic-engineer/issues/151))
+  [#151](https://github.com/wso2/labs-agentic-engineer/issues/151)).
+  *Superseded twice: the localStorage prompt copy by the project descriptor, and
+  the CTA-as-the-way-in by
+  [#562](https://github.com/wso2/labs-agentic-engineer/issues/562), which fires
+  the kickoff at creation and leaves the CTA as a resumption affordance.*
 - Onboarding — first-time credentials wizard for the default org (hard gate on
   incomplete `GET /config`): GitHub PAT + Anthropic key, then auto skills-repo
   bootstrap via extended `/skills/sync` —
@@ -224,10 +465,10 @@ that's a stalled feature — investigate, don't ignore.
   [#107](https://github.com/wso2/labs-agentic-engineer/issues/107) (BE
   handshake: [#108](https://github.com/wso2/labs-agentic-engineer/issues/108))
 
-## Feature inventory
+### Earlier features, with ship dates
 
-One row per **shipped** feature. Newest first. Links go to the feature's
-GitHub issue plus any ADRs it produced.
+Recorded in table form before the inventory settled on the entry format
+above. Same meaning: one row per shipped feature.
 
 | Feature | Shipped | Summary | Links |
 |---|---|---|---|

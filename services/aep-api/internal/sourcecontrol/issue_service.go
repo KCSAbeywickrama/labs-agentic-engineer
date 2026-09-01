@@ -81,6 +81,9 @@ type IssueService interface {
 	CreateMilestone(ctx context.Context, orgID, projectID string, req CreateMilestoneRequest) (*MilestoneResult, error)
 	// CloseMilestone closes a milestone at settle. Display only.
 	CloseMilestone(ctx context.Context, orgID, projectID string, number int) error
+	// ReopenMilestone reopens a closed milestone — what a rebuild of an unchanged
+	// spec does to the version it is working again. Display only, like the close.
+	ReopenMilestone(ctx context.Context, orgID, projectID string, number int) error
 	// ListMilestones returns the project's milestones in the given state
 	// ("open" | "closed" | "all"; empty ⇒ "all").
 	ListMilestones(ctx context.Context, orgID, projectID, state string) ([]Milestone, error)
@@ -91,6 +94,10 @@ type IssueService interface {
 	// working set and total — in ONE call, the run supervisor's dispatch
 	// predicate input.
 	MilestoneIssueCounts(ctx context.Context, orgID, projectID string, number int) (*MilestoneIssueCounts, error)
+	// ListMilestoneIssueComments returns the newest perIssue comments of every
+	// issue in one milestone, bucketed by issue number, oldest first — the
+	// version ledger's live narrative, in ONE round trip.
+	ListMilestoneIssueComments(ctx context.Context, orgID, projectID string, number, perIssue int) (map[int][]IssueComment, error)
 }
 
 type issueService struct {
@@ -298,7 +305,7 @@ func (s *issueService) CloseIssue(ctx context.Context, orgID, projectID string, 
 
 	// Post the closing comment first (best-effort: log and continue on failure).
 	if strings.TrimSpace(comment) != "" {
-		if commentErr := s.github.CommentIssue(ctx, owner, repoName, cred, number, comment); commentErr != nil {
+		if commentErr := s.github.CommentIssue(ctx, owner, repoName, cred, number, markMachineComment(comment)); commentErr != nil {
 			slog.WarnContext(ctx, "failed to post closing comment", "project", projectID, "issue", number, "error", commentErr)
 		}
 	}
@@ -324,7 +331,31 @@ func (s *issueService) CommentIssue(ctx context.Context, orgID, projectID string
 		return err
 	}
 
-	return s.github.CommentIssue(ctx, owner, repoName, cred, number, body)
+	return s.github.CommentIssue(ctx, owner, repoName, cred, number, markMachineComment(body))
+}
+
+// markMachineComment brands a body as platform-written (MachineCommentMarker).
+//
+// EVERY platform issue comment passes through this service — the delivery
+// domain's IssueWriter, the provisioning wiring and failure notes, the plan tap,
+// and the closing comment above all reach the host here — and there is no
+// user-facing comment write on the API at all. So stamping at this one point is
+// exactly the statement "the platform wrote this", and no call site can forget
+// it. Stamping at the five call sites instead is the duplication IssueWriter was
+// created to end.
+//
+// The marker LEADS, and the idempotence check is a prefix test to match — the
+// read side detects on the prefix too (githubhost.isMachineComment), so a body
+// that merely mentions the marker further down is not already branded and must
+// still get one. Checking with Contains here would leave a comment that QUOTES a
+// platform comment unbranded while the reader also declines to hide it: the two
+// looser tests would agree, and the platform's own text would surface in a feed
+// that exists to exclude it.
+func markMachineComment(body string) string {
+	if strings.HasPrefix(strings.TrimLeft(body, " \t\r\n"), MachineCommentMarker) {
+		return body
+	}
+	return MachineCommentMarker + "\n" + body
 }
 
 func (s *issueService) EditIssueBody(ctx context.Context, orgID, projectID string, number int, body string) error {
@@ -467,16 +498,36 @@ func ParseOwnerRepo(cloneURL string) (owner, repo string, err error) {
 // silently DROPS labels that do not exist, so an unlisted label still lands —
 // just in the default grey. A missing entry is a colour bug, never a
 // correctness one.
+//
+// The names are RE-SPELLED here rather than imported: this package sits below
+// internal/delivery and may not depend on a domain. A colour listed for a name
+// delivery no longer uses is harmless — EnsureLabel POSTs to /labels and never
+// recolours an existing one, so a repo keeps whatever colour it was first given
+// and a retired name simply stops being asked for.
+//
+// The colour families say what a reader should look for: blue arms an issue,
+// the kinds are graded by who works them, and the markers are grey because they
+// qualify an issue rather than routing it.
 func labelColor(name string) string {
 	switch name {
 	case "aep":
-		return "0075ca" // blue — agent work
-	case "aep:provision":
+		return "0075ca" // blue — the arming switch
+	case "development":
+		return "7057ff" // purple — planned work from the spec
+	case "bug":
+		return "d73a4a" // red — a defect (GitHub's own default for this name)
+	case "conflict":
+		return "b60205" // dark red — a pull request that will not merge
+	case "validation":
+		return "0e8a16" // green — judging the deployed system
+	case "provision":
 		return "d93f0b" // red-orange — a gate holding dispatch
-	case "aep:validation":
-		return "0e8a16" // green — the validation cycle
-	case "aep:codingagent":
-		return "5319e7" // violet — the GitHub-side adoption trigger
+	case "src/user", "src/incident", "src/validation", "src/build", "src/deploy":
+		return "c5def5" // pale blue — where a bug came from
+	case "aep:cancelled", "aep:halted":
+		return "bfbfbf" // grey — a marker on an issue already routed
+	case "aep:wired":
+		return "1d76db" // steel blue — endpoint wiring published on this issue
 	case "implementation":
 		return "7057ff" // purple
 	case "pending":

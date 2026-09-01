@@ -22,7 +22,7 @@ import { Check, CircleQuestionMark, Sparkles, X as XIcon } from "@wso2/oxygen-ui
 import { MarkdownView } from "../../../components/MarkdownView";
 import type { ChatItem } from "../toolGrouping";
 import type { FeedBlock } from "../feed";
-import { ActivityStep } from "./ActivityStep";
+import { ActivityStep, PlanStep } from "./ActivityStep";
 import { WorkingIndicator } from "./WorkingIndicator";
 
 // One agent turn in the activity stream (task 3): the "✦ Agent" header with
@@ -43,9 +43,11 @@ function ActivityRail({ children }: { children: ReactNode }) {
 function TurnFooter({
   status,
   onOpenSpec,
+  showSpecLink,
 }: {
   status: TurnFeedBlock["status"];
   onOpenSpec: () => void;
+  showSpecLink: boolean;
 }) {
   if (status === "running") {
     return <WorkingIndicator label="Working…" />;
@@ -74,18 +76,22 @@ function TurnFooter({
     >
       <Check size={14} color="var(--oxygen-palette-success-main, currentColor)" />
       <Typography variant="caption">Turn committed</Typography>
-      <Typography variant="caption" aria-hidden>
-        ·
-      </Typography>
-      <Link
-        component="button"
-        type="button"
-        variant="caption"
-        onClick={onOpenSpec}
-        sx={{ fontWeight: 600 }}
-      >
-        Open spec
-      </Link>
+      {showSpecLink ? (
+        <>
+          <Typography variant="caption" aria-hidden>
+            ·
+          </Typography>
+          <Link
+            component="button"
+            type="button"
+            variant="caption"
+            onClick={onOpenSpec}
+            sx={{ fontWeight: 600 }}
+          >
+            Open spec
+          </Link>
+        </>
+      ) : null}
     </Stack>
   );
 }
@@ -136,11 +142,13 @@ function TurnBody({
   expandedGroups,
   onToggleGroup,
   onOpenSpec,
+  showSpecLink,
 }: {
   items: ChatItem[];
   expandedGroups: Set<string>;
   onToggleGroup: (id: string) => void;
   onOpenSpec: () => void;
+  showSpecLink: boolean;
 }) {
   const out: ReactNode[] = [];
   let rail: ReactNode[] = [];
@@ -159,6 +167,15 @@ function TurnBody({
           expanded={expandedGroups.has(item.id)}
           onToggle={() => onToggleGroup(item.id)}
         />,
+      );
+      return;
+    }
+    // A plan row is an activity step (#576): it joins the rail rather than
+    // breaking it, so "Planned 4 more documents" sits between the file steps
+    // it explains instead of splitting them into two rails.
+    if (item.message.role === "plan") {
+      rail.push(
+        <PlanStep key={item.message.id} added={item.message.added} grew={item.message.grew} />,
       );
       return;
     }
@@ -190,10 +207,11 @@ function TurnBody({
       if (msg.content) {
         out.push(<MarkdownView key={msg.id}>{msg.content}</MarkdownView>);
       }
-    } else if (msg.role === "question" && msg.questions?.length) {
+    } else if (msg.role === "question" && msg.questions?.length && showSpecLink) {
       // EVERY question is answered on the spec body's shared form — one place,
       // one interaction, visible to the whole room. The chat only points at it
-      // so the thread stays readable.
+      // so the thread stays readable. Register chat has no spec room: questions
+      // replace the form pane, so a pointer that navigates would be a lie.
       out.push(
         <QuestionsPointer key={msg.id} count={msg.questions.length} onOpen={onOpenSpec} />,
       );
@@ -208,11 +226,13 @@ export function TurnBlock({
   expandedGroups,
   onToggleGroup,
   onOpenSpec,
+  showSpecLink = true,
 }: {
   turn: TurnFeedBlock;
   expandedGroups: Set<string>;
   onToggleGroup: (id: string) => void;
   onOpenSpec: () => void;
+  showSpecLink?: boolean;
 }) {
   return (
     <Box data-testid="turn-block">
@@ -236,8 +256,9 @@ export function TurnBlock({
         expandedGroups={expandedGroups}
         onToggleGroup={onToggleGroup}
         onOpenSpec={onOpenSpec}
+        showSpecLink={showSpecLink}
       />
-      <TurnFooter status={turn.status} onOpenSpec={onOpenSpec} />
+      <TurnFooter status={turn.status} onOpenSpec={onOpenSpec} showSpecLink={showSpecLink} />
     </Box>
   );
 }

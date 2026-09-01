@@ -37,6 +37,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/clients/observability"
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/clients/secretmanagersvc"
+	"github.com/wso2/aep/aep-api/internal/clients/thunderapp"
 	"github.com/wso2/aep/aep-api/internal/clients/thundersvc"
 	"github.com/wso2/aep/aep-api/internal/config"
 	"github.com/wso2/aep/aep-api/internal/delivery"
@@ -55,6 +56,8 @@ import (
 	"github.com/wso2/aep/aep-api/internal/dependencies/provisioning"
 	"github.com/wso2/aep/aep-api/internal/dependencies/runtimeconfig"
 	"github.com/wso2/aep/aep-api/internal/edge"
+	"github.com/wso2/aep/aep-api/internal/identity"
+	identityhttpapi "github.com/wso2/aep/aep-api/internal/identity/httpapi"
 	"github.com/wso2/aep/aep-api/internal/ops"
 	opshttpapi "github.com/wso2/aep/aep-api/internal/ops/httpapi"
 	"github.com/wso2/aep/aep-api/internal/organization"
@@ -182,9 +185,14 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		AuthProvider:           seam.AuthProvider,
 		RequestAuthStrategy:    seam.RequestAuthStrategy,
 		ImpersonateOrgResolver: seam.ImpersonateOrgResolver,
+		// A plane whose gateway does not terminate TLS serves only plain http,
+		// while OpenChoreo advertises an https URL beside it regardless. See
+		// Config.PreferPlainHTTPEndpoints.
+		PreferPlainHTTPEndpoints: !cfg.PlatformAPI.DataPlaneGatewayTLS,
 	}
 	projectClient := openchoreo.NewProjectClient(ocConfig)
 	namespaceClient := openchoreo.NewNamespaceClient(ocConfig)
+	environmentClient := openchoreo.NewEnvironmentClient(ocConfig)
 	componentClient := openchoreo.NewComponentClient(ocConfig)
 	// GitSecret client lands the per-org build git credential on the workflow
 	// plane (via OC → OpenBao → SecretReference). Used by BuildCredentialsService
@@ -278,6 +286,12 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	gitOpsService := sourcecontrol.NewGitOpsService(credResolver, workspaceEngine)
 	artifactSvcGit := spec.NewArtifactService(repoRepo, gitOpsService)
 	issueService := sourcecontrol.NewIssueService(repoRepo, gitHost, credResolver)
+	// THE delivery-side issue-write surface: every issue the delivery domain
+	// mints, closes, reopens or labels goes through this one writer, so the
+	// label vocabulary and the dedupe contract are decided once rather than once
+	// per sub-package. Its slices (eventcore, task, validation, build) each hold
+	// it; nothing else in delivery writes an issue.
+	deliveryIssues := delivery.NewIssueWriter(issueService)
 	webhookRegService := sourcecontrol.NewWebhookService(repoRepo, gitHost, repoService, issueService, cfg.WebhookDeliveryURL, cfg.WebhookHMACSecret)
 	credRefreshService := organization.NewCredentialsRefreshService(credResolver)
 	credService := organization.NewCredentialService(orgCredRepo, credStore, minter, cfg.WebhookHMACSecret, cfg.GitHubAppClientID, appClientSecret, gitHost)
@@ -285,11 +299,10 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	credService.WithBuildSecretCleaner(buildCredService)
 	anthropicCredService := organization.NewAnthropicCredentialService(orgAnthropicRepo, credStore)
 
-	// Task JWT manager — RS256, 24h TTL. The public key is published on the
-	// JWKS endpoint (/auth/external/jwks.json) and verified by both the runner
-	// callbacks (inbound S2S) and agents-service (outbound S2S). Constructed
-	// here, before the agents client, because that client uses it to mint the
-	// per-call outbound identity token.
+	// Task JWT manager — RS256. The public key is published on
+	// /auth/external/jwks.json. Used to mint BFF MCP tokens
+	// (IssueServiceToken) for the design agent and playground. Runner
+	// callbacks do not verify Task JWTs.
 	var taskTokens *authn.TaskTokenManager
 	if cfg.TaskTokenSigningKey != "" {
 		mgr, err := authn.NewTaskTokenManager(authn.TaskTokenConfig{
@@ -304,7 +317,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		taskTokens = mgr
 		slog.Info("Task token manager", "kid", mgr.KeyID(), "issuer", cfg.TaskTokenIssuer, "audience", cfg.TaskTokenAudience)
 	} else {
-		slog.Warn("BFF_TASK_SIGNING_KEY not set — task dispatch will fail")
+		slog.Warn("BFF_TASK_SIGNING_KEY not set — MCP identity tokens and JWKS will be unavailable")
 	}
 
 	// Secret-ref mirror writer wired into both credential services. nil-safe via
@@ -361,16 +374,9 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		}
 		return res.Key, nil
 	}
-	// skillsRepoForTurns ensures the org's _skills repo exists (seeding the
-	// embedded builtin/flow skills on first touch) and hands back its row —
-	// the SkillsRef source for genai + task-plan turns. A closure at the
-	// composition root so neither feature grows a skills edge.
-	skillsRepoForTurns := func(ctx context.Context, orgID string) (*sourcecontrol.GitRepository, error) {
-		if err := skillSvc.EnsureProvisioned(ctx, orgID); err != nil {
-			return nil, err
-		}
-		return repoService.GetRepo(ctx, orgID, spec.SkillsRepoSentinelProjectID)
-	}
+	// SkillsRef source for genai + task-plan turns. Reconcile so platform
+	// skills shipped after first provision land before Head/Ensure.
+	skillsRepoForTurns := spec.SkillsRepoForTurns(skillSvc, repoService)
 	turnRepo := spec.NewTurnRepository(db, in.RateStamper)
 	turnBroker := spec.NewTurnBroker()
 	genaiDeps := spec.ServiceDeps{
@@ -429,7 +435,8 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// satisfy the task consumer ports directly.
 	taskReads := task.NewReads(issueService, repoService, executionRepo, milestoneRunRepo)
 	taskPlan := task.NewPlanService(repoService, artifactSvcGit, gitOpsService,
-		anthropicKeyForGenAI, agentsvcClient, issueService, workspaceEngine, task.SkillsRepoResolver(skillsRepoForTurns))
+		anthropicKeyForGenAI, agentsvcClient, issueService, deliveryIssues, workspaceEngine,
+		task.SkillsRepoResolver(skillsRepoForTurns))
 
 	// Eagerly provision each org's skills repo on project creation.
 	projectService.SetSkillsProvisioner(skillSvc)
@@ -440,6 +447,27 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// Agentic Engineer marker, carrying the idea the user typed at create for
 	// the /start flow to generate requirements from.
 	projectService.SetDescriptorWriter(spec.NewDescriptorWriter(filesSvc))
+
+	// The journey starts itself (#562): creation fires `/start` server-side,
+	// so the user lands on a project whose agent is already interviewing them
+	// instead of a dashboard asking them to press a button. Wired after the
+	// descriptor writer above because that is the order the create path runs
+	// them in — the turn reads the idea from the file that write commits.
+	projectService.SetKickoffStarter(genaiSvc)
+	// …and the status poll reports whether it is still running, which is the
+	// one thing the git-derived spec fields cannot say.
+	projectService.SetSpecTurnSource(turnRepo)
+	// The build gate's staleness input (#575): the commit the newest successful
+	// design run read the project at. A build whose requirements have moved
+	// past its design is refused with the rest of the gate's conditions — the
+	// one refusal that is about the design being WRONG rather than incomplete.
+	artifactSvcGit.SetDesignBaselineResolver(func(ctx context.Context, orgID, projectID string) (string, error) {
+		last, err := turnRepo.NewestCompletedFlow(ctx, orgID, projectID, "design")
+		if err != nil || last == nil {
+			return "", err
+		}
+		return last.BaseRef, nil
+	})
 
 	// The Task-keyed log endpoint (issue number → newest execution by default,
 	// executionId query pins one for history browsing). (The runner skills-pull
@@ -508,6 +536,33 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		slog.Warn("Thunder admin client disabled — set THUNDER_ADMIN_URL + THUNDER_SYSTEM_CLIENT_ID + THUNDER_SYSTEM_CLIENT_SECRET")
 	}
 
+	// The identity domain: the platform's record of the SHARED roles and test
+	// users it creates on Thunder at build time, and the ensure that creates
+	// them. Both are optional — with no Thunder admin client there is no
+	// directory to write to, so `rolesEnsure` reports Enabled()==false and the
+	// build skips the roles gate entirely rather than failing every build.
+	// The store is wired regardless: it is what the validation credential
+	// provider reads, and reading an empty table is a correct "no test user".
+	identityStore := identity.NewStore(db, in.ColumnCipher)
+	var rolesEnsure *identity.EnsureService
+	var roleCatalogSvc *identity.CatalogService
+	// The console's Security panel. It takes the directory OPTIONALLY: with no
+	// Thunder admin client it still serves this project's references and their
+	// ownership from the store, and reports directoryAvailable=false so the
+	// console says "unknown" rather than "does not exist". The mutations refuse
+	// in that state — there is nothing to write to.
+	var identityDirectory identity.Directory
+	if thunderAdminClient != nil {
+		directory := thunderDirectory{c: thunderAdminClient}
+		identityDirectory = directory
+		rolesEnsure = identity.NewEnsureService(directory, identityStore, identityDesignReader{art: artifactSvcGit})
+		roleCatalogSvc = identity.NewCatalogService(directory, identityStore)
+		slog.Info("roles ensure wired — a build provisions the roles and test users specs/design/security.json declares")
+	} else {
+		slog.Warn("roles ensure disabled — no Thunder admin client; builds will not provision roles or test users")
+	}
+	identityPanel := identity.NewPanelService(identityDirectory, identityStore)
+
 	// Wire the Thunder OU validator into the org service so a stale/phantom JWT
 	// `ouId` can't poison the org→OU mapping (the root cause behind the runner
 	// publisher cc-token invalid_client: a phantom OU broke wc- namespace
@@ -518,9 +573,10 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		slog.Info("org OU validation wired — JWT ouId is validated against Thunder before the org→OU mapping is (over)written")
 	}
 	// WithSecretRefWriter mirrors per-org publisher client_secret to SM-API on
-	// EnsureOrgPublisher / RegenerateClientSecret so the dispatcher's
-	// PUBLISHER_CLIENT_SECRET ExternalSecret can materialise it into runner
-	// pods without the BFF holding the plaintext.
+	// EnsureOrgPublisher / RegenerateClientSecret and on
+	// ProvisionPublisherForBuild (POST /build, actor build-provision).
+	// Coding dispatch reads secret_ref_name only and mounts PUBLISHER_CLIENT_ID
+	// and PUBLISHER_CLIENT_SECRET from that SecretReference.
 	idpService := organization.NewIDPService(idpRepo, orgRepo, thunderAdminClient, organization.PlatformIDPConfig{
 		Issuer:  cfg.PlatformIDP.Issuer,
 		JWKSURL: cfg.PlatformIDP.JWKSURL,
@@ -566,9 +622,16 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// re-try the exec watcher asks for.
 	codingExecutor := codingagent.NewCodingExecutor(
 		componentClient, repoService, identities{cred: credService},
-		taskTokens, executionRepo,
+		executionRepo,
 		cfg.AgentPlatformURL, cfg.AgentPlatformURL,
 		orgRepo, anthropicCredService, orgCredRepo, idpRepo)
+	// Dispatch reads secret_ref_name only — it does not call
+	// EnsureOrgPublisher. POST /build provisions the SecretReference while the
+	// console JWT is still on ctx.
+	codingExecutor.WithPublisherCredentials(
+		codingagent.NewIDPPublisherResolver(idpRepo),
+		codingagent.PublisherTokenURLFromJWKS(cfg.PlatformIDP.JWKSURL),
+	)
 	// The OpenChoreo Component dispatch path (phase 08): one Component per run
 	// cycle in the milestone's own project, rendered by OC into the project's
 	// dataplane namespace. It needs only the OC client and the runner image —
@@ -625,6 +688,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		Runs:   eventcoreRuns{runs: milestoneRunRepo},
 		Cycles: eventcoreCycles{cycles: runCycleRepo},
 		Issues: issueService,
+		Writer: deliveryIssues,
 		PRs:    issueService,
 		Merger: issueService,
 		Repos:  repoLocator{db: db},
@@ -706,21 +770,13 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// system is launched by the milestone supervisor, so a cycle id is the only
 	// runner identity there is; an execution id named in a path fails closed.
 	publisherVerifier := authn.NewPublisherTokenVerifier(thunderJWKS, cfg.PlatformIDP.Issuer, "aep-publisher-")
-	runnerAuth := authn.NewRunnerAuthorizer(taskTokens, publisherVerifier, cycleOrgLookup(db))
+	runnerAuth := authn.NewRunnerAuthorizer(publisherVerifier, cycleOrgLookup(db))
 
 	// Validation-context runner callback: resolves the run's deployed endpoint
 	// URLs so they never enter the public issue.
 	validationContextSvc := validation.NewContextService(
 		validationCycleLocator{repo: runCycleRepo},
 		validationEndpointResolver{store: artifactStore, comp: componentService},
-	)
-	// Test-credentials runner callback: the runner requests a login on demand
-	// (only when a criterion needs one). v1 returns a shared mock account; the
-	// cycle→project fence + request contract are what real per-project user
-	// provisioning slots into later.
-	validationCredentialsSvc := validation.NewCredentialService(
-		validationCycleLocator{repo: runCycleRepo},
-		mockValidationCredentials{},
 	)
 
 	// Controllers
@@ -730,10 +786,9 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		// only the connect-callback + webhook controllers remain raw handlers.
 		// Every other feature is served by the strict handlers via params.Deps.
 		InternalDeps: edge.InternalDeps{
-			CredsRefresh:          credRefreshService,
-			RunnerAuth:            runnerAuth,
-			ValidationContext:     validationContextSvc,
-			ValidationCredentials: validationCredentialsSvc,
+			CredsRefresh:      credRefreshService,
+			RunnerAuth:        runnerAuth,
+			ValidationContext: validationContextSvc,
 		},
 		WebhookController:   webhookCtrl,
 		OrgGitHubController: orgGitHubCtrl,
@@ -764,7 +819,8 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// Strict-handler feature dependencies — everything the contract-first
 	// /api/v1 edge serves (internal/api/handlers_*.go).
 	params.Deps = edge.Deps{
-		TaskTokens: taskTokens,
+		TaskTokens:      taskTokens,
+		PublisherTokens: publisherVerifier,
 		// DesignSvc backs the edge's own GET /projects/{name}/design/dependencies
 		// handler (the one op served directly on the composite, not a domain
 		// embed). *spec.designService satisfies the narrow reader port.
@@ -773,8 +829,8 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		// assembled below (params.Deps.Projects).
 		// The delivery domain (build + task reads/promote + task-log stream) is
 		// assembled below (params.Deps.Delivery), after the external-resource
-		// provisioner exists — the build service's InputsCoordinator stages the
-		// drawer's external-config secrets through that provisioner's SM-API write,
+		// provisioner exists — build authors external bindings unset and SaveValues
+		// writes supplied external-config secrets through the provisioner's SM-API path,
 		// and its PreflightService reads the provisioning tri-state.
 	}
 
@@ -785,7 +841,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// ResourceTypes, Task 3 — no longer the external_resources table) and the
 	// org published endpoints + platform resource types (OC Resource-model
 	// client). The provisioning surface (value/param collection + the
-	// aep:provision issue funnel) is wired in the Phase-6 block further below.
+	// `provision` gate issue funnel) is wired in the Phase-6 block further below.
 	resourceClient := openchoreo.NewResourceClient(ocConfig)
 	// The resolver collaborators (repo locator + design reader) let the endpoint
 	// catalog discover each org-service's real OpenAPI contract + repo coords
@@ -822,6 +878,15 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		return nil, fmt.Errorf("assemble sourcecontrol domain: %w", err)
 	}
 	params.Deps.SourceControl = scHandlers
+
+	// identity — the platform's record of the SHARED directory objects (roles and
+	// test users) it creates at build time. Its one slice serves the console's
+	// Security panel; the slice is nil-tolerant, so the edge 503s when unwired.
+	identityHandlers, err := identityhttpapi.New(identity.Deps{Panel: identityPanel})
+	if err != nil {
+		return nil, fmt.Errorf("assemble identity domain: %w", err)
+	}
+	params.Deps.Identity = identityHandlers
 
 	// organization — org config + the organizations list (P3). Its handlers are
 	// embedded straight into the edge's composite; the edge holds no org service.
@@ -908,6 +973,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	params.MCPOrgEndpoints = orgEndpointCatalog
 	resourceTypeCatalog := dependencies.NewResourceTypeCatalog(resourceClient, cfg.PlatformResourcesEnabled)
 	params.MCPResourceTypes = resourceTypeCatalog
+	params.MCPRoleCatalog = roleCatalogOrNil(roleCatalogSvc)
 	// params.Deps.Dependencies (the strict ListPlatformResourceTypes + provisioning
 	// ops) is assembled below, after provisioningSvc exists.
 	// Endpoint spec discovery: the read-only remote-git reader an agent uses to
@@ -938,9 +1004,16 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// imports the dependencies feature (the *Catalog satisfies
 	// spec.OrgServiceResolver structurally).
 	artifactStore.SetOrgServiceResolver(orgEndpointCatalog)
+	// Read-time external-resource registry reuse (rule 2): the same
+	// ResourceType-backed catalog that backs MCP list_external_resources marks
+	// each design's `external` dependencies resolved when the name is already
+	// registered. Consumer-side wiring — spec never imports the dependencies
+	// feature (*ExternalResourceCatalog satisfies spec.ExternalResourceResolver
+	// structurally).
+	artifactStore.SetExternalResourceResolver(externalResourceRTCatalog)
 
 	// Dependency provisioning (dependency-management Phase 6): the value/param
-	// collection surface + the aep:provision gate funnel. The provisioner cores
+	// collection surface + the `provision` gate funnel. The provisioner cores
 	// author the OC Resource model; the service drives gate issues + provision
 	// Executions (Kind=provision) and closes each issue with a no-secrets
 	// reference; the readiness watcher observes platform-resource bindings'
@@ -950,17 +1023,15 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// classifies secret-vs-plain config keys from the project's committed
 	// design.json, never the org catalog (parity with the build path).
 	externalProvisioner := dependencies.NewExternalResourceProvisioner(designComponents{store: artifactStore}, resourceClient, secretRefWriter)
-	// The public build surface: its InputsCoordinator runs the drawer inputs'
-	// pre-tag work (collect external specs, derive end-user auth) and stages
-	// external-config secrets to SM-API through externalProvisioner before the
-	// tag-cut, carrying the resulting provision payload into the dev workflow.
+	// The public build surface: its InputsCoordinator runs pre-tag work (collect
+	// external specs, derive end-user auth), derives unset external authoring from
+	// the design, and carries the provision payload into the dev workflow.
 	buildSvc := build.NewService(build.Deps{
 		Repos:  repoFullNameLookup{repos: repoRepo},
 		Tagger: buildSpecTagger{art: artifactSvcGit},
 		Coord: build.NewInputsCoordinator(
 			designService,                          // SpecCollector (CollectSpec)
 			buildDesignDeriver{svc: designService}, // DesignFactDeriver (sentinel translation)
-			buildSecretStager{prov: externalProvisioner},
 			designComponents{store: artifactStore},
 		).WithSkillMirror(skillSvc), // refresh .claude/skills onto HEAD before the tag-cut
 		// The build-time dependency hard gate's fresh read (dependencyGateFailures) —
@@ -971,18 +1042,27 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		Design: designComponents{store: artifactStore},
 	})
 	platformProvisioner := dependencies.NewOCNativeProvisioner(resourceClient)
+	catalogValuePlane := provisioning.NewMemoryValuePlane()
 	provisioningSvc := provisioning.NewService(provisioning.Deps{
-		Issues:    issueService,
-		Execs:     executionRepo,
-		Design:    designComponents{store: artifactStore},
-		Repos:     repoNamer{repos: repoRepo, db: db},
-		RTCatalog: externalResourceRTCatalog,
-		ExtProv:   externalProvisioner,
-		PlatProv:  platformProvisioner,
-		Bindings:  resourceClient,
-		Projects:  provisionProjects{repos: repoRepo},
-		Access:    dependencies.NewAccessRequestRepository(db),
-		Providers: orgEndpointCatalog,
+		Issues:            issueService,
+		Execs:             executionRepo,
+		Design:            designComponents{store: artifactStore},
+		Repos:             repoNamer{repos: repoRepo, db: db},
+		RTCatalog:         externalResourceRTCatalog,
+		ExtProv:           externalProvisioner,
+		PlatProv:          platformProvisioner,
+		Bindings:          resourceClient,
+		Workloads:         resourceClient,
+		Projects:          provisionProjects{repos: repoRepo},
+		Access:            dependencies.NewAccessRequestRepository(db),
+		Providers:         orgEndpointCatalog,
+		Environments:      environmentClient,
+		CatalogValuePlane: catalogValuePlane,
+		OrgSecrets:        secretRefWriter,
+		OrgResourceDocs:   provisioning.NewGitOrgResourceDocs(repoService, gitOpsService),
+		Roles:             rolesEnsurerOrNil(rolesEnsure),
+		Markers:           resourceTypeCatalog,
+		SecurityJSON:      securityJSONReader{art: artifactSvcGit},
 	})
 	// Assemble the dependencies domain (P8): the provisioning slice (7 ops over
 	// provisioningSvc) + the resource-type-discovery slice (ListPlatformResourceTypes
@@ -990,6 +1070,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	dependenciesHandlers, err := dephttpapi.New(dephttpapi.Deps{
 		ProvisioningSvc: provisioningSvc,
 		ResourceTypes:   resourceTypeCatalog,
+		OrgEndpoints:    orgEndpointCatalog,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("assemble dependencies domain: %w", err)
@@ -1000,8 +1081,9 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// anything already provisioned OR in-flight (buildProvisionStatus collapses the
 	// provisioning tri-state onto the "already handled" bool).
 	preflightSvc := build.NewPreflightService(build.PreflightDeps{
-		Design: designComponents{store: artifactStore},
-		Status: buildProvisionStatus{svc: provisioningSvc},
+		Design:  designComponents{store: artifactStore},
+		Status:  buildProvisionStatus{svc: provisioningSvc},
+		Catalog: buildOrgCatalog{svc: provisioningSvc},
 	})
 	// delivery — the Delivery Pipeline domain (P6): the public single-tag build
 	// surface, the task read + promote-dispatch surface, and the task-log SSE
@@ -1020,7 +1102,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	runCycleBuilds := runread.NewCycleBuilds(milestoneRunRepo, runCycleRepo,
 		runreadProjectBuilds{oc: componentClient})
 
-	deliveryHandlers, err := deliveryhttpapi.New(deliveryhttpapi.Deps{
+	deliveryDeps := deliveryhttpapi.Deps{
 		BuildSvc:      buildSvc,
 		PreflightSvc:  preflightSvc,
 		BuildActivity: buildActivityRecorder{svc: activitySvc},
@@ -1032,19 +1114,25 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		// Cancel signals the supervisor AND deletes the cycle's agent
 		// Component, which is what actually stops the pod and frees the org's
 		// billing concurrency slot. Revalidate is the event plane's.
-		RunCommands: runread.NewCommands(milestoneRunRepo, runSupervisor, eventcoreRevalidator{events: eventPlane}).
+		RunCommands: runread.NewCommands(milestoneRunRepo, milestoneRunRepo, runSupervisor, eventcoreRevalidator{events: eventPlane}).
 			WithCycleReaper(codingagent.NewCycleReaper(componentClient, runCycleRepo)),
 		RunCycleBuilds: runCycleBuilds,
-	})
+	}
+	// WritePublisher stamps secret_ref_name onto the org's IDP profile;
+	// without a SecretsProvider, ProvisionPublisherForBuild fails closed and
+	// every POST /build 503s until a SecretsProvider is injected.
+	deliveryDeps.PublisherProvisioner = idpService
+	deliveryHandlers, err := deliveryhttpapi.New(deliveryDeps)
 	if err != nil {
 		return nil, fmt.Errorf("assemble delivery domain: %w", err)
 	}
 	params.Deps.Delivery = deliveryHandlers
-	// The project's single aep:validation issue. The RUN mints it, at
+	// The project's single validation task. The RUN mints it, at
 	// deployed-green: minting it at plan time would put an issue in the working
 	// set that nothing can work until every component is deployed.
 	validationSvc := validation.NewService(validation.Deps{
 		Issues:   issueService,
+		Writer:   deliveryIssues,
 		Criteria: validationCriteria{files: filesSvc},
 	})
 	// A planned Task's prose body names the App Path the agent works in — the
@@ -1065,14 +1153,23 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// feature never imports build/devflow; the app-root adapter calls the build
 	// service's non-HTTP StartProjectBuild entry point (idempotent).
 	provisioningSvc.SetProviderBuildTrigger(providerBuildTrigger{build: buildSvc})
+	// The deploy gate's wake-up (ADR-0023): saving an external dependency's values
+	// is the one thing that can unpark a run waiting on the gate, and nothing else
+	// observes it — a value save produces no webhook. Set here for the same reason
+	// as the trigger above: provisioning must not import delivery/run.
+	provisioningSvc.SetValuesSavedNotifier(valuesSavedNotifier{
+		runs:       milestoneRunRepo,
+		supervisor: runSupervisor,
+	})
 	// The milestone plan path (issue-driven execution §5): once the build's
 	// whole-spec gate cuts `v<N>`, the click supersedes the previous milestone,
-	// mints this version's, admits the run row that IS the one-spec-run-per-
-	// project mutex, then (detached) plans the version's Tasks into the milestone
-	// and mints its gates. Set here rather than in build.Deps because its gate
+	// mints this version's and admits the run row that IS the project's build
+	// mutex; the run then fills the milestone (gates, then the planning turn) as
+	// its own first phase. Set here rather than in build.Deps because its gate
 	// resolver is provisioningSvc, which is constructed after buildSvc.
 	buildSvc.SetPlanPath(build.PlanPathDeps{
 		Milestones: issueService,
+		Issues:     deliveryIssues,
 		Runs:       milestoneRunRepo,
 		Planner:    taskPlan,
 		Gates:      buildGateResolver{prov: provisioningSvc},
@@ -1126,6 +1223,36 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// The deployment service's two config inputs, wired here because both are
 	// built after it.
 	deploymentService.SetConfigSources(configService, runtimeConfigSvc)
+	// Thunder deploy-wait: after OC Ready, a web-app with ConsumerURLEnvConfig
+	// stays pending until the ThunderApplication CR carries the SPA callback.
+	// Nil reader (no kube API base — local compose) skips the wait.
+	deploymentService.SetResourceCatalog(thunderWaitMarkerCatalog{cat: resourceTypeCatalog})
+	deploymentService.SetResourceClient(resourceClient)
+	if cfg.KubeAPI.BaseURL != "" {
+		thunderClient, err := thunderapp.New(thunderapp.Config{
+			BaseURL:     cfg.KubeAPI.BaseURL,
+			BearerToken: cfg.KubeAPI.BearerToken,
+			TokenFile:   cfg.KubeAPI.TokenFile,
+			CAFile:      cfg.KubeAPI.CAFile,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("thunderapp client: %w", err)
+		}
+		deploymentService.SetThunderApplicationReader(thunderApplicationReader{
+			client: thunderClient,
+		})
+		slog.Info("ThunderApplication CR reader", "baseURL", cfg.KubeAPI.BaseURL)
+	} else {
+		slog.Info("ThunderApplication CR reader disabled — no KUBERNETES_SERVICE_HOST/PORT or KUBE_API_BASE_URL; thunder deploy-wait skipped")
+	}
+	// The address a consumer reaches a protected sibling's managed API on. Config
+	// carries only an override; the default lives beside the context-path builder
+	// it has to agree with.
+	if host := cfg.APIGatewayHost; host != "" {
+		deploymentService.SetAPIGatewayHost(host)
+	} else {
+		deploymentService.SetAPIGatewayHost(projects.DefaultAPIGatewayHost)
+	}
 	configService.SetConverger(deploymentService)
 	// The cross-project access grant is the only deploy observer left. The two
 	// that rode beside it — the env-config.js re-emit and the api-configuration
@@ -1236,11 +1363,23 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 			Deploy:       deploymentService,
 			Deployments:  deploymentService,
 			DeployIssues: eventPlane,
+			// The halt: a failed run's leftovers are marked so the reconcile sweep
+			// does not restart them with fresh budgets. Same plane, same reason —
+			// the supervisor decides, the plane writes the issue.
+			Halter: eventPlane,
+			// The cancel's other half: a cancelled run's in-flight issues are closed
+			// and stamped so the sweep does not restart the run the user just
+			// stopped, and so a rebuild of the same spec knows what to reopen.
+			Canceller: eventPlane,
 			// The planning phase. These are the same two collaborators the build
 			// click used to drive in a detached goroutine; behind an activity they
 			// are durable across a restart and retried on a blip.
 			Gates:   buildGateResolver{prov: provisioningSvc},
 			Planner: taskPlan,
+			// The deploy gate. Wired unconditionally: unlike the other
+			// collaborators an absent gate is not a degraded mode but an open
+			// door, so the activity fails closed rather than degrading.
+			DeployGate: deployGate{prov: provisioningSvc},
 		})
 		watchers = append(watchers, run.NewWorkerWatcher(temporalRuntime, runActs))
 		slog.Info("run: temporal worker watcher registered", "hostPort", cfg.Temporal.HostPort)

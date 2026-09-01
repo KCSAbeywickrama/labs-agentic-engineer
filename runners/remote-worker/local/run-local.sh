@@ -64,6 +64,8 @@ export AEP_IDENTITY_NAME="${AEP_IDENTITY_NAME:-AEP Local Agent}"
 export AEP_IDENTITY_EMAIL="${AEP_IDENTITY_EMAIL:-aep-local@users.noreply.github.com}"
 export AEP_BEARER="${AEP_BEARER:-$(node -e 'console.log(crypto.randomUUID())')}"
 export AEP_TASK_KIND="${AEP_TASK_KIND:-implementation}"
+export PUBLISHER_CLIENT_ID="${PUBLISHER_CLIENT_ID:-local-publisher}"
+export PUBLISHER_CLIENT_SECRET="${PUBLISHER_CLIENT_SECRET:-local-publisher-secret}"
 STUB_PORT="${STUB_PORT:-8377}"
 STUB_BIND="${STUB_BIND:-127.0.0.1}"
 IMAGE_TAG="${IMAGE_TAG:-aep-remote-worker:local}"
@@ -73,6 +75,7 @@ IMAGE_TAG="${IMAGE_TAG:-aep-remote-worker:local}"
 DOCKERFILE="${DOCKERFILE:-$WORKER_DIR/Dockerfile}"
 # The container reaches the host-side stub via host.docker.internal.
 export AEP_GIT_SERVICE_URL="http://host.docker.internal:${STUB_PORT}"
+export PUBLISHER_TOKEN_URL="http://host.docker.internal:${STUB_PORT}/oauth2/token"
 # AEP_PLATFORM_URL: for an implementation run it stays unset (oneshot.ts skips
 # the per-task skills pull; credhelper/gh fall back to AEP_GIT_SERVICE_URL). A
 # validation run points it at the same stub so the aep-validation skill can
@@ -92,6 +95,7 @@ fi
 echo ">> starting token stub on ${STUB_BIND}:${STUB_PORT}"
 GITHUB_PAT="$GITHUB_PAT" STUB_PORT="$STUB_PORT" STUB_BIND="$STUB_BIND" \
   STUB_BEARER="$AEP_BEARER" \
+  STUB_CLIENT_ID="$PUBLISHER_CLIENT_ID" STUB_CLIENT_SECRET="$PUBLISHER_CLIENT_SECRET" \
   node "$SCRIPT_DIR/token-stub.mjs" &
 STUB_PID=$!
 trap 'kill "$STUB_PID" 2>/dev/null || true' EXIT
@@ -106,7 +110,27 @@ if ! curl -sf "http://127.0.0.1:${STUB_PORT}/healthz" >/dev/null 2>&1; then
 fi
 
 echo ">> building runner image ${IMAGE_TAG} (${DOCKERFILE##*/})"
-docker build -f "$DOCKERFILE" -t "$IMAGE_TAG" "$WORKER_DIR"
+# The Dockerfile COPYs from two BuildKit named contexts that live outside its
+# build context — the skill library, and the `bal library` tool's source, which
+# its first stage compiles. Every build path has to pass both or BuildKit fails
+# to resolve them; the others are deployments/scripts/build-runner.sh and
+# release.yml's matrix row.
+#
+# The tool stage resolves `org.ballerinalang:ballerina-cli` from ballerina-platform's
+# GitHub Packages, so it needs a token with `read:packages` — as a secret mount,
+# never a build arg. See ADR-0008.
+export PACKAGE_PAT="${packagePAT:-${GITHUB_TOKEN:-$(gh auth token 2>/dev/null || true)}}"
+if [ -z "$PACKAGE_PAT" ]; then
+  echo "no token to read ballerina-platform's GitHub Packages." >&2
+  echo "  gh auth refresh -h github.com -s read:packages   # then re-run" >&2
+  echo "  export packagePAT=<PAT with read:packages>" >&2
+  exit 2
+fi
+docker build \
+  --build-context "skills=$WORKER_DIR/../../skills" \
+  --build-context "bal-library-tool=$WORKER_DIR/../../packages/bal-library-tool" \
+  --secret "id=packagePAT,env=PACKAGE_PAT" \
+  -f "$DOCKERFILE" -t "$IMAGE_TAG" "$WORKER_DIR"
 
 mkdir -p "$SCRIPT_DIR/workspace"
 
@@ -121,6 +145,7 @@ docker run --rm \
   -e AEP_TASK_ID -e AEP_ORG_ID -e AEP_PROJECT_ID -e AEP_COMPONENT_NAME \
   -e AEP_REPO_URL -e AEP_PROMPT -e AEP_BEARER -e AEP_GIT_SERVICE_URL \
   -e AEP_IDENTITY_NAME -e AEP_IDENTITY_EMAIL -e AEP_TASK_KIND -e AEP_PLATFORM_URL \
+  -e PUBLISHER_CLIENT_ID -e PUBLISHER_CLIENT_SECRET -e PUBLISHER_TOKEN_URL \
   "$IMAGE_TAG" || EXIT_CODE=$?
 
 WS="$SCRIPT_DIR/workspace/$AEP_ORG_ID/$AEP_PROJECT_ID/$AEP_TASK_ID"

@@ -268,6 +268,10 @@ func (f *fakeIssueSvc) ListPullRequestFiles(context.Context, string, string, int
 func (f *fakeIssueSvc) CreateMilestone(context.Context, string, string, sourcecontrol.CreateMilestoneRequest) (*sourcecontrol.MilestoneResult, error) {
 	panic("fakeIssueSvc: CreateMilestone not expected")
 }
+func (f *fakeIssueSvc) ReopenMilestone(context.Context, string, string, int) error {
+	return nil
+}
+
 func (f *fakeIssueSvc) CloseMilestone(context.Context, string, string, int) error {
 	panic("fakeIssueSvc: CloseMilestone not expected")
 }
@@ -279,6 +283,10 @@ func (f *fakeIssueSvc) ListMilestoneIssues(context.Context, string, string, sour
 }
 func (f *fakeIssueSvc) MilestoneIssueCounts(context.Context, string, string, int) (*sourcecontrol.MilestoneIssueCounts, error) {
 	panic("fakeIssueSvc: MilestoneIssueCounts not expected")
+}
+
+func (f *fakeIssueSvc) ListMilestoneIssueComments(context.Context, string, string, int, int) (map[int][]sourcecontrol.IssueComment, error) {
+	panic("fakeIssueSvc: ListMilestoneIssueComments not expected")
 }
 
 // credAESKey is a fixed 32-byte AES-256 key for the real credential store. The

@@ -24,6 +24,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/delivery"
 	"github.com/wso2/aep/aep-api/internal/delivery/run"
 	"github.com/wso2/aep/aep-api/internal/delivery/validation"
+	"github.com/wso2/aep/aep-api/internal/dependencies/provisioning"
 	"github.com/wso2/aep/aep-api/internal/spec"
 )
 
@@ -60,7 +61,7 @@ func (a runRuns) LiveRunForMilestone(ctx context.Context, orgID, projectID strin
 }
 
 // MilestoneSpecTag reads the version off the milestone's newest run that has
-// one. Rows arrive newest-first, so a milestone whose spec build was followed
+// one. Rows arrive newest-first, so a milestone whose dev run was followed
 // by tagless incident runs still answers with the version it was built for.
 func (a runRuns) MilestoneSpecTag(ctx context.Context, orgID, projectID string, milestoneNumber int) (string, error) {
 	rows, err := a.runs.ListByMilestone(ctx, orgID, projectID, milestoneNumber)
@@ -75,8 +76,21 @@ func (a runRuns) MilestoneSpecTag(ctx context.Context, orgID, projectID string, 
 	return "", nil
 }
 
+// ListByMilestone hands the milestone's runs straight through, newest-first. The
+// supervisor's own use is narrow — a validation run counting how many times this
+// version has been judged — but the filtering belongs on that side: which kinds
+// count is a loop decision, and this adapter holds none.
+func (a runRuns) ListByMilestone(ctx context.Context, orgID, projectID string, milestoneNumber int) ([]delivery.MilestoneRun, error) {
+	return a.runs.ListByMilestone(ctx, orgID, projectID, milestoneNumber)
+}
+
 func (a runRuns) SetState(ctx context.Context, id, state string) error {
 	_, err := a.runs.SetState(ctx, id, state)
+	return err
+}
+
+func (a runRuns) SetWaiting(ctx context.Context, id, reason string, dependencies []string) error {
+	_, err := a.runs.SetWaiting(ctx, id, reason, dependencies)
 	return err
 }
 
@@ -93,6 +107,17 @@ func (a runRuns) BumpBudget(ctx context.Context, id string, counter delivery.Run
 func (a runRuns) SetValidationVerdict(ctx context.Context, id, verdict string, issue int) error {
 	_, err := a.runs.SetValidationVerdict(ctx, id, verdict, issue)
 	return err
+}
+
+// CancelRequested reads the cancel stamp back. Org-scoped like every other read
+// this surface makes, and a row that is gone answers false — a run whose project
+// was deleted has nothing left to cancel.
+func (a runRuns) CancelRequested(ctx context.Context, orgID, runID string) (bool, error) {
+	row, err := a.runs.GetByIDScoped(ctx, orgID, runID)
+	if err != nil || row == nil {
+		return false, err
+	}
+	return row.CancelRequestedAt != nil, nil
 }
 
 // runCycles projects the cycle repository onto the supervisor's CycleStore.
@@ -115,9 +140,13 @@ func (a runCycles) Finish(ctx context.Context, cycleID, mergeSHA string) error {
 	return err
 }
 
-func (a runCycles) SetValidationVerdict(ctx context.Context, cycleID, verdict string, issue int) error {
-	_, err := a.cycles.SetValidationVerdict(ctx, cycleID, verdict, issue)
+func (a runCycles) SetValidationVerdict(ctx context.Context, cycleID, verdict string, issue int, digest string) error {
+	_, err := a.cycles.SetValidationVerdict(ctx, cycleID, verdict, issue, digest)
 	return err
+}
+
+func (a runCycles) LatestValidationDigest(ctx context.Context, orgID string, runIDs []string) (string, error) {
+	return a.cycles.LatestValidationDigest(ctx, orgID, runIDs)
 }
 
 func (a runCycles) Latest(ctx context.Context, orgID, runID string) (*delivery.RunCycle, error) {
@@ -177,6 +206,10 @@ func (a runValidation) Verdict(ctx context.Context, orgID, projectID, at string)
 	return validation.VerdictFromReport(raw), validation.ReportDigest(raw), nil
 }
 
+func (a runValidation) CloseValidationIssue(ctx context.Context, orgID, projectID string, issue int, verdict string) error {
+	return a.svc.CloseValidationIssue(ctx, orgID, projectID, issue, verdict)
+}
+
 func (a runValidation) MintRepairIssues(ctx context.Context, orgID, projectID string, milestoneNumber int, at, cycleID string) ([]int, error) {
 	raw, err := a.report(ctx, orgID, projectID, at)
 	if err != nil {
@@ -233,4 +266,57 @@ func (a runreadProjectBuilds) ListProjectBuildRuns(ctx context.Context, orgID, p
 		})
 	}
 	return out, nil
+}
+
+// valuesSavedNotifier bridges the provisioning feature's ValuesSavedNotifier
+// onto the run supervisor: external values landed, so a run parked on the deploy
+// gate should re-derive readiness now rather than at its next poll.
+//
+// It lives at the composition root for the reason the port exists at all —
+// provisioning must not import delivery/run. The signal carries no payload
+// because it carries no instruction: the supervisor re-reads readiness itself,
+// so a save that leaves another dependency unset parks the run straight back.
+type valuesSavedNotifier struct {
+	runs       delivery.MilestoneRunRepository
+	supervisor *run.Supervisor
+}
+
+func (n valuesSavedNotifier) ValuesSaved(ctx context.Context, orgID, projectID string) error {
+	// EVERY parked run, any kind — not just the newest. A task or validation run
+	// parks on this gate exactly like a dev run, and they can be live at the same
+	// time on their own milestones. One saved value can unblock several at once.
+	rows, err := n.runs.RunsWaitingOnValues(ctx, orgID, projectID)
+	if err != nil {
+		return err
+	}
+	// Values saved with no parked run is the ordinary case — a developer
+	// configuring ahead of the next build. Nothing to wake.
+	var errs []error
+	for i := range rows {
+		// Keep going after a failure: one run whose workflow has already gone
+		// (settled between the read and the signal) must not strand its siblings.
+		// The supervisor's own not-found handling decides what is benign; anything
+		// it still reports is joined and returned.
+		if err := n.supervisor.SignalRun(ctx, &rows[i],
+			delivery.SigRunValuesSaved, delivery.RunSignal{Signal: delivery.SigRunValuesSaved}); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// deployGate projects the provisioning service's readiness read onto the run
+// supervisor's DeployGate. It calls the service METHOD, not its HTTP handler:
+// the handler is a thin projection of this same call, and routing an in-process
+// workflow activity back through the edge would buy nothing but a socket.
+type deployGate struct {
+	prov *provisioning.Service
+}
+
+func (g deployGate) DeploymentReadiness(ctx context.Context, orgID, projectID, env string) ([]string, []string, error) {
+	readiness, err := g.prov.DeploymentReadiness(ctx, orgID, projectID, env)
+	if err != nil {
+		return nil, nil, err
+	}
+	return readiness.Unconfigured, readiness.Provisioning, nil
 }

@@ -4,20 +4,28 @@ type BuildRunList = components["schemas"]["BuildRunList"];
 type MilestoneRunView = components["schemas"]["MilestoneRunView"];
 type RunCycleView = components["schemas"]["RunCycleView"];
 type DeployStage = components["schemas"]["DeployStage"];
-// The six VERDICTS, which is a strict subset of the nine states the chip can
-// show: `none`, `running` and `awaiting-fix` are lifecycle, and no run row or
-// cycle record ever carries them.
-type RunVerdict = NonNullable<components["schemas"]["RunValidation"]["verdict"]>;
+// The six VERDICTS, which is a strict subset of the ten states the chip can
+// show: `none`, `running`, `awaiting-fix` and `cancelled` are lifecycle, and no
+// run row or cycle record ever carries them.
+type RunVerdict = NonNullable<
+  components["schemas"]["RunValidation"]["verdict"]
+>;
 
 // Scenario switch for the VALIDATION surface, orthogonal to the project scenario
-// in ./project.ts. `deploy.validation` has nine values and only ONE of them is
+// in ./project.ts. `deploy.validation` has ten values and only ONE of them is
 // reachable from the project scenarios, so every other state of the Validation
-// page — the four non-green verdicts, the two lifecycle states, the empty ones —
+// page — the four non-green verdicts, the three lifecycle states, the empty ones —
 // could previously only be seen by hand-editing a fixture.
 //
 // Toggle in devtools, then reload:
 //   localStorage.setItem('aep:mock:validation', 'failed')
 //   localStorage.removeItem('aep:mock:validation')   // back to the project scenario
+//
+// Two companion keys narrow the `running` scenario further — which ATTEMPT is in
+// flight (see ValidationAttempt below) and whether the repo has an oracle at all:
+//   localStorage.setItem('aep:mock:validation-criteria', 'missing')
+// which drops validation-criteria.json from the file list, so the read 404s the way
+// it does for a version whose spec authored none (handlers/project.ts).
 //
 // Setting it alone is enough: with no `aep:mock:project` chosen, the base scenario
 // becomes `deployed` rather than the usual `building`, because a verdict only
@@ -29,6 +37,7 @@ export const VALIDATION_SCENARIOS: ValidationScenario[] = [
   "none",
   "running",
   "awaiting-fix",
+  "cancelled",
   "passed",
   "partial",
   "failed",
@@ -63,9 +72,11 @@ interface CatalogueEntry {
   method: "e2e" | "scenario" | "manual";
 }
 
-const REQ_001 = "Shoppers can browse and search the catalog by name and category.";
+const REQ_001 =
+  "Shoppers can browse and search the catalog by name and category.";
 const REQ_002 = "Cart contents persist across browser sessions.";
-const REQ_003 = "Checkout produces an order visible in the shopper's order history.";
+const REQ_003 =
+  "Checkout produces an order visible in the shopper's order history.";
 
 const CATALOGUE: CatalogueEntry[] = [
   {
@@ -136,14 +147,20 @@ interface Artifacts {
 // report's totals are counted rather than typed. Criteria absent from the map are
 // absent from the oracle — that is how `passed` gets an all-automatable oracle
 // while `inconclusive` gets one with nothing automatable in it.
-function build(outcomes: Record<string, Outcome>): { criteria: string; report: string } {
+function build(outcomes: Record<string, Outcome>): {
+  criteria: string;
+  report: string;
+} {
   const chosen: { entry: CatalogueEntry; outcome: Outcome }[] = [];
   for (const entry of CATALOGUE) {
     const outcome = outcomes[entry.id];
     if (outcome) chosen.push({ entry, outcome });
   }
 
-  const byReq = new Map<string, { statement: string; entries: CatalogueEntry[] }>();
+  const byReq = new Map<
+    string,
+    { statement: string; entries: CatalogueEntry[] }
+  >();
   for (const { entry } of chosen) {
     const group = byReq.get(entry.req);
     if (group) group.entries.push(entry);
@@ -224,14 +241,22 @@ const TIMEOUT_FAILURE = {
 // unreachable, because the runner reports that criterion `manual` and an uncovered
 // criterion is precisely what makes a run `partial`.
 const PASSED = build({
-  "AC-001-a": { status: "pass", spec: "tests/e2e/specs/AC-001-a.spec.ts", durationMs: 1840 },
+  "AC-001-a": {
+    status: "pass",
+    spec: "tests/e2e/specs/AC-001-a.spec.ts",
+    durationMs: 1840,
+  },
   "AC-001-b": {
     status: "pass",
     spec: "tests/e2e/specs/AC-001-b.spec.ts",
     healed: true,
     durationMs: 2210,
   },
-  "AC-002-a": { status: "pass", spec: "tests/e2e/specs/AC-002-a.spec.ts", durationMs: 980 },
+  "AC-002-a": {
+    status: "pass",
+    spec: "tests/e2e/specs/AC-002-a.spec.ts",
+    durationMs: 980,
+  },
   "AC-003-a": {
     status: "pass",
     spec: "tests/e2e/specs/AC-003-a.spec.ts",
@@ -244,8 +269,16 @@ const PASSED = build({
 // e2e that never ran plus the two methods no runner executes. Exercises every
 // state chip except `fail`.
 const PARTIAL = build({
-  "AC-001-a": { status: "pass", spec: "tests/e2e/specs/AC-001-a.spec.ts", durationMs: 1840 },
-  "AC-001-b": { status: "pass", spec: "tests/e2e/specs/AC-001-b.spec.ts", durationMs: 2600 },
+  "AC-001-a": {
+    status: "pass",
+    spec: "tests/e2e/specs/AC-001-a.spec.ts",
+    durationMs: 1840,
+  },
+  "AC-001-b": {
+    status: "pass",
+    spec: "tests/e2e/specs/AC-001-b.spec.ts",
+    durationMs: 2600,
+  },
   "AC-002-a": { status: "not_run" },
   "AC-002-b": { status: "not_validated" },
   "AC-003-a": {
@@ -261,7 +294,11 @@ const PARTIAL = build({
 // is why this scenario keeps the uncovered criteria: the tile has to count the
 // failure against the whole set, not against the criteria that ran.
 const FAILED = build({
-  "AC-001-a": { status: "pass", spec: "tests/e2e/specs/AC-001-a.spec.ts", durationMs: 1840 },
+  "AC-001-a": {
+    status: "pass",
+    spec: "tests/e2e/specs/AC-001-a.spec.ts",
+    durationMs: 1840,
+  },
   "AC-001-b": {
     status: "fail",
     spec: "tests/e2e/specs/AC-001-b.spec.ts",
@@ -320,6 +357,11 @@ const ARTIFACTS: Record<ValidationScenario, Artifacts> = {
   // running or has not started. A REPEAT attempt does have one — see REPEAT_ARTIFACTS.
   running: { criteria: PARTIAL.criteria },
   none: { criteria: PARTIAL.criteria },
+  // Same pair as `none`: the oracle was authored, and the attempt that would have
+  // written a report against it was stopped before it committed one. The absence
+  // here is why the page must not read `cancelled` as "no criteria" — the criteria
+  // are right there, unanswered.
+  cancelled: { criteria: PARTIAL.criteria },
   // Mid-repair: the failed attempt's report is committed and stays readable, which
   // is what lets the page show WHAT is being fixed while the fix is in flight.
   "awaiting-fix": FAILED,
@@ -402,7 +444,11 @@ function validationCycle(
     prUrl: `${REPO_URL}/pull/${String(n + 2)}`,
     mergeSha: n === 2 ? "5c0de1a77b3f2049" : "7ab41c90ee31d5f0",
     validationVerdict: verdict,
-    validationIssue: 12,
+    // `validationTask` in project.ts — the one issue list-tasks hides and get-task
+    // still answers for. Every validation cycle carries the SAME number because the
+    // platform reopens the version's issue for a repeat attempt rather than minting
+    // a second one, so a per-cycle number here would misdescribe the real thing.
+    validationIssue: 30,
     createdAt: "2026-07-10T09:45:00Z",
     endedAt: "2026-07-10T10:02:00Z",
     ...over,
@@ -430,6 +476,7 @@ function run(over: Partial<MilestoneRunView>): MilestoneRunView {
     id: "run-v1-1",
     milestoneNumber: 1,
     milestoneTitle: "v1",
+    kind: "dev",
     origin: "spec-build",
     state: "succeeded",
     budgets: {
@@ -452,7 +499,7 @@ function run(over: Partial<MilestoneRunView>): MilestoneRunView {
 // A run that answered on its first attempt.
 function firstAttemptRun(verdict: RunVerdict): MilestoneRunView {
   return run({
-    validation: { verdict, issue: 12, reportPath: REPORT_PATH },
+    validation: { verdict, issue: 30, reportPath: REPORT_PATH },
     cycles: [CODING_1, validationCycle(2, verdict)],
   });
 }
@@ -471,7 +518,7 @@ function exhaustedRun(
     terminalReason,
     validation: {
       verdict,
-      issue: 12,
+      issue: 30,
       // The server omits the path for `unreported`: advertising one would send the
       // client to a 404 to rediscover what the verdict already said.
       ...(reportPath ? { reportPath: REPORT_PATH } : {}),
@@ -480,7 +527,10 @@ function exhaustedRun(
       CODING_1,
       validationCycle(2, verdict),
       CODING_3,
-      validationCycle(4, verdict, { createdAt: "2026-07-10T10:24:00Z", endedAt: "2026-07-10T10:40:00Z" }),
+      validationCycle(4, verdict, {
+        createdAt: "2026-07-10T10:24:00Z",
+        endedAt: "2026-07-10T10:40:00Z",
+      }),
     ],
   });
 }
@@ -509,8 +559,30 @@ const RUNS: Record<ValidationScenario, MilestoneRunView> = {
   "awaiting-fix": run({
     state: "running",
     endedAt: null,
-    validation: { verdict: "failed", issue: 12, reportPath: REPORT_PATH },
+    validation: { verdict: "failed", issue: 30, reportPath: REPORT_PATH },
     cycles: [CODING_1, validationCycle(2, "failed"), CODING_IN_FLIGHT],
+  }),
+  // A person STOPPED the judging. The validation cycle was opened and closed with
+  // no merge SHA — what the agent stage records for a dispatch that produced
+  // nothing — so the run settles carrying no verdict at all. Kind and origin are
+  // the validation run's own, and that is the whole distinction this scenario
+  // exists to show: only a run of THAT kind reads as `cancelled`, because a
+  // cancelled dev run is an abandoned increment and means something else.
+  cancelled: run({
+    kind: "validation",
+    origin: "revalidate",
+    state: "cancelled",
+    validation: {},
+    cycles: [
+      {
+        id: "cycle-2",
+        kind: "validation",
+        attempts: 1,
+        validationIssue: 30,
+        createdAt: "2026-07-10T09:45:00Z",
+        endedAt: "2026-07-10T09:52:00Z",
+      },
+    ],
   }),
   // The run is live and has not reached validation at all — the state every run
   // spends most of its life in.
@@ -528,7 +600,7 @@ const RUNS: Record<ValidationScenario, MilestoneRunView> = {
 // its numbers as the last attempt's — and `deploy.validation` is `running` for both,
 // so no value of the scenario switch can tell them apart.
 //
-// Hence a second devtools key rather than a tenth scenario:
+// Hence a second devtools key rather than an eleventh scenario:
 //   localStorage.setItem('aep:mock:validation', 'running')
 //   localStorage.setItem('aep:mock:validation-attempt', 'repeat')
 //
@@ -544,17 +616,24 @@ export const VALIDATION_ATTEMPTS: ValidationAttempt[] = ["first", "repeat"];
 const RUNNING_REPEAT: MilestoneRunView = run({
   state: "running",
   endedAt: null,
-  validation: { verdict: "failed", issue: 12, reportPath: REPORT_PATH },
+  validation: { verdict: "failed", issue: 30, reportPath: REPORT_PATH },
   cycles: [
     CODING_1,
     validationCycle(2, "failed"),
     CODING_3,
-    { ...VALIDATION_IN_FLIGHT, id: "cycle-4", createdAt: "2026-07-10T10:24:00Z" },
+    {
+      ...VALIDATION_IN_FLIGHT,
+      id: "cycle-4",
+      createdAt: "2026-07-10T10:24:00Z",
+    },
   ],
 });
 
 /** True when the scenario/attempt pair is the repeat-attempt shape. */
-function isRepeat(scenario: ValidationScenario, attempt: ValidationAttempt): boolean {
+function isRepeat(
+  scenario: ValidationScenario,
+  attempt: ValidationAttempt,
+): boolean {
   return scenario === "running" && attempt === "repeat";
 }
 

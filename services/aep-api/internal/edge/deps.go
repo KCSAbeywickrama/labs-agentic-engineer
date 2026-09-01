@@ -19,6 +19,7 @@ package edge
 import (
 	deliveryhttpapi "github.com/wso2/aep/aep-api/internal/delivery/httpapi"
 	dephttpapi "github.com/wso2/aep/aep-api/internal/dependencies/httpapi"
+	identityhttpapi "github.com/wso2/aep/aep-api/internal/identity/httpapi"
 	opshttpapi "github.com/wso2/aep/aep-api/internal/ops/httpapi"
 	orghttpapi "github.com/wso2/aep/aep-api/internal/organization/httpapi"
 	"github.com/wso2/aep/aep-api/internal/platform/auth"
@@ -35,6 +36,10 @@ import (
 // (untouched fields nil-guard or 503 in their handlers).
 type Deps struct {
 	TaskTokens *auth.TaskTokenManager
+
+	// PublisherTokens verifies Thunder publisher CC JWTs on the MCP mount
+	// (AgentsScopedVerifier fallback). Nil keeps MCP BFF-only (local/tests).
+	PublisherTokens *auth.PublisherTokenVerifier
 
 	// DesignSvc is the narrow design-dependency reader backing the edge's own
 	// GET /projects/{name}/design/dependencies handler (handlers_design.go) —
@@ -53,4 +58,5 @@ type Deps struct {
 	Projects      *projectshttpapi.Handlers
 	Delivery      *deliveryhttpapi.Handlers
 	Dependencies  *dephttpapi.Handlers
+	Identity      *identityhttpapi.Handlers
 }

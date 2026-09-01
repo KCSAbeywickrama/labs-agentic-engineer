@@ -1,6 +1,6 @@
 ---
 name: architecture
-description: Use when deriving or enriching a component's design — deciding the component decomposition, filling a scaffolded design.json (language, dependencies, description, pinned skills), or resolving/reconsidering any dependency.
+description: Reuse org catalog resources when deriving or enriching a component's design — deciding the component decomposition, filling a scaffolded design.json (language, dependencies, description, pinned skills), or resolving/reconsidering any dependency.
 metadata:
   aep:
     kind: platform
@@ -41,9 +41,21 @@ component's build actually needs as a `skillsPinned` array **inside that
 component's `specs/design/components/<name>/design.json`** — use the exact
 catalog names, e.g. a Ballerina API service →
 `["openapi-conventions", "ballerina"]` (a Go one → `["openapi-conventions",
-"go"]`); a web-application → `["wireframes", "react-webapp"]`. Add
-`"api-management"` to any service that sits behind the gateway, and
-`"thunder-authentication"` to **both** sides of sign-in — the SPA *and* every
+"go"]`); a web-application → `["wireframes", "react-webapp", <design system>]`,
+where `<design system>` is the skill name in the **UI design system** section of
+the Organization defaults block in your instructions. A web app's UI toolkit is
+a settled organization decision, so pin it on **every** web-application rather
+than leaving it to a description to trigger — and read the name from that
+section every time instead of remembering one, because it differs per
+organization. If that section is absent or empty, pin only the two stack skills.
+Never substitute a design system the organization defaults do not name.
+
+**Pin the design system; do not consult it.** A design system is built against,
+not designed with — it is the coding run's to load, and its theming is a settled
+organization decision that no design-time question reopens. Never ask the user
+about colors, themes, or look and feel. Add `"api-management"` to any service
+that sits behind the gateway, and `"thunder-authentication"` to **both** sides
+of sign-in — the SPA *and* every
 protected backend it calls, since that skill owns how each resolves the caller's
 role. It is a JSON key on the component's design object, so include it when you
 write that `design.json` (addFile/editFile) — `design.json` is its only home.
@@ -120,12 +132,17 @@ violations:
   "exposure": "internet",             // "internet" (public) | "intranet" (internal only)
   "dependencies": [ /* see below — every arrow in Interactions appears here */ ],
   "description": "One paragraph: single responsibility, port/entrypoint expectations, and what it explicitly does NOT do.",
+  "stories": [1, 2, 4],               // PRD story numbers THIS component serves — the build gate refuses the tag while any story is claimed by nobody
+  "skillsPinned": ["openapi-conventions", "ballerina"], // the skills this component's build needs — see the field above
   "endpoint": { "name": "http" } // optional; see below
 }
 ```
 
 `name`, `type`, `version`, `language`, `buildpack`, `appPath`, `entrypoint`,
-`exposure`, `description`, and `dependencies` are required. To CHANGE a
+`exposure`, `description`, `dependencies`, `stories` and `skillsPinned` are
+required — `stories` and `skillsPinned` are as required as the rest, and a
+component missing either fails the build gate, so emit them in the SAME write
+rather than as a follow-up edit. To CHANGE a
 design.json, re-emit the whole corrected file (removeFile + addFile) — never
 patch JSON with anchored edits. On INVALID_JSON or SCHEMA_VIOLATION, fix what
 the message lists and re-emit.
@@ -141,12 +158,11 @@ into `workload.yaml` and the managed-API gateway binds to. The port lives in
 - **Preserved verbatim** where the platform has already written them:
   `exposesAPI`, `componentAgentInstructions`, and any dependency
   `status`/`reason`.
-- **Recomputed and overwritten** on every save: a dependency's `wiring` object,
-  and the component's `stories` array — the platform restamps it from the
-  design.cell citations, so cite stories in the CELL, never here.
+- **Recomputed and overwritten** on every save: a dependency's `wiring` object.
   The platform derives its `ref` and its env-var names from the dependency's name
   and its resource type's declared outputs, so anything you write there is
-  discarded.
+  discarded. `stories` is NOT in this class — it is yours to author, per the
+  **stories** field above.
 
 ### dependencies — one entry per Interactions arrow
 
@@ -163,29 +179,34 @@ schema violation that both the zod write-gate and the Go fold gate reject.
 | `component` | a SIBLING in this design that this component CALLS | the sibling's own name | — | this design |
 | `org-service` | a service ANOTHER project publishes for cross-project use | the provider's exact name, **copied verbatim** | — | `list_org_endpoints`, then `list_org_component_endpoints` |
 | `platform-resource` | a backing resource the platform provisions (database, cache, IDP) | **your choice** — it becomes the env-var prefix | `resourceType` (a registered type), `parameters` | `list_platform_resource_types` |
-| `external` | a system OUTSIDE the platform (a SaaS API, a legacy service) | a registered resource's exact name, else your choice | `style` (`rest-api`\|`sdk`), then `specPath` or `package`; `config`; `candidates` | `list_external_resources` + `get_external_resource_schema`, else `web_search` |
+| `external` | a system OUTSIDE the platform (a SaaS API, a legacy service) | a **Registered External resource**'s exact name, else a **new** name for a **Project External resource** | `style` (`rest-api`\|`sdk`), then `specPath` or `package`; `config`; `candidates` | `list_external_resources` + `get_external_resource_schema`, else `web_search` |
 
-**Discover before you invent.** Call that last column's tool before authoring the
-entry, and take the name and schema from what it returns rather than from the
-requirement's wording — a registered resource described as "transactional email
+**Reuse.** Call that last column's tool before authoring the entry, and take
+the name and schema from the matching row rather than from the requirement's
+wording — a **Registered External resource** described as "transactional email
 delivery" is the right reuse for an "email" need even when its name (`sendgrid`)
-doesn't echo the requirement. When nothing the catalog returns fills the role,
-leave the dependency unresolved rather than forcing a fit: a name that resolves
-to nothing is worse than an absent one.
+doesn't echo the requirement. When several rows could fill the role, the
+org-level one wins (a Registered External over a new Project External name; an
+org-service over a sibling you would otherwise add; a listed cluster resource
+type for `resourceType`). This step is done when every `external`,
+`org-service`, and `platform-resource` emitted this turn is taken from this
+turn's matching `list_*` result (exact `name` or `resourceType`), unless this
+turn is a user-asked reconsider. When nothing the catalog returns fills the
+role, omit the entry and list the gap under **Needs your input** rather than
+coining a name: a `resourceType` that was not in this turn's
+`list_platform_resource_types` result fails Build.
 
 ```json
 "dependencies": [
   { "kind": "component", "name": "expense-api" },
-  { "kind": "platform-resource", "name": "orders-db", "resourceType": "postgres" },
-  { "kind": "external", "name": "stripe", "style": "sdk", "package": "npm:stripe@^14",
-    "config": [ { "key": "STRIPE_API_KEY", "secret": true, "description": "Your Stripe secret API key" } ] },
-  { "kind": "external", "name": "github", "style": "rest-api",
-    "description": "GitHub REST API for issues + PRs." }
+  { "kind": "platform-resource", "name": "orders-db", "resourceType": "postgres-cnpg" },
+  { "kind": "external", "name": "github",
+    "config": [ { "key": "GITHUB_TOKEN", "secret": true, "description": "GitHub personal access token" } ],
+    "description": "Call GitHub issues + PRs — consumption instructions from the Registered row." }
 ]
 ```
 
-The `github` entry is unresolved on purpose: `style: "rest-api"` with no
-`specPath` computes `unresolved`/`needs-spec` — expected, not an error to fix.
+The `github` entry is authored from the catalog row.
 
 #### Reading a provider's real contract
 
@@ -207,8 +228,10 @@ operations its contract actually exposes:
   list one "for reference".
 - **A role is not a name.** The requirement says "the organization's directory
   service"; the provider is usually called something else (`employee-service`).
-  Look it up — a name coined from the role words matches no provider and
-  hard-fails the build.
+  The same for a `platform-resource`: the PRD names a capability, `resourceType`
+  is the catalog row's `name` from this turn's `list_platform_resource_types`.
+  Copy that `name`. Look it up — a name coined from the role or capability words
+  matches no provider or type and hard-fails the build.
 - **A `platform-resource`'s `name` becomes the env-var prefix** for every one of
   its outputs (`orders-db` → `ORDERS_DB_HOST`, and for a SPA
   `window._env_.ORDERS_DB_*`), so pick a clear one: renaming it later renames the
@@ -230,19 +253,24 @@ operations its contract actually exposes:
   the spec implies users sign in, declare it on BOTH the SPA and each protected
   service under the SAME dependency `name` — that shared name is what ties
   sign-in to token-carrying API calls. With no such dependency the SPA deploys
-  unable to sign in. For `thunder-app` only, proposing the `scopes` parameter is
-  allowed (default `openid profile email`); every other resource type keeps the
-  no-invented-parameters rule, and `redirectUris` are platform-managed — never
-  propose them. `thunder-authentication` owns the full rule.
+  unable to sign in. `thunder-app` takes no `parameters`: `security-design`
+  authors the Thunder client on `security.json`, and the platform registers the
+  callback URI (`redirectUris` — platform-managed, never proposed here).
+  `thunder-authentication` owns the coding-time rule, and `security-design`
+  owns which roles sign in through it.
 
 ### Resolving an `external` dependency
 
-`external` is the one kind with real-world discovery to do — the SaaS or legacy
-system lives in no catalog you can look up directly. Work it in order:
+`external` is the one kind with real-world discovery to do. Work it in order:
 
-1. **Reuse first**, via the table's tool column. A registered resource whose
-   description fits resolves from the registry regardless of
-   `style`/`specPath`/`package`. Don't re-discover what the org already has.
+1. **Reuse first.** Call `list_external_resources`. Prefer a fitting
+   **Registered External resource** — take its exact name, config-key schema,
+   consumption instructions, and org resource docs pointers.
+   Write consumption instructions into the dependency `description`.
+   That name resolves from the registry regardless of
+   `style`/`specPath`/`package`. A user-asked reconsider may switch to a
+   different Registered name, or create a **Project External resource** under
+   a **new** name — a separate catalog record; org values stay on the Registered name.
 2. **`web_search` for candidates** when nothing registered fits. Stop at the
    options actually worth presenting — often 2–3 genuine contenders, sometimes
    one when a real signal already points to it.
@@ -250,19 +278,21 @@ system lives in no catalog you can look up directly. Work it in order:
    specific HTTP endpoints; `sdk` when it codes against a vendor SDK/library —
    the candidate's own docs make it obvious ("REST API reference" vs "install our
    SDK").
-4. **Resolve the contract.** A `rest-api` needs a `specPath`: prefer a URL you
-   discovered — confirm it is a real OpenAPI document with `fetch_openapi_spec`
+4. **Resolve the contract.** A `rest-api` needs a `specPath`: prefer an OpenAPI
+   URL from org resource docs on the Registered row, else a URL you discovered —
+   confirm it is a real OpenAPI document with `fetch_openapi_spec`
    (it fetches and validates, stores nothing), then set `specPath` to that URL. If
    the user hands you a spec file, or the API is private/undocumented, `addFile`
    it to
    `specs/design/components/<component>/dependencies/<dep-name>.openapi.yaml` and
-   point `specPath` at that repo-relative path. With NO `specPath` the dep stays
-   `needs-spec` and the build gate asks the user for one. Don't hand-author a
+   point `specPath` at that repo-relative path. With NO `specPath` and no catalog
+   hit the dep stays `needs-spec` and the build gate asks the user for one. Don't hand-author a
    whole spec — the coding agent researches the API. An `sdk` needs `package`
    instead: one ecosystem-prefixed identifier (`npm:`, `go:`, `pypi:`), version
    inline but optional.
 5. **Derive `config` keys** from the contract — a `rest-api`'s
-   `components.securitySchemes`, an `sdk`'s auth documentation.
+   `components.securitySchemes`, an `sdk`'s auth documentation. A reused
+   Registered row already named the keys — keep them.
 6. **Emit the outcome**, never a `status`/`reason`:
    - **A real SIGNAL points to one option → emit it resolved**, with `style` +
      (`package` or `specPath`) and `config`. A signal is one of: the requirement
@@ -312,11 +342,12 @@ which fields are present, first match wins:
 5. `style: "sdk"` with no `package` → `unresolved`/`needs-input`
 6. otherwise → `resolved`
 
-`component` and `platform-resource` are always `resolved` here. An `org-service`
-resolves on catalog visibility, and is `blocked`/`access-required` when the
-provider exists but this project cannot see it. The old `needsSpec` boolean is
-REMOVED from the schema — a draft carrying it fails the write-gate; migrate
-`needsSpec: true` to `style: "rest-api"`.
+`component` is always `resolved` here. A `platform-resource` is too — once
+emitted — so only emit one whose `resourceType` is a `name` from this turn's
+`list_platform_resource_types`. An `org-service` resolves on catalog visibility,
+and is `blocked`/`access-required` when the provider exists but this project
+cannot see it. The old `needsSpec` boolean is REMOVED from the schema — a draft
+carrying it fails the write-gate; migrate `needsSpec: true` to `style: "rest-api"`.
 
 ### Narrating the design turn
 
@@ -351,8 +382,10 @@ snapshot) and act on its current state.
   may name another. Pin the one they name — the same signal rule as discovery, so
   with no signal the choice stays theirs — then remove `candidates` per step 7.
 - **Unresolved.** Apply that kind's row in the table above.
-- **Already resolved — reconsider.** Present fresh alternatives as `candidates`,
-  or repin to the one the user names.
+- **Already resolved — reconsider.** This is the only branch that may leave a
+  catalog row that still fills the role. Present fresh alternatives as
+  `candidates`, or repin to the Registered name the user picks, or emit a
+  **Project External resource** under a **new** name.
 
 Edit ONLY that one dependency's entry: re-emit the component's whole
 `design.json` (never a patch) with every other field and dependency carried over
@@ -361,8 +394,9 @@ exactly as they were.
 ### Descriptions, and the per-component artifacts
 
 Every dependency carries a one-line `description`: what the target is and how
-this component uses it. Source it per kind — an `external`'s says which
-endpoints/SDK and which auth scheme; an `org-service`'s says the specific
+this component uses it. Source it per kind — an `external`'s is the consumption
+instructions when the name is a Registered External resource; an `org-service`'s
+says the specific
 operations it calls from the discovered contract, or plainly that no contract was
 resolvable, never a guess; a `platform-resource`'s says what it stores. The
 console shows it in the dependency drawer and the coding agent relies on it to

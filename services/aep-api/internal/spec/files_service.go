@@ -46,7 +46,9 @@ import (
 	"strings"
 
 	"github.com/wso2/aep/aep-api/internal/platform/designspec"
+	"github.com/wso2/aep/aep-api/internal/platform/gitfs"
 	"github.com/wso2/aep/aep-api/internal/platform/secrets"
+	"github.com/wso2/aep/aep-api/internal/platform/securityspec"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 )
 
@@ -189,6 +191,13 @@ type FilesService interface {
 	// why the fan-out is expensive AND incoherent.
 	Bundle(ctx context.Context, orgID, projectID, prefix, at string) (*FileBundle, error)
 	Apply(ctx context.Context, orgID, projectID string, req ApplyRequest) (*ApplyResult, []Conflict, error)
+	// PutReferences replaces the project's reference documents — the files
+	// attached on the create view. They are NOT spec files and never enter the
+	// repo (console ADR-0017); the workspace engine stores them beside the
+	// mirror and overlays them into each turn's snapshot. Hence a method on
+	// this service rather than a path through Apply: the specs/ write scope,
+	// the baseSha preconditions, and the commit itself all mean nothing here.
+	PutReferences(ctx context.Context, orgID, projectID string, docs []gitfs.ReferenceDoc) error
 }
 
 type service struct {
@@ -230,6 +239,17 @@ func (s *service) resolveRef(ctx context.Context, orgID, projectID string) (sour
 		return sourcecontrol.RepoRef{}, err
 	}
 	return sourcecontrol.ResolveWorkspaceRef(ctx, s.git.Resolver(), orgID, repo)
+}
+
+// PutReferences replaces the project's stored reference documents. Validation
+// (names, per-file size, count) belongs to the engine, which owns the store and
+// is the only thing that can enforce it — this is a thin ref-resolving pass.
+func (s *service) PutReferences(ctx context.Context, orgID, projectID string, docs []gitfs.ReferenceDoc) error {
+	ref, err := s.resolveRef(ctx, orgID, projectID)
+	if err != nil {
+		return err
+	}
+	return s.git.Workspace().PutReferences(ctx, ref, docs)
 }
 
 // List returns every blob at the branch tip, filtered to those whose path has
@@ -533,6 +553,20 @@ func checkPreconditions(req ApplyRequest, current map[string]string) []Conflict 
 // gate uses) plus the name==dir rule; any other .json gets a cheap parseability
 // check. Warnings never block the commit.
 func softValidate(path, content string) []Warning {
+	// The security.json document is the ONE spec file the platform later acts on
+	// deterministically — creating directory roles and test users from it at
+	// build time — so a malformed one is worth flagging the moment it is
+	// written, not three steps later when the build refuses.
+	if path == securityspec.Path {
+		if _, err := securityspec.Parse([]byte(content)); err != nil {
+			var ve *securityspec.ValidationError
+			if errors.As(err, &ve) {
+				return []Warning{{Path: path, Code: ve.Code, Message: ve.Message}}
+			}
+			return []Warning{{Path: path, Code: securityspec.CodeSchemaViolation, Message: err.Error()}}
+		}
+		return nil
+	}
 	if dir, ok := componentDesignDir(path); ok {
 		if err := designspec.ValidateComponentDesignInDir([]byte(content), dir); err != nil {
 			var ve *designspec.ValidationError

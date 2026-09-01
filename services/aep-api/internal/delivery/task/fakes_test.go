@@ -22,6 +22,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/wso2/aep/aep-api/internal/delivery"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
@@ -40,7 +41,37 @@ type fakeIssues struct {
 	// milestoneOf records the milestone each seeded issue belongs to, so
 	// ListMilestoneIssues can answer the plan turn's membership read.
 	milestoneOf map[int]int
+	// closed/reopened/moved record the three writes the plan path must never make.
+	closed   []int
+	reopened []int
+	moved    []string
+	// hostComments is what the HOST holds on each issue — the read side, as
+	// distinct from `comments`, which records the bodies this fake was asked to
+	// write. commentReads/lastCommentPerIssue prove whether the read happened at
+	// all and what cap it asked for; failComments makes it fail.
+	hostComments        map[int][]sourcecontrol.IssueComment
+	commentReads        int
+	lastCommentPerIssue int
+	failComments        bool
+	// The overlap probe (see the two milestone reads below): the comment read
+	// closes commentStarted on entry, and the issue list waits on
+	// awaitCommentStart. Both nil unless a test wires them with overlapProbe.
+	commentStarted    chan struct{}
+	awaitCommentStart chan struct{}
 }
+
+// overlapProbe makes the issue list block until the comment read has started,
+// so a test can assert the two host reads OVERLAP without measuring time.
+func (f *fakeIssues) overlapProbe() *fakeIssues {
+	ch := make(chan struct{})
+	f.commentStarted = ch
+	f.awaitCommentStart = ch
+	return f
+}
+
+// writer is the fake wearing the domain's issue-write surface, which is how the
+// plan tap mints through it.
+func (f *fakeIssues) writer() *delivery.IssueWriter { return delivery.NewIssueWriter(f) }
 
 func newFakeIssues() *fakeIssues {
 	return &fakeIssues{byNumber: map[int]*sourcecontrol.IssueInfo{}, nextNum: 100, comments: map[int][]string{}, milestoneOf: map[int]int{}}
@@ -95,6 +126,17 @@ func (f *fakeIssues) seedInMilestone(issue sourcecontrol.IssueInfo, milestone in
 }
 
 func (f *fakeIssues) ListMilestoneIssues(_ context.Context, _, _ string, filter sourcecontrol.MilestoneIssuesFilter) ([]sourcecontrol.IssueInfo, error) {
+	// The concurrency probe: block the issue list until the comment read has
+	// STARTED. Sequential reads would leave this waiting forever, so the test
+	// asserting overlap fails by timing out rather than by a stopwatch. Waited
+	// on before the lock is taken — the comment read needs it too.
+	if f.awaitCommentStart != nil {
+		select {
+		case <-f.awaitCommentStart:
+		case <-time.After(2 * time.Second):
+			return nil, fmt.Errorf("comment read never started: the two host reads are sequential")
+		}
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	var out []sourcecontrol.IssueInfo
@@ -111,6 +153,46 @@ func (f *fakeIssues) ListMilestoneIssues(_ context.Context, _, _ string, filter 
 		out = append(out, *issue)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Number < out[j].Number })
+	return out, nil
+}
+
+// seedComment appends a host comment to an issue, in thread order.
+func (f *fakeIssues) seedComment(number int, c sourcecontrol.IssueComment) *fakeIssues {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.hostComments == nil {
+		f.hostComments = map[int][]sourcecontrol.IssueComment{}
+	}
+	f.hostComments[number] = append(f.hostComments[number], c)
+	return f
+}
+
+func (f *fakeIssues) ListMilestoneIssueComments(_ context.Context, _, _ string, number, perIssue int) (map[int][]sourcecontrol.IssueComment, error) {
+	// Announce the start before contending for the lock, so the issue list this
+	// releases is not waiting on a lock this call is about to take.
+	if f.commentStarted != nil {
+		close(f.commentStarted)
+		f.commentStarted = nil
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.commentReads++
+	f.lastCommentPerIssue = perIssue
+	if f.failComments {
+		return nil, fmt.Errorf("boom: comment read failed")
+	}
+	out := map[int][]sourcecontrol.IssueComment{}
+	for n, cs := range f.hostComments {
+		if f.milestoneOf[n] != number || len(cs) == 0 {
+			continue
+		}
+		// The host answers the NEWEST perIssue, still in thread order — mirror
+		// that here so a test can prove the tail is what survives the cap.
+		if perIssue > 0 && len(cs) > perIssue {
+			cs = cs[len(cs)-perIssue:]
+		}
+		out[n] = append([]sourcecontrol.IssueComment(nil), cs...)
+	}
 	return out, nil
 }
 
@@ -175,6 +257,43 @@ func (f *fakeIssues) RemoveLabel(_ context.Context, _, _ string, number int, lab
 		}
 	}
 	i.Labels = kept
+	return nil
+}
+
+// SetIssueMilestone exists so the fake satisfies delivery.IssueOps. The plan tap
+// assigns a milestone by RIDING the create, never by a follow-up move, so a
+// planner that called this would be spending a second GitHub request per Task.
+func (f *fakeIssues) SetIssueMilestone(_ context.Context, _, _ string, number, milestoneNumber int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.moved = append(f.moved, fmt.Sprintf("%d>m%d", number, milestoneNumber))
+	return nil
+}
+
+// CloseIssue and ReopenIssue exist so the fake satisfies delivery.IssueOps —
+// the writer's port is the domain's WHOLE issue-write surface, while the plan
+// tap only ever mints and edits. Both record their calls so a test can assert
+// the planner never closes or reopens anything.
+func (f *fakeIssues) CloseIssue(_ context.Context, _, _ string, number int, comment string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.closed = append(f.closed, number)
+	if comment != "" {
+		f.comments[number] = append(f.comments[number], comment)
+	}
+	if i := f.byNumber[number]; i != nil {
+		i.State = "closed"
+	}
+	return nil
+}
+
+func (f *fakeIssues) ReopenIssue(_ context.Context, _, _ string, number int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.reopened = append(f.reopened, number)
+	if i := f.byNumber[number]; i != nil {
+		i.State = "open"
+	}
 	return nil
 }
 
@@ -306,11 +425,12 @@ func agentIssue(number int, title, body string) sourcecontrol.IssueInfo {
 		Body:   body,
 		State:  "open",
 		URL:    fmt.Sprintf("https://github.com/o/r/issues/%d", number),
-		Labels: []string{delivery.LabelAgentWork},
+		Labels: []string{delivery.LabelAgentWork, delivery.KindDevelopment},
 	}
 }
 
-// gateIssue builds a seeded dispatch gate: the aep:provision label, no `aep`.
+// gateIssue builds a seeded dispatch gate: kind `provision`, and deliberately
+// NOT armed — nothing may work a gate.
 func gateIssue(number int, depName string) sourcecontrol.IssueInfo {
 	return sourcecontrol.IssueInfo{
 		Number: number,
@@ -318,20 +438,34 @@ func gateIssue(number int, depName string) sourcecontrol.IssueInfo {
 		Body:   "Provide this dependency's configuration values in the architecture drawer.",
 		State:  "open",
 		URL:    fmt.Sprintf("https://github.com/o/r/issues/%d", number),
-		Labels: []string{delivery.LabelProvisionGate},
+		Labels: []string{delivery.KindProvision},
 	}
 }
 
-// validationIssue builds the project's seeded validation issue: one label, and
-// deliberately NOT the `aep` working-set one.
+// validationIssue builds the project's seeded validation task: ARMED like any
+// other agent work, and of a kind no working set includes.
 func validationIssue(number int) sourcecontrol.IssueInfo {
 	return sourcecontrol.IssueInfo{
 		Number: number,
-		Title:  "Validate the deployed system against its acceptance criteria",
+		Title:  "Validate the deployed system against its validation criteria",
 		Body:   "Author e2e tests and run them against the deployed system.",
 		State:  "open",
 		URL:    fmt.Sprintf("https://github.com/o/r/issues/%d", number),
-		Labels: []string{delivery.LabelValidationWork},
+		Labels: []string{delivery.LabelAgentWork, delivery.KindValidation},
+	}
+}
+
+// bugIssue builds a platform-minted defect: armed, kind `bug`, sourced from the
+// build that found it. It is `coding` to the console like planned work, and
+// tells itself apart from it only by its kind.
+func bugIssue(number int, title string) sourcecontrol.IssueInfo {
+	return sourcecontrol.IssueInfo{
+		Number: number,
+		Title:  title,
+		Body:   "The build failed and failed again on a re-trigger.",
+		State:  "open",
+		URL:    fmt.Sprintf("https://github.com/o/r/issues/%d", number),
+		Labels: []string{delivery.LabelAgentWork, delivery.KindBug, delivery.SrcBuild},
 	}
 }
 

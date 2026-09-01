@@ -41,9 +41,11 @@ the genai turn engine (runner/broker/sweeper), and the files / design / skills s
 | `Workspace` · `GitOpsService` · `RepoService` | needs | `sourcecontrol` — the gitfs engine hosting all spec + skills git content |
 | `resourceTypeCatalog` (returns `CRTType`) | needs | `dependencies` — the PE-authored CRT markers + declared outputs, projected at the root |
 | `AnthropicKeyResolver` · git-token `Resolver` | needs | `platform/secrets` — per-org keys + sealed git tokens |
-| `ArtifactService` · `ArtifactStore` · `SplitFrontmatter` | offers | `delivery` / `projects` / `dependencies` — design reads, spec-save, status snapshots |
+| `ArtifactService` · `ArtifactStore` · `SplitFrontmatter` | offers | `delivery` / `projects` / `dependencies` / `identity` — design reads, spec-save, status snapshots; `identity` reads `security.json` from the design bundle AT THE TAG being built, never at HEAD |
 | `HardConfigEdges` | offers | `projects` (deploy order) — which sibling addresses a component cannot start without |
 | `DescriptorWriter` | offers | `projects` — stamps `specs/.agentic-engineer.toml` into a repo at project create |
+| `Kickoff` | offers | `projects` (create) · `spec/files` (references upload) — fires the project's opening `/start` turn |
+| `TurnRepository.Newest` | offers | `projects` — the status poll's `spec.agent`: is an agent working on the spec right now |
 | `CredentialsRefreshService`-adjacent turn/tag reads | offers | delivery/build (SpecTagger, validation criteria) |
 
 ## Owns
@@ -94,6 +96,32 @@ the genai turn engine (runner/broker/sweeper), and the files / design / skills s
   the instruction and derives the flow's eager skills from the spec, so a console CTA, a typed command and
   a playground run produce identical turns (services/agents/design/ADR-0003). This domain holds NO prompt
   text; the flow token is kept here because it also gates web search and MCP minting for design turns.
+- **The kickoff** (`kickoff.go`) — the project's opening `/start`, fired server-side at creation so the
+  journey starts itself instead of waiting on a Generate-spec click. Room-scoped like every console turn,
+  carrying the creating user's bearer (which is what lets the agent join the spec room), on the project's
+  current thread. Idempotent on "has this project ever run a turn", because it has two triggers: project
+  create, and the references upload a create with `referencesPending` held it for. Runs INLINE, so the
+  create answers only once the turn row exists — that is what keeps `spec.agent == "never-started"`
+  meaning "no turn has ever run" rather than also "starting right now", which no surface could tell
+  apart. (`""` is a different fact: a turn HAS run and the newest one completed.) Bounded
+  (20s) and error-swallowing: a kickoff that cannot start never fails the creation, and the spec
+  view's empty state offers it instead.
+- **Design staleness is derived, never stored** (#575). "Have the requirements moved since the
+  design was written?" is answered by reading the requirements at the commit the newest successful
+  `/design` turn recorded reading the project at, and comparing that reduction against today's —
+  `RequirementsFingerprint` over a tree listing (path + blob sha, so no content is read). Nothing is
+  stamped, so nothing falls out of sync, and the question is answerable for projects predating the
+  check. A stored fingerprint was rejected because a turn NEVER commits: its file changes stream to
+  the collab doc and the collab server commits them later, carrying no turn id and no author — there
+  is no moment the platform controls, and no way to tell that flush from a hand edit. The build gate
+  refuses on it (`DESIGN_OUTDATED`), which is what makes it a block rather than a display.
+- **A running turn carries its own display record** (#562). `agent_turns` stores the transcript
+  line the turn started from plus its author, and `TurnStatus` serves them. Not redundant with the
+  journal that rides to the agents service: that store persists a turn's transcript only when the
+  turn ENDS, so between dispatch and landing there is nowhere else to read them from — and that
+  window is the whole of a kickoff, which no browser sent and none has a local copy of. Empty for
+  an unattributable turn (an M2M token) and for every row written before the record existed, which
+  the console renders as "paint nothing" rather than an empty bubble.
 - **Persistence**: the `agent_turns` gorm lives in this domain (`repository_turn.go` over the
   `agent_turn.go` entity), single write-authority — as does `project_conversations`
   (`repository_conversation.go`): the project's CURRENT chat thread pointer (#430), server-minted,
@@ -105,6 +133,21 @@ the genai turn engine (runner/broker/sweeper), and the files / design / skills s
 ## Invariants — don't break
 - **Single write-authority** over the git spec-content store and its `v<N>` tags — every save/tag/discard
   runs through this domain's gitfs Workspace engine; no other domain writes spec content.
+- **A `/start` turn carries what the agent cannot read for itself, and nothing more.** Two channels,
+  both best-effort and both silent when empty: the captured idea (from the dot-led descriptor, which
+  every turn snapshot strips) and the reference documents attached at create (paths only). References
+  are NOT git content and there is no base commit to read them from — they are stored off-git and
+  overlaid into the turn's snapshot at `specs/requirements/references/` (console ADR-0017), which is
+  the path listed. Text references land in the turn's text map; binary ones (PDF, images) never do —
+  they reach the agents service as native file attachments instead, which is what keeps a PDF's bytes
+  out of the text channel. Neither steer may fail a kickoff: an unreadable descriptor or an unlistable
+  store degrades to "no steer". When both are empty the turn is byte-identical to one from before
+  either channel existed — which is the path every pre-existing project takes.
+- **The Files API is text-only.** `WriteOp.encoding` and `FileContent.encoding` are gone with the
+  reference-document reversal (ADR-0017): the one binary this platform had to carry now travels the
+  references endpoint, off git, so nothing binary reaches `files/apply` or `read-file` at all. The
+  5 MiB cap measures the bytes as sent. A future binary-in-git need must argue for an encoding field
+  on its own merits rather than inheriting one.
 - **One authority for which wiring edges are HARD** (`wiring_edges.go`). A hard edge is an address the
   platform must have before a component can serve its first useful byte — today a web app's sibling
   *services*, whose cluster Service URLs are injected as pod env for nginx (`<DEP>_URL`). `projects`
@@ -128,6 +171,14 @@ the genai turn engine (runner/broker/sweeper), and the files / design / skills s
     resource that does not exist; a bounded-name test pins it.
   - Fail-closed: a design declaring a platform-resource whose catalog is unreachable returns
     `ErrResourceCatalogUnavailable` (503) rather than silently skipping either derivation.
+  - **Unknown `resourceType` is refused at build claim, not at design save.** After the catalog
+    fetch, a membership pass (`rejectUnknownResourceTypes`) returns `ErrUnknownResourceType`
+    when a `platform-resource` names a CRT that is not installed. Delivery maps that to HTTP 409
+    and cuts no tag — a design/task-breakdown agent inventing a type must not start a Temporal
+    run. An empty or nil catalog (`PLATFORM_RESOURCES_ENABLED=false`) skips membership so the
+    disabled path does not reject every build. Membership is against the live catalog map, never
+    a hardcoded type name (ADR-0007). Wiring derivation still treats an unknown type as "not
+    derivable yet"; the membership pass is a separate gate before persist.
 - The `/collab/validate` oracle recovers the acting org from VERIFIED claims and refuses any room whose
   `spec-<org>-` prefix mismatches — never a hint of whether the room exists. Platform-wide rules (tenant
   gate, secrets fence) → [../../README.md](../../README.md).

@@ -9,14 +9,14 @@ metadata:
 
 # WSO2 Labs Agentic Engineer validation task
 
-You are validating a deployed system against its acceptance criteria.
+You are validating a deployed system against its validation criteria.
 Deliverable: **one PR** containing committed e2e tests and a validation
 report — everything under `tests/`. A failing criterion is report
 *content*, not a task failure — you open the PR either way.
 
-The acceptance oracle (`specs/validation/validation-criteria.json`) is
-**read-only input**: you read it to know what to test, but you never
-modify it or anything else under `specs/`. All artifacts you produce
+The validation criteria (`specs/validation/validation-criteria.json`) are
+**read-only input**: you read them to know what to test, but you never
+modify them or anything else under `specs/`. All artifacts you produce
 live under `tests/`.
 
 The `aep` skill's authentication model (preconfigured `git`/`gh`),
@@ -31,6 +31,12 @@ directory (templates under `assets/`, the report generator under
 must invoke by absolute path is under `$AEP_SKILLS_DIR/aep-validation/` —
 the runner sets it.
 
+**Every command below runs from the repo root, and none of them needs a
+`cd`.** One shell serves the whole run, so a `cd` you make persists into
+every later call and a relative one is right only once. `Read`, `Write`
+and `Edit` never move with the shell — their relative paths always
+resolve from the repo root.
+
 ## Workflow
 
 ### 1. Read the issue
@@ -41,14 +47,15 @@ The prompt carries the issue URL. Read it with comments:
 gh issue view <url> --comments
 ```
 
-The body must contain: the **acceptance oracle** section (criteria file
+The body must contain: the **Validation criteria** section (criteria file
 path + per-criterion tables), a **Test layout** section, and **Report**
 requirements. If a required section is missing, post an issue comment
 naming what's missing and exit with failure.
 
-Deployed endpoint URLs and any test credentials are NOT in the issue —
-they are runtime inputs kept out of the public issue. The endpoints are
-already on disk for you (step 4); credentials you request on demand.
+Deployed endpoint URLs are NOT in this issue — they are runtime inputs the
+platform resolved for you and left on disk (step 4). Test-user logins are
+not here either: they are published in this milestone's roles gate ticket,
+which is a different issue (step 4).
 
 Post a brief opening comment (`Starting validation: <one-line plan>`).
 
@@ -105,49 +112,83 @@ probe, scan, or infer endpoints, and do not call the platform for them
 yourself; the URL is not something you can work out from inside the cluster.
 
 - **Endpoints** become `tests/e2e/targets.json` (step 5) and your target
-  list. Probe each URL (`curl -sf -o /dev/null <url>` or a playwright-cli
-  visit) before authoring. Never start, build, or deploy the app — you
-  validate what is already running; an unreachable endpoint → issue
-  comment + exit failure.
-- **A `.localhost` endpoint fails that probe for a reason that is not the
-  app.** curl and Chromium both implement RFC 6761: they resolve
-  `*.localhost` to loopback THEMSELVES, ignoring DNS and `/etc/hosts`. Inside
-  the runner pod loopback is the pod, so a plain `curl` gets connection
-  refused however healthy the deployment is. Do not read that as an
-  unreachable endpoint, and do not go hunting for the cause — resolve the
-  gateway from DNS and pin it per request:
+  list. Each one is reachable exactly as written: the runner probed them all
+  and exits before starting you if any did not answer, so there is no
+  unreachable-endpoint case for you to detect or report. Use the URL as
+  given — do not rewrite it to an IP or a cluster-internal name, which would
+  route around the gateway and stop testing what a user actually reaches.
+  Never start, build, or deploy the app; you validate what is already
+  running. If a request fails once you are authoring, that is a finding
+  about the app, not a target to go re-derive.
+- **Test users and their passwords** come from the **roles gate ticket**,
+  not from the context file and not from a spec file. A project whose design
+  declares roles gets one issue per version titled *Provision roles and test
+  users*, and the platform posts a comment on it carrying every test account's
+  login. Find that ticket in your own milestone:
 
   ```bash
-  GW=$(getent ahostsv4 development-default.openchoreoapis.localhost | awk 'NR==1{print $1}')
-  curl -sf -o /dev/null --resolve "<host>:19080:$GW" "<url>"
+  # newest gate in THIS milestone — only its table is current, and a rebuild can
+  # leave an older ticket beside it
+  GATE=$(gh issue list --repo <owner/repo> --label "aep:gate/roles" \
+    --milestone "$MILESTONE" --state all --json number,createdAt \
+    --jq 'sort_by(.createdAt) | .[-1].number // empty')
+  [ -n "$GATE" ] && gh issue view "$GATE" --repo <owner/repo> --comments
   ```
 
-  The browser needs the same override, which
-  `playwright.config.template.ts` already applies for you via
-  `--host-resolver-rules` — copy that file unedited and it self-configures.
-  Only treat an endpoint as genuinely down if it still fails WITH the
-  mapping.
-- **Test credentials (on demand):** request them only when a criterion
-  needs a login — POST the test-credentials endpoint with an optional
-  `role` hint (the role the flow requires). `AEP_TASK_ID` is this run's
-  validation cycle id; the bearer rides a file:
+  It is normally CLOSED — the platform resolves this gate itself — so
+  `--state all` is required, and the logins are a comment, so `--comments` is
+  too. `$MILESTONE` is the one you read in step 2; if it is empty here, read it
+  again rather than running the query without it — unfiltered, it returns
+  another version's ticket.
+
+  The logins are the markdown table under the `<!-- aep:test-users -->`
+  marker — the LAST such comment if the ticket carries more than one, since an
+  earlier one is a superseded build's. One row per account:
+
+  | Username | Password | Role | Cold start |
+  |---|---|---|---|
+  | `test-trainer` | `tdyjkfmq5t` | Trainer | no |
+  | `test-team-member` | `n3pe5cw8s4` | Team Member | yes |
+
+  Read the table, never the prose around it — a human may rewrite that at any
+  time, and the marker is what the platform guarantees.
+
+  **Which row.** Match the criterion's role to the `Role` column and use that
+  row. For a criterion that needs *a* signed-in user but names no role, use
+  the row with **Cold start: yes** — that is the role a person holds before
+  anyone grants them one. Do not reuse one role's login to exercise another
+  role's screens; that is the difference between judging a permission and
+  judging a page.
+
+  Export the pair in-session, per role, as you need it:
 
   ```bash
-  curl -sf -X POST "$AEP_PLATFORM_URL/internal/v1/validation/$AEP_TASK_ID/test-credentials" \
-    -H "Authorization: Bearer $(cat "$AEP_BEARER_FILE")" \
-    -H "Content-Type: application/json" \
-    --data '{"role":"admin"}' > /tmp/creds.json
+  export AEP_E2E_USERNAME='test-trainer' AEP_E2E_PASSWORD='…'
   ```
 
-  The response is `{ "username", "password", "mock": true|false, "note":
-  "..." }`. Export it in-session and never commit it:
-  `export AEP_E2E_USERNAME=… AEP_E2E_PASSWORD=…`. When `mock` is true the
-  account is a shared stand-in (real user provisioning isn't implemented
-  yet) — use it, and state in your PR description and closing comment that
-  auth-gated criteria ran against mock credentials, since such a login may
-  legitimately fail against a generated app that doesn't recognise it.
-  Only if the request itself errors do you let the affected criterion land
-  `not_run`, blocker noted.
+  **Never write a password into anything you commit or post** — not the
+  specs, not `targets.json`, not the report, not the PR body, not an issue
+  comment. Read it from the ticket into the environment and leave it there.
+  Playwright specs take it from `process.env`, never as a literal.
+
+  These accounts are the platform's own, created for this purpose. They hold
+  only the project's application roles, so a criterion judged with one is
+  judged against a real sign-in.
+
+  **When a login is missing.** Never improvise one, and never fall back to a
+  guess like `admin`/`admin` — a verdict from a login the app does not
+  recognise is worth less than no verdict. Land the affected criteria
+  `not_run` and say WHICH of these you hit, in the report and in your closing
+  comment; they mean different things and only some are a problem:
+
+  | What you see | What it means | Report it as |
+  |---|---|---|
+  | No gate ticket in the milestone | The design declares no roles — this system has no sign-in | Expected; no finding |
+  | A ticket, but no login table | Every role the design declares is one the platform does not own, so it could provision no usable account | A provisioning problem — say so |
+  | The ticket is OPEN and carries a failure comment | Provisioning failed; quote the cause | A provisioning problem — say so |
+  | A table, but no row for the role you need | That account was refused or could not be enrolled — the ticket's other comment says which | A provisioning problem — name the role |
+  | A row whose password says *unavailable* | The platform holds the account but could not publish its password | A platform problem — name the account |
+  | No row has **Cold start: yes** | The design says a caller with no role reaches nothing. Use the least-privileged role the criterion implies; if it implies none, the criterion is unreachable by design | Expected; explain the reasoning |
 - **Local dev servers (experimental runs only):** if the fetched
   endpoints are `localhost` dev servers you must start (the local
   harness), this overrides the base "never start servers" rule: start
@@ -183,20 +224,32 @@ tests/e2e/
   {
     "name": "e2e",
     "private": true,
+    "scripts": { "test": "playwright test" },
     "devDependencies": { "@playwright/test": "<value of $AEP_PLAYWRIGHT_VERSION>" }
   }
   ```
+
+  The `test` script is what lets every command below run from the repo
+  root: `npm --prefix` executes a script with the package as its working
+  directory, so Playwright finds this config without you moving your
+  shell.
 - `targets.json` shape: `{"targets": {"<component>": "<url>", ...},
   "primary": "<the web-facing component>"}`, filled from the step-4
   validation-context `endpoints`. On a re-validation run, refresh it from
   the context file — a committed `targets.json` may name URLs from an
   earlier deployment.
-- Install with `npm install` on first scaffold (commit the lockfile),
-  `npm ci` on later runs.
+- Install with `npm install --prefix tests/e2e` on first scaffold (commit
+  the lockfile), `npm ci --prefix tests/e2e` on later runs.
 - `scripts/generate-report.mjs` is platform-owned: the REPORT step
   always executes the plugin's copy directly and refreshes this
   committed copy, which exists only so humans can reproduce the report
   after checkout.
+- `playwright.config.ts` is platform-owned too, and is the one scaffold
+  file to re-copy from the template on EVERY run rather than skip when
+  present. It carries the launch args that make deployed endpoints
+  reachable and the rule deciding which run may write `results.json`;
+  a repo scaffolded before either landed keeps the old behaviour
+  silently, which is exactly the class of bug those two exist to fix.
 
 ### 6. PLAN, then GENERATE
 
@@ -206,7 +259,7 @@ memory:
 - **Read `references/authoring.md` now and follow it as the binding
   authoring discipline** (plan format, collect-generated-code loop,
   assertion rules, criterion↔spec contract).
-- Load `aep:playwright-cli` with the Skill tool — the CLI's own skill
+- Load `playwright-cli` with the Skill tool — the CLI's own skill
   (commands, refs, eval, storage state; vendored from @playwright/cli).
 
 Then: write the test plan, author one spec per uncovered e2e criterion
@@ -221,6 +274,18 @@ counts only after passing twice consecutively against the live app.
 - Spec naming (the report's join key — get this exactly right):
   - file: `tests/e2e/specs/<AC-ID>.spec.ts` (e.g. `AC-001-a.spec.ts`)
   - title: `test('<AC-ID>: <short form of the must>', ...)`
+- **Create the file before you explore for it.** For each criterion you
+  are authoring fresh, write `tests/e2e/specs/<AC-ID>.spec.ts` with its
+  `// spec:` header and nothing else, THEN explore, THEN fill in the
+  body. The header is mandatory either way — `generate-report.mjs`
+  hard-fails without it — so this changes only when you write it, and a
+  header-only spec is how the platform knows that criterion has been
+  picked up. Exploration is the longest stretch of this phase and the
+  only one nothing else can see into.
+
+  Only for specs you are CREATING. Never blank an existing spec back to
+  its header: that registers as a pre-existing spec modified with no
+  heal-log entry and fails the report.
 
 ### 7. RUN
 
@@ -228,10 +293,14 @@ The suite outlives the Bash tool's DEFAULT timeout (120s), so ask for the
 time up front — `timeout` is a parameter on the Bash call, max `600000`:
 
 ```bash
-cd tests/e2e
-rm -f test-results/results.json          # never read a previous run's verdict
-npx playwright test                      # Bash timeout: 600000
+rm -f tests/e2e/test-results/results.json   # never read a previous run's verdict
+npm test --prefix tests/e2e                 # Bash timeout: 600000
 ```
+
+Never `npx playwright test` from the repo root. It finds the specs and
+passes anyway, without loading the config — so no reporter, no
+`results.json`, and none of the launch args the endpoints need. Exit 0,
+nothing written.
 
 Two things about this step will mislead you if you let them:
 
@@ -239,7 +308,7 @@ Two things about this step will mislead you if you let them:
   harness detaches the command and hands back an OK result with no
   output — identical, from where you sit, to a suite that finished. So
   never infer the run completed from the call returning. Confirm
-  `test-results/results.json` exists and is NEWER than the moment you
+  `tests/e2e/test-results/results.json` exists and is NEWER than the moment you
   started the run; if it is missing or stale, the run was severed and
   its results do not exist.
 - **You cannot wait for a detached run.** `sleep` is blocked, and
@@ -247,18 +316,21 @@ Two things about this step will mislead you if you let them:
   unrecoverable — there is no way to attach to it or read its output
   later. Getting the timeout right up front is the whole game.
 
-If the suite is too big for one window, **shard it** — never let one
-call run past the limit:
+**Never narrow this call** — no spec filter, and none of `--shard`,
+`--grep`, `--last-failed`, `--only-changed`. The config decides which run
+may write `results.json` by whether the command narrows the suite: a
+complete run is this one, and anything narrower is a probe — a spec being
+checked while it is authored (step 6) or healed (step 8), neither of which
+may overwrite the report's input. A narrowed run therefore writes nothing,
+and `generate-report.mjs` exits 2 naming the missing file. That is
+deliberate: a run that loudly writes nothing beats one that quietly writes
+a third of the suite as if it were all of it.
 
-```bash
-npx playwright test specs/AC-001-a.spec.ts specs/AC-001-b.spec.ts   # a batch that fits
-```
+If the suite genuinely cannot finish inside the window, say so in the plan
+and PR notes: that is a finding about the suite, not something to work
+around by merging batches by hand.
 
-Merge each batch's results yourself and keep the per-criterion verdicts;
-sharding changes how the suite is run, never what the report claims. A
-batch that severs is a batch you re-run smaller, not one you skip.
-
-The config writes `test-results/results.json`. The run includes the
+The config writes `tests/e2e/test-results/results.json`. The run includes the
 regression set — that's free regression coverage, not an accident.
 
 ### 8. HEAL (bounded)
@@ -269,9 +341,10 @@ one against the live app, repair only *brittleness* (locators, waits,
 setup), never weaken what a test asserts. Log each heal in
 `tests/e2e/heal-log.json`. When the budget is exhausted, finish with
 one final full run so `results.json` reflects the authoritative state —
-under the same timeout discipline as step 7, sharded if that is what it
-takes. A final run that severs leaves you with no authoritative state at
-all, which is worse than a slower one that lands.
+under the same timeout discipline as step 7, and under its no-sharding
+rule for the same reason: a run that names specs is read as a probe and
+writes no `results.json` at all. A final run that severs leaves you with
+no authoritative state, and a sharded one leaves you with none either.
 
 ### 9. REPORT
 
@@ -293,7 +366,7 @@ cp "$AEP_SKILLS_DIR/aep-validation/scripts/generate-report.mjs" \
 ```
 
 This writes `tests/validation/report.md` + `report.json`. It reads the
-oracle but never writes it — coverage is expressed by each criterion's
+criteria but never writes them — coverage is expressed by each criterion's
 pass/fail in the report, not by a flag in the criteria file. Exit code 2
 means a contract violation: spec titles that don't map to criterion ids
 (fix titles, re-run tests from step 7), a spec file missing its
@@ -319,29 +392,45 @@ belongs in the report, and you still open the PR (step 10).
 ### 10. PR
 
 ```bash
+# always the lease: this branch name repeats every cycle, so a re-validation
+# diverges from what the last one left on it
+git push --force-with-lease -u origin "aep/m${MILESTONE}-validation"
+
 gh pr create \
   --title "Validation: <pass>/<total> e2e criteria passing (issue #<N>)" \
-  --body $'Closes #<N>\n\n<summary table: pass/fail/not_run + manual/scenario counts>\n\nReport: tests/validation/report.md'
+  --body $'Validates #<N>\n\n<summary table: pass/fail/not_run + manual/scenario counts>\n\nReport: tests/validation/report.md'
 ```
 
+**`Validates #<N>`, never `Closes` / `Fixes` / `Resolves`.** The
+platform owns this task's close: it reopens the task when a version is
+judged again, and it closes the task even on a run that never merged a
+PR at all. A GitHub closing keyword would put two owners on one issue.
+
+The reference still has to be there — the platform only auto-merges a
+PR that names an armed issue in the milestone, so a body referencing
+nothing sits unmerged until the run's deadline and the version reports
+`validation-unreported`.
+
 Open it **ready-for-review even when criteria fail** — the human reads
-the report and decides. Post a closing issue comment with the summary
-counts and the PR link.
+the report and decides. Post an issue comment with the summary counts
+and the PR link; the platform closes the issue itself.
 
 ## Do not
 
 - Modify application source, component App Paths, or the root
   `package.json` — tests and report only.
-- Write or modify anything under `specs/` — the acceptance oracle is
+- Write or modify anything under `specs/` — the validation criteria are
   read-only input; all validation artifacts live under `tests/`.
 - Delete or skip a previously committed spec. If one is obsolete, say
   so in the PR description and report — a human removes it.
 - Leave `.only` / `.skip` / `.fixme` in committed specs.
 - Hand-edit `report.md` / `report.json` — regenerate via the script.
 - Commit playwright-cli session state, server logs, `test-results/`,
-  or credentials. Credentials come only from the step-4 test-credentials
-  request (exported in-session as `AEP_E2E_USERNAME` / `AEP_E2E_PASSWORD`,
-  never written to a file); if the request errors and a criterion needs
-  login, mark it blocked in an issue comment and let it land `not_run`.
-- Everything in the `aep` skill's deny-list (no default-branch pushes,
-  no force-push, one PR, no merging, no repo-settings changes).
+  or credentials. A login comes only from the step-4 roles gate ticket,
+  exported in-session as `AEP_E2E_USERNAME` / `AEP_E2E_PASSWORD` and never
+  written to a file, a spec, a report or a comment; if there is no login to
+  read and a criterion needs one, mark it blocked in an issue comment and let
+  it land `not_run`.
+- Everything in the `aep` skill's deny-list (no default-branch pushes, one
+  PR, no merging, no repo-settings changes). Its force-push exception is
+  yours: `--force-with-lease` on your own branch, per step 10.

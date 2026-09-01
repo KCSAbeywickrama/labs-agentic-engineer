@@ -25,6 +25,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo/mocks"
@@ -72,7 +73,7 @@ func newExternalCatalogFixture(listErr error, rts ...openchoreo.ResourceType) *e
 // t.Fatalf).
 func mustBuildExternalRT(t *testing.T, name, description string, keys ...openchoreo.ExternalResourceConfigKey) openchoreo.ResourceType {
 	t.Helper()
-	rt, err := openchoreo.BuildExternalResourceType(name, description, keys)
+	rt, err := openchoreo.BuildExternalResourceType(name, description, keys, "", nil)
 	if err != nil {
 		t.Fatalf("build external RT fixture %q: %v", name, err)
 	}
@@ -230,8 +231,7 @@ func sampleHandler(t *testing.T) (http.Handler, *externalCatalogFixture, *fakeEn
 	rt := &fakeTypeLister{items: []dependencies.PlatformResourceType{
 		{Name: "postgres", Description: "A dedicated PostgreSQL database cluster.", Outputs: []string{"host", "port"}},
 	}}
-	return NewMCPHandler(er, ep, rt, &fakeRemoteGit{},
-		spec.ValidateOpenAPI, spec.NormalizeOpenAPIYAML, spec.FetchSpecFromURL), er, ep
+	return NewMCPHandler(er, ep, rt, nil, &fakeRemoteGit{}, spec.ValidateOpenAPI, spec.NormalizeOpenAPIYAML, spec.FetchSpecFromURL), er, ep
 }
 
 // fakeRemoteGit is a stub RemoteGitReader for the handler-dispatch tests. It
@@ -316,6 +316,7 @@ func TestMCP_ToolsList_RenamedTools(t *testing.T) {
 		"list_org_endpoints",
 		"list_org_component_endpoints",
 		"list_platform_resource_types",
+		"list_roles",
 		"get_remote_git_file_contents",
 		"search_remote_git_code",
 		"validate_openapi_spec",
@@ -369,7 +370,7 @@ func TestMCP_UnknownTool(t *testing.T) {
 // ---- guards ------------------------------------------------------------------
 
 func TestMCP_NilResourceReader_503(t *testing.T) {
-	h := NewMCPHandler(nil, &fakeEndpointLister{}, &fakeTypeLister{}, &fakeRemoteGit{}, nil, nil, nil)
+	h := NewMCPHandler(nil, &fakeEndpointLister{}, &fakeTypeLister{}, nil, &fakeRemoteGit{}, nil, nil, nil)
 	w := postRPC(t, h, "org-1", `{"jsonrpc":"2.0","id":1,"method":"ping"}`)
 	if w.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503", w.Code)
@@ -426,11 +427,66 @@ func TestMCP_ListExternalResources(t *testing.T) {
 
 func TestMCP_ListExternalResources_PortError(t *testing.T) {
 	er := newExternalCatalogFixture(fmt.Errorf("db down"))
-	h := NewMCPHandler(er, nil, nil, nil, nil, nil, nil)
+	h := NewMCPHandler(er, nil, nil, nil, nil, nil, nil, nil)
 	resp := decodeRPC(t, postRPC(t, h, "org-1", callBody("list_external_resources", `{}`)))
 	text := toolText(t, resp, true)
 	if !strings.Contains(text, "db down") {
 		t.Errorf("tool error text = %q, want it to carry the port error", text)
+	}
+}
+
+// TestMCP_ListExternalResources_RegisteredBeforeConsumers proves a zero-consumer
+// Registered external (RT authored at register via Ensure) surfaces on
+// list_external_resources with consumptionInstructions and resourceDocs pointers
+// — not secret values or file bodies. MCP view has no consumers field today.
+func TestMCP_ListExternalResources_RegisteredBeforeConsumers(t *testing.T) {
+	rt, err := openchoreo.BuildExternalResourceType("stripe", "Payments",
+		[]openchoreo.ExternalResourceConfigKey{{Key: "STRIPE_KEY", Secret: true}},
+		"Send the secret as Bearer.",
+		[]openchoreo.ResourceDoc{{Type: "openapi", URL: "https://example.com/stripe/openapi.yaml"}},
+	)
+	if err != nil {
+		t.Fatalf("BuildExternalResourceType: %v", err)
+	}
+	er := newExternalCatalogFixture(nil, *rt)
+	h := NewMCPHandler(er, nil, nil, nil, nil, nil, nil, nil)
+
+	resp := decodeRPC(t, postRPC(t, h, "org-1", callBody("list_external_resources", `{}`)))
+	text := toolText(t, resp, false)
+
+	var payload struct {
+		ExternalResources []struct {
+			Name                    string `json:"name"`
+			ConsumptionInstructions string `json:"consumptionInstructions"`
+			ResourceDocs            []struct {
+				Type string `json:"type"`
+				URL  string `json:"url"`
+				Path string `json:"path"`
+			} `json:"resourceDocs"`
+		} `json:"externalResources"`
+	}
+	if err := json.Unmarshal([]byte(text), &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if len(payload.ExternalResources) != 1 {
+		t.Fatalf("externalResources = %+v, want 1 row", payload.ExternalResources)
+	}
+	got := payload.ExternalResources[0]
+	if got.Name != "stripe" {
+		t.Errorf("name = %q, want stripe", got.Name)
+	}
+	if got.ConsumptionInstructions != "Send the secret as Bearer." {
+		t.Errorf("consumptionInstructions = %q, want Send the secret as Bearer.", got.ConsumptionInstructions)
+	}
+	if len(got.ResourceDocs) != 1 {
+		t.Fatalf("resourceDocs = %+v, want 1 pointer", got.ResourceDocs)
+	}
+	doc := got.ResourceDocs[0]
+	if doc.Type != "openapi" || doc.URL != "https://example.com/stripe/openapi.yaml" {
+		t.Errorf("resourceDocs[0] = %+v, want type=openapi url=https://example.com/stripe/openapi.yaml", doc)
+	}
+	if doc.Path != "" {
+		t.Errorf("resourceDocs[0].path = %q, want empty (URL pointer only)", doc.Path)
 	}
 }
 
@@ -504,7 +560,7 @@ func TestMCP_ExternalResources_DedupesStaleSchema(t *testing.T) {
 	assertNewestWins := func(t *testing.T, rts ...openchoreo.ResourceType) {
 		t.Helper()
 		er := newExternalCatalogFixture(nil, rts...)
-		h := NewMCPHandler(er, nil, nil, nil, nil, nil, nil)
+		h := NewMCPHandler(er, nil, nil, nil, nil, nil, nil, nil)
 
 		resp := decodeRPC(t, postRPC(t, h, "org-1", callBody("list_external_resources", `{}`)))
 		text := toolText(t, resp, false)
@@ -568,7 +624,7 @@ func TestMCP_ExternalResources_TieBreakDeterministic(t *testing.T) {
 
 	for _, order := range [][2]openchoreo.ResourceType{{a, b}, {b, a}} {
 		er := newExternalCatalogFixture(nil, order[0], order[1])
-		h := NewMCPHandler(er, nil, nil, nil, nil, nil, nil)
+		h := NewMCPHandler(er, nil, nil, nil, nil, nil, nil, nil)
 
 		resp := decodeRPC(t, postRPC(t, h, "org-1", callBody("list_external_resources", `{}`)))
 		text := toolText(t, resp, false)
@@ -634,7 +690,7 @@ func TestMCP_ListOrgEndpoints(t *testing.T) {
 
 func TestMCP_ListOrgEndpoints_NilLister_Empty(t *testing.T) {
 	er := newExternalCatalogFixture(nil)
-	h := NewMCPHandler(er, nil, nil, nil, nil, nil, nil)
+	h := NewMCPHandler(er, nil, nil, nil, nil, nil, nil, nil)
 	resp := decodeRPC(t, postRPC(t, h, "org-1", callBody("list_org_endpoints", `{}`)))
 	text := toolText(t, resp, false)
 	if text != `{"endpoints":[]}` {
@@ -683,7 +739,7 @@ func TestMCP_ListOrgComponentEndpoints(t *testing.T) {
 
 func TestMCP_ListOrgComponentEndpoints_NilLister_Empty(t *testing.T) {
 	er := newExternalCatalogFixture(nil)
-	h := NewMCPHandler(er, nil, nil, nil, nil, nil, nil)
+	h := NewMCPHandler(er, nil, nil, nil, nil, nil, nil, nil)
 	resp := decodeRPC(t, postRPC(t, h, "org-1", callBody("list_org_component_endpoints", `{}`)))
 	text := toolText(t, resp, false)
 	if text != `{"endpoints":[]}` {
@@ -718,7 +774,7 @@ func TestMCP_ListPlatformResourceTypes(t *testing.T) {
 
 func TestMCP_ListPlatformResourceTypes_NilLister_Empty(t *testing.T) {
 	er := newExternalCatalogFixture(nil)
-	h := NewMCPHandler(er, nil, nil, nil, nil, nil, nil)
+	h := NewMCPHandler(er, nil, nil, nil, nil, nil, nil, nil)
 	resp := decodeRPC(t, postRPC(t, h, "org-1", callBody("list_platform_resource_types", `{}`)))
 	text := toolText(t, resp, false)
 	if text != `{"resourceTypes":[]}` {
@@ -730,7 +786,7 @@ func TestMCP_ListPlatformResourceTypes_NilLister_Empty(t *testing.T) {
 
 func TestMCP_GetRemoteGitFileContents(t *testing.T) {
 	rg := &fakeRemoteGit{file: &RemoteGitFile{Content: "openapi: 3.0.0\n", SHA: "abc"}}
-	h := NewMCPHandler(newExternalCatalogFixture(nil), nil, nil, rg, nil, nil, nil)
+	h := NewMCPHandler(newExternalCatalogFixture(nil), nil, nil, nil, rg, nil, nil, nil)
 	resp := decodeRPC(t, postRPC(t, h, "org-1",
 		callBody("get_remote_git_file_contents", `{"owner":"acme","repo":"billing-svc","path":"specs/openapi.yaml","ref":"main"}`)))
 	text := toolText(t, resp, false)
@@ -755,7 +811,7 @@ func TestMCP_GetRemoteGitFileContents_Directory(t *testing.T) {
 	rg := &fakeRemoteGit{file: &RemoteGitFile{IsDirectory: true, Entries: []RemoteGitEntry{
 		{Path: "specs/openapi.yaml", Type: "file", SHA: "a"},
 	}}}
-	h := NewMCPHandler(newExternalCatalogFixture(nil), nil, nil, rg, nil, nil, nil)
+	h := NewMCPHandler(newExternalCatalogFixture(nil), nil, nil, nil, rg, nil, nil, nil)
 	resp := decodeRPC(t, postRPC(t, h, "org-1",
 		callBody("get_remote_git_file_contents", `{"owner":"acme","repo":"billing-svc","path":"specs"}`)))
 	text := toolText(t, resp, false)
@@ -768,11 +824,125 @@ func TestMCP_GetRemoteGitFileContents_Directory(t *testing.T) {
 	}
 }
 
+// Binary content never rides a tool result as text. A real turn died on this:
+// the model fetched an 868KB PDF through this tool, the raw bytes became ~1.5M
+// junk tokens per model step, and the NUL bytes the read carried then killed the
+// conversation's jsonb persist (Postgres rejects U+0000 anywhere in a jsonb
+// document). The tool answers with the file's facts and a refusal instead — the
+// model can still reason about the file existing.
+func TestMCP_GetRemoteGitFileContents_BinaryIsRefusedAsFacts(t *testing.T) {
+	pdf := "%PDF-1.4\n\x00\x00binary\xff\xfe"
+	rg := &fakeRemoteGit{file: &RemoteGitFile{Content: pdf, SHA: "abc"}}
+	h := NewMCPHandler(newExternalCatalogFixture(nil), nil, nil, nil, rg, nil, nil, nil)
+	resp := decodeRPC(t, postRPC(t, h, "org-1",
+		callBody("get_remote_git_file_contents", `{"owner":"acme","repo":"billing-svc","path":"specs/requirements/references/form.pdf"}`)))
+	text := toolText(t, resp, false)
+
+	var payload remoteGitFileView
+	if err := json.Unmarshal([]byte(text), &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if payload.Content != "" {
+		t.Fatalf("binary content leaked into the tool result (%d bytes) — must be empty", len(payload.Content))
+	}
+	if payload.SHA != "abc" {
+		t.Errorf("sha = %q, want abc (the facts still ride)", payload.SHA)
+	}
+	if payload.Note == "" || !strings.Contains(payload.Note, "binary") {
+		t.Errorf("note = %q, want an explanation naming the file as binary", payload.Note)
+	}
+}
+
+// A NUL byte alone is enough to withhold the content, and it is the byte that
+// actually killed the persist. U+0000 IS valid UTF-8, so the UTF-8 half of the
+// check cannot catch this one — the fixture is otherwise perfectly ordinary
+// text, and the refusal must still fire.
+func TestMCP_GetRemoteGitFileContents_ValidUTF8WithNULIsRefused(t *testing.T) {
+	withNUL := "openapi: 3.0.3" + string(rune(0)) + "\ninfo:\n  title: still valid utf-8\n"
+	if !utf8.ValidString(withNUL) {
+		t.Fatal("fixture is not valid UTF-8 — it would exercise the wrong branch")
+	}
+	rg := &fakeRemoteGit{file: &RemoteGitFile{Content: withNUL, SHA: "def"}}
+	h := NewMCPHandler(newExternalCatalogFixture(nil), nil, nil, nil, rg, nil, nil, nil)
+	resp := decodeRPC(t, postRPC(t, h, "org-1",
+		callBody("get_remote_git_file_contents", `{"owner":"acme","repo":"billing-svc","path":"specs/openapi.yaml"}`)))
+	text := toolText(t, resp, false)
+
+	var payload remoteGitFileView
+	if err := json.Unmarshal([]byte(text), &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if payload.Content != "" {
+		t.Fatalf("NUL-bearing content leaked into the tool result (%q) — must be empty", payload.Content)
+	}
+	if payload.SHA != "def" {
+		t.Errorf("sha = %q, want def (the facts still ride)", payload.SHA)
+	}
+	if payload.Note == "" || !strings.Contains(payload.Note, "binary") {
+		t.Errorf("note = %q, want an explanation naming the file as binary", payload.Note)
+	}
+}
+
+// Oversized text is truncated with a note, not returned whole: a tool result
+// is prompt input, and an unbounded file becomes an unbounded prompt.
+func TestMCP_GetRemoteGitFileContents_OversizedTextIsTruncated(t *testing.T) {
+	huge := strings.Repeat("line of an enormous but honest yaml file\n", 10000) // ~420KB
+	rg := &fakeRemoteGit{file: &RemoteGitFile{Content: huge, SHA: "abc"}}
+	h := NewMCPHandler(newExternalCatalogFixture(nil), nil, nil, nil, rg, nil, nil, nil)
+	resp := decodeRPC(t, postRPC(t, h, "org-1",
+		callBody("get_remote_git_file_contents", `{"owner":"acme","repo":"billing-svc","path":"specs/openapi.yaml"}`)))
+	text := toolText(t, resp, false)
+
+	var payload remoteGitFileView
+	if err := json.Unmarshal([]byte(text), &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if len(payload.Content) >= len(huge) {
+		t.Fatalf("content not truncated: %d bytes returned", len(payload.Content))
+	}
+	if len(payload.Content) == 0 {
+		t.Fatal("truncation must keep a leading slice, not drop the file")
+	}
+	if payload.Note == "" || !strings.Contains(payload.Note, "truncated") {
+		t.Errorf("note = %q, want a truncation notice", payload.Note)
+	}
+}
+
+// The truncation walks back to a rune boundary, and an ASCII fixture cannot
+// prove that: every byte is a rune start, so the walk-back loop never runs.
+// This one puts a 3-byte rune straddling the cut, so a naive slice at
+// maxToolFileBytes would hand the model a half-rune — invalid UTF-8 riding a
+// prompt, and a jsonb persist that Postgres may well refuse.
+func TestMCP_GetRemoteGitFileContents_TruncationNeverSplitsARune(t *testing.T) {
+	// Land one byte short of the cap, then straddle it with "…" (E2 80 A6).
+	huge := strings.Repeat("a", maxToolFileBytes-1) + "…" + strings.Repeat("b", 1024)
+	rg := &fakeRemoteGit{file: &RemoteGitFile{Content: huge, SHA: "abc"}}
+	h := NewMCPHandler(newExternalCatalogFixture(nil), nil, nil, nil, rg, nil, nil, nil)
+	resp := decodeRPC(t, postRPC(t, h, "org-1",
+		callBody("get_remote_git_file_contents", `{"owner":"acme","repo":"billing-svc","path":"specs/openapi.yaml"}`)))
+	text := toolText(t, resp, false)
+
+	var payload remoteGitFileView
+	if err := json.Unmarshal([]byte(text), &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if !utf8.ValidString(payload.Content) {
+		t.Error("truncated content is not valid UTF-8 — a rune was split at the cut")
+	}
+	if len(payload.Content) > maxToolFileBytes {
+		t.Errorf("content is %d bytes, over the %d cap", len(payload.Content), maxToolFileBytes)
+	}
+	// The straddling rune is dropped whole rather than half-kept.
+	if strings.HasSuffix(payload.Content, "\ufffd") {
+		t.Error("truncation kept a replacement char — the rune was split, not dropped")
+	}
+}
+
 func TestMCP_GetRemoteGitFileContents_OwnerMismatch_ToolError(t *testing.T) {
 	// The reader refuses a cross-org owner; the handler must surface it as a
 	// tool-level error (isError=true), not data.
 	rg := &fakeRemoteGit{err: ErrOwnerNotInOrg}
-	h := NewMCPHandler(newExternalCatalogFixture(nil), nil, nil, rg, nil, nil, nil)
+	h := NewMCPHandler(newExternalCatalogFixture(nil), nil, nil, nil, rg, nil, nil, nil)
 	resp := decodeRPC(t, postRPC(t, h, "org-1",
 		callBody("get_remote_git_file_contents", `{"owner":"evilcorp","repo":"secret","path":"x"}`)))
 	text := toolText(t, resp, true) // wantErr = true
@@ -789,7 +959,7 @@ func TestMCP_GetRemoteGitFileContents_MissingArgs_ToolError(t *testing.T) {
 }
 
 func TestMCP_GetRemoteGitFileContents_NilReader_ToolError(t *testing.T) {
-	h := NewMCPHandler(newExternalCatalogFixture(nil), nil, nil, nil, nil, nil, nil)
+	h := NewMCPHandler(newExternalCatalogFixture(nil), nil, nil, nil, nil, nil, nil, nil)
 	resp := decodeRPC(t, postRPC(t, h, "org-1",
 		callBody("get_remote_git_file_contents", `{"owner":"acme","repo":"r","path":"x"}`)))
 	toolText(t, resp, true)
@@ -800,7 +970,7 @@ func TestMCP_SearchRemoteGitCode(t *testing.T) {
 		{Path: "specs/openapi.yaml", SHA: "a"},
 		{Path: "api/openapi.yaml", SHA: "b"},
 	}}
-	h := NewMCPHandler(newExternalCatalogFixture(nil), nil, nil, rg, nil, nil, nil)
+	h := NewMCPHandler(newExternalCatalogFixture(nil), nil, nil, nil, rg, nil, nil, nil)
 	resp := decodeRPC(t, postRPC(t, h, "org-1",
 		callBody("search_remote_git_code", `{"owner":"acme","repo":"billing-svc","query":"openapi"}`)))
 	text := toolText(t, resp, false)
@@ -974,7 +1144,7 @@ func TestMCP_ValidateOpenAPISpec_MissingContent_ToolError(t *testing.T) {
 }
 
 func TestMCP_ValidateOpenAPISpec_NilPort_ToolError(t *testing.T) {
-	h := NewMCPHandler(newExternalCatalogFixture(nil), nil, nil, nil, nil, nil, nil)
+	h := NewMCPHandler(newExternalCatalogFixture(nil), nil, nil, nil, nil, nil, nil, nil)
 	resp := decodeRPC(t, postRPC(t, h, "org-1", callBody("validate_openapi_spec", `{"content":"whatever"}`)))
 	toolText(t, resp, true)
 }
@@ -985,8 +1155,7 @@ func TestMCP_ValidateOpenAPISpec_NilPort_ToolError(t *testing.T) {
 // behavior itself is exercised separately, through the real
 // spec.FetchSpecFromURL (see TestMCP_FetchOpenAPISpec_SSRFBlocked).
 func handlerWithFetcher(fetch SpecFetcher) http.Handler {
-	return NewMCPHandler(newExternalCatalogFixture(nil), nil, nil, nil,
-		spec.ValidateOpenAPI, spec.NormalizeOpenAPIYAML, fetch)
+	return NewMCPHandler(newExternalCatalogFixture(nil), nil, nil, nil, nil, spec.ValidateOpenAPI, spec.NormalizeOpenAPIYAML, fetch)
 }
 
 func TestMCP_FetchOpenAPISpec_Good(t *testing.T) {
@@ -1069,7 +1238,7 @@ func TestMCP_FetchOpenAPISpec_MissingURL_ToolError(t *testing.T) {
 }
 
 func TestMCP_FetchOpenAPISpec_NilPort_ToolError(t *testing.T) {
-	h := NewMCPHandler(newExternalCatalogFixture(nil), nil, nil, nil, nil, nil, nil)
+	h := NewMCPHandler(newExternalCatalogFixture(nil), nil, nil, nil, nil, nil, nil, nil)
 	resp := decodeRPC(t, postRPC(t, h, "org-1", callBody("fetch_openapi_spec", `{"url":"https://example.com/openapi.yaml"}`)))
 	toolText(t, resp, true)
 }

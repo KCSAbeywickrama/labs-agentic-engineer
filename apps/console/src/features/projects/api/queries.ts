@@ -30,7 +30,7 @@ import { useConfig } from "../../settings/api/queries";
 import { firstEndpointUrl } from "../lib/deploymentUrl";
 import { deploymentsAreMoving } from "../lib/deploymentRows";
 import { projectKeys } from "./keys";
-import { apiErrorMessage } from "../../../api/errors";
+import { ApiRequestError, apiErrorMessage } from "../../../api/errors";
 
 type CreateProjectRequest = components["schemas"]["CreateProjectRequest"];
 type BuildRequest = components["schemas"]["BuildRequest"];
@@ -92,6 +92,21 @@ type Deployment = components["schemas"]["Deployment"];
 
 function statusIsMoving(status: ProjectStatus): boolean {
   return (
+    // An agent writing the spec is the FIRST thing that moves on a new project
+    // and the longest stretch a first-timer watches (#562): the kickoff fires
+    // at creation, so the overview's opening minutes are exactly this state.
+    // Without it the spec card would sit on the idle interval through the whole
+    // interview and take up to 30s to notice it had finished.
+    status.spec.agent === "working" ||
+    // Mid-interview: a turn HAS run (so not "never-started") and written no
+    // spec yet, and `agent` returns to "" in every gap between turns — keying
+    // only on "working" drops the whole interview onto the idle cadence and
+    // leaves every surface up to 30s behind the agent it describes.
+    //
+    // Scoped to a project that actually has turn history, so an abandoned or
+    // never-started one is not parked on the fast cadence forever: this poll
+    // fans out to four backend sources, OpenChoreo included.
+    (status.spec.agent === "" && !status.spec.exists) ||
     status.build.status === "running" ||
     status.deploy.status === "deploying" ||
     status.repoStatus === "pending" ||
@@ -104,9 +119,11 @@ function useProjectResource<T>(
   fetcher: () => Promise<{ data?: T; error?: unknown }>,
   what: string,
   refetchInterval?: number | ((data: T | undefined) => number | false),
+  enabled = true,
 ) {
   return useQuery({
     queryKey,
+    enabled,
     queryFn: async () => {
       const { data, error } = await fetcher();
       if (error || data === undefined) {
@@ -138,6 +155,11 @@ export function useProjectStatus(projectName: string) {
       !status || statusIsMoving(status)
         ? STATUS_ACTIVE_POLL_MS
         : STATUS_IDLE_POLL_MS,
+    // The toolbar badge calls this from every route, project or not, because a
+    // hook cannot be conditional. Without this it polled `/projects//status`
+    // twice a second from the projects list, settings, alerts — a 404 loop
+    // against a path that has no project in it.
+    projectName !== "",
   );
 }
 
@@ -152,6 +174,28 @@ export function useProjectComponents(projectName: string) {
       }),
     "components",
   );
+}
+
+// Deployed-workload dependencies for the project Overview (deduped rows).
+// Null body is a valid empty list — unresolved design declarations are
+// omitted by the BFF, so we must not treat null as a load failure.
+export function useWorkloadDependencies(projectName: string) {
+  return useQuery({
+    queryKey: projectKeys.workloadDependencies(projectName),
+    queryFn: async () => {
+      const { data, error } = await client.GET(
+        "/projects/{projectName}/workload-dependencies",
+        { params: { path: { projectName } } },
+      );
+      if (error) {
+        throw new Error(
+          apiErrorMessage(error, "Failed to load workload dependencies"),
+        );
+      }
+      return data ?? [];
+    },
+    staleTime: 30_000,
+  });
 }
 
 // The Deployments board's pollers (#216): one list-deployments read per
@@ -246,6 +290,41 @@ export function useComponentOpenApi(
   });
 }
 
+// Whether every external dependency in the design has its values for an
+// environment. The platform answers per dependency (`configured` / `unset` /
+// `not-provisioned`, plus the keys it is still missing) and folds the set into
+// one `configured` flag — the same read the deploy gate consults, so the
+// console and the platform never disagree about what is outstanding.
+//
+// Not polled: the only thing that changes it is a save made from this console,
+// and every save invalidates this key. `staleTime` matches the feature's other
+// design-shaped reads.
+export function useProjectDependencyReadiness(
+  projectName: string,
+  environment: string,
+) {
+  return useQuery({
+    queryKey: projectKeys.dependencyReadiness(projectName, environment),
+    // A project name arrives with the route, but the environment is chosen by
+    // the caller — an empty one would silently read a different environment
+    // than the caller meant.
+    enabled: projectName !== "" && environment !== "",
+    queryFn: async () => {
+      const { data, error } = await client.GET(
+        "/projects/{projectName}/dependencies/readiness",
+        { params: { path: { projectName }, query: { environment } } },
+      );
+      if (error || data === undefined) {
+        throw new Error(
+          apiErrorMessage(error, "Failed to load dependency readiness"),
+        );
+      }
+      return data;
+    },
+    staleTime: 30_000,
+  });
+}
+
 // Re-collect an external connection's values (#395: dummy values at build
 // time, real ones later). POST …/external-resources/{name}/values re-splits
 // plain/secret by the design's schema, rewrites secrets to the secret
@@ -302,9 +381,10 @@ export function useCreateProject() {
     mutationFn: async (body: CreateProjectRequest) => {
       const { data, error } = await client.POST("/projects", { body });
       if (error) {
-        throw new Error(
-          apiErrorMessage(error, "Failed to create project"),
-        );
+        // ApiRequestError, not Error: the create flow reacts to a repo-name
+        // conflict specifically (#561), and the envelope's `code` is the only
+        // stable way to tell it apart from any other failure.
+        throw new ApiRequestError(error, "Failed to create project");
       }
       return data;
     },
@@ -421,6 +501,46 @@ export function useBuildProject(projectName: string) {
 // section), so this rides the settings feature's shared useConfig query
 // instead of a second, independent fetch of the same endpoint. gitProvider
 // is nullable (not connected yet), hence the optional chaining.
+// The create view's reference documents (#383), uploaded right after POST
+// /projects succeeds. They are transient turn inputs, never committed
+// (ADR-0017) — the server stores them off-git and overlays them into each
+// turn's snapshot. Deliberately NOT part of useCreateProject: a failed upload
+// must leave the created project intact so the confirm step can offer
+// Retry / Continue without documents.
+export function useUploadReferences() {
+  return useMutation({
+    mutationFn: async ({
+      projectName,
+      files,
+    }: {
+      projectName: string;
+      files: File[];
+    }) => {
+      // multipart, not base64-in-JSON: references are no longer spec files
+      // (ADR-0017), so they do not go through the specs-scoped Files API, and
+      // raw bytes keep the server's 5 MiB cap honest — a base64 body would
+      // inflate ~33% and silently shave the effective limit.
+      const formData = new FormData();
+      for (const file of files) formData.append("files", file);
+      // Same cast as useImportSkill: openapi-fetch passes FormData through its
+      // default bodySerializer untouched (browser sets the boundary), but the
+      // generated request type describes the JSON Schema shape, not the wire.
+      const { error } = await client.POST(
+        "/projects/{projectName}/references",
+        {
+          params: { path: { projectName } },
+          body: formData as unknown as { files: string[] },
+        },
+      );
+      if (error) {
+        throw new Error(
+          apiErrorMessage(error, "Failed to upload the reference documents"),
+        );
+      }
+    },
+  });
+}
+
 export function useGithubOrg() {
   const { data } = useConfig();
   return {

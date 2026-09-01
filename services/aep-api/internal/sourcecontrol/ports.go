@@ -70,9 +70,9 @@ type IssueOps interface {
 	EnsureLabel(ctx context.Context, owner, repo string, cred secrets.Credential, name, color string) error
 	// CloseIssue sets the issue state to closed with reason "completed".
 	CloseIssue(ctx context.Context, owner, repo string, cred secrets.Credential, number int) error
-	// ReopenIssue sets the issue state back to open. Used by the validation issue,
-	// which every attempt's pull request closes with `Closes #<N>` and which a
-	// repeated validation must find again rather than re-file.
+	// ReopenIssue sets the issue state back to open. Used by the validation task,
+	// which the PLATFORM closes at the end of every attempt and which a repeated
+	// validation must find again rather than re-file.
 	ReopenIssue(ctx context.Context, owner, repo string, cred secrets.Credential, number int) error
 	// CommentIssue posts a comment on the issue.
 	CommentIssue(ctx context.Context, owner, repo string, cred secrets.Credential, number int, body string) error
@@ -120,6 +120,11 @@ type IssueOps interface {
 	// CloseMilestone closes a milestone. Display only — member issues are
 	// untouched, and a closed milestone still accepts new ones.
 	CloseMilestone(ctx context.Context, owner, repo string, cred secrets.Credential, number int) error
+	// ReopenMilestone reopens a closed milestone — the inverse of the above and
+	// display only in the same way. A rebuild of an unchanged spec works the SAME
+	// milestone a cancel closed, and a version being worked whose milestone reads
+	// closed is a lie the console renders.
+	ReopenMilestone(ctx context.Context, owner, repo string, cred secrets.Credential, number int) error
 	// ListMilestones returns every milestone in the given state
 	// ("open" | "closed" | "all"; empty ⇒ "all"). The list must be complete,
 	// not a first page — CreateMilestone's uniqueness pre-check reads it.
@@ -132,6 +137,15 @@ type IssueOps interface {
 	// predicate input. Returns ErrMilestoneNotFound when no milestone carries
 	// that number.
 	MilestoneIssueCounts(ctx context.Context, owner, repo string, cred secrets.Credential, number int) (*MilestoneIssueCounts, error)
+	// ListMilestoneIssueComments returns the newest perIssue comments of every
+	// issue in one milestone, bucketed by issue number and OLDEST FIRST within
+	// each bucket, in ONE round trip. An issue with no comments is absent from
+	// the map rather than present with an empty slice.
+	//
+	// One call is the whole point: this rides a 5s console poll, and a call per
+	// issue would spend a milestone's worth of rate limit on every tick.
+	// Returns ErrMilestoneNotFound when no milestone carries that number.
+	ListMilestoneIssueComments(ctx context.Context, owner, repo string, cred secrets.Credential, number, perIssue int) (map[int][]IssueComment, error)
 }
 
 // WebhookOps is the repo-webhook surface. Consumed by webhookService.

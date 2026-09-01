@@ -42,6 +42,7 @@ const (
 	buildIdle      = "idle"
 	buildRunning   = "running"
 	buildFailed    = "failed"
+	buildCancelled = "cancelled"
 	buildSucceeded = "succeeded"
 
 	deployNone      = "none"
@@ -62,6 +63,14 @@ const (
 	// is what is being fixed — rendering the bare `failed` verdict here would read
 	// as terminal while the platform is actively resolving it.
 	validationAwaitingFix = "awaiting-fix"
+	// validationCancelled is a person STOPPING the judging: a validation run
+	// settled cancelled before it recorded a verdict, so nothing will answer for
+	// this version unless somebody re-asks. It is the one no-verdict state that
+	// does NOT hold promotion, and the distinction is the whole reason it exists:
+	// every other way to reach no verdict is an accident — a failed increment, an
+	// agent that died — where refusing to promote an unjudged version is the safe
+	// answer, and this one is a decision somebody already made.
+	validationCancelled = "cancelled"
 )
 
 // milestoneRunRows is the narrow port over the milestone_runs index: the status
@@ -85,6 +94,62 @@ type bindingsReader interface {
 	ListProjectReleaseBindings(ctx context.Context, orgName, projectName string) ([]openchoreo.ReleaseBindingSummary, error)
 }
 
+// specTurnRows is the narrow status-read port over the agent_turns index: one
+// indexed row read answering "is an agent working on this project's spec right
+// now" (#562). spec.TurnRepository satisfies it.
+//
+// It is a FOURTH poll source, admitted against the #184 budget because it is a
+// single-row read off a covering index (ix_agent_turns_project_newest) on a
+// database the poll already talks to — the same cost class as the milestone-run
+// read beside it, and an order cheaper than the OpenChoreo call. Nothing else
+// can answer the question: exists,
+// version and dirty all read committed git, and a kickoff writes nothing until
+// it lands, so the busiest moment in the journey is precisely the one git has
+// no record of.
+type specTurnRows interface {
+	Newest(ctx context.Context, orgID, projectID string) (*spec.AgentTurn, error)
+	// NewestCompletedFlow finds the newest successful run of one flow — the
+	// staleness check (#575) needs the last DESIGN run, so it can read the
+	// requirements as that run saw them.
+	NewestCompletedFlow(ctx context.Context, orgID, projectID, flow string) (*spec.AgentTurn, error)
+}
+
+// designFlow is the `/<skill>` token a design re-derivation runs under. Only a
+// full re-derivation counts as reconciling the design with the requirements: a
+// targeted edit to one document leaves the SET inconsistent, so clearing the
+// staleness flag on one would drop the warning while the problem stood.
+const designFlow = "design"
+
+// designOutdated answers whether the requirements have moved since the design
+// was last derived from them.
+//
+// nowFingerprint is the requirements as they stand; the baseline is the same
+// reduction taken at the commit the newest successful design run read. No
+// design run on record means there is nothing for the design to be behind —
+// including the ordinary case of a project that has never designed at all.
+//
+// A baseline that cannot be read is reported as an ERROR rather than as
+// "unchanged". The two failures are not symmetric: a spurious warning costs one
+// re-derivation, while a swallowed one lets the coding agents implement a
+// design the user has already changed their mind about.
+func (s *Service) designOutdated(ctx context.Context, orgName, projectName, nowFingerprint string) (bool, error) {
+	if s.specTurns == nil {
+		return false, nil
+	}
+	lastDesign, err := s.specTurns.NewestCompletedFlow(ctx, orgName, projectName, designFlow)
+	if err != nil {
+		return false, fmt.Errorf("newest design turn: %w", err)
+	}
+	if lastDesign == nil || lastDesign.BaseRef == "" {
+		return false, nil
+	}
+	was, err := s.artifactSvc.RequirementsFingerprintAt(ctx, orgName, projectName, lastDesign.BaseRef)
+	if err != nil {
+		return false, fmt.Errorf("requirements at the last design run's base: %w", err)
+	}
+	return was != nowFingerprint, nil
+}
+
 // SetStageSources wires the build/deploy stage inputs at the composition
 // root. On a ready repo GetProjectStatus fails when either is missing — the
 // stages are contract-required and never silently fabricated (D7).
@@ -93,10 +158,80 @@ func (s *Service) SetStageSources(runs milestoneRunRows, bindings bindingsReader
 	s.bindingsReader = bindings
 }
 
+// SetSpecTurnSource wires the spec stage's agent-activity read (#562).
+// Separate from SetStageSources because it is optional in a way those are not:
+// a service without it serves spec.agent as "" — the same value a project with
+// no turns gets — so the overview degrades to its pre-#562 reading rather than
+// failing the poll.
+func (s *Service) SetSpecTurnSource(turns specTurnRows) { s.specTurns = turns }
+
+// Spec-stage agent activity (the spec.agent contract enum).
+const (
+	specAgentIdle         = ""
+	specAgentWorking      = "working"
+	specAgentFailed       = "failed"
+	specAgentNeverStarted = "never-started"
+)
+
+// specAgentState folds the project's newest turn row into the contract enum.
+//
+// A COMPLETED turn reads as idle, not as "done": whatever it produced is in
+// git, so exists/version/dirty already describe it, and a second vocabulary
+// for the same fact would let the two disagree. Only the states git cannot see
+// survive — a turn in flight, a turn that died leaving nothing behind, and no
+// turn at all.
+//
+// NO ROW is its own state rather than more idle. The two look identical in git
+// and need opposite handling: a project that has never run a turn needs a way
+// to begin, while one merely between turns is mid-interview and must not be
+// offered a restart that would supersede it. Collapsing them left a project
+// whose dispatch never landed showing a spinner for work that was never
+// coming, with nothing to click.
+// specAgentOf guards the fold on the source being WIRED. Without it an
+// unwired service would report `never-started` — a positive claim about turn
+// history it has no way to make — where the documented degradation is the
+// pre-#562 reading: "", meaning "this says nothing".
+func specAgentOf(source specTurnRows, newest *spec.AgentTurn) string {
+	if source == nil {
+		return specAgentIdle
+	}
+	return specAgentState(newest)
+}
+
+// runningFlowOf reports WHICH work is in flight, for the spec rail to pulse the
+// right section (#575).
+//
+// Only a RUNNING turn has one. A finished turn's flow says nothing about what is
+// happening now, and reporting it would leave the rail pulsing whatever the last
+// run happened to be long after it ended.
+func runningFlowOf(newest *spec.AgentTurn) string {
+	if newest == nil || newest.Status != spec.TurnStatusRunning {
+		return ""
+	}
+	return newest.Flow
+}
+
+func specAgentState(newest *spec.AgentTurn) string {
+	if newest == nil {
+		return specAgentNeverStarted
+	}
+	switch newest.Status {
+	case spec.TurnStatusRunning:
+		return specAgentWorking
+	case spec.TurnStatusFailed:
+		return specAgentFailed
+	default:
+		return specAgentIdle
+	}
+}
+
 // populateStages fills the three nested aggregates plus the flat artifact
-// fields from three concurrently-read sources — strict join: any source
+// fields from four concurrently-read sources — strict join: any source
 // failing fails the whole read (the console's poller keeps last-good data
-// and retries; the endpoint never fabricates emptiness).
+// and retries; the endpoint never fabricates emptiness). The fourth, the
+// newest agent turn, is skipped entirely when unwired rather than failing:
+// its absence reads as "no agent working", which is what a project with no
+// turns reports anyway.
 func (s *Service) populateStages(ctx context.Context, orgName, projectName string, status *gen.ProjectStatus) error {
 	if s.artifactSvc == nil || s.runReader == nil || s.bindingsReader == nil {
 		return fmt.Errorf("project status: stage sources not wired")
@@ -106,10 +241,20 @@ func (s *Service) populateStages(ctx context.Context, orgName, projectName strin
 		snap        *spec.StatusSnapshot
 		runs        []delivery.MilestoneRun
 		bindings    []openchoreo.ReleaseBindingSummary
+		newestTurn  *spec.AgentTurn
 		deployVer   string
 		deployTotal int64
 	)
 	g, gctx := errgroup.WithContext(ctx)
+	if s.specTurns != nil {
+		g.Go(func() error {
+			var err error
+			if newestTurn, err = s.specTurns.Newest(gctx, orgName, projectName); err != nil {
+				return fmt.Errorf("newest agent turn: %w", err)
+			}
+			return nil
+		})
+	}
 	g.Go(func() error {
 		var err error
 		if snap, err = s.artifactSvc.StatusSnapshot(gctx, orgName, projectName); err != nil {
@@ -124,11 +269,11 @@ func (s *Service) populateStages(ctx context.Context, orgName, projectName strin
 		}
 		// The deploy denominator depends only on the rows, so read it here —
 		// overlapped with the OC call instead of serial after the join.
-		// deploy.version = the newest SUCCEEDED spec run's version: what the
+		// deploy.version = the newest SUCCEEDED DEV run's version: what the
 		// platform last finished delivering (a running v2 does not unseat a
 		// live v1).
 		for i := range runs {
-			if runs[i].Origin == delivery.RunOriginSpecBuild && runs[i].State == delivery.RunStateSucceeded {
+			if runs[i].Kind == delivery.RunKindDev && runs[i].State == delivery.RunStateSucceeded {
 				// SpecTag, not the milestone title: the title is the milestone's
 				// GitHub name and ComponentCountAtTag below resolves this as a GIT
 				// TAG — a title that is not the tag reads as a vanished tag and
@@ -167,20 +312,34 @@ func (s *Service) populateStages(ctx context.Context, orgName, projectName strin
 
 	// Spec stage + flat artifact fields: one snapshot, same semantics as the
 	// retired per-call reads — minus their per-poll origin fetches.
+	// Staleness is checked only when a design exists — nothing can be behind
+	// the requirements before it has been written, and this keeps the extra
+	// tree read off every pre-design poll.
+	outdated := false
+	if snap.HasDesign {
+		stale, err := s.designOutdated(ctx, orgName, projectName, snap.RequirementsFingerprint)
+		if err != nil {
+			return err
+		}
+		outdated = stale
+	}
 	status.Spec = gen.SpecStage{
-		Exists:  snap.HasSpec,
-		Version: snap.SpecVersion,
-		Dirty:   snap.SpecDirty,
-		Design:  snap.HasDesign,
+		Exists:         snap.HasSpec,
+		Version:        snap.SpecVersion,
+		Dirty:          snap.SpecDirty,
+		Design:         snap.HasDesign,
+		Agent:          specAgentOf(s.specTurns, newestTurn),
+		AgentFlow:      runningFlowOf(newestTurn),
+		DesignOutdated: outdated,
 	}
 	applyFlatArtifactFields(status, snap)
 
-	// Build stage: the newest SPEC BUILD (ListByProject is newest-first).
+	// Build stage: the newest DEV RUN (ListByProject is newest-first).
 	//
-	// Spec builds specifically, not simply the newest row, because only a spec
-	// build advances the project's version — "what version is this project on" has
-	// always meant the last one built. The other origins work an EXISTING
-	// milestone, which may be any version's: an incident adopted into v3 while the
+	// Dev runs specifically, not simply the newest row, because only a dev run
+	// advances the project's version — "what version is this project on" has
+	// always meant the last one built. The other kinds work an EXISTING
+	// milestone, which may be any version's: a bug adopted into v3 while the
 	// project is on v5, or a revalidation of v3, would otherwise walk the overview
 	// backwards and report the project as being on v3.
 	//
@@ -188,7 +347,7 @@ func (s *Service) populateStages(ctx context.Context, orgName, projectName strin
 	// version's milestone on GitHub, and this endpoint is polled at 5s — a
 	// per-poll GitHub read is exactly what the #184 budget forbids. The console
 	// renders per-version counts from the list-tasks response it already holds.
-	latest := newestByOrigin(runs, delivery.RunOriginSpecBuild)
+	latest := newestByKind(runs, delivery.RunKindDev)
 	if latest != nil {
 		status.Build.Version = latest.SpecTag()
 		status.Build.Status = buildStageStatus(latest.State)
@@ -223,14 +382,14 @@ func (s *Service) populateStages(ctx context.Context, orgName, projectName strin
 	// Validation: the newest verdict for the version the build stage just named —
 	// a column on a row already read above, so the poll costs nothing extra.
 	//
-	// Scoped to that MILESTONE rather than to the spec-build run, because a version
+	// Scoped to that MILESTONE rather than to the dev run, because a version
 	// can be judged more than once: a revalidation is a later run on the same
-	// milestone and its verdict is the version'"'"'s current answer. Scoped to the
+	// milestone and its verdict is the version's current answer. Scoped to the
 	// milestone rather than to the whole project for the reason above — a run on an
 	// older version must not answer for this one.
 	//
-	// The report itself, and the per-cycle detail behind it, live on the version'"'"'s
-	// run story (list-build-runs), which is where the console'"'"'s validation surface
+	// The report itself, and the per-cycle detail behind it, live on the version's
+	// run story (list-build-runs), which is where the console's validation surface
 	// reads them; validationUrl/validationIssue are therefore no longer served here.
 	state, err := s.validationStage(ctx, orgName, newestValidatingOnMilestone(runs, latest))
 	if err != nil {
@@ -244,11 +403,11 @@ func (s *Service) populateStages(ctx context.Context, orgName, projectName strin
 // cycle ONLY when the verdict alone cannot answer.
 //
 // That conditional read is the whole point of the split: a verdict that is final is
-// the answer, and a settled run without one never reached validation — both decided
-// from the row already in hand. The extra query happens for the two cases the row
-// cannot settle: a live run with no verdict yet (the case the old code got wrong by
-// calling every such run "validating"), and a live run holding a REPAIRABLE verdict,
-// which is mid-loop rather than finished.
+// the answer, and a settled run without one either had its judging cancelled or never
+// reached validation — all decided from the row already in hand. The extra query
+// happens for the two cases the row cannot settle: a live run with no verdict yet (the
+// case the old code got wrong by calling every such run "validating"), and a live run
+// holding a REPAIRABLE verdict, which is mid-loop rather than finished.
 func (s *Service) validationStage(ctx context.Context, orgID string, run *delivery.MilestoneRun) (string, error) {
 	state, decided := validationStageFromRun(run)
 	if decided {
@@ -273,12 +432,12 @@ func (s *Service) validationStage(ctx context.Context, orgID string, run *delive
 	return validationNone, nil
 }
 
-// newestByOrigin returns the newest run of one origin, or nil. rows must be
+// newestByKind returns the newest run of one kind, or nil. rows must be
 // newest-first, which is what ListByProject guarantees — so this is a scan, not a
 // sort, and costs nothing on a slice the caller already holds.
-func newestByOrigin(rows []delivery.MilestoneRun, origin string) *delivery.MilestoneRun {
+func newestByKind(rows []delivery.MilestoneRun, kind string) *delivery.MilestoneRun {
 	for i := range rows {
-		if rows[i].Origin == origin {
+		if rows[i].Kind == kind {
 			return &rows[i]
 		}
 	}
@@ -290,15 +449,15 @@ func newestByOrigin(rows []delivery.MilestoneRun, origin string) *delivery.Miles
 // that version.
 //
 // It exists because a version's answer and the version's BUILD can come from
-// different rows: the spec build delivers it, and a revalidation started
-// afterwards may hold a newer verdict for the very same milestone.
+// different rows: the dev run delivers it, and a revalidation started afterwards
+// may hold a newer verdict for the very same milestone.
 //
-// The ORIGIN filter is the load-bearing half, and it predates revalidation. An
-// incident adoption never validates, and `settle` stamps `skipped` on any
-// succeeded run that never did — so the newest run on a milestone is routinely one
-// whose verdict means "I was never asked". Returning it made a single adopted issue
-// report a genuinely passed version as unvalidated. RunValidates is delivery's own
-// answer to which origins ask the question, so this cannot drift from the loop.
+// The KIND filter is the load-bearing half, and it predates revalidation. A task
+// run never validates, and `settle` stamps `skipped` on any succeeded run that
+// never did — so the newest run on a milestone is routinely one whose verdict
+// means "I was never asked". Returning it made a single adopted issue report a
+// genuinely passed version as unvalidated. RunValidates is delivery's own answer
+// to which kinds ask the question, so this cannot drift from the loop.
 //
 // Keyed on the milestone number, which is the platform key; nil ref means there is
 // no version to answer about.
@@ -307,7 +466,7 @@ func newestValidatingOnMilestone(rows []delivery.MilestoneRun, ref *delivery.Mil
 		return nil
 	}
 	for i := range rows {
-		if rows[i].MilestoneNumber == ref.MilestoneNumber && delivery.RunValidates(rows[i].Origin) {
+		if rows[i].MilestoneNumber == ref.MilestoneNumber && delivery.RunValidates(rows[i].Kind) {
 			return &rows[i]
 		}
 	}
@@ -320,6 +479,11 @@ func newestValidatingOnMilestone(rows []delivery.MilestoneRun, ref *delivery.Mil
 // The verdict is MIRRORED, not folded: it is the thing a reader wants to know, and
 // folding it into a coarser word is how "completed" came to mean "passed" without
 // saying so — it would discard partial, inconclusive and unreported entirely.
+//
+// A TERMINAL run with no verdict splits in two, and the split is the difference
+// between a state that resolves and one that never will: judging that was CANCELLED
+// is settled (`cancelled`), and everything else is a run that simply never got there
+// (`none`, which promises a verdict is still coming).
 //
 // A verdict is final on a TERMINAL run, and on a live run when it is not one the
 // loop repairs. A live run holding a repairable verdict is undecided: the verdict is
@@ -339,6 +503,23 @@ func validationStageFromRun(run *delivery.MilestoneRun) (state string, decided b
 	if delivery.IsTerminalRunState(run.State) {
 		if run.ValidationVerdict != "" {
 			return run.ValidationVerdict, true
+		}
+		// A cancelled VALIDATION run: somebody stopped the judging, so no verdict is
+		// coming for this version and `none` — which promises one — would be a lie
+		// that never resolves.
+		//
+		// The KIND guard is load-bearing rather than defensive. This function is
+		// handed whatever newestValidatingOnMilestone returns, which is a
+		// validation-kind run OR a fall-back to the dev run, so testing the state
+		// alone would also catch a cancelled DEV run. That is an ABANDONED INCREMENT
+		// — the reconcile sweep suppresses its whole milestone for exactly that
+		// reason — and reporting it as "nothing left to wait for" would offer the
+		// version for promotion, which is worse than the confusion this state exists
+		// to remove. RunValidates is delivery's own answer to which kinds ask the
+		// question, and the selector above already keys on it, so the two cannot
+		// drift onto different ideas of what validates.
+		if run.State == delivery.RunStateCancelled && delivery.RunValidates(run.Kind) {
+			return validationCancelled, true
 		}
 		// Settled without ever recording a verdict: the run never reached validation.
 		return validationNone, true
@@ -386,17 +567,28 @@ func applyFlatArtifactFields(status *gen.ProjectStatus, snap *spec.StatusSnapsho
 
 // buildStageStatus maps a milestone run's state onto the BuildStage enum. A
 // version's delivery IS its run: it is running while the run is (waiting between
-// cycles included — the version is still being delivered), and it succeeds or
-// fails exactly when the run settles. A cancelled or BLOCKED run reads as not
-// delivered: the version did not ship, and the run row's terminal reason is
-// where the difference (abandoned versus out of agent slots) is explained.
+// cycles included — the version is still being delivered), and it settles when
+// the run does.
+//
+// CANCELLED IS ITS OWN VALUE, matching build.statusFromRunState. The two
+// aggregates are read by different surfaces off the same run row — this one
+// drives the project badge in the toolbar, that one the version ledger — so a
+// difference between them is a self-contradiction a reader sees in one glance.
+// It was one: the build page header said Cancelled while the toolbar two
+// centimetres away said "Build failed".
+//
+// A BLOCKED run still reads as failed. The version did not ship and a human has
+// to supply something before it can, which is what "failed, see the reason" says;
+// nobody chose it, and that is the whole difference from a cancel.
 func buildStageStatus(state string) string {
 	switch state {
 	case delivery.RunStateSucceeded:
 		return buildSucceeded
-	case delivery.RunStateFailed, delivery.RunStateCancelled, delivery.RunStateBlocked:
+	case delivery.RunStateCancelled:
+		return buildCancelled
+	case delivery.RunStateFailed, delivery.RunStateBlocked:
 		return buildFailed
-	default: // waiting | running
+	default: // waiting | running | planning
 		return buildRunning
 	}
 }

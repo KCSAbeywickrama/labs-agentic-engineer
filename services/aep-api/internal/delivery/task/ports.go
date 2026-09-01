@@ -32,9 +32,14 @@ import (
 // providers and tests supply fakes.
 
 // IssueClient is the GitHub issue surface the read path and the plan tap use:
-// list, fetch, create and edit. sourcecontrol.IssueService satisfies it.
+// list, fetch and edit. sourcecontrol.IssueService satisfies it.
+//
+// It does NOT mint. A planned Task is a platform mint like any other and goes
+// through delivery.IssueWriter, so the `aep` label and the milestone assignment
+// are decided in one place for the whole domain. What stays here is the
+// planner's own updateTask surface — retitle, rewrite the body, comment — which
+// acts on issues that already exist and carries no such policy.
 type IssueClient interface {
-	CreateIssue(ctx context.Context, orgID, projectID string, req sourcecontrol.CreateIssueRequest) (*sourcecontrol.IssueResult, error)
 	ListIssues(ctx context.Context, orgID, projectID string, labels []string) ([]sourcecontrol.IssueInfo, error)
 	// GetIssue fetches one issue by number (O(1)); returns sourcecontrol.ErrIssueNotFound
 	// when it doesn't exist. Preferred over ListIssues when the number is known.
@@ -42,12 +47,16 @@ type IssueClient interface {
 	CommentIssue(ctx context.Context, orgID, projectID string, number int, body string) error
 	EditIssueBody(ctx context.Context, orgID, projectID string, number int, body string) error
 	EditIssueTitle(ctx context.Context, orgID, projectID string, number int, title string) error
-	AddLabels(ctx context.Context, orgID, projectID string, number int, labels []string) error
 	// ListMilestoneIssues reads one milestone's issues (pull requests excluded).
 	// The plan turn reads the milestone it is planning INTO so a re-plan and a
 	// crash re-run dedupe against what is already there — the milestone, not a
 	// label query, is the version's membership.
 	ListMilestoneIssues(ctx context.Context, orgID, projectID string, filter sourcecontrol.MilestoneIssuesFilter) ([]sourcecontrol.IssueInfo, error)
+	// ListMilestoneIssueComments reads the newest perIssue comments of every
+	// issue in one milestone, bucketed by issue number and oldest first, in ONE
+	// round trip. Milestone-scoped because that is the only bounded set of
+	// issues this surface can name — see ListByTag.
+	ListMilestoneIssueComments(ctx context.Context, orgID, projectID string, number, perIssue int) (map[int][]sourcecontrol.IssueComment, error)
 }
 
 // ComponentPathReader maps a design component to its source directory (appPath)
@@ -98,10 +107,9 @@ type GitReader interface {
 	Resolver() secrets.Resolver
 }
 
-// SkillsRepoResolver ensures the org's _skills repo is provisioned (the
-// task-planning flow skill is seeded there) and returns its row — the source
-// of the plan turn's SkillsRef snapshot. Wired at the composition root from
-// the skills feature so task holds no skills edge.
+// SkillsRepoResolver returns the org _skills git row used as the plan
+// turn's SkillsRef snapshot source. Production wires the same reconcile
+// resolver as genai turns so the library is not first-touch-only.
 type SkillsRepoResolver func(ctx context.Context, orgID string) (*sourcecontrol.GitRepository, error)
 
 // ExecutionReader is the read side of the executions rows (the platform-owned

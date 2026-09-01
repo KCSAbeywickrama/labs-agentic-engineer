@@ -16,22 +16,34 @@
  * under the License.
  */
 
+import fs from "node:fs";
 import path from "node:path";
 import { query, type McpServerConfig, type Query } from "@anthropic-ai/claude-agent-sdk";
-import { openDebugSinks, type DebugSinks, type TaskLog } from "./logger.js";
+import { debugQueryOptions, openDebugSinks, type DebugSinks, type TaskLog } from "./logger.js";
+// Re-exported from where they now live: `debugQueryOptions` is entirely about
+// the sinks, so it sits beside them in `logger.ts`. Still exported here because
+// this is the module every existing caller and test imports it from, and
+// because a consumer that only wants the options should not have to pull in
+// this module's whole dependency graph to get them.
+export { debugQueryOptions, type DebugQueryOptions } from "./logger.js";
 import type { DispatchRequest } from "./types.js";
 import type { WorkspaceLayout } from "./workspace.js";
-import { emit } from "./progress/emitter.js";
+import { writeBearerFile } from "./workspace.js";
+import { emit, primeScrubber } from "./progress/emitter.js";
 import { createSdkTranslator } from "./progress/from-sdk.js";
 import { createRunWatchdog } from "./progress/watchdog.js";
-import { apiRetryLine, isStreamFrame, readApiRetry } from "./progress/diagnostics.js";
+import { apiRetryLine, isStreamFrame, readApiRetry, readStallSignal } from "./progress/diagnostics.js";
 import { scrubber } from "./progress/scrubber.js";
 import { createWebSearchDlpHook, stagedSecretValues } from "./websearch_dlp.js";
 import { createForegroundFanOutHook } from "./fanout_foreground.js";
 import { createWorkspaceWriteGuard } from "./workspace_guard.js";
+import { createValidationProgressTracker } from "./validation_progress.js";
+import { startMcpAuthProxy } from "./mcp_auth_proxy.js";
+import { staticTokenSource, type AccessTokenSource } from "./auth_retry.js";
 import { createWebFetchGuardHook } from "./webfetch_guard.js";
 import { checkPreload, preloadWarning } from "./skills_preload_check.js";
 import { SKILLS_MIRROR_DIR, requireWorkflowBodies } from "./skills_presence.js";
+import { curlConfigHome, playwrightCliConfigPath } from "./endpoint_access.js";
 
 /**
  * The mirror the BFF wrote into the project clone, as an absolute path.
@@ -194,10 +206,9 @@ export interface McpQueryOptions {
 
 // buildMcpOptions is a pure seam so the env-presence guard is unit-testable
 // without constructing a full query(). Both mcpUrl and mcpToken must be
-// present — the BFF's coding-agent Job template stamps AEP_MCP_URL
-// unconditionally but only stamps AEP_MCP_TOKEN when minting succeeded
-// (see coding_agent_component_type.go env stamping), so a URL-without-token dispatch must still omit
-// the server rather than register it unauthenticated.
+// present — AEP_MCP_URL plus the publisher CC token the runner minted.
+// A URL-without-token dispatch must still omit the server rather than register
+// it unauthenticated.
 export function buildMcpOptions(mcpUrl: string | undefined, mcpToken: string | undefined): McpQueryOptions {
   if (!mcpUrl || !mcpToken) {
     return { allowedTools: BASE_ALLOWED_TOOLS };
@@ -273,6 +284,15 @@ export interface PerTaskSkills {
   pinnedBodies: string;
 }
 
+// Live access-token source for MCP (and bearer-file persistence on remint).
+// canRefresh is true iff publisher CC creds are mounted — the same predicate
+// local and cloud already share. The SDK only accepts static MCP headers, so
+// runClaudeQuery puts a loopback proxy in front of AEP_MCP_URL.
+export interface McpAuthOpts {
+  source: AccessTokenSource;
+  canRefresh: boolean;
+}
+
 /**
  * The skills a run is steered by whatever its design says — read from the mirror
  * like every other skill, but not optional and not the design's to choose.
@@ -295,39 +315,49 @@ export function alwaysOnSkills(taskKind: DispatchRequest["taskKind"]): string[] 
 }
 
 /**
- * The SDK options that exist only to be read by a developer afterwards.
+ * The skills a run may LOAD on demand — the other half of the sentence above.
  *
- * Split out as a pure function so the boundary is testable: the expensive,
- * prompt-bearing options must be provably absent from a run that did not ask
- * for them, and "absent" is not something an integration test of a live session
- * can assert.
+ * `skills:` is an allowlist, so leaving `playwright-cli` out of the always-on
+ * set is only half a decision: absent from BOTH lists it is not deferred, it is
+ * unreachable, and the Skill tool answers "not in this session's skills
+ * allowlist". That is what shipped — a validation run passed an empty allowlist,
+ * so the load `aep-validation` instructs could never succeed and the agent
+ * grepped the mirror's files by hand instead.
  *
- * `includePartialMessages` is in here for volume, not secrecy — it multiplies
- * the message count by roughly the token count, and the run loop drops every
- * frame it produces on the floor after the watchdog has seen it. The other two
- * are in here for both reasons.
+ * Named rather than "the whole mirror" as an implementation run gets: that run
+ * may legitimately need any stack skill a `design.json` pinned, while a
+ * validation run builds nothing and has exactly one mechanics skill to reach
+ * for. Listing the mirror would readmit `go`, `ballerina` and every other stack
+ * skill the checkout happens to carry, which is the thing the `skills:` comment
+ * below warns against. Extend this list when a validation run genuinely needs
+ * something else; it is a statement of what the phase uses, not a cap someone
+ * has to work around.
  */
-export interface DebugQueryOptions {
-  includePartialMessages?: true;
-  debugFile?: string;
-  stderr?: (data: string) => void;
+export function onDemandSkills(taskKind: DispatchRequest["taskKind"]): string[] {
+  return taskKind === "validation" ? ["playwright-cli"] : [];
 }
 
-export function debugQueryOptions(sinks: DebugSinks | undefined): DebugQueryOptions {
-  if (!sinks) return {};
-  return {
-    includePartialMessages: true,
-    debugFile: sinks.debugFilePath,
-    stderr: (data: string) => sinks.onStderr(data),
-  };
+/**
+ * `PLAYWRIGHT_MCP_CONFIG`, but only when there is a config to point at.
+ *
+ * Spread into the child env so the variable is absent rather than empty when the
+ * preflight wrote nothing: playwright-cli reads it eagerly and its daemon dies
+ * on a path that does not resolve, so an unset variable is the only safe way to
+ * say "no override needed". Synchronous on purpose — this runs once, at spawn,
+ * after the preflight that writes the file has already returned.
+ */
+function playwrightCliConfigEnv(): Record<string, string> {
+  const file = playwrightCliConfigPath();
+  return fs.existsSync(file) ? { PLAYWRIGHT_MCP_CONFIG: file } : {};
 }
 
-export function runClaudeQuery(
+export async function runClaudeQuery(
   req: DispatchRequest,
   layout: WorkspaceLayout,
   log: TaskLog,
   perTaskSkills?: PerTaskSkills,
-): StartedRun {
+  mcpAuth?: McpAuthOpts,
+): Promise<StartedRun> {
   // Spawn env: bearer + git-service URL passed by file path / URL only.
   // No tokens cross via env, so transcripts cannot leak credentials.
   // ANTHROPIC_API_KEY flows through from process.env (container env).
@@ -346,6 +376,19 @@ export function runClaudeQuery(
     AEP_PLATFORM_URL: process.env.AEP_PLATFORM_URL ?? "",
     AEP_GIT_SERVICE_URL: req.gitServiceUrl,
     AEP_CORRELATION_ID: req.correlationId ?? "",
+    // Where curl looks for `.curlrc`. Named explicitly rather than left to the
+    // inherited HOME: a validation run writes `resolve` overrides there for its
+    // deployed endpoints (endpoint_access.ts), and a config curl was never told
+    // to look for is indistinguishable from no config at all. Harmless on a
+    // coding run, which writes no such file.
+    CURL_HOME: curlConfigHome(),
+    // And where playwright-cli looks for its own — the browser half of the same
+    // endpoint override (endpoint_access.ts). Set from the file's EXISTENCE, not
+    // unconditionally like CURL_HOME above: curl treats a missing `.curlrc` as
+    // no config, but this variable is fatal when it points at nothing (the
+    // daemon exits on ENOENT), so a coding run and a cloud validation run — both
+    // of which write no such file — must not see it at all.
+    ...playwrightCliConfigEnv(),
   };
 
   // NO plugins. Every skill this session reads is a directory in the project's
@@ -377,13 +420,35 @@ export function runClaudeQuery(
   // procedure: it throws here, before a session exists, not in each caller.
   const workflowBodies = requireWorkflowBodies(layout.workspace, alwaysOnSkills(req.taskKind));
 
-  // Endpoint Spec Discovery (B2) — register the BFF's MCP server in-process
-  // when the dispatch carries both AEP_MCP_URL and AEP_MCP_TOKEN. Older
-  // dispatches (or a failed token mint) omit one or both, in which case the
-  // runner falls back to the base tool set unchanged.
-  const { mcpServers, allowedTools } = buildMcpOptions(req.mcpUrl, req.mcpToken);
-
-  // D9 secure search (Task 12) — DLP gate for the server-side WebSearch
+  // Endpoint Spec Discovery (B2) — register the BFF's MCP server through a
+  // loopback proxy so the bearer can rotate. The SDK only accepts static
+  // Authorization headers; the proxy calls getToken() per request (5-minute
+  // CC buffer) and on HTTP 401 remints once. A second 401 or a remint
+  // failure kills the run. Dummy "loopback" is never sent upstream.
+  let mcpProxy: { url: string; close: () => Promise<void> } | undefined;
+  let mcpUrl = req.mcpUrl;
+  let mcpToken = req.mcpToken;
+  if (mcpUrl && mcpToken) {
+    const source = mcpAuth?.source ?? staticTokenSource(mcpToken);
+    const canRefresh = mcpAuth?.canRefresh ?? false;
+    let lastBearer = mcpToken;
+    mcpProxy = await startMcpAuthProxy({
+      upstreamUrl: mcpUrl,
+      source,
+      canRefresh,
+      onToken: async (token) => {
+        lastBearer = await writeBearerFile(layout.bearerFile, token, lastBearer);
+        primeScrubber([token]);
+      },
+      onFatal: (err) => {
+        emit({ kind: "result", status: "failure", error: `mcp auth: ${err.message}` });
+        setTimeout(() => process.exit(1), TERMINATE_FLUSH_MS);
+      },
+    });
+    mcpUrl = mcpProxy.url;
+    mcpToken = "loopback";
+  }
+  const { mcpServers, allowedTools } = buildMcpOptions(mcpUrl, mcpToken);
   // tool. Secret candidates are read from childEnv, the SAME env record
   // injected into this run (see websearch_dlp.ts's stagedSecretValues doc
   // comment): staged dependency secrets (Tasks 9-11's per-run K8s Secrets,
@@ -416,6 +481,17 @@ export function runClaudeQuery(
     emit({ kind: "log", level: "warn", summary: `[workspace] ${reason}` });
   });
 
+  // Per-criterion progress — see validation_progress.ts. Validation only: a
+  // coding run has no validation criteria to report on, and registering the
+  // matchers anyway would put a hook on every Write, Edit and Bash call of every
+  // run to derive nothing.
+  const validationProgress =
+    req.taskKind === "validation"
+      ? createValidationProgressTracker((update) => {
+          emit({ kind: "progress_item", itemId: update.itemId, status: update.status });
+        })
+      : undefined;
+
   // The SDK auto-discovers the bundled native binary — no
   // pathToClaudeCodeExecutable needed. See settingSources below for why the
   // project source — and only the project source — is admitted.
@@ -434,7 +510,9 @@ export function runClaudeQuery(
   // prompt-bearing debug log out of the cluster — see DispatchRequest.debug.
   const debugSinks = req.debug ? openDebugSinks(log.dir, (line) => scrubber.scrub(line)) : undefined;
 
-  const q = query({
+  let q: Query;
+  try {
+    q = query({
     prompt: promptWithProjectRoot(req.prompt, layout.workspace, contractReferencePath(layout.workspace)),
     options: {
       cwd: layout.workspace,
@@ -489,14 +567,34 @@ export function runClaudeQuery(
           { matcher: "Write", hooks: [workspaceWriteGuard] },
           { matcher: "Edit", hooks: [workspaceWriteGuard] },
           { matcher: "NotebookEdit", hooks: [workspaceWriteGuard] },
+          // Neither a guard nor a rewrite: this one only watches, and returns an
+          // empty decision. One matcher per tool for the same reason as every
+          // entry above, and `Bash` as well because a validation run's per-spec
+          // `npm test` call is what says a criterion is running.
+          ...(validationProgress
+            ? [
+                { matcher: "Write", hooks: [validationProgress.hook] },
+                { matcher: "Edit", hooks: [validationProgress.hook] },
+                { matcher: "NotebookEdit", hooks: [validationProgress.hook] },
+                { matcher: "Bash", hooks: [validationProgress.hook] },
+              ]
+            : []),
         ],
       },
     },
-  });
+    });
+  } catch (err) {
+    await mcpProxy?.close();
+    throw err;
+  }
 
   // One translator per run — it carries this run's subagent labels and
   // in-flight tool calls (see createSdkTranslator).
-  const translate = createSdkTranslator();
+  // The tracker settles a criterion from the SAME `ok` the feed reports, rather
+  // than re-deriving success from the tool result a second time.
+  const translate = createSdkTranslator(
+    validationProgress ? { onToolOutcome: validationProgress.settle } : undefined,
+  );
   // …and one watchdog, so a silent stretch says what it is waiting on rather
   // than looking identical to a dead run.
   const watchdog = createRunWatchdog();
@@ -545,6 +643,18 @@ export function runClaudeQuery(
           emit({ kind: "log", level: "warn", summary: apiRetryLine(retry) });
           continue;
         }
+        // The other system messages that explain a silence or an ending — a
+        // compaction, a refusal, a denied tool, a worker going away. Dropped
+        // with every other unrecognised subtype until now, which is how a run
+        // that was compacting and a run that was wedged looked identical.
+        // Deliberately NOT fed to the watchdog: none of them is the agent making
+        // progress, and firing the idle report slightly early is the safe
+        // direction for a diagnostic.
+        const signal = readStallSignal(message);
+        if (signal) {
+          emit({ kind: "log", level: signal.level, summary: signal.summary });
+          continue;
+        }
         const events = translate(message);
         watchdog.observe(events);
         for (const event of events) {
@@ -588,6 +698,7 @@ export function runClaudeQuery(
       process.removeListener("SIGINT", onTerminate);
       log.close();
       debugSinks?.close();
+      await mcpProxy?.close();
     }
   })();
 

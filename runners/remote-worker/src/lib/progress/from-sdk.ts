@@ -268,6 +268,32 @@ interface FailureDetail {
   summary: string;
 }
 
+// How much of a failed fan-out's error text reaches the feed.
+//
+// `failureDetail` below is the right shape for a tool ROW — the command is
+// printed above it and the whole output is in claude.log. A failed fan-out has
+// neither: the subagent's transcript is not on this feed at all, and claude.log
+// is inside a pod that is about to be deleted. Measured on a live run, that
+// left a 22-minute subagent arriving as a bare `ok:false` with no reason on
+// record anywhere. So the fan-out branch prints what the SDK actually said,
+// bounded instead of reduced to one sentence.
+const MAX_FAILURE_LINES = 10;
+const MAX_FAILURE_CHARS = 2000;
+
+/** The failed call's own words, flattened to one line and bounded. */
+function failureText(content: unknown): string {
+  const lines = resultText(content)
+    .replace(TOOL_USE_ERROR_TAG, "")
+    .split("\n")
+    .map((l) => (l.split("\r").pop() ?? "").trim())
+    .filter((l) => l !== "");
+  if (lines.length === 0) return "";
+  const kept = lines.slice(0, MAX_FAILURE_LINES);
+  const dropped = lines.length - kept.length;
+  const text = kept.join(" | ") + (dropped > 0 ? ` (+${dropped} more line${dropped === 1 ? "" : "s"})` : "");
+  return text.length <= MAX_FAILURE_CHARS ? text : text.slice(0, MAX_FAILURE_CHARS - 1) + "…";
+}
+
 /**
  * The one-line diagnosis of a failed call, plus its exit code when the tool was
  * a shell. Everything else in the output is developer material and belongs in
@@ -362,6 +388,18 @@ export type SdkTranslator = (message: unknown) => ProgressEventInput[];
 export interface SdkTranslatorOptions {
   /** Injected clock, so duration measurement is testable without sleeping. */
   now?: () => number;
+  /**
+   * Called when a plain tool call settles, with the same `ok` this translator
+   * puts on the feed. A seam, not a second feature: whether a call succeeded is
+   * already decided here from the SDK's own `is_error`, and re-deriving it
+   * anywhere else would give two answers to one question.
+   *
+   * Fan-out results are deliberately excluded — an `Agent`/`Task` call settles a
+   * whole subagent, which is a different kind of fact from one command's exit,
+   * and nothing consumes it. Today's only consumer is the validation progress
+   * tracker, which settles per-spec `npm test` calls.
+   */
+  onToolOutcome?: (toolUseId: string, ok: boolean) => void;
 }
 
 /**
@@ -371,6 +409,7 @@ export interface SdkTranslatorOptions {
  */
 export function createSdkTranslator(opts?: SdkTranslatorOptions): SdkTranslator {
   const now = opts?.now ?? Date.now;
+  const onToolOutcome = opts?.onToolOutcome;
   // Spawning tool-call id → that subagent / backgrounded command.
   const subagents = new Map<string, TaskInfo>();
   // SDK task id → the spawning tool-call id above, so a task_* message and a
@@ -622,9 +661,10 @@ export function createSdkTranslator(opts?: SdkTranslatorOptions): SdkTranslator 
             awaitingNotification.set(tr.toolUseId, call?.startedAt ?? now());
             continue;
           }
+          const ok = !tr.isError && (totals.status ?? "completed") === "completed";
           events.push({
             kind: "tool_result",
-            ok: !tr.isError && (totals.status ?? "completed") === "completed",
+            ok,
             toolUseId: tr.toolUseId,
             tool: "Agent",
             // Named even on success: this is the line reporting how long a
@@ -635,8 +675,25 @@ export function createSdkTranslator(opts?: SdkTranslatorOptions): SdkTranslator 
             ...totals,
             ...attribution(tr.toolUseId),
           });
+          // A second line, not a richer row: `summary` on the row above is
+          // contractually the subagent's LABEL (the console renders it as the
+          // section heading), so the reason has to arrive beside it. Emitted
+          // even when the tool result carried no text, because "the SDK gave no
+          // reason" is itself the finding — it is what a reader would otherwise
+          // spend the next run trying to establish.
+          if (!ok) {
+            const said = failureText(tr.content);
+            const why = said || `no error text on the tool result${totals.status ? ` (status ${totals.status})` : ""}`;
+            events.push({
+              kind: "log",
+              level: "error",
+              summary: `[fan-out] ${info.label || "subagent"} failed: ${why}`,
+              ...attribution(tr.toolUseId),
+            });
+          }
           continue;
         }
+        onToolOutcome?.(tr.toolUseId, !tr.isError);
         events.push({
           kind: "tool_result",
           ok: !tr.isError,

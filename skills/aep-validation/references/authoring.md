@@ -86,6 +86,19 @@ test-plan section — `generate-report.mjs` hard-fails without it, same
 as a bad title. Step comments (one per plan step above the code that
 executes it) are recommended for reviewability:
 
+**Write that header first, on its own, before you explore for the
+criterion** — then explore, then fill in the body. A spec file that
+exists with only its header is how the platform knows which criterion
+you have picked up: exploring one criterion can take many minutes of
+playwright-cli calls that name URLs and element refs but never the
+criterion they are for, so without the file there is nothing to
+attribute them to and the run looks stalled from outside.
+
+This applies only to specs you are CREATING. On a re-validation, never
+blank an existing spec back to its header — that reads as a pre-existing
+spec modified with no heal-log entry, and the report generator fails the
+run for it.
+
 ```ts
 // spec: tests/validation/test-plan.md § AC-001-a
 import { test, expect } from "@playwright/test";
@@ -115,7 +128,7 @@ test("AC-001-a: a name text box is visible", async ({ page }) => {
   is the contract. Extra assertions turn unrelated changes into false
   failures; missing assertions make the test vacuous.
 - **Independence:** each spec must pass when run alone
-  (`npx playwright test specs/AC-001-a.spec.ts`). No ordering
+  (`npm test --prefix tests/e2e -- specs/AC-001-a.spec.ts`). No ordering
   dependencies, no state left behind for the next spec.
 - **Unique test data:** the deployed environment persists between runs.
   Suffix created entities with a run marker

@@ -21,11 +21,16 @@ import type { components } from "../../../generated/aep-api";
 import {
   buildOutcome,
   buildSessionLabel,
+  externalValuesPark,
   gateDrive,
+  hasMergedWork,
+  isAgentStreaming,
   isDeliveryRun,
   isTerminalRun,
   runHold,
-  runOriginLabel,
+  runKind,
+  runKindLabel,
+  mergedCycle,
   runStateChip,
   spentBudgets,
   terminalReasonText,
@@ -50,6 +55,7 @@ const run = (over: Partial<MilestoneRunView> = {}): MilestoneRunView => ({
   id: "run-1",
   milestoneNumber: 1,
   milestoneTitle: "v1",
+  kind: "dev",
   origin: "spec-build",
   state: "running",
   budgets: budgets(),
@@ -57,6 +63,106 @@ const run = (over: Partial<MilestoneRunView> = {}): MilestoneRunView => ({
   cycles: [],
   createdAt: "2026-07-10T09:00:00Z",
   ...over,
+});
+
+const cycle = (
+  over: Partial<components["schemas"]["RunCycleView"]> = {},
+): components["schemas"]["RunCycleView"] => ({
+  id: "c1",
+  kind: "coding",
+  attempts: 1,
+  createdAt: "2026-07-10T09:05:00Z",
+  ...over,
+});
+
+describe("mergedCycle / hasMergedWork", () => {
+  it("finds the cycle that actually merged, not the newest one", () => {
+    // The Build logs bug: the section was handed `cycles.at(-1)`, which is
+    // routinely a validation cycle or a coding cycle that never merged, and the
+    // cluster read answers empty for any cycle with no merge SHA.
+    const r = run({
+      cycles: [
+        cycle({ id: "merged", mergeSha: "abc1234" }),
+        cycle({ id: "retry", mergeSha: "" }),
+      ],
+    });
+    expect(mergedCycle([r])?.id).toBe("merged");
+    expect(hasMergedWork([r])).toBe(true);
+  });
+
+  it("looks across every run of the version, newest merge first", () => {
+    // A version is often worked by several runs; the merge is frequently in an
+    // earlier one, and a later run cannot un-merge it.
+    const older = run({ id: "older", cycles: [cycle({ id: "old-merge", mergeSha: "aaa" })] });
+    const newer = run({ id: "newer", kind: "task", cycles: [] });
+    expect(mergedCycle([newer, older])?.id).toBe("old-merge");
+  });
+
+  it("prefers the NEWER RUN's merge when both runs merged something", () => {
+    // The precedence rule itself. The two cases either side of this one pass
+    // just as happily if the scan runs oldest-first: one has no merge in the
+    // newer run, the other has both merges inside a single run.
+    const newer = run({ id: "newer", cycles: [cycle({ id: "new-merge", mergeSha: "bbb" })] });
+    const older = run({ id: "older", cycles: [cycle({ id: "old-merge", mergeSha: "aaa" })] });
+    expect(mergedCycle([newer, older])?.id).toBe("new-merge");
+  });
+
+  it("prefers the newest merge when several cycles merged", () => {
+    const r = run({
+      cycles: [cycle({ id: "first", mergeSha: "aaa" }), cycle({ id: "second", mergeSha: "bbb" })],
+    });
+    expect(mergedCycle([r])?.id).toBe("second");
+  });
+
+  it("does not count a validation cycle's SHA — it names the commit it judged", () => {
+    const r = run({ cycles: [cycle({ kind: "validation", mergeSha: "abc1234" })] });
+    expect(mergedCycle([r])).toBeUndefined();
+    expect(hasMergedWork([r])).toBe(false);
+  });
+
+  it("is undefined when nothing merged", () => {
+    expect(mergedCycle([run({ cycles: [cycle({ mergeSha: "" })] })])).toBeUndefined();
+    expect(mergedCycle([])).toBeUndefined();
+    expect(mergedCycle(undefined)).toBeUndefined();
+  });
+});
+
+describe("isAgentStreaming", () => {
+  it("streams only while a build session is open", () => {
+    expect(isAgentStreaming([run({ cycles: [cycle({ endedAt: null })] })])).toBe(true);
+    expect(
+      isAgentStreaming([run({ cycles: [cycle({ endedAt: "2026-07-10T09:40:00Z" })] })]),
+    ).toBe(false);
+  });
+
+  it("stops the moment the agent finishes, though the RUN is still in progress", () => {
+    // The bug: the chip read the build's status, and a run stays in_progress
+    // through the merge, the component builds and the deployment — long after
+    // the coding agent has stopped and there is nothing left to stream.
+    const settled = run({
+      state: "running",
+      cycles: [cycle({ endedAt: "2026-07-10T09:40:00Z", mergeSha: "abc" })],
+    });
+    expect(isAgentStreaming([settled])).toBe(false);
+  });
+
+  it("never streams on a terminal run", () => {
+    expect(
+      isAgentStreaming([run({ state: "cancelled", cycles: [cycle({ endedAt: null })] })]),
+    ).toBe(false);
+  });
+
+  it("asks only the newest run — an older run's open cycle is not live", () => {
+    const newest = run({ id: "newest", cycles: [cycle({ endedAt: "2026-07-10T09:40:00Z" })] });
+    const older = run({ id: "older", cycles: [cycle({ endedAt: null })] });
+    expect(isAgentStreaming([newest, older])).toBe(false);
+  });
+
+  it("is quiet between sessions, and with no run at all", () => {
+    expect(isAgentStreaming([run({ cycles: [] })])).toBe(false);
+    expect(isAgentStreaming([])).toBe(false);
+    expect(isAgentStreaming(undefined)).toBe(false);
+  });
 });
 
 describe("isTerminalRun / versionIsLive", () => {
@@ -77,12 +183,12 @@ describe("isTerminalRun / versionIsLive", () => {
     // Newest first. An old succeeded run behind a live one must not settle the
     // page, and an old running row behind a terminal one must not keep it
     // polling forever.
-    expect(versionIsLive([run({ state: "waiting" }), run({ state: "succeeded" })])).toBe(
-      true,
-    );
-    expect(versionIsLive([run({ state: "succeeded" }), run({ state: "running" })])).toBe(
-      false,
-    );
+    expect(
+      versionIsLive([run({ state: "waiting" }), run({ state: "succeeded" })]),
+    ).toBe(true);
+    expect(
+      versionIsLive([run({ state: "succeeded" }), run({ state: "running" })]),
+    ).toBe(false);
   });
 });
 
@@ -98,34 +204,97 @@ describe("isDeliveryRun", () => {
   it("keeps every run that delivered the version", () => {
     expect(isDeliveryRun(run({ cycles: [cycle("coding")] }))).toBe(true);
     expect(
-      isDeliveryRun(run({ origin: "incident-adoption", cycles: [cycle("coding")] })),
+      isDeliveryRun(run({ kind: "task", cycles: [cycle("coding")] })),
     ).toBe(true);
   });
 
   // The copy this protects — "No build session was ever dispatched" — is TRUE for a
-  // spec build that died before dispatching, so that run has to stay on the rail.
-  it("keeps a spec build that never dispatched a session", () => {
+  // dev run that died before dispatching, so that run has to stay on the rail.
+  it("keeps a dev run that never dispatched a session", () => {
     expect(isDeliveryRun(run({ cycles: [] }))).toBe(true);
   });
 
   // A run that only re-judged the version has no build session to show, and its
   // verdict belongs on the Validation board. Leading with one made the page claim
   // nothing had been dispatched — false, since a validation cycle ran and merged.
-  it("drops a revalidation that only validated", () => {
+  it("drops a validation run that only validated", () => {
     expect(
-      isDeliveryRun(run({ origin: "revalidate", cycles: [cycle("validation")] })),
+      isDeliveryRun(run({ kind: "validation", cycles: [cycle("validation")] })),
     ).toBe(false);
   });
 
-  // But a revalidation left at the default attempt allowance repairs what it finds:
-  // an issue per failed criterion, then an ordinary coding cycle, then builds. Once
-  // it has done that it IS a build story, so the test is what the run did.
-  it("keeps a revalidation that repaired and rebuilt", () => {
+  // A row recorded before the kind column existed carries only its origin, and the
+  // rail must read it the same way — otherwise every historical revalidation
+  // reappears on the build rail announcing that nothing was ever dispatched.
+  it("falls back to the origin on a run that predates the kind", () => {
+    const legacy = run({ cycles: [cycle("validation")] }) as Record<
+      string,
+      unknown
+    >;
+    delete legacy.kind;
+    legacy.origin = "revalidate";
+    expect(isDeliveryRun(legacy as MilestoneRunView)).toBe(false);
+  });
+
+  // But a validation run left at the default attempt allowance repairs what it
+  // finds: an issue per failed criterion, then an ordinary coding cycle, then
+  // builds. Once it has done that it IS a build story, so the test is what it did.
+  it("keeps a validation run that repaired and rebuilt", () => {
     expect(
       isDeliveryRun(
-        run({ origin: "revalidate", cycles: [cycle("validation"), cycle("coding")] }),
+        run({
+          kind: "validation",
+          cycles: [cycle("validation"), cycle("coding")],
+        }),
       ),
     ).toBe(true);
+  });
+});
+
+describe("externalValuesPark", () => {
+  // ADR-0023: the deploy gate parks the run in `waiting` and names what it is
+  // short of. The build page renders those names, so the helper must return
+  // them rather than a boolean.
+  it("names the dependencies a deploy-gate park is waiting on", () => {
+    expect(
+      externalValuesPark(
+        run({
+          state: "waiting",
+          waitingReason: "external-values",
+          blockingDependencies: ["stripe", "sendgrid"],
+        }),
+      ),
+    ).toEqual(["stripe", "sendgrid"]);
+  });
+
+  // An empty array is a real answer — parked, naming nothing — and must stay
+  // distinguishable from null, or the one run that most needs an explanation
+  // renders none.
+  it("still reports a park that names nothing", () => {
+    expect(
+      externalValuesPark(run({ state: "waiting", waitingReason: "external-values" })),
+    ).toEqual([]);
+  });
+
+  // A reasonless `waiting` is the ordinary between-cycles park. It is bounded
+  // and nobody has to do anything about it, so it must not borrow the gate's
+  // call to action.
+  it("ignores a wait with no reason on it", () => {
+    expect(externalValuesPark(run({ state: "waiting" }))).toBeNull();
+  });
+
+  it("ignores a run that is not waiting", () => {
+    expect(
+      externalValuesPark(
+        run({ state: "running", waitingReason: "external-values" }),
+      ),
+    ).toBeNull();
+  });
+
+  // The build page has no run at all until the runs read answers, and while it
+  // is in flight the page must not claim the version is parked.
+  it("is null when there is no run", () => {
+    expect(externalValuesPark(undefined)).toBeNull();
   });
 });
 
@@ -224,7 +393,10 @@ describe("runHold", () => {
   // The bug this whole distinction exists for: a build that is busy writing
   // its milestone used to announce itself as parked on a human.
   it("names the plan window as work in progress, not a hold", () => {
-    const hold = runHold(run({ state: "planning", milestoneTitle: "v3" }), undefined);
+    const hold = runHold(
+      run({ state: "planning", milestoneTitle: "v3" }),
+      undefined,
+    );
     expect(hold?.kind).toBe("planning");
     expect(hold?.tone).toBe("info");
     expect(hold?.title).toBe("Planning v3");
@@ -243,7 +415,10 @@ describe("runHold", () => {
     const hold = runHold(
       run({ state: "waiting" }),
       loaded({
-        gates: [gate(1, "Provide configuration: stripe"), gate(2, "Provision resource: db", "running")],
+        gates: [
+          gate(1, "Provide configuration: stripe"),
+          gate(2, "Provision resource: db", "running"),
+        ],
       }),
     );
     expect(hold).toBeNull();
@@ -252,8 +427,13 @@ describe("runHold", () => {
   // A RESOLVED gate holds nothing, so it must not silence the run's own reason
   // for standing still.
   it("still explains a park when every gate is resolved", () => {
-    const resolved = { ...gate(1, "Provide configuration: stripe"), derivedStatus: "merged" };
-    expect(runHold(run({ state: "waiting" }), loaded({ gates: [resolved] }))?.kind).toBe("parked");
+    const resolved = {
+      ...gate(1, "Provide configuration: stripe"),
+      derivedStatus: "merged",
+    };
+    expect(
+      runHold(run({ state: "waiting" }), loaded({ gates: [resolved] }))?.kind,
+    ).toBe("parked");
   });
 
   // Gates and an empty milestone are both `waiting`, and the fix for one is
@@ -289,17 +469,27 @@ describe("runHold", () => {
 describe("terminalReasonText", () => {
   it("spells each failure class as a sentence", () => {
     expect(terminalReasonText("no-progress")).toMatch(/closed no issues/);
-    expect(terminalReasonText("cycle-ceiling")).toMatch(/ceiling on total build sessions/);
+    expect(terminalReasonText("cycle-ceiling")).toMatch(
+      /ceiling on total build sessions/,
+    );
   });
 
   // Both reasons the validating phase can settle under. They are separate
   // sentences because they are separate failures, and the fallback below means a
   // gap here degrades silently to a raw slug rather than to anything noisy.
   it("spells both of the validating phase's reasons", () => {
-    expect(terminalReasonText("validation-failed")).toMatch(/validation criteria/);
-    expect(terminalReasonText("validation-unreported")).toMatch(/without committing a report/);
-    expect(terminalReasonText("agent-quota-blocked")).toMatch(/maximum number of agent runs/);
-    expect(terminalReasonText("agent-quota-blocked")).toMatch(/Wait for one to finish/);
+    expect(terminalReasonText("validation-failed")).toMatch(
+      /validation criteria/,
+    );
+    expect(terminalReasonText("validation-unreported")).toMatch(
+      /without committing a report/,
+    );
+    expect(terminalReasonText("agent-quota-blocked")).toMatch(
+      /maximum number of agent runs/,
+    );
+    expect(terminalReasonText("agent-quota-blocked")).toMatch(
+      /Wait for one to finish/,
+    );
   });
 
   it("passes an unmapped reason through so it still reaches the user", () => {
@@ -313,14 +503,36 @@ describe("terminalReasonText", () => {
   });
 });
 
-describe("runOriginLabel", () => {
-  it("names each origin — it is what tells two runs of one milestone apart", () => {
-    expect(runOriginLabel("spec-build")).toBe("Spec build");
-    expect(runOriginLabel("incident-adoption")).toBe("Incident");
+describe("runKindLabel", () => {
+  it("names each kind — it is what tells two runs of one milestone apart", () => {
+    expect(runKindLabel("dev")).toBe("Spec build");
+    expect(runKindLabel("task")).toBe("Incident");
+    expect(runKindLabel("validation")).toBe("Revalidation");
   });
 
-  it("shows an unknown origin raw rather than mislabelling it", () => {
-    expect(runOriginLabel("some-future-origin")).toBe("some-future-origin");
+  it("shows an unknown kind raw rather than mislabelling it", () => {
+    expect(runKindLabel("some-future-kind")).toBe("some-future-kind");
+  });
+});
+
+describe("runKind", () => {
+  it("reads the run's own kind", () => {
+    expect(runKind(run({ kind: "task" }))).toBe("task");
+  });
+
+  // The whole reason origin is still read: rows admitted before the kind column
+  // existed carry one, and they still have to render as what they are.
+  it("derives the kind from the origin when the row predates it", () => {
+    for (const [origin, kind] of [
+      ["spec-build", "dev"],
+      ["incident-adoption", "task"],
+      ["revalidate", "validation"],
+    ]) {
+      const legacy = run() as Record<string, unknown>;
+      delete legacy.kind;
+      legacy.origin = origin;
+      expect(runKind(legacy as MilestoneRunView)).toBe(kind);
+    }
   });
 });
 
@@ -359,7 +571,12 @@ describe("spentBudgets", () => {
   it("reports nothing for a healthy run — an unspent allowance is not the user's business", () => {
     expect(
       spentBudgets(
-        budgets({ cyclesTotal: 3, cycleCeiling: 5, fixCycles: 1, conflictCycles: 1 }),
+        budgets({
+          cyclesTotal: 3,
+          cycleCeiling: 5,
+          fixCycles: 1,
+          conflictCycles: 1,
+        }),
       ),
     ).toEqual([]);
   });
@@ -368,14 +585,19 @@ describe("spentBudgets", () => {
     const spent = spentBudgets(
       budgets({ cyclesTotal: 8, fixCycles: 2, conflictCycles: 1 }),
     );
-    expect(spent.map((b) => b.label)).toEqual(["Build sessions", "Fix sessions"]);
+    expect(spent.map((b) => b.label)).toEqual([
+      "Build sessions",
+      "Fix sessions",
+    ]);
   });
 
   it("measures cycles against the run's own snapshotted ceiling, not a hardcoded one", () => {
     const [cycles] = spentBudgets(budgets({ cyclesTotal: 5, cycleCeiling: 5 }));
     expect(cycles?.text).toBe("5 / 5");
     // A run whose ceiling has not been snapshotted yet cannot be "at" it.
-    expect(spentBudgets(budgets({ cyclesTotal: 0, cycleCeiling: 0 }))).toEqual([]);
+    expect(spentBudgets(budgets({ cyclesTotal: 0, cycleCeiling: 0 }))).toEqual(
+      [],
+    );
   });
 
   it("never reports build re-triggers — the real guard is per component per SHA", () => {
@@ -387,7 +609,10 @@ describe("spentBudgets", () => {
 describe("buildSessionLabel", () => {
   it("numbers a build session from 1 and names its kind", () => {
     expect(
-      buildSessionLabel({ id: "c", kind: "fix", attempts: 1, createdAt: "" }, 2),
+      buildSessionLabel(
+        { id: "c", kind: "fix", attempts: 1, createdAt: "" },
+        2,
+      ),
     ).toBe("Build session 3 · fix");
   });
 });

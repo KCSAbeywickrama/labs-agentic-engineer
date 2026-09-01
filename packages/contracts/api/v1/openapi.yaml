@@ -222,7 +222,97 @@ paths:
       summary: List the org's external-resource catalog
       tags:
       - Dependencies
+    post:
+      operationId: register-external-resource
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterExternalResourceRequest'
+        required: true
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExternalResourceDTO'
+          description: Created Registered External resource (envCells populated; secrets never echoed)
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Missing required field, empty env value, or invalid resource-docs row
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Logical name already exists (Registered or Project External)
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Error
+      security:
+      - userJWT: []
+      summary: Register a Registered External resource
+      tags:
+      - Dependencies
   /dependencies/external-resources/{name}:
+    put:
+      operationId: update-external-resource
+      parameters:
+      - description: External resource name
+        in: path
+        name: name
+        required: true
+        schema:
+          description: External resource name
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterExternalResourceRequest'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExternalResourceDTO'
+          description: Updated Registered External resource (envCells populated; secrets never echoed)
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Key mutation, unset secret with empty value, missing required field, empty non-secret env value, or invalid resource-docs row
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Name is not in the catalog
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Name is a Project External resource (no org value plane)
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Error
+      security:
+      - userJWT: []
+      summary: Update a Registered External resource
+      tags:
+      - Dependencies
     delete:
       operationId: delete-external-resource
       parameters:
@@ -269,6 +359,54 @@ paths:
       security:
       - userJWT: []
       summary: List the platform-provisioned resource types available on the cluster
+      tags:
+      - Dependencies
+  /dependencies/org-endpoints:
+    get:
+      operationId: list-org-endpoints
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/OrgEndpointDTO'
+                type: array
+                nullable: true
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Error
+      security:
+      - userJWT: []
+      summary: List Marketplace Endpoints (namespace-visible org-service APIs)
+      tags:
+      - Dependencies
+  /dependencies/environments:
+    get:
+      operationId: list-org-environments
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/EnvironmentDTO'
+                type: array
+                nullable: true
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Error
+      security:
+      - userJWT: []
+      summary: List OpenChoreo Environments for Registered External env-value cells
       tags:
       - Dependencies
   /organizations:
@@ -582,7 +720,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
+                $ref: '#/components/schemas/GetConversationOutputBody'
           description: OK
         default:
           content:
@@ -617,6 +755,14 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/TurnInputBody'
+          multipart/form-data:
+            encoding:
+              anchor:
+                contentType: application/json
+              files:
+                contentType: application/octet-stream
+            schema:
+              $ref: '#/components/schemas/TurnInputMultipart'
         required: true
       responses:
         '202':
@@ -625,6 +771,14 @@ paths:
               schema:
                 $ref: '#/components/schemas/TurnOutputBody'
           description: Accepted
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Rejected multipart send — unsupported type, a file over 5 MiB, more than
+            10 files, or more than 15 MiB of raw bytes in total. NOTHING is sent and no turn is
+            started, so the client may re-send the same selection after the user drops a file.
         '409':
           content:
             application/json:
@@ -784,10 +938,60 @@ paths:
       summary: List a version's milestone runs and their cycles
       tags:
       - Runs
+  /projects/{projectName}/builds/{tag}/progress:
+    get:
+      operationId: stream-build-progress
+      parameters:
+      - description: Project name (DNS-label slug)
+        in: path
+        name: projectName
+        required: true
+        schema:
+          description: Project name (DNS-label slug)
+          type: string
+      - description: Spec version tag (`v<N>`), resolved to a milestone number through the run rows —
+          never by matching titles against GitHub.
+        in: path
+        name: tag
+        required: true
+        schema:
+          description: Spec version tag
+          type: string
+      responses:
+        '200':
+          content:
+            text/event-stream:
+              schema:
+                $ref: '#/components/schemas/BuildProgressEvent'
+          description: 'ONE SSE stream stitching every cycle of every run that has worked this version,
+            in chronological run order, so a version reads as one narrative rather than as several
+            executions. The frames are stream-run-progress''s, plus a `run` object on each naming the
+            run the cycle belongs to and its KIND (`dev` | `task` | `validation`) — the section marker
+            the console renders. `line.cycleIndex` stays the cycle''s position WITHIN ITS RUN, so
+            `(run.id, cycleIndex)` is the section key and no cycle is renumbered by being read here.
+            One `data:` JSON frame per event (a BuildProgressEvent discriminated by `type`), each
+            stamped `id: <seq>`; `: keep-alive` comments pace idle waits. The stream holds open while
+            ANY run on the version''s milestone is live and settles with a `done` frame carrying
+            `reason: no_live_run`, `data: [DONE]` and a server close when none is — which is NOT a
+            statement that the version is finished, because a later validation or task run may be
+            admitted on the same milestone; the console reopens the stream when its run-list poll shows
+            one. Reconnects are idempotent — the client upserts cycles by id and dedups lines by
+            cycleId+seq.'
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Error
+      security:
+      - userJWT: []
+      summary: Stream a version's per-cycle agent progress across every run, as SSE
+      tags:
+      - Runs
   /projects/{projectName}/builds/{tag}/revalidate:
     post:
       description: >-
-        Ask a version's acceptance criteria again, against the system already deployed. It starts a
+        Ask a version's validation criteria again, against the system already deployed. It starts a
         fresh run over that version's milestone which ENTERS THE LOOP AT VALIDATION rather than at
         the working set — nothing is rebuilt to answer the question.
 
@@ -803,7 +1007,7 @@ paths:
         the version's answer. 409 when a run is already live on the milestone (nothing to hand off
         to — its verdict may be hours away or may never come) or when the milestone still has open
         work (the loop would work that first, which is a build resume, not a revalidation). 422 when
-        the version has no acceptance criteria, refused rather than run so a `skipped` verdict
+        the version has no validation criteria, refused rather than run so a `skipped` verdict
         cannot overwrite a real one.
       operationId: revalidate-build
       parameters:
@@ -1413,6 +1617,39 @@ paths:
       summary: List a consumer project's access requests
       tags:
       - Dependencies
+  /projects/{projectName}/dependencies/readiness:
+    get:
+      operationId: get-project-dependency-readiness
+      parameters:
+      - description: Project name (DNS-label slug)
+        in: path
+        name: projectName
+        required: true
+        schema:
+          type: string
+      - description: 'Environment (default: development)'
+        in: query
+        name: environment
+        schema:
+          type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectDependencyReadiness'
+          description: Aggregate external dependency value state
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Error
+      security:
+      - userJWT: []
+      summary: Get project external-dependency configuration readiness
+      tags:
+      - Dependencies
   /projects/{projectName}/dependencies/external-resources/{name}/values:
     post:
       operationId: collect-external-resource-values
@@ -1443,6 +1680,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/StatusMsg'
           description: OK
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Name is a Registered External resource (values live on the org record)
         default:
           content:
             application/json:
@@ -1484,6 +1727,38 @@ paths:
       security:
       - userJWT: []
       summary: List every component's dependencies with read-time computed status/reason
+      tags:
+      - Dependencies
+  /projects/{projectName}/workload-dependencies:
+    get:
+      operationId: list-workload-dependencies
+      parameters:
+      - description: Project name (DNS-label slug)
+        in: path
+        name: projectName
+        required: true
+        schema:
+          description: Project name (DNS-label slug)
+          type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/WorkloadDependencyDTO'
+                type: array
+                nullable: true
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Error
+      security:
+      - userJWT: []
+      summary: list deployed-workload dependencies for the project Overview (deduped rows)
       tags:
       - Dependencies
   /projects/{projectName}/files:
@@ -1759,6 +2034,254 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
           description: Error
+  /projects/{projectName}/references:
+    post:
+      description: Store the reference documents attached on the create view. References are
+        TRANSIENT TURN INPUTS, not spec artifacts (console ADR-0017) — they are never committed
+        and never reach GitHub. Bytes live in a per-project directory on the shared workspace
+        volume for the project's lifetime and are overlaid into each turn's snapshot at
+        `specs/requirements/references/`, which is also scaffolded into the repo's `.gitignore`.
+        Deliberately outside the `specs/`-scoped Files API — `files/apply` means "commit to the
+        repo", and this is the opposite. multipart carries raw bytes, so the per-file limit is
+        checked on real bytes with no base64 inflation. Replaces the whole upload for the
+        project — a second call overwrites the stored set.
+      operationId: put-project-references
+      parameters:
+      - description: Project name (DNS-label slug)
+        in: path
+        name: projectName
+        required: true
+        schema:
+          description: Project name (DNS-label slug)
+          type: string
+      requestBody:
+        content:
+          multipart/form-data:
+            encoding:
+              files:
+                contentType: application/octet-stream
+            schema:
+              properties:
+                files:
+                  description: >
+                    Reference documents. Two groups, both readable by the models:
+                    binary read natively as file parts (`.pdf`, `.png`, `.jpg`,
+                    `.jpeg`, `.gif`, `.webp`), and text read as workspace files
+                    (`.md`, `.txt`, `.csv`, `.tsv`, `.json`, `.yaml`, `.yml`,
+                    `.xml`, `.html`, `.rst`). At most 10 documents, each at most
+                    5 MiB measured on the raw bytes. Office formats are not
+                    accepted — the models do not read them natively.
+                  items:
+                    format: binary
+                    type: string
+                  maxItems: 10
+                  type: array
+              required:
+              - files
+              type: object
+        required: true
+      responses:
+        '204':
+          description: References stored
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Rejected — unsupported type, a document over 5 MiB, more than 10
+            documents, an unusable name, or two names that reduce to one stored name.
+            Nothing is stored; the previous set is left intact.
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Error
+      security:
+      - userJWT: []
+      summary: Store a project's reference documents
+      tags:
+      - Projects
+  /projects/{projectName}/roles:
+    get:
+      description: The project's Security panel read. `roles` is the WHOLE directory catalog,
+        not just this project's roles — roles are shared at the identity provider's scope, so the
+        panel has to show which existing role a design reuses rather than implying the project owns
+        one. `testUsers` is this project's references only. `directoryAvailable` is false when the
+        identity provider could not be reached — the store-derived fields are still returned, and the
+        console must render "unknown" rather than reading an absent directory row as "does not exist".
+      operationId: get-project-roles
+      parameters:
+      - description: Project name (DNS-label slug)
+        in: path
+        name: projectName
+        required: true
+        schema:
+          description: Project name (DNS-label slug)
+          type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectRolesView'
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Error
+      security:
+      - userJWT: []
+      summary: Read the shared role catalog and this project's test users
+      tags:
+      - Identity
+  /projects/{projectName}/roles/test-users/{username}/reveal:
+    post:
+      description: Disclose a platform-owned test account's password. A POST, deliberately, even
+        though it reads. A password in a GET would land in the request URL, and from there in the
+        browser's history, the proxy access log, and any referrer — none of which the platform can
+        redact. Only an account this project references AND the platform owns (it holds a sealed
+        password for it) can be revealed; anything else is 404, so one project cannot read a shared
+        account another project provisioned.
+      operationId: reveal-test-user-password
+      parameters:
+      - description: Project name (DNS-label slug)
+        in: path
+        name: projectName
+        required: true
+        schema:
+          description: Project name (DNS-label slug)
+          type: string
+      - description: Test-user username
+        in: path
+        name: username
+        required: true
+        schema:
+          description: Test-user username
+          type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TestUserPassword'
+          description: The account's current password
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: The project does not reference this username, or the platform does not own
+            the account
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Error
+      security:
+      - userJWT: []
+      summary: Reveal a test user's password
+      tags:
+      - Identity
+  /projects/{projectName}/roles/test-users/{username}/rotate:
+    post:
+      description: Replace a platform-owned test account's password and return the new one. The
+        identity provider is written FIRST and the sealed copy second; if the seal fails after the
+        directory accepted the change the response is a 500 saying the password was changed but not
+        recorded, and the caller must rotate again. Same fence as reveal — the project must
+        reference the username and the platform must own the account.
+      operationId: rotate-test-user-password
+      parameters:
+      - description: Project name (DNS-label slug)
+        in: path
+        name: projectName
+        required: true
+        schema:
+          description: Project name (DNS-label slug)
+          type: string
+      - description: Test-user username
+        in: path
+        name: username
+        required: true
+        schema:
+          description: Test-user username
+          type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TestUserPassword'
+          description: The account's new password
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: The project does not reference this username, or the platform does not own
+            the account
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Error
+      security:
+      - userJWT: []
+      summary: Rotate a test user's password
+      tags:
+      - Identity
+  /projects/{projectName}/roles/test-users/{username}:
+    delete:
+      description: Delete a platform-owned test account from the identity provider and forget the
+        platform's record of it. The ROLE is left standing — roles are shared, and deleting one
+        because a single test account went away would take it from every other project naming it.
+        The account is shared too, so a delete while other projects still reference it is logged as
+        a warning and reported in the response status. Same fence as reveal and rotate.
+      operationId: delete-test-user
+      parameters:
+      - description: Project name (DNS-label slug)
+        in: path
+        name: projectName
+        required: true
+        schema:
+          description: Project name (DNS-label slug)
+          type: string
+      - description: Test-user username
+        in: path
+        name: username
+        required: true
+        schema:
+          description: Test-user username
+          type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusMsg'
+          description: Deleted; status names any other projects still referencing the account
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: The project does not reference this username, or the platform does not own
+            the account
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Error
+      security:
+      - userJWT: []
+      summary: Delete a test user
+      tags:
+      - Identity
   /projects/{projectName}/runs/{runId}/cancel:
     post:
       description: Abandon an increment. Cancel is the only expiry the run's unbounded wait state has.
@@ -1966,6 +2489,21 @@ paths:
           description: Filter to the Tasks of one spec/build version tag (e.g. v3), by milestone
             membership. Empty returns every version.
           type: string
+      - description: Include each issue's newest comments (defaults true). Honoured only on a
+          `tag`-scoped read — the comment fetch is anchored on the milestone, so a read spanning
+          versions has no bounded set to ask for. Pass false to skip the GitHub round trip when
+          the caller does not render them.
+        explode: false
+        in: query
+        name: comments
+        schema:
+          # Keep an explicit pointer under the global prefer-skip-optional-pointer:
+          # the handler must distinguish 'absent' (default true) from an explicit false.
+          x-go-type-skip-optional-pointer: false
+          default: true
+          description: Include each issue's newest comments (defaults true). Honoured only on a
+            `tag`-scoped read.
+          type: boolean
       responses:
         '200':
           content:
@@ -1986,10 +2524,12 @@ paths:
       - userJWT: []
       summary: List a project's issues (live from GitHub), optionally scoped to one spec/build version
         tag by milestone membership. Every row carries the label-derived `executorClass` the console
-        sections on — agent work, a dispatch gate, or a bare human ledger issue. The aep:validation
-        issue is excluded (it is a phase of the run, surfaced with the run's verdict on the deployment
-        surface); get-task still serves it by number. Ledger issues have no label to query by, so they
-        are only discoverable through milestone membership and appear only on a `tag`-scoped read.
+        sections on — agent work, a dispatch gate, or a bare human ledger issue — plus the finer
+        `kind` (development | bug | conflict | validation | provision) for the row's own chip. The
+        validation task is excluded (it is a phase of the run, surfaced with the run's verdict on the
+        deployment surface); get-task still serves it by number. Ledger issues carry no label to query
+        by, so they are only discoverable through milestone membership and appear only on a
+        `tag`-scoped read.
       tags:
       - Tasks
   /projects/{projectName}/tasks/{issueNumber}:
@@ -2607,6 +3147,47 @@ paths:
       - Skills
 components:
   schemas:
+    ConversationMessage:
+      additionalProperties: false
+      description: >
+        One rehydrated message from a conversation's server-side history, sourced from the
+        turn journal. The console's local chat log is display state; this is the durable
+        record, and it is what makes a chip survive a reload.
+      properties:
+        anchor:
+          $ref: '#/components/schemas/TurnAnchor'
+        attachments:
+          description: File NAMES that went up with this message (#428) — never bytes, which
+            are conversation-scoped model content the platform does not store (console
+            ADR-0019). Absent for every message without attachments.
+          items:
+            type: string
+          type: array
+        author:
+          $ref: '#/components/schemas/ConversationMessageAuthor'
+        content:
+          description: The message body as the journal recorded it. Deliberately untyped — a
+            turn's content is model-shaped and varies by role, and this endpoint's job is to
+            replay it, not to interpret it.
+        role:
+          description: Who the message is from, as the journal recorded it.
+          type: string
+      required:
+      - role
+      type: object
+    ConversationMessageAuthor:
+      additionalProperties: false
+      description: Who sent this message (#130 multi-user threads). Absent for the agent, and
+        for history written before attribution existed.
+      properties:
+        displayName:
+          type: string
+        id:
+          type: string
+      required:
+      - id
+      - displayName
+      type: object
     AccessRequest:
       additionalProperties: false
       properties:
@@ -2861,9 +3442,19 @@ components:
           type: array
           nullable: true
         needsInput:
+          description: Whether preflight emitted any item at all. Kept as the broad "there is
+            something to show" flag; it does NOT gate Build, because an external dependency's
+            values are collected on the Builds page while the coding agent runs and are enforced
+            at the deploy gate instead.
+          type: boolean
+        needsResolution:
+          description: Whether any emitted item blocks the version cut — a dependency the design
+            itself cannot resolve (ambiguous, unresolved, missing spec, or an org service awaiting
+            access). This is the ONLY flag a client may block Build on.
           type: boolean
       required:
       - needsInput
+      - needsResolution
       - items
       type: object
     BuildRequest:
@@ -2895,11 +3486,15 @@ components:
         already pays for it.
       properties:
         status:
-          description: idle (never built), running, failed, succeeded
+          description: idle (never built), running, failed, cancelled, succeeded. `cancelled` is its
+            own value for the same reason it is on BuildSummary — a person abandoning an increment is
+            a different fact from the platform failing to deliver one, and the project badge read
+            "Build failed" over a build somebody had deliberately stopped.
           enum:
           - idle
           - running
           - failed
+          - cancelled
           - succeeded
           type: string
           x-go-type: string
@@ -2909,6 +3504,74 @@ components:
       required:
       - version
       - status
+      type: object
+    BuildProgressEvent:
+      additionalProperties: false
+      description: 'One SSE frame on the VERSION progress stream, which spans every run that has worked
+        the version. `type` discriminates the payload: `cycle` carries a RunCycleView (client upserts by
+        id), `line` one RunProgressLine, and `done` says why the stream ended (the server then closes
+        it). `cycle` and `line` frames also carry `run` — a version''s story spans several executions,
+        so a cycle is only identified once you know which run opened it.'
+      properties:
+        cycle:
+          $ref: '#/components/schemas/RunCycleView'
+        line:
+          $ref: '#/components/schemas/RunProgressLine'
+        reason:
+          description: 'Why the stream ended — present only on the `done` frame, and deliberately NOT
+            a run state. `no_live_run` means no run on the version''s milestone is currently live, so
+            there is nothing further to report RIGHT NOW. It is not a verdict on the version: a later
+            validation or task run may be admitted on the same milestone, and the console reopens the
+            stream when its run-list poll shows one.'
+          enum:
+          - no_live_run
+          type: string
+          x-enum-varnames:
+          - BuildProgressEventReasonNoLiveRun
+        run:
+          $ref: '#/components/schemas/BuildProgressRun'
+        type:
+          enum:
+          - cycle
+          - line
+          - done
+          type: string
+          x-enum-varnames:
+          - BuildProgressEventTypeCycle
+          - BuildProgressEventTypeLine
+          - BuildProgressEventTypeDone
+      required:
+      - type
+      type: object
+    BuildProgressRun:
+      additionalProperties: false
+      description: Which run a frame's cycle belongs to. The version's narrative spans several runs, so
+        the run is the SECTION and the cycle is a step inside it — `RunProgressLine.cycleIndex` stays
+        run-relative and is only unique when paired with `run.id`.
+      properties:
+        id:
+          description: Milestone run id — the same id list-build-runs reports and cancel-run takes.
+          type: string
+        index:
+          description: 1-based chronological position of this run among the version's runs, so the
+            console can label a section without holding the whole run list — the same reason
+            `cycleIndex` exists, one level up. Two runs of one kind are ordinary (a version can be
+            repaired more than once), so the kind alone does not name a section.
+          format: int64
+          type: integer
+        kind:
+          description: What the run DOES, and the section marker the console renders — `dev` delivered
+            the version, `task` worked a defect inside it, `validation` re-judged it. Same vocabulary
+            as MilestoneRunView.kind.
+          enum:
+          - dev
+          - task
+          - validation
+          type: string
+      required:
+      - id
+      - kind
+      - index
       type: object
     BuildRunList:
       additionalProperties: false
@@ -2949,19 +3612,38 @@ components:
           type: integer
         reason:
           description: The run's terminal reason for a failed version (empty otherwise), surfaced
-            beside the Failed badge in the console.
+            beside the Failed badge in the console. A cancelled version carries none — a person
+            abandoning an increment is not a fault with a cause to report.
           type: string
         startedAt:
           format: date-time
           type: string
         status:
+          description: What became of this version. `cancelled` is its own value rather than a
+            flavour of `failed`, because the two are different facts and a reader acts on them
+            differently — a failure is the platform reporting it could not deliver the increment,
+            while a cancel is a person deciding not to. Folding them lost that; a build somebody
+            deliberately stopped rendered as Failed, with no reason beside it to say why, while the
+            same page's run row said Cancelled two lines below.
           enum:
           - started
           - in_progress
           - completed
           - failed
+          - cancelled
           type: string
         tag:
+          type: string
+        waitingReason:
+          description: Why an in-progress version is waiting rather than moving. Empty for the
+            ordinary between-cycles park, which needs no explanation. `external-values` is the
+            deploy gate — the run is built and ready to deploy, and every remaining blocker is a
+            value only a human can supply. It is carried here so a ledger row can say the version
+            is waiting on the reader instead of reading as a run an agent is still working; the
+            dependency NAMES stay on MilestoneRunView, where the run read that has them is already
+            being made.
+          enum:
+          - external-values
           type: string
       required:
       - tag
@@ -3087,6 +3769,33 @@ components:
       required:
       - componentName
       - dependencies
+      type: object
+    WorkloadDependencyDTO:
+      additionalProperties: false
+      properties:
+        kind:
+          enum:
+          - resource
+          - org-service
+          type: string
+        ref:
+          description: Resource type (resource rows)
+          type: string
+        tag:
+          enum:
+          - platform
+          - external
+          type: string
+        name:
+          type: string
+        project:
+          description: Provider project (org-service rows)
+          type: string
+        component:
+          description: Provider component (org-service rows)
+          type: string
+      required:
+      - kind
       type: object
     ComponentList:
       additionalProperties: false
@@ -3295,6 +4004,16 @@ components:
             requirement and kicks off spec derivation for the new project (issue #72). Projects created
             without a prompt keep today''s behavior.'
           type: string
+        referencesPending:
+          description: >-
+            The caller will POST reference documents for this project next
+            (`put-project-references`), so the platform must hold the `/start` kickoff (#562)
+            until they land — they are the primary brief, and a kickoff dispatched before the
+            upload interviews the user about a document the agent never saw. The kickoff then
+            fires from the references call instead. Omitted/false fires it from this call.
+            Nothing else waits on it: an abandoned upload simply leaves the project un-started,
+            which the overview's spec card offers as a CTA.
+          type: boolean
         repoName:
           description: 'Repository name for the project''s GitHub repo; defaults to the project name,
             the organization is fixed server-side (issue #71).'
@@ -3491,10 +4210,47 @@ components:
           type: boolean
         status:
           type: string
+        valueState:
+          $ref: '#/components/schemas/ExternalDependencyValueState'
       required:
       - status
       - ready
       - outputs
+      type: object
+    ExternalDependencyReadiness:
+      additionalProperties: false
+      properties:
+        missingKeys:
+          items:
+            type: string
+          type: array
+        name:
+          type: string
+        state:
+          $ref: '#/components/schemas/ExternalDependencyValueState'
+      required:
+      - name
+      - state
+      - missingKeys
+      type: object
+    ExternalDependencyValueState:
+      enum:
+      - not-provisioned
+      - unset
+      - configured
+      type: string
+    ProjectDependencyReadiness:
+      additionalProperties: false
+      properties:
+        configured:
+          type: boolean
+        dependencies:
+          items:
+            $ref: '#/components/schemas/ExternalDependencyReadiness'
+          type: array
+      required:
+      - configured
+      - dependencies
       type: object
     DeployStage:
       additionalProperties: false
@@ -3530,19 +4286,24 @@ components:
             `unreported` at exactly the surface that needs them, and `completed`
             never said whether anything passed.
 
-            Three LIFECYCLE values: none (the run has not reached validation),
-            running (a validation CYCLE is in flight — not merely a live run with
-            no verdict yet) and awaiting-fix (validation failed and the run is
-            repairing it — the work in flight is a CODING cycle, which is why the
-            state names the implementation rather than validation). The rest are
-            the verdict verbatim. They are mutually exclusive in time, so nothing
-            is hidden behind another.
+            Four LIFECYCLE values. none is PENDING, never settled: a verdict is
+            expected and has not arrived, because a run is live or a dev run filed
+            the version's validation task and nothing has started it yet. A client
+            must not read it as "there is no verdict to wait for" — that is what
+            skipped and inconclusive say. running is a validation CYCLE in flight,
+            not merely a live run with no verdict yet. awaiting-fix is validation
+            having failed with the run repairing it — the work in flight is a CODING
+            cycle, which is why the state names the implementation rather than
+            validation. cancelled is a person STOPPING the judging: a validation run
+            settled cancelled before recording a verdict, so nothing will answer for
+            this version unless somebody re-asks. The rest are the verdict verbatim.
+            They are mutually exclusive in time, so nothing is hidden behind another.
 
             passed (every criterion was automated and passed), partial (some
             passed, none failed, some were never covered), failed (a criterion
             asserted and lost), inconclusive (no test results at all), unreported
             (no usable report at the validation cycle's merge commit), skipped (no
-            acceptance criteria, and incident runs, which get no validation cycle).
+            validation criteria, and incident runs, which get no validation cycle).
 
             failed and unreported fail the run only once its validation attempts
             are spent: while attempts remain the run repairs and re-validates, and
@@ -3554,6 +4315,7 @@ components:
           - none
           - running
           - awaiting-fix
+          - cancelled
           - passed
           - partial
           - failed
@@ -3698,6 +4460,135 @@ components:
       - status
       - createdAt
       type: object
+    EnvValueCellDTO:
+      additionalProperties: false
+      description: One org-held env cell. Secrets never include value.
+      properties:
+        environment:
+          type: string
+        key:
+          type: string
+        status:
+          enum:
+          - configured
+          - unset
+          type: string
+        value:
+          type: string
+      required:
+      - environment
+      - key
+      - status
+      type: object
+    ResourceDocPointerDTO:
+      additionalProperties: false
+      description: Org resource docs pointer (type + URL or repo path), not file bodies.
+      properties:
+        path:
+          type: string
+        type:
+          enum:
+          - documentation
+          - openapi
+          - graphql
+          - asyncapi
+          - protobuf
+          type: string
+        url:
+          type: string
+      required:
+      - type
+      type: object
+    ResourceDocWriteDTO:
+      additionalProperties: false
+      description: >
+        One resource-docs write row on register/update. Exactly one of
+        {type,url} | {type,path} | {type,fileName,content}. List/GET never
+        use this schema.
+      properties:
+        type:
+          enum:
+          - documentation
+          - openapi
+          - graphql
+          - asyncapi
+          - protobuf
+          type: string
+        url:
+          type: string
+        path:
+          type: string
+        fileName:
+          type: string
+        content:
+          type: string
+          description: UTF-8 text of a new or replacement file; never returned on GET.
+      required:
+      - type
+      type: object
+    ResourceInstanceDTO:
+      additionalProperties: false
+      properties:
+        environment:
+          type: string
+        project:
+          type: string
+        status:
+          type: string
+      required:
+      - project
+      - environment
+      - status
+      type: object
+    EnvironmentDTO:
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+      required:
+      - name
+      type: object
+    RegisterExternalResourceRequest:
+      additionalProperties: false
+      properties:
+        config:
+          items:
+            $ref: '#/components/schemas/ConfigKeyDTO'
+          type: array
+        consumptionInstructions:
+          type: string
+        description:
+          type: string
+        envValues:
+          items:
+            additionalProperties: false
+            properties:
+              environment:
+                type: string
+              key:
+                type: string
+              value:
+                type: string
+            required:
+            - environment
+            - key
+            - value
+            type: object
+          type: array
+        name:
+          type: string
+        resourceDocs:
+          items:
+            $ref: '#/components/schemas/ResourceDocWriteDTO'
+          nullable: true
+          type: array
+      required:
+      - name
+      - description
+      - consumptionInstructions
+      - config
+      - envValues
+      type: object
     ExternalResourceDTO:
       additionalProperties: false
       properties:
@@ -3711,14 +4602,65 @@ components:
             $ref: '#/components/schemas/ConsumerDTO'
           type: array
           nullable: true
+        consumptionInstructions:
+          type: string
         description:
           type: string
+        envCells:
+          description: >
+            Org value plane. Present with one cell per config key × OpenChoreo
+            Environment on a Registered External resource. Omitted or empty on a
+            Project External resource. Secrets never include value.
+          items:
+            $ref: '#/components/schemas/EnvValueCellDTO'
+          nullable: true
+          type: array
+        instances:
+          items:
+            $ref: '#/components/schemas/ResourceInstanceDTO'
+          nullable: true
+          type: array
         name:
           type: string
+        resourceDocs:
+          items:
+            $ref: '#/components/schemas/ResourceDocPointerDTO'
+          nullable: true
+          type: array
       required:
       - name
       - config
       - consumers
+      type: object
+    OrgEndpointDTO:
+      additionalProperties: false
+      description: One Marketplace Endpoint — thin list_org_endpoints item, not the MCP {endpoints:[…]} wrapper.
+      properties:
+        name:
+          description: org-service dependency name = provider component name
+          type: string
+        project:
+          type: string
+        endpoint:
+          type: string
+        type:
+          enum:
+          - HTTP
+          - gRPC
+          - GraphQL
+          - Websocket
+          - TCP
+          - UDP
+          type: string
+        namespaceVisible:
+          description: always true on this operation
+          type: boolean
+      required:
+      - name
+      - project
+      - endpoint
+      - type
+      - namespaceVisible
       type: object
     FileBundle:
       additionalProperties: false
@@ -3897,6 +4839,38 @@ components:
       - title
       - body
       type: object
+    IssueComment:
+      additionalProperties: false
+      description: One comment on an issue, exactly as GitHub holds it. The platform stores none of
+        this — it is read live on every request, so GitHub stays the only copy. The platform's OWN
+        machine comments are excluded (a resolved-dependency block, a provisioning note, a closing
+        line — written for the agent, not for a person); what remains is the coding agent's progress
+        notes and whatever a human wrote, which appear alike. They cannot be told apart by author,
+        and are not meant to be — the platform comments through the org's own credential and the
+        coding runner is handed that same credential, so both arrive under one login.
+      properties:
+        author:
+          description: The commenter's GitHub login. Empty when the account is gone — GitHub answers
+            a null author for a deleted user, which is a fact about the comment, not a read failure.
+          type: string
+        body:
+          type: string
+        createdAt:
+          format: date-time
+          type: string
+        id:
+          description: GitHub's own node id — stable across reads, and the list key a consumer
+            should render on.
+          type: string
+        url:
+          type: string
+      required:
+      - id
+      - author
+      - body
+      - createdAt
+      - url
+      type: object
     IssueResult:
       additionalProperties: false
       description: Issue metadata after create. deduped=true means an open issue
@@ -4014,6 +4988,18 @@ components:
           x-go-type: '*time.Time'
         id:
           type: string
+        kind:
+          description: What this run DOES, and the value every platform predicate is written on.
+            `dev` delivers a version — it plans its own milestone, and is the only kind that takes
+            the one-active-build-per-project mutex. `task` works a defect inside a version already
+            delivered; task runs execute concurrently on their own milestones. `validation` asks a
+            shipped version's validation criteria again — it has no working set, builds nothing, and
+            is outside the mutex so it never holds up the next build.
+          enum:
+          - dev
+          - task
+          - validation
+          type: string
         milestoneNumber:
           format: int64
           type: integer
@@ -4022,10 +5008,8 @@ components:
             key, and the version this run builds is the list's tag.
           type: string
         origin:
-          description: Why this run was started. `revalidate` asks a version's criteria again against
-            the already-deployed system; it enters the loop at validation rather than at the working
-            set, and is deliberately outside the one-active-spec-run mutex so it never holds up the
-            next build.
+          description: Where this run was started from. A label on the trigger — the behaviour is
+            the run's kind.
           enum:
           - spec-build
           - incident-adoption
@@ -4056,10 +5040,26 @@ components:
             empty while the run is non-terminal and on a succeeded run. agent-quota-blocked
             explains state=blocked.
           type: string
+        waitingReason:
+          description: Why a `waiting` run is waiting. Empty for the ordinary between-cycles park,
+            which needs no explanation. `external-values` is the deploy gate — the run is built and
+            ready to deploy, and every remaining blocker is a value only a human can supply. That
+            park is unbounded and only cancellation or the values arriving exits it, so a client
+            that renders `waiting` without this reads a working run as a hung one.
+          enum:
+          - external-values
+          type: string
+        blockingDependencies:
+          description: The external dependency names a `waiting` run is blocked on, so a client can
+            name them and link straight to their configuration. Empty unless waitingReason is set.
+          items:
+            type: string
+          type: array
         validation:
           $ref: '#/components/schemas/RunValidation'
       required:
       - id
+      - kind
       - milestoneNumber
       - milestoneTitle
       - origin
@@ -4204,6 +5204,14 @@ components:
         files:
           format: int64
           type: integer
+        itemId:
+          description: '`progress_item` only: WHICH named unit of work the line is about — the key a
+            consumer folds on, since many lines describe the same item and a reader wants one row
+            repainted rather than many rows printed. Validation binds items to acceptance criteria
+            ("AC-003-a"), which `cycleKind` already implies, so this never repeats it. The status
+            itself rides on `status`, scoped by `kind`: planned | exploring | authoring | running |
+            healing | pass | fail.'
+          type: string
         kind:
           type: string
         level:
@@ -4308,6 +5316,111 @@ components:
           type: string
       required:
       - items
+      type: object
+    ProjectRoleState:
+      additionalProperties: false
+      description: One role as it exists on the identity provider right now, joined against the
+        platform's own record. Roles are shared at the provider's scope, so a row here is not owned
+        by the project reading it.
+      properties:
+        description:
+          description: The group description on the directory. Seeded at create and never rewritten
+            (a shared role may have been described by whoever declared it first).
+          type: string
+        memberCount:
+          description: How many accounts currently hold the role. Best-effort — a per-role read
+            failure leaves it 0 rather than failing the whole panel.
+          type: integer
+        name:
+          description: The role name verbatim; it is the identity, and it is what reaches an app as
+            a groups claim.
+          type: string
+        platformCreated:
+          description: True when the platform created this role and may therefore enrol test users
+            into it. A hand-made group reads false and the platform leaves it alone.
+          type: boolean
+      required:
+      - name
+      - platformCreated
+      type: object
+    ProjectRolesView:
+      additionalProperties: false
+      description: The Security panel's read model.
+      properties:
+        directoryAvailable:
+          description: False when the identity provider could not be reached. The store-derived
+            fields are still populated; the console must say "unknown" for the live ones instead of
+            rendering absence as "does not exist".
+          type: boolean
+        roles:
+          description: The WHOLE directory catalog, name-ordered — not just this project's roles.
+            Roles are shared, so the panel shows which existing role a design reuses. Empty when
+            directoryAvailable is false.
+          items:
+            $ref: '#/components/schemas/ProjectRoleState'
+          type: array
+          nullable: true
+        testUsers:
+          description: The test accounts THIS project's design references, role-ordered.
+          items:
+            $ref: '#/components/schemas/ProjectTestUserState'
+          type: array
+          nullable: true
+      required:
+      - directoryAvailable
+      type: object
+    ProjectTestUserState:
+      additionalProperties: false
+      description: One test account this project references. The account itself is shared at the
+        identity provider's scope; only the reference is the project's.
+      properties:
+        coldStart:
+          description: True for the account holding this project's cold-start role — the one served
+            when a caller asks for credentials without naming a role.
+          type: boolean
+        exists:
+          description: True when the account is present on the identity provider. Meaningless when
+            directoryAvailable is false.
+          type: boolean
+        owned:
+          description: True when the platform holds a sealed password for this account and may
+            therefore reveal, rotate or delete it. False means the username belongs to somebody
+            else and every mutation is refused.
+          type: boolean
+        referencingCount:
+          description: How many projects reference this account IN TOTAL, across every org. A bare
+            count with no names — the minimum disclosure that makes "others may still be using this"
+            a true statement before a delete.
+          type: integer
+        referencingProjects:
+          description: THIS ORG's projects that reference the account. Never another org's — a
+            project name is one org's data, and the shared directory does not license disclosing it.
+          items:
+            type: string
+          type: array
+          nullable: true
+        roleName:
+          description: The role this account holds.
+          type: string
+        rotatedAt:
+          description: When the password was last replaced; null when never.
+          format: date-time
+          type: string
+          nullable: true
+          x-go-type: '*time.Time'
+        supplied:
+          description: True when the design named no test user for the role and the platform
+            generated the username.
+          type: boolean
+        username:
+          type: string
+      required:
+      - username
+      - roleName
+      - supplied
+      - coldStart
+      - exists
+      - owned
       type: object
     ProjectStatus:
       additionalProperties: false
@@ -4763,8 +5876,9 @@ components:
     RunProgressLine:
       additionalProperties: false
       description: 'One line of a cycle''s agent log: the runner''s progress envelope (phase | tool_use
-        | git_commit | git_push | gh_action | log | result) plus the attribution the console groups on —
-        which cycle produced it, and whether the main agent or one of its Task subagents did.'
+        | activity | tool_result | git_commit | git_push | gh_action | log | progress_item | result)
+        plus the attribution the console groups on — which cycle produced it, and whether the main
+        agent or one of its Task subagents did.'
       properties:
         branch:
           type: string
@@ -4816,6 +5930,14 @@ components:
         files:
           format: int64
           type: integer
+        itemId:
+          description: '`progress_item` only: WHICH named unit of work the line is about — the key a
+            consumer folds on, since many lines describe the same item and a reader wants one row
+            repainted rather than many rows printed. Validation binds items to acceptance criteria
+            ("AC-003-a"), which `cycleKind` already implies, so this never repeats it. The status
+            itself rides on `status`, scoped by `kind`: planned | exploring | authoring | running |
+            healing | pass | fail.'
+          type: string
         kind:
           type: string
         level:
@@ -4895,7 +6017,7 @@ components:
             passed (every criterion was automated and passed), partial (some passed, none failed, and
             some were never covered — so `passed` would claim a result for criteria nobody checked),
             failed (a criterion asserted and lost), inconclusive (no test results at all), unreported
-            (no usable report at the cycle's merge commit), skipped (no acceptance criteria, and
+            (no usable report at the cycle's merge commit), skipped (no validation criteria, and
             incident runs, which get no validation cycle at all).
 
             `failed` and `unreported` fail the run ONCE ITS VALIDATION ATTEMPTS ARE SPENT, under
@@ -5098,8 +6220,54 @@ components:
         — version set and not dirty = approved (vN); dirty = draft changes (vN+); no version = unpublished
         draft; exists false = no spec yet.
       properties:
+        agent:
+          description: >-
+            Whether an agent is working on this project's spec right now, and how the last
+            attempt ended (#562). `never-started` — no turn has EVER run for this project;
+            `""` — a turn has run and the newest one completed; `working` — a turn is in
+            flight; `failed` — the newest turn ended in failure and none has run since.
+            `never-started` is distinct from `""` because the two need opposite treatment:
+            one means the journey has not begun and the user needs a way to begin it, the
+            other means it is under way between turns and offering to restart it would
+            supersede a live interview. Derived from the newest `agent_turns` row for the project,
+            which is what `exists`/`version`/`dirty` cannot say: all three read committed git,
+            and a kickoff writes nothing until it lands. The overview's spec card needs it to
+            say *Writing requirements* while the platform-fired `/start` runs, and the spec
+            view needs it to explain an empty workspace instead of offering a file picker.
+          type: string
+        agentFlow:
+          description: >-
+            WHICH work the running turn is doing — the `/<skill>` token it runs under
+            (`start`, `design`, `settle`, `amend`, …); `""` for plain chat or when nothing is
+            running (#575). `agent` says an agent is working; this says on what, which the spec
+            rail needs to pulse the right section.
+
+            Without it the rail could only guess from which sections were still empty, and guessed
+            wrongly in both directions: settling an assumption lit Design (the first empty section,
+            though the work was requirements), and the moment a design run wrote its first file the
+            pulse jumped to Validation while the rest of the design was still being written.
+
+            Reported for the RUNNING turn only. A finished turn's flow says nothing about what is
+            happening now, and the section states are derived from committed files from then on.
+          type: string
         design:
           description: Design files exist for the spec (gates the Spec view's design button).
+          type: boolean
+        designOutdated:
+          description: >-
+            The requirements have changed since the design was last derived from them (#575), so
+            the design may no longer describe what the user asked for. Derived by comparing the
+            requirements as they stand now against the requirements as they stood in the snapshot
+            the newest successful `/design` turn read — no stored fingerprint, so there is nothing
+            to fall out of sync and it answers for projects that predate the field.
+
+            Coarse ON PURPOSE: it reports that the requirements moved, never which components are
+            affected. The two failures are not symmetric — over-marking costs one re-derivation
+            the agent mostly no-ops through, while under-marking ships a design the user has
+            already changed their mind about to the coding agents.
+
+            False while a project has no design or no successful design turn: there is nothing to
+            be behind.
           type: boolean
         dirty:
           description: specs/ moved on GitHub past the latest tag.
@@ -5115,6 +6283,7 @@ components:
       - version
       - dirty
       - design
+      - agent
       type: object
     StartConnectInputBody:
       additionalProperties: false
@@ -5195,18 +6364,31 @@ components:
           type: object
         executorClass:
           description: >-
-            Label-derived kind of the issue, and the only classification the
-            platform makes of one: `coding` for agent work (the `aep` label),
-            `provision` for a dispatch gate (`aep:provision`), `validation` for
-            the run's validation issue, `ledger` for a bare human issue that
-            joined the milestone carrying none of them. Nothing here is parsed
-            out of the body — issue bodies are prose the platform writes for
-            the agent and never reads back.
+            WHO works this issue, derived from its labels: `coding` for anything
+            a coding agent is dispatched at (planned work, a bug, a merge
+            conflict — all armed with the `aep` label), `provision` for a
+            dispatch gate the platform resolves, `validation` for the version's
+            validation task, `ledger` for a bare human issue that joined the
+            milestone unarmed. Deliberately coarser than `kind`: the three
+            coding kinds are dispatched identically, so they are one class here
+            and are told apart by `kind`. Nothing here is parsed out of the body
+            — issue bodies are prose the platform writes for the agent and never
+            reads back.
           enum:
           - coding
           - provision
           - validation
           - ledger
+          type: string
+        kind:
+          description: >-
+            The issue's raw label kind: `development` for planned work minted
+            from the spec, `bug` for a defect, `conflict` for a pull request
+            that will not merge, `validation` for the version's validation
+            task, `provision` for a dispatch gate. Absent when the issue carries
+            no kind label (a ledger issue, or one a human armed without
+            classifying); a consumer that does not recognise a kind should render
+            the row untagged rather than guess.
           type: string
         hold:
           type: boolean
@@ -5285,6 +6467,17 @@ components:
           type: array
         body:
           type: string
+        comments:
+          description: The issue's newest comments, OLDEST FIRST, capped per issue, with the
+            platform's own machine comments excluded. Present only on a `tag`-scoped read taken with
+            `comments=true` (the default); a read spanning versions omits it, for the same reason
+            ledger issues are invisible there — the fetch is anchored on one milestone and a
+            cross-version read has no bounded set to ask for. Absence covers every empty case
+            (not asked for, nothing there, nothing left after the machine comments were dropped);
+            the field is never an empty array.
+          items:
+            $ref: '#/components/schemas/IssueComment'
+          type: array
         component:
           type: string
         dependsOn:
@@ -5300,18 +6493,31 @@ components:
           type: object
         executorClass:
           description: >-
-            Label-derived kind of the issue, and the only classification the
-            platform makes of one: `coding` for agent work (the `aep` label),
-            `provision` for a dispatch gate (`aep:provision`), `validation` for
-            the run's validation issue, `ledger` for a bare human issue that
-            joined the milestone carrying none of them. Nothing here is parsed
-            out of the body — issue bodies are prose the platform writes for
-            the agent and never reads back.
+            WHO works this issue, derived from its labels: `coding` for anything
+            a coding agent is dispatched at (planned work, a bug, a merge
+            conflict — all armed with the `aep` label), `provision` for a
+            dispatch gate the platform resolves, `validation` for the version's
+            validation task, `ledger` for a bare human issue that joined the
+            milestone unarmed. Deliberately coarser than `kind`: the three
+            coding kinds are dispatched identically, so they are one class here
+            and are told apart by `kind`. Nothing here is parsed out of the body
+            — issue bodies are prose the platform writes for the agent and never
+            reads back.
           enum:
           - coding
           - provision
           - validation
           - ledger
+          type: string
+        kind:
+          description: >-
+            The issue's raw label kind: `development` for planned work minted
+            from the spec, `bug` for a defect, `conflict` for a pull request
+            that will not merge, `validation` for the version's validation
+            task, `provision` for a dispatch gate. Absent when the issue carries
+            no kind label (a ledger issue, or one a human armed without
+            classifying); a consumer that does not recognise a kind should render
+            the row untagged rather than guess.
           type: string
         hold:
           type: boolean
@@ -5345,10 +6551,29 @@ components:
       - attention
       - executions
       type: object
+    TestUserPassword:
+      additionalProperties: false
+      description: A test account's password, disclosed deliberately by reveal or rotate. It is
+        never returned by any read.
+      properties:
+        password:
+          type: string
+        rotatedAt:
+          description: When the password was last replaced; null when it is the one minted at create.
+          format: date-time
+          type: string
+          nullable: true
+          x-go-type: '*time.Time'
+        username:
+          type: string
+      required:
+      - username
+      - password
+      type: object
     TimelineEvent:
       additionalProperties: false
-      description: 'A unified-timeline entry: today''s ProgressEvent (phase | tool_use | git_commit |
-        git_push | gh_action | build_step | log | result) plus its attribution — which execution attempt
+      description: 'A unified-timeline entry: today''s ProgressEvent (phase | tool_use | activity |
+        tool_result | git_commit | git_push | gh_action | build_step | log | progress_item | result) plus its attribution — which execution attempt
         it came from. This is the per-row shape the console renders; the FE groups rows by executionId/kind.'
       properties:
         branch:
@@ -5395,6 +6620,14 @@ components:
         files:
           format: int64
           type: integer
+        itemId:
+          description: '`progress_item` only: WHICH named unit of work the line is about — the key a
+            consumer folds on, since many lines describe the same item and a reader wants one row
+            repainted rather than many rows printed. Validation binds items to acceptance criteria
+            ("AC-003-a"), which `cycleKind` already implies, so this never repeats it. The status
+            itself rides on `status`, scoped by `kind`: planned | exploring | authoring | running |
+            healing | pass | fail.'
+          type: string
         kind:
           type: string
         level:
@@ -5454,9 +6687,105 @@ components:
       - executionId
       - executionKind
       type: object
+    GetConversationOutputBody:
+      additionalProperties: false
+      description: A conversation's history, oldest first. An empty list is a real answer — a
+        known thread with no turns yet — never an error.
+      properties:
+        messages:
+          items:
+            $ref: '#/components/schemas/ConversationMessage'
+          type: array
+      required:
+      - messages
+      type: object
+    TurnAnchor:
+      additionalProperties: false
+      description: >
+        What the user pointed at when they aimed this turn at part of a spec document
+        (#666; console ADR-0024). It LOCATES — it never carries the selected content.
+
+
+        The agent joins the spec collab room as a live peer, so between the selection and
+        the turn starting the user may keep typing and a teammate may edit too: content
+        captured at selection time is a photograph of a document that has since moved. The
+        agent resolves these names against the CURRENT document instead. The same reasoning
+        already reversed an embedded copy once — #252 Task 17 stripped a dependency's full
+        JSON entry back to its name, because the agent reads the live entry in its own turn
+        snapshot.
+
+
+        Absent for an ordinary chat turn.
+      properties:
+        file:
+          description: The authored spec file the selection resolves to. Always present — one
+            view renders exactly one file, so a selection never spans two.
+          type: string
+        nodes:
+          description: The selected nodes, in document order. A list because both surfaces
+            multi-select — a drag across three paragraphs, a shift-click across three
+            operations.
+          items:
+            $ref: '#/components/schemas/TurnAnchorNode'
+          minItems: 1
+          type: array
+      required:
+      - file
+      - nodes
+      type: object
+    TurnAnchorNode:
+      additionalProperties: false
+      description: One selected node — the name the agent resolves, and the name the transcript
+        shows back to a user who can no longer see what they clicked.
+      properties:
+        context:
+          description: Where the node sits, for a name that cannot stand alone. Markdown — the
+            heading path, root-first (`Solution > Slack integration`). A structured view — the
+            parent (`lunch-api`). Optional; a name that stands alone needs none.
+          type: string
+        kind:
+          description: >
+            The node's vocabulary word. It carries the whole difference between a name authored
+            AS a name and a sentence pressed into service as one, which is what lets prose and
+            structured views share this schema.
+
+
+            Markdown uses structural terms — `paragraph`, `heading`, `list item` — deliberately
+            NOT document-specific readings like `open question`, so an arbitrary `.md` produces
+            the same shape as the PRD. A structured view uses its own terms (`operation`,
+            `external dependency`). Kept as a raw string rather than a closed enum so a view can
+            name its nodes without a contract change.
+          type: string
+        name:
+          description: >
+            What the agent resolves and the transcript shows. A structured view supplies the
+            node's own name (`POST /rounds`, `slack`). Markdown has none, so it supplies a
+            BOUNDED excerpt of the block's RENDERED text — at most 80 characters, cut at a word
+            boundary.
+
+
+            The bound is the load-bearing part, not the number: an excerpt that grows with the
+            selection is the carried content this schema exists to avoid. It only has to be
+            unique enough to locate — the model receives the full block regardless, because the
+            agent read it from the file.
+
+
+            RENDERED, not source: the source carries `**bold**`, `*assumed*`, links and hard
+            wraps the reader never saw, so a source-exact excerpt fails to match for most
+            blocks. The agent matches on prose, tolerantly, and asks when a name is genuinely
+            ambiguous rather than guessing. `maxLength` is the contract's ceiling against
+            carry; the 80-character rule is the markdown client's.
+          maxLength: 200
+          type: string
+      required:
+      - name
+      - kind
+      type: object
     TurnInputBody:
       additionalProperties: false
       properties:
+        anchor:
+          $ref: '#/components/schemas/TurnAnchor'
         collab:
           description: 'Room-scoped turn (#86 phase 4): the agent joins the project''s spec collab room
             as a live peer, reads and edits the shared doc, and commits nothing to git.'
@@ -5466,8 +6795,97 @@ components:
             …) are sent VERBATIM — the server expands them, attaches the flow's eager skills, and enriches
             `/start` with the captured project idea.
           type: string
+        intent:
+          description: >
+            What the user wants done with `anchor` — `change` rewrites the selected nodes in
+            place, `discuss` opens the same selection as a grilling. Read by the agents service
+            when it renders the anchor into the prompt; the two differ only in how that
+            preamble is phrased.
+
+
+            Deliberately a field and NOT a `/command` prefix on `instruction`: a command IS the
+            user's message (the console adds nothing to a line they typed), and an anchored turn
+            carries prose they wrote in their own words, so a prefix would put machinery in their
+            voice. Mirrors the console's own resolve/reconsider intent, whose only job is the
+            same. Absent for a turn with no anchor.
+          enum:
+          - change
+          - discuss
+          type: string
         target:
           description: Optional target (e.g. a doc type)
+          type: string
+      required:
+      - instruction
+      type: object
+    TurnInputMultipart:
+      additionalProperties: false
+      description: >
+        The same turn input as `TurnInputBody`, sent as multipart so it can carry chat
+        attachments (#428). The JSON form stays the canonical one — a message with no
+        attachments MUST use it, and every existing caller is unaffected.
+
+
+        Attachments are CONVERSATION-SCOPED MODEL CONTENT (console ADR-0019): the platform
+        never writes them to disk and never commits them. They ride this request into the
+        turn and are durable only as parts of the conversation's history, which is also
+        what makes re-sending one free — the agents service dedupes by file name.
+
+
+        Deliberately NOT the reference-document channel: `POST /projects/{name}/references`
+        REPLACES a project's whole stored set, and the create view is the only door to it.
+        A file attached here never becomes a project reference, even when the instruction
+        is `/start`.
+      properties:
+        anchor:
+          $ref: '#/components/schemas/TurnAnchor'
+        collab:
+          description: As `TurnInputBody.collab`.
+          type: boolean
+        files:
+          description: >
+            Chat attachments, two groups and the split matters downstream. Read NATIVELY as
+            file parts: `.pdf`, and the four image media types the Messages API accepts —
+            `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`. Read AS TEXT (sent as `text/plain`,
+            the only text document type the Anthropic provider maps): `.md`, `.txt`, `.csv`,
+            `.tsv`, `.json`, `.yaml`, `.yml`, `.xml`, `.html`, `.rst`. Office formats are
+            not accepted — the models do not read them natively.
+
+
+            Three caps, and all of them restate ONE number: the agents service already
+            enforces a 20 MiB base64-ENCODED per-turn attachment budget (#384), past which
+            it warns and skips. So at most 10 files, each at most 5 MiB, and at most 15 MiB
+            of raw bytes in TOTAL — 15 MiB raw is 20 MiB encoded. The total is the load-
+            bearing one: a per-file cap alone cannot hold the line, since ten 5 MiB files
+            each pass it and together overrun the budget by 3x.
+          items:
+            format: binary
+            type: string
+          maxItems: 10
+          type: array
+        instruction:
+          description: As `TurnInputBody.instruction`. Required — an attachment alone cannot
+            start a turn, and the shared TurnSpec validator rejects an empty chat text.
+          type: string
+        intent:
+          description: >
+            As `TurnInputBody.intent`. What the user wants done with `anchor` — `change` rewrites the selected nodes in
+            place, `discuss` opens the same selection as a grilling. Read by the agents service
+            when it renders the anchor into the prompt; the two differ only in how that
+            preamble is phrased.
+
+
+            Deliberately a field and NOT a `/command` prefix on `instruction`: a command IS the
+            user's message (the console adds nothing to a line they typed), and an anchored turn
+            carries prose they wrote in their own words, so a prefix would put machinery in their
+            voice. Mirrors the console's own resolve/reconsider intent, whose only job is the
+            same. Absent for a turn with no anchor.
+          enum:
+          - change
+          - discuss
+          type: string
+        target:
+          description: As `TurnInputBody.target`.
           type: string
       required:
       - instruction
@@ -5485,12 +6903,34 @@ components:
       additionalProperties: false
       description: One turn's lifecycle view (create-turn 202 → poll/attach).
       properties:
+        authorDisplayName:
+          description: The acting user's display name, paired with authorId.
+          type: string
+        authorId:
+          description: >-
+            Who started this turn — EMAIL-anchored, matching the console's live author identity,
+            which is what lets a client tell its own turn from a teammate's. Empty when no
+            attributable human sent it (an M2M token, a minimal user token, or a turn dispatched
+            before the display record was stored). Flat rather than a nested object so "absent"
+            is one convention across this schema: the empty string, exactly as `instruction`
+            uses it.
+          type: string
         commitSha:
           type: string
         conversationId:
           type: string
         createdAt:
           format: date-time
+          type: string
+        instruction:
+          description: >-
+            What this turn's DISPLAY record says — the transcript line for the message that
+            started it. Present so a client attaching to a turn it did not send can render the
+            sender's message immediately, instead of narration under a blank space: the
+            conversation store persists a turn's transcript only when the turn ENDS, so a
+            history read mid-turn cannot supply it. Empty on turns dispatched before this field
+            existed. Not the model's prompt — the agents service composes that from the turn
+            spec and it never crosses this boundary.
           type: string
         message:
           type: string

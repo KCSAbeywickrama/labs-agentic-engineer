@@ -19,7 +19,7 @@
 // @vitest-environment jsdom
 
 import type { ElementType } from "react";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { components } from "../../../generated/aep-api";
 
@@ -50,6 +50,38 @@ import { DeploymentsPage } from "./DeploymentsPage";
 type ProjectStatus = components["schemas"]["ProjectStatus"];
 type DeployStage = components["schemas"]["DeployStage"];
 type ComponentDependencies = components["schemas"]["ComponentDependencies"];
+type ExternalResourceDTO = components["schemas"]["ExternalResourceDTO"];
+type ProjectTestUserState = components["schemas"]["ProjectTestUserState"];
+
+const MOCK_PASSWORD = "mocknotreal";
+const THUNDER_CONSOLE_USERS = "http://localhost:8097/console/users";
+
+// Roles hooks — overridable so green-deploy fixtures stay Thunder-only by
+// default, and Test-users cases can inject owned rows / reveal answers.
+let mockTestUsers: ProjectTestUserState[] = [];
+const mockReveal = vi.fn(
+  async (username: string) => ({
+    username,
+    password: MOCK_PASSWORD,
+    rotatedAt: null,
+  }),
+);
+
+vi.mock("../../spec/api/roles", () => ({
+  useProjectRoles: () => ({
+    data: {
+      directoryAvailable: true,
+      roles: [],
+      testUsers: mockTestUsers,
+    },
+    isPending: false,
+    isError: false,
+  }),
+  useRevealTestUserPassword: () => ({
+    mutateAsync: mockReveal,
+    isPending: false,
+  }),
+}));
 
 // Query hooks replaced wholesale — no QueryClientProvider / MSW needed, only the
 // rendering under test is real (mirrors TasksList.test.tsx).
@@ -80,6 +112,12 @@ const DEFAULT_DEPENDENCIES: ComponentDependencies[] = [
 ];
 let mockDependencies: ComponentDependencies[] = DEFAULT_DEPENDENCIES;
 
+// Org catalog for Registered vs Project External. Default empty / no envCells
+// so the fixture `stripe` stays a Project External (re-collect test).
+let mockExternalCatalog: ExternalResourceDTO[] = [];
+let mockExternalCatalogPending = false;
+let mockExternalCatalogError = false;
+
 function status(): ProjectStatus {
   return {
     phase: "components",
@@ -90,7 +128,7 @@ function status(): ProjectStatus {
     hasTasks: true,
     specStatus: "approved",
     designStatus: "approved",
-    spec: { exists: true, version: "v1", dirty: false, design: true },
+    spec: { exists: true, version: "v1", dirty: false, design: true, agent: "" },
     build: { version: "v1", status: "succeeded" },
     deploy: mockDeploy,
   };
@@ -134,6 +172,16 @@ vi.mock("../../spec/api/queries", () => ({
   useDesignDependencies: () => ({ data: mockDependencies, isPending: false }),
 }));
 
+vi.mock("../../settings/api/queries", () => ({
+  useExternalResources: () => ({
+    data: mockExternalCatalog,
+    isPending: mockExternalCatalogPending,
+    isError: mockExternalCatalogError,
+    error: mockExternalCatalogError ? new Error("catalog down") : null,
+    refetch: vi.fn(),
+  }),
+}));
+
 // The criteria/report join (#395 decision 3) — counts undefined by default (the
 // fallback path); individual tests set them to assert the "n/m passed" upgrade. The
 // VERDICT rides with them because `deploy.validation` folds `failed` and `unreported`
@@ -160,6 +208,11 @@ beforeEach(() => {
   mockRepairing = false;
   mockMutate.mockClear();
   mockDependencies = DEFAULT_DEPENDENCIES;
+  mockExternalCatalog = [];
+  mockExternalCatalogPending = false;
+  mockExternalCatalogError = false;
+  mockTestUsers = [];
+  mockReveal.mockClear();
 });
 
 describe("DeploymentsPage — validation", () => {
@@ -440,9 +493,169 @@ describe("DeploymentsPage — connections", () => {
       screen.queryByRole("button", { name: /Configure/ }),
     ).not.toBeInTheDocument();
   });
+
+  // Registered External: org catalog row with non-empty envCells — values live
+  // on the org plane, so Deployments must not offer Connection values dialog.
+  it("hides Configure for a Registered external connection", () => {
+    mockDeploy = {
+      version: "v1",
+      status: "deployed",
+      components: { total: 1, ready: 1 },
+      validation: "passed",
+    };
+    mockExternalCatalog = [
+      {
+        name: "stripe",
+        config: [{ key: "STRIPE_SECRET_KEY", secret: true }],
+        consumers: [],
+        envCells: [
+          {
+            environment: "development",
+            key: "STRIPE_SECRET_KEY",
+            status: "configured",
+          },
+        ],
+      },
+    ];
+
+    render(<DeploymentsPage projectName="acme" />);
+
+    expect(
+      screen.queryByRole("button", { name: "Configure stripe" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  // While the org catalog is still loading, registeredNames is empty — a
+  // Registered row must not flash Configure (which would open the project
+  // values dialog for a name that might already live on the org plane).
+  it("does not show Configure for an external while the org catalog is loading", () => {
+    mockDeploy = {
+      version: "v1",
+      status: "deployed",
+      components: { total: 1, ready: 1 },
+      validation: "passed",
+    };
+    mockExternalCatalogPending = true;
+    mockExternalCatalog = [];
+
+    render(<DeploymentsPage projectName="acme" />);
+
+    expect(
+      screen.queryByRole("button", { name: "Configure stripe" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  // Catalog error leaves registeredNames empty the same way pending does —
+  // fail closed so a Registered name cannot open the project values dialog.
+  it("does not show Configure for an external when the org catalog fails", () => {
+    mockDeploy = {
+      version: "v1",
+      status: "deployed",
+      components: { total: 1, ready: 1 },
+      validation: "passed",
+    };
+    mockExternalCatalogError = true;
+    mockExternalCatalog = [];
+
+    render(<DeploymentsPage projectName="acme" />);
+
+    expect(
+      screen.queryByRole("button", { name: "Configure stripe" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByText(/Failed to load org catalog/i)).toBeInTheDocument();
+  });
+
+  // Project External under a new name: empty/omitted catalog envCells — still
+  // opens the values dialog (and POSTs values; never register).
+  it("opens Configure for a Project External connection", () => {
+    mockDeploy = {
+      version: "v1",
+      status: "deployed",
+      components: { total: 1, ready: 1 },
+      validation: "passed",
+    };
+    mockDependencies = [
+      {
+        componentName: "storefront",
+        dependencies: [
+          {
+            kind: "external",
+            name: "acme-stripe",
+            config: [
+              {
+                key: "STRIPE_SECRET_KEY",
+                description: "Secret key",
+                secret: true,
+              },
+            ],
+          },
+        ],
+      },
+    ];
+    mockExternalCatalog = [
+      {
+        name: "acme-stripe",
+        config: [{ key: "STRIPE_SECRET_KEY", secret: true }],
+        consumers: [],
+        // Empty envCells = Project External (same as omitted).
+        envCells: [],
+      },
+    ];
+
+    render(<DeploymentsPage projectName="acme" />);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Configure acme-stripe" }),
+    );
+    const dialog = screen.getByRole("dialog");
+    expect(
+      within(dialog).getByText("Configure — acme-stripe"),
+    ).toBeInTheDocument();
+  });
 });
 
 describe("DeploymentsPage — promotion", () => {
+  // The reported bug. A build finishes, every binding goes Ready, and the deploy
+  // aggregate reports `deployed` — but the validation cycle has not started, so
+  // `validation` is still `none`. For that whole window (the reconcile sweep that
+  // starts the validation run ticks once a minute) this button offered production
+  // a version nothing had checked.
+  it("does not offer promotion while a verdict is still expected", () => {
+    mockDeploy = {
+      version: "v1",
+      status: "deployed",
+      components: { total: 1, ready: 1 },
+      validation: "none",
+    };
+
+    render(<DeploymentsPage projectName="acme" />);
+
+    expect(
+      screen.getByRole("button", { name: /Promote v1 to production/ }),
+    ).toBeDisabled();
+  });
+
+  // The other half, and why `none` could not simply be blocked on its own: a person
+  // who cancelled the judging has already made this call, and with no revalidate
+  // control in the console a permanently dead button would strand the version.
+  it("offers promotion once a person has cancelled the judging", () => {
+    mockDeploy = {
+      version: "v1",
+      status: "deployed",
+      components: { total: 1, ready: 1 },
+      validation: "cancelled",
+    };
+
+    render(<DeploymentsPage projectName="acme" />);
+
+    expect(
+      screen.getByRole("button", { name: /Promote v1 to production/ }),
+    ).toBeEnabled();
+  });
+
   it("opens the promote dialog and gates Promote on required values", () => {
     mockDeploy = {
       version: "v1",
@@ -524,5 +737,165 @@ describe("DeploymentsPage — promotion", () => {
     expect(
       within(dialog).getByRole("button", { name: /^Promote$/ }),
     ).toBeEnabled();
+  });
+});
+
+describe("DeploymentsPage — Test users", () => {
+  it("hides SignInPanel when deploy is not green", () => {
+    mockDeploy = {
+      version: "v1",
+      status: "deploying",
+      components: { total: 1, ready: 1 },
+      validation: "none",
+    };
+    mockTestUsers = [
+      {
+        username: "test-viewer",
+        roleName: "Viewer",
+        coldStart: true,
+        exists: true,
+        owned: true,
+        supplied: false,
+      },
+    ];
+
+    render(<DeploymentsPage projectName="acme" />);
+
+    expect(
+      screen.queryByText("Test users for agents on this environment"),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Thunder Console")).not.toBeInTheDocument();
+    expect(screen.queryByText("test-viewer")).not.toBeInTheDocument();
+  });
+
+  it("shows Thunder Console only when deploy is green and store is empty", () => {
+    mockDeploy = {
+      version: "v1",
+      status: "deployed",
+      components: { total: 1, ready: 1 },
+      validation: "none",
+    };
+    mockTestUsers = [];
+
+    render(<DeploymentsPage projectName="acme" />);
+
+    const link = screen.getByRole("link", {
+      name: "Open Thunder Console to add or remove real accounts",
+    });
+    expect(link).toHaveAttribute("href", THUNDER_CONSOLE_USERS);
+    expect(link).toHaveAttribute("target", "_blank");
+    expect(
+      screen.queryByText("Test users for agents on this environment"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Reveal/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows Thunder only when gate has no owned published user", () => {
+    mockDeploy = {
+      version: "v1",
+      status: "deployed",
+      components: { total: 1, ready: 1 },
+      validation: "none",
+    };
+    mockTestUsers = [
+      {
+        username: "test-viewer",
+        roleName: "Viewer",
+        coldStart: true,
+        exists: false,
+        owned: false,
+        supplied: false,
+      },
+    ];
+
+    render(<DeploymentsPage projectName="acme" />);
+
+    expect(
+      screen.getByRole("link", {
+        name: "Open Thunder Console to add or remove real accounts",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("Test users for agents on this environment"),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("test-viewer")).not.toBeInTheDocument();
+  });
+
+  it("lists owned published users and reveals password when deploy is green", async () => {
+    mockDeploy = {
+      version: "v1",
+      status: "deployed",
+      components: { total: 1, ready: 1 },
+      validation: "none",
+    };
+    mockTestUsers = [
+      {
+        username: "test-viewer",
+        roleName: "Viewer",
+        coldStart: true,
+        exists: true,
+        owned: true,
+        supplied: false,
+      },
+    ];
+
+    render(<DeploymentsPage projectName="acme" />);
+
+    expect(
+      screen.getByText("Test users for agents on this environment"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("test-viewer")).toBeInTheDocument();
+    const thunder = screen.getByRole("link", {
+      name: "Open Thunder Console to add or remove real accounts",
+    });
+    expect(thunder).toHaveAttribute("href", THUNDER_CONSOLE_USERS);
+    expect(thunder).toHaveAttribute("target", "_blank");
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Reveal the password for test-viewer",
+      }),
+    );
+    expect(mockReveal).toHaveBeenCalledWith("test-viewer");
+    await waitFor(() => {
+      expect(screen.getByText(MOCK_PASSWORD)).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Hide" }));
+    expect(screen.queryByText(MOCK_PASSWORD)).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", {
+        name: "Reveal the password for test-viewer",
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps Thunder / Test users copy and omits Roles-gate and account actions", () => {
+    mockDeploy = {
+      version: "v1",
+      status: "deployed",
+      components: { total: 1, ready: 1 },
+      validation: "none",
+    };
+    mockTestUsers = [
+      {
+        username: "test-viewer",
+        roleName: "Viewer",
+        coldStart: true,
+        exists: true,
+        owned: true,
+        supplied: false,
+      },
+    ];
+
+    render(<DeploymentsPage projectName="acme" />);
+
+    expect(screen.getByText(/user accounts/)).toBeInTheDocument();
+    expect(screen.getByText(/Test users/)).toBeInTheDocument();
+    expect(screen.queryByText(/Roles gate/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Add$/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Rotate/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Delete/i)).not.toBeInTheDocument();
   });
 });

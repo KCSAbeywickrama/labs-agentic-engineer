@@ -115,6 +115,20 @@ type Config struct {
 	// still deploy, just without per-org publishers).
 	ThunderAdmin ThunderAdminConfig
 
+	// KubeAPI is the in-cluster (or override) Kubernetes API the Thunder
+	// Application CR GET uses. BaseURL empty ⇒ thunder wait stays unwired
+	// (local compose has no kube API). See KubeAPIConfig.
+	KubeAPI KubeAPIConfig
+
+	// APIGatewayHost is host:port of the API Platform gateway runtime — the hop
+	// that terminates authentication for a managed API. Published to a consumer
+	// of a protected sibling as `<DEP>_GATEWAY_URL` so a SPA's nginx can proxy
+	// the browser's /api through it instead of straight at the project Service.
+	// Loaded from API_GATEWAY_HOST. Empty means "use the platform default" —
+	// the constant lives in the projects domain beside the context-path builder
+	// it must agree with, so config carries only the override.
+	APIGatewayHost string
+
 	// Platform IDP defaults seeded into organization_idp_profiles rows
 	// on first access. Loaded from PLATFORM_IDP_ISSUER /
 	// PLATFORM_IDP_JWKS_URL — should match the cluster's Thunder
@@ -257,6 +271,22 @@ type ThunderAdminConfig struct {
 	ClientSecret string
 }
 
+// KubeAPIConfig is the Kubernetes API endpoint used to LIST ThunderApplication
+// CRs (plain net/http — not controller-runtime). Resolved at Load:
+//
+//	BaseURL — https://$KUBERNETES_SERVICE_HOST:$KUBERNETES_SERVICE_PORT when
+//	both are set (Helm pods); else optional KUBE_API_BASE_URL.
+//	BearerToken — KUBE_API_BEARER static override (not a rotating SA token).
+//	TokenFile — in-cluster service-account token path when no bearer override;
+//	the client reads the file per request so projected rotations are picked up.
+//	CAFile — in-cluster service-account ca.crt when present.
+type KubeAPIConfig struct {
+	BaseURL     string
+	BearerToken string
+	TokenFile   string
+	CAFile      string
+}
+
 // PlatformIDPDefaults are the issuer + JWKS URL of the cluster's
 // platform IDP (Thunder in v1). Seeded into every new
 // organization_idp_profiles row.
@@ -334,6 +364,24 @@ type ObservabilityConfig struct {
 type PlatformAPIConfig struct {
 	BaseURL    string
 	HostHeader string
+	// DataPlaneGatewayTLS says whether the DATA-PLANE gateway terminates TLS —
+	// not whether this API does, and not which tier this is.
+	//
+	// It exists because OpenChoreo advertises a ReleaseBinding's external URLs
+	// from the endpoint's SHAPE, not from what its gateway serves: a local plane
+	// advertises BOTH an https and an http URL while `gateway.tls.enabled: false`
+	// leaves http as its only listener. A consumer that prefers https then hands
+	// out a URL nothing answers.
+	//
+	// It is stated rather than inferred on purpose. The tier was the obvious
+	// proxy and is the wrong fact: a dev-tier plane WITH TLS would be told to
+	// prefer plain http, which is the same bug mirrored. The single-cluster
+	// values file (deployments/single-cluster/values-dp.yaml) is what this must
+	// agree with, so the two are one edit apart.
+	//
+	// Defaults TRUE — every plane whose gateway fronts TLS, which is every one
+	// but local dev.
+	DataPlaneGatewayTLS bool
 }
 
 // TemporalConfig holds connection settings for the Temporal server that runs

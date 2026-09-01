@@ -162,6 +162,9 @@ type ComponentClient interface {
 
 type componentClient struct {
 	oc *ocgen.ClientWithResponses
+	// preferPlainHTTP picks the http external URL when a binding advertises both
+	// (Config.PreferPlainHTTPEndpoints explains why).
+	preferPlainHTTP bool
 }
 
 func NewComponentClient(cfg Config) ComponentClient {
@@ -169,7 +172,7 @@ func NewComponentClient(cfg Config) ComponentClient {
 	if err != nil {
 		panic(fmt.Errorf("init openchoreo component client: %w", err))
 	}
-	return &componentClient{oc: oc}
+	return &componentClient{oc: oc, preferPlainHTTP: cfg.PreferPlainHTTPEndpoints}
 }
 
 // -- Conversions -------------------------------------------------------------
@@ -278,9 +281,10 @@ func workflowRunToModel(run ocgen.WorkflowRun) gen.WorkflowRun {
 	}
 }
 
-// deploymentFromReleaseBinding pulls the first HTTP external URL from the
-// binding's resolved endpoints via the typed `ExternalURLs.Http *EndpointURL`.
-func deploymentFromReleaseBinding(rb ocgen.ReleaseBinding) gen.Deployment {
+// deploymentFromReleaseBinding pulls the first public URL from the binding's
+// resolved endpoints. Cloud gateways populate `externalURLs.https` only;
+// local/HTTP listeners populate `http`. Prefer https when both exist.
+func deploymentFromReleaseBinding(rb ocgen.ReleaseBinding, preferPlainHTTP bool) gen.Deployment {
 	var projectName, componentName, environment, releaseName string
 	if rb.Spec != nil {
 		projectName = rb.Spec.Owner.ProjectName
@@ -292,8 +296,8 @@ func deploymentFromReleaseBinding(rb ocgen.ReleaseBinding) gen.Deployment {
 	var endpointURL string
 	if rb.Status != nil && rb.Status.Endpoints != nil {
 		for _, ep := range *rb.Status.Endpoints {
-			if ep.ExternalURLs != nil && ep.ExternalURLs.Http != nil {
-				endpointURL = formatEndpointURL(ep.ExternalURLs.Http)
+			if u := publicEndpointURL(ep.ExternalURLs, preferPlainHTTP); u != "" {
+				endpointURL = u
 				break
 			}
 		}
@@ -313,6 +317,28 @@ func deploymentFromReleaseBinding(rb ocgen.ReleaseBinding) gen.Deployment {
 		CreatedAt:     derefTimeRFC3339(rb.Metadata.CreationTimestamp),
 		Status:        status,
 	}
+}
+
+// publicEndpointURL prefers the HTTPS gateway URL when OpenChoreo resolved
+// one, else HTTP. Empty when the binding has no external URL at all.
+func publicEndpointURL(urls *ocgen.EndpointGatewayURLs, preferPlainHTTP bool) string {
+	if urls == nil {
+		return ""
+	}
+	// Whichever is preferred FIRST, then the other as a fallback — a binding may
+	// advertise only one, and answering "" when the unpreferred scheme is the only
+	// one present would lose a URL that works.
+	first, second := urls.Https, urls.Http
+	if preferPlainHTTP {
+		first, second = urls.Http, urls.Https
+	}
+	if first != nil {
+		return formatEndpointURL(first)
+	}
+	if second != nil {
+		return formatEndpointURL(second)
+	}
+	return ""
 }
 
 // formatEndpointURL renders ocgen.EndpointURL as scheme://host:port/path. Path
@@ -342,6 +368,15 @@ func isInternalComponent(annotations, labels map[string]string) bool {
 		return true
 	}
 	return labels[annotationInternal] == "true"
+}
+
+// internalMarkerLabels is the label set that marks an object as the platform's
+// own ephemeral scaffolding rather than one of the user's components. One
+// spelling for the pair, because the writer (EnsureReleaseBinding) and the
+// reader (ListProjectReleaseBindings) have to agree on it or a marked object is
+// counted as a deployment anyway.
+func internalMarkerLabels() map[string]string {
+	return map[string]string{string(LabelKeyAepInternal): LabelValueAepInternal}
 }
 
 func (c *componentClient) ListComponents(ctx context.Context, orgName, projectName string, limit int, cursor string) (*gen.ComponentList, error) {
@@ -950,13 +985,29 @@ func (c *componentClient) ListDeployments(ctx context.Context, orgName, projectN
 
 	items := make([]gen.Deployment, len(resp.JSON200.Items))
 	for i, rb := range resp.JSON200.Items {
-		items[i] = deploymentFromReleaseBinding(rb)
+		items[i] = deploymentFromReleaseBinding(rb, c.preferPlainHTTP)
 	}
 	return &gen.DeploymentList{Items: items}, nil
 }
 
 // ListProjectReleaseBindings lists the org's ReleaseBindings and keeps the
-// project's, following pagination — the status poll's single OC call.
+// project's USER-COMPONENT ones, following pagination — the status poll's single
+// OC call.
+//
+// Internally marked bindings are skipped, the same exclusion ListComponents
+// makes: every coding-agent cycle creates a real dev-environment binding owned
+// by the user's project, and because that binding wraps a batch/v1 Job (which
+// OpenChoreo registers no health check for) it reports Ready=True regardless of
+// the Job's state. Folded into the deploy stage those bindings reported a
+// project as "deployed" before anything had been deployed — and the project's
+// first run could never report "none" at all, since one finished cycle is
+// enough to leave a permanently-Ready binding behind.
+//
+// The predicate is client-side rather than a labelSelector on the request: this
+// loop already filters by project here, so one more test is free, and the 5s
+// status poll must not depend on openchoreo-api honouring a selector on
+// releasebindings. Bindings created before the marker existed carry no label and
+// are still returned; they age out with the retention pass.
 func (c *componentClient) ListProjectReleaseBindings(ctx context.Context, orgName, projectName string) ([]ReleaseBindingSummary, error) {
 	var out []ReleaseBindingSummary
 	params := &ocgen.ListReleaseBindingsParams{}
@@ -974,6 +1025,16 @@ func (c *componentClient) ListProjectReleaseBindings(ctx context.Context, orgNam
 		}
 		for _, rb := range resp.JSON200.Items {
 			if rb.Spec == nil || rb.Spec.Owner.ProjectName != projectName {
+				continue
+			}
+			// The same predicate the Component read uses — it tests the marker,
+			// not a kind, and reusing it is what keeps the two exclusions from
+			// drifting onto different spellings of "internal".
+			var lbls map[string]string
+			if rb.Metadata.Labels != nil {
+				lbls = *rb.Metadata.Labels
+			}
+			if isInternalComponent(nil, lbls) {
 				continue
 			}
 			out = append(out, releaseBindingSummary(rb))

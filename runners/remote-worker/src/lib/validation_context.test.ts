@@ -178,7 +178,7 @@ test("a context with no criteria path throws", async () => {
         file,
         fetchImpl: impl,
       }),
-      /no acceptance-criteria path/,
+      /no validation-criteria path/,
       `criteriaPath ${JSON.stringify(criteria)}`,
     );
     assert.equal(fs.existsSync(file), false);
@@ -335,4 +335,38 @@ test("an unset platform URL throws before any request", async () => {
 test("the default context file is outside the workspace and outside .aep", () => {
   assert.equal(VALIDATION_CONTEXT_FILE.startsWith("/tmp/"), true);
   assert.equal(VALIDATION_CONTEXT_FILE.includes("/.aep/"), false);
+});
+
+test("source path remints once on 401 then writes the context", async () => {
+  const file = await tmpFile();
+  const payload = JSON.stringify({
+    endpoints: [{ component: "hello-webapp", url: "https://hello.example" }],
+    criteriaPath: "specs/validation/validation-criteria.json",
+  });
+  let n = 0;
+  const impl = (async (_url: string | URL | Request, init?: RequestInit) => {
+    n++;
+    const auth = new Headers(init?.headers).get("Authorization") ?? "";
+    if (auth === "Bearer stale") {
+      return new Response("no", { status: 401 });
+    }
+    return new Response(payload, { status: 200 });
+  }) as unknown as typeof fetch;
+  let token = "stale";
+  const ctx = await fetchValidationContext({
+    platformUrl: "https://bff.example",
+    cycleId: CYCLE,
+    bearer: "unused",
+    source: {
+      getToken: async () => token,
+      invalidate: () => {
+        token = "fresh";
+      },
+    },
+    canRefresh: true,
+    file,
+    fetchImpl: impl,
+  });
+  assert.equal(n, 2);
+  assert.equal(ctx.endpoints.length, 1);
 });

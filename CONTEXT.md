@@ -8,10 +8,9 @@ this file defines what terms *mean*, not how anything works.
 **Skill**:
 A unit of procedural guidance — a `SKILL.md` (frontmatter `name` + `description`,
 markdown body) — that the main agent may follow while editing a spec bundle. The
-caller passes the candidate Skills (`name`, `description`, `content`) in the turn
-request payload. A Skill is *guidance*, not code: never executed, never uploaded
-to a model provider, never read from disk by the service (the caller — the eval —
-resolves Skills from the repo).
+turn's Skills come from the workspace's immutable skills snapshot, which the
+caller names by ref; bodies never cross the wire. A Skill is *guidance*, not
+code: never executed, never uploaded to a model provider.
 _Avoid_: plugin, capability, tool (a tool is the agent's executable action, e.g. `editFile`).
 
 **Skill catalog**:
@@ -23,7 +22,19 @@ the body is fetched on demand.
 **`loadSkill`**:
 The tool the agent calls to fetch a Skill's full `content` by name. The body enters
 context only when loaded, and then persists as a tool result in message history.
-This is the only way a Skill body reaches the model.
+This is the only way a *catalogued* Skill body reaches the model — the standing
+blocks (the org's defaults, the Surface's narration policy) are inlined instead,
+and are kept out of the catalog precisely because nothing needs to load them.
+
+**Surface**:
+Where the person reading a turn's prose is sitting — the console, or a terminal
+in the repository. The right vocabulary belongs to the Surface, not to the Skill:
+`design.cell` is exactly the right word for someone standing in the repo and
+names nothing on a console user's screen. A Surface names the narration policy
+its callers' turns carry, so the shared flow Skills stay byte-identical wherever
+they run.
+_Avoid_: client, channel, caller (the caller is who dispatches a turn; the
+Surface is who reads it).
 
 **Spec bundle**:
 The in-memory set of files (a snapshot, keyed by path) the main agent reads and
@@ -95,8 +106,17 @@ inside a skill's body, not the agent).
 
 **Coding agent**:
 The agent that implements a component — it builds, verifies, and opens the pull
-request. It reads skills as guidance for construction.
+request. It reads skills as guidance for construction. When it calls the
+platform, it is the organization's **publisher client**, not a per-cycle token
+and not the design agent.
 _Avoid_: builder, implementer agent, runner (the runner is the pod it executes in).
+
+**Publisher client**:
+The organization's confidential Thunder OAuth application. The coding agent is
+this client when it calls the platform. One per organization, reused across
+cycles.
+_Avoid_: Task JWT (a per-cycle bearer, not this identity), M2M client (other
+service-to-service apps), design-agent token.
 
 ## LLM credentials (`services/aep-api`)
 
@@ -137,18 +157,35 @@ opposite side of the wire).
 external` entry in its `design.json` `dependencies[]` (`style: rest-api | sdk`),
 naming the config keys it reads and, for a REST API, an optional `specPath` (a
 URL or a committed spec file) the coding agent starts from (ADR-0010). Resolved
-at read time (ADR-0003), never a stored flag. It **resolves to** an external
-resource (below).
+at read time (ADR-0003), never a stored flag. It **resolves to** an External
+resource: a **Registered External resource**'s exact name when the catalog
+already has a fit, otherwise a new **Project External resource** name.
 _Avoid_: `needsSpec`, `specUrl`, `sources` — retired fields, rejected on parse.
 
 **External resource**:
-**The org-level, shared** record of one such integration once provisioned — its
-name, description, and config-key schema — so many components' external
-dependencies reuse it by name instead of each redefining it (one resource, many
-dependencies). It is what the Settings → Resources view lists and what a card's
-"Used by" counts. Stored as an org-namespaced OpenChoreo `ResourceType`, not a
-database table (ADR-0009).
+The org-level shared record of one third-party integration — name, description,
+config-key schema — so many components reuse it by name instead of each
+redefining it. Listed on **Resources**. Two kinds below. The OpenChoreo
+`ResourceType` *is* the record (ADR-0009).
 _Avoid_: "external_resources table" (removed); connection.
+
+**Registered External resource**:
+An External resource the org registered once, with org-held environment values
+and **consumption instructions**, so a later project that needs the same API
+reuses that name instead of collecting the values again.
+_Avoid_: org API, shared secret (the resource is the integration, not the secret).
+
+**Project External resource**:
+An External resource invented for one project's design when nothing in the
+catalog fits, or the user asks to reconsider. Its environment values are that
+project's.
+_Avoid_: unregistered external, local external.
+
+**Consumption instructions**:
+How a consuming project should use a Registered External resource — distinct
+from what the resource *is* (description), never a restatement of it. Their
+presence on the catalog record is what makes the resource Registered (ADR-0021).
+_Avoid_: usage notes, description (a different field).
 
 **Resource-type marker**:
 A declaration a platform engineer attaches to a resource type in the catalog,
@@ -182,6 +219,67 @@ Formerly an implicit per-component flag describing who calls a service's API.
 Superseded by the explicit Thunder application dependency: a design.json still
 carrying the field is rejected on parse, not silently migrated.
 _Avoid_: reviving `callerIdentity` as a design.json key — it no longer parses.
+
+## Security & access (`services/aep-api`)
+
+**`security.json`**:
+A project's security design (`specs/design/security.json`) — which Roles this
+project uses, what each may do **within this project**, its Test users, and the
+Thunder application client the platform registers for sign-in. Authored during
+design, versioned into the project's `v<N>` tag. It DECLARES Roles rather than
+owning them; only the permissions it grants them are this project's.
+_Avoid_: Roles document, roles.json, Security document, Security architecture,
+security.md, access model, permissions file, RBAC config (it is not
+enforcement — it is the declaration the platform provisions from and the coding
+agent wires to).
+
+**Role**:
+A named group of people on the Platform IdP, reaching an app as a `groups` claim.
+A Role is **shared, not project-scoped**: its scope is whatever the IdP's scope
+is — cluster-wide while one IdP serves the cluster, narrower once the IdP is.
+Two projects naming the same Role mean the same Role, and a person who holds it
+holds it everywhere. What a Role may DO is per-project (`security.json`); the
+Role itself is not — so a Role OUTLIVES the projects that declare it: dropping it
+from a design, or deleting the project, leaves the Role standing.
+_Avoid_: group (the IdP's word for what a Role is; use Role in the domain),
+permission (a Role is granted permissions, it is not one), scope (an OAuth
+concept, unrelated), project role (there is no such thing).
+
+**Role catalog**:
+The Roles that already exist on the Platform IdP, read at design time so a design
+REUSES an existing Role instead of minting a near-duplicate. Read-only to the
+design agent, exactly like the external-resource and platform-resource-type
+catalogs it already consults before inventing a name.
+_Avoid_: role registry, directory (the directory is the whole user store; the
+catalog is the readable list of Roles in it).
+
+**Test user**:
+An account on the Platform IdP, holding a Role, that exists so that Role's
+behaviour can be exercised — the validation agent signs in as one to judge
+role-gated acceptance criteria. Shared on the same terms as a Role, and outliving
+a project the same way. Every Role has at least one: the user may name their own,
+and the platform supplies any the design does not. Its password is
+platform-generated and PUBLISHED in the Roles gate ticket, which is where the
+validation agent reads it; a Test user is therefore a disposable account for
+agents, readable by anyone who can read the repository, and never a real person's.
+_Avoid_: demo user, seed user, service account (a Test user is a person-type
+account standing in for a real end user, never a machine identity).
+
+**Roles gate**:
+The `provision` gate titled "Provision roles and test users", minted once per
+version beside the per-dependency gates and resolved by the platform itself in
+the same pass. It is driven by the DESIGN at the tag, not by the Build drawer's
+inputs, which is what makes a Role added in v2 actually get created; and it
+carries `aep:gate/roles`, not an `aep:dep/` label, so it can never be mistaken
+for a dependency's gate. Like every gate it holds the next dispatch while open —
+which earns its keep only on failure, when validation would otherwise run
+unable to sign in. Before closing, it PUBLISHES every Test user's login as a
+comment, under an `<!-- aep:test-users -->` marker: that comment is the
+validation agent's source for the credentials it signs in with, and a failure to
+publish fails the build rather than sending validation into a run it cannot sign
+in for.
+_Avoid_: roles issue, provisioning task (it is never agent work — it carries no
+`aep` arming label, and nothing may work it).
 
 ## Tasks
 
@@ -288,6 +386,15 @@ The `v<N>` tag: a snapshot of a validated requirements+design pair, cut at the
 moment a build starts. Implementation lands *after* the version is cut; the
 version names what the build implements, not the resulting code state.
 _Avoid_: release, build number.
+
+**Open question**:
+A numbered entry under `## Open Questions` in the PRD — a recorded gap in the spec, and
+specifically one the agent may not close by assuming: a fact only the user holds. Deliberately
+a property of the *document*, not of any conversation. It **gates nothing** — design and build
+both proceed with open questions outstanding. An entry marked *deferred* is one the user has
+declined for now, which tells the agent to stop raising it rather than releasing any gate.
+_Avoid_: interview question (the agent's live request for the user's input, which is a
+mechanism for closing an open question, not the thing itself); blocker (it blocks nothing).
 
 **Dirty (spec)**:
 The spec content has moved past the latest spec version in committed truth.

@@ -86,7 +86,7 @@ export function taskDetailOf(
   const history = executionsOf(task);
   return {
     ...task,
-    body: `Planned by the v1 build from the published design.`,
+    body: `Planned by the v1 build from your design.`,
     executionHistory: history,
     executions: Object.fromEntries(history.map((e) => [e.id, e])),
   };
@@ -245,6 +245,6 @@ export function liveLine(
     kind: "log",
     executionId: `exec-${issueNumber}-coding`,
     executionKind: "coding",
-    message: `validating acceptance criteria (${tick})…`,
+    message: `checking validation criteria (${tick})…`,
   };
 }

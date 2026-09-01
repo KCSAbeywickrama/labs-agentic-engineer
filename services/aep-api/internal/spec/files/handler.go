@@ -22,6 +22,7 @@ import (
 
 	"github.com/wso2/aep/aep-api/internal/gen"
 	"github.com/wso2/aep/aep-api/internal/platform/apierr"
+	"github.com/wso2/aep/aep-api/internal/platform/gitfs"
 	"github.com/wso2/aep/aep-api/internal/platform/tenant"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 	"github.com/wso2/aep/aep-api/internal/spec"
@@ -38,11 +39,31 @@ import (
 type Handler struct {
 	files    spec.FilesService
 	activity spec.SpecUpdatedRecorder
+	kickoff  kickoffStarter
+}
+
+// kickoffStarter fires a project's opening `/start` turn (#562). The
+// references upload is the SECOND of its two triggers: a create that declared
+// documents were coming holds the kickoff, because they are the primary brief
+// and an interview run before they land is conducted blind. *spec.Service
+// satisfies it; the port is declared here so the slice keeps no genai edge.
+// Nil is a documented no-op.
+type kickoffStarter interface {
+	Kickoff(ctx context.Context, orgID, projectID string)
 }
 
 // New returns the slice's handler.
 func New(files spec.FilesService, activity spec.SpecUpdatedRecorder) *Handler {
 	return &Handler{files: files, activity: activity}
+}
+
+// WithKickoffStarter wires the held kickoff the references upload releases.
+// Chained rather than added to New: every other caller of this handler is
+// unrelated to project creation, and a fourth positional dependency on the
+// constructor would say otherwise.
+func (h *Handler) WithKickoffStarter(k kickoffStarter) *Handler {
+	h.kickoff = k
+	return h
 }
 
 func (h *Handler) ListFiles(ctx context.Context, request gen.ListFilesRequestObject) (gen.ListFilesResponseObject, error) {
@@ -74,11 +95,15 @@ func (h *Handler) ReadFile(ctx context.Context, request gen.ReadFileRequestObjec
 	if err != nil {
 		return nil, mapFilesError(err)
 	}
-	return gen.ReadFile200JSONResponse(gen.FileContent{
-		Path:    fc.Path,
-		Content: fc.Content,
-		Sha:     fc.SHA,
-	}), nil
+	return gen.ReadFile200JSONResponse(fileContentToWire(fc)), nil
+}
+
+// fileContentToWire converts a read into its wire shape. The Files API is
+// text-only: reference documents — the one binary this platform ever had to
+// serve — are transient turn inputs now, stored off-git and never readable
+// here (console ADR-0017), so there is no base64 half to pair with.
+func fileContentToWire(fc *spec.FileContent) gen.FileContent {
+	return gen.FileContent{Path: fc.Path, Content: fc.Content, Sha: fc.SHA}
 }
 
 // ReadFileBundle serves the whole-prefix read. It is registered under the
@@ -107,7 +132,8 @@ func (h *Handler) ApplyFiles(ctx context.Context, request gen.ApplyFilesRequestO
 	if request.Body == nil {
 		return nil, apierr.BadRequest("request body required")
 	}
-	res, conflicts, err := h.files.Apply(ctx, org, request.ProjectName, applyRequestFromWire(*request.Body))
+	applyReq := applyRequestFromWire(*request.Body)
+	res, conflicts, err := h.files.Apply(ctx, org, request.ProjectName, applyReq)
 	if err != nil {
 		if errors.Is(err, spec.ErrApplyConflict) {
 			return applyConflictsToWire(conflicts), nil
@@ -151,6 +177,8 @@ func appliedPaths(body gen.ApplyRequest, res *spec.ApplyResult) []string {
 }
 
 // applyRequestFromWire converts the generated body into the service's shape.
+// Writes carry text and nothing else — see fileContentToWire for why the
+// binary half is gone.
 func applyRequestFromWire(in gen.ApplyRequest) spec.ApplyRequest {
 	out := spec.ApplyRequest{Message: in.Message}
 	for _, w := range in.Writes {
@@ -189,6 +217,8 @@ func mapFilesError(err error) error {
 		// us on every attempt. That is a concurrent-write conflict, not a
 		// server fault — surface it as a retryable 409, never a 500.
 		return apierr.Conflict("the repository changed during the write; retry")
+	case errors.Is(err, gitfs.ErrDiskAdmission):
+		return apierr.ServiceUnavailable("workspace disk is full — try again in a few minutes, or contact your platform admin")
 	default:
 		return apierr.Internal("internal error")
 	}

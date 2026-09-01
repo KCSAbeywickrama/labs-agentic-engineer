@@ -34,7 +34,6 @@ import (
 	"strings"
 
 	"github.com/wso2/aep/aep-api/internal/delivery"
-	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 )
 
 // MintRepairIssues files ONE issue per failed acceptance criterion and returns
@@ -84,23 +83,22 @@ func (s *Service) MintRepairIssues(ctx context.Context, orgID, projectID string,
 		if must == "" {
 			must = musts[c.ID]
 		}
-		req := sourcecontrol.CreateIssueRequest{
+		number, _, err := s.writer.Mint(ctx, orgID, projectID, delivery.IssueSpec{
 			Title:     fmt.Sprintf("Fix the failing acceptance criterion %s", c.ID),
 			Body:      repairIssueBody(c, must),
-			Labels:    []string{delivery.LabelAgentWork},
-			Milestone: &milestoneNumber,
-			DedupeKey: fmt.Sprintf("aep validation-fix %s %s", c.ID, cycleID),
-		}
-		res, err := s.issues.CreateIssue(ctx, orgID, projectID, req)
+			Labels:    []string{delivery.LabelAgentWork, delivery.KindBug, delivery.SrcValidation},
+			Milestone: milestoneNumber,
+			DedupeKey: delivery.DedupeKeyValidationFix(c.ID, cycleID),
+		})
 		if err != nil {
 			return out, fmt.Errorf("validation: create repair issue for %s: %w", c.ID, err)
 		}
-		if res == nil || res.Number == 0 {
+		if number == 0 {
 			// Same hazard EnsureValidationIssue names: an issue exists and we cannot
 			// name it. Erroring retries the activity, and the retry dedupes onto it.
 			return out, fmt.Errorf("validation: filed a repair issue for %s but got no number back", c.ID)
 		}
-		out = append(out, res.Number)
+		out = append(out, number)
 	}
 	slog.InfoContext(ctx, "validation: filed repair issues for a failed attempt",
 		"project", projectID, "milestone", milestoneNumber, "issues", out)
@@ -162,8 +160,8 @@ func repairIssueBody(c FailedCriterion, must string) string {
 	}
 	b.WriteString("\nFix the implementation so this criterion holds, then include this issue in " +
 		"your pull request's Resolves list.\n\n" +
-		"Do not change the acceptance criteria or anything under `tests/` — they are the " +
-		"question, not the answer. Validation re-runs the whole oracle as it stands once your " +
+		"Do not change the validation criteria or anything under `tests/` — they are the " +
+		"question, not the answer. Validation re-runs every criterion as it stands once your " +
 		"fix is built and deployed.\n")
 	return b.String()
 }

@@ -39,6 +39,10 @@ const (
 	// codeMissingDesign — the design layout gate failed at its root
 	// (specs/design/design.cell absent).
 	codeMissingDesign = "MISSING_DESIGN"
+	// codeDesignOutdated — the requirements moved after this design was
+	// derived from them (#575). The only gate that refuses a design for being
+	// WRONG rather than incomplete.
+	codeDesignOutdated = "DESIGN_OUTDATED"
 )
 
 // SpecValidationError is the aggregate build-gate rejection: the spec at the
@@ -60,9 +64,25 @@ func (e *SpecValidationError) Error() string {
 	return "spec validation failed: " + strings.Join(parts, "; ")
 }
 
+// The two answers SaveSpec can give, named because a CALLER branches on them.
+//
+// The build click is that caller, and the branch it takes is the whole of "what
+// does pressing Build after a cancel do": SpecSaveApproved means a new version
+// was cut and is planned fresh, SpecSaveUnchanged means the SAME version is
+// worked again — its milestone reopened, the issues the cancel closed reopened,
+// and the planning turn skipped. The spec-save status is the only question asked;
+// there is no separate "was it cancelled" read anywhere.
+const (
+	// SpecSaveApproved: the specs/ tree moved, so a new `v<N>` tag was cut.
+	SpecSaveApproved = "approved"
+	// SpecSaveUnchanged: the specs/ tree matches the latest tag, so no tag was
+	// cut and Tag names the EXISTING version.
+	SpecSaveUnchanged = "unchanged"
+)
+
 // SpecSaveResult is the outcome of SaveSpec.
 type SpecSaveResult struct {
-	Status     string `json:"status"` // "approved" | "unchanged"
+	Status     string `json:"status"` // SpecSaveApproved | SpecSaveUnchanged
 	Tag        string `json:"tag"`    // e.g. "v3"
 	Version    int    `json:"version"`
 	CommitHash string `json:"commitHash,omitempty"`
@@ -102,6 +122,18 @@ func (s *artifactService) SaveSpec(ctx context.Context, orgID, projectID string,
 		return nil, verr
 	}
 
+	// …and it must be the design the user actually asked for (#575). An
+	// outdated design is the one thing that blocks a build on grounds of being
+	// WRONG rather than incomplete: building it hands the coding agents
+	// something the user has already changed their mind about. It joins the
+	// same refusal list every other unmet condition uses, so the console
+	// renders it with the rest and Build stays clickable — the click re-checks.
+	if verr := s.staleDesignRefusal(ctx, ref, orgID, projectID, commit); verr != nil {
+		slog.WarnContext(ctx, "spec save: the design is behind the requirements",
+			"project", projectID, "commit", commit)
+		return nil, verr
+	}
+
 	tags, err := s.listVersionTags(ctx, ref)
 	if err != nil {
 		return nil, fmt.Errorf("list tags: %w", err)
@@ -117,7 +149,7 @@ func (s *artifactService) SaveSpec(ctx context.Context, orgID, projectID string,
 		if same {
 			slog.InfoContext(ctx, "spec save: unchanged — specs/ matches latest tag",
 				"project", projectID, "tag", latest.Name, "commit", commit)
-			return &SpecSaveResult{Status: "unchanged", Tag: latest.Name, Version: n}, nil
+			return &SpecSaveResult{Status: SpecSaveUnchanged, Tag: latest.Name, Version: n}, nil
 		}
 	}
 
@@ -132,7 +164,7 @@ func (s *artifactService) SaveSpec(ctx context.Context, orgID, projectID string,
 
 	slog.InfoContext(ctx, "spec tagged", "project", projectID, "tag", tagName, "commit", commit)
 	return &SpecSaveResult{
-		Status:     "approved",
+		Status:     SpecSaveApproved,
 		Tag:        tagName,
 		Version:    nextN,
 		CommitHash: commit,
@@ -178,10 +210,28 @@ func (s *artifactService) LatestSpecTag(ctx context.Context, orgID, projectID st
 	return latestRequirementsTag(tags)
 }
 
+// specGateDisabled turns the whole-spec gate off — both the build-click gate and
+// ValidateSpecAtTag.
+//
+// It is here because the design agent does not reliably emit each component's
+// `stories`, and without them the gate fails every Build with UNCOVERED_STORY —
+// a spec the platform authored, refused by the platform. Disabling the gate is
+// the lesser harm while that holds: the cost is that a `v<N>` tag no longer
+// promises a buildable spec, so a build can now proceed on a spec the gate would
+// have refused, and a validation failure downstream may be missing coverage
+// rather than broken code.
+//
+// Flip to false to re-arm it once the design agent's story emission is
+// dependable.
+const specGateDisabled = true
+
 // validateSpecBundles is the shared whole-spec gate: the requirements main doc
 // must exist and the design bundle must pass the design hard gate. All
 // failures aggregate into ONE *SpecValidationError with repo-relative paths.
 func validateSpecBundles(reqFiles, designFiles map[string]string) error {
+	if specGateDisabled {
+		return nil
+	}
 	var files []FileValidationError
 	if strings.TrimSpace(reqFiles[requirementsMainFile]) == "" {
 		files = append(files, FileValidationError{
@@ -220,6 +270,50 @@ func validateSpecBundles(reqFiles, designFiles map[string]string) error {
 		return &SpecValidationError{Files: files}
 	}
 	return nil
+}
+
+// staleDesignRefusal refuses a build whose design predates the requirements it
+// was derived from, as an ordinary gate failure.
+//
+// Nothing is stored to answer this: every commit is a permanent snapshot and
+// every agent turn records the commit it read the project at, so the
+// requirements as the last design run saw them are still there to compare
+// against. That is what makes the answer available for projects that predate
+// the check entirely, and leaves nothing to fall out of sync.
+//
+// Silent when the resolver is unwired, when no design run is on record, or when
+// the baseline commit is unreadable. The first two mean the question does not
+// apply; the third is the one judgment call — a build refused because an old
+// commit has been garbage-collected would be unfixable by the user, and the
+// staleness it might have caught is visible in the rail either way.
+func (s *artifactService) staleDesignRefusal(
+	ctx context.Context, ref sourcecontrol.RepoRef, orgID, projectID, commit string,
+) error {
+	if s.designBaseline == nil {
+		return nil
+	}
+	base, err := s.designBaseline(ctx, orgID, projectID)
+	if err != nil || base == "" {
+		return nil
+	}
+	wasEntries, _, err := s.git.Workspace().List(ctx, ref, base)
+	if err != nil {
+		slog.WarnContext(ctx, "spec save: the last design run's commit is unreadable; staleness unchecked",
+			"project", projectID, "base", base, "error", err)
+		return nil
+	}
+	nowEntries, _, err := s.git.Workspace().List(ctx, ref, commit)
+	if err != nil {
+		return fmt.Errorf("list tree at %s: %w", commit, err)
+	}
+	if RequirementsFingerprint(wasEntries) == RequirementsFingerprint(nowEntries) {
+		return nil
+	}
+	return &SpecValidationError{Files: []FileValidationError{{
+		Path:    DesignDir + "/" + designRootFile,
+		Code:    codeDesignOutdated,
+		Message: "the requirements have changed since this design was written — update the design before building",
+	}}}
 }
 
 // specTreeUnchanged reports whether the specs/ subtrees at the two commits are

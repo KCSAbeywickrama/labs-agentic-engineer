@@ -38,6 +38,7 @@ import * as clack from "@clack/prompts";
 import { loadRepoSkills } from "./kit/skills.js";
 import { parseStartCommand, parseFlowCommand } from "@aep/contracts/commands";
 import { chatSpec, flowSpec, startSpec } from "./engine/turn-spec.js";
+import { readReferences } from "./state/references.js";
 import { loadDotenv } from "@aep/agents/shared/env";
 import {
   chatTurn,
@@ -90,7 +91,7 @@ function printUsage(): void {
       "  --host            (code) run the coding agent as a bare host process, not the runner image",
       "  --api-key         (code --host) authenticate with ANTHROPIC_API_KEY instead of your Claude login",
       "  --slow            (log) only the calls that took 3s or more, slowest first",
-      "  --thinking        (log) the model's reasoning blocks (main agent only — subagents emit none)",
+      "  --thinking        (log) the model's reasoning, the subagents' included, each block owner-labelled",
       "  --run <name>      (log) an older archived run instead of the newest",
       "  -h, --help        show this help",
       "",
@@ -194,9 +195,9 @@ async function runHeadless(
         const start = parseStartCommand(commandArg);
         const flow = !start ? parseFlowCommand(commandArg) : null;
         const turn = start
-          ? startSpec(start.inlineIdea || readIdea(projectDir))
+          ? startSpec(start.inlineIdea || readIdea(projectDir), readReferences(projectDir))
           : flow
-            ? flowSpec(flow.skill, flow.text)
+            ? flowSpec(flow.skill, flow.text, readReferences(projectDir))
             : chatSpec(commandArg);
         outcome = await chatTurn(session, turn, opts);
       } finally {

@@ -17,33 +17,106 @@
  */
 
 import { useState } from "react";
-import {
-  Avatar,
-  Box,
-  Card,
-  CardContent,
-  Stack,
-  Tooltip,
-  Typography,
-} from "@wso2/oxygen-ui";
-import { Boxes } from "@wso2/oxygen-ui-icons-react";
+import { Card, Chip, Tooltip } from "@wso2/oxygen-ui";
+import { Box as BoxIcon, Boxes } from "@wso2/oxygen-ui-icons-react";
 import { EmptyState } from "../../../components/EmptyState";
 import type { components } from "../../../generated/aep-api";
+import { useComponentEndpointUrl } from "../api/queries";
 import { ComponentOpenApiDialog } from "./ComponentOpenApiDialog";
+import { OverviewRow } from "./OverviewRow";
 
 type Component = components["schemas"]["Component"];
 
 // The component type is OpenChoreo's own ComponentType name, end-to-end.
 const isWebApp = (c: Component) => c.type === "web-application";
 
-// Component cards: one compact single-row card per component — avatar, name and
-// description. Services open their OpenAPI contract on click (JWT-guarded, so
-// via the authenticated dialog, not a raw link).
-//
-// Deliberately state-free. A component's build state used to be rolled up from
-// its tasks, but an issue no longer names a component — issue bodies are prose
-// the platform writes and never reads back — so the roll-up had no input left.
-// What is running lives on the deployments board, which reads the cluster.
+const typeLabel = (c: Component) => (isWebApp(c) ? "Web app" : "Service");
+
+/** The row itself, so both kinds render identically apart from where they go. */
+function ComponentRow({
+  component: c,
+  last,
+  onClick,
+  href,
+}: {
+  component: Component;
+  last: boolean;
+  onClick?: (() => void) | undefined;
+  href?: string | undefined;
+}) {
+  return (
+    <OverviewRow
+      icon={<BoxIcon size={18} />}
+      title={c.displayName ?? c.name}
+      trailing={
+        <Chip
+          size="small"
+          variant="outlined"
+          label={typeLabel(c)}
+          sx={{ height: 22, flexShrink: 0, fontSize: "0.75rem" }}
+        />
+      }
+      caption={c.description ?? undefined}
+      last={last}
+      onClick={onClick}
+      href={href}
+    />
+  );
+}
+
+/**
+ * A web app's row, which opens the RUNNING APP rather than a contract.
+ *
+ * A web app has no OpenAPI document, so this row used to go nowhere at all —
+ * the one component on the page a reader most wants to click was the one that
+ * did nothing. It has a public URL instead, and that URL is the answer to
+ * "what did the platform actually build me".
+ *
+ * The URL comes from the component's DEPLOYMENTS, not from the component:
+ * `Component.endpointUrl` is on the contract but the backend never fills it
+ * (noted drift, #196), while the dev binding's resolved URL rides on
+ * list-deployments. Its own component so the read is one hook per web app,
+ * rather than a hook called inside a map.
+ *
+ * Until it deploys there is no URL, and the row then stays inert — a link
+ * offered before the app is up is a link to a 404.
+ */
+function WebAppRow({
+  projectName,
+  component,
+  last,
+}: {
+  projectName: string;
+  component: Component;
+  last: boolean;
+}) {
+  const url = useComponentEndpointUrl(projectName, component.name).data;
+  if (!url) return <ComponentRow component={component} last={last} />;
+  return (
+    <Tooltip title="Open the app" placement="left">
+      <div>
+        <ComponentRow component={component} last={last} href={url} />
+      </div>
+    </Tooltip>
+  );
+}
+
+/**
+ * The project's components.
+ *
+ * These were one bordered card per component, with an avatar carrying the first
+ * letter of a name printed right beside it. They are now `OverviewRow`s, which
+ * is the build page's task row: a reader moving between the two pages should
+ * not have to work out what a row is twice.
+ *
+ * The Dependencies list below uses the same row for the same reason. One column
+ * running two densities was what made this page feel loose.
+ *
+ * Deliberately state-free. A component's build state used to be rolled up from
+ * its tasks, but an issue no longer names a component — issue bodies are prose
+ * the platform writes and never reads back — so the roll-up had no input left.
+ * What is running lives on the deployments board, which reads the cluster.
+ */
 export function ComponentsList({
   projectName,
   items,
@@ -61,71 +134,35 @@ export function ComponentsList({
         bordered
         icon={<Boxes size={28} />}
         title="No components yet"
-        description="The published plan produces them — they appear here as agents build."
+        description="Components are the services and apps your design is made of, and they appear as agents build them."
       />
     );
   }
 
   return (
     <>
-      <Stack spacing={1.5}>
-        {items.map((c) => {
-          const initial = ((c.displayName ?? c.name).trim()[0] ?? "C").toUpperCase();
-          const openable = !isWebApp(c);
-          const card = (
-            <Card
+      <Card variant="outlined">
+        {items.map((c, i) =>
+          isWebApp(c) ? (
+            <WebAppRow
               key={c.name}
-              variant="outlined"
-              {...(openable
-                ? {
-                    onClick: () => setContractComponent(c.name),
-                    sx: {
-                      cursor: "pointer",
-                      transition: "border-color 120ms, box-shadow 120ms",
-                      "&:hover": { borderColor: "primary.main", boxShadow: 1 },
-                    },
-                  }
-                : {})}
-            >
-              <CardContent sx={{ py: 1.5, "&:last-child": { pb: 1.5 } }}>
-                <Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
-                  <Avatar
-                    variant="rounded"
-                    sx={{
-                      width: 36,
-                      height: 36,
-                      bgcolor: "action.hover",
-                      color: "text.primary",
-                    }}
-                  >
-                    {initial}
-                  </Avatar>
-                  <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-                    <Typography sx={{ fontWeight: 600 }} noWrap>
-                      {c.displayName ?? c.name}
-                    </Typography>
-                    <Typography
-                      variant="caption"
-                      color="text.secondary"
-                      noWrap
-                      sx={{ display: "block" }}
-                    >
-                      {c.description ?? "—"}
-                    </Typography>
-                  </Box>
-                </Stack>
-              </CardContent>
-            </Card>
-          );
-          return openable ? (
-            <Tooltip key={c.name} title="View API contract" placement="left">
-              {card}
-            </Tooltip>
+              projectName={projectName}
+              component={c}
+              last={i === items.length - 1}
+            />
           ) : (
-            card
-          );
-        })}
-      </Stack>
+            <Tooltip key={c.name} title="View API contract" placement="left">
+              <div>
+                <ComponentRow
+                  component={c}
+                  last={i === items.length - 1}
+                  onClick={() => setContractComponent(c.name)}
+                />
+              </div>
+            </Tooltip>
+          ),
+        )}
+      </Card>
       <ComponentOpenApiDialog
         projectName={projectName}
         componentName={contractComponent}

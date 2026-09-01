@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
 import {
   AppShell,
   Box,
@@ -32,6 +32,7 @@ import {
   useAppShell,
 } from "@wso2/oxygen-ui";
 import {
+  Boxes,
   CircleAlert,
   CircleCheck,
   FileText,
@@ -39,6 +40,7 @@ import {
   LayoutDashboard,
   ListChecks,
   LogOut,
+  Radio,
   Rocket,
   Settings,
   Siren,
@@ -56,9 +58,11 @@ import {
 } from "@tanstack/react-router";
 import { useSession } from "../auth/SessionContext";
 import { OrgSwitcher, ProjectSwitcher } from "./HeaderSwitchers";
+import { ProjectStatusBadge } from "./ProjectStatusBadge";
 import { AlertsNotificationPanel, NotificationButton } from "./NotificationBell";
 import { AgentChatPanel } from "../features/agent-chat/components/AgentChatPanel";
 import { useHasPendingSeed } from "../features/agent-chat/useHasPendingSeed";
+import { useChatOpenRequest } from "../features/agent-chat/useChatOpenRequest";
 
 // Footer links (grilled 2026-07-12): the repo is the only real destination
 // today — /tree/HEAD/docs follows the default branch.
@@ -68,6 +72,8 @@ const REPO_URL = "https://github.com/wso2/labs-agentic-engineer";
 // (global nav) or per project section (project nav, ADR-0010).
 function activeItemFor(pathname: string, inProject: boolean): string {
   if (pathname.startsWith("/settings")) return "settings";
+  if (pathname.startsWith("/resources")) return "resources";
+  if (pathname.startsWith("/endpoints")) return "endpoints";
   if (pathname.startsWith("/alerts")) return "alerts";
   if (!inProject) return "projects";
   const section = pathname.split("/")[3];
@@ -97,6 +103,8 @@ function SidebarAutoCollapse({ collapsed }: { collapsed: boolean }) {
 
 // App shell per the oxygen-ui skill's canonical AppLayout: Header + Sidebar +
 // Main(Outlet) + Footer + NotificationPanel (Alerts, #154/#155).
+const CHAT_OPEN_KEY = "aep.chat.panelOpen";
+
 export function AppLayout() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const { user, signOut, orgHandle } = useSession();
@@ -106,19 +114,38 @@ export function AppLayout() {
   // strict:false param read as the header's project switcher.
   const params = useParams({ strict: false }) as { projectName?: string };
   const projectName = params.projectName;
-  const [chatOpen, setChatOpen] = useState(false);
+  // Whether the panel is showing survives a reload — a reader who works with
+  // the chat beside the spec should not have to reopen it every time the page
+  // comes back (#666). Per-browser convenience, never state: localStorage can
+  // be absent or throwing (privacy modes), and then the panel simply starts
+  // closed, which is the pre-persistence behaviour.
+  const [chatOpen, setChatOpen] = useState(() => {
+    try {
+      return localStorage.getItem(CHAT_OPEN_KEY) === "true";
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(CHAT_OPEN_KEY, String(chatOpen));
+    } catch {
+      // memory-only
+    }
+  }, [chatOpen]);
 
   const activeItem = activeItemFor(pathname, Boolean(projectName));
   // The spec workspace is the console's full-screen surface (#80).
   const isSpecRoute = Boolean(projectName) && activeItem === "spec";
 
-  // "Generate spec" CTA (#150): the Spec card navigates here with ?generate=1.
-  // Open the panel and hand the one-shot signal to AgentChatPanel, which sends
-  // the first requirements turn; then strip the param so a refresh/back doesn't
-  // re-fire it.
+  // "Generate design" CTA (#159): the spec view navigates to itself with
+  // ?generate=design. Open the panel and hand the one-shot signal to
+  // AgentChatPanel, which sends the design turn; then strip the param so a
+  // refresh/back doesn't re-fire it.
   const navigate = useNavigate();
   const search = useSearch({ strict: false }) as {
-    generate?: "requirements" | "design";
+    generate?: "design";
+    chat?: "open";
   };
   const generate = search.generate;
   useEffect(() => {
@@ -134,6 +161,30 @@ export function AppLayout() {
     });
   }, [navigate, projectName]);
 
+  // Landing from project creation (#562): the platform already fired `/start`,
+  // so the panel opens on arrival and the user's first sight of the project is
+  // the agent working from their own words. Stripped immediately, and with
+  // `replace`, so this is the ARRIVAL's behaviour and not the URL's — a
+  // refresh, a Back, or a shared link must not reopen a panel the user closed.
+  //
+  // Sits beside `generate` rather than folding into it because they are not the
+  // same act: that one hands a command across a navigation, this one only
+  // raises a surface.
+  const chatParam = search.chat;
+  useEffect(() => {
+    // Overview only — the strip below navigates there, so honouring the param
+    // on a sibling project route would MOVE the user, which this journey never
+    // does. Only the create flow sends it, and only to the overview.
+    if (chatParam !== "open" || !projectName || activeItem !== "overview") return;
+    setChatOpen(true);
+    void navigate({
+      to: "/projects/$projectName",
+      params: { projectName },
+      search: {},
+      replace: true,
+    });
+  }, [chatParam, projectName, activeItem, navigate]);
+
   // "Resolve via chat" (#252 Task 5): the dep card / drawer / build drawer
   // (Task 9) seeds a message into chatStore's pendingSeed slot from a
   // subtree that doesn't share this component's chatOpen state — open the
@@ -144,6 +195,28 @@ export function AppLayout() {
   useEffect(() => {
     if (hasPendingSeed && projectName) setChatOpen(true);
   }, [hasPendingSeed, projectName]);
+
+  // An anchored Discuss (#666) has already sent its turn, with the anchor
+  // attached — it needs the panel shown, not a message seeded. The count is
+  // monotonic, so a second Discuss re-opens a panel the user closed in between.
+  //
+  // Only an INCREMENT opens: the store keeps the count for the life of the
+  // page, so reacting to "count > 0" replayed old requests — leave the
+  // project, come back, and the panel opened itself off a Discuss from
+  // minutes ago. The baseline resets per project, since each has its own
+  // count.
+  const chatOpenRequest = useChatOpenRequest(orgHandle ?? "default", projectName);
+  const seenChatOpenRef = useRef({ key: projectName, seen: chatOpenRequest });
+  useEffect(() => {
+    if (seenChatOpenRef.current.key !== projectName) {
+      seenChatOpenRef.current = { key: projectName, seen: chatOpenRequest };
+      return;
+    }
+    if (chatOpenRequest > seenChatOpenRef.current.seen) {
+      seenChatOpenRef.current.seen = chatOpenRequest;
+      if (projectName) setChatOpen(true);
+    }
+  }, [chatOpenRequest, projectName]);
 
   return (
     <AppShell initialCollapsed={false} collapseOnSelectOnMobile>
@@ -170,6 +243,9 @@ export function AppLayout() {
           <Header.Switchers showDivider={false}>
             <OrgSwitcher />
             <ProjectSwitcher />
+            {/* Beside the project's name, not beside each page's title: one
+                fact, in the one place that is on screen from every page. */}
+            <ProjectStatusBadge />
           </Header.Switchers>
           <Header.Spacer />
           <Header.Actions>
@@ -303,6 +379,18 @@ export function AppLayout() {
                     <FolderOpen />
                   </Sidebar.ItemIcon>
                   <Sidebar.ItemLabel>Projects</Sidebar.ItemLabel>
+                </Sidebar.Item>
+                <Sidebar.Item id="resources" link={<Link to="/resources" />}>
+                  <Sidebar.ItemIcon>
+                    <Boxes />
+                  </Sidebar.ItemIcon>
+                  <Sidebar.ItemLabel>Resources</Sidebar.ItemLabel>
+                </Sidebar.Item>
+                <Sidebar.Item id="endpoints" link={<Link to="/endpoints" />}>
+                  <Sidebar.ItemIcon>
+                    <Radio />
+                  </Sidebar.ItemIcon>
+                  <Sidebar.ItemLabel>Endpoints</Sidebar.ItemLabel>
                 </Sidebar.Item>
                 {/* Global Alerts section (#155) — RCA-agent reports across every project. */}
                 <Sidebar.Item id="alerts" link={<Link to="/alerts" />}>

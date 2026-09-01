@@ -17,24 +17,69 @@ way to a clean Build is to follow the order below.
 
 ## The PRD is the brief
 
-Design FROM `specs/requirements/prd.md`. Do not interview the user again and
-do not widen or narrow the scope: what the PRD says is what gets designed. A
-missing or empty PRD means the user needs `/start` first — stop and say so.
+Design FROM `specs/requirements/prd.md`, and do not widen or narrow the scope:
+what the PRD says is what gets designed. A missing or empty PRD means the user
+needs `/start` first — stop and say so.
 
-**Open questions gate:** any PRD Open Question neither answered nor marked
-"deferred" blocks design — stop and point the user at the amend flow's
-resolve-open-questions branch. Deferred questions never block.
+**Ask at design altitude.** A call this step has to make and only the user can
+settle — which provider, which of two shapes the PRD deliberately left open —
+is an ordinary question, asked when it arises rather than assumed silently or
+deferred to a review that never happens. `grilling` carries the mechanics and
+the pacing. The PRD's own answers are settled: asking one back reads as the
+document being ignored.
+
+**Open questions never block design.** They are recorded gaps, not corruption:
+design what the PRD does say, and where one genuinely decides a call you are
+about to make, ask it as an ordinary question — the same way you ask anything
+else at design altitude. An entry marked "deferred" is one the user has already
+declined for now; leave it alone.
+
+## Reference documents ground the design
+
+The kickoff may have attached reference documents — and for design, the ones
+that matter most are the user's own sketches: a drawn wireframe, a form
+screenshot, a mockup image. They are attached to this conversation natively
+(images and PDFs) or in your workspace files (text). When any exist:
+
+- **A user-drawn wireframe sketch is the layout brief.** `wireframes.dsl`
+  follows what the user drew — screen structure, navigation, the controls
+  they placed — refined, not reinvented. Look at the image before writing a
+  single screen.
+- A form document (paper form, PDF) is the field inventory: the screens that
+  digitize it carry its fields and sections.
+- Where a sketch and the PRD disagree, the PRD's scope wins, but the sketch's
+  layout intent survives inside that scope — and the discrepancy is worth a
+  line in the design notes.
+
+No documents attached is the ordinary case: design from the PRD alone.
+
+## Say what you are about to write
+
+Design runs long, and a reader who can only see finished files cannot tell how
+much is left. **Call `declare_plan` before you start writing**, naming the
+files that step is about to produce, and call it again each time the plan grows
+— you cannot know the per-component files until the cell fixes the component
+set, so the list arriving in waves is the real shape of the work, not a failure
+to plan. Restating a path you already declared is harmless.
+
+It does not end your turn: declare, then write. The declaration and the
+artifacts appearing as you write them are what keep the user informed — you do
+not need to narrate your progress alongside them.
 
 ## The lineup
 
 Each step names the skill that governs it. Those bodies are inlined for this
 turn — apply them directly, and load one only if you find you do not have it.
 
+0. **Declare the first wave** — `declare_plan` with what you can already name:
+   `specs/design/design.cell` and `specs/design/domain-model.md` at minimum,
+   plus each `specs/design/flows/<slug>.md` as soon as you can name the flow.
 1. **design.cell** (`cell-design`) — emit the cell FIRST: every component,
    boundaries and edges. The console streams it into the live diagram, and
    the platform scaffolds a design.json skeleton per deployable component
    when it lands.
-2. **Component enrichment** (`architecture`) — fill each
+2. **Component enrichment** (`architecture`) — the component set now exists, so
+   `declare_plan` the per-component files before writing them. Fill each
    component's design.json: language (org Tech stack default first), the PRD
    `stories` it serves (every story the PRD defines must be claimed by some
    component — the build gate checks coverage), dependencies (discover before
@@ -49,10 +94,12 @@ turn — apply them directly, and load one only if you find you do not have it.
    exactly ONE mermaid `sequenceDiagram`. A key flow is a PRD actor's
    end-to-end journey: it starts with an actor, spans cell components, and
    involves more than one component interaction or a decision/async step —
-   plain CRUD on one entity is NOT a flow. Every participant must be a
-   component id from design.cell or an actor from the PRD, never an invented
+   plain CRUD on one entity is NOT a flow. Every participant must be a node
+   design.cell declares (a component, or a boundary external such as the
+   identity server or a SaaS) or an actor from the PRD — never an invented
    name. No context/C1 diagram anywhere: the cell and the PRD carry that.
-5. **security.md** (`security-design`) — when the design has sign-in or roles.
+5. **Security design** (`security-design`) — `specs/design/security.json` when
+   the design has sign-in or roles.
 6. **Per-component artifacts** — every `service` gets `openapi.yaml`
    (`openapi-conventions`); every `web-application` gets `wireframes.dsl`
    (`wireframes`).

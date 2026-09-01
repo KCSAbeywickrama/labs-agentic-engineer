@@ -22,6 +22,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/dependencies"
@@ -35,16 +36,26 @@ type mcpTool struct {
 }
 
 // externalResourceView is the JSON shape returned to the agent for one
-// registered external resource.
+// registered external resource (including zero-consumer Registered rows).
 type externalResourceView struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description,omitempty"`
-	ConfigKeys  []configKeyDTO `json:"configKeys"`
+	Name                    string           `json:"name"`
+	Description             string           `json:"description,omitempty"`
+	ConfigKeys              []configKeyDTO   `json:"configKeys"`
+	ConsumptionInstructions string           `json:"consumptionInstructions,omitempty"`
+	ResourceDocs            []resourceDocDTO `json:"resourceDocs,omitempty"`
 }
 
 type configKeyDTO struct {
 	Key    string `json:"key"`
 	Secret bool   `json:"secret,omitempty"`
+}
+
+// resourceDocDTO is an org resource-docs pointer (type + URL or path) — never
+// file bodies or secret values.
+type resourceDocDTO struct {
+	Type string `json:"type"`
+	URL  string `json:"url,omitempty"`
+	Path string `json:"path,omitempty"`
 }
 
 // orgEndpointView is the JSON shape returned to the agent for one published org
@@ -92,6 +103,9 @@ type remoteGitFileView struct {
 	SHA         string               `json:"sha,omitempty"`
 	IsDirectory bool                 `json:"isDirectory"`
 	Entries     []remoteGitEntryView `json:"entries,omitempty"`
+	// Note explains a withheld or shortened Content: binary refusal, or text
+	// truncation. Empty when Content is the whole file.
+	Note string `json:"note,omitempty"`
 }
 
 type remoteGitEntryView struct {
@@ -136,9 +150,11 @@ func mcpTools() []mcpTool {
 		{
 			Name: "list_external_resources",
 			Description: "List the external resources (third-party APIs/services) already registered in " +
-				"this organization. Use this BEFORE proposing an `external` dependency so you reuse an " +
-				"existing external resource name + its config-key schema instead of inventing a new one. " +
-				"Returns each external resource's name, description, and config keys (with which are secret).",
+				"this organization — including Registered records that no project has consumed yet. Use this " +
+				"BEFORE proposing an `external` dependency so you reuse an existing external resource name + " +
+				"its config-key schema instead of inventing a new one. Returns each external resource's name, " +
+				"description, config keys (with which are secret), consumptionInstructions, and resourceDocs " +
+				"pointers ({type, url} or {type, path} — never file bodies).",
 			InputSchema: map[string]any{"type": "object", "properties": map[string]any{}},
 		},
 		{
@@ -184,13 +200,27 @@ func mcpTools() []mcpTool {
 			InputSchema: map[string]any{"type": "object", "properties": map[string]any{}},
 		},
 		{
+			Name: "list_roles",
+			Description: "List the roles that already exist on the platform identity provider. " +
+				"Roles are SHARED across projects, so reuse a matching row's name verbatim instead " +
+				"of inventing a near-duplicate — take the row whose `description` matches the need, " +
+				"not the one whose name echoes the requirement's wording. Each row gives the role " +
+				"`name`, its `description`, `platformCreated` (true when this platform created it — " +
+				"only those can be given test users) and `memberCount`. Read-only: you never author " +
+				"these, and nothing you do creates one. The platform creates the roles your " +
+				"`specs/design/security.json` declares when the user clicks Build.",
+			InputSchema: map[string]any{"type": "object", "properties": map[string]any{}},
+		},
+		{
 			Name: "get_remote_git_file_contents",
 			Description: "Read a file (or list a directory) from a repository in THIS organization over the " +
 				"GitHub API — no clone. Use this AFTER list_org_component_endpoints reports a provider whose " +
 				"`spec.availability` is `repo`: pass that row's owner/repo plus the spec path to read the real " +
 				"OpenAPI document. A file returns decoded `content` + `sha`; a directory returns `entries[]` " +
 				"(each with path/type/sha) so you can drill down. `ref` is optional (branch/tag/commit; " +
-				"defaults to the repo's default branch). Read-only, and restricted to your own organization's " +
+				"defaults to the repo's default branch). TEXT ONLY: a binary file (PDF, image, …) answers with " +
+				"its sha and a `note` instead of content — do not retry, it will never return bytes; oversized " +
+				"text is truncated with a note. Read-only, and restricted to your own organization's " +
 				"repos — a request for any other owner is refused.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -343,6 +373,17 @@ func handleToolCall(w http.ResponseWriter, r *http.Request, h *mcpHandler, orgHa
 			return
 		}
 		writeToolText(w, req.ID, mustJSON(map[string]any{"resourceTypes": types}))
+	case "list_roles":
+		if h.roles == nil {
+			writeToolText(w, req.ID, mustJSON(map[string]any{"roles": []any{}}))
+			return
+		}
+		roles, err := h.roles.ListRoleCatalog(r.Context())
+		if err != nil {
+			writeToolError(w, req.ID, fmt.Sprintf("list roles: %v", err))
+			return
+		}
+		writeToolText(w, req.ID, mustJSON(map[string]any{"roles": roles}))
 	case "get_remote_git_file_contents":
 		if h.remoteGit == nil {
 			writeToolError(w, req.ID, "remote git reader not configured")
@@ -453,23 +494,57 @@ func (h *mcpHandler) validateAndNormalize(raw []byte) validateSpecView {
 // toExternalResourceView projects an external resource's definition —
 // reconstructed from its authored OpenChoreo ResourceType via
 // openchoreo.ExternalDefinitionFromRT — to the agent-facing shape (name,
-// description, and its config keys with the secret flag). The JSON shape is
-// unchanged from the pre-Task-3 DB-backed projection: only the source of `er`
-// moved (org RT registry, not the external_resources table).
+// description, config keys with the secret flag, consumptionInstructions, and
+// resourceDocs pointers). Ensure authors the RT at register, so a
+// zero-consumer Registered row is listable here once these fields are carried.
 func toExternalResourceView(er *openchoreo.ExternalResourceDefinition) externalResourceView {
 	keys := make([]configKeyDTO, 0, len(er.Config))
 	for _, k := range er.Config {
 		keys = append(keys, configKeyDTO{Key: k.Key, Secret: k.Secret})
 	}
-	return externalResourceView{Name: er.Name, Description: er.Description, ConfigKeys: keys}
+	docs := make([]resourceDocDTO, 0, len(er.ResourceDocs))
+	for _, d := range er.ResourceDocs {
+		docs = append(docs, resourceDocDTO{Type: d.Type, URL: d.URL, Path: d.Path})
+	}
+	return externalResourceView{
+		Name:                    er.Name,
+		Description:             er.Description,
+		ConfigKeys:              keys,
+		ConsumptionInstructions: er.ConsumptionInstructions,
+		ResourceDocs:            docs,
+	}
 }
 
-// toRemoteGitFileView projects a Contents API read to the agent-facing shape.
+// maxToolFileBytes caps the file content one tool result may carry. A tool
+// result is prompt input: an 868KB PDF fetched through this tool once rode a
+// live turn as ~1.5M junk tokens per model step, then killed the conversation's
+// jsonb persist — Postgres rejects U+0000 anywhere in a jsonb document, and the
+// PDF's bytes carried plenty. 128KB of text is far beyond any OpenAPI document
+// this tool exists to read.
+const maxToolFileBytes = 128 << 10
+
+// toRemoteGitFileView projects a Contents API read to the agent-facing shape,
+// guarding what may ride a prompt: binary content is withheld (its facts —
+// path, sha, size — still answer), oversized text is truncated with a note.
 func toRemoteGitFileView(f *RemoteGitFile) remoteGitFileView {
 	v := remoteGitFileView{
 		Content:     f.Content,
 		SHA:         f.SHA,
 		IsDirectory: f.IsDirectory,
+	}
+	switch {
+	// NUL is checked separately: it IS valid UTF-8, but Postgres jsonb refuses
+	// it, and no text document this tool exists to read contains one.
+	case !f.IsDirectory && (!utf8.ValidString(f.Content) || strings.ContainsRune(f.Content, 0)):
+		v.Content = ""
+		v.Note = fmt.Sprintf("binary file (%d bytes) — content withheld; this tool reads text documents", len(f.Content))
+	case !f.IsDirectory && len(f.Content) > maxToolFileBytes:
+		cut := maxToolFileBytes
+		for cut > 0 && !utf8.RuneStart(f.Content[cut]) {
+			cut-- // never split a rune mid-sequence
+		}
+		v.Content = f.Content[:cut]
+		v.Note = fmt.Sprintf("truncated to the first %d of %d bytes", cut, len(f.Content))
 	}
 	if len(f.Entries) > 0 {
 		v.Entries = make([]remoteGitEntryView, 0, len(f.Entries))

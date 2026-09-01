@@ -20,43 +20,46 @@ import type React from "react";
 import { useState } from "react";
 import {
   Box,
+  Chip,
   Collapse,
   IconButton,
   List,
   ListItemButton,
   ListItemIcon,
   ListItemText,
+  Stack,
   Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
 import {
+  Check,
   ChevronDown,
   ChevronRight,
   FileText,
-  Plus, RefreshCw,
+  RefreshCw,
   Network,
   LayoutDashboard,
+  ShieldCheck,
+  TriangleAlert,
 } from "@wso2/oxygen-ui-icons-react";
-import type { SpecFileEntry } from "../api/mapping";
+import { WorkingPulse } from "../../agent-chat/components/WorkingIndicator";
+import { PRD_PATH, type SpecFileEntry } from "../api/mapping";
+import { fileLabel } from "../api/labels";
+import {
+  mostSignificant,
+  reasonCount,
+  type RailPlanEntry,
+  type RailSection,
+  type SectionReason,
+} from "../lib/railSections";
+import { ProblemsDialog } from "./ProblemsDialog";
 import {
   buildDesignSection,
   selectionKey,
+  DESIGN_CELL_PATH,
+  SECURITY_JSON_PATH,
   type SpecSelection,
 } from "../api/designTree";
-
-function basename(path: string): string {
-  return path.split("/").at(-1) ?? path;
-}
-
-const OPENAPI_RE = /\/openapi\.ya?ml$/;
-const COMPONENT_DESIGN_RE = /^specs\/design\/components\/[^/]+\/design\.json$/;
-const VALIDATION_CRITERIA_RE = /^specs\/validation\/validation-criteria\.json$/;
-function fileLabel(path: string): string {
-  if (OPENAPI_RE.test(path)) return "API Spec";
-  if (COMPONENT_DESIGN_RE.test(path)) return "Design Overview";
-  if (VALIDATION_CRITERIA_RE.test(path)) return "Validation Criteria";
-  return basename(path);
-}
 
 function fileSel(path: string): SpecSelection {
   return { kind: "file", path };
@@ -66,32 +69,73 @@ export function SpecFileList({
   files,
   selection,
   onSelect,
-  onAddArtifact,
   onRegenerateDesign,
   regenerateDisabled,
-  deriving,
-  failed,
+  sections,
+  plan,
+  onReason,
 }: {
   files: SpecFileEntry[];
   selection: SpecSelection | null;
   onSelect: (sel: SpecSelection) => void;
-  onAddArtifact: () => void;
   /** Re-generate the design (#159) — shown in the Designs header once a design
    *  exists; fires the same design-generation room turn as the header CTA. */
   onRegenerateDesign: () => void;
   /** Disabled while an agent turn runs — a re-generate would be dropped mid-turn. */
   regenerateDisabled?: boolean;
-  /** Agents are still shaping the spec — empty groups say so. */
-  deriving: boolean;
-  /** Derivation failed — empty groups say that instead. */
-  failed: boolean;
+  /** The rail's own state per section (#575) — what is ready, being worked on,
+   *  wanting attention, or not begun, plus why. */
+  sections: RailSection[];
+  /** The declared plan's entries (#576): ghosts for what is coming, a pulse on
+   *  what is being written, an error mark on what died. Empty when no plan is
+   *  live and no wreckage stands. */
+  plan?: RailPlanEntry[];
+  /** A reason row was clicked: open the requirements document, or re-derive. */
+  onReason: (action: SectionReason["action"]) => void;
 }) {
+  const sectionOf = (id: RailSection["id"]) =>
+    sections.find((sec) => sec.id === id) ?? {
+      id,
+      title: id,
+      state: "not-started" as const,
+      reasons: [],
+    };
   const selKey = selection ? selectionKey(selection) : null;
   const isSel = (sel: SpecSelection) => selKey === selectionKey(sel);
 
-  const requirements = files.filter((f) => f.group === "requirements");
-  const validation = files.filter((f) => f.group === "validation");
-  const design = buildDesignSection(files);
+  // The declared plan (#576). A planned path with no committed file yet is a
+  // GHOST: it takes a row where the file will live — same grouping rules, so
+  // the list never re-arranges when the write lands — but is disabled, because
+  // a control that selects nothing is worse than prose. The moment the write
+  // starts, the path exists in the live doc, the row becomes real, and the
+  // status pulses on it.
+  const planByPath = new Map((plan ?? []).map((e) => [e.path, e.status]));
+  const committed = new Set(files.map((f) => f.path));
+  const ghosts: SpecFileEntry[] = (plan ?? [])
+    .filter((e) => e.section !== null && !committed.has(e.path))
+    .map((e) => ({
+      path: e.path,
+      sha: "",
+      group: e.section === "design" ? ("designs" as const) : (e.section as "requirements" | "validation"),
+    }));
+  // Merged in PATH order, not appended: a ghost has to sit where its file will
+  // sit, or the row hops up the list the moment the write lands — the visible
+  // re-arrangement holding a place was supposed to prevent. `files` arrives
+  // path-sorted and the group sorts below are stable, so one sort here is
+  // enough for every group.
+  const allFiles = [...files, ...ghosts].sort((a, b) => a.path.localeCompare(b.path));
+
+
+  // The PRD leads, whatever it sorts as. Everything else under Requirements
+  // elaborates it — a feature file is depth on a story the PRD defines — and on
+  // path alone `features/…` sorts ABOVE `prd.md`, burying the document the
+  // whole flow is written against beneath its own footnotes. `files` arrives
+  // path-sorted and sort is stable, so the rest keeps that order.
+  const requirements = allFiles
+    .filter((f) => f.group === "requirements")
+    .sort((a, b) => Number(b.path === PRD_PATH) - Number(a.path === PRD_PATH));
+  const validation = allFiles.filter((f) => f.group === "validation");
+  const design = buildDesignSection(allFiles);
 
   // Per-component expand/collapse — default expanded, remembered by name so
   // toggling one component survives unrelated re-derivations of the list.
@@ -107,62 +151,175 @@ export function SpecFileList({
     });
   };
 
-  const emptyNote = failed
-    ? "Derivation failed"
-    : deriving
-      ? "Being derived…"
-      : "No files yet";
+  // "Not created yet" — flat, and true. The old note claimed agents were
+  // "being derived…" over sections nobody had asked for yet, which stated
+  // something untrue about what the platform was doing. Active wording now
+  // lives in the section's own state, where it is earned.
+  const emptyNote = "Not created yet";
+
+  // The section header's ornament. Work in progress is the app's existing
+  // pulse — the same 8px dot the chat uses — so "working" looks identical
+  // everywhere rather than growing a second animation per surface.
+  // Colour comes from the THEME, through `currentColor` on a wrapper — not from
+  // MUI's palette CSS variables, which this theme does not define at all
+  // (`--mui-palette-success-main` resolves to nothing here). Passing them as an
+  // icon `color` silently produced an unstyled mark, so every state read the
+  // same shade and the rail's states were not distinguishable.
+  const ornament = (state: RailSection["state"]) => {
+    if (state === "active") return <WorkingPulse />;
+    // Nothing for `attention`: that state always carries a chip, and the chip
+    // already leads with a warning triangle. Both together put two identical
+    // marks a few pixels apart, which reads as two problems rather than one.
+    if (state !== "ready") return null;
+    return (
+      <Box sx={{ display: "flex", flexShrink: 0, color: "success.main" }}>
+        <Check size={14} />
+      </Box>
+    );
+  };
+
+  const sectionHeader = (section: RailSection, action?: React.ReactNode) => (
+    <Box
+      sx={{
+        px: 2,
+        py: 0.5,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 1,
+      }}
+    >
+      <Stack direction="row" spacing={0.75} sx={{ alignItems: "center", minWidth: 0 }}>
+        <Typography
+          variant="overline"
+          color={
+            section.state === "attention"
+              ? "warning.main"
+              : section.state === "active"
+                ? "primary.main"
+                : section.state === "not-started"
+                  ? "text.disabled"
+                  : "text.secondary"
+          }
+          noWrap
+        >
+          {section.title}
+        </Typography>
+        {ornament(section.state)}
+        {/* The count, not just the mark: three assumptions and one would
+            otherwise look identical, and "how much" is the thing a glance is
+            for. The hover carries the most significant one so a peek costs no
+            click; the click carries all of them. */}
+        {/* Gated on the STATE, not on `reasons.length`. The model keeps a
+            section's reasons while an agent works on it — SpecView reads them
+            for the design warning — but the rail must not show them: an agent
+            re-deriving a stale design is already resolving it, and warning
+            about the thing being fixed while it is being fixed reads as a
+            fault. `attention` is the only state this chip belongs to; the other
+            three carry no reasons or, when active, deliberately do not show
+            them. */}
+        {/* The denominator (#576): how far the declared plan has come. Answers
+            "how long do I wait" — honest BECAUSE it grows in waves; it counts
+            only what the turn actually declared. */}
+        {section.progress && (
+          <Typography
+            variant="caption"
+            color="text.secondary"
+            sx={{ flexShrink: 0, fontVariantNumeric: "tabular-nums" }}
+          >
+            {section.progress.done} of {section.progress.total}
+          </Typography>
+        )}
+        {section.state === "attention" && section.reasons.length > 0 && (
+          <Tooltip title={mostSignificant(section.reasons)?.label ?? ""}>
+            <Chip
+              size="small"
+              color="warning"
+              variant="outlined"
+              icon={<TriangleAlert size={12} />}
+              label={reasonCount(section.reasons)}
+              onClick={() => setProblemsFor(section)}
+              aria-label={`${section.title}: ${reasonCount(section.reasons)} to resolve`}
+              sx={{
+                height: 20,
+                cursor: "pointer",
+                // MUI's small chip gives its icon a 4px leading margin and its
+                // label 8px of trailing padding, so the pill was lopsided: the
+                // triangle sat almost against the left border while the count
+                // had twice the room on the right. Even it up.
+                "& .MuiChip-icon": { ml: 0.75, mr: -0.25 },
+              }}
+            />
+          </Tooltip>
+        )}
+      </Stack>
+      {action}
+    </Box>
+  );
+
+  // Which section's problems are open, if any. Local: the dialog is a detail of
+  // reading the rail, and lifting it would make every consumer of this list
+  // carry state it has no other use for.
+  const [problemsFor, setProblemsFor] = useState<RailSection | null>(null);
 
   // `indent` bumps a row one level deeper than the top-level tree (matching
   // the old console's depth-based pl: files inside an expanded component sit
   // right of both the top-level entries and the component's own header row).
+  // `statusPath` is for the synthetic rows (Architecture, Security, Wireframe)
+  // whose selection is not a file path; a plain file row derives it itself.
   const row = (
     sel: SpecSelection,
     label: string,
     icon: React.ReactNode,
     indent?: boolean,
-  ) => (
-    <ListItemButton
-      key={selectionKey(sel)}
-      selected={isSel(sel)}
-      onClick={() => onSelect(sel)}
-      sx={{ pl: indent ? 4 : 2, pr: 2 }}
-    >
-      <ListItemIcon sx={{ minWidth: 32 }}>{icon}</ListItemIcon>
-      <ListItemText primary={label} slotProps={{ primary: { noWrap: true } }} />
-    </ListItemButton>
-  );
-
-  const flatGroup = (
-    title: string,
-    groupFiles: SpecFileEntry[],
-    addBtn?: boolean,
-  ) => (
-    <Box sx={{ mb: 1 }}>
-      <Box
-        sx={{
-          px: 2,
-          py: 0.5,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-        }}
+    statusPath?: string,
+  ) => {
+    const path = statusPath ?? (sel.kind === "file" ? sel.path : undefined);
+    const status = path !== undefined ? planByPath.get(path) : undefined;
+    // A row with no document behind it selects nothing, so it is disabled
+    // whatever the plan says about it — an entry the turn DIED on has no file
+    // any more than one it never reached. `writing` is the exception: its
+    // document is arriving, the editor is already following it, and the pane
+    // says so.
+    const ghost =
+      path !== undefined &&
+      !committed.has(path) &&
+      (status === "planned" || status === "error");
+    return (
+      <ListItemButton
+        key={selectionKey(sel)}
+        selected={isSel(sel)}
+        onClick={() => onSelect(sel)}
+        disabled={ghost}
+        sx={{ pl: indent ? 4 : 2, pr: 2, ...(ghost ? { opacity: 0.55 } : {}) }}
       >
-        <Typography variant="overline" color="text.secondary">
-          {title}
-        </Typography>
-        {addBtn && (
-          <Tooltip title="Add requirement artifact">
-            <IconButton
-              size="small"
-              aria-label="Add requirement artifact"
-              onClick={onAddArtifact}
-            >
-              <Plus size={16} />
-            </IconButton>
-          </Tooltip>
+        <ListItemIcon sx={{ minWidth: 32 }}>{icon}</ListItemIcon>
+        <ListItemText
+          primary={label}
+          slotProps={{
+            primary: {
+              noWrap: true,
+              ...(status === "writing"
+                ? { color: "primary" }
+                : status === "error"
+                  ? { color: "error" }
+                  : {}),
+            },
+          }}
+        />
+        {status === "writing" && <WorkingPulse />}
+        {status === "error" && (
+          <Box sx={{ display: "flex", flexShrink: 0, color: "error.main" }}>
+            <TriangleAlert size={14} />
+          </Box>
         )}
-      </Box>
+      </ListItemButton>
+    );
+  };
+
+  const flatGroup = (section: RailSection, groupFiles: SpecFileEntry[]) => (
+    <Box sx={{ mb: 1 }}>
+      {sectionHeader(section)}
       {groupFiles.length > 0 ? (
         <List dense disablePadding>
           {groupFiles.map((f) =>
@@ -183,23 +340,13 @@ export function SpecFileList({
 
   return (
     <Box component="nav" aria-label="Spec files" sx={{ py: 1 }}>
-      {flatGroup("Requirements", requirements, true)}
+      {flatGroup(sectionOf("requirements"), requirements)}
 
-      {/* Designs — grouped by component, with synthetic diagram entries. */}
+      {/* Design — grouped by component, with synthetic diagram entries. */}
       <Box sx={{ mb: 1 }}>
-        <Box
-          sx={{
-            px: 2,
-            py: 0.5,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-          }}
-        >
-          <Typography variant="overline" color="text.secondary">
-            Designs
-          </Typography>
-          {(design.hasComponents || design.overview.length > 0) && (
+        {sectionHeader(
+          sectionOf("design"),
+          (design.hasComponents || design.overview.length > 0) && (
             <Tooltip
               title={
                 regenerateDisabled
@@ -219,19 +366,31 @@ export function SpecFileList({
                 </IconButton>
               </span>
             </Tooltip>
-          )}
-        </Box>
+          ),
+        )}
         {design.hasComponents || design.hasCellDsl || design.overview.length > 0 ? (
           <List dense disablePadding>
             {design.hasCellDsl &&
-              row({ kind: "cell-diagram" }, "Architecture", <Network size={16} />)}
-            {design.overview.map((f) =>
               row(
-                fileSel(f.path),
-                basename(f.path),
-                <LayoutDashboard size={16} />,
-              ),
+                { kind: "cell-diagram" },
+                "Architecture",
+                <Network size={16} />,
+                false,
+                DESIGN_CELL_PATH,
+              )}
+            {design.overview.map((f) =>
+              row(fileSel(f.path), fileLabel(f.path), <LayoutDashboard size={16} />),
             )}
+            {/* ONE rail entry for security.json — present file shows the row;
+                missing file hides it. */}
+            {design.hasSecurity &&
+              row(
+                { kind: "security" },
+                "Security",
+                <ShieldCheck size={16} />,
+                false,
+                SECURITY_JSON_PATH,
+              )}
             {design.components.map((c) => {
               const collapsed = collapsedComponents.has(c.name);
               return (
@@ -274,6 +433,7 @@ export function SpecFileList({
                         "Wireframe",
                         <LayoutDashboard size={16} />,
                         true,
+                        c.wireframeDslPath,
                       )}
                   </Collapse>
                 </Box>
@@ -291,7 +451,21 @@ export function SpecFileList({
         )}
       </Box>
 
-      {flatGroup("Validation", validation)}
+      {flatGroup(sectionOf("validation"), validation)}
+
+      <ProblemsDialog
+        open={problemsFor !== null}
+        title={problemsFor ? `${problemsFor.title} — to resolve` : ""}
+        problems={(problemsFor?.reasons ?? []).map((reason) => ({
+          key: reason.key,
+          label: reason.label,
+          fix: {
+            label: reason.action === "update-design" ? "Update the design" : "Open the document",
+            run: () => onReason(reason.action),
+          },
+        }))}
+        onClose={() => setProblemsFor(null)}
+      />
     </Box>
   );
 }

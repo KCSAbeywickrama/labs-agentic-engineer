@@ -27,6 +27,7 @@
  */
 
 import type { ModelMessage } from "ai";
+import type { TurnAnchor } from "@aep/agent-stream";
 
 /**
  * One turn's display record (#463): what the CLIENT sent, verbatim, plus who
@@ -45,6 +46,19 @@ export interface TurnJournalEntry {
    * displayName}); absent for M2M callers with no human identity.
    */
   author?: { id: string; displayName: string };
+  /**
+   * File NAMES that rode this message (#428) — never bytes. The display read
+   * replaces a user row's content with `text`, so without these a reload would
+   * show the agent discussing a document that appears nowhere in the thread.
+   */
+  attachments?: string[];
+  /**
+   * What this message was aimed at (#666) — the passage of a spec document the
+   * user selected before typing it. Journaled for the same reason as attachment
+   * names: the console renders it as a tag above the message, and a record of
+   * the words but not the target is not a record of what happened.
+   */
+  anchor?: TurnAnchor;
   /**
    * Index into `messages` of the user message this turn appended — stamped at
    * write time (the append site knows it exactly), so the display read pairs

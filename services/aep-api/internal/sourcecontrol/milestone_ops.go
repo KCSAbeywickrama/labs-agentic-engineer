@@ -52,6 +52,14 @@ func (s *issueService) CloseMilestone(ctx context.Context, orgID, projectID stri
 	return s.github.CloseMilestone(ctx, owner, repoName, cred, number)
 }
 
+func (s *issueService) ReopenMilestone(ctx context.Context, orgID, projectID string, number int) error {
+	owner, repoName, cred, err := s.resolveRepoAndCredential(ctx, orgID, projectID)
+	if err != nil {
+		return err
+	}
+	return s.github.ReopenMilestone(ctx, owner, repoName, cred, number)
+}
+
 func (s *issueService) ListMilestones(ctx context.Context, orgID, projectID, state string) ([]Milestone, error) {
 	owner, repoName, cred, err := s.resolveRepoAndCredential(ctx, orgID, projectID)
 	if err != nil {
@@ -74,4 +82,12 @@ func (s *issueService) MilestoneIssueCounts(ctx context.Context, orgID, projectI
 		return nil, err
 	}
 	return s.github.MilestoneIssueCounts(ctx, owner, repoName, cred, number)
+}
+
+func (s *issueService) ListMilestoneIssueComments(ctx context.Context, orgID, projectID string, number, perIssue int) (map[int][]IssueComment, error) {
+	owner, repoName, cred, err := s.resolveRepoAndCredential(ctx, orgID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	return s.github.ListMilestoneIssueComments(ctx, owner, repoName, cred, number, perIssue)
 }

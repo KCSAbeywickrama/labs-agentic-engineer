@@ -21,6 +21,8 @@ import (
 	"testing"
 
 	"github.com/wso2/aep/aep-api/internal/clients/agentsvc"
+	"github.com/wso2/aep/aep-api/internal/platform/gitfs"
+	"github.com/wso2/aep/aep-api/internal/platform/gitfs/workspacetest"
 	"github.com/wso2/aep/aep-api/internal/spec"
 )
 
@@ -45,7 +47,27 @@ func descriptorTOML(t *testing.T, idea string) string {
 // so its interview answers land in the same history.
 func startTurnSpec(t *testing.T, seed map[string]string, msg string) agentsvc.TurnSpec {
 	t.Helper()
+	return startTurnSpecWithReferences(t, seed, nil, msg)
+}
+
+// startTurnSpecWithReferences is startTurnSpec with reference documents in the
+// project's STORE. They are seeded there and not into `seed` (the git tree) on
+// purpose: references are never committed (console ADR-0017), so the store is
+// the only place a turn can learn about them.
+func startTurnSpecWithReferences(t *testing.T, seed map[string]string, refs []gitfs.ReferenceDoc, msg string) agentsvc.TurnSpec {
+	t.Helper()
 	r := newGenaiRig(t, seed)
+	if len(refs) > 0 {
+		// The store is addressed by the ref the SERVICE resolves from the repo
+		// row (testOrg/testProj), not the fixture's own default path key —
+		// seeding fx.Ref writes a store the turn never looks at.
+		ref := r.fx.Ref
+		ref.OrgID, ref.ProjectID = testOrg, testProj
+		ref.RepoSlug = workspacetest.DefaultSlug
+		if err := r.fx.Engine.PutReferences(t.Context(), ref, refs); err != nil {
+			t.Fatalf("seed reference store: %v", err)
+		}
+	}
 	r.fake.parts = []string{addFilePart("specs/requirements/prd.md", "# Reqs\n")}
 	m := manifestPart(map[string]string{"specs/requirements/prd.md": "# Reqs\n"}, nil)
 	r.fake.manifest = &m
@@ -90,6 +112,27 @@ func TestStartCommand_InlineIdeaOverridesDescriptor(t *testing.T) {
 	}
 	if strings.Contains(got.Idea, testIdea) {
 		t.Fatalf("descriptor idea must not also ride when one was typed inline: %+v", got)
+	}
+}
+
+// A `/start` the user TYPED is journalled verbatim: they saw those bytes go
+// into the composer, and the transcript has to show what they sent. Only the
+// bare token — which nobody types any more, since the platform fires the
+// kickoff itself (#562) — gets the resolved idea appended.
+func TestStartCommand_TypedInlineIdeaJournalsVerbatim(t *testing.T) {
+	r := newGenaiRig(t, map[string]string{
+		spec.DescriptorPath: descriptorTOML(t, testIdea),
+	})
+	r.fake.parts = []string{addFilePart("specs/requirements/prd.md", "# Reqs\n")}
+	m := manifestPart(map[string]string{"specs/requirements/prd.md": "# Reqs\n"}, nil)
+	r.fake.manifest = &m
+
+	const typed = "/start a rota planner for nurses"
+	r.waitTerminal(t, r.startTurn(t, convUUID, "", typed))
+
+	journal := r.fake.sentTurn(t, 0).req.Journal
+	if journal == nil || journal.Text != typed {
+		t.Fatalf("journal = %+v, want the typed command verbatim", journal)
 	}
 }
 

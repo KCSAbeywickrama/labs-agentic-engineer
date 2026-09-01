@@ -22,7 +22,6 @@ import {
   Avatar,
   Box,
   Button,
-  Grid,
   Link as MuiLink,
   Skeleton,
   Stack,
@@ -32,12 +31,11 @@ import { Link as LinkIcon } from "@wso2/oxygen-ui-icons-react";
 import { Link } from "@tanstack/react-router";
 import { PageHeader } from "../../../components/PageHeader";
 import { SectionTitle } from "../../../components/SectionTitle";
-import { StatusChip } from "../../../components/StatusChip";
 import { useProject, useProjectComponents, useProjectStatus } from "../api/queries";
-import { projectChip } from "../lib/projectChip";
-import { RecentActivity } from "./RecentActivity";
 import { ComponentsList } from "./ComponentsList";
-import { OverviewPipeline } from "./OverviewPipeline";
+import { OverviewTrack } from "./OverviewTrack";
+import { OverviewArchitecture, OVERVIEW_SPLIT_PX } from "./OverviewArchitecture";
+import { OverviewDependencies } from "./OverviewDependencies";
 
 function SectionError({
   what,
@@ -57,9 +55,12 @@ function SectionError({
 }
 
 // The overview renders from ONE polling read (#183): the status aggregate
-// powers the whole pipeline. The components list has no interval of its own —
+// powers the whole track. The components list has no interval of its own —
 // it refetches when the poll shows a build/deploy transition (the only times
-// components change).
+// components change). The architecture diagram adds no interval either: it is
+// a one-shot read of the committed design.cell, which only a design turn
+// changes, and a design turn is something the user watched happen in the spec
+// view.
 export function ProjectOverview({ projectName }: { projectName: string }) {
   const project = useProject(projectName);
   const status = useProjectStatus(projectName);
@@ -104,14 +105,12 @@ export function ProjectOverview({ projectName }: { projectName: string }) {
               {initial}
             </Avatar>
             <Box>
-              <Stack direction="row" spacing={1.5} sx={{ alignItems: "center" }}>
-                <Typography variant="h4" component="span">
-                  {displayName}
-                </Typography>
-                {status.data && (
-                  <StatusChip {...projectChip(status.data)} appearance="soft" dot />
-                )}
-              </Stack>
+              {/* A block, not the inline span it was while a chip sat beside
+                  it in a row Stack — inline, the repo link below reflowed onto
+                  the same line as the name. */}
+              <Typography variant="h4" component="div">
+                {displayName}
+              </Typography>
               {status.data?.repoUrl && (
                 <MuiLink
                   href={status.data.repoUrl}
@@ -144,37 +143,75 @@ export function ProjectOverview({ projectName }: { projectName: string }) {
         ) : status.isPending ? (
           <Skeleton variant="rounded" height={96} />
         ) : (
-          <OverviewPipeline projectName={projectName} status={status.data} />
+          <OverviewTrack projectName={projectName} status={status.data} />
         )}
 
-        {/* Two-column body: the agent-activity feed (what the agents have
-            done) beside the component cards (what they're building). */}
-        <Grid container spacing={4}>
-          <Grid size={{ xs: 12, md: 6 }}>
-            <RecentActivity projectName={projectName} />
-          </Grid>
-          <Grid size={{ xs: 12, md: 6 }}>
-            <SectionTitle>Components</SectionTitle>
-            {componentsQuery.isError ? (
-              <SectionError
-                what="components"
-                message={
-                  componentsQuery.error instanceof Error
-                    ? componentsQuery.error.message
-                    : undefined
-                }
-                onRetry={() => void componentsQuery.refetch()}
-              />
-            ) : componentsQuery.isPending ? (
-              <Skeleton variant="rounded" height={120} />
-            ) : (
-              <ComponentsList
-                projectName={projectName}
-                items={componentsQuery.data.items ?? []}
-              />
-            )}
-          </Grid>
-        </Grid>
+      {/* Index left, architecture right: the lists are the half you click
+          (a component opens its contract, a dependency opens the catalog),
+          and the diagram is the half you read.
+
+          A project with nothing in it gets this same body, not a substitute.
+          An earlier pass swapped it for an explainer of the three stages, on
+          the theory that three panels each saying "nothing here yet" is worse
+          than one page that teaches. It is not: each panel's empty state
+          already names what belongs there and when it turns up, so the
+          explainer was a fourth surface teaching the same thing in worse
+          words, and it hid the shape of the page from the one reader who has
+          never seen it.
+
+          THE SPLIT IS A CONTAINER QUERY, NOT A BREAKPOINT. The two halves are
+          not equally squeezable: the lists reflow to any width, while the
+          diagram is a fixed-aspect drawing that can only scale down, and below
+          about 600px of column it stops shrinking and starts being CROPPED
+          (`DIAGRAM_MIN_HEIGHT` explains the clamp). A viewport breakpoint gets
+          this wrong every time, because the viewport is not what the page gets:
+          the nav rail takes ~280px of it, and the agent chat panel can take
+          half of what is left. At `md` the diagram was cropped on a 1440px
+          screen — a picture you cannot read sitting next to a list you can,
+          which is the worst of both halves.
+
+          Measured against the page's own width instead, the two columns appear
+          exactly when there is room for both and not a pixel sooner. Under the
+          threshold the diagram goes below the lists at FULL width, where it
+          gets more room than the split ever gave it. */}
+        <Box sx={{ containerType: "inline-size" }}>
+          <Box
+            sx={{
+              display: "grid",
+              gap: 4,
+              gridTemplateColumns: "1fr",
+              [`@container (min-width: ${OVERVIEW_SPLIT_PX}px)`]: {
+                gridTemplateColumns: "5fr 7fr",
+              },
+            }}
+          >
+            <Box sx={{ minWidth: 0 }}>
+              <SectionTitle>Components</SectionTitle>
+              {componentsQuery.isError ? (
+                <SectionError
+                  what="components"
+                  message={
+                    componentsQuery.error instanceof Error
+                      ? componentsQuery.error.message
+                      : undefined
+                  }
+                  onRetry={() => void componentsQuery.refetch()}
+                />
+              ) : componentsQuery.isPending ? (
+                <Skeleton variant="rounded" height={120} />
+              ) : (
+                <ComponentsList
+                  projectName={projectName}
+                  items={componentsQuery.data.items ?? []}
+                />
+              )}
+              <OverviewDependencies projectName={projectName} />
+            </Box>
+            <Box sx={{ minWidth: 0 }}>
+              <OverviewArchitecture projectName={projectName} />
+            </Box>
+          </Box>
+        </Box>
       </Stack>
     </>
   );

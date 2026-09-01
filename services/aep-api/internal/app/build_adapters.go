@@ -68,25 +68,13 @@ func (d buildDesignDeriver) DerivePlatformResourceFactsAtHead(ctx context.Contex
 		return nil
 	case errors.Is(err, spec.ErrEndUserAuthConflict):
 		return fmt.Errorf("%w: %v", build.ErrEndUserAuthConflict, err)
+	case errors.Is(err, spec.ErrUnknownResourceType):
+		return fmt.Errorf("%w: %v", build.ErrUnknownResourceType, err)
 	case errors.Is(err, spec.ErrResourceCatalogUnavailable):
 		return fmt.Errorf("%w: %v", build.ErrResourceCatalogUnavailable, err)
 	default:
 		return err
 	}
-}
-
-// buildSecretStager adapts the external-resource provisioner's SM-API-only
-// StageSecrets onto the build feature's SecretStager port. The dependency name
-// is the registered external-resource name (registerExternalResources keys the
-// catalog on dep.Name), so a name-only ExternalResource is all StageSecrets
-// needs to form the per-env secret entity. orgID is unused — the SM-API write
-// keys on ocOrgID.
-type buildSecretStager struct {
-	prov *dependencies.ExternalResourceProvisioner
-}
-
-func (s buildSecretStager) StageExternalSecrets(ctx context.Context, _, ocOrgID, projectID, depName string, secretsByEnv map[string]map[string]string) (map[string]string, error) {
-	return s.prov.StageSecrets(ctx, ocOrgID, projectID, &dependencies.ExternalResource{Name: depName}, secretsByEnv)
 }
 
 // buildProvisionStatus adapts provisioning.Service.Status onto the build
@@ -110,9 +98,24 @@ func (b buildProvisionStatus) Ready(ctx context.Context, orgID, projectID, depNa
 	return st.Status != "unknown", nil
 }
 
+// buildOrgCatalog adapts provisioning.Service onto preflight's OrgCatalogReader:
+// a Registered External (org env cells, or a catalog RT that still carries
+// consumption instructions after the value plane was wiped) must not collect
+// values. Nil service is fail-open (HasOrgEnvCells false).
+type buildOrgCatalog struct {
+	svc *provisioning.Service
+}
+
+func (b buildOrgCatalog) HasOrgEnvCells(ctx context.Context, orgID, name string) bool {
+	if b.svc == nil {
+		return false
+	}
+	return b.svc.HasOrgEnvCells(ctx, orgID, name)
+}
+
 // buildGateResolver adapts the provisioning feature onto the build plan path's
 // GateResolver port: author the version's dependencies and mint its
-// aep:provision gates INTO the version's milestone, so the run's dispatch
+// `provision` gates INTO the version's milestone, so the run's dispatch
 // predicate sees them.
 //
 // It collapses provisioning's per-dependency failure list into one error on
@@ -127,14 +130,28 @@ func (b buildGateResolver) ProvisionForBuild(ctx context.Context, orgID, project
 	if err != nil {
 		return err
 	}
+	return aggregateProvisionFailures(fails)
+}
+
+func aggregateProvisionFailures(fails []provisioning.ProvisionFailure) error {
 	if len(fails) == 0 {
 		return nil
 	}
 	reasons := make([]string, 0, len(fails))
+	permanent := false
+	var cause error
 	for _, f := range fails {
 		reasons = append(reasons, f.Dependency+": "+f.Reason)
+		if errors.Is(f.Err, dependencies.ErrProvisionPermanent) {
+			permanent = true
+			cause = f.Err
+		}
 	}
-	return fmt.Errorf("provision %d dependenc(ies) failed: %s", len(fails), strings.Join(reasons, "; "))
+	joined := fmt.Errorf("provision %d dependenc(ies) failed: %s", len(fails), strings.Join(reasons, "; "))
+	if !permanent {
+		return joined
+	}
+	return fmt.Errorf("%w: %w: %w", delivery.ErrProvisionPermanent, cause, joined)
 }
 
 // mapProvisionInputs maps the delivery-root payload onto the provisioning

@@ -25,6 +25,10 @@
  *    contextual rule the agent adds (`name` must equal the component directory)
  *    is NOT expressible in a standalone JSON Schema (it needs the path), so both
  *    sides apply it separately (`checkComponentDesign` / the BFF save-gate).
+ *  - `securityDesignJsonSchema` — the security.json write/save gate. Its
+ *    referential rules (every `testUsers[].role` names a declared role,
+ *    `coldStartRole` likewise, thunder scopes tokens) are equally inexpressible
+ *    standalone, and are likewise applied separately on both sides.
  *  - `planTaskJsonSchema` / `updateTaskJsonSchema` — the plan-turn tool inputs
  *    the BFF plan tap acts on; vendored by phase 2.
  *
@@ -34,11 +38,17 @@
 
 import { z } from "zod";
 import { componentDesignSchema } from "./component-design-schema.js";
+import { securityDesignSchema } from "./security-design-schema.js";
 import { planTaskInputSchema, updateTaskInputSchema } from "./task-tools-schema.js";
 
 /** The `ComponentDesign` structural schema as JSON Schema (draft 2020-12). */
 export function componentDesignJsonSchema(): Record<string, unknown> {
   return z.toJSONSchema(componentDesignSchema, { target: "draft-2020-12" }) as Record<string, unknown>;
+}
+
+/** The `SecurityDesign` structural schema as JSON Schema (draft 2020-12). */
+export function securityDesignJsonSchema(): Record<string, unknown> {
+  return z.toJSONSchema(securityDesignSchema, { target: "draft-2020-12" }) as Record<string, unknown>;
 }
 
 /** The `planTask` tool input as JSON Schema (draft 2020-12). */

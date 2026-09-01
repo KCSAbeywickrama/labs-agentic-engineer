@@ -22,6 +22,7 @@ import type { SpecFileEntry } from "./mapping";
 export type SpecSelection =
   | { kind: "file"; path: string }
   | { kind: "cell-diagram" }
+  | { kind: "security" }
   | { kind: "wireframe"; component: string; dslPath: string };
 
 export interface DesignComponentNode {
@@ -38,11 +39,20 @@ export interface DesignSection {
   hasComponents: boolean;
   /** Whether a project-level design.cell exists (drives the Architecture tab). */
   hasCellDsl: boolean;
+  /** Whether specs/design/security.json exists (drives the Security rail entry). */
+  hasSecurity: boolean;
   components: DesignComponentNode[];
 }
 
 /** The project-level cell-diagram DSL path (rendered via the Architecture tab, never as a file). */
 export const DESIGN_CELL_PATH = "specs/design/design.cell";
+
+/** The security design document — one file, one rail entry. */
+export const SECURITY_JSON_PATH = "specs/design/security.json";
+
+function hideFromOverview(path: string): boolean {
+  return path === DESIGN_CELL_PATH || path === SECURITY_JSON_PATH;
+}
 
 // SpecFileEntry.path is the full repo-relative path (mapping.ts's current
 // scheme — the unprefixed room-key scheme it retired), so this must match
@@ -67,10 +77,12 @@ function isDsl(path: string): boolean {
 export function buildDesignSection(files: SpecFileEntry[]): DesignSection {
   const design = files.filter((f) => f.group === "designs");
   const hasCellDsl = design.some((f) => f.path === DESIGN_CELL_PATH);
+  const hasSecurity = design.some((f) => f.path === SECURITY_JSON_PATH);
   // design.cell is surfaced through the Architecture tab (streaming cell
-  // diagram), never as a raw text file — keep it out of the overview list.
+  // diagram), never as a raw text file. security.json is the Security rail
+  // entry, not an overview row.
   const overview = design
-    .filter((f) => componentOf(f.path) === null && f.path !== DESIGN_CELL_PATH)
+    .filter((f) => componentOf(f.path) === null && !hideFromOverview(f.path))
     .sort((a, b) => a.path.localeCompare(b.path));
 
   const byComponent = new Map<string, DesignComponentNode>();
@@ -91,7 +103,31 @@ export function buildDesignSection(files: SpecFileEntry[]): DesignSection {
   );
   for (const c of components) c.files.sort((a, b) => a.path.localeCompare(b.path));
 
-  return { overview, hasComponents: components.length > 0, hasCellDsl, components };
+  return {
+    overview,
+    hasComponents: components.length > 0,
+    hasCellDsl,
+    hasSecurity,
+    components,
+  };
+}
+
+/**
+ * The selection that WATCHES a path being written (#576, ADR-0026) — the same
+ * routing the rail's own rows use: the cell opens as the Architecture diagram,
+ * security.json opens the Security entry, a wireframe `.dsl` opens as its
+ * component's diagram, and everything else is the file itself. One definition,
+ * so follow-the-write can never land somewhere a click on the rail would not
+ * have gone.
+ */
+export function followSelection(path: string): SpecSelection {
+  if (path === DESIGN_CELL_PATH) return { kind: "cell-diagram" };
+  if (path === SECURITY_JSON_PATH) return { kind: "security" };
+  const component = componentOf(path);
+  if (component && isDsl(path)) {
+    return { kind: "wireframe", component, dslPath: path };
+  }
+  return { kind: "file", path };
 }
 
 /** Stable string identity for a selection (React keys + selected-state compare). */
@@ -101,6 +137,8 @@ export function selectionKey(sel: SpecSelection): string {
       return `file:${sel.path}`;
     case "cell-diagram":
       return "cell-diagram";
+    case "security":
+      return "security";
     case "wireframe":
       return `wireframe:${sel.component}`;
   }

@@ -40,6 +40,7 @@ export type {
   AskQuestionInput,
   AskQuestionsInput,
   QuestionAnswer,
+  DeclarePlanInput,
   LoadSkillInput,
   LoadSkillResult,
   LoadedSkill,
@@ -52,29 +53,49 @@ export type {
   PlanScope,
   PlanContextFile,
   TurnJournal,
+  TurnAttachment,
+  TurnAnchor,
+  TurnAnchorNode,
+  TurnAim,
+  TurnAimIntent,
   WorkspaceRef,
   McpConfig,
   CollabConfig,
   ManifestPart,
   TurnUsage,
   Toolset,
+  Surface,
   AgentSseEventType,
 } from "./contracts/sse-events.js";
 export {
   AGENT_SSE_EVENT_TYPES,
   SSE_DONE,
   TOOLSETS,
+  SURFACES,
   TURN_KINDS,
   ASK_QUESTION_TOOL,
   ASK_QUESTIONS_TOOL,
+  DECLARE_PLAN_TOOL,
   ANSWER_PREFIX,
   ANSWERS_PREFIX,
   buildAnswerInstruction,
   buildAnswersInstruction,
   isToolset,
+  isSurface,
   isTurnSpec,
+  isTurnAttachment,
+  isTurnAttachmentsOrAbsent,
+  isTurnAim,
+  TURN_AIM_LIMITS,
   isCollabConfig,
 } from "./contracts/sse-events.js";
+export type {
+  SecurityDesign,
+  ThunderClient,
+  RoleDeclaration,
+  RolePermission,
+  TestUserDeclaration,
+} from "./contracts/security-design.js";
 export type {
   ComponentDesign,
   Dependency,
@@ -124,8 +145,23 @@ export {
 } from "./component-design-schema.js";
 export type { ComponentDesignProblem } from "./component-design-schema.js";
 
+// --- The security.json write-gate ------------------------------------------
+export {
+  checkSecurityDesign,
+  checkSecurityReferences,
+  securityDesignSchema,
+  SECURITY_DESIGN_JSON_RE,
+  TEST_USERNAME_RE,
+} from "./security-design-schema.js";
+export type { SecurityDesignProblem } from "./security-design-schema.js";
+
 // --- JSON Schema publication (the BFF validates the same definitions) --------
-export { componentDesignJsonSchema, planTaskJsonSchema, updateTaskJsonSchema } from "./json-schema.js";
+export {
+  componentDesignJsonSchema,
+  securityDesignJsonSchema,
+  planTaskJsonSchema,
+  updateTaskJsonSchema,
+} from "./json-schema.js";
 
 // --- The reference SSE reader ------------------------------------------------
 // `streamTurn` = fetch + parse (server-side callers: evals, playground).

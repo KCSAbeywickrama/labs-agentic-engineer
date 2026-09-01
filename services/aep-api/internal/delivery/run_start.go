@@ -34,11 +34,11 @@ var (
 	// The loop would dispatch a coding cycle for it before validating, which is a
 	// build resumed rather than a version re-judged.
 	ErrMilestoneHasOpenWork = errors.New("this version still has open work — the run would build it, not just re-check it")
-	// ErrNoAcceptanceCriteria means the version has no oracle to validate against.
+	// ErrNoValidationCriteria means the version has no oracle to validate against.
 	// Refused rather than run: a run with nothing to validate concludes `skipped`,
 	// and because the newest run owns the version's verdict that would replace a
 	// real answer with "not validated".
-	ErrNoAcceptanceCriteria = errors.New("this version has no acceptance criteria to validate against")
+	ErrNoValidationCriteria = errors.New("this version has no validation criteria to validate against")
 	// ErrRunNotStarted means the supervisor reported success but no run row exists
 	// behind it — a degraded boot (no agent dispatcher, no workflow engine) or a
 	// lost admission race. The paths that re-offer on a timer treat those as
@@ -65,12 +65,18 @@ type StartRunRequest struct {
 	// discovery call. It is the milestone's name, not the version — the run row's
 	// SpecTag answers that.
 	MilestoneTitle string
-	// Origin is RunOriginSpecBuild for the plan path and
-	// RunOriginIncidentAdoption for everything the event plane starts.
+	// Kind is what the run will DO: RunKindDev for the plan path, RunKindTask for
+	// everything the event plane starts by detection, RunKindValidation for a
+	// human asking a shipped version's criteria again. Every predicate the
+	// supervisor and the loop apply reads this, including the build mutex.
+	Kind string
+	// Origin is where the request came from: RunOriginSpecBuild for the plan
+	// path, RunOriginIncidentAdoption for the event plane, RunOriginRevalidate
+	// for the human ask. It is recorded, never branched on.
 	Origin string
 	// RunID is the admitted run row this request supervises, when the caller
 	// already admitted one (the plan path admits the row itself, so that the
-	// spec-run mutex is armed before the slow planning turn begins). Empty means
+	// build mutex is armed before the slow planning turn begins). Empty means
 	// "admit one yourself" — the adoption and sweep paths, where admission and
 	// supervision must happen together or a row exists that nobody drives.
 	RunID string
@@ -85,6 +91,29 @@ type StartRunRequest struct {
 	// row for exactly that reason: the row cannot tell "start me" from "fill me".
 	Tag             string
 	ProvisionInputs []ProvisionInput
+
+	// Rebuild says the version's milestone is ALREADY FILLED, so the run mints its
+	// gates and skips the planning TURN.
+	//
+	// Only the build click sets it, and only when BOTH halves hold: the click
+	// resolved to the same tag (the spec did not change) AND the milestone
+	// actually holds planned work. The second half is not redundant, and the
+	// clicks that taught us are the ones where a run died in its planning phase —
+	// `plan-failed`, or a cancel that landed before the planning turn. The spec is
+	// unchanged there too, but the milestone holds only its gates, and a run that
+	// skips planning over it reads the empty working set as "planning produced
+	// nothing to work" and settles the version SUCCEEDED having built none of it.
+	// build.reopenIncrement answers the second half off the milestone's own
+	// issues.
+	//
+	// Re-planning a genuinely filled milestone is the opposite failure and is why
+	// the flag exists at all: plan dedupe is the title slug against the
+	// milestone's issues in any state, so the turn would mint nothing and the run
+	// would settle an unbuilt version as delivered just the same.
+	//
+	// It rides the request beside Tag for the same reason: the row cannot tell
+	// "fill me" from "resume me", let alone "I refilled it for you".
+	Rebuild bool
 
 	// CycleCeiling and ValidationAttempts pin this run's budgets, overriding the
 	// platform defaults. Zero on both means "use the default", which is what every

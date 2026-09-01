@@ -1,20 +1,32 @@
 import type { components } from "../../generated/aep-api";
 
 type ApiError = components["schemas"]["Error"];
+type ApplyRequest = components["schemas"]["ApplyRequest"];
+type ApplyResult = components["schemas"]["ApplyResult"];
 import { http, HttpResponse, type JsonBodyType } from "msw";
 import {
+  appliedFileContent,
+  appliedFileMetas,
+  applyFilesError,
+  uploadReferencesError,
   componentDeployments,
   componentOpenApi,
+  buildRunsForTag,
   projectBuildRuns,
   projectCycleBuilds,
   projectBuilds,
   projectComponents,
   projectDependencies,
+  projectDependencyReadiness,
   projectSectionError,
   projectSpecFiles,
   projectStatuses,
+  TRACK_SCENARIOS,
+  trackOverrides,
+  type TrackScenario,
   projectTags,
   projectTasks,
+  recordAppliedFiles,
   specFileContent,
   specFileMetas,
   specFileNotFound,
@@ -33,6 +45,7 @@ import {
   runHeartbeatLine,
 } from "../fixtures/run-progress";
 import {
+  CRITERIA_PATH,
   VALIDATION_ATTEMPTS,
   VALIDATION_FILE_PATHS,
   VALIDATION_SCENARIOS,
@@ -51,10 +64,32 @@ function scenario(): ProjectScenario {
   return validationScenario() ? "deployed" : "building";
 }
 
+// The track override (aep:mock:track): the spec/build/deploy combinations the
+// scenario ladder cannot express, because each of its rungs has the three
+// stages agreeing with each other. Unknown values are ignored, same as the
+// validation override — a typo should not look like the switch is broken.
+function trackScenario(): TrackScenario | null {
+  const raw = localStorage.getItem("aep:mock:track");
+  return raw && TRACK_SCENARIOS.includes(raw as TrackScenario)
+    ? (raw as TrackScenario)
+    : null;
+}
+
 // The validation override (aep:mock:validation), or null when the project
 // scenario's own fixtures should stand. Unknown values are ignored rather than
 // passed through — a typo would otherwise render as the `none` empty state and
 // look like the switch is broken.
+// How fast a mock progress stream plays a line. Paced for a HUMAN watching the
+// feed animate, not for tests — nothing asserts on it, and the three streams
+// below share the constant so one of them cannot quietly drift to a different
+// speed from the others.
+//
+// A second rather than a fraction of one: the per-criterion rows on the
+// Validation page step through five statuses each, and at 120ms a whole
+// validation cycle replayed faster than a reader could follow which row had
+// changed.
+const MOCK_LINE_MS = 1_000;
+
 function validationScenario(): ValidationScenario | null {
   const raw = localStorage.getItem("aep:mock:validation");
   return raw && VALIDATION_SCENARIOS.includes(raw as ValidationScenario)
@@ -73,6 +108,16 @@ function validationAttempt(): ValidationAttempt {
     : "first";
 }
 
+// Whether the repo should read as having no acceptance oracle at all
+// (aep:mock:validation-criteria=missing). A separate key from the two above because
+// it names what is IN THE REPO rather than which run or which attempt: the page
+// treats a `not_found` on the criteria as "none were authored" — the state a version
+// eventually settles as `skipped` for — and nothing else can produce it, since every
+// scenario that has a verdict also has an oracle.
+function criteriaMissing(): boolean {
+  return localStorage.getItem("aep:mock:validation-criteria") === "missing";
+}
+
 // The project's files with the two validation artifacts swapped for the ones the
 // overridden verdict implies. Dropping them first is what makes `unreported` and
 // `skipped` reachable: those scenarios contribute FEWER files, not different ones.
@@ -81,7 +126,9 @@ function specFiles(s: Exclude<ProjectScenario, "error">) {
   if (!v) return projectSpecFiles[s];
   return [
     ...projectSpecFiles[s].filter((f) => !VALIDATION_FILE_PATHS.includes(f.path)),
-    ...validationFiles(v, validationAttempt()),
+    ...validationFiles(v, validationAttempt()).filter(
+      (f) => !(criteriaMissing() && f.path === CRITERIA_PATH),
+    ),
   ];
 }
 
@@ -103,7 +150,11 @@ export const projectHandlers = [
   http.get("*/api/v1/projects/:projectName/status", () =>
     respond((s) => {
       const v = validationScenario();
-      const base = projectStatuses[s];
+      const track = trackScenario();
+      const scenarioBase = projectStatuses[s];
+      // The track override replaces all three aggregates together — they only
+      // mean anything as a set.
+      const base = track ? { ...scenarioBase, ...trackOverrides[track] } : scenarioBase;
       // Only deploy.validation moves: the rest of the status is the project
       // scenario's, so the override can be read against any of them.
       return v ? { ...base, deploy: { ...base.deploy, validation: v } } : base;
@@ -116,6 +167,13 @@ export const projectHandlers = [
   // status chips and the Deployments page's promotion connections.
   http.get("*/api/v1/projects/:projectName/design/dependencies", () =>
     respond((s) => projectDependencies(s)),
+  ),
+  // Whether the platform holds real values for each external dependency in an
+  // environment — the Builds page's External resources section (ADR-0023).
+  // Environment-scoped on the wire; the mock ignores it, since the console only
+  // ever asks about development.
+  http.get("*/api/v1/projects/:projectName/dependencies/readiness", () =>
+    respond((s) => projectDependencyReadiness(s)),
   ),
   // Re-collect an external connection's values (#395 follow-up). Values are
   // write-only on the real platform (secrets go to the secret manager and
@@ -163,8 +221,12 @@ export const projectHandlers = [
       // The verdict lives on the RUN, and its cycles are what the page reads the
       // report at — so an override has to replace the whole story, not patch a
       // field onto the project scenario's.
-      const runs = v ? validationRuns(v, validationAttempt()) : projectBuildRuns[s];
-      return { ...runs, tag: String(params.tag) };
+      const tag = String(params.tag);
+      // Keyed BY TAG: a run story stamped with another version's identity is a
+      // fixture that contradicts its own envelope.
+      return v
+        ? { ...validationRuns(v, validationAttempt()), tag }
+        : buildRunsForTag(s, tag);
     }),
   ),
   // A build session's fan-out. Derived from the cluster on the real server, so
@@ -192,7 +254,14 @@ export const projectHandlers = [
       if (s === "error") {
         return HttpResponse.json(projectSectionError, { status: 500 });
       }
-      const runs = projectBuildRuns[s].runs;
+      // The same runs list-build-runs answers with. Without this the feed
+      // streamed the PROJECT scenario's runs while the page's rows came from the
+      // validation override — two answers about one run, and the validation
+      // cycle a reader had selected was not the one narrating itself.
+      const v = validationScenario();
+      const runs = v
+        ? validationRuns(v, validationAttempt()).runs
+        : projectBuildRuns[s].runs;
       const run = runs[0];
       const encoder = new TextEncoder();
       let timer: ReturnType<typeof setInterval> | undefined;
@@ -212,7 +281,7 @@ export const projectHandlers = [
               if (request.signal.aborted) return controller.close();
               send(JSON.stringify({ type: "line", line }));
               seq = (line.seq ?? seq) + 1;
-              await delay(120);
+              await delay(MOCK_LINE_MS);
             }
           }
           if (!run || isTerminalRunState(run.state)) {
@@ -240,6 +309,62 @@ export const projectHandlers = [
         },
         cancel() {
           if (timer) clearInterval(timer);
+        },
+      });
+
+      return new HttpResponse(stream, {
+        headers: {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+        },
+      });
+    },
+  ),
+  // The VERSION feed: ONE SSE stream over every run the milestone has seen, in
+  // chronological order, each frame carrying the run it belongs to. It settles
+  // whenever no run is live — which is NOT "the version is finished", so the
+  // frame says `reason`, never a run state.
+  http.get(
+    "*/api/v1/projects/:projectName/builds/:tag/progress",
+    ({ request }) => {
+      const s = scenario();
+      if (s === "error") {
+        return HttpResponse.json(projectSectionError, { status: 500 });
+      }
+      // Oldest first: the run list is newest-first, and the narrative reads the
+      // other way.
+      const runs = [...projectBuildRuns[s].runs].reverse();
+      const encoder = new TextEncoder();
+
+      const stream = new ReadableStream<Uint8Array>({
+        async start(controller) {
+          const send = (data: string) =>
+            controller.enqueue(encoder.encode(`data: ${data}\n\n`));
+          const delay = (ms: number) =>
+            new Promise((resolve) => setTimeout(resolve, ms));
+
+          let seq = 0;
+          for (const [r, run] of runs.entries()) {
+            const attribution = { id: run.id, kind: run.kind, index: r + 1 };
+            for (const [i, cycle] of run.cycles.entries()) {
+              if (request.signal.aborted) return controller.close();
+              send(JSON.stringify({ type: "cycle", run: attribution, cycle }));
+              for (const line of runCycleLines(cycle, i, seq)) {
+                if (request.signal.aborted) return controller.close();
+                send(JSON.stringify({ type: "line", run: attribution, line }));
+                seq = (line.seq ?? seq) + 1;
+                await delay(MOCK_LINE_MS);
+              }
+            }
+          }
+          if (runs.some((run) => !isTerminalRunState(run.state))) {
+            // A live run holds the stream open, exactly as the server does — the
+            // property the console's reconnect logic is written against.
+            return;
+          }
+          send(JSON.stringify({ type: "done", reason: "no_live_run" }));
+          send("[DONE]");
+          controller.close();
         },
       });
 
@@ -302,7 +427,7 @@ export const projectHandlers = [
             if (request.signal.aborted) return controller.close();
             send(JSON.stringify(frame));
             if (frame.type === "line") seq = (frame.line?.seq ?? seq) + 1;
-            await delay(120);
+            await delay(MOCK_LINE_MS);
           }
           if (settled) {
             send("[DONE]");
@@ -342,25 +467,83 @@ export const projectHandlers = [
     respond((s) => projectTags[s]),
   ),
   // Files API (#113): list-files metadata + per-file content reads, exactly
-  // as aep-api serves them (repo-relative specs/ paths).
-  http.get("*/api/v1/projects/:projectName/files", () =>
-    respond((s) => specFileMetas(specFiles(s))),
+  // as aep-api serves them (repo-relative specs/ paths). Files applied through
+  // the mock files/apply (#383's reference uploads) are merged in per project.
+  http.get("*/api/v1/projects/:projectName/files", ({ params }) =>
+    respond((s) => [
+      ...specFileMetas(specFiles(s)),
+      ...appliedFileMetas(String(params.projectName)),
+    ]),
   ),
-  http.get("*/api/v1/projects/:projectName/files/*", ({ request }) => {
-    const s = scenario();
-    if (s === "error") {
-      return HttpResponse.json(projectSectionError, {
-        status: 500,
-      });
+  http.get(
+    "*/api/v1/projects/:projectName/files/*",
+    ({ request, params }) => {
+      const s = scenario();
+      if (s === "error") {
+        return HttpResponse.json(projectSectionError, {
+          status: 500,
+        });
+      }
+      const pathname = new URL(request.url).pathname;
+      const path = decodeURIComponent(pathname.replace(/^.*\/files\//, ""));
+      const file =
+        specFileContent(specFiles(s), path) ??
+        appliedFileContent(String(params.projectName), path);
+      if (!file) {
+        return HttpResponse.json(specFileNotFound(path), {
+          status: 404,
+        });
+      }
+      return HttpResponse.json(file);
+    },
+  ),
+  // The create flow's reference upload (#383), fired right after POST
+  // /projects. Nothing is committed and nothing becomes a spec file — the real
+  // server stores the bytes off-git (ADR-0017) — so the mock only asserts the
+  // request shape and answers 204. Error state (the confirm step's Retry /
+  // Continue-without-documents surface) via
+  // localStorage.setItem('aep:mock:project:references', 'error').
+  http.post("*/api/v1/projects/:projectName/references", async ({ request }) => {
+    if (localStorage.getItem("aep:mock:project:references") === "error") {
+      return HttpResponse.json(uploadReferencesError, { status: 500 });
     }
-    const pathname = new URL(request.url).pathname;
-    const path = decodeURIComponent(pathname.replace(/^.*\/files\//, ""));
-    const file = specFileContent(specFiles(s), path);
-    if (!file) {
-      return HttpResponse.json(specFileNotFound(path), {
-        status: 404,
-      });
+    const form = await request.formData();
+    const files = form.getAll("files");
+    if (files.length === 0) {
+      return HttpResponse.json(
+        { code: "invalid_request", message: "no reference documents" } satisfies ApiError,
+        { status: 400 },
+      );
     }
-    return HttpResponse.json(file);
+    return new HttpResponse(null, { status: 204 });
   }),
+  // apply-files. Error state via
+  // localStorage.setItem('aep:mock:project:apply', 'error').
+  http.post(
+    "*/api/v1/projects/:projectName/files/apply",
+    async ({ request, params }) => {
+      if (localStorage.getItem("aep:mock:project:apply") === "error") {
+        return HttpResponse.json(applyFilesError, { status: 500 });
+      }
+      const body = (await request.json()) as ApplyRequest;
+      const writes = body.writes ?? [];
+      const invalid =
+        writes.length === 0
+          ? "empty apply (no writes or deletes)"
+          : writes.find((w) => !w.path.startsWith("specs/"))
+            ? "only specs/ paths are accessible via this API"
+            : null;
+      if (invalid) {
+        return HttpResponse.json(
+          { code: "invalid_path", message: invalid } satisfies ApiError,
+          { status: 400 },
+        );
+      }
+      const files = recordAppliedFiles(String(params.projectName), writes);
+      return HttpResponse.json({
+        commitSha: files[0]?.sha ?? "0000000000000000000000000000000000000000",
+        files,
+      } satisfies ApplyResult);
+    },
+  ),
 ];

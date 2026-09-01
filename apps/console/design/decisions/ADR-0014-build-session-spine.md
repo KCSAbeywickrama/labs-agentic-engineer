@@ -1,6 +1,9 @@
 # ADR-0014: A run is ONE numbered flow — provisioning, then every build session's stages
 
-- **Status:** Accepted
+- **Status:** Historical as of
+  [ADR-0021](./ADR-0021-builds-is-a-version-ledger.md) — nothing renders
+  the numbered rail this ADR designed. §9's fetch-on-demand policy survives as
+  the build page's log-section behaviour. Previously: Accepted
 - **Date:** 2026-07-28
 - **Supersedes in part:** [ADR-0013](./ADR-0013-version-run-surface.md)
   decisions 3, 4b, 6 and 9.
@@ -43,7 +46,7 @@ a stage that went wrong says so in the platform's own recorded words.
 
 2. **Provisioning is a RUN-LEVEL stage, first on the rail**, and only when the
    milestone holds gates. This is what the platform's own dispatch predicate
-   says: `OpenProvision == 0 && OpenNonGateWork() > 0`, so an open gate holds
+   says: `OpenProvision == 0 && OpenDevWork() > 0`, so an open gate holds
    *every* session, not the first one. Nesting it inside session 1 would have no
    home for a gate minted mid-run and would force a fix session to either repeat
    the stage or pretend the gate was absent.

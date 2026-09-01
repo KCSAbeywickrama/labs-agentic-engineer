@@ -18,6 +18,7 @@ package provisioning
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -25,14 +26,16 @@ import (
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/contracts/taskmeta"
 	"github.com/wso2/aep/aep-api/internal/delivery"
+	"github.com/wso2/aep/aep-api/internal/dependencies"
+	"github.com/wso2/aep/aep-api/internal/gen"
 	"github.com/wso2/aep/aep-api/internal/platform/ocname"
 	"github.com/wso2/aep/aep-api/internal/spec"
 )
 
 // TestProvisionForBuild_ByKind is the Task-3 contract: the workflow's provision
-// step mints the gate issues once, then authors each dependency BY KIND —
-// external via AuthorWithSecretRef (the no-SM-write author half, gate closed
-// synchronously) and platform-resource via the async Provision (gate left open
+// step mints platform-resource gate issues once, then authors each dependency
+// BY KIND — external via AuthorPreparedValues (with no collection gate) and
+// platform-resource via the async Provision (gate left open
 // for the readiness watcher). It must NOT route external through Provision (that
 // would re-write secrets).
 func TestProvisionForBuild_ByKind(t *testing.T) {
@@ -55,21 +58,21 @@ func TestProvisionForBuild_ByKind(t *testing.T) {
 		t.Fatalf("want no failures, got %+v", fails)
 	}
 
-	// EnsureProvisionIssues minted a gate per distinct external + platform dep.
-	if len(issues.created) != 2 {
-		t.Fatalf("want 2 minted gate issues (stripe + orders-db), got %d", len(issues.created))
+	// Only the platform resource gets a build-time provision gate.
+	if len(issues.created) != 1 {
+		t.Fatalf("want 1 minted gate issue (orders-db), got %d", len(issues.created))
 	}
 
-	// External authored via AuthorWithSecretRef — NOT via Provision (no SM write).
-	if ext.authorRefCalls != 1 {
-		t.Fatalf("external dep must be authored via AuthorWithSecretRef once, got %d", ext.authorRefCalls)
+	// External authored from the design — NOT from the carried request payload,
+	// and NOT via Provision (which would write secrets).
+	if ext.authorPreparedCalls != 1 {
+		t.Fatalf("external dep must be authored via AuthorPreparedValues once, got %d", ext.authorPreparedCalls)
 	}
 	if ext.calls != 0 {
 		t.Fatalf("external dep must NOT go through Provision (that re-writes secrets), got %d Provision calls", ext.calls)
 	}
-	// The staged reference + plain config reach the author call verbatim.
-	if got := ext.authorByEnv["development"]; got.SecretStorePath != "sm://x" || got.Plain["region"] != "us" {
-		t.Fatalf("author byEnv wrong: %+v", got)
+	if got := ext.authorByEnv["development"]; got.SecretStorePath != "" || got.Plain["region"] != "" {
+		t.Fatalf("author must ignore request config/ref and use empty design values: %+v", got)
 	}
 
 	// Platform-resource authored via the async Provision path.
@@ -80,10 +83,8 @@ func TestProvisionForBuild_ByKind(t *testing.T) {
 		t.Fatalf("platform-resource params must flow through, got %+v", plat.params)
 	}
 
-	// The external gate closed synchronously; the platform gate stays open (async).
-	extGate := gateNumber(issues, "stripe")
-	if _, closed := issues.closed[extGate]; !closed {
-		t.Fatalf("external gate #%d must be closed synchronously", extGate)
+	if extGate := gateNumber(issues, "stripe"); extGate != 0 {
+		t.Fatalf("external dependency must not mint a config-collection gate, got #%d", extGate)
 	}
 	platGate := gateNumber(issues, "orders-db")
 	if _, closed := issues.closed[platGate]; closed {
@@ -91,16 +92,14 @@ func TestProvisionForBuild_ByKind(t *testing.T) {
 	}
 }
 
-// TestProvisionForBuild_UsesMintedGateDespiteListRace is the #164 race regression:
+// TestProvisionForBuild_UsesMintedPlatformGateDespiteListRace is the #164 race regression:
 // EnsureProvisionIssues CREATES the gate, but GitHub's label-filtered issue LIST is
 // eventually consistent — a just-minted gate is often NOT yet in ListIssues. The old
 // code re-looked-up the gate via that racy list (findProvisionIssue → 0) so NO
-// provision run was admitted: the OC binding got authored Ready but the gate was
-// never completed → stranded Pending forever. The fix threads the gate number the
-// CreateIssue result RETURNS. Here the fake hides just-created issues from ListIssues
-// (simulating the lag); the external gate must STILL be admitted+completed via the
-// captured number.
-func TestProvisionForBuild_UsesMintedGateDespiteListRace(t *testing.T) {
+// platform provision run would miss its gate. The fix threads the number the
+// CreateIssue result returns. Here the fake hides just-created issues from
+// ListIssues; platform provisioning must still receive the captured number.
+func TestProvisionForBuild_UsesMintedPlatformGateDespiteListRace(t *testing.T) {
 	issues := newFakeIssues(nil)
 	issues.raceNewIssues = true // just-minted gates are invisible to ListIssues (the race)
 	execs := &fakeExecStore{}
@@ -109,8 +108,8 @@ func TestProvisionForBuild_UsesMintedGateDespiteListRace(t *testing.T) {
 	svc := newTestService(issues, execs, fakeDesign{comps: designWithDeps()}, ext, plat, &fakeBindings{})
 
 	fails, err := svc.ProvisionForBuild(context.Background(), "acme", "acme", "proj", "v3", 0, []BuildProvisionInput{
-		{Component: "orders", Dependency: "stripe", Kind: "external-config",
-			Config: map[string]string{"region": "us"}, SecretRefByEnv: map[string]string{"development": "sm://x"}},
+		{Component: "orders", Dependency: "orders-db", Kind: "platform-resource",
+			Parameters: map[string]any{"instances": 1}},
 	})
 	if err != nil {
 		t.Fatalf("ProvisionForBuild: %v", err)
@@ -118,17 +117,51 @@ func TestProvisionForBuild_UsesMintedGateDespiteListRace(t *testing.T) {
 	if len(fails) != 0 {
 		t.Fatalf("want no failures, got %+v", fails)
 	}
-	// The external gate was minted (its number came back from CreateIssue) even though
-	// ListIssues would not return it — it MUST be admitted+completed via that number.
-	extGate := gateNumber(issues, "stripe")
-	if extGate == 0 {
+	platformGate := gateNumber(issues, "orders-db")
+	if platformGate == 0 {
 		t.Fatalf("gate must have been minted")
 	}
-	if _, closed := issues.closed[extGate]; !closed {
-		t.Fatalf("external gate #%d must be completed via the minted number despite the list race", extGate)
+	if row := provisionRowFor(execs, "orders-db"); row == nil || row.IssueNumber != platformGate {
+		t.Fatalf("platform provision row = %+v, want captured gate #%d", row, platformGate)
 	}
-	if r := provisionRowFor(execs, "stripe"); r == nil || r.Status != string(taskmeta.ExecSucceeded) {
-		t.Fatalf("a succeeded provision run must be admitted+completed via the captured gate number, got %+v", r)
+}
+
+// designWithPlatformDeps is a local fixture for the fail-fast test: three
+// platform-resource names that designWithDeps() does not carry, so the
+// provisioner is reached instead of a 404 from findDepInProject.
+func designWithPlatformDeps(names ...string) []spec.DesignComponent {
+	deps := make([]spec.Dependency, 0, len(names))
+	for _, n := range names {
+		deps = append(deps, spec.Dependency{
+			Kind:         spec.DependencyKindPlatformResource,
+			Name:         n,
+			ResourceType: "postgres-cnpg",
+		})
+	}
+	return []spec.DesignComponent{{Name: "orders", Dependencies: deps}}
+}
+
+func TestProvisionForBuild_PermanentPlatformFailureSkipsRemainingPlatformWaits(t *testing.T) {
+	issues := newFakeIssues(nil)
+	plat := &fakePlatProv{err: fmt.Errorf("%w: no release", dependencies.ErrProvisionPermanent)}
+	svc := newTestService(issues, &fakeExecStore{}, fakeDesign{comps: designWithPlatformDeps("bad-a", "bad-b", "bad-c")}, &fakeExtProv{}, plat, &fakeBindings{})
+
+	fails, err := svc.ProvisionForBuild(context.Background(), "acme", "acme", "proj", "v3", 0, []BuildProvisionInput{
+		{Component: "orders", Dependency: "bad-a", Kind: "platform-resource", Approved: true},
+		{Component: "orders", Dependency: "bad-b", Kind: "platform-resource", Approved: true},
+		{Component: "orders", Dependency: "bad-c", Kind: "platform-resource", Approved: true},
+	})
+	if err != nil {
+		t.Fatalf("batch error: %v", err)
+	}
+	if plat.calls != 1 {
+		t.Fatalf("permanent platform failure must skip remaining platform waits, got %d calls", plat.calls)
+	}
+	if len(fails) != 1 {
+		t.Fatalf("want 1 failure, got %+v", fails)
+	}
+	if !errors.Is(fails[0].Err, dependencies.ErrProvisionPermanent) {
+		t.Fatalf("failure must carry ErrProvisionPermanent, got %v", fails[0].Err)
 	}
 }
 
@@ -181,7 +214,7 @@ func TestProvisionForBuild_OrgServiceUnapprovedIsNoop(t *testing.T) {
 	if err != nil || len(fails) != 0 {
 		t.Fatalf("unapproved org-service must be a silent no-op, got fails=%+v err=%v", fails, err)
 	}
-	if ext.authorRefCalls != 0 || plat.calls != 0 {
+	if ext.authorPreparedCalls != 0 || plat.calls != 0 {
 		t.Fatalf("org-service must author nothing")
 	}
 	if len(issues.created) != 0 {
@@ -252,7 +285,8 @@ func TestProvisionForBuild_SettlesReadyGateNotInInputs(t *testing.T) {
 	bindings := &fakeBindings{byName: map[string]*openchoreo.ResourceReleaseBinding{
 		ocname.ExternalResourceBindingName("proj", "orders-db", "development"): readyBinding("host", "port"),
 	}}
-	svc := newTestService(issues, execs, fakeDesign{comps: designWithDeps()}, ext, plat, bindings)
+	design := &countingDesign{comps: designWithDeps()}
+	svc := newTestService(issues, execs, design, ext, plat, bindings)
 
 	fails, err := svc.ProvisionForBuild(context.Background(), "acme", "acme", "proj", "v3", 0, []BuildProvisionInput{
 		{Component: "orders", Dependency: "stripe", Kind: "external-config",
@@ -278,9 +312,14 @@ func TestProvisionForBuild_SettlesReadyGateNotInInputs(t *testing.T) {
 	if plat.calls != 0 {
 		t.Fatalf("settle must NOT re-author the already-ready resource, got %d Provision calls", plat.calls)
 	}
-	// The provisioned dep (stripe, in inputs) is driven by the inputs loop, not double-settled.
-	if n := countProvisionRows(execs, "stripe"); n != 1 {
-		t.Fatalf("stripe (in inputs) must have exactly one provision run, got %d", n)
+	// External authoring has no config-collection gate and therefore no provision row.
+	if n := countProvisionRows(execs, "stripe"); n != 0 {
+		t.Fatalf("stripe must not create a provision run, got %d", n)
+	}
+	// EnsureProvisionIssues, external authoring, and gate settlement each read
+	// the design once. Binding status must not trigger a fourth read.
+	if design.calls != 3 {
+		t.Fatalf("design reads = %d, want 3", design.calls)
 	}
 }
 
@@ -386,9 +425,201 @@ func countProvisionRows(execs *fakeExecStore, depName string) int {
 // which is how the platform itself resolves it.
 func gateNumber(issues *fakeIssues, depName string) int {
 	for _, i := range issues.list {
-		if delivery.HasLabel(i.Labels, delivery.LabelProvisionGate) && gateDepFromLabels(i.Labels) == gateDepFromLabels(gateLabels(depName)) {
+		if delivery.IsDispatchGate(i.Labels) && gateDepFromLabels(i.Labels) == gateDepFromLabels(gateLabels(depName)) {
 			return i.Number
 		}
 	}
 	return 0
+}
+
+// TestProvisionForBuild_RegisteredExternal_AuthorsFromOrgCells: a Registered
+// External resource (non-empty EnvCells) authors the project's Resource
+// instance from org non-secret cells — not design defaults — and records the
+// instance on the value plane. No project OpenBao Provision.
+func TestProvisionForBuild_RegisteredExternal_AuthorsFromOrgCells(t *testing.T) {
+	plane := NewMemoryValuePlane()
+	plane.PutEnvCells("acme", "stripe", []EnvCell{
+		{Environment: "development", Key: "api_key", Status: "configured"},
+		{Environment: "development", Key: "region", Status: "configured", Value: "us"},
+	})
+	ext := &fakeExtProv{}
+	svc := NewService(Deps{
+		Issues:            newFakeIssues(nil),
+		Execs:             &fakeExecStore{},
+		Design:            fakeDesign{comps: designWithDeps()},
+		Repos:             fakeRepos{},
+		ExtProv:           ext,
+		PlatProv:          &fakePlatProv{},
+		Bindings:          &fakeBindings{},
+		CatalogValuePlane: plane,
+	})
+
+	fails, err := svc.ProvisionForBuild(context.Background(), "acme", "acme", "proj", "v1", 0, []BuildProvisionInput{
+		{Component: "orders", Dependency: "stripe", Kind: "external-config"},
+	})
+	if err != nil {
+		t.Fatalf("ProvisionForBuild: %v", err)
+	}
+	if len(fails) != 0 {
+		t.Fatalf("want no failures, got %+v", fails)
+	}
+	if ext.authorPreparedCalls != 1 {
+		t.Fatalf("Registered build must AuthorPreparedValues once, got %d", ext.authorPreparedCalls)
+	}
+	if ext.calls != 0 {
+		t.Fatalf("Registered build must not Provision (project OpenBao), got %d", ext.calls)
+	}
+	got := ext.authorByEnv["development"]
+	if got.Plain["region"] != "us" {
+		t.Fatalf("Registered author Plain = %+v, want region=us from org cells", got.Plain)
+	}
+	if _, hasSecret := got.Plain["api_key"]; hasSecret {
+		t.Fatalf("secret cell must not appear in Plain: %+v", got.Plain)
+	}
+	inst := plane.Instances("acme", "stripe")
+	if len(inst) != 1 || inst[0].Project != "proj" || inst[0].Environment != "development" {
+		t.Fatalf("instances after Registered author = %+v, want {proj, development}", inst)
+	}
+}
+
+// fakeOrgSecrets is an OrgSecretWriter that returns a caller-chosen vault key
+// without talking to SM-API. Tests assert the key is forwarded, not its format.
+type fakeOrgSecrets struct {
+	key string
+}
+
+func (f *fakeOrgSecrets) WriteOrgCatalogSecret(context.Context, string, string, map[string]string) (string, error) {
+	return f.key, nil
+}
+
+func (f *fakeOrgSecrets) OrgCatalogVaultKey(context.Context, string, string) (string, error) {
+	return f.key, nil
+}
+
+type fakeEnvs struct {
+	names []string
+}
+
+func (f fakeEnvs) ListNames(context.Context, string) ([]string, error) {
+	return f.names, nil
+}
+
+// TestProvisionForBuild_RegisteredExternal_AuthorsOrgSecretStorePath: register
+// with a wired OrgSecretWriter persists the returned vault key on the value
+// plane; build authoring passes it as SecretStorePath. No project OpenBao
+// Provision. Secret cells stay out of Plain.
+func TestProvisionForBuild_RegisteredExternal_AuthorsOrgSecretStorePath(t *testing.T) {
+	plane := NewMemoryValuePlane()
+	ext := &fakeExtProv{}
+	writer := &fakeOrgSecrets{key: "from-org-secret-writer"}
+	svc := NewService(Deps{
+		Issues:            newFakeIssues(nil),
+		Execs:             &fakeExecStore{},
+		Design:            fakeDesign{comps: designWithDeps()},
+		Repos:             fakeRepos{},
+		RTCatalog:         &fakeRTCatalog{},
+		ExtProv:           ext,
+		PlatProv:          &fakePlatProv{},
+		Bindings:          &fakeBindings{},
+		CatalogValuePlane: plane,
+		Environments:      fakeEnvs{names: []string{"development"}},
+		OrgSecrets:        writer,
+	})
+
+	_, err := svc.RegisterExternalResource(context.Background(), "acme", gen.RegisterExternalResourceRequest{
+		Name:                    "stripe",
+		Description:             "Stripe payments",
+		ConsumptionInstructions: "Use the secret as Bearer.",
+		Config: []gen.ConfigKeyDTO{
+			{Key: "api_key", Description: "Secret API key", Secret: true},
+			{Key: "region", Description: "Account region"},
+		},
+		EnvValues: []struct {
+			Environment string `json:"environment"`
+			Key         string `json:"key"`
+			Value       string `json:"value"`
+		}{
+			{Environment: "development", Key: "api_key", Value: "sk_live"},
+			{Environment: "development", Key: "region", Value: "us"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("RegisterExternalResource: %v", err)
+	}
+
+	fails, err := svc.ProvisionForBuild(context.Background(), "acme", "acme", "proj", "v1", 0, []BuildProvisionInput{
+		{Component: "orders", Dependency: "stripe", Kind: "external-config"},
+	})
+	if err != nil {
+		t.Fatalf("ProvisionForBuild: %v", err)
+	}
+	if len(fails) != 0 {
+		t.Fatalf("want no failures, got %+v", fails)
+	}
+	if ext.authorPreparedCalls != 1 {
+		t.Fatalf("Registered build must AuthorPreparedValues once, got %d", ext.authorPreparedCalls)
+	}
+	if ext.calls != 0 {
+		t.Fatalf("Registered build must not Provision (project OpenBao), got %d", ext.calls)
+	}
+	got := ext.authorByEnv["development"]
+	if got.SecretStorePath == "" {
+		t.Fatal("AuthorPreparedValues must receive a non-empty SecretStorePath from the org-catalog writer")
+	}
+	if got.SecretStorePath != writer.key {
+		t.Fatalf("SecretStorePath = %q, want the vault key OrgSecretWriter returned", got.SecretStorePath)
+	}
+	if got.Plain["region"] != "us" {
+		t.Fatalf("Registered author Plain = %+v, want region=us from org cells", got.Plain)
+	}
+	if _, hasSecret := got.Plain["api_key"]; hasSecret {
+		t.Fatalf("secret cell must not appear in Plain: %+v", got.Plain)
+	}
+}
+
+// TestProvisionForBuild_RegisteredAfterRestart_AuthorsOrgSecretStorePath:
+// after aep-api restart the value plane is empty. Consumption instructions
+// on the RT still mark the name Registered; synthesize + OrgCatalogVaultKey
+// must pin the org-catalog path so build does not mint a project secret.
+func TestProvisionForBuild_RegisteredAfterRestart_AuthorsOrgSecretStorePath(t *testing.T) {
+	plane := NewMemoryValuePlane()
+	ext := &fakeExtProv{}
+	writer := &fakeOrgSecrets{key: "org-catalog-github-development"}
+	svc := NewService(Deps{
+		Issues: newFakeIssues(nil),
+		Execs:  &fakeExecStore{},
+		Design: fakeDesign{comps: designWithDeps()},
+		Repos:  fakeRepos{},
+		RTCatalog: &fakeRTCatalog{defs: []openchoreo.ExternalResourceDefinition{{
+			Name: "stripe",
+			Config: []openchoreo.ExternalResourceConfigKey{
+				{Key: "api_key", Secret: true},
+				{Key: "region"},
+			},
+			ConsumptionInstructions: "Use the secret as Bearer.",
+		}}},
+		ExtProv:           ext,
+		PlatProv:          &fakePlatProv{},
+		Bindings:          &fakeBindings{},
+		CatalogValuePlane: plane,
+		Environments:      fakeEnvs{names: []string{"development"}},
+		OrgSecrets:        writer,
+	})
+
+	fails, err := svc.ProvisionForBuild(context.Background(), "acme", "acme", "proj", "v1", 0, []BuildProvisionInput{
+		{Component: "orders", Dependency: "stripe", Kind: "external-config"},
+	})
+	if err != nil {
+		t.Fatalf("ProvisionForBuild: %v", err)
+	}
+	if len(fails) != 0 {
+		t.Fatalf("want no failures, got %+v", fails)
+	}
+	got := ext.authorByEnv["development"]
+	if got.SecretStorePath != writer.key {
+		t.Fatalf("SecretStorePath = %q, want reconstructed org-catalog key %q", got.SecretStorePath, writer.key)
+	}
+	if ext.calls != 0 {
+		t.Fatalf("Registered restart build must not Provision (project OpenBao), got %d", ext.calls)
+	}
 }

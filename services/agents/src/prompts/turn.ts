@@ -34,7 +34,7 @@
  * all send a `TurnSpec` and none of them composes.
  */
 
-import type { PlanContextFile, PlanScope, Toolset, TurnSpec } from "@aep/agent-stream";
+import type { PlanContextFile, PlanScope, Toolset, TurnAim, TurnSpec } from "@aep/agent-stream";
 
 // --- Wording -----------------------------------------------------------------
 
@@ -47,6 +47,23 @@ const START_INSTRUCTION = "Load the start skill and follow it.";
  * tracker`) or captured at project creation and read back from the descriptor.
  */
 const IDEA_PREFIX = "\n\nThe user's idea for this project:\n\n";
+
+/**
+ * The documents the user attached at project create, appended as PATHS. They
+ * are NOT spec content — nothing commits them (console ADR-0017); the platform
+ * overlays them into the turn's snapshot, so they are already in front of the
+ * agent and this points rather than pastes. It also says what they are FOR,
+ * because "some files exist" is not an instruction.
+ *
+ * Worded for start AND flow turns, which both carry references: "read them
+ * before interviewing" is meaningless on a `/design` turn, which interviews
+ * nobody. The shared line states their standing; each turn's own skill says
+ * what to do with them.
+ */
+const REFERENCES_PREFIX =
+  "\n\nThe user attached reference documents for this project. They are the " +
+  "primary brief for what is being built, and the idea above is the anchor. " +
+  "Read them before you plan or ask anything they already answer:\n\n";
 
 /**
  * The ONE surviving content steer for spec turns (#373): flow behaviour lives
@@ -68,6 +85,34 @@ const TARGET_CLOSE = ")";
 const PREVIOUS_TURN_FAILED_NOTE =
   "Note: your previous turn's changes were NOT applied; the workspace reflects the repository state.";
 
+/**
+ * The aimed-turn preamble (#666). Leads the instruction, so the model knows
+ * WHAT it is being pointed at before it reads what to do with it.
+ *
+ * The names are LOCATORS, not content (console ADR-0024). They are how the
+ * selection read when the user made it, and the agent is a live peer in the
+ * same room — the user may have kept typing, a teammate may have edited. So the
+ * note says to resolve them against the document as it stands and to SAY SO on
+ * a miss: an agent that guesses which paragraph was meant is the one failure
+ * this whole shape exists to avoid.
+ */
+const AIM_CHANGE =
+  "The user has selected part of a document and wants it changed. Their request follows the selection.";
+const AIM_DISCUSS =
+  "The user has selected part of a document and wants to talk it through BEFORE anything changes. Take up their point about the selection; do not edit the document in this turn unless they ask you to.";
+const AIM_RESOLVE_RULE =
+  "Find these in the document as it stands now — the names above are how the selection read when they made it, and the document may have moved on since. If you cannot find one, say so and ask; never guess which part was meant.";
+/**
+ * The fence, decided on #654: the selection is the SUBJECT, not a cage. A hard
+ * fence was rejected — a spec has legitimate ripples (rename an actor and the
+ * stories mention it; settle a decision and its entry leaves Open Questions),
+ * and the product's safety net is visibility, review marks and undo, not a
+ * cage. What the rule forbids is the other failure: unrelated tidying the user
+ * never pointed at. Change turns only — a Discuss edits nothing.
+ */
+const AIM_FENCE_RULE =
+  "The selection is the subject, not a cage: make the requested change at the named place. Touch other parts only where this change makes them wrong — consistency, never improvement — and leave everything else exactly as it is. If the right fix lies somewhere other than the selection, make it there and say so plainly in your reply.";
+
 /** No interview is possible (the playground's headless phases). */
 const HEADLESS_NOTE =
   "\n\nNo interview is possible in this run: do not call ask_question or ask_questions. Generate on stated assumptions and mark each assumption as assumed in the document.";
@@ -82,6 +127,36 @@ const PLAN_INSTRUCTION =
   'Plan the implementation Tasks for this project. Load the task-planning skill and follow it. The design is under specs/design/ and the requirements under specs/requirements/. When a "Milestone scope" section lists in-scope stories, cover every story marked NEEDS TASKS and leave COVERED stories\' Tasks untouched. Existing open Tasks (if any) are listed at the end of this message for reference — add Tasks ONLY for work they do not cover, and do not recreate or update the listed Tasks in this turn.';
 
 const PLAN_CONTEXT_HEADER = "\n\n## Existing open Tasks in this version (reference)\n";
+
+/**
+ * Commands whose token is NOT the skill they load (#579).
+ *
+ * A command names the user's INTENT — `/feature` says what they came to do —
+ * while a skill name is engineer-facing and routes by catalog description.
+ * `amend` never needed renaming; it needed to stop being what the user reads.
+ * So the three scoped edits share the one scoped-edit playbook and arrive at it
+ * carrying the branch they want, with whatever the user clicked as its subject.
+ *
+ * The mapping is WORDING — "which branch of which playbook, said how" — so it
+ * lives here with the rest of it, not in the parsers, which only ever yield
+ * facts (`@aep/contracts/commands`, `internal/spec/start_command.go`).
+ *
+ * `/settle` and `/design` are absent because their token already IS their
+ * skill; an unlisted token stays a plain skill load, which is what keeps
+ * `/<org-skill>` working.
+ *
+ * Read through `commandFlow`, never indexed directly: the key is a token the
+ * user typed, and `/constructor` reaching `Object.prototype` would turn a
+ * skill-not-found — which the agent reports cleanly — into a thrown turn.
+ */
+const COMMAND_FLOWS: Record<string, { skill: string; scope: (subject: string) => string }> = {
+  feature: { skill: "amend", scope: (s) => (s ? `Add a feature: ${s}` : "Add a feature.") },
+  actor: { skill: "amend", scope: (s) => (s ? `Add an actor: ${s}` : "Add an actor.") },
+  expand: {
+    skill: "amend",
+    scope: (s) => (s ? `Go deeper on this feature: ${s}` : "Go deeper on a feature."),
+  },
+};
 
 /**
  * SUPPORTING skills a flow needs beyond its own (#335 latency). The flow's own
@@ -103,10 +178,16 @@ const FLOW_SUPPORTING_SKILLS: Record<string, string[]> = {
   // document they both write. `prd-contract` is a sibling skill rather than a
   // `start` reference so an amend turn can hold the contract without also
   // inlining the cold-start interview playbook, whose frame ("the idea comes to
-  // you", "asks exactly once") is wrong for a scoped edit.
+  // you", the coverage walk over an empty document) is wrong for a scoped edit.
   start: ["grilling", "prd-contract"],
   amend: ["grilling", "prd-contract"],
-  // The rest of the design lineup, in the order the `design` skill walks it.
+  // `/settle` revises a document that already exists — it asks, then writes the
+  // answer where it belongs — so it needs the same two as its siblings.
+  settle: ["grilling", "prd-contract"],
+  // `grilling` first: the design flow interviews too (#578 removed the
+  // "do not interview the user again" clause), and the question mechanics are
+  // no more optional here than on a start turn. Then the rest of the design
+  // lineup, in the order the `design` skill walks it.
   // `design` names every one, so the model's first act was always to batch-load
   // the set: one model step, and ~70KB arriving as a tool RESULT — landing AFTER
   // the turn prompt's cache breakpoint, where it is re-prefilled per step rather
@@ -118,8 +199,18 @@ const FLOW_SUPPORTING_SKILLS: Record<string, string[]> = {
   // turn — there is nothing to condition on when the prompt is composed, and a
   // cached read costs a tenth of a re-prefill. Org-authored design skills stay
   // lazy: this map is flow wording and cannot know a given org's catalog.
-  design: ["cell-design", "architecture", "security-design", "openapi-conventions", "wireframes", "validation-criteria"],
+  design: ["grilling", "cell-design", "architecture", "security-design", "openapi-conventions", "wireframes", "validation-criteria"],
 };
+
+/** The branch a command names, or undefined for a token that IS its skill. */
+function commandFlow(token: string): { skill: string; scope: (subject: string) => string } | undefined {
+  return Object.hasOwn(COMMAND_FLOWS, token) ? COMMAND_FLOWS[token] : undefined;
+}
+
+/** The extras a flow inlines beyond its own skill. */
+function supportingSkills(skill: string): string[] {
+  return Object.hasOwn(FLOW_SUPPORTING_SKILLS, skill) ? (FLOW_SUPPORTING_SKILLS[skill] ?? []) : [];
+}
 
 // --- Composition -------------------------------------------------------------
 
@@ -131,19 +222,43 @@ export interface TurnModifiers {
   previousTurnFailed?: boolean | undefined;
   /** No interview is possible in this run. */
   headless?: boolean | undefined;
+  /**
+   * What the user pointed at, and what for (#666). A FACT the caller supplies —
+   * the console never formats these words, because a preamble written there
+   * would have to ride `instruction` and would then appear in the transcript as
+   * something the user said and did not.
+   */
+  aim?: TurnAim | undefined;
 }
 
 /**
  * A `TurnSpec` plus its modifiers, as the instruction text the agent receives.
  *
- * Shape: `[failure note] <body> [spec-paths rule] [target] [headless note]`.
+ * Shape: `[failure note] [aim note] <body> [spec-paths rule] [target] [headless note]`.
  * The spec-paths rule is a property of the KIND — plan turns write no spec
  * files, so they never carry it — which is why it is not a caller flag.
  */
 export function composeInstruction(turn: TurnSpec, mods: TurnModifiers = {}): string {
   const body = turn.kind === "plan" ? planBody(turn) : specBody(turn) + SPEC_PATHS_RULE + target(mods.target);
   const lead = mods.previousTurnFailed ? PREVIOUS_TURN_FAILED_NOTE + "\n\n" : "";
-  return lead + body + (mods.headless ? HEADLESS_NOTE : "");
+  return lead + aimNote(mods.aim) + body + (mods.headless ? HEADLESS_NOTE : "");
+}
+
+/**
+ * The selection, as the model reads it. Empty for every unaimed turn, so an
+ * ordinary chat message is byte-identical to what it was before this existed.
+ */
+export function aimNote(aim: TurnAim | undefined): string {
+  if (!aim) return "";
+  const lead = aim.intent === "discuss" ? AIM_DISCUSS : AIM_CHANGE;
+  const rows = aim.anchor.nodes
+    .map((n) => {
+      const where = n.context ? ` (under ${n.context})` : "";
+      return `- the ${n.kind} "${n.name}"${where}`;
+    })
+    .join("\n");
+  const fence = aim.intent === "change" ? `${AIM_FENCE_RULE}\n\n` : "";
+  return `${lead}\n\nIn ${aim.anchor.file}:\n${rows}\n\n${AIM_RESOLVE_RULE}\n\n${fence}`;
 }
 
 /** The instruction head for every kind that edits the spec bundle. */
@@ -153,17 +268,27 @@ function specBody(turn: Exclude<TurnSpec, { kind: "plan" }>): string {
       // Ordinary chat rides verbatim — the user's words are the instruction.
       return turn.text;
     case "flow": {
-      // A `/<skill>` command is a keyboard shortcut for "load a skill and
-      // follow it". An unknown skill is NOT an error here: `loadSkill` reports
-      // not-found and the agent says so, which is a better failure than a
-      // client-side allowlist that goes stale against the org's catalog.
-      const base = `Load the ${turn.skill} skill and follow it.`;
-      return turn.text?.trim() ? `${base}\n\n${turn.text.trim()}` : base;
+      // A `/<command>` is a keyboard shortcut for "load a skill and follow it".
+      // An unknown skill is NOT an error here: `loadSkill` reports not-found
+      // and the agent says so, which is a better failure than a client-side
+      // allowlist that goes stale against the org's catalog.
+      const command = commandFlow(turn.skill);
+      const base = `Load the ${command?.skill ?? turn.skill} skill and follow it.`;
+      // A command that names a BRANCH says which one, and carries whatever the
+      // user clicked as the branch's subject; everything else passes the user's
+      // trailing text through untouched.
+      const scoped = command ? command.scope(turn.text?.trim() ?? "") : turn.text?.trim();
+      const withText = scoped ? `${base}\n\n${scoped}` : base;
+      // Reference documents ride flows the same way they ride start turns:
+      // a flow generates artifacts, and an attached sketch IS the brief for
+      // wireframes. No documents → byte-identical to a plain flow turn.
+      return withText + references(turn.references);
     }
     case "start":
       // A blank idea appends NOTHING, leaving a bare skill load — the start
-      // skill then asks the user for it.
-      return START_INSTRUCTION + idea(turn.idea);
+      // skill then asks the user for it. References behave the same way: no
+      // documents, no paragraph, so a docless kickoff is unchanged.
+      return START_INSTRUCTION + idea(turn.idea) + references(turn.references);
   }
 }
 
@@ -175,6 +300,11 @@ function planBody(turn: Extract<TurnSpec, { kind: "plan" }>): string {
 function idea(raw: string | undefined): string {
   const trimmed = (raw ?? "").trim();
   return trimmed === "" ? "" : IDEA_PREFIX + trimmed;
+}
+
+function references(paths: string[] | undefined): string {
+  const listed = (paths ?? []).map((p) => p.trim()).filter((p) => p !== "");
+  return listed.length === 0 ? "" : REFERENCES_PREFIX + listed.map((p) => `- ${p}`).join("\n");
 }
 
 function target(raw: string | undefined): string {
@@ -228,7 +358,7 @@ function instructedSkill(turn: TurnSpec): string | undefined {
     case "plan":
       return "task-planning";
     case "flow":
-      return turn.skill;
+      return commandFlow(turn.skill)?.skill ?? turn.skill;
     case "chat":
       return undefined;
   }
@@ -246,10 +376,42 @@ function instructedSkill(turn: TurnSpec): string | undefined {
  * name that resolves to nothing is skipped silently — `loadSkill` then reports it
  * missing exactly as before.
  */
+/**
+ * The files the user attached to THIS message (#428), named so the model can
+ * resolve a pronoun to one.
+ *
+ * The attachment already rides the same user message as a document block, so the
+ * model can read it without being told. What it cannot do reliably is work out
+ * that "add this as a separate form" REFERS to the document — a bare `this` with
+ * no antecedent in the text reads as ambiguous, and the honest response to an
+ * ambiguous instruction is to ask, which is exactly what a live turn did.
+ * Naming the files supplies the antecedent.
+ *
+ * Deliberately separate from the reference-document paragraph: a reference was
+ * attached at project CREATE and is standing context, an attachment belongs to
+ * one message. Saying "attached for this project" about a screenshot the user
+ * just dropped would misdescribe it.
+ *
+ * Paths are not used here — an attachment has none, because nothing stores it
+ * (console ADR-0019).
+ */
+export function attachmentsNote(names: string[] | undefined): string {
+  const listed = (names ?? []).map((n) => n.trim()).filter((n) => n !== "");
+  if (listed.length === 0) return "";
+  return (
+    `The user attached ${listed.length === 1 ? "this file" : "these files"} to this message` +
+    `, and ${listed.length === 1 ? "it is" : "they are"} included above as document content — ` +
+    `read ${listed.length === 1 ? "it" : "them"} before asking about anything ` +
+    `${listed.length === 1 ? "it already answers" : "they already answer"}:\n` +
+    listed.map((n) => `- ${n}`).join("\n") +
+    "\n\n"
+  );
+}
+
 export function eagerSkillsFor(turn: TurnSpec): string[] {
   const instructed = instructedSkill(turn);
   if (instructed === undefined) return [];
-  return [instructed, ...(FLOW_SUPPORTING_SKILLS[instructed] ?? [])];
+  return [instructed, ...supportingSkills(instructed)];
 }
 
 
@@ -260,4 +422,17 @@ export function eagerSkillsFor(turn: TurnSpec): string[] {
  */
 export function toolsetFor(turn: TurnSpec): Toolset {
   return turn.kind === "plan" ? "task-plan" : "files";
+}
+
+/**
+ * Synthetic Marketplace register project (console `MARKETPLACE_CHAT_PROJECT`).
+ * Follow-up answers on this thread are classified as `chat`, not the
+ * `/register-external-resource` flow — they still need the draft tool.
+ */
+export const MARKETPLACE_REGISTER_PROJECT = "__marketplace_register__";
+
+/** Marketplace register chat needs a draft tool the files set does not carry. */
+export function wantsRegisterDraftTool(turn: TurnSpec, projectId?: string): boolean {
+  if (projectId === MARKETPLACE_REGISTER_PROJECT) return true;
+  return turn.kind === "flow" && turn.skill === "register-external-resource";
 }

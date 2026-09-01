@@ -22,6 +22,7 @@ import (
 	"log/slog"
 
 	"github.com/wso2/aep/aep-api/internal/dependencies"
+	"github.com/wso2/aep/aep-api/internal/platform/apierr"
 	"github.com/wso2/aep/aep-api/internal/spec"
 )
 
@@ -29,10 +30,10 @@ import (
 // plain / secret by the UNION of the dependency's config schema across every
 // component in the project's committed design.json that declares it (the user
 // never marks secrecy; secret always wins on conflict), writes the secrets to
-// SM-API + authors the OC external Resource model, then completes the
-// provision gate synchronously — the external ResourceType is
-// readyWhen:${true}, so the binding is Ready as soon as OC reconciles it, and
-// upstream likewise treats values-collected as immediately deployed.
+// SM-API + authors the OC external Resource model, then completes an existing
+// provision gate when one exists. Builds do not mint an external value-collection
+// gate; the external ResourceType remains readyWhen:${true}
+// while AEP reports value readiness separately as configured/unset.
 //
 // orgID is the OC namespace + issues org; ocOrgID is the SM-API org id (the
 // ctx must carry the user JWT — the SM-API writer reads the ouId claim for the
@@ -44,9 +45,8 @@ func (s *Service) SaveValues(ctx context.Context, orgID, ocOrgID, projectID, dep
 	// declares an external dependency of this name — not just the first
 	// match — so a key marked secret on ANY component is never misclassified
 	// plain merely because a different, secret-blind component happened to be
-	// scanned first (the CRITICAL leak this fixes). This mirrors the build
-	// path's secretKeysByDep (internal/feature/build/inputs_coordinator.go),
-	// which merges the same way across every component. A design read
+	// scanned first (the CRITICAL leak this fixes). Build authoring and readiness
+	// consume the same UnionExternalConfigFor/Keys helpers. A design read
 	// failure still fails here (the underlying design-read error) — a value
 	// is never misclassified plain for lack of a schema.
 	comps, err := s.design.ReadDesignComponents(ctx, orgID, projectID)
@@ -57,7 +57,12 @@ func (s *Service) SaveValues(ctx context.Context, orgID, ocOrgID, projectID, dep
 	if err != nil {
 		return err
 	}
-	unionConfig := spec.UnionExternalConfigFor(comps, depName)
+	// Registered External resources hold values on the org catalog plane;
+	// project POST .../values is Project External only.
+	if s.catalogValuePlane != nil && len(s.catalogValuePlane.EnvCells(orgID, depName)) > 0 {
+		return apierr.Conflict("values live on the org record")
+	}
+	unionConfig, _ := spec.UnionExternalConfigFor(comps, depName)
 
 	// The external definition the RT is authored against is built straight off
 	// the design — name + the matched dependency's Description + the UNION
@@ -73,9 +78,8 @@ func (s *Service) SaveValues(ctx context.Context, orgID, ocOrgID, projectID, dep
 		byEnv[env] = splitBySchema(unionConfig, vals)
 	}
 
-	// Admit a provision run for the gate issue (when one exists). Values are
-	// collected via the drawer AFTER planning, so the gate issue normally exists;
-	// provisioning without one still authors the resource, just with no gate to close.
+	// Resolve a legacy gate if one exists. New builds do not mint external value
+	// gates, so the normal path authors the resource without a provision row.
 	issueNumber, _, err := s.findProvisionIssue(ctx, orgID, projectID, depName)
 	if err != nil {
 		return err
@@ -113,6 +117,19 @@ func (s *Service) SaveValues(ctx context.Context, orgID, ocOrgID, projectID, dep
 		}
 		s.completeProvisionRow(ctx, orgID, projectID, depName, issueNumber, execID,
 			fmt.Sprintf("External resource `%s` configured (OC binding `%s`).", depName, ref))
+	}
+	// The deploy gate's wake-up (ADR-0023). Last, and only on the success path:
+	// the notification says "values landed", so it must not be sent for values
+	// that did not.
+	if s.valuesSaved != nil {
+		if err := s.valuesSaved.ValuesSaved(ctx, orgID, projectID); err != nil {
+			// The values are already durable, so a failed wake-up must not turn a
+			// successful save into an apparent failure — the caller would retry a
+			// write that already landed. The parked run's wait-poll re-derives
+			// readiness on its own; the signal only makes it prompt.
+			slog.WarnContext(ctx, "provisioning: wake parked run after values saved failed",
+				"org", orgID, "project", projectID, "error", err)
+		}
 	}
 	return nil
 }

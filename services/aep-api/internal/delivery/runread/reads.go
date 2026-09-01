@@ -89,9 +89,15 @@ func runView(row *delivery.MilestoneRun, cycles []delivery.RunCycle) gen.Milesto
 		ID:              row.ID,
 		MilestoneNumber: int64(row.MilestoneNumber),
 		MilestoneTitle:  row.MilestoneTitle,
+		Kind:            gen.MilestoneRunViewKind(row.Kind),
 		Origin:          gen.MilestoneRunViewOrigin(row.Origin),
 		State:           gen.MilestoneRunViewState(row.State),
 		TerminalReason:  row.TerminalReason,
+		// Only the deploy gate sets these, and only while parked. They ride the
+		// run story because that is what the build card renders: a `waiting` run
+		// whose reason did not travel with it reads as a hung one.
+		WaitingReason:        gen.MilestoneRunViewWaitingReason(row.WaitingReason),
+		BlockingDependencies: row.BlockingDependencies,
 		Budgets: gen.RunBudgets{
 			CyclesTotal:      int64(row.CyclesTotal),
 			CycleCeiling:     int64(row.CycleCeiling),

@@ -58,8 +58,100 @@ export function buildCycles(cycles: RunCycleView[]): RunCycleView[] {
   );
 }
 
+/**
+ * Has any of this VERSION's work actually merged?
+ *
+ * `mergeSha` is the platform's single record of a merge — the contract is
+ * explicit that there is no "merged" verdict because *"a merge is recorded by
+ * the merge SHA, so a second spelling of it could disagree with the first"*.
+ *
+ * The tempting substitute is the task list: count the tasks whose
+ * `derivedStatus` is `merged`. It is wrong, and a deployed build proved it. That
+ * field is a TWO-VALUE vocabulary — the issue is open, or it is closed — so a
+ * cancelled run whose issues were closed without a pull request ever opening
+ * (`prNumber` 0, `mergeSha` empty) reads as fully "merged" while nothing
+ * whatsoever landed in the repo.
+ *
+ * Every run of the version, not just the newest, and deploying proved that
+ * too: a version whose coding cycle merged pull request #15 was later reworked
+ * by a `task` run that opened no cycle at all. A merge is a permanent fact
+ * about the repository — a later run cannot un-merge it — so asking only the
+ * newest run made merged code look unmerged.
+ *
+ * Validation cycles are excluded by `buildCycles`: a validation cycle's
+ * `mergeSha` is the commit it JUDGED, not one it produced.
+ */
+export function hasMergedWork(runs: MilestoneRunView[] | undefined): boolean {
+  return mergedCycle(runs) !== undefined;
+}
+
+/**
+ * The newest build session whose pull request MERGED, across the version's runs.
+ *
+ * This is the cycle that built something: `list-cycle-builds` answers empty for
+ * any cycle whose `mergeSha` is empty ("a cycle whose pull request has not
+ * merged has nothing to have built"), and the platform matches component builds
+ * by that SHA. Handing it the newest cycle instead — which is routinely a
+ * validation cycle, or a later coding cycle that never merged — asked the
+ * cluster about a commit that produced nothing, so the Build logs section sat
+ * on "No component builds were produced for this version" forever.
+ *
+ * Runs arrive newest-first and cycles oldest-first, so both are walked
+ * backwards to find the newest merge.
+ */
+export function mergedCycle(
+  runs: MilestoneRunView[] | undefined,
+): RunCycleView | undefined {
+  for (const run of runs ?? []) {
+    const merged = buildCycles(run.cycles ?? [])
+      .reverse()
+      .find((c) => Boolean(c.mergeSha));
+    if (merged) return merged;
+  }
+  return undefined;
+}
+
+/**
+ * Is a build session open right now — is there anything for the agent log to
+ * stream?
+ *
+ * NOT the build's status, which is what the "streaming" chip used to read. A
+ * run stays `in_progress` through everything that happens after its agent
+ * stops: the merge, the component builds, the deployment. The chip therefore
+ * kept claiming a live stream long after the coding agent had finished, which
+ * is exactly when there is nothing left to stream.
+ */
+export function isAgentStreaming(runs: MilestoneRunView[] | undefined): boolean {
+  const newest = (runs ?? [])[0];
+  if (!newest || isTerminalRun(newest.state)) return false;
+  return buildCycles(newest.cycles ?? []).some((c) => !c.endedAt);
+}
+
 export function isTerminalRun(state: string): boolean {
   return TERMINAL_RUN_STATES.has(state);
+}
+
+/**
+ * The kind each retired origin implied — the console's mirror of
+ * delivery.RunKindForOrigin, and the only thing `origin` is still read for.
+ *
+ * A run row recorded before the kind existed carries an origin and nothing else,
+ * so falling back to it is what keeps a version's history legible across the
+ * change rather than showing every old run as an unrecognised kind.
+ */
+const KIND_FOR_ORIGIN: Record<string, string> = {
+  "spec-build": "dev",
+  "incident-adoption": "task",
+  revalidate: "validation",
+};
+
+/**
+ * What this run DOES: `dev` delivers a version, `task` works a defect inside one
+ * already delivered, `validation` re-judges a shipped version. Every predicate on
+ * this page is written on it, because the origin only says where a run came from.
+ */
+export function runKind(run: MilestoneRunView): string {
+  return run.kind || (KIND_FOR_ORIGIN[run.origin] ?? "");
 }
 
 /**
@@ -74,17 +166,41 @@ export function isTerminalRun(state: string): boolean {
  * run that died before dispatching, and false here, because a validation cycle was
  * dispatched, ran, and merged.
  *
- * Not a plain origin test, and that is the whole subtlety: a revalidation left at
+ * Not a plain kind test, and that is the whole subtlety: a validation run left at
  * the default attempt allowance REPAIRS what it finds — one issue per failed
  * criterion, then an ordinary coding cycle, then builds. Once it has done that it
  * is a build story like any other, so it is judged on what it actually did.
  *
- * The converse also has to hold: a spec build that died before dispatching has no
+ * The converse also has to hold: a dev run that died before dispatching has no
  * build sessions either, and it MUST stay — "nothing was ever dispatched" is the
- * true and useful thing to say about it. Hence the origin clause first.
+ * true and useful thing to say about it. Hence the kind clause first.
  */
 export function isDeliveryRun(run: MilestoneRunView): boolean {
-  return run.origin !== "revalidate" || buildCycles(run.cycles ?? []).length > 0;
+  return (
+    runKind(run) !== "validation" || buildCycles(run.cycles ?? []).length > 0
+  );
+}
+
+/**
+ * The external dependencies a run is parked on at the DEPLOY GATE (ADR-0023),
+ * or null when it is not parked there.
+ *
+ * A run that reaches the gate short of a value stops in `waiting` — the state
+ * that already means "something outside the platform is needed" — and only a
+ * person can end it. `waiting` on its own therefore reads as a hang, so the
+ * build page names the park and points at where the values go.
+ *
+ * An empty array is a REAL answer, not an absence: the run is parked and the
+ * row named nothing (an older row, or a lost write). Returning null for that
+ * would silence the notice on the one run that most needs it, which is why
+ * this is `string[] | null` rather than a possibly-empty list.
+ */
+export function externalValuesPark(
+  run: MilestoneRunView | undefined,
+): string[] | null {
+  if (!run || run.state !== "waiting") return null;
+  if (run.waitingReason !== "external-values") return null;
+  return run.blockingDependencies ?? [];
 }
 
 /**
@@ -276,19 +392,21 @@ export function buildSessionLabel(cycle: RunCycleView, index: number): string {
 }
 
 /**
- * What started this run. A milestone can see several SEQUENTIAL runs — the
- * spec build, then an incident adoption — and every run card is titled with the
- * same milestone title, so the origin is the only thing that tells them apart.
- * An origin this build predates is shown raw rather than mislabelled.
+ * What this run is. A milestone can see several SEQUENTIAL runs — the build that
+ * delivered it, then an incident fix, then a re-judgement — and every run card is
+ * titled with the same milestone title, so the kind is the only thing that tells
+ * them apart. A kind this build predates is shown raw rather than mislabelled.
  */
-export function runOriginLabel(origin: string): string {
-  switch (origin) {
-    case "spec-build":
+export function runKindLabel(kind: string): string {
+  switch (kind) {
+    case "dev":
       return "Spec build";
-    case "incident-adoption":
+    case "task":
       return "Incident";
+    case "validation":
+      return "Revalidation";
     default:
-      return origin;
+      return kind;
   }
 }
 

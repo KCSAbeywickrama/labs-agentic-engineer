@@ -29,6 +29,13 @@ type FileMeta = components["schemas"]["FileMeta"];
 
 export type SpecGroup = "requirements" | "designs" | "validation";
 
+/**
+ * The PRD. Named here because more than one surface has to recognise it: the
+ * file list pins it to the top of its group, and the editor carries the code
+ * lenses for this path alone.
+ */
+export const PRD_PATH = "specs/requirements/prd.md";
+
 export interface SpecFileEntry {
   /** Full repo-relative path (e.g. specs/requirements/prd.md) — also the
    *  collab doc key and the Files API read path. */
@@ -46,12 +53,37 @@ const GROUP_BY_FOLDER: Record<string, SpecGroup> = {
   validation: "validation",
 };
 
-export function toSpecEntry(meta: FileMeta): SpecFileEntry | null {
-  // specs/<folder>/<…file>: needs the prefix, a known folder, and a file name
-  // beyond it (segments.length >= 3).
-  const segments = meta.path.split("/");
+// Reference documents (#383) are transient turn inputs, never committed
+// (ADR-0017), so nothing under here should ever reach the spec view. The guard
+// stays anyway: projects created under the feature's v1 DID commit them, and
+// without it those paths fall through to the `requirements` group, become
+// selectable, and pour a PDF's bytes into the editor pane — the exact incident
+// #427 was opened to fix.
+const REFERENCES_PREFIX = "specs/requirements/references/";
+
+/**
+ * The spec-view group a path would belong to, or null for a path the view
+ * hides. The declared plan (#576) sorts its entries into rail sections with
+ * this — ONE definition of the folder rule, shared with `toSpecEntry` below,
+ * so a planned path and the file it becomes can never land in different
+ * sections.
+ *
+ * specs/<folder>/<…file>: needs the prefix, a known folder, and a file name
+ * beyond it (segments.length >= 3). A trailing slash means the path names a
+ * DIRECTORY, not a file: it clears the length check (the empty last segment
+ * counts) and would otherwise become a selectable entry with no file name.
+ * Checked before the references branch below, so it holds for every group.
+ */
+export function specGroupOf(path: string): SpecGroup | null {
+  const segments = path.split("/");
   if (segments[0] !== "specs" || segments.length < 3) return null;
-  const group = GROUP_BY_FOLDER[segments[1] ?? ""];
+  if (segments[segments.length - 1] === "") return null;
+  if (path.startsWith(REFERENCES_PREFIX)) return null;
+  return GROUP_BY_FOLDER[segments[1] ?? ""] ?? null;
+}
+
+export function toSpecEntry(meta: FileMeta): SpecFileEntry | null {
+  const group = specGroupOf(meta.path);
   if (!group) return null;
   return { path: meta.path, sha: meta.sha, group };
 }

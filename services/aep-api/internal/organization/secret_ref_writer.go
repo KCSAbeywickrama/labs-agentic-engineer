@@ -84,8 +84,8 @@ func (w *SecretRefWriter) Enabled() bool {
 
 // WriteAnthropic uploads one role's per-org Anthropic API key to SM-API and
 // stamps the triplet onto that role's `org_anthropic_credentials` row. ctx must
-// carry the inbound user JWT (the SM-API provider reads it via the
-// jwtassertion middleware context helper).
+// carry the inbound user JWT — Connect and POST /build run on that ctx (the
+// SM-API provider reads it via the jwtassertion middleware context helper).
 //
 // The role picks the SM-API EntityName, so the default and coding keys occupy
 // separate vault paths and a rotation of one can never clobber the other.
@@ -221,6 +221,43 @@ func (w *SecretRefWriter) WriteExternalResourceSecret(ctx context.Context, ocOrg
 	return vaultKey, secretRefName, nil
 }
 
+// orgCatalogProjectName is the SM-API project sentinel for Registered External
+// org-catalog secrets. It is not a real project; the vault layout is the same
+// WriteExternalResourceSecret path.
+const orgCatalogProjectName = "org-catalog"
+
+// WriteOrgCatalogSecret uploads Registered External secret fields using the
+// existing vault layout with projectName "org-catalog" and returns the vault
+// key the ResourceType CEL reads from the binding (secretStorePath).
+func (w *SecretRefWriter) WriteOrgCatalogSecret(ctx context.Context, ocOrgID, entityName string, data map[string]string) (string, error) {
+	vaultKey, _, err := w.WriteExternalResourceSecret(ctx, ocOrgID, orgCatalogProjectName, entityName, data)
+	return vaultKey, err
+}
+
+// OrgCatalogVaultKey reconstructs the org-catalog vault path for an already-
+// written Registered External secret (entityName is `<name>-<env>`) without
+// writing. Used after aep-api restart when the process-local value plane is
+// empty but OpenBao still holds the org-catalog record.
+func (w *SecretRefWriter) OrgCatalogVaultKey(ctx context.Context, ocOrgID, entityName string) (string, error) {
+	if w == nil || !w.Enabled() {
+		return "", nil
+	}
+	if strings.TrimSpace(ocOrgID) == "" || strings.TrimSpace(entityName) == "" {
+		return "", errors.New("secret-ref writer: ocOrgID and entityName required")
+	}
+	orgUUID, err := orgUUIDForSecretLocation(ctx)
+	if err != nil {
+		return "", fmt.Errorf("secret-ref writer: org-catalog vault key (%s): %w", entityName, err)
+	}
+	loc := secretmanagersvc.SecretLocation{
+		OrgName:               orgUUID,
+		ControlPlaneNamespace: ocOrgID,
+		ProjectName:           orgCatalogProjectName,
+		EntityName:            entityName,
+	}
+	return w.resolveVaultKey(ctx, loc.SecretRefName())
+}
+
 // orgUUIDForSecretLocation returns the Thunder ouId that must populate
 // SecretLocation.OrgName. The vault KV path hashes OrgName via
 // tenant.OrgBaseNamespace; SecretReference CRs are authored into
@@ -244,7 +281,7 @@ func orgUUIDForSecretLocation(ctx context.Context) (string, error) {
 // derives the NS from the JWT it just authenticated, so the BFF must
 // use the same source-of-truth to compute a matching path. The BFF's
 // local `organizations.uuid` is a random local PK and would diverge.
-// Connect always runs in a request context with a verified user JWT.
+// Connect and POST /build always run in a request context with a verified user JWT.
 func (w *SecretRefWriter) resolveVaultKey(ctx context.Context, secretRefName string) (string, error) {
 	orgUUID, err := orgUUIDForSecretLocation(ctx)
 	if err != nil {
@@ -289,8 +326,10 @@ func (w *SecretRefWriter) DeleteAnthropic(ctx context.Context, ocOrgID string, r
 // PublisherSecretFieldClientID and PublisherSecretFieldClientSecret are the
 // JSON field names inside the SM-API "publisher" secret. The dispatcher
 // materialises both into the per-run Job as PUBLISHER_CLIENT_ID and
-// PUBLISHER_CLIENT_SECRET via a single 2-entry ExternalSecret. Token
-// URL is non-secret and rides as a plain Job env from BFF config.
+// PUBLISHER_CLIENT_SECRET via two Workload secretEnv entries on the same
+// SecretReference (PUBLISHER_CLIENT_ID ← client_id, PUBLISHER_CLIENT_SECRET ←
+// client_secret). Token URL is non-secret plain Job env derived from
+// PLATFORM_IDP_JWKS_URL (/oauth2/jwks → /oauth2/token).
 const (
 	PublisherSecretFieldClientID     = "client_id"
 	PublisherSecretFieldClientSecret = "client_secret"
@@ -299,12 +338,13 @@ const (
 // WritePublisher uploads the per-org Thunder publisher cc credentials to
 // SM-API as a single 2-field secret and stamps the triplet onto
 // `organization_idp_profiles`. Called from idp_service.EnsureOrgPublisher
-// (on create) and RegenerateClientSecret (on rotation). The triplet is
-// read at dispatch time to mint the per-run ExternalSecret that hands
-// the runner pod its cc credentials.
+// (on create), RegenerateClientSecret (on rotation), and
+// ProvisionPublisherForBuild (POST /build). Coding dispatch reads
+// secret_ref_name to mount the two Workload secretEnv entries that hand the
+// runner pod its cc credentials.
 //
 // Same semantics as WriteAnthropic: best-effort, errors returned, ctx
-// must carry the user JWT.
+// must carry the user JWT (Connect and POST /build).
 func (w *SecretRefWriter) WritePublisher(ctx context.Context, ocOrgID, clientID, clientSecret string) (string, error) {
 	if !w.Enabled() {
 		return "", nil
