@@ -117,8 +117,8 @@ type OpResult struct {
 
 // protectedPaths are the structural roots removeFile refuses to delete.
 var protectedPaths = map[string]bool{
-	"specs/requirements/prd.md":  true,
-	"specs/design/design.md":             true,
+	"specs/requirements/prd.md": true,
+	"specs/design/design.cell":  true,
 }
 
 const maxCandidates = 6

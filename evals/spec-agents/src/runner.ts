@@ -75,7 +75,16 @@ function requirementsArtifact(projectDir: string): string {
 }
 
 function designArtifact(projectDir: string): string {
-  const parts: string[] = [readProjectFile(projectDir, "specs/design/design.md")];
+  const parts: string[] = [
+    readProjectFile(projectDir, "specs/design/design.cell"),
+    readProjectFile(projectDir, "specs/design/domain-model.md"),
+  ];
+  const flowsDir = join(projectDir, "specs/design/flows");
+  if (existsSync(flowsDir)) {
+    for (const f of readdirSync(flowsDir).sort()) {
+      if (f.endsWith(".md")) parts.push(readProjectFile(projectDir, `specs/design/flows/${f}`));
+    }
+  }
   const componentsDir = join(projectDir, "specs/design/components");
   if (existsSync(componentsDir)) {
     for (const c of readdirSync(componentsDir).sort()) {
@@ -112,7 +121,7 @@ async function scoreConversational(
   const judge = artifact.trim()
     ? await judgeArtifact({
         rubric,
-        artifactLabel: isDesign ? "software design (design.md + per-component design.json/openapi.yaml)" : "requirements document",
+        artifactLabel: isDesign ? "software design (design.cell + domain-model.md + flows/ + per-component design.json/openapi.yaml)" : "requirements document",
         artifact: clip(artifact),
         ...(digest ? { decisionsDigest: digest } : {}),
       })
@@ -213,7 +222,7 @@ export async function runDesignScenario(sc: DesignScenario, runName: string): Pr
   }
   const outcome = await scoreConversational(projectDir, run, sc.rubric, []);
   return finishRun("design-section", sc.brief.name, runName, run.records, [outcome], {
-    "specs/design/design.md": readProjectFile(projectDir, "specs/design/design.md"),
+    "specs/design/": designArtifact(projectDir),
   });
 }
 
@@ -268,7 +277,7 @@ export async function runChainScenario(sc: ChainScenario, runName: string): Prom
 
   return finishRun("chain", sc.brief.name, runName, records, outcomes, {
     "specs/requirements/prd.md": requirementsArtifact(projectDir),
-    "specs/design/design.md": readProjectFile(projectDir, "specs/design/design.md"),
+    "specs/design/": designArtifact(projectDir),
     "issues/": tasksArtifact(projectDir),
   });
 }

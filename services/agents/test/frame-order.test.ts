@@ -40,7 +40,7 @@ import { runTurn } from "../src/agents/main/run-turn.js";
 import { buildFileTools } from "../src/agents/main/tools/files.js";
 
 const FILES: ReadonlyArray<readonly [string, string]> = [
-  ["specs/design/design.md", "# Design\n"],
+  ["specs/design/domain-model.md", "# Domain model\n"],
   ["specs/design/security.md", "# Security\n"],
   ["specs/design/components/web/wireframes.dsl", "screen Home\n"],
 ];

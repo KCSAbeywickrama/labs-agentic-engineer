@@ -43,9 +43,11 @@ type CellFacts struct {
 }
 
 // parseCellFacts extracts the platform-relevant facts from design.cell source.
+// A leading `---` YAML frontmatter block (the root's sourceSpec carrier — see
+// DesignRootFile) is skipped: it is AssembleDesign's business, not a cell fact.
 func parseCellFacts(source string) (*CellFacts, error) {
 	facts := &CellFacts{}
-	for i, rawLine := range strings.Split(source, "\n") {
+	for i, rawLine := range strings.Split(stripCellFrontmatter(source), "\n") {
 		line := i + 1
 		statement := strings.TrimSpace(rawLine)
 		if statement == "" || strings.HasPrefix(statement, "#") || strings.HasPrefix(statement, "//") {
@@ -85,6 +87,20 @@ func parseCellComponent(statement string, line int) (CellComponent, error) {
 		}
 	}
 	return component, nil
+}
+
+// stripCellFrontmatter blanks a leading `---` YAML frontmatter block so the
+// statements below it keep their line numbers in diagnostics. A malformed
+// (unterminated) block is left in place — the grammar surfaces it as unknown
+// statements rather than this fact extractor guessing.
+func stripCellFrontmatter(source string) string {
+	fm, body, err := SplitFrontmatter(source)
+	if err != nil || fm == "" {
+		return source
+	}
+	// Preserve line count: replace every frontmatter line with a blank one.
+	cut := len(source) - len(body)
+	return strings.Repeat("\n", strings.Count(source[:cut], "\n")) + body
 }
 
 // tokenizeCellStatement splits on whitespace, keeping double-quoted runs as

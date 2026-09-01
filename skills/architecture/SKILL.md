@@ -46,9 +46,8 @@ catalog names, e.g. a Ballerina API service →
 `"thunder-authentication"` to **both** sides of sign-in — the SPA *and* every
 protected backend it calls, since that skill owns how each resolves the caller's
 role. It is a JSON key on the component's design object, so include it when you
-write that `design.json` (addFile/editFile) — do NOT put `skillsPinned` in
-`design.md` frontmatter. Each component carries only the skills its own build
-needs.
+write that `design.json` (addFile/editFile) — `design.json` is its only home.
+Each component carries only the skills its own build needs.
 
 Writing the whole enriched file yourself (removeFile + addFile with every
 field) is equally valid — the scaffold is a safety net, not a required
@@ -151,8 +150,8 @@ into `workload.yaml` and the managed-API gateway binds to. The port lives in
 
 ### dependencies — one entry per Interactions arrow
 
-`dependencies` mirrors the Interactions section of design.md and the edges of
-design.cell: every arrow appears here and vice versa — a mismatch is a defect.
+`dependencies` mirrors the edges of design.cell: every arrow appears here
+and vice versa — a mismatch is a defect.
 Each entry is a `kind` plus a `name`, and you pick the kind by WHAT the target
 is. The kind-only fields below are exhaustive: one of them on another kind is a
 schema violation that both the zod write-gate and the Go fold gate reject.
@@ -371,6 +370,6 @@ integrate correctly.
 
 One component per directory. Every `web-application` gets a `wireframes.dsl`
 (`wireframes` governs it); every `service` gets an `openapi.yaml`
-(`openapi-conventions` governs it), emitted after design.md's ER model.
+(`openapi-conventions` governs it), emitted after domain-model.md's ER model.
 Other kinds (scheduled tasks, workers, …) carry no extra artifact yet — capture
 their behaviour fully in `description` and `dependencies`.

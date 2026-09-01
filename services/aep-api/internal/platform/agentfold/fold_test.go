@@ -160,9 +160,9 @@ func TestAddFile_NoopAndAlreadyExists(t *testing.T) {
 func TestRemoveFile_ProtectedPathsRefused(t *testing.T) {
 	f := NewFromSnapshot(map[string]string{
 		"specs/requirements/prd.md": "req",
-		"specs/design/design.md":             "des",
+		"specs/design/design.cell":  "des",
 	})
-	for _, p := range []string{"specs/requirements/prd.md", "specs/design/design.md"} {
+	for _, p := range []string{"specs/requirements/prd.md", "specs/design/design.cell"} {
 		res, err := f.RemoveFile(ctx, p)
 		mustErrCode(t, res, err, ErrProtectedPath)
 	}

@@ -333,7 +333,6 @@ type DesignComponents []DesignComponent
 type Design struct {
 	ProjectID         string            `json:"projectId"`
 	OrgID             string            `json:"-"`
-	Overview          string            `json:"overview"`
 	Components        DesignComponents  `json:"components"`
 	Status            string            `json:"status"`
 	Version           int               `json:"version"`

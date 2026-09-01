@@ -58,8 +58,8 @@ export function listComponents(projectDir: string): string[] {
 }
 
 export function tasksGate(projectDir: string): GateResult {
-  if (!existsSync(join(projectDir, "specs/design/design.md"))) {
-    return blocked("specs/design/design.md is missing — run the design phase first");
+  if (!existsSync(join(projectDir, "specs/design/design.cell"))) {
+    return blocked("specs/design/design.cell is missing — run the design phase first");
   }
   const components = listComponents(projectDir);
   if (components.length === 0) return blocked("no components under specs/design/components/");

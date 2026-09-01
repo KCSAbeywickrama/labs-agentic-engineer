@@ -42,11 +42,14 @@ A simple API that responds with "Hello, World!" when called.
 - Requests work without requiring any parameters or authentication.
 `,
 
-  "specs/design/design.md": `---
+  "specs/design/design.cell": `---
 sourceSpec: v1
 ---
+title Hello API
 
-A simple public API service that responds with "Hello, World!" in JSON format. Built as a single Go service exposing one endpoint, requiring no authentication.
+component hello-api as "Hello API" service
+
+north -> hello-api
 `,
 
   "specs/design/components/hello-api/design.json": `{

@@ -64,7 +64,7 @@ export type { Op, ErrCode, MatchCandidate, OpOk, OpErr, OpResult };
 /** Structural root files the demo refuses to delete. */
 const PROTECTED_PATHS = new Set<string>([
   "specs/requirements/prd.md",
-  "specs/design/design.md",
+  "specs/design/design.cell",
 ]);
 
 /** Leading YAML frontmatter fence: `---\n<block>\n---`. */

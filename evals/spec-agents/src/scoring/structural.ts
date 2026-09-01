@@ -23,7 +23,7 @@
  * event, not drift.
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { checkComponentDesign } from "@aep/agent-stream";
@@ -68,7 +68,11 @@ export function requirementsChecks(projectDir: string, run: SectionRunResult): S
 }
 
 export function designChecks(projectDir: string, run: SectionRunResult): StructuralReport {
-  const designMd = readSafe(join(projectDir, "specs/design/design.md"));
+  const domainModel = readSafe(join(projectDir, "specs/design/domain-model.md"));
+  const flowsDir = join(projectDir, "specs/design/flows");
+  const flowFiles = existsSync(flowsDir)
+    ? readdirSync(flowsDir).filter((f) => f.endsWith(".md")).sort()
+    : [];
   const components = listComponents(projectDir);
 
   const designJsonProblems: string[] = [];
@@ -105,7 +109,8 @@ export function designChecks(projectDir: string, run: SectionRunResult): Structu
   }
 
   return report([
-    check("design.md exists", designMd.trim().length > 0, "specs/design/design.md missing or empty"),
+    check("domain-model.md exists", domainModel.trim().length > 0, "specs/design/domain-model.md missing or empty"),
+    check("≥1 key flow", flowFiles.length > 0, "no .md files under specs/design/flows/"),
     check("≥1 component designed", components.length > 0, "no dirs under specs/design/components/"),
     check("every design.json valid", components.length > 0 && designJsonProblems.length === 0, designJsonProblems.join("; ")),
     check("design.cell compiles", cellNote !== null && cellNote.ok, cellNote?.message ?? "specs/design/design.cell missing"),
