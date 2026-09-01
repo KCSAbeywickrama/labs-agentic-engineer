@@ -85,7 +85,7 @@ describe("ledgerStatus", () => {
     // The wording is the build page's own pill, so the two surfaces agree.
     expect(
       ledgerStatus(build({ status: "in_progress", waitingReason: "external-values" })),
-    ).toEqual({ label: "Waiting for values", tone: "warning", live: false });
+    ).toEqual({ label: "Waiting for configuration", tone: "warning", live: false });
   });
 
   it("treats `started` as running too", () => {
