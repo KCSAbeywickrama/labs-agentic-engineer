@@ -325,8 +325,9 @@ inches below competes with it for the same glance.
 **`Run finished successfully`, never `run settled — succeeded`.** *Settled* is
 the stream contract's word for the transition, not something a person watching a
 build says, and the state used to be pasted on raw in its lower-case wire
-spelling. The words match the run status chip's, so one run is not `Succeeded`
-in one place and `settled — succeeded` in another.
+spelling. It draws on the same vocabulary as the run status chip — *succeeded*
+becomes *finished successfully*, never *settled* — so a reader meets one word
+for one outcome, phrased for the slot it sits in.
 
 **How the run ENDED belongs in the header; how the STREAM is doing belongs in
 the body.** They answer different questions and come from different reads — the

@@ -60,6 +60,15 @@ export function connectionTail(phase: RunProgressPhase): string | undefined {
  * header uses for its counts, so the two section headers read as one system.
  * The run's outcome is already carried in colour by the page header's own
  * status chip; a second toned pill here would compete with it.
+ *
+ * This switches over the same states as `runStatus` in `runView`, and that
+ * duplication is deliberate rather than a helper waiting to be extracted: the
+ * two answer different questions in different slots. `runStatus` names the run
+ * ("Succeeded", with a tone, in a chip); this names what HAPPENED to it, as a
+ * sentence, untoned. Folding them together would force one phrasing into both.
+ * They must stay on one VOCABULARY — a state `runStatus` learns to name is a
+ * state this owes a sentence — which is what the default case is for until it
+ * has one.
  */
 export function settledLabel(state: string | undefined): string {
   switch (state) {
