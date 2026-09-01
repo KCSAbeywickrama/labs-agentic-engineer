@@ -48,8 +48,10 @@ sourceSpec: v1
 title Hello API
 
 component hello-api as "Hello API" service
+component postgres as "Postgres" database
 
 north -> hello-api
+hello-api -> postgres
 `,
 
   "specs/design/components/hello-api/design.json": `{

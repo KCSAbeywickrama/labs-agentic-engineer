@@ -44,6 +44,7 @@ import { checkSecurityDesign } from "./security-design-schema.js";
 import { checkOpenapiSpec } from "./openapi-spec.js";
 import { checkWireframeLayout } from "./wireframe-layout.js";
 import { checkDesignDiagram } from "./design-diagrams.js";
+import { checkComponentDependencies } from "./component-dependencies.js";
 import type {
   Op,
   ErrCode,
@@ -220,6 +221,14 @@ export class FileBundle {
     const jsonProblem = checkComponentDesign(path, content);
     if (jsonProblem) {
       return err(path, op, jsonProblem.code, jsonProblem.message);
+    }
+    // A component's dependencies are edges of the cell — the design's source
+    // of truth — so a dependency the cell does not declare (a database found
+    // during enrichment and never drawn) is refused while the agent can still
+    // add the node.
+    const dependencyProblem = checkComponentDependencies(path, content, this);
+    if (dependencyProblem) {
+      return err(path, op, dependencyProblem.code, dependencyProblem.message);
     }
     // The security document is gated on the same terms: it is the ONE spec file
     // the platform acts on deterministically at build time (creating directory

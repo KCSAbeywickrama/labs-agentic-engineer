@@ -83,7 +83,10 @@ turn — apply them directly, and load one only if you find you do not have it.
    component's design.json: language (org Tech stack default first), the PRD
    `stories` it serves (every story the PRD defines must be claimed by some
    component — the build gate checks coverage), dependencies (discover before
-   you invent), description, pinned skills.
+   you invent), description, pinned skills. A dependency is a cell node: a
+   database or cache you introduce here goes into design.cell first
+   (`component <id> as "…" database`, inside the cell) — the cell is the
+   source of truth, and a design.json naming a node it lacks is refused.
 3. **domain-model.md** — `specs/design/domain-model.md`: an H1 title, one
    or two sentences of intro, then exactly ONE mermaid `erDiagram` (entities,
    key fields, relations — these become the API schemas). Brief entity notes

@@ -104,6 +104,7 @@ const (
 	ErrInvalidOpenAPI     ErrCode = "INVALID_OPENAPI"
 	ErrInvalidDiagram     ErrCode = "INVALID_DIAGRAM"
 	ErrUnknownParticipant ErrCode = "UNKNOWN_PARTICIPANT"
+	ErrUnknownDependency  ErrCode = "UNKNOWN_DEPENDENCY"
 )
 
 // MatchCandidate echoes a source line for NOT_UNIQUE / NOT_FOUND re-anchoring.

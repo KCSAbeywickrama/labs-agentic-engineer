@@ -58,6 +58,7 @@ export type ErrCode =
   | "INVALID_OPENAPI"
   | "INVALID_DIAGRAM"
   | "UNKNOWN_PARTICIPANT"
+  | "UNKNOWN_DEPENDENCY"
   | "PROTECTED_PATH";
 
 /** A candidate line echoed back for NOT_UNIQUE / NOT_FOUND re-anchoring. */

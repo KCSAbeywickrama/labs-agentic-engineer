@@ -167,7 +167,13 @@ into `workload.yaml` and the managed-API gateway binds to. The port lives in
 ### dependencies — one entry per design.cell edge
 
 `dependencies` mirrors the edges of design.cell: every arrow appears here
-and vice versa — a mismatch is a defect.
+and vice versa — a mismatch is a defect. The platform enforces the membership
+half as you write: a dependency whose `name` is not a node the cell declares
+is refused (`UNKNOWN_DEPENDENCY`) with the cell statement to add. A resource
+you discover here — a database, a cache — is a cell node too: `editFile`
+`specs/design/design.cell` to add `component <name> as "…" database` inside
+the cell before the design.json that depends on it, or the diagram will not
+draw what the build provisions.
 Each entry is a `kind` plus a `name`, and you pick the kind by WHAT the target
 is. The kind-only fields below are exhaustive: one of them on another kind is a
 schema violation that both the zod write-gate and the Go fold gate reject.

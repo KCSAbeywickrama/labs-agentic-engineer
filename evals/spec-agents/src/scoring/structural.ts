@@ -26,7 +26,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { checkComponentDesign, checkDesignDiagram, DOMAIN_MODEL_PATH } from "@aep/agent-stream";
+import { checkComponentDependencies, checkComponentDesign, checkDesignDiagram, DOMAIN_MODEL_PATH } from "@aep/agent-stream";
 import { listComponents, listFlows } from "@aep/playground/src/engine/gates.js";
 import { compileProject } from "@aep/ui-cell-diagram-react/compiler";
 import type { SectionRunResult } from "../drivers/conversational.js";
@@ -68,14 +68,14 @@ export function requirementsChecks(projectDir: string, run: SectionRunResult): S
 }
 
 export function designChecks(projectDir: string, run: SectionRunResult): StructuralReport {
+  const reader = {
+    read: (p: string) => (existsSync(join(projectDir, p)) ? readFileSync(join(projectDir, p), "utf8") : undefined),
+  };
   const domainModel = readSafe(join(projectDir, "specs/design/domain-model.md"));
   const flowFiles = listFlows(projectDir);
   // The same judge the write gate runs (ADR-0020's per-file contract): one
   // diagram of the right kind, in the prescribed subset, participants
   // resolving against the cell and the PRD on disk.
-  const reader = {
-    read: (p: string) => (existsSync(join(projectDir, p)) ? readFileSync(join(projectDir, p), "utf8") : undefined),
-  };
   const domainModelProblem = domainModel.trim() ? checkDesignDiagram(DOMAIN_MODEL_PATH, domainModel, reader) : null;
   const flowProblems = flowFiles
     .map((f) => checkDesignDiagram(`specs/design/flows/${f}`, readSafe(join(projectDir, "specs/design/flows", f)), reader))
@@ -84,6 +84,7 @@ export function designChecks(projectDir: string, run: SectionRunResult): Structu
   const components = listComponents(projectDir);
 
   const designJsonProblems: string[] = [];
+  const dependencyProblems: string[] = [];
   const openapiProblems: string[] = [];
   for (const name of components) {
     const rel = `specs/design/components/${name}/design.json`;
@@ -91,6 +92,10 @@ export function designChecks(projectDir: string, run: SectionRunResult): Structu
     if (existsSync(abs)) {
       const problem = checkComponentDesign(rel, readFileSync(abs, "utf8"));
       if (problem !== null) designJsonProblems.push(`${rel}: ${problem.message}`);
+      // The cell is the source of truth: every dependency is one of its nodes
+      // (the same judge the write gate runs).
+      const depProblem = checkComponentDependencies(rel, readFileSync(abs, "utf8"), reader);
+      if (depProblem !== null) dependencyProblems.push(depProblem.message);
     } else {
       designJsonProblems.push(`${rel}: missing`);
     }
@@ -126,6 +131,7 @@ export function designChecks(projectDir: string, run: SectionRunResult): Structu
     check("every flow is one valid sequenceDiagram whose participants resolve", flowProblems.length === 0, flowProblems.join(" | ")),
     check("≥1 component designed", components.length > 0, "no dirs under specs/design/components/"),
     check("every design.json valid", components.length > 0 && designJsonProblems.length === 0, designJsonProblems.join("; ")),
+    check("every dependency is a node the cell declares", dependencyProblems.length === 0, dependencyProblems.join(" | ")),
     check(
       "design.cell compiles",
       cellCompile !== null && cellErrors.length === 0,
