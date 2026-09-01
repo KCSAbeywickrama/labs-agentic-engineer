@@ -57,6 +57,22 @@ export function listComponents(projectDir: string): string[] {
     .sort();
 }
 
+/**
+ * Key-flow files under specs/design/flows/ — one `.md` per flow, regular
+ * files only, non-blank (an empty placeholder is not a flow). The single
+ * definition the eval scorer and runner share.
+ *
+ * @knipkeep consumed by evals/spec-agents (structural scorer + runner), which is outside knip's workspaces
+ */
+export function listFlows(projectDir: string): string[] {
+  const dir = join(projectDir, "specs/design/flows");
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir, { withFileTypes: true })
+    .filter((e) => e.isFile() && e.name.endsWith(".md") && readFileSync(join(dir, e.name), "utf8").trim() !== "")
+    .map((e) => e.name)
+    .sort();
+}
+
 export function tasksGate(projectDir: string): GateResult {
   if (!existsSync(join(projectDir, "specs/design/design.cell"))) {
     return blocked("specs/design/design.cell is missing — run the design phase first");

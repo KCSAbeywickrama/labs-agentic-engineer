@@ -37,8 +37,8 @@ Three problems accumulated:
   in `specs/design/flows/<kebab-slug>.md` (title, one–two sentences naming
   actor and outcome, exactly one `sequenceDiagram`). A key flow is a PRD
   actor's end-to-end journey across cell components — plain CRUD on one
-  entity never qualifies — and every participant must resolve to a cell
-  component or a PRD actor.
+  entity never qualifies — and every participant must resolve to a node the
+  cell declares (a component or a boundary external) or a PRD actor.
 
 ## Consequences
 
@@ -53,3 +53,6 @@ Three problems accumulated:
   a follow-up (#687).
 - Existing bundles with a `design.md` and no `design.cell` read as "design
   missing" until the design is regenerated — a deliberate clean break.
+- The astryx design-system skill's per-project `## Brand colors` override
+  moves from `design.md` to the PRD (`specs/requirements/prd.md`) — the
+  document that already records what a person stated outright.

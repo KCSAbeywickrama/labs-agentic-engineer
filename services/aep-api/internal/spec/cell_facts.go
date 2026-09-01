@@ -90,12 +90,13 @@ func parseCellComponent(statement string, line int) (CellComponent, error) {
 }
 
 // stripCellFrontmatter blanks a leading `---` YAML frontmatter block so the
-// statements below it keep their line numbers in diagnostics. A malformed
-// (unterminated) block is left in place — the grammar surfaces it as unknown
-// statements rather than this fact extractor guessing.
+// statements below it keep their line numbers in diagnostics — the same fence
+// rule the TS grammar's stripFrontmatter applies. A malformed (unterminated)
+// block is left in place — the grammar surfaces it as unknown statements
+// rather than this fact extractor guessing.
 func stripCellFrontmatter(source string) string {
-	fm, body, err := SplitFrontmatter(source)
-	if err != nil || fm == "" {
+	_, body, err := SplitFrontmatter(source)
+	if err != nil {
 		return source
 	}
 	// Preserve line count: replace every frontmatter line with a blank one.

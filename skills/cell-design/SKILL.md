@@ -164,9 +164,10 @@ FIRST and the rest of the design follows it:
    affected lines (a component/external declaration, an edge). Each applied
    edit lands in the live diagram IN PLACE, so the user sees exactly the
    requested change without the diagram tearing down and rebuilding. Only
-   when the change replaces MOST of the diagram (a restructure) re-emit it
-   instead: `removeFile`, then ONE `addFile` with the complete new diagram
-   (the fresh add re-streams it line by line).
+   when the change replaces MOST of the diagram (a restructure) rewrite it
+   instead: ONE `editFile` whose `oldString` is the entire current file and
+   whose `newString` is the complete new diagram. design.cell is the design
+   root — a protected path — so `removeFile` on it is refused.
 2. Update `specs/design/domain-model.md` and the affected
    `specs/design/flows/` files when the change moves entities or reshapes a
    flow — a flow's participants must stay component ids the cell declares.

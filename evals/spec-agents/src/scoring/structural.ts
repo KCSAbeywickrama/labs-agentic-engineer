@@ -23,12 +23,12 @@
  * event, not drift.
  */
 
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { checkComponentDesign } from "@aep/agent-stream";
-import { listComponents } from "@aep/playground/src/engine/gates.js";
-import { compileDslDerived } from "@aep/playground/src/kit/derived.js";
+import { listComponents, listFlows } from "@aep/playground/src/engine/gates.js";
+import { compileProject } from "@aep/ui-cell-diagram-react/compiler";
 import type { SectionRunResult } from "../drivers/conversational.js";
 import type { TaskPlanRunResult } from "../drivers/task-plan.js";
 
@@ -69,10 +69,7 @@ export function requirementsChecks(projectDir: string, run: SectionRunResult): S
 
 export function designChecks(projectDir: string, run: SectionRunResult): StructuralReport {
   const domainModel = readSafe(join(projectDir, "specs/design/domain-model.md"));
-  const flowsDir = join(projectDir, "specs/design/flows");
-  const flowFiles = existsSync(flowsDir)
-    ? readdirSync(flowsDir).filter((f) => f.endsWith(".md")).sort()
-    : [];
+  const flowFiles = listFlows(projectDir);
   const components = listComponents(projectDir);
 
   const designJsonProblems: string[] = [];
@@ -97,8 +94,11 @@ export function designChecks(projectDir: string, run: SectionRunResult): Structu
     }
   }
 
-  const cellPath = "specs/design/design.cell";
-  const cellNote = existsSync(join(projectDir, cellPath)) ? compileDslDerived(projectDir, cellPath) : null;
+  // The cell is compiled by the same compiler the console renders it with —
+  // the design root either parses cleanly or the check names the line.
+  const cellSource = readSafe(join(projectDir, "specs/design/design.cell"));
+  const cellCompile = cellSource.trim() ? compileProject(cellSource) : null;
+  const cellErrors = (cellCompile?.diagnostics ?? []).filter((d) => d.severity === "error");
 
   const criteria = readSafe(join(projectDir, "specs/validation/validation-criteria.json"));
   let criteriaOk = false;
@@ -110,10 +110,14 @@ export function designChecks(projectDir: string, run: SectionRunResult): Structu
 
   return report([
     check("domain-model.md exists", domainModel.trim().length > 0, "specs/design/domain-model.md missing or empty"),
-    check("≥1 key flow", flowFiles.length > 0, "no .md files under specs/design/flows/"),
+    check("≥1 key flow", flowFiles.length > 0, "no non-blank .md files under specs/design/flows/"),
     check("≥1 component designed", components.length > 0, "no dirs under specs/design/components/"),
     check("every design.json valid", components.length > 0 && designJsonProblems.length === 0, designJsonProblems.join("; ")),
-    check("design.cell compiles", cellNote !== null && cellNote.ok, cellNote?.message ?? "specs/design/design.cell missing"),
+    check(
+      "design.cell compiles",
+      cellCompile !== null && cellErrors.length === 0,
+      cellCompile === null ? "specs/design/design.cell missing or empty" : cellErrors.map((d) => `line ${d.line}: ${d.message}`).join("; "),
+    ),
     check("openapi.yaml documents valid", openapiProblems.length === 0, openapiProblems.join("; ")),
     check("validation-criteria.json valid", criteriaOk, "missing or not JSON"),
     check("section completed", run.finishedInterview, run.error ?? "hit the turn cap"),

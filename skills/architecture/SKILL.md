@@ -130,7 +130,7 @@ violations:
   "appPath": "expense-api",           // repo-relative source dir — the component name
   "entrypoint": "deployment/service", // deploy entry — PAIRS with `type`: "deployment/service" for a service, "deployment/web-application" for a web-application
   "exposure": "internet",             // "internet" (public) | "intranet" (internal only)
-  "dependencies": [ /* see below — every arrow in Interactions appears here */ ],
+  "dependencies": [ /* see below — every design.cell edge appears here */ ],
   "description": "One paragraph: single responsibility, port/entrypoint expectations, and what it explicitly does NOT do.",
   "stories": [1, 2, 4],               // PRD story numbers THIS component serves — the build gate refuses the tag while any story is claimed by nobody
   "skillsPinned": ["openapi-conventions", "ballerina"], // the skills this component's build needs — see the field above
@@ -164,7 +164,7 @@ into `workload.yaml` and the managed-API gateway binds to. The port lives in
   discarded. `stories` is NOT in this class — it is yours to author, per the
   **stories** field above.
 
-### dependencies — one entry per Interactions arrow
+### dependencies — one entry per design.cell edge
 
 `dependencies` mirrors the edges of design.cell: every arrow appears here
 and vice versa — a mismatch is a defect.

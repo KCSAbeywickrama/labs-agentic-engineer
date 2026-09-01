@@ -258,7 +258,7 @@ export const DECLARE_PLAN_TOOL = "declare_plan" as const;
  */
 export interface DeclarePlanInput {
   /**
-   * Full repo-relative spec-bundle paths (`specs/design/design.md`), in the
+   * Full repo-relative spec-bundle paths (`specs/design/domain-model.md`), in the
    * order the turn intends to write them. The paths are the identity the
    * console reconciles file mutations against — no display names ride here;
    * naming a document is the console's job.

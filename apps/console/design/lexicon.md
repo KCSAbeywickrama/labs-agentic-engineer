@@ -41,7 +41,7 @@ concept for *the agreed description of what we're building*.
 | Section | Artifacts | Repo |
 |---|---|---|
 | `REQUIREMENTS` | **Product requirements** | `specs/requirements/prd.md` |
-| `DESIGN` (not `DESIGNS` — one design, several files) | **Architecture** · **Design overview** · **Security** · then per-component | `specs/design/` |
+| `DESIGN` (not `DESIGNS` — one design, several files) | **Architecture** · **Domain model** · **Flows** · **Security** · then per-component | `specs/design/` |
 | `VALIDATION` | **Validation criteria** | `specs/validation/validation-criteria.json` |
 
 **Security** is one rail entry, one page:

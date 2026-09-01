@@ -194,10 +194,10 @@ func TestDeploy_ReleaseNameIsDerivedFromTheCommit(t *testing.T) {
 func TestDeploy_ProtectedAPIUsesTraitDefaultCORS(t *testing.T) {
 	t.Parallel()
 	files := map[string]string{
-		spec.DesignRootFile:           traitRootMd(),
-		"components/api/design.json":  endUserServiceMd("api"),
-		"components/s2s/design.json":  serviceToServiceMd("s2s"),
-		"components/web/design.json":  webAppMd("web"),
+		spec.DesignRootFile:          traitRootMd(),
+		"components/api/design.json": endUserServiceMd("api"),
+		"components/s2s/design.json": serviceToServiceMd("s2s"),
+		"components/web/design.json": webAppMd("web"),
 	}
 	oc := ocDeployments(map[string]string{"web": "http://web.local/app/"})
 	svc := NewDeploymentService(oc, traitStoreWith(files))
@@ -396,4 +396,3 @@ func TestDeploymentState_FreshBindingIsPendingNotFailed(t *testing.T) {
 		}
 	}
 }
-

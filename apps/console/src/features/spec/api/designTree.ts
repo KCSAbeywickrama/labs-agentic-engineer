@@ -34,7 +34,7 @@ export interface DesignComponentNode {
 }
 
 export interface DesignSection {
-  /** Design files directly under design/ (e.g. design.md). */
+  /** Design files directly under design/ (e.g. domain-model.md). */
   overview: SpecFileEntry[];
   hasComponents: boolean;
   /** Whether a project-level design.cell exists (drives the Architecture tab). */

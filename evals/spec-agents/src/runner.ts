@@ -46,6 +46,7 @@ import { judgeArtifact, type JudgeReport } from "./scoring/judge.js";
 import { designChecks, requirementsChecks, tasksChecks, type StructuralReport } from "./scoring/structural.js";
 import { emitReviewSheet, type ReviewSection } from "./scoring/review-sheet.js";
 import { sumUsage, writeRunArtifacts, type TurnRecord, type TurnUsage } from "./tracing.js";
+import { listFlows } from "@aep/playground/src/engine/gates.js";
 
 export interface SectionOutcome {
   section: string;
@@ -79,11 +80,8 @@ function designArtifact(projectDir: string): string {
     readProjectFile(projectDir, "specs/design/design.cell"),
     readProjectFile(projectDir, "specs/design/domain-model.md"),
   ];
-  const flowsDir = join(projectDir, "specs/design/flows");
-  if (existsSync(flowsDir)) {
-    for (const f of readdirSync(flowsDir).sort()) {
-      if (f.endsWith(".md")) parts.push(readProjectFile(projectDir, `specs/design/flows/${f}`));
-    }
+  for (const f of listFlows(projectDir)) {
+    parts.push(readProjectFile(projectDir, `specs/design/flows/${f}`));
   }
   const componentsDir = join(projectDir, "specs/design/components");
   if (existsSync(componentsDir)) {

@@ -26,6 +26,7 @@ import {
   ParsedExternal,
   ParseResult
 } from "../domain/cellModel";
+import { stripFrontmatter } from "./frontmatter";
 import { splitLabel } from "./labels";
 
 const boundaryDirections = new Set<BoundaryDirection>(["north", "east", "south", "west"]);
@@ -207,26 +208,6 @@ function unknownStatement(line: number): Diagnostic {
     line,
     column: 1
   };
-}
-
-/**
- * Blank out a leading `---` YAML frontmatter block (the platform's sourceSpec
- * carrier on the root design.cell) so statements keep their line numbers in
- * diagnostics. An unterminated block is left in place — the grammar surfaces
- * it as unknown statements instead of this helper guessing.
- */
-function stripFrontmatter(source: string): string {
-  const lines = source.split(/\r?\n/);
-  let first = 0;
-  while (first < lines.length && lines[first].trim() === "") first++;
-  if (first >= lines.length || lines[first].trim() !== "---") return source;
-  for (let end = first + 1; end < lines.length; end++) {
-    if (lines[end].trim() === "---") {
-      for (let i = first; i <= end; i++) lines[i] = "";
-      return lines.join("\n");
-    }
-  }
-  return source;
 }
 
 export function parseCellDsl(source: string): ParseResult {

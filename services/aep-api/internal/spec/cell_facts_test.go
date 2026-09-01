@@ -18,6 +18,7 @@ package spec
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -66,5 +67,32 @@ func TestParseCellFacts_PermissiveOnUnknownStatements(t *testing.T) {
 	}
 	if len(facts.Components) != 1 || facts.Components[0].ID != "api" || facts.Components[0].Type != "service" {
 		t.Errorf("components = %+v", facts.Components)
+	}
+}
+
+// The root design.cell may open with the platform's sourceSpec frontmatter.
+// The fact extractor skips the block — and keeps counting its lines, so a
+// diagnostic below it names the line the author sees in the file.
+func TestParseCellFacts_SkipsLeadingFrontmatterAndKeepsLineNumbers(t *testing.T) {
+	facts, err := parseCellFacts("---\nsourceSpec: v1\n---\n" + cellFixture)
+	if err != nil {
+		t.Fatalf("parseCellFacts: %v", err)
+	}
+	if len(facts.Components) != 4 {
+		t.Fatalf("components = %d, want 4 — the frontmatter block must not hide component lines", len(facts.Components))
+	}
+	// The block is blanked, never cut: line N of the file is still line N of
+	// what the parser sees, so a diagnostic names the line the author sees.
+	fenced := "---\nsourceSpec: v1\n---\n" + cellFixture
+	stripped := stripCellFrontmatter(fenced)
+	if strings.Count(stripped, "\n") != strings.Count(fenced, "\n") {
+		t.Fatalf("line count drifted: %d → %d", strings.Count(fenced, "\n"), strings.Count(stripped, "\n"))
+	}
+	if !strings.HasPrefix(stripped, "\n\n\n"+cellFixture) {
+		t.Fatalf("want three blank lines then the cell verbatim, got %q", stripped[:40])
+	}
+	// No frontmatter: the source passes through untouched.
+	if got := stripCellFrontmatter(cellFixture); got != cellFixture {
+		t.Fatalf("unfenced source must be returned verbatim")
 	}
 }
