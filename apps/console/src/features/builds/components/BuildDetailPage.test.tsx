@@ -254,7 +254,7 @@ describe("BuildDetailPage — external resources", () => {
     expect(screen.getByText("External resources")).toBeInTheDocument();
     expect(screen.getByText("1 of 1 need configuration")).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Configure stripe" }),
+      screen.getByRole("button", { name: "Configure now: stripe" }),
     ).toBeInTheDocument();
 
     // ORDER, not membership. It is outstanding work a person must do, so it is

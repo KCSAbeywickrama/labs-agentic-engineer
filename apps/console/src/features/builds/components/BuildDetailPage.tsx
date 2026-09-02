@@ -573,8 +573,7 @@ function AgentLogSection({
   projectName: string;
   runId: string | undefined;
   streaming: boolean;
-  /** The run's own state, for the settled half of the header label. Both halves
-   *  read the run list so they cannot disagree — see `settledStatus`. */
+  /** Forwarded to `AgentLogMeta`, which is where it is explained. */
   runState: string | undefined;
 }) {
   return (

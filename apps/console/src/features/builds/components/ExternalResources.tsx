@@ -216,8 +216,8 @@ export function ExternalResources({ projectName }: { projectName: string }) {
                   alignItems: "center",
                   flexWrap: "wrap",
                   rowGap: 1,
-                  // A rule between rows, never above the first: the section's
-                  // own description already sits behind one.
+                  // A rule above every row: between two rows it separates them,
+                  // and above the first it closes off the section's description.
                   borderTop: 1,
                   borderColor: "divider",
                 }}
@@ -278,9 +278,13 @@ export function ExternalResources({ projectName }: { projectName: string }) {
                   variant={done ? "outlined" : "contained"}
                   color={done ? "inherit" : "primary"}
                   // The row's name is in its own label; the button's accessible
-                  // name must carry it too, or every row reads as "Configure".
+                  // name must carry it too, or every row reads the same. It must
+                  // also CONTAIN the visible text (WCAG 2.5.3 Label in Name) —
+                  // "Configure stripe" under a button reading "Configure now"
+                  // leaves a voice-control user saying a name that does not
+                  // match what they can see.
                   aria-label={`${
-                    done ? "Edit configuration for" : "Configure"
+                    done ? "Edit configuration for" : "Configure now:"
                   } ${row.name}`}
                   onClick={() => setTarget(row)}
                   sx={{ flexShrink: 0 }}

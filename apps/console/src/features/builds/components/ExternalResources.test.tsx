@@ -152,9 +152,29 @@ describe("ExternalResources", () => {
     expect(screen.getByText("1 of 1 need configuration")).toBeInTheDocument();
     expect(screen.getByText("Needs configuration")).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Configure stripe" }),
+      screen.getByRole("button", { name: "Configure now: stripe" }),
     ).toBeInTheDocument();
     expect(screen.queryByText(/Provisioning/)).not.toBeInTheDocument();
+  });
+
+  // WCAG 2.5.3 Label in Name: the accessible name must CONTAIN the visible text,
+  // or a voice-control user reading "Configure now" off the screen says a name
+  // the button does not answer to. The row name is appended, never substituted.
+  it("keeps each button's accessible name a superset of what it reads", () => {
+    mockDesign = design(external("stripe", ["api_key"]), external("dhl", ["key"]));
+    mockReadiness = readiness(
+      { name: "stripe", state: "unset", missingKeys: ["api_key"] },
+      { name: "dhl", state: "configured" },
+    );
+    renderSection();
+
+    const outstanding = screen.getByRole("button", { name: /stripe/ });
+    expect(outstanding).toHaveTextContent("Configure now");
+    expect(outstanding.getAttribute("aria-label")).toContain("Configure now");
+
+    const configured = screen.getByRole("button", { name: /dhl/ });
+    expect(configured).toHaveTextContent("Edit configuration");
+    expect(configured.getAttribute("aria-label")).toContain("Edit configuration");
   });
 
   it("offers Edit configuration once a dependency is configured", () => {
@@ -177,7 +197,7 @@ describe("ExternalResources", () => {
     });
     renderSection();
 
-    fireEvent.click(screen.getByRole("button", { name: "Configure stripe" }));
+    fireEvent.click(screen.getByRole("button", { name: "Configure now: stripe" }));
     // The dialog opens on the dependency's own schema.
     expect(screen.getByText("Configure — stripe")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("api_key"), {
