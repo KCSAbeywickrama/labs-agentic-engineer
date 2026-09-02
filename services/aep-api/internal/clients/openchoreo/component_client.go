@@ -152,6 +152,18 @@ type ComponentClient interface {
 	// See TriggerBuild for the `runName` + `secretRef` contracts.
 	TriggerBuildAtCommit(ctx context.Context, orgName, projectName, componentName, commitSHA, secretRef, runName string) (*gen.WorkflowRun, error)
 	ListWorkflowRuns(ctx context.Context, orgName, projectName, componentName string, limit int, cursor string) (*gen.WorkflowRunList, error)
+	// ListBuildRuns is the same read reduced to the facts the milestone loop
+	// decides on: the run's name, whether it is terminal, whether it succeeded,
+	// and the COMMIT it built.
+	//
+	// It exists beside ListWorkflowRuns because the two answer different
+	// audiences. That one returns the served contract model, which the console
+	// renders; this one returns the commit, which the contract does not carry and
+	// which both halves of the loop need — the event plane to count a commit's
+	// attempts, the supervisor to learn which release a component's newest green
+	// build should be serving. Mapping OpenChoreo's condition vocabulary once,
+	// here, is what keeps two adapters from spelling "succeeded" differently.
+	ListBuildRuns(ctx context.Context, orgName, projectName, componentName string) ([]BuildRunSummary, error)
 	// ListProjectWorkflowRuns is the same read widened to every component in
 	// the project — one call instead of one per component. The run read uses it
 	// to derive a cycle's builds from its merge SHA without first having to
@@ -1064,6 +1076,7 @@ func releaseBindingSummary(rb ocgen.ReleaseBinding) ReleaseBindingSummary {
 		componentName = rb.Spec.Owner.ComponentName
 		s.Environment = rb.Spec.Environment
 		s.Undeploy = rb.Spec.State != nil && *rb.Spec.State == ocgen.ReleaseBindingSpecStateUndeploy
+		s.ReleaseName = derefStr(rb.Spec.ReleaseName)
 	}
 	s.ComponentName = FriendlyComponentName(componentName, projectName)
 	if rb.Status != nil && rb.Status.Conditions != nil {
@@ -1264,6 +1277,66 @@ func (c *componentClient) ListWorkflowRuns(ctx context.Context, orgName, project
 	scopedComp := ScopedComponentName(projectName, componentName)
 	return c.listWorkflowRunsBySelector(ctx, orgName,
 		fmt.Sprintf("%s=%s", string(LabelKeyComponent), scopedComp), limit, cursor)
+}
+
+// ListBuildRuns lists a component's WorkflowRuns with the commit each one
+// built. It takes the host's default page for the reason the re-trigger count
+// does: the runs a decision turns on are the newest a component has, and paging
+// a long-lived component's whole history on every poll would cost far more than
+// the handful of rows the answer needs.
+func (c *componentClient) ListBuildRuns(ctx context.Context, orgName, projectName, componentName string) ([]BuildRunSummary, error) {
+	scopedComp := ScopedComponentName(projectName, componentName)
+	sel := ocgen.LabelSelectorParam(fmt.Sprintf("%s=%s", string(LabelKeyComponent), scopedComp))
+	resp, err := c.oc.ListWorkflowRunsWithResponse(ctx, orgName, &ocgen.ListWorkflowRunsParams{LabelSelector: &sel})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list workflow runs: %w", err)
+	}
+	if resp.StatusCode() != http.StatusOK || resp.JSON200 == nil {
+		return nil, handleErrorResponse(resp.StatusCode(), ErrorResponses{
+			JSON400: resp.JSON400,
+			JSON401: resp.JSON401,
+			JSON403: resp.JSON403,
+			JSON500: resp.JSON500,
+		})
+	}
+	out := make([]BuildRunSummary, 0, len(resp.JSON200.Items))
+	for _, run := range resp.JSON200.Items {
+		model := workflowRunToModel(run)
+		out = append(out, BuildRunSummary{
+			Name:      model.Name,
+			Status:    model.Status,
+			Completed: model.Completed,
+			Succeeded: model.Status == ReasonWorkflowSucceeded,
+			CommitSHA: buildRunCommit(run),
+			StartedAt: derefTime(run.Metadata.CreationTimestamp),
+		})
+	}
+	return out, nil
+}
+
+// buildRunCommit reads back the commit the trigger pinned the run to —
+// `spec.workflow.parameters.repository.revision.commit`, the exact path
+// injectCommitSHA writes.
+//
+// Read from the spec rather than parsed out of the run's NAME, which also
+// embeds a short commit: that name is composed through k8sname.Bounded, which
+// truncates a long readable head and appends a digest, so the commit is not
+// recoverable from it for every project and component. A build triggered
+// without a pinned commit (a manual build of the branch tip) answers "".
+func buildRunCommit(run ocgen.WorkflowRun) string {
+	if run.Spec == nil || run.Spec.Workflow.Parameters == nil {
+		return ""
+	}
+	repo, ok := (*run.Spec.Workflow.Parameters)["repository"].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	rev, ok := repo["revision"].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	commit, _ := rev["commit"].(string)
+	return commit
 }
 
 func (c *componentClient) ListProjectWorkflowRuns(ctx context.Context, orgName, projectName string, limit int, cursor string) (*gen.WorkflowRunList, error) {

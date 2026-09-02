@@ -159,13 +159,15 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   `ended_at IS NULL`: usage arrives from the terminal-log capture, and a cycle closes on the merge webhook
   seconds after its Job exits — fencing it would discard nearly every capture. Entries are keyed
   `(source, source_id)`, so a re-read of the same log updates one entry rather than adding a second.
-- The **deploy stage** (`run`): once a cycle's builds are green, the supervisor cuts each touched
-  component's release from the Workload its build posted, writes the binding that pins it — release
-  pin, trait env configs and workload overrides in ONE object write — and waits for every binding to
-  report Ready before the cycle is green. Components carry `autoDeploy: false`, so nothing else
-  promotes a release. It promotes WAVE BY WAVE (providers before the consumers whose start-up config
-  carries their address) and finishes with one converge for the facts that flow the other way — see
-  the invariant below and ADR-0019.
+- The **deploy stage** (`run`): every cycle, red or green, the supervisor RECONCILES THE VERSION. It
+  reads every component the design declares, compares the release its newest succeeded build would
+  cut against the release its binding pins, and promotes the difference — cutting each release from
+  the Workload that build posted and writing the binding that pins it, release pin plus trait env
+  configs plus workload overrides in ONE object write — then waits for Ready. Components carry
+  `autoDeploy: false`, so nothing else promotes a release. It promotes WAVE BY WAVE (providers before
+  the consumers whose start-up config carries their address), holds a component whose provider is not
+  serving, and finishes with one converge for the facts that flow the other way — see the invariants
+  below, ADR-0019 and ADR-0026.
 - The **run loop** (`run`): one Temporal workflow per SPECIES per milestone —
   `<kind>-<org>-<project>-<milestoneNumber>`, whose id is REUSED after a terminal run because a
   milestone sees sequential runs of one kind across its life. `dev` and `task` are the same cycle loop
@@ -433,9 +435,27 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   without committing a report at all, which proves nothing about the software and is a breach of the
   runner contract. `ValidationVerdictFailsRun` / `IsValidationTerminalReason` are the executable copy of
   that pair. A run that settles for a reason outside this list is a bug in the loop, not a new state.
+- **The deploy set is the VERSION's, not the cycle's** (ADR-0026). `desired(c)` is the release
+  `c`'s newest SUCCEEDED build would cut; `actual(c)` is what its binding pins and whether that is
+  Ready; the difference classifies every design component as `serving`, `behind`, `converging`,
+  `held` or `unbuilt`, and only `behind` is ever written to. A component is promoted when it is
+  behind AND every hard provider is serving or promoted ahead of it in the same pass — otherwise it
+  is `held`, which is neither waited on nor filed against. This runs on a RED cycle too: a red build
+  has already minted its fix issue, and its green siblings are still built. What it replaced promoted
+  the cycle's path diff, which made "what is serving" a function of which files a fix touched — one
+  version shipped with its API never promoted at all, because the cycle that built it was red and no
+  later cycle's diff mentioned it again. A fully serving version reconciles in one read and zero
+  writes, which is what lets the pass run every cycle.
+- **A version is delivered when it is SERVING, asserted rather than inferred.** The boundary re-reads
+  the version state and requires every design component `serving` before it mints the validation task;
+  anything else settles `version-incomplete` naming what was not. "Deployed-green" used to be inferred
+  from an empty working set plus a green last cycle — neither of which is a statement about a component
+  the cycles never touched. By the loop's own invariants the failure should be unreachable, which is
+  exactly why it must be loud rather than silent.
 - **A cycle is green when its components are DEPLOYED, not built.** The supervisor performs the
-  promote itself — `EnsureRelease` at the merge commit, then one `ApplyReleaseBinding` carrying the
-  pin and the wiring together — and then waits on each binding's Ready condition. While OpenChoreo's
+  promote itself — `EnsureRelease` at each component's own commit, then one `ApplyReleaseBinding`
+  carrying the pin and the wiring together — and then waits on each binding's Ready condition. While
+  OpenChoreo's
   AutoDeploy promoted releases on its own, a green WorkflowRun meant a deployment had been ASKED for:
   the chain was kicked off from inside the build and reconciled afterwards with no link back to the
   cycle that caused it. Everything downstream depended on the weaker fact — validation asserted
@@ -444,7 +464,9 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   component's own start-up config — a web app reads its backend's out of `window._env_` and throws at
   module load without it, so publishing the SPA alongside its backend serves a blank page. Those edges
   (`spec.HardConfigEdges`) put the provider in an earlier wave, and each wave must be Ready before the
-  next is promoted. What flows the other way is SOFT — a protected API's CORS allowlist is the
+  next is promoted. The edges are read over the WHOLE design rather than over the set being deployed,
+  so a provider with no serving release is an unsatisfied edge rather than an assumed-satisfied one
+  (ADR-0026 — the reading that published a SPA against an API that had never deployed). What flows the other way is SOFT — a protected API's CORS allowlist is the
   project's SPA origins, an OIDC resource wants the SPA's callback registered — and is written by ONE
   converge at the end, which passes an EMPTY commit so it re-asserts wiring without re-cutting a
   release. Grading them together is what made the graph look circular: the SPA needs the API's

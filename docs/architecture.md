@@ -67,12 +67,15 @@ behind `gen`, and CI runs `gen` + `git diff --exit-code` to catch staleness. See
 A spec version is cut as a `v<N>` tag and executed as **one supervised run over
 one GitHub milestone**: the run mints prose issues into it as its first phase, one coding agent
 works the whole milestone per cycle, its pull request auto-merges, the merge
-fans out to a build per changed component, the supervisor then promotes each
-built component and waits for it to serve, and the run settles when the working
-set is empty and validation has a verdict. The decisions and their costs are
+fans out to a build per changed component, the supervisor then **reconciles the
+version**: every component the design declares whose newest green build is not
+what its binding pins is promoted, providers before consumers, and the run
+settles when the working set is empty *and* every component is serving. The
+decisions and their costs are
 [ADR-0011](decisions/ADR-0011-milestone-is-the-unit-of-execution.md),
 [ADR-0017](decisions/ADR-0017-the-platform-owns-deploy.md),
-[ADR-0018](decisions/ADR-0018-planning-is-a-run-phase.md) and
-[ADR-0024](decisions/ADR-0024-cancel-reaches-the-planning-phase.md); the
+[ADR-0018](decisions/ADR-0018-planning-is-a-run-phase.md),
+[ADR-0024](decisions/ADR-0024-cancel-reaches-the-planning-phase.md) and
+[ADR-0026](decisions/ADR-0026-deploy-reconciles-the-version.md); the
 mechanism is
 [`internal/delivery/README.md`](../services/aep-api/internal/delivery/README.md).
