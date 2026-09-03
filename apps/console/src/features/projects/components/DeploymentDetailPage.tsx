@@ -174,17 +174,35 @@ export function DeploymentDetailPage({
   const bound = row?.cards.some((c) => c.deployment) ?? false;
 
   if (!row || !bound) {
+    // "Nothing is deployed here" is a claim about every component, and a read
+    // that FAILED supports no claim at all — so a page that lost some of them
+    // says THAT instead (#714 review). The two must not render together: an
+    // empty state beside a load warning tells the reader both that the
+    // environment is empty and that the page could not find out.
+    //
+    // The queries keep polling on failure (their interval is the active one
+    // while they hold no data), so this state resolves itself and needs no
+    // Retry of its own.
     return (
       <>
         <PageHeader title={title} backTo={backTo} />
-        <EmptyState
-          compact
-          description={
-            environment === "development"
-              ? "Nothing deployed here yet — agents deploy to development when a build merges."
-              : "Nothing deployed here yet — promote a validated version from development."
-          }
-        />
+        {deployments.failedCount > 0 ? (
+          <Alert severity="warning">
+            Deployments for {deployments.failedCount} component
+            {deployments.failedCount === 1 ? "" : "s"} could not be loaded, so
+            there is nothing this page can say about {environmentLabel(environment)}{" "}
+            yet. It keeps retrying.
+          </Alert>
+        ) : (
+          <EmptyState
+            compact
+            description={
+              environment === "development"
+                ? "Nothing deployed here yet — agents deploy to development when a build merges."
+                : "Nothing deployed here yet — promote a validated version from development."
+            }
+          />
+        )}
       </>
     );
   }

@@ -56,6 +56,7 @@ let mockDeploy: DeployStage = {
 };
 let mockDeployments: Deployment[] = [];
 let mockComponentsPending = false;
+let mockFailedCount = 0;
 
 vi.mock("../api/queries", () => ({
   useProjectComponents: () => ({
@@ -73,7 +74,7 @@ vi.mock("../api/queries", () => ({
   useComponentsDeployments: () => ({
     isPending: false,
     deployments: mockDeployments,
-    failedCount: 0,
+    failedCount: mockFailedCount,
   }),
   useProjectStatus: () => ({
     data: {
@@ -150,6 +151,7 @@ beforeEach(() => {
   };
   mockDeployments = devDeployments();
   mockComponentsPending = false;
+  mockFailedCount = 0;
   mockRuns = [];
   mockRunsPending = false;
   mockCounts = undefined;
@@ -255,6 +257,32 @@ describe("DeploymentDetailPage", () => {
     expect(
       screen.getByText(/Nothing deployed here yet — promote a validated version/),
     ).toBeInTheDocument();
+  });
+
+  it("does not call an environment empty when the reads that would say so failed", () => {
+    // Every list-deployments read failed, so nothing is bound — but that is
+    // ignorance, not emptiness, and the page must not report it as emptiness.
+    mockDeployments = [];
+    mockFailedCount = 2;
+
+    render(<DeploymentDetailPage projectName="expense" environment="development" />);
+
+    expect(
+      screen.getByText(/Deployments for 2 components could not be loaded/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Nothing deployed here yet/)).not.toBeInTheDocument();
+  });
+
+  it("still says nothing is deployed when every read answered", () => {
+    mockDeployments = [];
+    mockFailedCount = 0;
+
+    render(<DeploymentDetailPage projectName="expense" environment="development" />);
+
+    expect(
+      screen.getByText(/Nothing deployed here yet — agents deploy to development/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/could not be loaded/)).not.toBeInTheDocument();
   });
 
   it("rejects a segment that names no environment", () => {
